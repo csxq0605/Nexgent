@@ -157,8 +157,8 @@ def compact_context(messages: list, max_messages: int = 20) -> list:
     if len(messages) <= max_messages:
         return messages
 
-    result = [messages[0]]  # keep system prompt
-    tail = messages[-(max_messages - 1):]
+    result = []
+    tail = messages[-max_messages:]
 
     # collect valid tool_call_ids from remaining assistant messages
     valid_tool_call_ids = set()
@@ -241,7 +241,6 @@ class AgentHarness:
             return json.dumps({"error": str(e)})
 
     def _list_files(self, path: str) -> str:
-        import os
         try:
             entries = os.listdir(path)
             return json.dumps({"files": entries[:50], "count": len(entries)})
@@ -286,8 +285,11 @@ class AgentHarness:
                 session.add_message("assistant", final)
                 return final
 
-            session.add_message("assistant", message.model_dump())
-            messages.append(message.model_dump())
+            msg_dump = message.model_dump()
+            if msg_dump.get("content") is None:
+                msg_dump["content"] = ""
+            session.messages.append(msg_dump)
+            messages.append(msg_dump)
             for tc in message.tool_calls:
                 func_name = tc.function.name
                 func_args = json.loads(tc.function.arguments)
@@ -304,7 +306,7 @@ if __name__ == "__main__":
 
     print("=== Agent Harness Demo (MiMo) ===")
     print(f"Model: {MIMO_MODEL}")
-    print(f"API Key: {MIMO_API_KEY[:12]}...")
+    print(f"API Key: ***configured***")
     print("Available tools:", [t["function"]["name"] for t in harness.registry.list_tools()])
     print()
 

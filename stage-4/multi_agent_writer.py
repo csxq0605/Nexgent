@@ -4,7 +4,7 @@ A pipeline: Research -> Write -> Review -> Revise
 Uses Xiaomi MiMo API (OpenAI-compatible format).
 """
 
-import os, sys, json, time, re
+import sys, json, re
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import MIMO_BASE_URL, MIMO_API_KEY, MIMO_MODEL
@@ -156,7 +156,7 @@ def format_article(result: dict) -> str:
 if __name__ == "__main__":
     print("=== Multi-Agent Writer (MiMo) ===")
     print(f"Model: {MIMO_MODEL}")
-    print(f"API Key: {MIMO_API_KEY[:12]}...")
+    print(f"API Key: ***configured***")
     print()
 
     topic = input("Enter a topic: ").strip()

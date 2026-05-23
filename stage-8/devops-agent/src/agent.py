@@ -11,7 +11,7 @@ Features:
 - CLI deployment
 """
 
-import os, sys, json, time, logging, hashlib
+import os, sys, json, time, logging
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 from config import MIMO_BASE_URL, MIMO_API_KEY, MIMO_MODEL
@@ -224,7 +224,10 @@ class DevOpsAgent:
                 self.logger.trace("session_complete", self.cost.summary())
                 return final
 
-            messages.append(message.model_dump())
+            msg_dump = message.model_dump()
+            if msg_dump.get("content") is None:
+                msg_dump["content"] = ""
+            messages.append(msg_dump)
             for tc in message.tool_calls:
                 func_name = tc.function.name
                 func_args = json.loads(tc.function.arguments)
@@ -259,7 +262,7 @@ def main():
         print(agent.run(args.task))
     else:
         print("=== DevOps Agent (MiMo) ===")
-        print(f"API Key: {MIMO_API_KEY[:12]}...")
+        print(f"API Key: ***configured***")
         print("Type a task (or 'quit' to exit):\n")
         while True:
             task = input("Task: ").strip()

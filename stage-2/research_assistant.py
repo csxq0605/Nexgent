@@ -139,6 +139,11 @@ def execute_tool(name: str, params: dict, memory: Memory) -> str:
             return json.dumps({"results": results, "count": len(results)})
         elif name == "read_file":
             try:
+                from pathlib import Path as _Path
+                resolved = _Path(params["path"]).resolve()
+                allowed = _Path.cwd().resolve()
+                if not str(resolved).startswith(str(allowed)):
+                    return json.dumps({"error": "Path outside allowed directory"})
                 with open(params["path"], "r", encoding="utf-8") as f:
                     content = f.read()
                 if not content.strip():
@@ -240,7 +245,10 @@ def research_agent(
             final = message.content or "[No response]"
             return final
 
-        messages.append(message.model_dump())
+        msg_dump = message.model_dump()
+        if msg_dump.get("content") is None:
+            msg_dump["content"] = ""
+        messages.append(msg_dump)
         for tc in message.tool_calls:
             func_name = tc.function.name
             func_args = json.loads(tc.function.arguments)
@@ -258,7 +266,7 @@ def research_agent(
 
 if __name__ == "__main__":
     print("=== Research Assistant Agent (MiMo) ===")
-    print(f"API Key: {MIMO_API_KEY[:12]}...")
+    print(f"API Key: ***configured***")
     print()
 
     mem = Memory()

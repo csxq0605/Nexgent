@@ -127,6 +127,11 @@ def execute_tool(name: str, params: dict) -> str:
         return json.dumps({"summary": f"Search results for '{params['query']}': [placeholder - connect to real search API]"})
     elif name == "read_file":
         try:
+            from pathlib import Path
+            resolved = Path(params["path"]).resolve()
+            allowed = Path.cwd().resolve()
+            if not str(resolved).startswith(str(allowed)):
+                return json.dumps({"error": "Path outside allowed directory"})
             with open(params["path"], "r", encoding="utf-8") as f:
                 return json.dumps({"content": f.read()[:2000]})
         except Exception as e:
@@ -196,7 +201,7 @@ if __name__ == "__main__":
     print("=== Minimal Agent (MiMo) ===")
     print(f"Model: {MIMO_MODEL}")
     print(f"API: {MIMO_BASE_URL}")
-    print(f"API Key: {MIMO_API_KEY[:12]}...")
+    print(f"API Key: ***configured***")
     print("Type a message (or 'quit' to exit):\n")
 
     while True:

@@ -4,7 +4,7 @@ Runs evaluation test cases against a MiMo agent and produces a structured report
 Covers: success rate, failure classification, tracing, cost tracking.
 """
 
-import os, sys, json, time
+import os, sys, json, time, re
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import MIMO_BASE_URL, MIMO_API_KEY, MIMO_MODEL
@@ -92,7 +92,6 @@ def judge_response(question: str, expected: str, actual: str) -> bool:
         return True
 
     # Strip common formatting (markdown, commas, spaces) and thousand separators
-    import re
     actual_clean = re.sub(r'[*`#\n]', ' ', actual_lower).strip()
     expected_clean = re.sub(r'[*`#\n]', ' ', expected_lower).strip()
 
@@ -117,7 +116,7 @@ def judge_response(question: str, expected: str, actual: str) -> bool:
             if json_match:
                 act_list = json.loads(json_match.group())
                 return set(str(x).lower() for x in exp_list) == set(str(x).lower() for x in act_list)
-        except:
+        except Exception:
             pass
 
     # Comma-separated comparison
@@ -141,7 +140,7 @@ Does the actual answer correctly address the question and contain the expected i
             temperature=0.0
         )
         return "YES" in (response.choices[0].message.content or "").upper()
-    except:
+    except Exception:
         return False
 
 
