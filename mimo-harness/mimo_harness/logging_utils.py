@@ -5,7 +5,6 @@ import json
 import time
 import hashlib
 import logging
-from datetime import datetime
 
 
 class TraceLogger:
@@ -16,7 +15,9 @@ class TraceLogger:
         self.logger.setLevel(logging.DEBUG)
         if not self.logger.handlers:
             if log_file:
-                os.makedirs(os.path.dirname(log_file), exist_ok=True)
+                log_dir = os.path.dirname(log_file)
+                if log_dir:
+                    os.makedirs(log_dir, exist_ok=True)
                 fh = logging.FileHandler(log_file, encoding="utf-8")
                 fh.setLevel(logging.DEBUG)
                 fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))

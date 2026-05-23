@@ -45,6 +45,9 @@ class ToolRegistry:
     def list_names(self) -> list[str]:
         return list(self._tools.keys())
 
+    def list_all(self) -> list[ToolDef]:
+        return list(self._tools.values())
+
     def execute(self, name: str, params: dict, perms: PermissionGate) -> str:
         tool = self._tools.get(name)
         if not tool:

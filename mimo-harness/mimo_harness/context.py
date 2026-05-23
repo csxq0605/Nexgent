@@ -1,14 +1,10 @@
 """Context management - session state, message compaction, system prompt assembly."""
 
 import os
-import sys
 import json
 import time
-import hashlib
 import platform
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -48,12 +44,12 @@ class Session:
 
 
 def compact_context(messages: list, max_messages: int = 30) -> list:
-    """Keep system prompt + last N messages, filtering orphan tool results."""
+    """Keep last N messages, filtering orphan tool results."""
     if len(messages) <= max_messages:
         return messages
 
-    result = [messages[0]]  # keep system prompt
-    tail = messages[-(max_messages - 1):]
+    result = []
+    tail = messages[-max_messages:]
 
     # Collect valid tool_call_ids from remaining messages
     valid_ids = set()

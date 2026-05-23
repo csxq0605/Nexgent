@@ -1,14 +1,15 @@
 """Core Agent - the observe-think-act loop with tool dispatch."""
 
+import os
 import json
 import time
-from typing import Optional
+import hashlib
 from openai import OpenAI
 
 from .config import MIMO_BASE_URL, MIMO_API_KEY, MIMO_MODEL
 from .logging_utils import TraceLogger
 from .permissions import Permission, PermissionGate
-from .context import Session, compact_context, build_system_prompt, load_memory
+from .context import Session, compact_context, load_memory
 from .tools.registry import ToolRegistry, ToolDef
 from .tools import file_ops, shell, code_exec, web_tools, doc_tools, math_tools
 
@@ -81,7 +82,7 @@ You help users with coding, file operations, web research, document creation, an
     def _build_system_prompt(self) -> str:
         import platform
         tools_desc = "\n".join(
-            f"- **{t.name}**: {t.description}" for t in self.registry._tools.values()
+            f"- **{t.name}**: {t.description}" for t in self.registry.list_all()
         )
         memory = load_memory(".")
         return self.SYSTEM_PROMPT_TEMPLATE.format(
@@ -99,7 +100,6 @@ You help users with coding, file operations, web research, document creation, an
         return Permission.WRITE
 
     def run(self, task: str, session: Session = None) -> str:
-        import os
         if session is None:
             session = Session(
                 session_id=hashlib.md5(str(time.time()).encode()).hexdigest()[:8],
@@ -116,6 +116,7 @@ You help users with coding, file operations, web research, document creation, an
 
         start_time = time.time()
         tools_schema = self.registry.list_tools()
+        system_msg = {"role": "system", "content": self._build_system_prompt()}
 
         for step in range(self.max_steps):
             # Check time limit
@@ -123,7 +124,6 @@ You help users with coding, file operations, web research, document creation, an
                 return "[LIMIT] Time limit exceeded"
 
             # Build messages
-            system_msg = {"role": "system", "content": self._build_system_prompt()}
             messages = [system_msg] + compact_context(session.get_messages())
 
             self.logger.trace("llm_call_start", {"step": step + 1, "model": self.model})
@@ -191,8 +191,3 @@ You help users with coding, file operations, web research, document creation, an
                 session.add_message("tool", result, tool_call_id=tc.id)
 
         return "[ERROR] Max steps reached."
-
-
-# Need hashlib for session ID
-import hashlib
-import os

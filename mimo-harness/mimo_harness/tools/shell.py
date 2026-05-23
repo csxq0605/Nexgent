@@ -1,8 +1,7 @@
 """Shell execution tool - run commands with read-only auto-approval."""
 
-import os
-import sys
 import json
+import re
 import subprocess
 import platform
 from .registry import ToolDef
@@ -10,16 +9,23 @@ from ..permissions import Permission
 
 # Commands that are safe to auto-approve (read-only)
 READONLY_PREFIXES = [
-    "ls", "dir", "cat", "type", "head", "tail", "wc", "echo", "pwd", "cd",
+    "ls", "dir", "cat", "type", "head", "tail", "wc", "echo", "pwd",
     "git status", "git log", "git diff", "git show", "git branch", "git remote",
-    "which", "where", "whereis", "find", "tree", "file", "du", "df",
+    "which", "where", "whereis", "tree", "file", "du", "df",
     "python --version", "pip list", "pip show", "node --version", "npm list",
-    "uname", "hostname", "whoami", "date", "env",
+    "uname", "hostname", "whoami", "date",
 ]
+
+# Patterns that indicate command chaining / injection
+_CHAINING_PATTERN = re.compile(r'[;|&`$]|\$\(')
 
 
 def _is_readonly(command: str) -> bool:
-    cmd_lower = command.strip().lower()
+    cmd = command.strip()
+    # Reject any command containing chaining operators
+    if _CHAINING_PATTERN.search(cmd):
+        return False
+    cmd_lower = cmd.lower()
     return any(cmd_lower.startswith(p) for p in READONLY_PREFIXES)
 
 
@@ -64,7 +70,7 @@ def get_tools() -> list[ToolDef]:
                 },
                 "required": ["command"]
             },
-            handler=lambda p: run_command(p),
+            handler=run_command,
             permission=Permission.READ,  # dynamically checked
         ),
     ]

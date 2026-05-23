@@ -2,8 +2,31 @@
 
 import json
 import re
+from urllib.parse import urlparse
+import ipaddress
 from .registry import ToolDef
 from ..permissions import Permission
+
+
+def _validate_url(url: str) -> str | None:
+    """Return error message if URL is unsafe, else None."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return "Invalid URL"
+    if parsed.scheme not in ("http", "https"):
+        return f"URL scheme '{parsed.scheme}' not allowed (must be http or https)"
+    hostname = parsed.hostname or ""
+    # Block private/internal IPs
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            return f"Access to private IP '{hostname}' is not allowed"
+    except ValueError:
+        # hostname is a domain name - block obvious internal names
+        if hostname in ("localhost", "metadata.google.internal"):
+            return f"Access to '{hostname}' is not allowed"
+    return None
 
 
 def web_search(params: dict) -> str:
@@ -51,6 +74,9 @@ def web_search(params: dict) -> str:
 def web_fetch(params: dict) -> str:
     url = params.get("url", "")
     max_chars = params.get("max_chars", 5000)
+    err = _validate_url(url)
+    if err:
+        return json.dumps({"error": err})
     try:
         import requests
         resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)

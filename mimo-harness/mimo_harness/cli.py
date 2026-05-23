@@ -1,6 +1,5 @@
 """CLI entry point - interactive REPL and single-shot modes."""
 
-import sys
 import argparse
 from .agent import MiMoHarness
 from .config import MIMO_API_KEY, MIMO_MODEL
@@ -121,11 +120,8 @@ def main():
                 print(f"Unknown command: {cmd[0]}. Type /help for commands.")
             continue
 
-        # Run agent
-        result = harness.run(user_input, session)
-        # Result is already printed by the logger during run()
-        if not result.startswith("["):
-            pass  # Already printed
+        # Run agent (result is printed by the logger during run())
+        harness.run(user_input, session)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,6 @@
 import os
 import json
 import csv
-import io
 from datetime import datetime
 from .registry import ToolDef
 from ..permissions import Permission
@@ -17,7 +16,7 @@ def create_doc(params: dict) -> str:
 
     try:
         os.makedirs(output_dir, exist_ok=True)
-        safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in title).strip().replace(" ", "_")
+        safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in title).strip().replace(" ", "_") or "untitled"
         if fmt == "markdown":
             ext = "md"
             full_content = f"# {title}\n\n{content}\n"
@@ -43,16 +42,17 @@ def create_spreadsheet(params: dict) -> str:
 
     try:
         os.makedirs(output_dir, exist_ok=True)
-        safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in title).strip().replace(" ", "_")
+        safe_title = "".join(c if c.isalnum() or c in "-_ " else "" for c in title).strip().replace(" ", "_") or "untitled"
         path = os.path.join(output_dir, f"{safe_title}.csv")
 
         with open(path, "w", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
             if data and isinstance(data[0], dict):
-                writer.writerow(data[0].keys())
-                for row in data:
-                    writer.writerow(row.values())
+                fieldnames = list(data[0].keys())
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(data)
             else:
+                writer = csv.writer(f)
                 for row in data:
                     writer.writerow(row if isinstance(row, list) else [row])
 

@@ -8,6 +8,16 @@ from pathlib import Path
 from .registry import ToolDef
 from ..permissions import Permission
 
+_ALLOWED_WRITE_DIR = Path.cwd().resolve()
+
+
+def _validate_write_path(path: str) -> str | None:
+    """Return error message if path is outside allowed directory, else None."""
+    resolved = Path(path).resolve()
+    if not str(resolved).startswith(str(_ALLOWED_WRITE_DIR)):
+        return f"Path '{path}' is outside allowed directory '{_ALLOWED_WRITE_DIR}'"
+    return None
+
 
 def read_file(params: dict) -> str:
     path = params.get("path", "")
@@ -32,6 +42,9 @@ def read_file(params: dict) -> str:
 def write_file(params: dict) -> str:
     path = params.get("path", "")
     content = params.get("content", "")
+    err = _validate_write_path(path)
+    if err:
+        return json.dumps({"error": err})
     try:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
@@ -45,6 +58,9 @@ def edit_file(params: dict) -> str:
     path = params.get("path", "")
     old_text = params.get("old_text", "")
     new_text = params.get("new_text", "")
+    err = _validate_write_path(path)
+    if err:
+        return json.dumps({"error": err})
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
