@@ -101,7 +101,25 @@ python stage-2/research_assistant.py
 python stage-3/harness_demo.py
 python stage-4/multi_agent_writer.py
 python stage-7/eval_runner.py
+
+# 5. 或者直接使用完整 Harness（推荐）
+cd mimo-harness
+pip install -e .
+mimo-harness --task "What is 247 * 893?"
+mimo-harness  # 进入交互模式
+python stage-1/minimal_agent.py
+python stage-2/research_assistant.py
+python stage-3/harness_demo.py
+python stage-4/multi_agent_writer.py
+python stage-7/eval_runner.py
 ```
+
+
+## MiMo Harness
+
+基于 Stage 0-8 的经验，构建了一个完整的、可下载体验的 Agent Harness，类似 Claude Code 的架构。
+
+详见 [mimo-harness/README.md](mimo-harness/README.md)。
 
 ## Agent 工程能力总结
 
