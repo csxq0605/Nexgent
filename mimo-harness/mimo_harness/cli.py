@@ -1,10 +1,19 @@
 """CLI entry point - interactive REPL and single-shot modes."""
 
+import sys
 import argparse
 import hashlib
 import time
 from .agent import MiMoHarness
 from .config import MIMO_API_KEY, MIMO_MODEL
+
+# Fix Windows console encoding for Unicode output
+if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") != "utf8":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 
 def print_banner():
@@ -14,7 +23,6 @@ def print_banner():
 ║  AI Agent powered by Xiaomi MiMo model  ║
 ╚══════════════════════════════════════════╝
 """)
-
 
 def print_help():
     print("""
@@ -30,7 +38,6 @@ Commands:
 
 Or just type a task to interact with the agent.
 """)
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -123,7 +130,6 @@ def main():
 
         # Run agent (result is printed by the logger during run())
         harness.run(user_input, session)
-
 
 if __name__ == "__main__":
     main()
