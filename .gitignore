@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.pyc
+.env
+*.log
+*.png
+*.jpg
+eval_report.json
+logs/
+.venv/
+venv/
+.idea/
+.vscode/
