@@ -1,7 +1,7 @@
 """Tool registry - unified tool definition and dispatch."""
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional
 from ..permissions import Permission, PermissionGate
 
