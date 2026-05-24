@@ -303,12 +303,14 @@ def compact_context(
 
     # Trim: keep messages that fit within usable window
     # Estimate tokens after snip/microcompact and trim accordingly
+    # Target: stay below COMPRESS_TRIGGER_TOKENS to avoid re-triggering
+    target_tokens = COMPRESS_TRIGGER_TOKENS
     if max_messages > 0:
         trimmed = compacted[-max_messages:]
     else:
-        # Trim until tokens fit within usable window
+        # Trim until tokens fit within trigger threshold
         trimmed = compacted
-        while estimate_tokens(trimmed) > USABLE_CONTEXT_TOKENS and len(trimmed) > 2:
+        while estimate_tokens(trimmed) > target_tokens and len(trimmed) > 2:
             # Remove oldest 10% of messages at a time
             remove_count = max(1, len(trimmed) // 10)
             trimmed = trimmed[remove_count:]
