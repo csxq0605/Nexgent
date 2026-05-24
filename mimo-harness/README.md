@@ -9,10 +9,11 @@ A production-grade AI agent harness powered by Xiaomi MiMo model, following Clau
 - **Agent Loop**: Dependency injection, circuit breaker, token budget tracking, 7 termination reasons
 - **Tool System**: 11 tools with concurrency-safe/unsafe markers, input validation, result budget management
 - **Permission Pipeline**: 4-stage pipeline (validate → rules → context → prompt), plan mode, rule-based matching
-- **Context Management**: Progressive compression (snip → microcompact → orphan filter), compact boundary messages
+- **Context Management**: LLM-based semantic compression (summarize old messages), fallback to progressive truncation (snip → microcompact → orphan filter)
 - **Memory System**: 4 typed memories (user/feedback/project/reference), MEMORY.md index, path security
+- **Project Init**: `/init` command scans project and generates AGENTS.md with language/framework/tool detection
 - **Hook System**: Lifecycle events (PreToolUse, PostToolUse, Stop), command/function hooks, matcher patterns
-- **CLI**: Interactive REPL with /plan, /memory, /hooks, /stats commands, config file support
+- **CLI**: Interactive REPL with /plan, /memory, /hooks, /stats, /init commands, config file support
 
 ## Quick Start
 
@@ -66,6 +67,7 @@ mimo-harness -c config.json   # Load configuration file
 | `/remember` | Save context as memory |
 | `/hooks` | List registered hooks |
 | `/stats` | Show session statistics |
+| `/init` | Scan project and generate AGENTS.md |
 
 ## Architecture
 
@@ -79,6 +81,7 @@ mimo_harness/
 ├── logging_utils.py  # Structured logging with trace IDs
 ├── memory.py         # Typed memory system (user/feedback/project/reference)
 ├── permissions.py    # 4-stage pipeline, rule matching, plan mode
+├── project_scanner.py # /init: detect language/framework/tools, generate AGENTS.md
 └── tools/
     ├── registry.py   # Tool registration, validation, dispatch
     ├── file_ops.py   # File read/write/edit/glob/grep
@@ -190,18 +193,19 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-225 tests across 8 test files:
+253 tests across 9 test files:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
 | test_agent.py | 19 | DI, circuit breaker, token budget, retry |
 | test_permissions.py | 17 | 4-stage pipeline, rule matching, plan mode |
-| test_context.py | 13 | Progressive compression, session management |
+| test_context.py | 28 | Progressive compression, LLM compression, session management |
 | test_registry.py | 13 | Validation, dispatch, truncation |
 | test_hooks.py | 12 | Lifecycle events, command/function hooks |
 | test_memory.py | 14 | Typed storage, frontmatter, validation |
 | test_tools.py | 17 | File ops, shell, code exec, math, web |
 | test_stress_boundary.py | 111 | Path traversal, SSRF, shell injection, large input, Unicode, permissions, concurrency, math DoS, context compression, memory boundaries, registry edge cases |
+| test_project_scanner.py | 18 | Language/framework detection, AGENTS.md generation |
 
 ## Performance
 

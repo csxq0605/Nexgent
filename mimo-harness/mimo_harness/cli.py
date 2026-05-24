@@ -41,6 +41,7 @@ Commands:
   /remember      Save current context as memory
   /hooks         List registered hooks
   /stats         Show session statistics
+  /init          Scan project and generate AGENTS.md
 
 Or just type a task to interact with the agent.
 """)
@@ -226,6 +227,28 @@ def main():
                 print(f"  Approval log: {len(harness.perms.approval_log)} entries")
                 if harness.circuit_breaker.consecutive_failures > 0:
                     print(f"  Circuit breaker failures: {harness.circuit_breaker.consecutive_failures}")
+                print()
+            elif cmd[0] == "/init":
+                from .project_scanner import scan_project, generate_agents_md
+                agents_md_path = os.path.join(os.getcwd(), "AGENTS.md")
+                if os.path.exists(agents_md_path):
+                    confirm = input(
+                        "AGENTS.md already exists. Overwrite? [y/N] "
+                    ).strip().lower()
+                    if confirm not in ("y", "yes"):
+                        print("Skipped.")
+                        continue
+                print("Scanning project...")
+                result = scan_project(".")
+                content = generate_agents_md(result)
+                with open(agents_md_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                print(f"AGENTS.md generated at {agents_md_path}")
+                print(f"  Language: {result.get('language', 'unknown')}")
+                if result.get("frameworks"):
+                    print(f"  Frameworks: {', '.join(result['frameworks'])}")
+                if result.get("test_runner"):
+                    print(f"  Test runner: {result['test_runner']}")
                 print()
             elif cmd[0] == "/save" and len(cmd) > 1:
                 try:

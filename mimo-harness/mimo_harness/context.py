@@ -23,6 +23,8 @@ MAX_MESSAGES_DEFAULT = 30
 SNIP_MAX_AGE_MESSAGES = 20  # Messages older than this get snipped
 MICROCOMPACT_KEEP_RECENT = 5  # Keep last N tool results in microcompact
 COMPRESS_MARKER = "[Old tool result content cleared]"
+LLM_COMPRESS_THRESHOLD = 30   # Use LLM compression when messages exceed this
+LLM_COMPRESS_KEEP_RECENT = 10 # Keep last N messages uncompressed
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +128,88 @@ def microcompact(
 
 
 # ---------------------------------------------------------------------------
+# Level 3: LLM-based semantic compression (Ch7: model-driven summarization)
+# ---------------------------------------------------------------------------
+SUMMARIZATION_PROMPT = """You are a conversation summarizer. Summarize the following conversation history into a concise but information-dense summary.
+
+Rules:
+- Preserve all key decisions, file paths, error messages, and action outcomes
+- Preserve any code snippets that were discussed or modified
+- Preserve the user's stated goals and current progress
+- Use bullet points for clarity
+- Do NOT include tool call IDs or internal metadata
+- Do NOT fabricate information that was not in the conversation
+- Maximum length: 500 words
+
+Conversation to summarize:
+{conversation_text}
+
+Produce the summary now:"""
+
+
+def llm_compress(
+    messages: list,
+    client,
+    model: str = "mimo-v2.5-pro",
+    keep_recent: int = LLM_COMPRESS_KEEP_RECENT,
+    max_summary_tokens: int = 1024,
+) -> list | None:
+    """Level 3: LLM-based semantic compression.
+
+    Sends old messages to the LLM with a summarization prompt,
+    replacing them with a single assistant summary message.
+    Recent messages are kept uncompressed for continuity.
+
+    Returns: compressed message list, or None on failure (caller falls back).
+    """
+    if len(messages) <= keep_recent:
+        return messages
+
+    old_messages = messages[:-keep_recent]
+    recent = messages[-keep_recent:]
+
+    # Format old messages for summarization
+    parts = []
+    total_chars = 0
+    max_chars = 30000
+    for msg in old_messages:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        if not isinstance(content, str):
+            content = str(content) if content else ""
+        # Truncate individual long messages (e.g. large tool results)
+        if len(content) > 2000:
+            content = content[:2000] + "... [truncated]"
+        line = f"[{role}]: {content}"
+        if total_chars + len(line) > max_chars:
+            parts.append(f"[{role}]: ... [remaining messages omitted]")
+            break
+        parts.append(line)
+        total_chars += len(line)
+
+    conversation_text = "\n".join(parts)
+    prompt = SUMMARIZATION_PROMPT.format(conversation_text=conversation_text)
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_completion_tokens=max_summary_tokens,
+            temperature=0.3,
+        )
+        summary = response.choices[0].message.content
+        if not summary or not summary.strip():
+            return None
+        return [
+            {"role": "assistant", "content": "[Conversation Summary]\n" + summary.strip()}
+        ] + recent
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Orphan tool result filter (prevents sending unmatched tool results)
 # ---------------------------------------------------------------------------
 def _filter_orphan_tool_results(messages: list) -> list:
@@ -155,19 +239,27 @@ def _filter_orphan_tool_results(messages: list) -> list:
 # Main compaction entry point (Ch7: progressive compression)
 # ---------------------------------------------------------------------------
 def compact_context(
-    messages: list, max_messages: int = MAX_MESSAGES_DEFAULT
+    messages: list,
+    max_messages: int = MAX_MESSAGES_DEFAULT,
+    client=None,
+    model: str = "",
 ) -> list:
     """Progressive context compression (Ch7: lightweight → heavyweight).
 
     Strategy:
     1. If within limits, return as-is
-    2. First: filter orphan tool results (structural integrity)
-    3. Then: snip old tool results (Level 1, zero cost)
-    4. Then: microcompact to keep only recent N (Level 2, zero cost)
-    5. Finally: trim to max_messages window
+    2. If LLM client available and threshold met, try LLM summarization
+    3. Fallback: snip → microcompact → trim → orphan filter
     """
     if len(messages) <= max_messages:
         return _filter_orphan_tool_results(messages)
+
+    # Level 3: LLM-based semantic compression (preferred)
+    if client is not None and len(messages) >= LLM_COMPRESS_THRESHOLD:
+        llm_result = llm_compress(messages, client, model or "mimo-v2.5-pro")
+        if llm_result is not None:
+            return llm_result
+        # LLM failed, fall through to truncation
 
     # Level 1: Snip old tool results
     snipped = snip_compress(messages)
@@ -255,7 +347,7 @@ def load_memory(project_dir: str) -> str:
     Respects capacity limits: max 200 lines per file.
     """
     memory_parts = []
-    for name in ["MEMORY.md", "CLAUDE.md", ".mimo/memory.md"]:
+    for name in ["MEMORY.md", "CLAUDE.md", "AGENTS.md", ".mimo/memory.md"]:
         path = os.path.join(project_dir, name)
         if os.path.exists(path):
             try:

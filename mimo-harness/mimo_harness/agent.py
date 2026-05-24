@@ -320,7 +320,9 @@ You help users with coding, file operations, web research, document creation, an
                 return "[ERROR] Circuit breaker open — too many consecutive failures"
 
             # Build messages with context compaction
-            compacted = compact_context(session.get_messages())
+            compacted = compact_context(
+                session.get_messages(), client=client, model=self.model
+            )
             messages = [system_msg] + compacted
 
             # Token budget check (Ch7)

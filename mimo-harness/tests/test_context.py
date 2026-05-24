@@ -4,10 +4,11 @@ import pytest
 import json
 import tempfile
 import os
+from unittest.mock import MagicMock, patch
 from mimo_harness.context import (
     Session, compact_context, snip_compress, microcompact,
     _filter_orphan_tool_results, make_compact_boundary, load_memory,
-    COMPRESS_MARKER,
+    llm_compress, COMPRESS_MARKER,
 )
 
 
@@ -178,3 +179,120 @@ class TestLoadMemory:
     def test_no_files(self, tmp_path):
         result = load_memory(str(tmp_path))
         assert result == ""
+
+    def test_loads_agents_md(self, tmp_path):
+        agents_md = tmp_path / "AGENTS.md"
+        agents_md.write_text("# Project Instructions\nUse pytest.")
+
+        result = load_memory(str(tmp_path))
+        assert "AGENTS.md" in result
+        assert "Use pytest" in result
+
+
+class TestLLMCompress:
+    def _make_messages(self, n):
+        msgs = []
+        for i in range(n):
+            msgs.append({"role": "user", "content": f"question {i}"})
+            msgs.append({"role": "assistant", "content": f"answer {i}"})
+        return msgs
+
+    def _mock_client(self, summary="Summary of conversation"):
+        client = MagicMock()
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = summary
+        client.chat.completions.create.return_value = response
+        return client
+
+    def test_returns_summary_and_recent(self):
+        messages = self._make_messages(20)  # 40 messages
+        client = self._mock_client("Test summary")
+
+        result = llm_compress(messages, client, model="test-model", keep_recent=6)
+        assert result is not None
+        assert result[0]["role"] == "assistant"
+        assert "Conversation Summary" in result[0]["content"]
+        assert "Test summary" in result[0]["content"]
+        # Recent messages preserved
+        assert len(result) == 1 + 6  # summary + 6 recent
+
+    def test_preserves_recent_messages(self):
+        messages = self._make_messages(15)
+        client = self._mock_client("summary")
+
+        result = llm_compress(messages, client, keep_recent=4)
+        # Last 4 messages should be preserved verbatim
+        assert result[-4:] == messages[-4:]
+
+    def test_returns_none_on_api_error(self):
+        messages = self._make_messages(15)
+        client = MagicMock()
+        client.chat.completions.create.side_effect = Exception("API error")
+
+        result = llm_compress(messages, client)
+        assert result is None
+
+    def test_returns_none_on_empty_response(self):
+        messages = self._make_messages(15)
+        client = MagicMock()
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = ""
+        client.chat.completions.create.return_value = response
+
+        result = llm_compress(messages, client)
+        assert result is None
+
+    def test_short_messages_returned_as_is(self):
+        messages = self._make_messages(3)  # 6 messages, less than keep_recent
+        client = self._mock_client()
+
+        result = llm_compress(messages, client, keep_recent=10)
+        assert result == messages
+
+
+class TestCompactContextWithLLM:
+    def _make_messages(self, n):
+        msgs = []
+        for i in range(n):
+            msgs.append({"role": "user", "content": f"q{i}"})
+            msgs.append({"role": "assistant", "content": f"a{i}"})
+        return msgs
+
+    def test_uses_llm_when_threshold_exceeded(self):
+        messages = self._make_messages(25)  # 50 messages > threshold
+        client = MagicMock()
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = "LLM summary"
+        client.chat.completions.create.return_value = response
+
+        with patch("mimo_harness.context.llm_compress", return_value=[
+            {"role": "assistant", "content": "[Conversation Summary]\nLLM summary"}
+        ] + messages[-10:]) as mock_compress:
+            result = compact_context(messages, client=client, model="test")
+            mock_compress.assert_called_once()
+
+    def test_falls_back_to_truncation_on_llm_failure(self):
+        messages = self._make_messages(25)  # 50 messages
+        client = MagicMock()
+        client.chat.completions.create.side_effect = Exception("fail")
+
+        result = compact_context(messages, client=client, model="test")
+        # Should still produce a result via truncation
+        assert len(result) <= 30
+        assert len(result) > 0
+
+    def test_skips_llm_when_below_threshold(self):
+        messages = self._make_messages(10)  # 20 messages < threshold (30)
+
+        with patch("mimo_harness.context.llm_compress") as mock_compress:
+            result = compact_context(messages, client=MagicMock())
+            mock_compress.assert_not_called()
+
+    def test_backward_compatible_no_client(self):
+        messages = self._make_messages(25)  # 50 messages
+        result = compact_context(messages)  # no client
+        assert len(result) <= 30
+        assert len(result) > 0
