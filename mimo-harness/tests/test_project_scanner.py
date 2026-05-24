@@ -88,42 +88,39 @@ class TestScanProject:
 
 
 class TestGenerateAgentsMd:
-    def test_generates_basic_output(self):
+    def test_generates_codex_style_output(self):
         scan = {
             "language": "Python",
             "frameworks": ["FastAPI"],
             "test_runner": "pytest",
             "linter": "ruff",
-            "formatter": None,
+            "formatter": "black",
             "key_files": ["src/", "tests/"],
             "install_cmd": "pip install -e .",
             "test_cmd": "pytest",
             "lint_cmd": "ruff check .",
         }
         md = generate_agents_md(scan)
-        assert "Python" in md
-        assert "FastAPI" in md
-        assert "pytest" in md
-        assert "ruff" in md
+        assert "# AGENTS.md" in md
+        assert "## Workflow Commands" in md
+        assert "## Code Style" in md
+        assert "## Testing" in md
+        assert "## Dependencies" in md
+        assert "## Conventions" in md
         assert "pip install -e ." in md
+        assert "pytest" in md
+        assert "ruff check ." in md
+        assert "black ." in md
         assert "`src/`" in md
 
-    def test_omits_empty_sections(self):
-        scan = {
-            "language": "unknown",
-            "frameworks": [],
-            "test_runner": None,
-            "linter": None,
-            "formatter": None,
-            "key_files": [],
-            "install_cmd": None,
-            "test_cmd": None,
-            "lint_cmd": None,
-        }
+    def test_prescriptive_language(self):
+        scan = {"language": "Python", "frameworks": [], "test_runner": None,
+                "linter": None, "formatter": None, "key_files": [],
+                "install_cmd": None, "test_cmd": None, "lint_cmd": None}
         md = generate_agents_md(scan)
-        assert "## Commands" not in md
-        assert "## Tools" not in md
-        assert "## Key Files" not in md
+        assert "Always" in md
+        assert "Never" in md
+        assert "Prefer" in md
 
     def test_includes_detected_commands(self):
         scan = {
@@ -141,16 +138,36 @@ class TestGenerateAgentsMd:
         assert "pip install -r requirements.txt" in md
         assert "python -m pytest" in md
 
-    def test_python_conventions(self):
+    def test_python_style_rules(self):
         scan = {"language": "Python", "frameworks": [], "test_runner": None,
                 "linter": None, "formatter": None, "key_files": [],
                 "install_cmd": None, "test_cmd": None, "lint_cmd": None}
         md = generate_agents_md(scan)
         assert "type hints" in md.lower()
+        assert "pathlib" in md
+        assert "f-strings" in md
 
-    def test_rust_conventions(self):
+    def test_rust_style_rules(self):
         scan = {"language": "Rust", "frameworks": [], "test_runner": None,
                 "linter": None, "formatter": None, "key_files": [],
                 "install_cmd": None, "test_cmd": None, "lint_cmd": None}
         md = generate_agents_md(scan)
         assert "clippy" in md
+        assert "cargo fmt" in md
+        assert "unwrap()" in md
+
+    def test_go_style_rules(self):
+        scan = {"language": "Go", "frameworks": [], "test_runner": None,
+                "linter": None, "formatter": None, "key_files": [],
+                "install_cmd": None, "test_cmd": None, "lint_cmd": None}
+        md = generate_agents_md(scan)
+        assert "gofmt" in md
+        assert "context.Context" in md
+        assert "table-driven" in md
+
+    def test_placeholders_when_no_commands(self):
+        scan = {"language": "unknown", "frameworks": [], "test_runner": None,
+                "linter": None, "formatter": None, "key_files": [],
+                "install_cmd": None, "test_cmd": None, "lint_cmd": None}
+        md = generate_agents_md(scan)
+        assert "<!-- e.g." in md  # placeholders present

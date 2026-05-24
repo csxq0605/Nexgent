@@ -193,7 +193,7 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-253 tests across 9 test files:
+255 tests across 9 test files:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
@@ -205,7 +205,7 @@ python -m pytest tests/ -v
 | test_memory.py | 14 | Typed storage, frontmatter, validation |
 | test_tools.py | 17 | File ops, shell, code exec, math, web |
 | test_stress_boundary.py | 111 | Path traversal, SSRF, shell injection, large input, Unicode, permissions, concurrency, math DoS, context compression, memory boundaries, registry edge cases |
-| test_project_scanner.py | 18 | Language/framework detection, AGENTS.md generation |
+| test_project_scanner.py | 20 | Language/framework detection, AGENTS.md generation |
 
 ## Performance
 

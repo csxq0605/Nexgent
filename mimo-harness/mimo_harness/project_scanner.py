@@ -292,75 +292,139 @@ def scan_project(project_dir: str = ".") -> dict:
 
 
 def generate_agents_md(scan_result: dict) -> str:
-    """Generate AGENTS.md content from scan results."""
-    lines = ["# Project Instructions\n"]
+    """Generate AGENTS.md template following Codex specification.
 
-    # Overview
-    lines.append("## Project Overview\n")
+    The generated file is a prescriptive template — the user fills in
+    project-specific rules. Auto-detected info (language, commands) is
+    pre-filled; sections that need human input have placeholders.
+    """
     lang = scan_result.get("language", "unknown")
-    lines.append(f"- **Language**: {lang}")
     fw = scan_result.get("frameworks", [])
-    if fw:
-        lines.append(f"- **Frameworks**: {', '.join(fw)}")
-    lines.append("")
-
-    # Commands
     install = scan_result.get("install_cmd")
-    test = scan_result.get("test_cmd")
-    lint = scan_result.get("lint_cmd")
-    if install or test or lint:
-        lines.append("## Commands\n")
-        if install:
-            lines.append(f"- **Install**: `{install}`")
-        if test:
-            lines.append(f"- **Test**: `{test}`")
-        if lint:
-            lines.append(f"- **Lint**: `{lint}`")
-        lines.append("")
-
-    # Tools
+    test_cmd = scan_result.get("test_cmd")
+    lint_cmd = scan_result.get("lint_cmd")
     tr = scan_result.get("test_runner")
     li = scan_result.get("linter")
     fm = scan_result.get("formatter")
-    if tr or li or fm:
-        lines.append("## Tools\n")
-        if tr:
-            lines.append(f"- **Test runner**: {tr}")
-        if li:
-            lines.append(f"- **Linter**: {li}")
-        if fm:
-            lines.append(f"- **Formatter**: {fm}")
-        lines.append("")
-
-    # Key files
     kf = scan_result.get("key_files", [])
-    if kf:
-        lines.append("## Key Files\n")
-        for f in kf:
-            lines.append(f"- `{f}`")
-        lines.append("")
 
-    # Conventions
-    lines.append("## Conventions\n")
-    if lang == "Python":
-        lines.append("- Use type hints where practical")
-        lines.append("- Follow PEP 8 style guide")
-        lines.append("- Write docstrings for public functions")
-    elif lang in ("JavaScript/TypeScript", "TypeScript"):
-        lines.append("- Use TypeScript for new files")
-        lines.append("- Prefer const over let")
-        lines.append("- Use async/await over raw promises")
-    elif lang == "Rust":
-        lines.append("- Follow Rust API guidelines")
-        lines.append("- Use `clippy` for linting")
-        lines.append("- Write tests in each module")
-    elif lang == "Go":
-        lines.append("- Follow Go conventions (gofmt)")
-        lines.append("- Use table-driven tests")
-        lines.append("- Handle errors explicitly")
+    lines = []
+    lines.append("# AGENTS.md")
+    lines.append("")
+
+    # ── Workflow Commands ──
+    lines.append("## Workflow Commands")
+    lines.append("")
+    lines.append("<!-- Pre-fill detected commands. Edit to match your project. -->")
+    lines.append("")
+    if install:
+        lines.append(f"- **Install dependencies**: `{install}`")
     else:
-        lines.append("- Follow existing code style")
-        lines.append("- Write tests for new functionality")
+        lines.append("- **Install dependencies**: `<!-- e.g. pip install -e . -->`")
+    if test_cmd:
+        lines.append(f"- **Run all tests**: `{test_cmd}`")
+    else:
+        lines.append("- **Run all tests**: `<!-- e.g. pytest -->`")
+    if tr == "pytest":
+        lines.append("- **Run single test**: `pytest tests/test_<name>.py::TestClass::test_method`")
+    if lint_cmd:
+        lines.append(f"- **Lint**: `{lint_cmd}`")
+    else:
+        lines.append("- **Lint**: `<!-- e.g. ruff check . -->`")
+    if fm == "black":
+        lines.append("- **Format**: `black .`")
+    elif fm == "prettier":
+        lines.append("- **Format**: `npx prettier --write .`")
+    else:
+        lines.append("- **Format**: `<!-- e.g. black . / npx prettier --write . -->`")
+    lines.append("- **Type check**: `<!-- e.g. mypy . / tsc --noEmit -->`")
+    lines.append("")
+    lines.append("Always run lint and tests before committing. Do not skip hooks.")
+    lines.append("")
+
+    # ── Code Style ──
+    lines.append("## Code Style")
+    lines.append("")
+    if lang == "Python":
+        lines.append("- Always use type hints on function signatures")
+        lines.append("- Always use `ruff` or `black` for formatting; never mix styles")
+        lines.append("- Prefer f-strings over `.format()` or `%` formatting")
+        lines.append("- Prefer `pathlib.Path` over `os.path`")
+        lines.append("- Use `dataclass` or `pydantic` for structured data; avoid raw dicts")
+        lines.append("- Never use `eval()` or `exec()` on untrusted input")
+        lines.append("- Prefer `asyncio` over threading for I/O-bound concurrency")
+        lines.append("- Write docstrings for public functions and classes")
+    elif lang in ("JavaScript/TypeScript", "TypeScript"):
+        lines.append("- Always use TypeScript for new files; never add plain `.js`")
+        lines.append("- Prefer `const` over `let`; never use `var`")
+        lines.append("- Prefer `async/await` over raw Promises or callbacks")
+        lines.append("- Use `interface` for object shapes; `type` for unions/intersections")
+        lines.append("- Always handle Promise rejections")
+        lines.append("- Prefer named exports over default exports")
+    elif lang == "Rust":
+        lines.append("- Always run `cargo fmt` after changes")
+        lines.append("- Always run `cargo clippy` and fix all warnings")
+        lines.append("- Prefer `Result<T, E>` over panics; never use `unwrap()` in production code")
+        lines.append("- Use `thiserror` for library errors, `anyhow` for application errors")
+        lines.append("- Prefer iterators and combinators over manual loops")
+        lines.append("- Write doc comments (`///`) on all public items")
+        lines.append("- Make `match` exhaustive; avoid wildcard arms")
+    elif lang == "Go":
+        lines.append("- Always run `gofmt` and `goimports`")
+        lines.append("- Handle errors explicitly; never use `_` for error returns")
+        lines.append("- Prefer table-driven tests")
+        lines.append("- Use `context.Context` for cancellation and timeouts")
+        lines.append("- Keep interfaces small (1-3 methods)")
+        lines.append("- Write doc comments on all exported symbols")
+    else:
+        lines.append("- Follow existing code style in the project")
+        lines.append("- <!-- Add project-specific style rules here -->")
+    lines.append("")
+
+    # ── Project Structure ──
+    lines.append("## Project Structure")
+    lines.append("")
+    if kf:
+        for f in kf:
+            if f.endswith("/"):
+                lines.append(f"- `{f}` — <!-- describe purpose -->")
+            else:
+                lines.append(f"- `{f}` — <!-- describe purpose -->")
+    else:
+        lines.append("<!-- Describe key directories and files -->")
+        lines.append("- `src/` — source code")
+        lines.append("- `tests/` — test files")
+    lines.append("")
+
+    # ── Testing ──
+    lines.append("## Testing")
+    lines.append("")
+    if tr:
+        lines.append(f"- Test runner: **{tr}**")
+    else:
+        lines.append("- Test runner: <!-- e.g. pytest, jest, cargo test -->")
+    lines.append("- Always write tests for new functionality")
+    lines.append("- Always run the full test suite before finalizing changes")
+    lines.append("- Prefer unit tests for logic, integration tests for I/O")
+    lines.append("- <!-- Add project-specific testing rules here -->")
+    lines.append("")
+
+    # ── Dependencies ──
+    lines.append("## Dependencies")
+    lines.append("")
+    lines.append("- Never add dependencies without explicit user approval")
+    lines.append("- Prefer well-maintained, widely-used packages")
+    lines.append("- <!-- Add dependency management rules here -->")
+    lines.append("")
+
+    # ── Conventions ──
+    lines.append("## Conventions")
+    lines.append("")
+    lines.append("<!-- Add project-specific conventions, patterns, and anti-patterns -->")
+    lines.append("")
+    lines.append("- <!-- e.g. Always use DI for external services -->")
+    lines.append("- <!-- e.g. Never commit secrets; use .env files -->")
+    lines.append("- <!-- e.g. Error messages must be user-friendly -->")
     lines.append("")
 
     return "\n".join(lines)
