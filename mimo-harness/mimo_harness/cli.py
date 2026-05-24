@@ -17,11 +17,11 @@ from .permissions import PermissionRule
 
 def print_banner():
     print("""
-╔══════════════════════════════════════════╗
-║          MiMo Harness v0.2.0            ║
-║  AI Agent powered by Xiaomi MiMo model  ║
-║  Claude Code architecture patterns       ║
-╚══════════════════════════════════════════╝
++------------------------------------------+
+|          MiMo Harness v0.2.0             |
+|  AI Agent powered by Xiaomi MiMo model  |
+|  Claude Code architecture patterns       |
++------------------------------------------+
 """)
 
 
