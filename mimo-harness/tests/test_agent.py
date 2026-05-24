@@ -206,9 +206,13 @@ class TestCompressionIntegration:
             with patch.object(harness.deps, 'llm_client_factory', return_value=mock_client):
                 harness.run("test task", session)
 
-        # Session should now contain the summary
-        assert len(session.messages) == 2  # summary + user task
+        # Session should contain: summary + re-added user task + final assistant response
+        assert len(session.messages) == 3
         assert session.messages[0]["content"] == "[Conversation Summary]\nTest summary"
+        assert session.messages[1]["role"] == "user"
+        assert session.messages[1]["content"] == "test task"
+        assert session.messages[2]["role"] == "assistant"
+        assert session.messages[2]["content"] == "Done"
         assert session.compaction_count == 1
 
     def test_no_compression_when_below_threshold(self, monkeypatch):

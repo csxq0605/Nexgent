@@ -332,12 +332,15 @@ You help users with coding, file operations, web research, document creation, an
             if len(compacted) < len(session.get_messages()):
                 pre_count = len(session.get_messages())
                 session.messages = compacted
+                # Re-add the current user task — it was compressed away
+                session.add_message("user", task)
                 session.compaction_count += 1
                 self.logger.info(
                     f"[COMPACT] {pre_count} msgs → "
-                    f"{len(compacted)} msgs, ~{estimate_tokens(compacted)} tokens"
+                    f"{len(session.get_messages())} msgs, "
+                    f"~{estimate_tokens(session.get_messages())} tokens"
                 )
-            messages = [system_msg] + compacted
+            messages = [system_msg] + session.get_messages()
 
             # Token budget check (Ch7)
             self.token_budget.update(messages)

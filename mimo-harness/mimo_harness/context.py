@@ -245,9 +245,8 @@ def _filter_orphan_tool_results(messages: list) -> list:
 # ---------------------------------------------------------------------------
 def estimate_tokens(messages: list) -> int:
     """Estimate token count for a message list (~4 chars per token)."""
-    import json as _json
     total_chars = sum(
-        len(_json.dumps(m, ensure_ascii=False)) if isinstance(m, dict)
+        len(json.dumps(m, ensure_ascii=False)) if isinstance(m, dict)
         else len(str(m))
         for m in messages
     )
