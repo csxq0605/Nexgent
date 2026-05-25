@@ -31,6 +31,44 @@ class TestPermissionRule:
         assert rule.matches("run_command", "git status")
         assert not rule.matches("run_command", "git log")
 
+    def test_path_scoped_rule_match(self):
+        rule = PermissionRule(
+            tool_pattern="edit_file",
+            action="allow",
+            path_pattern="/src/**",
+        )
+        assert rule.matches("edit_file", "/src/foo.py")
+        assert rule.matches("edit_file", "/src/sub/module.py")
+
+    def test_path_scoped_rule_no_match(self):
+        rule = PermissionRule(
+            tool_pattern="edit_file",
+            action="allow",
+            path_pattern="/src/**",
+        )
+        assert not rule.matches("edit_file", "/other/foo.py")
+        assert not rule.matches("edit_file", "/etc/passwd")
+
+    def test_path_scoped_with_tilde(self):
+        home = os.path.expanduser("~")
+        rule = PermissionRule(
+            tool_pattern="read_file",
+            action="allow",
+            path_pattern="~/Documents/**",
+        )
+        assert rule.matches("read_file", f"{home}/Documents/test.txt")
+        assert not rule.matches("read_file", "/other/path.txt")
+
+    def test_path_scoped_gate_integration(self):
+        """Path-scoped rules integrate with PermissionGate."""
+        gate = PermissionGate(auto_approve=True, rules=[
+            PermissionRule("write_file", "allow", path_pattern="/src/**"),
+        ])
+        # write_file to /src/ should be allowed
+        assert gate.check(Permission.WRITE, "write_file(/src/main.py)")
+        # write_file outside /src/ falls through to auto-approve
+        assert gate.check(Permission.WRITE, "write_file(/tmp/other.py)")
+
 
 class TestPermissionGate:
     def test_read_always_approved(self):

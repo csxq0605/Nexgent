@@ -3,8 +3,10 @@
 import pytest
 import json
 import os
+import sys
 import tempfile
-from mimo_harness.tools import file_ops, shell, code_exec, math_tools, web_tools
+import time
+from mimo_harness.tools import file_ops, shell, code_exec, math_tools, web_tools, interactive, monitor
 
 
 class TestFileOps:
@@ -50,6 +52,8 @@ class TestFileOps:
         monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
         f = tmp_path / "edit.txt"
         f.write_text("hello world")
+        # Must read the file first (read-before-edit check)
+        file_ops.read_file({"path": str(f)})
         result = json.loads(file_ops.edit_file({
             "path": str(f),
             "old_text": "world",
@@ -62,6 +66,8 @@ class TestFileOps:
         monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
         f = tmp_path / "edit.txt"
         f.write_text("hello world")
+        # Must read the file first (read-before-edit check)
+        file_ops.read_file({"path": str(f)})
         result = json.loads(file_ops.edit_file({
             "path": str(f),
             "old_text": "nonexistent",
@@ -89,6 +95,90 @@ class TestFileOps:
         }))
         assert result["total"] == 2
 
+    def test_edit_file_replace_all(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
+        f = tmp_path / "replace_all.txt"
+        f.write_text("hello world hello python hello")
+        file_ops.read_file({"path": str(f)})
+        result = json.loads(file_ops.edit_file({
+            "path": str(f),
+            "old_text": "hello",
+            "new_text": "bye",
+            "replace_all": True,
+        }))
+        assert result["status"] == "edited"
+        assert result["replaced"] == 3
+        assert f.read_text() == "bye world bye python bye"
+
+    def test_edit_file_read_before_edit_required(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
+        monkeypatch.setattr(file_ops, "_read_files", set())
+        f = tmp_path / "unread.txt"
+        f.write_text("hello world")
+        result = json.loads(file_ops.edit_file({
+            "path": str(f),
+            "old_text": "world",
+            "new_text": "python",
+        }))
+        assert "error" in result
+        assert "read" in result["error"].lower()
+
+    def test_edit_file_uniqueness_check(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
+        f = tmp_path / "dup.txt"
+        f.write_text("hello world hello python hello")
+        file_ops.read_file({"path": str(f)})
+        result = json.loads(file_ops.edit_file({
+            "path": str(f),
+            "old_text": "hello",
+            "new_text": "bye",
+        }))
+        assert "error" in result
+        assert "3 times" in result["error"]
+        assert result["occurrences"] == 3
+
+    def test_edit_file_empty_old_text_rejected(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
+        f = tmp_path / "empty.txt"
+        f.write_text("hello world")
+        file_ops.read_file({"path": str(f)})
+        result = json.loads(file_ops.edit_file({
+            "path": str(f),
+            "old_text": "",
+            "new_text": "injected",
+        }))
+        assert "error" in result
+        assert "empty" in result["error"].lower()
+        # File must not be modified
+        assert f.read_text() == "hello world"
+
+    def test_grep_with_context(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
+        f = tmp_path / "ctx.txt"
+        f.write_text("line1\nline2\nline3 TARGET line4\nline5\nline6\n")
+        result = json.loads(file_ops.grep_files({
+            "pattern": "TARGET",
+            "path": str(tmp_path),
+            "context": 1,
+        }))
+        assert result["total"] >= 1
+        first = result["results"][0]
+        assert "before_context" in first
+        assert "after_context" in first
+        assert len(first["before_context"]) >= 1
+        assert len(first["after_context"]) >= 1
+
+    def test_grep_multiline(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
+        f = tmp_path / "multi.txt"
+        f.write_text("start\nfunction foo() {\n  return 42;\n}\nend\n")
+        result = json.loads(file_ops.grep_files({
+            "pattern": r"function foo\(\) \{\s*return \d+;\s*\}",
+            "path": str(tmp_path),
+            "multiline": True,
+        }))
+        assert result["total"] >= 1
+
 
 class TestShell:
     def test_is_readonly(self):
@@ -108,6 +198,21 @@ class TestShell:
         result = json.loads(shell.run_command({"command": "echo hello"}))
         assert result["exit_code"] == 0
         assert "hello" in result["output"]
+
+    def test_run_command_background(self):
+        result = json.loads(shell.run_command({
+            "command": "echo background_test",
+            "run_in_background": True,
+        }))
+        assert "job_id" in result
+        assert result["status"] == "started"
+        assert len(result["job_id"]) > 0
+        # Wait for the background job to complete
+        time.sleep(1)
+        job = shell._background_jobs.get(result["job_id"])
+        assert job is not None
+        assert job["status"] == "completed"
+        assert "background_test" in job["output"]
 
 
 class TestCodeExec:
@@ -158,3 +263,104 @@ class TestWebTools:
     def test_validate_url_blocks_non_http(self):
         assert web_tools._validate_url("ftp://example.com") is not None
         assert web_tools._validate_url("file:///etc/passwd") is not None
+
+
+class TestInteractive:
+    def test_ask_user_question_single(self, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda _: "2")
+        result = json.loads(interactive.ask_user_question({
+            "question": "Pick one",
+            "options": [
+                {"label": "A", "description": "First option"},
+                {"label": "B", "description": "Second option"},
+                {"label": "C", "description": "Third option"},
+            ],
+        }))
+        assert "selected" in result
+        assert result["selected"]["label"] == "B"
+
+    def test_ask_user_question_multi_select(self, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda _: "1,3")
+        result = json.loads(interactive.ask_user_question({
+            "question": "Pick multiple",
+            "options": [
+                {"label": "A", "description": "First"},
+                {"label": "B", "description": "Second"},
+                {"label": "C", "description": "Third"},
+            ],
+            "multi_select": True,
+        }))
+        assert "selected" in result
+        assert len(result["selected"]) == 2
+        assert result["selected"][0]["label"] == "A"
+        assert result["selected"][1]["label"] == "C"
+
+    def test_ask_user_question_no_options(self):
+        result = json.loads(interactive.ask_user_question({
+            "question": "Pick one",
+            "options": [],
+        }))
+        assert "error" in result
+
+    def test_ask_user_question_empty_input(self, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda _: "")
+        result = json.loads(interactive.ask_user_question({
+            "question": "Pick one",
+            "options": [{"label": "A"}],
+        }))
+        assert "error" in result
+        assert "No selection" in result["error"]
+
+    def test_ask_user_question_invalid_number(self, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda _: "99")
+        result = json.loads(interactive.ask_user_question({
+            "question": "Pick one",
+            "options": [{"label": "A"}, {"label": "B"}],
+        }))
+        assert "error" in result
+        assert "Invalid option" in result["error"]
+
+
+class TestMonitor:
+    def test_monitor_start_stop_list(self, monkeypatch):
+        monkeypatch.setattr(monitor, "_monitors", {})
+        command = f'{sys.executable} -c "import time; time.sleep(30)"'
+
+        # Start a monitor
+        result = json.loads(monitor.monitor_start({
+            "command": command,
+            "description": "Test monitor",
+        }))
+        assert "job_id" in result
+        assert result["status"] == "running"
+        job_id = result["job_id"]
+
+        # Brief wait for thread initialization
+        time.sleep(0.3)
+
+        # List monitors
+        list_result = json.loads(monitor.monitor_list({}))
+        assert list_result["active_monitors"] >= 1
+        assert any(m["job_id"] == job_id for m in list_result["monitors"])
+
+        # Stop monitor
+        stop_result = json.loads(monitor.monitor_stop({"job_id": job_id}))
+        assert stop_result["status"] == "stopped"
+
+        # Verify cleaned up
+        list_result = json.loads(monitor.monitor_list({}))
+        assert list_result["active_monitors"] == 0
+
+    def test_monitor_stop_nonexistent(self, monkeypatch):
+        monkeypatch.setattr(monitor, "_monitors", {})
+        result = json.loads(monitor.monitor_stop({"job_id": "nonexistent"}))
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+    def test_monitor_start_no_command(self, monkeypatch):
+        monkeypatch.setattr(monitor, "_monitors", {})
+        result = json.loads(monitor.monitor_start({
+            "command": "",
+            "description": "Empty",
+        }))
+        assert "error" in result

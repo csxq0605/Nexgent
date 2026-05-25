@@ -6,9 +6,9 @@ A production-grade AI agent harness powered by Xiaomi MiMo model, following Clau
 
 ## Features
 
-- **Agent Loop**: Dependency injection, circuit breaker, token budget tracking, 7 termination reasons
-- **Tool System**: 11 tools with concurrency-safe/unsafe markers, input validation, result budget management
-- **Permission Pipeline**: 4-stage pipeline (validate → rules → context → prompt), plan mode, rule-based matching
+- **Agent Loop**: Dependency injection, circuit breaker, token budget tracking, 7 termination reasons, parallel tool dispatch, streaming responses
+- **Tool System**: 15 tools with concurrency-safe/unsafe markers, input validation, result budget management, background execution
+- **Permission Pipeline**: 4-stage pipeline (validate → rules → context → prompt), plan mode, rule-based matching, path-scoped rules
 - **Context Management**: LLM-based semantic compression (summarize old messages), fallback to progressive truncation (snip → microcompact → orphan filter)
 - **Memory System**: 4 typed memories (user/feedback/project/reference), MEMORY.md index, path security
 - **Project Init**: `/init` command scans project and generates AGENTS.md with language/framework/tool detection
@@ -195,6 +195,10 @@ Each tool has safety markers (Ch3: fail-closed defaults):
 | create_doc | WRITE | | | Create markdown/txt |
 | create_spreadsheet | WRITE | | | Create CSV |
 | calculator | READ | ✓ | | Safe math evaluation |
+| ask_user_question | READ | ✓ | | Multi-choice interactive questions |
+| monitor_start | WRITE | | | Start background process monitor |
+| monitor_stop | WRITE | | | Stop a running monitor |
+| monitor_list | READ | ✓ | | List active monitors |
 
 ## Testing
 
@@ -203,18 +207,18 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-273 tests across 9 test files:
+306 tests across 9 test files:
 
 | Test File | Tests | Coverage |
 |-----------|-------|----------|
-| test_agent.py | 21 | DI, circuit breaker, token budget, retry, compression integration |
-| test_permissions.py | 17 | 4-stage pipeline, rule matching, plan mode |
+| test_agent.py | 27 | DI, circuit breaker, token budget, retry, compression, parallel dispatch, streaming, CLAUDE.md survival |
+| test_permissions.py | 21 | 4-stage pipeline, rule matching, plan mode, path-scoped rules |
 | test_context.py | 42 | Token-based compression, LLM compression, edge cases, session management |
 | test_registry.py | 13 | Validation, dispatch, truncation |
 | test_hooks.py | 12 | Lifecycle events, command/function hooks |
 | test_memory.py | 14 | Typed storage, frontmatter, validation |
-| test_tools.py | 17 | File ops, shell, code exec, math, web |
-| test_stress_boundary.py | 111 | Path traversal, SSRF, shell injection, large input, Unicode, permissions, concurrency, math DoS, context compression, memory boundaries, registry edge cases |
+| test_tools.py | 31 | File ops, shell, code exec, math, web, interactive, monitor |
+| test_stress_boundary.py | 119 | Path traversal, SSRF, shell injection, large input, Unicode, permissions, concurrency, math DoS, context compression, memory boundaries, registry edge cases, background jobs, monitors |
 | test_project_scanner.py | 18 | Language/framework detection, AGENTS.md generation |
 
 ## Performance

@@ -97,9 +97,9 @@ mimo-harness  # 进入交互模式
 
 基于 Stage 0-8 的经验，构建了一个完整的、可下载体验的 Agent Harness，参考 Claude Code 架构设计。
 
-**核心能力**：Agent Loop（DI + 熔断 + Token 预算）、11 个工具（并发安全标记）、4 阶段权限管线、Token-based 上下文压缩（200K 窗口 + LLM 语义摘要）、4 类型记忆系统、Hook 生命周期、`/init` 生成 AGENTS.md、交互式 REPL。
+**核心能力**：Agent Loop（DI + 熔断 + Token 预算 + 并行调度 + 流式响应）、15 个工具（并发安全标记）、4 阶段权限管线（路径级规则）、Token-based 上下文压缩（200K 窗口 + LLM 语义摘要）、4 类型记忆系统、Hook 生命周期、`/init` 生成 AGENTS.md、交互式 REPL、后台监控。
 
-**测试覆盖**：273 个测试（含 111 个压力/边界测试），覆盖路径遍历、SSRF、Shell 注入、大输入、Unicode、权限压力、并发安全、数学 DoS、压缩集成等场景。
+**测试覆盖**：306 个测试（含 119 个压力/边界测试），覆盖路径遍历、SSRF、Shell 注入、大输入、Unicode、权限压力、并发安全、数学 DoS、压缩集成、并行调度、流式响应、后台任务、交互式工具等场景。
 
 详见 [mimo-harness/README.md](mimo-harness/README.md)。
 

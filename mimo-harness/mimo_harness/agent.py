@@ -13,6 +13,7 @@ import json
 import time
 import hashlib
 import platform
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Optional
@@ -24,7 +25,19 @@ from .logging_utils import TraceLogger
 from .permissions import Permission, PermissionGate
 from .context import Session, compact_context, load_memory, estimate_tokens
 from .tools.registry import ToolRegistry, ToolDef
-from .tools import file_ops, shell, code_exec, web_tools, doc_tools, math_tools
+from .tools import file_ops, shell, code_exec, web_tools, doc_tools, math_tools, interactive, monitor
+
+
+# ---------------------------------------------------------------------------
+# Simple attribute-bag for building synthetic streaming response objects
+# (avoids using MagicMock in production code)
+# ---------------------------------------------------------------------------
+class _AttrBag:
+    """Minimal attribute container for streaming response reconstruction."""
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +202,7 @@ You help users with coding, file operations, web research, document creation, an
         log_file: str = None,
         deps: AgentDeps = None,
         plan_mode: bool = False,
+        stream: bool = False,
     ):
         self.model = model or MIMO_MODEL
         self.max_steps = max_steps
@@ -203,6 +217,7 @@ You help users with coding, file operations, web research, document creation, an
         self.registry = ToolRegistry()
         self.circuit_breaker = CircuitBreaker()
         self.token_budget = TokenBudget()
+        self.stream = stream
         self._system_prompt_cache: Optional[str] = None
         self._register_tools()
 
@@ -214,6 +229,8 @@ You help users with coding, file operations, web research, document creation, an
             + web_tools.get_tools()
             + doc_tools.get_tools()
             + math_tools.get_tools()
+            + interactive.get_tools()
+            + monitor.get_tools()
         )
         self.registry.register_many(all_tools)
 
@@ -269,6 +286,114 @@ You help users with coding, file operations, web research, document creation, an
 
         self.logger.tool_call(func_name, func_args, result)
         return result
+
+    def _stream_llm_call(self, client, messages: list, tools_schema: list):
+        """Execute LLM call with streaming, printing tokens as they arrive.
+
+        Returns a response object compatible with the non-streaming path.
+        """
+        import sys
+
+        def _do_stream():
+            return client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=tools_schema,
+                tool_choice="auto",
+                max_completion_tokens=2048,
+                temperature=0.7,
+                top_p=0.9,
+                stream=True,
+            )
+
+        response_stream = retry_with_backoff(
+            _do_stream,
+            max_retries=self.deps.max_retries,
+            base_delay=self.deps.base_retry_delay,
+        )
+
+        full_content = ""
+        tool_calls_data = {}
+        finish_reason = None
+
+        for chunk in response_stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            finish_reason = chunk.choices[0].finish_reason or finish_reason
+
+            if delta.content:
+                full_content += delta.content
+                print(delta.content, end="", flush=True)
+
+            if delta.tool_calls:
+                for tc_chunk in delta.tool_calls:
+                    idx = tc_chunk.index
+                    if idx not in tool_calls_data:
+                        tool_calls_data[idx] = {
+                            "id": "",
+                            "name": "",
+                            "arguments": "",
+                        }
+                    if tc_chunk.id:
+                        tool_calls_data[idx]["id"] = tc_chunk.id
+                    if tc_chunk.function:
+                        if tc_chunk.function.name:
+                            tool_calls_data[idx]["name"] = tc_chunk.function.name
+                        if tc_chunk.function.arguments:
+                            tool_calls_data[idx]["arguments"] += tc_chunk.function.arguments
+
+        if full_content or tool_calls_data:
+            print()  # newline after streaming
+
+        # Build synthetic response object for compatibility (using _AttrBag,
+        # not MagicMock — production code must not depend on unittest.mock)
+        tool_calls_list = []
+        for idx in sorted(tool_calls_data.keys()):
+            tc_data = tool_calls_data[idx]
+            tc_obj = _AttrBag(
+                id=tc_data["id"],
+                function=_AttrBag(
+                    name=tc_data["name"],
+                    arguments=tc_data["arguments"],
+                ),
+            )
+            tool_calls_list.append(tc_obj)
+
+        # snapshot tool_calls_data for the lambda closure
+        tc_snapshot = list(tool_calls_data.values())
+
+        def _model_dump():
+            return {
+                "role": "assistant",
+                "content": full_content or "",
+                "tool_calls": [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": tc["arguments"],
+                        },
+                    }
+                    for tc in tc_snapshot
+                ] if tc_snapshot else None,
+            }
+
+        synthetic_message = _AttrBag(
+            content=full_content or None,
+            tool_calls=tool_calls_list if tool_calls_list else None,
+            model_dump=_model_dump,
+        )
+
+        synthetic_choice = _AttrBag(
+            message=synthetic_message,
+            finish_reason=finish_reason,
+        )
+
+        synthetic_response = _AttrBag(choices=[synthetic_choice])
+
+        return synthetic_response
 
     def run(self, task: str, session: Session = None) -> str:
         """Execute the agent loop (Ch2: while(true) with state machine).
@@ -335,6 +460,10 @@ You help users with coding, file operations, web research, document creation, an
                 # Re-add the current user task — it was compressed away
                 session.add_message("user", task)
                 session.compaction_count += 1
+                # Re-load project instructions that were compressed away
+                memory_content = load_memory(os.getcwd())
+                if memory_content:
+                    session.messages.insert(0, {"role": "system", "content": f"## Project Memory\n{memory_content}"})
                 self.logger.info(
                     f"[COMPACT] {pre_count} msgs → "
                     f"{len(session.get_messages())} msgs, "
@@ -361,19 +490,24 @@ You help users with coding, file operations, web research, document creation, an
 
             # API call with retry (Ch2: error recovery)
             try:
-                response = retry_with_backoff(
-                    lambda: client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        tools=tools_schema,
-                        tool_choice="auto",
-                        max_completion_tokens=2048,
-                        temperature=0.7,
-                        top_p=0.9,
-                    ),
-                    max_retries=self.deps.max_retries,
-                    base_delay=self.deps.base_retry_delay,
-                )
+                if self.stream:
+                    response = self._stream_llm_call(
+                        client, messages, tools_schema
+                    )
+                else:
+                    response = retry_with_backoff(
+                        lambda: client.chat.completions.create(
+                            model=self.model,
+                            messages=messages,
+                            tools=tools_schema,
+                            tool_choice="auto",
+                            max_completion_tokens=2048,
+                            temperature=0.7,
+                            top_p=0.9,
+                        ),
+                        max_retries=self.deps.max_retries,
+                        base_delay=self.deps.base_retry_delay,
+                    )
                 self.circuit_breaker.record_success()
             except Exception as e:
                 self.circuit_breaker.record_failure()
@@ -389,7 +523,8 @@ You help users with coding, file operations, web research, document creation, an
             if not message.tool_calls:
                 final = message.content or "[No response]"
                 session.add_message("assistant", final)
-                self.logger.info(f"\nAgent: {final}")
+                if not self.stream:
+                    self.logger.info(f"\nAgent: {final}")
                 self.logger.session_summary({
                     "steps": step + 1,
                     "duration": round(time.time() - start_time, 2),
@@ -404,13 +539,40 @@ You help users with coding, file operations, web research, document creation, an
                 msg_dict["content"] = ""
             session.messages.append(msg_dict)
 
+            # Group tool calls into concurrency-safe and sequential
+            safe_calls = []
+            sequential_calls = []
             for tc in message.tool_calls:
                 func_name = tc.function.name
                 try:
                     func_args = json.loads(tc.function.arguments)
                 except json.JSONDecodeError:
                     func_args = {}
+                tool_def = self.registry.get(func_name)
+                if tool_def and tool_def.is_concurrency_safe:
+                    safe_calls.append((tc, func_name, func_args))
+                else:
+                    sequential_calls.append((tc, func_name, func_args))
 
+            # Execute concurrency-safe tools in parallel
+            if safe_calls:
+                with ThreadPoolExecutor(max_workers=min(len(safe_calls), 4)) as executor:
+                    future_to_tc = {
+                        executor.submit(
+                            self._handle_tool_call, fn, fa, tc.id, session
+                        ): tc
+                        for tc, fn, fa in safe_calls
+                    }
+                    for future in as_completed(future_to_tc):
+                        tc = future_to_tc[future]
+                        try:
+                            result = future.result()
+                        except Exception as e:
+                            result = json.dumps({"error": str(e)})
+                        session.add_message("tool", result, tool_call_id=tc.id)
+
+            # Execute non-concurrency-safe tools sequentially
+            for tc, func_name, func_args in sequential_calls:
                 result = self._handle_tool_call(
                     func_name, func_args, tc.id, session
                 )

@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 import pytest
+from unittest.mock import MagicMock
 
 from mimo_harness.tools import file_ops, shell, code_exec, web_tools, doc_tools, math_tools
 from mimo_harness.tools.registry import ToolRegistry, ToolDef
@@ -237,13 +238,13 @@ class TestShellInjection:
 
     def test_command_output_truncation(self):
         """Large output should be truncated."""
-        # Generate large output
+        # Generate large output exceeding 30000 char cap
         if sys.platform == "win32":
-            cmd = 'python -c "print(\'x\' * 20000)"'
+            cmd = 'python -c "print(\'x\' * 35000)"'
         else:
-            cmd = "python3 -c \"print('x' * 20000)\""
+            cmd = "python3 -c \"print('x' * 35000)\""
         result = json.loads(shell.run_command({"command": cmd, "timeout": 10}))
-        assert len(result.get("output", "")) <= 8500  # 8000 + truncation marker
+        assert len(result.get("output", "")) <= 30500  # 30000 + truncation marker
 
 
 # ============================================================================
@@ -950,3 +951,174 @@ class TestDocToolsBoundary:
             "output_dir": str(tmp_path),
         }))
         assert result.get("status") == "created"
+
+
+# ============================================================================
+# 14. BACKGROUND JOB CLEANUP
+# ============================================================================
+
+class TestBackgroundJobCleanup:
+    """Verify background jobs can be created and cleaned up without leaking."""
+
+    def test_background_job_cleanup(self):
+        """Background jobs should be removable without leaking."""
+        import time as _time
+
+        # Clean slate
+        shell._background_jobs.clear()
+
+        # Start a background job
+        result = json.loads(shell.run_command({
+            "command": "echo cleanup_test",
+            "run_in_background": True,
+        }))
+        job_id = result["job_id"]
+        assert job_id in shell._background_jobs
+
+        # Wait for completion
+        _time.sleep(1)
+        job = shell._background_jobs[job_id]
+        assert job["status"] == "completed"
+
+        # Cleanup: remove the completed job
+        del shell._background_jobs[job_id]
+        assert job_id not in shell._background_jobs
+        assert len(shell._background_jobs) == 0
+
+    def test_multiple_background_jobs(self):
+        """Multiple background jobs should coexist and complete independently."""
+        import time as _time
+
+        shell._background_jobs.clear()
+
+        job_ids = []
+        for i in range(3):
+            result = json.loads(shell.run_command({
+                "command": f"echo job_{i}",
+                "run_in_background": True,
+            }))
+            job_ids.append(result["job_id"])
+
+        assert len(shell._background_jobs) == 3
+
+        # Wait for all to complete
+        _time.sleep(1.5)
+        for jid in job_ids:
+            assert shell._background_jobs[jid]["status"] == "completed"
+
+        # Clean up all
+        for jid in job_ids:
+            del shell._background_jobs[jid]
+        assert len(shell._background_jobs) == 0
+
+
+# ============================================================================
+# 15. MONITOR MAX LIMIT
+# ============================================================================
+
+class TestMonitorMaxLimit:
+    """Verify the 10-monitor cap is enforced."""
+
+    def test_monitor_max_limit(self, monkeypatch):
+        """Starting more than MAX_MONITORS should be rejected."""
+        from mimo_harness.tools import monitor
+
+        monkeypatch.setattr(monitor, "_monitors", {})
+
+        # Fill _monitors with fake entries up to MAX_MONITORS
+        for i in range(monitor.MAX_MONITORS):
+            job_id = f"fake-{i}"
+            fake = MagicMock()
+            fake.command = f"fake command {i}"
+            fake.description = f"Fake monitor {i}"
+            fake.status = "running"
+            fake.lines = []
+            monitor._monitors[job_id] = fake
+
+        assert len(monitor._monitors) == monitor.MAX_MONITORS
+
+        # Next one should fail
+        result = json.loads(monitor.monitor_start({
+            "command": "echo overflow",
+            "description": "Overflow monitor",
+        }))
+        assert "error" in result
+        assert "Maximum" in result["error"]
+
+    def test_monitor_cleanup_allows_restart(self, monkeypatch):
+        """Stopping a monitor frees a slot for a new one."""
+        from mimo_harness.tools import monitor
+
+        monkeypatch.setattr(monitor, "_monitors", {})
+
+        # Fill up to MAX_MONITORS
+        for i in range(monitor.MAX_MONITORS):
+            fake = MagicMock()
+            fake.command = f"cmd {i}"
+            fake.description = f"desc {i}"
+            fake.status = "running"
+            fake.lines = []
+            fake.stop = MagicMock()
+            fake.get_lines = MagicMock(return_value=[])
+            monitor._monitors[f"fake-{i}"] = fake
+
+        # Stop one
+        stop_result = json.loads(monitor.monitor_stop({"job_id": "fake-0"}))
+        assert stop_result["status"] == "stopped"
+        assert len(monitor._monitors) == monitor.MAX_MONITORS - 1
+
+
+# ============================================================================
+# 16. PATH TRAVERSAL IN PERMISSION RULES
+# ============================================================================
+
+class TestPathTraversalInPermissionRule:
+    """Verify path-scoped permission rules properly restrict access."""
+
+    def test_path_pattern_blocks_outside_access(self):
+        """Paths outside the pattern scope should not match."""
+        rule = PermissionRule(
+            tool_pattern="write_file",
+            action="allow",
+            path_pattern="/src/**",
+        )
+        # Allowed: within /src/
+        assert rule.matches("write_file", "/src/main.py")
+        assert rule.matches("write_file", "/src/sub/module.py")
+
+        # Blocked: outside /src/
+        assert not rule.matches("write_file", "/etc/passwd")
+        assert not rule.matches("write_file", "/home/user/secret.txt")
+        assert not rule.matches("write_file", "/tmp/evil.txt")
+
+    def test_path_pattern_requires_tool_match(self):
+        """Path pattern also requires tool name to match."""
+        rule = PermissionRule(
+            tool_pattern="write_file",
+            action="allow",
+            path_pattern="/src/**",
+        )
+        # Wrong tool name, even with matching path
+        assert not rule.matches("read_file", "/src/main.py")
+        assert not rule.matches("delete_file", "/src/main.py")
+
+    def test_path_pattern_deny_rule(self):
+        """Deny rule with path pattern blocks matching tool+path combos."""
+        gate = PermissionGate(auto_approve=True, rules=[
+            PermissionRule("write_file", "deny", path_pattern="/etc/**"),
+        ])
+        # Deny rule blocks writes to /etc/
+        assert not gate.check(Permission.WRITE, "write_file(/etc/passwd)")
+        # Allow writes to other paths (falls through to auto_approve)
+        assert gate.check(Permission.WRITE, "write_file(/src/main.py)")
+
+    def test_path_pattern_wildcard_tool(self):
+        """Wildcard tool pattern with path restriction."""
+        rule = PermissionRule(
+            tool_pattern="*",
+            action="deny",
+            path_pattern="/secrets/**",
+        )
+        assert rule.matches("read_file", "/secrets/api_key.txt")
+        assert rule.matches("write_file", "/secrets/config.json")
+        assert not rule.matches("read_file", "/public/readme.txt")

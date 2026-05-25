@@ -9,7 +9,8 @@ Implements Ch4 patterns:
 """
 
 import json
-import re
+import os
+import fnmatch
 from enum import Enum
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -34,6 +35,7 @@ class PermissionRule:
     tool_pattern: str      # e.g. "read_file", "run_command", "run_command:npm:*"
     action: str            # "allow", "deny", "ask"
     source: str = "user"   # "user", "session", "policy"
+    path_pattern: Optional[str] = None  # e.g. "~/secrets/**", "/src/**"
 
     def matches(self, tool_name: str, context: str = "") -> bool:
         """Check if this rule matches a tool call.
@@ -42,7 +44,10 @@ class PermissionRule:
         - Exact match: "read_file"
         - Tool wildcard: "run_command:*" (all run_command calls)
         - Prefix match: "run_command:npm:*" (commands starting with npm)
+        - Path pattern: if path_pattern is set, also check tool's path argument
         """
+        # First check tool pattern match
+        tool_match = False
         if ":" in self.tool_pattern:
             # Pattern includes context (e.g., "run_command:npm:*")
             parts = self.tool_pattern.split(":", 1)
@@ -50,18 +55,48 @@ class PermissionRule:
                 return False
             pattern = parts[1]
             if pattern == "*":
-                return True
+                tool_match = True
             # Prefix match with wildcard
-            if pattern.endswith("*"):
+            elif pattern.endswith("*"):
                 prefix = pattern[:-1].rstrip(":")
                 # Match if context starts with prefix
-                return context.startswith(prefix)
-            return context == pattern
+                tool_match = context.startswith(prefix)
+            else:
+                tool_match = context == pattern
         else:
             # Simple tool name match
             if self.tool_pattern == "*":
-                return True
-            return self.tool_pattern == tool_name
+                tool_match = True
+            else:
+                tool_match = self.tool_pattern == tool_name
+
+        if not tool_match:
+            return False
+
+        # If path_pattern is set, also check if the tool's path argument matches
+        if self.path_pattern:
+            return self._matches_path(context)
+        return True
+
+    def _matches_path(self, context: str) -> bool:
+        """Check if a path in the context matches the path_pattern glob."""
+        # Try to extract a path from the context
+        # Context can be: a raw path, or JSON like {"path": "/foo/bar", ...}
+        path = context
+        if context.startswith("{"):
+            try:
+                args = json.loads(context)
+                path = args.get("path", args.get("command", context))
+            except (json.JSONDecodeError, AttributeError):
+                path = context
+        # Expand ~ for home directory
+        expanded_pattern = self.path_pattern
+        if expanded_pattern.startswith("~"):
+            expanded_pattern = os.path.expanduser(expanded_pattern)
+        expanded_path = path
+        if expanded_path.startswith("~"):
+            expanded_path = os.path.expanduser(expanded_path)
+        return fnmatch.fnmatch(expanded_path, expanded_pattern)
 
 
 class PermissionGate:

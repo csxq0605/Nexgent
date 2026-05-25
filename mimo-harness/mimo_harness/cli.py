@@ -82,6 +82,7 @@ def main():
     parser.add_argument("--log-file", help="Log file path")
     parser.add_argument("--config", "-c", help="Configuration file path")
     parser.add_argument("--rules", "-r", help="Permission rules file path")
+    parser.add_argument("--stream", "-s", action="store_true", help="Stream LLM responses token-by-token")
     args = parser.parse_args()
 
     print_banner()
@@ -101,6 +102,7 @@ def main():
         verbose=args.verbose,
         log_file=args.log_file or config.get("log_file"),
         plan_mode=args.plan or config.get("plan_mode", False),
+        stream=args.stream or config.get("stream", False),
     )
 
     # Load permission rules
@@ -327,7 +329,11 @@ def main():
             continue
 
         # Run agent
-        harness.run(user_input, session)
+        if harness.stream:
+            # When streaming, tokens are printed directly by the agent
+            harness.run(user_input, session)
+        else:
+            harness.run(user_input, session)
 
 
 if __name__ == "__main__":
