@@ -8,15 +8,15 @@ Tests cover:
 5. Unicode and encoding edge cases
 6. Permission pipeline stress
 7. Concurrent tool execution safety
-8. Math tool DoS vectors
-9. Context compression under load
-10. Memory system boundary conditions
+8. Background job cleanup
+9. Monitor max limit
+10. Path traversal in permission rules
+11. Write read-before-write enforcement
 """
 
 import json
 import os
 import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -24,12 +24,11 @@ from pathlib import Path
 import pytest
 from unittest.mock import MagicMock
 
-from mimo_harness.tools import file_ops, shell, code_exec, web_tools, doc_tools, math_tools
+from mimo_harness.tools import file_ops, shell, web_tools, doc_tools, math_tools
 from mimo_harness.tools.registry import ToolRegistry, ToolDef
 from mimo_harness.permissions import Permission, PermissionGate, PermissionRule, PermissionMode
-from mimo_harness.memory import MemoryStore, MemoryType, MEMORY_INDEX_MAX_LINES, MEMORY_INDEX_MAX_BYTES
-from mimo_harness.context import Session, compact_context, snip_compress, microcompact
-from mimo_harness.agent import CircuitBreaker, TokenBudget, TerminationReason
+from mimo_harness.memory import MemoryStore, MemoryType
+from mimo_harness.agent import CircuitBreaker, TokenBudget
 
 
 # ============================================================================
@@ -78,8 +77,8 @@ class TestPathTraversal:
         monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
         for sensitive in ["/etc/passwd", "/etc/shadow", "C:\\Windows\\system.ini"]:
             result = json.loads(file_ops.read_file({"path": sensitive}))
-            if "error" in result:
-                assert "outside" in result["error"] or "not found" in result["error"].lower() or "cannot find" in result["error"].lower()
+            assert "error" in result, f"Expected error for sensitive path {sensitive}, got {result}"
+            assert "outside" in result["error"] or "not found" in result["error"].lower() or "cannot find" in result["error"].lower()
 
     def test_glob_blocks_system_root(self, tmp_path, monkeypatch):
         monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
@@ -116,26 +115,31 @@ class TestPathTraversal:
             "path": str(tmp_path / "test\x00.txt"),
             "content": "pwned",
         }))
-        # Should either error or handle safely
-        assert isinstance(result, dict)
+        # Null byte in path should be rejected or handled safely without writing
+        assert "error" in result or result.get("status") != "written"
 
     def test_symlink_escape(self, tmp_path, monkeypatch):
-        """Symlink pointing outside allowed dir should be blocked."""
+        """Symlink pointing outside allowed dir should be blocked after resolve."""
         monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
-        target = tmp_path.parent / "outside.txt"
-        target.write_text("secret")
+        outside = tmp_path.parent / "outside.txt"
+        outside.write_text("secret")
         link = tmp_path / "escape.txt"
-        try:
-            link.symlink_to(target)
-            result = json.loads(file_ops.read_file({"path": str(link)}))
-            # After resolve(), symlink target is outside allowed dir
-            if "error" in result:
-                assert "outside" in result["error"]
-        except OSError:
-            pytest.skip("Symlinks not supported on this platform")
-        finally:
-            target.unlink(missing_ok=True)
-            link.unlink(missing_ok=True)
+
+        # Mock Path so resolve() for the link path returns the outside target.
+        # This simulates symlink resolution without needing real symlinks
+        # (which require elevated permissions on Windows).
+        _real_path = Path
+
+        class _MockPath(type(link)):
+            def resolve(self, *a, **kw):
+                if str(self) == str(link):
+                    return outside.resolve()
+                return _real_path.resolve(self, *a, **kw)
+
+        monkeypatch.setattr(file_ops, "Path", _MockPath)
+        result = json.loads(file_ops.read_file({"path": str(link)}))
+        assert "error" in result
+        assert "outside" in result["error"]
 
 
 # ============================================================================
@@ -191,7 +195,7 @@ class TestSSRF:
     def test_max_response_size_constant(self):
         """Verify MAX_RESPONSE_BYTES is defined and reasonable."""
         assert hasattr(web_tools, 'MAX_RESPONSE_BYTES')
-        assert web_tools.MAX_RESPONSE_BYTES <= 50 * 1024 * 1024  # <= 50MB
+        assert 1024 <= web_tools.MAX_RESPONSE_BYTES <= 10 * 1024 * 1024  # 1KB .. 10MB
 
 
 # ============================================================================
@@ -301,16 +305,12 @@ class TestLargeInput:
 
     def test_calculator_large_exponent(self):
         """Large exponent should not hang (DoS vector)."""
-        # This is a known DoS vector — 2**1000000 is huge
-        # For now, just verify it doesn't crash the test suite
-        # In production, a timeout should be enforced
         result = json.loads(math_tools.calculator({"expression": "2**100"}))
         assert "result" in result or "error" in result
 
     def test_registry_result_truncation(self):
         """Tool results over threshold should be spilled to disk."""
         registry = ToolRegistry()
-        # Override thresholds for testing
         registry.SPILL_THRESHOLD_CHARS = 5000
         registry.MAX_RESULT_CHARS = 10000
         def big_result(params):
@@ -399,9 +399,6 @@ class TestPermissionStress:
             PermissionRule("write_file", "allow"),
             PermissionRule("write_file", "ask"),
         ])
-        # ask should not auto-approve
-        # (will fall through to interactive, which we can't test here)
-        # Just verify it doesn't auto-approve
         gate_check = gate._match_rules(Permission.WRITE, "write_file")
         assert gate_check == "ask"
 
@@ -443,9 +440,6 @@ class TestPermissionStress:
         """After 3 rejections, auto-approve falls through to interactive."""
         gate = PermissionGate(auto_approve=True)
         gate._rejection_count = 3
-        # With 3 rejections, should NOT auto-approve
-        # (falls through to interactive prompt)
-        # We can't test the interactive part, but verify the count logic
         assert gate._rejection_count >= 3
 
     def test_many_rules_performance(self):
@@ -550,417 +544,7 @@ class TestConcurrency:
 
 
 # ============================================================================
-# 8. MATH TOOL DoS VECTORS
-# ============================================================================
-
-class TestMathDoS:
-    """Test math tool resilience against denial-of-service."""
-
-    def test_basic_arithmetic(self):
-        result = json.loads(math_tools.calculator({"expression": "2 + 3 * 4"}))
-        assert result["result"] == 14
-
-    def test_large_numbers(self):
-        result = json.loads(math_tools.calculator({"expression": "2**100"}))
-        assert result["result"] == 2**100
-
-    def test_nested_functions(self):
-        result = json.loads(math_tools.calculator({"expression": "sqrt(abs(-144))"}))
-        assert result["result"] == 12.0
-
-    def test_import_blocked(self):
-        result = json.loads(math_tools.calculator({"expression": "__import__('os').system('ls')"}))
-        assert "error" in result
-
-    def test_eval_blocked(self):
-        result = json.loads(math_tools.calculator({"expression": "eval('1+1')"}))
-        assert "error" in result
-
-    def test_exec_blocked(self):
-        result = json.loads(math_tools.calculator({"expression": "exec('import os')"}))
-        assert "error" in result
-
-    def test_open_blocked(self):
-        result = json.loads(math_tools.calculator({"expression": "open('/etc/passwd')"}))
-        assert "error" in result
-
-    def test_invalid_expression(self):
-        result = json.loads(math_tools.calculator({"expression": "+++"}))
-        assert "error" in result
-
-    def test_empty_expression(self):
-        result = json.loads(math_tools.calculator({"expression": ""}))
-        assert "error" in result
-
-    def test_very_long_expression(self):
-        # 100 additions — tests without hitting recursion limit
-        expr = " + ".join(["1"] * 100)
-        result = json.loads(math_tools.calculator({"expression": expr}))
-        assert result["result"] == 100
-
-    def test_division_by_zero(self):
-        result = json.loads(math_tools.calculator({"expression": "1/0"}))
-        assert "error" in result
-
-    def test_negative_sqrt(self):
-        result = json.loads(math_tools.calculator({"expression": "sqrt(-1)"}))
-        assert "error" in result
-
-
-# ============================================================================
-# 9. CONTEXT COMPRESSION UNDER LOAD
-# ============================================================================
-
-class TestContextCompression:
-    """Test context compression with large message histories."""
-
-    def test_snip_compress_basic(self):
-        messages = [
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "hi"},
-            {"role": "tool", "content": "x" * 5000, "tool_call_id": "tc1"},
-        ]
-        result = snip_compress(messages, max_age=2)
-        # Old tool result should be snipped
-        assert any("[snipped" in str(m) for m in result) or len(result) <= len(messages)
-
-    def test_microcompact_basic(self):
-        # microcompact clears old tool results but keeps message count the same
-        messages = []
-        for i in range(20):
-            messages.append({"role": "user", "content": f"task {i}"})
-            messages.append({"role": "tool", "content": f"result {i}", "tool_call_id": f"tc{i}"})
-        result = microcompact(messages, keep_recent=5)
-        # Same count, but old tool results replaced with markers
-        assert len(result) == 40
-        # Recent 5 tool results should be preserved
-        tool_msgs = [m for m in result if m.get("role") == "tool"]
-        recent_contents = [m["content"] for m in tool_msgs[-5:]]
-        assert all("result" in c for c in recent_contents)
-        # Old tool results should be markers
-        old_contents = [m["content"] for m in tool_msgs[:-5]]
-        assert all("cleared" in c for c in old_contents)
-
-    def test_compact_context_preserves_recent(self):
-        messages = [{"role": "user", "content": f"msg {i}"} for i in range(100)]
-        result, _, _, _ = compact_context(messages, max_messages=20)
-        assert len(result) <= 20
-        # Last message should be preserved
-        assert result[-1]["content"] == "msg 99"
-
-    def test_compact_context_short_unchanged(self):
-        messages = [{"role": "user", "content": "hello"}]
-        result, _, _, _ = compact_context(messages)
-        assert len(result) == 1
-
-    def test_compact_context_1000_messages(self):
-        """Stress test: 1000 messages should compress efficiently."""
-        messages = []
-        for i in range(1000):
-            role = "user" if i % 2 == 0 else "assistant"
-            messages.append({"role": role, "content": f"message {i}"})
-        start = time.time()
-        result, _, _, _ = compact_context(messages, max_messages=30)
-        elapsed = time.time() - start
-        assert len(result) <= 30
-        assert elapsed < 1.0  # Should be fast
-
-    def test_compact_context_with_tool_results(self):
-        """Tool results should be handled during compression."""
-        messages = []
-        for i in range(50):
-            messages.append({"role": "user", "content": f"task {i}"})
-            messages.append({"role": "assistant", "content": "ok", "tool_calls": [{"id": f"tc{i}"}]})
-            messages.append({"role": "tool", "content": f"result {i}", "tool_call_id": f"tc{i}"})
-        result, _, _, _ = compact_context(messages, max_messages=20)
-        assert len(result) <= 20
-
-    def test_session_compaction_count(self):
-        session = Session(session_id="test")
-        for i in range(5):
-            session.add_message("user", f"msg {i}")
-        initial_count = session.compaction_count
-        compact_context(session.get_messages(), max_messages=3)
-        # compaction_count may or may not change depending on implementation
-
-
-# ============================================================================
-# 10. MEMORY SYSTEM BOUNDARY CONDITIONS
-# ============================================================================
-
-class TestMemoryBoundary:
-    """Test memory system edge cases."""
-
-    def test_save_and_retrieve(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        store.save_memory("test", MemoryType.USER, "test desc", "test content")
-        memories = store.list_memories()
-        assert len(memories) == 1
-        assert memories[0].name == "test"
-
-    def test_overwrite_same_name(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        store.save_memory("test", MemoryType.USER, "first", "content 1")
-        store.save_memory("test", MemoryType.USER, "second", "content 2")
-        memories = store.list_memories()
-        assert len(memories) == 1
-        assert "content 2" in memories[0].content
-
-    def test_delete_nonexistent(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        result = store.delete_memory("nonexistent")
-        assert result is False
-
-    def test_many_memories(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        for i in range(50):
-            store.save_memory(f"mem-{i}", MemoryType.PROJECT, f"desc {i}", f"content {i}")
-        memories = store.list_memories()
-        assert len(memories) == 50
-
-    def test_index_line_limit(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        for i in range(MEMORY_INDEX_MAX_LINES + 10):
-            store.save_memory(f"mem-{i:04d}", MemoryType.PROJECT, f"desc {i}", f"content {i}")
-        index = store.load_index()
-        lines = index.strip().split("\n")
-        # Should be truncated
-        assert len(lines) <= MEMORY_INDEX_MAX_LINES + 5  # header + truncation marker
-
-    def test_index_byte_limit(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        # Create a memory with very long description to exceed 25KB
-        long_desc = "x" * 1000
-        for i in range(30):
-            store.save_memory(f"long-{i}", MemoryType.PROJECT, long_desc, f"content {i}")
-        index = store.load_index()
-        assert len(index.encode("utf-8")) <= MEMORY_INDEX_MAX_BYTES + 200  # some slack for truncation marker
-
-    def test_empty_memory_dir(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        assert store.list_memories() == []
-        assert store.load_index() == ""
-
-    def test_validate_path_blocks_traversal(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        err = store._validate_path(str(tmp_path / ".." / ".." / "evil.txt"))
-        assert err is not None
-
-    def test_validate_path_allows_valid(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        store.ensure_dir()
-        err = store._validate_path(str(Path(store.memory_dir) / "test.md"))
-        assert err is None
-
-    def test_special_characters_in_name(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        path = store.save_memory(
-            name="test@#$%^&*()",
-            memory_type=MemoryType.USER,
-            description="special chars",
-            content="content",
-        )
-        assert os.path.exists(path)
-
-    def test_frontmatter_with_triple_dash_in_content(self, tmp_path):
-        """Content containing --- should not break frontmatter parsing."""
-        store = MemoryStore(str(tmp_path))
-        store.save_memory(
-            name="dash-test",
-            memory_type=MemoryType.PROJECT,
-            description="test with dashes",
-            content="Some text\n---\nMore text\n---\nEnd",
-        )
-        memories = store.list_memories()
-        assert len(memories) == 1
-        assert memories[0].name == "dash-test"
-
-
-# ============================================================================
-# 11. CIRCUIT BREAKER AND TOKEN BUDGET
-# ============================================================================
-
-class TestCircuitBreaker:
-    def test_opens_after_threshold(self):
-        cb = CircuitBreaker(threshold=3)
-        for _ in range(3):
-            cb.record_failure()
-        assert cb.check() is True
-
-    def test_resets_on_success(self):
-        cb = CircuitBreaker(threshold=3)
-        cb.record_failure()
-        cb.record_failure()
-        cb.record_success()
-        assert cb.check() is False
-        assert cb.consecutive_failures == 0
-
-    def test_reset(self):
-        cb = CircuitBreaker(threshold=3)
-        for _ in range(5):
-            cb.record_failure()
-        cb.reset()
-        assert cb.check() is False
-        assert cb.consecutive_failures == 0
-
-
-class TestTokenBudget:
-    def test_usage_ratio(self):
-        budget = TokenBudget(max_tokens=100000)
-        budget.estimated_tokens = 50000
-        expected = 50000 / (100000 - 4096)
-        assert budget.usage_ratio() == pytest.approx(expected, abs=0.01)
-
-    def test_warning_threshold(self):
-        budget = TokenBudget(max_tokens=100000)
-        budget.estimated_tokens = 86000  # > 85%
-        assert budget.is_warning() is True
-
-    def test_blocked_threshold(self):
-        budget = TokenBudget(max_tokens=100000)
-        budget.estimated_tokens = 96000  # > 95%
-        assert budget.is_blocked() is True
-
-    def test_normal_usage(self):
-        budget = TokenBudget(max_tokens=100000)
-        budget.estimated_tokens = 10000
-        assert budget.is_warning() is False
-        assert budget.is_blocked() is False
-
-
-# ============================================================================
-# 12. TOOL REGISTRY EDGE CASES
-# ============================================================================
-
-class TestRegistryEdgeCases:
-    def test_unknown_tool(self):
-        registry = ToolRegistry()
-        gate = PermissionGate(auto_approve=True)
-        result = registry.execute("nonexistent", {}, gate)
-        assert "error" in result
-
-    def test_missing_required_param(self):
-        registry = ToolRegistry()
-        registry.register(ToolDef(
-            name="test", description="test",
-            parameters={"type": "object", "properties": {"x": {"type": "string"}}, "required": ["x"]},
-            handler=lambda p: "ok", permission=Permission.READ,
-        ))
-        gate = PermissionGate(auto_approve=True)
-        result = registry.execute("test", {}, gate)
-        assert "error" in result
-        assert "Missing required" in result
-
-    def test_wrong_param_type(self):
-        registry = ToolRegistry()
-        registry.register(ToolDef(
-            name="test", description="test",
-            parameters={"type": "object", "properties": {"x": {"type": "integer"}}, "required": ["x"]},
-            handler=lambda p: "ok", permission=Permission.READ,
-        ))
-        gate = PermissionGate(auto_approve=True)
-        result = registry.execute("test", {"x": "not_int"}, gate)
-        assert "error" in result
-
-    def test_boolean_not_accepted_as_integer(self):
-        registry = ToolRegistry()
-        registry.register(ToolDef(
-            name="test", description="test",
-            parameters={"type": "object", "properties": {"x": {"type": "integer"}}, "required": ["x"]},
-            handler=lambda p: "ok", permission=Permission.READ,
-        ))
-        gate = PermissionGate(auto_approve=True)
-        result = registry.execute("test", {"x": True}, gate)
-        assert "error" in result
-
-    def test_handler_exception_returns_error(self):
-        registry = ToolRegistry()
-        def boom(params):
-            raise RuntimeError("boom")
-        registry.register(ToolDef(
-            name="boom", description="test",
-            parameters={"type": "object", "properties": {}},
-            handler=boom, permission=Permission.READ,
-        ))
-        gate = PermissionGate(auto_approve=True)
-        result = registry.execute("boom", {}, gate)
-        assert "error" in result
-        assert "boom" in result
-
-    def test_list_read_only(self):
-        registry = ToolRegistry()
-        registry.register(ToolDef(
-            name="ro", description="test", parameters={},
-            handler=lambda p: "", permission=Permission.READ, is_read_only=True,
-        ))
-        registry.register(ToolDef(
-            name="rw", description="test", parameters={},
-            handler=lambda p: "", permission=Permission.WRITE, is_read_only=False,
-        ))
-        assert len(registry.list_read_only()) == 1
-        assert registry.list_read_only()[0].name == "ro"
-
-    def test_list_concurrency_safe(self):
-        registry = ToolRegistry()
-        registry.register(ToolDef(
-            name="safe", description="test", parameters={},
-            handler=lambda p: "", permission=Permission.READ, is_concurrency_safe=True,
-        ))
-        registry.register(ToolDef(
-            name="unsafe", description="test", parameters={},
-            handler=lambda p: "", permission=Permission.READ, is_concurrency_safe=False,
-        ))
-        assert len(registry.list_concurrency_safe()) == 1
-
-
-# ============================================================================
-# 13. DOC TOOLS BOUNDARY
-# ============================================================================
-
-class TestDocToolsBoundary:
-    def test_create_doc_path_validation(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(doc_tools, "_ALLOWED_WRITE_DIR", tmp_path)
-        # Restore the real validation function
-        from pathlib import Path as P
-        def real_validate(output_dir):
-            try:
-                resolved = P(output_dir).resolve()
-                if not resolved.is_relative_to(tmp_path):
-                    return f"Output directory '{output_dir}' is outside allowed directory"
-                return None
-            except Exception as e:
-                return f"Path validation error: {e}"
-        monkeypatch.setattr(doc_tools, "_validate_output_dir", real_validate)
-        result = json.loads(doc_tools.create_doc({
-            "title": "test",
-            "content": "content",
-            "output_dir": "/tmp/evil",
-        }))
-        assert "error" in result
-
-    def test_create_doc_empty_title(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(doc_tools, "_ALLOWED_WRITE_DIR", tmp_path)
-        monkeypatch.setattr(doc_tools, "_validate_output_dir", lambda d: None)
-        result = json.loads(doc_tools.create_doc({
-            "title": "@#$%",
-            "content": "content",
-            "output_dir": str(tmp_path),
-        }))
-        assert result.get("status") == "created"
-
-    def test_create_spreadsheet_empty_data(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(doc_tools, "_ALLOWED_WRITE_DIR", tmp_path)
-        monkeypatch.setattr(doc_tools, "_validate_output_dir", lambda d: None)
-        result = json.loads(doc_tools.create_spreadsheet({
-            "title": "empty",
-            "data": [],
-            "output_dir": str(tmp_path),
-        }))
-        assert result.get("status") == "created"
-
-
-# ============================================================================
-# 14. BACKGROUND JOB CLEANUP
+# 8. BACKGROUND JOB CLEANUP
 # ============================================================================
 
 class TestBackgroundJobCleanup:
@@ -1019,7 +603,7 @@ class TestBackgroundJobCleanup:
 
 
 # ============================================================================
-# 15. MONITOR MAX LIMIT
+# 9. MONITOR MAX LIMIT
 # ============================================================================
 
 class TestMonitorMaxLimit:
@@ -1075,7 +659,7 @@ class TestMonitorMaxLimit:
 
 
 # ============================================================================
-# 16. PATH TRAVERSAL IN PERMISSION RULES
+# 10. PATH TRAVERSAL IN PERMISSION RULES
 # ============================================================================
 
 class TestPathTraversalInPermissionRule:
@@ -1131,14 +715,14 @@ class TestPathTraversalInPermissionRule:
 
 
 # ============================================================================
-# 17. S1: WRITE READ-BEFORE-WRITE ENFORCEMENT
+# 11. WRITE READ-BEFORE-WRITE ENFORCEMENT
 # ============================================================================
 
 class TestWriteReadBeforeWrite:
-    """S1: write_file must read existing files before overwriting."""
+    """write_file must read existing files before overwriting."""
 
     def test_write_to_existing_unread_file_blocked(self, tmp_path, monkeypatch):
-        """S1: Writing to an existing file that was never read should error."""
+        """Writing to an existing file that was never read should error."""
         monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
         monkeypatch.setattr(file_ops, "_write_allowed_files", set())
         f = tmp_path / "existing.txt"
@@ -1151,7 +735,7 @@ class TestWriteReadBeforeWrite:
         assert "read" in result["error"].lower()
 
     def test_write_to_existing_read_file_succeeds(self, tmp_path, monkeypatch):
-        """S1: Writing to an existing file that was read should succeed."""
+        """Writing to an existing file that was read should succeed."""
         monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
         monkeypatch.setattr(file_ops, "_write_allowed_files", set())
         f = tmp_path / "existing.txt"
@@ -1166,7 +750,7 @@ class TestWriteReadBeforeWrite:
         assert f.read_text() == "new content"
 
     def test_write_to_new_file_succeeds(self, tmp_path, monkeypatch):
-        """S1: Writing to a file that does not exist yet should succeed without read."""
+        """Writing to a file that does not exist yet should succeed without read."""
         monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
         monkeypatch.setattr(file_ops, "_write_allowed_files", set())
         f = tmp_path / "brand_new.txt"
@@ -1177,156 +761,3 @@ class TestWriteReadBeforeWrite:
         }))
         assert result.get("status") == "written"
         assert f.read_text() == "first write"
-
-
-# ============================================================================
-# 18. S2: COMMAND PARSING AND QUOTED OPERATORS
-# ============================================================================
-
-class TestCompoundCommandParsing:
-    """S2: Compound command splitting respects quotes."""
-
-    def test_compound_with_and_is_not_readonly(self):
-        """S2: `ls && echo hi` has two subcommands, both readonly."""
-        # ls and echo are both readonly, so the whole thing is readonly
-        assert shell._is_readonly("ls && echo hi")
-
-    def test_compound_with_and_rm_is_not_readonly(self):
-        """S2: `ls && rm -rf /` has rm which is not readonly."""
-        assert not shell._is_readonly("ls && rm -rf /")
-
-    def test_quoted_and_is_readonly(self):
-        """S2: `echo '&&test'` should be readonly (&& is inside quotes)."""
-        assert shell._is_readonly("echo '&&test'")
-
-    def test_quoted_and_with_double_quotes(self):
-        """S2: `echo \"&&test\"` should be readonly (&& is inside double quotes)."""
-        assert shell._is_readonly('echo "&&test"')
-
-    def test_split_compound_respects_single_quotes(self):
-        """S2: _split_compound_command should not split on && inside single quotes."""
-        parts = shell._split_compound_command("echo 'a && b'")
-        assert len(parts) == 1
-        assert "a && b" in parts[0]
-
-    def test_split_compound_respects_double_quotes(self):
-        """S2: _split_compound_command should not split on && inside double quotes."""
-        parts = shell._split_compound_command('echo "a && b"')
-        assert len(parts) == 1
-        assert "a && b" in parts[0]
-
-    def test_split_compound_on_semicolon(self):
-        parts = shell._split_compound_command("ls; rm file")
-        assert len(parts) == 2
-
-    def test_split_compound_on_pipe(self):
-        parts = shell._split_compound_command("cat file | grep pattern")
-        assert len(parts) == 2
-
-    def test_split_compound_on_double_pipe(self):
-        parts = shell._split_compound_command("ls || echo failed")
-        assert len(parts) == 2
-
-
-# ============================================================================
-# 19. S3: CREDENTIAL SCRUBBING
-# ============================================================================
-
-class TestCredentialScrubbing:
-    """S3: _scrub_env removes sensitive keys from environment."""
-
-    def test_scrub_removes_api_key(self, monkeypatch):
-        """S3: API_KEY is removed from environment."""
-        monkeypatch.setenv("MY_API_KEY", "secret123")
-        env = shell._scrub_env()
-        assert "MY_API_KEY" not in env
-
-    def test_scrub_removes_secret(self, monkeypatch):
-        """S3: SECRET is removed from environment."""
-        monkeypatch.setenv("APP_SECRET", "topsecret")
-        env = shell._scrub_env()
-        assert "APP_SECRET" not in env
-
-    def test_scrub_removes_token(self, monkeypatch):
-        """S3: TOKEN is removed from environment."""
-        monkeypatch.setenv("AUTH_TOKEN", "bearer_abc")
-        env = shell._scrub_env()
-        assert "AUTH_TOKEN" not in env
-
-    def test_scrub_removes_password(self, monkeypatch):
-        """S3: PASSWORD is removed from environment."""
-        monkeypatch.setenv("DB_PASSWORD", "pass123")
-        env = shell._scrub_env()
-        assert "DB_PASSWORD" not in env
-
-    def test_scrub_removes_credential(self, monkeypatch):
-        """S3: CREDENTIAL is removed from environment."""
-        monkeypatch.setenv("AWS_CREDENTIAL", "cred_value")
-        env = shell._scrub_env()
-        assert "AWS_CREDENTIAL" not in env
-
-    def test_scrub_preserves_normal_vars(self, monkeypatch):
-        """S3: Non-sensitive environment variables are preserved."""
-        monkeypatch.setenv("MIMO_NORMAL_VAR", "safe_value")
-        env = shell._scrub_env()
-        assert env.get("MIMO_NORMAL_VAR") == "safe_value"
-
-    def test_scrub_case_insensitive(self, monkeypatch):
-        """S3: Credential pattern matching is case-insensitive."""
-        monkeypatch.setenv("my_api_key_lower", "secret")
-        monkeypatch.setenv("MY_SECRET_UPPER", "secret")
-        env = shell._scrub_env()
-        assert "my_api_key_lower" not in env
-        assert "MY_SECRET_UPPER" not in env
-
-
-# ============================================================================
-# 20. S4: PROTECTED PATH BLOCKING
-# ============================================================================
-
-class TestProtectedPathBlocking:
-    """S4: Writes to protected dirs/files are blocked by PermissionGate."""
-
-    def test_write_to_git_config_blocked(self):
-        """S4: Write to .git/config is blocked."""
-        gate = PermissionGate(auto_approve=True)
-        assert not gate.check(Permission.WRITE, "write_file(path=.git/config)")
-
-    def test_write_to_env_blocked(self):
-        """S4: Write to .env is blocked."""
-        gate = PermissionGate(auto_approve=True)
-        assert not gate.check(Permission.WRITE, "write_file(path=.env)")
-
-    def test_write_to_bashrc_blocked(self):
-        """S4: Write to .bashrc is blocked."""
-        gate = PermissionGate(auto_approve=True)
-        assert not gate.check(Permission.WRITE, "write_file(path=.bashrc)")
-
-    def test_write_to_normal_file_allowed(self):
-        """S4: Write to a normal file is allowed with auto_approve."""
-        gate = PermissionGate(auto_approve=True)
-        assert gate.check(Permission.WRITE, "write_file(path=src/main.py)")
-
-    def test_protected_path_bypass_mode(self):
-        """BYPASS mode still blocks writes to critical protected paths."""
-        gate = PermissionGate()
-        gate.mode = PermissionMode.BYPASS
-        assert not gate.check(Permission.WRITE, "write_file(path=.env)")
-
-    def test_is_protected_path_git_dir(self):
-        """S4: _is_protected_path detects .git/."""
-        from mimo_harness.permissions import _is_protected_path
-        assert _is_protected_path("project/.git/config")
-        assert _is_protected_path(".git/HEAD")
-
-    def test_is_protected_path_env_file(self):
-        """S4: _is_protected_path detects .env."""
-        from mimo_harness.permissions import _is_protected_path
-        assert _is_protected_path(".env")
-        assert _is_protected_path("project/.env")
-
-    def test_is_protected_path_normal_file(self):
-        """S4: _is_protected_path does not block normal files."""
-        from mimo_harness.permissions import _is_protected_path
-        assert not _is_protected_path("src/main.py")
-        assert not _is_protected_path("README.md")

@@ -10,11 +10,14 @@ Implements Ch4 patterns:
 
 import json
 import os
+import re
 import fnmatch
 from enum import Enum
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Optional
+
+from .security_pipeline import classify_action, SafetyDecision
 
 
 class Permission(Enum):
@@ -71,6 +74,7 @@ class PermissionRule:
         - Exact match: "read_file"
         - Tool wildcard: "run_command:*" (all run_command calls)
         - Prefix match: "run_command:npm:*" (commands starting with npm)
+        - Word boundary: "run_command:npm run test *" (space before * = word boundary)
         - Path pattern: if path_pattern is set, also check tool's path argument
         """
         # First check tool pattern match
@@ -86,8 +90,21 @@ class PermissionRule:
             # Prefix match with wildcard
             elif pattern.endswith("*"):
                 prefix = pattern[:-1].rstrip(":")
-                # Match if context starts with prefix
-                tool_match = context.startswith(prefix)
+                # Check for word boundary: "npm run test *" matches "npm run test -v"
+                # but NOT "npm run testing" — the space before * enforces word boundary
+                if prefix.endswith(" "):
+                    # Word boundary match: context must start with prefix,
+                    # and the next char (if any) must be a word boundary
+                    prefix_stripped = prefix.rstrip()
+                    if context.startswith(prefix_stripped):
+                        rest = context[len(prefix_stripped):]
+                        if not rest or rest[0] in " \t\n|;&(":
+                            tool_match = True
+                    else:
+                        tool_match = False
+                else:
+                    # Simple prefix match (no word boundary)
+                    tool_match = context.startswith(prefix)
             else:
                 tool_match = context == pattern
         else:
@@ -212,6 +229,21 @@ class PermissionGate:
                 self._log(permission, action_desc, "denied_protected_path")
                 print(f"  [PROTECTED PATH] Write blocked: {action_desc}")
                 return False
+
+        # Security Pipeline: hard_deny always blocks (even in BYPASS mode)
+        command = ""
+        if params:
+            command = params.get("command", "")
+        classification = classify_action(
+            tool_name=tool_name,
+            tool_args=params or {},
+            command=command,
+            working_dir=os.getcwd(),
+        )
+        if classification.decision == SafetyDecision.HARD_DENY:
+            self._log(permission, action_desc, "denied_security_pipeline")
+            print(f"  [SECURITY] Blocked: {classification.reason}")
+            return False
 
         # BYPASS mode: approve everything except dangerous rm -rf patterns
         if self.mode == PermissionMode.BYPASS:

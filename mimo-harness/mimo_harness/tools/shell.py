@@ -190,7 +190,7 @@ def _is_readonly_single(command: str) -> bool:
 def _spill_output(output: str) -> str:
     """S5+S20: Save oversized output to disk, return a preview with file path."""
     try:
-        outputs_dir = os.path.join(".mimo", "outputs")
+        outputs_dir = os.environ.get("MIMO_SPILL_DIR", os.path.join(".mimo", "outputs"))
         os.makedirs(outputs_dir, exist_ok=True)
         fname = f"{uuid.uuid4().hex}.txt"
         fpath = os.path.join(outputs_dir, fname)

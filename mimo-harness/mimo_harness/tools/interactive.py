@@ -1,10 +1,12 @@
-"""Interactive tools - user interaction during agent execution.
+"""Interactive tools - user interaction and memory topic loading.
 
 Ch3 markers:
 - ask_user_question: read-only, not concurrency-safe (requires user input)
+- read_memory_topic: read-only, concurrency-safe (on-demand topic loading)
 """
 
 import json
+import os
 from .registry import ToolDef
 from ..permissions import Permission
 
@@ -77,6 +79,38 @@ def ask_user_question(params: dict) -> str:
         return json.dumps({"error": "Invalid input. Please enter numbers only."})
 
 
+def read_memory_topic(params: dict) -> str:
+    """Load a memory topic file on-demand (Ch6: tiered memory loading).
+
+    Topic files like 'debugging.md' are NOT loaded at session start.
+    Only the MEMORY.md index is loaded. This tool lets the agent read
+    specific topic files when it needs the details.
+
+    Args:
+        params: dict with keys:
+            - topic_name (str): Name of the topic file (e.g. 'debugging', 'build-and-test')
+
+    Returns:
+        Topic file content, or error message if not found.
+    """
+    topic_name = params.get("topic_name", "")
+    if not topic_name:
+        return json.dumps({"error": "No topic_name provided"})
+
+    # Find project dir (look for .mimo/memory/ directory)
+    project_dir = os.getcwd()
+    from ..memory import MemoryStore
+    store = MemoryStore(project_dir)
+    content = store.load_topic(topic_name)
+    if not content:
+        available = store.list_topic_names()
+        return json.dumps({
+            "error": f"Topic '{topic_name}' not found",
+            "available_topics": available,
+        })
+    return content
+
+
 def get_tools() -> list[ToolDef]:
     return [
         ToolDef(
@@ -112,5 +146,27 @@ def get_tools() -> list[ToolDef]:
             permission=Permission.READ,
             is_read_only=True,
             is_concurrency_safe=False,
+        ),
+        ToolDef(
+            name="read_memory_topic",
+            description=(
+                "Load a memory topic file on-demand. Topic files (e.g. debugging.md, "
+                "build-and-test.md) are NOT loaded at session start — only the MEMORY.md "
+                "index is. Use this tool when you need details from a specific topic."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "topic_name": {
+                        "type": "string",
+                        "description": "Name of the topic file (e.g. 'debugging', 'build-and-test')",
+                    },
+                },
+                "required": ["topic_name"],
+            },
+            handler=read_memory_topic,
+            permission=Permission.READ,
+            is_read_only=True,
+            is_concurrency_safe=True,
         ),
     ]

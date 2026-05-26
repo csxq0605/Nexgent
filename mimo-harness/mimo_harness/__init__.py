@@ -17,6 +17,12 @@ from .context import Session, compact_context, load_memory
 from .hooks import HookRunner, HookConfig, HookEvent, HookResult, HookDecision
 from .memory import MemoryStore, MemoryType, MemoryEntry
 from .logging_utils import TraceLogger
+from .security_pipeline import (
+    SafetyDecision, ClassificationResult, FilteredOutput,
+    sanitize_output, detect_sensitive_disclosure, detect_prompt_injection,
+    classify_action, classify_action_regex, classify_action_model,
+    filter_tool_output, SAFETY_SYSTEM_PROMPT_ADDITION,
+)
 
 __all__ = [
     "MiMoHarness",
@@ -39,4 +45,12 @@ __all__ = [
     "MemoryType",
     "MemoryEntry",
     "TraceLogger",
+    "SafetyDecision",
+    "ClassificationResult",
+    "FilteredOutput",
+    "sanitize_output",
+    "detect_sensitive_disclosure",
+    "detect_prompt_injection",
+    "classify_action",
+    "filter_tool_output",
 ]

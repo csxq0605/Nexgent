@@ -42,7 +42,7 @@ class ToolRegistry:
     MAX_RESULT_TOKENS = 25000        # ~100K chars
     SPILL_THRESHOLD_CHARS = SPILL_THRESHOLD_TOKENS * 4   # 40000
     MAX_RESULT_CHARS = MAX_RESULT_TOKENS * 4              # 100000
-    SPILL_DIR = ".mimo/outputs"
+    SPILL_DIR = os.environ.get("MIMO_SPILL_DIR", ".mimo/outputs")
 
     def __init__(self):
         self._tools: dict[str, ToolDef] = {}

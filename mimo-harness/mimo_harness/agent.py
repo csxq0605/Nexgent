@@ -22,10 +22,12 @@ from openai import OpenAI
 
 from .config import MIMO_BASE_URL, MIMO_API_KEY, MIMO_MODEL, require_api_key
 from .logging_utils import TraceLogger
-from .permissions import Permission, PermissionGate
-from .context import Session, compact_context, load_memory, estimate_tokens
+from .permissions import Permission, PermissionGate, PermissionMode
+from .context import Session, compact_context, load_memory, load_memory_for_compaction, estimate_tokens, load_topic_on_demand
 from .tools.registry import ToolRegistry, ToolDef
-from .tools import file_ops, shell, code_exec, web_tools, doc_tools, math_tools, interactive, monitor, notebook_tools, task_tools
+from .tools import file_ops, shell, code_exec, web_tools, doc_tools, math_tools, interactive, monitor, notebook_tools, task_tools, plan_tools, lsp_tools, scheduler_tools
+from .security_pipeline import classify_action, filter_tool_output, SafetyDecision, SAFETY_SYSTEM_PROMPT_ADDITION
+from .hooks import HookRunner, HookEvent, HookResult
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +108,39 @@ class CircuitBreaker:
         self.is_open = False
 
 
+class GracefulAbort:
+    """Cooperative abort signal for graceful interruption.
+
+    Allows stopping the current agent loop iteration without
+    exiting the entire program. The abort flag is checked at
+    each step boundary.
+
+    Usage:
+        abort = GracefulAbort()
+        # In signal handler or UI thread:
+        abort.request()
+        # In agent loop:
+        if abort.is_requested():
+            return "[ABORTED] ..."
+        abort.reset()  # for next task
+    """
+
+    def __init__(self):
+        self._abort_requested = False
+
+    def request(self):
+        """Request an abort at the next step boundary."""
+        self._abort_requested = True
+
+    def is_requested(self) -> bool:
+        """Check if abort has been requested."""
+        return self._abort_requested
+
+    def reset(self):
+        """Clear the abort flag for a new task."""
+        self._abort_requested = False
+
+
 # ---------------------------------------------------------------------------
 # Token budget tracker (Ch7: buffer zones)
 # ---------------------------------------------------------------------------
@@ -118,13 +153,9 @@ class TokenBudget:
         self.estimated_tokens = 0
 
     def estimate_message_tokens(self, messages: list) -> int:
-        """Rough estimate: ~4 chars per token for mixed content."""
-        total_chars = sum(
-            len(json.dumps(m, ensure_ascii=False)) if isinstance(m, dict)
-            else len(str(m))
-            for m in messages
-        )
-        return total_chars // 4
+        """Estimate token count using weighted heuristic from context module."""
+        from .context import estimate_tokens
+        return estimate_tokens(messages)
 
     def update(self, messages: list):
         self.estimated_tokens = self.estimate_message_tokens(messages)
@@ -181,15 +212,15 @@ You help users with coding, file operations, web research, document creation, an
 - When writing code, verify it works by running it
 - If a tool call fails, analyze the error and try a different approach
 
+{safety_rules}
+
 ## Environment
 - Working directory: {cwd}
 - Platform: {platform}
 - Python: {python_version}
 
 ## Available Tools
-{tools_desc}
-
-{memory}"""
+{tools_desc}"""
 
     # Effort level → LLM parameter mapping
     EFFORT_PARAMS = {
@@ -228,6 +259,7 @@ You help users with coding, file operations, web research, document creation, an
         self.registry = ToolRegistry()
         self.circuit_breaker = CircuitBreaker()
         self.token_budget = TokenBudget()
+        self.graceful_abort = GracefulAbort()
         self.stream = stream
         self.bare = bare
         self.effort = effort
@@ -250,11 +282,19 @@ You help users with coding, file operations, web research, document creation, an
             + monitor.get_tools()
             + notebook_tools.get_tools()
             + task_tools.get_tools()
+            + plan_tools.get_tools()
+            + lsp_tools.get_tools()
+            + scheduler_tools.get_tools()
         )
         self.registry.register_many(all_tools)
 
     def _build_system_prompt(self) -> str:
-        """Build and cache system prompt (Ch6: prompt stability for cache hits)."""
+        """Build and cache system prompt (Ch6: prompt stability for cache hits).
+
+        Memory is NOT included in the system prompt. It's injected as a
+        separate user message for better prompt caching (stable system
+        prompt prefix, variable memory in conversation).
+        """
         if self._system_prompt_cache is not None:
             return self._system_prompt_cache
 
@@ -262,24 +302,13 @@ You help users with coding, file operations, web research, document creation, an
             f"- **{t.name}**: {t.description}" for t in self.registry.list_all()
         )
 
-        if self.bare:
-            # Bare mode: minimal prompt, skip memory loading
-            self._system_prompt_cache = self.SYSTEM_PROMPT_TEMPLATE.format(
-                cwd=os.getcwd(),
-                platform=f"{platform.system()} {platform.release()}",
-                python_version=platform.python_version(),
-                tools_desc=tools_desc,
-                memory="",
-            )
-        else:
-            memory = load_memory(".")
-            self._system_prompt_cache = self.SYSTEM_PROMPT_TEMPLATE.format(
-                cwd=os.getcwd(),
-                platform=f"{platform.system()} {platform.release()}",
-                python_version=platform.python_version(),
-                tools_desc=tools_desc,
-                memory=f"\n## Project Memory\n{memory}" if memory else "",
-            )
+        self._system_prompt_cache = self.SYSTEM_PROMPT_TEMPLATE.format(
+            cwd=os.getcwd(),
+            platform=f"{platform.system()} {platform.release()}",
+            python_version=platform.python_version(),
+            tools_desc=tools_desc,
+            safety_rules=SAFETY_SYSTEM_PROMPT_ADDITION,
+        )
 
         # S15: Append extra system prompt text if configured
         append_prompt = getattr(self, "_append_system_prompt", "")
@@ -296,11 +325,53 @@ You help users with coding, file operations, web research, document creation, an
     def _handle_tool_call(
         self, func_name: str, func_args: dict, tc_id: str, session: Session
     ) -> str:
-        """Execute a single tool call with permission checks.
+        """Execute a single tool call with permission checks and security pipeline.
 
         Returns the tool result string.
         """
         self.logger.trace("tool_call", {"name": func_name, "args": func_args})
+
+        # --- PreToolUse Hooks (Ch8: intercept before execution) ---
+        hook_runner = getattr(self, '_hook_runner', None)
+        if hook_runner:
+            pre_result = hook_runner.run_hooks(
+                HookEvent.PRE_TOOL_USE,
+                tool_name=func_name,
+                tool_input=func_args,
+            )
+            if pre_result.is_blocking:
+                self.logger.trace("hook_blocked", {
+                    "tool": func_name, "reason": pre_result.reason,
+                })
+                return json.dumps({
+                    "error": f"[HOOK BLOCKED] {pre_result.reason}",
+                    "decision": "blocked_by_hook",
+                })
+            # Apply updated input if hook modified it
+            if pre_result.updated_input:
+                func_args = pre_result.updated_input
+
+        # --- Security Pipeline: Action Classification (Transcript Classifier) ---
+        command = func_args.get("command", "")
+        # Use model-based classifier when available (Claude Code's auto mode approach)
+        llm_client = getattr(self, "_llm_client", None)
+        classification = classify_action(
+            tool_name=func_name,
+            tool_args=func_args,
+            command=command,
+            working_dir=os.getcwd(),
+            client=llm_client if self.perms.auto_approve else None,
+            model=self.model,
+            conversation_context=session.get_messages() if session else None,
+        )
+        if classification.decision == SafetyDecision.HARD_DENY:
+            self.logger.trace("security_hard_deny", {
+                "tool": func_name, "reason": classification.reason,
+            })
+            return json.dumps({
+                "error": f"[SECURITY] Blocked: {classification.reason}",
+                "decision": "hard_deny",
+            })
 
         # S12: Snapshot files before edit/write operations
         checkpoint_mgr = getattr(self, "_checkpoint_manager", None)
@@ -314,22 +385,63 @@ You help users with coding, file operations, web research, document creation, an
 
         # Dynamic permission for shell commands (Ch4: context-aware checks)
         if func_name == "run_command":
-            cmd = func_args.get("command", "")
-            perm = self._check_shell_permission(cmd)
+            perm = self._check_shell_permission(command)
             tool_def = self.registry.get(func_name)
             if tool_def:
                 original_perm = tool_def.permission
                 tool_def.permission = perm
                 try:
                     result = self.registry.execute(func_name, func_args, self.perms)
+                except KeyboardInterrupt:
+                    self.graceful_abort.request()
+                    return json.dumps({"error": "[INTERRUPTED] Tool execution cancelled by user"})
                 finally:
                     tool_def.permission = original_perm
             else:
                 result = json.dumps({"error": "Tool not found"})
         else:
-            result = self.registry.execute(func_name, func_args, self.perms)
+            try:
+                result = self.registry.execute(func_name, func_args, self.perms)
+            except KeyboardInterrupt:
+                self.graceful_abort.request()
+                return json.dumps({"error": "[INTERRUPTED] Tool execution cancelled by user"})
+
+        # --- Security Pipeline: Output Filtering (Input Probe) ---
+        filtered = filter_tool_output(result)
+        if filtered.was_sanitized:
+            self.logger.trace("security_sanitized", {"tool": func_name})
+        if filtered.injection_detected:
+            self.logger.trace("security_injection_detected", {"tool": func_name})
+        result = filtered.text
 
         self.logger.tool_call(func_name, func_args, result)
+
+        # --- PostToolUse Hooks (Ch8: intercept after execution) ---
+        if hook_runner:
+            post_result = hook_runner.run_hooks(
+                HookEvent.POST_TOOL_USE,
+                tool_name=func_name,
+                tool_input=func_args,
+                tool_result=result[:500],
+            )
+            # PostToolUse hooks can inject additional context but cannot block
+            if post_result.additional_context:
+                result = result + f"\n[Hook context: {post_result.additional_context}]"
+
+        # Plan mode workflow: auto-switch permission mode based on tool calls
+        if func_name == "enter_plan_mode":
+            self.perms.mode = PermissionMode.PLAN
+            self.logger.info("[PLAN MODE] Switched to read-only plan mode")
+        elif func_name == "exit_plan_mode":
+            try:
+                parsed = json.loads(result)
+                if parsed.get("decision") == "approved":
+                    self.perms.mode = PermissionMode.DEFAULT
+                    self.logger.info("[PLAN MODE] Approved — switched to default mode")
+                # If rejected/modify, stay in plan mode
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
         return result
 
     def _stream_llm_call(self, client, messages: list, tools_schema: list):
@@ -463,6 +575,17 @@ You help users with coding, file operations, web research, document creation, an
         client = self.deps.llm_client_factory(
             api_key=api_key, base_url=MIMO_BASE_URL
         )
+        self._llm_client = client  # Store for security pipeline model classifier
+
+        # Inject memory as a user message (Claude Code pattern: memory is
+        # context, not enforcement. Injected as user message after system
+        # prompt for better prompt caching — stable system prefix, variable
+        # memory in conversation.)
+        if not self.bare:
+            memory_content = load_memory(os.getcwd())
+            if memory_content:
+                session.add_message("user", f"## Project Memory\n{memory_content}")
+
         session.add_message("user", task)
 
         self.logger.info(f"\n{'='*60}")
@@ -481,6 +604,12 @@ You help users with coding, file operations, web research, document creation, an
         self._thrash_warned = False
 
         for step in range(self.max_steps):
+            # Termination check: graceful abort (Esc / Ctrl+C during execution)
+            if self.graceful_abort.is_requested():
+                self.logger.info("[ABORT] Graceful abort requested by user")
+                self.graceful_abort.reset()
+                return "[ABORTED] Stopped by user request."
+
             # Termination check: time limit
             if time.time() - start_time > self.max_duration:
                 self.logger.info(f"[LIMIT] Time limit exceeded ({self.max_duration}s)")
@@ -518,13 +647,14 @@ You help users with coding, file operations, web research, document creation, an
                 if len(compacted) < len(session.get_messages()):
                     pre_count = len(session.get_messages())
                     session.messages = compacted
+                    session.compaction_count += 1
+                    # Claude Code pattern: re-read memory/instructions from
+                    # disk after compaction (not from stale extracted messages)
+                    memory_content = load_memory_for_compaction()
+                    if memory_content:
+                        session.add_message("user", f"## Project Memory\n{memory_content}")
                     # Re-add the current user task — it was compressed away
                     session.add_message("user", task)
-                    session.compaction_count += 1
-                    # Re-load project instructions that were compressed away
-                    memory_content = load_memory(os.getcwd())
-                    if memory_content:
-                        session.messages.insert(0, {"role": "system", "content": f"## Project Memory\n{memory_content}"})
                     self.logger.info(
                         f"[COMPACT] {pre_count} msgs → "
                         f"{len(session.get_messages())} msgs, "
@@ -614,6 +744,10 @@ You help users with coding, file operations, web research, document creation, an
                 session.add_message("assistant", final)
                 if not self.stream:
                     self.logger.info(f"\nAgent: {final}")
+                # Ch8: Fire Stop hook
+                hook_runner = getattr(self, '_hook_runner', None)
+                if hook_runner:
+                    hook_runner.run_hooks(HookEvent.STOP, tool_result=final[:500])
                 self.logger.session_summary({
                     "steps": step + 1,
                     "duration": round(time.time() - start_time, 2),

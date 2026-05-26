@@ -22,7 +22,7 @@ import time
 from .agent import MiMoHarness
 from .config import MIMO_API_KEY, MIMO_MODEL
 from .permissions import PermissionRule
-from .context import Session, CheckpointManager, estimate_tokens, compact_context, CONTEXT_WINDOW_TOKENS
+from .context import Session, CheckpointManager, estimate_tokens, compact_context, cleanup_old_sessions, cleanup_old_spill_files, CONTEXT_WINDOW_TOKENS
 from .memory import MemoryStore
 
 
@@ -55,6 +55,7 @@ Commands:
   /dry-run       Toggle dry-run mode
   /auto          Toggle auto-approve mode
   /plan          Toggle plan mode (read-only)
+  /abort         Stop current task (graceful interrupt)
   /memory        List stored memories
   /remember      Save current context as memory
   /hooks         List registered hooks
@@ -64,9 +65,11 @@ Commands:
   /context       Show per-message token breakdown
   /init          Scan project and generate AGENTS.md
   /rewind        Restore files from the last checkpoint
+  /fork          Fork session into a new session (copy history)
 
 Or just type a task to interact with the agent.
 Prefix with ! to run a shell command directly (e.g. !ls -la).
+Press Ctrl+C during execution to stop the current task (doesn't exit).
 """)
 
 
@@ -117,6 +120,42 @@ def _load_config(config_path: str) -> dict:
     except Exception as e:
         print(f"Warning: Failed to load config from {config_path}: {e}")
         return {}
+
+
+class ConfigWatcher:
+    """Watch config file for changes and reload on modification.
+
+    Claude Code watches settings files and reloads them on change.
+    This implements the same pattern for .mimo/config.json.
+    """
+
+    def __init__(self, config_path: str):
+        self.config_path = config_path
+        self._last_mtime = 0.0
+        self._last_config = {}
+        if os.path.exists(config_path):
+            self._last_mtime = os.path.getmtime(config_path)
+
+    def check_for_changes(self) -> tuple[bool, dict]:
+        """Check if config file has changed since last check.
+
+        Returns:
+            (changed, new_config) tuple
+        """
+        if not os.path.exists(self.config_path):
+            return False, {}
+
+        current_mtime = os.path.getmtime(self.config_path)
+        if current_mtime <= self._last_mtime:
+            return False, self._last_config
+
+        try:
+            new_config = _load_config(self.config_path)
+            self._last_mtime = current_mtime
+            self._last_config = new_config
+            return True, new_config
+        except Exception:
+            return False, self._last_config
 
 
 def _list_session_files(session_dir: str) -> list:
@@ -200,6 +239,7 @@ def main():
     parser.add_argument("--continue", dest="continue_session", action="store_true", help="Resume the most recent session from session dir")
     parser.add_argument("--resume", action="store_true", help="List sessions and let user pick one to resume")
     parser.add_argument("--name", default=None, help="Name for the current session")
+    parser.add_argument("--cleanup-days", type=int, default=30, help="Delete sessions older than N days (default: 30)")
     args = parser.parse_args()
 
     if args.output_format == "text":
@@ -282,6 +322,17 @@ def main():
     session_dir = args.session_dir or os.path.join(os.path.expanduser("~"), ".mimo", "sessions")
     os.makedirs(session_dir, exist_ok=True)
 
+    # Claude Code pattern: auto-cleanup old sessions (default 30 days)
+    cleanup_days = getattr(args, "cleanup_days", 30)
+    cleaned = cleanup_old_sessions(session_dir, max_age_days=cleanup_days)
+    if cleaned > 0:
+        print(f"Cleaned up {cleaned} session(s) older than {cleanup_days} days")
+
+    # Cleanup old tool output spill files (default 7 days)
+    spill_cleaned = cleanup_old_spill_files(max_age_days=7)
+    if spill_cleaned > 0:
+        print(f"Cleaned up {spill_cleaned} old output file(s)")
+
     # A3+C2: Session resume logic
     session = None
     if args.continue_session:
@@ -305,6 +356,20 @@ def main():
     checkpoint_manager = CheckpointManager(session.session_id)
     harness._checkpoint_manager = checkpoint_manager
 
+    # Config hot-reload watcher
+    config_path = args.config or ".mimo/config.json"
+    config_watcher = ConfigWatcher(config_path)
+
+    # Initialize scheduler for session-scoped cron jobs
+    from .tools.scheduler_tools import Scheduler, set_scheduler
+    _scheduled_prompts = []
+    def _on_scheduled_prompt(prompt):
+        _scheduled_prompts.append(prompt)
+        print(f"\n[Scheduled] {prompt[:60]}...")
+    scheduler = Scheduler(callback=_on_scheduled_prompt)
+    set_scheduler(scheduler)
+    scheduler.start_background_checker(interval=30.0)
+
     while True:
         # Show token count in prompt
         tokens = estimate_tokens(session.messages)
@@ -313,11 +378,33 @@ def main():
         try:
             user_input = input(f"You [{token_str}/{max_str}]: ").strip()
         except (EOFError, KeyboardInterrupt):
+            scheduler.stop()
             print("\nBye!")
             break
 
         if not user_input:
-            continue
+            # Check for scheduled prompts even when user provides no input
+            if _scheduled_prompts:
+                scheduled = _scheduled_prompts.pop(0)
+                print(f"[Executing scheduled prompt]")
+                user_input = scheduled
+            else:
+                continue
+
+        # Check for config hot-reload
+        config_changed, new_config = config_watcher.check_for_changes()
+        if config_changed:
+            # Reload hooks from new config
+            if "hooks" in new_config:
+                from .hooks import HookRunner
+                harness._hook_runner = HookRunner()
+                harness._hook_runner.load_from_config(new_config)
+            # Reload permission rules
+            rules_path = new_config.get("rules_file")
+            if rules_path:
+                harness.perms.rules.clear()
+                harness.perms.load_rules_from_file(rules_path)
+            print("[Config reloaded]")
 
         # Handle commands
         if user_input.startswith("/"):
@@ -353,12 +440,18 @@ def main():
                 print(f"[error: {e}]")
             continue
 
-        # Run agent
-        if harness.stream:
-            # When streaming, tokens are printed directly by the agent
-            harness.run(user_input, session)
-        else:
-            harness.run(user_input, session)
+        # Run agent with graceful interrupt support
+        try:
+            if harness.stream:
+                # When streaming, tokens are printed directly by the agent
+                harness.run(user_input, session)
+            else:
+                harness.run(user_input, session)
+        except KeyboardInterrupt:
+            # Graceful abort: stop current task but don't exit REPL
+            harness.graceful_abort.request()
+            print("\n[Interrupted — stopping current task...]")
+            # The agent loop will check the abort flag at the next step boundary
 
 
 def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None):
@@ -368,6 +461,10 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
     The session may be replaced by /load.
     """
     if cmd[0] in ("/quit", "/exit", "/q"):
+        from .tools.scheduler_tools import get_scheduler
+        sched = get_scheduler()
+        if sched:
+            sched.stop()
         print("Bye!")
         return "quit", session
     elif cmd[0] == "/help":
@@ -403,6 +500,9 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
         else:
             harness.perms.mode = PermissionMode.PLAN
             print("Plan mode: ON (read-only)")
+    elif cmd[0] == "/abort":
+        harness.graceful_abort.request()
+        print("Abort requested — current task will stop at next step boundary.")
     elif cmd[0] == "/memory":
         memories = memory_store.list_memories()
         if memories:
@@ -563,6 +663,13 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
         else:
             print("No checkpoint manager available.")
         print()
+    elif cmd[0] == "/fork":
+        import secrets
+        new_id = secrets.token_hex(4)
+        old_id = session.session_id
+        session.session_id = new_id
+        session.name = f"fork-{old_id[:8]}"
+        print(f"Session forked: {old_id} → {new_id}")
     elif cmd[0] == "/save" and len(cmd) > 1:
         try:
             session.save(cmd[1])

@@ -467,11 +467,11 @@ class TestClaudeMdSurvivesCompact:
 
         # Mock compact_context to return a summary (triggers compression path)
         summary = [{"role": "assistant", "content": "[Conversation Summary]"}]
-        # Mock load_memory to return CLAUDE.md content
+        # Mock load_memory_for_compaction to return CLAUDE.md content
         memory_text = "# CLAUDE.md\nThis is the project memory"
 
         with patch("mimo_harness.agent.compact_context", return_value=(summary, 1, 0, False)), \
-             patch("mimo_harness.agent.load_memory", return_value=memory_text):
+             patch("mimo_harness.agent.load_memory_for_compaction", return_value=memory_text):
 
             mock_response = MagicMock()
             mock_response.choices = [MagicMock()]
@@ -962,3 +962,158 @@ class TestFallbackModel:
 
         assert "Backup response" in result
         assert "backup-model" in models_called
+
+
+class TestGracefulAbort:
+    def test_initial_state(self):
+        from mimo_harness.agent import GracefulAbort
+        abort = GracefulAbort()
+        assert abort.is_requested() is False
+
+    def test_request(self):
+        from mimo_harness.agent import GracefulAbort
+        abort = GracefulAbort()
+        abort.request()
+        assert abort.is_requested() is True
+
+    def test_reset(self):
+        from mimo_harness.agent import GracefulAbort
+        abort = GracefulAbort()
+        abort.request()
+        abort.reset()
+        assert abort.is_requested() is False
+
+    def test_double_request(self):
+        from mimo_harness.agent import GracefulAbort
+        abort = GracefulAbort()
+        abort.request()
+        abort.request()
+        assert abort.is_requested() is True
+
+
+class TestTerminationPaths:
+    """Test the 4 previously untested termination paths in MiMoHarness.run()."""
+
+    def test_max_duration_termination(self, monkeypatch):
+        """Agent stops when time limit is exceeded."""
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+
+        # max_duration=0 means the time check triggers immediately
+        harness = MiMoHarness(max_steps=100, max_duration=0.0)
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content="hi", tool_calls=None))]
+        )
+
+        session = Session(session_id="test")
+        with patch.object(harness.deps, 'llm_client_factory', return_value=mock_client):
+            result = harness.run("test task", session)
+
+        assert "LIMIT" in result or "Time limit" in result
+
+    def test_user_abort_termination(self, monkeypatch):
+        """Agent stops when graceful abort is requested."""
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+
+        harness = MiMoHarness(max_steps=10)
+        # Pre-request abort before run
+        harness.graceful_abort.request()
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content="hi", tool_calls=None))]
+        )
+
+        session = Session(session_id="test")
+        with patch.object(harness.deps, 'llm_client_factory', return_value=mock_client):
+            result = harness.run("test task", session)
+
+        assert "ABORTED" in result or "Stopped by user" in result
+
+    def test_model_error_termination(self, monkeypatch):
+        """Agent stops when LLM call raises non-retryable error repeatedly."""
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+
+        harness = MiMoHarness(max_steps=10)
+
+        call_count = 0
+        def failing_create(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("Non-retryable model error")
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = failing_create
+
+        session = Session(session_id="test")
+        with patch.object(harness.deps, 'llm_client_factory', return_value=mock_client):
+            result = harness.run("test task", session)
+
+        # After enough failures, circuit breaker should open
+        assert "ERROR" in result or "Circuit breaker" in result or "failures" in result
+        assert call_count >= 1
+
+    def test_token_limit_termination(self, monkeypatch):
+        """Agent stops when token budget is exceeded."""
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+
+        harness = MiMoHarness(max_steps=10)
+        # Force token budget to be blocked
+        harness.token_budget.effective_max = 1
+        harness.token_budget.estimated_tokens = 999999
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = MagicMock(
+            choices=[MagicMock(message=MagicMock(content="hi", tool_calls=None))]
+        )
+
+        session = Session(session_id="test")
+        with patch.object(harness.deps, 'llm_client_factory', return_value=mock_client):
+            result = harness.run("test task", session)
+
+        assert "Token budget" in result or "TOKEN_LIMIT" in result or "ERROR" in result
+
+    def test_retry_exhaustion(self, monkeypatch):
+        """retry_with_backoff raises after max retries exhausted."""
+        from mimo_harness.agent import retry_with_backoff
+
+        call_count = 0
+        def always_fail():
+            nonlocal call_count
+            call_count += 1
+            err = Exception("Rate limited")
+            err.status_code = 429
+            raise err
+
+        import pytest
+        with pytest.raises(Exception, match="Rate limited"):
+            retry_with_backoff(always_fail, max_retries=2, base_delay=0.001)
+
+        assert call_count >= 2  # At least initial + retries
+
+    def test_retry_503(self, monkeypatch):
+        """retry_with_backoff retries on 503 errors."""
+        from mimo_harness.agent import retry_with_backoff
+
+        call_count = 0
+        def fail_then_succeed():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                err = Exception("Service unavailable")
+                err.status_code = 503
+                raise err
+            return "success"
+
+        result = retry_with_backoff(fail_then_succeed, max_retries=3, base_delay=0.001)
+        assert result == "success"
+        assert call_count == 2

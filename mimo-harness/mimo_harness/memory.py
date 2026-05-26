@@ -178,7 +178,11 @@ metadata:
         return filename.replace(".md", ""), ""
 
     def load_index(self) -> str:
-        """Load MEMORY.md index content for context injection."""
+        """Load MEMORY.md index content for context injection.
+
+        Ch6: Only the index is loaded at session start (first 200 lines / 25KB).
+        Topic files are loaded on-demand via load_topic().
+        """
         if os.path.exists(self.index_path):
             try:
                 with open(self.index_path, "r", encoding="utf-8") as f:
@@ -188,6 +192,44 @@ metadata:
             except Exception:
                 pass
         return ""
+
+    def load_topic(self, topic_name: str) -> str:
+        """Load a specific topic file on-demand (Ch6: tiered loading pattern).
+
+        Topic files like 'debugging.md' are NOT loaded at session start.
+        Claude reads them via tools when needed. This method supports that
+        by providing programmatic access to a single topic's content.
+
+        Args:
+            topic_name: Name of the topic file (with or without .md extension)
+
+        Returns:
+            Topic file content, or empty string if not found.
+        """
+        if not topic_name.endswith(".md"):
+            topic_name = f"{topic_name}.md"
+        filepath = os.path.join(self.memory_dir, topic_name)
+        if not os.path.exists(filepath):
+            return ""
+        # Path security
+        error = self._validate_path(filepath)
+        if error:
+            return ""
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except Exception:
+            return ""
+
+    def list_topic_names(self) -> list[str]:
+        """List available topic file names (for tool descriptions)."""
+        if not os.path.exists(self.memory_dir):
+            return []
+        names = []
+        for filename in sorted(os.listdir(self.memory_dir)):
+            if filename.endswith(".md") and filename != "MEMORY.md":
+                names.append(filename)
+        return names
 
     def list_memories(self) -> list[MemoryEntry]:
         """List all stored memories."""

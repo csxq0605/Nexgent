@@ -3,6 +3,8 @@
 Implements Ch8 patterns:
 - Lifecycle events: PreToolUse, PostToolUse, Stop, SessionStart/End
 - Command hooks with matcher patterns
+- HTTP hooks (POST to URL)
+- Prompt hooks (LLM-based decision)
 - Hook response protocol (decision/updatedInput/additionalContext)
 - Priority ordering and timeout management
 """
@@ -43,6 +45,13 @@ class HookDecision(Enum):
     BLOCK = "block"
 
 
+class HookType(Enum):
+    """Hook handler types (Ch8: command, http, prompt)."""
+    COMMAND = "command"
+    HTTP = "http"
+    PROMPT = "prompt"
+
+
 @dataclass
 class HookResult:
     """Structured hook response (Ch8: decision/updatedInput/additionalContext)."""
@@ -61,7 +70,11 @@ class HookConfig:
     """Configuration for a single hook."""
     event: HookEvent
     matcher: str = "*"        # Tool name pattern to match
-    command: str = ""         # Shell command to execute
+    hook_type: HookType = HookType.COMMAND
+    command: str = ""         # Shell command to execute (for command type)
+    url: str = ""             # HTTP endpoint URL (for http type)
+    prompt: str = ""          # LLM prompt (for prompt type)
+    headers: dict = field(default_factory=dict)  # HTTP headers (for http type)
     timeout: float = 10.0     # Timeout in seconds (Ch8: < 1s recommended for sync)
     async_mode: bool = False  # Ch8: async hooks don't block
 
@@ -128,7 +141,7 @@ class HookRunner:
             except Exception:
                 pass  # Ch8: hooks are advisors, not commanders
 
-        # Run command hooks
+        # Run registered hooks (command, http, prompt)
         for config in self._hooks.get(event, []):
             if not config.matches(tool_name):
                 continue
@@ -138,7 +151,14 @@ class HookRunner:
                 self._run_async(config, tool_name, tool_input, tool_result)
                 continue
 
-            result = self._run_command_hook(config, tool_name, tool_input, tool_result)
+            # Dispatch based on hook type
+            if config.hook_type == HookType.HTTP:
+                result = self._run_http_hook(config, tool_name, tool_input, tool_result)
+            elif config.hook_type == HookType.PROMPT:
+                result = self._run_prompt_hook(config, tool_name, tool_input, tool_result)
+            else:
+                result = self._run_command_hook(config, tool_name, tool_input, tool_result)
+
             if result.is_blocking:
                 return result
 
@@ -254,6 +274,117 @@ class HookRunner:
         except Exception:
             pass  # Async hooks are fire-and-forget
 
+    def _run_http_hook(
+        self,
+        config: HookConfig,
+        tool_name: str,
+        tool_input: dict = None,
+        tool_result: str = "",
+    ) -> HookResult:
+        """Execute an HTTP hook by POSTing to a URL."""
+        import urllib.request
+        import urllib.error
+
+        payload = json.dumps({
+            "event": config.event.value,
+            "tool_name": tool_name,
+            "tool_input": tool_input or {},
+            "tool_result": tool_result[:500],
+        }, ensure_ascii=False)
+
+        headers = {"Content-Type": "application/json"}
+        headers.update(config.headers)
+
+        req = urllib.request.Request(
+            config.url,
+            data=payload.encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=config.timeout) as resp:
+                body = resp.read().decode("utf-8").strip()
+                if body:
+                    try:
+                        data = json.loads(body)
+                        decision = data.get("decision", "approve")
+                        if decision == "block":
+                            return HookResult(
+                                decision=HookDecision.BLOCK,
+                                reason=data.get("reason", "Blocked by HTTP hook"),
+                            )
+                        return HookResult(
+                            decision=HookDecision.APPROVE,
+                            additional_context=data.get("additionalContext", ""),
+                            updated_input=data.get("updatedInput"),
+                        )
+                    except json.JSONDecodeError:
+                        pass
+        except (urllib.error.URLError, OSError, Exception):
+            pass  # HTTP hook failures are non-blocking
+
+        return HookResult()
+
+    def _run_prompt_hook(
+        self,
+        config: HookConfig,
+        tool_name: str,
+        tool_input: dict = None,
+        tool_result: str = "",
+    ) -> HookResult:
+        """Execute a prompt hook by sending a query to an LLM.
+
+        The LLM decides whether to approve or block the action.
+        Used for auto-mode safety checks (Claude Code's classifier pattern).
+        """
+        # Build the prompt with context
+        prompt_text = config.prompt.format(
+            tool_name=tool_name,
+            tool_input=json.dumps(tool_input or {}, ensure_ascii=False)[:500],
+            tool_result=tool_result[:500],
+            event=config.event.value,
+        )
+
+        # Try to use the LLM client if available
+        llm_client = getattr(self, '_llm_client', None)
+        if not llm_client:
+            return HookResult()  # No LLM available, default to approve
+
+        try:
+            response = llm_client.chat.completions.create(
+                model=getattr(self, '_llm_model', "mimo-v2.5-pro"),
+                messages=[
+                    {"role": "system", "content": (
+                        "You are a safety classifier. Respond with JSON only: "
+                        '{"decision": "approve"} or {"decision": "block", "reason": "..."}'
+                    )},
+                    {"role": "user", "content": prompt_text},
+                ],
+                max_completion_tokens=200,
+                temperature=0.1,
+            )
+            content = response.choices[0].message.content or ""
+            # Parse response
+            content = content.strip()
+            if content.startswith("```"):
+                # Strip markdown code blocks
+                lines = content.split("\n")
+                content = "\n".join(lines[1:-1] if len(lines) > 2 else lines)
+            data = json.loads(content)
+            if data.get("decision") == "block":
+                return HookResult(
+                    decision=HookDecision.BLOCK,
+                    reason=data.get("reason", "Blocked by prompt hook"),
+                )
+            return HookResult(
+                additional_context=data.get("additionalContext", ""),
+            )
+        except Exception:
+            pass  # LLM hook failures are non-blocking
+
+        return HookResult()
+
     def load_from_config(self, config: dict):
         """Load hooks from a configuration dictionary.
 
@@ -281,10 +412,37 @@ class HookRunner:
             for matcher_config in matchers:
                 matcher = matcher_config.get("matcher", "*")
                 for hook_def in matcher_config.get("hooks", []):
-                    if hook_def.get("type") == "command":
+                    hook_type_str = hook_def.get("type", "command")
+                    hook_type = HookType.COMMAND
+                    try:
+                        hook_type = HookType(hook_type_str)
+                    except ValueError:
+                        pass
+
+                    if hook_type == HookType.HTTP:
                         self.register(HookConfig(
                             event=event,
                             matcher=matcher,
+                            hook_type=HookType.HTTP,
+                            url=hook_def.get("url", hook_def.get("command", "")),
+                            headers=hook_def.get("headers", {}),
+                            timeout=hook_def.get("timeout", 10.0),
+                            async_mode=hook_def.get("async", False),
+                        ))
+                    elif hook_type == HookType.PROMPT:
+                        self.register(HookConfig(
+                            event=event,
+                            matcher=matcher,
+                            hook_type=HookType.PROMPT,
+                            prompt=hook_def.get("prompt", ""),
+                            timeout=hook_def.get("timeout", 10.0),
+                            async_mode=hook_def.get("async", False),
+                        ))
+                    else:
+                        self.register(HookConfig(
+                            event=event,
+                            matcher=matcher,
+                            hook_type=HookType.COMMAND,
                             command=hook_def.get("command", ""),
                             timeout=hook_def.get("timeout", 10.0),
                             async_mode=hook_def.get("async", False),

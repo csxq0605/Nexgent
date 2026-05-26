@@ -158,3 +158,106 @@ class TestMemoryStore:
     def test_load_empty_index(self, tmp_path):
         store = MemoryStore(str(tmp_path))
         assert store.load_index() == ""
+
+
+class TestMemoryEntry:
+    def test_construction(self):
+        entry = MemoryEntry(
+            name="test", description="desc",
+            memory_type=MemoryType.USER, content="body",
+        )
+        assert entry.name == "test"
+        assert entry.description == "desc"
+        assert entry.memory_type == MemoryType.USER
+        assert entry.content == "body"
+
+    def test_defaults(self):
+        entry = MemoryEntry(
+            name="x", description="d",
+            memory_type=MemoryType.PROJECT, content="c",
+        )
+        assert entry.file_path == ""
+        assert entry.created_at > 0
+
+
+class TestLoadTopic:
+    def test_load_existing_topic(self, tmp_path):
+        store = MemoryStore(str(tmp_path))
+        store.ensure_dir()
+        topic_dir = store.memory_dir
+        # Create a topic file
+        topic_path = os.path.join(topic_dir, "my_topic.md")
+        with open(topic_path, "w", encoding="utf-8") as f:
+            f.write("---\nname: my_topic\n---\nTopic content here")
+
+        result = store.load_topic("my_topic")
+        assert "Topic content here" in result
+
+    def test_load_topic_auto_appends_md(self, tmp_path):
+        store = MemoryStore(str(tmp_path))
+        store.ensure_dir()
+        topic_path = os.path.join(store.memory_dir, "no_ext.md")
+        with open(topic_path, "w", encoding="utf-8") as f:
+            f.write("content")
+
+        result = store.load_topic("no_ext")
+        assert "content" in result
+
+    def test_load_topic_nonexistent(self, tmp_path):
+        store = MemoryStore(str(tmp_path))
+        store.ensure_dir()
+        result = store.load_topic("does_not_exist")
+        assert result == ""
+
+    def test_load_topic_path_traversal_blocked(self, tmp_path):
+        store = MemoryStore(str(tmp_path))
+        store.ensure_dir()
+        result = store.load_topic("../../etc/passwd")
+        assert result == ""
+
+    def test_load_topic_empty_dir(self, tmp_path):
+        store = MemoryStore(str(tmp_path))
+        result = store.load_topic("anything")
+        assert result == ""
+
+
+class TestListTopicNames:
+    def test_list_topics(self, tmp_path):
+        store = MemoryStore(str(tmp_path))
+        store.ensure_dir()
+        # Create topic files
+        for name in ["alpha.md", "beta.md", "gamma.md"]:
+            with open(os.path.join(store.memory_dir, name), "w") as f:
+                f.write(f"---\nname: {name[:-3]}\n---\ncontent")
+
+        names = store.list_topic_names()
+        assert names == ["alpha.md", "beta.md", "gamma.md"]
+
+    def test_excludes_memory_index(self, tmp_path):
+        store = MemoryStore(str(tmp_path))
+        store.ensure_dir()
+        # Create MEMORY.md (index) and a topic
+        with open(os.path.join(store.memory_dir, "MEMORY.md"), "w") as f:
+            f.write("# Index")
+        with open(os.path.join(store.memory_dir, "topic.md"), "w") as f:
+            f.write("content")
+
+        names = store.list_topic_names()
+        assert "MEMORY.md" not in names
+        assert "topic.md" in names
+
+    def test_excludes_non_md_files(self, tmp_path):
+        store = MemoryStore(str(tmp_path))
+        store.ensure_dir()
+        with open(os.path.join(store.memory_dir, "topic.md"), "w") as f:
+            f.write("content")
+        with open(os.path.join(store.memory_dir, "notes.txt"), "w") as f:
+            f.write("content")
+
+        names = store.list_topic_names()
+        assert "topic.md" in names
+        assert "notes.txt" not in names
+
+    def test_empty_dir(self, tmp_path):
+        store = MemoryStore(str(tmp_path))
+        assert store.list_topic_names() == []

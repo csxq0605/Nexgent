@@ -358,4 +358,7 @@ class TestSpillThresholdConstants:
         assert ToolRegistry.MAX_RESULT_CHARS == ToolRegistry.MAX_RESULT_TOKENS * 4
 
     def test_default_spill_dir(self):
-        assert ToolRegistry.SPILL_DIR == ".mimo/outputs"
+        # SPILL_DIR reads from MIMO_SPILL_DIR env var, falls back to .mimo/outputs
+        import os
+        expected = os.environ.get("MIMO_SPILL_DIR", ".mimo/outputs")
+        assert ToolRegistry.SPILL_DIR == expected

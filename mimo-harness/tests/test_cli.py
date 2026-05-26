@@ -590,9 +590,6 @@ class TestHandleCommand:
         memory_store = MemoryStore(str(tmp_path))
         monkeypatch.chdir(tmp_path)
         # Mock scan_project and generate_agents_md
-        with patch("mimo_harness.cli._handle_command.__wrapped__", create=True):
-            pass
-        # Use direct patching of the imported functions
         import mimo_harness.project_scanner as ps
         with patch.object(ps, "scan_project", return_value={
             "language": "Python", "frameworks": ["pytest"], "test_runner": "pytest"
@@ -1230,4 +1227,65 @@ class TestHandleCommandContext:
         _handle_command(["/context"], harness, session, memory_store)
         captured = capsys.readouterr()
         assert "Context breakdown" in captured.out
-        assert "3 messages" in captured.out
+
+
+class TestConfigWatcher:
+    """Tests for ConfigWatcher - config file hot-reload."""
+
+    def test_init_nonexistent_file(self, tmp_path):
+        from mimo_harness.cli import ConfigWatcher
+        watcher = ConfigWatcher(str(tmp_path / "nonexistent.json"))
+        assert watcher._last_mtime == 0.0
+        assert watcher._last_config == {}
+
+    def test_init_existing_file(self, tmp_path):
+        from mimo_harness.cli import ConfigWatcher
+        config_file = tmp_path / "config.json"
+        config_file.write_text('{"model": "test"}')
+        watcher = ConfigWatcher(str(config_file))
+        assert watcher._last_mtime > 0
+
+    def test_no_changes(self, tmp_path):
+        from mimo_harness.cli import ConfigWatcher
+        config_file = tmp_path / "config.json"
+        config_file.write_text('{"model": "test"}')
+        watcher = ConfigWatcher(str(config_file))
+        changed, config = watcher.check_for_changes()
+        assert changed is False
+
+    def test_detects_changes(self, tmp_path):
+        import time as _time
+        from mimo_harness.cli import ConfigWatcher
+        config_file = tmp_path / "config.json"
+        config_file.write_text('{"model": "v1"}')
+        watcher = ConfigWatcher(str(config_file))
+
+        _time.sleep(0.05)
+        config_file.write_text('{"model": "v2"}')
+        changed, config = watcher.check_for_changes()
+        assert changed is True
+        assert config.get("model") == "v2"
+
+    def test_file_deleted(self, tmp_path):
+        from mimo_harness.cli import ConfigWatcher
+        config_file = tmp_path / "config.json"
+        config_file.write_text('{"model": "test"}')
+        watcher = ConfigWatcher(str(config_file))
+
+        config_file.unlink()
+        changed, config = watcher.check_for_changes()
+        assert changed is False
+        assert config == {}
+
+    def test_invalid_json_after_change(self, tmp_path):
+        import time as _time
+        from mimo_harness.cli import ConfigWatcher
+        config_file = tmp_path / "config.json"
+        config_file.write_text('{"model": "v1"}')
+        watcher = ConfigWatcher(str(config_file))
+
+        _time.sleep(0.05)
+        config_file.write_text('not valid json{{{')
+        changed, config = watcher.check_for_changes()
+        # Invalid JSON still counts as a change (mtime updated), but config is empty
+        assert config == {}

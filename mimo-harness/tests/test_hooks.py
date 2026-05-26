@@ -2,8 +2,9 @@
 
 import json
 import pytest
+from unittest.mock import patch, MagicMock
 from mimo_harness.hooks import (
-    HookEvent, HookDecision, HookResult, HookConfig, HookRunner,
+    HookEvent, HookDecision, HookType, HookResult, HookConfig, HookRunner,
 )
 
 
@@ -357,3 +358,202 @@ class TestAsyncHookStdin:
         assert output_file.exists(), "Async hook hung waiting for stdin EOF"
         content = output_file.read_text()
         assert content.startswith("received:")
+
+
+class TestHookType:
+    def test_enum_values(self):
+        assert HookType.COMMAND.value == "command"
+        assert HookType.HTTP.value == "http"
+        assert HookType.PROMPT.value == "prompt"
+
+    def test_enum_members(self):
+        assert len(HookType) == 3
+
+
+class TestHttpHook:
+    def test_approve_response(self):
+        """HTTP hook returning approve decision should approve."""
+        runner = HookRunner()
+        config = HookConfig(
+            event=HookEvent.PRE_TOOL_USE,
+            matcher="*",
+            url="http://localhost:9999/hook",
+        )
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({"decision": "approve"}).encode("utf-8")
+        mock_response.__enter__ = MagicMock(return_value=mock_response)
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_response):
+            result = runner._run_http_hook(config, "test_tool", {"arg": "val"})
+
+        assert result.decision == HookDecision.APPROVE
+
+    def test_block_response(self):
+        """HTTP hook returning block decision should block."""
+        runner = HookRunner()
+        config = HookConfig(
+            event=HookEvent.PRE_TOOL_USE,
+            matcher="*",
+            url="http://localhost:9999/hook",
+        )
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({
+            "decision": "block", "reason": "denied"
+        }).encode("utf-8")
+        mock_response.__enter__ = MagicMock(return_value=mock_response)
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_response):
+            result = runner._run_http_hook(config, "test_tool")
+
+        assert result.decision == HookDecision.BLOCK
+        assert result.reason == "denied"
+
+    def test_network_error_defaults_approve(self):
+        """HTTP hook network failure should default to approve."""
+        runner = HookRunner()
+        config = HookConfig(
+            event=HookEvent.PRE_TOOL_USE,
+            matcher="*",
+            url="http://localhost:9999/hook",
+        )
+
+        import urllib.error
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("refused")):
+            result = runner._run_http_hook(config, "test_tool")
+
+        assert result.decision == HookDecision.APPROVE
+
+    def test_non_json_response_defaults_approve(self):
+        """HTTP hook returning non-JSON should default to approve."""
+        runner = HookRunner()
+        config = HookConfig(
+            event=HookEvent.PRE_TOOL_USE,
+            matcher="*",
+            url="http://localhost:9999/hook",
+        )
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = b"not json at all"
+        mock_response.__enter__ = MagicMock(return_value=mock_response)
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_response):
+            result = runner._run_http_hook(config, "test_tool")
+
+        assert result.decision == HookDecision.APPROVE
+
+    def test_truncates_tool_result(self):
+        """HTTP hook should truncate tool_result to 500 chars in payload."""
+        runner = HookRunner()
+        config = HookConfig(
+            event=HookEvent.PRE_TOOL_USE,
+            matcher="*",
+            url="http://localhost:9999/hook",
+        )
+        captured_payload = {}
+
+        def mock_urlopen(req, timeout=None):
+            captured_payload["data"] = req.data.decode("utf-8")
+            resp = MagicMock()
+            resp.read.return_value = json.dumps({"decision": "approve"}).encode("utf-8")
+            resp.__enter__ = MagicMock(return_value=resp)
+            resp.__exit__ = MagicMock(return_value=False)
+            return resp
+
+        with patch("urllib.request.urlopen", side_effect=mock_urlopen):
+            runner._run_http_hook(config, "test_tool", tool_result="x" * 1000)
+
+        payload = json.loads(captured_payload["data"])
+        assert len(payload["tool_result"]) == 500
+
+
+class TestPromptHook:
+    def test_no_llm_client_defaults_approve(self):
+        """Without LLM client, prompt hook should default to approve."""
+        runner = HookRunner()
+        config = HookConfig(
+            event=HookEvent.PRE_TOOL_USE,
+            matcher="*",
+            prompt="Is {tool_name} safe?",
+        )
+
+        result = runner._run_prompt_hook(config, "test_tool", {"arg": "val"})
+        assert result.decision == HookDecision.APPROVE
+
+    def test_llm_approve(self):
+        """LLM returning approve should approve."""
+        runner = HookRunner()
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"decision": "approve"}'
+        mock_client.chat.completions.create.return_value = mock_response
+        runner._llm_client = mock_client
+
+        config = HookConfig(
+            event=HookEvent.PRE_TOOL_USE,
+            matcher="*",
+            prompt="Is {tool_name} safe?",
+        )
+
+        result = runner._run_prompt_hook(config, "test_tool")
+        assert result.decision == HookDecision.APPROVE
+
+    def test_llm_block(self):
+        """LLM returning block should block."""
+        runner = HookRunner()
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"decision": "block", "reason": "unsafe"}'
+        mock_client.chat.completions.create.return_value = mock_response
+        runner._llm_client = mock_client
+
+        config = HookConfig(
+            event=HookEvent.PRE_TOOL_USE,
+            matcher="*",
+            prompt="Is {tool_name} safe?",
+        )
+
+        result = runner._run_prompt_hook(config, "test_tool")
+        assert result.decision == HookDecision.BLOCK
+        assert result.reason == "unsafe"
+
+    def test_llm_markdown_json(self):
+        """LLM returning JSON in markdown code blocks should be parsed."""
+        runner = HookRunner()
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '```json\n{"decision": "block", "reason": "bad"}\n```'
+        mock_client.chat.completions.create.return_value = mock_response
+        runner._llm_client = mock_client
+
+        config = HookConfig(
+            event=HookEvent.PRE_TOOL_USE,
+            matcher="*",
+            prompt="Is {tool_name} safe?",
+        )
+
+        result = runner._run_prompt_hook(config, "test_tool")
+        assert result.decision == HookDecision.BLOCK
+
+    def test_llm_exception_defaults_approve(self):
+        """LLM exception should default to approve."""
+        runner = HookRunner()
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = RuntimeError("API down")
+        runner._llm_client = mock_client
+
+        config = HookConfig(
+            event=HookEvent.PRE_TOOL_USE,
+            matcher="*",
+            prompt="Is {tool_name} safe?",
+        )
+
+        result = runner._run_prompt_hook(config, "test_tool")
+        assert result.decision == HookDecision.APPROVE

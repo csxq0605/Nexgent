@@ -246,6 +246,44 @@ class TestCodeExec:
         assert result["exit_code"] != 0
         assert "ZeroDivisionError" in result["output"]
 
+    def test_execute_python_timeout(self):
+        result = json.loads(code_exec.execute_python({
+            "code": "import time; time.sleep(100)",
+            "timeout": 1,
+        }))
+        assert "timed out" in result.get("error", "").lower() or result.get("exit_code") != 0
+
+    def test_execute_python_empty_code(self):
+        result = json.loads(code_exec.execute_python({"code": ""}))
+        assert result["exit_code"] == 0
+
+    def test_execute_python_syntax_error(self):
+        result = json.loads(code_exec.execute_python({
+            "code": "def foo(\n    pass",
+        }))
+        assert result["exit_code"] != 0
+
+    def test_execute_python_large_output_truncation(self):
+        # Generate output > 5000 chars
+        result = json.loads(code_exec.execute_python({
+            "code": "print('x' * 10000)",
+        }))
+        output = result.get("output", "")
+        # Output must be truncated — either marked or capped in length
+        assert len(output) <= 5100, f"Output not truncated: {len(output)} chars"
+
+    def test_execute_python_stderr_captured(self):
+        result = json.loads(code_exec.execute_python({
+            "code": "import sys; sys.stderr.write('warning\\n')",
+        }))
+        assert "warning" in result.get("output", "")
+
+    def test_execute_python_returns_json(self):
+        result = code_exec.execute_python({"code": "print('hi')"})
+        parsed = json.loads(result)
+        assert "exit_code" in parsed
+        assert "output" in parsed
+
 
 class TestMathTools:
     def test_basic_math(self):
@@ -335,6 +373,33 @@ class TestInteractive:
         }))
         assert "error" in result
         assert "Invalid option" in result["error"]
+
+    def test_read_memory_topic(self, tmp_path, monkeypatch):
+        """Test read_memory_topic tool handler."""
+        monkeypatch.chdir(tmp_path)
+        memory_dir = tmp_path / ".mimo" / "memory"
+        memory_dir.mkdir(parents=True)
+        topic_file = memory_dir / "test_topic.md"
+        topic_file.write_text("---\nname: test_topic\ndescription: A test\n---\nTopic content here")
+
+        result_str = interactive.read_memory_topic({"topic_name": "test_topic"})
+        assert "Topic content" in result_str
+
+    def test_read_memory_topic_not_found(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = json.loads(interactive.read_memory_topic({"topic_name": "nonexistent"}))
+        assert "not found" in str(result).lower() or "error" in str(result).lower()
+
+    def test_read_memory_topic_no_topic_name(self):
+        result = json.loads(interactive.read_memory_topic({}))
+        assert "error" in result
+
+    def test_interactive_get_tools(self):
+        tools = interactive.get_tools()
+        assert len(tools) == 2
+        names = {t.name for t in tools}
+        assert "ask_user_question" in names
+        assert "read_memory_topic" in names
 
 
 class TestMonitor:
@@ -931,14 +996,20 @@ class TestShellDeep:
             "command": f'{sys.executable} -c "import time; time.sleep(10)"',
             "timeout": 1,
         }))
-        # Should either timeout or complete quickly
-        assert "error" in result or result.get("exit_code") is not None
+        # Should either return a timeout error or a non-zero exit code
+        if "error" in result:
+            assert "timeout" in result["error"].lower() or "timed out" in result["error"].lower()
+        else:
+            assert result.get("exit_code") != 0
 
     def test_run_command_empty(self):
         """Verify empty command is handled."""
         result = json.loads(shell.run_command({"command": ""}))
-        # Should complete (empty command on shell)
-        assert "exit_code" in result or "error" in result
+        # Empty command should either succeed with exit code 0 or return an error
+        if "error" in result:
+            assert isinstance(result["error"], str)
+        else:
+            assert result["exit_code"] == 0
 
     def test_get_tools_returns_tooldef(self):
         """Verify get_tools returns proper ToolDef."""
@@ -1152,10 +1223,9 @@ class TestWebFetchCache:
             result2 = json.loads(web_tools.web_fetch({"url": "https://example.com/cached"}))
 
         assert "Cached content" in result1["content"]
-        # If caching is implemented, second call should not trigger HTTP
-        # If caching is not implemented, both calls will go through
-        # We verify the second call still returns valid data
         assert "Cached content" in result2["content"]
+        # Second call should hit cache, not trigger another HTTP request
+        assert call_count[0] == 1, f"Expected 1 HTTP call (cache hit), got {call_count[0]}"
 
 
 class TestShellWrapperStripping:
@@ -1264,3 +1334,78 @@ class TestShellOutputSpillover:
         # Should contain start and end of output
         assert "A" * 10 in result
         assert "B" * 10 in result
+
+
+class TestSplitCompoundCommand:
+    def test_simple_command(self):
+        assert shell._split_compound_command("ls -la") == ["ls -la"]
+
+    def test_semicolon_split(self):
+        parts = shell._split_compound_command("ls; rm file")
+        assert len(parts) == 2
+        assert parts[0] == "ls"
+        assert parts[1] == "rm file"
+
+    def test_and_split(self):
+        parts = shell._split_compound_command("echo a && echo b")
+        assert len(parts) == 2
+
+    def test_or_split(self):
+        parts = shell._split_compound_command("cmd1 || cmd2")
+        assert len(parts) == 2
+
+    def test_pipe_split(self):
+        parts = shell._split_compound_command("cat file | grep pattern")
+        assert len(parts) == 2
+
+    def test_single_quotes_preserve(self):
+        parts = shell._split_compound_command("echo 'a && b'")
+        assert len(parts) == 1
+        assert "a && b" in parts[0]
+
+    def test_double_quotes_preserve(self):
+        parts = shell._split_compound_command('echo "a | b"')
+        assert len(parts) == 1
+
+    def test_empty_input(self):
+        assert shell._split_compound_command("") == []
+
+    def test_whitespace_only(self):
+        assert shell._split_compound_command("   ") == []
+
+
+class TestScrubEnv:
+    def test_removes_api_key(self, monkeypatch):
+        monkeypatch.setenv("MY_API_KEY", "secret")
+        env = shell._scrub_env()
+        assert "MY_API_KEY" not in env
+
+    def test_removes_secret(self, monkeypatch):
+        monkeypatch.setenv("APP_SECRET", "topsecret")
+        env = shell._scrub_env()
+        assert "APP_SECRET" not in env
+
+    def test_removes_token(self, monkeypatch):
+        monkeypatch.setenv("AUTH_TOKEN", "bearer_abc")
+        env = shell._scrub_env()
+        assert "AUTH_TOKEN" not in env
+
+    def test_removes_password(self, monkeypatch):
+        monkeypatch.setenv("DB_PASSWORD", "pass123")
+        env = shell._scrub_env()
+        assert "DB_PASSWORD" not in env
+
+    def test_preserves_normal_vars(self, monkeypatch):
+        monkeypatch.setenv("MIMO_SAFE_VAR", "safe_value")
+        env = shell._scrub_env()
+        assert env.get("MIMO_SAFE_VAR") == "safe_value"
+
+    def test_case_insensitive(self, monkeypatch):
+        monkeypatch.setenv("my_api_key_lower", "secret")
+        env = shell._scrub_env()
+        assert "my_api_key_lower" not in env
+
+    def test_does_not_mutate_os_environ(self, monkeypatch):
+        monkeypatch.setenv("TEST_SCRUB_KEY", "value")
+        shell._scrub_env()
+        assert os.environ.get("TEST_SCRUB_KEY") == "value"

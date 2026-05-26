@@ -39,12 +39,9 @@ class TestRequireApiKey:
         importlib.reload(mimo_harness.config)
 
     def test_require_api_key_missing(self, monkeypatch):
-        monkeypatch.delenv("MIMO_API_KEY", raising=False)
-        import importlib
         import mimo_harness.config
-        importlib.reload(mimo_harness.config)
+        # Directly set the module attribute to empty to simulate missing key
+        # (module-level load_dotenv re-reads .env on reload, so we patch the attribute)
+        monkeypatch.setattr(mimo_harness.config, "MIMO_API_KEY", "")
         with pytest.raises(EnvironmentError, match="Missing MIMO_API_KEY"):
             mimo_harness.config.require_api_key()
-        # Restore
-        monkeypatch.setenv("MIMO_API_KEY", "test-key-for-testing")
-        importlib.reload(mimo_harness.config)

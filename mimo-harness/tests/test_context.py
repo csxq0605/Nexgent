@@ -12,8 +12,11 @@ from mimo_harness.context import (
     COMPRESS_TRIGGER_TOKENS, CONTEXT_WINDOW_TOKENS,
     STARTUP_RESERVE_TOKENS, build_system_prompt,
     CheckpointManager,
-    _extract_instructions, _resolve_imports, _parse_frontmatter,
-    _load_path_scoped_rules,
+    _resolve_imports, _parse_frontmatter,
+    _load_path_scoped_rules, _discover_instruction_files,
+    _load_global_rules, load_path_scoped_rules_for_file,
+    load_memory_for_compaction, cleanup_old_sessions, cleanup_old_spill_files,
+    load_topic_on_demand,
 )
 
 
@@ -398,7 +401,7 @@ class TestLLMCompressEdgeCases:
             {"role": "assistant", "content": "hi"},
         ]
         result = llm_compress(messages, client)
-        assert result is not None
+        assert isinstance(result, list)
         assert len(result) == 1
 
     def test_messages_with_none_content(self):
@@ -414,7 +417,8 @@ class TestLLMCompressEdgeCases:
             {"role": "assistant", "content": None},
         ]
         result = llm_compress(messages, client)
-        assert result is not None
+        assert isinstance(result, list)
+        assert len(result) >= 1
 
     def test_long_content_truncated(self):
         """Individual messages with >3000 chars should be truncated."""
@@ -430,7 +434,7 @@ class TestLLMCompressEdgeCases:
         ]
         # Should not raise, should truncate internally
         result = llm_compress(messages, client)
-        assert result is not None
+        assert isinstance(result, list)
 
 
 class TestCompactContextEdgeCases:
@@ -690,67 +694,186 @@ class TestCompactContextTupleReturn:
         assert thrashing is False
 
 
-class TestExtractInstructions:
-    """R2: _extract_instructions extracts system messages with project memory."""
+class TestDiscoverInstructionFiles:
+    """Tests for directory-tree walk to discover CLAUDE.md files."""
 
-    def test_extracts_system_with_project_memory(self):
-        from mimo_harness.context import _extract_instructions
-        messages = [
-            {"role": "system", "content": "## Project Memory\nUse pytest."},
-            {"role": "user", "content": "hello"},
-        ]
-        result = _extract_instructions(messages)
+    def test_finds_claude_md_at_root(self, tmp_path):
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project rules\nBe concise.")
+        result = _discover_instruction_files(str(tmp_path))
         assert len(result) == 1
-        assert "Project Memory" in result[0]["content"]
+        assert result[0][0] == "CLAUDE.md"
+        assert "Be concise" in result[0][1]
 
-    def test_extracts_system_with_instructions_keyword(self):
-        from mimo_harness.context import _extract_instructions
-        messages = [
-            {"role": "system", "content": "Follow these instructions carefully."},
-            {"role": "user", "content": "hello"},
-        ]
-        result = _extract_instructions(messages)
+    def test_finds_claude_local_md(self, tmp_path):
+        local_md = tmp_path / "CLAUDE.local.md"
+        local_md.write_text("# Local overrides\nUse black.")
+        result = _discover_instruction_files(str(tmp_path))
         assert len(result) == 1
+        assert result[0][0] == "CLAUDE.local.md"
 
-    def test_extracts_system_with_rules_keyword(self):
-        from mimo_harness.context import _extract_instructions
-        messages = [
-            {"role": "system", "content": "Project rules: be concise."},
-            {"role": "user", "content": "hello"},
-        ]
-        result = _extract_instructions(messages)
-        assert len(result) == 1
-
-    def test_ignores_non_system_messages(self):
-        from mimo_harness.context import _extract_instructions
-        messages = [
-            {"role": "user", "content": "Project Memory: something"},
-            {"role": "assistant", "content": "instructions here"},
-        ]
-        result = _extract_instructions(messages)
-        assert len(result) == 0
-
-    def test_ignores_system_without_keywords(self):
-        from mimo_harness.context import _extract_instructions
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-        ]
-        result = _extract_instructions(messages)
-        assert len(result) == 0
-
-    def test_extracts_multiple_instructions(self):
-        from mimo_harness.context import _extract_instructions
-        messages = [
-            {"role": "system", "content": "Project Memory: section 1"},
-            {"role": "user", "content": "hi"},
-            {"role": "system", "content": "Additional rules for testing."},
-        ]
-        result = _extract_instructions(messages)
+    def test_finds_both_claude_and_local(self, tmp_path):
+        (tmp_path / "CLAUDE.md").write_text("# Project rules")
+        (tmp_path / "CLAUDE.local.md").write_text("# Local overrides")
+        result = _discover_instruction_files(str(tmp_path))
         assert len(result) == 2
+        assert result[0][0] == "CLAUDE.md"
+        assert result[1][0] == "CLAUDE.local.md"
 
-    def test_empty_messages(self):
-        from mimo_harness.context import _extract_instructions
-        assert _extract_instructions([]) == []
+    def test_strips_html_comments(self, tmp_path):
+        (tmp_path / "CLAUDE.md").write_text("<!-- comment -->\nReal content")
+        result = _discover_instruction_files(str(tmp_path))
+        assert len(result) == 1
+        assert "comment" not in result[0][1]
+        assert "Real content" in result[0][1]
+
+    def test_respects_line_limit(self, tmp_path):
+        content = "\n".join([f"line {i}" for i in range(300)])
+        (tmp_path / "CLAUDE.md").write_text(content)
+        result = _discover_instruction_files(str(tmp_path))
+        assert len(result) == 1
+        assert "truncated" in result[0][1]
+
+    def test_no_files_returns_empty(self, tmp_path):
+        result = _discover_instruction_files(str(tmp_path))
+        assert result == []
+
+
+class TestLoadGlobalRules:
+    """Tests for loading non-path-scoped rules at startup."""
+
+    def test_loads_rules_without_paths(self, tmp_path):
+        rules_dir = tmp_path / ".mimo" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "global.md").write_text("Be concise.")
+        result = _load_global_rules(str(tmp_path))
+        assert len(result) == 1
+        assert "Be concise" in result[0]
+
+    def test_skips_rules_with_paths(self, tmp_path):
+        rules_dir = tmp_path / ".mimo" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "scoped.md").write_text('---\npaths: ["*.py"]\n---\nUse type hints.')
+        result = _load_global_rules(str(tmp_path))
+        assert len(result) == 0
+
+    def test_no_rules_directory(self, tmp_path):
+        result = _load_global_rules(str(tmp_path))
+        assert result == []
+
+
+class TestLoadPathScopedRulesForFile:
+    """Tests for lazy-loading path-scoped rules on demand."""
+
+    def test_loads_matching_rules(self, tmp_path):
+        rules_dir = tmp_path / ".mimo" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "python.md").write_text('---\npaths: ["*.py"]\n---\nUse type hints.')
+        result = load_path_scoped_rules_for_file(str(tmp_path), "main.py")
+        assert len(result) == 1
+        assert "type hints" in result[0]
+
+    def test_skips_non_matching_rules(self, tmp_path):
+        rules_dir = tmp_path / ".mimo" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "python.md").write_text('---\npaths: ["*.py"]\n---\nUse type hints.')
+        result = load_path_scoped_rules_for_file(str(tmp_path), "readme.md")
+        assert len(result) == 0
+
+    def test_empty_current_file_returns_empty(self, tmp_path):
+        rules_dir = tmp_path / ".mimo" / "rules"
+        rules_dir.mkdir(parents=True)
+        (rules_dir / "python.md").write_text('---\npaths: ["*.py"]\n---\nUse type hints.')
+        result = load_path_scoped_rules_for_file(str(tmp_path), "")
+        assert result == []
+
+    def test_no_rules_directory(self, tmp_path):
+        result = load_path_scoped_rules_for_file(str(tmp_path), "main.py")
+        assert result == []
+
+
+class TestCleanupOldSessions:
+    """Tests for session auto-cleanup."""
+
+    def test_deletes_old_sessions(self, tmp_path):
+        # Create a fake old session file
+        old_file = tmp_path / "old_session.jsonl"
+        old_file.write_text('{"role": "user", "content": "hello"}\n')
+        # Set modification time to 60 days ago
+        import time
+        old_time = time.time() - (60 * 86400)
+        os.utime(str(old_file), (old_time, old_time))
+
+        deleted = cleanup_old_sessions(str(tmp_path), max_age_days=30)
+        assert deleted == 1
+        assert not old_file.exists()
+
+    def test_keeps_recent_sessions(self, tmp_path):
+        recent_file = tmp_path / "recent_session.jsonl"
+        recent_file.write_text('{"role": "user", "content": "hello"}\n')
+
+        deleted = cleanup_old_sessions(str(tmp_path), max_age_days=30)
+        assert deleted == 0
+        assert recent_file.exists()
+
+    def test_no_directory(self, tmp_path):
+        deleted = cleanup_old_sessions(str(tmp_path / "nonexistent"), max_age_days=30)
+        assert deleted == 0
+
+
+class TestCleanupOldSpillFiles:
+    """Tests for spill file auto-cleanup."""
+
+    def test_deletes_old_spill_files(self, tmp_path):
+        spill_dir = tmp_path / "outputs"
+        spill_dir.mkdir()
+        old_file = spill_dir / "abc12345.txt"
+        old_file.write_text("large output content")
+        import time
+        old_time = time.time() - (10 * 86400)
+        os.utime(str(old_file), (old_time, old_time))
+
+        deleted = cleanup_old_spill_files(str(spill_dir), max_age_days=7)
+        assert deleted == 1
+        assert not old_file.exists()
+
+    def test_keeps_recent_spill_files(self, tmp_path):
+        spill_dir = tmp_path / "outputs"
+        spill_dir.mkdir()
+        recent_file = spill_dir / "def67890.txt"
+        recent_file.write_text("recent output")
+
+        deleted = cleanup_old_spill_files(str(spill_dir), max_age_days=7)
+        assert deleted == 0
+        assert recent_file.exists()
+
+    def test_ignores_non_txt_files(self, tmp_path):
+        spill_dir = tmp_path / "outputs"
+        spill_dir.mkdir()
+        (spill_dir / "data.json").write_text("{}")
+        import time
+        old_time = time.time() - (10 * 86400)
+        json_file = spill_dir / "old.json"
+        json_file.write_text("{}")
+        os.utime(str(json_file), (old_time, old_time))
+
+        deleted = cleanup_old_spill_files(str(spill_dir), max_age_days=7)
+        assert deleted == 0
+
+    def test_no_directory(self, tmp_path):
+        deleted = cleanup_old_spill_files(str(tmp_path / "nonexistent"), max_age_days=7)
+        assert deleted == 0
+
+
+class TestLoadMemoryForCompaction:
+    """Tests for re-reading memory from disk after compaction."""
+
+    def test_reads_claude_md_from_disk(self, tmp_path):
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# Project rules\nUse pytest.")
+        result = load_memory_for_compaction(str(tmp_path))
+        assert "CLAUDE.md" in result
+        assert "Use pytest" in result
 
 
 class TestResolveImports:
@@ -1047,9 +1170,14 @@ class TestCheckpointManagerBatch:
 
 
 class TestCompactContextPreservesInstructions:
-    """R2: compact_context preserves system instructions during compression."""
+    """R2: compact_context does NOT preserve instructions in output.
 
-    def test_instructions_preserved_after_truncation(self):
+    Instructions are re-read from disk after compaction by the caller
+    (agent.py calls load_memory_for_compaction()). This matches Claude
+    Code's behavior: CLAUDE.md is re-read from disk after /compact.
+    """
+
+    def test_instructions_not_in_compacted_output(self):
         big = "x" * 8000
         messages = [
             {"role": "system", "content": "## Project Memory\nUse pytest for testing."},
@@ -1061,11 +1189,11 @@ class TestCompactContextPreservesInstructions:
         assert tokens > COMPRESS_TRIGGER_TOKENS
 
         result, _, _, _ = compact_context(messages, estimated_tokens=tokens)
-        # Instructions should be preserved (possibly at the beginning)
+        # Instructions are NOT preserved — caller re-reads from disk
         contents = [m.get("content", "") for m in result]
-        assert any("Use pytest" in c for c in contents)
+        assert not any("Use pytest" in c for c in contents)
 
-    def test_instructions_preserved_after_llm_compress(self):
+    def test_llm_compress_returns_summary_only(self):
         messages = [
             {"role": "system", "content": "## Project Memory\nFollow PEP 8."},
         ]
@@ -1089,4 +1217,29 @@ class TestCompactContextPreservesInstructions:
                 messages, client=client, estimated_tokens=tokens,
             )
         contents = [m.get("content", "") for m in result]
-        assert any("Follow PEP 8" in c for c in contents)
+        # Only the summary, no instruction re-insertion
+        assert any("LLM summary" in c for c in contents)
+
+
+class TestLoadTopicOnDemand:
+    def test_loads_existing_topic(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        # Create memory structure
+        memory_dir = tmp_path / ".mimo" / "memory"
+        memory_dir.mkdir(parents=True)
+        (memory_dir / "my_topic.md").write_text(
+            "---\nname: my_topic\n---\nTopic body", encoding="utf-8"
+        )
+        result = load_topic_on_demand("my_topic", project_dir=str(tmp_path))
+        assert "Topic body" in result
+
+    def test_nonexistent_topic_returns_empty(self, tmp_path):
+        result = load_topic_on_demand("no_such_topic", project_dir=str(tmp_path))
+        assert result == ""
+
+    def test_auto_appends_md(self, tmp_path):
+        memory_dir = tmp_path / ".mimo" / "memory"
+        memory_dir.mkdir(parents=True)
+        (memory_dir / "test.md").write_text("content", encoding="utf-8")
+        result = load_topic_on_demand("test", project_dir=str(tmp_path))
+        assert "content" in result

@@ -380,26 +380,49 @@ def _filter_orphan_tool_results(messages: list) -> list:
 # Main compaction entry point (Ch7: progressive compression)
 # ---------------------------------------------------------------------------
 def estimate_tokens(messages: list) -> int:
-    """Estimate token count for a message list (~4 chars per token)."""
-    total_chars = sum(
-        len(json.dumps(m, ensure_ascii=False)) if isinstance(m, dict)
-        else len(str(m))
-        for m in messages
-    )
-    return total_chars // 4
+    """Estimate token count for a message list.
 
+    Uses a weighted heuristic that accounts for content type:
+    - Code/technical content: ~3.5 chars per token (more tokens per char)
+    - Natural language: ~4.5 chars per token
+    - JSON structure overhead: ~3 chars per token
 
-def _extract_instructions(messages: list) -> list:
-    """Extract system messages containing project instructions (A9)."""
-    instructions = []
+    This is more accurate than a flat chars/4 ratio, especially for
+    code-heavy conversations where tool results dominate.
+    """
+    total_tokens = 0
     for msg in messages:
-        if isinstance(msg, dict) and msg.get("role") == "system":
-            content = msg.get("content", "")
-            if isinstance(content, str) and ("Project Memory" in content
-                                             or "instructions" in content.lower()
-                                             or "rules" in content.lower()):
-                instructions.append(dict(msg))
-    return instructions
+        if not isinstance(msg, dict):
+            total_tokens += len(str(msg)) // 4
+            continue
+        # Serialize the full message to capture all fields
+        raw = json.dumps(msg, ensure_ascii=False)
+        char_count = len(raw)
+        content = msg.get("content", "")
+        role = msg.get("role", "")
+
+        # Determine content type for better estimation
+        if role == "tool":
+            # Tool results are often JSON/code — lower chars/token ratio
+            ratio = 3.2
+        elif role == "system":
+            # System prompts are structured text
+            ratio = 3.8
+        elif isinstance(content, str) and any(
+            marker in content for marker in ["```", "def ", "class ", "import ", "{", "}"]
+        ):
+            # Code-heavy content
+            ratio = 3.5
+        else:
+            # Natural language
+            ratio = 4.2
+
+        # Account for JSON structure overhead (keys, brackets, quotes)
+        # which have very low chars/token ratio
+        json_overhead = raw.count('"') * 0.5 + raw.count('{') * 0.3 + raw.count('}') * 0.3
+        total_tokens += int((char_count + json_overhead) / ratio)
+
+    return max(total_tokens, 1)
 
 
 def compact_context(
@@ -416,6 +439,11 @@ def compact_context(
     After compression, conversation is replaced with a single summary
     (~12% of original tokens, capped at ~15K). This frees up ~170K+
     tokens for continued work.
+
+    Note: Instructions (CLAUDE.md, memory) are NOT extracted/re-inserted
+    here. Instead, the caller re-reads them from disk after compaction
+    via load_memory_for_compaction(). This matches Claude Code's behavior:
+    CLAUDE.md is re-read from disk after /compact.
 
     Args:
         messages: conversation messages
@@ -439,9 +467,6 @@ def compact_context(
     if not needs_token_compress and not needs_message_compress:
         return _filter_orphan_tool_results(messages), compaction_attempts, compaction_failures, False
 
-    # A9: Extract instructions before compression so we can re-insert them
-    preserved_instructions = _extract_instructions(messages)
-
     # Case 1: Token-based compression (Claude Code style — aggressive)
     if needs_token_compress:
         # A8: Check if thrashing is detected (3 consecutive failures)
@@ -460,9 +485,6 @@ def compact_context(
                 else:
                     compaction_failures = 0
                 compaction_attempts += 1
-                # A9: Re-insert preserved instructions
-                for instr in reversed(preserved_instructions):
-                    llm_result.insert(0, instr)
                 return llm_result, compaction_attempts, compaction_failures, False
             # LLM failed, fall through to truncation
             compaction_failures += 1
@@ -482,9 +504,6 @@ def compact_context(
                     msg = dict(msg)
                     msg["content"] = content[:2000] + "... [truncated]"
                 result.append(msg)
-        # A9: Re-insert preserved instructions
-        for instr in reversed(preserved_instructions):
-            result.insert(0, instr)
         return _filter_orphan_tool_results(result), compaction_attempts, compaction_failures, False
 
     # Case 2: Message-count limit (legacy, simple trim)
@@ -495,6 +514,65 @@ def compact_context(
 # ---------------------------------------------------------------------------
 # Compact boundary message (Ch7: metadata marker)
 # ---------------------------------------------------------------------------
+def cleanup_old_sessions(session_dir: str, max_age_days: int = 30) -> int:
+    """Delete session files older than max_age_days (Claude Code pattern).
+
+    Claude Code defaults to 30-day cleanup via cleanupPeriodDays setting.
+    Returns the number of deleted session files.
+    """
+    if not os.path.isdir(session_dir):
+        return 0
+
+    cutoff_time = time.time() - (max_age_days * 86400)
+    deleted = 0
+
+    for filename in os.listdir(session_dir):
+        if not filename.endswith(".jsonl"):
+            continue
+        filepath = os.path.join(session_dir, filename)
+        try:
+            # Use file modification time as proxy for session age
+            mtime = os.path.getmtime(filepath)
+            if mtime < cutoff_time:
+                os.remove(filepath)
+                deleted += 1
+        except (OSError, IOError):
+            pass
+
+    return deleted
+
+
+def cleanup_old_spill_files(spill_dir: str = ".mimo/outputs", max_age_days: int = 7) -> int:
+    """Delete old tool output spill files.
+
+    Large tool results are spilled to .mimo/outputs/ as .txt files.
+    These are ephemeral artifacts that accumulate over time.
+    Default cleanup age: 7 days (shorter than sessions since these
+    are intermediate results, not conversation history).
+
+    Returns the number of deleted files.
+    """
+    if not os.path.isdir(spill_dir):
+        return 0
+
+    cutoff_time = time.time() - (max_age_days * 86400)
+    deleted = 0
+
+    for filename in os.listdir(spill_dir):
+        if not filename.endswith(".txt"):
+            continue
+        filepath = os.path.join(spill_dir, filename)
+        try:
+            mtime = os.path.getmtime(filepath)
+            if mtime < cutoff_time:
+                os.remove(filepath)
+                deleted += 1
+        except (OSError, IOError):
+            pass
+
+    return deleted
+
+
 def make_compact_boundary(
     pre_tokens: int, pre_messages: int, trigger: str = "auto"
 ) -> dict:
@@ -651,26 +729,151 @@ def _load_path_scoped_rules(project_dir: str) -> list[tuple[list[str], str]]:
     return rules
 
 
-def load_memory(project_dir: str, current_file: str = "") -> str:
-    """Load project memory files.
+def _load_global_rules(project_dir: str) -> list[str]:
+    """Load non-path-scoped rules (always injected at startup).
 
-    Reads MEMORY.md index, CLAUDE.md instructions, and .mimo/memory.md.
-    Resolves @import directives (A6).
-    Loads path-scoped rules from .mimo/rules/*.md (A5).
-    Respects capacity limits: max 200 lines per file.
+    Only loads rules from .mimo/rules/*.md that have NO paths: field.
+    Path-scoped rules are loaded lazily via load_path_scoped_rules_for_file().
+    """
+    rules_dir = os.path.join(project_dir, ".mimo", "rules")
+    if not os.path.isdir(rules_dir):
+        return []
+    global_rules = []
+    for rule_file in sorted(_glob.glob(os.path.join(rules_dir, "*.md"))):
+        try:
+            with open(rule_file, "r", encoding="utf-8") as f:
+                raw = f.read()
+            meta, body = _parse_frontmatter(raw)
+            if not body:
+                continue
+            paths = meta.get("paths", [])
+            if not paths:
+                global_rules.append(body)
+        except Exception:
+            pass
+    return global_rules
+
+
+def load_path_scoped_rules_for_file(project_dir: str, current_file: str) -> list[str]:
+    """Lazy-load path-scoped rules that match the given file (A5 lazy pattern).
+
+    Called on-demand when the agent reads a file, not at startup.
+    Returns list of rule content strings whose paths patterns match current_file.
+    """
+    if not current_file:
+        return []
+    import fnmatch
+    rules_dir = os.path.join(project_dir, ".mimo", "rules")
+    if not os.path.isdir(rules_dir):
+        return []
+    matched = []
+    for rule_file in sorted(_glob.glob(os.path.join(rules_dir, "*.md"))):
+        try:
+            with open(rule_file, "r", encoding="utf-8") as f:
+                raw = f.read()
+            meta, body = _parse_frontmatter(raw)
+            if not body:
+                continue
+            paths = meta.get("paths", [])
+            if not paths:
+                continue  # Global rules handled separately
+            for pattern in paths:
+                if fnmatch.fnmatch(current_file, pattern):
+                    matched.append(body)
+                    break
+        except Exception:
+            pass
+    return matched
+
+
+def _discover_instruction_files(start_dir: str = None) -> list[tuple[str, str]]:
+    """Walk up directory tree to discover all CLAUDE.md and CLAUDE.local.md files.
+
+    Mimics Claude Code's directory-tree walk behavior:
+    - Walks from start_dir (default: cwd) up to filesystem root
+    - At each directory, checks for CLAUDE.md and CLAUDE.local.md
+    - Returns list ordered from root down to cwd (broadest → most specific)
+    - Within each directory, CLAUDE.local.md is appended after CLAUDE.md
+
+    Returns list of (filename, file_content) tuples.
+    """
+    if start_dir is None:
+        start_dir = os.getcwd()
+    start_dir = os.path.abspath(start_dir)
+
+    # Collect directories from start_dir up to root
+    dirs = []
+    current = start_dir
+    while True:
+        dirs.append(current)
+        parent = os.path.dirname(current)
+        if parent == current:  # Reached root
+            break
+        current = parent
+
+    # Reverse so root is first (broadest → most specific)
+    dirs.reverse()
+
+    discovered = []
+    for d in dirs:
+        for name in ["CLAUDE.md", "CLAUDE.local.md"]:
+            path = os.path.join(d, name)
+            if os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                    if len(lines) > 200:
+                        lines = lines[:200] + ["... [truncated to 200 lines]\n"]
+                    content = "".join(lines).strip()
+                    if content:
+                        # Strip HTML comments to save tokens
+                        content = re.sub(r'<!--.*?-->', '', content, flags=re.DOTALL).strip()
+                        if content:
+                            discovered.append((name, content))
+                except Exception:
+                    pass
+    return discovered
+
+
+def load_memory(project_dir: str) -> str:
+    """Load project memory with tiered loading (Claude Code style).
+
+    Tiered loading pattern (Ch6):
+    - MEMORY.md index is ALWAYS loaded (first 200 lines / 25KB)
+    - Topic files (e.g. debugging.md) are NOT loaded at startup
+    - Topic files are read on-demand via load_topic_on_demand()
+    - CLAUDE.md files are loaded in full (they are instructions, not data)
+    - Global rules are loaded at startup
+    - Path-scoped rules are lazy-loaded on file read
     """
     memory_parts = []
-    for name in ["MEMORY.md", "CLAUDE.md", "AGENTS.md", ".mimo/memory.md"]:
+
+    # 1. Load MEMORY.md index ONLY (not topic files — tiered loading)
+    memory_index_path = os.path.join(project_dir, ".mimo", "memory", "MEMORY.md")
+    if os.path.exists(memory_index_path):
+        try:
+            with open(memory_index_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            if len(lines) > 200:
+                lines = lines[:200] + ["... [truncated to 200 lines]\n"]
+            content = "".join(lines).strip()
+            if content:
+                content = _resolve_imports(content, project_dir)
+            if content:
+                memory_parts.append(f"### Memory Index\n{content}")
+        except Exception:
+            pass
+
+    # 2. Load AGENTS.md and .mimo/memory.md from project root
+    for name in ["AGENTS.md", ".mimo/memory.md"]:
         path = os.path.join(project_dir, name)
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     lines = f.readlines()
-                # Ch6: dual capacity protection — 200 line limit
                 if len(lines) > 200:
                     lines = lines[:200] + ["... [truncated to 200 lines]\n"]
                 content = "".join(lines).strip()
-                # A6: Resolve @import directives
                 if content:
                     content = _resolve_imports(content, project_dir)
                 if content:
@@ -678,23 +881,52 @@ def load_memory(project_dir: str, current_file: str = "") -> str:
             except Exception:
                 pass
 
-    # A5: Load path-scoped rules from .mimo/rules/*.md
-    rules = _load_path_scoped_rules(project_dir)
-    if rules:
-        import fnmatch
-        rule_sections = []
-        for paths_patterns, rule_content in rules:
-            if not paths_patterns:
-                # No path filter — always include
-                rule_sections.append(rule_content)
-            elif current_file:
-                # Include only if current file matches any pattern
-                for pattern in paths_patterns:
-                    if fnmatch.fnmatch(current_file, pattern):
-                        rule_sections.append(rule_content)
-                        break
-            # If current_file is empty and patterns exist, skip (context-dependent)
-        if rule_sections:
-            memory_parts.append("### Path-Scoped Rules\n" + "\n\n".join(rule_sections))
+    # 3. Walk up directory tree to discover all CLAUDE.md files
+    instruction_files = _discover_instruction_files(project_dir)
+    for name, content in instruction_files:
+        content = _resolve_imports(content, project_dir)
+        if content:
+            memory_parts.append(f"### {name}\n{content}")
+
+    # 4. Load global (non-path-scoped) rules from .mimo/rules/*.md
+    global_rules = _load_global_rules(project_dir)
+    if global_rules:
+        memory_parts.append("### Global Rules\n" + "\n\n".join(global_rules))
+
+    # Note: Path-scoped rules are loaded lazily via load_path_scoped_rules_for_file()
+    # when the agent reads a matching file, not at startup.
+    # Note: Topic files are loaded on-demand via load_topic_on_demand().
 
     return "\n\n".join(memory_parts)
+
+
+def load_topic_on_demand(topic_name: str, project_dir: str = None) -> str:
+    """Load a single memory topic file on-demand (Ch6: tiered loading).
+
+    Called when the agent needs details from a specific memory topic.
+    Topic files are NOT loaded at session start — only the MEMORY.md index is.
+
+    Args:
+        topic_name: Topic file name (e.g. 'debugging', 'debugging.md')
+        project_dir: Project directory (defaults to cwd)
+
+    Returns:
+        Topic file content, or empty string if not found.
+    """
+    if project_dir is None:
+        project_dir = os.getcwd()
+    from .memory import MemoryStore
+    store = MemoryStore(project_dir)
+    return store.load_topic(topic_name)
+
+
+def load_memory_for_compaction(project_dir: str = None) -> str:
+    """Re-read memory/instruction files from disk after compaction.
+
+    This is called after context compaction to ensure fresh instructions
+    are injected, rather than relying on stale extracted messages.
+    (Claude Code pattern: CLAUDE.md is re-read from disk after /compact.)
+    """
+    if project_dir is None:
+        project_dir = os.getcwd()
+    return load_memory(project_dir)
