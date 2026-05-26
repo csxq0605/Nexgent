@@ -41,7 +41,7 @@ python stage-1/minimal_agent.py
 
 # 或使用完整 Harness（推荐）
 cd mimo-harness && pip install -e .
-mimo-harness --task "What is 247 * 893?"
+mimo-harness   # 进入交互模式
 ```
 
 ## MiMo Harness

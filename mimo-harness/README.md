@@ -22,27 +22,45 @@ A production-grade AI agent harness powered by Xiaomi MiMo model, following Clau
 cd mimo-harness
 pip install -e .
 cp .env.example .env  # Edit with your API key
-mimo-harness --task "What is 247 * 893?"
-mimo-harness          # Interactive mode
+mimo-harness          # 进入交互模式
 ```
 
 ## Usage
 
+### 交互模式（推荐）
+
 ```bash
-# Single task
-mimo-harness --task "Create a Python fibonacci script"
+mimo-harness
+# You [5.4K/200.0K]: ████---------------------------------------- 2.7%
 
-# Pipe input
-cat error.log | mimo-harness -p "Analyze these errors"
+> 读取当前目录的 README.md，帮我总结要点
+# Agent 自动调用 read_file 工具读取文件并给出摘要
 
-# Interactive mode options
-mimo-harness --auto-approve --effort high --bare
-mimo-harness --continue   # Resume last session
+> 帮我写一个 fibonacci 函数，保存到 fib.py
+# Agent 自动调用 write_file 创建文件
+
+> 运行一下看看结果对不对
+# Agent 调用 execute_python 执行代码
+
+> 搜索一下 Python 异步编程的最佳实践
+# Agent 调用 web_search 搜索并整理结果
+
+> /context          # 查看 token 使用明细
+> /tools            # 列出所有可用工具
+> /memory           # 查看已存储的记忆
+> !git status       # 直接执行 shell 命令
+> /compact          # 手动压缩上下文
+> /rewind           # 回退到上一个检查点
 ```
 
-### Commands
+### 其他模式
 
-`/help` `/quit` `/clear` `/tools` `/memory` `/hooks` `/stats` `/compact` `/context` `/init` `/rewind` `!<cmd>`
+```bash
+mimo-harness --task "What is 247 * 893?"   # 单次任务
+cat error.log | mimo-harness -p "分析这些错误"  # 管道输入
+mimo-harness --continue                    # 恢复上次会话
+mimo-harness --auto-approve --effort high  # 自动审批 + 高努力
+```
 
 ## Architecture
 
