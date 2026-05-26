@@ -45,13 +45,46 @@ mimo-harness
 > 搜索一下 Python 异步编程的最佳实践
 # Agent 调用 web_search 搜索并整理结果
 
-> /context          # 查看 token 使用明细
-> /tools            # 列出所有可用工具
-> /memory           # 查看已存储的记忆
-> !git status       # 直接执行 shell 命令
-> /compact          # 手动压缩上下文
-> /rewind           # 回退到上一个检查点
+> 列出当前目录所有 Python 文件
+# Agent 调用 glob_files 搜索
+
+> 帮我创建一个 Jupyter notebook，写个数据分析模板
+# Agent 调用 notebook_edit 创建 notebook
+
+> 给我三个选项让我选下一步方向
+# Agent 调用 ask_user_question 交互式提问
+
+> /context   # 查看每条消息的 token 明细，找出最占 token 的消息
+> /rewind    # 回退到上一个检查点，撤销 Agent 的文件修改
+> /compact   # 手动压缩上下文，释放 token 空间
+> !git diff  # 直接执行 shell 命令，查看代码变更
 ```
+
+### 斜杠命令
+
+| 命令 | 说明 |
+|------|------|
+| `/help` | 显示帮助信息 |
+| `/quit` `/exit` `/q` | 退出 |
+| `/clear` | 清空当前会话 |
+| `/tools` | 列出所有可用工具及标记（RO/CS/DST） |
+| `/save <path>` | 保存会话到文件 |
+| `/load <path>` | 从文件加载会话 |
+| `/dry-run` | 切换干跑模式（只显示不执行） |
+| `/auto` | 切换自动审批模式 |
+| `/plan` | 切换计划模式（只读，不写文件） |
+| `/abort` | 请求中止当前任务 |
+| `/memory` | 列出已存储的记忆 |
+| `/remember` | 将当前上下文保存为记忆 |
+| `/hooks` | 列出已注册的 Hook |
+| `/stats` | 显示会话统计（消息数、token、压缩次数） |
+| `/tokens` | 显示 token 用量进度条 |
+| `/compact` | 手动压缩上下文 |
+| `/context` | 按消息显示 token 明细，标记最占 token 的消息 |
+| `/init` | 扫描项目并生成 AGENTS.md |
+| `/rewind` | 回退到上一个文件检查点 |
+| `/fork` | 分叉当前会话（复制为新 session ID） |
+| `!<cmd>` | 直接执行 shell 命令（如 `!git status`） |
 
 ### 其他模式
 
