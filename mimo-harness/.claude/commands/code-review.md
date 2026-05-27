@@ -6,17 +6,18 @@ missed bug ships. Err on the side of surfacing.
 
 ## Objectivity requirement
 
-For every finding, you MUST classify it into one of four categories:
+For every finding, classify it:
 
-- **REGRESSION** — behavior changed by this diff, and the new behavior is wrong. These are the only findings that deserve HIGH severity.
-- **PRE-EXISTING** — the bug existed before this diff. Report it but mark as LOW severity and note it's out of scope for this diff.
-- **INTENTIONAL DESIGN** — the diff deliberately changed this behavior (e.g., relaxing a constraint, adding tolerance). Not a bug.
-- **HARMLESS DEFENSIVE** — dead code, unreachable guards, or redundant checks that don't cause incorrect behavior. Note but don't inflate severity.
+- **REGRESSION** — this diff changed the behavior, and the new behavior is wrong.
+- **PRE-EXISTING** — the issue existed before this diff. Mention it but don't present it as something this diff introduced.
+- **INTENTIONAL DESIGN** — the diff deliberately changed this behavior. Not a bug.
+- **HARMLESS DEFENSIVE** — dead code, unreachable guards, redundant checks. No incorrect behavior.
 
-Do NOT mark everything HIGH severity. Most findings in a typical diff are
-PRE-EXISTING or INTENTIONAL. Be honest about what this diff actually broke
-vs. what was already broken or deliberately changed. If the review
-methodology produces inflated findings, say so explicitly.
+Rules:
+- Describe failure scenarios factually. Don't use dramatic language like "infinite loop", "completely defeated", "ALL messages lost" unless the behavior literally and unavoidably does that in a realistic scenario.
+- If a finding only matters in an extreme edge case (e.g., file locked by antivirus AND permissions prevent deletion AND user retries repeatedly), say so — don't present it as a common occurrence.
+- Most findings in a typical diff are PRE-EXISTING or INTENTIONAL. Only REGRESSION findings are actionable bugs introduced by this diff.
+- If the review methodology produces inflated findings, say so.
 
 ## Phase 0 — Gather the diff
 
