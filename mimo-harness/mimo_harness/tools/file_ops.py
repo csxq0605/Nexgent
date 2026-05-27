@@ -15,7 +15,7 @@ from pathlib import Path
 from .registry import ToolDef
 from ..permissions import Permission
 
-_ALLOWED_WRITE_DIR = Path.cwd().resolve()
+_ALLOWED_WRITE_DIR = None  # Lazily initialized on first use
 
 # Track files that have been read in this session (for read-before-edit check)
 _read_files: set[str] = set()
@@ -26,19 +26,29 @@ _write_allowed_files: set[str] = set()
 _write_allowed_files_lock = threading.Lock()
 
 
+def _get_allowed_write_dir() -> Path:
+    """Return the allowed write directory, lazily initialized to CWD."""
+    global _ALLOWED_WRITE_DIR
+    if _ALLOWED_WRITE_DIR is None:
+        _ALLOWED_WRITE_DIR = Path.cwd().resolve()
+    return _ALLOWED_WRITE_DIR
+
+
 def _validate_write_path(path: str) -> str | None:
     """Return error message if path is outside allowed directory, else None."""
     resolved = Path(path).resolve()
-    if not resolved.is_relative_to(_ALLOWED_WRITE_DIR):
-        return f"Path '{path}' is outside allowed directory '{_ALLOWED_WRITE_DIR}'"
+    allowed = _get_allowed_write_dir()
+    if not resolved.is_relative_to(allowed):
+        return f"Path '{path}' is outside allowed directory '{allowed}'"
     return None
 
 
 def _validate_read_path(path: str) -> str | None:
     """Return error message if read path is outside allowed directory, else None."""
     resolved = Path(path).resolve()
-    if not resolved.is_relative_to(_ALLOWED_WRITE_DIR):
-        return f"Path '{path}' is outside allowed directory '{_ALLOWED_WRITE_DIR}'"
+    allowed = _get_allowed_write_dir()
+    if not resolved.is_relative_to(allowed):
+        return f"Path '{path}' is outside allowed directory '{allowed}'"
     return None
 
 

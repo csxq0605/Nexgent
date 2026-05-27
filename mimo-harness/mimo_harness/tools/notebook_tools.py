@@ -70,7 +70,13 @@ def notebook_edit(params: dict) -> str:
             cells.append(new_cell)
     else:  # replace
         if target_idx is not None and 0 <= target_idx < len(cells):
-            cells[target_idx]["source"] = new_source.split("\n") if isinstance(new_source, str) else new_source
+            # Jupyter format: each line except the last ends with \n
+            if isinstance(new_source, str):
+                lines = new_source.split("\n")
+                source_lines = [line + "\n" for line in lines[:-1]] + [lines[-1]]
+            else:
+                source_lines = new_source
+            cells[target_idx]["source"] = source_lines
             if cell_type:
                 cells[target_idx]["cell_type"] = cell_type
         else:

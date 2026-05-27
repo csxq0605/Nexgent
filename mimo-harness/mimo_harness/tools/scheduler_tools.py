@@ -61,12 +61,14 @@ def _match_cron(cron_expr: str, now: time.struct_time) -> bool:
         return False
 
     minute, hour, dom, month, dow = fields
+    # Standard cron: 0=Sunday. Python tm_wday: 0=Monday. Convert.
+    cron_wday = (now.tm_wday + 1) % 7  # 0=Sun, 1=Mon, ..., 6=Sat
     checks = [
         (minute, now.tm_min, 0, 59),
         (hour, now.tm_hour, 0, 23),
         (dom, now.tm_mday, 1, 31),
         (month, now.tm_mon, 1, 12),
-        (dow, now.tm_wday, 0, 6),  # 0=Monday in Python
+        (dow, cron_wday, 0, 6),
     ]
 
     for field_val, current, min_val, max_val in checks:

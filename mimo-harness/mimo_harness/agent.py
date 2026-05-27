@@ -175,17 +175,19 @@ class TokenBudget:
 # ---------------------------------------------------------------------------
 def retry_with_backoff(fn, max_retries: int = 3, base_delay: float = 1.0):
     last_error = None
+    last_traceback = None
     for attempt in range(max_retries):
         try:
             return fn()
         except Exception as e:
             last_error = e
+            last_traceback = e.__traceback__
             status = getattr(e, "status_code", None)
             if status and status not in (429, 500, 502, 503, 504):
                 raise
             if attempt < max_retries - 1:
                 time.sleep(base_delay * (2 ** attempt))
-    raise last_error
+    raise last_error.with_traceback(last_traceback)
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +333,13 @@ You help users with coding, file operations, web research, document creation, an
         """
         self.logger.trace("tool_call", {"name": func_name, "args": func_args})
 
+        # Report malformed arguments back to LLM instead of executing with empty dict
+        if func_args.get("_parse_error"):
+            return json.dumps({
+                "error": f"Malformed tool arguments: {func_args.get('raw', '')}",
+                "hint": "Please retry with valid JSON arguments.",
+            })
+
         # --- PreToolUse Hooks (Ch8: intercept before execution) ---
         hook_runner = getattr(self, '_hook_runner', None)
         if hook_runner:
@@ -388,15 +397,14 @@ You help users with coding, file operations, web research, document creation, an
             perm = self._check_shell_permission(command)
             tool_def = self.registry.get(func_name)
             if tool_def:
-                original_perm = tool_def.permission
-                tool_def.permission = perm
+                # Use per-call permission override instead of mutating shared tool_def
                 try:
-                    result = self.registry.execute(func_name, func_args, self.perms)
+                    result = self.registry.execute(
+                        func_name, func_args, self.perms, permission_override=perm
+                    )
                 except KeyboardInterrupt:
                     self.graceful_abort.request()
                     return json.dumps({"error": "[INTERRUPTED] Tool execution cancelled by user"})
-                finally:
-                    tool_def.permission = original_perm
             else:
                 result = json.dumps({"error": "Tool not found"})
         else:
@@ -625,7 +633,7 @@ You help users with coding, file operations, web research, document creation, an
 
             # A8: Skip auto-compaction if thrashing detected
             if self._thrashing_detected:
-                if not hasattr(self, '_thrash_warned'):
+                if not self._thrash_warned:
                     self.logger.info("[THRASHING] Compaction thrashing detected — auto-compaction disabled")
                     self._thrash_warned = True
             else:
@@ -754,13 +762,16 @@ You help users with coding, file operations, web research, document creation, an
                     "reason": TerminationReason.COMPLETED.value,
                     "token_usage": round(self.token_budget.usage_ratio(), 2),
                 })
+                self._last_session = session
+                self._last_steps = step + 1
                 return final
 
             # Process tool calls (Ch3: tool dispatch with fail-closed defaults)
             msg_dict = message.model_dump()
             if msg_dict.get("content") is None:
                 msg_dict["content"] = ""
-            session.messages.append(msg_dict)
+            session.add_message(msg_dict["role"], msg_dict["content"],
+                              tool_calls=msg_dict.get("tool_calls"))
 
             # Group tool calls into concurrency-safe and sequential
             safe_calls = []
@@ -770,7 +781,7 @@ You help users with coding, file operations, web research, document creation, an
                 try:
                     func_args = json.loads(tc.function.arguments)
                 except json.JSONDecodeError:
-                    func_args = {}
+                    func_args = {"_parse_error": True, "raw": tc.function.arguments}
                 tool_def = self.registry.get(func_name)
                 if tool_def and tool_def.is_concurrency_safe:
                     safe_calls.append((tc, func_name, func_args))
@@ -800,9 +811,12 @@ You help users with coding, file operations, web research, document creation, an
 
             # Execute other sequential tools first
             for tc, func_name, func_args in other_calls:
-                result = self._handle_tool_call(
-                    func_name, func_args, tc.id, session
-                )
+                try:
+                    result = self._handle_tool_call(
+                        func_name, func_args, tc.id, session
+                    )
+                except Exception as e:
+                    result = json.dumps({"error": str(e)})
                 session.add_message("tool", result, tool_call_id=tc.id)
 
             # Execute edit/write tools as a batch if checkpoint manager available
@@ -811,9 +825,12 @@ You help users with coding, file operations, web research, document creation, an
                 if checkpoint_mgr and len(edit_calls) > 1:
                     checkpoint_mgr.begin_batch()
                 for tc, func_name, func_args in edit_calls:
-                    result = self._handle_tool_call(
-                        func_name, func_args, tc.id, session
-                    )
+                    try:
+                        result = self._handle_tool_call(
+                            func_name, func_args, tc.id, session
+                        )
+                    except Exception as e:
+                        result = json.dumps({"error": str(e)})
                     session.add_message("tool", result, tool_call_id=tc.id)
                 if checkpoint_mgr and len(edit_calls) > 1:
                     checkpoint_mgr.end_batch()
@@ -824,4 +841,6 @@ You help users with coding, file operations, web research, document creation, an
             "duration": round(time.time() - start_time, 2),
             "reason": TerminationReason.MAX_STEPS.value,
         })
+        self._last_session = session
+        self._last_steps = self.max_steps
         return "[ERROR] Max steps reached."

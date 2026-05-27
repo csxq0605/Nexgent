@@ -1230,8 +1230,11 @@ class TestCheckpointManagerBatch:
         assert os.path.exists(meta_path)
         with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
-        assert "original_path" in meta
-        assert "safe_name" in meta
+        # meta is now a list of entries (supports multi-file batches)
+        assert isinstance(meta, list)
+        assert len(meta) == 1
+        assert "original_path" in meta[0]
+        assert "safe_name" in meta[0]
 
 
 class TestCompactContextPreservesInstructions:

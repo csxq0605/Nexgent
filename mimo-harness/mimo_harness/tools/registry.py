@@ -137,7 +137,7 @@ class ToolRegistry:
             f"... [output truncated — full result ({len(result)} chars) saved to {file_path}]"
         )
 
-    def execute(self, name: str, params: dict, perms: PermissionGate) -> str:
+    def execute(self, name: str, params: dict, perms: PermissionGate, permission_override=None) -> str:
         """Execute a tool with full 4-stage pipeline (Ch4).
 
         Stages:
@@ -158,7 +158,8 @@ class ToolRegistry:
 
         # Stage 2: Permission check (C2: pass params for accurate protected path detection)
         action_desc = f"{name}({json.dumps(params, ensure_ascii=False)[:100]})"
-        if not perms.check(tool.permission, action_desc, params=params):
+        effective_perm = permission_override if permission_override is not None else tool.permission
+        if not perms.check(effective_perm, action_desc, params=params):
             return json.dumps({"error": f"Permission denied for '{name}'"})
 
         # Stage 3: Execute handler
@@ -168,9 +169,9 @@ class ToolRegistry:
             return json.dumps({"error": f"Tool '{name}' failed: {str(e)}"})
 
         # Stage 4: Result budget (A7: disk spillover for large outputs)
-        if len(result) > self.MAX_RESULT_CHARS:
-            # Hard cap: truncate to MAX before spilling
-            result = result[:self.MAX_RESULT_CHARS]
+        # Spill to disk first (preserves full content), then truncate the preview
         if len(result) > self.SPILL_THRESHOLD_CHARS:
             result = self._spill_to_disk(result, name)
+        elif len(result) > self.MAX_RESULT_CHARS:
+            result = result[:self.MAX_RESULT_CHARS]
         return result

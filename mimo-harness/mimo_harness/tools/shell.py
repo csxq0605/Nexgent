@@ -19,6 +19,20 @@ from ..permissions import Permission
 _background_jobs: dict[str, dict] = {}
 _background_jobs_lock = threading.Lock()
 MAX_BACKGROUND_JOBS = 20
+_MAX_COMPLETED_JOBS = 50  # cap completed jobs to prevent memory leak
+
+
+def _cleanup_completed_jobs():
+    """Remove oldest completed/errored jobs when exceeding cap."""
+    completed = [
+        (jid, j) for jid, j in _background_jobs.items()
+        if j["status"] != "running"
+    ]
+    if len(completed) > _MAX_COMPLETED_JOBS:
+        # Remove oldest completed jobs (insertion order in Python 3.7+)
+        to_remove = [jid for jid, _ in completed[:len(completed) - _MAX_COMPLETED_JOBS]]
+        for jid in to_remove:
+            del _background_jobs[jid]
 
 # S5+S20: Configurable output length limit via env var
 MAX_OUTPUT_LENGTH = int(os.environ.get("MIMO_MAX_OUTPUT_LENGTH", "30000"))
@@ -31,8 +45,8 @@ READONLY_PREFIXES = [
     "python --version", "pip list", "pip show", "node --version", "npm list",
     "uname", "hostname", "whoami", "date",
     # S19: extended readonly prefixes
-    "grep", "find", "stat", "env", "printenv", "realpath", "readlink",
-    "basename", "dirname", "sort", "uniq", "cut", "tr", "sed -n", "awk '",
+    "grep", "stat", "env", "printenv", "realpath", "readlink",
+    "basename", "dirname", "sort", "uniq", "cut", "tr", "sed -n",
 ]
 
 # S8: Wrapper prefixes that should be stripped before readonly detection
@@ -97,6 +111,11 @@ def _split_compound_command(command: str) -> list[str]:
                 current = []
                 i += 1
             elif ch == "|":
+                parts.append("".join(current).strip())
+                current = []
+                i += 1
+            elif ch == "\n":
+                # Newline acts as command separator (like ;)
                 parts.append("".join(current).strip())
                 current = []
                 i += 1
@@ -172,10 +191,8 @@ def _is_readonly(command: str) -> bool:
     subcommands = _split_compound_command(cmd)
     if len(subcommands) > 1:
         return all(_is_readonly_single(sub) for sub in subcommands)
-    # S8: strip wrapper prefixes before checking readonly
-    cmd = _strip_wrappers(cmd)
-    cmd_lower = cmd.lower()
-    return any(cmd_lower.startswith(p) for p in READONLY_PREFIXES)
+    # Single command — delegate to _is_readonly_single for find/awk handling
+    return _is_readonly_single(cmd)
 
 
 def _is_readonly_single(command: str) -> bool:
@@ -184,6 +201,15 @@ def _is_readonly_single(command: str) -> bool:
     # S8: strip wrapper prefixes before checking readonly
     cmd = _strip_wrappers(cmd)
     cmd_lower = cmd.lower()
+    # find with -exec/-ok is not readonly (can run arbitrary commands)
+    if cmd_lower.startswith("find ") and re.search(r'\b-exec\b|\b-ok\b', cmd_lower):
+        return False
+    # awk with system()/getline from pipe is not readonly
+    if cmd_lower.startswith("awk ") and re.search(r'\bsystem\s*\(', cmd_lower):
+        return False
+    # Special-case: allow find and awk as readonly when safe
+    if cmd_lower.startswith("find ") or cmd_lower.startswith("awk "):
+        return True
     return any(cmd_lower.startswith(p) for p in READONLY_PREFIXES)
 
 
@@ -245,14 +271,17 @@ def run_command(params: dict) -> str:
                     _background_jobs[job_id]["output"] = output
                     _background_jobs[job_id]["exit_code"] = result.returncode
                     _background_jobs[job_id]["status"] = "completed"
+                    _cleanup_completed_jobs()
             except subprocess.TimeoutExpired:
                 with _background_jobs_lock:
                     _background_jobs[job_id]["status"] = "timeout"
                     _background_jobs[job_id]["output"] = f"Command timed out after {timeout}s"
+                    _cleanup_completed_jobs()
             except Exception as e:
                 with _background_jobs_lock:
                     _background_jobs[job_id]["status"] = "error"
                     _background_jobs[job_id]["output"] = str(e)
+                    _cleanup_completed_jobs()
         thread = threading.Thread(target=_run_bg, daemon=True)
         thread.start()
         return json.dumps({

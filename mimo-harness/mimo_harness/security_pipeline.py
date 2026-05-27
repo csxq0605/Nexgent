@@ -108,16 +108,18 @@ _INJECTION_PATTERNS = [
 
 # Hard deny patterns — always block (circuit breaker, even in bypass mode)
 _HARD_DENY_PATTERNS = [
-    (re.compile(r'\brm\s+.*-rf\s+/\s*$'), "rm -rf / destroys the filesystem"),
-    (re.compile(r'\brm\s+.*-rf\s+~'), "rm -rf ~ destroys home directory"),
-    (re.compile(r'\brm\s+.*-rf\s+\*'), "rm -rf * destroys all files"),
-    (re.compile(r'\brm\s+.*-rf\s+\.'), "rm -rf . destroys current directory"),
+    (re.compile(r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+/\s*$'), "rm -rf / destroys the filesystem"),
+    (re.compile(r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+~'), "rm -rf ~ destroys home directory"),
+    (re.compile(r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+\*'), "rm -rf * destroys all files"),
+    (re.compile(r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+\.'), "rm -rf . destroys current directory"),
+    (re.compile(r'\brm\s+.*--recursive\s+.*--force\s+'), "rm --recursive --force is dangerous"),
+    (re.compile(r'\brm\s+.*--force\s+.*--recursive\s+'), "rm --force --recursive is dangerous"),
     (re.compile(r'\bmkfs\b'), "mkfs formats a filesystem"),
     (re.compile(r'\bdd\s+if=.*of=/dev/'), "dd to device overwrites disk"),
     (re.compile(r':\(\)\s*\{.*:\|:.*\}'), "fork bomb detected"),
-    (re.compile(r'\bshutdown\b'), "shutdown command"),
-    (re.compile(r'\breboot\b'), "reboot command"),
-    (re.compile(r'\bhalt\b'), "halt command"),
+    (re.compile(r'(?:^|[;&|]\s*)shutdown\b'), "shutdown command"),
+    (re.compile(r'(?:^|[;&|]\s*)reboot\b'), "reboot command"),
+    (re.compile(r'(?:^|[;&|]\s*)halt\b'), "halt command"),
     (re.compile(r'\bchmod\s+.*-R\s+777\s+/(?:\s|$)'), "chmod 777 / is dangerous"),
     (re.compile(r'\b(curl|wget)\s+.*\|\s*(bash|sh|zsh)\b'), "download-and-execute is dangerous"),
     (re.compile(r'\b(curl|wget)\s+.*\b(ENV|env|\.env|credentials|\.ssh)\b'), "potential credential exfiltration"),
@@ -250,7 +252,7 @@ def classify_action_regex(
     if tool_name == "run_command":
         cmd = command or tool_args.get("command", "")
     elif tool_name == "execute_python":
-        cmd = f"python: {tool_args.get('code', '')[:200]}"
+        cmd = f"python: {tool_args.get('code', '')}"
     else:
         cmd = ""
 
@@ -468,9 +470,14 @@ Is this action safe to execute?"""
                 source="model",
             )
     except Exception:
-        # If model classifier fails, fall through to allow
-        # (Claude Code's approach: classifier failure doesn't block)
-        return None
+        # Fail closed: if model classifier is unavailable, return SOFT_DENY
+        # so the user is prompted rather than silently allowing
+        return ClassificationResult(
+            decision=SafetyDecision.SOFT_DENY,
+            reason="Model classifier unavailable (API error) — manual review required",
+            rule_matched="classifier_unavailable",
+            source="model",
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -376,7 +376,7 @@ def main():
     parser.add_argument("--auto-approve", "-y", action="store_true", help="Auto-approve all write operations")
     parser.add_argument("--dry-run", action="store_true", help="Dry-run mode (show but don't execute)")
     parser.add_argument("--plan", action="store_true", help="Plan mode (read-only operations only)")
-    parser.add_argument("--max-steps", type=int, default=20, help="Max agent steps (default: 20)")
+    parser.add_argument("--max-steps", type=int, default=None, help="Max agent steps (default: 20)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output with trace logs")
     parser.add_argument("--log-file", help="Log file path")
     parser.add_argument("--config", "-c", help="Configuration file path")
@@ -409,7 +409,7 @@ def main():
         model=args.model or config.get("model"),
         auto_approve=args.auto_approve or config.get("auto_approve", False),
         dry_run=args.dry_run or config.get("dry_run", False),
-        max_steps=args.max_steps if args.max_steps != 20 else config.get("max_steps", 20),
+        max_steps=args.max_steps if args.max_steps is not None else config.get("max_steps", 20),
         verbose=args.verbose,
         log_file=args.log_file or config.get("log_file"),
         plan_mode=args.plan or config.get("plan_mode", False),
@@ -458,7 +458,10 @@ def main():
         start_time = time.time()
         result = harness.run(task)
         duration = time.time() - start_time
-        _output(result, args.output_format, duration=duration)
+        # Retrieve session info for structured output
+        last_session = getattr(harness, '_last_session', None)
+        last_steps = getattr(harness, '_last_steps', 0)
+        _output(result, args.output_format, session=last_session, steps=last_steps, duration=duration)
         return
 
     # Interactive REPL mode
@@ -549,6 +552,7 @@ def main():
         try:
             user_input = input(f"You [{token_str}/{max_str}]: ").strip()
         except (EOFError, KeyboardInterrupt):
+            session.save_meta_to_jsonl()
             scheduler.stop()
             print("\nBye!")
             break
@@ -581,7 +585,7 @@ def main():
         if user_input.startswith("/"):
             parts = user_input.split()
             cmd = [parts[0].lower()] + parts[1:]
-            action, session = _handle_command(cmd, harness, session, memory_store, checkpoint_manager)
+            action, session = _handle_command(cmd, harness, session, memory_store, checkpoint_manager, session_dir)
             if action == "quit":
                 break
             continue
@@ -625,13 +629,14 @@ def main():
             # The agent loop will check the abort flag at the next step boundary
 
 
-def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None):
+def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None, session_dir=None):
     """Handle a single REPL command.
 
     Returns (action, session) where action is 'quit' or 'continue'.
     The session may be replaced by /load.
     """
     if cmd[0] in ("/quit", "/exit", "/q"):
+        session.save_meta_to_jsonl()
         from .tools.scheduler_tools import get_scheduler
         sched = get_scheduler()
         if sched:
@@ -642,6 +647,14 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
         print_help()
     elif cmd[0] == "/clear":
         session.messages.clear()
+        # Also truncate the JSONL file so cleared state persists
+        if session.auto_save_dir:
+            jsonl_path = os.path.join(session.auto_save_dir, f"{session.session_id}.jsonl")
+            try:
+                with open(jsonl_path, "w", encoding="utf-8"):
+                    pass
+            except OSError:
+                pass
         print("Session cleared.")
     elif cmd[0] == "/tools":
         print("\nAvailable tools:")
@@ -840,6 +853,18 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
         old_id = session.session_id
         session.session_id = new_id
         session.name = f"fork-{old_id[:8]}"
+        # Write all existing messages to the new session's JSONL
+        if session.auto_save_dir:
+            new_path = os.path.join(session.auto_save_dir, f"{new_id}.jsonl")
+            try:
+                with open(new_path, "w", encoding="utf-8") as f:
+                    for msg in session.messages:
+                        f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+            except OSError as e:
+                print(f"Warning: could not write fork session file: {e}")
+        # Update checkpoint_manager to new session
+        if checkpoint_manager:
+            checkpoint_manager.session_id = new_id
         print(f"Session forked: {old_id} → {new_id}")
     elif cmd[0] == "/save" and len(cmd) > 1:
         try:
@@ -850,6 +875,10 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
     elif cmd[0] == "/load" and len(cmd) > 1:
         try:
             session = Session.load(cmd[1])
+            session.auto_save_dir = session_dir
+            # Update checkpoint_manager to loaded session
+            if checkpoint_manager:
+                checkpoint_manager.session_id = session.session_id
             print(f"Session loaded from {cmd[1]}")
         except Exception as e:
             print(f"Error: {e}")

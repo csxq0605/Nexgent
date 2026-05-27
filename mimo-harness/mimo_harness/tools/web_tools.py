@@ -122,8 +122,35 @@ def web_fetch(params: dict) -> str:
             return cached_result
     try:
         import requests
+        # S14: Pre-resolve DNS and pin IP to mitigate DNS rebinding TOCTOU
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+        pinned_ip = None
+        if hostname:
+            try:
+                resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                for _, _, _, _, sockaddr in resolved:
+                    ip = ipaddress.ip_address(sockaddr[0])
+                    if not (ip.is_private or ip.is_loopback or ip.is_link_local):
+                        pinned_ip = sockaddr[0]
+                        break
+            except (socket.gaierror, OSError, ValueError):
+                pass
+
         resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15, stream=True)
         resp.raise_for_status()
+
+        # Post-request DNS re-check: verify IP didn't change (DNS rebinding detection)
+        if pinned_ip and hostname:
+            try:
+                post_resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                post_ips = {sockaddr[0] for _, _, _, _, sockaddr in post_resolved}
+                if pinned_ip not in post_ips:
+                    resp.close()
+                    return json.dumps({"error": f"DNS rebinding detected for '{hostname}' — IP changed during request"})
+            except (socket.gaierror, OSError):
+                pass  # DNS failure after request is less concerning
         # Read with size limit to prevent memory exhaustion
         content_bytes = b""
         for chunk in resp.iter_content(chunk_size=8192):

@@ -973,6 +973,8 @@ class TestOutputFormat:
         with patch("mimo_harness.cli.MiMoHarness") as MockHarness:
             mock_instance = MagicMock()
             mock_instance.run.return_value = "Result text"
+            mock_instance._last_session = None
+            mock_instance._last_steps = 0
             MockHarness.return_value = mock_instance
             from mimo_harness.cli import main
             main()
@@ -991,6 +993,8 @@ class TestOutputFormat:
         with patch("mimo_harness.cli.MiMoHarness") as MockHarness:
             mock_instance = MagicMock()
             mock_instance.run.return_value = "Stream result"
+            mock_instance._last_session = None
+            mock_instance._last_steps = 0
             MockHarness.return_value = mock_instance
             from mimo_harness.cli import main
             main()

@@ -66,10 +66,10 @@ class TestMatchCron:
         assert _match_cron("* *", now) is False
 
     def test_day_of_week(self):
-        # tm_wday=0 is Monday
+        # tm_wday=0 is Monday. Standard cron: 0=Sun, 1=Mon, ..., 6=Sat
         now = time.struct_time((2026, 5, 26, 14, 30, 0, 0, 146, 0))
-        assert _match_cron("* * * * 0", now) is True
-        assert _match_cron("* * * * 1", now) is False
+        assert _match_cron("* * * * 1", now) is True   # 1=Monday
+        assert _match_cron("* * * * 0", now) is False  # 0=Sunday, not Monday
 
     def test_range_in_cron(self):
         now = time.struct_time((2026, 5, 26, 14, 30, 0, 0, 146, 0))

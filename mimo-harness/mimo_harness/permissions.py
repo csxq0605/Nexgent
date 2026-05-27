@@ -42,8 +42,8 @@ PROTECTED_FILES = {".gitconfig", ".gitmodules", ".bashrc", ".bash_profile", ".zs
 
 def _is_protected_path(path: str) -> bool:
     """S4: Check if any component of the path matches protected dirs/files."""
-    # Normalize and split the path into components
-    normalized = os.path.normpath(path)
+    # Resolve symlinks and normalize — prevents symlink bypass attacks
+    normalized = os.path.realpath(path)
     components = normalized.split(os.sep)
     filename = os.path.basename(normalized)
 
@@ -312,11 +312,12 @@ class PermissionGate:
         """H2: Check for dangerous destructive patterns (circuit breaker for BYPASS mode)."""
         import re
         patterns = [
-            r'\brm\s+.*-rf\s+/', r'\brm\s+.*-rf\s+~',
-            r'\brm\s+.*-rf\s+\*', r'\brm\s+.*-rf\s+\.',
+            r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+/', r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+~',
+            r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+\*', r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+\.',
+            r'\brm\s+.*--recursive\s+.*--force', r'\brm\s+.*--force\s+.*--recursive',
             r'\bmkfs\b', r'\bdd\s+if=.*of=/dev/',
             r'\bchmod\s+.*-R\s+777\s+/',
-            r'\bshutdown\b', r'\breboot\b', r'\bhalt\b',
+            r'(?:^|[;&|]\s*)shutdown\b', r'(?:^|[;&|]\s*)reboot\b', r'(?:^|[;&|]\s*)halt\b',
             r':\(\)\s*\{.*:\|:.*\}',  # fork bomb
         ]
         for pat in patterns:
@@ -330,8 +331,19 @@ class PermissionGate:
         if path and _is_protected_path(path):
             return True
         command = params.get("command", "")
-        if command and _is_protected_path(command):
-            return True
+        if command:
+            # Extract shell redirection targets (>, >>) and check them
+            import re as _re
+            redirects = _re.findall(r'>+\s*([^\s;|&]+)', command)
+            for target in redirects:
+                if _is_protected_path(target):
+                    return True
+            # Also check arguments that look like file paths to protected files
+            # (e.g., echo x .env, cp file .env)
+            parts = command.split()
+            for part in parts[1:]:  # skip the command name
+                if _is_protected_path(part):
+                    return True
         return False
 
     def _has_protected_path(self, action_desc: str) -> bool:
@@ -365,11 +377,20 @@ class PermissionGate:
         )
         return approved
 
+    @staticmethod
+    def _redact(desc: str) -> str:
+        """Redact potentially sensitive paths and tokens from log entries."""
+        # Mask file paths that look like absolute paths
+        desc = re.sub(r'(?:[A-Za-z]:)?(?:/|\\)[^\s,;\)]{10,}', '[REDACTED_PATH]', desc)
+        # Mask tokens/keys/secrets in args
+        desc = re.sub(r'(?i)(token|key|secret|password|auth)[=:]\s*\S+', r'\1=[REDACTED]', desc)
+        return desc
+
     def _log(self, perm: Permission, desc: str, result: str):
         self.approval_log.append({
             "timestamp": datetime.now().isoformat(),
             "permission": perm.value,
-            "action": desc,
+            "action": self._redact(desc),
             "result": result,
             "mode": self.mode.value,
         })

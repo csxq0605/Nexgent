@@ -110,12 +110,17 @@ class Session:
         than raising, so that valid messages before a corrupt trailing line are
         preserved. A ValueError is raised only if NO valid messages are found.
 
+        Session metadata (name, compaction_count, working_dir) is stored as a
+        special __session_meta__ message at the end of the file and restored
+        on load.
+
         Returns a LoadResult(session, skipped) where skipped is the count of
         invalid lines that were silently dropped.
         """
         messages = []
         skipped = 0
         created_at = os.path.getmtime(path)
+        session_meta = {}
         with open(path, "r", encoding="utf-8") as f:
             for i, line in enumerate(f, 1):
                 line = line.strip()
@@ -126,7 +131,14 @@ class Session:
                 except json.JSONDecodeError:
                     skipped += 1
                     continue
-                if not isinstance(msg, dict) or "role" not in msg:
+                if not isinstance(msg, dict):
+                    skipped += 1
+                    continue
+                # Extract session metadata (not a real message)
+                if msg.get("role") == "__session_meta__":
+                    session_meta = msg.get("meta", {})
+                    continue
+                if "role" not in msg:
                     skipped += 1
                     continue
                 messages.append(msg)
@@ -140,8 +152,31 @@ class Session:
             session_id=session_id,
             messages=messages,
             created_at=created_at,
+            name=session_meta.get("name", ""),
+            compaction_count=session_meta.get("compaction_count", 0),
+            working_dir=session_meta.get("working_dir", ""),
         )
         return LoadResult(session=session, skipped=skipped)
+
+    def save_meta_to_jsonl(self):
+        """Append session metadata as a special line to the JSONL file.
+
+        Called before closing a session to persist name, compaction_count, etc.
+        """
+        if not self.auto_save_dir:
+            return
+        os.makedirs(self.auto_save_dir, exist_ok=True)
+        path = os.path.join(self.auto_save_dir, f"{self.session_id}.jsonl")
+        meta_msg = {
+            "role": "__session_meta__",
+            "meta": {
+                "name": self.name,
+                "compaction_count": self.compaction_count,
+                "working_dir": self.working_dir,
+            },
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(meta_msg, ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +209,7 @@ class CheckpointManager:
         import json as _json
         meta_path = os.path.join(dest_dir, "meta.json")
         with open(meta_path, "w", encoding="utf-8") as f:
-            _json.dump({"original_path": abs_path, "safe_name": safe_name}, f)
+            _json.dump([{"original_path": abs_path, "safe_name": safe_name}], f)
         return dest
 
     def restore_last(self) -> list[str]:
@@ -185,24 +220,29 @@ class CheckpointManager:
         if not os.path.isdir(checkpoint_path):
             return []
         restored = []
-        # Load metadata if available
+        # Load metadata if available (supports both list and single-object formats)
         meta_path = os.path.join(checkpoint_path, "meta.json")
-        original_path = None
+        meta_entries = []
         if os.path.exists(meta_path):
             import json as _json
-            with open(meta_path, "r", encoding="utf-8") as f:
-                meta = _json.load(f)
-                original_path = meta.get("original_path")
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    raw_meta = _json.load(f)
+                if isinstance(raw_meta, list):
+                    meta_entries = raw_meta
+                elif isinstance(raw_meta, dict):
+                    meta_entries = [raw_meta]
+            except (json.JSONDecodeError, OSError):
+                pass
+        # Build lookup: safe_name -> original_path
+        path_lookup = {e["safe_name"]: e["original_path"] for e in meta_entries if "safe_name" in e and "original_path" in e}
         for filename in os.listdir(checkpoint_path):
             if filename == "meta.json":
                 continue
             src = os.path.join(checkpoint_path, filename)
             if os.path.isfile(src):
                 # Restore to original path if available, else cwd
-                if original_path:
-                    dest = original_path
-                else:
-                    dest = os.path.join(os.getcwd(), filename)
+                dest = path_lookup.get(filename, os.path.join(os.getcwd(), filename))
                 os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
                 shutil.copy2(src, dest)
                 restored.append(dest)
@@ -231,11 +271,21 @@ class CheckpointManager:
         dest = os.path.join(self._batch_dir, safe_name)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copy2(file_path, dest)
-        # Store metadata
+        # Accumulate metadata entries (don't overwrite)
         meta_path = os.path.join(self._batch_dir, "meta.json")
         import json as _json
+        existing = []
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    existing = _json.load(f)
+                if not isinstance(existing, list):
+                    existing = [existing]
+            except (json.JSONDecodeError, OSError):
+                existing = []
+        existing.append({"original_path": abs_path, "safe_name": safe_name})
         with open(meta_path, "w", encoding="utf-8") as f:
-            _json.dump({"original_path": abs_path, "safe_name": safe_name}, f)
+            _json.dump(existing, f)
         return dest
 
     def end_batch(self):
@@ -444,7 +494,7 @@ def estimate_tokens(messages: list) -> int:
             # System prompts are structured text
             ratio = 3.8
         elif isinstance(content, str) and any(
-            marker in content for marker in ["```", "def ", "class ", "import ", "{", "}"]
+            marker in content for marker in ["```", "def ", "class ", "import ", "function ", "const ", "let ", "var "]
         ):
             # Code-heavy content
             ratio = 3.5
@@ -453,8 +503,10 @@ def estimate_tokens(messages: list) -> int:
             ratio = 4.2
 
         # Account for JSON structure overhead (keys, brackets, quotes)
-        # which have very low chars/token ratio
-        json_overhead = raw.count('"') * 0.5 + raw.count('{') * 0.3 + raw.count('}') * 0.3
+        # which have very low chars/token ratio. Only count structural JSON
+        # braces at the start/end of the serialized string to avoid inflating
+        # estimates for content that happens to contain braces.
+        json_overhead = raw.count('"') * 0.3
         total_tokens += int((char_count + json_overhead) / ratio)
 
     return max(total_tokens, 1)
@@ -692,8 +744,14 @@ def _resolve_imports(content: str, base_dir: str, depth: int = 0) -> str:
             resolved = os.path.abspath(abs_path)
         except (ValueError, OSError):
             return match.group(0)
-        if not resolved.startswith(base_abs + os.sep) and resolved != base_abs:
-            return match.group(0)  # Reject path traversal
+        # Case-insensitive comparison on Windows for path traversal check
+        base_prefix = base_abs + os.sep
+        if platform.system() == "Windows":
+            if not resolved.lower().startswith(base_prefix.lower()) and resolved.lower() != base_abs.lower():
+                return match.group(0)
+        else:
+            if not resolved.startswith(base_prefix) and resolved != base_abs:
+                return match.group(0)
         if not os.path.exists(abs_path):
             return match.group(0)  # Leave unresolved imports as-is
         try:
