@@ -441,7 +441,8 @@ def main():
     stdin_content = ""
     try:
         if not sys.stdin.isatty():
-            stdin_content = sys.stdin.read()
+            # D4: Limit stdin to 1MB to prevent OOM on large pipe input
+            stdin_content = sys.stdin.read(1_000_000)
     except (OSError, EOFError):
         pass
 

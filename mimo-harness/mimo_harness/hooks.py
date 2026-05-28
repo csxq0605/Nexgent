@@ -12,6 +12,7 @@ Implements Ch8 patterns:
 import json
 import subprocess
 import platform
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Callable
@@ -271,6 +272,16 @@ class HookRunner:
                 proc.stdin.close()
             except Exception:
                 pass  # If stdin write fails, let the process continue
+            # L11: Reap process in background with timeout to prevent zombies
+            def _reap():
+                try:
+                    proc.wait(timeout=config.timeout or 30)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                except Exception:
+                    pass
+            threading.Thread(target=_reap, daemon=True).start()
         except Exception:
             pass  # Async hooks are fire-and-forget
 

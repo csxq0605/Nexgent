@@ -119,6 +119,7 @@ class Session:
         """
         messages = []
         skipped = 0
+        total_lines = 0
         created_at = os.path.getmtime(path)
         session_meta = {}
         with open(path, "r", encoding="utf-8") as f:
@@ -126,6 +127,7 @@ class Session:
                 line = line.strip()
                 if not line:
                     continue
+                total_lines += 1
                 try:
                     msg = json.loads(line)
                 except json.JSONDecodeError:
@@ -141,12 +143,19 @@ class Session:
                 if "role" not in msg:
                     skipped += 1
                     continue
+                # D5: Validate role is a known value to prevent injection via crafted JSONL
+                valid_roles = {"system", "user", "assistant", "tool"}
+                if msg["role"] not in valid_roles:
+                    skipped += 1
+                    continue
                 messages.append(msg)
         if not messages and skipped > 0:
             raise ValueError(
                 f"No valid messages found in {os.path.basename(path)} "
                 f"({skipped} invalid line(s))"
             )
+        # L2: Corrupt threshold is checked by callers via LoadResult.skipped
+        # (cli.py's _resume_by_session_id handles file renaming)
         session_id = os.path.splitext(os.path.basename(path))[0]
         session = cls(
             session_id=session_id,
@@ -188,6 +197,7 @@ class CheckpointManager:
     def __init__(self, session_id: str):
         self.checkpoint_dir = os.path.join(".mimo", "checkpoints", session_id)
         self._seq = 0
+        self._restored_seqs: set = set()  # L12: Track restored checkpoints
         self._batch_dir: Optional[str] = None
 
     def snapshot(self, file_path: str) -> str:
@@ -215,6 +225,9 @@ class CheckpointManager:
     def restore_last(self) -> list[str]:
         """Restore all files from the latest checkpoint. Returns list of restored paths."""
         if self._seq == 0:
+            return []
+        # L12: Guard against double-restore of the same checkpoint
+        if self._seq in self._restored_seqs:
             return []
         checkpoint_path = os.path.join(self.checkpoint_dir, str(self._seq))
         if not os.path.isdir(checkpoint_path):
@@ -246,6 +259,7 @@ class CheckpointManager:
                 os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
                 shutil.copy2(src, dest)
                 restored.append(dest)
+        self._restored_seqs.add(self._seq)  # L12: Mark as restored
         self._seq -= 1
         return restored
 
@@ -502,10 +516,8 @@ def estimate_tokens(messages: list) -> int:
             # Natural language
             ratio = 4.2
 
-        # Account for JSON structure overhead (keys, brackets, quotes)
-        # which have very low chars/token ratio.
-        json_overhead = raw.count('"') * 0.5 + raw.count('{') * 0.3 + raw.count('}') * 0.3
-        total_tokens += int((char_count + json_overhead) / ratio)
+        # L3: Use content length directly (JSON structure already included in char_count)
+        total_tokens += int(char_count / ratio)
 
     return max(total_tokens, 1)
 

@@ -59,8 +59,8 @@ def _validate_url(url: str) -> str | None:
     # Check if hostname is a raw IP
     try:
         ip = ipaddress.ip_address(hostname)
-        if ip.is_private or ip.is_loopback or ip.is_link_local:
-            return f"Access to private IP '{hostname}' is not allowed"
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return f"Access to private/reserved IP '{hostname}' is not allowed"
         return None
     except ValueError:
         pass
@@ -70,8 +70,8 @@ def _validate_url(url: str) -> str | None:
         resolved_ips = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         for _, _, _, _, sockaddr in resolved_ips:
             ip = ipaddress.ip_address(sockaddr[0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local:
-                return f"Domain '{hostname}' resolves to private IP '{ip}' — blocked"
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return f"Domain '{hostname}' resolves to restricted IP '{ip}' — blocked"
     except (socket.gaierror, OSError):
         pass  # DNS failure — let the request fail naturally
 
@@ -136,32 +136,37 @@ def web_fetch(params: dict) -> str:
         from urllib.parse import urlparse
         parsed = urlparse(url)
         hostname = parsed.hostname or ""
-        pinned_ip = None
+        pre_ips = set()
         if hostname:
             try:
                 resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
                 for _, _, _, _, sockaddr in resolved:
                     ip = ipaddress.ip_address(sockaddr[0])
-                    if not (ip.is_private or ip.is_loopback or ip.is_link_local):
-                        pinned_ip = sockaddr[0]
-                        break
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                        return json.dumps({"error": f"Domain '{hostname}' resolves to restricted IP '{ip}' — blocked"})
+                    pre_ips.add(sockaddr[0])
             except (socket.gaierror, OSError, ValueError):
                 pass
 
-        # DNS rebinding defense: pre-resolve rejects private IPs (above),
-        # post-request re-check detects IP change (below). No need to replace
-        # hostname with IP in the URL (which breaks IPv6, userinfo, ports, and TLS).
+        # DNS rebinding defense: pre-resolve rejects restricted IPs (above),
+        # post-request re-check detects IP change (below).
         resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15, stream=True)
         resp.raise_for_status()
 
-        # Post-request DNS re-check: verify IP didn't change (DNS rebinding detection)
-        if pinned_ip and hostname:
+        # Post-request DNS re-check: verify IPs didn't change (DNS rebinding detection)
+        if pre_ips and hostname:
             try:
                 post_resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
                 post_ips = {sockaddr[0] for _, _, _, _, sockaddr in post_resolved}
-                if pinned_ip not in post_ips:
+                if not post_ips.intersection(pre_ips):
                     resp.close()
                     return json.dumps({"error": f"DNS rebinding detected for '{hostname}' — IP changed during request"})
+                # Also check post-resolve IPs are still safe
+                for post_ip_str in post_ips:
+                    post_ip = ipaddress.ip_address(post_ip_str)
+                    if post_ip.is_private or post_ip.is_loopback or post_ip.is_link_local or post_ip.is_reserved:
+                        resp.close()
+                        return json.dumps({"error": f"DNS rebinding detected: '{hostname}' now resolves to restricted IP '{post_ip}'"})
             except (socket.gaierror, OSError):
                 pass  # DNS failure after request is less concerning
         # Read with size limit to prevent memory exhaustion

@@ -102,9 +102,17 @@ class MemoryStore:
         filepath = os.path.join(self.memory_dir, filename)
 
         # Build frontmatter content (Ch6: YAML frontmatter format)
+        # L4: Escape YAML special characters in name and description
+        def _yaml_escape(val: str) -> str:
+            # Only quote if value contains truly problematic YAML characters
+            _NEEDS_QUOTE = set(':#,{}[]&*?|<>!=%@`\'"\n\r\t')
+            if any(c in _NEEDS_QUOTE for c in val):
+                return f'"{val.replace(chr(10), " ").replace(chr(13), "").replace('"', '\\"')}"'
+            return val
+
         file_content = f"""---
-name: {name}
-description: {description}
+name: {_yaml_escape(name)}
+description: {_yaml_escape(description)}
 metadata:
   type: {memory_type.value}
   created: {time.strftime('%Y-%m-%d %H:%M:%S')}
@@ -209,11 +217,11 @@ metadata:
         if not topic_name.endswith(".md"):
             topic_name = f"{topic_name}.md"
         filepath = os.path.join(self.memory_dir, topic_name)
-        if not os.path.exists(filepath):
-            return ""
-        # Path security
+        # Path security — validate before existence check to prevent oracle
         error = self._validate_path(filepath)
         if error:
+            return ""
+        if not os.path.exists(filepath):
             return ""
         try:
             with open(filepath, "r", encoding="utf-8") as f:
@@ -246,14 +254,19 @@ metadata:
                     content = f.read()
                 name, description = self._parse_frontmatter(content, filename)
 
-                # Parse type from frontmatter
+                # L5: Parse type from frontmatter only (between --- markers)
                 memory_type = MemoryType.PROJECT  # default
+                in_frontmatter = False
                 for line in content.split("\n"):
-                    if "type:" in line:
+                    if line.strip() == "---":
+                        in_frontmatter = not in_frontmatter
+                        continue
+                    if in_frontmatter and "type:" in line:
                         for mt in MemoryType:
                             if mt.value in line:
                                 memory_type = mt
                                 break
+                        break
 
                 entries.append(MemoryEntry(
                     name=name,

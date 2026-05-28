@@ -109,7 +109,7 @@ _INJECTION_PATTERNS = [
 # Hard deny patterns — always block (circuit breaker, even in bypass mode)
 _HARD_DENY_PATTERNS = [
     # Case-insensitive rm -rf patterns (re.IGNORECASE handles -Rf, -rF, -RF, etc.)
-    (re.compile(r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+/\s*$', re.IGNORECASE), "rm -rf / destroys the filesystem"),
+    (re.compile(r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+/(?:\s|\)|$)', re.IGNORECASE), "rm -rf / destroys the filesystem"),
     (re.compile(r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+~', re.IGNORECASE), "rm -rf ~ destroys home directory"),
     (re.compile(r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+\*', re.IGNORECASE), "rm -rf * destroys all files"),
     (re.compile(r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+\.', re.IGNORECASE), "rm -rf . destroys current directory"),
@@ -125,7 +125,9 @@ _HARD_DENY_PATTERNS = [
     (re.compile(r'(?:^|[;&|]\s*)(?:sudo\s+)?reboot\b', re.IGNORECASE), "reboot command"),
     (re.compile(r'(?:^|[;&|]\s*)(?:sudo\s+)?halt\b', re.IGNORECASE), "halt command"),
     (re.compile(r'\bchmod\s+.*-R\s+777\s+/(?:\s|$)', re.IGNORECASE), "chmod 777 / is dangerous"),
-    (re.compile(r'\b(curl|wget)\s+.*\|\s*(bash|sh|zsh)\b', re.IGNORECASE), "download-and-execute is dangerous"),
+    (re.compile(r'\b(curl|wget)\s+.*\|\s*(bash|sh|zsh)\b', re.IGNORECASE), "download-and-execute via pipe is dangerous"),
+    (re.compile(r'\b(curl|wget)\s+.*-o\s+\S+.*&&\s*(bash|sh|zsh)\b', re.IGNORECASE), "download-then-execute is dangerous"),
+    (re.compile(r'\b(curl|wget)\s+.*&&\s*(bash|sh|zsh)\s+\S+', re.IGNORECASE), "download-then-execute is dangerous"),
     (re.compile(r'\b(curl|wget)\s+.*\b(ENV|env|\.env|credentials|\.ssh)\b', re.IGNORECASE), "potential credential exfiltration"),
     (re.compile(r'\b(curl|wget)\s+.*-d\s+.*\b(key|token|secret|password)\b', re.IGNORECASE),
      "sending credentials to external endpoint"),
@@ -256,7 +258,11 @@ def classify_action_regex(
     if tool_name == "run_command":
         cmd = command or tool_args.get("command", "")
     elif tool_name == "execute_python":
-        cmd = f"python: {tool_args.get('code', '')[:2000]}"
+        code = tool_args.get('code', '')
+        # Check first 10000 chars and last 2000 chars to prevent truncation bypass
+        cmd = f"python: {code[:10000]}"
+        if len(code) > 10000:
+            cmd += f"\npython_tail: {code[-2000:]}"
     else:
         cmd = ""
 
@@ -458,6 +464,15 @@ Is this action safe to execute?"""
         result = json.loads(result_text)
         decision = result.get("decision", "allow")
         reason = result.get("reason", "Model classifier decision")
+
+        # L7: Strict validation of decision field
+        if decision not in ("allow", "deny"):
+            return ClassificationResult(
+                decision=SafetyDecision.HARD_DENY,
+                reason=f"Model classifier returned invalid decision: {decision!r}",
+                rule_matched="model_classifier",
+                source="model",
+            )
 
         if decision == "deny":
             return ClassificationResult(

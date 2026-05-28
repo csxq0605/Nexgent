@@ -45,8 +45,8 @@ READONLY_PREFIXES = [
     "python --version", "pip list", "pip show", "node --version", "npm list",
     "uname", "hostname", "whoami", "date",
     # S19: extended readonly prefixes
-    "grep", "stat", "env", "printenv", "realpath", "readlink",
-    "basename", "dirname", "sort", "uniq", "cut", "tr", "sed -n",
+    "grep", "stat", "printenv", "realpath", "readlink",
+    "basename", "dirname", "sort", "uniq", "cut", "tr",
 ]
 
 # S8: Wrapper prefixes that should be stripped before readonly detection

@@ -1277,9 +1277,9 @@ class TestShellReadonlyExtended:
         """S19: 'stat file.txt' is readonly."""
         assert shell._is_readonly("stat file.txt")
 
-    def test_env_is_readonly(self):
-        """S19: 'env' is readonly."""
-        assert shell._is_readonly("env")
+    def test_env_is_not_readonly(self):
+        """M4: 'env' is NOT readonly — it can execute commands (env VAR=val cmd)."""
+        assert not shell._is_readonly("env")
 
     def test_printenv_is_readonly(self):
         """S19: 'printenv PATH' is readonly."""

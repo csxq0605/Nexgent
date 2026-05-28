@@ -12,6 +12,7 @@ import json
 import os
 import re
 import fnmatch
+import platform
 from enum import Enum
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -44,6 +45,9 @@ def _is_protected_path(path: str) -> bool:
     """S4: Check if any component of the path matches protected dirs/files."""
     # Resolve symlinks and normalize — prevents symlink bypass attacks
     normalized = os.path.realpath(path)
+    # L9: On Windows, also normalize case for consistent comparison
+    if platform.system() == "Windows":
+        normalized = os.path.normcase(normalized)
     components = normalized.split(os.sep)
     filename = os.path.basename(normalized)
 
@@ -312,7 +316,7 @@ class PermissionGate:
         """H2: Check for dangerous destructive patterns (circuit breaker for BYPASS mode)."""
         import re
         patterns = [
-            r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+/', r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+~',
+            r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+/(?:\s|\)|$)', r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+~',
             r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+\*', r'\brm\s+.*-[^\s]*r[^\s]*f[^\s]*\s+\.',
             r'\brm\s+.*--recursive\s+.*--force', r'\brm\s+.*--force\s+.*--recursive',
             r'\brm\s+.*--recursive\b.*-[^\s]*f', r'\brm\s+.*-[^\s]*r\b.*--force\b',

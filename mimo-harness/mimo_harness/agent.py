@@ -176,6 +176,8 @@ class TokenBudget:
 def retry_with_backoff(fn, max_retries: int = 3, base_delay: float = 1.0):
     last_error = None
     last_traceback = None
+    # L10: Also retry on common network errors (no status_code attribute)
+    _NETWORK_ERRORS = (ConnectionError, TimeoutError, ConnectionResetError, BrokenPipeError, ConnectionAbortedError)
     for attempt in range(max_retries):
         try:
             return fn()
@@ -184,6 +186,10 @@ def retry_with_backoff(fn, max_retries: int = 3, base_delay: float = 1.0):
             last_traceback = e.__traceback__
             status = getattr(e, "status_code", None)
             if status and status not in (429, 500, 502, 503, 504):
+                raise
+            # Retry on HTTP status errors OR network errors
+            is_retryable = (status in (429, 500, 502, 503, 504)) or isinstance(e, _NETWORK_ERRORS)
+            if not is_retryable:
                 raise
             if attempt < max_retries - 1:
                 time.sleep(base_delay * (2 ** attempt))
@@ -610,17 +616,22 @@ You help users with coding, file operations, web research, document creation, an
         self.circuit_breaker.reset()
         # Reset thrashing warning flag for new task
         self._thrash_warned = False
+        # L1: Reset thrashing counters for new task
+        self._compaction_attempts = 0
+        self._compaction_failures = 0
 
         for step in range(self.max_steps):
             # Termination check: graceful abort (Esc / Ctrl+C during execution)
             if self.graceful_abort.is_requested():
                 self.logger.info("[ABORT] Graceful abort requested by user")
                 self.graceful_abort.reset()
+                self._last_session = session
                 return "[ABORTED] Stopped by user request."
 
             # Termination check: time limit
             if time.time() - start_time > self.max_duration:
                 self.logger.info(f"[LIMIT] Time limit exceeded ({self.max_duration}s)")
+                self._last_session = session
                 return "[LIMIT] Time limit exceeded"
 
             # Termination check: circuit breaker (Ch7)
@@ -629,6 +640,7 @@ You help users with coding, file operations, web research, document creation, an
                     f"[CIRCUIT_BREAKER] {self.circuit_breaker.consecutive_failures} "
                     f"consecutive failures. Stopping."
                 )
+                self._last_session = session
                 return "[ERROR] Circuit breaker open — too many consecutive failures"
 
             # A8: Skip auto-compaction if thrashing detected
@@ -674,6 +686,7 @@ You help users with coding, file operations, web research, document creation, an
             self.token_budget.update(messages)
             if self.token_budget.is_blocked():
                 self.logger.error("[TOKEN_LIMIT] Context window exceeded")
+                self._last_session = session
                 return "[ERROR] Token budget exceeded — context too long"
 
             if self.token_budget.is_warning():
@@ -767,7 +780,12 @@ You help users with coding, file operations, web research, document creation, an
                 return final
 
             # Process tool calls (Ch3: tool dispatch with fail-closed defaults)
-            msg_dict = message.model_dump()
+            try:
+                msg_dict = message.model_dump()
+            except Exception:
+                self.logger.error("[MODEL_ERROR] Failed to serialize response")
+                self.circuit_breaker.record_failure()
+                continue
             if msg_dict.get("content") is None:
                 msg_dict["content"] = ""
             session.add_message(msg_dict["role"], msg_dict["content"],

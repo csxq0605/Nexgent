@@ -278,7 +278,7 @@ def grep_files(params: dict) -> str:
                             if only_matching:
                                 match_text = m.group(0)[:200]
                             else:
-                                match_text = m.group(0)[:200]
+                                match_text = line.rstrip()[:200]
                             entry: dict = {"file": fpath}
                             if show_line_numbers:
                                 entry["line"] = line_num
@@ -348,7 +348,7 @@ def grep_files(params: dict) -> str:
         return json.dumps({
             "pattern": pattern,
             "results": sliced,
-            "total": len(results),
+            "total": total_raw,
             "truncated": truncated,
         })
     except Exception as e:

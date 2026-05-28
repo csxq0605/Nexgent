@@ -101,7 +101,8 @@ class ToolRegistry:
         # Check parameter types (basic validation)
         for key, value in params.items():
             if key in properties:
-                expected_type = properties[key].get("type")
+                prop = properties[key]
+                expected_type = prop.get("type")
                 if expected_type == "string" and not isinstance(value, str):
                     return f"Parameter '{key}' must be a string"
                 # Check boolean BEFORE integer (isinstance(True, int) is True)
@@ -111,6 +112,15 @@ class ToolRegistry:
                     return f"Parameter '{key}' must be an integer"
                 if expected_type == "number" and not isinstance(value, (int, float)):
                     return f"Parameter '{key}' must be a number"
+                # D6: Validate enum constraints
+                if "enum" in prop and value not in prop["enum"]:
+                    return f"Parameter '{key}' must be one of {prop['enum']}"
+                # D6: Validate minimum/maximum constraints for numeric types
+                if expected_type in ("integer", "number") and isinstance(value, (int, float)):
+                    if "minimum" in prop and value < prop["minimum"]:
+                        return f"Parameter '{key}' must be >= {prop['minimum']}"
+                    if "maximum" in prop and value > prop["maximum"]:
+                        return f"Parameter '{key}' must be <= {prop['maximum']}"
 
         return None
 
@@ -173,5 +183,7 @@ class ToolRegistry:
         if len(result) > self.SPILL_THRESHOLD_CHARS:
             result = self._spill_to_disk(result, name)
         elif len(result) > self.MAX_RESULT_CHARS:
+            # Hard cap fallback (reachable when SPILL_THRESHOLD > MAX_RESULT_CHARS
+            # or when thresholds are overridden for testing)
             result = result[:self.MAX_RESULT_CHARS]
         return result
