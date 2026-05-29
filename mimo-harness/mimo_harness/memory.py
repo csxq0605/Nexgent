@@ -161,10 +161,18 @@ metadata:
         # Write index
         index_content = "# Memory Index\n\n" + "\n".join(entries) + "\n"
 
-        # Second: byte limit (25KB)
+        # Second: byte limit (25KB) — truncate at character boundary to avoid
+        # corrupting multi-byte UTF-8 characters (e.g. Chinese, emoji).
         encoded = index_content.encode("utf-8")
         if len(encoded) > MEMORY_INDEX_MAX_BYTES:
-            index_content = encoded[:MEMORY_INDEX_MAX_BYTES].decode("utf-8", errors="ignore") + "\n... [truncated to 25KB]\n"
+            lo, hi = 0, len(index_content)
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if len(index_content[:mid].encode("utf-8")) <= MEMORY_INDEX_MAX_BYTES:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            index_content = index_content[:lo] + "\n... [truncated to 25KB]\n"
 
         with open(self.index_path, "w", encoding="utf-8") as f:
             f.write(index_content)

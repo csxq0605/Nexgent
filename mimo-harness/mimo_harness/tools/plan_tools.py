@@ -68,7 +68,8 @@ def exit_plan_mode(params: dict) -> str:
             - summary (str): One-line summary of the plan
 
     Returns:
-        User's decision (approved/rejected/modify).
+        JSON with plan details and decision="pending". The agent loop
+        is responsible for prompting the user and handling approval.
     """
     plan = params.get("plan", "")
     summary = params.get("summary", "")
@@ -76,52 +77,12 @@ def exit_plan_mode(params: dict) -> str:
     if not plan:
         return json.dumps({"error": "No plan provided. Include your plan in the 'plan' parameter."})
 
-    # Display plan to user for approval
-    print(f"\n{'='*60}")
-    print("  PLAN READY FOR REVIEW")
-    print(f"{'='*60}")
-    if summary:
-        print(f"\n  Summary: {summary}")
-    print(f"\n{plan}")
-    print(f"\n{'='*60}")
-
-    # Ask for approval
-    print("\nOptions:")
-    print("  1. Approve — exit plan mode and proceed with implementation")
-    print("  2. Reject — stay in plan mode, provide feedback")
-    print("  3. Modify — request changes to the plan")
-
-    try:
-        choice = input("\nYour choice (1/2/3): ").strip()
-    except (EOFError, KeyboardInterrupt):
-        return json.dumps({"decision": "rejected", "reason": "User cancelled"})
-
-    if choice == "1":
-        return json.dumps({
-            "decision": "approved",
-            "message": "[PLAN APPROVED] Exiting plan mode. Proceeding with implementation.",
-            "action": "exit_plan_mode",
-        })
-    elif choice == "3":
-        try:
-            feedback = input("What changes would you like? ").strip()
-        except (EOFError, KeyboardInterrupt):
-            feedback = ""
-        return json.dumps({
-            "decision": "modify",
-            "feedback": feedback,
-            "message": "[PLAN MODIFICATION REQUESTED] Please revise the plan based on feedback.",
-        })
-    else:
-        try:
-            feedback = input("Feedback (optional): ").strip()
-        except (EOFError, KeyboardInterrupt):
-            feedback = ""
-        return json.dumps({
-            "decision": "rejected",
-            "feedback": feedback,
-            "message": "[PLAN REJECTED] Staying in plan mode. Revise based on feedback.",
-        })
+    return json.dumps({
+        "decision": "pending",
+        "plan": plan,
+        "summary": summary,
+        "message": "[PLAN READY] Plan submitted for user approval.",
+    })
 
 
 def get_tools() -> list[ToolDef]:

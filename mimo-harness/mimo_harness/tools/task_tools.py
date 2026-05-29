@@ -48,13 +48,15 @@ class TaskStore:
         with self._lock:
             return [t for t in self._tasks.values() if t.status != "deleted"]
 
+    _UPDATABLE_FIELDS = frozenset({"subject", "description", "status", "active_form", "owner", "metadata"})
+
     def update(self, task_id: str, **kwargs) -> Optional[Task]:
         with self._lock:
             task = self._tasks.get(task_id)
             if not task:
                 return None
             for key, value in kwargs.items():
-                if hasattr(task, key):
+                if key in self._UPDATABLE_FIELDS:
                     setattr(task, key, value)
             return task
 

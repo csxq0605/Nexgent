@@ -72,8 +72,8 @@ class TerminationReason(Enum):
 class AgentDeps:
     """Injected dependencies for testability and environment abstraction."""
     llm_client_factory: Callable = field(default_factory=lambda: OpenAI)
-    uuid_generator: Callable = field(default_factory=lambda: hashlib.md5(
-        str(time.time()).encode()
+    uuid_generator: Callable = field(default_factory=lambda: lambda: hashlib.md5(
+        str(time.time()).encode() + str(id(object())).encode()
     ).hexdigest()[:8])
     max_retries: int = 3
     base_retry_delay: float = 1.0
@@ -449,6 +449,9 @@ You help users with coding, file operations, web research, document creation, an
         elif func_name == "exit_plan_mode":
             try:
                 parsed = json.loads(result)
+                if parsed.get("decision") == "pending":
+                    result = self._handle_plan_approval(parsed)
+                    parsed = json.loads(result)
                 if parsed.get("decision") == "approved":
                     self.perms.mode = PermissionMode.DEFAULT
                     self.logger.info("[PLAN MODE] Approved — switched to default mode")
@@ -457,6 +460,61 @@ You help users with coding, file operations, web research, document creation, an
                 pass
 
         return result
+
+    def _handle_plan_approval(self, parsed: dict) -> str:
+        """Prompt user for plan approval (called from agent loop, not tool handler)."""
+        if self.perms.auto_approve:
+            return json.dumps({
+                "decision": "approved",
+                "message": "[PLAN APPROVED] Auto-approved. Proceeding with implementation.",
+                "action": "exit_plan_mode",
+            })
+
+        summary = parsed.get("summary", "")
+        plan = parsed.get("plan", "")
+        print(f"\n{'='*60}")
+        print("  PLAN READY FOR REVIEW")
+        print(f"{'='*60}")
+        if summary:
+            print(f"\n  Summary: {summary}")
+        print(f"\n{plan}")
+        print(f"\n{'='*60}")
+        print("\nOptions:")
+        print("  1. Approve — exit plan mode and proceed with implementation")
+        print("  2. Reject — stay in plan mode, provide feedback")
+        print("  3. Modify — request changes to the plan")
+
+        try:
+            choice = input("\nYour choice (1/2/3): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return json.dumps({"decision": "rejected", "reason": "User cancelled"})
+
+        if choice == "1":
+            return json.dumps({
+                "decision": "approved",
+                "message": "[PLAN APPROVED] Exiting plan mode. Proceeding with implementation.",
+                "action": "exit_plan_mode",
+            })
+        elif choice == "3":
+            try:
+                feedback = input("What changes would you like? ").strip()
+            except (EOFError, KeyboardInterrupt):
+                feedback = ""
+            return json.dumps({
+                "decision": "modify",
+                "feedback": feedback,
+                "message": "[PLAN MODIFICATION REQUESTED] Please revise the plan based on feedback.",
+            })
+        else:
+            try:
+                feedback = input("Feedback (optional): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                feedback = ""
+            return json.dumps({
+                "decision": "rejected",
+                "feedback": feedback,
+                "message": "[PLAN REJECTED] Staying in plan mode. Revise based on feedback.",
+            })
 
     def _stream_llm_call(self, client, messages: list, tools_schema: list):
         """Execute LLM call with streaming, printing tokens as they arrive.
@@ -581,7 +639,7 @@ You help users with coding, file operations, web research, document creation, an
         """
         if session is None:
             session = Session(
-                session_id=self.deps.uuid_generator,
+                session_id=self.deps.uuid_generator(),
                 working_dir=os.getcwd(),
             )
 

@@ -34,7 +34,7 @@ def _get_allowed_write_dir() -> Path:
     return _ALLOWED_WRITE_DIR
 
 
-def _validate_write_path(path: str) -> str | None:
+def _validate_path(path: str) -> str | None:
     """Return error message if path is outside allowed directory, else None."""
     resolved = Path(path).resolve()
     allowed = _get_allowed_write_dir()
@@ -43,13 +43,12 @@ def _validate_write_path(path: str) -> str | None:
     return None
 
 
+def _validate_write_path(path: str) -> str | None:
+    return _validate_path(path)
+
+
 def _validate_read_path(path: str) -> str | None:
-    """Return error message if read path is outside allowed directory, else None."""
-    resolved = Path(path).resolve()
-    allowed = _get_allowed_write_dir()
-    if not resolved.is_relative_to(allowed):
-        return f"Path '{path}' is outside allowed directory '{allowed}'"
-    return None
+    return _validate_path(path)
 
 
 def read_file(params: dict) -> str:
@@ -278,7 +277,7 @@ def grep_files(params: dict) -> str:
                             if only_matching:
                                 match_text = m.group(0)[:200]
                             else:
-                                match_text = line.rstrip()[:200]
+                                match_text = lines[line_num - 1].rstrip()[:200]
                             entry: dict = {"file": fpath}
                             if show_line_numbers:
                                 entry["line"] = line_num

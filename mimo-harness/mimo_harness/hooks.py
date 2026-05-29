@@ -10,9 +10,12 @@ Implements Ch8 patterns:
 """
 
 import json
+import logging
 import subprocess
 import platform
 import threading
+
+_logger = logging.getLogger("mimo-harness.hooks")
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Callable
@@ -139,8 +142,8 @@ class HookRunner:
                 result = fn(tool_name=tool_name, tool_input=tool_input, tool_result=tool_result)
                 if isinstance(result, HookResult) and result.is_blocking:
                     return result
-            except Exception:
-                pass  # Ch8: hooks are advisors, not commanders
+            except Exception as e:
+                _logger.warning("Function hook error for %s: %s", event.value, e)
 
         # Run registered hooks (command, http, prompt)
         for config in self._hooks.get(event, []):
@@ -237,8 +240,8 @@ class HookRunner:
         except subprocess.TimeoutExpired:
             # Ch8: timeout = error, not block
             return HookResult()
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning("Command hook error: %s", e)
 
         return HookResult()
 
@@ -332,8 +335,8 @@ class HookRunner:
                         )
                     except json.JSONDecodeError:
                         pass
-        except (urllib.error.URLError, OSError, Exception):
-            pass  # HTTP hook failures are non-blocking
+        except Exception as e:
+            _logger.warning("HTTP hook error: %s", e)
 
         return HookResult()
 

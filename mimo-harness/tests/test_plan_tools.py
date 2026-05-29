@@ -35,23 +35,11 @@ class TestEnterPlanMode:
 
 
 class TestExitPlanMode:
-    def test_approve(self):
-        with patch("builtins.input", return_value="1"):
-            result = json.loads(exit_plan_mode({"plan": "Step 1: do X\nStep 2: do Y"}))
-        assert result["decision"] == "approved"
-        assert "APPROVED" in result["message"]
-
-    def test_reject(self):
-        with patch("builtins.input", return_value="2"):
-            result = json.loads(exit_plan_mode({"plan": "Step 1: do X"}))
-        assert result["decision"] == "rejected"
-        assert "REJECTED" in result["message"]
-
-    def test_modify(self):
-        with patch("builtins.input", side_effect=["3", "Add error handling"]):
-            result = json.loads(exit_plan_mode({"plan": "Step 1: do X"}))
-        assert result["decision"] == "modify"
-        assert result["feedback"] == "Add error handling"
+    def test_returns_pending(self):
+        result = json.loads(exit_plan_mode({"plan": "Step 1: do X\nStep 2: do Y"}))
+        assert result["decision"] == "pending"
+        assert result["plan"] == "Step 1: do X\nStep 2: do Y"
+        assert "PLAN READY" in result["message"]
 
     def test_no_plan_returns_error(self):
         result = json.loads(exit_plan_mode({}))
@@ -63,38 +51,69 @@ class TestExitPlanMode:
         assert "error" in result
 
     def test_with_summary(self):
+        result = json.loads(exit_plan_mode({
+            "plan": "Detailed plan here",
+            "summary": "Refactor auth module",
+        }))
+        assert result["decision"] == "pending"
+        assert result["summary"] == "Refactor auth module"
+
+
+class TestHandlePlanApproval:
+    """Test _handle_plan_approval (user interaction in agent loop)."""
+
+    def _make_harness(self, monkeypatch):
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+        from mimo_harness.agent import MiMoHarness
+        return MiMoHarness(auto_approve=False)
+
+    def test_approve(self, monkeypatch):
+        harness = self._make_harness(monkeypatch)
         with patch("builtins.input", return_value="1"):
-            result = json.loads(exit_plan_mode({
-                "plan": "Detailed plan here",
-                "summary": "Refactor auth module",
-            }))
+            result = json.loads(harness._handle_plan_approval({"plan": "do X", "summary": "X"}))
         assert result["decision"] == "approved"
 
-    def test_eof_on_choice(self):
+    def test_reject(self, monkeypatch):
+        harness = self._make_harness(monkeypatch)
+        with patch("builtins.input", return_value="2"):
+            result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
+        assert result["decision"] == "rejected"
+
+    def test_modify(self, monkeypatch):
+        harness = self._make_harness(monkeypatch)
+        with patch("builtins.input", side_effect=["3", "Add error handling"]):
+            result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
+        assert result["decision"] == "modify"
+        assert result["feedback"] == "Add error handling"
+
+    def test_auto_approve(self, monkeypatch):
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+        from mimo_harness.agent import MiMoHarness
+        harness = MiMoHarness(auto_approve=True)
+        result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
+        assert result["decision"] == "approved"
+
+    def test_eof_on_choice(self, monkeypatch):
+        harness = self._make_harness(monkeypatch)
         with patch("builtins.input", side_effect=EOFError):
-            result = json.loads(exit_plan_mode({"plan": "Some plan"}))
+            result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
         assert result["decision"] == "rejected"
 
-    def test_keyboard_interrupt_on_choice(self):
-        with patch("builtins.input", side_effect=KeyboardInterrupt):
-            result = json.loads(exit_plan_mode({"plan": "Some plan"}))
-        assert result["decision"] == "rejected"
-
-    def test_modify_eof_on_feedback(self):
+    def test_modify_eof_on_feedback(self, monkeypatch):
+        harness = self._make_harness(monkeypatch)
         with patch("builtins.input", side_effect=["3", EOFError]):
-            result = json.loads(exit_plan_mode({"plan": "Some plan"}))
+            result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
         assert result["decision"] == "modify"
         assert result["feedback"] == ""
 
-    def test_reject_eof_on_feedback(self):
-        with patch("builtins.input", side_effect=["2", EOFError]):
-            result = json.loads(exit_plan_mode({"plan": "Some plan"}))
-        assert result["decision"] == "rejected"
-        assert result["feedback"] == ""
-
-    def test_reject_with_feedback(self):
+    def test_reject_with_feedback(self, monkeypatch):
+        harness = self._make_harness(monkeypatch)
         with patch("builtins.input", side_effect=["2", "Needs more detail"]):
-            result = json.loads(exit_plan_mode({"plan": "Some plan"}))
+            result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
         assert result["decision"] == "rejected"
         assert result["feedback"] == "Needs more detail"
 

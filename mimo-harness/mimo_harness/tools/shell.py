@@ -35,7 +35,10 @@ def _cleanup_completed_jobs():
             del _background_jobs[jid]
 
 # S5+S20: Configurable output length limit via env var
-MAX_OUTPUT_LENGTH = int(os.environ.get("MIMO_MAX_OUTPUT_LENGTH", "30000"))
+try:
+    MAX_OUTPUT_LENGTH = int(os.environ.get("MIMO_MAX_OUTPUT_LENGTH", "30000"))
+except (ValueError, TypeError):
+    MAX_OUTPUT_LENGTH = 30000
 
 # S19: Commands that are safe to auto-approve (read-only) — extended
 READONLY_PREFIXES = [
