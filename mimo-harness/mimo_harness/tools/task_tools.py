@@ -100,16 +100,18 @@ def task_get(params):
 
 def task_list(params):
     tasks = _task_store.list_all()
-    return json.dumps([
-        {
-            "id": t.id,
-            "subject": t.subject,
-            "status": t.status,
-            "owner": t.owner,
-            "blockedBy": t.blocked_by,
-        }
-        for t in tasks
-    ])
+    return json.dumps({
+        "tasks": [
+            {
+                "id": t.id,
+                "subject": t.subject,
+                "status": t.status,
+                "owner": t.owner,
+                "blockedBy": t.blocked_by,
+            }
+            for t in tasks
+        ]
+    })
 
 
 def task_update(params):

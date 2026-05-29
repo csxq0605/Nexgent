@@ -69,9 +69,8 @@ class TestSSRF:
     def test_blocks_ipv6_loopback(self):
         assert web_tools._validate_url("http://[::1]/admin") is not None
 
-    def test_blocks_encoded_localhost(self):
-        # URL encoding bypass attempt
-        assert web_tools._validate_url("http://127.0.0.1:8080/admin") is not None
+    def test_blocks_zero_address(self):
+        assert web_tools._validate_url("http://0.0.0.0/admin") is not None
 
     def test_max_response_size_constant(self):
         """Verify MAX_RESPONSE_BYTES is defined and reasonable."""

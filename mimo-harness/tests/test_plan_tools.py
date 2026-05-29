@@ -31,7 +31,7 @@ class TestEnterPlanMode:
         caps_text = " ".join(result["capabilities"])
         assert "Read" in caps_text or "read" in caps_text
         restrictions_text = " ".join(result["restrictions"])
-        assert "Cannot" in restrictions_text or "Cannot" in restrictions_text
+        assert "Cannot" in restrictions_text
 
 
 class TestExitPlanMode:

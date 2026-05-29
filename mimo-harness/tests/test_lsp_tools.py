@@ -27,16 +27,18 @@ class TestLspDefinition:
         f.write_text("def hello():\n    pass\n\nhello()\n")
         with patch.object(lsp_tools, "_get_lsp_client", return_value=None):
             result = json.loads(lsp_definition({"file_path": str(f), "line": 1, "character": 4}))
-        assert "definitions" in result or "error" in result
+        assert "definitions" in result
+        assert len(result["definitions"]) > 0
+        assert result.get("method") == "grep_fallback"
 
     def test_line_conversion(self, tmp_path):
         """Line numbers should be converted from 1-indexed to 0-indexed."""
         f = tmp_path / "test.py"
-        f.write_text("x = 1\ny = 2\nz = 3\n")
+        f.write_text("x = 1\nhello = 2\nz = hello\n")
         with patch.object(lsp_tools, "_get_lsp_client", return_value=None):
-            # line=2 means line index 1 (0-indexed)
+            # line=2 means 1-indexed line 2, which is "hello = 2" (0-indexed line 1)
             result = json.loads(lsp_definition({"file_path": str(f), "line": 2, "character": 0}))
-        assert "definitions" in result or "error" in result
+        assert "definitions" in result
 
 
 class TestLspReferences:
@@ -53,7 +55,7 @@ class TestLspReferences:
         f.write_text("def foo():\n    pass\n\nfoo()\n")
         with patch.object(lsp_tools, "_get_lsp_client", return_value=None):
             result = json.loads(lsp_references({"file_path": str(f), "line": 1, "character": 4}))
-        assert "references" in result or "error" in result
+        assert "references" in result
 
 
 class TestLspDiagnostics:

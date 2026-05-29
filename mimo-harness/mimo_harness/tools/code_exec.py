@@ -36,7 +36,10 @@ def execute_python(params: dict) -> str:
                 "output": output,
             })
         finally:
-            os.unlink(tmp_path)
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass  # Windows: file may still be locked by subprocess
     except subprocess.TimeoutExpired:
         return json.dumps({"error": f"Code execution timed out after {timeout}s"})
     except Exception as e:

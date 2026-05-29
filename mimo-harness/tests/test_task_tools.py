@@ -50,14 +50,14 @@ class TestTaskToolFunctions:
 
     def test_task_list_empty(self):
         result = json.loads(task_list({}))
-        assert result == []
+        assert result == {"tasks": []}
 
     def test_task_list_with_tasks(self):
         task_create({"subject": "Task A"})
         task_create({"subject": "Task B"})
         result = json.loads(task_list({}))
-        assert len(result) == 2
-        subjects = [t["subject"] for t in result]
+        assert len(result["tasks"]) == 2
+        subjects = [t["subject"] for t in result["tasks"]]
         assert "Task A" in subjects
         assert "Task B" in subjects
 
@@ -66,8 +66,8 @@ class TestTaskToolFunctions:
         t2 = json.loads(task_create({"subject": "Remove"}))
         task_delete({"taskId": t2["id"]})
         result = json.loads(task_list({}))
-        assert len(result) == 1
-        assert result[0]["subject"] == "Keep"
+        assert len(result["tasks"]) == 1
+        assert result["tasks"][0]["subject"] == "Keep"
 
     def test_task_update_status(self):
         created = json.loads(task_create({"subject": "Update me"}))

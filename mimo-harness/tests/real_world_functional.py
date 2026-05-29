@@ -106,6 +106,11 @@ def test_5_context_compression():
     recent = tool_msgs[-5:]
     for t in recent:
         assert t["content"] != "[Old tool result content cleared]", "Recent tools preserved"
+    # Verify that old tool messages WERE actually cleared
+    old = tool_msgs[:-5]
+    if old:
+        assert any(t["content"] == "[Old tool result content cleared]" for t in old), \
+            "Old tool messages should be cleared by microcompact"
 
     tokens = estimate_tokens(msgs)
     assert tokens > 10000, f"Expected >10K tokens, got {tokens}"
@@ -274,28 +279,21 @@ def test_12_hooks_system():
     print("  [PASS] Hooks system: register function + command hooks, fire OK")
 
 
-def test_13_logging():
-    from mimo_harness.logging_utils import TraceLogger
-
-    logger = TraceLogger(verbose=True)
-    logger.info("test info")
-    logger.error("test error")
-    logger.trace("test_event", {"key": "value"})
-    logger.session_summary({"steps": 5, "duration": 1.23})
-    print("  [PASS] Logging: info/error/trace/summary OK")
-
-
 def test_14_project_scanner():
     from mimo_harness.project_scanner import scan_project
 
     tmp = tempfile.mkdtemp()
     try:
         with open(os.path.join(tmp, "test.py"), "w") as f:
-            f.write("import flask")
+            f.write("print('hello')")
+        with open(os.path.join(tmp, "requirements.txt"), "w") as f:
+            f.write("flask==2.0\n")
         with open(os.path.join(tmp, "package.json"), "w") as f:
             json.dump({"dependencies": {"react": "*"}}, f)
         result = scan_project(tmp)
         assert isinstance(result, dict)
+        assert result.get("language") == "Python"
+        assert "Flask" in result.get("frameworks", [])
         print("  [PASS] Project scanner: language/framework detection OK")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

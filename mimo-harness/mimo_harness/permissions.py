@@ -343,9 +343,13 @@ class PermissionGate:
             for target in redirects:
                 if _is_protected_path(target):
                     return True
-            # Also check arguments that look like file paths to protected files
-            # (e.g., echo x .env, cp file .env)
-            parts = command.split()
+            # Check arguments using shlex to handle quoted strings correctly
+            # (e.g., `cp file .env` is blocked, but `git commit -m "update .env"` is not)
+            import shlex
+            try:
+                parts = shlex.split(command)
+            except ValueError:
+                parts = command.split()
             for part in parts[1:]:  # skip the command name
                 if _is_protected_path(part):
                     return True

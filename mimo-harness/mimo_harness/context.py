@@ -12,9 +12,12 @@ import os
 import re
 import glob as _glob
 import json
+import logging
 import time
 import shutil
 import platform
+
+_logger = logging.getLogger("mimo-harness.context")
 from dataclasses import dataclass, field
 from typing import Optional, Any, NamedTuple
 
@@ -445,7 +448,8 @@ def llm_compress(
         return [
             {"role": "assistant", "content": "[Conversation Summary]\n" + summary.strip()}
         ]
-    except Exception:
+    except Exception as e:
+        _logger.warning("LLM compression failed: %s", e)
         return None
 
 
@@ -668,66 +672,6 @@ def cleanup_old_spill_files(spill_dir: str = ".mimo/outputs", max_age_days: int 
             pass
 
     return deleted
-
-
-def make_compact_boundary(
-    pre_tokens: int, pre_messages: int, trigger: str = "auto"
-) -> dict:
-    """Create a compact boundary message with compression metadata."""
-    return {
-        "role": "system",
-        "content": (
-            f"[Context compacted: {pre_messages} messages → "
-            f"{pre_tokens} tokens, trigger={trigger}]"
-        ),
-        "compact_metadata": {
-            "trigger": trigger,
-            "pre_tokens": pre_tokens,
-            "pre_messages": pre_messages,
-            "timestamp": time.time(),
-        },
-    }
-
-
-# ---------------------------------------------------------------------------
-# System prompt builder
-# ---------------------------------------------------------------------------
-def build_system_prompt(tools_desc: str, memory_content: str = "") -> str:
-    """Assemble dynamic system prompt with environment context."""
-    cwd = os.getcwd()
-    env_info = f"{platform.system()} {platform.release()}"
-
-    prompt = f"""You are MiMo Harness, a capable AI assistant powered by Xiaomi MiMo model.
-
-## Environment
-- Working directory: {cwd}
-- Platform: {env_info}
-- Python: {platform.python_version()}
-
-## Capabilities
-You can help with:
-- File operations (read, write, edit, search)
-- Code writing and execution
-- Web search and content fetching
-- Document creation (markdown, CSV)
-- Mathematical calculations
-- Shell command execution
-
-## Rules
-- Use absolute file paths
-- Ask for confirmation before write/deploy operations
-- Explain what you're doing before using tools
-- Be concise but thorough
-- If a task is ambiguous, ask for clarification
-- When a tool fails, analyze the error and try a different approach
-
-## Available Tools
-{tools_desc}"""
-
-    if memory_content:
-        prompt += f"\n\n## Project Memory\n{memory_content}"
-
-    return prompt
 
 
 # ---------------------------------------------------------------------------

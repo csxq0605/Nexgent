@@ -553,6 +553,9 @@ You help users with coding, file operations, web research, document creation, an
             delta = chunk.choices[0].delta
             finish_reason = chunk.choices[0].finish_reason or finish_reason
 
+            if delta is None:
+                continue
+
             if delta.content:
                 full_content += delta.content
                 print(delta.content, end="", flush=True)
@@ -648,6 +651,11 @@ You help users with coding, file operations, web research, document creation, an
             api_key=api_key, base_url=MIMO_BASE_URL
         )
         self._llm_client = client  # Store for security pipeline model classifier
+
+        # Inject LLM client into hook runner for prompt-type hooks
+        hook_runner = getattr(self, '_hook_runner', None)
+        if hook_runner:
+            hook_runner._llm_client = client
 
         # Inject memory as a user message (Claude Code pattern: memory is
         # context, not enforcement. Injected as user message after system

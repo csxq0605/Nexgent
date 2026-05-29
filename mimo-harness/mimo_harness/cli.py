@@ -192,7 +192,7 @@ def _load_session_safe(path: str, session_name: str):
 
 
 def _handle_corrupt_file(path: str, session_name: str, reason: str):
-    """Attempt to rename, remove, or truncate a corrupt session file."""
+    """Attempt to rename or remove a corrupt session file."""
     print(f"Warning: session {session_name} is corrupt ({reason})")
     backup = path + ".corrupt"
     try:
@@ -203,12 +203,8 @@ def _handle_corrupt_file(path: str, session_name: str, reason: str):
             os.remove(path)
             print(f"Removed corrupt session file {session_name}.jsonl")
         except OSError:
-            print(f"Warning: corrupt session {session_name} could not be removed, truncating instead")
-            try:
-                with open(path, "w", encoding="utf-8"):
-                    pass
-            except OSError:
-                print(f"Warning: could not truncate {session_name}.jsonl either")
+            print(f"Warning: corrupt session {session_name} could not be renamed or removed. "
+                  f"Manually delete '{path}' to resolve.")
 
 
 def _resume_latest_session(session_dir: str):
@@ -312,7 +308,7 @@ def _build_parser():
     parser.add_argument("--fallback-model", help="Fallback model to use if primary model fails with 429/503")
     parser.add_argument("--output-format", choices=["text", "json", "stream-json"], default="text", help="Output format (default: text)")
     parser.add_argument("--bare", action="store_true", help="Bare mode: skip memory loading, use minimal system prompt")
-    parser.add_argument("--effort", choices=["low", "medium", "high"], default="medium", help="Effort level: low, medium (default), high")
+    parser.add_argument("--effort", choices=["low", "medium", "high"], default=None, help="Effort level: low, medium (default), high")
     parser.add_argument("--session-dir", default=None, help="Directory for auto-saving sessions (default: ~/.mimo/sessions/)")
     parser.add_argument("--continue", dest="continue_session", action="store_true", help="Resume the most recent session from session dir")
     parser.add_argument("--resume", action="store_true", help="List sessions and let user pick one to resume")
@@ -469,7 +465,10 @@ def main():
     # Initialize scheduler for session-scoped cron jobs
     from .tools.scheduler_tools import Scheduler, set_scheduler
     _scheduled_prompts = []
+    _MAX_SCHEDULED_PROMPTS = 10
     def _on_scheduled_prompt(prompt):
+        if len(_scheduled_prompts) >= _MAX_SCHEDULED_PROMPTS:
+            _scheduled_prompts.pop(0)  # Drop oldest to prevent unbounded growth
         _scheduled_prompts.append(prompt)
         print(f"\n[Scheduled] {prompt[:60]}...")
     scheduler = Scheduler(callback=_on_scheduled_prompt)

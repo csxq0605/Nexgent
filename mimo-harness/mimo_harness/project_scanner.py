@@ -112,11 +112,14 @@ def _read_file_head(path: str, max_lines: int = 50) -> str:
 
 def _detect_frameworks_from_deps(content: str) -> list[str]:
     """Detect frameworks from dependency file content."""
+    import re
     content_lower = content.lower()
     found = []
     for dep, framework in _FRAMEWORK_DEPS.items():
-        # Match dependency name in requirements.txt or package.json style
-        if dep in content_lower:
+        # Match dependency name at word boundary (requirements.txt: flask==2.0,
+        # package.json: "react": "^18"). Avoids false positives like "overreact".
+        pattern = r'(^|[\s"\',=<>!:;])' + re.escape(dep) + r'([\s"\',=<>!:;]|$)'
+        if re.search(pattern, content_lower, re.MULTILINE):
             if framework not in found:
                 found.append(framework)
     return found
