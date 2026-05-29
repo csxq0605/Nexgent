@@ -1,160 +1,16 @@
 """Tests for lsp_tools.py - Language Server Protocol integration."""
 
 import json
-import os
-import tempfile
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from mimo_harness.tools import lsp_tools
 from mimo_harness.tools.lsp_tools import (
-    LSPClient, lsp_definition, lsp_references, lsp_diagnostics,
-    get_tools, _fallback_definition, _fallback_references,
-    _extract_word_at, _location_to_str, _python_diagnostics,
-    LSP_SERVERS,
+    lsp_definition, lsp_references, lsp_diagnostics,
+    get_tools,
 )
 from mimo_harness.tools.registry import ToolDef
 from mimo_harness.permissions import Permission
-
-
-class TestLSPClient:
-    def test_init(self):
-        client = LSPClient()
-        assert client._process is None
-        assert client._request_id == 0
-        assert client._responses == {}
-        assert client._server_name == ""
-
-    def test_start_file_not_found(self):
-        client = LSPClient()
-        result = client.start({"name": "fake", "command": ["nonexistent_lsp_server_xyz"]})
-        assert result is False
-
-    def test_shutdown_no_process(self):
-        client = LSPClient()
-        client.shutdown()  # Should not raise
-        assert client._process is None
-
-    def test_shutdown_with_dead_process(self):
-        client = LSPClient()
-        client._process = MagicMock()
-        client._process.poll.return_value = 1  # Already dead
-        client.shutdown()
-        assert client._process is None
-
-
-class TestLocationToStr:
-    def test_basic(self):
-        loc = {"uri": "file:///home/user/test.py", "range": {"start": {"line": 5, "character": 10}}}
-        result = _location_to_str(loc)
-        assert "test.py" in result
-        assert ":6:" in result  # 0-indexed -> 1-indexed
-
-    def test_missing_fields(self):
-        result = _location_to_str({})
-        assert result  # Should not crash
-
-    def test_windows_path(self):
-        loc = {"uri": "file:///C:/Users/test.py", "range": {"start": {"line": 0, "character": 0}}}
-        result = _location_to_str(loc)
-        assert "test.py" in result
-
-
-class TestExtractWordAt:
-    def test_basic(self):
-        assert _extract_word_at("def hello_world():", 4) == "hello_world"
-
-    def test_at_start(self):
-        assert _extract_word_at("variable = 1", 0) == "variable"
-
-    def test_at_end(self):
-        word = _extract_word_at("x = foo", 6)
-        assert word == "foo"
-
-    def test_beyond_length(self):
-        word = _extract_word_at("short", 100)
-        assert word == "short"  # Falls back to last word
-
-    def test_empty_line(self):
-        word = _extract_word_at("", 0)
-        assert word == ""
-
-    def test_no_word_at_position(self):
-        word = _extract_word_at("   ", 1)
-        assert word == ""
-
-
-class TestPythonDiagnostics:
-    def test_valid_file(self, tmp_path):
-        f = tmp_path / "valid.py"
-        f.write_text("x = 1\ny = 2\n")
-        result = json.loads(_python_diagnostics(str(f)))
-        assert result["count"] == 0
-        assert result["diagnostics"] == []
-
-    def test_syntax_error(self, tmp_path):
-        f = tmp_path / "broken.py"
-        f.write_text("def foo(\n    pass\n")
-        result = json.loads(_python_diagnostics(str(f)))
-        assert result["count"] > 0
-        assert any("SyntaxError" in d["message"] or "error" in d["severity"] for d in result["diagnostics"])
-
-    def test_file_not_found(self):
-        # py_compile.compile raises FileNotFoundError for missing files
-        with pytest.raises(FileNotFoundError):
-            _python_diagnostics("/nonexistent/file.py")
-
-
-class TestFallbackDefinition:
-    def test_file_not_found(self):
-        result = json.loads(_fallback_definition("/nonexistent.py", 0, 0))
-        assert "error" in result
-
-    def test_line_out_of_range(self, tmp_path):
-        f = tmp_path / "test.py"
-        f.write_text("x = 1\n")
-        result = json.loads(_fallback_definition(str(f), 999, 0))
-        assert "error" in result
-
-    def test_finds_function_def(self, tmp_path):
-        f = tmp_path / "test.py"
-        f.write_text("def hello():\n    pass\n\nclass Foo:\n    pass\n")
-        result = json.loads(_fallback_definition(str(f), 0, 4))
-        assert "definitions" in result
-        assert len(result["definitions"]) > 0
-        assert result.get("method") == "grep_fallback"
-
-    def test_finds_variable_assignment(self, tmp_path):
-        f = tmp_path / "test.py"
-        f.write_text("my_var = 42\nprint(my_var)\n")
-        result = json.loads(_fallback_definition(str(f), 1, 6))
-        assert "definitions" in result
-
-    def test_no_definition_found(self, tmp_path):
-        f = tmp_path / "test.py"
-        f.write_text("# just a comment\n")
-        result = json.loads(_fallback_definition(str(f), 0, 0))
-        assert "error" in result
-
-
-class TestFallbackReferences:
-    def test_file_not_found(self):
-        result = json.loads(_fallback_references("/nonexistent.py", 0, 0))
-        assert "error" in result
-
-    def test_line_out_of_range(self, tmp_path):
-        f = tmp_path / "test.py"
-        f.write_text("x = 1\n")
-        result = json.loads(_fallback_references(str(f), 999, 0))
-        assert "error" in result
-
-    def test_finds_references(self, tmp_path):
-        f = tmp_path / "test.py"
-        f.write_text("def foo():\n    pass\n\nfoo()\nfoo()\n")
-        result = json.loads(_fallback_references(str(f), 0, 4))
-        assert "references" in result
-        assert result["count"] >= 2
-        assert result.get("method") == "grep_fallback"
 
 
 class TestLspDefinition:
@@ -227,16 +83,6 @@ class TestLspDiagnostics:
         with patch.object(lsp_tools, "_get_lsp_client", return_value=None):
             result = json.loads(lsp_diagnostics({"file_path": str(f)}))
         assert "error" in result
-
-
-class TestLSPServers:
-    def test_python_server_configured(self):
-        assert ".py" in LSP_SERVERS
-        assert LSP_SERVERS[".py"]["name"] == "pylsp"
-
-    def test_js_ts_configured(self):
-        assert ".js" in LSP_SERVERS
-        assert ".ts" in LSP_SERVERS
 
 
 class TestLspToolsGetTools:

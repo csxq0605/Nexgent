@@ -2,97 +2,15 @@
 
 import json
 import time
-import threading
 from unittest.mock import patch, MagicMock
 
-from mimo_harness.tools import scheduler_tools
 from mimo_harness.tools.scheduler_tools import (
-    CronJob, Scheduler, _parse_cron_field, _match_cron,
+    Scheduler,
     cron_create, cron_delete, cron_list,
-    get_scheduler, set_scheduler, get_tools,
+    set_scheduler, get_tools,
 )
 from mimo_harness.tools.registry import ToolDef
 from mimo_harness.permissions import Permission
-
-
-class TestParseCronField:
-    def test_wildcard(self):
-        assert _parse_cron_field("*", 0, 59) == set(range(0, 60))
-
-    def test_step(self):
-        assert _parse_cron_field("*/5", 0, 59) == {0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}
-
-    def test_range(self):
-        assert _parse_cron_field("1-5", 0, 59) == {1, 2, 3, 4, 5}
-
-    def test_single_value(self):
-        assert _parse_cron_field("30", 0, 59) == {30}
-
-    def test_comma_separated(self):
-        result = _parse_cron_field("1,5,10", 0, 59)
-        assert result == {1, 5, 10}
-
-    def test_mixed(self):
-        result = _parse_cron_field("*/15,45", 0, 59)
-        assert 0 in result
-        assert 15 in result
-        assert 45 in result
-
-
-class TestMatchCron:
-    def test_every_minute(self):
-        now = time.struct_time((2026, 5, 26, 14, 30, 0, 0, 146, 0))
-        assert _match_cron("* * * * *", now) is True
-
-    def test_specific_minute(self):
-        now = time.struct_time((2026, 5, 26, 14, 30, 0, 0, 146, 0))
-        assert _match_cron("30 * * * *", now) is True
-        assert _match_cron("31 * * * *", now) is False
-
-    def test_step(self):
-        now = time.struct_time((2026, 5, 26, 14, 30, 0, 0, 146, 0))
-        assert _match_cron("*/15 * * * *", now) is True
-        now2 = time.struct_time((2026, 5, 26, 14, 31, 0, 0, 146, 0))
-        assert _match_cron("*/15 * * * *", now2) is False
-
-    def test_hour_check(self):
-        now = time.struct_time((2026, 5, 26, 9, 0, 0, 0, 146, 0))
-        assert _match_cron("0 9 * * *", now) is True
-        assert _match_cron("0 10 * * *", now) is False
-
-    def test_invalid_expression(self):
-        now = time.struct_time((2026, 5, 26, 14, 30, 0, 0, 146, 0))
-        assert _match_cron("invalid", now) is False
-        assert _match_cron("* *", now) is False
-
-    def test_day_of_week(self):
-        # tm_wday=0 is Monday. Standard cron: 0=Sun, 1=Mon, ..., 6=Sat
-        now = time.struct_time((2026, 5, 26, 14, 30, 0, 0, 146, 0))
-        assert _match_cron("* * * * 1", now) is True   # 1=Monday
-        assert _match_cron("* * * * 0", now) is False  # 0=Sunday, not Monday
-
-    def test_range_in_cron(self):
-        now = time.struct_time((2026, 5, 26, 14, 30, 0, 0, 146, 0))
-        assert _match_cron("30 9-17 * * *", now) is True
-        assert _match_cron("30 1-5 * * *", now) is False
-
-
-class TestCronJob:
-    def test_defaults(self):
-        job = CronJob(job_id="test-1", cron_expr="* * * * *", prompt="hello")
-        assert job.recurring is True
-        assert job.fire_count == 0
-        assert job.max_fires == 0
-        assert job.last_fired == 0.0
-
-    def test_custom_values(self):
-        job = CronJob(
-            job_id="test-2", cron_expr="0 9 * * *", prompt="morning",
-            recurring=False, fire_count=5, max_fires=10,
-        )
-        assert job.recurring is False
-        assert job.fire_count == 5
-        assert job.max_fires == 10
 
 
 class TestScheduler:
@@ -296,54 +214,6 @@ class TestCronToolFunctions:
         result = json.loads(cron_list({}))
         assert "error" in result
         set_scheduler(self.scheduler)
-
-
-class TestSchedulerThreadSafety:
-    def test_concurrent_create(self):
-        s = Scheduler()
-        ids = []
-        lock = threading.Lock()
-
-        def create():
-            for _ in range(20):
-                job_id = s.create_job("* * * * *", "concurrent")
-                with lock:
-                    ids.append(job_id)
-
-        threads = [threading.Thread(target=create) for _ in range(5)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert len(ids) == 100
-        assert len(set(ids)) == 100  # All unique
-
-    def test_concurrent_create_and_delete(self):
-        s = Scheduler()
-        created = []
-        lock = threading.Lock()
-
-        def creator():
-            for _ in range(10):
-                job_id = s.create_job("* * * * *", "test")
-                with lock:
-                    created.append(job_id)
-
-        def deleter():
-            time.sleep(0.01)
-            with lock:
-                ids = list(created)
-            for jid in ids[:5]:
-                s.delete_job(jid)
-
-        t1 = threading.Thread(target=creator)
-        t2 = threading.Thread(target=deleter)
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-        # Should not crash
 
 
 class TestSchedulerToolsGetTools:

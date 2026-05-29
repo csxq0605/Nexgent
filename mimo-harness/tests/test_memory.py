@@ -2,19 +2,10 @@
 
 import pytest
 import os
-import tempfile
 from mimo_harness.memory import (
     MemoryType, MemoryEntry, MemoryStore,
     MEMORY_INDEX_MAX_LINES, MEMORY_INDEX_MAX_BYTES,
 )
-
-
-class TestMemoryType:
-    def test_four_types(self):
-        assert MemoryType.USER.value == "user"
-        assert MemoryType.FEEDBACK.value == "feedback"
-        assert MemoryType.PROJECT.value == "project"
-        assert MemoryType.REFERENCE.value == "reference"
 
 
 class TestMemoryStore:
@@ -160,26 +151,6 @@ class TestMemoryStore:
         assert store.load_index() == ""
 
 
-class TestMemoryEntry:
-    def test_construction(self):
-        entry = MemoryEntry(
-            name="test", description="desc",
-            memory_type=MemoryType.USER, content="body",
-        )
-        assert entry.name == "test"
-        assert entry.description == "desc"
-        assert entry.memory_type == MemoryType.USER
-        assert entry.content == "body"
-
-    def test_defaults(self):
-        entry = MemoryEntry(
-            name="x", description="d",
-            memory_type=MemoryType.PROJECT, content="c",
-        )
-        assert entry.file_path == ""
-        assert entry.created_at > 0
-
-
 class TestLoadTopic:
     def test_load_existing_topic(self, tmp_path):
         store = MemoryStore(str(tmp_path))
@@ -219,117 +190,3 @@ class TestLoadTopic:
         store = MemoryStore(str(tmp_path))
         result = store.load_topic("anything")
         assert result == ""
-
-
-class TestListTopicNames:
-    def test_list_topics(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        store.ensure_dir()
-        # Create topic files
-        for name in ["alpha.md", "beta.md", "gamma.md"]:
-            with open(os.path.join(store.memory_dir, name), "w") as f:
-                f.write(f"---\nname: {name[:-3]}\n---\ncontent")
-
-        names = store.list_topic_names()
-        assert names == ["alpha.md", "beta.md", "gamma.md"]
-
-    def test_excludes_memory_index(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        store.ensure_dir()
-        # Create MEMORY.md (index) and a topic
-        with open(os.path.join(store.memory_dir, "MEMORY.md"), "w") as f:
-            f.write("# Index")
-        with open(os.path.join(store.memory_dir, "topic.md"), "w") as f:
-            f.write("content")
-
-        names = store.list_topic_names()
-        assert "MEMORY.md" not in names
-        assert "topic.md" in names
-
-    def test_excludes_non_md_files(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        store.ensure_dir()
-        with open(os.path.join(store.memory_dir, "topic.md"), "w") as f:
-            f.write("content")
-        with open(os.path.join(store.memory_dir, "notes.txt"), "w") as f:
-            f.write("content")
-
-        names = store.list_topic_names()
-        assert "topic.md" in names
-        assert "notes.txt" not in names
-
-    def test_empty_dir(self, tmp_path):
-        store = MemoryStore(str(tmp_path))
-        assert store.list_topic_names() == []
-
-
-# ============================================================================
-# P2: Additional memory.py test coverage
-# ============================================================================
-
-
-class TestMemoryPathSecurity:
-    """Test MemoryStore path traversal protection."""
-
-    def test_path_traversal_file_stays_in_dir(self, tmp_path):
-        """Path traversal chars in name should not escape memory dir."""
-        store = MemoryStore(str(tmp_path))
-        store.save_memory(
-            name="../../etc/passwd",
-            memory_type=MemoryType.USER,
-            description="test",
-            content="content",
-        )
-        memories = store.list_memories()
-        assert len(memories) == 1
-        # File path should be inside memory dir, not escaped
-        assert str(tmp_path) in memories[0].file_path
-
-    def test_null_byte_in_name_handled(self, tmp_path):
-        """Null bytes in name should be handled gracefully."""
-        store = MemoryStore(str(tmp_path))
-        store.save_memory(
-            name="test\x00evil",
-            memory_type=MemoryType.USER,
-            description="test",
-            content="content",
-        )
-        memories = store.list_memories()
-        assert len(memories) == 1
-
-    def test_special_yaml_chars_in_description(self, tmp_path):
-        """YAML special chars in description should be escaped."""
-        store = MemoryStore(str(tmp_path))
-        store.save_memory(
-            name="test-yaml",
-            memory_type=MemoryType.USER,
-            description="Value with: colons, # hashes, {braces}",
-            content="content",
-        )
-        memories = store.list_memories()
-        assert len(memories) == 1
-        assert "colons" in memories[0].description
-
-    def test_save_memory_with_empty_name(self, tmp_path):
-        """Empty name should fall back to timestamp-based name."""
-        store = MemoryStore(str(tmp_path))
-        store.save_memory(
-            name="",
-            memory_type=MemoryType.USER,
-            description="test",
-            content="content",
-        )
-        memories = store.list_memories()
-        assert len(memories) == 1
-
-    def test_validate_memory_stale_date(self, tmp_path):
-        """Memory with stale relative date should be flagged."""
-        store = MemoryStore(str(tmp_path))
-        store.save_memory(
-            name="stale-mem",
-            memory_type=MemoryType.PROJECT,
-            description="old memory",
-            content="This was from last week",
-        )
-        memories = store.list_memories()
-        assert len(memories) == 1

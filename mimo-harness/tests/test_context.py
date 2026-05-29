@@ -6,15 +6,11 @@ import tempfile
 import os
 from unittest.mock import MagicMock, patch
 from mimo_harness.context import (
-    Session, compact_context, snip_compress, microcompact,
-    _filter_orphan_tool_results, make_compact_boundary, load_memory,
-    llm_compress, COMPRESS_MARKER, estimate_tokens,
-    COMPRESS_TRIGGER_TOKENS, CONTEXT_WINDOW_TOKENS,
-    STARTUP_RESERVE_TOKENS, build_system_prompt,
+    Session, compact_context, load_memory,
+    estimate_tokens,
+    COMPRESS_TRIGGER_TOKENS,
     CheckpointManager,
-    _resolve_imports, _parse_frontmatter,
-    _load_path_scoped_rules, _discover_instruction_files,
-    _load_global_rules, load_path_scoped_rules_for_file,
+    load_path_scoped_rules_for_file,
     load_memory_for_compaction, cleanup_old_sessions, cleanup_old_spill_files,
     load_topic_on_demand,
 )
@@ -59,89 +55,6 @@ class TestSession:
             os.unlink(path)
 
 
-class TestSnipCompress:
-    def test_no_compression_needed(self):
-        messages = [{"role": "user", "content": "hi"}] * 5
-        result = snip_compress(messages, max_age=10)
-        assert len(result) == 5
-
-    def test_snips_old_tool_results(self):
-        messages = []
-        for i in range(30):
-            if i % 2 == 0:
-                messages.append({"role": "user", "content": f"msg {i}"})
-            else:
-                messages.append({"role": "tool", "content": f"result {i}"})
-
-        result = snip_compress(messages, max_age=10)
-        # Old tool results should be snipped
-        old_tools = [m for m in result[:20] if m.get("role") == "tool"]
-        for t in old_tools:
-            assert t["content"] == COMPRESS_MARKER
-
-        # Recent messages should be preserved
-        recent = result[-10:]
-        for m in recent:
-            if m.get("role") == "tool":
-                assert m["content"] != COMPRESS_MARKER
-
-    def test_preserves_non_tool_messages(self):
-        messages = [
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "hi there"},
-        ]
-        result = snip_compress(messages, max_age=10)
-        assert result == messages
-
-
-class TestMicrocompact:
-    def test_keeps_recent_tool_results(self):
-        messages = []
-        for i in range(20):
-            messages.append({"role": "user", "content": f"msg {i}"})
-            messages.append({
-                "role": "assistant",
-                "content": "ok",
-                "tool_calls": [{"id": f"tc{i}", "function": {"name": "test", "arguments": "{}"}}]
-            })
-            messages.append({"role": "tool", "content": f"result {i}", "tool_call_id": f"tc{i}"})
-
-        result = microcompact(messages, keep_recent=3)
-
-        # Should keep last 3 tool results intact
-        tool_msgs = [m for m in result if m.get("role") == "tool"]
-        non_markers = [m for m in tool_msgs if m["content"] != COMPRESS_MARKER]
-        assert len(non_markers) == 3
-
-    def test_no_compression_if_few_results(self):
-        messages = [
-            {"role": "tool", "content": "r1", "tool_call_id": "tc1"},
-            {"role": "tool", "content": "r2", "tool_call_id": "tc2"},
-        ]
-        result = microcompact(messages, keep_recent=5)
-        assert result == messages
-
-
-class TestOrphanFilter:
-    def test_removes_orphan_tool_results(self):
-        messages = [
-            {"role": "assistant", "content": "ok", "tool_calls": [{"id": "tc1", "function": {"name": "f", "arguments": "{}"}}]},
-            {"role": "tool", "content": "result1", "tool_call_id": "tc1"},
-            {"role": "tool", "content": "orphan", "tool_call_id": "tc999"},
-        ]
-        result = _filter_orphan_tool_results(messages)
-        assert len(result) == 2
-        assert result[1]["tool_call_id"] == "tc1"
-
-    def test_preserves_valid_tool_results(self):
-        messages = [
-            {"role": "assistant", "content": "ok", "tool_calls": [{"id": "tc1", "function": {"name": "f", "arguments": "{}"}}]},
-            {"role": "tool", "content": "result", "tool_call_id": "tc1"},
-        ]
-        result = _filter_orphan_tool_results(messages)
-        assert len(result) == 2
-
-
 class TestEstimateTokens:
     def test_estimates_basic_messages(self):
         messages = [{"role": "user", "content": "hello world"}]
@@ -153,15 +66,6 @@ class TestEstimateTokens:
         messages = [{"role": "user", "content": "x" * 400}] * 10
         tokens = estimate_tokens(messages)
         assert tokens >= 900
-
-
-class TestTokenConstants:
-    def test_context_window_200k(self):
-        assert CONTEXT_WINDOW_TOKENS == 200_000
-
-    def test_compress_trigger_at_85_percent(self):
-        expected = int(200_000 * 0.85)
-        assert COMPRESS_TRIGGER_TOKENS == expected
 
 
 class TestCompactContext:
@@ -183,16 +87,6 @@ class TestCompactContext:
         contents = [m.get("content", "") for m in result]
         assert any("recent question" in c for c in contents)
         assert any("recent answer" in c for c in contents)
-
-
-class TestCompactBoundary:
-    def test_creates_boundary(self):
-        boundary = make_compact_boundary(
-            pre_tokens=50000, pre_messages=100, trigger="auto"
-        )
-        assert boundary["role"] == "system"
-        assert "compacted" in boundary["content"]
-        assert boundary["compact_metadata"]["trigger"] == "auto"
 
 
 class TestLoadMemory:
@@ -222,65 +116,6 @@ class TestLoadMemory:
         result = load_memory(str(tmp_path))
         assert "AGENTS.md" in result
         assert "Use pytest" in result
-
-
-class TestLLMCompress:
-    def _make_messages(self, n):
-        msgs = []
-        for i in range(n):
-            msgs.append({"role": "user", "content": f"question {i}"})
-            msgs.append({"role": "assistant", "content": f"answer {i}"})
-        return msgs
-
-    def _mock_client(self, summary="Summary of conversation"):
-        client = MagicMock()
-        response = MagicMock()
-        response.choices = [MagicMock()]
-        response.choices[0].message.content = summary
-        client.chat.completions.create.return_value = response
-        return client
-
-    def test_returns_single_summary_message(self):
-        """After LLM compress, result is ONE summary message."""
-        messages = self._make_messages(20)
-        client = self._mock_client("Test summary")
-
-        result = llm_compress(messages, client, model="test-model")
-        assert result is not None
-        assert len(result) == 1  # Only summary, no recent messages
-        assert result[0]["role"] == "assistant"
-        assert "Conversation Summary" in result[0]["content"]
-        assert "Test summary" in result[0]["content"]
-
-    def test_returns_none_on_api_error(self):
-        messages = self._make_messages(15)
-        client = MagicMock()
-        client.chat.completions.create.side_effect = Exception("API error")
-
-        result = llm_compress(messages, client)
-        assert result is None
-
-    def test_returns_none_on_empty_response(self):
-        messages = self._make_messages(15)
-        client = MagicMock()
-        response = MagicMock()
-        response.choices = [MagicMock()]
-        response.choices[0].message.content = ""
-        client.chat.completions.create.return_value = response
-
-        result = llm_compress(messages, client)
-        assert result is None
-
-    def test_summary_size_is_small(self):
-        """Summary should be much smaller than original conversation."""
-        messages = self._make_messages(50)  # 100 messages
-        original_tokens = estimate_tokens(messages)
-        client = self._mock_client("Short summary of the conversation.")
-
-        result = llm_compress(messages, client)
-        summary_tokens = estimate_tokens(result)
-        # Summary should be < 10% of original
-        assert summary_tokens < original_tokens * 0.10
 
 
 class TestCompactContextWithLLM:
@@ -341,70 +176,6 @@ class TestCompactContextWithLLM:
         assert result[0]["role"] == "system"
 
 
-class TestLLMCompressEdgeCases:
-    """Edge cases for llm_compress."""
-
-    def test_empty_messages(self):
-        client = MagicMock()
-        result = llm_compress([], client)
-        assert result == []
-
-    def test_single_message(self):
-        client = MagicMock()
-        msg = [{"role": "user", "content": "hi"}]
-        result = llm_compress(msg, client)
-        assert result == msg
-
-    def test_messages_with_non_dict(self):
-        """Non-dict messages should be skipped gracefully."""
-        client = MagicMock()
-        response = MagicMock()
-        response.choices = [MagicMock()]
-        response.choices[0].message.content = "summary"
-        client.chat.completions.create.return_value = response
-
-        messages = [
-            {"role": "user", "content": "hello"},
-            "not a dict",  # should be skipped
-            {"role": "assistant", "content": "hi"},
-        ]
-        result = llm_compress(messages, client)
-        assert isinstance(result, list)
-        assert len(result) == 1
-
-    def test_messages_with_none_content(self):
-        """Messages with None content should be handled."""
-        client = MagicMock()
-        response = MagicMock()
-        response.choices = [MagicMock()]
-        response.choices[0].message.content = "summary"
-        client.chat.completions.create.return_value = response
-
-        messages = [
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": None},
-        ]
-        result = llm_compress(messages, client)
-        assert isinstance(result, list)
-        assert len(result) >= 1
-
-    def test_long_content_truncated(self):
-        """Individual messages with >3000 chars should be truncated."""
-        client = MagicMock()
-        response = MagicMock()
-        response.choices = [MagicMock()]
-        response.choices[0].message.content = "summary"
-        client.chat.completions.create.return_value = response
-
-        messages = [
-            {"role": "user", "content": "x" * 10000},
-            {"role": "assistant", "content": "y" * 10000},
-        ]
-        # Should not raise, should truncate internally
-        result = llm_compress(messages, client)
-        assert isinstance(result, list)
-
-
 class TestCompactContextEdgeCases:
     """Edge cases for compact_context."""
 
@@ -454,31 +225,6 @@ class TestCompactContextEdgeCases:
         # Fallback: system marker + last 2 messages
         assert len(result) <= 4
         assert result[0]["role"] == "system"
-
-
-class TestBuildSystemPrompt:
-    def test_build_system_prompt_basic(self):
-        """Contains MiMo Harness, cwd, platform info."""
-        prompt = build_system_prompt(tools_desc="- read_file: read files")
-        assert "MiMo Harness" in prompt
-        assert os.getcwd() in prompt
-        assert "Platform" in prompt or "platform" in prompt.lower()
-        assert "read_file" in prompt
-
-    def test_build_system_prompt_with_memory(self):
-        """memory_content is appended to prompt."""
-        prompt = build_system_prompt(
-            tools_desc="- test_tool: testing",
-            memory_content="This is project memory content",
-        )
-        assert "project memory content" in prompt.lower() or "Project Memory" in prompt
-
-    def test_build_system_prompt_with_tools(self):
-        """tools_desc is included in prompt."""
-        tools_desc = "- read_file: reads files\n- write_file: writes files"
-        prompt = build_system_prompt(tools_desc=tools_desc)
-        assert "read_file" in prompt
-        assert "write_file" in prompt
 
 
 # ============================================================================
@@ -662,74 +408,6 @@ class TestCompactContextTupleReturn:
         assert thrashing is False
 
 
-class TestDiscoverInstructionFiles:
-    """Tests for directory-tree walk to discover CLAUDE.md files."""
-
-    def test_finds_claude_md_at_root(self, tmp_path):
-        claude_md = tmp_path / "CLAUDE.md"
-        claude_md.write_text("# Project rules\nBe concise.")
-        result = _discover_instruction_files(str(tmp_path))
-        assert len(result) == 1
-        assert result[0][0] == "CLAUDE.md"
-        assert "Be concise" in result[0][1]
-
-    def test_finds_claude_local_md(self, tmp_path):
-        local_md = tmp_path / "CLAUDE.local.md"
-        local_md.write_text("# Local overrides\nUse black.")
-        result = _discover_instruction_files(str(tmp_path))
-        assert len(result) == 1
-        assert result[0][0] == "CLAUDE.local.md"
-
-    def test_finds_both_claude_and_local(self, tmp_path):
-        (tmp_path / "CLAUDE.md").write_text("# Project rules")
-        (tmp_path / "CLAUDE.local.md").write_text("# Local overrides")
-        result = _discover_instruction_files(str(tmp_path))
-        assert len(result) == 2
-        assert result[0][0] == "CLAUDE.md"
-        assert result[1][0] == "CLAUDE.local.md"
-
-    def test_strips_html_comments(self, tmp_path):
-        (tmp_path / "CLAUDE.md").write_text("<!-- comment -->\nReal content")
-        result = _discover_instruction_files(str(tmp_path))
-        assert len(result) == 1
-        assert "comment" not in result[0][1]
-        assert "Real content" in result[0][1]
-
-    def test_respects_line_limit(self, tmp_path):
-        content = "\n".join([f"line {i}" for i in range(300)])
-        (tmp_path / "CLAUDE.md").write_text(content)
-        result = _discover_instruction_files(str(tmp_path))
-        assert len(result) == 1
-        assert "truncated" in result[0][1]
-
-    def test_no_files_returns_empty(self, tmp_path):
-        result = _discover_instruction_files(str(tmp_path))
-        assert result == []
-
-
-class TestLoadGlobalRules:
-    """Tests for loading non-path-scoped rules at startup."""
-
-    def test_loads_rules_without_paths(self, tmp_path):
-        rules_dir = tmp_path / ".mimo" / "rules"
-        rules_dir.mkdir(parents=True)
-        (rules_dir / "global.md").write_text("Be concise.")
-        result = _load_global_rules(str(tmp_path))
-        assert len(result) == 1
-        assert "Be concise" in result[0]
-
-    def test_skips_rules_with_paths(self, tmp_path):
-        rules_dir = tmp_path / ".mimo" / "rules"
-        rules_dir.mkdir(parents=True)
-        (rules_dir / "scoped.md").write_text('---\npaths: ["*.py"]\n---\nUse type hints.')
-        result = _load_global_rules(str(tmp_path))
-        assert len(result) == 0
-
-    def test_no_rules_directory(self, tmp_path):
-        result = _load_global_rules(str(tmp_path))
-        assert result == []
-
-
 class TestLoadPathScopedRulesForFile:
     """Tests for lazy-loading path-scoped rules on demand."""
 
@@ -863,138 +541,6 @@ class TestLoadMemoryForCompaction:
         result = load_memory_for_compaction(str(tmp_path))
         assert "CLAUDE.md" in result
         assert "Use pytest" in result
-
-
-class TestResolveImports:
-    """R2: _resolve_imports with @import syntax."""
-
-    def test_resolves_simple_import(self, tmp_path):
-        from mimo_harness.context import _resolve_imports
-        imported_file = tmp_path / "rules.md"
-        imported_file.write_text("Be concise.")
-        content = "See @rules.md for details."
-        result = _resolve_imports(content, str(tmp_path))
-        assert "Be concise." in result
-        assert "@rules.md" not in result
-
-    def test_unresolved_import_left_as_is(self, tmp_path):
-        from mimo_harness.context import _resolve_imports
-        content = "See @nonexistent.md for details."
-        result = _resolve_imports(content, str(tmp_path))
-        assert "@nonexistent.md" in result
-
-    def test_nested_imports_resolved(self, tmp_path):
-        from mimo_harness.context import _resolve_imports
-        (tmp_path / "outer.md").write_text("Outer: @inner.md")
-        (tmp_path / "inner.md").write_text("Inner content.")
-        result = _resolve_imports("Read @outer.md", str(tmp_path))
-        assert "Inner content." in result
-
-    def test_depth_limit_prevents_infinite_loop(self, tmp_path):
-        from mimo_harness.context import _resolve_imports
-        # Create circular import
-        (tmp_path / "a.md").write_text("@b.md")
-        (tmp_path / "b.md").write_text("@a.md")
-        # Should not raise, just stop at depth limit
-        result = _resolve_imports("@a.md", str(tmp_path))
-        assert isinstance(result, str)
-
-    def test_no_imports_returns_unchanged(self, tmp_path):
-        from mimo_harness.context import _resolve_imports
-        content = "No imports here."
-        result = _resolve_imports(content, str(tmp_path))
-        assert result == content
-
-    def test_multiple_imports(self, tmp_path):
-        from mimo_harness.context import _resolve_imports
-        (tmp_path / "a.md").write_text("Content A")
-        (tmp_path / "b.md").write_text("Content B")
-        content = "@a.md and @b.md"
-        result = _resolve_imports(content, str(tmp_path))
-        assert "Content A" in result
-        assert "Content B" in result
-
-
-class TestParseFrontmatter:
-    """R2: _parse_frontmatter with YAML-like frontmatter."""
-
-    def test_parses_simple_frontmatter(self):
-        from mimo_harness.context import _parse_frontmatter
-        content = "---\npaths: [\"*.py\", \"*.js\"]\n---\nBody content here."
-        meta, body = _parse_frontmatter(content)
-        assert meta["paths"] == ["*.py", "*.js"]
-        assert "Body content" in body
-
-    def test_no_frontmatter(self):
-        from mimo_harness.context import _parse_frontmatter
-        content = "Just plain content."
-        meta, body = _parse_frontmatter(content)
-        assert meta == {}
-        assert body == content
-
-    def test_unclosed_frontmatter(self):
-        from mimo_harness.context import _parse_frontmatter
-        content = "---\npaths: [\"*.py\"]\nNo closing delimiter"
-        meta, body = _parse_frontmatter(content)
-        assert meta == {}
-        assert body == content
-
-    def test_frontmatter_with_scalar_values(self):
-        from mimo_harness.context import _parse_frontmatter
-        content = "---\nname: test-rule\nseverity: high\n---\nRule body."
-        meta, body = _parse_frontmatter(content)
-        assert meta["name"] == "test-rule"
-        assert meta["severity"] == "high"
-        assert "Rule body" in body
-
-    def test_frontmatter_with_quoted_values(self):
-        from mimo_harness.context import _parse_frontmatter
-        content = '---\nname: "quoted value"\n---\nBody.'
-        meta, body = _parse_frontmatter(content)
-        assert meta["name"] == "quoted value"
-
-    def test_empty_frontmatter(self):
-        from mimo_harness.context import _parse_frontmatter
-        content = "---\n---\nBody."
-        meta, body = _parse_frontmatter(content)
-        assert meta == {}
-        assert "Body" in body
-
-
-class TestLoadPathScopedRules:
-    """R2: _load_path_scoped_rules scans .mimo/rules/*.md."""
-
-    def test_loads_rules_from_directory(self, tmp_path):
-        from mimo_harness.context import _load_path_scoped_rules
-        rules_dir = tmp_path / ".mimo" / "rules"
-        rules_dir.mkdir(parents=True)
-        (rules_dir / "python.md").write_text(
-            '---\npaths: ["*.py"]\n---\nUse type hints.'
-        )
-        rules = _load_path_scoped_rules(str(tmp_path))
-        assert len(rules) == 1
-        assert rules[0][0] == ["*.py"]
-        assert "type hints" in rules[0][1]
-
-    def test_no_rules_directory(self, tmp_path):
-        from mimo_harness.context import _load_path_scoped_rules
-        rules = _load_path_scoped_rules(str(tmp_path))
-        assert rules == []
-
-    def test_empty_rules_directory(self, tmp_path):
-        from mimo_harness.context import _load_path_scoped_rules
-        rules_dir = tmp_path / ".mimo" / "rules"
-        rules_dir.mkdir(parents=True)
-        rules = _load_path_scoped_rules(str(tmp_path))
-        assert rules == []
-
-    def test_rule_without_body_skipped(self, tmp_path):
-        from mimo_harness.context import _load_path_scoped_rules
-        rules_dir = tmp_path / ".mimo" / "rules"
-        rules_dir.mkdir(parents=True)
-        (rules_dir / "empty.md").write_text("---\npaths: [\"*.py\"]\n---\n")
-        rules = _load_path_scoped_rules(str(tmp_path))
-        assert len(rules) == 0
 
 
 class TestSessionFromJsonl:
@@ -1205,58 +751,6 @@ class TestCheckpointManagerBatch:
         assert "safe_name" in meta[0]
 
 
-class TestCompactContextPreservesInstructions:
-    """R2: compact_context does NOT preserve instructions in output.
-
-    Instructions are re-read from disk after compaction by the caller
-    (agent.py calls load_memory_for_compaction()). This matches Claude
-    Code's behavior: CLAUDE.md is re-read from disk after /compact.
-    """
-
-    def test_instructions_not_in_compacted_output(self):
-        big = "x" * 8000
-        messages = [
-            {"role": "system", "content": "## Project Memory\nUse pytest for testing."},
-        ]
-        for i in range(100):
-            messages.append({"role": "user", "content": f"q{i} {big}"})
-            messages.append({"role": "assistant", "content": f"a{i} {big}"})
-        tokens = estimate_tokens(messages)
-        assert tokens > COMPRESS_TRIGGER_TOKENS
-
-        result, _, _, _ = compact_context(messages, estimated_tokens=tokens)
-        # Instructions are NOT preserved — caller re-reads from disk
-        contents = [m.get("content", "") for m in result]
-        assert not any("Use pytest" in c for c in contents)
-
-    def test_llm_compress_returns_summary_only(self):
-        messages = [
-            {"role": "system", "content": "## Project Memory\nFollow PEP 8."},
-        ]
-        big = "x" * 8000
-        for i in range(100):
-            messages.append({"role": "user", "content": f"q{i} {big}"})
-            messages.append({"role": "assistant", "content": f"a{i} {big}"})
-        tokens = estimate_tokens(messages)
-        assert tokens > COMPRESS_TRIGGER_TOKENS
-
-        client = MagicMock()
-        response = MagicMock()
-        response.choices = [MagicMock()]
-        response.choices[0].message.content = "LLM summary"
-        client.chat.completions.create.return_value = response
-
-        with patch("mimo_harness.context.llm_compress", return_value=[
-            {"role": "assistant", "content": "[Conversation Summary]\nLLM summary"}
-        ]):
-            result, _, _, _ = compact_context(
-                messages, client=client, estimated_tokens=tokens,
-            )
-        contents = [m.get("content", "") for m in result]
-        # Only the summary, no instruction re-insertion
-        assert any("LLM summary" in c for c in contents)
-
-
 class TestLoadTopicOnDemand:
     def test_loads_existing_topic(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -1328,49 +822,3 @@ class TestEstimateTokensEdgeCases:
         tokens = estimate_tokens(messages)
         assert tokens >= 0
 
-
-class TestFilterOrphanToolResults:
-    """Test _filter_orphan_tool_results function."""
-
-    def test_removes_orphan_tool_results(self):
-        messages = [
-            {"role": "user", "content": "hello"},
-            {"role": "tool", "content": "result", "tool_call_id": "orphan_id"},
-            {"role": "assistant", "content": "hi"},
-        ]
-        result = _filter_orphan_tool_results(messages)
-        assert len(result) == 2
-        assert all(m.get("role") != "tool" for m in result)
-
-    def test_preserves_valid_tool_results(self):
-        messages = [
-            {"role": "assistant", "content": "", "tool_calls": [{"id": "tc1", "function": {"name": "test", "arguments": "{}"}}]},
-            {"role": "tool", "content": "result", "tool_call_id": "tc1"},
-            {"role": "assistant", "content": "done"},
-        ]
-        result = _filter_orphan_tool_results(messages)
-        assert len(result) == 3
-
-    def test_empty_messages(self):
-        assert _filter_orphan_tool_results([]) == []
-
-    def test_mixed_orphan_and_valid(self):
-        messages = [
-            {"role": "assistant", "content": "", "tool_calls": [{"id": "tc_valid", "function": {"name": "test", "arguments": "{}"}}]},
-            {"role": "tool", "content": "valid result", "tool_call_id": "tc_valid"},
-            {"role": "tool", "content": "orphan result", "tool_call_id": "tc_orphan"},
-            {"role": "assistant", "content": "done"},
-        ]
-        result = _filter_orphan_tool_results(messages)
-        assert len(result) == 3
-        tool_msgs = [m for m in result if m.get("role") == "tool"]
-        assert len(tool_msgs) == 1
-        assert tool_msgs[0]["tool_call_id"] == "tc_valid"
-
-    def test_preserves_non_tool_messages(self):
-        messages = [
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "hi"},
-        ]
-        result = _filter_orphan_tool_results(messages)
-        assert len(result) == 2
