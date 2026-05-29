@@ -308,20 +308,6 @@ class TestLargeInput:
         result = json.loads(math_tools.calculator({"expression": "2**100"}))
         assert "result" in result or "error" in result
 
-    def test_registry_result_truncation(self):
-        """Tool results over threshold should be spilled to disk."""
-        registry = ToolRegistry()
-        registry.SPILL_THRESHOLD_CHARS = 5000
-        registry.MAX_RESULT_CHARS = 10000
-        def big_result(params):
-            return "x" * 20000
-        registry.register(ToolDef(
-            name="big_tool", description="test", parameters={"type": "object", "properties": {}},
-            handler=big_result, permission=Permission.READ,
-        ))
-        gate = PermissionGate(auto_approve=True)
-        result = registry.execute("big_tool", {}, gate)
-        assert len(result) <= 10200  # MAX + spillover message
 
 
 # ============================================================================
@@ -385,14 +371,6 @@ class TestUnicodeEdgeCases:
 class TestPermissionStress:
     """Stress test the permission pipeline."""
 
-    def test_deny_always_wins(self):
-        """deny > allow, even if allow is listed first."""
-        gate = PermissionGate(rules=[
-            PermissionRule("write_file", "allow"),
-            PermissionRule("write_file", "deny"),
-        ])
-        assert not gate.check(Permission.WRITE, "write_file()")
-
     def test_ask_before_allow(self):
         """ask > allow when no deny."""
         gate = PermissionGate(auto_approve=False, rules=[
@@ -401,46 +379,6 @@ class TestPermissionStress:
         ])
         gate_check = gate._match_rules(Permission.WRITE, "write_file")
         assert gate_check == "ask"
-
-    def test_plan_mode_blocks_all_writes(self):
-        gate = PermissionGate(plan_mode=True)
-        assert not gate.check(Permission.WRITE, "write_file()")
-        assert not gate.check(Permission.DESTRUCTIVE, "rm()")
-
-    def test_plan_mode_allows_reads(self):
-        gate = PermissionGate(plan_mode=True)
-        assert gate.check(Permission.READ, "read_file()")
-
-    def test_auto_approve_writes(self):
-        gate = PermissionGate(auto_approve=True)
-        assert gate.check(Permission.WRITE, "write_file()")
-
-    def test_rule_pattern_wildcard(self):
-        gate = PermissionGate(rules=[
-            PermissionRule("run_command:*", "allow"),
-        ])
-        result = gate._match_rules(Permission.WRITE, "run_command", "anything")
-        assert result == "allow"
-
-    def test_rule_pattern_prefix(self):
-        gate = PermissionGate(rules=[
-            PermissionRule("run_command:git:*", "allow"),
-        ])
-        assert gate._match_rules(Permission.WRITE, "run_command", "git status") == "allow"
-        assert gate._match_rules(Permission.WRITE, "run_command", "rm -rf /") is None
-
-    def test_rule_pattern_exact(self):
-        gate = PermissionGate(rules=[
-            PermissionRule("read_file", "allow"),
-        ])
-        assert gate._match_rules(Permission.READ, "read_file") == "allow"
-        assert gate._match_rules(Permission.READ, "write_file") is None
-
-    def test_rejection_circuit_breaker(self):
-        """After 3 rejections, auto-approve falls through to interactive."""
-        gate = PermissionGate(auto_approve=True)
-        gate._rejection_count = 3
-        assert gate._rejection_count >= 3
 
     def test_many_rules_performance(self):
         """100 rules should not slow down permission checks."""

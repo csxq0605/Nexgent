@@ -665,3 +665,57 @@ class TestGetInjectionWarning:
         detection = InjectionDetection(detected=True)
         warning = get_injection_warning(detection)
         assert warning.endswith("\n\n")
+
+
+# ============================================================================
+# P2: Additional security_pipeline test coverage
+# ============================================================================
+
+
+class TestClassifyActionModelEdgeCases:
+    """Test classify_action_model edge cases."""
+
+    def test_returns_none_without_client(self):
+        result = classify_action_model("run_command", {"command": "ls"}, client=None)
+        assert result is None
+
+    def test_fail_closed_on_exception(self):
+        """When LLM raises exception, should return HARD_DENY (fail-closed)."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = Exception("API error")
+        result = classify_action_model("run_command", {"command": "rm -rf /"}, client=mock_client)
+        assert result is not None
+        assert result.decision == SafetyDecision.HARD_DENY
+
+    def test_handles_non_json_response(self):
+        """Non-JSON response from LLM should fail closed."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "This is not JSON"
+        mock_client.chat.completions.create.return_value = mock_response
+        result = classify_action_model("run_command", {"command": "ls"}, client=mock_client)
+        assert result is not None
+        assert result.decision == SafetyDecision.HARD_DENY
+
+    def test_handles_markdown_json_response(self):
+        """JSON wrapped in markdown code blocks should be parsed."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '```json\n{"decision": "allow", "reason": "safe"}\n```'
+        mock_client.chat.completions.create.return_value = mock_response
+        result = classify_action_model("read_file", {"path": "/tmp/test"}, client=mock_client)
+        assert result is not None
+        assert result.decision == SafetyDecision.ALLOW
+
+    def test_handles_invalid_decision_field(self):
+        """Invalid decision value should fail closed."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"decision": "invalid_value", "reason": "test"}'
+        mock_client.chat.completions.create.return_value = mock_response
+        result = classify_action_model("run_command", {"command": "ls"}, client=mock_client)
+        assert result is not None
+        assert result.decision == SafetyDecision.HARD_DENY

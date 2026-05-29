@@ -362,3 +362,47 @@ class TestSpillThresholdConstants:
         import os
         expected = os.environ.get("MIMO_SPILL_DIR", ".mimo/outputs")
         assert ToolRegistry.SPILL_DIR == expected
+
+
+# ============================================================================
+# P2: Additional registry.py test coverage
+# ============================================================================
+
+
+class TestValidateParamsEdgeCases:
+    """Test _validate_params edge cases."""
+
+    def test_missing_required_param(self):
+        registry = ToolRegistry()
+        registry.register(ToolDef(
+            name="test_tool", description="test",
+            parameters={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+            handler=lambda p: "ok", permission=Permission.READ,
+        ))
+        gate = PermissionGate(auto_approve=True)
+        result = registry.execute("test_tool", {}, gate)
+        assert "error" in result.lower() or "required" in result.lower() or "missing" in result.lower()
+
+    def test_wrong_type_string(self):
+        registry = ToolRegistry()
+        registry.register(ToolDef(
+            name="test_tool", description="test",
+            parameters={"type": "object", "properties": {"count": {"type": "string"}}},
+            handler=lambda p: "ok", permission=Permission.READ,
+        ))
+        gate = PermissionGate(auto_approve=True)
+        # Pass integer where string expected
+        result = registry.execute("test_tool", {"count": 42}, gate)
+        # Should either accept (coerce) or reject
+        assert isinstance(result, str)
+
+    def test_enum_constraint(self):
+        registry = ToolRegistry()
+        registry.register(ToolDef(
+            name="test_tool", description="test",
+            parameters={"type": "object", "properties": {"mode": {"type": "string", "enum": ["fast", "slow"]}}},
+            handler=lambda p: "ok", permission=Permission.READ,
+        ))
+        gate = PermissionGate(auto_approve=True)
+        result = registry.execute("test_tool", {"mode": "invalid"}, gate)
+        assert "error" in result.lower() or "enum" in result.lower() or "invalid" in result.lower()

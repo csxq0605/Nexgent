@@ -7,233 +7,196 @@ import sys
 import pytest
 from unittest.mock import patch, MagicMock
 
-from mimo_harness.cli import _format_tokens, _load_config, print_help, _handle_command, _output, _estimate_message_tokens, _list_session_files, _resume_latest_session, _pick_session, _validate_session_id, _resume_by_session_id
+from mimo_harness.cli import _format_tokens, _load_config, print_help, _handle_command, _output, _estimate_message_tokens, _list_session_files, _resume_latest_session, _pick_session, _validate_session_id, _resume_by_session_id, _build_parser
 from mimo_harness.context import Session
 
 
 class TestParseArgs:
-    """Test argparse parsing via sys.argv manipulation."""
+    """Test the actual CLI argument parser from cli.py."""
 
     def test_parse_args_task(self):
-        with patch("sys.argv", ["mimo", "--task", "fix the bug"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.task == "fix the bug"
+        parser = _build_parser()
+        args = parser.parse_args(["--task", "fix the bug"])
+        assert args.task == "fix the bug"
+
+    def test_parse_args_task_short(self):
+        parser = _build_parser()
+        args = parser.parse_args(["-t", "fix the bug"])
+        assert args.task == "fix the bug"
 
     def test_parse_args_model(self):
-        with patch("sys.argv", ["mimo", "--model", "custom"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.model == "custom"
+        parser = _build_parser()
+        args = parser.parse_args(["--model", "custom"])
+        assert args.model == "custom"
+
+    def test_parse_args_model_short(self):
+        parser = _build_parser()
+        args = parser.parse_args(["-m", "custom"])
+        assert args.model == "custom"
 
     def test_parse_args_auto_approve(self):
-        with patch("sys.argv", ["mimo", "--auto-approve"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.auto_approve is True
+        parser = _build_parser()
+        args = parser.parse_args(["--auto-approve"])
+        assert args.auto_approve is True
 
     def test_parse_args_auto_approve_short(self):
-        with patch("sys.argv", ["mimo", "-y"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.auto_approve is True
+        parser = _build_parser()
+        args = parser.parse_args(["-y"])
+        assert args.auto_approve is True
 
     def test_parse_args_dry_run(self):
-        with patch("sys.argv", ["mimo", "--dry-run"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.dry_run is True
+        parser = _build_parser()
+        args = parser.parse_args(["--dry-run"])
+        assert args.dry_run is True
 
     def test_parse_args_plan(self):
-        with patch("sys.argv", ["mimo", "--plan"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.plan is True
+        parser = _build_parser()
+        args = parser.parse_args(["--plan"])
+        assert args.plan is True
 
     def test_parse_args_stream(self):
-        with patch("sys.argv", ["mimo", "--stream"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.stream is True
+        parser = _build_parser()
+        args = parser.parse_args(["--stream"])
+        assert args.stream is True
 
     def test_parse_args_stream_short(self):
-        with patch("sys.argv", ["mimo", "-s"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.stream is True
+        parser = _build_parser()
+        args = parser.parse_args(["-s"])
+        assert args.stream is True
 
     def test_parse_args_max_steps(self):
-        with patch("sys.argv", ["mimo", "--max-steps", "10"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.max_steps == 10
+        parser = _build_parser()
+        args = parser.parse_args(["--max-steps", "10"])
+        assert args.max_steps == 10
 
     def test_parse_args_verbose(self):
-        with patch("sys.argv", ["mimo", "--verbose"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.verbose is True
+        parser = _build_parser()
+        args = parser.parse_args(["--verbose"])
+        assert args.verbose is True
 
     def test_parse_args_verbose_short(self):
-        with patch("sys.argv", ["mimo", "-v"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.verbose is True
+        parser = _build_parser()
+        args = parser.parse_args(["-v"])
+        assert args.verbose is True
 
     def test_parse_args_config(self):
-        with patch("sys.argv", ["mimo", "--config", "path.json"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.config == "path.json"
+        parser = _build_parser()
+        args = parser.parse_args(["--config", "path.json"])
+        assert args.config == "path.json"
+
+    def test_parse_args_config_short(self):
+        parser = _build_parser()
+        args = parser.parse_args(["-c", "path.json"])
+        assert args.config == "path.json"
 
     def test_parse_args_rules(self):
-        with patch("sys.argv", ["mimo", "--rules", "rules.json"]):
-            import argparse
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--task", "-t")
-            parser.add_argument("--model", "-m", default=None)
-            parser.add_argument("--auto-approve", "-y", action="store_true")
-            parser.add_argument("--dry-run", action="store_true")
-            parser.add_argument("--plan", action="store_true")
-            parser.add_argument("--max-steps", type=int, default=20)
-            parser.add_argument("--verbose", "-v", action="store_true")
-            parser.add_argument("--config", "-c")
-            parser.add_argument("--rules", "-r")
-            parser.add_argument("--stream", "-s", action="store_true")
-            args = parser.parse_args()
-            assert args.rules == "rules.json"
+        parser = _build_parser()
+        args = parser.parse_args(["--rules", "rules.json"])
+        assert args.rules == "rules.json"
+
+    def test_parse_args_rules_short(self):
+        parser = _build_parser()
+        args = parser.parse_args(["-r", "rules.json"])
+        assert args.rules == "rules.json"
+
+    def test_parse_args_bare(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--bare"])
+        assert args.bare is True
+
+    def test_parse_args_effort(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--effort", "high"])
+        assert args.effort == "high"
+
+    def test_parse_args_effort_default(self):
+        parser = _build_parser()
+        args = parser.parse_args([])
+        assert args.effort == "medium"
+
+    def test_parse_args_output_format(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--output-format", "json"])
+        assert args.output_format == "json"
+
+    def test_parse_args_output_format_default(self):
+        parser = _build_parser()
+        args = parser.parse_args([])
+        assert args.output_format == "text"
+
+    def test_parse_args_session_dir(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--session-dir", "/tmp/sessions"])
+        assert args.session_dir == "/tmp/sessions"
+
+    def test_parse_args_continue(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--continue"])
+        assert args.continue_session is True
+
+    def test_parse_args_resume(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--resume"])
+        assert args.resume is True
+
+    def test_parse_args_name(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--name", "my-session"])
+        assert args.name == "my-session"
+
+    def test_parse_args_session_id(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--session-id", "abc123"])
+        assert args.session_id == "abc123"
+
+    def test_parse_args_fallback_model(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--fallback-model", "backup"])
+        assert args.fallback_model == "backup"
+
+    def test_parse_args_log_file(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--log-file", "/tmp/app.log"])
+        assert args.log_file == "/tmp/app.log"
+
+    def test_parse_args_cleanup_days(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--cleanup-days", "7"])
+        assert args.cleanup_days == 7
+
+    def test_parse_args_cleanup_days_default(self):
+        parser = _build_parser()
+        args = parser.parse_args([])
+        assert args.cleanup_days == 30
+
+    def test_parse_args_defaults(self):
+        """All flags default correctly when no args passed."""
+        parser = _build_parser()
+        args = parser.parse_args([])
+        assert args.task is None
+        assert args.model is None
+        assert args.auto_approve is False
+        assert args.dry_run is False
+        assert args.plan is False
+        assert args.max_steps is None
+        assert args.verbose is False
+        assert args.stream is False
+        assert args.bare is False
+        assert args.continue_session is False
+        assert args.resume is False
+
+    def test_parse_args_combined(self):
+        parser = _build_parser()
+        args = parser.parse_args([
+            "--task", "test", "--model", "m", "-y", "--stream",
+            "--max-steps", "5", "--output-format", "json",
+        ])
+        assert args.task == "test"
+        assert args.model == "m"
+        assert args.auto_approve is True
+        assert args.stream is True
+        assert args.max_steps == 5
+        assert args.output_format == "json"
 
 
 class TestLoadConfig:
@@ -269,163 +232,6 @@ class TestFormatTokens:
 
     def test_format_tokens_zero(self):
         assert _format_tokens(0) == "0"
-
-
-class TestReplCommands:
-    """Test REPL slash commands by simulating input and capturing output."""
-
-    def test_repl_help_command(self):
-        buf = io.StringIO()
-        with patch("sys.stdout", buf):
-            print_help()
-        output = buf.getvalue()
-        assert "/help" in output
-        assert "/quit" in output
-        assert "/clear" in output
-        assert "/tools" in output
-
-    def test_repl_tools_command(self, monkeypatch):
-        monkeypatch.setenv("MIMO_API_KEY", "test-key")
-        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
-        monkeypatch.setenv("MIMO_MODEL", "test-model")
-        from mimo_harness.agent import MiMoHarness
-        harness = MiMoHarness()
-        buf = io.StringIO()
-        with patch("sys.stdout", buf):
-            print("\nAvailable tools:")
-            for name in harness.registry.list_names():
-                tool = harness.registry.get(name)
-                markers = []
-                if tool.is_read_only:
-                    markers.append("RO")
-                if tool.is_concurrency_safe:
-                    markers.append("CS")
-                if tool.is_destructive:
-                    markers.append("DST")
-                marker_str = f" [{', '.join(markers)}]" if markers else ""
-                print(f"  - {name}: {tool.description[:50]}...{marker_str}")
-            print()
-        output = buf.getvalue()
-        assert "Available tools:" in output
-        assert "read_file" in output
-        assert "run_command" in output
-
-    def test_repl_stats_command(self, monkeypatch):
-        monkeypatch.setenv("MIMO_API_KEY", "test-key")
-        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
-        monkeypatch.setenv("MIMO_MODEL", "test-model")
-        from mimo_harness.agent import MiMoHarness
-        from mimo_harness.context import Session, estimate_tokens
-        from mimo_harness.cli import _format_tokens
-        harness = MiMoHarness()
-        session = Session(session_id="aabbccdd")
-        session.add_message("user", "hello")
-        buf = io.StringIO()
-        with patch("sys.stdout", buf):
-            tokens = estimate_tokens(session.messages)
-            print(f"\nSession Statistics:")
-            print(f"  Messages: {len(session.messages)}")
-            print(f"  Tokens: {_format_tokens(tokens)}")
-            print()
-        output = buf.getvalue()
-        assert "Session Statistics:" in output
-        assert "Messages: 1" in output
-
-    def test_repl_tokens_command(self, monkeypatch):
-        monkeypatch.setenv("MIMO_API_KEY", "test-key")
-        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
-        monkeypatch.setenv("MIMO_MODEL", "test-model")
-        from mimo_harness.context import Session, estimate_tokens, CONTEXT_WINDOW_TOKENS
-        from mimo_harness.cli import _format_tokens
-        session = Session(session_id="aabbccdd")
-        session.add_message("user", "hello world")
-        buf = io.StringIO()
-        with patch("sys.stdout", buf):
-            tokens = estimate_tokens(session.messages)
-            pct = tokens / CONTEXT_WINDOW_TOKENS * 100
-            print(f"\nToken Usage:")
-            print(f"  Conversation: {_format_tokens(tokens)} / {_format_tokens(CONTEXT_WINDOW_TOKENS)} ({pct:.1f}%)")
-            print()
-        output = buf.getvalue()
-        assert "Token Usage:" in output
-        assert "Conversation:" in output
-
-    def test_repl_dry_run_toggle(self, monkeypatch):
-        monkeypatch.setenv("MIMO_API_KEY", "test-key")
-        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
-        monkeypatch.setenv("MIMO_MODEL", "test-model")
-        from mimo_harness.agent import MiMoHarness
-        harness = MiMoHarness(dry_run=False)
-        # Toggle dry-run ON
-        harness.perms.dry_run = not harness.perms.dry_run
-        buf = io.StringIO()
-        with patch("sys.stdout", buf):
-            print(f"Dry-run: {'ON' if harness.perms.dry_run else 'OFF'}")
-        assert "ON" in buf.getvalue()
-        # Toggle dry-run OFF
-        harness.perms.dry_run = not harness.perms.dry_run
-        buf2 = io.StringIO()
-        with patch("sys.stdout", buf2):
-            print(f"Dry-run: {'ON' if harness.perms.dry_run else 'OFF'}")
-        assert "OFF" in buf2.getvalue()
-
-    def test_repl_auto_toggle(self, monkeypatch):
-        monkeypatch.setenv("MIMO_API_KEY", "test-key")
-        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
-        monkeypatch.setenv("MIMO_MODEL", "test-model")
-        from mimo_harness.agent import MiMoHarness
-        harness = MiMoHarness(auto_approve=False)
-        # Toggle auto ON
-        harness.perms.auto_approve = not harness.perms.auto_approve
-        buf = io.StringIO()
-        with patch("sys.stdout", buf):
-            print(f"Auto-approve: {'ON' if harness.perms.auto_approve else 'OFF'}")
-        assert "ON" in buf.getvalue()
-        # Toggle auto OFF
-        harness.perms.auto_approve = not harness.perms.auto_approve
-        buf2 = io.StringIO()
-        with patch("sys.stdout", buf2):
-            print(f"Auto-approve: {'ON' if harness.perms.auto_approve else 'OFF'}")
-        assert "OFF" in buf2.getvalue()
-
-    def test_repl_plan_toggle(self, monkeypatch):
-        monkeypatch.setenv("MIMO_API_KEY", "test-key")
-        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
-        monkeypatch.setenv("MIMO_MODEL", "test-model")
-        from mimo_harness.agent import MiMoHarness
-        from mimo_harness.permissions import PermissionMode
-        harness = MiMoHarness()
-        # Toggle plan ON
-        harness.perms.mode = PermissionMode.PLAN
-        buf = io.StringIO()
-        with patch("sys.stdout", buf):
-            print("Plan mode: ON (read-only)")
-        assert "ON" in buf.getvalue()
-        # Toggle plan OFF
-        harness.perms.mode = PermissionMode.DEFAULT
-        buf2 = io.StringIO()
-        with patch("sys.stdout", buf2):
-            print("Plan mode: OFF")
-        assert "OFF" in buf2.getvalue()
-
-    def test_repl_clear_command(self, monkeypatch):
-        from mimo_harness.context import Session
-        session = Session(session_id="test")
-        session.add_message("user", "hello")
-        session.add_message("assistant", "hi")
-        assert len(session.messages) == 2
-        session.messages.clear()
-        buf = io.StringIO()
-        with patch("sys.stdout", buf):
-            print("Session cleared.")
-        assert len(session.messages) == 0
-        assert "Session cleared" in buf.getvalue()
-
-    def test_repl_quit_command(self):
-        buf = io.StringIO()
-        with patch("sys.stdout", buf):
-            print("Bye!")
-        assert "Bye!" in buf.getvalue()
 
 
 class _HarnessFixture:
@@ -1066,19 +872,6 @@ class TestEstimateMessageTokens:
         assert tokens >= 1
 
 
-class TestShellCommandPrefix:
-    """R2: !command prefix in REPL (subprocess execution)."""
-
-    def test_bang_prefix_executes_command(self):
-        """The ! prefix triggers subprocess.run. Test via _handle_command path is not
-        directly testable (it's in the REPL loop), but we can test the subprocess
-        behavior that would occur."""
-        import subprocess
-        result = subprocess.run("echo hello", shell=True, capture_output=True, text=True, timeout=5)
-        assert result.returncode == 0
-        assert "hello" in result.stdout
-
-
 class TestContextCommand:
     """R2: /context command shows per-message token breakdown."""
 
@@ -1674,3 +1467,120 @@ class TestConfigWatcher:
         changed, config = watcher.check_for_changes()
         # Invalid JSON still counts as a change (mtime updated), but config is empty
         assert config == {}
+
+
+# ============================================================================
+# P0: Additional CLI test coverage
+# ============================================================================
+
+
+class TestHandleCommandAbort:
+    """Test /abort command triggers graceful abort."""
+
+    def test_abort_command(self, monkeypatch, tmp_path, capsys):
+        harness, session = _HarnessFixture.make(monkeypatch)
+        from mimo_harness.memory import MemoryStore
+        memory_store = MemoryStore(str(tmp_path))
+        assert not harness.graceful_abort.is_requested()
+        _handle_command(["/abort"], harness, session, memory_store)
+        captured = capsys.readouterr()
+        assert "Abort requested" in captured.out
+        assert harness.graceful_abort.is_requested()
+
+
+class TestHandleCommandHelp:
+    """Test /help command via _handle_command."""
+
+    def test_help_command(self, monkeypatch, tmp_path, capsys):
+        harness, session = _HarnessFixture.make(monkeypatch)
+        from mimo_harness.memory import MemoryStore
+        memory_store = MemoryStore(str(tmp_path))
+        _handle_command(["/help"], harness, session, memory_store)
+        captured = capsys.readouterr()
+        assert "/help" in captured.out
+        assert "/quit" in captured.out
+
+
+class TestSessionFromJsonlEdgeCases:
+    """Test Session.from_jsonl edge cases."""
+
+    def test_from_jsonl_empty_file(self, tmp_path):
+        from mimo_harness.context import Session
+        f = tmp_path / "empty.jsonl"
+        f.write_text("", encoding="utf-8")
+        # Empty file: no messages, no skipped lines -> returns empty session
+        result = Session.from_jsonl(str(f))
+        assert len(result.session.messages) == 0
+        assert result.skipped == 0
+
+    def test_from_jsonl_all_invalid_lines(self, tmp_path):
+        from mimo_harness.context import Session
+        f = tmp_path / "bad.jsonl"
+        f.write_text("not json\nalso bad\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="No valid messages"):
+            Session.from_jsonl(str(f))
+
+    def test_from_jsonl_mixed_valid_invalid(self, tmp_path):
+        from mimo_harness.context import Session
+        f = tmp_path / "mixed.jsonl"
+        lines = [
+            json.dumps({"role": "user", "content": "hello"}) + "\n",
+            "not valid json\n",
+            json.dumps({"role": "assistant", "content": "hi"}) + "\n",
+        ]
+        f.write_text("".join(lines), encoding="utf-8")
+        result = Session.from_jsonl(str(f))
+        assert len(result.session.messages) == 2
+        assert result.skipped == 1
+
+    def test_from_jsonl_with_session_meta(self, tmp_path):
+        from mimo_harness.context import Session
+        f = tmp_path / "meta.jsonl"
+        lines = [
+            json.dumps({"role": "user", "content": "hello"}) + "\n",
+            json.dumps({"role": "__session_meta__", "meta": {"name": "test", "compaction_count": 2}}) + "\n",
+            json.dumps({"role": "assistant", "content": "hi"}) + "\n",
+        ]
+        f.write_text("".join(lines), encoding="utf-8")
+        result = Session.from_jsonl(str(f))
+        # __session_meta__ messages are skipped in the message list
+        assert len(result.session.messages) == 2
+        assert result.session.name == "test"
+        assert result.session.compaction_count == 2
+
+    def test_from_jsonl_rejects_unknown_role(self, tmp_path):
+        from mimo_harness.context import Session
+        f = tmp_path / "unknown_role.jsonl"
+        lines = [
+            json.dumps({"role": "user", "content": "hello"}) + "\n",
+            json.dumps({"role": "unknown_role", "content": "weird"}) + "\n",
+            json.dumps({"role": "assistant", "content": "hi"}) + "\n",
+        ]
+        f.write_text("".join(lines), encoding="utf-8")
+        result = Session.from_jsonl(str(f))
+        assert len(result.session.messages) == 2
+        assert result.skipped == 1
+
+    def test_from_jsonl_session_id_from_filename(self, tmp_path):
+        from mimo_harness.context import Session
+        f = tmp_path / "my-session-id.jsonl"
+        f.write_text(json.dumps({"role": "user", "content": "hi"}) + "\n", encoding="utf-8")
+        result = Session.from_jsonl(str(f))
+        assert result.session.session_id == "my-session-id"
+
+
+class TestOutputEdgeCases:
+    """Test _output function edge cases."""
+
+    def test_output_json_with_none_session(self, capsys):
+        _output("test", output_format="json", session=None)
+        captured = capsys.readouterr()
+        data = json.loads(captured.out.strip())
+        assert data["type"] == "result"
+        assert data["session_id"] == ""
+
+    def test_output_text_multiline(self, capsys):
+        _output("line1\nline2\nline3", output_format="text")
+        captured = capsys.readouterr()
+        assert "line1" in captured.out
+        assert "line3" in captured.out

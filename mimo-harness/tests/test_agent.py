@@ -6,7 +6,7 @@ import threading
 from unittest.mock import MagicMock, patch
 from mimo_harness.agent import (
     MiMoHarness, AgentDeps, CircuitBreaker, TokenBudget,
-    TerminationReason, retry_with_backoff, _AttrBag,
+    TerminationReason, retry_with_backoff,
 )
 from mimo_harness.context import Session
 from mimo_harness.tools import file_ops
@@ -527,22 +527,6 @@ class TestClaudeMdSurvivesCompact:
         assert session.compaction_count == 0
 
 
-class TestAttrBag:
-    def test_attrbag_basic(self):
-        bag = _AttrBag(name="test", value=42)
-        assert bag.name == "test"
-        assert bag.value == 42
-
-    def test_attrbag_model_dump(self):
-        bag = _AttrBag(
-            content="hello",
-            model_dump=lambda: {"role": "assistant", "content": "hello"},
-        )
-        result = bag.model_dump()
-        assert result["role"] == "assistant"
-        assert result["content"] == "hello"
-
-
 class TestStreamLLMCall:
     """Test _stream_llm_call streaming response assembly."""
 
@@ -864,19 +848,6 @@ class TestAppendSystemPrompt:
         # Both should be the same (empty append adds nothing)
         assert prompt_with_empty == prompt_without
 
-    def test_append_system_prompt_via_cli_flag(self, monkeypatch):
-        """S15: CLI --append-system-prompt sets _append_system_prompt on harness."""
-        monkeypatch.setenv("MIMO_API_KEY", "test-key")
-        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
-        monkeypatch.setenv("MIMO_MODEL", "test-model")
-
-        harness = MiMoHarness()
-        # Simulate what cli.py does
-        harness._append_system_prompt = "EXTRA TEXT FROM CLI"
-        prompt = harness._build_system_prompt()
-        assert "EXTRA TEXT FROM CLI" in prompt
-
-
 class TestFallbackModel:
     """S16: fallback_model parameter is stored and used correctly."""
 
@@ -1117,3 +1088,215 @@ class TestTerminationPaths:
         result = retry_with_backoff(fail_then_succeed, max_retries=3, base_delay=0.001)
         assert result == "success"
         assert call_count == 2
+
+
+# ============================================================================
+# P0: Additional agent test coverage
+# ============================================================================
+
+
+class TestEffortLevel:
+    """Test effort level parameter mapping."""
+
+    def test_effort_params_low(self, monkeypatch):
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+        harness = MiMoHarness(effort="low")
+        assert harness.effort == "low"
+        params = harness.EFFORT_PARAMS["low"]
+        assert params["temperature"] == 0.3
+        assert params["max_completion_tokens"] == 512
+
+    def test_effort_params_medium(self, monkeypatch):
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+        harness = MiMoHarness(effort="medium")
+        params = harness.EFFORT_PARAMS["medium"]
+        assert params["temperature"] == 0.7
+        assert params["max_completion_tokens"] == 2048
+
+    def test_effort_params_high(self, monkeypatch):
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+        harness = MiMoHarness(effort="high")
+        params = harness.EFFORT_PARAMS["high"]
+        assert params["temperature"] == 0.9
+        assert params["max_completion_tokens"] == 4096
+
+    def test_effort_defaults_to_medium(self, monkeypatch):
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+        harness = MiMoHarness()
+        assert harness.effort == "medium"
+
+    def test_effort_passed_to_llm_call(self, monkeypatch):
+        """Verify effort params are passed to the LLM API call."""
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+
+        harness = MiMoHarness(max_steps=1, effort="high")
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Done"
+        mock_response.choices[0].message.tool_calls = None
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_response
+
+        session = Session(session_id="test")
+        with patch.object(harness.deps, 'llm_client_factory', return_value=mock_client):
+            harness.run("test task", session)
+
+        call_kwargs = mock_client.chat.completions.create.call_args
+        assert call_kwargs.kwargs.get("temperature") == 0.9
+        assert call_kwargs.kwargs.get("max_completion_tokens") == 4096
+
+
+class TestBareMode:
+    """Test bare mode skips memory loading."""
+
+    def test_bare_mode_init(self, monkeypatch):
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+        harness = MiMoHarness(bare=True)
+        assert harness.bare is True
+
+    def test_bare_mode_system_prompt(self, monkeypatch):
+        """Bare mode should produce a minimal system prompt without memory."""
+        monkeypatch.setenv("MIMO_API_KEY", "test-key")
+        monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
+        monkeypatch.setenv("MIMO_MODEL", "test-model")
+        harness = MiMoHarness(bare=True)
+        prompt = harness._build_system_prompt()
+        # Bare mode should not load CLAUDE.md or MEMORY.md content
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
+
+
+class TestRetryEdgeCases:
+    """Test retry_with_backoff edge cases."""
+
+    def test_retry_on_429(self):
+        call_count = 0
+        def fail_once():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                err = Exception("Rate limited")
+                err.status_code = 429
+                raise err
+            return "ok"
+
+        result = retry_with_backoff(fail_once, max_retries=3, base_delay=0.001)
+        assert result == "ok"
+        assert call_count == 2
+
+    def test_retry_on_500(self):
+        call_count = 0
+        def fail_once():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                err = Exception("Internal error")
+                err.status_code = 500
+                raise err
+            return "ok"
+
+        result = retry_with_backoff(fail_once, max_retries=3, base_delay=0.001)
+        assert result == "ok"
+
+    def test_retry_on_502(self):
+        call_count = 0
+        def fail_once():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                err = Exception("Bad gateway")
+                err.status_code = 502
+                raise err
+            return "ok"
+
+        result = retry_with_backoff(fail_once, max_retries=3, base_delay=0.001)
+        assert result == "ok"
+
+    def test_no_retry_on_400(self):
+        """400 errors should not be retried."""
+        call_count = 0
+        def fail_400():
+            nonlocal call_count
+            call_count += 1
+            err = Exception("Bad request")
+            err.status_code = 400
+            raise err
+
+        with pytest.raises(Exception, match="Bad request"):
+            retry_with_backoff(fail_400, max_retries=3, base_delay=0.001)
+        assert call_count == 1  # No retries
+
+    def test_no_retry_on_401(self):
+        """401 errors should not be retried."""
+        call_count = 0
+        def fail_401():
+            nonlocal call_count
+            call_count += 1
+            err = Exception("Unauthorized")
+            err.status_code = 401
+            raise err
+
+        with pytest.raises(Exception, match="Unauthorized"):
+            retry_with_backoff(fail_401, max_retries=3, base_delay=0.001)
+        assert call_count == 1
+
+
+class TestTokenBudgetEdgeCases:
+    """Test TokenBudget edge cases."""
+
+    def test_zero_max_tokens(self):
+        tb = TokenBudget(max_tokens=0)
+        # Should handle gracefully
+        assert tb.effective_max <= 0
+
+    def test_usage_ratio_at_zero(self):
+        tb = TokenBudget(max_tokens=100000)
+        assert tb.usage_ratio() == 0.0
+
+    def test_not_blocked_below_threshold(self):
+        tb = TokenBudget(max_tokens=100000)
+        tb.estimated_tokens = 50000
+        assert not tb.is_blocked()
+
+
+class TestCircuitBreakerEdgeCases:
+    """Test CircuitBreaker edge cases."""
+
+    def test_threshold_boundary(self):
+        cb = CircuitBreaker(threshold=3)
+        cb.record_failure()
+        cb.record_failure()
+        assert not cb.is_open  # 2 failures, threshold is 3
+        cb.record_failure()
+        assert cb.is_open  # 3 failures, now open
+
+    def test_success_after_partial_failures(self):
+        cb = CircuitBreaker(threshold=5)
+        cb.record_failure()
+        cb.record_failure()
+        cb.record_success()
+        assert cb.consecutive_failures == 0
+        assert not cb.is_open
+
+    def test_check_returns_false_when_closed(self):
+        cb = CircuitBreaker(threshold=3)
+        assert cb.check() is False
+
+    def test_check_returns_true_when_open(self):
+        cb = CircuitBreaker(threshold=1)
+        cb.record_failure()
+        assert cb.check() is True

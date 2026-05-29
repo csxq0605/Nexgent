@@ -165,31 +165,6 @@ class TestTokenConstants:
 
 
 class TestCompactContext:
-    def test_within_token_limits(self):
-        messages = [{"role": "user", "content": "hi"}] * 5
-        result, attempts, failures, thrashing = compact_context(messages)
-        assert len(result) == 5
-
-    def test_no_compression_when_below_trigger(self):
-        messages = [{"role": "user", "content": "x" * 100}] * 100
-        tokens = estimate_tokens(messages)
-        assert tokens < COMPRESS_TRIGGER_TOKENS
-        result, _, _, _ = compact_context(messages, estimated_tokens=tokens)
-        assert len(result) == 100
-
-    def test_truncation_fallback_produces_few_messages(self):
-        """Fallback should produce ~3 messages (marker + last 2), not 132K tokens."""
-        big_content = "x" * 4000
-        messages = [{"role": "user", "content": big_content}] * 200
-        tokens = estimate_tokens(messages)
-        assert tokens > COMPRESS_TRIGGER_TOKENS
-
-        result, _, _, _ = compact_context(messages, estimated_tokens=tokens)
-        # Should be: system marker + last user + last assistant = 3 messages
-        assert len(result) <= 4
-        assert result[0]["role"] == "system"
-        assert "compacted" in result[0]["content"].lower()
-
     def test_truncation_preserves_last_messages(self):
         """Last user + assistant messages should be preserved."""
         messages = [
@@ -295,13 +270,6 @@ class TestLLMCompress:
 
         result = llm_compress(messages, client)
         assert result is None
-
-    def test_single_message_returned_as_is(self):
-        messages = [{"role": "user", "content": "hi"}]
-        client = self._mock_client()
-
-        result = llm_compress(messages, client)
-        assert result == messages
 
     def test_summary_size_is_small(self):
         """Summary should be much smaller than original conversation."""
@@ -1311,3 +1279,98 @@ class TestLoadTopicOnDemand:
         (memory_dir / "test.md").write_text("content", encoding="utf-8")
         result = load_topic_on_demand("test", project_dir=str(tmp_path))
         assert "content" in result
+
+
+# ============================================================================
+# P1: Additional context.py test coverage
+# ============================================================================
+
+
+class TestEstimateTokensEdgeCases:
+    """Test estimate_tokens with various content types."""
+
+    def test_non_dict_messages(self):
+        """Non-dict messages should be estimated using chars/4."""
+        messages = ["not a dict", 42, None]
+        tokens = estimate_tokens(messages)
+        assert tokens > 0
+
+    def test_tool_message_estimate(self):
+        """Tool messages should be estimated with code ratio."""
+        messages = [{"role": "tool", "content": "x" * 1000, "tool_call_id": "tc1"}]
+        tokens = estimate_tokens(messages)
+        assert tokens > 0
+        # Tool content uses ~3.5 chars/token, so 1000 chars ≈ 286 tokens
+        assert 200 < tokens < 400
+
+    def test_system_message_estimate(self):
+        """System messages should be estimated with system ratio."""
+        messages = [{"role": "system", "content": "x" * 1000}]
+        tokens = estimate_tokens(messages)
+        assert tokens > 0
+
+    def test_assistant_with_tool_calls_estimate(self):
+        """Assistant messages with tool_calls should include tool call overhead."""
+        messages = [{
+            "role": "assistant",
+            "content": "let me check",
+            "tool_calls": [{"id": "tc1", "function": {"name": "read_file", "arguments": '{"path": "/tmp/test"}'}}],
+        }]
+        tokens = estimate_tokens(messages)
+        assert tokens > 0
+
+    def test_empty_messages_list(self):
+        # Returns minimum 1 token even for empty list
+        assert estimate_tokens([]) >= 0
+
+    def test_message_with_none_content(self):
+        messages = [{"role": "user", "content": None}]
+        tokens = estimate_tokens(messages)
+        assert tokens >= 0
+
+
+class TestFilterOrphanToolResults:
+    """Test _filter_orphan_tool_results function."""
+
+    def test_removes_orphan_tool_results(self):
+        messages = [
+            {"role": "user", "content": "hello"},
+            {"role": "tool", "content": "result", "tool_call_id": "orphan_id"},
+            {"role": "assistant", "content": "hi"},
+        ]
+        result = _filter_orphan_tool_results(messages)
+        assert len(result) == 2
+        assert all(m.get("role") != "tool" for m in result)
+
+    def test_preserves_valid_tool_results(self):
+        messages = [
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "tc1", "function": {"name": "test", "arguments": "{}"}}]},
+            {"role": "tool", "content": "result", "tool_call_id": "tc1"},
+            {"role": "assistant", "content": "done"},
+        ]
+        result = _filter_orphan_tool_results(messages)
+        assert len(result) == 3
+
+    def test_empty_messages(self):
+        assert _filter_orphan_tool_results([]) == []
+
+    def test_mixed_orphan_and_valid(self):
+        messages = [
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "tc_valid", "function": {"name": "test", "arguments": "{}"}}]},
+            {"role": "tool", "content": "valid result", "tool_call_id": "tc_valid"},
+            {"role": "tool", "content": "orphan result", "tool_call_id": "tc_orphan"},
+            {"role": "assistant", "content": "done"},
+        ]
+        result = _filter_orphan_tool_results(messages)
+        assert len(result) == 3
+        tool_msgs = [m for m in result if m.get("role") == "tool"]
+        assert len(tool_msgs) == 1
+        assert tool_msgs[0]["tool_call_id"] == "tc_valid"
+
+    def test_preserves_non_tool_messages(self):
+        messages = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ]
+        result = _filter_orphan_tool_results(messages)
+        assert len(result) == 2

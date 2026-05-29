@@ -367,7 +367,8 @@ def _resume_by_session_id(session_dir: str, session_id: str):
         return None
 
 
-def main():
+def _build_parser():
+    """Build the argument parser. Extracted for testability."""
     parser = argparse.ArgumentParser(
         description="MiMo Harness - AI Agent powered by Xiaomi MiMo model"
     )
@@ -393,6 +394,11 @@ def main():
     parser.add_argument("--name", default=None, help="Name for the current session")
     parser.add_argument("--session-id", default=None, help="Specify a session ID to resume or create")
     parser.add_argument("--cleanup-days", type=int, default=30, help="Delete sessions older than N days (default: 30)")
+    return parser
+
+
+def main():
+    parser = _build_parser()
     args = parser.parse_args()
 
     if args.output_format == "text":

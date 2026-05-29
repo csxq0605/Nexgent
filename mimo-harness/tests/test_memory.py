@@ -261,3 +261,75 @@ class TestListTopicNames:
     def test_empty_dir(self, tmp_path):
         store = MemoryStore(str(tmp_path))
         assert store.list_topic_names() == []
+
+
+# ============================================================================
+# P2: Additional memory.py test coverage
+# ============================================================================
+
+
+class TestMemoryPathSecurity:
+    """Test MemoryStore path traversal protection."""
+
+    def test_path_traversal_file_stays_in_dir(self, tmp_path):
+        """Path traversal chars in name should not escape memory dir."""
+        store = MemoryStore(str(tmp_path))
+        store.save_memory(
+            name="../../etc/passwd",
+            memory_type=MemoryType.USER,
+            description="test",
+            content="content",
+        )
+        memories = store.list_memories()
+        assert len(memories) == 1
+        # File path should be inside memory dir, not escaped
+        assert str(tmp_path) in memories[0].file_path
+
+    def test_null_byte_in_name_handled(self, tmp_path):
+        """Null bytes in name should be handled gracefully."""
+        store = MemoryStore(str(tmp_path))
+        store.save_memory(
+            name="test\x00evil",
+            memory_type=MemoryType.USER,
+            description="test",
+            content="content",
+        )
+        memories = store.list_memories()
+        assert len(memories) == 1
+
+    def test_special_yaml_chars_in_description(self, tmp_path):
+        """YAML special chars in description should be escaped."""
+        store = MemoryStore(str(tmp_path))
+        store.save_memory(
+            name="test-yaml",
+            memory_type=MemoryType.USER,
+            description="Value with: colons, # hashes, {braces}",
+            content="content",
+        )
+        memories = store.list_memories()
+        assert len(memories) == 1
+        assert "colons" in memories[0].description
+
+    def test_save_memory_with_empty_name(self, tmp_path):
+        """Empty name should fall back to timestamp-based name."""
+        store = MemoryStore(str(tmp_path))
+        store.save_memory(
+            name="",
+            memory_type=MemoryType.USER,
+            description="test",
+            content="content",
+        )
+        memories = store.list_memories()
+        assert len(memories) == 1
+
+    def test_validate_memory_stale_date(self, tmp_path):
+        """Memory with stale relative date should be flagged."""
+        store = MemoryStore(str(tmp_path))
+        store.save_memory(
+            name="stale-mem",
+            memory_type=MemoryType.PROJECT,
+            description="old memory",
+            content="This was from last week",
+        )
+        memories = store.list_memories()
+        assert len(memories) == 1

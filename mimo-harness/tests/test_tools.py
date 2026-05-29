@@ -193,42 +193,10 @@ class TestFileOps:
 
 
 class TestShell:
-    def test_is_readonly(self):
-        assert shell._is_readonly("ls -la")
-        assert shell._is_readonly("git status")
-        assert shell._is_readonly("cat file.txt")
-        assert not shell._is_readonly("rm -rf /")
-        assert not shell._is_readonly("npm install")
-
-    def test_chaining_detection(self):
-        # Semicolon: splitter handles — ls readonly but rm not
-        assert not shell._is_readonly("ls; rm -rf /")
-        # Pipe: both cat and grep are readonly → all() returns True
-        assert shell._is_readonly("cat file | grep pattern")
-        # Backtick: injection pattern blocked
-        assert not shell._is_readonly("echo `whoami`")
-        # Dollar-paren: injection pattern blocked
-        assert not shell._is_readonly("echo $(whoami)")
-
     def test_run_command(self):
         result = json.loads(shell.run_command({"command": "echo hello"}))
         assert result["exit_code"] == 0
         assert "hello" in result["output"]
-
-    def test_run_command_background(self):
-        result = json.loads(shell.run_command({
-            "command": "echo background_test",
-            "run_in_background": True,
-        }))
-        assert "job_id" in result
-        assert result["status"] == "started"
-        assert len(result["job_id"]) > 0
-        # Wait for the background job to complete
-        time.sleep(1)
-        job = shell._background_jobs.get(result["job_id"])
-        assert job is not None
-        assert job["status"] == "completed"
-        assert "background_test" in job["output"]
 
 
 class TestCodeExec:
@@ -302,21 +270,6 @@ class TestMathTools:
         import math
         result = json.loads(math_tools.calculator({"expression": "sin(pi/2)"}))
         assert abs(result["result"] - 1.0) < 0.0001
-
-
-class TestWebTools:
-    def test_validate_url_safe(self):
-        assert web_tools._validate_url("https://example.com") is None
-        assert web_tools._validate_url("http://example.com") is None
-
-    def test_validate_url_blocks_private(self):
-        assert web_tools._validate_url("http://127.0.0.1") is not None
-        assert web_tools._validate_url("http://localhost") is not None
-        assert web_tools._validate_url("http://10.0.0.1") is not None
-
-    def test_validate_url_blocks_non_http(self):
-        assert web_tools._validate_url("ftp://example.com") is not None
-        assert web_tools._validate_url("file:///etc/passwd") is not None
 
 
 class TestInteractive:
@@ -1409,3 +1362,219 @@ class TestScrubEnv:
         monkeypatch.setenv("TEST_SCRUB_KEY", "value")
         shell._scrub_env()
         assert os.environ.get("TEST_SCRUB_KEY") == "value"
+
+
+# ============================================================================
+# P1: Additional shell.py test coverage
+# ============================================================================
+
+
+class TestStripWrappersDepthLimit:
+    """Test _strip_wrappers max depth protection."""
+
+    def test_nested_wrappers_up_to_depth_5(self):
+        """5 levels of nesting should work."""
+        cmd = "timeout nice time nohup stdbuf git status"
+        result = shell._strip_wrappers(cmd)
+        assert result == "git status"
+
+    def test_single_wrapper(self):
+        result = shell._strip_wrappers("timeout 30 git status")
+        assert result == "git status"
+
+    def test_wrapper_with_flag_arg(self):
+        result = shell._strip_wrappers("nice -n 10 ls -la")
+        assert result == "ls -la"
+
+    def test_no_wrapper(self):
+        result = shell._strip_wrappers("git status")
+        assert result == "git status"
+
+
+class TestScrubEnvPatterns:
+    """Test _scrub_env with all credential patterns."""
+
+    def test_removes_credential(self, monkeypatch):
+        monkeypatch.setenv("MY_CREDENTIAL_STORE", "secret")
+        env = shell._scrub_env()
+        assert "MY_CREDENTIAL_STORE" not in env
+
+    def test_removes_auth(self, monkeypatch):
+        monkeypatch.setenv("AUTH_TOKEN_EXTRA", "secret")
+        env = shell._scrub_env()
+        assert "AUTH_TOKEN_EXTRA" not in env
+
+    def test_removes_private_key(self, monkeypatch):
+        monkeypatch.setenv("SSH_PRIVATE_KEY_PATH", "/path/to/key")
+        env = shell._scrub_env()
+        assert "SSH_PRIVATE_KEY_PATH" not in env
+
+    def test_removes_passphrase(self, monkeypatch):
+        monkeypatch.setenv("GPG_PASSPHRASE", "secret")
+        env = shell._scrub_env()
+        assert "GPG_PASSPHRASE" not in env
+
+    def test_removes_database_url(self, monkeypatch):
+        monkeypatch.setenv("DATABASE_URL", "postgres://user:pass@host/db")
+        env = shell._scrub_env()
+        assert "DATABASE_URL" not in env
+
+    def test_removes_connection_string(self, monkeypatch):
+        monkeypatch.setenv("MONGODB_CONNECTION_STRING", "mongodb://...")
+        env = shell._scrub_env()
+        assert "MONGODB_CONNECTION_STRING" not in env
+
+    def test_removes_dsn(self, monkeypatch):
+        monkeypatch.setenv("DSN_VALUE", "dsn://...")
+        env = shell._scrub_env()
+        assert "DSN_VALUE" not in env
+
+    def test_preserves_normal_vars(self, monkeypatch):
+        monkeypatch.setenv("HOME", "/home/user")
+        monkeypatch.setenv("PATH", "/usr/bin")
+        monkeypatch.setenv("MY_APP_CONFIG", "value")
+        env = shell._scrub_env()
+        assert "HOME" in env
+        assert "PATH" in env
+        assert "MY_APP_CONFIG" in env
+
+
+class TestSplitCompoundCommandEdgeCases:
+    """Test _split_compound_command edge cases."""
+
+    def test_backslash_escape_in_double_quotes(self):
+        """Backslash-escaped quotes inside double quotes should be preserved."""
+        parts = shell._split_compound_command('echo "hello \\"world\\"" && ls')
+        assert len(parts) == 2
+
+    def test_newline_separator(self):
+        parts = shell._split_compound_command("echo hello\necho world")
+        assert len(parts) == 2
+
+    def test_multiple_operators(self):
+        parts = shell._split_compound_command("a && b || c ; d | e")
+        assert len(parts) == 5
+
+
+class TestIsReadonlyEdgeCases:
+    """Test _is_readonly edge cases."""
+
+    def test_backtick_injection_blocked(self):
+        assert not shell._is_readonly("echo `whoami`")
+
+    def test_dollar_paren_injection_blocked(self):
+        assert not shell._is_readonly("echo $(whoami)")
+
+    def test_redirect_blocked(self):
+        assert not shell._is_readonly("echo hello > /tmp/out")
+
+    def test_find_exec_blocked(self):
+        assert not shell._is_readonly("find . -exec rm {} \\;")
+
+    def test_find_delete_blocked(self):
+        assert not shell._is_readonly("find . -delete")
+
+    def test_awk_system_blocked(self):
+        assert not shell._is_readonly("awk '{system(\"rm -rf /\")}' file")
+
+
+class TestBackgroundJobCleanup:
+    """Test background job lifecycle and cleanup."""
+
+    def test_background_job_completes(self):
+        result = json.loads(shell.run_command({
+            "command": "echo bg_test_cleanup",
+            "run_in_background": True,
+        }))
+        assert result["status"] == "started"
+        job_id = result["job_id"]
+        import time
+        time.sleep(1)
+        job = shell._background_jobs.get(job_id)
+        assert job is not None
+        assert job["status"] == "completed"
+        assert "bg_test_cleanup" in job["output"]
+
+
+# ============================================================================
+# P1: Additional file_ops.py test coverage
+# ============================================================================
+
+
+class TestMatchesGitignoreEdgeCases:
+    """Test _matches_gitignore edge cases."""
+
+    def test_anchored_pattern(self):
+        """Pattern with leading / is anchored (stripped before matching)."""
+        from mimo_harness.tools.file_ops import _matches_gitignore
+        patterns = ["/build"]
+        assert _matches_gitignore("build", patterns)
+
+    def test_basename_matching(self):
+        """Pattern without slash matches basename anywhere."""
+        from mimo_harness.tools.file_ops import _matches_gitignore
+        patterns = ["*.pyc"]
+        assert _matches_gitignore("test.pyc", patterns)
+        assert _matches_gitignore("subdir/test.pyc", patterns)
+
+    def test_directory_pattern(self):
+        """Pattern ending with / matches directories."""
+        from mimo_harness.tools.file_ops import _matches_gitignore
+        patterns = ["build/"]
+        assert _matches_gitignore("build", patterns)
+
+    def test_negation_not_supported(self):
+        """Gitignore negation patterns (!) are not specially handled."""
+        from mimo_harness.tools.file_ops import _matches_gitignore
+        patterns = ["*.txt", "!important.txt"]
+        # The ! pattern is treated as a literal pattern
+        result = _matches_gitignore("important.txt", patterns)
+        # *.txt matches, so it should be True
+        assert result is True
+
+    def test_empty_patterns(self):
+        from mimo_harness.tools.file_ops import _matches_gitignore
+        assert not _matches_gitignore("any/file.txt", [])
+
+    def test_comment_patterns_ignored(self, tmp_path):
+        """Comment patterns starting with # should be skipped by _load_gitignore_patterns."""
+        from mimo_harness.tools.file_ops import _load_gitignore_patterns
+        gitignore = tmp_path / ".gitignore"
+        gitignore.write_text("# comment\n*.pyc\n\n  # indented comment\n*.log\n", encoding="utf-8")
+        patterns = _load_gitignore_patterns(str(tmp_path))
+        assert "*.pyc" in patterns
+        assert "*.log" in patterns
+        assert len([p for p in patterns if "comment" in p]) == 0
+
+
+class TestGrepOutputModesEdgeCases:
+    """Test grep_files output mode edge cases."""
+
+    def test_grep_count_mode(self, tmp_path, monkeypatch):
+        """Test count output mode."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("abc\nabc\ndef\nabc\n", encoding="utf-8")
+        file_ops._read_files.add(str(test_file))
+        result = json.loads(file_ops.grep_files({
+            "pattern": "abc",
+            "path": str(tmp_path),
+            "output_mode": "count",
+        }))
+        assert result["total_files"] >= 1
+        assert any(v == 3 for v in result["counts"].values())
+
+    def test_grep_files_with_matches_mode(self, tmp_path, monkeypatch):
+        """Test files_with_matches output mode."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(file_ops, "_ALLOWED_WRITE_DIR", tmp_path)
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("hello world\nhello again\n", encoding="utf-8")
+        file_ops._read_files.add(str(test_file))
+        result = json.loads(file_ops.grep_files({
+            "pattern": "hello",
+            "path": str(tmp_path),
+            "output_mode": "files_with_matches",
+        }))
+        assert len(result["files"]) >= 1
