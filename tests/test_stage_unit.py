@@ -273,7 +273,7 @@ class TestStage5Unit:
 
     def test_format_report_parse_failure(self):
         format_report = self.s5.format_report
-        r = {"raw": "some output", "parse_error": True}
+        r = {"raw_text": "some output", "parse_error": "Failed to parse JSON"}
         report = format_report(r)
         assert "some output" in report
 

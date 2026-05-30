@@ -60,7 +60,7 @@ def extract_json(text: str) -> dict:
             return json.loads(text[start:end + 1])
         except json.JSONDecodeError:
             pass
-    return {"raw": text, "parse_error": True}
+    return {"raw_text": text, "parse_error": "Failed to parse JSON"}
 
 
 def review_code(code: str, filename: str = "unknown", focus: str = "all") -> dict:
@@ -77,7 +77,7 @@ def review_code(code: str, filename: str = "unknown", focus: str = "all") -> dic
             {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
             {"role": "user", "content": prompt}
         ],
-        max_completion_tokens=2048,
+        max_completion_tokens=16384,
         temperature=0.3,
         top_p=0.9
     )
@@ -88,7 +88,7 @@ def review_code(code: str, filename: str = "unknown", focus: str = "all") -> dic
 
 def format_report(result: dict) -> str:
     if "parse_error" in result:
-        return f"# Code Review\n\n{result.get('raw', '(no output)')}"
+        return f"# Code Review\n\n{result.get('raw_text', '(no output)')}"
     summary = result.get("summary", {})
     issues = result.get("issues", [])
     lines = [
@@ -127,7 +127,7 @@ def get_user(user_id):
 
     if "parse_error" in result:
         print("[FAIL] Output parsing failed")
-        print(f"  Raw output: {result.get('raw', '')[:200]}")
+        print(f"  Raw output: {result.get('raw_text', '')[:200]}")
         return False
 
     issues = result.get("issues", [])

@@ -71,7 +71,7 @@ def ask_agent(question: str) -> str:
             {"role": "system", "content": "You are MiMo, an AI assistant. Answer concisely."},
             {"role": "user", "content": question}
         ],
-        max_completion_tokens=200,
+        max_completion_tokens=4096,
         temperature=0.7,
         top_p=0.9
     )
@@ -136,7 +136,7 @@ Does the actual answer correctly address the question and contain the expected i
         response = client.chat.completions.create(
             model=MIMO_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=10,
+            max_completion_tokens=100,
             temperature=0.0
         )
         return "YES" in (response.choices[0].message.content or "").upper()
