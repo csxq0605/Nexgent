@@ -1,7 +1,6 @@
 """Tests for plan_tools.py - EnterPlanMode/ExitPlanMode workflow."""
 
 import json
-from unittest.mock import patch
 
 from mimo_harness.tools import plan_tools
 from mimo_harness.tools.plan_tools import enter_plan_mode, exit_plan_mode, get_tools
@@ -71,20 +70,21 @@ class TestHandlePlanApproval:
 
     def test_approve(self, monkeypatch):
         harness = self._make_harness(monkeypatch)
-        with patch("builtins.input", return_value="1"):
-            result = json.loads(harness._handle_plan_approval({"plan": "do X", "summary": "X"}))
+        monkeypatch.setattr("builtins.input", lambda _="": "1")
+        result = json.loads(harness._handle_plan_approval({"plan": "do X", "summary": "X"}))
         assert result["decision"] == "approved"
 
     def test_reject(self, monkeypatch):
         harness = self._make_harness(monkeypatch)
-        with patch("builtins.input", return_value="2"):
-            result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
+        monkeypatch.setattr("builtins.input", lambda _="": "2")
+        result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
         assert result["decision"] == "rejected"
 
     def test_modify(self, monkeypatch):
         harness = self._make_harness(monkeypatch)
-        with patch("builtins.input", side_effect=["3", "Add error handling"]):
-            result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
+        _iter = iter(["3", "Add error handling"])
+        monkeypatch.setattr("builtins.input", lambda _="": next(_iter))
+        result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
         assert result["decision"] == "modify"
         assert result["feedback"] == "Add error handling"
 
@@ -99,21 +99,29 @@ class TestHandlePlanApproval:
 
     def test_eof_on_choice(self, monkeypatch):
         harness = self._make_harness(monkeypatch)
-        with patch("builtins.input", side_effect=EOFError):
-            result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
+        def _raise_eof(_=""): raise EOFError
+        monkeypatch.setattr("builtins.input", _raise_eof)
+        result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
         assert result["decision"] == "rejected"
 
     def test_modify_eof_on_feedback(self, monkeypatch):
         harness = self._make_harness(monkeypatch)
-        with patch("builtins.input", side_effect=["3", EOFError]):
-            result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
+        _count = [0]
+        def _input(_=""):
+            _count[0] += 1
+            if _count[0] == 1:
+                return "3"
+            raise EOFError
+        monkeypatch.setattr("builtins.input", _input)
+        result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
         assert result["decision"] == "modify"
         assert result["feedback"] == ""
 
     def test_reject_with_feedback(self, monkeypatch):
         harness = self._make_harness(monkeypatch)
-        with patch("builtins.input", side_effect=["2", "Needs more detail"]):
-            result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
+        _iter = iter(["2", "Needs more detail"])
+        monkeypatch.setattr("builtins.input", lambda _="": next(_iter))
+        result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
         assert result["decision"] == "rejected"
         assert result["feedback"] == "Needs more detail"
 

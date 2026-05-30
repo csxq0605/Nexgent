@@ -2,7 +2,6 @@
 
 import json
 import pytest
-from unittest.mock import patch
 
 from mimo_harness.tools import lsp_tools
 from mimo_harness.tools.lsp_tools import (
@@ -22,22 +21,22 @@ class TestLspDefinition:
         result = json.loads(lsp_definition({"file_path": "/nonexistent.py", "line": 1}))
         assert "error" in result
 
-    def test_fallback_for_python(self, tmp_path):
+    def test_fallback_for_python(self, tmp_path, monkeypatch):
         f = tmp_path / "test.py"
         f.write_text("def hello():\n    pass\n\nhello()\n")
-        with patch.object(lsp_tools, "_get_lsp_client", return_value=None):
-            result = json.loads(lsp_definition({"file_path": str(f), "line": 1, "character": 4}))
+        monkeypatch.setattr(lsp_tools, "_get_lsp_client", lambda _: None)
+        result = json.loads(lsp_definition({"file_path": str(f), "line": 1, "character": 4}))
         assert "definitions" in result
         assert len(result["definitions"]) > 0
         assert result.get("method") == "grep_fallback"
 
-    def test_line_conversion(self, tmp_path):
+    def test_line_conversion(self, tmp_path, monkeypatch):
         """Line numbers should be converted from 1-indexed to 0-indexed."""
         f = tmp_path / "test.py"
         f.write_text("x = 1\nhello = 2\nz = hello\n")
-        with patch.object(lsp_tools, "_get_lsp_client", return_value=None):
-            # line=2 means 1-indexed line 2, which is "hello = 2" (0-indexed line 1)
-            result = json.loads(lsp_definition({"file_path": str(f), "line": 2, "character": 0}))
+        monkeypatch.setattr(lsp_tools, "_get_lsp_client", lambda _: None)
+        # line=2 means 1-indexed line 2, which is "hello = 2" (0-indexed line 1)
+        result = json.loads(lsp_definition({"file_path": str(f), "line": 2, "character": 0}))
         assert "definitions" in result
 
 
@@ -50,11 +49,11 @@ class TestLspReferences:
         result = json.loads(lsp_references({"file_path": "/nonexistent.py", "line": 1}))
         assert "error" in result
 
-    def test_fallback_for_python(self, tmp_path):
+    def test_fallback_for_python(self, tmp_path, monkeypatch):
         f = tmp_path / "test.py"
         f.write_text("def foo():\n    pass\n\nfoo()\n")
-        with patch.object(lsp_tools, "_get_lsp_client", return_value=None):
-            result = json.loads(lsp_references({"file_path": str(f), "line": 1, "character": 4}))
+        monkeypatch.setattr(lsp_tools, "_get_lsp_client", lambda _: None)
+        result = json.loads(lsp_references({"file_path": str(f), "line": 1, "character": 4}))
         assert "references" in result
 
 
@@ -79,11 +78,11 @@ class TestLspDiagnostics:
         result = json.loads(lsp_diagnostics({"file_path": str(f)}))
         assert result["count"] > 0
 
-    def test_non_python_no_lsp(self, tmp_path):
+    def test_non_python_no_lsp(self, tmp_path, monkeypatch):
         f = tmp_path / "test.js"
         f.write_text("const x = 1;\n")
-        with patch.object(lsp_tools, "_get_lsp_client", return_value=None):
-            result = json.loads(lsp_diagnostics({"file_path": str(f)}))
+        monkeypatch.setattr(lsp_tools, "_get_lsp_client", lambda _: None)
+        result = json.loads(lsp_diagnostics({"file_path": str(f)}))
         assert "error" in result
 
 

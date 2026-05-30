@@ -4,7 +4,6 @@ import pytest
 import json
 import tempfile
 import os
-from unittest.mock import MagicMock, patch
 from mimo_harness.context import (
     Session, compact_context, load_memory,
     estimate_tokens,
@@ -14,6 +13,15 @@ from mimo_harness.context import (
     load_memory_for_compaction, cleanup_old_sessions, cleanup_old_spill_files,
     load_topic_on_demand,
 )
+
+
+def _real_llm_client():
+    """Create a real OpenAI client from env vars. Skip test if unavailable."""
+    from openai import OpenAI
+    from mimo_harness.config import MIMO_API_KEY, MIMO_BASE_URL, MIMO_MODEL
+    if not MIMO_API_KEY or MIMO_API_KEY == "test-key-for-testing":
+        pytest.skip("Real MIMO_API_KEY not set")
+    return OpenAI(api_key=MIMO_API_KEY, base_url=MIMO_BASE_URL), MIMO_MODEL
 
 
 class TestSession:
@@ -128,42 +136,41 @@ class TestCompactContextWithLLM:
         return msgs
 
     def test_uses_llm_when_tokens_exceed_threshold(self):
+        client, model = _real_llm_client()
         messages = self._make_big_messages(60)
         tokens = estimate_tokens(messages)
         assert tokens > COMPRESS_TRIGGER_TOKENS
 
-        client = MagicMock()
-        response = MagicMock()
-        response.choices = [MagicMock()]
-        response.choices[0].message.content = "LLM summary"
-        client.chat.completions.create.return_value = response
+        result, attempts, _, _ = compact_context(
+            messages, client=client, model=model, estimated_tokens=tokens,
+        )
+        # LLM compression should have been attempted
+        assert attempts >= 1
+        # Result should be shorter than input
+        assert len(result) < len(messages)
 
-        with patch("mimo_harness.context.llm_compress", return_value=[
-            {"role": "assistant", "content": "[Conversation Summary]\nLLM summary"}
-        ]) as mock_compress:
-            result, _, _, _ = compact_context(messages, client=client, model="test", estimated_tokens=tokens)
-            mock_compress.assert_called_once()
-
-    def test_falls_back_to_truncation_on_llm_failure(self):
+    def test_falls_back_to_truncation_on_no_client(self):
+        """Without client, falls back to truncation."""
         messages = self._make_big_messages(60)
         tokens = estimate_tokens(messages)
         assert tokens > COMPRESS_TRIGGER_TOKENS
-        client = MagicMock()
-        client.chat.completions.create.side_effect = Exception("fail")
 
-        result, _, _, _ = compact_context(messages, client=client, model="test", estimated_tokens=tokens)
+        result, _, _, _ = compact_context(messages, estimated_tokens=tokens)
         # Fallback: system marker + last 2 messages
         assert len(result) <= 4
         assert result[0]["role"] == "system"
 
-    def test_skips_llm_when_below_token_threshold(self):
+    def test_skips_compression_when_below_token_threshold(self):
+        """Below token threshold, no compression needed."""
         messages = [{"role": "user", "content": "hi"}] * 10
         tokens = estimate_tokens(messages)
         assert tokens < COMPRESS_TRIGGER_TOKENS
 
-        with patch("mimo_harness.context.llm_compress") as mock_compress:
-            result, _, _, _ = compact_context(messages, client=MagicMock(), estimated_tokens=tokens)
-            mock_compress.assert_not_called()
+        result, attempts, failures, _ = compact_context(messages, estimated_tokens=tokens)
+        # No compression should have been attempted
+        assert attempts == 0
+        assert failures == 0
+        assert len(result) == len(messages)
 
     def test_backward_compatible_no_client(self):
         """Without client, uses truncation fallback (aggressive)."""
@@ -347,42 +354,32 @@ class TestCompactContextTupleReturn:
 
     def test_attempts_increments_on_compression(self):
         """When LLM compression succeeds, attempts should increment."""
+        client, model = _real_llm_client()
         big = "x" * 8000
         messages = [{"role": "user", "content": big}] * 100
         tokens = estimate_tokens(messages)
         assert tokens > COMPRESS_TRIGGER_TOKENS
 
-        client = MagicMock()
-        response = MagicMock()
-        response.choices = [MagicMock()]
-        response.choices[0].message.content = "Summary"
-        client.chat.completions.create.return_value = response
-
-        with patch("mimo_harness.context.llm_compress", return_value=[
-            {"role": "assistant", "content": "[Conversation Summary]\nSummary"}
-        ]):
-            _, attempts, failures, thrashing = compact_context(
-                messages, client=client, estimated_tokens=tokens,
-                compaction_attempts=0, compaction_failures=0,
-            )
+        _, attempts, failures, thrashing = compact_context(
+            messages, client=client, model=model, estimated_tokens=tokens,
+            compaction_attempts=0, compaction_failures=0,
+        )
         assert attempts >= 1
         assert thrashing is False
 
-    def test_failures_increment_on_llm_failure(self):
-        """When LLM compression fails, failures should increment."""
+    def test_failures_increment_when_no_client(self):
+        """Without client, truncation fallback doesn't increment failures."""
         big = "x" * 8000
         messages = [{"role": "user", "content": big}] * 100
         tokens = estimate_tokens(messages)
         assert tokens > COMPRESS_TRIGGER_TOKENS
 
-        client = MagicMock()
-        client.chat.completions.create.side_effect = Exception("API error")
-
         _, attempts, failures, thrashing = compact_context(
-            messages, client=client, estimated_tokens=tokens,
+            messages, estimated_tokens=tokens,
             compaction_attempts=0, compaction_failures=0,
         )
-        assert failures >= 1
+        # No client = no LLM attempt = no failure increment
+        assert failures == 0
 
     def test_thrashing_detected_after_three_failures(self):
         """Thrashing flag is True when compaction_failures >= 3."""

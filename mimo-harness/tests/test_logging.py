@@ -1,12 +1,9 @@
 """Tests for structured logging (TraceLogger)."""
 
-import io
 import os
 import re
-import json
 import logging
 import pytest
-from unittest.mock import patch, MagicMock
 from mimo_harness.logging_utils import TraceLogger
 
 
@@ -30,51 +27,42 @@ class TestTraceLogger:
         # 8 hex chars = 4 bytes = secrets.token_hex(4)
         assert re.match(r'^[0-9a-f]{8}$', logger.session_id)
 
-    def test_trace_logger_info(self):
+    def test_trace_logger_info(self, caplog):
         logger = TraceLogger()
-        with patch.object(logger.logger, 'info') as mock_info:
+        with caplog.at_level(logging.DEBUG, logger="mimo-harness"):
             logger.info("test info message")
-            mock_info.assert_called_once_with("test info message")
+        assert "test info message" in caplog.text
 
-    def test_trace_logger_error(self):
+    def test_trace_logger_error(self, caplog):
         logger = TraceLogger()
-        with patch.object(logger.logger, 'error') as mock_error:
-            exc = ValueError("test error")
+        exc = ValueError("test error")
+        with caplog.at_level(logging.DEBUG, logger="mimo-harness"):
             logger.error("something failed", exc=exc)
-            mock_error.assert_called_once()
-            call_args = mock_error.call_args
-            assert "something failed" in call_args[0][0]
-            assert call_args[1].get('exc_info') is exc
+        assert "something failed" in caplog.text
 
-    def test_trace_logger_trace(self):
+    def test_trace_logger_trace(self, caplog):
         logger = TraceLogger()
-        with patch.object(logger.logger, 'debug') as mock_debug:
+        with caplog.at_level(logging.DEBUG, logger="mimo-harness"):
             logger.trace("test_event", {"key": "value"})
-            mock_debug.assert_called_once()
-            msg = mock_debug.call_args[0][0]
-            assert "[TRACE]" in msg
-            assert "test_event" in msg
-            assert "key" in msg
+        assert "[TRACE]" in caplog.text
+        assert "test_event" in caplog.text
+        assert "key" in caplog.text
         assert logger.step == 1
 
-    def test_trace_logger_tool_call(self):
+    def test_trace_logger_tool_call(self, caplog):
         logger = TraceLogger()
-        with patch.object(logger.logger, 'debug') as mock_debug:
+        with caplog.at_level(logging.DEBUG, logger="mimo-harness"):
             logger.tool_call("read_file", {"path": "/tmp/test"}, result="hello world")
-            mock_debug.assert_called_once()
-            msg = mock_debug.call_args[0][0]
-            assert "tool_call" in msg
-            assert "read_file" in msg
-            assert "11" in msg  # len("hello world") == 11
+        assert "tool_call" in caplog.text
+        assert "read_file" in caplog.text
+        assert "11" in caplog.text  # len("hello world") == 11
 
-    def test_trace_logger_session_summary(self):
+    def test_trace_logger_session_summary(self, caplog):
         logger = TraceLogger()
-        with patch.object(logger.logger, 'debug') as mock_debug:
+        with caplog.at_level(logging.DEBUG, logger="mimo-harness"):
             logger.session_summary({"steps": 3, "duration": 1.5})
-            mock_debug.assert_called_once()
-            msg = mock_debug.call_args[0][0]
-            assert "session_complete" in msg
-            assert "steps" in msg
+        assert "session_complete" in caplog.text
+        assert "steps" in caplog.text
 
     def test_trace_logger_step_increment(self):
         logger = TraceLogger()

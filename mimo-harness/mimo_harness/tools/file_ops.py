@@ -181,6 +181,10 @@ def _matches_gitignore(rel_path: str, patterns: list[str]) -> bool:
 def glob_files(params: dict) -> str:
     pattern = params.get("pattern", "")
     respect_gitignore = params.get("respect_gitignore", False)
+    # Support explicit path parameter: prepend to pattern if provided
+    search_path = params.get("path", "")
+    if search_path:
+        pattern = os.path.join(search_path, pattern)
     # Validate that the pattern's base directory is within allowed path
     base = pattern.split("*")[0].rstrip("/\\") or "."
     err = _validate_read_path(base)
@@ -414,6 +418,7 @@ def get_tools() -> list[ToolDef]:
                 "type": "object",
                 "properties": {
                     "pattern": {"type": "string", "description": "Glob pattern"},
+                    "path": {"type": "string", "description": "Directory to search in (default: current directory)"},
                     "respect_gitignore": {"type": "boolean", "description": "Filter out paths matching .gitignore rules (default false)"},
                 },
                 "required": ["pattern"]

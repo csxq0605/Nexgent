@@ -11,11 +11,11 @@ Tests cover:
 
 import json
 import os
+import sys
 import threading
 import time
 
 import pytest
-from unittest.mock import MagicMock
 
 from mimo_harness.tools import file_ops, web_tools, doc_tools, math_tools
 from mimo_harness.permissions import Permission, PermissionGate, PermissionRule
@@ -316,16 +316,17 @@ class TestMonitorMaxLimit:
         from mimo_harness.tools import monitor
 
         monkeypatch.setattr(monitor, "_monitors", {})
+        sleep_cmd = f'{sys.executable} -c "import time; time.sleep(60)"'
 
-        # Fill _monitors with fake entries up to MAX_MONITORS
+        # Fill _monitors with real processes up to MAX_MONITORS
+        started = []
         for i in range(monitor.MAX_MONITORS):
-            job_id = f"fake-{i}"
-            fake = MagicMock()
-            fake.command = f"fake command {i}"
-            fake.description = f"Fake monitor {i}"
-            fake.status = "running"
-            fake.lines = []
-            monitor._monitors[job_id] = fake
+            result = json.loads(monitor.monitor_start({
+                "command": sleep_cmd,
+                "description": f"Cap test monitor {i}",
+            }))
+            assert "job_id" in result, f"Failed to start monitor {i}: {result}"
+            started.append(result["job_id"])
 
         assert len(monitor._monitors) == monitor.MAX_MONITORS
 
@@ -337,25 +338,33 @@ class TestMonitorMaxLimit:
         assert "error" in result
         assert "Maximum" in result["error"]
 
+        # Cleanup
+        for job_id in started:
+            monitor.monitor_stop({"job_id": job_id})
+
     def test_monitor_cleanup_allows_restart(self, monkeypatch):
         """Stopping a monitor frees a slot for a new one."""
         from mimo_harness.tools import monitor
 
         monkeypatch.setattr(monitor, "_monitors", {})
+        sleep_cmd = f'{sys.executable} -c "import time; time.sleep(60)"'
 
-        # Fill up to MAX_MONITORS
+        # Fill up to MAX_MONITORS with real processes
+        started = []
         for i in range(monitor.MAX_MONITORS):
-            fake = MagicMock()
-            fake.command = f"cmd {i}"
-            fake.description = f"desc {i}"
-            fake.status = "running"
-            fake.lines = []
-            fake.stop = MagicMock()
-            fake.get_lines = MagicMock(return_value=[])
-            monitor._monitors[f"fake-{i}"] = fake
+            result = json.loads(monitor.monitor_start({
+                "command": sleep_cmd,
+                "description": f"Restart test monitor {i}",
+            }))
+            assert "job_id" in result
+            started.append(result["job_id"])
 
         # Stop one
-        stop_result = json.loads(monitor.monitor_stop({"job_id": "fake-0"}))
+        stop_result = json.loads(monitor.monitor_stop({"job_id": started[0]}))
         assert stop_result["status"] == "stopped"
         assert len(monitor._monitors) == monitor.MAX_MONITORS - 1
+
+        # Cleanup remaining
+        for job_id in started[1:]:
+            monitor.monitor_stop({"job_id": job_id})
 

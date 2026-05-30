@@ -132,16 +132,23 @@ class HookRunner:
         """Run all matching hooks for an event (Ch8: Chain of Responsibility).
 
         Returns the first blocking result, or approve if all pass.
+        Non-blocking hooks that set updated_input have their input changes
+        merged into the final result.
         """
         if not self.enabled:
             return HookResult()
+
+        merged_updated_input = None
 
         # Run function hooks first (in-memory, fastest)
         for fn in self._function_hooks.get(event, []):
             try:
                 result = fn(tool_name=tool_name, tool_input=tool_input, tool_result=tool_result)
-                if isinstance(result, HookResult) and result.is_blocking:
-                    return result
+                if isinstance(result, HookResult):
+                    if result.is_blocking:
+                        return result
+                    if result.updated_input is not None:
+                        merged_updated_input = result.updated_input
             except Exception as e:
                 _logger.warning("Function hook error for %s: %s", event.value, e)
 
@@ -165,8 +172,10 @@ class HookRunner:
 
             if result.is_blocking:
                 return result
+            if result.updated_input is not None:
+                merged_updated_input = result.updated_input
 
-        return HookResult()
+        return HookResult(updated_input=merged_updated_input)
 
     def _run_command_hook(
         self,

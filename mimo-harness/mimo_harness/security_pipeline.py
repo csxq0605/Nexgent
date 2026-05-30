@@ -386,6 +386,11 @@ Respond with ONLY a JSON object:
 {{"decision": "allow" or "deny", "reason": "brief explanation"}}"""
 
 
+# Cache for model classifier results to reduce API calls
+_classifier_cache: dict[str, tuple[float, ClassificationResult]] = {}
+_CLASSIFIER_CACHE_TTL = 300  # 5 minutes
+
+
 def classify_action_model(
     tool_name: str,
     tool_args: dict,
@@ -406,6 +411,15 @@ def classify_action_model(
     """
     if client is None:
         return None
+
+    # Check cache to avoid redundant API calls for identical tool invocations
+    import hashlib
+    cache_key = f"{tool_name}:{hashlib.md5(json.dumps(tool_args, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]}"
+    now = time.time()
+    if cache_key in _classifier_cache:
+        cached_time, cached_result = _classifier_cache[cache_key]
+        if now - cached_time < _CLASSIFIER_CACHE_TTL:
+            return cached_result
 
     # Build the action description for the classifier
     # (Claude Code sends transcript + pending action, NOT tool results)
@@ -475,31 +489,31 @@ Is this action safe to execute?"""
             )
 
         if decision == "deny":
-            return ClassificationResult(
+            result = ClassificationResult(
                 decision=SafetyDecision.SOFT_DENY,
                 reason=f"Model classifier: {reason}",
                 rule_matched="model_classifier",
                 source="model",
             )
         else:
-            return ClassificationResult(
+            result = ClassificationResult(
                 decision=SafetyDecision.ALLOW,
                 reason=f"Model classifier: {reason}",
                 rule_matched="model_classifier",
                 source="model",
             )
+        _classifier_cache[cache_key] = (now, result)
+        return result
     except Exception as e:
-        # Fail closed: if model response is unparseable or API is unavailable,
-        # return HARD_DENY so the command is blocked rather than silently allowed.
-        # Log the traceback so code bugs are visible, not silently masked.
+        # Fail open: when the model classifier API is unavailable (timeout,
+        # rate limit, network error), fall through to the default-allow path
+        # in classify_action(). Regex pre-filter (step 1) already blocked
+        # obviously dangerous commands (rm -rf /, credential access, etc.).
+        # Blocking ALL tool calls when the classifier API is down is too
+        # aggressive — it makes the agent completely unusable.
         import logging
-        logging.getLogger(__name__).warning("Model classifier exception: %s", e, exc_info=True)
-        return ClassificationResult(
-            decision=SafetyDecision.HARD_DENY,
-            reason="Model classifier unavailable (API error) — blocked for safety",
-            rule_matched="classifier_unavailable",
-            source="model",
-        )
+        logging.getLogger(__name__).warning("Model classifier exception (falling through to default): %s", e, exc_info=True)
+        return None
 
 
 # ---------------------------------------------------------------------------

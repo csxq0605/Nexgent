@@ -2,7 +2,6 @@
 
 import json
 import time
-from unittest.mock import patch, MagicMock
 
 from mimo_harness.tools.scheduler_tools import (
     Scheduler,
@@ -53,58 +52,51 @@ class TestScheduler:
 
     def test_check_and_fire(self):
         s = Scheduler()
-        callback = MagicMock()
-        s.set_callback(callback)
+        fired = []
+        s.set_callback(lambda p: fired.append(p))
         s.create_job("* * * * *", "fire me")
 
-        # Mock time to match the cron expression
-        now = time.localtime()
-        with patch("time.localtime", return_value=now):
-            s.check_and_fire()
+        s.check_and_fire()
 
         # Should have fired since * * * * * matches any time
-        # (unless last_fired was < 30s ago, but it's a fresh job)
-        jobs = s.list_jobs()
+        assert len(fired) == 1
+        assert fired[0] == "fire me"
         # Job should still exist (recurring=True)
+        assert len(s.list_jobs()) == 1
 
     def test_check_and_fire_one_shot(self):
         s = Scheduler()
-        callback = MagicMock()
-        s.set_callback(callback)
+        fired = []
+        s.set_callback(lambda p: fired.append(p))
         s.create_job("* * * * *", "once", recurring=False)
 
-        now = time.localtime()
-        with patch("time.localtime", return_value=now):
-            s.check_and_fire()
+        s.check_and_fire()
 
         # One-shot job should be deleted after firing
         assert len(s.list_jobs()) == 0
-        callback.assert_called_once_with("once")
+        assert len(fired) == 1
+        assert fired[0] == "once"
 
     def test_check_and_fire_no_callback(self):
         s = Scheduler()
         s.create_job("* * * * *", "no callback")
         # Should not raise
-        now = time.localtime()
-        with patch("time.localtime", return_value=now):
-            s.check_and_fire()
+        s.check_and_fire()
 
     def test_check_and_fire_rate_limit(self):
         """Jobs should not fire if fired in the last 30 seconds."""
         s = Scheduler()
-        callback = MagicMock()
-        s.set_callback(callback)
+        fired = []
+        s.set_callback(lambda p: fired.append(p))
         job_id = s.create_job("* * * * *", "rate limited")
 
         # Set last_fired to now
         with s._lock:
             s._jobs[job_id].last_fired = time.time()
 
-        now = time.localtime()
-        with patch("time.localtime", return_value=now):
-            s.check_and_fire()
+        s.check_and_fire()
 
-        callback.assert_not_called()
+        assert len(fired) == 0
 
     def test_background_checker(self):
         s = Scheduler()
@@ -130,9 +122,7 @@ class TestScheduler:
         s.set_callback(lambda x: 1 / 0)  # Will raise ZeroDivisionError
         s.create_job("* * * * *", "will crash callback")
 
-        now = time.localtime()
-        with patch("time.localtime", return_value=now):
-            s.check_and_fire()  # Should not propagate exception
+        s.check_and_fire()  # Should not propagate exception
 
 
 class TestCronToolFunctions:
