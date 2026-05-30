@@ -59,18 +59,20 @@ def test_stage1():
 
     def t1():
         """API: 计算器 247*893"""
+        import re
         r = agent_loop("What is 247 * 893? Reply with ONLY the number, nothing else.")
-        assert "220571" in r, f"Expected 220571, got: {r}"
+        assert re.search(r'\b220571\b', r), f"Expected 220571, got: {r}"
 
     def t2():
         """API: 计算器 sqrt(144)+10"""
+        import re
         r = agent_loop("What is sqrt(144) + 10? Reply with ONLY the number.")
-        assert "22" in r, f"Expected 22, got: {r}"
+        assert re.search(r'\b22\b', r), f"Expected 22, got: {r}"
 
     def t3():
         """API: 知识问答 法国首都"""
         r = agent_loop("What is the capital of France? Reply with ONLY the city name.")
-        assert "paris" in r.lower(), f"Expected Paris, got: {r}"
+        assert r.strip().lower().rstrip('.') == "paris", f"Expected 'Paris', got: {r}"
 
     def t4():
         """safe_eval 基本运算"""
@@ -192,15 +194,17 @@ def test_stage2():
 
     def t9():
         """API: 研究代理回答简单问题"""
+        import re
         m = Memory()
         answer = research_agent("What is 2 + 2? Reply with only the number.", memory=m, max_steps=5, timeout_seconds=30)
-        assert "4" in answer, f"Expected 4, got: {answer}"
+        assert re.search(r'\b4\b', answer), f"Expected 4, got: {answer}"
 
     def t10():
         """API: 研究代理使用工具"""
+        import re
         m = Memory()
         answer = research_agent("Use the execute_code tool to calculate 15 * 23. Tell me just the result number.", memory=m, max_steps=5, timeout_seconds=30)
-        assert "345" in answer, f"Expected 345, got: {answer}"
+        assert re.search(r'\b345\b', answer), f"Expected 345, got: {answer}"
 
     return [
         ("Memory 存储和检索", t1),
@@ -294,6 +298,7 @@ def test_stage3():
         session = Session(session_id="test2")
         result = harness.run("Read the file README.md and tell me the first heading text. Just the heading.", session)
         assert len(result) > 0, "Got empty result"
+        assert "[ERROR]" not in result, f"Got error: {result}"
 
     def t9():
         """工具列表包含4个工具"""
@@ -367,21 +372,24 @@ def test_stage4():
         """API: researcher 返回结构化"""
         r = call_agent("researcher", "Benefits of exercise. Brief summary.")
         assert isinstance(r, dict)
-        assert len(r) > 0
+        assert "parse_error" not in r, f"LLM returned unparseable response: {r}"
+        assert "key_findings" in r or "findings" in r or "summary" in r
 
     def t8():
         """API: writer 返回文章"""
         research = {"key_findings": ["Exercise improves health", "Reduces stress", "Boosts mood"], "sources": ["WHO"], "gaps": []}
         r = call_agent("writer", f"Write a brief article based on: {json.dumps(research)}")
         assert isinstance(r, dict)
-        assert "title" in r or "raw_text" in r
+        assert "parse_error" not in r, f"LLM returned unparseable response: {r}"
+        assert "title" in r
 
     def t9():
         """API: reviewer 返回评分"""
         article = {"title": "Exercise Benefits", "sections": [{"heading": "Health", "content": "Exercise is good for health."}]}
         r = call_agent("reviewer", f"Review this article: {json.dumps(article)}")
         assert isinstance(r, dict)
-        assert "score" in r or "raw_text" in r
+        assert "parse_error" not in r, f"LLM returned unparseable response: {r}"
+        assert "score" in r
 
     return [
         ("extract_json 直接解析", t1),
@@ -440,8 +448,9 @@ def test_stage5():
         assert "issues" in result
         issues = result.get("issues", [])
         assert len(issues) > 0, "Should find at least one issue"
-        all_text = json.dumps(issues).lower()
-        assert "sql" in all_text or "inject" in all_text or "string" in all_text or "concatenat" in all_text, \
+        # Check only issue titles/descriptions, not the entire result (which may echo code)
+        issue_text = json.dumps([i.get("title", "") + " " + i.get("description", "") for i in issues]).lower()
+        assert "sql" in issue_text or "inject" in issue_text or "concatenat" in issue_text, \
             f"Expected SQL injection detection, got: {[i.get('title','') for i in issues]}"
 
     def t6():
@@ -449,8 +458,12 @@ def test_stage5():
         code = 'def login():\n    password = "admin123"\n    return authenticate(password)'
         result = review_code(code, "login.py")
         assert "issues" in result
-        all_text = json.dumps(result).lower()
-        assert "password" in all_text or "credential" in all_text or "hardcod" in all_text or "secret" in all_text
+        issues = result.get("issues", [])
+        assert len(issues) > 0, "Should find at least one issue"
+        # Check only issue titles/descriptions, not the entire result (which echoes code)
+        issue_text = json.dumps([i.get("title", "") + " " + i.get("description", "") for i in issues]).lower()
+        assert "password" in issue_text or "credential" in issue_text or "hardcod" in issue_text or "secret" in issue_text, \
+            f"Expected hardcoded password detection, got: {[i.get('title','') for i in issues]}"
 
     def t7():
         """API: review_code 干净代码少issue"""
@@ -497,52 +510,65 @@ def test_stage6():
     def t3():
         """navigate 拒绝非HTTP"""
         agent = BrowserAgent()
-        result = asyncio.get_event_loop().run_until_complete(agent.navigate("ftp://evil.com"))
+        result = asyncio.run(agent.navigate("ftp://evil.com"))
         assert "error" in result
 
     def t4():
         """navigate 拒绝file://"""
         agent = BrowserAgent()
-        result = asyncio.get_event_loop().run_until_complete(agent.navigate("file:///etc/passwd"))
+        result = asyncio.run(agent.navigate("file:///etc/passwd"))
         assert "error" in result
 
     def t5():
         """安全: 文本截断5000字符"""
         import inspect
         src = inspect.getsource(BrowserAgent.extract_text)
-        assert "5000" in src
+        # Verify truncation is applied (text[:N] pattern)
+        assert "[:5000]" in src or "[: 5000]" in src, "extract_text should truncate at 5000 chars"
 
     def t6():
         """安全: 链接限制50条"""
         import inspect
         src = inspect.getsource(BrowserAgent.extract_links)
-        assert "50" in src
+        # Verify link count limit (links[:N] pattern)
+        assert "[:50]" in src or "[: 50]" in src, "extract_links should limit to 50 links"
 
     def t7():
         """安全: 拒绝表单提交"""
         import inspect
         src = inspect.getsource(BrowserAgent.click)
-        assert "form" in src.lower() or "submit" in src.lower()
+        # Verify form/submit detection logic exists
+        assert '"form"' in src or "'form'" in src, "click should check for form tags"
+        assert '"submit"' in src or "'submit'" in src, "click should check for submit buttons"
 
     def t8():
         """API: 浏览器访问 example.com"""
-        agent = BrowserAgent(headless=True, timeout=15000)
+        import urllib.request
         try:
-            asyncio.get_event_loop().run_until_complete(agent.start())
-            result = asyncio.get_event_loop().run_until_complete(agent.navigate("https://example.com"))
+            urllib.request.urlopen("https://example.com", timeout=5)
+        except Exception:
+            print("  [SKIP] t8: example.com not reachable")
+            return
+
+        agent = BrowserAgent(headless=True, timeout=15000)
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(agent.start())
+            result = loop.run_until_complete(agent.navigate("https://example.com"))
             assert "title" in result, f"Expected title, got: {result}"
             assert result.get("ok") == True or result.get("status") == 200
 
-            text_result = asyncio.get_event_loop().run_until_complete(agent.extract_text("body"))
+            text_result = loop.run_until_complete(agent.extract_text("body"))
             assert "text" in text_result
             assert len(text_result["text"]) > 0
 
-            links_result = asyncio.get_event_loop().run_until_complete(agent.extract_links())
+            links_result = loop.run_until_complete(agent.extract_links())
             assert "links" in links_result
 
             assert len(agent.action_log) >= 2
         finally:
-            asyncio.get_event_loop().run_until_complete(agent.stop())
+            loop.run_until_complete(agent.stop())
+            loop.close()
 
     return [
         ("BrowserAgent 初始化", t1),
@@ -753,15 +779,17 @@ def test_stage8():
         """API: DevOpsAgent 健康检查"""
         agent = DevOpsAgent(dry_run=True)
         result = agent.run("Check system health and tell me the hostname.", max_steps=5)
-        assert len(result) > 0
+        assert len(result) > 0, "Got empty result"
         assert "[ERROR]" not in result, f"Got error: {result}"
+        assert "[LIMIT]" not in result, f"Got limit: {result}"
 
     def t13():
         """API: DevOpsAgent 列出服务"""
         agent = DevOpsAgent(dry_run=True)
         result = agent.run("List the running processes on this machine.", max_steps=5)
-        assert len(result) > 0
+        assert len(result) > 0, "Got empty result"
         assert "[ERROR]" not in result, f"Got error: {result}"
+        assert "[LIMIT]" not in result, f"Got limit: {result}"
 
     return [
         ("CostTracker 计数", t1),

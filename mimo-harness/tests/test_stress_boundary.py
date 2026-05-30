@@ -215,10 +215,11 @@ class TestPermissionStress:
         assert elapsed < 1.0  # 1000 checks in under 1 second
 
     def test_approval_log_growth(self):
-        """Approval log should not grow unbounded."""
+        """Approval log records all checks (currently unbounded)."""
         gate = PermissionGate(auto_approve=True)
         for i in range(1000):
             gate.check(Permission.READ, f"read_file_{i}()")
+        # Current implementation stores all entries — this verifies it doesn't crash at scale
         assert len(gate.approval_log) == 1000
 
     def test_load_rules_from_missing_file(self):

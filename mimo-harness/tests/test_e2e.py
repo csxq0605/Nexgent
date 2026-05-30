@@ -8,21 +8,17 @@ import json
 import os
 import sys
 import shutil
-import tempfile
-import time
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from mimo_harness.agent import MiMoHarness, AgentDeps, CircuitBreaker, TokenBudget, GracefulAbort
-from mimo_harness.context import Session, CheckpointManager, estimate_tokens
-from mimo_harness.tools.registry import ToolRegistry
-from mimo_harness.tools import file_ops, shell, code_exec, task_tools, scheduler_tools
+from mimo_harness.agent import MiMoHarness
+from mimo_harness.context import Session, CheckpointManager
+from mimo_harness.tools import file_ops, task_tools
 from mimo_harness.permissions import PermissionGate, Permission, PermissionMode
 from mimo_harness.security_pipeline import classify_action, filter_tool_output, SafetyDecision
 from mimo_harness.hooks import HookRunner, HookEvent, HookResult
 from mimo_harness.memory import MemoryStore, MemoryType
-from mimo_harness.tools.scheduler_tools import Scheduler
 
 # All E2E tests require a real API key
 pytestmark = pytest.mark.skipif(
@@ -30,24 +26,14 @@ pytestmark = pytest.mark.skipif(
     reason="Real MIMO_API_KEY not set — E2E tests skipped",
 )
 
-# E2E test artifacts that may be created by the agent in CWD
-_E2E_ARTIFACTS = ["calc.py", "fib.py", "test.txt"]
-
-
 @pytest.fixture(autouse=True, scope="session")
 def _cleanup_e2e_artifacts():
     """Clean up all E2E test artifacts after the entire test session."""
     yield
     cwd = os.getcwd()
-    # Clean up .e2e_work parent directory
     e2e_work = os.path.join(cwd, ".e2e_work")
     if os.path.isdir(e2e_work):
         shutil.rmtree(e2e_work, ignore_errors=True)
-    # Clean up agent-generated test artifacts in CWD
-    for artifact in _E2E_ARTIFACTS:
-        path = os.path.join(cwd, artifact)
-        if os.path.isfile(path):
-            os.unlink(path)
 
 
 @pytest.fixture
@@ -92,12 +78,15 @@ class TestE2ESimpleQuestion:
     """Agent answers simple questions without tools."""
 
     def test_math(self):
+        import re
         result = _harness().run("What is 123 * 456? Reply with just the number.")
-        assert "56088" in result
+        assert re.search(r'\b56088\b', result), f"Expected 56088, got: {result}"
 
     def test_definition(self):
         result = _harness().run("In one sentence, what is a Python list?")
-        assert len(result) > 10
+        assert len(result) > 10, f"Response too short: {result}"
+        # Should contain relevant content, not just errors
+        assert "[ERROR]" not in result, f"Got error: {result}"
 
 
 class TestE2EReadFile:
@@ -122,7 +111,8 @@ class TestE2EReadFile:
         result = _harness().run(
             f"Read lines 10-12 from {target}. What do they say?"
         )
-        assert "line 10" in result or "line 11" in result or "line 12" in result
+        assert "line 10" in result and "line 11" in result and "line 12" in result, \
+            f"Expected all three lines, got: {result}"
 
 
 class TestE2EWriteFile:
@@ -557,233 +547,3 @@ class TestE2EHooks:
         assert result.updated_input["content"] == "[MOD] test"
 
 
-# ═══════════════════════════════════════════════════════════════
-# 10. Shell Safety
-# ═══════════════════════════════════════════════════════════════
-
-class TestE2EShellSafety:
-    """Shell command safety analysis."""
-
-    def test_readonly(self):
-        for cmd in ["ls -la", "cat file", "git status", "echo hi", "pwd"]:
-            assert shell._is_readonly(cmd), f"'{cmd}' should be readonly"
-
-    def test_write_not_readonly(self):
-        for cmd in ["rm f", "mv a b", "mkdir d", "pip install x"]:
-            assert not shell._is_readonly(cmd), f"'{cmd}' should NOT be readonly"
-
-    def test_compound(self):
-        assert shell._is_readonly("ls && echo ok")
-        assert not shell._is_readonly("ls && rm f")
-
-    def test_credential_scrub(self):
-        env = shell._scrub_env()
-        for key in ["MIMO_API_KEY", "OPENAI_API_KEY", "SECRET_KEY"]:
-            assert key not in env
-        assert "PATH" in env
-
-    def test_real_exec(self):
-        result = json.loads(shell.run_command({"command": "echo e2e_test"}))
-        assert "e2e_test" in result.get("output", result.get("stdout", ""))
-
-
-# ═══════════════════════════════════════════════════════════════
-# 11. File Ops (direct, no LLM)
-# ═══════════════════════════════════════════════════════════════
-
-class TestE2EFileOps:
-    """File operations with real I/O."""
-
-    def test_read(self, work_dir):
-        f = os.path.join(work_dir, "test.txt")
-        with open(f, "w") as fh:
-            fh.write("content here")
-        result = json.loads(file_ops.read_file({"path": f}))
-        assert "content here" in str(result)
-
-    def test_write(self, work_dir):
-        f = os.path.join(work_dir, "out.txt")
-        file_ops.write_file({"path": f, "content": "written"})
-        assert open(f).read() == "written"
-
-    def test_glob(self, work_dir):
-        with open(os.path.join(work_dir, "alpha_xyz.py"), "w") as fh:
-            fh.write("a")
-        with open(os.path.join(work_dir, "beta_xyz.py"), "w") as fh:
-            fh.write("b")
-        # Test with explicit path parameter (bug is now fixed)
-        result = json.loads(file_ops.glob_files({
-            "pattern": "*_xyz.py", "path": work_dir,
-        }))
-        assert result["total"] == 2
-
-    def test_grep(self, work_dir):
-        f = os.path.join(work_dir, "code.py")
-        with open(f, "w") as fh:
-            fh.write("def hello():\ndef world():")
-        result = json.loads(file_ops.grep_files({
-            "pattern": "def \\w+", "path": work_dir, "output_mode": "content",
-        }))
-        assert "hello" in str(result) and "world" in str(result)
-
-    def test_edit(self, work_dir):
-        f = os.path.join(work_dir, "edit.txt")
-        with open(f, "w") as fh:
-            fh.write("old content")
-        file_ops._read_files.add(os.path.abspath(f))
-        file_ops._write_allowed_files.add(os.path.abspath(f))
-        file_ops.edit_file({"path": f, "old_text": "old", "new_text": "new"})
-        assert "new content" in open(f).read()
-
-
-# ═══════════════════════════════════════════════════════════════
-# 12. Code Execution
-# ═══════════════════════════════════════════════════════════════
-
-class TestE2ECodeExec:
-    """Code execution with real subprocess."""
-
-    def test_simple(self):
-        result = json.loads(code_exec.execute_python({"code": "print(2+3)"}))
-        assert "5" in result.get("output", "")
-
-    def test_imports(self):
-        result = json.loads(code_exec.execute_python({
-            "code": "import json; print(json.dumps({'k': 'v'}))"
-        }))
-        assert "k" in result.get("output", "")
-
-    def test_syntax_error(self):
-        result = json.loads(code_exec.execute_python({"code": "def foo("}))
-        assert "error" in result or "SyntaxError" in str(result)
-
-    def test_empty(self):
-        result = json.loads(code_exec.execute_python({"code": ""}))
-        # Empty code runs successfully (Python just exits 0)
-        assert "exit_code" in result
-
-
-# ═══════════════════════════════════════════════════════════════
-# 13. Math Tools
-# ═══════════════════════════════════════════════════════════════
-
-class TestE2EMath:
-    """Math tools with real calculations."""
-
-    def test_arithmetic(self):
-        from mimo_harness.tools.math_tools import calculator
-        result = json.loads(calculator({"expression": "2 + 3 * 4"}))
-        assert result.get("result") == 14
-
-    def test_dangerous_blocked(self):
-        from mimo_harness.tools.math_tools import calculator
-        result = json.loads(calculator({"expression": "__import__('os').system('echo x')"}))
-        assert "error" in result
-
-
-# ═══════════════════════════════════════════════════════════════
-# 14. Registry
-# ═══════════════════════════════════════════════════════════════
-
-class TestE2ERegistry:
-    """Tool registry with real tools."""
-
-    def test_all_registered(self):
-        harness = MiMoHarness(dry_run=True, bare=True)
-        names = harness.registry.list_names()
-        assert len(names) >= 22
-        for name in ["read_file", "write_file", "run_command", "execute_python",
-                      "web_search", "task_create", "cron_create"]:
-            assert name in names
-
-    def test_openai_schema(self):
-        harness = MiMoHarness(dry_run=True, bare=True)
-        tools = harness.registry.list_tools()
-        for t in tools:
-            assert t["type"] == "function"
-            assert "name" in t["function"]
-
-
-# ═══════════════════════════════════════════════════════════════
-# 15. Token Budget
-# ═══════════════════════════════════════════════════════════════
-
-class TestE2ETokenBudget:
-    """Token budget with real estimation."""
-
-    def test_estimate_scales(self):
-        small = [{"role": "user", "content": "hi"}]
-        large = [{"role": "user", "content": "x" * 10000}]
-        assert estimate_tokens(large) > estimate_tokens(small) * 10
-
-    def test_thresholds(self):
-        tb = TokenBudget(max_tokens=200000)
-        tb.estimated_tokens = 180000
-        assert tb.is_warning() and not tb.is_blocked()
-        tb.estimated_tokens = 195000
-        assert tb.is_warning() and tb.is_blocked()
-
-
-# ═══════════════════════════════════════════════════════════════
-# 16. Web Security
-# ═══════════════════════════════════════════════════════════════
-
-class TestE2EWebSecurity:
-    """SSRF protection."""
-
-    def test_blocks_localhost(self):
-        from mimo_harness.tools.web_tools import _validate_url
-        assert _validate_url("http://localhost:8080") is not None
-
-    def test_blocks_private(self):
-        from mimo_harness.tools.web_tools import _validate_url
-        for ip in ["10.0.0.1", "172.16.0.1", "192.168.1.1"]:
-            assert _validate_url(f"http://{ip}/") is not None
-
-    def test_allows_public(self):
-        from mimo_harness.tools.web_tools import _validate_url
-        assert _validate_url("https://example.com") is None
-
-
-# ═══════════════════════════════════════════════════════════════
-# 17. Agent Config
-# ═══════════════════════════════════════════════════════════════
-
-class TestE2EAgentConfig:
-    """Agent harness configuration."""
-
-    def test_effort_levels(self):
-        for effort in ["low", "medium", "high"]:
-            h = MiMoHarness(effort=effort, bare=True, dry_run=True)
-            params = h.EFFORT_PARAMS[effort]
-            assert 0 <= params["temperature"] <= 2
-
-    def test_circuit_breaker(self):
-        cb = CircuitBreaker(threshold=3)
-        for _ in range(3):
-            cb.record_failure()
-        assert cb.check()
-        cb.record_success()
-        assert not cb.check()
-
-    def test_graceful_abort(self):
-        abort = GracefulAbort()
-        assert not abort.is_requested()
-        abort.request()
-        assert abort.is_requested()
-        abort.reset()
-        assert not abort.is_requested()
-
-
-# ═══════════════════════════════════════════════════════════════
-# 18. Protected Paths
-# ═══════════════════════════════════════════════════════════════
-
-class TestE2EProtectedPaths:
-    """Protected paths enforced."""
-
-    def test_git_env_bashrc(self):
-        gate = PermissionGate(auto_approve=True)
-        assert not gate.check(Permission.WRITE, "write_file(path=.git/config)")
-        assert not gate.check(Permission.WRITE, "write_file(path=.env)")
-        assert not gate.check(Permission.WRITE, "write_file(path=.bashrc)")

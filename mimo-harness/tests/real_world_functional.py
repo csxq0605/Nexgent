@@ -279,6 +279,18 @@ def test_12_hooks_system():
     print("  [PASS] Hooks system: register function + command hooks, fire OK")
 
 
+def test_13_logging():
+    from mimo_harness.logging_utils import TraceLogger
+
+    logger = TraceLogger(session_id="test-log-session")
+    logger.info("test_event", key="value")
+    logger.error("test_error", detail="something went wrong")
+    summary = logger.session_summary()
+    assert summary["session_id"] == "test-log-session"
+    assert summary["total_steps"] >= 0
+    print("  [PASS] Logging: TraceLogger init, info, error, summary OK")
+
+
 def test_14_project_scanner():
     from mimo_harness.project_scanner import scan_project
 

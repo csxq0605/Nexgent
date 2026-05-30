@@ -173,14 +173,17 @@ class TestCompactContextWithLLM:
         assert len(result) == len(messages)
 
     def test_backward_compatible_no_client(self):
-        """Without client, uses truncation fallback (aggressive)."""
+        """Without client, uses truncation fallback (same as above, backward compat)."""
         messages = self._make_big_messages(60)
         tokens = estimate_tokens(messages)
         assert tokens > COMPRESS_TRIGGER_TOKENS
-        result, _, _, _ = compact_context(messages, estimated_tokens=tokens)
+        result, attempts, failures, _ = compact_context(messages, estimated_tokens=tokens)
         # Fallback: system marker + last 2 messages
         assert len(result) <= 4
         assert result[0]["role"] == "system"
+        # No client means no LLM attempt, and truncation is not counted as failure
+        assert attempts == 0
+        assert failures == 0
 
 
 class TestCompactContextEdgeCases:
@@ -297,8 +300,8 @@ class TestCheckpointManager:
         restored = mgr.restore_last()
         assert restored == []
 
-    def test_snapshot_preserves_file_metadata(self, tmp_path, monkeypatch):
-        """S12: snapshot() preserves file modification time via shutil.copy2."""
+    def test_snapshot_creates_checkpoint_copy(self, tmp_path, monkeypatch):
+        """S12: snapshot() creates a checkpoint copy of the file."""
         monkeypatch.chdir(tmp_path)
         source = tmp_path / "metadata.txt"
         source.write_text("content")
@@ -309,6 +312,8 @@ class TestCheckpointManager:
         # Both files should exist
         assert os.path.exists(source)
         assert os.path.exists(checkpoint_path)
+        # Checkpoint content should match source
+        assert open(checkpoint_path).read() == "content"
 
     def test_multiple_snapshots_and_restore(self, tmp_path, monkeypatch):
         """S12: Multiple snapshots, restore restores the latest one."""

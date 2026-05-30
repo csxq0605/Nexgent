@@ -144,11 +144,16 @@ class TestBareMode:
     """Test bare mode skips memory loading."""
 
     def test_bare_mode_system_prompt(self):
-        """Bare mode should produce a minimal system prompt without memory."""
+        """Bare mode should skip memory loading."""
         harness = MiMoHarness(bare=True)
         prompt = harness._build_system_prompt()
         assert isinstance(prompt, str)
         assert len(prompt) > 0
+        # Bare mode: memory is not loaded as a user message
+        assert harness.bare is True
+        # Verify the system prompt itself is well-formed
+        assert "MiMo Harness" in prompt
+        assert "Available Tools" in prompt
 
 
 class TestRunStreamMode:
