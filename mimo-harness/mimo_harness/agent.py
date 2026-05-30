@@ -225,7 +225,10 @@ You help users with coding, file operations, web research, document creation, an
 ## Environment
 - Working directory: {cwd}
 - Platform: {platform}
+- Shell: {shell_type}
 - Python: {python_version}
+
+{platform_guidance}
 
 ## Available Tools
 {tools_desc}"""
@@ -310,12 +313,26 @@ You help users with coding, file operations, web research, document creation, an
             f"- **{t.name}**: {t.description}" for t in self.registry.list_all()
         )
 
+        if platform.system() == "Windows":
+            shell_type = "cmd.exe (Windows Command Prompt)"
+            platform_guidance = """## Windows Command Guidance
+- Use Windows-native commands: `dir` (not `ls`), `type` (not `cat`), `copy` (not `cp`)
+- `mkdir` creates parent directories by default (no `-p` flag needed)
+- Use `rmdir /s /q <dir>` for recursive directory delete, `del /f /q <file>` for files
+- Use `xcopy` or `copy` for file copying
+- Some Unix commands are auto-translated, but prefer native Windows commands"""
+        else:
+            shell_type = "sh (Unix shell)"
+            platform_guidance = ""
+
         self._system_prompt_cache = self.SYSTEM_PROMPT_TEMPLATE.format(
             cwd=os.getcwd(),
             platform=f"{platform.system()} {platform.release()}",
+            shell_type=shell_type,
             python_version=platform.python_version(),
             tools_desc=tools_desc,
             safety_rules=SAFETY_SYSTEM_PROMPT_ADDITION,
+            platform_guidance=platform_guidance,
         )
 
         # S15: Append extra system prompt text if configured

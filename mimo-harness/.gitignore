@@ -9,3 +9,5 @@ build/
 .pytest_cache/
 .coverage
 .claude/
+.e2e_work/
+coverage.json

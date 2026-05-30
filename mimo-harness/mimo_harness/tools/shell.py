@@ -324,10 +324,24 @@ def run_command(params: dict) -> str:
 
 
 def get_tools() -> list[ToolDef]:
+    if platform.system() == "Windows":
+        shell_desc = (
+            "Execute a shell command via cmd.exe on Windows. "
+            "Read-only commands (dir, git status, echo, etc.) are auto-approved. "
+            "Write commands require confirmation. "
+            "Note: Use Windows-native commands (dir, type, copy, mkdir, rmdir). "
+            "Unix commands like 'mkdir -p' will be auto-translated where possible."
+        )
+    else:
+        shell_desc = (
+            "Execute a shell command. "
+            "Read-only commands (ls, git status, etc.) are auto-approved. "
+            "Write commands require confirmation."
+        )
     return [
         ToolDef(
             name="run_command",
-            description="Execute a shell command. Read-only commands (ls, git status, etc.) are auto-approved. Write commands require confirmation.",
+            description=shell_desc,
             parameters={
                 "type": "object",
                 "properties": {

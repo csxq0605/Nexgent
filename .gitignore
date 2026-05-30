@@ -13,3 +13,6 @@ venv/
 .vscode/
 .mimo/
 .claude/
+.e2e_work/
+.coverage
+coverage.json
