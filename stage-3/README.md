@@ -31,10 +31,10 @@
 
 | Component | Claude Code | Our Demo |
 |-----------|------------|----------|
-| **Tool Registry** | 20+ tools (Read, Edit, Bash, Glob, Grep, Agent...) | 4 tools (read, write, run, list) |
-| **Permission Gate** | Auto/Ask/Deny per tool per mode | Permission enum with auto/approve/block |
+| **Tool Registry** | 20+ tools (Read, Edit, Bash, Glob, Grep, Agent...) | 4 tools (read_file, write_file, list_files, calculator) |
+| **Permission Gate** | Auto/Ask/Deny per tool per mode | 5-level Permission enum (NONE/READ/WRITE/EXECUTE/DESTRUCTIVE) |
 | **Session Store** | JSONL transcripts, cross-surface sessions | In-memory session with message history |
-| **Context Compaction** | Auto-summarize when approaching limits | Keep first + last N messages |
+| **Context Compaction** | Auto-summarize when approaching limits | Keep last N messages with orphan tool result filtering |
 | **Hooks** | Shell commands pre/post tool execution | Not implemented (would be event emitter) |
 | **Sub-agents** | Independent context windows, parallel execution | Not implemented (would be Agent class) |
 | **MCP** | External tool servers via protocol | Not implemented |

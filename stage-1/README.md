@@ -1,7 +1,7 @@
 # Stage 1: Minimal Agent Loop
 
 ## Deliverable
-A 115-line Python agent that can select tools, execute them, and return final answers.
+A ~220-line Python agent that can select tools, execute them, and return final answers.
 
 ## What It Does
 1. Sends user message + tool definitions to LLM API (MiMo via OpenAI-compatible interface)
@@ -9,11 +9,12 @@ A 115-line Python agent that can select tools, execute them, and return final an
 3. If tool_use: executes the tool, feeds results back, loops
 4. If end_turn: returns the final text answer
 5. Has max_steps (10) and timeout (60s) safety guards
+6. Uses safe math evaluator (AST-based) instead of `eval()` for security
 
 ## Tools Available
-- `calculator` -- evaluates math expressions
-- `search` -- placeholder for search API
-- `read_file` -- reads local files
+- `calculator` -- evaluates math expressions using safe AST-based evaluator
+- `search` -- placeholder for search API (simulated results)
+- `read_file` -- reads local files with path traversal protection
 
 ## How to Run
 ```bash

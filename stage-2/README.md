@@ -24,9 +24,9 @@ User Query
 ## Features
 
 ### RAG Pipeline
-- **Chunk**: Text split into 500-char overlapping chunks
-- **Store**: Chunks saved to simulated vector store with source metadata
-- **Retrieve**: Keyword overlap scoring (placeholder for real embeddings)
+- **Chunk**: Text split into 500-char overlapping chunks (configurable chunk_size and overlap)
+- **Store**: Chunks saved to memory store with source metadata (MD5 hash IDs)
+- **Retrieve**: Keyword overlap scoring for long-term memory search
 - **Answer**: LLM generates answers citing retrieved sources
 
 ### Memory System (3 tiers)
@@ -34,22 +34,23 @@ User Query
 |------|---------------|----------|----------|
 | Short-term | In-context messages | Single LLM call | Current reasoning |
 | Session | `session_history` list | Conversation | Track what was discussed |
-| Long-term | Simulated vector store | Persistent | Recall prior research |
+| Long-term | `long_term_store` list with keyword search | Persistent | Recall prior research |
 
 ### Error Handling
 - **Tool failures**: try/except around every tool, error returned to LLM
 - **Empty results**: explicit "no results" message so LLM knows to try alternatives
 - **Duplicate calls**: `seen_tool_calls` set prevents repeating identical calls
-- **Hallucinated citations**: all sources come from actual tool results, not LLM imagination
+- **Path traversal**: file reads are restricted to current working directory
+- **Code execution**: 5-second timeout, output truncated to 2000 chars
 
 ## Tools
 | Tool | Purpose |
 |------|---------|
 | `web_search` | Search for current information (simulated, connect real API) |
-| `read_file` | Read local files, auto-chunks into RAG store |
-| `save_to_memory` | Persist findings to long-term memory |
-| `recall_memory` | Search long-term memory for prior research |
-| `execute_code` | Run Python for data analysis |
+| `read_file` | Read local files, auto-chunks into long-term memory (max 5 chunks) |
+| `save_to_memory` | Persist findings to long-term memory with source |
+| `recall_memory` | Search long-term memory for prior research (top 3 results) |
+| `execute_code` | Run Python for data analysis (5s timeout) |
 
 ## How to Run
 ```bash
