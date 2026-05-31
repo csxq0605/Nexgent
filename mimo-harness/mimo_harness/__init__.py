@@ -7,9 +7,10 @@ Architecture follows Claude Code patterns:
 - Ch6: Typed memory system, MEMORY.md index
 - Ch7: Progressive context compression, token budget
 - Ch8: Hook system with lifecycle events
+- SubAgent: Multi-agent coordination with lifecycle management
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from .agent import MiMoHarness, AgentDeps, CircuitBreaker, TokenBudget
 from .permissions import PermissionGate, Permission, PermissionMode, PermissionRule
@@ -22,6 +23,11 @@ from .security_pipeline import (
     sanitize_output, detect_sensitive_disclosure, detect_prompt_injection,
     classify_action, classify_action_regex, classify_action_model,
     review_action, filter_tool_output, SAFETY_SYSTEM_PROMPT_ADDITION,
+)
+from .subagent import (
+    SubAgent, SubAgentManager, SubAgentConfig, SubAgentResult,
+    SubAgentState, SubAgentPriority, MessageChannel, ResourceLimits,
+    create_subagent, run_parallel_tasks, run_pipeline_tasks,
 )
 
 __all__ = [
@@ -55,4 +61,16 @@ __all__ = [
     "classify_action",
     "review_action",
     "filter_tool_output",
+    # SubAgent system
+    "SubAgent",
+    "SubAgentManager",
+    "SubAgentConfig",
+    "SubAgentResult",
+    "SubAgentState",
+    "SubAgentPriority",
+    "MessageChannel",
+    "ResourceLimits",
+    "create_subagent",
+    "run_parallel_tasks",
+    "run_pipeline_tasks",
 ]

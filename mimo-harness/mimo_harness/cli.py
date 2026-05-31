@@ -67,6 +67,10 @@ Commands:
   /init          Scan project and generate AGENTS.md
   /rewind        Restore files from the last checkpoint
   /fork          Fork session into a new session (copy history)
+  /subagents     List active SubAgents
+  /subagent <task>  Run a task as a SubAgent
+  /parallel <task1> | <task2> | ...  Run tasks in parallel
+  /pipeline <task1> | <task2> | ...  Run tasks in pipeline
 
 Or just type a task to interact with the agent.
 Prefix with ! to run a shell command directly (e.g. !ls -la).
@@ -826,6 +830,93 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
             checkpoint_manager._seq = 0
             checkpoint_manager._batch_dir = None
         print(f"Session forked: {old_id} → {new_id}")
+    elif cmd[0] == "/subagents":
+        # List active SubAgents
+        summary = harness.get_subagent_summary()
+        print(f"\nSubAgent Summary:")
+        print(f"  Total: {summary.get('total_subagents', 0)}")
+        print(f"  Running: {summary.get('running', 0)}")
+        print(f"  Completed: {summary.get('completed', 0)}")
+        print(f"  Failed: {summary.get('failed', 0)}")
+        if summary.get('total_tokens_used', 0) > 0:
+            print(f"  Tokens used: {_format_tokens(summary['total_tokens_used'])}")
+        if summary.get('total_time_elapsed', 0) > 0:
+            print(f"  Time elapsed: {summary['total_time_elapsed']:.1f}s")
+        print()
+    elif cmd[0] == "/subagent" and len(cmd) > 1:
+        # Run a single task as a SubAgent
+        task = " ".join(cmd[1:])
+        print(f"\nRunning SubAgent: {task[:60]}...")
+        try:
+            from .subagent import SubAgentConfig
+            config = SubAgentConfig(task=task, effort=harness.effort)
+            result = harness.subagent_manager.run_single(config)
+            print(f"\nSubAgent Result:")
+            print(f"  Status: {result.state.value}")
+            print(f"  Steps: {result.steps_taken}")
+            print(f"  Duration: {result.duration_seconds:.1f}s")
+            if result.result:
+                print(f"\n{result.result}")
+            elif result.error:
+                print(f"  Error: {result.error}")
+        except Exception as e:
+            print(f"Error: {e}")
+        print()
+    elif cmd[0] == "/parallel" and len(cmd) > 1:
+        # Run tasks in parallel
+        tasks_str = " ".join(cmd[1:])
+        tasks = [t.strip() for t in tasks_str.split("|") if t.strip()]
+        if len(tasks) < 2:
+            print("Usage: /parallel <task1> | <task2> | ...")
+            print("Separate tasks with | (pipe)")
+        else:
+            print(f"\nRunning {len(tasks)} tasks in parallel...")
+            for i, task in enumerate(tasks, 1):
+                print(f"  [{i}] {task[:50]}...")
+            try:
+                results = harness.run_parallel_subagents(tasks, effort=harness.effort)
+                print(f"\nResults:")
+                for i, result in enumerate(results, 1):
+                    status = "✓" if result.success else "✗"
+                    print(f"  [{i}] {status} {result.state.value} ({result.duration_seconds:.1f}s)")
+                    if result.result:
+                        # Show first 100 chars of result
+                        preview = result.result[:100].replace("\n", " ")
+                        print(f"      {preview}...")
+                # Show summary
+                summary = harness.subagent_manager.aggregate_results(results)
+                print(f"\nSummary: {summary['successful']}/{summary['total']} succeeded")
+            except Exception as e:
+                print(f"Error: {e}")
+        print()
+    elif cmd[0] == "/pipeline" and len(cmd) > 1:
+        # Run tasks in pipeline
+        tasks_str = " ".join(cmd[1:])
+        tasks = [t.strip() for t in tasks_str.split("|") if t.strip()]
+        if len(tasks) < 2:
+            print("Usage: /pipeline <task1> | <task2> | ...")
+            print("Separate tasks with | (pipe)")
+        else:
+            print(f"\nRunning {len(tasks)} tasks in pipeline...")
+            for i, task in enumerate(tasks, 1):
+                print(f"  Stage {i}: {task[:50]}...")
+            try:
+                stages = [{"task": task} for task in tasks]
+                results = harness.run_pipeline_subagents(stages)
+                print(f"\nResults:")
+                for i, result in enumerate(results, 1):
+                    status = "✓" if result.success else "✗"
+                    print(f"  Stage {i}: {status} {result.state.value} ({result.duration_seconds:.1f}s)")
+                    if result.result:
+                        # Show first 100 chars of result
+                        preview = result.result[:100].replace("\n", " ")
+                        print(f"           {preview}...")
+                # Show summary
+                summary = harness.subagent_manager.aggregate_results(results)
+                print(f"\nSummary: {summary['successful']}/{summary['total']} stages succeeded")
+            except Exception as e:
+                print(f"Error: {e}")
+        print()
     elif cmd[0] == "/save" and len(cmd) > 1:
         try:
             session.save(cmd[1])

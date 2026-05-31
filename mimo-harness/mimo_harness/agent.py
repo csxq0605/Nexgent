@@ -294,6 +294,8 @@ You help users with coding, file operations, web research, document creation, an
         self._compaction_failures = 0
         self._thrashing_detected = False
         self._thrash_warned = False
+        # SubAgent management (lazy-initialized)
+        self._subagent_manager = None
         self._register_tools()
 
     def _register_tools(self):
@@ -973,3 +975,105 @@ You help users with coding, file operations, web research, document creation, an
         self._last_session = session
         self._last_steps = self.max_steps
         return "[ERROR] Max steps reached."
+
+    # -----------------------------------------------------------------------
+    # SubAgent Management
+    # -----------------------------------------------------------------------
+    @property
+    def subagent_manager(self):
+        """Lazy-initialized SubAgentManager."""
+        if self._subagent_manager is None:
+            from .subagent import SubAgentManager
+            self._subagent_manager = SubAgentManager(
+                parent_harness=self,
+                logger=self.logger,
+            )
+        return self._subagent_manager
+
+    def create_subagent(
+        self,
+        task: str,
+        description: str = "",
+        max_steps: int = 10,
+        allowed_tools: list[str] = None,
+        effort: str = "medium",
+    ):
+        """Create a SubAgent for parallel task execution.
+
+        Args:
+            task: The task for the SubAgent to execute
+            description: Human-readable description of the task
+            max_steps: Maximum steps for the SubAgent
+            allowed_tools: List of allowed tool names (None = all tools)
+            effort: Effort level (low/medium/high)
+
+        Returns:
+            SubAgent instance
+        """
+        from .subagent import SubAgentConfig
+
+        config = SubAgentConfig(
+            task=task,
+            description=description,
+            max_steps=max_steps,
+            allowed_tools=allowed_tools,
+            effort=effort,
+        )
+        return self.subagent_manager.create_subagent(config)
+
+    def run_subagent(self, task: str, **kwargs):
+        """Create and run a single SubAgent synchronously.
+
+        Args:
+            task: The task for the SubAgent to execute
+            **kwargs: Additional SubAgentConfig options
+
+        Returns:
+            SubAgentResult
+        """
+        from .subagent import SubAgentConfig
+
+        config = SubAgentConfig(task=task, **kwargs)
+        return self.subagent_manager.run_single(config)
+
+    def run_parallel_subagents(self, tasks: list[str], **kwargs):
+        """Run multiple tasks in parallel using SubAgents.
+
+        Args:
+            tasks: List of task descriptions
+            **kwargs: Additional SubAgentConfig options
+
+        Returns:
+            List of SubAgentResult
+        """
+        from .subagent import SubAgentConfig
+
+        configs = [SubAgentConfig(task=task, **kwargs) for task in tasks]
+        return self.subagent_manager.run_parallel(configs)
+
+    def run_pipeline_subagents(self, stages: list[dict]):
+        """Run tasks in pipeline mode (sequential with context passing).
+
+        Args:
+            stages: List of dicts with 'task' and optional 'description', 'allowed_tools'
+
+        Returns:
+            List of SubAgentResult
+        """
+        from .subagent import SubAgentConfig
+
+        configs = [
+            SubAgentConfig(
+                task=stage["task"],
+                description=stage.get("description", ""),
+                allowed_tools=stage.get("allowed_tools"),
+            )
+            for stage in stages
+        ]
+        return self.subagent_manager.run_pipeline(configs)
+
+    def get_subagent_summary(self) -> dict:
+        """Get a summary of all SubAgent activity."""
+        if self._subagent_manager is None:
+            return {"total_subagents": 0, "running": 0, "completed": 0, "failed": 0}
+        return self.subagent_manager.get_resource_summary()
