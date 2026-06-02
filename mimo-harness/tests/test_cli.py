@@ -364,6 +364,10 @@ class TestHandleCommand:
         test_file.write_text("original")
         checkpoint_manager.snapshot(str(test_file))
         test_file.write_text("modified")
+        # Verify checkpoint was created
+        assert checkpoint_manager._seq > 0
+        checkpoint_path = os.path.join(checkpoint_manager.checkpoint_dir, str(checkpoint_manager._seq))
+        assert os.path.isdir(checkpoint_path)
         _handle_command(["/rewind"], harness, session, memory_store, checkpoint_manager=checkpoint_manager)
         captured = capsys.readouterr()
         assert "Restored" in captured.out
