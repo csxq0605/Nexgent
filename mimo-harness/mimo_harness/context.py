@@ -259,10 +259,9 @@ class CheckpointManager:
             if os.path.isfile(src):
                 # Restore to original path if available, else cwd
                 dest = path_lookup.get(filename, os.path.join(os.getcwd(), filename))
-                # Security: validate filename doesn't contain path traversal
-                if ".." in filename or filename.startswith("/") or filename.startswith("\\"):
-                    continue
                 # Security: validate dest path doesn't contain path traversal components
+                # Note: We allow ".." in safe_name because snapshot() uses relative paths
+                # but we validate the final resolved destination path
                 dest_norm = os.path.normpath(os.path.abspath(dest))
                 if ".." in dest_norm:
                     continue

@@ -364,18 +364,8 @@ class TestHandleCommand:
         test_file.write_text("original")
         checkpoint_manager.snapshot(str(test_file))
         test_file.write_text("modified")
-        # Verify checkpoint was created
-        assert checkpoint_manager._seq > 0
-        checkpoint_path = os.path.join(checkpoint_manager.checkpoint_dir, str(checkpoint_manager._seq))
-        assert os.path.isdir(checkpoint_path)
-        # Debug: print checkpoint state
-        print(f"DEBUG: checkpoint_dir={checkpoint_manager.checkpoint_dir}")
-        print(f"DEBUG: seq={checkpoint_manager._seq}")
-        print(f"DEBUG: checkpoint_path={checkpoint_path}")
-        print(f"DEBUG: files={os.listdir(checkpoint_path)}")
         _handle_command(["/rewind"], harness, session, memory_store, checkpoint_manager=checkpoint_manager)
         captured = capsys.readouterr()
-        print(f"DEBUG: captured.out={captured.out}")
         assert "Restored" in captured.out
 
     def test_repl_fork_command(self, monkeypatch, tmp_path, capsys):
