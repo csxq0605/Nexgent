@@ -369,3 +369,62 @@ class TestMonitorMaxLimit:
         for job_id in started[1:]:
             monitor.monitor_stop({"job_id": job_id})
 
+
+# ============================================================================
+# TASK THREAD SAFETY
+# ============================================================================
+
+class TestTaskThreadSafety:
+    """Test concurrent task_create calls are thread-safe."""
+
+    def test_concurrent_task_create(self):
+        """20 concurrent task_create calls should not crash or lose data."""
+        from mimo_harness.tools import task_tools
+
+        results = []
+        errors = []
+
+        def create_task(i):
+            try:
+                r = json.loads(task_tools.task_create({
+                    "subject": f"Thread Task {i}",
+                    "description": f"Description {i}",
+                }))
+                results.append(r)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=create_task, args=(i,)) for i in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0, f"Thread errors: {errors}"
+        assert len(results) == 20
+
+
+# ============================================================================
+# INIT ATTRIBUTE ASSERTIONS
+# ============================================================================
+
+class TestInitAttributes:
+    """Test that key classes initialize with correct default attributes."""
+
+    def test_circuit_breaker_init(self):
+        cb = CircuitBreaker(threshold=5)
+        assert cb.threshold == 5
+        assert cb.consecutive_failures == 0
+        assert cb.is_open is False
+
+    def test_token_budget_init(self):
+        budget = TokenBudget(max_tokens=200000)
+        assert budget.max_tokens == 200000
+        assert budget.estimated_tokens == 0
+        assert budget.effective_max == 200000 - 4096
+
+    def test_token_budget_default(self):
+        budget = TokenBudget()
+        assert budget.max_tokens > 0
+        assert budget.estimated_tokens == 0
+

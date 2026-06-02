@@ -831,3 +831,138 @@ class TestEstimateTokensEdgeCases:
         tokens = estimate_tokens(messages)
         assert tokens >= 0
 
+
+# ============================================================================
+# snip_compress / microcompact independent boundary tests
+# ============================================================================
+
+from mimo_harness.context import snip_compress, microcompact, COMPRESS_MARKER
+
+
+class TestSnipCompress:
+    """Boundary tests for snip_compress (Level 1 compression)."""
+
+    def test_empty_messages(self):
+        assert snip_compress([]) == []
+
+    def test_messages_within_limit(self):
+        msgs = [{"role": "user", "content": "hi"}] * 5
+        result = snip_compress(msgs, max_age=10)
+        assert result == msgs
+
+    def test_old_tool_messages_snipped(self):
+        """Old tool messages should be replaced with markers."""
+        msgs = [
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "ok", "tool_calls": [{"id": "tc1"}]},
+            {"role": "tool", "content": "old result", "tool_call_id": "tc1"},
+            {"role": "user", "content": "q2"},
+            {"role": "assistant", "content": "ok2"},
+        ]
+        result = snip_compress(msgs, max_age=2)
+        # The tool message at index 2 is older than max_age=2 from end
+        assert result[2]["content"] == COMPRESS_MARKER
+        assert result[2]["tool_call_id"] == "tc1"  # preserved
+        # Non-tool messages unchanged
+        assert result[0]["content"] == "q1"
+        assert result[3]["content"] == "q2"
+
+    def test_recent_messages_preserved(self):
+        """Messages within max_age should not be snipped."""
+        msgs = [
+            {"role": "tool", "content": "recent result", "tool_call_id": "tc2"},
+            {"role": "user", "content": "q"},
+        ]
+        result = snip_compress(msgs, max_age=5)
+        assert result[0]["content"] == "recent result"
+
+    def test_non_tool_messages_never_snipped(self):
+        """User/assistant messages are never snipped, even if old."""
+        msgs = [
+            {"role": "user", "content": "old question"},
+            {"role": "assistant", "content": "old answer"},
+            {"role": "user", "content": "recent"},
+        ]
+        result = snip_compress(msgs, max_age=1)
+        assert result[0]["content"] == "old question"
+        assert result[1]["content"] == "old answer"
+
+    def test_preserves_message_count(self):
+        """snip_compress preserves the total number of messages."""
+        msgs = [
+            {"role": "user", "content": "q"},
+            {"role": "assistant", "content": "a", "tool_calls": [{"id": "tc1"}]},
+            {"role": "tool", "content": "r", "tool_call_id": "tc1"},
+        ] * 10
+        result = snip_compress(msgs, max_age=5)
+        assert len(result) == len(msgs)
+
+
+class TestMicrocompact:
+    """Boundary tests for microcompact (Level 2 compression)."""
+
+    def test_empty_messages(self):
+        assert microcompact([]) == []
+
+    def test_no_tool_messages(self):
+        """Messages without tool results should pass through unchanged."""
+        msgs = [
+            {"role": "user", "content": "q"},
+            {"role": "assistant", "content": "a"},
+        ]
+        result = microcompact(msgs, keep_recent=5)
+        assert result == msgs
+
+    def test_tool_messages_within_limit(self):
+        """Tool messages within keep_recent should not be compressed."""
+        msgs = [
+            {"role": "tool", "content": "result1", "tool_call_id": "tc1"},
+            {"role": "tool", "content": "result2", "tool_call_id": "tc2"},
+        ]
+        result = microcompact(msgs, keep_recent=5)
+        assert result[0]["content"] == "result1"
+        assert result[1]["content"] == "result2"
+
+    def test_old_tool_messages_compressed(self):
+        """Old tool messages should be replaced with markers."""
+        msgs = [
+            {"role": "tool", "content": "old1", "tool_call_id": "tc1"},
+            {"role": "tool", "content": "old2", "tool_call_id": "tc2"},
+            {"role": "tool", "content": "recent1", "tool_call_id": "tc3"},
+            {"role": "tool", "content": "recent2", "tool_call_id": "tc4"},
+        ]
+        result = microcompact(msgs, keep_recent=2)
+        assert result[0]["content"] == COMPRESS_MARKER
+        assert result[1]["content"] == COMPRESS_MARKER
+        assert result[2]["content"] == "recent1"
+        assert result[3]["content"] == "recent2"
+
+    def test_preserves_non_tool_messages(self):
+        """Non-tool messages should pass through unchanged."""
+        msgs = [
+            {"role": "user", "content": "question"},
+            {"role": "tool", "content": "old", "tool_call_id": "tc1"},
+            {"role": "assistant", "content": "answer"},
+            {"role": "tool", "content": "recent", "tool_call_id": "tc2"},
+        ]
+        result = microcompact(msgs, keep_recent=1)
+        assert result[0]["content"] == "question"
+        assert result[2]["content"] == "answer"
+        assert result[1]["content"] == COMPRESS_MARKER
+        assert result[3]["content"] == "recent"
+
+    def test_preserves_message_count(self):
+        """microcompact preserves the total number of messages."""
+        msgs = [
+            {"role": "tool", "content": f"r{i}", "tool_call_id": f"tc{i}"}
+            for i in range(20)
+        ]
+        result = microcompact(msgs, keep_recent=3)
+        assert len(result) == 20
+
+    def test_single_tool_message(self):
+        """Single tool message should not be compressed (within keep_recent)."""
+        msgs = [{"role": "tool", "content": "only", "tool_call_id": "tc1"}]
+        result = microcompact(msgs, keep_recent=1)
+        assert result[0]["content"] == "only"
+

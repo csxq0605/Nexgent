@@ -14,14 +14,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-
-def load_module(name, path):
-    """Import a module from a file path (handles hyphenated dirs)."""
-    import importlib, importlib.util
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from conftest import load_module
 
 
 # ============================================================

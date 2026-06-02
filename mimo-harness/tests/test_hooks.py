@@ -202,3 +202,39 @@ class TestHookRunner:
         # Should not crash, just return approve
         result = runner.run_hooks(HookEvent.PRE_TOOL_USE, "test_tool")
         assert not result.is_blocking
+
+
+# =========================================================================
+# HookConfig.matcher matching logic tests
+# =========================================================================
+
+class TestHookConfigMatcher:
+    """Test the matcher field of HookConfig for tool name matching."""
+
+    def test_wildcard_matches_any(self):
+        config = HookConfig(event=HookEvent.PRE_TOOL_USE, matcher="*")
+        assert config.matches("read_file") is True
+        assert config.matches("run_command") is True
+        assert config.matches("anything") is True
+
+    def test_exact_match(self):
+        config = HookConfig(event=HookEvent.PRE_TOOL_USE, matcher="write_file")
+        assert config.matches("write_file") is True
+        assert config.matches("read_file") is False
+        assert config.matches("write_file_extra") is False
+
+    def test_prefix_wildcard(self):
+        config = HookConfig(event=HookEvent.PRE_TOOL_USE, matcher="write_*")
+        assert config.matches("write_file") is True
+        assert config.matches("write_memory") is True
+        assert config.matches("read_file") is False
+
+    def test_empty_matcher(self):
+        config = HookConfig(event=HookEvent.PRE_TOOL_USE, matcher="")
+        assert config.matches("anything") is False
+
+    def test_case_sensitive(self):
+        config = HookConfig(event=HookEvent.PRE_TOOL_USE, matcher="Bash")
+        assert config.matches("Bash") is True
+        assert config.matches("bash") is False
+        assert config.matches("BASH") is False

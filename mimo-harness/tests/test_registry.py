@@ -135,3 +135,28 @@ class TestToolRegistry:
         result = json.loads(reg.execute("fail", {}, perms))
         assert "error" in result
         assert "failed" in result["error"]
+
+
+class TestAggregateToolRegistration:
+    """Test that all tool modules register together with valid schemas."""
+
+    def test_all_modules_register_18_plus_tools(self):
+        """Register all tool modules together and verify 18+ tools with valid schemas."""
+        from mimo_harness.tools import (
+            file_ops, shell, code_exec, web_tools, doc_tools,
+            math_tools, interactive, monitor, notebook_tools, task_tools,
+        )
+
+        reg = ToolRegistry()
+        all_tools = (
+            file_ops.get_tools() + shell.get_tools() + code_exec.get_tools()
+            + web_tools.get_tools() + doc_tools.get_tools() + math_tools.get_tools()
+            + interactive.get_tools() + monitor.get_tools() + notebook_tools.get_tools()
+            + task_tools.get_tools()
+        )
+        reg.register_many(all_tools)
+        assert len(all_tools) >= 18, f"Expected 18+ tools, got {len(all_tools)}"
+        for t in all_tools:
+            assert t.name, f"Tool missing name"
+            assert t.description, f"Tool {t.name} missing description"
+            assert "type" in t.parameters, f"Tool {t.name} missing parameters type"

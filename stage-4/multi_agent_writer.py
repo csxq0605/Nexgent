@@ -35,11 +35,71 @@ def extract_json(text: str) -> dict:
     start = text.find('{')
     end = text.rfind('}')
     if start != -1 and end != -1 and end > start:
+        snippet = text[start:end + 1]
         try:
-            return json.loads(text[start:end + 1])
+            return json.loads(snippet)
         except json.JSONDecodeError:
             pass
+        # Fallback: try to fix unescaped quotes inside string values
+        fixed = _try_fix_json_quotes(snippet)
+        if fixed is not None:
+            try:
+                return json.loads(fixed)
+            except json.JSONDecodeError:
+                pass
     return {"raw_text": text, "parse_error": "Failed to parse JSON"}
+
+
+def _try_fix_json_quotes(text: str) -> str | None:
+    """Try to fix unescaped double quotes inside JSON string values.
+
+    LLMs sometimes return JSON like:
+        {"key": "value with "inner" quotes"}
+    where the inner quotes should be escaped. This function attempts to fix
+    such cases by escaping quotes that appear inside string values.
+    Returns the fixed string, or None if no fix was possible.
+    """
+    # Strategy: walk through the string character by character,
+    # tracking whether we're inside a JSON string value.
+    result = []
+    in_string = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == '\\' and in_string:
+            # Escaped character — copy both chars
+            result.append(ch)
+            if i + 1 < len(text):
+                result.append(text[i + 1])
+                i += 2
+                continue
+        if ch == '"':
+            if not in_string:
+                in_string = True
+                result.append(ch)
+            else:
+                # Check if this is a closing quote or an inner quote
+                # Closing quote: followed by , } ] : or whitespace then , } ] :
+                rest = text[i + 1:].lstrip()
+                if rest and rest[0] in (',', '}', ']', ':'):
+                    # Closing quote
+                    in_string = False
+                    result.append(ch)
+                elif not rest:
+                    # End of string — closing quote
+                    in_string = False
+                    result.append(ch)
+                else:
+                    # Inner quote — escape it
+                    result.append('\\"')
+            i += 1
+            continue
+        result.append(ch)
+        i += 1
+    fixed = ''.join(result)
+    if fixed == text:
+        return None
+    return fixed
 
 
 AGENTS = {

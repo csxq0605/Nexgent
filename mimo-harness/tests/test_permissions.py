@@ -197,23 +197,25 @@ class TestPermissionGate:
 # Model-driven permission features
 # =========================================================================
 
-class _MockChoice:
-    def __init__(self, content):
-        self.message = type("msg", (), {"content": content})()
-        self.finish_reason = "stop"
+class _MockCompletions:
+    """Track calls and return canned responses."""
+    def __init__(self, response_text):
+        self.response_text = response_text
+        self.call_count = 0
+        self.last_messages = None
+
+    def create(self, **kwargs):
+        self.call_count += 1
+        self.last_messages = kwargs.get("messages", [])
+        msg = type("Msg", (), {"content": self.response_text})()
+        choice = type("Choice", (), {"message": msg, "finish_reason": "stop"})()
+        return type("Resp", (), {"choices": [choice]})()
 
 
 class _MockClient:
+    """Mock OpenAI client for testing model-driven permissions."""
     def __init__(self, response_text):
-        self.chat = type("chat", (), {
-            "completions": type("comp", (), {
-                "call_count": 0,
-                "last_messages": None,
-                "create": lambda self, **kw: type("resp", (), {
-                    "choices": [_MockChoice(response_text)]
-                })()
-            })()
-        })()
+        self.chat = type("Chat", (), {"completions": _MockCompletions(response_text)})()
 
 
 class TestModelDrivenPermissions:

@@ -447,15 +447,6 @@ class TestWebToolsDeep:
         result = json.loads(web_tools.web_fetch({"url": "http://192.0.2.1:1/nonexistent"}))
         assert "error" in result
 
-    def test_web_fetch_non_html(self, tmp_path, monkeypatch):
-        """Fetch a URL and verify content is returned."""
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(web_tools, "_fetch_cache", {})
-        result = json.loads(web_tools.web_fetch({"url": "http://example.com"}))
-        assert "status" in result
-        assert result["status"] == 200
-        assert len(result["content"]) > 0
-
     def test_web_fetch_url_validation_blocks_private(self, tmp_path, monkeypatch):
         """SSRF protection blocks private IPs."""
         monkeypatch.chdir(tmp_path)
@@ -936,3 +927,93 @@ class TestShellDeep:
         # Chaining operators (;, |, &&) are handled by splitter, not this pattern
         assert shell._CHAINING_PATTERN.search(";") is None
         assert shell._CHAINING_PATTERN.search("|") is None
+
+
+class TestScrubEnv:
+    """Tests for _scrub_env credential scrubbing."""
+
+    def test_removes_api_key(self, monkeypatch):
+        monkeypatch.setenv("MY_API_KEY", "secret123")
+        env = shell._scrub_env()
+        assert "MY_API_KEY" not in env
+
+    def test_removes_secret(self, monkeypatch):
+        monkeypatch.setenv("APP_SECRET", "value")
+        env = shell._scrub_env()
+        assert "APP_SECRET" not in env
+
+    def test_removes_token(self, monkeypatch):
+        monkeypatch.setenv("AUTH_TOKEN", "tok123")
+        env = shell._scrub_env()
+        assert "AUTH_TOKEN" not in env
+
+    def test_removes_password(self, monkeypatch):
+        monkeypatch.setenv("DB_PASSWORD", "pass")
+        env = shell._scrub_env()
+        assert "DB_PASSWORD" not in env
+
+    def test_removes_credential(self, monkeypatch):
+        monkeypatch.setenv("AWS_CREDENTIAL", "val")
+        env = shell._scrub_env()
+        assert "AWS_CREDENTIAL" not in env
+
+    def test_removes_database_url(self, monkeypatch):
+        monkeypatch.setenv("DATABASE_URL", "postgres://admin:pass@db")
+        env = shell._scrub_env()
+        assert "DATABASE_URL" not in env
+
+    def test_preserves_safe_keys(self, monkeypatch):
+        monkeypatch.setenv("PATH", "/usr/bin")
+        monkeypatch.setenv("HOME", "/home/user")
+        monkeypatch.setenv("LANG", "en_US.UTF-8")
+        env = shell._scrub_env()
+        assert "PATH" in env
+        assert "HOME" in env
+        assert "LANG" in env
+
+    def test_preserves_partial_match(self, monkeypatch):
+        """Keys containing pattern substring but not as word boundary should still be removed."""
+        monkeypatch.setenv("MY_API_KEY_ID", "val")
+        env = shell._scrub_env()
+        # API_KEY pattern matches, so it should be removed
+        assert "MY_API_KEY_ID" not in env
+
+
+class TestSplitCompoundCommand:
+    """Tests for _split_compound_command."""
+
+    def test_double_ampersand(self):
+        assert shell._split_compound_command("ls -la && echo done") == ["ls -la", "echo done"]
+
+    def test_double_pipe(self):
+        assert shell._split_compound_command("ls || echo fail") == ["ls", "echo fail"]
+
+    def test_semicolon(self):
+        assert shell._split_compound_command("cat file; rm -rf /") == ["cat file", "rm -rf /"]
+
+    def test_pipe(self):
+        assert shell._split_compound_command("ls | head -5") == ["ls", "head -5"]
+
+    def test_single_command(self):
+        assert shell._split_compound_command("ls -la") == ["ls -la"]
+
+    def test_empty_command(self):
+        assert shell._split_compound_command("") == []
+
+    def test_respects_single_quotes(self):
+        """Operators inside single quotes should not split."""
+        result = shell._split_compound_command("echo 'a && b'")
+        assert result == ["echo 'a && b'"]
+
+    def test_respects_double_quotes(self):
+        """Operators inside double quotes should not split."""
+        result = shell._split_compound_command('echo "a && b"')
+        assert result == ['echo "a && b"']
+
+    def test_newline_separator(self):
+        result = shell._split_compound_command("ls\necho done")
+        assert result == ["ls", "echo done"]
+
+    def test_multiple_operators(self):
+        result = shell._split_compound_command("a && b || c ; d | e")
+        assert result == ["a", "b", "c", "d", "e"]

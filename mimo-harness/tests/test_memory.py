@@ -190,3 +190,37 @@ class TestLoadTopic:
         store = MemoryStore(str(tmp_path))
         result = store.load_topic("anything")
         assert result == ""
+
+
+class TestMemoryIndexMaxBytes:
+    """Test MEMORY_INDEX_MAX_BYTES limit for the memory index."""
+
+    def test_index_respects_byte_limit(self, tmp_path):
+        """Index should be truncated when it exceeds MEMORY_INDEX_MAX_BYTES."""
+        store = MemoryStore(str(tmp_path))
+        # Create memories with long descriptions to exceed 25KB
+        for i in range(50):
+            store.save_memory(
+                name=f"large-memory-{i:03d}",
+                memory_type=MemoryType.PROJECT,
+                description=f"Description {i}: " + "x" * 500,
+                content=f"Content {i}",
+            )
+
+        index = store.load_index()
+        encoded_size = len(index.encode("utf-8"))
+        # Should be capped at roughly MEMORY_INDEX_MAX_BYTES + some overhead
+        assert encoded_size <= MEMORY_INDEX_MAX_BYTES + 2000  # allow header overhead
+
+    def test_small_index_not_truncated(self, tmp_path):
+        """Small index should not be truncated."""
+        store = MemoryStore(str(tmp_path))
+        store.save_memory(
+            name="small",
+            memory_type=MemoryType.USER,
+            description="Short",
+            content="Content",
+        )
+        index = store.load_index()
+        assert "small" in index
+        assert "Short" in index

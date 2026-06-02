@@ -41,19 +41,41 @@ def _cleanup_spill_dir():
 # E2E retry configuration
 E2E_MAX_RETRIES = 3
 
+# Only retry on network/API errors, not assertion failures
+RETRYABLE_EXCEPTIONS = (
+    ConnectionError,
+    TimeoutError,
+    OSError,
+)
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Check if an exception is retryable (network/API error)."""
+    if isinstance(exc, RETRYABLE_EXCEPTIONS):
+        return True
+    # openai library errors
+    exc_name = type(exc).__name__
+    if exc_name in ("APIError", "APITimeoutError", "APIConnectionError", "RateLimitError"):
+        return True
+    # Check status_code attribute (openai errors set this)
+    status_code = getattr(exc, "status_code", None)
+    if status_code in (429, 500, 502, 503, 504):
+        return True
+    return False
+
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_call(item):
-    """Retry flaky E2E tests up to E2E_MAX_RETRIES times."""
-    # Only retry E2E tests (in test_e2e.py or test_real_world_functional.py)
-    is_e2e = "test_e2e" in str(item.fspath) or "test_real_world_functional" in str(item.fspath)
+    """Retry flaky E2E tests up to E2E_MAX_RETRIES times on network errors."""
+    # Only retry E2E tests (in test_e2e.py)
+    is_e2e = "test_e2e" in str(item.fspath)
 
     if not is_e2e:
         # Non-E2E tests: run normally
         yield
         return
 
-    # E2E tests: retry on failure
+    # E2E tests: retry only on retryable (network/API) failures
     last_exc = None
     for attempt in range(E2E_MAX_RETRIES):
         try:
@@ -62,10 +84,11 @@ def pytest_runtest_call(item):
             return
         except Exception as e:
             last_exc = e
+            if not _is_retryable(e):
+                # Non-retryable error (e.g. AssertionError) — fail immediately
+                raise
             if attempt < E2E_MAX_RETRIES - 1:
-                # Print retry notice (visible with -v)
                 print(f"\n  [RETRY] {item.nodeid} failed (attempt {attempt + 1}/{E2E_MAX_RETRIES}), retrying...")
                 continue
             else:
-                # Final attempt failed
                 raise last_exc
