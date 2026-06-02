@@ -34,6 +34,10 @@ jobs:
           -v --tb=short
 
     - name: Run stage unit tests
+      env:
+        MIMO_API_KEY: test-key-for-testing
+        MIMO_BASE_URL: http://localhost:8080/v1
+        MIMO_MODEL: test-model
       run: |
         python -m pytest tests/test_stage_unit.py \
           -v --tb=short
