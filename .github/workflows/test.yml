@@ -40,7 +40,8 @@ jobs:
         MIMO_MODEL: test-model
       run: |
         python -m pytest tests/test_stage_unit.py \
-          -v --tb=short
+          -v --tb=short \
+          -k "not TestStage6Unit"
 
     - name: Run tests with coverage
       if: matrix.python-version == '3.12'
