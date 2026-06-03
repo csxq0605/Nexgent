@@ -39,6 +39,7 @@ jobs:
       run: |
         python -m pytest mimo-harness/tests/ \
           --ignore=mimo-harness/tests/test_e2e.py \
+          --ignore=mimo-harness/tests/test_cli_e2e.py \
           -v --tb=short
 
     - name: Run stage unit tests
@@ -55,6 +56,7 @@ jobs:
       run: |
         python -m pytest mimo-harness/tests/ \
           --ignore=mimo-harness/tests/test_e2e.py \
+          --ignore=mimo-harness/tests/test_cli_e2e.py \
           --cov=mimo_harness \
           --cov-report=xml \
           --cov-report=term-missing
@@ -107,3 +109,11 @@ jobs:
         MIMO_MODEL: ${{ secrets.MIMO_MODEL }}
       run: |
         python -m pytest mimo-harness/tests/test_e2e.py -v --tb=short
+
+    - name: Run CLI E2E tests
+      env:
+        MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
+        MIMO_BASE_URL: ${{ secrets.MIMO_BASE_URL }}
+        MIMO_MODEL: ${{ secrets.MIMO_MODEL }}
+      run: |
+        python -m pytest mimo-harness/tests/test_cli_e2e.py -v --tb=short
