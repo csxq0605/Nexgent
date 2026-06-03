@@ -8,7 +8,6 @@ from mimo_harness.permissions import (
     Permission, PermissionRule, PermissionGate,
 )
 from mimo_harness.security_pipeline import SafetyDecision, ClassificationResult, ReviewResult
-from tests.helpers import MockClient as _MockClient
 
 
 class TestPermissionGate:
@@ -33,6 +32,11 @@ class TestPermissionGate:
     def test_dry_run_blocks(self):
         gate = PermissionGate(dry_run=True)
         assert not gate.check(Permission.WRITE, "write_file(path)")
+
+    def test_dry_run_blocks_read(self):
+        """Dry-run should block ALL operations including READ."""
+        gate = PermissionGate(dry_run=True)
+        assert not gate.check(Permission.READ, "read_file(path)")
 
     def test_plan_mode_blocks_writes(self):
         gate = PermissionGate(plan_mode=True)
@@ -202,7 +206,8 @@ class TestModelDrivenPermissions:
     def test_set_llm_client(self):
         """set_llm_client stores client and model."""
         gate = PermissionGate()
-        client = _MockClient("{}")
+        # Use a simple object to represent a client (no mock needed)
+        client = object()
         gate.set_llm_client(client, "test-model")
         assert gate._llm_client is client
         assert gate._llm_model == "test-model"

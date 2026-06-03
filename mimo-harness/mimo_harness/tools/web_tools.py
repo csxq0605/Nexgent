@@ -78,38 +78,80 @@ def _validate_url(url: str) -> str | None:
     return None
 
 
+_SEARCH_BACKENDS = [
+    ("https://html.duckduckgo.com/html/", "duckduckgo"),
+    ("https://www.bing.com/search", "bing"),
+]
+
+
+def _parse_ddg_html(html: str) -> list[dict]:
+    """Parse DuckDuckGo HTML search results."""
+    results = []
+    for match in re.finditer(
+        r'<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
+        r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+        html, re.DOTALL
+    ):
+        url = match.group(1)
+        title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
+        snippet = re.sub(r'<[^>]+>', '', match.group(3)).strip()
+        if title and snippet:
+            results.append({"title": title, "url": url, "snippet": snippet})
+        if len(results) >= 5:
+            break
+    if not results:
+        for match in re.finditer(r'<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>', html, re.DOTALL):
+            title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
+            if title and len(title) > 5:
+                results.append({"title": title, "url": match.group(1), "snippet": ""})
+            if len(results) >= 5:
+                break
+    return results
+
+
+def _parse_bing_html(html: str) -> list[dict]:
+    """Parse Bing HTML search results."""
+    results = []
+    for match in re.finditer(
+        r'<li class="b_algo"[^>]*>.*?<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>.*?<p[^>]*>(.*?)</p>',
+        html, re.DOTALL
+    ):
+        url = match.group(1)
+        title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
+        snippet = re.sub(r'<[^>]+>', '', match.group(3)).strip()
+        if title:
+            results.append({"title": title, "url": url, "snippet": snippet})
+        if len(results) >= 5:
+            break
+    return results
+
+
 def web_search(params: dict) -> str:
     query = params.get("query", "")
     try:
         import requests
-        resp = requests.get(
-            "https://html.duckduckgo.com/html/",
-            params={"q": query},
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        results = []
-        for match in re.finditer(
-            r'<a[^>]+class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
-            r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
-            resp.text, re.DOTALL
-        ):
-            url = match.group(1)
-            title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
-            snippet = re.sub(r'<[^>]+>', '', match.group(3)).strip()
-            if title and snippet:
-                results.append({"title": title, "url": url, "snippet": snippet})
-            if len(results) >= 5:
-                break
-        if not results:
-            for match in re.finditer(r'<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>', resp.text, re.DOTALL):
-                title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
-                if title and len(title) > 5:
-                    results.append({"title": title, "url": match.group(1), "snippet": ""})
-                if len(results) >= 5:
-                    break
-        return json.dumps({"query": query, "results": results, "count": len(results)})
+        last_error = None
+        for backend_url, backend_name in _SEARCH_BACKENDS:
+            try:
+                search_params = {"q": query}
+                if backend_name == "bing":
+                    search_params["format"] = "rss"
+                resp = requests.get(
+                    backend_url,
+                    params=search_params,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                if backend_name == "duckduckgo":
+                    results = _parse_ddg_html(resp.text)
+                else:
+                    results = _parse_bing_html(resp.text)
+                return json.dumps({"query": query, "results": results, "count": len(results)})
+            except Exception as e:
+                last_error = e
+                continue
+        return json.dumps({"error": f"All search backends failed: {last_error}"})
     except ImportError:
         return json.dumps({"error": "requests library not installed. Run: pip install requests"})
     except Exception as e:

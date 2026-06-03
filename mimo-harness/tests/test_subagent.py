@@ -482,7 +482,13 @@ class TestSubAgentManager:
         assert summary["failed"] == 1
         assert summary["success_rate"] == pytest.approx(2/3)
         assert summary["total_tokens"] == 350
-        assert summary["total_duration"] == pytest.approx(3.5)
+        assert summary["avg_tokens"] == pytest.approx(350/3)
+        assert summary["total_duration"] == pytest.approx(3.5, abs=0.01)
+        assert summary["avg_duration"] == pytest.approx(3.5/3, abs=0.01)
+        assert summary["max_duration"] == pytest.approx(2.0, abs=0.01)
+        assert summary["min_duration"] == pytest.approx(0.5, abs=0.01)
+        assert len(summary["errors"]) == 1
+        assert summary["errors"][0]["error"] == "failed"
         assert "combined_output" in summary
 
     def test_cancel_all(self):
@@ -526,50 +532,6 @@ class TestSubAgentManager:
         config3 = SubAgentConfig(task="task 3")
         with pytest.raises(RuntimeError, match="SubAgent limit exceeded"):
             manager.create_subagent(config3)
-
-    def test_aggregate_results_advanced(self):
-        manager = SubAgentManager()
-        results = [
-            SubAgentResult(
-                subagent_id="1",
-                task="task 1",
-                state=SubAgentState.COMPLETED,
-                result="result 1",
-                token_usage=100,
-                duration_seconds=1.0,
-            ),
-            SubAgentResult(
-                subagent_id="2",
-                task="task 2",
-                state=SubAgentState.COMPLETED,
-                result="result 2",
-                token_usage=200,
-                duration_seconds=2.0,
-            ),
-            SubAgentResult(
-                subagent_id="3",
-                task="task 3",
-                state=SubAgentState.FAILED,
-                error="failed",
-                token_usage=50,
-                duration_seconds=0.5,
-            ),
-        ]
-
-        summary = manager.aggregate_results(results)
-
-        assert summary["total"] == 3
-        assert summary["successful"] == 2
-        assert summary["failed"] == 1
-        assert summary["success_rate"] == pytest.approx(2/3)
-        assert summary["total_tokens"] == 350
-        assert summary["avg_tokens"] == pytest.approx(350/3)
-        assert summary["total_duration"] == pytest.approx(3.5, abs=0.01)
-        assert summary["avg_duration"] == pytest.approx(3.5/3, abs=0.01)
-        assert summary["max_duration"] == pytest.approx(2.0, abs=0.01)
-        assert summary["min_duration"] == pytest.approx(0.5, abs=0.01)
-        assert len(summary["errors"]) == 1
-        assert summary["errors"][0]["error"] == "failed"
 
     def test_get_performance_stats(self):
         manager = SubAgentManager()
@@ -761,12 +723,22 @@ class TestSubAgentE2E:
 
     def test_subagent_with_tools(self):
         """Test SubAgent using specific tools."""
-        import tempfile
-        import os
+        import shutil
+        import uuid
+        from mimo_harness.tools import file_ops
 
-        # Create a temp file in the working directory so security pipeline allows it
-        working_dir = os.getcwd()
-        temp_path = os.path.join(working_dir, "temp_subagent_test.txt")
+        # Reset file_ops sandbox state so it uses current CWD
+        file_ops._ALLOWED_WRITE_DIR = None
+        file_ops._read_files.clear()
+        file_ops._write_allowed_files.clear()
+
+        # Create a temp file in CWD so security pipeline allows it
+        cwd = os.getcwd()
+        work_dir = os.path.join(cwd, ".e2e_work")
+        os.makedirs(work_dir, exist_ok=True)
+        test_dir = os.path.join(work_dir, str(uuid.uuid4())[:8])
+        os.makedirs(test_dir)
+        temp_path = os.path.join(test_dir, "subagent_test.txt")
 
         try:
             with open(temp_path, "w") as f:
@@ -784,8 +756,11 @@ class TestSubAgentE2E:
             assert result.state == SubAgentState.COMPLETED
             assert "Hello from SubAgent test!" in result.result
         finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+            shutil.rmtree(test_dir, ignore_errors=True)
+            # Reset file_ops sandbox state
+            file_ops._ALLOWED_WRITE_DIR = None
+            file_ops._read_files.clear()
+            file_ops._write_allowed_files.clear()
 
 
 if __name__ == "__main__":

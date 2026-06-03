@@ -311,6 +311,12 @@ class PermissionGate:
             self._log(permission, action_desc, "denied_dont_ask")
             return False
 
+        # Dry-run mode: block ALL operations (including READ) to show plan without executing
+        if self.dry_run:
+            self._log(permission, action_desc, "dry_run_skip")
+            print(f"  [DRY-RUN] Would: {action_desc}")
+            return False
+
         # ACCEPT_EDITS mode: auto-approve READ + file tool writes, ask for shell/destructive
         if self.mode == PermissionMode.ACCEPT_EDITS:
             if permission == Permission.READ:
@@ -336,12 +342,6 @@ class PermissionGate:
         if rule_result == "allow":
             self._log(permission, action_desc, "allowed_by_rule")
             return True
-
-        # Dry-run mode
-        if self.dry_run:
-            self._log(permission, action_desc, "dry_run_skip")
-            print(f"  [DRY-RUN] Would: {action_desc}")
-            return False
 
         # Auto-approve mode (Ch4: auto mode with safe tool allowlist)
         if self.auto_approve or self.mode == PermissionMode.AUTO:

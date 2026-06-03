@@ -5,6 +5,7 @@ All model-driven tests use real MiMo API calls — no mocking.
 
 import os
 import json
+import hashlib
 import pytest
 
 from mimo_harness.security_pipeline import (
@@ -391,10 +392,16 @@ class TestClassifyActionModel:
 
         client, model = _get_client()
         result1 = classify_action_model("run_command", {"command": "ls"}, client=client, model=model)
+        # Verify cache was populated
+        cache_key = "run_command:" + hashlib.md5(json.dumps({"command": "ls"}, sort_keys=True).encode()).hexdigest()[:12]
+        assert cache_key in security_pipeline._classifier_cache
+
+        # Second call should use cache (same object)
         result2 = classify_action_model("run_command", {"command": "ls"}, client=client, model=model)
         assert result1 is not None
         assert result2 is not None
-        assert result1.decision == result2.decision
+        # Cache should return the same result object
+        assert result1 is result2
 
     def test_permission_mode_in_prompt(self):
         """Permission mode should be passed through to the classifier."""
