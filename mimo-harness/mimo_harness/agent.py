@@ -30,6 +30,11 @@ from .tools import file_ops, shell, code_exec, web_tools, doc_tools, math_tools,
 from .tools.file_ops import FileOpsState, set_file_ops_state
 from .security_pipeline import filter_tool_output, SAFETY_SYSTEM_PROMPT_ADDITION
 from .hooks import HookRunner, HookEvent, HookResult
+from .display import (
+    print_step_header, print_tool_call_start, print_tool_call_result,
+    print_streaming_token, print_streaming_end, print_error,
+    print_thinking_indicator, StepInfo
+)
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +47,22 @@ class _AttrBag:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+
+
+def _parse_tool_result(result: str) -> tuple[bool, str | None, str | None]:
+    """Parse tool result for display purposes.
+
+    Returns:
+        (success, error_msg, preview) tuple
+    """
+    try:
+        result_data = json.loads(result)
+        success = "error" not in result_data
+        error_msg = result_data.get("error") if not success else None
+        preview = result[:200] if success else None
+        return success, error_msg, preview
+    except (json.JSONDecodeError, TypeError):
+        return True, None, result[:200] if result else None
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +588,7 @@ You help users with coding, file operations, web research, document creation, an
         full_content = ""
         tool_calls_data = {}
         finish_reason = None
+        is_first_token = True
 
         for chunk in response_stream:
             if not chunk.choices:
@@ -578,10 +600,14 @@ You help users with coding, file operations, web research, document creation, an
                 continue
 
             if delta.content:
+                if is_first_token:
+                    # First token received - print newline to separate from thinking indicator
+                    print()  # Move past the "Thinking..." line
+                    is_first_token = False
                 full_content += delta.content
                 # Track streaming tokens
                 stream_counter.add_text(delta.content)
-                print(delta.content, end="", flush=True)
+                print_streaming_token(delta.content)
 
             if delta.tool_calls:
                 for tc_chunk in delta.tool_calls:
@@ -601,7 +627,7 @@ You help users with coding, file operations, web research, document creation, an
                             tool_calls_data[idx]["arguments"] += tc_chunk.function.arguments
 
         if full_content or tool_calls_data:
-            print()  # newline after streaming
+            print_streaming_end()
 
         # Log streaming token stats
         self.logger.trace("stream_tokens", {
@@ -806,6 +832,16 @@ You help users with coding, file operations, web research, document creation, an
                 {"step": step + 1, "model": self.model},
             )
 
+            # Display step header and thinking indicator
+            step_info = StepInfo(
+                current=step + 1,
+                max_steps=self.max_steps,
+                model=self.model,
+                effort=self.effort,
+            )
+            print_step_header(step_info)
+            print_thinking_indicator()
+
             # API call with retry (Ch2: error recovery)
             try:
                 if self.stream:
@@ -870,7 +906,10 @@ You help users with coding, file operations, web research, document creation, an
                 final = message.content or "[No response]"
                 session.add_message("assistant", final)
                 if not self.stream:
-                    self.logger.info(f"\nAgent: {final}")
+                    # Display the response with formatting
+                    print()
+                    print(final)
+                    print()
                 # Ch8: Fire Stop hook
                 hook_runner = getattr(self, '_hook_runner', None)
                 if hook_runner:
@@ -909,8 +948,11 @@ You help users with coding, file operations, web research, document creation, an
                 stats.tool_call_count += len(message.tool_calls)
 
             # Group tool calls into concurrency-safe and sequential
+            # Also collect parsed args for display (avoid double parsing)
             safe_calls = []
             sequential_calls = []
+            all_calls_parsed = []  # (func_name, func_args) for display
+            total_tool_calls = len(message.tool_calls)
             for tc in message.tool_calls:
                 func_name = tc.function.name
                 try:
@@ -922,6 +964,14 @@ You help users with coding, file operations, web research, document creation, an
                     safe_calls.append((tc, func_name, func_args))
                 else:
                     sequential_calls.append((tc, func_name, func_args))
+                # Store for display (use clean args without _parse_error)
+                display_args = {k: v for k, v in func_args.items() if k != "_parse_error"}
+                all_calls_parsed.append((func_name, display_args))
+
+            # Display all tool calls before execution
+            print()
+            for i, (func_name, func_args) in enumerate(all_calls_parsed):
+                print_tool_call_start(func_name, func_args, i, total_tool_calls)
 
             # Execute concurrency-safe tools in parallel (preserving order)
             if safe_calls:
@@ -932,11 +982,17 @@ You help users with coding, file operations, web research, document creation, an
                         for tc, fn, fa in safe_calls
                     ]
                     # Collect results in submission order (not completion order)
-                    for (tc, _, _), future in zip(safe_calls, futures):
+                    for (tc, func_name, _), future in zip(safe_calls, futures):
+                        tool_start = time.time()
                         try:
                             result = future.result()
+                            duration = time.time() - tool_start
+                            success, error_msg, preview = _parse_tool_result(result)
+                            print_tool_call_result(func_name, success, duration, preview, error_msg)
                         except Exception as e:
+                            duration = time.time() - tool_start
                             result = json.dumps({"error": str(e)})
+                            print_tool_call_result(func_name, False, duration, error=str(e))
                         session.add_message("tool", result, tool_call_id=tc.id)
 
             # X2: Batch related edit/write operations together
@@ -945,12 +1001,18 @@ You help users with coding, file operations, web research, document creation, an
 
             # Execute other sequential tools first
             for tc, func_name, func_args in other_calls:
+                tool_start = time.time()
                 try:
                     result = self._handle_tool_call(
                         func_name, func_args, tc.id, session
                     )
+                    duration = time.time() - tool_start
+                    success, error_msg, preview = _parse_tool_result(result)
+                    print_tool_call_result(func_name, success, duration, preview, error_msg)
                 except Exception as e:
+                    duration = time.time() - tool_start
                     result = json.dumps({"error": str(e)})
+                    print_tool_call_result(func_name, False, duration, error=str(e))
                 session.add_message("tool", result, tool_call_id=tc.id)
 
             # Execute edit/write tools as a batch if checkpoint manager available
@@ -959,12 +1021,18 @@ You help users with coding, file operations, web research, document creation, an
                 if checkpoint_mgr and len(edit_calls) > 1:
                     checkpoint_mgr.begin_batch()
                 for tc, func_name, func_args in edit_calls:
+                    tool_start = time.time()
                     try:
                         result = self._handle_tool_call(
                             func_name, func_args, tc.id, session
                         )
+                        duration = time.time() - tool_start
+                        success, error_msg, preview = _parse_tool_result(result)
+                        print_tool_call_result(func_name, success, duration, preview, error_msg)
                     except Exception as e:
+                        duration = time.time() - tool_start
                         result = json.dumps({"error": str(e)})
+                        print_tool_call_result(func_name, False, duration, error=str(e))
                     session.add_message("tool", result, tool_call_id=tc.id)
                 if checkpoint_mgr and len(edit_calls) > 1:
                     checkpoint_mgr.end_batch()

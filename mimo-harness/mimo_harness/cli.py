@@ -11,6 +11,7 @@ Enhanced with:
 - !command prefix for shell execution
 - /context command for token breakdown
 - Effort levels (low, medium, high)
+- Structured CLI display (Claude Code style)
 """
 
 import argparse
@@ -25,57 +26,12 @@ from .config import MIMO_API_KEY, MIMO_MODEL
 from .permissions import PermissionRule
 from .context import Session, CheckpointManager, estimate_tokens, compact_context, cleanup_old_sessions, cleanup_old_spill_files, CONTEXT_WINDOW_TOKENS, LoadResult, _CORRUPT_THRESHOLD
 from .memory import MemoryStore
-
-
-def print_banner():
-    print("""
-+------------------------------------------+
-|          MiMo Harness v0.3.0             |
-|  AI Agent powered by Xiaomi MiMo model  |
-|  Claude Code architecture patterns       |
-+------------------------------------------+
-""")
-
-
-def _format_tokens(tokens: int) -> str:
-    """Format token count for display (e.g. 45231 → '45K')."""
-    if tokens >= 1000:
-        return f"{tokens / 1000:.1f}K"
-    return str(tokens)
-
-
-def print_help():
-    print("""
-Commands:
-  /help          Show this help
-  /quit, /exit   Exit
-  /clear         Clear conversation history
-  /save <path>   Save session to file
-  /load <path>   Load session from file
-  /tools         List available tools
-  /dry-run       Toggle dry-run mode
-  /auto          Toggle auto-approve mode
-  /plan          Toggle plan mode (read-only)
-  /abort         Stop current task (graceful interrupt)
-  /memory        List stored memories
-  /remember      Save current context as memory
-  /hooks         List registered hooks
-  /stats         Show session statistics
-  /tokens        Show current token usage
-  /compact       Manually compress conversation context
-  /context       Show per-message token breakdown
-  /init          Scan project and generate AGENTS.md
-  /rewind        Restore files from the last checkpoint
-  /fork          Fork session into a new session (copy history)
-  /subagents     List active SubAgents
-  /subagent <task>  Run a task as a SubAgent
-  /parallel <task1> | <task2> | ...  Run tasks in parallel
-  /pipeline <task1> | <task2> | ...  Run tasks in pipeline
-
-Or just type a task to interact with the agent.
-Prefix with ! to run a shell command directly (e.g. !ls -la).
-Press Ctrl+C during execution to stop the current task (doesn't exit).
-""")
+from .display import (
+    print_banner as display_banner, print_session_info, print_help as display_help,
+    print_error, print_warning, print_info, print_success,
+    print_token_usage, print_context_breakdown, print_session_stats,
+    print_tool_list, USE_COLOR, _format_tokens, _dim, _bold, _yellow, _green, _red, _cyan
+)
 
 
 def _estimate_message_tokens(msg: dict) -> int:
@@ -307,7 +263,7 @@ def _build_parser():
     parser.add_argument("--log-file", help="Log file path")
     parser.add_argument("--config", "-c", help="Configuration file path")
     parser.add_argument("--rules", "-r", help="Permission rules file path")
-    parser.add_argument("--stream", "-s", action="store_true", help="Stream LLM responses token-by-token")
+    parser.add_argument("--no-stream", action="store_true", help="Disable streaming output (streaming is now default)")
     parser.add_argument("--append-system-prompt", help="Additional text to append to the system prompt")
     parser.add_argument("--fallback-model", help="Fallback model to use if primary model fails with 429/503")
     parser.add_argument("--output-format", choices=["text", "json", "stream-json"], default="text", help="Output format (default: text)")
@@ -327,7 +283,7 @@ def main():
     args = parser.parse_args()
 
     if args.output_format == "text":
-        print_banner()
+        display_banner()
 
     # Load configuration
     config = {}
@@ -335,6 +291,13 @@ def main():
         config = _load_config(args.config)
     elif os.path.exists(".mimo/config.json"):
         config = _load_config(".mimo/config.json")
+
+    # Streaming is now default ON, use --no-stream to disable
+    # Priority: --no-stream flag > config file > default (True)
+    if args.no_stream:
+        stream_enabled = False
+    else:
+        stream_enabled = config.get("stream", True)
 
     harness = MiMoHarness(
         model=args.model or config.get("model"),
@@ -344,7 +307,7 @@ def main():
         verbose=args.verbose,
         log_file=args.log_file or config.get("log_file"),
         plan_mode=args.plan or config.get("plan_mode", False),
-        stream=args.stream or config.get("stream", False),
+        stream=stream_enabled,
         fallback_model=args.fallback_model or config.get("fallback_model"),
         bare=args.bare or config.get("bare", False),
         effort=args.effort or config.get("effort", "medium"),
@@ -396,13 +359,12 @@ def main():
         _output(result, args.output_format, session=last_session, steps=last_steps, duration=duration)
         return
 
-    # Interactive REPL mode
-    print(f"Model: {harness.model}")
-    if MIMO_API_KEY:
-        print(f"API Key: {'*' * 12}")
+    # Interactive REPL mode - use structured display
     mode_str = 'plan' if args.plan else 'dry-run' if args.dry_run else 'auto-approve' if args.auto_approve else 'interactive'
-    print(f"Mode: {mode_str}")
-    print("Type /help for commands, or just start chatting.\n")
+    if args.output_format == "text":
+        print_session_info(harness.model, mode_str, bool(MIMO_API_KEY))
+        print_info("Type /help for commands, or just start chatting.")
+        print()
 
     import secrets
 
@@ -480,26 +442,28 @@ def main():
     scheduler.start_background_checker(interval=30.0)
 
     while True:
-        # Show token count in prompt
+        # Show token count in prompt with structured format
         tokens = estimate_tokens(session.messages)
         token_str = _format_tokens(tokens)
         max_str = _format_tokens(CONTEXT_WINDOW_TOKENS)
         try:
-            user_input = input(f"You [{token_str}/{max_str}]: ").strip()
+            # Use colored prompt for better visibility
+            prompt = f"\n{_cyan('You')} {_dim(f'[{token_str}/{max_str}]')}: "
+            user_input = input(prompt).strip()
         except (EOFError, KeyboardInterrupt):
             try:
                 session.save_meta_to_jsonl()
             except OSError:
                 pass
             scheduler.stop()
-            print("\nBye!")
+            print_info("Bye!")
             break
 
         if not user_input:
             # Check for scheduled prompts even when user provides no input
             if _scheduled_prompts:
                 scheduled = _scheduled_prompts.pop(0)
-                print(f"[Executing scheduled prompt]")
+                print_info(f"Executing scheduled prompt...")
                 user_input = scheduled
             else:
                 continue
@@ -517,7 +481,7 @@ def main():
             if rules_path:
                 harness.perms.rules.clear()
                 harness.perms.load_rules_from_file(rules_path)
-            print("[Config reloaded]")
+            print_info("Config reloaded")
 
         # Handle commands
         if user_input.startswith("/"):
@@ -538,8 +502,9 @@ def main():
             perm = Permission.READ if _is_readonly(shell_cmd) else Permission.WRITE
             action_desc = f"run_command({shell_cmd[:100]})"
             if not harness.perms.check(perm, action_desc, params={"command": shell_cmd}):
-                print("[blocked by permission system]")
+                print_error("[blocked by permission system]")
                 continue
+            print(f"  {_dim('$')} {shell_cmd}")
             try:
                 scrubbed_env = _scrub_env()
                 result = subprocess.run(
@@ -551,24 +516,21 @@ def main():
                 if result.stderr:
                     print(result.stderr, end="")
                 if result.returncode != 0 and not result.stdout and not result.stderr:
-                    print(f"[exit code: {result.returncode}]")
+                    print_warning(f"[exit code: {result.returncode}]")
             except subprocess.TimeoutExpired:
-                print("[command timed out after 30s]")
+                print_error("[command timed out after 30s]")
             except Exception as e:
-                print(f"[error: {e}]")
+                print_error(f"[error: {e}]")
             continue
 
         # Run agent with graceful interrupt support
         try:
-            if harness.stream:
-                # When streaming, tokens are printed directly by the agent
-                harness.run(user_input, session)
-            else:
-                harness.run(user_input, session)
+            # Streaming is now the default - tokens are printed directly by the agent
+            harness.run(user_input, session)
         except KeyboardInterrupt:
             # Graceful abort: stop current task but don't exit REPL
             harness.graceful_abort.request()
-            print("\n[Interrupted — stopping current task...]")
+            print_warning("\nInterrupted — stopping current task...")
             # The agent loop will check the abort flag at the next step boundary
 
 
@@ -587,10 +549,10 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
         sched = get_scheduler()
         if sched:
             sched.stop()
-        print("Bye!")
+        print_info("Bye!")
         return "quit", session
     elif cmd[0] == "/help":
-        print_help()
+        display_help()
     elif cmd[0] == "/clear":
         session.messages.clear()
         # Also truncate the JSONL file so cleared state persists
@@ -601,49 +563,49 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                     pass
             except OSError:
                 pass
-        print("Session cleared.")
+        print_success("Session cleared.")
     elif cmd[0] == "/tools":
-        print("\nAvailable tools:")
+        tools_info = []
         for name in harness.registry.list_names():
             tool = harness.registry.get(name)
-            markers = []
-            if tool.is_read_only:
-                markers.append("RO")
-            if tool.is_concurrency_safe:
-                markers.append("CS")
-            if tool.is_destructive:
-                markers.append("DST")
-            marker_str = f" [{', '.join(markers)}]" if markers else ""
-            print(f"  - {name}: {tool.description[:50]}...{marker_str}")
-        print()
+            tools_info.append({
+                "name": name,
+                "description": tool.description,
+                "is_read_only": tool.is_read_only,
+                "is_concurrency_safe": tool.is_concurrency_safe,
+                "is_destructive": tool.is_destructive,
+            })
+        print_tool_list(tools_info)
     elif cmd[0] == "/dry-run":
         harness.perms.dry_run = not harness.perms.dry_run
-        print(f"Dry-run: {'ON' if harness.perms.dry_run else 'OFF'}")
+        status = "ON" if harness.perms.dry_run else "OFF"
+        print_info(f"Dry-run: {status}")
     elif cmd[0] == "/auto":
         harness.perms.auto_approve = not harness.perms.auto_approve
-        print(f"Auto-approve: {'ON' if harness.perms.auto_approve else 'OFF'}")
+        status = "ON" if harness.perms.auto_approve else "OFF"
+        print_info(f"Auto-approve: {status}")
     elif cmd[0] == "/plan":
         from .permissions import PermissionMode
         if harness.perms.mode.value == "plan":
             harness.perms.mode = PermissionMode.DEFAULT
-            print("Plan mode: OFF")
+            print_info("Plan mode: OFF")
         else:
             harness.perms.mode = PermissionMode.PLAN
-            print("Plan mode: ON (read-only)")
+            print_info("Plan mode: ON (read-only)")
     elif cmd[0] == "/abort":
         harness.graceful_abort.request()
-        print("Abort requested — current task will stop at next step boundary.")
+        print_warning("Abort requested — current task will stop at next step boundary.")
     elif cmd[0] == "/memory":
         memories = memory_store.list_memories()
         if memories:
-            print(f"\nStored memories ({len(memories)}):")
+            print(f"\n  {_bold(f'Stored memories ({len(memories)})')}")
             for m in memories:
-                print(f"  [{m.memory_type.value}] {m.name}: {m.description[:60]}")
+                print(f"  {_yellow('•')} [{m.memory_type.value}] {m.name}: {_dim(m.description[:60])}")
         else:
-            print("No memories stored.")
+            print_info("No memories stored.")
         print()
     elif cmd[0] == "/remember":
-        print("Enter memory content (empty line to finish):")
+        print_info("Enter memory content (empty line to finish):")
         lines = []
         while True:
             try:
@@ -661,63 +623,53 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 description=f"Memory from session {session.session_id[:8]}",
                 content=content,
             )
-            print("Memory saved.")
+            print_success("Memory saved.")
     elif cmd[0] == "/hooks":
         hook_runner = getattr(harness, '_hook_runner', None)
         if hook_runner:
             total = sum(len(v) for v in hook_runner._hooks.values())
-            print(f"\nRegistered hooks: {total}")
+            print(f"\n  {_bold(f'Registered hooks: {total}')}")
             for event, hooks in hook_runner._hooks.items():
                 for h in hooks:
-                    print(f"  [{event.value}] {h.matcher} -> {h.command[:50]}")
+                    print(f"  {_yellow('•')} [{event.value}] {h.matcher} → {_dim(h.command[:50])}")
         else:
-            print("No hooks registered.")
+            print_info("No hooks registered.")
         print()
     elif cmd[0] == "/stats":
         tokens = estimate_tokens(session.messages)
-        print(f"\nSession Statistics:")
-        print(f"  Messages: {len(session.messages)}")
-        print(f"  Tokens: {_format_tokens(tokens)} / {_format_tokens(CONTEXT_WINDOW_TOKENS)}")
-        print(f"  Compactions: {session.compaction_count}")
-        print(f"  Approval log: {len(harness.perms.approval_log)} entries")
+        stats_dict = {
+            "Messages": len(session.messages),
+            "Tokens": f"{_format_tokens(tokens)} / {_format_tokens(CONTEXT_WINDOW_TOKENS)}",
+            "Compactions": session.compaction_count,
+            "Approval log": f"{len(harness.perms.approval_log)} entries",
+        }
         if harness.circuit_breaker.consecutive_failures > 0:
-            print(f"  Circuit breaker failures: {harness.circuit_breaker.consecutive_failures}")
+            stats_dict["Circuit breaker failures"] = harness.circuit_breaker.consecutive_failures
+        print_session_stats(stats_dict)
         # Show token stats
-        stats = harness.token_budget.get_stats()
-        stats.total_tokens = tokens
-        stats.message_count = len(session.messages)
-        stats.compression_count = session.compaction_count
-        print(f"\n{stats.format_report()}")
+        token_stats = harness.token_budget.get_stats()
+        token_stats.total_tokens = tokens
+        token_stats.message_count = len(session.messages)
+        token_stats.compression_count = session.compaction_count
+        print(token_stats.format_report())
         print()
     elif cmd[0] == "/tokens":
         tokens = estimate_tokens(session.messages)
-        print(f"\nToken Usage:")
-        print(f"  {_format_tokens(tokens)} / {_format_tokens(CONTEXT_WINDOW_TOKENS)}")
-        print(f"  Messages: {len(session.messages)}")
-        print(f"  Compactions: {session.compaction_count}")
-        # Progress bar
-        pct = tokens / CONTEXT_WINDOW_TOKENS * 100
-        bar_len = 40
-        filled = int(bar_len * tokens / CONTEXT_WINDOW_TOKENS)
-        bar = '█' * min(filled, bar_len) + '░' * max(0, bar_len - filled)
-        status = "OK"
-        if pct >= 95:
-            status = "BLOCKED"
-        elif pct >= 85:
-            status = "WARNING"
-        print(f"  [{bar}] {pct:.1f}% {status}")
+        print_token_usage(tokens, CONTEXT_WINDOW_TOKENS)
+        print(f"  {_dim('Messages:')} {len(session.messages)}")
+        print(f"  {_dim('Compactions:')} {session.compaction_count}")
         # Show token stats if available
         stats = harness.token_budget.get_stats()
         if stats.message_count > 0:
-            print(f"\nToken Statistics:")
+            print(f"\n  {_bold('Token Statistics')}")
             print(stats.format_report())
         print()
     elif cmd[0] == "/compact":
         tokens_before = estimate_tokens(session.messages)
         if tokens_before < 1000:
-            print("Not enough messages to compress.")
+            print_info("Not enough messages to compress.")
         else:
-            print(f"Compressing... ({_format_tokens(tokens_before)} tokens)")
+            print_info(f"Compressing... ({_format_tokens(tokens_before)} tokens)")
             from .config import MIMO_BASE_URL, require_api_key
             try:
                 api_key = require_api_key()
@@ -732,7 +684,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 session.messages = compacted
                 session.compaction_count += 1
                 tokens_after = estimate_tokens(session.messages)
-                print(f"Done: {_format_tokens(tokens_before)} -> {_format_tokens(tokens_after)} tokens")
+                print_success(f"Done: {_format_tokens(tokens_before)} → {_format_tokens(tokens_after)} tokens")
             except Exception as e:
                 # Fallback: no LLM, just truncation
                 compacted, _, _, _, _ = compact_context(
@@ -742,72 +694,48 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 session.messages = compacted
                 session.compaction_count += 1
                 tokens_after = estimate_tokens(session.messages)
-                print(f"Done (truncation): {_format_tokens(tokens_before)} -> {_format_tokens(tokens_after)} tokens")
+                print_success(f"Done (truncation): {_format_tokens(tokens_before)} → {_format_tokens(tokens_after)} tokens")
         print()
     elif cmd[0] == "/context":
         # C9: Per-message token breakdown
         if not session.messages:
-            print("No messages in session.")
+            print_info("No messages in session.")
         else:
-            print(f"\nContext breakdown ({len(session.messages)} messages):")
-            print(f"{'#':<4} {'Role':<12} {'Tokens':>8}  Content preview")
-            print("-" * 70)
-            total_tokens = 0
-            msg_tokens = []
-            for i, msg in enumerate(session.messages):
-                role = msg.get("role", "?")
-                tokens = _estimate_message_tokens(msg)
-                total_tokens += tokens
-                content = msg.get("content", "")
-                if not isinstance(content, str):
-                    content = str(content) if content else ""
-                preview = content[:50].replace("\n", " ")
-                msg_tokens.append((i, role, tokens, preview))
-            # Sort by token count descending to highlight heavy messages
-            sorted_by_tokens = sorted(msg_tokens, key=lambda x: x[2], reverse=True)
-            for i, role, tokens, preview in msg_tokens:
-                marker = " <<" if tokens == sorted_by_tokens[0][2] and tokens > 100 else ""
-                print(f"{i:<4} {role:<12} {_format_tokens(tokens):>8}  {preview}{marker}")
-            print("-" * 70)
-            print(f"{'Total':<16} {_format_tokens(total_tokens):>8}")
-            # Highlight top consumers
-            if sorted_by_tokens and sorted_by_tokens[0][2] > 100:
-                top = sorted_by_tokens[0]
-                print(f"\nLargest: msg #{top[0]} ({top[1]}) — {_format_tokens(top[2])} tokens")
+            print_context_breakdown(session.messages)
             print()
     elif cmd[0] == "/init":
         from .project_scanner import scan_project, generate_agents_md
         agents_md_path = os.path.join(os.getcwd(), "AGENTS.md")
         if os.path.exists(agents_md_path):
             confirm = input(
-                "AGENTS.md already exists. Overwrite? [y/N] "
+                f"  {_yellow('AGENTS.md already exists. Overwrite? [y/N] ')}"
             ).strip().lower()
             if confirm not in ("y", "yes"):
-                print("Skipped.")
+                print_info("Skipped.")
                 return "continue", session
-        print("Scanning project...")
+        print_info("Scanning project...")
         result = scan_project(".")
         content = generate_agents_md(result)
         with open(agents_md_path, "w", encoding="utf-8") as f:
             f.write(content)
-        print(f"AGENTS.md generated at {agents_md_path}")
-        print(f"  Language: {result.get('language', 'unknown')}")
+        print_success(f"AGENTS.md generated at {agents_md_path}")
+        print(f"  {_dim('Language:')} {result.get('language', 'unknown')}")
         if result.get("frameworks"):
-            print(f"  Frameworks: {', '.join(result['frameworks'])}")
+            print(f"  {_dim('Frameworks:')} {', '.join(result['frameworks'])}")
         if result.get("test_runner"):
-            print(f"  Test runner: {result['test_runner']}")
+            print(f"  {_dim('Test runner:')} {result['test_runner']}")
         print()
     elif cmd[0] == "/rewind":
         if checkpoint_manager:
             restored = checkpoint_manager.restore_last()
             if restored:
-                print(f"Restored {len(restored)} file(s):")
+                print_success(f"Restored {len(restored)} file(s):")
                 for p in restored:
-                    print(f"  {p}")
+                    print(f"  {_dim('•')} {p}")
             else:
-                print("No checkpoint to restore.")
+                print_info("No checkpoint to restore.")
         else:
-            print("No checkpoint manager available.")
+            print_warning("No checkpoint manager available.")
         print()
     elif cmd[0] == "/fork":
         import secrets
@@ -823,106 +751,107 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                     for msg in session.messages:
                         f.write(json.dumps(msg, ensure_ascii=False) + "\n")
             except OSError as e:
-                print(f"Warning: could not write fork session file: {e}")
+                print_warning(f"Could not write fork session file: {e}")
         # Update checkpoint_manager to new session
         if checkpoint_manager:
             checkpoint_manager.checkpoint_dir = os.path.join(".mimo", "checkpoints", new_id)
             checkpoint_manager._seq = 0
             checkpoint_manager._batch_dir = None
-        print(f"Session forked: {old_id} → {new_id}")
+        print_success(f"Session forked: {old_id} → {new_id}")
     elif cmd[0] == "/subagents":
         # List active SubAgents
         summary = harness.get_subagent_summary()
-        print(f"\nSubAgent Summary:")
-        print(f"  Total: {summary.get('total_subagents', 0)}")
-        print(f"  Running: {summary.get('running', 0)}")
-        print(f"  Completed: {summary.get('completed', 0)}")
-        print(f"  Failed: {summary.get('failed', 0)}")
+        print(f"\n  {_bold('SubAgent Summary')}")
+        print(f"  {_dim('─' * 30)}")
+        print(f"  {_dim('Total:')} {summary.get('total_subagents', 0)}")
+        print(f"  {_dim('Running:')} {summary.get('running', 0)}")
+        print(f"  {_dim('Completed:')} {summary.get('completed', 0)}")
+        print(f"  {_dim('Failed:')} {summary.get('failed', 0)}")
         if summary.get('total_tokens_used', 0) > 0:
-            print(f"  Tokens used: {_format_tokens(summary['total_tokens_used'])}")
+            print(f"  {_dim('Tokens used:')} {_format_tokens(summary['total_tokens_used'])}")
         if summary.get('total_time_elapsed', 0) > 0:
-            print(f"  Time elapsed: {summary['total_time_elapsed']:.1f}s")
+            print(f"  {_dim('Time elapsed:')} {summary['total_time_elapsed']:.1f}s")
         print()
     elif cmd[0] == "/subagent" and len(cmd) > 1:
         # Run a single task as a SubAgent
         task = " ".join(cmd[1:])
-        print(f"\nRunning SubAgent: {task[:60]}...")
+        print_info(f"Running SubAgent: {task[:60]}...")
         try:
             from .subagent import SubAgentConfig
             config = SubAgentConfig(task=task, effort=harness.effort)
             result = harness.subagent_manager.run_single(config)
-            print(f"\nSubAgent Result:")
-            print(f"  Status: {result.state.value}")
-            print(f"  Steps: {result.steps_taken}")
-            print(f"  Duration: {result.duration_seconds:.1f}s")
+            print(f"\n  {_bold('SubAgent Result')}")
+            print(f"  {_dim('Status:')} {result.state.value}")
+            print(f"  {_dim('Steps:')} {result.steps_taken}")
+            print(f"  {_dim('Duration:')} {result.duration_seconds:.1f}s")
             if result.result:
                 print(f"\n{result.result}")
             elif result.error:
-                print(f"  Error: {result.error}")
+                print_error(f"Error: {result.error}")
         except Exception as e:
-            print(f"Error: {e}")
+            print_error(str(e))
         print()
     elif cmd[0] == "/parallel" and len(cmd) > 1:
         # Run tasks in parallel
         tasks_str = " ".join(cmd[1:])
         tasks = [t.strip() for t in tasks_str.split("|") if t.strip()]
         if len(tasks) < 2:
-            print("Usage: /parallel <task1> | <task2> | ...")
-            print("Separate tasks with | (pipe)")
+            print_warning("Usage: /parallel <task1> | <task2> | ...")
+            print_info("Separate tasks with | (pipe)")
         else:
-            print(f"\nRunning {len(tasks)} tasks in parallel...")
+            print_info(f"Running {len(tasks)} tasks in parallel...")
             for i, task in enumerate(tasks, 1):
-                print(f"  [{i}] {task[:50]}...")
+                print(f"  {_dim(f'[{i}]')} {task[:50]}...")
             try:
                 results = harness.run_parallel_subagents(tasks, effort=harness.effort)
-                print(f"\nResults:")
+                print(f"\n  {_bold('Results')}")
+                print(f"  {_dim('─' * 40)}")
                 for i, result in enumerate(results, 1):
-                    status = "✓" if result.success else "✗"
+                    status = _green("✓") if result.success else _red("✗")
                     print(f"  [{i}] {status} {result.state.value} ({result.duration_seconds:.1f}s)")
                     if result.result:
-                        # Show first 100 chars of result
                         preview = result.result[:100].replace("\n", " ")
-                        print(f"      {preview}...")
+                        print(f"      {_dim(preview)}...")
                 # Show summary
                 summary = harness.subagent_manager.aggregate_results(results)
-                print(f"\nSummary: {summary['successful']}/{summary['total']} succeeded")
+                print(f"\n  {_bold('Summary:')} {summary['successful']}/{summary['total']} succeeded")
             except Exception as e:
-                print(f"Error: {e}")
+                print_error(str(e))
         print()
     elif cmd[0] == "/pipeline" and len(cmd) > 1:
         # Run tasks in pipeline
         tasks_str = " ".join(cmd[1:])
         tasks = [t.strip() for t in tasks_str.split("|") if t.strip()]
         if len(tasks) < 2:
-            print("Usage: /pipeline <task1> | <task2> | ...")
-            print("Separate tasks with | (pipe)")
+            print_warning("Usage: /pipeline <task1> | <task2> | ...")
+            print_info("Separate tasks with | (pipe)")
         else:
-            print(f"\nRunning {len(tasks)} tasks in pipeline...")
+            print_info(f"Running {len(tasks)} tasks in pipeline...")
             for i, task in enumerate(tasks, 1):
-                print(f"  Stage {i}: {task[:50]}...")
+                print(f"  {_dim(f'Stage {i}:')} {task[:50]}...")
             try:
                 stages = [{"task": task} for task in tasks]
                 results = harness.run_pipeline_subagents(stages)
-                print(f"\nResults:")
+                print(f"\n  {_bold('Results')}")
+                print(f"  {_dim('─' * 40)}")
                 for i, result in enumerate(results, 1):
-                    status = "✓" if result.success else "✗"
+                    status = _green("✓") if result.success else _red("✗")
                     print(f"  Stage {i}: {status} {result.state.value} ({result.duration_seconds:.1f}s)")
                     if result.result:
-                        # Show first 100 chars of result
                         preview = result.result[:100].replace("\n", " ")
-                        print(f"           {preview}...")
+                        print(f"           {_dim(preview)}...")
                 # Show summary
                 summary = harness.subagent_manager.aggregate_results(results)
-                print(f"\nSummary: {summary['successful']}/{summary['total']} stages succeeded")
+                print(f"\n  {_bold('Summary:')} {summary['successful']}/{summary['total']} stages succeeded")
             except Exception as e:
-                print(f"Error: {e}")
+                print_error(str(e))
         print()
     elif cmd[0] == "/save" and len(cmd) > 1:
         try:
             session.save(cmd[1])
-            print(f"Session saved to {cmd[1]}")
+            print_success(f"Session saved to {cmd[1]}")
         except Exception as e:
-            print(f"Error: {e}")
+            print_error(str(e))
     elif cmd[0] == "/load" and len(cmd) > 1:
         try:
             # Save current session metadata before replacing
@@ -937,11 +866,11 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 checkpoint_manager.checkpoint_dir = os.path.join(".mimo", "checkpoints", session.session_id)
                 checkpoint_manager._seq = 0
                 checkpoint_manager._batch_dir = None
-            print(f"Session loaded from {cmd[1]}")
+            print_success(f"Session loaded from {cmd[1]}")
         except Exception as e:
-            print(f"Error: {e}")
+            print_error(str(e))
     else:
-        print(f"Unknown command: {cmd[0]}. Type /help for commands.")
+        print_warning(f"Unknown command: {cmd[0]}. Type /help for commands.")
     return "continue", session
 
 

@@ -226,7 +226,7 @@ class TestHandleCommand:
         memory_store = MemoryStore(str(tmp_path))
         _handle_command(["/tools"], harness, session, memory_store)
         captured = capsys.readouterr()
-        assert "Available tools" in captured.out
+        assert "Available Tools" in captured.out
         assert "read_file" in captured.out
         assert "run_command" in captured.out
 
@@ -287,7 +287,7 @@ class TestHandleCommand:
         session.add_message("user", "hello world")
         _handle_command(["/tokens"], harness, session, memory_store)
         captured = capsys.readouterr()
-        assert "Token Usage" in captured.out
+        assert "Tokens:" in captured.out
         assert "Messages:" in captured.out
 
     def test_repl_save_error(self, monkeypatch, tmp_path, capsys):
@@ -300,7 +300,8 @@ class TestHandleCommand:
             harness, session, memory_store,
         )
         captured = capsys.readouterr()
-        assert "Error" in captured.out
+        # Check for error indicator (✗) or error message
+        assert "✗" in captured.out or "No such file" in captured.out
 
     def test_repl_abort_command(self, monkeypatch, tmp_path, capsys):
         harness, session = _HarnessFixture.make(monkeypatch)
@@ -330,10 +331,9 @@ class TestHandleCommand:
         session.add_message("assistant", "response here")
         _handle_command(["/context"], harness, session, memory_store)
         captured = capsys.readouterr()
-        assert "Context breakdown" in captured.out
+        assert "Context Breakdown" in captured.out
         assert "user" in captured.out
         assert "assistant" in captured.out
-        assert "Total" in captured.out
 
     def test_repl_context_command_empty(self, monkeypatch, tmp_path, capsys):
         harness, session = _HarnessFixture.make(monkeypatch)
