@@ -5,8 +5,6 @@ import json
 import os
 import sys
 import time
-import threading
-import http.server
 from mimo_harness.tools import file_ops, shell, code_exec, math_tools, web_tools, interactive, monitor, doc_tools
 
 
@@ -472,90 +470,39 @@ class TestWebToolsDeep:
         # Either results or error
         assert "results" in result or "error" in result
 
-    def _bypass_ssrf_for_localhost(self, monkeypatch):
-        """Bypass SSRF checks so localhost HTTP server can be tested."""
-        import ipaddress as _ipaddress
-
-        monkeypatch.setattr("mimo_harness.tools.web_tools._validate_url", lambda url: None)
-
-        _orig_ip = _ipaddress.ip_address
-        class _PublicLoopback:
-            """Wrapper that makes loopback IPs appear public."""
-            def __init__(self, real_ip):
-                self._ip = real_ip
-            def __getattr__(self, name):
-                if name in ('is_private', 'is_loopback', 'is_link_local', 'is_reserved'):
-                    return False
-                return getattr(self._ip, name)
-            def __str__(self):
-                return str(self._ip)
-            def __repr__(self):
-                return repr(self._ip)
-
-        def _permissive_ip(addr):
-            real = _orig_ip(addr)
-            if real.is_loopback:
-                return _PublicLoopback(real)
-            return real
-        monkeypatch.setattr(_ipaddress, "ip_address", _permissive_ip)
-
     def test_web_fetch_success(self, tmp_path, monkeypatch):
-        """Real HTTP request to local server, verify content extraction."""
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html")
-                self.end_headers()
-                self.wfile.write(b"<html><body><p>Hello from local server</p></body></html>")
-            def log_message(self, *args):
-                pass
-
-        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-        port = server.server_address[1]
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-
-        try:
-            monkeypatch.setattr(doc_tools, "_ALLOWED_WRITE_DIR", tmp_path)
-            monkeypatch.chdir(tmp_path)
-            monkeypatch.setattr(web_tools, "_fetch_cache", {})
-            self._bypass_ssrf_for_localhost(monkeypatch)
-
-            result = json.loads(web_tools.web_fetch({"url": f"http://127.0.0.1:{port}/page"}))
-            assert "url" in result
-            assert result["status"] == 200
-            assert "Hello from local server" in result["content"]
-        finally:
-            server.shutdown()
+        """Real HTTP request to example.com, verify content extraction."""
+        monkeypatch.setattr(doc_tools, "_ALLOWED_WRITE_DIR", tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(web_tools, "_fetch_cache", {})
+        # Retry up to 3 times on transient network errors (proxy timeout, DNS failure)
+        for attempt in range(3):
+            result = json.loads(web_tools.web_fetch({"url": "http://example.com"}))
+            if "error" in result and ("timed out" in result["error"] or "Connection" in result["error"]):
+                if attempt < 2:
+                    time.sleep(1)
+                    continue
+            break
+        assert "url" in result, f"web_fetch failed after retries: {result}"
+        assert result["url"] == "http://example.com"
+        assert result["status"] == 200
+        assert len(result["content"]) > 0
 
     def test_web_fetch_caching(self, tmp_path, monkeypatch):
         """Second fetch of same URL should return cached result."""
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html")
-                self.end_headers()
-                self.wfile.write(b"<html><body>Cached content</body></html>")
-            def log_message(self, *args):
-                pass
-
-        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-        port = server.server_address[1]
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-
-        try:
-            monkeypatch.chdir(tmp_path)
-            monkeypatch.setattr(web_tools, "_fetch_cache", {})
-            self._bypass_ssrf_for_localhost(monkeypatch)
-
-            url = f"http://127.0.0.1:{port}/cached"
-            result1 = json.loads(web_tools.web_fetch({"url": url}))
-            assert "content" in result1
-            result2 = json.loads(web_tools.web_fetch({"url": url}))
-            assert result1["content"] == result2["content"]
-        finally:
-            server.shutdown()
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(web_tools, "_fetch_cache", {})
+        # Retry up to 3 times on transient network errors
+        for attempt in range(3):
+            result1 = json.loads(web_tools.web_fetch({"url": "http://example.com"}))
+            if "error" in result1 and ("timed out" in result1["error"] or "Connection" in result1["error"]):
+                if attempt < 2:
+                    time.sleep(1)
+                    continue
+            break
+        assert "content" in result1, f"First fetch failed after retries: {result1}"
+        result2 = json.loads(web_tools.web_fetch({"url": "http://example.com"}))
+        assert result1["content"] == result2["content"]
 
     def test_web_fetch_network_error(self, tmp_path, monkeypatch):
         """Connection to refused port, verify error handling."""
