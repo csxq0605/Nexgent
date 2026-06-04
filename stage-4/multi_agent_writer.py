@@ -122,24 +122,36 @@ AGENTS = {
 }
 
 
-def call_agent(role: str, user_prompt: str) -> dict:
+def call_agent(role: str, user_prompt: str, max_retries: int = 3) -> dict:
     agent = AGENTS[role]
     print(f"  [{agent['role']}] Working...")
     client = get_client()
 
-    response = client.chat.completions.create(
-        model=MIMO_MODEL,
-        messages=[
-            {"role": "system", "content": agent["system"]},
-            {"role": "user", "content": user_prompt}
-        ],
-        max_completion_tokens=2048,
-        temperature=0.8,
-        top_p=0.9
-    )
+    last_error = None
+    for attempt in range(max_retries):
+        response = client.chat.completions.create(
+            model=MIMO_MODEL,
+            messages=[
+                {"role": "system", "content": agent["system"]},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_completion_tokens=2048,
+            temperature=0.7,
+            top_p=0.9
+        )
 
-    text = response.choices[0].message.content or ""
-    return extract_json(text)
+        text = response.choices[0].message.content
+        if not text or not text.strip():
+            last_error = {"raw_text": "", "parse_error": "Empty response from LLM"}
+            continue
+
+        result = extract_json(text)
+        # If parse succeeded or raw_text is substantial, return it
+        if "parse_error" not in result or len(result.get("raw_text", "")) > 50:
+            return result
+        last_error = result
+
+    return last_error or {"raw_text": "", "parse_error": "All retries failed"}
 
 
 @dataclass
