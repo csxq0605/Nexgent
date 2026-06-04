@@ -417,3 +417,51 @@ class TestHandleToolCallIntegration:
         parsed = json.loads(result)
         assert "error" in parsed
         assert "malformed" in parsed["error"].lower() or "parse" in parsed["error"].lower()
+
+
+@requires_api
+class TestNonBareModeMemory:
+    """Test that non-bare mode loads memory as a user message."""
+
+    def test_non_bare_injects_memory_message(self, monkeypatch, tmp_path):
+        """Non-bare mode should add a '## Project Memory' user message to session."""
+        monkeypatch.chdir(tmp_path)
+        # Create a .mimo/memory/MEMORY.md file with test content
+        memory_dir = tmp_path / ".mimo" / "memory"
+        memory_dir.mkdir(parents=True)
+        (memory_dir / "MEMORY.md").write_text("# Test Memory\nThis is a test memory entry.\n")
+        file_ops.set_file_ops_state(file_ops.FileOpsState())
+        file_ops._ALLOWED_WRITE_DIR = tmp_path
+
+        harness = MiMoHarness(max_steps=1, auto_approve=True, bare=False)
+        session = Session(session_id="memory-test")
+        harness.run("Say hello.", session)
+
+        # Non-bare mode should have injected memory as a user message
+        memory_msgs = [
+            m for m in session.messages
+            if m.get("role") == "user" and "Project Memory" in m.get("content", "")
+        ]
+        assert len(memory_msgs) >= 1, (
+            f"Expected 'Project Memory' user message in non-bare mode. "
+            f"Messages: {[(m['role'], m['content'][:80]) for m in session.messages]}"
+        )
+
+    def test_bare_mode_no_memory_message(self, monkeypatch, tmp_path):
+        """Bare mode should NOT inject memory messages."""
+        monkeypatch.chdir(tmp_path)
+        memory_dir = tmp_path / ".mimo" / "memory"
+        memory_dir.mkdir(parents=True)
+        (memory_dir / "MEMORY.md").write_text("# Test Memory\nShould not appear.\n")
+        file_ops.set_file_ops_state(file_ops.FileOpsState())
+        file_ops._ALLOWED_WRITE_DIR = tmp_path
+
+        harness = MiMoHarness(max_steps=1, auto_approve=True, bare=True)
+        session = Session(session_id="bare-test")
+        harness.run("Say hello.", session)
+
+        memory_msgs = [
+            m for m in session.messages
+            if m.get("role") == "user" and "Project Memory" in m.get("content", "")
+        ]
+        assert len(memory_msgs) == 0, "Bare mode should not inject memory messages"

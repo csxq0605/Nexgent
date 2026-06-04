@@ -1,5 +1,8 @@
 """Tests for the hook system (Ch8 patterns)."""
 
+import json
+import threading
+import http.server
 import pytest
 from mimo_harness.hooks import (
     HookEvent, HookDecision, HookConfig, HookRunner, HookResult, HookType,
@@ -238,3 +241,112 @@ class TestHookConfigMatcher:
         assert config.matches("Bash") is True
         assert config.matches("bash") is False
         assert config.matches("BASH") is False
+
+
+class TestHttpHookSuccess:
+    """Test HTTP hook with a real local HTTP server (success path).
+
+    Uses _run_http_hook directly with SSRF check bypassed for localhost,
+    since the SSRF protection is tested separately in test_stress_boundary.py.
+    """
+
+    def _start_server(self, handler_class):
+        """Start a local HTTP server on a random port. Returns (server, port)."""
+        server = http.server.HTTPServer(("127.0.0.1", 0), handler_class)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, port
+
+    def test_http_hook_approve(self, monkeypatch):
+        """HTTP hook returning approve JSON should not block."""
+        class ApproveHandler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"decision": "approve"}).encode())
+            def log_message(self, *args):
+                pass  # suppress logs
+
+        server, port = self._start_server(ApproveHandler)
+        try:
+            # Bypass SSRF check for localhost testing (SSRF tested separately)
+            monkeypatch.setattr("mimo_harness.tools.web_tools._validate_url", lambda url: None)
+            runner = HookRunner()
+            config = HookConfig(
+                event=HookEvent.PRE_TOOL_USE,
+                matcher="*",
+                hook_type=HookType.HTTP,
+                url=f"http://127.0.0.1:{port}/hook",
+                timeout=5.0,
+            )
+            result = runner._run_http_hook(config, "test_tool")
+            assert not result.is_blocking
+            assert result.decision == HookDecision.APPROVE
+        finally:
+            server.shutdown()
+
+    def test_http_hook_block(self, monkeypatch):
+        """HTTP hook returning block JSON should block with reason."""
+        class BlockHandler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "decision": "block",
+                    "reason": "forbidden tool",
+                }).encode())
+            def log_message(self, *args):
+                pass
+
+        server, port = self._start_server(BlockHandler)
+        try:
+            monkeypatch.setattr("mimo_harness.tools.web_tools._validate_url", lambda url: None)
+            runner = HookRunner()
+            config = HookConfig(
+                event=HookEvent.PRE_TOOL_USE,
+                matcher="*",
+                hook_type=HookType.HTTP,
+                url=f"http://127.0.0.1:{port}/hook",
+                timeout=5.0,
+            )
+            result = runner._run_http_hook(config, "test_tool")
+            assert result.is_blocking
+            assert result.decision == HookDecision.BLOCK
+            assert "forbidden" in result.reason
+        finally:
+            server.shutdown()
+
+    def test_http_hook_with_additional_context(self, monkeypatch):
+        """HTTP hook can return additionalContext and updatedInput."""
+        class ContextHandler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "decision": "approve",
+                    "additionalContext": "Extra info from hook",
+                    "updatedInput": {"command": "safe-command"},
+                }).encode())
+            def log_message(self, *args):
+                pass
+
+        server, port = self._start_server(ContextHandler)
+        try:
+            monkeypatch.setattr("mimo_harness.tools.web_tools._validate_url", lambda url: None)
+            runner = HookRunner()
+            config = HookConfig(
+                event=HookEvent.PRE_TOOL_USE,
+                matcher="*",
+                hook_type=HookType.HTTP,
+                url=f"http://127.0.0.1:{port}/hook",
+                timeout=5.0,
+            )
+            result = runner._run_http_hook(config, "test_tool")
+            assert not result.is_blocking
+            assert "Extra info" in (result.additional_context or "")
+        finally:
+            server.shutdown()

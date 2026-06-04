@@ -133,3 +133,68 @@ class TestTaskToolsGetTools:
         tools = get_tools()
         task_list_tool = next(t for t in tools if t.name == "task_list")
         assert task_list_tool.is_concurrency_safe is True
+
+
+class TestTaskUpdateOwner:
+    """Test task_update owner field handling."""
+
+    def _reset_store(self):
+        _task_store._tasks.clear()
+        _task_store._next_id = 1
+
+    def setup_method(self):
+        self._reset_store()
+
+    def teardown_method(self):
+        self._reset_store()
+
+    def test_update_owner(self):
+        """task_update sets owner field on a task."""
+        created = json.loads(task_create({"subject": "Owned task"}))
+        result = json.loads(task_update({
+            "taskId": created["id"],
+            "owner": "agent-1",
+        }))
+        assert result["id"] == created["id"]
+        # Verify via task_get — owner is not in task_get output, so use task_list
+        listed = json.loads(task_list({}))
+        task = next(t for t in listed["tasks"] if t["id"] == created["id"])
+        assert task["owner"] == "agent-1"
+
+    def test_update_owner_empty_string(self):
+        """task_update can clear owner by setting empty string."""
+        created = json.loads(task_create({"subject": "Task"}))
+        task_update({"taskId": created["id"], "owner": "agent-1"})
+        task_update({"taskId": created["id"], "owner": ""})
+        listed = json.loads(task_list({}))
+        task = next(t for t in listed["tasks"] if t["id"] == created["id"])
+        assert task["owner"] == ""
+
+    def test_update_owner_and_status_simultaneously(self):
+        """task_update can set owner and status in one call."""
+        created = json.loads(task_create({"subject": "Multi update"}))
+        result = json.loads(task_update({
+            "taskId": created["id"],
+            "owner": "agent-2",
+            "status": "in_progress",
+        }))
+        assert result["status"] == "in_progress"
+        listed = json.loads(task_list({}))
+        task = next(t for t in listed["tasks"] if t["id"] == created["id"])
+        assert task["owner"] == "agent-2"
+
+    def test_task_get_returns_blocks_and_blockedby(self):
+        """task_get includes blocks and blockedBy fields (even if empty)."""
+        created = json.loads(task_create({"subject": "Deps task"}))
+        result = json.loads(task_get({"taskId": created["id"]}))
+        assert "blocks" in result
+        assert "blockedBy" in result
+        assert result["blocks"] == []
+        assert result["blockedBy"] == []
+
+    def test_task_list_returns_blockedby(self):
+        """task_list includes blockedBy field for each task."""
+        created = json.loads(task_create({"subject": "Listed task"}))
+        result = json.loads(task_list({}))
+        task = next(t for t in result["tasks"] if t["id"] == created["id"])
+        assert "blockedBy" in task

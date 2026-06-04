@@ -2,6 +2,7 @@
 
 import pytest
 import json
+import os
 from mimo_harness.tools.registry import ToolDef, ToolRegistry
 from mimo_harness.permissions import Permission, PermissionGate
 
@@ -160,3 +161,70 @@ class TestAggregateToolRegistration:
             assert t.name, f"Tool missing name"
             assert t.description, f"Tool {t.name} missing description"
             assert "type" in t.parameters, f"Tool {t.name} missing parameters type"
+
+
+class TestRegistrySpillFile:
+    """Test that large results are spilled to disk files."""
+
+    def test_spill_creates_file(self, tmp_path):
+        """Large result should be saved to a file on disk."""
+        reg = ToolRegistry()
+        reg.SPILL_DIR = str(tmp_path)
+        reg.SPILL_THRESHOLD_CHARS = 50
+        reg.MAX_RESULT_CHARS = 200
+
+        big_content = "A" * 200
+        reg.register(ToolDef(
+            name="big", description="b", parameters={},
+            handler=lambda p: big_content,
+            permission=Permission.READ,
+        ))
+        perms = PermissionGate(auto_approve=True)
+        result = reg.execute("big", {}, perms)
+
+        # Result should reference a saved file
+        assert "saved to" in result
+        # The spill file should actually exist
+        txt_files = [f for f in os.listdir(str(tmp_path)) if f.endswith(".txt")]
+        assert len(txt_files) >= 1, f"Expected spill file in {tmp_path}, found: {txt_files}"
+        # File should contain the full content
+        spill_path = os.path.join(str(tmp_path), txt_files[0])
+        with open(spill_path, "r") as f:
+            assert f.read() == big_content
+
+    def test_spill_preview_length(self, tmp_path):
+        """Spill result should contain preview + file path reference."""
+        reg = ToolRegistry()
+        reg.SPILL_DIR = str(tmp_path)
+        reg.SPILL_THRESHOLD_CHARS = 30
+        reg.MAX_RESULT_CHARS = 200
+
+        reg.register(ToolDef(
+            name="big", description="b", parameters={},
+            handler=lambda p: "X" * 500,
+            permission=Permission.READ,
+        ))
+        perms = PermissionGate(auto_approve=True)
+        result = reg.execute("big", {}, perms)
+
+        assert "saved to" in result
+        # Preview chars should be the first SPILL_THRESHOLD_CHARS of the raw data
+        raw_preview = "X" * 30
+        assert result.startswith(raw_preview)
+
+    def test_small_result_no_spill(self, tmp_path):
+        """Results under threshold should NOT create spill files."""
+        reg = ToolRegistry()
+        reg.SPILL_DIR = str(tmp_path)
+        reg.SPILL_THRESHOLD_CHARS = 1000
+
+        reg.register(ToolDef(
+            name="small", description="s", parameters={},
+            handler=lambda p: "small result",
+            permission=Permission.READ,
+        ))
+        perms = PermissionGate(auto_approve=True)
+        result = reg.execute("small", {}, perms)
+
+        assert result == "small result"
+        assert not os.listdir(str(tmp_path))

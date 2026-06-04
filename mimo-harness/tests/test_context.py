@@ -966,3 +966,117 @@ class TestMicrocompact:
         result = microcompact(msgs, keep_recent=1)
         assert result[0]["content"] == "only"
 
+
+# ═══════════════════════════════════════════════════════════════
+# _parse_frontmatter tests
+# ═══════════════════════════════════════════════════════════════
+
+class TestParseFrontmatter:
+    """Test _parse_frontmatter YAML-like frontmatter parser."""
+
+    def test_simple_key_value(self):
+        from mimo_harness.context import _parse_frontmatter
+        content = "---\npaths: *.py\n---\nBody content here"
+        meta, body = _parse_frontmatter(content)
+        assert meta["paths"] == "*.py"
+        assert body == "Body content here"
+
+    def test_list_value(self):
+        from mimo_harness.context import _parse_frontmatter
+        content = '---\npaths: ["*.py", "*.js"]\n---\nBody'
+        meta, body = _parse_frontmatter(content)
+        assert meta["paths"] == ["*.py", "*.js"]
+        assert body == "Body"
+
+    def test_multiple_keys(self):
+        from mimo_harness.context import _parse_frontmatter
+        content = "---\npaths: *.py\nname: test-rule\n---\nBody"
+        meta, body = _parse_frontmatter(content)
+        assert meta["paths"] == "*.py"
+        assert meta["name"] == "test-rule"
+
+    def test_no_frontmatter(self):
+        from mimo_harness.context import _parse_frontmatter
+        content = "No frontmatter here"
+        meta, body = _parse_frontmatter(content)
+        assert meta == {}
+        assert body == content
+
+    def test_unclosed_frontmatter(self):
+        from mimo_harness.context import _parse_frontmatter
+        content = "---\npaths: *.py\nNo closing delimiter"
+        meta, body = _parse_frontmatter(content)
+        assert meta == {}
+        assert body == content
+
+    def test_empty_frontmatter(self):
+        from mimo_harness.context import _parse_frontmatter
+        content = "---\n---\nBody"
+        meta, body = _parse_frontmatter(content)
+        assert meta == {}
+        assert body == "Body"
+
+    def test_quoted_values(self):
+        from mimo_harness.context import _parse_frontmatter
+        content = '---\nname: "quoted value"\n---\nBody'
+        meta, body = _parse_frontmatter(content)
+        assert meta["name"] == "quoted value"
+
+
+# ═══════════════════════════════════════════════════════════════
+# _resolve_imports tests
+# ═══════════════════════════════════════════════════════════════
+
+class TestResolveImports:
+    """Test _resolve_imports @import directive resolver."""
+
+    def test_basic_import(self, tmp_path):
+        from mimo_harness.context import _resolve_imports
+        (tmp_path / "helper.md").write_text("Helper content")
+        content = "Before\n@helper.md\nAfter"
+        result = _resolve_imports(content, str(tmp_path))
+        assert "Helper content" in result
+        assert "Before" in result
+        assert "After" in result
+
+    def test_import_nonexistent_file(self, tmp_path):
+        from mimo_harness.context import _resolve_imports
+        content = "Before\n@nonexistent.md\nAfter"
+        result = _resolve_imports(content, str(tmp_path))
+        # Unresolved imports left as-is
+        assert "@nonexistent.md" in result
+
+    def test_import_path_traversal_blocked(self, tmp_path):
+        from mimo_harness.context import _resolve_imports
+        content = "@../outside.md"
+        result = _resolve_imports(content, str(tmp_path))
+        # Should not resolve — path traversal blocked
+        assert "@../outside.md" in result
+
+    def test_import_nested(self, tmp_path):
+        from mimo_harness.context import _resolve_imports
+        (tmp_path / "a.md").write_text("Content from A\n@b.md")
+        (tmp_path / "b.md").write_text("Content from B")
+        content = "@a.md"
+        result = _resolve_imports(content, str(tmp_path))
+        assert "Content from A" in result
+        assert "Content from B" in result
+
+    def test_import_depth_limit(self, tmp_path):
+        from mimo_harness.context import _resolve_imports
+        # Create a chain of 10 imports (depth limit is 5)
+        for i in range(10):
+            next_file = f"level{i+1}.md" if i < 9 else "final.md"
+            (tmp_path / f"level{i}.md").write_text(f"@{next_file}")
+        (tmp_path / "final.md").write_text("FINAL")
+        result = _resolve_imports("@level0.md", str(tmp_path))
+        # Should not infinite loop; final content may or may not be reached
+        # depending on depth, but should not crash
+        assert isinstance(result, str)
+
+    def test_no_imports(self, tmp_path):
+        from mimo_harness.context import _resolve_imports
+        content = "No imports here, just plain text."
+        result = _resolve_imports(content, str(tmp_path))
+        assert result == content
+

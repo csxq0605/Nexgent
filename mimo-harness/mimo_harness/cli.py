@@ -340,34 +340,6 @@ def main():
     except (OSError, EOFError):
         pass
 
-    # Build task from stdin and/or --task
-    task = None
-    if stdin_content and args.task:
-        task = f"{stdin_content}\n\n{args.task}"
-    elif stdin_content:
-        task = stdin_content
-    elif args.task:
-        task = args.task
-
-    if task:
-        start_time = time.time()
-        result = harness.run(task)
-        duration = time.time() - start_time
-        # Retrieve session info for structured output
-        last_session = getattr(harness, '_last_session', None)
-        last_steps = getattr(harness, '_last_steps', 0)
-        _output(result, args.output_format, session=last_session, steps=last_steps, duration=duration)
-        return
-
-    # Interactive REPL mode - use structured display
-    mode_str = 'plan' if args.plan else 'dry-run' if args.dry_run else 'auto-approve' if args.auto_approve else 'interactive'
-    if args.output_format == "text":
-        print_session_info(harness.model, mode_str, bool(MIMO_API_KEY))
-        print_info("Type /help for commands, or just start chatting.")
-        print()
-
-    import secrets
-
     # A4+X1: Session directory setup
     session_dir = args.session_dir or os.path.join(os.path.expanduser("~"), ".mimo", "sessions")
     os.makedirs(session_dir, exist_ok=True)
@@ -384,6 +356,7 @@ def main():
         print(f"Cleaned up {spill_cleaned} old output file(s)")
 
     # A3+C2: Session resume logic (priority: --session-id > --continue > --resume > new)
+    import secrets
     session = None
     if args.session_id is not None:
         try:
@@ -418,7 +391,37 @@ def main():
         session.auto_save_dir = session_dir
         if args.name:
             session.name = args.name
-        print(f"Resumed session: {session.session_id} ({len(session.messages)} messages)")
+
+    # Build task from stdin and/or --task
+    task = None
+    if stdin_content and args.task:
+        task = f"{stdin_content}\n\n{args.task}"
+    elif stdin_content:
+        task = stdin_content
+    elif args.task:
+        task = args.task
+
+    if task:
+        start_time = time.time()
+        result = harness.run(task, session=session)
+        duration = time.time() - start_time
+        # Retrieve session info for structured output
+        last_session = getattr(harness, '_last_session', None) or session
+        last_steps = getattr(harness, '_last_steps', 0)
+        # Save session metadata after task completes
+        if last_session and last_session.auto_save_dir:
+            last_session.save_meta_to_jsonl()
+        _output(result, args.output_format, session=last_session, steps=last_steps, duration=duration)
+        return
+
+    # Interactive REPL mode - use structured display
+    mode_str = 'plan' if args.plan else 'dry-run' if args.dry_run else 'auto-approve' if args.auto_approve else 'interactive'
+    if args.output_format == "text":
+        print_session_info(harness.model, mode_str, bool(MIMO_API_KEY))
+        print_info("Type /help for commands, or just start chatting.")
+        print()
+
+    import secrets
 
     memory_store = MemoryStore(".")
     checkpoint_manager = CheckpointManager(session.session_id)

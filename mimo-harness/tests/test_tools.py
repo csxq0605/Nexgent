@@ -270,6 +270,51 @@ class TestMathTools:
         result = json.loads(math_tools.calculator({"expression": "sin(pi/2)"}))
         assert abs(result["result"] - 1.0) < 0.0001
 
+    def test_division_by_zero(self):
+        """Division by zero should return an error, not crash."""
+        result = json.loads(math_tools.calculator({"expression": "1 / 0"}))
+        assert "error" in result
+
+    def test_floor_division_by_zero(self):
+        """Floor division by zero should return an error."""
+        result = json.loads(math_tools.calculator({"expression": "1 // 0"}))
+        assert "error" in result
+
+    def test_modulo_by_zero(self):
+        """Modulo by zero should return an error."""
+        result = json.loads(math_tools.calculator({"expression": "10 % 0"}))
+        assert "error" in result
+
+    def test_very_large_number(self):
+        """Large number arithmetic should work without crashing."""
+        result = json.loads(math_tools.calculator({"expression": "10 ** 100"}))
+        assert "result" in result
+        assert result["result"] == 10 ** 100
+
+    def test_negative_exponent(self):
+        result = json.loads(math_tools.calculator({"expression": "2 ** -3"}))
+        assert "result" in result
+        assert abs(result["result"] - 0.125) < 0.0001
+
+    def test_unknown_variable(self):
+        result = json.loads(math_tools.calculator({"expression": "x + 1"}))
+        assert "error" in result
+        assert "Unknown variable" in result["error"]
+
+    def test_empty_expression(self):
+        result = json.loads(math_tools.calculator({"expression": ""}))
+        assert "error" in result
+
+    def test_nested_functions(self):
+        result = json.loads(math_tools.calculator({"expression": "sqrt(abs(-16))"}))
+        assert "result" in result
+        assert result["result"] == 4.0
+
+    def test_multiple_operations(self):
+        result = json.loads(math_tools.calculator({"expression": "(2 + 3) * (4 - 1)"}))
+        assert "result" in result
+        assert result["result"] == 15
+
 
 class TestInteractive:
     def test_ask_user_question_single(self, monkeypatch):

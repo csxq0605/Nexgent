@@ -597,3 +597,77 @@ class TestMainFunctionPaths:
         main()
         assert "Bye!" in capsys.readouterr().out
 
+
+# ═══════════════════════════════════════════════════════════════
+# CLI Flag Tests — --log-file, --verbose, --session-dir, --session-id
+# ═══════════════════════════════════════════════════════════════
+
+class TestCLIVerbose:
+    """CLI --verbose flag."""
+
+    def test_verbose_flag_accepted(self):
+        """--verbose flag should not cause an error."""
+        result = _run_cli(
+            "--task", "What is 1 + 1? Reply with just the number.",
+            "--verbose", "--max-steps", "5", "--bare",
+        )
+        assert result.returncode == 0
+        assert "2" in result.stdout
+
+
+class TestCLILogFile:
+    """CLI --log-file flag."""
+
+    def test_log_file_created(self, tmp_path):
+        """--log-file should create a log file."""
+        import os
+        log_path = os.path.join(str(tmp_path), "test.log")
+        result = _run_cli(
+            "--task", "What is 1 + 1? Reply with just the number.",
+            "--log-file", log_path, "--max-steps", "5", "--bare",
+        )
+        assert result.returncode == 0
+        # Log file should exist and have content
+        assert os.path.exists(log_path), f"Log file {log_path} was not created"
+        with open(log_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert len(content) > 0, "Log file is empty"
+
+
+class TestCLISessionDir:
+    """CLI --session-dir flag."""
+
+    def test_session_dir_creates_session(self, tmp_path):
+        """--session-dir should save session to the specified directory."""
+        import os
+        session_dir = os.path.join(str(tmp_path), "my_sessions")
+        result = _run_cli(
+            "--task", "Reply with the word hello.",
+            "--session-dir", session_dir, "--max-steps", "5", "--bare",
+        )
+        assert result.returncode == 0
+        # Session directory should have been created
+        assert os.path.isdir(session_dir), f"Session dir {session_dir} was not created"
+        # Should contain at least one .jsonl file
+        jsonl_files = [f for f in os.listdir(session_dir) if f.endswith(".jsonl")]
+        assert len(jsonl_files) >= 1, f"No session files in {session_dir}"
+
+
+class TestCLISessionId:
+    """CLI --session-id flag."""
+
+    def test_session_id_in_output(self):
+        """--session-id should be used in JSON output."""
+        result = _run_cli(
+            "--task", "What is 1 + 1? Reply with just the number.",
+            "--output-format", "json", "--session-id", "test-session-123",
+            "--max-steps", "5", "--bare",
+        )
+        assert result.returncode == 0
+        # Find the CLI wrapper JSON
+        json_start = result.stdout.rfind('{"type": "result"')
+        assert json_start >= 0, f"No CLI result JSON found: {result.stdout[:500]}"
+        decoder = json.JSONDecoder()
+        data, _ = decoder.raw_decode(result.stdout, json_start)
+        assert data["session_id"] == "test-session-123"
+
