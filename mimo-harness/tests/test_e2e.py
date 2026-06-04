@@ -432,10 +432,11 @@ class TestCLIOutputFormat:
             "--output-format", "json", "--max-steps", "5", "--bare",
         )
         assert result.returncode == 0
-        # Output may contain step headers before JSON — find the JSON object
+        # Output may contain step headers before/after JSON — use raw_decode
         json_start = result.stdout.find("{")
         assert json_start >= 0, f"No JSON object found in output: {result.stdout[:200]}"
-        data = json.loads(result.stdout[json_start:])
+        decoder = json.JSONDecoder()
+        data, _ = decoder.raw_decode(result.stdout, json_start)
         assert "content" in data
         assert "session_id" in data
 
