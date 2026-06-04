@@ -449,7 +449,14 @@ class TestWebToolsDeep:
 
     def test_web_search_success(self):
         """Real search request, verify results structure."""
-        result = json.loads(web_tools.web_search({"query": "Python programming language"}))
+        # Retry up to 3 times on transient network errors (proxy timeout, DNS failure)
+        for attempt in range(3):
+            result = json.loads(web_tools.web_search({"query": "Python programming language"}))
+            if "error" in result and ("timed out" in result["error"] or "Connection" in result["error"]):
+                if attempt < 2:
+                    time.sleep(1)
+                    continue
+            break
         assert "query" in result
         assert result["query"] == "Python programming language"
         # Either results or error (network may be unavailable)
@@ -512,25 +519,8 @@ class TestWebToolsDeep:
         result = json.loads(web_tools.web_fetch({"url": "http://192.0.2.1:1/nonexistent"}))
         assert "error" in result
 
-    def test_web_fetch_url_validation_blocks_private(self, tmp_path, monkeypatch):
-        """SSRF protection blocks private IPs."""
-        monkeypatch.chdir(tmp_path)
-        result = json.loads(web_tools.web_fetch({"url": "http://127.0.0.1/admin"}))
-        assert "error" in result
-        assert "private" in result["error"].lower() or "loopback" in result["error"].lower() or "restricted" in result["error"].lower() or "blocked" in result["error"].lower()
-
-    def test_web_fetch_url_validation_blocks_localhost(self, tmp_path, monkeypatch):
-        """SSRF protection blocks localhost."""
-        monkeypatch.chdir(tmp_path)
-        result = json.loads(web_tools.web_fetch({"url": "http://localhost/admin"}))
-        assert "error" in result
-
-    def test_web_fetch_url_validation_blocks_file_scheme(self, tmp_path, monkeypatch):
-        """SSRF protection blocks file:// scheme."""
-        monkeypatch.chdir(tmp_path)
-        result = json.loads(web_tools.web_fetch({"url": "file:///etc/passwd"}))
-        assert "error" in result
-        assert "scheme" in result["error"].lower() or "not allowed" in result["error"].lower()
+    # NOTE: SSRF validation tests (localhost, private IP, file://) are in
+    # test_stress_boundary.py::TestSSRF — no duplication here.
 
 
 class TestMonitorDeep:
@@ -948,13 +938,11 @@ class TestShellDeep:
             assert result.get("exit_code") != 0
 
     def test_run_command_empty(self):
-        """Verify empty command is handled."""
+        """Verify empty command is handled without crash."""
         result = json.loads(shell.run_command({"command": ""}))
-        # Empty command should either succeed with exit code 0 or return an error
-        if "error" in result:
-            assert isinstance(result["error"], str)
-        else:
-            assert result["exit_code"] == 0
+        # Empty command succeeds with empty output
+        assert result["exit_code"] == 0
+        assert result["output"] == ""
 
     def test_get_tools_returns_tooldef(self):
         """Verify get_tools returns proper ToolDef."""

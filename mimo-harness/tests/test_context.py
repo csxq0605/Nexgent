@@ -173,18 +173,8 @@ class TestCompactContextWithLLM:
         assert failures == 0
         assert len(result) == len(messages)
 
-    def test_backward_compatible_no_client(self):
-        """Without client, uses truncation fallback (same as above, backward compat)."""
-        messages = self._make_big_messages(60)
-        tokens = estimate_tokens(messages)
-        assert tokens > COMPRESS_TRIGGER_TOKENS
-        result, attempts, failures, _, _ = compact_context(messages, estimated_tokens=tokens)
-        # Fallback: system marker + last 2 messages
-        assert len(result) <= 4
-        assert result[0]["role"] == "system"
-        # No client means no LLM attempt, and truncation is not counted as failure
-        assert attempts == 0
-        assert failures == 0
+    # NOTE: test_backward_compatible_no_client removed — duplicate of
+    # test_falls_back_to_truncation_on_no_client (same code path, same assertions)
 
 
 class TestCompactContextEdgeCases:
@@ -237,9 +227,9 @@ class TestCompactContextEdgeCases:
         assert len(result) <= 4
         assert result[0]["role"] == "system"
 
+    # NOTE: compact_context failure fallback is tested via E2E token budget
+    # exhaustion test (TestE2ETokenBudgetExhaustion) which uses real API.
 
-# ============================================================================
-# S12: CheckpointManager tests
 # ============================================================================
 
 class TestCheckpointManager:
@@ -760,6 +750,9 @@ class TestCheckpointManagerBatch:
 
 
 class TestLoadTopicOnDemand:
+    """Tests load_topic_on_demand() — CWD-relative topic loading wrapper.
+    NOTE: TestLoadTopic in test_memory.py tests the lower-level
+    MemoryStore.load_topic() directly."""
     def test_loads_existing_topic(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         # Create memory structure

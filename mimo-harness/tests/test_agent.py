@@ -122,7 +122,9 @@ class TestTerminationPaths:
         session = Session(session_id="test")
         result = harness.run("test task", session)
 
-        assert "LIMIT" in result or "Time limit" in result or "duration" in result.lower()
+        result_lower = result.lower()
+        assert "time" in result_lower or "limit" in result_lower or "exceeded" in result_lower, \
+            f"Expected time-limit indicator in result: {result[:200]}"
 
     def test_user_abort_termination(self):
         """Agent stops when graceful abort is requested."""

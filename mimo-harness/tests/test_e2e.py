@@ -91,8 +91,10 @@ class TestE2ESimpleQuestion:
     def test_definition(self):
         result = _harness().run("In one sentence, what is a Python list?")
         assert len(result) > 10, f"Response too short: {result}"
-        # Should contain relevant content, not just errors
         assert "[ERROR]" not in result, f"Got error: {result}"
+        # Must contain relevant content keywords
+        result_lower = result.lower()
+        assert "list" in result_lower, f"Response should mention 'list', got: {result[:200]}"
 
 
 class TestE2EReadFile:
@@ -185,7 +187,8 @@ class TestE2EShell:
             f"List the files in {work_dir} using glob_files with path='{work_dir}' and pattern='*'. "
             f"Tell me what files you see."
         )
-        assert "file1_e2e" in result or "file2_e2e" in result
+        assert "file1_e2e" in result and "file2_e2e" in result, \
+            f"Expected both files, got: {result[:200]}"
 
 
 class TestE2ECodeExec:
@@ -231,7 +234,9 @@ class TestE2EGlobGrep:
         result = _harness().run(
             f"Find all Python files in {work_dir}. How many .py files are there?"
         )
-        assert "2" in result
+        # "2" alone could match timestamps/version numbers; require context
+        assert "2" in result and ("file" in result.lower() or "py" in result.lower()), \
+            f"Expected '2' with file context, got: {result[:200]}"
 
     def test_grep(self, work_dir):
         target = os.path.join(work_dir, "code.py")
@@ -242,7 +247,9 @@ class TestE2EGlobGrep:
             f"Search for all function definitions (lines starting with 'def') "
             f"in {target}. How many functions are defined?"
         )
-        assert "3" in result
+        # "3" alone is too loose; require "3" near function context
+        assert "3" in result and ("function" in result.lower() or "def" in result.lower()), \
+            f"Expected '3' with function context, got: {result[:200]}"
 
 
 class TestE2EMultiStep:
@@ -265,13 +272,17 @@ class TestE2EMultiStep:
     def test_create_and_run_script(self, work_dir):
         target = os.path.join(work_dir, "calc.py")
 
-        result = _harness(max_steps=15).run(
+        # Use longer max_duration — execute_python API calls can be slow
+        harness = MiMoHarness(auto_approve=True, bare=True, max_steps=15, max_duration=900.0)
+        file_ops.set_allowed_write_dir(os.getcwd())
+        result = harness.run(
             f"Create a Python script at {target} that calculates and prints "
             f"the sum of all numbers from 1 to 100. Then run it with execute_python. "
             f"Tell me the result."
         )
-        # LLM may format as "5050" or "5,050" — accept either
-        assert "5050" in result.replace(",", "") or "5,050" in result
+        # LLM may format as "5050" or "5,050" — check both without global replace
+        assert "5050" in result or "5,050" in result, \
+            f"Expected 5050 in result, got: {result[:200]}"
 
     def test_search_and_summarize(self, work_dir):
         for name, content in [
@@ -309,6 +320,86 @@ class TestE2ESession:
         assert "assistant" in roles
 
 
+# ═══════════════════════════════════════════════════════════════
+# 2b. Error Handling & Edge Cases (E2E with real API)
+# ═══════════════════════════════════════════════════════════════
+
+class TestE2EErrorHandling:
+    """Agent error handling with real API calls."""
+
+    def test_file_not_found_handled(self, work_dir):
+        """Agent should handle missing file gracefully without crashing."""
+        nonexistent = os.path.join(work_dir, "does_not_exist.txt")
+        result = _harness(max_steps=5).run(
+            f"Read the file at {nonexistent} and tell me what it says."
+        )
+        # Agent should report the error, not crash
+        assert len(result) > 0, "Agent should produce a response"
+        assert "[ERROR]" not in result or "not found" in result.lower() or "no such" in result.lower()
+
+    def test_max_steps_exhaustion(self, work_dir):
+        """Agent stops gracefully when max_steps is reached."""
+        # Use a multi-step task with very few steps
+        target = os.path.join(work_dir, "steps_test.txt")
+        result = _harness(max_steps=1).run(
+            f"Create a file at {target} with content 'step1', "
+            f"then create another file at {os.path.join(work_dir, 'steps_test2.txt')} with content 'step2', "
+            f"then create a third file at {os.path.join(work_dir, 'steps_test3.txt')} with content 'step3'."
+        )
+        # With only 1 step, not all files should be created
+        assert len(result) > 0, "Agent should produce a response"
+
+    def test_empty_task(self):
+        """Agent handles empty task without crashing."""
+        result = _harness(max_steps=3).run("")
+        assert len(result) > 0, "Agent should produce a response for empty task"
+
+    def test_very_long_input(self):
+        """Agent handles very long task input."""
+        long_task = "Repeat the following text back to me: " + "hello " * 2000
+        result = _harness(max_steps=5).run(long_task)
+        assert len(result) > 0, "Agent should produce a response for long input"
+
+
+class TestE2ESessionResume:
+    """Session save and resume with real API calls."""
+
+    def test_session_save_and_reload(self, work_dir):
+        """Session can be saved and reloaded with message history intact."""
+        session_dir = os.path.join(work_dir, "sessions")
+        os.makedirs(session_dir, exist_ok=True)
+
+        # First run: create session with auto_save_dir so messages persist
+        harness1 = _harness(max_steps=5)
+        session = Session(session_id="resume-test", auto_save_dir=session_dir)
+        harness1.run("What is 10 + 20? Reply with just the number.", session=session)
+        session.save_meta_to_jsonl()
+
+        # Verify session file exists
+        jsonl_files = [f for f in os.listdir(session_dir) if f.endswith(".jsonl")]
+        assert len(jsonl_files) >= 1, f"No session files in {session_dir}"
+
+        # Reload session and verify messages persist
+        load_result = Session.from_jsonl(os.path.join(session_dir, jsonl_files[0]))
+        session2 = load_result.session
+        roles = [m["role"] for m in session2.messages]
+        assert "user" in roles
+        assert "assistant" in roles
+
+
+class TestE2ETokenBudgetExhaustion:
+    """Token budget exhaustion with real API calls."""
+
+    def test_token_budget_blocks_when_exceeded(self):
+        """Agent should stop when token budget is exceeded."""
+        from mimo_harness.agent import TokenBudget
+        harness = _harness(max_steps=10)
+        # Set a very small token budget that will be exceeded
+        harness.token_budget = TokenBudget(max_tokens=1000)
+        result = harness.run("Write a very long essay about Python programming.")
+        # Should either complete quickly or hit token limit
+        assert len(result) > 0
+
 
 # ═══════════════════════════════════════════════════════════════
 # 3. Token Counter Accuracy (E2E with real API)
@@ -341,22 +432,24 @@ class TestE2ETokenCounter:
         # Our token count
         our_count = count_messages_tokens(messages)
 
-        # API reported usage (if available)
+        # API reported usage — must be available for this test to be meaningful
         api_usage = response.usage
-        if api_usage:
-            api_prompt_tokens = api_usage.prompt_tokens
-            # Our count should be within 20% of API's count
-            ratio = our_count / api_prompt_tokens if api_prompt_tokens > 0 else 1.0
-            assert 0.5 < ratio < 2.0, (
-                f"Our count {our_count} vs API {api_prompt_tokens}, ratio={ratio:.2f}"
-            )
+        assert api_usage is not None, "API response must include usage info for token accuracy test"
+        api_prompt_tokens = api_usage.prompt_tokens
+        assert api_prompt_tokens > 0, "API reported 0 prompt tokens"
+        # Our count should be within 30% of API's count
+        ratio = our_count / api_prompt_tokens
+        assert 0.7 < ratio < 1.3, (
+            f"Our count {our_count} vs API {api_prompt_tokens}, ratio={ratio:.2f}"
+        )
 
     def test_token_budget_status_with_real_agent(self):
         """Token budget should work correctly with a real agent run."""
+        import re
         harness = _harness()
-        result = harness.run("What is 1 + 1?")
+        result = harness.run("What is 1 + 1? Reply with just the number.")
 
-        assert "2" in result
+        assert re.search(r'\b2\b', result), f"Expected answer '2' in result: {result[:200]}"
         # Token budget should have been updated
         assert harness.token_budget.estimated_tokens > 0
 
@@ -424,6 +517,7 @@ class TestCLIHelp:
         result = _run_cli("-h")
         assert result.returncode == 0
         assert "Usage" in result.stdout or "usage" in result.stdout
+        assert "--task" in result.stdout
 
 
 class TestCLIOutputFormat:
@@ -492,6 +586,7 @@ class TestCLIPlanMode:
             "--plan", "--max-steps", "5", "--bare",
         )
         assert result.returncode == 0
+        assert len(result.stdout.strip()) > 0, "Plan mode should produce output"
 
 
 class TestCLIErrorHandling:
@@ -504,6 +599,27 @@ class TestCLIErrorHandling:
             "--max-steps", "1", "--bare",
         )
         assert result.returncode != 0 or "error" in result.stderr.lower() or "error" in result.stdout.lower()
+
+    def test_invalid_effort_value(self):
+        """Invalid --effort value should be rejected by argparse."""
+        result = _run_cli("--task", "Hello", "--effort", "invalid_value")
+        assert result.returncode != 0
+        assert "invalid choice" in result.stderr.lower() or "error" in result.stderr.lower()
+
+    def test_invalid_output_format(self):
+        """Invalid --output-format value should be rejected by argparse."""
+        result = _run_cli("--task", "Hello", "--output-format", "invalid_format")
+        assert result.returncode != 0
+        assert "invalid choice" in result.stderr.lower() or "error" in result.stderr.lower()
+
+    def test_conflicting_dry_run_and_plan(self):
+        """Both --dry-run and --plan should be accepted (plan implies dry-run)."""
+        result = _run_cli(
+            "--task", "What is 2 + 2?",
+            "--dry-run", "--plan", "--max-steps", "3", "--bare",
+        )
+        # Should not crash — both flags are compatible
+        assert result.returncode == 0
 
 
 class TestCLIBareMode:
@@ -535,17 +651,19 @@ class TestCLIEffortLevels:
 
     def test_low_effort(self):
         result = _run_cli(
-            "--task", "What is 2 + 2?",
+            "--task", "What is 2 + 2? Reply with just the number.",
             "--effort", "low", "--max-steps", "5", "--bare",
         )
         assert result.returncode == 0
+        assert "4" in result.stdout, f"Expected answer '4' in output: {result.stdout[:200]}"
 
     def test_high_effort(self):
         result = _run_cli(
-            "--task", "What is 2 + 2?",
+            "--task", "What is 2 + 2? Reply with just the number.",
             "--effort", "high", "--max-steps", "5", "--bare",
         )
         assert result.returncode == 0
+        assert "4" in result.stdout, f"Expected answer '4' in output: {result.stdout[:200]}"
 
 
 class TestMainFunctionPaths:
@@ -555,25 +673,31 @@ class TestMainFunctionPaths:
         monkeypatch.setattr("sys.argv", ["mimo", "--task", "Reply with the word hello."])
         from mimo_harness.cli import main
         main()
-        assert len(capsys.readouterr().out.strip()) > 0
+        output = capsys.readouterr().out.strip()
+        assert len(output) > 0
+        assert "hello" in output.lower(), f"Expected 'hello' in output: {output[:200]}"
 
     def test_main_dry_run(self, monkeypatch, capsys):
         monkeypatch.setattr("sys.argv", ["mimo", "--task", "test", "--dry-run"])
         from mimo_harness.cli import main
         main()
-        assert len(capsys.readouterr().out.strip()) > 0
+        output = capsys.readouterr().out.strip()
+        assert len(output) > 0, "Dry-run should produce output"
 
     def test_main_plan_mode(self, monkeypatch, capsys):
         monkeypatch.setattr("sys.argv", ["mimo", "--task", "Say hello", "--plan"])
         from mimo_harness.cli import main
         main()
-        assert len(capsys.readouterr().out.strip()) > 0
+        output = capsys.readouterr().out.strip()
+        assert len(output) > 0
 
     def test_main_no_stream_mode(self, monkeypatch, capsys):
         monkeypatch.setattr("sys.argv", ["mimo", "--task", "Say hello", "--no-stream", "--bare", "--max-steps", "5"])
         from mimo_harness.cli import main
         main()
-        assert len(capsys.readouterr().out.strip()) > 0
+        output = capsys.readouterr().out.strip()
+        assert len(output) > 0
+        assert "hello" in output.lower(), f"Expected 'hello' in output: {output[:200]}"
 
     def test_main_repl_quit(self, monkeypatch, capsys):
         monkeypatch.setattr("sys.argv", ["mimo"])

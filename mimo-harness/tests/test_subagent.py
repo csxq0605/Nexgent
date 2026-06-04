@@ -590,8 +590,8 @@ class TestSubAgentManager:
         manager._start_time = time.time() - 10.0
         assert "Time limit exceeded" in manager._check_resource_limits()
 
-    def test_run_pipeline_with_truncation(self):
-        """Test pipeline context truncation mechanism (unit test of truncation logic)."""
+    def test_pipeline_result_storage_with_large_output(self):
+        """Test that large pipeline results are stored and accessible."""
         manager = SubAgentManager()
 
         # Simulate a pipeline result with a very long output
@@ -689,37 +689,8 @@ class TestSubAgentE2E:
         assert result.steps_taken > 0
         assert result.duration_seconds > 0
 
-    def test_parallel_subagents(self):
-        """Test running multiple SubAgents in parallel."""
-        manager = SubAgentManager(max_concurrent=2)
-        configs = [
-            SubAgentConfig(task="What is 10 * 10? Reply with just the number.", effort="low"),
-            SubAgentConfig(task="What is 20 + 20? Reply with just the number.", effort="low"),
-        ]
-
-        results = manager.run_parallel(configs)
-
-        assert len(results) == 2
-        assert all(r.state == SubAgentState.COMPLETED for r in results)
-        assert "100" in results[0].result
-        assert "40" in results[1].result
-
-    def test_pipeline_subagents(self):
-        """Test running SubAgents in pipeline mode."""
-        manager = SubAgentManager()
-        configs = [
-            SubAgentConfig(task="Calculate 5 * 5 and tell me the result.", effort="low"),
-            SubAgentConfig(task="Take the previous result and add 10 to it.", effort="low"),
-        ]
-
-        results = manager.run_pipeline(configs)
-
-        assert len(results) == 2
-        assert all(r.state == SubAgentState.COMPLETED for r in results)
-        # First result should be 25
-        assert "25" in results[0].result
-        # Second result should be 35 (25 + 10)
-        assert "35" in results[1].result
+    # NOTE: test_parallel_subagents and test_pipeline_subagents removed —
+    # duplicates of TestSubAgentManager.test_run_parallel and test_run_pipeline
 
     def test_subagent_with_tools(self):
         """Test SubAgent using specific tools."""

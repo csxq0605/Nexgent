@@ -152,6 +152,9 @@ class TestMemoryStore:
 
 
 class TestLoadTopic:
+    """Tests MemoryStore.load_topic() — low-level topic file loading.
+    NOTE: TestLoadTopicOnDemand in test_context.py tests the higher-level
+    load_topic_on_demand() wrapper with CWD-relative path resolution."""
     def test_load_existing_topic(self, tmp_path):
         store = MemoryStore(str(tmp_path))
         store.ensure_dir()

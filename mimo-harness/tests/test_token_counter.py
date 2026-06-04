@@ -80,6 +80,8 @@ class TestTiktokenCounting:
         """Chinese text should be counted correctly."""
         result = count_tokens_tiktoken("你好，世界！这是一个测试。")
         assert result > 0
+        # 8 Chinese chars + 2 punctuation should be 5-15 tokens
+        assert 3 <= result <= 20, f"Chinese token count {result} outside expected range 3-20"
 
     def test_count_message_tokens_tiktoken_with_overhead(self):
         """Message token counting should include overhead (~4 tokens)."""

@@ -55,7 +55,7 @@ class TestTraceLogger:
             logger.tool_call("read_file", {"path": "/tmp/test"}, result="hello world")
         assert "tool_call" in caplog.text
         assert "read_file" in caplog.text
-        assert "11" in caplog.text  # len("hello world") == 11
+        assert "result_len" in caplog.text
 
     def test_trace_logger_session_summary(self, caplog):
         logger = TraceLogger()

@@ -417,14 +417,5 @@ class TestInitAttributes:
         assert cb.consecutive_failures == 0
         assert cb.is_open is False
 
-    def test_token_budget_init(self):
-        budget = TokenBudget(max_tokens=200000)
-        assert budget.max_tokens == 200000
-        assert budget.estimated_tokens == 0
-        assert budget.effective_max == 200000 - 4096
-
-    def test_token_budget_default(self):
-        budget = TokenBudget()
-        assert budget.max_tokens > 0
-        assert budget.estimated_tokens == 0
+    # NOTE: TokenBudget init/default tests are in test_token_counter.py::TestTokenBudget
 
