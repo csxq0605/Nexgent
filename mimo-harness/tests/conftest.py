@@ -4,6 +4,7 @@ E2E tests (test_e2e.py) use the real API from .env — skip mock overrides.
 """
 
 import os
+import time
 import atexit
 import shutil
 import tempfile
@@ -80,27 +81,42 @@ def _cleanup_spill_dir():
     shutil.rmtree(_test_spill_dir, ignore_errors=True)
 
 
-@pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_call(item):
-    """Retry flaky E2E tests up to E2E_MAX_RETRIES times on network errors."""
-    # Only retry E2E tests (in test_e2e.py or test_cli_e2e.py)
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_protocol(item, nextitem):
+    """Retry flaky E2E tests up to E2E_MAX_RETRIES on retryable errors."""
     is_e2e = "test_e2e" in str(item.fspath)
-
     if not is_e2e:
-        yield
-        return
+        return None  # use default protocol
 
-    last_exc = None
     for attempt in range(E2E_MAX_RETRIES):
-        try:
-            outcome = yield
-            return
-        except Exception as e:
-            last_exc = e
-            if not _is_retryable(e):
-                raise
-            if attempt < E2E_MAX_RETRIES - 1:
-                print(f"\n  [RETRY] {item.nodeid} failed (attempt {attempt + 1}/{E2E_MAX_RETRIES}), retrying...")
-                continue
-            else:
-                raise last_exc
+        reports = pytest.runner.runtestprotocol(item, nextitem=nextitem, log=False)
+        failed = any(r.failed and r.when == "call" for r in reports)
+        if not failed:
+            for rep in reports:
+                item.ihook.pytest_runtest_logreport(report=rep)
+            return True
+
+        call_report = next((r for r in reports if r.when == "call" and r.failed), None)
+        if call_report is None:
+            for rep in reports:
+                item.ihook.pytest_runtest_logreport(report=rep)
+            return True
+
+        exc = call_report.excinfo[1] if call_report.excinfo else None
+        if exc is None or not _is_retryable(exc):
+            for rep in reports:
+                item.ihook.pytest_runtest_logreport(report=rep)
+            return True
+
+        if attempt < E2E_MAX_RETRIES - 1:
+            backoff = 10 * (2 ** attempt)  # 10s, 20s
+            print(f"\n  [RETRY] {item.nodeid} ({type(exc).__name__}), "
+                  f"attempt {attempt + 1}/{E2E_MAX_RETRIES}, backoff {backoff}s...")
+            time.sleep(backoff)
+        else:
+            print(f"\n  [RETRY] {item.nodeid} exhausted {E2E_MAX_RETRIES} attempts")
+            for rep in reports:
+                item.ihook.pytest_runtest_logreport(report=rep)
+            return True
+
+    return True

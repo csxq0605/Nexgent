@@ -1,8 +1,11 @@
 """Structured CLI display module for MiMo Harness.
 
 Provides rich, structured output similar to Claude Code:
+- Conversation bubbles (user vs model visual distinction)
 - Step indicators
-- Tool call visualization
+- Tool call visualization (structured, collapsible)
+- Code block syntax highlighting
+- Status bar with current state
 - Streaming output formatting
 - Status indicators
 - Thinking/reasoning display
@@ -12,10 +15,20 @@ import os
 import sys
 import time
 import json
+import re
 import threading
 import locale
 from typing import Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+# Optional syntax highlighting (graceful fallback if pygments not installed)
+try:
+    from pygments import highlight as _pygments_highlight
+    from pygments.lexers import get_lexer_by_name, TextLexer
+    from pygments.formatters import TerminalFormatter
+    _HAS_PYGMENTS = True
+except ImportError:
+    _HAS_PYGMENTS = False
 
 
 def _console_supports_unicode() -> bool:
@@ -322,8 +335,7 @@ def print_tool_call_result(
 
 def print_streaming_token(token: str):
     """Print a single streaming token (called from streaming callback)."""
-    sys.stdout.write(token)
-    sys.stdout.flush()
+    _safe_print(token, end="", flush=True)
 
 
 def print_streaming_end():
@@ -511,3 +523,307 @@ def print_help():
 def create_spinner(message: str = "Thinking") -> Spinner:
     """Create and return a new spinner instance."""
     return Spinner(message)
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Structured CLI Interface Enhancements
+# ---------------------------------------------------------------------------
+
+# Conversation bubble characters
+if _SUPPORTS_UNICODE:
+    BUBBLE_TL = "╭"
+    BUBBLE_TR = "╮"
+    BUBBLE_BL = "╰"
+    BUBBLE_BR = "╯"
+    BUBBLE_H = "─"
+    BUBBLE_V = "│"
+    COLLAPSE_ICON = "▸"
+    EXPAND_ICON = "▾"
+    USER_ICON = "❯"
+    ASSISTANT_ICON = "◈"
+    BULLET_ICON = DOT_ICON
+    CODE_BORDER = "┌"
+    CODE_BORDER_BOT = "└"
+    CODE_BORDER_H = "─"
+    CODE_BORDER_V = "│"
+    STATUS_IDLE = "○"
+    STATUS_THINKING = "◉"
+    STATUS_EXECUTING = "●"
+    STATUS_ERROR = "✖"
+else:
+    BUBBLE_TL = "+"
+    BUBBLE_TR = "+"
+    BUBBLE_BL = "+"
+    BUBBLE_BR = "+"
+    BUBBLE_H = "-"
+    BUBBLE_V = "|"
+    COLLAPSE_ICON = "[+]"
+    EXPAND_ICON = "[-]"
+    USER_ICON = ">"
+    ASSISTANT_ICON = "*"
+    BULLET_ICON = DOT_ICON
+    CODE_BORDER = "+"
+    CODE_BORDER_BOT = "+"
+    CODE_BORDER_H = "-"
+    CODE_BORDER_V = "|"
+    STATUS_IDLE = "o"
+    STATUS_THINKING = "*"
+    STATUS_EXECUTING = "#"
+    STATUS_ERROR = "x"
+
+
+def _wrap_text(text: str, width: int = 76) -> list[str]:
+    """Wrap text to specified width, preserving existing newlines.
+
+    Returns list of lines.
+    """
+    lines = []
+    for paragraph in text.split("\n"):
+        if not paragraph:
+            lines.append("")
+            continue
+        # Simple word-wrap
+        current = ""
+        for word in paragraph.split(" "):
+            if not current:
+                current = word
+            elif len(current) + 1 + len(word) <= width:
+                current += " " + word
+            else:
+                # Hard-break current if it exceeds width
+                while len(current) > width:
+                    lines.append(current[:width])
+                    current = current[width:]
+                lines.append(current)
+                current = word
+        if current:
+            # Hard-break remaining text if it exceeds width
+            while len(current) > width:
+                lines.append(current[:width])
+                current = current[width:]
+            if current:
+                lines.append(current)
+    return lines
+
+
+def _visible_len(text: str) -> int:
+    """Calculate visible length of text, ignoring ANSI escape sequences."""
+    return len(re.sub(r'\033\[[0-9;]*m', '', text))
+
+
+def print_user_input(user_text: str, width: int = 76):
+    """Print user input in a conversation bubble for visual distinction.
+
+    Uses a right-aligned or labeled bubble to differentiate from model output.
+    """
+    label = _cyan(f" {USER_ICON} You ")
+    lines = _wrap_text(user_text, width - 4)
+
+    label_vis_len = _visible_len(label)
+    remaining = max(0, width - 2 - label_vis_len)
+    _safe_print(f"  {label}{_dim(BUBBLE_H * remaining)}")
+    for line in lines:
+        padded = f" {line}{' ' * max(0, width - 3 - len(line))}"
+        _safe_print(f"  {_cyan(BUBBLE_V)}{_dim(padded[:width-2])}{_cyan(BUBBLE_V)}")
+    _safe_print(f"  {_cyan(BUBBLE_BL)}{_cyan(BUBBLE_H * (width - 2))}{_cyan(BUBBLE_BR)}")
+    print()
+
+
+_OUTPUT_BOX_WIDTH = 56
+
+
+def print_model_output_start(model: str = ""):
+    """Print the start of a model output container.
+
+    Call this before streaming/displaying model response.
+    """
+    label = f" {ASSISTANT_ICON} Assistant "
+    if model:
+        label = f" {ASSISTANT_ICON} {model} "
+    label_vis = _visible_len(label)
+    dash_count = max(0, _OUTPUT_BOX_WIDTH - label_vis)
+    _safe_print(f"  {_blue(label)}{_dim(BUBBLE_H * dash_count)}")
+    _safe_print(f"  {_blue(BUBBLE_V)}")
+
+
+def print_model_output_end():
+    """Print the end of a model output container.
+
+    Call this after model response is complete.
+    """
+    _safe_print(f"  {_blue(BUBBLE_V)}")
+    _safe_print(f"  {_blue(BUBBLE_BL)}{_blue(BUBBLE_H * (_OUTPUT_BOX_WIDTH - 2))}{_blue(BUBBLE_BR)}")
+    print()
+
+
+def print_code_block(code: str, language: str = ""):
+    """Print a code block with optional syntax highlighting.
+
+    If pygments is available and language is specified, applies syntax highlighting.
+    Otherwise, uses a simple bordered display with dim styling.
+    """
+    lang_label = f" [{language}]" if language else ""
+    border_h = CODE_BORDER_H * 42
+
+    # Header
+    _safe_print(f"    {_dim(f'{CODE_BORDER}{border_h}{lang_label}')}")
+
+    # Apply syntax highlighting if available
+    if _HAS_PYGMENTS and language:
+        try:
+            lexer = get_lexer_by_name(language)
+            highlighted = _pygments_highlight(code, lexer, TerminalFormatter())
+            for line in highlighted.rstrip("\n").split("\n"):
+                _safe_print(f"    {_dim(CODE_BORDER_V)} {line}")
+        except Exception:
+            # Fallback to plain display
+            for line in code.rstrip("\n").split("\n"):
+                _safe_print(f"    {_dim(CODE_BORDER_V)} {_dim(line)}")
+    else:
+        # Plain display with dim styling
+        for line in code.rstrip("\n").split("\n"):
+            _safe_print(f"    {_dim(CODE_BORDER_V)} {_dim(line)}")
+
+    # Footer
+    _safe_print(f"    {_dim(f'{CODE_BORDER_BOT}{border_h}')}")
+
+
+def print_tool_call_collapsible(
+    tool_name: str,
+    args: dict,
+    call_index: int = 0,
+    total: int = 1,
+    collapsed: bool = True,
+    result_preview: Optional[str] = None,
+    success: Optional[bool] = None,
+    duration: Optional[float] = None,
+):
+    """Print a tool call with collapsible details.
+
+    Shows tool name and summary on first line. When collapsed, details are hidden.
+    When expanded, shows full args and result.
+    """
+    # Format arguments for summary
+    args_str = _format_tool_args(tool_name, args)
+    icon = COLLAPSE_ICON if collapsed else EXPAND_ICON
+
+    if total > 1:
+        prefix = f"  {_yellow(TOOL_ICON)} [{call_index + 1}/{total}]"
+    else:
+        prefix = f"  {_yellow(TOOL_ICON)}"
+
+    # Status indicator
+    status_str = ""
+    if success is not None:
+        if success:
+            status_str = f" {_green(CHECK_ICON)}"
+        else:
+            status_str = f" {_red(CROSS_ICON)}"
+    if duration is not None:
+        status_str += _dim(f" ({duration:.1f}s)")
+
+    # Main line: tool name + args summary + status
+    _safe_print(f"{prefix} {_dim(icon)} {_bold(tool_name)}{args_str}{status_str}", flush=True)
+
+    # Expanded details
+    if not collapsed:
+        # Show full args
+        if args:
+            args_json = json.dumps(args, ensure_ascii=False, indent=2)
+            for line in args_json.split("\n"):
+                _safe_print(f"      {_dim(line)}")
+
+        # Show result preview
+        if result_preview:
+            preview_lines = result_preview[:500].split("\n")
+            _safe_print(f"    {_dim('─' * 36)}")
+            for line in preview_lines[:10]:
+                _safe_print(f"      {_dim(line)}")
+            if len(result_preview) > 500:
+                _safe_print(f"      {_dim('...')}")
+
+
+# ---------------------------------------------------------------------------
+# Status Bar
+# ---------------------------------------------------------------------------
+
+class StatusBar:
+    """Persistent status bar showing current agent state.
+
+    Displays: idle / thinking / executing / error states with visual indicators.
+    Thread-safe for updates from agent loop.
+    """
+
+    def __init__(self):
+        self._state = "idle"
+        self._detail = ""
+        self._lock = threading.Lock()
+
+    def set_thinking(self, model: str = ""):
+        """Set status to 'thinking' (model is processing)."""
+        with self._lock:
+            self._state = "thinking"
+            self._detail = model
+
+    def set_executing(self, tool_name: str = ""):
+        """Set status to 'executing' (tool is running)."""
+        with self._lock:
+            self._state = "executing"
+            self._detail = tool_name
+
+    def set_idle(self):
+        """Set status to 'idle' (waiting for user input)."""
+        with self._lock:
+            self._state = "idle"
+            self._detail = ""
+
+    def set_error(self, message: str = ""):
+        """Set status to 'error'."""
+        with self._lock:
+            self._state = "error"
+            self._detail = message
+
+    def render(self) -> str:
+        """Render the status bar as a string."""
+        with self._lock:
+            state = self._state
+            detail = self._detail
+
+        if state == "thinking":
+            icon = _cyan(STATUS_THINKING)
+            label = _cyan("Thinking")
+            if detail:
+                label += _dim(f" [{detail}]")
+        elif state == "executing":
+            icon = _yellow(STATUS_EXECUTING)
+            label = _yellow("Executing")
+            if detail:
+                label += _dim(f" [{detail}]")
+        elif state == "error":
+            icon = _red(STATUS_ERROR)
+            label = _red("Error")
+            if detail:
+                label += _dim(f" {detail[:40]}")
+        else:
+            icon = _dim(STATUS_IDLE)
+            label = _dim("Idle")
+
+        return f"  {icon} {label}"
+
+    def print_status(self):
+        """Print the current status bar."""
+        _safe_print(self.render())
+
+
+# Module-level status bar instance
+_status_bar = StatusBar()
+
+
+def get_status_bar() -> StatusBar:
+    """Get the module-level status bar instance."""
+    return _status_bar
+
+
+def print_status_bar():
+    """Print the current status bar state."""
+    _status_bar.print_status()

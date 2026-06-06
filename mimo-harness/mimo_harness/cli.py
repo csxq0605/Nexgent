@@ -18,6 +18,7 @@ import argparse
 import os
 import re
 import sys
+import threading
 import json
 import subprocess
 import time
@@ -30,7 +31,9 @@ from .display import (
     print_banner as display_banner, print_session_info, print_help as display_help,
     print_error, print_warning, print_info, print_success,
     print_token_usage, print_context_breakdown, print_session_stats,
-    print_tool_list, USE_COLOR, _format_tokens, _dim, _bold, _yellow, _green, _red, _cyan
+    print_tool_list, USE_COLOR, _format_tokens, _dim, _bold, _yellow, _green, _red, _cyan,
+    _safe_print, print_user_input, get_status_bar,
+    BUBBLE_H, BULLET_ICON, ARROW_ICON, CHECK_ICON, CROSS_ICON,
 )
 
 
@@ -421,8 +424,6 @@ def main():
         print_info("Type /help for commands, or just start chatting.")
         print()
 
-    import secrets
-
     memory_store = MemoryStore(".")
     checkpoint_manager = CheckpointManager(session.session_id)
     harness._checkpoint_manager = checkpoint_manager
@@ -434,11 +435,13 @@ def main():
     # Initialize scheduler for session-scoped cron jobs
     from .tools.scheduler_tools import Scheduler, set_scheduler
     _scheduled_prompts = []
+    _scheduled_lock = threading.Lock()
     _MAX_SCHEDULED_PROMPTS = 10
     def _on_scheduled_prompt(prompt):
-        if len(_scheduled_prompts) >= _MAX_SCHEDULED_PROMPTS:
-            _scheduled_prompts.pop(0)  # Drop oldest to prevent unbounded growth
-        _scheduled_prompts.append(prompt)
+        with _scheduled_lock:
+            if len(_scheduled_prompts) >= _MAX_SCHEDULED_PROMPTS:
+                _scheduled_prompts.pop(0)  # Drop oldest to prevent unbounded growth
+            _scheduled_prompts.append(prompt)
         print(f"\n[Scheduled] {prompt[:60]}...")
     scheduler = Scheduler(callback=_on_scheduled_prompt)
     set_scheduler(scheduler)
@@ -464,8 +467,9 @@ def main():
 
         if not user_input:
             # Check for scheduled prompts even when user provides no input
-            if _scheduled_prompts:
-                scheduled = _scheduled_prompts.pop(0)
+            with _scheduled_lock:
+                scheduled = _scheduled_prompts.pop(0) if _scheduled_prompts else None
+            if scheduled:
                 print_info(f"Executing scheduled prompt...")
                 user_input = scheduled
             else:
@@ -528,11 +532,19 @@ def main():
 
         # Run agent with graceful interrupt support
         try:
+            # Show user input in a conversation bubble for visual distinction
+            if args.output_format == "text":
+                print_user_input(user_input)
+            # Update status bar to executing
+            get_status_bar().set_thinking(harness.model)
             # Streaming is now the default - tokens are printed directly by the agent
             harness.run(user_input, session)
+            # Status bar set to idle after agent completes
+            get_status_bar().set_idle()
         except KeyboardInterrupt:
             # Graceful abort: stop current task but don't exit REPL
             harness.graceful_abort.request()
+            get_status_bar().set_idle()
             print_warning("\nInterrupted — stopping current task...")
             # The agent loop will check the abort flag at the next step boundary
 
@@ -603,7 +615,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
         if memories:
             print(f"\n  {_bold(f'Stored memories ({len(memories)})')}")
             for m in memories:
-                print(f"  {_yellow('•')} [{m.memory_type.value}] {m.name}: {_dim(m.description[:60])}")
+                _safe_print(f"  {_yellow(BULLET_ICON)} [{m.memory_type.value}] {m.name}: {_dim(m.description[:60])}")
         else:
             print_info("No memories stored.")
         print()
@@ -634,7 +646,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
             print(f"\n  {_bold(f'Registered hooks: {total}')}")
             for event, hooks in hook_runner._hooks.items():
                 for h in hooks:
-                    print(f"  {_yellow('•')} [{event.value}] {h.matcher} → {_dim(h.command[:50])}")
+                    _safe_print(f"  {_yellow(BULLET_ICON)} [{event.value}] {h.matcher} {ARROW_ICON} {_dim(h.command[:50])}")
         else:
             print_info("No hooks registered.")
         print()
@@ -687,7 +699,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 session.messages = compacted
                 session.compaction_count += 1
                 tokens_after = estimate_tokens(session.messages)
-                print_success(f"Done: {_format_tokens(tokens_before)} → {_format_tokens(tokens_after)} tokens")
+                print_success(f"Done: {_format_tokens(tokens_before)} {ARROW_ICON} {_format_tokens(tokens_after)} tokens")
             except Exception as e:
                 # Fallback: no LLM, just truncation
                 compacted, _, _, _, _ = compact_context(
@@ -697,7 +709,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 session.messages = compacted
                 session.compaction_count += 1
                 tokens_after = estimate_tokens(session.messages)
-                print_success(f"Done (truncation): {_format_tokens(tokens_before)} → {_format_tokens(tokens_after)} tokens")
+                print_success(f"Done (truncation): {_format_tokens(tokens_before)} {ARROW_ICON} {_format_tokens(tokens_after)} tokens")
         print()
     elif cmd[0] == "/context":
         # C9: Per-message token breakdown
@@ -734,7 +746,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
             if restored:
                 print_success(f"Restored {len(restored)} file(s):")
                 for p in restored:
-                    print(f"  {_dim('•')} {p}")
+                    _safe_print(f"  {_dim(BULLET_ICON)} {p}")
             else:
                 print_info("No checkpoint to restore.")
         else:
@@ -760,12 +772,12 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
             checkpoint_manager.checkpoint_dir = os.path.join(".mimo", "checkpoints", new_id)
             checkpoint_manager._seq = 0
             checkpoint_manager._batch_dir = None
-        print_success(f"Session forked: {old_id} → {new_id}")
+        print_success(f"Session forked: {old_id} {ARROW_ICON} {new_id}")
     elif cmd[0] == "/subagents":
         # List active SubAgents
         summary = harness.get_subagent_summary()
         print(f"\n  {_bold('SubAgent Summary')}")
-        print(f"  {_dim('─' * 30)}")
+        _safe_print(f"  {_dim(BUBBLE_H * 30)}")
         print(f"  {_dim('Total:')} {summary.get('total_subagents', 0)}")
         print(f"  {_dim('Running:')} {summary.get('running', 0)}")
         print(f"  {_dim('Completed:')} {summary.get('completed', 0)}")
@@ -808,9 +820,9 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
             try:
                 results = harness.run_parallel_subagents(tasks, effort=harness.effort)
                 print(f"\n  {_bold('Results')}")
-                print(f"  {_dim('─' * 40)}")
+                _safe_print(f"  {_dim(BUBBLE_H * 40)}")
                 for i, result in enumerate(results, 1):
-                    status = _green("✓") if result.success else _red("✗")
+                    status = _green(CHECK_ICON) if result.success else _red(CROSS_ICON)
                     print(f"  [{i}] {status} {result.state.value} ({result.duration_seconds:.1f}s)")
                     if result.result:
                         preview = result.result[:100].replace("\n", " ")
@@ -836,9 +848,9 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 stages = [{"task": task} for task in tasks]
                 results = harness.run_pipeline_subagents(stages)
                 print(f"\n  {_bold('Results')}")
-                print(f"  {_dim('─' * 40)}")
+                _safe_print(f"  {_dim(BUBBLE_H * 40)}")
                 for i, result in enumerate(results, 1):
-                    status = _green("✓") if result.success else _red("✗")
+                    status = _green(CHECK_ICON) if result.success else _red(CROSS_ICON)
                     print(f"  Stage {i}: {status} {result.state.value} ({result.duration_seconds:.1f}s)")
                     if result.result:
                         preview = result.result[:100].replace("\n", " ")
@@ -863,7 +875,8 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
             except OSError:
                 pass
             session = Session.load(cmd[1])
-            session.auto_save_dir = session_dir
+            if session_dir:
+                session.auto_save_dir = session_dir
             # Update checkpoint_manager to loaded session
             if checkpoint_manager:
                 checkpoint_manager.checkpoint_dir = os.path.join(".mimo", "checkpoints", session.session_id)

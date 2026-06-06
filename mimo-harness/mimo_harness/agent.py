@@ -31,9 +31,11 @@ from .tools.file_ops import FileOpsState, set_file_ops_state
 from .security_pipeline import filter_tool_output, SAFETY_SYSTEM_PROMPT_ADDITION
 from .hooks import HookRunner, HookEvent, HookResult
 from .display import (
-    print_step_header, print_tool_call_start, print_tool_call_result,
+    print_step_header, print_tool_call_result,
     print_streaming_token, print_streaming_end, print_error,
-    print_thinking_indicator, StepInfo
+    print_thinking_indicator, StepInfo,
+    print_model_output_start, print_model_output_end,
+    print_tool_call_collapsible, get_status_bar,
 )
 
 
@@ -843,6 +845,9 @@ You help users with coding, file operations, web research, document creation, an
             )
             print_step_header(step_info)
             print_thinking_indicator()
+            # Update status bar
+            status_bar = get_status_bar()
+            status_bar.set_thinking(self.model)
 
             # API call with retry (Ch2: error recovery)
             try:
@@ -890,12 +895,14 @@ You help users with coding, file operations, web research, document creation, an
                     except Exception as fallback_err:
                         self.circuit_breaker.record_failure()
                         self.logger.error(f"Fallback model also failed: {fallback_err}")
+                        status_bar.set_error(str(fallback_err)[:60])
                         if self.circuit_breaker.check():
                             return f"[ERROR] Circuit breaker open after repeated failures: {fallback_err}"
                         continue
                 else:
                     self.circuit_breaker.record_failure()
                     self.logger.error(f"LLM call failed: {e}")
+                    status_bar.set_error(str(e)[:60])
                     if self.circuit_breaker.check():
                         return f"[ERROR] Circuit breaker open after repeated failures: {e}"
                     continue  # Retry in next loop iteration
@@ -908,10 +915,13 @@ You help users with coding, file operations, web research, document creation, an
                 final = message.content or "[No response]"
                 session.add_message("assistant", final)
                 if not self.stream:
-                    # Display the response with formatting
+                    # Display the response in model output container
                     print()
+                    print_model_output_start(self.model)
                     print(final)
-                    print()
+                    print_model_output_end()
+                # Set status bar to idle after completion
+                get_status_bar().set_idle()
                 # Ch8: Fire Stop hook
                 hook_runner = getattr(self, '_hook_runner', None)
                 if hook_runner:
@@ -970,10 +980,14 @@ You help users with coding, file operations, web research, document creation, an
                 display_args = {k: v for k, v in func_args.items() if k != "_parse_error"}
                 all_calls_parsed.append((func_name, display_args))
 
-            # Display all tool calls before execution
+            # Display all tool calls before execution (collapsible format)
             print()
+            status_bar = get_status_bar()
             for i, (func_name, func_args) in enumerate(all_calls_parsed):
-                print_tool_call_start(func_name, func_args, i, total_tool_calls)
+                print_tool_call_collapsible(
+                    func_name, func_args, i, total_tool_calls, collapsed=True
+                )
+                status_bar.set_executing(func_name)
 
             # Execute concurrency-safe tools in parallel (preserving order)
             if safe_calls:
@@ -996,6 +1010,8 @@ You help users with coding, file operations, web research, document creation, an
                             result = json.dumps({"error": str(e)})
                             print_tool_call_result(func_name, False, duration, error=str(e))
                         session.add_message("tool", result, tool_call_id=tc.id)
+                # Update status bar after parallel execution
+                status_bar.set_thinking(self.model)
 
             # X2: Batch related edit/write operations together
             edit_calls = [(tc, fn, fa) for tc, fn, fa in sequential_calls if fn in ("edit_file", "write_file")]
@@ -1003,6 +1019,7 @@ You help users with coding, file operations, web research, document creation, an
 
             # Execute other sequential tools first
             for tc, func_name, func_args in other_calls:
+                status_bar.set_executing(func_name)
                 tool_start = time.time()
                 try:
                     result = self._handle_tool_call(
@@ -1023,6 +1040,7 @@ You help users with coding, file operations, web research, document creation, an
                 if checkpoint_mgr and len(edit_calls) > 1:
                     checkpoint_mgr.begin_batch()
                 for tc, func_name, func_args in edit_calls:
+                    status_bar.set_executing(func_name)
                     tool_start = time.time()
                     try:
                         result = self._handle_tool_call(
@@ -1038,6 +1056,8 @@ You help users with coding, file operations, web research, document creation, an
                     session.add_message("tool", result, tool_call_id=tc.id)
                 if checkpoint_mgr and len(edit_calls) > 1:
                     checkpoint_mgr.end_batch()
+                # Update status bar after all tools executed
+                status_bar.set_thinking(self.model)
 
         # Termination: max steps reached
         stats = self.token_budget.get_stats()

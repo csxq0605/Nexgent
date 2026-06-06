@@ -1,5 +1,6 @@
 """Pytest configuration for root-level tests."""
 import sys
+import time
 import importlib
 import importlib.util
 import functools
@@ -41,31 +42,49 @@ E2E_MAX_RETRIES = _e2e_utils.E2E_MAX_RETRIES
 _is_retryable = _e2e_utils._is_retryable
 
 
-@pytest.hookimpl(tryfirst=True, hookwrapper=True)
-def pytest_runtest_call(item):
-    """Retry flaky E2E tests up to E2E_MAX_RETRIES times on network errors."""
-    # Only retry E2E tests (in test_e2e.py)
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_protocol(item, nextitem):
+    """Retry flaky E2E tests up to E2E_MAX_RETRIES on retryable errors."""
     is_e2e = "test_e2e" in str(item.fspath)
-
     if not is_e2e:
-        # Non-E2E tests: run normally
-        yield
-        return
+        return None  # use default protocol
 
-    # E2E tests: retry only on retryable (network/API) failures
-    last_exc = None
     for attempt in range(E2E_MAX_RETRIES):
-        try:
-            outcome = yield
-            # If we get here without exception, test passed
-            return
-        except Exception as e:
-            last_exc = e
-            if not _is_retryable(e):
-                # Non-retryable error (e.g. AssertionError) — fail immediately
-                raise
-            if attempt < E2E_MAX_RETRIES - 1:
-                print(f"\n  [RETRY] {item.nodeid} failed (attempt {attempt + 1}/{E2E_MAX_RETRIES}), retrying...")
-                continue
-            else:
-                raise last_exc
+        # Run the test using the default protocol
+        reports = pytest.runner.runtestprotocol(item, nextitem=nextitem, log=False)
+        failed = any(r.failed and r.when == "call" for r in reports)
+        if not failed:
+            # Test passed — emit reports normally
+            for rep in reports:
+                item.ihook.pytest_runtest_logreport(report=rep)
+            return True
+
+        # Check if the failure is retryable
+        call_report = next((r for r in reports if r.when == "call" and r.failed), None)
+        if call_report is None:
+            for rep in reports:
+                item.ihook.pytest_runtest_logreport(report=rep)
+            return True
+
+        exc = call_report.excinfo[1] if call_report.excinfo else None
+        if exc is None or not _is_retryable(exc):
+            # Non-retryable — emit as-is
+            for rep in reports:
+                item.ihook.pytest_runtest_logreport(report=rep)
+            return True
+
+        # Retryable — backoff and retry
+        if attempt < E2E_MAX_RETRIES - 1:
+            backoff = 10 * (2 ** attempt)  # 10s, 20s
+            print(f"\n  [RETRY] {item.nodeid} ({type(exc).__name__}), "
+                  f"attempt {attempt + 1}/{E2E_MAX_RETRIES}, backoff {backoff}s...")
+            time.sleep(backoff)
+            # Discard these reports; we'll re-run
+        else:
+            # Final attempt — emit the failure reports
+            print(f"\n  [RETRY] {item.nodeid} exhausted {E2E_MAX_RETRIES} attempts")
+            for rep in reports:
+                item.ihook.pytest_runtest_logreport(report=rep)
+            return True
+
+    return True
