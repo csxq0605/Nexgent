@@ -11,7 +11,7 @@ Implements:
 import os
 import json
 import time
-import hashlib
+import secrets
 import platform
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -97,9 +97,7 @@ class TerminationReason(Enum):
 class AgentDeps:
     """Injected dependencies for testability and environment abstraction."""
     llm_client_factory: Callable = field(default_factory=lambda: OpenAI)
-    uuid_generator: Callable = field(default_factory=lambda: lambda: hashlib.md5(
-        str(time.time()).encode() + str(id(object())).encode()
-    ).hexdigest()[:8])
+    uuid_generator: Callable = field(default_factory=lambda: lambda: secrets.token_hex(4))
     max_retries: int = 3
     base_retry_delay: float = 1.0
 

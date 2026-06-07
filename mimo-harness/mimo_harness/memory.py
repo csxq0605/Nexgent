@@ -48,6 +48,20 @@ _EXCLUDED_PATTERNS = [
     r"(package|library) version",      # Can be read from package.json
 ]
 
+# YAML special characters that require quoting
+_YAML_NEEDS_QUOTE = set(':#,{}[]&*?|<>!=%@`\'"\n\r\t')
+
+
+def _yaml_escape(val: str) -> str:
+    """Escape YAML special characters in a value string.
+
+    Only quotes the value if it contains truly problematic YAML characters.
+    """
+    if any(c in _YAML_NEEDS_QUOTE for c in val):
+        escaped = val.replace(chr(10), " ").replace(chr(13), "").replace('"', '\\"')
+        return f'"{escaped}"'
+    return val
+
 
 class MemoryStore:
     """File-based persistent memory store (Ch6: memdir pattern).
@@ -103,14 +117,6 @@ class MemoryStore:
 
         # Build frontmatter content (Ch6: YAML frontmatter format)
         # L4: Escape YAML special characters in name and description
-        def _yaml_escape(val: str) -> str:
-            # Only quote if value contains truly problematic YAML characters
-            _NEEDS_QUOTE = set(':#,{}[]&*?|<>!=%@`\'"\n\r\t')
-            if any(c in _NEEDS_QUOTE for c in val):
-                escaped = val.replace(chr(10), " ").replace(chr(13), "").replace('"', '\\"')
-                return f'"{escaped}"'
-            return val
-
         file_content = f"""---
 name: {_yaml_escape(name)}
 description: {_yaml_escape(description)}

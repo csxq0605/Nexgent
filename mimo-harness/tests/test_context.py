@@ -157,8 +157,8 @@ class TestCompactContextWithLLM:
         assert tokens > COMPRESS_TRIGGER_TOKENS
 
         result, _, _, _, _ = compact_context(messages, estimated_tokens=tokens)
-        # Fallback: system marker + last 2 messages
-        assert len(result) <= 4
+        # Fallback: system marker + system msg + last 8 messages
+        assert len(result) <= 10
         assert result[0]["role"] == "system"
 
     def test_skips_compression_when_below_token_threshold(self):
@@ -223,8 +223,8 @@ class TestCompactContextEdgeCases:
         assert tokens > COMPRESS_TRIGGER_TOKENS
 
         result, _, _, _, _ = compact_context(messages, estimated_tokens=tokens)
-        # Fallback: system marker + last 2 messages
-        assert len(result) <= 4
+        # Fallback: system marker + system msg + last 8 messages
+        assert len(result) <= 10
         assert result[0]["role"] == "system"
 
     # NOTE: compact_context failure fallback is tested via E2E token budget

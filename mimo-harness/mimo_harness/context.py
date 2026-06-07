@@ -582,7 +582,7 @@ def compact_context(
             compaction_failures += 1
             compaction_attempts += 1
 
-        # Fallback: aggressive truncation — system marker + preserved system messages + last 2 messages
+        # Fallback: aggressive truncation — system marker + preserved system messages + last N messages
         result = []
         result.append({
             "role": "system",
@@ -593,14 +593,15 @@ def compact_context(
             if isinstance(msg, dict) and msg.get("role") == "system":
                 result.append(msg)
                 break  # Only keep the first system message
-        recent = messages[-2:] if len(messages) >= 2 else messages
-        for msg in recent:
-            if isinstance(msg, dict) and msg.get("role") != "system":
-                content = msg.get("content", "")
-                if isinstance(content, str) and len(content) > 2000:
-                    msg = dict(msg)
-                    msg["content"] = content[:2000] + "... [truncated]"
-                result.append(msg)
+        # Keep last 8 non-system messages for reasonable context continuity
+        KEEP_RECENT = 8
+        recent_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") != "system"]
+        for msg in recent_msgs[-KEEP_RECENT:]:
+            content = msg.get("content", "")
+            if isinstance(content, str) and len(content) > 2000:
+                msg = dict(msg)
+                msg["content"] = content[:2000] + "... [truncated]"
+            result.append(msg)
         return _filter_orphan_tool_results(result), compaction_attempts, compaction_failures, False, True
 
     # Case 2: Message-count limit (legacy, simple trim)

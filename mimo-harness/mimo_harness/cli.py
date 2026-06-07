@@ -26,7 +26,7 @@ from .agent import MiMoHarness
 from .config import MIMO_API_KEY, MIMO_MODEL
 from .permissions import PermissionRule
 from .context import Session, CheckpointManager, estimate_tokens, compact_context, cleanup_old_sessions, cleanup_old_spill_files, CONTEXT_WINDOW_TOKENS, LoadResult, _CORRUPT_THRESHOLD
-from .memory import MemoryStore
+from .memory import MemoryStore, MemoryType
 from .display import (
     print_banner as display_banner, print_session_info, print_help as display_help,
     print_error, print_warning, print_info, print_success,
@@ -634,7 +634,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
             content = "\n".join(lines)
             memory_store.save_memory(
                 name=f"session-{session.session_id[:8]}",
-                memory_type=__import__('mimo_harness.memory', fromlist=['MemoryType']).MemoryType.PROJECT,
+                memory_type=MemoryType.PROJECT,
                 description=f"Memory from session {session.session_id[:8]}",
                 content=content,
             )
