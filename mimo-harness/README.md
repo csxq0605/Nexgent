@@ -17,8 +17,9 @@ A production-grade AI agent harness powered by Xiaomi MiMo model, following Clau
 - **Hook System**: 18 lifecycle events, command/HTTP/prompt hooks, async fire-and-forget, SSRF protection on HTTP hooks
 - **SubAgent System**: Parallel/Pipeline execution, resource limits (tokens/time/count), message channels, priority scheduling
 - **Token Counter**: tiktoken precise counting with heuristic fallback, streaming accumulator, per-session stats
-- **Display**: Structured CLI with Unicode/ASCII fallback, conversation bubbles, code syntax highlighting, spinner, status bar, collapsible tool calls
-- **CLI**: Interactive REPL, pipe input, output formats (text/json/stream-json), streaming default ON, `!command`, 25+ slash commands
+- **Display**: Structured CLI with Unicode/ASCII fallback, conversation bubbles, code syntax highlighting, spinner, status bar, collapsible tool calls, rich tables/panels
+- **TUI**: Full-screen Textual interface with fixed bottom input, scrolling output, command auto-complete, input history (up/down arrows)
+- **CLI**: Interactive REPL, pipe input, output formats (text/json/stream-json), streaming default ON, `!command`, 26 slash commands
 
 ## Quick Start
 
@@ -99,6 +100,8 @@ mimo-harness
 | `/subagent <task>` | 运行单个 SubAgent 任务 |
 | `/parallel <t1> \| <t2>` | 并行运行多个任务 |
 | `/pipeline <t1> \| <t2>` | Pipeline 模式运行多个任务 |
+| `/effort [low\|medium\high]` | 查看或切换推理强度 |
+| `/mode [default\|plan]` | 查看或切换权限模式 |
 | `!<cmd>` | 直接执行 shell 命令（如 `!git status`），通过权限系统 |
 
 ### 其他模式
@@ -182,6 +185,8 @@ mimo_harness/
 ├── security_pipeline.py  # 2-layer security (regex + model), sensitive data redaction
 ├── settings.py           # 4-level settings hierarchy
 ├── display.py            # Structured CLI display (banners, spinners, status bar, syntax highlighting)
+├── input_utils.py        # Shared prompt_toolkit input with auto-completion and history
+├── tui.py                # Full-screen Textual TUI (fixed bottom input, scrolling output)
 ├── subagent.py           # SubAgent lifecycle, parallel/pipeline execution, message channels
 ├── token_counter.py      # tiktoken counting, heuristic fallback, streaming accumulator
 └── tools/                # 14 tool modules + registry

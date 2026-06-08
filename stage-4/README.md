@@ -60,8 +60,8 @@ All agents communicate via JSON objects, enabling:
 
 ## How to Run
 ```bash
-# 使用 MiMo 模型（通过 OpenAI 兼容接口）
-# 在 .env 中配置 MIMO_BASE_URL, MIMO_API_KEY, MIMO_MODEL
+# Use MiMo model via OpenAI-compatible API
+# Configure MIMO_BASE_URL, MIMO_API_KEY, MIMO_MODEL in .env
 pip install openai python-dotenv
 python multi_agent_writer.py
 ```

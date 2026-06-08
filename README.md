@@ -29,7 +29,7 @@
 ```bash
 git clone https://github.com/csxq0605/Agent-Learning-Hub-MiMo.git
 cd Agent-Learning-Hub-MiMo
-pip install openai python-dotenv prompt_toolkit rich
+pip install openai python-dotenv prompt_toolkit rich textual
 
 # 配置 .env
 echo 'MIMO_BASE_URL=https://token-plan-cn.xiaomimimo.com/v1' > .env
@@ -58,7 +58,7 @@ mimo-harness   # 进入交互模式
 - **会话管理**: JSONL 自动保存、检查点回滚、会话分叉、命名会话
 - **Hook 系统**: 18 种生命周期事件，命令/HTTP/Prompt 三种 handler
 - **SubAgent**: 并行/Pipeline 执行，资源限制，消息通道
-- **CLI**: 25+ 斜杠命令、管道输入、多输出格式
+- **CLI**: 27 交互命令（26 斜杠 + `!` shell）、全屏 TUI（Textual）、管道输入、多输出格式
 
 详见 [mimo-harness/README.md](mimo-harness/README.md)。
 
