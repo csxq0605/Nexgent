@@ -69,11 +69,14 @@ def work_dir(tmp_path):
         shutil.rmtree(test_dir, ignore_errors=True)
 
 
-def _harness(auto_approve=True, max_steps=10):
-    """Create a harness with real API."""
+def _harness(auto_approve=True, max_steps=10, max_duration=120.0):
+    """Create a harness with real API.
+
+    Default max_duration=120s prevents tests from hanging indefinitely.
+    """
     # Ensure allowed_write_dir is current CWD (may have been changed by previous tests)
     file_ops.set_allowed_write_dir(os.getcwd())
-    return MiMoHarness(auto_approve=auto_approve, bare=True, max_steps=max_steps)
+    return MiMoHarness(auto_approve=auto_approve, bare=True, max_steps=max_steps, max_duration=max_duration)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -275,7 +278,7 @@ class TestE2EMultiStep:
         target = os.path.join(work_dir, "calc.py")
 
         # Use longer max_duration — execute_python API calls can be slow
-        harness = MiMoHarness(auto_approve=True, bare=True, max_steps=15, max_duration=900.0)
+        harness = MiMoHarness(auto_approve=True, bare=True, max_steps=15, max_duration=180.0)
         file_ops.set_allowed_write_dir(os.getcwd())
         result = harness.run(
             f"Create a Python script at {target} that calculates and prints "
@@ -433,7 +436,7 @@ class TestE2ETokenCounter:
         response = client.chat.completions.create(
             model=MIMO_MODEL,
             messages=messages,
-            max_completion_tokens=100,
+            max_tokens=100,
         )
 
         # Our token count
@@ -505,9 +508,15 @@ class TestE2ECompactContext:
 def _run_cli(*args, timeout=120):
     """Run the CLI as a subprocess."""
     cmd = [sys.executable, "-m", "mimo_harness.cli"] + list(args)
+    # Ensure UTF-8 encoding for subprocess output (Windows GBK fix)
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
     return subprocess.run(
-        cmd, capture_output=True, text=True, timeout=timeout,
+        cmd, capture_output=True, timeout=timeout,
         cwd=os.path.join(os.path.dirname(__file__), ".."),
+        env=env,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
