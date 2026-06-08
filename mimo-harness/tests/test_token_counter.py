@@ -281,21 +281,18 @@ class TestTokenBudget:
         expected = 50000 / budget.effective_max
         assert ratio == pytest.approx(expected, rel=0.01)
 
-    def test_budget_warning_and_blocking(self):
-        """Warning at 85%, blocking at 95%."""
+    def test_budget_warning_threshold(self):
+        """Warning at 85% — no blocking, just warning like Claude Code."""
         budget = TokenBudget(max_tokens=100000)
         # Below warning threshold
         budget.estimated_tokens = 80000
         assert not budget.is_warning()
-        assert not budget.is_blocked()
-        # Above warning, below blocking
+        # Above warning
         budget.estimated_tokens = 90000
         assert budget.is_warning()
-        assert not budget.is_blocked()
-        # Above blocking
+        # High usage still just warns
         budget.estimated_tokens = 98000
         assert budget.is_warning()
-        assert budget.is_blocked()
 
 
 # ============================================================================
