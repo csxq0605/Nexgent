@@ -730,30 +730,27 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
         else:
             print_info(f"Compressing... ({_format_tokens(tokens_before)} tokens)")
             from .config import MIMO_BASE_URL, require_api_key
+            from .context import llm_compress, snip_compress, microcompact
             try:
                 api_key = require_api_key()
                 from openai import OpenAI
                 client = OpenAI(api_key=api_key, base_url=MIMO_BASE_URL)
-                compacted, _, _, _, _ = compact_context(
-                    session.messages,
-                    client=client,
-                    model=harness.model,
-                    estimated_tokens=tokens_before,
-                )
+                # /compact: directly use LLM summarization (Level 3)
+                compacted = llm_compress(session.messages, client, harness.model)
+                if compacted is None:
+                    # LLM failed, fall back to snip + microcompact
+                    compacted = microcompact(snip_compress(session.messages))
                 session.messages = compacted
                 session.compaction_count += 1
                 tokens_after = estimate_tokens(session.messages)
                 print_success(f"Done: {_format_tokens(tokens_before)} {ARROW_ICON} {_format_tokens(tokens_after)} tokens")
             except Exception as e:
-                # Fallback: no LLM, just truncation
-                compacted, _, _, _, _ = compact_context(
-                    session.messages,
-                    estimated_tokens=tokens_before,
-                )
+                # No API available, use snip + microcompact
+                compacted = microcompact(snip_compress(session.messages))
                 session.messages = compacted
                 session.compaction_count += 1
                 tokens_after = estimate_tokens(session.messages)
-                print_success(f"Done (truncation): {_format_tokens(tokens_before)} {ARROW_ICON} {_format_tokens(tokens_after)} tokens")
+                print_success(f"Done (local): {_format_tokens(tokens_before)} {ARROW_ICON} {_format_tokens(tokens_after)} tokens")
         print()
     elif cmd[0] == "/context":
         # C9: Per-message token breakdown
