@@ -33,6 +33,7 @@ from .hooks import HookRunner, HookEvent, HookResult
 from .display import (
     print_step_header, print_tool_call_result,
     print_streaming_token, print_streaming_end, print_error,
+    print_warning, print_info,
     print_thinking_indicator, StepInfo,
     print_model_output_start, print_model_output_end,
     print_tool_call_collapsible, get_status_bar,
@@ -72,8 +73,7 @@ def _parse_tool_result(result: str) -> tuple[bool, str | None, str | None]:
 # Constants (Ch7: token budget thresholds)
 # ---------------------------------------------------------------------------
 MAX_CONSECUTIVE_FAILURES = 3
-TOKEN_WARNING_THRESHOLD = 0.85  # 85% of context window
-TOKEN_BLOCK_THRESHOLD = 0.98    # 98% → block new requests (near hard limit)
+TOKEN_WARNING_THRESHOLD = 0.85  # 85% of context window — trigger auto-compact
 DEFAULT_MAX_CONTEXT_TOKENS = 1_000_000  # 1M context window
 RESERVED_OUTPUT_TOKENS = 4096
 
@@ -195,9 +195,6 @@ class TokenBudget:
 
     def is_warning(self) -> bool:
         return self.usage_ratio() >= TOKEN_WARNING_THRESHOLD
-
-    def is_blocked(self) -> bool:
-        return self.usage_ratio() >= TOKEN_BLOCK_THRESHOLD
 
     def get_stats(self):
         """Get or create TokenStats for this session."""
@@ -859,33 +856,25 @@ You help users with coding, file operations, web research, document creation, an
                     )
             messages = [system_msg] + session.get_messages()
 
-            # Token budget check (Ch7)
+            # Auto-compact when context gets large (no blocking — always proceed)
             self.token_budget.update(messages)
-            if self.token_budget.is_blocked():
-                self.logger.error("[TOKEN_LIMIT] Context window exceeded")
-                self._last_session = session
-                return "[ERROR] Token budget exceeded — context too long"
-
-            if self.token_budget.is_warning():
-                pct = self.token_budget.usage_ratio()
+            pct = self.token_budget.usage_ratio()
+            if pct >= 0.85 and not did_compress:
                 self.logger.info(f"[TOKEN_WARNING] Usage at {pct:.0%}")
-                # Auto-compact if not already done this iteration
-                if not did_compress and pct >= 0.90:
-                    print_warning(f"Context usage at {pct:.0%} — running auto-compact...")
-                    compacted, _, _, _, did_compact = compact_context(
-                        session.get_messages(),
-                        client=client,
-                        model=self.model,
-                        estimated_tokens=estimate_tokens(session.get_messages()),
-                    )
-                    if did_compact:
-                        session.messages = compacted
-                        session.compaction_count += 1
-                        # Re-add task after compaction
-                        session.add_message("user", task)
-                        messages = [system_msg] + session.get_messages()
-                        self.token_budget.update(messages)
-                        print_info(f"Compacted to {self.token_budget.usage_ratio():.0%}")
+                print_warning(f"Context at {pct:.0%} — auto-compacting...")
+                compacted, _, _, _, did_compact = compact_context(
+                    session.get_messages(),
+                    client=client,
+                    model=self.model,
+                    estimated_tokens=estimate_tokens(session.get_messages()),
+                )
+                if did_compact:
+                    session.messages = compacted
+                    session.compaction_count += 1
+                    session.add_message("user", task)
+                    messages = [system_msg] + session.get_messages()
+                    self.token_budget.update(messages)
+                    print_info(f"Compacted to {self.token_budget.usage_ratio():.0%}")
 
             self.logger.trace(
                 "llm_call_start",

@@ -161,17 +161,20 @@ class TestTerminationPaths:
 
         assert "ABORTED" in result or "Stopped by user" in result or "abort" in result.lower()
 
-    def test_token_limit_termination(self):
-        """Agent stops when token budget is exceeded."""
+    def test_token_limit_auto_compact(self):
+        """Agent auto-compacts when token usage is high, never blocks."""
         harness = MiMoHarness(max_steps=10, auto_approve=True, bare=True)
-        # Force token budget to be blocked
+        # Force high token usage
         harness.token_budget.effective_max = 1
         harness.token_budget.estimated_tokens = 999999
 
         session = Session(session_id="test")
         result = harness.run("test task", session)
 
-        assert "Token budget" in result or "TOKEN_LIMIT" in result or "ERROR" in result
+        # Agent should produce a response, NOT an error — no blocking
+        assert len(result) > 0, "Agent should produce a response"
+        assert "Token budget" not in result, "Should not block on token limit"
+        assert "TOKEN_LIMIT" not in result, "Should not block on token limit"
 
 
 class TestBareMode:
