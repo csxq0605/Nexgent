@@ -6,11 +6,11 @@ A production-grade AI agent harness powered by Xiaomi MiMo model, following Clau
 
 ## Features
 
-- **Agent Loop**: Dependency injection, circuit breaker, token budget, parallel tool dispatch, streaming, effort levels, fallback model, graceful abort
-- **14 Tool Modules**: File ops, shell, code execution, web, docs, math, notebooks, tasks, LSP, scheduler, plan, monitor, interactive, subagent
-- **Permission Pipeline**: 6 modes (DEFAULT/PLAN/AUTO/ACCEPT_EDITS/DONT_ASK/BYPASS), 4-stage pipeline, protected paths, symlink resolution
+- **Agent Loop**: Dependency injection, circuit breaker, token budget, parallel tool dispatch, streaming, effort levels, fallback model, graceful abort, _StreamReader with per-chunk 120s timeout
+- **33 Tools across 14 Modules**: File ops (6), shell, code execution, web (2), docs (2), math, notebooks, tasks (5), LSP (3), scheduler (3), plan (2), monitor (3), interactive (2), subagent
+- **Permission Pipeline**: 6 modes (DEFAULT/PLAN/AUTO/ACCEPT_EDITS/DONT_ASK/BYPASS), 4-stage pipeline, protected paths, symlink resolution, inline TUI prompts
 - **Security Pipeline**: 2-layer defense (regex pre-filter + model classifier), sensitive data redaction, prompt injection detection, self-review mechanism
-- **Context Management**: 4-level progressive compression (snip → microcompact → LLM semantic → aggressive truncation), 200K token window, thrashing protection
+- **Context Management**: 1M token window, 4-level progressive compression (snip → microcompact → LLM semantic → truncation), warning at 85%, user-controlled `/compact`
 - **Memory System**: 4 types (user/feedback/project/reference), @import directives, path-scoped rules, tiered loading, CLAUDE.md discovery
 - **Session Management**: Auto-save (JSONL), resume, named sessions, session ID validation, checkpoints with rewind, fork, auto-cleanup
 - **Settings Hierarchy**: 4-level config (managed → user → project → local), config hot-reload via ConfigWatcher
@@ -18,7 +18,7 @@ A production-grade AI agent harness powered by Xiaomi MiMo model, following Clau
 - **SubAgent System**: Parallel/Pipeline execution, resource limits (tokens/time/count), message channels, priority scheduling
 - **Token Counter**: tiktoken precise counting with heuristic fallback, streaming accumulator, per-session stats
 - **Display**: Structured CLI with Unicode/ASCII fallback, conversation bubbles, code syntax highlighting, spinner, status bar, collapsible tool calls, rich tables/panels
-- **TUI**: Full-screen Textual interface with fixed bottom input, scrolling output, command auto-complete, input history (up/down arrows)
+- **TUI**: Full-screen Textual interface with queue-based output (no deadlock), fixed bottom input, scrolling output, tab completion, input history, inline permission prompts, Ctrl+K force-kill
 - **CLI**: Interactive REPL, pipe input, output formats (text/json/stream-json), streaming default ON, `!command`, 26 slash commands
 
 ## Quick Start
@@ -33,7 +33,7 @@ cp .env.example .env  # Edit with your API key
 # MIMO_API_KEY=your-api-key-here
 # MIMO_MODEL=mimo-v2.5-pro
 
-mimo-harness          # 进入交互模式
+mimo-harness          # 进入交互模式（自动启动 TUI）
 ```
 
 ## Usage
@@ -42,7 +42,7 @@ mimo-harness          # 进入交互模式
 
 ```bash
 mimo-harness
-# You [5.4K/200.0K]: ████---------------------------------------- 2.7%
+# Session 4a2f  |  Tokens 5.4K/1.0M  |  Msgs 12
 
 > 读取当前目录的 README.md，帮我总结要点
 # Agent 自动调用 read_file 工具读取文件并给出摘要
@@ -67,10 +67,20 @@ mimo-harness
 
 > /context   # 查看每条消息的 token 明细，找出最占 token 的消息
 > /rewind    # 回退到上一个检查点，撤销 Agent 的文件修改
-> /compact   # 手动压缩上下文，释放 token 空间
+> /compact   # 手动压缩上下文（LLM 语义摘要），释放 token 空间
 > !git diff  # 直接执行 shell 命令，查看代码变更
 > /fork      # 分叉当前会话，创建新的 session ID
 ```
+
+### TUI 快捷键
+
+| 快捷键 | 说明 |
+|--------|------|
+| `Ctrl+C` | 优雅中止当前任务（如果在运行）或退出 |
+| `Ctrl+K` | 强制终止卡住的 agent 线程 |
+| `Escape` | 保存并退出 |
+| `Up/Down` | 浏览输入历史 |
+| `Tab` | 斜杠命令补全（循环匹配） |
 
 ### 斜杠命令
 
@@ -91,7 +101,7 @@ mimo-harness
 | `/hooks` | 列出已注册的 Hook |
 | `/stats` | 显示会话统计（消息数、token、压缩次数、熔断器状态） |
 | `/tokens` | 显示 token 用量进度条 |
-| `/compact` | 手动压缩上下文 |
+| `/compact` | 手动压缩上下文（直接 LLM 摘要） |
 | `/context` | 按消息显示 token 明细，标记最占 token 的消息 |
 | `/init` | 扫描项目并生成 AGENTS.md |
 | `/rewind` | 回退到上一个文件检查点（支持批量恢复） |
@@ -100,7 +110,7 @@ mimo-harness
 | `/subagent <task>` | 运行单个 SubAgent 任务 |
 | `/parallel <t1> \| <t2>` | 并行运行多个任务 |
 | `/pipeline <t1> \| <t2>` | Pipeline 模式运行多个任务 |
-| `/effort [low\|medium\high]` | 查看或切换推理强度 |
+| `/effort [low\|medium\|high]` | 查看或切换推理强度 |
 | `/mode [default\|plan]` | 查看或切换权限模式 |
 | `!<cmd>` | 直接执行 shell 命令（如 `!git status`），通过权限系统 |
 
@@ -114,7 +124,7 @@ mimo-harness --resume                      # 从列表中选择会话恢复
 mimo-harness --session-id my-project       # 按指定 ID 恢复或创建会话
 mimo-harness --name "weekly-report"        # 命名当前会话
 mimo-harness --auto-approve --effort high  # 自动审批 + 高努力
-mimo-harness --no-stream                    # 禁用流式输出（默认启用）
+mimo-harness --no-stream                   # 禁用流式输出（默认启用）
 mimo-harness --bare                        # 裸模式（跳过记忆加载）
 mimo-harness --fallback-model gpt-4o       # 设置备用模型
 ```
@@ -151,7 +161,7 @@ mimo-harness --fallback-model gpt-4o       # 设置备用模型
 | `--auto-approve`, `-y` | 自动审批所有写操作 |
 | `--dry-run` | 干跑模式（只显示不执行） |
 | `--plan` | 计划模式（只读操作） |
-| `--max-steps` | 最大 Agent 步数（默认 20） |
+| `--max-steps` | 最大 Agent 步数（0=无限，默认 0） |
 | `--verbose`, `-v` | 详细输出 |
 | `--log-file` | 日志文件路径 |
 | `--config`, `-c` | 配置文件路径 |
@@ -173,39 +183,97 @@ mimo-harness --fallback-model gpt-4o       # 设置备用模型
 
 ```
 mimo_harness/
-├── agent.py              # Core loop, DI, circuit breaker, token budget, streaming
-├── cli.py                # REPL, pipe input, output formats, session resume, commands
+├── agent.py              # Core loop, DI, circuit breaker, token budget, streaming, _StreamReader
+├── cli.py                # REPL, pipe input, output formats, session resume, 26 commands
 ├── config.py             # Configuration management, API key validation
 ├── context.py            # 4-level compression, session management, checkpoints, memory loading
 ├── hooks.py              # 18 lifecycle events, command/HTTP/prompt hooks
 ├── logging_utils.py      # Structured logging with trace IDs
 ├── memory.py             # 4 typed memories, tiered loading, path-scoped rules
-├── permissions.py        # 6 modes, 4-stage pipeline, protected paths, symlink resolution
+├── permissions.py        # 6 modes, 4-stage pipeline, protected paths, TUI callback
 ├── project_scanner.py    # Project analysis, AGENTS.md generation
 ├── security_pipeline.py  # 2-layer security (regex + model), sensitive data redaction
 ├── settings.py           # 4-level settings hierarchy
 ├── display.py            # Structured CLI display (banners, spinners, status bar, syntax highlighting)
 ├── input_utils.py        # Shared prompt_toolkit input with auto-completion and history
-├── tui.py                # Full-screen Textual TUI (fixed bottom input, scrolling output)
+├── tui.py                # Full-screen Textual TUI (queue-based output, inline permissions, Ctrl+K)
 ├── subagent.py           # SubAgent lifecycle, parallel/pipeline execution, message channels
 ├── token_counter.py      # tiktoken counting, heuristic fallback, streaming accumulator
-└── tools/                # 14 tool modules + registry
-    ├── code_exec.py      # Python code execution in isolated subprocess
-    ├── doc_tools.py      # Document and CSV creation
-    ├── file_ops.py       # File read/write/edit, session-scoped state via contextvars
-    ├── interactive.py    # User interaction (ask_user_question), memory topic loading
-    ├── lsp_tools.py      # LSP integration (definition, references, diagnostics)
-    ├── math_tools.py     # AST-based safe math evaluator
-    ├── monitor.py        # Background process monitoring
-    ├── notebook_tools.py # Jupyter notebook cell editing
-    ├── plan_tools.py     # Plan mode (enter/exit with user approval)
-    ├── registry.py       # Tool registration, validation, disk spillover
-    ├── scheduler_tools.py # Cron-like session-scoped scheduling
-    ├── shell.py          # Shell execution with read-only auto-detection, env scrubbing
-    ├── subagent_tools.py # LLM-driven task delegation to sub-agents
-    ├── task_tools.py     # Task CRUD (create/get/list/update/delete)
-    └── web_tools.py      # Web search (DuckDuckGo/Bing) and fetch with SSRF protection
+└── tools/                # 14 modules, 33 registered tools
+    ├── code_exec.py      # execute_python — Python code execution in isolated subprocess
+    ├── doc_tools.py      # create_doc, create_spreadsheet — Document and CSV creation
+    ├── file_ops.py       # read_file, read_files, write_file, edit_file, glob_files, grep_files
+    ├── interactive.py    # ask_user_question, read_memory_topic
+    ├── lsp_tools.py      # lsp_definition, lsp_references, lsp_diagnostics
+    ├── math_tools.py     # calculator — AST-based safe math evaluator
+    ├── monitor.py        # monitor_start, monitor_stop, monitor_list
+    ├── notebook_tools.py # notebook_edit — Jupyter notebook cell editing
+    ├── plan_tools.py     # enter_plan_mode, exit_plan_mode
+    ├── registry.py       # Tool registration, validation, 4-stage execution, disk spillover
+    ├── scheduler_tools.py # cron_create, cron_delete, cron_list
+    ├── shell.py          # run_command — shell execution with read-only auto-detection, env scrubbing
+    ├── subagent_tools.py # subagent_run — LLM-driven task delegation to sub-agents
+    ├── task_tools.py     # task_create, task_get, task_list, task_update, task_delete
+    └── web_tools.py      # web_search, web_fetch — SSRF protection, response caching
 ```
+
+## Context Management
+
+- **Context Window**: 1,000,000 tokens (1M)
+- **Warning Threshold**: 85% (850K tokens) — prints warning, user decides to `/compact`
+- **No blocking** — agent never refuses to run, only warns
+- **`/compact` command**: directly uses LLM semantic summarization (Level 3)
+
+### 4-Level Progressive Compression
+
+| Level | Method | Cost | Description |
+|-------|--------|------|-------------|
+| 1 | Snip | Free | Replace old tool results (>20 msgs ago) with `[Old tool result content cleared]` |
+| 2 | Microcompact | Free | Keep only recent 5 tool results, clear the rest |
+| 3 | LLM Semantic | API call | Full conversation summarization (~500 words max) |
+| 4 | Truncation | Free | Keep last 15 messages only |
+
+`/compact` directly invokes Level 3 (LLM summarization). Auto-compression is not triggered — only warnings are shown.
+
+## TUI Architecture
+
+The TUI uses a **queue-based output architecture** to prevent thread deadlocks:
+
+```
+Agent Worker Thread          Main Textual Thread
+      │                            │
+      │  _output_queue.put()       │  _drain_output_queue() ← 50ms timer
+      │  (never blocks)            │  (processes ≤100 items/tick)
+      │                            │
+      ▼                            ▼
+  _output_queue  ──────────→  RichLog / Static widgets
+```
+
+- Worker thread puts output items into `queue.Queue` (non-blocking)
+- Main thread drains queue every 50ms via `set_interval` timer
+- No `call_from_thread()` = no deadlock possible
+- `_StdoutProxy` redirects `sys.stdout`/`sys.stderr` to queue
+- Permission prompts appear inline in output area (Y/n via key press)
+- `Ctrl+K` force-kills stuck agent thread via `PyThreadState_SetAsyncExc`
+
+## Tool Summary
+
+| Module | Tools | Permission | Description |
+|--------|-------|-----------|-------------|
+| file_ops | read_file, read_files, write_file, edit_file, glob_files, grep_files | READ/WRITE | File operations with session-scoped state |
+| shell | run_command | READ (dynamic) | Shell execution, background jobs, env scrubbing |
+| code_exec | execute_python | WRITE | Python code in isolated subprocess |
+| web_tools | web_search, web_fetch | READ | SSRF-protected web search and fetch |
+| doc_tools | create_doc, create_spreadsheet | WRITE | Document and CSV creation |
+| math_tools | calculator | READ | AST-based safe math evaluator |
+| interactive | ask_user_question, read_memory_topic | READ | User interaction and memory loading |
+| monitor | monitor_start, monitor_stop, monitor_list | READ/WRITE | Background process monitoring |
+| notebook_tools | notebook_edit | WRITE | Jupyter notebook cell editing |
+| task_tools | task_create, task_get, task_list, task_update, task_delete | READ/WRITE | Task CRUD with dependencies |
+| plan_tools | enter_plan_mode, exit_plan_mode | READ | Plan mode management |
+| lsp_tools | lsp_definition, lsp_references, lsp_diagnostics | READ | LSP integration with grep fallback |
+| scheduler_tools | cron_create, cron_delete, cron_list | READ | Session-scoped cron scheduling |
+| subagent_tools | subagent_run | WRITE | LLM-driven task delegation |
 
 ## Testing
 
@@ -214,15 +282,16 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-**测试状态**: 760 unit + 46 E2E = 806 tests passed
+**测试状态**: ~1,143 tests across 27 test files
 
-24 test files covering:
+27 test files covering:
 - **Security**: path traversal, SSRF, shell injection, large input, Unicode, sensitive data redaction, prompt injection detection
 - **Permissions**: 6 modes, 4-stage pipeline, protected paths, symlink resolution, rule matching
 - **Context**: 4-level compression, parallel dispatch, streaming, thrashing protection, orphan filtering
 - **Tools**: file ops, shell, web, docs, math, notebooks, tasks, LSP, plan, scheduler, code execution
 - **Display**: banner, step header, tool call display, spinner, status bar, Unicode fallback, conversation bubbles, code blocks, hard-wrap
 - **CLI**: interactive REPL, pipe input, output formats, session management, argument parsing, streaming output
+- **TUI**: queue-based output, command suggester, stream buffer, class attributes, inline permissions
 - **Hooks**: 18 lifecycle events, command/HTTP/prompt hooks, async execution
 - **Settings**: 4-level hierarchy, config hot-reload
 - **Session**: ID validation, checkpoints, fork, resume, JSONL persistence
