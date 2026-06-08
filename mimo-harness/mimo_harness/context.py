@@ -567,18 +567,29 @@ def compact_context(
     if not needs_token_compress and not needs_message_compress:
         return _filter_orphan_tool_results(messages), compaction_attempts, compaction_failures, False, False
 
-    # Case 1: Token-based compression (Claude Code style — aggressive)
+    # Case 1: Token-based compression — progressive 4-level approach
     if needs_token_compress:
         # A8: Check if thrashing is detected (3 consecutive failures)
         if compaction_failures >= 3:
             result = _filter_orphan_tool_results(messages)
             return result, compaction_attempts, compaction_failures, True, False
 
-        # Level 3: LLM-based semantic compression (preferred)
+        # Level 1: Snip — replace old tool results with markers (zero cost)
+        result = snip_compress(messages)
+        result_tokens = estimate_tokens(result)
+        if result_tokens < COMPRESS_TRIGGER_TOKENS:
+            return _filter_orphan_tool_results(result), compaction_attempts, compaction_failures, False, True
+
+        # Level 2: Microcompact — keep only recent N tool results (zero cost)
+        result = microcompact(result)
+        result_tokens = estimate_tokens(result)
+        if result_tokens < COMPRESS_TRIGGER_TOKENS:
+            return _filter_orphan_tool_results(result), compaction_attempts, compaction_failures, False, True
+
+        # Level 3: LLM-based semantic compression
         if client is not None:
             llm_result = llm_compress(messages, client, model or "mimo-v2.5-pro")
             if llm_result is not None:
-                # A8: Check if compression achieved at least 30% reduction
                 new_tokens = estimate_tokens(llm_result)
                 if tokens > 0 and (tokens - new_tokens) / tokens < 0.30:
                     compaction_failures += 1
@@ -586,22 +597,19 @@ def compact_context(
                     compaction_failures = 0
                 compaction_attempts += 1
                 return llm_result, compaction_attempts, compaction_failures, False, True
-            # LLM failed, fall through to truncation
             compaction_failures += 1
             compaction_attempts += 1
 
-        # Fallback: aggressive truncation — system marker + preserved system messages + last N messages
+        # Level 4: Truncation fallback — last 15 messages
         result = []
         result.append({
             "role": "system",
             "content": f"[Context compacted: {len(messages)} messages, ~{tokens} tokens reduced to this summary]"
         })
-        # Preserve existing system messages from the conversation
         for msg in messages:
             if isinstance(msg, dict) and msg.get("role") == "system":
                 result.append(msg)
-                break  # Only keep the first system message
-        # Keep last 15 non-system messages for reasonable context continuity
+                break
         KEEP_RECENT = 15
         recent_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") != "system"]
         for msg in recent_msgs[-KEEP_RECENT:]:
