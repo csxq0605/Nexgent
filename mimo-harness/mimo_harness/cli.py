@@ -478,6 +478,9 @@ def main():
         tokens = estimate_tokens(session.messages)
         token_str = _format_tokens(tokens)
         max_str = _format_tokens(CONTEXT_WINDOW_TOKENS)
+        # Warn user when context is getting full
+        if CONTEXT_WINDOW_TOKENS > 0 and tokens / CONTEXT_WINDOW_TOKENS > 0.85:
+            print_warning(f"Context at {tokens/CONTEXT_WINDOW_TOKENS:.0%} — consider /compact to free space")
         try:
             # Styled prompt with input box using prompt_toolkit FormattedText
             from prompt_toolkit.formatted_text import FormattedText

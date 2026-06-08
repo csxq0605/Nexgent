@@ -128,8 +128,8 @@ class TestLoadMemory:
 
 
 class TestCompactContextWithLLM:
-    def _make_big_messages(self, n, content_size=12000):
-        """Create messages large enough to exceed token threshold (~170K)."""
+    def _make_big_messages(self, n, content_size=50000):
+        """Create messages large enough to exceed token threshold (~850K)."""
         msgs = []
         for i in range(n):
             msgs.append({"role": "user", "content": f"q{i}" + "x" * content_size})
@@ -138,7 +138,7 @@ class TestCompactContextWithLLM:
 
     def test_uses_llm_when_tokens_exceed_threshold(self):
         client, model = _real_llm_client()
-        messages = self._make_big_messages(60)
+        messages = self._make_big_messages(75)
         tokens = estimate_tokens(messages)
         assert tokens > COMPRESS_TRIGGER_TOKENS
 
@@ -152,7 +152,7 @@ class TestCompactContextWithLLM:
 
     def test_falls_back_to_truncation_on_no_client(self):
         """Without client, falls back to truncation."""
-        messages = self._make_big_messages(60)
+        messages = self._make_big_messages(75)
         tokens = estimate_tokens(messages)
         assert tokens > COMPRESS_TRIGGER_TOKENS
 
@@ -210,8 +210,8 @@ class TestCompactContextEdgeCases:
     def test_token_compress_with_tool_calls(self):
         """Token-based compression should handle tool_calls messages."""
         messages = []
-        for i in range(100):
-            messages.append({"role": "user", "content": f"task {i} " + "x" * 15000})
+        for i in range(200):
+            messages.append({"role": "user", "content": f"task {i} " + "x" * 50000})
             messages.append({
                 "role": "assistant",
                 "content": "ok",
@@ -352,8 +352,8 @@ class TestCompactContextTupleReturn:
     def test_attempts_increments_on_compression(self):
         """When LLM compression succeeds, attempts should increment."""
         client, model = _real_llm_client()
-        big = "x" * 15000
-        messages = [{"role": "user", "content": big}] * 100
+        big = "x" * 50000
+        messages = [{"role": "user", "content": big}] * 150
         tokens = estimate_tokens(messages)
         assert tokens > COMPRESS_TRIGGER_TOKENS
 
@@ -367,8 +367,8 @@ class TestCompactContextTupleReturn:
 
     def test_failures_increment_when_no_client(self):
         """Without client, truncation fallback doesn't increment failures."""
-        big = "x" * 15000
-        messages = [{"role": "user", "content": big}] * 100
+        big = "x" * 50000
+        messages = [{"role": "user", "content": big}] * 150
         tokens = estimate_tokens(messages)
         assert tokens > COMPRESS_TRIGGER_TOKENS
 
@@ -382,8 +382,8 @@ class TestCompactContextTupleReturn:
 
     def test_thrashing_detected_after_three_failures(self):
         """Thrashing flag is True when compaction_failures >= 3."""
-        big = "x" * 15000
-        messages = [{"role": "user", "content": big}] * 100
+        big = "x" * 50000
+        messages = [{"role": "user", "content": big}] * 150
         tokens = estimate_tokens(messages)
         assert tokens > COMPRESS_TRIGGER_TOKENS
 

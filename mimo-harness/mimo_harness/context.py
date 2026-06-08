@@ -26,7 +26,7 @@ from typing import Optional, Any, NamedTuple
 # ---------------------------------------------------------------------------
 # Constants (Ch7: compression thresholds — Claude Code style)
 # ---------------------------------------------------------------------------
-CONTEXT_WINDOW_TOKENS = 200_000          # Total context window (200K)
+CONTEXT_WINDOW_TOKENS = 1_000_000        # Total context window (1M)
 STARTUP_RESERVE_TOKENS = 10_000          # System prompt + memory + AGENTS.md (~7.5K)
 COMPRESS_TRIGGER_RATIO = 0.85            # Trigger compression at 85% of window
 

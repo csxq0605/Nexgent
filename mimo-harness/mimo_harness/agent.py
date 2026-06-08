@@ -73,8 +73,8 @@ def _parse_tool_result(result: str) -> tuple[bool, str | None, str | None]:
 # ---------------------------------------------------------------------------
 MAX_CONSECUTIVE_FAILURES = 3
 TOKEN_WARNING_THRESHOLD = 0.85  # 85% of context window
-TOKEN_BLOCK_THRESHOLD = 0.95    # 95% → block new requests
-DEFAULT_MAX_CONTEXT_TOKENS = 200_000  # 200K context window (Claude Code standard)
+TOKEN_BLOCK_THRESHOLD = 0.98    # 98% → block new requests (near hard limit)
+DEFAULT_MAX_CONTEXT_TOKENS = 1_000_000  # 1M context window
 RESERVED_OUTPUT_TOKENS = 4096
 
 
@@ -867,10 +867,25 @@ You help users with coding, file operations, web research, document creation, an
                 return "[ERROR] Token budget exceeded — context too long"
 
             if self.token_budget.is_warning():
-                self.logger.info(
-                    f"[TOKEN_WARNING] Usage at "
-                    f"{self.token_budget.usage_ratio():.0%}"
-                )
+                pct = self.token_budget.usage_ratio()
+                self.logger.info(f"[TOKEN_WARNING] Usage at {pct:.0%}")
+                # Auto-compact if not already done this iteration
+                if not did_compress and pct >= 0.90:
+                    print_warning(f"Context usage at {pct:.0%} — running auto-compact...")
+                    compacted, _, _, _, did_compact = compact_context(
+                        session.get_messages(),
+                        client=client,
+                        model=self.model,
+                        estimated_tokens=estimate_tokens(session.get_messages()),
+                    )
+                    if did_compact:
+                        session.messages = compacted
+                        session.compaction_count += 1
+                        # Re-add task after compaction
+                        session.add_message("user", task)
+                        messages = [system_msg] + session.get_messages()
+                        self.token_budget.update(messages)
+                        print_info(f"Compacted to {self.token_budget.usage_ratio():.0%}")
 
             self.logger.trace(
                 "llm_call_start",
@@ -918,7 +933,7 @@ You help users with coding, file operations, web research, document creation, an
                                 tool_choice="auto",
                                 temperature=effort_params["temperature"],
                                 top_p=0.9,
-                            ),
+                                            ),
                             max_retries=self.deps.max_retries,
                             base_delay=self.deps.base_retry_delay,
                         )
