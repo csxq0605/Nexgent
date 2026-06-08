@@ -118,7 +118,7 @@ class TestTerminationPaths:
 
     def test_max_duration_termination(self):
         """Agent stops when time limit is exceeded."""
-        harness = MiMoHarness(max_steps=100, auto_approve=True, bare=True, max_duration=0.0)
+        harness = MiMoHarness(max_steps=100, auto_approve=True, bare=True, max_duration=0.01)
         session = Session(session_id="test")
         result = harness.run("test task", session)
 

@@ -285,7 +285,7 @@ You help users with coding, file operations, web research, document creation, an
         auto_approve: bool = False,
         dry_run: bool = False,
         max_steps: int = 0,
-        max_duration: float = 600.0,
+        max_duration: float = 0.0,
         verbose: bool = False,
         log_file: str = None,
         deps: AgentDeps = None,
@@ -783,7 +783,7 @@ You help users with coding, file operations, web research, document creation, an
                 return "[ABORTED] Stopped by user request."
 
             # Termination check: time limit
-            if time.time() - start_time > self.max_duration:
+            if self.max_duration > 0 and time.time() - start_time > self.max_duration:
                 self.logger.info(f"[LIMIT] Time limit exceeded ({self.max_duration}s)")
                 self._last_session = session
                 return "[LIMIT] Time limit exceeded"
