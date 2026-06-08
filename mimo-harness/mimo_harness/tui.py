@@ -119,6 +119,7 @@ class MiMoTUI(App):
 
     BINDINGS = [
         Binding("ctrl+c", "abort", "Abort", show=False, priority=True),
+        Binding("ctrl+k", "force_kill", "Force Kill", show=False, priority=True),
         Binding("escape", "quit", "Quit", show=False),
         Binding("up", "history_up", "History Up", show=False),
         Binding("down", "history_down", "History Down", show=False),
@@ -161,6 +162,8 @@ class MiMoTUI(App):
         self._permission_event: Event | None = None
         self._permission_result: bool | None = None
         self._permission_mode = False  # True when waiting for Y/n
+        # Worker thread tracking for force-kill
+        self._worker_thread: threading.Thread | None = None
 
     def compose(self) -> ComposeResult:
         yield RichLog(
@@ -376,6 +379,12 @@ class MiMoTUI(App):
         orig_safe_print = _display_mod._safe_print
         orig_print_token = _display_mod.print_streaming_token
 
+        def _flush_and_write(text: str):
+            """Single call_from_thread target: flush stream, write output, restart stream."""
+            self._end_streaming()
+            self.write_output(text)
+            self._start_streaming()
+
         def tui_console_print(*args, **kwargs):
             """Intercept _console.print — route ALL display output to TUI."""
             end = kwargs.get('end', '\n')
@@ -391,12 +400,10 @@ class MiMoTUI(App):
                     if len(_stream_buffer) >= 20:
                         flush_stream_buffer()
             else:
-                # Non-streaming: flush pending stream, then write
+                # Non-streaming: single call_from_thread to avoid event loop congestion
                 flush_stream_buffer()
                 try:
-                    self.call_from_thread(self._end_streaming)
-                    self.call_from_thread(self.write_output, full.rstrip('\n'))
-                    self.call_from_thread(self._start_streaming)
+                    self.call_from_thread(_flush_and_write, full.rstrip('\n'))
                 except Exception:
                     pass
 
@@ -409,9 +416,7 @@ class MiMoTUI(App):
             if text:
                 flush_stream_buffer()
                 try:
-                    self.call_from_thread(self._end_streaming)
-                    self.call_from_thread(self.write_output, full.rstrip('\n'))
-                    self.call_from_thread(self._start_streaming)
+                    self.call_from_thread(_flush_and_write, full.rstrip('\n'))
                 except Exception:
                     pass
 
@@ -444,16 +449,24 @@ class MiMoTUI(App):
                       orig_safe_print, orig_print_token,
                       perm_mod=None, orig_perm_request=None):
         def worker():
+            # Save thread reference for force-kill
+            self._worker_thread = threading.current_thread()
             try:
                 result = self.harness.run(task, self.session)
                 # Flush remaining streaming tokens
                 flush_stream_buffer()
                 if result:
-                    self.call_from_thread(self._end_streaming)
-                    self.call_from_thread(self.write_output, result)
+                    try:
+                        self.call_from_thread(self._end_streaming)
+                        self.call_from_thread(self.write_output, result)
+                    except Exception:
+                        pass
             except Exception as e:
-                self.call_from_thread(self._end_streaming)
-                self.call_from_thread(self.write_output, f"[red]Error: {e}[/red]")
+                try:
+                    self.call_from_thread(self._end_streaming)
+                    self.call_from_thread(self.write_output, f"[red]Error: {e}[/red]")
+                except Exception:
+                    pass
             finally:
                 # Restore ALL display functions
                 display_mod._console.print = orig_console_print
@@ -462,7 +475,11 @@ class MiMoTUI(App):
                 # Restore permission callback
                 if perm_mod is not None:
                     perm_mod._tui_permission_request = orig_perm_request
-                self.call_from_thread(self._on_agent_done)
+                self._worker_thread = None
+                try:
+                    self.call_from_thread(self._on_agent_done)
+                except Exception:
+                    pass
         return worker
 
     def _on_agent_done(self) -> None:
@@ -529,6 +546,35 @@ class MiMoTUI(App):
             self.write_output("[yellow]Abort requested - stopping current task...[/yellow]")
         else:
             self._save_and_exit()
+
+    def action_force_kill(self) -> None:
+        """Ctrl+K: Force-kill the stuck agent thread.
+
+        This is the nuclear option — kills the thread immediately,
+        restores display state, and re-enables input.
+        Only use when Ctrl+C (graceful abort) doesn't respond.
+        """
+        if not self._agent_running:
+            return
+        thread = self._worker_thread
+        if thread and thread.is_alive():
+            import ctypes
+            self.write_output("[red bold]Force-killing agent thread...[/red bold]")
+            try:
+                ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                    ctypes.c_ulong(thread.ident),
+                    ctypes.py_object(SystemExit),
+                )
+            except Exception:
+                pass
+        # Force-restore state even if thread doesn't die cleanly
+        self._on_agent_done()
+        # Restore display functions
+        import mimo_harness.display as _display_mod
+        import mimo_harness.permissions as _perm_mod
+        _display_mod._tui_write = None
+        _perm_mod._tui_permission_request = None
+        self.write_output("[yellow]Agent killed. Input re-enabled.[/yellow]")
 
     def action_quit(self) -> None:
         self._save_and_exit()
