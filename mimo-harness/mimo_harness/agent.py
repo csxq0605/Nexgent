@@ -24,7 +24,7 @@ from openai import OpenAI
 from .config import MIMO_BASE_URL, MIMO_API_KEY, MIMO_MODEL, require_api_key
 from .logging_utils import TraceLogger
 from .permissions import Permission, PermissionGate, PermissionMode
-from .context import Session, compact_context, load_memory, load_memory_for_compaction, estimate_tokens, load_topic_on_demand
+from .context import Session, compact_context, load_memory, load_memory_for_compaction, estimate_tokens, load_topic_on_demand, COMPRESS_TRIGGER_TOKENS
 from .tools.registry import ToolRegistry, ToolDef
 from .tools import file_ops, shell, code_exec, web_tools, doc_tools, math_tools, interactive, monitor, notebook_tools, task_tools, plan_tools, lsp_tools, scheduler_tools, subagent_tools
 from .tools.file_ops import FileOpsState, set_file_ops_state
@@ -817,14 +817,12 @@ You help users with coding, file operations, web research, document creation, an
                 self._last_session = session
                 return "[LIMIT] Max steps exceeded"
 
-            # A8: Skip auto-compaction if thrashing detected
-            if self._thrashing_detected:
-                if not self._thrash_warned:
-                    self.logger.info("[THRASHING] Compaction thrashing detected — auto-compaction disabled")
-                    self._thrash_warned = True
-            else:
-                # Build messages with context compaction (token-based)
-                conv_tokens = estimate_tokens(session.get_messages())
+            # Auto-compact when context gets large (no blocking — always proceed)
+            conv_tokens = estimate_tokens(session.get_messages())
+            if conv_tokens >= COMPRESS_TRIGGER_TOKENS and not self._thrashing_detected:
+                pct = conv_tokens / self.token_budget.effective_max
+                self.logger.info(f"[COMPACT] Context at {pct:.0%}, compressing...")
+                print_warning(f"Context at {pct:.0%} — auto-compacting...")
                 compacted, self._compaction_attempts, self._compaction_failures, thrashing, did_compress = compact_context(
                     session.get_messages(),
                     client=client,
@@ -835,46 +833,20 @@ You help users with coding, file operations, web research, document creation, an
                 )
                 if thrashing:
                     self._thrashing_detected = True
-                    self.logger.info("[THRASHING] Compaction not reducing size — thrashing detected")
-                # If compression happened, update session messages so next
-                # iteration uses the compressed context
+                    self.logger.info("[THRASHING] Compaction not reducing size — disabled")
                 if did_compress:
-                    pre_count = len(session.get_messages())
                     session.messages = compacted
                     session.compaction_count += 1
-                    # Claude Code pattern: re-read memory/instructions from
-                    # disk after compaction (not from stale extracted messages)
                     memory_content = load_memory_for_compaction()
                     if memory_content:
                         session.add_message("user", f"## Project Memory\n{memory_content}")
-                    # Re-add the current user task — it was compressed away
                     session.add_message("user", task)
-                    self.logger.info(
-                        f"[COMPACT] {pre_count} msgs → "
-                        f"{len(session.get_messages())} msgs, "
-                        f"~{estimate_tokens(session.get_messages())} tokens"
-                    )
-            messages = [system_msg] + session.get_messages()
+                    new_tokens = estimate_tokens(session.get_messages())
+                    self.logger.info(f"[COMPACT] Done → ~{new_tokens} tokens")
+                    print_info(f"Compacted to {new_tokens / self.token_budget.effective_max:.0%}")
 
-            # Auto-compact when context gets large (no blocking — always proceed)
+            messages = [system_msg] + session.get_messages()
             self.token_budget.update(messages)
-            pct = self.token_budget.usage_ratio()
-            if pct >= 0.85 and not did_compress:
-                self.logger.info(f"[TOKEN_WARNING] Usage at {pct:.0%}")
-                print_warning(f"Context at {pct:.0%} — auto-compacting...")
-                compacted, _, _, _, did_compact = compact_context(
-                    session.get_messages(),
-                    client=client,
-                    model=self.model,
-                    estimated_tokens=estimate_tokens(session.get_messages()),
-                )
-                if did_compact:
-                    session.messages = compacted
-                    session.compaction_count += 1
-                    session.add_message("user", task)
-                    messages = [system_msg] + session.get_messages()
-                    self.token_budget.update(messages)
-                    print_info(f"Compacted to {self.token_budget.usage_ratio():.0%}")
 
             self.logger.trace(
                 "llm_call_start",
