@@ -519,6 +519,35 @@ class MiMoTUI(App):
         self._enable_input()
         self._update_status_bar()
 
+    def _cleanup_interrupted_session(self) -> None:
+        """Remove incomplete messages after force-kill.
+
+        Removes trailing assistant messages with tool_calls that have no
+        corresponding tool responses. This prevents the model from continuing
+        the old interrupted task when a new user message arrives.
+        """
+        messages = self.session.messages
+        # Collect tool_call_ids from assistant messages
+        # Remove trailing assistant messages with orphaned tool_calls
+        while messages:
+            last = messages[-1]
+            if last.get("role") == "assistant" and last.get("tool_calls"):
+                # Has tool_calls — check if tool responses exist
+                tc_ids = {tc["id"] for tc in last["tool_calls"]}
+                response_ids = {
+                    m.get("tool_call_id") for m in messages if m.get("role") == "tool"
+                }
+                if tc_ids - response_ids:
+                    # Orphaned tool_calls — remove this message
+                    messages.pop()
+                    continue
+            break
+        # Save cleaned session
+        try:
+            self.session.save_meta_to_jsonl()
+        except OSError:
+            pass
+
     # ── Permission Request (queue-based, non-blocking) ──────────
 
     def _queue_permission_request(self, action_desc: str, permission_value: str) -> bool:
@@ -600,6 +629,8 @@ class MiMoTUI(App):
                 _output_queue.get_nowait()
             except queue.Empty:
                 break
+        # Clean up incomplete messages from session to prevent old task continuation
+        self._cleanup_interrupted_session()
         self._on_agent_done()
         # Restore display functions
         import mimo_harness.display as _display_mod
