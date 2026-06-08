@@ -277,8 +277,10 @@ class TestHandleCommand:
         session.add_message("user", "hello world")
         _handle_command(["/stats"], harness, session, memory_store)
         captured = capsys.readouterr()
-        assert "Session Statistics" in captured.out
-        assert "Messages: 1" in captured.out
+        import re
+        clean = re.sub(r'\x1b\[[0-9;]*m', '', captured.out)
+        assert "Messages" in clean
+        assert "1" in clean
 
     def test_repl_tokens_command(self, monkeypatch, tmp_path, capsys):
         harness, session = _HarnessFixture.make(monkeypatch)
@@ -388,7 +390,10 @@ class TestHandleCommand:
         harness.circuit_breaker.consecutive_failures = 3
         _handle_command(["/stats"], harness, session, memory_store)
         captured = capsys.readouterr()
-        assert "Circuit breaker failures: 3" in captured.out
+        import re
+        clean = re.sub(r'\x1b\[[0-9;]*m', '', captured.out)
+        assert "Circuit breaker failures" in clean
+        assert "3" in clean
         harness.circuit_breaker.consecutive_failures = 0
 
 

@@ -37,6 +37,7 @@ from .display import (
     print_model_output_start, print_model_output_end,
     print_tool_call_collapsible, get_status_bar,
 )
+from .input_utils import rich_input as _rich_input
 
 
 # ---------------------------------------------------------------------------
@@ -526,7 +527,7 @@ You help users with coding, file operations, web research, document creation, an
         print("  3. Modify — request changes to the plan")
 
         try:
-            choice = input("\nYour choice (1/2/3): ").strip()
+            choice = _rich_input("\nYour choice (1/2/3): ").strip()
         except (EOFError, KeyboardInterrupt):
             return json.dumps({"decision": "rejected", "reason": "User cancelled"})
 
@@ -538,7 +539,7 @@ You help users with coding, file operations, web research, document creation, an
             })
         elif choice == "3":
             try:
-                feedback = input("What changes would you like? ").strip()
+                feedback = _rich_input("What changes would you like? ").strip()
             except (EOFError, KeyboardInterrupt):
                 feedback = ""
             return json.dumps({
@@ -548,7 +549,7 @@ You help users with coding, file operations, web research, document creation, an
             })
         else:
             try:
-                feedback = input("Feedback (optional): ").strip()
+                feedback = _rich_input("Feedback (optional): ").strip()
             except (EOFError, KeyboardInterrupt):
                 feedback = ""
             return json.dumps({
@@ -556,6 +557,25 @@ You help users with coding, file operations, web research, document creation, an
                 "feedback": feedback,
                 "message": "[PLAN REJECTED] Staying in plan mode. Revise based on feedback.",
             })
+
+    def _call_llm(self, client, messages: list, tools_schema: list, temperature: float = 0.7):
+        """Execute a non-streaming LLM call.
+
+        This is a patchable wrapper around client.chat.completions.create()
+        so tests can replace it without touching the real API.
+        """
+        return retry_with_backoff(
+            lambda: client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=tools_schema,
+                tool_choice="auto",
+                temperature=temperature,
+                top_p=0.9,
+            ),
+            max_retries=self.deps.max_retries,
+            base_delay=self.deps.base_retry_delay,
+        )
 
     def _stream_llm_call(self, client, messages: list, tools_schema: list):
         """Execute LLM call with streaming, printing tokens as they arrive.
@@ -751,10 +771,7 @@ You help users with coding, file operations, web research, document creation, an
 
         session.add_message("user", task)
 
-        self.logger.info(f"\n{'='*60}")
-        self.logger.info(f"Task: {task}")
-        self.logger.info(f"Session: {self.logger.session_id}")
-        self.logger.info(f"{'='*60}")
+        self.logger.trace("task_start", {"task": task[:200], "session": self.logger.session_id})
 
         start_time = time.time()
         tools_schema = self.registry.list_tools()
@@ -880,17 +897,9 @@ You help users with coding, file operations, web research, document creation, an
                         client, messages, tools_schema
                     )
                 else:
-                    response = retry_with_backoff(
-                        lambda: client.chat.completions.create(
-                            model=self.model,
-                            messages=messages,
-                            tools=tools_schema,
-                            tool_choice="auto",
-                            temperature=effort_params["temperature"],
-                            top_p=0.9,
-                        ),
-                        max_retries=self.deps.max_retries,
-                        base_delay=self.deps.base_retry_delay,
+                    response = self._call_llm(
+                        client, messages, tools_schema,
+                        temperature=effort_params["temperature"],
                     )
                 self.circuit_breaker.record_success()
             except Exception as e:

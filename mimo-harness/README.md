@@ -7,7 +7,7 @@ A production-grade AI agent harness powered by Xiaomi MiMo model, following Clau
 ## Features
 
 - **Agent Loop**: Dependency injection, circuit breaker, token budget, parallel tool dispatch, streaming, effort levels, fallback model, graceful abort
-- **15 Tool Modules**: File ops, shell, code execution, web, docs, math, notebooks, tasks, LSP, scheduler, plan, monitor, interactive
+- **14 Tool Modules**: File ops, shell, code execution, web, docs, math, notebooks, tasks, LSP, scheduler, plan, monitor, interactive, subagent
 - **Permission Pipeline**: 6 modes (DEFAULT/PLAN/AUTO/ACCEPT_EDITS/DONT_ASK/BYPASS), 4-stage pipeline, protected paths, symlink resolution
 - **Security Pipeline**: 2-layer defense (regex pre-filter + model classifier), sensitive data redaction, prompt injection detection, self-review mechanism
 - **Context Management**: 4-level progressive compression (snip → microcompact → LLM semantic → aggressive truncation), 200K token window, thrashing protection
@@ -184,7 +184,7 @@ mimo_harness/
 ├── display.py            # Structured CLI display (banners, spinners, status bar, syntax highlighting)
 ├── subagent.py           # SubAgent lifecycle, parallel/pipeline execution, message channels
 ├── token_counter.py      # tiktoken counting, heuristic fallback, streaming accumulator
-└── tools/                # 15 tool modules
+└── tools/                # 14 tool modules + registry
     ├── code_exec.py      # Python code execution in isolated subprocess
     ├── doc_tools.py      # Document and CSV creation
     ├── file_ops.py       # File read/write/edit, session-scoped state via contextvars
@@ -197,6 +197,7 @@ mimo_harness/
     ├── registry.py       # Tool registration, validation, disk spillover
     ├── scheduler_tools.py # Cron-like session-scoped scheduling
     ├── shell.py          # Shell execution with read-only auto-detection, env scrubbing
+    ├── subagent_tools.py # LLM-driven task delegation to sub-agents
     ├── task_tools.py     # Task CRUD (create/get/list/update/delete)
     └── web_tools.py      # Web search (DuckDuckGo/Bing) and fetch with SSRF protection
 ```
@@ -210,7 +211,7 @@ python -m pytest tests/ -v
 
 **测试状态**: 760 unit + 46 E2E = 806 tests passed
 
-23 test files covering:
+24 test files covering:
 - **Security**: path traversal, SSRF, shell injection, large input, Unicode, sensitive data redaction, prompt injection detection
 - **Permissions**: 6 modes, 4-stage pipeline, protected paths, symlink resolution, rule matching
 - **Context**: 4-level compression, parallel dispatch, streaming, thrashing protection, orphan filtering

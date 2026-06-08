@@ -9,6 +9,9 @@ Provides rich, structured output similar to Claude Code:
 - Streaming output formatting
 - Status indicators
 - Thinking/reasoning display
+
+Uses `rich` library for professional terminal output with automatic
+Unicode/ASCII fallback and cross-platform compatibility.
 """
 
 import os
@@ -17,9 +20,18 @@ import time
 import json
 import re
 import threading
-import locale
 from typing import Optional
 from dataclasses import dataclass, field
+
+# Rich imports — the core rendering engine
+from rich.console import Console
+from rich.text import Text
+from rich.panel import Panel
+from rich.table import Table
+from rich.syntax import Syntax
+from rich.markdown import Markdown
+from rich.table import Table
+from rich import box
 
 # Optional syntax highlighting (graceful fallback if pygments not installed)
 try:
@@ -38,7 +50,7 @@ def _console_supports_unicode() -> bool:
     cause UnicodeEncodeError. This detects that and enables ASCII fallbacks.
     """
     try:
-        encoding = sys.stdout.encoding or locale.getpreferredencoding()
+        encoding = sys.stdout.encoding or "utf-8"
         # Test a representative Unicode character
         "💭".encode(encoding)
         return True
@@ -91,32 +103,58 @@ else:
     STEP_H = "-"
 
 
-def _safe_print(*args, **kwargs):
-    """Print with UnicodeEncodeError fallback to ASCII-safe output."""
+def _get_terminal_width(default: int = 80) -> int:
+    """Get terminal width, capped at 80 for consistent display."""
     try:
-        print(*args, **kwargs)
-    except UnicodeEncodeError:
-        # Replace problematic characters and retry
-        safe_args = []
+        return min(os.get_terminal_size().columns, 80)
+    except (OSError, ValueError):
+        return default
+
+
+# Rich console — the single source of truth for all output
+# force_terminal=True ensures colors even when stdout is piped (for testing)
+# Width capped at 80 for consistent display across terminal sizes
+_console = Console(highlight=False, force_terminal=True, width=_get_terminal_width())
+
+
+def _safe_print(*args, **kwargs):
+    """Print with rich Console, falling back to print() on error.
+
+    This is the primary output function. All display functions should use this.
+    """
+    try:
+        # Convert string args to rich Text to avoid markup interpretation
+        text_args = []
         for a in args:
-            s = str(a)
-            try:
-                s.encode(sys.stdout.encoding or "ascii")
-                safe_args.append(s)
-            except (UnicodeEncodeError, LookupError):
-                safe_args.append(s.encode("ascii", errors="replace").decode("ascii"))
-        print(*safe_args, **kwargs)
+            if isinstance(a, str):
+                text_args.append(a)
+            else:
+                text_args.append(a)
+        _console.print(*text_args, **kwargs, highlight=False, soft_wrap=True)
+    except Exception:
+        # Ultimate fallback
+        try:
+            print(*args, **kwargs)
+        except UnicodeEncodeError:
+            safe_args = []
+            for a in args:
+                s = str(a)
+                try:
+                    s.encode(sys.stdout.encoding or "ascii")
+                    safe_args.append(s)
+                except (UnicodeEncodeError, LookupError):
+                    safe_args.append(s.encode("ascii", errors="replace").decode("ascii"))
+            print(*safe_args, **kwargs)
 
 
-# ANSI color codes
+# ANSI color codes — kept for backward compatibility with code that imports them
 class Colors:
-    """ANSI escape codes for terminal colors."""
+    """ANSI escape codes for terminal colors. Kept for backward compat."""
     RESET = "\033[0m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
     ITALIC = "\033[3m"
 
-    # Foreground
     BLACK = "\033[30m"
     RED = "\033[31m"
     GREEN = "\033[32m"
@@ -126,7 +164,6 @@ class Colors:
     CYAN = "\033[36m"
     WHITE = "\033[37m"
 
-    # Bright foreground
     BRIGHT_RED = "\033[91m"
     BRIGHT_GREEN = "\033[92m"
     BRIGHT_YELLOW = "\033[93m"
@@ -134,7 +171,6 @@ class Colors:
     BRIGHT_MAGENTA = "\033[95m"
     BRIGHT_CYAN = "\033[96m"
 
-    # Background
     BG_RED = "\033[41m"
     BG_GREEN = "\033[42m"
     BG_YELLOW = "\033[43m"
@@ -143,13 +179,10 @@ class Colors:
 
 def _supports_color() -> bool:
     """Check if terminal supports ANSI colors."""
-    # Respect NO_COLOR standard (https://no-color.org/)
     if os.environ.get("NO_COLOR"):
         return False
-    # Respect TERM=dumb
     if os.environ.get("TERM") == "dumb":
         return False
-    # Windows Terminal and modern cmd.exe support ANSI
     return hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
 
 
@@ -196,7 +229,7 @@ def _blue(text: str) -> str:
 
 
 class Spinner:
-    """Animated spinner for indicating ongoing operations."""
+    """Animated spinner using rich.status.Status."""
 
     def __init__(self, message: str = "Thinking"):
         self.message = message
@@ -204,6 +237,7 @@ class Spinner:
         self._thread: Optional[threading.Thread] = None
         self._frame = 0
         self._start_time = 0.0
+        self._status = None
 
     def start(self):
         """Start the spinner animation."""
@@ -223,7 +257,6 @@ class Spinner:
             self._thread.join(timeout=0.2)
 
         if USE_COLOR:
-            # Clear the spinner line
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
 
@@ -239,8 +272,7 @@ class Spinner:
         while not self._stop_event.is_set():
             frame = SPINNER_FRAMES[self._frame % len(SPINNER_FRAMES)]
             elapsed = time.time() - self._start_time
-            sys.stdout.write(f"\r  {_cyan(frame)} {self.message} {_dim(f'({elapsed:.1f}s)')}")
-            sys.stdout.flush()
+            _safe_print(f"  [cyan]{frame}[/cyan] {self.message} [dim]({elapsed:.1f}s)[/dim]", end="\r", highlight=False)
             self._frame += 1
             self._stop_event.wait(0.08)
 
@@ -255,49 +287,50 @@ class StepInfo:
 
 
 def print_banner(version: str = "0.3.0"):
-    """Print the application banner with structured formatting."""
-    h = BOX_H * 48
-    banner = f"""
-{_cyan(f"{BOX_TL}{h}{BOX_TR}")}
-{_cyan(BOX_V)}  {_bold("MiMo Harness")} {_dim(f"v{version}")}                          {_cyan(BOX_V)}
-{_cyan(BOX_V)}  {_dim("AI Agent powered by Xiaomi MiMo model")}       {_cyan(BOX_V)}
-{_cyan(BOX_V)}  {_dim("Claude Code architecture patterns")}             {_cyan(BOX_V)}
-{_cyan(f"{BOX_BL}{h}{BOX_BR}")}"""
-    _safe_print(banner)
+    """Print the application banner with rich Panel."""
+    content = (
+        f"[bold]MiMo Harness[/bold] [dim]v{version}[/dim]\n"
+        f"[dim]AI Agent powered by Xiaomi MiMo model[/dim]\n"
+        f"[dim]Claude Code architecture patterns[/dim]"
+    )
+    panel = Panel(
+        content,
+        border_style="cyan",
+        width=52,
+        padding=(0, 1),
+    )
+    _console.print(panel)
 
 
 def print_session_info(model: str, mode: str, api_key_set: bool):
     """Print session configuration info."""
-    print()
-    _safe_print(f"  {_dim('Model:')}    {model}")
-    _safe_print(f"  {_dim('API Key:')}  {'*' * 12 if api_key_set else _red('NOT SET')}")
-    _safe_print(f"  {_dim('Mode:')}     {mode}")
-    print()
+    _console.print()
+    _console.print(f"  [dim]Model:[/dim]    {model}")
+    _console.print(f"  [dim]API Key:[/dim]  {'*' * 12 if api_key_set else '[red]NOT SET[/red]'}")
+    _console.print(f"  [dim]Mode:[/dim]     {mode}")
+    _console.print()
 
 
 def print_step_header(step_info: StepInfo):
     """Print a minimal step indicator (no step counter — Claude Code style)."""
-    # Only show a subtle separator, no "Step X/max" noise.
-    # The model and effort are already visible in the status bar.
     pass
 
 
 def print_thinking_indicator():
     """Print a thinking indicator before model response."""
-    _safe_print(f"  {_dim(f'{THINK_ICON} Thinking...')}", flush=True)
+    _console.print(f"  [dim]{THINK_ICON} Thinking...[/dim]", highlight=False)
 
 
 def print_tool_call_start(tool_name: str, args: dict, call_index: int = 0, total: int = 1):
     """Print tool call start information."""
-    # Format arguments nicely
     args_str = _format_tool_args(tool_name, args)
 
     if total > 1:
-        prefix = f"  {_yellow(TOOL_ICON)} [{call_index + 1}/{total}]"
+        prefix = f"  [yellow]{TOOL_ICON}[/yellow] [{call_index + 1}/{total}]"
     else:
-        prefix = f"  {_yellow(TOOL_ICON)}"
+        prefix = f"  [yellow]{TOOL_ICON}[/yellow]"
 
-    _safe_print(f"{prefix} {_bold(tool_name)}{args_str}", flush=True)
+    _console.print(f"{prefix} [bold]{tool_name}[/bold]{args_str}", highlight=False)
 
 
 def print_tool_call_result(
@@ -309,53 +342,52 @@ def print_tool_call_result(
 ):
     """Print tool call result."""
     if success:
-        status = _green(CHECK_ICON)
-        time_str = _dim(f"({duration:.1f}s)")
-        _safe_print(f"  {status} {tool_name} {time_str}")
+        status = f"[green]{CHECK_ICON}[/green]"
+        time_str = f"[dim]({duration:.1f}s)[/dim]"
+        _console.print(f"  {status} {tool_name} {time_str}", highlight=False)
 
         if result_preview:
-            # Show a preview of the result (truncated)
             preview = result_preview[:200].replace("\n", " ")
             if len(result_preview) > 200:
                 preview += "..."
-            _safe_print(f"    {_dim(preview)}")
+            _console.print(f"    [dim]{preview}[/dim]", highlight=False)
     else:
-        status = _red(CROSS_ICON)
-        time_str = _dim(f"({duration:.1f}s)")
-        _safe_print(f"  {status} {tool_name} {time_str}")
+        status = f"[red]{CROSS_ICON}[/red]"
+        time_str = f"[dim]({duration:.1f}s)[/dim]"
+        _console.print(f"  {status} {tool_name} {time_str}", highlight=False)
         if error:
             error_preview = error[:200].replace("\n", " ")
-            _safe_print(f"    {_red(error_preview)}")
+            _console.print(f"    [red]{error_preview}[/red]", highlight=False)
 
 
 def print_streaming_token(token: str):
     """Print a single streaming token (called from streaming callback)."""
-    _safe_print(token, end="", flush=True)
+    _console.print(token, end="", highlight=False)
 
 
 def print_streaming_end():
     """Print newline after streaming completes."""
-    print()
+    _console.print()
 
 
 def print_error(message: str):
     """Print an error message."""
-    _safe_print(f"\n  {_red(CROSS_ICON)} {_red(message)}\n")
+    _console.print(f"\n  [red]{CROSS_ICON}[/red] [red]{message}[/red]\n", highlight=False)
 
 
 def print_warning(message: str):
     """Print a warning message."""
-    _safe_print(f"  {_yellow(WARN_ICON)} {message}")
+    _console.print(f"  [yellow]{WARN_ICON}[/yellow] {message}", highlight=False)
 
 
 def print_info(message: str):
     """Print an info message."""
-    _safe_print(f"  {_dim(INFO_ICON)} {message}")
+    _console.print(f"  [dim]{INFO_ICON}[/dim] {message}", highlight=False)
 
 
 def print_success(message: str):
     """Print a success message."""
-    _safe_print(f"  {_green(CHECK_ICON)} {message}")
+    _console.print(f"  [green]{CHECK_ICON}[/green] {message}", highlight=False)
 
 
 def print_token_usage(current: int, max_tokens: int):
@@ -365,50 +397,58 @@ def print_token_usage(current: int, max_tokens: int):
     filled = int(bar_len * pct)
 
     if pct >= 0.95:
-        bar_color = Colors.RED
+        bar_color = "red"
         status = "BLOCKED"
     elif pct >= 0.85:
-        bar_color = Colors.YELLOW
+        bar_color = "yellow"
         status = "WARNING"
     else:
-        bar_color = Colors.GREEN
+        bar_color = "green"
         status = "OK"
 
     bar = BAR_FILL * min(filled, bar_len) + BAR_EMPTY * max(0, bar_len - filled)
     current_str = _format_tokens(current)
     max_str = _format_tokens(max_tokens)
 
-    _safe_print(f"\n  {_dim('Tokens:')} {_c(bar_color, bar)} {current_str}/{max_str} {_dim(status)}")
+    _console.print(f"\n  [dim]Tokens:[/dim] [{bar_color}]{bar}[/{bar_color}] {current_str}/{max_str} [dim]{status}[/dim]", highlight=False)
 
 
 def print_tool_list(tools: list):
-    """Print available tools in a structured format."""
-    _safe_print(f"\n  {_bold('Available Tools')}")
-    _safe_print(f"  {_dim(BOX_H * 40)}")
+    """Print available tools in a structured table."""
+    table = Table(title="Available Tools", box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Tool", style="yellow", no_wrap=True)
+    table.add_column("Markers", style="dim", width=10)
+    table.add_column("Description", style="dim", max_width=50)
+
     for tool in tools:
         markers = []
         if tool.get("is_read_only"):
-            markers.append(_dim("RO"))
+            markers.append("[dim]RO[/dim]")
         if tool.get("is_concurrency_safe"):
-            markers.append(_dim("CS"))
+            markers.append("[dim]CS[/dim]")
         if tool.get("is_destructive"):
-            markers.append(_red("DST"))
-        marker_str = f" [{' '.join(markers)}]" if markers else ""
-        _safe_print(f"  {_yellow(DOT_ICON)} {tool['name']}{marker_str}")
-        if tool.get("description"):
-            desc = tool["description"][:60]
-            _safe_print(f"    {_dim(desc)}")
-    print()
+            markers.append("[red]DST[/red]")
+        marker_str = " ".join(markers)
+        desc = (tool.get("description") or "")[:60]
+        table.add_row(tool["name"], marker_str, desc)
+
+    _console.print()
+    _console.print(table)
+    _console.print()
 
 
 def print_context_breakdown(messages: list, max_display: int = 15):
-    """Print context breakdown in a structured format."""
-    sep = BOX_H * 60
-    _safe_print(f"\n  {_bold('Context Breakdown')} {_dim(f'({len(messages)} messages)')}")
-    _safe_print(f"  {_dim(sep)}")
-    header = f"{'#':<4} {'Role':<12} {'Tokens':>8}  Content preview"
-    _safe_print(f"  {_dim(header)}")
-    _safe_print(f"  {_dim(sep)}")
+    """Print context breakdown in a structured table."""
+    table = Table(
+        title=f"Context Breakdown ({len(messages)} messages)",
+        box=box.SIMPLE,
+        show_header=True,
+        header_style="bold",
+    )
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Role", style="cyan", width=12)
+    table.add_column("Tokens", justify="right", width=8)
+    table.add_column("Content preview", style="dim", max_width=45)
 
     for i, msg in enumerate(messages[:max_display]):
         role = msg.get("role", "?")
@@ -417,21 +457,26 @@ def print_context_breakdown(messages: list, max_display: int = 15):
             content = str(content) if content else ""
         tokens = max(1, len(content) // 4)
         preview = content[:50].replace("\n", " ")
-        _safe_print(f"  {i:<4} {role:<12} {_format_tokens(tokens):>8}  {_dim(preview)}")
+        table.add_row(str(i), role, _format_tokens(tokens), preview)
 
     if len(messages) > max_display:
-        _safe_print(f"  {_dim(f'... and {len(messages) - max_display} more messages')}")
+        table.add_row("", "", "", f"[dim]... and {len(messages) - max_display} more messages[/dim]")
 
-    _safe_print(f"  {_dim(sep)}")
+    _console.print()
+    _console.print(table)
+    _console.print()
 
 
 def print_session_stats(stats: dict):
     """Print session statistics."""
-    _safe_print(f"\n  {_bold('Session Statistics')}")
-    _safe_print(f"  {_dim(BOX_H * 30)}")
+    table = Table(title="Session Statistics", box=box.SIMPLE, show_header=False)
+    table.add_column("Key", style="dim")
+    table.add_column("Value")
     for key, value in stats.items():
-        _safe_print(f"  {_dim(f'{key}:')} {value}")
-    print()
+        table.add_row(key, str(value))
+    _console.print()
+    _console.print(table)
+    _console.print()
 
 
 def _format_tool_args(tool_name: str, args: dict) -> str:
@@ -439,34 +484,31 @@ def _format_tool_args(tool_name: str, args: dict) -> str:
     if not args:
         return ""
 
-    # Special formatting for common tools
     if tool_name in ("read_file", "write_file", "edit_file"):
         path = args.get("path") or args.get("file_path", "")
         if path:
-            return f" {_dim(ARROW_ICON)} {_cyan(path)}"
+            return f" [dim]{ARROW_ICON}[/dim] [cyan]{path}[/cyan]"
 
     if tool_name == "run_command":
         cmd = args.get("command", "")
         if cmd:
-            # Truncate long commands
             if len(cmd) > 60:
                 cmd = cmd[:57] + "..."
-            return f" {_dim(ARROW_ICON)} {_dim('$')} {cmd}"
+            return f" [dim]{ARROW_ICON}[/dim] [dim]$[/dim] {cmd}"
 
     if tool_name == "search_files":
         pattern = args.get("pattern", "")
         if pattern:
-            return f" {_dim(ARROW_ICON)} {_cyan(pattern)}"
+            return f" [dim]{ARROW_ICON}[/dim] [cyan]{pattern}[/cyan]"
 
     if tool_name == "list_directory":
         path = args.get("path", ".")
-        return f" {_dim(ARROW_ICON)} {_cyan(path)}"
+        return f" [dim]{ARROW_ICON}[/dim] [cyan]{path}[/cyan]"
 
-    # Generic format
     args_preview = json.dumps(args, ensure_ascii=False)
     if len(args_preview) > 80:
         args_preview = args_preview[:77] + "..."
-    return f" {_dim(ARROW_ICON)} {_dim(args_preview)}"
+    return f" [dim]{ARROW_ICON}[/dim] [dim]{args_preview}[/dim]"
 
 
 def _format_tokens(tokens: int) -> str:
@@ -477,7 +519,7 @@ def _format_tokens(tokens: int) -> str:
 
 
 def print_help():
-    """Print help in structured format."""
+    """Print help in a structured table."""
     commands = [
         ("/help", "Show this help"),
         ("/quit, /exit", "Exit"),
@@ -507,14 +549,19 @@ def print_help():
         ("/pipeline <t1> | <t2>", "Run tasks in pipeline"),
     ]
 
-    _safe_print(f"\n  {_bold('Commands')}")
-    _safe_print(f"  {_dim(BOX_H * 50)}")
+    table = Table(title="Commands", box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("Command", style="yellow", no_wrap=True)
+    table.add_column("Description", style="dim")
+
     for cmd, desc in commands:
-        _safe_print(f"  {_yellow(cmd):<25} {_dim(desc)}")
-    print()
-    _safe_print(f"  {_dim('Prefix with ! to run shell commands (e.g. !ls -la)')}")
-    _safe_print(f"  {_dim('Press Ctrl+C during execution to stop current task')}")
-    print()
+        table.add_row(cmd, desc)
+
+    _console.print()
+    _console.print(table)
+    _console.print()
+    _console.print("  [dim]Prefix with ! to run shell commands (e.g. !ls -la)[/dim]")
+    _console.print("  [dim]Press Ctrl+C during execution to stop current task[/dim]")
+    _console.print()
 
 
 def create_spinner(message: str = "Thinking") -> Spinner:
@@ -579,7 +626,6 @@ def _wrap_text(text: str, width: int = 76) -> list[str]:
         if not paragraph:
             lines.append("")
             continue
-        # Simple word-wrap
         current = ""
         for word in paragraph.split(" "):
             if not current:
@@ -587,14 +633,12 @@ def _wrap_text(text: str, width: int = 76) -> list[str]:
             elif len(current) + 1 + len(word) <= width:
                 current += " " + word
             else:
-                # Hard-break current if it exceeds width
                 while len(current) > width:
                     lines.append(current[:width])
                     current = current[width:]
                 lines.append(current)
                 current = word
         if current:
-            # Hard-break remaining text if it exceeds width
             while len(current) > width:
                 lines.append(current[:width])
                 current = current[width:]
@@ -609,80 +653,55 @@ def _visible_len(text: str) -> int:
 
 
 def print_user_input(user_text: str, width: int = 76):
-    """Print user input in a conversation bubble for visual distinction.
-
-    Uses a right-aligned or labeled bubble to differentiate from model output.
-    """
-    label = _cyan(f" {USER_ICON} You ")
-    lines = _wrap_text(user_text, width - 4)
-
-    label_vis_len = _visible_len(label)
-    remaining = max(0, width - 2 - label_vis_len)
-    _safe_print(f"  {label}{_dim(BUBBLE_H * remaining)}")
-    for line in lines:
-        padded = f" {line}{' ' * max(0, width - 3 - len(line))}"
-        _safe_print(f"  {_cyan(BUBBLE_V)}{_dim(padded[:width-2])}{_cyan(BUBBLE_V)}")
-    _safe_print(f"  {_cyan(BUBBLE_BL)}{_cyan(BUBBLE_H * (width - 2))}{_cyan(BUBBLE_BR)}")
-    print()
+    """Print user input in a rich Panel for visual distinction."""
+    panel = Panel(
+        user_text,
+        title=f"[cyan]{USER_ICON} You[/cyan]",
+        border_style="cyan",
+        width=min(width, 80),
+        padding=(0, 1),
+    )
+    _console.print(panel)
 
 
-_OUTPUT_BOX_WIDTH = 56
+_OUTPUT_BOX_WIDTH = min(_get_terminal_width() - 4, 72)
 
 
 def print_model_output_start(model: str = ""):
-    """Print the start of a model output container.
-
-    Call this before streaming/displaying model response.
-    """
-    label = f" {ASSISTANT_ICON} Assistant "
-    if model:
-        label = f" {ASSISTANT_ICON} {model} "
-    label_vis = _visible_len(label)
-    dash_count = max(0, _OUTPUT_BOX_WIDTH - label_vis)
-    _safe_print(f"  {_blue(label)}{_dim(BUBBLE_H * dash_count)}")
-    _safe_print(f"  {_blue(BUBBLE_V)}")
+    """Print the start of a model output container."""
+    title = f"{ASSISTANT_ICON} {model}" if model else f"{ASSISTANT_ICON} Assistant"
+    title_len = len(title) + 2  # spaces around title
+    # Top border: left corner + dashes + title + dashes + right corner
+    left_dashes = BUBBLE_H * 2
+    right_dashes = BUBBLE_H * max(0, _OUTPUT_BOX_WIDTH - 2 - title_len - 2)
+    _console.print(f"  [blue]{BUBBLE_TL}{left_dashes} {title} {right_dashes}{BUBBLE_TR}[/blue]", highlight=False)
+    _console.print(f"  [blue]{BUBBLE_V}[/blue]")
 
 
 def print_model_output_end():
-    """Print the end of a model output container.
-
-    Call this after model response is complete.
-    """
-    _safe_print(f"  {_blue(BUBBLE_V)}")
-    _safe_print(f"  {_blue(BUBBLE_BL)}{_blue(BUBBLE_H * (_OUTPUT_BOX_WIDTH - 2))}{_blue(BUBBLE_BR)}")
-    print()
+    """Print the end of a model output container."""
+    _console.print(f"  [blue]{BUBBLE_V}[/blue]")
+    _console.print(f"  [blue]{BUBBLE_BL}{BUBBLE_H * (_OUTPUT_BOX_WIDTH - 2)}{BUBBLE_BR}[/blue]")
+    _console.print()
 
 
 def print_code_block(code: str, language: str = ""):
-    """Print a code block with optional syntax highlighting.
+    """Print a code block with syntax highlighting via rich."""
+    if language:
+        try:
+            syntax = Syntax(code, language, theme="monokai", line_numbers=False, word_wrap=True)
+            _console.print(Panel(syntax, title=language, border_style="dim", padding=(0, 1)))
+            return
+        except Exception:
+            pass
 
-    If pygments is available and language is specified, applies syntax highlighting.
-    Otherwise, uses a simple bordered display with dim styling.
-    """
+    # Fallback: plain bordered display
     lang_label = f" [{language}]" if language else ""
     border_h = CODE_BORDER_H * 42
-
-    # Header
-    _safe_print(f"    {_dim(f'{CODE_BORDER}{border_h}{lang_label}')}")
-
-    # Apply syntax highlighting if available
-    if _HAS_PYGMENTS and language:
-        try:
-            lexer = get_lexer_by_name(language)
-            highlighted = _pygments_highlight(code, lexer, TerminalFormatter())
-            for line in highlighted.rstrip("\n").split("\n"):
-                _safe_print(f"    {_dim(CODE_BORDER_V)} {line}")
-        except Exception:
-            # Fallback to plain display
-            for line in code.rstrip("\n").split("\n"):
-                _safe_print(f"    {_dim(CODE_BORDER_V)} {_dim(line)}")
-    else:
-        # Plain display with dim styling
-        for line in code.rstrip("\n").split("\n"):
-            _safe_print(f"    {_dim(CODE_BORDER_V)} {_dim(line)}")
-
-    # Footer
-    _safe_print(f"    {_dim(f'{CODE_BORDER_BOT}{border_h}')}")
+    _console.print(f"    [dim]{CODE_BORDER}{border_h}{lang_label}[/dim]", highlight=False)
+    for line in code.rstrip("\n").split("\n"):
+        _console.print(f"    [dim]{CODE_BORDER_V}[/dim] [dim]{line}[/dim]", highlight=False)
+    _console.print(f"    [dim]{CODE_BORDER_BOT}{border_h}[/dim]", highlight=False)
 
 
 def print_tool_call_collapsible(
@@ -695,49 +714,39 @@ def print_tool_call_collapsible(
     success: Optional[bool] = None,
     duration: Optional[float] = None,
 ):
-    """Print a tool call with collapsible details.
-
-    Shows tool name and summary on first line. When collapsed, details are hidden.
-    When expanded, shows full args and result.
-    """
-    # Format arguments for summary
+    """Print a tool call with collapsible details."""
     args_str = _format_tool_args(tool_name, args)
     icon = COLLAPSE_ICON if collapsed else EXPAND_ICON
 
     if total > 1:
-        prefix = f"  {_yellow(TOOL_ICON)} [{call_index + 1}/{total}]"
+        prefix = f"  [yellow]{TOOL_ICON}[/yellow] [{call_index + 1}/{total}]"
     else:
-        prefix = f"  {_yellow(TOOL_ICON)}"
+        prefix = f"  [yellow]{TOOL_ICON}[/yellow]"
 
-    # Status indicator
     status_str = ""
     if success is not None:
         if success:
-            status_str = f" {_green(CHECK_ICON)}"
+            status_str = f" [green]{CHECK_ICON}[/green]"
         else:
-            status_str = f" {_red(CROSS_ICON)}"
+            status_str = f" [red]{CROSS_ICON}[/red]"
     if duration is not None:
-        status_str += _dim(f" ({duration:.1f}s)")
+        status_str += f"[dim] ({duration:.1f}s)[/dim]"
 
-    # Main line: tool name + args summary + status
-    _safe_print(f"{prefix} {_dim(icon)} {_bold(tool_name)}{args_str}{status_str}", flush=True)
+    _console.print(f"{prefix} [dim]{icon}[/dim] [bold]{tool_name}[/bold]{args_str}{status_str}", highlight=False)
 
-    # Expanded details
     if not collapsed:
-        # Show full args
         if args:
             args_json = json.dumps(args, ensure_ascii=False, indent=2)
             for line in args_json.split("\n"):
-                _safe_print(f"      {_dim(line)}")
+                _console.print(f"      [dim]{line}[/dim]", highlight=False)
 
-        # Show result preview
         if result_preview:
             preview_lines = result_preview[:500].split("\n")
-            _safe_print(f"    {_dim('─' * 36)}")
+            _console.print(f"    [dim]{'─' * 36}[/dim]", highlight=False)
             for line in preview_lines[:10]:
-                _safe_print(f"      {_dim(line)}")
+                _console.print(f"      [dim]{line}[/dim]", highlight=False)
             if len(result_preview) > 500:
-                _safe_print(f"      {_dim('...')}")
+                _console.print(f"      [dim]...[/dim]", highlight=False)
 
 
 # ---------------------------------------------------------------------------

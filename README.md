@@ -29,7 +29,7 @@
 ```bash
 git clone https://github.com/csxq0605/Agent-Learning-Hub-MiMo.git
 cd Agent-Learning-Hub-MiMo
-pip install openai python-dotenv
+pip install openai python-dotenv prompt_toolkit rich
 
 # 配置 .env
 echo 'MIMO_BASE_URL=https://token-plan-cn.xiaomimimo.com/v1' > .env
@@ -50,7 +50,7 @@ mimo-harness   # 进入交互模式
 
 **核心特性**：
 - **Agent Loop**: 依赖注入、熔断器、Token 预算、并行工具调度、流式输出
-- **15 个工具模块**: 文件操作、Shell、代码执行、Web、文档、数学、笔记本、任务、LSP、调度器等
+- **14 个工具模块**: 文件操作、Shell、代码执行、Web、文档、数学、笔记本、任务、LSP、调度器、子代理等
 - **权限管线**: 6 种模式（DEFAULT/PLAN/AUTO/ACCEPT_EDITS/DONT_ASK/BYPASS），4 阶段管线
 - **安全管线**: 2 层防御（regex 预过滤 + 模型分类器），敏感数据脱敏，Prompt injection 检测
 - **上下文管理**: 4 级渐进压缩（snip → microcompact → LLM 压缩 → 激进截断），200K token 窗口

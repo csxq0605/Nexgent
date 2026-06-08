@@ -31,7 +31,7 @@
 
 | Component | Claude Code | Stage 3 Demo | MiMo Harness (v0.3.0) |
 |-----------|------------|-------------|----------------------|
-| **Tool Registry** | 20+ tools | 4 tools | 15 tools with fail-closed defaults |
+| **Tool Registry** | 20+ tools | 4 tools | 14 tool modules with fail-closed defaults |
 | **Permission Gate** | Auto/Ask/Deny per tool per mode | 5-level Permission enum | 6 modes, 4-stage pipeline, protected paths |
 | **Session Store** | JSONL transcripts | In-memory session | JSONL auto-save, checkpoints, fork, resume |
 | **Context Compaction** | Auto-summarize when approaching limits | Keep last N messages | 4-level progressive compression (snip → microcompact → LLM → truncation) |

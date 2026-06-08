@@ -9,6 +9,7 @@ import json
 import os
 from .registry import ToolDef
 from ..permissions import Permission
+from ..input_utils import rich_input as _rich_input
 
 
 def ask_user_question(params: dict) -> str:
@@ -51,7 +52,7 @@ def ask_user_question(params: dict) -> str:
         prompt = "\nSelect an option (number): "
 
     try:
-        user_input = input(prompt).strip()
+        user_input = _rich_input(prompt).strip()
     except (EOFError, KeyboardInterrupt):
         return json.dumps({"error": "User cancelled"})
 

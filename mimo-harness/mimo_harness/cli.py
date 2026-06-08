@@ -32,9 +32,12 @@ from .display import (
     print_error, print_warning, print_info, print_success,
     print_token_usage, print_context_breakdown, print_session_stats,
     print_tool_list, USE_COLOR, _format_tokens, _dim, _bold, _yellow, _green, _red, _cyan,
-    _safe_print, print_user_input, get_status_bar,
+    _safe_print, get_status_bar,
     BUBBLE_H, BULLET_ICON, ARROW_ICON, CHECK_ICON, CROSS_ICON,
 )
+
+# prompt_toolkit for rich input with auto-completion and history
+from .input_utils import rich_input as _rich_input
 
 
 def _estimate_message_tokens(msg: dict) -> int:
@@ -205,7 +208,7 @@ def _pick_session(session_dir: str):
         print(f"  [{i+1}] {name} (~{msg_count} msgs, {dt.strftime('%Y-%m-%d %H:%M')})")
     print()
     try:
-        choice = input("Pick a session number (or Enter to cancel): ").strip()
+        choice = _rich_input("Pick a session number (or Enter to cancel): ").strip()
         if not choice:
             return None
         idx = int(choice) - 1
@@ -453,9 +456,25 @@ def main():
         token_str = _format_tokens(tokens)
         max_str = _format_tokens(CONTEXT_WINDOW_TOKENS)
         try:
-            # Use colored prompt for better visibility
-            prompt = f"\n{_cyan('You')} {_dim(f'[{token_str}/{max_str}]')}: "
-            user_input = input(prompt).strip()
+            # Styled prompt with input box using prompt_toolkit FormattedText
+            from prompt_toolkit.formatted_text import FormattedText
+            from .display import _get_terminal_width
+            box_width = min(_get_terminal_width() - 4, 72)
+            # Prefix: "  ┌─ You [tokens] " = ~23 chars
+            header_label = f'You [{token_str}/{max_str}]'
+            header_prefix_len = 5 + len(header_label) + 1  # "  ┌─ " + label + " "
+            dashes = '─' * max(4, box_width - header_prefix_len)
+            bot_dashes = '─' * max(4, box_width - 4)
+            prompt_msg = FormattedText([
+                ('class:prompt.border', '\n  ┌─ '),
+                ('class:prompt.user', 'You'),
+                ('class:prompt.tokens', f' [{token_str}/{max_str}]'),
+                ('class:prompt.border', f' {dashes}'),
+                ('class:prompt.border', '\n  │ '),
+            ])
+            user_input = _rich_input(prompt_msg).strip()
+            # Print bottom border after input
+            _safe_print(f'  └{bot_dashes}──')
         except (EOFError, KeyboardInterrupt):
             try:
                 session.save_meta_to_jsonl()
@@ -532,9 +551,6 @@ def main():
 
         # Run agent with graceful interrupt support
         try:
-            # Show user input in a conversation bubble for visual distinction
-            if args.output_format == "text":
-                print_user_input(user_input)
             # Update status bar to executing
             get_status_bar().set_thinking(harness.model)
             # Streaming is now the default - tokens are printed directly by the agent
@@ -624,7 +640,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
         lines = []
         while True:
             try:
-                line = input()
+                line = _rich_input("  > ")
                 if not line:
                     break
                 lines.append(line)
@@ -722,8 +738,9 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
         from .project_scanner import scan_project, generate_agents_md
         agents_md_path = os.path.join(os.getcwd(), "AGENTS.md")
         if os.path.exists(agents_md_path):
-            confirm = input(
-                f"  {_yellow('AGENTS.md already exists. Overwrite? [y/N] ')}"
+            from prompt_toolkit.formatted_text import FormattedText
+            confirm = _rich_input(
+                FormattedText([('class:prompt.label', '  ⚠ AGENTS.md already exists. Overwrite? [y/N] ')])
             ).strip().lower()
             if confirm not in ("y", "yes"):
                 print_info("Skipped.")

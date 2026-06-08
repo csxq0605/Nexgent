@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .security_pipeline import classify_action, review_action, SafetyDecision, ReviewResult
+from .input_utils import rich_input as _rich_input
 
 
 class Permission(Enum):
@@ -408,7 +409,7 @@ class PermissionGate:
         print(f"\n  [CONFIRM] {action_desc}")
         print(f"  Permission: {permission.value}")
         try:
-            response = input("  Allow? (y/n): ").strip().lower()
+            response = _rich_input("  Allow? (y/n): ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             self._log(permission, action_desc, "denied_no_input")
             return False

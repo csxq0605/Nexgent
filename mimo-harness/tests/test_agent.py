@@ -122,7 +122,6 @@ class TestTerminationPaths:
         session = Session(session_id="test")
 
         import time as _time
-        _original_sleep = _time.sleep
 
         # Patch _call_llm to simulate slow responses so time limit triggers
         call_count = 0
@@ -132,11 +131,18 @@ class TestTerminationPaths:
             if call_count >= 2:
                 _time.sleep(0.05)  # ensure we exceed 0.01s
             # Return a tool call so the loop continues past the time check
-            return {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [{"id": "tc1", "type": "function", "function": {"name": "task_list", "arguments": "{}"}}],
-            }
+            # Must return an object with .choices[0].message structure
+            from types import SimpleNamespace
+            msg = SimpleNamespace(
+                role="assistant",
+                content="",
+                tool_calls=[SimpleNamespace(
+                    id="tc1",
+                    type="function",
+                    function=SimpleNamespace(name="task_list", arguments="{}"),
+                )],
+            )
+            return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
 
         harness._call_llm = _slow_llm
         result = harness.run("test task", session)

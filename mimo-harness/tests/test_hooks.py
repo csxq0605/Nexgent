@@ -262,6 +262,9 @@ class TestHttpHookSuccess:
         """HTTP hook returning approve JSON should not block."""
         class ApproveHandler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
+                # Read request body to prevent Windows connection abort
+                content_length = int(self.headers.get("Content-Length", 0))
+                self.rfile.read(content_length)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -291,6 +294,8 @@ class TestHttpHookSuccess:
         """HTTP hook returning block JSON should block with reason."""
         class BlockHandler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
+                content_length = int(self.headers.get("Content-Length", 0))
+                self.rfile.read(content_length)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -323,6 +328,8 @@ class TestHttpHookSuccess:
         """HTTP hook can return additionalContext and updatedInput."""
         class ContextHandler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
+                content_length = int(self.headers.get("Content-Length", 0))
+                self.rfile.read(content_length)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
