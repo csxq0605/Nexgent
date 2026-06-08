@@ -107,7 +107,12 @@ def _validate_read_path(path: str) -> str | None:
 def read_file(params: dict) -> str:
     path = params.get("path", "")
     offset = params.get("offset", 0)
-    limit = params.get("limit", 200)
+    limit = params.get("limit", 500)
+    return _read_single_file(path, offset, limit)
+
+
+def _read_single_file(path: str, offset: int = 0, limit: int = 500) -> str:
+    """Read a single file and return JSON result."""
     err = _validate_read_path(path)
     if err:
         return json.dumps({"error": err})
@@ -129,6 +134,19 @@ def read_file(params: dict) -> str:
         })
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+def read_files(params: dict) -> str:
+    """Read multiple files in a single tool call (batch read)."""
+    paths = params.get("paths", [])
+    offset = params.get("offset", 0)
+    limit = params.get("limit", 200)
+    if not paths:
+        return json.dumps({"error": "paths must be a non-empty list"})
+    results = []
+    for path in paths:
+        results.append(json.loads(_read_single_file(path, offset, limit)))
+    return json.dumps({"files": results, "count": len(results)})
 
 
 def write_file(params: dict) -> str:
@@ -231,6 +249,7 @@ def _matches_gitignore(rel_path: str, patterns: list[str]) -> bool:
 def glob_files(params: dict) -> str:
     pattern = params.get("pattern", "")
     respect_gitignore = params.get("respect_gitignore", False)
+    max_results = params.get("max_results", 100)
     # Support explicit path parameter: prepend to pattern if provided
     search_path = params.get("path", "")
     if search_path:
@@ -259,7 +278,8 @@ def glob_files(params: dict) -> str:
                     if not _matches_gitignore(rel, gitignore_patterns):
                         filtered.append(m)
                 matches = filtered
-        return json.dumps({"pattern": pattern, "matches": matches[:100], "total": len(matches)})
+        limit = max_results if max_results > 0 else len(matches)
+        return json.dumps({"pattern": pattern, "matches": matches[:limit], "total": len(matches), "truncated": len(matches) > limit})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -418,11 +438,32 @@ def get_tools() -> list[ToolDef]:
                 "properties": {
                     "path": {"type": "string", "description": "Absolute file path"},
                     "offset": {"type": "integer", "description": "Start line (0-based, default 0)"},
-                    "limit": {"type": "integer", "description": "Max lines to read (default 200)"},
+                    "limit": {"type": "integer", "description": "Max lines to read (default 500)"},
                 },
                 "required": ["path"]
             },
             handler=read_file,
+            permission=Permission.READ,
+            is_read_only=True,
+            is_concurrency_safe=True,
+        ),
+        ToolDef(
+            name="read_files",
+            description="Read multiple files in a single call (batch read). More efficient than calling read_file multiple times.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of absolute file paths to read"
+                    },
+                    "offset": {"type": "integer", "description": "Start line for all files (0-based, default 0)"},
+                    "limit": {"type": "integer", "description": "Max lines per file (default 200)"},
+                },
+                "required": ["paths"]
+            },
+            handler=read_files,
             permission=Permission.READ,
             is_read_only=True,
             is_concurrency_safe=True,
@@ -470,6 +511,7 @@ def get_tools() -> list[ToolDef]:
                     "pattern": {"type": "string", "description": "Glob pattern"},
                     "path": {"type": "string", "description": "Directory to search in (default: current directory)"},
                     "respect_gitignore": {"type": "boolean", "description": "Filter out paths matching .gitignore rules (default false)"},
+                    "max_results": {"type": "integer", "description": "Max results to return (default 100, 0=unlimited)"},
                 },
                 "required": ["pattern"]
             },

@@ -261,7 +261,7 @@ def _build_parser():
     parser.add_argument("--auto-approve", "-y", action="store_true", help="Auto-approve all write operations")
     parser.add_argument("--dry-run", action="store_true", help="Dry-run mode (show but don't execute)")
     parser.add_argument("--plan", action="store_true", help="Plan mode (read-only operations only)")
-    parser.add_argument("--max-steps", type=int, default=None, help="Max agent steps (default: 20)")
+    parser.add_argument("--max-steps", type=int, default=None, help="Max agent steps (0=unlimited, default: 0)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output with trace logs")
     parser.add_argument("--log-file", help="Log file path")
     parser.add_argument("--config", "-c", help="Configuration file path")
@@ -306,7 +306,7 @@ def main():
         model=args.model or config.get("model"),
         auto_approve=args.auto_approve or config.get("auto_approve", False),
         dry_run=args.dry_run or config.get("dry_run", False),
-        max_steps=args.max_steps if args.max_steps is not None else config.get("max_steps", 20),
+        max_steps=args.max_steps if args.max_steps is not None else config.get("max_steps", 0),
         verbose=args.verbose,
         log_file=args.log_file or config.get("log_file"),
         plan_mode=args.plan or config.get("plan_mode", False),

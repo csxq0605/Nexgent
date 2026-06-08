@@ -276,15 +276,10 @@ def print_session_info(model: str, mode: str, api_key_set: bool):
 
 
 def print_step_header(step_info: StepInfo):
-    """Print a step header indicating current progress."""
-    step_str = f"Step {step_info.current}/{step_info.max_steps}"
-    model_str = _dim(f"[{step_info.model}]") if step_info.model else ""
-    effort_str = _dim(f"({step_info.effort})") if step_info.effort else ""
-    h = STEP_H * 2
-
-    print()
-    print(f"  {_blue(h)} {_bold(step_str)} {model_str} {effort_str} {_blue(h)}")
-    print()
+    """Print a minimal step indicator (no step counter — Claude Code style)."""
+    # Only show a subtle separator, no "Step X/max" noise.
+    # The model and effort are already visible in the status bar.
+    pass
 
 
 def print_thinking_indicator():

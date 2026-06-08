@@ -15,7 +15,7 @@ from ..permissions import Permission
 
 def execute_python(params: dict) -> str:
     code = params.get("code", "")
-    timeout = params.get("timeout", 10)
+    timeout = params.get("timeout", 30)
     try:
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".py", delete=False, encoding="utf-8"
@@ -29,8 +29,7 @@ def execute_python(params: dict) -> str:
                 encoding="utf-8", errors="replace"
             )
             output = (result.stdout + result.stderr).strip()
-            if len(output) > 5000:
-                output = output[:5000] + "\n... [truncated]"
+            # No truncation here — let the registry's spill-to-disk handle large outputs
             return json.dumps({
                 "exit_code": result.returncode,
                 "output": output,
@@ -55,7 +54,7 @@ def get_tools() -> list[ToolDef]:
                 "type": "object",
                 "properties": {
                     "code": {"type": "string", "description": "Python code to execute"},
-                    "timeout": {"type": "integer", "description": "Timeout in seconds (default 10)"},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds (default 30)"},
                 },
                 "required": ["code"]
             },

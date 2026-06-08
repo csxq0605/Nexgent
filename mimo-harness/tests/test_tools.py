@@ -230,14 +230,15 @@ class TestCodeExec:
         }))
         assert result["exit_code"] != 0
 
-    def test_execute_python_large_output_truncation(self):
-        # Generate output > 5000 chars
+    def test_execute_python_large_output_no_truncation(self):
+        # Generate output > 5000 chars — should NOT be truncated
+        # (registry's spill-to-disk handles large outputs)
         result = json.loads(code_exec.execute_python({
             "code": "print('x' * 10000)",
         }))
         output = result.get("output", "")
-        # Output must be truncated — either marked or capped in length
-        assert len(output) <= 5100, f"Output not truncated: {len(output)} chars"
+        # Output should be complete (10000 x's + newline stripped)
+        assert len(output) >= 10000, f"Output unexpectedly truncated: {len(output)} chars"
 
     def test_execute_python_stderr_captured(self):
         result = json.loads(code_exec.execute_python({

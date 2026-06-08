@@ -84,7 +84,7 @@ _SEARCH_BACKENDS = [
 ]
 
 
-def _parse_ddg_html(html: str) -> list[dict]:
+def _parse_ddg_html(html: str, max_results: int = 10) -> list[dict]:
     """Parse DuckDuckGo HTML search results."""
     results = []
     for match in re.finditer(
@@ -97,19 +97,19 @@ def _parse_ddg_html(html: str) -> list[dict]:
         snippet = re.sub(r'<[^>]+>', '', match.group(3)).strip()
         if title and snippet:
             results.append({"title": title, "url": url, "snippet": snippet})
-        if len(results) >= 5:
+        if len(results) >= max_results:
             break
     if not results:
         for match in re.finditer(r'<a[^>]+href="(https?://[^"]+)"[^>]*>(.*?)</a>', html, re.DOTALL):
             title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
             if title and len(title) > 5:
                 results.append({"title": title, "url": match.group(1), "snippet": ""})
-            if len(results) >= 5:
+            if len(results) >= max_results:
                 break
     return results
 
 
-def _parse_bing_html(html: str) -> list[dict]:
+def _parse_bing_html(html: str, max_results: int = 10) -> list[dict]:
     """Parse Bing HTML search results."""
     results = []
     for match in re.finditer(
@@ -121,13 +121,14 @@ def _parse_bing_html(html: str) -> list[dict]:
         snippet = re.sub(r'<[^>]+>', '', match.group(3)).strip()
         if title:
             results.append({"title": title, "url": url, "snippet": snippet})
-        if len(results) >= 5:
+        if len(results) >= max_results:
             break
     return results
 
 
 def web_search(params: dict) -> str:
     query = params.get("query", "")
+    max_results = params.get("max_results", 10)
     try:
         import requests
         last_error = None
@@ -144,9 +145,9 @@ def web_search(params: dict) -> str:
                 )
                 resp.raise_for_status()
                 if backend_name == "duckduckgo":
-                    results = _parse_ddg_html(resp.text)
+                    results = _parse_ddg_html(resp.text, max_results)
                 else:
-                    results = _parse_bing_html(resp.text)
+                    results = _parse_bing_html(resp.text, max_results)
                 return json.dumps({"query": query, "results": results, "count": len(results)})
             except Exception as e:
                 last_error = e
@@ -160,7 +161,7 @@ def web_search(params: dict) -> str:
 
 def web_fetch(params: dict) -> str:
     url = params.get("url", "")
-    max_chars = params.get("max_chars", 5000)
+    max_chars = params.get("max_chars", 20000)
     err = _validate_url(url)
     if err:
         return json.dumps({"error": err})
@@ -245,6 +246,7 @@ def get_tools() -> list[ToolDef]:
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
+                    "max_results": {"type": "integer", "description": "Max results to return (default 10)"},
                 },
                 "required": ["query"]
             },
@@ -260,7 +262,7 @@ def get_tools() -> list[ToolDef]:
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "URL to fetch"},
-                    "max_chars": {"type": "integer", "description": "Max characters to return (default 5000)"},
+                    "max_chars": {"type": "integer", "description": "Max characters to return (default 20000)"},
                 },
                 "required": ["url"]
             },

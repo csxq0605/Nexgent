@@ -270,10 +270,13 @@ You help users with coding, file operations, web research, document creation, an
 {tools_desc}"""
 
     # Effort level → LLM parameter mapping
+    # No max_completion_tokens cap — let the model generate as many tokens as
+    # the task requires.  Artificial caps cause truncation on reasoning models
+    # whose thinking tokens eat into the budget.
     EFFORT_PARAMS = {
-        "low": {"temperature": 0.3, "max_completion_tokens": 512},
-        "medium": {"temperature": 0.7, "max_completion_tokens": 2048},
-        "high": {"temperature": 0.9, "max_completion_tokens": 4096},
+        "low": {"temperature": 0.3},
+        "medium": {"temperature": 0.7},
+        "high": {"temperature": 0.9},
     }
 
     def __init__(
@@ -281,8 +284,8 @@ You help users with coding, file operations, web research, document creation, an
         model: str = None,
         auto_approve: bool = False,
         dry_run: bool = False,
-        max_steps: int = 20,
-        max_duration: float = 300.0,
+        max_steps: int = 0,
+        max_duration: float = 600.0,
         verbose: bool = False,
         log_file: str = None,
         deps: AgentDeps = None,
@@ -573,7 +576,6 @@ You help users with coding, file operations, web research, document creation, an
                 messages=messages,
                 tools=tools_schema,
                 tool_choice="auto",
-                max_completion_tokens=effort_params["max_completion_tokens"],
                 temperature=effort_params["temperature"],
                 top_p=0.9,
                 stream=True,
@@ -586,6 +588,7 @@ You help users with coding, file operations, web research, document creation, an
         )
 
         full_content = ""
+        full_reasoning_content = ""
         tool_calls_data = {}
         finish_reason = None
         is_first_token = True
@@ -598,6 +601,12 @@ You help users with coding, file operations, web research, document creation, an
 
             if delta is None:
                 continue
+
+            # Capture reasoning_content from streaming chunks.
+            # MiMo API requires this to be passed back in subsequent
+            # requests when tool_calls are present.
+            if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                full_reasoning_content += delta.reasoning_content
 
             if delta.content:
                 if is_first_token:
@@ -655,9 +664,11 @@ You help users with coding, file operations, web research, document creation, an
 
         # snapshot tool_calls_data for the lambda closure
         tc_snapshot = list(tool_calls_data.values())
+        # snapshot reasoning_content for the lambda closure
+        reasoning_snapshot = full_reasoning_content
 
         def _model_dump():
-            return {
+            result = {
                 "role": "assistant",
                 "content": full_content or "",
                 "tool_calls": [
@@ -672,10 +683,15 @@ You help users with coding, file operations, web research, document creation, an
                     for tc in tc_snapshot
                 ] if tc_snapshot else None,
             }
+            # MiMo API requires reasoning_content to be passed back
+            if reasoning_snapshot:
+                result["reasoning_content"] = reasoning_snapshot
+            return result
 
         synthetic_message = _AttrBag(
             content=full_content or None,
             tool_calls=tool_calls_list if tool_calls_list else None,
+            reasoning_content=full_reasoning_content or None,
             model_dump=_model_dump,
         )
 
@@ -754,7 +770,10 @@ You help users with coding, file operations, web research, document creation, an
         self._compaction_attempts = 0
         self._compaction_failures = 0
 
-        for step in range(self.max_steps):
+        step = 0
+        while True:
+            step += 1
+
             # Termination check: graceful abort (Esc / Ctrl+C during execution)
             if self.graceful_abort.is_requested():
                 self.logger.info("[ABORT] Graceful abort requested by user")
@@ -776,6 +795,12 @@ You help users with coding, file operations, web research, document creation, an
                 )
                 self._last_session = session
                 return "[ERROR] Circuit breaker open — too many consecutive failures"
+
+            # Termination check: max_steps (only if explicitly set, 0 = unlimited)
+            if self.max_steps > 0 and step > self.max_steps:
+                self.logger.info(f"[LIMIT] Max steps exceeded ({self.max_steps})")
+                self._last_session = session
+                return "[LIMIT] Max steps exceeded"
 
             # A8: Skip auto-compaction if thrashing detected
             if self._thrashing_detected:
@@ -860,7 +885,6 @@ You help users with coding, file operations, web research, document creation, an
                             messages=messages,
                             tools=tools_schema,
                             tool_choice="auto",
-                            max_completion_tokens=effort_params["max_completion_tokens"],
                             temperature=effort_params["temperature"],
                             top_p=0.9,
                         ),
@@ -882,7 +906,6 @@ You help users with coding, file operations, web research, document creation, an
                                 messages=messages,
                                 tools=tools_schema,
                                 tool_choice="auto",
-                                max_completion_tokens=effort_params["max_completion_tokens"],
                                 temperature=effort_params["temperature"],
                                 top_p=0.9,
                             ),
@@ -947,8 +970,38 @@ You help users with coding, file operations, web research, document creation, an
                 continue
             if msg_dict.get("content") is None:
                 msg_dict["content"] = ""
+
+            # Validate and sanitize tool calls before adding to session.
+            # Malformed (truncated) tool arguments cause 400 errors on
+            # subsequent API calls because the invalid JSON is embedded in
+            # the conversation history sent back to the model.
+            if msg_dict.get("tool_calls"):
+                for tc_dict in msg_dict["tool_calls"]:
+                    func = tc_dict.get("function", {})
+                    args_str = func.get("arguments", "{}")
+                    try:
+                        json.loads(args_str)
+                    except (json.JSONDecodeError, TypeError):
+                        # Replace malformed arguments with valid JSON so
+                        # the session history remains well-formed.
+                        func["arguments"] = json.dumps({
+                            "error": "Malformed tool arguments (truncated output)",
+                            "hint": "Please retry with shorter content.",
+                        })
+                        self.logger.trace("sanitized_malformed_tool_args", {
+                            "tool": func.get("name", "unknown"),
+                        })
+
+            # MiMo API requires reasoning_content to be passed back in
+            # subsequent requests when tool_calls are present.  Missing it
+            # causes a 400 error.  See:
+            # https://platform.xiaomimimo.com/docs/zh-CN/usage-guide/passing-back-reasoning_content
+            extra_kwargs = {}
+            if msg_dict.get("reasoning_content"):
+                extra_kwargs["reasoning_content"] = msg_dict["reasoning_content"]
             session.add_message(msg_dict["role"], msg_dict["content"],
-                              tool_calls=msg_dict.get("tool_calls"))
+                              tool_calls=msg_dict.get("tool_calls"),
+                              **extra_kwargs)
 
             # Update token stats for assistant message
             stats = self.token_budget.get_stats()
@@ -1056,19 +1109,6 @@ You help users with coding, file operations, web research, document creation, an
                     checkpoint_mgr.end_batch()
                 # Update status bar after all tools executed
                 status_bar.set_thinking(self.model)
-
-        # Termination: max steps reached
-        stats = self.token_budget.get_stats()
-        stats.total_tokens = self.token_budget.estimated_tokens
-        self.logger.session_summary({
-            "steps": self.max_steps,
-            "duration": round(time.time() - start_time, 2),
-            "reason": TerminationReason.MAX_STEPS.value,
-            "token_stats": stats.to_dict(),
-        })
-        self._last_session = session
-        self._last_steps = self.max_steps
-        return "[ERROR] Max steps reached."
 
     # -----------------------------------------------------------------------
     # SubAgent Management

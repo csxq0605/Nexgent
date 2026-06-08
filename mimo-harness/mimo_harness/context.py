@@ -416,7 +416,6 @@ def llm_compress(
     messages: list,
     client,
     model: str = "mimo-v2.5-pro",
-    max_summary_tokens: int = 2048,
 ) -> list | None:
     """Level 3: LLM-based semantic compression (Claude Code style).
 
@@ -456,7 +455,6 @@ def llm_compress(
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=max_summary_tokens,
             temperature=0.3,
         )
         summary = response.choices[0].message.content

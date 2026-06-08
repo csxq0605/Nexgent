@@ -391,7 +391,6 @@ class HookRunner:
                     )},
                     {"role": "user", "content": prompt_text},
                 ],
-                max_completion_tokens=200,
                 temperature=0.1,
             )
             content = response.choices[0].message.content or ""

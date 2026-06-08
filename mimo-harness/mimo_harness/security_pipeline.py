@@ -428,6 +428,51 @@ _READ_ONLY_TOOLS = {
 }
 
 
+def _try_salvage_json(text: str) -> Optional[dict]:
+    """Attempt to salvage a truncated JSON response by closing open strings/braces."""
+    try:
+        # Fast path: already valid
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try closing an unterminated string, then closing braces/brackets
+    for suffix in ['"', '"}', '"}}', '"]}', "}]", "}}}"]:
+        try:
+            return json.loads(text + suffix)
+        except json.JSONDecodeError:
+            continue
+
+    # Try trimming to last complete key-value pair and closing
+    # Find last occurrence of a complete value (ends with , or })
+    for end_char in [",", "}"]:
+        idx = text.rfind(end_char)
+        if idx > 0:
+            candidate = text[:idx + 1]
+            # Close any open braces
+            open_braces = candidate.count("{") - candidate.count("}")
+            open_brackets = candidate.count("[") - candidate.count("]")
+            candidate += "]" * max(0, open_brackets) + "}" * max(0, open_braces)
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+
+    # Last resort: find the last complete "key": "value" pair and build minimal JSON
+    import re as _re
+    pairs = _re.findall(r'"(\w+)"\s*:\s*"([^"]*)"', text)
+    if pairs:
+        # Extract known fields from whatever we can parse
+        result = {}
+        for k, v in pairs:
+            if k in ("decision", "reason", "reasoning", "risk_level"):
+                result[k] = v
+        if "decision" in result:
+            return result
+
+    return None
+
+
 def classify_action_model(
     tool_name: str,
     tool_args: dict,
@@ -503,24 +548,33 @@ Is this action safe to execute?"""
             permission_mode=permission_mode,
         )
 
+        # No max_completion_tokens cap — reasoning models need headroom for
+        # thinking tokens; an artificial cap causes truncation.
         response = client.chat.completions.create(
-            model=model or "mimo-v2.5-pro",  # Use MiMo model for classification
+            model=model or "mimo-v2.5-pro",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
-            max_completion_tokens=800,
             temperature=0.0,  # Deterministic for safety decisions
         )
 
         result_text = response.choices[0].message.content.strip()
-        # Parse JSON response
-        # Handle markdown code blocks
+        # Parse JSON response — strip markdown code fences if present
         if result_text.startswith("```"):
             result_text = re.sub(r'^```\w*\n?', '', result_text)
             result_text = re.sub(r'\n?```$', '', result_text)
 
-        parsed = json.loads(result_text)
+        try:
+            parsed = json.loads(result_text)
+        except json.JSONDecodeError:
+            salvaged = _try_salvage_json(result_text)
+            if salvaged is None:
+                logging.getLogger(__name__).warning(
+                    "Model classifier: failed to parse JSON, falling through to default"
+                )
+                return None
+            parsed = salvaged
         decision = parsed.get("decision", "allow")
         reason = parsed.get("reason", "Model classifier decision")
         reasoning = parsed.get("reasoning", reason)
@@ -655,7 +709,6 @@ Is this decision appropriate? Are there any overlooked risks?"""
                 {"role": "system", "content": _REVIEW_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-            max_completion_tokens=800,
             temperature=0.0,
         )
 
