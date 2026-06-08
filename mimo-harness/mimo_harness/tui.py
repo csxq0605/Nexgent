@@ -211,9 +211,6 @@ class MiMoTUI(App):
                 elif kind == "permission":
                     desc, value = data
                     self._show_permission_prompt(desc, value)
-                    self._enable_permission_input()
-                elif kind == "permission_enable":
-                    self._enable_permission_input()
         except queue.Empty:
             pass
 
@@ -292,6 +289,31 @@ class MiMoTUI(App):
 
     # ── Input Handling ──────────────────────────────────────────
 
+    def on_key(self, event) -> None:
+        """Handle key presses during permission mode (inline, not input box)."""
+        if not self._permission_mode or self._permission_event is None:
+            return
+        key = event.key.lower()
+        if key in ("y", "enter"):
+            self._permission_result = True
+            self._write_permission_response(True)
+            self._permission_mode = False
+            self._permission_event.set()
+            event.stop()
+        elif key == "n":
+            self._permission_result = False
+            self._write_permission_response(False)
+            self._permission_mode = False
+            self._permission_event.set()
+            event.stop()
+
+    def _write_permission_response(self, approved: bool) -> None:
+        """Show the user's Y/n response in the output area."""
+        if approved:
+            _output_queue.put(("write", "  [green bold]Y[/green bold] — Allowed"))
+        else:
+            _output_queue.put(("write", "  [red bold]n[/red bold] — Denied"))
+
     def on_input_changed(self, event: Input.Changed) -> None:
         """Reset tab completion state when user types."""
         self._tab_matches = []
@@ -300,18 +322,6 @@ class MiMoTUI(App):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
         event.input.clear()
-
-        # Permission mode: treat input as Y/n response
-        if self._permission_mode and self._permission_event is not None:
-            approved = text.lower() in ("", "y", "yes")
-            self._permission_result = approved
-            # Restore input state
-            inp = self.query_one("#input-area", Input)
-            inp.placeholder = "Type a message or /help..."
-            inp.disabled = True
-            # Signal the waiting thread
-            self._permission_event.set()
-            return
 
         # Save to history
         if text:
@@ -531,20 +541,19 @@ class MiMoTUI(App):
         return self._permission_result
 
     def _show_permission_prompt(self, action_desc: str, permission_value: str) -> None:
-        """Display permission prompt in the output log (main thread only)."""
-        prompt_text = Text()
-        prompt_text.append("  Allow? (", style="bold")
-        prompt_text.append("Y", style="bold green")
-        prompt_text.append("/n) ", style="bold")
-        self.write_output(prompt_text)
+        """Display inline permission prompt in the output log (main thread only).
 
-    def _enable_permission_input(self) -> None:
-        """Temporarily enable input for permission response (main thread only)."""
-        inp = self.query_one("#input-area", Input)
-        inp.disabled = False
-        inp.placeholder = "Type Y or n..."
-        inp.value = ""
-        inp.focus()
+        Claude Code style: shows the tool call info and Y/n options inline
+        in the output area. User presses Y or n directly (no input box).
+        """
+        prompt_text = Text()
+        prompt_text.append(f"  {action_desc}\n", style="dim")
+        prompt_text.append("  Allow? ", style="bold")
+        prompt_text.append("Y", style="bold black on green")
+        prompt_text.append(" / ", style="dim")
+        prompt_text.append("n", style="bold black on red")
+        prompt_text.append("  (press key)", style="dim")
+        self.write_output(prompt_text)
 
     def _disable_input(self) -> None:
         inp = self.query_one("#input-area", Input)
