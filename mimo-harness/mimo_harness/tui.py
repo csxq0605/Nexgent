@@ -401,6 +401,8 @@ class MiMoTUI(App):
         orig_console_print = _display_mod._console.print
         orig_safe_print = _display_mod._safe_print
         orig_print_token = _display_mod.print_streaming_token
+        orig_stdout = sys.stdout
+        orig_stderr = sys.stderr
 
         def tui_console_print(*args, **kwargs):
             """Intercept _console.print — route ALL display output to queue."""
@@ -447,17 +449,36 @@ class MiMoTUI(App):
         self.run_worker(
             self._agent_worker(task, _display_mod, orig_console_print,
                                orig_safe_print, orig_print_token,
-                               _perm_mod, orig_perm_request),
+                               _perm_mod, orig_perm_request,
+                               orig_stdout, orig_stderr),
             exclusive=True,
             thread=True,
         )
 
     def _agent_worker(self, task, display_mod, orig_console_print,
                       orig_safe_print, orig_print_token,
-                      perm_mod=None, orig_perm_request=None):
+                      perm_mod=None, orig_perm_request=None,
+                      orig_stdout=None, orig_stderr=None):
         def worker():
             # Save thread reference for force-kill
             self._worker_thread = threading.current_thread()
+
+            # Redirect stdout/stderr to queue so direct print() goes to TUI
+            class _StdoutProxy:
+                """Redirect sys.stdout to the output queue."""
+                def write(self, text):
+                    if text and text.strip():
+                        _output_queue.put(("write", text.rstrip('\n')))
+                def flush(self):
+                    pass
+                @property
+                def encoding(self):
+                    return 'utf-8'
+
+            proxy = _StdoutProxy()
+            sys.stdout = proxy
+            sys.stderr = proxy
+
             try:
                 result = self.harness.run(task, self.session)
                 if result:
@@ -467,6 +488,9 @@ class MiMoTUI(App):
                 _output_queue.put(("end_stream", None))
                 _output_queue.put(("write", f"[red]Error: {e}[/red]"))
             finally:
+                # Restore stdout/stderr
+                sys.stdout = orig_stdout or sys.__stdout__
+                sys.stderr = orig_stderr or sys.__stderr__
                 # Restore ALL display functions
                 display_mod._console.print = orig_console_print
                 display_mod._safe_print = orig_safe_print
