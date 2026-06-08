@@ -21,6 +21,11 @@ from typing import Optional
 from .security_pipeline import classify_action, review_action, SafetyDecision, ReviewResult
 from .input_utils import rich_input as _rich_input
 
+# TUI permission callback — set by TUI to intercept permission prompts
+# Signature: (action_desc: str, permission_value: str) -> bool|None
+# Return True for approve, False for deny, None to fall back to default
+_tui_permission_request = None
+
 
 class Permission(Enum):
     READ = "read"
@@ -408,6 +413,23 @@ class PermissionGate:
         """Stage 4: Interactive user confirmation."""
         print(f"\n  [CONFIRM] {action_desc}")
         print(f"  Permission: {permission.value}")
+
+        # TUI mode: use callback to get input from TUI widget
+        if _tui_permission_request is not None:
+            try:
+                result = _tui_permission_request(action_desc, permission.value)
+                if result is True:
+                    self._log(permission, action_desc, "approved")
+                    self._rejection_count = 0
+                    return True
+                elif result is False:
+                    self._rejection_count += 1
+                    self._log(permission, action_desc, "denied")
+                    return False
+                # None = fall through to default
+            except Exception:
+                pass
+
         try:
             from prompt_toolkit.formatted_text import FormattedText
             prompt = FormattedText([

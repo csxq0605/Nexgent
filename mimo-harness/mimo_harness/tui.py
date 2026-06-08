@@ -12,6 +12,7 @@ import io
 import sys
 import threading
 from contextlib import redirect_stdout
+from threading import Event
 
 from rich.panel import Panel
 from rich.table import Table
@@ -156,6 +157,10 @@ class MiMoTUI(App):
         self._tab_matches: list[str] = []
         self._tab_idx = -1
         self._tab_prefix = ""
+        # Permission request state (used when agent needs user approval)
+        self._permission_event: Event | None = None
+        self._permission_result: bool | None = None
+        self._permission_mode = False  # True when waiting for Y/n
 
     def compose(self) -> ComposeResult:
         yield RichLog(
@@ -272,6 +277,19 @@ class MiMoTUI(App):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
         event.input.clear()
+
+        # Permission mode: treat input as Y/n response
+        if self._permission_mode and self._permission_event is not None:
+            approved = text.lower() in ("", "y", "yes")
+            self._permission_result = approved
+            # Restore input state
+            inp = self.query_one("#input-area", Input)
+            inp.placeholder = "Type a message or /help..."
+            inp.disabled = True
+            # Signal the waiting thread
+            self._permission_event.set()
+            return
+
         # Save to history
         if text:
             self._history.append(text)
@@ -409,15 +427,22 @@ class MiMoTUI(App):
         _display_mod._safe_print = tui_safe_print
         _display_mod.print_streaming_token = tui_print_streaming_token
 
+        # Monkey-patch permission input to route through TUI
+        import mimo_harness.permissions as _perm_mod
+        orig_perm_request = _perm_mod._tui_permission_request
+        _perm_mod._tui_permission_request = self.request_permission
+
         self.run_worker(
             self._agent_worker(task, _display_mod, orig_console_print,
-                               orig_safe_print, orig_print_token),
+                               orig_safe_print, orig_print_token,
+                               _perm_mod, orig_perm_request),
             exclusive=True,
             thread=True,
         )
 
     def _agent_worker(self, task, display_mod, orig_console_print,
-                      orig_safe_print, orig_print_token):
+                      orig_safe_print, orig_print_token,
+                      perm_mod=None, orig_perm_request=None):
         def worker():
             try:
                 result = self.harness.run(task, self.session)
@@ -434,14 +459,58 @@ class MiMoTUI(App):
                 display_mod._console.print = orig_console_print
                 display_mod._safe_print = orig_safe_print
                 display_mod.print_streaming_token = orig_print_token
+                # Restore permission callback
+                if perm_mod is not None:
+                    perm_mod._tui_permission_request = orig_perm_request
                 self.call_from_thread(self._on_agent_done)
         return worker
 
     def _on_agent_done(self) -> None:
         self._end_streaming()
         self._agent_running = False
+        self._permission_mode = False
         self._enable_input()
         self._update_status_bar()
+
+    # ── Permission Request ─────────────────────────────────────
+
+    def request_permission(self, action_desc: str, permission_value: str) -> bool:
+        """Show permission prompt in TUI and wait for user Y/n input.
+
+        Called from the agent worker thread via _tui_permission_request callback.
+        Uses call_from_thread to enable input, then waits on an Event.
+        """
+        self._permission_event = Event()
+        self._permission_result = None
+        self._permission_mode = True
+
+        # Show prompt in output
+        self.call_from_thread(self._show_permission_prompt, action_desc, permission_value)
+
+        # Enable input so user can type Y/n
+        self.call_from_thread(self._enable_permission_input)
+
+        # Block until user responds
+        self._permission_event.wait()
+
+        self._permission_mode = False
+        return self._permission_result
+
+    def _show_permission_prompt(self, action_desc: str, permission_value: str) -> None:
+        """Display permission prompt in the output log."""
+        prompt_text = Text()
+        prompt_text.append("  Allow? (", style="bold")
+        prompt_text.append("Y", style="bold green")
+        prompt_text.append("/n) ", style="bold")
+        self.write_output(prompt_text)
+
+    def _enable_permission_input(self) -> None:
+        """Temporarily enable input for permission response."""
+        inp = self.query_one("#input-area", Input)
+        inp.disabled = False
+        inp.placeholder = "Type Y or n..."
+        inp.value = ""
+        inp.focus()
 
     def _disable_input(self) -> None:
         inp = self.query_one("#input-area", Input)
