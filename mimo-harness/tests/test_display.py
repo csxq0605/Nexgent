@@ -220,11 +220,11 @@ class TestPrintFunctions:
     """Test print functions (smoke tests)."""
 
     def test_print_step_header(self, capsys):
-        """Should print step header."""
+        """Should not print anything (step header is now a no-op)."""
         info = StepInfo(current=1, max_steps=10, model="test", effort="medium")
         print_step_header(info)
         captured = capsys.readouterr()
-        assert "Step 1/10" in captured.out
+        assert captured.out == ""
 
     def test_print_thinking_indicator(self, capsys):
         """Should print thinking indicator."""
