@@ -116,12 +116,28 @@ def _get_terminal_width(default: int = 80) -> int:
 # Width capped at 80 for consistent display across terminal sizes
 _console = Console(highlight=False, force_terminal=True, width=_get_terminal_width())
 
+# TUI output callback — set by tui.py when full-screen mode is active.
+# When set, _safe_print routes output here instead of to the console.
+_tui_write = None  # Callable[[str], None] or None
+
 
 def _safe_print(*args, **kwargs):
     """Print with rich Console, falling back to print() on error.
 
     This is the primary output function. All display functions should use this.
+    When TUI mode is active, output is routed to the TUI's RichLog.
     """
+    # Route to TUI if active
+    if _tui_write is not None:
+        sep = kwargs.get('sep', ' ')
+        end = kwargs.get('end', '\n')
+        text = sep.join(str(a) for a in args)
+        try:
+            _tui_write(text + end)
+        except Exception:
+            pass
+        return
+
     try:
         # Convert string args to rich Text to avoid markup interpretation
         text_args = []

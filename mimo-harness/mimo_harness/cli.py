@@ -422,11 +422,6 @@ def main():
 
     # Interactive REPL mode - use structured display
     mode_str = 'plan' if args.plan else 'dry-run' if args.dry_run else 'auto-approve' if args.auto_approve else 'interactive'
-    if args.output_format == "text":
-        print_session_info(harness.model, mode_str, bool(MIMO_API_KEY))
-        _safe_print(f"  {_dim('Session:')}  {session.session_id}")
-        print_info("Type /help for commands, or just start chatting.")
-        print()
 
     memory_store = MemoryStore(".")
     checkpoint_manager = CheckpointManager(session.session_id)
@@ -450,6 +445,33 @@ def main():
     scheduler = Scheduler(callback=_on_scheduled_prompt)
     set_scheduler(scheduler)
     scheduler.start_background_checker(interval=30.0)
+
+    # Use full-screen TUI when stdin is a real terminal (not piped)
+    if sys.stdin.isatty() and sys.stdout.isatty() and args.output_format == "text":
+        try:
+            from .tui import run_tui
+            run_tui(
+                harness=harness,
+                session=session,
+                memory_store=memory_store,
+                checkpoint_manager=checkpoint_manager,
+                session_dir=session_dir,
+                config_watcher=config_watcher,
+                scheduler=scheduler,
+                scheduled_prompts=_scheduled_prompts,
+                scheduled_lock=_scheduled_lock,
+            )
+            return
+        except ImportError:
+            # Textual not installed — fall through to normal REPL
+            pass
+
+    # Fallback: normal REPL without full-screen TUI
+    if args.output_format == "text":
+        print_session_info(harness.model, mode_str, bool(MIMO_API_KEY))
+        _safe_print(f"  {_dim('Session:')}  {session.session_id}")
+        print_info("Type /help for commands, or just start chatting.")
+        print()
 
     while True:
         # Show token count in prompt with structured format

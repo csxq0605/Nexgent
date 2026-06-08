@@ -17,6 +17,7 @@ setup(
         "tiktoken>=0.5.0",
         "prompt_toolkit>=3.0.0",
         "rich>=13.0.0",
+        "textual>=0.40.0",
     ],
     extras_require={
         "dev": [
