@@ -236,9 +236,9 @@ class MiMoTUI(App):
         table = Table(show_header=False, box=None, padding=(0, 2))
         table.add_column(style="dim", width=10)
         table.add_column()
+        from .config import MIMO_API_KEY
         table.add_row("Model", self.harness.model)
-        api_key = getattr(self.harness, '_api_key', '') or ''
-        table.add_row("API Key", "*" * 12 if api_key else "[red]NOT SET[/red]")
+        table.add_row("API Key", "*" * 12 if MIMO_API_KEY else "[red]NOT SET[/red]")
         mode = 'plan' if getattr(self.harness, 'plan_mode', False) else \
                'auto-approve' if self.harness.perms.auto_approve else 'interactive'
         table.add_row("Mode", mode)
