@@ -409,7 +409,7 @@ class PermissionGate:
         print(f"\n  [CONFIRM] {action_desc}")
         print(f"  Permission: {permission.value}")
         try:
-            response = _rich_input("  Allow? [Y/n] ").strip().lower()
+            response = _rich_input("  Allow? [y=yes, n=no, default=y] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             self._log(permission, action_desc, "denied_no_input")
             return False
