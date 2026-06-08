@@ -589,8 +589,11 @@ You help users with coding, file operations, web research, document creation, an
         # Initialize streaming token counter
         stream_counter = StreamingTokenCounter(model=self.model)
 
-        def _do_stream():
-            return client.chat.completions.create(
+        def _consume_stream():
+            """Create stream and consume ALL chunks — entire function is
+            wrapped in retry_with_backoff so network hangs mid-stream
+            trigger a full retry (re-create the stream from scratch)."""
+            response_stream = client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=tools_schema,
@@ -600,59 +603,61 @@ You help users with coding, file operations, web research, document creation, an
                 stream=True,
             )
 
-        response_stream = retry_with_backoff(
-            _do_stream,
+            content = ""
+            reasoning = ""
+            tc_data = {}
+            finish = None
+            first_token = True
+
+            for chunk in response_stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                finish = chunk.choices[0].finish_reason or finish
+
+                if delta is None:
+                    continue
+
+                # Capture reasoning_content from streaming chunks.
+                # MiMo API requires this to be passed back in subsequent
+                # requests when tool_calls are present.
+                if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                    reasoning += delta.reasoning_content
+
+                if delta.content:
+                    if first_token:
+                        # First token received - print newline to separate from thinking indicator
+                        print()  # Move past the "Thinking..." line
+                        first_token = False
+                    content += delta.content
+                    # Track streaming tokens
+                    stream_counter.add_text(delta.content)
+                    print_streaming_token(delta.content)
+
+                if delta.tool_calls:
+                    for tc_chunk in delta.tool_calls:
+                        idx = tc_chunk.index
+                        if idx not in tc_data:
+                            tc_data[idx] = {
+                                "id": "",
+                                "name": "",
+                                "arguments": "",
+                            }
+                        if tc_chunk.id:
+                            tc_data[idx]["id"] = tc_chunk.id
+                        if tc_chunk.function:
+                            if tc_chunk.function.name:
+                                tc_data[idx]["name"] = tc_chunk.function.name
+                            if tc_chunk.function.arguments:
+                                tc_data[idx]["arguments"] += tc_chunk.function.arguments
+
+            return content, reasoning, tc_data, finish
+
+        full_content, full_reasoning_content, tool_calls_data, finish_reason = retry_with_backoff(
+            _consume_stream,
             max_retries=self.deps.max_retries,
             base_delay=self.deps.base_retry_delay,
         )
-
-        full_content = ""
-        full_reasoning_content = ""
-        tool_calls_data = {}
-        finish_reason = None
-        is_first_token = True
-
-        for chunk in response_stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            finish_reason = chunk.choices[0].finish_reason or finish_reason
-
-            if delta is None:
-                continue
-
-            # Capture reasoning_content from streaming chunks.
-            # MiMo API requires this to be passed back in subsequent
-            # requests when tool_calls are present.
-            if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                full_reasoning_content += delta.reasoning_content
-
-            if delta.content:
-                if is_first_token:
-                    # First token received - print newline to separate from thinking indicator
-                    print()  # Move past the "Thinking..." line
-                    is_first_token = False
-                full_content += delta.content
-                # Track streaming tokens
-                stream_counter.add_text(delta.content)
-                print_streaming_token(delta.content)
-
-            if delta.tool_calls:
-                for tc_chunk in delta.tool_calls:
-                    idx = tc_chunk.index
-                    if idx not in tool_calls_data:
-                        tool_calls_data[idx] = {
-                            "id": "",
-                            "name": "",
-                            "arguments": "",
-                        }
-                    if tc_chunk.id:
-                        tool_calls_data[idx]["id"] = tc_chunk.id
-                    if tc_chunk.function:
-                        if tc_chunk.function.name:
-                            tool_calls_data[idx]["name"] = tc_chunk.function.name
-                        if tc_chunk.function.arguments:
-                            tool_calls_data[idx]["arguments"] += tc_chunk.function.arguments
 
         if full_content or tool_calls_data:
             print_streaming_end()
@@ -747,7 +752,8 @@ You help users with coding, file operations, web research, document creation, an
 
         api_key = require_api_key()
         client = self.deps.llm_client_factory(
-            api_key=api_key, base_url=MIMO_BASE_URL
+            api_key=api_key, base_url=MIMO_BASE_URL,
+            timeout=300.0,  # 5min HTTP transport timeout — prevents infinite hang on network issues
         )
         self._llm_client = client  # Store for security pipeline model classifier
         # Set LLM client on permission gate for model-driven classification
