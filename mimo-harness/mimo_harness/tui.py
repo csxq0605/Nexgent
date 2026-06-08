@@ -119,6 +119,18 @@ class MiMoTUI(App):
     BINDINGS = [
         Binding("ctrl+c", "abort", "Abort", show=False, priority=True),
         Binding("escape", "quit", "Quit", show=False),
+        Binding("up", "history_up", "History Up", show=False),
+        Binding("down", "history_down", "History Down", show=False),
+        Binding("tab", "tab_complete", "Tab Complete", show=False),
+    ]
+
+    # All slash commands for tab completion
+    COMMANDS = [
+        "/help", "/quit", "/exit", "/clear", "/tools", "/stats",
+        "/tokens", "/compact", "/context", "/memory", "/remember",
+        "/hooks", "/dry-run", "/auto", "/plan", "/abort", "/effort",
+        "/mode", "/save", "/load", "/fork", "/rewind", "/init",
+        "/subagents", "/subagent", "/parallel", "/pipeline",
     ]
 
     def __init__(self, harness, session, memory_store, checkpoint_manager,
@@ -136,6 +148,14 @@ class MiMoTUI(App):
         self.scheduled_lock = scheduled_lock
         self._agent_running = False
         self._streaming_text = ""  # accumulated streaming text
+        # Input history
+        self._history: list[str] = []
+        self._history_idx = -1  # -1 = current (not browsing)
+        self._saved_input = ""  # saved current input when browsing history
+        # Tab completion state
+        self._tab_matches: list[str] = []
+        self._tab_idx = -1
+        self._tab_prefix = ""
 
     def compose(self) -> ComposeResult:
         yield RichLog(
@@ -244,9 +264,21 @@ class MiMoTUI(App):
 
     # ── Input Handling ──────────────────────────────────────────
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Reset tab completion state when user types."""
+        self._tab_matches = []
+        self._tab_idx = -1
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
         event.input.clear()
+        # Save to history
+        if text:
+            self._history.append(text)
+        self._history_idx = -1
+        self._saved_input = ""
+        self._tab_matches = []
+        self._tab_idx = -1
         if not text:
             # Check scheduled prompts
             with self.scheduled_lock:
@@ -431,6 +463,78 @@ class MiMoTUI(App):
 
     def action_quit(self) -> None:
         self._save_and_exit()
+
+    # ── History Navigation ──────────────────────────────────────
+
+    def action_history_up(self) -> None:
+        """Show previous input from history."""
+        inp = self.query_one("#input-area", Input)
+        if not self._history:
+            return
+        if self._history_idx == -1:
+            # Save current input before browsing
+            self._saved_input = inp.value
+            self._history_idx = len(self._history) - 1
+        elif self._history_idx > 0:
+            self._history_idx -= 1
+        else:
+            return  # Already at the oldest
+        inp.value = self._history[self._history_idx]
+        # Move cursor to end
+        inp.cursor_position = len(inp.value)
+
+    def action_history_down(self) -> None:
+        """Show next input from history."""
+        inp = self.query_one("#input-area", Input)
+        if self._history_idx == -1:
+            return  # Not browsing
+        if self._history_idx < len(self._history) - 1:
+            self._history_idx += 1
+            inp.value = self._history[self._history_idx]
+        else:
+            # Restore saved input
+            self._history_idx = -1
+            inp.value = self._saved_input
+        inp.cursor_position = len(inp.value)
+
+    # ── Tab Completion ──────────────────────────────────────────
+
+    def action_tab_complete(self) -> None:
+        """Cycle through matching slash commands."""
+        inp = self.query_one("#input-area", Input)
+        value = inp.value
+
+        # Only complete slash commands
+        if not value.startswith("/"):
+            return
+
+        # If we're already cycling with the same prefix, show next match
+        if self._tab_matches and self._tab_prefix == value:
+            self._tab_idx = (self._tab_idx + 1) % len(self._tab_matches)
+            inp.value = self._tab_matches[self._tab_idx]
+            inp.cursor_position = len(inp.value)
+            return
+
+        # Find all matching commands
+        matches = [cmd for cmd in self.COMMANDS if cmd.startswith(value)]
+        if not matches:
+            return
+
+        if len(matches) == 1:
+            # Single match — complete it
+            inp.value = matches[0] + " "
+            inp.cursor_position = len(inp.value)
+            self._tab_matches = []
+            self._tab_idx = -1
+        else:
+            # Multiple matches — show them and start cycling
+            self._tab_matches = matches
+            self._tab_prefix = value
+            self._tab_idx = 0
+            inp.value = matches[0]
+            inp.cursor_position = len(inp.value)
+            # Show all matches in output
+            self.write_output("  [dim]" + "  ".join(matches) + "[/dim]")
 
     def _save_and_exit(self) -> None:
         try:
