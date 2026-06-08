@@ -112,7 +112,7 @@ class MiMoTUI(App):
         Binding("escape", "quit", "Quit", show=False),
         Binding("up", "history_up", "History Up", show=False),
         Binding("down", "history_down", "History Down", show=False),
-        Binding("tab", "tab_complete", "Tab Complete", show=False),
+        Binding("tab", "tab_complete", "Tab Complete", show=False, priority=True),
     ]
 
     # All slash commands for tab completion
@@ -167,7 +167,6 @@ class MiMoTUI(App):
         yield Input(
             placeholder="Type a message or /help...",
             id="input-area",
-            suggester=CommandSuggester(),
         )
 
     def on_mount(self) -> None:
@@ -267,7 +266,7 @@ class MiMoTUI(App):
         table.add_column()
         from .config import MIMO_API_KEY
         table.add_row("Model", self.harness.model)
-        table.add_row("API Key", "*" * 12 if MIMO_API_KEY else "[red]NOT SET[/red]")
+        table.add_row("API Key", "[green]SET[/green]" if MIMO_API_KEY else "[red]NOT SET[/red]")
         mode = 'plan' if getattr(self.harness, 'plan_mode', False) else \
                'auto-approve' if self.harness.perms.auto_approve else 'interactive'
         table.add_row("Mode", mode)
