@@ -397,6 +397,30 @@ class MiMoTUI(App):
 
     # ── Agent Execution ─────────────────────────────────────────
 
+    def _format_tool_args(self, tool_name: str, args: dict) -> str:
+        """Format tool arguments for TUI display (matches display.py logic)."""
+        if not args:
+            return ""
+        if tool_name in ("read_file", "write_file", "edit_file"):
+            path = args.get("path") or args.get("file_path", "")
+            if path:
+                return f" → {path}"
+        if tool_name == "run_command":
+            cmd = args.get("command", "")
+            if cmd:
+                return f" → ${cmd}" if len(cmd) <= 60 else f" → ${cmd[:57]}..."
+        if tool_name == "search_files":
+            pattern = args.get("pattern", "")
+            if pattern:
+                return f" → {pattern}"
+        if tool_name == "list_directory":
+            return f" → {args.get('path', '.')}"
+        import json
+        preview = json.dumps(args, ensure_ascii=False)
+        if len(preview) > 80:
+            preview = preview[:77] + "..."
+        return f" → {preview}"
+
     def _run_agent(self, task: str) -> None:
         self._agent_running = True
         self._disable_input()
@@ -405,10 +429,12 @@ class MiMoTUI(App):
         _output_queue.put(("start_stream", None))
 
         import mimo_harness.display as _display_mod
+        import io
 
         # Save originals for restore
         orig_stdout = sys.stdout
         orig_stderr = sys.stderr
+        orig_console_file = _display_mod._console.file
 
         # Install TUI override callbacks in display.py.
         # These are checked INSIDE each display function, so they work even
@@ -423,11 +449,16 @@ class MiMoTUI(App):
         )
         _display_mod._tui_model_output_end = lambda: _output_queue.put(("write", "╰──────"))
         _display_mod._tui_tool_call_collapsible = lambda name, args, *a, **kw: _output_queue.put(
-            ("write", f"  ⚡ {name}")
+            ("write", f"  ⚡ {name}{self._format_tool_args(name, args)}")
         )
         _display_mod._tui_tool_call_result = lambda name, ok, dur, *a, **kw: _output_queue.put(
             ("write", f"  {'✓' if ok else '✗'} {name} ({dur:.1f}s)")
         )
+
+        # Suppress _console.print — it writes directly to its file object
+        # (the original stdout fd), bypassing sys.stdout and all overrides.
+        # Our override callbacks handle all output through the queue instead.
+        _display_mod._console.file = io.StringIO()
 
         # Monkey-patch permission input to route through TUI
         import mimo_harness.permissions as _perm_mod
@@ -437,14 +468,16 @@ class MiMoTUI(App):
         self.run_worker(
             self._agent_worker(task, _display_mod,
                                _perm_mod, orig_perm_request,
-                               orig_stdout, orig_stderr),
+                               orig_stdout, orig_stderr,
+                               orig_console_file),
             exclusive=True,
             thread=True,
         )
 
     def _agent_worker(self, task, display_mod,
                       perm_mod=None, orig_perm_request=None,
-                      orig_stdout=None, orig_stderr=None):
+                      orig_stdout=None, orig_stderr=None,
+                      orig_console_file=None):
         def worker():
             # Save thread reference for force-kill
             self._worker_thread = threading.current_thread()
@@ -476,6 +509,8 @@ class MiMoTUI(App):
                 # Restore stdout/stderr
                 sys.stdout = orig_stdout or sys.__stdout__
                 sys.stderr = orig_stderr or sys.__stderr__
+                # Restore _console.file (was set to StringIO to suppress direct writes)
+                display_mod._console.file = orig_console_file or sys.__stdout__
                 # Clear ALL display override callbacks
                 display_mod._tui_stream_token = None
                 display_mod._tui_stream_end = None
@@ -623,6 +658,7 @@ class MiMoTUI(App):
         _display_mod._tui_model_output_end = None
         _display_mod._tui_tool_call_collapsible = None
         _display_mod._tui_tool_call_result = None
+        _display_mod._console.file = sys.__stdout__
         _perm_mod._tui_permission_request = None
         self.write_output("[yellow]Agent killed. Input re-enabled.[/yellow]")
 
