@@ -489,10 +489,10 @@ class MiMoTUI(App):
             sys.stderr = proxy
 
             try:
-                result = self.harness.run(task, self.session)
-                if result:
-                    _output_queue.put(("end_stream", None))
-                    _output_queue.put(("write", result))
+                # harness.run() outputs through monkey-patched _console.print
+                # and print_streaming_token, which route to _output_queue.
+                # Do NOT write result again here — that causes duplicate output.
+                self.harness.run(task, self.session)
             except Exception as e:
                 _output_queue.put(("end_stream", None))
                 _output_queue.put(("write", f"[red]Error: {e}[/red]"))
