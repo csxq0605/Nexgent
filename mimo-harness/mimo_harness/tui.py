@@ -482,7 +482,7 @@ class MiMoTUI(App):
             # Save thread reference for force-kill
             self._worker_thread = threading.current_thread()
 
-            # Redirect stdout/stderr to queue so direct print() goes to TUI
+            # Redirect sys.stdout/stderr as safety net
             class _StdoutProxy:
                 """Redirect sys.stdout to the output queue."""
                 def write(self, text):
@@ -498,14 +498,40 @@ class MiMoTUI(App):
             sys.stdout = proxy
             sys.stderr = proxy
 
+            # Replace builtins.print to route ALL print() calls to the TUI queue.
+            # This is the most reliable interception point — it catches print()
+            # from agent.py, permissions.py, display.py, and any other module,
+            # regardless of how they import or reference print().
+            import builtins
+            orig_builtins_print = builtins.print
+            self._orig_builtins_print = orig_builtins_print  # for force_kill cleanup
+
+            def tui_print(*args, **kwargs):
+                """Replacement for builtins.print — routes to TUI queue."""
+                sep = kwargs.get('sep', ' ')
+                end = kwargs.get('end', '\n')
+                text = sep.join(str(a) for a in args)
+                if not text and end == '\n':
+                    return
+                full = text + end
+                # Streaming tokens use end="" — buffer in streaming widget
+                if end == '':
+                    _output_queue.put(("stream", full))
+                else:
+                    _output_queue.put(("write", full.rstrip('\n')))
+
+            builtins.print = tui_print
+
             try:
-                # harness.run() outputs through display.py override callbacks
-                # which route to _output_queue. Do NOT write result again here.
+                # harness.run() outputs through builtins.print (routed to queue)
+                # and display.py override callbacks. Do NOT write result again here.
                 self.harness.run(task, self.session)
             except Exception as e:
                 _output_queue.put(("end_stream", None))
                 _output_queue.put(("write", f"[red]Error: {e}[/red]"))
             finally:
+                # Restore builtins.print
+                builtins.print = orig_builtins_print
                 # Restore stdout/stderr
                 sys.stdout = orig_stdout or sys.__stdout__
                 sys.stderr = orig_stderr or sys.__stderr__
@@ -648,8 +674,11 @@ class MiMoTUI(App):
         self._cleanup_interrupted_session()
         self._on_agent_done()
         # Restore display override callbacks
+        import builtins
         import mimo_harness.display as _display_mod
         import mimo_harness.permissions as _perm_mod
+        if hasattr(self, '_orig_builtins_print'):
+            builtins.print = self._orig_builtins_print
         _display_mod._tui_write = None
         _display_mod._tui_stream_token = None
         _display_mod._tui_stream_end = None
