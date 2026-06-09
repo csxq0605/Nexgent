@@ -451,12 +451,21 @@ class MiMoTUI(App):
             ("write", f"╭── {model} ──") if model else ("write", "╭── Assistant ──")
         )
         _display_mod._tui_model_output_end = lambda: _output_queue.put(("write", "╰──────"))
-        _display_mod._tui_tool_call_collapsible = lambda name, args, *a, **kw: _output_queue.put(
-            ("write", f"  ⚡ {name}{self._format_tool_args(name, args)}")
-        )
-        _display_mod._tui_tool_call_result = lambda name, ok, dur, *a, **kw: _output_queue.put(
-            ("write", f"  {'✓' if ok else '✗'} {name} ({dur:.1f}s)")
-        )
+        def tui_tool_call_collapsible(name, args, call_index=0, total=1,
+                                      collapsed=True, result_preview=None,
+                                      success=None, duration=None):
+            prefix = f"  ⚡ [{call_index + 1}/{total}]" if total > 1 else "  ⚡"
+            _output_queue.put(("write", f"{prefix} {name}{self._format_tool_args(name, args)}"))
+        _display_mod._tui_tool_call_collapsible = tui_tool_call_collapsible
+
+        def tui_tool_call_result(name, success, duration, result_preview=None, error=None):
+            icon = '✓' if success else '✗'
+            _output_queue.put(("write", f"  {icon} {name} ({duration:.1f}s)"))
+            if error:
+                _output_queue.put(("write", f"    [red]{error[:200]}[/red]"))
+            elif result_preview:
+                _output_queue.put(("write", f"    [dim]{result_preview[:200]}[/dim]"))
+        _display_mod._tui_tool_call_result = tui_tool_call_result
 
         # Suppress _console.print — it writes directly to its file object
         # (the original stdout fd), bypassing sys.stdout and all overrides.
