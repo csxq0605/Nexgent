@@ -7,7 +7,7 @@ A production-grade AI agent harness powered by Xiaomi MiMo model, following Clau
 ## Features
 
 - **Agent Loop**: Dependency injection, circuit breaker, token budget, parallel tool dispatch, streaming, effort levels, fallback model, graceful abort, _StreamReader with per-chunk 120s timeout
-- **33 Tools across 14 Modules**: File ops (6), shell, code execution, web (2), docs (2), math, notebooks, tasks (5), LSP (3), scheduler (3), plan (2), monitor (3), interactive (2), subagent
+- **30 Tools across 14 Modules**: File ops (6), shell, code execution, web (2), docs (2), math, notebooks, tasks (5), LSP (3), scheduler (3), plan (2), monitor (3), interactive (2), subagent
 - **Permission Pipeline**: 6 modes (DEFAULT/PLAN/AUTO/ACCEPT_EDITS/DONT_ASK/BYPASS), 4-stage pipeline, protected paths, symlink resolution, inline TUI prompts
 - **Security Pipeline**: 2-layer defense (regex pre-filter + model classifier), sensitive data redaction, prompt injection detection, self-review mechanism
 - **Context Management**: 1M token window, 4-level progressive compression (snip → microcompact → LLM semantic → truncation), warning at 85%, user-controlled `/compact`
@@ -18,8 +18,8 @@ A production-grade AI agent harness powered by Xiaomi MiMo model, following Clau
 - **SubAgent System**: Parallel/Pipeline execution, resource limits (tokens/time/count), message channels, priority scheduling
 - **Token Counter**: tiktoken precise counting with heuristic fallback, streaming accumulator, per-session stats
 - **Display**: Structured CLI with Unicode/ASCII fallback, conversation bubbles, code syntax highlighting, spinner, status bar, collapsible tool calls, rich tables/panels
-- **TUI**: Full-screen Textual interface with queue-based output (no deadlock), fixed bottom input, scrolling output, tab completion, input history, inline permission prompts, Ctrl+K force-kill
-- **CLI**: Interactive REPL, pipe input, output formats (text/json/stream-json), streaming default ON, `!command`, 26 slash commands
+- **TUI**: Full-screen Textual interface with queue-based output (no deadlock), override callbacks for all display functions, builtins.print interception, fixed bottom input, scrolling output, tab completion, input history, inline permission prompts, Ctrl+K force-kill, real-time status bar
+- **CLI**: Interactive REPL, pipe input, output formats (text/json/stream-json), streaming default ON, `!command`, 28 slash commands
 
 ## Quick Start
 
@@ -184,7 +184,7 @@ mimo-harness --fallback-model gpt-4o       # 设置备用模型
 ```
 mimo_harness/
 ├── agent.py              # Core loop, DI, circuit breaker, token budget, streaming, _StreamReader
-├── cli.py                # REPL, pipe input, output formats, session resume, 26 commands
+├── cli.py                # REPL, pipe input, output formats, session resume, 28 commands
 ├── config.py             # Configuration management, API key validation
 ├── context.py            # 4-level compression, session management, checkpoints, memory loading
 ├── hooks.py              # 18 lifecycle events, command/HTTP/prompt hooks
@@ -194,12 +194,12 @@ mimo_harness/
 ├── project_scanner.py    # Project analysis, AGENTS.md generation
 ├── security_pipeline.py  # 2-layer security (regex + model), sensitive data redaction
 ├── settings.py           # 4-level settings hierarchy
-├── display.py            # Structured CLI display (banners, spinners, status bar, syntax highlighting)
+├── display.py            # Structured CLI display, TUI override callbacks
 ├── input_utils.py        # Shared prompt_toolkit input with auto-completion and history
-├── tui.py                # Full-screen Textual TUI (queue-based output, inline permissions, Ctrl+K)
+├── tui.py                # Full-screen Textual TUI (queue-based, override callbacks, builtins.print)
 ├── subagent.py           # SubAgent lifecycle, parallel/pipeline execution, message channels
 ├── token_counter.py      # tiktoken counting, heuristic fallback, streaming accumulator
-└── tools/                # 14 modules, 33 registered tools
+└── tools/                # 14 modules, 30 registered tools
     ├── code_exec.py      # execute_python — Python code execution in isolated subprocess
     ├── doc_tools.py      # create_doc, create_spreadsheet — Document and CSV creation
     ├── file_ops.py       # read_file, read_files, write_file, edit_file, glob_files, grep_files
@@ -237,24 +237,30 @@ mimo_harness/
 
 ## TUI Architecture
 
-The TUI uses a **queue-based output architecture** to prevent thread deadlocks:
+The TUI uses a **queue-based output architecture** with **display override callbacks** to prevent thread deadlocks and ensure all output is captured:
 
 ```
 Agent Worker Thread          Main Textual Thread
       │                            │
-      │  _output_queue.put()       │  _drain_output_queue() ← 50ms timer
-      │  (never blocks)            │  (processes ≤100 items/tick)
-      │                            │
+      │  builtins.print ──────────────→ _output_queue.put()
+      │  display callbacks ───────────→ _output_queue.put()
+      │  _StdoutProxy ────────────────→ _output_queue.put()
+      │  (never blocks)            │
+      │                            │  _drain_output_queue() ← 50ms timer
+      │                            │  (processes ≤100 items/tick)
       ▼                            ▼
   _output_queue  ──────────→  RichLog / Static widgets
 ```
 
-- Worker thread puts output items into `queue.Queue` (non-blocking)
-- Main thread drains queue every 50ms via `set_interval` timer
-- No `call_from_thread()` = no deadlock possible
-- `_StdoutProxy` redirects `sys.stdout`/`sys.stderr` to queue
-- Permission prompts appear inline in output area (Y/n via key press)
-- `Ctrl+K` force-kills stuck agent thread via `PyThreadState_SetAsyncExc`
+Key design decisions:
+- **Override callbacks**: 7 callbacks in `display.py` (`_tui_stream_token`, `_tui_print`, `_tui_model_output_start/end`, `_tui_tool_call_collapsible/result`, `_tui_write`) intercept all output from agent.py, even when agent.py holds direct function references via `from .display import ...`
+- **`builtins.print` replacement**: Catches all `print()` calls from any module, routes to queue based on `end=""` (stream) vs `end="\n"` (write)
+- **`_console.file = io.StringIO()`**: Suppresses any direct `_console.print` calls that bypass both callbacks and builtins.print
+- **`_StdoutProxy`**: Safety net for any remaining `sys.stdout.write()` calls
+- **Permission prompts**: Inline in output area (Y/n via key press), not in input box
+- **`Ctrl+K`**: Force-kills stuck agent thread via `PyThreadState_SetAsyncExc`, cleans up orphaned tool_calls
+- **Status bar**: Updates every 50ms during agent execution (tokens, messages)
+- **Tool call display**: Shows parallel index `[1/N]`, file path, command, error details
 
 ## Tool Summary
 
@@ -282,16 +288,16 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-**测试状态**: ~1,143 tests across 27 test files
+**测试状态**: 884 tests across 25 test files
 
-27 test files covering:
+25 test files covering:
 - **Security**: path traversal, SSRF, shell injection, large input, Unicode, sensitive data redaction, prompt injection detection
 - **Permissions**: 6 modes, 4-stage pipeline, protected paths, symlink resolution, rule matching
 - **Context**: 4-level compression, parallel dispatch, streaming, thrashing protection, orphan filtering
 - **Tools**: file ops, shell, web, docs, math, notebooks, tasks, LSP, plan, scheduler, code execution
 - **Display**: banner, step header, tool call display, spinner, status bar, Unicode fallback, conversation bubbles, code blocks, hard-wrap
 - **CLI**: interactive REPL, pipe input, output formats, session management, argument parsing, streaming output
-- **TUI**: queue-based output, command suggester, stream buffer, class attributes, inline permissions
+- **TUI**: queue-based output, command suggester, stream buffer, class attributes, inline permissions, override callbacks
 - **Hooks**: 18 lifecycle events, command/HTTP/prompt hooks, async execution
 - **Settings**: 4-level hierarchy, config hot-reload
 - **Session**: ID validation, checkpoints, fork, resume, JSONL persistence

@@ -49,8 +49,8 @@ mimo-harness   # 进入交互模式
 基于 Stage 0-8 经验构建的完整 Agent Harness，参考 Claude Code 架构。
 
 **核心特性**：
-- **Agent Loop**: 依赖注入、熔断器、Token 预算、并行工具调度、流式输出、_StreamReader per-chunk 120s 超时
-- **33 个工具 / 14 个模块**: 文件操作(6)、Shell、代码执行、Web(2)、文档(2)、数学、笔记本、任务(5)、LSP(3)、调度器(3)、计划(2)、监控(3)、交互(2)、子代理
+- **Agent Loop**: 依赖注入、熔断器、Token 预算、并行工具调度、流式输出、_StreamReader per-chunk 120s 超时、retry_with_backoff
+- **30 个工具 / 14 个模块**: 文件操作(6)、Shell、代码执行、Web(2)、文档(2)、数学、笔记本、任务(5)、LSP(3)、调度器(3)、计划(2)、监控(3)、交互(2)、子代理
 - **权限管线**: 6 种模式（DEFAULT/PLAN/AUTO/ACCEPT_EDITS/DONT_ASK/BYPASS），4 阶段管线，TUI 内联提示
 - **安全管线**: 2 层防御（regex 预过滤 + 模型分类器），敏感数据脱敏，Prompt injection 检测，自审机制
 - **上下文管理**: 1M token 窗口，4 级渐进压缩（snip → microcompact → LLM 压缩 → 截断），85% 预警，用户手动 `/compact`
@@ -58,8 +58,8 @@ mimo-harness   # 进入交互模式
 - **会话管理**: JSONL 自动保存、检查点回滚、会话分叉、命名会话、自动清理
 - **Hook 系统**: 18 种生命周期事件，命令/HTTP/Prompt 三种 handler，SSRF 防护
 - **SubAgent**: 并行/Pipeline 执行，资源限制（token/时间/数量），消息通道，优先级调度
-- **TUI**: 全屏 Textual 界面，队列输出架构（无死锁），底部固定输入，Tab 补全，输入历史，内联权限提示，Ctrl+K 强制终止
-- **CLI**: 26 斜杠命令 + `!` shell、管道输入、多输出格式（text/json/stream-json）
+- **TUI**: 全屏 Textual 界面，队列输出架构（无死锁），8 个 override 回调，builtins.print 拦截，底部固定输入，Tab 补全，输入历史，内联权限提示，Ctrl+K 强制终止，实时状态栏
+- **CLI**: 28 斜杠命令 + `!` shell、管道输入、多输出格式（text/json/stream-json）
 
 详见 [mimo-harness/README.md](mimo-harness/README.md)。
 
@@ -67,13 +67,13 @@ mimo-harness   # 进入交互模式
 
 | 测试类型 | 数量 | 耗时 |
 |---------|------|------|
-| 单元测试 | ~1,060 | ~10min |
+| 单元测试 | ~800 | ~10min |
 | E2E fast | 34 | ~10min |
 | E2E slow | 12 | ~6.5min |
 | Stage 测试 | 83 (58 unit + 25 E2E) | ~3min |
-| **总计** | **~1,143** | **~30min** |
+| **总计** | **~884** | **~30min** |
 
-27 个测试文件，覆盖安全、权限、上下文、工具、CLI、TUI、Hook、设置、会话、SubAgent、Token 计数器、压力/边界测试。
+25 个测试文件，覆盖安全、权限、上下文、工具、CLI、TUI、Hook、设置、会话、SubAgent、Token 计数器、压力/边界测试。
 
 ## CI/CD
 
