@@ -187,35 +187,25 @@ class MiMoTUI(App):
 
         Called every 50ms by Textual timer on the main thread.
         This is the ONLY place widgets are touched from.
-
-        Streaming tokens are written directly to RichLog with end=""
-        so they append to the current entry in real-time (no separate
-        #streaming widget). This matches the behavior described in the
-        TUI streaming report: content stays in RichLog permanently.
         """
         try:
             for _ in range(100):  # max 100 items per tick to avoid blocking UI
                 kind, data = _output_queue.get_nowait()
                 if kind == "stream":
-                    # Append streaming tokens directly to RichLog
-                    log = self.query_one("#output", RichLog)
-                    log.write(data, end="")
+                    # Append streaming tokens to the streaming widget
                     self._streaming_text += data
+                    stream = self.query_one("#streaming", Static)
+                    stream.update(self._streaming_text)
                 elif kind == "write":
-                    # Finalize current stream entry, then write content
-                    if self._streaming_text:
-                        log = self.query_one("#output", RichLog)
-                        log.write("")  # newline to close the stream entry
-                        self._streaming_text = ""
+                    # Write completed content to RichLog
+                    self._end_streaming_internal()
                     log = self.query_one("#output", RichLog)
                     log.write(data)
+                    self._start_streaming_internal()
                 elif kind == "start_stream":
-                    self._streaming_text = ""
+                    self._start_streaming_internal()
                 elif kind == "end_stream":
-                    if self._streaming_text:
-                        log = self.query_one("#output", RichLog)
-                        log.write("")  # newline to close the stream entry
-                        self._streaming_text = ""
+                    self._end_streaming_internal()
                 elif kind == "done":
                     self._on_agent_done()
                 elif kind == "permission":
@@ -228,21 +218,22 @@ class MiMoTUI(App):
             self._update_status_bar()
 
     # ── Streaming Support ──────────────────────────────────────
-    # Streaming tokens are now written directly to RichLog with end=""
-    # so they append in real-time. No separate #streaming widget needed.
-    # _start_streaming_internal and _end_streaming_internal are kept as
-    # no-ops for compatibility with code that calls them.
 
     def _start_streaming_internal(self) -> None:
-        """No-op: streaming tokens go directly to RichLog."""
+        """Show the streaming widget for real-time token display (main thread only)."""
         self._streaming_text = ""
+        stream = self.query_one("#streaming", Static)
+        stream.add_class("visible")
+        stream.update("")
 
     def _end_streaming_internal(self) -> None:
-        """Flush any remaining stream content to RichLog."""
-        if self._streaming_text:
+        """Move streaming content to RichLog and hide streaming widget (main thread only)."""
+        stream = self.query_one("#streaming", Static)
+        stream.remove_class("visible")
+        if self._streaming_text.strip():
             log = self.query_one("#output", RichLog)
-            log.write("")  # newline to close stream entry
-            self._streaming_text = ""
+            log.write(self._streaming_text)
+        self._streaming_text = ""
 
     # ── Output API ──────────────────────────────────────────────
 
@@ -451,7 +442,6 @@ class MiMoTUI(App):
         # Install TUI override callbacks in display.py.
         # These are checked INSIDE each display function, so they work even
         # when agent.py holds direct references via `from .display import ...`
-        _display_mod._tui_write = lambda text: _output_queue.put(("write", text.rstrip('\n')))
         _display_mod._tui_stream_token = lambda token: _output_queue.put(("stream", token))
         _display_mod._tui_stream_end = lambda: None  # no-op; _on_agent_done flushes
         _display_mod._tui_print = lambda *a, **kw: _output_queue.put(
@@ -461,19 +451,12 @@ class MiMoTUI(App):
             ("write", f"╭── {model} ──") if model else ("write", "╭── Assistant ──")
         )
         _display_mod._tui_model_output_end = lambda: _output_queue.put(("write", "╰──────"))
-        def tui_tool_call_collapsible(name, args, call_index=0, total=1, *a, **kw):
-            prefix = f"  ⚡ [{call_index + 1}/{total}]" if total > 1 else "  ⚡"
-            _output_queue.put(("write", f"{prefix} {name}{self._format_tool_args(name, args)}"))
-        _display_mod._tui_tool_call_collapsible = tui_tool_call_collapsible
-
-        def tui_tool_call_result(name, ok, dur, preview=None, error=None, *a, **kw):
-            icon = '✓' if ok else '✗'
-            _output_queue.put(("write", f"  {icon} {name} ({dur:.1f}s)"))
-            if error:
-                _output_queue.put(("write", f"    [red]{error[:200]}[/red]"))
-            elif preview:
-                _output_queue.put(("write", f"    [dim]{preview[:200]}[/dim]"))
-        _display_mod._tui_tool_call_result = tui_tool_call_result
+        _display_mod._tui_tool_call_collapsible = lambda name, args, *a, **kw: _output_queue.put(
+            ("write", f"  ⚡ {name}{self._format_tool_args(name, args)}")
+        )
+        _display_mod._tui_tool_call_result = lambda name, ok, dur, *a, **kw: _output_queue.put(
+            ("write", f"  {'✓' if ok else '✗'} {name} ({dur:.1f}s)")
+        )
 
         # Suppress _console.print — it writes directly to its file object
         # (the original stdout fd), bypassing sys.stdout and all overrides.
@@ -558,7 +541,6 @@ class MiMoTUI(App):
                 # Restore _console.file (was set to StringIO to suppress direct writes)
                 display_mod._console.file = orig_console_file or sys.__stdout__
                 # Clear ALL display override callbacks
-                display_mod._tui_write = None
                 display_mod._tui_stream_token = None
                 display_mod._tui_stream_end = None
                 display_mod._tui_print = None
@@ -685,12 +667,10 @@ class MiMoTUI(App):
             except Exception:
                 pass
         # Force-restore state even if thread doesn't die cleanly
-        # Drain queue: preserve stream tokens, discard the rest
+        # Clear the output queue to avoid stale items
         while not _output_queue.empty():
             try:
-                kind, data = _output_queue.get_nowait()
-                if kind == "stream":
-                    self._streaming_text += data
+                _output_queue.get_nowait()
             except queue.Empty:
                 break
         # Clean up incomplete messages from session to prevent old task continuation
