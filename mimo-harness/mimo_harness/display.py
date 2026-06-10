@@ -595,6 +595,12 @@ def print_help():
         ("/subagent <task>", "Run task as SubAgent"),
         ("/parallel <t1> | <t2>", "Run tasks in parallel"),
         ("/pipeline <t1> | <t2>", "Run tasks in pipeline"),
+        ("/skills", "List available skills"),
+        ("/<skill-name>", "Invoke a skill"),
+        ("/mcp", "Show MCP server status"),
+        ("/mcp connect <name>", "Connect to MCP server"),
+        ("/mcp disconnect <name>", "Disconnect from MCP server"),
+        ("/mcp refresh", "Refresh MCP configurations"),
     ]
 
     table = Table(title="Commands", box=box.SIMPLE, show_header=True, header_style="bold")

@@ -958,6 +958,99 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 _safe_print(f"  {marker} {_yellow(name)} {_dim(f'({desc})')}")
             print(f"\n  {_dim('Usage: /mode <default|plan>')}")
         print()
+    elif cmd[0] == "/skills":
+        # List available skills
+        from .skills import SkillManager
+        skill_manager = SkillManager()
+        skills = skill_manager.list_skills()
+        if skills:
+            print(f"\n  {_bold(f'Available Skills ({len(skills)})')}")
+            _safe_print(f"  {_dim(BUBBLE_H * 40)}")
+            for skill in skills:
+                invocable = ""
+                if not skill['user_invocable']:
+                    invocable = _dim(" (model-only)")
+                elif skill['disable_model_invocation']:
+                    invocable = _dim(" (user-only)")
+                _safe_print(f"  {_yellow('/')}{skill['name']}{invocable}")
+                if skill['description']:
+                    _safe_print(f"    {_dim(skill['description'][:60])}")
+            print(f"\n  {_dim('Usage: /<skill-name> [arguments]')}")
+        else:
+            print_info("No skills found. Create skills in ~/.mimo/skills/ or .mimo/skills/")
+        print()
+    elif cmd[0].startswith("/") and cmd[0][1:] in (getattr(harness, '_skill_manager', SkillManager()).skills if hasattr(harness, '_skill_manager') else {}):
+        # Invoke a skill
+        skill_name = cmd[0][1:]
+        arguments = " ".join(cmd[1:]) if len(cmd) > 1 else ""
+        from .skills import SkillManager
+        if not hasattr(harness, '_skill_manager'):
+            harness._skill_manager = SkillManager()
+        rendered = harness._skill_manager.invoke_skill(
+            skill_name,
+            arguments=arguments,
+            session_id=session.session_id,
+            effort=harness.effort,
+        )
+        if rendered:
+            # Add skill content as a system message
+            session.messages.append({
+                "role": "system",
+                "content": f"[Skill: {skill_name}]\n{rendered}",
+            })
+            print_success(f"Skill '{skill_name}' loaded.")
+        else:
+            print_error(f"Skill '{skill_name}' not found or cannot be invoked.")
+        print()
+    elif cmd[0] == "/mcp":
+        # MCP commands
+        from .mcp import MCPManager
+        if not hasattr(harness, '_mcp_manager'):
+            harness._mcp_manager = MCPManager()
+            harness._mcp_manager.load_configurations()
+
+        if len(cmd) > 1:
+            # Subcommands
+            subcmd = cmd[1]
+            if subcmd == "connect" and len(cmd) > 2:
+                server_name = cmd[2]
+                print_info(f"Connecting to {server_name}...")
+                if harness._mcp_manager.connect_server(server_name):
+                    print_success(f"Connected to {server_name}")
+                else:
+                    print_error(f"Failed to connect to {server_name}")
+            elif subcmd == "disconnect" and len(cmd) > 2:
+                server_name = cmd[2]
+                harness._mcp_manager.disconnect_server(server_name)
+                print_success(f"Disconnected from {server_name}")
+            elif subcmd == "refresh":
+                harness._mcp_manager.load_configurations()
+                print_success("MCP configurations refreshed")
+            else:
+                print_warning("Usage: /mcp [connect|disconnect|refresh] [server-name]")
+        else:
+            # Show status
+            status = harness._mcp_manager.get_server_status()
+            if status:
+                print(f"\n  {_bold('MCP Servers')}")
+                _safe_print(f"  {_dim(BUBBLE_H * 40)}")
+                for server in status:
+                    status_icon = {
+                        'connected': _green(CHECK_ICON),
+                        'connecting': _yellow('...'),
+                        'disconnected': _dim('○'),
+                        'failed': _red(CROSS_ICON),
+                        'pending': _yellow('?'),
+                    }.get(server['status'], '?')
+                    tools_info = f" ({server['tools_count']} tools)" if server['tools_count'] > 0 else ""
+                    _safe_print(f"  {status_icon} {_yellow(server['name'])}{tools_info}")
+                    _safe_print(f"    {_dim(f'{server["transport"]} | {server["scope"]}')}")
+                    if server['error']:
+                        _safe_print(f"    {_red(server['error'][:50])}")
+                print(f"\n  {_dim('Commands: /mcp connect <name>, /mcp disconnect <name>, /mcp refresh')}")
+            else:
+                print_info("No MCP servers configured. Create .mimo/mcp.json to add servers.")
+        print()
     else:
         print_warning(f"Unknown command: {cmd[0]}. Type /help for commands.")
     return "continue", session

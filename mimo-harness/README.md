@@ -281,6 +281,207 @@ Key design decisions:
 | scheduler_tools | cron_create, cron_delete, cron_list | READ | Session-scoped cron scheduling |
 | subagent_tools | subagent_run | WRITE | LLM-driven task delegation |
 
+## Skills 系统
+
+Skills 是可复用的指令定义，可以扩展 Agent 的能力。创建一个 `SKILL.md` 文件，Agent 会将其添加到工具箱中。
+
+### 目录结构
+
+```
+~/.mimo/skills/            # 个人级 skills（所有项目可用）
+.mimo/skills/              # 项目级 skills（仅当前项目）
+.mimo/commands/            # 兼容旧版 commands
+```
+
+### SKILL.md 文件格式
+
+```yaml
+---
+name: my-skill
+description: What this skill does
+disable-model-invocation: true
+user-invocable: true
+allowed-tools: Read Grep
+context: fork
+agent: Explore
+---
+
+Skill instructions here...
+```
+
+#### Frontmatter 字段
+
+| 字段 | 说明 |
+|------|------|
+| `name` | 显示名称 |
+| `description` | 技能描述，Agent 用它来决定何时使用 |
+| `when_to_use` | 额外的使用场景说明 |
+| `argument-hint` | 参数提示 |
+| `arguments` | 命名参数列表 |
+| `disable-model-invocation` | 设为 `true` 阻止 Agent 自动调用 |
+| `user-invocable` | 设为 `false` 隐藏用户调用 |
+| `allowed-tools` | 技能激活时允许的工具 |
+| `disallowed-tools` | 技能激活时禁止的工具 |
+| `model` | 使用的模型 |
+| `effort` | 努力级别 |
+| `context` | 设为 `fork` 在子代理中运行 |
+| `agent` | 子代理类型 |
+| `paths` | 限制激活的文件模式 |
+| `shell` | Shell 类型（bash 或 powershell） |
+
+### 动态上下文注入
+
+使用 `` !`command` `` 语法在技能加载时执行命令：
+
+```markdown
+## Current changes
+
+!`git diff HEAD`
+
+## Environment
+
+```!
+node --version
+npm --version
+```
+```
+
+### 参数替换
+
+| 变量 | 说明 |
+|------|------|
+| `$ARGUMENTS` | 所有参数 |
+| `$ARGUMENTS[N]` | 第 N 个参数（0 开始） |
+| `$N` | `$ARGUMENTS[N]` 的简写 |
+| `${CLAUDE_SESSION_ID}` | 当前会话 ID |
+| `${CLAUDE_EFFORT}` | 当前努力级别 |
+| `${CLAUDE_SKILL_DIR}` | 技能目录路径 |
+
+### 使用 Skills
+
+```
+/skills                      # 列出可用 Skills
+/<skill-name> [arguments]    # 调用 Skill
+/summarize-changes           # 示例：总结变更
+/fix-issue 123               # 示例：修复 issue #123
+```
+
+### 示例 Skill
+
+创建文件 `.mimo/skills/code-review/SKILL.md`：
+
+```yaml
+---
+name: code-review
+description: Review code changes and suggest improvements
+disable-model-invocation: true
+allowed-tools: Read Grep
+---
+
+## Current changes
+
+!`git diff HEAD`
+
+## Instructions
+
+Review the changes above and:
+1. Identify potential bugs
+2. Suggest improvements
+3. Check for security issues
+4. Verify test coverage
+```
+
+## MCP 支持
+
+MCP (Model Context Protocol) 允许连接外部工具和数据源。
+
+### 配置文件
+
+#### 项目级配置（.mimo/mcp.json）
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["@modelcontextprotocol/server-filesystem", "."]
+    },
+    "github": {
+      "type": "stdio",
+      "command": "github-mcp-server",
+      "args": ["stdio"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+#### 用户级配置（~/.mimo/config.json）
+
+```json
+{
+  "mcpServers": {
+    "global-server": {
+      "type": "http",
+      "url": "https://mcp.example.com"
+    }
+  }
+}
+```
+
+### 传输协议
+
+| 类型 | 说明 | 配置示例 |
+|------|------|----------|
+| `stdio` | 本地子进程 | `"command": "npx", "args": ["-y", "server"]` |
+| `http` | HTTP 远程服务器 | `"url": "https://mcp.example.com/mcp"` |
+| `sse` | Server-Sent Events | `"url": "https://mcp.example.com/sse"` |
+| `ws` | WebSocket | `"url": "wss://mcp.example.com/socket"` |
+
+### 环境变量扩展
+
+支持 `${VAR}` 和 `${VAR:-default}` 语法：
+
+```json
+{
+  "command": "${HOME}/server",
+  "env": {
+    "API_KEY": "${API_KEY:-default-key}"
+  }
+}
+```
+
+### 使用 MCP
+
+```
+/mcp                         # 查看服务器状态
+/mcp connect <server-name>   # 连接服务器
+/mcp disconnect <server-name># 断开服务器
+/mcp refresh                 # 刷新配置
+```
+
+### 资源引用
+
+使用 `@` 语法引用 MCP 资源：
+
+```
+@github:issue://123
+@postgres:schema://users
+@docs:file://api/authentication
+```
+
+### 推荐 MCP 服务器
+
+| 服务器 | 用途 | 安装方式 |
+|--------|------|----------|
+| `@modelcontextprotocol/server-filesystem` | 文件系统操作 | `npm install -g @modelcontextprotocol/server-filesystem` |
+| `github-mcp-server` | GitHub 集成（issues、PRs） | [GitHub Releases](https://github.com/github/github-mcp-server/releases) |
+| `@modelcontextprotocol/server-brave-search` | 网页搜索 | `npm install -g @modelcontextprotocol/server-brave-search` |
+| `@bytebase/dbhub` | 数据库查询 | `npx -y @bytebase/dbhub --dsn postgresql://...` |
+
 ## Testing
 
 ```bash
