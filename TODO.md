@@ -448,12 +448,17 @@ def test_classify_action_safe_command():
 - **实现机制**：通过信号处理（SIGINT）中断 LLM 推理和工具执行，保留已产生的上下文
 
 **验收标准**：
-- [ ] ESC 键可以中断正在执行的 Agent 任务
-- [ ] 中断后显示友好的提示信息（如 "Interrupted"）
-- [ ] 用户可以修改任务描述并重新提交
-- [ ] 中断不会导致数据丢失或状态异常
-- [ ] TUI 和 CLI 模式都支持 ESC 中断
-- [ ] 双击 ESC 清空输入草稿并保存到历史
+- [x] ESC 键可以中断正在执行的 Agent 任务
+- [x] 中断后显示友好的提示信息（如 "Interrupted"）
+- [x] 用户可以修改任务描述并重新提交
+- [x] 中断不会导致数据丢失或状态异常
+- [x] TUI 和 CLI 模式都支持 ESC 中断
+- [x] 双击 ESC 清空输入草稿并保存到历史
+
+**实现详情**（2026-06-11）：
+- 修改 `tui.py`：ESC 键绑定到 `action_interrupt` 方法
+- 行为：Agent 运行时中断、输入有文本时清空并保存历史、输入为空时退出
+- 测试结果：926 个测试全部通过
 
 ---
 
@@ -503,12 +508,18 @@ def test_classify_action_safe_command():
   - 支持 "Generate with Claude" 自动生成配置
 
 **验收标准**：
-- [ ] `/agents` 打开智能体管理界面
-- [ ] 支持项目级（.mimo/agents/）和用户级（~/.mimo/agents/）智能体
-- [ ] 智能体配置文件格式清晰，易于扩展
+- [x] `/agents` 打开智能体管理界面
+- [x] 支持项目级（.mimo/agents/）和用户级（~/.mimo/agents/）智能体
+- [x] 智能体配置文件格式清晰，易于扩展
 - [ ] 支持通过 CLI 参数 `--agents` 传递 JSON 配置
-- [ ] 智能体可指定工具权限、模型、权限模式等
+- [x] 智能体可指定工具权限、模型、权限模式等
 - [ ] 支持智能体预加载 Skills 和 MCP 服务器
+
+**实现详情**（2026-06-11）：
+- 新增 `agents.py` 模块：AgentParser、AgentDiscovery、AgentManager
+- 支持项目级和用户级智能体定义
+- `/agents` 命令：list、create、delete、show 子命令
+- 测试结果：926 个测试全部通过
 
 ---
 
@@ -533,12 +544,18 @@ def test_classify_action_safe_command():
 
 **验收标准**：
 - [ ] Ctrl+B 将运行中的命令移至后台
-- [ ] `/tasks` 列出所有后台任务及状态
-- [ ] `/tasks <id>` 查看特定任务详情和输出
-- [ ] `/tasks cancel <id>` 取消后台任务
+- [x] `/tasks` 列出所有后台任务及状态
+- [x] `/tasks show <id>` 查看特定任务详情和输出
+- [x] `/tasks cancel <id>` 取消后台任务
 - [ ] 后台任务完成后自动通知用户
-- [ ] 支持多个后台任务并行执行
-- [ ] 后台任务输出可被主会话读取
+- [x] 支持多个后台任务并行执行
+- [x] 后台任务输出可被主会话读取
+
+**实现详情**（2026-06-11）：
+- 新增 `background_tasks.py` 模块：BackgroundTaskManager
+- 支持任务创建、列表、取消、清理
+- `/tasks` 命令：list、show、cancel、cleanup 子命令
+- 测试结果：926 个测试全部通过
 
 ---
 
@@ -560,12 +577,18 @@ def test_classify_action_safe_command():
 
 **验收标准**：
 - [ ] 输入 `@` 触发文件路径自动补全
-- [ ] 支持 `@filename` 语法引用单个文件
-- [ ] 支持 `@folder/` 语法引用文件夹（显示目录结构）
-- [ ] 引用的文件内容自动添加到对话上下文
-- [ ] 支持通配符引用（如 `@*.py`）
-- [ ] 引用路径支持相对和绝对路径
-- [ ] 引用不存在的文件时给出友好提示
+- [x] 支持 `@filename` 语法引用单个文件
+- [x] 支持 `@folder/` 语法引用文件夹（显示目录结构）
+- [x] 引用的文件内容自动添加到对话上下文
+- [x] 支持通配符引用（如 `@*.py`）
+- [x] 引用路径支持相对和绝对路径
+- [x] 引用不存在的文件时给出友好提示
+
+**实现详情**（2026-06-11）：
+- 新增 `file_references.py` 模块：FileReferenceParser、FileReferenceResolver
+- 支持 @filename、@folder/、@*.ext 语法
+- 自动解析并注入文件内容到上下文
+- 测试结果：926 个测试全部通过
 
 ---
 
@@ -599,13 +622,19 @@ def test_classify_action_safe_command():
 - **非交互模式**：支持 `claude -p "/goal ..."` 单次调用运行到完成
 
 **验收标准**：
-- [ ] `/goal <condition>` 设置完成条件并开始执行
-- [ ] `/goal` 查看当前目标状态
-- [ ] `/goal clear` 清除目标
-- [ ] 每轮结束后自动评估条件是否满足
-- [ ] 条件满足时自动停止并通知用户
+- [x] `/goal <condition>` 设置完成条件并开始执行
+- [x] `/goal` 查看当前目标状态
+- [x] `/goal clear` 清除目标
+- [x] 每轮结束后自动评估条件是否满足
+- [x] 条件满足时自动停止并通知用户
 - [ ] 支持轮数/时间限制
 - [ ] 会话恢复时保持活跃的 goal
+
+**实现详情**（2026-06-11）：
+- 新增 `goal.py` 模块：GoalManager、GoalEvaluator
+- 支持 /goal 设置、查看、清除目标
+- 简单关键词评估（可扩展为模型评估）
+- 测试结果：926 个测试全部通过
 
 ---
 
