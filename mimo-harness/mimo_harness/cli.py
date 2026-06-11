@@ -1429,6 +1429,59 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 print_info("No background tasks")
                 print_info("Run tasks in background by appending & to commands")
             print()
+    elif cmd[0] == "/goal":
+        # Goal management
+        from .goal import get_goal_manager
+        goal_manager = get_goal_manager(session.session_id)
+
+        if len(cmd) > 1:
+            arg = cmd[1]
+            if arg in ("clear", "stop", "off", "reset", "none", "cancel"):
+                # Clear goal
+                goal_manager.clear_goal()
+                print_success("Goal cleared")
+                print()
+            elif arg == "set" and len(cmd) > 2:
+                # Set goal with condition
+                condition = " ".join(cmd[2:])
+                goal_manager.set_goal(condition)
+                print_success(f"Goal set: {condition}")
+                print_info("Claude will continue working until the condition is met")
+                print()
+            else:
+                # Set goal (shorthand: /goal <condition>)
+                condition = " ".join(cmd[1:])
+                goal_manager.set_goal(condition)
+                print_success(f"Goal set: {condition}")
+                print_info("Claude will continue working until the condition is met")
+                print()
+        else:
+            # Show goal status
+            status = goal_manager.get_status()
+            if status.get('active'):
+                print(f"\n  {_bold('Active Goal')}")
+                _safe_print(f"  {_dim(BUBBLE_H * 40)}")
+                _safe_print(f"  {_dim('Condition:')} {status['condition']}")
+                _safe_print(f"  {_dim('Duration:')} {status['duration']:.1f}s")
+                _safe_print(f"  {_dim('Turns:')} {status['turns']}")
+                _safe_print(f"  {_dim('Tokens:')} {_format_tokens(status['tokens'])}")
+                if status['reason']:
+                    _safe_print(f"  {_dim('Last reason:')} {status['reason']}")
+                print(f"\n  {_dim('Commands: /goal <condition>, /goal clear')}")
+            elif status.get('achieved'):
+                print(f"\n  {_bold('Goal Achieved')}")
+                _safe_print(f"  {_dim(BUBBLE_H * 40)}")
+                _safe_print(f"  {_dim('Condition:')} {status['condition']}")
+                _safe_print(f"  {_dim('Duration:')} {status['duration']:.1f}s")
+                _safe_print(f"  {_dim('Turns:')} {status['turns']}")
+                _safe_print(f"  {_dim('Tokens:')} {_format_tokens(status['tokens'])}")
+                if status['reason']:
+                    _safe_print(f"  {_dim('Reason:')} {_green(status['reason'])}")
+            else:
+                print_info("No active goal")
+                print_info("Set a goal: /goal <condition>")
+                print_info("Example: /goal all tests pass")
+            print()
     else:
         print_warning(f"Unknown command: {cmd[0]}. Type /help for commands.")
     return "continue", session

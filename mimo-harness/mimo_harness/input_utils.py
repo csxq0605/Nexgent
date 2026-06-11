@@ -21,6 +21,7 @@ _SLASH_COMMANDS = [
     "/effort", "/mode",
     "/agents", "/agents list", "/agents create", "/agents show", "/agents delete",
     "/tasks", "/tasks list", "/tasks show", "/tasks cancel", "/tasks cleanup",
+    "/goal", "/goal clear",
     "/skills", "/skills install",
     "/mcp", "/mcp install", "/mcp connect", "/mcp disconnect", "/mcp refresh",
 ]
