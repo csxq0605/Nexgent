@@ -1044,7 +1044,9 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                     }.get(server['status'], '?')
                     tools_info = f" ({server['tools_count']} tools)" if server['tools_count'] > 0 else ""
                     _safe_print(f"  {status_icon} {_yellow(server['name'])}{tools_info}")
-                    _safe_print(f"    {_dim(f'{server["transport"]} | {server["scope"]}')}")
+                    transport = server["transport"]
+                    scope = server["scope"]
+                    _safe_print(f"    {_dim(transport + ' | ' + scope)}")
                     if server['error']:
                         _safe_print(f"    {_red(server['error'][:50])}")
                 print(f"\n  {_dim('Commands: /mcp connect <name>, /mcp disconnect <name>, /mcp refresh')}")
