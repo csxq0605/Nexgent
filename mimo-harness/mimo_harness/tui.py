@@ -109,7 +109,7 @@ class MiMoTUI(App):
     BINDINGS = [
         Binding("ctrl+c", "abort", "Abort", show=False, priority=True),
         Binding("ctrl+k", "force_kill", "Force Kill", show=False, priority=True),
-        Binding("escape", "quit", "Quit", show=False),
+        Binding("escape", "interrupt", "Interrupt", show=False),
         Binding("up", "history_up", "History Up", show=False),
         Binding("down", "history_down", "History Down", show=False),
         Binding("tab", "tab_complete", "Tab Complete", show=False, priority=True),
@@ -649,6 +649,36 @@ class MiMoTUI(App):
         inp.focus()
 
     # ── Actions ─────────────────────────────────────────────────
+
+    def action_interrupt(self) -> None:
+        """ESC: Interrupt current task or clear input.
+
+        Behavior (matching Claude Code):
+        - If agent is running: request graceful abort
+        - If input has text: clear input draft and save to history
+        - If input is empty: quit
+        """
+        if self._agent_running:
+            # Agent is running - interrupt it
+            self.harness.graceful_abort.request()
+            self.write_output("[yellow]Interrupted - stopping current task...[/yellow]")
+        else:
+            # Agent is not running
+            try:
+                input_widget = self.query_one("#input-area", Input)
+                if input_widget.value:
+                    # Clear input draft and save to history
+                    draft = input_widget.value
+                    if draft not in self._history:
+                        self._history.append(draft)
+                    input_widget.value = ""
+                    self.write_output("[dim]Input cleared (saved to history)[/dim]")
+                else:
+                    # No input - quit
+                    self._save_and_exit()
+            except Exception:
+                # Fallback: quit if input widget not found
+                self._save_and_exit()
 
     def action_abort(self) -> None:
         if self._agent_running:
