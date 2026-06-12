@@ -571,7 +571,7 @@ def main():
                 if result.returncode != 0 and not result.stdout and not result.stderr:
                     print_warning(f"[exit code: {result.returncode}]")
             except subprocess.TimeoutExpired:
-                print_error("[command timed out after 30s]")
+                print_error("[command timed out after 120s]")
             except Exception as e:
                 print_error(f"[error: {e}]")
             continue
@@ -1381,11 +1381,11 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                     _safe_print(f"  {_dim(BUBBLE_H * 40)}")
                     for task in tasks:
                         state_icon = {
-                            'pending': _yellow('⏳'),
-                            'running': _blue('🔄'),
-                            'completed': _green('✓'),
-                            'failed': _red('✗'),
-                            'cancelled': _dim('⊘'),
+                            'pending': _yellow('...'),
+                            'running': _blue('>>>'),
+                            'completed': _green(CHECK_ICON),
+                            'failed': _red(CROSS_ICON),
+                            'cancelled': _dim('--'),
                         }.get(task['state'], '?')
                         duration = f"{task['duration']:.1f}s" if task['duration'] > 0 else ""
                         _safe_print(f"  {state_icon} {_yellow(task['id'])} {task['description'][:40]}")
@@ -1450,11 +1450,11 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 _safe_print(f"  {_dim(BUBBLE_H * 40)}")
                 for task in tasks:
                     state_icon = {
-                        'pending': _yellow('⏳'),
-                        'running': _blue('🔄'),
-                        'completed': _green('✓'),
-                        'failed': _red('✗'),
-                        'cancelled': _dim('⊘'),
+                        'pending': _yellow('...'),
+                        'running': _blue('>>>'),
+                        'completed': _green(CHECK_ICON),
+                        'failed': _red(CROSS_ICON),
+                        'cancelled': _dim('--'),
                     }.get(task['state'], '?')
                     duration = f"{task['duration']:.1f}s" if task['duration'] > 0 else ""
                     _safe_print(f"  {state_icon} {_yellow(task['id'])} {task['description'][:40]}")
@@ -1480,14 +1480,14 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 condition = " ".join(cmd[2:])
                 goal_manager.set_goal(condition)
                 print_success(f"Goal set: {condition}")
-                print_info("Claude will continue working until the condition is met")
+                print_info("MiMo will continue working until the condition is met")
                 print()
             else:
                 # Set goal (shorthand: /goal <condition>)
                 condition = " ".join(cmd[1:])
                 goal_manager.set_goal(condition)
                 print_success(f"Goal set: {condition}")
-                print_info("Claude will continue working until the condition is met")
+                print_info("MiMo will continue working until the condition is met")
                 print()
         else:
             # Show goal status

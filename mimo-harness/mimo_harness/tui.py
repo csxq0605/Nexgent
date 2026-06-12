@@ -42,16 +42,14 @@ def _set_tui_app(app):
     _get_tui_app._instance = app
 
 
+# Import shared command list
+from .commands import SLASH_COMMANDS as _SHARED_COMMANDS, SUGGEST_COMMANDS
+
+
 class CommandSuggester(Suggester):
     """Auto-suggest slash commands for the input widget."""
 
-    COMMANDS = [
-        "/help", "/quit", "/exit", "/clear", "/tools", "/stats",
-        "/tokens", "/compact", "/context", "/memory", "/remember",
-        "/hooks", "/dry-run", "/auto", "/plan", "/abort", "/effort",
-        "/mode", "/save", "/load", "/fork", "/rewind", "/init",
-        "/subagents", "/subagent", "/parallel", "/pipeline",
-    ]
+    COMMANDS = SUGGEST_COMMANDS
 
     async def get_suggestion(self, value: str) -> str | None:
         if not value.startswith("/"):
@@ -116,18 +114,7 @@ class MiMoTUI(App):
     ]
 
     # All slash commands for tab completion
-    COMMANDS = [
-        "/help", "/quit", "/exit", "/clear", "/tools", "/stats",
-        "/tokens", "/compact", "/context", "/memory", "/remember",
-        "/hooks", "/dry-run", "/auto", "/plan", "/abort", "/effort",
-        "/mode", "/save", "/load", "/fork", "/rewind", "/init",
-        "/subagents", "/subagent", "/parallel", "/pipeline",
-        "/agents", "/agents list", "/agents create", "/agents show", "/agents delete",
-        "/tasks", "/tasks list", "/tasks show", "/tasks cancel", "/tasks cleanup",
-        "/goal", "/goal clear",
-        "/skills", "/skills install",
-        "/mcp", "/mcp install", "/mcp connect", "/mcp disconnect", "/mcp refresh",
-    ]
+    COMMANDS = _SHARED_COMMANDS
 
     def __init__(self, harness, session, memory_store, checkpoint_manager,
                  session_dir, config_watcher, scheduler, scheduled_prompts,
@@ -676,12 +663,10 @@ class MiMoTUI(App):
                         self._history.append(draft)
                     input_widget.value = ""
                     self.write_output("[dim]Input cleared (saved to history)[/dim]")
-                else:
-                    # No input - quit
-                    self._save_and_exit()
+                # If input is empty, ESC is a no-op (don't quit)
             except Exception:
-                # Fallback: quit if input widget not found
-                self._save_and_exit()
+                # Fallback: ignore if input widget not found
+                pass
 
     def action_abort(self) -> None:
         if self._agent_running:

@@ -11,20 +11,8 @@ import builtins
 import os
 import sys
 
-# / command auto-completion
-_SLASH_COMMANDS = [
-    "/help", "/quit", "/exit", "/q", "/clear", "/tools",
-    "/save", "/load", "/dry-run", "/auto", "/plan", "/abort",
-    "/memory", "/remember", "/hooks", "/stats", "/tokens",
-    "/compact", "/context", "/init", "/rewind", "/fork",
-    "/subagents", "/subagent", "/parallel", "/pipeline",
-    "/effort", "/mode",
-    "/agents", "/agents list", "/agents create", "/agents show", "/agents delete",
-    "/tasks", "/tasks list", "/tasks show", "/tasks cancel", "/tasks cleanup",
-    "/goal", "/goal clear",
-    "/skills", "/skills install",
-    "/mcp", "/mcp install", "/mcp connect", "/mcp disconnect", "/mcp refresh",
-]
+# Import shared command list
+from .commands import SLASH_COMMANDS as _SLASH_COMMANDS
 
 # Lazy-loaded prompt_toolkit components
 _session = None

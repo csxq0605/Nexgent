@@ -50,27 +50,38 @@ class FileReferenceParser:
         Returns:
             List of resolved file paths
         """
+        from pathlib import Path
+
         # Normalize base directory
         base_dir = os.path.abspath(base_dir)
+        base_path = Path(base_dir)
+
+        def is_within_base(path: str) -> bool:
+            """Check if path is within base directory."""
+            try:
+                Path(os.path.abspath(path)).relative_to(base_path)
+                return True
+            except ValueError:
+                return False
 
         # Handle absolute paths
         if os.path.isabs(ref_path):
             # Check for path traversal - absolute paths must be within base_dir
             abs_path = os.path.abspath(ref_path)
-            if not abs_path.startswith(base_dir):
+            if not is_within_base(abs_path):
                 return []  # Block path traversal
             if os.path.exists(abs_path):
                 return [abs_path]
             # Try glob for wildcards
             matches = glob.glob(abs_path)
-            return [m for m in matches if os.path.isfile(m) and m.startswith(base_dir)]
+            return [m for m in matches if os.path.isfile(m) and is_within_base(m)]
 
         # Handle relative paths
         full_path = os.path.join(base_dir, ref_path)
 
         # Check for path traversal
         abs_full_path = os.path.abspath(full_path)
-        if not abs_full_path.startswith(base_dir):
+        if not is_within_base(abs_full_path):
             return []  # Block path traversal
 
         # Check if it's a directory
@@ -85,7 +96,7 @@ class FileReferenceParser:
         # Try glob for wildcards
         matches = glob.glob(abs_full_path, recursive=True)
         if matches:
-            return [m for m in matches if os.path.isfile(m) and os.path.abspath(m).startswith(base_dir)]
+            return [m for m in matches if os.path.isfile(m) and is_within_base(m)]
 
         return []
 

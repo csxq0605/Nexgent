@@ -63,12 +63,23 @@ class BackgroundTaskManager:
             task.state = TaskState.RUNNING
             task.start_time = time.time()
             try:
+                # Check cancellation before starting
+                if task.cancel_event.is_set():
+                    task.state = TaskState.CANCELLED
+                    return
                 result = func(*args, **kwargs)
-                task.output = str(result) if result else ""
-                task.state = TaskState.COMPLETED
+                # Check cancellation after completion
+                if task.cancel_event.is_set():
+                    task.state = TaskState.CANCELLED
+                else:
+                    task.output = str(result) if result is not None else ""
+                    task.state = TaskState.COMPLETED
             except Exception as e:
-                task.error = str(e)
-                task.state = TaskState.FAILED
+                if task.cancel_event.is_set():
+                    task.state = TaskState.CANCELLED
+                else:
+                    task.error = str(e)
+                    task.state = TaskState.FAILED
             finally:
                 task.end_time = time.time()
 

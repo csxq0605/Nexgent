@@ -260,7 +260,12 @@ class AgentManager:
         filepath = os.path.join(agents_dir, f"{name}.md")
         abs_filepath = os.path.abspath(filepath)
         abs_agents_dir = os.path.abspath(agents_dir)
-        if not abs_filepath.startswith(abs_agents_dir):
+
+        # Use pathlib for robust path comparison
+        from pathlib import Path
+        try:
+            Path(abs_filepath).relative_to(Path(abs_agents_dir))
+        except ValueError:
             raise ValueError(f"Invalid agent name: {name}. Path traversal detected.")
 
         try:
