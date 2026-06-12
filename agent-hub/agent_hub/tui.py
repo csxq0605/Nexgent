@@ -9,12 +9,15 @@ Falls back to normal REPL when:
 """
 
 import io
+import logging
 import os
 import queue
 import sys
 import threading
 from contextlib import redirect_stdout
 from threading import Event
+
+_BTW_CMD = "/btw"
 
 from rich.panel import Panel
 from rich.table import Table
@@ -219,10 +222,10 @@ class MiMoTUI(App):
                     self._show_permission_prompt(desc, value)
         except queue.Empty:
             pass
-        except Exception:
+        except Exception as exc:
             # Prevent drain timer from dying on unexpected errors.
             # If the timer stops, the TUI freezes permanently.
-            pass
+            logging.debug("TUI drain error (non-fatal): %s", exc, exc_info=True)
         # Update status bar in real-time during agent execution
         if self._agent_running:
             self._update_status_bar()
@@ -410,8 +413,8 @@ class MiMoTUI(App):
         Anything else — queue for execution after agent finishes.
         """
         # /btw: inject guidance into the running agent's context
-        if text == "/btw" or text.startswith("/btw "):
-            btw_msg = text[4:].strip()
+        if text == _BTW_CMD or text.startswith(_BTW_CMD + " "):
+            btw_msg = text[len(_BTW_CMD):].strip()
             if not btw_msg:
                 self.write_output("[yellow]Usage: /btw <your guidance message>[/yellow]")
                 return
@@ -447,8 +450,8 @@ class MiMoTUI(App):
 
     def _handle_command(self, text: str) -> None:
         # /btw when agent is idle: add message to session context for next turn
-        if text == "/btw" or text.startswith("/btw "):
-            btw_msg = text[4:].strip()
+        if text == _BTW_CMD or text.startswith(_BTW_CMD + " "):
+            btw_msg = text[len(_BTW_CMD):].strip()
             if btw_msg:
                 self.session.add_message("user", btw_msg)
                 self.write_output(
@@ -661,7 +664,14 @@ class MiMoTUI(App):
         self._end_streaming_internal()
         self._agent_running = False
         self._permission_mode = False
-        self._enable_input()
+        # Re-enable input without resetting placeholder yet — drain may
+        # start a new agent which sets its own running placeholder.
+        try:
+            inp = self.query_one("#input-area", Input)
+            inp.disabled = False
+            inp.focus()
+        except Exception as exc:
+            logging.debug("Failed to re-enable input: %s", exc)
 
         # Drain command queue: process slash commands until we find one
         # that starts an agent (non-slash), or the queue is empty.
@@ -690,6 +700,9 @@ class MiMoTUI(App):
             # Catch-all: prevent drain timer from dying
             self.write_output(f"[red]Queue drain error: {e}[/red]")
 
+        # Restore default placeholder only if no new agent was started
+        if not self._agent_running:
+            self._set_input_placeholder(self._default_placeholder)
         # Update after queue drain so status bar reflects final state
         self._update_status_bar()
 
@@ -763,8 +776,8 @@ class MiMoTUI(App):
         try:
             inp = self.query_one("#input-area", Input)
             inp.placeholder = text
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("Failed to set input placeholder: %s", exc)
 
     def _disable_input(self) -> None:
         inp = self.query_one("#input-area", Input)
