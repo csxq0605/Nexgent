@@ -1258,7 +1258,8 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                         _safe_print(f"  {_yellow(preset_name)} - {preset['description']}")
                     print(f"\n  {_dim('Usage: /agents create <name>')}")
                     print(f"  {_dim('Example: /agents create code-reviewer')}")
-                    print(f"  {_dim('Custom: /agents create my-agent \"Description\"')}")
+                    custom_hint = 'Custom: /agents create my-agent "Description"'
+                    print(f"  {_dim(custom_hint)}")
                     print()
                     return "continue", session
                 name = cmd[2]
