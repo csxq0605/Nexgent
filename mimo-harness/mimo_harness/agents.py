@@ -5,6 +5,7 @@ Implements Claude Code-style custom agents:
 - Agent discovery from multiple directories
 - /agents command for management
 - Agent invocation with custom system prompts and tool restrictions
+- Preset templates for quick creation
 """
 
 import os
@@ -14,6 +15,57 @@ import json
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Any
 from pathlib import Path
+
+
+# Preset agent templates for quick creation
+AGENT_PRESETS = {
+    "code-reviewer": {
+        "description": "Reviews code for quality, security, and best practices",
+        "prompt": "You are a senior code reviewer. Analyze code for:\n- Bugs and logic errors\n- Security vulnerabilities\n- Performance issues\n- Code style and readability\n\nProvide specific, actionable feedback with line references.",
+        "tools": ["Read", "Grep", "Glob"],
+        "color": "blue",
+    },
+    "researcher": {
+        "description": "Researches and analyzes codebases and documentation",
+        "prompt": "You are a research assistant. Explore codebases thoroughly, find relevant files, and provide comprehensive analysis. Focus on accuracy and completeness.",
+        "tools": ["Read", "Grep", "Glob", "WebSearch", "WebFetch"],
+        "color": "green",
+    },
+    "debugger": {
+        "description": "Debugs errors and test failures",
+        "prompt": "You are an expert debugger. Analyze errors, identify root causes, and provide fixes. Read error messages carefully, trace execution flow, and propose minimal changes.",
+        "tools": ["Read", "Grep", "Glob", "Bash"],
+        "color": "red",
+    },
+    "writer": {
+        "description": "Writes documentation and technical content",
+        "prompt": "You are a technical writer. Create clear, well-structured documentation. Use proper formatting, examples, and explanations suitable for the target audience.",
+        "tools": ["Read", "Write", "Edit"],
+        "color": "purple",
+    },
+    "tester": {
+        "description": "Writes and runs tests",
+        "prompt": "You are a test engineer. Write comprehensive tests covering happy paths, edge cases, and error conditions. Ensure tests are isolated, readable, and maintainable.",
+        "tools": ["Read", "Write", "Edit", "Bash"],
+        "color": "yellow",
+    },
+    "planner": {
+        "description": "Plans implementation approach before coding",
+        "prompt": "You are a software architect. Analyze requirements, design solutions, and create implementation plans. Consider trade-offs, dependencies, and risks.",
+        "tools": ["Read", "Grep", "Glob"],
+        "color": "cyan",
+    },
+}
+
+
+def get_preset_names() -> List[str]:
+    """Get list of available preset names."""
+    return list(AGENT_PRESETS.keys())
+
+
+def get_preset(name: str) -> Optional[Dict[str, Any]]:
+    """Get a preset template by name."""
+    return AGENT_PRESETS.get(name)
 
 
 @dataclass

@@ -1248,28 +1248,36 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 print()
             elif subcmd == "create":
                 # Create new agent
-                if len(cmd) < 3:
-                    print_warning("Usage: /agents create <name> [description]")
-                    print_info("Quick: /agents create my-agent")
-                    print_info("Manual: /agents create my-agent 'Description here'")
+                from .agents import get_preset_names, get_preset
+                if len(cmd) < 3 or cmd[2] == "list":
+                    # Show available presets
+                    print(f"\n  {_bold('Available Presets')}")
+                    _safe_print(f"  {_dim(BUBBLE_H * 40)}")
+                    for preset_name in get_preset_names():
+                        preset = get_preset(preset_name)
+                        _safe_print(f"  {_yellow(preset_name)} - {preset['description']}")
+                    print(f"\n  {_dim('Usage: /agents create <name>')}")
+                    print(f"  {_dim('Example: /agents create code-reviewer')}")
+                    print(f"  {_dim('Custom: /agents create my-agent \"Description\"')}")
                     print()
                     return "continue", session
                 name = cmd[2]
                 description = " ".join(cmd[3:]) if len(cmd) > 3 else ""
 
-                # Quick create if no description provided
-                if not description:
-                    description = f"Custom agent: {name}"
-                    prompt = f"You are {name}. Complete the assigned tasks efficiently."
+                # Check if name matches a preset
+                preset = get_preset(name)
+                if preset and not description:
+                    # Use preset template
                     filepath = harness._agent_manager.create_agent(
                         name=name,
-                        description=description,
-                        prompt=prompt,
+                        description=preset["description"],
+                        prompt=preset["prompt"],
+                        tools=preset.get("tools"),
                     )
-                    print_success(f"Agent '{name}' created (quick mode)")
+                    print_success(f"Agent '{name}' created from preset")
                     print_info(f"File: {filepath}")
-                else:
-                    # Manual create - ask for prompt
+                elif description:
+                    # Manual create with description - ask for prompt
                     print_info(f"Creating agent '{name}'...")
                     print_info("Enter agent system prompt (empty line to finish):")
                     lines = []
@@ -1288,6 +1296,17 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                         prompt=prompt,
                     )
                     print_success(f"Agent '{name}' created at {filepath}")
+                else:
+                    # Quick create with default prompt
+                    description = f"Custom agent: {name}"
+                    prompt = f"You are {name}. Complete the assigned tasks efficiently."
+                    filepath = harness._agent_manager.create_agent(
+                        name=name,
+                        description=description,
+                        prompt=prompt,
+                    )
+                    print_success(f"Agent '{name}' created (quick mode)")
+                    print_info(f"File: {filepath}")
                 print()
             elif subcmd == "delete":
                 # Delete agent
