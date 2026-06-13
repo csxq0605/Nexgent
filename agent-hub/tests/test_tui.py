@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agent_hub.tui import MiMoTUI
+from agent_hub.context import Session
 
 
 # ── Helpers ────────────────────────────────────────────────────
@@ -24,10 +25,12 @@ def _make_tui_app(tmp_path):
     harness.graceful_abort = MagicMock()
     harness.graceful_abort.is_requested.return_value = False
 
-    session = MagicMock()
-    session.session_id = "test-session-1234"
-    session.messages = []
-    session.get_messages.return_value = []
+    # Real Session object — no mock
+    session = Session(
+        session_id="test-session-1234",
+        messages=[],
+        working_dir=str(tmp_path),
+    )
 
     app = MiMoTUI(
         harness=harness,
@@ -377,25 +380,26 @@ class TestTUIBehavior:
         assert app._command_queue == []
 
     def test_btw_during_agent_injects_message(self, tmp_path):
-        """/btw while agent runs calls session.add_message with the content."""
+        """/btw while agent runs injects message into session."""
         app = _make_tui_app(tmp_path)
         app._agent_running = True
         app._handle_during_agent("/btw use iterative approach")
-        app.session.add_message.assert_called_once_with("user", "use iterative approach")
+        assert len(app.session.messages) == 1
+        assert app.session.messages[0] == {"role": "user", "content": "use iterative approach"}
 
     def test_btw_during_agent_empty_rejected(self, tmp_path):
-        """/btw with no message does not call add_message."""
+        """/btw with no message does not add to session."""
         app = _make_tui_app(tmp_path)
         app._agent_running = True
         app._handle_during_agent("/btw")
-        app.session.add_message.assert_not_called()
+        assert len(app.session.messages) == 0
 
     def test_btw_during_agent_whitespace_rejected(self, tmp_path):
-        """/btw with only spaces does not call add_message."""
+        """/btw with only spaces does not add to session."""
         app = _make_tui_app(tmp_path)
         app._agent_running = True
         app._handle_during_agent("/btw   ")
-        app.session.add_message.assert_not_called()
+        assert len(app.session.messages) == 0
 
     def test_non_btw_during_agent_queues(self, tmp_path):
         """Non-/btw input during agent run gets queued."""
@@ -427,7 +431,8 @@ class TestTUIBehavior:
         app._command_queue = ["/btw context msg"]
         app._on_agent_done()
         assert app._command_queue == []
-        app.session.add_message.assert_called_with("user", "context msg")
+        assert len(app.session.messages) == 1
+        assert app.session.messages[0] == {"role": "user", "content": "context msg"}
 
     def test_on_agent_done_starts_agent_for_non_slash(self, tmp_path):
         """_on_agent_done starts agent for first non-slash queued command."""
@@ -503,7 +508,8 @@ class TestTUIBehavior:
         app = _make_tui_app(tmp_path)
         app._agent_running = False
         app._handle_command("/btw prepare for next task")
-        app.session.add_message.assert_called_once_with("user", "prepare for next task")
+        assert len(app.session.messages) == 1
+        assert app.session.messages[0] == {"role": "user", "content": "prepare for next task"}
 
     def test_btw_idle_empty_shows_usage(self, tmp_path):
         """/btw with no message when idle shows usage hint."""
@@ -578,37 +584,13 @@ class TestTUIBehavior:
         assert call_count[0] == 1
         mock_run.assert_called_once_with("real task")
 
-    def test_btw_idle_adds_to_session_messages(self, tmp_path):
-        """/btw when idle actually appends to session.messages list."""
-        app = _make_tui_app(tmp_path)
-        app._agent_running = False
-        app.session.messages = []
-        # Use a real list for messages to verify actual append
-        def fake_add_message(role, content):
-            app.session.messages.append({"role": role, "content": content})
-        app.session.add_message = fake_add_message
-        app._handle_command("/btw context note")
-        assert len(app.session.messages) == 1
-        assert app.session.messages[0] == {"role": "user", "content": "context note"}
-
-    def test_btw_during_agent_adds_to_session_messages(self, tmp_path):
-        """/btw while agent runs actually appends to session.messages list."""
-        app = _make_tui_app(tmp_path)
-        app._agent_running = True
-        app.session.messages = []
-        def fake_add_message(role, content):
-            app.session.messages.append({"role": role, "content": content})
-        app.session.add_message = fake_add_message
-        app._handle_during_agent("/btw guidance here")
-        assert len(app.session.messages) == 1
-        assert app.session.messages[0] == {"role": "user", "content": "guidance here"}
-
     def test_btw_with_multiple_spaces_parses_correctly(self, tmp_path):
         """/btw followed by multiple spaces then content works correctly."""
         app = _make_tui_app(tmp_path)
         app._agent_running = True
         app._handle_during_agent("/btw   hello world  ")
-        app.session.add_message.assert_called_once_with("user", "hello world")
+        assert len(app.session.messages) == 1
+        assert app.session.messages[0] == {"role": "user", "content": "hello world"}
 
     def test_queue_size_limit_enforced(self, tmp_path):
         """Queue rejects new items when at max capacity."""
