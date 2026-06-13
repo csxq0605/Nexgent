@@ -26,7 +26,7 @@ import uuid
 import threading
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .logging_utils import TraceLogger
@@ -56,80 +56,92 @@ class ResourceMonitor:
 
     When limits are 0 (unlimited), monitoring still runs — it just
     never triggers warnings since there's no ceiling to approach.
+
+    Thread-safe: all mutable state is protected by a lock.
     """
 
     def __init__(self, limits: "ResourceLimits", logger: TraceLogger = None):
         self.limits = limits
         self.logger = logger or TraceLogger()
+        self._lock = threading.Lock()
         self._start_time = time.time()
         self._total_tokens = 0
         self._total_steps = 0
         self._subagent_count = 0
         self._warnings_issued: set[str] = set()  # dedup warnings
-        self.on_warning: Optional[callable] = None  # callback(msg: str) for TUI/REPL
+        self.on_warning: Optional[Callable[[str], None]] = None  # callback for TUI/REPL
 
     def record_subagent_finished(self, result: "SubAgentResult"):
         """Record metrics from a completed SubAgent."""
-        self._total_tokens += result.token_usage
-        self._total_steps += result.steps_taken
-        self._subagent_count += 1
+        with self._lock:
+            self._total_tokens += result.token_usage
+            self._total_steps += result.steps_taken
+            self._subagent_count += 1
         self._check_and_warn()
 
     def record_tokens(self, tokens: int):
         """Record token usage (for live tracking within a run)."""
-        self._total_tokens += tokens
+        with self._lock:
+            self._total_tokens += tokens
         self._check_and_warn()
 
     def get_usage_report(self) -> dict:
         """Return current usage snapshot for logging/display."""
-        elapsed = time.time() - self._start_time
-        return {
-            "total_tokens": self._total_tokens,
-            "total_steps": self._total_steps,
-            "subagent_count": self._subagent_count,
-            "elapsed_seconds": round(elapsed, 1),
-            "tokens_per_subagent": (
-                round(self._total_tokens / self._subagent_count)
-                if self._subagent_count > 0 else 0
-            ),
-        }
+        with self._lock:
+            elapsed = time.time() - self._start_time
+            return {
+                "total_tokens": self._total_tokens,
+                "total_steps": self._total_steps,
+                "subagent_count": self._subagent_count,
+                "elapsed_seconds": round(elapsed, 1),
+                "tokens_per_subagent": (
+                    round(self._total_tokens / self._subagent_count)
+                    if self._subagent_count > 0 else 0
+                ),
+            }
 
     def _check_and_warn(self):
         """Emit warnings when approaching configured limits (not unlimited)."""
-        elapsed = time.time() - self._start_time
+        with self._lock:
+            elapsed = time.time() - self._start_time
+            warnings_to_emit: list[str] = []
 
-        # Token warning
-        if self.limits.max_total_tokens > 0:
-            ratio = self._total_tokens / self.limits.max_total_tokens
-            if ratio >= _RESOURCE_WARNING_RATIO and "tokens" not in self._warnings_issued:
-                self._warnings_issued.add("tokens")
-                msg = (f"[MONITOR] Token usage at {ratio:.0%} "
-                       f"({self._total_tokens:,}/{self.limits.max_total_tokens:,})")
-                self.logger.warning(msg)
-                if self.on_warning:
-                    self.on_warning(msg)
+            # Token warning
+            if self.limits.max_total_tokens > 0:
+                ratio = self._total_tokens / self.limits.max_total_tokens
+                if ratio >= _RESOURCE_WARNING_RATIO and "tokens" not in self._warnings_issued:
+                    self._warnings_issued.add("tokens")
+                    warnings_to_emit.append(
+                        f"[MONITOR] Token usage at {ratio:.0%} "
+                        f"({self._total_tokens:,}/{self.limits.max_total_tokens:,})"
+                    )
 
-        # Time warning
-        if self.limits.max_total_time > 0:
-            ratio = elapsed / self.limits.max_total_time
-            if ratio >= _RESOURCE_WARNING_RATIO and "time" not in self._warnings_issued:
-                self._warnings_issued.add("time")
-                msg = (f"[MONITOR] Time usage at {ratio:.0%} "
-                       f"({elapsed:.0f}s/{self.limits.max_total_time:.0f}s)")
-                self.logger.warning(msg)
-                if self.on_warning:
-                    self.on_warning(msg)
+            # Time warning
+            if self.limits.max_total_time > 0:
+                ratio = elapsed / self.limits.max_total_time
+                if ratio >= _RESOURCE_WARNING_RATIO and "time" not in self._warnings_issued:
+                    self._warnings_issued.add("time")
+                    warnings_to_emit.append(
+                        f"[MONITOR] Time usage at {ratio:.0%} "
+                        f"({elapsed:.0f}s/{self.limits.max_total_time:.0f}s)"
+                    )
 
-        # SubAgent count warning
-        if self.limits.max_subagents > 0:
-            ratio = self._subagent_count / self.limits.max_subagents
-            if ratio >= _RESOURCE_WARNING_RATIO and "count" not in self._warnings_issued:
-                self._warnings_issued.add("count")
-                msg = (f"[MONITOR] SubAgent count at {ratio:.0%} "
-                       f"({self._subagent_count}/{self.limits.max_subagents})")
-                self.logger.warning(msg)
-                if self.on_warning:
-                    self.on_warning(msg)
+            # SubAgent count warning
+            if self.limits.max_subagents > 0:
+                ratio = self._subagent_count / self.limits.max_subagents
+                if ratio >= _RESOURCE_WARNING_RATIO and "count" not in self._warnings_issued:
+                    self._warnings_issued.add("count")
+                    warnings_to_emit.append(
+                        f"[MONITOR] SubAgent count at {ratio:.0%} "
+                        f"({self._subagent_count}/{self.limits.max_subagents})"
+                    )
+
+        # Emit outside the lock to avoid holding it during I/O
+        callback = self.on_warning  # snapshot to avoid TOCTOU
+        for msg in warnings_to_emit:
+            self.logger.warning(msg)
+            if callback:
+                callback(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -723,15 +735,20 @@ class SubAgentManager:
                     with self._lock:
                         self._results[subagents[orig_idx].subagent_id] = error_result
 
+                    # Feed monitor on failure too — count matters for warnings
+                    self.resource_monitor.record_subagent_finished(error_result)
+
                     self.logger.error(f"SubAgent {subagents[orig_idx].subagent_id} failed: {e}")
 
         return results
 
-    def run_pipeline(self, configs: list[SubAgentConfig]) -> list[SubAgentResult]:
+    def run_pipeline(self, configs: list[SubAgentConfig], max_context_length: int = 200_000) -> list[SubAgentResult]:
         """Run SubAgents in pipeline mode (sequential, each gets previous results).
 
         Args:
             configs: List of SubAgentConfig for each stage
+            max_context_length: Max chars of previous context to pass forward (default 200K).
+                                Prevents unbounded prompt growth across stages.
 
         Returns:
             List of SubAgentResult for each stage
@@ -740,9 +757,12 @@ class SubAgentManager:
         previous_context = ""
 
         for idx, config in enumerate(configs):
-            # Add previous results to the task context
+            # Add previous results to the task context (truncate if needed)
             if previous_context:
-                enhanced_task = f"{config.task}\n\n## Previous Stage Results\n{previous_context}"
+                ctx = previous_context
+                if len(ctx) > max_context_length:
+                    ctx = ctx[:max_context_length] + f"\n... (truncated from {len(previous_context)} chars)"
+                enhanced_task = f"{config.task}\n\n## Previous Stage Results\n{ctx}"
                 enhanced_config = replace(config, task=enhanced_task)
             else:
                 enhanced_config = config
@@ -757,7 +777,6 @@ class SubAgentManager:
             if result.success and result.result:
                 previous_context = result.result
             else:
-                # Pipeline broken - subsequent stages will fail
                 self.logger.warning(f"Pipeline stage {idx + 1} failed: {result.error}")
 
         return results

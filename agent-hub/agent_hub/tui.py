@@ -148,8 +148,8 @@ class MiMoTUI(App):
         self._streaming_text = ""  # accumulated streaming text
         # Command queue: typed during agent execution, auto-runs when agent finishes
         self._command_queue: list[str] = []
-        # ResourceMonitor warnings pending display
-        self._pending_monitor_warnings: list[str] = []
+        # ResourceMonitor warnings pending display (thread-safe queue)
+        self._monitor_warning_queue: queue.Queue[str] = queue.Queue()
         self._default_placeholder = "Type a message or /help..."
         # Input history
         self._history: list[str] = []
@@ -229,11 +229,14 @@ class MiMoTUI(App):
             # Prevent drain timer from dying on unexpected errors.
             # If the timer stops, the TUI freezes permanently.
             logging.debug("TUI drain error (non-fatal): %s", exc, exc_info=True)
-        # Display pending ResourceMonitor warnings
-        while self._pending_monitor_warnings:
-            msg = self._pending_monitor_warnings.pop(0)
-            log = self.query_one("#output", RichLog)
-            log.write(f"[yellow]{msg}[/yellow]")
+        # Display pending ResourceMonitor warnings (thread-safe)
+        while True:
+            try:
+                msg = self._monitor_warning_queue.get_nowait()
+                log = self.query_one("#output", RichLog)
+                log.write(f"[yellow]{msg}[/yellow]")
+            except queue.Empty:
+                break
         # Update status bar in real-time during agent execution
         if self._agent_running:
             self._update_status_bar()
@@ -563,13 +566,18 @@ class MiMoTUI(App):
 
     def _run_agent(self, task: str) -> None:
         self._agent_running = True
-        self._pending_monitor_warnings.clear()
-        # Wire up ResourceMonitor warnings → TUI output
+        # Drain any stale warnings from previous runs
+        while not self._monitor_warning_queue.empty():
+            try:
+                self._monitor_warning_queue.get_nowait()
+            except queue.Empty:
+                break
+        # Wire up ResourceMonitor warnings → TUI output (thread-safe queue)
         try:
             monitor = self.harness.subagent_manager.resource_monitor
-            monitor.on_warning = lambda msg: self._pending_monitor_warnings.append(msg)
-        except Exception:
-            pass
+            monitor.on_warning = lambda msg: self._monitor_warning_queue.put(msg)
+        except Exception as exc:
+            logging.debug("Could not wire ResourceMonitor callback: %s", exc)
         # Keep input enabled for /btw injection and command queuing
         self._set_input_placeholder(
             "Agent running — /btw to guide, or type to queue..."
