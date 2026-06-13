@@ -148,6 +148,8 @@ class MiMoTUI(App):
         self._streaming_text = ""  # accumulated streaming text
         # Command queue: typed during agent execution, auto-runs when agent finishes
         self._command_queue: list[str] = []
+        # ResourceMonitor warnings pending display
+        self._pending_monitor_warnings: list[str] = []
         self._default_placeholder = "Type a message or /help..."
         # Input history
         self._history: list[str] = []
@@ -227,6 +229,11 @@ class MiMoTUI(App):
             # Prevent drain timer from dying on unexpected errors.
             # If the timer stops, the TUI freezes permanently.
             logging.debug("TUI drain error (non-fatal): %s", exc, exc_info=True)
+        # Display pending ResourceMonitor warnings
+        while self._pending_monitor_warnings:
+            msg = self._pending_monitor_warnings.pop(0)
+            log = self.query_one("#output", RichLog)
+            log.write(f"[yellow]{msg}[/yellow]")
         # Update status bar in real-time during agent execution
         if self._agent_running:
             self._update_status_bar()
@@ -303,12 +310,29 @@ class MiMoTUI(App):
                 f"  [dim]|[/dim]  [yellow]Queued[/yellow] "
                 f"{len(self._command_queue)}"
             )
+        # SubAgent resource monitoring
+        subagent_info = ""
+        try:
+            summary = self.harness.get_subagent_summary()
+            if summary.get("total_subagents", 0) > 0:
+                sa_tokens = _format_tokens(summary.get("total_tokens_used", 0))
+                sa_count = summary["total_subagents"]
+                sa_running = summary.get("running", 0)
+                sa_elapsed = summary.get("elapsed_seconds", 0)
+                parts = [f"SA:{sa_count}"]
+                if sa_running > 0:
+                    parts.append(f"[yellow]run:{sa_running}[/yellow]")
+                parts.append(f"tok:{sa_tokens}")
+                parts.append(f"{sa_elapsed:.0f}s")
+                subagent_info = f"  [dim]|[/dim]  [dim]SubAgents[/dim] {' '.join(parts)}"
+        except Exception:
+            pass
         status = self.query_one("#status-bar", Static)
         status.update(
             f"  [dim]Session[/dim] {self.session.session_id[:8]}  "
             f"[dim]|[/dim]  [dim]Tokens[/dim] {token_str}/{max_str}  "
             f"[dim]|[/dim]  [dim]Msgs[/dim] {msgs}"
-            f"{queue_info}"
+            f"{queue_info}{subagent_info}"
         )
 
     # ── Input Handling ──────────────────────────────────────────
@@ -539,6 +563,13 @@ class MiMoTUI(App):
 
     def _run_agent(self, task: str) -> None:
         self._agent_running = True
+        self._pending_monitor_warnings.clear()
+        # Wire up ResourceMonitor warnings → TUI output
+        try:
+            monitor = self.harness.subagent_manager.resource_monitor
+            monitor.on_warning = lambda msg: self._pending_monitor_warnings.append(msg)
+        except Exception:
+            pass
         # Keep input enabled for /btw injection and command queuing
         self._set_input_placeholder(
             "Agent running — /btw to guide, or type to queue..."

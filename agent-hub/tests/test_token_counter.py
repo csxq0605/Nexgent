@@ -269,29 +269,29 @@ class TestTokenBudget:
 
     def test_budget_initialization(self):
         """Budget should initialize correctly."""
-        budget = TokenBudget(max_tokens=200000)
-        assert budget.max_tokens == 200000
-        assert budget.effective_max == 200000 - 4096
+        budget = TokenBudget(max_tokens=1_000_000)
+        assert budget.max_tokens == 1_000_000
+        assert budget.effective_max == 1_000_000 - 50000
 
     def test_budget_usage_ratio(self):
         """Usage ratio should be calculated correctly."""
-        budget = TokenBudget(max_tokens=100000)
-        budget.estimated_tokens = 50000
+        budget = TokenBudget(max_tokens=1_000_000)
+        budget.estimated_tokens = 500000
         ratio = budget.usage_ratio()
-        expected = 50000 / budget.effective_max
+        expected = 500000 / budget.effective_max
         assert ratio == pytest.approx(expected, rel=0.01)
 
     def test_budget_warning_threshold(self):
         """Warning at 85% — no blocking, just warning like Claude Code."""
-        budget = TokenBudget(max_tokens=100000)
+        budget = TokenBudget(max_tokens=1_000_000)
         # Below warning threshold
-        budget.estimated_tokens = 80000
+        budget.estimated_tokens = 700000
         assert not budget.is_warning()
         # Above warning
-        budget.estimated_tokens = 90000
+        budget.estimated_tokens = 850000
         assert budget.is_warning()
         # High usage still just warns
-        budget.estimated_tokens = 98000
+        budget.estimated_tokens = 940000
         assert budget.is_warning()
 
 
@@ -388,7 +388,7 @@ class TestIntegration:
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi there!"},
         ]
-        budget = TokenBudget(max_tokens=200000)
+        budget = TokenBudget(max_tokens=1_000_000)
         budget.update(messages)
         ratio = budget.usage_ratio()
         assert 0 < ratio < 1

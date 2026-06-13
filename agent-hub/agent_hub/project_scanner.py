@@ -96,7 +96,7 @@ KEY_PATTERNS = [
 ]
 
 
-def _read_file_head(path: str, max_lines: int = 50) -> str:
+def _read_file_head(path: str, max_lines: int = 200) -> str:
     """Read first N lines of a file safely."""
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:

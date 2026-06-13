@@ -141,7 +141,7 @@ Does the actual answer correctly address the question and contain the expected i
         response = client.chat.completions.create(
             model=MIMO_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=100,
+            max_completion_tokens=1024,
             temperature=0.0
         )
         if not response.choices:

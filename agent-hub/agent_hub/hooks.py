@@ -190,7 +190,7 @@ class HookRunner:
             "event": config.event.value,
             "tool_name": tool_name,
             "tool_input": tool_input or {},
-            "tool_result": tool_result[:2000],  # Truncate for hook input
+            "tool_result": tool_result[:15000],  # Truncate for hook input
         }, ensure_ascii=False)
 
         try:

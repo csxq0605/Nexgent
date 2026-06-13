@@ -46,10 +46,17 @@ requires_api = pytest.mark.skipif(
 class TestResourceLimits:
     def test_default_limits(self):
         limits = ResourceLimits()
-        assert limits.max_total_tokens == 500_000
-        assert limits.max_total_time == 600.0
-        assert limits.max_subagents == 20
+        assert limits.max_total_tokens == 0   # 0 = unlimited
+        assert limits.max_total_time == 0.0   # 0 = unlimited
+        assert limits.max_subagents == 0      # 0 = unlimited
         assert limits.max_concurrent == 5
+
+    def test_unlimited_defaults_allow_anything(self):
+        """Default (0) limits should allow any usage."""
+        limits = ResourceLimits()
+        assert limits.check_token_limit(999_999_999) is True
+        assert limits.check_time_limit(999_999.0) is True
+        assert limits.check_subagent_limit(999) is True
 
     def test_custom_limits(self):
         limits = ResourceLimits(
@@ -94,9 +101,9 @@ class TestSubAgentConfig:
         config = SubAgentConfig(task="test task")
         assert config.task == "test task"
         assert config.description == ""
-        assert config.max_steps == 50
-        assert config.max_duration == 300.0
-        assert config.max_tokens == 100_000
+        assert config.max_steps == 0       # 0 = unlimited
+        assert config.max_duration == 0.0  # 0 = unlimited
+        assert config.max_tokens == 0      # 0 = unlimited
         assert config.priority == SubAgentPriority.NORMAL
         assert config.allowed_tools is None
         assert config.isolated is True

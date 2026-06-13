@@ -77,7 +77,7 @@ def _parse_tool_result(result: str) -> tuple[bool, str | None, str | None]:
 MAX_CONSECUTIVE_FAILURES = 3
 TOKEN_WARNING_THRESHOLD = 0.85  # 85% of context window — trigger auto-compact
 DEFAULT_MAX_CONTEXT_TOKENS = 1_000_000  # 1M context window
-RESERVED_OUTPUT_TOKENS = 4096
+RESERVED_OUTPUT_TOKENS = 50000  # 5% of context window reserved for output
 
 
 # ---------------------------------------------------------------------------

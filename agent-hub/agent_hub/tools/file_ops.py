@@ -107,11 +107,11 @@ def _validate_read_path(path: str) -> str | None:
 def read_file(params: dict) -> str:
     path = params.get("path", "")
     offset = params.get("offset", 0)
-    limit = params.get("limit", 500)
+    limit = params.get("limit", 2000)
     return _read_single_file(path, offset, limit)
 
 
-def _read_single_file(path: str, offset: int = 0, limit: int = 500) -> str:
+def _read_single_file(path: str, offset: int = 0, limit: int = 2000) -> str:
     """Read a single file and return JSON result."""
     err = _validate_read_path(path)
     if err:
@@ -140,7 +140,7 @@ def read_files(params: dict) -> str:
     """Read multiple files in a single tool call (batch read)."""
     paths = params.get("paths", [])
     offset = params.get("offset", 0)
-    limit = params.get("limit", 500)
+    limit = params.get("limit", 2000)
     if not paths:
         return json.dumps({"error": "paths must be a non-empty list"})
     results = []
@@ -438,7 +438,7 @@ def get_tools() -> list[ToolDef]:
                 "properties": {
                     "path": {"type": "string", "description": "Absolute file path"},
                     "offset": {"type": "integer", "description": "Start line (0-based, default 0)"},
-                    "limit": {"type": "integer", "description": "Max lines to read (default 500)"},
+                    "limit": {"type": "integer", "description": "Max lines to read (default 2000)"},
                 },
                 "required": ["path"]
             },

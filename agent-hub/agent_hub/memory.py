@@ -37,8 +37,8 @@ class MemoryEntry:
 
 
 # Ch6: MEMORY.md capacity limits
-MEMORY_INDEX_MAX_LINES = 200
-MEMORY_INDEX_MAX_BYTES = 25 * 1024  # 25KB
+MEMORY_INDEX_MAX_LINES = 500
+MEMORY_INDEX_MAX_BYTES = 50 * 1024  # 50KB
 
 # Ch6: excluded content types (derivable from project state)
 _EXCLUDED_PATTERNS = [
@@ -154,7 +154,7 @@ metadata:
                 # Parse frontmatter
                 name, description = self._parse_frontmatter(content, filename)
                 # Ch6: index entry format, max 150 chars
-                hook = description[:140] if len(description) > 140 else description
+                hook = description[:250] if len(description) > 250 else description
                 entries.append(f"- [{name}]({filename}) — {hook}")
             except Exception:
                 continue

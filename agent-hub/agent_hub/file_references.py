@@ -101,7 +101,7 @@ class FileReferenceParser:
         return []
 
     @classmethod
-    def read_file_content(cls, filepath: str, max_lines: int = 1000) -> Optional[str]:
+    def read_file_content(cls, filepath: str, max_lines: int = 2000) -> Optional[str]:
         """Read file content with size limits.
 
         Args:

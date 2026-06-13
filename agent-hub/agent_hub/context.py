@@ -430,7 +430,7 @@ def llm_compress(
     # Format all messages for summarization
     parts = []
     total_chars = 0
-    max_chars = 60000  # ~15K tokens of input
+    max_chars = 120000  # ~30K tokens of input
     for msg in messages:
         if not isinstance(msg, dict):
             continue
@@ -439,8 +439,8 @@ def llm_compress(
         if not isinstance(content, str):
             content = str(content) if content else ""
         # Truncate individual long messages (e.g. large tool results)
-        if len(content) > 8000:
-            content = content[:8000] + "... [truncated]"
+        if len(content) > 25000:
+            content = content[:25000] + "... [truncated]"
         line = f"[{role}]: {content}"
         if total_chars + len(line) > max_chars:
             parts.append(f"[{role}]: ... [remaining messages omitted]")

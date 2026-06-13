@@ -36,6 +36,9 @@ class TraceLogger:
     def info(self, msg: str):
         self.logger.info(msg)
 
+    def warning(self, msg: str):
+        self.logger.warning(f"[WARN] {msg}")
+
     def error(self, msg: str, exc: Exception = None):
         self.logger.error(f"[ERROR] {msg}", exc_info=exc)
 

@@ -27,7 +27,7 @@ from .security_pipeline import (
 from .subagent import (
     SubAgent, SubAgentManager, SubAgentConfig, SubAgentResult,
     SubAgentState, SubAgentPriority, MessageChannel, ResourceLimits,
-    create_subagent, run_parallel_tasks, run_pipeline_tasks,
+    ResourceMonitor, create_subagent, run_parallel_tasks, run_pipeline_tasks,
 )
 
 __all__ = [
@@ -70,6 +70,7 @@ __all__ = [
     "SubAgentPriority",
     "MessageChannel",
     "ResourceLimits",
+    "ResourceMonitor",
     "create_subagent",
     "run_parallel_tasks",
     "run_pipeline_tasks",

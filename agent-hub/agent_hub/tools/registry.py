@@ -39,9 +39,9 @@ class ToolRegistry:
 
     # A7: disk spillover thresholds (approx 4 chars per token)
     SPILL_THRESHOLD_TOKENS = 10000   # ~40K chars
-    MAX_RESULT_TOKENS = 25000        # ~100K chars
+    MAX_RESULT_TOKENS = 50000        # ~200K chars (raised to avoid truncating spilled results)
     SPILL_THRESHOLD_CHARS = SPILL_THRESHOLD_TOKENS * 4   # 40000
-    MAX_RESULT_CHARS = MAX_RESULT_TOKENS * 4              # 100000
+    MAX_RESULT_CHARS = MAX_RESULT_TOKENS * 4              # 200000
     SPILL_DIR = os.environ.get("MIMO_SPILL_DIR", ".mimo/outputs")
 
     def __init__(self):
