@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+import shutil
 import threading
 import pytest
 
@@ -17,6 +18,15 @@ from agent_hub.subagent import (
     SubAgentState, SubAgentPriority, MessageChannel, ResourceLimits,
     create_subagent, run_parallel_tasks, run_pipeline_tasks,
 )
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _cleanup_e2e_work_subagent():
+    """Clean up .e2e_work created by subagent tests."""
+    yield
+    e2e_work = os.path.join(os.getcwd(), ".e2e_work")
+    if os.path.isdir(e2e_work):
+        shutil.rmtree(e2e_work, ignore_errors=True)
 
 # Helper to check if real API key is available
 def _has_real_api_key():

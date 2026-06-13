@@ -15,6 +15,14 @@ from agent_hub.agents import (
 )
 
 
+@pytest.fixture(autouse=True)
+def restore_cwd():
+    """Restore original working directory after each test."""
+    original_cwd = os.getcwd()
+    yield
+    os.chdir(original_cwd)
+
+
 class TestAgentParser:
     """Test agent definition parsing."""
 

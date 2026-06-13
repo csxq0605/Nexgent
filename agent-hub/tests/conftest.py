@@ -88,6 +88,11 @@ def _cleanup_old_spill_dirs():
 # Clean up old spill dirs before creating new one
 _cleanup_old_spill_dirs()
 
+# Clean up stale .e2e_work from previous crashed runs
+_e2e_work = os.path.join(os.getcwd(), ".e2e_work")
+if os.path.isdir(_e2e_work):
+    shutil.rmtree(_e2e_work, ignore_errors=True)
+
 # Redirect spill files to a temp directory during tests to prevent
 # test artifacts from accumulating in .mimo/outputs/
 _test_spill_dir = tempfile.mkdtemp(prefix="mimo_test_spill_")
@@ -99,6 +104,10 @@ def _cleanup_spill_dir():
     """Remove the temp spill directory when the test session ends."""
     yield
     shutil.rmtree(_test_spill_dir, ignore_errors=True)
+    # Also clean up .e2e_work if it still exists
+    e2e_work = os.path.join(os.getcwd(), ".e2e_work")
+    if os.path.isdir(e2e_work):
+        shutil.rmtree(e2e_work, ignore_errors=True)
 
 
 def pytest_collection_modifyitems(config, items):
