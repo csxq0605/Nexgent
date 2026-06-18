@@ -12,6 +12,7 @@ Implements Claude Code-style MCP support:
 
 import os
 import json
+import re
 import subprocess
 import threading
 import time
@@ -137,7 +138,6 @@ class MCPConfigParser:
         # Expand environment variables
         def expand_env(value: str) -> str:
             """Expand ${VAR} and ${VAR:-default} patterns."""
-            import re
             def replace_var(match):
                 var = match.group(1)
                 if ':-' in var:
@@ -340,7 +340,6 @@ class MCPConnection:
             self._send_message(init_request)
 
             # Read response, skipping notifications
-            import time
             response = None
             for _ in range(10):
                 response = self._receive_message()
@@ -393,7 +392,6 @@ class MCPConnection:
 
     def _readline_with_timeout(self, timeout: float = 10.0) -> Optional[bytes]:
         """Read a line from stdout with timeout to prevent permanent blocking."""
-        import threading as _threading
         result = [None]
         error = [None]
         def _read():
@@ -401,7 +399,7 @@ class MCPConnection:
                 result[0] = self.server.process.stdout.readline()
             except Exception as e:
                 error[0] = e
-        t = _threading.Thread(target=_read, daemon=True)
+        t = threading.Thread(target=_read, daemon=True)
         t.start()
         t.join(timeout=timeout)
         if t.is_alive():
@@ -439,13 +437,22 @@ class MCPConnection:
                 if not line or line.strip() == b'':
                     break
 
-            # Read body
+            # Read body with timeout to prevent permanent blocking
             body = b''
             while len(body) < content_length:
-                chunk = self.server.process.stdout.read(content_length - len(body))
-                if not chunk:
+                remaining = content_length - len(body)
+                chunk_result = [None]
+                def _read_chunk():
+                    try:
+                        chunk_result[0] = self.server.process.stdout.read(remaining)
+                    except Exception:
+                        pass
+                t = threading.Thread(target=_read_chunk, daemon=True)
+                t.start()
+                t.join(timeout=10.0)
+                if t.is_alive() or not chunk_result[0]:
                     break
-                body += chunk
+                body += chunk_result[0]
             return json.loads(body.decode('utf-8'))
 
         # Otherwise, treat as newline-delimited JSON
@@ -495,15 +502,16 @@ class MCPConnection:
 
     def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         """Call a tool on the server."""
-        # Use local reference to avoid race with disconnect()
+        # Use local references to avoid race with disconnect()
         with self._lock:
             if self.server.status != MCPServerStatus.CONNECTED:
                 return {'error': f"Server {self.config.name} is not connected"}
             process = self.server.process
+            tools = dict(self.server.tools)
         if not process:
             return {'error': f"Server {self.config.name} process not running"}
 
-        if tool_name not in self.server.tools:
+        if tool_name not in tools:
             return {'error': f"Tool {tool_name} not found on server {self.config.name}"}
 
         try:

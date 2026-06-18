@@ -11,10 +11,13 @@ Supports Python (pylsp/pyright) and can be extended for other languages.
 
 import json
 import os
+import platform
+import re
 import subprocess
 import threading
 import time
 from typing import Optional
+from urllib.parse import urlparse, unquote
 
 from .registry import ToolDef
 from ..permissions import Permission
@@ -53,6 +56,7 @@ class LSPClient:
         self._reader_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self._server_name = ""
+        self._opened_files: set[str] = set()
 
     def __del__(self):
         """Cleanup on garbage collection."""
@@ -132,20 +136,20 @@ class LSPClient:
             self._request_id += 1
             req_id = self._request_id
 
-        msg = {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "method": method,
-            "params": params,
-        }
-        body = json.dumps(msg)
-        header = f"Content-Length: {len(body)}\r\n\r\n"
+            msg = {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "method": method,
+                "params": params,
+            }
+            body = json.dumps(msg)
+            header = f"Content-Length: {len(body)}\r\n\r\n"
 
-        try:
-            self._process.stdin.write((header + body).encode())
-            self._process.stdin.flush()
-        except Exception:
-            return None
+            try:
+                self._process.stdin.write((header + body).encode())
+                self._process.stdin.flush()
+            except Exception:
+                return None
 
         # Wait for response using event (no busy-wait)
         event = threading.Event()
@@ -175,8 +179,11 @@ class LSPClient:
         except Exception:
             pass
 
-    def open_file(self, file_path: str, content: str = None):
-        """Notify the server about an opened file."""
+    def open_file(self, file_path: str, content: Optional[str] = None):
+        """Notify the server about an opened file (only once per file)."""
+        if file_path in self._opened_files:
+            return
+        self._opened_files.add(file_path)
         if content is None:
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
@@ -241,8 +248,9 @@ class LSPClient:
         self._process = None
 
 
-# Global LSP client instance
+# Global LSP client instance and lock
 _lsp_client: Optional[LSPClient] = None
+_lsp_lock = threading.Lock()
 
 
 def _get_lsp_client(file_path: str) -> Optional[LSPClient]:
@@ -258,21 +266,22 @@ def _get_lsp_client(file_path: str) -> Optional[LSPClient]:
     if not server_config:
         return None
 
-    # Reuse existing client if it's for the same server
-    if _lsp_client and _lsp_client._server_name == server_config["name"]:
-        if _lsp_client._process and _lsp_client._process.poll() is None:
+    with _lsp_lock:
+        # Reuse existing client if it's for the same server
+        if _lsp_client and _lsp_client._server_name == server_config["name"]:
+            if _lsp_client._process and _lsp_client._process.poll() is None:
+                return _lsp_client
+
+        # Shutdown old client
+        if _lsp_client:
+            _lsp_client.shutdown()
+
+        # Start new client
+        _lsp_client = LSPClient()
+        if _lsp_client.start(server_config):
             return _lsp_client
-
-    # Shutdown old client
-    if _lsp_client:
-        _lsp_client.shutdown()
-
-    # Start new client
-    _lsp_client = LSPClient()
-    if _lsp_client.start(server_config):
-        return _lsp_client
-    _lsp_client = None
-    return None
+        _lsp_client = None
+        return None
 
 
 def _location_to_str(loc: dict) -> str:
@@ -280,7 +289,13 @@ def _location_to_str(loc: dict) -> str:
     uri = loc.get("uri", "")
     range_info = loc.get("range", {})
     start = range_info.get("start", {})
-    file_path = uri.replace("file:///", "").replace("/", os.sep)
+    # Use urlparse for correct path extraction on all platforms
+    parsed = urlparse(uri)
+    file_path = unquote(parsed.path)
+    # On Windows, urlparse returns /C:/path — strip leading /
+    if platform.system() == "Windows" and file_path.startswith("/") and len(file_path) > 2 and file_path[2] == ":":
+        file_path = file_path[1:]
+    file_path = file_path.replace("/", os.sep)
     line = start.get("line", 0) + 1  # LSP is 0-indexed
     char = start.get("character", 0)
     return f"{file_path}:{line}:{char}"
@@ -423,7 +438,6 @@ def _fallback_definition(file_path: str, line: int, character: int) -> str:
             return json.dumps({"error": "Could not identify symbol at position"})
 
         # Search for definition patterns
-        import re
         patterns = [
             rf'^\s*(def|class|async\s+def)\s+{re.escape(word)}\b',
             rf'^\s*{re.escape(word)}\s*=',
@@ -483,7 +497,6 @@ def _fallback_references(file_path: str, line: int, character: int) -> str:
         if not word:
             return json.dumps({"error": "Could not identify symbol at position"})
 
-        import re
         pattern = rf'\b{re.escape(word)}\b'
         results = []
 
@@ -512,7 +525,6 @@ def _extract_word_at(line: str, character: int) -> str:
     """Extract the word at a given character position in a line."""
     if character >= len(line):
         # Try to get the last word
-        import re
         words = re.findall(r'\b\w+\b', line)
         return words[-1] if words else ""
 
@@ -530,7 +542,6 @@ def _extract_word_at(line: str, character: int) -> str:
 def _python_diagnostics(file_path: str) -> str:
     """Use py_compile for basic Python diagnostics."""
     import py_compile
-    import io
 
     errors = []
     try:

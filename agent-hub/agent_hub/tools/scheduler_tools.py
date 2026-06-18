@@ -48,6 +48,8 @@ def _parse_cron_field(field_val: str, min_val: int, max_val: int) -> set[int]:
         elif "-" in part:
             start, end = part.split("-", 1)
             start_val, end_val = int(start), int(end)
+            if start_val > end_val:
+                raise ValueError(f"Cron range {part}: start ({start_val}) > end ({end_val})")
             if start_val < min_val or end_val > max_val:
                 raise ValueError(f"Cron range {part} out of bounds [{min_val}-{max_val}]")
             values.update(range(start_val, end_val + 1))
@@ -335,8 +337,8 @@ def get_tools() -> list[ToolDef]:
                 "required": ["cron", "prompt"],
             },
             handler=cron_create,
-            permission=Permission.READ,
-            is_read_only=True,
+            permission=Permission.WRITE,
+            is_read_only=False,
             is_concurrency_safe=False,
         ),
         ToolDef(

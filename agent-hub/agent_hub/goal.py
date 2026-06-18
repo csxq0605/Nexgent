@@ -6,13 +6,11 @@ Implements Claude Code-style /goal command:
 - Continue working until condition is met
 """
 
-import os
 import time
 import json
 import threading
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, Callable
-from pathlib import Path
+from typing import Optional, Dict, Any
 
 
 @dataclass

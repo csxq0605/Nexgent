@@ -9,6 +9,7 @@ Ch3 markers:
 import json
 import re
 import socket
+import threading
 import time
 from urllib.parse import urlparse
 import ipaddress
@@ -18,8 +19,9 @@ from ..permissions import Permission
 # Max response size for web_fetch (10MB)
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 
-# S14: Response cache for web_fetch
+# S14: Response cache for web_fetch (thread-safe)
 _fetch_cache: dict[str, tuple[float, str]] = {}
+_cache_lock = threading.Lock()
 CACHE_TTL = 900  # 15 minutes
 MAX_CACHE_SIZE = 500  # Maximum cache entries
 
@@ -187,14 +189,14 @@ def web_fetch(params: dict) -> str:
     err = _validate_url(url)
     if err:
         return json.dumps({"error": err})
-    # S14: evict expired cache entries to prevent unbounded growth
-    _evict_expired_cache()
-    # S14: check cache first
+    # S14: evict expired cache entries and check cache (thread-safe)
     cache_key = f"{url}|{max_chars}"
-    if cache_key in _fetch_cache:
-        cached_time, cached_result = _fetch_cache[cache_key]
-        if time.time() - cached_time < CACHE_TTL:
-            return cached_result
+    with _cache_lock:
+        _evict_expired_cache()
+        if cache_key in _fetch_cache:
+            cached_time, cached_result = _fetch_cache[cache_key]
+            if time.time() - cached_time < CACHE_TTL:
+                return cached_result
     try:
         import requests
         # S14: Pre-resolve DNS and pin IP to mitigate DNS rebinding TOCTOU
@@ -255,8 +257,9 @@ def web_fetch(params: dict) -> str:
         if len(text) > max_chars:
             text = text[:max_chars] + "\n... [truncated]"
         result = json.dumps({"url": url, "status": resp.status_code, "content": text})
-        # S14: store in cache
-        _fetch_cache[cache_key] = (time.time(), result)
+        # S14: store in cache (thread-safe)
+        with _cache_lock:
+            _fetch_cache[cache_key] = (time.time(), result)
         return result
     except ImportError:
         return json.dumps({"error": "requests library not installed. Run: pip install requests"})

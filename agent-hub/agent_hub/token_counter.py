@@ -335,9 +335,9 @@ class StreamingTokenCounter:
             self.total_tokens = max(prev_total, new_total)
             return max(0, self.total_tokens - prev_total)
 
-        # No flush, just update estimate (not counted as incremental)
+        # No flush, just update estimate (not counted as incremental, never decrease)
         buffer_estimate = count_tokens_heuristic(self._buffer) if self._buffer else 0
-        self.total_tokens = self._precise_count + buffer_estimate
+        self.total_tokens = max(self.total_tokens, self._precise_count + buffer_estimate)
         return 0
 
     def _flush_buffer(self):

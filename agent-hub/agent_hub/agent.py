@@ -15,7 +15,7 @@ import secrets
 import platform
 import queue
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Optional
@@ -34,7 +34,7 @@ from .hooks import HookRunner, HookEvent, HookResult
 from .display import (
     print_step_header, print_tool_call_result,
     print_streaming_token, print_streaming_end, print_error,
-    print_warning, print_info,
+    print_warning,
     print_thinking_indicator, StepInfo,
     print_model_output_start, print_model_output_end,
     print_tool_call_collapsible, get_status_bar,
@@ -209,7 +209,7 @@ class TokenBudget:
 # Retry with exponential backoff (Ch2: error recovery)
 # ---------------------------------------------------------------------------
 def retry_with_backoff(fn, max_retries: int = 3, base_delay: float = 1.0):
-    import random as _random
+    import random
     last_error = None
     last_traceback = None
     # L10: Also retry on common network errors (no status_code attribute)
@@ -231,7 +231,7 @@ def retry_with_backoff(fn, max_retries: int = 3, base_delay: float = 1.0):
                 delay = base_delay * (2 ** attempt)
                 # Add jitter to prevent thundering herd when multiple
                 # SubAgents retry simultaneously on 429/503
-                jitter = _random.uniform(0, delay * 0.5)
+                jitter = random.uniform(0, delay * 0.5)
                 time.sleep(delay + jitter)
     raise last_error.with_traceback(last_traceback)
 
@@ -857,6 +857,7 @@ You help users with coding, file operations, web research, document creation, an
         self._compaction_failures = 0
 
         step = 0
+        status_bar = None
         try:
             while True:
                 step += 1
@@ -1032,7 +1033,7 @@ You help users with coding, file operations, web research, document creation, an
                                   **extra_kwargs)
 
                 stats = self.token_budget.get_stats()
-                stats.input_tokens += self.token_budget.estimated_tokens
+                stats.input_tokens = self.token_budget.estimated_tokens
                 stats.message_count += 1
                 if message.tool_calls:
                     stats.tool_call_count += len(message.tool_calls)
@@ -1133,10 +1134,11 @@ You help users with coding, file operations, web research, document creation, an
         finally:
             # Ensure session and status bar are always cleaned up
             self._last_session = session
-            try:
-                status_bar.set_idle()
-            except Exception:
-                pass
+            if status_bar is not None:
+                try:
+                    status_bar.set_idle()
+                except Exception:
+                    pass
 
     # -----------------------------------------------------------------------
     # SubAgent Management

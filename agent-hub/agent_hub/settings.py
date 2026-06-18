@@ -40,7 +40,7 @@ class SettingsManager:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-        except (FileNotFoundError, PermissionError, json.JSONDecodeError, OSError):
+        except (OSError, json.JSONDecodeError):
             return
 
         for key, value in data.items():
@@ -51,7 +51,7 @@ class SettingsManager:
                     self._settings.get("permissions", {}).get("deny", [])
                 )
                 new_deny = value.get("deny", [])
-                merged_deny = list(set(existing_deny + new_deny))
+                merged_deny = list(dict.fromkeys(existing_deny + new_deny))
                 # Merge: start with new value, then restore accumulated denies
                 self._settings[key] = dict(value)
                 if merged_deny:

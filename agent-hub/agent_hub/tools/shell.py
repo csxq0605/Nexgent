@@ -258,17 +258,11 @@ def run_command(params: dict) -> str:
         def _run_bg():
             try:
                 scrubbed_env = _scrub_env()
-                if platform.system() == "Windows":
-                    result = subprocess.run(
-                        command, shell=True, capture_output=True, text=True,
-                        timeout=timeout, encoding="utf-8", errors="replace",
-                        env=scrubbed_env
-                    )
-                else:
-                    result = subprocess.run(
-                        command, shell=True, capture_output=True, text=True,
-                        timeout=timeout, env=scrubbed_env
-                    )
+                result = subprocess.run(
+                    command, shell=True, capture_output=True, text=True,
+                    timeout=timeout, encoding="utf-8", errors="replace",
+                    env=scrubbed_env
+                )
                 output = (result.stdout + result.stderr).strip()
                 if len(output) > MAX_OUTPUT_LENGTH:
                     output = _spill_output(output)
@@ -298,17 +292,11 @@ def run_command(params: dict) -> str:
 
     try:
         scrubbed_env = _scrub_env()
-        if platform.system() == "Windows":
-            result = subprocess.run(
-                command, shell=True, capture_output=True, text=True,
-                timeout=timeout, encoding="utf-8", errors="replace",
-                env=scrubbed_env
-            )
-        else:
-            result = subprocess.run(
-                command, shell=True, capture_output=True, text=True,
-                timeout=timeout, env=scrubbed_env
-            )
+        result = subprocess.run(
+            command, shell=True, capture_output=True, text=True,
+            timeout=timeout, encoding="utf-8", errors="replace",
+            env=scrubbed_env
+        )
         output = (result.stdout + result.stderr).strip()
         if len(output) > MAX_OUTPUT_LENGTH:
             output = _spill_output(output)

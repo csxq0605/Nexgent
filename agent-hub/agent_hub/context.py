@@ -252,10 +252,9 @@ class CheckpointManager:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copy2(file_path, dest)
         # Store original path metadata for accurate restoration
-        import json as _json
         meta_path = os.path.join(dest_dir, "meta.json")
         with open(meta_path, "w", encoding="utf-8") as f:
-            _json.dump([{"original_path": abs_path, "safe_name": safe_name}], f)
+            json.dump([{"original_path": abs_path, "safe_name": safe_name}], f)
         return dest
 
     def restore_last(self) -> list[str]:
@@ -275,10 +274,9 @@ class CheckpointManager:
         meta_path = os.path.join(checkpoint_path, "meta.json")
         meta_entries = []
         if os.path.exists(meta_path):
-            import json as _json
             try:
                 with open(meta_path, "r", encoding="utf-8") as f:
-                    raw_meta = _json.load(f)
+                    raw_meta = json.load(f)
                 if isinstance(raw_meta, list):
                     meta_entries = raw_meta
                 elif isinstance(raw_meta, dict):
@@ -332,19 +330,18 @@ class CheckpointManager:
         shutil.copy2(file_path, dest)
         # Accumulate metadata entries (don't overwrite)
         meta_path = os.path.join(self._batch_dir, "meta.json")
-        import json as _json
         existing = []
         if os.path.exists(meta_path):
             try:
                 with open(meta_path, "r", encoding="utf-8") as f:
-                    existing = _json.load(f)
+                    existing = json.load(f)
                 if not isinstance(existing, list):
                     existing = [existing]
             except (json.JSONDecodeError, OSError):
                 existing = []
         existing.append({"original_path": abs_path, "safe_name": safe_name})
         with open(meta_path, "w", encoding="utf-8") as f:
-            _json.dump(existing, f)
+            json.dump(existing, f)
         return dest
 
     def end_batch(self):
@@ -644,9 +641,9 @@ def compact_context(
         if result_tokens < COMPRESS_TRIGGER_TOKENS:
             return _filter_orphan_tool_results(result), compaction_attempts, compaction_failures, False, True
 
-        # Level 3: LLM-based semantic compression
+        # Level 3: LLM-based semantic compression (use partially compressed result)
         if client is not None:
-            llm_result = llm_compress(messages, client, model or "mimo-v2.5-pro")
+            llm_result = llm_compress(result, client, model or "mimo-v2.5-pro")
             if llm_result is not None:
                 new_tokens = estimate_tokens(llm_result)
                 if tokens > 0 and (tokens - new_tokens) / tokens < 0.30:

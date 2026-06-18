@@ -19,6 +19,7 @@ References:
 import re
 import os
 import json
+import platform
 import time
 import hashlib
 import logging
@@ -461,8 +462,7 @@ def _try_salvage_json(text: str) -> Optional[dict]:
                 continue
 
     # Last resort: find the last complete "key": "value" pair and build minimal JSON
-    import re as _re
-    pairs = _re.findall(r'"(\w+)"\s*:\s*"([^"]*)"', text)
+    pairs = re.findall(r'"(\w+)"\s*:\s*"([^"]*)"', text)
     if pairs:
         # Extract known fields from whatever we can parse
         result = {}
@@ -543,10 +543,9 @@ Recent conversation (tool results stripped):
 Is this action safe to execute?"""
 
     try:
-        import platform as plat
         system_prompt = _CLASSIFIER_SYSTEM_PROMPT.format(
             working_dir=working_dir or os.getcwd(),
-            platform=f"{plat.system()} {plat.release()}",
+            platform=f"{platform.system()} {platform.release()}",
             permission_mode=permission_mode,
         )
 
@@ -825,7 +824,7 @@ def filter_tool_output(raw_output: str) -> FilteredOutput:
     - This is the sanitization + injection detection layer.
     """
     if raw_output is None:
-        return FilteredOutput(text=None)
+        return FilteredOutput(text="")
 
     sensitive_warnings = detect_sensitive_disclosure(raw_output)
     sanitized = sanitize_output(raw_output)

@@ -389,6 +389,10 @@ class SubAgent:
                 max_tokens=self.config.max_tokens,
             )
 
+            # Inherit parent's hook runner so security/logging hooks apply
+            if self.parent_harness and hasattr(self.parent_harness, '_hook_runner'):
+                child_harness._hook_runner = self.parent_harness._hook_runner
+
             # Initialize isolated FileOpsState for subagent (prevent inheriting stale state)
             try:
                 from .tools.file_ops import FileOpsState, set_file_ops_state
@@ -544,8 +548,8 @@ class SubAgent:
             tool_def = harness.registry.get(tool_name)
             if not tool_def:
                 self.logger.warning("Tool '%s' not found in registry, skipping", tool_name)
-            if tool_def:
-                filtered_registry.register(tool_def)
+                continue
+            filtered_registry.register(tool_def)
         harness.registry = filtered_registry
 
 

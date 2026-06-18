@@ -348,7 +348,7 @@ class TestFilterToolOutput:
 
     def test_none_input(self):
         result = filter_tool_output(None)
-        assert result.text is None
+        assert result.text == ""
 
 
 # =========================================================================

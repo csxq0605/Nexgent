@@ -51,8 +51,6 @@ class FileReferenceParser:
         Returns:
             List of resolved file paths
         """
-        from pathlib import Path
-
         # Normalize base directory
         base_dir = os.path.abspath(base_dir)
         base_path = Path(base_dir)

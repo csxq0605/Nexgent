@@ -427,6 +427,9 @@ def print_info(message: str):
 
 def print_success(message: str):
     """Print a success message."""
+    if _tui_print is not None:
+        _tui_print(f"  {CHECK_ICON} {message}")
+        return
     _console.print(f"  [green]{CHECK_ICON}[/green] {message}", highlight=False)
 
 

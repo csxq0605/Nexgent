@@ -156,7 +156,7 @@ metadata:
 
                 # Parse frontmatter
                 name, description = self._parse_frontmatter(content, filename)
-                # Ch6: index entry format, max 150 chars
+                # Ch6: index entry format, max 250 chars
                 hook = description[:250] if len(description) > 250 else description
                 entries.append(f"- [{name}]({filename}) — {hook}")
             except Exception:

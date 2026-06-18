@@ -75,16 +75,16 @@ class BackgroundTaskManager:
                     with self._lock:
                         task.state = TaskState.CANCELLED
                 else:
-                    task.output = str(result) if result is not None else ""
                     with self._lock:
+                        task.output = str(result) if result is not None else ""
                         task.state = TaskState.COMPLETED
             except Exception as e:
                 if task.cancel_event.is_set():
                     with self._lock:
                         task.state = TaskState.CANCELLED
                 else:
-                    task.error = str(e)
                     with self._lock:
+                        task.error = str(e)
                         task.state = TaskState.FAILED
             finally:
                 task.end_time = time.time()
@@ -163,11 +163,14 @@ class BackgroundTaskManager:
 
 # Global task manager instance
 _task_manager = None
+_task_manager_lock = threading.Lock()
 
 
 def get_task_manager() -> BackgroundTaskManager:
-    """Get the global task manager instance."""
+    """Get the global task manager instance (thread-safe double-checked locking)."""
     global _task_manager
     if _task_manager is None:
-        _task_manager = BackgroundTaskManager()
+        with _task_manager_lock:
+            if _task_manager is None:
+                _task_manager = BackgroundTaskManager()
     return _task_manager

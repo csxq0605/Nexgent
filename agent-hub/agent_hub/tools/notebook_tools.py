@@ -15,6 +15,10 @@ def notebook_edit(params: dict) -> str:
     cell_type = params.get("cell_type", None)
     edit_mode = params.get("edit_mode", "replace")  # replace, insert, delete
 
+    # new_source is required for replace and insert modes
+    if edit_mode in ("replace", "insert") and not new_source:
+        return json.dumps({"error": f"new_source is required for {edit_mode} mode"})
+
     # Validate path before any file operations
     read_err = _validate_read_path(notebook_path)
     if read_err:
@@ -105,7 +109,7 @@ def get_tools() -> list[ToolDef]:
                     "cell_type": {"type": "string", "description": "Cell type: code or markdown"},
                     "edit_mode": {"type": "string", "description": "replace, insert, or delete", "enum": ["replace", "insert", "delete"]},
                 },
-                "required": ["notebook_path", "new_source"]
+                "required": ["notebook_path"]
             },
             handler=notebook_edit,
             permission=Permission.WRITE,

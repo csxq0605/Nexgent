@@ -9,6 +9,7 @@ Implements Ch4 patterns:
 """
 
 import json
+import logging
 import os
 import re
 import fnmatch
@@ -192,7 +193,7 @@ class PermissionGate:
         try:
             self.mode = PermissionMode(mode)
         except ValueError:
-            pass
+            logging.getLogger(__name__).warning("Invalid permission mode: %s", mode)
 
     def add_rule(self, rule: PermissionRule):
         self.rules.append(rule)
@@ -355,6 +356,9 @@ class PermissionGate:
             if self._rejection_count >= 3:
                 pass  # Fall through to interactive prompt
             else:
+                # Gradually recover rejection count on successful auto-approve
+                if self._rejection_count > 0:
+                    self._rejection_count = max(0, self._rejection_count - 1)
                 self._log(permission, action_desc, "auto_approved")
                 return True
 
@@ -380,8 +384,7 @@ class PermissionGate:
         command = params.get("command", "")
         if command:
             # Extract shell redirection targets (>, >>) and check them
-            import re as _re
-            redirects = _re.findall(r'>+\s*([^\s;|&]+)', command)
+            redirects = re.findall(r'>+\s*([^\s;|&]+)', command)
             for target in redirects:
                 # Strip quotes from redirect targets (e.g., > ".env" -> .env)
                 target = target.strip('"').strip("'")
@@ -402,7 +405,6 @@ class PermissionGate:
 
     def _has_protected_path(self, action_desc: str) -> bool:
         """S4: Fallback check using action_desc string parsing."""
-        import re
         path_matches = re.findall(r'path=([^,\s\)]+)', action_desc)
         for path in path_matches:
             path = path.strip('"').strip("'")

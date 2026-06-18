@@ -642,6 +642,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
     elif cmd[0] == "/clear":
         session.messages.clear()
         session.compaction_count = 0
+        session._last_saved_idx = 0
         # Also truncate the JSONL file so cleared state persists
         if session.auto_save_dir:
             jsonl_path = os.path.join(session.auto_save_dir, f"{session.session_id}.jsonl")
@@ -843,6 +844,8 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                         f.write(json.dumps(msg, ensure_ascii=False) + "\n")
             except OSError as e:
                 print_warning(f"Could not write fork session file: {e}")
+        # Update save index so auto_save doesn't duplicate messages
+        session._last_saved_idx = len(session.messages)
         # Update checkpoint_manager to new session
         if checkpoint_manager:
             checkpoint_manager.checkpoint_dir = os.path.join(".mimo", "checkpoints", new_id)
@@ -1095,14 +1098,10 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 print_info("No skills found. Create skills in ~/.mimo/skills/ or .mimo/skills/")
                 print_info("Install: /skills install <github-url>")
             print()
-    elif cmd[0].startswith("/") and cmd[0][1:] in (getattr(harness, '_skill_manager', SkillManager()).skills if hasattr(harness, '_skill_manager') else {}):
-        # Note: SkillManager is imported in the /skills branch above
+    elif cmd[0].startswith("/") and cmd[0][1:] in (harness._skill_manager.skills if hasattr(harness, '_skill_manager') and harness._skill_manager else {}):
         # Invoke a skill
         skill_name = cmd[0][1:]
         arguments = " ".join(cmd[1:]) if len(cmd) > 1 else ""
-        from .skills import SkillManager
-        if not hasattr(harness, '_skill_manager'):
-            harness._skill_manager = SkillManager()
         rendered = harness._skill_manager.invoke_skill(
             skill_name,
             arguments=arguments,
@@ -1110,11 +1109,8 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
             effort=harness.effort,
         )
         if rendered:
-            # Add skill content as a system message
-            session.messages.append({
-                "role": "system",
-                "content": f"[Skill: {skill_name}]\n{rendered}",
-            })
+            # Add skill content as a system message (via add_message for auto-save)
+            session.add_message("system", f"[Skill: {skill_name}]\n{rendered}")
             print_success(f"Skill '{skill_name}' loaded.")
         else:
             print_error(f"Skill '{skill_name}' not found or cannot be invoked.")

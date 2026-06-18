@@ -277,13 +277,15 @@ class HookRunner:
         }, ensure_ascii=False)
 
         try:
-            proc = subprocess.Popen(
-                config.command,
+            popen_kwargs = dict(
                 shell=True,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            if platform.system() == "Windows":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            proc = subprocess.Popen(config.command, **popen_kwargs)
             # Write hook input to stdin and close the pipe so the
             # subprocess does not hang waiting for EOF.
             try:
@@ -416,8 +418,8 @@ class HookRunner:
             return HookResult(
                 additional_context=data.get("additionalContext", ""),
             )
-        except Exception:
-            pass  # LLM hook failures are non-blocking
+        except Exception as e:
+            _logger.warning("Prompt hook error: %s", e)
 
         return HookResult()
 
