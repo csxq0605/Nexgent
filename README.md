@@ -49,9 +49,9 @@ ah          # 进入交互模式
 
 | 类型 | 数量 |
 |------|------|
-| 单元测试 | 983 |
+| 单元测试 | 1057 |
 | E2E 测试 | 73（57 fast + 16 slow） |
-| Stage 测试 | 50 |
+| Stage 测试 | 67 |
 
 ```bash
 cd agent-hub
@@ -82,7 +82,7 @@ Agent-Learning-Hub-MiMo/
 │   │   ├── tui.py         # 全屏 TUI 界面
 │   │   ├── tools/         # 14 个工具模块（33 个工具）
 │   │   └── ...
-│   ├── tests/             # 983 单元 + 73 E2E 测试
+│   ├── tests/             # 1057 单元 + 73 E2E 测试
 │   └── setup.py           # 包配置
 ├── tests/                 # Stage 级别测试
 └── .github/workflows/     # CI/CD

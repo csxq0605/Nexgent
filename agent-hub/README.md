@@ -18,7 +18,7 @@
 - **Skills**: SKILL.md 格式、动态上下文注入、参数替换、GitHub URL 安装
 - **MCP**: Model Context Protocol 集成，多协议支持（stdio/HTTP/SSE/WebSocket），OAuth 认证
 - **TUI**: 全屏 Textual 界面，固定输入区 + 滚动输出，队列架构，斜杠命令自动补全
-- **CLI**: 30+ 斜杠命令，管道输入，3 种输出格式（text/json/stream-json），配置热重载
+- **CLI**: 34 个斜杠命令，管道输入，3 种输出格式（text/json/stream-json），配置热重载
 - **自定义智能体**: YAML frontmatter 定义，项目级/用户级，6 个预设模板（code-reviewer/researcher/debugger/writer/tester/planner）
 - **后台任务**: 异步执行、状态跟踪、取消、自动清理
 - **@文件引用**: `@file`、`@folder/`、`@*.ext` 语法，自动注入上下文，路径遍历保护
@@ -148,7 +148,7 @@ agent_hub/
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest tests/ --ignore=tests/test_e2e.py -v  # 单元测试（983 个）
+python -m pytest tests/ --ignore=tests/test_e2e.py -v  # 单元测试（1057 个）
 python -m pytest tests/test_e2e.py -v                    # E2E fast（57 个）
 python -m pytest tests/test_e2e.py -v --run-slow         # E2E fast + slow（73 个）
 python run_tests.py --all                                 # 全部

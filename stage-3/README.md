@@ -39,7 +39,7 @@
 | **Sub-agents** | Independent context windows, parallel execution | Not implemented | Parallel/Pipeline execution, resource limits |
 | **MCP** | External tool servers via protocol | Not implemented | Multi-protocol support (stdio/HTTP/SSE/WebSocket) |
 
-> **Note**: The Stage 3 demo was a learning exercise. The full MiMo Harness (v0.4.0) implements all components listed above, with 983 unit tests + 73 E2E tests passing.
+> **Note**: The Stage 3 demo was a learning exercise. The full MiMo Harness (v0.4.0) implements all components listed above, with 1057 unit tests + 73 E2E tests passing.
 
 ### What I Learned
 
