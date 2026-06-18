@@ -219,7 +219,11 @@ class TestSchedulerToolsGetTools:
         for tool in get_tools():
             assert isinstance(tool, ToolDef)
             assert tool.handler is not None
-            assert tool.permission == Permission.READ
+            # cron_create is WRITE (modifies state), others are READ
+            if tool.name == "cron_create":
+                assert tool.permission == Permission.WRITE
+            else:
+                assert tool.permission == Permission.READ
 
     def test_required_params(self):
         tools = {t.name: t for t in get_tools()}
