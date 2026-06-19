@@ -791,11 +791,17 @@ class SubAgentManager:
         """
         results = []
         previous_context = ""
+        _MAX_CONTEXT_CHARS = 50000  # Limit accumulated context to prevent token overflow
 
         for idx, config in enumerate(configs):
             # Add previous results to the task context (monitor warns on size)
             if previous_context:
-                enhanced_task = f"{config.task}\n\n## Previous Stage Results\n{previous_context}"
+                # Truncate context if it exceeds limit
+                ctx = previous_context
+                if len(ctx) > _MAX_CONTEXT_CHARS:
+                    ctx = ctx[-_MAX_CONTEXT_CHARS:]
+                    ctx = f"... (truncated)\n{ctx}"
+                enhanced_task = f"{config.task}\n\n## Previous Stage Results\n{ctx}"
                 enhanced_config = replace(config, task=enhanced_task)
             else:
                 enhanced_config = config

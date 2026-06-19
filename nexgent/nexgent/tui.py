@@ -545,7 +545,8 @@ class MiMoTUI(App):
                     cmd, self.harness, self.session, self.memory_store,
                     self.checkpoint_manager, self.session_dir,
                 )
-            self.session = new_session
+            if new_session is not None:
+                self.session = new_session
         except SystemExit as e:
             # In TUI mode, catch SystemExit from slash commands (e.g., /quit)
             # and handle gracefully. The actual exit is done by _save_and_exit().
@@ -711,8 +712,6 @@ class MiMoTUI(App):
                 sep = kwargs.get('sep', ' ')
                 end = kwargs.get('end', '\n')
                 text = sep.join(str(a) for a in args)
-                if not text and end == '\n':
-                    return
                 full = text + end
                 # Streaming tokens use end="" — buffer in streaming widget
                 if end == '':

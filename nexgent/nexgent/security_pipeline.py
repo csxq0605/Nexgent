@@ -161,9 +161,9 @@ _SOFT_DENY_PATTERNS = [
     (re.compile(r'\b(chmod|chown)\s+.*-R\s+'), "recursive permission change"),
     (re.compile(r'\b(ufw|iptables)\s+.*\b(disable|stop|flush)\b'), "disabling firewall"),
     (re.compile(r'\bselinux\b.*\b(disabl?e[ds]?|permissive)\b'), "disabling SELinux"),
-    (re.compile(r'\bcat\s+.*\.ssh/'), "accessing SSH credentials"),
-    (re.compile(r'\bcat\s+.*\.aws/credentials'), "accessing AWS credentials"),
-    (re.compile(r'\bcat\s+.*\.gnupg/'), "accessing GPG keys"),
+    (re.compile(r'\b(cat|less|head|tail|xxd|base64|type|more|cp|mv)\s+.*\.ssh/'), "accessing SSH credentials"),
+    (re.compile(r'\b(cat|less|head|tail|xxd|base64|type|more|cp|mv)\s+.*\.aws/credentials'), "accessing AWS credentials"),
+    (re.compile(r'\b(cat|less|head|tail|xxd|base64|type|more|cp|mv)\s+.*\.gnupg/'), "accessing GPG keys"),
     (re.compile(r'\b(grep|findstr)\s+.*\b(token|secret|key|password|credential)\b.*\b(env|ENV|\.env|config)\b'),
      "credential exploration pattern"),
     (re.compile(r'\b(curl|wget)\s+.*\b(ENV|env|\.env|credentials|\.ssh)\b', re.IGNORECASE),
@@ -306,7 +306,7 @@ def classify_action_regex(
     if tool_name in ("read_file", "write_file", "edit_file"):
         path = tool_args.get("path", tool_args.get("file_path", ""))
         if path:
-            filename = os.path.basename(os.path.normpath(path))
+            filename = os.path.basename(os.path.realpath(path))
             if filename in _SENSITIVE_FILENAMES:
                 return ClassificationResult(
                     decision=SafetyDecision.HARD_DENY,
@@ -317,7 +317,7 @@ def classify_action_regex(
                     risk_level="high",
                 )
         for cred_path in _CREDENTIAL_STORE_PATHS:
-            if path and os.path.normpath(path) == os.path.normpath(cred_path):
+            if path and os.path.realpath(path) == os.path.realpath(cred_path):
                 return ClassificationResult(
                     decision=SafetyDecision.HARD_DENY,
                     reason=f"Hard deny: accessing credential store {os.path.basename(cred_path)}",
@@ -358,8 +358,8 @@ def classify_action_regex(
         path = tool_args.get("path", tool_args.get("file_path", ""))
         if path:
             try:
-                abs_path = os.path.normpath(os.path.abspath(path))
-                abs_project = os.path.normpath(os.path.abspath(working_dir))
+                abs_path = os.path.realpath(path)
+                abs_project = os.path.realpath(working_dir)
                 if not abs_path.startswith(abs_project):
                     return ClassificationResult(
                         decision=SafetyDecision.SOFT_DENY,

@@ -19,6 +19,7 @@ import sys
 import time
 import json
 import re
+import unicodedata
 import threading
 from typing import Optional
 from dataclasses import dataclass, field
@@ -239,6 +240,15 @@ def _red(text: str) -> str:
 def _escape_markup(text: str) -> str:
     """Escape Rich markup special characters in user-controlled strings."""
     return text.replace("[", "\\[").replace("]", "\\]")
+
+
+def _display_width(text: str) -> int:
+    """Calculate the display width of text, accounting for CJK characters."""
+    width = 0
+    for ch in text:
+        eaw = unicodedata.east_asian_width(ch)
+        width += 2 if eaw in ('F', 'W') else 1
+    return width
 
 
 def _cyan(text: str) -> str:
@@ -698,18 +708,35 @@ def _wrap_text(text: str, width: int = 76) -> list[str]:
         for word in paragraph.split(" "):
             if not current:
                 current = word
-            elif len(current) + 1 + len(word) <= width:
+            elif _display_width(current) + 1 + _display_width(word) <= width:
                 current += " " + word
             else:
-                while len(current) > width:
-                    lines.append(current[:width])
-                    current = current[width:]
+                while _display_width(current) > width:
+                    # Find the split point by display width
+                    split_idx = 0
+                    w = 0
+                    for i, ch in enumerate(current):
+                        cw = 2 if unicodedata.east_asian_width(ch) in ('F', 'W') else 1
+                        if w + cw > width:
+                            break
+                        w += cw
+                        split_idx = i + 1
+                    lines.append(current[:split_idx])
+                    current = current[split_idx:]
                 lines.append(current)
                 current = word
         if current:
-            while len(current) > width:
-                lines.append(current[:width])
-                current = current[width:]
+            while _display_width(current) > width:
+                split_idx = 0
+                w = 0
+                for i, ch in enumerate(current):
+                    cw = 2 if unicodedata.east_asian_width(ch) in ('F', 'W') else 1
+                    if w + cw > width:
+                        break
+                    w += cw
+                    split_idx = i + 1
+                lines.append(current[:split_idx])
+                current = current[split_idx:]
             if current:
                 lines.append(current)
     return lines
@@ -741,7 +768,7 @@ def print_model_output_start(model: str = ""):
         _tui_model_output_start(model)
         return
     title = f"{ASSISTANT_ICON} {model}" if model else f"{ASSISTANT_ICON} Assistant"
-    title_len = len(title) + 2  # spaces around title
+    title_len = _display_width(title) + 2  # spaces around title
     # Top border: left corner + dashes + title + dashes + right corner
     left_dashes = BUBBLE_H * 2
     right_dashes = BUBBLE_H * max(0, _OUTPUT_BOX_WIDTH - 2 - title_len - 2)
@@ -815,13 +842,13 @@ def print_tool_call_collapsible(
         if args:
             args_json = json.dumps(args, ensure_ascii=False, indent=2)
             for line in args_json.split("\n"):
-                _console.print(f"      [dim]{line}[/dim]", highlight=False)
+                _console.print(f"      [dim]{_escape_markup(line)}[/dim]", highlight=False)
 
         if result_preview:
             preview_lines = result_preview[:500].split("\n")
-            _console.print(f"    [dim]{'─' * 36}[/dim]", highlight=False)
+            _console.print(f"    [dim]{BOX_H * 36}[/dim]", highlight=False)
             for line in preview_lines[:10]:
-                _console.print(f"      [dim]{line}[/dim]", highlight=False)
+                _console.print(f"      [dim]{_escape_markup(line)}[/dim]", highlight=False)
             if len(result_preview) > 500:
                 _console.print(f"      [dim]...[/dim]", highlight=False)
 

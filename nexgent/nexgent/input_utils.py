@@ -84,7 +84,7 @@ def _init_prompt_toolkit():
         slash_completer = WordCompleter(_SLASH_COMMANDS, ignore_case=True, sentence=True)
         at_file_completer = AtFileCompleter()
         completer = merge_completers(slash_completer, at_file_completer)
-        history_path = os.path.join(os.path.expanduser("~"), ".mimo", "history")
+        history_path = os.path.join(os.path.expanduser("~"), ".nexgent", "history")
         os.makedirs(os.path.dirname(history_path), exist_ok=True)
 
         # Style for the prompt labels

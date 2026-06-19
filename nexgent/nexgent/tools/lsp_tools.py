@@ -228,7 +228,7 @@ class LSPClient:
         # For a tool, we do a workaround: open the file and check for
         # any diagnostic notifications that arrived.
         self.open_file(file_path)
-        time.sleep(1)  # Wait for diagnostics to arrive
+        time.sleep(0.1)  # Brief wait for diagnostics to arrive
         # In a real implementation, we'd collect diagnostic notifications.
         # For now, return empty and let the server push them.
         return []
@@ -320,6 +320,12 @@ def lsp_definition(params: dict) -> str:
     if not file_path:
         return json.dumps({"error": "No file_path provided"})
 
+    # Validate path is within allowed directory
+    from .file_ops import _validate_read_path
+    err = _validate_read_path(file_path)
+    if err:
+        return json.dumps({"error": err})
+
     if not os.path.exists(file_path):
         return json.dumps({"error": f"File not found: {file_path}"})
 
@@ -363,6 +369,12 @@ def lsp_references(params: dict) -> str:
     if not file_path:
         return json.dumps({"error": "No file_path provided"})
 
+    # Validate path is within allowed directory
+    from .file_ops import _validate_read_path
+    err = _validate_read_path(file_path)
+    if err:
+        return json.dumps({"error": err})
+
     if not os.path.exists(file_path):
         return json.dumps({"error": f"File not found: {file_path}"})
 
@@ -401,6 +413,12 @@ def lsp_diagnostics(params: dict) -> str:
 
     if not file_path:
         return json.dumps({"error": "No file_path provided"})
+
+    # Validate path is within allowed directory
+    from .file_ops import _validate_read_path
+    err = _validate_read_path(file_path)
+    if err:
+        return json.dumps({"error": err})
 
     if not os.path.exists(file_path):
         return json.dumps({"error": f"File not found: {file_path}"})

@@ -164,9 +164,9 @@ def write_file(params: dict) -> str:
             return json.dumps({"error": f"File '{path}' must be read before writing. Use read_file first."})
     try:
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        with open(abs_path, "w", encoding="utf-8") as f:
             f.write(content)
-        return json.dumps({"status": "written", "path": path, "bytes": len(content.encode("utf-8"))})
+        return json.dumps({"status": "written", "path": abs_path, "bytes": len(content.encode("utf-8"))})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -189,7 +189,7 @@ def edit_file(params: dict) -> str:
     if not state.is_read(abs_path):
         return json.dumps({"error": f"File '{path}' must be read before editing. Use read_file first."})
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(abs_path, "r", encoding="utf-8") as f:
             content = f.read()
         if old_text not in content:
             return json.dumps({"error": "old_text not found in file"})
@@ -206,7 +206,7 @@ def edit_file(params: dict) -> str:
         else:
             new_content = content.replace(old_text, new_text, 1)
             replaced = 1
-        with open(path, "w", encoding="utf-8") as f:
+        with open(abs_path, "w", encoding="utf-8") as f:
             f.write(new_content)
         return json.dumps({"status": "edited", "path": path, "occurrences": count, "replaced": replaced})
     except Exception as e:
