@@ -236,6 +236,11 @@ def _red(text: str) -> str:
     return _c(Colors.RED, text)
 
 
+def _escape_markup(text: str) -> str:
+    """Escape Rich markup special characters in user-controlled strings."""
+    return text.replace("[", "\\[").replace("]", "\\]")
+
+
 def _cyan(text: str) -> str:
     return _c(Colors.CYAN, text)
 
@@ -530,23 +535,23 @@ def _format_tool_args(tool_name: str, args: dict) -> str:
     if tool_name in ("read_file", "write_file", "edit_file"):
         path = args.get("path") or args.get("file_path", "")
         if path:
-            return f" [dim]{ARROW_ICON}[/dim] [cyan]{path}[/cyan]"
+            return f" [dim]{ARROW_ICON}[/dim] [cyan]{_escape_markup(path)}[/cyan]"
 
     if tool_name == "run_command":
         cmd = args.get("command", "")
         if cmd:
             if len(cmd) > 60:
                 cmd = cmd[:57] + "..."
-            return f" [dim]{ARROW_ICON}[/dim] [dim]$[/dim] {cmd}"
+            return f" [dim]{ARROW_ICON}[/dim] [dim]$[/dim] {_escape_markup(cmd)}"
 
     if tool_name == "search_files":
         pattern = args.get("pattern", "")
         if pattern:
-            return f" [dim]{ARROW_ICON}[/dim] [cyan]{pattern}[/cyan]"
+            return f" [dim]{ARROW_ICON}[/dim] [cyan]{_escape_markup(pattern)}[/cyan]"
 
     if tool_name == "list_directory":
         path = args.get("path", ".")
-        return f" [dim]{ARROW_ICON}[/dim] [cyan]{path}[/cyan]"
+        return f" [dim]{ARROW_ICON}[/dim] [cyan]{_escape_markup(path)}[/cyan]"
 
     args_preview = json.dumps(args, ensure_ascii=False)
     if len(args_preview) > 80:
@@ -769,7 +774,7 @@ def print_code_block(code: str, language: str = ""):
     border_h = CODE_BORDER_H * 42
     _console.print(f"    [dim]{CODE_BORDER}{border_h}{lang_label}[/dim]", highlight=False)
     for line in code.rstrip("\n").split("\n"):
-        _console.print(f"    [dim]{CODE_BORDER_V}[/dim] [dim]{line}[/dim]", highlight=False)
+        _console.print(f"    [dim]{CODE_BORDER_V}[/dim] [dim]{_escape_markup(line)}[/dim]", highlight=False)
     _console.print(f"    [dim]{CODE_BORDER_BOT}{border_h}[/dim]", highlight=False)
 
 

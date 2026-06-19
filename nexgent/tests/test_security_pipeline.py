@@ -415,7 +415,7 @@ class TestClassifyActionModel:
         assert result.decision in (SafetyDecision.ALLOW, SafetyDecision.SOFT_DENY, SafetyDecision.HARD_DENY)
 
     def test_model_unavailable_fails_open(self):
-        """When API is unavailable, fails open (returns None)."""
+        """When API is unavailable, falls back to SOFT_DENY."""
         class _FailingClient:
             class chat:
                 class completions:
@@ -423,7 +423,8 @@ class TestClassifyActionModel:
                     def create(**kwargs):
                         raise ConnectionError("API unavailable")
         result = classify_action_model("run_command", {"command": "ls"}, client=_FailingClient)
-        assert result is None
+        assert result is not None
+        assert result.decision == SafetyDecision.SOFT_DENY
 
 
 # =========================================================================

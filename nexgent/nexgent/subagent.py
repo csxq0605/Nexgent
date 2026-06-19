@@ -322,19 +322,30 @@ class SubAgent:
     ):
         self.config = config
         self.subagent_id = str(uuid.uuid4())[:8]
-        self.state = SubAgentState.CREATED
         self.parent_harness = parent_harness
         self.logger = logger or TraceLogger()
 
         # Communication channel
         self.channel = MessageChannel(channel_id=self.subagent_id)
 
-        # Result storage
+        # Thread-safe state/result storage
+        self._state_lock = threading.Lock()
+        self._state = SubAgentState.CREATED
         self.result: Optional[SubAgentResult] = None
 
         # Thread control
         self._thread: Optional[threading.Thread] = None
         self._cancel_event = threading.Event()
+
+    @property
+    def state(self):
+        with self._state_lock:
+            return self._state
+
+    @state.setter
+    def state(self, value):
+        with self._state_lock:
+            self._state = value
 
     # Thread-safe import cache
     _import_lock = threading.Lock()
@@ -701,7 +712,17 @@ class SubAgentManager:
         Returns:
             List of SubAgentResult in the same order as configs
         """
-        subagents = [self.create_subagent(config) for config in configs]
+        # Create all subagents; on failure, clean up already-created ones
+        subagents = []
+        try:
+            for config in configs:
+                subagents.append(self.create_subagent(config))
+        except Exception:
+            # Clean up already-created subagents to avoid leaking CREATED state
+            for sa in subagents:
+                with self._lock:
+                    self._subagents.pop(sa.subagent_id, None)
+            raise
 
         # Sort by priority (higher priority first), preserving original indices
         indexed_subagents = list(enumerate(subagents))

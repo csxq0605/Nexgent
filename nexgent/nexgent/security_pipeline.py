@@ -118,6 +118,11 @@ _HARD_DENY_PATTERNS = [
     (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+~', re.IGNORECASE), "rm -rf ~ destroys home directory"),
     (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+\*', re.IGNORECASE), "rm -rf * destroys all files"),
     (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+\.', re.IGNORECASE), "rm -rf . destroys current directory"),
+    # Separate short flags: rm -r -f /, rm -f -r /, etc.
+    (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+/(?:\s|\.|/|\)|$)', re.IGNORECASE), "rm -r -f / destroys the filesystem"),
+    (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+~', re.IGNORECASE), "rm -r -f ~ destroys home directory"),
+    (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+\*', re.IGNORECASE), "rm -r -f * destroys all files"),
+    (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+\.', re.IGNORECASE), "rm -r -f . destroys current directory"),
     # Long flag forms and mixed short/long forms
     (re.compile(r'\brm\s+.*--recursive\s+.*--force\s+', re.IGNORECASE), "rm --recursive --force is dangerous"),
     (re.compile(r'\brm\s+.*--force\s+.*--recursive\s+', re.IGNORECASE), "rm --force --recursive is dangerous"),
@@ -131,7 +136,9 @@ _HARD_DENY_PATTERNS = [
     (re.compile(r'(?:^|[;&|]\s*)(?:sudo\s+)?reboot\b', re.IGNORECASE), "reboot command"),
     (re.compile(r'(?:^|[;&|]\s*)(?:sudo\s+)?halt\b', re.IGNORECASE), "halt command"),
     (re.compile(r'\bchmod\s+.*-R\s+777\s+/(?:\s|$)', re.IGNORECASE), "chmod 777 / is dangerous"),
-    (re.compile(r'\b(curl|wget)\s+.*\|\s*(bash|sh|zsh)\b', re.IGNORECASE), "download-and-execute via pipe is dangerous"),
+    (re.compile(r'\b(curl|wget)\s+[^\n]*\|\s*(bash|sh|zsh)\b', re.IGNORECASE), "download-and-execute via pipe is dangerous"),
+    # Also catch no-space pipe: curl URL|bash (non-greedy match)
+    (re.compile(r'\b(curl|wget)\s+[^\n]*?\|\s*(bash|sh|zsh)\b', re.IGNORECASE), "download-and-execute via pipe is dangerous"),
     (re.compile(r'\b(curl|wget)\s+.*-o\s+\S+.*&&\s*(bash|sh|zsh)\b', re.IGNORECASE), "download-then-execute is dangerous"),
     (re.compile(r'\b(curl|wget)\s+.*&&\s*(bash|sh|zsh)\s+\S+', re.IGNORECASE), "download-then-execute is dangerous"),
     (re.compile(r'\b(curl|wget)\s+.*-d\s+.*\b(key|token|secret|password)\b', re.IGNORECASE),
@@ -616,14 +623,20 @@ Is this action safe to execute?"""
             _classifier_cache[cache_key] = (now, result)
         return result
     except Exception as e:
-        # Fail open: when the model classifier API is unavailable (timeout,
-        # rate limit, network error), fall through to the default-allow path
-        # in classify_action(). Regex pre-filter (step 1) already blocked
-        # obviously dangerous commands (rm -rf /, credential access, etc.).
-        # Blocking ALL tool calls when the classifier API is down is too
-        # aggressive — it makes the agent completely unusable.
-        logging.getLogger(__name__).warning("Model classifier exception (falling through to default): %s", e, exc_info=True)
-        return None
+        # Fail to SOFT_DENY: when the model classifier API is unavailable,
+        # return a soft-deny result so the permission pipeline can still
+        # prompt the user (in interactive mode) or block (in DONT_ASK mode).
+        # Regex pre-filter (step 1) already blocked obviously dangerous
+        # commands (rm -rf /, credential access, etc.).
+        logging.getLogger(__name__).warning("Model classifier exception (soft-deny fallback): %s", e, exc_info=True)
+        return ClassificationResult(
+            decision=SafetyDecision.SOFT_DENY,
+            reason=f"Classifier API unavailable: {e}",
+            rule_matched="classifier_unavailable",
+            source="fallback",
+            reasoning=f"Classifier API unavailable: {e}",
+            risk_level="medium",
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -60,8 +60,9 @@ _WRAPPER_PREFIXES = ["timeout", "time", "nice", "nohup", "stdbuf"]
 _CHAINING_PATTERN = re.compile(r'[`><]|\$\(|<<')
 
 # S3: Credential patterns to scrub from environment (M6: extended)
+# Each pattern is matched as a whole segment in the env var name (split on _)
 _CREDENTIAL_PATTERNS = [
-    "API_KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL", "AUTH",
+    "API_KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL",
     "PRIVATE_KEY", "PASSPHRASE", "SIGNING_KEY", "ENCRYPTION_KEY",
     "DATABASE_URL", "CONNECTION_STRING", "DSN",
 ]
@@ -137,8 +138,11 @@ def _scrub_env() -> dict:
     keys_to_remove = []
     for key in env:
         key_upper = key.upper()
+        key_segments = set(key_upper.split("_"))
         for pattern in _CREDENTIAL_PATTERNS:
-            if pattern in key_upper:
+            # Match pattern as whole segment(s) in the underscore-delimited name
+            pattern_segments = set(pattern.split("_"))
+            if pattern_segments.issubset(key_segments):
                 keys_to_remove.append(key)
                 break
     for key in keys_to_remove:

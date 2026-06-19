@@ -156,7 +156,8 @@ def write_file(params: dict) -> str:
     if err:
         return json.dumps({"error": err})
     # Read-before-write check: existing files must be read first (session-scoped)
-    abs_path = os.path.abspath(path)
+    # Use realpath to resolve symlinks consistently with _validate_write_path
+    abs_path = os.path.realpath(path)
     state = get_file_ops_state()
     if os.path.exists(abs_path):
         if not state.is_write_allowed(abs_path):
@@ -182,7 +183,8 @@ def edit_file(params: dict) -> str:
     if not old_text:
         return json.dumps({"error": "old_text must not be empty"})
     # Read-before-edit check: verify file was read in this session (session-scoped)
-    abs_path = os.path.abspath(path)
+    # Use realpath to resolve symlinks consistently with _validate_write_path
+    abs_path = os.path.realpath(path)
     state = get_file_ops_state()
     if not state.is_read(abs_path):
         return json.dumps({"error": f"File '{path}' must be read before editing. Use read_file first."})
@@ -253,6 +255,9 @@ def glob_files(params: dict) -> str:
     # Support explicit path parameter: prepend to pattern if provided
     search_path = params.get("path", "")
     if search_path:
+        # Validate search_path separately (reject wildcards in path to prevent injection)
+        if "*" in search_path or "?" in search_path or "[" in search_path:
+            return json.dumps({"error": "Wildcards not allowed in path parameter, use pattern instead"})
         pattern = os.path.join(search_path, pattern)
     # Validate that the pattern's base directory is within allowed path
     base = pattern.split("*")[0].rstrip("/\\") or "."

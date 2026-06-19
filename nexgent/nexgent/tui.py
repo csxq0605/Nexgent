@@ -676,13 +676,23 @@ class MiMoTUI(App):
             class _StdoutProxy:
                 """Redirect sys.stdout to the output queue."""
                 def write(self, text):
-                    if text and text.strip():
+                    if text:
                         _output_queue.put(("write", text.rstrip('\n')))
                 def flush(self):
                     pass
+                def isatty(self):
+                    return False
+                def fileno(self):
+                    raise OSError("stdout is redirected in TUI mode")
+                @property
+                def buffer(self):
+                    raise AttributeError("stdout buffer not available in TUI mode")
                 @property
                 def encoding(self):
                     return 'utf-8'
+                @property
+                def name(self):
+                    return '<tui_proxy>'
 
             proxy = _StdoutProxy()
             sys.stdout = proxy

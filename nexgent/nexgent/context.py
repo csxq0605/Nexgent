@@ -266,41 +266,40 @@ class CheckpointManager:
             if self._seq in self._restored_seqs:
                 return []
             seq = self._seq
-        checkpoint_path = os.path.join(self.checkpoint_dir, str(seq))
-        if not os.path.isdir(checkpoint_path):
-            return []
-        restored = []
-        # Load metadata if available (supports both list and single-object formats)
-        meta_path = os.path.join(checkpoint_path, "meta.json")
-        meta_entries = []
-        if os.path.exists(meta_path):
-            try:
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    raw_meta = json.load(f)
-                if isinstance(raw_meta, list):
-                    meta_entries = raw_meta
-                elif isinstance(raw_meta, dict):
-                    meta_entries = [raw_meta]
-            except (json.JSONDecodeError, OSError):
-                pass
-        # Build lookup: safe_name -> original_path
-        path_lookup = {e["safe_name"]: e["original_path"] for e in meta_entries if "safe_name" in e and "original_path" in e}
-        for filename in os.listdir(checkpoint_path):
-            if filename == "meta.json":
-                continue
-            src = os.path.join(checkpoint_path, filename)
-            if os.path.isfile(src):
-                # Restore to original path if available, else cwd
-                dest = path_lookup.get(filename, os.path.join(os.getcwd(), filename))
-                # Security: normalize path to resolve any ".." traversal components
-                dest_norm = os.path.normpath(os.path.abspath(dest))
-                os.makedirs(os.path.dirname(dest_norm), exist_ok=True)
-                shutil.copy2(src, dest_norm)
-                restored.append(dest)
-        with self._lock:
+            checkpoint_path = os.path.join(self.checkpoint_dir, str(seq))
+            if not os.path.isdir(checkpoint_path):
+                return []
+            restored = []
+            # Load metadata if available (supports both list and single-object formats)
+            meta_path = os.path.join(checkpoint_path, "meta.json")
+            meta_entries = []
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        raw_meta = json.load(f)
+                    if isinstance(raw_meta, list):
+                        meta_entries = raw_meta
+                    elif isinstance(raw_meta, dict):
+                        meta_entries = [raw_meta]
+                except (json.JSONDecodeError, OSError):
+                    pass
+            # Build lookup: safe_name -> original_path
+            path_lookup = {e["safe_name"]: e["original_path"] for e in meta_entries if "safe_name" in e and "original_path" in e}
+            for filename in os.listdir(checkpoint_path):
+                if filename == "meta.json":
+                    continue
+                src = os.path.join(checkpoint_path, filename)
+                if os.path.isfile(src):
+                    # Restore to original path if available, else cwd
+                    dest = path_lookup.get(filename, os.path.join(os.getcwd(), filename))
+                    # Security: normalize path to resolve any ".." traversal components
+                    dest_norm = os.path.normpath(os.path.abspath(dest))
+                    os.makedirs(os.path.dirname(dest_norm), exist_ok=True)
+                    shutil.copy2(src, dest_norm)
+                    restored.append(dest)
             self._restored_seqs.add(seq)  # L12: Mark as restored
             self._seq -= 1
-        return restored
+            return restored
 
     # -- Batch support (X2: Multi-File Checkpoint Batch) --
 

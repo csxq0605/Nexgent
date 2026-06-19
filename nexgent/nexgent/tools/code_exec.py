@@ -16,33 +16,38 @@ from ..permissions import Permission
 def execute_python(params: dict) -> str:
     code = params.get("code", "")
     timeout = params.get("timeout", 60)
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".py", delete=False, encoding="utf-8"
         ) as f:
             f.write(code)
             tmp_path = f.name
+        # Use Popen for explicit kill on timeout (subprocess.run may leave orphan)
+        proc = subprocess.Popen(
+            [sys.executable, tmp_path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+        )
         try:
-            result = subprocess.run(
-                [sys.executable, tmp_path],
-                capture_output=True, text=True, timeout=timeout,
-                encoding="utf-8", errors="replace"
-            )
-            output = (result.stdout + result.stderr).strip()
-            # No truncation here — let the registry's spill-to-disk handle large outputs
+            stdout, stderr = proc.communicate(timeout=timeout)
+            output = (stdout + stderr).strip()
             return json.dumps({
-                "exit_code": result.returncode,
+                "exit_code": proc.returncode,
                 "output": output,
             })
-        finally:
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            return json.dumps({"error": f"Code execution timed out after {timeout}s"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+    finally:
+        if tmp_path:
             try:
                 os.unlink(tmp_path)
             except OSError:
-                pass  # Windows: file may still be locked by subprocess
-    except subprocess.TimeoutExpired:
-        return json.dumps({"error": f"Code execution timed out after {timeout}s"})
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+                pass
 
 
 def get_tools() -> list[ToolDef]:

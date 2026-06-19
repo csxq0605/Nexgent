@@ -556,8 +556,7 @@ def main():
                             _new_rules.append(PermissionRule(
                                 tool_pattern=_pattern, action=_action, source="config",
                             ))
-                    harness.perms.rules.clear()
-                    harness.perms.rules.extend(_new_rules)
+                    harness.perms.rules = _new_rules
                 except Exception as e:
                     print_warning(f"Failed to reload rules: {e}")
             print_info("Config reloaded")
@@ -783,6 +782,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                     # LLM failed, fall back to snip + microcompact
                     compacted = microcompact(snip_compress(session.messages))
                 session.messages = compacted
+                session._last_saved_idx = 0  # Reset so compacted messages get persisted
                 session.compaction_count += 1
                 tokens_after = estimate_tokens(session.messages)
                 print_success(f"Done: {_format_tokens(tokens_before)} {ARROW_ICON} {_format_tokens(tokens_after)} tokens")
@@ -791,6 +791,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 print_warning(f"LLM compression failed ({e}), falling back to local compression...")
                 compacted = microcompact(snip_compress(session.messages))
                 session.messages = compacted
+                session._last_saved_idx = 0  # Reset so compacted messages get persisted
                 session.compaction_count += 1
                 tokens_after = estimate_tokens(session.messages)
                 print_success(f"Done (local): {_format_tokens(tokens_before)} {ARROW_ICON} {_format_tokens(tokens_after)} tokens")
