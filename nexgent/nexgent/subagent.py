@@ -35,9 +35,9 @@ from .logging_utils import TraceLogger
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-DEFAULT_SUBAGENT_MAX_STEPS = 0       # 0 = unlimited (like AgentHub)
-DEFAULT_SUBAGENT_MAX_DURATION = 0.0  # 0 = unlimited (like AgentHub)
-DEFAULT_SUBAGENT_MAX_TOKENS = 0      # 0 = unlimited (like AgentHub)
+DEFAULT_SUBAGENT_MAX_STEPS = 0       # 0 = unlimited (like NexgentAgent)
+DEFAULT_SUBAGENT_MAX_DURATION = 0.0  # 0 = unlimited (like NexgentAgent)
+DEFAULT_SUBAGENT_MAX_TOKENS = 0      # 0 = unlimited (like NexgentAgent)
 MAX_CONCURRENT_SUBAGENTS = 5
 
 # Warning thresholds (fraction of limit) — emit log but don't block
@@ -339,7 +339,7 @@ class SubAgent:
     # Thread-safe import cache
     _import_lock = threading.Lock()
     _imports_cached = False
-    _AgentHub = None
+    _NexgentAgent = None
     _AgentDeps = None
     _Session = None
 
@@ -361,20 +361,20 @@ class SubAgent:
             if not SubAgent._imports_cached:
                 with SubAgent._import_lock:
                     if not SubAgent._imports_cached:
-                        from .agent import AgentHub, AgentDeps
+                        from .agent import NexgentAgent, AgentDeps
                         from .context import Session
                         from .tools.file_ops import FileOpsState, set_file_ops_state
-                        SubAgent._AgentHub = AgentHub
+                        SubAgent._NexgentAgent = NexgentAgent
                         SubAgent._AgentDeps = AgentDeps
                         SubAgent._Session = Session
                         SubAgent._imports_cached = True
 
-            AgentHub = SubAgent._AgentHub
+            NexgentAgent = SubAgent._NexgentAgent
             AgentDeps = SubAgent._AgentDeps
             Session = SubAgent._Session
 
             # Create a child harness with limited capabilities
-            child_harness = AgentHub(
+            child_harness = NexgentAgent(
                 model=self.parent_harness.model if self.parent_harness else None,
                 auto_approve=self.config.auto_approve,
                 dry_run=self.parent_harness.perms.dry_run if self.parent_harness else False,
@@ -979,7 +979,7 @@ def run_parallel_tasks(
 
     Args:
         tasks: List of task descriptions
-        parent_harness: Parent AgentHub instance
+        parent_harness: Parent NexgentAgent instance
         max_concurrent: Maximum concurrent SubAgents
 
     Returns:
@@ -1001,7 +1001,7 @@ def run_pipeline_tasks(
 
     Args:
         stages: List of dicts with 'task' and optional 'description', 'allowed_tools'
-        parent_harness: Parent AgentHub instance
+        parent_harness: Parent NexgentAgent instance
 
     Returns:
         List of SubAgentResult

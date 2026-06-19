@@ -311,7 +311,7 @@ class TestSubAgent:
     def setup_method(self):
         """Reset import cache before each test."""
         SubAgent._imports_cached = False
-        SubAgent._AgentHub = None
+        SubAgent._NexgentAgent = None
         SubAgent._AgentDeps = None
         SubAgent._Session = None
 
@@ -394,7 +394,7 @@ class TestSubAgentManager:
     def setup_method(self):
         """Reset import cache before each test."""
         SubAgent._imports_cached = False
-        SubAgent._AgentHub = None
+        SubAgent._NexgentAgent = None
         SubAgent._AgentDeps = None
         SubAgent._Session = None
 
@@ -687,7 +687,7 @@ class TestSubAgentE2E:
     def setup_method(self):
         """Reset import cache before each test to ensure real API usage."""
         SubAgent._imports_cached = False
-        SubAgent._AgentHub = None
+        SubAgent._NexgentAgent = None
         SubAgent._AgentDeps = None
         SubAgent._Session = None
 

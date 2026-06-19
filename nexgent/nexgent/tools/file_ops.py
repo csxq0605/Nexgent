@@ -36,7 +36,7 @@ def set_allowed_write_dir(path: str):
 class FileOpsState:
     """Per-session tracking of read/write file state.
 
-    Each AgentHub session (including SubAgents) gets its own isolated
+    Each NexgentAgent session (including SubAgents) gets its own isolated
     state, preventing one SubAgent's reads from being visible to another.
     """
     read_files: set = field(default_factory=set)

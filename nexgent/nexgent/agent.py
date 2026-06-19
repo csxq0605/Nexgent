@@ -239,7 +239,7 @@ def retry_with_backoff(fn, max_retries: int = 3, base_delay: float = 1.0):
 # ---------------------------------------------------------------------------
 # Main Agent Harness
 # ---------------------------------------------------------------------------
-class AgentHub:
+class NexgentAgent:
     """Production-grade agent harness following Claude Code architecture.
 
     Key patterns from the book:
@@ -813,6 +813,13 @@ You help users with coding, file operations, web research, document creation, an
         # session/SubAgent has isolated read/write tracking
         self._file_ops_state = FileOpsState()
         set_file_ops_state(self._file_ops_state)
+
+        # Dry-run: skip LLM call, memory injection, and API key check entirely
+        if self.perms.dry_run:
+            self._last_session = session
+            self._last_steps = 0
+            self.logger.trace("task_start", {"task": task[:200], "session": self.logger.session_id, "dry_run": True})
+            return f"[DRY-RUN] Task received: {task[:200]}\nNo LLM call made, no tools executed."
 
         api_key = require_api_key()
         client = self.deps.llm_client_factory(

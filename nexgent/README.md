@@ -103,7 +103,7 @@ nexgent --output-format stream-json      # 流式 JSON 输出
 
 ```
 nexgent/
-├── agent.py              # 核心循环（AgentHub、AgentDeps、CircuitBreaker、TokenBudget）
+├── agent.py              # 核心循环（NexgentAgent、AgentDeps、CircuitBreaker、TokenBudget）
 ├── cli.py                # REPL 入口、斜杠命令处理
 ├── context.py            # 会话管理 + 渐进压缩
 ├── permissions.py        # 4 阶段权限管线
@@ -162,9 +162,9 @@ python run_tests.py --all                                 # 全部
 ## Python API
 
 ```python
-from nexgent import AgentHub, Session
+from nexgent import NexgentAgent, Session
 
-harness = AgentHub(model="mimo-v2.5-pro", auto_approve=True)
+harness = NexgentAgent(model="mimo-v2.5-pro", auto_approve=True)
 session = Session(session_id="test")
 result = harness.run("What is 2+2?", session=session)
 

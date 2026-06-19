@@ -22,7 +22,7 @@ import threading
 import json
 import subprocess
 import time
-from .agent import AgentHub
+from .agent import NexgentAgent
 from .config import MIMO_API_KEY, MIMO_MODEL
 from .permissions import PermissionRule
 from .context import Session, CheckpointManager, estimate_tokens, compact_context, cleanup_old_sessions, cleanup_old_spill_files, CONTEXT_WINDOW_TOKENS, LoadResult, _CORRUPT_THRESHOLD
@@ -305,7 +305,7 @@ def main():
     else:
         stream_enabled = config.get("stream", True)
 
-    harness = AgentHub(
+    harness = NexgentAgent(
         model=args.model or config.get("model"),
         auto_approve=args.auto_approve or config.get("auto_approve", False),
         dry_run=args.dry_run or config.get("dry_run", False),
@@ -397,6 +397,14 @@ def main():
         session.auto_save_dir = session_dir
         if args.name:
             session.name = args.name
+
+    # Validate: --task provided but empty/whitespace (before building task)
+    if args.task is not None and not args.task.strip():
+        if not stdin_content:
+            print_error("--task requires a non-empty value")
+            sys.exit(2)
+        # stdin is present — treat whitespace-only --task as absent
+        args.task = None
 
     # Build task from stdin and/or --task
     task = None

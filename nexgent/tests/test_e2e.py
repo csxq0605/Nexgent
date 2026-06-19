@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from nexgent.agent import AgentHub
+from nexgent.agent import NexgentAgent
 from nexgent.context import Session
 from nexgent.tools import file_ops
 
@@ -69,7 +69,7 @@ def _harness(auto_approve=True, max_steps=10, max_duration=120.0):
     """
     # Ensure allowed_write_dir is current CWD (may have been changed by previous tests)
     file_ops.set_allowed_write_dir(os.getcwd())
-    return AgentHub(auto_approve=auto_approve, bare=True, max_steps=max_steps, max_duration=max_duration)
+    return NexgentAgent(auto_approve=auto_approve, bare=True, max_steps=max_steps, max_duration=max_duration)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -271,7 +271,7 @@ class TestE2EMultiStep:
         target = os.path.join(work_dir, "calc.py")
 
         # Use longer max_duration — execute_python API calls can be slow
-        harness = AgentHub(auto_approve=True, bare=True, max_steps=15, max_duration=180.0)
+        harness = NexgentAgent(auto_approve=True, bare=True, max_steps=15, max_duration=180.0)
         file_ops.set_allowed_write_dir(os.getcwd())
         result = harness.run(
             f"Create a Python script at {target} that calculates and prints "

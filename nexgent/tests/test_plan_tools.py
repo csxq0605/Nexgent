@@ -65,8 +65,8 @@ class TestHandlePlanApproval:
         monkeypatch.setenv("MIMO_API_KEY", "test-key")
         monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
         monkeypatch.setenv("MIMO_MODEL", "test-model")
-        from nexgent.agent import AgentHub
-        return AgentHub(auto_approve=False)
+        from nexgent.agent import NexgentAgent
+        return NexgentAgent(auto_approve=False)
 
     def test_approve(self, monkeypatch):
         harness = self._make_harness(monkeypatch)
@@ -92,8 +92,8 @@ class TestHandlePlanApproval:
         monkeypatch.setenv("MIMO_API_KEY", "test-key")
         monkeypatch.setenv("MIMO_BASE_URL", "http://test.com")
         monkeypatch.setenv("MIMO_MODEL", "test-model")
-        from nexgent.agent import AgentHub
-        harness = AgentHub(auto_approve=True)
+        from nexgent.agent import NexgentAgent
+        harness = NexgentAgent(auto_approve=True)
         result = json.loads(harness._handle_plan_approval({"plan": "do X"}))
         assert result["decision"] == "approved"
 

@@ -12,7 +12,7 @@ Architecture follows Claude Code patterns:
 
 __version__ = "0.4.0"
 
-from .agent import AgentHub, AgentDeps, CircuitBreaker, TokenBudget
+from .agent import NexgentAgent, AgentDeps, CircuitBreaker, TokenBudget
 from .permissions import PermissionGate, Permission, PermissionMode, PermissionRule
 from .context import Session, compact_context, load_memory
 from .hooks import HookRunner, HookConfig, HookEvent, HookResult, HookDecision
@@ -31,7 +31,7 @@ from .subagent import (
 )
 
 __all__ = [
-    "AgentHub",
+    "NexgentAgent",
     "AgentDeps",
     "CircuitBreaker",
     "TokenBudget",
