@@ -123,7 +123,8 @@ def _read_single_file(path: str, offset: int = 0, limit: int = 2000) -> str:
         selected = lines[offset:offset + limit]
         numbered = [f"{i+offset+1}\t{l}" for i, l in enumerate(selected)]
         # Track that this file has been read (session-scoped)
-        abs_path = os.path.abspath(path)
+        # Use realpath to be consistent with write_file/edit_file
+        abs_path = os.path.realpath(path)
         state = get_file_ops_state()
         state.mark_read(abs_path)
         return json.dumps({

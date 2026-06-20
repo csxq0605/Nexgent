@@ -110,6 +110,11 @@ class MemoryStore:
         filename = f"{safe_name}.md"
         filepath = os.path.join(self.memory_dir, filename)
 
+        # Defense-in-depth: validate path is within memory directory
+        err = self._validate_path(filepath)
+        if err:
+            raise ValueError(err)
+
         # Build frontmatter content (Ch6: YAML frontmatter format)
         # L4: Escape YAML special characters in name and description
         file_content = f"""---

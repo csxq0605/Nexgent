@@ -12,8 +12,10 @@ class TraceLogger:
         self.step = 0
         self.logger = logging.getLogger("nexgent")
         self.logger.setLevel(logging.DEBUG)
-        if not self.logger.handlers:
-            if log_file:
+        # Add file handler if requested and not already present
+        if log_file:
+            has_file_handler = any(isinstance(h, logging.FileHandler) for h in self.logger.handlers)
+            if not has_file_handler:
                 log_dir = os.path.dirname(log_file)
                 if log_dir:
                     os.makedirs(log_dir, exist_ok=True)
@@ -21,6 +23,8 @@ class TraceLogger:
                 fh.setLevel(logging.DEBUG)
                 fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
                 self.logger.addHandler(fh)
+        # Add console handler if not already present
+        if not self.logger.handlers:
             ch = logging.StreamHandler()
             ch.setLevel(logging.DEBUG if verbose else logging.INFO)
             ch.setFormatter(logging.Formatter("%(message)s"))

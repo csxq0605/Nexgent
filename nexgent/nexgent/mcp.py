@@ -429,7 +429,11 @@ class MCPConnection:
         # Check if it's a Content-Length header
         if first_line_str.lower().startswith('content-length:'):
             self._use_content_length_header = True
-            content_length = int(first_line_str.split(':', 1)[1].strip())
+            try:
+                content_length = int(first_line_str.split(':', 1)[1].strip())
+            except ValueError:
+                logging.getLogger(__name__).warning("MCP: malformed Content-Length header: %s", first_line_str)
+                return None
 
             # Read remaining headers until empty line
             while True:

@@ -117,12 +117,12 @@ _HARD_DENY_PATTERNS = [
     (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+/(?:\s|\.|/|\)|$)', re.IGNORECASE), "rm -rf / destroys the filesystem"),
     (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+~', re.IGNORECASE), "rm -rf ~ destroys home directory"),
     (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+\*', re.IGNORECASE), "rm -rf * destroys all files"),
-    (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+\.', re.IGNORECASE), "rm -rf . destroys current directory"),
+    (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+\.(?:\s|/|$)', re.IGNORECASE), "rm -rf . destroys current directory"),
     # Separate short flags: rm -r -f /, rm -f -r /, etc.
     (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+/(?:\s|\.|/|\)|$)', re.IGNORECASE), "rm -r -f / destroys the filesystem"),
     (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+~', re.IGNORECASE), "rm -r -f ~ destroys home directory"),
     (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+\*', re.IGNORECASE), "rm -r -f * destroys all files"),
-    (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+\.', re.IGNORECASE), "rm -r -f . destroys current directory"),
+    (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+\.(?:\s|/|$)', re.IGNORECASE), "rm -r -f . destroys current directory"),
     # Long flag forms and mixed short/long forms
     (re.compile(r'\brm\s+.*--recursive\s+.*--force\s+', re.IGNORECASE), "rm --recursive --force is dangerous"),
     (re.compile(r'\brm\s+.*--force\s+.*--recursive\s+', re.IGNORECASE), "rm --force --recursive is dangerous"),

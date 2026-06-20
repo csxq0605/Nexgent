@@ -390,14 +390,14 @@ def print_tool_call_result(
             preview = result_preview[:200].replace("\n", " ")
             if len(result_preview) > 200:
                 preview += "..."
-            _console.print(f"    [dim]{preview}[/dim]", highlight=False)
+            _console.print(f"    [dim]{_escape_markup(preview)}[/dim]", highlight=False)
     else:
         status = f"[red]{CROSS_ICON}[/red]"
         time_str = f"[dim]({duration:.1f}s)[/dim]"
         _console.print(f"  {status} {tool_name} {time_str}", highlight=False)
         if error:
             error_preview = error[:200].replace("\n", " ")
-            _console.print(f"    [red]{error_preview}[/red]", highlight=False)
+            _console.print(f"    [red]{_escape_markup(error_preview)}[/red]", highlight=False)
 
 
 def print_streaming_token(token: str):
@@ -566,7 +566,7 @@ def _format_tool_args(tool_name: str, args: dict) -> str:
     args_preview = json.dumps(args, ensure_ascii=False)
     if len(args_preview) > 80:
         args_preview = args_preview[:77] + "..."
-    return f" [dim]{ARROW_ICON}[/dim] [dim]{args_preview}[/dim]"
+    return f" [dim]{ARROW_ICON}[/dim] [dim]{_escape_markup(args_preview)}[/dim]"
 
 
 def _format_tokens(tokens: int) -> str:

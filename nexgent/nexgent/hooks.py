@@ -193,12 +193,16 @@ class HookRunner:
     ) -> HookResult:
         """Execute a single command hook with timeout."""
         # Build hook input (Ch8: structured JSON input)
-        hook_input = json.dumps({
-            "event": config.event.value,
-            "tool_name": tool_name,
-            "tool_input": tool_input or {},
-            "tool_result": tool_result[:15000],  # Truncate for hook input
-        }, ensure_ascii=False)
+        try:
+            hook_input = json.dumps({
+                "event": config.event.value,
+                "tool_name": tool_name,
+                "tool_input": tool_input or {},
+                "tool_result": tool_result[:15000],  # Truncate for hook input
+            }, ensure_ascii=False)
+        except (TypeError, ValueError) as e:
+            # Non-serializable objects in tool_input — skip hook
+            return HookResult(decision=HookDecision.APPROVE, reason=f"Hook input serialization failed: {e}")
 
         try:
             # Ch8: command hooks execute via subprocess
