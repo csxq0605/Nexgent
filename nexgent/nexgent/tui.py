@@ -151,8 +151,10 @@ class MiMoTUI(App):
         # ResourceMonitor warnings pending display (thread-safe queue)
         self._monitor_warning_queue: queue.Queue[str] = queue.Queue()
         self._default_placeholder = "Type a message or /help..."
-        # Input history
-        self._history: list[str] = []
+        # Input history (persistent across sessions)
+        from .input_utils import get_shared_history
+        self._persistent_history = get_shared_history()
+        self._history: list[str] = self._persistent_history.get_entries()
         self._history_idx = -1  # -1 = current (not browsing)
         self._saved_input = ""  # saved current input when browsing history
         # Tab completion state
@@ -394,9 +396,10 @@ class MiMoTUI(App):
         text = event.value.strip()
         event.input.clear()
 
-        # Save to history
+        # Save to history (persistent across sessions)
         if text:
-            self._history.append(text)
+            self._persistent_history.append(text)
+            self._history = self._persistent_history.get_entries()
         self._history_idx = -1
         self._saved_input = ""
         self._tab_matches = []
@@ -929,10 +932,10 @@ class MiMoTUI(App):
             try:
                 input_widget = self.query_one("#input-area", Input)
                 if input_widget.value:
-                    # Clear input draft and save to history
+                    # Clear input draft and save to history (persistent)
                     draft = input_widget.value
-                    if draft not in self._history:
-                        self._history.append(draft)
+                    self._persistent_history.append(draft)
+                    self._history = self._persistent_history.get_entries()
                     input_widget.value = ""
                     self.write_output("[dim]Input cleared (saved to history)[/dim]")
                 # If input is empty, ESC is a no-op (don't quit)
