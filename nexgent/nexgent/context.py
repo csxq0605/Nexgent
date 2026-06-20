@@ -81,12 +81,17 @@ class Session:
         """Append unsaved messages as JSONL lines (must hold lock)."""
         if not self.auto_save_dir or not self.messages:
             return
-        os.makedirs(self.auto_save_dir, exist_ok=True)
-        path = os.path.join(self.auto_save_dir, f"{self.session_id}.jsonl")
-        with open(path, "a", encoding="utf-8") as f:
-            for i in range(self._last_saved_idx, len(self.messages)):
-                f.write(json.dumps(self.messages[i], ensure_ascii=False) + "\n")
-        self._last_saved_idx = len(self.messages)
+        try:
+            os.makedirs(self.auto_save_dir, exist_ok=True)
+            path = os.path.join(self.auto_save_dir, f"{self.session_id}.jsonl")
+            with open(path, "a", encoding="utf-8") as f:
+                for i in range(self._last_saved_idx, len(self.messages)):
+                    f.write(json.dumps(self.messages[i], ensure_ascii=False) + "\n")
+            self._last_saved_idx = len(self.messages)
+        except OSError as e:
+            # Disk full or permission error — log but don't crash the agent loop.
+            # Messages remain in memory; next successful save will catch up.
+            logging.getLogger(__name__).warning("Auto-save failed (will retry): %s", e)
 
     def auto_save(self):
         """Append unsaved messages as JSONL lines to the session file."""
@@ -649,10 +654,13 @@ def compact_context(
                     compaction_failures = 0
                 compaction_attempts += 1
                 return llm_result, compaction_attempts, compaction_failures, False, True
+            # LLM compression failed — return Level 2 (microcompact) result
+            # rather than jumping to aggressive Level 4 truncation.
             compaction_failures += 1
             compaction_attempts += 1
+            return _filter_orphan_tool_results(result), compaction_attempts, compaction_failures, False, True
 
-        # Level 4: Truncation fallback — last 15 messages
+        # Level 4: Truncation fallback — last 15 messages (only when no LLM client at all)
         result = []
         result.append({
             "role": "system",

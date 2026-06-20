@@ -204,6 +204,9 @@ class PluginManager:
                     module.init()
                 except Exception as e:
                     self.logger.error(f"Plugin {manifest.name} init() failed: {e}")
+                    plugin.error = f"init() failed: {e}"
+                    plugin.loaded = False
+                    return plugin
 
             plugin.loaded = True
 

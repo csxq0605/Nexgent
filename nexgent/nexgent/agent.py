@@ -1124,6 +1124,16 @@ You help users with coding, file operations, web research, document creation, an
                     msg_dict = message.model_dump()
                 except Exception:
                     self.logger.error("[MODEL_ERROR] Failed to serialize response")
+                    # Inform the LLM that tool dispatch failed, so it can recover
+                    # instead of retrying the same tool call indefinitely.
+                    if hasattr(message, 'tool_calls') and message.tool_calls:
+                        for tc in message.tool_calls:
+                            tc_id = getattr(tc, 'id', None) or getattr(tc, 'id', 'unknown')
+                            session.add_message(
+                                "tool",
+                                json.dumps({"error": "Tool dispatch failed (serialization error). Please retry or use a different approach."}),
+                                tool_call_id=tc_id,
+                            )
                     self.circuit_breaker.record_failure()
                     continue
                 if msg_dict.get("content") is None:

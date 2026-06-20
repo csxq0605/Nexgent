@@ -511,41 +511,42 @@ class MCPConnection:
 
     def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         """Call a tool on the server."""
-        # Use local references to avoid race with disconnect()
+        # Hold lock for the entire send/receive cycle to prevent
+        # concurrent requests from interleaving on the shared stdin/stdout pipes.
         with self._lock:
             if self.server.status != MCPServerStatus.CONNECTED:
                 return {'error': f"Server {self.config.name} is not connected"}
             process = self.server.process
             tools = dict(self.server.tools)
-        if not process:
-            return {'error': f"Server {self.config.name} process not running"}
+            if not process:
+                return {'error': f"Server {self.config.name} process not running"}
 
-        if tool_name not in tools:
-            return {'error': f"Tool {tool_name} not found on server {self.config.name}"}
+            if tool_name not in tools:
+                return {'error': f"Tool {tool_name} not found on server {self.config.name}"}
 
-        try:
-            request = {
-                'jsonrpc': '2.0',
-                'id': str(uuid.uuid4()),
-                'method': 'tools/call',
-                'params': {
-                    'name': tool_name,
-                    'arguments': arguments,
-                },
-            }
+            try:
+                request = {
+                    'jsonrpc': '2.0',
+                    'id': str(uuid.uuid4()),
+                    'method': 'tools/call',
+                    'params': {
+                        'name': tool_name,
+                        'arguments': arguments,
+                    },
+                }
 
-            self._send_message(request)
-            response = self._receive_message()
+                self._send_message(request)
+                response = self._receive_message()
 
-            if response and 'result' in response:
-                return response['result']
-            elif response and 'error' in response:
-                return {'error': response['error']}
-            else:
-                return {'error': 'No response from server'}
+                if response and 'result' in response:
+                    return response['result']
+                elif response and 'error' in response:
+                    return {'error': response['error']}
+                else:
+                    return {'error': 'No response from server'}
 
-        except Exception as e:
-            return {'error': f"Tool call failed: {e}"}
+            except Exception as e:
+                return {'error': f"Tool call failed: {e}"}
 
     def disconnect(self):
         """Disconnect from the server."""

@@ -59,7 +59,7 @@ def work_dir(tmp_path):
     finally:
         # Restore allowed_write_dir to CWD after test
         file_ops.set_allowed_write_dir(os.getcwd())
-        shutil.rmtree(test_dir, ignore_errors=True)
+        shutil.rmtree(str(tmp_path), ignore_errors=True)
 
 
 def _harness(auto_approve=True, max_steps=10, max_duration=120.0):
