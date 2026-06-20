@@ -320,12 +320,6 @@ def lsp_definition(params: dict) -> str:
     if not file_path:
         return json.dumps({"error": "No file_path provided"})
 
-    # Validate path is within allowed directory
-    from .file_ops import _validate_read_path
-    err = _validate_read_path(file_path)
-    if err:
-        return json.dumps({"error": err})
-
     if not os.path.exists(file_path):
         return json.dumps({"error": f"File not found: {file_path}"})
 
@@ -369,12 +363,6 @@ def lsp_references(params: dict) -> str:
     if not file_path:
         return json.dumps({"error": "No file_path provided"})
 
-    # Validate path is within allowed directory
-    from .file_ops import _validate_read_path
-    err = _validate_read_path(file_path)
-    if err:
-        return json.dumps({"error": err})
-
     if not os.path.exists(file_path):
         return json.dumps({"error": f"File not found: {file_path}"})
 
@@ -413,12 +401,6 @@ def lsp_diagnostics(params: dict) -> str:
 
     if not file_path:
         return json.dumps({"error": "No file_path provided"})
-
-    # Validate path is within allowed directory
-    from .file_ops import _validate_read_path
-    err = _validate_read_path(file_path)
-    if err:
-        return json.dumps({"error": err})
 
     if not os.path.exists(file_path):
         return json.dumps({"error": f"File not found: {file_path}"})
