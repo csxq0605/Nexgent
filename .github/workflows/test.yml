@@ -46,10 +46,9 @@ jobs:
       run: |
         playwright install chromium --with-deps
 
-    - name: Run nexgent unit tests
+    - name: Run nexgent tests
       run: |
         python -m pytest nexgent/tests/ \
-          --ignore=nexgent/tests/test_e2e.py \
           -v --tb=short
 
     - name: Run stage unit tests
@@ -65,7 +64,6 @@ jobs:
       if: matrix.python-version == '3.12'
       run: |
         python -m pytest nexgent/tests/ \
-          --ignore=nexgent/tests/test_e2e.py \
           --cov=nexgent \
           --cov-report=xml \
           --cov-report=term-missing
