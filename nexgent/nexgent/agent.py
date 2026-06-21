@@ -15,7 +15,6 @@ import secrets
 import platform
 import queue
 import threading
-import contextvars
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
@@ -488,6 +487,13 @@ You help users with coding, file operations, web research, document creation, an
 
         Returns the tool result string.
         """
+        # Ensure FileOpsState is set in this thread's context.
+        # This is necessary because ThreadPoolExecutor worker threads
+        # don't inherit the parent thread's ContextVar values (Python <3.12),
+        # and ctx.run() can't be used in nested parallel calls.
+        if hasattr(self, '_file_ops_state'):
+            set_file_ops_state(self._file_ops_state)
+
         self.logger.trace("tool_call", {"name": func_name, "args": func_args})
 
         # Report malformed arguments back to LLM instead of executing with empty dict
@@ -1196,26 +1202,11 @@ You help users with coding, file operations, web research, document creation, an
                     status_bar.set_executing(func_name)
 
                 if safe_calls:
-                    # Copy current context so FileOpsState and other ContextVars
-                    # are propagated to worker threads (Python <3.11 compat).
-                    # Fall back to direct submission if context is already entered
-                    # (e.g. nested parallel calls).
-                    try:
-                        ctx = contextvars.copy_context()
-                        use_ctx = True
-                    except RuntimeError:
-                        use_ctx = False
                     with ThreadPoolExecutor(max_workers=min(len(safe_calls), 8)) as executor:
-                        if use_ctx:
-                            futures = [
-                                executor.submit(ctx.run, self._handle_tool_call, fn, fa, tc.id, session)
-                                for tc, fn, fa in safe_calls
-                            ]
-                        else:
-                            futures = [
-                                executor.submit(self._handle_tool_call, fn, fa, tc.id, session)
-                                for tc, fn, fa in safe_calls
-                            ]
+                        futures = [
+                            executor.submit(self._handle_tool_call, fn, fa, tc.id, session)
+                            for tc, fn, fa in safe_calls
+                        ]
                         for (tc, func_name, _), future in zip(safe_calls, futures):
                             tool_start = time.time()
                             try:
