@@ -781,7 +781,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 if compacted is None:
                     # LLM failed, fall back to snip + microcompact
                     compacted = microcompact(snip_compress(session.messages))
-                session.messages = compacted
+                session.replace_messages(compacted)
                 session._last_saved_idx = 0  # Reset so compacted messages get persisted
                 # Truncate JSONL file so compacted state persists on resume
                 if session.auto_save_dir:
@@ -798,7 +798,7 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 # No API available, use snip + microcompact
                 print_warning(f"LLM compression failed ({e}), falling back to local compression...")
                 compacted = microcompact(snip_compress(session.messages))
-                session.messages = compacted
+                session.replace_messages(compacted)
                 session._last_saved_idx = 0  # Reset so compacted messages get persisted
                 # Truncate JSONL file so compacted state persists on resume
                 if session.auto_save_dir:
@@ -1010,11 +1010,19 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
             i = 3
             while i < len(cmd):
                 if cmd[i] == "--budget" and i + 1 < len(cmd):
-                    budget = int(cmd[i + 1])
+                    try:
+                        budget = int(cmd[i + 1])
+                    except ValueError:
+                        print_error(f"Invalid --budget value: {cmd[i + 1]}")
+                        return
                     i += 2
                 elif cmd[i] == "--args" and i + 1 < len(cmd):
                     import json as _json
-                    args = _json.loads(cmd[i + 1])
+                    try:
+                        args = _json.loads(cmd[i + 1])
+                    except _json.JSONDecodeError as e:
+                        print_error(f"Invalid --args JSON: {e}")
+                        return
                     i += 2
                 else:
                     i += 1
@@ -1024,8 +1032,13 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 print()
                 return "continue", session
 
-            with open(script_path, "r", encoding="utf-8") as f:
-                script_source = f.read()
+            try:
+                with open(script_path, "r", encoding="utf-8") as f:
+                    script_source = f.read()
+            except (OSError, PermissionError) as e:
+                print_error(f"Cannot read script file: {e}")
+                print()
+                return "continue", session
 
             print_info(f"Running workflow: {script_path}")
             if budget:

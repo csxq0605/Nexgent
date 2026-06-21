@@ -362,8 +362,10 @@ def grep_files(params: dict) -> str:
                             # content mode (or default legacy behavior)
                             if only_matching:
                                 match_text = m.group(0)[:500]
-                            else:
+                            elif 1 <= line_num <= len(lines):
                                 match_text = lines[line_num - 1].rstrip()[:500]
+                            else:
+                                match_text = m.group(0)[:500]  # fallback for out-of-bounds
                             entry: dict = {"file": fpath}
                             if show_line_numbers:
                                 entry["line"] = line_num

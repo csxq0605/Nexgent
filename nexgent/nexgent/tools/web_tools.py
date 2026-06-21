@@ -277,6 +277,22 @@ def web_fetch(params: dict) -> str:
         try:
             resp.raise_for_status()
 
+            # SSRF defense: check final URL after redirects
+            final_url = str(resp.url)
+            if final_url != url:
+                final_parsed = urlparse(final_url)
+                final_hostname = final_parsed.hostname or ""
+                if final_hostname:
+                    try:
+                        final_resolved = socket.getaddrinfo(final_hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                        for _, _, _, _, sockaddr in final_resolved:
+                            final_ip = ipaddress.ip_address(sockaddr[0])
+                            if final_ip.is_private or final_ip.is_loopback or final_ip.is_link_local or final_ip.is_reserved:
+                                resp.close()
+                                return json.dumps({"error": f"SSRF: redirect to '{final_url}' resolves to restricted IP '{final_ip}'"})
+                    except (socket.gaierror, OSError, ValueError):
+                        pass
+
             # Post-request DNS re-check: verify IPs didn't change (DNS rebinding detection)
             if pre_ips and hostname:
                 try:

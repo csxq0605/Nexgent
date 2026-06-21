@@ -77,6 +77,11 @@ class Session:
         with self._lock:
             return list(self.messages)
 
+    def replace_messages(self, new_messages: list):
+        """Replace all messages atomically (thread-safe)."""
+        with self._lock:
+            self.messages = new_messages
+
     def _auto_save_unlocked(self):
         """Append unsaved messages as JSONL lines (must hold lock)."""
         if not self.auto_save_dir or not self.messages:
@@ -552,13 +557,13 @@ def _filter_orphan_tool_results(messages: list) -> list:
                 new_msg = dict(msg)
                 new_msg["tool_calls"] = filtered_tcs
                 result.append(new_msg)
-            elif msg.get("content"):
-                # Keep assistant message with content but remove tool_calls entirely
-                # (empty tool_calls array is rejected by some API providers)
+            elif msg.get("content") or msg.get("reasoning_content"):
+                # Keep assistant message with content or reasoning_content
+                # but remove orphaned tool_calls (empty array rejected by some providers)
                 new_msg = dict(msg)
                 new_msg.pop("tool_calls", None)
                 result.append(new_msg)
-            # else: assistant message with only orphaned tool_calls and no content, skip
+            # else: assistant message with only orphaned tool_calls and no content/reasoning, skip
         else:
             result.append(msg)
     return result

@@ -536,14 +536,25 @@ class MCPConnection:
                 }
 
                 self._send_message(request)
-                response = self._receive_message()
 
-                if response and 'result' in response:
-                    return response['result']
-                elif response and 'error' in response:
-                    return {'error': response['error']}
-                else:
-                    return {'error': 'No response from server'}
+                # Read response, skipping notifications (messages without 'id')
+                import time
+                for _ in range(10):
+                    response = self._receive_message()
+                    if not response:
+                        time.sleep(0.5)
+                        continue
+                    # Skip notifications (no 'id' field)
+                    if 'id' not in response:
+                        continue
+                    # This is the response to our tools/call request
+                    if 'result' in response:
+                        return response['result']
+                    elif 'error' in response:
+                        return {'error': response['error']}
+                    else:
+                        return {'error': 'No response from server'}
+                return {'error': 'No response from server (timeout waiting for response)'}
 
             except Exception as e:
                 return {'error': f"Tool call failed: {e}"}
