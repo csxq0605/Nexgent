@@ -119,6 +119,9 @@ class MiMoTUI(App):
     }
     """
 
+    # Mode cycling order for Shift+Tab (string-based to avoid import issues)
+    _MODE_CYCLE = ["default", "plan", "auto"]
+
     BINDINGS = [
         Binding("ctrl+c", "abort", "Abort", show=False, priority=True),
         Binding("ctrl+k", "force_kill", "Force Kill", show=False, priority=True),
@@ -126,6 +129,7 @@ class MiMoTUI(App):
         Binding("up", "history_up", "History Up", show=False),
         Binding("down", "history_down", "History Down", show=False),
         Binding("tab", "tab_complete", "Tab Complete", show=False, priority=True),
+        Binding("shift+tab", "cycle_mode", "Cycle Mode", show=False, priority=True),
     ]
 
     # All slash commands for tab completion
@@ -199,6 +203,18 @@ class MiMoTUI(App):
 
     def on_unmount(self) -> None:
         _set_tui_app(None)
+
+    def on_mouse_up(self, event) -> None:
+        """Left-click release: auto-copy selected text to clipboard."""
+        if event.button != 0:
+            return
+        try:
+            selected_text = self.screen.get_selected_text()
+            if selected_text and selected_text.strip():
+                self.copy_to_clipboard(selected_text)
+                self.write_output("[dim]Copied to clipboard[/dim]")
+        except Exception as exc:
+            logging.debug("Auto-copy failed: %s", exc)
 
     # ── Output Queue Drain (main thread timer) ─────────────────
 
@@ -344,9 +360,23 @@ class MiMoTUI(App):
                 subagent_info = f"  [dim]|[/dim]  [dim]SubAgents[/dim] {' '.join(parts)}"
         except Exception:
             pass
+        # Mode display with color coding
+        mode = self.harness.perms.mode.value
+        mode_colors = {
+            "default": "green",
+            "plan": "yellow",
+            "auto": "cyan",
+            "bypass": "red",
+            "accept_edits": "blue",
+            "dont_ask": "magenta",
+        }
+        mode_color = mode_colors.get(mode, "white")
+        mode_str = f"[{mode_color}]{mode}[/{mode_color}]"
+
         status = self.query_one("#status-bar", Static)
         status.update(
             f"  [dim]Session[/dim] {self.session.session_id[:8]}  "
+            f"[dim]|[/dim]  [dim]Mode[/dim] {mode_str}  "
             f"[dim]|[/dim]  [dim]Tokens[/dim] {token_str}/{max_str}  "
             f"[dim]|[/dim]  [dim]Msgs[/dim] {msgs}"
             f"{queue_info}{subagent_info}"
@@ -1046,6 +1076,22 @@ class MiMoTUI(App):
 
     def action_quit(self) -> None:
         self._save_and_exit()
+
+    # ── Mode Cycling (Shift+Tab) ────────────────────────────────
+
+    def action_cycle_mode(self) -> None:
+        """Cycle through permission modes: default → plan → auto → default."""
+        from .permissions import PermissionMode
+        current = self.harness.perms.mode.value
+        try:
+            idx = self._MODE_CYCLE.index(current)
+            next_idx = (idx + 1) % len(self._MODE_CYCLE)
+        except ValueError:
+            next_idx = 0
+        new_mode_name = self._MODE_CYCLE[next_idx]
+        self.harness.perms.mode = PermissionMode(new_mode_name)
+        self.write_output(f"[bold]Mode:[/bold] [cyan]{new_mode_name}[/cyan]")
+        self._update_status_bar()
 
     # ── History Navigation ──────────────────────────────────────
 
