@@ -631,7 +631,7 @@ def print_help():
         ("/load <path>", "Load session from file"),
         ("/tools", "List available tools"),
         ("/effort <level>", "Set effort: low/medium/high"),
-        ("/mode <mode>", "Set mode: default/plan"),
+        ("Shift+Tab", "Cycle mode: default/plan/auto"),
         ("/dry-run", "Toggle dry-run mode"),
         ("/auto", "Toggle auto-approve mode"),
         ("/plan", "Toggle plan mode (read-only)"),

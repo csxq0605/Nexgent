@@ -1365,24 +1365,6 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 _safe_print(f"  {marker} {_yellow(level)}")
             print(f"\n  {_dim('Usage: /effort <low|medium|high>')}")
         print()
-    elif cmd[0] == "/mode":
-        from .permissions import PermissionMode
-        modes = {
-            "default": PermissionMode.DEFAULT,
-            "plan": PermissionMode.PLAN,
-        }
-        current = harness.perms.mode.value
-        if len(cmd) > 1 and cmd[1] in modes:
-            harness.perms.mode = modes[cmd[1]]
-            print_success(f"Mode: {cmd[1]}")
-        else:
-            print(f"\n  {_bold('Permission Mode')}  {_dim(f'(current: {current})')}")
-            for name, mode in modes.items():
-                marker = _green(CHECK_ICON) if name == current else "  "
-                desc = "read-only" if name == "plan" else "read+write"
-                _safe_print(f"  {marker} {_yellow(name)} {_dim(f'({desc})')}")
-            print(f"\n  {_dim('Usage: /mode <default|plan>')}")
-        print()
     elif cmd[0] == "/skills":
         from .skills import SkillManager
         if len(cmd) > 1 and cmd[1] == "install":

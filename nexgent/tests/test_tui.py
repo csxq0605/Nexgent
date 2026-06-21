@@ -177,7 +177,6 @@ class TestTUIClass:
         assert "/help" in MiMoTUI.COMMANDS
         assert "/quit" in MiMoTUI.COMMANDS
         assert "/effort" in MiMoTUI.COMMANDS
-        assert "/mode" in MiMoTUI.COMMANDS
 
     def test_has_bindings(self):
         from nexgent.tui import MiMoTUI

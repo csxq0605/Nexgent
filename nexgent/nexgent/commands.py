@@ -11,7 +11,7 @@ SLASH_COMMANDS = [
     "/save", "/load", "/dry-run", "/auto", "/plan", "/abort",
     "/memory", "/remember", "/hooks", "/stats", "/tokens",
     "/compact", "/context", "/init", "/init-config", "/rewind", "/fork",
-    "/effort", "/mode",
+    "/effort",
     # SubAgent commands
     "/subagents", "/subagent", "/parallel", "/pipeline",
     # Agent management
