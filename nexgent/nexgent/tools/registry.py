@@ -118,6 +118,8 @@ class ToolRegistry:
                     return f"Parameter '{key}' must be an integer"
                 if expected_type == "number" and not isinstance(value, (int, float)):
                     return f"Parameter '{key}' must be a number"
+                if expected_type == "array" and not isinstance(value, list):
+                    return f"Parameter '{key}' must be an array"
                 # D6: Validate enum constraints
                 if "enum" in prop and value not in prop["enum"]:
                     return f"Parameter '{key}' must be one of {prop['enum']}"

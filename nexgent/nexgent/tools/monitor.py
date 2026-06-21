@@ -100,6 +100,13 @@ class MonitorJob:
         except Exception as e:
             if not self._stop_event.is_set():
                 self.status = f"error: {e}"
+        finally:
+            # Close stdout pipe to prevent FD leak
+            if self.process and self.process.stdout:
+                try:
+                    self.process.stdout.close()
+                except Exception:
+                    pass
 
     def stop(self):
         """Stop the monitor and terminate the process."""

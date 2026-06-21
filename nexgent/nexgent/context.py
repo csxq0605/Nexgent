@@ -244,6 +244,8 @@ class CheckpointManager:
         with self._lock:
             self._seq += 1
             seq = self._seq
+            # Clear restored marker for this seq (allows re-restore after new snapshot)
+            self._restored_seqs.discard(seq)
         dest_dir = os.path.join(self.checkpoint_dir, str(seq))
         os.makedirs(dest_dir, exist_ok=True)
         # H3: Use sanitized relative path to avoid cross-directory collisions
@@ -551,9 +553,10 @@ def _filter_orphan_tool_results(messages: list) -> list:
                 new_msg["tool_calls"] = filtered_tcs
                 result.append(new_msg)
             elif msg.get("content"):
-                # Keep assistant message with content but strip empty tool_calls
+                # Keep assistant message with content but remove tool_calls entirely
+                # (empty tool_calls array is rejected by some API providers)
                 new_msg = dict(msg)
-                new_msg["tool_calls"] = []
+                new_msg.pop("tool_calls", None)
                 result.append(new_msg)
             # else: assistant message with only orphaned tool_calls and no content, skip
         else:

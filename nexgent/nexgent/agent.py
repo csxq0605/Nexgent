@@ -700,6 +700,7 @@ You help users with coding, file operations, web research, document creation, an
                 self._queue = queue.Queue()
                 self._error = None
                 self._closed = False
+                self._stream = stream_iter  # Keep reference for close()
                 def _read():
                     try:
                         for chunk in stream_iter:
@@ -727,6 +728,13 @@ You help users with coding, file operations, web research, document creation, an
             def close(self):
                 """Signal the background thread to stop and drain the queue."""
                 self._closed = True
+                # Close the underlying stream to unblock the background thread
+                # if it's stuck waiting for data from a hung connection.
+                if hasattr(self._stream, 'close'):
+                    try:
+                        self._stream.close()
+                    except Exception:
+                        pass
                 # Drain the queue so the background thread's put() doesn't block
                 while not self._queue.empty():
                     try:

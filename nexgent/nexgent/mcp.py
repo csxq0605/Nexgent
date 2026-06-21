@@ -702,8 +702,10 @@ class MCPManager:
                 },
             }
             try:
-                connection._send_message(request)
-                response = connection._receive_message()
+                # Hold lock for entire send/receive to prevent interleaving
+                with connection._lock:
+                    connection._send_message(request)
+                    response = connection._receive_message()
                 if response and 'result' in response:
                     return response['result']
             except Exception as e:

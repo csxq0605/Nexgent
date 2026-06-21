@@ -414,9 +414,16 @@ class HookRunner:
             # Parse response
             content = content.strip()
             if content.startswith("```"):
-                # Strip markdown code blocks
+                # Strip markdown code fences (handle all cases including 1-2 line responses)
                 lines = content.split("\n")
-                content = "\n".join(lines[1:-1] if len(lines) > 2 else lines)
+                if len(lines) >= 3:
+                    content = "\n".join(lines[1:-1])
+                elif len(lines) == 2:
+                    # Opening fence on line 0, content on line 1 (no closing fence)
+                    content = lines[1]
+                else:
+                    # Single line: strip the backticks
+                    content = lines[0].strip("`").strip()
             data = json.loads(content)
             if data.get("decision") == "block":
                 return HookResult(
