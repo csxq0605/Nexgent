@@ -130,6 +130,7 @@ class MiMoTUI(App):
         Binding("down", "history_down", "History Down", show=False),
         Binding("tab", "tab_complete", "Tab Complete", show=False, priority=True),
         Binding("shift+tab", "cycle_mode", "Cycle Mode", show=False, priority=True),
+        Binding("ctrl+shift+c", "copy_last_output", "Copy Output", show=False),
     ]
 
     # All slash commands for tab completion
@@ -203,18 +204,6 @@ class MiMoTUI(App):
 
     def on_unmount(self) -> None:
         _set_tui_app(None)
-
-    def on_mouse_up(self, event) -> None:
-        """Left-click release: auto-copy selected text to clipboard."""
-        if event.button != 0:
-            return
-        try:
-            selected_text = self.screen.get_selected_text()
-            if selected_text and selected_text.strip():
-                self.copy_to_clipboard(selected_text)
-                self.write_output("[dim]Copied to clipboard[/dim]")
-        except Exception as exc:
-            logging.debug("Auto-copy failed: %s", exc)
 
     # ── Output Queue Drain (main thread timer) ─────────────────
 
@@ -1092,6 +1081,32 @@ class MiMoTUI(App):
         self.harness.perms.mode = PermissionMode(new_mode_name)
         self.write_output(f"[bold]Mode:[/bold] [cyan]{new_mode_name}[/cyan]")
         self._update_status_bar()
+
+    # ── Copy Last Output (Ctrl+Shift+C) ────────────────────────
+
+    def action_copy_last_output(self) -> None:
+        """Copy the last assistant message to clipboard."""
+        # Walk messages in reverse to find the last assistant content
+        for msg in reversed(self.session.messages):
+            if msg.get("role") == "assistant" and msg.get("content"):
+                content = msg["content"]
+                if isinstance(content, list):
+                    # Multi-part content (e.g. tool_use + text blocks)
+                    parts = [
+                        block.get("text", "")
+                        for block in content
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    ]
+                    text = "\n".join(parts)
+                elif isinstance(content, str):
+                    text = content
+                else:
+                    continue
+                if text.strip():
+                    self.copy_to_clipboard(text)
+                    self.write_output(f"[dim]Copied {len(text)} chars to clipboard[/dim]")
+                    return
+        self.write_output("[dim]No assistant output to copy[/dim]")
 
     # ── History Navigation ──────────────────────────────────────
 
