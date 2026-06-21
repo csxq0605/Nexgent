@@ -151,6 +151,10 @@ class MiMoTUI(App):
         self.scheduled_lock = scheduled_lock
         self._agent_running = False
         self._streaming_text = ""  # accumulated streaming text
+        # Mouse selection state
+        self._select_start: tuple[int, int] | None = None  # (line_idx, col_idx)
+        self._select_end: tuple[int, int] | None = None
+        self._selecting = False
         # Command queue: typed during agent execution, auto-runs when agent finishes
         self._command_queue: list[str] = []
         # ResourceMonitor warnings pending display (thread-safe queue)
@@ -204,6 +208,107 @@ class MiMoTUI(App):
 
     def on_unmount(self) -> None:
         _set_tui_app(None)
+
+    # ── Mouse Selection ─────────────────────────────────────────
+
+    def _screen_to_text_pos(self, screen_x: int, screen_y: int) -> tuple[int, int] | None:
+        """Convert screen coordinates to (line_idx, col_idx) in RichLog content."""
+        try:
+            output = self.query_one("#output", RichLog)
+        except Exception:
+            return None
+        region = output.content_region
+        if not region:
+            return None
+        scroll_x, scroll_y = output.scroll_offset
+        # Widget-relative coordinates + scroll = content coordinates
+        line_idx = (screen_y - region.y) + scroll_y
+        col_idx = (screen_x - region.x) + scroll_x
+        if line_idx < 0 or line_idx >= len(output.lines):
+            return None
+        if col_idx < 0:
+            col_idx = 0
+        return (line_idx, col_idx)
+
+    def _strip_to_plain_text(self, strip) -> str:
+        """Extract plain text from a Rich Strip object."""
+        parts = []
+        for segment in strip._segments:
+            # Segment is (style, text, control) — we want the text
+            if len(segment) >= 2:
+                parts.append(segment[1])
+        return "".join(parts)
+
+    def _extract_selected_text(self) -> str:
+        """Extract text between _select_start and _select_end."""
+        if not self._select_start or not self._select_end:
+            return ""
+        try:
+            output = self.query_one("#output", RichLog)
+        except Exception:
+            return ""
+        start_line, start_col = self._select_start
+        end_line, end_col = self._select_end
+        # Ensure start <= end
+        if (start_line, start_col) > (end_line, end_col):
+            start_line, start_col, end_line, end_col = end_line, end_col, start_line, start_col
+        lines = output.lines
+        if start_line >= len(lines) or end_line >= len(lines):
+            return ""
+        result = []
+        for i in range(start_line, end_line + 1):
+            text = self._strip_to_plain_text(lines[i])
+            if i == start_line and i == end_line:
+                result.append(text[start_col:end_col])
+            elif i == start_line:
+                result.append(text[start_col:])
+            elif i == end_line:
+                result.append(text[:end_col])
+            else:
+                result.append(text)
+        return "\n".join(result)
+
+    def on_mouse_down(self, event) -> None:
+        """Start text selection on left-click."""
+        if event.button != 0:
+            return
+        pos = self._screen_to_text_pos(event.x, event.y)
+        if pos:
+            self._select_start = pos
+            self._select_end = pos
+            self._selecting = True
+
+    def on_mouse_move(self, event) -> None:
+        """Update selection while dragging."""
+        if not self._selecting:
+            return
+        pos = self._screen_to_text_pos(event.x, event.y)
+        if pos:
+            self._select_end = pos
+
+    def on_mouse_up(self, event) -> None:
+        """Finish selection and auto-copy on left-click release."""
+        if event.button != 0 or not self._selecting:
+            self._selecting = False
+            return
+        self._selecting = False
+        pos = self._screen_to_text_pos(event.x, event.y)
+        if pos:
+            self._select_end = pos
+        text = self._extract_selected_text()
+        if text and text.strip():
+            self.copy_to_clipboard(text.strip())
+            # Show brief feedback in status bar
+            preview = text.strip()[:60].replace("\n", " ")
+            if len(text.strip()) > 60:
+                preview += "..."
+            try:
+                status = self.query_one("#status-bar", Static)
+                status.update(f"  [green bold]Copied:[/green bold] [dim]{preview}[/dim]")
+            except Exception:
+                pass
+        self._select_start = None
+        self._select_end = None
 
     # ── Output Queue Drain (main thread timer) ─────────────────
 
