@@ -14,6 +14,7 @@ import os
 import re
 import fnmatch
 import platform
+import threading
 from enum import Enum
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -179,6 +180,7 @@ class PermissionGate:
         self.approval_log: list[dict] = []
         self.rules: list[PermissionRule] = rules or []
         self._rejection_count = 0  # Ch4: circuit breaker for rejections
+        self._rejection_lock = threading.Lock()
         self._llm_client = None
         self._llm_model = None
         self.review_log: list[dict] = []
@@ -354,14 +356,15 @@ class PermissionGate:
         # Auto-approve mode (Ch4: auto mode with safe tool allowlist)
         if self.auto_approve or self.mode == PermissionMode.AUTO:
             # Ch4: rejection tracking - fallback to interactive after rejections
-            if self._rejection_count >= 3:
-                pass  # Fall through to interactive prompt
-            else:
-                # Gradually recover rejection count on successful auto-approve
-                if self._rejection_count > 0:
-                    self._rejection_count = max(0, self._rejection_count - 1)
-                self._log(permission, action_desc, "auto_approved")
-                return True
+            with self._rejection_lock:
+                if self._rejection_count >= 3:
+                    pass  # Fall through to interactive prompt
+                else:
+                    # Gradually recover rejection count on successful auto-approve
+                    if self._rejection_count > 0:
+                        self._rejection_count = max(0, self._rejection_count - 1)
+                    self._log(permission, action_desc, "auto_approved")
+                    return True
 
         # Stage 4: Interactive confirmation
         return self._interactive_confirm(permission, action_desc)
@@ -426,10 +429,12 @@ class PermissionGate:
                 result = _tui_permission_request(action_desc, permission.value)
                 if result is True:
                     self._log(permission, action_desc, "approved")
-                    self._rejection_count = 0
+                    with self._rejection_lock:
+                        self._rejection_count = 0
                     return True
                 elif result is False:
-                    self._rejection_count += 1
+                    with self._rejection_lock:
+                        self._rejection_count += 1
                     self._log(permission, action_desc, "denied")
                     return False
                 # None = fall through to default
@@ -448,10 +453,11 @@ class PermissionGate:
             self._log(permission, action_desc, "denied_no_input")
             return False
         approved = response in ("", "y", "yes")
-        if not approved:
-            self._rejection_count += 1
-        else:
-            self._rejection_count = 0
+        with self._rejection_lock:
+            if not approved:
+                self._rejection_count += 1
+            else:
+                self._rejection_count = 0
         self._log(
             permission, action_desc, "approved" if approved else "denied"
         )

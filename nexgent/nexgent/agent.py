@@ -15,6 +15,7 @@ import secrets
 import platform
 import queue
 import threading
+import contextvars
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
@@ -1195,9 +1196,12 @@ You help users with coding, file operations, web research, document creation, an
                     status_bar.set_executing(func_name)
 
                 if safe_calls:
+                    # Copy current context so FileOpsState and other ContextVars
+                    # are propagated to worker threads (Python <3.11 compat).
+                    ctx = contextvars.copy_context()
                     with ThreadPoolExecutor(max_workers=min(len(safe_calls), 8)) as executor:
                         futures = [
-                            executor.submit(self._handle_tool_call, fn, fa, tc.id, session)
+                            executor.submit(ctx.run, self._handle_tool_call, fn, fa, tc.id, session)
                             for tc, fn, fa in safe_calls
                         ]
                         for (tc, func_name, _), future in zip(safe_calls, futures):

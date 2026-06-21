@@ -38,27 +38,33 @@ class FileOpsState:
 
     Each NexgentAgent session (including SubAgents) gets its own isolated
     state, preventing one SubAgent's reads from being visible to another.
+    Thread-safe: all mutations are protected by a lock.
     """
     read_files: set = field(default_factory=set)
     write_allowed_files: set = field(default_factory=set)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def mark_read(self, abs_path: str):
         """Record that a file has been read in this session."""
-        self.read_files.add(abs_path)
-        self.write_allowed_files.add(abs_path)
+        with self._lock:
+            self.read_files.add(abs_path)
+            self.write_allowed_files.add(abs_path)
 
     def is_read(self, abs_path: str) -> bool:
         """Check if a file has been read in this session."""
-        return abs_path in self.read_files
+        with self._lock:
+            return abs_path in self.read_files
 
     def is_write_allowed(self, abs_path: str) -> bool:
         """Check if a file has been read (and thus write-allowed) in this session."""
-        return abs_path in self.write_allowed_files
+        with self._lock:
+            return abs_path in self.write_allowed_files
 
     def reset(self):
         """Clear all tracking state (for new session)."""
-        self.read_files.clear()
-        self.write_allowed_files.clear()
+        with self._lock:
+            self.read_files.clear()
+            self.write_allowed_files.clear()
 
 
 # Context variable for session-scoped state; default is a shared global
