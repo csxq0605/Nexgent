@@ -171,7 +171,6 @@ def logout(
       - Decode it to get the ``sub`` (user id).
       - Call ``svc.logout(user_id)`` to revoke all refresh tokens.
     """
-    # Extract user_id from Authorization header
     try:
         scheme, _, token = authorization.partition(" ")
         if scheme.lower() != "bearer" or not token:

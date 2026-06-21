@@ -63,6 +63,7 @@ def create_refresh_token(subject: str) -> str:
 
     Claims:
         sub  — the user id (as a string)
+        iat  — issued-at timestamp (UTC, integer seconds)
         exp  — expiration timestamp (UTC)
         type — "refresh"
         jti  — unique token id (UUID v4) used for per-token revocation
@@ -70,6 +71,7 @@ def create_refresh_token(subject: str) -> str:
     now = datetime.now(timezone.utc)
     payload: dict[str, Any] = {
         "sub": subject,
+        "iat": int(now.timestamp()),
         "exp": now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         "type": "refresh",
         "jti": str(uuid.uuid4()),
@@ -87,40 +89,58 @@ def decode_token(token: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Blacklist helpers  (TODO — not yet implemented)
+# Blacklist helpers
 # ---------------------------------------------------------------------------
 
-def is_token_blacklisted(jti: str) -> bool:  # TODO
+def is_token_blacklisted(jti: str, db: Any = None) -> bool:
     """Check whether a token's *jti* has been revoked.
 
-    This should query the ``token_blacklist`` table.
-
-    Currently returns ``False`` (no token is considered revoked).
+    Queries the ``token_blacklist`` table.  Returns ``False`` if no
+    database session is provided (e.g. during stateless token decoding).
     """
-    return False
+    if db is None:
+        return False
+    from sqlalchemy import select
+    from src.auth.models import TokenBlacklist
+    result = db.execute(
+        select(TokenBlacklist).where(TokenBlacklist.jti == jti)
+    ).scalar_one_or_none()
+    return result is not None
 
 
-def blacklist_token(jti: str, user_id: int, expires_at: datetime) -> None:  # TODO
+def blacklist_token(jti: str, user_id: int, expires_at: datetime, db: Any = None) -> None:
     """Add a token *jti* to the blacklist.
 
-    Should INSERT a row into ``token_blacklist`` with the given *jti*,
+    INSERTs a row into ``token_blacklist`` with the given *jti*,
     *user_id*, and *expires_at*.
-
-    Currently a no-op.
     """
-    pass
+    if db is None:
+        return
+    from src.auth.models import TokenBlacklist
+    entry = TokenBlacklist(jti=jti, user_id=user_id, expires_at=expires_at)
+    db.add(entry)
+    db.commit()
 
 
-def blacklist_all_user_tokens(user_id: int) -> int:  # TODO
+def blacklist_all_user_tokens(user_id: int, db: Any = None) -> int:
     """Revoke every refresh token belonging to *user_id*.
 
-    Implementation strategy (pick one):
-      1. INSERT blacklist rows for every known jti for this user.
-      2. Maintain a ``token_epoch`` on the User model and reject tokens
-         issued before the epoch.
+    Strategy: maintain a ``token_epoch`` on the User model — set it to
+    ``now() + 1s``.  Any refresh token with ``iat <= now`` is rejected.
+    The +1s buffer ensures tokens issued in the same second as logout
+    are also revoked (JWT ``iat`` is integer seconds).
 
-    Should return the number of tokens revoked.
-
-    Currently returns 0.
+    Returns the number of tokens logically revoked (1 for the epoch bump).
     """
-    return 0
+    if db is None:
+        return 0
+    from sqlalchemy import update
+    from src.auth.models import User
+    # +1 second buffer: ensures tokens issued in the same second as logout
+    # have iat < epoch and are properly rejected.
+    now_plus_1 = datetime.utcnow().replace(microsecond=0) + timedelta(seconds=1)
+    db.execute(
+        update(User).where(User.id == user_id).values(token_epoch=now_plus_1)
+    )
+    db.commit()
+    return 1

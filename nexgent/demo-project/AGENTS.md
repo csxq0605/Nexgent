@@ -5,6 +5,7 @@
 ```
 demo-project/
 ├── AGENTS.md                  # This file — project knowledge base
+├── README.md                  # Usage guide and tutorials
 ├── docs/
 │   ├── api-spec.md            # REST API endpoint specification
 │   └── architecture.md        # System architecture and design decisions
@@ -14,12 +15,23 @@ demo-project/
 │   │   ├── __init__.py
 │   │   ├── models.py          # SQLAlchemy ORM models
 │   │   ├── routes.py          # FastAPI route definitions
-│   │   └── service.py         # Business logic layer
+│   │   ├── service.py         # Business logic layer
+│   │   ├── admin.py           # Admin routes (list users, deactivate, change role)
+│   │   ├── rate_limit.py      # In-memory sliding-window rate limiter
+│   │   ├── audit.py           # Audit log (event recording and querying)
+│   │   ├── roles.py           # RBAC (role-permission mapping)
+│   │   ├── password_reset.py  # Password reset flow
+│   │   └── email_verify.py    # Email verification flow
 │   └── utils/
 │       ├── __init__.py
 │       └── security.py        # JWT and password hashing utilities
 └── tests/
-    └── test_auth.py           # Pytest test suite
+    ├── conftest.py            # Shared fixtures and sys.path setup
+    ├── test_auth.py           # Auth flow tests
+    ├── test_admin.py          # Admin route tests
+    ├── test_rate_limit.py     # Rate limiter tests
+    ├── test_audit.py          # Audit log tests
+    └── test_roles.py          # RBAC tests
 ```
 
 ## Tech Stack
@@ -42,15 +54,14 @@ demo-project/
 - TODO stubs must raise `NotImplementedError` with a descriptive message.
 - Constants (JWT secret, expiry) live in `src/utils/security.py` and are read from environment.
 
-## TODO List
+## Architecture
 
-The following features are **not yet implemented** and have stub code in place:
+Three-layer design: Routes → Service → Models.
 
-| Feature        | Location                          | Status |
-|----------------|-----------------------------------|--------|
-| Token refresh  | `service.py` / `routes.py`       | TODO   |
-| Token revocation | `service.py` / `routes.py`     | TODO   |
-| Logout         | `service.py` / `routes.py`       | TODO   |
-| Blacklist helpers | `security.py`                  | TODO   |
+- Routes never call models directly; always go through the service.
+- Service methods accept a SQLAlchemy `Session` (injected at init).
+- Models define tables only — no business logic.
 
-Each TODO stub contains a docstring explaining the expected behaviour. Search for `TODO` or `NotImplementedError` to find them.
+JWT tokens use HS256 with 15-minute access tokens and 7-day refresh tokens.
+Refresh tokens carry a unique `jti` for per-token revocation.
+Logout uses epoch-based bulk revocation (O(1) regardless of token count).
