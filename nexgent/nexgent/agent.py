@@ -1198,12 +1198,24 @@ You help users with coding, file operations, web research, document creation, an
                 if safe_calls:
                     # Copy current context so FileOpsState and other ContextVars
                     # are propagated to worker threads (Python <3.11 compat).
-                    ctx = contextvars.copy_context()
+                    # Fall back to direct submission if context is already entered
+                    # (e.g. nested parallel calls).
+                    try:
+                        ctx = contextvars.copy_context()
+                        use_ctx = True
+                    except RuntimeError:
+                        use_ctx = False
                     with ThreadPoolExecutor(max_workers=min(len(safe_calls), 8)) as executor:
-                        futures = [
-                            executor.submit(ctx.run, self._handle_tool_call, fn, fa, tc.id, session)
-                            for tc, fn, fa in safe_calls
-                        ]
+                        if use_ctx:
+                            futures = [
+                                executor.submit(ctx.run, self._handle_tool_call, fn, fa, tc.id, session)
+                                for tc, fn, fa in safe_calls
+                            ]
+                        else:
+                            futures = [
+                                executor.submit(self._handle_tool_call, fn, fa, tc.id, session)
+                                for tc, fn, fa in safe_calls
+                            ]
                         for (tc, func_name, _), future in zip(safe_calls, futures):
                             tool_start = time.time()
                             try:
