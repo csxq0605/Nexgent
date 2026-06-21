@@ -101,7 +101,9 @@ class TestLspToolsGetTools:
             assert tool.handler is not None
             assert tool.permission == Permission.READ
             assert tool.is_read_only is True
-            assert tool.is_concurrency_safe is True
+            # lsp_diagnostics is NOT concurrency-safe (mutates _opened_files, calls sleep)
+            expected_safe = tool.name != "lsp_diagnostics"
+            assert tool.is_concurrency_safe is expected_safe, f"{tool.name} concurrency_safe mismatch"
 
     def test_required_params(self):
         tools = {t.name: t for t in get_tools()}

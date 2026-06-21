@@ -20,7 +20,9 @@ def _make_run_handler(harness):
     def _run_subagent(params: dict) -> str:
         from ..subagent import SubAgentConfig, SubAgentState
 
-        task = params["task"]
+        task = params.get("task")
+        if not task:
+            return json.dumps({"error": "task is required"})
         description = params.get("description", "")
         allowed_tools = params.get("allowed_tools")
         effort = params.get("effort", "medium")

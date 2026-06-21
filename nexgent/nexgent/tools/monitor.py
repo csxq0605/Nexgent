@@ -130,6 +130,10 @@ def monitor_start(params: dict) -> str:
         return json.dumps({"error": "No command provided"})
 
     with _monitors_lock:
+        # Clean up dead monitors before checking the cap
+        dead = [jid for jid, m in _monitors.items() if not m.process or m.process.poll() is not None]
+        for jid in dead:
+            _monitors.pop(jid, None)
         if len(_monitors) >= MAX_MONITORS:
             return json.dumps({
                 "error": f"Maximum number of monitors ({MAX_MONITORS}) reached. Stop an existing monitor first.",
@@ -168,10 +172,9 @@ def monitor_stop(params: dict) -> str:
                 "error": f"Monitor not found: {job_id}",
                 "active_monitors": list(_monitors.keys()),
             })
-
-    monitor.stop()
-    recent_lines = monitor.get_lines(10)
-    with _monitors_lock:
+        # Stop and remove atomically to prevent race with monitor_list/monitor_stop
+        monitor.stop()
+        recent_lines = monitor.get_lines(10)
         _monitors.pop(job_id, None)
 
     return json.dumps({

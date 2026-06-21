@@ -274,35 +274,35 @@ def web_fetch(params: dict) -> str:
         # DNS rebinding defense: pre-resolve rejects restricted IPs (above),
         # post-request re-check detects IP change (below).
         resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15, stream=True)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
 
-        # Post-request DNS re-check: verify IPs didn't change (DNS rebinding detection)
-        if pre_ips and hostname:
-            try:
-                post_resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-                post_ips = {sockaddr[0] for _, _, _, _, sockaddr in post_resolved}
-                if not post_ips.intersection(pre_ips):
-                    resp.close()
-                    return json.dumps({"error": f"DNS rebinding detected for '{hostname}' — IP changed during request"})
-                # Also check post-resolve IPs are still safe
-                for post_ip_str in post_ips:
-                    post_ip = ipaddress.ip_address(post_ip_str)
-                    if post_ip.is_private or post_ip.is_loopback or post_ip.is_link_local or post_ip.is_reserved:
-                        resp.close()
-                        return json.dumps({"error": f"DNS rebinding detected: '{hostname}' now resolves to restricted IP '{post_ip}'"})
-            except (socket.gaierror, OSError):
-                pass  # DNS failure after request is less concerning
-        # Read with size limit to prevent memory exhaustion
-        content_chunks = []
-        total_size = 0
-        truncated = False
-        for chunk in resp.iter_content(chunk_size=8192):
-            content_chunks.append(chunk)
-            total_size += len(chunk)
-            if total_size > MAX_RESPONSE_BYTES:
-                truncated = True
-                break
-        resp.close()
+            # Post-request DNS re-check: verify IPs didn't change (DNS rebinding detection)
+            if pre_ips and hostname:
+                try:
+                    post_resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                    post_ips = {sockaddr[0] for _, _, _, _, sockaddr in post_resolved}
+                    if not post_ips.intersection(pre_ips):
+                        return json.dumps({"error": f"DNS rebinding detected for '{hostname}' — IP changed during request"})
+                    # Also check post-resolve IPs are still safe
+                    for post_ip_str in post_ips:
+                        post_ip = ipaddress.ip_address(post_ip_str)
+                        if post_ip.is_private or post_ip.is_loopback or post_ip.is_link_local or post_ip.is_reserved:
+                            return json.dumps({"error": f"DNS rebinding detected: '{hostname}' now resolves to restricted IP '{post_ip}'"})
+                except (socket.gaierror, OSError):
+                    pass  # DNS failure after request is less concerning
+            # Read with size limit to prevent memory exhaustion
+            content_chunks = []
+            total_size = 0
+            truncated = False
+            for chunk in resp.iter_content(chunk_size=8192):
+                content_chunks.append(chunk)
+                total_size += len(chunk)
+                if total_size > MAX_RESPONSE_BYTES:
+                    truncated = True
+                    break
+        finally:
+            resp.close()
         if truncated:
             content_chunks.append(b"\n... [truncated: response too large]")
         content = b"".join(content_chunks).decode("utf-8", errors="replace")

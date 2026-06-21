@@ -91,7 +91,9 @@ def _make_status_handler(harness):
 
     def _workflow_status(params: dict) -> str:
         runner = harness.workflow_runner
-        run_id = params["run_id"]
+        run_id = params.get("run_id")
+        if not run_id:
+            return json.dumps({"error": "run_id is required"})
         run = runner.get_run(run_id)
         if not run:
             return json.dumps({"error": f"Workflow run {run_id} not found"})
@@ -128,8 +130,10 @@ def _make_save_handler(harness):
 
     def _save_workflow(params: dict) -> str:
         runner = harness.workflow_runner
-        run_id = params["run_id"]
-        name = params["name"]
+        run_id = params.get("run_id")
+        name = params.get("name")
+        if not run_id or not name:
+            return json.dumps({"error": "run_id and name are required"})
         save_dir = params.get("save_dir")
 
         try:
@@ -146,7 +150,9 @@ def _make_resume_handler(harness):
 
     def _resume_workflow(params: dict) -> str:
         runner = harness.workflow_runner
-        run_id = params["run_id"]
+        run_id = params.get("run_id")
+        if not run_id:
+            return json.dumps({"error": "run_id is required"})
         progress_log = []
 
         def on_progress(msg):

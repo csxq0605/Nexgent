@@ -121,7 +121,8 @@ class LSPClient:
                                 event = self._response_events.get(msg_id)
                                 if event:
                                     event.set()
-                except Exception:
+                except Exception as e:
+                    logging.getLogger(__name__).debug("LSP reader error: %s", e)
                     break
 
         self._reader_thread = threading.Thread(target=_reader, daemon=True)
@@ -655,6 +656,6 @@ def get_tools() -> list[ToolDef]:
             handler=lsp_diagnostics,
             permission=Permission.READ,
             is_read_only=True,
-            is_concurrency_safe=True,
+            is_concurrency_safe=False,  # mutates _opened_files and calls time.sleep
         ),
     ]

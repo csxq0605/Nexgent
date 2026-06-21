@@ -39,6 +39,11 @@ def execute_python(params: dict) -> str:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+            # Explicitly close pipe file descriptors to prevent FD leak
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
             return json.dumps({"error": f"Code execution timed out after {timeout}s"})
     except Exception as e:
         return json.dumps({"error": str(e)})
