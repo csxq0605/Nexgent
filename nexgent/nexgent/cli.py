@@ -676,9 +676,6 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 "is_destructive": tool.is_destructive,
             })
         print_tool_list(tools_info)
-    elif cmd[0] == "/abort":
-        harness.graceful_abort.request()
-        print_warning("Abort requested — current task will stop at next step boundary.")
     elif cmd[0] == "/memory":
         memories = memory_store.list_memories()
         if memories:
@@ -736,17 +733,6 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
         token_stats.message_count = len(session.messages)
         token_stats.compression_count = session.compaction_count
         print(token_stats.format_report())
-        print()
-    elif cmd[0] == "/tokens":
-        tokens = estimate_tokens(session.messages)
-        print_token_usage(tokens, CONTEXT_WINDOW_TOKENS)
-        print(f"  {_dim('Messages:')} {len(session.messages)}")
-        print(f"  {_dim('Compactions:')} {session.compaction_count}")
-        # Show token stats if available
-        stats = harness.token_budget.get_stats()
-        if stats.message_count > 0:
-            print(f"\n  {_bold('Token Statistics')}")
-            print(stats.format_report())
         print()
     elif cmd[0] == "/compact":
         tokens_before = estimate_tokens(session.messages)

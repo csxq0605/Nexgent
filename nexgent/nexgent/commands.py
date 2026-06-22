@@ -8,8 +8,8 @@ used in the CLI and TUI interfaces.
 SLASH_COMMANDS = [
     # Basic commands
     "/help", "/quit", "/exit", "/q", "/clear", "/tools",
-    "/save", "/load", "/abort",
-    "/memory", "/remember", "/hooks", "/stats", "/tokens",
+    "/save", "/load",
+    "/memory", "/remember", "/hooks", "/stats",
     "/compact", "/context", "/init", "/init-config", "/rewind", "/fork",
     "/effort",
     # SubAgent commands

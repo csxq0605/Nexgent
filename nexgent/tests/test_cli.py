@@ -242,16 +242,6 @@ class TestHandleCommand:
         assert "Messages" in clean
         assert "1" in clean
 
-    def test_repl_tokens_command(self, monkeypatch, tmp_path, capsys):
-        harness, session = _HarnessFixture.make(monkeypatch)
-        from nexgent.memory import MemoryStore
-        memory_store = MemoryStore(str(tmp_path))
-        session.add_message("user", "hello world")
-        _handle_command(["/tokens"], harness, session, memory_store)
-        captured = capsys.readouterr()
-        assert "Tokens:" in captured.out
-        assert "Messages:" in captured.out
-
     def test_repl_save_error(self, monkeypatch, tmp_path, capsys):
         harness, session = _HarnessFixture.make(monkeypatch)
         from nexgent.memory import MemoryStore
@@ -264,16 +254,6 @@ class TestHandleCommand:
         captured = capsys.readouterr()
         # Check for error indicator (✗) or error message
         assert "✗" in captured.out or "No such file" in captured.out
-
-    def test_repl_abort_command(self, monkeypatch, tmp_path, capsys):
-        harness, session = _HarnessFixture.make(monkeypatch)
-        from nexgent.memory import MemoryStore
-        memory_store = MemoryStore(str(tmp_path))
-        harness.graceful_abort.reset()
-        _handle_command(["/abort"], harness, session, memory_store)
-        captured = capsys.readouterr()
-        assert "Abort requested" in captured.out
-        assert harness.graceful_abort.is_requested()
 
     def test_repl_help_command(self, monkeypatch, tmp_path, capsys):
         harness, session = _HarnessFixture.make(monkeypatch)
