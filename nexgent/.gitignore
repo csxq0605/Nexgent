@@ -20,6 +20,7 @@ coverage.json
 .nexgent/outputs/
 .nexgent/sessions/
 .nexgent/checkpoints/
+.nexgent/memory/
 
 # IDE
 .claude/

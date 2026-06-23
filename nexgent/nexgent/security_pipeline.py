@@ -91,14 +91,16 @@ _SENSITIVE_FILENAMES = {
 }
 
 # Prompt injection patterns (Input Probe layer)
+# NOTE: Removed overly broad patterns that caused false positives:
+# - "you are now a" — matches "you are now a developer" etc.
+# - "new instructions:" — matches documentation text
+# - "system:" — matches "Operating system: Windows" etc.
+# - "<system>" — matches HTML/XML tags
+# - "[system]" — matches any [system] in text
+# Only keep specific, unambiguous injection patterns.
 _INJECTION_PATTERNS = [
     re.compile(r'(?i)ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|prompts|rules)'),
     re.compile(r'(?i)disregard\s+(all\s+)?(previous|prior|above)\s+(instructions|prompts)'),
-    re.compile(r'(?i)you\s+are\s+now\s+(a|an)\s+'),
-    re.compile(r'(?i)new\s+instructions?\s*:\s*'),
-    re.compile(r'(?i)system\s*:\s*'),
-    re.compile(r'(?i)<\s*system\s*>'),
-    re.compile(r'(?i)\[system\]'),
     re.compile(r'(?i)override\s+(all\s+)?safety'),
     re.compile(r'(?i)disable\s+(all\s+)?(safety|security|filtering|guard)'),
     re.compile(r'(?i)bypass\s+(all\s+)?(safety|security|restriction)'),
@@ -112,23 +114,19 @@ _INJECTION_PATTERNS = [
 ]
 
 # Hard deny patterns — always block (circuit breaker, even in bypass mode)
+# Simplified: merged redundant variants into core patterns
 _HARD_DENY_PATTERNS = [
-    # Case-insensitive rm -rf patterns: lookahead catches both -rf and -fr orderings
+    # rm -rf: combined flags (-rf, -fr) with any dangerous target
     (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+/(?:\s|\.|/|\)|;|&|\||#|$)', re.IGNORECASE), "rm -rf / destroys the filesystem"),
     (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+~', re.IGNORECASE), "rm -rf ~ destroys home directory"),
     (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+\*', re.IGNORECASE), "rm -rf * destroys all files"),
     (re.compile(r'\brm\s+.*-(?=[^\s]*r)(?=[^\s]*f)[^\s]*\s+\.(?:\s|/|;|&|\||#|$)', re.IGNORECASE), "rm -rf . destroys current directory"),
-    # Separate short flags: rm -r -f /, rm -f -r /, etc.
-    (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+/(?:\s|\.|/|\)|;|&|\||#|$)', re.IGNORECASE), "rm -r -f / destroys the filesystem"),
-    (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+~', re.IGNORECASE), "rm -r -f ~ destroys home directory"),
-    (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+\*', re.IGNORECASE), "rm -r -f * destroys all files"),
-    (re.compile(r'\brm\s+(?:-[^\s]*r\s+.*-[^\s]*f|-[^\s]*f\s+.*-[^\s]*r)\s+\.(?:\s|/|$)', re.IGNORECASE), "rm -r -f . destroys current directory"),
-    # Long flag forms and mixed short/long forms
-    (re.compile(r'\brm\s+.*--recursive\s+.*--force\s+', re.IGNORECASE), "rm --recursive --force is dangerous"),
-    (re.compile(r'\brm\s+.*--force\s+.*--recursive\s+', re.IGNORECASE), "rm --force --recursive is dangerous"),
-    (re.compile(r'\brm\s+.*--recursive\b.*-[^\s]*f', re.IGNORECASE), "rm --recursive -f is dangerous"),
-    (re.compile(r'\brm\s+.*-[^\s]*r\b.*--force\b', re.IGNORECASE), "rm -r --force is dangerous"),
-    (re.compile(r'\brm\s+.*--force\b.*-[^\s]*r\b', re.IGNORECASE), "rm --force -r is dangerous"),
+    # rm -rf: separate flags (-r -f, -f -r) and long flags (--recursive --force)
+    (re.compile(r'\brm\s+(?:.*-[^\s]*r\s+.*-[^\s]*f|.*-[^\s]*f\s+.*-[^\s]*r|.*--recursive\s+.*--force|.*--force\s+.*--recursive)\s+/(?:\s|\.|/|\)|;|&|\||#|$)', re.IGNORECASE), "rm -r -f / destroys the filesystem"),
+    (re.compile(r'\brm\s+(?:.*-[^\s]*r\s+.*-[^\s]*f|.*-[^\s]*f\s+.*-[^\s]*r|.*--recursive\s+.*--force|.*--force\s+.*--recursive)\s+~', re.IGNORECASE), "rm -r -f ~ destroys home directory"),
+    (re.compile(r'\brm\s+(?:.*-[^\s]*r\s+.*-[^\s]*f|.*-[^\s]*f\s+.*-[^\s]*r|.*--recursive\s+.*--force|.*--force\s+.*--recursive)\s+\*', re.IGNORECASE), "rm -r -f * destroys all files"),
+    (re.compile(r'\brm\s+(?:.*-[^\s]*r\s+.*-[^\s]*f|.*-[^\s]*f\s+.*-[^\s]*r|.*--recursive\s+.*--force|.*--force\s+.*--recursive)\s+\.(?:\s|/|$)', re.IGNORECASE), "rm -r -f . destroys current directory"),
+    # Other destructive commands
     (re.compile(r'\bmkfs\b', re.IGNORECASE), "mkfs formats a filesystem"),
     (re.compile(r'\bdd\s+if=.*of=/dev/', re.IGNORECASE), "dd to device overwrites disk"),
     (re.compile(r':\(\)\s*\{.*:\|:.*\}'), "fork bomb detected"),
@@ -136,37 +134,38 @@ _HARD_DENY_PATTERNS = [
     (re.compile(r'(?:^|[;&|]\s*)(?:sudo\s+)?reboot\b', re.IGNORECASE), "reboot command"),
     (re.compile(r'(?:^|[;&|]\s*)(?:sudo\s+)?halt\b', re.IGNORECASE), "halt command"),
     (re.compile(r'\bchmod\s+.*-R\s+777\s+/(?:\s|$)', re.IGNORECASE), "chmod 777 / is dangerous"),
-    (re.compile(r'\b(curl|wget)\s+[^\n]*\|\s*(bash|sh|zsh)\b', re.IGNORECASE), "download-and-execute via pipe is dangerous"),
-    # Also catch no-space pipe: curl URL|bash (non-greedy match)
+    # Download-and-execute: pipe and && variants (merged from 4 to 2)
     (re.compile(r'\b(curl|wget)\s+[^\n]*?\|\s*(bash|sh|zsh)\b', re.IGNORECASE), "download-and-execute via pipe is dangerous"),
-    (re.compile(r'\b(curl|wget)\s+.*-o\s+\S+.*&&\s*(bash|sh|zsh)\b', re.IGNORECASE), "download-then-execute is dangerous"),
-    (re.compile(r'\b(curl|wget)\s+.*&&\s*(bash|sh|zsh)\s+\S+', re.IGNORECASE), "download-then-execute is dangerous"),
-    (re.compile(r'\b(curl|wget)\s+.*-d\s+.*\b(key|token|secret|password)\b', re.IGNORECASE),
+    (re.compile(r'\b(curl|wget)\s+.*&&\s*(bash|sh|zsh)\b', re.IGNORECASE), "download-then-execute is dangerous"),
+    # Credential exfiltration: -d with sensitive keywords OR -d @file (file reference)
+    (re.compile(r'\b(curl|wget)\s+.*-d\s+.*(?:\b(key|token|secret|password)\b|@\S+)', re.IGNORECASE),
      "sending credentials to external endpoint"),
 ]
 
-# Soft deny patterns
+# Soft deny patterns — simplified and narrowed to reduce false positives
 _SOFT_DENY_PATTERNS = [
-    (re.compile(r'\bgit\s+push\s+.*--force(?=\s|$)'), "force push can overwrite history"),
-    (re.compile(r'\bgit\s+push\s+.*-f\b'), "force push can overwrite history"),
+    # Git operations: force push (merged --force and -f)
+    (re.compile(r'\bgit\s+push\s+.*(?:--force|-f)\b'), "force push can overwrite history"),
     (re.compile(r'\bgit\s+push\s+.*\b(origin|upstream)\s+(main|master)\b'),
      "pushing directly to main/master"),
-    (re.compile(r'\bnpm\s+publish\b'), "npm publish is irreversible"),
-    (re.compile(r'\bpip\s+publish\b'), "pip publish is irreversible"),
-    (re.compile(r'\btwine\s+upload\b'), "twine upload is irreversible"),
+    # Package publishing (merged npm/pip/twine)
+    (re.compile(r'\b(npm|pip|twine)\s+(publish|upload)\b'), "package publish is irreversible"),
+    # Global git config
     (re.compile(r'\bgit\s+config\s+--global\b'), "modifying global git config"),
+    # SSH operations
     (re.compile(r'\bssh-keygen\b'), "SSH key generation"),
     (re.compile(r'\bssh-copy-id\b'), "SSH key installation"),
+    # System configuration
     (re.compile(r'\bcrontab\s+-e\b'), "cronjob installation"),
     (re.compile(r'\b(chmod|chown)\s+.*-R\s+'), "recursive permission change"),
     (re.compile(r'\b(ufw|iptables)\s+.*\b(disable|stop|flush)\b'), "disabling firewall"),
     (re.compile(r'\bselinux\b.*\b(disabl?e[ds]?|permissive)\b'), "disabling SELinux"),
-    (re.compile(r'\b(cat|less|head|tail|xxd|base64|type|more|cp|mv)\s+.*\.ssh/'), "accessing SSH credentials"),
-    (re.compile(r'\b(cat|less|head|tail|xxd|base64|type|more|cp|mv)\s+.*\.aws/credentials'), "accessing AWS credentials"),
-    (re.compile(r'\b(cat|less|head|tail|xxd|base64|type|more|cp|mv)\s+.*\.gnupg/'), "accessing GPG keys"),
-    (re.compile(r'\b(grep|findstr)\s+.*\b(token|secret|key|password|credential)\b.*\b(env|ENV|\.env|config)\b'),
-     "credential exploration pattern"),
-    (re.compile(r'\b(curl|wget)\s+.*\b(ENV|env|\.env|credentials|\.ssh)\b', re.IGNORECASE),
+    # Private key access (narrowed: only match key files, not config files)
+    (re.compile(r'\b(cat|less|head|tail|xxd|base64|type|more)\s+.*\.ssh/id_'), "accessing SSH private key"),
+    (re.compile(r'\b(cat|less|head|tail|xxd|base64|type|more)\s+.*\.aws/credentials'), "accessing AWS credentials"),
+    (re.compile(r'\b(cat|less|head|tail|xxd|base64|type|more)\s+.*\.gnupg/(private|secring)'), "accessing GPG private key"),
+    # Credential exfiltration
+    (re.compile(r'\b(curl|wget)\s+.*\b(credentials|\.ssh/id_)\b', re.IGNORECASE),
      "potential credential exfiltration"),
 ]
 

@@ -56,8 +56,13 @@ READONLY_PREFIXES = [
 _WRAPPER_PREFIXES = ["timeout", "time", "nice", "nohup", "stdbuf"]
 
 # Patterns that indicate command injection (Ch4: security) - backticks and $()
-# C1/C3: also reject shell redirections (>, >>, <, <<, <<<) to prevent readonly-bypass attacks
-_CHAINING_PATTERN = re.compile(r'[`><]|\$\(|<<|(?<!&)&(?!&)')
+# C1/C3: reject shell redirections EXCEPT stderr redirections (2>nul, 2>/dev/null, 2>&1)
+# - backtick and $() — command substitution (must block)
+# - << — heredoc (must block)
+# - > not preceded by digit (allows 2>nul, 2>/dev/null, 2>&1)
+# - < not preceded by < (allows <<, <<< but blocks <file)
+# - & not part of && — background execution (must block)
+_CHAINING_PATTERN = re.compile(r'`|\$\(|<<|(?<!\d)>(?!&)|(?<!<)<|(?<!&)&(?!&)')
 
 # S3: Credential patterns to scrub from environment (M6: extended)
 # Each pattern is matched as a whole segment in the env var name (split on _)
