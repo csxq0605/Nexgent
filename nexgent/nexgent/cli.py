@@ -1280,9 +1280,74 @@ def _handle_command(cmd, harness, session, memory_store, checkpoint_manager=None
                 print_error(f"Plugin not found: {name}")
             print()
 
+        elif cmd[1] == "install":
+            if len(cmd) < 3:
+                print_warning("Usage: /plugin install <github-url>")
+                print_info("Example: /plugin install https://github.com/user/team-coord")
+                print()
+                return "continue", session
+            url = cmd[2]
+            try:
+                import tempfile
+                import subprocess
+                import shutil
+                import re as _re
+                parts = url.rstrip('/').split('/')
+                if 'github.com' in url and 'tree' in parts:
+                    idx = parts.index('tree')
+                    repo_url = '/'.join(parts[:5])
+                    sub_path = '/'.join(parts[idx+2:])
+                    plugin_name = parts[-1]
+                else:
+                    repo_url = url
+                    sub_path = None
+                    plugin_name = parts[-1].replace('.git', '')
+                if not plugin_name or '..' in plugin_name or '/' in plugin_name or '\\' in plugin_name:
+                    print_error("Invalid plugin name derived from URL")
+                    print()
+                    return "continue", session
+                if not _re.match(r'^[\w\-.]+$', plugin_name):
+                    print_error(f"Invalid plugin name: {plugin_name}")
+                    print()
+                    return "continue", session
+                plugin_dir = os.path.join(plugin_mgr.user_plugin_dir, plugin_name)
+                os.makedirs(plugin_dir, exist_ok=True)
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    print_info(f"Cloning {repo_url}...")
+                    subprocess.run(['git', 'clone', '--depth', '1', repo_url, tmpdir],
+                                   capture_output=True, check=True)
+                    source_dir = os.path.join(tmpdir, sub_path) if sub_path else tmpdir
+                    if not os.path.exists(source_dir):
+                        print_error(f"Path not found: {sub_path}")
+                        print()
+                        return "continue", session
+                    if not os.path.exists(os.path.join(source_dir, 'plugin.json')):
+                        print_error("No plugin.json found in repository")
+                        print()
+                        return "continue", session
+                    if os.path.exists(plugin_dir):
+                        shutil.rmtree(plugin_dir)
+                    shutil.copytree(source_dir, plugin_dir)
+                    print_success(f"Plugin '{plugin_name}' installed to {plugin_dir}")
+                    plugin_mgr.load_all()
+                    # Look up by manifest name (may differ from directory name)
+                    import json as _json
+                    with open(os.path.join(plugin_dir, 'plugin.json'), 'r', encoding='utf-8') as _f:
+                        _manifest_name = _json.load(_f).get('name', plugin_name)
+                    loaded = plugin_mgr.get_plugin(_manifest_name)
+                    if loaded and loaded.loaded:
+                        print_success(f"Loaded: {loaded.name} v{loaded.manifest.version} ({len(loaded.tools)} tools)")
+                    elif loaded:
+                        print_warning(f"Installed but failed to load: {loaded.error}")
+            except subprocess.CalledProcessError as e:
+                print_error(f"Failed to clone: {e.stderr.decode() if e.stderr else str(e)}")
+            except Exception as e:
+                print_error(f"Installation failed: {str(e)}")
+            print()
+
         else:
             print_warning(f"Unknown plugin subcommand: {cmd[1]}")
-            print_info("Available: list, load, unload")
+            print_info("Available: list, load, unload, install")
             print()
 
     elif cmd[0] == "/save":

@@ -32,7 +32,7 @@ SLASH_COMMANDS = [
     # Model management
     "/model", "/model list", "/model set", "/model default",
     # Plugins
-    "/plugin", "/plugin list", "/plugin load", "/plugin unload",
+    "/plugin", "/plugin list", "/plugin load", "/plugin unload", "/plugin install",
 ]
 
 # Subset of commands for quick suggestions (most common)
