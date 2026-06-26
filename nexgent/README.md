@@ -117,7 +117,7 @@ models.json         ← 模型配置（提供商、模型名、base_url、defaul
 
 ```bash
 # 安装插件
-/plugin install https://github.com/csxq0605/multi-agent/tree/master/nexgent-plugin
+/plugin install https://github.com/csxq0605/plugins/tree/master/nexgent-plugin
 
 # 管理
 /plugin list              # 列出已安装插件
@@ -128,7 +128,7 @@ models.json         ← 模型配置（提供商、模型名、base_url、defaul
 
 | 插件 | 说明 |
 |------|------|
-| [team-coord](https://github.com/csxq0605/multi-agent) | 多 agent 团队协调——lead 纯协调 + worker 并行执行，作为 subagent/workflow 的补充层 |
+| [team-coord](https://github.com/csxq0605/plugins) | 多 agent 团队协调——lead 纯协调 + worker 并行执行，作为 subagent/workflow 的补充层 |
 
 ## 常用命令
 
