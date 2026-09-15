@@ -1,7 +1,7 @@
 """A durable experiment coordinator; the agent source owns the research algorithm.
 
 The immutable host admits resources, runs programs, evaluates submissions and
-maintains evidence. It does not select a scientific algorithm or write patches.
+maintains evidence. It does not select a domain algorithm or write patches.
 """
 from __future__ import annotations
 
@@ -42,6 +42,7 @@ Use the supplied tools API exactly. Code may read tools.work_units but cannot re
 Models return JSON. Source instruction ceiling is 2 million, numeric work is separately charged.
 brokers: ask(role,prompt,payload,max_tokens=6000); parallel([{role,prompt,payload,max_tokens}]);
 experiment(files,label) provides development-only measurements; search(query); log(kind,content).
+search(query) requires nonempty text of at most 400 characters; retain the full research question separately.
 probe_improver(files,label) runs both actual improvers from a common task start on development only.
 It is available only when context.capabilities.probe_improver is true; inner probes are forbidden.
 Task tools also offer ask(role,prompt,payload,max_tokens), parallel(requests), search(query).
@@ -225,7 +226,7 @@ class StudyController:
         import importlib.metadata
         source = Path(__file__).parents[1]
         # Freeze execution and research behavior; a window style change cannot
-        # change the measured scientific implementation.
+        # change the measured benchmark implementation.
         files = {str(p.relative_to(source)): p.read_text(encoding="utf-8") for folder in ("kernel", "benchmarks", "agents", "models", "evolution", "research") for p in sorted((source / folder).rglob("*.py"))}
         versions = {}
         for package in ("openai",):
@@ -676,7 +677,7 @@ class StudyController:
                     state["generation"] = pending["generation"]
                     state["pending"] = None
                     self._save(state, progress)
-                state["stage"] = "final unseen-family evaluation"
+                state["stage"] = "final benchmark transfer evaluation"
                 self._save(state, progress)
                 selected = self.store.bundle(state["active_program"])
                 final_rows = []

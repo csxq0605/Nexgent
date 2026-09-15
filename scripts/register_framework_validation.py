@@ -14,9 +14,12 @@ from nexgent.kernel.programs import digest
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--revision", choices=("initial", "query-contract"), default="initial")
     args = parser.parse_args()
     root = args.root.resolve()
-    path = root / "docs/research/registered-framework-mechanism-20260916.json"
+    revised = args.revision == "query-contract"
+    suffix = "-query-fix" if revised else ""
+    path = root / ("docs/research/registered-framework-mechanism-20260916" + suffix + ".json")
     if path.exists():
         print(json.dumps({"registration": str(path), "study_id": json.loads(path.read_text(encoding="utf-8"))["study_id"], "new_registration": False}))
         return
@@ -27,9 +30,9 @@ def main():
         "change substantive improve control flow or agent coordination when justified, test actual "
         "offspring from the same task start, and let the inherited improver execute in the next generation. "
         "Keep task performance, measured meta utility and source execution as separate claims.",
-        generations=2, arm="full", seed=43,
+        generations=2, arm="full", seed=47 if revised else 43,
         budget={"max_model_calls": 36, "max_completion_tokens": 180000},
-        prior_study="study-35d3b448578f4824", benchmark_id="scientific_discovery")
+        prior_study="study-3ae09e74105945a2" if revised else "study-35d3b448578f4824", benchmark_id="scientific_discovery")
     registration = {
         "schema": "nexgent-framework-mechanism-registration-v1", "version": "0.8.0",
         "study_id": state["id"], "registered_at": state["created"],
@@ -51,8 +54,8 @@ def main():
         ],
         "independent_evaluation": {
             "condition": "Run once only if the completed study has evaluated descendants and a different executable research improver; otherwise record not applicable without paid same-program sampling.",
-            "scientific_discovery": {"seeds": [491, 592], "k": 1},
-            "bbh": {"seeds": [693], "k": 1, "purpose": "Cross-benchmark execution and portability; the strong baseline is saturated, so this is not evidence of unsolved-task gains."},
+            "scientific_discovery": {"seeds": [701, 802] if revised else [491, 592], "k": 1},
+            "bbh": {"seeds": [903] if revised else [693], "k": 1, "purpose": "Cross-benchmark execution and portability; the strong baseline is saturated, so this is not evidence of unsolved-task gains."},
             "generation_budget": {"max_model_calls": 6, "max_completion_tokens": 30000, "max_development_experiments": 3},
             "arm_budget": {"max_model_calls": 6, "max_completion_tokens": 30000},
             "primary_effect": "Paired initial/evolved improvement_at_1 on meta_transfer after development-only selection; report every seed and missing outcome.",
@@ -66,6 +69,14 @@ def main():
         "scope": "Framework-level source evolution; scientific discovery and BBH are independent benchmark plugins. Prior scientific batch and confirmation remain immutable and are not rerun.",
         "stop_rule": "One two-generation attempt plus the predeclared conditional independent comparisons, within each frozen budget. Preserve errors and negative results; no automatic paid retry."
     }
+    if revised:
+        registration["revision"] = {
+            "previous_study": "study-3ae09e74105945a2",
+            "previous_meta_studies": ["study-d57c201e29872ba1", "study-ba417aca3b24a809"],
+            "reason": "The prior real probe and independent comparisons exposed a generic interface defect: accepted research questions exceeded the search capability's 400-character limit. Both source improvers failed before generating task offspring.",
+            "intervention": "Bound only the literature query in the bootstrap workflow; preserve the complete question in model research context. Keep benchmark algorithms, grading, protocol and budgets unchanged.",
+            "scope": "One functional regression/mechanism verification after a diagnosed software defect, with new registered seeds. Not a repeated superiority search. All failed prior results remain reportable."
+        }
     registration["registration_digest"] = digest(registration)
     path.write_text(json.dumps(registration, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"registration": str(path), "study_id": state["id"], "registration_digest": registration["registration_digest"], "new_registration": True}))

@@ -4,7 +4,8 @@ Nexgent 的目标是 `src/nexgent` 中的通用源码级 RSI 框架。科学发�
 
 | 文档 | 用途 |
 |---|---|
-| [系统设计](design.md) | 文献机制、可执行对象、证据边界、创新假设和实现对应 |
+| [当前框架架构](../architecture.md) | 通用核心、独立插件、实际后代探测和源码/预算归因 |
+| [0.7 设计记录](design.md) | 历史科学 demo 原型的文献机制与实现；其领域耦合已纠正 |
 | [RSI 一手研究复核](reboot-rsi-mechanisms.md) | STOP、DGM、Hyperagents、HGM 等的原文位置、真实机制、成本与反证 |
 | [科学协议与失败诊断](reboot-scientific-protocol.md) | 历史逐候选分析、科学任务、强基线、消融和新数值控制 |
 | [全仓审计与迁移](reboot-repository-map.md) | 原仓库模块去留、依赖、包布局和运行安全审查 |

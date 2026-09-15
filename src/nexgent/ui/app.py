@@ -1,4 +1,4 @@
-"""Desktop entry point for a scientific study workspace."""
+"""Desktop entry point for a general RSI study workspace."""
 
 from __future__ import annotations
 

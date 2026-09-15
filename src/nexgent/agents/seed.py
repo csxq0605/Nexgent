@@ -160,6 +160,19 @@ def measured_quality(report):
         return None
     return score
 
+def prepare_literature_query(context, domain):
+    # The research question remains intact; only the bounded search request is shortened.
+    options = [("literature_query", context.get("literature_query")),
+               ("domain.literature_query", domain.get("literature_query")),
+               ("question", context.get("question")),
+               ("default", "source code recursive self improvement agents")]
+    for origin, raw in options:
+        if isinstance(raw, str) and raw.strip():
+            normalized = " ".join(raw.split())
+            return {"query": normalized[:400].strip(), "source": origin,
+                    "input_characters": len(raw), "normalized_characters": len(normalized),
+                    "limit_characters": 400, "truncated": len(normalized) > 400}
+
 def research_cycle(context, broker):
     roles = context.get("roles", {})
     parent = context.get("parent", {})
@@ -179,8 +192,10 @@ def research_cycle(context, broker):
         return {"candidates": [], "research": research}
     broker.log("research_budget", plan)
     domain = context.get("domain", {})
-    query = context.get("literature_query") or domain.get("literature_query") or context.get("question") or "source code recursive self improvement agents"
-    literature = {"registered": context.get("literature", []), "retrieved": broker.search(query)}
+    query = prepare_literature_query(context, domain)
+    research["literature_query"] = query
+    broker.log("literature_query", query)
+    literature = {"registered": context.get("literature", []), "retrieved": broker.search(query["query"])}
     research["literature"] = literature
     broker.log("literature", literature)
     evidence_payload = {
