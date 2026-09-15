@@ -17,11 +17,11 @@ from .programs import ProgramError, canonical, verify_bundle
 
 class ProgramRunner:
     def run(self, bundle, entry, argument, *, handler=None, timeout=90, stop_event=None,
-            max_work_units=20_000_000):
+            max_work_units=20_000_000, toolbox_factory=None):
         verify_bundle(bundle)
         stop_event = stop_event or threading.Event()
-        if timeout <= 0 or timeout > 900:
-            raise ValueError("Source process deadline must be in (0, 900] seconds")
+        if timeout <= 0 or timeout > 1800:
+            raise ValueError("Source process deadline must be in (0, 1800] seconds")
         environment = {k: v for k, v in os.environ.items() if k.upper() in {
             "SYSTEMROOT", "WINDIR", "PATH", "TEMP", "TMP", "USERPROFILE", "LANG", "LC_ALL"}}
         environment.update(PYTHONPATH=str(Path(__file__).resolve().parents[2]),
@@ -29,7 +29,7 @@ class ProgramRunner:
                            OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
         options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
         request = canonical({"bundle": bundle, "entry": entry, "argument": argument,
-                             "max_work_units": max_work_units})
+                             "max_work_units": max_work_units, "toolbox_factory": toolbox_factory})
         if len(request) > 1_500_000:
             raise ProgramError("Source input exceeded budget")
         with tempfile.TemporaryDirectory(prefix="nexgent-source-") as directory:
@@ -104,7 +104,7 @@ class ProgramRunner:
                     if "result" in message:
                         return message["result"]
                     rpc = message.get("rpc")
-                    if not rpc or rpc["method"] not in {"ask", "parallel", "experiment", "search", "log"}:
+                    if not rpc or rpc["method"] not in {"ask", "parallel", "experiment", "probe_improver", "search", "log"}:
                         raise ProgramError("Unknown source capability request")
                     if handler is None:
                         raise ProgramError("This source entry has no external capabilities")

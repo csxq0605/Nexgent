@@ -20,7 +20,7 @@ def project_root(explicit=None):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="NExgent 科研信息空间")
+    parser = argparse.ArgumentParser(description="NExgent RSI 实验空间")
     parser.add_argument("--project", type=Path, help="研究工作区目录")
     args = parser.parse_args(argv)
     if os.name == "nt":
@@ -38,4 +38,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

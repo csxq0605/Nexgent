@@ -1,6 +1,9 @@
-# Nexgent 科研 RSI 系统设计
+# 0.7 科学 demo 原型设计记录（历史版本）
 
-本文对应 `src/nexgent` 的新实现。旧 Harness 和有限策略原型均已退出活动包。系统目标、协作分工和研究验收见根目录 `REFACTOR_PLAN.md`。
+本文记录 0.7 阶段冻结实验的原设计，保留以解释六组历史实验。
+其中把科学发现耦合到产品核心的定位已被纠正，不能用作当前框架合同。
+0.8 的通用 RSI 架构及独立 benchmark 边界见 [当前架构](../architecture.md)；
+科学发现的工具、数据、提示与算法现归独立 `benchmarks/scientific_discovery` 包。
 
 ## 1. 研究问题与设计选择
 

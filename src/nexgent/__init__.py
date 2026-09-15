@@ -1,3 +1,3 @@
-"""Nexgent: scientific agents that evolve their own research programs."""
+"""Nexgent: a general RSI agent framework with pluggable benchmarks."""
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"

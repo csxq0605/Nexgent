@@ -1,5 +1,9 @@
-name: Scientific agent checks
-on: [push, pull_request, workflow_dispatch]
+name: RSI framework checks
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
 env:
   QT_QPA_PLATFORM: offscreen
   NEXGENT_API_KEY: test-key-for-testing
@@ -20,6 +24,6 @@ jobs:
       - name: Linux Qt libraries
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
-      - run: python -m pip install -e '.[dev]'
-      - name: Scientific product and durable runtime acceptance
+      - run: python -m pip install -e '.[dev]' -e benchmarks/scientific_discovery -e benchmarks/bbh
+      - name: Framework, benchmark contracts and durable runtime acceptance
         run: python -m pytest tests -q

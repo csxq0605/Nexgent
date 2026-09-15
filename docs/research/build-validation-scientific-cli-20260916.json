@@ -1,0 +1,217 @@
+{
+  "schema": "nexgent-build-validation-v1",
+  "recorded_at": "2026-09-15T17:37:57.140554+00:00",
+  "purpose": "Public CLI fixed-program scientific-discovery demo validation; no RSI effectiveness claim",
+  "command": [
+    "python",
+    "-X",
+    "utf8",
+    "-m",
+    "nexgent",
+    "--root",
+    "NExgent",
+    "evaluate",
+    "--benchmark",
+    "scientific_discovery",
+    "--seeds",
+    "303"
+  ],
+  "exit_code": 0,
+  "study_id": "study-4a0364950cef472c",
+  "kind": "benchmark_evaluation",
+  "status": "completed",
+  "benchmark_id": "scientific_discovery",
+  "split": "final_transfer",
+  "seeds": [
+    303
+  ],
+  "registration_digest": "714e2642b71f0404b5debe88f1c8b9aadf95742344aa1c39ea7a12a1f42d1bb2",
+  "implementation_digest": "6b8431b31a0f66de2cc2eb64420e77270670d0b19405abf0d3afa89213dd7069",
+  "evaluator_digest": "cef29caa5d3871ee5a2deb690e480ca622ed7c89d173e10295a71ff755a4dc50",
+  "source": {
+    "program_id": "agent-ad28729c9a5d0504bceb",
+    "source_digest": "7146d3a43e1107c386c311317613af09dbe0626256e83d2cd9410ab2abb24602",
+    "component_digests": {
+      "meta.py": "3793d634a1d02ad9851a89ac1476854fdb114981d278471b172f35da6b844dbf",
+      "roles.json": "cae013a7aa6dc6bad4aefc965bdc5a7d9d2684aac6b6dae83df7b3c13a9ff2d9",
+      "task.py": "39a449e48181ad2ec36e14fa2d4dc08a98de2a7aaf82191e6bc6da66c85477b3",
+      "workflow.py": "e7c0bc216e270c6485a627edb3006b2aa57f11dcb0e2aacaad0c89c4fc20111b"
+    }
+  },
+  "source_process": {
+    "pid": 41256,
+    "entry": "solve_batch",
+    "bundle_id": "agent-ad28729c9a5d0504bceb",
+    "source_digest": "7146d3a43e1107c386c311317613af09dbe0626256e83d2cd9410ab2abb24602",
+    "elapsed_seconds": 9.46900000000096,
+    "instructions": 1625,
+    "rpc_count": 0,
+    "work_units": 9243277
+  },
+  "source_tool_receipts": 492,
+  "score": 0.7975788635802928,
+  "groups": {
+    "different_family": {
+      "failures": 0,
+      "missing": 0,
+      "nrmse": 0.05385780113323159,
+      "score": 0.7038590342095147,
+      "score_available": true,
+      "tasks": 4
+    },
+    "in_family": {
+      "failures": 0,
+      "missing": 0,
+      "nrmse": 0.5008849143201897,
+      "score": 0.8444387782656819,
+      "score_available": true,
+      "tasks": 8
+    }
+  },
+  "tasks": [
+    {
+      "task_id": "813a2df35b3d5321026707af",
+      "family": "linear_decay",
+      "group": "in_family",
+      "score": 0.9891192920776122,
+      "nrmse": 0.0011000400062497254,
+      "status": "ok",
+      "stable": true,
+      "complexity": 1
+    },
+    {
+      "task_id": "9b653bbac9a9203ac5e3ebd6",
+      "family": "logistic",
+      "group": "in_family",
+      "score": 0.9851227881088395,
+      "nrmse": 0.0015101885846860352,
+      "status": "ok",
+      "stable": true,
+      "complexity": 4
+    },
+    {
+      "task_id": "efa60ba07a5fda58b07b4e86",
+      "family": "cubic_relaxation",
+      "group": "in_family",
+      "score": 0.9934880867408643,
+      "nrmse": 0.0006554596221176514,
+      "status": "ok",
+      "stable": true,
+      "complexity": 2
+    },
+    {
+      "task_id": "0bbda8e65c0363c1913d6bac",
+      "family": "damped_oscillator",
+      "group": "in_family",
+      "score": 0.9864127609652014,
+      "nrmse": 0.0013774395032667217,
+      "status": "ok",
+      "stable": true,
+      "complexity": 3
+    },
+    {
+      "task_id": "1142637af7e93e16fadfca31",
+      "family": "predator_prey",
+      "group": "in_family",
+      "score": 0.9087158641673173,
+      "nrmse": 0.01004539916515367,
+      "status": "ok",
+      "stable": true,
+      "complexity": 15
+    },
+    {
+      "task_id": "57e6fc37619595f8362b39be",
+      "family": "duffing",
+      "group": "in_family",
+      "score": 0.913679488263008,
+      "nrmse": 0.00944757027446195,
+      "status": "ok",
+      "stable": true,
+      "complexity": 4
+    },
+    {
+      "task_id": "0fbf67880260e09e2ec9c22e",
+      "family": "logistic",
+      "group": "in_family",
+      "score": 0.9544511493616968,
+      "nrmse": 0.0047722558319265125,
+      "status": "ok",
+      "stable": true,
+      "complexity": 4
+    },
+    {
+      "task_id": "7160fcdcfdc995eb47cafbda",
+      "family": "damped_oscillator",
+      "group": "in_family",
+      "score": 0.02452079644091544,
+      "nrmse": 3.978170961573656,
+      "status": "ok",
+      "stable": true,
+      "complexity": 16
+    },
+    {
+      "task_id": "4da19b0da8c001f6acdffa96",
+      "family": "pendulum",
+      "group": "different_family",
+      "score": 0.7003242341089616,
+      "nrmse": 0.0427910032661261,
+      "status": "ok",
+      "stable": true,
+      "complexity": 12
+    },
+    {
+      "task_id": "cdaf872547b9e8f9a8bc8d16",
+      "family": "saturating_decay",
+      "group": "different_family",
+      "score": 0.9043565904611393,
+      "nrmse": 0.010575851444847812,
+      "status": "ok",
+      "stable": true,
+      "complexity": 4
+    },
+    {
+      "task_id": "fe3f1050eda93d1e60a9eaf1",
+      "family": "trigonometric_flow",
+      "group": "different_family",
+      "score": 0.42627221989630754,
+      "nrmse": 0.1345918765814141,
+      "status": "ok",
+      "stable": true,
+      "complexity": 6
+    },
+    {
+      "task_id": "b2bbc082b23e263c423805d1",
+      "family": "rational_growth",
+      "group": "different_family",
+      "score": 0.7844830923716506,
+      "nrmse": 0.027472473240538347,
+      "status": "ok",
+      "stable": true,
+      "complexity": 4
+    }
+  ],
+  "missing_seeds": [],
+  "unknown_work_seeds": [],
+  "usage": {
+    "model_calls": 0,
+    "reserved_completion_tokens": 0,
+    "reported_total_tokens": 0,
+    "unknown_usage_calls": 0,
+    "evaluations": 1,
+    "numeric_work_units": 13448077,
+    "physical_numeric_work_units": 13448077
+  },
+  "work_accounting": {
+    "work_units": 13448077,
+    "dataset_generation_work_units": 2592000,
+    "scoring_work_units": 1612800
+  },
+  "algorithm_task_failures": 0,
+  "task_count": 12,
+  "rsi_effect": false,
+  "model_calls": 0,
+  "model_tokens": 0,
+  "full_export": ".nexgent/exports/study-4a0364950cef472c.json",
+  "full_export_sha256": "c13c8990db0932737872da5178a54469a83d4b607e2458cab11f27267db81ee7",
+  "content_digest": "1cae5e52822c9164b456524125735fb1344fc399fea77d2ca26d28946cc65820"
+}

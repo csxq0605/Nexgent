@@ -12,7 +12,7 @@ from ..research import LiteratureSearch
 
 class ImprovementBroker:
     def __init__(self, gateway, *, parent_files, experiment, search=None, event=None,
-                 stop_event=None, max_parallel=4, source_bundle=None):
+                 stop_event=None, max_parallel=4, source_bundle=None, probe_improver=None):
         if type(max_parallel) is not int or not 1 <= max_parallel <= 8:
             raise ValueError("Parallel request cap must be within 1..8")
         self.gateway, self.parent_files = gateway, deepcopy(parent_files)
@@ -20,6 +20,7 @@ class ImprovementBroker:
         self.event, self.stop_event = event, stop_event
         self.max_parallel, self._lock = max_parallel, RLock()
         self.source_bundle = source_bundle
+        self.probe_improver = probe_improver
 
     def _stop(self):
         if self.stop_event is not None and self.stop_event.is_set():
@@ -40,7 +41,7 @@ class ImprovementBroker:
 
     def handle(self, method, params):
         self._stop()
-        if method not in {"ask", "parallel", "experiment", "search", "log"}:
+        if method not in {"ask", "parallel", "experiment", "probe_improver", "search", "log"}:
             raise ValueError("Unknown research capability")
         if not isinstance(params, dict) or len(json.dumps(params, allow_nan=False)) > 900000:
             raise ValueError("Capability parameters must be a bounded JSON object")
@@ -72,7 +73,7 @@ class ImprovementBroker:
                     if errors:
                         raise errors[0]
                 result = results
-            elif method == "experiment":
+            elif method in {"experiment", "probe_improver"}:
                 if set(params) != {"files", "label"} or not isinstance(params["files"], dict):
                     raise ValueError("experiment requires file replacements and a label")
                 if not isinstance(params["label"], str) or not params["label"].strip() or len(params["label"]) > 500:
@@ -80,7 +81,10 @@ class ImprovementBroker:
                 if any(not isinstance(k, str) or not isinstance(v, str) for k, v in params["files"].items()):
                     raise ValueError("experiment source replacements must be text")
                 files = {**deepcopy(self.parent_files), **deepcopy(params["files"])}
-                result = self.experiment(files, params["label"])
+                if method == "probe_improver" and self.probe_improver is None:
+                    raise ValueError("Improver probe is not available at this execution depth")
+                callback = self.experiment if method == "experiment" else self.probe_improver
+                result = callback(files, params["label"])
                 if not isinstance(result, dict) or result.get("split") != "development":
                     raise ValueError("Experiment callback must return development-only evidence")
             elif method == "search":

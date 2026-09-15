@@ -127,7 +127,7 @@ def summarize(receipt, *, reference_arm="seed", bootstrap_repetitions=10_000, bo
 
 
 def _provenance():
-    files = [Path(__file__), *sorted((ROOT / "src" / "nexgent" / "science").glob("*.py"))]
+    files = [Path(__file__), *sorted((ROOT / "benchmarks" / "scientific_discovery" / "src" / "nexgent_scientific_discovery").glob("*.py"))]
     files += [ROOT / "src" / "nexgent" / "kernel" / name for name in ("programs.py", "runner.py", "worker.py")]
     sources = {str(path.relative_to(ROOT)).replace("\\", "/"): path.read_text(encoding="utf-8") for path in files}
     return {"python": sys.version, "executable": sys.executable, "platform": platform.platform(), "dependencies": {name: importlib.metadata.version(name) for name in ("numpy", "scipy")}, "sources": sources, "sources_digest": digest(sources)}
@@ -136,11 +136,12 @@ def _provenance():
 def baseline(args):
     from nexgent.kernel.programs import make_bundle
     from nexgent.kernel.runner import ProgramRunner
-    from nexgent.science import ResearchBenchmark, seed_task_files, strong_baseline_files
+    from nexgent.benchmarks import BoundRunner
+    from nexgent_scientific_discovery import ScientificDiscoveryBenchmark, seed_task_files, strong_baseline_files
 
     if len(set(args.seeds)) != len(args.seeds):
         raise ValueError("all registered seeds must be distinct")
-    benchmark = ResearchBenchmark()
+    benchmark = ScientificDiscoveryBenchmark()
     created = utc_now()
     output = Path(args.output).resolve() if args.output else ROOT / ".nexgent" / "research-studies" / ("fixed-baselines-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".json")
     if output.exists():
@@ -157,7 +158,7 @@ def baseline(args):
         for step in protocol["run_order"]:
             for arm in step["arms"]:
                 before = time.monotonic()
-                measurement = benchmark.evaluate(bundles[arm], args.split, step["seed"], ProgramRunner(), max_work_units=args.max_work_units)
+                measurement = benchmark.evaluate(bundles[arm], args.split, step["seed"], BoundRunner(ProgramRunner(), benchmark.spec.toolbox_factory), max_work_units=args.max_work_units)
                 receipt["measurements"].append({"arm": arm, "seed": step["seed"], "completed_at": utc_now(), "wall_seconds": time.monotonic() - before, "measurement": measurement})
                 receipt["summary"] = summarize(receipt, bootstrap_repetitions=args.bootstrap_repetitions, bootstrap_seed=args.bootstrap_seed)
                 save_receipt(output, receipt)

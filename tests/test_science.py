@@ -5,7 +5,8 @@ import math
 import numpy as np
 import pytest
 
-from nexgent.science import ResearchBenchmark, Toolbox, NumericalFailure, WorkBudgetExceeded, seed_task_files, strong_baseline_files
+from nexgent_scientific_discovery import ScientificDiscoveryBenchmark, ResearchBenchmark, Toolbox, NumericalFailure, WorkBudgetExceeded, seed_task_files, strong_baseline_files
+from nexgent.benchmarks import BenchmarkRegistry, BoundRunner
 from nexgent.kernel.programs import make_bundle
 from nexgent.kernel.runner import ProgramRunner
 
@@ -123,7 +124,7 @@ def test_nonpolynomial_transfer_is_separately_reported_and_self_reported_score_i
 
 def test_real_source_runner_uses_observation_only_tools():
     problem = ResearchBenchmark().problems("development", 2)[0]
-    result = ProgramRunner().run(_bundle(seed_task_files()), "solve_batch", {"problems": [problem]}, timeout=30)
+    result = BoundRunner(ProgramRunner(), ScientificDiscoveryBenchmark.spec.toolbox_factory).run(_bundle(seed_task_files()), "solve_batch", {"problems": [problem]}, timeout=30)
     assert result["value"][0]["ok"], result
     assert result["execution"]["work_units"] > 0
     assert result["execution"]["science_receipts"]
@@ -170,3 +171,41 @@ def test_source_entry_budget_status_is_preserved_and_valid_tasks_are_not_dropped
     assert result["status"] == "budget_exhausted" and not result["score_available"]
     assert len(result["tasks"]) == 8
     assert sum(row["score_available"] for row in result["tasks"]) == 7
+
+
+def test_installed_science_plugin_exposes_public_context_and_complete_snapshot():
+    benchmark = BenchmarkRegistry().get("scientific_discovery")
+    assert isinstance(benchmark, ScientificDiscoveryBenchmark)
+    assert benchmark.initial_files() == strong_baseline_files()
+    context = benchmark.research_context()
+    assert not {"forecasts", "truth", "family", "parameters", "cases", "observations"} & set(context)
+    assert len(context["repository_review"]) == 3
+    # Context callers cannot mutate the next study's literature/role guidance.
+    context["repository_review"].clear()
+    context["role_guidance"].clear()
+    assert benchmark.research_context()["repository_review"]
+    assert benchmark.research_context()["role_guidance"]
+    snapshot = benchmark.snapshot()
+    assert {"benchmark.py", "toolbox.py", "expressions.py", "baselines.py", "adapter.py"} <= set(snapshot["files"])
+    assert set(snapshot["versions"]) == {"numpy", "scipy"}
+    assert snapshot["data"]["kind"] == "seeded_synthetic_generator"
+    assert snapshot["data"]["external_dataset"] is None
+    json.dumps(snapshot, allow_nan=False)
+
+
+def test_plugin_search_keeps_previous_review_distinct_from_live_failure():
+    benchmark = ScientificDiscoveryBenchmark()
+    benchmark._literature_search = lambda query: {"query": query, "status": "failed", "papers": [], "evidence_level": "metadata_and_abstract"}
+    result = benchmark.search("dynamical system identification")
+    assert result["status"] == result["live_retrieval_status"] == "failed"
+    assert result["papers"] == [] and len(result["domain_review"]) == 3
+
+
+def test_plugin_evaluator_runs_strong_source_with_only_installed_toolbox_binding():
+    benchmark = BenchmarkRegistry().get("scientific_discovery")
+    runner = BoundRunner(ProgramRunner(), benchmark.spec.toolbox_factory)
+    result = benchmark.evaluate(_bundle(benchmark.initial_files()), "development", 4, runner)
+    assert result["score_available"] and result["score"] > 0.65
+    assert len(result["tasks"]) == 8
+    assert result["execution"]["work_units"] > 0
+    assert result["work_units"] == result["dataset_generation_work_units"] + result["scoring_work_units"] + result["execution"]["work_units"]

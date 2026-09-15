@@ -1,6 +1,6 @@
 # 源码 RSI 共享实现契约
 
-状态：供本轮实现统一使用，接口变动由根代理协调。新包唯一位置 `src/nexgent`，旧 `nexgent/nexgent` 是待迁出基线。
+状态：供本轮实现统一使用，接口变动由根代理协调。产品包唯一位置为 `src/nexgent`；旧 `nexgent/nexgent` 已连同旧运行产物迁出当前仓库，保存在相邻目录 `NExgent-rejected-prototype-20260915`。
 
 ## 1. 源码版本
 

@@ -306,3 +306,7 @@ B1 source + entry=improve execution receipt -> generated B2
 [机制审查 §5](source-mechanism-review-20260916.md#5-下一项元机制研究把实际改进器探测交还给研究程序) 给出尚未实施的 `probe_improver` 契约：同一已注册 task 起点、冻结公开历史、真实执行新旧 improve、开发后代效用反馈、最大嵌套深度 1、同账本预算与单 outer 一次探测。两代机制 pilot 首先检验真实反馈和继承，零收益、负收益及未验证修订仍保留其证据状态；能力接通与元生产率提高是不同结论。
 
 Nexgent 的定位是**通用 RSI 智能体框架**。科学发现是本文的演示领域；核心 seed、模型编排、源码继承和探测不能依赖 SINDy、动力系统或固定任务数量。领域任务、工具、文献、种子与评价由独立 adapter 注册，通过 `context.domain/task_contract/tool_api/literature` 提供给同一通用研究程序。将科学内容移至 `examples/scientific_discovery` 与第二领域验证属于下一阶段工作，尚不能当成已完成或跨领域效果已获证明。
+
+**0.8 实现状态补注（2026-09-16）：** 上段及 §11.7 的“尚未实施/下一阶段”描述保留的是 0.7 审查结束时的设计状态。现已完成通用核心与领域包的源码分离；最终实际路径为 [benchmarks/scientific_discovery](../../benchmarks/scientific_discovery/) 和 [benchmarks/bbh](../../benchmarks/bbh/)，并非先前拟定的 `examples/`。领域通过 `nexgent.benchmarks` entry point 注册，核心 `agents.seed` 要求注册领域提供 task 源码，不再导入科学包或固定科学任务数量。科学方法资料与提示归属科学插件，BBH 插件是另一个领域适配器。
+
+`probe_improver`、实际新旧改进器执行、探测后证据反馈与未验证修订的区分也已实现。独立 `controller.meta_evaluate` 已经由真实本地源码进程的跨 benchmark fixture 验证：两个原始 M 分别保留身份，共用目标 task 起点；目标工具和契约进入实际进程；跨域不运行旧 task 的 2×2 归因；私有转移反馈不进入后续生成请求。顶层或任务行显式 `score_available=false` 均作为缺测。这些测试使用脚本模型回复，证明接口与执行链，不能证明真实模型跨领域元生产率提高。上文两个 full 的无 meta 改动结果及注释修订反例保持不变；新两代真实模型机制 pilot 尚需按其独立注册记录报告结果。

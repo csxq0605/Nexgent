@@ -20,6 +20,7 @@ from nexgent.kernel import runner as runner_module
 from nexgent.kernel.programs import ProgramError, make_bundle, validate_source, verify_bundle
 from nexgent.kernel.runner import ProgramRunner
 from nexgent.kernel.store import BudgetExhausted, Store
+from nexgent.benchmarks import BenchmarkSpec, BoundRunner
 
 
 TASK = "def solve(problem, tools):\n    return {'answer': 3}\n"
@@ -36,10 +37,7 @@ def source_runner(tmp_path, monkeypatch):
     original = Path(runner_module.__file__).parent
     shutil.copytree(original, package / "kernel", ignore=shutil.ignore_patterns("__pycache__"))
     (package / "__init__.py").write_text("", encoding="utf-8")
-    science = package / "science"
-    science.mkdir()
-    (science / "__init__.py").write_text("", encoding="utf-8")
-    (science / "toolbox.py").write_text(
+    (package / "fixture_tools.py").write_text(
         "class Toolbox:\n"
         "    def __init__(self, max_work_units=100):\n"
         "        self.work_units = 0\n"
@@ -61,7 +59,7 @@ def source_runner(tmp_path, monkeypatch):
         launched.append(process)
         return process
     monkeypatch.setattr(runner_module.subprocess, "Popen", track_process)
-    yield ProgramRunner()
+    yield BoundRunner(ProgramRunner(), "nexgent.fixture_tools:Toolbox")
     assert all(process.poll() is not None for process in launched), "A source worker survived runner cleanup"
 
 
@@ -130,6 +128,7 @@ def test_local_data_mutation_remains_available(source_runner):
 
 
 def test_actual_numerical_facade_runs_under_audit_hook():
+    plugin = pytest.importorskip("nexgent_scientific_discovery")
     source = """def solve(problem, tools):
     points = [[float(i)] for i in range(11)]
     smoothed = tools.smooth(points, window=5, degree=2)
@@ -141,7 +140,7 @@ def test_actual_numerical_facade_runs_under_audit_hook():
     return {'coefficients': fitted['coefficients'], 'reported_work': tools.work_units}
 """
     result = ProgramRunner().run(bundle(task=source), "solve_batch", {"problems": [{}]},
-                                 timeout=10, max_work_units=100000)
+                                 timeout=10, max_work_units=100000, toolbox_factory=plugin.ScientificDiscoveryBenchmark.spec.toolbox_factory)
     task = result["value"][0]
     assert task["ok"], task
     assert task["submission"]["coefficients"][0][0] == pytest.approx(1.0, abs=1e-8)
@@ -393,8 +392,12 @@ def test_evaluation_cache_binds_source_evaluator_seed_protocol_and_budget(tmp_pa
     from nexgent.evolution.controller import StudyController
 
     class Benchmark:
+        spec = BenchmarkSpec("cache_fixture", "Cache fixture", "Synthetic", "Return an answer")
         evaluator_digest = "frozen-evaluator-A"
         def __init__(self): self.calls = []
+        def initial_files(self): return {"task.py": TASK}
+        def snapshot(self): return {"fixture": self.evaluator_digest}
+        def research_context(self): return {}
         def evaluate(self, program, split, seed, runner, **kwargs):
             self.calls.append((program["digest"], self.evaluator_digest, seed, kwargs["max_work_units"]))
             return {"score": 0.5, "status": "ok", "split": split, "seed": seed, "work_units": 10,

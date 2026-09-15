@@ -1,18 +1,22 @@
-# 研究信息空间
+# RSI 实验空间
 
-当前实现：`src/nexgent/ui/`，桌面入口 `python -m nexgent.ui.app`。本界面只依赖新科研控制器与显式项目模型配置，没有迁入旧聊天窗口、Agent、Tools、ConfigDialog 或 ModelRegistry。
+当前实现：`src/nexgent/ui/`，桌面入口 `python -m nexgent.ui.app`。界面依赖通用实验控制器、已安装的 benchmark 插件与显式项目模型配置，没有迁入旧聊天窗口、Agent、Tools、ConfigDialog 或 ModelRegistry。科学发现是可选择的演示领域，界面不假定所有任务都是科学计算。
 
 ## 1. 用户流程
 
-用户输入研究目标，设置轮数、模型调用上限与输出 Token 预算，然后启动研究。模式与控制器一致：
+用户从 `controller.list_benchmarks()` 返回的已安装插件选择任务基准，输入目标，设置轮数、模型调用上限与输出 Token 预算，然后启动研究。没有可用插件时说明安装方式和实际配置错误，禁用执行；原有记录仍可浏览与导出。模式与控制器一致：
 
 - **完整 RSI**：`full`，允许任务与改进器源码演化。
 - **固定改进器对照**：`task_only`。
 - **仅冠军分支对照**：`greedy`。
 
-强静态科研基线由控制器在每项研究中执行，不是一个额外演化模式。模型配置显示当前 profile、缺失项和读取错误；连接未经实际请求时明确标为尚未验证。凭据配置通过本项目 `models.json` 或 `.env` 完成，界面不显示密钥。
+初始任务基线由所选插件提供，不是一个额外演化模式。模型配置显示当前 profile、缺失项和读取错误；连接未经实际请求时明确标为尚未验证。凭据配置通过本项目 `models.json` 或 `.env` 完成，界面不显示密钥。
 
 浏览已有研究时收起新建表单，主体呈现记录自身的模式、资源、证据和结论。运行期间可以停止并保存；恢复针对同一研究 ID，保留原预算与测量。完成的研究可以“继续自改进”：打开新资源表单，调用 `continue_research` 从已保存探索源码注册一个后续研究，再异步执行。旧记录不会被当作新研究覆盖。
+
+继续研究锁定原 benchmark，不会因当前下拉框选择不同而换成另一个领域。未登记插件身份的旧记录只读保留；恢复或继续要求原插件仍然可用。新研究显式传入 `benchmark_id`，不把某个演示基准作为核心默认值。
+
+`kind=benchmark_evaluation` 是固定任务程序的基准执行，窗口展示逐种子 planned/admitted/measured/missing、完整均值及仅已观测部分的均值，明确没有执行自改进；不会通过通用研究恢复按钮重发。协议完成但有缺测时，顶部与历史均显示“已完成 · 存在缺测”，包括所有种子均缺测的情况。`kind=meta_evaluation` 同样只读展示，保留专门协议的操作边界。原始实验记录始终可以导出。
 
 ## 2. 信息结构
 
@@ -22,9 +26,14 @@
 | 资料与假说 | 实际来源、阅读范围、检索失败、观察与可反驳判断 | 原文/摘要、来源链接、机制分析、局限与完整研究记录 |
 | 实验与反例 | 候选独立评价、得分变化、实际实验、失败与反例 | 数值任务、计算成本、执行收据与拒绝原因 |
 | 源码谱系 | 版本父子关系、任务冠军、探索父代 | 内容摘要、task/meta/workflow/roles 文件与真实父子差异 |
+| 改进器效能 | 开发集探测与独立后代对照分别展示 | 真实 RPC 状态、初始/候选开发增益、独立种子配对、缺测、实际成本、源码身份与原始工件 |
 | 结论与知识 | 未见任务评价、源码修改与继承执行、元能力证据、知识条目 | 关联测量与完整研究导出 |
 
 界面只绘制存储的源码 parent_id 关系。科研能力的输入、输出与依赖工件保持在真实事件详情中，不按角色名称推断一个未执行的 DAG。未来若增加专门工件图，也必须以这些持久引用为依据。
+
+“改进器效能”只读取已存储证据，不触发探测或模型请求。开发探测来自宿主 `capability` 事件的 `probe_improver` 方法，同一个 RPC 的开始与终止合并显示；智能体自述日志不能充当实际执行证明。`started`、失败、不完整、相同改进器跳过均有单独状态。开发增益与独立迁移收益分别列出，不互相代替。
+
+独立对照同时支持原研究的 `conclusion.meta_evaluation` 与独立实验的顶层 `meta_evaluation`。显示每个种子的初始、演化改进器收益和差值；缺测保持缺测，显示完整配对数、已报告用量与缺失用量。探测/对照的完整源包只在用户打开原始记录或导出时查看，不在默认页面铺开。
 
 ## 3. 结论和数值的表达
 
@@ -42,18 +51,21 @@
 
 ```text
 StudyController(project_root)
-create(question, generations, arm, budget) -> ready state
+list_benchmarks() -> installed benchmark metadata and availability
+create(question, generations=3, arm='full', seed=0, budget=None, *, benchmark_id) -> ready state
 run(study_id, progress, stop_event) -> terminal state
 get(study_id) -> public snapshot
 list_studies() -> study summaries
 get_program(program_id) -> immutable source bundle
-continue_research(study_id, generations, budget) -> new ready state
+continue_research(study_id, *, generations=3, budget=None) -> new ready state
 export(study_id, destination) -> export path
 ```
 
 阻塞 `run` 在 Qt worker 线程中运行，进度以复制后的快照传给主线程。源码 bundle 按 ID 懒读取并缓存，UI 不直接访问控制器内部 Store。
 
 当前使用研究更新时间与事件序号拒绝迟到的旧快照。选中的历史 ID 与本窗口运行 ID 独立：运行 A、查看 B 时，A 的进度不会覆盖 B；导出始终使用 B。切换研究会清除原先准备继续的目标，避免从错误谱系启动后续研究。
+
+同一研究刷新时保留正在查看的源码版本、文件及滚动位置；父源码不能读取时禁用差异比较，不把缺失源码解释为空文件。导出从打开保存对话框前锁定研究 ID，避免对话框期间的界面事件改变导出对象。
 
 模型请求过程中也可能产生新收据，因此仅在本窗口 worker 活动或所选记录为 running 时，每两秒只读查询公开快照；空闲、切换到静态记录或关闭窗口后停止。查询不会调用 run、创建研究或发起模型请求，也支持查看 CLI 启动的研究。
 
@@ -71,9 +83,13 @@ python -m nexgent.ui.app --project E:\path\to\research-workspace
 
 ## 6. 阶段验证
 
-2026-09-16，`tests/test_ui.py` **21 项通过**。覆盖真实合同字段投影、历史与后台隔离、迟到快照拒绝、正确模式/预算、停止恢复与关闭、继续自改进及目标隔离、活动期只读收据刷新与空闲停止、缺测表达、错误可见、导出身份、真实源码 diff、HTML 转义与凭据不显示。
+阶段 1 提交 `36d70a2a95c128fa0bb5a6ed476b40841f91500f` 的 [GitHub Actions 34995410595](https://github.com/csxq0605/Nexgent/actions/runs/34995410595) 已核实四项通过：Windows/Linux × Python 3.11/3.12。该 CI 证据对应阶段 1 提交，不包含下述后续界面改动。
+
+2026-09-16，后续 `tests/test_ui.py` 在本机 Windows Python 3.12 **49 项通过**。覆盖真实合同字段投影、历史与后台隔离、迟到快照拒绝、正确模式/预算、停止恢复与关闭、继续自改进及目标隔离、活动期只读收据刷新与空闲停止、缺测表达、错误可见、导出身份、真实源码 diff、HTML 转义与凭据不显示；新增元对照双位置读取、探测 RPC 生命周期和无执行/失败/缺测状态、源文件选择保留、保存对话框的目标隔离，以及插件发现、配置错误、显式 benchmark 注册和继续研究的领域锁定。固定程序评价的专门状态与顶部缺测、旧/新反例类型，以及实际控制器在无插件环境中的窗口启动也被覆盖。与 BBH 插件 18 项测试共同运行得到 67 项通过。
 
 在独立空工作区执行 `nexgent.ui.app.main` 并自动退出，返回码为 0，没有研究或模型请求。
+
+通用核心无插件入口另经真实 Qt 冒烟检查：注册表为空，未导入科学或 BBH 插件，0 研究、0 源码 worker，1480×980，自动关闭返回 0；没有遗留窗口。该过程把 create/run/continue/meta 方法禁用，确保检查不能触发研究。
 
 另只读载入阶段真实记录 `study-b1b2c2500a5f4d54`，五页均正常渲染：三轮、9 次模型调用、3 个源码版本、2 条独立评价，任务冠军仍第 0 代。界面准确显示来源失败、候选回归与未见任务平均变化为零。此记录用于界面整合验证，不代表研究目标已完成或科学改进成立。
 

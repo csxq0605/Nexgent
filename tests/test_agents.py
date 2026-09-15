@@ -3,6 +3,7 @@
 from copy import deepcopy
 import io
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from nexgent.agents import ImprovementBroker, seed_files
+from nexgent.agents.seed import WORKFLOW_SOURCE, META_SOURCE
 from nexgent.kernel.programs import make_bundle
 from nexgent.kernel.runner import ProgramRunner
 from nexgent.models import ModelGateway, ModelError, ModelConfigurationError, ModelBudgetError
@@ -446,3 +448,319 @@ def test_seed_parent_selector_can_explore_unexpanded_missing_score_program():
         {"id": "unexpanded-missing", "score": None, "score_available": False, "children": 0}], timeout=10)
     assert result["value"] == "unexpanded-missing"
     assert result["execution"]["source_digest"] == original["digest"]
+
+
+def seed_namespace():
+    """Execute the actual editable source with a scripted capability surface."""
+    namespace = {"math": math}
+    exec(WORKFLOW_SOURCE, namespace)
+    exec(META_SOURCE, namespace)
+    return namespace
+
+
+def meta_design(role="changed_writer"):
+    source = ('def improve(context, broker):\n'
+              f'    return broker.ask("{role}", "Generate one task source candidate", '
+              '{"parent": context["parent"], "domain": context.get("domain", {})}, max_tokens=6000)\n')
+    return {"candidates": [{"files": {"meta.py": source}, "rationale": "Fixture changes the actual model delegation",
+        "hypothesis": "A distinct role actually generates the task offspring",
+        "code_evidence": [{"file": "meta.py", "new_code": f'broker.ask("{role}"',
+                           "mechanism": "Actual changed source-defined dispatch"}]}], "research": {"falsification": "No changed dispatch in execution"}}
+
+
+def probe_report(gain=.1, status="completed", reason=None):
+    report = {"schema": "nexgent-improver-probe-v1", "probe_id": "fixture-probe", "split": "development",
+        "status": status, "arms": [{"arm": name, "status": "complete", "development_gain": value, "attempts": [
+            {"execution": {"source_digest": name, "entry": "improve"}}]} for name, value in [("initial", .2), ("evolved", .2 + (gain or 0))]],
+        "aggregate": {"paired_development_gain": gain}, "costs": {"model_calls": 4}}
+    if reason:
+        report["reason"] = reason
+    return report
+
+
+def run_meta_fixture(designs, report=None, budget=None, overrides=None):
+    original = make_bundle(seed_files({"task.py": "def solve(problem, tools):\n    return {'answer': 0}\n"}))
+    context = {"parent": original, "roles": json.loads(original["files"]["roles.json"]),
+        "domain": {"id": "fixture_domain", "title": "Fixture contract"}, "task_contract": {"score_direction": "maximize"},
+        "tool_api": "Fixture task capability contract", "runtime_contract": "Fixture source protocol",
+        "literature": [{"url": "https://example.test/registered-prior", "evidence_level": "fixture"}],
+        "capabilities": {"probe_improver": True}, "editable_components": ["task.py", "meta.py", "workflow.py", "roles.json"],
+        "development": {"status": "ok", "score": .4, "score_available": True},
+        "failures": [{"kind": "measured_counterexample", "candidate_id": original["id"], "decision": {"delta": 0}}],
+        "budget": budget if budget is not None else {"remaining_calls": 18, "remaining_completion_tokens": 90000}}
+    context.update(overrides or {})
+    calls, probes, experiments, logs = [], [], [], []
+    pending = list(designs)
+    class Broker:
+        def ask(self, role, prompt, payload, max_tokens=6000):
+            calls.append({"role": role, "prompt": prompt, "payload": deepcopy(payload), "max_tokens": max_tokens})
+            if role == "main":
+                assert pending, "Unexpected extra paid design/repair attempt"
+                response = pending.pop(0)
+                if isinstance(response, Exception):
+                    raise response
+                return response
+            return {"observations": ["Fixture evidence only"]}
+        def parallel(self, requests):
+            return [self.ask(**request) for request in requests]
+        def search(self, query):
+            return {"status": "no_results", "query": query, "papers": []}
+        def experiment(self, files, label):
+            experiments.append((deepcopy(files), label))
+            return {"status": "ok", "split": "development", "score": .9, "score_available": True}
+        def probe_improver(self, files, label):
+            probes.append((deepcopy(files), label))
+            if isinstance(report, Exception):
+                raise report
+            return deepcopy(report if report is not None else probe_report())
+        def log(self, kind, content):
+            logs.append((kind, deepcopy(content)))
+    result = seed_namespace()["improve"](context, Broker())
+    return result, calls, probes, experiments, context, logs
+
+
+def test_seed_requires_registered_task_seed_and_contains_no_domain_algorithm():
+    with pytest.raises(ValueError, match="registered domain"):
+        seed_files()
+    source = Path(__import__("nexgent.agents.seed", fromlist=["seed_files"]).__file__).read_text(encoding="utf-8")
+    for forbidden in ["from ..science", "SINDy", "dynamics", "8 development", "12 transfer", "numerical_budget"]:
+        assert forbidden not in source
+
+
+@pytest.mark.parametrize("domain", [
+    {"id": "sequence_ordering", "title": "Ordering", "description": "Recover a valid sequence", "research_context": "Partial orders"},
+    {"id": "text_rewriting", "title": "Text", "description": "Revise a document", "research_context": "Edit constraints"},
+])
+def test_same_seed_passes_registered_domain_contract_and_priors_to_task_research(domain):
+    contract, tools = {"entry": "solve", "output": "adapter-defined"}, "tools supplied by this adapter"
+    result, calls, probes, experiments, context, logs = run_meta_fixture([source_design(7)], overrides={
+        "domain": domain, "task_contract": contract, "tool_api": tools,
+        "capabilities": {"probe_improver": False}, "editable_components": ["task.py"]})
+    assert len(calls) == 3 and len(experiments) == 1 and probes == []
+    for call in calls:
+        assert call["payload"]["domain"] == domain and call["payload"]["task_contract"] == contract
+        assert call["payload"]["tool_api"] == tools
+        assert call["payload"]["literature"]["registered"] == context["literature"]
+    assert set(result["candidates"][0]["files"]) == {"task.py"}
+
+
+def test_comment_audit_preserves_strings_and_indentation_while_rejecting_cosmetic_revision():
+    audit = seed_namespace()["source_without_comments"]
+    source = "def f():\n    # old explanation\n    return '#literal'\n"
+    assert audit(source) == audit(source.replace("old explanation", "claimed novel mechanism"))
+    assert audit(source) == audit(source.replace("    # old explanation\n", ""))
+    assert audit(source) != audit(source.replace("#literal", "#different literal"))
+    assert audit('value = """a\n\n# literal\nb"""\n') != audit('value = """a\n# literal\nb"""\n')
+    assert audit("if True:\n    a = 1\n    b = 2\n") != audit("if True:\n    a = 1\nb = 2\n")
+
+
+def test_comment_only_task_repair_keeps_prior_measurement_and_avoids_another_experiment():
+    repeated = source_design(3)
+    repeated["candidates"][0]["files"]["task.py"] = "# This fixes the algorithm (unsupported claim)\n" + repeated["candidates"][0]["files"]["task.py"]
+    value, calls, experiments, original, events = run_repair_fixture([source_design(3), repeated])
+    assert len(calls) == 4 and len(experiments) == 1
+    assert value["research"]["repair"]["status"] == "repair_noop"
+    assert value["research"]["revisions"][0]["difference_from_tested"]["comments_only_or_identical"]
+
+
+def test_meta_trigger_requires_capability_and_source_linked_or_registered_public_evidence():
+    trigger = seed_namespace()["meta_research_trigger"]
+    context = {"capabilities": {"probe_improver": True}, "editable_components": ["meta.py"],
+               "parent": {"id": "current"}, "failures": [{"kind": "counterexample", "candidate_id": "unrelated"}]}
+    assert trigger(context) == []
+    context["prior_research"] = {"study_id": "public-prior", "scope": "development_and_selection_only", "artifact": "evidence"}
+    assert trigger(context)[0]["kind"] == "registered_prior_research_problem"
+    context["capabilities"]["probe_improver"] = False
+    assert trigger(context) == []
+    context["capabilities"]["probe_improver"] = True
+    context["editable_components"] = ["task.py"]
+    assert trigger(context) == []
+
+
+def test_meta_trigger_accepts_explicit_null_prior_from_new_study_context():
+    trigger = seed_namespace()["meta_research_trigger"]
+    context = {"capabilities": {"probe_improver": True}, "editable_components": ["meta.py"],
+               "parent": {"id": "current"}, "prior_research": None, "failures": []}
+    assert trigger(context) == []
+    context["failures"] = [{"kind": "counterexample", "candidate_id": "current"}]
+    assert trigger(context)[0]["kind"] == "source_linked_failure"
+
+
+def test_meta_research_probes_actual_proposed_source_once_and_records_provisional_evidence():
+    result, calls, probes, experiments, context, logs = run_meta_fixture([meta_design()])
+    assert len(calls) == 3 and len(probes) == 1 and experiments == []
+    assert probes[0][0] == meta_design()["candidates"][0]["files"]
+    assert all(call["payload"]["editable_components"] == ["meta.py"] for call in calls)
+    assert result["candidates"][0]["evidence_status"] == "development_supported"
+    assert result["candidates"][0]["probe_id"] == "fixture-probe"
+    assert result["research"]["probes"][0] == probe_report()
+    assert "transfer" in result["research"]["probe_interpretation"]["scope"]
+
+
+def test_meta_negative_actual_probe_informs_single_unverified_source_repair():
+    actual = probe_report(gain=-.15)
+    result, calls, probes, experiments, context, logs = run_meta_fixture([meta_design(), meta_design("revised_writer")], report=actual)
+    assert len(calls) == 4 and sum(call["max_tokens"] for call in calls) == 16400 and len(probes) == 1
+    assert calls[-1]["payload"]["actual_probe"] == actual
+    assert calls[-1]["payload"]["previous_candidate"]["files"] == probes[0][0]
+    selected = result["candidates"][0]
+    assert selected["files"] == meta_design("revised_writer")["candidates"][0]["files"]
+    assert selected["evidence_status"] == "unverified" and selected["needs_probe"]
+    assert selected["based_on_probe_id"] == "fixture-probe" and "probe_id" not in selected
+    assert result["research"]["repair"]["status"] == "unverified_revision_after_probe"
+
+
+def test_meta_comments_only_repair_preserves_negative_evidence_without_false_retest():
+    revision = meta_design()
+    revision["candidates"][0]["files"]["meta.py"] = "# Claimed new mechanism\n" + revision["candidates"][0]["files"]["meta.py"]
+    result, calls, probes, experiments, context, logs = run_meta_fixture([meta_design(), revision], report=probe_report(gain=0))
+    assert len(probes) == 1 and len(calls) == 4
+    assert result["candidates"][0]["evidence_status"] == "unproven"
+    assert result["candidates"][0]["files"] == meta_design()["candidates"][0]["files"]
+    assert result["research"]["repair"]["status"] == "invalid_or_noop_repair"
+
+
+@pytest.mark.parametrize("report", [
+    {"schema": "nexgent-improver-probe-v1", "status": "incomplete", "reason": "insufficient_budget", "arms": [], "aggregate": {}},
+    {"schema": "nexgent-improver-probe-v1", "status": "skipped_identical_improver", "arms": [], "aggregate": {}},
+])
+def test_meta_probe_skip_has_no_invented_gain_or_followup_model_retry(report):
+    result, calls, probes, experiments, context, logs = run_meta_fixture([meta_design()], report=report)
+    assert len(calls) == 3 and len(probes) == 1
+    assert result["candidates"][0]["evidence_status"] == "unproven"
+    assert result["research"]["probes"][0]["aggregate"] == {}
+
+
+def test_meta_negative_probe_without_repair_reservation_returns_unproven_research_branch():
+    result, calls, probes, experiments, context, logs = run_meta_fixture([meta_design()], report=probe_report(gain=-.1),
+        budget={"remaining_calls": 15, "remaining_completion_tokens": 70400})
+    assert len(calls) == 3 and len(probes) == 1
+    assert result["candidates"][0]["evidence_status"] == "unproven"
+    assert not result["research"]["budget_plan"]["repair_reserved"]
+
+
+def test_meta_insufficient_whole_pair_budget_falls_back_before_design_or_probe():
+    result, calls, probes, experiments, context, logs = run_meta_fixture([source_design(7)],
+        budget={"remaining_calls": 14, "remaining_completion_tokens": 70400})
+    assert len(calls) == 3 and not probes and len(experiments) == 1
+    assert result["research"]["meta_research_skipped"]["status"] == "insufficient_budget_for_paired_probe"
+
+
+def test_meta_invalid_design_may_use_one_repair_before_probe_but_never_another_after():
+    result, calls, probes, experiments, context, logs = run_meta_fixture([source_design(7), meta_design()], report=probe_report(gain=-.1))
+    assert len(calls) == 4 and len(probes) == 1
+    assert calls[-1]["payload"]["phase"] == "meta_source_repair_before_probe"
+    assert result["research"]["repair"]["status"] == "used_before_probe"
+    assert result["candidates"][0]["evidence_status"] == "unproven"
+
+
+def test_meta_probe_transport_failure_is_missing_not_a_measured_zero_or_retry():
+    result, calls, probes, experiments, context, logs = run_meta_fixture([meta_design()], report=RuntimeError("worker stopped"),
+        budget={"remaining_calls": 15, "remaining_completion_tokens": 70400})
+    assert len(probes) == 1 and len(calls) == 3
+    assert result["research"]["probes"][0]["status"] == "incomplete"
+    assert result["research"]["probes"][0]["aggregate"] == {}
+    assert result["candidates"][0]["evidence_status"] == "unproven"
+
+
+def test_real_source_outer_probe_runs_two_actual_improvers_and_inherits_changed_dispatch():
+    """Local source processes and real measurements; model replies alone are scripted."""
+    from nexgent.evolution.meta_evaluation import evaluate_improver_probe
+    original = make_bundle(seed_files({"task.py": "def solve(problem, tools):\n    return {'answer': 0}\n"}))
+    runner = ProgramRunner()
+    outer_calls, inner_calls, probe_records, inner_executions = [], [], [], []
+    class OuterGateway:
+        def ask(self, **request):
+            outer_calls.append(deepcopy(request))
+            return meta_design() if request["role"] == "main" else {"observations": ["Fixture dispatch hypothesis"]}
+    def evaluate(bundle, split, seed):
+        assert split == "development", "The meta probe must not request held-out data"
+        response = runner.run(bundle, "solve_batch", {"problems": [{}]}, timeout=10)
+        return {"split": split, "status": "ok", "score_available": True,
+                "score": response["value"][0]["submission"]["answer"] / 10,
+                "work_units": 0, "execution": response["execution"]}
+    def generate(bundle, context, label):
+        before = len(inner_calls)
+        receipts, reports = [], []
+        class InnerGateway:
+            def ask(self, **request):
+                inner_calls.append(deepcopy(request))
+                receipts.append({"call_id": "scripted-" + str(len(inner_calls)), "status": "received",
+                    "reserved_completion_tokens": request.get("max_tokens", 6000),
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
+                if request["role"] == "changed_writer":
+                    return source_design(8)
+                if request["role"] == "main":
+                    return source_design(6)
+                return {"observations": ["Scripted ordinary task research"]}
+        def experiment(files, label):
+            report = evaluate(make_bundle(files), "development", context["seed"])
+            reports.append(report)
+            return report
+        context.update(capabilities={"probe_improver": False}, editable_components=["task.py"],
+            domain={"id": "literal_fixture"}, task_contract={"score_direction": "maximize"},
+            budget={"remaining_calls": 6, "remaining_completion_tokens": 30000})
+        broker = ImprovementBroker(InnerGateway(), parent_files=bundle["files"], experiment=experiment,
+            search=lambda query: {"status": "no_results", "papers": []})
+        response = runner.run(bundle, "improve", context, handler=broker.handle, timeout=15)
+        inner_executions.append({"source": bundle, "execution": response["execution"],
+                                 "roles": [row["role"] for row in inner_calls[before:]]})
+        return {"candidates": [make_bundle(row["files"], parent=bundle) for row in response["value"]["candidates"]],
+                "execution": response["execution"], "research": response["value"].get("research", {}),
+                "calls": receipts, "numerical_reports": reports}
+    def probe(files, label):
+        assert not probe_records, "The outer source must never perform a second probe"
+        candidate = make_bundle(files, parent=original)
+        report = evaluate_improver_probe(original, candidate, original, seed=12, generate=generate, evaluate=evaluate)
+        report["probe_id"] = "actual-local-source-probe"
+        probe_records.append(deepcopy(report))
+        return report
+    broker = ImprovementBroker(OuterGateway(), parent_files=original["files"], experiment=None,
+        search=lambda query: {"status": "no_results", "papers": []}, probe_improver=probe)
+    context = {"parent": original, "roles": json.loads(original["files"]["roles.json"]),
+        "domain": {"id": "literal_fixture"}, "capabilities": {"probe_improver": True},
+        "editable_components": ["task.py", "meta.py", "workflow.py", "roles.json"],
+        "failures": [{"kind": "measured_counterexample", "candidate_id": original["id"]}],
+        "budget": {"remaining_calls": 18, "remaining_completion_tokens": 90000}}
+    outer = runner.run(original, "improve", context, handler=broker.handle, timeout=40)
+    assert len(probe_records) == 1 and len(outer_calls) == 3
+    actual = probe_records[0]
+    assert actual["status"] == "completed" and actual["aggregate"]["paired_development_gain"] == pytest.approx(.2)
+    assert len(inner_executions) == 2
+    assert set(inner_executions[0]["roles"][:2]) == {"mechanism_researcher", "experimental_critic"}
+    assert inner_executions[0]["roles"][-1] == "main"
+    assert inner_executions[1]["roles"] == ["changed_writer"]
+    assert all(row["execution"]["source_digest"] == row["source"]["digest"] for row in inner_executions)
+    assert inner_executions[0]["execution"]["source_digest"] != inner_executions[1]["execution"]["source_digest"]
+    assert outer["execution"]["source_digest"] == original["digest"]
+    candidate = outer["value"]["candidates"][0]
+    assert candidate["evidence_status"] == "development_supported"
+    assert outer["value"]["research"]["probes"][0]["probe_id"] == "actual-local-source-probe"
+    # Freeze and inherit the actual proposed M; its next execution uses its own changed dispatch.
+    successor = make_bundle(candidate["files"], parent=original)
+    inherited = generate(successor, {"parent": successor, "seed": 12, "development": {"status": "ok", "score": 0}}, "next-generation")
+    assert inherited["execution"]["source_digest"] == successor["digest"]
+    assert inner_executions[-1]["roles"] == ["changed_writer"]
+
+
+def test_failed_post_probe_model_repair_retains_actual_negative_probe_and_candidate():
+    result, calls, probes, experiments, context, logs = run_meta_fixture(
+        [meta_design(), RuntimeError("model transport failed")], report=probe_report(gain=-.1))
+    assert len(calls) == 4 and len(probes) == 1
+    assert result["research"]["repair"]["status"] == "model_repair_failed"
+    assert result["research"]["probes"][0]["aggregate"]["paired_development_gain"] == -.1
+    assert result["candidates"][0]["evidence_status"] == "unproven"
+
+
+@pytest.mark.parametrize("mutation", ["missing_source_receipt", "missing_cost_receipt", "incomplete_arm"])
+def test_positive_probe_number_cannot_promote_missing_actual_evidence(mutation):
+    report = probe_report(gain=.1)
+    if mutation == "missing_source_receipt":
+        report["arms"][0]["attempts"][0]["execution"] = None
+    elif mutation == "missing_cost_receipt":
+        report["evidence"] = {"missing": [{"kind": "model_calls"}]}
+    else:
+        report["arms"][1]["status"] = "incomplete"
+    result, calls, probes, experiments, context, logs = run_meta_fixture([meta_design()], report=report,
+        budget={"remaining_calls": 15, "remaining_completion_tokens": 70400})
+    assert result["candidates"][0]["evidence_status"] == "unproven"

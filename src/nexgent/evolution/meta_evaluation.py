@@ -4,7 +4,7 @@
 It returns complete candidate bundles, ``calls`` (durable model receipts),
 ``execution`` (the improve execution receipt), and optionally ``numerical_reports``
 (each actual broker experiment, once). Exceptions may carry those same attributes.
-``evaluate(bundle, split, seed)`` returns an independent science report. The caller
+``evaluate(bundle, split, seed)`` returns an independent registered-benchmark report. The caller
 must keep transfer data private and persist returned artifacts before publication.
 
 The measured quantity is best-of-k TASK output of a frozen improver, from a common
@@ -97,8 +97,8 @@ class _Recorder:
                 raise MetaEvaluationError("Evaluation split/seed does not match the request")
             tasks = report.get("tasks", [])
             resource_statuses = {"budget_exhausted", "interrupted", "stopped", "timeout", "missing"}
-            if report.get("status") in resource_statuses or any(
-                isinstance(row, dict) and row.get("status") in resource_statuses for row in tasks
+            if report.get("score_available") is False or report.get("status") in resource_statuses or any(
+                isinstance(row, dict) and (row.get("score_available") is False or row.get("status") in resource_statuses) for row in tasks
             ):
                 raise MetaEvaluationError("Resource-limited evaluation is missing, not a zero score")
             if not _number(report.get("score")):
@@ -217,7 +217,24 @@ class _Recorder:
                 "accounting_scope": "Known reported work only, deduplicated across evaluation and broker experiments by host measurement_key. Without a key, reuse is unknown and each report is retained. Cross-study cache reuse means this is not necessarily newly executed physical work; use the host ledger for physical/logical costs. Nested tool receipts are not added. Missing usage is not zero. Reservations are retained."}
 
 
-def _arm(recorder, name, improver, task_start, seed, k, generate):
+def attach_model_costs(report, calls, *, scope):
+    """Replace partial generation-only model accounting with an authoritative ledger.
+
+    Numeric measurements and actual generation execution receipts stay intact.
+    The host supplies every admitted call, including task-model evaluation calls.
+    """
+    recorder = _Recorder(None)
+    recorder.receipts = [{"label": scope, "receipt": deepcopy(call)} for call in calls]
+    full = recorder.costs()
+    costs = report.setdefault("costs", {})
+    for key in ("model_calls_with_identity", "model_receipts", "calls", "receipts_without_identity",
+                "reserved_completion_tokens", "known_usage", "usage_missing_call_ids", "billing_unknown_call_ids"):
+        costs[key] = full[key]
+    costs["model_accounting_scope"] = scope
+    return report
+
+
+def _arm(recorder, name, improver, task_start, seed, k, generate, *, transfer=True):
     parent = recorder.artifact(splice(task_start, improver))
     baseline = recorder.evaluation(parent, "development", seed, f"{seed}/{name}/baseline")
     arm = {"arm": name, "seed": seed, "improver_origin": _origin(improver),
@@ -297,6 +314,11 @@ def _arm(recorder, name, improver, task_start, seed, k, generate):
         selected, selected_development = max(eligible, key=lambda pair: pair[1]["score"])
         arm.update(selected_id=selected["id"], selected_development=selected_development["id"],
                    development_gain=selected_development["score"] - baseline["score"])
+        if not transfer:
+            if arm["status"] != "complete":
+                arm["observed_development_gain"] = arm["development_gain"]
+                arm["development_gain"] = None
+            return arm
         # Transfer runs only after development selection. Its result never enters generation.
         baseline_transfer = recorder.evaluation(parent, "meta_transfer", seed, f"{seed}/{name}/baseline_transfer")
         selected_transfer = recorder.evaluation(selected, "meta_transfer", seed, f"{seed}/{name}/selected_transfer")
@@ -309,6 +331,56 @@ def _arm(recorder, name, improver, task_start, seed, k, generate):
         else:
             arm["status"] = "incomplete"
     return arm
+
+
+def improver_fingerprint(bundle):
+    """Ignore Python comments/formatting; this is AST identity, not equivalence."""
+    import ast
+    return digest({name: ast.dump(ast.parse(source), include_attributes=False)
+        if name.endswith(".py") else json.loads(source)
+        for name, source in bundle["files"].items() if name != "task.py"})
+
+
+def evaluate_improver_probe(initial, evolved, task_start, *, seed, generate, evaluate):
+    """Actually run two frozen improvers, returning development-only feedback.
+
+    Host adapters own admission and recursion depth. No transfer evaluation or
+    direct task/non-task cross runs are possible through this entry point.
+    """
+    if type(seed) is not int or not callable(generate) or not callable(evaluate):
+        raise MetaEvaluationError("A probe needs an integer seed and actual execution callbacks")
+    recorder = _Recorder(evaluate)
+    for bundle in (initial, evolved, task_start):
+        recorder.artifact(bundle)
+    report = {"schema": "nexgent-improver-probe-v1", "split": "development", "seed": seed,
+        "source_reference": {"id": initial["id"], "digest": initial["digest"]},
+        "source_candidate": {"id": evolved["id"], "digest": evolved["digest"]},
+        "task_anchor": {"id": task_start["id"], "digest": task_start["digest"]},
+        "status": "skipped_identical_improver", "arms": [],
+        "aggregate": {"paired_development_gain": None},
+        "interpretation": "Development-selected actual offspring of two frozen improvers. Feedback for research, not held-out evidence or a claim of RSI efficacy."}
+    if improver_fingerprint(initial) == improver_fingerprint(evolved):
+        report["reason"] = "Identical non-task executable AST and role content at the common task start"
+    else:
+        order = [("initial", initial), ("evolved", evolved)]
+        if seed % 2:
+            order.reverse()
+        report["arm_order"] = [name for name, _ in order]
+        for name, source in order:
+            arm = _arm(recorder, name, source, task_start, seed, 1, generate, transfer=False)
+            arm.setdefault("development_gain", None)
+            report["arms"].append(arm)
+        complete = all(arm["status"] == "complete" and arm["development_gain"] is not None for arm in report["arms"])
+        report["status"] = "completed" if complete else "incomplete"
+        if complete:
+            values = {arm["arm"]: arm["development_gain"] for arm in report["arms"]}
+            report["aggregate"]["paired_development_gain"] = values["evolved"] - values["initial"]
+    report.update(artifacts=recorder.artifacts, evaluations=recorder.evaluations,
+                  costs=recorder.costs(), failures=recorder.failures,
+                  evidence={"missing": recorder.missing_evidence,
+                            "level": "development_actual_offspring" if not recorder.missing_evidence else "missing_execution_or_cost_evidence"})
+    canonical(report)
+    return report
 
 
 def _cross(recorder, initial, evolved, seeds):
@@ -341,7 +413,7 @@ def _cross(recorder, initial, evolved, seeds):
 
 
 def evaluate_improvers(initial, evolved, task_start, seeds=(101, 202, 303), k=1,
-                       generate=None, evaluate=None):
+                       generate=None, evaluate=None, *, include_cross=True):
     """Return a strict-JSON report; callbacks own execution, privacy and budgets.
 
     k bounds offspring slots and generation invocations separately, not model calls
@@ -373,7 +445,9 @@ def evaluate_improvers(initial, evolved, task_start, seeds=(101, 202, 303), k=1,
                       "evolved_improvement_at_k": second,
                       "difference": second - first if first is not None and second is not None else None,
                       "status": "complete" if first is not None and second is not None else "incomplete"})
-    cross = _cross(recorder, initial, evolved, seeds)
+    cross = _cross(recorder, initial, evolved, seeds) if include_cross else {
+        "kind": "not_applicable_cross_benchmark", "rows": [],
+        "interpretation": "Original task modules belong to another benchmark. Both actual improvers instead receive the target benchmark's identical task baseline."}
     complete = [row for row in pairs if row["status"] == "complete"]
     costs = recorder.costs()
     evidence = {"level": "matched_actual_source_offspring_comparison" if not recorder.missing_evidence else "comparison_with_missing_execution_or_cost_evidence",

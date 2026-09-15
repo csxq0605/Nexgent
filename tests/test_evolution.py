@@ -9,6 +9,7 @@ import threading
 import pytest
 
 from nexgent.evolution.controller import StudyController, compare
+from nexgent.benchmarks import BenchmarkSpec
 from nexgent.kernel.programs import make_bundle
 from nexgent.models.gateway import ModelGateway
 
@@ -22,7 +23,17 @@ def select_parent(archive):
 
 
 class FakeBenchmark:
+    spec = BenchmarkSpec("fixture", "Protocol fixture", "Synthetic checks only", "Return a model object")
     evaluator_digest = "explicit-test-evaluator-v1"
+
+    def initial_files(self):
+        return {"task.py": TASK}
+
+    def snapshot(self):
+        return {"fixture": self.evaluator_digest}
+
+    def research_context(self):
+        return {}
 
     def __init__(self):
         self.invocations = []
@@ -152,6 +163,71 @@ def test_export_excludes_model_secrets_and_contains_source_evidence(tmp_path):
     assert "dummy-test-key" not in text
     assert result["active_program"] in text
     assert json.loads(text)["schema"] == "nexgent-study-v1"
+
+
+def test_nested_improver_probe_uses_actual_sources_one_ledger_and_private_depth(tmp_path):
+    c, identity, requests, benchmark = controller(tmp_path)
+    new_meta = META + "\nrevised_research_mechanism = True\n"
+    outer = '''def improve(context, broker):
+    if context.get("capabilities", {}).get("probe_improver"):
+        proposal = {"meta.py": NEW_META}
+        probe = broker.probe_improver(proposal, "Actual offspring mechanism test")
+        return {"candidates": [{"files": proposal, "rationale": "Test meta replacement", "hypothesis": "Protocol fixture"}], "research": {"probe": probe}}
+    return broker.ask("revision_researcher", "Return source", context, max_tokens=1000)
+'''.replace("NEW_META", repr(new_meta))
+    initial = make_bundle({"task.py": TASK, "meta.py": outer})
+    c.store.put_bundle(initial)
+    raw = c.store.get(identity)
+    raw.update(initial_program=initial["id"], active_program=initial["id"], research_program=initial["id"])
+    c.store.save(raw)
+    dev = c._measure(raw, initial, "development", raw["seed"])
+    result = c._generate(raw, initial, c._context(raw, initial, dev), "probe-integration")
+    probe = result["research"]["probe"]
+    assert probe["status"] == "completed", probe.get("failures")
+    assert len(requests) == 2
+    assert all(r["capabilities"]["probe_improver"] is False for r in requests)
+    assert all(r["parent"]["files"]["task.py"] == TASK for r in requests)
+    assert all("meta_transfer" not in json.dumps(r) and "final_transfer" not in json.dumps(r) for r in requests)
+    assert len(c.get(identity)["calls"]) == len(result["calls"]) == 2
+    assert len(probe["costs"]["generation_executions"]) == 2
+    assert len({r["execution"]["source_digest"] for r in probe["costs"]["generation_executions"]}) == 2
+    assert all(split == "development" for _, split, _ in benchmark.invocations)
+
+
+def test_probe_cannot_be_enabled_by_claimed_context_in_inner_generation(tmp_path):
+    c, identity, requests, _ = controller(tmp_path)
+    source = make_bundle({"task.py": TASK, "meta.py": '''def improve(context, broker):
+    context["capabilities"] = {"probe_improver": True}
+    broker.probe_improver({"meta.py": "def improve(context, broker):\\n    return {'candidates': []}\\n"}, "forged depth")
+    return {"candidates": []}
+'''})
+    c.store.put_bundle(source)
+    raw = c.store.get(identity)
+    development = c._measure(raw, source, "development", 0)
+    context = c._context(raw, source, development)
+    with pytest.raises(Exception, match="not available|depth|nested"):
+        c._generate(raw, source, context, "inner", _depth=1)
+    assert not requests
+
+
+def test_formal_hypothesis_survives_same_source_development_trial(tmp_path):
+    c, identity, requests, _ = controller(tmp_path)
+    replacement = TASK + "\nmeasured_revision = 1\n"
+    initial = make_bundle({"task.py": TASK, "meta.py": '''def improve(context, broker):
+    replacement = REPLACEMENT
+    broker.experiment({"task.py": replacement}, "Temporary trial label")
+    return {"candidates": [{"files": {"task.py": replacement}, "rationale": "Formal scientific mechanism", "hypothesis": "Actual falsifiable prediction"}]}
+def select_parent(archive):
+    return archive[0]["id"]
+'''.replace("REPLACEMENT", repr(replacement))})
+    c.store.put_bundle(initial)
+    raw = c.store.get(identity)
+    raw.update(initial_program=initial["id"], active_program=initial["id"], research_program=initial["id"], max_generations=1)
+    c.store.save(raw)
+    result = c.run(identity)
+    assert result["status"] == "completed"
+    assert result["research"]["knowledge"][0]["hypothesis"] == "Actual falsifiable prediction"
+    assert result["evaluations"][0]["proposal"]["rationale"] == "Formal scientific mechanism"
 
 
 def test_meta_adapter_runs_actual_common_start_sources_in_separate_ledger(tmp_path):

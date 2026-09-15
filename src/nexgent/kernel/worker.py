@@ -83,11 +83,32 @@ class Broker:
     def experiment(self, files, label="development experiment"):
         return self.request("experiment", {"files": files, "label": label})
 
+    def probe_improver(self, files, label="development improver probe"):
+        return self.request("probe_improver", {"files": files, "label": label})
+
     def search(self, query):
         return self.request("search", {"query": query})
 
     def log(self, kind, content):
         return self.request("log", {"kind": kind, "content": content})
+
+
+class TaskCapabilities:
+    """Common model/research RPC plus optional benchmark-owned local tools."""
+    def __init__(self, local, broker):
+        self.local, self.broker = local, broker
+
+    def __getattr__(self, name):
+        return getattr(self.local, name)
+
+    def ask(self, role, prompt, payload=None, max_tokens=6000):
+        return self.broker.ask(role, prompt, payload, max_tokens)
+
+    def parallel(self, requests):
+        return self.broker.parallel(requests)
+
+    def search(self, query):
+        return self.broker.search(query)
 
 
 def main():
@@ -96,13 +117,15 @@ def main():
     bundle, entry = request["bundle"], request["entry"]
     verify_bundle(bundle)
     limit, job_handle = memory_limit()
-    from ..science.toolbox import Toolbox
-    tools = Toolbox(max_work_units=request.get("max_work_units", 20_000_000))
-    tool_methods = [n for n in dir(Toolbox) if not n.startswith("_") and callable(getattr(Toolbox, n))]
+    from .tooling import toolbox_class, tool_methods
+    broker = Broker()
+    local_tools = toolbox_class(request.get("toolbox_factory"))(max_work_units=request.get("max_work_units", 20_000_000))
+    tools = TaskCapabilities(local_tools, broker)
+    methods = tool_methods(request.get("toolbox_factory"))
     compiled = []
     for name in ("workflow.py", "task.py", "meta.py"):
         if name in bundle["files"]:
-            tree = validate_source(bundle["files"][name], name, tool_methods)
+            tree = validate_source(bundle["files"][name], name, methods)
             compiled.append(compile(tree, "agent:" + name, "exec"))
     names = ("abs all any bool dict enumerate filter float int isinstance len list map max min next "
              "pow range reversed round set sorted str sum tuple zip Exception ValueError RuntimeError "
@@ -110,7 +133,6 @@ def main():
     safe_builtins = {n: getattr(builtins, n) for n in names}
     math_facade = SimpleNamespace(**{n: getattr(math, n) for n in PURE_METHODS if hasattr(math, n)})
     namespace = {"__builtins__": safe_builtins, "math": math_facade}
-    broker = Broker()
     instructions = [0]
 
     def trace(frame, event, arg):
@@ -162,7 +184,8 @@ def main():
               "pid": os.getpid(), "source_digest": bundle["digest"],
               "elapsed_seconds": time.monotonic() - started, "rpc_count": broker.count,
               "work_units": getattr(tools, "work_units", 0), "instructions": instructions[0],
-              "science_receipts": tools.receipts(),
+              "tool_receipts": tools.receipts(),
+              "science_receipts": tools.receipts(),  # Historical receipt alias; no domain import.
               "isolation": {"language": "capability_python", "audit_hook": True, "memory_limit": limit,
                             "os_filesystem_container": False}}}
     output = json.dumps({"result": result}, ensure_ascii=False, allow_nan=False)

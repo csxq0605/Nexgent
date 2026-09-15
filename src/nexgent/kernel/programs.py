@@ -24,7 +24,7 @@ PURE_METHODS = {
     "get", "items", "keys", "values", "copy", "update", "append", "extend", "pop",
     "sort", "reverse", "count", "index", "join", "split", "strip", "lower", "upper",
     "replace", "startswith", "endswith", "remove", "add", "discard", "setdefault",
-    "ask", "parallel", "experiment", "search", "log", "sin", "cos", "tan", "tanh",
+    "ask", "parallel", "experiment", "probe_improver", "search", "log", "sin", "cos", "tan", "tanh",
     "exp", "log1p", "sqrt", "floor", "ceil", "fabs", "isfinite", "isnan", "isinf",
     "pi", "e", "work_units", "pow", "copysign", "atan2", "hypot", "asin", "acos",
 }

@@ -33,12 +33,14 @@ class FakeController:
         self.release = threading.Event()
         self.finished = threading.Event()
         self.fail = False
+        self.benchmarks = [{"id": "test-domain", "title": "Test benchmark", "description": "Independent test plugin", "available": True}]
 
     def state(self, identity="study-0000000000000001", status="completed"):
         parent, child = list(self.programs.values())
         state = {"id": identity, "question": "从含噪时间序列中发现动力学方程", "status": status,
             "stage": "study completed; evidence available", "generation": 3, "max_generations": 3,
             "arm": "full", "budget": {"max_model_calls": 36, "max_completion_tokens": 144000},
+            "benchmark": {"id": "test-domain", "title": "Test benchmark", "description": "Independent test plugin"},
             "usage": {"model_calls": 2, "reported_total_tokens": 321, "unknown_usage_calls": 1,
                       "reserved_completion_tokens": 12000}, "created": 1,
             "active_program": child["id"], "research_program": parent["id"],
@@ -59,14 +61,16 @@ class FakeController:
         return deepcopy(state)
 
     def list_studies(self): return deepcopy(list(self.states.values()))
+    def list_benchmarks(self): return deepcopy(self.benchmarks)
     def get(self, identity): return deepcopy(self.states[identity])
     def get_program(self, identity): return deepcopy(self.programs[identity])
 
-    def create(self, question, generations=3, arm="full", seed=0, budget=None):
-        self.created.append({"question": question, "generations": generations, "arm": arm, "budget": deepcopy(budget)})
+    def create(self, question, generations=3, arm="full", seed=0, budget=None, *, benchmark_id=None):
+        self.created.append({"question": question, "generations": generations, "arm": arm, "budget": deepcopy(budget), "benchmark_id": benchmark_id})
         identity = f"study-{len(self.states) + 1:016x}"
         state = self.state(identity, "ready")
-        state.update(question=question, generation=0, max_generations=generations, arm=arm, budget=deepcopy(budget))
+        state.update(question=question, generation=0, max_generations=generations, arm=arm, budget=deepcopy(budget),
+                     benchmark={"id": benchmark_id, "title": benchmark_id})
         self.states[identity] = state
         return deepcopy(state)
 
@@ -90,7 +94,7 @@ class FakeController:
         previous = self.get(identity)
         result = self.state(f"study-{len(self.states)+1:016x}", "ready")
         result.update(question=previous["question"], arm=previous["arm"], generation=0,
-                      max_generations=generations, budget=deepcopy(budget), origin_study=identity)
+                      max_generations=generations, budget=deepcopy(budget), origin_study=identity, benchmark=deepcopy(previous["benchmark"]))
         self.states[result["id"]] = result
         return deepcopy(result)
 
@@ -180,7 +184,7 @@ def test_create_passes_registered_arm_and_explicit_budget(make_window, qtbot):
     window.generations.setValue(4); window.max_calls.setValue(12); window.max_tokens.setValue(60000)
     window.start_study(); qtbot.waitUntil(controller.entered.is_set)
     assert controller.created == [{"question": "改进一个科学方法", "generations": 4, "arm": "task_only",
-                                   "budget": {"max_model_calls": 12, "max_completion_tokens": 60000}}]
+                                   "budget": {"max_model_calls": 12, "max_completion_tokens": 60000}, "benchmark_id": "test-domain"}]
     assert not window.start_button.isEnabled()
     controller.release.set(); qtbot.waitUntil(lambda: window._worker is None)
 
@@ -363,3 +367,264 @@ def test_project_root_prefers_explicit_then_environment_then_repository(tmp_path
     target = tmp_path / "chosen"; monkeypatch.setenv("NEXGENT_PROJECT_ROOT", str(target))
     assert project_root() == target
     assert project_root(repo) == repo
+
+
+def meta_report():
+    return {"protocol": {"k": 1, "seeds": [401, 502]},
+        "per_seed_pairs": [
+            {"seed": 401, "initial_improvement_at_k": 0.01, "evolved_improvement_at_k": 0.03,
+             "difference": 0.02, "status": "complete"},
+            {"seed": 502, "initial_improvement_at_k": 0.0, "evolved_improvement_at_k": None,
+             "difference": None, "status": "incomplete"}],
+        "aggregate": {"paired_difference": {"n": 1, "mean": 0.02}},
+        "evidence": {"complete_pairs": 1, "requested_pairs": 2, "missing": [{"kind": "improve_execution"}],
+                     "level": "comparison_with_missing_execution_or_cost_evidence"},
+        "costs": {"model_calls_with_identity": 4, "known_usage": {"total_tokens": 1234},
+                  "usage_missing_call_ids": ["call-missing"]},
+        "failures": [{"stage": "generation", "error": {"type": "TimeoutError"}}]}
+
+
+def test_independent_meta_record_reads_top_level_report_and_missing_pairs(make_window):
+    controller = FakeController(); state = controller.state()
+    state.update(kind="meta_evaluation", conclusion={}, meta_evaluation=meta_report())
+    controller.states[state["id"]] = state
+    window = make_window(controller); panel = window.meta_evidence
+    assert panel.pairs.rowCount() == 2
+    assert panel.pairs.item(0, 3).text() == "+0.0200"
+    assert panel.pairs.item(1, 2).text() == "缺测"
+    assert panel.pairs.item(1, 3).text() == "缺测"
+    assert "完整配对 1 / 2" in panel.comparison_summary.toPlainText()
+    assert "用量缺失请求 1" in panel.comparison_summary.toPlainText()
+    assert "1234" in panel.comparison_summary.toPlainText()
+    assert "独立改进器对照已有报告" in window.conclusion.toPlainText()
+    assert panel.details_button.isEnabled()
+    assert not window.continue_button.isEnabled() and controller.run_ids == []
+
+
+def test_origin_study_meta_report_is_visible_and_switching_history_clears_it(make_window):
+    controller = FakeController(); a = controller.state()
+    controller.states[a["id"]]["conclusion"]["meta_evaluation"] = meta_report()
+    b = controller.state("study-0000000000000002")
+    window = make_window(controller); window.select_study(a["id"])
+    assert window.meta_evidence.pairs.rowCount() == 2
+    window.select_study(b["id"])
+    assert window.meta_evidence.pairs.rowCount() == 0
+    assert not window.meta_evidence.details_button.isEnabled()
+    assert "尚未记录独立后代对照" in window.meta_evidence.comparison_summary.toPlainText()
+
+
+@pytest.mark.parametrize("status,message", [("running", "正在执行"), ("failed", "未完成"), ("paused", "未完成")])
+def test_incomplete_meta_study_does_not_imply_zero_or_completion(make_window, status, message):
+    controller = FakeController(); state = controller.state(status=status)
+    controller.states[state["id"]].update(kind="meta_evaluation", conclusion={})
+    window = make_window(controller)
+    assert message in window.meta_evidence.comparison_summary.toPlainText()
+    assert window.meta_evidence.pairs.rowCount() == 0
+    assert controller.run_ids == []
+
+
+def test_probe_lifecycle_uses_real_rpc_and_keeps_development_separate(make_window):
+    controller = FakeController(); state = controller.state()
+    base = {"id": "rpc-probe", "method": "probe_improver", "status": "started", "source_bundle": "source-caller",
+            "request": {"label": "改进器机制实验"}, "input_artifact_ids": ["request-artifact"]}
+    result = {"schema": "nexgent-improver-probe-v1", "probe_id": "probe-1", "status": "incomplete", "split": "development",
+              "source_candidate": {"id": "candidate-source", "digest": "actual-source-digest"},
+              "arms": [{"arm": "initial", "development_gain": 0.02}, {"arm": "evolved", "development_gain": None}],
+              "aggregate": {"paired_development_gain": None}, "costs": {"model_calls_with_identity": 3}}
+    state["conclusion"].update(executable_meta_changed=False, inherited_improver_executed=[])
+    state["events"] = [None, {"kind": "capability", "sequence": 1, "content": base},
+        {"kind": "capability", "sequence": 2, "content": {**base, "status": "completed", "result": result, "output_artifact_ids": ["result-artifact"]}},
+        {"kind": "agent_log", "content": {"claimed_kind": "probe_improver", "result": {"status": "completed"}}}]
+    controller.states[state["id"]] = state
+    window = make_window(controller); panel = window.meta_evidence
+    assert panel.probes.rowCount() == 1
+    assert panel.probes.item(0, 1).text() == "证据不完整"
+    assert panel.probes.item(0, 2).text() == "+0.0200"
+    assert panel.probes.item(0, 3).text() == "缺测"
+    assert panel.probes.item(0, 5).text() == "3"
+    assert "actual-source-digest" in panel.probe_detail.toPlainText()
+    assert "未记录改进器或编排修改" in panel.summary.text()
+    assert "0 个修改后的改进器" in panel.summary.text()
+    assert panel.pairs.rowCount() == 0
+    captured=[]; panel.show_details=lambda title, payload: captured.append(deepcopy(payload))
+    panel._open_probe(0)
+    assert captured[0]["output_artifact_ids"] == ["result-artifact"]
+    assert controller.run_ids == []
+
+
+@pytest.mark.parametrize("status,result,expected", [
+    ("started", None, "进行中"),
+    ("failed", None, "执行失败"),
+    ("completed", {"status": "skipped_identical_improver"}, "改进器相同，未执行探测")])
+def test_probe_unmeasured_states_are_explicit(make_window, status, result, expected):
+    controller = FakeController(); state = controller.state()
+    state["events"]=[{"kind": "capability", "content": {"id": "rpc-1", "method": "probe_improver",
+        "status": status, "result": result, "error_type": "TimeoutError" if status == "failed" else None}}]
+    controller.states[state["id"]]=state
+    window=make_window(controller); panel=window.meta_evidence
+    assert panel.probes.item(0, 1).text() == expected
+    assert panel.probes.item(0, 4).text() == "缺测"
+    if status == "failed": assert "TimeoutError" in panel.probe_detail.toPlainText()
+    assert controller.run_ids == []
+
+
+def test_live_refresh_preserves_selected_source_and_file(make_window):
+    controller=FakeController(); state=controller.state(status="running")
+    window=make_window(controller)
+    window.source_file.setCurrentText("meta.py")
+    identity=window.lineage.currentItem().data(0, Qt.ItemDataRole.UserRole)
+    state["updated"]=100
+    window._progress(state)
+    assert window.lineage.currentItem().data(0, Qt.ItemDataRole.UserRole) == identity
+    assert window.source_file.currentText() == "meta.py"
+
+
+def test_unavailable_parent_source_cannot_be_presented_as_a_diff(make_window):
+    controller=FakeController(); state=controller.state()
+    parent,child=list(controller.programs.values())
+    del controller.programs[parent["id"]]
+    window=make_window(controller); window.source_diff.setChecked(True)
+    assert not window.source_diff.isEnabled()
+    assert window.source_code.toPlainText() == child["files"]["task.py"]
+    assert window.error_label.isVisible()
+
+
+def test_export_dialog_keeps_original_study_identity(make_window, tmp_path, monkeypatch):
+    from nexgent.ui.window import QFileDialog
+    controller=FakeController(); a=controller.state(); b=controller.state("study-0000000000000002")
+    window=make_window(controller); window.select_study(a["id"])
+    target=tmp_path/'chosen-study.json'
+    def choose(*args):
+        window.select_study(b["id"])
+        return str(target), ""
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", choose)
+    window.export_study()
+    assert controller.exported == [(a["id"], str(target))]
+    assert json.loads(target.read_text())["id"] == a["id"]
+
+
+def test_no_benchmark_plugin_blocks_execution_but_preserves_history_export(make_window, tmp_path):
+    controller=FakeController(); state=controller.state(); controller.benchmarks=[]
+    window=make_window(controller)
+    assert not window.resume_button.isEnabled() and not window.continue_button.isEnabled()
+    assert window.export_study(tmp_path/'old.json')
+    window.new_study(); window.question.setPlainText("A general source RSI objective")
+    assert "pip install /path/to/benchmark-plugin" in window.benchmark_hint.text()
+    assert not window.start_button.isEnabled()
+    window.start_study()
+    assert controller.created == [] and controller.run_ids == []
+
+
+def test_benchmark_choices_come_only_from_installed_metadata(make_window, qtbot):
+    controller=FakeController()
+    controller.benchmarks=[{"id":"unavailable", "title":"Missing data", "available":False, "error":"Download the pinned dataset"},
+        {"id":"custom-domain", "title":"External task plugin", "description":"A general task contract", "available":True}]
+    window=make_window(controller)
+    assert window.benchmark_choice.currentData() == "custom-domain"
+    assert not window.benchmark_choice.model().item(0).isEnabled()
+    window.question.setPlainText("Improve this task algorithm")
+    window.start_study(); qtbot.waitUntil(controller.entered.is_set)
+    assert controller.created[0]["benchmark_id"] == "custom-domain"
+    assert not window.benchmark_choice.isEnabled()
+    controller.release.set(); qtbot.waitUntil(lambda: window._worker is None)
+
+
+def test_continue_locks_the_original_benchmark(make_window, qtbot):
+    controller=FakeController(); state=controller.state()
+    controller.benchmarks.append({"id":"another-domain", "title":"Another", "available":True})
+    window=make_window(controller)
+    window.benchmark_choice.setCurrentIndex(window.benchmark_choice.findData("another-domain"))
+    window.continue_study()
+    assert window.benchmark_choice.currentData() == "test-domain"
+    assert not window.benchmark_choice.isEnabled()
+    window.start_study(); qtbot.waitUntil(controller.entered.is_set)
+    assert controller.continued[0]["study_id"] == state["id"]
+    assert window.snapshot["benchmark"]["id"] == "test-domain"
+    controller.release.set(); qtbot.waitUntil(lambda: window._worker is None)
+
+
+def test_unavailable_plugin_reports_its_actual_configuration_error(make_window):
+    controller=FakeController(); controller.benchmarks=[{"id":"bbh", "available":False, "error":"NEXGENT_BBH_DATA is missing"}]
+    window=make_window(controller)
+    assert "NEXGENT_BBH_DATA is missing" in window.benchmark_hint.text()
+    assert window.benchmark_choice.currentData() is None
+
+
+@pytest.mark.parametrize("kind", ["benchmark_counterexample", "scientific_counterexample"])
+def test_generic_and_legacy_counterexamples_remain_visible(make_window, kind):
+    controller=FakeController(); state=controller.state()
+    state["research"]["failures"]=[{"kind":kind, "decision":{"delta":-0.04}, "generation":2}]
+    controller.states[state["id"]]=state
+    window=make_window(controller)
+    assert "任务反例" in window.failures_list.item(0).text()
+    assert "-0.040" in window.failures_list.item(0).text()
+
+
+@pytest.mark.parametrize("status", ["ready", "running", "paused", "failed", "completed"])
+def test_fixed_benchmark_evaluation_is_not_resumed_as_source_research(make_window, status):
+    controller=FakeController(); state=controller.state(status=status)
+    controller.states[state["id"]]["kind"]="benchmark_evaluation"
+    window=make_window(controller)
+    assert not window.resume_button.isEnabled()
+    assert not window.continue_button.isEnabled()
+    assert window.export_button.isEnabled()
+    window.resume_study(); window.continue_study()
+    assert controller.run_ids == [] and controller.continued == []
+
+
+def test_fixed_evaluation_renders_planned_missing_and_measured_seeds_separately(make_window):
+    controller=FakeController(); state=controller.state()
+    state.update(kind="benchmark_evaluation", max_generations=0, conclusion={"kind":"fixed_program_benchmark", "rsi_effect":False},
+        benchmark_evaluation={"results":[
+            {"seed":1,"status":"measured","report":{"score":0.75,"score_available":True,"work_units":123,
+                "tasks":[{"task_id":"case-1","score":0.75,"status":"ok"}],"execution":{"instructions":123}}},
+            {"seed":2,"status":"missing","report":{"score":0.0,"score_available":False,"status":"timeout","tasks":[]},"error":"source timeout"},
+            {"seed":3,"status":"planned","report":None}],
+            "summary":{"planned":3,"measured":1,"missing":1,"mean_score":None,"observed_mean_score":0.75}})
+    state["benchmark"]["work_unit"]="source_instruction_events"
+    controller.states[state["id"]]=state
+    window=make_window(controller)
+    assert window.program_card.caption.text() == "固定任务程序"
+    assert window.round_card.value.text() == "1 / 3"
+    assert "固定程序基准评价" in window.overview.toPlainText()
+    assert window.evaluations.item(0,2).text() == "0.750"
+    assert window.evaluations.item(1,2).text() == "缺测"
+    assert window.evaluations.item(2,1).text() == "尚未执行"
+    assert window.evaluations.item(2,2).text() == "—"
+    assert "完整评价均分 —" in window.conclusion.toPlainText()
+    assert "仅已观测部分均分 0.750" in window.conclusion.toPlainText()
+    assert "源码执行事件 123" in window.experiments_detail.toPlainText()
+    window.experiments_list.setCurrentRow(1)
+    assert "任务得分 缺测" in window.experiments_detail.toPlainText()
+
+
+def test_actual_controller_window_starts_with_no_installed_plugins(qtbot, tmp_path, monkeypatch):
+    import nexgent.benchmarks as registry
+    monkeypatch.setattr(registry, "entry_points", lambda **kwargs: [])
+    window=ResearchWindow(tmp_path); qtbot.addWidget(window)
+    window.show()
+    assert window.controller.list_benchmarks() == []
+    assert window.controller.list_studies() == []
+    assert "没有可用的基准插件" in window.benchmark_hint.text()
+    assert window._worker is None and not window.start_button.isEnabled()
+    assert not window.details_button.isEnabled()
+    assert "等待选择任务基准" in window.overview.toPlainText()
+    window.close()
+
+
+@pytest.mark.parametrize("missing", [0, 1, 2])
+def test_completed_fixed_benchmark_missingness_is_visible_in_header_and_history(make_window, missing):
+    controller = FakeController(); state = controller.state()
+    state.update(kind="benchmark_evaluation", max_generations=0,
+        benchmark_evaluation={"results": [], "summary": {
+            "planned": 2, "measured": 2 - missing, "missing": missing,
+            "mean_score": None if missing else 1.0,
+            "observed_mean_score": None if missing == 2 else 1.0}})
+    controller.states[state["id"]] = state
+    window = make_window(controller)
+    assert ("存在缺测" in window.state_label.text()) == bool(missing)
+    assert ("存在缺测" in window.history.item(0).text()) == bool(missing)
+    if missing == 2:
+        assert window.round_card.value.text() == "0 / 2"
+        assert "完整评价均分 —" in window.conclusion.toPlainText()
+        assert not window.continue_button.isEnabled()
