@@ -1,0 +1,48 @@
+{
+  "schema": "nexgent-confirmation-plan-v1",
+  "plan_id": "source-confirmation-20260916-v1",
+  "registered_at": "2026-09-15T16:06:43.093537+00:00",
+  "status": "registered_not_run",
+  "split": "confirmation_20260916_v1",
+  "seeds": [
+    7101,
+    7202,
+    7303
+  ],
+  "required_arms": [
+    "full",
+    "task_only",
+    "greedy"
+  ],
+  "max_work_units_per_measurement": 20000000,
+  "model_calls_allowed": 0,
+  "selection_rule": "For every supplied completed source study, freeze initial_program and active_program from its export before generating any confirmation data. active_program must equal the last selection-promoted program or the unchanged initial program. Confirmation results never select or replace a champion.",
+  "enrollment_rule": "Require one completed, version-compatible export for each required arm at each enrolled evolution seed. Freeze all supplied exports and source hashes before the first measurement. Do not add or replace studies after opening confirmation results.",
+  "seed_interpretation": "7101,7202,7303 are task/transfer replication seeds conditional on frozen programs. They are not independent evolution seeds. Compare arms only at matched source-study evolution seeds.",
+  "evaluation_rule": "Run initial and selected executable source independently at the same confirmation split and task seed. No shared numerical cache discounts; retain each complete report and all costs.",
+  "failure_rule": "Keep all planned measurements. Numerical instability is observed failure; timeout, interruption or insufficient resource is missing, never a zero observation. Persist admission before execution and result after execution. Interrupted or failed admitted measurements are not rerun; remaining unadmitted measurements may resume with exactly the same frozen enrollment.",
+  "primary_comparisons": [
+    "selected minus initial within each frozen study",
+    "full selected minus task_only selected at matched evolution seed",
+    "full selected minus greedy selected at matched evolution seed"
+  ],
+  "reported_metrics": [
+    "per-task score and NRMSE",
+    "in_family and different_family groups",
+    "numerical failures and resource missingness",
+    "total and source/scoring/generation work",
+    "actual execution receipts and wall seconds"
+  ],
+  "inference_rule": "Aggregate task replication batches within each study first. RSI comparison uncertainty uses independent evolution seeds; n<2 has no confidence interval. Missing required study or task batches suppress pooled intervals. A three-task-seed replication supports conditional predictive replication, not general RSI efficacy.",
+  "bootstrap": {
+    "method": "paired percentile bootstrap",
+    "repetitions": 10000,
+    "seed": 713,
+    "confidence": 0.95,
+    "unit": "independent evolution seed after within-study aggregation"
+  },
+  "data_flow": "Read controller exports only. Write confirmation artifacts in a separate directory. Never import a controller instance, call a model gateway, modify a study ledger, or inject confirmation feedback into research context.",
+  "execution_authorization": "This registration does not run confirmation. The implementation task is plan/script only; execution is a later explicit research step after every arm is frozen.",
+  "amendment_rule": "Do not overwrite this registration. Any method or enrollment change after seeing confirmation results requires a new plan ID, split and unused replication seeds; preserve prior results.",
+  "content_digest": "a34e83877f9cc4de81f6003b40b6c4944e13c217b6ad7fb1af7442d4f1a2c0c7"
+}

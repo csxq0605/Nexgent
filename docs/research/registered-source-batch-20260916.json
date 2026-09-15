@@ -1,0 +1,70 @@
+{
+  "schema": "nexgent-registered-batch-v1",
+  "batch_id": "source-rsi-20260916-v2",
+  "registered_at": "2026-09-15T16:21:16.660576+00:00",
+  "protocol": {
+    "seeds": [
+      11,
+      22
+    ],
+    "arms": [
+      "full",
+      "task_only",
+      "greedy"
+    ],
+    "generations": 3,
+    "budget": {
+      "max_model_calls": 24,
+      "max_completion_tokens": 120000
+    },
+    "public_prior_study_id": "study-b1b2c2500a5f4d54",
+    "question": "研究噪声观测下的动力学方程发现：诊断强基线的模型选择和跨初值泛化失败，提出可反驳机制、实现求解与改进程序的源码变化，并用真实后代实验验证研究组织是否改善。",
+    "confirmation_plan": "docs/research/confirmation-plan-20260916.json"
+  },
+  "studies": [
+    {
+      "study_id": "study-3382b5236cd94564",
+      "arm": "full",
+      "seed": 11,
+      "initial_program": "agent-07bf1dac73f145b3240d",
+      "implementation_digest": "b92b3dff72fae9bb1443cf3babf6f720f9bc07f3f9641515f3b60d9f5a4ece47"
+    },
+    {
+      "study_id": "study-505f821b94164d06",
+      "arm": "task_only",
+      "seed": 11,
+      "initial_program": "agent-07bf1dac73f145b3240d",
+      "implementation_digest": "b92b3dff72fae9bb1443cf3babf6f720f9bc07f3f9641515f3b60d9f5a4ece47"
+    },
+    {
+      "study_id": "study-6e07edc5e75b4dc5",
+      "arm": "greedy",
+      "seed": 11,
+      "initial_program": "agent-07bf1dac73f145b3240d",
+      "implementation_digest": "b92b3dff72fae9bb1443cf3babf6f720f9bc07f3f9641515f3b60d9f5a4ece47"
+    },
+    {
+      "study_id": "study-35d3b448578f4824",
+      "arm": "full",
+      "seed": 22,
+      "initial_program": "agent-07bf1dac73f145b3240d",
+      "implementation_digest": "b92b3dff72fae9bb1443cf3babf6f720f9bc07f3f9641515f3b60d9f5a4ece47"
+    },
+    {
+      "study_id": "study-e9c0baa97b924e90",
+      "arm": "task_only",
+      "seed": 22,
+      "initial_program": "agent-07bf1dac73f145b3240d",
+      "implementation_digest": "b92b3dff72fae9bb1443cf3babf6f720f9bc07f3f9641515f3b60d9f5a4ece47"
+    },
+    {
+      "study_id": "study-873c52c5f6c64560",
+      "arm": "greedy",
+      "seed": 22,
+      "initial_program": "agent-07bf1dac73f145b3240d",
+      "implementation_digest": "b92b3dff72fae9bb1443cf3babf6f720f9bc07f3f9641515f3b60d9f5a4ece47"
+    }
+  ],
+  "registration_started_at": "2026-09-15T16:18:36.049000+00:00",
+  "content_digest": "2c624b42d68ee1fe070daa887ac6bbece8cd0f78111fcc7c9f5d63eee8ae37e8"
+}

@@ -1,117 +1,100 @@
-![Nexgent — Agents in motion](nexgent/assets/brand/nexgent-title.png)
+# Nexgent
 
-Nexgent 是面向长周期科研代码与模拟任务的可追踪、自排查、自进化 Coding Harness。
-它让 Agent 在真实仓库中修改代码、配置和模拟参数，同时把执行、故障、恢复与验收证据
-保存为可继续、可检查、可导出的持久 Run。
+**面向科研发现，通过可执行源码继承进行自我改进的智能体系统。**
 
-> A traceable, self-diagnosing and evolving Coding Harness for long-running
-> research code and simulation tasks.
+用户提供研究问题与预算，在研究窗口查看资料、假说、实验、反例、结论和程序谱系。智能体运行自己的研究程序，修改科学求解算法以及提出下一轮改进的方法；后代从新进程加载并执行继承的源码。
 
-## 功能
+当前研究场景是**从含噪观测发现动力学方程**：系统组织文献研究和竞争假说，编写估计与模型选择方法，进行开发实验，再由独立评价器测量新初值、更长轨迹及不同方程族的预测。科研目标是检验方法与智能体改进机制，合成方程的恢复结果不等同于发现新的自然定律。
 
-- **验证驱动闭环**：以用户提供的测试或模拟验收命令作为唯一成功条件；普通模型回答
-  不会被当作任务完成。
-- **持久追踪**：记录目标、attempt、模型和工具事件、进程、代码/配置变化、产物、
-  依赖边、诊断、恢复和验证结果。
-- **自动排查**：验收失败后，从症状沿控制、数据、产物、资源和因果关系回溯候选根因，
-  将证据与失败输出交给下一次修复。
-- **长周期恢复**：Run 保存在项目的 `.nexgent/runs`；暂停或中断后可由新进程继续同一
-  Run，并使用 lease 防止两个运行时同时接管。
-- **验证约束的经验演化**：成功恢复只有经过独立验收且没有回归才会晋升为可复用策略；
-  复用后失败会降权并可被禁用。
-- **科研运行时**：提供 Typed DAG、精确输入缓存、跨进程恢复、模拟器状态、资源状态和
-  外部副作用遥测接口。
-- **统一工作区**：PyQt6 GUI、Textual TUI 与无界面 CLI 共用同一个 Agent、权限系统、
-  Session、SubAgent、Workflow 和持久 Harness。
+## 启动研究窗口
 
-## 安装
+需要独立的 Python 3.11+ 环境；本机验证使用 Python 3.12。Windows 使用该项目自己的 Python，避免 Qt/Conda 动态库混用。
 
-要求 Python 3.10+。
-
-```bash
-git clone https://github.com/csxq0605/Nexgent.git
-cd Nexgent/nexgent
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-
-cp .env.example .env
-cp models.json.example models.json
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -e '.[dev]'
+.\start.ps1
 ```
 
-在 `.env` 中填写所使用 Provider 的 API Key，并在 `models.json` 中选择默认模型。
+本机已有 `.venv` 可直接运行 `start.ps1`，或 `.venv\Scripts\python.exe -m nexgent gui`。
 
-## GUI 快速开始
+模型从本项目被 Git 忽略的 `models.json` 和 `.env` 读取。配置示例见 [models.example.json](models.example.json) 与 [.env.example](.env.example)。复制为对应本机文件后填写凭证。没有配置时显示具体错误；API 密钥不会进入智能体源码进程。
 
-```bash
-nexgent-gui --project /path/to/repository
+## 一次研究的完整过程
+
+1. 注册问题、模型与数值预算、实现版本和评价规则。
+2. 运行强静态求解器，得到开发诊断与研究选择基线。
+3. 执行当前源码的 `select_parent` 和 `improve`。初始程序使用文献研究、独立批评、源码设计和开发实验；后代可以重写步骤、角色与信息流。
+4. 执行候选科学程序，保存质量、成本、失败和真实数值工具回执。
+5. 更新部署冠军与探索档案，把实际失败和后代结果交给下一轮研究。
+6. 冻结方法，以三个独立种子检验未见轨迹与额外方程族。
+7. 单独运行初始/演化改进器的真实后代对照，区分任务进步与改进能力变化。
+
+arXiv 在线检索及原文片段与仓库已核实的一手研究笔记同时可用，记录明确区分当次获取、历史笔记及检索失败。
+
+## 可演化对象
+
+| 对象 | 内容 |
+|---|---|
+| `task.py` | 方程表达、估计、验证、模型选择及科学提交的可执行算法 |
+| `meta.py` | `improve`、父代选择和改进策略的实现 |
+| `workflow.py` | 角色协作、依赖、实验安排和共享研究函数 |
+| `roles.json` | 程序使用的角色指令 |
+| 固定宿主 | 进程、能力接口、独立评分、预算、停止和证据账本 |
+
+源码可定义函数、循环、新表达式和研究控制流。文件共享名称空间；直接任务/元模块互换可能暴露依赖耦合，因此它与实际后代生产率分别报告。
+
+执行边界包括独立进程、Python 能力限制、审计钩子、内存/指令/数值/请求预算；没有直接文件、网络、反射或子进程能力。它不是完整操作系统容器。`work_units` 是确定性数值计算代理，模型 token 与墙钟时间另记。
+
+## 研究与复现
+
+```powershell
+# 真实研究；arm还可为task_only（文件范围消融）或greedy（只扩展冠军）
+.venv\Scripts\python.exe -m nexgent research '改善动力学发现与自身研究程序' --generations 3 --arm full --seed 0
+
+.venv\Scripts\python.exe -m nexgent list
+.venv\Scripts\python.exe -m nexgent show STUDY_ID
+.venv\Scripts\python.exe -m nexgent resume STUDY_ID
+.venv\Scripts\python.exe -m nexgent export STUDY_ID
+
+# 两版实际improver从共同起点产生后代，独立注册预算
+.venv\Scripts\python.exe -m nexgent meta-evaluate STUDY_ID --seeds 401 502 603 --k 1
+
+# 不用模型的固定方法控制
+.venv\Scripts\python.exe scripts/run_research_study.py baseline --seeds 0 1 2
+
+# 当前产品测试使用显式模拟模型，不发送真实请求
+.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-启动后全部核心操作都可以在桌面界面完成：
+停止保留已登记用量。恢复沿用冻结实现和账本，未提交的旧模型请求不会静默重发。数据保存在 `.nexgent/research/research.sqlite3`，导出保存在 `.nexgent/exports/`。
 
-1. 在 **File → Model & Provider Settings…** 配置模型与 Provider；
-2. 在左侧打开 **Runs**，点击 **New Run**；
-3. 填写科研代码或模拟修复目标、独立验收命令、最大尝试次数和超时；
-4. 点击 **Start Run**，在 Conversation 中查看执行、验收、故障定位和恢复进度；
-5. 选中历史 Run，使用 **Details、Resume、Export** 检查证据、继续任务或导出 JSONL。
+## 设计与证据
 
-Files 用于浏览和预览项目，Sessions 用于恢复对话，Agents 用于切换主 Agent 与
-SubAgent。运行中的写入和执行授权也会在 GUI 中弹窗确认。
+- [整体协作计划](REFACTOR_PLAN.md)
+- [架构和文献到实现的映射](docs/research/design.md)
+- [RSI 一手文献复核](docs/research/reboot-rsi-mechanisms.md)
+- [科学协议、旧失败分析和控制实验](docs/research/reboot-scientific-protocol.md)
+- [全仓迁移审计](docs/research/reboot-repository-map.md)
+- [源码运行合同](docs/research/source-runtime-contract.md)
+- [操作与故障恢复](docs/operations.md)
 
-![Nexgent Runs workspace](nexgent/assets/screenshots/main-window.png)
+软件检查、实际自修改、任务性能、真实后代生产率是不同证据层次。完整研究保留所有失败和缺测，流程结束不自动代表科研假设成立。
 
-## GUI 中的科研 Coding Loop
+## 单一产品结构
 
-**New Run** 表单中的 Acceptance command 是唯一成功条件。例如填写
-`python simulate.py --verify`，只有该命令退出码为 0，Run 才会显示为 `SUCCEEDED`。
-模型文本不会被当作任务完成；预算耗尽时 Run 保持 `PAUSED`，可以在 Runs 页面选中后点击
-**Resume** 增加有界预算并继续同一证据链。
-
-Nexgent 会重复执行 Agent、独立验收、故障记录、依赖定位和恢复指导。只有验收命令退出码
-为 0，Run 才会进入 `succeeded`；预算耗尽时保持 `paused`，不会伪报成功。
-
-## 无需 API Key 的运行 Demo
-
-安装后运行：
-
-```bash
-cd Nexgent/nexgent
-python examples/harness_fault_recovery_demo.py
+```text
+src/nexgent/
+  kernel/       源码版本、执行边界、统一账本
+  models/       Provider请求进程和预算回执
+  agents/       可继承研究程序和能力代理
+  research/     原文检索与已核实文献笔记
+  science/      可组合实验工具和独立动力学评价
+  evolution/    源码演化、档案和真实改进器对照
+  ui/           研究信息窗口
+tests/          当前产品测试
+scripts/        科研复现及报告
+docs/research/  设计、协议与实验依据
 ```
 
-Demo 使用脚本化 Agent 故意写入错误的模拟容差，然后通过正式 Harness 运行时完成验收失败、
-依赖归因、恢复指导、重新修复、成功验收、JSONL 导出和独立完整性校验。它不调用模型，
-用于复现运行闭环，而不是替代对真实 Provider 能力的测试。命令最后会打印保留的临时工作区、
-Run ID 和导出文件路径。
-
-需要真实 Provider 的 Skills、SubAgent 与 Workflow 交互展示，见
-[demo-project](nexgent/demo-project/README.md)；它是功能沙箱，不作为 Harness 闭环证据。
-
-## 自动化入口（可选）
-
-TUI、无界面任务和 CI 入口仍然保留，并与 GUI 共享运行时和 Run Store；自动化命令及独立
-证据校验方式见 [Harness README](nexgent/README.md)。日常交互不需要输入这些命令。
-
-## 当前能力边界
-
-- Nexgent 提供 Harness、追踪协议和恢复闭环；项目效果评估由外部任务体系负责。
-- “自进化”指经过验证的恢复经验晋升、复用、降权和禁用，不表示在线训练基础模型，也不
-  会绕过权限自动重放任意补丁。
-- 通用代码与进程事件会自动记录；领域模拟器内部状态需要通过 `SimulatorAdapter` 接入。
-- 任意未知科研仓库能否修复取决于模型、工具、遥测、验收条件和权限配置。
-
-## 测试
-
-```bash
-cd Nexgent/nexgent
-pip install -e ".[dev]"
-QT_QPA_PLATFORM=offscreen pytest -q
-```
-
-完整使用说明见 [Harness README](nexgent/README.md)，桌面操作见
-[Desktop GUI](nexgent/docs/desktop-gui.md)。
-
-## License
-
-[MIT](LICENSE)
+旧 Harness、示例和被否定的有限策略原型已从活动源码退出，保留在本机仓库外快照及 Git 历史中。安装包只包含 `src/nexgent`。

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexgent"
+version = "0.7.0"
+description = "Scientific agents with executable, inherited self-improvement programs"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = ["numpy>=1.26", "scipy>=1.12", "openai>=1.0", "requests>=2.31", "python-dotenv>=1.0", "PyQt6>=6.8,<7"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-qt>=4.5"]
+
+[project.scripts]
+nexgent = "nexgent.cli:main"
+nexgent-gui = "nexgent.ui.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+nexgent = ["agents/seeds/*.py", "agents/seeds/*.json", "ui/assets/*.svg", "ui/assets/*.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["provider: real configured model calls, explicitly invoked", "research: computational scientific experiments"]
