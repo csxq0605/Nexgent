@@ -15,6 +15,7 @@ Windows Qt 出现“无法定位程序输入点”属于动态库装载问题。
 - 已用 token：仅合计 Provider 返回的 usage。未返回用量的调用标为未知。
 - `max_evaluations`：benchmark 评价次数。跨研究缓存占相同逻辑额度，同研究同一测量不重复计算。
 - 逻辑工作与实际工作分别记录；单位由插件声明，不跨领域直接比较。历史字段 `numeric_work_units` 保留以读取已有记录。
+- 科学插件在无法获得失败源进程的工作收据时，以预算上界保守记账，并标记 `execution.work_units_status=reserved_upper_bound_actual_usage_unavailable`。此时 `physical_numeric_work_units` 表示未缓存测量的记账值，不能当作精确物理运算量；实际用量未知必须连同该标记报告。
 - 外层改进器默认上限 1800 秒、探测内层 600 秒，每次模型请求上限 180 秒。均可停止，没有隐式重试。
 - 探测先检查能容纳两组的额度。任务程序经通用工具发出的模型请求也记入同一账本。
 

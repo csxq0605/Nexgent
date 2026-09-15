@@ -413,6 +413,118 @@ def test_origin_study_meta_report_is_visible_and_switching_history_clears_it(mak
     assert "尚未记录独立后代对照" in window.meta_evidence.comparison_summary.toPlainText()
 
 
+def related_meta(controller, identity, origin, target, *, status="completed", seed=903, cross=False):
+    state = controller.state(identity, status)
+    benchmark = {"id": target, "title": {"bbh": "BBH · Boolean + Sorting",
+        "scientific_discovery": "Scientific discovery"}.get(target, target)}
+    report = meta_report()
+    report.update(meta_study_id=identity, benchmark=benchmark, cross_benchmark=cross)
+    report["protocol"].update(seeds=[seed], k=1)
+    state.update(kind="meta_evaluation", benchmark=benchmark, conclusion={},
+        registration={"origin_study": origin, "benchmark": benchmark, "cross_benchmark": cross,
+                      "seeds": [seed], "k": 1}, meta_evaluation=report if status == "completed" else None)
+    controller.states[identity] = state
+    return deepcopy(state)
+
+
+def test_main_study_lists_all_completed_targets_and_deduplicates_attached_latest_report(make_window):
+    controller = FakeController(); origin = controller.state()
+    controller.states[origin["id"]]["benchmark"] = {"id": "scientific_discovery", "title": "Scientific discovery"}
+    science = related_meta(controller, "study-0000000000000011", origin["id"], "scientific_discovery", seed=803)
+    bbh = related_meta(controller, "study-0000000000000012", origin["id"], "bbh", seed=903, cross=True)
+    related_meta(controller, "study-0000000000000013", "unrelated-origin", "bbh", cross=True)
+    related_meta(controller, "study-0000000000000014", origin["id"], "bbh", status="running", cross=True)
+    controller.states[origin["id"]]["conclusion"]["meta_evaluation"] = bbh["meta_evaluation"]
+    window = make_window(controller); window.select_study(origin["id"]); panel = window.meta_evidence
+    assert panel.comparison_choice.count() == 2
+    assert panel.comparison_choice.currentData() == science["id"]
+    assert "Scientific discovery [scientific_discovery]" in panel.report_context.text()
+    assert "同基准对照" in panel.report_context.text() and "种子：803" in panel.report_context.text()
+    panel.comparison_choice.setCurrentIndex(panel.comparison_choice.findData(bbh["id"]))
+    context = panel.report_context.text()
+    assert "BBH · Boolean + Sorting [bbh]" in context and "跨基准迁移对照" in context
+    assert bbh["id"] in context and origin["id"] in context and "种子：903" in context and "k=1" in context
+    assert panel.report["meta_study_id"] == bbh["id"]
+    captured = []; panel.show_details = lambda title, report: captured.append(deepcopy(report))
+    panel.details_button.click()
+    assert captured[0]["benchmark"]["id"] == "bbh"
+    assert controller.created == [] and controller.run_ids == [] and controller.continued == []
+
+
+def test_refresh_finds_newly_completed_meta_without_losing_selected_target(make_window):
+    controller = FakeController(); origin = controller.state()
+    bbh = related_meta(controller, "study-0000000000000011", origin["id"], "bbh", cross=True)
+    related_meta(controller, "study-0000000000000012", origin["id"], "scientific_discovery", status="running", seed=803)
+    window = make_window(controller); window.select_study(origin["id"]); panel = window.meta_evidence
+    assert panel.comparison_choice.count() == 1 and panel.comparison_choice.currentData() == bbh["id"]
+    related_meta(controller, "study-0000000000000012", origin["id"], "scientific_discovery", seed=803)
+    panel.refresh_reports.click()
+    assert panel.comparison_choice.count() == 2 and panel.comparison_choice.currentData() == bbh["id"]
+    other = controller.state("study-0000000000000099")
+    window.refresh_history(); window.select_study(other["id"])
+    assert panel.comparison_choice.count() == 0 and panel.report is None
+    assert controller.run_ids == []
+
+
+@pytest.mark.parametrize("status", ["completed", "running", "failed", "paused"])
+def test_independent_meta_has_explicit_kind_origin_target_and_cannot_launch_research(make_window, status):
+    controller = FakeController(); origin = controller.state()
+    meta = related_meta(controller, "study-0000000000000011", origin["id"], "bbh", status=status, cross=True)
+    window = make_window(controller); window.select_study(meta["id"])
+    window.question.setPlainText("A stale new-research form must not launch from this record")
+    assert "独立改进器对照（只读）" in window.overview.toPlainText()
+    assert origin["id"] in window.overview.toPlainText()
+    context = window.meta_evidence.report_context.text()
+    assert meta["id"] in context and origin["id"] in context
+    assert "[bbh]" in context and "跨基准迁移对照" in context and "种子：903" in context
+    assert not window.start_button.isEnabled() and not window.resume_button.isEnabled() and not window.continue_button.isEnabled()
+    window.start_study(); window.resume_study(); window.continue_study()
+    assert controller.created == [] and controller.run_ids == [] and controller.continued == []
+
+
+def test_legacy_meta_report_does_not_guess_missing_benchmark_attribution(make_window):
+    controller = FakeController(); state = controller.state()
+    controller.states[state["id"]]["conclusion"]["meta_evaluation"] = meta_report()
+    window = make_window(controller)
+    assert window.meta_evidence.comparison_choice.count() == 1
+    context = window.meta_evidence.report_context.text()
+    assert "ID 未记录" in context and "跨基准关系未记录" in context
+    assert "旧报告未提供独立研究 ID" in context
+    assert window.meta_evidence.pairs.rowCount() == 2
+
+
+def test_actual_offspring_counts_keep_benchmarks_and_main_inheritance_separate(make_window):
+    controller = FakeController(); origin = controller.state()
+    controller.states[origin["id"]]["conclusion"].update(executable_meta_changed=True, inherited_improver_executed=[])
+    science = related_meta(controller, "study-0000000000000011", origin["id"], "scientific_discovery", seed=701)
+    bbh = related_meta(controller, "study-0000000000000012", origin["id"], "bbh", cross=True)
+    for record, counts in ((science, (2, 2)), (bbh, (0, 1))):
+        report = controller.states[record["id"]]["meta_evaluation"]
+        report["arms"] = [{"arm": arm, "attempts": [{"candidates": [{"status": "evaluated"} for _ in range(count)]}]}
+            for arm, count in zip(("initial", "evolved"), counts)]
+    controller.states[origin["id"]]["conclusion"]["meta_evaluation"] = deepcopy(controller.states[bbh["id"]]["meta_evaluation"])
+    window = make_window(controller); window.select_study(origin["id"]); panel = window.meta_evidence
+    assert "实际任务后代共 5 个，已评价 5 个" in panel.related_summary.text()
+    assert "不计为主研究的继承执行" in panel.related_summary.text()
+    assert "0 个修改后的改进器有继承执行记录" in panel.summary.text()
+    panel.comparison_choice.setCurrentIndex(panel.comparison_choice.findData(science["id"]))
+    assert "本对照实际任务后代 4 个，已评价 4 个" in panel.comparison_summary.toPlainText()
+    panel.comparison_choice.setCurrentIndex(panel.comparison_choice.findData(bbh["id"]))
+    assert "初始改进器产生 0 个，演化改进器产生 1 个" in panel.comparison_summary.toPlainText()
+
+
+def test_meta_progress_uses_registered_pairs_and_target_start_instead_of_inherited_rounds(make_window):
+    controller = FakeController(); origin = controller.state()
+    meta = related_meta(controller, "study-0000000000000011", origin["id"], "bbh", status="running", cross=True)
+    initial, child = list(controller.programs.values())
+    controller.states[meta["id"]].update(initial_program=initial["id"], active_program=child["id"], generation=17)
+    window = make_window(controller); window.select_study(meta["id"])
+    assert window.program_card.caption.text() == "冻结任务起点"
+    assert window.program_card.value.text() == "第 0 代"
+    assert window.round_card.caption.text() == "完整 / 登记配对"
+    assert window.round_card.value.text() == "— / 1"
+
+
 @pytest.mark.parametrize("status,message", [("running", "正在执行"), ("failed", "未完成"), ("paused", "未完成")])
 def test_incomplete_meta_study_does_not_imply_zero_or_completion(make_window, status, message):
     controller = FakeController(); state = controller.state(status=status)

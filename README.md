@@ -94,6 +94,10 @@ python -m venv .venv
 
 ## 当前证据
 
+最终实现通过 282 项本地检查，配置 Windows/Ubuntu × Python 3.11/3.12 四项 CI（[当前检查](https://github.com/csxq0605/Nexgent/pull/1/checks)）；独立核心安装无需科学依赖，也能运行窗口和通用源码。实际模型研究、两个插件的独立改进器比较与完整成本见 [框架验证报告](docs/research/framework-validation-20260916.md)。
+
+本轮先后登记的两次机制 pilot 与独立比较共 44 次模型请求。原轮观察到改变后的改进器继承执行，同时暴露并修复了长查询接口缺陷。修复轮的独立比较实际生成并评测 5 个任务后代，3 个配对效应均为 0；**尚无改进器能力增强的证据**。错误父代选择、未通过源码准入的提议和无效修订均保留，不能用源码 diff 或生成槽位数代替成功后代。
+
 六组科学 demo 研究和 36 次独立确认全部保留。一个任务程序获得确认平均增益 +0.012351；两个 full 组均未改变改进程序，**该批没有建立改进器能力增强的证据**。这些反例用于后续机制设计，不能改称框架已完成 RSI 验收。
 
 官方 BBH 两任务固定强基线通过 500/500 例，0 模型调用。这验证接入、实际执行与评分，也说明准确率已饱和；它不是演化成果。
@@ -109,6 +113,8 @@ python -m venv .venv
 - [RSI 一手文献与实现判断](docs/research/reboot-rsi-mechanisms.md)
 - [源码机制审查和探测设计](docs/research/source-mechanism-review-20260916.md)
 - [六组科学 demo 完整结果](docs/research/source-batch-results-20260916.md)
+- [通用框架的真实机制验证与交付](docs/research/framework-validation-20260916.md)
+- [v1 源码机制审查](docs/research/framework-mechanism-v1-review.md)、[v2 源码机制审查](docs/research/framework-mechanism-v2-review.md)
 - [源码、配对数据与确认收据](docs/research/source-batch-evidence-20260916.json)
 - [运行与恢复](docs/operations.md)
 

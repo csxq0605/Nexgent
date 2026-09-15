@@ -15,6 +15,9 @@ Nexgent 的目标是 `src/nexgent` 中的通用源码级 RSI 框架。科学发�
 | [精简原始证据](source-batch-evidence-20260916.json) | 六研究、36 次确认、逐任务数据、实际用量及去重源码，排除配置和模型请求正文 |
 | [科学发现插件](../../benchmarks/scientific_discovery/README.md) | 领域任务、数值工具、强基线、评分与文献的独立安装及方法边界 |
 | [公共 CLI 科学 demo 验证](build-validation-scientific-cli-20260916.json) | 通用 evaluate 入口的固定程序、真实源进程、逐任务结果和 0 API 用量回执；不衡量 RSI 效果 |
+| [通用框架真实验证](framework-validation-20260916.md) | 框架边界、两次 pilot、跨 benchmark 实际改进器比较、安装与成本证据 |
+| [v1 机制审查](framework-mechanism-v1-review.md) | 实际继承、查询接口失败、被拒的伪修复与不完整比较 |
+| [v2 机制审查](framework-mechanism-v2-review.md) | 无候选探测、错误 selector、实际后代及独立比较的证据边界 |
 
 论文结果、本地软件检查、实际自修改、任务效果和真实后代生产率分别报告。需要同时保存成功、失败、缺测、模型用量和数值工作；多次迁移复现不能冒充多个独立演化研究。
 

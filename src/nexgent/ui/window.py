@@ -259,6 +259,7 @@ class ResearchWindow(QMainWindow):
         self._build_lineage()
         from .meta_evidence import MetaEvidencePanel
         self.meta_evidence = MetaEvidencePanel(self.show_json)
+        self.meta_evidence.refresh_requested.connect(self.refresh_history)
         self.tabs.addTab(self.meta_evidence, "改进器效能")
         self._build_conclusion()
         outer.addWidget(main, 1)
@@ -449,7 +450,8 @@ class ResearchWindow(QMainWindow):
         if not hasattr(self, "start_button"): return
         busy = self._worker is not None
         selected_benchmark = self.benchmark_choice.currentData() if hasattr(self, "benchmark_choice") else None
-        self.start_button.setEnabled(not busy and bool(self.question.toPlainText().strip()) and self._benchmark_available(selected_benchmark))
+        readonly_experiment = (self.snapshot or {}).get("kind") in READ_ONLY_EXPERIMENTS
+        self.start_button.setEnabled(not busy and not readonly_experiment and bool(self.question.toPlainText().strip()) and self._benchmark_available(selected_benchmark))
         self.start_button.setText("启动后续研究" if self._continuation_id else "开始研究")
         self.question.setEnabled(not busy)
         self.question.setReadOnly(bool(self._continuation_id))
@@ -610,17 +612,23 @@ class ResearchWindow(QMainWindow):
         self.state_label.setText("等待研究目标" if not state else f"{state['id']} · {study_status(state)} · {state.get('stage', '')}")
         if self._worker is None:
             self.running_note.setText("所选记录为研究中\n本窗口仅查看，可刷新记录" if state.get("status") == "running" else "本窗口当前没有运行中的研究")
-        active = self._program(state.get("active_program"), state)
+        meta = state.get("kind") == "meta_evaluation"
+        active = self._program(state.get("initial_program") if meta else state.get("active_program"), state)
         fixed = state.get("kind") == "benchmark_evaluation"
         fixed_report = state.get("benchmark_evaluation") or {}
         fixed_summary = fixed_report.get("summary") or {}
-        self.program_card.caption.setText("固定任务程序" if fixed else "当前任务冠军")
-        self.round_card.caption.setText("已测量 / 登记种子" if fixed else "研究轮次")
+        self.program_card.caption.setText("固定任务程序" if fixed else "冻结任务起点" if meta else "当前任务冠军")
+        self.round_card.caption.setText("已测量 / 登记种子" if fixed else "完整 / 登记配对" if meta else "研究轮次")
         self.program_card.value.setText(f"第 {active['generation']} 代" if 'generation' in active else "—")
         self.program_card.value.setToolTip(str(active.get("id", "")))
         self.round_card.value.setText(f"{state.get('generation', 0)} / {state.get('max_generations', '—')}" if state else "—")
         if fixed:
             self.round_card.value.setText(f"{fixed_summary.get('measured', '—')} / {fixed_summary.get('planned', '—')}")
+        elif meta:
+            evidence = (state.get("meta_evaluation") or {}).get("evidence") or {}
+            seeds = (state.get("registration") or {}).get("seeds")
+            requested = evidence.get("requested_pairs", len(seeds) if isinstance(seeds, list) else "—")
+            self.round_card.value.setText(f"{evidence.get('complete_pairs', '—')} / {requested}")
         calls = state.get("calls") or []
         budget = state.get("budget") or {}; usage = state.get("usage") or {}
         used_calls = usage.get("model_calls", usage.get("calls", len(calls)))
@@ -639,6 +647,10 @@ class ResearchWindow(QMainWindow):
         if fixed:
             mode = "固定程序基准评价"
             summary = self._fixed_benchmark_summary(fixed_summary)
+        elif state.get("kind") == "meta_evaluation":
+            mode = "独立改进器对照（只读）"
+            origin = (state.get("registration") or {}).get("origin_study", "旧记录未提供来源 ID")
+            summary = f"来源研究：{origin}。本记录评价冻结改进器，目标基准、种子、缺测与成本见“改进器效能”。"
         benchmark = state.get("benchmark") or {}
         title = benchmark.get("title", benchmark.get("id", "旧记录未登记基准插件")) if state else "等待选择任务基准"
         self.overview.setHtml(f"<h3>{esc(title)} · {esc(mode)}</h3><p>{esc(summary)}</p>")
@@ -680,7 +692,7 @@ class ResearchWindow(QMainWindow):
             self._fill_list(self.experiments_list, experiments, "尚未形成基准测量报告")
             self._fill_list(self.failures_list, failures, "尚未记录缺测")
         self._render_lineage(state)
-        self.meta_evidence.render(state)
+        self.meta_evidence.render(state, related_studies=self._states.values())
         displayed_conclusion = conclusion
         if state.get("kind") == "meta_evaluation" and state.get("meta_evaluation"):
             displayed_conclusion = {**conclusion, "meta_evaluation": state["meta_evaluation"],
