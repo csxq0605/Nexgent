@@ -1,6 +1,6 @@
 # NExgent 重启研究：从有限策略搜索到源码级递归自我改进
 
-研究日期：2026-09-15。状态：**文献机制复核与待验证设计，尚未实现或复现本报告提出的系统。** 本文取代上一轮“有限策略搜索已足以作为交付主体”的判断。它不否定已有数值测量，但不再将这些测量解释为整个智能体软件已学会改进自身。
+研究日期：2026-09-15。本文记录**重启实现前的文献机制复核与待验证设计**，不是当前实现或实验结果清单；后续实现见[当前架构](design.md)，科学收益仍需独立实验判断。本文取代上一轮“有限策略搜索已足以作为交付主体”的判断。它不否定已有数值测量，但不再将这些测量解释为整个智能体软件已学会改进自身。
 
 ## 1. 研究问题与取证范围
 
@@ -19,14 +19,14 @@
 
 ## 2. 上一轮实现的问题在哪里
 
-本节依据本轮实际读取的仓库源文件，而不是从论文反推实现。旧代码随后已迁往相邻目录 `NExgent-rejected-prototype-20260915`；以下链接指向该归档快照。
+本节依据本轮实际读取的仓库源文件，而不是从论文反推实现。旧代码随后已迁往相邻目录 `NExgent-rejected-prototype-20260915`；以下文件名均相对于该归档中的 `nexgent/nexgent/rsi/`。归档只保留在本地工作区，不随当前仓库或安装包发布。
 
 | 实际实现 | 能证明什么 | 不能支持的结论及重构要求 |
 | --- | --- | --- |
-| [`contracts.py`](../../../NExgent-rejected-prototype-20260915/nexgent/nexgent/rsi/contracts.py) 的 `TASK_OPTIONS` 固定 library、derivative、selection、ridge、threshold；`validate_task_policy` 限制取值。 | 能在既定数值方法族中搜索配置。 | 不能生成新的求解器、诊断器、检索方法或科研工作流。把这些枚举写入 Python 文件也不会改变问题性质。 |
-| [`proposals.py`](../../../NExgent-rejected-prototype-20260915/nexgent/nexgent/rsi/proposals.py) 的 `task_mutations`、`_alternative`、`_next_meta` 由开发者实现。 | 父代配置会真实影响变体顺序、范围和组合。 | 可变的是固定解释器的输入；解释器的搜索逻辑、提出假设的方法和修改操作本身不变。 |
-| [`provider.py`](../../../NExgent-rejected-prototype-20260915/nexgent/nexgent/rsi/provider.py) 固定按 evidence → critic → designer 调用，最后从 `task_choice` 表选索引。 | 三次真实模型调用和严格、可审计的有限选择。 | 模型无法改变角色数量、信息流、实验时机或改进器程序。索引方案修复了接口可靠性，却进一步明确了它是封闭候选空间。 |
-| [`worker.py`](../../../NExgent-rejected-prototype-20260915/nexgent/nexgent/rsi/worker.py) 的元评价从共同 `SEED_TASK_POLICY` 调用 `task_mutations`，截取两名后代。 | 公共同起点降低了已有任务水平的混淆，可测固定变异解释器在不同配置下的表现。 | 它没有加载、运行被测后代的真实 LLM 改进器，更没有测试其编写后代源码的能力。不能把该分数称为实际源码改进器的 improvement@k。 |
+| `contracts.py` 的 `TASK_OPTIONS` 固定 library、derivative、selection、ridge、threshold；`validate_task_policy` 限制取值。 | 能在既定数值方法族中搜索配置。 | 不能生成新的求解器、诊断器、检索方法或科研工作流。把这些枚举写入 Python 文件也不会改变问题性质。 |
+| `proposals.py` 的 `task_mutations`、`_alternative`、`_next_meta` 由开发者实现。 | 父代配置会真实影响变体顺序、范围和组合。 | 可变的是固定解释器的输入；解释器的搜索逻辑、提出假设的方法和修改操作本身不变。 |
+| `provider.py` 固定按 evidence → critic → designer 调用，最后从 `task_choice` 表选索引。 | 三次真实模型调用和严格、可审计的有限选择。 | 模型无法改变角色数量、信息流、实验时机或改进器程序。索引方案修复了接口可靠性，却进一步明确了它是封闭候选空间。 |
+| `worker.py` 的元评价从共同 `SEED_TASK_POLICY` 调用 `task_mutations`，截取两名后代。 | 公共同起点降低了已有任务水平的混淆，可测固定变异解释器在不同配置下的表现。 | 它没有加载、运行被测后代的真实 LLM 改进器，更没有测试其编写后代源码的能力。不能把该分数称为实际源码改进器的 improvement@k。 |
 | 新进程、摘要、谱系、预算收据、数值保留集。 | 测量、恢复和溯源的工程基础有效。 | 被测对象有限时，再严谨的收据也不会把有限搜索变成软件架构进化。这些基础应复用，结论范围必须收缩。 |
 
 因此，重启目标不是增加枚举、扩大 grid、让 JSON 更灵活，或把固定角色换一个名字。**可变主体必须是能够被加载执行的完整智能体软件；测试中必须观察到后代使用自己继承的改进代码产生下一代。** 共同起点本身不是问题，问题在于测试时用宿主固定算法代替了被测改进器。
@@ -298,3 +298,11 @@ B1 source + entry=improve execution receipt -> generated B2
 另一个维度是实际 meta study 的数据种子：模块 API 默认 101/202/303，controller 当前默认 401/502/603，均须以那次独立注册为准；不能因为也有三个种子就与上述统一 confirmation 混同。主运行自动产生的内部 final_transfer 也不是本次公开机制审查的数据来源。
 
 当前两演化种子的设计足以暴露执行链、预算失败和方向不一致，尚不足以稳定估计广泛分布上的效应或宣布统计显著。确认数据必须等最终程序/比较对象冻结后统一查看，不能边看边决定下一份候选代码。机制审查只读公开源码、development/selection 证据，并在[公开机制归因审查](source-mechanism-review-20260916.md)保留模型主张与实际实现不一致的记录。
+
+### 11.7 由公开反例提出的下一项机制实验
+
+两条 full 轨迹的正式后代均未改变 meta/workflow/roles；因此把它们的非 task 部分与初始程序做付费生成比较，只会比较同一改进器的抽样重复，不能估计元算法变化。本结论来自公开源码与生成/selection 记录，不使用确认集。下一项假设应针对已观察到的缺口：源程序缺少实际探测新改进器所生成后代的能力，而且修订审计存在“声称改变机制、实际只改注释”的反例。
+
+[机制审查 §5](source-mechanism-review-20260916.md#5-下一项元机制研究把实际改进器探测交还给研究程序) 给出尚未实施的 `probe_improver` 契约：同一已注册 task 起点、冻结公开历史、真实执行新旧 improve、开发后代效用反馈、最大嵌套深度 1、同账本预算与单 outer 一次探测。两代机制 pilot 首先检验真实反馈和继承，零收益、负收益及未验证修订仍保留其证据状态；能力接通与元生产率提高是不同结论。
+
+Nexgent 的定位是**通用 RSI 智能体框架**。科学发现是本文的演示领域；核心 seed、模型编排、源码继承和探测不能依赖 SINDy、动力系统或固定任务数量。领域任务、工具、文献、种子与评价由独立 adapter 注册，通过 `context.domain/task_contract/tool_api/literature` 提供给同一通用研究程序。将科学内容移至 `examples/scientific_discovery` 与第二领域验证属于下一阶段工作，尚不能当成已完成或跨领域效果已获证明。
