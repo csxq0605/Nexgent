@@ -1,5 +1,7 @@
 # 源码 RSI 共享实现契约
 
+> 历史协作记录：以下为早期源码原型的合同，科学目录归属等内容已过时。现有 0.8 见 [实现快照](../architecture-0.8.md)，下一版范围以 [vNext 架构](../design/agent-architecture-vnext.md)为准；四文件限制不再定义目标框架。
+
 状态：供本轮实现统一使用，接口变动由根代理协调。产品包唯一位置为 `src/nexgent`；旧 `nexgent/nexgent` 已连同旧运行产物迁出当前仓库，保存在相邻目录 `NExgent-rejected-prototype-20260915`。
 
 ## 1. 源码版本

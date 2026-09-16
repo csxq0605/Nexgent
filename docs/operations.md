@@ -1,5 +1,7 @@
 # 研究运行与恢复
 
+> 适用版本：现有 0.8。vNext 与 OpenFOAM 仍是设计，不能据本文命令推断它们已实现；新设计见 [架构入口](architecture.md)。
+
 ## 项目与模型
 
 GUI、CLI 与 Python API 使用同一个通用控制器，读取当前项目的 `models.json` / `.env`。`NEXGENT_PROJECT_ROOT` 或 CLI `--root` 可指定项目。智能体源码进程不接收凭证。

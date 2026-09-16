@@ -1,15 +1,26 @@
 # 科研与 RSI 研究索引
 
-Nexgent 的目标是 `src/nexgent` 中的通用源码级 RSI 框架。科学发现是独立 benchmark 插件和研究 demo；它的任务、工具与评分不能成为核心框架的假定。旧有限策略原型的文档已归档。
+Nexgent 的目标是通用任务执行与反馈驱动自改进的智能体架构，能够运行 benchmark。科学发现与 OpenFOAM 是独立 demo，不能定义核心。2026-09-16 的重新设计以下列文档为准；vNext 尚未实现，旧实验仍按当时协议解释。
+
+## 当前设计
+
+- [定位与重构决策](../design/product-and-refactor-decision.md)
+- [vNext 架构](../design/agent-architecture-vnext.md)
+- [编排与 RSI 研究综合](agent-orchestration-rsi-synthesis-20260916.md)：实际方法、采用方式、未完成能力和可证伪实验。
+- [OpenFOAM demo](../demos/openfoam-cfd-design.md)与[环境核查](../demos/openfoam-environment-20260916.md)：独立领域任务与评价。
+
+## 0.8 及更早阶段的材料
+
+以下文献复核、接口和实验文件是历史研究记录，不覆盖新设计的范围。
 
 | 文档 | 用途 |
 |---|---|
-| [当前框架架构](../architecture.md) | 通用核心、独立插件、实际后代探测和源码/预算归因 |
+| [0.8 架构快照](../architecture-0.8.md) | 现有源码执行、插件、探测和归因；完整任务编排目标尚未完成 |
 | [0.7 设计记录](design.md) | 历史科学 demo 原型的文献机制与实现；其领域耦合已纠正 |
 | [RSI 一手研究复核](reboot-rsi-mechanisms.md) | STOP、DGM、Hyperagents、HGM 等的原文位置、真实机制、成本与反证 |
 | [科学协议与失败诊断](reboot-scientific-protocol.md) | 历史逐候选分析、科学任务、强基线、消融和新数值控制 |
 | [全仓审计与迁移](reboot-repository-map.md) | 原仓库模块去留、依赖、包布局和运行安全审查 |
-| [源码接口合同](source-runtime-contract.md) | 共享 source bundle、solver、improver、broker 与数值接口 |
+| [早期源码接口记录](source-runtime-contract.md) | 历史 source bundle、solver、improver、broker 与数值接口；目录和范围已被后续设计替代 |
 | [确认实验登记](confirmation-plan-20260916.json) | 已执行的一次性 split/seed、预算、先冻结各臂程序及禁止确认反馈 |
 | [六组研究与独立确认结果](source-batch-results-20260916.md) | 两条独立演化种子的三臂对照、全部失败与成本、一次性确认和 RSI 证据限制 |
 | [精简原始证据](source-batch-evidence-20260916.json) | 六研究、36 次确认、逐任务数据、实际用量及去重源码，排除配置和模型请求正文 |

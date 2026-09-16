@@ -1,5 +1,7 @@
 # RSI 实验空间
 
+> 本文记录 0.8 信息窗口，不能作为完整任务智能体或 vNext 已实现的证据。新任务与演化窗口的设计见 [vNext 架构](../design/agent-architecture-vnext.md)。
+
 当前实现：`src/nexgent/ui/`，桌面入口 `python -m nexgent.ui.app`。界面依赖通用实验控制器、已安装的 benchmark 插件与显式项目模型配置，没有迁入旧聊天窗口、Agent、Tools、ConfigDialog 或 ModelRegistry。科学发现是可选择的演示领域，界面不假定所有任务都是科学计算。
 
 ## 1. 用户流程
