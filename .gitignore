@@ -1,10 +1,13 @@
 __pycache__/
+.nexgent/
+.pytest_cache/
 .DS_Store
 *.py[cod]
 *.pyc
 .env
 *.log
 *.png
+!docs/validation/*.png
 *.jpg
 logs/
 .venv/
@@ -21,3 +24,13 @@ coverage.json
 .nexgent/exports/
 **/.nexgent/runs/
 **/.nexgent/exports/
+**/.nexgent/science/
+**/.nexgent/sessions/
+**/.nexgent/outputs/
+*.egg-info/
+build/
+dist/
+validation-workspace/
+models.json
+validation-provider/
+build-validation/

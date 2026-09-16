@@ -1,0 +1,84 @@
+{
+  "created_utc": "2026-09-15T18:19:09.312906+00:00",
+  "study_id": "study-6e02dda373304307",
+  "status": "completed",
+  "generation": 2,
+  "usage": {
+    "model_calls": 16,
+    "reserved_completion_tokens": 65600,
+    "reported_total_tokens": 632912,
+    "unknown_usage_calls": 0,
+    "evaluations": 10,
+    "numeric_work_units": 108622446,
+    "physical_numeric_work_units": 108622446
+  },
+  "inherited_improver_executed": [],
+  "main_mean_transfer_delta": 0.0,
+  "main_meta_mutation": true,
+  "association_summary": "关联对照 2 份；实际任务后代共 5 个，已评价 5 个。各基准分别评价；这些执行不计为主研究的继承执行。",
+  "inherited_execution_summary": "存在改进器或编排修改；0 个修改后的改进器有继承执行记录。源码变化、开发探测与独立后代效能分别核对。",
+  "source_digest_unchanged": true,
+  "registered_implementation_digest": "762dd64e539e067cdf3f456da81fb01da8cb139915c950cb31673fbb94f7de21",
+  "screenshots": [
+    {
+      "path": "docs\\validation\\pilot-v2-final-progress.png",
+      "tab": "研究进展",
+      "size": [
+        1480,
+        980
+      ],
+      "sha256": "604fe85b9a0593addc5f47c97df39cc00599f60165ad1057ec916c454d14da53"
+    },
+    {
+      "path": "docs\\validation\\pilot-v2-final-improver-science.png",
+      "tab": "改进器效能",
+      "size": [
+        1480,
+        980
+      ],
+      "sha256": "098246559bba9c22877b3575009584e8f3da4a0d68be5dcc82d45bb94ab4025c",
+      "meta_study_id": "study-30cadef88bee7988",
+      "benchmark_id": "scientific_discovery",
+      "identity_text": "目标基准：Scientific discovery: dynamical systems [scientific_discovery] · 同基准对照\n独立研究：study-30cadef88bee7988 · 来源研究：study-6e02dda373304307\n种子：701, 802 · 每臂后代上限 k=1",
+      "offspring": {
+        "generated": 4,
+        "evaluated": 4,
+        "initial": 2,
+        "evolved": 2
+      },
+      "paired_difference": 0.0
+    },
+    {
+      "path": "docs\\validation\\pilot-v2-final-improver-bbh.png",
+      "tab": "改进器效能",
+      "size": [
+        1480,
+        980
+      ],
+      "sha256": "e20efca10157c184006311d769df9a8f4394bba34cb5011bb12019cdce4cbf44",
+      "meta_study_id": "study-4ba1dd861ddbeb30",
+      "benchmark_id": "bbh",
+      "identity_text": "目标基准：BBH · Boolean expressions + Word sorting [bbh] · 跨基准迁移对照\n独立研究：study-4ba1dd861ddbeb30 · 来源研究：study-6e02dda373304307\n种子：903 · 每臂后代上限 k=1",
+      "offspring": {
+        "generated": 1,
+        "evaluated": 1,
+        "initial": 0,
+        "evolved": 1
+      },
+      "paired_difference": 0.0
+    },
+    {
+      "path": "docs\\validation\\pilot-v2-final-lineage.png",
+      "tab": "源码谱系",
+      "size": [
+        1480,
+        980
+      ],
+      "sha256": "805add189b8e1d5f7265a81a38adf2f75a14bd0ac36b7008b103a6e3c16f833c"
+    }
+  ],
+  "capture_model_calls": 0,
+  "capture_research_calls": 0,
+  "capture_source_executions": 0,
+  "window_closed": true
+}
