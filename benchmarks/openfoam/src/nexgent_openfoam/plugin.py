@@ -286,9 +286,9 @@ class OpenFOAMCavityDomain:
         return runner.discover_environment().public()
 
     def tools(self):
-        from nexgent.tasks.tools import ToolSpec
+        from nexgent.tasks.tools import ToolSpec, artifact_ref_schema
         empty = obj({})
-        ref = {"type": "string", "minLength": 1}
+        ref = artifact_ref_schema()
         return [
             ToolSpec(
                 name="openfoam.probe_environment",

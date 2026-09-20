@@ -18,7 +18,9 @@ from nexgent.kernel.programs import digest
 from nexgent.models.gateway import ModelTransportError
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService, ToolContext
-from nexgent.tasks.tools import ContractError, ToolRegistry, ToolSpec
+from nexgent.tasks.tools import (
+    ContractError, ToolRegistry, ToolSpec, artifact_ref_schema, validate_tool_input,
+)
 
 
 def controlled_package(source):
@@ -175,6 +177,126 @@ def test_task_registration_rejects_external_schema_refs_and_accepts_local_defini
                     "type": "object", "properties": {"value": {"$ref": "#/$defs/value"}}}
     state = service.create("Local schema is valid", deliverables=[{"name": "result", "schema": local_schema}])
     assert state["status"] == "ready"
+
+
+def test_tool_artifact_reference_contract_rejects_placeholders_before_handler(tmp_path):
+    calls = []
+
+    def handler(arguments, context):
+        calls.append(deepcopy(arguments))
+        return {"value": context.read_artifact(arguments["source_ref"])["content"]}
+
+    tool = ToolSpec(
+        "contract.artifact", {
+            "type": "object", "required": ["source_ref"],
+            "properties": {"source_ref": artifact_ref_schema()},
+            "additionalProperties": False,
+        }, {"type": "object"}, "read", handler)
+    service = TaskService(tmp_path, tools=ToolRegistry([tool]))
+    invalid_package = controlled_package("""def execute(payload, context):
+    context.tool('contract.artifact', {'source_ref': 'pending'})
+    return {'deliverables': {}}
+""")
+    invalid = service.create(
+        "Reject placeholder artifact identities", package=invalid_package,
+        deliverables=result_spec(), capabilities=[tool.name])
+    failed = service.run(invalid["id"])
+
+    assert failed["status"] == "failed"
+    assert failed["failure_domain"] == "protocol"
+    assert "actual artifact ID returned by the host" in failed["last_error"]
+    assert failed["usage"]["tool_calls"] == 0
+    assert calls == []
+
+    valid_package = controlled_package("""def execute(payload, context):
+    value = context.tool('contract.artifact', {'source_ref': payload['input_refs']['source']})
+    artifact = context.publish(value, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+""")
+    valid = service.create(
+        "Accept host artifact identities", inputs={"source": {"answer": 9}},
+        package=valid_package, deliverables=result_spec(), capabilities=[tool.name])
+    completed = service.run(valid["id"])
+    assert completed["status"] == "completed", completed.get("last_error")
+    assert len(calls) == 1 and calls[0]["source_ref"].startswith("artifact-")
+
+
+def test_tool_registration_rejects_invalid_or_output_artifact_reference_annotations():
+    invalid = ToolSpec(
+        "contract.invalid-artifact-marker", {
+            "type": "object", "properties": {
+                "source_ref": {"type": "string", "x-nexgent-artifact-ref": False}}},
+        {"type": "object"}, "read", lambda arguments, context: {})
+    with pytest.raises(ContractError, match="Artifact-reference annotations"):
+        ToolRegistry([invalid])
+    output_marker = ToolSpec(
+        "contract.output-artifact-marker", {"type": "object"},
+        {"type": "string", "x-nexgent-artifact-ref": True}, "read",
+        lambda arguments, context: "artifact-0000000000000000")
+    with pytest.raises(ContractError, match="only valid in tool inputs"):
+        ToolRegistry([output_marker])
+
+
+def test_artifact_reference_keyword_is_only_interpreted_at_schema_positions():
+    ordinary_data = [
+        {"type": "object", "properties": {
+            "x-nexgent-artifact-ref": {"type": "boolean"}}},
+        {"const": {"x-nexgent-artifact-ref": "ordinary data"}},
+        {"examples": [{"x-nexgent-artifact-ref": "ordinary data"}]},
+    ]
+    for index, schema in enumerate(ordinary_data):
+        ToolRegistry([ToolSpec(
+            f"contract.ordinary-marker-name-{index}", schema,
+            {"type": "object"}, "read", lambda arguments, context: {})])
+
+    remote_ref = {"type": "object", "properties": {
+        "source": {"$ref": "https://example.invalid/schema"}}}
+    with pytest.raises(ContractError, match="local definitions"):
+        ToolRegistry([ToolSpec(
+            "contract.remote-ref", remote_ref, {"type": "object"}, "read",
+            lambda arguments, context: {})])
+
+    for unsupported in (
+        {"dependencies": {"source": artifact_ref_schema()}},
+        {"contentSchema": artifact_ref_schema()},
+    ):
+        with pytest.raises(ContractError, match="not supported"):
+            ToolRegistry([ToolSpec(
+                "contract.unsupported-artifact-position", unsupported,
+                {"type": "object"}, "read", lambda arguments, context: {})])
+
+
+def test_artifact_reference_keyword_follows_json_schema_applicator_semantics():
+    seen = []
+    resolver = lambda ref: seen.append(ref)
+    first = "artifact-1111111111111111"
+    second = "artifact-2222222222222222"
+
+    local_ref = {
+        "$defs": {"artifact": artifact_ref_schema()},
+        "type": "object", "required": ["source"],
+        "properties": {"source": {"$ref": "#/$defs/artifact"}},
+    }
+    validate_tool_input({"source": first}, local_ref, artifact_resolver=resolver)
+    assert seen == [first]
+
+    seen.clear()
+    alternative = {"type": "object", "properties": {
+        "value": {"anyOf": [{"type": "integer"}, artifact_ref_schema()]}}}
+    validate_tool_input({"value": 7}, alternative, artifact_resolver=resolver)
+    assert seen == []
+
+    pattern = {"type": "object", "patternProperties": {
+        "^input_": artifact_ref_schema()}}
+    with pytest.raises(ContractError, match="actual artifact ID"):
+        validate_tool_input(
+            {"input_one": "pending"}, pattern, artifact_resolver=resolver)
+
+    seen.clear()
+    array = {"type": "array", "prefixItems": [artifact_ref_schema()],
+             "items": artifact_ref_schema()}
+    validate_tool_input([first, second], array, artifact_resolver=resolver)
+    assert seen == [first, second]
 
 
 def test_tool_workspace_is_bounded_and_shared_by_the_root_episode(tmp_path):

@@ -521,14 +521,19 @@ class TaskService:
                     and tool.effect_class not in constraints["allowed_effects"]):
                 raise PermissionError(
                     f"Tool effect {tool.effect_class!r} is not allowed by this task")
-            validate(arguments, tool.input_schema, label=name + " input")
+            from .tools import validate_tool_input
+            validate_tool_input(
+                arguments, tool.input_schema,
+                artifact_resolver=lambda ref: self.store.read(ref, identity),
+                label=name + " input")
             self.store.reserve_tool(identity, path, {"name": name, "arguments": arguments})
             receipt = {"call_id": identity + "/" + path, "episode_id": identity, "name": name,
                        "arguments": deepcopy(arguments), "status": "started", "started_at": time.time()}
             started = time.monotonic()
             try:
                 result = tool.handler(arguments, ToolContext(self, identity, path, stop_event))
-                validate(result, tool.output_schema, label=name + " output")
+                validate(result, tool.output_schema, label=name + " output",
+                         allow_artifact_refs=False)
                 receipt.update(status="completed", result=deepcopy(result))
                 return result
             except Exception as exc:

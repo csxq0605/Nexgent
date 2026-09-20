@@ -45,6 +45,8 @@
 
 代码与确定性测试已经覆盖受限子进程、版本化多文件包、模型/工具节点、显式工件、当前记忆快照、树级共享预算、停止恢复、交付 schema 核验、包内 reviewer 修订和冻结 benchmark 评价。简单任务仍可走单体路径，不靠强制增加角色数制造协作证据。
 
+P1-V 已将跨工具工件交接收紧为核心 JSON Schema 合同：插件以 `x-nexgent-artifact-ref: true` 标记输入位置，运行器按完整 Draft 2020-12 applicator 语义验证真实 `artifact-…` 身份和 Episode 可见性，再登记工具调用。普通数据中的同名属性不会被误判；输出 schema 不允许声明该标记。Workbench 与 OpenFOAM 只消费这个通用合同，不在核心写入领域流程。
+
 真实 Provider 验证已经登记。Qwen `qwen3.8-flash` 的最小与 Workbench 请求均被阿里云以 400 `Arrearage` 拒绝，本机 Gemini provider 最小探针返回 `APIConnectionError`。MiMo `mimo-v2.5` 的旧 Workbench episode 在 30 次模型调用后失败；2026-09-21 的普通任务资格运行用 3 次调用完成 schema 合法交付，但新的 Workbench development episode 仍在 20 次调用后预算耗尽，评价不可用。完整记录见[验证记录](docs/research/task-runtime-validation-20260920.md)与[增量机器摘要](docs/research/task-runtime-validation-20260921.json)。
 
 实现出口中的共享执行器、核心独立安装、真实状态窗口和受控失败恢复合同已经完成。实际 MiMo 轨迹现在证明普通任务的模型调用、任务内发布、reviewer 路径和 schema 合法交付能够闭合；Workbench 轨迹证明工具与失败反馈被激活，但没有在预算内完成工件验证或独立评价。受控失败恢复、benchmark 成功及反馈后的有效修订仍待验证。P1 的工程底座可供 P2/P3 开发使用，但不能写成完整 RSI 或已验证的自我改进效果。
@@ -124,7 +126,7 @@ promotion 强制绑定预登记 improver guard。部署后的候选生成通过�
 
 ### 下一阶段
 
-1. **P1-V 后续真实运行验证**：在修正模型反复请求已完成工具的问题并设置新的冻结预算后，重新检验 normal 多步骤交付；只有 normal 能完成，才运行可隔离验证恢复假设的受控失败场景。保留已有失败 episode，不用重跑覆盖。
+1. **P1-V 后续真实运行验证**：工件引用合同已修正模型使用 `pending` 等占位符的问题；下一次冻结运行先检验 normal 多步骤交付，只有 normal 能完成，才运行可隔离验证恢复假设的受控失败场景。保留已有失败 episode，不用重跑覆盖。
 2. **P2 数值验证扩展**：在现有 smoke 之外，另行冻结 Re=100、独立参考、网格/时间收敛和稳态判据。没有这些证据时保持 smoke 结论，不把 20×20×1 Re=10 输出与 Ghia 数据比较。
 3. **P3 真实行为与效果验证**：先以冻结的内置 `reference-os-v1` 作为可复现实验臂，再加入显式 R 与通道 R 对照；冻结任务序列、可验证执行环境/工具/运行时快照、预算、paired selection 和 guard policy；预登记目标 provider/model，并用逐调用 receipt 核验实际身份与参数；用真实 development 失败产生候选，报告全部 complete/missing generation、完整/缺测配对、行为激活、质量、normalized work unit、原始 usage、可得的实际货币费用和回归。即使没有候选通过也按预登记结束，不降低门槛追求正结果。
 4. **P4 真实行为与 P5**：使用已实现的递归控制面冻结真实 R0/R1、共同 A0、任务族、provider/model receipt、资源和 selection/guard；报告全部分支与缺测。最终只用多任务族、重复、合理固定优化器基线和未写回 holdout 决定统计主张。

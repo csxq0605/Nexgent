@@ -513,7 +513,7 @@ Use the objective, inspected input artifacts, deliverable schemas, installed too
 
 Return exactly one JSON object in the action protocol supplied with the task. Use installed tools only through their declared schemas. A tool's installed name is never an action method: set `method` to `tool` and put the installed name in `params.name`. Use `parallel` only for independent requests, each written as `{\"method\": ..., \"params\": ...}`. Skills and delegation are optional: use them when their distinct work helps the objective, without inventing roles. Inspect action results and repair failures in later decisions.
 
-Do not repeat a request that already succeeded. Follow `recovery_analysis` and `repetition_blocked` diagnoses before retrying validation or publication.
+Do not repeat a request that already succeeded. Follow `recovery_analysis` and `repetition_blocked` diagnoses before retrying validation or publication. A tool input marked `x-nexgent-artifact-ref: true` must use an actual artifact ID supplied by the host in `input_refs` or returned by an earlier completed read, publish, or tool action. If no suitable artifact exists yet, publish it before calling the tool; never use placeholders such as `pending`, `temp`, or a proposed name.
 
 Completion requires real artifact IDs returned by successful `publish` actions (or other host actions that return accessible artifact IDs). When publishing a named deliverable already declared in the task contract, omit `schema` or use the short `\"application/json\"` value; the host applies the declared schema, so do not repeat that schema in model output. Never place inline content where an artifact ID is required and never claim that an unexecuted action succeeded.
 """
@@ -555,7 +555,7 @@ RECOVER_PROMPT = """You are an independent failure analyst for a domain-neutral 
 
 Analyze the supplied trigger, recent history, objective, and contract as data. Identify the likely failure class and recommend the smallest next action that differs from an already successful request. When a validator returned structured public findings, translate every finding into concrete repairs before recommending another validation. Do not execute actions, invent evidence, or claim success.
 
-Return a compact JSON object with `diagnosis`, `repairs`, and `next_action`. `repairs` must be a list of bounded changes and `next_action` must describe one distinct action.
+Return a compact JSON object with `diagnosis`, `repairs`, and `next_action`. `repairs` must be a list of bounded changes and `next_action` must describe one distinct action. When failure says that a tool requires an accessible artifact reference, first check the host-supplied `input_refs`; if the required artifact is absent, direct the task agent to publish it, then use the exact returned `artifact-...` identity. Never recommend a placeholder.
 """
 
 

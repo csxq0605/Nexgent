@@ -1,6 +1,6 @@
 # Nexgent vNext：通用任务智能体与递归改进架构
 
-日期：2026-09-16。状态：**设计提案，尚未实现**。本文提出下一版的产品与接口，不是对 0.8 能力的重新命名，也不授权实现、模型调用或正式实验。产品边界见 [定位决策](product-and-refactor-decision.md)，阶段出口见 [重构计划](../../REFACTOR_PLAN.md)。0.8 的实现与既有结果仍以 [0.8 架构快照](../architecture-0.8.md) 和 [框架验证报告](../research/framework-validation-20260916.md) 为准。
+日期：2026-09-16。状态：**0.9 实现基线，效果验证仍在进行**。本文固定产品与接口方向；任务运行、插件边界、版本化 AgentPackage、反馈生成、配对选择、晋升、guard/rollback 与冻结研究控制面已经实现，真实模型改进效果与统计 RSI 结论仍未建立。产品边界见 [定位决策](product-and-refactor-decision.md)，阶段出口和证据边界见 [重构计划](../../REFACTOR_PLAN.md)。0.8 的历史实现与既有结果仍以 [0.8 架构快照](../architecture-0.8.md) 和 [框架验证报告](../research/framework-validation-20260916.md) 为准。
 
 ## 1. 产品定位与这次需要改变的中心
 

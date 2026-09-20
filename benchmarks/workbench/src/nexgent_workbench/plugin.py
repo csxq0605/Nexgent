@@ -206,14 +206,16 @@ class WorkbenchDomain:
                 "details": "Pure Python artifact tools; provider is configured by the host."}
 
     def tools(self):
-        from nexgent.tasks.tools import ToolSpec
+        from nexgent.tasks.tools import ToolSpec, artifact_ref_schema
         return [ToolSpec(name="workbench.inspect_sources",
                          description="Inspect source artifact shape and revision inventory, without reconciling records.",
-                         input_schema=obj({"source_ref": STR}), output_schema=INSPECTION_SCHEMA,
+                         input_schema=obj({"source_ref": artifact_ref_schema()}),
+                         output_schema=INSPECTION_SCHEMA,
                          effect_class="read", handler=inspect_sources),
                 ToolSpec(name="workbench.validate_delivery",
                          description="Read actual ledger/report artifacts and return public schema and policy-consistency feedback. A successful tool receipt for the final artifacts is required; mentioning this tool in prose is not validation.",
-                         input_schema=obj({"ledger_ref": STR, "report_ref": STR}),
+                         input_schema=obj({"ledger_ref": artifact_ref_schema(),
+                                           "report_ref": artifact_ref_schema()}),
                          output_schema=VALIDATION_SCHEMA, effect_class="read", handler=validate_delivery)]
 
 

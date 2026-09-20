@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.seed import default_package
-from nexgent.tasks.tools import ToolRegistry, ToolSpec
+from nexgent.tasks.tools import ToolRegistry, ToolSpec, artifact_ref_schema
 
 
 class ScriptedGatewayFactory:
@@ -491,6 +491,61 @@ def test_seed_repairs_tool_schema_arguments_containing_artifact_like_label(tmp_p
     assert result["status"] == "completed", result.get("last_error")
     assert calls == [{"value": 4}]
     assert len(gateway.calls) == 6
+
+
+def test_seed_sees_artifact_reference_contract_and_recovers_from_placeholder(tmp_path):
+    handler_calls = []
+
+    def handler(arguments, context):
+        handler_calls.append(deepcopy(arguments))
+        return {"valid": True}
+
+    tool = ToolSpec("test.validate-artifact", {
+        "type": "object", "required": ["result_ref"],
+        "properties": {"result_ref": artifact_ref_schema()},
+        "additionalProperties": False,
+    }, {"type": "object"}, "read", handler)
+
+    def policy(number, payload):
+        artifact_ids = [item["result"]["id"] for item in payload.get("history", [])
+                        if item.get("kind") == "observation" and item.get("ok")
+                        and isinstance(item.get("result"), dict)
+                        and isinstance(item["result"].get("id"), str)]
+        if number == 1:
+            marker = payload["task"]["tools"][0]["input_schema"]["properties"]["result_ref"]
+            assert marker["x-nexgent-artifact-ref"] is True
+            return {"request": {"method": "tool", "params": {
+                "name": tool.name, "arguments": {"result_ref": "pending"}}}}
+        if number == 2:
+            feedback = payload["history"][-1]
+            assert feedback["kind"] == "recovery_analysis"
+            assert "publish" in feedback["analysis"]["next_action"].lower()
+            return {"request": {"method": "publish", "params": {
+                "name": "result", "content": {"answer": 12}}}}
+        if number == 3:
+            artifact_id = artifact_ids[-1]
+            return {"request": {"method": "tool", "params": {
+                "name": tool.name, "arguments": {"result_ref": artifact_id}}}}
+        return {"done": {"deliverables": {"result": artifact_ids[-1]},
+                         "summary": "published before using an artifact reference",
+                         "limitations": []}}
+
+    def recover(payload):
+        assert "actual artifact ID returned by the host" in payload["trigger"]["error"]
+        return {"diagnosis": "A placeholder was used where the tool requires an artifact.",
+                "repairs": ["Publish the missing deliverable."],
+                "next_action": "Publish the result and retain its returned artifact ID."}
+
+    gateway = ScriptedGatewayFactory(policy, recovery_policy=recover)
+    service = TaskService(tmp_path, tools=ToolRegistry([tool]), gateway_factory=gateway)
+    state = service.create("Use actual artifacts", deliverables=result_spec(),
+                           capabilities=[tool.name])
+    result = service.run(state["id"])
+
+    assert result["status"] == "completed", result.get("last_error")
+    assert len(handler_calls) == 1
+    assert handler_calls[0]["result_ref"].startswith("artifact-")
+    assert result["usage"]["tool_calls"] == 1
 
 
 def test_seed_does_not_swallow_provider_failure_inside_prompt_skill(tmp_path):

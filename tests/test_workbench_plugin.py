@@ -349,7 +349,7 @@ def test_public_tools_register_in_generic_host_and_validate_typed_results():
     for name, arguments in (("workbench.inspect_sources", {"source_ref": "sources"}),
                             ("workbench.validate_delivery", {"ledger_ref": "ledger", "report_ref": "report"})):
         tool = registry.get(name)
-        validate(arguments, tool.input_schema)
+        validate(arguments, tool.input_schema, allow_artifact_refs=True)
         result = tool.handler(arguments, context)
         validate(result, tool.output_schema)
         assert tool.effect_class == "read"

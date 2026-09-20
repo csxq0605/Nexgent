@@ -21,6 +21,8 @@ python -m nexgent task-benchmark openfoam_cavity --split smoke --seed 0
 
 `--input` 接受内联 JSON 对象、JSON 文件路径或 `@file`。`--capability` 可重复授予工具；`--package` 读取 AgentPackage JSON。任务和 benchmark 都可设置 `--max-calls`、`--max-completion-tokens`、`--max-tool-calls` 与 `--max-nodes`。workbench 和 openfoam_cavity 的 `--controlled-failure` 请求各插件提供的确定性一次性故障场景，用于恢复合同验证；它不是生产故障模拟。
 
+工具输入 schema 可以把某个字符串位置标记为 `x-nexgent-artifact-ref: true`。这表示调用方必须传入宿主已发布且当前 Episode 可访问的真实工件 ID；不能猜测 ID，也不能用 `pending`、文件名或逻辑标签代替。默认任务包会先从 `input_refs` 取宿主输入，或用 `context.publish(...)` 得到返回的 ID，再调用依赖该工件的工具。运行器在工具预算登记与 handler 执行前完成该校验。
+
 ## P3 反馈演化控制面
 
 P3 管理通用 `AgentPackage` 的行为版本，不理解 OpenFOAM、科学发现或 WorkBench 的领域语义。插件只提供任务、工具、数据和 evaluator；核心只处理身份、反馈边界、候选、冻结评测、部署通道和回滚。

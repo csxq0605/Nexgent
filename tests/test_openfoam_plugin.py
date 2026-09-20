@@ -125,10 +125,12 @@ def test_domain_tool_schemas_are_closed_and_refs_are_the_only_path_like_inputs()
         },
     }
     for name, tool in tools.items():
-        validate(valid_arguments[name], tool.input_schema, label=name)
+        validate(valid_arguments[name], tool.input_schema, label=name,
+                 allow_artifact_refs=True)
         injected = {**valid_arguments[name], "command": "sh -c 'touch escaped'"}
         with pytest.raises(Exception):
-            validate(injected, tool.input_schema, label=name)
+            validate(injected, tool.input_schema, label=name,
+                     allow_artifact_refs=True)
 
 
 def test_prepare_rejects_tampered_path_spec_before_environment_or_workspace(tmp_path):
