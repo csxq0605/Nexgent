@@ -1,4 +1,4 @@
-# Nexgent
+# Nexgent 0.9
 
 **通用 RSI 智能体框架：自主组织任务执行，从反馈中改进技能、协作和工作方式，并能运行 benchmark 检验效果。**
 
@@ -6,14 +6,19 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具
 
 ## 定位与当前状态
 
-2026-09-16 重新固定设计。现有 **0.8 代码是源码执行、自修改与评测基础**，尚未完成完整任务多智能体架构与有效编排进化。新的 **vNext 目前仅为设计文档**；本轮未实现新运行器、OpenFOAM 插件或启动仿真/模型实验。
+0.9 完成了 P1 的任务执行、交付评审与恢复基础及产品入口整合：普通目标和 benchmark 现在共享 `TaskService`，使用版本化 `AgentPackage`、受限模型/技能/工具能力、显式工件、执行节点、记忆快照、预算、停止恢复和可导出证据。默认 GUI 是任务空间；0.8 研究窗口和原有 CLI 命令继续保留。
+
+P1 已由确定性网关、工具和 benchmark 双件测试覆盖，并会运行真实受限子进程。它建立了后续 RSI 所需的可执行、可评审、可追踪和可恢复底座，**还没有实现跨任务候选生成、独立晋升门、自动回滚或改进策略自身更新**。仓库当前也没有据此声称真实模型供应商上的任务成功或效果提升；这类运行证据仍需单独登记和报告。
 
 | 内容 | 状态 |
 | --- | --- |
-| 通用插件、实际源码执行、预算/版本、0.8 信息窗口 | 已实现，有历史软件与运行证据 |
-| 完整任务规划、技能协作、工件/记忆与跨任务行为更新 | 本轮重新设计，待实现 |
-| 改进流程本身可更新且带来递归效用 | 设计目标；0.8 未建立正面效果证据 |
-| OpenFOAM 方腔 demo | 设计已形成；本机 Foundation 8 已只读确认，插件和算例验证未执行 |
+| P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础已实现并通过确定性合同测试；真实 episode 验证记录待补 |
+| P1 普通任务与独立 workbench benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同 |
+| P2 OpenFOAM 方腔 demo | 待实现、待运行；本机 Foundation 8 仅做过只读确认 |
+| P3 跨任务行为更新 | 待实现与检验 |
+| P4 改进过程可更新与递归执行 | 待实现与检验 |
+| P5 冻结研究和完整产品验收 | 待实现与检验 |
+| 0.8 源码执行、自修改、历史 benchmark 与研究窗口 | 保留；其证据不替代 0.9 P1 或 P2–P5 验收 |
 
 ### 设计阅读入口
 
@@ -23,24 +28,30 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具
 - [OpenFOAM 独立 demo](docs/demos/openfoam-cfd-design.md)与[本机环境](docs/demos/openfoam-environment-20260916.md)：任务、物理验证、版本适配及未执行项目。
 - [分阶段重构计划](REFACTOR_PLAN.md)：依赖、责任和验收条件。
 
-### 目标架构（待实现）
+### 当前 0.9 P1 执行路径
 
 ```mermaid
 flowchart LR
-    T[普通任务 / Benchmark任务] --> A[当前版本智能体: 技能 / 编排 / 工具 / 记忆]
-    A --> O[真实交付物与过程反馈]
-    O --> I[同一智能体能力体系诊断并提出行为修改]
-    I --> V[候选评测与版本选择]
-    V --> A
-    D[可选领域插件] --> A
+    T[普通任务 / Benchmark 任务] --> S[TaskService]
+    S --> P[版本化 AgentPackage]
+    P --> C[模型 / 技能 / 授权工具 / 委派]
+    C --> A[工件、节点、收据与记忆]
+    A --> O[交付与验收状态]
+    D[可选领域插件] --> C
     O --> B[独立 Benchmark 评价]
 ```
 
-任务内调整、跨任务保留的改进、改进过程自身的递归更新分别验证；不要求每代修改某个元文件。信息窗口展示目标、进展、交付物、失败和采用的改进，内部执行基础设施由框架管理。
+任务窗口展示目标、节点、交付物、失败、调用收据和记忆版本。跨任务行为更新与递归改进属于 P3–P4，未包含在 P1 完成状态中。
 
-## 0.8 安装与信息窗口
+### 从任务底座到 RSI
 
-以下命令仅适用于现有 0.8，不是 vNext 或 OpenFOAM 的启动说明。[0.8 架构快照](docs/architecture-0.8.md)保留当前接口边界。
+后续自进化的对象是版本化智能体行为，而不是宿主评价器或领域答案：任务编排与角色交接、技能实现和提示协议、记忆写入与检索策略，以及用于诊断和产生改进的策略。真实任务的交付质量、独立 benchmark 分数、评审缺陷、工具错误、恢复结果、回归和资源成本共同构成反馈；代理自评只能作为其中一项有来源的信号。
+
+闭环需要依次留下可核查证据：失败归因形成修改假设；从已冻结父版本生成候选 `AgentPackage`；在隔离的开发任务上执行候选；以独立评价和成本/安全回归作为晋升门；只有通过门控的版本才进入后续任务。未通过的候选保留证据但不部署；已部署版本若在监测任务中退化，则恢复到上一已通过版本。P1 目前提供包身份、谱系、任务轨迹和恢复语义，候选生成、门控、晋升和回滚由 P3–P4 实现。
+
+这个边界来自[编排与 RSI 研究综合](docs/research/agent-orchestration-rsi-synthesis-20260916.md)：持久化、实际执行和有效必须分别检查，且“失败证据 → 候选变化 → 验证 → 后续实际加载 → 结果”缺一不可。0.8 的[框架验证](docs/research/framework-validation-20260916.md)、[v1 机制审查](docs/research/framework-mechanism-v1-review.md)和[v2 机制审查](docs/research/framework-mechanism-v2-review.md)记录过机制未激活、契约错误和实际后代零增益，因此源码变化、记忆写入或候选数量都不能单独作为 RSI 成功证据。P1 实跑记录格式见[任务运行时验证模板](docs/research/task-runtime-validation-20260920.md)。
+
+## 0.9 安装与任务入口
 
 Python 3.11+；本机使用独立 Python 3.12 环境。Windows 使用本项目解释器，避免其他项目的 Qt/Conda 动态库混用。
 
@@ -49,6 +60,7 @@ python -m venv .venv
 .venv\Scripts\python.exe -m pip install -e '.[dev]'
 
 # 选择安装所需 demo / benchmark
+.venv\Scripts\python.exe -m pip install -e benchmarks/workbench
 .venv\Scripts\python.exe -m pip install -e benchmarks/scientific_discovery
 .venv\Scripts\python.exe -m pip install -e benchmarks/bbh
 .venv\Scripts\nexgent-bbh-download.exe --destination .nexgent/benchmarks/bbh
@@ -56,11 +68,30 @@ python -m venv .venv
 .\start.ps1
 ```
 
-本机环境、两项插件和 BBH 数据已准备。模型读取被 Git 忽略的 `models.json` / `.env`；示例见 [models.example.json](models.example.json) 和 [.env.example](.env.example)。凭证留在模型请求宿主，不进入智能体源码进程。
+本机环境、workbench、scientific_discovery、BBH 三项插件和 BBH 数据已准备。模型读取被 Git 忽略的 `models.json` / `.env`；示例见 [models.example.json](models.example.json) 和 [.env.example](.env.example)。凭证留在模型请求宿主，不进入智能体源码进程。
 
-窗口包含进度、资料、实验、源码谱系、改进器效能和结论。开发探测、独立评测、固定程序成绩及未执行结果分别显示。查看或导出不会启动新的研究。
+`nexgent gui` 和 `nexgent-gui` 默认打开任务空间。任务创建、恢复、查看和导出使用同一个 `.nexgent` 持久存储：
 
-## 0.8 benchmark 与源码研究接口
+```powershell
+# 默认创建后执行；--input 接受内联 JSON、JSON 文件路径或 @file
+.venv\Scripts\python.exe -m nexgent task "整理输入资料并交付结果" --input inputs.json
+.venv\Scripts\python.exe -m nexgent task "只登记" --register-only --max-calls 4 --max-completion-tokens 12000
+
+.venv\Scripts\python.exe -m nexgent task-list
+.venv\Scripts\python.exe -m nexgent task-show EPISODE_ID
+.venv\Scripts\python.exe -m nexgent task-resume EPISODE_ID
+.venv\Scripts\python.exe -m nexgent task-export EPISODE_ID --output delivery.json
+
+# workbench 是 P1 的纯 Python 可选插件；此命令仍会使用配置的模型供应商
+.venv\Scripts\python.exe -m nexgent task-benchmark workbench --split development --seed 0 --max-calls 20
+
+# 打开保留的 0.8 研究窗口
+.venv\Scripts\python.exe -m nexgent gui --legacy-research
+```
+
+`--capability` 可重复授予已安装工具；`--package` 接受 AgentPackage JSON。预算选项包括 `--max-calls`、`--max-completion-tokens`、`--max-tool-calls` 和 `--max-nodes`。没有传入时使用运行器的有界默认值。输入、包和任务合同无效时，命令会在执行前失败。
+
+## 保留的 0.8 benchmark 与源码研究接口
 
 ```powershell
 .venv\Scripts\python.exe -m nexgent benchmarks
@@ -117,7 +148,7 @@ python -m venv .venv
 
 ## 开发与研究材料
 
-安装两项插件后运行 `.venv\Scripts\python.exe -m pytest tests -q`。
+安装 workbench、scientific_discovery 和 BBH 三项插件后运行 `.venv\Scripts\python.exe -m pytest tests -q`。
 
 - [分阶段协作计划与 PR](REFACTOR_PLAN.md)
 - [当前设计与历史实现的架构入口](docs/architecture.md)
@@ -131,6 +162,7 @@ python -m venv .venv
 
 ```text
 src/nexgent/                      通用 RSI 核心与信息窗口
+benchmarks/workbench/             P1 工件式数据核对任务与 benchmark 插件
 benchmarks/scientific_discovery/   独立科学发现 demo 包
 benchmarks/bbh/                    独立公开 benchmark 包
 tests/                            核心合同、继承、账本及插件验证

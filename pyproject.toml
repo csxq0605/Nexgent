@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nexgent"
-version = "0.8.0"
-description = "A general RSI agent framework with pluggable benchmarks and inherited improvement programs"
+version = "0.9.0"
+description = "A general task agent runtime with durable execution, artifacts, tools, memory, and pluggable benchmarks"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["openai>=1.0", "requests>=2.31", "python-dotenv>=1.0", "PyQt6>=6.8,<7"]
+dependencies = ["openai>=1.0", "requests>=2.31", "python-dotenv>=1.0", "PyQt6>=6.8,<7", "jsonschema>=4.22,<5"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-qt>=4.5"]

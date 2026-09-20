@@ -1,13 +1,22 @@
 # 科研与 RSI 研究索引
 
-Nexgent 的目标是通用任务执行与反馈驱动自改进的智能体架构，能够运行 benchmark。科学发现与 OpenFOAM 是独立 demo，不能定义核心。2026-09-16 的重新设计以下列文档为准；vNext 尚未实现，旧实验仍按当时协议解释。
+Nexgent 是通用、可运行 benchmark 的 RSI 智能体编排框架。科学发现与 OpenFOAM 是解耦 demo，只提供领域任务、工具、数据和评价，不能定义核心。2026-09-20 已实现 P1 的任务执行、交付评审与恢复基础；跨任务候选生成、独立晋升/回滚和改进策略自身更新仍待 P3–P4 实现。旧实验继续按当时协议解释，不能替代新运行时验证。
 
 ## 当前设计
 
 - [定位与重构决策](../design/product-and-refactor-decision.md)
 - [vNext 架构](../design/agent-architecture-vnext.md)
 - [编排与 RSI 研究综合](agent-orchestration-rsi-synthesis-20260916.md)：实际方法、采用方式、未完成能力和可证伪实验。
+- [P1 任务运行时验证](task-runtime-validation-20260920.md)：真实 episode 的冻结信息、轨迹、评审、恢复和验收记录结构；当前空字段保留为待运行证据。
 - [OpenFOAM demo](../demos/openfoam-cfd-design.md)与[环境核查](../demos/openfoam-environment-20260916.md)：独立领域任务与评价。
+
+## P1 与 RSI 研究边界
+
+P1 固定了任务、不可变 AgentPackage、能力准入、工件/记忆引用、调用收据、预算和恢复状态，并在默认包中加入交付评审与修订循环。这些对象让后续研究能够判断“哪个版本在什么输入和预算下做了什么”，但尚未形成跨任务自进化。
+
+真正的 RSI 闭环以版本化行为为修改对象：编排与角色交接、技能和提示协议、记忆写入/检索策略，以及后续的改进策略。反馈来自独立任务质量、评审缺陷、工具与恢复结果、资源成本和回归。候选必须带父版本与触发证据，在隔离任务上实际运行，经过冻结评价器和成本/回归门控后才可晋升；失败候选不部署，已部署候选退化时回到上一通过版本。
+
+[研究综合](agent-orchestration-rsi-synthesis-20260916.md)的核心结论是：持久化、可执行和有效必须分开检查；任务内修订、跨任务积累和元效用也必须分开测。[框架验证](framework-validation-20260916.md)与[v1](framework-mechanism-v1-review.md)/[v2](framework-mechanism-v2-review.md)审查进一步表明，机制未激活、未通过准入的源码、错误父代选择和零增益后代必须如实保留。后续不能再用源码 diff、写入记忆或生成候选的数量代替实际效用。
 
 ## 0.8 及更早阶段的材料
 

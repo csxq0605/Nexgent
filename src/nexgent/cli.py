@@ -1,4 +1,4 @@
-"""Research operations, each backed by the same product controller and ledger."""
+"""Task-first product commands plus the preserved 0.8 research interface."""
 import argparse
 import json
 import os
@@ -6,6 +6,9 @@ from pathlib import Path
 import threading
 
 from .evolution.controller import StudyController
+
+
+TASK_COMMANDS = {"task", "task-resume", "task-show", "task-list", "task-export", "task-benchmark"}
 
 
 def project_root():
@@ -18,11 +21,139 @@ def project_root():
     return Path.cwd()
 
 
+def _json_argument(value, *, label):
+    """Read a JSON value from inline text, @file, or an existing file path."""
+    source = value
+    path = None
+    if value.startswith("@"):
+        path = Path(value[1:]).expanduser()
+        if not path.is_file():
+            raise ValueError(f"{label} file does not exist: {path}")
+    elif not value.lstrip().startswith(("{", "[")):
+        candidate = Path(value).expanduser()
+        try:
+            if candidate.is_file():
+                path = candidate
+        except OSError:
+            path = None
+    if path is not None:
+        source = path.read_text(encoding="utf-8")
+    try:
+        return json.loads(source)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} must be valid JSON or a JSON file: {exc.msg}") from exc
+
+
+def _object_argument(value, *, label):
+    result = _json_argument(value, label=label)
+    if not isinstance(result, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return result
+
+
+def _task_budget(args):
+    return {key: value for key, value in {
+        "max_model_calls": getattr(args, "max_calls", None),
+        "max_completion_tokens": getattr(args, "max_completion_tokens", None),
+        "max_tool_calls": getattr(args, "max_tool_calls", None),
+        "max_nodes": getattr(args, "max_nodes", None),
+    }.items() if value is not None}
+
+
+def _add_task_budget(parser):
+    parser.add_argument("--max-calls", type=int, help="Maximum admitted model calls")
+    parser.add_argument("--max-completion-tokens", type=int, help="Maximum reserved completion tokens")
+    parser.add_argument("--max-tool-calls", type=int, help="Maximum admitted tool calls")
+    parser.add_argument("--max-nodes", type=int, help="Maximum admitted execution nodes")
+
+
+def _task_summary(state):
+    return {key: state.get(key) for key in
+            ("id", "status", "output_refs", "outcome", "usage", "last_error")}
+
+
+def _run_task_command(args):
+    from .tasks.runtime import TaskService
+
+    service = TaskService(args.root)
+    if args.command == "task-list":
+        return [{"id": state.get("id"), "objective": state.get("task", {}).get("objective"),
+                 "status": state.get("status"), "outcome": state.get("outcome")}
+                for state in service.list()]
+    if args.command == "task-show":
+        return service.get(args.episode_id)
+    if args.command == "task-export":
+        return {"episode_id": args.episode_id,
+                "path": service.export(args.episode_id, args.output)}
+
+    stop = threading.Event()
+    import signal
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    if args.command == "task-resume":
+        return _task_summary(service.run(args.episode_id, stop_event=stop))
+    if args.command == "task-benchmark":
+        package = _object_argument(str(args.package), label="package") if args.package else None
+        options = {"controlled_failure": True} if args.controlled_failure else {}
+        return service.benchmark(args.benchmark, split=args.split, seed=args.seed,
+                                 budget=_task_budget(args), package=package,
+                                 stop_event=stop, **options)
+
+    inputs = _object_argument(args.input, label="input") if args.input else {}
+    deliverables = _json_argument(args.deliverables, label="deliverables") if args.deliverables else None
+    if deliverables is not None and not isinstance(deliverables, list):
+        raise ValueError("deliverables must be a JSON array")
+    constraints = _object_argument(args.constraints, label="constraints") if args.constraints else None
+    package = _object_argument(str(args.package), label="package") if args.package else None
+    state = service.create(args.objective, inputs=inputs, budget=_task_budget(args),
+                           capabilities=args.capability, package=package,
+                           deliverables=deliverables, constraints=constraints)
+    if args.register_only:
+        return _task_summary(state)
+    return _task_summary(service.run(state["id"], stop_event=stop))
+
+
+def _task_failed(command, result):
+    if command in {"task", "task-resume"}:
+        return result.get("status") in {"failed", "paused", "waiting_input", "cancelled"}
+    if command == "task-benchmark":
+        reports = result.get("reports", [])
+        return any(report.get("evaluation", {}).get("accepted") is not True for report in reports)
+    return False
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Nexgent general RSI agent framework")
+    parser = argparse.ArgumentParser(description="NExgent task agent runtime and legacy RSI research tools")
     parser.add_argument("--root", type=Path, default=project_root())
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("gui")
+    gui = sub.add_parser("gui", help="Open the task workspace")
+    gui.add_argument("--legacy-research", action="store_true", help="Open the preserved 0.8 research window")
+
+    task = sub.add_parser("task", help="Register and execute an ordinary task")
+    task.add_argument("objective")
+    task.add_argument("--input", help="Inline JSON object, JSON file path, or @file")
+    task.add_argument("--deliverables", help="JSON array (or file) of named output schemas")
+    task.add_argument("--constraints", help="JSON object (or file) with quality/effect/wall-time constraints")
+    task.add_argument("--capability", action="append", default=[], help="Grant an installed tool capability; repeat as needed")
+    task.add_argument("--package", type=Path, help="AgentPackage JSON file; defaults to the installed seed package")
+    task.add_argument("--register-only", action="store_true", help="Register without executing")
+    _add_task_budget(task)
+    resume_task = sub.add_parser("task-resume", help="Resume a persisted task episode")
+    resume_task.add_argument("episode_id")
+    show_task = sub.add_parser("task-show", help="Show a persisted task episode")
+    show_task.add_argument("episode_id")
+    sub.add_parser("task-list", help="List top-level task episodes")
+    export_task = sub.add_parser("task-export", help="Export a task episode and its evidence")
+    export_task.add_argument("episode_id")
+    export_task.add_argument("--output", type=Path)
+    benchmark_task = sub.add_parser("task-benchmark", help="Run an installed benchmark through the task runtime")
+    benchmark_task.add_argument("benchmark")
+    benchmark_task.add_argument("--split", default="development")
+    benchmark_task.add_argument("--seed", type=int, default=0)
+    benchmark_task.add_argument("--package", type=Path, help="AgentPackage JSON file; defaults to the installed seed package")
+    benchmark_task.add_argument("--controlled-failure", action="store_true",
+                                help="Request the benchmark's deterministic recovery trial when supported")
+    _add_task_budget(benchmark_task)
+
     sub.add_parser("list")
     sub.add_parser("benchmarks")
     evaluate = sub.add_parser("evaluate", help="Run a fixed program on an installed benchmark without evolution")
@@ -61,7 +192,17 @@ def main(argv=None):
     if args.command == "gui":
         from .ui.app import main as gui_main
         os.environ["NEXGENT_PROJECT_ROOT"] = str(args.root)
-        return gui_main(["--project", str(args.root)])
+        gui_args = ["--project", str(args.root)]
+        if args.legacy_research:
+            gui_args.append("--legacy-research")
+        return gui_main(gui_args)
+    if args.command in TASK_COMMANDS:
+        try:
+            result = _run_task_command(args)
+        except (ValueError, OSError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+        return 1 if _task_failed(args.command, result) else 0
     controller = StudyController(args.root)
     if args.command == "benchmarks":
         result = controller.list_benchmarks()
