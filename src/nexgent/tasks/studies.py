@@ -328,7 +328,8 @@ class TaskStudyExecutor:
             "score": float(report["score"]) if measured else None,
             "accepted": report["accepted"] if measured else None,
             "evaluation_digest": digest(report),
-            "usage": {key: usage.get(key) for key in _USAGE_KEYS},
+            "usage": {key: (usage.get(key, 0) if key == "charged_tool_work_units"
+                            else usage.get(key)) for key in _USAGE_KEYS},
             "usage_complete": usage.get("usage_complete") is True,
             "execution_status": state["status"],
             "failure_class": failure_class,
@@ -446,7 +447,10 @@ class RSIStudyService:
     def _budget(value):
         value = _copy(value, "Study episode budget")
         expected = set(_LIMIT_KEYS.values())
-        if not isinstance(value, dict) or set(value) != expected:
+        if not isinstance(value, dict):
+            raise ContractError("Study budget must freeze every supported resource limit")
+        value.setdefault("max_tool_work_units", 0)
+        if set(value) != expected:
             raise ContractError("Study budget must freeze every supported resource limit")
         if any(type(value[key]) is not int or value[key] < 0 for key in expected):
             raise ContractError("Study budget limits must be nonnegative integers")
@@ -582,7 +586,9 @@ class RSIStudyService:
                            "missing": "fail_closed",
                            "work_proxy": {"model_calls": 1.0,
                                           "charged_completion_tokens": 0.001,
-                                          "tool_calls": 1.0, "nodes": 1.0}},
+                                          "tool_calls": 1.0,
+                                          "charged_tool_work_units": 1.0,
+                                          "nodes": 1.0}},
         }
         record = {
             "schema": STUDY_PLAN_SCHEMA, "id": plan_id, "created_at": time.time(),
@@ -779,7 +785,8 @@ class RSIStudyService:
                     plan, scheduled, owner, "ready",
                     {"status": "missing", "score": None, "accepted": None,
                      "execution_status": "error", "evaluation_digest": None,
-                     "usage": {key: usage.get(key) for key in _USAGE_KEYS},
+                     "usage": {key: (usage.get(key, 0) if key == "charged_tool_work_units"
+                                     else usage.get(key)) for key in _USAGE_KEYS},
                      "usage_complete": usage.get("usage_complete") is True,
                      "failure_class": "infrastructure_missing",
                      "reason": f"{type(exc).__name__}: {str(exc)[:500]}"})
@@ -845,7 +852,8 @@ class RSIStudyService:
         if any(type(value) is not int or value < 0 for value in values):
             return None
         return (usage["model_calls"] + usage["charged_completion_tokens"] / 1000.0
-                + usage["tool_calls"] + usage["nodes"])
+                + usage["tool_calls"] + usage["charged_tool_work_units"]
+                + usage["nodes"])
 
     @staticmethod
     def _bootstrap_interval(values, confidence, seed):

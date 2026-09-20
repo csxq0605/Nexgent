@@ -168,6 +168,84 @@ def test_node_and_tool_concurrent_admission_share_root(store, package, kind, max
     assert store.get(root["id"])["revision"] == 0
 
 
+def test_tool_work_is_reserved_metered_settled_and_unknown_is_fail_closed(store, package):
+    episode = store.create(task(budget={
+        "max_model_calls": 0, "max_completion_tokens": 0,
+        "max_tool_calls": 3, "max_tool_work_units": 20, "max_nodes": 3,
+    }), package)
+    store.reserve_tool(episode["id"], "metered", {"name": "compute"},
+                       reserved_work_units=5)
+    assert store.add_tool_work(episode["id"], "metered", 3)["charged_work_units"] == 5
+    assert store.add_tool_work(episode["id"], "metered", 4)["charged_work_units"] == 7
+    settled = store.settle_tool(episode["id"], "metered", status="completed")
+    assert settled == {
+        "schema": "nexgent.tool-work.v1", "reserved_work_units": 5,
+        "measured_work_units": 7, "charged_work_units": 7,
+        "usage_complete": True,
+    }
+    assert store.settle_tool(episode["id"], "metered", status="completed") == settled
+    with pytest.raises(ValueError, match="cannot change status"):
+        store.settle_tool(episode["id"], "metered", status="failed")
+    # A durable reservation without a terminal settlement is charged at its
+    # baseline and makes the aggregate receipt incomplete.
+    store.reserve_tool(episode["id"], "unknown", {"name": "crashed"},
+                       reserved_work_units=4)
+    usage = store.usage(episode["id"])
+    assert usage["tool_calls"] == 2
+    assert usage["reserved_tool_work_units"] == 9
+    assert usage["charged_tool_work_units"] == 11
+    assert usage["tool_work_units"] is None
+    assert usage["tool_usage_missing_call_ids"] == [f"{episode['id']}/unknown"]
+    assert usage["usage_complete"] is False
+    with pytest.raises(ValueError, match="positive integers"):
+        store.add_tool_work(episode["id"], "unknown", -1)
+    with pytest.raises(ValueError, match="positive integers"):
+        store.add_tool_work(episode["id"], "unknown", float("nan"))
+    with pytest.raises(ValueError, match="Terminal"):
+        store.add_tool_work(episode["id"], "metered", 1)
+
+
+def test_tool_usage_missing_ids_are_episode_qualified_across_descendants(store, package):
+    root = store.create(task(budget={
+        "max_model_calls": 0, "max_completion_tokens": 0,
+        "max_tool_calls": 2, "max_tool_work_units": 0, "max_nodes": 3,
+    }), package)
+    child = store.create(task(capabilities=[]), package, root["id"])
+    store.reserve_tool(root["id"], "same-path", reserved_work_units=0)
+    store.reserve_tool(child["id"], "same-path", reserved_work_units=0)
+
+    missing = store.usage(root["id"])["tool_usage_missing_call_ids"]
+    assert missing == [
+        f"{root['id']}/same-path",
+        f"{child['id']}/same-path",
+    ]
+    assert len(set(missing)) == 2
+
+
+def test_tool_work_reservation_is_atomic_and_cannot_overspend(store, package):
+    root = store.create(task(budget={
+        "max_model_calls": 0, "max_completion_tokens": 0,
+        "max_tool_calls": 8, "max_tool_work_units": 10, "max_nodes": 3,
+    }), package)
+    child = store.create(task(capabilities=[]), package, root["id"])
+
+    def admit(index):
+        try:
+            store.reserve_tool(
+                [root["id"], child["id"]][index % 2], f"work-{index}",
+                reserved_work_units=6)
+            return True
+        except BudgetExhausted:
+            return False
+
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        assert sum(workers.map(admit, range(16))) == 1
+    usage = store.usage(root["id"])
+    assert usage["reserved_tool_work_units"] == 6
+    assert usage["charged_tool_work_units"] == 6
+    assert usage["usage_complete"] is False
+
+
 def test_rpc_unknown_outcome_requires_reconciliation_and_failure_replays(store, package):
     episode = store.create(task(), package)
     request = {"tool": "local", "args": {"port": "input"}}

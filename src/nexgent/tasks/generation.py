@@ -276,7 +276,8 @@ class GenerationService:
                 "usage": {"digest": digest(usage), "summary": {
                     key: usage.get(key) for key in
                     ("model_calls", "charged_completion_tokens", "completion_tokens",
-                     "tool_calls", "nodes", "usage_complete")}},
+                     "tool_calls", "reserved_tool_work_units", "tool_work_units",
+                     "charged_tool_work_units", "nodes", "usage_complete")}},
                 "events": [{"sequence": event["sequence"], "kind": event["kind"],
                             "digest": event["digest"]} for event in events],
                 "artifacts": [_artifact_ref(artifact) for artifact in artifacts],

@@ -161,11 +161,13 @@ class ToolSpec:
     effect_class: str
     handler: Callable
     description: str = ""
+    work_units_per_call: int = 0
 
     def describe(self):
         return {"name": self.name, "description": self.description,
                 "input_schema": deepcopy(self.input_schema), "output_schema": deepcopy(self.output_schema),
-                "effect_class": self.effect_class}
+                "effect_class": self.effect_class,
+                "work_units_per_call": self.work_units_per_call}
 
 class ToolRegistry:
     def __init__(self, tools=()):
@@ -182,6 +184,8 @@ class ToolRegistry:
             raise ContractError("Tool names must be nonempty, bounded and unique")
         if tool.effect_class not in {"read", "artifact_write", "local_compute", "external_compute"}:
             raise ContractError("Tool effect class is not supported by this host")
+        if type(tool.work_units_per_call) is not int or tool.work_units_per_call < 0:
+            raise ContractError("Tool work-unit reservation must be a nonnegative integer")
         check_contract_schema(tool.input_schema, allow_artifact_refs=True)
         check_contract_schema(tool.output_schema, allow_artifact_refs=False)
         self._tools[tool.name] = tool

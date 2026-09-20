@@ -300,7 +300,8 @@ class ImproverService:
             "improver_package_digest": record.get("improver_package_digest"),
             "usage": {key: usage.get(key) for key in
                       ("model_calls", "charged_completion_tokens", "completion_tokens",
-                       "tool_calls", "nodes", "usage_complete")},
+                       "tool_calls", "reserved_tool_work_units", "tool_work_units",
+                       "charged_tool_work_units", "nodes", "usage_complete")},
         }
 
     @staticmethod

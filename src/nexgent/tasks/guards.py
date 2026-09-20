@@ -94,10 +94,23 @@ class ImproverGuardService:
         return record
 
     def plan(self, plan_id):
-        return self._get("task_improver_guard_plans", plan_id)
+        record = self._get("task_improver_guard_plans", plan_id)
+        if isinstance(record.get("outer_budget"), dict):
+            record["outer_budget"].setdefault("max_tool_work_units", 0)
+        return record
 
     def run_record(self, run_id):
-        return self._get("task_improver_guard_runs", run_id)
+        record = self._get("task_improver_guard_runs", run_id)
+        if isinstance(record.get("usage"), dict):
+            record["usage"].setdefault("charged_tool_work_units", 0)
+        if isinstance(record.get("generation"), dict):
+            usage = record["generation"].get("usage")
+            if isinstance(usage, dict):
+                usage.setdefault("charged_tool_work_units", 0)
+        for row in record.get("rows") or []:
+            if isinstance(row, dict) and isinstance(row.get("usage"), dict):
+                row["usage"].setdefault("charged_tool_work_units", 0)
+        return record
 
     def action(self, action_id):
         return self._get("task_improver_guard_actions", action_id)
@@ -105,7 +118,11 @@ class ImproverGuardService:
     @staticmethod
     def _budget(value):
         expected = set(_LIMIT_KEYS.values())
-        if not isinstance(value, dict) or set(value) != expected:
+        if not isinstance(value, dict):
+            raise ContractError("Guard budget must freeze every supported resource limit")
+        value = dict(value)
+        value.setdefault("max_tool_work_units", 0)
+        if set(value) != expected:
             raise ContractError("Guard budget must freeze every supported resource limit")
         if any(type(value[key]) is not int or value[key] < 0 for key in expected):
             raise ContractError("Guard budget limits must be nonnegative integers")
@@ -389,7 +406,8 @@ class ImproverGuardService:
         usage = receipt.get("usage") if isinstance(receipt, dict) else None
         if not isinstance(usage, dict) or usage.get("usage_complete") is not True:
             raise ContractError("Guard executor usage is incomplete")
-        result = {key: usage.get(key) for key in _USAGE_KEYS}
+        result = {key: (usage.get(key, 0) if key == "charged_tool_work_units"
+                        else usage.get(key)) for key in _USAGE_KEYS}
         if any(type(value) is not int or value < 0 for value in result.values()):
             raise ContractError("Guard executor usage is invalid")
         return result

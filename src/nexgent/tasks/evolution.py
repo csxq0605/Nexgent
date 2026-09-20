@@ -620,6 +620,7 @@ class EvolutionService:
         # A transparent normalized work unit. Raw usage is retained in every pair.
         return (usage.get("model_calls", 0) + usage.get("tool_calls", 0)
                 + usage.get("charged_completion_tokens", 0) / 1000
+                + usage.get("charged_tool_work_units", 0)
                 + usage.get("nodes", 0) / 10)
 
     def _create_frozen(self, package, benchmark_id, task_ref, snapshot, budget, registration):

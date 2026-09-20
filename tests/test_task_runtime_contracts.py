@@ -110,6 +110,125 @@ def test_installed_tool_effect_restriction_is_enforced_only_when_explicit(tmp_pa
         assert len(calls) == 1
 
 
+def test_tool_work_receipt_uses_host_meter_and_ignores_output_claims(tmp_path):
+    def handler(arguments, context):
+        context.charge_work(3)
+        context.charge_work(4)
+        # A domain result cannot lower or replace the host-owned meter.
+        return {"value": 7, "work_units": -999}
+
+    tool = ToolSpec(
+        "contract.metered", {"type": "object"}, {"type": "object"},
+        "local_compute", handler, work_units_per_call=5)
+    service = TaskService(tmp_path, tools=ToolRegistry([tool]))
+    package = controlled_package("""def execute(payload, context):
+    value = context.tool('contract.metered', {})
+    artifact = context.publish(value, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+""")
+    state = service.create(
+        "Meter trusted tool work", package=package, capabilities=[tool.name],
+        deliverables=result_spec(), budget={
+            "max_model_calls": 0, "max_completion_tokens": 0,
+            "max_tool_calls": 1, "max_tool_work_units": 10, "max_nodes": 8,
+        })
+    result = service.run(state["id"])
+    assert result["status"] == "completed", result.get("last_error")
+    assert result["usage"]["reserved_tool_work_units"] == 5
+    assert result["usage"]["tool_work_units"] == 7
+    assert result["usage"]["charged_tool_work_units"] == 7
+    assert result["usage"]["usage_complete"] is True
+    receipt = [event["content"] for event in result["events"]
+               if event["kind"] == "tool"][-1]
+    assert receipt["work_accounting"] == {
+        "schema": "nexgent.tool-work.v1", "reserved_work_units": 5,
+        "measured_work_units": 7, "charged_work_units": 7,
+        "usage_complete": True,
+    }
+    assert receipt["result"]["work_units"] == -999
+
+
+def test_tool_work_budget_is_reserved_before_handler_and_meter_overrun_stops_work(tmp_path):
+    calls = []
+
+    def handler(arguments, context):
+        calls.append("started")
+        context.charge_work(6)
+        calls.append("unreachable")
+        return {"value": 1}
+
+    tool = ToolSpec(
+        "contract.expensive", {"type": "object"}, {"type": "object"},
+        "external_compute", handler, work_units_per_call=5)
+    package = controlled_package("""def execute(payload, context):
+    value = context.tool('contract.expensive', {})
+    artifact = context.publish(value, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+""")
+    blocked_service = TaskService(tmp_path / "blocked", tools=ToolRegistry([tool]))
+    blocked = blocked_service.create(
+        "Reject before handler", package=package, capabilities=[tool.name],
+        deliverables=result_spec(), budget={
+            "max_model_calls": 0, "max_completion_tokens": 0,
+            "max_tool_calls": 1, "max_tool_work_units": 4, "max_nodes": 8,
+        })
+    blocked = blocked_service.run(blocked["id"])
+    assert blocked["status"] == "failed" and calls == []
+    assert blocked["usage"]["tool_calls"] == 0
+
+    metered_service = TaskService(tmp_path / "metered", tools=ToolRegistry([tool]))
+    metered = metered_service.create(
+        "Stop at meter boundary", package=package, capabilities=[tool.name],
+        deliverables=result_spec(), budget={
+            "max_model_calls": 0, "max_completion_tokens": 0,
+            "max_tool_calls": 1, "max_tool_work_units": 5, "max_nodes": 8,
+        })
+    metered = metered_service.run(metered["id"])
+    assert metered["status"] == "failed"
+    assert calls == ["started"]
+    assert metered["usage"]["charged_tool_work_units"] == 5
+    assert metered["usage"]["tool_work_units"] == 0
+    assert metered["usage"]["usage_complete"] is True
+
+
+def test_resumed_tool_rpc_reuses_one_work_receipt_without_free_or_duplicate_work(tmp_path):
+    calls = []
+
+    def handler(arguments, context):
+        calls.append(context.episode_id)
+        context.charge_work(5)
+        context.stop_event.set()
+        return {"value": 11}
+
+    tool = ToolSpec(
+        "contract.metered_pause", {"type": "object"}, {"type": "object"},
+        "external_compute", handler, work_units_per_call=3)
+    registry = ToolRegistry([tool])
+    service = TaskService(tmp_path, tools=registry)
+    package = controlled_package("""def execute(payload, context):
+    value = context.tool('contract.metered_pause', {})
+    artifact = context.publish(value, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+""")
+    state = service.create(
+        "Resume paid tool work", package=package, capabilities=[tool.name],
+        deliverables=result_spec(), budget={
+            "max_model_calls": 0, "max_completion_tokens": 0,
+            "max_tool_calls": 1, "max_tool_work_units": 5, "max_nodes": 8,
+        })
+    first = service.run(state["id"])
+    assert first["status"] == "paused"
+    assert first["usage"]["charged_tool_work_units"] == 5
+    assert first["usage"]["usage_complete"] is True
+    resumed = TaskService(tmp_path, tools=registry).run(state["id"])
+    assert resumed["status"] == "completed", resumed.get("last_error")
+    assert calls == [state["id"]]
+    assert resumed["usage"]["tool_calls"] == 1
+    assert resumed["usage"]["reserved_tool_work_units"] == 3
+    assert resumed["usage"]["tool_work_units"] == 5
+    assert resumed["usage"]["charged_tool_work_units"] == 5
+
+
 def test_terminal_failure_domain_separates_agent_protocol_and_host_failures(tmp_path):
     class FailureAdapter:
         id = "failure-contract"
@@ -289,6 +408,12 @@ def test_tool_artifact_reference_contract_rejects_placeholders_before_handler(tm
 
 
 def test_tool_registration_rejects_invalid_or_output_artifact_reference_annotations():
+    for invalid_units in (-1, 1.5, float("nan")):
+        with pytest.raises(ContractError, match="work-unit reservation"):
+            ToolRegistry([ToolSpec(
+                "contract.invalid-work", {"type": "object"}, {"type": "object"},
+                "read", lambda arguments, context: {},
+                work_units_per_call=invalid_units)])
     invalid = ToolSpec(
         "contract.invalid-artifact-marker", {
             "type": "object", "properties": {

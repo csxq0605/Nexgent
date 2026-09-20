@@ -142,6 +142,12 @@ class ToolContext:
     def once(self, key):
         return self.service.store.once(self.episode_id, key)
 
+    def charge_work(self, units):
+        """Durably append host-metered numerical work for this tool call."""
+        self.check_stop()
+        return self.service.store.add_tool_work(
+            self.episode_id, self.node_id, units)
+
     def workspace(self, namespace):
         """Return a durable, root-episode-scoped directory for a trusted tool.
 
@@ -657,22 +663,32 @@ class TaskService:
                 arguments, tool.input_schema,
                 artifact_resolver=lambda ref: self.store.read(ref, identity),
                 label=name + " input")
-            self.store.reserve_tool(identity, path, {"name": name, "arguments": arguments})
+            self.store.reserve_tool(
+                identity, path, {"name": name, "arguments": arguments},
+                reserved_work_units=tool.work_units_per_call)
             receipt = {"call_id": identity + "/" + path, "episode_id": identity, "name": name,
-                       "arguments": deepcopy(arguments), "status": "started", "started_at": time.time()}
+                       "arguments": deepcopy(arguments), "status": "started", "started_at": time.time(),
+                       "work_reservation": {"schema": "nexgent.tool-work.v1",
+                                            "reserved_work_units": tool.work_units_per_call}}
             started = time.monotonic()
+            result, failure = None, None
             try:
                 result = tool.handler(arguments, ToolContext(self, identity, path, stop_event))
                 validate(result, tool.output_schema, label=name + " output",
                          allow_artifact_refs=False)
                 receipt.update(status="completed", result=deepcopy(result))
-                return result
-            except Exception as exc:
+            except BaseException as exc:
+                failure = exc
                 receipt.update(status="failed", error=f"{type(exc).__name__}: {str(exc)[:1000]}")
-                raise
             finally:
+                accounting = self.store.settle_tool(
+                    identity, path, status="completed" if failure is None else "failed")
+                receipt["work_accounting"] = accounting
                 receipt.update(finished_at=time.time(), elapsed_seconds=time.monotonic() - started)
                 self.store.event(identity, "tool", receipt)
+            if failure is not None:
+                raise failure
+            return result
         if method == "parallel":
             requests = params["requests"]
             if not isinstance(requests, list) or not 1 <= len(requests) <= 4:

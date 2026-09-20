@@ -18,6 +18,13 @@ BUDGET = {
 }
 
 
+def test_p5_study_cost_uses_authoritative_charged_tool_work():
+    assert RSIStudyService._work({
+        "model_calls": 0, "charged_completion_tokens": 0,
+        "tool_calls": 1, "charged_tool_work_units": 23, "nodes": 0,
+    }) == 24
+
+
 def package(score):
     source = (
         "def execute(payload, context):\n"
@@ -160,6 +167,13 @@ def test_study_plan_binds_benchmark_and_package_digests(tmp_path):
             "adapter_fingerprint", "execution_environment", "execution_environment_digest",
         "model_version_binding", "statistics")}
     assert plan["protocol_digest"] == digest(protocol)
+    assert plan["statistics"]["work_proxy"] == {
+        "model_calls": 1.0,
+        "charged_completion_tokens": 0.001,
+        "tool_calls": 1.0,
+        "charged_tool_work_units": 1.0,
+        "nodes": 1.0,
+    }
     assert plan["arms"]["a"]["package_digest"] == baseline["digest"]
     assert plan["arms"]["b"]["package_digest"] == candidate["digest"]
 

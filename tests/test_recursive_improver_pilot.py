@@ -1,4 +1,6 @@
 from pathlib import Path
+from dataclasses import asdict
+from copy import deepcopy
 import json
 import sys
 import time
@@ -22,6 +24,27 @@ from nexgent.tasks.meta_evaluation import (
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.tools import ContractError, ToolRegistry
+
+
+def test_meta_cost_uses_authoritative_charged_tool_work():
+    policy = asdict(MetaEvaluationPolicy(
+        model_call_weight=0, completion_token_weight=0,
+        tool_call_weight=0, tool_work_unit_weight=2, node_weight=0))
+    usage = {
+        "model_calls": 0, "charged_completion_tokens": 0, "tool_calls": 1,
+        "charged_tool_work_units": 7, "nodes": 0,
+    }
+    assert MetaEvaluationService._normalized_work(usage, policy) == 14
+
+
+def test_meta_cost_treats_pre_metering_records_as_zero_tool_work():
+    policy = asdict(MetaEvaluationPolicy())
+    policy.pop("tool_work_unit_weight")
+    usage = {
+        "model_calls": 1, "charged_completion_tokens": 0,
+        "tool_calls": 1, "nodes": 0,
+    }
+    assert MetaEvaluationService._normalized_work(usage, policy) == 2
 
 
 def behavior_source(version, score):
@@ -177,6 +200,143 @@ def test_meta_protocol_rejects_untrusted_receipt_callbacks(tmp_path):
     tasks = TaskService(tmp_path, tools=ToolRegistry())
     with pytest.raises(TypeError, match="trusted TaskMetaExecutor"):
         MetaEvaluationService(tasks.store, lambda request: request, lambda request: request)
+
+
+def test_pre_metering_meta_plan_can_run_and_trial_can_be_assessed(tmp_path):
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    generation = GenerationService(tasks, EvolutionService(tasks))
+    executor = TaskMetaExecutor(tasks, generation, RecursivePilotBenchmark())
+    meta = MetaEvaluationService(
+        tasks.store, executor.generate_offspring, executor.evaluate_descendant)
+    old_budget = deepcopy(META_BUDGET)
+    old_policy = asdict(MetaEvaluationPolicy())
+    old_policy.pop("tool_work_unit_weight")
+    plan_record = {
+        "schema": "nexgent.improver-meta-plan.v1", "id": "legacy-meta-plan",
+        "created": 1.0, "candidate_id": "candidate-legacy",
+        "channel": "recursive", "channel_revision": 0,
+        "improvers": {
+            "R0": {"id": "improver-r0", "digest": "0" * 64},
+            "R1": {"id": "improver-r1", "digest": "1" * 64},
+        },
+        "outer_budget": deepcopy(old_budget), "arm_budget": deepcopy(old_budget),
+        "policy": old_policy, "policy_digest": digest(old_policy),
+        "development_tasks": [{"id": "development"}],
+        "selection_tasks": [{"id": "selection"}],
+        "offspring_per_arm": 1,
+        "schedule": {"generation": [], "development": [], "selection": []},
+        "protocol_digest": digest({"legacy": "meta-plan"}),
+    }
+    plan = meta._insert("task_improver_meta_plans", plan_record)
+
+    # The not-yet-run legacy plan remains executable and fails closed because
+    # this minimal fixture deliberately schedules no measurements.
+    run = meta.run(plan["id"])
+    assert run["measurement_complete"] is False
+    assert run["usage"]["total"]["charged_tool_work_units"] == 0
+    loaded_plan = meta.plan(plan["id"])
+    assert loaded_plan["outer_budget"]["max_tool_work_units"] == 0
+    assert loaded_plan["arm_budget"]["max_tool_work_units"] == 0
+    assert loaded_plan["policy"]["tool_work_unit_weight"] == 1.0
+
+    old_usage = {
+        "model_calls": 1, "charged_completion_tokens": 0,
+        "tool_calls": 0, "nodes": 0,
+    }
+    task_digest = digest(plan_record["selection_tasks"][0])
+    trial_record = {
+        "schema": "nexgent.improver-meta-trial.v1", "id": "legacy-meta-trial",
+        "created_at": 2.0, "plan_id": plan["id"],
+        "plan_digest": plan["record_digest"],
+        "protocol_digest": plan_record["protocol_digest"],
+        "measurement_complete": True, "descendants": {"R0": [], "R1": []},
+        "development_rows": [], "development_aggregates": {},
+        "selected_descendants": {},
+        "selection_rows": [
+            {"arm": "R0", "task_digest": task_digest, "score": 0.4,
+             "accepted": True, "usage": {**old_usage, "usage_complete": True}},
+            {"arm": "R1", "task_digest": task_digest, "score": 0.8,
+             "accepted": True, "usage": {**old_usage, "usage_complete": True}},
+        ],
+        "usage": {"total": {key: value * 2 for key, value in old_usage.items()},
+                  "by_arm": {"R0": old_usage, "R1": old_usage},
+                  "usage_complete": True},
+        "failures": [],
+    }
+    trial = meta._insert("task_improver_meta_trials", trial_record)
+    assessment = meta.assess(trial["id"])
+    assert assessment["eligible"] is True
+    assert assessment["measurements"]["candidate"]["usage"][
+        "charged_tool_work_units"] == 0
+
+    # Read compatibility does not rewrite the immutable source records or
+    # silently bless a new digest.
+    with tasks.store.connect() as db:
+        raw_plan = json.loads(db.execute(
+            "SELECT data FROM task_improver_meta_plans WHERE id=?",
+            (plan["id"],)).fetchone()[0])
+        raw_trial = json.loads(db.execute(
+            "SELECT data FROM task_improver_meta_trials WHERE id=?",
+            (trial["id"],)).fetchone()[0])
+    assert "max_tool_work_units" not in raw_plan["outer_budget"]
+    assert "tool_work_unit_weight" not in raw_plan["policy"]
+    assert "charged_tool_work_units" not in raw_trial["usage"]["by_arm"]["R0"]
+    assert plan["record_digest"] == digest(raw_plan)
+    assert trial["record_digest"] == digest(raw_trial)
+
+
+def test_pre_metering_guard_plan_can_recover_stale_claim(tmp_path):
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    generation = GenerationService(tasks, EvolutionService(tasks))
+    improvers = ImproverService(tasks)
+    executor = TaskMetaExecutor(tasks, generation, RecursivePilotBenchmark())
+    guards = ImproverGuardService(
+        improvers, executor.generate_offspring, executor.evaluate_descendant)
+    improvers.register("recursive", improver_package(), IMPROVER_POLICY)
+    parent = improvers.active("recursive")
+    plan_id = "legacy-guard-plan"
+    candidate_id, candidate_digest = "improver-r1", "1" * 64
+    old_plan = {
+        "schema": "nexgent.improver-guard-plan.v1", "id": plan_id,
+        "channel": "recursive", "expected_deployed_revision": 1,
+        "candidate_improver_id": candidate_id,
+        "candidate_improver_digest": candidate_digest,
+        "outer_budget": deepcopy(META_BUDGET),
+        "protocol_digest": digest({"legacy": "guard-plan"}),
+    }
+    stored_plan = guards._insert("task_improver_guard_plans", old_plan)
+    deployed = deepcopy(parent)
+    deployed.update({
+        "package_id": candidate_id, "package_digest": candidate_digest,
+        "revision": 1,
+        "promotion": {"guard_plan_id": plan_id},
+        "deployment_stack": [{
+            "package_id": parent["package_id"],
+            "package_digest": parent["package_digest"],
+            "promotion": parent.get("promotion"),
+        }],
+    })
+    stale = time.time() - GUARD_CLAIM_LEASE_SECONDS - 10
+    with tasks.store.connect() as db:
+        db.execute(
+            "UPDATE task_improver_channels SET package_id=?,revision=?,data=? WHERE name=?",
+            (candidate_id, 1, improvers._encode(deployed), "recursive"))
+        db.execute(
+            "INSERT INTO task_improver_guard_claims VALUES(?,?,?,?,?)",
+            (plan_id, "running", None, stale, stale))
+
+    action = guards.run(plan_id)
+    assert action["rolled_back"] is True
+    assert action["active_package_id_after"] == parent["package_id"]
+    assert guards.plan(plan_id)["outer_budget"]["max_tool_work_units"] == 0
+    guard_run = guards.run_record(action["run_id"])
+    assert guard_run["usage"]["charged_tool_work_units"] == 0
+    with tasks.store.connect() as db:
+        raw = json.loads(db.execute(
+            "SELECT data FROM task_improver_guard_plans WHERE id=?",
+            (plan_id,)).fetchone()[0])
+    assert "max_tool_work_units" not in raw["outer_budget"]
+    assert stored_plan["record_digest"] == digest(raw)
 
 
 def test_active_guard_requires_immutable_plan_closure(tmp_path):

@@ -114,6 +114,8 @@ promotion 强制绑定预登记 improver guard。部署后的候选生成通过�
 
 TaskService benchmark 的 SDK 已收敛为显式 descriptor/protocol、隔离 registry、有限 JSON 合同和独立 host runtime 指纹；Workbench、OpenFOAM 与 BBH 两任务 adapter 已接入，OpenFOAM 不再读取宿主私有源码来定义 evaluator identity。BBH 每个公开样本现在形成独立 TaskSpec/Episode，隐藏答案只留在宿主评价器，并提供可执行的无模型 reference AgentPackage；legacy 入口和历史记录仍保留且不与 Episode ID 互认。P3 paired selection/guard 与 P5 study 冻结同一 outcome policy：只有 `failed + agent/protocol` 属可测的 observed zero，cancelled、paused、waiting、基础设施故障和 evaluator unavailable 均保持 missing。scientific discovery 与既有 0.8 记录仍按原执行器保留，尚未迁移或混写；完整边界见[Task benchmark SDK](docs/design/benchmark-sdk.md)。
 
+TaskService 现将工具调用次数与数值/外部工作量分开核算。`ToolSpec` 声明调用前固定预留，可信 handler 经 `ToolContext` 在实际工作边界持久计费，root Episode 对并行和委派共享原子预算；崩溃或未知结算保留预留且使 usage 不完整。P3/P4/P5 的成本门统一读取宿主 `charged_tool_work_units`，历史记录按显式零基线只读兼容。框架不能自动推断任意求解器的 FLOPs；scientific discovery 迁移前仍需在插件侧登记保守预留和实际计量点。完整合同见[工具工作量计量](docs/design/tool-work-accounting.md)。
+
 ## 5. 当前状态
 
 | 项目 | 状态 |
@@ -121,7 +123,7 @@ TaskService benchmark 的 SDK 已收敛为显式 descriptor/protocol、隔离 re
 | 用户确认的框架定位与独立 demo 边界 | 固定要求 |
 | vNext 定位、架构、研究综合、OpenFOAM 设计 | P0 已完成；设计中的正式数值研究仍未执行 |
 | 本机 OpenFOAM | 已确认 WSL2 / Ubuntu 20.04 / Foundation 8，并真实运行 Re=10 教程 smoke |
-| P1 任务执行、交付评审、工件/记忆、预算与恢复基础 | 0.9 已实现并通过确定性合同测试；真实 MiMo 普通任务交付已通过，Workbench 独立评价仍未形成 |
+| P1 任务执行、交付评审、工件/记忆、预算与恢复基础 | 0.9 已实现，含 root 共享的宿主可信工具工作量预留/计量/恢复账本；真实 MiMo 普通任务交付已通过，Workbench 独立评价仍未形成 |
 | Task benchmark SDK 与失败测量 | 0.9 canonical descriptor/registry、插件隔离、host runtime 指纹及 P3/P5 共享 outcome policy 已实现；BBH 两任务已迁移且保留 legacy 兼容入口，scientific discovery 尚在 0.8 API |
 | OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
 | 跨任务行为更新 P3 | feedback/R0/BehaviorPatch、内置 `reference-os-v1`、显式/通道 R、配对门控、显式晋升、通道加载、guard monitor 与回滚控制面已实现；真实模型独立效果与统计效益待检验 |

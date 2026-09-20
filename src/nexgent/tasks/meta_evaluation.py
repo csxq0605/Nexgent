@@ -34,11 +34,15 @@ DECISION_SCHEMA = "nexgent.improver-meta-evaluation.v1"
 GENERATION_RECEIPT_SCHEMA = "nexgent.meta-generation-receipt.v1"
 EVALUATION_RECEIPT_SCHEMA = "nexgent.meta-evaluation-receipt.v1"
 _ARMS = ("R0", "R1")
-_USAGE_KEYS = ("model_calls", "charged_completion_tokens", "tool_calls", "nodes")
+_USAGE_KEYS = (
+    "model_calls", "charged_completion_tokens", "tool_calls",
+    "charged_tool_work_units", "nodes",
+)
 _LIMIT_KEYS = {
     "model_calls": "max_model_calls",
     "charged_completion_tokens": "max_completion_tokens",
     "tool_calls": "max_tool_calls",
+    "charged_tool_work_units": "max_tool_work_units",
     "nodes": "max_nodes",
 }
 
@@ -92,6 +96,7 @@ class MetaEvaluationPolicy:
     model_call_weight: float = 1.0
     completion_token_weight: float = 0.001
     tool_call_weight: float = 1.0
+    tool_work_unit_weight: float = 1.0
     node_weight: float = 0.1
 
     def __post_init__(self):
@@ -99,6 +104,7 @@ class MetaEvaluationPolicy:
             self.min_utility_delta, self.min_success_rate, self.max_cost_ratio,
             self.max_absolute_cost_when_r0_zero, self.model_call_weight,
             self.completion_token_weight, self.tool_call_weight, self.node_weight,
+            self.tool_work_unit_weight,
         )
         if (any(type(value) not in {int, float} or not math.isfinite(value)
                 for value in numeric)
@@ -196,11 +202,63 @@ class MetaEvaluationService:
             raise ContractError("External meta-evaluation table is invalid")
         return self._get(table, identity)
 
+    @staticmethod
+    def _legacy_usage(value):
+        """Project pre-metering usage into the current read contract.
+
+        This runs only after the stored digest has been verified.  The
+        persisted evidence and its digest remain unchanged; callers merely
+        receive the explicit zero baseline that existed before numerical tool
+        work was introduced.
+        """
+        result = deepcopy(value)
+        if isinstance(result, dict):
+            result.setdefault("charged_tool_work_units", 0)
+        return result
+
+    @classmethod
+    def _normalize_plan_read(cls, record):
+        result = deepcopy(record)
+        for key in ("outer_budget", "arm_budget"):
+            if isinstance(result.get(key), dict):
+                result[key].setdefault("max_tool_work_units", 0)
+        if isinstance(result.get("policy"), dict):
+            result["policy"].setdefault("tool_work_unit_weight", 1.0)
+        return result
+
+    @classmethod
+    def _normalize_trial_read(cls, record):
+        result = deepcopy(record)
+        for values in (result.get("descendants") or {}).values():
+            for item in values if isinstance(values, list) else []:
+                if isinstance(item, dict) and "usage" in item:
+                    item["usage"] = cls._legacy_usage(item["usage"])
+        for key in ("development_rows", "selection_rows"):
+            for item in result.get(key) or []:
+                if isinstance(item, dict) and "usage" in item:
+                    item["usage"] = cls._legacy_usage(item["usage"])
+        usage = result.get("usage")
+        if isinstance(usage, dict):
+            if "total" in usage:
+                usage["total"] = cls._legacy_usage(usage["total"])
+            if isinstance(usage.get("by_arm"), dict):
+                usage["by_arm"] = {
+                    arm: cls._legacy_usage(value)
+                    for arm, value in usage["by_arm"].items()
+                }
+        for failure in result.get("failures") or []:
+            execution = failure.get("execution") if isinstance(failure, dict) else None
+            if isinstance(execution, dict) and "usage" in execution:
+                execution["usage"] = cls._legacy_usage(execution["usage"])
+        return result
+
     def plan(self, plan_id):
-        return self._get("task_improver_meta_plans", plan_id)
+        return self._normalize_plan_read(
+            self._get("task_improver_meta_plans", plan_id))
 
     def trial(self, trial_id):
-        return self._get("task_improver_meta_trials", trial_id)
+        return self._normalize_trial_read(
+            self._get("task_improver_meta_trials", trial_id))
 
     def evaluation(self, evaluation_id):
         """Load meta-evidence consumed by ImproverService.record_decision."""
@@ -211,6 +269,10 @@ class MetaEvaluationService:
         if not isinstance(value, dict):
             raise ContractError("Outer budget must be an object")
         expected = set(_LIMIT_KEYS.values())
+        value = dict(value)
+        # Pre-metering callers have an explicit zero baseline. They cannot
+        # consume numerical tool work until they opt into the new limit.
+        value.setdefault("max_tool_work_units", 0)
         if set(value) != expected:
             raise ContractError("Outer budget must freeze every supported resource limit")
         result = {}
@@ -422,7 +484,7 @@ class MetaEvaluationService:
             raise ContractError("Executor receipt has incomplete usage accounting")
         result = {}
         for key in _USAGE_KEYS:
-            value = usage.get(key)
+            value = usage.get(key, 0) if key == "charged_tool_work_units" else usage.get(key)
             if type(value) is not int or value < 0:
                 raise ContractError("Executor receipt has invalid usage accounting")
             result[key] = value
@@ -683,6 +745,8 @@ class MetaEvaluationService:
         return (usage["model_calls"] * policy["model_call_weight"]
                 + usage["charged_completion_tokens"] * policy["completion_token_weight"]
                 + usage["tool_calls"] * policy["tool_call_weight"]
+                + usage.get("charged_tool_work_units", 0)
+                * policy.get("tool_work_unit_weight", 1.0)
                 + usage["nodes"] * policy["node_weight"])
 
     def assess(self, trial_id):
@@ -819,7 +883,8 @@ class TaskMetaExecutor:
     def _usage(value):
         if not isinstance(value, dict) or value.get("usage_complete") is not True:
             raise ContractError("Runtime Episode has incomplete usage accounting")
-        result = {key: value.get(key) for key in _USAGE_KEYS}
+        result = {key: (value.get(key, 0) if key == "charged_tool_work_units"
+                        else value.get(key)) for key in _USAGE_KEYS}
         if any(type(item) is not int or item < 0 for item in result.values()):
             raise ContractError("Runtime Episode has invalid usage accounting")
         return {**result, "usage_complete": True}

@@ -23,7 +23,8 @@ from ..kernel.store import BudgetExhausted
 
 MAX_JSON_BYTES = 1_000_000
 DEFAULT_BUDGET = {"max_model_calls": 20, "max_completion_tokens": 80000,
-                  "max_tool_calls": 20, "max_nodes": 100}
+                  "max_tool_calls": 20, "max_tool_work_units": 0,
+                  "max_nodes": 100}
 
 
 class RecoveryRequired(RuntimeError):
@@ -471,6 +472,24 @@ class EpisodeStore:
             count = db.execute("SELECT COUNT(*) FROM task_resources WHERE root_id=? AND kind=?", (root_id, kind)).fetchone()[0]
             if count >= root["budget"]["max_tool_calls" if kind == "tool" else "max_nodes"]:
                 raise BudgetExhausted(f"Root Episode {kind} budget exhausted")
+            if kind == "tool":
+                accounting = data.get("work_accounting")
+                if (not isinstance(accounting, dict)
+                        or accounting.get("schema") != "nexgent.tool-work.v1"
+                        or set(accounting) != {"schema", "reserved_work_units"}
+                        or type(accounting.get("reserved_work_units")) is not int
+                        or accounting["reserved_work_units"] < 0):
+                    raise ValueError("Tool work reservation is invalid")
+                charged = 0
+                for stored, in db.execute(
+                        "SELECT data FROM task_resources WHERE root_id=? AND kind='tool'",
+                        (root_id,)):
+                    prior = json.loads(stored).get("data", {}).get("work_accounting", {})
+                    charged += prior.get("charged_work_units",
+                                         prior.get("reserved_work_units", 0))
+                if (charged + accounting["reserved_work_units"]
+                        > root["budget"].get("max_tool_work_units", 0)):
+                    raise BudgetExhausted("Root Episode tool-work budget exhausted")
             record = {"episode_id": episode_id, "root_episode_id": root_id, "id": identity,
                       "kind": kind, "status": "reserved", "created_at": time.time(), "data": deepcopy(data)}
             db.execute("INSERT INTO task_resources VALUES(?,?,?,?,?)",
@@ -478,8 +497,109 @@ class EpisodeStore:
             self._event(db, episode_id, kind + "_admitted", record)
             return record
 
-    def reserve_tool(self, episode_id, call_id, data=None):
-        return self._reserve_resource(episode_id, call_id, "tool", data or {})
+    def reserve_tool(self, episode_id, call_id, data=None, *, reserved_work_units=0):
+        if type(reserved_work_units) is not int or reserved_work_units < 0:
+            raise ValueError("Tool work reservation must be a nonnegative integer")
+        data = deepcopy(data or {})
+        if "work_accounting" in data:
+            raise ValueError("Tool work accounting is host-owned")
+        data["work_accounting"] = {
+            "schema": "nexgent.tool-work.v1",
+            "reserved_work_units": reserved_work_units,
+        }
+        return self._reserve_resource(episode_id, call_id, "tool", data)
+
+    def add_tool_work(self, episode_id, call_id, units):
+        """Durably charge positive work while a trusted tool is executing."""
+        if type(units) is not int or units <= 0:
+            raise ValueError("Tool work increments must be positive integers")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            episode = self._get(db, episode_id)
+            row = db.execute(
+                "SELECT data FROM task_resources WHERE episode=? AND kind='tool' AND identity=?",
+                (episode_id, call_id)).fetchone()
+            if not row:
+                raise KeyError(call_id)
+            record = json.loads(row[0])
+            if record.get("status") != "reserved":
+                raise ValueError("Terminal tool work cannot be changed")
+            accounting = record.get("data", {}).get("work_accounting")
+            if (not isinstance(accounting, dict)
+                    or accounting.get("schema") != "nexgent.tool-work.v1"):
+                raise ValueError("Tool work reservation is unavailable")
+            previous = accounting.get("measured_work_units", 0)
+            if type(previous) is not int or previous < 0:
+                raise ValueError("Stored tool work is invalid")
+            proposed = previous + units
+            root_id = episode["root_episode_id"]
+            root = self._get(db, root_id)
+            other = 0
+            for stored_identity, stored in db.execute(
+                    "SELECT identity,data FROM task_resources WHERE root_id=? AND kind='tool'",
+                    (root_id,)):
+                if stored_identity == call_id and json.loads(stored).get("episode_id") == episode_id:
+                    continue
+                prior = json.loads(stored).get("data", {}).get("work_accounting", {})
+                other += prior.get("charged_work_units",
+                                   prior.get("reserved_work_units", 0))
+            charged = max(accounting["reserved_work_units"], proposed)
+            if other + charged > root["budget"].get("max_tool_work_units", 0):
+                raise BudgetExhausted("Root Episode tool-work budget exhausted")
+            accounting["measured_work_units"] = proposed
+            accounting["charged_work_units"] = charged
+            record["data"]["work_accounting"] = accounting
+            db.execute(
+                "UPDATE task_resources SET data=? WHERE episode=? AND kind='tool' AND identity=?",
+                (_json(record), episode_id, call_id))
+            self._event(db, episode_id, "tool_work_charged", {
+                "call_id": call_id, "increment": units,
+                "measured_work_units": proposed, "charged_work_units": charged,
+            })
+        return deepcopy(accounting)
+
+    def settle_tool(self, episode_id, call_id, *, status):
+        """Finalize one tool meter; an absent settlement remains fail-closed."""
+        if status not in {"completed", "failed"}:
+            raise ValueError("Tool settlement status is invalid")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._get(db, episode_id)
+            row = db.execute(
+                "SELECT data FROM task_resources WHERE episode=? AND kind='tool' AND identity=?",
+                (episode_id, call_id)).fetchone()
+            if not row:
+                raise KeyError(call_id)
+            record = json.loads(row[0])
+            accounting = record.get("data", {}).get("work_accounting")
+            if (not isinstance(accounting, dict)
+                    or accounting.get("schema") != "nexgent.tool-work.v1"):
+                raise ValueError("Tool work reservation is unavailable")
+            if record.get("status") in {"completed", "failed"}:
+                if record["status"] != status:
+                    raise ValueError("Terminal tool settlement cannot change status")
+                return deepcopy(accounting)
+            if record.get("status") != "reserved":
+                raise ValueError("Tool reservation status is invalid")
+            measured = accounting.get("measured_work_units", 0)
+            accounting.update(
+                measured_work_units=measured,
+                charged_work_units=max(accounting["reserved_work_units"], measured),
+                usage_complete=True,
+            )
+            record["status"] = status
+            record["finished_at"] = time.time()
+            record["data"]["work_accounting"] = accounting
+            db.execute(
+                "UPDATE task_resources SET data=? WHERE episode=? AND kind='tool' AND identity=?",
+                (_json(record), episode_id, call_id))
+            self._event(db, episode_id, "tool_work_settled", {
+                "call_id": call_id, "status": status,
+                "reserved_work_units": accounting["reserved_work_units"],
+                "measured_work_units": measured,
+                "charged_work_units": accounting["charged_work_units"],
+            })
+        return deepcopy(accounting)
 
     def reserve_node(self, episode_id, node_id, data=None):
         return self._reserve_resource(episode_id, node_id, "node", data or {})
@@ -489,14 +609,42 @@ class EpisodeStore:
         root_id = self.get(root_id)["root_episode_id"]
         with self.connect() as db:
             resources = dict(db.execute("SELECT kind,COUNT(*) FROM task_resources WHERE root_id=? GROUP BY kind", (root_id,)))
+            tool_resources = [json.loads(row[0]) for row in db.execute(
+                "SELECT data FROM task_resources WHERE root_id=? AND kind='tool' ORDER BY rowid",
+                (root_id,))]
         missing = [c["call_id"] for c in calls if any(name not in (c.get("usage") or {})
                    for name in ("prompt_tokens", "completion_tokens", "total_tokens"))]
+        tool_missing = []
+        reserved_tool_work = charged_tool_work = measured_tool_work = 0
+        for resource in tool_resources:
+            accounting = resource.get("data", {}).get("work_accounting")
+            if not isinstance(accounting, dict):
+                # Historical receipts predate work metering and are an explicit
+                # zero baseline rather than fabricated numerical work.
+                continue
+            reserved = accounting.get("reserved_work_units")
+            measured = accounting.get("measured_work_units")
+            if (type(reserved) is not int or reserved < 0
+                    or measured is not None and (type(measured) is not int or measured < 0)):
+                tool_missing.append(f"{resource['episode_id']}/{resource['id']}")
+                continue
+            reserved_tool_work += reserved
+            charged_tool_work += accounting.get("charged_work_units", reserved)
+            if accounting.get("usage_complete") is True and measured is not None:
+                measured_tool_work += measured
+            else:
+                tool_missing.append(f"{resource['episode_id']}/{resource['id']}")
         known = {name: sum((c.get("usage") or {}).get(name, 0) for c in calls)
                  for name in ("prompt_tokens", "completion_tokens", "total_tokens")}
         return {"model_calls": len(calls), "reserved_completion_tokens": sum(c["reserved_completion_tokens"] for c in calls),
                 "charged_completion_tokens": sum(max(c["reserved_completion_tokens"], (c.get("usage") or {}).get("completion_tokens", 0)) for c in calls),
                 "completion_tokens": None if missing else known["completion_tokens"], "known_usage": known,
-                "usage_missing_call_ids": missing, "usage_complete": not missing,
+                "usage_missing_call_ids": missing,
+                "tool_usage_missing_call_ids": tool_missing,
+                "reserved_tool_work_units": reserved_tool_work,
+                "charged_tool_work_units": charged_tool_work,
+                "tool_work_units": None if tool_missing else measured_tool_work,
+                "usage_complete": not missing and not tool_missing,
                 "billing_unknown_call_ids": [c["call_id"] for c in calls if c.get("billing_status") != "usage_reported"],
                 "tool_calls": resources.get("tool", 0), "nodes": resources.get("node", 0)}
 

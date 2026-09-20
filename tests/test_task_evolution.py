@@ -847,3 +847,12 @@ def test_paired_arms_share_frozen_memory_seed_and_host_owned_split_role(tmp_path
             registration = state["task"]["context"]["evolution_registration"]
             assert registration["split_role"] == "selection"
             assert state["task"]["context"]["memory_writeback"] is False
+
+
+def test_p3_cost_uses_authoritative_charged_tool_work():
+    assert EvolutionService._cost({
+        "model_calls": 0, "charged_completion_tokens": 0,
+        "tool_calls": 1, "charged_tool_work_units": 17, "nodes": 0,
+        # A lower measured value cannot reduce charged cost.
+        "tool_work_units": 2,
+    }) == 18

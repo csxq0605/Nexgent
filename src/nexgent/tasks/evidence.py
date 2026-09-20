@@ -20,7 +20,9 @@ from .tools import ContractError
 SCHEMA = "nexgent.rsi-mechanism-evidence.v1"
 _USAGE_KEYS = (
     "model_calls", "reserved_completion_tokens", "charged_completion_tokens",
-    "completion_tokens", "tool_calls", "nodes", "usage_complete",
+    "completion_tokens", "tool_calls", "reserved_tool_work_units",
+    "tool_work_units", "charged_tool_work_units", "tool_usage_missing_call_ids",
+    "nodes", "usage_complete",
 )
 def _usage(value):
     value = value or {}
