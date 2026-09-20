@@ -93,6 +93,10 @@ class TaskWindow(QMainWindow):
             from ..tasks.evolution import EvolutionService
             evolution = EvolutionService(service)
         self.evolution = evolution
+        self.improvers = None
+        if hasattr(service, "store"):
+            from ..tasks.improvers import ImproverService
+            self.improvers = ImproverService(service)
         self.selected_id = None
         self.running_id = None
         self.worker = None
@@ -209,9 +213,13 @@ class TaskWindow(QMainWindow):
         self.rsi_refresh_button = QPushButton("刷新版本状态")
         self.rsi_refresh_button.clicked.connect(self.refresh_rsi)
         rsi_controls.addWidget(self.rsi_channel, 1)
+        rsi_controls.addWidget(QLabel("改进器通道"))
+        self.improver_channel = QLineEdit("recursive")
+        self.improver_channel.setPlaceholderText("例如 recursive")
+        rsi_controls.addWidget(self.improver_channel, 1)
         rsi_controls.addWidget(self.rsi_refresh_button)
         rsi_layout.addLayout(rsi_controls)
-        rsi_layout.addWidget(QLabel("仅显示版本、决策、聚合指标与审计摘要；评测器实现和私有任务内容不会显示。"))
+        rsi_layout.addWidget(QLabel("任务智能体与递归改进器使用独立通道；仅显示版本、决策、守卫和审计摘要。"))
         self.rsi_view = self._reader()
         rsi_layout.addWidget(self.rsi_view, 1)
         self.tabs.addTab(rsi_panel, "RSI 与版本")
@@ -298,21 +306,36 @@ class TaskWindow(QMainWindow):
         self.refresh_rsi()
 
     def refresh_rsi(self):
-        """Refresh a bounded, evaluator-safe package evolution projection."""
+        """Refresh bounded task-agent and recursive-improver projections."""
         if self.evolution is None:
             self.rsi_view.setPlainText("当前任务服务未提供 AgentPackage 演化控制面。")
             return
         channel = self.rsi_channel.text().strip()
-        if not channel:
-            self.rsi_view.setPlainText("请输入 AgentPackage 通道名称。")
+        improver_channel = self.improver_channel.text().strip()
+        if not channel or not improver_channel:
+            self.rsi_view.setPlainText("请输入任务智能体通道和改进器通道名称。")
             return
         try:
             from ..tasks.evolution_view import public_channel_view
-            view = public_channel_view(self.evolution.active(channel),
-                                       self.evolution.events(channel), limit=50)
+            from ..tasks.improvers import public_improver_event, public_improver_state
+            try:
+                task_view = public_channel_view(
+                    self.evolution.active(channel), self.evolution.events(channel), limit=50)
+            except KeyError:
+                task_view = {"channel": channel, "status": "unregistered"}
+            try:
+                if self.improvers is None:
+                    raise KeyError(improver_channel)
+                improver_view = {
+                    "state": public_improver_state(self.improvers.active(improver_channel)),
+                    "events": [public_improver_event(event) for event in
+                               self.improvers.events(improver_channel)[-50:]],
+                }
+            except KeyError:
+                improver_view = {"channel": improver_channel, "status": "unregistered"}
+            view = {"task_agent": task_view, "recursive_improver": improver_view,
+                    "claim_scope": "mechanism evidence; model and statistical effects separate"}
             self.rsi_view.setPlainText(json_text(view))
-        except KeyError:
-            self.rsi_view.setPlainText(f"尚未登记通道：{channel}")
         except Exception as exc:
             self.rsi_view.setPlainText(f"读取 RSI 版本状态失败：{exc}")
 

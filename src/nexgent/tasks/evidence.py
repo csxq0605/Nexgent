@@ -340,3 +340,181 @@ def export_rsi_mechanism_evidence(destination, *args, **kwargs):
         encoding="utf-8",
     )
     return str(destination.resolve())
+
+
+RECURSIVE_SCHEMA = "nexgent.recursive-improver-evidence.v1"
+
+
+def build_recursive_improver_evidence(
+    tasks, generation, improvers, meta, guards, *, channel,
+    improver_feedback_id, improver_generation_id, meta_plan_id, meta_trial_id,
+    meta_evaluation_id, improver_decision_id, guard_plan_id, guard_action_id,
+    post_promotion_generation_id, next_improver_generation_id,
+    recovery_generation_id,
+):
+    """Verify and sanitize one P4 recursive-improver mechanism closure."""
+    feedback = improvers.feedback(improver_feedback_id)
+    r1_generation = improvers.generation(improver_generation_id)
+    candidate = improvers.candidate(r1_generation["candidate_id"])
+    improvers._verify_generation(candidate)
+    plan = meta.plan(meta_plan_id)
+    trial = meta.trial(meta_trial_id)
+    assessment = meta.evaluation(meta_evaluation_id)
+    decision = improvers.decision(improver_decision_id)
+    guard_plan = guards.plan(guard_plan_id)
+    action = guards.action(guard_action_id)
+    guard_run = guards.run_record(action["run_id"])
+    post = generation.generation(post_promotion_generation_id)
+    r2_generation = improvers.generation(next_improver_generation_id)
+    r2_candidate = improvers.candidate(r2_generation["candidate_id"])
+    improvers._verify_generation(r2_candidate)
+    recovery = generation.generation(recovery_generation_id)
+    active = improvers.active(channel)
+
+    if not (
+        feedback["channel"] == candidate["channel"] == plan["channel"] == channel
+        and r1_generation["feedback_id"] == feedback["id"] == improver_feedback_id
+        and candidate["generation_id"] == r1_generation["id"] == improver_generation_id
+        and plan["candidate_id"] == assessment["candidate_id"] == decision["candidate_id"]
+        == guard_plan["candidate_id"] == candidate["id"]
+        and trial["plan_id"] == plan["id"] == meta_plan_id
+        and assessment["trial_id"] == trial["id"] == meta_trial_id
+        and decision["meta_evaluation_id"] == assessment["id"] == meta_evaluation_id
+        and action["plan_id"] == guard_plan["id"] == guard_plan_id
+        and guard_run["plan_id"] == guard_plan_id
+        and action["run_id"] == guard_run["id"]
+        and assessment.get("eligible") is True
+        and action.get("degraded") is True and action.get("rolled_back") is True
+    ):
+        raise ContractError("Recursive improver records do not form one linked closure")
+    if (post.get("status") != "generated"
+            or post.get("improver_registration", {}).get("package_id") != candidate["package_id"]
+            or post.get("improver_registration", {}).get("revision")
+               != guard_plan["expected_deployed_revision"]):
+        raise ContractError("Post-promotion generation did not load R1 through its channel")
+    if (r2_generation.get("status") != "generated"
+            or r2_generation.get("parent_improver_id") != candidate["package_id"]
+            or r2_generation.get("candidate_id") != r2_candidate["id"]
+            or r2_candidate.get("package_id") != r2_generation.get("candidate_package_id")):
+        raise ContractError("Deployed R1 did not generate a direct R2 candidate")
+    if (guard_run.get("generation", {}).get("improver_registration", {}).get("package_id")
+            != candidate["package_id"]):
+        raise ContractError("Guard did not load deployed R1 through its channel")
+    if (active["package_id"] != candidate["parent_improver_id"]
+            or recovery.get("status") != "generated"
+            or recovery.get("improver_registration", {}).get("package_id") != active["package_id"]
+            or recovery.get("improver_registration", {}).get("revision") != active["revision"]):
+        raise ContractError("Recovery generation did not load rolled-back R0")
+
+    events = improvers.events(channel)
+    required = (
+        ("improver_candidate_generated", lambda value:
+         value.get("generation_id") == r1_generation["id"]),
+        ("improver_promotion_assessed", lambda value:
+         value.get("decision_id") == decision["id"]),
+        ("improver_promoted", lambda value:
+         value.get("candidate_id") == candidate["id"]
+         and value.get("guard_plan_id") == guard_plan["id"]),
+        ("improver_candidate_generated", lambda value:
+         value.get("generation_id") == r2_generation["id"]),
+        ("improver_rolled_back", lambda value:
+         value.get("from_package_id") == candidate["package_id"]
+         and value.get("to_package_id") == candidate["parent_improver_id"]),
+    )
+    selected = []
+    start = 0
+    for kind, predicate in required:
+        match = next((event for event in events[start:]
+                      if event["kind"] == kind and predicate(event["content"])), None)
+        if match is None:
+            raise ContractError(f"Recursive evidence lacks ordered event: {kind}")
+        selected.append(match)
+        start = events.index(match) + 1
+
+    def generation_ref(record):
+        registration = record.get("improver_registration") or {}
+        return {
+            "id": record["id"], "record_digest": record["record_digest"],
+            "episode_id": record.get("episode_id"), "status": record.get("status"),
+            "improver_package_id": record.get("improver_package_id"),
+            "improver_package_digest": record.get("improver_package_digest"),
+            "improver_channel": {key: registration.get(key) for key in
+                                 ("channel", "revision", "package_id", "package_digest")},
+            "candidate_id": record.get("candidate_id"),
+            "candidate_package_id": record.get("candidate_package_id"),
+            "candidate_package_digest": record.get("candidate_package_digest"),
+            "usage": _usage(record.get("usage")),
+        }
+
+    body = {
+        "schema": RECURSIVE_SCHEMA,
+        "claim_scope": {
+            "recursive_mechanism_closed_loop": True,
+            "real_model_recursive_benefit_established": False,
+            "statistical_rsi_benefit_established": False,
+            "claim": "deterministic_recursive_mechanism_only",
+        },
+        "channel": channel,
+        "improvers": {
+            "R0": {"id": candidate["parent_improver_id"],
+                   "digest": candidate["parent_improver_digest"]},
+            "R1": {"id": candidate["package_id"], "digest": candidate["package_digest"]},
+            "R2": {"id": r2_generation["candidate_package_id"],
+                   "digest": r2_generation["candidate_package_digest"], "deployed": False},
+        },
+        "self_update": {
+            "feedback_id": feedback["id"], "feedback_digest": feedback["digest"],
+            "generation_id": r1_generation["id"],
+            "generation_digest": r1_generation["record_digest"],
+            "episode_id": r1_generation["episode_id"],
+            "patch_digest": r1_generation["patch_digest"],
+            "usage": _usage(r1_generation.get("usage")),
+        },
+        "meta_evaluation": {
+            "plan_id": plan["id"], "plan_digest": plan["record_digest"],
+            "protocol_digest": plan["protocol_digest"],
+            "trial_id": trial["id"], "trial_digest": trial["record_digest"],
+            "assessment_id": assessment["id"],
+            "assessment_digest": assessment["record_digest"],
+            "decision_id": decision["id"], "decision_digest": decision["record_digest"],
+            "eligible": assessment["eligible"], "gates": deepcopy(assessment["gates"]),
+            "measurements": deepcopy(assessment["measurements"]),
+            "selected_descendants": deepcopy(assessment["selected_descendants"]),
+        },
+        "deployment": generation_ref(post),
+        "next_self_update": {
+            "generation_id": r2_generation["id"],
+            "generation_digest": r2_generation["record_digest"],
+            "episode_id": r2_generation["episode_id"],
+            "candidate_id": r2_generation["candidate_id"],
+            "candidate_package_id": r2_generation["candidate_package_id"],
+            "candidate_package_digest": r2_generation["candidate_package_digest"],
+            "usage": _usage(r2_generation.get("usage")),
+        },
+        "guard": {
+            "plan_id": guard_plan["id"], "plan_digest": guard_plan["record_digest"],
+            "protocol_digest": guard_plan["protocol_digest"],
+            "run_id": guard_run["id"], "run_digest": guard_run["record_digest"],
+            "action_id": action["id"], "action_digest": action["record_digest"],
+            "measurement_complete": guard_run["measurement_complete"],
+            "mean_utility": guard_run["mean_utility"],
+            "success_rate": guard_run["success_rate"],
+            "degraded": action["degraded"], "rolled_back": action["rolled_back"],
+            "usage": _usage(guard_run.get("usage")),
+        },
+        "recovery": generation_ref(recovery),
+        "events": [{"sequence": event["sequence"], "kind": event["kind"],
+                    "previous": event["previous"], "digest": event["digest"]}
+                   for event in events],
+    }
+    return {**body, "integrity_digest": digest(body)}
+
+
+def export_recursive_improver_evidence(destination, *args, **kwargs):
+    evidence = build_recursive_improver_evidence(*args, **kwargs)
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(evidence, ensure_ascii=False, sort_keys=True, indent=2,
+                   allow_nan=False) + "\n", encoding="utf-8")
+    return str(destination.resolve())

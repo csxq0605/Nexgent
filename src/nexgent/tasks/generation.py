@@ -374,7 +374,8 @@ class GenerationService:
         return result
 
     def generate(self, channel, feedback_bundle_id, improver_package, mutation_policy,
-                 expected_revision, *, budget=None, stop_event=None):
+                 expected_revision, *, improver_channel=None,
+                 expected_improver_revision=None, budget=None, stop_event=None):
         """Execute ``improve`` and admit its valid child, or persist missing evidence."""
         feedback = self.feedback(feedback_bundle_id)
         active = self.evolution.active(channel)
@@ -385,6 +386,27 @@ class GenerationService:
                 or feedback["parent_package_id"] != active["package_id"]
                 or feedback["parent_package_digest"] != active["package_digest"]):
             raise ContractError("Candidate generation expected revision or parent is stale")
+        if improver_channel is not None:
+            if improver_package is not None:
+                raise ContractError("Specify either an improver package or an improver channel")
+            from .improvers import active_improver_registration
+            registration = active_improver_registration(self.store, improver_channel)
+            if (type(expected_improver_revision) is not int
+                    or expected_improver_revision != registration["revision"]):
+                raise ContractError("Improver channel expected revision is stale")
+            improver_package = registration["package"]
+            improver_registration = {
+                "channel": registration["channel"],
+                "revision": registration["revision"],
+                "package_id": registration["package_id"],
+                "package_digest": registration["package_digest"],
+            }
+        else:
+            if expected_improver_revision is not None:
+                raise ContractError("An improver revision requires an improver channel")
+            improver_registration = None
+        if improver_package is None:
+            raise ContractError("Candidate generation requires an improver package or channel")
         verify_package(improver_package)
         if "improve" not in improver_package["manifest"]["entries"]:
             raise ContractError("Improver AgentPackage must register the improve entry")
@@ -406,6 +428,7 @@ class GenerationService:
             "feedback_bundle_id": feedback["id"], "feedback_digest": feedback["digest"],
             "improver_package_id": improver_package["id"],
             "improver_package_digest": improver_package["digest"],
+            "improver_registration": improver_registration,
             "improver_entry": improver_entry,
             "improver_closure": closure,
             "improver_closure_digest": closure_digest,
@@ -423,15 +446,19 @@ class GenerationService:
                   "mutation_policy": policy}
         episode = None
         try:
+            episode_context = {"split": "development", "split_role": "development",
+                               "rsi_role": "candidate_generation", "channel": channel,
+                               "channel_revision": active["revision"],
+                               "feedback_bundle_id": feedback["id"]}
+            if improver_registration is not None:
+                episode_context["improver_channel_registration"] = deepcopy(
+                    improver_registration)
             episode = self.tasks.create(
                 "Generate one feedback-bound BehaviorPatch for the active AgentPackage",
                 inputs=inputs,
                 deliverables=[{"name": "behavior_patch", "schema": _patch_schema()}],
                 budget=budget, capabilities=[], package=improver_package,
-                context={"split": "development", "split_role": "development",
-                         "rsi_role": "candidate_generation", "channel": channel,
-                         "channel_revision": active["revision"],
-                         "feedback_bundle_id": feedback["id"]},
+                context=episode_context,
                 constraints={"allowed_effects": [], "wall_seconds": 1200}, entry="improve")
             episode = self.tasks.run(episode["id"], stop_event=stop_event)
         except Exception as exc:
@@ -453,6 +480,16 @@ class GenerationService:
             if (execution.get("entry") != "improve"
                     or execution.get("package_digest") != improver_package["digest"]):
                 raise ContractError("Candidate generation lacks an actual improve entry receipt")
+            if improver_registration is not None:
+                from .improvers import active_improver_registration
+                current_improver = active_improver_registration(
+                    self.store, improver_registration["channel"])
+                if any(current_improver[key] != improver_registration[key]
+                       for key in ("revision", "package_id", "package_digest")):
+                    raise ContractError("Active improver changed during candidate generation")
+                if (episode.get("task", {}).get("context", {}).get(
+                        "improver_channel_registration") != improver_registration):
+                    raise ContractError("Improver channel registration is missing from the Episode")
             loaded = execution.get("loaded_modules") or []
             entry_path = improver_entry.split(":", 1)[0]
             if entry_path not in loaded:
@@ -485,6 +522,7 @@ class GenerationService:
         self.evolution._event(channel, "candidate_generated", {
             "generation_id": generation_id, "feedback_bundle_id": feedback["id"],
             "improver_episode_id": episode["id"], "improver_package_id": improver_package["id"],
+            "improver_registration": improver_registration,
             "improver_closure_digest": closure_digest, "patch_digest": patch_digest,
             "candidate_id": candidate["id"], "candidate_package_id": child["id"],
             "record_digest": result["record_digest"],

@@ -1,6 +1,6 @@
 # Nexgent vNext 重构计划
 
-日期：2026-09-20。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 Provider 验证已运行但没有形成可验收交付；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面已实现，真实模型效果与统计 RSI 效益尚未建立。P4–P5 尚未完成。
+日期：2026-09-20。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 Provider 验证已运行但没有形成可验收交付；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面与 P4 递归改进器确定性机制闭环已实现。真实模型效果、统计 RSI 效益与 P5 正式研究尚未建立。
 
 ## 1. 产品与执行范围
 
@@ -82,9 +82,13 @@ development Episode
 
 详细对象、接口和信任边界见[控制面设计](docs/design/p3-feedback-evolution-control-plane.md)。固定编排、匹配额外调用、只积累记忆与 P3 主机制的对照见[研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)。
 
-### P4：改进过程的可更新与递归执行
+### P4：改进过程的可更新与递归执行（机制闭环已实现，效果实验未完成）
 
-依赖 P3。同一 AgentPackage 的规划、委派、工具和记忆能力用于诊断、设计和检验自身修改；改进策略本身可被更新。旧的 probe/独立元评价按新的完整任务执行协议改造，不能在比较中关闭候选唯一改变的行为分支。
+依赖 P3。当前实现为 R 建立独立 archive、channel 和 hash-linked event chain。active R 通过真实 `TaskService` self-update Episode 交付受限 `ImproverPatch`，形成直接子代；R0/R1 的元比较从同一 A0、同一 FeedbackBundle、相同 task mutation policy、空 memory 起点和等分总预算出发，实际调用 `GenerationService` 产生任务后代，再通过冻结 benchmark adapter 运行和评价。元效用只来自后代质量、成功率、回归与 charged work。
+
+promotion 强制绑定预登记 improver guard。部署后的候选生成通过独立 improver channel 解析 R id/digest/revision，并在运行结束前复核通道未变化。guard 同样经该通道产生真实任务后代，完整覆盖冻结任务多重集；缺测、身份错误、usage 不全或效用低于阈值都 fail closed，并沿确切部署边 CAS rollback。
+
+确定性 pilot 已闭合 `R0→R1`、R0/R1 后代 `0.4/0.8` 元比较、R1 channel 加载、`R1→R2` archive、自注册阈值 `0.9` 触发回滚，以及新 revision 通过 channel 再次实际加载 R0。该 fixture 不使用模型、网络或工具，只证明机制；真实 R 是否能从任务反馈产生更优改进策略仍未建立。
 
 出口分两类：实现上证明新版本能够承担下一次改进任务；研究上比较两版改进策略实际产生后代的效用。前者不等于后者；无需强制每代修改 meta，宿主评分和预算边界保持固定。
 
@@ -110,7 +114,8 @@ development Episode
 | P1 任务执行、交付评审、工件/记忆、预算与恢复基础 | 0.9 已实现并通过确定性合同测试；真实 Provider episode 已执行但未产生交付或评价结果 |
 | OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
 | 跨任务行为更新 P3 | feedback/R0/BehaviorPatch、配对门控、显式晋升、通道加载、guard monitor 与回滚控制面已实现；真实模型效果与统计效益待检验 |
-| 新框架递归执行及效用 P4–P5 | 待实现与检验 |
+| 改进器递归执行 P4 | 独立 R 通道、自更新、真实任务后代元评测、guard/rollback 和恢复加载机制已闭合；真实模型行为与统计递归效益待检验 |
+| 冻结正式研究 P5 | 待登记与执行 |
 | 0.8 的源码机制与历史结果 | 保留；不能替代以上状态 |
 
 ### 下一阶段
@@ -118,7 +123,7 @@ development Episode
 1. **P1-V 后续真实运行验证**：在修正模型反复请求已完成工具的问题并设置新的冻结预算后，重新检验 normal 多步骤交付；只有 normal 能完成，才运行可隔离验证恢复假设的受控失败场景。保留已有失败 episode，不用重跑覆盖。
 2. **P2 数值验证扩展**：在现有 smoke 之外，另行冻结 Re=100、独立参考、网格/时间收敛和稳态判据。没有这些证据时保持 smoke 结论，不把 20×20×1 Re=10 输出与 Ghia 数据比较。
 3. **P3 真实行为与效果验证**：冻结 `R0`、任务序列、可验证执行环境/工具/运行时快照、预算、paired selection 和 guard policy；预登记目标 provider/model，并用逐调用 receipt 核验实际身份与参数；用真实 development 失败产生候选，报告全部完整/缺测配对、行为激活、质量、normalized work unit、原始 usage、可得的实际货币费用和回归。即使没有候选通过也按预登记结束，不降低门槛追求正结果。
-4. **P4–P5**：只有 P3 显示后续任务实际加载了有效变化后，才允许候选生成、实验选择、父代选择和预算分配策略 `R` 成为变异对象，并从共同起点比较两版冻结 R 的后代效用；最终用多任务族、重复和未写回 holdout 决定统计主张。
+4. **P4 真实行为与 P5**：使用已实现的递归控制面冻结真实 R0/R1、共同 A0、任务族、provider/model receipt、资源和 selection/guard；报告全部分支与缺测。最终只用多任务族、重复、合理固定优化器基线和未写回 holdout 决定统计主张。
 
 ## 6. 分阶段 PR 与历史提交
 

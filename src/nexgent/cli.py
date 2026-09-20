@@ -13,6 +13,7 @@ TASK_COMMANDS = {
     "rsi-status", "rsi-events", "rsi-register", "rsi-feedback", "rsi-generate",
     "rsi-plan", "rsi-run-plan", "rsi-assess", "rsi-plan-monitor", "rsi-promote",
     "rsi-run-monitor", "rsi-monitor", "rsi-rollback",
+    "rsi-improver-status", "rsi-improver-events",
 }
 
 
@@ -130,6 +131,17 @@ def _run_task_command(args):
 
     service = TaskService(args.root)
     if args.command.startswith("rsi-"):
+        if args.command in {"rsi-improver-status", "rsi-improver-events"}:
+            from .tasks.improvers import (
+                ImproverService, public_improver_event, public_improver_state,
+            )
+
+            improvers = ImproverService(service)
+            if args.command == "rsi-improver-status":
+                return public_improver_state(improvers.active(args.channel))
+            events = improvers.events(args.channel)[-args.limit:]
+            return {"channel": args.channel,
+                    "events": [public_improver_event(event) for event in events]}
         from .tasks.evolution import EvolutionService
         from .tasks.evolution_view import public_evolution_event
 
@@ -298,6 +310,14 @@ def main(argv=None):
     rsi_events = sub.add_parser("rsi-events", help="Show the public audit events for an RSI channel")
     rsi_events.add_argument("channel")
     rsi_events.add_argument("--limit", type=_event_limit, default=50)
+
+    rsi_improver_status = sub.add_parser(
+        "rsi-improver-status", help="Show the active recursive improver revision")
+    rsi_improver_status.add_argument("channel")
+    rsi_improver_events = sub.add_parser(
+        "rsi-improver-events", help="Show the public recursive-improver audit chain")
+    rsi_improver_events.add_argument("channel")
+    rsi_improver_events.add_argument("--limit", type=_event_limit, default=50)
 
     rsi_register = sub.add_parser("rsi-register", help="Register a generation-zero package channel")
     rsi_register.add_argument("channel")

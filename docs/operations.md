@@ -1,6 +1,6 @@
 # 任务运行与恢复
 
-> 适用版本：0.9。P1 任务运行器已经实现；P2 OpenFOAM 独立 Re=10 smoke 已实现并真实通过；P3 反馈驱动包演化控制面已实现，真实模型效果与统计 RSI 效益仍未建立；P4 递归改进和 P5 冻结研究尚未完成。0.8 研究接口保留在本文末尾。
+> 适用版本：0.9。P1 任务运行器已经实现；P2 OpenFOAM 独立 Re=10 smoke 已实现并真实通过；P3 反馈驱动包演化控制面和 P4 递归改进器确定性机制闭环已实现。真实模型效果、统计 RSI 效益与 P5 冻结研究仍未建立。0.8 研究接口保留在本文末尾。
 
 ## 项目、模型与入口
 
@@ -77,7 +77,29 @@ python -m nexgent rsi-monitor general GUARD_EPISODE_ID
 - monitor plan 是 promotion 的必填项，其完整任务多重集只能消费一次；monitor 只接受真实、usage-complete、evaluator-bound Episode，不接受调用方伪造的分数字典；rollback 只移动指针，保留候选、trial、decision、Episode 和事件链；
 - selection gate 中的 `cost` 是按模型调用、charged completion tokens、工具调用和节点计算的 normalized work unit，不是货币。原始 usage 继续保留；如需比较实际费用，必须另外记录供应商账单口径。
 
-确定性测试验证这些合同，只构成 **mechanism proof**。真实 `R0` 生成候选并在新 Episode 激活，才构成 **真实模型行为证据**；在预登记任务族上有重复、对照、完整缺测报告和效应估计，才构成 **统计 RSI 效益证据**。当前不能越级使用后两种表述。完整数据对象和 P3/P4 边界见[P3 控制面设计](design/p3-feedback-evolution-control-plane.md)，实验协议见[P3 跨任务 RSI 研究设计](research/p3-cross-task-rsi-design-20260920.md)。
+确定性测试验证这些合同，只构成 **mechanism proof**。真实 `R0` 生成候选并在新 Episode 激活，才构成 **真实模型行为证据**；在预登记任务族上有重复、对照、完整缺测报告和效应估计，才构成 **统计 RSI 效益证据**。当前不能越级使用后两种表述。P3 对象见[P3 控制面设计](design/p3-feedback-evolution-control-plane.md)，R 自更新与元效用见[P4 递归控制面](design/p4-recursive-improver-control-plane.md)。
+
+## P4 递归改进器
+
+P4 把改进策略 `R` 作为与任务智能体 `A` 分离的可版本化 AgentPackage。Python 控制面依次使用：
+
+1. `ImproverService.register(...)` 登记 R0 和冻结 self-mutation/capability envelope；
+2. `capture_feedback(...)` 读取 R0 实际产生的 P3 generation 与独立 decision；
+3. `generate_candidate(...)` 真实运行 active R 的 `improve` entry，生成 R1；
+4. `MetaEvaluationService.create_plan/run/assess` 让 R0/R1 从共同 A0 与 FeedbackBundle 实际产生后代，再比较 downstream utility；
+5. `ImproverGuardService.create_plan(...)` 在部署前冻结后代效用 guard；
+6. `record_decision(...)` 与 `promote(..., guard_plan_id=...)` 进行显式 CAS 部署；
+7. 后续 `GenerationService.generate(..., improver_channel=..., expected_improver_revision=...)` 证明实际加载部署 R；
+8. `ImproverGuardService.run(...)` 单次执行 guard，退化或缺测时自动回滚；run、回滚、action、事件和 claim 原子提交，执行租约过期后按缺测 fail closed 恢复；当前部署的 guard 完成并通过前不能继续晋升下一代 R。回滚后再通过 improver channel 做 recovery generation。
+
+只读入口：
+
+```powershell
+python -m nexgent rsi-improver-status recursive
+python -m nexgent rsi-improver-events recursive --limit 50
+```
+
+GUI 同时显示任务智能体与递归改进器通道。两个通道使用独立存储和 revision，不能互相替代。当前 meta/guard 明确要求空 memory 起点；provider/model 要求会与实际 model receipt 核对。完整 API、状态机、确定性结果和研究限制见[P4 递归控制面](design/p4-recursive-improver-control-plane.md)。
 
 `build_rsi_mechanism_evidence(...)` / `export_rsi_mechanism_evidence(...)` 可在 Python 中核验一条已经完成的闭环并导出 `nexgent.rsi-mechanism-evidence.v1`。导出只含 package/episode/record identity、digest、usage、gate、聚合测量和事件链引用，不含包源码或 evaluator 私有内容。当前确定性 pilot 使用固定无模型 fixture 覆盖了生成、selection、晋升、后续通道加载、guard 退化、回滚和回滚后加载；它的 claim 固定为 `deterministic_mechanism_closure_only`。
 
@@ -135,7 +157,7 @@ P1 的确定性合同测试不调用真实模型供应商，也不构成真实�
 
 ## P3 与 P4 的版本边界
 
-P3 的 `R0` 是冻结实验装置：候选只能改变任务 agent 的 O/M/S 行为面。P4 才允许诊断、候选生成、实验选择、父代选择或预算分配等改进策略 `R` 自身成为被测更新对象。即使进入 P4，评价器、预算核算、权限准入、promotion/rollback 记录和最终比较规则仍留在可信宿主侧；被测 R 不能改写自己的通过标准。研究依据和所需对照见[编排与 RSI 研究综合](research/agent-orchestration-rsi-synthesis-20260916.md)与[P3 研究设计](research/p3-cross-task-rsi-design-20260920.md)。
+P3 的 `R0` 是冻结实验装置：候选只能改变任务 agent 的 O/M/S 行为面。P4 允许改进策略 `R` 自身成为被测更新对象，并已经实现递归版本与后代元效用机制。即使进入 P4，评价器、预算核算、权限准入、promotion/rollback 记录和最终比较规则仍留在可信宿主侧；被测 R 不能改写自己的通过标准。研究依据和所需对照见[编排与 RSI 研究综合](research/agent-orchestration-rsi-synthesis-20260916.md)与[P4 控制面](design/p4-recursive-improver-control-plane.md)。
 
 ## 保留的 0.8 研究接口
 

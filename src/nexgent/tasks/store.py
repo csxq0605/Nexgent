@@ -181,7 +181,15 @@ class EpisodeStore:
             db.execute("BEGIN IMMEDIATE")
             previous = db.execute("SELECT data FROM task_packages WHERE id=?", (package["id"],)).fetchone()
             if previous and previous[0] != encoded:
-                raise ValueError("Cannot overwrite an immutable AgentPackage")
+                stored = json.loads(previous[0])
+                # Package identity covers executable content and lineage, while
+                # generation provenance lives in immutable candidate/generation
+                # records.  Re-running an improver may therefore rediscover the
+                # same content-addressed child with a different generation id.
+                comparable = lambda value: {key: item for key, item in value.items()
+                                            if key != "provenance"}
+                if comparable(stored) != comparable(package):
+                    raise ValueError("Cannot overwrite an immutable AgentPackage")
             if package.get("parent_id"):
                 parent = db.execute("SELECT data FROM task_packages WHERE id=?", (package["parent_id"],)).fetchone()
                 if not parent:
