@@ -1,6 +1,6 @@
 # Nexgent vNext 重构计划
 
-日期：2026-09-21。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 Provider 验证已运行但没有形成可验收交付；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面与 P4 递归改进器确定性机制闭环已实现；P5 已实现通用预注册 final-holdout 配对执行器。真实模型效果、统计 RSI 效益与正式外部研究尚未建立。
+日期：2026-09-21。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 MiMo 普通任务已形成 schema 合法交付但独立 Workbench 仍失败；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面与 P4 递归改进器确定性机制闭环已实现；P5 已实现通用预注册 final-holdout 配对执行器。真实 RSI 行为变化、统计效益与正式外部研究尚未建立。
 
 ## 1. 产品与执行范围
 
@@ -45,9 +45,9 @@
 
 代码与确定性测试已经覆盖受限子进程、版本化多文件包、模型/工具节点、显式工件、当前记忆快照、树级共享预算、停止恢复、交付 schema 核验、包内 reviewer 修订和冻结 benchmark 评价。简单任务仍可走单体路径，不靠强制增加角色数制造协作证据。
 
-真实 Provider 验证已经登记。Qwen `qwen3.8-flash` 的最小与 Workbench 请求均被阿里云以 400 `Arrearage` 拒绝，该错误属于账户欠费而非请求格式；本机 Gemini provider 最小探针返回 `APIConnectionError`。MiMo `mimo-v2.5` 的最小调用成功，normal Workbench episode 真实执行 30 次模型调用、1 次工具调用和 35 个节点，运行时阻止了模型反复请求已成功的 `inspect_sources` 并进入 `recover`，但模型没有发布交付，最终 `BudgetExhausted`，评价不可用。完整记录见[验证记录](docs/research/task-runtime-validation-20260920.md)。
+真实 Provider 验证已经登记。Qwen `qwen3.8-flash` 的最小与 Workbench 请求均被阿里云以 400 `Arrearage` 拒绝，本机 Gemini provider 最小探针返回 `APIConnectionError`。MiMo `mimo-v2.5` 的旧 Workbench episode 在 30 次模型调用后失败；2026-09-21 的普通任务资格运行用 3 次调用完成 schema 合法交付，但新的 Workbench development episode 仍在 20 次调用后预算耗尽，评价不可用。完整记录见[验证记录](docs/research/task-runtime-validation-20260920.md)与[增量机器摘要](docs/research/task-runtime-validation-20260921.json)。
 
-实现出口中的共享执行器、核心独立安装、真实状态窗口和受控失败恢复合同已经完成。实际 MiMo 轨迹证明 Provider path、usage、工具执行、重复调用阻断与恢复入口能够真实激活；它没有证明交付、评审修订或恢复成功。normal 已失败且继续运行受控失败场景会增加消耗而不能隔离恢复假设，因此本轮没有继续该场景。P1 的工程底座可供 P2/P3 开发使用，但不能写成完整 RSI 或已验证的真实模型任务效果。
+实现出口中的共享执行器、核心独立安装、真实状态窗口和受控失败恢复合同已经完成。实际 MiMo 轨迹现在证明普通任务的模型调用、任务内发布、reviewer 路径和 schema 合法交付能够闭合；Workbench 轨迹证明工具与失败反馈被激活，但没有在预算内完成工件验证或独立评价。受控失败恢复、benchmark 成功及反馈后的有效修订仍待验证。P1 的工程底座可供 P2/P3 开发使用，但不能写成完整 RSI 或已验证的自我改进效果。
 
 ### P2：独立 OpenFOAM demo 接入（Re=10 smoke 已完成）
 
@@ -113,7 +113,7 @@ promotion 强制绑定预登记 improver guard。部署后的候选生成通过�
 | 用户确认的框架定位与独立 demo 边界 | 固定要求 |
 | vNext 定位、架构、研究综合、OpenFOAM 设计 | P0 已完成；设计中的正式数值研究仍未执行 |
 | 本机 OpenFOAM | 已确认 WSL2 / Ubuntu 20.04 / Foundation 8，并真实运行 Re=10 教程 smoke |
-| P1 任务执行、交付评审、工件/记忆、预算与恢复基础 | 0.9 已实现并通过确定性合同测试；真实 Provider episode 已执行但未产生交付或评价结果 |
+| P1 任务执行、交付评审、工件/记忆、预算与恢复基础 | 0.9 已实现并通过确定性合同测试；真实 MiMo 普通任务交付已通过，Workbench 独立评价仍未形成 |
 | OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
 | 跨任务行为更新 P3 | feedback/R0/BehaviorPatch、配对门控、显式晋升、通道加载、guard monitor 与回滚控制面已实现；真实模型效果与统计效益待检验 |
 | 改进器递归执行 P4 | 独立 R 通道、自更新、真实任务后代元评测、guard/rollback 和恢复加载机制已闭合；真实模型行为与统计递归效益待检验 |

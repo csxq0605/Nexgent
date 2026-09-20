@@ -10,11 +10,11 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具
 
 P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → paired selection → task channel → guard/rollback`。P4 又实现 `R0 真实自更新为 R1 → R0/R1 从共同 A0 产生后代 → 下游效用元评测 → 独立 R channel 部署 → R1 产生 R2 → 后代效用 guard → 回滚并重新加载 R0`。评价、权限、预算、晋升和回滚仍由可信宿主掌握。**当前完成的是无模型确定性机制证明；没有真实模型递归提升或统计 RSI 效益证据。**
 
-真实 Provider 验证已经执行：MiMo 跑通模型、usage、工具、重复阻断与恢复入口，但在 30 次模型调用后耗尽预算且没有交付；Qwen 因账户欠费被供应商拒绝，Gemini 最小探针连接失败。仓库不把这些失败记录、确定性控制面测试或 P2 求解器运行写成真实模型任务成功。
+真实 Provider 验证已经执行：2026-09-21 的 MiMo 普通任务用 3 次模型调用完成 schema 合法交付，证明 P1 模型驱动交付路径可用；同日 Workbench development 仍在 20 次调用后耗尽预算且没有交付或独立评价。此前 Qwen 因账户欠费被供应商拒绝，Gemini 最小探针连接失败。仓库不把普通任务交付、Workbench 失败、确定性控制面测试或 P2 求解器运行写成 RSI 效益。
 
 | 内容 | 状态 |
 | --- | --- |
-| P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础已实现并通过确定性合同测试；真实 Provider episode 已运行但未形成可验收交付 |
+| P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础已实现并通过确定性合同测试；真实 MiMo 普通任务已形成 schema 合法交付，独立 Workbench 仍失败 |
 | P1 普通任务与独立 workbench benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同 |
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
 | P3 跨任务行为更新 | 反馈绑定候选生成、配对门控、通道晋升、监测/回滚及脱敏机制证据导出已实现；确定性闭环不代表真实模型效果或统计效益 |

@@ -1,7 +1,7 @@
 # P1 任务运行时验证记录
 
 日期：2026-09-20
-状态：**已完成三条真实 Provider 路径探测和一条运行至预算停止条件的 Workbench episode；结果均未形成可验收交付。本文将已观察机制、失败原因和缺测项分开记录。**
+状态：**2026-09-20 的三条 Provider 探测和 Workbench 失败记录保持不变；2026-09-21 新增一条真实 MiMo 普通任务完整交付及一条新的 Workbench 预算失败。普通任务路径已形成 schema 合法交付，独立 benchmark 仍未通过。**
 
 ## 1. 目的与声明边界
 
@@ -20,6 +20,7 @@ P1 是任务执行、评审和恢复基础，不是完整 RSI。本文不以一�
 | `custom-1788598424262` | `qwen3.8-flash` | 最小请求；完整 Workbench 请求 | 两次均由阿里云返回 HTTP 400 `Arrearage`；请求未进入任务工具阶段 |
 | `preset-anthropic-xiaomi-mimo-token-plan-china` | `mimo-v2.5` | 最小请求；完整 normal Workbench episode | 最小请求成功；Workbench 实际执行 30 次模型调用和 1 次工具调用，随后因预算耗尽失败 |
 | 本机 Gemini provider | 本机配置所指模型 | 最小连接探针 | `APIConnectionError`；未建立可用调用 |
+| `mimo` | `mimo-v2.5` | 普通任务资格；新的 Workbench development episode | 普通任务 3 次模型调用后完成 schema 合法交付；Workbench 20 次调用后预算耗尽，评价不可用 |
 
 完整 Workbench 运行的 package digest 为 `dd684d6dbb2ff8059a2a95986759a8d76916f588a6f38820ad3c82e6ab7eb2cd`。本轮没有在观察结果出现后回写任务成功条件或评价标准。未在下文列出的冻结字段不从日志外推，按缺测处理。
 
@@ -125,9 +126,42 @@ normal Workbench 已在 MiMo 上耗尽 30 次真实模型调用而未产生交�
 5. 恢复不重复已完成的有副作用调用，未知结果不会自动重放。
 6. 成功、失败、缺测、未知用量与全部成本均保留。
 
-本轮可报告的结论是：P1 运行时合同通过确定性测试；真实 MiMo episode 观察到模型调用、usage、一次工具执行、重复调用阻断和 `recover` 入口；Qwen 与 Gemini 分别留下账户状态和连接失败证据。真实 episode 没有交付，评价均不可用，任务成功、评审修订和恢复成功仍未通过验证。在 P3–P5 完成独立对照前，不使用“系统已经学会”“完成 RSI”“持续提升”或“递归改进有效”。
+2026-09-20 当轮可报告的结论是：P1 运行时合同通过确定性测试；真实 MiMo episode 观察到模型调用、usage、一次工具执行、重复调用阻断和 `recover` 入口；Qwen 与 Gemini 分别留下账户状态和连接失败证据。该轮真实 episode 没有交付，评价均不可用。
 
-## 7. 后续 RSI 证据链
+## 7. 2026-09-21 增量资格运行
+
+两条运行都基于提交 `f2976a6`，使用本地被 Git 忽略的 provider 配置。调用收据记录 configured/observed model；provider 没有返回 system fingerprint/revision，因此结论只能绑定到该运行时间窗口。脱敏机器可读摘要见[`task-runtime-validation-20260921.json`](task-runtime-validation-20260921.json)。
+
+### 7.1 真实 MiMo 普通任务完成交付
+
+| 项目 | 观察 |
+| --- | --- |
+| episode / package | `episode-29c12c25d12746fc`；`package-25679f93c73f9e9a82a918b9`；package digest `dd684d6dbb2ff8059a2a95986759a8d76916f588a6f38820ad3c82e6ab7eb2cd` |
+| 冻结目标 | 只依据两个输入事实，交付包含 `answer` 与 `evidence_ids` 的 `result` 工件 |
+| 模型路径 | 2 次 `task_agent`、1 次 `task_reviewer`；configured/observed model 都是 `mimo-v2.5`；finish reason 均为 `stop` |
+| 交付 | `artifact-072698ec561e4a37`；答案正确引用 `f1`/`f2`；宿主 JSON Schema 通过 |
+| 用量 | 3 model calls；4,203 prompt、158 completion、4,361 total tokens；7 nodes；usage 完整 |
+| 宿主结论 | `completed`、`delivered`、`schema_validation=passed`；普通任务没有独立 evaluator，因此 `acceptance_status=not_evaluated` |
+
+结论：真实模型驱动的 P1 普通任务路径已经形成完整交付。这证明模型调用、任务内编排、发布、reviewer 路径和宿主 schema 闭合可以实际运行；它没有独立 benchmark 分数，也没有候选生成、跨任务持久更新或后代效用，不能升级为 RSI 改进证据。
+
+### 7.2 新 Workbench development 仍未完成
+
+| 项目 | 观察 |
+| --- | --- |
+| episode / package | `episode-933d0549a14c4c7e`；同一默认 package digest |
+| 冻结预算 | 20 model calls、70,000 reserved completion tokens、12 tool calls、60 nodes |
+| 实际路径 | 20 model calls、2 tool calls、29 nodes；78,545 prompt、6,265 completion、84,810 total tokens；usage 完整 |
+| 工具 | `workbench.inspect_sources` 成功；随后 `workbench.validate_delivery` 收到无效的 `pending` 工件引用并以 `KeyError` 失败 |
+| 终态 | 没有 output refs 或 outcome；最终 `BudgetExhausted`；Episode 为 `failed`，独立评价 `unavailable` |
+
+结论：提高可用账户额度没有消除 Workbench 编排缺陷。系统实际执行了工具并接收到失败反馈，但默认任务包仍没有在冻结预算内转入有效的工件发布与验证闭环。该结果作为 P3 development 失败信号保留，不能按 benchmark 零分或通过处理，除非正式研究协议预先规定相应的 intention-to-treat 责任分类。
+
+## 8. 更新后的 P1 验收判断
+
+P1 普通任务真实模型交付已通过一次资格运行；独立 benchmark、受控失败恢复和 reviewer 拒绝后的有效修订仍未通过真实 Provider 验证。P3/P4 的控制面实现和确定性 pilot 不受这条新运行影响；在真实反馈产生候选、后续 Episode 加载该候选并由冻结对照显示效用前，不使用“系统已经学会”“完成 RSI”“持续提升”或“递归改进有效”。
+
+## 9. 后续 RSI 证据链
 
 P3–P4 应在本文的 episode 证据之上另行登记以下闭环：
 

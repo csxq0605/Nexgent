@@ -105,6 +105,6 @@ Nexgent 核心不内置任务域。正式研究通过 `nexgent.task_benchmarks` 
 ## 9. 当前结果
 
 - P0–P4 的确定性机制：E0。
-- 真实 Provider 运行：MiMo 路径有模型/工具/usage 收据，但没有交付或评价；Qwen/Gemini 留下供应商失败证据。它们不足以达到 E1。
+- 真实 Provider 运行：MiMo 普通任务已形成一次 schema 合法交付；Workbench 仍在冻结预算内失败且评价不可用，Qwen/Gemini 留下供应商失败证据。没有真实反馈生成的候选被后续 Episode 加载和比较，因此仍不足以达到 RSI 的 E1。
 - P5 执行器的确定性 pilot：证明 final holdout 冻结、真实 Episode 配对、空 memory、禁止写回、独立评价、可恢复执行、脱敏查看和统计门可以运行。fixture 的固定 0.2/0.8 分数不是模型效果。
 - 尚未注册 τ-bench、SWE-bench-Live、私有 WebArena 或等价外部主矩阵；因此没有 E2–E6 结论。
