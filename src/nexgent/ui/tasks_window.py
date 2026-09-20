@@ -318,6 +318,7 @@ class TaskWindow(QMainWindow):
         try:
             from ..tasks.evolution_view import public_channel_view
             from ..tasks.improvers import public_improver_event, public_improver_state
+            from ..tasks.studies import public_study_records
             try:
                 task_view = public_channel_view(
                     self.evolution.active(channel), self.evolution.events(channel), limit=50)
@@ -333,7 +334,11 @@ class TaskWindow(QMainWindow):
                 }
             except KeyError:
                 improver_view = {"channel": improver_channel, "status": "unregistered"}
+            study_view = (public_study_records(self.service.store, 20)
+                          if hasattr(self.service, "store")
+                          else {"status": "unavailable"})
             view = {"task_agent": task_view, "recursive_improver": improver_view,
+                    "confirmatory_studies": study_view,
                     "claim_scope": "mechanism evidence; model and statistical effects separate"}
             self.rsi_view.setPlainText(json_text(view))
         except Exception as exc:

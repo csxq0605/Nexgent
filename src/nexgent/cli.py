@@ -14,6 +14,7 @@ TASK_COMMANDS = {
     "rsi-plan", "rsi-run-plan", "rsi-assess", "rsi-plan-monitor", "rsi-promote",
     "rsi-run-monitor", "rsi-monitor", "rsi-rollback",
     "rsi-improver-status", "rsi-improver-events",
+    "rsi-study-plan", "rsi-study-run", "rsi-study-assess", "rsi-study-list",
 }
 
 
@@ -131,6 +132,9 @@ def _run_task_command(args):
 
     service = TaskService(args.root)
     if args.command.startswith("rsi-"):
+        if args.command == "rsi-study-list":
+            from .tasks.studies import public_study_records
+            return public_study_records(service.store, args.limit)
         if args.command in {"rsi-improver-status", "rsi-improver-events"}:
             from .tasks.improvers import (
                 ImproverService, public_improver_event, public_improver_state,
@@ -142,6 +146,50 @@ def _run_task_command(args):
             events = improvers.events(args.channel)[-args.limit:]
             return {"channel": args.channel,
                     "events": [public_improver_event(event) for event in events]}
+        if args.command in {"rsi-study-plan", "rsi-study-run", "rsi-study-assess"}:
+            from .tasks.studies import RSIStudyService, StudyPolicy
+
+            studies = RSIStudyService(service, _task_benchmark(args.benchmark))
+            if args.command == "rsi-study-plan":
+                policy_fields = (_object_argument(args.policy, label="study policy")
+                                 if args.policy else {})
+                try:
+                    policy = StudyPolicy(**policy_fields)
+                except TypeError as exc:
+                    raise ValueError(f"study policy has unsupported fields: {exc}") from None
+                result = studies.create_plan(
+                    arms={"baseline": _object_argument(
+                              args.baseline_package, label="baseline package"),
+                          "candidate": _object_argument(
+                              args.candidate_package, label="candidate package")},
+                    baseline_arm="baseline", candidate_arm="candidate",
+                    split="final_holdout", seeds=args.seeds,
+                    episode_budget=_task_budget(args), provider=args.provider,
+                    model=args.model, policy=policy,
+                    require_model_calls=not args.no_require_model_calls,
+                    observed_model=args.observed_model,
+                    provider_revision=args.provider_revision)
+                return _record_result(result, (
+                    "schema", "id", "benchmark_id", "split", "seeds", "arms",
+                    "baseline_arm", "candidate_arm", "episode_budget", "provider",
+                    "model", "resolved_model", "model_profile_digest",
+                    "model_version_binding", "expected_observed_model",
+                    "expected_provider_revision", "require_model_calls", "policy",
+                    "adapter_fingerprint", "execution_environment_digest", "statistics",
+                    "protocol_digest", "created_at", "record_digest"))
+            if args.command == "rsi-study-run":
+                result = studies.run(args.plan_id, stop_event=_stop_event())
+                return _record_result(result, (
+                    "schema", "id", "plan_id", "plan_digest", "protocol_digest",
+                    "status", "measurement_complete", "completed_cells",
+                    "created_at", "record_digest"))
+            result = studies.assess(args.run_id)
+            return _record_result(result, (
+                "schema", "id", "plan_id", "run_id", "protocol_digest",
+                "complete_pair_count", "planned_pair_count", "independent_cluster_count",
+                "planned_cluster_count", "missing", "metrics",
+                "gates", "engineering_acceptance", "statistical_support",
+                "version_scope", "claim_scope", "created_at", "record_digest"))
         from .tasks.evolution import EvolutionService
         from .tasks.evolution_view import public_evolution_event
 
@@ -380,6 +428,39 @@ def main(argv=None):
     rsi_rollback = sub.add_parser("rsi-rollback", help="Roll back one promoted package edge")
     rsi_rollback.add_argument("channel")
     rsi_rollback.add_argument("reason")
+
+    rsi_study_plan = sub.add_parser(
+        "rsi-study-plan", help="Pre-register a paired final-holdout RSI study")
+    rsi_study_plan.add_argument("benchmark")
+    rsi_study_plan.add_argument("--baseline-package", required=True,
+                                help="Baseline AgentPackage JSON object, file, or @file")
+    rsi_study_plan.add_argument("--candidate-package", required=True,
+                                help="Candidate AgentPackage JSON object, file, or @file")
+    rsi_study_plan.add_argument("--seeds", type=int, nargs="+", required=True)
+    rsi_study_plan.add_argument("--provider", required=True)
+    rsi_study_plan.add_argument("--model", required=True)
+    rsi_study_plan.add_argument(
+        "--observed-model", help="Exact model identity expected in provider responses")
+    rsi_study_plan.add_argument(
+        "--provider-revision", help="Exact provider-reported revision/system fingerprint")
+    rsi_study_plan.add_argument("--policy", help="Study policy JSON object, file, or @file")
+    rsi_study_plan.add_argument(
+        "--no-require-model-calls", action="store_true",
+        help="Allow deterministic packages with no model calls")
+    _add_task_budget(rsi_study_plan)
+
+    rsi_study_run = sub.add_parser(
+        "rsi-study-run", help="Execute or resume a frozen final-holdout study")
+    rsi_study_run.add_argument("plan_id")
+    rsi_study_run.add_argument("benchmark")
+
+    rsi_study_assess = sub.add_parser(
+        "rsi-study-assess", help="Assess a completed paired RSI study")
+    rsi_study_assess.add_argument("run_id")
+    rsi_study_assess.add_argument("benchmark")
+    rsi_study_list = sub.add_parser(
+        "rsi-study-list", help="Show public frozen-study plans and reports")
+    rsi_study_list.add_argument("--limit", type=_event_limit, default=50)
 
     sub.add_parser("list")
     sub.add_parser("benchmarks")

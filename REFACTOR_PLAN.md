@@ -1,6 +1,6 @@
 # Nexgent vNext 重构计划
 
-日期：2026-09-20。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 Provider 验证已运行但没有形成可验收交付；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面与 P4 递归改进器确定性机制闭环已实现。真实模型效果、统计 RSI 效益与 P5 正式研究尚未建立。
+日期：2026-09-21。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 Provider 验证已运行但没有形成可验收交付；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面与 P4 递归改进器确定性机制闭环已实现；P5 已实现通用预注册 final-holdout 配对执行器。真实模型效果、统计 RSI 效益与正式外部研究尚未建立。
 
 ## 1. 产品与执行范围
 
@@ -104,6 +104,8 @@ promotion 强制绑定预登记 improver guard。部署后的候选生成通过�
 
 出口：完整任务系统可运行、独立插件成立、改进被后续执行使用；有报告支撑效果结论。结果可以为零或负，但不能以此掩盖未实现的能力，也不能将有限结果写成普适或加速增长的 RSI。
 
+当前已实现 `RSIStudyService`：只接受 final holdout，冻结两个 AgentPackage、宿主私有 benchmark 注册、显式统计单位/来源 cluster、完整任务/seed、provider/model、执行环境摘要、每 Episode 硬预算、随机化调度、工程门和 cluster bootstrap/sign-flip 统计；每个 cell 通过真实 `TaskService` 执行，空 memory 且禁止写回，可恢复但不可选择性重放。模型收据区分请求别名与 provider 实际 model/revision；没有固定 revision 时只允许时间窗口内的局部工程结论。CLI 与 GUI 只投影脱敏计划和报告。它是正式研究的执行底座，不等于外部研究已完成。主矩阵至少需要一个工具/政策任务族、一个新鲜可执行代码任务族和一个私有自托管交互任务族；OpenFOAM 单列为 demo，Workbench/饱和 BBH 只做资格与接口检查。完整协议见[P5 预注册研究](docs/research/p5-preregistered-rsi-study.md)。
+
 ## 5. 当前状态
 
 | 项目 | 状态 |
@@ -115,7 +117,7 @@ promotion 强制绑定预登记 improver guard。部署后的候选生成通过�
 | OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
 | 跨任务行为更新 P3 | feedback/R0/BehaviorPatch、配对门控、显式晋升、通道加载、guard monitor 与回滚控制面已实现；真实模型效果与统计效益待检验 |
 | 改进器递归执行 P4 | 独立 R 通道、自更新、真实任务后代元评测、guard/rollback 和恢复加载机制已闭合；真实模型行为与统计递归效益待检验 |
-| 冻结正式研究 P5 | 待登记与执行 |
+| 冻结正式研究 P5 | 通用 final-holdout 配对执行器、预注册 schema、CLI/信息窗已实现；外部多任务族正式研究待登记与执行 |
 | 0.8 的源码机制与历史结果 | 保留；不能替代以上状态 |
 
 ### 下一阶段

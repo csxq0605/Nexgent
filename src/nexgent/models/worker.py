@@ -43,9 +43,14 @@ def response_payload(response):
     choice = response.choices[0] if response.choices else None
     content = getattr(getattr(choice, "message", None), "content", None)
     reason, identity = getattr(choice, "finish_reason", None), getattr(response, "id", None)
+    observed_model = getattr(response, "model", None)
+    system_fingerprint = getattr(response, "system_fingerprint", None)
     return {"content": content[:240001] if isinstance(content, str) else None,
             "finish_reason": reason[:100] if isinstance(reason, str) else None,
             "response_id": identity[:500] if isinstance(identity, str) else None,
+            "observed_model": observed_model[:500] if isinstance(observed_model, str) else None,
+            "system_fingerprint": (system_fingerprint[:500]
+                                   if isinstance(system_fingerprint, str) else None),
             "usage": usage_snapshot(getattr(response, "usage", None))}
 
 

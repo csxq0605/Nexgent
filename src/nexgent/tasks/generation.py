@@ -173,10 +173,9 @@ class GenerationService:
     def generation(self, generation_id):
         return self._get("task_candidate_generations", generation_id)
 
-    @staticmethod
-    def _development_boundary(episode):
+    def _development_boundary(self, episode):
         context = episode["task"].get("context") or {}
-        registration = context.get("benchmark_registration") or {}
+        registration = self.store.benchmark_registration(episode["id"]) or {}
         task_ref = registration.get("task_ref") or {}
         registered_context = task_ref.get("context") or {}
         observed = []

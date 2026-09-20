@@ -927,7 +927,7 @@ class TaskMetaExecutor:
             "provider_requirement": request.get("provider"),
             "model_requirement": request.get("model"),
         })
-        context["benchmark_registration"] = {
+        benchmark_registration = {
             "benchmark_id": self.adapter.id,
             "task_ref": deepcopy(task_ref),
             "snapshot": deepcopy(self.snapshot),
@@ -936,15 +936,15 @@ class TaskMetaExecutor:
             task_ref["objective"], inputs=task_ref.get("inputs"),
             deliverables=task_ref.get("deliverables"), budget=request.get("budget"),
             capabilities=task_ref.get("capabilities"), package=package, context=context,
-            constraints=task_ref.get("constraints"), entry=task_ref.get("entry", "execute"))
+            constraints=task_ref.get("constraints"), entry=task_ref.get("entry", "execute"),
+            benchmark_registration=benchmark_registration)
         state = self.tasks.run(state["id"])
         evaluated = self.tasks.evaluate(
             state["id"], self.adapter, task_ref, snapshot=deepcopy(self.snapshot))
         report = evaluated["evaluation"]
         episode = self.tasks.get(state["id"])
         if (episode.get("package_digest") != package["digest"]
-                or episode.get("task", {}).get("context", {}).get(
-                    "benchmark_registration", {}).get("snapshot") != self.snapshot
+                or self.tasks.store.benchmark_registration(state["id"]) != benchmark_registration
                 or not any(event.get("kind") == "benchmark_evaluated"
                            for event in episode.get("events") or [])):
             raise ContractError("Descendant evaluation lacks a complete local benchmark closure")

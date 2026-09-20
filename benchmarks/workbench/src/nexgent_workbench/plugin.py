@@ -250,6 +250,8 @@ class WorkbenchBenchmark:
             raise ValueError("controlled_failure must be boolean")
         task_id = f"workbench/{VERSION}/{split}/{seed}/{'recovery' if controlled_failure else 'normal'}"
         return [{"id": task_id, "schema_version": "1",
+                 "statistical_unit_id": task_id,
+                 "cluster_id": f"workbench/{VERSION}/{split}/origin/{seed}",
                  "objective": "Reconcile the versioned invoice source rows under the supplied policy. Deliver a provenance-preserving ledger, explicit unresolved conflicts, and an exact aggregate/exclusion report. excluded_rows must contain exactly the invalid input rows; a valid row superseded by a higher revision is ignored for record selection and must not be reported as excluded. For an invalid row, use the first failing field in invalid_reason_order as its reason. Call inspect_sources on the sources artifact. Publish ledger and report artifacts, call validate_delivery on those actual artifact refs, use its errors to repair the content, republish, and repeat until valid=true. Naming a tool or proposed action in a deliverable does not call it; acceptance requires successful host receipts bound to the final artifact digest.",
                  "inputs": inputs,
                  "deliverables": [{"name": name, "schema": deepcopy(schema)}

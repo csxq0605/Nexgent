@@ -319,7 +319,7 @@ class EvolutionService:
             except KeyError:
                 raise ContractError(f"Candidate feedback episode is not local: {identity}") from None
             context = episode["task"].get("context", {})
-            registration = context.get("benchmark_registration", {})
+            registration = self.store.benchmark_registration(identity) or {}
             registered_ref = registration.get("task_ref", {}) if isinstance(registration, dict) else {}
             registered_context = (registered_ref.get("context", {})
                                   if isinstance(registered_ref, dict) else {})
@@ -487,13 +487,14 @@ class EvolutionService:
         context["split"] = registration["split"]
         context["evolution_registration"] = deepcopy(registration)
         context["memory_writeback"] = False
-        context["benchmark_registration"] = {"benchmark_id": benchmark_id,
-                                               "task_ref": deepcopy(task_ref),
-                                               "snapshot": deepcopy(snapshot)}
+        benchmark_registration = {"benchmark_id": benchmark_id,
+                                  "task_ref": deepcopy(task_ref),
+                                  "snapshot": deepcopy(snapshot)}
         return self.tasks.create(
             task_ref["objective"], task_ref.get("inputs"), task_ref.get("deliverables"), budget,
             task_ref.get("capabilities"), package, context,
-            constraints=task_ref.get("constraints"))
+            constraints=task_ref.get("constraints"),
+            benchmark_registration=benchmark_registration)
 
     def _run_frozen(self, state, adapter, task_ref, snapshot, stop_event):
         error = None
@@ -892,13 +893,14 @@ class EvolutionService:
             context["monitoring_registration"] = {
                 "monitor_plan_id": plan_id, "suite_digest": plan["suite_digest"],
                 "task_ref_digest": digest(task_ref), "split_role": "monitoring"}
-            context["benchmark_registration"] = {
+            benchmark_registration = {
                 "benchmark_id": suite["benchmark_id"], "task_ref": deepcopy(task_ref),
                 "snapshot": deepcopy(suite["snapshot"])}
             state = self.tasks.create(
                 task_ref["objective"], task_ref.get("inputs"), task_ref.get("deliverables"),
                 plan["budget"], task_ref.get("capabilities"), context=context,
-                constraints=task_ref.get("constraints"), package_channel=channel)
+                constraints=task_ref.get("constraints"), package_channel=channel,
+                benchmark_registration=benchmark_registration)
             self.tasks.run(state["id"], stop_event=stop_event)
             reports.append(self.tasks.evaluate(
                 state["id"], adapter, deepcopy(task_ref), snapshot=deepcopy(suite["snapshot"])))

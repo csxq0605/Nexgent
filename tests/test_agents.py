@@ -165,7 +165,8 @@ def test_worker_receives_180_second_bound_and_disables_sdk_retries(monkeypatch, 
             self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
         def create(self, **kwargs):
             return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok":true}'), finish_reason="stop")],
-                                   usage={"total_tokens": 1}, id="test")
+                                   usage={"total_tokens": 1}, id="test",
+                                   model="mimo-v2.5-202609", system_fingerprint="revision-42")
         def close(self):
             pass
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=Client))
@@ -175,7 +176,10 @@ def test_worker_receives_180_second_bound_and_disables_sdk_retries(monkeypatch, 
     assert worker.main() == 0
     assert parameters[0]["timeout"] == 180 and parameters[0]["max_retries"] == 0
     output = capsys.readouterr().out
-    assert json.loads(output)["content"] == '{"ok":true}' and "worker-secret" not in output
+    payload = json.loads(output)
+    assert payload["content"] == '{"ok":true}' and "worker-secret" not in output
+    assert payload["observed_model"] == "mimo-v2.5-202609"
+    assert payload["system_fingerprint"] == "revision-42"
 
 
 def test_transport_diagnostics_include_cause_phase_and_never_exception_text():

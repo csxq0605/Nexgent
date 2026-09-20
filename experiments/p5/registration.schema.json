@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexgent.dev/schemas/p5-registration-v1.json",
+  "title": "Nexgent P5 preregistration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "git", "hypotheses", "contrasts", "arms", "benchmarks",
+    "splits", "models", "execution_environment", "budgets", "missingness",
+    "statistics", "claim_ceiling"
+  ],
+  "properties": {
+    "schema": {"const": "nexgent.p5-preregistration.v1"},
+    "git": {
+      "type": "object", "additionalProperties": false,
+      "required": ["commit", "dirty"],
+      "properties": {"commit": {"type": "string", "minLength": 40}, "dirty": {"type": "boolean"}}
+    },
+    "hypotheses": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "contrasts": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+    "arms": {
+      "type": "array", "minItems": 2,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "agent_package_digest", "improver_package_digest", "mutable_surfaces"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,99}$"},
+          "agent_package_digest": {"type": "string", "minLength": 32},
+          "improver_package_digest": {"type": ["string", "null"]},
+          "mutable_surfaces": {"type": "array", "uniqueItems": true, "items": {"enum": ["O", "M", "S", "R"]}}
+        }
+      }
+    },
+    "benchmarks": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "family", "snapshot_digest", "data_digest", "evaluator_digest",
+                     "statistical_unit_key", "cluster_key", "role"],
+        "properties": {
+          "id": {"type": "string"}, "family": {"type": "string"},
+          "snapshot_digest": {"type": "string"}, "data_digest": {"type": "string"},
+          "evaluator_digest": {"type": "string"},
+          "statistical_unit_key": {"type": "string", "minLength": 1},
+          "cluster_key": {"type": "string", "minLength": 1},
+          "role": {"enum": ["qualification", "primary", "transfer", "demo_only"]}
+        }
+      }
+    },
+    "splits": {
+      "type": "object", "additionalProperties": false,
+      "required": ["development", "selection", "guard", "final_holdout", "origin_group_policy"],
+      "properties": {
+        "development": {"type": "array", "items": {"type": "string"}},
+        "selection": {"type": "array", "items": {"type": "string"}},
+        "guard": {"type": "array", "items": {"type": "string"}},
+        "final_holdout": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "origin_group_policy": {"type": "string", "minLength": 1}
+      }
+    },
+    "models": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["provider", "model", "observed_model", "version", "sampling"],
+        "properties": {
+          "provider": {"type": "string"}, "model": {"type": "string"},
+          "observed_model": {"type": "string"},
+          "version": {"type": "string"}, "sampling": {"type": "object"}
+        }
+      }
+    },
+    "execution_environment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runtime_digest", "tool_digests", "container_or_host_digest",
+                   "evaluator_artifact_digest"],
+      "properties": {
+        "runtime_digest": {"type": "string", "minLength": 32},
+        "tool_digests": {"type": "object"},
+        "container_or_host_digest": {"type": "string", "minLength": 1},
+        "evaluator_artifact_digest": {"type": "string", "minLength": 32}
+      }
+    },
+    "budgets": {"type": "object", "minProperties": 1},
+    "missingness": {"type": "object", "minProperties": 1},
+    "statistics": {"type": "object", "minProperties": 1},
+    "claim_ceiling": {"enum": ["E0", "E1", "E2", "E3", "E4", "E5", "E6"]}
+  }
+}

@@ -5,6 +5,7 @@ benchmark fixtures are authored test doubles: no provider or external task runs.
 """
 
 from copy import deepcopy
+import json
 from pathlib import Path
 import sys
 import threading
@@ -13,6 +14,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from nexgent.kernel.programs import digest
+from nexgent.models.gateway import ModelTransportError
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService, ToolContext
 from nexgent.tasks.tools import ContractError, ToolRegistry, ToolSpec
@@ -105,6 +108,63 @@ def test_installed_tool_effect_restriction_is_enforced_only_when_explicit(tmp_pa
         assert len(calls) == 1
 
 
+def test_terminal_failure_domain_separates_agent_protocol_and_host_failures(tmp_path):
+    failing_tool = ToolSpec(
+        "contract.host_failure", {"type": "object"}, {"type": "object"}, "read",
+        lambda arguments, context: (_ for _ in ()).throw(RuntimeError("host tool unavailable")),
+    )
+    registry = ToolRegistry([failing_tool])
+    host_service = TaskService(tmp_path / "host", tools=registry)
+    host_package = controlled_package("""def execute(payload, context):
+    context.tool('contract.host_failure', {})
+    return {'deliverables': {}}
+""")
+    host = host_service.create(
+        "host failure", package=host_package, capabilities=[failing_tool.name],
+        deliverables=result_spec(),
+    )
+    host_result = host_service.run(host["id"])
+    assert host_result["status"] == "failed"
+    assert host_result["failure_domain"] == "infrastructure"
+
+    class TransportFactory:
+        def __call__(self, reserve, stop_event):
+            class Gateway:
+                def ask(self, **params):
+                    raise ModelTransportError(
+                        "provider connection failed", {"connection_phase": "connect"})
+            return Gateway()
+
+    model_service = TaskService(
+        tmp_path / "model", tools=ToolRegistry(), gateway_factory=TransportFactory())
+    model_package = controlled_package("""def execute(payload, context):
+    context.ask('worker', 'attempt', max_tokens=8)
+    return {'deliverables': {}}
+""")
+    model = model_service.create("model failure", package=model_package, deliverables=result_spec())
+    model_result = model_service.run(model["id"])
+    assert model_result["status"] == "failed"
+    assert model_result["failure_domain"] == "infrastructure"
+
+    agent_service = TaskService(tmp_path / "agent", tools=ToolRegistry())
+    agent_package = controlled_package("""def execute(payload, context):
+    raise RuntimeError('agent implementation failed')
+""")
+    agent = agent_service.create("agent failure", package=agent_package, deliverables=result_spec())
+    agent_result = agent_service.run(agent["id"])
+    assert agent_result["status"] == "failed"
+    assert agent_result["failure_domain"] == "agent"
+
+    protocol_package = controlled_package("""def execute(payload, context):
+    return {'unexpected': True}
+""")
+    protocol = agent_service.create(
+        "protocol failure", package=protocol_package, deliverables=result_spec())
+    protocol_result = agent_service.run(protocol["id"])
+    assert protocol_result["status"] == "failed"
+    assert protocol_result["failure_domain"] == "protocol"
+
+
 def test_task_registration_rejects_external_schema_refs_and_accepts_local_definitions(tmp_path):
     service = TaskService(tmp_path, tools=ToolRegistry())
     for keyword in ("$ref", "$dynamicRef"):
@@ -152,6 +212,7 @@ def test_unknown_started_model_rpc_requires_user_recovery_without_repeating_mode
     service.store.rpc_start(state["id"], "rpc.1", request)
     result = service.run(state["id"])
     assert result["status"] == "waiting_input"
+    assert result["failure_domain"] == "infrastructure"
     assert gateway.calls == []
     assert service.store.rpc_find(state["id"], "rpc.1", request)["status"] == "started"
     assert "Unfinished" in result["last_error"] or "Recovery" in result["last_error"]
@@ -179,6 +240,7 @@ def test_delegated_interruption_resumes_same_child_and_preserves_paid_model_resu
                                    "max_tool_calls": 1, "max_nodes": 16})
     first = service.run(state["id"])
     assert first["status"] == "paused"
+    assert first["failure_domain"] == "infrastructure"
     assert len(first["children"]) == 1
     child_id = first["children"][0]["id"]
     request = {"method": "delegate", "params": first["nodes"]["rpc.1"]["request"],
@@ -273,6 +335,88 @@ def registered_benchmark_run(tmp_path, monkeypatch):
     return service, adapter, identity, registry
 
 
+def test_private_benchmark_registration_has_no_package_visible_enumeration_or_digest(tmp_path):
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    package = controlled_package("""def execute(payload, context):
+    artifact = context.publish({'context': payload['context']}, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+""")
+    candidates = [
+        {"benchmark_id": "tiny", "task_ref": {"id": index}, "snapshot": {"version": 1}}
+        for index in range(8)
+    ]
+    registration = candidates[3]
+    state = service.create(
+        "private registration", package=package, deliverables=result_spec(),
+        context={"memory_namespace": "study", "split": "final_holdout"},
+        benchmark_registration=registration,
+    )
+    result = service.run(state["id"])
+    visible = service.store.read(result["output_refs"]["result"], state["id"])["content"]["context"]
+    encoded = json.dumps(visible, sort_keys=True)
+    assert visible == {"memory_namespace": "study", "split": "final_holdout"}
+    assert "benchmark_registration" not in encoded
+    assert all(digest(candidate) not in encoded for candidate in candidates)
+    assert service.store.benchmark_registration(state["id"]) == registration
+
+
+def test_final_holdout_delegate_inherits_only_public_context_whitelist(tmp_path):
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    package = controlled_package("""def execute(payload, context):
+    if payload['objective'] == 'inspect delegated context':
+        artifact = context.publish({'context': payload['context']}, name='result')
+        return {'deliverables': {'result': artifact['id']}}
+    child = context.delegate({
+        'objective': 'inspect delegated context',
+        'context': {
+            'benchmark_registration_digest': 'guessed-low-entropy-marker',
+            'study_cell_id': 'package-controlled-cell'
+        },
+        'deliverables': [{'name': 'result', 'schema': {'type': 'object'}}]
+    })
+    return {'deliverables': {'result': child['output_refs']['result']}}
+""")
+    registration = {
+        "benchmark_id": "private-benchmark",
+        "task_ref": {"id": "private-task"},
+        "snapshot": {"version": 1},
+    }
+    parent_context = {
+        "memory_namespace": "confirmatory-study",
+        "split": "final_holdout",
+        "split_role": "final_holdout",
+        "memory_writeback": False,
+        "rsi_role": "confirmatory_holdout",
+        "study_plan_id": "private-plan-id",
+        "study_cell_id": "private-cell-id",
+        "provider_requirement": "private-provider",
+        "model_requirement": "private-model",
+        "monitoring_registration": {"private": True},
+    }
+    parent = service.create(
+        "delegate final holdout", package=package, deliverables=result_spec(),
+        context=parent_context, benchmark_registration=registration,
+    )
+    result = service.run(parent["id"])
+    assert result["status"] == "completed", result.get("last_error")
+    assert len(result["children"]) == 1
+    child = service.get(result["children"][0]["id"])
+    expected = {
+        "memory_namespace": "confirmatory-study",
+        "split": "final_holdout",
+        "split_role": "final_holdout",
+        "memory_writeback": False,
+        "rsi_role": "confirmatory_holdout",
+    }
+    assert child["task"]["context"] == expected
+    assert service.store.benchmark_registration(child["id"]) is None
+    delivered = service.store.read(result["output_refs"]["result"], parent["id"])["content"]
+    assert delivered["context"] == expected
+    assert not ({"study_plan_id", "study_cell_id", "provider_requirement",
+                 "model_requirement", "monitoring_registration",
+                 "benchmark_registration_digest"} & set(delivered["context"]))
+
+
 def test_incomplete_benchmark_is_unavailable_without_calling_evaluator(tmp_path, monkeypatch):
     service, adapter, identity, registry = registered_benchmark_run(tmp_path, monkeypatch)
     state = service.get(identity)
@@ -287,9 +431,11 @@ def test_incomplete_benchmark_is_unavailable_without_calling_evaluator(tmp_path,
 def test_benchmark_registration_is_frozen_and_resume_invalidates_then_explicitly_reevaluates(tmp_path, monkeypatch):
     service, adapter, identity, registry = registered_benchmark_run(tmp_path, monkeypatch)
     state = service.get(identity)
-    registration = state["task"]["context"]["benchmark_registration"]
+    registration = service.store.benchmark_registration(identity)
     assert registration == {"benchmark_id": adapter.id,
                             "task_ref": adapter.tasks()[0], "snapshot": adapter.snapshot()}
+    assert "benchmark_registration" not in state["task"]["context"]
+    assert "benchmark_registration_digest" not in state["task"]["context"]
     resumed_service = TaskService(tmp_path, tools=registry)
     resumed = resumed_service.run(identity)
     assert resumed["status"] == "completed"

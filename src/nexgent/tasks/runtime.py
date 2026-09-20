@@ -14,14 +14,17 @@ from jsonschema import Draft202012Validator
 
 from ..kernel.programs import digest
 from ..kernel.store import BudgetExhausted
-from ..models.gateway import ModelGateway
+from ..models.gateway import ModelGateway, ModelTransportError
 from .package_runner import CapabilityAbort, run_package
-from .packages import verify_package
+from .packages import PackageError, verify_package
 from .store import EpisodeStore, RecoveryRequired, StateConflict
 from .tools import ContractError, ToolRegistry, task_benchmarks, validate
 
 
 _EFFECT_CLASSES = frozenset({"read", "artifact_write", "local_compute", "external_compute"})
+_DELEGATED_PUBLIC_CONTEXT_FIELDS = frozenset({
+    "memory_namespace", "split", "split_role", "memory_writeback", "rsi_role",
+})
 
 
 class _CompositePending(Exception):
@@ -64,6 +67,44 @@ def _json_copy(value, *, label):
         return json.loads(json.dumps(value, ensure_ascii=False, allow_nan=False))
     except (TypeError, ValueError, RecursionError) as exc:
         raise ContractError(f"{label} must be finite JSON: {str(exc)[:800]}") from None
+
+
+def _delegated_public_context(context):
+    """Project only explicitly public policy fields into a delegated TaskSpec."""
+    if not isinstance(context, dict):
+        return {}
+    return {key: deepcopy(context[key])
+            for key in _DELEGATED_PUBLIC_CONTEXT_FIELDS if key in context}
+
+
+def _capability_failure_domain(method, exc):
+    """Classify a failed host RPC without treating unknown host faults as agent faults."""
+    cause = exc.cause if isinstance(exc, CapabilityAbort) else exc
+    if isinstance(cause, (RecoveryRequired, ModelTransportError, OSError, TimeoutError,
+                          StateConflict)):
+        return "infrastructure"
+    if isinstance(cause, BudgetExhausted):
+        return "agent"
+    if isinstance(cause, (ContractError, PermissionError, KeyError, TypeError, ValueError)):
+        return "protocol"
+    if method in {"ask", "tool"}:
+        return "infrastructure"
+    return "infrastructure"
+
+
+def _terminal_failure_domain(exc, observed_domains):
+    """Return a fail-closed terminal domain for one unsuccessful Episode."""
+    if "infrastructure" in observed_domains:
+        return "infrastructure"
+    if "protocol" in observed_domains:
+        return "protocol"
+    if "agent" in observed_domains:
+        return "agent"
+    if isinstance(exc, PackageError):
+        return "agent"
+    if isinstance(exc, (ContractError, PermissionError, KeyError, TypeError, ValueError)):
+        return "protocol"
+    return "infrastructure"
 
 
 class ToolContext:
@@ -145,7 +186,7 @@ class TaskService:
 
     def create(self, objective, inputs=None, deliverables=None, budget=None, capabilities=None,
                package=None, context=None, *, constraints=None, entry="execute", parent_episode_id=None,
-               package_channel=None):
+               package_channel=None, benchmark_registration=None):
         if not isinstance(objective, str) or not objective.strip() or len(objective) > 20000:
             raise ContractError("Task objective must be nonempty and at most 20000 characters")
         if package is not None and package_channel is not None:
@@ -170,11 +211,19 @@ class TaskService:
             self.tools.get(name)
         inputs = {} if inputs is None else _json_copy(inputs, label="Task inputs")
         context = {} if context is None else _json_copy(context, label="Task context")
+        benchmark_registration = (None if benchmark_registration is None else
+                                  _json_copy(benchmark_registration,
+                                             label="Benchmark registration"))
         constraints = {} if constraints is None else _json_copy(constraints, label="Task constraints")
         budget = {} if budget is None else _json_copy(budget, label="Task budget")
         if (not isinstance(inputs, dict) or not isinstance(context, dict)
                 or not isinstance(constraints, dict) or not isinstance(budget, dict)):
             raise ContractError("Task inputs, context, constraints and budget must be JSON objects")
+        if "benchmark_registration" in context or "benchmark_registration_digest" in context:
+            raise ContractError("Benchmark registration context is host-owned")
+        if benchmark_registration is not None:
+            if not isinstance(benchmark_registration, dict):
+                raise ContractError("Benchmark registration must be a JSON object")
         if package_registration is not None:
             if "package_channel_registration" in context:
                 raise ContractError("Package channel registration context is host-owned")
@@ -206,7 +255,9 @@ class TaskService:
                 "deliverables": deliverables, "budget": budget, "capabilities": capabilities,
                 "context": context, "constraints": constraints, "entry": entry,
                 "tools": self.tools.describe(capabilities)}
-        episode = self.store.create(task, package, parent_episode_id)
+        episode = self.store.create(
+            task, package, parent_episode_id,
+            benchmark_registration=benchmark_registration)
         refs = {}
         for name, value in task["inputs"].items():
             artifact = self.store.publish(episode["id"], value, name=name, scope="tree", node_id="input")
@@ -234,7 +285,8 @@ class TaskService:
             if state["status"] == "cancelled":
                 raise ContractError("A cancelled task needs a new task identity")
             package = self.store.package(state["package_id"])
-            self._change(identity, lambda s: s.update(status="running", last_error=None))
+            self._change(identity, lambda s: s.update(
+                status="running", last_error=None, failure_domain=None))
             self.store.event(identity, "episode_started", {"package_digest": package["digest"], "resume": bool(state["nodes"])})
 
             def notify():
@@ -248,6 +300,7 @@ class TaskService:
                            skills=deepcopy(package["manifest"].get("skills", {})))
             counter = [0]
             recovery_errors = []
+            failure_domains = []
 
             def handle(method, params):
                 counter[0] += 1
@@ -258,11 +311,20 @@ class TaskService:
                     # host-side signal so an uncertain admitted call cannot be
                     # misclassified as an ordinary package failure.
                     recovery_errors.append(str(exc))
+                    failure_domains.append("infrastructure")
                     raise CapabilityAbort(exc) from exc
                 except InterruptedError as exc:
+                    failure_domains.append("infrastructure")
                     raise CapabilityAbort(exc) from exc
                 except (BudgetExhausted, StateConflict) as exc:
+                    failure_domains.append(_capability_failure_domain(method, exc))
                     raise CapabilityAbort(exc) from exc
+                except CapabilityAbort as exc:
+                    failure_domains.append(_capability_failure_domain(method, exc))
+                    raise
+                except Exception as exc:
+                    failure_domains.append(_capability_failure_domain(method, exc))
+                    raise
 
             notify()
             try:
@@ -271,15 +333,21 @@ class TaskService:
                                         max_rpc=512, max_instructions=5_000_000)
                 self._complete(identity, execution)
             except InterruptedError as exc:
-                self._change(identity, lambda s: s.update(status="paused", last_error=str(exc)))
+                self._change(identity, lambda s: s.update(
+                    status="paused", last_error=str(exc), failure_domain="infrastructure"))
             except RecoveryRequired as exc:
-                self._change(identity, lambda s: s.update(status="waiting_input", last_error=str(exc)))
+                self._change(identity, lambda s: s.update(
+                    status="waiting_input", last_error=str(exc), failure_domain="infrastructure"))
             except Exception as exc:
                 if recovery_errors:
-                    self._change(identity, lambda s: s.update(status="waiting_input", last_error=recovery_errors[-1]))
+                    self._change(identity, lambda s: s.update(
+                        status="waiting_input", last_error=recovery_errors[-1],
+                        failure_domain="infrastructure"))
                 else:
+                    failure_domain = _terminal_failure_domain(exc, failure_domains)
                     self._change(identity, lambda s: s.update(status="paused" if stop_event.is_set() else "failed",
-                        last_error=f"{type(exc).__name__}: {str(exc)[:1200]}"))
+                        last_error=f"{type(exc).__name__}: {str(exc)[:1200]}",
+                        failure_domain=failure_domain))
             finally:
                 self.store.event(identity, "episode_finished", {"status": self.store.get(identity)["status"]})
                 notify()
@@ -303,7 +371,8 @@ class TaskService:
                    "limitations": value.get("limitations", []), "summary": value.get("summary", ""),
                    "schema_validation": "passed"}
         self._change(identity, lambda s: s.update(status="completed", output_refs=refs, outcome=outcome,
-                                                   execution=execution["execution"], evaluation=None))
+                                                   execution=execution["execution"], evaluation=None,
+                                                   failure_domain=None))
 
     def _publish(self, identity, path, content, name, schema, input_refs=None):
         state = self.store.get(identity)
@@ -545,7 +614,8 @@ class TaskService:
                     inputs[name] = self.store.read(ref, identity)["content"]
                 child = self.create(task["objective"], inputs, task.get("deliverables"),
                     capabilities=task.get("capabilities", state["capabilities"]), package=target,
-                    context=state["task"].get("context"), constraints=state["task"].get("constraints"),
+                    context=_delegated_public_context(state["task"].get("context")),
+                    constraints=state["task"].get("constraints"),
                     parent_episode_id=identity)
                 child_id = child["id"]
 
@@ -617,12 +687,12 @@ class TaskService:
             context = deepcopy(task_ref.get("context") or {})
             if not isinstance(context, dict):
                 raise ContractError("Benchmark task context must be a JSON object")
-            context["benchmark_registration"] = {"benchmark_id": benchmark_id,
-                                                   "task_ref": deepcopy(task_ref),
-                                                   "snapshot": deepcopy(snapshot)}
+            registration = {"benchmark_id": benchmark_id,
+                            "task_ref": deepcopy(task_ref),
+                            "snapshot": deepcopy(snapshot)}
             state = self.create(task_ref["objective"], task_ref.get("inputs"), task_ref.get("deliverables"), budget,
                 task_ref.get("capabilities"), package, context, constraints=task_ref.get("constraints"),
-                package_channel=package_channel)
+                package_channel=package_channel, benchmark_registration=registration)
             self.run(state["id"], stop_event=stop_event)
             reports.append(self._evaluate_registered(state["id"], adapters))
             if stop_event is not None and stop_event.is_set():
@@ -646,7 +716,7 @@ class TaskService:
         state = self.store.get(identity)
         snapshot = _json_copy(adapter.snapshot() if snapshot is None else snapshot, label="Benchmark snapshot")
         task_ref = _json_copy(task_ref, label="Benchmark task")
-        registration = state["task"].get("context", {}).get("benchmark_registration")
+        registration = self.store.benchmark_registration(identity)
         if registration is not None:
             if (not isinstance(registration, dict)
                     or getattr(adapter, "id", None) != registration.get("benchmark_id")
@@ -681,7 +751,7 @@ class TaskService:
 
     def _evaluate_registered(self, identity, adapters):
         state = self.store.get(identity)
-        registration = state["task"].get("context", {}).get("benchmark_registration")
+        registration = self.store.benchmark_registration(identity)
         if not isinstance(registration, dict):
             raise ContractError("Task has no frozen benchmark registration")
         benchmark_id = registration.get("benchmark_id")

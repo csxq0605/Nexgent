@@ -79,6 +79,8 @@ class EpisodeStore:
                     id TEXT PRIMARY KEY, episode TEXT, data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS task_snapshots(
                     id TEXT PRIMARY KEY, episode TEXT, data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS task_benchmark_registrations(
+                    episode TEXT PRIMARY KEY, data TEXT NOT NULL, digest TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS task_rpc(
                     episode TEXT, call_path TEXT, data TEXT NOT NULL,
                     PRIMARY KEY(episode,call_path));
@@ -100,8 +102,10 @@ class EpisodeStore:
             raise KeyError(episode_id)
         return json.loads(row[0])
 
-    def create(self, task, package, parent_episode_id=None):
+    def create(self, task, package, parent_episode_id=None, *, benchmark_registration=None):
         task = deepcopy(task)
+        benchmark_registration = (None if benchmark_registration is None
+                                  else deepcopy(benchmark_registration))
         if not isinstance(task, dict) or not isinstance(task.get("objective"), str) or not task["objective"].strip():
             raise ValueError("A task requires a nonempty objective")
         if not isinstance(task.get("inputs", {}), dict):
@@ -145,8 +149,25 @@ class EpisodeStore:
                        "budget": deepcopy(limits), "capabilities": deepcopy(capabilities),
                        "created_at": now, "updated_at": now}
             db.execute("INSERT INTO task_episodes VALUES(?,?,?,?)", (episode_id, root_id, now, _json(episode)))
+            if benchmark_registration is not None:
+                encoded = _json(benchmark_registration)
+                db.execute("INSERT INTO task_benchmark_registrations VALUES(?,?,?)",
+                           (episode_id, encoded, _digest(benchmark_registration)))
             self._event(db, episode_id, "task_registered", {"task": task, "package_digest": package["digest"]})
         return episode
+
+    def benchmark_registration(self, episode_id):
+        with self.connect() as db:
+            self._get(db, episode_id)
+            row = db.execute(
+                "SELECT data,digest FROM task_benchmark_registrations WHERE episode=?",
+                (episode_id,)).fetchone()
+        if row is None:
+            return None
+        value = json.loads(row[0])
+        if _digest(value) != row[1]:
+            raise ValueError("Benchmark registration digest mismatch")
+        return value
 
     def get(self, episode_id):
         with self.connect() as db:

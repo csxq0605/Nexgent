@@ -1,6 +1,6 @@
 # 任务运行与恢复
 
-> 适用版本：0.9。P1 任务运行器已经实现；P2 OpenFOAM 独立 Re=10 smoke 已实现并真实通过；P3 反馈驱动包演化控制面和 P4 递归改进器确定性机制闭环已实现。真实模型效果、统计 RSI 效益与 P5 冻结研究仍未建立。0.8 研究接口保留在本文末尾。
+> 适用版本：0.9。P1 任务运行器已经实现；P2 OpenFOAM 独立 Re=10 smoke 已实现并真实通过；P3 反馈驱动包演化控制面和 P4 递归改进器确定性机制闭环已实现；P5 冻结研究执行器已实现。真实模型效果、统计 RSI 效益与正式外部研究仍未建立。0.8 研究接口保留在本文末尾。
 
 ## 项目、模型与入口
 
@@ -100,6 +100,24 @@ python -m nexgent rsi-improver-events recursive --limit 50
 ```
 
 GUI 同时显示任务智能体与递归改进器通道。两个通道使用独立存储和 revision，不能互相替代。当前 meta/guard 明确要求空 memory 起点；provider/model 要求会与实际 model receipt 核对。完整 API、状态机、确定性结果和研究限制见[P4 递归控制面](design/p4-recursive-improver-control-plane.md)。
+
+## P5 final-holdout 研究
+
+`RSIStudyService` 在候选生成、selection、promotion 与 guard 之后运行。它不改变 package channel，只比较两个冻结 AgentPackage：
+
+```powershell
+python -m nexgent rsi-study-plan workbench `
+  --baseline-package a0.json --candidate-package a1.json `
+  --seeds 101 202 303 404 505 606 `
+  --provider PROVIDER --model PINNED_MODEL `
+  --max-calls 20 --max-completion-tokens 80000 --max-tool-calls 20 --max-nodes 100 `
+  --policy study-policy.json
+python -m nexgent rsi-study-run PLAN_ID workbench
+python -m nexgent rsi-study-assess RUN_ID workbench
+python -m nexgent rsi-study-list --limit 20
+```
+
+plan 只接受 `final_holdout`；插件必须为每个任务给出唯一 `statistical_unit_id` 和来源 `cluster_id`。每个 cell 从空 memory 开始并禁止 writeback，完整 evaluator/snapshot/task 注册只留在宿主私有表，真实执行后由冻结插件评价。停止后继续同一 plan 会恢复原 cell，不重新抽样。缺测完整保留，engineering gate 与 statistical support 分开；统计检验按 cluster 聚合，task digest 只校验完整性。正式效果研究还必须冻结外部 benchmark commit/data/container、工具与评价器 artifact、来源组 split、provider 实际模型 revision、网络策略和跨 family 统计；现有 Workbench 与 OpenFOAM 不能单独授权通用 RSI 结论。见[P5 研究协议](research/p5-preregistered-rsi-study.md)和[机器可读预注册 schema](../experiments/p5/registration.schema.json)。
 
 `build_rsi_mechanism_evidence(...)` / `export_rsi_mechanism_evidence(...)` 可在 Python 中核验一条已经完成的闭环并导出 `nexgent.rsi-mechanism-evidence.v1`。导出只含 package/episode/record identity、digest、usage、gate、聚合测量和事件链引用，不含包源码或 evaluator 私有内容。当前确定性 pilot 使用固定无模型 fixture 覆盖了生成、selection、晋升、后续通道加载、guard 退化、回滚和回滚后加载；它的 claim 固定为 `deterministic_mechanism_closure_only`。
 

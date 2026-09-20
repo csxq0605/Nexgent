@@ -19,7 +19,7 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
 | P3 跨任务行为更新 | 反馈绑定候选生成、配对门控、通道晋升、监测/回滚及脱敏机制证据导出已实现；确定性闭环不代表真实模型效果或统计效益 |
 | P4 改进过程可更新与递归执行 | 独立 R archive/channel、自更新、真实后代元评测、预登记 guard 与自动回滚已形成确定性机制闭环；真实模型与统计效益待检验 |
-| P5 冻结研究和完整产品验收 | 待实现与检验 |
+| P5 冻结研究和完整产品验收 | 通用 final-holdout 配对研究执行器、预注册 schema 与脱敏信息窗已实现；正式外部多任务族研究尚未登记或执行 |
 | 0.8 源码执行、自修改、历史 benchmark 与研究窗口 | 保留；其证据不替代 0.9 P1 或 P2–P5 验收 |
 
 ### 设计阅读入口
@@ -29,6 +29,7 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 - [论文方法到设计与实验](docs/research/agent-orchestration-rsi-synthesis-20260916.md)：AutoSci、ADAS、AFlow、DGM、Hyperagents、STOP 的采用方式与边界。
 - [P3 反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)：当前实现对象、完整状态流、CLI/GUI、信任边界和证据等级。
 - [P4 递归改进器控制面](docs/design/p4-recursive-improver-control-plane.md)：R 自更新、后代效用元评测、独立通道、guard 与结论边界。
+- [P5 预注册 RSI 研究](docs/research/p5-preregistered-rsi-study.md)：证据等级、实验臂、外部 benchmark 矩阵、防泄漏、缺测与统计职责。
 - [P3 跨任务 RSI 研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)：一手论文方法、可证伪假设、对照和冻结试验协议。
 - [P1 真实 Provider 验证](docs/research/task-runtime-validation-20260920.md)：实际 episode、token 与节点用量、供应商失败、重复调用阻断和未通过项。
 - [OpenFOAM 独立 demo](docs/demos/openfoam-cfd-design.md)、[本机环境](docs/demos/openfoam-environment-20260916.md)、[真实 smoke 验证](docs/demos/openfoam-smoke-validation-20260920.md)与[机器可读收据摘要](docs/demos/openfoam-smoke-receipt-20260920.json)：任务设计、版本适配、实际执行证据和结论边界。
@@ -102,6 +103,7 @@ python -m venv .venv
 .venv\Scripts\python.exe -m nexgent rsi-events general --limit 50
 .venv\Scripts\python.exe -m nexgent rsi-improver-status recursive
 .venv\Scripts\python.exe -m nexgent rsi-improver-events recursive --limit 50
+.venv\Scripts\python.exe -m nexgent rsi-study-list --limit 20
 
 # 显式、分阶段执行 P3 闭环；每一步输出下一步所需的不可变 ID/digest
 .venv\Scripts\python.exe -m nexgent rsi-register general --package parent-package.json
@@ -126,6 +128,8 @@ python -m venv .venv
 ```
 
 `--capability` 可重复授予已安装工具；`--package` 接受 AgentPackage JSON，`--package-channel` 在任务创建时原子解析当前 active 包，两者互斥。预算选项包括 `--max-calls`、`--max-completion-tokens`、`--max-tool-calls` 和 `--max-nodes`。没有传入时使用运行器的有界默认值。输入、包和任务合同无效时，命令会在执行前失败。
+
+正式 final-holdout 比较使用 `rsi-study-plan` 冻结两个包、宿主私有 benchmark snapshot、显式统计单位/来源 cluster、seed、provider/model revision、执行环境、完整预算与统计政策，再依次执行 `rsi-study-run` 和 `rsi-study-assess`。统计检验按独立 cluster 聚合；模型供应商只返回滚动别名时，报告保持时间窗口内的 benchmark 局部结论。`rsi-study-list` 与 GUI 只显示脱敏摘要。当前没有外部多任务族正式结果；确定性 study pilot 只验证研究控制面。
 
 P3 的每个写操作都有独立 CLI 和 Python API；P4 的递归写操作保留为显式 Python 控制面，必须依次形成 meta feedback、R self-generation、meta trial/decision、guard plan 和 promotion，不能“一键跳过门控”。GUI 的“RSI 与版本”页保持只读。`rsi-*` 输出不暴露 AgentPackage 源文件、私有任务内容或 evaluator 实现。操作顺序见[运行与恢复](docs/operations.md)，完整合同见[P3 控制面设计](docs/design/p3-feedback-evolution-control-plane.md)与[P4 递归控制面](docs/design/p4-recursive-improver-control-plane.md)。
 
