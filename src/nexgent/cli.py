@@ -13,6 +13,7 @@ TASK_COMMANDS = {
     "rsi-status", "rsi-events", "rsi-register", "rsi-feedback", "rsi-generate",
     "rsi-plan", "rsi-run-plan", "rsi-assess", "rsi-plan-monitor", "rsi-promote",
     "rsi-run-monitor", "rsi-monitor", "rsi-rollback",
+    "rsi-cycle-start", "rsi-cycle-resume", "rsi-cycle-show", "rsi-cycle-recover",
     "rsi-improver-status", "rsi-improver-events",
     "rsi-study-plan", "rsi-study-run", "rsi-study-assess", "rsi-study-list",
 }
@@ -194,6 +195,56 @@ def _run_task_command(args):
         from .tasks.evolution_view import public_evolution_event
 
         evolution = EvolutionService(service)
+        if args.command.startswith("rsi-cycle-"):
+            from .tasks.cycles import RSICycleService
+            from .tasks.generation import GenerationService
+
+            cycles = RSICycleService(
+                service, evolution, GenerationService(service, evolution))
+            if args.command == "rsi-cycle-show":
+                return cycles.public(args.cycle_id)
+            if args.command == "rsi-cycle-recover":
+                cycles.recover(
+                    args.cycle_id,
+                    confirm_no_external_commit=args.confirm_no_external_commit)
+                return cycles.public(args.cycle_id)
+            if args.command == "rsi-cycle-resume":
+                cycle = cycles.get(args.cycle_id)
+                selection = _task_benchmark(cycle["selection"]["benchmark_id"])
+                guard = _task_benchmark(cycle["guard"]["benchmark_id"])
+                cycles.resume(
+                    args.cycle_id, selection, guard, stop_event=_stop_event())
+                return cycles.public(args.cycle_id)
+            benchmark = _task_benchmark(args.benchmark)
+            if args.improver_package in {None, "builtin:reference-os-v1"}:
+                from .tasks.improver_seed import default_improver_package
+                improver = default_improver_package()
+            else:
+                improver = _object_argument(
+                    args.improver_package, label="improver package")
+            cycle = cycles.create(
+                channel=args.channel, feedback_episode_ids=args.episode_ids,
+                improver_package=improver,
+                mutation_policy=_object_argument(
+                    args.mutation_policy, label="mutation policy"),
+                expected_revision=args.expected_revision,
+                selection_adapter=benchmark, guard_adapter=benchmark,
+                selection_seed=args.selection_seed, guard_seed=args.guard_seed,
+                generation_budget=(_object_argument(
+                    args.generation_budget, label="generation budget")
+                    if args.generation_budget else None),
+                selection_budget=(_object_argument(
+                    args.selection_budget, label="selection budget")
+                    if args.selection_budget else None),
+                guard_budget=(_object_argument(
+                    args.guard_budget, label="guard budget")
+                    if args.guard_budget else None),
+                policy=_promotion_policy(args.policy),
+                rollback_on_regression=not args.no_rollback)
+            if not args.register_only:
+                cycles.run(
+                    cycle["id"], benchmark, benchmark, stop_event=_stop_event())
+            return cycles.public(cycle["id"])
         if args.command == "rsi-status":
             return _public_active_result(evolution.active(args.channel))
         if args.command == "rsi-events":
@@ -326,6 +377,11 @@ def _task_failed(command, result):
     if command == "task-benchmark":
         reports = result.get("reports", [])
         return any(report.get("evaluation", {}).get("accepted") is not True for report in reports)
+    if command in {"rsi-cycle-start", "rsi-cycle-resume", "rsi-cycle-recover"}:
+        return (result.get("status") in
+                {"generation_missing", "rejected", "guard_failed", "rolled_back"}
+                or result.get("runner", {}).get("status") in
+                {"paused", "recovery_required"})
     return False
 
 
@@ -446,6 +502,45 @@ def main(argv=None):
     rsi_rollback = sub.add_parser("rsi-rollback", help="Roll back one promoted package edge")
     rsi_rollback.add_argument("channel")
     rsi_rollback.add_argument("reason")
+
+    rsi_cycle_start = sub.add_parser(
+        "rsi-cycle-start", help="Register and normally execute one complete RSI cycle")
+    rsi_cycle_start.add_argument("channel")
+    rsi_cycle_start.add_argument("benchmark")
+    rsi_cycle_start.add_argument("episode_ids", nargs="+")
+    rsi_cycle_start.add_argument("--expected-revision", type=int, required=True)
+    rsi_cycle_start.add_argument("--mutation-policy", required=True,
+                                 help="Mutation policy JSON object, file path, or @file")
+    rsi_cycle_start.add_argument(
+        "--improver-package",
+        help="Improver AgentPackage JSON, file, or builtin:reference-os-v1; defaults to builtin")
+    rsi_cycle_start.add_argument("--selection-seed", type=int, default=0)
+    rsi_cycle_start.add_argument("--guard-seed", type=int, default=0)
+    rsi_cycle_start.add_argument("--generation-budget",
+                                 help="Generation budget JSON object, file path, or @file")
+    rsi_cycle_start.add_argument("--selection-budget",
+                                 help="Selection budget JSON object, file path, or @file")
+    rsi_cycle_start.add_argument("--guard-budget",
+                                 help="Guard budget JSON object, file path, or @file")
+    rsi_cycle_start.add_argument("--policy",
+                                 help="Promotion policy JSON object, file path, or @file")
+    rsi_cycle_start.add_argument("--no-rollback", action="store_true",
+                                 help="Record guard degradation without automatic rollback")
+    rsi_cycle_start.add_argument("--register-only", action="store_true",
+                                 help="Persist the frozen cycle without running it")
+
+    rsi_cycle_resume = sub.add_parser(
+        "rsi-cycle-resume", help="Resume a persisted RSI cycle")
+    rsi_cycle_resume.add_argument("cycle_id")
+    rsi_cycle_show = sub.add_parser(
+        "rsi-cycle-show", help="Show a public RSI cycle projection")
+    rsi_cycle_show.add_argument("cycle_id")
+    rsi_cycle_recover = sub.add_parser(
+        "rsi-cycle-recover", help="Recover an interrupted RSI cycle claim")
+    rsi_cycle_recover.add_argument("cycle_id")
+    rsi_cycle_recover.add_argument(
+        "--confirm-no-external-commit", action="store_true",
+        help="Allow retry only after externally confirming the pending action did not commit")
 
     rsi_study_plan = sub.add_parser(
         "rsi-study-plan", help="Pre-register a paired final-holdout RSI study")

@@ -39,7 +39,23 @@ P3 管理通用 `AgentPackage` 的行为版本，不理解 OpenFOAM、科学发�
 
 Python API 与 CLI 都保留分步对象，调用方必须显式保存每个 immutable record。GUI 提供安全只读信息；CLI 提供同样受门控的逐步操作：
 
-后端另提供 `RSICycleService.create/run/resume/recover`，可按冻结计划连续推进上述步骤，并在每个边界持久 checkpoint。它仍保留所有分步 immutable record；`generation_missing`、`rejected`、`guard_failed` 和 `rolled_back` 是正常可审计终态。无法判断某次外部动作是否提交时，cycle 不会自动重放。CLI 与 GUI 的 cycle 入口将在下一阶段接入。
+`RSICycleService.create/run/resume/recover` 可按冻结计划连续推进上述步骤，并在每个边界持久 checkpoint。它仍保留所有分步 immutable record；`generation_missing`、`rejected`、`guard_failed` 和 `rolled_back` 是正常可审计终态。无法判断某次外部动作是否提交时，cycle 不会自动重放。
+
+正常产品入口如下；`start` 默认创建后运行完整 cycle，`--register-only` 只冻结计划。三个阶段预算分别接收 JSON 对象或文件。`resume` 根据持久记录解析并复核 selection/guard benchmark snapshot；四个命令只输出公开投影。
+
+```powershell
+python -m nexgent rsi-cycle-start general workbench DEVELOPMENT_EPISODE_ID `
+  --expected-revision 0 `
+  --mutation-policy examples/rsi/reference-os-mutation-policy.json `
+  --generation-budget '{"max_model_calls":1,"max_completion_tokens":8000}' `
+  --selection-budget '{"max_model_calls":8,"max_nodes":80}' `
+  --guard-budget '{"max_model_calls":4,"max_nodes":40}'
+python -m nexgent rsi-cycle-show RSI_CYCLE_ID
+python -m nexgent rsi-cycle-resume RSI_CYCLE_ID
+python -m nexgent rsi-cycle-recover RSI_CYCLE_ID
+```
+
+`recover` 只会自动关联已经唯一落盘的 paired/monitor run。若公开状态为 `recovery_required`，命令返回非零；只有外部核对确认 pending action 未提交后，才使用 `--confirm-no-external-commit` 允许重试。默认 GUI 的“RSI 与版本”页可输入 cycle ID 查看同一公开投影，不提供绕过门控的写操作。
 
 ```powershell
 # --package 与 --package-channel 互斥

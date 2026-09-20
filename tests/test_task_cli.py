@@ -327,6 +327,125 @@ def test_rsi_generate_uses_builtin_reference_improver_when_unspecified(
     assert json.loads(capsys.readouterr().out)["status"] == "missing"
 
 
+def test_rsi_cycle_commands_freeze_inputs_run_resume_and_emit_only_public_state(
+        monkeypatch, task_service, tmp_path, capsys):
+    calls = []
+    adapter = object()
+    records = {}
+
+    class FakeEvolution:
+        def __init__(self, service):
+            assert service is task_service
+
+    class FakeGeneration:
+        def __init__(self, service, evolution):
+            assert service is task_service and isinstance(evolution, FakeEvolution)
+
+    class FakeCycles:
+        def __init__(self, service, evolution, generation):
+            assert service is task_service
+            assert isinstance(evolution, FakeEvolution)
+            assert isinstance(generation, FakeGeneration)
+
+        def create(self, **kwargs):
+            identity = "rsi-cycle-explicit" if kwargs["improver_package"].get("id") == "R-explicit" else "rsi-cycle-1"
+            calls.append(("create", kwargs))
+            records[identity] = {
+                "id": identity, "status": "registered",
+                "selection": {"benchmark_id": "generic"},
+                "guard": {"benchmark_id": "generic"},
+                "mutation_policy": {"private": "must not print"}}
+            return records[identity]
+
+        def run(self, identity, selection, guard, **kwargs):
+            calls.append(("run", identity, selection, guard, kwargs))
+            records[identity]["status"] = "completed"
+            return records[identity]
+
+        def resume(self, identity, selection, guard, **kwargs):
+            calls.append(("resume", identity, selection, guard, kwargs))
+            records[identity]["status"] = "completed"
+            return records[identity]
+
+        def get(self, identity):
+            calls.append(("get", identity))
+            return records[identity]
+
+        def recover(self, identity, **kwargs):
+            calls.append(("recover", identity, kwargs))
+            if not kwargs.get("confirm_no_external_commit"):
+                records[identity]["status"] = "registered"
+                records[identity]["runner_status"] = "recovery_required"
+            return records[identity]
+
+        def public(self, identity):
+            calls.append(("public", identity))
+            return {"schema": "nexgent.rsi-cycle.v1", "id": identity,
+                    "status": records[identity]["status"],
+                    "selection": {"benchmark_id": "generic", "snapshot_digest": "s"},
+                    "guard": {"benchmark_id": "generic", "snapshot_digest": "g"},
+                    "refs": {}, "runner": {
+                        "status": records[identity].get("runner_status", "completed")}}
+
+    monkeypatch.setattr("nexgent.tasks.evolution.EvolutionService", FakeEvolution)
+    monkeypatch.setattr("nexgent.tasks.generation.GenerationService", FakeGeneration)
+    monkeypatch.setattr("nexgent.tasks.cycles.RSICycleService", FakeCycles)
+    monkeypatch.setattr("nexgent.tasks.tools.task_benchmarks", lambda: {"generic": adapter})
+
+    start = [
+        "--root", str(tmp_path), "rsi-cycle-start", "stable", "generic",
+        "episode-a", "episode-b", "--expected-revision", "4",
+        "--mutation-policy", '{"mutable_paths":["main.py"],"component_classes":{"main.py":"O"}}',
+        "--selection-seed", "17", "--guard-seed", "23",
+        "--generation-budget", '{"max_model_calls":1}',
+        "--selection-budget", '{"max_nodes":8}',
+        "--guard-budget", '{"max_tool_calls":3}',
+        "--policy", '{"min_quality_delta":0.2}',
+    ]
+    assert cli.main(start) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "completed"
+    assert "mutation_policy" not in output
+    created = calls[0][1]
+    assert created["channel"] == "stable"
+    assert created["feedback_episode_ids"] == ["episode-a", "episode-b"]
+    assert created["selection_adapter"] is adapter and created["guard_adapter"] is adapter
+    assert created["selection_seed"] == 17 and created["guard_seed"] == 23
+    assert created["generation_budget"] == {"max_model_calls": 1}
+    assert created["selection_budget"] == {"max_nodes": 8}
+    assert created["guard_budget"] == {"max_tool_calls": 3}
+    assert created["policy"].min_quality_delta == 0.2
+    assert created["improver_package"]["provenance"] == {
+        "origin": "nexgent.default-task-improver", "role": "R0"}
+    assert calls[1][0:4] == ("run", "rsi-cycle-1", adapter, adapter)
+
+    assert cli.main([
+        "--root", str(tmp_path), "rsi-cycle-start", "stable", "generic", "episode-c",
+        "--expected-revision", "4", "--mutation-policy", '{}',
+        "--improver-package", '{"id":"R-explicit"}', "--register-only"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "registered"
+    assert records["rsi-cycle-explicit"]["status"] == "registered"
+
+    assert cli.main(["--root", str(tmp_path), "rsi-cycle-resume", "rsi-cycle-1"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "completed"
+    assert any(call[0:4] == ("resume", "rsi-cycle-1", adapter, adapter) for call in calls)
+
+    assert cli.main(["--root", str(tmp_path), "rsi-cycle-show", "rsi-cycle-1"]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert "mutation_policy" not in shown
+    assert cli.main([
+        "--root", str(tmp_path), "rsi-cycle-recover", "rsi-cycle-1",
+        "--confirm-no-external-commit"]) == 0
+    recovered = json.loads(capsys.readouterr().out)
+    assert recovered["id"] == "rsi-cycle-1"
+    assert ("recover", "rsi-cycle-1", {"confirm_no_external_commit": True}) in calls
+
+    assert cli.main([
+        "--root", str(tmp_path), "rsi-cycle-recover", "rsi-cycle-1"]) == 1
+    unresolved = json.loads(capsys.readouterr().out)
+    assert unresolved["runner"]["status"] == "recovery_required"
+
+
 def test_rsi_command_errors_use_parser_failure(monkeypatch, task_service, tmp_path):
     monkeypatch.setattr("nexgent.tasks.tools.task_benchmarks", lambda: {})
 

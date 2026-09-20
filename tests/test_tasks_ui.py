@@ -123,6 +123,37 @@ def test_rsi_information_view_shows_versions_and_public_audit_only(qtbot, tmp_pa
     assert "private rubric" not in text and "hidden source" not in text and "hidden result" not in text
 
 
+def test_rsi_information_view_queries_public_cycle_projection(qtbot, tmp_path):
+    class FakeCycles:
+        def __init__(self):
+            self.requested = []
+
+        def public(self, identity):
+            self.requested.append(identity)
+            return {"schema": "nexgent.rsi-cycle.v1", "id": identity,
+                    "status": "guard_run", "refs": {"monitor_run_id": "monitor-run-1"},
+                    "selection": {"snapshot_digest": "selection-public"},
+                    "guard": {"snapshot_digest": "guard-public"}}
+
+        def get(self, identity):
+            raise AssertionError("GUI must not read the private cycle record")
+
+    service = FakeService()
+    cycles = FakeCycles()
+    ui = TaskWindow(
+        tmp_path, service=service, evolution=FakeEvolution(), cycles=cycles)
+    qtbot.addWidget(ui)
+    ui.show()
+    ui.rsi_cycle_id.setText("rsi-cycle-123")
+    qtbot.mouseClick(ui.rsi_cycle_refresh_button, Qt.MouseButton.LeftButton)
+
+    text = ui.rsi_view.toPlainText()
+    assert cycles.requested == ["rsi-cycle-123"]
+    assert "rsi-cycle-123" in text and "monitor-run-1" in text
+    assert "selection-public" in text and "guard-public" in text
+    assert "mutation_policy" not in text and "private cycle record" not in text
+
+
 def test_register_freeform_task_with_inputs_and_budget(qtbot, tmp_path):
     service = FakeService()
     ui = window(qtbot, tmp_path, service)

@@ -82,7 +82,7 @@ class TaskWorker(QThread):
 
 
 class TaskWindow(QMainWindow):
-    def __init__(self, project_root, service=None, evolution=None):
+    def __init__(self, project_root, service=None, evolution=None, cycles=None):
         super().__init__()
         self.project_root = Path(project_root).resolve()
         if service is None:
@@ -97,6 +97,12 @@ class TaskWindow(QMainWindow):
         if hasattr(service, "store"):
             from ..tasks.improvers import ImproverService
             self.improvers = ImproverService(service)
+        self.cycles = cycles
+        if self.cycles is None and hasattr(service, "store") and self.evolution is not None:
+            from ..tasks.cycles import RSICycleService
+            from ..tasks.generation import GenerationService
+            self.cycles = RSICycleService(
+                service, self.evolution, GenerationService(service, self.evolution))
         self.selected_id = None
         self.running_id = None
         self.worker = None
@@ -219,6 +225,15 @@ class TaskWindow(QMainWindow):
         rsi_controls.addWidget(self.improver_channel, 1)
         rsi_controls.addWidget(self.rsi_refresh_button)
         rsi_layout.addLayout(rsi_controls)
+        cycle_controls = QHBoxLayout()
+        cycle_controls.addWidget(QLabel("RSI cycle ID"))
+        self.rsi_cycle_id = QLineEdit()
+        self.rsi_cycle_id.setPlaceholderText("例如 rsi-cycle-…")
+        self.rsi_cycle_refresh_button = QPushButton("查询 cycle 状态")
+        self.rsi_cycle_refresh_button.clicked.connect(self.refresh_rsi)
+        cycle_controls.addWidget(self.rsi_cycle_id, 1)
+        cycle_controls.addWidget(self.rsi_cycle_refresh_button)
+        rsi_layout.addLayout(cycle_controls)
         rsi_layout.addWidget(QLabel("任务智能体与递归改进器使用独立通道；仅显示版本、决策、守卫和审计摘要。"))
         self.rsi_view = self._reader()
         rsi_layout.addWidget(self.rsi_view, 1)
@@ -337,8 +352,18 @@ class TaskWindow(QMainWindow):
             study_view = (public_study_records(self.service.store, 20)
                           if hasattr(self.service, "store")
                           else {"status": "unavailable"})
+            cycle_id = self.rsi_cycle_id.text().strip()
+            if not cycle_id:
+                cycle_view = {"status": "not_selected"}
+            elif self.cycles is None:
+                cycle_view = {"id": cycle_id, "status": "unavailable"}
+            else:
+                try:
+                    cycle_view = self.cycles.public(cycle_id)
+                except KeyError:
+                    cycle_view = {"id": cycle_id, "status": "not_found"}
             view = {"task_agent": task_view, "recursive_improver": improver_view,
-                    "confirmatory_studies": study_view,
+                    "confirmatory_studies": study_view, "cycle": cycle_view,
                     "claim_scope": "mechanism evidence; model and statistical effects separate"}
             self.rsi_view.setPlainText(json_text(view))
         except Exception as exc:

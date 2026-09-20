@@ -1,6 +1,6 @@
 # 可恢复 RSI Cycle 服务
 
-状态：0.9 后端服务已实现；CLI 与信息窗口接入属于下一阶段。
+状态：0.9 后端服务、CLI 与信息窗口只读投影已实现。
 
 `RSICycleService` 将一次跨任务行为改进保存为持久状态机，减少调用方在多个命令之间手工搬运 feedback、candidate、trial、decision 和 guard ID。它只编排已有控制面，不替代 `GenerationService`、`EvolutionService` 的不可变记录、独立评价和部署门控。
 
@@ -46,3 +46,13 @@ promotion 后的 guard 执行、评估和回滚都绑定 cycle 记录的 revisio
 `public()` 只返回状态、版本身份、benchmark/snapshot digest、证据 ID、聚合结果和错误类型。adapter snapshot、mutation policy、包内容、内部错误正文和 evaluator 私有内容不会进入公开投影。
 
 这些机制证明 cycle 编排、恢复和门控闭合；它们不证明真实模型候选更好，也不构成统计 RSI 效果。
+
+## 产品入口
+
+- `rsi-cycle-start` 冻结并默认执行完整 cycle，`--register-only` 只登记；
+- `rsi-cycle-resume` 从 checkpoint 继续并重新核验 benchmark snapshot；
+- `rsi-cycle-show` 只显示公开投影；
+- `rsi-cycle-recover` 处理硬中断，未能安全恢复时输出状态并返回非零；
+- GUI“RSI 与版本”页按 cycle ID 查询相同公开投影，不执行写操作。
+
+CLI 当前默认使用 `reference-os-v1` 或显式 improver package。通过 recursive improver channel 冻结 R revision 的 cycle 入口尚未接入。
