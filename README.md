@@ -12,14 +12,14 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 
 通用 `MemoryService` 现提供一个最小 M-data 生命周期：记忆 policy/data 分离、候选隔离、宿主冻结 selection、accepted/rejected/retired 状态、版本父系、CAS release 晋升/回滚，以及 Episode 创建时的原子快照。公开视图不包含记忆正文、私有任务或 evaluator 证据。它仍是单可信宿主内的工程出口，尚未实现 principal 权限与 M-policy/M-data 的独立因果评测，因此不构成 M-RSI 闭环。完整边界见 [MemoryService lifecycle](docs/design/memory-service-lifecycle.md)。
 
-工具工作量现在由宿主账本计量：工具安装时声明固定预留，可信 handler 可在数值计算边界持久追加单位；异常或未知结算至少保留预留成本。P3、P4 与 P5 统一使用 `charged_tool_work_units`，工具返回值不能自行少报成本。它是可审计的实验代理量，不等同于 FLOPs、时间或费用；scientific-discovery 和 OpenFOAM 后续接入时仍须在各自插件中定义并登记单位。完整合同见 [Tool work-unit accounting](docs/design/tool-work-accounting.md)。
+工具工作量现在由宿主账本计量：工具安装时声明固定预留，可信 handler 可在数值计算边界持久追加单位；异常或未知结算至少保留预留成本。P3、P4 与 P5 统一使用 `charged_tool_work_units`，工具返回值不能自行少报成本。它是可审计的实验代理量，不等同于 FLOPs、时间或费用；scientific-discovery canonical DomainPack 已在数值批次边界接入该可信计量，其他插件仍须各自定义并登记单位。完整合同见 [Tool work-unit accounting](docs/design/tool-work-accounting.md)。
 
 真实 Provider 验证已经执行：2026-09-21 的 MiMo 普通任务用 3 次模型调用完成 schema 合法交付，证明 P1 模型驱动交付路径可用；同日 Workbench development 仍在 20 次调用后耗尽预算且没有交付或独立评价。此前 Qwen 因账户欠费被供应商拒绝，Gemini 最小探针连接失败。仓库不把普通任务交付、Workbench 失败、确定性控制面测试或 P2 求解器运行写成 RSI 效益。
 
 | 内容 | 状态 |
 | --- | --- |
 | P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础与宿主可信工具工作量账本已实现并通过定向合同测试；真实 MiMo 普通任务已形成 schema 合法交付，独立 Workbench 仍失败 |
-| P1 普通任务与 benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同；BBH 两任务已提供 canonical TaskService adapter 与无模型 reference package |
+| P1 普通任务与 benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同；BBH 两任务与 scientific-discovery 已提供 canonical TaskService adapter 和无模型 reference package，legacy 入口继续保留 |
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
 | P3 跨任务行为更新 | 反馈绑定候选生成、内置 `reference-os-v1`、显式/通道 improver、配对门控、通道晋升、监测/回滚及脱敏机制证据导出已实现；真实模型候选效果与统计效益待检验 |
 | P4 改进过程可更新与递归执行 | 独立 R archive/channel、自更新、真实后代元评测、预登记 guard 与自动回滚已形成确定性机制闭环；真实模型与统计效益待检验 |
@@ -34,7 +34,8 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 - [P3 反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)：当前实现对象、完整状态流、CLI/GUI、信任边界和证据等级。
 - [P4 递归改进器控制面](docs/design/p4-recursive-improver-control-plane.md)：R 自更新、后代效用元评测、独立通道、guard 与结论边界。
 - [P5 预注册 RSI 研究](docs/research/p5-preregistered-rsi-study.md)：证据等级、实验臂、外部 benchmark 矩阵、防泄漏、缺测与统计职责。
-- [Task benchmark SDK 与 BBH 迁移](docs/design/benchmark-sdk.md)：TaskService 插件的显式 descriptor、隔离发现、JSON 合同、BBH canonical 路径与 legacy 兼容边界。
+- [Task benchmark SDK 与 canonical 迁移](docs/design/benchmark-sdk.md)：TaskService 插件的显式 descriptor、隔离发现、JSON 合同、BBH/scientific-discovery canonical 路径与 legacy 兼容边界。
+- [RSI orchestration research refresh](docs/research/rsi-orchestration-refresh-20260921.md)：当前证据等级、可证伪实验与 scientific-discovery 迁移的结论上限。
 - [工具工作量计量](docs/design/tool-work-accounting.md)：调用前预留、持久增量、未知结算、恢复复用及科学插件接入边界。
 - [P3 跨任务 RSI 研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)：一手论文方法、可证伪假设、对照和冻结试验协议。
 - [P1 真实 Provider 验证](docs/research/task-runtime-validation-20260920.md)：实际 episode、token 与节点用量、供应商失败、重复调用阻断和未通过项。
@@ -195,7 +196,7 @@ P3 的每个写操作都有独立 CLI 和 Python API；P4 的递归写操作保�
 
 ## 0.8 benchmark 接口
 
-插件实现 [Benchmark 合同](src/nexgent/benchmarks/__init__.py)：`spec` 声明领域、任务合同、工具 API、工具类入口与成本单位；`initial_files()` 提供任务基线；`research_context()` 只提供公开领域信息；`snapshot()` 冻结源码/依赖/数据版本；`evaluate(...)` 使用传入运行器执行源码，由宿主持有答案和评分。
+插件实现 [Benchmark 合同](src/nexgent/benchmarks/__init__.py)：`spec` 声明领域、任务合同、工具 API、工具类入口与成本单位；`initial_files()` 提供任务基线；`research_context()` 只提供公开领域信息；`snapshot()` 冻结源码/依赖/数据版本；`evaluate(...)` 使用传入运行器执行源码，由宿主持有答案和评分。scientific-discovery 的这一 legacy 入口仍保留；其 canonical 入口把每个 synthetic case 作为一个 `TaskSpec`/Episode，并以项目私有 release key 的 HMAC 派生隐藏生成 seed 和不透明来源 cluster。历史 confirmation 分布虽在 canonical API 中命名为 `final_holdout`，但只供迁移 regression/golden 检查，不构成新的研究证据；固定 reference AgentPackage 只是无模型 control。
 
 参考：[科学发现插件](benchmarks/scientific_discovery/README.md)、[BBH 插件](benchmarks/bbh/README.md)。BBH 仅覆盖 boolean_expressions 和 word_sorting，不称为完整 23 任务成绩。
 
@@ -220,6 +221,7 @@ P3 的每个写操作都有独立 CLI 和 Python API；P4 的递归写操作保�
 - [RSI 一手文献与实现判断](docs/research/reboot-rsi-mechanisms.md)
 - [P3 反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)
 - [P3 跨任务 RSI 研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)
+- [RSI orchestration research refresh](docs/research/rsi-orchestration-refresh-20260921.md)
 - [源码机制审查和探测设计](docs/research/source-mechanism-review-20260916.md)
 - [六组科学 demo 完整结果](docs/research/source-batch-results-20260916.md)
 - [通用框架的真实机制验证与交付](docs/research/framework-validation-20260916.md)

@@ -6,7 +6,7 @@
 
 唯一产品是 **通用 RSI 智能体框架 Nexgent**。它应能组织智能体完成普通任务，并通过独立 benchmark 检验任务能力、持久改进和递归效用。科学发现与 OpenFOAM 都是可选插件/场景；核心不能依赖 CFD 方程、求解器、case、论文五阶段流程或某个 demo 的评分。
 
-当前实现阶段仍遵守该产品边界。定位依据见[设计决策](docs/design/product-and-refactor-decision.md)，接口和执行模型见[架构](docs/design/agent-architecture-vnext.md)，P3 的现行合同见[反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)，研究依据与冻结实验见[P3 跨任务 RSI 设计](docs/research/p3-cross-task-rsi-design-20260920.md)。
+当前实现阶段仍遵守该产品边界。定位依据见[设计决策](docs/design/product-and-refactor-decision.md)，接口和执行模型见[架构](docs/design/agent-architecture-vnext.md)，P3 的现行合同见[反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)，研究依据与冻结实验见[P3 跨任务 RSI 设计](docs/research/p3-cross-task-rsi-design-20260920.md)及[RSI orchestration research refresh](docs/research/rsi-orchestration-refresh-20260921.md)。
 
 ## 2. 对旧完成判断的修正
 
@@ -112,9 +112,11 @@ promotion 强制绑定预登记 improver guard。部署后的候选生成通过�
 
 当前已实现 `RSIStudyService`：只接受 final holdout，冻结两个 AgentPackage、宿主私有 benchmark 注册、显式统计单位/来源 cluster、完整任务/seed、provider/model、执行环境摘要、每 Episode 硬预算、随机化调度、工程门和 cluster bootstrap/sign-flip 统计；每个 cell 通过真实 `TaskService` 执行，空 memory 且禁止写回，可恢复但不可选择性重放。模型收据区分请求别名与 provider 实际 model/revision；没有固定 revision 时只允许时间窗口内的局部工程结论。CLI 与 GUI 只投影脱敏计划和报告。它是正式研究的执行底座，不等于外部研究已完成。主矩阵至少需要一个工具/政策任务族、一个新鲜可执行代码任务族和一个私有自托管交互任务族；OpenFOAM 单列为 demo，Workbench/饱和 BBH 只做资格与接口检查。完整协议见[P5 预注册研究](docs/research/p5-preregistered-rsi-study.md)。
 
-TaskService benchmark 的 SDK 已收敛为显式 descriptor/protocol、隔离 registry、有限 JSON 合同和独立 host runtime 指纹；Workbench、OpenFOAM 与 BBH 两任务 adapter 已接入，OpenFOAM 不再读取宿主私有源码来定义 evaluator identity。BBH 每个公开样本现在形成独立 TaskSpec/Episode，隐藏答案只留在宿主评价器，并提供可执行的无模型 reference AgentPackage；legacy 入口和历史记录仍保留且不与 Episode ID 互认。P3 paired selection/guard 与 P5 study 冻结同一 outcome policy：只有 `failed + agent/protocol` 属可测的 observed zero，cancelled、paused、waiting、基础设施故障和 evaluator unavailable 均保持 missing。scientific discovery 与既有 0.8 记录仍按原执行器保留，尚未迁移或混写；完整边界见[Task benchmark SDK](docs/design/benchmark-sdk.md)。
+TaskService benchmark 的 SDK 已收敛为显式 descriptor/protocol、隔离 registry、有限 JSON 合同和独立 host runtime 指纹；Workbench、OpenFOAM、BBH 两任务与 scientific-discovery adapter 已接入。scientific-discovery 的一个 synthetic case 对应一个 TaskSpec/Episode，隐藏 forecast 留在宿主评价器，项目私有 release key 通过 HMAC 派生隐藏生成 seed、统计单元和不透明 family cluster，并提供确定性的无模型 reference AgentPackage。它与 BBH 都保留 legacy 入口和历史记录，且不把 legacy ID 与 Episode ID 互认。P3 paired selection/guard 与 P5 study 冻结同一 outcome policy：只有 `failed + agent/protocol` 属可测的 observed zero，cancelled、paused、waiting、基础设施故障和 evaluator unavailable 均保持 missing。完整边界见[Task benchmark SDK](docs/design/benchmark-sdk.md)。
 
-TaskService 现将工具调用次数与数值/外部工作量分开核算。`ToolSpec` 声明调用前固定预留，可信 handler 经 `ToolContext` 在实际工作边界持久计费，root Episode 对并行和委派共享原子预算；崩溃或未知结算保留预留且使 usage 不完整。P3/P4/P5 的成本门统一读取宿主 `charged_tool_work_units`，历史记录按显式零基线只读兼容。框架不能自动推断任意求解器的 FLOPs；scientific discovery 迁移前仍需在插件侧登记保守预留和实际计量点。完整合同见[工具工作量计量](docs/design/tool-work-accounting.md)。
+TaskService 现将工具调用次数与数值/外部工作量分开核算。`ToolSpec` 声明调用前固定预留，可信 handler 经 `ToolContext` 在实际工作边界持久计费，root Episode 对并行和委派共享原子预算；崩溃或未知结算保留预留且使 usage 不完整。P3/P4/P5 的成本门统一读取宿主 `charged_tool_work_units`，历史记录按显式零基线只读兼容。框架不能自动推断任意求解器的 FLOPs；scientific-discovery DomainPack 已在数值批次边界接入宿主可信计量，返回值中的 `work_units` 只作诊断。完整合同见[工具工作量计量](docs/design/tool-work-accounting.md)。
+
+scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分布的兼容名称，仅用于迁移 regression/golden 等价检查。它不是新鲜 holdout，也不支持新的科学发现、模型效果或 RSI 结论；正式研究仍需新的 host-private release、独立来源 cluster、重复、控制臂和真实 provider 收据。
 
 ## 5. 当前状态
 
@@ -124,7 +126,7 @@ TaskService 现将工具调用次数与数值/外部工作量分开核算。`Too
 | vNext 定位、架构、研究综合、OpenFOAM 设计 | P0 已完成；设计中的正式数值研究仍未执行 |
 | 本机 OpenFOAM | 已确认 WSL2 / Ubuntu 20.04 / Foundation 8，并真实运行 Re=10 教程 smoke |
 | P1 任务执行、交付评审、工件/记忆、预算与恢复基础 | 0.9 已实现，含 root 共享的宿主可信工具工作量预留/计量/恢复账本；真实 MiMo 普通任务交付已通过，Workbench 独立评价仍未形成 |
-| Task benchmark SDK 与失败测量 | 0.9 canonical descriptor/registry、插件隔离、host runtime 指纹及 P3/P5 共享 outcome policy 已实现；BBH 两任务已迁移且保留 legacy 兼容入口，scientific discovery 尚在 0.8 API |
+| Task benchmark SDK 与失败测量 | 0.9 canonical descriptor/registry、插件隔离、host runtime 指纹及 P3/P5 共享 outcome policy 已实现；BBH 两任务与 scientific-discovery 已迁移并保留 legacy 兼容入口；科学历史 holdout 仅作迁移回归材料 |
 | OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
 | 跨任务行为更新 P3 | feedback/R0/BehaviorPatch、内置 `reference-os-v1`、显式/通道 R、配对门控、显式晋升、通道加载、guard monitor 与回滚控制面已实现；真实模型独立效果与统计效益待检验 |
 | 改进器递归执行 P4 | 独立 R 通道、自更新、真实任务后代元评测、guard/rollback 和恢复加载机制已闭合；真实模型行为与统计递归效益待检验 |
