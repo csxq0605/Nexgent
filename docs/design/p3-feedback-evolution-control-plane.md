@@ -1,7 +1,7 @@
 # P3 反馈驱动 AgentPackage 演化控制面
 
-日期：2026-09-20
-状态：工程控制面已实现；真实模型效果与统计 RSI 效益尚未建立。
+日期：2026-09-21
+状态：工程控制面与内置参考 R0 已实现；真实模型候选的独立效果与统计 RSI 效益尚未建立。
 
 ## 1. 定位
 
@@ -83,6 +83,10 @@ FeedbackBundle 不把 task context、evaluator 私有诊断或答案直接传给
 
 `GenerationService.generate(...)` 要求独立版本化的 improver package 注册 `improve` entry。它通过普通 `TaskService` 和有界预算执行，不能获得工具权限，只能发布一个符合 schema 的 `behavior_patch` 工件。宿主随后验证执行 entry、loaded module、工件 producer、patch schema、可变路径、组件类别、旧摘要、patch 大小和激活探针，再构造并 admission child 包。
 
+CLI 在未指定 improver 来源时加载框架内置 `reference-os-v1`。这是领域无关的参考 R0：它读取有界、脱敏的 FeedbackBundle 与 mutation policy，通过配置的模型角色 `rsi_improver` 提出一个声明式 patch；源包没有 OpenFOAM、科学发现、Workbench 或其他 benchmark 的分支。首版故意限制为一个现有 O/S 组件的一次 `replace`，要求匹配父包摘要和 `component_loaded` 激活探针。它不修改 M，不增删文件，不接触 evaluator、manifest、权限、gate 或宿主代码。证据不足时模型可 abstain，宿主将其与非法输出、供应商失败、预算耗尽一样保存为 missing，而不是生成占位 candidate。
+
+另外两种来源保持显式：`--improver-package` 接受调用方冻结的独立 R0；`--improver-channel` 与 `--expected-improver-revision` 从 P4 的独立 R channel 原子解析已部署 R。三种来源最终经过同一 `GenerationService`、补丁校验和 generation receipt，不改变可信宿主的门控职责。builtin 是可运行的参考实现，不是被框架硬编码的唯一改进算法。
+
 provider 中断、预算耗尽、无交付、closure 缺失、非法补丁、并发 channel revision 变化等情况会形成持久的 `candidate_generation_missing`，不会被伪装为候选或零分结果。
 
 `EvolutionService.propose(...)` 仍可 admission 外部构造的 child，用于低层合同、研究比较或受控导入；它同样要求非空 hypothesis、本地非 holdout 反馈、有效父子谱系、真实 component delta、冻结 improve entry 和 O/M/S 分类。其 `origin="imported"` 记录只进入研究/archive，没有 deployment authority。promotion 必须反查 `origin="generated"` candidate 的不可变 generation record，并闭合 FeedbackBundle、实际 R0 improver Episode、usage 和 patch receipt。
@@ -134,7 +138,10 @@ python -m nexgent rsi-events general --limit 50
 
 # 完整参数和顺序见 docs/operations.md
 python -m nexgent rsi-feedback general EPISODE_ID --expected-revision 0
+python -m nexgent rsi-generate general FEEDBACK_ID --mutation-policy examples/rsi/reference-os-mutation-policy.json --expected-revision 0
+# 或显式选择冻结包 / 独立 R channel
 python -m nexgent rsi-generate general FEEDBACK_ID --improver-package improver.json --mutation-policy mutation-policy.json --expected-revision 0
+python -m nexgent rsi-generate general FEEDBACK_ID --improver-channel recursive --expected-improver-revision 0 --mutation-policy mutation-policy.json --expected-revision 0
 python -m nexgent rsi-plan CANDIDATE_ID workbench --policy promotion-policy.json
 python -m nexgent rsi-run-plan PLAN_ID workbench
 python -m nexgent rsi-assess TRIAL_ID
@@ -150,8 +157,8 @@ CLI 和 Python API 都按 FeedbackBundle、generation、TrialPlan、decision、m
 
 | 等级 | 能证明什么 | 当前状态 |
 | --- | --- | --- |
-| mechanism proof | 身份、不可变记录、反馈边界、补丁准入、paired plan、fail-closed decision、CAS promotion、channel 加载、monitor/rollback 合同可执行 | 固定无模型 fixture 已闭合整条链，并由脱敏 evidence exporter 核验；不涉及真实模型能力结论 |
-| 真实模型行为证据 | 冻结 R0 实际读取 FeedbackBundle、产生合法 patch；candidate 在真实 provider Episode 中加载并激活预期行为；selection/guard 有真实 evaluator receipt | 尚未建立完整成功链；已有 MiMo 运行止于预算耗尽且无交付 |
+| mechanism proof | 身份、不可变记录、反馈边界、补丁准入、paired plan、fail-closed decision、CAS promotion、channel 加载、monitor/rollback 合同可执行 | 固定无模型 fixture 已闭合整条链；内置 `reference-os-v1` 及其单文件 O/S 边界已有工程合同，不涉及真实模型能力结论 |
+| 真实模型行为证据 | 冻结 R0 实际读取 FeedbackBundle、产生合法 patch；candidate 在真实 provider Episode 中加载并激活预期行为；selection/guard 有真实 evaluator receipt | 内置 R0 已提供可运行入口，但真实模型 generation → activation → independent selection 的完整成功链仍待执行与报告 |
 | 统计 RSI 效益 | 在预登记多任务族、重复、对照和完整缺测报告下，候选或改进过程产生可估计、可复核的质量/成功率/成本改善 | 尚未执行；不能由单候选、单 demo 或机制测试替代 |
 
 “候选生成成功”“包被晋升”和“RSI 有效”是三个不同命题。即使完整控制面工作正常，真实实验也可以得到零增益、负增益或全部 missing；这些都应作为结果保留，而不是降低门槛直到出现正数。

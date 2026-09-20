@@ -213,13 +213,24 @@ def _run_task_command(args):
                 return _record_result(result, (
                     "schema", "id", "channel", "channel_revision", "parent_package_id",
                     "parent_package_digest", "digest", "created_at", "record_digest"))
-            improver = _object_argument(args.improver_package, label="improver package")
+            if args.improver_package and args.improver_channel:
+                raise ValueError("Specify either an improver package or an improver channel")
+            if args.improver_channel:
+                improver = None
+            elif args.improver_package in {None, "builtin:reference-os-v1"}:
+                from .tasks.improver_seed import default_improver_package
+                improver = default_improver_package()
+            else:
+                improver = _object_argument(args.improver_package, label="improver package")
             mutation = _object_argument(args.mutation_policy, label="mutation policy")
             result = generation.generate(
                 args.channel, args.feedback_id, improver, mutation, args.expected_revision,
+                improver_channel=args.improver_channel,
+                expected_improver_revision=args.expected_improver_revision,
                 budget=_task_budget(args), stop_event=_stop_event())
             return _record_result(result, (
-                "schema", "id", "channel", "channel_revision", "status", "reason",
+                "schema", "id", "channel", "channel_revision", "status", "reason_type",
+                "reason_digest",
                 "feedback_bundle_id", "feedback_digest", "improver_package_id",
                 "improver_package_digest", "improver_closure_digest", "episode_id",
                 "episode_status", "usage", "execution", "patch_digest", "candidate_id",
@@ -380,8 +391,15 @@ def main(argv=None):
     rsi_generate = sub.add_parser("rsi-generate", help="Generate a feedback-bound candidate")
     rsi_generate.add_argument("channel")
     rsi_generate.add_argument("feedback_id")
-    rsi_generate.add_argument("--improver-package", required=True,
-                              help="Improver AgentPackage JSON object, file path, or @file")
+    improver_source = rsi_generate.add_mutually_exclusive_group()
+    improver_source.add_argument(
+        "--improver-package",
+        help="Improver AgentPackage JSON, file, or builtin:reference-os-v1; defaults to builtin")
+    improver_source.add_argument(
+        "--improver-channel", help="Resolve the improver from a deployed improver channel")
+    rsi_generate.add_argument(
+        "--expected-improver-revision", type=int,
+        help="Required compare-and-swap revision when using --improver-channel")
     rsi_generate.add_argument("--mutation-policy", required=True,
                               help="Mutation policy JSON object, file path, or @file")
     rsi_generate.add_argument("--expected-revision", type=int, required=True)
@@ -497,6 +515,9 @@ def main(argv=None):
             p.add_argument("--generation-max-completion-tokens", type=int)
             p.add_argument("--generation-max-experiments", type=int)
     args = parser.parse_args(argv)
+    if args.command == "rsi-generate":
+        if bool(args.improver_channel) != (args.expected_improver_revision is not None):
+            parser.error("--improver-channel and --expected-improver-revision must be used together")
     if args.command == "gui":
         from .ui.app import main as gui_main
         os.environ["NEXGENT_PROJECT_ROOT"] = str(args.root)

@@ -82,6 +82,47 @@ def _artifact_ref(artifact):
     }
 
 
+def _error_type(value):
+    if not isinstance(value, str) or not value:
+        return None
+    name = value.split(":", 1)[0]
+    return name if name.isidentifier() and len(name) <= 120 else "RuntimeError"
+
+
+def _public_execution_trace(episode):
+    """Expose failure shape and action flow without arguments, outputs, or prompts."""
+    nodes = sorted((episode.get("nodes") or {}).values(),
+                   key=lambda node: (node.get("started_at", 0), node.get("id", "")))
+    rows = []
+    for node in nodes[-128:]:
+        request = node.get("request") or {}
+        row = {"id": node.get("id"), "method": node.get("method"),
+               "status": node.get("status"),
+               "error_type": _error_type(node.get("error"))}
+        if node.get("method") == "ask" and isinstance(request.get("role"), str):
+            row["role_digest"] = digest(request["role"])
+        if node.get("method") in {"tool", "skill"} and isinstance(request.get("name"), str):
+            row["capability_digest"] = digest(request["name"])
+        result = node.get("result")
+        if isinstance(result, dict):
+            signals = {key: result[key] for key in ("valid", "passed", "approved", "success")
+                       if type(result.get(key)) is bool}
+            if signals:
+                row["public_signals"] = signals
+        rows.append(row)
+    counts = {}
+    for row in rows:
+        key = (row.get("method") or "unknown") + ":" + (row.get("status") or "unknown")
+        counts[key] = counts.get(key, 0) + 1
+    return {
+        "failure_domain": episode.get("failure_domain"),
+        "last_error_type": _error_type(episode.get("last_error")),
+        "node_counts": counts,
+        "nodes": rows,
+        "truncated_nodes": max(0, len(nodes) - len(rows)),
+    }
+
+
 def _patch_schema():
     operation = {
         "type": "object",
@@ -231,6 +272,7 @@ class GenerationService:
                 "memory": {"snapshot_id": snapshot["id"], "digest": snapshot["digest"],
                            "item_version_refs": deepcopy(snapshot.get("item_version_refs") or [])[:128]},
                 "evaluation": _public_evaluation(episode.get("evaluation")),
+                "execution_trace": _public_execution_trace(episode),
                 "usage": {"digest": digest(usage), "summary": {
                     key: usage.get(key) for key in
                     ("model_calls", "charged_completion_tokens", "completion_tokens",
@@ -357,7 +399,9 @@ class GenerationService:
             raise ContractError(f"BehaviorPatch cannot form a valid child package: {str(exc)[:500]}") from None
 
     def _missing(self, base, reason, *, episode=None, patch_digest=None):
-        record = {**base, "status": "missing", "reason": reason[:1500],
+        reason = str(reason)[:1500]
+        record = {**base, "status": "missing", "reason": reason,
+                  "reason_type": _error_type(reason), "reason_digest": digest(reason),
                   "episode_id": episode["id"] if episode else None,
                   "episode_status": episode.get("status") if episode else None,
                   "usage": deepcopy(episode.get("usage")) if episode else None,
@@ -367,7 +411,8 @@ class GenerationService:
         result = self._insert("task_candidate_generations", record)
         self.evolution._event(base["channel"], "candidate_generation_missing", {
             "generation_id": base["id"], "feedback_bundle_id": base["feedback_bundle_id"],
-            "episode_id": record["episode_id"], "reason": record["reason"],
+            "episode_id": record["episode_id"], "reason_type": record["reason_type"],
+            "reason_digest": record["reason_digest"],
             "record_digest": result["record_digest"],
         })
         return result

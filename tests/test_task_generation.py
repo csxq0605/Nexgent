@@ -8,7 +8,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nexgent.tasks.evolution import EvolutionService
+from nexgent.tasks.evolution_view import public_evolution_event
 from nexgent.tasks.generation import GenerationService, PATCH_SCHEMA
+from nexgent.tasks.improver_seed import default_improver_package
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.tools import ContractError, ToolRegistry
@@ -93,6 +95,31 @@ class PublicEvaluation:
                 "accepted": True, "private_hidden_answer": "DO_NOT_EXPOSE_ME"}
 
 
+class ImproverGatewayFactory:
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+
+    def __call__(self, reserve, stop_event):
+        owner = self
+
+        class Gateway:
+            def ask(self, role, prompt, payload=None, max_tokens=4000):
+                owner.calls.append({"role": role, "prompt": prompt,
+                                    "payload": deepcopy(payload), "max_tokens": max_tokens})
+                receipt = {"call_id": "reference-improver-1", "role": role,
+                           "model": "SCRIPTED-IMPROVER", "status": "started",
+                           "reserved_completion_tokens": max_tokens,
+                           "max_tokens": max_tokens}
+                reserve(receipt)
+                reserve({**receipt, "status": "completed", "billing_status": "usage_reported",
+                         "usage": {"prompt_tokens": 5, "completion_tokens": 7,
+                                   "total_tokens": 12}})
+                return deepcopy(owner.response)
+
+        return Gateway()
+
+
 def prepared(tmp_path):
     tasks = TaskService(tmp_path, tools=ToolRegistry())
     evolution = EvolutionService(tasks)
@@ -136,7 +163,98 @@ def test_feedback_bundle_is_immutable_bounded_and_excludes_hidden_evaluator_cont
     assert all("content" not in item for item in bundle["episode_refs"][0]["artifacts"])
     assert all(set(item) == {"sequence", "kind", "digest"}
                for item in bundle["episode_refs"][0]["events"])
+    trace = bundle["episode_refs"][0]["execution_trace"]
+    assert trace["failure_domain"] is None
+    assert trace["nodes"]
+    assert all(not ({"request", "result", "arguments", "prompt", "payload"} & set(node))
+               for node in trace["nodes"])
     assert generation.feedback(bundle["id"])["record_digest"] == bundle["record_digest"]
+
+
+def test_feedback_execution_trace_hashes_package_controlled_role_names(tmp_path):
+    secret = "PRIVATE_ROLE_ENCODES_TASK_CONTENT"
+    source = """def execute(payload, context):
+    context.ask('PRIVATE_ROLE_ENCODES_TASK_CONTENT', 'fixed prompt', {})
+    artifact = context.publish({'version': 0}, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+"""
+    parent = make_package(
+        {"main.py": source}, {"entries": {"execute": "main.py:execute"}},
+        provenance={"fixture": "adversarial-role"})
+    gateway = ImproverGatewayFactory({"ok": True})
+    tasks = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    evolution = EvolutionService(tasks)
+    generation = GenerationService(tasks, evolution)
+    evolution.register("general", parent)
+    episode_id = feedback_episode(tasks, parent, evaluate=False)
+
+    bundle = generation.capture_feedback("general", [episode_id], expected_revision=0)
+    serialized = json.dumps(bundle, ensure_ascii=False)
+    ask_nodes = [node for node in bundle["episode_refs"][0]["execution_trace"]["nodes"]
+                 if node["method"] == "ask"]
+    assert secret not in serialized
+    assert len(ask_nodes) == 1 and "role_digest" in ask_nodes[0]
+    assert "role" not in ask_nodes[0]
+
+
+def test_builtin_reference_improver_executes_one_model_call_and_admits_os_patch(tmp_path):
+    parent = target_package()
+    patch = behavior_patch(parent)
+    gateway = ImproverGatewayFactory(patch)
+    tasks = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    evolution = EvolutionService(tasks)
+    generation = GenerationService(tasks, evolution)
+    evolution.register("general", parent)
+    episode_id = feedback_episode(tasks, parent, evaluate=False)
+    bundle = generation.capture_feedback("general", [episode_id], expected_revision=0)
+
+    improver = default_improver_package()
+    result = generation.generate(
+        "general", bundle["id"], improver, policy(), 0,
+        budget={"max_model_calls": 1, "max_completion_tokens": 6000,
+                "max_tool_calls": 0, "max_nodes": 8})
+
+    assert result["status"] == "generated"
+    assert result["improver_package_id"] == improver["id"]
+    assert result["usage"]["model_calls"] == 1
+    assert result["usage"]["usage_complete"] is True
+    assert result["execution"]["entry"] == "improve"
+    assert len(gateway.calls) == 1
+    assert gateway.calls[0]["role"] == "rsi_improver"
+    assert gateway.calls[0]["payload"]["feedback_bundle"]["id"] == bundle["id"]
+    assert gateway.calls[0]["payload"]["parent_components"][0]["path"] == "main.py"
+    child = tasks.store.package(result["candidate_package_id"])
+    assert child["files"]["main.py"] == CHILD_SOURCE
+
+
+@pytest.mark.parametrize("response,component_class,expected_calls", [
+    ({"decision": "abstain", "reason": "insufficient evidence"}, "O", 1),
+    ({"unused": True}, "M", 0),
+])
+def test_builtin_reference_improver_abstains_and_refuses_memory_mutation(
+        tmp_path, response, component_class, expected_calls):
+    parent = target_package()
+    gateway = ImproverGatewayFactory(response)
+    tasks = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    evolution = EvolutionService(tasks)
+    generation = GenerationService(tasks, evolution)
+    evolution.register("general", parent)
+    episode_id = feedback_episode(tasks, parent, evaluate=False)
+    bundle = generation.capture_feedback("general", [episode_id], expected_revision=0)
+    mutation = {"mutable_paths": ["main.py"],
+                "component_classes": {"main.py": component_class},
+                "allowed_operations": ["replace"], "max_patch_bytes": 30000}
+
+    result = generation.generate(
+        "general", bundle["id"], default_improver_package(), mutation, 0,
+        budget={"max_model_calls": 1, "max_completion_tokens": 6000,
+                "max_tool_calls": 0, "max_nodes": 8})
+
+    assert result["status"] == "missing"
+    assert result["candidate_id"] is None
+    assert len(gateway.calls) == expected_calls
+    assert not [event for event in evolution.events("general")
+                if event["kind"] == "candidate_admitted"]
 
 
 @pytest.mark.parametrize("case", ["ready", "selection", "monitoring", "holdout", "wrong_package"])
@@ -232,6 +350,29 @@ def test_failure_budget_and_missing_output_persist_missing_without_admission(tmp
     assert result["candidate_id"] is None
     assert not [event for event in evolution.events("general")
                 if event["kind"] == "candidate_admitted"]
+
+
+def test_missing_generation_keeps_private_reason_internal_and_redacts_public_event(tmp_path):
+    secret = "PRIVATE_FEEDBACK_MUST_NOT_REACH_PUBLIC_SURFACES"
+    tasks, evolution, generation, parent, episode_id, bundle = captured(
+        tmp_path, evaluate=False)
+    source = "def improve(payload, context):\n    raise ValueError('" + secret + "')\n"
+    improver = make_package(
+        {"improver.py": source},
+        {"entries": {"execute": "improver.py:improve", "improve": "improver.py:improve"}},
+        provenance={"fixture": "adversarial-error"})
+
+    result = generation.generate("general", bundle["id"], improver, policy(), 0)
+    event = [event for event in evolution.events("general")
+             if event["kind"] == "candidate_generation_missing"][-1]
+    public = public_evolution_event(event)
+
+    assert secret in result["reason"]  # retained only in the host-owned immutable record
+    assert result["reason_type"] == "PackageError"
+    assert result["reason_digest"]
+    assert secret not in json.dumps(event, ensure_ascii=False)
+    assert secret not in json.dumps(public, ensure_ascii=False)
+    assert set(public["content"]) >= {"reason_type", "reason_digest"}
 
 
 def test_mutation_policy_freezes_improver_and_forbids_control_plane_paths(tmp_path):

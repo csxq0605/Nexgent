@@ -292,6 +292,41 @@ def test_rsi_mutation_commands_form_scriptable_control_plane(monkeypatch, task_s
     assert "suite" not in outputs[3] and "reports" not in outputs[8]
 
 
+def test_rsi_generate_uses_builtin_reference_improver_when_unspecified(
+        monkeypatch, task_service, tmp_path, capsys):
+    calls = []
+
+    class FakeEvolution:
+        def __init__(self, service):
+            assert service is task_service
+
+    class FakeGeneration:
+        def __init__(self, service, evolution):
+            assert service is task_service and isinstance(evolution, FakeEvolution)
+
+        def generate(self, channel, feedback_id, improver, mutation, expected_revision, **kwargs):
+            calls.append((channel, feedback_id, improver, mutation, expected_revision, kwargs))
+            return {"id": "generation-builtin", "status": "missing"}
+
+    monkeypatch.setattr("nexgent.tasks.evolution.EvolutionService", FakeEvolution)
+    monkeypatch.setattr("nexgent.tasks.generation.GenerationService", FakeGeneration)
+    code = cli.main([
+        "--root", str(tmp_path), "rsi-generate", "stable", "feedback-1",
+        "--mutation-policy", '{"mutable_paths":["main.py"],"component_classes":{"main.py":"O"}}',
+        "--expected-revision", "0", "--max-calls", "1",
+    ])
+
+    assert code == 0
+    improver = calls[0][2]
+    assert improver["provenance"] == {
+        "origin": "nexgent.default-task-improver", "role": "R0"}
+    assert improver["manifest"]["entries"]["improve"] == "improver.py:improve"
+    assert calls[0][5]["improver_channel"] is None
+    assert calls[0][5]["expected_improver_revision"] is None
+    assert calls[0][5]["budget"] == {"max_model_calls": 1}
+    assert json.loads(capsys.readouterr().out)["status"] == "missing"
+
+
 def test_rsi_command_errors_use_parser_failure(monkeypatch, task_service, tmp_path):
     monkeypatch.setattr("nexgent.tasks.tools.task_benchmarks", lambda: {})
 
@@ -308,6 +343,19 @@ def test_rsi_command_errors_use_parser_failure(monkeypatch, task_service, tmp_pa
     with pytest.raises(SystemExit):
         cli.main(["--root", str(tmp_path), "rsi-register", "stable",
                   "--package", "[]"])
+    with pytest.raises(SystemExit):
+        cli.main(["--root", str(tmp_path), "rsi-generate", "stable", "feedback-1",
+                  "--improver-package", "builtin:reference-os-v1",
+                  "--improver-channel", "recursive",
+                  "--mutation-policy", '{}', "--expected-revision", "0"])
+    with pytest.raises(SystemExit):
+        cli.main(["--root", str(tmp_path), "rsi-generate", "stable", "feedback-1",
+                  "--improver-channel", "recursive",
+                  "--mutation-policy", '{}', "--expected-revision", "0"])
+    with pytest.raises(SystemExit):
+        cli.main(["--root", str(tmp_path), "rsi-generate", "stable", "feedback-1",
+                  "--expected-improver-revision", "0",
+                  "--mutation-policy", '{}', "--expected-revision", "0"])
 
 
 def test_gui_defaults_to_task_workspace_and_forwards_legacy_switch(monkeypatch, tmp_path):

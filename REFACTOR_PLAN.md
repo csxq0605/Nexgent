@@ -1,6 +1,6 @@
 # Nexgent vNext 重构计划
 
-日期：2026-09-21。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 MiMo 普通任务已形成 schema 合法交付但独立 Workbench 仍失败；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面与 P4 递归改进器确定性机制闭环已实现；P5 已实现通用预注册 final-holdout 配对执行器。真实 RSI 行为变化、统计效益与正式外部研究尚未建立。
+日期：2026-09-21。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 MiMo 普通任务已形成 schema 合法交付但独立 Workbench 仍失败；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面及内置参考 R0、P4 递归改进器确定性机制闭环已实现；P5 已实现通用预注册 final-holdout 配对执行器。真实 RSI 行为变化、统计效益与正式外部研究尚未建立。
 
 ## 1. 产品与执行范围
 
@@ -76,9 +76,11 @@ development Episode
 
 `GenerationService` 只从本地、终态、明确标记为 development 且绑定当前 active 父包的 Episode 捕获有界反馈。独立版本化的 `R0` 通过同一 `TaskService` 运行，只能交付严格的声明式 `BehaviorPatch`；可信宿主验证可修改路径、O/M/S 分类、旧摘要、大小、激活探针和完整 child 包。`R0` 的 improve entry 与执行闭包在 P3 冻结，候选不得修改 evaluator、gate、权限、预算核算或宿主控制代码。
 
+产品默认已经补入领域无关的 `reference-os-v1`，使 `rsi-generate` 无需外部 improver JSON 也能通过配置的模型执行真实 R0。其 v1 capability envelope 只允许一个现有 O/S 文件的单次 `replace`；M、多文件、add/remove 和控制面修改均拒绝。调用方仍可显式传入冻结 improver package，或以 improver channel + expected revision 使用 P4 部署版本。三种入口共享相同 receipt、admission 与 missing 语义。默认 R0 只生成候选，不自动 selection、promotion 或 guard，也不包含任何 demo/benchmark 专用逻辑。
+
 `EvolutionService` 把 paired suite、benchmark/evaluator snapshot、父子顺序、预算、可重算的 execution environment/tool/runtime snapshot 及 PromotionPolicy 在结果产生前冻结。实际 provider/model 身份由逐调用 receipt 证明，并在正式实验中与预登记配置核对；当前计划记录本身不声称已预先完整冻结二者。development decision 不能晋升，final holdout 不能进入演化；selection 缺分、用量不完整、身份不一致和关键回归均 fail closed。选择门的 `cost` 是模型调用、charged completion tokens、工具调用和节点用量形成的 normalized work unit，不是供应商货币费用。eligible 与 promote 分开；只有 `GenerationService` 闭合真实 R0 生成收据的 candidate 有部署权限，受控导入只进入研究/archive；promote 还要求父包仍为 active，并强制绑定预登记 monitor plan。普通任务只在创建时通过 `package_channel` 解析部署包。guard plan 与阈值在晋升前冻结，其完整任务多重集只允许一次执行；缺项、重复项、usage 不完整或 evaluator receipt 不匹配均 fail closed，退化时沿已记录部署边回滚。
 
-当前完成的是工程机制：不可变记录、hash-linked 事件、只读安全投影、普通任务的通道加载，以及一个以固定无模型 fixture 执行 feedback → generation → selection → promotion → new Episode → guard → rollback 的确定性闭环和脱敏证据导出。尚未完成的 P3 研究出口包括：真实 `R0` 从真实模型反馈产生有效候选、候选在独立 selection 上胜过父代、晋升后在新任务中激活所声称行为，以及由重复和对照支持的效应估计。候选未变好时必须报告 rejected/missing；不能把代码路径、模拟测试、candidate 数量或一次部署写成 RSI 效益。
+当前完成的是工程机制：不可变记录、hash-linked 事件、只读安全投影、普通任务的通道加载、内置参考 R0，以及一个以固定无模型 fixture 执行 feedback → generation → selection → promotion → new Episode → guard → rollback 的确定性闭环和脱敏证据导出。尚未完成的 P3 研究出口包括：内置或冻结 `R0` 从真实模型反馈产生有效候选、候选在独立 selection 上胜过父代、晋升后在新任务中激活所声称行为，以及由重复和对照支持的效应估计。候选未变好时必须报告 rejected/missing；不能把代码路径、模拟测试、candidate 数量、一次模型调用或一次部署写成 RSI 效益。
 
 详细对象、接口和信任边界见[控制面设计](docs/design/p3-feedback-evolution-control-plane.md)。固定编排、匹配额外调用、只积累记忆与 P3 主机制的对照见[研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)。
 
@@ -115,7 +117,7 @@ promotion 强制绑定预登记 improver guard。部署后的候选生成通过�
 | 本机 OpenFOAM | 已确认 WSL2 / Ubuntu 20.04 / Foundation 8，并真实运行 Re=10 教程 smoke |
 | P1 任务执行、交付评审、工件/记忆、预算与恢复基础 | 0.9 已实现并通过确定性合同测试；真实 MiMo 普通任务交付已通过，Workbench 独立评价仍未形成 |
 | OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
-| 跨任务行为更新 P3 | feedback/R0/BehaviorPatch、配对门控、显式晋升、通道加载、guard monitor 与回滚控制面已实现；真实模型效果与统计效益待检验 |
+| 跨任务行为更新 P3 | feedback/R0/BehaviorPatch、内置 `reference-os-v1`、显式/通道 R、配对门控、显式晋升、通道加载、guard monitor 与回滚控制面已实现；真实模型独立效果与统计效益待检验 |
 | 改进器递归执行 P4 | 独立 R 通道、自更新、真实任务后代元评测、guard/rollback 和恢复加载机制已闭合；真实模型行为与统计递归效益待检验 |
 | 冻结正式研究 P5 | 通用 final-holdout 配对执行器、预注册 schema、CLI/信息窗已实现；外部多任务族正式研究待登记与执行 |
 | 0.8 的源码机制与历史结果 | 保留；不能替代以上状态 |
@@ -124,7 +126,7 @@ promotion 强制绑定预登记 improver guard。部署后的候选生成通过�
 
 1. **P1-V 后续真实运行验证**：在修正模型反复请求已完成工具的问题并设置新的冻结预算后，重新检验 normal 多步骤交付；只有 normal 能完成，才运行可隔离验证恢复假设的受控失败场景。保留已有失败 episode，不用重跑覆盖。
 2. **P2 数值验证扩展**：在现有 smoke 之外，另行冻结 Re=100、独立参考、网格/时间收敛和稳态判据。没有这些证据时保持 smoke 结论，不把 20×20×1 Re=10 输出与 Ghia 数据比较。
-3. **P3 真实行为与效果验证**：冻结 `R0`、任务序列、可验证执行环境/工具/运行时快照、预算、paired selection 和 guard policy；预登记目标 provider/model，并用逐调用 receipt 核验实际身份与参数；用真实 development 失败产生候选，报告全部完整/缺测配对、行为激活、质量、normalized work unit、原始 usage、可得的实际货币费用和回归。即使没有候选通过也按预登记结束，不降低门槛追求正结果。
+3. **P3 真实行为与效果验证**：先以冻结的内置 `reference-os-v1` 作为可复现实验臂，再加入显式 R 与通道 R 对照；冻结任务序列、可验证执行环境/工具/运行时快照、预算、paired selection 和 guard policy；预登记目标 provider/model，并用逐调用 receipt 核验实际身份与参数；用真实 development 失败产生候选，报告全部 complete/missing generation、完整/缺测配对、行为激活、质量、normalized work unit、原始 usage、可得的实际货币费用和回归。即使没有候选通过也按预登记结束，不降低门槛追求正结果。
 4. **P4 真实行为与 P5**：使用已实现的递归控制面冻结真实 R0/R1、共同 A0、任务族、provider/model receipt、资源和 selection/guard；报告全部分支与缺测。最终只用多任务族、重复、合理固定优化器基线和未写回 holdout 决定统计主张。
 
 ## 6. 分阶段 PR 与历史提交

@@ -29,7 +29,7 @@ P3 管理通用 `AgentPackage` 的行为版本，不理解 OpenFOAM、科学发�
 
 1. 用当前 channel 包运行明确标记为 `development` 的任务，留下终态 Episode；
 2. `GenerationService.capture_feedback(...)` 将实际 episode/package/memory/evaluation/usage/artifact 摘要冻结成 `FeedbackBundle`，私有 evaluator 内容只保留 digest；
-3. `GenerationService.generate(...)` 通过同一任务运行器执行独立、版本化且冻结的 improver `R0`；它只能返回严格 `BehaviorPatch`，由宿主将 O/M/S 改动应用为不可变 child 包；
+3. `GenerationService.generate(...)` 通过同一任务运行器执行独立、版本化且冻结的 improver `R0`；CLI 默认使用框架内置的 `reference-os-v1`，也可显式传包或从 improver channel 解析版本；R0 只能返回严格 `BehaviorPatch`，由宿主将获准改动应用为不可变 child 包；
 4. `EvolutionService.plan_pair(...)` 在结果产生前冻结 selection suite、父子顺序、benchmark/evaluator snapshot、可重算的 execution environment/tool/runtime snapshot 和 `PromotionPolicy`，再由 `run_pair(...)` 实际执行；逐调用 receipt 会保留实际 provider/model，当前 P3 gate 只检查用量收据完整性，不把尚未实现的 provider/model 目标预登记核验写成已完成能力；
 5. `assess(...)` 对完整配对 fail closed；只有 selection decision 可以 eligible，且 eligible 不会自动部署；
 6. 只有 `GenerationService` 生成且具有完整 feedback、R0 execution 和 patch receipt 的 candidate 能部署；`propose(origin="imported")` 只供合同测试和研究 archive。晋升前必须用 `plan_monitor(...)` 冻结 guard 任务和阈值；`promote(...)` 强制接收该 plan，并以 compare-and-swap 检查父包仍 active 后移动 channel；
@@ -51,7 +51,15 @@ python -m nexgent rsi-events general --limit 50
 # 注册、捕获开发反馈并执行冻结 R0
 python -m nexgent rsi-register general --package parent-package.json
 python -m nexgent rsi-feedback general EPISODE_ID --expected-revision 0
+
+# 默认：内置 reference-os-v1。该示例 policy 面向默认 task-agent 包
+python -m nexgent rsi-generate general FEEDBACK_ID --mutation-policy examples/rsi/reference-os-mutation-policy.json --expected-revision 0
+
+# 可选：显式 improver 包；builtin:reference-os-v1 是默认值的显式写法
 python -m nexgent rsi-generate general FEEDBACK_ID --improver-package improver.json --mutation-policy mutation-policy.json --expected-revision 0
+
+# 可选：加载独立 R channel 的当前版本，并用 revision 防止运行期间身份漂移
+python -m nexgent rsi-generate general FEEDBACK_ID --improver-channel recursive --expected-improver-revision 0 --mutation-policy mutation-policy.json --expected-revision 0
 
 # 先冻结 selection policy/任务，再运行与决策
 python -m nexgent rsi-plan CANDIDATE_ID workbench --split selection --seed 19 --policy promotion-policy.json
@@ -65,7 +73,9 @@ python -m nexgent rsi-run-monitor general workbench
 python -m nexgent rsi-monitor general GUARD_EPISODE_ID
 ```
 
-默认任务窗口的“RSI 与版本”页输入 channel 后刷新同一只读投影。页面和 CLI 输出不会返回包源文件、FeedbackBundle 正文、私有任务 payload、evaluator 诊断或隐藏答案。CLI 也不提供“一键晋升”；部署必须经过 selection decision、预登记 monitor plan 和显式 `rsi-promote`。
+不传 `--improver-package` 或 `--improver-channel` 时，`rsi-generate` 使用内置 `reference-os-v1`。它向配置的 provider 发起一次有收据的 `rsi_improver` 调用，只接收一个现有 O/S 组件的单次 `replace`，要求精确旧摘要和对应激活探针；M、多文件、`add`、`remove`、控制面组件和未列入 mutation policy 的路径都会 fail closed。模型 abstain、输出不合合同、调用失败或预算耗尽均保留为 missing generation。示例 [reference-os-mutation-policy.json](../examples/rsi/reference-os-mutation-policy.json) 只适用于默认 task-agent 包；自定义包应按其实际文件与 O/M/S 分类另行冻结策略。
+
+默认任务窗口的“RSI 与版本”页输入 channel 后刷新同一只读投影。页面和 CLI 输出不会返回包源文件、FeedbackBundle 正文、私有任务 payload、evaluator 诊断或隐藏答案。CLI 也不提供“一键晋升”；candidate generation 成功后仍须经过 selection decision、预登记 monitor plan 和显式 `rsi-promote`。
 
 安全边界如下：
 
@@ -77,7 +87,7 @@ python -m nexgent rsi-monitor general GUARD_EPISODE_ID
 - monitor plan 是 promotion 的必填项，其完整任务多重集只能消费一次；monitor 只接受真实、usage-complete、evaluator-bound Episode，不接受调用方伪造的分数字典；rollback 只移动指针，保留候选、trial、decision、Episode 和事件链；
 - selection gate 中的 `cost` 是按模型调用、charged completion tokens、工具调用和节点计算的 normalized work unit，不是货币。原始 usage 继续保留；如需比较实际费用，必须另外记录供应商账单口径。
 
-确定性测试验证这些合同，只构成 **mechanism proof**。真实 `R0` 生成候选并在新 Episode 激活，才构成 **真实模型行为证据**；在预登记任务族上有重复、对照、完整缺测报告和效应估计，才构成 **统计 RSI 效益证据**。当前不能越级使用后两种表述。P3 对象见[P3 控制面设计](design/p3-feedback-evolution-control-plane.md)，R 自更新与元效用见[P4 递归控制面](design/p4-recursive-improver-control-plane.md)。
+确定性测试验证这些合同，只构成 **mechanism proof**。内置 R0 的存在和一次模型调用也不自动构成改进证据；真实 `R0` 必须生成合法候选、候选在后续 Episode 激活并通过独立 selection，才能形成完整的 **真实模型行为证据**。在预登记任务族上有重复、对照、完整缺测报告和效应估计，才构成 **统计 RSI 效益证据**。当前后两层仍待实验闭合。P3 对象见[P3 控制面设计](design/p3-feedback-evolution-control-plane.md)，R 自更新与元效用见[P4 递归控制面](design/p4-recursive-improver-control-plane.md)。
 
 ## P4 递归改进器
 

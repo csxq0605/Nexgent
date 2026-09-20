@@ -27,7 +27,8 @@ _EVENT_FIELDS = {
         "record_digest",
     ),
     "candidate_generation_missing": (
-        "generation_id", "feedback_bundle_id", "episode_id", "reason", "record_digest",
+        "generation_id", "feedback_bundle_id", "episode_id", "reason_type",
+        "reason_digest", "record_digest",
     ),
     "paired_trial_planned": (
         "candidate_id", "plan_id", "suite_digest", "policy_digest", "record_digest",
