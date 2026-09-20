@@ -8,7 +8,12 @@ import threading
 from .evolution.controller import StudyController
 
 
-TASK_COMMANDS = {"task", "task-resume", "task-show", "task-list", "task-export", "task-benchmark"}
+TASK_COMMANDS = {
+    "task", "task-resume", "task-show", "task-list", "task-export", "task-benchmark",
+    "rsi-status", "rsi-events", "rsi-register", "rsi-feedback", "rsi-generate",
+    "rsi-plan", "rsi-run-plan", "rsi-assess", "rsi-plan-monitor", "rsi-promote",
+    "rsi-run-monitor", "rsi-monitor", "rsi-rollback",
+}
 
 
 def project_root():
@@ -67,15 +72,143 @@ def _add_task_budget(parser):
     parser.add_argument("--max-nodes", type=int, help="Maximum admitted execution nodes")
 
 
+def _event_limit(value):
+    try:
+        limit = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("event limit must be an integer") from None
+    if not 1 <= limit <= 1000:
+        raise argparse.ArgumentTypeError("event limit must be between 1 and 1000")
+    return limit
+
+
 def _task_summary(state):
     return {key: state.get(key) for key in
             ("id", "status", "output_refs", "outcome", "usage", "last_error")}
+
+
+def _task_benchmark(identity):
+    from .tasks.tools import task_benchmarks
+
+    adapters = task_benchmarks()
+    if identity not in adapters:
+        raise ValueError(f"Task benchmark is not installed: {identity}")
+    return adapters[identity]
+
+
+def _promotion_policy(value):
+    from .tasks.evolution import PromotionPolicy
+
+    fields = _object_argument(value, label="policy") if value else {}
+    try:
+        return PromotionPolicy(**fields)
+    except TypeError as exc:
+        raise ValueError(f"policy has unsupported fields: {exc}") from None
+
+
+def _public_active_result(result):
+    """Keep package source out of command output while retaining deployment identity."""
+    from .tasks.evolution_view import public_channel_state
+
+    return public_channel_state(result)
+
+
+def _record_result(record, fields):
+    """Return only control-plane identities and aggregate evidence, never frozen task payloads."""
+    return {key: record.get(key) for key in fields if key in record}
+
+
+def _stop_event():
+    stop = threading.Event()
+    import signal
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    return stop
 
 
 def _run_task_command(args):
     from .tasks.runtime import TaskService
 
     service = TaskService(args.root)
+    if args.command.startswith("rsi-"):
+        from .tasks.evolution import EvolutionService
+        from .tasks.evolution_view import public_evolution_event
+
+        evolution = EvolutionService(service)
+        if args.command == "rsi-status":
+            return _public_active_result(evolution.active(args.channel))
+        if args.command == "rsi-events":
+            events = evolution.events(args.channel)[-args.limit:]
+            return {"channel": args.channel,
+                    "events": [public_evolution_event(event) for event in events]}
+        if args.command == "rsi-register":
+            package = _object_argument(args.package, label="package")
+            return _public_active_result(evolution.register(args.channel, package))
+        if args.command in {"rsi-feedback", "rsi-generate"}:
+            from .tasks.generation import GenerationService
+
+            generation = GenerationService(service, evolution)
+            if args.command == "rsi-feedback":
+                result = generation.capture_feedback(
+                    args.channel, args.episode_ids, args.expected_revision)
+                return _record_result(result, (
+                    "schema", "id", "channel", "channel_revision", "parent_package_id",
+                    "parent_package_digest", "digest", "created_at", "record_digest"))
+            improver = _object_argument(args.improver_package, label="improver package")
+            mutation = _object_argument(args.mutation_policy, label="mutation policy")
+            result = generation.generate(
+                args.channel, args.feedback_id, improver, mutation, args.expected_revision,
+                budget=_task_budget(args), stop_event=_stop_event())
+            return _record_result(result, (
+                "schema", "id", "channel", "channel_revision", "status", "reason",
+                "feedback_bundle_id", "feedback_digest", "improver_package_id",
+                "improver_package_digest", "improver_closure_digest", "episode_id",
+                "episode_status", "usage", "execution", "patch_digest", "candidate_id",
+                "candidate_package_id", "candidate_package_digest", "created_at",
+                "completed_at", "record_digest"))
+        if args.command == "rsi-plan":
+            result = evolution.plan_pair(
+                args.candidate_id, _task_benchmark(args.benchmark), split=args.split,
+                split_role="selection", seed=args.seed, budget=_task_budget(args),
+                policy=_promotion_policy(args.policy))
+            return _record_result(result, (
+                "id", "candidate_id", "channel", "parent_package_id",
+                 "parent_package_digest", "package_id", "package_digest", "suite_digest",
+                 "split_role", "arm_schedule", "environment_digest", "budget", "policy",
+                 "policy_digest", "created_at",
+                "record_digest"))
+        if args.command == "rsi-run-plan":
+            result = evolution.run_pair(
+                args.plan_id, _task_benchmark(args.benchmark), stop_event=_stop_event())
+            return _record_result(result, (
+                "id", "plan_id", "candidate_id", "channel", "parent_package_id",
+                "parent_package_digest", "package_id", "package_digest", "suite_digest",
+                "split_role", "policy", "policy_digest", "arm_order", "created_at",
+                "record_digest"))
+        if args.command == "rsi-assess":
+            return evolution.assess(args.trial_id)
+        if args.command == "rsi-plan-monitor":
+            result = evolution.plan_monitor(
+                args.candidate_id, _task_benchmark(args.benchmark), split=args.split,
+                seed=args.seed, budget=_task_budget(args))
+            return _record_result(result, (
+                 "id", "candidate_id", "channel", "package_id", "package_digest",
+                 "suite_digest", "task_schedule", "environment_digest", "budget",
+                 "created_at", "record_digest"))
+        if args.command == "rsi-promote":
+            return _public_active_result(evolution.promote(
+                args.candidate_id, args.decision_id, monitor_plan_id=args.monitor_plan_id))
+        if args.command == "rsi-run-monitor":
+            result = evolution.run_monitor(
+                args.channel, _task_benchmark(args.benchmark), stop_event=_stop_event())
+            return _record_result(result, (
+                "id", "monitor_plan_id", "suite_digest", "episode_ids", "record_digest"))
+        if args.command == "rsi-monitor":
+            result = evolution.monitor(
+                args.channel, args.episode_ids, rollback_on_regression=not args.no_rollback)
+            result["active"] = _public_active_result(result["active"])
+            return result
+        if args.command == "rsi-rollback":
+            return _public_active_result(evolution.rollback(args.channel, reason=args.reason))
     if args.command == "task-list":
         return [{"id": state.get("id"), "objective": state.get("task", {}).get("objective"),
                  "status": state.get("status"), "outcome": state.get("outcome")}
@@ -86,16 +219,17 @@ def _run_task_command(args):
         return {"episode_id": args.episode_id,
                 "path": service.export(args.episode_id, args.output)}
 
-    stop = threading.Event()
-    import signal
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    stop = _stop_event()
     if args.command == "task-resume":
         return _task_summary(service.run(args.episode_id, stop_event=stop))
     if args.command == "task-benchmark":
+        if args.package and args.package_channel:
+            raise ValueError("Specify either --package or --package-channel")
         package = _object_argument(str(args.package), label="package") if args.package else None
         options = {"controlled_failure": True} if args.controlled_failure else {}
         return service.benchmark(args.benchmark, split=args.split, seed=args.seed,
                                  budget=_task_budget(args), package=package,
+                                 package_channel=args.package_channel,
                                  stop_event=stop, **options)
 
     inputs = _object_argument(args.input, label="input") if args.input else {}
@@ -103,9 +237,12 @@ def _run_task_command(args):
     if deliverables is not None and not isinstance(deliverables, list):
         raise ValueError("deliverables must be a JSON array")
     constraints = _object_argument(args.constraints, label="constraints") if args.constraints else None
+    if args.package and args.package_channel:
+        raise ValueError("Specify either --package or --package-channel")
     package = _object_argument(str(args.package), label="package") if args.package else None
     state = service.create(args.objective, inputs=inputs, budget=_task_budget(args),
                            capabilities=args.capability, package=package,
+                           package_channel=args.package_channel,
                            deliverables=deliverables, constraints=constraints)
     if args.register_only:
         return _task_summary(state)
@@ -135,6 +272,7 @@ def main(argv=None):
     task.add_argument("--constraints", help="JSON object (or file) with quality/effect/wall-time constraints")
     task.add_argument("--capability", action="append", default=[], help="Grant an installed tool capability; repeat as needed")
     task.add_argument("--package", type=Path, help="AgentPackage JSON file; defaults to the installed seed package")
+    task.add_argument("--package-channel", help="Resolve the active AgentPackage from this RSI channel")
     task.add_argument("--register-only", action="store_true", help="Register without executing")
     _add_task_budget(task)
     resume_task = sub.add_parser("task-resume", help="Resume a persisted task episode")
@@ -150,9 +288,78 @@ def main(argv=None):
     benchmark_task.add_argument("--split", default="development")
     benchmark_task.add_argument("--seed", type=int, default=0)
     benchmark_task.add_argument("--package", type=Path, help="AgentPackage JSON file; defaults to the installed seed package")
+    benchmark_task.add_argument("--package-channel", help="Resolve the active AgentPackage from this RSI channel")
     benchmark_task.add_argument("--controlled-failure", action="store_true",
                                 help="Request the benchmark's deterministic recovery trial when supported")
     _add_task_budget(benchmark_task)
+
+    rsi_status = sub.add_parser("rsi-status", help="Show the active package revision for an RSI channel")
+    rsi_status.add_argument("channel")
+    rsi_events = sub.add_parser("rsi-events", help="Show the public audit events for an RSI channel")
+    rsi_events.add_argument("channel")
+    rsi_events.add_argument("--limit", type=_event_limit, default=50)
+
+    rsi_register = sub.add_parser("rsi-register", help="Register a generation-zero package channel")
+    rsi_register.add_argument("channel")
+    rsi_register.add_argument("--package", required=True,
+                              help="AgentPackage JSON object, file path, or @file")
+
+    rsi_feedback = sub.add_parser("rsi-feedback", help="Capture development Episode feedback")
+    rsi_feedback.add_argument("channel")
+    rsi_feedback.add_argument("episode_ids", nargs="+")
+    rsi_feedback.add_argument("--expected-revision", type=int, required=True)
+
+    rsi_generate = sub.add_parser("rsi-generate", help="Generate a feedback-bound candidate")
+    rsi_generate.add_argument("channel")
+    rsi_generate.add_argument("feedback_id")
+    rsi_generate.add_argument("--improver-package", required=True,
+                              help="Improver AgentPackage JSON object, file path, or @file")
+    rsi_generate.add_argument("--mutation-policy", required=True,
+                              help="Mutation policy JSON object, file path, or @file")
+    rsi_generate.add_argument("--expected-revision", type=int, required=True)
+    _add_task_budget(rsi_generate)
+
+    rsi_plan = sub.add_parser("rsi-plan", help="Freeze a paired selection trial plan")
+    rsi_plan.add_argument("candidate_id")
+    rsi_plan.add_argument("benchmark")
+    rsi_plan.add_argument("--split", default="selection")
+    rsi_plan.add_argument("--seed", type=int, default=0)
+    rsi_plan.add_argument("--policy", help="Promotion policy JSON object, file path, or @file")
+    _add_task_budget(rsi_plan)
+
+    rsi_run_plan = sub.add_parser("rsi-run-plan", help="Execute a frozen paired trial plan")
+    rsi_run_plan.add_argument("plan_id")
+    rsi_run_plan.add_argument("benchmark")
+
+    rsi_assess = sub.add_parser("rsi-assess", help="Assess a completed paired trial")
+    rsi_assess.add_argument("trial_id")
+
+    rsi_plan_monitor = sub.add_parser(
+        "rsi-plan-monitor", help="Freeze an independent deployment monitoring plan")
+    rsi_plan_monitor.add_argument("candidate_id")
+    rsi_plan_monitor.add_argument("benchmark")
+    rsi_plan_monitor.add_argument("--split", default="guard")
+    rsi_plan_monitor.add_argument("--seed", type=int, default=0)
+    _add_task_budget(rsi_plan_monitor)
+
+    rsi_promote = sub.add_parser("rsi-promote", help="Promote an eligible candidate")
+    rsi_promote.add_argument("candidate_id")
+    rsi_promote.add_argument("decision_id")
+    rsi_promote.add_argument("monitor_plan_id")
+
+    rsi_run_monitor = sub.add_parser("rsi-run-monitor", help="Run the active guard plan")
+    rsi_run_monitor.add_argument("channel")
+    rsi_run_monitor.add_argument("benchmark")
+
+    rsi_monitor = sub.add_parser("rsi-monitor", help="Assess evaluator-bound monitoring Episodes")
+    rsi_monitor.add_argument("channel")
+    rsi_monitor.add_argument("episode_ids", nargs="+")
+    rsi_monitor.add_argument("--no-rollback", action="store_true",
+                             help="Record degradation without automatic rollback")
+
+    rsi_rollback = sub.add_parser("rsi-rollback", help="Roll back one promoted package edge")
+    rsi_rollback.add_argument("channel")
+    rsi_rollback.add_argument("reason")
 
     sub.add_parser("list")
     sub.add_parser("benchmarks")
@@ -199,7 +406,7 @@ def main(argv=None):
     if args.command in TASK_COMMANDS:
         try:
             result = _run_task_command(args)
-        except (ValueError, OSError) as exc:
+        except (KeyError, ValueError, OSError) as exc:
             parser.error(str(exc))
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 1 if _task_failed(args.command, result) else 0

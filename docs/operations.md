@@ -1,6 +1,6 @@
 # 任务运行与恢复
 
-> 适用版本：0.9。P1 任务运行器已经实现；P2 OpenFOAM 独立 Re=10 smoke 已实现并真实通过；P3 跨任务行为更新、P4 递归改进和 P5 冻结研究仍未完成。0.8 研究接口保留在本文末尾。
+> 适用版本：0.9。P1 任务运行器已经实现；P2 OpenFOAM 独立 Re=10 smoke 已实现并真实通过；P3 反馈驱动包演化控制面已实现，真实模型效果与统计 RSI 效益仍未建立；P4 递归改进和 P5 冻结研究尚未完成。0.8 研究接口保留在本文末尾。
 
 ## 项目、模型与入口
 
@@ -20,6 +20,66 @@ python -m nexgent task-benchmark openfoam_cavity --split smoke --seed 0
 ```
 
 `--input` 接受内联 JSON 对象、JSON 文件路径或 `@file`。`--capability` 可重复授予工具；`--package` 读取 AgentPackage JSON。任务和 benchmark 都可设置 `--max-calls`、`--max-completion-tokens`、`--max-tool-calls` 与 `--max-nodes`。workbench 和 openfoam_cavity 的 `--controlled-failure` 请求各插件提供的确定性一次性故障场景，用于恢复合同验证；它不是生产故障模拟。
+
+## P3 反馈演化控制面
+
+P3 管理通用 `AgentPackage` 的行为版本，不理解 OpenFOAM、科学发现或 WorkBench 的领域语义。插件只提供任务、工具、数据和 evaluator；核心只处理身份、反馈边界、候选、冻结评测、部署通道和回滚。
+
+标准顺序为：
+
+1. 用当前 channel 包运行明确标记为 `development` 的任务，留下终态 Episode；
+2. `GenerationService.capture_feedback(...)` 将实际 episode/package/memory/evaluation/usage/artifact 摘要冻结成 `FeedbackBundle`，私有 evaluator 内容只保留 digest；
+3. `GenerationService.generate(...)` 通过同一任务运行器执行独立、版本化且冻结的 improver `R0`；它只能返回严格 `BehaviorPatch`，由宿主将 O/M/S 改动应用为不可变 child 包；
+4. `EvolutionService.plan_pair(...)` 在结果产生前冻结 selection suite、父子顺序、benchmark/evaluator snapshot、可重算的 execution environment/tool/runtime snapshot 和 `PromotionPolicy`，再由 `run_pair(...)` 实际执行；逐调用 receipt 会保留实际 provider/model，当前 P3 gate 只检查用量收据完整性，不把尚未实现的 provider/model 目标预登记核验写成已完成能力；
+5. `assess(...)` 对完整配对 fail closed；只有 selection decision 可以 eligible，且 eligible 不会自动部署；
+6. 只有 `GenerationService` 生成且具有完整 feedback、R0 execution 和 patch receipt 的 candidate 能部署；`propose(origin="imported")` 只供合同测试和研究 archive。晋升前必须用 `plan_monitor(...)` 冻结 guard 任务和阈值；`promote(...)` 强制接收该 plan，并以 compare-and-swap 检查父包仍 active 后移动 channel；
+7. 后续任务通过 `--package-channel` 加载新版本；`run_monitor(...)` 只能一次性消费完整 guard task 多重集并产生实际 Episode，`monitor(...)` 核验当前部署、逐项任务登记、usage 完整性和 evaluator receipt。缺项、额外重复或缺测都 fail closed，达到退化条件时沿部署边 `rollback(...)`。
+
+Python API 与 CLI 都保留分步对象，调用方必须显式保存每个 immutable record。GUI 提供安全只读信息；CLI 提供同样受门控的逐步操作：
+
+```powershell
+# --package 与 --package-channel 互斥
+python -m nexgent task "执行已部署版本" --package-channel general
+python -m nexgent task-benchmark workbench --split selection --seed 19 --package-channel general
+
+# 当前 active package/revision/promotion 摘要
+python -m nexgent rsi-status general
+
+# 最近 50 条经过字段白名单过滤的 hash-linked 审计事件
+python -m nexgent rsi-events general --limit 50
+
+# 注册、捕获开发反馈并执行冻结 R0
+python -m nexgent rsi-register general --package parent-package.json
+python -m nexgent rsi-feedback general EPISODE_ID --expected-revision 0
+python -m nexgent rsi-generate general FEEDBACK_ID --improver-package improver.json --mutation-policy mutation-policy.json --expected-revision 0
+
+# 先冻结 selection policy/任务，再运行与决策
+python -m nexgent rsi-plan CANDIDATE_ID workbench --split selection --seed 19 --policy promotion-policy.json
+python -m nexgent rsi-run-plan PLAN_ID workbench
+python -m nexgent rsi-assess TRIAL_ID
+
+# 晋升前冻结 guard；晋升、运行监控并按预登记阈值判断回滚
+python -m nexgent rsi-plan-monitor CANDIDATE_ID workbench --split guard --seed 23
+python -m nexgent rsi-promote CANDIDATE_ID DECISION_ID MONITOR_PLAN_ID
+python -m nexgent rsi-run-monitor general workbench
+python -m nexgent rsi-monitor general GUARD_EPISODE_ID
+```
+
+默认任务窗口的“RSI 与版本”页输入 channel 后刷新同一只读投影。页面和 CLI 输出不会返回包源文件、FeedbackBundle 正文、私有任务 payload、evaluator 诊断或隐藏答案。CLI 也不提供“一键晋升”；部署必须经过 selection decision、预登记 monitor plan 和显式 `rsi-promote`。
+
+安全边界如下：
+
+- 反馈 Episode 必须在本地、终态、development-only，并绑定当前 active 父包；selection、guard 和 final holdout 不能被回灌为候选反馈；
+- mutable policy 只允许声明为 O（编排）、M（记忆策略）或 S（技能/提示协议）的包内路径；improve entry、R0 执行闭包、evaluator、gate、权限、manifest 和宿主代码不可修改；
+- paired plan 和 monitor plan 在执行前冻结；计划保存的是可验证的 execution environment/tool/runtime snapshot，provider/model 实际值保留在逐调用 receipt 中。当前 gate 会拒绝用量不完整，但正式真实模型实验还必须预登记目标 provider/model/参数，并另行核验 receipt；缺分数、用量不完整、snapshot 变化、已实现的身份错配和 required regression 不能被当作零损失或从聚合中省略；
+- `eligible` 只是 decision，`promote` 是单独 CAS 操作；在途 Episode 继续绑定创建时版本，新 Episode 才读取新 channel revision；
+- imported candidate 没有 deployment authority；promotion 必须能反查不可变 generation record、FeedbackBundle 和实际 R0 执行收据；
+- monitor plan 是 promotion 的必填项，其完整任务多重集只能消费一次；monitor 只接受真实、usage-complete、evaluator-bound Episode，不接受调用方伪造的分数字典；rollback 只移动指针，保留候选、trial、decision、Episode 和事件链；
+- selection gate 中的 `cost` 是按模型调用、charged completion tokens、工具调用和节点计算的 normalized work unit，不是货币。原始 usage 继续保留；如需比较实际费用，必须另外记录供应商账单口径。
+
+确定性测试验证这些合同，只构成 **mechanism proof**。真实 `R0` 生成候选并在新 Episode 激活，才构成 **真实模型行为证据**；在预登记任务族上有重复、对照、完整缺测报告和效应估计，才构成 **统计 RSI 效益证据**。当前不能越级使用后两种表述。完整数据对象和 P3/P4 边界见[P3 控制面设计](design/p3-feedback-evolution-control-plane.md)，实验协议见[P3 跨任务 RSI 研究设计](research/p3-cross-task-rsi-design-20260920.md)。
+
+`build_rsi_mechanism_evidence(...)` / `export_rsi_mechanism_evidence(...)` 可在 Python 中核验一条已经完成的闭环并导出 `nexgent.rsi-mechanism-evidence.v1`。导出只含 package/episode/record identity、digest、usage、gate、聚合测量和事件链引用，不含包源码或 evaluator 私有内容。当前确定性 pilot 使用固定无模型 fixture 覆盖了生成、selection、晋升、后续通道加载、guard 退化、回滚和回滚后加载；它的 claim 固定为 `deterministic_mechanism_closure_only`。
 
 ## OpenFOAM smoke 运行
 
@@ -73,11 +133,9 @@ P1 的确定性合同测试不调用真实模型供应商，也不构成真实�
 
 真实运行按[任务运行时验证记录](research/task-runtime-validation-20260920.md)登记。至少保存 package/episode 身份、冻结任务合同、计划和节点、评审与修订、模型及工具收据、工件谱系、停止/恢复状态、预算用量和最终验收。未观察到的字段保持缺测，不能用确定性测试结果代填；调用 `recover` 也不能在没有最终交付时写成恢复成功。
 
-## P1 之后的版本变更与回滚边界
+## P3 与 P4 的版本边界
 
-P1 只会执行登记的不可变 `AgentPackage`，不会根据一次任务反馈自动生成或部署新包。P3 才会把跨任务失败归因到编排、技能、提示协议或记忆策略，产生带父版本和触发证据的候选；候选先在隔离开发任务上运行，再由独立质量、成本和回归检查决定是否晋升。未晋升候选保持可审计但不进入默认任务。若已晋升版本在监测任务上触发预登记退化条件，部署指针恢复到最近一个已通过门控的包，失败 episode 和候选谱系继续保留。
-
-P4 才允许候选生成、实验选择或预算分配等改进策略本身成为被更新对象。评价器、预算核算、权限准入和回滚记录保持在可信宿主侧，候选不能修改自己的通过标准。研究依据和所需对照见[编排与 RSI 研究综合](research/agent-orchestration-rsi-synthesis-20260916.md)。
+P3 的 `R0` 是冻结实验装置：候选只能改变任务 agent 的 O/M/S 行为面。P4 才允许诊断、候选生成、实验选择、父代选择或预算分配等改进策略 `R` 自身成为被测更新对象。即使进入 P4，评价器、预算核算、权限准入、promotion/rollback 记录和最终比较规则仍留在可信宿主侧；被测 R 不能改写自己的通过标准。研究依据和所需对照见[编排与 RSI 研究综合](research/agent-orchestration-rsi-synthesis-20260916.md)与[P3 研究设计](research/p3-cross-task-rsi-design-20260920.md)。
 
 ## 保留的 0.8 研究接口
 

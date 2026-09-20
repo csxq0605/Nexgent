@@ -10,7 +10,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView, QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
-    QListWidget, QListWidgetItem, QMainWindow, QPlainTextEdit, QPushButton,
+    QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QPlainTextEdit, QPushButton,
     QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
     QVBoxLayout, QWidget,
 )
@@ -82,13 +82,17 @@ class TaskWorker(QThread):
 
 
 class TaskWindow(QMainWindow):
-    def __init__(self, project_root, service=None):
+    def __init__(self, project_root, service=None, evolution=None):
         super().__init__()
         self.project_root = Path(project_root).resolve()
         if service is None:
             from ..tasks.runtime import TaskService
             service = TaskService(self.project_root)
         self.service = service
+        if evolution is None and hasattr(service, "store"):
+            from ..tasks.evolution import EvolutionService
+            evolution = EvolutionService(service)
+        self.evolution = evolution
         self.selected_id = None
         self.running_id = None
         self.worker = None
@@ -196,6 +200,21 @@ class TaskWindow(QMainWindow):
         self.tabs.addTab(self.memory, "记忆与版本")
         self.events = self._reader()
         self.tabs.addTab(self.events, "活动记录")
+        rsi_panel = QWidget()
+        rsi_layout = QVBoxLayout(rsi_panel)
+        rsi_controls = QHBoxLayout()
+        rsi_controls.addWidget(QLabel("AgentPackage 通道"))
+        self.rsi_channel = QLineEdit("general")
+        self.rsi_channel.setPlaceholderText("例如 general")
+        self.rsi_refresh_button = QPushButton("刷新版本状态")
+        self.rsi_refresh_button.clicked.connect(self.refresh_rsi)
+        rsi_controls.addWidget(self.rsi_channel, 1)
+        rsi_controls.addWidget(self.rsi_refresh_button)
+        rsi_layout.addLayout(rsi_controls)
+        rsi_layout.addWidget(QLabel("仅显示版本、决策、聚合指标与审计摘要；评测器实现和私有任务内容不会显示。"))
+        self.rsi_view = self._reader()
+        rsi_layout.addWidget(self.rsi_view, 1)
+        self.tabs.addTab(rsi_panel, "RSI 与版本")
         tools_panel = QWidget()
         tools_layout = QVBoxLayout(tools_panel)
         tools_layout.addWidget(QLabel("为新任务勾选允许使用的已安装工具。"))
@@ -276,6 +295,26 @@ class TaskWindow(QMainWindow):
                 self.show_task(selected)
         except Exception as exc:
             self._error(f"读取任务失败：{exc}")
+        self.refresh_rsi()
+
+    def refresh_rsi(self):
+        """Refresh a bounded, evaluator-safe package evolution projection."""
+        if self.evolution is None:
+            self.rsi_view.setPlainText("当前任务服务未提供 AgentPackage 演化控制面。")
+            return
+        channel = self.rsi_channel.text().strip()
+        if not channel:
+            self.rsi_view.setPlainText("请输入 AgentPackage 通道名称。")
+            return
+        try:
+            from ..tasks.evolution_view import public_channel_view
+            view = public_channel_view(self.evolution.active(channel),
+                                       self.evolution.events(channel), limit=50)
+            self.rsi_view.setPlainText(json_text(view))
+        except KeyError:
+            self.rsi_view.setPlainText(f"尚未登记通道：{channel}")
+        except Exception as exc:
+            self.rsi_view.setPlainText(f"读取 RSI 版本状态失败：{exc}")
 
     def _selection_changed(self, current, previous=None):
         if current is not None:

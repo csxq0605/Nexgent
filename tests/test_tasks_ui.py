@@ -85,6 +85,44 @@ def window(qtbot, tmp_path, service):
     return widget
 
 
+class FakeEvolution:
+    def active(self, channel):
+        return {"channel": channel, "package_id": "package-active", "package_digest": "digest-active",
+                "revision": 4, "promotion": {"decision_id": "decision-7"}, "updated_at": 1.0,
+                "package": {"files": {"private.py": "hidden source"}}}
+
+    def events(self, channel):
+        return [
+            {"channel": channel, "sequence": 8, "kind": "candidate_admitted", "created": 1.0,
+             "content": {"candidate_id": "candidate-8", "package_id": "package-next",
+                         "hidden_evaluator": "private rubric"},
+             "previous": "old", "digest": "candidate-event"},
+            {"channel": channel, "sequence": 9, "kind": "promotion_assessed", "created": 2.0,
+             "content": {"decision_id": "decision-9", "trial_id": "trial-9", "eligible": True},
+             "previous": "candidate-event", "digest": "decision-event"},
+            {"channel": channel, "sequence": 10, "kind": "package_promoted", "created": 3.0,
+             "content": {"candidate_id": "candidate-8", "decision_id": "decision-9",
+                         "trial_id": "trial-9", "to_package_id": "package-next"},
+             "previous": "decision-event", "digest": "promotion-event"},
+            {"channel": channel, "sequence": 11, "kind": "package_rolled_back", "created": 4.0,
+             "content": {"from_package_id": "package-next", "to_package_id": "package-active",
+                         "reason": "guard regression", "evidence": {"private": "hidden result"}},
+             "previous": "promotion-event", "digest": "rollback-event"},
+        ]
+
+
+def test_rsi_information_view_shows_versions_and_public_audit_only(qtbot, tmp_path):
+    service = FakeService()
+    ui = TaskWindow(tmp_path, service=service, evolution=FakeEvolution())
+    qtbot.addWidget(ui)
+    ui.show()
+    text = ui.rsi_view.toPlainText()
+    assert "package-active" in text and '"revision": 4' in text
+    assert "candidate-8" in text and "trial-9" in text and "decision-9" in text
+    assert "package_promoted" in text and "package_rolled_back" in text
+    assert "private rubric" not in text and "hidden source" not in text and "hidden result" not in text
+
+
 def test_register_freeform_task_with_inputs_and_budget(qtbot, tmp_path):
     service = FakeService()
     ui = window(qtbot, tmp_path, service)

@@ -144,10 +144,18 @@ class TaskService:
             return self.store.save(state)
 
     def create(self, objective, inputs=None, deliverables=None, budget=None, capabilities=None,
-               package=None, context=None, *, constraints=None, entry="execute", parent_episode_id=None):
+               package=None, context=None, *, constraints=None, entry="execute", parent_episode_id=None,
+               package_channel=None):
         if not isinstance(objective, str) or not objective.strip() or len(objective) > 20000:
             raise ContractError("Task objective must be nonempty and at most 20000 characters")
-        if package is None:
+        if package is not None and package_channel is not None:
+            raise ContractError("Specify either a package or a package channel")
+        package_registration = None
+        if package_channel is not None:
+            from .evolution import active_package_registration
+            package_registration = active_package_registration(self.store, package_channel)
+            package = package_registration["package"]
+        elif package is None:
             from .seed import default_package
             package = default_package()
         verify_package(package)
@@ -167,6 +175,15 @@ class TaskService:
         if (not isinstance(inputs, dict) or not isinstance(context, dict)
                 or not isinstance(constraints, dict) or not isinstance(budget, dict)):
             raise ContractError("Task inputs, context, constraints and budget must be JSON objects")
+        if package_registration is not None:
+            if "package_channel_registration" in context:
+                raise ContractError("Package channel registration context is host-owned")
+            context["package_channel_registration"] = {
+                "channel": package_registration["channel"],
+                "revision": package_registration["revision"],
+                "package_id": package_registration["package_id"],
+                "package_digest": package_registration["package_digest"],
+            }
         allowed_effects = constraints.get("allowed_effects")
         if ("allowed_effects" in constraints and
                 (not isinstance(allowed_effects, list)
@@ -563,6 +580,9 @@ class TaskService:
                 "query": query, "item_ids": [item["id"] for item in selected[:params.get("limit", 5)]]})
             return selected[:params.get("limit", 5)]
         if method == "remember":
+            state = self.store.get(identity)
+            if state["task"].get("context", {}).get("memory_writeback") is False:
+                raise PermissionError("Memory writeback is disabled for this evaluation Episode")
             return self.store.remember(identity, params["content"], kind=params.get("kind", "experience"),
                                        evidence_refs=params.get("evidence") or [])
         if method == "plan":
@@ -578,7 +598,10 @@ class TaskService:
             return record
         raise ContractError(f"Unknown task capability: {method}")
 
-    def benchmark(self, benchmark_id, *, split="development", seed=0, budget=None, package=None, stop_event=None, **options):
+    def benchmark(self, benchmark_id, *, split="development", seed=0, budget=None, package=None,
+                  package_channel=None, stop_event=None, **options):
+        if package is not None and package_channel is not None:
+            raise ContractError("Specify either a package or a package channel")
         adapters = task_benchmarks()
         if benchmark_id not in adapters:
             raise ContractError(f"Task benchmark is not installed: {benchmark_id}")
@@ -598,7 +621,8 @@ class TaskService:
                                                    "task_ref": deepcopy(task_ref),
                                                    "snapshot": deepcopy(snapshot)}
             state = self.create(task_ref["objective"], task_ref.get("inputs"), task_ref.get("deliverables"), budget,
-                task_ref.get("capabilities"), package, context, constraints=task_ref.get("constraints"))
+                task_ref.get("capabilities"), package, context, constraints=task_ref.get("constraints"),
+                package_channel=package_channel)
             self.run(state["id"], stop_event=stop_event)
             reports.append(self._evaluate_registered(state["id"], adapters))
             if stop_event is not None and stop_event.is_set():
@@ -621,6 +645,21 @@ class TaskService:
     def evaluate(self, identity, adapter, task_ref, *, snapshot=None):
         state = self.store.get(identity)
         snapshot = _json_copy(adapter.snapshot() if snapshot is None else snapshot, label="Benchmark snapshot")
+        task_ref = _json_copy(task_ref, label="Benchmark task")
+        registration = state["task"].get("context", {}).get("benchmark_registration")
+        if registration is not None:
+            if (not isinstance(registration, dict)
+                    or getattr(adapter, "id", None) != registration.get("benchmark_id")
+                    or digest(snapshot) != digest(registration.get("snapshot"))
+                    or digest(task_ref) != digest(registration.get("task_ref"))):
+                raise ContractError("Evaluation does not match the frozen benchmark registration")
+            # Registered benchmark evidence is single-assignment.  A resumed
+            # Episode explicitly clears its stale evaluation before it can be
+            # evaluated again, so callers cannot rerun an evaluator until a
+            # favorable score appears or overwrite a guard result.
+            if isinstance(state.get("evaluation"), dict):
+                return {"episode_id": identity, "evaluation": deepcopy(state["evaluation"]),
+                        "usage": self.store.usage(identity)}
         if state["status"] != "completed":
             report = {"status": "unavailable", "score_available": False, "accepted": None,
                       "execution_status": state["status"]}

@@ -6,16 +6,18 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具
 
 ## 定位与当前状态
 
-0.9 完成了 P1 的任务执行、交付评审与恢复基础及产品入口整合，并实现了首个独立 P2 OpenFOAM smoke demo。普通目标和 benchmark 共享 `TaskService`，使用版本化 `AgentPackage`、受限模型/技能/工具能力、显式工件、执行节点、记忆快照、预算、停止恢复和可导出证据。默认 GUI 是任务空间；0.8 研究窗口和原有 CLI 命令继续保留。
+0.9 完成了 P1 的任务执行、交付评审与恢复基础及产品入口整合，实现了独立 P2 OpenFOAM smoke demo，并加入 P3 的反馈驱动包演化控制面。普通目标和 benchmark 共享 `TaskService`；P3 再用不可变记录把开发反馈、冻结改进器、候选行为补丁、配对选择、显式晋升、通道加载、监测和回滚连成可审计闭环。默认 GUI 是任务空间；0.8 研究窗口和原有 CLI 命令继续保留。
 
-P1 已由确定性网关、工具和 benchmark 双件测试覆盖，并会运行真实受限子进程。它建立了后续 RSI 所需的可执行、可评审、可追踪和可恢复底座，**还没有实现跨任务候选生成、独立晋升门、自动回滚或改进策略自身更新**。真实 Provider 验证已经执行：MiMo 跑通模型、usage、工具、重复阻断与恢复入口，但在 30 次模型调用后耗尽预算且没有交付；Qwen 因账户欠费被供应商拒绝，Gemini 最小探针连接失败。仓库不把这些失败记录或 P2 求解器运行写成真实模型任务成功。
+P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → 预登记 paired selection/policy → 显式 promotion/channel → 预登记 guard monitor → rollback` 的工程控制面。它能证明候选由真实开发反馈触发、门控与部署分离、后续任务按通道解析版本，并在可信宿主侧保留评价、权限、预算和回滚权力。**当前没有真实模型候选通过独立选择的结果，也没有统计 RSI 效益证据；P3 不允许 R0 修改自身，P4 才研究 R 的递归更新。**
+
+真实 Provider 验证已经执行：MiMo 跑通模型、usage、工具、重复阻断与恢复入口，但在 30 次模型调用后耗尽预算且没有交付；Qwen 因账户欠费被供应商拒绝，Gemini 最小探针连接失败。仓库不把这些失败记录、确定性控制面测试或 P2 求解器运行写成真实模型任务成功。
 
 | 内容 | 状态 |
 | --- | --- |
 | P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础已实现并通过确定性合同测试；真实 Provider episode 已运行但未形成可验收交付 |
 | P1 普通任务与独立 workbench benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同 |
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
-| P3 跨任务行为更新 | 待实现与检验 |
+| P3 跨任务行为更新 | 反馈绑定候选生成、配对门控、通道晋升、监测/回滚及脱敏机制证据导出已实现；确定性闭环不代表真实模型效果或统计效益 |
 | P4 改进过程可更新与递归执行 | 待实现与检验 |
 | P5 冻结研究和完整产品验收 | 待实现与检验 |
 | 0.8 源码执行、自修改、历史 benchmark 与研究窗口 | 保留；其证据不替代 0.9 P1 或 P2–P5 验收 |
@@ -25,6 +27,8 @@ P1 已由确定性网关、工具和 benchmark 双件测试覆盖，并会运行
 - [定位与重构决策](docs/design/product-and-refactor-decision.md)：固定用户不变要求和框架边界。
 - [vNext 智能体架构](docs/design/agent-architecture-vnext.md)：真实任务执行、技能/编排/记忆和反馈驱动更新。
 - [论文方法到设计与实验](docs/research/agent-orchestration-rsi-synthesis-20260916.md)：AutoSci、ADAS、AFlow、DGM、Hyperagents、STOP 的采用方式与边界。
+- [P3 反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)：当前实现对象、完整状态流、CLI/GUI、信任边界和证据等级。
+- [P3 跨任务 RSI 研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)：一手论文方法、可证伪假设、对照和冻结试验协议。
 - [P1 真实 Provider 验证](docs/research/task-runtime-validation-20260920.md)：实际 episode、token 与节点用量、供应商失败、重复调用阻断和未通过项。
 - [OpenFOAM 独立 demo](docs/demos/openfoam-cfd-design.md)、[本机环境](docs/demos/openfoam-environment-20260916.md)、[真实 smoke 验证](docs/demos/openfoam-smoke-validation-20260920.md)与[机器可读收据摘要](docs/demos/openfoam-smoke-receipt-20260920.json)：任务设计、版本适配、实际执行证据和结论边界。
 - [分阶段重构计划](REFACTOR_PLAN.md)：依赖、责任和验收条件。
@@ -42,13 +46,17 @@ flowchart LR
     O --> B[独立 Benchmark 评价]
 ```
 
-任务窗口展示目标、节点、交付物、失败、调用收据和记忆版本。跨任务行为更新与递归改进属于 P3–P4，未包含在 P1 完成状态中。
+任务窗口展示目标、节点、交付物、失败、调用收据和记忆版本；“RSI 与版本”页只读展示通道当前包和经过字段白名单过滤的审计事件。跨任务行为更新由 P3 控制面管理，改进器自身更新属于 P4。
 
 ### 从任务底座到 RSI
 
 后续自进化的对象是版本化智能体行为，而不是宿主评价器或领域答案：任务编排与角色交接、技能实现和提示协议、记忆写入与检索策略，以及用于诊断和产生改进的策略。真实任务的交付质量、独立 benchmark 分数、评审缺陷、工具错误、恢复结果、回归和资源成本共同构成反馈；代理自评只能作为其中一项有来源的信号。
 
-闭环需要依次留下可核查证据：失败归因形成修改假设；从已冻结父版本生成候选 `AgentPackage`；在隔离的开发任务上执行候选；以独立评价和成本/安全回归作为晋升门；只有通过门控的版本才进入后续任务。未通过的候选保留证据但不部署；已部署版本若在监测任务中退化，则恢复到上一已通过版本。P1 目前提供包身份、谱系、任务轨迹和恢复语义，候选生成、门控、晋升和回滚由 P3–P4 实现。
+闭环依次留下可核查证据：只从当前通道父包的 development Episode 捕获 `FeedbackBundle`；独立、版本化且冻结的 `R0` 只能输出声明式 `BehaviorPatch`；可信宿主验证补丁只改变编排 O、记忆策略 M 或技能/提示协议 S，并构造不可变 child `AgentPackage`；冻结候选在 selection 任务上与父包交错配对，按预登记政策形成 decision；只有由 `GenerationService` 真实执行 R0 并闭合生成收据的 eligible candidate 才有部署资格，受控导入的 candidate 只进入研究 archive；显式 compare-and-swap 晋升必须绑定预登记 monitor plan；guard plan 的完整任务多重集只能消费一次，缺项、重复项或 usage 不完整均 fail closed，并可沿部署边回滚。未通过的候选和缺测全部保留。
+
+paired plan 冻结宿主能够重算的 execution environment、工具描述、运行时实现摘要和 arm schedule。当前计划对象不会预先完整冻结实际 provider/model；二者由每次模型调用的 receipt 证明，正式实验再核验这些收据是否符合预登记配置。选择门中的 `cost` 是由模型调用、charged completion tokens、工具调用和节点用量构成的透明 normalized work unit，便于同一协议内比较，不代表供应商货币费用。
+
+这条链有三种不同证据等级。确定性测试可以证明身份、隔离、门控、加载和回滚等**机制**；真实 provider Episode 才能证明模型确实产生并执行了行为变化；多个冻结任务、重复和对照才能支持**统计 RSI 效益**。当前状态只完成第一层的工程实现，后两层仍待实验。
 
 这个边界来自[编排与 RSI 研究综合](docs/research/agent-orchestration-rsi-synthesis-20260916.md)：持久化、实际执行和有效必须分别检查，且“失败证据 → 候选变化 → 验证 → 后续实际加载 → 结果”缺一不可。0.8 的[框架验证](docs/research/framework-validation-20260916.md)、[v1 机制审查](docs/research/framework-mechanism-v1-review.md)和[v2 机制审查](docs/research/framework-mechanism-v2-review.md)记录过机制未激活、契约错误和实际后代零增益，因此源码变化、记忆写入或候选数量都不能单独作为 RSI 成功证据。P1 实跑记录格式见[任务运行时验证模板](docs/research/task-runtime-validation-20260920.md)。
 
@@ -84,6 +92,26 @@ python -m venv .venv
 .venv\Scripts\python.exe -m nexgent task-resume EPISODE_ID
 .venv\Scripts\python.exe -m nexgent task-export EPISODE_ID --output delivery.json
 
+# 让普通任务或 benchmark 使用通道当前已晋升包；不能同时传 --package
+.venv\Scripts\python.exe -m nexgent task "执行后续任务" --package-channel general
+.venv\Scripts\python.exe -m nexgent task-benchmark workbench --split selection --seed 19 --package-channel general
+
+# 只读查看通道当前版本与字段过滤后的审计事件
+.venv\Scripts\python.exe -m nexgent rsi-status general
+.venv\Scripts\python.exe -m nexgent rsi-events general --limit 50
+
+# 显式、分阶段执行 P3 闭环；每一步输出下一步所需的不可变 ID/digest
+.venv\Scripts\python.exe -m nexgent rsi-register general --package parent-package.json
+.venv\Scripts\python.exe -m nexgent rsi-feedback general EPISODE_ID --expected-revision 0
+.venv\Scripts\python.exe -m nexgent rsi-generate general FEEDBACK_ID --improver-package improver.json --mutation-policy mutation-policy.json --expected-revision 0
+.venv\Scripts\python.exe -m nexgent rsi-plan CANDIDATE_ID workbench --split selection --seed 19 --policy promotion-policy.json
+.venv\Scripts\python.exe -m nexgent rsi-run-plan PLAN_ID workbench
+.venv\Scripts\python.exe -m nexgent rsi-assess TRIAL_ID
+.venv\Scripts\python.exe -m nexgent rsi-plan-monitor CANDIDATE_ID workbench --split guard --seed 23
+.venv\Scripts\python.exe -m nexgent rsi-promote CANDIDATE_ID DECISION_ID MONITOR_PLAN_ID
+.venv\Scripts\python.exe -m nexgent rsi-run-monitor general workbench
+.venv\Scripts\python.exe -m nexgent rsi-monitor general GUARD_EPISODE_ID
+
 # workbench 是 P1 的纯 Python 可选插件；此命令仍会使用配置的模型供应商
 .venv\Scripts\python.exe -m nexgent task-benchmark workbench --split development --seed 0 --max-calls 20
 
@@ -94,7 +122,9 @@ python -m venv .venv
 .venv\Scripts\python.exe -m nexgent gui --legacy-research
 ```
 
-`--capability` 可重复授予已安装工具；`--package` 接受 AgentPackage JSON。预算选项包括 `--max-calls`、`--max-completion-tokens`、`--max-tool-calls` 和 `--max-nodes`。没有传入时使用运行器的有界默认值。输入、包和任务合同无效时，命令会在执行前失败。
+`--capability` 可重复授予已安装工具；`--package` 接受 AgentPackage JSON，`--package-channel` 在任务创建时原子解析当前 active 包，两者互斥。预算选项包括 `--max-calls`、`--max-completion-tokens`、`--max-tool-calls` 和 `--max-nodes`。没有传入时使用运行器的有界默认值。输入、包和任务合同无效时，命令会在执行前失败。
+
+P3 的每个写操作都有独立 CLI 和 Python API；CLI 保留 FeedbackBundle、TrialPlan、decision、monitor plan 与 promotion 的分步边界，没有“一键跳过门控”的入口。GUI 的“RSI 与版本”页保持只读。`rsi-*` 输出只包含部署身份、decision、聚合指标和摘要 digest，不暴露 AgentPackage 源文件、私有任务内容或 evaluator 实现。操作顺序见[运行与恢复](docs/operations.md)，完整合同见[P3 控制面设计](docs/design/p3-feedback-evolution-control-plane.md)。
 
 ## 保留的 0.8 benchmark 与源码研究接口
 
@@ -158,6 +188,8 @@ python -m venv .venv
 - [分阶段协作计划与 PR](REFACTOR_PLAN.md)
 - [当前设计与历史实现的架构入口](docs/architecture.md)
 - [RSI 一手文献与实现判断](docs/research/reboot-rsi-mechanisms.md)
+- [P3 反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)
+- [P3 跨任务 RSI 研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)
 - [源码机制审查和探测设计](docs/research/source-mechanism-review-20260916.md)
 - [六组科学 demo 完整结果](docs/research/source-batch-results-20260916.md)
 - [通用框架的真实机制验证与交付](docs/research/framework-validation-20260916.md)
@@ -166,7 +198,7 @@ python -m venv .venv
 - [运行与恢复](docs/operations.md)
 
 ```text
-src/nexgent/                      通用 RSI 核心与信息窗口
+src/nexgent/                      通用 RSI 核心、P3 包演化控制面与信息窗口
 benchmarks/workbench/             P1 工件式数据核对任务与 benchmark 插件
 benchmarks/openfoam/              P2 Foundation 8 方腔 smoke 插件
 benchmarks/scientific_discovery/   独立科学发现 demo 包

@@ -1,12 +1,12 @@
 # Nexgent vNext 重构计划
 
-日期：2026-09-20。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 Provider 验证已运行但没有形成可验收交付；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过。P3–P5 尚未完成。
+日期：2026-09-20。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 Provider 验证已运行但没有形成可验收交付；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面已实现，真实模型效果与统计 RSI 效益尚未建立。P4–P5 尚未完成。
 
 ## 1. 产品与执行范围
 
 唯一产品是 **通用 RSI 智能体框架 Nexgent**。它应能组织智能体完成普通任务，并通过独立 benchmark 检验任务能力、持久改进和递归效用。科学发现与 OpenFOAM 都是可选插件/场景；核心不能依赖 CFD 方程、求解器、case、论文五阶段流程或某个 demo 的评分。
 
-当前实现阶段仍遵守该产品边界。定位依据见[设计决策](docs/design/product-and-refactor-decision.md)，接口和执行模型见[架构](docs/design/agent-architecture-vnext.md)，P1 的真实运行证据按[验证模板](docs/research/task-runtime-validation-20260920.md)另行登记。
+当前实现阶段仍遵守该产品边界。定位依据见[设计决策](docs/design/product-and-refactor-decision.md)，接口和执行模型见[架构](docs/design/agent-architecture-vnext.md)，P3 的现行合同见[反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)，研究依据与冻结实验见[P3 跨任务 RSI 设计](docs/research/p3-cross-task-rsi-design-20260920.md)。
 
 ## 2. 对旧完成判断的修正
 
@@ -57,13 +57,30 @@
 
 真实 WSL2 `Ubuntu-20.04` / OpenFOAM Foundation 8 运行已经通过 Re=10、20×20×1 smoke：三个程序实际退出成功，`checkMesh` 报告 `Mesh OK.` 和 400 cells，`icoFoam` 到达模板结束时间，最新 `U`/`p` 内部场可解析且有限，隐藏评价器接受与真实收据一致的交付。真实 `TaskService` 还用固定无模型 AgentPackage 完成了一次合成单次拒绝、重试、求解、工件校验与隐藏评价链。详细证据见[2026-09-20 验证记录](docs/demos/openfoam-smoke-validation-20260920.md)。这只是执行和结构 smoke 及框架恢复证据，不建立模型自主恢复、稳态、Ghia 精度、Re=100、网格/时间收敛、性能或 RSI 结论。
 
-### P3：跨任务持久改进
+### P3：跨任务持久改进（控制面已实现，效果实验未完成）
 
-依赖 P1；可与 P2 插件实现部分并行，完整验收需 P2 或另一真实任务环境提供反馈。把任务反馈归因到可修改的行为组件，生成技能/图/工具策略/记忆策略候选；修订在隔离版本中验证，后续任务使用被采用的版本。
+依赖 P1。当前实现固定以下闭环：
 
-至少提供一个实际的、由反馈促成的行为变化：例如反复缺少运行前检查，促成条件验证节点及交接要求，并在后续不同任务实例生效。不能只调 CFD 网格或把一条教训写入未使用的文件。候选未变好时报告未采用或保留研究分支，不强行宣称改进。
+```text
+development Episode
+  -> FeedbackBundle
+  -> 独立且冻结的 improver R0
+  -> BehaviorPatch（只允许 O/M/S）
+  -> 不可变 child AgentPackage
+  -> 预登记 paired selection + PromotionPolicy
+  -> eligible decision
+  -> 显式 CAS promotion + package channel
+  -> 预登记 guard Episode
+  -> monitor / rollback
+```
 
-出口：提出变更、真实加载、执行差异、质量/成本和回归都可追踪。固定编排与仅记忆积累分别作为对照；验证持久变化，不要求每轮修改所有组件。
+`GenerationService` 只从本地、终态、明确标记为 development 且绑定当前 active 父包的 Episode 捕获有界反馈。独立版本化的 `R0` 通过同一 `TaskService` 运行，只能交付严格的声明式 `BehaviorPatch`；可信宿主验证可修改路径、O/M/S 分类、旧摘要、大小、激活探针和完整 child 包。`R0` 的 improve entry 与执行闭包在 P3 冻结，候选不得修改 evaluator、gate、权限、预算核算或宿主控制代码。
+
+`EvolutionService` 把 paired suite、benchmark/evaluator snapshot、父子顺序、预算、可重算的 execution environment/tool/runtime snapshot 及 PromotionPolicy 在结果产生前冻结。实际 provider/model 身份由逐调用 receipt 证明，并在正式实验中与预登记配置核对；当前计划记录本身不声称已预先完整冻结二者。development decision 不能晋升，final holdout 不能进入演化；selection 缺分、用量不完整、身份不一致和关键回归均 fail closed。选择门的 `cost` 是模型调用、charged completion tokens、工具调用和节点用量形成的 normalized work unit，不是供应商货币费用。eligible 与 promote 分开；只有 `GenerationService` 闭合真实 R0 生成收据的 candidate 有部署权限，受控导入只进入研究/archive；promote 还要求父包仍为 active，并强制绑定预登记 monitor plan。普通任务只在创建时通过 `package_channel` 解析部署包。guard plan 与阈值在晋升前冻结，其完整任务多重集只允许一次执行；缺项、重复项、usage 不完整或 evaluator receipt 不匹配均 fail closed，退化时沿已记录部署边回滚。
+
+当前完成的是工程机制：不可变记录、hash-linked 事件、只读安全投影、普通任务的通道加载，以及一个以固定无模型 fixture 执行 feedback → generation → selection → promotion → new Episode → guard → rollback 的确定性闭环和脱敏证据导出。尚未完成的 P3 研究出口包括：真实 `R0` 从真实模型反馈产生有效候选、候选在独立 selection 上胜过父代、晋升后在新任务中激活所声称行为，以及由重复和对照支持的效应估计。候选未变好时必须报告 rejected/missing；不能把代码路径、模拟测试、candidate 数量或一次部署写成 RSI 效益。
+
+详细对象、接口和信任边界见[控制面设计](docs/design/p3-feedback-evolution-control-plane.md)。固定编排、匹配额外调用、只积累记忆与 P3 主机制的对照见[研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)。
 
 ### P4：改进过程的可更新与递归执行
 
@@ -92,7 +109,7 @@
 | 本机 OpenFOAM | 已确认 WSL2 / Ubuntu 20.04 / Foundation 8，并真实运行 Re=10 教程 smoke |
 | P1 任务执行、交付评审、工件/记忆、预算与恢复基础 | 0.9 已实现并通过确定性合同测试；真实 Provider episode 已执行但未产生交付或评价结果 |
 | OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
-| 跨任务行为更新 P3 | 待实现与检验 |
+| 跨任务行为更新 P3 | feedback/R0/BehaviorPatch、配对门控、显式晋升、通道加载、guard monitor 与回滚控制面已实现；真实模型效果与统计效益待检验 |
 | 新框架递归执行及效用 P4–P5 | 待实现与检验 |
 | 0.8 的源码机制与历史结果 | 保留；不能替代以上状态 |
 
@@ -100,8 +117,8 @@
 
 1. **P1-V 后续真实运行验证**：在修正模型反复请求已完成工具的问题并设置新的冻结预算后，重新检验 normal 多步骤交付；只有 normal 能完成，才运行可隔离验证恢复假设的受控失败场景。保留已有失败 episode，不用重跑覆盖。
 2. **P2 数值验证扩展**：在现有 smoke 之外，另行冻结 Re=100、独立参考、网格/时间收敛和稳态判据。没有这些证据时保持 smoke 结论，不把 20×20×1 Re=10 输出与 Ghia 数据比较。
-3. **P3 跨任务行为更新**：明确修改对象为编排、技能/提示协议和记忆策略；从任务反馈生成带谱系的候选包，在隔离开发任务中评价质量、成本和回归，通过门控后晋升，退化时回到上一通过版本。
-4. **P4–P5**：只有 P3 显示后续任务实际加载了有效变化后，才让候选生成、实验选择和预算分配策略本身可更新，并用冻结协议检验其后代效用。
+3. **P3 真实行为与效果验证**：冻结 `R0`、任务序列、可验证执行环境/工具/运行时快照、预算、paired selection 和 guard policy；预登记目标 provider/model，并用逐调用 receipt 核验实际身份与参数；用真实 development 失败产生候选，报告全部完整/缺测配对、行为激活、质量、normalized work unit、原始 usage、可得的实际货币费用和回归。即使没有候选通过也按预登记结束，不降低门槛追求正结果。
+4. **P4–P5**：只有 P3 显示后续任务实际加载了有效变化后，才允许候选生成、实验选择、父代选择和预算分配策略 `R` 成为变异对象，并从共同起点比较两版冻结 R 的后代效用；最终用多任务族、重复和未写回 holdout 决定统计主张。
 
 ## 6. 分阶段 PR 与历史提交
 
