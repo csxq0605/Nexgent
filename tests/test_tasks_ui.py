@@ -162,12 +162,15 @@ def test_register_freeform_task_with_inputs_and_budget(qtbot, tmp_path):
     ui.contract.setPlainText('{"deliverables":[{"name":"report","schema":{"type":"object"}}],"constraints":{"quality_requirements":["cite inputs"]}}')
     ui.max_calls.setValue(3)
     ui.max_tools.setValue(4)
+    ui.max_tool_work.setValue(500)
     ui.tool_permissions.item(0).setCheckState(Qt.CheckState.Checked)
     qtbot.mouseClick(ui.create_button, Qt.MouseButton.LeftButton)
     assert service.created == [{"objective": "Compare two proposed storage designs", "inputs": {"document": {"facts": [1, 2]}},
                                 "deliverables": [{"name": "report", "schema": {"type": "object"}}],
                                 "constraints": {"quality_requirements": ["cite inputs"]},
-                                "budget": {"max_model_calls": 3, "max_completion_tokens": 80000, "max_tool_calls": 4, "max_nodes": 100},
+                                "budget": {"max_model_calls": 3, "max_completion_tokens": 80000,
+                                           "max_tool_calls": 4, "max_tool_work_units": 500,
+                                           "max_nodes": 100},
                                 "capabilities": ["workbench.inspect"]}]
     assert ui.task_list.count() == 1
     assert ui.run_button.isEnabled()

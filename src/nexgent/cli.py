@@ -65,6 +65,7 @@ def _task_budget(args):
         "max_model_calls": getattr(args, "max_calls", None),
         "max_completion_tokens": getattr(args, "max_completion_tokens", None),
         "max_tool_calls": getattr(args, "max_tool_calls", None),
+        "max_tool_work_units": getattr(args, "max_tool_work_units", None),
         "max_nodes": getattr(args, "max_nodes", None),
     }.items() if value is not None}
 
@@ -73,6 +74,8 @@ def _add_task_budget(parser):
     parser.add_argument("--max-calls", type=int, help="Maximum admitted model calls")
     parser.add_argument("--max-completion-tokens", type=int, help="Maximum reserved completion tokens")
     parser.add_argument("--max-tool-calls", type=int, help="Maximum admitted tool calls")
+    parser.add_argument("--max-tool-work-units", type=int,
+                        help="Maximum host-metered tool work across the root Episode")
     parser.add_argument("--max-nodes", type=int, help="Maximum admitted execution nodes")
 
 

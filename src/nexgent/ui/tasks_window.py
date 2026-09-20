@@ -145,9 +145,12 @@ class TaskWindow(QMainWindow):
         self.max_calls = self._spin(20, 0, 10000)
         self.max_tokens = self._spin(80000, 0, 100000000)
         self.max_tools = self._spin(20, 0, 10000)
+        self.max_tool_work = self._spin(0, 0, 2000000000)
         self.max_nodes = self._spin(100, 0, 100000)
         for label, widget in [("模型调用上限", self.max_calls), ("预留输出 Token", self.max_tokens),
-                              ("工具调用上限", self.max_tools), ("执行节点上限", self.max_nodes)]:
+                              ("工具调用上限", self.max_tools),
+                              ("工具工作量上限", self.max_tool_work),
+                              ("执行节点上限", self.max_nodes)]:
             limits.addRow(label, widget)
         left.addLayout(limits)
         self.create_button = QPushButton("登记任务")
@@ -403,7 +406,9 @@ class TaskWindow(QMainWindow):
             if constraints is not None and not isinstance(constraints, dict):
                 raise ValueError("constraints 必须是 JSON 对象")
             budget = {"max_model_calls": self.max_calls.value(), "max_completion_tokens": self.max_tokens.value(),
-                      "max_tool_calls": self.max_tools.value(), "max_nodes": self.max_nodes.value()}
+                      "max_tool_calls": self.max_tools.value(),
+                      "max_tool_work_units": self.max_tool_work.value(),
+                      "max_nodes": self.max_nodes.value()}
             capabilities = [self.tool_permissions.item(i).data(Qt.ItemDataRole.UserRole)
                             for i in range(self.tool_permissions.count())
                             if self.tool_permissions.item(i).checkState() == Qt.CheckState.Checked]

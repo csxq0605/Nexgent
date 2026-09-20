@@ -79,7 +79,8 @@ def test_task_loads_json_files_and_forwards_explicit_runtime_options(task_servic
                      "--capability", "workbench.inspect_sources",
                      "--capability", "workbench.validate_delivery",
                      "--max-calls", "3", "--max-completion-tokens", "900",
-                     "--max-tool-calls", "4", "--max-nodes", "12"])
+                     "--max-tool-calls", "4", "--max-tool-work-units", "55",
+                     "--max-nodes", "12"])
 
     assert code == 0
     create = task_service.calls[0]
@@ -89,7 +90,8 @@ def test_task_loads_json_files_and_forwards_explicit_runtime_options(task_servic
     assert create[2]["deliverables"] == [{"name": "ledger", "schema": {"type": "object"}}]
     assert create[2]["constraints"] == {"allowed_effects": ["read"]}
     assert create[2]["budget"] == {"max_model_calls": 3, "max_completion_tokens": 900,
-                                    "max_tool_calls": 4, "max_nodes": 12}
+                                    "max_tool_calls": 4, "max_tool_work_units": 55,
+                                    "max_nodes": 12}
     assert create[2]["package"]["digest"] == "test"
     assert task_service.calls[1][0:2] == ("run", "episode-1")
     assert json.loads(capsys.readouterr().out)["status"] == "completed"
@@ -121,12 +123,14 @@ def test_persisted_task_commands_route_to_task_service(task_service, tmp_path, c
 def test_task_benchmark_forwards_split_seed_budget_and_recovery_option(task_service, tmp_path, capsys):
     code = cli.main(["--root", str(tmp_path), "task-benchmark", "workbench",
                      "--split", "selection", "--seed", "19", "--max-calls", "6",
-                     "--max-tool-calls", "8", "--controlled-failure"])
+                     "--max-tool-calls", "8", "--max-tool-work-units", "89",
+                     "--controlled-failure"])
     assert code == 0
     call = task_service.calls[0]
     assert call[0:2] == ("benchmark", "workbench")
     assert call[2]["split"] == "selection" and call[2]["seed"] == 19
-    assert call[2]["budget"] == {"max_model_calls": 6, "max_tool_calls": 8}
+    assert call[2]["budget"] == {"max_model_calls": 6, "max_tool_calls": 8,
+                                 "max_tool_work_units": 89}
     assert call[2]["controlled_failure"] is True
     assert call[2]["package_channel"] is None
     assert json.loads(capsys.readouterr().out)["reports"][0]["evaluation"]["accepted"] is True

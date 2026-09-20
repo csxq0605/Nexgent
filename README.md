@@ -144,7 +144,7 @@ python -m venv .venv
 .venv\Scripts\python.exe -m nexgent gui --legacy-research
 ```
 
-`--capability` 可重复授予已安装工具；`--package` 接受 AgentPackage JSON，`--package-channel` 在任务创建时原子解析当前 active 包，两者互斥。预算选项包括 `--max-calls`、`--max-completion-tokens`、`--max-tool-calls` 和 `--max-nodes`。没有传入时使用运行器的有界默认值。输入、包和任务合同无效时，命令会在执行前失败。
+`--capability` 可重复授予已安装工具；`--package` 接受 AgentPackage JSON，`--package-channel` 在任务创建时原子解析当前 active 包，两者互斥。预算选项包括 `--max-calls`、`--max-completion-tokens`、`--max-tool-calls`、`--max-tool-work-units` 和 `--max-nodes`。没有传入时使用运行器的有界默认值；工具工作量默认上限为 0，使用带正预留的数值或外部工具时必须显式授权。输入、包和任务合同无效时，命令会在执行前失败。
 
 工具可在输入 JSON Schema 中用 `x-nexgent-artifact-ref: true` 声明工件引用。运行器只接受宿主提供或先前动作实际返回的 `artifact-…` 身份，并在调用工具前核验该工件对当前 Episode 可见；`pending` 等占位符会以协议错误失败，且不会消耗工具调用预算。这个合同属于通用核心，Workbench 与 OpenFOAM 只是使用它的独立插件。
 
