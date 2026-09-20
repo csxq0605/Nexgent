@@ -5,6 +5,8 @@ from copy import deepcopy
 import inspect
 import re
 
+from nexgent.tasks.benchmarks import BenchmarkDescriptor
+
 from .data import VERSION, SPLITS, digest, inputs_for, row_errors
 from .schemas import DELIVERY_SCHEMAS, obj, STR, INT, REV, schema_errors
 
@@ -221,10 +223,20 @@ class WorkbenchDomain:
 
 class WorkbenchBenchmark:
     id = "workbench"
+    descriptor = BenchmarkDescriptor(
+        id=id,
+        version=VERSION,
+        title="Artifact-based data reconciliation",
+        splits=tuple(SPLITS),
+        default_split="development",
+        modes=("fixed", "confirmatory", "recovery"),
+        required_capabilities=(
+            "workbench.inspect_sources", "workbench.validate_delivery"),
+        evidence_scope="Engineering task acceptance; no RSI/statistical efficacy claim.",
+    )
 
     def describe(self):
-        return {"id": self.id, "version": VERSION, "title": "Artifact-based data reconciliation",
-                "splits": list(SPLITS), "split_aliases": {"dev": "development"},
+        return {**self.descriptor.as_dict(), "split_aliases": {"dev": "development"},
                 "task_count_per_seed": 1, "data_origin": "authored_operational_fixture",
                 "acceptance": "Exact provenance-preserving reconciliation, aggregates, input integrity, and successful public artifact inspection and schema validation.",
                 "research_scope": "P1 engineering benchmark; statistical efficacy belongs to P5."}

@@ -41,6 +41,24 @@ class FakeTaskService:
             {"episode_id": "episode-bench", "evaluation": {"accepted": True, "score": 1.0}}]}
 
 
+class FakeBenchmarkAdapter:
+    id = "generic"
+
+    def describe(self):
+        return {"id": self.id, "title": "Generic test benchmark",
+                "splits": ["development"]}
+
+    def snapshot(self):
+        return {"id": self.id, "version": 1}
+
+    def tasks(self, split="development", seed=0):
+        return [{"id": f"generic/{split}/{seed}", "objective": "test"}]
+
+    def evaluate(self, task_ref, deliverables, execution_view):
+        return {"status": "accepted", "score_available": True,
+                "score": 1.0, "accepted": True}
+
+
 @pytest.fixture
 def task_service(monkeypatch, tmp_path):
     fake = FakeTaskService(tmp_path)
@@ -170,7 +188,7 @@ def test_rsi_status_and_events_expose_public_control_plane_projection(monkeypatc
 def test_rsi_mutation_commands_form_scriptable_control_plane(monkeypatch, task_service,
                                                               tmp_path, capsys):
     calls = []
-    adapter = object()
+    adapter = FakeBenchmarkAdapter()
 
     class FakeEvolution:
         def __init__(self, service):
@@ -330,7 +348,7 @@ def test_rsi_generate_uses_builtin_reference_improver_when_unspecified(
 def test_rsi_cycle_commands_freeze_inputs_run_resume_and_emit_only_public_state(
         monkeypatch, task_service, tmp_path, capsys):
     calls = []
-    adapter = object()
+    adapter = FakeBenchmarkAdapter()
     records = {}
 
     class FakeEvolution:

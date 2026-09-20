@@ -1,5 +1,6 @@
 """Task-first product commands plus the preserved 0.8 research interface."""
 import argparse
+import inspect
 import json
 import os
 from pathlib import Path
@@ -90,13 +91,17 @@ def _task_summary(state):
             ("id", "status", "output_refs", "outcome", "usage", "last_error")}
 
 
-def _task_benchmark(identity):
+def _task_benchmark(identity, project_root=None):
+    from .tasks.benchmarks import BenchmarkRegistry
     from .tasks.tools import task_benchmarks
 
-    adapters = task_benchmarks()
-    if identity not in adapters:
-        raise ValueError(f"Task benchmark is not installed: {identity}")
-    return adapters[identity]
+    try:
+        inspect.signature(task_benchmarks).bind(project_root)
+    except (TypeError, ValueError):
+        adapters = task_benchmarks()
+    else:
+        adapters = task_benchmarks(project_root)
+    return BenchmarkRegistry.from_mapping(adapters, project_root).get(identity)
 
 
 def _promotion_policy(value):
@@ -150,7 +155,7 @@ def _run_task_command(args):
         if args.command in {"rsi-study-plan", "rsi-study-run", "rsi-study-assess"}:
             from .tasks.studies import RSIStudyService, StudyPolicy
 
-            studies = RSIStudyService(service, _task_benchmark(args.benchmark))
+            studies = RSIStudyService(service, _task_benchmark(args.benchmark, args.root))
             if args.command == "rsi-study-plan":
                 policy_fields = (_object_argument(args.policy, label="study policy")
                                  if args.policy else {})
@@ -210,12 +215,14 @@ def _run_task_command(args):
                 return cycles.public(args.cycle_id)
             if args.command == "rsi-cycle-resume":
                 cycle = cycles.get(args.cycle_id)
-                selection = _task_benchmark(cycle["selection"]["benchmark_id"])
-                guard = _task_benchmark(cycle["guard"]["benchmark_id"])
+                selection = _task_benchmark(
+                    cycle["selection"]["benchmark_id"], args.root)
+                guard = _task_benchmark(
+                    cycle["guard"]["benchmark_id"], args.root)
                 cycles.resume(
                     args.cycle_id, selection, guard, stop_event=_stop_event())
                 return cycles.public(args.cycle_id)
-            benchmark = _task_benchmark(args.benchmark)
+            benchmark = _task_benchmark(args.benchmark, args.root)
             if args.improver_channel:
                 improver = None
             elif args.improver_package in {None, "builtin:reference-os-v1"}:
@@ -293,7 +300,7 @@ def _run_task_command(args):
                 "completed_at", "record_digest"))
         if args.command == "rsi-plan":
             result = evolution.plan_pair(
-                args.candidate_id, _task_benchmark(args.benchmark), split=args.split,
+                args.candidate_id, _task_benchmark(args.benchmark, args.root), split=args.split,
                 split_role="selection", seed=args.seed, budget=_task_budget(args),
                 policy=_promotion_policy(args.policy))
             return _record_result(result, (
@@ -304,7 +311,7 @@ def _run_task_command(args):
                 "record_digest"))
         if args.command == "rsi-run-plan":
             result = evolution.run_pair(
-                args.plan_id, _task_benchmark(args.benchmark), stop_event=_stop_event())
+                args.plan_id, _task_benchmark(args.benchmark, args.root), stop_event=_stop_event())
             return _record_result(result, (
                 "id", "plan_id", "candidate_id", "channel", "parent_package_id",
                 "parent_package_digest", "package_id", "package_digest", "suite_digest",
@@ -314,7 +321,7 @@ def _run_task_command(args):
             return evolution.assess(args.trial_id)
         if args.command == "rsi-plan-monitor":
             result = evolution.plan_monitor(
-                args.candidate_id, _task_benchmark(args.benchmark), split=args.split,
+                args.candidate_id, _task_benchmark(args.benchmark, args.root), split=args.split,
                 seed=args.seed, budget=_task_budget(args))
             return _record_result(result, (
                  "id", "candidate_id", "channel", "package_id", "package_digest",
@@ -325,7 +332,7 @@ def _run_task_command(args):
                 args.candidate_id, args.decision_id, monitor_plan_id=args.monitor_plan_id))
         if args.command == "rsi-run-monitor":
             result = evolution.run_monitor(
-                args.channel, _task_benchmark(args.benchmark), stop_event=_stop_event())
+                args.channel, _task_benchmark(args.benchmark, args.root), stop_event=_stop_event())
             return _record_result(result, (
                 "id", "monitor_plan_id", "suite_digest", "episode_ids", "record_digest"))
         if args.command == "rsi-monitor":

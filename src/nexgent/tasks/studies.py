@@ -22,7 +22,11 @@ import time
 import uuid
 
 from ..kernel.programs import digest
+from .benchmarks import (
+    host_runtime_fingerprint, validate_adapter, validate_snapshot, validate_tasks,
+)
 from .meta_evaluation import _LIMIT_KEYS, _USAGE_KEYS
+from .outcomes import classify_benchmark_outcome, outcome_policy
 from .packages import verify_package
 from .tools import ContractError
 
@@ -216,17 +220,13 @@ class TaskStudyExecutor:
     """Trusted bridge from a frozen study cell to TaskService and an adapter."""
 
     def __init__(self, task_service, adapter):
-        if not isinstance(getattr(adapter, "id", None), str) or not adapter.id:
-            raise TypeError("Study adapter needs a stable id")
-        for method in ("snapshot", "tasks", "evaluate"):
-            if not callable(getattr(adapter, method, None)):
-                raise TypeError("Study adapter is missing method: " + method)
+        validate_adapter(adapter, require_descriptor=False)
         self.tasks = task_service
         try:
             self.adapter = deepcopy(adapter)
         except Exception as exc:
             raise TypeError("Study adapter must be deepcopy-freezable") from exc
-        self.snapshot = _copy(self.adapter.snapshot(), "Study evaluator snapshot")
+        self.snapshot = validate_snapshot(self.adapter.snapshot())
         self.adapter_fingerprint = _adapter_fingerprint(self.adapter)
         self.environment = _execution_environment(task_service, self.adapter)
         self.environment_digest = digest(self.environment)
@@ -250,6 +250,7 @@ class TaskStudyExecutor:
             "benchmark_id": plan["benchmark_id"],
             "task_ref": deepcopy(task_ref),
             "snapshot": deepcopy(plan["benchmark_snapshot"]),
+            "host_runtime": host_runtime_fingerprint(),
         }
         state = self.tasks.create(
             task_ref["objective"], inputs=task_ref.get("inputs"),
@@ -276,39 +277,25 @@ class TaskStudyExecutor:
         return state
 
     def finish(self, plan, cell, episode_id, *, stop_event=None):
-        if (_adapter_fingerprint(self.adapter) != plan["adapter_fingerprint"]
-                or _copy(self.adapter.snapshot(), "Current study snapshot")
+        if (plan.get("outcome_policy") != outcome_policy()
+                or _adapter_fingerprint(self.adapter) != plan["adapter_fingerprint"]
+                or validate_snapshot(self.adapter.snapshot())
                    != plan["benchmark_snapshot"]
                 or digest(_execution_environment(self.tasks, self.adapter))
                    != plan["execution_environment_digest"]):
             raise ContractError("Study evaluator authority changed after registration")
-        state = self.tasks.run(episode_id, stop_event=stop_event)
+        state = self.tasks.get(episode_id)
+        if state["status"] not in {"completed", "failed", "cancelled", "waiting_input"}:
+            state = self.tasks.run(episode_id, stop_event=stop_event)
         if state["status"] in {"ready", "running", "paused"}:
             return None
-        failure_class = None
-        if state["status"] == "completed":
-            evaluated = self.tasks.evaluate(
-                episode_id, self.adapter, deepcopy(cell["task"]),
-                snapshot=deepcopy(plan["benchmark_snapshot"]))
-            state = self.tasks.get(episode_id)
-            report = evaluated["evaluation"]
-        elif state["status"] in {"failed", "cancelled"}:
-            state = self.tasks.get(episode_id)
-            responsibility = state.get("failure_domain")
-            if responsibility not in {"agent", "protocol"}:
-                failure_class = "infrastructure_missing"
-                report = {"status": "unavailable", "score_available": False,
-                          "accepted": None, "execution_status": state["status"]}
-            else:
-                failure_class = "observed_system_failure"
-                report = {"status": "observed_failure", "score_available": True,
-                          "score": 0.0, "accepted": False,
-                          "execution_status": state["status"]}
-        else:
-            state = self.tasks.get(episode_id)
-            failure_class = "infrastructure_missing"
-            report = {"status": "unavailable", "score_available": False,
-                      "accepted": None, "execution_status": state["status"]}
+        evaluated = self.tasks.evaluate(
+            episode_id, self.adapter, deepcopy(cell["task"]),
+            snapshot=deepcopy(plan["benchmark_snapshot"]))
+        state = self.tasks.get(episode_id)
+        classified = classify_benchmark_outcome(state, evaluated["evaluation"])
+        report = classified["evaluation"]
+        failure_class = classified["failure_class"]
         state = self.validate_episode(plan, cell, episode_id)
         calls = state.get("calls") or []
         if plan["provider"] == "none" and plan["model"] == "none":
@@ -427,7 +414,7 @@ class RSIStudyService:
         if plan is not None and (
                 executor.adapter.id != plan["benchmark_id"]
                 or _adapter_fingerprint(executor.adapter) != plan["adapter_fingerprint"]
-                or _copy(executor.adapter.snapshot(), "Current study snapshot")
+                or validate_snapshot(executor.adapter.snapshot())
                    != plan["benchmark_snapshot"]
                 or digest(_execution_environment(self.tasks, executor.adapter))
                    != plan["execution_environment_digest"]):
@@ -513,7 +500,7 @@ class RSIStudyService:
         snapshot = deepcopy(executor.snapshot)
         rows = []
         for seed in seeds:
-            tasks = list(executor.adapter.tasks(split=split, seed=seed))
+            tasks = validate_tasks(executor.adapter.tasks(split=split, seed=seed))
             if not tasks:
                 raise ContractError("Study benchmark returned no holdout tasks")
             for index, task in enumerate(tasks):
@@ -582,6 +569,7 @@ class RSIStudyService:
             "expected_observed_model": observed_model,
             "expected_provider_revision": provider_revision,
             "require_model_calls": require_model_calls, "policy": policy,
+            "outcome_policy": outcome_policy(),
             "adapter_fingerprint": _adapter_fingerprint(executor.adapter),
             "execution_environment": deepcopy(executor.environment),
             "execution_environment_digest": executor.environment_digest,

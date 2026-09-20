@@ -9,7 +9,7 @@ from nexgent.kernel.programs import digest
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.studies import RSIStudyService, StudyPolicy, TaskStudyExecutor
-from nexgent.tasks.tools import ContractError, ToolRegistry
+from nexgent.tasks.tools import ContractError, ToolRegistry, ToolSpec
 
 
 BUDGET = {
@@ -154,9 +154,10 @@ def test_study_plan_binds_benchmark_and_package_digests(tmp_path):
     protocol = {key: plan[key] for key in (
         "benchmark_id", "benchmark_snapshot", "split", "seeds", "tasks", "arms",
         "baseline_arm", "candidate_arm", "episode_budget", "provider", "model",
-        "resolved_model", "model_profile_digest", "require_model_calls", "policy",
-        "expected_observed_model", "expected_provider_revision",
-        "adapter_fingerprint", "execution_environment", "execution_environment_digest",
+            "resolved_model", "model_profile_digest", "require_model_calls", "policy",
+            "expected_observed_model", "expected_provider_revision",
+            "outcome_policy",
+            "adapter_fingerprint", "execution_environment", "execution_environment_digest",
         "model_version_binding", "statistics")}
     assert plan["protocol_digest"] == digest(protocol)
     assert plan["arms"]["a"]["package_digest"] == baseline["digest"]
@@ -322,3 +323,47 @@ def test_agent_execution_failure_is_observed_zero_not_missing(tmp_path):
     report = studies.assess(run["id"])
     assert report["missing"] == []
     assert report["complete_pair_count"] == 2
+
+
+def test_infrastructure_failure_stays_missing_and_is_not_aggregated(tmp_path):
+    tool = ToolSpec(
+        "study.infrastructure", {"type": "object"}, {"type": "object"}, "read",
+        lambda arguments, context: (_ for _ in ()).throw(
+            RuntimeError("host infrastructure unavailable")))
+    tasks = TaskService(tmp_path, tools=ToolRegistry([tool]))
+
+    class InfrastructureBenchmark(HoldoutBenchmark):
+        id = "infrastructure-holdout"
+
+        def tasks(self, split="final_holdout", seed=0):
+            rows = super().tasks(split=split, seed=seed)
+            rows[0]["capabilities"] = [tool.name]
+            return rows
+
+    infrastructure_package = make_package(
+        {"behavior.py": (
+            "def execute(payload, context):\n"
+            "    context.tool('study.infrastructure', {})\n"
+            "    return {'deliverables': {}}\n")},
+        {"entries": {"execute": "behavior.py:execute"}},
+        provenance={"fixture": "study-infrastructure-failure"})
+    studies = RSIStudyService(tasks, InfrastructureBenchmark())
+    budget = {**BUDGET, "max_tool_calls": 1}
+    plan = studies.create_plan(
+        arms={"missing": infrastructure_package, "candidate": package(0.8)},
+        baseline_arm="missing", candidate_arm="candidate", split="final_holdout",
+        seeds=[1, 2], episode_budget=budget, provider="none", model="none",
+        require_model_calls=False, policy=StudyPolicy(min_complete_pairs=2))
+
+    run = studies.run(plan["id"])
+    missing = [cell for cell in run["cells"] if cell["arm"] == "missing"]
+    assert [(cell["status"], cell["score"], cell["accepted"], cell["failure_class"])
+            for cell in missing] == [
+                ("missing", None, None, "infrastructure_missing"),
+                ("missing", None, None, "infrastructure_missing"),
+            ]
+    report = studies.assess(run["id"])
+    assert report["complete_pair_count"] == 0
+    assert len(report["missing"]) == 2
+    assert report["metrics"]["mean_quality_delta"] is None
+    assert report["gates"]["complete_pairs"] is False

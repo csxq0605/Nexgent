@@ -23,6 +23,7 @@ import time
 import uuid
 
 from ..kernel.programs import digest
+from .benchmarks import host_runtime_fingerprint
 from .packages import verify_package
 from .tools import ContractError
 
@@ -931,6 +932,7 @@ class TaskMetaExecutor:
             "benchmark_id": self.adapter.id,
             "task_ref": deepcopy(task_ref),
             "snapshot": deepcopy(self.snapshot),
+            "host_runtime": host_runtime_fingerprint(),
         }
         state = self.tasks.create(
             task_ref["objective"], inputs=task_ref.get("inputs"),

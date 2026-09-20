@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
+import inspect
 from pathlib import Path
 import re
 import threading
@@ -15,6 +16,11 @@ from jsonschema import Draft202012Validator
 from ..kernel.programs import digest
 from ..kernel.store import BudgetExhausted
 from ..models.gateway import ModelGateway, ModelTransportError
+from .benchmarks import (
+    BenchmarkRegistry, describe_adapter, host_runtime_fingerprint,
+    validate_report, validate_snapshot, validate_tasks,
+)
+from .outcomes import classify_benchmark_outcome
 from .package_runner import CapabilityAbort, run_package
 from .packages import PackageError, verify_package
 from .store import EpisodeStore, RecoveryRequired, StateConflict
@@ -178,6 +184,16 @@ class TaskService:
         self.gateway_factory = gateway_factory
         self._projection_lock = threading.RLock()
 
+    def _benchmark_registry(self):
+        """Use project-aware discovery while preserving injected no-arg test facades."""
+        try:
+            inspect.signature(task_benchmarks).bind(self.project_root)
+        except (TypeError, ValueError):
+            adapters = task_benchmarks()
+        else:
+            adapters = task_benchmarks(self.project_root)
+        return BenchmarkRegistry.from_mapping(adapters, project_root=self.project_root)
+
     def _change(self, identity, update):
         with self._projection_lock:
             state = self.store.get(identity)
@@ -278,6 +294,16 @@ class TaskService:
         if benchmark_registration is not None:
             if not isinstance(benchmark_registration, dict):
                 raise ContractError("Benchmark registration must be a JSON object")
+            current_host_runtime = host_runtime_fingerprint()
+            frozen_host_runtime = benchmark_registration.get("host_runtime")
+            if (frozen_host_runtime is not None
+                    and frozen_host_runtime != current_host_runtime):
+                raise ContractError(
+                    "Benchmark registration host runtime differs from the current host")
+            # The host owns this field.  Directly injected legacy callers may
+            # omit it, but cannot choose or suppress the value persisted for a
+            # newly created Episode.
+            benchmark_registration["host_runtime"] = current_host_runtime
         if package_registration is not None:
             if "package_channel_registration" in context:
                 raise ContractError("Package channel registration context is host-owned")
@@ -366,6 +392,12 @@ class TaskService:
                 return self.get(identity)
             if state["status"] == "cancelled":
                 raise ContractError("A cancelled task needs a new task identity")
+            benchmark_registration = self.store.benchmark_registration(identity)
+            if (benchmark_registration is not None
+                    and benchmark_registration.get("host_runtime")
+                    != host_runtime_fingerprint()):
+                raise ContractError(
+                    "Benchmark host runtime changed before Episode execution or resume")
             package = self.store.package(state["package_id"])
             improver_registration = state["task"].get("context", {}).get(
                 "improver_channel_registration")
@@ -384,7 +416,8 @@ class TaskService:
                     raise ContractError(
                         "Active improver registration differs from the Episode package")
             self._change(identity, lambda s: s.update(
-                status="running", last_error=None, failure_domain=None))
+                status="running", last_error=None, failure_domain=None,
+                evaluation=None))
             self.store.event(identity, "episode_started", {"package_digest": package["digest"], "resume": bool(state["nodes"])})
 
             def notify():
@@ -790,24 +823,19 @@ class TaskService:
                   stop_event=None, **options):
         if package is not None and package_channel is not None:
             raise ContractError("Specify either a package or a package channel")
-        adapters = task_benchmarks()
-        if benchmark_id not in adapters:
-            raise ContractError(f"Task benchmark is not installed: {benchmark_id}")
-        adapter = adapters[benchmark_id]
-        snapshot = _json_copy(adapter.snapshot(), label="Benchmark snapshot")
-        if not isinstance(snapshot, dict):
-            raise ContractError("Benchmark snapshot must be a JSON object")
+        registry = self._benchmark_registry()
+        adapter = registry.get(benchmark_id)
+        adapters = registry.adapters()
+        snapshot = validate_snapshot(adapter.snapshot())
         reports = []
-        for task in adapter.tasks(split=split, seed=seed, **options):
-            task_ref = _json_copy(task, label="Benchmark task")
-            if not isinstance(task_ref, dict):
-                raise ContractError("Benchmark tasks must be JSON objects")
+        for task_ref in validate_tasks(adapter.tasks(split=split, seed=seed, **options)):
             context = deepcopy(task_ref.get("context") or {})
             if not isinstance(context, dict):
                 raise ContractError("Benchmark task context must be a JSON object")
             registration = {"benchmark_id": benchmark_id,
                             "task_ref": deepcopy(task_ref),
-                            "snapshot": deepcopy(snapshot)}
+                            "snapshot": deepcopy(snapshot),
+                            "host_runtime": host_runtime_fingerprint()}
             state = self.create(task_ref["objective"], task_ref.get("inputs"), task_ref.get("deliverables"), budget,
                 task_ref.get("capabilities"), package, context, constraints=task_ref.get("constraints"),
                 package_channel=package_channel, benchmark_registration=registration,
@@ -817,7 +845,8 @@ class TaskService:
             reports.append(self._evaluate_registered(state["id"], adapters))
             if stop_event is not None and stop_event.is_set():
                 break
-        return {"benchmark": adapter.describe(), "snapshot": snapshot, "reports": reports}
+        return {"benchmark": describe_adapter(adapter), "snapshot": snapshot,
+                "reports": reports}
 
     def _save_evaluation(self, identity, report, snapshot):
         self.store.event(identity, "benchmark_evaluated", {"report": report, "snapshot": snapshot})
@@ -834,13 +863,14 @@ class TaskService:
 
     def evaluate(self, identity, adapter, task_ref, *, snapshot=None):
         state = self.store.get(identity)
-        snapshot = _json_copy(adapter.snapshot() if snapshot is None else snapshot, label="Benchmark snapshot")
+        snapshot = validate_snapshot(adapter.snapshot() if snapshot is None else snapshot)
         task_ref = _json_copy(task_ref, label="Benchmark task")
         registration = self.store.benchmark_registration(identity)
         if registration is not None:
             if (not isinstance(registration, dict)
                     or getattr(adapter, "id", None) != registration.get("benchmark_id")
                     or digest(snapshot) != digest(registration.get("snapshot"))
+                    or registration.get("host_runtime") != host_runtime_fingerprint()
                     or digest(task_ref) != digest(registration.get("task_ref"))):
                 raise ContractError("Evaluation does not match the frozen benchmark registration")
             # Registered benchmark evidence is single-assignment.  A resumed
@@ -851,23 +881,30 @@ class TaskService:
                 return {"episode_id": identity, "evaluation": deepcopy(state["evaluation"]),
                         "usage": self.store.usage(identity)}
         if state["status"] != "completed":
-            report = {"status": "unavailable", "score_available": False, "accepted": None,
-                      "execution_status": state["status"]}
+            report = classify_benchmark_outcome(state)["evaluation"]
             return self._save_evaluation(identity, report, snapshot)
         descendants = [s for s in self.store.list() if s["root_episode_id"] == state["root_episode_id"]]
         tool_calls = [event["content"] for s in descendants for event in self.store.events(s["id"]) if event["kind"] == "tool"]
         delivered = {name: self.store.read(ref, identity)["content"] for name, ref in state["output_refs"].items()}
-        report = adapter.evaluate(task_ref, delivered,
-            {"inputs": state["task"]["inputs"], "tool_calls": tool_calls, "usage": self.store.usage(identity),
-             "episode_id": identity, "status": state["status"]})
-        report = _json_copy(report, label="Benchmark evaluation")
-        if not isinstance(report, dict):
-            raise ContractError("Benchmark evaluation must be a JSON object")
-        report.setdefault("execution_status", state["status"])
+        try:
+            report = adapter.evaluate(task_ref, delivered,
+                {"inputs": state["task"]["inputs"], "tool_calls": tool_calls,
+                 "usage": self.store.usage(identity), "episode_id": identity,
+                 "status": state["status"]})
+            report = validate_report(report)
+        except Exception:
+            # Evaluator code is host-owned measurement infrastructure.  Its
+            # failure is missing evidence, never an observed agent score.  Do
+            # not persist exception text because registrations and reports can
+            # reach public CLI/export surfaces.
+            report = {"status": "evaluator_unavailable", "score_available": False,
+                      "accepted": None, "execution_status": state["status"]}
+        report = classify_benchmark_outcome(state, report)["evaluation"]
         return self._save_evaluation(identity, report, snapshot)
 
     def evaluate_registered(self, identity):
-        return self._evaluate_registered(identity, task_benchmarks())
+        registry = self._benchmark_registry()
+        return self._evaluate_registered(identity, registry.adapters())
 
     def _evaluate_registered(self, identity, adapters):
         state = self.store.get(identity)
@@ -878,7 +915,7 @@ class TaskService:
         if benchmark_id not in adapters:
             raise ContractError(f"Registered task benchmark is not installed: {benchmark_id}")
         adapter = adapters[benchmark_id]
-        current = _json_copy(adapter.snapshot(), label="Benchmark snapshot")
+        current = validate_snapshot(adapter.snapshot())
         frozen = registration.get("snapshot")
         if not isinstance(current, dict) or not isinstance(frozen, dict) or digest(current) != digest(frozen):
             raise ContractError("Benchmark evaluator snapshot changed from the frozen registration")

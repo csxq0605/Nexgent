@@ -407,6 +407,29 @@ def test_assessment_fails_closed_on_missing_measurement(tmp_path, monkeypatch, f
     assert len(decision["measurements"]["paired_task_deltas"]) == 2
 
 
+def test_attributable_parent_failure_is_observed_zero_in_paired_selection(tmp_path):
+    tasks = service(tmp_path)
+    evolution = EvolutionService(tasks)
+    parent = package(0, fail=True)
+    evolution.register("general", parent)
+    _, candidate = generated_candidate(
+        tasks, evolution, parent, package(1, parent=parent))
+
+    trial = evolution.evaluate_pair(
+        candidate["id"], PairedBenchmark(), split="selection",
+        split_role="selection", policy=PromotionPolicy(max_cost_ratio=10.0))
+    decision = evolution.assess(trial["id"])
+
+    assert decision["gates"]["measurement_complete"] is True
+    rows = decision["measurements"]["paired_task_deltas"]
+    assert [(row["parent"]["score"], row["parent"]["accepted"],
+             row["parent"]["failure_class"], row["score_delta"])
+            for row in rows] == [
+                (0.0, False, "observed_system_failure", 1.0),
+                (0.0, False, "observed_system_failure", 1.0),
+            ]
+
+
 def test_failed_candidate_and_holdout_trial_cannot_be_promoted(tmp_path):
     tasks = service(tmp_path)
     evolution = EvolutionService(tasks)
@@ -478,6 +501,62 @@ def test_monitor_missing_measurement_fails_closed_without_zero_imputation(tmp_pa
     assert monitored["metrics"]["measurement_complete"] is False
     assert monitored["metrics"]["score"] is None
     assert monitored["metrics"]["success_rate"] is None
+
+
+def test_attributable_guard_failure_is_measured_zero_and_rolls_back(tmp_path):
+    tasks = service(tmp_path)
+    evolution = EvolutionService(tasks)
+    parent = package(0)
+    evolution.register("general", parent)
+    target = make_package({"main.py": (
+        "def execute(payload, context):\n"
+        "    if payload.get('context', {}).get('split') == 'guard':\n"
+        "        raise RuntimeError('guard-observed agent failure')\n"
+        "    item = {'version': 1, 'score': 1.0}\n"
+        "    artifact = context.publish(item, name='result')\n"
+        "    return {'deliverables': {'result': artifact['id']}}\n")},
+        {"entries": {"execute": "main.py:execute"}}, parent=parent,
+        provenance={"fixture": "guard-observed-failure"})
+    child, candidate = generated_candidate(tasks, evolution, parent, target)
+    adapter = PairedBenchmark()
+    policy = PromotionPolicy(
+        max_cost_ratio=10.0, monitor_min_score=0.5, monitor_min_success_rate=1.0)
+    trial = evolution.evaluate_pair(
+        candidate["id"], adapter, split="selection", split_role="selection",
+        policy=policy)
+    decision = evolution.assess(trial["id"])
+    assert decision["eligible"] is True
+    monitor_plan = evolution.plan_monitor(candidate["id"], adapter, split="guard", seed=17)
+    evolution.promote(candidate["id"], decision["id"], monitor_plan_id=monitor_plan["id"])
+
+    monitoring = evolution.run_monitor("general", adapter)
+    assert all(report["evaluation"]["status"] == "observed_failure"
+               and report["evaluation"]["score"] == 0.0
+               for report in monitoring["reports"])
+    monitored = evolution.monitor("general", monitoring["episode_ids"])
+    assert monitored["metrics"]["measurement_complete"] is True
+    assert monitored["metrics"]["score"] == 0.0
+    assert monitored["metrics"]["success_rate"] == 0.0
+    assert monitored["degraded"] is True and monitored["rolled_back"] is True
+    assert monitored["active"]["package_id"] == parent["id"]
+
+
+def test_guard_evaluator_failure_is_missing_and_rolls_back(tmp_path):
+    tasks, evolution, parent, child, candidate, adapter, monitor_plan, active = promoted(
+        tmp_path)
+
+    def unavailable_evaluator(*args):
+        raise RuntimeError("private evaluator dependency failed")
+
+    adapter.evaluate = unavailable_evaluator
+    monitoring = evolution.run_monitor("general", adapter)
+    assert all(report["evaluation"]["status"] == "evaluator_unavailable"
+               and report["evaluation"]["score_available"] is False
+               for report in monitoring["reports"])
+    monitored = evolution.monitor("general", monitoring["episode_ids"])
+    assert monitored["metrics"]["measurement_complete"] is False
+    assert monitored["degraded"] is True and monitored["rolled_back"] is True
+    assert monitored["active"]["package_id"] == parent["id"]
 
 
 def test_paired_plan_is_single_consumption_and_replay_does_not_create_episodes(tmp_path):

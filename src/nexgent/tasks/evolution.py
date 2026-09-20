@@ -20,6 +20,10 @@ import time
 import uuid
 
 from ..kernel.programs import digest
+from .benchmarks import (
+    host_runtime_fingerprint, validate_adapter, validate_snapshot, validate_tasks,
+)
+from .outcomes import classify_benchmark_outcome, outcome_policy
 from .packages import verify_package
 from .tools import ContractError
 
@@ -627,7 +631,8 @@ class EvolutionService:
         context["memory_writeback"] = False
         benchmark_registration = {"benchmark_id": benchmark_id,
                                   "task_ref": deepcopy(task_ref),
-                                  "snapshot": deepcopy(snapshot)}
+                                  "snapshot": deepcopy(snapshot),
+                                  "host_runtime": host_runtime_fingerprint()}
         return self.tasks.create(
             task_ref["objective"], task_ref.get("inputs"), task_ref.get("deliverables"), budget,
             task_ref.get("capabilities"), package, context,
@@ -647,9 +652,10 @@ class EvolutionService:
                                      "accepted": False, "execution_status": current["status"]},
                       "usage": current["usage"]}
         current = self.tasks.get(state["id"])
-        return {"episode_id": result["episode_id"], "evaluation": result["evaluation"],
-                "usage": result["usage"], "execution": deepcopy(current.get("execution")),
-                "error": error}
+        classified = classify_benchmark_outcome(current, result["evaluation"])
+        return {"episode_id": result["episode_id"], "evaluation": classified["evaluation"],
+                 "usage": result["usage"], "execution": deepcopy(current.get("execution")),
+                "failure_class": classified["failure_class"], "error": error}
 
     def plan_pair(self, candidate_id, adapter, *, split="development", split_role="development",
                   seed=0, budget=None, policy=None, **options):
@@ -659,9 +665,10 @@ class EvolutionService:
             raise ContractError("Final holdout cannot be used for package evolution")
         if split_role not in {"development", "selection", "guard"}:
             raise ContractError("Paired trials require development, selection, or guard role")
+        validate_adapter(adapter, require_descriptor=False)
         benchmark_id = _identifier(getattr(adapter, "id", ""), "Benchmark id")
-        snapshot = _copy(adapter.snapshot(), "Benchmark snapshot")
-        tasks = [_copy(task, "Benchmark task") for task in adapter.tasks(split=split, seed=seed, **options)]
+        snapshot = validate_snapshot(adapter.snapshot())
+        tasks = validate_tasks(adapter.tasks(split=split, seed=seed, **options))
         if not tasks or any(not isinstance(task, dict) or not isinstance(task.get("objective"), str)
                             for task in tasks):
             raise ContractError("Evolution benchmark must provide valid tasks")
@@ -682,9 +689,10 @@ class EvolutionService:
                   "package_id": candidate["package_id"], "package_digest": candidate["package_digest"],
                   "suite": suite, "suite_digest": suite_digest, "split_role": split_role,
                   "arm_schedule": arm_schedule, "environment": environment,
-                  "environment_digest": digest(environment),
-                  "budget": _copy({} if budget is None else budget, "Trial budget"),
-                  "policy": asdict(policy), "policy_digest": digest(asdict(policy)),
+                   "environment_digest": digest(environment),
+                   "budget": _copy({} if budget is None else budget, "Trial budget"),
+                   "outcome_policy": outcome_policy(),
+                   "policy": asdict(policy), "policy_digest": digest(asdict(policy)),
                   "created_at": time.time()}
         result = self._insert("task_evolution_plans", record)
         self._event(candidate["channel"], "paired_trial_planned",
@@ -700,8 +708,10 @@ class EvolutionService:
         """Execute a pre-registered paired plan with equal initial memory snapshots."""
         plan = self.plan(plan_id)
         suite = plan["suite"]
+        validate_adapter(adapter, require_descriptor=False)
         benchmark_id = _identifier(getattr(adapter, "id", ""), "Benchmark id")
-        if benchmark_id != suite["benchmark_id"] or digest(_copy(adapter.snapshot())) != digest(suite["snapshot"]):
+        if (benchmark_id != suite["benchmark_id"]
+                or digest(validate_snapshot(adapter.snapshot())) != digest(suite["snapshot"])):
             raise ContractError("Benchmark evaluator changed from the paired trial plan")
         candidate = self.candidate(plan["candidate_id"])
         if (candidate["parent_package_id"] != plan["parent_package_id"]
@@ -713,7 +723,8 @@ class EvolutionService:
         tasks = suite["tasks"]
         budget = plan["budget"]
         if (digest(self._environment_snapshot(tasks)) != plan.get("environment_digest")
-                or len(plan.get("arm_schedule", [])) != len(tasks)):
+                or len(plan.get("arm_schedule", [])) != len(tasks)
+                or plan.get("outcome_policy") != outcome_policy()):
             raise ContractError("Paired trial execution environment changed from its plan")
         for task_ref, scheduled in zip(tasks, plan["arm_schedule"]):
             if (scheduled.get("task_ref_digest") != digest(task_ref)
@@ -754,12 +765,12 @@ class EvolutionService:
                 raise ContractError("Paired arms did not receive the same frozen memory seed")
             runs = {}
             for arm in order:
-                if digest(_copy(adapter.snapshot())) != digest(snapshot):
+                if digest(validate_snapshot(adapter.snapshot())) != digest(snapshot):
                     raise ContractError("Benchmark evaluator changed during the paired trial")
                 if digest(self._environment_snapshot(tasks)) != plan["environment_digest"]:
                     raise ContractError("Paired trial execution environment changed during execution")
                 runs[arm] = self._run_frozen(states[arm], adapter, task_ref, snapshot, stop_event)
-                if digest(_copy(adapter.snapshot())) != digest(snapshot):
+                if digest(validate_snapshot(adapter.snapshot())) != digest(snapshot):
                     raise ContractError("Benchmark evaluator changed during the paired trial")
             parent_run, candidate_run = runs["parent"], runs["candidate"]
             pairs.append({"task_ref": deepcopy(task_ref), "task_ref_digest": digest(task_ref),
@@ -830,6 +841,7 @@ class EvolutionService:
                     reasons.append("usage_incomplete")
                 row[side] = {"episode_id": run["episode_id"], "score": value,
                              "accepted": evaluation.get("accepted"),
+                             "failure_class": run.get("failure_class"),
                              "cost": self._cost(run.get("usage", {})),
                              "usage_complete": run.get("usage", {}).get("usage_complete") is True,
                              "failure_reasons": reasons}
@@ -904,10 +916,10 @@ class EvolutionService:
         candidate = self.candidate(candidate_id)
         if split in {"development", "selection", "final_holdout", "holdout"}:
             raise ContractError("Deployment monitoring requires an independent guard split")
+        validate_adapter(adapter, require_descriptor=False)
         benchmark_id = _identifier(getattr(adapter, "id", ""), "Benchmark id")
-        snapshot = _copy(adapter.snapshot(), "Benchmark snapshot")
-        tasks = [_copy(task, "Monitoring task")
-                 for task in adapter.tasks(split=split, seed=seed, **options)]
+        snapshot = validate_snapshot(adapter.snapshot())
+        tasks = validate_tasks(adapter.tasks(split=split, seed=seed, **options))
         if not tasks or any(not isinstance(task, dict) or not isinstance(task.get("objective"), str)
                             for task in tasks):
             raise ContractError("Monitoring plan must provide valid tasks")
@@ -920,6 +932,7 @@ class EvolutionService:
                    "suite_digest": digest(suite),
                    "task_schedule": [digest(task) for task in tasks],
                    "environment": environment, "environment_digest": digest(environment),
+                   "outcome_policy": outcome_policy(),
                    "budget": _copy({} if budget is None else budget, "Monitoring budget"),
                   "created_at": time.time()}
         result = self._insert("task_evolution_monitor_plans", record)
@@ -1013,8 +1026,9 @@ class EvolutionService:
         if (plan["record_digest"] != promotion.get("monitor_plan_digest")
                 or plan["package_id"] != active["package_id"]
                 or plan["package_digest"] != active["package_digest"]
+                or plan.get("outcome_policy") != outcome_policy()
                 or getattr(adapter, "id", None) != suite["benchmark_id"]
-                or digest(_copy(adapter.snapshot())) != digest(suite["snapshot"])):
+                or digest(validate_snapshot(adapter.snapshot())) != digest(suite["snapshot"])):
             raise ContractError("Active monitoring plan identity changed")
         tasks = suite["tasks"]
         if (plan.get("task_schedule") != [digest(task) for task in tasks]
@@ -1037,7 +1051,7 @@ class EvolutionService:
                     or current["package_id"] != active["package_id"]
                     or current["package_digest"] != active["package_digest"]):
                 raise ContractError("Active deployment changed during monitoring")
-            if (digest(_copy(adapter.snapshot())) != digest(suite["snapshot"])
+            if (digest(validate_snapshot(adapter.snapshot())) != digest(suite["snapshot"])
                     or digest(self._environment_snapshot(tasks)) != plan["environment_digest"]):
                 raise ContractError("Monitoring environment changed during execution")
             context = deepcopy(task_ref.get("context") or {})
@@ -1050,7 +1064,8 @@ class EvolutionService:
                 "task_ref_digest": digest(task_ref), "split_role": "monitoring"}
             benchmark_registration = {
                 "benchmark_id": suite["benchmark_id"], "task_ref": deepcopy(task_ref),
-                "snapshot": deepcopy(suite["snapshot"])}
+                "snapshot": deepcopy(suite["snapshot"]),
+                "host_runtime": host_runtime_fingerprint()}
             state = self.tasks.create(
                 task_ref["objective"], task_ref.get("inputs"), task_ref.get("deliverables"),
                 plan["budget"], task_ref.get("capabilities"), context=context,
@@ -1063,7 +1078,7 @@ class EvolutionService:
             self.tasks.run(state["id"], stop_event=stop_event)
             reports.append(self.tasks.evaluate(
                 state["id"], adapter, deepcopy(task_ref), snapshot=deepcopy(suite["snapshot"])))
-            if (digest(_copy(adapter.snapshot())) != digest(suite["snapshot"])
+            if (digest(validate_snapshot(adapter.snapshot())) != digest(suite["snapshot"])
                     or digest(self._environment_snapshot(tasks)) != plan["environment_digest"]):
                 raise ContractError("Monitoring evaluator or environment changed during execution")
         current = self.active(channel)
@@ -1146,7 +1161,8 @@ class EvolutionService:
         plan = self.monitor_plan(plan_id)
         if (plan["record_digest"] != promotion.get("monitor_plan_digest")
                 or plan["package_id"] != active["package_id"]
-                or plan["package_digest"] != active["package_digest"]):
+                or plan["package_digest"] != active["package_digest"]
+                or plan.get("outcome_policy") != outcome_policy()):
             raise ContractError("Active monitoring plan identity changed")
         monitor_run = self.monitor_run(plan_id)
         run_episodes = Counter(monitor_run.get("episode_ids", []))

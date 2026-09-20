@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import re
 
+from nexgent.tasks.benchmarks import BenchmarkDescriptor
+
 from .data import SCENARIO, SPLITS, TEMPLATE_RELPATH, VERSION, digest, inputs_for
 from .schemas import (
     DELIVERY_SCHEMAS, PARAMETER_SCHEMA, PREPARE_SCHEMA, PROBE_SCHEMA,
@@ -319,13 +321,24 @@ class OpenFOAMCavityDomain:
 
 class OpenFOAMCavityBenchmark:
     id = "openfoam_cavity"
+    descriptor = BenchmarkDescriptor(
+        id=id,
+        version=VERSION,
+        title="Foundation 8 cavity Re=10 execution smoke",
+        splits=tuple(SPLITS),
+        default_split="smoke",
+        modes=("fixed", "recovery"),
+        required_capabilities=(
+            "openfoam.probe_environment", "openfoam.prepare_cavity",
+            "openfoam.run_cavity", "openfoam.validate_delivery"),
+        evidence_scope=(
+            "Foundation 8 cavity execution smoke; no accuracy, convergence, "
+            "performance, general CFD, or RSI claim."),
+    )
 
     def describe(self):
         return {
-            "id": self.id,
-            "version": VERSION,
-            "title": "Foundation 8 cavity Re=10 execution smoke",
-            "splits": list(SPLITS),
+            **self.descriptor.as_dict(),
             "parameter_schema": deepcopy(PARAMETER_SCHEMA),
             "task_count_per_seed": 1,
             "data_origin": "official_openfoam_foundation_8_tutorial",
@@ -335,7 +348,6 @@ class OpenFOAMCavityBenchmark:
 
     def snapshot(self):
         from . import _evaluation, data, schemas
-        from nexgent.tasks.runtime import TaskService, ToolContext
         return {
             **self.describe(),
             "evaluator_digest": digest({
@@ -352,11 +364,6 @@ class OpenFOAMCavityBenchmark:
                 },
                 "task_contract": inspect.getsource(type(self).tasks),
                 "acceptance": inspect.getsource(type(self).evaluate),
-                "host_runtime": {
-                    "tool_workspace": inspect.getsource(ToolContext.workspace),
-                    "tool_receipts": inspect.getsource(TaskService._invoke),
-                    "evaluation_view": inspect.getsource(TaskService.evaluate),
-                },
             }),
             "frozen_input_digest": digest(inputs_for("smoke", 0)),
         }

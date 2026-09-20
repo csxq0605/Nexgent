@@ -214,10 +214,7 @@ class ToolRegistry:
         return registry
 
 
-def task_benchmarks():
-    result = {}
-    for point in entry_points(group="nexgent.task_benchmarks"):
-        if point.name in result:
-            raise ContractError("Duplicate task benchmark identity")
-        result[point.name] = point.load()()
-    return result
+def task_benchmarks(project_root=None):
+    """Compatibility facade over the canonical isolated benchmark registry."""
+    from .benchmarks import BenchmarkRegistry
+    return BenchmarkRegistry(project_root).adapters()

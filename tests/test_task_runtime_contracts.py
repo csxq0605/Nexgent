@@ -111,6 +111,16 @@ def test_installed_tool_effect_restriction_is_enforced_only_when_explicit(tmp_pa
 
 
 def test_terminal_failure_domain_separates_agent_protocol_and_host_failures(tmp_path):
+    class FailureAdapter:
+        id = "failure-contract"
+
+        def snapshot(self):
+            return {"id": self.id, "version": 1}
+
+        def evaluate(self, task_ref, deliverables, execution_view):
+            raise AssertionError("A failed Episode must not call the benchmark evaluator")
+
+    adapter = FailureAdapter()
     failing_tool = ToolSpec(
         "contract.host_failure", {"type": "object"}, {"type": "object"}, "read",
         lambda arguments, context: (_ for _ in ()).throw(RuntimeError("host tool unavailable")),
@@ -128,6 +138,9 @@ def test_terminal_failure_domain_separates_agent_protocol_and_host_failures(tmp_
     host_result = host_service.run(host["id"])
     assert host_result["status"] == "failed"
     assert host_result["failure_domain"] == "infrastructure"
+    host_evaluation = host_service.evaluate(host["id"], adapter, {"id": "host"})["evaluation"]
+    assert host_evaluation["score_available"] is False
+    assert host_evaluation["accepted"] is None
 
     class TransportFactory:
         def __call__(self, reserve, stop_event):
@@ -147,6 +160,10 @@ def test_terminal_failure_domain_separates_agent_protocol_and_host_failures(tmp_
     model_result = model_service.run(model["id"])
     assert model_result["status"] == "failed"
     assert model_result["failure_domain"] == "infrastructure"
+    model_evaluation = model_service.evaluate(
+        model["id"], adapter, {"id": "transport"})["evaluation"]
+    assert model_evaluation["score_available"] is False
+    assert model_evaluation["accepted"] is None
 
     agent_service = TaskService(tmp_path / "agent", tools=ToolRegistry())
     agent_package = controlled_package("""def execute(payload, context):
@@ -156,6 +173,37 @@ def test_terminal_failure_domain_separates_agent_protocol_and_host_failures(tmp_
     agent_result = agent_service.run(agent["id"])
     assert agent_result["status"] == "failed"
     assert agent_result["failure_domain"] == "agent"
+    agent_evaluation = agent_service.evaluate(
+        agent["id"], adapter, {"id": "agent"})["evaluation"]
+    assert (agent_evaluation["status"], agent_evaluation["score"],
+            agent_evaluation["accepted"]) == ("observed_failure", 0.0, False)
+
+    class BudgetFactory:
+        def __call__(self, reserve, stop_event):
+            class Gateway:
+                def ask(self, **params):
+                    reserve({"call_id": "budget-call", "status": "reserved",
+                             "model": "test/model", "role": params["role"],
+                             "request_digest": "budget-request",
+                             "reserved_completion_tokens": params["max_tokens"]})
+            return Gateway()
+
+    budget_service = TaskService(
+        tmp_path / "budget", tools=ToolRegistry(), gateway_factory=BudgetFactory())
+    budget_package = controlled_package("""def execute(payload, context):
+    context.ask('worker', 'exhaust the frozen zero-call budget', max_tokens=8)
+    return {'deliverables': {}}
+""")
+    budget = budget_service.create(
+        "budget failure", package=budget_package, deliverables=result_spec(),
+        budget={"max_model_calls": 0})
+    budget_result = budget_service.run(budget["id"])
+    assert budget_result["status"] == "failed"
+    assert budget_result["failure_domain"] == "agent"
+    budget_evaluation = budget_service.evaluate(
+        budget["id"], adapter, {"id": "budget"})["evaluation"]
+    assert (budget_evaluation["status"], budget_evaluation["score"],
+            budget_evaluation["accepted"]) == ("observed_failure", 0.0, False)
 
     protocol_package = controlled_package("""def execute(payload, context):
     return {'unexpected': True}
@@ -165,6 +213,10 @@ def test_terminal_failure_domain_separates_agent_protocol_and_host_failures(tmp_
     protocol_result = agent_service.run(protocol["id"])
     assert protocol_result["status"] == "failed"
     assert protocol_result["failure_domain"] == "protocol"
+    protocol_evaluation = agent_service.evaluate(
+        protocol["id"], adapter, {"id": "protocol"})["evaluation"]
+    assert (protocol_evaluation["status"], protocol_evaluation["score"],
+            protocol_evaluation["accepted"]) == ("observed_failure", 0.0, False)
 
 
 def test_task_registration_rejects_external_schema_refs_and_accepts_local_definitions(tmp_path):
@@ -494,7 +546,10 @@ def test_private_benchmark_registration_has_no_package_visible_enumeration_or_di
     assert visible == {"memory_namespace": "study", "split": "final_holdout"}
     assert "benchmark_registration" not in encoded
     assert all(digest(candidate) not in encoded for candidate in candidates)
-    assert service.store.benchmark_registration(state["id"]) == registration
+    stored_registration = service.store.benchmark_registration(state["id"])
+    assert {key: stored_registration[key] for key in registration} == registration
+    assert stored_registration["host_runtime"]["schema"] == (
+        "nexgent.task-benchmark-host-runtime.v1")
 
 
 def test_final_holdout_delegate_inherits_only_public_context_whitelist(tmp_path):
@@ -569,8 +624,10 @@ def test_benchmark_registration_is_frozen_and_resume_invalidates_then_explicitly
     service, adapter, identity, registry = registered_benchmark_run(tmp_path, monkeypatch)
     state = service.get(identity)
     registration = service.store.benchmark_registration(identity)
-    assert registration == {"benchmark_id": adapter.id,
-                            "task_ref": adapter.tasks()[0], "snapshot": adapter.snapshot()}
+    assert {key: registration[key] for key in ("benchmark_id", "task_ref", "snapshot")} == {
+        "benchmark_id": adapter.id,
+        "task_ref": adapter.tasks()[0], "snapshot": adapter.snapshot()}
+    assert registration["host_runtime"]["schema"] == "nexgent.task-benchmark-host-runtime.v1"
     assert "benchmark_registration" not in state["task"]["context"]
     assert "benchmark_registration_digest" not in state["task"]["context"]
     resumed_service = TaskService(tmp_path, tools=registry)

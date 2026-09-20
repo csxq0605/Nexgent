@@ -341,7 +341,7 @@ def test_smoke_identity_is_frozen_to_one_real_scenario_and_seed():
     assert snapshot["frozen_input_digest"] == digest(inputs_for())
 
 
-def test_snapshot_binds_schemas_tools_runner_evaluator_and_task_contract(monkeypatch):
+def test_snapshot_binds_plugin_owned_schemas_tools_runner_evaluator_and_task_contract(monkeypatch):
     benchmark = OpenFOAMCavityBenchmark()
     original = benchmark.snapshot()["evaluator_digest"]
     real_getsource = openfoam_plugin.inspect.getsource
@@ -368,10 +368,10 @@ def test_snapshot_binds_schemas_tools_runner_evaluator_and_task_contract(monkeyp
         openfoam_plugin.OpenFOAMCavityDomain.tools,
         openfoam_plugin.OpenFOAMCavityBenchmark.tasks,
         openfoam_plugin.OpenFOAMCavityBenchmark.evaluate,
-        ToolContext.workspace,
     } <= set(observed)
-    assert TaskService._invoke in observed
-    assert TaskService.evaluate in observed
+    assert ToolContext.workspace not in observed
+    assert TaskService._invoke not in observed
+    assert TaskService.evaluate not in observed
 
 
 def test_public_tools_and_contracts_do_not_expose_acceptance_or_hidden_oracle():
