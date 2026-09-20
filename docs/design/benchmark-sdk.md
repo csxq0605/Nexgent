@@ -1,15 +1,17 @@
-# Task benchmark SDK：机制收敛第一阶段
+# Task benchmark SDK：机制收敛与 BBH 迁移
 
-当前产品路径以 `TaskService` 和 `nexgent.task_benchmarks` 为准。本阶段只统一
-TaskService benchmark 的插件合同与发现机制，不迁移 0.8 的
-`nexgent.benchmarks` 源码 bundle 接口，也不迁移 BBH 或 scientific discovery。
-旧 `StudyController`、历史命令、记录读取和恢复语义保持不变。
+当前产品路径以 `TaskService` 和 `nexgent.task_benchmarks` 为准。第一阶段统一了
+TaskService benchmark 的插件合同与发现机制；第二阶段已把 BBH 两任务适配器接到
+canonical API。0.8 的 `nexgent.benchmarks` 源码 bundle 接口仍作为兼容层保留，
+scientific discovery 尚未迁移。旧 `StudyController`、历史命令、记录读取和恢复语义
+保持不变。
 
 ## 已实现边界
 
 `nexgent.tasks.benchmarks` 提供显式 `BenchmarkDescriptor`、
 `BenchmarkAdapter` Protocol 和 `BenchmarkRegistry`。Workbench 与 OpenFOAM
-已经声明 descriptor。Registry 对每个 entry point 独立加载和校验：一个插件导入失败、
+已经声明 descriptor；BBH 两任务插件提供逐样本 TaskSpec、host-side 隐藏评价器和
+无模型 reference AgentPackage。Registry 对每个 entry point 独立加载和校验：一个插件导入失败、
 缺少数据、声明不可用或合同错误时，只把该插件列为 unavailable，不阻止其余插件。
 
 安装入口名必须等于 adapter 和 descriptor 的 `id`。Snapshot、任务列表和评价报告
@@ -35,9 +37,11 @@ policy；缺失 usage、缺失 evaluator 或不完整任务多重集仍使 gate 
 
 ## 尚未完成
 
-- BBH 与 scientific discovery 仍使用保留的 0.8 benchmark API。
+- scientific discovery 仍只使用保留的 0.8 benchmark API；BBH legacy 入口继续保留，
+  但新的 TaskService 执行已走 canonical adapter。
 - 本阶段不统一两代 benchmark 的记录 schema、缓存或执行主体。
-- 本阶段不新增 suite aggregation、reference AgentPackage 或数值 work-unit 计量。
+- BBH 的 suite aggregation 当前是插件审计 helper，不是 TaskService 的宿主级服务；
+  canonical 成本使用 TaskService ledger，不伪造 legacy 的 source-instruction 数值。
 - OpenFOAM 仍是单一 smoke 场景，不具备 confirmatory study 所需的独立统计 cluster；
   descriptor 因此只声明 fixed/recovery。
 - Workbench 声明 confirmatory 支持，但真实统计结论仍需预注册、多 seed、独立 cluster

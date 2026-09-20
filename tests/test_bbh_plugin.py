@@ -4,13 +4,17 @@ from copy import deepcopy
 import hashlib
 import io
 import json
+from pathlib import Path
 import threading
+import tomllib
 
 import pytest
 
 from nexgent.kernel.programs import make_bundle
 from nexgent.kernel.runner import ProgramRunner
-from nexgent_bbh import BigBenchHardBenchmark
+from nexgent_bbh import (
+    BigBenchHardBenchmark, BigBenchHardTaskBenchmark, reference_package,
+)
 from nexgent_bbh import data
 
 
@@ -220,3 +224,176 @@ def test_project_factory_defaults_to_workspace_data_and_respects_explicit_overri
     assert RecordingBenchmark.from_project(tmp_path).path == tmp_path / ".nexgent" / "benchmarks" / "bbh"
     monkeypatch.setenv("NEXGENT_BBH_DATA", str(tmp_path / "override"))
     assert str(RecordingBenchmark.from_project(tmp_path).path) == str(tmp_path / "override")
+
+
+def test_canonical_descriptor_snapshot_aliases_and_public_tasks_do_not_expose_answers():
+    b = BigBenchHardTaskBenchmark(fixture=True, samples_per_task=3)
+    assert b.descriptor.id == "bbh"
+    assert b.descriptor.default_split == "development"
+    assert b.descriptor.modes == ("fixed", "confirmatory")
+    assert set(b.descriptor.splits) == {
+        "development", "selection", "transfer", "meta_transfer", "confirmation",
+        "final_transfer", "final_holdout",
+    }
+    transfer = b.tasks("transfer", 17)
+    alias = b.tasks("final_transfer", 17)
+    assert [row["id"] for row in transfer] == [row["id"] for row in alias]
+    assert {row["context"]["suite_digest"] for row in transfer + alias} == {
+        transfer[0]["context"]["suite_digest"]}
+    holdout = b.tasks("final_holdout", 17)
+    confirmation = b.tasks("confirmation", 17)
+    assert [row["id"] for row in holdout] == [row["id"] for row in confirmation]
+    public = json.dumps({"snapshot": b.snapshot(), "tasks": transfer + holdout}, sort_keys=True)
+    assert '"target"' not in public
+    assert '"answer": "True"' not in public and '"answer": "False"' not in public
+    compatibility = b.describe()["legacy_compatibility"]
+    assert compatibility["legacy_entry_group"] == "nexgent.benchmarks"
+    assert compatibility["canonical_entry_group"] == "nexgent.task_benchmarks"
+    assert "must not be interpreted" in compatibility["record_boundary"]
+
+
+def test_canonical_project_factory_availability_and_installed_entry_are_project_aware(
+        tmp_path, monkeypatch):
+    monkeypatch.delenv("NEXGENT_BBH_DATA", raising=False)
+    adapter = BigBenchHardTaskBenchmark.from_project(tmp_path)
+    assert adapter.data_path == (tmp_path / ".nexgent" / "benchmarks" / "bbh").resolve()
+    assert adapter.availability()["available"] is False
+    # Discovery can still validate the answer-free snapshot before data exists.
+    assert adapter.snapshot()["manifest"]["data"]["mode"] == "official_pinned_subset"
+    metadata = tomllib.loads(
+        (Path(__file__).parents[1] / "benchmarks" / "bbh" / "pyproject.toml")
+        .read_text(encoding="utf-8"))
+    assert metadata["project"]["entry-points"]["nexgent.task_benchmarks"]["bbh"] == (
+        "nexgent_bbh:BigBenchHardTaskBenchmark")
+
+
+def test_canonical_sample_count_fails_closed_when_any_selected_pool_is_too_small(
+        monkeypatch):
+    oversized = BigBenchHardTaskBenchmark(fixture=True, samples_per_task=5)
+    description = oversized.describe()
+    assert "task_count_per_seed" not in description
+    assert description["requested_samples_per_family"] == 5
+    assert oversized.availability()["available"] is False
+    with pytest.raises(data.DatasetError, match="exactly 5 samples.*confirmation=4"):
+        oversized.tasks("final_holdout", 0)
+
+    exact = BigBenchHardTaskBenchmark(fixture=True, samples_per_task=4)
+    assert exact.availability() == {"available": True}
+    legacy = exact._legacy()
+    original = legacy._cases
+    monkeypatch.setattr(legacy, "_cases", lambda split, seed: original(split, seed)[:-1])
+    with pytest.raises(data.DatasetError, match="exact registered family multiset"):
+        exact.tasks("confirmation", 0)
+
+
+def test_canonical_fixture_is_exactly_score_and_group_equivalent_to_legacy_fixture():
+    seed = 23
+    legacy = BigBenchHardBenchmark(fixture=True, samples_per_task=4)
+    cases = legacy._cases("development", seed)
+    answers = {}
+    for index, case in enumerate(cases):
+        # Exercise both accepted and rejected rows in each family.
+        answers[case["task_id"]] = case["target"] if index % 3 else "definitely-wrong"
+
+    class GoldenRunner:
+        def run(self, program, entry, argument, **kwargs):
+            return {
+                "value": [{"ok": True, "submission": {
+                    "answer": answers[problem["task_id"]]}}
+                    for problem in argument["problems"]],
+                "execution": {"instructions": 777, "entry": entry},
+            }
+
+    legacy_report = legacy.evaluate(bundle(legacy), "development", seed, GoldenRunner())
+    canonical = BigBenchHardTaskBenchmark(fixture=True, samples_per_task=4)
+    canonical_reports = []
+    for task in canonical.tasks("development", seed):
+        public_id = task["inputs"]["problem"]["task_id"]
+        canonical_reports.append(canonical.evaluate(
+            task, {"answer": {"answer": answers[public_id]}},
+            {"usage": {"model_calls": 0, "usage_complete": True}}))
+    aggregate = canonical.aggregate(canonical_reports)
+    assert aggregate["score"] == legacy_report["score"]
+    assert aggregate["score_available"] == legacy_report["score_available"]
+    assert aggregate["groups"] == legacy_report["groups"]
+    assert all("target" not in row for row in canonical_reports)
+    assert all("source_instruction_events" in row["cost_semantics"]["legacy_comparison"]
+               for row in canonical_reports)
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing", "duplicate", "extra", "missing_schema_field", "forged_task_ref",
+    "forged_task_id", "forged_family", "forged_score", "nonfinite_score",
+    "fractional_score", "accepted_mismatch", "forged_native_split", "forged_seed",
+    "forged_suite", "forged_manifest", "forged_evaluator", "forged_report_identity",
+])
+def test_canonical_aggregate_rejects_incomplete_malformed_or_forged_reports(mutation):
+    adapter = BigBenchHardTaskBenchmark(fixture=True, samples_per_task=2)
+    tasks = adapter.tasks("final_transfer", 47)
+    private = {case["task_id"]: case for case in adapter._legacy()._cases("transfer", 47)}
+    reports = [adapter.evaluate(
+        task,
+        {"answer": {"answer": private[task["inputs"]["problem"]["task_id"]]["target"]}},
+        {"usage": {"model_calls": 0, "usage_complete": True}})
+        for task in tasks]
+    assert adapter.aggregate(reports)["score"] == 1.0
+
+    forged = deepcopy(reports)
+    if mutation == "missing":
+        forged.pop()
+    elif mutation == "duplicate":
+        forged[-1] = deepcopy(forged[0])
+    elif mutation == "extra":
+        forged.append(deepcopy(forged[0]))
+    elif mutation == "missing_schema_field":
+        forged[0].pop("group")
+    elif mutation == "forged_task_ref":
+        forged[0]["task_ref"] += "-forged"
+    elif mutation == "forged_task_id":
+        forged[0]["task_id"] += "-forged"
+    elif mutation == "forged_family":
+        forged[0]["family"] = "word_sorting" if forged[0]["family"] == "boolean_expressions" else "boolean_expressions"
+    elif mutation == "forged_score":
+        forged[0].update(score=0.0, accepted=False, status="rejected",
+                         reasons=["exact_answer_mismatch"])
+    elif mutation == "nonfinite_score":
+        forged[0]["score"] = float("nan")
+    elif mutation == "fractional_score":
+        forged[0].update(score=0.5, accepted=False, status="rejected",
+                         reasons=["exact_answer_mismatch"])
+    elif mutation == "accepted_mismatch":
+        forged[0]["accepted"] = False
+    elif mutation == "forged_native_split":
+        forged[0]["native_split"] = "selection"
+    elif mutation == "forged_seed":
+        forged[0]["seed"] = 48
+    elif mutation == "forged_suite":
+        forged[0]["suite_digest"] = "0" * 64
+    elif mutation == "forged_manifest":
+        forged[0]["manifest_digest"] = "0" * 64
+    elif mutation == "forged_evaluator":
+        forged[0]["evaluator_digest"] = "0" * 64
+    elif mutation == "forged_report_identity":
+        forged[0]["report_identity"] = "0" * 64
+    with pytest.raises(ValueError):
+        adapter.aggregate(forged)
+
+
+def test_canonical_reference_package_runs_through_task_service_without_models(
+        tmp_path, monkeypatch):
+    from nexgent.tasks.runtime import TaskService
+    from nexgent.tasks.tools import ToolRegistry
+
+    adapter = BigBenchHardTaskBenchmark(fixture=True, samples_per_task=2)
+    monkeypatch.setattr(
+        "nexgent.tasks.runtime.task_benchmarks",
+        lambda project_root=None: {adapter.id: adapter})
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    result = service.benchmark(
+        adapter.id, split="final_transfer", seed=31, package=reference_package())
+    assert len(result["reports"]) == 4
+    assert all(row["evaluation"]["accepted"] is True for row in result["reports"])
+    assert all(row["evaluation"]["score"] == 1.0 for row in result["reports"])
+    assert all(row["usage"]["model_calls"] == 0 for row in result["reports"])
+    assert {row["evaluation"]["native_split"] for row in result["reports"]} == {"transfer"}
+    assert '"target"' not in json.dumps(result, sort_keys=True)

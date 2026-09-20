@@ -1,6 +1,17 @@
 # BIG-Bench Hard 两任务插件
 
-这是可单独安装的 Nexgent benchmark 插件，入口组为 `nexgent.benchmarks`、ID 为 `bbh`。核心运行时不导入本插件；本插件不依赖科学计算任务、NumPy 或科学工具箱。
+这是可单独安装的 Nexgent benchmark 插件。发行包暂时同时保留两条显式入口：
+
+- canonical TaskService：`nexgent.task_benchmarks`，ID 为 `bbh`，由
+  `nexgent task-benchmark bbh` 调用；
+- 0.8 兼容层：`nexgent.benchmarks`，逻辑 ID 仍为 `bbh`，只由 legacy
+  `nexgent evaluate --benchmark bbh`、`StudyController` 和旧研究界面调用。
+
+两个 entry point 不会在同一次 CLI 调用中一起执行。旧 `study-*` / measurement
+记录继续由 legacy 控制器读取和恢复；canonical 运行创建新的 `episode-*` 及其冻结
+benchmark registration。不要把旧 measurement ID 传给 TaskService，也不要把
+canonical Episode 当作旧测量恢复或原地升级。核心运行时不导入本插件；本插件不依赖
+科学计算任务、NumPy 或科学工具箱。
 
 ## 来源与范围
 
@@ -27,6 +38,38 @@
 在界面的任务基准下拉框选择 BBH。框架通过 `from_project(project_root)` 默认读取项目的 `.nexgent/benchmarks/bbh`，因此按上述目录下载后无需设置环境变量；`NEXGENT_BBH_DATA` 用于覆盖位置。Linux 或已激活环境可直接执行 `nexgent-bbh-download --destination PATH`。缺数据、manifest 不一致或文件哈希错误都会显示不可用，不会替换成模拟数据。
 
 ## 执行与评价
+
+### Canonical TaskService 路径
+
+canonical adapter 将每个抽中的公开题目注册成一个 TaskSpec / Episode。TaskSpec 的
+`problem` 输入只含题目 ID、类别、输入和答题合同；目标答案只在 host-side evaluator
+中使用，不进入 TaskSpec、artifact schema、evaluator snapshot 或 evaluation report。
+snapshot 固定数据 manifest 摘要、adapter 源码摘要、分区/别名和样本数；suite digest
+只哈希 manifest 摘要、native split、seed 和公开 task ID，不哈希隐藏答案。
+
+插件提供一个无模型、可复核的 reference AgentPackage。安装和下载数据后可直接运行：
+
+```powershell
+nexgent-bbh-reference-package --output .nexgent/bbh-reference-package.json
+nexgent task-benchmark bbh --split final_transfer --seed 101 --package .nexgent/bbh-reference-package.json
+```
+
+reference package 从 host 发布的 `problem` 输入 artifact 读取公开题目，发布
+`{"answer": "..."}` artifact；它实现完整布尔解析与词语排序，不读取数据文件或答案。
+canonical descriptor 声明 `fixed` 和 `confirmatory`，不声明合成故障恢复模式。
+`final_transfer` 是 `transfer` 的兼容别名；`final_holdout` 是 `confirmation` 的
+canonical 研究别名。别名保留调用名，但共享同一 native pool、task ID 和 suite digest。
+每个 family 必须精确返回配置的样本数；任一 frozen pool 容量不足时 availability 为
+unavailable，直接调用 `tasks()` 也会失败，不会返回缩短的 suite 或宣称 `2 × N`。
+插件的审计聚合器会按 split/seed 重建公开任务全集，并拒绝不完整、重复、额外、跨 suite
+或身份/分数合同不一致的 report。
+
+canonical 成本只报告 TaskService host ledger 的 model call/token、tool call 和 node
+使用量；provider receipt 不完整时 token 总数保持未知。legacy 的
+`source_instruction_events` 是另一种运行时计量，canonical 不伪造该标量，两个路径的
+数值成本不能当成同一单位比较。
+
+### Legacy 0.8 路径
 
 任务程序仍是普通的 `solve(problem, tools)`。公开参数只含任务 ID、类别、题目与提交规则；答案留在宿主评价器。程序返回 `{"answer": "..."}`，宿主对两侧空白规范化后做区分大小写的精确匹配。额外解释文字不被自动当作答案提取。
 

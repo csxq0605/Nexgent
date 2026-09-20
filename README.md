@@ -17,7 +17,7 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 | 内容 | 状态 |
 | --- | --- |
 | P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础已实现并通过确定性合同测试；真实 MiMo 普通任务已形成 schema 合法交付，独立 Workbench 仍失败 |
-| P1 普通任务与独立 workbench benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同 |
+| P1 普通任务与 benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同；BBH 两任务已提供 canonical TaskService adapter 与无模型 reference package |
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
 | P3 跨任务行为更新 | 反馈绑定候选生成、内置 `reference-os-v1`、显式/通道 improver、配对门控、通道晋升、监测/回滚及脱敏机制证据导出已实现；真实模型候选效果与统计效益待检验 |
 | P4 改进过程可更新与递归执行 | 独立 R archive/channel、自更新、真实后代元评测、预登记 guard 与自动回滚已形成确定性机制闭环；真实模型与统计效益待检验 |
@@ -32,7 +32,7 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 - [P3 反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)：当前实现对象、完整状态流、CLI/GUI、信任边界和证据等级。
 - [P4 递归改进器控制面](docs/design/p4-recursive-improver-control-plane.md)：R 自更新、后代效用元评测、独立通道、guard 与结论边界。
 - [P5 预注册 RSI 研究](docs/research/p5-preregistered-rsi-study.md)：证据等级、实验臂、外部 benchmark 矩阵、防泄漏、缺测与统计职责。
-- [Task benchmark SDK 第一阶段](docs/design/benchmark-sdk.md)：TaskService 插件的显式 descriptor、隔离发现、JSON 合同与当前兼容边界。
+- [Task benchmark SDK 与 BBH 迁移](docs/design/benchmark-sdk.md)：TaskService 插件的显式 descriptor、隔离发现、JSON 合同、BBH canonical 路径与 legacy 兼容边界。
 - [P3 跨任务 RSI 研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)：一手论文方法、可证伪假设、对照和冻结试验协议。
 - [P1 真实 Provider 验证](docs/research/task-runtime-validation-20260920.md)：实际 episode、token 与节点用量、供应商失败、重复调用阻断和未通过项。
 - [OpenFOAM 独立 demo](docs/demos/openfoam-cfd-design.md)、[本机环境](docs/demos/openfoam-environment-20260916.md)、[真实 smoke 验证](docs/demos/openfoam-smoke-validation-20260920.md)与[机器可读收据摘要](docs/demos/openfoam-smoke-receipt-20260920.json)：任务设计、版本适配、实际执行证据和结论边界。
