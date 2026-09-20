@@ -348,7 +348,12 @@ def test_rsi_cycle_commands_freeze_inputs_run_resume_and_emit_only_public_state(
             assert isinstance(generation, FakeGeneration)
 
         def create(self, **kwargs):
-            identity = "rsi-cycle-explicit" if kwargs["improver_package"].get("id") == "R-explicit" else "rsi-cycle-1"
+            if kwargs.get("improver_channel"):
+                identity = "rsi-cycle-channel"
+            elif kwargs["improver_package"].get("id") == "R-explicit":
+                identity = "rsi-cycle-explicit"
+            else:
+                identity = "rsi-cycle-1"
             calls.append(("create", kwargs))
             records[identity] = {
                 "id": identity, "status": "registered",
@@ -417,6 +422,8 @@ def test_rsi_cycle_commands_freeze_inputs_run_resume_and_emit_only_public_state(
     assert created["policy"].min_quality_delta == 0.2
     assert created["improver_package"]["provenance"] == {
         "origin": "nexgent.default-task-improver", "role": "R0"}
+    assert created["improver_channel"] is None
+    assert created["expected_improver_revision"] is None
     assert calls[1][0:4] == ("run", "rsi-cycle-1", adapter, adapter)
 
     assert cli.main([
@@ -425,6 +432,17 @@ def test_rsi_cycle_commands_freeze_inputs_run_resume_and_emit_only_public_state(
         "--improver-package", '{"id":"R-explicit"}', "--register-only"]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "registered"
     assert records["rsi-cycle-explicit"]["status"] == "registered"
+
+    assert cli.main([
+        "--root", str(tmp_path), "rsi-cycle-start", "stable", "generic", "episode-d",
+        "--expected-revision", "4", "--mutation-policy", '{}',
+        "--improver-channel", "recursive", "--expected-improver-revision", "6",
+        "--register-only"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "registered"
+    channel_create = [call for call in calls if call[0] == "create"
+                      and call[1].get("improver_channel") == "recursive"][-1][1]
+    assert channel_create["improver_package"] is None
+    assert channel_create["expected_improver_revision"] == 6
 
     assert cli.main(["--root", str(tmp_path), "rsi-cycle-resume", "rsi-cycle-1"]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "completed"
@@ -439,11 +457,24 @@ def test_rsi_cycle_commands_freeze_inputs_run_resume_and_emit_only_public_state(
     recovered = json.loads(capsys.readouterr().out)
     assert recovered["id"] == "rsi-cycle-1"
     assert ("recover", "rsi-cycle-1", {"confirm_no_external_commit": True}) in calls
-
     assert cli.main([
         "--root", str(tmp_path), "rsi-cycle-recover", "rsi-cycle-1"]) == 1
     unresolved = json.loads(capsys.readouterr().out)
     assert unresolved["runner"]["status"] == "recovery_required"
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--improver-channel", "recursive"],
+    ["--expected-improver-revision", "2"],
+    ["--improver-package", '{"id":"R"}', "--improver-channel", "recursive",
+     "--expected-improver-revision", "2"],
+])
+def test_rsi_cycle_cli_rejects_ambiguous_or_unpaired_improver_channel(
+        task_service, tmp_path, arguments):
+    with pytest.raises(SystemExit):
+        cli.main([
+            "--root", str(tmp_path), "rsi-cycle-start", "stable", "generic", "episode-a",
+            "--expected-revision", "0", "--mutation-policy", '{}', *arguments])
 
 
 def test_rsi_command_errors_use_parser_failure(monkeypatch, task_service, tmp_path):

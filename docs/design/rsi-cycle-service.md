@@ -9,7 +9,8 @@
 创建 cycle 时固定：
 
 - AgentPackage channel 的 revision、父包身份和 feedback Episode；
-- 独立 improver 包与 mutation policy；
+- 独立 improver 包，或独立 R channel 的 revision、package ID 与 digest；
+- mutation policy；
 - selection 与 guard benchmark 的身份和 snapshot；
 - 两阶段 seed、预算、选项和 `PromotionPolicy`；
 - guard 退化时是否按冻结策略回滚。
@@ -41,6 +42,8 @@ paired trial 与 monitor run 使用单次 claim。若不可变 run record 已写
 
 promotion 后的 guard 执行、评估和回滚都绑定 cycle 记录的 revision、package ID 与 monitor plan。通道漂移会失败，不会把另一部署的 guard 记到当前 cycle。
 
+当 cycle 从递归 improver channel 取得 `R` 时，创建 cycle 会冻结 channel、revision、package ID 与 digest。GenerationService 的首次解析不是唯一检查点：可信宿主会在创建 Episode 前重新解析一次，并在 Episode 从 `ready` 转为 `running`、写入 `episode_started` 和执行包之前再次核验。任何 TOCTOU 漂移都会在模型调用前失败；调用方不能通过普通 task context 注入或替换这份宿主登记。
+
 ## 公开投影
 
 `public()` 只返回状态、版本身份、benchmark/snapshot digest、证据 ID、聚合结果和错误类型。adapter snapshot、mutation policy、包内容、内部错误正文和 evaluator 私有内容不会进入公开投影。
@@ -55,4 +58,4 @@ promotion 后的 guard 执行、评估和回滚都绑定 cycle 记录的 revisio
 - `rsi-cycle-recover` 处理硬中断，未能安全恢复时输出状态并返回非零；
 - GUI“RSI 与版本”页按 cycle ID 查询相同公开投影，不执行写操作。
 
-CLI 当前默认使用 `reference-os-v1` 或显式 improver package。通过 recursive improver channel 冻结 R revision 的 cycle 入口尚未接入。
+CLI 默认使用 `reference-os-v1`，也接受显式 improver package，或成对提供 `--improver-channel` 与 `--expected-improver-revision`。公开投影只显示来源类型及 channel/revision/package identity，不返回 R 的源码或归档内容。

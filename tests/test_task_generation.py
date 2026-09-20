@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from nexgent.tasks.evolution import EvolutionService
 from nexgent.tasks.evolution_view import public_evolution_event
 from nexgent.tasks.generation import GenerationService, PATCH_SCHEMA
+from nexgent.tasks import improvers as improver_module
+from nexgent.tasks.improvers import ImproverService
 from nexgent.tasks.improver_seed import default_improver_package
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
@@ -151,6 +153,30 @@ def captured(tmp_path, *, evaluate=True):
     return tasks, evolution, generation, parent, episode_id, bundle
 
 
+def channel_captured(tmp_path):
+    parent = target_package()
+    gateway = ImproverGatewayFactory(behavior_patch(parent))
+    tasks = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    evolution = EvolutionService(tasks)
+    generation = GenerationService(tasks, evolution)
+    evolution.register("general", parent)
+    episode_id = feedback_episode(tasks, parent, evaluate=False)
+    bundle = generation.capture_feedback("general", [episode_id], expected_revision=0)
+    improver = default_improver_package()
+    ImproverService(tasks).register(
+        "recursive", improver,
+        {"mutable_paths": ["improver.py"], "allowed_operations": ["replace"]})
+    return tasks, generation, bundle, gateway
+
+
+def generation_with_channel(generation, bundle):
+    return generation.generate(
+        "general", bundle["id"], None, policy(), 0,
+        improver_channel="recursive", expected_improver_revision=0,
+        budget={"max_model_calls": 1, "max_completion_tokens": 6000,
+                "max_tool_calls": 0, "max_nodes": 8})
+
+
 def test_feedback_bundle_is_immutable_bounded_and_excludes_hidden_evaluator_content(tmp_path):
     tasks, evolution, generation, parent, episode_id, bundle = captured(tmp_path)
     serialized = json.dumps(bundle, ensure_ascii=False)
@@ -225,6 +251,61 @@ def test_builtin_reference_improver_executes_one_model_call_and_admits_os_patch(
     assert gateway.calls[0]["payload"]["parent_components"][0]["path"] == "main.py"
     child = tasks.store.package(result["candidate_package_id"])
     assert child["files"]["main.py"] == CHILD_SOURCE
+
+
+def test_improver_channel_drift_before_episode_create_runs_nothing(
+        tmp_path, monkeypatch):
+    tasks, generation, bundle, gateway = channel_captured(tmp_path)
+    real_registration = improver_module.active_improver_registration
+    calls = 0
+
+    def drift_after_initial_resolution(store, channel):
+        nonlocal calls
+        calls += 1
+        registration = real_registration(store, channel)
+        if calls >= 2:
+            registration = {**registration, "revision": registration["revision"] + 1}
+        return registration
+
+    monkeypatch.setattr(
+        improver_module, "active_improver_registration", drift_after_initial_resolution)
+    episode_ids = {state["id"] for state in tasks.store.list()}
+
+    result = generation_with_channel(generation, bundle)
+
+    assert result["status"] == "missing"
+    assert result["episode_id"] is None
+    assert {state["id"] for state in tasks.store.list()} == episode_ids
+    assert gateway.calls == []
+
+
+def test_improver_channel_drift_before_episode_run_never_starts_package(
+        tmp_path, monkeypatch):
+    tasks, generation, bundle, gateway = channel_captured(tmp_path)
+    real_registration = improver_module.active_improver_registration
+    calls = 0
+
+    def drift_at_dispatch(store, channel):
+        nonlocal calls
+        calls += 1
+        registration = real_registration(store, channel)
+        if calls >= 3:
+            registration = {**registration, "revision": registration["revision"] + 1}
+        return registration
+
+    monkeypatch.setattr(improver_module, "active_improver_registration", drift_at_dispatch)
+    episode_ids = {state["id"] for state in tasks.store.list()}
+
+    result = generation_with_channel(generation, bundle)
+
+    assert result["status"] == "missing"
+    assert result["episode_id"] not in episode_ids
+    assert result["episode_status"] == "ready"
+    episode = tasks.get(result["episode_id"])
+    assert episode["status"] == "ready"
+    assert not [event for event in episode["events"]
+                if event["kind"] == "episode_started"]
+    assert gateway.calls == []
 
 
 @pytest.mark.parametrize("response,component_class,expected_calls", [

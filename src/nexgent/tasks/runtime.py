@@ -187,9 +187,10 @@ class TaskService:
     def create(self, objective, inputs=None, deliverables=None, budget=None, capabilities=None,
                package=None, context=None, *, constraints=None, entry="execute", parent_episode_id=None,
                package_channel=None, benchmark_registration=None,
-               expected_package_registration=None):
+               expected_package_registration=None, improver_channel_registration=None):
         if not isinstance(objective, str) or not objective.strip() or len(objective) > 20000:
             raise ContractError("Task objective must be nonempty and at most 20000 characters")
+        explicit_package = package is not None
         if package is not None and package_channel is not None:
             raise ContractError("Specify either a package or a package channel")
         package_registration = None
@@ -237,6 +238,8 @@ class TaskService:
             raise ContractError("Task inputs, context, constraints and budget must be JSON objects")
         if "benchmark_registration" in context or "benchmark_registration_digest" in context:
             raise ContractError("Benchmark registration context is host-owned")
+        if "improver_channel_registration" in context:
+            raise ContractError("Improver channel registration context is host-owned")
         if benchmark_registration is not None:
             if not isinstance(benchmark_registration, dict):
                 raise ContractError("Benchmark registration must be a JSON object")
@@ -249,6 +252,27 @@ class TaskService:
                 "package_id": package_registration["package_id"],
                 "package_digest": package_registration["package_digest"],
             }
+        if improver_channel_registration is not None:
+            if not explicit_package or package_channel is not None:
+                raise ContractError(
+                    "Improver channel registration requires an explicit package")
+            improver_channel_registration = _json_copy(
+                improver_channel_registration, label="Improver channel registration")
+            registration_keys = {"channel", "revision", "package_id", "package_digest"}
+            if (not isinstance(improver_channel_registration, dict)
+                    or set(improver_channel_registration) != registration_keys):
+                raise ContractError(
+                    "Improver channel registration must contain the frozen identity")
+            from .improvers import active_improver_registration
+            active_improver = active_improver_registration(
+                self.store, improver_channel_registration["channel"])
+            if (any(active_improver[key] != improver_channel_registration[key]
+                    for key in registration_keys)
+                    or package["id"] != improver_channel_registration["package_id"]
+                    or package["digest"] != improver_channel_registration["package_digest"]):
+                raise ContractError(
+                    "Active improver registration differs from the expected deployment")
+            context["improver_channel_registration"] = improver_channel_registration
         allowed_effects = constraints.get("allowed_effects")
         if ("allowed_effects" in constraints and
                 (not isinstance(allowed_effects, list)
@@ -301,6 +325,22 @@ class TaskService:
             if state["status"] == "cancelled":
                 raise ContractError("A cancelled task needs a new task identity")
             package = self.store.package(state["package_id"])
+            improver_registration = state["task"].get("context", {}).get(
+                "improver_channel_registration")
+            if improver_registration is not None:
+                registration_keys = {"channel", "revision", "package_id", "package_digest"}
+                if (not isinstance(improver_registration, dict)
+                        or set(improver_registration) != registration_keys):
+                    raise ContractError("Improver channel registration is invalid")
+                from .improvers import active_improver_registration
+                active_improver = active_improver_registration(
+                    self.store, improver_registration["channel"])
+                if (any(active_improver[key] != improver_registration[key]
+                        for key in registration_keys)
+                        or package["id"] != improver_registration["package_id"]
+                        or package["digest"] != improver_registration["package_digest"]):
+                    raise ContractError(
+                        "Active improver registration differs from the Episode package")
             self._change(identity, lambda s: s.update(
                 status="running", last_error=None, failure_domain=None))
             self.store.event(identity, "episode_started", {"package_digest": package["digest"], "resume": bool(state["nodes"])})

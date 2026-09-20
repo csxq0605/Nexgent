@@ -216,7 +216,9 @@ def _run_task_command(args):
                     args.cycle_id, selection, guard, stop_event=_stop_event())
                 return cycles.public(args.cycle_id)
             benchmark = _task_benchmark(args.benchmark)
-            if args.improver_package in {None, "builtin:reference-os-v1"}:
+            if args.improver_channel:
+                improver = None
+            elif args.improver_package in {None, "builtin:reference-os-v1"}:
                 from .tasks.improver_seed import default_improver_package
                 improver = default_improver_package()
             else:
@@ -225,6 +227,8 @@ def _run_task_command(args):
             cycle = cycles.create(
                 channel=args.channel, feedback_episode_ids=args.episode_ids,
                 improver_package=improver,
+                improver_channel=args.improver_channel,
+                expected_improver_revision=args.expected_improver_revision,
                 mutation_policy=_object_argument(
                     args.mutation_policy, label="mutation policy"),
                 expected_revision=args.expected_revision,
@@ -511,9 +515,15 @@ def main(argv=None):
     rsi_cycle_start.add_argument("--expected-revision", type=int, required=True)
     rsi_cycle_start.add_argument("--mutation-policy", required=True,
                                  help="Mutation policy JSON object, file path, or @file")
-    rsi_cycle_start.add_argument(
+    cycle_improver_source = rsi_cycle_start.add_mutually_exclusive_group()
+    cycle_improver_source.add_argument(
         "--improver-package",
         help="Improver AgentPackage JSON, file, or builtin:reference-os-v1; defaults to builtin")
+    cycle_improver_source.add_argument(
+        "--improver-channel", help="Resolve the improver from a deployed improver channel")
+    rsi_cycle_start.add_argument(
+        "--expected-improver-revision", type=int,
+        help="Required compare-and-swap revision when using --improver-channel")
     rsi_cycle_start.add_argument("--selection-seed", type=int, default=0)
     rsi_cycle_start.add_argument("--guard-seed", type=int, default=0)
     rsi_cycle_start.add_argument("--generation-budget",
@@ -611,6 +621,9 @@ def main(argv=None):
             p.add_argument("--generation-max-experiments", type=int)
     args = parser.parse_args(argv)
     if args.command == "rsi-generate":
+        if bool(args.improver_channel) != (args.expected_improver_revision is not None):
+            parser.error("--improver-channel and --expected-improver-revision must be used together")
+    if args.command == "rsi-cycle-start":
         if bool(args.improver_channel) != (args.expected_improver_revision is not None):
             parser.error("--improver-channel and --expected-improver-revision must be used together")
     if args.command == "gui":

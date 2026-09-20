@@ -50,12 +50,18 @@ python -m nexgent rsi-cycle-start general workbench DEVELOPMENT_EPISODE_ID `
   --generation-budget '{"max_model_calls":1,"max_completion_tokens":8000}' `
   --selection-budget '{"max_model_calls":8,"max_nodes":80}' `
   --guard-budget '{"max_model_calls":4,"max_nodes":40}'
+# 或冻结独立 R channel 的指定 revision，让当前递归改进器承担 generation
+python -m nexgent rsi-cycle-start general workbench DEVELOPMENT_EPISODE_ID `
+  --expected-revision 0 `
+  --improver-channel recursive `
+  --expected-improver-revision 0 `
+  --mutation-policy mutation-policy.json
 python -m nexgent rsi-cycle-show RSI_CYCLE_ID
 python -m nexgent rsi-cycle-resume RSI_CYCLE_ID
 python -m nexgent rsi-cycle-recover RSI_CYCLE_ID
 ```
 
-`recover` 只会自动关联已经唯一落盘的 paired/monitor run。若公开状态为 `recovery_required`，命令返回非零；只有外部核对确认 pending action 未提交后，才使用 `--confirm-no-external-commit` 允许重试。默认 GUI 的“RSI 与版本”页可输入 cycle ID 查看同一公开投影，不提供绕过门控的写操作。
+`recover` 只会自动关联已经唯一落盘的 paired/monitor run。若公开状态为 `recovery_required`，命令返回非零；只有外部核对确认 pending action 未提交后，才使用 `--confirm-no-external-commit` 允许重试。使用 `--improver-channel` 时必须同时给出期望 revision；宿主会在 GenerationService 解析之后、Episode 创建之前和 Episode 真正启动之前再次核验 channel、revision、package ID 与 digest。任何漂移都会在模型调用前 fail closed，普通任务 context 也不能伪造该宿主登记。默认 GUI 的“RSI 与版本”页可输入 cycle ID 查看同一公开投影，不提供绕过门控的写操作。
 
 ```powershell
 # --package 与 --package-channel 互斥

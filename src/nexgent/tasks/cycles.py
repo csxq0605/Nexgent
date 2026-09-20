@@ -73,6 +73,13 @@ def public_rsi_cycle(record):
         "parent_package_digest": record.get("parent_package_digest"),
         "improver_package_id": record.get("improver_package_id"),
         "improver_package_digest": record.get("improver_package_digest"),
+        "improver": {
+            "source": "channel" if record.get("improver_registration") else "package",
+            "channel": (record.get("improver_registration") or {}).get("channel"),
+            "revision": (record.get("improver_registration") or {}).get("revision"),
+            "package_id": record.get("improver_package_id"),
+            "package_digest": record.get("improver_package_digest"),
+        },
         "feedback_episode_count": len(record.get("feedback_episode_ids") or []),
         "selection": {key: (record.get("selection") or {}).get(key) for key in (
             "benchmark_id", "snapshot_digest", "split", "split_role", "seed")},
@@ -181,7 +188,8 @@ class RSICycleService:
             self._append_event(db, body["id"], kind, content)
         return {**body, "record_digest": record_digest}
 
-    def create(self, *, channel, feedback_episode_ids, improver_package,
+    def create(self, *, channel, feedback_episode_ids, improver_package=None,
+               improver_channel=None, expected_improver_revision=None,
                mutation_policy, expected_revision, selection_adapter, guard_adapter,
                selection_seed=0, guard_seed=0, generation_budget=None,
                selection_budget=None, guard_budget=None, policy=None,
@@ -197,10 +205,32 @@ class RSICycleService:
                 or any(not isinstance(item, str) or not item for item in feedback_episode_ids)
                 or len(set(feedback_episode_ids)) != len(feedback_episode_ids)):
             raise ContractError("RSI cycle needs unique feedback Episode ids")
-        verify_package(improver_package)
-        if "improve" not in improver_package["manifest"].get("entries", {}):
-            raise ContractError("RSI cycle improver must register the improve entry")
-        self.store.put_package(improver_package)
+        if improver_package is not None and improver_channel is not None:
+            raise ContractError("Specify either an improver package or an improver channel")
+        if improver_channel is not None:
+            if type(expected_improver_revision) is not int:
+                raise ContractError(
+                    "Improver channel requires an expected improver revision")
+            from .improvers import active_improver_registration
+            resolved_improver = active_improver_registration(self.store, improver_channel)
+            if resolved_improver["revision"] != expected_improver_revision:
+                raise ContractError("Improver channel expected revision is stale")
+            improver_package = resolved_improver["package"]
+            improver_registration = {
+                key: resolved_improver[key] for key in
+                ("channel", "revision", "package_id", "package_digest")}
+        else:
+            if expected_improver_revision is not None:
+                raise ContractError(
+                    "An expected improver revision requires an improver channel")
+            if improver_package is None:
+                raise ContractError(
+                    "RSI cycle requires an improver package or improver channel")
+            verify_package(improver_package)
+            if "improve" not in improver_package["manifest"].get("entries", {}):
+                raise ContractError("RSI cycle improver must register the improve entry")
+            self.store.put_package(improver_package)
+            improver_registration = None
         policy = PromotionPolicy() if policy is None else policy
         if not isinstance(policy, PromotionPolicy):
             raise TypeError("policy must be a PromotionPolicy")
@@ -221,6 +251,7 @@ class RSICycleService:
             "feedback_episode_ids": list(feedback_episode_ids),
             "improver_package_id": improver_package["id"],
             "improver_package_digest": improver_package["digest"],
+            "improver_registration": improver_registration,
             "mutation_policy": _copy(mutation_policy, "Mutation policy"),
             "generation_budget": _copy(generation_budget, "Generation budget"),
             "selection": {**selection, "split": "selection", "split_role": "selection",
@@ -245,6 +276,7 @@ class RSICycleService:
             self._append_event(db, record["id"], "cycle_registered", {
                 "channel": channel, "channel_revision": active["revision"],
                 "parent_package_id": active["package_id"],
+                "improver_registration": improver_registration,
                 "selection_snapshot_digest": selection["snapshot_digest"],
                 "guard_snapshot_digest": guard["snapshot_digest"]})
         return {**record, "record_digest": record_digest}
@@ -389,12 +421,22 @@ class RSICycleService:
             return self._advance(record, token, status, "feedback_captured",
                                  {"feedback_bundle_id": feedback["id"]})
         if status == "feedback_captured":
-            improver = self.store.package(record["improver_package_id"])
-            if improver["digest"] != record["improver_package_digest"]:
-                raise ContractError("RSI cycle improver package digest changed")
+            improver_registration = record.get("improver_registration")
+            if improver_registration is None:
+                improver = self.store.package(record["improver_package_id"])
+                if improver["digest"] != record["improver_package_digest"]:
+                    raise ContractError("RSI cycle improver package digest changed")
+                improver_channel = None
+                expected_improver_revision = None
+            else:
+                improver = None
+                improver_channel = improver_registration["channel"]
+                expected_improver_revision = improver_registration["revision"]
             generation = self.generation.generate(
                 record["channel"], refs["feedback_bundle_id"], improver,
                 record["mutation_policy"], record["channel_revision"],
+                improver_channel=improver_channel,
+                expected_improver_revision=expected_improver_revision,
                 budget=record["generation_budget"], stop_event=stop_event)
             generated_refs = {"generation_id": generation["id"]}
             if generation["status"] != "generated":

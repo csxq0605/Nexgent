@@ -179,6 +179,21 @@ def test_task_registration_rejects_external_schema_refs_and_accepts_local_defini
     assert state["status"] == "ready"
 
 
+def test_task_context_cannot_forge_improver_channel_registration(tmp_path):
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    package = controlled_package("""def execute(payload, context):
+    return {'deliverables': {}}
+""")
+
+    with pytest.raises(ContractError, match="host-owned"):
+        service.create(
+            "Reject caller-owned improver deployment identity", package=package,
+            context={"improver_channel_registration": {
+                "channel": "recursive", "revision": 0,
+                "package_id": package["id"], "package_digest": package["digest"],
+            }})
+
+
 def test_tool_artifact_reference_contract_rejects_placeholders_before_handler(tmp_path):
     calls = []
 

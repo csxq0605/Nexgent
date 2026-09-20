@@ -123,6 +123,8 @@ python -m venv .venv
 
 # 产品化 cycle：一次冻结并推进同样的 feedback→selection→promotion→guard 门控
 .venv\Scripts\python.exe -m nexgent rsi-cycle-start general workbench DEVELOPMENT_EPISODE_ID --expected-revision 0 --mutation-policy examples/rsi/reference-os-mutation-policy.json
+# 可选：让已部署的递归改进器 R 承担本轮候选生成，并冻结其 revision
+.venv\Scripts\python.exe -m nexgent rsi-cycle-start general workbench DEVELOPMENT_EPISODE_ID --expected-revision 0 --improver-channel recursive --expected-improver-revision 0 --mutation-policy mutation-policy.json
 .venv\Scripts\python.exe -m nexgent rsi-cycle-show RSI_CYCLE_ID
 .venv\Scripts\python.exe -m nexgent rsi-cycle-resume RSI_CYCLE_ID
 
@@ -146,7 +148,7 @@ python -m venv .venv
 
 P3 的每个写操作都有独立 CLI 和 Python API；P4 的递归写操作保留为显式 Python 控制面，必须依次形成 meta feedback、R self-generation、meta trial/decision、guard plan 和 promotion，不能“一键跳过门控”。GUI 的“RSI 与版本”页保持只读。`rsi-*` 输出不暴露 AgentPackage 源文件、私有任务内容或 evaluator 实现。操作顺序见[运行与恢复](docs/operations.md)，完整合同见[P3 控制面设计](docs/design/p3-feedback-evolution-control-plane.md)与[P4 递归控制面](docs/design/p4-recursive-improver-control-plane.md)。
 
-`RSICycleService` 把一次任务智能体改进的 feedback、generation、paired selection、guard plan、promotion 与 monitor 串成持久状态机。CLI 提供 `rsi-cycle-start/resume/show/recover`，默认使用内置参考 R0；信息窗口可按 cycle ID 查看脱敏状态。它减少调用方手工传递记录 ID，但不会跳过独立评价或自动放宽晋升条件；硬中断中无法确定外部动作是否提交时会进入 `recovery_required`，CLI 返回非零。合同见[可恢复 RSI Cycle 服务](docs/design/rsi-cycle-service.md)。
+`RSICycleService` 把一次任务智能体改进的 feedback、generation、paired selection、guard plan、promotion 与 monitor 串成持久状态机。CLI 提供 `rsi-cycle-start/resume/show/recover`，默认使用内置参考 R0，也可冻结并执行独立 R channel 的指定 revision；信息窗口可按 cycle ID 查看脱敏状态。R channel 在 Episode 创建前和真正启动前都会重新核验，漂移时不会发起模型调用。它减少调用方手工传递记录 ID，但不会跳过独立评价或自动放宽晋升条件；硬中断中无法确定外部动作是否提交时会进入 `recovery_required`，CLI 返回非零。合同见[可恢复 RSI Cycle 服务](docs/design/rsi-cycle-service.md)。
 
 ## 保留的 0.8 benchmark 与源码研究接口
 

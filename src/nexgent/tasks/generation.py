@@ -494,16 +494,14 @@ class GenerationService:
                                "rsi_role": "candidate_generation", "channel": channel,
                                "channel_revision": active["revision"],
                                "feedback_bundle_id": feedback["id"]}
-            if improver_registration is not None:
-                episode_context["improver_channel_registration"] = deepcopy(
-                    improver_registration)
             episode = self.tasks.create(
                 "Generate one feedback-bound BehaviorPatch for the active AgentPackage",
                 inputs=inputs,
                 deliverables=[{"name": "behavior_patch", "schema": _patch_schema()}],
                 budget=budget, capabilities=[], package=improver_package,
                 context=episode_context,
-                constraints={"allowed_effects": [], "wall_seconds": 1200}, entry="improve")
+                constraints={"allowed_effects": [], "wall_seconds": 1200}, entry="improve",
+                improver_channel_registration=improver_registration)
             episode = self.tasks.run(episode["id"], stop_event=stop_event)
         except Exception as exc:
             if episode is not None:

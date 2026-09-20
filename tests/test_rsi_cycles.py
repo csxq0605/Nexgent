@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from nexgent.tasks.cycles import RSICycleService
 from nexgent.tasks.evolution import EvolutionService, PromotionPolicy
 from nexgent.tasks.generation import GenerationService, PATCH_SCHEMA
+from nexgent.tasks.improvers import ImproverService
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.tools import ContractError, ToolRegistry
@@ -332,3 +333,98 @@ def test_cycle_refuses_guard_execution_after_promoted_deployment_drifts(tmp_path
 
     assert len(tasks.list()) == before
     assert evolution.active("general")["package_id"] == parent["id"]
+
+
+def test_cycle_freezes_and_executes_a_recursive_improver_channel(tmp_path):
+    tasks, evolution, generation, cycles, parent, benchmark, _ = prepared(tmp_path)
+    improver = improver_package(parent)
+    ImproverService(tasks).register(
+        "recursive", improver, {"mutable_paths": ["improver.py"]})
+    feedback = tasks.create(
+        "Observe the active package for channel-driven improvement",
+        deliverables=[{"name": "result", "schema": {
+            "type": "object", "required": ["score"]}}],
+        package_channel="general",
+        context={"split": "development", "split_role": "development"})
+    feedback = tasks.run(feedback["id"])
+
+    cycle = cycles.create(
+        channel="general", feedback_episode_ids=[feedback["id"]],
+        improver_channel="recursive", expected_improver_revision=0,
+        mutation_policy={"mutable_paths": ["behavior.py"],
+                         "component_classes": {"behavior.py": "O"},
+                         "allowed_operations": ["replace"],
+                         "max_patch_bytes": 100000},
+        expected_revision=0, selection_adapter=benchmark, guard_adapter=benchmark,
+        policy=PromotionPolicy(min_quality_delta=0.5, monitor_min_score=0.5))
+
+    assert cycle["improver_registration"] == {
+        "channel": "recursive", "revision": 0,
+        "package_id": improver["id"], "package_digest": improver["digest"]}
+    public = cycles.public(cycle["id"])
+    assert public["improver"] == {
+        "source": "channel", "channel": "recursive", "revision": 0,
+        "package_id": improver["id"], "package_digest": improver["digest"]}
+    assert "files" not in json.dumps(public, ensure_ascii=False)
+
+    completed = cycles.run(cycle["id"], benchmark, benchmark)
+    assert completed["status"] == "completed"
+    generated = generation.generation(completed["refs"]["generation_id"])
+    assert generated["improver_registration"] == cycle["improver_registration"]
+
+
+def test_cycle_improver_channel_drift_fails_closed_before_generation(
+        tmp_path, monkeypatch):
+    tasks, evolution, generation, cycles, parent, benchmark, _ = prepared(tmp_path)
+    improver = improver_package(parent)
+    ImproverService(tasks).register(
+        "recursive", improver, {"mutable_paths": ["improver.py"]})
+    feedback = tasks.create(
+        "Observe behavior before improver drift",
+        deliverables=[{"name": "result", "schema": {
+            "type": "object", "required": ["score"]}}],
+        package_channel="general",
+        context={"split": "development", "split_role": "development"})
+    feedback = tasks.run(feedback["id"])
+    cycle = cycles.create(
+        channel="general", feedback_episode_ids=[feedback["id"]],
+        improver_channel="recursive", expected_improver_revision=0,
+        mutation_policy={"mutable_paths": ["behavior.py"],
+                         "component_classes": {"behavior.py": "O"}},
+        expected_revision=0, selection_adapter=benchmark, guard_adapter=benchmark)
+    captured = cycles.run(cycle["id"], benchmark, benchmark, max_steps=1)
+    assert captured["status"] == "feedback_captured"
+    before = len(tasks.list())
+
+    def drifted_registration(store, channel):
+        return {"channel": channel, "revision": 1,
+                "package_id": improver["id"], "package_digest": improver["digest"],
+                "package": improver}
+
+    monkeypatch.setattr(
+        "nexgent.tasks.improvers.active_improver_registration", drifted_registration)
+    with pytest.raises(ContractError, match="Improver channel expected revision is stale"):
+        cycles.resume(cycle["id"], benchmark, benchmark)
+    assert len(tasks.list()) == before
+    paused = cycles.get(cycle["id"])
+    assert paused["status"] == "feedback_captured"
+    assert paused["pending_action"]["name"] == "feedback_captured"
+
+
+@pytest.mark.parametrize("kwargs,match", [
+    ({}, "requires an improver package or improver channel"),
+    ({"improver_package": {"id": "invalid"}, "improver_channel": "recursive",
+      "expected_improver_revision": 0}, "either"),
+    ({"improver_channel": "recursive"}, "expected improver revision"),
+    ({"improver_package": {"id": "invalid"}, "expected_improver_revision": 0},
+     "requires an improver channel"),
+])
+def test_cycle_improver_source_contract_is_exclusive(tmp_path, kwargs, match):
+    tasks, evolution, generation, cycles, parent, benchmark, cycle = prepared(tmp_path)
+    base = dict(
+        channel="general", feedback_episode_ids=cycle["feedback_episode_ids"],
+        mutation_policy={"mutable_paths": ["behavior.py"],
+                         "component_classes": {"behavior.py": "O"}},
+        expected_revision=0, selection_adapter=benchmark, guard_adapter=benchmark)
+    with pytest.raises(ContractError, match=match):
+        cycles.create(**base, **kwargs)
