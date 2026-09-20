@@ -14,7 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nexgent.tasks.packages import make_package
-from nexgent.tasks.runtime import TaskService
+from nexgent.tasks.runtime import TaskService, ToolContext
 from nexgent.tasks.tools import ContractError, ToolRegistry, ToolSpec
 
 
@@ -115,6 +115,27 @@ def test_task_registration_rejects_external_schema_refs_and_accepts_local_defini
                     "type": "object", "properties": {"value": {"$ref": "#/$defs/value"}}}
     state = service.create("Local schema is valid", deliverables=[{"name": "result", "schema": local_schema}])
     assert state["status"] == "ready"
+
+
+def test_tool_workspace_is_bounded_and_shared_by_the_root_episode(tmp_path):
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    parent = service.create("parent")
+    child = service.create("child", parent_episode_id=parent["id"])
+    parent_context = ToolContext(service, parent["id"], "rpc.1", threading.Event())
+    child_context = ToolContext(service, child["id"], "rpc.1.1", threading.Event())
+
+    parent_workspace = parent_context.workspace("openfoam")
+    assert parent_workspace == child_context.workspace("openfoam")
+    assert parent_workspace == (tmp_path.resolve() / ".nexgent" / "tool-workspaces"
+                                / "openfoam" / parent["id"])
+    assert parent_workspace.is_dir()
+    events = service.store.events(child["id"])
+    assert events[-1]["kind"] == "tool_workspace_opened"
+    assert events[-1]["content"]["root_episode_id"] == parent["id"]
+
+    for invalid in ("../escape", "OpenFOAM", "", "a" * 65, "space here"):
+        with pytest.raises(ContractError, match="workspace namespace"):
+            parent_context.workspace(invalid)
 
 
 def test_unknown_started_model_rpc_requires_user_recovery_without_repeating_model(tmp_path):

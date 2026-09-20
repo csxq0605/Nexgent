@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 import threading
 import time
 
@@ -93,6 +94,39 @@ class ToolContext:
 
     def once(self, key):
         return self.service.store.once(self.episode_id, key)
+
+    def workspace(self, namespace):
+        """Return a durable, root-episode-scoped directory for a trusted tool.
+
+        Tool handlers are host code rather than package code.  The namespace
+        contract keeps their durable files under one framework-owned root and
+        prevents a plugin from turning a task argument into a filesystem path.
+        Parent and delegated episodes deliberately share the same directory so
+        retries and recovery can address the same external work receipts.
+        """
+        if (not isinstance(namespace, str)
+                or not re.fullmatch(r"[a-z][a-z0-9_.-]{0,63}", namespace)):
+            raise ContractError("Tool workspace namespace must be a bounded lowercase identifier")
+        project_root = self.service.project_root.resolve()
+        base = (project_root / ".nexgent" / "tool-workspaces").resolve()
+        try:
+            base.relative_to(project_root)
+        except ValueError:
+            raise ContractError("Tool workspace root resolved outside the project") from None
+        base.mkdir(parents=True, exist_ok=True)
+        root_id = self.service.store.get(self.episode_id)["root_episode_id"]
+        target = (base / namespace / root_id).resolve()
+        try:
+            target.relative_to(base)
+        except ValueError:
+            raise ContractError("Tool workspace resolved outside the managed root") from None
+        target.mkdir(parents=True, exist_ok=True)
+        self.service.store.event(
+            self.episode_id,
+            "tool_workspace_opened",
+            {"node_id": self.node_id, "namespace": namespace, "root_episode_id": root_id},
+        )
+        return target
 
 
 class TaskService:

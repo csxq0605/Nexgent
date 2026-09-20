@@ -1,0 +1,181 @@
+{
+  "schema_version": "nexgent.openfoam-smoke-evidence.v1",
+  "recorded_at": "2026-09-20",
+  "environment": {
+    "backend": "wsl",
+    "distribution": "Ubuntu-20.04",
+    "project": "OpenFOAM",
+    "foundation_version": "8",
+    "package_version": "openfoam8 20210316"
+  },
+  "scenario": {
+    "id": "cavity_re10",
+    "split": "smoke",
+    "seed": 0,
+    "cells": 400,
+    "expected_end_time": 0.5
+  },
+  "identity": {
+    "run_digest": "24d3bcca47377e63d2067c1fd52316b900d165d51966b14611709d426e29d63f",
+    "job_digest": "c8400a9d172c4364f4afa875d132dc327f55ca7c87f6f8d9652ab143b7b3a9a5",
+    "spec_digest": "2783156865071846129427dc895820f0e530f1b12834860e80ef7e8b4e8d7009",
+    "template_digest": "241b4c8cb8e85fa252cc3854be0f5389adb228a67b2163cd21a60ef4a9b597f3",
+    "case_digest_before_run": "241b4c8cb8e85fa252cc3854be0f5389adb228a67b2163cd21a60ef4a9b597f3",
+    "case_digest_after_run": "8d9d0414b8e62279a8291d25d8e720e6268303abbe38e8bbcd076ae82f3d8e55"
+  },
+  "execution": {
+    "wall_time_ms": 18859,
+    "commands": [
+      {
+        "program": "blockMesh",
+        "returncode": 0,
+        "duration_ms": 5078,
+        "output_bytes": 2284,
+        "output_digest": "8f73ac7db7ea349beec59c337bcd5f0d5b88ca0a6c70af87608c06075f9bb751",
+        "output_truncated": false,
+        "timed_out": false
+      },
+      {
+        "program": "checkMesh",
+        "returncode": 0,
+        "duration_ms": 5984,
+        "output_bytes": 3091,
+        "output_digest": "d29329de4abb04bafd7e475dde2b3e6d0f8c481592a40d9293803313ae6b8ec4",
+        "output_truncated": false,
+        "timed_out": false
+      },
+      {
+        "program": "icoFoam",
+        "returncode": 0,
+        "duration_ms": 7796,
+        "output_bytes": 73883,
+        "output_digest": "7d1c072ca0a9af4723c1ea1eab8630bbbebabe16fbccc57fef6bb7877f0667a1",
+        "output_truncated": true,
+        "timed_out": false
+      }
+    ]
+  },
+  "verification": {
+    "status": "passed",
+    "independent_evaluator_accepted": true,
+    "mesh_ok": true,
+    "cell_count": 400,
+    "solver_end_time": 0.5,
+    "solver_completed": true,
+    "residual_lines_observed": 354,
+    "residual_scan_complete": false,
+    "fields": [
+      {
+        "name": "U",
+        "class": "volVectorField",
+        "dimensions": "[0 1 -1 0 0 0 0]",
+        "value_count": 400,
+        "finite": true,
+        "minimum": -0.368612,
+        "maximum": 0.852667,
+        "digest": "d9cedfff53166ede22d5d7f913f911c79b8d7d82ab7c89d6ea45823a5b456f8c"
+      },
+      {
+        "name": "p",
+        "class": "volScalarField",
+        "dimensions": "[0 2 -2 0 0 0 0]",
+        "value_count": 400,
+        "finite": true,
+        "minimum": -4.36666,
+        "maximum": 4.84854,
+        "digest": "cd153e93d5c2e7317bb4ae96e47e2ec8bdcd2ab39bd88e4cf60279bb6dd73bc7"
+      }
+    ]
+  },
+  "claim_boundary": {
+    "established": [
+      "fixed tool execution",
+      "mesh structural check",
+      "solver completion to the tutorial end time",
+      "finite final fields",
+      "receipt-bound independent acceptance"
+    ],
+    "not_evaluated": [
+      "steady state",
+      "independent numerical accuracy",
+      "grid convergence",
+      "time-step convergence",
+      "Re=100 behavior",
+      "general CFD reliability",
+      "RSI effectiveness"
+    ]
+  },
+  "framework_recovery_episode": {
+    "episode_id": "episode-6ef65a0b81754ce3",
+    "status": "completed",
+    "execution_mode": "fixed_no_model_agent_package",
+    "task_service": true,
+    "package": {
+      "id": "package-9d3eb88382fcfebbff47b1f4",
+      "digest": "d6162a2b18c6d8366d82a49dfbded3fba3cde089cbc46101a839725f02398067"
+    },
+    "usage": {
+      "model_calls": 0,
+      "tool_calls": 5,
+      "nodes": 7
+    },
+    "controlled_recovery": {
+      "failure": "synthetic_once_only_rejection",
+      "retry": true,
+      "outcome": "completed"
+    },
+    "identity": {
+      "run_digest": "c44da613aa7d1d06dba6cab415c8ceb4a22211a32dec5cda9f4222a9d62cc63a",
+      "job_digest": "c8400a9d172c4364f4afa875d132dc327f55ca7c87f6f8d9652ab143b7b3a9a5",
+      "spec_digest": "2783156865071846129427dc895820f0e530f1b12834860e80ef7e8b4e8d7009"
+    },
+    "execution": {
+      "backend": "wsl",
+      "wall_time_ms": 16656,
+      "commands": [
+        {
+          "program": "blockMesh",
+          "duration_ms": 4593
+        },
+        {
+          "program": "checkMesh",
+          "duration_ms": 5265
+        },
+        {
+          "program": "icoFoam",
+          "duration_ms": 6797
+        }
+      ],
+      "residual_lines_observed": 353,
+      "residual_scan_complete": false
+    },
+    "artifacts": [
+      "artifact-42403ae7a6234a8a",
+      "artifact-918635f6f9074d44"
+    ],
+    "evaluation": {
+      "accepted": true,
+      "score": 1.0,
+      "evaluator_digest": "ee61af9540a6f628ccf4cc7ac94a5414c638d1e41699c093a6431a55e9e0a606"
+    },
+    "claim_boundary": {
+      "established": [
+        "TaskService executed the fixed AgentPackage",
+        "synthetic once-only rejection was observed and retried",
+        "real WSL OpenFOAM tools executed",
+        "final artifacts were published and validated",
+        "the hidden evaluator accepted the receipt-bound delivery"
+      ],
+      "not_evaluated": [
+        "model-driven autonomous recovery",
+        "model task quality",
+        "steady state",
+        "independent numerical accuracy",
+        "grid convergence",
+        "time-step convergence",
+        "Re=100 behavior",
+        "RSI effectiveness"
+      ]
+    }
+  }
+}
