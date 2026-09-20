@@ -59,7 +59,7 @@ def test_declared_workflow_skill_executes_through_same_runtime(tmp_path):
     assert "rpc.1/nodes/load" in result["nodes"]
 
 
-def test_candidate_memory_is_frozen_then_actually_consumed_by_later_episode(tmp_path):
+def test_candidate_memory_is_not_trusted_by_a_later_episode(tmp_path):
     candidate = package("""def execute(payload, context):
     if payload['objective'] == 'teach':
         item = context.remember({'lesson': 'verify provenance before aggregation'}, 'procedure')
@@ -77,6 +77,6 @@ def test_candidate_memory_is_frozen_then_actually_consumed_by_later_episode(tmp_
                             context={"memory_namespace": "contract", "split": "development"})
     result = service.run(second["id"])
     content = service.store.read(result["output_refs"]["result"], second["id"])["content"]
-    assert content == {"lessons": [{"lesson": "verify provenance before aggregation"}]}
+    assert content == {"lessons": []}
     consumed = [event for event in result["events"] if event["kind"] == "memory_consumed"]
-    assert len(consumed) == 1 and len(consumed[0]["content"]["item_ids"]) == 1
+    assert len(consumed) == 1 and consumed[0]["content"]["item_ids"] == []

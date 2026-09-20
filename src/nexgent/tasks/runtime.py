@@ -187,7 +187,8 @@ class TaskService:
     def create(self, objective, inputs=None, deliverables=None, budget=None, capabilities=None,
                package=None, context=None, *, constraints=None, entry="execute", parent_episode_id=None,
                package_channel=None, benchmark_registration=None,
-               expected_package_registration=None, improver_channel_registration=None):
+               expected_package_registration=None, improver_channel_registration=None,
+               memory_channel=None, expected_memory_registration=None):
         if not isinstance(objective, str) or not objective.strip() or len(objective) > 20000:
             raise ContractError("Task objective must be nonempty and at most 20000 characters")
         explicit_package = package is not None
@@ -217,6 +218,37 @@ class TaskService:
         elif expected_package_registration is not None:
             raise ContractError("Expected package registration requires a package channel")
         verify_package(package)
+        memory_registration = None
+        if memory_channel is not None:
+            from .memory import active_memory_registration
+            memory_registration = active_memory_registration(self.store, memory_channel)
+            if (memory_registration["package_id"] != package["id"]
+                    or memory_registration["package_digest"] != package["digest"]):
+                raise ContractError("Active memory belongs to a different AgentPackage")
+            if expected_memory_registration is not None:
+                expected_memory_registration = _json_copy(
+                    expected_memory_registration, label="Expected memory registration")
+                expected_keys = {"channel", "revision", "memory_id", "memory_digest",
+                                 "package_id", "package_digest"}
+                if (not isinstance(expected_memory_registration, dict)
+                        or frozenset(expected_memory_registration) not in {
+                            frozenset(expected_keys), frozenset(expected_keys | {"updated_at"})}
+                        or any(memory_registration[key] != expected_memory_registration[key]
+                               for key in expected_keys)):
+                    raise ContractError(
+                        "Active memory registration differs from the expected deployment")
+        elif expected_memory_registration is not None:
+            raise ContractError("Expected memory registration requires a memory channel")
+        frozen_memory_version = None
+        if memory_registration is None and parent_episode_id is not None:
+            memory_registration = self.store.memory_registration(parent_episode_id)
+        if memory_registration is not None:
+            from .memory import memory_version
+            # Fully verify and JSON-bound the resource before EpisodeStore starts
+            # its atomic registration/snapshot transaction.
+            frozen_memory_version = memory_version(
+                self.store, memory_registration["memory_id"])
+            _json_copy(frozen_memory_version, label="Frozen memory version")
         if capabilities is None:
             capabilities = []
         if (not isinstance(capabilities, list) or len(capabilities) > 256
@@ -240,6 +272,9 @@ class TaskService:
             raise ContractError("Benchmark registration context is host-owned")
         if "improver_channel_registration" in context:
             raise ContractError("Improver channel registration context is host-owned")
+        if ("memory_channel_registration" in context
+                or "memory_registration_digest" in context):
+            raise ContractError("Memory channel registration context is host-owned")
         if benchmark_registration is not None:
             if not isinstance(benchmark_registration, dict):
                 raise ContractError("Benchmark registration must be a JSON object")
@@ -297,13 +332,20 @@ class TaskService:
                 "tools": self.tools.describe(capabilities)}
         episode = self.store.create(
             task, package, parent_episode_id,
-            benchmark_registration=benchmark_registration)
+            benchmark_registration=benchmark_registration,
+            memory_registration=memory_registration,
+            memory_version=frozen_memory_version)
         refs = {}
         for name, value in task["inputs"].items():
             artifact = self.store.publish(episode["id"], value, name=name, scope="tree", node_id="input")
             refs[name] = artifact["id"]
-        snapshot = self.store.snapshot(episode["id"], query="")
-        return self._change(episode["id"], lambda s: s.update(input_refs=refs, memory_snapshot_id=snapshot["id"]))
+        if episode["memory_snapshot_id"] is None:
+            snapshot = self.store.snapshot(episode["id"], query="")
+            snapshot_id = snapshot["id"]
+        else:
+            snapshot_id = episode["memory_snapshot_id"]
+        return self._change(episode["id"], lambda s: s.update(
+            input_refs=refs, memory_snapshot_id=snapshot_id))
 
     def list(self):
         return [self.get(state["id"]) for state in self.store.list() if not state["parent_episode_id"]]
@@ -704,17 +746,31 @@ class TaskService:
             # become available to a subsequent episode, not retroactively here.
             snapshot = self.store.memory_snapshot(state["memory_snapshot_id"], identity)
             query = params.get("query", "")
+            requested_limit = params.get("limit", 5)
+            if (not isinstance(query, str) or type(requested_limit) is not int
+                    or not 0 <= requested_limit <= 100):
+                raise ContractError(
+                    "Memory search requires text and a limit between 0 and 100")
             words = query.lower().split()
             items = snapshot.get("items", [])
             selected = [item for item in items if not words or any(w in json.dumps(item, ensure_ascii=False).lower() for w in words)]
+            policy_limit = snapshot.get("memory_policy", {}).get(
+                "retrieval", {}).get("max_results", 100)
+            effective_limit = min(requested_limit, policy_limit)
             self.store.event(identity, "memory_consumed", {"node_id": path, "snapshot_id": snapshot["id"],
-                "query": query, "item_ids": [item["id"] for item in selected[:params.get("limit", 5)]]})
-            return selected[:params.get("limit", 5)]
+                "query": query, "item_ids": [item["id"] for item in selected[:effective_limit]]})
+            return selected[:effective_limit]
         if method == "remember":
             state = self.store.get(identity)
             if state["task"].get("context", {}).get("memory_writeback") is False:
                 raise PermissionError("Memory writeback is disabled for this evaluation Episode")
-            return self.store.remember(identity, params["content"], kind=params.get("kind", "experience"),
+            kind = params.get("kind", "experience")
+            snapshot = self.store.memory_snapshot(state["memory_snapshot_id"], identity)
+            writeback = snapshot.get("memory_policy", {}).get("writeback")
+            if writeback is not None and (not writeback.get("enabled")
+                    or kind not in writeback.get("allowed_kinds", [])):
+                raise PermissionError("Frozen memory policy does not allow this writeback")
+            return self.store.remember(identity, params["content"], kind=kind,
                                        evidence_refs=params.get("evidence") or [])
         if method == "plan":
             plan = params["plan"]
@@ -730,7 +786,8 @@ class TaskService:
         raise ContractError(f"Unknown task capability: {method}")
 
     def benchmark(self, benchmark_id, *, split="development", seed=0, budget=None, package=None,
-                  package_channel=None, stop_event=None, **options):
+                  package_channel=None, memory_channel=None, expected_memory_registration=None,
+                  stop_event=None, **options):
         if package is not None and package_channel is not None:
             raise ContractError("Specify either a package or a package channel")
         adapters = task_benchmarks()
@@ -753,7 +810,9 @@ class TaskService:
                             "snapshot": deepcopy(snapshot)}
             state = self.create(task_ref["objective"], task_ref.get("inputs"), task_ref.get("deliverables"), budget,
                 task_ref.get("capabilities"), package, context, constraints=task_ref.get("constraints"),
-                package_channel=package_channel, benchmark_registration=registration)
+                package_channel=package_channel, benchmark_registration=registration,
+                memory_channel=memory_channel,
+                expected_memory_registration=expected_memory_registration)
             self.run(state["id"], stop_event=stop_event)
             reports.append(self._evaluate_registered(state["id"], adapters))
             if stop_event is not None and stop_event.is_set():

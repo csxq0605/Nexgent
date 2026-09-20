@@ -251,7 +251,8 @@ def test_memory_namespace_split_and_holdout_cannot_be_overridden(store, package)
     holdout = store.create(task(context={"memory_namespace": "study-a", "split": "final_holdout"}), package)
     item = store.remember(first["id"], {"lesson": "Check input binding before retry"})
     assert item["status"] == "candidate"
-    assert store.search(same["id"], "input") == [item]
+    assert store.search(first["id"], "input") == [item]
+    assert store.search(same["id"], "input") == []
     assert store.search(other["id"]) == []
     assert store.search(holdout["id"]) == []
     with pytest.raises(PermissionError, match="namespace"):

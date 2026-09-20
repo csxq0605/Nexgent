@@ -81,6 +81,8 @@ class EpisodeStore:
                     id TEXT PRIMARY KEY, episode TEXT, data TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS task_benchmark_registrations(
                     episode TEXT PRIMARY KEY, data TEXT NOT NULL, digest TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS task_memory_registrations(
+                    episode TEXT PRIMARY KEY, data TEXT NOT NULL, digest TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS task_rpc(
                     episode TEXT, call_path TEXT, data TEXT NOT NULL,
                     PRIMARY KEY(episode,call_path));
@@ -102,10 +104,14 @@ class EpisodeStore:
             raise KeyError(episode_id)
         return json.loads(row[0])
 
-    def create(self, task, package, parent_episode_id=None, *, benchmark_registration=None):
+    def create(self, task, package, parent_episode_id=None, *, benchmark_registration=None,
+               memory_registration=None, memory_version=None):
         task = deepcopy(task)
         benchmark_registration = (None if benchmark_registration is None
                                   else deepcopy(benchmark_registration))
+        memory_registration = (None if memory_registration is None
+                               else deepcopy(memory_registration))
+        memory_version = None if memory_version is None else deepcopy(memory_version)
         if not isinstance(task, dict) or not isinstance(task.get("objective"), str) or not task["objective"].strip():
             raise ValueError("A task requires a nonempty objective")
         if not isinstance(task.get("inputs", {}), dict):
@@ -136,6 +142,47 @@ class EpisodeStore:
                     if key in context and context[key] != inherited:
                         raise PermissionError("A child task cannot change its memory boundary")
                     context[key] = inherited
+                parent_memory = db.execute(
+                    "SELECT data FROM task_memory_registrations WHERE episode=?",
+                    (parent_episode_id,)).fetchone()
+                parent_registration = json.loads(parent_memory[0]) if parent_memory else None
+                if memory_registration is not None and memory_registration != parent_registration:
+                    raise PermissionError("A child task cannot change its frozen memory version")
+                memory_registration = parent_registration
+            if memory_registration is not None:
+                if (memory_registration.get("package_id") != package["id"]
+                        or memory_registration.get("package_digest") != package["digest"]):
+                    raise PermissionError("Frozen memory belongs to a different AgentPackage")
+                try:
+                    memory_row = db.execute(
+                        "SELECT status,data,record_digest FROM task_memory_versions WHERE id=?",
+                        (memory_registration.get("memory_id"),)).fetchone()
+                except sqlite3.OperationalError as exc:
+                    raise PermissionError("Frozen memory registry is unavailable") from exc
+                stored_memory = json.loads(memory_row[1]) if memory_row else None
+                provided_memory = deepcopy(memory_version) if isinstance(memory_version, dict) else None
+                if provided_memory is not None:
+                    provided_memory.pop("status", None)
+                    provided_memory.pop("record_digest", None)
+                # A resolved registration is the Episode's linearization point.
+                # Like package-channel resolution, a later channel move does not
+                # rewrite that in-flight choice. Retired versions remain valid for
+                # already resolved or delegated Episodes, but cannot be resolved
+                # anew by active_memory_registration().
+                allowed_statuses = {"accepted", "retired"}
+                if (not isinstance(memory_version, dict)
+                        or memory_row is None
+                        or memory_row[0] not in allowed_statuses
+                        or _digest(stored_memory) != memory_row[2]
+                        or stored_memory != provided_memory
+                        or memory_version.get("id") != memory_registration.get("memory_id")
+                        or memory_version.get("digest") != memory_registration.get("memory_digest")
+                        or memory_version.get("package_id") != package["id"]
+                        or memory_version.get("package_digest") != package["digest"]
+                        or memory_version.get("status") not in allowed_statuses):
+                    raise PermissionError("Frozen memory version does not match its registration")
+            elif memory_version is not None:
+                raise PermissionError("A memory version requires a frozen registration")
             task.setdefault("inputs", {})
             task.setdefault("context", {})
             task.setdefault("entry", "execute")
@@ -148,12 +195,63 @@ class EpisodeStore:
                        "child_episode_ids": [], "memory_snapshot_id": None, "outcome": None,
                        "budget": deepcopy(limits), "capabilities": deepcopy(capabilities),
                        "created_at": now, "updated_at": now}
+            memory_snapshot = None
+            if memory_registration is not None:
+                namespace, split = self._scope(episode)
+                resource = memory_version.get("resource", {})
+                policy = resource.get("policy", {})
+                data = resource.get("data", {})
+                if (set(policy) != {"retrieval", "writeback"}
+                        or set(data) != {"items"} or not isinstance(data["items"], list)):
+                    raise ValueError("Frozen memory resource shape is invalid")
+                items = []
+                for entry in data["items"]:
+                    item = deepcopy(entry)
+                    item.update({"status": "accepted", "namespace": namespace, "split": split})
+                    items.append(item)
+                memory_snapshot = {
+                    "id": _id("snapshot"), "episode_id": episode_id,
+                    "item_version_refs": [{"id": item["id"], "version": item["version"]}
+                                          for item in items],
+                    "items": items, "retrieval_refs": [], "query": "",
+                    "namespace": namespace, "split": split,
+                    "retrieval_policy_digest": _digest(policy["retrieval"]),
+                    "memory_policy": deepcopy(policy),
+                    "source": {key: deepcopy(memory_registration[key]) for key in (
+                        "channel", "revision", "memory_id", "memory_digest",
+                        "package_id", "package_digest")},
+                    "created_at": now,
+                }
+                memory_snapshot["digest"] = _digest(memory_snapshot)
+                # Serialize before inserting the Episode.  Contract/size failures
+                # therefore leave no partial identity even inside this transaction.
+                _json(memory_snapshot)
+                episode["memory_snapshot_id"] = memory_snapshot["id"]
             db.execute("INSERT INTO task_episodes VALUES(?,?,?,?)", (episode_id, root_id, now, _json(episode)))
             if benchmark_registration is not None:
                 encoded = _json(benchmark_registration)
                 db.execute("INSERT INTO task_benchmark_registrations VALUES(?,?,?)",
                            (episode_id, encoded, _digest(benchmark_registration)))
+            if memory_registration is not None:
+                encoded = _json(memory_registration)
+                db.execute("INSERT INTO task_memory_registrations VALUES(?,?,?)",
+                           (episode_id, encoded, _digest(memory_registration)))
             self._event(db, episode_id, "task_registered", {"task": task, "package_digest": package["digest"]})
+            if memory_registration is not None:
+                self._event(db, episode_id, "memory_version_frozen", {
+                    "channel": memory_registration["channel"],
+                    "revision": memory_registration["revision"],
+                    "memory_id": memory_registration["memory_id"],
+                    "memory_digest": memory_registration["memory_digest"],
+                })
+                db.execute("INSERT INTO task_snapshots VALUES(?,?,?)",
+                           (memory_snapshot["id"], episode_id, _json(memory_snapshot)))
+                self._event(db, episode_id, "memory_snapshot", {
+                    "id": memory_snapshot["id"], "digest": memory_snapshot["digest"],
+                    "item_version_refs": memory_snapshot["item_version_refs"],
+                    "retrieval_policy_digest": memory_snapshot["retrieval_policy_digest"],
+                    "source": memory_snapshot["source"],
+                })
         return episode
 
     def benchmark_registration(self, episode_id):
@@ -167,6 +265,20 @@ class EpisodeStore:
         value = json.loads(row[0])
         if _digest(value) != row[1]:
             raise ValueError("Benchmark registration digest mismatch")
+        return value
+
+    def memory_registration(self, episode_id):
+        """Return the host-private memory identity frozen for an Episode."""
+        with self.connect() as db:
+            self._get(db, episode_id)
+            row = db.execute(
+                "SELECT data,digest FROM task_memory_registrations WHERE episode=?",
+                (episode_id,)).fetchone()
+        if row is None:
+            return None
+        value = json.loads(row[0])
+        if _digest(value) != row[1]:
+            raise ValueError("Memory registration digest mismatch")
         return value
 
     def get(self, episode_id):
@@ -515,7 +627,10 @@ class EpisodeStore:
             rows = [json.loads(r[0]) for r in db.execute("SELECT data FROM task_memory WHERE namespace=? AND split=? ORDER BY rowid DESC",
                                                        (namespace, split))]
             terms = query.casefold().split()
-            items = [r for r in rows if r["status"] in {"candidate", "accepted"} and
+            # Unreviewed claims remain visible to their producing Episode for
+            # explicit snapshot/audit work, but never seed a later Episode.
+            items = [r for r in rows if (r["status"] == "accepted"
+                     or (r["status"] == "candidate" and episode_id in r["source_episode_refs"])) and
                      all(term in _json(r["content"]).casefold() for term in terms)][:limit]
             trace = {"id": _id("retrieval"), "episode_id": episode_id, "query": query,
                      "namespace": namespace, "split": split, "limit": limit, "created_at": time.time(),
