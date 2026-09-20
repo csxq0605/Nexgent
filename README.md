@@ -8,11 +8,11 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具
 
 0.9 完成了 P1 的任务执行、交付评审与恢复基础及产品入口整合，并实现了首个独立 P2 OpenFOAM smoke demo。普通目标和 benchmark 共享 `TaskService`，使用版本化 `AgentPackage`、受限模型/技能/工具能力、显式工件、执行节点、记忆快照、预算、停止恢复和可导出证据。默认 GUI 是任务空间；0.8 研究窗口和原有 CLI 命令继续保留。
 
-P1 已由确定性网关、工具和 benchmark 双件测试覆盖，并会运行真实受限子进程。它建立了后续 RSI 所需的可执行、可评审、可追踪和可恢复底座，**还没有实现跨任务候选生成、独立晋升门、自动回滚或改进策略自身更新**。P1 的真实模型验证会产生外部供应商载荷，目前仍等待用户明确授权后才执行；仓库不以确定性测试或 P2 求解器运行替代这项证据。
+P1 已由确定性网关、工具和 benchmark 双件测试覆盖，并会运行真实受限子进程。它建立了后续 RSI 所需的可执行、可评审、可追踪和可恢复底座，**还没有实现跨任务候选生成、独立晋升门、自动回滚或改进策略自身更新**。真实 Provider 验证已经执行：MiMo 跑通模型、usage、工具、重复阻断与恢复入口，但在 30 次模型调用后耗尽预算且没有交付；Qwen 因账户欠费被供应商拒绝，Gemini 最小探针连接失败。仓库不把这些失败记录或 P2 求解器运行写成真实模型任务成功。
 
 | 内容 | 状态 |
 | --- | --- |
-| P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础已实现并通过确定性合同测试；真实模型 episode 等待明确外部载荷授权 |
+| P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础已实现并通过确定性合同测试；真实 Provider episode 已运行但未形成可验收交付 |
 | P1 普通任务与独立 workbench benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同 |
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
 | P3 跨任务行为更新 | 待实现与检验 |
@@ -25,6 +25,7 @@ P1 已由确定性网关、工具和 benchmark 双件测试覆盖，并会运行
 - [定位与重构决策](docs/design/product-and-refactor-decision.md)：固定用户不变要求和框架边界。
 - [vNext 智能体架构](docs/design/agent-architecture-vnext.md)：真实任务执行、技能/编排/记忆和反馈驱动更新。
 - [论文方法到设计与实验](docs/research/agent-orchestration-rsi-synthesis-20260916.md)：AutoSci、ADAS、AFlow、DGM、Hyperagents、STOP 的采用方式与边界。
+- [P1 真实 Provider 验证](docs/research/task-runtime-validation-20260920.md)：实际 episode、token 与节点用量、供应商失败、重复调用阻断和未通过项。
 - [OpenFOAM 独立 demo](docs/demos/openfoam-cfd-design.md)、[本机环境](docs/demos/openfoam-environment-20260916.md)、[真实 smoke 验证](docs/demos/openfoam-smoke-validation-20260920.md)与[机器可读收据摘要](docs/demos/openfoam-smoke-receipt-20260920.json)：任务设计、版本适配、实际执行证据和结论边界。
 - [分阶段重构计划](REFACTOR_PLAN.md)：依赖、责任和验收条件。
 
