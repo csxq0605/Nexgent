@@ -186,7 +186,8 @@ class TaskService:
 
     def create(self, objective, inputs=None, deliverables=None, budget=None, capabilities=None,
                package=None, context=None, *, constraints=None, entry="execute", parent_episode_id=None,
-               package_channel=None, benchmark_registration=None):
+               package_channel=None, benchmark_registration=None,
+               expected_package_registration=None):
         if not isinstance(objective, str) or not objective.strip() or len(objective) > 20000:
             raise ContractError("Task objective must be nonempty and at most 20000 characters")
         if package is not None and package_channel is not None:
@@ -195,10 +196,25 @@ class TaskService:
         if package_channel is not None:
             from .evolution import active_package_registration
             package_registration = active_package_registration(self.store, package_channel)
+            if expected_package_registration is not None:
+                expected_package_registration = _json_copy(
+                    expected_package_registration, label="Expected package registration")
+                expected_keys = {"channel", "revision", "package_id", "package_digest"}
+                if (not isinstance(expected_package_registration, dict)
+                        or set(expected_package_registration) != expected_keys
+                        or any(package_registration[key] != expected_package_registration[key]
+                               for key in expected_keys)):
+                    raise ContractError(
+                        "Active package registration differs from the expected deployment")
             package = package_registration["package"]
         elif package is None:
+            if expected_package_registration is not None:
+                raise ContractError(
+                    "Expected package registration requires a package channel")
             from .seed import default_package
             package = default_package()
+        elif expected_package_registration is not None:
+            raise ContractError("Expected package registration requires a package channel")
         verify_package(package)
         if capabilities is None:
             capabilities = []

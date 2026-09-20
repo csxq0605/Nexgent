@@ -39,6 +39,8 @@ P3 管理通用 `AgentPackage` 的行为版本，不理解 OpenFOAM、科学发�
 
 Python API 与 CLI 都保留分步对象，调用方必须显式保存每个 immutable record。GUI 提供安全只读信息；CLI 提供同样受门控的逐步操作：
 
+后端另提供 `RSICycleService.create/run/resume/recover`，可按冻结计划连续推进上述步骤，并在每个边界持久 checkpoint。它仍保留所有分步 immutable record；`generation_missing`、`rejected`、`guard_failed` 和 `rolled_back` 是正常可审计终态。无法判断某次外部动作是否提交时，cycle 不会自动重放。CLI 与 GUI 的 cycle 入口将在下一阶段接入。
+
 ```powershell
 # --package 与 --package-channel 互斥
 python -m nexgent task "执行已部署版本" --package-channel general

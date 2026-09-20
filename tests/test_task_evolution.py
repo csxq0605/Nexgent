@@ -189,6 +189,121 @@ def test_selection_trial_promotes_explicitly_and_channel_loads_new_package(tmp_p
         "min_score": 0.0, "min_success_rate": 1.0}
 
 
+def test_expected_package_registration_pins_the_resolved_deployment_during_drift(
+        tmp_path, monkeypatch):
+    import nexgent.tasks.evolution as evolution_module
+
+    tasks, evolution, parent, child, candidate, adapter, monitor_plan, active = promoted(tmp_path)
+    expected = {key: active[key] for key in (
+        "channel", "revision", "package_id", "package_digest")}
+    original = evolution_module.active_package_registration
+    drifted = {"done": False}
+
+    def resolve_then_drift(store, channel):
+        registration = original(store, channel)
+        if not drifted["done"]:
+            drifted["done"] = True
+            evolution.rollback(
+                channel, reason="concurrent test drift",
+                expected_revision=active["revision"],
+                expected_package_id=active["package_id"],
+                expected_monitor_plan_id=monitor_plan["id"])
+        return registration
+
+    monkeypatch.setattr(evolution_module, "active_package_registration", resolve_then_drift)
+    state = tasks.create(
+        "pin the resolved deployment", package_channel="general",
+        expected_package_registration=expected)
+
+    assert state["package_id"] == child["id"]
+    assert state["task"]["context"]["package_channel_registration"] == expected
+    assert evolution.active("general")["package_id"] == parent["id"]
+
+
+def test_expected_package_registration_rejects_stale_or_nonchannel_use(tmp_path):
+    tasks = service(tmp_path)
+    parent = package(0)
+    evolution = EvolutionService(tasks)
+    active = evolution.register("general", parent)
+    expected = {key: active[key] for key in (
+        "channel", "revision", "package_id", "package_digest")}
+    stale = {**expected, "revision": expected["revision"] + 1}
+
+    with pytest.raises(ContractError, match="differs from the expected deployment"):
+        tasks.create("stale", package_channel="general",
+                     expected_package_registration=stale)
+    with pytest.raises(ContractError, match="requires a package channel"):
+        tasks.create("not a channel", package=parent,
+                     expected_package_registration=expected)
+
+
+def test_run_monitor_never_loads_a_drifted_channel_package(tmp_path, monkeypatch):
+    tasks, evolution, parent, child, candidate, adapter, monitor_plan, active = promoted(tmp_path)
+    original_create = tasks.create
+    drifted = {"done": False}
+
+    def drift_before_channel_resolution(*args, **kwargs):
+        if not drifted["done"]:
+            drifted["done"] = True
+            evolution.rollback(
+                "general", reason="race before guard Episode creation",
+                expected_revision=active["revision"],
+                expected_package_id=active["package_id"],
+                expected_monitor_plan_id=monitor_plan["id"])
+        return original_create(*args, **kwargs)
+
+    monkeypatch.setattr(tasks, "create", drift_before_channel_resolution)
+    before = len(tasks.list())
+    with pytest.raises(ContractError, match="expected deployment"):
+        evolution.run_monitor(
+            "general", adapter, expected_revision=active["revision"],
+            expected_package_id=active["package_id"],
+            expected_monitor_plan_id=monitor_plan["id"])
+
+    assert len(tasks.list()) == before
+    assert evolution.active("general")["package_id"] == parent["id"]
+    claim = evolution.inspect_run_claim("monitor", monitor_plan["id"])
+    assert claim["status"] == "running"
+    evolution.recover_run_claim(
+        "monitor", monitor_plan["id"], confirm_no_external_commit=True)
+
+
+def test_monitor_cas_refuses_to_rollback_a_newer_deployment(tmp_path, monkeypatch):
+    tasks, evolution, parent, child, candidate, adapter, monitor_plan, active = promoted(tmp_path)
+    adapter.score_available = False
+    monitoring = evolution.run_monitor(
+        "general", adapter, expected_revision=active["revision"],
+        expected_package_id=active["package_id"],
+        expected_monitor_plan_id=monitor_plan["id"])
+    original_event = evolution._event
+    drifted = {"done": False}
+
+    def drift_after_measurement(channel, kind, content):
+        event = original_event(channel, kind, content)
+        if kind == "deployment_monitored" and not drifted["done"]:
+            drifted["done"] = True
+            evolution.rollback(
+                channel, reason="concurrent rollback wins",
+                expected_revision=active["revision"],
+                expected_package_id=active["package_id"],
+                expected_monitor_plan_id=monitor_plan["id"])
+        return event
+
+    monkeypatch.setattr(evolution, "_event", drift_after_measurement)
+    with pytest.raises(ContractError, match="expected binding"):
+        evolution.monitor(
+            "general", monitoring["episode_ids"],
+            expected_revision=active["revision"],
+            expected_package_id=active["package_id"],
+            expected_monitor_plan_id=monitor_plan["id"])
+
+    # The concurrent rollback happened once; monitor did not apply a second
+    # rollback to the already-restored parent deployment.
+    restored = evolution.active("general")
+    assert restored["package_id"] == parent["id"]
+    assert restored["revision"] == active["revision"] + 1
+
+
 def test_candidate_requires_lineage_hypothesis_feedback_and_component_delta(tmp_path):
     tasks = service(tmp_path)
     evolution = EvolutionService(tasks)
@@ -374,6 +489,10 @@ def test_paired_plan_is_single_consumption_and_replay_does_not_create_episodes(t
     first = evolution.run_pair(plan["id"], adapter)
     after_first = len(tasks.list())
     assert after_first == before + 2 * len(plan["suite"]["tasks"])
+    claim = evolution.inspect_run_claim("paired", plan["id"])
+    assert claim["status"] == "completed" and claim["record_id"] == first["id"]
+    assert evolution.recover_run_claim(
+        "paired", plan["id"], confirm_no_external_commit=True) == claim
 
     second = evolution.run_pair(plan["id"], adapter)
     assert second["id"] == first["id"]
@@ -387,6 +506,10 @@ def test_monitor_plan_is_single_consumption_and_replay_never_creates_episodes(tm
     first = evolution.run_monitor("general", adapter)
     after_first = len(tasks.list())
     assert after_first == before + len(monitor_plan["suite"]["tasks"])
+    claim = evolution.inspect_run_claim("monitor", monitor_plan["id"])
+    assert claim["status"] == "completed" and claim["record_id"] == first["id"]
+    assert evolution.recover_run_claim(
+        "monitor", monitor_plan["id"], confirm_no_external_commit=True) == claim
 
     try:
         second = evolution.run_monitor("general", adapter)
@@ -398,6 +521,89 @@ def test_monitor_plan_is_single_consumption_and_replay_never_creates_episodes(tm
             assert second["id"] == first["id"]
             assert second["record_digest"] == first["record_digest"]
     assert len(tasks.list()) == after_first
+
+
+def test_paired_record_survives_interruption_before_claim_finalize_without_replay(
+        tmp_path, monkeypatch):
+    tasks, evolution, parent, child, candidate = prepare(tmp_path)
+    adapter = PairedBenchmark()
+    plan = evolution.plan_pair(
+        candidate["id"], adapter, split="selection", split_role="selection")
+    original_finish = evolution._finish_run
+
+    def interrupt_finalize(kind, plan_id, record_id):
+        assert (kind, plan_id) == ("paired", plan["id"])
+        raise RuntimeError("lost after durable paired record")
+
+    monkeypatch.setattr(evolution, "_finish_run", interrupt_finalize)
+    before = len(tasks.list())
+    with pytest.raises(RuntimeError, match="durable paired record"):
+        evolution.run_pair(plan["id"], adapter)
+    after = len(tasks.list())
+    assert after == before + 2 * len(plan["suite"]["tasks"])
+    claim = evolution.inspect_run_claim("paired", plan["id"])
+    assert claim["status"] == "running" and claim["record_id"] is None
+    assert claim["durable_record_id"] is not None
+    assert not [event for event in evolution.events("general")
+                if event["kind"] == "paired_trial_recorded"
+                and event["content"].get("plan_id") == plan["id"]]
+
+    recovered = evolution.recover_run_claim("paired", plan["id"])
+    assert recovered["status"] == "completed"
+    assert recovered["record_id"] == claim["durable_record_id"]
+    events = [event for event in evolution.events("general")
+              if event["kind"] == "paired_trial_recorded"
+              and event["content"].get("plan_id") == plan["id"]]
+    assert len(events) == 1
+
+    monkeypatch.setattr(evolution, "_finish_run", original_finish)
+    replay = evolution.run_pair(plan["id"], adapter)
+    assert replay["id"] == recovered["record_id"]
+    assert len(tasks.list()) == after
+    assert len(evolution._durable_run_records("paired", plan["id"])) == 1
+
+
+def test_monitor_record_survives_interruption_before_claim_finalize_without_replay(
+        tmp_path, monkeypatch):
+    tasks, evolution, parent, child, candidate, adapter, monitor_plan, active = promoted(tmp_path)
+    original_finish = evolution._finish_run
+
+    def interrupt_finalize(kind, plan_id, record_id):
+        assert (kind, plan_id) == ("monitor", monitor_plan["id"])
+        raise RuntimeError("lost after durable monitor record")
+
+    monkeypatch.setattr(evolution, "_finish_run", interrupt_finalize)
+    before = len(tasks.list())
+    with pytest.raises(RuntimeError, match="durable monitor record"):
+        evolution.run_monitor(
+            "general", adapter, expected_revision=active["revision"],
+            expected_package_id=active["package_id"],
+            expected_monitor_plan_id=monitor_plan["id"])
+    after = len(tasks.list())
+    assert after == before + len(monitor_plan["suite"]["tasks"])
+    claim = evolution.inspect_run_claim("monitor", monitor_plan["id"])
+    assert claim["status"] == "running" and claim["record_id"] is None
+    assert claim["durable_record_id"] is not None
+    assert not [event for event in evolution.events("general")
+                if event["kind"] == "monitoring_run_recorded"
+                and event["content"].get("monitor_plan_id") == monitor_plan["id"]]
+
+    recovered = evolution.recover_run_claim("monitor", monitor_plan["id"])
+    assert recovered["status"] == "completed"
+    assert recovered["record_id"] == claim["durable_record_id"]
+    events = [event for event in evolution.events("general")
+              if event["kind"] == "monitoring_run_recorded"
+              and event["content"].get("monitor_plan_id") == monitor_plan["id"]]
+    assert len(events) == 1
+
+    monkeypatch.setattr(evolution, "_finish_run", original_finish)
+    replay = evolution.run_monitor(
+        "general", adapter, expected_revision=active["revision"],
+        expected_package_id=active["package_id"],
+        expected_monitor_plan_id=monitor_plan["id"])
+    assert replay["id"] == recovered["record_id"]
+    assert len(tasks.list()) == after
+    assert len(evolution._durable_run_records("monitor", monitor_plan["id"])) == 1
 
 
 def test_guard_requires_complete_task_multiset_and_fails_closed_on_subset(tmp_path):

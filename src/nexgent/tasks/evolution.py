@@ -143,14 +143,152 @@ class EvolutionService:
         return None
 
     def _finish_run(self, kind, plan_id, record_id):
+        claim = self.recover_run_claim(kind, plan_id)
+        if (claim is None or claim["status"] != "completed"
+                or claim["record_id"] != record_id):
+            raise ContractError(f"{kind} plan claim changed before completion")
+
+    def _durable_run_records(self, kind, plan_id):
+        table, plan_key = (("task_evolution_trials", "plan_id") if kind == "paired" else
+                           ("task_evolution_monitor_runs", "monitor_plan_id"))
+        with self.store.connect() as db:
+            rows = db.execute(f"SELECT id,data,digest FROM {table}").fetchall()
+        matches = []
+        for identity, data, record_digest in rows:
+            record = json.loads(data)
+            if record.get(plan_key) != plan_id:
+                continue
+            if record.get("id") != identity or digest(record) != record_digest:
+                raise ContractError("Durable evolution run record digest mismatch")
+            matches.append({**record, "record_digest": record_digest})
+        if len(matches) > 1:
+            raise ContractError("Evolution plan has multiple durable run records")
+        return matches
+
+    def inspect_run_claim(self, kind, plan_id):
+        """Inspect and verify a paired/monitor single-consumption claim."""
+        if kind not in {"paired", "monitor"}:
+            raise ContractError("Evolution run claim kind must be paired or monitor")
+        if kind == "paired":
+            self.plan(plan_id)
+        else:
+            self.monitor_plan(plan_id)
+        with self.store.connect() as db:
+            row = db.execute(
+                "SELECT status,record_id,created,updated FROM task_evolution_run_claims "
+                "WHERE kind=? AND plan_id=?", (kind, plan_id)).fetchone()
+        if row is None:
+            return None
+        status, record_id, created, updated = row
+        durable = self._durable_run_records(kind, plan_id)
+        if status == "running" and record_id is not None:
+            raise ContractError("Running evolution claim unexpectedly has a record")
+        if status == "completed":
+            if not isinstance(record_id, str) or not record_id:
+                raise ContractError("Completed evolution claim has no record")
+            if kind == "paired":
+                record = self.trial(record_id)
+                linked_plan = record.get("plan_id")
+            else:
+                record = self._get("task_evolution_monitor_runs", record_id)
+                linked_plan = record.get("monitor_plan_id")
+            if linked_plan != plan_id:
+                raise ContractError("Evolution run claim record belongs to another plan")
+            if len(durable) != 1 or durable[0]["id"] != record_id:
+                raise ContractError("Completed evolution claim lost its unique durable record")
+        elif status != "running":
+            raise ContractError("Evolution run claim status is invalid")
+        return {"kind": kind, "plan_id": plan_id, "status": status,
+                "record_id": record_id, "created_at": created, "updated_at": updated,
+                "durable_record_id": durable[0]["id"] if durable else None}
+
+    def recover_run_claim(self, kind, plan_id, *, confirm_no_external_commit=False):
+        """Clear only an explicitly confirmed uncommitted running claim."""
+        if type(confirm_no_external_commit) is not bool:
+            raise TypeError("confirm_no_external_commit must be boolean")
+        claim = self.inspect_run_claim(kind, plan_id)
+        if claim is None or claim["status"] == "completed":
+            return claim
+        if claim["durable_record_id"] is not None:
+            record_id = claim["durable_record_id"]
+            record = (self.trial(record_id) if kind == "paired" else
+                      self._get("task_evolution_monitor_runs", record_id))
+            if kind == "paired":
+                event_kind = "paired_trial_recorded"
+                event_content = {
+                    "candidate_id": record["candidate_id"], "plan_id": plan_id,
+                    "trial_id": record_id, "suite_digest": record["suite_digest"],
+                    "policy_digest": record["policy_digest"],
+                    "record_digest": record["record_digest"]}
+                event_record_key = "trial_id"
+            else:
+                event_kind = "monitoring_run_recorded"
+                event_content = {
+                    "monitor_run_id": record_id, "monitor_plan_id": plan_id,
+                    "suite_digest": record["suite_digest"],
+                    "episode_ids": record["episode_ids"],
+                    "record_digest": record["record_digest"]}
+                event_record_key = "monitor_run_id"
+            with self.store.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute(
+                    "SELECT status,record_id FROM task_evolution_run_claims "
+                    "WHERE kind=? AND plan_id=?", (kind, plan_id)).fetchone()
+                if current != ("running", None):
+                    raise ContractError("Evolution run claim changed during durable recovery")
+                durable_row = db.execute(
+                    "SELECT data,digest FROM "
+                    + ("task_evolution_trials" if kind == "paired" else
+                       "task_evolution_monitor_runs") + " WHERE id=?", (record_id,)).fetchone()
+                if (durable_row is None or json.loads(durable_row[0]) != {
+                        key: value for key, value in record.items() if key != "record_digest"}
+                        or durable_row[1] != record["record_digest"]):
+                    raise ContractError("Durable evolution run changed during recovery")
+                event_rows = db.execute(
+                    "SELECT data FROM task_evolution_events WHERE channel=? AND kind=?",
+                    (record["channel"], event_kind)).fetchall()
+                linked_events = [json.loads(data) for (data,) in event_rows
+                                 if json.loads(data).get(event_record_key) == record_id]
+                if len(linked_events) > 1:
+                    raise ContractError("Durable evolution run has duplicate completion events")
+                if linked_events and linked_events[0] != event_content:
+                    raise ContractError("Durable evolution run completion event changed")
+                if not linked_events:
+                    self._append_event(db, record["channel"], event_kind, event_content)
+                changed = db.execute(
+                    "UPDATE task_evolution_run_claims "
+                    "SET status='completed',record_id=?,updated=? "
+                    "WHERE kind=? AND plan_id=? AND status='running' AND record_id IS NULL",
+                    (record_id, time.time(), kind, plan_id)).rowcount
+                if changed != 1:
+                    raise ContractError("Evolution run claim changed during durable recovery")
+            return self.inspect_run_claim(kind, plan_id)
+        if not confirm_no_external_commit:
+            raise ContractError(
+                "Running evolution claim requires explicit no-commit confirmation")
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             changed = db.execute(
-                "UPDATE task_evolution_run_claims SET status='completed',record_id=?,updated=? "
+                "DELETE FROM task_evolution_run_claims "
                 "WHERE kind=? AND plan_id=? AND status='running' AND record_id IS NULL",
-                (record_id, time.time(), kind, plan_id)).rowcount
-            if changed != 1:
-                raise ContractError(f"{kind} plan claim changed before completion")
+                (kind, plan_id)).rowcount
+        if changed != 1:
+            raise ContractError("Evolution run claim changed during recovery")
+        return None
+
+    @staticmethod
+    def _expected_deployment(active, *, expected_revision=None,
+                             expected_package_id=None, expected_monitor_plan_id=None):
+        expected = (expected_revision, expected_package_id, expected_monitor_plan_id)
+        if all(value is None for value in expected):
+            return
+        if any(value is None for value in expected):
+            raise ContractError("Expected deployment binding must be complete")
+        promotion = active.get("promotion") or {}
+        if (active.get("revision") != expected_revision
+                or active.get("package_id") != expected_package_id
+                or promotion.get("monitor_plan_id") != expected_monitor_plan_id):
+            raise ContractError("Active deployment differs from the expected binding")
 
     def _environment_snapshot(self, tasks):
         capabilities = sorted({name for task in tasks for name in task.get("capabilities", [])})
@@ -584,6 +722,9 @@ class EvolutionService:
                 raise ContractError("Paired trial arm schedule is invalid")
         prior_id = self._claim_run("paired", plan_id)
         if prior_id is not None:
+            claim = self.inspect_run_claim("paired", plan_id)
+            if claim is None or claim["record_id"] != prior_id:
+                raise ContractError("Completed paired claim changed during replay")
             return self.trial(prior_id)
         pairs, arm_order = [], []
         for index, task_ref in enumerate(tasks):
@@ -633,10 +774,6 @@ class EvolutionService:
                   "policy": deepcopy(plan["policy"]), "policy_digest": plan["policy_digest"],
                   "arm_order": arm_order, "pairs": pairs, "created_at": time.time()}
         result = self._insert("task_evolution_trials", record)
-        self._event(candidate["channel"], "paired_trial_recorded",
-                    {"candidate_id": candidate["id"], "plan_id": plan_id, "trial_id": record["id"],
-                     "suite_digest": plan["suite_digest"], "policy_digest": plan["policy_digest"],
-                     "record_digest": result["record_digest"]})
         self._finish_run("paired", plan_id, record["id"])
         return result
 
@@ -858,9 +995,15 @@ class EvolutionService:
                                 "decision_record_digest": decision["record_digest"]})
         return self.active(candidate["channel"])
 
-    def run_monitor(self, channel, adapter, *, stop_event=None):
+    def run_monitor(self, channel, adapter, *, stop_event=None,
+                    expected_revision=None, expected_package_id=None,
+                    expected_monitor_plan_id=None):
         """Execute only the guard tasks frozen into the active promotion."""
         active = self.active(channel)
+        self._expected_deployment(
+            active, expected_revision=expected_revision,
+            expected_package_id=expected_package_id,
+            expected_monitor_plan_id=expected_monitor_plan_id)
         promotion = active.get("promotion") or {}
         plan_id = promotion.get("monitor_plan_id")
         if not isinstance(plan_id, str):
@@ -879,9 +1022,21 @@ class EvolutionService:
             raise ContractError("Monitoring execution environment changed from its plan")
         prior_id = self._claim_run("monitor", plan_id)
         if prior_id is not None:
+            claim = self.inspect_run_claim("monitor", plan_id)
+            if claim is None or claim["record_id"] != prior_id:
+                raise ContractError("Completed monitor claim changed during replay")
             return self._get("task_evolution_monitor_runs", prior_id)
         reports = []
         for task_ref in tasks:
+            current = self.active(channel)
+            self._expected_deployment(
+                current, expected_revision=expected_revision,
+                expected_package_id=expected_package_id,
+                expected_monitor_plan_id=expected_monitor_plan_id)
+            if (current["revision"] != active["revision"]
+                    or current["package_id"] != active["package_id"]
+                    or current["package_digest"] != active["package_digest"]):
+                raise ContractError("Active deployment changed during monitoring")
             if (digest(_copy(adapter.snapshot())) != digest(suite["snapshot"])
                     or digest(self._environment_snapshot(tasks)) != plan["environment_digest"]):
                 raise ContractError("Monitoring environment changed during execution")
@@ -900,13 +1055,26 @@ class EvolutionService:
                 task_ref["objective"], task_ref.get("inputs"), task_ref.get("deliverables"),
                 plan["budget"], task_ref.get("capabilities"), context=context,
                 constraints=task_ref.get("constraints"), package_channel=channel,
-                benchmark_registration=benchmark_registration)
+                benchmark_registration=benchmark_registration,
+                expected_package_registration={
+                    "channel": channel, "revision": active["revision"],
+                    "package_id": active["package_id"],
+                    "package_digest": active["package_digest"]})
             self.tasks.run(state["id"], stop_event=stop_event)
             reports.append(self.tasks.evaluate(
                 state["id"], adapter, deepcopy(task_ref), snapshot=deepcopy(suite["snapshot"])))
             if (digest(_copy(adapter.snapshot())) != digest(suite["snapshot"])
                     or digest(self._environment_snapshot(tasks)) != plan["environment_digest"]):
                 raise ContractError("Monitoring evaluator or environment changed during execution")
+        current = self.active(channel)
+        self._expected_deployment(
+            current, expected_revision=expected_revision,
+            expected_package_id=expected_package_id,
+            expected_monitor_plan_id=expected_monitor_plan_id)
+        if (current["revision"] != active["revision"]
+                or current["package_id"] != active["package_id"]
+                or current["package_digest"] != active["package_digest"]):
+            raise ContractError("Active deployment changed during monitoring")
         record = {"id": _id("monitor-run"), "monitor_plan_id": plan_id,
                   "channel": channel, "package_id": active["package_id"],
                   "package_digest": active["package_digest"],
@@ -914,19 +1082,19 @@ class EvolutionService:
                   "episode_ids": [row["episode_id"] for row in reports],
                   "created_at": time.time()}
         result = self._insert("task_evolution_monitor_runs", record)
-        self._event(channel, "monitoring_run_recorded", {
-            "monitor_run_id": record["id"], "monitor_plan_id": plan_id,
-            "suite_digest": plan["suite_digest"], "episode_ids": record["episode_ids"],
-            "record_digest": result["record_digest"],
-        })
         self._finish_run("monitor", plan_id, record["id"])
         return result
 
-    def rollback(self, channel, *, reason, evidence=None):
+    def rollback(self, channel, *, reason, evidence=None, expected_revision=None,
+                 expected_package_id=None, expected_monitor_plan_id=None):
         """Roll back one deployment edge to the prior promoted package."""
         if not isinstance(reason, str) or not reason.strip():
             raise ContractError("Rollback requires a nonempty reason")
         active = self.active(channel)
+        self._expected_deployment(
+            active, expected_revision=expected_revision,
+            expected_package_id=expected_package_id,
+            expected_monitor_plan_id=expected_monitor_plan_id)
         promotions = [event for event in self.events(channel)
                       if event["kind"] == "package_promoted"
                       and event["content"]["to_package_id"] == active["package_id"]]
@@ -956,13 +1124,19 @@ class EvolutionService:
                                 "evidence": _copy({} if evidence is None else evidence)})
         return self.active(channel)
 
-    def monitor(self, channel, episode_ids, *, rollback_on_regression=True):
+    def monitor(self, channel, episode_ids, *, rollback_on_regression=True,
+                expected_revision=None, expected_package_id=None,
+                expected_monitor_plan_id=None):
         """Monitor the active deployment using evaluator-bound local Episodes only."""
         if (not isinstance(episode_ids, list) or not episode_ids
                 or any(not isinstance(identity, str) for identity in episode_ids)
                 or len(set(episode_ids)) != len(episode_ids)):
             raise ContractError("Monitoring requires unique local episode identities")
         active = self.active(channel)
+        self._expected_deployment(
+            active, expected_revision=expected_revision,
+            expected_package_id=expected_package_id,
+            expected_monitor_plan_id=expected_monitor_plan_id)
         promotion = active.get("promotion")
         if not isinstance(promotion, dict) or not isinstance(promotion.get("monitoring_thresholds"), dict):
             raise ContractError("Active deployment has no frozen monitoring policy")
@@ -1074,16 +1248,28 @@ class EvolutionService:
                         and metrics["score"] < thresholds["min_score"])
                     or (metrics["success_rate"] is not None
                         and metrics["success_rate"] < thresholds["min_success_rate"]))
+        current = self.active(channel)
+        self._expected_deployment(
+            current, expected_revision=expected_revision,
+            expected_package_id=expected_package_id,
+            expected_monitor_plan_id=expected_monitor_plan_id)
+        if (current["revision"] != active["revision"]
+                or current["package_id"] != active["package_id"]
+                or current["package_digest"] != active["package_digest"]):
+            raise ContractError("Active deployment changed during monitoring assessment")
         self._event(channel, "deployment_monitored", {"metrics": metrics, "degraded": degraded,
                                                        "observations": observations,
                                                        "thresholds": thresholds})
         if degraded and rollback_on_regression:
             state = self.rollback(channel, reason="monitoring_regression",
                                   evidence={"metrics": metrics, "thresholds": thresholds,
-                                            "episode_ids": list(episode_ids)})
+                                            "episode_ids": list(episode_ids)},
+                                  expected_revision=active["revision"],
+                                  expected_package_id=active["package_id"],
+                                  expected_monitor_plan_id=plan_id)
             return {"degraded": True, "rolled_back": True, "active": state, "metrics": metrics}
         return {"degraded": degraded, "rolled_back": False,
-                "active": self.active(channel), "metrics": metrics}
+                "active": current, "metrics": metrics}
 
 
 def active_package(store, channel):

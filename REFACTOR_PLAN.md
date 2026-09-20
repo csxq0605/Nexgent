@@ -84,6 +84,8 @@ development Episode
 
 当前完成的是工程机制：不可变记录、hash-linked 事件、只读安全投影、普通任务的通道加载、内置参考 R0，以及一个以固定无模型 fixture 执行 feedback → generation → selection → promotion → new Episode → guard → rollback 的确定性闭环和脱敏证据导出。尚未完成的 P3 研究出口包括：内置或冻结 `R0` 从真实模型反馈产生有效候选、候选在独立 selection 上胜过父代、晋升后在新任务中激活所声称行为，以及由重复和对照支持的效应估计。候选未变好时必须报告 rejected/missing；不能把代码路径、模拟测试、candidate 数量、一次模型调用或一次部署写成 RSI 效益。
 
+通用 `RSICycleService` 已将上述 P3 步骤组织成可恢复持久状态机：创建时冻结 channel revision、improver、selection/guard adapter snapshot、预算、seed 与 policy；运行时逐阶段保存已有不可变证据引用。paired/monitor 单次 claim 可在“run record 已写入、claim 尚未完成”的中断窗口唯一关联并原子收口；promotion 后的 guard 和 rollback 绑定预期 revision/package/monitor plan，通道漂移 fail closed。该服务消除了正常路径的手工 ID 串接，CLI/GUI 产品入口仍待接入。
+
 详细对象、接口和信任边界见[控制面设计](docs/design/p3-feedback-evolution-control-plane.md)。固定编排、匹配额外调用、只积累记忆与 P3 主机制的对照见[研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)。
 
 ### P4：改进过程的可更新与递归执行（机制闭环已实现，效果实验未完成）
