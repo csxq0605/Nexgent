@@ -344,6 +344,585 @@ def export_rsi_mechanism_evidence(destination, *args, **kwargs):
     return str(destination.resolve())
 
 
+P3_E1_SCHEMA = "nexgent.p3-e1-evidence.v1"
+_P3_E1_REFS = frozenset({
+    "feedback_bundle_id", "generation_id", "candidate_id",
+    "selection_plan_id", "trial_id", "decision_id", "monitor_plan_id",
+    "promoted_revision", "promoted_package_id", "monitor_run_id",
+    "guard_episode_ids",
+})
+_PUBLIC_EVALUATION_KEYS = (
+    "status", "score", "score_available", "accepted", "execution_status",
+)
+
+
+def _p3_e1_episode(tasks, identity, label):
+    episode = _episode(tasks, identity)
+    if episode.get("status") != "completed":
+        raise ContractError(f"{label} Episode must be completed")
+    if episode.get("usage", {}).get("usage_complete") is not True:
+        raise ContractError(f"{label} Episode usage is incomplete")
+    return episode
+
+
+def _public_evaluation_metrics(value):
+    if not isinstance(value, dict):
+        return None
+    return {key: deepcopy(value[key]) for key in _PUBLIC_EVALUATION_KEYS if key in value}
+
+
+def _deliverable_digests(tasks, episode):
+    refs = episode.get("output_refs")
+    if not isinstance(refs, dict) or not refs:
+        raise ContractError("Paired Episode has no delivered result")
+    result = {}
+    for name, artifact_id in refs.items():
+        if not isinstance(name, str) or not isinstance(artifact_id, str):
+            raise ContractError("Paired Episode deliverable references are invalid")
+        try:
+            artifact = tasks.store.read(artifact_id, episode["id"])
+        except (KeyError, PermissionError, ValueError) as exc:
+            raise ContractError("Paired Episode deliverable is unavailable") from exc
+        producer = artifact.get("producer") or {}
+        if (producer.get("episode_id") != episode["id"]
+                or producer.get("package_digest") != episode["package_digest"]
+                or not isinstance(artifact.get("content_digest"), str)):
+            raise ContractError("Paired Episode deliverable provenance is invalid")
+        result[name] = artifact["content_digest"]
+    return result
+
+
+def _event_ref(event):
+    return {key: event[key] for key in ("sequence", "kind", "created", "previous", "digest")}
+
+
+_HOST_TASK_CONTEXT_KEYS = frozenset({
+    "package_channel_registration", "evolution_registration",
+    "monitoring_registration", "improver_channel_registration",
+    "memory_channel_registration", "memory_registration_digest",
+    "memory_writeback",
+})
+
+
+def _task_identity_digest(task):
+    """Digest caller-visible task identity without host execution bindings."""
+    if not isinstance(task, dict):
+        raise ContractError("P3 E1 task identity is invalid")
+    context = deepcopy(task.get("context") or {})
+    context_identity = context.pop("task_identity", None)
+    identity = task.get("id") or context_identity
+    if not isinstance(identity, str) or not identity:
+        raise ContractError("P3 E1 task identity must be explicit")
+    for key in _HOST_TASK_CONTEXT_KEYS:
+        context.pop(key, None)
+    public_task = {
+        "id": identity,
+        "statistical_unit_id": (task.get("statistical_unit_id")
+                                or context.get("statistical_unit_id")),
+        "cluster_id": task.get("cluster_id") or context.get("cluster_id"),
+        "objective": task.get("objective"),
+        "inputs": deepcopy(task.get("inputs") or {}),
+        "deliverables": deepcopy(task.get("deliverables") or []),
+        "capabilities": deepcopy(task.get("capabilities") or []),
+        "constraints": deepcopy(task.get("constraints") or {}),
+        "context": context,
+    }
+    return digest(public_task)
+
+
+def _task_content_digest(task):
+    """Digest task semantics while excluding partition and identity labels."""
+    if not isinstance(task, dict):
+        raise ContractError("P3 E1 task content is invalid")
+    context = deepcopy(task.get("context") or {})
+    for key in (_HOST_TASK_CONTEXT_KEYS | frozenset({
+            "split", "split_role", "task_identity", "statistical_unit_id",
+            "cluster_id", "qualification_role"})):
+        context.pop(key, None)
+    return digest({
+        "objective": task.get("objective"),
+        "inputs": deepcopy(task.get("inputs") or {}),
+        "deliverables": deepcopy(task.get("deliverables") or []),
+        "capabilities": deepcopy(task.get("capabilities") or []),
+        "constraints": deepcopy(task.get("constraints") or {}),
+        "context": context,
+    })
+
+
+def _p3_e1_registration(tasks, episode, cycle, label):
+    registration = tasks.store.benchmark_registration(episode["id"])
+    selection = cycle.get("selection") or {}
+    guard = cycle.get("guard") or {}
+    if (selection.get("benchmark_id") != guard.get("benchmark_id")
+            or selection.get("snapshot_digest") != guard.get("snapshot_digest")):
+        raise ContractError("P3 E1 adapters do not share one frozen benchmark")
+    if (not isinstance(registration, dict)
+            or registration.get("benchmark_id") != selection.get("benchmark_id")
+            or digest(registration.get("snapshot")) != selection.get("snapshot_digest")
+            or not isinstance(registration.get("task_ref"), dict)):
+        raise ContractError(f"{label} Episode lacks the frozen P3 E1 benchmark binding")
+    task_ref = registration["task_ref"]
+    context = episode.get("task", {}).get("context", {})
+    if (context.get("task_identity") != task_ref.get("id")
+            or context.get("statistical_unit_id") != task_ref.get("statistical_unit_id")
+            or context.get("cluster_id") != task_ref.get("cluster_id")):
+        raise ContractError(f"{label} Episode task identity differs from its frozen task")
+    evaluation_events = [event for event in episode.get("events") or []
+                         if event.get("kind") == "benchmark_evaluated"]
+    if (not evaluation_events
+            or evaluation_events[-1].get("content", {}).get("report")
+            != episode.get("evaluation")
+            or digest(evaluation_events[-1].get("content", {}).get("snapshot"))
+            != selection.get("snapshot_digest")):
+        raise ContractError(f"{label} Episode evaluation is outside its frozen benchmark")
+    return task_ref
+
+
+def _statistical_identity(task_ref, label):
+    unit = task_ref.get("statistical_unit_id")
+    cluster = task_ref.get("cluster_id")
+    if (not isinstance(unit, str) or not unit
+            or not isinstance(cluster, str) or not cluster):
+        raise ContractError(f"{label} task lacks statistical unit or cluster identity")
+    return unit, cluster
+
+
+def _p3_e1_model_receipt(generation_episode, generated):
+    calls = generation_episode.get("calls") or []
+    if len(calls) != 1:
+        raise ContractError("P3 E1 generation requires exactly one model call")
+    call = calls[0]
+    identity_keys = (
+        "model", "provider_model", "configured_provider_model",
+        "observed_provider_model", "request_digest", "profile_digest",
+    )
+    usage = call.get("usage")
+    if (call.get("role") != "rsi_improver"
+            or call.get("status") != "received"
+            or call.get("billing_status") != "usage_reported"
+            or any(not isinstance(call.get(key), str) or not call[key]
+                   for key in identity_keys)
+            or type(call.get("finished_at")) not in {int, float}
+            or not isinstance(usage, dict)):
+        raise ContractError("P3 E1 model receipt identity or terminal status is incomplete")
+    required_usage = {key: usage.get(key) for key in (
+        "prompt_tokens", "completion_tokens", "total_tokens")}
+    if (any(type(value) is not int or value < 0 for value in required_usage.values())
+            or required_usage["prompt_tokens"] + required_usage["completion_tokens"]
+            != required_usage["total_tokens"]):
+        raise ContractError("P3 E1 model receipt usage is inconsistent")
+    for value in usage.values():
+        if isinstance(value, dict):
+            if any(type(item) is not int or item < 0 for item in value.values()):
+                raise ContractError("P3 E1 model detail usage is inconsistent")
+        elif type(value) is not int or value < 0:
+            raise ContractError("P3 E1 model usage contains an invalid counter")
+    if digest(call.get("output")) != generated.get("patch_digest"):
+        raise ContractError("P3 E1 model output does not match the admitted patch")
+    aggregate = generation_episode.get("usage") or {}
+    known = aggregate.get("known_usage") or {}
+    if (aggregate.get("usage_complete") is not True
+            or aggregate.get("model_calls") != 1
+            or aggregate.get("completion_tokens") != required_usage["completion_tokens"]
+            or any(known.get(key) != value for key, value in required_usage.items())
+            or aggregate.get("usage_missing_call_ids") != []
+            or aggregate.get("billing_unknown_call_ids") != []):
+        raise ContractError("P3 E1 aggregate model usage differs from its receipt")
+    revision = call.get("provider_revision")
+    assurance = "provider_revision" if isinstance(revision, str) and revision else (
+        "request_alias_time_window")
+    return {
+        "call_id_digest": digest(call.get("call_id")),
+        "role": "rsi_improver",
+        "status": "received",
+        "billing_status": "usage_reported",
+        "model_identity_digest": digest({key: call[key] for key in identity_keys[:4]}),
+        "request_digest": call["request_digest"],
+        "profile_digest": call["profile_digest"],
+        "provider_revision_digest": digest(revision) if assurance == "provider_revision" else None,
+        "identity_assurance": assurance,
+        "output_digest": generated["patch_digest"],
+        "usage": required_usage,
+    }
+
+
+def build_p3_e1_evidence(cycles, *, cycle_id, reuse_episode_ids):
+    """Verify and sanitize one successful real-model P3 E1 pilot.
+
+    The cycle remains the authoritative coordinator.  This function only
+    follows its immutable references and proves that the promoted behavior was
+    subsequently loaded by ordinary channel work.  No package source,
+    FeedbackBundle body, evaluator-private field, or model response is copied.
+    """
+    if (not isinstance(reuse_episode_ids, list) or not reuse_episode_ids
+            or len(reuse_episode_ids) > 128
+            or any(not isinstance(item, str) or not item for item in reuse_episode_ids)
+            or len(set(reuse_episode_ids)) != len(reuse_episode_ids)):
+        raise ContractError(
+            "P3 E1 evidence requires unique reuse Episode ids")
+
+    tasks = cycles.tasks
+    evolution = cycles.evolution
+    generation_service = cycles.generation
+    cycle = cycles.get(cycle_id)
+    if cycle.get("status") != "completed":
+        raise ContractError("P3 E1 evidence requires a completed RSI cycle")
+    result = cycle.get("result") or {}
+    if (result.get("outcome") != "completed"
+            or result.get("degraded") is not False
+            or result.get("rolled_back") is not False):
+        raise ContractError("P3 E1 guard must complete without degradation or rollback")
+    refs = cycle.get("refs") or {}
+    if not _P3_E1_REFS <= set(refs):
+        raise ContractError("P3 E1 cycle evidence references are incomplete")
+    if (not isinstance(refs.get("guard_episode_ids"), list)
+            or not refs["guard_episode_ids"]):
+        raise ContractError("P3 E1 cycle has no guard Episodes")
+
+    generated = generation_service.generation(refs["generation_id"])
+    if generated.get("status") != "generated":
+        raise ContractError("P3 E1 generation did not produce a candidate")
+    from .improver_seed import default_improver_package
+    reference_improver = default_improver_package()
+    if (generated.get("improver_package_id") != reference_improver["id"]
+            or generated.get("improver_package_digest") != reference_improver["digest"]):
+        raise ContractError("P3 E1 generation did not use the reference-os-v1 improver")
+    candidate = evolution.candidate(refs["candidate_id"])
+    verified_generation = evolution._verify_generated_candidate(candidate)
+    feedback = generation_service.feedback(refs["feedback_bundle_id"])
+    plan = evolution.plan(refs["selection_plan_id"])
+    trial = evolution.trial(refs["trial_id"])
+    decision = evolution.decision(refs["decision_id"])
+    monitor_plan = evolution.monitor_plan(refs["monitor_plan_id"])
+    monitor_run = evolution.monitor_run(refs["monitor_plan_id"])
+
+    if not (
+        generated["id"] == verified_generation.get("id") == refs["generation_id"]
+        and generated.get("feedback_bundle_id") == feedback["id"]
+        == refs["feedback_bundle_id"]
+        and generated.get("candidate_id") == candidate["id"] == refs["candidate_id"]
+        and generated.get("channel") == candidate.get("channel") == cycle.get("channel")
+        and candidate.get("origin") == "generated"
+        and candidate.get("parent_package_id") == cycle.get("parent_package_id")
+        and candidate.get("parent_package_digest") == cycle.get("parent_package_digest")
+        and plan["id"] == trial.get("plan_id") == refs["selection_plan_id"]
+        and plan.get("candidate_id") == trial.get("candidate_id")
+        == decision.get("candidate_id") == candidate["id"]
+        and trial["id"] == decision.get("trial_id") == refs["trial_id"]
+        and decision["id"] == refs["decision_id"]
+        and plan.get("split_role") == trial.get("split_role") == "selection"
+        and (plan.get("suite") or {}).get("benchmark_id")
+        == cycle.get("selection", {}).get("benchmark_id")
+        and digest((plan.get("suite") or {}).get("snapshot"))
+        == cycle.get("selection", {}).get("snapshot_digest")
+        and monitor_plan["id"] == monitor_run.get("monitor_plan_id")
+        == refs["monitor_plan_id"]
+        and (monitor_plan.get("suite") or {}).get("benchmark_id")
+        == cycle.get("guard", {}).get("benchmark_id")
+        and digest((monitor_plan.get("suite") or {}).get("snapshot"))
+        == cycle.get("guard", {}).get("snapshot_digest")
+        and monitor_plan.get("candidate_id") == candidate["id"]
+        and monitor_run.get("id") == refs["monitor_run_id"]
+        and monitor_run.get("channel") == cycle.get("channel")
+        and monitor_run.get("package_id") == candidate.get("package_id")
+        and monitor_run.get("package_digest") == candidate.get("package_digest")
+        and monitor_run.get("suite_digest") == monitor_plan.get("suite_digest")
+        and Counter(monitor_run.get("episode_ids") or [])
+        == Counter(refs["guard_episode_ids"])
+        and refs.get("promoted_package_id") == candidate.get("package_id")
+        and result.get("active_package_id") == candidate.get("package_id")
+        and result.get("active_revision") == refs.get("promoted_revision")
+    ):
+        raise ContractError("P3 E1 cycle references do not form one closed chain")
+
+    generation_episode = _p3_e1_episode(
+        tasks, generated.get("episode_id"), "Improver")
+    if (generation_episode.get("package_id") != generated.get("improver_package_id")
+            or generation_episode.get("package_digest")
+            != generated.get("improver_package_digest")
+            or generated.get("usage") != generation_episode.get("usage")
+            or generated.get("execution") != generation_episode.get("execution")):
+        raise ContractError("P3 E1 improver Episode does not match generation")
+    model_receipt = _p3_e1_model_receipt(generation_episode, generated)
+
+    activation = candidate.get("activation_probe") or {}
+    if (decision.get("eligible") is not True
+            or decision.get("gates", {}).get("behavior_activated") is not True
+            or activation.get("kind") != "component_loaded"
+            or not isinstance(activation.get("path"), str)):
+        raise ContractError("P3 E1 selection lacks eligible component-loaded evidence")
+    measurements = decision.get("measurements") or {}
+    parent_measurements = measurements.get("parent") or {}
+    candidate_measurements = measurements.get("candidate") or {}
+    gains = {}
+    for name in ("quality", "success_rate"):
+        parent_value = parent_measurements.get(name)
+        candidate_value = candidate_measurements.get(name)
+        gains[name] = (candidate_value - parent_value
+                       if type(parent_value) in {int, float}
+                       and type(candidate_value) in {int, float} else None)
+
+    paired_rows = []
+    observable_change = False
+    for pair in trial.get("pairs") or []:
+        parent_run = pair.get("parent") or {}
+        candidate_run = pair.get("candidate") or {}
+        parent_episode = _p3_e1_episode(
+            tasks, parent_run.get("episode_id"), "Selection parent")
+        candidate_episode = _p3_e1_episode(
+            tasks, candidate_run.get("episode_id"), "Selection candidate")
+        if (parent_episode.get("package_id") != candidate.get("parent_package_id")
+                or candidate_episode.get("package_id") != candidate.get("package_id")
+                or activation["path"] not in (
+                    (candidate_episode.get("execution") or {}).get("loaded_modules") or [])):
+            raise ContractError("P3 E1 paired Episodes do not load the tested packages")
+        parent_evaluation = _public_evaluation_metrics(parent_run.get("evaluation"))
+        candidate_evaluation = _public_evaluation_metrics(candidate_run.get("evaluation"))
+        parent_deliverables = _deliverable_digests(tasks, parent_episode)
+        candidate_deliverables = _deliverable_digests(tasks, candidate_episode)
+        changed_deliverables = sorted(
+            name for name in set(parent_deliverables) & set(candidate_deliverables)
+            if parent_deliverables[name] != candidate_deliverables[name])
+        evaluation_changed = parent_evaluation != candidate_evaluation
+        changed = evaluation_changed or bool(changed_deliverables)
+        observable_change = observable_change or changed
+        paired_rows.append({
+            "task_ref_digest": pair.get("task_ref_digest"),
+            "parent_episode_id": parent_episode["id"],
+            "candidate_episode_id": candidate_episode["id"],
+            "public_evaluation_changed": evaluation_changed,
+            "changed_deliverables": changed_deliverables,
+            "observable_change": changed,
+        })
+    if not paired_rows or not observable_change:
+        raise ContractError("P3 E1 has no paired observable behavior change")
+    if not any(type(value) in {int, float} and value > 0 for value in gains.values()):
+        raise ContractError("P3 E1 paired selection has no strict measured gain")
+
+    planned_guard_tasks = Counter(
+        digest(task) for task in (monitor_plan.get("suite") or {}).get("tasks", []))
+    observed_guard_tasks = Counter()
+    reports = {row.get("episode_id"): row for row in monitor_run.get("reports") or []
+               if isinstance(row, dict) and isinstance(row.get("episode_id"), str)}
+    if (len(reports) != len(monitor_run.get("reports") or [])
+            or Counter(reports.keys()) != Counter(refs["guard_episode_ids"])):
+        raise ContractError("P3 E1 guard run reports are incomplete")
+    guard_rows = []
+    for identity in refs["guard_episode_ids"]:
+        episode = _p3_e1_episode(tasks, identity, "Guard")
+        registration = _channel_registration(episode, cycle["channel"])
+        monitoring = episode.get("task", {}).get("context", {}).get(
+            "monitoring_registration") or {}
+        task_digest = monitoring.get("task_ref_digest")
+        if (episode.get("package_id") != candidate.get("package_id")
+                or episode.get("package_digest") != candidate.get("package_digest")
+                or registration.get("revision") != refs["promoted_revision"]
+                or registration.get("package_id") != candidate.get("package_id")
+                or monitoring.get("monitor_plan_id") != monitor_plan["id"]
+                or monitoring.get("suite_digest") != monitor_plan.get("suite_digest")
+                or task_digest not in planned_guard_tasks
+                or reports[identity].get("evaluation") != episode.get("evaluation")):
+            raise ContractError("P3 E1 guard Episode is outside the frozen guard run")
+        observed_guard_tasks[task_digest] += 1
+        guard_rows.append({
+            "episode_id": identity,
+            "task_ref_digest": task_digest,
+            "evaluation_digest": digest(episode.get("evaluation")),
+            "usage": _usage(episode.get("usage")),
+        })
+    if observed_guard_tasks != planned_guard_tasks:
+        raise ContractError("P3 E1 guard task coverage is incomplete")
+
+    origin_task_digests = set()
+    qualification_task_refs = []
+    for row in feedback.get("episode_refs") or []:
+        origin_episode = _p3_e1_episode(tasks, row.get("episode_id"), "Development")
+        origin_task_ref = _p3_e1_registration(
+            tasks, origin_episode, cycle, "Development")
+        qualification_task_refs.append(origin_task_ref)
+        origin_task_digests.add(_task_identity_digest(origin_episode.get("task")))
+    selection_tasks = (plan.get("suite") or {}).get("tasks", [])
+    guard_tasks = (monitor_plan.get("suite") or {}).get("tasks", [])
+    qualification_task_refs.extend(selection_tasks)
+    qualification_task_refs.extend(guard_tasks)
+    selection_task_digests = {_task_identity_digest(task) for task in selection_tasks}
+    guard_task_digests = {_task_identity_digest(task) for task in guard_tasks}
+    prior_task_digests = (
+        origin_task_digests | selection_task_digests | guard_task_digests)
+    if not origin_task_digests or not selection_task_digests or not guard_task_digests:
+        raise ContractError("P3 E1 qualification task identities are incomplete")
+    statistical_identities = [
+        _statistical_identity(task_ref, "Qualification")
+        for task_ref in qualification_task_refs]
+    prior_units = {unit for unit, _cluster in statistical_identities}
+    clusters = {cluster for _unit, cluster in statistical_identities}
+    if (len(prior_units) != len(statistical_identities) or len(clusters) != 1):
+        raise ContractError("P3 E1 qualification statistical units are not independent")
+    qualification_task_ref_digests = {
+        digest(task_ref) for task_ref in qualification_task_refs}
+    qualification_content_digests = {
+        _task_content_digest(task_ref) for task_ref in qualification_task_refs}
+
+    evolution_events = evolution.events(cycle["channel"])
+    promotion_events = [event for event in evolution_events
+                        if event["kind"] == "package_promoted"
+                        and event["content"].get("candidate_id") == candidate["id"]
+                        and event["content"].get("decision_id") == decision["id"]
+                        and event["content"].get("monitor_plan_id") == monitor_plan["id"]
+                        and event["content"].get("to_package_id") == candidate["package_id"]]
+    if len(promotion_events) != 1:
+        raise ContractError("P3 E1 promotion event is missing or ambiguous")
+    promotion_event = promotion_events[0]
+    monitor_run_events = [event for event in evolution_events
+                          if event["kind"] == "monitoring_run_recorded"
+                          and event["content"].get("monitor_run_id") == monitor_run["id"]
+                          and Counter(event["content"].get("episode_ids") or [])
+                          == Counter(refs["guard_episode_ids"])]
+    monitor_events = [event for event in evolution_events
+                      if event["kind"] == "deployment_monitored"
+                      and event["content"].get("degraded") is False
+                      and {row.get("episode_id") for row in
+                           event["content"].get("observations") or []}
+                      == set(refs["guard_episode_ids"])]
+    if not monitor_run_events or not monitor_events:
+        raise ContractError("P3 E1 successful guard events are missing")
+    monitor_run_event = monitor_run_events[-1]
+    monitor_event = monitor_events[-1]
+    if not (promotion_event["sequence"] < monitor_run_event["sequence"]
+            < monitor_event["sequence"]):
+        raise ContractError("P3 E1 promotion and guard events are out of order")
+    if any(event["kind"] == "package_rolled_back"
+           and event["content"].get("from_package_id") == candidate["package_id"]
+           for event in evolution_events[promotion_event["sequence"]:]):
+        raise ContractError("P3 E1 promoted package was rolled back")
+
+    reuse_rows = []
+    for identity in reuse_episode_ids:
+        episode = _p3_e1_episode(tasks, identity, "Reuse")
+        registration = _channel_registration(episode, cycle["channel"])
+        if (episode.get("package_id") != candidate.get("package_id")
+                or episode.get("package_digest") != candidate.get("package_digest")
+                or registration.get("revision") != refs["promoted_revision"]
+                or registration.get("package_id") != candidate.get("package_id")
+                or registration.get("package_digest") != candidate.get("package_digest")):
+            raise ContractError("Reuse Episode is not bound to the promoted package revision")
+        if (type(episode.get("created_at")) not in {int, float}
+                or episode["created_at"] <= promotion_event["created"]
+                or episode["created_at"] <= cycle.get("updated_at", 0)):
+            raise ContractError("Reuse Episode did not occur after the completed promotion cycle")
+        task_digest = _task_identity_digest(episode.get("task"))
+        if task_digest in prior_task_digests:
+            raise ContractError("Reuse Episode task was already used by qualification")
+        reuse_task_ref = _p3_e1_registration(tasks, episode, cycle, "Reuse")
+        task_ref_digest = digest(reuse_task_ref)
+        reuse_unit, reuse_cluster = _statistical_identity(reuse_task_ref, "Reuse")
+        if (task_ref_digest in qualification_task_ref_digests
+                or reuse_unit in prior_units or reuse_cluster not in clusters):
+            raise ContractError("Reuse Episode is not an unseen unit in the qualification cluster")
+        content_digest = _task_content_digest(reuse_task_ref)
+        if content_digest in qualification_content_digests:
+            raise ContractError("Reuse Episode duplicates qualification task content")
+        evaluation = episode.get("evaluation")
+        public_evaluation = _public_evaluation_metrics(evaluation)
+        if (not isinstance(evaluation, dict)
+                or evaluation.get("score_available") is not True
+                or evaluation.get("accepted") is not True):
+            raise ContractError(
+                "Reuse Episode requires a bound accepted public evaluation")
+        reuse_rows.append({
+            "episode_id": identity,
+            "package_id": episode["package_id"],
+            "package_digest": episode["package_digest"],
+            "channel_revision": registration["revision"],
+            "task_digest": task_digest,
+            "task_ref_digest": task_ref_digest,
+            "task_content_digest": content_digest,
+            "statistical_unit_digest": digest(reuse_unit),
+            "cluster_digest": digest(reuse_cluster),
+            "deliverables": _deliverable_digests(tasks, episode),
+            "evaluation_digest": digest(evaluation),
+            "public_evaluation": public_evaluation,
+            "usage": _usage(episode.get("usage")),
+        })
+
+    cycle_events = cycles.events(cycle_id)
+    body = {
+        "schema": P3_E1_SCHEMA,
+        "claim_scope": {
+            "single_persistent_behavior_instance": True,
+            "cross_task_benefit_established": False,
+            "statistical_rsi_benefit_established": False,
+            "recursive_improver_benefit_established": False,
+        },
+        "cycle": {
+            "id": cycle["id"], "record_digest": cycle["record_digest"],
+            "channel": cycle["channel"], "status": cycle["status"],
+            "events": [_event_ref(event) for event in cycle_events],
+        },
+        "packages": {
+            "parent": {"id": candidate["parent_package_id"],
+                       "digest": candidate["parent_package_digest"]},
+            "candidate": {"id": candidate["package_id"],
+                          "digest": candidate["package_digest"]},
+            "improver": {"id": generated["improver_package_id"],
+                         "digest": generated["improver_package_digest"]},
+        },
+        "generation": {
+            "feedback_bundle_id": feedback["id"],
+            "feedback_digest": feedback["digest"],
+            "generation_id": generated["id"],
+            "generation_record_digest": generated["record_digest"],
+            "improver_episode_id": generation_episode["id"],
+            "patch_digest": generated["patch_digest"],
+            "candidate_id": candidate["id"],
+            "candidate_record_digest": candidate["record_digest"],
+            "model_receipt": model_receipt,
+            "usage": _usage(generation_episode.get("usage")),
+        },
+        "selection": {
+            "plan_id": plan["id"], "plan_digest": plan["record_digest"],
+            "trial_id": trial["id"], "trial_digest": trial["record_digest"],
+            "decision_id": decision["id"],
+            "decision_digest": decision["record_digest"],
+            "eligible": True, "activation_probe": deepcopy(activation),
+            "gates": deepcopy(decision["gates"]),
+            "strict_gain": gains,
+            "paired_tasks": paired_rows,
+        },
+        "promotion": {
+            "revision": refs["promoted_revision"],
+            "package_id": refs["promoted_package_id"],
+            "event": _event_ref(promotion_event),
+        },
+        "guard": {
+            "monitor_plan_id": monitor_plan["id"],
+            "monitor_plan_digest": monitor_plan["record_digest"],
+            "monitor_run_id": monitor_run["id"],
+            "monitor_run_digest": monitor_run["record_digest"],
+            "degraded": False, "rolled_back": False,
+            "episodes": guard_rows,
+            "run_event": _event_ref(monitor_run_event),
+            "assessment_event": _event_ref(monitor_event),
+        },
+        "reuse": reuse_rows,
+    }
+    return {**body, "integrity_digest": digest(body)}
+
+
+def export_p3_e1_evidence(destination, cycles, *, cycle_id, reuse_episode_ids):
+    """Build a P3 E1 evidence document and write canonical JSON."""
+    evidence = build_p3_e1_evidence(
+        cycles, cycle_id=cycle_id, reuse_episode_ids=reuse_episode_ids)
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(evidence, ensure_ascii=False, sort_keys=True, indent=2,
+                   allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    return str(destination.resolve())
+
+
 RECURSIVE_SCHEMA = "nexgent.recursive-improver-evidence.v1"
 
 

@@ -45,12 +45,13 @@ answers. The host must isolate benchmark implementation and evaluator files
 from candidate code and must supply receipts itself; agent-authored receipts
 are not accepted execution evidence.
 
-`development`, `selection` and `final_holdout` have separate deterministic
-source/record identities at every seed. `dev` aliases `development` only. Seeds
-change order and amounts within their own split. The snapshot fingerprints the
-fixture, policy, schemas and evaluator source. Final holdout is for a frozen
-evaluation protocol, not tuning; research comparisons and efficacy conclusions
-belong to P5.
+`development`, `selection`, `guard` and `final_holdout` have separate
+deterministic source/record identities at every seed. `dev` aliases
+`development` only. Seeds change order and amounts within their own split. The
+snapshot fingerprints the fixture, policy, schemas and evaluator source.
+`guard` is reserved for post-promotion monitoring and does not feed candidate
+generation or selection. Final holdout is for a frozen evaluation protocol,
+not tuning; research comparisons and efficacy conclusions belong to P5.
 
 For the authorized real-provider smoke task, select development seed 0, choose
 the installed domain and the normal task executor/package, and configure a

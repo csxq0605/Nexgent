@@ -158,7 +158,7 @@ CLI 和 Python API 都按 FeedbackBundle、generation、TrialPlan、decision、m
 | 等级 | 能证明什么 | 当前状态 |
 | --- | --- | --- |
 | mechanism proof | 身份、不可变记录、反馈边界、补丁准入、paired plan、fail-closed decision、CAS promotion、channel 加载、monitor/rollback 合同可执行 | 固定无模型 fixture 已闭合整条链；内置 `reference-os-v1` 及其单文件 O/S 边界已有工程合同，不涉及真实模型能力结论 |
-| 真实模型行为证据 | 冻结 R0 实际读取 FeedbackBundle、产生合法 patch；candidate 在真实 provider Episode 中加载并激活预期行为；selection/guard 有真实 evaluator receipt | 内置 R0 已提供可运行入口，但真实模型 generation → activation → independent selection 的完整成功链仍待执行与报告 |
+| 真实模型行为证据 | 冻结 R0 实际读取 FeedbackBundle、产生合法 patch；candidate 在真实 provider Episode 中加载并激活预期行为；selection/guard 有真实 evaluator receipt | 正向 E1 exporter 与一次性 qualification runner 已实现并通过伪造反例审计；真实 MiMo generation 尚待外部 payload 导出授权，因而完整成功链仍未形成 |
 | 统计 RSI 效益 | 在预登记多任务族、重复、对照和完整缺测报告下，候选或改进过程产生可估计、可复核的质量/成功率/成本改善 | 尚未执行；不能由单候选、单 demo 或机制测试替代 |
 
 “候选生成成功”“包被晋升”和“RSI 有效”是三个不同命题。即使完整控制面工作正常，真实实验也可以得到零增益、负增益或全部 missing；这些都应作为结果保留，而不是降低门槛直到出现正数。

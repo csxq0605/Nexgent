@@ -36,7 +36,8 @@ class Context:
         if path not in self.namespaces:
             namespace = {"__builtins__": self.builtins_map, "math": self.math_facade}
             self.namespaces[path] = namespace
-            self.loaded_modules.append(path)
+            if path not in self.loaded_modules:
+                self.loaded_modules.append(path)
             exec(self.compiled[path], namespace, namespace)
         callback = self.namespaces[path].get(function)
         if not callable(callback):
@@ -57,6 +58,8 @@ class Context:
         safe_path(path)
         if path not in self.package["files"]:
             raise PackageError(f"Package resource is absent: {path}")
+        if path not in self.loaded_modules:
+            self.loaded_modules.append(path)
         return self.package["files"][path]
 
     def request(self, method, params):

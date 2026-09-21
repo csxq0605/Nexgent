@@ -6,7 +6,7 @@ import json
 import random
 
 VERSION = "invoice-reconciliation-v1"
-SPLITS = ("development", "selection", "final_holdout")
+SPLITS = ("development", "selection", "guard", "final_holdout")
 
 
 def digest(value):

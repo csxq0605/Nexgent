@@ -21,7 +21,7 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 | P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础与宿主可信工具工作量账本已实现并通过定向合同测试；真实 MiMo 普通任务已形成 schema 合法交付，独立 Workbench 仍失败 |
 | P1 普通任务与 benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同；BBH 两任务与 scientific-discovery 已提供 canonical TaskService adapter 和无模型 reference package，legacy 入口继续保留 |
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
-| P3 跨任务行为更新 | 反馈绑定候选生成、内置 `reference-os-v1`、显式/通道 improver、配对门控、通道晋升、监测/回滚及脱敏机制证据导出已实现；真实模型候选效果与统计效益待检验 |
+| P3 跨任务行为更新 | 反馈绑定候选生成、内置 `reference-os-v1`、显式/通道 improver、配对门控、通道晋升、监测/回滚及正向 E1/回滚机制证据导出已实现；一次性真实模型 E1 pilot 已冻结，外部 payload 导出仍待显式授权，候选效果与统计效益尚未建立 |
 | P4 改进过程可更新与递归执行 | 独立 R archive/channel、自更新、真实后代元评测、预登记 guard 与自动回滚已形成确定性机制闭环；真实模型与统计效益待检验 |
 | P5 冻结研究和完整产品验收 | 通用 final-holdout 配对研究执行器、预注册 schema 与脱敏信息窗已实现；正式外部多任务族研究尚未登记或执行 |
 | 0.8 源码执行、自修改、历史 benchmark 与研究窗口 | 保留；其证据不替代 0.9 P1 或 P2–P5 验收 |
@@ -36,6 +36,7 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 - [P5 预注册 RSI 研究](docs/research/p5-preregistered-rsi-study.md)：证据等级、实验臂、外部 benchmark 矩阵、防泄漏、缺测与统计职责。
 - [Task benchmark SDK 与 canonical 迁移](docs/design/benchmark-sdk.md)：TaskService 插件的显式 descriptor、隔离发现、JSON 合同、BBH/scientific-discovery canonical 路径与 legacy 兼容边界。
 - [RSI orchestration research refresh](docs/research/rsi-orchestration-refresh-20260921.md)：当前证据等级、可证伪实验与 scientific-discovery 迁移的结论上限。
+- [P3 E1 qualification pilot](experiments/p3_e1/README.md)：一次 generation、不可覆盖 attempt 收据、严格模型/patch/paired gain/guard/reuse 闭合及结论边界。
 - [工具工作量计量](docs/design/tool-work-accounting.md)：调用前预留、持久增量、未知结算、恢复复用及科学插件接入边界。
 - [P3 跨任务 RSI 研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)：一手论文方法、可证伪假设、对照和冻结试验协议。
 - [P1 真实 Provider 验证](docs/research/task-runtime-validation-20260920.md)：实际 episode、token 与节点用量、供应商失败、重复调用阻断和未通过项。
@@ -65,7 +66,7 @@ flowchart LR
 
 paired plan 冻结宿主能够重算的 execution environment、工具描述、运行时实现摘要和 arm schedule。当前计划对象不会预先完整冻结实际 provider/model；二者由每次模型调用的 receipt 证明，正式实验再核验这些收据是否符合预登记配置。选择门中的 `cost` 是由模型调用、charged completion tokens、工具调用和节点用量构成的透明 normalized work unit，便于同一协议内比较，不代表供应商货币费用。
 
-这条链有三种不同证据等级。确定性测试可以证明身份、隔离、门控、递归版本、真实运行路径、加载和回滚等**机制**；真实 provider Episode 才能证明模型确实产生并执行了行为变化；多个冻结任务、重复和对照才能支持**统计 RSI 效益**。当前状态只完成第一层的工程实现，后两层仍待实验。
+这条链有三种不同证据等级。确定性测试可以证明身份、隔离、门控、递归版本、真实运行路径、加载和回滚等**机制**；真实 provider Episode 才能证明模型确实产生并执行了行为变化；多个冻结任务、重复和对照才能支持**统计 RSI 效益**。正向 E1 exporter 与一次性 qualification runner 已实现并通过伪造反例审计，但真实 MiMo 调用尚未获准把脱敏 FeedbackBundle、可修改组件和 mutation policy 发往外部 provider，因此当前仍只完成第一层工程实现。
 
 这个边界来自[编排与 RSI 研究综合](docs/research/agent-orchestration-rsi-synthesis-20260916.md)：持久化、实际执行和有效必须分别检查，且“失败证据 → 候选变化 → 验证 → 后续实际加载 → 结果”缺一不可。0.8 的[框架验证](docs/research/framework-validation-20260916.md)、[v1 机制审查](docs/research/framework-mechanism-v1-review.md)和[v2 机制审查](docs/research/framework-mechanism-v2-review.md)记录过机制未激活、契约错误和实际后代零增益，因此源码变化、记忆写入或候选数量都不能单独作为 RSI 成功证据。P1 实跑记录格式见[任务运行时验证模板](docs/research/task-runtime-validation-20260920.md)。
 

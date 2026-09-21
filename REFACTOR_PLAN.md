@@ -1,6 +1,6 @@
 # Nexgent vNext 重构计划
 
-日期：2026-09-21。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 MiMo 普通任务已形成 schema 合法交付但独立 Workbench 仍失败；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面及内置参考 R0、P4 递归改进器确定性机制闭环已实现；P5 已实现通用预注册 final-holdout 配对执行器。真实 RSI 行为变化、统计效益与正式外部研究尚未建立。
+日期：2026-09-21。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地并通过确定性合同测试，真实 MiMo 普通任务已形成 schema 合法交付但独立 Workbench 仍失败；P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面、内置参考 R0、正向 E1 收据和一次性真实模型 pilot 已实现，P4 递归改进器确定性机制闭环已实现；P5 已实现通用预注册 final-holdout 配对执行器。E1 pilot 的外部 payload 导出仍待显式授权；真实 RSI 行为变化、统计效益与正式外部研究尚未建立。
 
 ## 1. 产品与执行范围
 
@@ -115,6 +115,8 @@ promotion 强制绑定预登记 improver guard。部署后的候选生成通过�
 TaskService benchmark 的 SDK 已收敛为显式 descriptor/protocol、隔离 registry、有限 JSON 合同和独立 host runtime 指纹；Workbench、OpenFOAM、BBH 两任务与 scientific-discovery adapter 已接入。scientific-discovery 的一个 synthetic case 对应一个 TaskSpec/Episode，隐藏 forecast 留在宿主评价器，项目私有 release key 通过 HMAC 派生隐藏生成 seed、统计单元和不透明 family cluster，并提供确定性的无模型 reference AgentPackage。它与 BBH 都保留 legacy 入口和历史记录，且不把 legacy ID 与 Episode ID 互认。P3 paired selection/guard 与 P5 study 冻结同一 outcome policy：只有 `failed + agent/protocol` 属可测的 observed zero，cancelled、paused、waiting、基础设施故障和 evaluator unavailable 均保持 missing。完整边界见[Task benchmark SDK](docs/design/benchmark-sdk.md)。
 
 TaskService 现将工具调用次数与数值/外部工作量分开核算。`ToolSpec` 声明调用前固定预留，可信 handler 经 `ToolContext` 在实际工作边界持久计费，root Episode 对并行和委派共享原子预算；崩溃或未知结算保留预留且使 usage 不完整。P3/P4/P5 的成本门统一读取宿主 `charged_tool_work_units`，历史记录按显式零基线只读兼容。框架不能自动推断任意求解器的 FLOPs；scientific-discovery DomainPack 已在数值批次边界接入宿主可信计量，返回值中的 `work_units` 只作诊断。完整合同见[工具工作量计量](docs/design/tool-work-accounting.md)。
+
+P3 现有一个独立的正向 E1 exporter 与领域中立 qualification runner。它只接受 exact `reference-os-v1` 的单一 `rsi_improver` 模型输出，要求输出摘要等于入库 patch、usage/模型身份完整、paired quality 或 success 严格改善、独立 guard 通过，并由一个未参与 development/selection/guard 的冻结统计单元在晋升后再次加载同一 package revision。attempt 在模型调用前持久化且不可覆盖。该 runner 尚未执行真实 MiMo generation：自动外发审查要求用户明确授权把脱敏 FeedbackBundle、`behavior.py` 和 mutation policy 发往已配置的 MiMo endpoint。合同和运行方式见 [P3 E1 qualification pilot](experiments/p3_e1/README.md)。
 
 scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分布的兼容名称，仅用于迁移 regression/golden 等价检查。它不是新鲜 holdout，也不支持新的科学发现、模型效果或 RSI 结论；正式研究仍需新的 host-private release、独立来源 cluster、重复、控制臂和真实 provider 收据。
 

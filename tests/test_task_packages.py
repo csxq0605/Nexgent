@@ -77,12 +77,37 @@ def test_real_multimodule_execution_and_receipts():
     assert execution["pid"] != os.getpid()
     assert execution["package_id"] == candidate["id"]
     assert execution["package_digest"] == candidate["digest"]
-    assert execution["loaded_modules"] == ["agent/main.py", "skills/check.py"]
+    assert execution["loaded_modules"] == [
+        "agent/main.py", "skills/check.py", "resources/note.md"]
     assert execution["local_calls"] == [{"ref": "skills/check.py:check"}]
     assert execution["instructions"] > 0
     assert execution["rpc_count"] == 0
     assert execution["isolation"]["audit_hook"] is True
     assert execution["isolation"]["os_filesystem_container"] is False
+
+
+def test_resource_load_receipt_is_ordered_and_idempotent():
+    source = """def execute(payload, context):
+    first = context.resource('prompts/task.md')
+    second = context.resource('prompts/task.md')
+    context.resource('skills/check.py')
+    checked = context.call('skills/check.py:check', payload)
+    return {'first': first, 'second': second, 'checked': checked}
+"""
+    candidate = package(source, **{
+        "prompts/task.md": "Follow the task contract.",
+        "skills/check.py": "def check(payload, context):\n    return payload['value']\n",
+    })
+
+    result = run_package(candidate, "execute", {"value": 7})
+
+    assert result["value"] == {
+        "first": "Follow the task contract.",
+        "second": "Follow the task contract.",
+        "checked": 7,
+    }
+    assert result["execution"]["loaded_modules"] == [
+        "agent/main.py", "prompts/task.md", "skills/check.py"]
 
 
 def test_module_namespaces_are_separate():

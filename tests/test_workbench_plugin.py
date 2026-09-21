@@ -63,17 +63,35 @@ def contract_execution(task, delivery=None):
 
 def test_split_identities_are_deterministic_disjoint_and_alias_explicit():
     benchmark = WorkbenchBenchmark()
-    pools = []
-    for split, seed in (("development", 1), ("selection", 8), ("final_holdout", 99)):
+    pools, input_digests, task_ids = [], [], []
+    for split in ("development", "selection", "guard", "final_holdout"):
+        seed = 13
         task = benchmark.tasks(split, seed)[0]
         assert task == benchmark.tasks(split, seed)[0]
         pools.append({row["record_id"] for row in task["inputs"]["sources"]["rows"]})
+        input_digests.append(digest(task["inputs"]))
+        task_ids.append(task["id"])
     assert all(a.isdisjoint(b) for i, a in enumerate(pools) for b in pools[i + 1:])
+    assert len(set(input_digests)) == 4
+    assert len(set(task_ids)) == 4
     assert benchmark.tasks("dev", 0) == benchmark.tasks("development", 0)
     with pytest.raises(ValueError, match="Unknown split"):
         benchmark.tasks("transfer", 0)
     assert benchmark.snapshot() == benchmark.snapshot()
-    assert len(set(benchmark.snapshot()["split_identity_digests"].values())) == 3
+    assert len(set(benchmark.snapshot()["split_identity_digests"].values())) == 4
+
+
+def test_guard_split_is_evaluated_by_the_same_frozen_contract():
+    benchmark = WorkbenchBenchmark()
+    task = benchmark.tasks("guard", 13)[0]
+    delivery, view = contract_execution(task)
+
+    report = benchmark.evaluate(task, delivery, view)
+
+    assert report["accepted"] is True
+    assert report["score"] == 1.0
+    assert report["split"] == "guard"
+    assert report["task_ref"] == task["id"]
 
 
 def test_snapshot_binds_public_tool_and_task_contract_implementations(monkeypatch):

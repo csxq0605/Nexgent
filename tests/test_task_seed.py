@@ -137,7 +137,9 @@ def test_seed_inspects_input_then_calls_tool_reads_publishes_and_finishes(tmp_pa
     assert review_payload["contract"]["deliverables"] == result_spec()
     assert review_payload["candidate"]["artifacts"]["result"]["content"] == {"answer": 12}
     assert result["plan"] == {"steps": ["compute", "verify", "publish"]}
-    assert result["execution"]["loaded_modules"] == ["agent/main.py", "agent/protocol.py", "agent/actions.py"]
+    assert result["execution"]["loaded_modules"] == [
+        "agent/main.py", "prompts/task.md", "prompts/protocol.md",
+        "prompts/delivery_review.md", "agent/protocol.py", "agent/actions.py"]
     refs = [call["ref"] for call in result["execution"]["local_calls"]
             if call["ref"].startswith("agent/")]
     assert refs.count("agent/protocol.py:validate_decision") == 4

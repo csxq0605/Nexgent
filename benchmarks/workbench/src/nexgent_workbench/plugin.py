@@ -282,7 +282,10 @@ class WorkbenchBenchmark:
         """Host resolves artifact refs; original inputs and receipts stay host supplied."""
         from ._evaluation import expected_delivery
         task_id = task_ref["id"] if isinstance(task_ref, dict) else task_ref
-        match = re.fullmatch(rf"workbench/{re.escape(VERSION)}/(development|selection|final_holdout)/(\d+)/(normal|recovery)", str(task_id))
+        match = re.fullmatch(
+            rf"workbench/{re.escape(VERSION)}/(development|selection|guard|final_holdout)/(\d+)/(normal|recovery)",
+            str(task_id),
+        )
         if not match:
             raise ValueError("Unknown frozen workbench task reference")
         split, seed, trial = match.groups()
