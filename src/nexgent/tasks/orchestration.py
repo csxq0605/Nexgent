@@ -20,6 +20,8 @@ from .tools import ContractError
 
 
 EXECUTABLE_PLAN_SCHEMA = "nexgent.executable-plan.v1"
+MAX_PLAN_NODES = 256
+MAX_PLAN_REVISIONS = 32
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9_.-]{0,99}")
 
 
@@ -299,6 +301,8 @@ class PlanSpec:
     def __post_init__(self):
         _identifier(self.id, "Plan id")
         _positive_integer(self.revision, "Plan revision")
+        if self.revision > MAX_PLAN_REVISIONS + 1:
+            raise ContractError("Executable plan exceeds its revision limit")
         if self.schema != EXECUTABLE_PLAN_SCHEMA:
             raise ContractError("Unsupported executable-plan schema")
         for name, value_type in (
@@ -313,8 +317,8 @@ class PlanSpec:
                 raise ContractError(f"Plan {name} contains an invalid value")
             if len(values) != len(set(values)):
                 raise ContractError(f"Plan {name} must not contain duplicates")
-        if not self.nodes:
-            raise ContractError("Executable plan must contain at least one node")
+        if not 1 <= len(self.nodes) <= MAX_PLAN_NODES:
+            raise ContractError(f"Executable plan must contain 1 to {MAX_PLAN_NODES} nodes")
         node_by_id = {node.id: node for node in self.nodes}
         if len(node_by_id) != len(self.nodes):
             raise ContractError("Plan node ids must be unique")
@@ -371,6 +375,9 @@ class PlanSpec:
     def ref(self) -> str:
         return _content_ref(self)
 
+    def as_dict(self) -> dict:
+        return _canonical(self)
+
 
 # Public vocabulary for callers that prefer the contract's product name.
 ExecutablePlan = PlanSpec
@@ -409,6 +416,9 @@ class PlanRevision:
     def ref(self) -> str:
         return "revision-" + _content_ref(self).removeprefix("plan-")
 
+    def as_dict(self) -> dict:
+        return _canonical(self)
+
 
 @dataclass(frozen=True)
 class NodeExecution:
@@ -416,6 +426,8 @@ class NodeExecution:
     node_spec_ref: str
     status: NodeStatus = NodeStatus.PENDING
     attempt_refs: tuple[str, ...] = ()
+    attempt_count: int = 0
+    iteration_count: int = 0
     input_artifact_refs: tuple[str, ...] = ()
     output_artifact_refs: tuple[str, ...] = ()
     failure_ref: str | None = None
@@ -432,6 +444,11 @@ class NodeExecution:
                     or len(values) != len(set(values))):
                 raise ContractError(f"Node execution {name} must contain unique references")
         _reference(self.failure_ref, "Node execution failure_ref", optional=True)
+        if (type(self.attempt_count) is not int or self.attempt_count < 0
+                or self.attempt_count != len(self.attempt_refs)):
+            raise ContractError("Node attempt_count must equal its immutable attempt receipts")
+        if type(self.iteration_count) is not int or self.iteration_count < 0:
+            raise ContractError("Node iteration_count must be a nonnegative integer")
         if self.status is NodeStatus.PENDING and (
                 self.attempt_refs or self.input_artifact_refs
                 or self.output_artifact_refs or self.failure_ref is not None):
@@ -474,6 +491,50 @@ def validate_revision(execution: "PlanExecution", revision: PlanRevision) -> Non
     added = set(revised_nodes) - set(base_nodes)
     mutable_targets = scope | added
 
+    # New nodes must attach to the boundary occupied by the replaced pending
+    # subgraph.  Merely naming an unrelated pending node cannot authorize an
+    # arbitrary disconnected branch elsewhere in the plan.
+    old_boundary = set()
+    for binding in revision.base_plan.control_bindings:
+        if binding.target_node_id in scope and binding.source_node_id not in scope:
+            old_boundary.add(binding.source_node_id)
+        if binding.source_node_id in scope and binding.target_node_id not in scope:
+            old_boundary.add(binding.target_node_id)
+    for binding in revision.base_plan.artifact_bindings:
+        if binding.consumer_node_id in scope and binding.producer_node_id not in scope:
+            old_boundary.add(binding.producer_node_id)
+        if binding.producer_node_id in scope and binding.consumer_node_id not in scope:
+            old_boundary.add(binding.consumer_node_id)
+    for route in revision.base_plan.failure_routes:
+        if route.source_node_id in scope and route.target_node_id not in scope:
+            if route.target_node_id is not None:
+                old_boundary.add(route.target_node_id)
+
+    adjacency = {node_id: set() for node_id in set(revised_nodes) | old_boundary}
+    for binding in revision.revised_plan.control_bindings:
+        adjacency[binding.source_node_id].add(binding.target_node_id)
+        adjacency[binding.target_node_id].add(binding.source_node_id)
+    for binding in revision.revised_plan.artifact_bindings:
+        adjacency[binding.producer_node_id].add(binding.consumer_node_id)
+        adjacency[binding.consumer_node_id].add(binding.producer_node_id)
+    for route in revision.revised_plan.failure_routes:
+        if route.target_node_id is not None:
+            adjacency[route.source_node_id].add(route.target_node_id)
+            adjacency[route.target_node_id].add(route.source_node_id)
+    anchors = (scope & set(revised_nodes)) | old_boundary
+    if not anchors and scope == set(base_nodes) and added:
+        anchors.add(sorted(added)[0])
+    reachable = set(anchors)
+    stack = list(anchors)
+    while stack:
+        node_id = stack.pop()
+        for neighbour in adjacency.get(node_id, ()):
+            if neighbour not in reachable:
+                reachable.add(neighbour)
+                stack.append(neighbour)
+    if added - reachable:
+        raise ContractError("Added plan nodes must connect to the replaced subgraph boundary")
+
     # A control or artifact binding is owned by its consumer.  This permits a
     # new pending branch to consume an already completed artifact without
     # rewriting the completed producer's inputs or execution identity.
@@ -495,6 +556,11 @@ def validate_revision(execution: "PlanExecution", revision: PlanRevision) -> Non
             != _outside(revision.revised_plan.failure_routes, mutable_targets,
                         "source_node_id")):
         raise ContractError("Plan revision changed failure route outside the pending subgraph")
+    if any(route.source_node_id in mutable_targets
+           and route.target_node_id is not None
+           and route.target_node_id not in mutable_targets
+           for route in revision.revised_plan.failure_routes):
+        raise ContractError("Revised failure routes must stay inside the pending subgraph")
 
 
 @dataclass(frozen=True)
@@ -522,6 +588,17 @@ class PlanExecution:
         for node_id, state in state_by_id.items():
             if state.node_spec_ref != node_by_id[node_id].ref:
                 raise ContractError("Node execution does not match its immutable node spec")
+            limits = node_by_id[node_id].local_limits
+            if state.attempt_count > limits.max_attempts:
+                raise ContractError("Node execution exceeds its local attempt limit")
+            if (state.iteration_count
+                    and (limits.max_iterations is None
+                         or state.iteration_count > limits.max_iterations)):
+                raise ContractError("Node execution exceeds its local iteration limit")
+        if len(history) > MAX_PLAN_REVISIONS:
+            raise ContractError("Plan execution exceeds its revision limit")
+        if len(history) != self.plan.revision - 1:
+            raise ContractError("Plan execution must retain its complete revision history")
         for previous, current in zip(history, history[1:]):
             if previous.revised_plan != current.base_plan:
                 raise ContractError("Plan revision history is not contiguous")
@@ -554,6 +631,7 @@ class PlanExecution:
         input_artifact_refs: tuple[str, ...] = (),
         output_artifact_refs: tuple[str, ...] = (),
         failure_ref: str | None = None,
+        iteration_count: int | None = None,
     ) -> "PlanExecution":
         """Record one legal node transition without mutating prior evidence."""
         current = self.node(node_id)
@@ -569,6 +647,7 @@ class PlanExecution:
                     node_spec_ref=current.node_spec_ref,
                     status=status,
                     attempt_refs=(attempt_ref,),
+                    attempt_count=1,
                     input_artifact_refs=tuple(input_artifact_refs),
                 )
             elif status in {NodeStatus.SKIPPED, NodeStatus.CANCELLED}:
@@ -581,22 +660,26 @@ class PlanExecution:
         elif current.status is NodeStatus.RUNNING:
             if attempt_ref is not None or input_artifact_refs:
                 raise ContractError("Running node attempt and inputs are immutable")
+            iterations = current.iteration_count if iteration_count is None else iteration_count
             if status is NodeStatus.COMPLETED:
                 if failure_ref is not None:
                     raise ContractError("Completed node cannot carry a failure reference")
                 updated = replace(
                     current, status=status,
+                    iteration_count=iterations,
                     output_artifact_refs=tuple(output_artifact_refs),
                 )
             elif status is NodeStatus.FAILED:
                 _reference(failure_ref, "Node failure_ref")
                 if output_artifact_refs:
                     raise ContractError("Failed node cannot publish successful outputs")
-                updated = replace(current, status=status, failure_ref=failure_ref)
+                updated = replace(current, status=status, failure_ref=failure_ref,
+                                  iteration_count=iterations)
             elif status is NodeStatus.CANCELLED:
                 if output_artifact_refs:
                     raise ContractError("Cancelled node cannot publish successful outputs")
-                updated = replace(current, status=status, failure_ref=failure_ref)
+                updated = replace(current, status=status, failure_ref=failure_ref,
+                                  iteration_count=iterations)
             else:
                 raise ContractError("Running node may only complete, fail, or cancel")
         else:  # Defensive: all enum states are covered above.
@@ -610,6 +693,8 @@ class PlanExecution:
         )
 
     def apply_revision(self, revision: PlanRevision) -> "PlanExecution":
+        if len(self.revisions) >= MAX_PLAN_REVISIONS:
+            raise ContractError("Plan execution exceeds its revision limit")
         validate_revision(self, revision)
         old_states = {state.node_id: state for state in self.node_executions}
         scope = set(revision.replaced_node_ids)
@@ -626,9 +711,96 @@ class PlanExecution:
             revisions=self.revisions + (revision,),
         )
 
+    def as_dict(self) -> dict:
+        return _canonical(self)
+
+
+def plan_spec_from_dict(value: dict) -> PlanSpec:
+    """Rebuild and revalidate a persisted PlanSpec projection."""
+    try:
+        nodes = []
+        for node in value["nodes"]:
+            limits = LocalLimits(**node.get("local_limits", {}))
+            nodes.append(PlanNode(
+                id=node["id"],
+                operator_ref=node["operator_ref"],
+                role_ref=node.get("role_ref"),
+                component_ref=node.get("component_ref"),
+                input_ports=tuple(PortSpec(**port) for port in node.get("input_ports", [])),
+                output_ports=tuple(PortSpec(**port) for port in node.get("output_ports", [])),
+                local_limits=limits,
+            ))
+        return PlanSpec(
+            id=value["id"],
+            nodes=tuple(nodes),
+            revision=value.get("revision", 1),
+            control_bindings=tuple(
+                ControlBinding(**binding) for binding in value.get("control_bindings", [])),
+            artifact_bindings=tuple(
+                ArtifactBinding(**binding) for binding in value.get("artifact_bindings", [])),
+            join_policies=tuple(JoinPolicy(
+                node_id=policy["node_id"], mode=JoinMode(policy.get("mode", "all")),
+                quorum=policy.get("quorum"),
+            ) for policy in value.get("join_policies", [])),
+            failure_routes=tuple(FailureRoute(
+                source_node_id=route["source_node_id"],
+                action=FailureAction(route["action"]),
+                target_node_id=route.get("target_node_id"),
+                failure_kinds=tuple(route.get("failure_kinds", ["*"])),
+            ) for route in value.get("failure_routes", [])),
+            schema=value.get("schema", EXECUTABLE_PLAN_SCHEMA),
+        )
+    except ContractError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ContractError(f"Invalid persisted PlanSpec: {str(exc)[:500]}") from None
+
+
+def plan_revision_from_dict(value: dict) -> PlanRevision:
+    try:
+        return PlanRevision(
+            id=value["id"],
+            base_plan=plan_spec_from_dict(value["base_plan"]),
+            revised_plan=plan_spec_from_dict(value["revised_plan"]),
+            replaced_node_ids=tuple(value["replaced_node_ids"]),
+            reason_ref=value.get("reason_ref"),
+        )
+    except ContractError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ContractError(f"Invalid persisted PlanRevision: {str(exc)[:500]}") from None
+
+
+def plan_execution_from_dict(value: dict) -> PlanExecution:
+    """Rebuild a durable execution while checking node and revision identity."""
+    try:
+        return PlanExecution(
+            id=value["id"],
+            plan=plan_spec_from_dict(value["plan"]),
+            node_executions=tuple(NodeExecution(
+                node_id=state["node_id"],
+                node_spec_ref=state["node_spec_ref"],
+                status=NodeStatus(state.get("status", "pending")),
+                attempt_refs=tuple(state.get("attempt_refs", [])),
+                attempt_count=state.get("attempt_count", len(state.get("attempt_refs", []))),
+                iteration_count=state.get("iteration_count", 0),
+                input_artifact_refs=tuple(state.get("input_artifact_refs", [])),
+                output_artifact_refs=tuple(state.get("output_artifact_refs", [])),
+                failure_ref=state.get("failure_ref"),
+            ) for state in value["node_executions"]),
+            revisions=tuple(
+                plan_revision_from_dict(revision) for revision in value.get("revisions", [])),
+        )
+    except ContractError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ContractError(f"Invalid persisted PlanExecution: {str(exc)[:500]}") from None
+
 
 __all__ = [
     "EXECUTABLE_PLAN_SCHEMA",
+    "MAX_PLAN_NODES",
+    "MAX_PLAN_REVISIONS",
     "ArtifactBinding",
     "ControlBinding",
     "ExecutablePlan",
@@ -644,5 +816,8 @@ __all__ = [
     "PlanRevision",
     "PlanSpec",
     "PortSpec",
+    "plan_execution_from_dict",
+    "plan_revision_from_dict",
+    "plan_spec_from_dict",
     "validate_revision",
 ]

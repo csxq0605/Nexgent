@@ -10,6 +10,9 @@ from nexgent.tasks.orchestration import (
     JoinMode,
     JoinPolicy,
     LocalLimits,
+    MAX_PLAN_NODES,
+    MAX_PLAN_REVISIONS,
+    NodeExecution,
     NodeStatus,
     PlanExecution,
     PlanNode,
@@ -232,3 +235,112 @@ def test_terminal_node_cannot_be_replayed_or_have_receipts_rewritten():
             "draft", NodeStatus.COMPLETED,
             input_artifact_refs=("artifact://different-input",),
         )
+
+
+def test_revision_rejects_disconnected_nodes_and_routes_back_to_completed_work():
+    execution = PlanExecution.create("execution-five", _base_plan())
+    execution = execution.transition_node(
+        "draft", NodeStatus.RUNNING, attempt_ref="attempt://draft/1")
+    execution = execution.transition_node("draft", NodeStatus.COMPLETED)
+
+    disconnected = PlanSpec(
+        id=execution.plan.id,
+        revision=2,
+        nodes=execution.plan.nodes + (_node("orphan"),),
+        control_bindings=execution.plan.control_bindings,
+        artifact_bindings=execution.plan.artifact_bindings,
+        join_policies=execution.plan.join_policies,
+        failure_routes=execution.plan.failure_routes,
+    )
+    with pytest.raises(ContractError, match="connect to the replaced"):
+        execution.apply_revision(PlanRevision(
+            id="add-orphan",
+            base_plan=execution.plan,
+            revised_plan=disconnected,
+            replaced_node_ids=("review",),
+        ))
+
+    replay_route = PlanSpec(
+        id=execution.plan.id,
+        revision=2,
+        nodes=execution.plan.nodes,
+        control_bindings=execution.plan.control_bindings,
+        artifact_bindings=execution.plan.artifact_bindings,
+        join_policies=execution.plan.join_policies,
+        failure_routes=execution.plan.failure_routes + (
+            FailureRoute(
+                "review", FailureAction.ROUTE, target_node_id="draft",
+                failure_kinds=("new-failure",),
+            ),
+        ),
+    )
+    with pytest.raises(ContractError, match="stay inside the pending"):
+        execution.apply_revision(PlanRevision(
+            id="route-to-completed",
+            base_plan=execution.plan,
+            revised_plan=replay_route,
+            replaced_node_ids=("review",),
+        ))
+
+
+def test_plan_and_execution_limits_are_checked_on_persisted_state():
+    with pytest.raises(ContractError, match=f"1 to {MAX_PLAN_NODES}"):
+        PlanSpec(
+            id="oversized-plan",
+            nodes=tuple(_node(f"node-{index}") for index in range(MAX_PLAN_NODES + 1)),
+        )
+
+    plan = PlanSpec(
+        id="limited-execution",
+        nodes=(_node("only", attempts=1, iterations=2),),
+    )
+    with pytest.raises(ContractError, match="attempt limit"):
+        PlanExecution(
+            id="over-attempt",
+            plan=plan,
+            node_executions=(NodeExecution(
+                node_id="only",
+                node_spec_ref=plan.nodes[0].ref,
+                status=NodeStatus.RUNNING,
+                attempt_refs=("attempt://1", "attempt://2"),
+                attempt_count=2,
+            ),),
+        )
+    with pytest.raises(ContractError, match="iteration limit"):
+        PlanExecution(
+            id="over-iteration",
+            plan=plan,
+            node_executions=(NodeExecution(
+                node_id="only",
+                node_spec_ref=plan.nodes[0].ref,
+                iteration_count=3,
+            ),),
+        )
+
+    execution = PlanExecution.create("revision-limit", plan)
+    for number in range(MAX_PLAN_REVISIONS):
+        revised = PlanSpec(
+            id=plan.id,
+            revision=execution.plan.revision + 1,
+            nodes=(_node("only", operator=f"operator://only/v{number + 2}",
+                         attempts=1, iterations=2),),
+        )
+        execution = execution.apply_revision(PlanRevision(
+            id=f"revision-{number}",
+            base_plan=execution.plan,
+            revised_plan=revised,
+            replaced_node_ids=("only",),
+        ))
+    with pytest.raises(ContractError, match="revision limit"):
+        overflow = PlanSpec(
+            id=plan.id,
+            revision=execution.plan.revision + 1,
+            nodes=(_node("only", operator="operator://only/overflow",
+                         attempts=1, iterations=2),),
+        )
+        execution.apply_revision(PlanRevision(
+            id="revision-overflow",
+            base_plan=execution.plan,
+            revised_plan=overflow,
+            replaced_node_ids=("only",),
+        ))

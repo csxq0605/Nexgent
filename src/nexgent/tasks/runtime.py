@@ -22,7 +22,7 @@ from .benchmarks import (
 )
 from .outcomes import classify_benchmark_outcome
 from .package_runner import CapabilityAbort, run_package
-from .packages import PackageError, verify_package
+from .packages import CAPABILITIES, PackageError, verify_package
 from .store import EpisodeStore, RecoveryRequired, StateConflict
 from .tools import ContractError, ToolRegistry, task_benchmarks, validate
 
@@ -390,6 +390,296 @@ class TaskService:
                      memory_retrievals=self.store.retrievals(identity))
         return state
 
+    @staticmethod
+    def _workflow_orchestrator(package, entry):
+        manifest = package["manifest"]
+        if manifest.get("manifest_version", 1) != 2 or entry != "execute":
+            return None
+        component_id = manifest["orchestrator"]
+        component = manifest["components"][component_id]
+        if component["kind"] != "workflow":
+            return None
+        return component_id, component["ref"]
+
+    def _materialize_workflow(self, package, workflow_ref, capability_lease):
+        """Resolve node references only against the frozen v2 manifest and lease."""
+        manifest = package["manifest"]
+        registered = manifest["workflows"].get(workflow_ref)
+        if not isinstance(registered, dict):
+            raise ContractError(f"Workflow is not registered: {workflow_ref}")
+        try:
+            workflow = json.loads(package["files"][registered["ref"]])
+        except (KeyError, TypeError, ValueError):
+            raise ContractError(f"Registered workflow cannot be loaded: {workflow_ref}") from None
+        if not isinstance(workflow, dict):
+            raise ContractError("Registered workflow must contain an object")
+        workflow = deepcopy(workflow)
+        workflow.setdefault("input_schema", deepcopy(registered.get("input_schema", {})))
+        workflow.setdefault("output_schema", deepcopy(registered.get("output_schema", {})))
+        roles = manifest["roles"]
+        components = manifest["components"]
+        role_components = {}
+        for component_id, component in components.items():
+            if component.get("kind") == "role":
+                role_components.setdefault(component.get("ref"), []).append(component_id)
+        for node in workflow.get("nodes", []):
+            if not isinstance(node, dict):
+                raise ContractError("Workflow nodes must be objects")
+            method = node.get("method")
+            if method not in CAPABILITIES | {"join", "loop"}:
+                raise ContractError("Workflow operator is not registered by the host")
+            role_ref = node.get("role_ref")
+            if role_ref is not None:
+                role = roles.get(role_ref)
+                if not isinstance(role, dict):
+                    raise ContractError(f"Workflow role is not registered: {role_ref}")
+                if method in CAPABILITIES and method not in role.get("capabilities", []):
+                    raise PermissionError(
+                        f"Role {role_ref!r} is not leased capability {method!r}")
+                matches = role_components.get(role_ref, [])
+                if node.get("component_ref") is None and len(matches) == 1:
+                    node["component_ref"] = matches[0]
+                if method == "ask":
+                    params = node.setdefault("params", {})
+                    params.setdefault("role", role_ref)
+                    prompt_ref = role.get("prompt_ref")
+                    if prompt_ref is not None:
+                        params.setdefault("prompt", package["files"][prompt_ref])
+            component_ref = node.get("component_ref")
+            if component_ref is not None:
+                component = components.get(component_ref)
+                if not isinstance(component, dict):
+                    raise ContractError(
+                        f"Workflow component is not registered: {component_ref}")
+                if (role_ref is not None
+                        and (component.get("kind"), component.get("ref"))
+                        != ("role", role_ref)):
+                    raise ContractError("Workflow role_ref and component_ref do not resolve together")
+            params = node.get("params", {})
+            if method == "tool":
+                tool_name = params.get("name") if isinstance(params, dict) else None
+                if not isinstance(tool_name, str) or tool_name not in capability_lease:
+                    raise PermissionError(
+                        "Workflow tool operator must resolve to the Episode capability lease")
+                self.tools.get(tool_name)
+            if method == "skill":
+                skill_name = params.get("name") if isinstance(params, dict) else None
+                if not isinstance(skill_name, str) or skill_name not in manifest.get("skills", {}):
+                    raise ContractError("Workflow skill operator must resolve to a frozen skill")
+        for rule in workflow.get("revision_rules", []):
+            if not isinstance(rule, dict) or rule.get("workflow_ref") not in manifest["workflows"]:
+                raise ContractError("Workflow revision must resolve to a frozen registered workflow")
+        return workflow
+
+    def _persist_plan(self, identity, execution, receipts, workflow_ref):
+        """Save the plan projection; RPC and artifact ledgers remain authoritative."""
+        from .orchestration import NodeStatus
+
+        previous = self.store.get(identity)
+        previous_ref = previous.get("current_plan_ref")
+        node_by_id = {node.id: node for node in execution.plan.nodes}
+        states = {state.node_id: state for state in execution.node_executions}
+        control_dependencies = {node_id: set() for node_id in node_by_id}
+        artifact_bindings = {node_id: [] for node_id in node_by_id}
+        for binding in execution.plan.control_bindings:
+            control_dependencies[binding.target_node_id].add(binding.source_node_id)
+        for binding in execution.plan.artifact_bindings:
+            control_dependencies[binding.consumer_node_id].add(binding.producer_node_id)
+            artifact_bindings[binding.consumer_node_id].append({
+                "producer_node_id": binding.producer_node_id,
+                "output_port": binding.output_port,
+                "input_port": binding.input_port,
+                "schema_ref": binding.schema_ref,
+            })
+        history = ([execution.revisions[0].base_plan.ref]
+                   + [revision.revised_plan.ref for revision in execution.revisions]
+                   if execution.revisions else [execution.plan.ref])
+
+        def update(state):
+            state["current_plan_ref"] = execution.plan.ref
+            state["plan_history_refs"] = history
+            state["plan_revision"] = execution.plan.revision
+            state["plan_revisions"] = [{
+                "id": revision.id,
+                "ref": revision.ref,
+                "base_plan_ref": revision.base_plan.ref,
+                "revised_plan_ref": revision.revised_plan.ref,
+                "replaced_node_ids": list(revision.replaced_node_ids),
+                "reason_ref": revision.reason_ref,
+            } for revision in execution.revisions]
+            state["plan_execution"] = execution.as_dict()
+            state["plan_workflow_ref"] = workflow_ref
+            state["plan_node_receipts"] = deepcopy(receipts)
+            state["plan"] = execution.plan.as_dict()
+            active_paths = set()
+            for node_id, node in node_by_id.items():
+                path = f"plan/nodes/{node_id}"
+                active_paths.add(path)
+                current = deepcopy(state["nodes"].get(path) or {})
+                node_state = states[node_id]
+                current.update({
+                    "id": path,
+                    "plan_node_id": node_id,
+                    "plan_ref": execution.plan.ref,
+                    "node_spec_ref": node.ref,
+                    "operator_ref": node.operator_ref,
+                    "role_ref": node.role_ref,
+                    "component_ref": node.component_ref,
+                    "control_dependencies": sorted(control_dependencies[node_id]),
+                    "artifact_bindings": sorted(
+                        artifact_bindings[node_id],
+                        key=lambda value: (value["input_port"], value["producer_node_id"]),
+                    ),
+                    "local_limits": {
+                        "max_attempts": node.local_limits.max_attempts,
+                        "max_iterations": node.local_limits.max_iterations,
+                        "timeout_seconds": node.local_limits.timeout_seconds,
+                        "max_model_calls": node.local_limits.max_model_calls,
+                        "max_tool_calls": node.local_limits.max_tool_calls,
+                        "max_child_episodes": node.local_limits.max_child_episodes,
+                        "max_work_units": node.local_limits.max_work_units,
+                    },
+                    "status": node_state.status.value,
+                    "attempt_count": node_state.attempt_count,
+                    "iteration_count": node_state.iteration_count,
+                    "input_refs": list(node_state.input_artifact_refs),
+                    "output_refs": list(node_state.output_artifact_refs),
+                })
+                if node_id in receipts:
+                    current["plan_receipt"] = deepcopy(receipts[node_id])
+                    if node_state.status is NodeStatus.COMPLETED:
+                        current["result"] = deepcopy(receipts[node_id].get("value"))
+                state["nodes"][path] = current
+            for path, node in state["nodes"].items():
+                if path.startswith("plan/nodes/") and path not in active_paths:
+                    node["status"] = "superseded"
+
+        self._change(identity, update)
+        if previous_ref != execution.plan.ref:
+            kind = "plan_committed" if previous_ref is None else "plan_revised"
+            self.store.event(identity, kind, {
+                "plan_ref": execution.plan.ref,
+                "revision": execution.plan.revision,
+                "workflow_ref": workflow_ref,
+                "previous_plan_ref": previous_ref,
+            })
+
+    def _run_workflow_orchestrator(
+            self, identity, package, component_id, initial_workflow_ref,
+            payload, stop_event, notify):
+        from .orchestration import (
+            NodeStatus, PlanExecution, PlanRevision, plan_execution_from_dict,
+        )
+        from .workflows import plan_from_workflow, run_executable_workflow
+
+        state = self.store.get(identity)
+        workflow_ref = [state.get("plan_workflow_ref") or initial_workflow_ref]
+        workflow = self._materialize_workflow(
+            package, workflow_ref[0], state["capabilities"])
+        if state.get("plan_execution") is None:
+            plan = plan_from_workflow(workflow, component_id)
+            execution = PlanExecution.create(identity, plan)
+            receipts = {}
+        else:
+            execution = plan_execution_from_dict(state["plan_execution"])
+            expected = plan_from_workflow(
+                workflow, component_id, revision=execution.plan.revision)
+            if expected != execution.plan:
+                raise RecoveryRequired(
+                    "Persisted plan differs from its frozen workflow resource")
+            receipts = deepcopy(state.get("plan_node_receipts") or {})
+            methods = {node["id"]: node["method"] for node in workflow["nodes"]}
+            for node_state in execution.node_executions:
+                for artifact_ref in (
+                        *node_state.input_artifact_refs,
+                        *node_state.output_artifact_refs):
+                    try:
+                        self.store.read(artifact_ref, identity)
+                    except (KeyError, PermissionError, ValueError) as exc:
+                        raise RecoveryRequired(
+                            f"Plan node {node_state.node_id} references invalid artifact evidence"
+                        ) from exc
+                if node_state.status is NodeStatus.RUNNING:
+                    raise RecoveryRequired(
+                        f"Plan node {node_state.node_id} was admitted without a durable outcome")
+                if not node_state.status.terminal:
+                    continue
+                receipt = receipts.get(node_state.node_id)
+                if not isinstance(receipt, dict):
+                    raise RecoveryRequired("Terminal plan node is missing its host receipt")
+                if node_state.status in {NodeStatus.SKIPPED, NodeStatus.CANCELLED}:
+                    continue
+                if (tuple(self._references(identity, receipt.get("value")))
+                        != node_state.output_artifact_refs):
+                    raise RecoveryRequired(
+                        f"Plan node {node_state.node_id} artifact evidence differs from the ledger")
+                if methods[node_state.node_id] in {"join", "loop"}:
+                    continue
+                path = f"plan/nodes/{node_state.node_id}"
+                journal = self.store.rpc_find(identity, path)
+                expected_status = ("completed" if node_state.status is NodeStatus.COMPLETED
+                                   else "failed")
+                if (journal is None or journal["status"] != expected_status
+                        or (expected_status == "completed"
+                            and journal["result"] != receipt.get("value"))):
+                    raise RecoveryRequired(
+                        f"Plan node {node_state.node_id} receipt differs from the RPC journal")
+
+        def persist(current, current_receipts):
+            self._persist_plan(
+                identity, current, current_receipts, workflow_ref[0])
+            notify()
+
+        def resolve_revision(rule, current):
+            target_ref = rule["workflow_ref"]
+            revised_workflow = self._materialize_workflow(
+                package, target_ref, state["capabilities"])
+            revised_plan = plan_from_workflow(
+                revised_workflow, component_id, revision=current.plan.revision + 1)
+            revision = PlanRevision(
+                id=rule["id"],
+                base_plan=current.plan,
+                revised_plan=revised_plan,
+                replaced_node_ids=tuple(rule["replace_node_ids"]),
+                reason_ref=rule.get("reason_ref"),
+            )
+            workflow_ref[0] = target_ref
+            return revised_workflow, revision
+
+        def invoke(method, params, path):
+            result = self._dispatch(
+                identity, package, method, params, path, stop_event, notify)
+            journal = self.store.rpc_find(identity, path)
+            if (journal is None or journal["status"] != "completed"
+                    or journal["result"] != result):
+                raise RecoveryRequired("Plan node result is not durable in the RPC journal")
+            return deepcopy(journal["result"])
+
+        result = run_executable_workflow(
+            workflow,
+            payload,
+            invoke,
+            execution=execution,
+            persist=persist,
+            resolve_revision=resolve_revision,
+            receipt_evidence=lambda _kind, value: self._references(identity, value),
+            initial_receipts=receipts,
+            stop_event=stop_event,
+            max_parallel=package["manifest"]["workflows"][workflow_ref[0]].get(
+                "max_parallel", 4),
+        )
+        if result["status"] != "completed":
+            raise ContractError(result.get("error") or "Executable plan did not complete")
+        return {
+            "value": result["outputs"],
+            "execution": {
+                "kind": "executable_plan",
+                "plan_ref": result["plan_execution"].plan.ref,
+                "plan_revision": result["plan_execution"].plan.revision,
+                "workflow_ref": workflow_ref[0],
+            },
+        }
+
     def run(self, identity, on_update=None, stop_event=None):
         stop_event = stop_event if stop_event is not None else threading.Event()
         with self.store.lock(identity):
@@ -465,9 +755,20 @@ class TaskService:
 
             notify()
             try:
-                execution = run_package(package, state["task"]["entry"], payload, handle,
-                                        stop_event=stop_event, timeout=state["task"].get("constraints", {}).get("wall_seconds", 1200),
-                                        max_rpc=512, max_instructions=5_000_000)
+                workflow_orchestrator = self._workflow_orchestrator(
+                    package, state["task"]["entry"])
+                if workflow_orchestrator is None:
+                    execution = run_package(
+                        package, state["task"]["entry"], payload, handle,
+                        stop_event=stop_event,
+                        timeout=state["task"].get("constraints", {}).get(
+                            "wall_seconds", 1200),
+                        max_rpc=512, max_instructions=5_000_000,
+                    )
+                else:
+                    execution = self._run_workflow_orchestrator(
+                        identity, package, workflow_orchestrator[0],
+                        workflow_orchestrator[1], payload, stop_event, notify)
                 self._complete(identity, execution)
             except InterruptedError as exc:
                 self._change(identity, lambda s: s.update(
@@ -579,8 +880,10 @@ class TaskService:
             refs = self._references(identity, params)
             self.store.reserve_node(identity, path, {"method": method})
             self.store.rpc_start(identity, path, request)
-            node = {"id": path, "method": method, "status": "running", "input_refs": refs,
-                    "package_digest": package["digest"], "started_at": time.time(), "request": deepcopy(params)}
+            node = deepcopy(self.store.get(identity)["nodes"].get(path) or {})
+            node.update({"id": path, "method": method, "status": "running", "input_refs": refs,
+                         "package_digest": package["digest"], "started_at": time.time(),
+                         "request": deepcopy(params)})
             self._change(identity, lambda s: s["nodes"].update({path: deepcopy(node)}))
         notify()
         try:

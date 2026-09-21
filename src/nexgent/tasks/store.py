@@ -192,7 +192,10 @@ class EpisodeStore:
             episode = {"id": episode_id, "task": task, "package_id": package["id"],
                        "package_digest": package["digest"], "parent_episode_id": parent_episode_id,
                        "root_episode_id": root_id, "status": "ready", "revision": 0,
-                       "plan": None, "nodes": {}, "input_refs": {}, "output_refs": {},
+                       "plan": None, "current_plan_ref": None, "plan_history_refs": [],
+                       "plan_revision": 0, "plan_revisions": [], "plan_execution": None,
+                       "plan_workflow_ref": None, "plan_node_receipts": {},
+                       "nodes": {}, "input_refs": {}, "output_refs": {},
                        "child_episode_ids": [], "memory_snapshot_id": None, "outcome": None,
                        "budget": deepcopy(limits), "capabilities": deepcopy(capabilities),
                        "created_at": now, "updated_at": now}
