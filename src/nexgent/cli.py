@@ -15,6 +15,8 @@ TASK_COMMANDS = {
     "rsi-plan", "rsi-run-plan", "rsi-assess", "rsi-plan-monitor", "rsi-promote",
     "rsi-run-monitor", "rsi-monitor", "rsi-rollback",
     "rsi-cycle-start", "rsi-cycle-resume", "rsi-cycle-show", "rsi-cycle-recover",
+    "rsi-improver-cycle-start", "rsi-improver-cycle-resume",
+    "rsi-improver-cycle-show", "rsi-improver-cycle-recover",
     "rsi-improver-status", "rsi-improver-events",
     "rsi-study-plan", "rsi-study-run", "rsi-study-assess", "rsi-study-list",
 }
@@ -203,6 +205,66 @@ def _run_task_command(args):
         from .tasks.evolution_view import public_evolution_event
 
         evolution = EvolutionService(service)
+        if args.command.startswith("rsi-improver-cycle-"):
+            from .tasks.generation import GenerationService
+            from .tasks.guards import ImproverGuardService
+            from .tasks.improvers import ImproverService
+            from .tasks.meta_evaluation import MetaEvaluationService, TaskMetaExecutor
+            from .tasks.recursive_cycles import RecursiveImproverCycleService
+
+            adapter = _task_benchmark(args.benchmark, args.root)
+            generation = GenerationService(service, evolution)
+            improvers = ImproverService(service)
+            executor = TaskMetaExecutor(service, generation, adapter)
+            meta = MetaEvaluationService(
+                service.store, executor.generate_offspring, executor.evaluate_descendant)
+            guards = ImproverGuardService(
+                improvers, executor.generate_offspring, executor.evaluate_descendant)
+            cycles = RecursiveImproverCycleService(improvers, meta, guards)
+            if args.command == "rsi-improver-cycle-show":
+                return cycles.show(args.cycle_id)
+            if args.command == "rsi-improver-cycle-recover":
+                cycles.recover(
+                    args.cycle_id,
+                    confirm_no_external_commit=args.confirm_no_external_commit)
+                return cycles.show(args.cycle_id)
+            if args.command == "rsi-improver-cycle-resume":
+                cycles.resume(args.cycle_id, stop_event=_stop_event())
+                return cycles.show(args.cycle_id)
+
+            spec = _object_argument(args.spec, label="recursive improver cycle spec")
+            required = {
+                "channel", "expected_revision", "generation_ids", "decision_ids",
+                "task_channel", "task_channel_revision", "task_feedback_bundle_id",
+                "task_mutation_policy", "provider", "model", "development_tasks",
+                "selection_tasks", "evaluator", "meta_budget", "guard_budget",
+                "guard_tasks", "guard_min_mean_utility",
+            }
+            optional = {
+                "self_generation_budget", "memory", "meta_policy",
+                "offspring_per_arm", "guard_evaluator", "guard_min_success_rate",
+            }
+            missing, unsupported = required - set(spec), set(spec) - required - optional
+            if missing:
+                raise ValueError(
+                    "recursive improver cycle spec is missing: "
+                    + ", ".join(sorted(missing)))
+            if unsupported:
+                raise ValueError(
+                    "recursive improver cycle spec has unsupported fields: "
+                    + ", ".join(sorted(unsupported)))
+            task_active = evolution.active(spec["task_channel"])
+            if task_active["revision"] != spec["task_channel_revision"]:
+                raise ValueError("recursive improver cycle task channel revision is stale")
+            feedback = generation.feedback(spec["task_feedback_bundle_id"])
+            start_fields = {key: spec[key] for key in required | optional if key in spec}
+            start_fields.pop("task_feedback_bundle_id")
+            start_fields["task_agent"] = task_active["package"]
+            start_fields["task_feedback_bundle"] = feedback
+            cycle = cycles.start(**start_fields)
+            if not args.register_only:
+                cycles.resume(cycle["id"], stop_event=_stop_event())
+            return cycles.show(cycle["id"])
         if args.command.startswith("rsi-cycle-"):
             from .tasks.cycles import RSICycleService
             from .tasks.generation import GenerationService
@@ -391,7 +453,10 @@ def _task_failed(command, result):
     if command == "task-benchmark":
         reports = result.get("reports", [])
         return any(report.get("evaluation", {}).get("accepted") is not True for report in reports)
-    if command in {"rsi-cycle-start", "rsi-cycle-resume", "rsi-cycle-recover"}:
+    if command in {
+            "rsi-cycle-start", "rsi-cycle-resume", "rsi-cycle-recover",
+            "rsi-improver-cycle-start", "rsi-improver-cycle-resume",
+            "rsi-improver-cycle-recover"}:
         return (result.get("status") in
                 {"generation_missing", "rejected", "guard_failed", "rolled_back"}
                 or result.get("runner", {}).get("status") in
@@ -561,6 +626,35 @@ def main(argv=None):
     rsi_cycle_recover.add_argument(
         "--confirm-no-external-commit", action="store_true",
         help="Allow retry only after externally confirming the pending action did not commit")
+
+    rsi_improver_cycle_start = sub.add_parser(
+        "rsi-improver-cycle-start",
+        help="Register and normally execute one recoverable recursive-improver cycle")
+    rsi_improver_cycle_start.add_argument("benchmark")
+    rsi_improver_cycle_start.add_argument(
+        "--spec", required=True,
+        help="Recursive-improver cycle JSON object, file path, or @file")
+    rsi_improver_cycle_start.add_argument(
+        "--register-only", action="store_true",
+        help="Persist the frozen cycle without running it")
+    rsi_improver_cycle_resume = sub.add_parser(
+        "rsi-improver-cycle-resume",
+        help="Resume a persisted recursive-improver cycle")
+    rsi_improver_cycle_resume.add_argument("cycle_id")
+    rsi_improver_cycle_resume.add_argument("benchmark")
+    rsi_improver_cycle_show = sub.add_parser(
+        "rsi-improver-cycle-show",
+        help="Show the public recursive-improver cycle projection")
+    rsi_improver_cycle_show.add_argument("cycle_id")
+    rsi_improver_cycle_show.add_argument("benchmark")
+    rsi_improver_cycle_recover = sub.add_parser(
+        "rsi-improver-cycle-recover",
+        help="Recover an interrupted recursive-improver cycle claim")
+    rsi_improver_cycle_recover.add_argument("cycle_id")
+    rsi_improver_cycle_recover.add_argument("benchmark")
+    rsi_improver_cycle_recover.add_argument(
+        "--confirm-no-external-commit", action="store_true",
+        help="Retry only after externally confirming the pending action did not commit")
 
     rsi_study_plan = sub.add_parser(
         "rsi-study-plan", help="Pre-register a paired final-holdout RSI study")

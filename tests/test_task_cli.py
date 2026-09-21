@@ -485,6 +485,110 @@ def test_rsi_cycle_commands_freeze_inputs_run_resume_and_emit_only_public_state(
     assert unresolved["runner"]["status"] == "recovery_required"
 
 
+def test_recursive_improver_cycle_cli_freezes_spec_and_returns_public_projection(
+        monkeypatch, task_service, tmp_path, capsys):
+    calls = []
+    adapter = FakeBenchmarkAdapter()
+    task_service.store = object()
+    task_package = {"id": "A0", "digest": "a" * 64}
+    feedback = {"id": "feedback-1", "record_digest": "f" * 64}
+
+    class FakeEvolution:
+        def __init__(self, service):
+            assert service is task_service
+
+        def active(self, channel):
+            assert channel == "agent"
+            return {"revision": 3, "package": task_package}
+
+    class FakeGeneration:
+        def __init__(self, service, evolution):
+            assert service is task_service and isinstance(evolution, FakeEvolution)
+
+        def feedback(self, identity):
+            assert identity == "feedback-1"
+            return feedback
+
+    class FakeImprovers:
+        def __init__(self, service):
+            assert service is task_service
+            self.store = service.store
+
+    class FakeExecutor:
+        def __init__(self, service, generation, frozen_adapter):
+            assert service is task_service and isinstance(generation, FakeGeneration)
+            assert frozen_adapter is adapter
+
+        def generate_offspring(self, request):
+            return request
+
+        def evaluate_descendant(self, request):
+            return request
+
+    class FakeMeta:
+        def __init__(self, store, generate, evaluate):
+            assert store is task_service.store and callable(generate) and callable(evaluate)
+
+    class FakeGuards:
+        def __init__(self, improvers, generate, evaluate):
+            assert isinstance(improvers, FakeImprovers)
+
+    class FakeCycles:
+        def __init__(self, improvers, meta, guards):
+            assert isinstance(improvers, FakeImprovers)
+
+        def start(self, **kwargs):
+            calls.append(("start", kwargs))
+            return {"id": "recursive-cycle-1"}
+
+        def resume(self, identity, **kwargs):
+            calls.append(("resume", identity, kwargs))
+
+        def show(self, identity):
+            calls.append(("show", identity))
+            return {"schema": "nexgent.recursive-improver-cycle.v1",
+                    "id": identity, "status": "completed", "refs": {}}
+
+    monkeypatch.setattr("nexgent.tasks.evolution.EvolutionService", FakeEvolution)
+    monkeypatch.setattr("nexgent.tasks.generation.GenerationService", FakeGeneration)
+    monkeypatch.setattr("nexgent.tasks.improvers.ImproverService", FakeImprovers)
+    monkeypatch.setattr("nexgent.tasks.meta_evaluation.TaskMetaExecutor", FakeExecutor)
+    monkeypatch.setattr("nexgent.tasks.meta_evaluation.MetaEvaluationService", FakeMeta)
+    monkeypatch.setattr("nexgent.tasks.guards.ImproverGuardService", FakeGuards)
+    monkeypatch.setattr(
+        "nexgent.tasks.recursive_cycles.RecursiveImproverCycleService", FakeCycles)
+    monkeypatch.setattr("nexgent.tasks.tools.task_benchmarks", lambda: {"generic": adapter})
+    spec = {
+        "channel": "recursive", "expected_revision": 2,
+        "generation_ids": ["generation-1"], "decision_ids": [],
+        "task_channel": "agent", "task_channel_revision": 3,
+        "task_feedback_bundle_id": "feedback-1",
+        "task_mutation_policy": {"mutable_components": ["orchestrator"]},
+        "provider": "provider", "model": "model",
+        "development_tasks": [{"id": "development-1"}],
+        "selection_tasks": [{"id": "selection-1"}],
+        "evaluator": {"id": "evaluator-1"},
+        "meta_budget": {"max_nodes": 20},
+        "guard_budget": {"max_nodes": 10},
+        "guard_tasks": [{"id": "guard-1"}],
+        "guard_min_mean_utility": 0.5,
+    }
+    code = cli.main([
+        "--root", str(tmp_path), "rsi-improver-cycle-start", "generic",
+        "--spec", json.dumps(spec),
+    ])
+
+    assert code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output == {"schema": "nexgent.recursive-improver-cycle.v1",
+                      "id": "recursive-cycle-1", "status": "completed", "refs": {}}
+    started = calls[0][1]
+    assert started["task_agent"] is task_package
+    assert started["task_feedback_bundle"] is feedback
+    assert "task_feedback_bundle_id" not in started
+    assert calls[1][0:2] == ("resume", "recursive-cycle-1")
+
+
 @pytest.mark.parametrize("arguments", [
     ["--improver-channel", "recursive"],
     ["--expected-improver-revision", "2"],
