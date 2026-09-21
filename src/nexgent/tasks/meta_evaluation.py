@@ -47,6 +47,10 @@ _LIMIT_KEYS = {
 }
 
 
+class AdmissionConflict(ContractError):
+    """A frozen cycle pointer or durable action claim changed before an effect."""
+
+
 def _copy(value, label="Meta-evaluation value"):
     try:
         encoded = json.dumps(value, ensure_ascii=False, sort_keys=True,
@@ -631,8 +635,10 @@ class MetaEvaluationService:
             selected[arm], aggregates[arm] = choices[0], choices
         return selected, aggregates
 
-    def run(self, plan_id):
+    def run(self, plan_id, *, admission_check=None):
         """Consume a plan once and return its immutable descendant trial."""
+        if admission_check is not None and not callable(admission_check):
+            raise TypeError("admission_check must be callable")
         plan = self.plan(plan_id)
         prior = self._claim(plan_id)
         if prior:
@@ -652,11 +658,14 @@ class MetaEvaluationService:
             request = self._generation_request(plan, row, call_budget)
             try:
                 executor = self._trusted_executor()
-                receipt = TaskMetaExecutor.generate_offspring(executor, _copy(request))
+                receipt = TaskMetaExecutor.generate_offspring(
+                    executor, _copy(request), admission_check=admission_check)
                 result = self._validate_generation(plan, request, receipt)
                 self._admit_episode(seen_episode_ids, result["episode_id"])
                 self._add_usage(totals, arm_totals, row["arm"], result["usage"], plan)
                 descendants[row["arm"]].append(result)
+            except AdmissionConflict:
+                raise
             except Exception as exc:
                 failures.append(self._runner_failure("generation", row, exc, result))
                 break
@@ -674,11 +683,14 @@ class MetaEvaluationService:
                     plan, descendant, task, "development", call_budget)
                 try:
                     executor = self._trusted_executor()
-                    receipt = TaskMetaExecutor.evaluate_descendant(executor, _copy(request))
+                    receipt = TaskMetaExecutor.evaluate_descendant(
+                        executor, _copy(request), admission_check=admission_check)
                     result = self._validate_evaluation(request, receipt)
                     self._admit_episode(seen_episode_ids, result["episode_id"])
                     self._add_usage(totals, arm_totals, row["arm"], result["usage"], plan)
                     development_rows.append(result)
+                except AdmissionConflict:
+                    raise
                 except Exception as exc:
                     failures.append(self._runner_failure("development", row, exc, result))
                     break
@@ -706,11 +718,14 @@ class MetaEvaluationService:
                     plan, chosen[arm], task, "selection", call_budget)
                 try:
                     executor = self._trusted_executor()
-                    receipt = TaskMetaExecutor.evaluate_descendant(executor, _copy(request))
+                    receipt = TaskMetaExecutor.evaluate_descendant(
+                        executor, _copy(request), admission_check=admission_check)
                     result = self._validate_evaluation(request, receipt)
                     self._admit_episode(seen_episode_ids, result["episode_id"])
                     self._add_usage(totals, arm_totals, arm, result["usage"], plan)
                     selection_rows.append(result)
+                except AdmissionConflict:
+                    raise
                 except Exception as exc:
                     failures.append(self._runner_failure("selection", row, exc, result))
                     break
@@ -909,7 +924,19 @@ class TaskMetaExecutor:
         if any(call.get("model") != expected for call in calls):
             raise ContractError("Meta execution used a model outside the frozen requirement")
 
-    def generate_offspring(self, request):
+    @staticmethod
+    def _admission_checkpoint(request, admission_check, boundary):
+        if admission_check is None:
+            return
+        if not callable(admission_check):
+            raise TypeError("admission_check must be callable")
+        admission_check({
+            "kind": request.get("kind"),
+            "binding": _copy(request.get("binding"), "Admission binding"),
+            "boundary": boundary,
+        })
+
+    def generate_offspring(self, request, *, admission_check=None):
         request = _copy(request, "Meta generation request")
         binding = request.get("binding")
         improver = request.get("improver") or {}
@@ -935,7 +962,7 @@ class TaskMetaExecutor:
             request.get("task_mutation_policy"), revision,
             improver_channel=improver_channel,
             expected_improver_revision=expected_improver_revision,
-            budget=request.get("budget"))
+            budget=request.get("budget"), admission_check=admission_check)
         stored = self.generation.generation(result["id"])
         if stored["record_digest"] != result["record_digest"]:
             raise ContractError("Candidate generation record changed after execution")
@@ -971,7 +998,7 @@ class TaskMetaExecutor:
             "improver_registration": deepcopy(result.get("improver_registration")),
         }
 
-    def evaluate_descendant(self, request):
+    def evaluate_descendant(self, request, *, admission_check=None):
         request = _copy(request, "Meta evaluation request")
         self._check_evaluator(request.get("evaluator"))
         task_ref = request.get("task")
@@ -999,13 +1026,16 @@ class TaskMetaExecutor:
             "snapshot": deepcopy(self.snapshot),
             "host_runtime": host_runtime_fingerprint(),
         }
+        self._admission_checkpoint(request, admission_check, "evaluation_create")
         state = self.tasks.create(
             task_ref["objective"], inputs=task_ref.get("inputs"),
             deliverables=task_ref.get("deliverables"), budget=request.get("budget"),
             capabilities=task_ref.get("capabilities"), package=package, context=context,
             constraints=task_ref.get("constraints"), entry=task_ref.get("entry", "execute"),
             benchmark_registration=benchmark_registration)
+        self._admission_checkpoint(request, admission_check, "evaluation_run")
         state = self.tasks.run(state["id"])
+        self._admission_checkpoint(request, admission_check, "evaluation_evaluate")
         evaluated = self.tasks.evaluate(
             state["id"], self.adapter, task_ref, snapshot=deepcopy(self.snapshot))
         report = evaluated["evaluation"]

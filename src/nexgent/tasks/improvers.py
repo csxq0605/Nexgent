@@ -122,6 +122,12 @@ class ImproverService:
                     id TEXT PRIMARY KEY, data TEXT NOT NULL, digest TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS task_improver_generations(
                     id TEXT PRIMARY KEY, data TEXT NOT NULL, digest TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS task_improver_generation_claims(
+                    invocation_digest TEXT PRIMARY KEY,
+                    cycle_id TEXT NOT NULL, action_id TEXT NOT NULL UNIQUE,
+                    data TEXT NOT NULL, token_digest TEXT NOT NULL,
+                    status TEXT NOT NULL, generation_id TEXT UNIQUE,
+                    terminal_record_digest TEXT, updated REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS task_improver_candidates(
                     id TEXT PRIMARY KEY, data TEXT NOT NULL, digest TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS task_improver_decisions(
@@ -399,13 +405,11 @@ class ImproverService:
             "patch_digest": patch_digest, "candidate_id": None,
             "candidate_package_id": None, "completed_at": time.time(),
         }
-        result = self._insert("task_improver_generations", record)
-        self._event(base["channel"], "improver_generation_missing", {
+        return self._store_generation_terminal(
+            record, "improver_generation_missing", {
             "generation_id": base["id"], "feedback_id": base["feedback_id"],
             "episode_id": record["episode_id"], "reason": record["reason"],
-            "record_digest": result["record_digest"],
         })
-        return result
 
     @staticmethod
     def _budget(version, requested):
@@ -428,8 +432,146 @@ class ImproverService:
             result[key] = value
         return result
 
-    def generate(self, channel, feedback_id, expected_revision, *, budget=None, stop_event=None):
+    @staticmethod
+    def _invocation(value):
+        if value is None:
+            return None
+        value = _copy(value, "Improver generation invocation")
+        expected = {"schema", "cycle_id", "action_id", "nonce",
+                    "started_at", "intent_digest"}
+        if (not isinstance(value, dict) or set(value) != expected
+                or value.get("schema") != "nexgent.recursive-cycle-invocation.v1"
+                or any(not isinstance(value.get(key), str) or not value[key]
+                       for key in ("cycle_id", "action_id", "nonce", "intent_digest"))
+                or type(value.get("started_at")) not in {int, float}
+                or value["started_at"] <= 0):
+            raise ContractError("Improver generation invocation is invalid")
+        return value
+
+    @staticmethod
+    def _claim_token(value):
+        if not isinstance(value, str) or not value:
+            raise ContractError("Improver generation claim token is invalid")
+        return value
+
+    def reserve_generation_invocation(self, db, invocation, claim_token):
+        """Reserve one cycle invocation inside the caller's open transaction."""
+        invocation = self._invocation(invocation)
+        claim_token = self._claim_token(claim_token)
+        invocation_digest = digest(invocation)
+        try:
+            db.execute(
+                "INSERT INTO task_improver_generation_claims VALUES(?,?,?,?,?,?,?,?,?)", (
+                    invocation_digest, invocation["cycle_id"], invocation["action_id"],
+                    self._encode(invocation), digest(claim_token), "reserved",
+                    None, None, time.time()))
+        except Exception as exc:
+            raise ContractError(
+                "Recursive generation invocation is already reserved") from exc
+        return invocation_digest
+
+    def _consume_generation_invocation(
+            self, invocation, claim_token, generation_id):
+        if invocation is None:
+            if claim_token is not None:
+                raise ContractError("A generation claim token requires an invocation")
+            return None
+        claim_token = self._claim_token(claim_token)
+        invocation_digest = digest(invocation)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT data,token_digest,status,generation_id,terminal_record_digest "
+                "FROM task_improver_generation_claims WHERE invocation_digest=?",
+                (invocation_digest,)).fetchone()
+            if (row is None or json.loads(row[0]) != invocation
+                    or row[1] != digest(claim_token)):
+                raise ContractError(
+                    "Recursive generation invocation has no matching reserved claim")
+            if row[2] == "completed" and row[3] and row[4]:
+                return row[3]
+            if row[2] != "reserved" or row[3] is not None or row[4] is not None:
+                raise ContractError("Recursive generation invocation is already running")
+            updated = db.execute(
+                "UPDATE task_improver_generation_claims SET status='running',"
+                "generation_id=?,updated=? WHERE invocation_digest=? "
+                "AND status='reserved' AND generation_id IS NULL",
+                (generation_id, time.time(), invocation_digest)).rowcount
+            if updated != 1:
+                raise ContractError("Recursive generation invocation claim was lost")
+        return None
+
+    def generation_for_invocation(self, invocation):
+        invocation = self._invocation(invocation)
+        invocation_digest = digest(invocation)
+        with self.store.connect() as db:
+            row = db.execute(
+                "SELECT data,status,generation_id,terminal_record_digest "
+                "FROM task_improver_generation_claims WHERE invocation_digest=?",
+                (invocation_digest,)).fetchone()
+        if row is None:
+            return None
+        if json.loads(row[0]) != invocation:
+            raise ContractError("Recursive generation invocation claim changed")
+        if row[1] != "completed":
+            return None
+        if not row[2] or not row[3]:
+            raise ContractError("Completed generation invocation claim is incomplete")
+        generation = self.generation(row[2])
+        if (generation["record_digest"] != row[3]
+                or generation.get("invocation") != invocation
+                or generation.get("invocation_digest") != invocation_digest):
+            raise ContractError("Generation invocation claim terminal evidence changed")
+        return generation
+
+    def discard_generation_invocation(self, invocation, claim_token):
+        invocation = self._invocation(invocation)
+        claim_token = self._claim_token(claim_token)
+        invocation_digest = digest(invocation)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            deleted = db.execute(
+                "DELETE FROM task_improver_generation_claims "
+                "WHERE invocation_digest=? AND token_digest=? "
+                "AND status IN ('reserved','running') AND terminal_record_digest IS NULL",
+                (invocation_digest, digest(claim_token))).rowcount
+            if deleted != 1:
+                raise ContractError(
+                    "Recursive generation invocation cannot be discarded")
+
+    def _store_generation_terminal(self, record, event_kind, event_content):
+        encoded, record_digest = self._encode(record), digest(record)
+        invocation = record.get("invocation")
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute(
+                "SELECT data,digest FROM task_improver_generations WHERE id=?",
+                (record["id"],)).fetchone()
+            if previous and previous != (encoded, record_digest):
+                raise ContractError("Cannot overwrite an immutable improver record")
+            db.execute(
+                "INSERT OR IGNORE INTO task_improver_generations VALUES(?,?,?)",
+                (record["id"], encoded, record_digest))
+            if invocation is not None:
+                updated = db.execute(
+                    "UPDATE task_improver_generation_claims "
+                    "SET status='completed',terminal_record_digest=?,updated=? "
+                    "WHERE invocation_digest=? AND status='running' AND generation_id=?",
+                    (record_digest, time.time(), digest(invocation), record["id"])).rowcount
+                if updated != 1:
+                    raise ContractError(
+                        "Recursive generation terminal record lost its invocation claim")
+            self._append_event(
+                db, record["channel"], event_kind,
+                {**event_content, "record_digest": record_digest})
+        return {**deepcopy(record), "record_digest": record_digest}
+
+    def generate(self, channel, feedback_id, expected_revision, *, budget=None,
+                 stop_event=None, invocation=None, invocation_claim_token=None,
+                 admission_check=None):
         """Actually run active R on its own source and admit a valid R child."""
+        if admission_check is not None and not callable(admission_check):
+            raise TypeError("admission_check must be callable")
         active, feedback = self.active(channel), self.feedback(feedback_id)
         if (feedback["channel"] != channel
                 or type(expected_revision) is not int
@@ -442,7 +584,12 @@ class ImproverService:
         policy = version["mutation_policy"]
         envelope = version["capability_envelope"]
         execution_budget = self._budget(version, budget)
+        invocation = self._invocation(invocation)
         generation_id = _id("improver-generation")
+        completed_generation_id = self._consume_generation_invocation(
+            invocation, invocation_claim_token, generation_id)
+        if completed_generation_id is not None:
+            return self.generation(completed_generation_id)
         base = {
             "schema": IMPROVER_GENERATION_SCHEMA, "id": generation_id,
             "channel": channel, "channel_revision": active["revision"],
@@ -454,6 +601,8 @@ class ImproverService:
             "capability_envelope_digest": version["capability_envelope_digest"],
             "outer_budget": execution_budget,
             "outer_budget_digest": digest(execution_budget), "created_at": time.time(),
+            "invocation": invocation,
+            "invocation_digest": digest(invocation) if invocation is not None else None,
         }
         components = [{
             "path": path, "digest": parent["component_digests"].get(path),
@@ -463,7 +612,17 @@ class ImproverService:
                             if key != "record_digest"}
         inputs = {"meta_feedback": visible_feedback, "self_components": components,
                   "mutation_policy": deepcopy(policy)}
+        def admit(boundary):
+            if admission_check is not None:
+                admission_check({
+                    "kind": "generate_recursive_improver_candidate",
+                    "boundary": boundary,
+                    "channel": channel,
+                    "expected_revision": expected_revision,
+                })
+
         episode = None
+        admit("recursive_generation_create")
         try:
             episode = self.tasks.create(
                 "Generate one evidence-bound patch for the active improver itself",
@@ -472,9 +631,16 @@ class ImproverService:
                 budget=execution_budget, capabilities=list(envelope["tools"]), package=parent,
                 context={"split": "development", "split_role": "development",
                          "rsi_role": "recursive_improver_generation", "channel": channel,
-                         "channel_revision": active["revision"], "feedback_id": feedback["id"]},
+                         "channel_revision": active["revision"], "feedback_id": feedback["id"],
+                         "recursive_cycle_invocation_digest": base["invocation_digest"]},
                 constraints={"allowed_effects": list(envelope["allowed_effects"]),
                              "wall_seconds": 1200}, entry="improve")
+        except Exception as exc:
+            if episode is not None:
+                episode = self.tasks.get_private(episode["id"])
+            return self._generation_missing(base, f"{type(exc).__name__}: {exc}", episode)
+        admit("recursive_generation_run")
+        try:
             episode = self.tasks.run(episode["id"], stop_event=stop_event)
         except Exception as exc:
             if episode is not None:
@@ -568,23 +734,26 @@ class ImproverService:
             "candidate_package_digest": child["digest"],
             "version_record_digest": archived["record_digest"], "completed_at": time.time(),
         }
-        result = self._insert("task_improver_generations", record)
-        self._event(channel, "improver_candidate_generated", {
+        return self._store_generation_terminal(
+            record, "improver_candidate_generated", {
             "generation_id": generation_id, "feedback_id": feedback["id"],
             "episode_id": episode["id"], "parent_improver_id": parent["id"],
             "candidate_id": candidate_id, "candidate_package_id": child["id"],
-            "patch_digest": patch_digest, "record_digest": result["record_digest"],
+            "patch_digest": patch_digest,
         })
-        return result
 
     def generation(self, generation_id):
         return self._get("task_improver_generations", generation_id)
 
     def generate_candidate(self, channel, feedback_id, expected_revision, *,
-                           budget=None, stop_event=None):
+                           budget=None, stop_event=None, invocation=None,
+                           invocation_claim_token=None, admission_check=None):
         """Named P4 API alias for :meth:`generate`."""
         return self.generate(channel, feedback_id, expected_revision,
-                             budget=budget, stop_event=stop_event)
+                             budget=budget, stop_event=stop_event,
+                             invocation=invocation,
+                             invocation_claim_token=invocation_claim_token,
+                             admission_check=admission_check)
 
     def candidate(self, candidate_id):
         return self._get("task_improver_candidates", candidate_id)

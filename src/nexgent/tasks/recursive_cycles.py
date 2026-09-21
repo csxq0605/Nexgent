@@ -18,7 +18,7 @@ import uuid
 
 from ..kernel.programs import digest
 from .evolution import active_package_registration
-from .meta_evaluation import MetaEvaluationPolicy
+from .meta_evaluation import AdmissionConflict, MetaEvaluationPolicy
 from .packages import verify_package
 from .tools import ContractError
 
@@ -36,6 +36,20 @@ _TRANSITIONS = {
     "guard_planned": frozenset({"promoted"}),
     "promoted": frozenset({"completed", "rolled_back"}),
 }
+_PUBLIC_REF_TYPES = {
+    "improver_feedback_id": str, "improver_generation_id": str,
+    "candidate_id": str, "r1_package_id": str, "r1_package_digest": str,
+    "meta_plan_id": str, "meta_trial_id": str, "meta_evaluation_id": str,
+    "improver_decision_id": str, "guard_plan_id": str,
+    "promoted_revision": int, "promoted_package_id": str,
+    "guard_action_id": str, "guard_run_id": str,
+}
+_PUBLIC_RESULT_TYPES = {
+    "outcome": frozenset({"generation_missing", "rejected", "completed", "rolled_back"}),
+    "meta_evaluation_id": str, "degraded": bool, "rolled_back": bool,
+    "active_revision": int, "active_package_id": str,
+    "active_package_digest": str,
+}
 
 
 def _copy(value, label="Recursive cycle value"):
@@ -43,6 +57,26 @@ def _copy(value, label="Recursive cycle value"):
         return json.loads(json.dumps(value, ensure_ascii=False, allow_nan=False))
     except (TypeError, ValueError, RecursionError) as exc:
         raise ContractError(f"{label} must be finite JSON: {str(exc)[:500]}") from None
+
+
+def _public_scalars(value, fields):
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for key, expected in fields.items():
+        if key not in value:
+            continue
+        item = value[key]
+        valid = (
+            (expected is str and isinstance(item, str) and bool(item))
+            or (expected is int and type(item) is int and item >= 0)
+            or (expected is bool and type(item) is bool)
+            or (isinstance(expected, frozenset)
+                and isinstance(item, str) and item in expected)
+        )
+        if valid:
+            result[key] = item
+    return result
 
 
 def _identifier(value, label):
@@ -66,6 +100,9 @@ def public_recursive_cycle(record):
     pending = record.get("pending_action") or {}
     workload = record.get("workload") or {}
     guard = record.get("guard") or {}
+    refs = record.get("refs") if isinstance(record.get("refs"), dict) else {}
+    raw_result = record.get("result")
+    result = raw_result if isinstance(raw_result, dict) else {}
     return {
         "schema": record.get("schema"),
         "id": record.get("id"),
@@ -113,8 +150,9 @@ def public_recursive_cycle(record):
             "min_mean_utility": guard.get("min_mean_utility"),
             "min_success_rate": guard.get("min_success_rate"),
         },
-        "refs": _copy(record.get("refs") or {}),
-        "result": _copy(record.get("result")) if record.get("result") is not None else None,
+        "refs": _public_scalars(refs, _PUBLIC_REF_TYPES),
+        "result": (_public_scalars(result, _PUBLIC_RESULT_TYPES)
+                   if raw_result is not None else None),
         "runner": {"status": runner.get("status"), "error_type": runner.get("error_type")},
         "pending_action": pending.get("stage"),
     }
@@ -197,7 +235,9 @@ class RecursiveImproverCycleService:
     def show(self, cycle_id):
         return public_recursive_cycle(self.get(cycle_id))
 
-    def _replace(self, old, changed, kind, content):
+    def _replace(self, old, changed, kind, content, *, transaction_hook=None):
+        if transaction_hook is not None and not callable(transaction_hook):
+            raise TypeError("transaction_hook must be callable")
         body = deepcopy(changed)
         body.pop("record_digest", None)
         body["revision"] = old["revision"] + 1
@@ -213,6 +253,8 @@ class RecursiveImproverCycleService:
                     old["record_digest"])).rowcount
             if updated != 1:
                 raise ContractError("Recursive improver cycle changed concurrently")
+            if transaction_hook is not None:
+                transaction_hook(db, body)
             self._append_event(db, body["id"], kind, content)
         return {**body, "record_digest": record_digest}
 
@@ -366,7 +408,7 @@ class RecursiveImproverCycleService:
     def _claim(self, cycle_id):
         old = self.get(cycle_id)
         if old["status"] in _TERMINAL:
-            return old, None
+            return self._finalize_terminal(old), None
         if old.get("pending_action") is not None or old.get("runner", {}).get("status") in {
                 "running", "recovery_required"}:
             raise ContractError("Recursive improver cycle requires recover() before resume")
@@ -378,8 +420,27 @@ class RecursiveImproverCycleService:
         return self._replace(old, changed, "cycle_claimed", {
             "token_digest": digest(token)}), token
 
+    def _finalize_terminal(self, record):
+        runner = record.get("runner") or {}
+        if record.get("pending_action") is not None:
+            raise ContractError("Terminal recursive cycle retains a pending action")
+        if runner.get("status") == "completed" and runner.get("token") is None:
+            return record
+        changed = deepcopy(record)
+        changed["runner"] = {"status": "completed", "token": None,
+                             "updated_at": time.time(), "last_error": None,
+                             "error_type": None}
+        return self._replace(record, changed, "terminal_claim_reconciled", {
+            "status": record["status"],
+            "previous_runner_status": runner.get("status")})
+
     def _release(self, cycle_id, token, error=None):
         current = self.get(cycle_id)
+        if (current["status"] in _TERMINAL
+                and current.get("runner", {}).get("status") == "completed"
+                and current.get("runner", {}).get("token") is None
+                and current.get("pending_action") is None):
+            return current
         if current.get("runner", {}).get("token") != token:
             raise ContractError("Recursive improver cycle runner lost its claim")
         changed = deepcopy(current)
@@ -400,10 +461,69 @@ class RecursiveImproverCycleService:
         if current.get("pending_action") is not None:
             raise ContractError("Recursive improver cycle already has a pending action")
         changed = deepcopy(current)
-        changed["pending_action"] = {"stage": current["status"], "started_at": time.time()}
+        started_at = time.time()
+        action_id = "recursive-action-" + uuid.uuid4().hex
+        nonce = uuid.uuid4().hex
+        changed["pending_action"] = {
+            "stage": current["status"], "action_id": action_id,
+            "nonce": nonce, "started_at": started_at,
+        }
+        if current["status"] == "feedback_captured":
+            changed["pending_action"]["generation_claim_token"] = uuid.uuid4().hex
+        changed["pending_action"]["intent_digest"] = digest(
+            self._action_intent(current, changed["pending_action"]))
         changed["runner"]["updated_at"] = time.time()
+        transaction_hook = None
+        if current["status"] == "feedback_captured":
+            invocation = self._generation_invocation(changed)
+            claim_token = changed["pending_action"]["generation_claim_token"]
+
+            def reserve_invocation(db, _body):
+                self.improvers.reserve_generation_invocation(
+                    db, invocation, claim_token)
+
+            transaction_hook = reserve_invocation
         return self._replace(current, changed, "cycle_action_started", {
-            "stage": current["status"]})
+            "stage": current["status"], "action_id": action_id,
+            "intent_digest": changed["pending_action"]["intent_digest"]},
+            transaction_hook=transaction_hook)
+
+    @staticmethod
+    def _action_intent(record, action):
+        return {
+            "cycle_id": record["id"], "stage": action.get("stage"),
+            "action_id": action.get("action_id"), "nonce": action.get("nonce"),
+            "started_at": action.get("started_at"), "channel": record["channel"],
+            "generation_claim_token_digest": (
+                digest(action["generation_claim_token"])
+                if action.get("generation_claim_token") is not None else None),
+            "expected_revision": record["channel_revision"],
+            "r0_package_id": record["r0_package_id"],
+            "r0_package_digest": record["r0_package_digest"],
+            "feedback_id": record["refs"].get("improver_feedback_id"),
+            "self_generation_budget": record["workload"]["self_generation_budget"],
+            "mutation_policy_digest": record["improver_mutation_policy_digest"],
+            "capability_envelope_digest": record[
+                "improver_capability_envelope_digest"],
+        }
+
+    @staticmethod
+    def _generation_invocation(record):
+        action = record.get("pending_action") or {}
+        required = ("action_id", "nonce", "started_at", "intent_digest",
+                    "generation_claim_token")
+        if action.get("stage") != "feedback_captured" or any(
+                action.get(key) is None for key in required):
+            raise ContractError("Recursive generation action claim is incomplete")
+        if action["intent_digest"] != digest(
+                RecursiveImproverCycleService._action_intent(record, action)):
+            raise ContractError("Recursive generation action intent changed")
+        return {
+            "schema": "nexgent.recursive-cycle-invocation.v1",
+            "cycle_id": record["id"], "action_id": action["action_id"],
+            "nonce": action["nonce"], "started_at": action["started_at"],
+            "intent_digest": action["intent_digest"],
+        }
 
     def _checkpoint(self, old, status, *, refs=None, result=None, recovery=False):
         if status not in _TRANSITIONS.get(old["status"], frozenset()):
@@ -415,9 +535,14 @@ class RecursiveImproverCycleService:
             changed["refs"].update(_copy(refs, "Recursive cycle evidence references"))
         if result is not None:
             changed["result"] = _copy(result, "Recursive cycle result")
-        if recovery:
+        if status in _TERMINAL:
             changed["runner"] = {
-                "status": "completed" if status in _TERMINAL else "paused",
+                "status": "completed", "token": None, "updated_at": time.time(),
+                "last_error": None, "error_type": None,
+            }
+        elif recovery:
+            changed["runner"] = {
+                "status": "paused",
                 "token": None, "updated_at": time.time(),
                 "last_error": None, "error_type": None,
             }
@@ -450,7 +575,11 @@ class RecursiveImproverCycleService:
                 record["channel"], refs["improver_feedback_id"],
                 record["channel_revision"],
                 budget=record["workload"]["self_generation_budget"],
-                stop_event=stop_event)
+                stop_event=stop_event,
+                invocation=self._generation_invocation(record),
+                invocation_claim_token=record["pending_action"].get(
+                    "generation_claim_token"),
+                admission_check=lambda _admission: self._verify_action_admission(record))
             generation_refs = {"improver_generation_id": generation["id"]}
             if generation["status"] != "generated":
                 return self._advance(
@@ -490,7 +619,9 @@ class RecursiveImproverCycleService:
             return self._advance(record["id"], token, status, "meta_planned",
                                  refs={"meta_plan_id": plan["id"]})
         if status == "meta_planned":
-            trial = self.meta.run(refs["meta_plan_id"])
+            trial = self.meta.run(
+                refs["meta_plan_id"],
+                admission_check=lambda _admission: self._verify_action_admission(record))
             return self._advance(record["id"], token, status, "meta_run",
                                  refs={"meta_trial_id": trial["id"]})
         if status == "meta_run":
@@ -533,7 +664,9 @@ class RecursiveImproverCycleService:
                 refs={"promoted_revision": promoted["revision"],
                       "promoted_package_id": promoted["package_id"]})
         if status == "promoted":
-            action = self.guards.run(refs["guard_plan_id"])
+            action = self.guards.run(
+                refs["guard_plan_id"],
+                admission_check=lambda _admission: self._verify_action_admission(record))
             final = "rolled_back" if action["rolled_back"] else "completed"
             return self._advance(
                 record["id"], token, status, final,
@@ -562,6 +695,18 @@ class RecursiveImproverCycleService:
                         record["r0_package_digest"])
         if (active["revision"], active["package_id"], active["package_digest"]) != expected:
             raise ContractError("Recursive cycle improver channel changed")
+
+    def _verify_action_admission(self, claimed):
+        current = self.get(claimed["id"])
+        if (current.get("pending_action") != claimed.get("pending_action")
+                or current.get("runner", {}).get("token")
+                != claimed.get("runner", {}).get("token")):
+            raise AdmissionConflict(
+                "Recursive cycle action claim changed before admission")
+        try:
+            self._verify_frozen_pointers(current)
+        except ContractError as exc:
+            raise AdmissionConflict(str(exc)) from None
 
     def resume(self, cycle_id, *, stop_event=None, max_steps=None):
         """Run from the latest durable checkpoint through completion or a step bound."""
@@ -610,15 +755,27 @@ class RecursiveImproverCycleService:
 
     def _find_generation(self, record):
         feedback_id = record["refs"].get("improver_feedback_id")
-        for item in self._table_records("task_improver_generations"):
-            if (item.get("channel") == record["channel"]
-                    and item.get("channel_revision") == record["channel_revision"]
-                    and item.get("parent_improver_id") == record["r0_package_id"]
-                    and item.get("parent_improver_digest") == record["r0_package_digest"]
-                    and item.get("feedback_id") == feedback_id
-                    and item.get("status") in {"generated", "missing"}):
-                return item
-        return None
+        invocation = self._generation_invocation(record)
+        expected_budget = record["workload"]["self_generation_budget"]
+        item = self.improvers.generation_for_invocation(invocation)
+        if item is None:
+            return None
+        if not (item.get("channel") == record["channel"]
+                and item.get("channel_revision") == record["channel_revision"]
+                and item.get("parent_improver_id") == record["r0_package_id"]
+                and item.get("parent_improver_digest") == record["r0_package_digest"]
+                and item.get("feedback_id") == feedback_id
+                and item.get("outer_budget") == expected_budget
+                and item.get("outer_budget_digest") == digest(expected_budget)
+                and item.get("mutation_policy_digest")
+                == record["improver_mutation_policy_digest"]
+                and item.get("capability_envelope_digest")
+                == record["improver_capability_envelope_digest"]
+                and item.get("created_at", 0) >= invocation["started_at"]
+                and item.get("status") in {"generated", "missing"}):
+            raise ContractError(
+                "Recursive generation claim terminal evidence violates its frozen intent")
+        return item
 
     def _plan_matches(self, plan, record):
         refs, workload = record["refs"], record["workload"]
@@ -816,7 +973,7 @@ class RecursiveImproverCycleService:
             raise TypeError("confirm_no_external_commit must be boolean")
         old = self.get(cycle_id)
         if old["status"] in _TERMINAL:
-            return old
+            return self._finalize_terminal(old)
         pending = old.get("pending_action")
         if pending is None:
             changed = deepcopy(old)

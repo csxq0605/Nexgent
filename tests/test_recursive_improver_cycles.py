@@ -11,11 +11,15 @@ from nexgent.tasks.generation import GenerationService
 from nexgent.tasks.guards import ImproverGuardService
 from nexgent.tasks.improvers import ImproverService
 from nexgent.tasks.meta_evaluation import (
+    AdmissionConflict,
     MetaEvaluationPolicy,
     MetaEvaluationService,
     TaskMetaExecutor,
 )
-from nexgent.tasks.recursive_cycles import RecursiveImproverCycleService
+from nexgent.tasks.recursive_cycles import (
+    RecursiveImproverCycleService,
+    public_recursive_cycle,
+)
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.tools import ContractError, ToolRegistry
 
@@ -85,7 +89,21 @@ def prepared_cycle(tmp_path):
     return tasks, evolution, improvers, meta, guards, cycles, cycle, r0
 
 
-def test_recursive_cycle_resumes_all_stages_and_guard_rolls_back(tmp_path):
+def drift_task_channel(tasks):
+    with tasks.store.connect() as db:
+        row = db.execute(
+            "SELECT revision,data FROM task_package_channels WHERE name='agent'").fetchone()
+        state = json.loads(row[1])
+        state["revision"] = row[0] + 1
+        db.execute(
+            "UPDATE task_package_channels SET revision=?,data=? WHERE name='agent'",
+            (state["revision"], json.dumps(
+                state, ensure_ascii=False, sort_keys=True,
+                separators=(",", ":"), allow_nan=False)))
+
+
+def test_recursive_cycle_resumes_all_stages_and_guard_rolls_back(
+        tmp_path, monkeypatch):
     tasks, evolution, improvers, meta, guards, cycles, cycle, r0 = prepared_cycle(tmp_path)
 
     first = cycles.resume(cycle["id"], max_steps=3)
@@ -96,15 +114,51 @@ def test_recursive_cycle_resumes_all_stages_and_guard_rolls_back(tmp_path):
     }
 
     restored = RecursiveImproverCycleService(improvers, meta, guards)
-    terminal = restored.resume(cycle["id"])
+    promoted = restored.resume(cycle["id"], max_steps=5)
+    assert promoted["status"] == "promoted"
+
+    original_release = restored._release
+    lost_release = {"done": False}
+
+    def lose_terminal_release(cycle_id, token, error=None):
+        current = restored.get(cycle_id)
+        if (current["status"] in {"completed", "rolled_back"}
+                and error is None and not lost_release["done"]):
+            lost_release["done"] = True
+            raise RuntimeError("lost terminal runner release")
+        return original_release(cycle_id, token, error)
+
+    monkeypatch.setattr(restored, "_release", lose_terminal_release)
+    with pytest.raises(RuntimeError, match="lost terminal runner release"):
+        restored.resume(cycle["id"])
+    stuck = restored.get(cycle["id"])
+    assert stuck["status"] == "rolled_back"
+    assert stuck["runner"]["status"] == "completed"
+    assert stuck["runner"]["token"] is None
+
+    monkeypatch.setattr(restored, "_release", original_release)
+    terminal = restored.recover(cycle["id"])
     assert terminal["status"] == "rolled_back"
+    assert terminal["runner"]["status"] == "completed"
+    interrupted_again = json.loads(json.dumps(terminal))
+    interrupted_again.pop("record_digest")
+    interrupted_again["runner"] = {
+        "status": "running", "token": "orphaned-terminal-token",
+        "updated_at": terminal["updated_at"], "last_error": None,
+        "error_type": None,
+    }
+    restored._replace(
+        terminal, interrupted_again, "test_terminal_interruption", {})
+    terminal = restored.resume(cycle["id"])
+    assert terminal["runner"]["status"] == "completed"
     assert terminal["result"]["degraded"] is True
     assert terminal["result"]["rolled_back"] is True
     assert terminal["result"]["active_package_id"] == r0["id"]
     assert improvers.active("recursive")["revision"] == 2
     assert improvers.active("recursive")["package_id"] == r0["id"]
     assert meta.trial(terminal["refs"]["meta_trial_id"])["measurement_complete"] is True
-    assert guards.action(terminal["refs"]["guard_action_id"])["rolled_back"] is True
+    guard_action = guards.action(terminal["refs"]["guard_action_id"])
+    assert guard_action["rolled_back"] is True
 
     event_count = len(restored.events(cycle["id"]))
     assert restored.resume(cycle["id"]) == terminal
@@ -121,6 +175,22 @@ def test_recursive_cycle_resumes_all_stages_and_guard_rolls_back(tmp_path):
     assert '"task_mutation_policy":' not in serialized
     assert R0_SOURCE not in serialized and R1_SOURCE not in serialized
     assert "MUST_NOT_ENTER_IMPROVER_INPUT" not in serialized
+    injected = public_recursive_cycle({
+        **terminal,
+        "refs": {**terminal["refs"], "future_private_ref": "secret-ref"},
+        "result": {**terminal["result"], "future_private_result": "secret-result"},
+    })
+    assert "secret-ref" not in json.dumps(injected)
+    assert "secret-result" not in json.dumps(injected)
+    nested = public_recursive_cycle({
+        **terminal,
+        "refs": {**terminal["refs"], "candidate_id": {"source": "secret-source"}},
+        "result": {**terminal["result"], "outcome": {"evaluator": "secret-evaluator"}},
+    })
+    assert "secret-source" not in json.dumps(nested)
+    assert "secret-evaluator" not in json.dumps(nested)
+    assert "candidate_id" not in nested["refs"]
+    assert "outcome" not in nested["result"]
 
 
 def test_recursive_cycle_reconciles_completed_meta_run_without_episode_replay(
@@ -179,8 +249,15 @@ def test_recursive_cycle_reconciles_terminal_self_generation_without_replay(
     with pytest.raises(RuntimeError, match="lost generation checkpoint"):
         cycles.resume(cycle["id"])
     episode_count = len(tasks.list())
+    pending = cycles.get(cycle["id"])["pending_action"]
     generations = cycles._table_records("task_improver_generations")
     assert len(generations) == 1 and generations[0]["status"] == "generated"
+    assert generations[0]["invocation"] == {
+        "schema": "nexgent.recursive-cycle-invocation.v1",
+        "cycle_id": cycle["id"], "action_id": pending["action_id"],
+        "nonce": pending["nonce"], "started_at": pending["started_at"],
+        "intent_digest": pending["intent_digest"],
+    }
 
     recovered = cycles.recover(cycle["id"])
     assert recovered["status"] == "generated"
@@ -193,3 +270,94 @@ def test_recursive_cycle_reconciles_terminal_self_generation_without_replay(
     assert planned["refs"]["improver_generation_id"] == generations[0]["id"]
     assert len([item for item in cycles._table_records("task_improver_generations")
                 if item["feedback_id"] == captured["refs"]["improver_feedback_id"]]) == 1
+
+
+def test_recovery_does_not_claim_foreign_generation_with_same_feedback(tmp_path):
+    tasks, evolution, improvers, meta, guards, cycles, cycle, r0 = prepared_cycle(tmp_path)
+    captured = cycles.resume(cycle["id"], max_steps=1)
+    foreign = improvers.generate_candidate(
+        "recursive", captured["refs"]["improver_feedback_id"], 0,
+        budget={"max_nodes": 19})
+    assert foreign["status"] == "generated"
+    assert foreign["invocation"] is None
+    assert foreign["outer_budget"] != cycle["workload"]["self_generation_budget"]
+
+    claimed, token = cycles._claim(cycle["id"])
+    cycles._begin_action(cycle["id"], token)
+    cycles._release(cycle["id"], token, error=RuntimeError("simulated loss"))
+    recovered = cycles.recover(cycle["id"])
+    assert recovered["status"] == "feedback_captured"
+    assert recovered["runner"]["status"] == "recovery_required"
+    assert "improver_generation_id" not in recovered["refs"]
+
+
+def test_reserved_invocation_rejects_copied_call_and_replays_terminal_result(tmp_path):
+    tasks, evolution, improvers, meta, guards, cycles, cycle, r0 = prepared_cycle(tmp_path)
+    captured = cycles.resume(cycle["id"], max_steps=1)
+    claimed, token = cycles._claim(cycle["id"])
+    action = cycles._begin_action(cycle["id"], token)
+    invocation = cycles._generation_invocation(action)
+    before = len(tasks.list())
+
+    with pytest.raises(ContractError, match="claim token"):
+        improvers.generate_candidate(
+            "recursive", captured["refs"]["improver_feedback_id"], 0,
+            budget=cycle["workload"]["self_generation_budget"],
+            invocation=invocation)
+    assert len(tasks.list()) == before
+
+    claim_token = action["pending_action"]["generation_claim_token"]
+    first = improvers.generate_candidate(
+        "recursive", captured["refs"]["improver_feedback_id"], 0,
+        budget=cycle["workload"]["self_generation_budget"],
+        invocation=invocation, invocation_claim_token=claim_token)
+    after_first = len(tasks.list())
+    replay = improvers.generate_candidate(
+        "recursive", captured["refs"]["improver_feedback_id"], 0,
+        budget=cycle["workload"]["self_generation_budget"],
+        invocation=invocation, invocation_claim_token=claim_token)
+    assert replay == first
+    assert len(tasks.list()) == after_first
+
+    cycles._release(cycle["id"], token, error=RuntimeError("simulated loss"))
+    recovered = cycles.recover(cycle["id"])
+    assert recovered["status"] == "generated"
+    assert recovered["refs"]["improver_generation_id"] == first["id"]
+
+
+def test_meta_admission_conflict_between_create_and_run_is_not_measurement(
+        tmp_path, monkeypatch):
+    tasks, evolution, improvers, meta, guards, cycles, cycle, r0 = prepared_cycle(tmp_path)
+    planned = cycles.resume(cycle["id"], max_steps=3)
+    before = len(tasks.list())
+    original_create = tasks.create
+    target = {"id": None}
+
+    def create_then_drift(*args, **kwargs):
+        state = original_create(*args, **kwargs)
+        if (target["id"] is None
+                and (kwargs.get("context") or {}).get("rsi_role")
+                == "improver_descendant_evaluation"):
+            target["id"] = state["id"]
+            drift_task_channel(tasks)
+        return state
+
+    monkeypatch.setattr(tasks, "create", create_then_drift)
+    with pytest.raises(AdmissionConflict, match="A0 changed"):
+        cycles.resume(cycle["id"], max_steps=1)
+
+    interrupted = cycles.get(cycle["id"])
+    assert interrupted["status"] == "meta_planned"
+    assert interrupted["pending_action"]["stage"] == "meta_planned"
+    assert interrupted["runner"]["status"] == "paused"
+    created = tasks.get_private(target["id"])
+    assert created["status"] != "completed"
+    assert created.get("evaluation") is None
+    with tasks.store.connect() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM task_improver_meta_trials WHERE "
+            "json_extract(data,'$.plan_id')=?",
+            (planned["refs"]["meta_plan_id"],)).fetchone()[0] == 0
+    # Two valid generation Episodes and one valid evaluation create occurred;
+    # the invalid run/evaluate boundaries did not execute.
+    assert len(tasks.list()) == before + 3

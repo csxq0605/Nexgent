@@ -9,6 +9,7 @@ import time
 
 from ..kernel.programs import digest
 from .meta_evaluation import (
+    AdmissionConflict,
     EVALUATION_RECEIPT_SCHEMA,
     GENERATION_RECEIPT_SCHEMA,
     TaskMetaExecutor,
@@ -424,8 +425,10 @@ class ImproverGuardService:
         return {_LIMIT_KEYS[key]: plan["outer_budget"][_LIMIT_KEYS[key]] - total[key]
                 for key in _USAGE_KEYS}
 
-    def run(self, plan_id):
+    def run(self, plan_id, *, admission_check=None):
         """Consume the guard once and roll back automatically on degradation."""
+        if admission_check is not None and not callable(admission_check):
+            raise TypeError("admission_check must be callable")
         plan = self.plan(plan_id)
         with self.store.connect() as db:
             existing = db.execute(
@@ -472,7 +475,8 @@ class ImproverGuardService:
         try:
             self._heartbeat(plan_id)
             receipt = _copy(
-                TaskMetaExecutor.generate_offspring(executor, generation_request),
+                TaskMetaExecutor.generate_offspring(
+                    executor, generation_request, admission_check=admission_check),
                 "Guard generation receipt")
             self._heartbeat(plan_id)
             if (receipt.get("schema") != GENERATION_RECEIPT_SCHEMA
@@ -494,6 +498,8 @@ class ImproverGuardService:
                     or registration.get("revision") != plan["expected_deployed_revision"]
                     or registration.get("package_digest") != plan["candidate_improver_digest"]):
                 raise ContractError("Guard offspring was not produced by the deployed channel")
+        except AdmissionConflict:
+            raise
         except Exception as exc:
             generation = None
             failures.append({"phase": "generation", "error_type": type(exc).__name__,
@@ -520,7 +526,8 @@ class ImproverGuardService:
                 try:
                     self._heartbeat(plan_id)
                     receipt = _copy(
-                        TaskMetaExecutor.evaluate_descendant(executor, request),
+                        TaskMetaExecutor.evaluate_descendant(
+                            executor, request, admission_check=admission_check),
                         "Guard evaluation receipt")
                     self._heartbeat(plan_id)
                     score = receipt.get("score")
@@ -540,6 +547,8 @@ class ImproverGuardService:
                         "episode_id": episode_id, "score": float(score),
                         "accepted": receipt["accepted"], "receipt_digest": digest(receipt),
                     })
+                except AdmissionConflict:
+                    raise
                 except Exception as exc:
                     failures.append({"phase": "evaluation", "task_index": index,
                                      "error_type": type(exc).__name__,
