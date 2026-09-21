@@ -96,6 +96,7 @@ def _v2_package(workflows):
         ),
         "prompts/alpha.md": "Produce the alpha branch.",
         "prompts/beta.md": "Produce the beta branch.",
+        "prompts/formatter.md": "Format the supplied payload.",
     }
     registry = {}
     for name, workflow in workflows.items():
@@ -110,7 +111,14 @@ def _v2_package(workflows):
     manifest = {
         "manifest_version": 2,
         "entries": {"execute": "agent/main.py:execute"},
-        "skills": {},
+        "skills": {
+            "formatter": {
+                "kind": "prompt_protocol",
+                "ref": "prompts/formatter.md",
+                "input_schema": {},
+                "output_schema": {},
+            },
+        },
         "roles": {
             role: {"prompt_ref": f"prompts/{role}.md", "capabilities": ["ask"]}
             for role in ("alpha", "beta")
@@ -120,6 +128,9 @@ def _v2_package(workflows):
             "main-orchestrator": {"class": "O", "kind": "workflow", "ref": "main"},
             "alpha-role": {"class": "S", "kind": "role", "ref": "alpha"},
             "beta-role": {"class": "S", "kind": "role", "ref": "beta"},
+            "formatter-skill": {
+                "class": "S", "kind": "skill", "ref": "formatter",
+            },
         },
         "orchestrator": "main-orchestrator",
     }
@@ -170,6 +181,8 @@ def test_v2_workflow_orchestrator_persists_parallel_roles_join_and_checker(tmp_p
     checker_node = result["nodes"]["plan/nodes/checker"]
     assert (alpha["role_ref"], alpha["component_ref"]) == ("alpha", "alpha-role")
     assert alpha["operator_ref"].startswith("operator://ask/")
+    assert service.store.rpc_find(
+        episode["id"], "plan/nodes/alpha")["request"]["params"]["role"] == "alpha"
     assert join["control_dependencies"] == ["alpha", "beta"]
     assert {binding["producer_node_id"] for binding in join["artifact_bindings"]} == {
         "alpha", "beta"}
@@ -300,7 +313,7 @@ def test_manifest_v1_runtime_remains_on_controlled_entry_path(tmp_path):
     assert result["execution"]["entry"] == "execute"
 
 
-def test_resume_rejects_plan_artifact_evidence_absent_from_host_ledger(tmp_path):
+def test_resume_rejects_valid_but_substituted_input_artifact_evidence(tmp_path):
     calls = []
 
     def checkpoint(arguments, context):
@@ -318,6 +331,9 @@ def test_resume_rejects_plan_artifact_evidence_absent_from_host_ledger(tmp_path)
             "id": "checkpoint",
             "method": "tool",
             "params": {"name": tool.name, "arguments": {}},
+            "bindings": {"arguments": {
+                "artifact_id": {"$input": "input_refs.source"},
+            }},
         }],
         "outputs": {"deliverables": {"result": {"$node": "checkpoint.artifact_id"}}},
     }
@@ -325,6 +341,7 @@ def test_resume_rejects_plan_artifact_evidence_absent_from_host_ledger(tmp_path)
     service = TaskService(tmp_path, tools=registry)
     episode = service.create(
         "Reject forged plan evidence", deliverables=RESULT_SPEC,
+        inputs={"source": {"value": "A"}, "alternate": {"value": "B"}},
         capabilities=[tool.name], package=_v2_package({"main": workflow}),
         constraints={"allowed_effects": ["artifact_write"]},
     )
@@ -334,19 +351,25 @@ def test_resume_rejects_plan_artifact_evidence_absent_from_host_ledger(tmp_path)
     assert len(calls) == 1
     raw = service.store.get(episode["id"])
     node_state = raw["plan_execution"]["node_executions"][0]
-    node_state["output_artifact_refs"] = ["artifact-missing-from-ledger"]
+    assert node_state["input_artifact_refs"] == [raw["input_refs"]["source"]]
+    node_state["input_artifact_refs"] = [raw["input_refs"]["alternate"]]
     service.store.save(raw)
 
     resumed = TaskService(tmp_path, tools=registry).run(episode["id"])
 
     assert resumed["status"] == "waiting_input"
-    assert "invalid artifact evidence" in resumed["last_error"]
+    assert "input artifact evidence differs" in resumed["last_error"]
     assert len(calls) == 1
 
 
 @pytest.mark.parametrize(("violation", "message"), [
     ("component", "component"),
     ("role", "role"),
+    ("ask_refs", "explicit role_ref and component_ref"),
+    ("ask_component", "matching role component_ref"),
+    ("ask_conflict", "conflicts with its frozen role_ref"),
+    ("ask_binding", "derived from role_ref"),
+    ("skill_component", "matching skill component_ref"),
     ("lease", "capability lease"),
 ])
 def test_v2_plan_refs_and_tool_operator_must_resolve_to_manifest_and_lease(
@@ -369,6 +392,22 @@ def test_v2_plan_refs_and_tool_operator_must_resolve_to_manifest_and_lease(
         node["component_ref"] = "missing-component"
     if violation == "role":
         node.update(method="ask", role_ref="missing-role", params={"prompt": "unused"})
+    if violation == "ask_refs":
+        node.update(method="ask", params={"prompt": "unused"})
+    if violation == "ask_component":
+        node.update(method="ask", role_ref="alpha", params={"prompt": "unused"})
+    if violation == "ask_conflict":
+        node.update(
+            method="ask", role_ref="alpha", component_ref="alpha-role",
+            params={"role": "beta", "prompt": "unused"},
+        )
+    if violation == "ask_binding":
+        node.update(
+            method="ask", role_ref="alpha", component_ref="alpha-role",
+            params={"prompt": "unused"}, bindings={"role": "beta"},
+        )
+    if violation == "skill_component":
+        node.update(method="skill", params={"name": "formatter", "payload": {}})
     workflow = {"nodes": [node], "outputs": {}}
     service = TaskService(
         tmp_path, tools=ToolRegistry([tool]), gateway_factory=ParallelRoleGateway())

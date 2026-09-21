@@ -418,10 +418,10 @@ class TaskService:
         workflow.setdefault("output_schema", deepcopy(registered.get("output_schema", {})))
         roles = manifest["roles"]
         components = manifest["components"]
-        role_components = {}
-        for component_id, component in components.items():
-            if component.get("kind") == "role":
-                role_components.setdefault(component.get("ref"), []).append(component_id)
+        role_artifact_targets = {
+            edge.get("consumer_node") for edge in workflow.get("artifact_edges", [])
+            if isinstance(edge, dict) and edge.get("input_port") == "role"
+        }
         for node in workflow.get("nodes", []):
             if not isinstance(node, dict):
                 raise ContractError("Workflow nodes must be objects")
@@ -429,6 +429,13 @@ class TaskService:
             if method not in CAPABILITIES | {"join", "loop"}:
                 raise ContractError("Workflow operator is not registered by the host")
             role_ref = node.get("role_ref")
+            component_ref = node.get("component_ref")
+            component = None
+            if component_ref is not None:
+                component = components.get(component_ref)
+                if not isinstance(component, dict):
+                    raise ContractError(
+                        f"Workflow component is not registered: {component_ref}")
             if role_ref is not None:
                 role = roles.get(role_ref)
                 if not isinstance(role, dict):
@@ -436,26 +443,27 @@ class TaskService:
                 if method in CAPABILITIES and method not in role.get("capabilities", []):
                     raise PermissionError(
                         f"Role {role_ref!r} is not leased capability {method!r}")
-                matches = role_components.get(role_ref, [])
-                if node.get("component_ref") is None and len(matches) == 1:
-                    node["component_ref"] = matches[0]
-                if method == "ask":
-                    params = node.setdefault("params", {})
-                    params.setdefault("role", role_ref)
-                    prompt_ref = role.get("prompt_ref")
-                    if prompt_ref is not None:
-                        params.setdefault("prompt", package["files"][prompt_ref])
-            component_ref = node.get("component_ref")
-            if component_ref is not None:
-                component = components.get(component_ref)
-                if not isinstance(component, dict):
-                    raise ContractError(
-                        f"Workflow component is not registered: {component_ref}")
-                if (role_ref is not None
-                        and (component.get("kind"), component.get("ref"))
+                if (component is None
+                        or (component.get("kind"), component.get("ref"))
                         != ("role", role_ref)):
-                    raise ContractError("Workflow role_ref and component_ref do not resolve together")
+                    raise ContractError(
+                        "Workflow role_ref requires an explicit matching role component_ref")
             params = node.get("params", {})
+            if method == "ask":
+                if role_ref is None or component_ref is None:
+                    raise ContractError(
+                        "Workflow ask nodes require explicit role_ref and component_ref")
+                if ("role" in node.get("bindings", {})
+                        or node.get("id") in role_artifact_targets):
+                    raise ContractError(
+                        "Workflow ask role is derived from role_ref and cannot be bound")
+                if "role" in params and params["role"] != role_ref:
+                    raise ContractError(
+                        "Workflow ask params.role conflicts with its frozen role_ref")
+                params["role"] = role_ref
+                prompt_ref = roles[role_ref].get("prompt_ref")
+                if prompt_ref is not None:
+                    params.setdefault("prompt", package["files"][prompt_ref])
             if method == "tool":
                 tool_name = params.get("name") if isinstance(params, dict) else None
                 if not isinstance(tool_name, str) or tool_name not in capability_lease:
@@ -466,6 +474,17 @@ class TaskService:
                 skill_name = params.get("name") if isinstance(params, dict) else None
                 if not isinstance(skill_name, str) or skill_name not in manifest.get("skills", {}):
                     raise ContractError("Workflow skill operator must resolve to a frozen skill")
+                if (role_ref is not None or component is None
+                        or (component.get("kind"), component.get("ref"))
+                        != ("skill", skill_name)):
+                    raise ContractError(
+                        "Workflow skill nodes require an explicit matching skill component_ref")
+            if (method in {"join", "loop"} and (role_ref is not None or component_ref is not None)):
+                raise ContractError("Local workflow nodes cannot declare role_ref or component_ref")
+            if (method not in {"ask", "skill", "join", "loop"}
+                    and role_ref is None and component_ref is not None):
+                raise ContractError(
+                    f"Workflow {method} nodes cannot declare component_ref without role_ref")
         for rule in workflow.get("revision_rules", []):
             if not isinstance(rule, dict) or rule.get("workflow_ref") not in manifest["workflows"]:
                 raise ContractError("Workflow revision must resolve to a frozen registered workflow")
@@ -589,6 +608,7 @@ class TaskService:
                     "Persisted plan differs from its frozen workflow resource")
             receipts = deepcopy(state.get("plan_node_receipts") or {})
             methods = {node["id"]: node["method"] for node in workflow["nodes"]}
+            plan_nodes = {node.id: node for node in execution.plan.nodes}
             for node_state in execution.node_executions:
                 for artifact_ref in (
                         *node_state.input_artifact_refs,
@@ -619,11 +639,29 @@ class TaskService:
                 journal = self.store.rpc_find(identity, path)
                 expected_status = ("completed" if node_state.status is NodeStatus.COMPLETED
                                    else "failed")
-                if (journal is None or journal["status"] != expected_status
+                request = journal.get("request") if isinstance(journal, dict) else None
+                expected_method = methods[node_state.node_id]
+                if (journal is None or journal.get("status") != expected_status
+                        or not isinstance(request, dict)
+                        or set(request) != {"method", "params", "package_digest"}
+                        or request["method"] != expected_method
+                        or not isinstance(request["params"], dict)
+                        or request["package_digest"] != package["digest"]
+                        or not plan_nodes[node_state.node_id].operator_ref.startswith(
+                            f"operator://{expected_method}/")
                         or (expected_status == "completed"
-                            and journal["result"] != receipt.get("value"))):
+                            and journal.get("result") != receipt.get("value"))):
                     raise RecoveryRequired(
                         f"Plan node {node_state.node_id} receipt differs from the RPC journal")
+                try:
+                    self.store.rpc_find(identity, path, request)
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise RecoveryRequired(
+                        f"Plan node {node_state.node_id} RPC request identity is invalid") from exc
+                if (tuple(self._references(identity, request["params"]))
+                        != node_state.input_artifact_refs):
+                    raise RecoveryRequired(
+                        f"Plan node {node_state.node_id} input artifact evidence differs from the RPC journal")
 
         def persist(current, current_receipts):
             self._persist_plan(
