@@ -48,6 +48,34 @@ def _terminal(episode, label):
         raise ContractError(f"{label} Episode is not terminal")
 
 
+def _component_loaded_evidence(tasks, component, episode):
+    if not isinstance(component, dict):
+        return None
+    try:
+        package = tasks.store.package(episode.get("package_id"))
+    except KeyError:
+        raise ContractError("Component loaded evidence package is not local") from None
+    loaded_modules = (episode.get("execution") or {}).get("loaded_modules") or []
+    expected = component.get("files") or []
+    actual = [path for path in expected if path in loaded_modules]
+    expected_digests = {path: package["component_digests"].get(path) for path in expected}
+    loaded_digests = {path: expected_digests[path] for path in actual}
+    loaded_package_digest = (episode.get("execution") or {}).get("package_digest")
+    return {"component_id": component.get("component_id"),
+            "class": component.get("class"), "kind": component.get("kind"),
+            "ref": component.get("ref"), "expected_files": list(expected),
+            "expected_file_digests": expected_digests,
+            "loaded_files": actual, "loaded_modules": list(loaded_modules),
+            "loaded_file_digests": loaded_digests,
+            "loaded_modules_digest": digest(loaded_modules),
+            "expected_package_digest": package["digest"],
+            "loaded_package_digest": loaded_package_digest,
+            "loaded": (bool(expected) and len(actual) == len(expected)
+                       and loaded_digests == expected_digests
+                       and package["digest"] == episode.get("package_digest")
+                       and loaded_package_digest == package["digest"])}
+
+
 def build_rsi_mechanism_evidence(
     tasks,
     evolution,
@@ -111,6 +139,25 @@ def build_rsi_mechanism_evidence(
         raise ContractError("Selection decision did not pass every frozen gate")
     if decision["gates"].get("behavior_activated") is not True:
         raise ContractError("Candidate component activation was not observed")
+    component_targeted = candidate.get("targeting") == "manifest_component_v2"
+    component = candidate.get("component_target")
+    if component_targeted:
+        if (not isinstance(component, dict)
+                or generated.get("component_id") != candidate.get("component_id")
+                or generated.get("component_target") != component
+                or plan.get("component_id") != candidate.get("component_id")
+                or trial.get("component_id") != candidate.get("component_id")
+                or decision.get("component_id") != candidate.get("component_id")
+                or monitor_plan.get("component_id") != candidate.get("component_id")
+                or monitor_run.get("component_id") != candidate.get("component_id")
+                or decision.get("component_target") != component
+                or monitor_plan.get("component_target") != component
+                or monitor_run.get("component_target") != component
+                or not decision.get("loaded_evidence")
+                or not all(row.get("loaded") is True
+                           and row.get("component_id") == candidate.get("component_id")
+                           for row in decision["loaded_evidence"])):
+            raise ContractError("Component-targeted evidence identity is incomplete")
 
     promoted = _episode(tasks, promoted_episode_id)
     _terminal(promoted, "Post-promotion")
@@ -121,6 +168,9 @@ def build_rsi_mechanism_evidence(
         or promoted_registration.get("package_id") != candidate["package_id"]
     ):
         raise ContractError("Post-promotion Episode did not load the generated child")
+    promoted_loaded_evidence = _component_loaded_evidence(tasks, component, promoted)
+    if component_targeted and promoted_loaded_evidence.get("loaded") is not True:
+        raise ContractError("Post-promotion Episode did not load the target component")
 
     guard_rows = []
     planned_tasks = Counter(digest(task) for task in monitor_plan["suite"]["tasks"])
@@ -152,6 +202,11 @@ def build_rsi_mechanism_evidence(
             raise ContractError("Guard Episode changed after its immutable monitor run")
         if episode.get("usage", {}).get("usage_complete") is not True:
             raise ContractError("Guard Episode usage is incomplete")
+        loaded_evidence = _component_loaded_evidence(tasks, component, episode)
+        if component_targeted:
+            if (loaded_evidence.get("loaded") is not True
+                    or frozen_report.get("loaded_evidence") != loaded_evidence):
+                raise ContractError("Guard Episode did not load the target component")
         observed_tasks[monitoring["task_ref_digest"]] += 1
         guard_rows.append({
             "episode_id": identity,
@@ -159,6 +214,8 @@ def build_rsi_mechanism_evidence(
             "package_digest": episode["package_digest"],
             "task_ref_digest": monitoring["task_ref_digest"],
             "evaluation_digest": digest(episode["evaluation"]),
+            "component_id": candidate.get("component_id"),
+            "loaded_evidence": loaded_evidence,
             "usage": _usage(episode.get("usage")),
         })
     if observed_tasks != planned_tasks:
@@ -292,6 +349,9 @@ def build_rsi_mechanism_evidence(
             "candidate_id": candidate["id"],
             "candidate_record_digest": candidate["record_digest"],
             "candidate_evidence_digest": candidate["evidence_digest"],
+            "targeting": candidate.get("targeting", "legacy_path_v1"),
+            "component_id": candidate.get("component_id"),
+            "component_target": deepcopy(component),
             "component_delta": deepcopy(candidate["component_delta"]),
             "activation_probe": deepcopy(candidate["activation_probe"]),
             "usage": _usage(generated.get("usage")),
@@ -302,12 +362,16 @@ def build_rsi_mechanism_evidence(
             "trial_id": trial["id"], "trial_digest": trial["record_digest"],
             "decision_id": decision["id"], "decision_digest": decision["record_digest"],
             "eligible": decision["eligible"], "gates": deepcopy(decision["gates"]),
+            "component_id": decision.get("component_id"),
+            "loaded_evidence": deepcopy(decision.get("loaded_evidence")),
             "measurements": deepcopy(decision["measurements"]),
             "paired_runs": paired_runs,
         },
         "deployment": {
             "promoted_episode_id": promoted["id"],
             "promoted_registration": deepcopy(promoted_registration),
+            "component_id": candidate.get("component_id"),
+            "loaded_evidence": promoted_loaded_evidence,
             "promoted_episode_usage": _usage(promoted.get("usage")),
         },
         "monitoring": {
@@ -646,10 +710,16 @@ def build_p3_e1_evidence(cycles, *, cycle_id, reuse_episode_ids):
     model_receipt = _p3_e1_model_receipt(generation_episode, generated)
 
     activation = candidate.get("activation_probe") or {}
+    component_targeted = candidate.get("targeting") == "manifest_component_v2"
+    component = candidate.get("component_target")
     if (decision.get("eligible") is not True
             or decision.get("gates", {}).get("behavior_activated") is not True
             or activation.get("kind") != "component_loaded"
-            or not isinstance(activation.get("path"), str)):
+            or (component_targeted
+                and (not isinstance(component, dict)
+                     or activation.get("component_id") != candidate.get("component_id")))
+            or (not component_targeted
+                and not isinstance(activation.get("path"), str))):
         raise ContractError("P3 E1 selection lacks eligible component-loaded evidence")
     measurements = decision.get("measurements") or {}
     parent_measurements = measurements.get("parent") or {}
@@ -671,10 +741,13 @@ def build_p3_e1_evidence(cycles, *, cycle_id, reuse_episode_ids):
             tasks, parent_run.get("episode_id"), "Selection parent")
         candidate_episode = _p3_e1_episode(
             tasks, candidate_run.get("episode_id"), "Selection candidate")
+        loaded_evidence = _component_loaded_evidence(tasks, component, candidate_episode)
+        legacy_loaded = activation.get("path") in (
+            (candidate_episode.get("execution") or {}).get("loaded_modules") or [])
         if (parent_episode.get("package_id") != candidate.get("parent_package_id")
                 or candidate_episode.get("package_id") != candidate.get("package_id")
-                or activation["path"] not in (
-                    (candidate_episode.get("execution") or {}).get("loaded_modules") or [])):
+                or (component_targeted and loaded_evidence.get("loaded") is not True)
+                or (not component_targeted and not legacy_loaded)):
             raise ContractError("P3 E1 paired Episodes do not load the tested packages")
         parent_evaluation = _public_evaluation_metrics(parent_run.get("evaluation"))
         candidate_evaluation = _public_evaluation_metrics(candidate_run.get("evaluation"))
@@ -690,6 +763,8 @@ def build_p3_e1_evidence(cycles, *, cycle_id, reuse_episode_ids):
             "task_ref_digest": pair.get("task_ref_digest"),
             "parent_episode_id": parent_episode["id"],
             "candidate_episode_id": candidate_episode["id"],
+            "component_id": candidate.get("component_id"),
+            "loaded_evidence": loaded_evidence,
             "public_evaluation_changed": evaluation_changed,
             "changed_deliverables": changed_deliverables,
             "observable_change": changed,
@@ -723,11 +798,19 @@ def build_p3_e1_evidence(cycles, *, cycle_id, reuse_episode_ids):
                 or task_digest not in planned_guard_tasks
                 or reports[identity].get("evaluation") != episode.get("evaluation")):
             raise ContractError("P3 E1 guard Episode is outside the frozen guard run")
+        guard_loaded_evidence = _component_loaded_evidence(tasks, component, episode)
+        if (component_targeted
+                and (guard_loaded_evidence.get("loaded") is not True
+                     or reports[identity].get("loaded_evidence")
+                     != guard_loaded_evidence)):
+            raise ContractError("P3 E1 guard did not load the target component")
         observed_guard_tasks[task_digest] += 1
         guard_rows.append({
             "episode_id": identity,
             "task_ref_digest": task_digest,
             "evaluation_digest": digest(episode.get("evaluation")),
+            "component_id": candidate.get("component_id"),
+            "loaded_evidence": guard_loaded_evidence,
             "usage": _usage(episode.get("usage")),
         })
     if observed_guard_tasks != planned_guard_tasks:
@@ -876,6 +959,9 @@ def build_p3_e1_evidence(cycles, *, cycle_id, reuse_episode_ids):
             "patch_digest": generated["patch_digest"],
             "candidate_id": candidate["id"],
             "candidate_record_digest": candidate["record_digest"],
+            "targeting": candidate.get("targeting", "legacy_path_v1"),
+            "component_id": candidate.get("component_id"),
+            "component_target": deepcopy(component),
             "model_receipt": model_receipt,
             "usage": _usage(generation_episode.get("usage")),
         },
@@ -885,6 +971,8 @@ def build_p3_e1_evidence(cycles, *, cycle_id, reuse_episode_ids):
             "decision_id": decision["id"],
             "decision_digest": decision["record_digest"],
             "eligible": True, "activation_probe": deepcopy(activation),
+            "component_id": candidate.get("component_id"),
+            "loaded_evidence": deepcopy(decision.get("loaded_evidence")),
             "gates": deepcopy(decision["gates"]),
             "strict_gain": gains,
             "paired_tasks": paired_rows,

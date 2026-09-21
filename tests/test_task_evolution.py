@@ -3,8 +3,9 @@ from copy import deepcopy
 import pytest
 
 from nexgent.kernel.programs import digest
+from nexgent.tasks.evidence import build_rsi_mechanism_evidence
 from nexgent.tasks.evolution import EvolutionService, PromotionPolicy
-from nexgent.tasks.generation import GenerationService, PATCH_SCHEMA
+from nexgent.tasks.generation import GenerationService, PATCH_SCHEMA, PATCH_SCHEMA_V2
 from nexgent.tasks.packages import PackageError, make_package
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.tools import ContractError, ToolRegistry
@@ -26,6 +27,23 @@ def package(version, *, parent=None, fail=False, improve_revision=None):
         entries["improve"] = "improve.py:improve"
     return make_package(files, {"entries": entries}, parent=parent,
                         provenance={"fixture": version})
+
+
+def v2_package(version, *, parent=None):
+    source = ("def execute(payload, context):\n"
+              f"    item = {{'version': {version!r}, 'score': {float(version)!r}}}\n"
+              "    artifact = context.publish(item, name='result')\n"
+              "    return {'deliverables': {'result': artifact['id']}}\n")
+    manifest = {
+        "manifest_version": 2,
+        "entries": {"execute": "main.py:execute"},
+        "skills": {}, "roles": {}, "workflows": {},
+        "components": {
+            "task-orchestrator": {"class": "O", "kind": "entry", "ref": "execute"}},
+        "orchestrator": "task-orchestrator",
+    }
+    return make_package({"main.py": source}, manifest, parent=parent,
+                        provenance={"fixture": f"v2-{version}"})
 
 
 class PairedBenchmark:
@@ -67,6 +85,11 @@ class DuplicateGuardBenchmark(PairedBenchmark):
                 "inputs": {}, "deliverables": result_spec(), "capabilities": [],
                 "context": {"split": split}}
         return [deepcopy(task), deepcopy(task)]
+
+
+class SingleTaskBenchmark(PairedBenchmark):
+    def tasks(self, split="development", seed=0):
+        return [super().tasks(split=split, seed=seed)[0]]
 
 
 def result_spec():
@@ -129,6 +152,49 @@ def generated_candidate(tasks, evolution, parent, target):
     return tasks.store.package(candidate["package_id"]), candidate
 
 
+def generated_v2_candidate(tasks, evolution, parent, target):
+    observed = tasks.create(
+        "Observe the active v2 parent", deliverables=result_spec(), package=parent,
+        context={"split": "development", "split_role": "development"})
+    observed = tasks.run(observed["id"])
+    feedback_adapter = SingleTaskBenchmark()
+    feedback_task = feedback_adapter.tasks(split="development", seed=0)[0]
+    tasks.evaluate(observed["id"], feedback_adapter, feedback_task,
+                   snapshot=feedback_adapter.snapshot())
+    generation = GenerationService(tasks, evolution)
+    bundle = generation.capture_feedback("general", [observed["id"]], expected_revision=0)
+    patch = {
+        "schema": PATCH_SCHEMA_V2,
+        "hypothesis": {
+            "component_id": "task-orchestrator",
+            "failure_mechanism": "The active component retains old behavior.",
+            "expected_behavior": "The target component improves the paired score.",
+            "applicability": "Tasks using the declared orchestrator.",
+            "falsifier": "The component is not loaded or does not improve.",
+        },
+        "operations": [{
+            "op": "replace", "component_id": "task-orchestrator",
+            "old_digest": parent["component_digests"]["main.py"],
+            "content": target["files"]["main.py"],
+        }],
+        "activation_probe": {
+            "kind": "component_loaded", "component_id": "task-orchestrator"},
+    }
+    source = ("def improve(payload, context):\n"
+              f"    artifact = context.publish({patch!r}, name='behavior_patch')\n"
+              "    return {'deliverables': {'behavior_patch': artifact['id']}}\n")
+    improver = make_package(
+        {"improver.py": source},
+        {"entries": {"execute": "improver.py:improve", "improve": "improver.py:improve"}},
+        provenance={"fixture": "v2-evolution-improver"})
+    result = generation.generate(
+        "general", bundle["id"], improver,
+        {"mutable_components": ["task-orchestrator"],
+         "allowed_operations": ["replace"], "max_patch_bytes": 100000}, 0)
+    assert result["status"] == "generated", result.get("reason")
+    return evolution.candidate(result["candidate_id"]), generation, bundle, result
+
+
 def prepare(tmp_path):
     tasks = service(tmp_path)
     evolution = EvolutionService(tasks)
@@ -187,6 +253,119 @@ def test_selection_trial_promotes_explicitly_and_channel_loads_new_package(tmp_p
     assert promotion_event["content"]["policy"] == decision["policy"]
     assert promotion_event["content"]["monitoring_thresholds"] == {
         "min_score": 0.0, "min_success_rate": 1.0}
+
+
+def test_v2_component_identity_and_loaded_evidence_reach_guard_and_promotion(tmp_path):
+    tasks = service(tmp_path)
+    evolution = EvolutionService(tasks)
+    parent = v2_package(0)
+    evolution.register("general", parent)
+    target = v2_package(1, parent=parent)
+    candidate, generation, bundle, generated = generated_v2_candidate(
+        tasks, evolution, parent, target)
+    adapter = SingleTaskBenchmark()
+
+    trial = evolution.evaluate_pair(
+        candidate["id"], adapter, split="selection", split_role="selection",
+        policy=PromotionPolicy(monitor_min_score=2.0))
+    candidate_run = trial["pairs"][0]["candidate"]
+    candidate_package = tasks.store.package(candidate["package_id"])
+    assert candidate_run["loaded_evidence"] == {
+        "component_id": "task-orchestrator", "class": "O", "kind": "entry",
+        "ref": "execute", "expected_files": ["main.py"],
+        "expected_file_digests": {
+            "main.py": candidate_package["component_digests"]["main.py"]},
+        "loaded_files": ["main.py"], "loaded_modules": ["main.py"],
+        "loaded_file_digests": {
+            "main.py": candidate_package["component_digests"]["main.py"]},
+        "loaded_modules_digest": digest(["main.py"]),
+        "expected_package_digest": candidate_package["digest"],
+        "loaded_package_digest": candidate_package["digest"], "loaded": True}
+    decision = evolution.assess(trial["id"])
+    assert decision["eligible"] is True
+    assert decision["component_id"] == "task-orchestrator"
+    assert decision["loaded_evidence"][0]["loaded"] is True
+    assert decision["loaded_evidence"][0]["loaded_file_digests"] == {
+        "main.py": candidate_package["component_digests"]["main.py"]}
+
+    monitor_plan = evolution.plan_monitor(
+        candidate["id"], adapter, split="guard", seed=9)
+    active = evolution.promote(
+        candidate["id"], decision["id"], monitor_plan_id=monitor_plan["id"])
+    assert active["promotion"]["component_id"] == "task-orchestrator"
+    assert active["promotion"]["selection_loaded_evidence"] == decision["loaded_evidence"]
+    promotion_event = [event for event in evolution.events("general")
+                       if event["kind"] == "package_promoted"][-1]
+    assert promotion_event["content"]["component_id"] == "task-orchestrator"
+    assert promotion_event["content"]["selection_loaded_evidence"] == decision["loaded_evidence"]
+    promoted_episode = tasks.create(
+        "Load the promoted component", package_channel="general")
+    promoted_episode = tasks.run(promoted_episode["id"])
+
+    monitor_run = evolution.run_monitor(
+        "general", adapter, expected_revision=active["revision"],
+        expected_package_id=active["package_id"],
+        expected_monitor_plan_id=monitor_plan["id"])
+    assert monitor_run["component_id"] == "task-orchestrator"
+    assert monitor_run["reports"][0]["loaded_evidence"]["loaded"] is True
+    assert monitor_run["reports"][0]["loaded_evidence"]["expected_file_digests"] == {
+        "main.py": candidate_package["component_digests"]["main.py"]}
+    monitored = evolution.monitor(
+        "general", monitor_run["episode_ids"], rollback_on_regression=True,
+        expected_revision=active["revision"], expected_package_id=active["package_id"],
+        expected_monitor_plan_id=monitor_plan["id"])
+    assert monitored["degraded"] is True and monitored["rolled_back"] is True
+    rollback_episode = tasks.create(
+        "Load the restored parent", package_channel="general")
+    rollback_episode = tasks.run(rollback_episode["id"])
+
+    evidence = build_rsi_mechanism_evidence(
+        tasks, evolution, generation, channel="general",
+        feedback_bundle_id=bundle["id"], generation_id=generated["id"],
+        selection_plan_id=trial["plan_id"], trial_id=trial["id"],
+        decision_id=decision["id"], monitor_plan_id=monitor_plan["id"],
+        promoted_episode_id=promoted_episode["id"],
+        guard_episode_ids=monitor_run["episode_ids"],
+        rollback_episode_id=rollback_episode["id"])
+    assert evidence["generation"]["component_id"] == "task-orchestrator"
+    assert evidence["selection"]["loaded_evidence"][0]["loaded"] is True
+    assert evidence["deployment"]["loaded_evidence"]["loaded"] is True
+    assert evidence["deployment"]["loaded_evidence"]["loaded_file_digests"] == {
+        "main.py": candidate_package["component_digests"]["main.py"]}
+    assert evidence["monitoring"]["guard_episodes"][0]["loaded_evidence"]["loaded"] is True
+
+
+def test_v2_candidate_cannot_redirect_stable_component_ref_through_manifest(tmp_path):
+    tasks = service(tmp_path)
+    evolution = EvolutionService(tasks)
+    parent = v2_package(0)
+    evolution.register("general", parent)
+    redirected_manifest = deepcopy(parent["manifest"])
+    redirected_manifest["entries"]["execute"] = "other.py:execute"
+    child = make_package(
+        {**parent["files"], "other.py": package(1)["files"]["main.py"]},
+        redirected_manifest, parent=parent, provenance={"fixture": "redirect"})
+
+    with pytest.raises(ContractError, match="frozen parent manifest"):
+        evolution.propose(
+            "general", child,
+            hypothesis={"component_id": "task-orchestrator", "claim": "redirect"},
+            feedback_episode_ids=[feedback(tasks, parent)],
+            activation_probe={"kind": "component_loaded",
+                              "component_id": "task-orchestrator"})
+
+
+def test_v1_candidate_cannot_upgrade_manifest_through_propose(tmp_path):
+    tasks = service(tmp_path)
+    evolution = EvolutionService(tasks)
+    parent = package(0)
+    evolution.register("general", parent)
+    upgraded = v2_package(1, parent=parent)
+
+    with pytest.raises(ContractError, match="frozen parent manifest"):
+        evolution.propose(
+            "general", upgraded, hypothesis="upgrade manifest version",
+            feedback_episode_ids=[feedback(tasks, parent)])
 
 
 def test_expected_package_registration_pins_the_resolved_deployment_during_drift(

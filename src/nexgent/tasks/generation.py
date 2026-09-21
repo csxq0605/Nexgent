@@ -16,12 +16,14 @@ import time
 import uuid
 
 from ..kernel.programs import digest
-from .packages import make_package, manifest_component_classes, safe_path, verify_package
+from .packages import make_package, safe_path, split_ref, verify_package
 from .tools import ContractError
 
 
 FEEDBACK_SCHEMA = "nexgent.feedback-bundle.v1"
 PATCH_SCHEMA = "nexgent.behavior-patch.v1"
+PATCH_SCHEMA_V2 = "nexgent.behavior-patch.v2"
+LEGACY_PATCH_SCHEMA = PATCH_SCHEMA
 GENERATION_SCHEMA = "nexgent.candidate-generation.v1"
 _TERMINAL = frozenset({"completed", "failed"})
 _MUTABLE_CLASSES = frozenset({"O", "M", "S"})
@@ -123,37 +125,102 @@ def _public_execution_trace(episode):
     }
 
 
-def _patch_schema():
+def _component_descriptor(package, component_id):
+    """Resolve one v2 component through the frozen manifest registry."""
+    manifest = package["manifest"]
+    if manifest.get("manifest_version", 1) != 2:
+        raise ContractError("Stable component targets require manifest v2")
+    component = manifest.get("components", {}).get(component_id)
+    if not isinstance(component, dict):
+        raise ContractError(f"Unknown manifest component id: {component_id!r}")
+    component_class, kind, ref = (component.get("class"), component.get("kind"),
+                                  component.get("ref"))
+    try:
+        if kind == "entry":
+            paths = [split_ref(manifest["entries"][ref], package["files"])[0]]
+        elif kind == "skill":
+            skill = manifest.get("skills", {})[ref]
+            paths = [split_ref(skill["ref"], package["files"])[0]
+                     if skill["kind"] == "controlled_code" else skill["ref"]]
+        elif kind == "workflow":
+            paths = [manifest["workflows"][ref]["ref"]]
+        elif kind == "role":
+            prompt_ref = manifest["roles"][ref].get("prompt_ref")
+            paths = [] if prompt_ref is None else [prompt_ref]
+        elif kind == "resource":
+            paths = [ref]
+        else:
+            raise KeyError(kind)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ContractError(
+            f"Manifest component {component_id!r} cannot resolve its frozen reference") from None
+    for path in paths:
+        try:
+            safe_path(path)
+        except Exception as exc:
+            raise ContractError(str(exc)) from None
+        if path not in package["files"]:
+            raise ContractError(
+                f"Manifest component {component_id!r} resolves outside the package")
+    return {"component_id": component_id, "class": component_class,
+            "kind": kind, "ref": ref, "files": paths}
+
+
+def _component_registry_snapshot(package):
+    manifest = package["manifest"]
+    if manifest.get("manifest_version", 1) != 2:
+        return None
+    components = {
+        component_id: _component_descriptor(package, component_id)
+        for component_id in sorted(manifest["components"])
+    }
+    return {"manifest_version": 2, "manifest_digest": digest(manifest),
+            "components": components}
+
+
+def _patch_schema(schema=PATCH_SCHEMA):
+    component_targeted = schema == PATCH_SCHEMA_V2
     operation = {
         "type": "object",
-        "required": ["op", "path"],
+        "required": (["op", "component_id"] if component_targeted else ["op", "path"]),
         "properties": {
             "op": {"enum": ["replace", "add", "remove"]},
-            "path": {"type": "string", "minLength": 1, "maxLength": 240},
             "old_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
             "content": {"type": "string", "maxLength": 100000},
         },
         "additionalProperties": False,
     }
+    operation["properties"]["component_id" if component_targeted else "path"] = {
+        "type": "string", "minLength": 1, "maxLength": 100 if component_targeted else 240}
+    hypothesis_keys = ["failure_mechanism", "expected_behavior", "applicability", "falsifier"]
+    hypothesis_properties = {
+        key: {"type": "string", "minLength": 1, "maxLength": 5000}
+        for key in hypothesis_keys}
+    if component_targeted:
+        hypothesis_keys.append("component_id")
+        hypothesis_properties["component_id"] = {
+            "type": "string", "minLength": 1, "maxLength": 100}
+    probe_properties = {"kind": {"const": "component_loaded"}}
+    probe_properties["component_id" if component_targeted else "path"] = {
+        "type": "string", "minLength": 1,
+        "maxLength": 100 if component_targeted else 240}
     return {
         "type": "object",
         "required": ["schema", "hypothesis", "operations", "activation_probe"],
         "properties": {
-            "schema": {"const": PATCH_SCHEMA},
+            "schema": {"const": schema},
             "hypothesis": {
                 "type": "object",
-                "required": ["failure_mechanism", "expected_behavior", "applicability", "falsifier"],
-                "properties": {key: {"type": "string", "minLength": 1, "maxLength": 5000}
-                               for key in ("failure_mechanism", "expected_behavior",
-                                           "applicability", "falsifier")},
+                "required": hypothesis_keys,
+                "properties": hypothesis_properties,
                 "additionalProperties": False,
             },
             "operations": {"type": "array", "minItems": 1, "maxItems": 128,
                            "items": operation},
             "activation_probe": {
-                "type": "object", "required": ["kind", "path"],
-                "properties": {"kind": {"const": "component_loaded"},
-                               "path": {"type": "string", "minLength": 1, "maxLength": 240}},
+                "type": "object",
+                "required": ["kind", "component_id" if component_targeted else "path"],
+                "properties": probe_properties,
                 "additionalProperties": False,
             },
         },
@@ -288,6 +355,7 @@ class GenerationService:
                 "channel_revision": active["revision"],
                 "parent_package_id": active["package_id"],
                 "parent_package_digest": active["package_digest"],
+                "parent_component_registry": _component_registry_snapshot(active["package"]),
                 "episode_refs": episode_refs}
         record = {"id": _id("feedback"), **body, "digest": digest(body),
                   "created_at": time.time()}
@@ -304,6 +372,71 @@ class GenerationService:
         policy = _copy(policy, "Mutation policy")
         if not isinstance(policy, dict):
             raise ContractError("Mutation policy must be an object")
+        manifest_v2 = parent["manifest"].get("manifest_version", 1) == 2
+        default_operations = ["replace"] if manifest_v2 else ["replace", "add", "remove"]
+        allowed = policy.get("allowed_operations", default_operations)
+        if (not isinstance(allowed, list) or not allowed or len(set(allowed)) != len(allowed)
+                or any(item not in {"replace", "add", "remove"} for item in allowed)):
+            raise ContractError("Mutation policy has unsupported operations")
+        max_bytes = policy.get("max_patch_bytes", 300000)
+        if type(max_bytes) is not int or not 1 <= max_bytes <= 500000:
+            raise ContractError("Mutation policy patch budget is invalid")
+
+        if manifest_v2:
+            if "mutable_paths" in policy or "component_classes" in policy:
+                raise ContractError(
+                    "Manifest v2 mutation policy must use stable component ids, not legacy paths/classes")
+            if allowed != ["replace"]:
+                raise ContractError(
+                    "Stable manifest components currently permit only replacement")
+            supplied = [key for key in ("mutable_components", "mutable_component_ids")
+                        if key in policy]
+            if len(supplied) != 1:
+                raise ContractError(
+                    "Manifest v2 mutation policy needs mutable_components")
+            component_ids = policy[supplied[0]]
+            if (not isinstance(component_ids, list) or not component_ids
+                    or len(component_ids) > 128 or len(set(component_ids)) != len(component_ids)
+                    or any(not isinstance(value, str) or not value for value in component_ids)):
+                raise ContractError(
+                    "Mutable components must be a nonempty unique list of stable ids")
+            improve_ref = parent["manifest"]["entries"].get("improve")
+            improve_path = improve_ref.split(":", 1)[0] if improve_ref else None
+            registry = _component_registry_snapshot(parent)["components"]
+            resolved = {}
+            for component_id in component_ids:
+                descriptor = registry.get(component_id)
+                if descriptor is None:
+                    raise ContractError(f"Unknown manifest component id: {component_id!r}")
+                if descriptor["class"] not in {"O", "S"}:
+                    raise ContractError(
+                        "Component-targeted manifest v2 evolution currently permits only O or S")
+                if len(descriptor["files"]) != 1:
+                    raise ContractError(
+                        "Mutable manifest components must resolve to exactly one declared file")
+                path = descriptor["files"][0]
+                owners = [identity for identity, value in registry.items()
+                          if path in value["files"]]
+                if owners != [component_id]:
+                    raise ContractError(
+                        f"Manifest component {component_id!r} shares its file with another component")
+                if path == improve_path:
+                    raise ContractError("The active package improve component is frozen")
+                if _path_tokens(path) & _FORBIDDEN_TOKENS:
+                    raise ContractError(
+                        "Mutation policy cannot expose evaluator, gate, permission, manifest, or hidden paths")
+                resolved[component_id] = descriptor
+            return {
+                "targeting": "manifest_component_v2",
+                "mutable_components": list(component_ids),
+                "resolved_components": resolved,
+                "manifest_digest": digest(parent["manifest"]),
+                "allowed_operations": allowed,
+                "max_patch_bytes": max_bytes,
+            }
+
+        # Manifest v1 and path patches remain a deliberately marked legacy
+        # compatibility contract. Their classes cannot become v2 authority.
         paths = policy.get("mutable_paths")
         classes = policy.get("component_classes")
         if (not isinstance(paths, list) or not paths or len(paths) > 128
@@ -312,7 +445,6 @@ class GenerationService:
             raise ContractError("Mutation policy needs exact mutable path classifications")
         improve_ref = parent["manifest"]["entries"].get("improve")
         improve_path = improve_ref.split(":", 1)[0] if improve_ref else None
-        authoritative_classes = manifest_component_classes(parent)
         for path in paths:
             try:
                 safe_path(path)
@@ -320,44 +452,56 @@ class GenerationService:
                 raise ContractError(str(exc)) from None
             if classes[path] not in _MUTABLE_CLASSES:
                 raise ContractError("Mutable components must be classified as O, M, or S")
-            if (authoritative_classes is not None
-                    and (path not in authoritative_classes
-                         or classes[path] != authoritative_classes[path])):
-                raise ContractError(
-                    "Manifest v2 mutation classes must match authoritative components")
             if path == improve_path:
                 raise ContractError("The active package improve component is frozen")
             if _path_tokens(path) & _FORBIDDEN_TOKENS:
                 raise ContractError("Mutation policy cannot expose evaluator, gate, permission, manifest, or hidden paths")
-        allowed = policy.get("allowed_operations", ["replace", "add", "remove"])
-        if (not isinstance(allowed, list) or not allowed or len(set(allowed)) != len(allowed)
-                or any(item not in {"replace", "add", "remove"} for item in allowed)):
-            raise ContractError("Mutation policy has unsupported operations")
-        max_bytes = policy.get("max_patch_bytes", 300000)
-        if type(max_bytes) is not int or not 1 <= max_bytes <= 500000:
-            raise ContractError("Mutation policy patch budget is invalid")
-        return {"mutable_paths": paths, "component_classes": classes,
+        return {"targeting": "legacy_path_v1", "legacy": True,
+                "mutable_paths": paths, "component_classes": classes,
                 "allowed_operations": allowed, "max_patch_bytes": max_bytes}
 
     @staticmethod
     def _apply_patch(parent, patch, policy, generation_id, feedback, improver):
         patch = _copy(patch, "BehaviorPatch")
+        component_targeted = policy.get("targeting") == "manifest_component_v2"
+        if component_targeted:
+            registry = _component_registry_snapshot(parent)
+            if (policy.get("manifest_digest") != registry["manifest_digest"]
+                    or any(policy.get("resolved_components", {}).get(component_id)
+                           != registry["components"].get(component_id)
+                           for component_id in policy.get("mutable_components", []))):
+                raise ContractError(
+                    "BehaviorPatch component policy differs from the frozen parent manifest")
+        expected_schema = PATCH_SCHEMA_V2 if component_targeted else PATCH_SCHEMA
+        hypothesis_fields = {"failure_mechanism", "expected_behavior",
+                             "applicability", "falsifier"}
+        if component_targeted:
+            hypothesis_fields.add("component_id")
         if (not isinstance(patch, dict)
                 or set(patch) != {"schema", "hypothesis", "operations", "activation_probe"}
-                or patch.get("schema") != PATCH_SCHEMA
+                or patch.get("schema") != expected_schema
                 or not isinstance(patch.get("hypothesis"), dict)
-                or set(patch["hypothesis"]) != {"failure_mechanism", "expected_behavior",
-                                                "applicability", "falsifier"}
+                or set(patch["hypothesis"]) != hypothesis_fields
                 or any(not isinstance(value, str) or not value.strip() or len(value) > 5000
                        for value in patch["hypothesis"].values())
                 or not isinstance(patch.get("operations"), list)
                 or not 1 <= len(patch["operations"]) <= 128):
             raise ContractError("Improver output is not a strict BehaviorPatch")
         probe = patch.get("activation_probe")
-        if (not isinstance(probe, dict) or set(probe) != {"kind", "path"}
-                or probe.get("kind") != "component_loaded"
-                or probe.get("path") not in policy["mutable_paths"]):
-            raise ContractError("BehaviorPatch activation probe must name a mutable component")
+        if component_targeted:
+            component_id = probe.get("component_id") if isinstance(probe, dict) else None
+            if (not isinstance(probe, dict) or set(probe) != {"kind", "component_id"}
+                    or probe.get("kind") != "component_loaded"
+                    or component_id not in policy["mutable_components"]
+                    or patch["hypothesis"].get("component_id") != component_id):
+                raise ContractError(
+                    "BehaviorPatch v2 hypothesis and activation probe must name one mutable component id")
+        else:
+            component_id = None
+            if (not isinstance(probe, dict) or set(probe) != {"kind", "path"}
+                    or probe.get("kind") != "component_loaded"
+                    or probe.get("path") not in policy["mutable_paths"]):
+                raise ContractError("Legacy BehaviorPatch activation probe must name a mutable path")
         encoded = json.dumps(patch, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
         if len(encoded.encode("utf-8")) > policy["max_patch_bytes"]:
             raise ContractError("BehaviorPatch exceeds its byte budget")
@@ -365,15 +509,29 @@ class GenerationService:
         for operation in patch["operations"]:
             if not isinstance(operation, dict):
                 raise ContractError("BehaviorPatch operations must be objects")
-            op, path = operation.get("op"), operation.get("path")
-            if op not in policy["allowed_operations"] or path not in policy["mutable_paths"]:
-                raise ContractError("BehaviorPatch operation is outside the mutation policy")
+            op = operation.get("op")
+            if component_targeted:
+                operation_component_id = operation.get("component_id")
+                if (op not in policy["allowed_operations"]
+                        or operation_component_id not in policy["mutable_components"]
+                        or operation_component_id != component_id):
+                    raise ContractError(
+                        "BehaviorPatch operation crosses its declared manifest component")
+                descriptor = policy["resolved_components"][operation_component_id]
+                path = descriptor["files"][0]
+                target_field = "component_id"
+            else:
+                path = operation.get("path")
+                if op not in policy["allowed_operations"] or path not in policy["mutable_paths"]:
+                    raise ContractError("BehaviorPatch operation is outside the mutation policy")
+                target_field = "path"
             if path in seen:
                 raise ContractError("BehaviorPatch cannot modify one path twice")
             seen.add(path)
-            expected_keys = ({"op", "path", "content"} if op == "add" else
-                             {"op", "path", "old_digest", "content"} if op == "replace" else
-                             {"op", "path", "old_digest"})
+            expected_keys = ({"op", target_field, "content"} if op == "add" else
+                             {"op", target_field, "old_digest", "content"}
+                             if op == "replace" else
+                             {"op", target_field, "old_digest"})
             if set(operation) != expected_keys:
                 raise ContractError("BehaviorPatch operation fields do not match its operation")
             if op in {"replace", "remove"}:
@@ -400,8 +558,11 @@ class GenerationService:
             "behavior_patch_digest": digest(patch),
         }
         try:
-            return make_package(files, deepcopy(parent["manifest"]), parent=parent,
-                                provenance=provenance), patch
+            child = make_package(files, deepcopy(parent["manifest"]), parent=parent,
+                                 provenance=provenance)
+            if child["manifest"] != parent["manifest"]:
+                raise ContractError("BehaviorPatch changed the frozen parent manifest")
+            return child, patch
         except Exception as exc:
             raise ContractError(f"BehaviorPatch cannot form a valid child package: {str(exc)[:500]}") from None
 
@@ -426,8 +587,11 @@ class GenerationService:
 
     def generate(self, channel, feedback_bundle_id, improver_package, mutation_policy,
                  expected_revision, *, improver_channel=None,
-                 expected_improver_revision=None, budget=None, stop_event=None):
+                 expected_improver_revision=None, budget=None, stop_event=None,
+                 admission_check=None):
         """Execute ``improve`` and admit its valid child, or persist missing evidence."""
+        if admission_check is not None and not callable(admission_check):
+            raise TypeError("admission_check must be callable")
         feedback = self.feedback(feedback_bundle_id)
         active = self.evolution.active(channel)
         if feedback["channel"] != channel:
@@ -464,6 +628,11 @@ class GenerationService:
         if improver_package["id"] == active["package_id"]:
             raise ContractError("Improver AgentPackage must be independently versioned")
         policy = self._mutation_policy(mutation_policy, active["package"])
+        registry = _component_registry_snapshot(active["package"])
+        if feedback.get("parent_component_registry") != registry:
+            raise ContractError("Feedback component registry does not match the frozen parent")
+        patch_schema = (PATCH_SCHEMA_V2 if policy["targeting"] == "manifest_component_v2"
+                        else PATCH_SCHEMA)
         improver_entry = improver_package["manifest"]["entries"]["improve"]
         # The complete immutable package is the conservative execution closure:
         # controlled code may load source modules or read packaged resources.
@@ -483,19 +652,51 @@ class GenerationService:
             "improver_entry": improver_entry,
             "improver_closure": closure,
             "improver_closure_digest": closure_digest,
+            "patch_contract": patch_schema,
+            "targeting": policy["targeting"],
+            "legacy_path_patch": policy["targeting"] == "legacy_path_v1",
             "mutation_policy": policy, "mutation_policy_digest": digest(policy),
             "created_at": time.time(),
         }
-        components = [{"path": path, "class": policy["component_classes"][path],
-                       "digest": active["package"]["component_digests"].get(path),
-                       "content": active["package"]["files"].get(path),
-                       "exists": path in active["package"]["files"]}
-                      for path in policy["mutable_paths"]]
-        inputs = {"feedback_bundle": {key: deepcopy(value) for key, value in feedback.items()
-                                      if key != "record_digest"},
+        if policy["targeting"] == "manifest_component_v2":
+            components = []
+            for component_id in policy["mutable_components"]:
+                descriptor = deepcopy(policy["resolved_components"][component_id])
+                path = descriptor["files"][0]
+                components.append({**descriptor, "path": path,
+                                   "digest": active["package"]["component_digests"][path],
+                                   "content": active["package"]["files"][path],
+                                   "exists": True})
+        else:
+            components = [{"path": path, "class": policy["component_classes"][path],
+                           "digest": active["package"]["component_digests"].get(path),
+                           "content": active["package"]["files"].get(path),
+                           "exists": path in active["package"]["files"],
+                           "legacy": True}
+                          for path in policy["mutable_paths"]]
+        feedback_input = {key: deepcopy(value) for key, value in feedback.items()
+                          if key != "record_digest"}
+        if policy["targeting"] == "manifest_component_v2":
+            feedback_input["parent_component_registry"] = {
+                "manifest_version": 2,
+                "manifest_digest": registry["manifest_digest"],
+                "components": {
+                    component_id: deepcopy(registry["components"][component_id])
+                    for component_id in policy["mutable_components"]}}
+        inputs = {"feedback_bundle": feedback_input,
                   "parent_components": components,
                   "mutation_policy": policy}
+        def admit(boundary):
+            if admission_check is not None:
+                admission_check({
+                    "kind": "generate_task_agent_candidate",
+                    "boundary": boundary,
+                    "channel": channel,
+                    "expected_revision": expected_revision,
+                })
+
         episode = None
+        admit("generation_create")
         try:
             episode_context = {"split": "development", "split_role": "development",
                                "rsi_role": "candidate_generation", "channel": channel,
@@ -504,11 +705,17 @@ class GenerationService:
             episode = self.tasks.create(
                 "Generate one feedback-bound BehaviorPatch for the active AgentPackage",
                 inputs=inputs,
-                deliverables=[{"name": "behavior_patch", "schema": _patch_schema()}],
+                deliverables=[{"name": "behavior_patch", "schema": _patch_schema(patch_schema)}],
                 budget=budget, capabilities=[], package=improver_package,
                 context=episode_context,
                 constraints={"allowed_effects": [], "wall_seconds": 1200}, entry="improve",
                 improver_channel_registration=improver_registration)
+        except Exception as exc:
+            if episode is not None:
+                episode = self.tasks.get_private(episode["id"])
+            return self._missing(base, f"{type(exc).__name__}: {str(exc)}", episode=episode)
+        admit("generation_run")
+        try:
             episode = self.tasks.run(episode["id"], stop_event=stop_event)
         except Exception as exc:
             if episode is not None:
@@ -546,6 +753,12 @@ class GenerationService:
             child, patch = self._apply_patch(active["package"], artifact["content"], policy,
                                              generation_id, feedback, improver_package)
             patch_digest = digest(patch)
+            if policy["targeting"] == "manifest_component_v2":
+                component_id = patch["activation_probe"]["component_id"]
+                component_target = deepcopy(policy["resolved_components"][component_id])
+            else:
+                component_id = None
+                component_target = None
             current = self.evolution.active(channel)
             if (current["revision"] != active["revision"]
                     or current["package_digest"] != active["package_digest"]):
@@ -555,7 +768,9 @@ class GenerationService:
                 channel, child, hypothesis=patch["hypothesis"],
                 feedback_episode_ids=[item["episode_id"] for item in feedback["episode_refs"]],
                 activation_probe=patch["activation_probe"],
-                component_classes=policy["component_classes"], origin="generated")
+                component_classes=(None if component_id is not None
+                                   else policy["component_classes"]),
+                component_target=component_target, origin="generated")
         except Exception as exc:
             return self._missing(base, f"{type(exc).__name__}: {str(exc)}", episode=episode,
                                  patch_digest=(digest(artifact["content"])
@@ -564,7 +779,9 @@ class GenerationService:
         record = {**base, "status": "generated", "reason": None,
                   "episode_id": episode["id"], "episode_status": episode["status"],
                   "usage": deepcopy(episode["usage"]), "execution": deepcopy(episode["execution"]),
-                  "patch_digest": patch_digest, "candidate_id": candidate["id"],
+                  "patch_digest": patch_digest, "component_id": component_id,
+                  "component_target": component_target,
+                  "candidate_id": candidate["id"],
                   "candidate_package_id": child["id"], "candidate_package_digest": child["digest"],
                   "completed_at": time.time()}
         result = self._insert("task_candidate_generations", record)
@@ -573,6 +790,7 @@ class GenerationService:
             "improver_episode_id": episode["id"], "improver_package_id": improver_package["id"],
             "improver_registration": improver_registration,
             "improver_closure_digest": closure_digest, "patch_digest": patch_digest,
+            "component_id": component_id, "component_target": component_target,
             "candidate_id": candidate["id"], "candidate_package_id": child["id"],
             "record_digest": result["record_digest"],
         })

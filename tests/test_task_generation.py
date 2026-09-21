@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nexgent.tasks.evolution import EvolutionService
 from nexgent.tasks.evolution_view import public_evolution_event
-from nexgent.tasks.generation import GenerationService, PATCH_SCHEMA
+from nexgent.tasks.generation import GenerationService, PATCH_SCHEMA, PATCH_SCHEMA_V2
 from nexgent.tasks import improvers as improver_module
 from nexgent.tasks.improvers import ImproverService
 from nexgent.tasks.improver_seed import default_improver_package
@@ -73,6 +73,24 @@ def improver_package(patch=None, *, mode="patch"):
         provenance={"fixture": "independent-improver", "mode": mode})
 
 
+def v2_improver_package(patch):
+    source = """def improve(payload, context):
+    components = context.read_artifact(payload['input_refs']['parent_components'])['content']
+    policy = context.read_artifact(payload['input_refs']['mutation_policy'])['content']
+    context.read_artifact(payload['input_refs']['feedback_bundle'])
+    if components[0]['component_id'] != 'orchestrator':
+        raise ValueError('missing stable component identity')
+    if policy['resolved_components']['orchestrator']['files'] != ['main.py']:
+        raise ValueError('missing host resolution')
+    artifact = context.publish(PATCH, name='behavior_patch')
+    return {'deliverables': {'behavior_patch': artifact['id']}}
+""".replace("PATCH", repr(patch))
+    return make_package(
+        {"improver.py": source},
+        {"entries": {"execute": "improver.py:improve", "improve": "improver.py:improve"}},
+        provenance={"fixture": "v2-component-improver"})
+
+
 def policy(*paths):
     paths = list(paths or ("main.py",))
     return {"mutable_paths": paths, "component_classes": {path: "O" for path in paths},
@@ -80,17 +98,108 @@ def policy(*paths):
             "max_patch_bytes": 100000}
 
 
-def test_v2_mutation_policy_uses_authoritative_manifest_component_classes():
+def v2_policy(*component_ids):
+    return {"mutable_components": list(component_ids or ("orchestrator",)),
+            "allowed_operations": ["replace"], "max_patch_bytes": 100000}
+
+
+def v2_behavior_patch(parent, *, component_id="orchestrator", content=CHILD_SOURCE):
+    return {"schema": PATCH_SCHEMA_V2,
+            "hypothesis": {
+                "component_id": component_id,
+                "failure_mechanism": "The parent emits the old behavior.",
+                "expected_behavior": "The target component emits the new behavior.",
+                "applicability": "Tasks using the declared component.",
+                "falsifier": "The target component is not loaded or stays unchanged.",
+            },
+            "operations": [{"op": "replace", "component_id": component_id,
+                            "old_digest": parent["component_digests"]["main.py"],
+                            "content": content}],
+            "activation_probe": {"kind": "component_loaded",
+                                 "component_id": component_id}}
+
+
+def test_v2_mutation_policy_resolves_authoritative_component_identity():
     parent = v2_target_package()
-    assert GenerationService._mutation_policy(policy(), parent)["component_classes"] == {
-        "main.py": "O"}
-    forged = policy()
-    forged["component_classes"]["main.py"] = "S"
-    with pytest.raises(ContractError, match="authoritative components"):
-        GenerationService._mutation_policy(forged, parent)
-    uncovered = policy("unregistered.py")
-    with pytest.raises(ContractError, match="authoritative components"):
-        GenerationService._mutation_policy(uncovered, parent)
+    normalized = GenerationService._mutation_policy(v2_policy(), parent)
+    assert normalized["targeting"] == "manifest_component_v2"
+    assert normalized["resolved_components"]["orchestrator"] == {
+        "component_id": "orchestrator", "class": "O", "kind": "entry",
+        "ref": "execute", "files": ["main.py"]}
+    with pytest.raises(ContractError, match="not legacy paths/classes"):
+        GenerationService._mutation_policy(policy(), parent)
+    with pytest.raises(ContractError, match="Unknown manifest component"):
+        GenerationService._mutation_policy(v2_policy("absent"), parent)
+    unsafe_operations = v2_policy()
+    unsafe_operations["allowed_operations"] = ["replace", "remove"]
+    with pytest.raises(ContractError, match="only replacement"):
+        GenerationService._mutation_policy(unsafe_operations, parent)
+
+    shared_manifest = deepcopy(parent["manifest"])
+    shared_manifest["components"]["shared-resource"] = {
+        "class": "O", "kind": "resource", "ref": "main.py"}
+    shared = make_package(parent["files"], shared_manifest,
+                          provenance={"fixture": "shared-component-file"})
+    with pytest.raises(ContractError, match="shares its file"):
+        GenerationService._mutation_policy(v2_policy(), shared)
+
+    memory_manifest = deepcopy(parent["manifest"])
+    memory_manifest["components"]["memory-policy"] = {
+        "class": "M", "kind": "resource", "ref": "memory.txt"}
+    memory_parent = make_package(
+        {**parent["files"], "memory.txt": "frozen memory policy"}, memory_manifest,
+        provenance={"fixture": "memory-component"})
+    with pytest.raises(ContractError, match="only O or S"):
+        GenerationService._mutation_policy(v2_policy("memory-policy"), memory_parent)
+
+
+def test_v2_generation_targets_component_id_and_records_resolved_identity(tmp_path):
+    parent = v2_target_package()
+    patch = v2_behavior_patch(parent)
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    evolution = EvolutionService(tasks)
+    generation = GenerationService(tasks, evolution)
+    evolution.register("general", parent)
+    episode_id = feedback_episode(tasks, parent, evaluate=False)
+    bundle = generation.capture_feedback("general", [episode_id], expected_revision=0)
+
+    result = generation.generate(
+        "general", bundle["id"], v2_improver_package(patch), v2_policy(), 0)
+
+    assert result["status"] == "generated"
+    assert result["patch_contract"] == PATCH_SCHEMA_V2
+    assert result["targeting"] == "manifest_component_v2"
+    assert result["legacy_path_patch"] is False
+    assert result["component_id"] == "orchestrator"
+    assert result["component_target"] == {
+        "component_id": "orchestrator", "class": "O", "kind": "entry",
+        "ref": "execute", "files": ["main.py"]}
+    candidate = evolution.candidate(result["candidate_id"])
+    assert candidate["component_id"] == "orchestrator"
+    assert candidate["component_classes"] == {"orchestrator": "O"}
+    assert candidate["activation_probe"] == {
+        "kind": "component_loaded", "component_id": "orchestrator"}
+    child = tasks.store.package(result["candidate_package_id"])
+    assert child["manifest"] == parent["manifest"]
+    assert child["files"]["main.py"] == CHILD_SOURCE
+
+
+def test_v2_patch_cannot_cross_component_or_supply_a_path():
+    parent = v2_target_package()
+    normalized = GenerationService._mutation_policy(v2_policy(), parent)
+    patch = v2_behavior_patch(parent, component_id="absent")
+    with pytest.raises(ContractError, match="mutable component id"):
+        GenerationService._apply_patch(
+            parent, patch, normalized, "generation-test",
+            {"id": "feedback-test", "digest": "f" * 64},
+            {"id": "package-test", "digest": "i" * 64})
+    forged = v2_behavior_patch(parent)
+    forged["operations"][0]["path"] = "main.py"
+    with pytest.raises(ContractError, match="fields do not match"):
+        GenerationService._apply_patch(
+            parent, forged, normalized, "generation-test",
+            {"id": "feedback-test", "digest": "f" * 64},
+            {"id": "package-test", "digest": "i" * 64})
 
 
 def behavior_patch(parent, *, op="replace", path="main.py", content=CHILD_SOURCE,
@@ -265,6 +374,9 @@ def test_builtin_reference_improver_executes_one_model_call_and_admits_os_patch(
                 "max_tool_calls": 0, "max_nodes": 8})
 
     assert result["status"] == "generated"
+    assert result["patch_contract"] == PATCH_SCHEMA
+    assert result["targeting"] == "legacy_path_v1"
+    assert result["legacy_path_patch"] is True
     assert result["improver_package_id"] == improver["id"]
     assert result["usage"]["model_calls"] == 1
     assert result["usage"]["usage_complete"] is True
@@ -275,6 +387,69 @@ def test_builtin_reference_improver_executes_one_model_call_and_admits_os_patch(
     assert gateway.calls[0]["payload"]["parent_components"][0]["path"] == "main.py"
     child = tasks.store.package(result["candidate_package_id"])
     assert child["files"]["main.py"] == CHILD_SOURCE
+
+
+def test_builtin_reference_improver_emits_manifest_component_v2_patch(tmp_path):
+    parent = v2_target_package()
+    gateway = ImproverGatewayFactory(v2_behavior_patch(parent))
+    tasks = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    evolution = EvolutionService(tasks)
+    generation = GenerationService(tasks, evolution)
+    evolution.register("general", parent)
+    episode_id = feedback_episode(tasks, parent, evaluate=False)
+    bundle = generation.capture_feedback("general", [episode_id], expected_revision=0)
+
+    improver = default_improver_package()
+    result = generation.generate(
+        "general", bundle["id"], improver, v2_policy(), 0,
+        budget={"max_model_calls": 1, "max_completion_tokens": 6000,
+                "max_tool_calls": 0, "max_nodes": 8})
+
+    assert result["status"] == "generated", result.get("reason")
+    assert result["patch_contract"] == PATCH_SCHEMA_V2
+    assert result["targeting"] == "manifest_component_v2"
+    assert result["component_id"] == "orchestrator"
+    assert result["component_target"] == {
+        "component_id": "orchestrator", "class": "O", "kind": "entry",
+        "ref": "execute", "files": ["main.py"]}
+    assert len(gateway.calls) == 1
+    model_input = gateway.calls[0]["payload"]
+    assert model_input["mutation_policy"]["targeting"] == "manifest_component_v2"
+    assert model_input["parent_components"][0]["component_id"] == "orchestrator"
+    assert model_input["parent_components"][0]["digest"] == \
+        parent["component_digests"]["main.py"]
+    child = tasks.store.package(result["candidate_package_id"])
+    assert child["manifest"] == parent["manifest"]
+    assert child["files"]["main.py"] == CHILD_SOURCE
+
+
+@pytest.mark.parametrize("injected_field,injected_value", [
+    ("path", "main.py"),
+    ("class", "O"),
+])
+def test_builtin_reference_improver_rejects_v2_path_or_class_injection(
+        tmp_path, injected_field, injected_value):
+    parent = v2_target_package()
+    patch = v2_behavior_patch(parent)
+    patch["operations"][0][injected_field] = injected_value
+    gateway = ImproverGatewayFactory(patch)
+    tasks = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    evolution = EvolutionService(tasks)
+    generation = GenerationService(tasks, evolution)
+    evolution.register("general", parent)
+    episode_id = feedback_episode(tasks, parent, evaluate=False)
+    bundle = generation.capture_feedback("general", [episode_id], expected_revision=0)
+
+    result = generation.generate(
+        "general", bundle["id"], default_improver_package(), v2_policy(), 0,
+        budget={"max_model_calls": 1, "max_completion_tokens": 6000,
+                "max_tool_calls": 0, "max_nodes": 8})
+
+    assert result["status"] == "missing"
+    assert "operation fields" in result["reason"].casefold()
+    assert result["candidate_id"] is None and result["candidate_package_id"] is None
+    assert not [event for event in evolution.events("general")
+                if event["kind"] == "candidate_admitted"]
 
 
 def test_improver_channel_drift_before_episode_create_runs_nothing(
@@ -396,6 +571,8 @@ def test_generated_candidate_executes_actual_improve_entry_and_records_receipts(
 
     candidate = evolution.candidate(result["candidate_id"])
     assert candidate["origin"] == "generated"
+    assert candidate["targeting"] == "legacy_path_v1"
+    assert candidate["legacy_path_patch"] is True
     assert candidate["activation_probe"] == {"kind": "component_loaded", "path": "main.py"}
     assert candidate["component_classes"]["main.py"] == "O"
     child = tasks.store.package(candidate["package_id"])

@@ -24,7 +24,7 @@ from .benchmarks import (
     host_runtime_fingerprint, validate_adapter, validate_snapshot, validate_tasks,
 )
 from .outcomes import classify_benchmark_outcome, outcome_policy
-from .packages import verify_package
+from .packages import safe_path, split_ref, verify_package
 from .tools import ContractError
 
 
@@ -43,6 +43,68 @@ def _identifier(value, label):
 
 def _id(prefix):
     return prefix + "-" + uuid.uuid4().hex[:16]
+
+
+def _manifest_component(package, component_id):
+    """Resolve a stable v2 id without accepting caller-supplied path/class data."""
+    manifest = package["manifest"]
+    if manifest.get("manifest_version", 1) != 2:
+        raise ContractError("Stable component targets require manifest v2")
+    component = manifest.get("components", {}).get(component_id)
+    if not isinstance(component, dict):
+        raise ContractError(f"Unknown manifest component id: {component_id!r}")
+    component_class, kind, ref = (component.get("class"), component.get("kind"),
+                                  component.get("ref"))
+    try:
+        if kind == "entry":
+            files = [split_ref(manifest["entries"][ref], package["files"])[0]]
+        elif kind == "skill":
+            skill = manifest.get("skills", {})[ref]
+            files = [split_ref(skill["ref"], package["files"])[0]
+                     if skill["kind"] == "controlled_code" else skill["ref"]]
+        elif kind == "workflow":
+            files = [manifest["workflows"][ref]["ref"]]
+        elif kind == "role":
+            prompt_ref = manifest["roles"][ref].get("prompt_ref")
+            files = [] if prompt_ref is None else [prompt_ref]
+        elif kind == "resource":
+            files = [ref]
+        else:
+            raise KeyError(kind)
+    except (KeyError, TypeError, ValueError):
+        raise ContractError(
+            f"Manifest component {component_id!r} cannot resolve its frozen reference") from None
+    for path in files:
+        try:
+            safe_path(path)
+        except Exception as exc:
+            raise ContractError(str(exc)) from None
+        if path not in package["files"]:
+            raise ContractError(
+                f"Manifest component {component_id!r} resolves outside the package")
+    return {"component_id": component_id, "class": component_class,
+            "kind": kind, "ref": ref, "files": files}
+
+
+def _loaded_evidence(component, execution, package):
+    loaded_modules = (execution or {}).get("loaded_modules") or []
+    actual = [path for path in component["files"] if path in loaded_modules]
+    expected_digests = {
+        path: package["component_digests"][path] for path in component["files"]}
+    loaded_digests = {path: expected_digests[path] for path in actual}
+    package_loaded = (execution or {}).get("package_digest") == package["digest"]
+    return {"component_id": component["component_id"],
+            "class": component["class"], "kind": component["kind"],
+            "ref": component["ref"], "expected_files": list(component["files"]),
+            "expected_file_digests": expected_digests,
+            "loaded_files": actual, "loaded_modules": list(loaded_modules),
+            "loaded_file_digests": loaded_digests,
+            "loaded_modules_digest": digest(loaded_modules),
+            "expected_package_digest": package["digest"],
+            "loaded_package_digest": (execution or {}).get("package_digest"),
+            "loaded": (bool(component["files"])
+                       and len(actual) == len(component["files"])
+                       and loaded_digests == expected_digests and package_loaded)}
 
 
 @dataclass(frozen=True)
@@ -223,6 +285,10 @@ class EvolutionService:
                     "candidate_id": record["candidate_id"], "plan_id": plan_id,
                     "trial_id": record_id, "suite_digest": record["suite_digest"],
                     "policy_digest": record["policy_digest"],
+                    "component_id": record.get("component_id"),
+                    "loaded_evidence_digest": digest([
+                        (pair.get("candidate") or {}).get("loaded_evidence")
+                        for pair in record.get("pairs", [])]),
                     "record_digest": record["record_digest"]}
                 event_record_key = "trial_id"
             else:
@@ -231,6 +297,10 @@ class EvolutionService:
                     "monitor_run_id": record_id, "monitor_plan_id": plan_id,
                     "suite_digest": record["suite_digest"],
                     "episode_ids": record["episode_ids"],
+                    "component_id": record.get("component_id"),
+                    "loaded_evidence_digest": digest([
+                        report.get("loaded_evidence")
+                        for report in record.get("reports", [])]),
                     "record_digest": record["record_digest"]}
                 event_record_key = "monitor_run_id"
             with self.store.connect() as db:
@@ -420,7 +490,8 @@ class EvolutionService:
         return state
 
     def propose(self, channel, package, *, hypothesis, feedback_episode_ids,
-                activation_probe=None, component_classes=None, origin="imported"):
+                activation_probe=None, component_classes=None, component_target=None,
+                origin="imported"):
         """Admit a candidate bound to local non-holdout feedback and a hypothesis."""
         active = self.active(channel)
         verify_package(package, active["package"])
@@ -436,19 +507,56 @@ class EvolutionService:
             raise ContractError("Candidate hypothesis must be nonempty bounded text or an object")
         if origin not in {"imported", "generated"}:
             raise ContractError("Candidate origin must be imported or generated")
+        parent = active["package"]
+        manifest_v2 = parent["manifest"].get("manifest_version", 1) == 2
+        if (package["manifest"].get("entries", {}).get("improve")
+                != parent["manifest"].get("entries", {}).get("improve")):
+            raise ContractError("Candidate cannot change the frozen improve entry")
+        if package["manifest"] != parent["manifest"]:
+            raise ContractError("Candidates must preserve the frozen parent manifest")
         activation_probe = ({"kind": "package_loaded"} if activation_probe is None
                             else _copy(activation_probe, "Activation probe"))
-        if (not isinstance(activation_probe, dict)
-                or activation_probe.get("kind") not in {"package_loaded", "component_loaded"}
-                or activation_probe.get("kind") == "component_loaded"
-                and (not isinstance(activation_probe.get("path"), str)
-                     or activation_probe["path"] not in package["files"])):
-            raise ContractError("Candidate activation probe is invalid")
-        component_classes = {} if component_classes is None else _copy(
-            component_classes, "Component classes")
-        if (not isinstance(component_classes, dict)
-                or any(value not in {"O", "M", "S"} for value in component_classes.values())):
-            raise ContractError("Candidate component classes must use O, M, or S")
+        if manifest_v2:
+            if (not isinstance(activation_probe, dict)
+                    or set(activation_probe) != {"kind", "component_id"}
+                    or activation_probe.get("kind") != "component_loaded"
+                    or not isinstance(activation_probe.get("component_id"), str)):
+                raise ContractError(
+                    "Manifest v2 candidate activation probe must use a stable component id")
+            resolved_target = _manifest_component(parent, activation_probe["component_id"])
+            if not resolved_target["files"]:
+                raise ContractError("Manifest component has no loadable declared file")
+            if resolved_target["class"] not in {"O", "S"}:
+                raise ContractError(
+                    "Component-targeted manifest v2 evolution currently permits only O or S")
+            if component_target is not None and _copy(
+                    component_target, "Component target") != resolved_target:
+                raise ContractError("Candidate component target differs from the frozen manifest")
+            if component_classes not in (None, {}):
+                raise ContractError(
+                    "Manifest v2 candidate classes are resolved by the host, not the caller")
+            component_id = resolved_target["component_id"]
+            if (not isinstance(hypothesis, dict)
+                    or hypothesis.get("component_id") != component_id):
+                raise ContractError(
+                    "Manifest v2 candidate hypothesis must name the target component id")
+            component_classes = {component_id: resolved_target["class"]}
+            targeting = "manifest_component_v2"
+        else:
+            if (not isinstance(activation_probe, dict)
+                    or activation_probe.get("kind") not in {"package_loaded", "component_loaded"}
+                    or activation_probe.get("kind") == "component_loaded"
+                    and (not isinstance(activation_probe.get("path"), str)
+                         or activation_probe["path"] not in package["files"])):
+                raise ContractError("Candidate activation probe is invalid")
+            component_classes = {} if component_classes is None else _copy(
+                component_classes, "Component classes")
+            if (not isinstance(component_classes, dict)
+                    or any(value not in {"O", "M", "S"} for value in component_classes.values())):
+                raise ContractError("Candidate component classes must use O, M, or S")
+            resolved_target = None
+            component_id = None
+            targeting = "legacy_path_v1"
         if (not isinstance(feedback_episode_ids, list) or not feedback_episode_ids
                 or len(feedback_episode_ids) > 256
                 or any(not isinstance(identity, str) for identity in feedback_episode_ids)
@@ -473,7 +581,6 @@ class EvolutionService:
             feedback.append({"episode_id": identity, "package_id": episode["package_id"],
                              "status": episode["status"], "updated_at": episode["updated_at"]})
 
-        parent = active["package"]
         parent_improve = parent["manifest"]["entries"].get("improve")
         candidate_improve = package["manifest"]["entries"].get("improve")
         if candidate_improve != parent_improve:
@@ -493,10 +600,26 @@ class EvolutionService:
         if not (component_delta["added"] or component_delta["removed"]
                 or component_delta["changed"] or component_delta["manifest_changed"]):
             raise ContractError("Candidate package has no component delta")
+        if manifest_v2:
+            changed_files = set(component_delta["added"] + component_delta["removed"]
+                                + component_delta["changed"])
+            overlapping = {
+                path: sorted(component_id for component_id in parent["manifest"]["components"]
+                             if path in _manifest_component(parent, component_id)["files"])
+                for path in changed_files}
+            if (component_delta["manifest_changed"]
+                    or not changed_files
+                    or not changed_files <= set(resolved_target["files"])
+                    or any(owners != [component_id]
+                           for owners in overlapping.values())):
+                raise ContractError(
+                    "Manifest v2 candidate crosses its declared component boundary")
         evidence = {"hypothesis": hypothesis, "feedback": feedback,
                     "component_delta": component_delta, "parent_package_digest": parent["digest"],
                     "package_digest": package["digest"], "activation_probe": activation_probe,
-                    "component_classes": component_classes, "origin": origin}
+                    "component_classes": component_classes, "component_id": component_id,
+                    "component_target": resolved_target, "targeting": targeting,
+                    "origin": origin}
         self.store.put_package(package)
         record = {"id": _id("candidate"), "channel": channel,
                   "parent_package_id": active["package_id"],
@@ -506,6 +629,8 @@ class EvolutionService:
                   "feedback_episode_ids": list(feedback_episode_ids),
                   "feedback_evidence": feedback,
                   "component_delta": component_delta, "component_classes": component_classes,
+                  "component_id": component_id, "component_target": resolved_target,
+                  "targeting": targeting, "legacy_path_patch": not manifest_v2,
                   "activation_probe": activation_probe, "origin": origin,
                   "evidence_digest": digest(evidence),
                   "created_at": time.time()}
@@ -586,6 +711,8 @@ class EvolutionService:
         child = self.store.package(candidate["package_id"])
         provenance = child.get("provenance") or {}
         improve_path = (generation.get("improver_entry") or "").split(":", 1)[0]
+        component_targeted = candidate.get("targeting") == "manifest_component_v2"
+        artifact_content = artifact.get("content")
         if (episode.get("status") != "completed"
                 or set(episode.get("output_refs", {})) != {"behavior_patch"}
                 or episode.get("task", {}).get("entry") != "improve"
@@ -602,7 +729,22 @@ class EvolutionService:
                 or episode.get("usage", {}).get("usage_complete") is not True
                 or generation.get("usage") != episode.get("usage")
                 or generation.get("execution") != execution
-                or digest(artifact.get("content")) != generation["patch_digest"]
+                or generation.get("targeting") != candidate.get("targeting")
+                or generation.get("legacy_path_patch") != candidate.get("legacy_path_patch")
+                or generation.get("component_id") != candidate.get("component_id")
+                or generation.get("component_target") != candidate.get("component_target")
+                or (component_targeted
+                    and (generation.get("patch_contract") != "nexgent.behavior-patch.v2"
+                         or not isinstance(artifact_content, dict)
+                         or artifact_content.get("schema") != "nexgent.behavior-patch.v2"
+                         or child.get("manifest") != self.store.package(
+                             candidate["parent_package_id"]).get("manifest")))
+                or (not component_targeted
+                    and (generation.get("patch_contract") not in {
+                             None, "nexgent.behavior-patch.v1"}
+                         or not isinstance(artifact_content, dict)
+                         or artifact_content.get("schema") != "nexgent.behavior-patch.v1"))
+                or digest(artifact_content) != generation["patch_digest"]
                 or artifact.get("producer", {}).get("package_digest")
                 != generation.get("improver_package_digest")
                 or provenance.get("origin") != "generated"
@@ -688,6 +830,9 @@ class EvolutionService:
                   "channel": candidate["channel"], "parent_package_id": candidate["parent_package_id"],
                   "parent_package_digest": candidate["parent_package_digest"],
                   "package_id": candidate["package_id"], "package_digest": candidate["package_digest"],
+                  "component_id": candidate.get("component_id"),
+                  "component_target": deepcopy(candidate.get("component_target")),
+                  "targeting": candidate.get("targeting", "legacy_path_v1"),
                   "suite": suite, "suite_digest": suite_digest, "split_role": split_role,
                   "arm_schedule": arm_schedule, "environment": environment,
                    "environment_digest": digest(environment),
@@ -716,7 +861,9 @@ class EvolutionService:
             raise ContractError("Benchmark evaluator changed from the paired trial plan")
         candidate = self.candidate(plan["candidate_id"])
         if (candidate["parent_package_id"] != plan["parent_package_id"]
-                or candidate["package_id"] != plan["package_id"]):
+                or candidate["package_id"] != plan["package_id"]
+                or candidate.get("component_id") != plan.get("component_id")
+                or candidate.get("component_target") != plan.get("component_target")):
             raise ContractError("Paired trial plan candidate identity mismatch")
         parent = self.store.package(candidate["parent_package_id"])
         proposed = self.store.package(candidate["package_id"])
@@ -774,6 +921,9 @@ class EvolutionService:
                 if digest(validate_snapshot(adapter.snapshot())) != digest(snapshot):
                     raise ContractError("Benchmark evaluator changed during the paired trial")
             parent_run, candidate_run = runs["parent"], runs["candidate"]
+            if candidate.get("component_target") is not None:
+                candidate_run["loaded_evidence"] = _loaded_evidence(
+                    candidate["component_target"], candidate_run.get("execution"), proposed)
             pairs.append({"task_ref": deepcopy(task_ref), "task_ref_digest": digest(task_ref),
                           "memory_seed_digest": digest(memory_seed["parent"]),
                           "arm_order": order, "parent": parent_run, "candidate": candidate_run})
@@ -781,7 +931,11 @@ class EvolutionService:
         record = {"id": _id("trial"), "plan_id": plan_id, "candidate_id": candidate["id"],
                   "channel": candidate["channel"], "parent_package_id": parent["id"],
                   "parent_package_digest": parent["digest"], "package_id": proposed["id"],
-                  "package_digest": proposed["digest"], "suite": suite,
+                  "package_digest": proposed["digest"],
+                  "component_id": candidate.get("component_id"),
+                  "component_target": deepcopy(candidate.get("component_target")),
+                  "targeting": candidate.get("targeting", "legacy_path_v1"),
+                  "suite": suite,
                   "suite_digest": plan["suite_digest"], "split_role": suite["split_role"],
                   "policy": deepcopy(plan["policy"]), "policy_digest": plan["policy_digest"],
                   "arm_order": arm_order, "pairs": pairs, "created_at": time.time()}
@@ -869,14 +1023,46 @@ class EvolutionService:
                     "usage_complete": all(row["usage_complete"] for row in rows)}
 
         parent, proposed = measurements("parent"), measurements("candidate")
-        probe = self.candidate(trial["candidate_id"]).get("activation_probe") or {}
+        candidate = self.candidate(trial["candidate_id"])
+        candidate_package = self.store.package(candidate["package_id"])
+        probe = candidate.get("activation_probe") or {}
+        activation_rows = []
         if probe.get("kind") == "package_loaded":
             behavior_activated = all(row["candidate"].get("error") is None
                                      for row in trial["pairs"])
+            activation_rows = [{"episode_id": row["candidate"]["episode_id"],
+                                "package_loaded": row["candidate"].get("error") is None}
+                               for row in trial["pairs"]]
+        elif (probe.get("kind") == "component_loaded"
+              and candidate.get("targeting") == "manifest_component_v2"):
+            component = candidate.get("component_target")
+            if (not isinstance(component, dict)
+                    or component.get("component_id") != probe.get("component_id")):
+                behavior_activated = False
+            else:
+                for row in trial["pairs"]:
+                    actual = _loaded_evidence(
+                        component, row["candidate"].get("execution"), candidate_package)
+                    if row["candidate"].get("loaded_evidence") != actual:
+                        raise ContractError("Paired trial component loaded evidence changed")
+                    activation_rows.append({"episode_id": row["candidate"]["episode_id"],
+                                            **actual})
+                behavior_activated = bool(activation_rows) and all(
+                    row["loaded"] for row in activation_rows)
         elif probe.get("kind") == "component_loaded":
             behavior_activated = all(
                 probe.get("path") in ((row["candidate"].get("execution") or {}).get("loaded_modules") or [])
                 for row in trial["pairs"])
+            activation_rows = [
+                {"episode_id": row["candidate"]["episode_id"], "legacy": True,
+                 "path": probe.get("path"),
+                 "loaded_files": ([probe.get("path")] if probe.get("path") in
+                                  ((row["candidate"].get("execution") or {}).get(
+                                      "loaded_modules") or []) else []),
+                 "loaded": probe.get("path") in
+                           ((row["candidate"].get("execution") or {}).get(
+                               "loaded_modules") or [])}
+                for row in trial["pairs"]]
         else:
             behavior_activated = False
         regressions = sum(
@@ -898,6 +1084,9 @@ class EvolutionService:
                  "behavior_activated": behavior_activated}
         record = {"id": _id("decision"), "trial_id": trial_id,
                   "candidate_id": trial["candidate_id"], "channel": trial["channel"],
+                  "component_id": candidate.get("component_id"),
+                  "component_target": deepcopy(candidate.get("component_target")),
+                  "loaded_evidence": activation_rows,
                   "policy": asdict(policy), "measurements": {"parent": parent, "candidate": proposed,
                                                                "regressions": regressions,
                                                                "paired_task_deltas": deltas,
@@ -906,7 +1095,10 @@ class EvolutionService:
         result = self._insert("task_evolution_decisions", record)
         self._event(trial["channel"], "promotion_assessed",
                     {"decision_id": record["id"], "trial_id": trial_id,
-                     "eligible": record["eligible"], "record_digest": result["record_digest"]})
+                     "eligible": record["eligible"],
+                     "component_id": candidate.get("component_id"),
+                     "loaded_evidence_digest": digest(activation_rows),
+                     "record_digest": result["record_digest"]})
         return result
 
     def decision(self, decision_id):
@@ -929,7 +1121,11 @@ class EvolutionService:
         environment = self._environment_snapshot(tasks)
         record = {"id": _id("monitor-plan"), "candidate_id": candidate_id,
                   "channel": candidate["channel"], "package_id": candidate["package_id"],
-                   "package_digest": candidate["package_digest"], "suite": suite,
+                   "package_digest": candidate["package_digest"],
+                   "component_id": candidate.get("component_id"),
+                   "component_target": deepcopy(candidate.get("component_target")),
+                   "targeting": candidate.get("targeting", "legacy_path_v1"),
+                   "suite": suite,
                    "suite_digest": digest(suite),
                    "task_schedule": [digest(task) for task in tasks],
                    "environment": environment, "environment_digest": digest(environment),
@@ -964,6 +1160,13 @@ class EvolutionService:
         candidate, decision = self.candidate(candidate_id), self.decision(decision_id)
         if decision["candidate_id"] != candidate_id or not decision["eligible"]:
             raise ContractError("Candidate has no eligible paired promotion decision")
+        if (decision.get("component_id") != candidate.get("component_id")
+                or decision.get("component_target") != candidate.get("component_target")
+                or (candidate.get("targeting") == "manifest_component_v2"
+                    and (not decision.get("loaded_evidence")
+                         or not all(row.get("loaded") is True
+                                    for row in decision["loaded_evidence"])))):
+            raise ContractError("Promotion lacks the candidate component loaded evidence")
         if not isinstance(monitor_plan_id, str) or not monitor_plan_id:
             raise ContractError("Promotion requires a pre-registered monitoring plan")
         generation = self._verify_generated_candidate(candidate)
@@ -976,10 +1179,17 @@ class EvolutionService:
         monitor_plan = self.monitor_plan(monitor_plan_id)
         if (monitor_plan["candidate_id"] != candidate_id
                 or monitor_plan["package_id"] != package["id"]
-                or monitor_plan["package_digest"] != package["digest"]):
+                or monitor_plan["package_digest"] != package["digest"]
+                or monitor_plan.get("component_id") != candidate.get("component_id")
+                or monitor_plan.get("component_target") != candidate.get("component_target")):
             raise ContractError("Monitoring plan does not belong to the promoted candidate")
         promotion = {"candidate_id": candidate_id, "decision_id": decision_id,
                      "trial_id": decision["trial_id"], "policy": deepcopy(decision["policy"]),
+                     "component_id": candidate.get("component_id"),
+                     "component_target": deepcopy(candidate.get("component_target")),
+                     "selection_loaded_evidence": deepcopy(decision.get("loaded_evidence")),
+                     "selection_loaded_evidence_digest": digest(
+                         decision.get("loaded_evidence") or []),
                      "monitor_plan_id": monitor_plan_id,
                      "monitor_plan_digest": monitor_plan["record_digest"],
                      "monitoring_thresholds": {
@@ -1004,6 +1214,12 @@ class EvolutionService:
                                 "decision_id": decision_id, "trial_id": decision["trial_id"],
                                 "monitor_plan_id": monitor_plan_id,
                                 "monitor_plan_digest": promotion["monitor_plan_digest"],
+                                "component_id": promotion["component_id"],
+                                "component_target": promotion["component_target"],
+                                "selection_loaded_evidence": promotion[
+                                    "selection_loaded_evidence"],
+                                "selection_loaded_evidence_digest": promotion[
+                                    "selection_loaded_evidence_digest"],
                                 "policy": deepcopy(decision["policy"]),
                                 "monitoring_thresholds": promotion["monitoring_thresholds"],
                                 "decision_record_digest": decision["record_digest"]})
@@ -1023,11 +1239,16 @@ class EvolutionService:
         if not isinstance(plan_id, str):
             raise ContractError("Active deployment has no pre-registered monitoring plan")
         plan = self.monitor_plan(plan_id)
+        candidate = self.candidate(plan["candidate_id"])
         suite = plan["suite"]
         if (plan["record_digest"] != promotion.get("monitor_plan_digest")
                 or plan["package_id"] != active["package_id"]
                 or plan["package_digest"] != active["package_digest"]
                 or plan.get("outcome_policy") != outcome_policy()
+                or plan.get("component_id") != promotion.get("component_id")
+                or plan.get("component_target") != promotion.get("component_target")
+                or candidate.get("component_id") != plan.get("component_id")
+                or candidate.get("component_target") != plan.get("component_target")
                 or getattr(adapter, "id", None) != suite["benchmark_id"]
                 or digest(validate_snapshot(adapter.snapshot())) != digest(suite["snapshot"])):
             raise ContractError("Active monitoring plan identity changed")
@@ -1077,8 +1298,13 @@ class EvolutionService:
                     "package_id": active["package_id"],
                     "package_digest": active["package_digest"]})
             self.tasks.run(state["id"], stop_event=stop_event)
-            reports.append(self.tasks.evaluate(
-                state["id"], adapter, deepcopy(task_ref), snapshot=deepcopy(suite["snapshot"])))
+            report = self.tasks.evaluate(
+                state["id"], adapter, deepcopy(task_ref), snapshot=deepcopy(suite["snapshot"]))
+            if candidate.get("component_target") is not None:
+                episode = self.tasks.get_private(state["id"])
+                report["loaded_evidence"] = _loaded_evidence(
+                    candidate["component_target"], episode.get("execution"), active["package"])
+            reports.append(report)
             if (digest(validate_snapshot(adapter.snapshot())) != digest(suite["snapshot"])
                     or digest(self._environment_snapshot(tasks)) != plan["environment_digest"]):
                 raise ContractError("Monitoring evaluator or environment changed during execution")
@@ -1094,6 +1320,8 @@ class EvolutionService:
         record = {"id": _id("monitor-run"), "monitor_plan_id": plan_id,
                   "channel": channel, "package_id": active["package_id"],
                   "package_digest": active["package_digest"],
+                  "component_id": candidate.get("component_id"),
+                  "component_target": deepcopy(candidate.get("component_target")),
                   "suite_digest": plan["suite_digest"], "reports": reports,
                   "episode_ids": [row["episode_id"] for row in reports],
                   "created_at": time.time()}
@@ -1186,7 +1414,11 @@ class EvolutionService:
         if (not promotion_events
                 or promotion_events[-1].get("policy") != promotion.get("policy")
                 or promotion_events[-1].get("monitoring_thresholds")
-                != promotion.get("monitoring_thresholds")):
+                != promotion.get("monitoring_thresholds")
+                or promotion_events[-1].get("component_id")
+                != promotion.get("component_id")
+                or promotion_events[-1].get("selection_loaded_evidence_digest")
+                != promotion.get("selection_loaded_evidence_digest")):
             raise ContractError("Active monitoring policy does not match its promotion event")
         thresholds = deepcopy(promotion["monitoring_thresholds"])
         expected_tasks = Counter(digest(task) for task in plan["suite"]["tasks"])
@@ -1224,6 +1456,12 @@ class EvolutionService:
             if (not isinstance(frozen_report, dict)
                     or frozen_report.get("evaluation") != evaluation):
                 raise ContractError("Monitoring result changed after its immutable guard run")
+            loaded_evidence = None
+            if promotion.get("component_target") is not None:
+                loaded_evidence = _loaded_evidence(
+                    promotion["component_target"], episode.get("execution"), active["package"])
+                if frozen_report.get("loaded_evidence") != loaded_evidence:
+                    raise ContractError("Monitoring component loaded evidence changed")
             evaluation_events = [event for event in self.store.events(identity)
                                  if event["kind"] == "benchmark_evaluated"]
             if (not evaluation_events
@@ -1236,7 +1474,9 @@ class EvolutionService:
             complete = (type(accepted) is bool and evaluation.get("score_available") is True
                         and type(value) in {int, float} and math.isfinite(value)
                         and episode.get("status") in {"completed", "failed"}
-                        and episode.get("usage", {}).get("usage_complete") is True)
+                        and episode.get("usage", {}).get("usage_complete") is True
+                        and (loaded_evidence is None
+                             or loaded_evidence.get("loaded") is True))
             if complete:
                 scores.append(float(value))
                 successes.append(accepted is True)
@@ -1244,6 +1484,8 @@ class EvolutionService:
                 missing.append(identity)
             observations.append({"episode_id": identity, "evaluation_digest": digest(evaluation),
                                  "task_ref_digest": task_digest,
+                                 "component_id": promotion.get("component_id"),
+                                 "loaded_evidence": loaded_evidence,
                                  "accepted": accepted if type(accepted) is bool else None,
                                  "score": float(value) if complete else None,
                                  "usage_complete": episode.get("usage", {}).get("usage_complete") is True,
