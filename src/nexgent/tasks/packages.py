@@ -16,9 +16,13 @@ from jsonschema import Draft202012Validator
 from ..kernel.programs import canonical, digest, validate_source, ProgramError
 
 SCHEMA = "nexgent.agent-package.v1"
+MANIFEST_VERSION = 2
 CAPABILITIES = frozenset({"ask", "tool", "parallel", "skill", "delegate", "read_artifact",
                           "publish", "memory_search", "remember", "plan", "feedback"})
 LOCAL_METHODS = frozenset({"call", "resource"})
+IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,99}")
+COMPONENT_CLASSES = frozenset({"O", "M", "S"})
+COMPONENT_KINDS = frozenset({"role", "workflow", "skill", "entry", "resource"})
 
 
 class PackageError(ValueError):
@@ -87,6 +91,95 @@ def _schema(schema, label):
         raise PackageError(f"{label} is invalid: {str(exc)[:500]}") from None
 
 
+def _identifier(value, label):
+    if not isinstance(value, str) or not IDENTIFIER.fullmatch(value):
+        raise PackageError(f"{label} must be a bounded identifier")
+    return value
+
+
+def _resource(ref, files, label):
+    safe_path(ref)
+    if ref not in files:
+        raise PackageError(f"{label} resource is absent: {ref!r}")
+    return ref
+
+
+def _registry(value, label):
+    if not isinstance(value, dict):
+        raise PackageError(f"Manifest {label} must be an object")
+    for name, definition in value.items():
+        _identifier(name, f"{label[:-1].capitalize()} id")
+        if not isinstance(definition, dict):
+            raise PackageError(f"Manifest {label} definitions must be objects")
+    return value
+
+
+def _manifest_v2(manifest, files, entries, skills):
+    """Validate the first-class registries introduced by manifest version 2."""
+    missing = {"roles", "workflows", "components", "orchestrator"} - manifest.keys()
+    if missing:
+        raise PackageError("Manifest v2 needs roles, workflows, components, and orchestrator")
+
+    roles = _registry(manifest["roles"], "roles")
+    for name, role in roles.items():
+        if "prompt_ref" in role:
+            _resource(role["prompt_ref"], files, f"Role {name!r} prompt")
+        capabilities = role.get("capabilities", [])
+        if (not isinstance(capabilities, list)
+                or any(not isinstance(item, str) or item not in CAPABILITIES
+                       for item in capabilities)
+                or len(set(capabilities)) != len(capabilities)):
+            raise PackageError(f"Role {name!r} capabilities must be unique registered capabilities")
+
+    workflows = _registry(manifest["workflows"], "workflows")
+    for name, workflow in workflows.items():
+        ref = _resource(workflow.get("ref"), files, f"Workflow {name!r}")
+        if not ref.endswith(".json"):
+            raise PackageError(f"Workflow {name!r} must reference a JSON resource")
+        try:
+            definition = json.loads(files[ref])
+        except (ValueError, TypeError):
+            raise PackageError(f"Workflow {name!r} is not valid JSON") from None
+        if not isinstance(definition, dict):
+            raise PackageError(f"Workflow {name!r} must contain an object")
+        _schema(workflow.get("input_schema", {}), f"Workflow {name!r} input schema")
+        _schema(workflow.get("output_schema", {}), f"Workflow {name!r} output schema")
+        if ("max_parallel" in workflow
+                and (type(workflow["max_parallel"]) is not int
+                     or not 1 <= workflow["max_parallel"] <= 256)):
+            raise PackageError(f"Workflow {name!r} has an invalid parallelism ceiling")
+
+    components = _registry(manifest["components"], "components")
+    targets = set()
+    registries = {"role": roles, "workflow": workflows, "skill": skills, "entry": entries}
+    for component_id, component in components.items():
+        component_class = component.get("class")
+        kind, ref = component.get("kind"), component.get("ref")
+        if component_class not in COMPONENT_CLASSES:
+            raise PackageError(f"Component {component_id!r} class must be O, M, or S")
+        if kind not in COMPONENT_KINDS:
+            raise PackageError(f"Component {component_id!r} has an unsupported kind")
+        if kind == "resource":
+            _resource(ref, files, f"Component {component_id!r}")
+        else:
+            _identifier(ref, f"Component {component_id!r} reference")
+            if ref not in registries[kind]:
+                raise PackageError(
+                    f"Component {component_id!r} references an absent {kind}: {ref!r}")
+        target = (kind, ref)
+        if target in targets:
+            raise PackageError(f"Duplicate component reference: {kind}:{ref}")
+        targets.add(target)
+
+    orchestrator = manifest["orchestrator"]
+    _identifier(orchestrator, "Manifest orchestrator")
+    component = components.get(orchestrator)
+    if component is None:
+        raise PackageError("Manifest orchestrator must reference a registered component")
+    if component.get("class") != "O" or component.get("kind") not in {"entry", "workflow"}:
+        raise PackageError("Manifest orchestrator must reference an O entry or workflow component")
+
+
 def _content(files, manifest, provenance):
     if not isinstance(files, dict) or not files or len(files) > 256:
         raise PackageError("Package files must be a nonempty object of at most 256 text files")
@@ -109,6 +202,9 @@ def _content(files, manifest, provenance):
         raise PackageError("Package file and directory paths collide")
     if not isinstance(manifest, dict):
         raise PackageError("Package manifest must be an object")
+    manifest_version = manifest.get("manifest_version", 1)
+    if type(manifest_version) is not int or manifest_version not in {1, MANIFEST_VERSION}:
+        raise PackageError("Unsupported AgentPackage manifest version")
     entries = manifest.get("entries")
     if not isinstance(entries, dict) or "execute" not in entries or set(entries) - {"execute", "improve"}:
         raise PackageError("Manifest needs execute and optional improve entries")
@@ -118,8 +214,7 @@ def _content(files, manifest, provenance):
     if not isinstance(skills, dict):
         raise PackageError("Manifest skills must be an object")
     for name, skill in skills.items():
-        if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,99}", name)
-                or not isinstance(skill, dict)):
+        if (not isinstance(name, str) or not IDENTIFIER.fullmatch(name) or not isinstance(skill, dict)):
             raise PackageError("Skills need names and object definitions")
         kind, ref = skill.get("kind"), skill.get("ref")
         if kind not in {"controlled_code", "prompt_protocol", "workflow"}:
@@ -141,6 +236,8 @@ def _content(files, manifest, provenance):
         _schema(skill.get("output_schema", {}), f"Skill {name!r} output schema")
         if "max_tokens" in skill and (type(skill["max_tokens"]) is not int or not 1 <= skill["max_tokens"] <= 12000):
             raise PackageError(f"Skill {name!r} has an invalid token ceiling")
+    if manifest_version == MANIFEST_VERSION:
+        _manifest_v2(manifest, files, entries, skills)
     if not isinstance(provenance, dict):
         raise PackageError("Package provenance must be an object")
     try:

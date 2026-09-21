@@ -67,6 +67,79 @@ def test_manifest_and_prompt_resource_change_content_identity():
     assert make_package({**original["files"], "skills/prompt.md": "review skeptically"}, changed)["digest"] != candidate["digest"]
 
 
+def v2_package(manifest_changes=None):
+    files = {
+        "agent/main.py": "def execute(payload, context):\n    return payload\n",
+        "prompts/reviewer.md": "Review the result.",
+        "workflows/main.json": '{"nodes": []}',
+        "resources/memory-policy.json": "{}",
+    }
+    manifest = {
+        "manifest_version": 2,
+        "entries": {"execute": "agent/main.py:execute"},
+        "skills": {},
+        "roles": {"reviewer": {"prompt_ref": "prompts/reviewer.md", "capabilities": ["ask"]}},
+        "workflows": {"main": {"ref": "workflows/main.json", "max_parallel": 2}},
+        "components": {
+            "main-orchestrator": {"class": "O", "kind": "workflow", "ref": "main"},
+            "review-role": {"class": "S", "kind": "role", "ref": "reviewer"},
+            "memory-policy": {"class": "M", "kind": "resource", "ref": "resources/memory-policy.json"},
+        },
+        "orchestrator": "main-orchestrator",
+    }
+    if manifest_changes:
+        manifest.update(manifest_changes)
+    return make_package(files, manifest)
+
+
+def test_manifest_v2_registers_first_class_agent_components():
+    candidate = v2_package()
+    assert candidate["manifest"]["manifest_version"] == 2
+    assert candidate["manifest"]["components"]["main-orchestrator"] == {
+        "class": "O", "kind": "workflow", "ref": "main"}
+    assert verify_package(candidate) == candidate
+
+
+def test_v1_manifests_remain_loadable_with_implicit_or_explicit_version():
+    implicit = package()
+    explicit = make_package(implicit["files"], {
+        "manifest_version": 1, "entries": {"execute": "agent/main.py:execute"}})
+    assert verify_package(implicit) == implicit
+    assert verify_package(explicit) == explicit
+
+
+@pytest.mark.parametrize(("manifest_changes", "match"), [
+    ({"components": {
+        "main-orchestrator": {"class": "O", "kind": "workflow", "ref": "missing"}}},
+     "absent workflow"),
+    ({"components": {
+        "main-orchestrator": {"class": "O", "kind": "workflow", "ref": "main"},
+        "duplicate": {"class": "S", "kind": "workflow", "ref": "main"}}},
+     "Duplicate component reference"),
+    ({"components": {
+        "main-orchestrator": {"class": "X", "kind": "workflow", "ref": "main"}}},
+     "class must be O, M, or S"),
+    ({"orchestrator": "missing"}, "registered component"),
+    ({"components": {
+        "main-orchestrator": {"class": "S", "kind": "role", "ref": "reviewer"}}},
+     "O entry or workflow"),
+])
+def test_manifest_v2_rejects_invalid_component_contracts(manifest_changes, match):
+    with pytest.raises(PackageError, match=match):
+        v2_package(manifest_changes)
+
+
+@pytest.mark.parametrize(("manifest_changes", "match"), [
+    ({"roles": {"reviewer": {"prompt_ref": "prompts/missing.md"}}}, "resource is absent"),
+    ({"roles": {"reviewer": {"capabilities": ["shell"]}}}, "registered capabilities"),
+    ({"roles": {"reviewer": {"capabilities": [{}]}}}, "registered capabilities"),
+    ({"workflows": {"main": {"ref": "workflows/missing.json"}}}, "resource is absent"),
+])
+def test_manifest_v2_rejects_invalid_first_class_registry_references(manifest_changes, match):
+    with pytest.raises(PackageError, match=match):
+        v2_package(manifest_changes)
+
+
 def test_real_multimodule_execution_and_receipts():
     candidate = package("def execute(payload, context):\n    return context.call('skills/check.py:check', payload)\n",
                         **{"skills/check.py": "def check(payload, context):\n    return {'total': sum(payload), 'note': context.resource('resources/note.md')}\n",
