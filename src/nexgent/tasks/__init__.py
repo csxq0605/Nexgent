@@ -1,5 +1,15 @@
 """Task execution, reusable agent packages and feedback-driven improvement."""
 
 from .benchmarks import BenchmarkAdapter, BenchmarkDescriptor, BenchmarkRegistry
+from .orchestration import (
+    ArtifactBinding, ControlBinding, ExecutablePlan, FailureAction, FailureRoute,
+    JoinMode, JoinPolicy, LocalLimits, NodeExecution, NodeStatus, PlanExecution,
+    PlanNode, PlanRevision, PlanSpec, PortSpec, validate_revision,
+)
 
-__all__ = ["BenchmarkAdapter", "BenchmarkDescriptor", "BenchmarkRegistry"]
+__all__ = [
+    "ArtifactBinding", "BenchmarkAdapter", "BenchmarkDescriptor", "BenchmarkRegistry",
+    "ControlBinding", "ExecutablePlan", "FailureAction", "FailureRoute", "JoinMode",
+    "JoinPolicy", "LocalLimits", "NodeExecution", "NodeStatus", "PlanExecution",
+    "PlanNode", "PlanRevision", "PlanSpec", "PortSpec", "validate_revision",
+]
