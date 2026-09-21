@@ -722,6 +722,7 @@ class TaskService:
             methods = {node["id"]: node["method"] for node in workflow["nodes"]}
             plan_nodes = {node.id: node for node in execution.plan.nodes}
             workflow_nodes, _, _, workflow_artifacts = _validate(workflow)
+            resumable_local_nodes = set()
             for node_state in execution.node_executions:
                 for artifact_ref in (
                         *node_state.input_artifact_refs,
@@ -733,8 +734,47 @@ class TaskService:
                             f"Plan node {node_state.node_id} references invalid artifact evidence"
                         ) from exc
                 if node_state.status is NodeStatus.RUNNING:
-                    raise RecoveryRequired(
-                        f"Plan node {node_state.node_id} was admitted without a durable outcome")
+                    node_id = node_state.node_id
+                    path = f"plan/nodes/{node_id}"
+                    if (methods[node_id] != "loop"
+                            or node_id in receipts
+                            or self.store.rpc_find(identity, path) is not None
+                            or node_state.iteration_count != 0):
+                        raise RecoveryRequired(
+                            f"Plan node {node_id} was admitted without a durable outcome")
+                    try:
+                        loop_params = _node_parameters(
+                            node_id, workflow_nodes, workflow_artifacts,
+                            payload, receipts,
+                        )
+                    except Exception as exc:
+                        raise RecoveryRequired(
+                            f"Running loop node {node_id} inputs cannot be reconstructed"
+                        ) from exc
+                    if (tuple(self._references(identity, loop_params))
+                            != node_state.input_artifact_refs):
+                        raise RecoveryRequired(
+                            f"Running loop node {node_id} input evidence differs from its dependencies")
+                    for journal in self.store.rpc_under(
+                            identity, f"{path}/iterations/"):
+                        request = journal.get("request")
+                        if (journal.get("status") not in {"completed", "failed"}
+                                or not isinstance(request, dict)
+                                or set(request) != {"method", "params", "package_digest"}
+                                or request.get("method") not in CAPABILITIES
+                                or not isinstance(request.get("params"), dict)
+                                or request.get("package_digest") != package["digest"]):
+                            raise RecoveryRequired(
+                                f"Running loop node {node_id} has an unfinished nested RPC")
+                        try:
+                            self.store.rpc_find(
+                                identity, journal["call_path"], request)
+                        except (KeyError, TypeError, ValueError) as exc:
+                            raise RecoveryRequired(
+                                f"Running loop node {node_id} nested RPC identity is invalid"
+                            ) from exc
+                    resumable_local_nodes.add(node_id)
+                    continue
                 if not node_state.status.terminal:
                     continue
                 receipt = receipts.get(node_state.node_id)
@@ -840,6 +880,9 @@ class TaskService:
                             f"{path}/iterations/{index}/",
                         )
 
+        if state.get("plan_execution") is None:
+            resumable_local_nodes = set()
+
         def persist(current, current_receipts):
             self._persist_plan(
                 identity, current, current_receipts, workflow_ref[0])
@@ -896,6 +939,7 @@ class TaskService:
             receipt_evidence=lambda _kind, value: self._references(identity, value),
             record_local_receipt=record_local_receipt,
             initial_receipts=receipts,
+            resumable_local_nodes=resumable_local_nodes,
             stop_event=stop_event,
             max_parallel=lambda: package["manifest"]["workflows"][
                 workflow_ref[0]].get("max_parallel", 4),

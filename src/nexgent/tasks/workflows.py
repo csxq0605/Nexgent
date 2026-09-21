@@ -524,6 +524,7 @@ def run_executable_workflow(
     receipt_evidence,
     record_local_receipt,
     initial_receipts=None,
+    resumable_local_nodes=(),
     stop_event=None,
     max_parallel=4,
 ):
@@ -545,6 +546,7 @@ def run_executable_workflow(
     active = deepcopy(workflow)
     payload = deepcopy(payload)
     receipts = deepcopy(initial_receipts or {})
+    resumable_local_nodes = set(resumable_local_nodes)
     execution_lock = threading.RLock()
 
     def parallelism():
@@ -561,10 +563,19 @@ def run_executable_workflow(
         nonlocal execution
         with execution_lock:
             check_stop()
-            execution = execution.transition_node(
-                node_id, NodeStatus.RUNNING, attempt_ref=attempt_ref,
-                input_artifact_refs=input_refs,
-            )
+            current = execution.node(node_id)
+            if node_id in resumable_local_nodes:
+                if (current.status is not NodeStatus.RUNNING
+                        or current.attempt_refs[-1] != attempt_ref
+                        or current.input_artifact_refs != input_refs):
+                    raise WorkflowError(
+                        "Resumable local node differs from its admitted attempt")
+                resumable_local_nodes.remove(node_id)
+            else:
+                execution = execution.transition_node(
+                    node_id, NodeStatus.RUNNING, attempt_ref=attempt_ref,
+                    input_artifact_refs=input_refs,
+                )
             persist(execution, receipts)
 
     def execute(node_id, params, nodes, attempt_ref, input_refs):
@@ -629,10 +640,16 @@ def run_executable_workflow(
         if current_ids != {node.id for node in execution.plan.nodes}:
             raise WorkflowError("Current workflow nodes differ from the persisted plan")
         state_by_id = {state.node_id: state for state in execution.node_executions}
+        unknown_resumable = resumable_local_nodes - set(state_by_id)
+        if unknown_resumable:
+            raise WorkflowError("Resumable local node is absent from the current plan")
         pending = {node_id for node_id, state in state_by_id.items()
-                   if state.status is NodeStatus.PENDING}
+                   if (state.status is NodeStatus.PENDING
+                       or node_id in resumable_local_nodes)}
         for node_id, state in state_by_id.items():
-            if state.status is NodeStatus.RUNNING:
+            if (state.status is NodeStatus.RUNNING
+                    and (node_id not in resumable_local_nodes
+                         or nodes[node_id]["method"] != "loop")):
                 raise WorkflowError("Running plan node requires host recovery")
             if state.status.terminal and node_id not in receipts:
                 raise WorkflowError("Terminal plan node is missing its host receipt")
@@ -656,7 +673,10 @@ def run_executable_workflow(
                     pending.remove(node_id)
                     finished_now.append(node_id)
                     continue
-                attempt_ref = f"attempt://{execution.id}/{execution.plan.revision}/{node_id}/1"
+                state = execution.node(node_id)
+                attempt_ref = (state.attempt_refs[-1]
+                               if node_id in resumable_local_nodes
+                               else f"attempt://{execution.id}/{execution.plan.revision}/{node_id}/1")
                 try:
                     params = _node_parameters(
                         node_id, nodes, artifacts, payload, receipts)

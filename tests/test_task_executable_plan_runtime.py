@@ -678,6 +678,114 @@ def test_resume_rejects_modified_loop_history_and_keeps_it_host_private(tmp_path
     assert "host journal" in resumed["last_error"] or "rpc journal" in resumed["last_error"].lower()
 
 
+def test_resume_reenters_interrupted_running_loop_and_replays_nested_rpc(tmp_path):
+    calls = []
+
+    def checkpoint(arguments, context):
+        calls.append(arguments["value"])
+        artifact = context.publish({"value": arguments["value"]}, name="result")
+        context.stop_event.set()
+        return {"artifact_id": artifact["id"]}
+
+    tool = ToolSpec(
+        "contract.loop-pause", {"type": "object"}, {"type": "object"},
+        "artifact_write", checkpoint,
+    )
+    workflow = {
+        "nodes": [{
+            "id": "iterate", "method": "loop", "max_iterations": 1,
+            "params": {"payload": {"value": 7}},
+            "body": {
+                "nodes": [{
+                    "id": "checkpoint", "method": "tool",
+                    "params": {
+                        "name": tool.name, "arguments": {"value": 7},
+                    },
+                }],
+                "outputs": {
+                    "artifact_id": {"$node": "checkpoint.artifact_id"},
+                },
+            },
+        }],
+        "outputs": {"deliverables": {
+            "result": {"$node": "iterate.outputs.artifact_id"},
+        }},
+    }
+    registry = ToolRegistry([tool])
+    service = TaskService(tmp_path, tools=registry)
+    episode = service.create(
+        "Resume a locally interrupted loop", deliverables=RESULT_SPEC,
+        capabilities=[tool.name], package=_v2_package({"main": workflow}),
+        constraints={"allowed_effects": ["artifact_write"]},
+    )
+
+    first = service.run(episode["id"])
+
+    assert first["status"] == "paused"
+    assert first["nodes"]["plan/nodes/iterate"]["status"] == "running"
+    assert service.store.rpc_find(episode["id"], "plan/nodes/iterate") is None
+    nested_path = "plan/nodes/iterate/iterations/0/nodes/checkpoint"
+    assert service.store.rpc_find(episode["id"], nested_path)["status"] == "completed"
+    assert calls == [7]
+
+    resumed = TaskService(tmp_path, tools=registry).run(episode["id"])
+
+    assert resumed["status"] == "completed", resumed.get("last_error")
+    assert resumed["nodes"]["plan/nodes/iterate"]["status"] == "completed"
+    assert calls == [7]
+    assert service.store.rpc_find(episode["id"], nested_path)["status"] == "completed"
+
+
+def test_resume_rejects_running_loop_with_unfinished_nested_rpc(tmp_path):
+    calls = []
+
+    def pause(arguments, context):
+        calls.append(arguments["value"])
+        context.stop_event.set()
+        return {"value": arguments["value"]}
+
+    tool = ToolSpec(
+        "contract.loop-unknown", {"type": "object"}, {"type": "object"},
+        "local_compute", pause,
+    )
+    workflow = {
+        "nodes": [{
+            "id": "iterate", "method": "loop", "max_iterations": 1,
+            "body": {
+                "nodes": [{
+                    "id": "batch", "method": "parallel",
+                    "params": {"requests": [{
+                        "method": "tool", "params": {
+                            "name": tool.name, "arguments": {"value": 3},
+                        },
+                    }]},
+                }],
+                "outputs": {"value": {"$node": "batch.0.value.value"}},
+            },
+        }],
+    }
+    registry = ToolRegistry([tool])
+    service = TaskService(tmp_path, tools=registry)
+    episode = service.create(
+        "Reject an unknown nested loop outcome", deliverables=RESULT_SPEC,
+        capabilities=[tool.name], package=_v2_package({"main": workflow}),
+        constraints={"allowed_effects": ["local_compute"]},
+    )
+
+    first = service.run(episode["id"])
+
+    assert first["status"] == "paused"
+    nested_path = "plan/nodes/iterate/iterations/0/nodes/batch"
+    assert service.store.rpc_find(episode["id"], nested_path)["status"] == "started"
+    assert calls == [3]
+
+    resumed = TaskService(tmp_path, tools=registry).run(episode["id"])
+
+    assert resumed["status"] == "waiting_input"
+    assert "unfinished nested rpc" in resumed["last_error"].lower()
+    assert calls == [3]
+
+
 @pytest.mark.parametrize(("violation", "message"), [
     ("component", "component"),
     ("role", "role"),

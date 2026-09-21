@@ -856,6 +856,20 @@ class EpisodeStore:
             raise ValueError("Replay key reused with a different request digest")
         return record
 
+    def rpc_under(self, episode_id, call_path_prefix):
+        """Return host RPC records below one composite call path."""
+        if (not isinstance(call_path_prefix, str) or not call_path_prefix
+                or len(call_path_prefix) > 1000):
+            raise ValueError("RPC call_path prefix must be nonempty bounded text")
+        with self.connect() as db:
+            self._get(db, episode_id)
+            rows = db.execute(
+                "SELECT call_path,data FROM task_rpc WHERE episode=? ORDER BY call_path",
+                (episode_id,),
+            ).fetchall()
+        return [json.loads(data) for call_path, data in rows
+                if call_path.startswith(call_path_prefix)]
+
     def rpc_start(self, episode_id, call_path, request):
         if not isinstance(call_path, str) or not call_path or len(call_path) > 1000:
             raise ValueError("RPC call_path must be nonempty text within 1000 characters")
