@@ -67,11 +67,11 @@ def test_manifest_and_prompt_resource_change_content_identity():
     assert make_package({**original["files"], "skills/prompt.md": "review skeptically"}, changed)["digest"] != candidate["digest"]
 
 
-def v2_package(manifest_changes=None):
+def v2_package(manifest_changes=None, file_changes=None):
     files = {
         "agent/main.py": "def execute(payload, context):\n    return payload\n",
         "prompts/reviewer.md": "Review the result.",
-        "workflows/main.json": '{"nodes": []}',
+        "workflows/main.json": '{"nodes": [{"id": "main", "method": "ask"}]}',
         "resources/memory-policy.json": "{}",
     }
     manifest = {
@@ -89,6 +89,8 @@ def v2_package(manifest_changes=None):
     }
     if manifest_changes:
         manifest.update(manifest_changes)
+    if file_changes:
+        files.update(file_changes)
     return make_package(files, manifest)
 
 
@@ -106,6 +108,47 @@ def test_v1_manifests_remain_loadable_with_implicit_or_explicit_version():
         "manifest_version": 1, "entries": {"execute": "agent/main.py:execute"}})
     assert verify_package(implicit) == implicit
     assert verify_package(explicit) == explicit
+
+
+def test_manifest_v1_rejects_v2_fields_and_package_rejects_unsigned_extensions():
+    with pytest.raises(PackageError, match="v2 fields"):
+        make_package(
+            {"main.py": "def execute(payload, context):\n    return payload\n"},
+            {"entries": {"execute": "main.py:execute"}, "components": {}})
+    extended = package()
+    extended["components"] = {"unsigned": {"class": "M"}}
+    with pytest.raises(PackageError, match="schema"):
+        verify_package(extended)
+
+
+def test_manifest_v2_lineage_cannot_downgrade_or_repurpose_stable_component_ids():
+    parent = v2_package()
+    with pytest.raises(PackageError, match="downgrade"):
+        make_package(parent["files"], {
+            "manifest_version": 1,
+            "entries": {"execute": "agent/main.py:execute"},
+        }, parent=parent)
+
+    changed = deepcopy(parent["manifest"])
+    changed["components"]["review-role"] = {
+        "class": "S", "kind": "resource", "ref": "prompts/reviewer.md"}
+    with pytest.raises(PackageError, match="Stable component id"):
+        make_package(parent["files"], changed, parent=parent)
+
+
+def test_manifest_v2_rejects_cross_class_aliases_of_the_same_file():
+    components = {
+        "main-orchestrator": {"class": "O", "kind": "workflow", "ref": "main"},
+        "execute-code": {"class": "O", "kind": "entry", "ref": "execute"},
+        "fake-memory": {"class": "M", "kind": "resource", "ref": "agent/main.py"},
+    }
+    with pytest.raises(PackageError, match="cannot have both O and M classes"):
+        v2_package({"components": components})
+
+
+def test_manifest_v2_rejects_structurally_invalid_workflow_json():
+    with pytest.raises(PackageError, match="Workflow 'main' is invalid"):
+        v2_package(file_changes={"workflows/main.json": "{}"})
 
 
 @pytest.mark.parametrize(("manifest_changes", "match"), [

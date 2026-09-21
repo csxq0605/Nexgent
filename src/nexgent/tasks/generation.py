@@ -16,7 +16,7 @@ import time
 import uuid
 
 from ..kernel.programs import digest
-from .packages import make_package, safe_path, verify_package
+from .packages import make_package, manifest_component_classes, safe_path, verify_package
 from .tools import ContractError
 
 
@@ -312,6 +312,7 @@ class GenerationService:
             raise ContractError("Mutation policy needs exact mutable path classifications")
         improve_ref = parent["manifest"]["entries"].get("improve")
         improve_path = improve_ref.split(":", 1)[0] if improve_ref else None
+        authoritative_classes = manifest_component_classes(parent)
         for path in paths:
             try:
                 safe_path(path)
@@ -319,6 +320,11 @@ class GenerationService:
                 raise ContractError(str(exc)) from None
             if classes[path] not in _MUTABLE_CLASSES:
                 raise ContractError("Mutable components must be classified as O, M, or S")
+            if (authoritative_classes is not None
+                    and (path not in authoritative_classes
+                         or classes[path] != authoritative_classes[path])):
+                raise ContractError(
+                    "Manifest v2 mutation classes must match authoritative components")
             if path == improve_path:
                 raise ContractError("The active package improve component is frozen")
             if _path_tokens(path) & _FORBIDDEN_TOKENS:

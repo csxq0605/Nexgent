@@ -23,6 +23,7 @@ LOCAL_METHODS = frozenset({"call", "resource"})
 IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,99}")
 COMPONENT_CLASSES = frozenset({"O", "M", "S"})
 COMPONENT_KINDS = frozenset({"role", "workflow", "skill", "entry", "resource"})
+V2_FIELDS = frozenset({"roles", "workflows", "components", "orchestrator"})
 
 
 class PackageError(ValueError):
@@ -142,6 +143,12 @@ def _manifest_v2(manifest, files, entries, skills):
             raise PackageError(f"Workflow {name!r} is not valid JSON") from None
         if not isinstance(definition, dict):
             raise PackageError(f"Workflow {name!r} must contain an object")
+        # Local import avoids the workflows -> packages capability import cycle.
+        from .workflows import WorkflowError, _validate
+        try:
+            _validate(definition)
+        except WorkflowError as exc:
+            raise PackageError(f"Workflow {name!r} is invalid: {str(exc)[:500]}") from None
         _schema(workflow.get("input_schema", {}), f"Workflow {name!r} input schema")
         _schema(workflow.get("output_schema", {}), f"Workflow {name!r} output schema")
         if ("max_parallel" in workflow
@@ -151,6 +158,7 @@ def _manifest_v2(manifest, files, entries, skills):
 
     components = _registry(manifest["components"], "components")
     targets = set()
+    file_classes = {}
     registries = {"role": roles, "workflow": workflows, "skill": skills, "entry": entries}
     for component_id, component in components.items():
         component_class = component.get("class")
@@ -170,6 +178,24 @@ def _manifest_v2(manifest, files, entries, skills):
         if target in targets:
             raise PackageError(f"Duplicate component reference: {kind}:{ref}")
         targets.add(target)
+        if kind == "entry":
+            paths = (split_ref(entries[ref], files)[0],)
+        elif kind == "skill":
+            skill = skills[ref]
+            paths = ((split_ref(skill["ref"], files)[0],) if skill["kind"] == "controlled_code"
+                     else (skill["ref"],))
+        elif kind == "workflow":
+            paths = (workflows[ref]["ref"],)
+        elif kind == "role":
+            paths = ((roles[ref]["prompt_ref"],) if "prompt_ref" in roles[ref] else ())
+        else:
+            paths = (ref,)
+        for path in paths:
+            previous = file_classes.get(path)
+            if previous is not None and previous != component_class:
+                raise PackageError(
+                    f"Package file {path!r} cannot have both {previous} and {component_class} classes")
+            file_classes[path] = component_class
 
     orchestrator = manifest["orchestrator"]
     _identifier(orchestrator, "Manifest orchestrator")
@@ -178,6 +204,31 @@ def _manifest_v2(manifest, files, entries, skills):
         raise PackageError("Manifest orchestrator must reference a registered component")
     if component.get("class") != "O" or component.get("kind") not in {"entry", "workflow"}:
         raise PackageError("Manifest orchestrator must reference an O entry or workflow component")
+    return file_classes
+
+
+def _manifest_lineage(parent_manifest, child_manifest):
+    parent_version = parent_manifest.get("manifest_version", 1)
+    child_version = child_manifest.get("manifest_version", 1)
+    if parent_version == MANIFEST_VERSION and child_version != MANIFEST_VERSION:
+        raise PackageError("Manifest v2 lineage cannot downgrade to v1")
+    if parent_version == child_version == MANIFEST_VERSION:
+        parent_components = parent_manifest["components"]
+        child_components = child_manifest["components"]
+        for component_id in set(parent_components) & set(child_components):
+            before, after = parent_components[component_id], child_components[component_id]
+            if any(before.get(field) != after.get(field) for field in ("class", "kind", "ref")):
+                raise PackageError(f"Stable component id changed classification or reference: {component_id}")
+
+
+def manifest_component_classes(package):
+    """Return authoritative file classifications for a validated v2 package."""
+    verify_package(package)
+    manifest = package["manifest"]
+    if manifest.get("manifest_version", 1) != MANIFEST_VERSION:
+        return None
+    return _manifest_v2(
+        manifest, package["files"], manifest["entries"], manifest.get("skills", {}))
 
 
 def _content(files, manifest, provenance):
@@ -205,6 +256,8 @@ def _content(files, manifest, provenance):
     manifest_version = manifest.get("manifest_version", 1)
     if type(manifest_version) is not int or manifest_version not in {1, MANIFEST_VERSION}:
         raise PackageError("Unsupported AgentPackage manifest version")
+    if manifest_version == 1 and V2_FIELDS.intersection(manifest):
+        raise PackageError("Manifest v1 cannot contain manifest v2 fields")
     entries = manifest.get("entries")
     if not isinstance(entries, dict) or "execute" not in entries or set(entries) - {"execute", "improve"}:
         raise PackageError("Manifest needs execute and optional improve entries")
@@ -260,6 +313,8 @@ def make_package(files, manifest, parent=None, provenance=None):
         verify_package(parent)
     provenance = {} if provenance is None else provenance
     _content(files, manifest, provenance)
+    if parent is not None:
+        _manifest_lineage(parent["manifest"], manifest)
     content_digest = digest({"files": files, "manifest": manifest})
     parent_id = parent["id"] if parent is not None else None
     generation = parent["generation"] + 1 if parent is not None else 0
@@ -273,7 +328,7 @@ def make_package(files, manifest, parent=None, provenance=None):
 def verify_package(package, parent=None):
     """Verify content and lineage; verify exact parent linkage when supplied."""
     required = {"schema", "id", "digest", "parent_id", "generation", "files", "manifest", "component_digests", "provenance"}
-    if not isinstance(package, dict) or not required.issubset(package) or package["schema"] != SCHEMA:
+    if not isinstance(package, dict) or set(package) != required or package["schema"] != SCHEMA:
         raise PackageError("Invalid AgentPackage schema")
     _content(package["files"], package["manifest"], package["provenance"])
     generation, parent_id = package["generation"], package["parent_id"]
@@ -290,4 +345,5 @@ def verify_package(package, parent=None):
         verify_package(parent)
         if parent_id != parent["id"] or generation != parent["generation"] + 1:
             raise PackageError("Package does not descend from the supplied parent")
+        _manifest_lineage(parent["manifest"], package["manifest"])
     return package

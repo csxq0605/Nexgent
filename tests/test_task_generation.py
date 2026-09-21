@@ -36,6 +36,17 @@ def target_package(version=0, parent=None):
         parent=parent, provenance={"fixture": "generation-target", "version": version})
 
 
+def v2_target_package():
+    return make_package(
+        {"main.py": PARENT_SOURCE},
+        {"manifest_version": 2, "entries": {"execute": "main.py:execute"},
+         "skills": {}, "roles": {}, "workflows": {},
+         "components": {
+             "orchestrator": {"class": "O", "kind": "entry", "ref": "execute"}},
+         "orchestrator": "orchestrator"},
+        provenance={"fixture": "generation-target-v2"})
+
+
 def improver_package(patch=None, *, mode="patch"):
     if mode == "raise":
         source = "def improve(payload, context):\n    raise ValueError('controlled improver failure')\n"
@@ -67,6 +78,19 @@ def policy(*paths):
     return {"mutable_paths": paths, "component_classes": {path: "O" for path in paths},
             "allowed_operations": ["replace", "add", "remove"],
             "max_patch_bytes": 100000}
+
+
+def test_v2_mutation_policy_uses_authoritative_manifest_component_classes():
+    parent = v2_target_package()
+    assert GenerationService._mutation_policy(policy(), parent)["component_classes"] == {
+        "main.py": "O"}
+    forged = policy()
+    forged["component_classes"]["main.py"] = "S"
+    with pytest.raises(ContractError, match="authoritative components"):
+        GenerationService._mutation_policy(forged, parent)
+    uncovered = policy("unregistered.py")
+    with pytest.raises(ContractError, match="authoritative components"):
+        GenerationService._mutation_policy(uncovered, parent)
 
 
 def behavior_patch(parent, *, op="replace", path="main.py", content=CHILD_SOURCE,
