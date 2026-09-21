@@ -8,6 +8,8 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具
 
 0.9 完成了 P1 的任务执行、交付评审与恢复基础及产品入口整合，实现了独立 P2 OpenFOAM smoke demo、P3 反馈驱动任务包演化控制面，以及 P4 递归改进器的确定性机制闭环。普通目标和 benchmark 共享 `TaskService`；任务智能体 `A` 与改进器 `R` 使用独立版本通道。默认 GUI 是任务空间；0.8 研究窗口和原有 CLI 命令继续保留。
 
+AgentPackage manifest v2 现在把 role、workflow、orchestrator 和 O/M/S component 变成包内的显式、可校验注册项。以 workflow 作为 O 类 orchestrator 时，宿主将冻结的 workflow 编译为 `nexgent.executable-plan.v1`，把角色能力、控制边、工件边、局部预算、失败路由和有界 revision 接到真实 `TaskService` 调用；恢复时重新核验包内 workflow、计划投影、RPC journal 与工件账本，只复用宿主已确认的终态节点。首版 revision 只能切换到同一不可变包内已注册的 workflow，并且只能替换仍为 pending 的子图。完整合同见 [ExecutablePlan v1 与 manifest v2](docs/design/executable-plan-v1.md)。
+
 P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → paired selection → task channel → guard/rollback`。`rsi-generate` 现在默认运行框架内置、领域无关的 `reference-os-v1`：它用配置的模型读取脱敏反馈，只允许对一个 O（编排）或 S（技能/提示协议）组件做一次 `replace`，也可以改为显式 improver 包或已部署 improver channel。P4 又实现 `R0 真实自更新为 R1 → R0/R1 从共同 A0 产生后代 → 下游效用元评测 → 独立 R channel 部署 → R1 产生 R2 → 后代效用 guard → 回滚并重新加载 R0`。评价、权限、预算、晋升和回滚仍由可信宿主掌握。内置 R0 只补齐可直接运行的候选生成基线，不会自动晋升。**当前完成的是工程机制；真实模型候选的独立效果和统计 RSI 效益仍待闭合。**
 
 通用 `MemoryService` 现提供一个最小 M-data 生命周期：记忆 policy/data 分离、候选隔离、宿主冻结 selection、accepted/rejected/retired 状态、版本父系、CAS release 晋升/回滚，以及 Episode 创建时的原子快照。公开视图不包含记忆正文、私有任务或 evaluator 证据。它仍是单可信宿主内的工程出口，尚未实现 principal 权限与 M-policy/M-data 的独立因果评测，因此不构成 M-RSI 闭环。完整边界见 [MemoryService lifecycle](docs/design/memory-service-lifecycle.md)。
@@ -18,11 +20,11 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 
 | 内容 | 状态 |
 | --- | --- |
-| P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础与宿主可信工具工作量账本已实现并通过定向合同测试；真实 MiMo 普通任务已形成 schema 合法交付，独立 Workbench 仍失败 |
+| P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础、manifest v2、ExecutablePlan v1 与宿主可信账本已实现并通过定向合同测试；真实 MiMo 普通任务已形成 schema 合法交付，manifest-v2 计划路径仍只有 E0 工程合同证据，独立 Workbench 仍失败 |
 | P1 普通任务与 benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同；BBH 两任务与 scientific-discovery 已提供 canonical TaskService adapter 和无模型 reference package，legacy 入口继续保留 |
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
-| P3 跨任务行为更新 | 反馈绑定候选生成、内置 `reference-os-v1`、显式/通道 improver、配对门控、通道晋升、监测/回滚及正向 E1/回滚机制证据导出已实现；一次性真实模型 E1 pilot 已冻结，外部 payload 导出仍待显式授权，候选效果与统计效益尚未建立 |
-| P4 改进过程可更新与递归执行 | 独立 R archive/channel、自更新、真实后代元评测、预登记 guard 与自动回滚已形成确定性机制闭环；真实模型与统计效益待检验 |
+| P3 跨任务行为更新 | 反馈绑定候选生成、内置 `reference-os-v1`、显式/通道 improver、配对门控、通道晋升、监测/回滚及 E1/回滚机制证据导出已实现；一次性 E1 qualification 协议已冻结，但真实模型 generation 所需外部 payload 发送尚未获授权，因此未激活，候选效果与统计效益尚未建立 |
+| P4 改进过程可更新与递归执行 | 独立 R archive/channel、自更新、真实后代元评测、预登记 guard 与自动回滚已形成确定性机制闭环；这些仍是显式 API 串接，下一步需收敛为可恢复 cycle，真实模型与统计效益待检验 |
 | P5 冻结研究和完整产品验收 | 通用 final-holdout 配对研究执行器、预注册 schema 与脱敏信息窗已实现；正式外部多任务族研究尚未登记或执行 |
 | 0.8 源码执行、自修改、历史 benchmark 与研究窗口 | 保留；其证据不替代 0.9 P1 或 P2–P5 验收 |
 
@@ -30,13 +32,14 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 
 - [定位与重构决策](docs/design/product-and-refactor-decision.md)：固定用户不变要求和框架边界。
 - [vNext 智能体架构](docs/design/agent-architecture-vnext.md)：真实任务执行、技能/编排/记忆和反馈驱动更新。
+- [ExecutablePlan v1 与 manifest v2](docs/design/executable-plan-v1.md)：角色、工作流、O/M/S 组件如何接入真实执行、计划修订与宿主账本恢复。
 - [论文方法到设计与实验](docs/research/agent-orchestration-rsi-synthesis-20260916.md)：AutoSci、ADAS、AFlow、DGM、Hyperagents、STOP 的采用方式与边界。
 - [P3 反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)：当前实现对象、完整状态流、CLI/GUI、信任边界和证据等级。
 - [P4 递归改进器控制面](docs/design/p4-recursive-improver-control-plane.md)：R 自更新、后代效用元评测、独立通道、guard 与结论边界。
 - [P5 预注册 RSI 研究](docs/research/p5-preregistered-rsi-study.md)：证据等级、实验臂、外部 benchmark 矩阵、防泄漏、缺测与统计职责。
 - [Task benchmark SDK 与 canonical 迁移](docs/design/benchmark-sdk.md)：TaskService 插件的显式 descriptor、隔离发现、JSON 合同、BBH/scientific-discovery canonical 路径与 legacy 兼容边界。
 - [RSI orchestration research refresh](docs/research/rsi-orchestration-refresh-20260921.md)：当前证据等级、可证伪实验与 scientific-discovery 迁移的结论上限。
-- [P3 E1 qualification pilot](experiments/p3_e1/README.md)：一次 generation、不可覆盖 attempt 收据、严格模型/patch/paired gain/guard/reuse 闭合及结论边界。
+- [P3 E1 qualification pilot](experiments/p3_e1/README.md)：一次性 generation 流程、不可覆盖 attempt 收据、严格模型/patch/paired gain/guard/reuse 闭合及结论边界；真实外发尚未授权。
 - [工具工作量计量](docs/design/tool-work-accounting.md)：调用前预留、持久增量、未知结算、恢复复用及科学插件接入边界。
 - [P3 跨任务 RSI 研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)：一手论文方法、可证伪假设、对照和冻结试验协议。
 - [P1 真实 Provider 验证](docs/research/task-runtime-validation-20260920.md)：实际 episode、token 与节点用量、供应商失败、重复调用阻断和未通过项。
@@ -48,11 +51,13 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 ```mermaid
 flowchart LR
     T[普通任务 / Benchmark 任务] --> S[TaskService]
-    S --> P[版本化 AgentPackage]
-    P --> C[模型 / 技能 / 授权工具 / 委派]
+    S --> P[AgentPackage manifest v2]
+    P --> E[ExecutablePlan v1]
+    E --> C[模型 / 技能 / 授权工具 / 委派]
     C --> A[工件、节点、收据与记忆]
     A --> O[交付与验收状态]
     D[可选领域插件] --> C
+    A -->|宿主账本恢复| E
     O --> B[独立 Benchmark 评价]
 ```
 
@@ -66,7 +71,9 @@ flowchart LR
 
 paired plan 冻结宿主能够重算的 execution environment、工具描述、运行时实现摘要和 arm schedule。当前计划对象不会预先完整冻结实际 provider/model；二者由每次模型调用的 receipt 证明，正式实验再核验这些收据是否符合预登记配置。选择门中的 `cost` 是由模型调用、charged completion tokens、工具调用和节点用量构成的透明 normalized work unit，便于同一协议内比较，不代表供应商货币费用。
 
-这条链有三种不同证据等级。确定性测试可以证明身份、隔离、门控、递归版本、真实运行路径、加载和回滚等**机制**；真实 provider Episode 才能证明模型确实产生并执行了行为变化；多个冻结任务、重复和对照才能支持**统计 RSI 效益**。正向 E1 exporter 与一次性 qualification runner 已实现并通过伪造反例审计，但真实 MiMo 调用尚未获准把脱敏 FeedbackBundle、可修改组件和 mutation policy 发往外部 provider，因此当前仍只完成第一层工程实现。
+这条链有三种不同证据等级。E0 确定性工程合同可以证明身份、隔离、计划执行/修订/恢复、门控、递归版本、加载和回滚等**机制**；E1 真实 provider Episode 才能证明模型确实根据反馈产生并执行了行为变化；多个冻结任务、重复和对照才能支持**统计 RSI 效益**。manifest-v2/ExecutablePlan 与反馈驱动 RSI 的当前结论上限仍是 E0。正向 E1 exporter 与一次性 qualification runner 已实现并通过伪造反例审计，但真实 MiMo generation 尚未获得向外部 provider 发送脱敏 FeedbackBundle、可修改组件和 mutation policy 的授权，因此不能声称 E1 模型生成激活、候选改进或自我迭代收益已经成立。P1 的真实普通任务交付和 P2 的真实求解器 smoke 是各自执行路径的证据，不抬高这一 RSI 证据等级。
+
+工程下一阶段依次是：让演化收据以 manifest-v2 的稳定 component id 为目标；把 M component 路由到冻结的 `MemoryService` release/snapshot；将 P4 显式 self-update、meta evaluation、promotion、guard 和 rollback 收敛成可恢复 cycle。以上工作继续保留 evaluator、usage、snapshot、selection 与 promotion/guard 门槛。
 
 这个边界来自[编排与 RSI 研究综合](docs/research/agent-orchestration-rsi-synthesis-20260916.md)：持久化、实际执行和有效必须分别检查，且“失败证据 → 候选变化 → 验证 → 后续实际加载 → 结果”缺一不可。0.8 的[框架验证](docs/research/framework-validation-20260916.md)、[v1 机制审查](docs/research/framework-mechanism-v1-review.md)和[v2 机制审查](docs/research/framework-mechanism-v2-review.md)记录过机制未激活、契约错误和实际后代零增益，因此源码变化、记忆写入或候选数量都不能单独作为 RSI 成功证据。P1 实跑记录格式见[任务运行时验证模板](docs/research/task-runtime-validation-20260920.md)。
 
