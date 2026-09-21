@@ -1,6 +1,6 @@
 # Nexgent vNext 重构计划
 
-日期：2026-09-21。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地，AgentPackage manifest v2 与 ExecutablePlan v1 已把 role/workflow/orchestrator/O-M-S component 接到真实 runtime、revision 和宿主账本恢复，并通过确定性合同测试；真实 MiMo 普通任务已形成 schema 合法交付但独立 Workbench 仍失败。P2 独立 OpenFOAM Re=10 smoke 已实现并在真实 WSL2/Foundation 8 环境通过；P3 反馈驱动包演化控制面、内置参考 R0、E1 证据导出合同和一次性 qualification runner 已实现，P4 递归改进器确定性机制闭环已实现；P5 已实现通用预注册 final-holdout 配对执行器。当前 RSI 证据上限仍是 E0 工程合同；真实 E1 模型 generation activation 尚未获得向外部 provider 发送所需 payload 的授权，真实行为变化、统计效益与正式外部研究尚未建立。
+日期：2026-09-21。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地，AgentPackage manifest v2 与 ExecutablePlan v1 已把 role/workflow/orchestrator/O-M-S component 接到真实 runtime、revision 和宿主账本恢复。P2 独立 OpenFOAM Re=10 smoke 已在真实 WSL2/Foundation 8 环境通过。P3 的稳定 component-id O/S 演化链与双合同 reference R0 已实现；P4 已有 durable-claim 可恢复 cycle；P5 已实现通用预注册 final-holdout 配对执行器。当前 RSI 证据上限仍是 E0 工程合同；真实 E1 generation activation、M route 和正式外部多任务研究尚未完成。
 
 ## 1. 产品与执行范围
 
@@ -82,7 +82,7 @@ development Episode
 
 `GenerationService` 只从本地、终态、明确标记为 development 且绑定当前 active 父包的 Episode 捕获有界反馈。独立版本化的 `R0` 通过同一 `TaskService` 运行，只能交付严格的声明式 `BehaviorPatch`；可信宿主验证可修改路径、O/M/S 分类、旧摘要、大小、激活探针和完整 child 包。`R0` 的 improve entry 与执行闭包在 P3 冻结，候选不得修改 evaluator、gate、权限、预算核算或宿主控制代码。
 
-产品默认已经补入领域无关的 `reference-os-v1`，使 `rsi-generate` 无需外部 improver JSON 也能通过配置的模型执行真实 R0。其 v1 capability envelope 只允许一个现有 O/S 文件的单次 `replace`；M、多文件、add/remove 和控制面修改均拒绝。调用方仍可显式传入冻结 improver package，或以 improver channel + expected revision 使用 P4 部署版本。三种入口共享相同 receipt、admission 与 missing 语义。默认 R0 只生成候选，不自动 selection、promotion 或 guard，也不包含任何 demo/benchmark 专用逻辑。
+产品默认 reference R0 使 `rsi-generate` 无需外部 improver JSON 也能通过配置模型执行真实 generation。它按宿主归一化 policy 支持 legacy path-v1 和 manifest component-id-v2；v2 强制 hypothesis/operation/probe 使用同一 id，调用者与模型都不能提供权威 path/class。两条合同都只允许一个现有 O/S 文件的单次 `replace`，拒绝 M、多文件、add/remove 和控制面修改。调用方仍可显式传入冻结 improver package，或以 improver channel + expected revision 使用 P4 部署版本。默认 R0 只生成候选，不自动 selection、promotion 或 guard，也不包含 demo/benchmark 专用逻辑。
 
 `EvolutionService` 把 paired suite、benchmark/evaluator snapshot、父子顺序、预算、可重算的 execution environment/tool/runtime snapshot 及 PromotionPolicy 在结果产生前冻结。实际 provider/model 身份由逐调用 receipt 证明，并在正式实验中与预登记配置核对；当前计划记录本身不声称已预先完整冻结二者。development decision 不能晋升，final holdout 不能进入演化；selection 缺分、用量不完整、身份不一致和关键回归均 fail closed。选择门的 `cost` 是模型调用、charged completion tokens、工具调用和节点用量形成的 normalized work unit，不是供应商货币费用。eligible 与 promote 分开；只有 `GenerationService` 闭合真实 R0 生成收据的 candidate 有部署权限，受控导入只进入研究/archive；promote 还要求父包仍为 active，并强制绑定预登记 monitor plan。普通任务只在创建时通过 `package_channel` 解析部署包。guard plan 与阈值在晋升前冻结，其完整任务多重集只允许一次执行；缺项、重复项、usage 不完整或 evaluator receipt 不匹配均 fail closed，退化时沿已记录部署边回滚。
 
@@ -100,7 +100,7 @@ promotion 强制绑定预登记 improver guard。部署后的候选生成通过�
 
 确定性 pilot 已闭合 `R0→R1`、R0/R1 后代 `0.4/0.8` 元比较、R1 channel 加载、`R1→R2` archive、自注册阈值 `0.9` 触发回滚，以及新 revision 通过 channel 再次实际加载 R0。该 fixture 不使用模型、网络或工具，只证明机制；真实 R 是否能从任务反馈产生更优改进策略仍未建立。
 
-当前 P4 写路径仍由调用方按显式 API 顺序串接，不具备类似 `RSICycleService` 的单一持久状态机。现有 archive/channel、claim、guard 和恢复加载是建设 recoverable cycle 的部件，不能据此声称 P4 已能在任意阶段中断后自动、安全地续跑。
+`RecursiveImproverCycleService` 已把 feedback、R self-generation、meta plan/run/assessment、decision、guard plan、promotion、guard 与 rollback 组织为持久状态机。action 与 generation invocation claim 在同一事务预留；terminal generation、claim 与事件原子闭合；R/A0 在 generation create/run 和 evaluation create/run/evaluate 前重验。控制面漂移抛出独立 `AdmissionConflict`，不会被写成性能失败或触发错误回滚。CLI 提供 start/resume/show/recover，公开投影按字段和类型过滤。它仍只证明恢复与门控机制，不证明模型能递归提高 R。
 
 出口分两类：实现上证明新版本能够承担下一次改进任务；研究上比较两版改进策略实际产生后代的效用。前者不等于后者；无需强制每代修改 meta，宿主评分和预算边界保持固定。
 
@@ -122,7 +122,7 @@ TaskService benchmark 的 SDK 已收敛为显式 descriptor/protocol、隔离 re
 
 TaskService 现将工具调用次数与数值/外部工作量分开核算。`ToolSpec` 声明调用前固定预留，可信 handler 经 `ToolContext` 在实际工作边界持久计费，root Episode 对并行和委派共享原子预算；崩溃或未知结算保留预留且使 usage 不完整。P3/P4/P5 的成本门统一读取宿主 `charged_tool_work_units`，历史记录按显式零基线只读兼容。框架不能自动推断任意求解器的 FLOPs；scientific-discovery DomainPack 已在数值批次边界接入宿主可信计量，返回值中的 `work_units` 只作诊断。完整合同见[工具工作量计量](docs/design/tool-work-accounting.md)。
 
-P3 现有一个独立的正向 E1 exporter 与领域中立 qualification runner。它只接受 exact `reference-os-v1` 的单一 `rsi_improver` 模型输出，要求输出摘要等于入库 patch、usage/模型身份完整、paired quality 或 success 严格改善、独立 guard 通过，并由一个未参与 development/selection/guard 的冻结统计单元在晋升后再次加载同一 package revision。attempt 在模型调用前持久化且不可覆盖。该 runner 尚未执行真实 MiMo generation：自动外发审查要求用户明确授权把脱敏 FeedbackBundle、`behavior.py` 和 mutation policy 发往已配置的 MiMo endpoint。合同和运行方式见 [P3 E1 qualification pilot](experiments/p3_e1/README.md)。
+P3 现有一个独立的正向 E1 exporter 与领域中立 qualification runner。它只接受仓库当前 immutable reference R0 的单一 `rsi_improver` 模型输出；现有 qualification fixture 仍使用 legacy path-v1 目标。runner 要求输出摘要等于入库 patch、usage/模型身份完整、paired quality 或 success 严格改善、独立 guard 通过，并由未参与 development/selection/guard 的冻结统计单元在晋升后再次加载同一 package revision。attempt 在模型调用前持久化且不可覆盖。该 runner 尚未执行真实 MiMo generation：自动外发审查要求用户明确授权把脱敏 FeedbackBundle、目标 component 内容和 mutation policy 发往已配置的 MiMo endpoint。合同和运行方式见 [P3 E1 qualification pilot](experiments/p3_e1/README.md)。
 
 scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分布的兼容名称，仅用于迁移 regression/golden 等价检查。它不是新鲜 holdout，也不支持新的科学发现、模型效果或 RSI 结论；正式研究仍需新的 host-private release、独立来源 cluster、重复、控制臂和真实 provider 收据。
 
@@ -136,18 +136,17 @@ scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分
 | P1 任务执行、交付评审、工件/记忆、预算与恢复基础 | 0.9 已实现，含 manifest v2、ExecutablePlan v1、pending 子图 revision 与 root 共享宿主账本恢复；定向证据为 E0 工程合同，真实 MiMo 普通任务交付已通过，Workbench 独立评价仍未形成 |
 | Task benchmark SDK 与失败测量 | 0.9 canonical descriptor/registry、插件隔离、host runtime 指纹及 P3/P5 共享 outcome policy 已实现；BBH 两任务与 scientific-discovery 已迁移并保留 legacy 兼容入口；科学历史 holdout 仅作迁移回归材料 |
 | OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
-| 跨任务行为更新 P3 | feedback/R0/BehaviorPatch、内置 `reference-os-v1`、显式/通道 R、配对门控、显式晋升、通道加载、guard monitor 与回滚控制面已实现；真实模型独立效果与统计效益待检验 |
-| 改进器递归执行 P4 | 独立 R 通道、自更新、真实任务后代元评测、guard/rollback 和通道恢复加载机制已闭合；写路径仍靠显式 API 串接，recoverable cycle 与真实模型/统计递归效益待完成 |
+| 跨任务行为更新 P3 | manifest-v2 component id 已贯穿 feedback、BehaviorPatch v2、加载摘要、selection、promotion、guard 与 evidence；默认 R0 同时支持 legacy v1；M route 与真实模型效果待检验 |
+| 改进器递归执行 P4 | 独立 R 通道、自更新、真实后代元评测、guard/rollback、durable invocation claim、逐副作用 admission 与 recoverable cycle 已闭合；真实模型/统计递归效益待完成 |
 | 冻结正式研究 P5 | 通用 final-holdout 配对执行器、预注册 schema、CLI/信息窗已实现；外部多任务族正式研究待登记与执行 |
 | 0.8 的源码机制与历史结果 | 保留；不能替代以上状态 |
 
 ### 下一阶段
 
-1. **component-targeted evolution**：把 P3 的 path + class mutation policy 收敛到 manifest-v2 的稳定 component id，使 feedback、hypothesis、patch、activation probe、selection 与 guard 都指向同一个 O/M/S 身份；谱系必须保持 class/kind/ref 约束，控制面、evaluator、gate、权限与预算仍不可变异。验收是一个 O 或 S component 的候选能从捕获反馈到新 Episode 激活形成连续收据，同时非法 id、跨类改写和未声明文件 fail closed。首个完成切片仍属于 E0。
-2. **M 路由**：将 manifest 中的 M component 与 `MemoryService` 的冻结 release/snapshot 接入计划输入和运行节点，明确区分 M-policy 与 M-data，并把实际读取的 release revision/digest 写入 Episode/plan receipt。验收是同一冻结任务可比较无记忆、固定 M-data 与候选 M-policy 三条路径，通道漂移、正文越权和缺少收据均停止执行；在独立评价完成前不声称 M-RSI。
-3. **P4 recoverable cycle**：把现有显式 P4 self-update、meta trial/decision、promotion、improver guard 与 rollback 编排为可恢复状态机，冻结 R channel revision、共同 A0、FeedbackBundle、benchmark snapshot、预算与 policy；每阶段只消费唯一 durable claim，并能在写记录/完成 claim 的中断窗口原子收口。验收包括 promotion 前中断、promotion 后 guard 中断、通道漂移和缺测 fail-closed，恢复不得重复模型或 benchmark 外部工作。
-4. **E1 激活与随后 P5**：只有获得明确外部发送授权后，才运行已冻结的真实模型 qualification：发送范围限于审查过的脱敏 FeedbackBundle、目标 component 内容和 mutation policy，保存 provider/model/usage receipt，并要求候选在独立 selection、guard 与新任务 reuse 中形成同一 component 身份链。没有授权时保持 E0；获得一次 E1 激活后仍需多任务族、重复、对照和未写回 holdout，才能讨论统计 RSI 效益。
-5. **独立 demo 扩展**：OpenFOAM 若继续扩展，另行冻结 Re=100、独立参考、网格/时间收敛和稳态判据；它只提供工具型 demo/任务族证据，不改变上述通用框架优先级，也不单独支持科学发现或跨域 RSI 结论。
+1. **M 路由**：先只支持 manifest-v2 `class=M, kind=resource` 的纯 M patch，路由到 `MemoryService.admit → plan_selection → assess → promote → Episode snapshot`；O/S+M 混合补丁在 compound release 出现前整体拒绝，避免两个 CAS 通道形成中间态。
+2. **多 benchmark / 多 seed 聚合**：把 P5 的冻结 cell 与 P3/P4 component identity 链接，至少覆盖工具/政策、新鲜可执行代码和私有交互任务族；OpenFOAM 只作为一个外部工具 demo/task family。
+3. **E1 激活**：只有获得精确外部发送授权后，运行一次冻结 qualification；payload 仅含审查过的脱敏 FeedbackBundle、目标 component 内容和 mutation policy，并保存 provider/model/usage receipt。一次 E1 激活仍不能替代重复、对照和未写回 holdout。
+4. **独立 demo 扩展**：OpenFOAM 若继续扩展，另行冻结 Re=100、独立参考、网格/时间收敛和稳态判据；它不改变通用框架优先级。
 
 ## 6. 分阶段 PR 与历史提交
 

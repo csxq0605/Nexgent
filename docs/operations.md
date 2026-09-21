@@ -1,6 +1,6 @@
 # 任务运行与恢复
 
-> 适用版本：0.9。P1 任务运行器已经实现；P2 OpenFOAM 独立 Re=10 smoke 已实现并真实通过；P3 反馈驱动包演化控制面和 P4 递归改进器确定性机制闭环已实现；P5 冻结研究执行器已实现。真实模型效果、统计 RSI 效益与正式外部研究仍未建立。0.8 研究接口保留在本文末尾。
+> 适用版本：0.9。P1 任务运行器已经实现；P2 OpenFOAM 独立 Re=10 smoke 已真实通过；P3 component-targeted 演化和 P4 durable-claim 可恢复 cycle 已实现；P5 冻结研究执行器已实现。真实模型效果、统计 RSI 效益与正式外部研究仍未建立。0.8 研究接口保留在本文末尾。
 
 ## 项目、模型与入口
 
@@ -31,7 +31,7 @@ P3 管理通用 `AgentPackage` 的行为版本，不理解 OpenFOAM、科学发�
 
 1. 用当前 channel 包运行明确标记为 `development` 的任务，留下终态 Episode；
 2. `GenerationService.capture_feedback(...)` 将实际 episode/package/memory/evaluation/usage/artifact 摘要冻结成 `FeedbackBundle`，私有 evaluator 内容只保留 digest；
-3. `GenerationService.generate(...)` 通过同一任务运行器执行独立、版本化且冻结的 improver `R0`；CLI 默认使用框架内置的 `reference-os-v1`，也可显式传包或从 improver channel 解析版本；R0 只能返回严格 `BehaviorPatch`，由宿主将获准改动应用为不可变 child 包；
+3. `GenerationService.generate(...)` 通过同一任务运行器执行独立、版本化且冻结的 improver `R0`；CLI 默认使用框架内置的 reference R0（保留 `builtin:reference-os-v1` 兼容名），也可显式传包或从 improver channel 解析版本；R0 只能返回与父包 targeting 匹配的严格 `BehaviorPatch`，由宿主将获准改动应用为不可变 child 包；
 4. `EvolutionService.plan_pair(...)` 在结果产生前冻结 selection suite、父子顺序、benchmark/evaluator snapshot、可重算的 execution environment/tool/runtime snapshot 和 `PromotionPolicy`，再由 `run_pair(...)` 实际执行；逐调用 receipt 会保留实际 provider/model，当前 P3 gate 只检查用量收据完整性，不把尚未实现的 provider/model 目标预登记核验写成已完成能力；
 5. `assess(...)` 对完整配对 fail closed；只有 selection decision 可以 eligible，且 eligible 不会自动部署；
 6. 只有 `GenerationService` 生成且具有完整 feedback、R0 execution 和 patch receipt 的 candidate 能部署；`propose(origin="imported")` 只供合同测试和研究 archive。晋升前必须用 `plan_monitor(...)` 冻结 guard 任务和阈值；`promote(...)` 强制接收该 plan，并以 compare-and-swap 检查父包仍 active 后移动 channel；
@@ -99,7 +99,7 @@ python -m nexgent rsi-run-monitor general workbench
 python -m nexgent rsi-monitor general GUARD_EPISODE_ID
 ```
 
-不传 `--improver-package` 或 `--improver-channel` 时，`rsi-generate` 使用内置 `reference-os-v1`。它向配置的 provider 发起一次有收据的 `rsi_improver` 调用，只接收一个现有 O/S 组件的单次 `replace`，要求精确旧摘要和对应激活探针；M、多文件、`add`、`remove`、控制面组件和未列入 mutation policy 的路径都会 fail closed。模型 abstain、输出不合合同、调用失败或预算耗尽均保留为 missing generation。示例 [reference-os-mutation-policy.json](../examples/rsi/reference-os-mutation-policy.json) 只适用于默认 task-agent 包；自定义包应按其实际文件与 O/M/S 分类另行冻结策略。
+不传 `--improver-package` 或 `--improver-channel` 时，`rsi-generate` 使用内置 reference R0。legacy manifest v1 走 path-v1；manifest v2 走 component-id-v2，并要求 hypothesis、operation 与 activation probe 使用同一稳定 id。两者都只接收一个现有 O/S 组件的单次 `replace` 与精确旧摘要；M、多文件、`add`、`remove`、控制面组件、未登记 id 以及 v2 中的 path/class 注入都会 fail closed。模型 abstain、输出不合合同、调用失败或预算耗尽均保留为 missing generation。示例 [reference-os-mutation-policy.json](../examples/rsi/reference-os-mutation-policy.json) 面向 legacy 默认包；自定义 manifest-v2 包应使用 `mutable_components` 冻结稳定 id。
 
 默认任务窗口的“RSI 与版本”页输入 channel 后刷新同一只读投影。页面和 CLI 输出不会返回包源文件、FeedbackBundle 正文、私有任务 payload、evaluator 诊断或隐藏答案。CLI 也不提供“一键晋升”；candidate generation 成功后仍须经过 selection decision、预登记 monitor plan 和显式 `rsi-promote`。
 
@@ -117,7 +117,7 @@ python -m nexgent rsi-monitor general GUARD_EPISODE_ID
 
 ## P4 递归改进器
 
-P4 把改进策略 `R` 作为与任务智能体 `A` 分离的可版本化 AgentPackage。Python 控制面依次使用：
+P4 把改进策略 `R` 作为与任务智能体 `A` 分离的可版本化 AgentPackage。底层 Python 控制面依次使用：
 
 1. `ImproverService.register(...)` 登记 R0 和冻结 self-mutation/capability envelope；
 2. `capture_feedback(...)` 读取 R0 实际产生的 P3 generation 与独立 decision；
@@ -128,14 +128,18 @@ P4 把改进策略 `R` 作为与任务智能体 `A` 分离的可版本化 AgentP
 7. 后续 `GenerationService.generate(..., improver_channel=..., expected_improver_revision=...)` 证明实际加载部署 R；
 8. `ImproverGuardService.run(...)` 单次执行 guard，退化或缺测时自动回滚；run、回滚、action、事件和 claim 原子提交，执行租约过期后按缺测 fail closed 恢复；当前部署的 guard 完成并通过前不能继续晋升下一代 R。回滚后再通过 improver channel 做 recovery generation。
 
-只读入口：
+产品 CLI 将这些步骤组织成同一个持久状态机。`recursive-cycle.json` 必须给出 `channel`、`expected_revision`、generation/decision id、`task_channel` 与 revision、`task_feedback_bundle_id`、task mutation policy、provider/model、development/selection/guard tasks、evaluator、meta/guard budget 和 guard 阈值；可选 self-generation budget、meta policy、offspring 数与独立 guard evaluator。
 
 ```powershell
 python -m nexgent rsi-improver-status recursive
 python -m nexgent rsi-improver-events recursive --limit 50
+python -m nexgent rsi-improver-cycle-start workbench --spec recursive-cycle.json --register-only
+python -m nexgent rsi-improver-cycle-resume RECURSIVE_CYCLE_ID workbench
+python -m nexgent rsi-improver-cycle-show RECURSIVE_CYCLE_ID workbench
+python -m nexgent rsi-improver-cycle-recover RECURSIVE_CYCLE_ID workbench
 ```
 
-GUI 同时显示任务智能体与递归改进器通道。两个通道使用独立存储和 revision，不能互相替代。当前 meta/guard 明确要求空 memory 起点；provider/model 要求会与实际 model receipt 核对。完整 API、状态机、确定性结果和研究限制见[P4 递归控制面](design/p4-recursive-improver-control-plane.md)。
+普通 recover 只收口已经能由 durable claim 证明的 terminal evidence。只有宿主已经在外部确认 pending action 没有提交时，才使用 `--confirm-no-external-commit` 允许新 action；否则保持 `recovery_required`，避免重复付费或重复副作用。GUI 同时显示任务智能体与递归改进器通道。两个通道使用独立存储和 revision，不能互相替代。当前 meta/guard 明确要求空 memory 起点；provider/model 要求会与实际 model receipt 核对。完整 API、状态机、确定性结果和研究限制见[P4 递归控制面](design/p4-recursive-improver-control-plane.md)。
 
 ## P5 final-holdout 研究
 

@@ -10,7 +10,9 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具
 
 AgentPackage manifest v2 现在把 role、workflow、orchestrator 和 O/M/S component 变成包内的显式、可校验注册项。以 workflow 作为 O 类 orchestrator 时，宿主将冻结的 workflow 编译为 `nexgent.executable-plan.v1`，把角色能力、控制边、工件边、局部预算、失败路由和有界 revision 接到真实 `TaskService` 调用；恢复时重新核验包内 workflow、计划投影、RPC journal 与工件账本，只复用宿主已确认的终态节点。首版 revision 只能切换到同一不可变包内已注册的 workflow，并且只能替换仍为 pending 的子图。完整合同见 [ExecutablePlan v1 与 manifest v2](docs/design/executable-plan-v1.md)。
 
-P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → paired selection → task channel → guard/rollback`。`rsi-generate` 现在默认运行框架内置、领域无关的 `reference-os-v1`：它用配置的模型读取脱敏反馈，只允许对一个 O（编排）或 S（技能/提示协议）组件做一次 `replace`，也可以改为显式 improver 包或已部署 improver channel。P4 又实现 `R0 真实自更新为 R1 → R0/R1 从共同 A0 产生后代 → 下游效用元评测 → 独立 R channel 部署 → R1 产生 R2 → 后代效用 guard → 回滚并重新加载 R0`。评价、权限、预算、晋升和回滚仍由可信宿主掌握。内置 R0 只补齐可直接运行的候选生成基线，不会自动晋升。**当前完成的是工程机制；真实模型候选的独立效果和统计 RSI 效益仍待闭合。**
+P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/S) → paired selection → task channel → guard/rollback`。manifest v2 的 hypothesis、operation、activation、selection、promotion 与 guard 现在都绑定同一个稳定 `component_id`；宿主从冻结 manifest 解析 class/kind/ref/file，不接受调用者提供 path/class。内置、领域无关的 reference R0 同时支持 legacy BehaviorPatch v1 与 component-targeted BehaviorPatch v2，均只允许一个 O/S `replace`。M component 暂不伪装成文件补丁，后续单独接入 `MemoryService` release/snapshot。
+
+P4 已把 `R0 自更新为 R1 → R0/R1 从共同 A0 产生后代 → 下游效用元评测 → 独立 R channel 部署 → 后代效用 guard → 回滚` 收敛为可恢复持久状态机。每个外部 generation/evaluation 由唯一 durable claim 和 R/A0 admission check 保护，create/run/evaluate 边界都会重验冻结指针；终态、runner 释放和证据引用原子提交。评价、权限、预算、晋升和回滚仍由可信宿主掌握。**当前完成的是 E0 工程机制；真实模型候选的独立效果和统计 RSI 效益仍待闭合。**
 
 通用 `MemoryService` 现提供一个最小 M-data 生命周期：记忆 policy/data 分离、候选隔离、宿主冻结 selection、accepted/rejected/retired 状态、版本父系、CAS release 晋升/回滚，以及 Episode 创建时的原子快照。公开视图不包含记忆正文、私有任务或 evaluator 证据。它仍是单可信宿主内的工程出口，尚未实现 principal 权限与 M-policy/M-data 的独立因果评测，因此不构成 M-RSI 闭环。完整边界见 [MemoryService lifecycle](docs/design/memory-service-lifecycle.md)。
 
@@ -23,8 +25,8 @@ P3 已实现 `FeedbackBundle → 冻结独立 R0 → BehaviorPatch(O/M/S) → pa
 | P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础、manifest v2、ExecutablePlan v1 与宿主可信账本已实现并通过定向合同测试；真实 MiMo 普通任务已形成 schema 合法交付，manifest-v2 计划路径仍只有 E0 工程合同证据，独立 Workbench 仍失败 |
 | P1 普通任务与 benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同；BBH 两任务与 scientific-discovery 已提供 canonical TaskService adapter 和无模型 reference package，legacy 入口继续保留 |
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
-| P3 跨任务行为更新 | 反馈绑定候选生成、内置 `reference-os-v1`、显式/通道 improver、配对门控、通道晋升、监测/回滚及 E1/回滚机制证据导出已实现；一次性 E1 qualification 协议已冻结，但真实模型 generation 所需外部 payload 发送尚未获授权，因此未激活，候选效果与统计效益尚未建立 |
-| P4 改进过程可更新与递归执行 | 独立 R archive/channel、自更新、真实后代元评测、预登记 guard 与自动回滚已形成确定性机制闭环；这些仍是显式 API 串接，下一步需收敛为可恢复 cycle，真实模型与统计效益待检验 |
+| P3 跨任务行为更新 | manifest-v2 component id 已贯穿反馈、BehaviorPatch v2、加载证据、selection、promotion、guard 与 evidence；默认 reference R0 同时支持 v1/v2；M 路由、真实 E1 activation 与统计效益仍未完成 |
+| P4 改进过程可更新与递归执行 | 独立 R archive/channel、自更新、真实后代元评测、预登记 guard、自动回滚与可恢复 cycle 已形成确定性机制闭环；真实模型与统计递归效益待检验 |
 | P5 冻结研究和完整产品验收 | 通用 final-holdout 配对研究执行器、预注册 schema 与脱敏信息窗已实现；正式外部多任务族研究尚未登记或执行 |
 | 0.8 源码执行、自修改、历史 benchmark 与研究窗口 | 保留；其证据不替代 0.9 P1 或 P2–P5 验收 |
 
@@ -73,7 +75,7 @@ paired plan 冻结宿主能够重算的 execution environment、工具描述、�
 
 这条链有三种不同证据等级。E0 确定性工程合同可以证明身份、隔离、计划执行/修订/恢复、门控、递归版本、加载和回滚等**机制**；E1 真实 provider Episode 才能证明模型确实根据反馈产生并执行了行为变化；多个冻结任务、重复和对照才能支持**统计 RSI 效益**。manifest-v2/ExecutablePlan 与反馈驱动 RSI 的当前结论上限仍是 E0。正向 E1 exporter 与一次性 qualification runner 已实现并通过伪造反例审计，但真实 MiMo generation 尚未获得向外部 provider 发送脱敏 FeedbackBundle、可修改组件和 mutation policy 的授权，因此不能声称 E1 模型生成激活、候选改进或自我迭代收益已经成立。P1 的真实普通任务交付和 P2 的真实求解器 smoke 是各自执行路径的证据，不抬高这一 RSI 证据等级。
 
-工程下一阶段依次是：让演化收据以 manifest-v2 的稳定 component id 为目标；把 M component 路由到冻结的 `MemoryService` release/snapshot；将 P4 显式 self-update、meta evaluation、promotion、guard 和 rollback 收敛成可恢复 cycle。以上工作继续保留 evaluator、usage、snapshot、selection 与 promotion/guard 门槛。
+工程下一阶段依次是：把纯 M component 路由到冻结的 `MemoryService` candidate/release/snapshot，拒绝当前无法原子提交的 O/S+M 混合补丁；扩展多 benchmark、多 seed 聚合；在获得精确外部发送授权后执行一次真实 E1 generation activation。以上工作继续保留 evaluator、usage、snapshot、selection 与 promotion/guard 门槛。
 
 这个边界来自[编排与 RSI 研究综合](docs/research/agent-orchestration-rsi-synthesis-20260916.md)：持久化、实际执行和有效必须分别检查，且“失败证据 → 候选变化 → 验证 → 后续实际加载 → 结果”缺一不可。0.8 的[框架验证](docs/research/framework-validation-20260916.md)、[v1 机制审查](docs/research/framework-mechanism-v1-review.md)和[v2 机制审查](docs/research/framework-mechanism-v2-review.md)记录过机制未激活、契约错误和实际后代零增益，因此源码变化、记忆写入或候选数量都不能单独作为 RSI 成功证据。P1 实跑记录格式见[任务运行时验证模板](docs/research/task-runtime-validation-20260920.md)。
 
@@ -123,7 +125,7 @@ python -m venv .venv
 # 显式、分阶段执行 P3 闭环；每一步输出下一步所需的不可变 ID/digest
 .venv\Scripts\python.exe -m nexgent rsi-register general --package parent-package.json
 .venv\Scripts\python.exe -m nexgent rsi-feedback general EPISODE_ID --expected-revision 0
-# 默认使用内置、模型驱动的 reference-os-v1；示例策略只开放默认任务包的 O/S 组件
+# 默认 reference R0 根据父包自动选择 legacy path v1 或 manifest component v2 合同
 .venv\Scripts\python.exe -m nexgent rsi-generate general FEEDBACK_ID --mutation-policy examples/rsi/reference-os-mutation-policy.json --expected-revision 0
 # 可选：显式冻结包，或从独立 R channel 解析已部署版本
 .venv\Scripts\python.exe -m nexgent rsi-generate general FEEDBACK_ID --improver-package improver.json --mutation-policy mutation-policy.json --expected-revision 0
@@ -143,6 +145,12 @@ python -m venv .venv
 .venv\Scripts\python.exe -m nexgent rsi-cycle-show RSI_CYCLE_ID
 .venv\Scripts\python.exe -m nexgent rsi-cycle-resume RSI_CYCLE_ID
 
+# P4 可恢复递归改进器 cycle；spec 冻结 R/A0、feedback、任务集、预算、模型和门槛
+.venv\Scripts\python.exe -m nexgent rsi-improver-cycle-start workbench --spec recursive-cycle.json --register-only
+.venv\Scripts\python.exe -m nexgent rsi-improver-cycle-resume RECURSIVE_CYCLE_ID workbench
+.venv\Scripts\python.exe -m nexgent rsi-improver-cycle-show RECURSIVE_CYCLE_ID workbench
+.venv\Scripts\python.exe -m nexgent rsi-improver-cycle-recover RECURSIVE_CYCLE_ID workbench
+
 # workbench 是 P1 的纯 Python 可选插件；此命令仍会使用配置的模型供应商
 .venv\Scripts\python.exe -m nexgent task-benchmark workbench --split development --seed 0 --max-calls 20
 
@@ -159,9 +167,9 @@ python -m venv .venv
 
 正式 final-holdout 比较使用 `rsi-study-plan` 冻结两个包、宿主私有 benchmark snapshot、显式统计单位/来源 cluster、seed、provider/model revision、执行环境、完整预算与统计政策，再依次执行 `rsi-study-run` 和 `rsi-study-assess`。统计检验按独立 cluster 聚合；模型供应商只返回滚动别名时，报告保持时间窗口内的 benchmark 局部结论。`rsi-study-list` 与 GUI 只显示脱敏摘要。当前没有外部多任务族正式结果；确定性 study pilot 只验证研究控制面。
 
-内置 `reference-os-v1` 是通用参考 R0，不包含科学发现、OpenFOAM 或任何 benchmark 的答案与评分逻辑。首版主动收窄为单文件 `replace` 且只处理 O/S；M（记忆策略）、多文件修改和增删文件继续由显式研究包探索。模型返回 abstain、非法 patch、调用失败或预算耗尽时，generation 持久记录为 missing。生成 candidate 后仍必须完成 paired selection、显式 promotion 和 guard，默认命令不会自动部署。
+内置 reference R0 是通用改进器，不包含科学发现、OpenFOAM 或任何 benchmark 的答案与评分逻辑。它按宿主归一化的 `mutation_policy.targeting` 选择 BehaviorPatch v1 或 v2；v2 强制 hypothesis、operation 和 activation probe 使用同一稳定 `component_id`，并拒绝模型注入 path/class。当前仍收窄为单文件 O/S `replace`；M、多文件修改和增删文件留给后续受控切片。模型返回 abstain、非法 patch、调用失败或预算耗尽时，generation 持久记录为 missing。生成 candidate 后仍必须完成 paired selection、显式 promotion 和 guard，默认命令不会自动部署。
 
-P3 的每个写操作都有独立 CLI 和 Python API；P4 的递归写操作保留为显式 Python 控制面，必须依次形成 meta feedback、R self-generation、meta trial/decision、guard plan 和 promotion，不能“一键跳过门控”。GUI 的“RSI 与版本”页保持只读。`rsi-*` 输出不暴露 AgentPackage 源文件、私有任务内容或 evaluator 实现。操作顺序见[运行与恢复](docs/operations.md)，完整合同见[P3 控制面设计](docs/design/p3-feedback-evolution-control-plane.md)与[P4 递归控制面](docs/design/p4-recursive-improver-control-plane.md)。
+P3 的每个写操作都有独立 CLI 和 Python API。P4 既保留显式服务 API，也提供 `rsi-improver-cycle-start/resume/show/recover`；cycle 仍逐步形成 meta feedback、R self-generation、meta trial/decision、guard plan 和 promotion，不能跳过门控。GUI 的“RSI 与版本”页保持只读。`rsi-*` 输出不暴露 AgentPackage 源文件、私有任务内容或 evaluator 实现。操作顺序见[运行与恢复](docs/operations.md)，完整合同见[P3 控制面设计](docs/design/p3-feedback-evolution-control-plane.md)与[P4 递归控制面](docs/design/p4-recursive-improver-control-plane.md)。
 
 `RSICycleService` 把一次任务智能体改进的 feedback、generation、paired selection、guard plan、promotion 与 monitor 串成持久状态机。CLI 提供 `rsi-cycle-start/resume/show/recover`，默认使用内置参考 R0，也可冻结并执行独立 R channel 的指定 revision；信息窗口可按 cycle ID 查看脱敏状态。R channel 在 Episode 创建前和真正启动前都会重新核验，漂移时不会发起模型调用。它减少调用方手工传递记录 ID，但不会跳过独立评价或自动放宽晋升条件；硬中断中无法确定外部动作是否提交时会进入 `recovery_required`，CLI 返回非零。合同见[可恢复 RSI Cycle 服务](docs/design/rsi-cycle-service.md)。
 

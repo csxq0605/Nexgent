@@ -58,4 +58,4 @@ promotion 后的 guard 执行、评估和回滚都绑定 cycle 记录的 revisio
 - `rsi-cycle-recover` 处理硬中断，未能安全恢复时输出状态并返回非零；
 - GUI“RSI 与版本”页按 cycle ID 查询相同公开投影，不执行写操作。
 
-CLI 默认使用 `reference-os-v1`，也接受显式 improver package，或成对提供 `--improver-channel` 与 `--expected-improver-revision`。公开投影只显示来源类型及 channel/revision/package identity，不返回 R 的源码或归档内容。
+CLI 默认使用双合同 reference R0（保留 `reference-os-v1` 兼容名）：manifest v1 走 path-v1，manifest v2 走 component-id-v2。也可接受显式 improver package，或成对提供 `--improver-channel` 与 `--expected-improver-revision`。公开投影只显示来源类型及 channel/revision/package identity，不返回 R 的源码或归档内容。

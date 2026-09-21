@@ -1,7 +1,7 @@
 # P4 递归改进器控制面
 
 日期：2026-09-20
-状态：确定性机制闭环已实现；真实模型行为与统计递归效益尚未建立。
+状态：确定性机制闭环与可恢复 cycle 已实现；真实模型行为与统计递归效益尚未建立。
 
 ## 1. 定位与研究结论
 
@@ -90,7 +90,17 @@ Meta plan 只能消费一次；重复运行返回同一 trial，不产生新 Epi
 
 回滚移动 R channel 指针，不删除 R1、R2、trial 或失败记录。回滚后的 recovery generation 必须以新 revision 再次通过 channel 实际执行 R0；仅读取指针不构成“R0 已重新加载”的证据。
 
-## 6. 确定性机制 pilot 的结果
+## 6. 可恢复 cycle 与 durable admission
+
+`RecursiveImproverCycleService` 冻结 R channel revision、共同 A0 与 task channel revision、两个 FeedbackBundle、任务集、adapter snapshot、provider/model、预算、meta policy 与 guard 阈值。状态机依次持久化 feedback、self-generation、meta plan/run/assessment、decision、guard plan、promotion 和 guard/rollback 的不可变引用。
+
+每个阶段先登记唯一 action。R self-generation 的 invocation 与 action 在同一 SQLite 事务中预留，另有不进入公开投影的 claim token；重复或复制 invocation 不能创建第二个 Episode。terminal generation record、claim 完成状态与 event 原子提交，恢复直接从 claim 定位唯一证据，不按相似字段扫描全表。
+
+Meta 与 guard 的每个外部边界都执行 admission check：TaskAgent generation 的 create/run、recursive R generation 的 create/run，以及 descendant evaluation 的 create/run/evaluate。检查重新加载 cycle action、R channel 与 A0 channel；漂移抛出 `AdmissionConflict` 并越过普通测量失败捕获，不写 trial、guard action 或 rollback。进入 `completed`/`rolled_back` 时，terminal status、evidence refs、`pending_action=None` 和 runner token 清理在同一 CAS 写入。
+
+公开 `show` 只返回固定字段与标量类型；package source、任务正文、evaluator、policy、claim token 和嵌套任意对象都不会随未来私有字段自动暴露。`recover(confirm_no_external_commit=True)` 只用于宿主无法证明某个 running action 是否已经产生外部提交的场景；已闭合 claim 会被重用，不重放 Episode。
+
+## 7. 确定性机制 pilot 的结果
 
 `tests/test_recursive_improver_pilot.py` 使用无模型、无网络、无工具的完整真实控制面：
 
@@ -109,7 +119,7 @@ Meta plan 只能消费一次；重复运行返回同一 trial，不产生新 Epi
 
 这证明递归版本、实际执行、下游元效用、部署、下一代自更新和退化回滚机制闭合。分数来自确定性 fixture，不能证明真实模型下 R1 优于 R0，也不能证明持续改进、加速增长或跨任务泛化。
 
-## 7. 产品入口
+## 8. 产品入口
 
 普通任务和 benchmark 继续使用 task-agent channel：
 
@@ -118,16 +128,20 @@ python -m nexgent task "完成目标" --package-channel general
 python -m nexgent task-benchmark workbench --package-channel general
 ```
 
-递归改进器有独立只读状态入口：
+递归改进器有独立通道状态和可恢复 cycle 入口：
 
 ```powershell
 python -m nexgent rsi-improver-status recursive
 python -m nexgent rsi-improver-events recursive --limit 50
+python -m nexgent rsi-improver-cycle-start workbench --spec recursive-cycle.json --register-only
+python -m nexgent rsi-improver-cycle-resume RECURSIVE_CYCLE_ID workbench
+python -m nexgent rsi-improver-cycle-show RECURSIVE_CYCLE_ID workbench
+python -m nexgent rsi-improver-cycle-recover RECURSIVE_CYCLE_ID workbench
 ```
 
-GUI 的“RSI 与版本”信息窗同时显示 task-agent channel 和 recursive-improver channel 的脱敏状态。写操作保留为显式 Python 控制面步骤，避免把 feedback、self-update、meta trial、guard 与 promotion 压缩为不可审查的一键动作。
+start 的 JSON spec 必须显式给出 R/A0 revision、task feedback、generation/decision evidence、development/selection/guard 任务、provider/model、预算和门槛。CLI 只推进同一持久状态机，并不绕过其中任何门控。GUI 的“RSI 与版本”信息窗继续显示 task-agent channel 和 recursive-improver channel 的脱敏状态。
 
-## 8. 尚未完成的研究
+## 9. 尚未完成的研究
 
 P4 机制实现之后，仍需单独预登记真实研究：
 

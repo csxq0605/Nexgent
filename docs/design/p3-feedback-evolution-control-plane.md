@@ -40,12 +40,12 @@ P3 把任务 agent 的可变行为面划分为：
 | `M` | memory policy | 写入、检索、冲突处理、过期和消费策略 |
 | `S` | skill / prompt protocol | 工具前后检查、工件发布协议、审阅与修订步骤 |
 
-一个 `BehaviorPatch` 必须声明失败机制、预期行为、适用范围、可证伪条件、有限路径操作和激活探针。mutation policy 为每个可变路径预先标注 O/M/S，宿主按旧 digest 验证 replace/remove，并从父包确定性构造完整 child 包。
+一个 `BehaviorPatch` 必须声明失败机制、预期行为、适用范围、可证伪条件、有限操作和激活探针。manifest v2 使用 BehaviorPatch v2：mutation policy 只列稳定 component id，宿主从父 manifest 解析 O/S class、kind、ref 与唯一文件，hypothesis/operation/probe 必须使用同一 id。manifest v1 保留明确标记的 path-v1 兼容合同。两者都按旧 digest 验证并从父包确定性构造完整 child；当前 v2 只允许单文件 replace，M 另行路由。
 
 P3 冻结：
 
 - 独立 improver package、`improve` entry 和完整包组件摘要；
-- FeedbackBundle schema、BehaviorPatch schema、mutable paths、操作类型和大小上限；
+- FeedbackBundle schema、BehaviorPatch v1/v2 schema、mutable path 或 stable component id、操作类型和大小上限；
 - task sampler、split/seed、父子运行顺序规则、benchmark/evaluator snapshot；
 - PromotionPolicy、guard plan、monitor 阈值和 rollback 实现；
 - 可重算的 execution environment、工具描述、运行时实现摘要、任务预算和 candidate-generation 预算。provider/model 的预登记目标属于实验协议；实际身份由每次模型调用 receipt 证明，当前 plan 不声称在调用前完整冻结二者。
@@ -81,9 +81,9 @@ P3 冻结：
 
 FeedbackBundle 不把 task context、evaluator 私有诊断或答案直接传给 improver。它保留任务与私有 context digest、有限公开指标、工件引用和执行证据摘要，从而既绑定真实反馈，又缩小信息泄漏面。
 
-`GenerationService.generate(...)` 要求独立版本化的 improver package 注册 `improve` entry。它通过普通 `TaskService` 和有界预算执行，不能获得工具权限，只能发布一个符合 schema 的 `behavior_patch` 工件。宿主随后验证执行 entry、loaded module、工件 producer、patch schema、可变路径、组件类别、旧摘要、patch 大小和激活探针，再构造并 admission child 包。
+`GenerationService.generate(...)` 要求独立版本化的 improver package 注册 `improve` entry。它通过普通 `TaskService` 和有界预算执行，不能获得工具权限，只能发布一个符合 schema 的 `behavior_patch` 工件。宿主随后验证执行 entry、loaded module、工件 producer、patch schema、stable component identity、旧摘要、patch 大小和激活探针，再构造并 admission child 包。v2 child 必须保留完整父 manifest，候选不能借 manifest 重定向组件或把 v1 谱系升级成 v2。
 
-CLI 在未指定 improver 来源时加载框架内置 `reference-os-v1`。这是领域无关的参考 R0：它读取有界、脱敏的 FeedbackBundle 与 mutation policy，通过配置的模型角色 `rsi_improver` 提出一个声明式 patch；源包没有 OpenFOAM、科学发现、Workbench 或其他 benchmark 的分支。首版故意限制为一个现有 O/S 组件的一次 `replace`，要求匹配父包摘要和 `component_loaded` 激活探针。它不修改 M，不增删文件，不接触 evaluator、manifest、权限、gate 或宿主代码。证据不足时模型可 abstain，宿主将其与非法输出、供应商失败、预算耗尽一样保存为 missing，而不是生成占位 candidate。
+CLI 在未指定 improver 来源时加载框架内置 reference R0（`builtin:reference-os-v1` 仍是兼容入口名）。它读取有界、脱敏的 FeedbackBundle 与宿主归一化 mutation policy，通过 `rsi_improver` 产生声明式 patch；legacy policy 输出 v1，manifest component policy 输出 v2。v2 在 R0 内再次核验 descriptor 的 class/kind/ref/files，并拒绝 path/class 注入。源包没有 OpenFOAM、科学发现、Workbench 或其他 benchmark 分支。两条合同都限制为一个现有 O/S 组件的一次 `replace`，不修改 M、不增删文件，也不接触 evaluator、manifest、权限、gate 或宿主代码。
 
 另外两种来源保持显式：`--improver-package` 接受调用方冻结的独立 R0；`--improver-channel` 与 `--expected-improver-revision` 从 P4 的独立 R channel 原子解析已部署 R。三种来源最终经过同一 `GenerationService`、补丁校验和 generation receipt，不改变可信宿主的门控职责。builtin 是可运行的参考实现，不是被框架硬编码的唯一改进算法。
 

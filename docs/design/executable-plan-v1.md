@@ -21,7 +21,7 @@ manifest v2 保留 `execute` 和可选 `improve` entry，并增加四个必填�
 
 component class 只能是 O（编排）、M（记忆策略/数据接口）或 S（技能与提示协议）；kind 只能是 role、workflow、skill、entry 或 resource。宿主验证所有引用存在、同一个 `(kind, ref)` 不重复注册、同一文件没有冲突分类。v2 child 不能降级成 v1；父子共同拥有的稳定 component id 不能改变 class、kind 或 ref。
 
-这些规则给演化和审计提供权威身份，但当前 BehaviorPatch 仍以文件 path 为直接变更目标。由 stable component id 贯穿反馈、补丁和评价属于下一阶段。
+这些规则现在也是 BehaviorPatch v2 的权威身份来源。宿主只接受 mutation policy 中的稳定 `component_id`，从冻结 manifest 解析 class/kind/ref/file；hypothesis、唯一 replace operation、activation probe、selection、promotion、guard 与 evidence 必须保持同一身份。legacy manifest v1 继续使用明确标记的 path 合同，不能升级或伪装成 v2 证据。
 
 ## 3. ExecutablePlan v1：可执行图合同
 
@@ -58,13 +58,9 @@ workflow 可以登记有界 revision rule：某个节点的持久 receipt 满足
 
 ## 6. 与 O/M/S 演化的关系
 
-当前纵切面已经把 O 类 workflow orchestrator、role 和 S 类 skill/prompt component 连接到真实执行，也为 M component 提供了 manifest 身份。`MemoryService` 另有候选、release、snapshot 与 CAS 晋升/回滚合同，但 M component 身份尚未贯穿 plan node、memory release 和演化收据；P3 mutation policy 也仍以 path 与 O/M/S class 为主。
+当前纵切面已经把 O 类 workflow orchestrator、role 和 S 类 skill/prompt component 连接到真实执行，并把 manifest-v2 component identity 接到 P3 演化收据。`MemoryService` 另有候选、release、snapshot 与 CAS 晋升/回滚合同，但 M component 身份尚未贯穿 plan node、memory release 和演化收据。
 
-因此下一完整切片应依次完成：
-
-1. **component-targeted evolution**：feedback、BehaviorPatch、activation probe、selection 和 guard 使用同一稳定 component id；
-2. **M routing**：计划显式绑定冻结 memory release/snapshot，并区分 M-policy 与 M-data；
-3. **P4 recoverable cycle**：将 R self-update、meta trial/decision、promotion、guard 和 rollback 纳入持久、可恢复、单次 claim 的 cycle。
+component-targeted evolution 与 P4 recoverable cycle 已完成 E0 工程切片。下一完整切片是 **M routing**：先只允许纯 `class=M, kind=resource` 目标，把候选路由到冻结 MemoryService selection/release/snapshot；在 compound release 出现前，O/S+M 混合更新整体拒绝。
 
 这些步骤不得放宽 evaluator、usage、snapshot、selection、promotion 或 guard gate。
 
