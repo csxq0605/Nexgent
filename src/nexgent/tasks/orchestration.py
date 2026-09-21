@@ -92,8 +92,14 @@ class NodeStatus(str, Enum):
 
 
 class JoinMode(str, Enum):
+    # Legacy generic modes remain readable for persisted v1 contracts. New
+    # workflow compilation uses the explicit success/completion vocabulary so
+    # admission semantics participate in plan identity.
     ALL = "all"
     ANY = "any"
+    ALL_SUCCESS = "all_success"
+    ALL_COMPLETED = "all_completed"
+    ANY_SUCCESS = "any_success"
     QUORUM = "quorum"
 
 

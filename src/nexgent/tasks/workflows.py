@@ -120,6 +120,23 @@ def _set(value, path, content):
     value[parts[-1]] = content
 
 
+def _node_parameters(node_id, nodes, artifacts, payload, receipts):
+    """Deterministically materialize one admitted node's effective inputs."""
+    node = nodes[node_id]
+    params = _bind(node.get("params", {}), payload, receipts)
+    params.update(_bind(node.get("bindings", {}), payload, receipts))
+    for edge in artifacts[node_id]:
+        source = receipts[edge["producer_node"]]
+        if source["status"] == "skipped":
+            raise WorkflowError("Artifact producer was skipped")
+        _set(params, edge["input_port"],
+             _get(source["value"], edge["output_port"]))
+    if "input_schema" in node:
+        from .tools import validate
+        validate(params, node["input_schema"], label=f"node {node_id} input")
+    return params
+
+
 def _validate(workflow, depth=0):
     if depth > 16 or not isinstance(workflow, dict):
         raise WorkflowError("Workflow nesting exceeds its limit or is not an object")
@@ -295,16 +312,8 @@ def _run(workflow, payload, invoke, stop_event, max_parallel, prefix, limiter):
                     pending.remove(node_id)
                     continue
                 try:
-                    params = _bind(node.get("params", {}), payload, receipts)
-                    params.update(_bind(node.get("bindings", {}), payload, receipts))
-                    for edge in artifacts[node_id]:
-                        source = receipts[edge["producer_node"]]
-                        if source["status"] == "skipped":
-                            raise WorkflowError("Artifact producer was skipped")
-                        _set(params, edge["input_port"], _get(source["value"], edge["output_port"]))
-                    if "input_schema" in node:
-                        from .tools import validate
-                        validate(params, node["input_schema"], label=f"node {node_id} input")
+                    params = _node_parameters(
+                        node_id, nodes, artifacts, payload, receipts)
                 except Exception as exc:
                     receipts[node_id] = _failed(exc)
                     pending.remove(node_id)
@@ -439,12 +448,16 @@ def plan_from_workflow(workflow, plan_id, *, revision=1):
                     ))
         join_policies = []
         for node_id, node in nodes.items():
-            incoming = controls[node_id]
-            if len(incoming) > 1 or "join_policy" in node:
+            if (dependencies[node_id] or "join_policy" in node
+                    or "join_policy" in workflow):
                 policy = node.get("join_policy", workflow.get("join_policy", "all_success"))
                 join_policies.append(JoinPolicy(
                     node_id=node_id,
-                    mode=JoinMode.ANY if policy == "any_success" else JoinMode.ALL,
+                    mode={
+                        "all_success": JoinMode.ALL_SUCCESS,
+                        "all_completed": JoinMode.ALL_COMPLETED,
+                        "any_success": JoinMode.ANY_SUCCESS,
+                    }[policy],
                 ))
 
         failure_routes = []
@@ -509,6 +522,7 @@ def run_executable_workflow(
     persist,
     resolve_revision,
     receipt_evidence,
+    record_local_receipt,
     initial_receipts=None,
     stop_event=None,
     max_parallel=4,
@@ -522,34 +536,53 @@ def run_executable_workflow(
     if not isinstance(execution, PlanExecution):
         raise ValueError("Executable workflow requires PlanExecution")
     if (not callable(invoke) or not callable(persist) or not callable(resolve_revision)
-            or not callable(receipt_evidence)):
+            or not callable(receipt_evidence) or not callable(record_local_receipt)):
         raise ValueError("Executable workflow callbacks must be callable")
-    if type(max_parallel) is not int or not 1 <= max_parallel <= 32:
+    if not callable(max_parallel) and (
+            type(max_parallel) is not int or not 1 <= max_parallel <= 32):
         raise ValueError("max_parallel must be in [1,32]")
     stop_event = threading.Event() if stop_event is None else stop_event
     active = deepcopy(workflow)
     payload = deepcopy(payload)
     receipts = deepcopy(initial_receipts or {})
-    limiter = threading.BoundedSemaphore(max_parallel)
+    execution_lock = threading.RLock()
+
+    def parallelism():
+        value = max_parallel() if callable(max_parallel) else max_parallel
+        if type(value) is not int or not 1 <= value <= 32:
+            raise ValueError("max_parallel must be in [1,32]")
+        return value
 
     def check_stop():
         if stop_event.is_set():
             raise InterruptedError("Workflow execution stopped")
 
-    def execute(node_id, params, nodes):
+    def admit(node_id, attempt_ref, input_refs):
+        nonlocal execution
+        with execution_lock:
+            check_stop()
+            execution = execution.transition_node(
+                node_id, NodeStatus.RUNNING, attempt_ref=attempt_ref,
+                input_artifact_refs=input_refs,
+            )
+            persist(execution, receipts)
+
+    def execute(node_id, params, nodes, attempt_ref, input_refs):
         check_stop()
         node = nodes[node_id]
         path = f"plan/nodes/{node_id}"
         try:
             if node["method"] == "join":
+                admit(node_id, attempt_ref, input_refs)
                 value = params
             elif node["method"] == "loop":
+                admit(node_id, attempt_ref, input_refs)
                 state = params.get("payload", payload)
                 history = []
                 for iteration in range(node["max_iterations"]):
                     check_stop()
                     result = _run(
-                        node["body"], state, invoke, stop_event, max_parallel,
+                        node["body"], state, invoke, stop_event, active_parallelism,
                         f"{path}/iterations/{iteration}/", limiter,
                     )
                     history.append(result)
@@ -574,6 +607,7 @@ def run_executable_workflow(
                     check_stop()
                 try:
                     check_stop()
+                    admit(node_id, attempt_ref, input_refs)
                     value = invoke(node["method"], params, path)
                 finally:
                     limiter.release()
@@ -588,6 +622,8 @@ def run_executable_workflow(
             return _failed(exc)
 
     while True:
+        active_parallelism = parallelism()
+        limiter = threading.BoundedSemaphore(active_parallelism)
         nodes, dependencies, controls, artifacts = _validate(active)
         current_ids = set(nodes)
         if current_ids != {node.id for node in execution.plan.nodes}:
@@ -622,25 +658,18 @@ def run_executable_workflow(
                     continue
                 attempt_ref = f"attempt://{execution.id}/{execution.plan.revision}/{node_id}/1"
                 try:
-                    params = _bind(node.get("params", {}), payload, receipts)
-                    params.update(_bind(node.get("bindings", {}), payload, receipts))
-                    for edge in artifacts[node_id]:
-                        source = receipts[edge["producer_node"]]
-                        if source["status"] == "skipped":
-                            raise WorkflowError("Artifact producer was skipped")
-                        _set(params, edge["input_port"],
-                             _get(source["value"], edge["output_port"]))
-                    if "input_schema" in node:
-                        from .tools import validate
-                        validate(params, node["input_schema"], label=f"node {node_id} input")
-                    execution = execution.transition_node(
-                        node_id, NodeStatus.RUNNING, attempt_ref=attempt_ref,
-                        input_artifact_refs=tuple(receipt_evidence("input", params)),
-                    )
+                    params = _node_parameters(
+                        node_id, nodes, artifacts, payload, receipts)
+                    input_refs = tuple(receipt_evidence("input", params))
                 except Exception as exc:
                     execution = execution.transition_node(
                         node_id, NodeStatus.RUNNING, attempt_ref=attempt_ref)
                     receipts[node_id] = _failed(exc)
+                    if node["method"] in {"join", "loop"}:
+                        record_local_receipt(
+                            node["method"], {"host_preflight": True},
+                            f"plan/nodes/{node_id}", receipts[node_id],
+                        )
                     execution = execution.transition_node(
                         node_id, NodeStatus.FAILED,
                         failure_ref=f"failure://{execution.id}/{node_id}",
@@ -648,41 +677,49 @@ def run_executable_workflow(
                     pending.remove(node_id)
                     finished_now.append(node_id)
                     continue
-                admitted[node_id] = params
+                admitted[node_id] = (params, attempt_ref, input_refs)
             persist(execution, receipts)
 
             interruption = None
             with ThreadPoolExecutor(
-                    max_workers=max_parallel,
+                    max_workers=active_parallelism,
                     thread_name_prefix="nexgent-plan") as executor:
-                futures = {node_id: executor.submit(execute, node_id, params, nodes)
-                           for node_id, params in admitted.items()}
+                futures = {node_id: executor.submit(
+                    execute, node_id, params, nodes, attempt_ref, input_refs)
+                           for node_id, (params, attempt_ref, input_refs) in admitted.items()}
                 for node_id, future in futures.items():
                     try:
                         receipt = future.result()
-                        receipts[node_id] = receipt
-                        node = nodes[node_id]
-                        iterations = (receipt["value"].get("iterations", 0)
-                                      if node["method"] == "loop"
-                                      and isinstance(receipt.get("value"), dict) else 0)
-                        if receipt["status"] == "completed":
-                            execution = execution.transition_node(
-                                node_id, NodeStatus.COMPLETED,
-                                output_artifact_refs=tuple(
-                                    receipt_evidence("output", receipt["value"])),
-                                iteration_count=iterations,
-                            )
-                        else:
-                            execution = execution.transition_node(
-                                node_id, NodeStatus.FAILED,
-                                failure_ref=f"failure://{execution.id}/{node_id}",
-                                iteration_count=iterations,
-                            )
+                        with execution_lock:
+                            node = nodes[node_id]
+                            if node["method"] in {"join", "loop"}:
+                                record_local_receipt(
+                                    node["method"], admitted[node_id][0],
+                                    f"plan/nodes/{node_id}", receipt,
+                                )
+                            receipts[node_id] = receipt
+                            iterations = (receipt["value"].get("iterations", 0)
+                                          if node["method"] == "loop"
+                                          and isinstance(receipt.get("value"), dict) else 0)
+                            if receipt["status"] == "completed":
+                                execution = execution.transition_node(
+                                    node_id, NodeStatus.COMPLETED,
+                                    output_artifact_refs=tuple(
+                                        receipt_evidence("output", receipt["value"])),
+                                    iteration_count=iterations,
+                                )
+                            else:
+                                execution = execution.transition_node(
+                                    node_id, NodeStatus.FAILED,
+                                    failure_ref=f"failure://{execution.id}/{node_id}",
+                                    iteration_count=iterations,
+                                )
+                            pending.remove(node_id)
+                            finished_now.append(node_id)
+                            persist(execution, receipts)
                     except InterruptedError as exc:
                         stop_event.set()
                         interruption = exc
-                    pending.remove(node_id)
-                    finished_now.append(node_id)
             persist(execution, receipts)
 
             for node_id in finished_now:

@@ -31,7 +31,7 @@ def _usage(value):
 
 def _episode(tasks, identity):
     try:
-        return tasks.get(identity)
+        return tasks.get_private(identity)
     except KeyError:
         raise ContractError(f"Evidence Episode is not local: {identity}") from None
 

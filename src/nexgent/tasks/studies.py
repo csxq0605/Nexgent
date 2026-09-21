@@ -266,7 +266,7 @@ class TaskStudyExecutor:
         return state["id"]
 
     def validate_episode(self, plan, cell, episode_id):
-        state = self.tasks.get(episode_id)
+        state = self.tasks.get_private(episode_id)
         registration = self.tasks.store.benchmark_registration(episode_id) or {}
         if (state.get("package_id") != cell["package_id"]
                 or state.get("package_digest") != cell["package_digest"]
@@ -284,7 +284,7 @@ class TaskStudyExecutor:
                 or digest(_execution_environment(self.tasks, self.adapter))
                    != plan["execution_environment_digest"]):
             raise ContractError("Study evaluator authority changed after registration")
-        state = self.tasks.get(episode_id)
+        state = self.tasks.get_private(episode_id)
         if state["status"] not in {"completed", "failed", "cancelled", "waiting_input"}:
             state = self.tasks.run(episode_id, stop_event=stop_event)
         if state["status"] in {"ready", "running", "paused"}:
@@ -292,7 +292,7 @@ class TaskStudyExecutor:
         evaluated = self.tasks.evaluate(
             episode_id, self.adapter, deepcopy(cell["task"]),
             snapshot=deepcopy(plan["benchmark_snapshot"]))
-        state = self.tasks.get(episode_id)
+        state = self.tasks.get_private(episode_id)
         classified = classify_benchmark_outcome(state, evaluated["evaluation"])
         report = classified["evaluation"]
         failure_class = classified["failure_class"]

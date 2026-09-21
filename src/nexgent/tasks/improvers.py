@@ -343,7 +343,7 @@ class ImproverService:
             if not isinstance(episode_id, str):
                 raise ContractError("Task-agent generation lacks a real improver Episode")
             try:
-                episode = self.tasks.get(episode_id)
+                episode = self.tasks.get_private(episode_id)
             except KeyError:
                 raise ContractError("Task-agent generation Episode is not local") from None
             if episode["status"] not in _GENERATION_EVIDENCE_STATUSES:
@@ -478,7 +478,7 @@ class ImproverService:
             episode = self.tasks.run(episode["id"], stop_event=stop_event)
         except Exception as exc:
             if episode is not None:
-                episode = self.tasks.get(episode["id"])
+                episode = self.tasks.get_private(episode["id"])
             return self._generation_missing(base, f"{type(exc).__name__}: {exc}", episode)
         if episode["status"] != "completed":
             return self._generation_missing(
@@ -697,7 +697,7 @@ class ImproverService:
         parent = self.store.package(candidate["parent_improver_id"])
         verify_package(child, parent)
         version = self.version(child["id"])
-        episode = self.tasks.get(generation["episode_id"])
+        episode = self.tasks.get_private(generation["episode_id"])
         if (child.get("provenance", {}).get("generation_id") != generation["id"]
                 or version.get("generation_id") != generation["id"]
                 or version.get("candidate_id") != candidate["id"]

@@ -238,7 +238,7 @@ class GenerationService:
         episode_refs = []
         for identity in episode_ids:
             try:
-                episode = self.tasks.get(identity)
+                episode = self.tasks.get_private(identity)
             except KeyError:
                 raise ContractError(f"Feedback Episode is not local: {identity}") from None
             if episode["status"] not in _TERMINAL:
@@ -512,7 +512,7 @@ class GenerationService:
             episode = self.tasks.run(episode["id"], stop_event=stop_event)
         except Exception as exc:
             if episode is not None:
-                episode = self.tasks.get(episode["id"])
+                episode = self.tasks.get_private(episode["id"])
             return self._missing(base, f"{type(exc).__name__}: {str(exc)}", episode=episode)
         if episode["status"] != "completed":
             return self._missing(base, episode.get("last_error") or

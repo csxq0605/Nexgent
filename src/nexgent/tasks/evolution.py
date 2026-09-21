@@ -577,7 +577,7 @@ class EvolutionService:
             raise ContractError("Candidate feedback-to-generation linkage is invalid")
 
         try:
-            episode = self.tasks.get(generation["episode_id"])
+            episode = self.tasks.get_private(generation["episode_id"])
             artifact = self.store.read(episode["output_refs"]["behavior_patch"], episode["id"])
         except (KeyError, PermissionError, ValueError) as exc:
             raise ContractError("Candidate improver execution receipt is missing") from exc
@@ -647,12 +647,12 @@ class EvolutionService:
             result = self.tasks.evaluate(state["id"], adapter, deepcopy(task_ref), snapshot=deepcopy(snapshot))
         except Exception as exc:  # failure is evidence and must never become deployment authority
             error = {"type": type(exc).__name__, "message": str(exc)[:1000]}
-            current = self.tasks.get(state["id"])
+            current = self.tasks.get_private(state["id"])
             result = {"episode_id": state["id"],
                       "evaluation": {"status": "error", "score_available": False,
                                      "accepted": False, "execution_status": current["status"]},
                       "usage": current["usage"]}
-        current = self.tasks.get(state["id"])
+        current = self.tasks.get_private(state["id"])
         classified = classify_benchmark_outcome(current, result["evaluation"])
         return {"episode_id": result["episode_id"], "evaluation": classified["evaluation"],
                  "usage": result["usage"], "execution": deepcopy(current.get("execution")),
@@ -1194,7 +1194,7 @@ class EvolutionService:
         observations, scores, successes, missing = [], [], [], []
         for identity in episode_ids:
             try:
-                episode = self.tasks.get(identity)
+                episode = self.tasks.get_private(identity)
             except KeyError:
                 raise ContractError(f"Monitoring episode is not local: {identity}") from None
             registration = episode["task"].get("context", {}).get("package_channel_registration")

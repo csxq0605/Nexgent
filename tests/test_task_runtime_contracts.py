@@ -138,7 +138,7 @@ def test_tool_work_receipt_uses_host_meter_and_ignores_output_claims(tmp_path):
     assert result["usage"]["tool_work_units"] == 7
     assert result["usage"]["charged_tool_work_units"] == 7
     assert result["usage"]["usage_complete"] is True
-    receipt = [event["content"] for event in result["events"]
+    receipt = [event["content"] for event in service.get_private(state["id"])["events"]
                if event["kind"] == "tool"][-1]
     assert receipt["work_accounting"] == {
         "schema": "nexgent.tool-work.v1", "reserved_work_units": 5,
@@ -557,7 +557,8 @@ def test_delegated_interruption_resumes_same_child_and_preserves_paid_model_resu
     assert first["failure_domain"] == "infrastructure"
     assert len(first["children"]) == 1
     child_id = first["children"][0]["id"]
-    request = {"method": "delegate", "params": first["nodes"]["rpc.1"]["request"],
+    private = service.get_private(state["id"])
+    request = {"method": "delegate", "params": private["nodes"]["rpc.1"]["request"],
                "package_digest": package["digest"]}
     assert service.store.rpc_find(state["id"], "rpc.1", request)["status"] == "started"
     # Recreate the host as well as the subprocess; resume uses the durable journal.
@@ -591,7 +592,8 @@ def test_parallel_interruption_resumes_child_rpc_journal_without_repeating_paid_
                                    "max_tool_calls": 1, "max_nodes": 16})
     first = service.run(state["id"])
     assert first["status"] == "paused"
-    request = {"method": "parallel", "params": first["nodes"]["rpc.1"]["request"],
+    private = service.get_private(state["id"])
+    request = {"method": "parallel", "params": private["nodes"]["rpc.1"]["request"],
                "package_digest": package["digest"]}
     assert service.store.rpc_find(state["id"], "rpc.1", request)["status"] == "started"
     assert first["nodes"]["rpc.1.0"]["status"] == "completed"

@@ -382,13 +382,52 @@ class TaskService:
     def list(self):
         return [self.get(state["id"]) for state in self.store.list() if not state["parent_episode_id"]]
 
-    def get(self, identity):
+    def _get_private_projection(self, identity):
         state = self.store.get(identity)
         state.update(usage=self.store.usage(state["root_episode_id"]), calls=self.store.calls(state["root_episode_id"]),
                      events=self.store.events(identity), artifacts=self.store.artifacts(identity),
                      children=[s for s in self.store.list() if s["parent_episode_id"] == identity],
                      memory_retrievals=self.store.retrievals(identity))
         return state
+
+    def get_private(self, identity):
+        """Return the host-only recovery projection, including durable receipts."""
+        return self._get_private_projection(identity)
+
+    @staticmethod
+    def _public_projection(state):
+        """Remove recovery-only requests and receipts from user-facing state."""
+        state = deepcopy(state)
+        state.pop("plan_node_receipts", None)
+        for node in state.get("nodes", {}).values():
+            if isinstance(node, dict):
+                for key in ("request", "plan_receipt", "result"):
+                    node.pop(key, None)
+        for child in state.get("children", []):
+            if isinstance(child, dict):
+                child.pop("plan_node_receipts", None)
+                for node in child.get("nodes", {}).values():
+                    if isinstance(node, dict):
+                        for key in ("request", "plan_receipt", "result"):
+                            node.pop(key, None)
+        for event in state.get("events", []):
+            if isinstance(event, dict):
+                content = event.get("content")
+                if isinstance(content, dict):
+                    for key in ("prompt", "messages", "request", "input"):
+                        content.pop(key, None)
+                if event.get("kind") == "tool" and isinstance(content, dict):
+                    content.pop("arguments", None)
+                    content.pop("result", None)
+        for call in state.get("calls", []):
+            if isinstance(call, dict):
+                for key in ("prompt", "messages", "request", "input"):
+                    call.pop(key, None)
+        state["projection"] = "public"
+        return state
+
+    def get(self, identity):
+        return self._public_projection(self._get_private_projection(identity))
 
     @staticmethod
     def _workflow_orchestrator(package, entry):
@@ -488,6 +527,19 @@ class TaskService:
         for rule in workflow.get("revision_rules", []):
             if not isinstance(rule, dict) or rule.get("workflow_ref") not in manifest["workflows"]:
                 raise ContractError("Workflow revision must resolve to a frozen registered workflow")
+        def has_retry(definition):
+            return (any(route.get("action") == "retry"
+                        for route in definition.get("failure_routes", [])
+                        if isinstance(route, dict))
+                    or any(node.get("method") == "loop"
+                           and isinstance(node.get("body"), dict)
+                           and has_retry(node["body"])
+                           for node in definition.get("nodes", [])
+                           if isinstance(node, dict)))
+
+        if has_retry(workflow):
+            raise ContractError(
+                "ExecutablePlan v1 runtime does not support RETRY failure routes")
         return workflow
 
     def _persist_plan(self, identity, execution, receipts, workflow_ref):
@@ -583,13 +635,73 @@ class TaskService:
                 "previous_plan_ref": previous_ref,
             })
 
+    def _verify_nested_loop_journals(
+            self, identity, package, workflow, result, prefix):
+        """Bind a persisted loop history to every nested external RPC outcome."""
+        from .workflows import _validate
+
+        try:
+            nodes, _, _, _ = _validate(workflow)
+            nested_receipts = result["nodes"]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RecoveryRequired("Persisted loop history is malformed") from exc
+        if not isinstance(nested_receipts, dict) or set(nested_receipts) != set(nodes):
+            raise RecoveryRequired("Persisted loop history has inconsistent nodes")
+        for node_id, node in nodes.items():
+            receipt = nested_receipts[node_id]
+            if not isinstance(receipt, dict) or receipt.get("status") not in {
+                    "completed", "failed", "skipped"}:
+                raise RecoveryRequired("Persisted loop node receipt is malformed")
+            if receipt["status"] == "skipped" or node["method"] == "join":
+                continue
+            path = f"{prefix}nodes/{node_id}"
+            if node["method"] == "loop":
+                value = receipt.get("value")
+                history = value.get("history") if isinstance(value, dict) else None
+                iterations = value.get("iterations") if isinstance(value, dict) else None
+                if (type(iterations) is not int or iterations < 0
+                        or not isinstance(history, list) or len(history) != iterations
+                        or iterations > node["max_iterations"]):
+                    raise RecoveryRequired("Persisted nested loop iteration evidence is invalid")
+                for index, iteration in enumerate(history):
+                    self._verify_nested_loop_journals(
+                        identity, package, node["body"], iteration,
+                        f"{path}/iterations/{index}/",
+                    )
+                continue
+            journal = self.store.rpc_find(identity, path)
+            request = journal.get("request") if isinstance(journal, dict) else None
+            if (not isinstance(request, dict)
+                    or request.get("method") != node["method"]
+                    or request.get("package_digest") != package["digest"]
+                    or not isinstance(request.get("params"), dict)):
+                raise RecoveryRequired(
+                    f"Nested loop node {node_id} is missing its RPC request")
+            try:
+                self.store.rpc_find(identity, path, request)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RecoveryRequired(
+                    f"Nested loop node {node_id} RPC request identity is invalid") from exc
+            if journal.get("status") == "completed":
+                if (receipt.get("status") != "completed"
+                        or receipt.get("value") != journal.get("result")):
+                    raise RecoveryRequired(
+                        f"Nested loop node {node_id} differs from its RPC outcome")
+            elif (journal.get("status") != "failed"
+                  or receipt.get("status") != "failed"):
+                raise RecoveryRequired(
+                    f"Nested loop node {node_id} differs from its RPC status")
+
     def _run_workflow_orchestrator(
             self, identity, package, component_id, initial_workflow_ref,
             payload, stop_event, notify):
         from .orchestration import (
             NodeStatus, PlanExecution, PlanRevision, plan_execution_from_dict,
         )
-        from .workflows import plan_from_workflow, run_executable_workflow
+        from .workflows import (
+            _failed, _node_parameters, _validate, plan_from_workflow,
+            run_executable_workflow,
+        )
 
         state = self.store.get(identity)
         workflow_ref = [state.get("plan_workflow_ref") or initial_workflow_ref]
@@ -609,6 +721,7 @@ class TaskService:
             receipts = deepcopy(state.get("plan_node_receipts") or {})
             methods = {node["id"]: node["method"] for node in workflow["nodes"]}
             plan_nodes = {node.id: node for node in execution.plan.nodes}
+            workflow_nodes, _, _, workflow_artifacts = _validate(workflow)
             for node_state in execution.node_executions:
                 for artifact_ref in (
                         *node_state.input_artifact_refs,
@@ -633,24 +746,34 @@ class TaskService:
                         != node_state.output_artifact_refs):
                     raise RecoveryRequired(
                         f"Plan node {node_state.node_id} artifact evidence differs from the ledger")
-                if methods[node_state.node_id] in {"join", "loop"}:
-                    continue
                 path = f"plan/nodes/{node_state.node_id}"
                 journal = self.store.rpc_find(identity, path)
                 expected_status = ("completed" if node_state.status is NodeStatus.COMPLETED
                                    else "failed")
                 request = journal.get("request") if isinstance(journal, dict) else None
                 expected_method = methods[node_state.node_id]
-                if (journal is None or journal.get("status") != expected_status
+                local_method = expected_method in {"join", "loop"}
+                if local_method:
+                    outcome_matches = (
+                        isinstance(journal, dict)
+                        and journal.get("status") == "completed"
+                        and journal.get("result") == receipt
+                    )
+                else:
+                    outcome_matches = (
+                        isinstance(journal, dict)
+                        and journal.get("status") == expected_status
+                        and (expected_status != "completed"
+                             or journal.get("result") == receipt.get("value"))
+                    )
+                if (not outcome_matches
                         or not isinstance(request, dict)
                         or set(request) != {"method", "params", "package_digest"}
                         or request["method"] != expected_method
                         or not isinstance(request["params"], dict)
                         or request["package_digest"] != package["digest"]
                         or not plan_nodes[node_state.node_id].operator_ref.startswith(
-                            f"operator://{expected_method}/")
-                        or (expected_status == "completed"
-                            and journal.get("result") != receipt.get("value"))):
+                            f"operator://{expected_method}/")):
                     raise RecoveryRequired(
                         f"Plan node {node_state.node_id} receipt differs from the RPC journal")
                 try:
@@ -662,6 +785,60 @@ class TaskService:
                         != node_state.input_artifact_refs):
                     raise RecoveryRequired(
                         f"Plan node {node_state.node_id} input artifact evidence differs from the RPC journal")
+                if expected_method == "join":
+                    params = None
+                    try:
+                        params = _node_parameters(
+                            node_state.node_id, workflow_nodes, workflow_artifacts,
+                            payload, receipts,
+                        )
+                        if "output_schema" in workflow_nodes[node_state.node_id]:
+                            validate(
+                                params, workflow_nodes[node_state.node_id]["output_schema"],
+                                label=f"node {node_state.node_id} output",
+                            )
+                        expected_receipt = {"status": "completed", "value": params}
+                    except Exception as exc:
+                        expected_receipt = _failed(exc)
+                    expected_params = (
+                        {"host_preflight": True} if params is None else params)
+                    if (receipt != expected_receipt
+                            or request["params"] != expected_params):
+                        raise RecoveryRequired(
+                            f"Join node {node_state.node_id} differs from its dependencies")
+                elif expected_method == "loop":
+                    try:
+                        loop_params = _node_parameters(
+                            node_state.node_id, workflow_nodes, workflow_artifacts,
+                            payload, receipts,
+                        )
+                    except Exception as exc:
+                        expected_receipt = _failed(exc)
+                        if (request["params"] == {"host_preflight": True}
+                                and receipt == expected_receipt
+                                and node_state.iteration_count == 0):
+                            continue
+                        raise RecoveryRequired(
+                            f"Loop node {node_state.node_id} inputs cannot be reconstructed"
+                        ) from exc
+                    if request["params"] != loop_params:
+                        raise RecoveryRequired(
+                            f"Loop node {node_state.node_id} differs from its dependencies")
+                    value = receipt.get("value")
+                    history = value.get("history") if isinstance(value, dict) else None
+                    iterations = value.get("iterations") if isinstance(value, dict) else None
+                    if (type(iterations) is not int or iterations < 0
+                            or not isinstance(history, list) or len(history) != iterations
+                            or iterations != node_state.iteration_count
+                            or iterations > workflow_nodes[node_state.node_id]["max_iterations"]):
+                        raise RecoveryRequired(
+                            f"Loop node {node_state.node_id} iteration evidence is invalid")
+                    for index, iteration in enumerate(history):
+                        self._verify_nested_loop_journals(
+                            identity, package,
+                            workflow_nodes[node_state.node_id]["body"], iteration,
+                            f"{path}/iterations/{index}/",
+                        )
 
         def persist(current, current_receipts):
             self._persist_plan(
@@ -686,12 +863,28 @@ class TaskService:
 
         def invoke(method, params, path):
             result = self._dispatch(
-                identity, package, method, params, path, stop_event, notify)
+                identity, package, method, params, path, stop_event, notify,
+                admitted=True)
             journal = self.store.rpc_find(identity, path)
             if (journal is None or journal["status"] != "completed"
                     or journal["result"] != result):
                 raise RecoveryRequired("Plan node result is not durable in the RPC journal")
             return deepcopy(journal["result"])
+
+        def record_local_receipt(method, params, path, receipt):
+            request = {
+                "method": method,
+                "params": deepcopy(params),
+                "package_digest": package["digest"],
+            }
+            journal = self.store.rpc_find(identity, path, request)
+            if journal is None:
+                self.store.rpc_start(identity, path, request)
+                journal = self.store.rpc_finish(identity, path, result=receipt)
+            if (journal.get("status") != "completed"
+                    or journal.get("result") != receipt):
+                raise RecoveryRequired(
+                    f"Local plan node {path} differs from its host journal")
 
         result = run_executable_workflow(
             workflow,
@@ -701,10 +894,11 @@ class TaskService:
             persist=persist,
             resolve_revision=resolve_revision,
             receipt_evidence=lambda _kind, value: self._references(identity, value),
+            record_local_receipt=record_local_receipt,
             initial_receipts=receipts,
             stop_event=stop_event,
-            max_parallel=package["manifest"]["workflows"][workflow_ref[0]].get(
-                "max_parallel", 4),
+            max_parallel=lambda: package["manifest"]["workflows"][
+                workflow_ref[0]].get("max_parallel", 4),
         )
         if result["status"] != "completed":
             raise ContractError(result.get("error") or "Executable plan did not complete")
@@ -895,8 +1089,10 @@ class TaskService:
         visit(value)
         return sorted(result)
 
-    def _dispatch(self, identity, package, method, params, path, stop_event, notify):
-        if stop_event.is_set():
+    def _dispatch(
+            self, identity, package, method, params, path, stop_event, notify,
+            *, admitted=False):
+        if stop_event.is_set() and not admitted:
             raise InterruptedError("Task execution stopped before admission")
         if not isinstance(params, dict):
             raise ContractError("Capability arguments must be a JSON object")

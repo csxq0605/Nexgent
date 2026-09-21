@@ -945,7 +945,7 @@ class TaskMetaExecutor:
         descendant = self.tasks.store.package(result["candidate_package_id"])
         if descendant["digest"] != result.get("candidate_package_digest"):
             raise ContractError("Admitted descendant digest mismatch")
-        episode = self.tasks.get(result["episode_id"])
+        episode = self.tasks.get_private(result["episode_id"])
         if (episode.get("execution", {}).get("entry") != "improve"
                 or episode.get("execution", {}).get("package_digest") != package["digest"]
                 or episode.get("package_digest") != package["digest"]
@@ -1009,7 +1009,7 @@ class TaskMetaExecutor:
         evaluated = self.tasks.evaluate(
             state["id"], self.adapter, task_ref, snapshot=deepcopy(self.snapshot))
         report = evaluated["evaluation"]
-        episode = self.tasks.get(state["id"])
+        episode = self.tasks.get_private(state["id"])
         if (episode.get("package_digest") != package["digest"]
                 or self.tasks.store.benchmark_registration(state["id"]) != benchmark_registration
                 or not any(event.get("kind") == "benchmark_evaluated"
