@@ -6,7 +6,7 @@
 
 任务 GUI、CLI 与 Python API 使用同一个 `TaskService`，读取当前项目的 `models.json` / `.env`。`NEXGENT_PROJECT_ROOT` 或 CLI `--root` 可指定项目。受限 AgentPackage 子进程不接收凭证；模型和工具调用由宿主准入并记账。
 
-`nexgent gui` 默认打开任务窗口。`nexgent task` 登记并执行普通目标；`task-resume`、`task-show`、`task-list` 和 `task-export` 操作持久化任务。`task-benchmark workbench` 将同一运行器接到独立任务与评分插件。领域工具、数据和评分留在插件内。
+`nexgent gui` 默认打开 Nexgent Main 对话；自然语言消息会进入同一 `TaskService` 并创建可恢复 Episode。需要原始合同、预算、工具授权和脱敏 RSI 投影时，使用 Main 中的“打开高级控制台”或 `nexgent-gui --task-console`。`nexgent task` 登记并执行普通目标；`task-resume`、`task-show`、`task-list` 和 `task-export` 操作持久化任务。`task-benchmark workbench` 将同一运行器接到独立任务与评分插件。领域工具、数据和评分留在插件内。
 
 ```powershell
 python -m nexgent task "生成所需交付物" --input '{"brief":"..."}' --max-calls 8

@@ -1,4 +1,4 @@
-"""Desktop entry point for the task-first NExgent workspace."""
+"""Desktop entry point for the conversation-first Nexgent workspace."""
 
 from __future__ import annotations
 
@@ -20,8 +20,9 @@ def project_root(explicit=None):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="NExgent 通用任务智能体工作区")
+    parser = argparse.ArgumentParser(description="Nexgent 通用任务智能体工作区")
     parser.add_argument("--project", type=Path, help="任务工作区目录")
+    parser.add_argument("--task-console", action="store_true", help="打开高级任务与证据控制台")
     parser.add_argument("--legacy-research", action="store_true", help="打开保留的 0.8 研究窗口")
     args = parser.parse_args(argv)
     if os.name == "nt":
@@ -29,14 +30,17 @@ def main(argv=None):
         ctypes.windll.kernel32.SetErrorMode(0x8003)
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([sys.argv[0]])
-    app.setApplicationName("NExgent Task Workspace")
-    app.setOrganizationName("NExgent")
+    app.setApplicationName("Nexgent")
+    app.setOrganizationName("Nexgent")
     if args.legacy_research:
         from .window import ResearchWindow
         window = ResearchWindow(project_root(args.project))
-    else:
+    elif args.task_console:
         from .tasks_window import TaskWindow
         window = TaskWindow(project_root(args.project))
+    else:
+        from .main_window import MainWindow
+        window = MainWindow(project_root(args.project))
     window.show()
     return app.exec()
 

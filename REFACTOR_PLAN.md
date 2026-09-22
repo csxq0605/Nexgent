@@ -41,7 +41,7 @@
 
 ### P1：任务执行、交付评审与恢复基础（代码已实现，真实模型任务效果未通过）
 
-依赖 P0。当前通用 AgentPackage 已能读取目标与输入，规划工作，调用模型、技能、工具和委派，交接工件，依据失败或交付评审继续修订并交付。普通任务和轻量非 CFD workbench benchmark 共用 `TaskService`；默认 GUI、CLI、持久存储和导出也已接入同一状态。
+依赖 P0。当前通用 AgentPackage 已能读取目标与输入，规划工作，调用模型、技能、工具和委派，交接工件，依据失败或交付评审继续修订并交付。普通任务和轻量非 CFD workbench benchmark 共用 `TaskService`；Main 对话、CLI、持久存储和导出也已接入同一状态，高级任务/证据控制台保留完整字段和 RSI 只读投影。
 
 AgentPackage manifest v2 新增显式 role、workflow、component 与 orchestrator 注册。component 以稳定 id 绑定 O/M/S 分类和 role/workflow/skill/entry/resource 引用；v2 谱系不能降级到 v1，也不能让同一稳定 component id 悄然改变 class/kind/ref。O 类 workflow orchestrator 的冻结 JSON workflow 会在执行边界编译为 `nexgent.executable-plan.v1`，由宿主核验角色能力、组件引用、Episode 工具 lease、控制/工件边、join、局部上限、失败路由和 revision 规则，再通过真实模型、技能、工具、委派与发布路径运行。
 
@@ -134,6 +134,7 @@ scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分
 | vNext 定位、架构、研究综合、OpenFOAM 设计 | P0 已完成；设计中的正式数值研究仍未执行 |
 | 本机 OpenFOAM | 已确认 WSL2 / Ubuntu 20.04 / Foundation 8，并真实运行 Re=10 教程 smoke |
 | P1 任务执行、交付评审、工件/记忆、预算与恢复基础 | 0.9 已实现，含 manifest v2、ExecutablePlan v1、pending 子图 revision 与 root 共享宿主账本恢复；定向证据为 E0 工程合同，真实 MiMo 普通任务交付已通过，Workbench 独立评价仍未形成 |
+| Main 对话与信息窗口 | 默认入口已切换为自然语言 Main；运行、成果、证据在右侧信息窗，高级任务控制台仍可打开；项目级消息历史、附件上下文和澄清回合仍待后续切片 |
 | Task benchmark SDK 与失败测量 | 0.9 canonical descriptor/registry、插件隔离、host runtime 指纹及 P3/P5 共享 outcome policy 已实现；BBH 两任务与 scientific-discovery 已迁移并保留 legacy 兼容入口；科学历史 holdout 仅作迁移回归材料 |
 | OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
 | 跨任务行为更新 P3 | manifest-v2 component id 已贯穿 feedback、BehaviorPatch v2、加载摘要、selection、promotion、guard 与 evidence；默认 R0 同时支持 legacy v1；M route 与真实模型效果待检验 |

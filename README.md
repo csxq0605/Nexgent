@@ -6,7 +6,7 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具
 
 ## 定位与当前状态
 
-0.9 完成了 P1 的任务执行、交付评审与恢复基础及产品入口整合，实现了独立 P2 OpenFOAM smoke demo、P3 反馈驱动任务包演化控制面，以及 P4 递归改进器的确定性机制闭环。普通目标和 benchmark 共享 `TaskService`；任务智能体 `A` 与改进器 `R` 使用独立版本通道。默认 GUI 是任务空间；0.8 研究窗口和原有 CLI 命令继续保留。
+0.9 完成了 P1 的任务执行、交付评审与恢复基础及产品入口整合，实现了独立 P2 OpenFOAM smoke demo、P3 反馈驱动任务包演化控制面，以及 P4 递归改进器的确定性机制闭环。普通目标和 benchmark 共享 `TaskService`；任务智能体 `A` 与改进器 `R` 使用独立版本通道。默认 GUI 是 Nexgent Main 对话；完整任务/证据控制台通过高级入口打开，0.8 研究窗口和原有 CLI 命令继续保留。
 
 AgentPackage manifest v2 现在把 role、workflow、orchestrator 和 O/M/S component 变成包内的显式、可校验注册项。以 workflow 作为 O 类 orchestrator 时，宿主将冻结的 workflow 编译为 `nexgent.executable-plan.v1`，把角色能力、控制边、工件边、局部预算、失败路由和有界 revision 接到真实 `TaskService` 调用；恢复时重新核验包内 workflow、计划投影、RPC journal 与工件账本，只复用宿主已确认的终态节点。首版 revision 只能切换到同一不可变包内已注册的 workflow，并且只能替换仍为 pending 的子图。完整合同见 [ExecutablePlan v1 与 manifest v2](docs/design/executable-plan-v1.md)。
 
@@ -33,6 +33,7 @@ P4 已把 `R0 自更新为 R1 → R0/R1 从共同 A0 产生后代 → 下游效�
 ### 设计阅读入口
 
 - [定位与重构决策](docs/design/product-and-refactor-decision.md)：固定用户不变要求和框架边界。
+- [Main 对话与信息窗口设计](docs/design/main-conversation-interface.md)：默认入口、运行详情、成果证据与 RSI Lab 的信息层级。
 - [vNext 智能体架构](docs/design/agent-architecture-vnext.md)：真实任务执行、技能/编排/记忆和反馈驱动更新。
 - [ExecutablePlan v1 与 manifest v2](docs/design/executable-plan-v1.md)：角色、工作流、O/M/S 组件如何接入真实执行、计划修订与宿主账本恢复。
 - [论文方法到设计与实验](docs/research/agent-orchestration-rsi-synthesis-20260916.md)：AutoSci、ADAS、AFlow、DGM、Hyperagents、STOP 的采用方式与边界。
@@ -99,7 +100,7 @@ python -m venv .venv
 
 本机环境、workbench、openfoam、scientific_discovery、BBH 四项插件和 BBH 数据已准备。模型读取被 Git 忽略的 `models.json` / `.env`；示例见 [models.example.json](models.example.json) 和 [.env.example](.env.example)。凭证留在模型请求宿主，不进入智能体源码进程。
 
-`nexgent gui` 和 `nexgent-gui` 默认打开任务空间。任务创建、恢复、查看和导出使用同一个 `.nexgent` 持久存储：
+`nexgent gui` 和 `nexgent-gui` 默认打开 Nexgent Main 对话。普通用户输入自然语言即可创建并执行 Episode；任务创建、恢复、查看和导出仍使用同一个 `.nexgent` 持久存储。需要原始 JSON 合同、预算、工具授权和 RSI 脱敏投影时，使用“打开高级控制台”或 `--task-console`：
 
 ```powershell
 # 默认创建后执行；--input 接受内联 JSON、JSON 文件路径或 @file

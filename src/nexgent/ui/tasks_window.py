@@ -1,4 +1,4 @@
-"""Task-first desktop: goals, actual execution, delivery, and bounded recovery."""
+"""Advanced Nexgent console: goals, execution, delivery, and bounded recovery."""
 
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ class TaskWindow(QMainWindow):
         self.worker = None
         self._close_requested = False
         self._selected_state = None
-        self.setWindowTitle("NExgent · 任务空间")
+        self.setWindowTitle("Nexgent · 高级任务控制台")
         self.resize(1320, 880)
         self.setStyleSheet(TASK_STYLE)
         self._build()
@@ -120,7 +120,7 @@ class TaskWindow(QMainWindow):
         sidebar = QWidget()
         left = QVBoxLayout(sidebar)
         left.setContentsMargins(18, 20, 18, 18)
-        brand = QLabel("NExgent")
+        brand = QLabel("Nexgent")
         brand.setObjectName("Brand")
         left.addWidget(brand)
         left.addWidget(QLabel("目标、资料与交付"))

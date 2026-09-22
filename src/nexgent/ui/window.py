@@ -175,7 +175,7 @@ class ResearchWindow(QMainWindow):
         self._load_error = None
         self._continuation_id = None
         self._benchmarks = []
-        self.setWindowTitle("NExgent · RSI 实验空间")
+        self.setWindowTitle("Nexgent · RSI 实验空间")
         self.resize(1480, 980)
         self.setMinimumSize(1140, 780)
         self.setStyleSheet(STYLE)
@@ -196,7 +196,7 @@ class ResearchWindow(QMainWindow):
         outer = QHBoxLayout(canvas); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
         sidebar = QFrame(); sidebar.setObjectName("Sidebar"); sidebar.setFixedWidth(260)
         side = QVBoxLayout(sidebar); side.setContentsMargins(18, 25, 18, 20); side.setSpacing(12)
-        brand = QLabel("NEXGENT"); brand.setObjectName("Brand"); side.addWidget(brand)
+        brand = QLabel("Nexgent"); brand.setObjectName("Brand"); side.addWidget(brand)
         side.addWidget(QLabel("通用智能体 · 源码自改进"))
         side.addSpacing(15)
         new = QPushButton("＋  新的研究目标"); new.setObjectName("SidebarButton")
