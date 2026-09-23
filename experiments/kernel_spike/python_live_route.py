@@ -6,6 +6,7 @@ environment-variable reference and a boolean leak scan result.
 
 from __future__ import annotations
 
+import argparse
 from copy import deepcopy
 import hashlib
 import inspect
@@ -183,15 +184,22 @@ def _live_transport(profile, params):
             client.close()
 
 
-def _tool_spec():
+def _tool_spec(*, leased=False):
     integer = {"type": "integer"}
+    fields = {}
+    if leased:
+        fields = {
+            "provider_id": "nexgent.kernel-spike",
+            "provider_version": "1",
+            "handler_digest": HANDLER_DIGEST,
+        }
     return ToolSpec(
         TOOL,
         {"type": "object", "properties": {"left": integer, "right": integer},
          "required": ["left", "right"], "additionalProperties": False},
         {"type": "object", "properties": {"value": integer},
          "required": ["value"], "additionalProperties": False},
-        "local_compute", multiply, description="Multiply two integers",
+        "local_compute", multiply, description="Multiply two integers", **fields,
     )
 
 
@@ -245,7 +253,18 @@ def _leak_free(root, report_text, secret):
     return True
 
 
-def run():
+def _active_inventory(service, episode_id):
+    return [
+        {
+            "name": lease["name"],
+            "revision": lease["revision"],
+            "descriptor_digest": lease["descriptor"]["digest"],
+        }
+        for lease in service.active_capabilities(episode_id)
+    ]
+
+
+def run(*, leased=False):
     scratch_parent = MODEL_SOURCE_ROOT.parent
     project_root = Path(tempfile.mkdtemp(
         prefix=".nexgent-python-live-", dir=scratch_parent)).resolve()
@@ -255,6 +274,17 @@ def run():
     service = None
     episode_id = None
     failure = None
+    lease_receipt = {
+        "mode": "leased",
+        "mount_revision": None,
+        "release_revision": None,
+        "descriptor_digest": None,
+        "active_inventory": {},
+        "provenance": (
+            "The model did not develop or install the tool. The host mounted the "
+            "prewritten installed tool into the Episode."
+        ),
+    } if leased else None
     try:
         profile, profile_identity, profile_digest = _load_live_profile()
 
@@ -283,11 +313,12 @@ def run():
             }
             return gateway
 
-        spec = _tool_spec()
+        spec = _tool_spec(leased=leased)
         package = _package()
         service = TaskService(
             project_root, tools=ToolRegistry([spec]),
             gateway_factory=gateway_factory)
+        create_fields = {"initially_active_capabilities": []} if leased else {}
         state = service.create(
             "Compute 6 × 7 with the authorized multiply tool and deliver the model's JSON answer.",
             deliverables=[{"name": "result", "schema": {
@@ -297,9 +328,27 @@ def run():
             capabilities=[TOOL],
             package=package,
             constraints={"allowed_effects": ["local_compute"], "wall_seconds": 240},
+            **create_fields,
         )
         episode_id = state["id"]
+        mounted_lease = None
+        if leased:
+            lease_receipt["active_inventory"]["after_creation"] = _active_inventory(
+                service, episode_id)
+            mounted_lease = service.mount_capability(episode_id, TOOL)
+            lease_receipt["mount_revision"] = mounted_lease["revision"]
+            lease_receipt["descriptor_digest"] = mounted_lease["descriptor"]["digest"]
+            lease_receipt["active_inventory"]["after_mount"] = _active_inventory(
+                service, episode_id)
         service.run(episode_id, stop_event=threading.Event())
+        if leased:
+            lease_receipt["active_inventory"]["after_completion"] = _active_inventory(
+                service, episode_id)
+            released_lease = service.release_capability(
+                episode_id, TOOL, expected_revision=mounted_lease["revision"])
+            lease_receipt["release_revision"] = released_lease["revision"]
+            lease_receipt["active_inventory"]["after_release"] = _active_inventory(
+                service, episode_id)
         private = service.get_private(episode_id)
         calls = private.get("calls", [])
         safe_calls = [_safe_call_receipt(row) for row in calls]
@@ -375,6 +424,9 @@ def run():
             "scratch_root": str(project_root), "leak_scan_passed": True,
         }
 
+    if lease_receipt is not None:
+        report["capability_lease"] = deepcopy(lease_receipt)
+
     secret = profile.api_key if profile is not None else _dotenv_value(
         MODEL_SOURCE_ROOT / ".env", CREDENTIAL_REF)
     serialized = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2)
@@ -393,5 +445,14 @@ def run():
     return 0 if report.get("passed") else 1
 
 
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--leased", action="store_true",
+        help="Mount the preinstalled multiply tool through an Episode capability lease.",
+    )
+    return run(leased=parser.parse_args(argv).leased)
+
+
 if __name__ == "__main__":
-    raise SystemExit(run())
+    raise SystemExit(main())

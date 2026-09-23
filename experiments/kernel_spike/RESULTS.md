@@ -106,3 +106,9 @@ Windows 上最终脚本由子智能体与根代理分别定向运行通过。最
 定向测试见 [`test_task_capability_leases.py`](../../tests/test_task_capability_leases.py)：作用域隔离、空 inventory 拒绝、真实 `TaskService.run` 的工具结果、完成后释放、进程重建后的 provider 漂移拒绝、委派子任务只继承父任务活动且同版本的描述、旧子任务缺版本界限时拒绝挂载。实现期间 50 项存储／运行时相关测试通过；最终安全修订后租约与委派相关的 20 项、释放修订后的租约 8 项通过。没有为该小样再次调用外部模型，真实 MiMo 成功仍属于上节**预授权静态工具**的单独 Episode。
 
 这不是任务中安装新插件或完整 C1：候选工具名称和 handler 在任务创建前已存在于宿主 `ToolRegistry`；`handler_digest` 目前是受信 provider 提交的声明，不是从实际加载字节独立测得；释放影响 Episode 作用域，不执行 provider 进程／事件订阅清理。当前 `package_worker` 也不是 OS 安全容器。后续必须按[任务中能力授权合同](../../docs/design/task-time-capability-authority.md)把权限上限从“预列出名称”迁为 effect／操作／资源约束，并在隔离 worker 中真正试装模型开发的 fresh-name Definition。
+
+### 同一 Episode 的真实模型与租约
+
+新增 `python_live_route.py --leased`，保留原无参数静态路径。该诊断脚本在空活动清单下创建 Episode，由宿主在执行前挂载人工预写的 `spike.multiply`，随后让 MiMo v2.6 flash 在两次 JSON `ask` 之间选择并调用工具，任务完成后释放租约。2026-09-24 的**唯一一次**限额运行退出码 0；[脱敏收据](evidence-python-leased-live-20260924.json)记录同一 Episode `episode-5ae0d466e0a04de7` 完成，真实模型调用 2、工具调用 1、结果 42 和工件 `{"answer":42}`。模型报告用量 260 prompt / 29 completion token；自动重试 0。创建／挂载／完成／释放时的清单依次为 `[] / [spike.multiply] / [spike.multiply] / []`；租约 revision `1 → 2`，工具收据绑定 descriptor digest。独立重开 SQLite 核对 Episode `completed`、租约 `released`、mount/tool/release 事件各 1、模型调用账 2。
+
+这补齐了 Python 同一次模型执行与任务级租约的 A3 证据，但**挂载动作仍由宿主在运行前完成**。模型没有发现能力缺口后自己编写／试装工具，handler 摘要仍由宿主声明，模型工具选择采用 JSON `ask` 而非 provider-native function call。因此它支持内核选型，不满足 C1、跨任务采用或 RSI 效果验收。
