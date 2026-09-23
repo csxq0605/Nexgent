@@ -112,3 +112,11 @@ Windows 上最终脚本由子智能体与根代理分别定向运行通过。最
 新增 `python_live_route.py --leased`，保留原无参数静态路径。该诊断脚本在空活动清单下创建 Episode，由宿主在执行前挂载人工预写的 `spike.multiply`，随后让 MiMo v2.6 flash 在两次 JSON `ask` 之间选择并调用工具，任务完成后释放租约。2026-09-24 的**唯一一次**限额运行退出码 0；[脱敏收据](evidence-python-leased-live-20260924.json)记录同一 Episode `episode-5ae0d466e0a04de7` 完成，真实模型调用 2、工具调用 1、结果 42 和工件 `{"answer":42}`。模型报告用量 260 prompt / 29 completion token；自动重试 0。创建／挂载／完成／释放时的清单依次为 `[] / [spike.multiply] / [spike.multiply] / []`；租约 revision `1 → 2`，工具收据绑定 descriptor digest。独立重开 SQLite 核对 Episode `completed`、租约 `released`、mount/tool/release 事件各 1、模型调用账 2。
 
 这补齐了 Python 同一次模型执行与任务级租约的 A3 证据，但**挂载动作仍由宿主在运行前完成**。模型没有发现能力缺口后自己编写／试装工具，handler 摘要仍由宿主声明，模型工具选择采用 JSON `ask` 而非 provider-native function call。因此它支持内核选型，不满足 C1、跨任务采用或 RSI 效果验收。
+
+## C1 工具切片：真实模型在任务中开发未知名称工具
+
+2026-09-24 使用 [`python_dynamic_tool_live.py`](python_dynamic_tool_live.py)做**一次**限额运行，[脱敏收据](evidence-python-dynamic-tool-live-20260924.json)已入库，原始 SQLite 在收据指明的本机 scratch。任务创建时 `capabilities=[]`、活动工具清单为空；冻结授权只允许 `tool/local_compute/controlled-python-v1`，定义和调用各最多一次。MiMo `mimo-v2.6-flash` 通过 `tool_builder` 请求返回它写的 `multiply_integers` 源码、输入／输出 schema 和参数 `{a:6,b:7}`。Nexgent 将此前未知的名称编译成 Definition，在同一 Episode 持久 stage/mount，重新读取 inventory 后在受控 worker 中执行模型源码，返回 42；第二次模型请求使用工具结果交付 `answer=42`。Episode `episode-d30ca5aa3ec74462` 为 `completed`，模型调用 2、工具调用 1、节点 7；实际用量 254 prompt / 300 completion token；零自动重试，凭据字节扫描通过。调用收据绑定 authority、Definition、Instance revision、bundle／入口摘要和 worker 的 9 个 trace 事件。
+
+这是**模型生成并实际使用新工具**的任务内证据，比 A3 的人工预写租约多了一步。实验程序仍预设“先请模型开发工具，再调用，再写答案”的路线；模型没有独立决定是否开发、没有编写服务／策略插件，也没有经过跨任务独立评价与默认采用。`tool_work_units=0` 是既有可信工具工作量账，**不等于零计算成本**；受控 worker 此次执行 9 个 trace 事件，每次硬上限 20 万，且不是 OS 级容器。结果只属于 C1 工具切片，不宣称 B／C 全部通过或 RSI 净收益。
+
+对照边界：固定 [DeepSeek Harness 源码审计](../../docs/research/kernel-reference-audit-20260923.md)里的作用域服务／provider／模型工具分层，Nexgent 此次只实现了**模型写工具定义 → Episode 实例 → 调用收据**，服务生命周期和 provider 替换未实现。[AutoSci](https://github.com/skyllwt/AutoSci/tree/arxiv-v1)的技能／图／反馈更新、[ADAS](https://arxiv.org/abs/2408.08435v2)的可执行 Agent 搜索、[AFlow](https://arxiv.org/abs/2410.10762v4)的工作流搜索，仍对应后续 D/E 的编排与候选评价；一次算术工具成功不能代替它们。OpenFOAM 等领域 demo 没有参与本次核心验收。

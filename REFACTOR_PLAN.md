@@ -51,7 +51,7 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 
 ## 4. 新阶段与验收
 
-当前状态：**A 的内核选型已完成，选择 Python Episode 作为唯一生产执行边界；B–G 尚未按新合同验收。** [ADR 001](docs/design/adr-001-python-episode-kernel.md)基于固定源码、两路线真实／替身小样、恢复、失败及迁移责任。Python 路径的真实 MiMo 模型、已安装工具的 Episode 租约、预算、调用、交付和释放已在同一次任务中通过；挂载仍由宿主在运行前完成，模型没有开发新工具。DeepSeek 真实 MiMo 产生原生工具调用并取得结果，但第二次最终 JSON 解码失败，未完成同题交付；外部原执行未受 Nexgent 准入／计费／恢复管理。已提交的租约基础层是 B 的过渡资产，其预列出名称上限不能满足[任务中新能力合同](docs/design/task-time-capability-authority.md)。已有代码作为迁移资产，不直接填入 B–G 完成数。
+当前状态：**A 的内核选型已完成，选择 Python Episode 作为唯一生产执行边界；C1 新工具切片已有一次真实模型开发与调用证据，B–G 的完整阶段出口均未验收。** [ADR 001](docs/design/adr-001-python-episode-kernel.md)基于固定源码、两路线真实／替身小样、恢复、失败及迁移责任。早期 Python 路径的真实 MiMo 模型与**已安装**工具租约在同一次任务中通过；随后[新工具切片](experiments/kernel_spike/RESULTS.md#c1-工具切片真实模型在任务中开发未知名称工具)从空清单出发，让模型自己生成源码／schema 并在原 Episode 内试装、调用和交付。DeepSeek 真实 MiMo 产生原生工具调用并取得结果，但第二次最终 JSON 解码失败，未完成同题交付；外部原执行未受 Nexgent 准入／计费／恢复管理。已安装工具租约仍是过渡资产；新工具 Definition／Instance 只支持无凭据的本地计算，不满足 B 的完整插件生命周期或 C 的服务／策略插件要求。已有代码作为迁移资产，不直接填入 B–G 阶段完成数。
 
 ### A. 内核边界与技术选型
 
@@ -149,6 +149,7 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 - [x] A2 同题诊断小样：Python 预先授权路径与任务内装入负结果；DeepSeek 固定模型 Agent 作用域工具运行和独立 Nexgent 证据投影。任务内插件试装及原执行生产桥接未通过，计入 A3/B。
 - [x] A3 实跑两条小样，记录失败、恢复、兼容与维护成本，提交[技术 ADR](docs/design/adr-001-python-episode-kernel.md)。Python 同一 Episode 的真实模型＋租约通过；DeepSeek 真实最终解码失败并保留负结果。
 - [ ] B1 按 ADR 建立版本化能力接口及现有 ToolRegistry／AgentPackage 适配；同步最小事件与能力视图。
+- [x] C1 工具切片：冻结基于 effect／操作／运行环境的 EpisodeAuthority，模型从未知名称开发本地计算 Definition，任务内挂载、重读、调用；[真实 MiMo 收据](experiments/kernel_spike/evidence-python-dynamic-tool-live-20260924.json)与定向回归已记录。此项不代表 C 阶段全部完成。
 - [ ] C1、D1 在统一接口上分别实现模型临时工具／插件开发和可替换执行策略，再进入 E 的任务来源采用链。
 
 计划重定见 `3919a0d`；后续逐阶段提交记录在[实现与来源对照账本](docs/research/implementation-reference-tracker.md)。A2–G 的完成状态由实际代码与运行收据逐项更新。
