@@ -93,6 +93,10 @@ class Context:
     def delegate(self, task, package_id=None):
         return self.request("delegate", {"task": task, "package_id": package_id})
 
+    def develop_skill(self, proposal, constraints):
+        return self.request("develop_skill", {
+            "proposal": proposal, "constraints": constraints})
+
     def read_artifact(self, artifact_id):
         artifact = self.request("read_artifact", {"artifact_id": artifact_id})
         if artifact_id not in self.read_artifact_ids:

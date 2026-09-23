@@ -152,6 +152,8 @@ scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分
 
 本阶段优先解决**编排和技能的实际可进化范围，以及模型驱动的多智能体 benchmark**，不把当前单组件 E1 pilot 当作最终框架的替代验收。完整合同、逐组件激活证据与四臂对照见[编排与技能可进化 v3](docs/design/orchestration-skill-evolution-v3.md)。
 
+2026-09-23 的新增纵切让 Main 对话默认使用任务时自编排包：模型提出 pending DAG，Compiler 校验并执行；任务可通过 `develop_skill` 产生受控代码技能子包，并在委派 Episode 中实际运行。图生成已有真实 MiMo 调用和交付；技能生成目前只有确定性端到端执行证据，真实 Provider 探针仍在开发阶段。此纵切是**任务内能力创建**，不是技能跨任务晋升。下一条不可省略的链是：真实任务反馈促发第二版图和能力提案 → 同任务实际激活 → 独立任务上的候选验证 → package channel 晋升与 guard → 另一新任务实际选择和加载技能。入口、执行、验证、复用须有各自 Episode 和组件加载证据；不得用源码存在或本任务交付代替后半段。
+
 1. **纯 M 与 benchmark 合同**：纯 M 路由、benchmark suite role、独立来源 cluster、evaluator identity 和 CLI 投影已从原工作树合入隔离分支；纯 M 进入 MemoryService 独立 release/snapshot，O/S+M 在原子复合合同前整体拒绝。首轮真实 MiMo R0 选择 abstain，未生成可评价 M 候选；下一步需在不泄漏隐藏答案的前提下完善有界 development 诊断、候选验证与后续复用。
 2. **扩大 O/S 候选单位**：整包原子 PackagePatch v3 的 role、workflow、skill、prompt 与 manifest 多组件 add/replace/remove 已有确定性闭环；真实 R0 已生成并实际运行一个新增验证角色的 O 候选，开发预检通过，但独立 selection 未过门。继续修复预算预留、失败对账与有界多候选搜索，再以新候选和新统计单元测试稳定交付与成本门。
 3. **模型驱动的多角色 benchmark**：同一 TaskService/canonical BBH adapter 上已经观察到两个 MiMo proposer、一个 adjudicator、发布和独立评价；这只是公开小样本资格验证。后续用 Workbench 和新鲜外部任务族检验模型交付、工具使用与跨分布稳健性，零模型调用路径只作 control。

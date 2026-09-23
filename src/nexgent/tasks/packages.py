@@ -17,7 +17,7 @@ from ..kernel.programs import canonical, digest, validate_source, ProgramError
 
 SCHEMA = "nexgent.agent-package.v1"
 MANIFEST_VERSION = 2
-CAPABILITIES = frozenset({"ask", "tool", "parallel", "skill", "delegate", "read_artifact",
+CAPABILITIES = frozenset({"ask", "tool", "parallel", "skill", "delegate", "develop_skill", "read_artifact",
                           "publish", "memory_search", "remember", "plan", "feedback"})
 LOCAL_METHODS = frozenset({"call", "resource"})
 IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,99}")
@@ -274,6 +274,25 @@ def _content(files, manifest, provenance):
             raise PackageError(f"Skill {name!r} has an unsupported implementation kind")
         if kind == "controlled_code":
             split_ref(skill.get("ref"), files)
+            ceiling_fields = {"allowed_rpc_methods", "allowed_tools"} & set(skill)
+            if ceiling_fields and ceiling_fields != {
+                    "allowed_rpc_methods", "allowed_tools"}:
+                raise PackageError(
+                    f"Skill {name!r} must declare both RPC and tool ceilings")
+            if ceiling_fields:
+                methods = skill["allowed_rpc_methods"]
+                tools = skill["allowed_tools"]
+                if (not isinstance(methods, list)
+                        or any(not isinstance(method, str) or method not in CAPABILITIES
+                               for method in methods)
+                        or len(methods) != len(set(methods))):
+                    raise PackageError(f"Skill {name!r} has an invalid RPC ceiling")
+                if (not isinstance(tools, list)
+                        or any(not isinstance(tool, str) or not tool or len(tool) > 120
+                               for tool in tools)
+                        or len(tools) != len(set(tools))
+                        or tools and "tool" not in methods):
+                    raise PackageError(f"Skill {name!r} has an invalid tool ceiling")
         else:
             safe_path(ref)
             if ref not in files:

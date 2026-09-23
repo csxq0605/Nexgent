@@ -2,7 +2,7 @@
 
 **通用 RSI 智能体框架：自主组织任务执行，从反馈中改进技能、协作和工作方式，并能运行 benchmark 检验效果。**
 
-目标形态是一个无状态、任务类型无关的 Kernel 与通用 Compiler/Runtime，由多智能体根据任务自行组成并改进任务专一的角色、技能和协作程序。本分支已接通模型提出图操作、编译 pending 子图并在同一任务执行与恢复的首个纵切；真实 MiMo 的两次普通任务完成了模型产图、执行和交付，但尚未证明稳定的任务适配、新技能开发或跨任务有效复用。[架构决策](docs/design/stateless-kernel-and-self-designed-teams.md)、[任务时图合同](docs/design/task-time-self-orchestration.md)和[真实探针记录](docs/research/task-time-self-orchestration-live-20260923.md)区分这些证据。
+目标形态是一个无状态、任务类型无关的 Kernel 与通用 Compiler/Runtime，由多智能体根据任务自行组成并改进任务专一的角色、技能和协作程序。本分支已接通模型提出图操作、编译 pending 子图并在同一任务执行与恢复的首个纵切；新技能提案也可编译为不可变子包，由委派 Episode 真正执行。真实 MiMo 的两次普通任务完成了模型产图、执行和交付，但尚未证明稳定的任务适配、真实模型技能发明或跨任务有效复用。[架构决策](docs/design/stateless-kernel-and-self-designed-teams.md)、[任务时图合同](docs/design/task-time-self-orchestration.md)、[任务中创建能力](docs/design/task-time-skill-invention.md)和[真实探针记录](docs/research/task-time-self-orchestration-live-20260923.md)区分这些证据。
 
 Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具、任务、数据和评分不能进入核心。OpenFOAM 不成为框架的默认任务定义；同一核心必须能执行非 CFD 任务与 benchmark。
 
@@ -10,7 +10,7 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具
 
 0.9 完成了 P1 的任务执行、交付评审与恢复基础及产品入口整合，实现了独立 P2 OpenFOAM smoke demo、P3 反馈驱动任务包演化控制面，以及 P4 递归改进器的确定性机制闭环。普通目标和 benchmark 共享 `TaskService`；任务智能体 `A` 与改进器 `R` 使用独立版本通道。默认 GUI 是 Nexgent Main 对话；完整任务/证据控制台通过高级入口打开，0.8 研究窗口和原有 CLI 命令继续保留。
 
-AgentPackage manifest v2 现在把 role、workflow、orchestrator 和 O/M/S component 变成包内的显式、可校验注册项。以 workflow 作为 O 类 orchestrator 时，宿主将图编译为 `nexgent.executable-plan.v1`，把角色能力、控制边、工件边和 pending 修订接到真实 `TaskService` 调用。工作流可来自冻结包，也可由任务时规划节点通过图操作生成；后者仍只能使用准入的角色、技能与工具，并将完整解析图按摘要保存以供恢复。默认普通任务仍走原有路径，动态自编排由 `self_orchestration_package()` 显式启用。完整合同见 [ExecutablePlan v1 与 manifest v2](docs/design/executable-plan-v1.md)和[任务时图合同](docs/design/task-time-self-orchestration.md)。
+AgentPackage manifest v2 现在把 role、workflow、orchestrator 和 O/M/S component 变成包内的显式、可校验注册项。以 workflow 作为 O 类 orchestrator 时，宿主将图编译为 `nexgent.executable-plan.v1`，把角色能力、控制边、工件边和 pending 修订接到真实 `TaskService` 调用。工作流可来自冻结包，也可由任务时规划节点通过图操作生成；后者仍只能使用准入的角色、技能与工具，并将完整解析图按摘要保存以供恢复。Main 对话入口现选用 `self_orchestration_package()`；底层 `TaskService.create()` 和 CLI 在未指定包时仍保持兼容的旧默认。完整合同见 [ExecutablePlan v1 与 manifest v2](docs/design/executable-plan-v1.md)和[任务时图合同](docs/design/task-time-self-orchestration.md)。
 
 P3 已实现 `FeedbackBundle → 冻结独立 R0 → O/S PackagePatch → paired selection → task channel → guard/rollback`。旧 BehaviorPatch v1/v2 仍按原来的单组件约束兼容；新增 PackagePatch v3 可原子修改 workflow、role、prompt、skill 与 manifest 的多个 O/S 组件，使用完整组件集合的加载证据决定候选能否晋升。默认 R0 已能提出 v3 补丁，宿主独立核验和构造子包。M component 通过独立 `MemoryService` 生命周期处理，尚未与 O/S 形成原子复合发布。
 
@@ -26,7 +26,7 @@ P4 已把 `R0 自更新为 R1 → R0/R1 从共同 A0 产生后代 → 下游效�
 
 | 内容 | 状态 |
 | --- | --- |
-| P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础、manifest v2、ExecutablePlan v1 与宿主可信账本已实现；任务时图操作新增定向恢复测试和两次真实 MiMo 普通任务交付。尚无独立的编排收益、技能发明或 Workbench 成功证据 |
+| P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础、manifest v2、ExecutablePlan v1 与宿主可信账本已实现；任务时图操作新增定向恢复测试和两次真实 MiMo 普通任务交付；任务时技能编译与子 Episode 执行有确定性端到端证据。尚无独立的编排收益、真实模型技能发明或 Workbench 成功证据 |
 | P1 普通任务与 benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同；BBH 两任务与 scientific-discovery 已提供 canonical TaskService adapter 和无模型 reference package，legacy 入口继续保留 |
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
 | P3 跨任务行为更新 | PackagePatch v3 的多组件 O/S 与纯 M 独立控制路径已有确定性验证；MiMo 生成两个 S 候选和一个实际执行的 O 候选，独立 selection 均未达到晋升门；纯 M 真实尝试 abstain；O/S+M 复合、晋升后复用、正向 E1 和统计效益仍未完成 |

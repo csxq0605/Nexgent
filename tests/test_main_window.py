@@ -14,10 +14,12 @@ class FakeMainService:
         self.entered = threading.Event()
         self.release = threading.Event()
         self.created = []
+        self.created_packages = []
 
     def create(self, objective, **kwargs):
         identity = f"episode-{len(self.states) + 1:04d}"
         self.created.append(objective)
+        self.created_packages.append(kwargs.get("package"))
         state = {
             "id": identity,
             "task": {"objective": objective},
@@ -68,6 +70,8 @@ def test_main_starts_from_conversation_and_uses_task_service(qtbot, tmp_path):
     qtbot.waitUntil(service.entered.is_set)
 
     assert service.created == ["比较两个方案并给出有证据的建议"]
+    assert service.created_packages[0]["provenance"]["origin"] == (
+        "nexgent.self-orchestration-seed")
     assert window.selected_id == "episode-0001"
     assert "目标已接收" in window.messages.toPlainText()
     assert not hasattr(window, "objective")

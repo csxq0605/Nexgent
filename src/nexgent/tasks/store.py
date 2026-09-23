@@ -63,6 +63,10 @@ class EpisodeStore:
                     id TEXT PRIMARY KEY, root_id TEXT NOT NULL, updated REAL, state TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS task_packages(
                     id TEXT PRIMARY KEY, digest TEXT NOT NULL, data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS task_skill_package_leases(
+                    package_id TEXT NOT NULL, root_id TEXT NOT NULL,
+                    creator_episode TEXT NOT NULL, created REAL NOT NULL,
+                    PRIMARY KEY(package_id,root_id));
                 CREATE TABLE IF NOT EXISTS task_events(
                     episode TEXT, sequence INTEGER, kind TEXT, created REAL,
                     data TEXT, previous TEXT, digest TEXT,
@@ -131,7 +135,10 @@ class EpisodeStore:
         for name in DEFAULT_BUDGET:
             if type(limits[name]) is not int or limits[name] < 0:
                 raise ValueError("Budget limits must be nonnegative integers")
-        self.put_package(package)
+        task_scoped_package = self.is_task_scoped_package(package)
+        self.authorize_task_package_use(package, parent_episode_id)
+        if not task_scoped_package:
+            self.put_package(package)
         now, episode_id = time.time(), _id("episode")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -321,32 +328,106 @@ class EpisodeStore:
                        (state["updated_at"], _json(state), state["id"]))
         return state
 
+    @staticmethod
+    def _put_package_row(db, package):
+        previous = db.execute(
+            "SELECT data FROM task_packages WHERE id=?", (package["id"],)).fetchone()
+        if previous and previous[0] != _json(package):
+            stored = json.loads(previous[0])
+            # Package identity covers executable content and lineage, while
+            # generation provenance lives in immutable candidate/generation
+            # records.  Re-running an improver may therefore rediscover the
+            # same content-addressed child with a different generation id.
+            comparable = lambda value: {key: item for key, item in value.items()
+                                        if key != "provenance"}
+            if comparable(stored) != comparable(package):
+                raise ValueError("Cannot overwrite an immutable AgentPackage")
+        if package.get("parent_id"):
+            parent = db.execute(
+                "SELECT data FROM task_packages WHERE id=?",
+                (package["parent_id"],)).fetchone()
+            if not parent:
+                raise ValueError("Package parent must be stored first")
+            if package["generation"] != json.loads(parent[0])["generation"] + 1:
+                raise ValueError("Package generation does not follow its parent")
+        db.execute("INSERT OR IGNORE INTO task_packages VALUES(?,?,?)",
+                   (package["id"], package["digest"], _json(package)))
+
     def put_package(self, package):
         from .packages import verify_package
         verify_package(package)
-        encoded = _json(package)
+        if package.get("provenance", {}).get("task_time_only") is True:
+            raise PermissionError(
+                "Task-authored packages must be persisted with a creator-tree lease")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            previous = db.execute("SELECT data FROM task_packages WHERE id=?", (package["id"],)).fetchone()
-            if previous and previous[0] != encoded:
-                stored = json.loads(previous[0])
-                # Package identity covers executable content and lineage, while
-                # generation provenance lives in immutable candidate/generation
-                # records.  Re-running an improver may therefore rediscover the
-                # same content-addressed child with a different generation id.
-                comparable = lambda value: {key: item for key, item in value.items()
-                                            if key != "provenance"}
-                if comparable(stored) != comparable(package):
-                    raise ValueError("Cannot overwrite an immutable AgentPackage")
-            if package.get("parent_id"):
-                parent = db.execute("SELECT data FROM task_packages WHERE id=?", (package["parent_id"],)).fetchone()
-                if not parent:
-                    raise ValueError("Package parent must be stored first")
-                if package["generation"] != json.loads(parent[0])["generation"] + 1:
-                    raise ValueError("Package generation does not follow its parent")
-            db.execute("INSERT OR IGNORE INTO task_packages VALUES(?,?,?)",
-                       (package["id"], package["digest"], encoded))
+            self._put_package_row(db, package)
         return deepcopy(package)
+
+    def lease_task_package(self, package, creator_episode):
+        """Persist a task-authored package and bind it to its creator's tree."""
+        from .packages import verify_package
+        verify_package(package)
+        provenance = package.get("provenance", {})
+        if (provenance.get("task_time_only") is not True
+                or provenance.get("promotion_authority") is not False
+                or provenance.get("episode_id") != creator_episode):
+            raise PermissionError("Task-authored package provenance is invalid")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            creator = self._get(db, creator_episode)
+            self._put_package_row(db, package)
+            db.execute(
+                "INSERT OR IGNORE INTO task_skill_package_leases VALUES(?,?,?,?)",
+                (package["id"], creator["root_episode_id"], creator_episode, time.time()))
+        return deepcopy(package)
+
+    def is_task_scoped_package(self, package):
+        if not isinstance(package, dict) or not isinstance(package.get("id"), str):
+            return False
+        current = package
+        seen = set()
+        with self.connect() as db:
+            while isinstance(current, dict) and current.get("id") not in seen:
+                package_id = current.get("id")
+                if not isinstance(package_id, str):
+                    return False
+                seen.add(package_id)
+                stored_row = db.execute(
+                    "SELECT data FROM task_packages WHERE id=?", (package_id,)).fetchone()
+                stored = json.loads(stored_row[0]) if stored_row else None
+                if (current.get("provenance", {}).get("task_time_only") is True
+                        or isinstance(stored, dict)
+                        and stored.get("provenance", {}).get("task_time_only") is True
+                        or db.execute(
+                            "SELECT 1 FROM task_skill_package_leases "
+                            "WHERE package_id=? LIMIT 1", (package_id,)).fetchone()):
+                    return True
+                parent_id = current.get("parent_id")
+                if parent_id is None:
+                    return False
+                parent_row = db.execute(
+                    "SELECT data FROM task_packages WHERE id=?", (parent_id,)).fetchone()
+                if parent_row is None:
+                    return False
+                current = json.loads(parent_row[0])
+        return False
+
+    def authorize_task_package_use(self, package, parent_episode_id):
+        """Reject task-authored packages outside a leased Episode tree."""
+        if not self.is_task_scoped_package(package):
+            return
+        if not isinstance(parent_episode_id, str) or not parent_episode_id:
+            raise PermissionError(
+                "Task-authored packages require a delegated Episode in their creator tree")
+        with self.connect() as db:
+            parent = self._get(db, parent_episode_id)
+            allowed = db.execute(
+                "SELECT 1 FROM task_skill_package_leases WHERE package_id=? AND root_id=?",
+                (package["id"], parent["root_episode_id"])).fetchone()
+        if allowed is None:
+            raise PermissionError(
+                "Task-authored package is outside its creator Episode tree")
 
     def package(self, package_id):
         from .packages import verify_package

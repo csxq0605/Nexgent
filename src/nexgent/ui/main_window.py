@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ..tasks.self_orchestration_seed import self_orchestration_package
 from .tasks_window import ACCEPTANCE, STATUS, TaskWorker, task_status
 
 
@@ -288,7 +289,8 @@ class MainWindow(QMainWindow):
             self._error("请先告诉 Nexgent 要完成什么。")
             return
         try:
-            state = self.service.create(objective)
+            state = self.service.create(
+                objective, package=self_orchestration_package())
         except Exception as exc:
             self._error(f"创建 Episode 失败：{exc}")
             return

@@ -51,6 +51,40 @@ nodes, dependencies, deliverable names, and output shape to the actual task:
   {"op":"add_control_edge","edge":{"from":"architect","to":"worker"}}
 ],"outputs":{"deliverables":{"result":{"$node":"publish.id"}}},"revision_rules":[]}}
 
+If a missing reusable capability is worth creating during this task, add an
+`ask` node whose prompt requests a JSON `task-skill-proposal`, then a
+`develop_skill` node, then a `delegate` node. The proposal must have `schema`
+`nexgent.task-skill-proposal.v1`, `skill` with `name`, `entrypoint`, Python
+`source` defining `entrypoint(payload, context)`, `input_schema`, and
+`output_schema`, `deliverable_name`, and `hypothesis` with
+`failure_mechanism`, `expected_behavior`, `applicability`, and `falsifier`.
+The proposal envelope is exact: use `schema`, not `schema_version`; use
+`skill.source`, not `skill.python_source`; keep both schemas inside `skill`.
+No extra top-level keys are accepted. A valid coder output has this shape:
+{"schema":"nexgent.task-skill-proposal.v1","skill":{"name":"transform",
+"entrypoint":"solve","source":"def solve(payload, context):\\n    return {'answer': 1}\\n",
+"input_schema":{"type":"object"},"output_schema":{"type":"object"}},
+"deliverable_name":"result","hypothesis":{"failure_mechanism":"missing transform",
+"expected_behavior":"computed result","applicability":"same input shape",
+"falsifier":"wrong output"}}.
+The host binds `parent_package_digest`; do not invent it. Give the coder the
+task and exact proposal contract in `params.prompt`. Bind its entire JSON
+result to `develop_skill` as `{"proposal":{"$node":"coder"}}` and set
+`params.constraints` to the minimum required `allowed_rpc_methods`,
+`allowed_tools`, and `max_patch_bytes`. These are host RPC method names, not
+Python libraries: pure computation needs `allowed_rpc_methods:[]`;
+`context.read_artifact` needs `["read_artifact"]`. Never name `python` as an RPC
+method. For a child that needs the parent's input artifacts, bind the
+delegate's `package_id` to
+`{"$node":"develop.package_id"}` and its `task` to an object containing
+`objective`, `input_refs`, `deliverables`, and `capabilities` from `$input`.
+The child skill receives the child TaskSpec as `payload`; input values are
+artifact refs under `payload['input_refs']`, so Python reads, for example,
+`context.read_artifact(payload['input_refs']['numbers'])['content']`.
+Use the child's `output_refs.<deliverable_name>` for the final output. The
+child package executes only in that delegated Episode. Do not invent a skill
+when the task can be completed directly with existing roles and capabilities.
+
 Preserve the completed `architect` node and remove `slot`. Every added ask node
 must name one available `role_ref` and its matching `component_ref`. Use
 bindings and artifact edges to pass actual results rather than describing a
@@ -109,7 +143,7 @@ GENERIC_ROLE_PROMPTS = {
 
 
 AVAILABLE_OPERATORS = (
-    "ask", "tool", "skill", "delegate", "read_artifact", "publish",
+    "ask", "tool", "skill", "develop_skill", "delegate", "read_artifact", "publish",
     "memory_search", "remember", "feedback", "parallel", "join", "loop",
 )
 

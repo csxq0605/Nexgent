@@ -1537,7 +1537,16 @@ class TaskService:
                     stop_event=stop_event)
             elif kind == "controlled_code":
                 counter = [0]
+                allowed_methods = skill.get("allowed_rpc_methods")
+                allowed_tools = skill.get("allowed_tools")
                 def handle(m, p):
+                    if allowed_methods is not None and m not in allowed_methods:
+                        raise PermissionError(
+                            f"Skill {name!r} is not allowed to call RPC method {m!r}")
+                    if (m == "tool" and allowed_tools is not None
+                            and p.get("name") not in allowed_tools):
+                        raise PermissionError(
+                            f"Skill {name!r} is not allowed to call tool {p.get('name')!r}")
                     counter[0] += 1
                     return self._dispatch(identity, package, m, p, f"{path}/skill.{counter[0]}", stop_event, notify)
                 execution = run_package(package, "skill:" + name, payload, handle, stop_event=stop_event, timeout=300)
@@ -1547,6 +1556,49 @@ class TaskService:
                 raise ContractError("Unsupported skill implementation kind")
             validate(result, skill.get("output_schema", {}), label=name + " output")
             return result
+        if method == "develop_skill":
+            from .task_skill_compiler import compile_task_skill_proposal
+
+            state = self.store.get(identity)
+            constraints = params.get("constraints")
+            if not isinstance(constraints, dict):
+                raise ContractError("develop_skill requires explicit task skill constraints")
+            requested_tools = constraints.get("allowed_tools")
+            requested_methods = constraints.get("allowed_rpc_methods")
+            if (not isinstance(requested_tools, list)
+                    or any(not isinstance(name, str) for name in requested_tools)
+                    or not set(requested_tools) <= set(state["capabilities"])):
+                raise PermissionError("Task-authored skill tools exceed the Episode lease")
+            host_methods = CAPABILITIES - {
+                "parallel", "skill", "delegate", "develop_skill"}
+            policy_methods = state["task"].get("constraints", {}).get(
+                "allowed_skill_rpc_methods", sorted(host_methods))
+            if (not isinstance(policy_methods, list)
+                    or any(not isinstance(name, str) for name in policy_methods)
+                    or not set(policy_methods) <= host_methods
+                    or not isinstance(requested_methods, list)
+                    or any(not isinstance(name, str) for name in requested_methods)
+                    or not set(requested_methods) <= set(policy_methods)):
+                raise PermissionError("Task-authored skill RPC methods exceed the host policy")
+            proposal = deepcopy(params.get("proposal"))
+            if isinstance(proposal, dict):
+                proposal.setdefault("parent_package_digest", package["digest"])
+            child = compile_task_skill_proposal(
+                package, proposal, constraints,
+                provenance={"episode_id": identity, "node_id": path},
+            )
+            self.store.lease_task_package(child, identity)
+            skill_name = proposal["skill"]["name"]
+            self.store.event(identity, "task_skill_compiled", {
+                "node_id": path,
+                "package_id": child["id"],
+                "package_digest": child["digest"],
+                "skill_name": skill_name,
+                "proposal_digest": digest(proposal),
+            })
+            return {"package_id": child["id"],
+                    "package_digest": child["digest"],
+                    "skill_name": skill_name}
         if method == "delegate":
             state = self.store.get(identity)
             depth, cursor = 0, state

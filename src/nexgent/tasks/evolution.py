@@ -482,6 +482,9 @@ class EvolutionService:
         """Create a channel with its immutable generation-zero package."""
         channel = _identifier(channel, "Package channel")
         verify_package(package)
+        if self.store.is_task_scoped_package(package):
+            raise ContractError(
+                "Task-authored packages require an explicit adoption before deployment")
         if package["generation"] != 0:
             raise ContractError("A new channel must start from a generation-zero package")
         self.store.put_package(package)
@@ -521,6 +524,9 @@ class EvolutionService:
         """Admit a candidate bound to local non-holdout feedback and a hypothesis."""
         active = self.active(channel)
         verify_package(package, active["package"])
+        if self.store.is_task_scoped_package(package):
+            raise ContractError(
+                "Task-authored packages require an explicit adoption before evolution")
         if isinstance(hypothesis, str):
             if not hypothesis.strip() or len(hypothesis) > 20000:
                 raise ContractError("Candidate hypothesis must be nonempty bounded text")
@@ -1299,6 +1305,9 @@ class EvolutionService:
                 or active["revision"] != generation.get("channel_revision")):
             raise ContractError("Candidate parent is no longer active")
         package = self.store.package(candidate["package_id"])
+        if self.store.is_task_scoped_package(package):
+            raise ContractError(
+                "Task-authored packages require an explicit adoption before promotion")
         verify_package(package, active["package"])
         monitor_plan = self.monitor_plan(monitor_plan_id)
         if (monitor_plan["candidate_id"] != candidate_id
