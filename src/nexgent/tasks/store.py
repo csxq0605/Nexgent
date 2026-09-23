@@ -105,6 +105,9 @@ class EpisodeStore:
                 CREATE TABLE IF NOT EXISTS task_capability_instances(
                     episode TEXT NOT NULL, name TEXT NOT NULL, data TEXT NOT NULL,
                     PRIMARY KEY(episode,name));
+                CREATE TABLE IF NOT EXISTS task_service_applications(
+                    episode TEXT NOT NULL, node_id TEXT NOT NULL, data TEXT NOT NULL,
+                    PRIMARY KEY(episode,node_id));
                 CREATE TABLE IF NOT EXISTS task_events(
                     episode TEXT, sequence INTEGER, kind TEXT, created REAL,
                     data TEXT, previous TEXT, digest TEXT,
@@ -601,13 +604,23 @@ class EpisodeStore:
         verify_tool_definition(definition, self.package(definition["package_id"]))
         return definition
 
-    def tool_instance(self, episode_id, name):
+    def _capability_instance(self, episode_id, name):
         with self.connect() as db:
             self._get(db, episode_id)
             row = db.execute(
                 "SELECT data FROM task_capability_instances WHERE episode=? AND name=?",
                 (episode_id, name)).fetchone()
             return self._checked_tool_instance(db, episode_id, name, row[0]) if row else None
+
+    def tool_instance(self, episode_id, name):
+        if not isinstance(name, str) or name.startswith("@service:"):
+            return None
+        return self._capability_instance(episode_id, name)
+
+    def service_instance(self, episode_id, interface="model_context.v1"):
+        if interface != "model_context.v1":
+            raise ValueError("Unknown service interface")
+        return self._capability_instance(episode_id, "@service:" + interface)
 
     @staticmethod
     def _checked_tool_instance(db, episode_id, name, encoded):
@@ -636,7 +649,8 @@ class EpisodeStore:
                 raise ValueError("Episode event chain is invalid")
             expected_sequence += 1
             previous = stored_digest
-            if kind in {"capability_instance_mounted", "capability_instance_released"}:
+            if kind in {"capability_instance_mounted", "capability_instance_released",
+                        "service_provider_activated", "service_provider_released"}:
                 if event.get("name") == name:
                     latest = (kind, event)
         if latest is None:
@@ -644,7 +658,7 @@ class EpisodeStore:
         kind, event = latest
         if (event.get("revision") != instance["revision"]
                 or event.get("record_digest") != instance["record_digest"]
-                or (kind == "capability_instance_mounted")
+                or (kind in {"capability_instance_mounted", "service_provider_activated"})
                 != (instance["status"] == "active")):
             raise ValueError("CapabilityInstance differs from its lifecycle event")
         return instance
@@ -653,7 +667,8 @@ class EpisodeStore:
         with self.connect() as db:
             self._get(db, episode_id)
             rows = db.execute(
-                "SELECT name,data FROM task_capability_instances WHERE episode=? ORDER BY name",
+                "SELECT name,data FROM task_capability_instances WHERE episode=? "
+                "AND name NOT LIKE '@service:%' ORDER BY name",
                 (episode_id,)).fetchall()
             instances = [self._checked_tool_instance(db, episode_id, row[0], row[1])
                          for row in rows]
@@ -738,6 +753,213 @@ class EpisodeStore:
                 "revision": instance["revision"], "record_digest": instance["record_digest"],
             })
         return instance
+
+    def stage_service_definition(self, episode_id, definition, package):
+        """Store a model-authored provider without activating it globally."""
+        from .capability_authority import require_definition_authorized
+        from .service_definitions import verify_service_definition
+        definition = deepcopy(verify_service_definition(definition, package))
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            episode = self._get(db, episode_id)
+            authority = episode["task"].get("capability_authority")
+            if episode["status"] in {"completed", "cancelled", "failed"}:
+                raise PermissionError("Terminal Episode cannot stage a service")
+            if authority is None or definition["origin_episode_id"] != episode_id:
+                raise PermissionError("Service development requires creator Episode authority")
+            require_definition_authorized(
+                authority, definition["kind"], definition["effect_class"],
+                definition["declared_operations"], definition["credential_handles"])
+            if definition["runtime"] != authority["runtime"]:
+                raise PermissionError("Service runtime exceeds Episode authority")
+            existing = db.execute(
+                "SELECT data FROM task_capability_definitions WHERE id=?",
+                (definition["id"],)).fetchone()
+            if existing:
+                if json.loads(existing[0]) != definition:
+                    raise ValueError("Cannot overwrite an immutable service Definition")
+                return definition
+            count = db.execute(
+                "SELECT COUNT(*) FROM task_capability_definitions WHERE origin_episode=?",
+                (episode_id,)).fetchone()[0]
+            if count >= authority["max_definitions"]:
+                raise BudgetExhausted("Episode capability-definition limit exhausted")
+            self._put_package_row(db, package)
+            db.execute("INSERT OR IGNORE INTO task_skill_package_leases VALUES(?,?,?,?)",
+                       (package["id"], episode["root_episode_id"], episode_id, time.time()))
+            db.execute("INSERT INTO task_capability_definitions VALUES(?,?,?,?)",
+                       (definition["id"], definition["digest"], episode_id,
+                        _json(definition)))
+            self._event(db, episode_id, "service_definition_staged", {
+                "definition_id": definition["id"], "definition_digest": definition["digest"],
+                "package_digest": package["digest"], "authority_digest": authority["digest"],
+                "service_interface": definition["service_interface"],
+            })
+        return definition
+
+    def service_definition(self, definition_id):
+        from .service_definitions import verify_service_definition
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT digest,origin_episode,data FROM task_capability_definitions WHERE id=?",
+                (definition_id,)).fetchone()
+        if row is None:
+            raise KeyError(definition_id)
+        definition = json.loads(row[2])
+        if (definition.get("id") != definition_id
+                or definition.get("digest") != row[0]
+                or definition.get("origin_episode_id") != row[1]):
+            raise ValueError("Stored service Definition table identity mismatch")
+        verify_service_definition(definition, self.package(definition["package_id"]))
+        return definition
+
+    def activate_service_provider(self, episode_id, definition_id, *, expected_revision):
+        """CAS-switch the sole Episode-local model-context provider slot."""
+        from .capability_authority import require_definition_authorized
+        definition = self.service_definition(definition_id)
+        slot = "@service:" + definition["service_slot"]
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            episode = self._get(db, episode_id)
+            authority = episode["task"].get("capability_authority")
+            if episode["status"] in {"completed", "cancelled", "failed"}:
+                raise PermissionError("Terminal Episode cannot activate a service")
+            if authority is None or definition["origin_episode_id"] != episode_id:
+                raise PermissionError("Service provider is outside its creator Episode")
+            require_definition_authorized(
+                authority, definition["kind"], definition["effect_class"],
+                definition["declared_operations"], definition["credential_handles"])
+            if definition["runtime"] != authority["runtime"]:
+                raise PermissionError("Service runtime exceeds Episode authority")
+            row = db.execute(
+                "SELECT data FROM task_capability_instances WHERE episode=? AND name=?",
+                (episode_id, slot)).fetchone()
+            previous = (self._checked_tool_instance(db, episode_id, slot, row[0])
+                        if row else None)
+            revision = previous["revision"] if previous else 0
+            if (previous and previous["status"] == "active"
+                    and previous["definition_id"] == definition_id
+                    and type(expected_revision) is int
+                    and previous["revision"] == expected_revision + 1):
+                # Re-enter an admitted activation after the Instance committed
+                # but before its enclosing RPC completion was persisted.
+                return previous
+            if type(expected_revision) is not int or expected_revision != revision:
+                raise StateConflict("Service slot revision changed")
+            if previous and previous["status"] == "active":
+                if previous["definition_id"] == definition_id:
+                    return previous
+                raise StateConflict("Active service provider must be released before replacement")
+            now = time.time()
+            instance = {
+                "schema": "nexgent.capability-instance.v1", "episode_id": episode_id,
+                "name": slot, "definition_id": definition_id,
+                "definition_digest": definition["digest"],
+                "authority_digest": authority["digest"], "status": "active",
+                "revision": revision + 1,
+                "created_at": previous["created_at"] if previous else now,
+                "updated_at": now,
+            }
+            instance["record_digest"] = _digest(instance)
+            db.execute("INSERT OR REPLACE INTO task_capability_instances VALUES(?,?,?)",
+                       (episode_id, slot, _json(instance)))
+            self._event(db, episode_id, "service_provider_activated", {
+                "service_interface": definition["service_interface"],
+                "definition_id": definition_id, "name": slot,
+                "revision": instance["revision"],
+                "record_digest": instance["record_digest"],
+            })
+        return instance
+
+    def release_service_provider(self, episode_id, *, expected_revision):
+        slot = "@service:model_context.v1"
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            episode = self._get(db, episode_id)
+            if episode["status"] in {"completed", "cancelled", "failed"}:
+                raise PermissionError("Terminal Episode cannot release a service")
+            row = db.execute(
+                "SELECT data FROM task_capability_instances WHERE episode=? AND name=?",
+                (episode_id, slot)).fetchone()
+            if row is None:
+                raise KeyError(slot)
+            instance = self._checked_tool_instance(db, episode_id, slot, row[0])
+            if (instance["status"] == "released"
+                    and instance["revision"] == expected_revision + 1):
+                return instance
+            if instance["revision"] != expected_revision:
+                raise StateConflict("Service slot revision changed")
+            if instance["status"] != "active":
+                return instance
+            instance.update(status="released", revision=instance["revision"] + 1,
+                            updated_at=time.time())
+            instance["record_digest"] = _digest({
+                key: value for key, value in instance.items() if key != "record_digest"})
+            db.execute("UPDATE task_capability_instances SET data=? WHERE episode=? AND name=?",
+                       (_json(instance), episode_id, slot))
+            self._event(db, episode_id, "service_provider_released", {
+                "name": slot, "definition_id": instance["definition_id"],
+                "revision": instance["revision"],
+                "record_digest": instance["record_digest"],
+            })
+        return instance
+
+    def reserve_service_application(self, episode_id, node_id, binding):
+        """Admit one provider execution before running model-authored code."""
+        if not isinstance(node_id, str) or not node_id:
+            raise ValueError("Service application needs a stable model node")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            episode = self._get(db, episode_id)
+            authority = episode["task"].get("capability_authority")
+            row = db.execute(
+                "SELECT data FROM task_capability_instances WHERE episode=? AND name=?",
+                (episode_id, "@service:model_context.v1")).fetchone()
+            instance = (self._checked_tool_instance(
+                db, episode_id, "@service:model_context.v1", row[0]) if row else None)
+            if (authority is None or instance is None or instance["status"] != "active"
+                    or binding != {"definition_id": instance["definition_id"],
+                                   "definition_digest": instance["definition_digest"],
+                                   "instance_revision": instance["revision"],
+                                   "authority_digest": authority["digest"]}
+                    or instance["authority_digest"] != authority["digest"]):
+                raise PermissionError("Service provider identity or authority changed")
+            old = db.execute(
+                "SELECT data FROM task_service_applications WHERE episode=? AND node_id=?",
+                (episode_id, node_id)).fetchone()
+            if old:
+                record = json.loads(old[0])
+                if record["binding"] != binding:
+                    raise StateConflict("Service application changes provider identity")
+                return record
+            root_id = episode["root_episode_id"]
+            root = self._get(db, root_id)
+            root_tools = db.execute(
+                "SELECT COUNT(*) FROM task_resources WHERE root_id=? AND kind='tool'",
+                (root_id,)).fetchone()[0]
+            root_services = db.execute(
+                "SELECT COUNT(*) FROM task_service_applications a "
+                "JOIN task_episodes e ON a.episode=e.id WHERE e.root_id=?",
+                (root_id,)).fetchone()[0]
+            if root_tools + root_services >= root["budget"]["max_tool_calls"]:
+                raise BudgetExhausted("Root Episode capability-call budget exhausted")
+            used = db.execute(
+                "SELECT COUNT(*) FROM task_service_applications WHERE episode=?",
+                (episode_id,)).fetchone()[0]
+            for stored, in db.execute(
+                    "SELECT data FROM task_resources WHERE episode=? AND kind='tool'",
+                    (episode_id,)):
+                if json.loads(stored).get("data", {}).get("dynamic_capability"):
+                    used += 1
+            if used >= authority["max_invocations"]:
+                raise BudgetExhausted("Episode capability invocation limit exhausted")
+            record = {"episode_id": episode_id, "node_id": node_id,
+                      "binding": deepcopy(binding), "status": "admitted",
+                      "created_at": time.time()}
+            db.execute("INSERT INTO task_service_applications VALUES(?,?,?)",
+                       (episode_id, node_id, _json(record)))
+            self._event(db, episode_id, "service_application_admitted", record)
+        return record
 
     @staticmethod
     def _event(db, episode_id, kind, data):
@@ -909,7 +1131,8 @@ class EpisodeStore:
                 if row[0] != root_id:
                     raise PermissionError("Model request belongs to a different budget account")
                 old = json.loads(row[1])
-                for key in ("request_digest", "model", "role"):
+                for key in ("request_digest", "model", "role", "service_provider",
+                            "effective_payload_digest"):
                     if key in old and key in receipt and receipt[key] != old[key]:
                         raise ValueError("Model receipt changes request identity")
                 if old["status"] not in {"started", "reserved"} and receipt.get("status") != old["status"]:
@@ -961,6 +1184,11 @@ class EpisodeStore:
                     raise ValueError("Resource reservation changes request identity")
                 return json.loads(old[0])
             count = db.execute("SELECT COUNT(*) FROM task_resources WHERE root_id=? AND kind=?", (root_id, kind)).fetchone()[0]
+            if kind == "tool":
+                count += db.execute(
+                    "SELECT COUNT(*) FROM task_service_applications a "
+                    "JOIN task_episodes e ON a.episode=e.id WHERE e.root_id=?",
+                    (root_id,)).fetchone()[0]
             if count >= root["budget"]["max_tool_calls" if kind == "tool" else "max_nodes"]:
                 raise BudgetExhausted(f"Root Episode {kind} budget exhausted")
             if kind == "tool":
@@ -990,6 +1218,9 @@ class EpisodeStore:
                             (episode_id,)):
                         if json.loads(stored).get("data", {}).get("dynamic_capability"):
                             count_dynamic += 1
+                    count_dynamic += db.execute(
+                        "SELECT COUNT(*) FROM task_service_applications WHERE episode=?",
+                        (episode_id,)).fetchone()[0]
                     if count_dynamic >= authority["max_invocations"]:
                         raise BudgetExhausted("Episode dynamic-tool invocation limit exhausted")
                 accounting = data.get("work_accounting")

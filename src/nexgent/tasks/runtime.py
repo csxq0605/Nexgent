@@ -513,6 +513,29 @@ class TaskService:
             })
         return result
 
+    def _service_inventory(self, identity):
+        from .capability_authority import require_definition_authorized
+        authority = self.store.get(identity)["task"].get("capability_authority")
+        if authority is None:
+            return None
+        try:
+            require_definition_authorized(authority, "service_provider", "model_context", [], [])
+        except (PermissionError, ContractError):
+            return None
+        instance = self.store.service_instance(identity)
+        if instance is None:
+            return {"model_context.v1": {"status": "empty", "revision": 0}}
+        definition = self.store.service_definition(instance["definition_id"])
+        if (instance["definition_digest"] != definition["digest"]
+                or instance["authority_digest"] != authority["digest"]
+                or definition["origin_episode_id"] != identity):
+            raise ContractError("Service provider identity or authority changed")
+        return {"model_context.v1": {
+            "status": instance["status"], "revision": instance["revision"],
+            "definition_id": definition["id"], "definition_digest": definition["digest"],
+            "name": definition["name"], "description": definition["description"],
+        }}
+
     def list(self):
         return [self.get(state["id"]) for state in self.store.list() if not state["parent_episode_id"]]
 
@@ -1731,7 +1754,8 @@ class TaskService:
             if existing["status"] == "failed":
                 raise RuntimeError(existing["error"])
             if method not in {"delegate", "parallel", "develop_skill", "develop_tool",
-                              "release_tool"}:
+                              "release_tool", "develop_service", "activate_service",
+                              "release_service"}:
                 raise RecoveryRequired(f"Unfinished capability {path}; automatic repetition refused")
             node = deepcopy(self.store.get(identity)["nodes"].get(path) or {})
             if not node or node.get("method") != method:
@@ -1786,8 +1810,72 @@ class TaskService:
 
     def _ask(self, identity, path, params, stop_event, notify):
         state = self.store.get(identity)
+        params = deepcopy(params)
+        service_binding = None
+        instance = self.store.service_instance(identity)
+        if instance is not None and instance["status"] == "active":
+            from .capability_authority import require_definition_authorized
+            from .service_definitions import (
+                MODEL_CONTEXT_INPUT_SCHEMA, MODEL_CONTEXT_OUTPUT_SCHEMA,
+            )
+            definition = self.store.service_definition(instance["definition_id"])
+            authority = state["task"].get("capability_authority")
+            if (authority is None or instance["authority_digest"] != authority["digest"]
+                    or instance["definition_digest"] != definition["digest"]
+                    or definition["origin_episode_id"] != identity):
+                raise PermissionError("Active service provider identity or authority changed")
+            require_definition_authorized(
+                authority, definition["kind"], definition["effect_class"],
+                definition["declared_operations"], definition["credential_handles"])
+            service_binding = {
+                "definition_id": definition["id"],
+                "definition_digest": definition["digest"],
+                "instance_revision": instance["revision"],
+                "authority_digest": authority["digest"],
+            }
+            request = {"schema": "nexgent.model-context-request.v1",
+                       "role": params["role"], "node_id": path,
+                       "payload": params.get("payload")}
+            validate(request, MODEL_CONTEXT_INPUT_SCHEMA,
+                     label="model-context service input", allow_artifact_refs=False)
+            self.store.reserve_service_application(identity, path, service_binding)
+            started = time.monotonic()
+            try:
+                instruction_limit = 200_000
+                execution = run_package(
+                    self.store.package(definition["package_id"]), "execute", request,
+                    handle=None, stop_event=stop_event, timeout=120, max_rpc=0,
+                    max_instructions=instruction_limit)
+                output = execution["value"]
+                validate(output, MODEL_CONTEXT_OUTPUT_SCHEMA,
+                         label="model-context service output", allow_artifact_refs=False)
+                transformed = _json_copy(output["payload"], label="Model-context payload")
+                if len(json.dumps(output, ensure_ascii=False, allow_nan=False)) > 240000:
+                    raise ContractError("Model-context service output exceeds model input limit")
+                self.store.event(identity, "service_applied", {
+                    "node_id": path, "binding": service_binding,
+                    "package_id": definition["package_id"],
+                    "package_digest": definition["package_digest"],
+                    "entry_digest": definition["entry_digest"],
+                    "input_digest": digest(request),
+                    "output_digest": digest(output),
+                    "annotations": output["annotations"],
+                    "worker_instruction_limit": instruction_limit,
+                    "worker_execution": execution["execution"],
+                    "elapsed_seconds": time.monotonic() - started,
+                })
+                params["payload"] = transformed
+            except BaseException as exc:
+                self.store.event(identity, "service_application_failed", {
+                    "node_id": path, "binding": service_binding,
+                    "error": f"{type(exc).__name__}: {str(exc)[:1000]}",
+                })
+                raise
         def reserve(receipt):
             receipt.update(episode_id=identity, node_id=path, package_digest=state["package_digest"])
+            if service_binding is not None:
+                receipt["service_provider"] = deepcopy(service_binding)
+                receipt["effective_payload_digest"] = digest(params["payload"])
             self.store.reserve_model(state["root_episode_id"], receipt)
             notify()
         gateway = (self.gateway_factory(reserve, stop_event) if self.gateway_factory else
@@ -1880,7 +1968,46 @@ class TaskService:
                 installed = self.tools.describe([item["name"] for item in leases])
             else:
                 installed = self.tools.describe(state["capabilities"])
-            return {"tools": installed + self._dynamic_inventory(identity)}
+            result = {"tools": installed + self._dynamic_inventory(identity)}
+            services = self._service_inventory(identity)
+            if services is not None:
+                result["services"] = services
+            return result
+        if method == "develop_service":
+            if getattr(self._parallel_context, "active", False):
+                raise PermissionError("Service development requires a serial Episode point")
+            if set(params) != {"proposal"}:
+                raise ContractError("Service development requires one proposal")
+            from .service_definitions import build_service_definition
+            definition, bundle = build_service_definition(params["proposal"], identity)
+            self.store.stage_service_definition(identity, definition, bundle)
+            return {"definition_id": definition["id"],
+                    "definition_digest": definition["digest"],
+                    "name": definition["name"],
+                    "service_interface": definition["service_interface"]}
+        if method == "activate_service":
+            if getattr(self._parallel_context, "active", False):
+                raise PermissionError("Service activation requires a serial Episode point")
+            if (set(params) != {"definition_id", "expected_revision"}
+                    or not isinstance(params["definition_id"], str)
+                    or type(params["expected_revision"]) is not int):
+                raise ContractError("Service activation requires definition and exact revision")
+            instance = self.store.activate_service_provider(
+                identity, params["definition_id"],
+                expected_revision=params["expected_revision"])
+            return {"definition_id": instance["definition_id"],
+                    "instance_revision": instance["revision"],
+                    "status": instance["status"]}
+        if method == "release_service":
+            if getattr(self._parallel_context, "active", False):
+                raise PermissionError("Service release requires a serial Episode point")
+            if set(params) != {"expected_revision"} or type(params["expected_revision"]) is not int:
+                raise ContractError("Service release requires an exact revision")
+            instance = self.store.release_service_provider(
+                identity, expected_revision=params["expected_revision"])
+            return {"definition_id": instance["definition_id"],
+                    "instance_revision": instance["revision"],
+                    "status": instance["status"]}
         if method == "develop_tool":
             if getattr(self._parallel_context, "active", False):
                 raise PermissionError("Tool development requires a serial Episode point")

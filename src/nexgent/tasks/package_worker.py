@@ -104,6 +104,18 @@ class Context:
         return self.request("release_tool", {
             "name": name, "expected_revision": expected_revision})
 
+    def develop_service(self, proposal):
+        return self.request("develop_service", {"proposal": proposal})
+
+    def activate_service(self, definition_id, expected_revision):
+        return self.request("activate_service", {
+            "definition_id": definition_id,
+            "expected_revision": expected_revision})
+
+    def release_service(self, expected_revision):
+        return self.request("release_service", {
+            "expected_revision": expected_revision})
+
     def capability_inventory(self):
         return self.request("capability_inventory", {})
 
