@@ -84,3 +84,9 @@ Windows 上最终脚本由子智能体与根代理分别定向运行通过。最
 | `tool/call` 已在 JSONL、handler 已进入但没有持久 `tool/result` | 相同 call ID 的调用 1、成功结果 0、`TOOL_OUTCOME_UNKNOWN` 1、handler 入口 1；旧 turn 被标记 interrupted | `{"status":"unknown","action":"verify_external_state"}`，没有再次发出工具调用 |
 
 每组 phase 1 都由父进程请求 `SIGKILL` 而结束，phase 2 退出码 0。断言还核对 crash 前的 session 是恢复后日志的前缀、结构化账本字段、`turn/end.reason.kind=interrupted`、固定 adapter 请求收据及输入摘要。此结果证明**进程终止后，恢复的历史使这个固定 adapter 能避免重发**；它不证明运行时对任意模型具有 exactly-once 去重、断电级持久性，也不证明真实外部业务副作用的提交／对账。未知组账本只证明 handler 已进入。外部原执行仍未进入 Nexgent 的预算和 evaluator，真实模型接通及生产技术选型尚待完成。
+
+## A3：Python 路线真实 MiMo 模型调用
+
+[`python_live_route.py`](python_live_route.py)在独立临时项目通过现有 `TaskService` 创建普通 Episode，固定 `mimo-v2.6-flash` 配置和同题输入，最多两次模型调用、512 completion token、一次工具调用，SDK 自动重试为零。凭据仅在内存读取，收据只记录配置引用和不含密钥的 profile 摘要。2026-09-23 唯一一次定向运行退出码 0；[脱敏收据](evidence-python-live-20260923.json)记录 Episode `completed`、两次真实模型调用共 260 prompt / 28 completion token、一次 `spike.multiply(6,7) → 42`、交付工件 `{"answer":42}`，并通过本地密钥字节扫描。原始 Episode 数据库保存在收据标明的本机 scratch 目录。
+
+这证明现有 Python 路径能够把真实模型选择、预授权工具执行、预算用量和交付连在同一 Episode 中。模型通过两次 JSON `ask` 交互，**不是 provider-native tool calling**；工具由人工预先编写并在 Episode 创建时授权，任务中开发、安装、卸载和跨任务进化仍未证明。此次没有为同题任务测试动态租约，不能借真实模型成功覆盖前述任务内装入负结果。

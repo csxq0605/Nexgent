@@ -4,7 +4,7 @@
 
 | 阶段 | 目标与来源 | 当前实际证据 | 出口状态／下一项 |
 | --- | --- | --- | --- |
-| A 内核选型 | [同题小样](../../experiments/kernel_spike/CONTRACT.md)；[DeepSeek 架构](https://github.com/deepseek-ai/deepseek-harness/blob/46a7f68b0922371ce7144b668b90e377d8e799f4/docs/architecture.md)服务／provider／工具分离 | [A1 固定源码对照](kernel-reference-audit-20260923.md)；[A2/A3 运行记录](../../experiments/kernel_spike/RESULTS.md)：Python 预先授权路径通过、任务内装入拒绝；DeepSeek 固定模型同题通过 Agent 作用域工具处理器注册／释放，独立 Nexgent 诊断 Episode 可评价外部收据，原执行未受 Nexgent 准入／计费；Windows 两组进程终止恢复通过，限固定 adapter／无真实副作用 | A1 完成；A2 诊断小样完成；A3 恢复子项通过，真实模型、任务内插件生命周期、Python 动态能力薄片和最终 ADR 未过 |
+| A 内核选型 | [同题小样](../../experiments/kernel_spike/CONTRACT.md)；[DeepSeek 架构](https://github.com/deepseek-ai/deepseek-harness/blob/46a7f68b0922371ce7144b668b90e377d8e799f4/docs/architecture.md)服务／provider／工具分离 | [A1 固定源码对照](kernel-reference-audit-20260923.md)；[A2/A3 运行记录](../../experiments/kernel_spike/RESULTS.md)：Python 真实 MiMo 两次 JSON ask、预授权工具一次与同一 Episode 用量／交付通过，任务内装入仍拒绝；DeepSeek 固定模型同题通过 Agent 作用域工具处理器注册／释放，独立 Nexgent 诊断 Episode 可评价外部收据，原执行未受 Nexgent 准入／计费；Windows 两组进程终止恢复通过，限固定 adapter／无真实副作用 | A1 完成；A2 诊断小样完成；A3 Python 真实模型与 DeepSeek 恢复子项通过，DeepSeek 真实模型、任务内插件生命周期、Python 动态能力薄片和最终 ADR 未过 |
 | B 能力内核 | DeepSeek scoped registry、可替换 loop；Nexgent 自有 Episode 和权限账本 | 已安装 DomainPack 工具；`ToolRegistry` 只有注册，没有任务作用域装入／卸载 | 未开始；依赖 A 选型 |
 | C 自主能力开发 | DeepSeek Creator 的发现／管理入口；通用工具与服务插件双对象 | `develop_skill` 受限技能的局部实证；无通用插件运行 | 未开始；需真实模型开发并使用两种插件能力 |
 | D 执行与编排 | [AutoSci](https://arxiv.org/abs/2605.31468v1)技能／图更新、[ADAS](https://arxiv.org/abs/2408.08435v2)代码 Agent、[AFlow](https://arxiv.org/abs/2410.10762v4)工作流搜索 | 真实模型完成 7 节点 DAG；反馈后的第二版图未完成 | 未达新出口；需非 DAG 后端与真实中途策略修改 |
