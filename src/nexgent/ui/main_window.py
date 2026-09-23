@@ -59,6 +59,27 @@ def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=lambda item: f"<{type(item).__name__}>")
 
 
+def _brief(value, limit=180):
+    if value is None:
+        return "未记录"
+    if isinstance(value, str):
+        result = value
+    else:
+        result = json.dumps(value, ensure_ascii=False, default=str)
+    result = " ".join(result.split())
+    return result[:limit] + ("…" if len(result) > limit else "")
+
+
+def _list_summary(value, empty):
+    if not value:
+        return empty
+    if isinstance(value, dict):
+        return "\n".join(f"• {key}: {_brief(item)}" for key, item in value.items())
+    if isinstance(value, list):
+        return "\n".join(f"• {_brief(item)}" for item in value)
+    return _brief(value)
+
+
 class MainWindow(QMainWindow):
     """Main conversation surface backed by the generic ``TaskService``."""
 
@@ -296,7 +317,8 @@ class MainWindow(QMainWindow):
             self._append("main", f"这是该 Episode 的当前记录。状态：{status}")
             outcome = state.get("outcome") or {}
             if outcome:
-                self._append("main", "交付摘要：\n" + _json(outcome))
+                summary = outcome.get("summary") or outcome.get("delivery_status") or "已记录"
+                self._append("main", "交付摘要：" + _brief(summary, 320))
         self._buttons()
 
     def _start(self, episode_id):
@@ -361,29 +383,54 @@ class MainWindow(QMainWindow):
         self.status_label.setText(status)
         nodes = state.get("nodes") or {}
         node_rows = []
+        superseded = 0
         if isinstance(nodes, dict):
             for identity, node in nodes.items():
                 if isinstance(node, dict):
-                    node_rows.append({"id": identity, "status": STATUS.get(node.get("status"), node.get("status")),
-                                      "operator": node.get("operator", node.get("kind", node.get("method"))),
-                                      "attempt": node.get("attempt_id", node.get("attempt"))})
-        self.run_view.setPlainText(_json({"episode_id": state.get("id"), "status": status,
-                                          "nodes": node_rows, "children": state.get("children", []),
-                                          "last_error": state.get("last_error")}))
+                    if node.get("status") == "superseded":
+                        superseded += 1
+                        continue
+                    node_status = STATUS.get(node.get("status"), node.get("status", "待执行"))
+                    operator = node.get("operator", node.get("kind", node.get("method", "步骤")))
+                    name = str(identity).rsplit("/", 1)[-1].replace("_", " ")
+                    node_rows.append(f"• {node_status} · {name}（{operator}）")
+        usage = state.get("usage") or {}
+        usage_rows = []
+        for key, label in (("model_calls", "模型调用"), ("tool_calls", "工具调用"),
+                           ("nodes", "节点"), ("charged_completion_tokens", "预留输出 tokens")):
+            if key in usage:
+                usage_rows.append(f"{label}：{usage[key]}")
+        run_text = [f"状态：{status}", f"Episode：{state.get('id', '未记录')}", "",
+                    "执行步骤", "\n".join(node_rows) if node_rows else "尚无执行步骤"]
+        if superseded:
+            run_text.append(f"另有 {superseded} 条已替代的内部步骤，详见高级控制台。")
+        if usage_rows:
+            run_text.extend(["", "资源用量", "\n".join(usage_rows)])
+        if state.get("last_error"):
+            run_text.extend(["", "最近错误", _brief(state["last_error"], 400)])
+        self.run_view.setPlainText("\n".join(run_text))
         outcome = state.get("outcome") or {}
         acceptance = outcome.get("acceptance_status", "not_tested")
-        self.delivery_view.setPlainText(
-            f"交付状态：{outcome.get('delivery_status', '未记录')}\n"
-            f"验收状态：{ACCEPTANCE.get(acceptance, acceptance)}\n\n"
-            f"限制：\n{_json(outcome.get('limitations', []))}\n\n"
-            f"输出引用：\n{_json(state.get('output_refs', {}))}\n\n"
-            f"交付工件：\n{_json(state.get('artifacts', []))}"
-        )
-        self.evidence_view.setPlainText(_json({"input_refs": state.get("input_refs", {}),
-                                               "artifacts": state.get("artifacts", []),
-                                               "usage": state.get("usage", {}),
-                                               "calls": state.get("calls", []),
-                                               "events": state.get("events", [])}))
+        self.delivery_view.setPlainText("\n".join([
+            f"交付：{outcome.get('delivery_status', '未记录')}",
+            f"验收：{ACCEPTANCE.get(acceptance, acceptance)}", "",
+            "摘要", _brief(outcome.get("summary")), "",
+            "输出", _list_summary(state.get("output_refs"), "暂无输出引用"), "",
+            "工件", _list_summary(state.get("artifacts"), "暂无交付工件"), "",
+            "限制", _list_summary(outcome.get("limitations"), "未记录限制"),
+        ]))
+        calls = state.get("calls") or []
+        events = state.get("events") or []
+        event_names = [str(event.get("kind", "事件")) for event in events[-8:]
+                       if isinstance(event, dict)]
+        self.evidence_view.setPlainText("\n".join([
+            "证据概览",
+            f"模型/工具调用收据：{len(calls)}",
+            f"事件：{len(events)}",
+            f"工件：{len(state.get('artifacts') or [])}", "",
+            "最近事件", "\n".join(f"• {name}" for name in event_names) if event_names else "暂无事件", "",
+            "完整收据和原始字段请在高级控制台查看，或导出该 Episode。",
+        ]))
         self._buttons()
 
     def open_advanced(self):

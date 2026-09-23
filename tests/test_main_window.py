@@ -97,3 +97,27 @@ def test_ctrl_enter_submits_main_message(qtbot, tmp_path):
     assert service.created == ["用快捷键提交"]
     window.stop_running()
     qtbot.waitUntil(lambda: window.worker is None)
+
+
+def test_main_information_window_summarizes_run_without_raw_json(qtbot, tmp_path):
+    service = FakeMainService()
+    episode = service.create("比较两个方案")
+    state = service.states[episode["id"]]
+    state["status"] = "completed"
+    state["nodes"] = {
+        "plan/nodes/proposer_a": {"status": "completed", "operator": "ask"},
+        "plan/nodes/old_retry": {"status": "superseded", "operator": "ask"},
+    }
+    state["usage"] = {"model_calls": 1, "tool_calls": 0, "nodes": 2}
+    state["outcome"] = {"delivery_status": "delivered",
+                        "acceptance_status": "passed", "summary": "答案已验证"}
+    window = MainWindow(tmp_path, service=service)
+    qtbot.addWidget(window)
+    window.show_task(episode["id"])
+
+    assert "proposer a（ask）" in window.run_view.toPlainText()
+    assert "模型调用：1" in window.run_view.toPlainText()
+    assert "已替代" in window.run_view.toPlainText()
+    assert "答案已验证" in window.messages.toPlainText()
+    assert "答案已验证" in window.delivery_view.toPlainText()
+    assert '"nodes"' not in window.run_view.toPlainText()

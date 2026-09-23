@@ -106,6 +106,8 @@ python -m venv .venv
 
 `nexgent gui` 和 `nexgent-gui` 默认打开 Nexgent Main 对话。普通用户输入自然语言即可创建并执行 Episode；任务创建、恢复、查看和导出仍使用同一个 `.nexgent` 持久存储。需要原始 JSON 合同、预算、工具授权和 RSI 脱敏投影时，使用“打开高级控制台”或 `--task-console`：
 
+[Windows 实际运行截图](docs/validation/nexgent-main-real-episode-20260923.png)展示了一条 MiMo 多角色 benchmark Episode 在 Main 对话与右侧运行信息窗中的状态；它是当前界面证据，不代表 RSI Lab 已完成。
+
 ```powershell
 # 默认创建后执行；--input 接受内联 JSON、JSON 文件路径或 @file
 .venv\Scripts\python.exe -m nexgent task "整理输入资料并交付结果" --input inputs.json
