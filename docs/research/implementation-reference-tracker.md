@@ -1,12 +1,12 @@
 # Nexgent 实现与目标／来源对照账本
 
-日期：2026-09-23。每个阶段提交更新本表，按**目标合同 → 实际代码和运行收据 → 论文／参考源码的机制 → 未通过的出口**记录。状态只用“目标已定义”“实现中”“确定性通过”“真实任务通过”“独立效果通过”，不凭文件存在判完成。正式验收以[当前计划](../../REFACTOR_PLAN.md)各阶段出口为准；旧实验的成功与失败保留在[研究索引](README.md)。
+日期：2026-09-24。每个阶段提交更新本表，按**目标合同 → 实际代码和运行收据 → 论文／参考源码的机制 → 未通过的出口**记录。状态只用“目标已定义”“实现中”“确定性通过”“真实任务通过”“独立效果通过”，不凭文件存在判完成。正式验收以[当前计划](../../REFACTOR_PLAN.md)各阶段出口为准；旧实验的成功与失败保留在[研究索引](README.md)。
 
 | 阶段 | 目标与来源 | 当前实际证据 | 出口状态／下一项 |
 | --- | --- | --- | --- |
 | A 内核选型 | [同题小样](../../experiments/kernel_spike/CONTRACT.md)；[DeepSeek 架构](https://github.com/deepseek-ai/deepseek-harness/blob/46a7f68b0922371ce7144b668b90e377d8e799f4/docs/architecture.md)服务／provider／工具分离 | [A1 固定源码对照](kernel-reference-audit-20260923.md)；[A2/A3 运行记录](../../experiments/kernel_spike/RESULTS.md)：Python 真实 MiMo 与已安装工具的任务级租约已在同一 Episode 完成，含挂载、预算、调用、交付和释放；委派约束与重启漂移拒绝另有确定性测试。DeepSeek Agent 作用域处理器通过，真实 MiMo 原生 tool call 与工具结果通过但 final JSON 解码失败；外部原执行未受 Nexgent 准入／计费。两组 Windows 固定 adapter 进程终止恢复通过 | [ADR 001](../design/adr-001-python-episode-kernel.md)选 Python Episode 单一生产边界；A 选型出口完成，负结果保留；真正任务中插件开发属于 C，未完成 |
-| B 能力内核 | DeepSeek scoped registry、可替换 loop；[Nexgent 新名称授权合同](../design/task-time-capability-authority.md) | 已安装工具的 Episode 租约、descriptor 核对和释放进入运行路径；`ToolRegistry` 仍是全局可信 handler 注册表，没有 fresh-name Definition、服务 provider 或实际清理 | 过渡基础层确定性通过；B 出口未过，依赖 A 选型与内容寻址动态 Definition |
-| C 自主能力开发 | DeepSeek Creator 的发现／管理入口；通用工具与服务插件双对象 | `develop_skill` 受限技能的局部实证；无通用插件运行 | 未开始；需真实模型开发并使用两种插件能力 |
+| B 能力内核 | [固定 DeepSeek scoped registry 源码](kernel-reference-audit-20260923.md)、可替换 loop；[新名称授权合同](../design/task-time-capability-authority.md) | 已安装工具的 Episode 租约；新增冻结 EpisodeAuthority、内容寻址 tool Definition、Episode-local Instance、动态 inventory、释放和重启身份核对。确定性纵向任务创建未知名称工具并调用，收据绑定定义、实例、授权和 worker；只允许无凭据、无外部依赖的 `local_compute`。受控 worker 每次限 20 万 trace 事件，收据记实际事件数；现有 `tool_work_units=0` 不代表零计算成本 | 工具子路径确定性通过；B 整体出口未过：没有服务／provider 三层、依赖解析、实际清理和可替换执行策略 |
+| C 自主能力开发 | DeepSeek Creator 的发现／管理入口；通用工具与服务插件双对象 | 受限 `develop_skill` 原有局部实证；现在包内程序可调用 `develop_tool`、重读 inventory、执行新工具，确定性纵向测试通过。工具源码由测试包写定，**尚非真实模型自主开发** | C1 工具机制确定性通过；尚需真实模型自己生成／试装／调用工具，以及服务或策略插件在任务中实际激活 |
 | D 执行与编排 | [AutoSci](https://arxiv.org/abs/2605.31468v1)技能／图更新、[ADAS](https://arxiv.org/abs/2408.08435v2)代码 Agent、[AFlow](https://arxiv.org/abs/2410.10762v4)工作流搜索 | 真实模型完成 7 节点 DAG；反馈后的第二版图未完成 | 未达新出口；需非 DAG 后端与真实中途策略修改 |
 | E 持续进化 | AutoSci SciEvolve、Nexgent 候选／评价／guard 合同 | 图候选确定性采用复用；真实 O/S 未晋升、M abstain | 未达新出口；需任务来源的工具／服务插件在独立任务采用和调用 |
 | F 效果与递归 | [RHI](https://arxiv.org/abs/2607.15524v1)信息流、[HSI](https://arxiv.org/abs/2608.08466v1)三级更新及后代评价 | 确定性研究执行器；无真实跨任务净收益／递归收益 | 未开始正式研究；先完成 C–E 实际路径 |

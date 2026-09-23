@@ -218,6 +218,7 @@ class TaskService:
         self.tools = tools if tools is not None else ToolRegistry.discover()
         self.gateway_factory = gateway_factory
         self._projection_lock = threading.RLock()
+        self._parallel_context = threading.local()
 
     def _benchmark_registry(self):
         """Use project-aware discovery while preserving injected no-arg test facades."""
@@ -241,7 +242,7 @@ class TaskService:
                expected_package_registration=None, improver_channel_registration=None,
                memory_channel=None, expected_memory_registration=None,
                _memory_candidate=None, _memory_candidate_token=None,
-               initially_active_capabilities=None):
+               initially_active_capabilities=None, capability_authority=None):
         if not isinstance(objective, str) or not objective.strip() or len(objective) > 20000:
             raise ContractError("Task objective must be nonempty and at most 20000 characters")
         explicit_package = package is not None
@@ -448,6 +449,9 @@ class TaskService:
                 "context": context, "constraints": constraints, "entry": entry,
                 "tools": self.tools.describe(
                     initially_active_capabilities if lease_mode else capabilities)}
+        if capability_authority is not None:
+            from .capability_authority import validate_episode_authority
+            task["capability_authority"] = validate_episode_authority(capability_authority)
         if lease_mode:
             task["capability_mode"] = "leased"
         episode = self.store.create(
@@ -489,6 +493,25 @@ class TaskService:
             for lease in leases:
                 self.tools.resolve_lease(lease)
             return leases
+
+    def _dynamic_inventory(self, identity):
+        result = []
+        authority = self.store.get(identity)["task"].get("capability_authority")
+        for instance in self.store.tool_instances(identity, active_only=True):
+            definition = self.store.tool_definition(instance["definition_id"])
+            if (authority is None or instance["authority_digest"] != authority["digest"]
+                    or instance["definition_digest"] != definition["digest"]
+                    or instance["name"] != definition["name"]):
+                raise ContractError("Active tool instance has changed definition")
+            result.append({
+                "name": definition["name"], "description": definition["description"],
+                "input_schema": deepcopy(definition["input_schema"]),
+                "output_schema": deepcopy(definition["output_schema"]),
+                "effect_class": definition["effect_class"], "work_units_per_call": 0,
+                "definition_id": definition["id"], "definition_digest": definition["digest"],
+                "instance_revision": instance["revision"],
+            })
+        return result
 
     def list(self):
         return [self.get(state["id"]) for state in self.store.list() if not state["parent_episode_id"]]
@@ -1515,6 +1538,8 @@ class TaskService:
                 # deriving the inventory from current leases.
                 payload["tools"] = self.tools.describe(
                     [lease["name"] for lease in active_leases])
+            if state["task"].get("capability_authority") is not None:
+                payload["tools"] = payload["tools"] + self._dynamic_inventory(identity)
             payload.update(episode_id=identity, input_refs=state["input_refs"],
                            memory_snapshot=self.store.memory_snapshot(state["memory_snapshot_id"], identity),
                            skills=deepcopy(package["manifest"].get("skills", {})),
@@ -1705,7 +1730,7 @@ class TaskService:
                 return existing["result"]
             if existing["status"] == "failed":
                 raise RuntimeError(existing["error"])
-            if method not in {"delegate", "parallel", "develop_skill"}:
+            if method not in {"delegate", "parallel", "develop_skill", "develop_tool"}:
                 raise RecoveryRequired(f"Unfinished capability {path}; automatic repetition refused")
             node = deepcopy(self.store.get(identity)["nodes"].get(path) or {})
             if not node or node.get("method") != method:
@@ -1776,9 +1801,101 @@ class TaskService:
             # repair its own unavailable provider would hide the real failure.
             raise CapabilityAbort(exc) from exc
 
+    def _invoke_dynamic_tool(self, identity, name, arguments, path, stop_event):
+        from .tools import validate_tool_input
+        instance = self.store.tool_instance(identity, name)
+        if instance is None or instance["status"] != "active":
+            raise PermissionError(f"Task-authored tool is not active: {name}")
+        definition = self.store.tool_definition(instance["definition_id"])
+        state = self.store.get(identity)
+        authority = state["task"].get("capability_authority")
+        if (authority is None or instance["authority_digest"] != authority["digest"]
+                or instance["definition_digest"] != definition["digest"]
+                or definition["name"] != name):
+            raise PermissionError("Task-authored tool identity or authority changed")
+        from .capability_authority import require_definition_authorized
+        require_definition_authorized(
+            authority, definition["kind"], definition["effect_class"],
+            definition["declared_operations"], definition["credential_handles"])
+        validate_tool_input(arguments, definition["input_schema"],
+                            artifact_resolver=lambda ref: self.store.read(ref, identity),
+                            label=name + " input")
+        binding = {
+            "name": name, "definition_id": definition["id"],
+            "definition_digest": definition["digest"],
+            "instance_revision": instance["revision"],
+            "authority_digest": authority["digest"],
+        }
+        self.store.reserve_tool(identity, path,
+                                {"name": name, "arguments": deepcopy(arguments),
+                                 "dynamic_capability": binding}, reserved_work_units=0)
+        receipt = {
+            "call_id": identity + "/" + path, "episode_id": identity,
+            "name": name, "arguments": deepcopy(arguments),
+            "dynamic_capability": binding, "package_id": definition["package_id"],
+            "package_digest": definition["package_digest"],
+            "entry_digest": definition["entry_digest"],
+            "status": "started", "started_at": time.time(),
+        }
+        started = time.monotonic()
+        result, failure = None, None
+        try:
+            instruction_limit = 200_000
+            execution = run_package(
+                self.store.package(definition["package_id"]), "execute", arguments,
+                handle=None, stop_event=stop_event, timeout=120, max_rpc=0,
+                max_instructions=instruction_limit)
+            result = execution["value"]
+            validate(result, definition["output_schema"], label=name + " output",
+                     allow_artifact_refs=False)
+            receipt.update(status="completed", result=deepcopy(result),
+                           execution=execution["execution"],
+                           worker_instruction_limit=instruction_limit,
+                           worker_instructions=execution["execution"]["instructions"])
+        except BaseException as exc:
+            failure = exc
+            receipt.update(status="failed", error=f"{type(exc).__name__}: {str(exc)[:1000]}")
+        finally:
+            accounting = self.store.settle_tool(
+                identity, path, status="completed" if failure is None else "failed")
+            receipt["work_accounting"] = accounting
+            receipt.update(finished_at=time.time(), elapsed_seconds=time.monotonic() - started)
+            self.store.event(identity, "tool", receipt)
+        if failure is not None:
+            raise failure
+        return result
+
     def _invoke(self, identity, package, method, params, path, stop_event, notify):
         if method == "ask":
             return self._ask(identity, path, params, stop_event, notify)
+        if method == "capability_inventory":
+            if params:
+                raise ContractError("Capability inventory accepts no arguments")
+            state = self.store.get(identity)
+            if state["task"].get("capability_mode") == "leased":
+                leases = self.store.capability_leases(identity, active_only=True)
+                for lease in leases:
+                    self.tools.resolve_lease(lease)
+                installed = self.tools.describe([item["name"] for item in leases])
+            else:
+                installed = self.tools.describe(state["capabilities"])
+            return {"tools": installed + self._dynamic_inventory(identity)}
+        if method == "develop_tool":
+            if getattr(self._parallel_context, "active", False):
+                raise PermissionError("Tool development requires a serial Episode point")
+            if set(params) != {"proposal"}:
+                raise ContractError("Tool development requires one proposal")
+            state = self.store.get(identity)
+            if state["task"].get("capability_authority") is None:
+                raise PermissionError("Episode has no tool-development authority")
+            from .capability_definitions import build_tool_definition
+            definition, bundle = build_tool_definition(params["proposal"], identity)
+            self.store.stage_tool_definition(identity, definition, bundle)
+            instance = self.store.mount_tool_definition(identity, definition["id"])
+            return {"definition_id": definition["id"],
+                    "definition_digest": definition["digest"],
+                    "name": definition["name"], "instance_revision": instance["revision"],
+                    "authority_digest": instance["authority_digest"]}
         if method == "read_artifact":
             artifact = self.store.read(params["artifact_id"], identity)
             self.store.event(identity, "artifact_read", {"node_id": path, "artifact_id": artifact["id"]})
@@ -1789,6 +1906,9 @@ class TaskService:
         if method == "tool":
             name, arguments = params["name"], params.get("arguments") or {}
             state = self.store.get(identity)
+            dynamic = self.store.tool_instance(identity, name)
+            if dynamic is not None:
+                return self._invoke_dynamic_tool(identity, name, arguments, path, stop_event)
             if name not in state["capabilities"]:
                 raise PermissionError(f"Task has not granted capability: {name}")
             lease = None
@@ -1850,6 +1970,7 @@ class TaskService:
             if not isinstance(requests, list) or not 1 <= len(requests) <= 4:
                 raise ContractError("A parallel batch requires one to four requests")
             def call(index, request):
+                self._parallel_context.active = True
                 try:
                     result = self._dispatch(identity, package, request["method"], request.get("params", {}),
                                             f"{path}.{index}", stop_event, notify)
@@ -1858,6 +1979,8 @@ class TaskService:
                     return None, exc
                 except Exception as exc:
                     return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:1000]}"}, exc
+                finally:
+                    self._parallel_context.active = False
             # Always join every admitted branch before returning partial failures.
             with ThreadPoolExecutor(max_workers=len(requests)) as pool:
                 futures = [pool.submit(call, index, request) for index, request in enumerate(requests)]
@@ -2055,7 +2178,10 @@ class TaskService:
                     capabilities=task.get("capabilities", parent_capabilities), package=target,
                     context=_delegated_public_context(state["task"].get("context")),
                     constraints=state["task"].get("constraints"),
-                    parent_episode_id=identity)
+                    parent_episode_id=identity,
+                    capability_authority=task.get(
+                        "capability_authority",
+                        state["task"].get("capability_authority")))
                 child_id = child["id"]
 
                 def link_child(parent):

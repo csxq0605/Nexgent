@@ -99,6 +99,12 @@ class EpisodeStore:
                 CREATE TABLE IF NOT EXISTS task_delegated_capability_bounds(
                     episode TEXT NOT NULL, name TEXT NOT NULL, descriptor TEXT NOT NULL,
                     PRIMARY KEY(episode,name));
+                CREATE TABLE IF NOT EXISTS task_capability_definitions(
+                    id TEXT PRIMARY KEY, digest TEXT NOT NULL,
+                    origin_episode TEXT NOT NULL, data TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS task_capability_instances(
+                    episode TEXT NOT NULL, name TEXT NOT NULL, data TEXT NOT NULL,
+                    PRIMARY KEY(episode,name));
                 CREATE TABLE IF NOT EXISTS task_events(
                     episode TEXT, sequence INTEGER, kind TEXT, created REAL,
                     data TEXT, previous TEXT, digest TEXT,
@@ -145,6 +151,12 @@ class EpisodeStore:
                memory_registration=None, memory_version=None,
                _allow_candidate_memory=False, initial_capability_descriptors=()):
         task = deepcopy(task)
+        from .capability_authority import (require_delegated_authority,
+                                            validate_episode_authority)
+        authority = task.get("capability_authority")
+        if authority is not None:
+            authority = validate_episode_authority(authority)
+            task["capability_authority"] = authority
         initial_capability_descriptors = deepcopy(initial_capability_descriptors)
         if not isinstance(initial_capability_descriptors, (list, tuple)):
             raise ValueError("Initial capability descriptors must be a sequence")
@@ -195,6 +207,11 @@ class EpisodeStore:
             inherited_descriptors = {}
             if parent_episode_id:
                 parent = self._get(db, parent_episode_id)
+                parent_authority = parent["task"].get("capability_authority")
+                if authority is not None:
+                    if parent_authority is None:
+                        raise PermissionError("Delegation cannot add capability authority")
+                    require_delegated_authority(parent_authority, authority)
                 if not set(capabilities) <= set(parent["capabilities"]):
                     raise PermissionError("A delegated task cannot widen parent capabilities")
                 if parent["task"].get("capability_mode") == "leased":
@@ -520,6 +537,205 @@ class EpisodeStore:
         verify_package(package)
         return package
 
+    def stage_tool_definition(self, episode_id, definition, package):
+        """Bind an immutable task-authored bundle to its creator Episode."""
+        from .capability_authority import require_definition_authorized
+        from .capability_definitions import verify_tool_definition
+        definition = deepcopy(verify_tool_definition(definition, package))
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            episode = self._get(db, episode_id)
+            if episode["status"] in {"completed", "cancelled", "failed"}:
+                raise PermissionError("Terminal Episode cannot stage a tool")
+            authority = episode["task"].get("capability_authority")
+            if authority is None or definition["origin_episode_id"] != episode_id:
+                raise PermissionError("Tool development requires creator Episode authority")
+            require_definition_authorized(
+                authority, definition["kind"], definition["effect_class"],
+                definition["declared_operations"], definition["credential_handles"])
+            if definition["runtime"] != authority["runtime"]:
+                raise PermissionError("Tool runtime exceeds Episode authority")
+            allowed = episode["task"].get("constraints", {}).get("allowed_effects")
+            if allowed is not None and definition["effect_class"] not in allowed:
+                raise PermissionError("Tool effect exceeds Episode constraints")
+            existing = db.execute(
+                "SELECT data FROM task_capability_definitions WHERE id=?",
+                (definition["id"],)).fetchone()
+            if existing:
+                if json.loads(existing[0]) != definition:
+                    raise ValueError("Cannot overwrite an immutable CapabilityDefinition")
+                return definition
+            count = db.execute(
+                "SELECT COUNT(*) FROM task_capability_definitions WHERE origin_episode=?",
+                (episode_id,)).fetchone()[0]
+            if count >= authority["max_definitions"]:
+                raise BudgetExhausted("Episode tool-definition limit exhausted")
+            if definition["name"] in episode["capabilities"]:
+                raise PermissionError("Task-authored tool cannot shadow an installed grant")
+            self._put_package_row(db, package)
+            db.execute("INSERT OR IGNORE INTO task_skill_package_leases VALUES(?,?,?,?)",
+                       (package["id"], episode["root_episode_id"], episode_id, time.time()))
+            db.execute("INSERT INTO task_capability_definitions VALUES(?,?,?,?)",
+                       (definition["id"], definition["digest"], episode_id,
+                        _json(definition)))
+            self._event(db, episode_id, "capability_definition_staged", {
+                "definition_id": definition["id"], "definition_digest": definition["digest"],
+                "package_id": package["id"], "package_digest": package["digest"],
+                "authority_digest": authority["digest"], "name": definition["name"],
+            })
+        return definition
+
+    def tool_definition(self, definition_id):
+        from .capability_definitions import verify_tool_definition
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT digest,origin_episode,data FROM task_capability_definitions WHERE id=?",
+                (definition_id,)).fetchone()
+        if row is None:
+            raise KeyError(definition_id)
+        definition = json.loads(row[2])
+        if (definition.get("id") != definition_id
+                or definition.get("digest") != row[0]
+                or definition.get("origin_episode_id") != row[1]):
+            raise ValueError("Stored CapabilityDefinition table identity mismatch")
+        verify_tool_definition(definition, self.package(definition["package_id"]))
+        return definition
+
+    def tool_instance(self, episode_id, name):
+        with self.connect() as db:
+            self._get(db, episode_id)
+            row = db.execute(
+                "SELECT data FROM task_capability_instances WHERE episode=? AND name=?",
+                (episode_id, name)).fetchone()
+            return self._checked_tool_instance(db, episode_id, name, row[0]) if row else None
+
+    @staticmethod
+    def _checked_tool_instance(db, episode_id, name, encoded):
+        instance = json.loads(encoded)
+        fields = {"schema", "episode_id", "name", "definition_id",
+                  "definition_digest", "authority_digest", "status", "revision",
+                  "created_at", "updated_at", "record_digest"}
+        if (set(instance) != fields or instance["schema"] != "nexgent.capability-instance.v1"
+                or instance["episode_id"] != episode_id or instance["name"] != name
+                or instance["status"] not in {"active", "released"}
+                or type(instance["revision"]) is not int or instance["revision"] < 1
+                or instance["record_digest"] != _digest({
+                    key: value for key, value in instance.items() if key != "record_digest"})):
+            raise ValueError("Stored CapabilityInstance identity is invalid")
+        latest = None
+        previous, expected_sequence = "genesis", 1
+        for sequence, kind, created, data, stored_previous, stored_digest in db.execute(
+                "SELECT sequence,kind,created,data,previous,digest FROM task_events "
+                "WHERE episode=? ORDER BY sequence", (episode_id,)):
+            event = json.loads(data)
+            envelope = {"episode_id": episode_id, "sequence": sequence,
+                        "kind": kind, "created": created, "content": event,
+                        "previous": stored_previous}
+            if (sequence != expected_sequence or stored_previous != previous
+                    or _digest(envelope) != stored_digest):
+                raise ValueError("Episode event chain is invalid")
+            expected_sequence += 1
+            previous = stored_digest
+            if kind in {"capability_instance_mounted", "capability_instance_released"}:
+                if event.get("name") == name:
+                    latest = (kind, event)
+        if latest is None:
+            raise ValueError("CapabilityInstance has no lifecycle event")
+        kind, event = latest
+        if (event.get("revision") != instance["revision"]
+                or event.get("record_digest") != instance["record_digest"]
+                or (kind == "capability_instance_mounted")
+                != (instance["status"] == "active")):
+            raise ValueError("CapabilityInstance differs from its lifecycle event")
+        return instance
+
+    def tool_instances(self, episode_id, *, active_only=False):
+        with self.connect() as db:
+            self._get(db, episode_id)
+            rows = db.execute(
+                "SELECT name,data FROM task_capability_instances WHERE episode=? ORDER BY name",
+                (episode_id,)).fetchall()
+            instances = [self._checked_tool_instance(db, episode_id, row[0], row[1])
+                         for row in rows]
+        return [item for item in instances if item["status"] == "active"] if active_only else instances
+
+    def mount_tool_definition(self, episode_id, definition_id, *, expected_revision=None):
+        """Activate one previously staged definition at a serial Episode point."""
+        from .capability_authority import require_definition_authorized
+        definition = self.tool_definition(definition_id)
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            episode = self._get(db, episode_id)
+            if episode["status"] in {"completed", "cancelled", "failed"}:
+                raise PermissionError("Terminal Episode cannot mount a tool")
+            authority = episode["task"].get("capability_authority")
+            if authority is None or definition["origin_episode_id"] != episode_id:
+                raise PermissionError("Tool instance is outside its creator Episode")
+            require_definition_authorized(
+                authority, definition["kind"], definition["effect_class"],
+                definition["declared_operations"], definition["credential_handles"])
+            if definition["runtime"] != authority["runtime"]:
+                raise PermissionError("Tool runtime exceeds Episode authority")
+            if definition["name"] in episode["capabilities"]:
+                raise PermissionError("Task-authored tool cannot shadow an installed grant")
+            row = db.execute(
+                "SELECT data FROM task_capability_instances WHERE episode=? AND name=?",
+                (episode_id, definition["name"])).fetchone()
+            previous = (self._checked_tool_instance(db, episode_id, definition["name"], row[0])
+                        if row else None)
+            current_revision = previous["revision"] if previous else 0
+            if expected_revision is not None and expected_revision != current_revision:
+                raise StateConflict("Tool instance revision changed")
+            if previous and previous["status"] == "active":
+                if previous["definition_id"] == definition_id:
+                    return previous
+                raise StateConflict("An active tool name must be released before replacement")
+            now = time.time()
+            instance = {
+                "schema": "nexgent.capability-instance.v1", "episode_id": episode_id,
+                "name": definition["name"], "definition_id": definition_id,
+                "definition_digest": definition["digest"], "authority_digest": authority["digest"],
+                "status": "active", "revision": current_revision + 1,
+                "created_at": previous["created_at"] if previous else now,
+                "updated_at": now,
+            }
+            instance["record_digest"] = _digest(instance)
+            db.execute("INSERT OR REPLACE INTO task_capability_instances VALUES(?,?,?)",
+                       (episode_id, definition["name"], _json(instance)))
+            self._event(db, episode_id, "capability_instance_mounted", {
+                "name": definition["name"], "definition_id": definition_id,
+                "definition_digest": definition["digest"],
+                "authority_digest": authority["digest"], "revision": instance["revision"],
+                "record_digest": instance["record_digest"],
+            })
+        return instance
+
+    def release_tool_instance(self, episode_id, name, *, expected_revision):
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._get(db, episode_id)
+            row = db.execute(
+                "SELECT data FROM task_capability_instances WHERE episode=? AND name=?",
+                (episode_id, name)).fetchone()
+            if row is None:
+                raise KeyError(name)
+            instance = self._checked_tool_instance(db, episode_id, name, row[0])
+            if instance["revision"] != expected_revision:
+                raise StateConflict("Tool instance revision changed")
+            if instance["status"] != "active":
+                return instance
+            instance.update(status="released", revision=instance["revision"] + 1,
+                            updated_at=time.time())
+            instance["record_digest"] = _digest({
+                key: value for key, value in instance.items() if key != "record_digest"})
+            db.execute("UPDATE task_capability_instances SET data=? WHERE episode=? AND name=?",
+                       (_json(instance), episode_id, name))
+            self._event(db, episode_id, "capability_instance_released", {
+                "name": name, "definition_id": instance["definition_id"],
+                "revision": instance["revision"], "record_digest": instance["record_digest"],
+            })
+        return instance
+
     @staticmethod
     def _event(db, episode_id, kind, data):
         EpisodeStore._get(db, episode_id)
@@ -745,6 +961,34 @@ class EpisodeStore:
             if count >= root["budget"]["max_tool_calls" if kind == "tool" else "max_nodes"]:
                 raise BudgetExhausted(f"Root Episode {kind} budget exhausted")
             if kind == "tool":
+                dynamic = data.get("dynamic_capability")
+                if dynamic is not None:
+                    if (not isinstance(dynamic, dict)
+                            or set(dynamic) != {"name", "definition_id", "definition_digest",
+                                                "instance_revision", "authority_digest"}):
+                        raise ValueError("Dynamic tool reservation identity is invalid")
+                    authority = episode["task"].get("capability_authority")
+                    row = db.execute(
+                        "SELECT data FROM task_capability_instances WHERE episode=? AND name=?",
+                        (episode_id, dynamic["name"])).fetchone()
+                    instance = (self._checked_tool_instance(
+                        db, episode_id, dynamic["name"], row[0]) if row else None)
+                    if (authority is None or instance is None
+                            or instance["status"] != "active"
+                            or instance["definition_id"] != dynamic["definition_id"]
+                            or instance["definition_digest"] != dynamic["definition_digest"]
+                            or instance["revision"] != dynamic["instance_revision"]
+                            or instance["authority_digest"] != authority["digest"]
+                            or dynamic["authority_digest"] != authority["digest"]):
+                        raise PermissionError("Dynamic tool instance or authority changed")
+                    count_dynamic = 0
+                    for stored, in db.execute(
+                            "SELECT data FROM task_resources WHERE episode=? AND kind='tool'",
+                            (episode_id,)):
+                        if json.loads(stored).get("data", {}).get("dynamic_capability"):
+                            count_dynamic += 1
+                    if count_dynamic >= authority["max_invocations"]:
+                        raise BudgetExhausted("Episode dynamic-tool invocation limit exhausted")
                 accounting = data.get("work_accounting")
                 if (not isinstance(accounting, dict)
                         or accounting.get("schema") != "nexgent.tool-work.v1"

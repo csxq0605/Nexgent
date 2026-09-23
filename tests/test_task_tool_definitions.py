@@ -88,7 +88,7 @@ def test_forbidden_or_non_pure_source_is_rejected(source):
     ("input_schema", ["not", "a", "schema"]),
 ])
 def test_malformed_contract_schemas_are_rejected(field, schema):
-    with pytest.raises(DefinitionError, match="schema is invalid"):
+    with pytest.raises(DefinitionError, match="schema"):
         build_tool_definition(proposal(**{field: schema}), "episode-origin")
 
 
@@ -103,7 +103,9 @@ def test_content_identity_is_stable_and_tracks_origin_and_source():
     other_origin, same_bundle = build_tool_definition(
         proposal(), "episode-fedcba9876543210")
     assert other_origin["id"] != first_record["id"]
-    assert same_bundle["id"] == first_package["id"]
+    # Task-scoped package storage has one immutable row per package id; origin
+    # must be part of bundle identity so two creators cannot alias that row.
+    assert same_bundle["id"] != first_package["id"]
 
     changed_record, changed_package = build_tool_definition(
         proposal(source=(

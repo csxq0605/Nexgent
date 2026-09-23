@@ -97,6 +97,12 @@ class Context:
         return self.request("develop_skill", {
             "proposal": proposal, "constraints": constraints})
 
+    def develop_tool(self, proposal):
+        return self.request("develop_tool", {"proposal": proposal})
+
+    def capability_inventory(self):
+        return self.request("capability_inventory", {})
+
     def read_artifact(self, artifact_id):
         artifact = self.request("read_artifact", {"artifact_id": artifact_id})
         if artifact_id not in self.read_artifact_ids:

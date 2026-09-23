@@ -25,6 +25,7 @@ RUNTIME = "controlled-python-v1"
 
 _NAME = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,119}")
 _ENTRY_PATH = "tool.py"
+_ORIGIN_PATH = "origin.json"
 _ENTRY_FUNCTION = "execute"
 _ENTRY = f"{_ENTRY_PATH}:{_ENTRY_FUNCTION}"
 _REQUIRED_PROPOSAL_FIELDS = {
@@ -51,6 +52,37 @@ def _finite_json(value, label):
 
 
 def _validate_schema(schema, label):
+    # Definitions are model-authored, and their schemas are evaluated in the
+    # host during admission. Keep this first runtime slice to bounded,
+    # non-recursive validation: regexes, references and branch combinators can
+    # otherwise consume unbounded host CPU before the worker watchdog starts.
+    allowed = {"type", "properties", "required", "additionalProperties",
+               "items", "enum", "const", "minimum", "maximum",
+               "exclusiveMinimum", "exclusiveMaximum", "minLength",
+               "maxLength", "minItems", "maxItems", "minProperties",
+               "maxProperties", "description"}
+    pending = [(schema, 0)]
+    nodes = 0
+    while pending:
+        current, depth = pending.pop()
+        nodes += 1
+        if nodes > 128 or depth > 12:
+            raise DefinitionError(f"{label} exceeds the task-tool schema bound")
+        if type(current) is bool:
+            continue
+        if not isinstance(current, dict) or set(current) - allowed:
+            raise DefinitionError(f"{label} uses an unsupported task-tool schema keyword")
+        properties = current.get("properties", {})
+        if not isinstance(properties, dict) or len(properties) > 64:
+            raise DefinitionError(f"{label} properties are not bounded")
+        pending.extend((child, depth + 1) for child in properties.values())
+        for key in ("additionalProperties", "items"):
+            if key in current:
+                pending.append((current[key], depth + 1))
+        if ("enum" in current
+                and (not isinstance(current["enum"], list)
+                     or len(current["enum"]) > 64)):
+            raise DefinitionError(f"{label} enum is not bounded")
     try:
         check_contract_schema(schema)
     except (ContractError, SchemaError, RecursionError) as exc:
@@ -123,7 +155,9 @@ def build_tool_definition(proposal, origin_episode_id):
     origin_episode_id = _origin(origin_episode_id)
     try:
         package = make_package(
-            {_ENTRY_PATH: proposal["source"]},
+            {_ENTRY_PATH: proposal["source"],
+             _ORIGIN_PATH: json.dumps({"episode_id": origin_episode_id},
+                                      sort_keys=True, separators=(",", ":"))},
             {"entries": {_ENTRY_FUNCTION: _ENTRY}},
             provenance={
                 "task_time_only": True,
@@ -203,6 +237,10 @@ def verify_tool_definition(record, package):
     }
     if package["provenance"] != expected_provenance:
         raise DefinitionError("Tool package provenance does not match its Definition")
+    if package["files"].get(_ORIGIN_PATH) != json.dumps(
+            {"episode_id": record["origin_episode_id"]},
+            sort_keys=True, separators=(",", ":")):
+        raise DefinitionError("Tool package content is not scoped to its origin")
     if (record["package_id"] != package["id"]
             or record["package_digest"] != package["digest"]
             or record["bundle_digest"] != package["digest"]
