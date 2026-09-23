@@ -384,3 +384,32 @@ def test_instance_lifecycle_event_digest_is_a_checked_anchor(tmp_path):
                    (json.dumps(event), episode["id"], row[0]))
     with pytest.raises(ValueError, match="event chain"):
         service.store.tool_instance(episode["id"], definition["name"])
+
+
+def test_task_releases_and_redevelops_same_logical_tool(tmp_path):
+    first = _proposal("episode.revised", multiplier=2)
+    second = _proposal("episode.revised", multiplier=3)
+    source = (
+        "def execute(payload, context):\n"
+        f"    first = context.develop_tool({first!r})\n"
+        "    before = context.tool(first['name'], {'value': 5})\n"
+        "    released = context.release_tool(first['name'], first['instance_revision'])\n"
+        f"    second = context.develop_tool({second!r})\n"
+        "    after = context.tool(second['name'], {'value': 5})\n"
+        "    artifact = context.publish({'before': before, 'after': after,\n"
+        "        'released': released, 'second': second}, name='result')\n"
+        "    return {'deliverables': {'result': artifact['id']}}\n"
+    )
+    package = make_package({"agent/main.py": source},
+                           {"entries": {"execute": "agent/main.py:execute"}})
+    service = TaskService(tmp_path)
+    episode = service.create("Revise a task-local tool", package=package,
+                             capabilities=[], capability_authority=_authority())
+    completed = service.run(episode["id"])
+    assert completed["status"] == "completed", completed.get("last_error")
+    content = service.store.read(completed["output_refs"]["result"], episode["id"])["content"]
+    assert content["before"] == {"value": 10}
+    assert content["after"] == {"value": 15}
+    assert content["released"]["status"] == "released"
+    assert content["second"]["instance_revision"] == 3
+    assert service.store.tool_instance(episode["id"], "episode.revised")["status"] == "active"

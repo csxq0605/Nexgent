@@ -18,7 +18,7 @@ from ..kernel.programs import canonical, digest, validate_source, ProgramError
 SCHEMA = "nexgent.agent-package.v1"
 MANIFEST_VERSION = 2
 CAPABILITIES = frozenset({"ask", "tool", "parallel", "skill", "delegate", "develop_skill",
-                          "develop_tool", "capability_inventory", "read_artifact",
+                          "develop_tool", "release_tool", "capability_inventory", "read_artifact",
                           "publish", "memory_search", "remember", "plan", "feedback"})
 LOCAL_METHODS = frozenset({"call", "resource"})
 IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,99}")

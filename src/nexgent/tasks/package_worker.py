@@ -100,6 +100,10 @@ class Context:
     def develop_tool(self, proposal):
         return self.request("develop_tool", {"proposal": proposal})
 
+    def release_tool(self, name, expected_revision):
+        return self.request("release_tool", {
+            "name": name, "expected_revision": expected_revision})
+
     def capability_inventory(self):
         return self.request("capability_inventory", {})
 

@@ -1730,7 +1730,8 @@ class TaskService:
                 return existing["result"]
             if existing["status"] == "failed":
                 raise RuntimeError(existing["error"])
-            if method not in {"delegate", "parallel", "develop_skill", "develop_tool"}:
+            if method not in {"delegate", "parallel", "develop_skill", "develop_tool",
+                              "release_tool"}:
                 raise RecoveryRequired(f"Unfinished capability {path}; automatic repetition refused")
             node = deepcopy(self.store.get(identity)["nodes"].get(path) or {})
             if not node or node.get("method") != method:
@@ -1896,6 +1897,18 @@ class TaskService:
                     "definition_digest": definition["digest"],
                     "name": definition["name"], "instance_revision": instance["revision"],
                     "authority_digest": instance["authority_digest"]}
+        if method == "release_tool":
+            if getattr(self._parallel_context, "active", False):
+                raise PermissionError("Tool release requires a serial Episode point")
+            if (set(params) != {"name", "expected_revision"}
+                    or not isinstance(params["name"], str)
+                    or type(params["expected_revision"]) is not int):
+                raise ContractError("Tool release requires name and exact revision")
+            instance = self.store.release_tool_instance(
+                identity, params["name"], expected_revision=params["expected_revision"])
+            return {"name": params["name"], "instance_revision": instance["revision"],
+                    "status": instance["status"],
+                    "definition_id": instance["definition_id"]}
         if method == "read_artifact":
             artifact = self.store.read(params["artifact_id"], identity)
             self.store.event(identity, "artifact_read", {"node_id": path, "artifact_id": artifact["id"]})

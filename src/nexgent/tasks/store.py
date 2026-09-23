@@ -720,6 +720,9 @@ class EpisodeStore:
             if row is None:
                 raise KeyError(name)
             instance = self._checked_tool_instance(db, episode_id, name, row[0])
+            if (instance["status"] == "released"
+                    and instance["revision"] == expected_revision + 1):
+                return instance
             if instance["revision"] != expected_revision:
                 raise StateConflict("Tool instance revision changed")
             if instance["status"] != "active":
