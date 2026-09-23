@@ -1,10 +1,14 @@
 # Four-arm confirmatory RSI protocol (design, not yet executed)
 
-Status: protocol design for the next implementation stage. The existing
-[`RSIStudyService`](../../src/nexgent/tasks/studies.py) is a two-arm,
-empty-memory final-holdout executor. The [four-arm qualification harness](../../experiments/orchestration_controls/harness.py)
-checks execution contracts on non-holdout data, but cannot establish a causal
-effect. Neither is this confirmatory protocol yet.
+Status: partial implementation. The new
+[`FourArmStudyService`](../../src/nexgent/tasks/four_arm_studies.py) reserves a
+whole F/S/M/E quartet, freezes accepted memory releases and execution identity,
+and runs cells through TaskService with fail-closed crash recovery. The existing
+[`RSIStudyService`](../../src/nexgent/tasks/studies.py) remains a separate
+two-arm, empty-memory final-holdout executor. The [four-arm qualification
+harness](../../experiments/orchestration_controls/harness.py) checks execution
+contracts on non-holdout data; no real four-arm final-holdout run or causal
+effect estimate exists yet.
 
 ## Question and frozen treatments
 
@@ -76,5 +80,9 @@ completed study if the protocol ran as registered.
 - Run the public qualification harness first with real F/S/M/E calls and an
   accepted M release. Its descriptive output cannot satisfy the final gate.
 
-Current status: none of these confirmatory execution gates is complete; no
-final-holdout quartet has been registered or consumed.
+Current status: the trusted quartet plan/reservation/execution/recovery core and
+deterministic tests exist. Statistical assessment, Holm adjustment, outer
+search-cost ledger, actual memory-retrieval activation check, CLI/UI projection,
+and real provider final-holdout execution remain open. No final-holdout quartet
+has been registered or consumed. A fifth arm is still required for an O/S-by-M
+interaction claim.
