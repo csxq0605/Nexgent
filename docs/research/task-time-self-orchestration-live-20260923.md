@@ -31,5 +31,7 @@
 | 2 | 2 | 模型创建 v2 图并运行到 `develop_skill`，但提案使用 `schema_version`、`python_source`，把 schema 放到顶层，不符合精确合同。Episode `episode-3b6c64cbbc824316`。 |
 | 3 | 2 | 规划器创建 v2 图，生成技能的模型调用在 Provider 响应读取阶段发生连接错误；未执行技能。Episode `episode-064a7042039d4be3`。 |
 | 4 | 2 | 规划器创建 v2 图，生成技能的模型调用达到 180 秒墙钟上限，远端结果未知；未执行技能。Episode `episode-2300b89dfa084310`。 |
+| 5 | 1 | 规划器创建 v2 图，但给 `ask` 型 coder 节点绑定了网关不接受的顶层 `task` 参数；图编译阶段未识别参数合同，执行时报 `ModelGateway.ask() got an unexpected keyword argument 'task'`。Episode `episode-7129980b48294011`，未执行技能。 |
+| 6 | 2 | 加上网关参数编译检查后，规划器创建 v2 图，coder 节点完成；它仍将提案字段写成 `schema_version` 而非 `schema`，`develop_skill` 拒绝 `Task skill proposal has an invalid envelope`。Episode `episode-e12cf4e8017a4389`，未生成子包。 |
 
-前两次失败使规划提示补上精确提案 envelope、RPC 名称与工件读取方式，但后两次因 Provider 故障没有检验这次修订。四次都证明模型可选择技能创建图；**没有一次证明真实模型创建的技能成功执行**。确定性测试的子包加载与 `answer:42` 只证明框架路径可运行。下一步应让失败合同经可恢复的技能提案修复回合返回给 coder，并在网络稳定时重新跑真实任务；还要做独立验证和新任务复用。
+前两次失败使规划提示补上精确提案 envelope、RPC 名称与工件读取方式，但后两次因 Provider 故障没有检验这次修订。第五次暴露了宿主图编译器漏检 `ask` 参数的缺陷；第六次虽通过图编译，却再次暴露技能提案字段错误。六次都证明模型可选择技能创建图；**没有一次证明真实模型创建的技能成功执行**。确定性测试的子包加载与 `answer:42` 只证明框架路径可运行。现在图编译阶段会拒绝错误网关参数并交给已有图修复回合；技能提案本身仍需要可恢复的模型修复。真实任务的独立验证与新任务复用仍未发生。

@@ -2,7 +2,7 @@
 
 **通用 RSI 智能体框架：自主组织任务执行，从反馈中改进技能、协作和工作方式，并能运行 benchmark 检验效果。**
 
-目标形态是一个无状态、任务类型无关的 Kernel 与通用 Compiler/Runtime，由多智能体根据任务自行组成并改进任务专一的角色、技能和协作程序。本分支已接通模型提出图操作、编译 pending 子图并在同一任务执行与恢复的首个纵切；新技能提案可编译为不可变子包，由委派 Episode 直接执行，或由保留通用规划器的子 Episode 自行选择和运行。任务来源的技能还能经独立改进器形成候选，等待新任务验证。真实 MiMo 的两次普通任务完成了模型产图、执行和交付，但尚未证明稳定的任务适配、真实模型技能发明或跨任务有效复用。[架构决策](docs/design/stateless-kernel-and-self-designed-teams.md)、[任务时图合同](docs/design/task-time-self-orchestration.md)、[任务中创建能力](docs/design/task-time-skill-invention.md)和[真实探针记录](docs/research/task-time-self-orchestration-live-20260923.md)区分这些证据。
+目标形态是一个无状态、任务类型无关的 Kernel 与通用 Compiler/Runtime，由多智能体根据任务自行组成并改进任务专一的角色、技能和协作程序。本分支已接通模型提出图操作、编译 pending 子图并在同一任务执行与恢复的首个纵切；任务图可创建带冻结身份的新模型角色，并用有类型的消息边交流。新技能提案可编译为不可变子包，由委派 Episode 直接执行，或由保留通用规划器的子 Episode 自行选择和运行。任务来源的技能还可经过反馈、独立候选验证与 guard 后通过 channel 在后续任务复用；目前该完整闭环只有确定性测试证据。真实 MiMo 的两次普通任务完成了模型产图、执行和交付，但尚未证明稳定的任务适配、真实模型技能发明或跨任务有效复用。[架构决策](docs/design/stateless-kernel-and-self-designed-teams.md)、[任务时图合同](docs/design/task-time-self-orchestration.md)、[任务中创建能力](docs/design/task-time-skill-invention.md)和[真实探针记录](docs/research/task-time-self-orchestration-live-20260923.md)区分这些证据。
 
 Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具、任务、数据和评分不能进入核心。OpenFOAM 不成为框架的默认任务定义；同一核心必须能执行非 CFD 任务与 benchmark。
 

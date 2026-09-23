@@ -12,6 +12,10 @@ import re
 import threading
 
 from ..kernel.programs import canonical, digest
+from .messages import (
+    AgentMessageError, make_agent_message, message_schema_ref,
+    validate_message_contract,
+)
 from .orchestration import (
     ArtifactBinding, ControlBinding, FailureAction, FailureRoute, JoinMode,
     JoinPolicy, LocalLimits, NodeStatus, PlanExecution, PlanNode, PlanRevision,
@@ -129,8 +133,15 @@ def _node_parameters(node_id, nodes, artifacts, payload, receipts):
         source = receipts[edge["producer_node"]]
         if source["status"] == "skipped":
             raise WorkflowError("Artifact producer was skipped")
-        _set(params, edge["input_port"],
-             _get(source["value"], edge["output_port"]))
+        content = _get(source["value"], edge["output_port"])
+        if "message" in edge:
+            content = make_agent_message(
+                sender_node_id=edge["producer_node"],
+                recipient_node_id=node_id,
+                contract=edge["message"],
+                payload=content,
+            )
+        _set(params, edge["input_port"], content)
     if "input_schema" in node:
         from .tools import validate
         validate(params, node["input_schema"], label=f"node {node_id} input")
@@ -190,6 +201,16 @@ def _validate(workflow, depth=0):
             raise WorkflowError("Artifact edge needs valid producers, consumers and port paths")
         if not edge["input_port"] or any(not part for part in edge["input_port"].split(".")):
             raise WorkflowError("Artifact input ports must be nonempty dotted paths")
+        if "message" in edge:
+            try:
+                expected_schema = message_schema_ref(
+                    validate_message_contract(edge["message"]))
+            except AgentMessageError as exc:
+                raise WorkflowError(str(exc)) from None
+            if ("schema_ref" in edge
+                    and edge["schema_ref"] != expected_schema):
+                raise WorkflowError(
+                    "Message edge schema_ref must match its message contract")
         incoming_artifact[edge["consumer_node"]].append(edge)
         dependencies[edge["consumer_node"]].add(edge["producer_node"])
     outputs = workflow.get("outputs", {})
@@ -438,7 +459,9 @@ def plan_from_workflow(workflow, plan_id, *, revision=1):
         artifact_bindings = []
         for consumer, edges in artifacts.items():
             for edge in edges:
-                schema_ref = edge.get("schema_ref", "schema://json")
+                schema_ref = (message_schema_ref(edge["message"])
+                              if "message" in edge
+                              else edge.get("schema_ref", "schema://json"))
                 producer = edge["producer_node"]
                 output = edge["output_port"]
                 input_ = edge["input_port"]

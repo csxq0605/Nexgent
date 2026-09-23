@@ -529,15 +529,24 @@ class TaskService:
         if registered is not None:
             workflow.setdefault("input_schema", deepcopy(registered.get("input_schema", {})))
             workflow.setdefault("output_schema", deepcopy(registered.get("output_schema", {})))
+        from .dynamic_roles import materialize_task_roles
+        workflow = materialize_task_roles(workflow)
         from .workflows import _validate
         _validate(workflow)
         roles = manifest["roles"]
         components = manifest["components"]
+        task_roles = workflow.get("task_roles", {})
         def authorize_nodes(definition):
+            ask_fields = {"role", "prompt", "payload", "max_tokens"}
             role_artifact_targets = {
                 edge.get("consumer_node") for edge in definition.get("artifact_edges", [])
                 if isinstance(edge, dict) and edge.get("input_port") == "role"
             }
+            ask_artifact_fields = {}
+            for edge in definition.get("artifact_edges", []):
+                if isinstance(edge, dict) and isinstance(edge.get("input_port"), str):
+                    ask_artifact_fields.setdefault(edge.get("consumer_node"), set()).add(
+                        edge["input_port"].split(".", 1)[0])
             for node in definition.get("nodes", []):
                 if not isinstance(node, dict):
                     raise ContractError("Workflow nodes must be objects")
@@ -569,6 +578,16 @@ class TaskService:
                     if role_ref is None or component_ref is None:
                         raise ContractError(
                             "Workflow ask nodes require explicit role_ref and component_ref")
+                    provided_ask_fields = (
+                        set(node.get("params", {}))
+                        | set(node.get("bindings", {}))
+                        | ask_artifact_fields.get(node.get("id"), set())
+                    )
+                    unsupported = provided_ask_fields - ask_fields
+                    if unsupported:
+                        raise ContractError(
+                            "Workflow ask node has unsupported gateway arguments: "
+                            + ", ".join(sorted(unsupported)))
                     if ("role" in node.get("bindings", {})
                             or node.get("id") in role_artifact_targets):
                         raise ContractError(
@@ -577,9 +596,14 @@ class TaskService:
                         raise ContractError(
                             "Workflow ask params.role conflicts with its frozen role_ref")
                     params["role"] = role_ref
-                    prompt_ref = roles[role_ref].get("prompt_ref")
-                    if prompt_ref is not None:
+                    prompt_ref = role.get("prompt_ref")
+                    if task_role is not None:
+                        params.setdefault("prompt", task_role["prompt"])
+                    elif prompt_ref is not None:
                         params.setdefault("prompt", package["files"][prompt_ref])
+                    if "payload" not in provided_ask_fields:
+                        raise ContractError(
+                            "Workflow ask node must provide the model payload argument")
                 if method == "tool":
                     tool_name = params.get("name") if isinstance(params, dict) else None
                     if not isinstance(tool_name, str) or tool_name not in capability_lease:

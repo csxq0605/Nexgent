@@ -154,7 +154,7 @@ def _candidate_workflow(base_workflow, proposal):
         return _snapshot(candidate, "Proposed revised workflow")
     graph_ops = {
         key: proposal[key]
-        for key in ("operations", "outputs", "revision_rules")
+        for key in ("operations", "outputs", "revision_rules", "task_roles")
         if key in proposal
     }
     return apply_graph_ops(base_workflow, graph_ops)

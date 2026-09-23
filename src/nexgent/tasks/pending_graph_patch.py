@@ -153,11 +153,11 @@ def apply_graph_ops(base_workflow, proposal) -> dict:
         raise ContractError("Base workflow must be an object")
     if not isinstance(changes, dict):
         raise ContractError("Graph proposal must be an object")
-    allowed_fields = {"operations", "outputs", "revision_rules"}
+    allowed_fields = {"operations", "outputs", "revision_rules", "task_roles"}
     if set(changes) - allowed_fields or "operations" not in changes:
         raise ContractError(
             "Graph proposal must contain operations and only optional outputs "
-            "or revision_rules"
+            "or revision_rules/task_roles"
         )
     operations = changes["operations"]
     if not isinstance(operations, list) or len(operations) > 4096:
@@ -246,6 +246,18 @@ def apply_graph_ops(base_workflow, proposal) -> dict:
         revised["outputs"] = deepcopy(changes["outputs"])
     if "revision_rules" in changes:
         revised["revision_rules"] = deepcopy(changes["revision_rules"])
+    if "task_roles" in changes:
+        additions = changes["task_roles"]
+        if not isinstance(additions, dict):
+            raise ContractError("Graph proposal task_roles must be an object")
+        existing = revised.get("task_roles", {})
+        if not isinstance(existing, dict):
+            raise ContractError("Base workflow task_roles must be an object")
+        collisions = set(existing).intersection(additions)
+        if collisions:
+            raise ContractError(
+                "Graph proposal cannot redefine existing task role identities")
+        revised["task_roles"] = {**deepcopy(existing), **deepcopy(additions)}
     if revised == base:
         raise ContractError("Graph proposal must change the workflow")
 

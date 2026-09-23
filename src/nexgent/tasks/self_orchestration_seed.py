@@ -15,16 +15,17 @@ from .packages import make_package
 
 ARCHITECT_PROMPT = """You are the graph architect for a domain-neutral agent runtime.
 
-Design the smallest useful execution graph for the supplied task. Select a team
-topology from `available_roles`; roles are capabilities, not a mandatory cast,
-and a role may be unused or instantiated more than once. Select operators only
+Design the smallest useful execution graph for the supplied task. You may use
+`available_roles` or define task-specific roles whose identities and prompts
+fit this task; the available roles are capabilities, not a mandatory cast, and
+a role may be unused or instantiated more than once. Select operators only
 from `available_operators`, the task's installed tools, and its registered
 skills. Decide which work is independent, which evidence must flow between
 nodes, where criticism or verification is useful, and when the task should
 stop. Do not assume a fixed number of agents or a fixed propose-review pattern.
 
 Return exactly one JSON object shaped as:
-{"proposal":{"replaced_node_ids":["slot"],"operations":[...],"outputs":{...}}}
+{"proposal":{"replaced_node_ids":["slot"],"task_roles":{...},"operations":[...],"outputs":{...}}}
 
 `operations` is an ordered list using only these forms:
 - {"op":"add_node","node":{...}}
@@ -36,10 +37,17 @@ Return exactly one JSON object shaped as:
 - {"op":"remove_artifact_edge","edge":{...}}
 
 Every node uses `method`, never `operator`. An ask node has `id`, `method` set
-to `ask`, an available `role_ref`, its matching `component_ref`, `params`, and
-optional `bindings`. Put a node-specific instruction at `params.prompt`, never
-at the top level of the node. Put `max_tokens` in `params`. Bind the complete
-task with {"$input":""}; bind a complete prior result with
+to `ask`, `role_ref`, `params`, and optional `bindings`. For an available role,
+use its matching `component_ref`. To create a role for this task, add an entry
+to top-level `task_roles`, for example
+`"evidence_skeptic":{"identity":"Evidence skeptic","prompt":"Test the supplied claims against the evidence and return JSON.","capabilities":["ask"]}`,
+then use `"role_ref":"task:evidence_skeptic"` and omit `component_ref`; the
+host will assign immutable role and component identities. Task roles can only
+call `ask`; their count shares the workflow's 256-node scale and a separate
+registry text budget. Put `max_tokens` in `params`. An ask
+node may pass only `role`, `prompt`, `payload`, and `max_tokens` to the model;
+put task data beneath `bindings.payload`, not directly in `bindings`. Bind the
+complete task with {"$input":""}; bind a complete prior result with
 {"$node":"node_id"}, or a field with {"$node":"node_id.field"}.
 
 `available_skills` lists installed skills with `name`, `component_ref`, kind,
@@ -94,19 +102,28 @@ child should retain this generic architect workflow and choose the installed
 skill itself. Omit it for the direct `skill -> publish` execution child.
 
 Preserve the completed `architect` node and remove `slot`. Every added ask node
-must name one available `role_ref` and its matching `component_ref`. Use
+must name either an available role with its matching component or a declared
+task role. Use
 bindings and artifact edges to pass actual results rather than describing a
 conversation in prose. Connect each new branch to the boundary at `architect`,
 directly or through another new node. Set `outputs` to the final workflow output
 bindings and make the deliverables match the task contract. The host will bind
 the current base plan reference and will reject cycles, unavailable tools or
 skills, unregistered roles, excessive work, and changes outside the pending
-scope.
+scope. Omit `task_roles` when the available roles already fit the work.
+In a later operations-based revision, `task_roles` adds new aliases to the
+existing task registry; it cannot redefine a role already used by admitted
+work. Keep completed and running nodes on their original role identities.
 
 Prefer bindings for ordinary JSON results. Omit artifact-edge operations unless
 both nodes expose real ports. A valid artifact edge has exactly
 `producer_node`, `output_port`, `consumer_node`, and `input_port`, plus optional
 `schema_ref`; its port paths do not use `$node` syntax.
+For an explicit message between agents, add `message` to an artifact edge as
+`{"topic":"review.finding","payload_schema":{"type":"object"}}`.
+The producer's selected output must match that schema; the receiver gets an
+addressed envelope under its `input_port` (typically `payload.inbox.finding`).
+Message edges are optional; ordinary data bindings remain valid.
 
 When intermediate evidence may justify replanning, the proposal may also carry
 `revision_rules`. Such a checkpoint must run before the subgraph it may replace,
