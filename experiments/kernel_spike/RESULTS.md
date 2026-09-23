@@ -139,3 +139,7 @@ Windows 上最终脚本由子智能体与根代理分别定向运行通过。最
 | [v4](evidence-python-main-graph-service-live-v4-20260924.json) `43CF7BC0E8B8F4BAA50E69C8A1CAA7478317F3468040A550BD71BCADF4914E87` | `failed`；模型调用 3、节点 6，服务 Definition 已生成但未激活；独立质量检查失败 | 架构智能体把 `$node...`／`$input...` 放进普通字符串参数；运行时才发现 `expected_revision` 非整数。现于图编译期拒绝并向修复循环提供诊断 |
 
 `model_context.v1` 的当前安全边界只允许添加模型 payload 的顶层字段，不能删改已有证据；这是首版窄接口，不是通用 provider。上述修订通过 22 项服务／图／Main 定向测试；最后一次实跑发生在编译期类型检查加入之前，故**没有**测试宣称该修复能让 MiMo 的图完成任务。四次样本不能估计成功率。它们说明图编译、数据传递、服务变换和独立评价必须同时正确，仍未证明模型能根据反馈更新编排并跨任务采用。
+
+### E3-B 跨任务便携能力真实试验 v1：程序解析失败
+
+按 [`PORTABLE_RSI_LIVE_CONTRACT.md`](PORTABLE_RSI_LIVE_CONTRACT.md) 固定一次 MiMo `mimo-v2.6-flash` 尝试，[脱敏收据](evidence-portable-rsi-live-20260924.json)已保留。创建任务的唯一模型调用返回完整的通用整数乘法工具提案：`multiply_two_integers`，源码从 `payload['a']`、`payload['b']` 相乘；报告 140 prompt / 140 completion token，自动重试 0。试验程序却只读取 `decision['proposal']`，而模型返回的五个提案字段位于顶层，因此 Episode 以 `KeyError: 'proposal'` 失败。没有生成 Definition、没有调用工具、没有进入反馈／配对／晋升／复用。此轮不计作 RSI 成功或模型能力失败；它是模型输出合同与试验程序不匹配的负证据。后续版本若兼容顶层与包装提案，必须作为新试验单独记录。
