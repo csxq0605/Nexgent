@@ -5,6 +5,7 @@ import pytest
 from nexgent.kernel.programs import digest
 from nexgent.tasks.capability_authority import (
     AUTHORITY_SCHEMA,
+    AUTHORITY_SCHEMA_V2,
     make_authority,
     make_episode_authority,
     require_definition_authorized,
@@ -95,6 +96,48 @@ def test_v1_fails_closed_outside_controlled_local_tool_slice():
             ["tool"], ["local_compute"], runtime="host-python-v1")
 
 
+def test_v2_explicitly_authorizes_tools_and_model_context_services():
+    record = make_authority(
+        ["service_provider", "tool"],
+        ["model_context", "local_compute"],
+        version=2,
+    )
+
+    assert record["schema"] == AUTHORITY_SCHEMA_V2
+    assert record["version"] == 2
+    assert validate_authority(record) == record
+    require_definition_authorized(
+        record, "service_provider", "model_context", [], [])
+    require_definition_authorized(record, "tool", "local_compute", [], [])
+
+    # Separate set membership cannot authorize a cross-product pair.
+    with pytest.raises(ContractError, match="pair"):
+        require_definition_authorized(
+            record, "service_provider", "local_compute", [], [])
+
+
+def test_v2_rejects_incoherent_or_unimplemented_service_authority():
+    with pytest.raises(ContractError, match="must grant"):
+        make_authority(["service_provider"], ["local_compute"], version=2)
+    with pytest.raises(ContractError, match="effect"):
+        make_authority(
+            ["service_provider"], ["external_context"], version=2)
+    with pytest.raises(ContractError, match="credential"):
+        make_authority(
+            ["service_provider"], ["model_context"],
+            credential_handles=["secret.one"], version=2)
+
+
+def test_authority_schema_and_version_must_match_exactly():
+    record = make_authority(
+        ["service_provider"], ["model_context"], version=2)
+    record["schema"] = AUTHORITY_SCHEMA
+    payload = {key: value for key, value in record.items() if key != "digest"}
+    record["digest"] = digest(payload)
+    with pytest.raises(ContractError, match="schema or version"):
+        validate_authority(record)
+
+
 def test_delegation_allows_only_subsets_and_nonincreasing_limits():
     parent = authority()
     child = authority(
@@ -117,6 +160,22 @@ def test_delegation_allows_only_subsets_and_nonincreasing_limits():
         delegated["digest"] = digest(payload)
         with pytest.raises(ContractError, match="widens"):
             require_delegated_authority(parent, delegated)
+
+
+def test_v2_parent_may_delegate_v1_but_v1_parent_cannot_delegate_v2():
+    parent_v2 = make_authority(
+        ["service_provider", "tool"],
+        ["model_context", "local_compute"],
+        max_definitions=8,
+        max_invocations=40,
+        version=2,
+    )
+    child_v1 = authority(
+        allowed_operations=[], max_definitions=2, max_invocations=10)
+    assert require_delegated_authority(parent_v2, child_v1) == child_v1
+
+    with pytest.raises(ContractError, match="contract version"):
+        require_delegated_authority(child_v1, parent_v2)
 
 
 def test_malformed_authority_values_are_rejected():
