@@ -50,4 +50,20 @@ node experiments/kernel_spike/dsh_driver.ts ..\NExgent-upstream-deepseek-46a7f68
 
 初版 runner 只核对源码 `.git/HEAD`，未核对构建产物。独立审查指出这不足以把运行结果严格归给固定提交；修订 runner 增加 tracked source clean 检查，并在摘要中记录实际执行的 `apps/cli/lib/bin.js`、pnpm lockfile、overlay patch 和复制收据的 SHA-256。初次加入 Git clean 检查时，受限用户触发 Git `dubious ownership`，未改全局配置，而是在该次只读 Git 命令中指定固定上游目录为 safe.directory 后重跑成功。修订后第三轮通过的收据位于 `E:\PKU\program\2026\Aug\te\.nexgent-dsh-spike-lTgig9\receipts`；可供 PR 审查的[摘要与哈希清单](evidence-a2-20260923.json)已入库。原始 JSONL 仍只在本机 scratch，清单不是完整构建依赖闭包或远端原始收据归档。上游 install/build/27+1 测试是独立命令观察，不由本轮同题收据证明。
 
-**共同合同尚未完整通过：**真实模型、重启恢复和 Nexgent Episode／benchmark 评价投影仍待验证。当前 `TaskService` 没有公开的外部执行结算接口；事后导入 DeepSeek 日志不能冒充执行前预算准入或原任务完成。A2 下一项是构造清楚标记为“外部证据投影”的诊断 Episode，再判定 A3 的生产桥接与技术选型。
+**共同合同尚未完整通过：**真实模型、重启恢复，以及将原执行纳入 Nexgent Episode／benchmark 的生产桥接仍待验证。当前 `TaskService` 没有公开的外部执行结算接口；事后导入 DeepSeek 日志不能冒充执行前预算准入或原任务完成。下述诊断 Episode 只验证证据投影的可行性。
+
+### Nexgent 诊断 Episode 投影
+
+[`dsh_projection.py`](dsh_projection.py) 从上述第三轮同题运行的**持久** session JSONL、第二 Agent session、插件 side receipts 和摘要重新读取证据，核对这三份收据与摘要中的 SHA-256、session 身份、连续 seq、首请求 schema、两次 tool call/result、卸载后的错误及最终 JSON。它把内部一致的外部证据交给一个静态可信的 Nexgent package，经公开 `TaskService.create → run → evaluate` 发布 `result` 与 `external_evidence`，并冻结本地诊断 BenchmarkAdapter 的身份。
+
+定向命令（只读源收据，输出项目另置）：
+
+```powershell
+..\NExgent\.venv\Scripts\python.exe experiments\kernel_spike\dsh_projection.py E:\PKU\program\2026\Aug\te\.nexgent-dsh-spike-lTgig9\receipts --project-root E:\PKU\program\2026\Aug\te\.nexgent-dsh-projection-lTgig9
+```
+
+2026-09-23 实跑退出码 0。独立审查后修订的投影 Episode `episode-3d2cad3b2b794521` 为 `completed`，本地诊断报告 `accepted/1.0`、scope=`receipt_internal_consistency_only`；**仅投影程序**的模型与工具调用均为 0，外部原执行的用量单列为 `unknown`。修订版 [投影摘要](evidence-a2-projection-20260923.json)已入库；此前初版及第二个独立项目目录也通过。将源 `session.jsonl` 追加一行空白后，校验在创建 Episode 之前因摘要不匹配而拒绝。这一分数**仅评价外部收据的投影合同**，不评价智能体完成任务的质量，也不能作为 Nexgent 原执行受预算准入、恢复或 RSI 改进的证据。外部原执行的成本未进入 Nexgent 用量账，不能把这行报告汇入正式 benchmark 成本／效果统计。
+
+独立审查还指出：本地文件哈希只证明在给定摘要下的内部一致性，不能阻止一起改写摘要和收据；构建入口、patch 和 lockfile 的摘要尚未在投影进程里对原文件重算；诊断 evaluator 尚未独立重验所有来源。修订版 snapshot 已绑定 validator、bridge 和 adapter 源码摘要，并单列外部成本未知，但仍不是可信来源认证。生产路径需要可信来源锚点、宿主侧复核及外部成本结算。不能把这次 `accepted/1.0` 迁移解释成独立任务质量评价。
+
+至此 A2 的**诊断投影**已跑通，生产桥接仍不存在。若采用 DeepSeek 执行后端，阶段 B 必须实现调用前准入、能力／handler 版本绑定、外部完成结算、side receipt 与 session 的可靠关联，并使真实 BenchmarkAdapter 只接收宿主认可的原任务证据。阶段 A3 还需本机跨进程恢复和同一真实模型路径的实测。

@@ -1,0 +1,66 @@
+{
+  "schema": "nexgent.dsh-diagnostic-projection-result.v1",
+  "episode_id": "episode-3d2cad3b2b794521",
+  "episode_status": "completed",
+  "projection_kind": "external_diagnostic_evidence_only",
+  "projection_claim": "Nexgent completed and evaluated an internal-consistency projection of persisted external DSH receipts.",
+  "does_not_claim": [
+    "The original DSH execution was admitted by Nexgent.",
+    "The original DSH model or tool calls were budget-metered by Nexgent.",
+    "The original DSH execution is recoverable through TaskService."
+  ],
+  "dsh_session_id": "session-cf687fc8-96c2-42de-8c8d-411693631927",
+  "package_digest": "03c49d26bf10195238628e7e4e747c4c63dc8cf5bf03f83ad28407c95d066a8e",
+  "benchmark_snapshot": {
+    "id": "dsh-a2-diagnostic-projection",
+    "schema": "nexgent.dsh-diagnostic-projection-benchmark.v1",
+    "source_identity": {
+      "validator_sha256": "c7d40362d50c26c3916bd4daacca8ced09c36bff1af13f696e973c6d151fe13e",
+      "bridge_sha256": "c3e97bc1439354487b5a6a54541f2a5ef186fea8c6b17036c7f392b3b91d75f1",
+      "adapter_sha256": "cf2fd21750c4c4886112f58ac05b858a8fb1ab96896a077c5c03f309fa7bccaa"
+    },
+    "criteria_digest": "abbbd72ead8ceb3ce4d83576d512fdd103c077496906287759b9153e9e64ee64"
+  },
+  "evaluation": {
+    "status": "accepted",
+    "score_available": true,
+    "score": 1.0,
+    "accepted": true,
+    "scope": "receipt_internal_consistency_only",
+    "execution_status": "completed"
+  },
+  "projection_usage": {
+    "model_calls": 0,
+    "reserved_completion_tokens": 0,
+    "charged_completion_tokens": 0,
+    "completion_tokens": 0,
+    "known_usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0
+    },
+    "usage_missing_call_ids": [],
+    "tool_usage_missing_call_ids": [],
+    "reserved_tool_work_units": 0,
+    "charged_tool_work_units": 0,
+    "tool_work_units": 0,
+    "usage_complete": true,
+    "billing_unknown_call_ids": [],
+    "tool_calls": 0,
+    "nodes": 3
+  },
+  "external_execution_usage": {
+    "status": "unknown",
+    "reason": "The receipts do not establish complete external model, token, tool, or work-unit accounting.",
+    "model_calls": null,
+    "completion_tokens": null,
+    "tool_calls": null,
+    "tool_work_units": null
+  },
+  "output_refs": {
+    "external_evidence": "artifact-e8c97ec483b444c3",
+    "result": "artifact-b3d825189e7d4803"
+  },
+  "external_evidence_digest": "1c7bba94335d95e0d42a4536612f707c5f00aa121a5dd57a9cf71c2ccf054f5b",
+  "project_root": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-dsh-projection-lTgig9-v2"
+}
