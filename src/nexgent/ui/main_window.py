@@ -55,6 +55,8 @@ QTabBar::tab:selected { color:#234d37; border-bottom:2px solid #628d60; }
 QTabWidget::pane { border:0; }
 """
 
+MAIN_PACKAGE_CHANNEL = "nexgent-main"
+
 
 def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=lambda item: f"<{type(item).__name__}>")
@@ -290,7 +292,8 @@ class MainWindow(QMainWindow):
             return
         try:
             state = self.service.create(
-                objective, package=self_orchestration_package())
+                objective, context={"split_role": "development"},
+                **self._package_selection())
         except Exception as exc:
             self._error(f"创建 Episode 失败：{exc}")
             return
@@ -302,6 +305,21 @@ class MainWindow(QMainWindow):
         self._append("main", "目标已接收。我会组织执行、检查中间结果，并在交付时报告证据和限制。")
         self.refresh_tasks()
         self._start(state["id"])
+
+    def _package_selection(self):
+        """Resolve the project's promoted Main package before admitting a task."""
+        from ..tasks.runtime import TaskService
+
+        if not isinstance(self.service, TaskService):
+            return {"package": self_orchestration_package()}
+        from ..tasks.evolution import EvolutionService
+
+        evolution = EvolutionService(self.service)
+        try:
+            evolution.active(MAIN_PACKAGE_CHANNEL)
+        except KeyError:
+            evolution.register(MAIN_PACKAGE_CHANNEL, self_orchestration_package())
+        return {"package_channel": MAIN_PACKAGE_CHANNEL}
 
     def show_task(self, episode_id, *, preserve_conversation=False):
         try:

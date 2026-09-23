@@ -6,6 +6,8 @@ import threading
 from PyQt6.QtCore import Qt
 
 from nexgent.ui.main_window import MainWindow
+from nexgent.tasks.evolution import EvolutionService
+from nexgent.tasks.runtime import TaskService
 
 
 class FakeMainService:
@@ -15,11 +17,13 @@ class FakeMainService:
         self.release = threading.Event()
         self.created = []
         self.created_packages = []
+        self.created_options = []
 
     def create(self, objective, **kwargs):
         identity = f"episode-{len(self.states) + 1:04d}"
         self.created.append(objective)
         self.created_packages.append(kwargs.get("package"))
+        self.created_options.append(kwargs)
         state = {
             "id": identity,
             "task": {"objective": objective},
@@ -72,6 +76,7 @@ def test_main_starts_from_conversation_and_uses_task_service(qtbot, tmp_path):
     assert service.created == ["比较两个方案并给出有证据的建议"]
     assert service.created_packages[0]["provenance"]["origin"] == (
         "nexgent.self-orchestration-seed")
+    assert service.created_options[0]["context"]["split_role"] == "development"
     assert window.selected_id == "episode-0001"
     assert "目标已接收" in window.messages.toPlainText()
     assert not hasattr(window, "objective")
@@ -80,6 +85,21 @@ def test_main_starts_from_conversation_and_uses_task_service(qtbot, tmp_path):
     window.stop_running()
     qtbot.waitUntil(lambda: window.worker is None)
     assert service.get("episode-0001")["status"] == "paused"
+
+
+def test_real_main_resolves_a_project_package_channel(qtbot, tmp_path):
+    service = TaskService(tmp_path)
+    window = MainWindow(tmp_path, service=service)
+    qtbot.addWidget(window)
+
+    selection = window._package_selection()
+    assert selection == {"package_channel": "nexgent-main"}
+    active = EvolutionService(service).active("nexgent-main")
+    assert active["package"]["provenance"]["origin"] == (
+        "nexgent.self-orchestration-seed")
+    assert window._package_selection() == selection
+    episode = service.create("Plan a task", **selection)
+    assert episode["package_digest"] == active["package_digest"]
 
 
 def test_new_conversation_keeps_advanced_controls_out_of_main(qtbot, tmp_path):

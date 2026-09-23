@@ -42,6 +42,11 @@ at the top level of the node. Put `max_tokens` in `params`. Bind the complete
 task with {"$input":""}; bind a complete prior result with
 {"$node":"node_id"}, or a field with {"$node":"node_id.field"}.
 
+`available_skills` lists installed skills with `name`, `component_ref`, kind,
+and input/output schemas. When one fits the task, add a `skill` node using the
+listed `component_ref`, put its `name` in `params.name`, and bind the requested
+payload. Do not recreate an installed skill or invent its component identity.
+
 Here is one complete, valid minimal response. Adapt role choice, instructions,
 nodes, dependencies, deliverable names, and output shape to the actual task:
 {"proposal":{"replaced_node_ids":["slot"],"operations":[
@@ -84,6 +89,9 @@ artifact refs under `payload['input_refs']`, so Python reads, for example,
 Use the child's `output_refs.<deliverable_name>` for the final output. The
 child package executes only in that delegated Episode. Do not invent a skill
 when the task can be completed directly with existing roles and capabilities.
+Set `params.mode` on `develop_skill` to `planner_preserving` when the delegated
+child should retain this generic architect workflow and choose the installed
+skill itself. Omit it for the direct `skill -> publish` execution child.
 
 Preserve the completed `architect` node and remove `slot`. Every added ask node
 must name one available `role_ref` and its matching `component_ref`. Use
@@ -171,6 +179,7 @@ def self_orchestration_package():
                         "task": {"$input": ""},
                         "available_roles": available_roles,
                         "available_operators": list(AVAILABLE_OPERATORS),
+                        "available_skills": {"$input": "available_skills"},
                     },
                 },
             },

@@ -178,15 +178,10 @@ def _workflow_tools(workflow):
     return names
 
 
-def compile_task_skill_proposal(parent, proposal, constraints, *, provenance=None):
-    """Return an immutable task-time child package containing one new skill.
-
-    The parent must use a manifest-v2 workflow orchestrator.  The child keeps
-    that component identity and replaces its workflow with a two-node graph:
-    execute the new controlled-code skill, then publish its result under the
-    proposal's deliverable name.  This function performs no persistence or
-    deployment and therefore grants no cross-task promotion authority.
-    """
+def _compile_task_skill_proposal(
+        parent, proposal, constraints, *, provenance=None,
+        preserve_planner=False):
+    """Build one immutable task-scoped skill child under a selected run mode."""
     verify_package(parent)
     if parent["manifest"].get("manifest_version") != 2:
         raise ContractError("Task skill compilation requires a manifest-v2 parent")
@@ -227,47 +222,53 @@ def compile_task_skill_proposal(parent, proposal, constraints, *, provenance=Non
     manifest["components"][component_id] = {
         "class": "S", "kind": "skill", "ref": skill_name,
     }
-    workflow = {
-        "nodes": [
-            {
-                "id": "invented_skill",
-                "method": "skill",
-                "component_ref": component_id,
-                "params": {"name": skill_name},
-                "bindings": {"payload": {"$input": ""}},
-                "output_schema": deepcopy(skill["output_schema"]),
-            },
-            {
-                "id": "publish_result",
-                "method": "publish",
-                "params": {"name": proposal["deliverable_name"]},
-                "bindings": {"content": {"$node": "invented_skill"}},
-            },
-        ],
-        "control_edges": [],
-        "outputs": {
-            "deliverables": {
-                proposal["deliverable_name"]: {"$node": "publish_result.id"},
-            },
-            "summary": "Task-authored controlled skill executed in an immutable child package.",
-        },
-        "revision_rules": [],
-    }
     workflow_path = workflow_registration["ref"]
-    manifest["workflows"][workflow_name] = {
-        **deepcopy(workflow_registration),
-        "max_parallel": 1,
-        "input_schema": {"type": "object"},
-        "output_schema": {"type": "object"},
-    }
-
-    hypothesis = {**deepcopy(proposal["hypothesis"]),
-                  "component_ids": [orchestrator_id, component_id]}
-    patch = {
-        "schema": PACKAGE_PATCH_SCHEMA,
-        "parent_package_digest": parent["digest"],
-        "hypothesis": hypothesis,
-        "operations": [
+    if preserve_planner:
+        workflow = json.loads(parent["files"][workflow_path])
+        changed_components = [component_id]
+        operations = [{
+            "op": "add",
+            "component_id": component_id,
+            "path": path,
+            "content": skill["source"],
+        }]
+    else:
+        workflow = {
+            "nodes": [
+                {
+                    "id": "invented_skill",
+                    "method": "skill",
+                    "component_ref": component_id,
+                    "params": {"name": skill_name},
+                    "bindings": {"payload": {"$input": ""}},
+                    "output_schema": deepcopy(skill["output_schema"]),
+                },
+                {
+                    "id": "publish_result",
+                    "method": "publish",
+                    "params": {"name": proposal["deliverable_name"]},
+                    "bindings": {"content": {"$node": "invented_skill"}},
+                },
+            ],
+            "control_edges": [],
+            "outputs": {
+                "deliverables": {
+                    proposal["deliverable_name"]: {"$node": "publish_result.id"},
+                },
+                "summary": (
+                    "Task-authored controlled skill executed in an immutable child package."
+                ),
+            },
+            "revision_rules": [],
+        }
+        manifest["workflows"][workflow_name] = {
+            **deepcopy(workflow_registration),
+            "max_parallel": 1,
+            "input_schema": {"type": "object"},
+            "output_schema": {"type": "object"},
+        }
+        changed_components = [orchestrator_id, component_id]
+        operations = [
             {
                 "op": "replace",
                 "component_id": orchestrator_id,
@@ -281,9 +282,17 @@ def compile_task_skill_proposal(parent, proposal, constraints, *, provenance=Non
                 "path": path,
                 "content": skill["source"],
             },
-        ],
+        ]
+
+    hypothesis = {**deepcopy(proposal["hypothesis"]),
+                  "component_ids": changed_components}
+    patch = {
+        "schema": PACKAGE_PATCH_SCHEMA,
+        "parent_package_digest": parent["digest"],
+        "hypothesis": hypothesis,
+        "operations": operations,
         "child_manifest": manifest,
-        "activation_targets": [orchestrator_id, component_id],
+        "activation_targets": changed_components,
     }
 
     existing_role_methods = {
@@ -299,7 +308,7 @@ def compile_task_skill_proposal(parent, proposal, constraints, *, provenance=Non
                       else json.loads(parent["files"][registration["ref"]]))
         existing_tools.update(_workflow_tools(definition))
     package_policy = {
-        "mutable_components": [orchestrator_id],
+        "mutable_components": [] if preserve_planner else [orchestrator_id],
         "allow_add": True,
         "allow_remove": False,
         "max_patch_bytes": constraints["max_patch_bytes"],
@@ -317,12 +326,40 @@ def compile_task_skill_proposal(parent, proposal, constraints, *, provenance=Non
         package_policy,
         provenance={
             **host_provenance,
-            "origin": "task-time-skill-proposal",
+            "origin": ("task-time-planner-skill-proposal" if preserve_planner
+                       else "task-time-skill-proposal"),
             "task_time_only": True,
             "promotion_authority": False,
+            **({"planner_preserving": True} if preserve_planner else {}),
             "task_skill_proposal_digest": digest(proposal),
             "task_skill_constraint_digest": digest(constraints),
             "observed_rpc_methods": used_methods,
             "observed_tools": used_tools,
         },
     )
+
+
+def compile_task_skill_proposal(parent, proposal, constraints, *, provenance=None):
+    """Compile a task skill into a direct ``skill -> publish`` child.
+
+    This keeps the original task-local execution behavior.  The child remains
+    creator-tree scoped and grants no cross-task promotion authority.
+    """
+    return _compile_task_skill_proposal(
+        parent, proposal, constraints, provenance=provenance,
+        preserve_planner=False)
+
+
+def compile_task_skill_planner_proposal(
+        parent, proposal, constraints, *, provenance=None):
+    """Compile a task skill while preserving the parent's generic planner.
+
+    Only the new S component, skill registration, and controlled-code file are
+    added.  The workflow/orchestrator files and identities remain unchanged so
+    a delegated child can plan normally and choose the installed skill from
+    the host-supplied inventory.  The returned package is still task-local and
+    cannot authorize promotion.
+    """
+    return _compile_task_skill_proposal(
+        parent, proposal, constraints, provenance=provenance,
+        preserve_planner=True)

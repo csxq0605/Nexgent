@@ -83,6 +83,31 @@ def _delegated_public_context(context):
             for key in _DELEGATED_PUBLIC_CONTEXT_FIELDS if key in context}
 
 
+def _available_skill_inventory(package):
+    """Project registered S skills into the task planner's bounded inventory."""
+    manifest = package["manifest"]
+    skills = manifest.get("skills", {})
+    components = manifest.get("components", {})
+    inventory = []
+    for component_id, component in sorted(components.items()):
+        if (not isinstance(component, dict)
+                or component.get("class") != "S"
+                or component.get("kind") != "skill"):
+            continue
+        name = component.get("ref")
+        skill = skills.get(name)
+        if not isinstance(skill, dict):
+            continue
+        inventory.append({
+            "name": name,
+            "component_ref": component_id,
+            "kind": skill.get("kind"),
+            "input_schema": deepcopy(skill.get("input_schema", {})),
+            "output_schema": deepcopy(skill.get("output_schema", {})),
+        })
+    return inventory
+
+
 def _capability_failure_domain(method, exc):
     """Classify a failed host RPC without treating unknown host faults as agent faults."""
     cause = exc.cause if isinstance(exc, CapabilityAbort) else exc
@@ -1184,7 +1209,8 @@ class TaskService:
             payload.pop("inputs", None)
             payload.update(episode_id=identity, input_refs=state["input_refs"],
                            memory_snapshot=self.store.memory_snapshot(state["memory_snapshot_id"], identity),
-                           skills=deepcopy(package["manifest"].get("skills", {})))
+                           skills=deepcopy(package["manifest"].get("skills", {})),
+                           available_skills=_available_skill_inventory(package))
             counter = [0]
             recovery_errors = []
             failure_domains = []
@@ -1557,7 +1583,10 @@ class TaskService:
             validate(result, skill.get("output_schema", {}), label=name + " output")
             return result
         if method == "develop_skill":
-            from .task_skill_compiler import compile_task_skill_proposal
+            from .task_skill_compiler import (
+                compile_task_skill_planner_proposal,
+                compile_task_skill_proposal,
+            )
 
             state = self.store.get(identity)
             constraints = params.get("constraints")
@@ -1583,7 +1612,13 @@ class TaskService:
             proposal = deepcopy(params.get("proposal"))
             if isinstance(proposal, dict):
                 proposal.setdefault("parent_package_digest", package["digest"])
-            child = compile_task_skill_proposal(
+            mode = params.get("mode", "direct")
+            if mode not in {"direct", "planner_preserving"}:
+                raise ContractError("develop_skill mode is unsupported")
+            compiler = (compile_task_skill_planner_proposal
+                        if mode == "planner_preserving"
+                        else compile_task_skill_proposal)
+            child = compiler(
                 package, proposal, constraints,
                 provenance={"episode_id": identity, "node_id": path},
             )
@@ -1594,11 +1629,13 @@ class TaskService:
                 "package_id": child["id"],
                 "package_digest": child["digest"],
                 "skill_name": skill_name,
+                "mode": mode,
                 "proposal_digest": digest(proposal),
             })
             return {"package_id": child["id"],
                     "package_digest": child["digest"],
-                    "skill_name": skill_name}
+                    "skill_name": skill_name,
+                    "mode": mode}
         if method == "delegate":
             state = self.store.get(identity)
             depth, cursor = 0, state
