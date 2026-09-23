@@ -52,6 +52,32 @@ def _id(prefix):
 
 
 class EpisodeStore:
+    @staticmethod
+    def _check_capability_admission(db, episode, descriptor):
+        """Reject unusable grants before they enter the visible inventory."""
+        effect = descriptor.get("effect_class")
+        units = descriptor.get("work_units_per_call")
+        if (effect not in {"read", "artifact_write", "local_compute", "external_compute"}
+                or type(units) is not int or units < 0):
+            raise ValueError("Capability effect or work reservation is invalid")
+        allowed = episode["task"].get("constraints", {}).get("allowed_effects")
+        if allowed is not None and effect not in allowed:
+            raise PermissionError("Capability effect exceeds the Episode authority")
+        root_id = episode["root_episode_id"]
+        root = episode if root_id == episode["id"] else EpisodeStore._get(db, root_id)
+        rows = db.execute(
+            "SELECT data FROM task_resources WHERE root_id=? AND kind='tool'",
+            (root_id,)).fetchall()
+        if len(rows) >= root["budget"]["max_tool_calls"]:
+            raise BudgetExhausted("Root Episode tool-call budget exhausted")
+        charged = 0
+        for row in rows:
+            accounting = json.loads(row[0]).get("data", {}).get("work_accounting", {})
+            charged += accounting.get("charged_work_units",
+                                      accounting.get("reserved_work_units", 0))
+        if charged + units > root["budget"].get("max_tool_work_units", 0):
+            raise BudgetExhausted("Root Episode tool-work budget exhausted")
+
     def __init__(self, root):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -69,6 +95,9 @@ class EpisodeStore:
                     PRIMARY KEY(package_id,root_id));
                 CREATE TABLE IF NOT EXISTS task_capability_leases(
                     episode TEXT NOT NULL, name TEXT NOT NULL, data TEXT NOT NULL,
+                    PRIMARY KEY(episode,name));
+                CREATE TABLE IF NOT EXISTS task_delegated_capability_bounds(
+                    episode TEXT NOT NULL, name TEXT NOT NULL, descriptor TEXT NOT NULL,
                     PRIMARY KEY(episode,name));
                 CREATE TABLE IF NOT EXISTS task_events(
                     episode TEXT, sequence INTEGER, kind TEXT, created REAL,
@@ -114,8 +143,23 @@ class EpisodeStore:
 
     def create(self, task, package, parent_episode_id=None, *, benchmark_registration=None,
                memory_registration=None, memory_version=None,
-               _allow_candidate_memory=False):
+               _allow_candidate_memory=False, initial_capability_descriptors=()):
         task = deepcopy(task)
+        initial_capability_descriptors = deepcopy(initial_capability_descriptors)
+        if not isinstance(initial_capability_descriptors, (list, tuple)):
+            raise ValueError("Initial capability descriptors must be a sequence")
+        if initial_capability_descriptors and task.get("capability_mode") != "leased":
+            raise PermissionError("Initial capability leases require leased mode")
+        initial_names = []
+        for descriptor in initial_capability_descriptors:
+            if (not isinstance(descriptor, dict)
+                    or not isinstance(descriptor.get("name"), str)
+                    or descriptor.get("digest") != _digest(
+                        {key: value for key, value in descriptor.items() if key != "digest"})):
+                raise ValueError("Initial capability descriptor identity is invalid")
+            initial_names.append(descriptor["name"])
+        if len(set(initial_names)) != len(initial_names):
+            raise ValueError("Initial capability names must be unique")
         benchmark_registration = (None if benchmark_registration is None
                                   else deepcopy(benchmark_registration))
         memory_registration = (None if memory_registration is None
@@ -134,6 +178,8 @@ class EpisodeStore:
         capabilities = task.get("capabilities", [])
         if not isinstance(capabilities, list) or any(not isinstance(c, str) for c in capabilities):
             raise ValueError("Capabilities must be a list of names")
+        if not set(initial_names) <= set(capabilities):
+            raise PermissionError("Initial leases exceed the Episode capability ceiling")
         limits = {**DEFAULT_BUDGET, **task.get("budget", {})}
         for name in DEFAULT_BUDGET:
             if type(limits[name]) is not int or limits[name] < 0:
@@ -146,10 +192,27 @@ class EpisodeStore:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             root_id = episode_id
+            inherited_descriptors = {}
             if parent_episode_id:
                 parent = self._get(db, parent_episode_id)
                 if not set(capabilities) <= set(parent["capabilities"]):
                     raise PermissionError("A delegated task cannot widen parent capabilities")
+                if parent["task"].get("capability_mode") == "leased":
+                    if task.get("capability_mode") != "leased":
+                        raise PermissionError("A leased parent cannot delegate legacy tool grants")
+                    active_rows = db.execute(
+                        "SELECT data FROM task_capability_leases WHERE episode=?",
+                        (parent_episode_id,)).fetchall()
+                    active_leases = [json.loads(row[0]) for row in active_rows]
+                    inherited_descriptors = {
+                        lease["name"]: lease["descriptor"] for lease in active_leases
+                        if lease["status"] == "active"
+                    }
+                    if not set(capabilities) <= set(inherited_descriptors):
+                        raise PermissionError("Delegation exceeds the parent's active leases")
+                    if any(descriptor != inherited_descriptors[descriptor["name"]]
+                           for descriptor in initial_capability_descriptors):
+                        raise PermissionError("Delegated handler differs from the parent lease")
                 root_id = parent["root_episode_id"]
                 limits = self._get(db, root_id)["budget"]
                 # Evaluation and memory boundaries are inherited, never delegated away.
@@ -262,6 +325,21 @@ class EpisodeStore:
                 db.execute("INSERT INTO task_memory_registrations VALUES(?,?,?)",
                            (episode_id, encoded, _digest(memory_registration)))
             self._event(db, episode_id, "task_registered", {"task": task, "package_digest": package["digest"]})
+            for name in capabilities:
+                if name in inherited_descriptors:
+                    db.execute(
+                        "INSERT INTO task_delegated_capability_bounds VALUES(?,?,?)",
+                        (episode_id, name, _json(inherited_descriptors[name])))
+            for descriptor in initial_capability_descriptors:
+                self._check_capability_admission(db, episode, descriptor)
+                record = {"episode_id": episode_id, "name": descriptor["name"],
+                          "status": "active", "revision": 1,
+                          "descriptor": descriptor, "created_at": now, "updated_at": now}
+                db.execute("INSERT INTO task_capability_leases VALUES(?,?,?)",
+                           (episode_id, descriptor["name"], _json(record)))
+                self._event(db, episode_id, "capability_mounted",
+                            {"name": descriptor["name"], "revision": 1,
+                             "descriptor_digest": descriptor["digest"]})
             if memory_registration is not None:
                 self._event(db, episode_id, "memory_version_frozen", {
                     "channel": memory_registration["channel"],
@@ -494,6 +572,15 @@ class EpisodeStore:
                 raise PermissionError("Capability leases change only while an Episode is stopped")
             if name not in state["capabilities"]:
                 raise PermissionError("Capability is outside the Episode's frozen ceiling")
+            bound = db.execute(
+                "SELECT descriptor FROM task_delegated_capability_bounds "
+                "WHERE episode=? AND name=?", (episode_id, name)).fetchone()
+            if (bound is None and state["parent_episode_id"] is not None
+                    and self._get(db, state["parent_episode_id"])["task"].get(
+                        "capability_mode") == "leased"):
+                raise PermissionError("Delegated capability has no frozen parent bound")
+            if bound is not None and json.loads(bound[0]) != descriptor:
+                raise PermissionError("Delegated handler differs from the parent lease")
             row = db.execute(
                 "SELECT data FROM task_capability_leases WHERE episode=? AND name=?",
                 (episode_id, name)).fetchone()
@@ -509,6 +596,7 @@ class EpisodeStore:
                     raise StateConflict("Capability lease revision changed")
             elif expected_revision is not None:
                 raise StateConflict("Capability lease does not have the expected revision")
+            self._check_capability_admission(db, state, descriptor)
             now = time.time()
             record = {"episode_id": episode_id, "name": name, "status": "active",
                       "revision": previous["revision"] + 1 if previous else 1,
@@ -526,8 +614,8 @@ class EpisodeStore:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             state = self._get(db, episode_id)
-            if state["status"] not in {"ready", "paused", "waiting_input"}:
-                raise PermissionError("Capability leases change only while an Episode is stopped")
+            if state["status"] not in {"ready", "paused", "waiting_input", "completed", "failed", "cancelled"}:
+                raise PermissionError("Capability release requires a stopped Episode")
             row = db.execute(
                 "SELECT data FROM task_capability_leases WHERE episode=? AND name=?",
                 (episode_id, name)).fetchone()

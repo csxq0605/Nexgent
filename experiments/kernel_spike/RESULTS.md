@@ -98,3 +98,11 @@ Windows 上最终脚本由子智能体与根代理分别定向运行通过。最
 第一次请求得到模型原生 `spike.multiply({left:6,right:7})` tool call，MiMo 返回 627 input / 28 output token；DeepSeek session 持久记录工具调用和结果 42，handler 只执行一次。第二次请求已发出并返回 envelope，但当时的 adapter 未能将最终 `message.content` 解码为约定 JSON；分类为 `provider_protocol/final_decode`，进程退出码 1。总请求开始数为 2、完整模型收据数为 1、重试数为 0，**没有最终交付**。运行版本未先保存第二响应的 shape、finish reason 和 usage，因此不能在不重新请求的情况下确定是空内容、数组还是其他形态；不猜测根因。运行后只补强了后续尝试的观测字段，做本地语法／预检，没有再调用 provider。
 
 因此这条路线只证明真实原生 tool-call 与工具闭环接通，不能算同题完整成功。其原执行仍没有进入 Nexgent Episode 的事前准入、预算或真实任务评分。Python 路线的完整 Episode 成功与 DeepSeek 路线的最终解码失败需并列进入内核 ADR，不能把两条路线成功片段拼成一次成功执行。
+
+## A3：Python 任务级工具租约薄片
+
+`TaskService.create(..., initially_active_capabilities=[])` 现在可以为**已安装且事先列入候选名称**的工具建立空活动作用域；宿主在 Episode 停止时调用 `mount_capability`，下次运行的工具 inventory 只包含活动租约。调用前核对 provider、版本、handler 身份、effect 与剩余工具预算，再写入工具准入记录并执行；结果事件保留租约 revision 和 descriptor。释放后不再接受新的调用路径，已完成 RPC 的旧结果仍可复用。初始租约与 Episode 创建在同一 SQLite 事务；中途失败不留下半套初始授权。
+
+定向测试见 [`test_task_capability_leases.py`](../../tests/test_task_capability_leases.py)：作用域隔离、空 inventory 拒绝、真实 `TaskService.run` 的工具结果、完成后释放、进程重建后的 provider 漂移拒绝、委派子任务只继承父任务活动且同版本的描述、旧子任务缺版本界限时拒绝挂载。实现期间 50 项存储／运行时相关测试通过；最终安全修订后租约与委派相关的 20 项、释放修订后的租约 8 项通过。没有为该小样再次调用外部模型，真实 MiMo 成功仍属于上节**预授权静态工具**的单独 Episode。
+
+这不是任务中安装新插件或完整 C1：候选工具名称和 handler 在任务创建前已存在于宿主 `ToolRegistry`；`handler_digest` 目前是受信 provider 提交的声明，不是从实际加载字节独立测得；释放影响 Episode 作用域，不执行 provider 进程／事件订阅清理。当前 `package_worker` 也不是 OS 安全容器。后续必须按[任务中能力授权合同](../../docs/design/task-time-capability-authority.md)把权限上限从“预列出名称”迁为 effect／操作／资源约束，并在隔离 worker 中真正试装模型开发的 fresh-name Definition。

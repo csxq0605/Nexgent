@@ -39,3 +39,11 @@
 - A3 的验收是已安装工具的任务级租约进入真实执行路径、卸载、恢复与收据。B/C 的验收另需真实模型在未知工具名下开发 Definition、隔离试装、重新发现并调用；服务／策略插件必须另行验证。E/F 再证明独立采用和未见任务效果，允许零或负结果。
 
 现有 `ToolSpec.handler_digest` 是可信 provider 提交的身份声明，不能单独证明运行中的字节确实与摘要一致。B 阶段需在装载时核对构建包／入口摘要，并把环境及依赖固定。A3 测试对该字段的相等检查只表明恢复时声明没有漂移。
+
+## C1 首个可执行切片
+
+优先做**未知名称的新工具**，不先扩到网络／进程插件，也不引入固定团队或 DAG。任务保留冻结的 `EpisodeAuthority v1`：允许的能力类型、effect、具体操作、工件范围、受控运行环境、凭据句柄、开发／调用预算和版本摘要。旧 `capabilities` 只兼容为初始预安装工具实例。模型通过固定开发能力提交源码、接口和测试；宿主在受控子进程环境内检查后保存内容寻址 Definition，再于 Episode 的串行安全点挂载 Instance。工具名无需出现在初始列表，下一次模型请求看到重新计算的 active inventory 并实际调用它。
+
+实施路径优先复用现有 `task_skill_compiler` 的提案／AST 检查、`make_package`／`verify_package` 的包身份、`run_package` 的受控 Python worker，以及 Episode RPC、资源预留和事件账。动态定义和实例单独存储；生成代码不写入全局 `ToolRegistry`，不在宿主 Python 进程中运行。调用收据须关联 authority、Definition、Instance、bundle／入口／运行环境摘要及 worker 结果。`stage_definition` 的静态检查不能冒充实际调用或独立评价。
+
+首片定向验证：一项固定模型替身任务从空 inventory 生成新名工具、试装、重新发现并调用，同时验证越权与兄弟 Episode 不可见；一次重启后继续调用／释放／篡改拒绝；一次限额真实模型运行，必须同时留下模型、定义、实例与调用收据。受控 Python worker 不是 OS 安全容器，首片仅允许 `local_compute` 与受控工件读取、空外部依赖和空凭据。其他 effect 需有实际隔离后再开放。此切片不算 E 的跨任务采用：新任务只能从独立评价通过的 release 解析 Definition，并重新接受自身授权检查。

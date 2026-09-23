@@ -240,7 +240,8 @@ class TaskService:
                package_channel=None, benchmark_registration=None,
                expected_package_registration=None, improver_channel_registration=None,
                memory_channel=None, expected_memory_registration=None,
-               _memory_candidate=None, _memory_candidate_token=None):
+               _memory_candidate=None, _memory_candidate_token=None,
+               initially_active_capabilities=None):
         if not isinstance(objective, str) or not objective.strip() or len(objective) > 20000:
             raise ContractError("Task objective must be nonempty and at most 20000 characters")
         explicit_package = package is not None
@@ -333,6 +334,35 @@ class TaskService:
         capabilities = list(capabilities)
         for name in capabilities:
             self.tools.get(name)
+        if (parent_episode_id is not None
+                and self.store.get(parent_episode_id)["task"].get("capability_mode") == "leased"
+                and initially_active_capabilities is None):
+            # A leased parent cannot create a legacy child that bypasses its
+            # active grants. The store separately checks the active subset in
+            # the child registration transaction.
+            initially_active_capabilities = list(capabilities)
+        lease_mode = initially_active_capabilities is not None
+        if lease_mode:
+            # Transitional A3 path for preinstalled tools only: capabilities
+            # remains a frozen name ceiling and cannot admit a model-created
+            # tool whose name was unknown when this Episode was created.
+            if (not isinstance(initially_active_capabilities, list)
+                    or len(initially_active_capabilities) > 256
+                    or any(not isinstance(name, str) or not name or len(name) > 120
+                           for name in initially_active_capabilities)
+                    or len(set(initially_active_capabilities))
+                    != len(initially_active_capabilities)):
+                raise ContractError(
+                    "Initially active capabilities must be a bounded list of unique nonempty names")
+            if not set(initially_active_capabilities) <= set(capabilities):
+                raise PermissionError(
+                    "Initially active capabilities exceed the Episode's frozen ceiling")
+            initial_descriptors = [
+                self.tools.lease_descriptor(name)
+                for name in initially_active_capabilities
+            ]
+        else:
+            initial_descriptors = []
         inputs = {} if inputs is None else _json_copy(inputs, label="Task inputs")
         context = {} if context is None else _json_copy(context, label="Task context")
         benchmark_registration = (None if benchmark_registration is None else
@@ -416,13 +446,17 @@ class TaskService:
         task = {"schema_version": 1, "objective": objective, "inputs": inputs,
                 "deliverables": deliverables, "budget": budget, "capabilities": capabilities,
                 "context": context, "constraints": constraints, "entry": entry,
-                "tools": self.tools.describe(capabilities)}
+                "tools": self.tools.describe(
+                    initially_active_capabilities if lease_mode else capabilities)}
+        if lease_mode:
+            task["capability_mode"] = "leased"
         episode = self.store.create(
             task, package, parent_episode_id,
             benchmark_registration=benchmark_registration,
             memory_registration=memory_registration,
             memory_version=frozen_memory_version,
-            _allow_candidate_memory=_memory_candidate is not None)
+            _allow_candidate_memory=_memory_candidate is not None,
+            initial_capability_descriptors=initial_descriptors)
         refs = {}
         for name, value in task["inputs"].items():
             artifact = self.store.publish(episode["id"], value, name=name, scope="tree", node_id="input")
@@ -434,6 +468,27 @@ class TaskService:
             snapshot_id = episode["memory_snapshot_id"]
         return self._change(episode["id"], lambda s: s.update(
             input_refs=refs, memory_snapshot_id=snapshot_id))
+
+    def mount_capability(self, identity, name, *, expected_revision=None):
+        """Mount one installed tool into a stopped lease-mode Episode."""
+        with self.store.lock(identity):
+            descriptor = self.tools.lease_descriptor(name)
+            return self.store.mount_capability(
+                identity, descriptor, expected_revision=expected_revision)
+
+    def release_capability(self, identity, name, *, expected_revision):
+        """Release one tool from a stopped lease-mode Episode."""
+        with self.store.lock(identity):
+            return self.store.release_capability(
+                identity, name, expected_revision=expected_revision)
+
+    def active_capabilities(self, identity):
+        """Return active durable leases after checking installed implementations."""
+        with self.store.lock(identity):
+            leases = self.store.capability_leases(identity, active_only=True)
+            for lease in leases:
+                self.tools.resolve_lease(lease)
+            return leases
 
     def list(self):
         return [self.get(state["id"]) for state in self.store.list() if not state["parent_episode_id"]]
@@ -1420,6 +1475,14 @@ class TaskService:
                 raise ContractError(
                     "Benchmark host runtime changed before Episode execution or resume")
             package = self.store.package(state["package_id"])
+            active_leases = None
+            if state["task"].get("capability_mode") == "leased":
+                active_leases = self.store.capability_leases(identity, active_only=True)
+                # Resolve every active descriptor before execution begins. A
+                # restarted host with a missing or changed provider therefore
+                # leaves the stopped Episode untouched and fails closed.
+                for lease in active_leases:
+                    self.tools.resolve_lease(lease)
             improver_registration = state["task"].get("context", {}).get(
                 "improver_channel_registration")
             if improver_registration is not None:
@@ -1447,6 +1510,11 @@ class TaskService:
 
             payload = deepcopy(state["task"])
             payload.pop("inputs", None)
+            if active_leases is not None:
+                # Preserve the legacy public tool-description shape while
+                # deriving the inventory from current leases.
+                payload["tools"] = self.tools.describe(
+                    [lease["name"] for lease in active_leases])
             payload.update(episode_id=identity, input_refs=state["input_refs"],
                            memory_snapshot=self.store.memory_snapshot(state["memory_snapshot_id"], identity),
                            skills=deepcopy(package["manifest"].get("skills", {})),
@@ -1723,7 +1791,14 @@ class TaskService:
             state = self.store.get(identity)
             if name not in state["capabilities"]:
                 raise PermissionError(f"Task has not granted capability: {name}")
-            tool = self.tools.get(name)
+            lease = None
+            if state["task"].get("capability_mode") == "leased":
+                lease = self.store.capability_lease(identity, name)
+                if lease is None or lease.get("status") != "active":
+                    raise PermissionError(f"Task capability lease is not active: {name}")
+                tool = self.tools.resolve_lease(lease)
+            else:
+                tool = self.tools.get(name)
             constraints = state["task"].get("constraints", {})
             if ("allowed_effects" in constraints
                     and tool.effect_class not in constraints["allowed_effects"]):
@@ -1734,13 +1809,23 @@ class TaskService:
                 arguments, tool.input_schema,
                 artifact_resolver=lambda ref: self.store.read(ref, identity),
                 label=name + " input")
+            admission = {"name": name, "arguments": arguments}
+            if lease is not None:
+                admission.update(
+                    capability_lease_revision=lease["revision"],
+                    capability_descriptor_digest=lease["descriptor"]["digest"],
+                    handler_digest=lease["descriptor"]["handler_digest"],
+                )
             self.store.reserve_tool(
-                identity, path, {"name": name, "arguments": arguments},
+                identity, path, admission,
                 reserved_work_units=tool.work_units_per_call)
             receipt = {"call_id": identity + "/" + path, "episode_id": identity, "name": name,
                        "arguments": deepcopy(arguments), "status": "started", "started_at": time.time(),
                        "work_reservation": {"schema": "nexgent.tool-work.v1",
                                             "reserved_work_units": tool.work_units_per_call}}
+            if lease is not None:
+                receipt.update(capability_descriptor=deepcopy(lease["descriptor"]),
+                               capability_lease_revision=lease["revision"])
             started = time.monotonic()
             result, failure = None, None
             try:
@@ -1962,8 +2047,12 @@ class TaskService:
                 inputs = deepcopy(task.get("inputs", {}))
                 for name, ref in task.get("input_refs", {}).items():
                     inputs[name] = self.store.read(ref, identity)["content"]
+                parent_capabilities = state["capabilities"]
+                if state["task"].get("capability_mode") == "leased":
+                    parent_capabilities = [lease["name"] for lease in
+                                           self.store.capability_leases(identity, active_only=True)]
                 child = self.create(task["objective"], inputs, task.get("deliverables"),
-                    capabilities=task.get("capabilities", state["capabilities"]), package=target,
+                    capabilities=task.get("capabilities", parent_capabilities), package=target,
                     context=_delegated_public_context(state["task"].get("context")),
                     constraints=state["task"].get("constraints"),
                     parent_episode_id=identity)
