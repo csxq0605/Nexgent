@@ -120,7 +120,7 @@ promotion 强制绑定预登记 improver guard。部署后的候选生成通过�
 
 当前已实现 `RSIStudyService`：只接受 final holdout，冻结两个 AgentPackage、宿主私有 benchmark 注册、显式统计单位/来源 cluster、完整任务/seed、provider/model、执行环境摘要、每 Episode 硬预算、随机化调度、工程门和 cluster bootstrap/sign-flip 统计；每个 cell 通过真实 `TaskService` 执行，空 memory 且禁止写回，可恢复但不可选择性重放。模型收据区分请求别名与 provider 实际 model/revision；没有固定 revision 时只允许时间窗口内的局部工程结论。CLI 与 GUI 只投影脱敏计划和报告。它是正式研究的执行底座，不等于外部研究已完成。主矩阵至少需要一个工具/政策任务族、一个新鲜可执行代码任务族和一个私有自托管交互任务族；OpenFOAM 单列为 demo，Workbench/饱和 BBH 只做资格与接口检查。完整协议见[P5 预注册研究](docs/research/p5-preregistered-rsi-study.md)。
 
-独立 `FourArmStudyService` 已实现 F/S/M/E 同一 final-holdout 统计单位的原子预留、冻结 package/M release 与环境身份、四臂顺序、TaskService 执行和崩溃后保守恢复。它不改写两臂研究合同；真实 final-holdout 尚未消耗。四臂统计评估、Holm 校正、外层搜索成本、记忆实际检索激活、公开投影与 CLI/UI 仍待实现；如声称 O/S 与 M 交互效应，还需预登记第五臂。详见[四臂确认协议](docs/research/four-arm-confirmatory-protocol-v1.md)。
+独立 `FourArmStudyService` 已实现 F/S/M/E 同一 final-holdout 统计单位的原子预留、冻结 package/M release 与环境身份、四臂顺序、TaskService 执行和崩溃后保守恢复；只读评估层按来源 cluster 做 bootstrap、sign-flip 和三比较 Holm 校正。它不改写两臂研究合同；真实 final-holdout 尚未消耗。统计层最多报告 benchmark 局部质量 treatment 效应，不自动称 RSI 收益。外层搜索成本、改进父系和组件激活认证、记忆实际检索、公开投影与 CLI/UI 仍待实现；如声称 O/S 与 M 交互效应，还需预登记第五臂。详见[四臂确认协议](docs/research/four-arm-confirmatory-protocol-v1.md)。
 
 TaskService benchmark 的 SDK 已收敛为显式 descriptor/protocol、隔离 registry、有限 JSON 合同和独立 host runtime 指纹；Workbench、OpenFOAM、BBH 两任务与 scientific-discovery adapter 已接入。scientific-discovery 的一个 synthetic case 对应一个 TaskSpec/Episode，隐藏 forecast 留在宿主评价器，项目私有 release key 通过 HMAC 派生隐藏生成 seed、统计单元和不透明 family cluster，并提供确定性的无模型 reference AgentPackage。它与 BBH 都保留 legacy 入口和历史记录，且不把 legacy ID 与 Episode ID 互认。P3 paired selection/guard 与 P5 study 冻结同一 outcome policy：只有 `failed + agent/protocol` 属可测的 observed zero，cancelled、paused、waiting、基础设施故障和 evaluator unavailable 均保持 missing。完整边界见[Task benchmark SDK](docs/design/benchmark-sdk.md)。
 
@@ -143,7 +143,7 @@ scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分
 | OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
 | 跨任务行为更新 P3 | manifest-v2 component id 与整包 PackagePatch v3 已贯穿反馈、生成、选择、加载证据和部署门；真实模型生成两个 S 候选及一个已实际执行的 O 候选，独立选择均拒绝，尚无晋升后复用或正向效果；纯 M 真实尝试 abstain，独立 release/snapshot 仍只有工程验证 |
 | 改进器递归执行 P4 | 独立 R 通道、自更新、真实后代元评测、guard/rollback、durable invocation claim、逐副作用 admission 与 recoverable cycle 已闭合；真实模型/统计递归效益待完成 |
-| 冻结正式研究 P5 | 两臂 final-holdout 执行器与独立四臂 quartet 原子预留/执行/保守恢复底座已有定向测试；四臂统计推断、outer cost、memory 检索激活、CLI/信息窗接入与外部多任务族真实研究待完成 |
+| 冻结正式研究 P5 | 两臂 final-holdout 执行器与独立四臂 quartet 原子预留/执行/保守恢复、sealed-record 统计层已有定向测试；outer cost、memory 检索和 O/S 激活、演化父系、CLI/信息窗接入与外部多任务族真实研究待完成 |
 | 0.8 的源码机制与历史结果 | 保留；不能替代以上状态 |
 
 ### 下一阶段

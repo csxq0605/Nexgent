@@ -80,9 +80,13 @@ completed study if the protocol ran as registered.
 - Run the public qualification harness first with real F/S/M/E calls and an
   accepted M release. Its descriptive output cannot satisfy the final gate.
 
-Current status: the trusted quartet plan/reservation/execution/recovery core and
-deterministic tests exist. Statistical assessment, Holm adjustment, outer
-search-cost ledger, actual memory-retrieval activation check, CLI/UI projection,
-and real provider final-holdout execution remain open. No final-holdout quartet
-has been registered or consumed. A fifth arm is still required for an O/S-by-M
-interaction claim.
+Current status: the trusted quartet plan/reservation/execution/recovery core
+and a separate [sealed-record assessment layer](four-arm-assessment-contract.md)
+pass deterministic tests. The assessor implements cluster aggregation,
+bootstrap/sign-flip tests and Holm adjustment, but its strongest output is a
+benchmark-local **quality treatment effect**, never an RSI claim: it does not
+authenticate the evolved package's generation/promotion lineage or component
+activation. Outer search-cost ledger, actual memory-retrieval activation check,
+CLI/UI projection, fresh external families and real provider final-holdout
+execution remain open. No final-holdout quartet has been registered or
+consumed. A fifth arm is still required for an O/S-by-M interaction claim.
