@@ -70,6 +70,10 @@ manifest v2 已登记 role/workflow/skill/O/M/S component；ExecutablePlan v1 �
 
 每步只运行受影响的定向测试和必要的真实资格任务；推送一个阶段后再跑完整 CI。所有阶段继续进入同一 Draft PR，负结果和缺测保留。
 
+### 2026-09-23 首个执行切面
+
+固定多角色 AgentPackage 和等调用量单角色包已作为领域无关基线实现；它们都通过同一 canonical benchmark 入口运行并由宿主独立评分。[公开 BBH development 单题资格运行](../../experiments/orchestration_qualification/RESULTS.md)中，MiMo v2.6-flash 的多角色包完成了 3 次模型调用、交接和交付，但得 0 分；单角色 3 次调用得 1 分。它证明“实际运行”路径，不支持多智能体收益，也**尚未实现**本文件的 PackagePatch v3、M-only/完整进化臂或统计对照。
+
 ## 研究依据与限度
 
 - [AutoSci](https://arxiv.org/html/2605.31468v1) 的 SciDAG/SciEvolve 指向可复用 DAG 模板、技能与记忆组织的版本化更新；它的科研生命周期是 demo 语境，不应硬编码到 Nexgent 核心。

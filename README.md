@@ -20,6 +20,8 @@ P4 已把 `R0 自更新为 R1 → R0/R1 从共同 A0 产生后代 → 下游效�
 
 真实 Provider 验证已经执行：2026-09-21 的 MiMo 普通任务用 3 次模型调用完成 schema 合法交付，证明 P1 模型驱动交付路径可用；同日 Workbench development 仍在 20 次调用后耗尽预算且没有交付或独立评价。此前 Qwen 因账户欠费被供应商拒绝，Gemini 最小探针连接失败。仓库不把普通任务交付、Workbench 失败、确定性控制面测试或 P2 求解器运行写成 RSI 效益。
 
+2026-09-23 的[多角色编排资格运行](experiments/orchestration_qualification/RESULTS.md)进一步证明：领域无关的三模型角色包可以经过 canonical BBH TaskService 执行、交接、发布并接受独立评价。在同一公开 development 单题、MiMo v2.6-flash 和 3 次调用上限下，固定多角色得 0，单角色顺序修订得 1。该单题负结果不构成普遍效应，也没有激活 O/S 自进化。
+
 | 内容 | 状态 |
 | --- | --- |
 | P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础、manifest v2、ExecutablePlan v1 与宿主可信账本已实现并通过定向合同测试；真实 MiMo 普通任务已形成 schema 合法交付，manifest-v2 计划路径仍只有 E0 工程合同证据，独立 Workbench 仍失败 |
