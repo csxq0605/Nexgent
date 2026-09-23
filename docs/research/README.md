@@ -1,8 +1,12 @@
 # 科研与 RSI 研究索引
 
-Nexgent 是通用、可运行 benchmark 的 RSI 智能体编排框架。科学发现与 OpenFOAM 是解耦 demo，只提供领域任务、工具、数据和评价，不能定义核心。2026-09-20 已实现 P1 的任务执行、交付评审与恢复基础；跨任务候选生成、独立晋升/回滚和改进策略自身更新仍待 P3–P4 实现。旧实验继续按当时协议解释，不能替代新运行时验证。
+Nexgent 是通用、可运行 benchmark 的 RSI 智能体框架。2026-09-23 的[新计划](../../REFACTOR_PLAN.md)以可扩展能力内核、模型工具／插件开发、执行与编排更新、独立验证和递归效用为主线。已有候选选择／晋升和递归控制面具有确定性机制证据；真实模型有部分任务与能力生成证据，但没有正向 RSI 结论。科学发现与 OpenFOAM 只提供独立环境，不能定义核心。
 
 ## 当前设计
+
+- [能力内核与可演化执行系统](../design/rsi-capability-kernel.md)：DeepSeek Harness、AutoSci、ADAS/AFlow、RHI/HSI 的参考机制与待检验问题；目标设计，不是已实现声明。
+- [真实任务时编排与技能探针](task-time-self-orchestration-live-20260923.md)：模型图、技能、检查点成功与失败的证据边界。
+- [仓库当前计划](../../REFACTOR_PLAN.md)与[旧 P0–P5 快照](../history/refactor-plan-p0-p5-20260923.md)：现行实施顺序与历史交付分开读取。
 
 - [定位与重构决策](../design/product-and-refactor-decision.md)
 - [vNext 架构](../design/agent-architecture-vnext.md)
@@ -10,7 +14,7 @@ Nexgent 是通用、可运行 benchmark 的 RSI 智能体编排框架。科学�
 - [P1 任务运行时验证](task-runtime-validation-20260920.md)：真实 episode 的冻结信息、轨迹、评审、恢复和验收记录结构；当前空字段保留为待运行证据。
 - [OpenFOAM demo](../demos/openfoam-cfd-design.md)与[环境核查](../demos/openfoam-environment-20260916.md)：独立领域任务与评价。
 
-## P1 与 RSI 研究边界
+## 已有任务执行基线与 RSI 研究边界
 
 P1 固定了任务、不可变 AgentPackage、能力准入、工件/记忆引用、调用收据、预算和恢复状态，并在默认包中加入交付评审与修订循环。这些对象让后续研究能够判断“哪个版本在什么输入和预算下做了什么”，但尚未形成跨任务自进化。
 

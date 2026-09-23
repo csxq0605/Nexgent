@@ -1,5 +1,7 @@
 # Nexgent RSI readiness and decision gates · 2026-09-23
 
+Scope note: this is the historical audit before the task-time capability-kernel replan. Its observations and G0–G6 labels describe that earlier snapshot, not today's implementation queue. Current status and acceptance gates are maintained in [REFACTOR_PLAN.md](../../REFACTOR_PLAN.md); later live probes are in [the task-time execution record](task-time-self-orchestration-live-20260923.md).
+
 This is an evidence ledger for the **framework**, not a claim that its demos
 prove general RSI. The authoritative run evidence remains in immutable Episode,
 candidate, trial, memory, and study records. This document records what each

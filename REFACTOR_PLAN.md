@@ -1,180 +1,154 @@
-# Nexgent vNext 重构计划
+# Nexgent 仓库重构计划
 
-日期：2026-09-23。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地，AgentPackage manifest v2 与 ExecutablePlan v1 已把 role/workflow/orchestrator/O-M-S component 接到真实 runtime、revision 和宿主账本恢复。P2 独立 OpenFOAM Re=10 smoke 已在真实 WSL2/Foundation 8 环境通过。P3 已新增多组件 O/S PackagePatch v3、默认 R0 输出合同、组件集合选择/晋升/guard 的确定性端到端验证，并接入纯 M 候选的独立 MemoryService release/snapshot 路径；P4 已有 durable-claim 可恢复 cycle；P5 已实现通用预注册 final-holdout 配对执行器。真实 MiMo v2.6-flash 已生成两个合法 S 候选和一个实际执行的 O 工作流候选；O 开发预检为候选 2/2、父包 1/2，但独立 selection 因一次候选响应违反 JSON 合同及更高工作量未过门槛。一次真实纯 M 改进尝试明确 abstain。全部未晋升，当前没有正向 RSI 效益证据。O/S+M 原子复合发布、改进后复用、递归真实效果和正式外部多任务研究尚未完成。
+修订日期：2026-09-23。基线提交：`4722cf7`。**本次重新确定目标、依赖与验收；新阶段的实现尚未开始，没有真实 RSI 收益结论。** 基线不包含工作树中尚未提交的 benchmark／memory 诊断改动。
 
-逐项可声称能力、自身设计限制与继续/停止门，统一记录在 [RSI readiness 审计](docs/research/rsi-readiness-audit-20260923.md)。selection 的父子分数是观测值；由于两臂模型输出形状不同且候选改动未实际加载，不能把 2/2→0/2 因果归于那次补丁。
+本文件是当前实施顺序的唯一入口；[能力内核决策](docs/design/rsi-capability-kernel.md)定义目标和待决技术选型，[产品决策](docs/design/product-and-refactor-decision.md)保留产品边界。旧 P0–P5 计划转为[历史快照](docs/history/refactor-plan-p0-p5-20260923.md)，其中的完成标记只解释当时的交付，不对应下列新阶段。
 
-## 1. 产品与执行范围
+## 1. 产品目标与完成条件
 
-唯一产品是 **通用 RSI 智能体框架 Nexgent**。它应能组织智能体完成普通任务，并通过独立 benchmark 检验任务能力、持久改进和递归效用。科学发现与 OpenFOAM 都是可选插件/场景；核心不能依赖 CFD 方程、求解器、case、论文五阶段流程或某个 demo 的评分。
+Nexgent 是任务类型无关、能够运行普通任务与 benchmark 的通用 RSI 智能体框架。模型可发现能力缺口，开发或修改工具、插件、技能、上下文／记忆策略、智能体执行循环和协作程序，实际运行这些变化，并根据独立反馈决定后续保留、改进或回滚。改进策略本身也属于可版本化、可检验的行为。
 
-进一步的目标架构已固定为[无状态底座与任务专一型自设计团队](docs/design/stateless-kernel-and-self-designed-teams.md)，任务时的编排合同见[自编排图架构](docs/design/task-time-self-orchestration.md)：同一通用 Compiler/Runtime 接纳由智能体为当前任务提出的团队、技能和协作程序；外部 Store 保存任务状态、记忆与版本。P1 的固定多角色包和 P3/P5 的研究执行器只是底座及资格工具。当前分支已新增任务时图提案、图操作编译、pending 修订和生成图恢复；这只满足自主形成执行图的首个纵切，不等于技能开发和跨任务演化。后续实施先补任务驱动的设计／执行／能力开发／复用路径，再扩大 demo 与统计试验。
-
-当前实现阶段仍遵守该产品边界。定位依据见[设计决策](docs/design/product-and-refactor-decision.md)，接口和执行模型见[架构](docs/design/agent-architecture-vnext.md)与[ExecutablePlan v1 / manifest v2](docs/design/executable-plan-v1.md)，P3 的现行合同见[反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)，研究依据与冻结实验见[P3 跨任务 RSI 设计](docs/research/p3-cross-task-rsi-design-20260920.md)及[RSI orchestration research refresh](docs/research/rsi-orchestration-refresh-20260921.md)。
-
-## 2. 对旧完成判断的修正
-
-此前的“整体重构已完成”仅有源码基础设施、插件解耦、信息窗口和有限机制试验的证据，不能代表用户要求的完整智能体架构已完成。当前应保留：
-
-- 通用 benchmark 注册、实际进程执行、版本身份、模型代理、预算/停止恢复与原始证据；
-- 科学与 BBH 插件的独立包装，以及全部正、负、缺测结果；
-- 0.8 已验证的 282 项本地测试和四项跨平台 CI，但不将其转移为 vNext 已通过验证。
-
-当前需要重构：四文件包约束、以代数/改源码为中心的控制器、固定初始研究链、仅靠宿主整理历史的记忆路径，以及只能展示这类运行的 UI 投影。具体逐模块判断见架构迁移表。
-
-## 3. 协作责任与共享合同
-
-| 工作线 | 责任 | P0 交付产物 | 下游 |
-| --- | --- | --- | --- |
-| 产品与整合 | 根代理 | 定位决策、本计划、README、文档入口、PR | 全部工作线 |
-| 架构与内部审计 | 架构子智能体 | `docs/design/agent-architecture-vnext.md` | 运行器、编排、界面实现 |
-| 外部方法与实验设计 | RSI 子智能体 | `docs/research/agent-orchestration-rsi-synthesis-20260916.md` | 改进方法与实验负责人 |
-| 领域场景与环境 | 科学子智能体 | `docs/demos/openfoam-cfd-design.md`、环境记录 | 可选 CFD 插件与验证 |
-
-先完成各自文档，再交叉核查：根代理检查通用边界和交付状态；架构负责人检查插件是否逼迫核心加入领域特例；方法负责人检查实验能否激活候选机制；领域负责人检查物理指标是否真实且可比较。共享对象及字段以架构文档为准；领域信息通过命名空间元数据与工件传递。
-
-后续实现按文件归属分工，不由多名代理同时改同一模块。接口变更先更新合同，再由依赖方接入。子智能体的开发分工本身不计作 Nexgent 产品的多智能体能力。
-
-## 4. 阶段、依赖与出口
-
-### P0：定位、方法与可执行设计（已完成）
-
-已交付定位决策、通用架构、论文到方法的对应、迁移范围、OpenFOAM demo 与只读环境核查，并修正旧文档中的完成状态和范围错误，保留历史结果。
-
-出口已经满足：文档之间的对象和边界一致，现有能力、拟实现能力和未支持的研究假设分开陈述；该阶段历史提交保留在现有 Draft PR。
-
-### P1：任务执行、交付评审与恢复基础（代码已实现，真实模型任务效果未通过）
-
-依赖 P0。当前通用 AgentPackage 已能读取目标与输入，规划工作，调用模型、技能、工具和委派，交接工件，依据失败或交付评审继续修订并交付。普通任务和轻量非 CFD workbench benchmark 共用 `TaskService`；Main 对话、CLI、持久存储和导出也已接入同一状态，高级任务/证据控制台保留完整字段和 RSI 只读投影。
-
-AgentPackage manifest v2 新增显式 role、workflow、component 与 orchestrator 注册。component 以稳定 id 绑定 O/M/S 分类和 role/workflow/skill/entry/resource 引用；v2 谱系不能降级到 v1，也不能让同一稳定 component id 悄然改变 class/kind/ref。O 类 workflow orchestrator 的冻结 JSON workflow 会在执行边界编译为 `nexgent.executable-plan.v1`，由宿主核验角色能力、组件引用、Episode 工具 lease、控制/工件边、join、局部上限、失败路由和 revision 规则，再通过真实模型、技能、工具、委派与发布路径运行。
-
-原计划 revision 只允许切换到同一不可变 AgentPackage 内已注册的 workflow；现在还可由已完成节点的 `proposal_path` 读取模型图提案，在 manifest 与 Episode lease 内新增／删除／改写 pending 节点和边。运行中和终态节点及其收据不可改写。生成图的已解析完整内容与摘要一起持久化；恢复时持久计划仍只是投影，宿主 RPC journal、工件可见性和节点收据才是权威证据。已完成节点通过交叉核验后复用，已 admission 却没有持久 outcome 的 running 节点进入 `recovery_required`。该纵切面证明声明、执行、任务时生成图修订和恢复合同已连通，不证明模型能稳定产生高质量组织或跨任务改进。详见[ExecutablePlan v1 与 manifest v2](docs/design/executable-plan-v1.md)和[真实模型探针](docs/research/task-time-self-orchestration-live-20260923.md)。
-
-代码与确定性测试已经覆盖受限子进程、版本化多文件包、模型/工具节点、显式工件、当前记忆快照、树级共享预算、停止恢复、交付 schema 核验、包内 reviewer 修订和冻结 benchmark 评价。简单任务仍可走单体路径，不靠强制增加角色数制造协作证据。
-
-P1-V 已将跨工具工件交接收紧为核心 JSON Schema 合同：插件以 `x-nexgent-artifact-ref: true` 标记输入位置，运行器按完整 Draft 2020-12 applicator 语义验证真实 `artifact-…` 身份和 Episode 可见性，再登记工具调用。普通数据中的同名属性不会被误判；输出 schema 不允许声明该标记。Workbench 与 OpenFOAM 只消费这个通用合同，不在核心写入领域流程。
-
-真实 Provider 验证已经登记。Qwen `qwen3.8-flash` 的最小与 Workbench 请求均被阿里云以 400 `Arrearage` 拒绝，本机 Gemini provider 最小探针返回 `APIConnectionError`。MiMo `mimo-v2.5` 的旧 Workbench episode 在 30 次模型调用后失败；2026-09-21 的普通任务资格运行用 3 次调用完成 schema 合法交付，但新的 Workbench development episode 仍在 20 次调用后预算耗尽，评价不可用。完整记录见[验证记录](docs/research/task-runtime-validation-20260920.md)与[增量机器摘要](docs/research/task-runtime-validation-20260921.json)。
-
-实现出口中的共享执行器、核心独立安装、真实状态窗口和受控失败恢复合同已经完成。实际 MiMo 轨迹现在证明普通任务的模型调用、任务内发布、reviewer 路径和 schema 合法交付能够闭合；Workbench 轨迹证明工具与失败反馈被激活，但没有在预算内完成工件验证或独立评价。受控失败恢复、benchmark 成功及反馈后的有效修订仍待验证。P1 的工程底座可供 P2/P3 开发使用，但不能写成完整 RSI 或已验证的自我改进效果。
-
-### P2：独立 OpenFOAM demo 接入（Re=10 smoke 已完成）
-
-依赖 P1。独立 `benchmarks/openfoam` 插件已经注册领域工具与隐藏评价器；核心只新增通用、根 episode 共享且路径受限的工具工作区，不包含 OpenFOAM 命令、Reynolds 数、压力单位、残差阈值或中心线评分。
-
-已完成的冻结切片只有 `split=smoke, seed=0, cavity_re10`：插件从 Foundation 8 官方 cavity 模板做有界常规文件复制，在宿主管理目录内以固定参数运行 `blockMesh`、`checkMesh`、`icoFoam`，限制单命令时间和输出，解析 mesh、求解时间及最新 `U`/`p` 字段，并将交付物绑定到宿主 `run.json` 收据。隐藏评价器要求输入完整性、环境探针、准备、真实求解、公开 smoke 检查与最终验证收据全部匹配。
-
-真实 WSL2 `Ubuntu-20.04` / OpenFOAM Foundation 8 运行已经通过 Re=10、20×20×1 smoke：三个程序实际退出成功，`checkMesh` 报告 `Mesh OK.` 和 400 cells，`icoFoam` 到达模板结束时间，最新 `U`/`p` 内部场可解析且有限，隐藏评价器接受与真实收据一致的交付。真实 `TaskService` 还用固定无模型 AgentPackage 完成了一次合成单次拒绝、重试、求解、工件校验与隐藏评价链。详细证据见[2026-09-20 验证记录](docs/demos/openfoam-smoke-validation-20260920.md)。这只是执行和结构 smoke 及框架恢复证据，不建立模型自主恢复、稳态、Ghia 精度、Re=100、网格/时间收敛、性能或 RSI 结论。
-
-### P3：跨任务持久改进（控制面已实现，效果实验未完成）
-
-依赖 P1。当前实现固定以下闭环：
+核心主线是：
 
 ```text
-development Episode
-  -> FeedbackBundle
-  -> 独立且冻结的 improver R0
-  -> BehaviorPatch（只允许 O/M/S）
-  -> 不可变 child AgentPackage
-  -> 预登记 paired selection + PromotionPolicy
-  -> eligible decision
-  -> 显式 CAS promotion + package channel
-  -> 预登记 guard Episode
-  -> monitor / rollback
+任务与已有能力 → 执行／发现缺口 → 实现并试用能力或行为变化
+             → 任务反馈 → 候选版本 → 独立验证 → 后续任务复用
+                                       └→ 退化回滚／失败归档
+改进策略的新版本 → 实际产生后代 → 比较后代效用 → 采用或拒绝
 ```
 
-`GenerationService` 只从本地、终态、明确标记为 development 且绑定当前 active 父包的 Episode 捕获有界反馈。独立版本化的 `R0` 通过同一 `TaskService` 运行，只能交付严格的声明式 `BehaviorPatch`；可信宿主验证可修改路径、O/M/S 分类、旧摘要、大小、激活探针和完整 child 包。`R0` 的 improve entry 与执行闭包在 P3 冻结，候选不得修改 evaluator、gate、权限、预算核算或宿主控制代码。
+DAG、多智能体团队、工具插件和代码编排都是系统可使用及改进的对象。任务可以直接求解、临时组队或开发能力；不要求固定角色数、固定工作流、先造技能或每代修改改进器。Manyselves 仅保留为早期结构参考，不再作为产品形态或验收依据。
 
-产品默认 reference R0 使 `rsi-generate` 无需外部 improver JSON 也能通过配置模型执行真实 generation。它保留 legacy path-v1 与 manifest component-id-v2 的单文件合同，并新增 manifest component-set-v3：O/S 多组件 add/replace/remove 及完整 child manifest 由宿主核验，M 和控制面修改仍受独立边界限制。调用方仍可显式传入冻结 improver package，或以 improver channel + expected revision 使用 P4 部署版本。默认 R0 只生成候选，不自动 selection、promotion 或 guard，也不包含 demo/benchmark 专用逻辑。
+用户通过 Main 提交目标，信息窗口展示真实执行、能力变化、成果和验证结果。科学发现与 OpenFOAM 是可选插件／demo；移除领域插件后，框架仍能执行其他任务和 benchmark。OpenFOAM 求解器 smoke 不构成框架 RSI 验收。
 
-`EvolutionService` 把 paired suite、benchmark/evaluator snapshot、父子顺序、预算、可重算的 execution environment/tool/runtime snapshot 及 PromotionPolicy 在结果产生前冻结。实际 provider/model 身份由逐调用 receipt 证明，并在正式实验中与预登记配置核对；当前计划记录本身不声称已预先完整冻结二者。development decision 不能晋升，final holdout 不能进入演化；selection 缺分、用量不完整、身份不一致和关键回归均 fail closed。选择门的 `cost` 是模型调用、charged completion tokens、工具调用和节点用量形成的 normalized work unit，不是供应商货币费用。eligible 与 promote 分开；只有 `GenerationService` 闭合真实 R0 生成收据的 candidate 有部署权限，受控导入只进入研究/archive；promote 还要求父包仍为 active，并强制绑定预登记 monitor plan。普通任务只在创建时通过 `package_channel` 解析部署包。guard plan 与阈值在晋升前冻结，其完整任务多重集只允许一次执行；缺项、重复项、usage 不完整或 evaluator receipt 不匹配均 fail closed，退化时沿已记录部署边回滚。
+框架交付需要实际运行及迁移证据；效果研究允许零或负结果。未实现能力、模型失败、基础设施缺测和未获支持的收益结论分别报告，不能用测试数量、图复杂度或候选数量替代验收。
 
-当前完成的是工程机制：不可变记录、hash-linked 事件、只读安全投影、普通任务的通道加载、内置参考 R0，以及一个以固定无模型 fixture 执行 feedback → generation → selection → promotion → new Episode → guard → rollback 的确定性闭环和脱敏证据导出。真实 MiMo v2.6-flash 已从开发反馈生成两个有效 S 候选和一个真正改变可达工作流的 O 候选。O 候选的验证角色在新开发任务中实际执行，候选 2/2、父包 1/2；独立 selection 有一次模型响应违反 JSON 合同，且候选工作量较高，未通过晋升门。纯 M 真实试验中 R0 abstain，未生成候选。尚未完成的 P3 研究出口包括：独立 selection 改善、晋升后在新任务中激活所声称行为，以及由重复和对照支持的效应估计。候选未变好时必须报告 rejected/missing；不能把代码路径、模拟测试、candidate 数量、一次模型调用或一次部署写成 RSI 效益。
+## 2. 当前基线与差距
 
-通用 `RSICycleService` 已将上述 P3 步骤组织成可恢复持久状态机：创建时冻结 task channel revision、improver、selection/guard adapter snapshot、预算、seed 与 policy；运行时逐阶段保存已有不可变证据引用。paired/monitor 单次 claim 可在“run record 已写入、claim 尚未完成”的中断窗口唯一关联并原子收口；promotion 后的 guard 和 rollback 绑定预期 revision/package/monitor plan，通道漂移 fail closed。`rsi-cycle-start/resume/show/recover` 消除了正常路径的手工 ID 串接，默认信息窗口可查询脱敏 cycle 状态。Cycle 还可冻结独立 recursive improver channel 的 revision/package/digest，让已部署 R 承担下一轮 generation；可信宿主在 Episode 创建和启动边界重新核验登记，避免 R channel 漂移后错误执行旧包或产生模型费用。
+| 对象 | 已有资产与证据 | 缺口／新阶段 |
+| --- | --- | --- |
+| 执行底座 | TaskService、AgentPackage、模型与工具调用、工件、预算、停止恢复；普通任务和 benchmark 共用执行路径 | 服务接口与生命周期仍集中在宿主实现，缺少可替换插件运行时；A–B |
+| 工具／插件 | ToolRegistry 从已安装的 nexgent.domains entry point 加载可信处理器 | 模型不能定义并试装新 ToolSpec／服务插件；现有受限 worker 不是 OS 容器；B–C |
+| 技能开发 | develop_skill 编译受控 Python 子包；确定性测试覆盖开发、修复、委派；真实模型写出过可运行代码 | 真实父任务自主创建并调用技能尚未成功，不能替代工具／插件开发；C |
+| 编排 | 任务角色、定向消息边、pending DAG 修改与恢复；真实 MiMo 完成一个 7 节点、多角色任务 | 真实反馈后第二次改图未成功；任务角色仅 ask，缺少持久 mailbox；执行循环与上下文策略不够可替换；D |
+| 跨任务采用 | 图／角色候选有确定性配对评价、加载检查、晋升、guard、新任务 channel 复用 | 普通 Main 任务不会自动驱动完整采用链；图与新技能联合激活未证明；E |
+| 记忆 | 独立 MemoryService release、快照、选择与回滚；真实 M 提案曾 abstain | 与 O/S 的一致版本组合、真实检索激活及收益未验证；E–F |
+| 递归 | 独立 R 通道与 R0/R1 后代比较、恢复、guard 有确定性测试 | 无真实模型递归收益；F |
+| 产品／研究 | Main 与高级信息窗、benchmark SDK、两臂／四臂研究执行器 | 插件树、完整轨迹、能力开发与演化状态未连通；正式多任务研究未执行；B–G |
 
-详细对象、接口和信任边界见[控制面设计](docs/design/p3-feedback-evolution-control-plane.md)。固定编排、匹配额外调用、只积累记忆与 P3 主机制的对照见[研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)。
+证据入口：[真实自编排及技能探针](docs/research/task-time-self-orchestration-live-20260923.md)、[候选资格结果](experiments/orchestration_qualification/RESULTS.md)、[记忆资格结果](experiments/memory_qualification/README.md)、[readiness 审计](docs/research/rsi-readiness-audit-20260923.md)。确定性评分替身只能证明机制连通。已有真实 O/S selection 未过门，尚无真实晋升后的净收益。
 
-### P4：改进过程的可更新与递归执行（机制闭环已实现，效果实验未完成）
+## 3. 方法来源与落地责任
 
-依赖 P3。当前实现为 R 建立独立 archive、channel 和 hash-linked event chain。active R 通过真实 `TaskService` self-update Episode 交付受限 `ImproverPatch`，形成直接子代；R0/R1 的元比较从同一 A0、同一 FeedbackBundle、相同 task mutation policy、空 memory 起点和等分总预算出发，实际调用 `GenerationService` 产生任务后代，再通过冻结 benchmark adapter 运行和评价。元效用只来自后代质量、成功率、回归与 charged work。
+| 来源 | 要借鉴并检验的机制 | 本计划交付 |
+| --- | --- | --- |
+| [DeepSeek Harness 架构](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md)与[插件管理](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/boot/plugin-manager/README.md) | 服务接口／实现／模型工具分离，插件作用域与生命周期，可替换 agent loop，事件轨迹，模型可参与能力配置与开发 | A–C 的内核选型、插件 SDK、作用域试装、运行轨迹；可扩展性本身不宣称 RSI |
+| [AutoSci](https://github.com/skyllwt/AutoSci)与[论文](https://arxiv.org/html/2605.31468) | SciFlow 技能协议、SciDAG 算子图与工作流复用、SciEvolve 从反馈更新技能／记忆／模板 | D–E 的编排策略与反馈更新；核对 paper／arxiv-v1 与 main，科研阶段不进入核心 |
+| [ADAS](https://arxiv.org/html/2408.08435)、[AFlow](https://arxiv.org/html/2410.10762) | 可编程智能体／工作流、执行反馈、候选档案与搜索 | D–F 比较完整行为变化，不将搜索空间收窄为一处提示替换 |
+| [RHI](https://arxiv.org/abs/2607.15524)、[HSI](https://arxiv.org/abs/2608.08466)及[已有文献综合](docs/research/agent-orchestration-rsi-synthesis-20260916.md) | 上下文与信息流可优化；任务执行、改进、元改进分层并用后代效用验证 | E–F 的循环／上下文更新和 R0/R1 研究；新预印本的主张不作为本地效果证据 |
 
-promotion 强制绑定预登记 improver guard。部署后的候选生成通过独立 improver channel 解析 R id/digest/revision，并在运行结束前复核通道未变化。guard 同样经该通道产生真实任务后代，完整覆盖冻结任务多重集；缺测、身份错误、usage 不全或效用低于阈值都 fail closed，并沿确切部署边 CAS rollback。
+研究工作遵循问题定义 → 一手文献与代码复核 → 机制实现 → 开发试验 → 冻结对照 → 独立评价 → 解释与复现。当前无通用 research SKILL.md，按用户已授权的同等科研流程执行。每项来源都需对应实现接口、激活证据和可证伪实验。
 
-确定性 pilot 已闭合 `R0→R1`、R0/R1 后代 `0.4/0.8` 元比较、R1 channel 加载、`R1→R2` archive、自注册阈值 `0.9` 触发回滚，以及新 revision 通过 channel 再次实际加载 R0。该 fixture 不使用模型、网络或工具，只证明机制；真实 R 是否能从任务反馈产生更优改进策略仍未建立。
+## 4. 新阶段与验收
 
-`RecursiveImproverCycleService` 已把 feedback、R self-generation、meta plan/run/assessment、decision、guard plan、promotion、guard 与 rollback 组织为持久状态机。action 与 generation invocation claim 在同一事务预留；terminal generation、claim 与事件原子闭合；R/A0 在 generation create/run 和 evaluation create/run/evaluate 前重验。控制面漂移抛出独立 `AdmissionConflict`，不会被写成性能失败或触发错误回滚。CLI 提供 start/resume/show/recover，公开投影按字段和类型过滤。它仍只证明恢复与门控机制，不证明模型能递归提高 R。
+当前状态：**计划已重定；A 的技术小样尚未执行；B–G 均未按新合同验收。** 已有代码作为迁移资产，不直接填入新阶段完成数。
 
-出口分两类：实现上证明新版本能够承担下一次改进任务；研究上比较两版改进策略实际产生后代的效用。前者不等于后者；无需强制每代修改 meta，宿主评分和预算边界保持固定。
+### A. 内核边界与技术选型
 
-### P5：冻结协议、独立研究与产品验收
+交付：固定版本的一手代码审查、两条等价小样及最终 ADR。比较：
+1. 保留 Python TaskService／Store，抽取可替换服务与插件接口；
+2. 以 DeepSeek Harness 及其底层 Cordis 插件框架承担执行后端，桥接 Nexgent 的版本、反馈和 benchmark；Cordis 的角色见上列官方架构文档，不是第三条独立后端路线。
 
-依赖 P2–P4。通过开发试验选定问题、任务分布、资源和评价后注册正式研究；不得先看最终数据再回写阈值。
+两条小样使用同一最小任务：通过模型接口完成一次任务，在隔离作用域注册新工具并调用，卸载后调用不可继续；将实际版本、输入、输出和失败连到既有 Episode／评价记录。小样中的人工编写插件只验证后端接入，不计作模型能力开发。
 
-- 固定任务 agent、固定改进器的架构搜索、只积累记忆、完整系统和目标机制消融。
-- 控制同一模型、任务信息和资源上限；记录实际 tokens、仿真工作和时间。额外调用不能自动归因于架构效果。
-- 同起点比较候选；独立任务采用冻结版本并禁用写回，避免把测试反馈当下一次调参输入。
-- OpenFOAM 场景变体用于 CFD 域内泛化；非 CFD benchmark 单独检验框架接入和行为迁移，二者不混称跨域。
-- 检验任务质量、完成率、成本、失败恢复和退化；若声称递归提升，再补实际后代效用及跨域改进策略对照。
+决策依据：任务内能力发现／试装、调用与事件重放、暂停恢复、模型适配、Windows 环境、隔离条件、依赖与上游 API 稳定性、旧证据兼容、维护及迁移工作量。完成后选择一个生产执行主路径；不维护两套并行核心。若某条不能运行，保留阻断证据再决定，不用接口清单假定兼容。
 
-出口：完整任务系统可运行、独立插件成立、改进被后续执行使用；有报告支撑效果结论。结果可以为零或负，但不能以此掩盖未实现的能力，也不能将有限结果写成普适或加速增长的 RSI。
+**出口：实际运行记录与迁移清单支持一项明确技术决策。**
 
-当前已实现 `RSIStudyService`：只接受 final holdout，冻结两个 AgentPackage、宿主私有 benchmark 注册、显式统计单位/来源 cluster、完整任务/seed、provider/model、执行环境摘要、每 Episode 硬预算、随机化调度、工程门和 cluster bootstrap/sign-flip 统计；每个 cell 通过真实 `TaskService` 执行，空 memory 且禁止写回，可恢复但不可选择性重放。模型收据区分请求别名与 provider 实际 model/revision；没有固定 revision 时只允许时间窗口内的局部工程结论。CLI 与 GUI 只投影脱敏计划和报告。它是正式研究的执行底座，不等于外部研究已完成。主矩阵至少需要一个工具/政策任务族、一个新鲜可执行代码任务族和一个私有自托管交互任务族；OpenFOAM 单列为 demo，Workbench/饱和 BBH 只做资格与接口检查。完整协议见[P5 预注册研究](docs/research/p5-preregistered-rsi-study.md)。
+### B. 可扩展能力内核
 
-独立 `FourArmStudyService` 已实现 F/S/M/E 同一 final-holdout 统计单位的原子预留、冻结 package/M release 与环境身份、四臂顺序、TaskService 执行和崩溃后保守恢复；只读评估层按来源 cluster 做 bootstrap、sign-flip 和三比较 Holm 校正。它不改写两臂研究合同；真实 final-holdout 尚未消耗。统计层最多报告 benchmark 局部质量 treatment 效应，不自动称 RSI 收益。外层搜索成本、改进父系和组件激活认证、记忆实际检索、公开投影与 CLI/UI 仍待实现；如声称 O/S 与 M 交互效应，还需预登记第五臂。详见[四臂确认协议](docs/research/four-arm-confirmatory-protocol-v1.md)。
+依赖 A。建立带版本的服务接口、provider 实现、模型可调用工具三层；支持任务／会话作用域、依赖解析、检查、加载、卸载、失效清理及失败恢复。既有 ToolRegistry、技能、模型网关、存储、执行循环通过适配器进入同一接口。
 
-TaskService benchmark 的 SDK 已收敛为显式 descriptor/protocol、隔离 registry、有限 JSON 合同和独立 host runtime 指纹；Workbench、OpenFOAM、BBH 两任务与 scientific-discovery adapter 已接入。scientific-discovery 的一个 synthetic case 对应一个 TaskSpec/Episode，隐藏 forecast 留在宿主评价器，项目私有 release key 通过 HMAC 派生隐藏生成 seed、统计单元和不透明 family cluster，并提供确定性的无模型 reference AgentPackage。它与 BBH 都保留 legacy 入口和历史记录，且不把 legacy ID 与 Episode ID 互认。P3 paired selection/guard 与 P5 study 冻结同一 outcome policy：只有 `failed + agent/protocol` 属可测的 observed zero，cancelled、paused、waiting、基础设施故障和 evaluator unavailable 均保持 missing。完整边界见[Task benchmark SDK](docs/design/benchmark-sdk.md)。
+执行循环、上下文整理、记忆检索、编排和工具实现可以替换。授权、凭据访问、资源计量、证据完整性和独立 evaluator 由稳定宿主管理；候选插件不能修改评价自己的门槛。保留现有收据与 Episode 身份，通过有版本的适配连接事件轨迹，不破坏原始证据。
 
-TaskService 现将工具调用次数与数值/外部工作量分开核算。`ToolSpec` 声明调用前固定预留，可信 handler 经 `ToolContext` 在实际工作边界持久计费，root Episode 对并行和委派共享原子预算；崩溃或未知结算保留预留且使 usage 不完整。P3/P4/P5 的成本门统一读取宿主 `charged_tool_work_units`，历史记录按显式零基线只读兼容。框架不能自动推断任意求解器的 FLOPs；scientific-discovery DomainPack 已在数值批次边界接入宿主可信计量，返回值中的 `work_units` 只作诊断。完整合同见[工具工作量计量](docs/design/tool-work-accounting.md)。
+提供实际能力清单、schema／SDK 查询和增量编写入口；避免让模型反复猜测一份巨大的图或插件 JSON。界面同步提供最小能力清单和轨迹查看。
 
-P3 现有一个独立的正向 E1 exporter 与领域中立 qualification runner。它只接受仓库当前 immutable reference R0 的单一 `rsi_improver` 模型输出；现有 qualification fixture 仍使用 legacy path-v1 目标。runner 要求输出摘要等于入库 patch、usage/模型身份完整、paired quality 或 success 严格改善、独立 guard 通过，并由未参与 development/selection/guard 的冻结统计单元在晋升后再次加载同一 package revision。attempt 在模型调用前持久化且不可覆盖。MiMo v2.6-flash 已用于 [PackagePatch v3 资格尝试](experiments/orchestration_qualification/RESULTS.md)：紧凑提案形成了真实候选，但独立 selection 结果为负且未晋升；该结果不能写作正向 E1。原 E1 runner 的合同和运行方式见 [P3 E1 qualification pilot](experiments/p3_e1/README.md)。
+**出口：替换一个工具 provider 和一种执行策略无需改宿主分发代码；作用域隔离、卸载、暂停恢复和旧任务记录兼容有定向证据。** 能力清单记录接口、声明的外部操作、固定依赖与实际处理器摘要；依赖漂移、超出已授权操作和卸载后调用有对应失败记录。恢复时对执行结果未知的外部操作先核对状态，不能静默重放。
 
-scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分布的兼容名称，仅用于迁移 regression/golden 等价检查。它不是新鲜 holdout，也不支持新的科学发现、模型效果或 RSI 结论；正式研究仍需新的 host-private release、独立来源 cluster、重复、控制臂和真实 provider 收据。
+### C. 模型开发工具／插件并在任务中使用
 
-## 5. 当前状态
+依赖 B。形成能力检查 → 缺口判断 → 开发 → 隔离运行检查 → 试装 → 实际调用 → 失败修复的任务路径。支持文件／源码、接口、依赖、测试工件与增量修改；保留受限技能作为轻量方式，但它不能冒充完整插件系统。
 
-| 项目 | 状态 |
+至少覆盖两种能力：一个可实际调用的新工具，以及一个改变运行行为的服务／策略插件。外部依赖、文件、进程和网络使用按已有授权及运行环境处理。模型生成的通用插件先在隔离 worker／runtime 测试，不能直接当作可信宿主处理器执行；具体隔离方式由 A 的实测决定。
+
+**出口：真实模型在普通任务中自主开发一个新工具和一个服务／策略插件，经检查与试装后分别实际调用或激活并完成交付；原始代码与运行收据对应，过程不依赖人工修正提案或手工创建诊断子任务。** 两类能力均经过 B 的生命周期与操作边界验证；同时保留无法开发、测试未过和无必要开发的任务。跨任务采用在 E 验收。
+
+### D. 可演化的执行与编排
+
+依赖 B，可与 C 并行。把开放式 agent loop、DAG 执行、代码编排作为可组合的策略。沿用现有 ExecutablePlan 编译、pending 修订与恢复，接入角色工具访问、消息／上下文选择、持久会话或 mailbox、并行／路由／委派／停止策略。
+
+任务可选现成流程，也可实现新的工具组合或协作程序。planner／architect、上下文整理和路由策略均有版本，不能成为永远冻结的外部组织者。模型可以改节点／边，也可以改执行程序；是否采用 DAG 由任务与策略决定。
+
+**出口：同一入口在不同任务上实际使用不同执行形态；其中至少一项真实任务根据中间反馈修改编排或执行策略并继续完成任务，暂停恢复不重放已完成副作用。** 不以更多角色或更大 DAG 作为收益指标。
+
+### E. 任务来源的持续进化
+
+依赖 C、D。复用 GenerationService、EvolutionService、MemoryService 和 cycle 的可靠部分，将工具／插件／技能／执行策略纳入同一候选与版本关系。普通任务反馈按已配置策略自动触发可恢复开发与采用流程；用户不必手工串接 ID 或启动实验脚本。
+
+区分当前任务临时能力、待评价候选和后续任务默认可用的已采用版本。保存适用条件、依赖、父系、触发反馈和实际调用证据；选择相关经验和能力，避免把一次性数据／答案固化成通用实现。O/S/M 或后继组件类型需有一致的版本组合和原子激活，不要求独立部件每次一起变化。
+
+开发验证可反复改进；独立 selection 和 guard 受冻结协议管理。仅安装文件、版本存在或测试通过不能替代实际激活。使用者实际权限扩大时才进入授权边界，不给已授权开发增加逐轮确认。
+
+**出口：真实任务来源的能力变化完成独立评价，结果按原定规则采用或拒绝；至少一个模型开发的工具或服务插件获得采用，由新进程中的独立任务自动发现并实际调用或激活，退化可回滚。** 技能或 DAG 候选单独成功不能替代插件采用出口。全部被拒绝时，只完成评价路径，独立采用／复用出口仍待完成；不得用确定性替身、人工导入版本或降低门槛代替。
+
+### F. 多任务研究与递归改进
+
+依赖 C–E 的实际开发路径。先做开放开发试验，记录合同／工具／模型／资源设计造成的失败；稳定后预注册独立研究。预算从观测工作量制定并可配置，smoke 的小上限不能被当作产品能力边界。
+
+研究至少包含工具与数据处理、可执行程序、交互环境三类任务族；同一执行框架加载各自 BenchmarkAdapter。OpenFOAM 另作可选科学 demo。比较固定框架、同资源单智能体、仅记忆、完整能力进化；按主张补工具开发／编排／上下文更新消融。同调用数不等于同纠错机会，报告模型 tokens、外层开发／搜索成本、工具工作、时间及失败率。
+
+预注册任务来源、划分、版本、模型、资源、评价器、成本规则、重复及缺测处理；开发和 selection 不重复消耗 final holdout。使用现有 study 服务之前核查 activation、外层成本、版本父系和记忆使用证据。
+
+递归试验中，新改进器必须实际产生后代，并在共同起点和资源下与旧版比较后代效用。不能把任务版本的一次提升称为改进器变强。
+
+**出口：可复现报告同时给出真实能力激活、未见任务效果、成本与失败／缺测；R 研究单独报告。** 结果可为零或负，确认效果之前不宣称正向 RSI。
+
+### G. 产品与发布验收
+
+最小产品接入随 B–E 同步；最终依赖 E、F 的证据投影。完成 Main 持久多轮、附件上下文、澄清／暂停恢复；显示实际插件与能力版本、执行轨迹、候选差异、采用／回滚原因及 Benchmark／RSI Lab。
+
+核查此前项目目录 SQLite/WAL 写入故障，恢复正常项目目录使用；不能长期靠临时演示目录作为默认产品路径。UI、CLI 和 benchmark 使用同一执行与版本身份。完成安装、迁移、核心独立运行和代表性平台检查。
+
+**出口：用户从 Main 能启动、观察并恢复真实任务与能力开发／复用；文档、界面、PR 与收据对完成状态的描述一致。** OpenFOAM Re=100、收敛和参考解扩展在核心出口之后独立安排。
+
+## 5. 保留、改造与后移
+
+| 原计划资产 | 新处理 |
 | --- | --- |
-| 用户确认的框架定位与独立 demo 边界 | 固定要求 |
-| vNext 定位、架构、研究综合、OpenFOAM 设计 | P0 已完成；设计中的正式数值研究仍未执行 |
-| 本机 OpenFOAM | 已确认 WSL2 / Ubuntu 20.04 / Foundation 8，并真实运行 Re=10 教程 smoke |
-| P1 任务执行、交付评审、工件/记忆、预算与恢复基础 | 0.9 已实现，含 manifest v2、ExecutablePlan v1、pending 子图 revision 与 root 共享宿主账本恢复；定向证据为 E0 工程合同，真实 MiMo 普通任务交付已通过，Workbench 独立评价仍未形成 |
-| Main 对话与信息窗口 | 默认入口已切换为自然语言 Main；运行、成果、证据在右侧信息窗，高级任务控制台仍可打开；项目级消息历史、附件上下文和澄清回合仍待后续切片 |
-| Task benchmark SDK 与失败测量 | 0.9 canonical descriptor/registry、插件隔离、host runtime 指纹及 P3/P5 共享 outcome policy 已实现；BBH 两任务与 scientific-discovery 已迁移并保留 legacy 兼容入口；科学历史 holdout 仅作迁移回归材料 |
-| OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
-| 跨任务行为更新 P3 | manifest-v2 component id 与整包 PackagePatch v3 已贯穿反馈、生成、选择、加载证据和部署门；真实模型生成两个 S 候选及一个已实际执行的 O 候选，独立选择均拒绝，尚无晋升后复用或正向效果；纯 M 真实尝试 abstain，独立 release/snapshot 仍只有工程验证 |
-| 改进器递归执行 P4 | 独立 R 通道、自更新、真实后代元评测、guard/rollback、durable invocation claim、逐副作用 admission 与 recoverable cycle 已闭合；真实模型/统计递归效益待完成 |
-| 冻结正式研究 P5 | 两臂 final-holdout 执行器与独立四臂 quartet 原子预留/执行/保守恢复、sealed-record 统计层已有定向测试；outer cost、memory 检索和 O/S 激活、演化父系、CLI/信息窗接入与外部多任务族真实研究待完成 |
-| 0.8 的源码机制与历史结果 | 保留；不能替代以上状态 |
+| P0 定位／论文综合 | 保留框架与 demo 边界；当前优先级改由本计划定义；补齐 DeepSeek 能力内核与代码审查 |
+| P1 TaskService、包、图编译、恢复 | 保留可核查运行合同；按 A 的决策抽取接口或桥接，不为多智能体团队另建核心 |
+| P2 OpenFOAM | 保留插件和原始 smoke；脱离核心重构关键路径 |
+| P3 O/S/M、采用桥与控制面 | 迁移为能力包的验证与发布服务；补任务来源自动触发和工具／插件对象 |
+| P4 递归控制面 | 保留确定性验证；实际递归效用在 F 验收 |
+| P5 study／SDK／统计 | 保留评价适配与独立试验；先核查实际组件、记忆及外层成本再正式研究 |
+| 默认固定 architect、窄技能 JSON、DAG 优先叙述 | 作为兼容实现或启动种子，不能继续定义可进化对象的上限 |
+| Manyselves 中心叙述、每轮扩大 demo／全量测试 | 不再作为实施或验收依据；测试按改变范围递增 |
 
-### 下一阶段
+## 6. 协作、提交与研究纪律
 
-本阶段优先解决**编排和技能的实际可进化范围，以及模型驱动的多智能体 benchmark**，不把当前单组件 E1 pilot 当作最终框架的替代验收。完整合同、逐组件激活证据与四臂对照见[编排与技能可进化 v3](docs/design/orchestration-skill-evolution-v3.md)。
+- 根代理维护本计划、接口决策、集成与证据说明。子智能体只使用用户指定的 GPT-5.6 Sol，high 或 xhigh；按内核、能力开发、编排、评价、产品划分边界，在依赖已明确时并行。
+- 每个阶段先确定可执行合同与文件归属，再实现和交叉审查；禁止多代理同时覆盖同一文件。子智能体的开发协作不是 Nexgent 产品能力证据。
+- 继续按阶段提交和推送同一 [Draft PR #1](https://github.com/csxq0605/Nexgent/pull/1)，远端分支 `refactor/scientific-rsi`。每次说明本阶段行为、定向验证、真实运行与剩余缺口；新阶段尚未完成时保持 Draft。
+- 文档变更检查链接与一致性；接口／运行时改动跑相关集成测试；新增失败或涉及全局边界时再扩大检查。CI 按仓库配置运行，不每轮手工重跑全套。
+- 模型默认使用已授权配置中的 `mimo-v2.6-flash`，固定实际 provider/model 收据；凭据不入库。真实运行有事先明确的问题、可复现输入、资源策略和停止条件，禁止靠无界改提示重试挑选成功结果。
+- 计划进度按每项出口的证据更新。代码存在、确定性机制、真实执行、独立效果四项分别标记；原始负结果不重写。
 
-2026-09-23 的新增纵切让 Main 对话默认使用任务时自编排包：模型提出 pending DAG，Compiler 校验并执行；任务可通过 `develop_skill` 产生受控代码技能子包，并在委派 Episode 中实际运行。真实 MiMo 已生成任务图；一次真实提案经过编译诊断修复，成功形成技能子包，手工诊断子 Episode 证明其代码可执行，但父任务中的自主委派仍失败。另一次探针尝试修复技能提案后仍因 envelope 错误失败。此纵切是**任务内组织与能力创建的机制**，不是稳定自治执行或跨任务晋升。下一条不可省略的链是：真实任务反馈促发第二版图和能力提案 → 同任务实际激活 → 独立任务上的候选验证 → package channel 晋升与 guard → 另一新任务实际选择和加载技能。入口、执行、验证、复用须有各自 Episode 和组件加载证据；不得用源码存在或本任务交付代替后半段。
+## 7. 立即执行队列
 
-优先验收的对象是**通用 AgentProgram 自设计**，而非多跑一个 demo：同一入口针对不同任务自行确定角色、节点、控制与消息边、并行／合并、检查点、子任务和停止条件；节点必须实际执行并留收据，反馈要能导致已准入 pending 子图的新版本；规划策略和可复用技能本身随后进入版本档案、独立验证及新任务选择。当前固定 `architect` 仅是启动种子，不能长期成为不可替换的宿主编排者。图和技能的确定性单测、编译修复及单次图生成均不能替代这些验收。
+- [ ] A1 固定参考项目 commit／tag，完成插件内核、Creator、loop 与日志接口的源码对照。
+- [ ] A2 为两种内核路径定义相同任务、作用域插件和 Episode／benchmark 桥接小样。
+- [ ] A3 实跑两条小样，记录失败、恢复、兼容与维护成本，提交最终技术 ADR。
+- [ ] B1 按 ADR 建立版本化能力接口及现有 ToolRegistry／AgentPackage 适配；同步最小事件与能力视图。
+- [ ] C1、D1 在统一接口上分别实现模型临时工具／插件开发和可替换执行策略，再进入 E 的任务来源采用链。
 
-本分支又加入任务可指定的修订规划角色：任意节点的持久成功／失败收据满足规则时，运行时调用该角色生成新图，编译后只替换未开始的节点。失败节点→新图→执行与暂停恢复有确定性测试；真实模型尚未在运行中用它完成第二次修订。另一条真实 MiMo 开发任务自行形成并完成 7 节点的 API 事故分析图，含并行读取及 investigator/critic/verifier，5 次模型调用后交付；没有对照或独立评分，不能称为 RSI 收益。O 搜索现在可在明确冻结 Episode 预算时接纳动态修订、委派和任务角色；预算由运行时账本执行。任务最终图、角色和可选技能也可从创建者的持久收据形成一个 O/S PackagePatch v3 候选；纯图／角色候选不依赖技能发明。这些是确定性机制，下一步仍须用独立任务证明组件实际激活、选择、晋升和后续加载。
-
-1. **纯 M 与 benchmark 合同**：纯 M 路由、benchmark suite role、独立来源 cluster、evaluator identity 和 CLI 投影已从原工作树合入隔离分支；纯 M 进入 MemoryService 独立 release/snapshot，O/S+M 在原子复合合同前整体拒绝。首轮真实 MiMo R0 选择 abstain，未生成可评价 M 候选；下一步需在不泄漏隐藏答案的前提下完善有界 development 诊断、候选验证与后续复用。
-2. **扩大 O/S 候选单位**：整包原子 PackagePatch v3 的 role、workflow、skill、prompt 与 manifest 多组件 add/replace/remove 已有确定性闭环；真实 R0 已生成并实际运行一个新增验证角色的 O 候选，开发预检通过，但独立 selection 未过门。继续修复预算预留、失败对账与有界多候选搜索，再以新候选和新统计单元测试稳定交付与成本门。
-3. **模型驱动的多角色 benchmark**：同一 TaskService/canonical BBH adapter 上已经观察到两个 MiMo proposer、一个 adjudicator、发布和独立评价；这只是公开小样本资格验证。后续用 Workbench 和新鲜外部任务族检验模型交付、工具使用与跨分布稳健性，零模型调用路径只作 control。
-4. **反馈搜索与对照**：固定多角色、等预算单角色、memory-only、完整进化四臂已有非因果 qualification harness，且能检查真实模型收据与角色结构；它不能代替正式研究。须按[四臂确认协议](docs/research/four-arm-confirmatory-protocol-v1.md)预注册同来源 cluster 的四臂联合消耗、冻结 M release、外层改进成本和缺测/多重比较规则，再在未见任务上估计质量与成本；如需区分 O/S 与 M 的交互效应，应增第五臂。
-5. **E1 与后续研究**：在上述完整目标面上闭合真实 provider 候选的 generation、selection、promotion、guard 和后续复用；旧的单组件 qualification pilot 仍可作为兼容回归，但不代表目标架构验收。然后做多 benchmark/seed 聚合、M 的独立因果检验、原子 O/S+M 复合发布和 R0/R1 后代效用比较。
-6. **产品与 demo**：Main 完成持久多轮、附件、澄清、Benchmark/RSI Lab 信息视图；OpenFOAM 的 Re=100/收敛/参考解作为后置独立 demo 扩展。
-
-## 6. 分阶段 PR 与历史提交
-
-继续使用 [Draft PR #1](https://github.com/csxq0605/Nexgent/pull/1)，分支仍为 `refactor/scientific-rsi`；历史分支名不定义产品领域。下表只列已经推送的 0.8 历史提交。P1 实现与本文状态更新仍应在提交时单独说明其确定性测试和真实 episode 证据边界；不得把工作树内容或 PR 合并状态当作运行验收。
-
-| 已推送提交 | 历史内容与解释 |
-| --- | --- |
-| `36d70a2` | 旧产品退出、初始源码运行与研究系统；其早期科学耦合后来纠正 |
-| `1ebc131` | 六组研究及 36 次确认；小幅任务收益不构成元改进 |
-| `51fe475` | 核心/插件分离，真实改进器反馈接口 |
-| `28bfc83` | 查询合同缺陷修复与重新登记 |
-| `5e61906` | 完整证据、安装与窗口验证；5 后代、3 配对零收益，不是本次完整架构验收 |
-
-[原始报告](docs/research/framework-validation-20260916.md)及源数据不改动。上一版计划的历史内容保留在 Git；本计划替代其“整体完成”结论和后续工作顺序。
+本轮交付仅为重新制定计划和同步文档。A1–G 的完成状态由后续提交及运行收据逐项更新。
