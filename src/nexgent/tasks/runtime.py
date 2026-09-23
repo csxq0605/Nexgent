@@ -2389,7 +2389,7 @@ class TaskService:
 
     def benchmark(self, benchmark_id, *, split="development", seed=0, budget=None, package=None,
                   package_channel=None, memory_channel=None, expected_memory_registration=None,
-                  stop_event=None, **options):
+                  capability_authority=None, stop_event=None, **options):
         if package is not None and package_channel is not None:
             raise ContractError("Specify either a package or a package channel")
         registry = self._benchmark_registry()
@@ -2409,7 +2409,8 @@ class TaskService:
                 task_ref.get("capabilities"), package, context, constraints=task_ref.get("constraints"),
                 package_channel=package_channel, benchmark_registration=registration,
                 memory_channel=memory_channel,
-                expected_memory_registration=expected_memory_registration)
+                expected_memory_registration=expected_memory_registration,
+                capability_authority=capability_authority)
             self.run(state["id"], stop_event=stop_event)
             reports.append(self._evaluate_registered(state["id"], adapters))
             if stop_event is not None and stop_event.is_set():

@@ -431,6 +431,10 @@ def _run_task_command(args):
         return service.benchmark(args.benchmark, split=args.split, seed=args.seed,
                                  budget=_task_budget(args), package=package,
                                  package_channel=args.package_channel,
+                                 capability_authority=(
+                                     _object_argument(args.capability_authority,
+                                                      label="capability authority")
+                                     if args.capability_authority else None),
                                  stop_event=stop, **options)
 
     inputs = _object_argument(args.input, label="input") if args.input else {}
@@ -444,7 +448,11 @@ def _run_task_command(args):
     state = service.create(args.objective, inputs=inputs, budget=_task_budget(args),
                            capabilities=args.capability, package=package,
                            package_channel=args.package_channel,
-                           deliverables=deliverables, constraints=constraints)
+                           deliverables=deliverables, constraints=constraints,
+                           capability_authority=(
+                               _object_argument(args.capability_authority,
+                                                label="capability authority")
+                               if args.capability_authority else None))
     if args.register_only:
         return _task_summary(state)
     return _task_summary(service.run(state["id"], stop_event=stop))
@@ -480,6 +488,7 @@ def main(argv=None):
     task.add_argument("--deliverables", help="JSON array (or file) of named output schemas")
     task.add_argument("--constraints", help="JSON object (or file) with quality/effect/wall-time constraints")
     task.add_argument("--capability", action="append", default=[], help="Grant an installed tool capability; repeat as needed")
+    task.add_argument("--capability-authority", help="Episode capability authority JSON object, file path, or @file")
     task.add_argument("--package", type=Path, help="AgentPackage JSON file; defaults to the installed seed package")
     task.add_argument("--package-channel", help="Resolve the active AgentPackage from this RSI channel")
     task.add_argument("--register-only", action="store_true", help="Register without executing")
@@ -498,6 +507,7 @@ def main(argv=None):
     benchmark_task.add_argument("--seed", type=int, default=0)
     benchmark_task.add_argument("--package", type=Path, help="AgentPackage JSON file; defaults to the installed seed package")
     benchmark_task.add_argument("--package-channel", help="Resolve the active AgentPackage from this RSI channel")
+    benchmark_task.add_argument("--capability-authority", help="Host-granted Episode capability authority JSON object, file path, or @file")
     benchmark_task.add_argument("--controlled-failure", action="store_true",
                                 help="Request the benchmark's deterministic recovery trial when supported")
     _add_task_budget(benchmark_task)

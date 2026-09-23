@@ -78,6 +78,7 @@ def test_task_loads_json_files_and_forwards_explicit_runtime_options(task_servic
                      "--constraints", '{"allowed_effects":["read"]}',
                      "--capability", "workbench.inspect_sources",
                      "--capability", "workbench.validate_delivery",
+                     "--capability-authority", '{"version":2}',
                      "--max-calls", "3", "--max-completion-tokens", "900",
                      "--max-tool-calls", "4", "--max-tool-work-units", "55",
                      "--max-nodes", "12"])
@@ -87,6 +88,7 @@ def test_task_loads_json_files_and_forwards_explicit_runtime_options(task_servic
     assert create[0:2] == ("create", "reconcile records")
     assert create[2]["inputs"] == {"source": {"rows": [1, 2]}}
     assert create[2]["capabilities"] == ["workbench.inspect_sources", "workbench.validate_delivery"]
+    assert create[2]["capability_authority"] == {"version": 2}
     assert create[2]["deliverables"] == [{"name": "ledger", "schema": {"type": "object"}}]
     assert create[2]["constraints"] == {"allowed_effects": ["read"]}
     assert create[2]["budget"] == {"max_model_calls": 3, "max_completion_tokens": 900,
@@ -164,6 +166,7 @@ def test_task_benchmark_forwards_split_seed_budget_and_recovery_option(task_serv
     code = cli.main(["--root", str(tmp_path), "task-benchmark", "workbench",
                      "--split", "selection", "--seed", "19", "--max-calls", "6",
                      "--max-tool-calls", "8", "--max-tool-work-units", "89",
+                     "--capability-authority", '{"version":2}',
                      "--controlled-failure"])
     assert code == 0
     call = task_service.calls[0]
@@ -172,6 +175,7 @@ def test_task_benchmark_forwards_split_seed_budget_and_recovery_option(task_serv
     assert call[2]["budget"] == {"max_model_calls": 6, "max_tool_calls": 8,
                                  "max_tool_work_units": 89}
     assert call[2]["controlled_failure"] is True
+    assert call[2]["capability_authority"] == {"version": 2}
     assert call[2]["package_channel"] is None
     assert json.loads(capsys.readouterr().out)["reports"][0]["evaluation"]["accepted"] is True
 

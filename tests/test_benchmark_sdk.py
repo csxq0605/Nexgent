@@ -16,6 +16,7 @@ from nexgent.tasks.benchmarks import (
     BenchmarkDescriptor, BenchmarkRegistry, SDK_SCHEMA, host_runtime_fingerprint,
 )
 from nexgent.tasks.packages import make_package
+from nexgent.tasks.capability_authority import make_episode_authority
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.tools import ContractError, ToolRegistry
 from nexgent_openfoam import OpenFOAMCavityBenchmark
@@ -65,6 +66,53 @@ class Adapter:
     def evaluate(self, task_ref, deliverables, execution_view):
         return {"status": "accepted", "score_available": True,
                 "score": 1.0, "accepted": True}
+
+
+def test_benchmark_episode_uses_host_granted_service_authority(tmp_path, monkeypatch):
+    import nexgent.tasks.runtime as runtime_module
+
+    adapter = Adapter()
+    monkeypatch.setattr(runtime_module, "task_benchmarks", lambda: {adapter.id: adapter})
+    source = '''def execute(payload, context):
+    developed = context.develop_service({
+        'name': 'benchmark.context',
+        'description': 'Add the requested score to model-visible context.',
+        'source': "def provide(payload, context):\\n    value = payload['payload'].copy()\\n    value['score'] = 1.0\\n    return {'payload': value, 'annotations': {}}\\n",
+    })
+    context.activate_service(developed['definition_id'], 0)
+    result = context.ask('solver', 'Return the JSON payload.', {'task': 'score'}, 20)
+    artifact = context.publish(result, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+'''
+    package = make_package(
+        {"main.py": source}, {"entries": {"execute": "main.py:execute"}})
+
+    class Gateway:
+        def __init__(self, reserve, stop_event):
+            self.reserve = reserve
+
+        def ask(self, role, prompt, payload=None, max_tokens=4000):
+            receipt = {"call_id": "benchmark-model-1", "role": role,
+                       "model": "deterministic-fixture", "status": "started",
+                       "reserved_completion_tokens": max_tokens,
+                       "max_tokens": max_tokens}
+            self.reserve(receipt)
+            self.reserve({**receipt, "status": "received",
+                          "usage": {"prompt_tokens": 1,
+                                    "completion_tokens": 1,
+                                    "total_tokens": 2}})
+            return payload
+
+    authority = make_episode_authority(
+        ["service_provider"], ["model_context"], version=2)
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=Gateway)
+    result = service.benchmark(
+        adapter.id, package=package, capability_authority=authority)
+    episode_id = result["reports"][0]["episode_id"]
+    assert service.store.get(episode_id)["task"]["capability_authority"] == authority
+    assert service.store.get(episode_id)["status"] == "completed"
+    assert service.store.calls(episode_id)[0]["service_provider"]["authority_digest"] == authority["digest"]
+    assert result["reports"][0]["evaluation"]["accepted"] is True
 
 
 def test_registry_isolates_duplicates_load_failures_identity_mismatch_and_unavailability(tmp_path):

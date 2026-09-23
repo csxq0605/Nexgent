@@ -9,7 +9,7 @@
 | C 自主能力开发 | DeepSeek Creator 的发现／管理入口；通用工具与服务插件双对象 | [一次限额真实 MiMo 运行](../../experiments/kernel_spike/evidence-python-dynamic-tool-live-20260924.json)：空清单起步，模型写 `multiply_integers` 源码／schema，Nexgent stage/mount、重新发现、调用，结果 42；同一 Episode 模型 2 次、工具 1 次、7 节点，零重试。确定性任务另验证释放旧 Definition、同名开发新版本并实际调用。通用默认 TaskService 包接入工具开发和动态 inventory，确定性网关完成 `develop_tool → tool → publish → done`；服务已具备任务 RPC，但尚未接入默认任务智能体的自主决策。**Main 界面仍采用另一图编排种子，未接入**。真实工具实验程序预设开发路线，未测模型自主判断是否需要开发 | **C1 工具切片真实任务通过、服务切片仅确定性通过**；C 完整出口未过：服务的真实模型自主开发激活、跨任务采用、独立效果、RSI 净收益均未证明 |
 | D 执行与编排 | [AutoSci](https://arxiv.org/abs/2605.31468v1)技能／图更新、[ADAS](https://arxiv.org/abs/2408.08435v2)代码 Agent、[AFlow](https://arxiv.org/abs/2410.10762v4)工作流搜索 | 真实模型完成 7 节点 DAG；反馈后的第二版图未完成 | 未达新出口；需非 DAG 后端与真实中途策略修改 |
 | E 持续进化 | AutoSci SciEvolve、Nexgent 候选／评价／guard 合同 | 图候选确定性采用复用；真实 O/S 未晋升、M abstain | 未达新出口；需任务来源的工具／服务插件在独立任务采用和调用 |
-| F 效果与递归 | [RHI](https://arxiv.org/abs/2607.15524v1)信息流、[HSI](https://arxiv.org/abs/2608.08466v1)三级更新及后代评价 | 确定性研究执行器；无真实跨任务净收益／递归收益 | 未开始正式研究；先完成 C–E 实际路径 |
+| F 效果与递归 | [RHI](https://arxiv.org/abs/2607.15524v1)信息流、[HSI](https://arxiv.org/abs/2608.08466v1)三级更新及后代评价 | `TaskService.benchmark` 现在能接收宿主显式授权的 EpisodeAuthority，普通任务与 benchmark 共用 `create/run/_ask` 路径；确定性 benchmark 中服务开发、激活、模型调用和独立评价已纵向跑通，CLI 亦可传该授权。尚无正式多任务研究或真实跨任务净收益／递归收益 | benchmark 的能力开发入口确定性通过；未开始正式研究；先完成 C–E 实际路径与冻结对照协议 |
 | G 产品 | Main 展示同一任务／版本／能力身份 | Main 早期界面和高级控制台；无插件树及完整演化投影 | 未达出口；最小视图随 B–E 接入 |
 
 更新规则：每条新“已实现”要附代码和定向运行证据；“效果改善”另附独立任务、父子对照、成本与失败。上游参考固定 SHA／论文版本；确需升级时注明迁移影响。负结果和基础设施问题也追加，不删除前一次结论。子智能体审查、手写小样及模型替身均不能替代 Nexgent 产品的自动执行证据。
