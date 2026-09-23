@@ -46,9 +46,13 @@ def _rule(*, include_scope=True, **source):
     return rule
 
 
-def test_revision_rule_accepts_exactly_one_dynamic_proposal_source():
+@pytest.mark.parametrize("source", [
+    {"proposal_path": "proposal"},
+    {"planner_role_ref": "planner"},
+])
+def test_revision_rule_accepts_exactly_one_dynamic_proposal_source(source):
     plan = plan_from_workflow(
-        _workflow(_rule(proposal_path="proposal")), "dynamic-plan")
+        _workflow(_rule(**source)), "dynamic-plan")
 
     assert plan.id == "dynamic-plan"
 
@@ -95,6 +99,29 @@ def test_dynamic_revision_rule_rejects_invalid_compile_attempts(attempts):
         )
 
 
+@pytest.mark.parametrize("tokens", [1, 4000, 6000])
+def test_planner_revision_rule_accepts_bounded_model_budget(tokens):
+    plan = plan_from_workflow(
+        _workflow(_rule(
+            planner_role_ref="planner", planner_max_tokens=tokens,
+        )),
+        "planner-budget-plan",
+    )
+
+    assert plan.id == "planner-budget-plan"
+
+
+@pytest.mark.parametrize("tokens", [0, 6001, True, "4000"])
+def test_planner_revision_rule_rejects_invalid_model_budget(tokens):
+    with pytest.raises(WorkflowError, match="revision rule is invalid"):
+        plan_from_workflow(
+            _workflow(_rule(
+                planner_role_ref="planner", planner_max_tokens=tokens,
+            )),
+            "invalid-planner-budget-plan",
+        )
+
+
 def test_frozen_revision_rule_rejects_compile_repair_budget():
     with pytest.raises(WorkflowError, match="revision rule is invalid"):
         plan_from_workflow(
@@ -108,7 +135,9 @@ def test_frozen_revision_rule_rejects_compile_repair_budget():
 @pytest.mark.parametrize("source", [
     {},
     {"workflow_ref": "frozen", "proposal_path": "proposal"},
+    {"proposal_path": "proposal", "planner_role_ref": "planner"},
     {"proposal_path": ""},
+    {"planner_role_ref": ""},
     {"proposal_path": "proposal..graph"},
 ])
 def test_revision_rule_rejects_missing_ambiguous_or_invalid_source(source):

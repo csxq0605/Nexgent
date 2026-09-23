@@ -43,3 +43,5 @@
 ## 非技能任务的团队选择探针
 
 以 API 延迟事故的两种根因假设作为通用分析任务，输入公开的观察和假设，要求模型自行选择最小团队。MiMo v2.6-flash 提出的 v2 图为 `architect → 两个 read_artifact 并行 → investigator → critic → verifier → publish`，使用三个不同的既有角色，没有创建任务专用角色或消息边。两项 `read_artifact` 节点均缺少必需的 `artifact_id` 参数，执行时报 `KeyError`，下游全部跳过；Episode `episode-363450c3f7064bf5`，实际 1 次模型调用，任务失败。这证明模型能提出与先前 generalist/verifier 不同的图形，但本次没有完成节点链，更不能作为多智能体效果证据。需让通用能力参数合同在图编译阶段拒绝并反馈这种错误，避免“合法图、不可执行节点”。
+
+加入通用 capability 参数编译前检查后，用同一类 API 延迟诊断任务重跑了一次任务类型无关的 AgentProgram 探针。MiMo v2.6-flash 提出并实际执行 `architect → 两个并行 read_artifact → investigator → critic → verifier → publish`，7 个有效节点全部完成，5 次模型调用，Episode `episode-de7c84ec8fbc4054`、计划版本 2。交付工件 `artifact-0b8c87f17c014149` 将数据库连接池饱和判断为较有证据支持的解释，并明确部署造成饱和的具体机制尚未证实。输入观察包括数据库等待从 4 ms 增至 610 ms、缓存命中率基本不变、回滚后延迟恢复。这个结果证明**真实模型设计的非固定多角色 DAG 可以被执行并交付**；图没有使用任务新角色、消息边或执行中第二次重编排，亦没有独立评分或与单智能体对照，因此不支持多智能体优势或 RSI 收益结论。

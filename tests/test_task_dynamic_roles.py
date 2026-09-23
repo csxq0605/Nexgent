@@ -257,3 +257,32 @@ def test_later_revision_can_add_a_role_without_redefining_completed_role():
     applied = execution.apply_revision(revision)
     assert applied.node("done").status is NodeStatus.COMPLETED
     assert applied.node("critic").status is NodeStatus.PENDING
+
+
+def test_revision_planner_task_role_alias_is_content_addressed():
+    workflow = materialize_task_roles({
+        "task_roles": {
+            "replanner": {
+                "identity": "Failure-aware replanner",
+                "prompt": "Revise pending work from the supplied checkpoint receipt.",
+                "capabilities": ["ask"],
+            },
+        },
+        "nodes": [
+            {"id": "attempt", "method": "join"},
+            {"id": "pending", "method": "join"},
+        ],
+        "control_edges": [{"from": "attempt", "to": "pending"}],
+        "revision_rules": [{
+            "id": "failure-replan",
+            "after_node": "attempt",
+            "when": {"path": "$status", "equals": "failed"},
+            "planner_role_ref": "task:replanner",
+            "replace_node_ids": ["pending"],
+        }],
+    })
+
+    [role_ref] = workflow["task_roles"]
+    assert role_ref.startswith("task-role://replanner/")
+    assert workflow["revision_rules"][0]["planner_role_ref"] == role_ref
+    plan_from_workflow(workflow, "task-planner-rule")

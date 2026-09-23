@@ -176,6 +176,24 @@ def materialize_task_roles(workflow: object) -> dict:
             if node.get("method") == "loop" and isinstance(node.get("body"), dict):
                 rewrite(node["body"])
 
+        for rule in definition.get("revision_rules", []):
+            if not isinstance(rule, dict) or "planner_role_ref" not in rule:
+                continue
+            role_ref = rule["planner_role_ref"]
+            if isinstance(role_ref, str) and role_ref.startswith("task:"):
+                alias = role_ref.removeprefix("task:")
+                if alias not in alias_to_ref:
+                    raise ContractError(
+                        f"Workflow revision planner task role is not declared: {alias}"
+                    )
+                rule["planner_role_ref"] = alias_to_ref[alias]
+            elif (isinstance(role_ref, str)
+                  and role_ref.startswith("task-role://")
+                  and role_ref not in role_by_ref):
+                raise ContractError(
+                    f"Workflow revision planner task role is not declared: {role_ref}"
+                )
+
     rewrite(result)
     return result
 

@@ -425,10 +425,19 @@ def _validate_revision_rules(workflow, nodes):
     for rule in rules:
         workflow_ref = rule.get("workflow_ref") if isinstance(rule, dict) else None
         proposal_path = rule.get("proposal_path") if isinstance(rule, dict) else None
-        sources = sum(source is not None for source in (workflow_ref, proposal_path))
+        planner_role_ref = (
+            rule.get("planner_role_ref") if isinstance(rule, dict) else None
+        )
+        planner_max_tokens = (
+            rule.get("planner_max_tokens", 4000) if isinstance(rule, dict) else None
+        )
+        sources = sum(
+            source is not None
+            for source in (workflow_ref, proposal_path, planner_role_ref)
+        )
         replacement_scope = (rule.get("replace_node_ids")
                              if isinstance(rule, dict) else None)
-        if proposal_path is not None:
+        if proposal_path is not None or planner_role_ref is not None:
             invalid_scope = (
                 "replace_node_ids" in rule
                 and (not isinstance(replacement_scope, list)
@@ -460,6 +469,15 @@ def _validate_revision_rules(workflow, nodes):
                     and (not isinstance(proposal_path, str)
                          or not proposal_path
                          or any(not part for part in proposal_path.split("."))))
+                or (planner_role_ref is not None
+                    and (not isinstance(planner_role_ref, str)
+                         or not planner_role_ref.strip()
+                         or len(planner_role_ref) > 200))
+                or (isinstance(rule, dict)
+                    and "planner_max_tokens" in rule
+                    and (planner_role_ref is None
+                         or type(planner_max_tokens) is not int
+                         or not 1 <= planner_max_tokens <= 6000))
                 or invalid_scope
                 or invalid_compile_attempts):
             raise WorkflowError("Workflow revision rule is invalid")

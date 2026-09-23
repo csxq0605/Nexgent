@@ -139,6 +139,16 @@ future checkpoint is useful, so the bootstrap rule is not retained. Prefer
 direct execution for simple tasks and add agents or checkpoints only when their
 expected value exceeds their cost.
 
+A rule may instead set `planner_role_ref` to an available role or a declared
+`task:<alias>`. The host then calls that frozen role after the rule's durable
+success or failure condition matches. Its payload contains the task, current
+workflow, base plan reference, trigger node, and exact trigger receipt; it must
+return `{"proposal":{...}}`. Use this form when the observed worker cannot emit
+a graph proposal itself. Set optional `planner_max_tokens` from 1 to 6000 when
+the default 4000 is insufficient. `planner_role_ref`, `proposal_path`, and
+`workflow_ref` are mutually exclusive revision sources. A task-created planner
+still has only the `ask` capability and is content-addressed before execution.
+
 If the host supplies compiler feedback after rejecting a proposal, repair every
 reported contract error and return the complete JSON object again, including a
 full replacement `proposal`; never return a partial patch or prose explanation.

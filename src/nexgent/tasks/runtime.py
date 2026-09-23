@@ -748,6 +748,34 @@ class TaskService:
                     or ("workflow_ref" in rule and
                         rule["workflow_ref"] not in manifest["workflows"])):
                 raise ContractError("Workflow revision references an unknown frozen workflow")
+            planner_role_ref = rule.get("planner_role_ref")
+            if planner_role_ref is not None:
+                task_role = task_roles.get(planner_role_ref)
+                role = task_role if isinstance(task_role, dict) else roles.get(planner_role_ref)
+                if not isinstance(role, dict):
+                    raise ContractError(
+                        f"Workflow revision planner role is not registered: {planner_role_ref}"
+                    )
+                if "ask" not in role.get("capabilities", []):
+                    raise PermissionError(
+                        f"Workflow revision planner role {planner_role_ref!r} is not leased "
+                        "capability 'ask'"
+                    )
+                if task_role is None:
+                    role_components = [
+                        component for component in components.values()
+                        if (component.get("kind"), component.get("ref"))
+                        == ("role", planner_role_ref)
+                    ]
+                    if len(role_components) != 1:
+                        raise ContractError(
+                            "Workflow revision planner role must have one registered role component"
+                        )
+                    prompt_ref = role.get("prompt_ref")
+                    if not isinstance(prompt_ref, str) or prompt_ref not in package["files"]:
+                        raise ContractError(
+                            "Workflow revision planner role requires a frozen prompt resource"
+                        )
         def has_retry(definition):
             return (any(route.get("action") == "retry"
                         for route in definition.get("failure_routes", [])
@@ -1160,38 +1188,93 @@ class TaskService:
             notify()
 
         def resolve_revision(rule, current, trigger_receipt):
-            if "proposal_path" in rule:
+            if "proposal_path" in rule or "planner_role_ref" in rule:
                 from .graph_compiler_repair import (
                     GraphRepairExhausted, compile_with_graph_repair,
                 )
                 from .workflows import _get
-                proposal = _get(trigger_receipt["value"], rule["proposal_path"])
+
+                planner_role_ref = rule.get("planner_role_ref")
+                planner_max_tokens = rule.get("planner_max_tokens", 4000)
+                checkpoint_payload = None
+                if planner_role_ref is not None:
+                    task_role = workflow_current[0].get("task_roles", {}).get(
+                        planner_role_ref)
+                    role = (task_role if isinstance(task_role, dict)
+                            else package["manifest"]["roles"].get(planner_role_ref))
+                    if not isinstance(role, dict):
+                        raise ContractError(
+                            f"Workflow revision planner role is not registered: "
+                            f"{planner_role_ref}"
+                        )
+                    prompt = (role.get("prompt") if isinstance(task_role, dict)
+                              else package["files"].get(role.get("prompt_ref")))
+                    if not isinstance(prompt, str) or not prompt:
+                        raise ContractError(
+                            "Workflow revision planner role has no frozen prompt"
+                        )
+                    checkpoint_payload = {
+                        "schema": "nexgent.plan-revision-checkpoint.v1",
+                        "task": deepcopy(payload),
+                        "rule_id": rule["id"],
+                        "base_plan_ref": current.plan.ref,
+                        "current_workflow": deepcopy(workflow_current[0]),
+                        "trigger_node": rule["after_node"],
+                        "trigger_receipt": deepcopy(trigger_receipt),
+                    }
+                    reply = self._dispatch(
+                        identity, package, "ask", {
+                            "role": planner_role_ref,
+                            "prompt": prompt,
+                            "payload": checkpoint_payload,
+                            "max_tokens": planner_max_tokens,
+                        },
+                        f"plan/revision-checkpoints/{current.plan.revision}/{rule['id']}",
+                        stop_event, notify, admitted=True,
+                    )
+                    proposal = _get(reply, "proposal")
+                else:
+                    proposal = _get(trigger_receipt["value"], rule["proposal_path"])
                 if not isinstance(proposal, dict):
                     raise ContractError("Graph proposal must be a JSON object")
                 def repair(request, repair_path):
-                    source = next(node for node in workflow_current[0]["nodes"]
-                                  if node["id"] == rule["after_node"])
-                    if source["method"] != "ask" or not source.get("role_ref"):
-                        raise ContractError(
-                            "Graph compiler repair needs a model role at the checkpoint")
+                    if planner_role_ref is None:
+                        source = next(node for node in workflow_current[0]["nodes"]
+                                      if node["id"] == rule["after_node"])
+                        if source["method"] != "ask" or not source.get("role_ref"):
+                            raise ContractError(
+                                "Graph compiler repair needs a model role at the checkpoint")
+                        repair_role = source["role_ref"]
+                        repair_prompt = source["params"]["prompt"]
+                        repair_payload = {"task": payload, "compiler_feedback": request}
+                        response_path = rule["proposal_path"]
+                        repair_max_tokens = source["params"].get("max_tokens", 4000)
+                    else:
+                        repair_role = planner_role_ref
+                        repair_prompt = prompt
+                        repair_payload = {
+                            **checkpoint_payload,
+                            "compiler_feedback": request,
+                        }
+                        response_path = "proposal"
+                        repair_max_tokens = planner_max_tokens
                     self.store.event(identity, "graph_compiler_rejected", {
                         "plan_ref": current.plan.ref,
                         "rule_id": rule["id"],
                         "diagnostic": request["diagnostic"],
                     })
-                    params = source["params"]
                     reply = self._dispatch(
                         identity, package, "ask", {
-                            "role": source["role_ref"],
-                            "prompt": params["prompt"] + "\nThe previous graph did not compile. "
+                            "role": repair_role,
+                            "prompt": repair_prompt + "\nThe previous graph did not compile. "
                                       "Use compiler_feedback to return a complete corrected JSON "
                                       "proposal in the same envelope. Do not repeat the invalid graph.",
-                            "payload": {"task": payload, "compiler_feedback": request},
-                            "max_tokens": params.get("max_tokens", 4000),
+                            "payload": repair_payload,
+                            "max_tokens": repair_max_tokens,
                         },
                         f"plan/{repair_path}", stop_event, notify, admitted=True,
                     )
-                    return _get(reply, rule["proposal_path"])
+                    return _get(reply, response_path)
 
                 try:
                     compiled = compile_with_graph_repair(
