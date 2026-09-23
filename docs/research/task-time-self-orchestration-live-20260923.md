@@ -45,3 +45,16 @@
 以 API 延迟事故的两种根因假设作为通用分析任务，输入公开的观察和假设，要求模型自行选择最小团队。MiMo v2.6-flash 提出的 v2 图为 `architect → 两个 read_artifact 并行 → investigator → critic → verifier → publish`，使用三个不同的既有角色，没有创建任务专用角色或消息边。两项 `read_artifact` 节点均缺少必需的 `artifact_id` 参数，执行时报 `KeyError`，下游全部跳过；Episode `episode-363450c3f7064bf5`，实际 1 次模型调用，任务失败。这证明模型能提出与先前 generalist/verifier 不同的图形，但本次没有完成节点链，更不能作为多智能体效果证据。需让通用能力参数合同在图编译阶段拒绝并反馈这种错误，避免“合法图、不可执行节点”。
 
 加入通用 capability 参数编译前检查后，用同一类 API 延迟诊断任务重跑了一次任务类型无关的 AgentProgram 探针。MiMo v2.6-flash 提出并实际执行 `architect → 两个并行 read_artifact → investigator → critic → verifier → publish`，7 个有效节点全部完成，5 次模型调用，Episode `episode-de7c84ec8fbc4054`、计划版本 2。交付工件 `artifact-0b8c87f17c014149` 将数据库连接池饱和判断为较有证据支持的解释，并明确部署造成饱和的具体机制尚未证实。输入观察包括数据库等待从 4 ms 增至 610 ms、缓存命中率基本不变、回滚后延迟恢复。这个结果证明**真实模型设计的非固定多角色 DAG 可以被执行并交付**；图没有使用任务新角色、消息边或执行中第二次重编排，亦没有独立评分或与单智能体对照，因此不支持多智能体优势或 RSI 收益结论。
+
+## 执行中检查点与任务自建规划角色探针
+
+使用同一通用入口及[可复现任务输入](../../experiments/orchestration_qualification/checkpoint_incident_case.json)，明确要求模型先收集 API 事故证据，再由自己创建的规划角色读取完成节点收据、修改 pending 图。这个任务输入**刻意要求检查点**，所以即使成功也只能证明机制连通，不能证明模型在普通任务中自主判断何时值得改图。四次有界开发尝试均未得到成功的第二版图：
+
+| 尝试 | Episode | 实际模型调用 | 最远执行点与结果 |
+| --- | --- | ---: | --- |
+| 1 | `episode-a4ae48507d90471f` | 3 | 任务角色节点的 `params.prompt` 与已冻结的角色提示冲突，编译修复耗尽；计划仍为 v1。 |
+| 2 | `episode-806df1bf623e40c2` | 3 | 改正了角色提示冲突，却在一条修订规则中同时设置互斥的 `planner_role_ref` 和 `proposal_path`；编译修复耗尽，计划仍为 v1。 |
+| 3 | `episode-98bd04a29388459e` | 5 | 初始图准入为 v2，`gather` 节点实际完成，任务自建 planner 收到其收据并提出后续图；提案对已存在节点再次 `add_node`，修复又用 `remove_node` + 同 ID `add_node`，被重复操作检查拒绝。 |
+| 4 | `episode-01dbffcb23f446ee` | 5 | 初始图准入为 v2，`gather` 完成；随后 Provider 在读取规划响应时发生 `APIConnectionError`，无法判断该次规划提案是否有效。 |
+
+前两项失败暴露启动 Program 对任务角色和修订规则合同的说明不够明确；已补充冻结提示、互斥修订来源和 `replace_node` 的通用例子。第三项表明**真实的任务自建 planner 已被收据触发**，但尚未产出可编译的 v3 图；第四项是传输缺测。四次都不是成功的任务内重编排，更不能算跨任务 RSI 效益。下一次研究执行应先固定这一份任务与版本，比较修复成功率和真实 v3 执行，而非继续改提示后无界重试。

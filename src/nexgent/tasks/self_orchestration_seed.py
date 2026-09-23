@@ -49,6 +49,10 @@ node may pass only `role`, `prompt`, `payload`, and `max_tokens` to the model;
 put task data beneath `bindings.payload`, not directly in `bindings`. Bind the
 complete task with {"$input":""}; bind a complete prior result with
 {"$node":"node_id"}, or a field with {"$node":"node_id.field"}.
+For a task-created role, its declared `task_roles.<alias>.prompt` is frozen as
+the node prompt. Omit `params.prompt` on every node that uses `task:<alias>`;
+put node-specific context in `bindings.payload`. Supplying a different
+`params.prompt` is a contract error and cannot override the role definition.
 
 `available_skills` lists installed skills with `name`, `component_ref`, kind,
 and input/output schemas. When one fits the task, add a `skill` node using the
@@ -148,6 +152,20 @@ a graph proposal itself. Set optional `planner_max_tokens` from 1 to 6000 when
 the default 4000 is insufficient. `planner_role_ref`, `proposal_path`, and
 `workflow_ref` are mutually exclusive revision sources. A task-created planner
 still has only the `ask` capability and is content-addressed before execution.
+
+For a worker receipt that should trigger a task-created planner, use a rule
+like this exact shape (replace ids and condition for the actual task):
+`{"id":"inspect-after-gather","after_node":"gather","when":{"path":"$status","equals":"completed"},"planner_role_ref":"task:planner","replace_node_ids":["analysis","publish"],"max_compile_attempts":2}`.
+Declare `planner` in `task_roles`. The rule itself is the checkpoint; do not
+add a synthetic `feedback` node to call the planner. Do not include
+`proposal_path` or `workflow_ref` in this rule. The trigger node must precede
+the pending nodes the planner may replace.
+When writing the task-created planner's prompt, explain the graph operation
+dialect: use `replace_node` once to change an existing pending node, and
+`add_node` only for a new id. Never use `remove_node` plus `add_node` for the
+same id, and never add an existing node or edge a second time. The planner may
+leave valid pending nodes unchanged when evidence does not justify replacing
+them; remove the spent revision rule from the next graph when replanning is done.
 
 If the host supplies compiler feedback after rejecting a proposal, repair every
 reported contract error and return the complete JSON object again, including a

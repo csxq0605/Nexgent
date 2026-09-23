@@ -1,0 +1,15 @@
+{
+  "objective": "Investigate the supplied API latency incident. Build a task-specific team and execution DAG. First gather the evidence and let a task-created planner inspect that node's completed receipt at a checkpoint. The planner must decide which pending analysis or verification nodes to keep, remove, or add before publishing. Report the most supported cause and what remains uncertain. This task specifically tests your ability to change the pending graph after actual node feedback; do not answer directly from the initial plan.",
+  "inputs": {
+    "observations": {
+      "db_pool_wait_ms_before": 4,
+      "db_pool_wait_ms_after": 610,
+      "cache_hit_rate_before": 0.94,
+      "cache_hit_rate_after": 0.93,
+      "latency_after_rollback": "normal"
+    },
+    "hypotheses": ["database connection pool saturation", "cache regression"]
+  },
+  "deliverables": [{"name": "result", "schema": {"type": "object", "required": ["root_cause", "evidence", "uncertainty"], "properties": {"root_cause": {"type": "string"}, "evidence": {"type": "array"}, "uncertainty": {"type": "string"}}}}],
+  "budget": {"max_model_calls": 12, "max_completion_tokens": 48000}
+}
