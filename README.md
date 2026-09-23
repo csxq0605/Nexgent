@@ -27,7 +27,7 @@ P4 已把 `R0 自更新为 R1 → R0/R1 从共同 A0 产生后代 → 下游效�
 | P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础、manifest v2、ExecutablePlan v1 与宿主可信账本已实现并通过定向合同测试；真实 MiMo 普通任务已形成 schema 合法交付，manifest-v2 计划路径仍只有 E0 工程合同证据，独立 Workbench 仍失败 |
 | P1 普通任务与 benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同；BBH 两任务与 scientific-discovery 已提供 canonical TaskService adapter 和无模型 reference package，legacy 入口继续保留 |
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
-| P3 跨任务行为更新 | PackagePatch v3 的多组件 O/S 生成、加载证据、selection、promotion 和 guard 已通过确定性端到端验证；MiMo v2.6-flash 的真实 v3 输出尚未形成合法候选；M 复合、真实 E1 和统计效益仍未完成 |
+| P3 跨任务行为更新 | PackagePatch v3 的多组件 O/S 生成、加载证据、selection、promotion 和 guard 已通过确定性端到端验证；MiMo v2.6-flash 用紧凑注册表差量生成真实候选，但独立 selection 从父包 2/2 降到 0/2，未晋升；M 复合、真实正向 E1 和统计效益仍未完成 |
 | P4 改进过程可更新与递归执行 | 独立 R archive/channel、自更新、真实后代元评测、预登记 guard、自动回滚与可恢复 cycle 已形成确定性机制闭环；真实模型与统计递归效益待检验 |
 | P5 冻结研究和完整产品验收 | 通用 final-holdout 配对研究执行器、预注册 schema 与脱敏信息窗已实现；正式外部多任务族研究尚未登记或执行 |
 | 0.8 源码执行、自修改、历史 benchmark 与研究窗口 | 保留；其证据不替代 0.9 P1 或 P2–P5 验收 |
@@ -171,7 +171,7 @@ python -m venv .venv
 
 正式 final-holdout 比较使用 `rsi-study-plan` 冻结两个包、宿主私有 benchmark snapshot、显式统计单位/来源 cluster、seed、provider/model revision、执行环境、完整预算与统计政策，再依次执行 `rsi-study-run` 和 `rsi-study-assess`。统计检验按独立 cluster 聚合；模型供应商只返回滚动别名时，报告保持时间窗口内的 benchmark 局部结论。`rsi-study-list` 与 GUI 只显示脱敏摘要。当前没有外部多任务族正式结果；确定性 study pilot 只验证研究控制面。
 
-内置 reference R0 是通用改进器，不包含科学发现、OpenFOAM 或任何 benchmark 的答案与评分逻辑。它按宿主归一化的 `mutation_policy.targeting` 选择旧 BehaviorPatch v1/v2 或多组件 PackagePatch v3；v3 允许 O/S 多文件与注册表 add/replace/remove，模型交付完整 child manifest，宿主重新构造并校验。旧 v1/v2 保持原单文件约束。模型返回 abstain、非法 patch、调用失败或预算耗尽时，generation 持久记录为 missing。生成 candidate 后仍必须完成 paired selection、显式 promotion 和 guard，默认命令不会自动部署。真实 MiMo v2.6-flash 的首轮 v3 输出未通过构造校验，见[资格结果](experiments/orchestration_qualification/RESULTS.md)。
+内置 reference R0 是通用改进器，不包含科学发现、OpenFOAM 或任何 benchmark 的答案与评分逻辑。它按宿主归一化的 `mutation_policy.targeting` 选择旧 BehaviorPatch v1/v2 或多组件 PackagePatch v3；v3 允许 O/S 多文件与注册表 add/replace/remove，模型只需交付更紧凑的注册表差量，R0 据冻结父 manifest 组装完整子包提案，宿主重新构造并校验。旧 v1/v2 保持原单文件约束。模型返回 abstain、非法 patch、调用失败或预算耗尽时，generation 持久记录为 missing。生成 candidate 后仍必须完成 paired selection、显式 promotion 和 guard，默认命令不会自动部署。真实 MiMo v2.6-flash 已生成候选，但独立 selection 出现 0/2 负结果，见[资格结果](experiments/orchestration_qualification/RESULTS.md)。
 
 P3 的每个写操作都有独立 CLI 和 Python API。P4 既保留显式服务 API，也提供 `rsi-improver-cycle-start/resume/show/recover`；cycle 仍逐步形成 meta feedback、R self-generation、meta trial/decision、guard plan 和 promotion，不能跳过门控。GUI 的“RSI 与版本”页保持只读。`rsi-*` 输出不暴露 AgentPackage 源文件、私有任务内容或 evaluator 实现。操作顺序见[运行与恢复](docs/operations.md)，完整合同见[P3 控制面设计](docs/design/p3-feedback-evolution-control-plane.md)与[P4 递归控制面](docs/design/p4-recursive-improver-control-plane.md)。
 

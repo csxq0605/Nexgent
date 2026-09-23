@@ -52,7 +52,41 @@ The last response included three role replacements, but placed
 registry reference. Moving that field alone still leaves an invalid child,
 so this is a model-output failure rather than a hidden evaluator result.
 The gateway now sends MiMo's verified `thinking: disabled` setting for this
-model, giving JSON output room within the host ceiling. There is **no real
-model-generated v3 candidate and no measured RSI improvement** yet. Next,
-reduce the model-facing manifest burden while retaining host-side atomic
-validation, then rerun selection on unseen development tasks.
+model, giving JSON output room within the host ceiling. At this point there
+was no valid model-generated candidate.
+
+## Compact proposal and independent selection
+
+To remove the full-manifest copying burden, R0 now asks the model only for
+changed registry declarations. It assembles the complete child manifest from
+the frozen parent and passes the resulting PackagePatch v3 to the **same
+host-side validator**. A deterministic gateway test covers the entire
+generation, selection, promotion, and guard path with this compact input.
+
+With the unchanged feedback Episode, MiMo v2.6-flash [generated a valid
+candidate](receipts/improve-v3-compact-generated.json) in one call (8,744
+prompt and 830 completion tokens). The candidate changed the generic
+publishing skill. This proves model-to-candidate generation, not improvement.
+
+The candidate and its parent then ran on two BBH `selection` items disjoint
+from the development feedback. The frozen [paired result](receipts/select-v3-compact-rejected.json)
+used the same three-call/4,800-reserved-token ceiling per arm and actual
+three calls for every Episode. The persisted call ledger records
+`mimo-v2.6-flash` for all twelve calls, with no provider revision supplied:
+
+| Arm | Exact-answer scores | Success rate | Normalized work |
+| --- | --- | --- | --- |
+| Parent fixed multi-role | 1, 1 | 100% | 17.0 |
+| Generated skill candidate | 0, 0 | 0% | 17.0 |
+
+The candidate failed before publication in both tasks: its edited skill
+selected a string-valued `answer` field as the entire deliverable although
+the task required an object. The host rejected the artifact schema, the
+changed skill did not complete, and component activation was false. All
+quality, success, regression, completion, and activation gates failed;
+**the candidate was not promoted**. This is a measured negative result for
+one candidate on a two-item public selection slice, not a general estimate
+of RSI effectiveness. The next research step is to feed rejected-candidate
+diagnostics into generation without leaking selection answers, then compare
+more than one candidate against fixed, equal-call single-role, and memory-only
+controls on independent tasks.

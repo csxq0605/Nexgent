@@ -74,7 +74,7 @@ manifest v2 已登记 role/workflow/skill/O/M/S component；ExecutablePlan v1 �
 
 固定多角色 AgentPackage 和等调用量单角色包已作为领域无关基线实现；它们都通过同一 canonical benchmark 入口运行并由宿主独立评分。[公开 BBH development 单题资格运行](../../experiments/orchestration_qualification/RESULTS.md)中，MiMo v2.6-flash 的多角色包完成了 3 次模型调用、交接和交付，但得 0 分；单角色 3 次调用得 1 分。它证明“实际运行”路径，不支持多智能体收益。
 
-`package_patch_v3.py` 是宿主侧整包构造器。PackagePatch v3 已接入默认 R0、候选入库、逐组件选择、晋升和 guard；确定性模型替身的端到端测试同时变更 workflow、role prompt 和 skill，并执行角色删除/新增，验证了加载证据和回滚入口。真实 MiMo v2.6-flash [生成资格运行](../../experiments/orchestration_qualification/RESULTS.md)尚未产生合法候选：一次默认思考耗尽输出预算，关闭思考后返回的 child manifest 仍缺少有效引用。**M-only/完整进化臂、模型产出候选的真实选择收益和统计对照仍未完成**，不能称为已证实 RSI。下一步应压缩模型面对的 manifest 编辑表示，同时保留宿主完整重建和核验。
+`package_patch_v3.py` 是宿主侧整包构造器。PackagePatch v3 已接入默认 R0、候选入库、逐组件选择、晋升和 guard；确定性模型替身的端到端测试同时变更 workflow、role prompt 和 skill，并执行角色删除/新增，验证了加载证据和回滚入口。真实 MiMo v2.6-flash [资格运行](../../experiments/orchestration_qualification/RESULTS.md)先因整份 child manifest 格式失败；改用只生成注册表差量后，R0 在一次模型调用中形成合法候选，但该候选在独立 selection 两题中从父包的 2/2 降为 0/2，未激活所改发布技能且未晋升。**M-only/完整进化臂、真实正向 RSI 效益和统计对照仍未完成**。下一步应把拒绝候选的可公开失败诊断接回搜索，同时严格隔离 selection 的答案和私有 evaluator。
 
 ## 研究依据与限度
 

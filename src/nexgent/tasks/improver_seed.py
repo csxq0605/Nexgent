@@ -41,6 +41,45 @@ IMPROVER_SOURCE = '''def improve(payload, context):
             'parent_package_digest': parent_digest,
             'mutation_policy': policy,
         }, max_tokens=6000)
+        if isinstance(patch, dict) and patch.get('schema') == 'nexgent.package-patch-proposal.v1':
+            if set(patch.keys()) != set([
+                    'schema', 'parent_package_digest', 'hypothesis', 'operations',
+                    'manifest_delta', 'activation_targets']):
+                raise ValueError('Compact PackagePatch proposal has unknown fields')
+            delta = patch.get('manifest_delta')
+            if (not isinstance(delta, dict)
+                    or set(delta.keys()) not in [set(['set', 'remove']),
+                                                  set(['set', 'remove', 'orchestrator'])]
+                    or not isinstance(delta['set'], dict)
+                    or not isinstance(delta['remove'], dict)):
+                raise ValueError('Compact PackagePatch manifest delta is invalid')
+            registries = ['entries', 'roles', 'workflows', 'skills', 'components']
+            child_manifest = {}
+            for name, value in parent_manifest.items():
+                child_manifest[name] = value.copy() if isinstance(value, dict) else value
+            for name, identities in delta['remove'].items():
+                if (name not in registries or not isinstance(identities, list)
+                        or len(set(identities)) != len(identities)
+                        or any(not isinstance(identity, str)
+                               or identity not in child_manifest[name]
+                               for identity in identities)):
+                    raise ValueError('Compact PackagePatch removal is invalid')
+                for identity in identities:
+                    del child_manifest[name][identity]
+            for name, replacements in delta['set'].items():
+                if (name not in registries or not isinstance(replacements, dict)
+                        or any(not isinstance(identity, str)
+                               for identity in replacements)):
+                    raise ValueError('Compact PackagePatch registry update is invalid')
+                child_manifest[name].update(replacements)
+            if 'orchestrator' in delta:
+                if not isinstance(delta['orchestrator'], str):
+                    raise ValueError('Compact PackagePatch orchestrator is invalid')
+                child_manifest['orchestrator'] = delta['orchestrator']
+            patch = {name: value for name, value in patch.items()
+                     if name != 'manifest_delta'}
+            patch['schema'] = 'nexgent.package-patch.v3'
+            patch['child_manifest'] = child_manifest
         if (not isinstance(patch, dict)
                 or set(patch.keys()) != set([
                     'schema', 'parent_package_digest', 'hypothesis', 'operations',
@@ -185,7 +224,7 @@ For `manifest_component_v2`, produce exactly one `nexgent.behavior-patch.v2` JSO
 
 Use exactly one `replace` operation on an existing component classified O or S by `mutation_policy`. Under v2, copy the same stable `component_id` into the hypothesis, operation, and activation probe; never supply a path or class. Copy the exact digest from the matching parent component and return the complete replacement text, not a diff. Preserve registered entry functions and keep Python within the controlled package language. Do not add domain answers, benchmark names, evaluator logic, hidden data, permissions, manifests, gates, or provider credentials. Prefer the smallest change that applies across tasks with the same failure mechanism.
 
-For `manifest_component_set_v3`, produce a `nexgent.package-patch.v3` object with exactly `schema`, `parent_package_digest`, `hypothesis`, `operations`, `child_manifest`, and `activation_targets`. The hypothesis has the four explanatory strings above plus `component_ids`, listing every changed component. Each operation names a stable `component_id` and is an `add`, `replace`, or `remove`; for add include `path` and full `content`, for remove include the parent `old_digest`, and for replace include `old_digest` plus full `content` when its file changes. Return the complete child manifest, including its updated role/skill/workflow/component registries. Activation targets must equal the changed component IDs. Use the supplied parent manifest and package digest exactly, keep the improve entry and host controls frozen, and stay within the mutation policy's capability, tool, parallelism, and byte ceilings. A coherent multi-file change may alter the workflow DAG and the roles or skills it actually uses. Abstain if the evidence does not support such a change.
+For `manifest_component_set_v3`, return a compact `nexgent.package-patch-proposal.v1` object with exactly `schema`, `parent_package_digest`, `hypothesis`, `operations`, `manifest_delta`, and `activation_targets`. Do not copy the complete parent manifest. The reference improver will apply your declared delta to the frozen parent and publish a complete PackagePatch v3; the host will independently validate every change. The hypothesis has the four explanatory strings above plus `component_ids`, listing every changed component. Each operation names a stable `component_id` and is an `add`, `replace`, or `remove`; for add include `path` and full `content`, for remove include the parent `old_digest`, and for replace include `old_digest` plus full `content` when its file changes. `manifest_delta` has `set` and `remove` objects and may have an `orchestrator` component ID when that identity changes. `set` and `remove` map registry names (`entries`, `roles`, `workflows`, `skills`, `components`) to respectively an object of new or replacement declarations, or a list of registry identities to delete. Use empty objects when no registry change is needed. Keep every unchanged registration out of this delta. Activation targets must equal the changed component IDs. Use the supplied parent package digest exactly, keep the improve entry and host controls frozen, and stay within the mutation policy's capability, tool, parallelism, and byte ceilings. A coherent multi-file change may alter the workflow DAG and the roles or skills it actually uses. Abstain if the evidence does not support such a change.
 
 The hypothesis must be falsifiable on later Episodes. The activation probe or targets must name changed components. Do not claim the patch works; selection and guard evaluation decide that independently.
 """

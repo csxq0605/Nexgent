@@ -22,3 +22,11 @@ qualification Episode and asks the reference R0 to generate a PackagePatch v3.
 The receipt is saved before the model call. This step can yield a generated
 candidate or durable missing evidence; generation alone never proves benefit.
 The complete child manifest makes this a demanding model-output contract.
+The reference R0 also accepts a compact model proposal containing only
+changed manifest registry entries; it assembles the complete child for the
+same host validator. `python -m experiments.orchestration_qualification.select_v3
+--root PROJECT --data BBH_DATA --candidate-id CANDIDATE_ID` pre-registers
+disjoint BBH selection tasks, then runs the parent/candidate pair under the
+same three-call hard budget and records the independent decision. Use the
+current worktree's `src` and `benchmarks/bbh/src` on `PYTHONPATH` when a
+different editable BBH checkout is installed in the Python environment.

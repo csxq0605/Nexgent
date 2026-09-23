@@ -1,6 +1,6 @@
 # Nexgent vNext 重构计划
 
-日期：2026-09-23。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地，AgentPackage manifest v2 与 ExecutablePlan v1 已把 role/workflow/orchestrator/O-M-S component 接到真实 runtime、revision 和宿主账本恢复。P2 独立 OpenFOAM Re=10 smoke 已在真实 WSL2/Foundation 8 环境通过。P3 已新增多组件 O/S PackagePatch v3、默认 R0 输出合同、组件集合选择/晋升/guard 的确定性端到端验证；P4 已有 durable-claim 可恢复 cycle；P5 已实现通用预注册 final-holdout 配对执行器。真实 MiMo v2.6-flash 的 v3 生成尝试未产生合法候选，当前 RSI 效益证据上限仍是 E0 工程合同；M route 和正式外部多任务研究尚未完成。
+日期：2026-09-23。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地，AgentPackage manifest v2 与 ExecutablePlan v1 已把 role/workflow/orchestrator/O-M-S component 接到真实 runtime、revision 和宿主账本恢复。P2 独立 OpenFOAM Re=10 smoke 已在真实 WSL2/Foundation 8 环境通过。P3 已新增多组件 O/S PackagePatch v3、默认 R0 输出合同、组件集合选择/晋升/guard 的确定性端到端验证；P4 已有 durable-claim 可恢复 cycle；P5 已实现通用预注册 final-holdout 配对执行器。真实 MiMo v2.6-flash 已通过紧凑注册表差量生成合法 v3 候选，但在独立 selection 两题中由父包 2/2 降为 0/2，未晋升；当前没有正向 RSI 效益证据。M route 和正式外部多任务研究尚未完成。
 
 ## 1. 产品与执行范围
 
@@ -122,7 +122,7 @@ TaskService benchmark 的 SDK 已收敛为显式 descriptor/protocol、隔离 re
 
 TaskService 现将工具调用次数与数值/外部工作量分开核算。`ToolSpec` 声明调用前固定预留，可信 handler 经 `ToolContext` 在实际工作边界持久计费，root Episode 对并行和委派共享原子预算；崩溃或未知结算保留预留且使 usage 不完整。P3/P4/P5 的成本门统一读取宿主 `charged_tool_work_units`，历史记录按显式零基线只读兼容。框架不能自动推断任意求解器的 FLOPs；scientific-discovery DomainPack 已在数值批次边界接入宿主可信计量，返回值中的 `work_units` 只作诊断。完整合同见[工具工作量计量](docs/design/tool-work-accounting.md)。
 
-P3 现有一个独立的正向 E1 exporter 与领域中立 qualification runner。它只接受仓库当前 immutable reference R0 的单一 `rsi_improver` 模型输出；现有 qualification fixture 仍使用 legacy path-v1 目标。runner 要求输出摘要等于入库 patch、usage/模型身份完整、paired quality 或 success 严格改善、独立 guard 通过，并由未参与 development/selection/guard 的冻结统计单元在晋升后再次加载同一 package revision。attempt 在模型调用前持久化且不可覆盖。MiMo v2.6-flash 已用于 [PackagePatch v3 资格尝试](experiments/orchestration_qualification/RESULTS.md)，真实 R0 输出尚未形成合法候选；该负结果不能写作 E1。原 E1 runner 的合同和运行方式见 [P3 E1 qualification pilot](experiments/p3_e1/README.md)。
+P3 现有一个独立的正向 E1 exporter 与领域中立 qualification runner。它只接受仓库当前 immutable reference R0 的单一 `rsi_improver` 模型输出；现有 qualification fixture 仍使用 legacy path-v1 目标。runner 要求输出摘要等于入库 patch、usage/模型身份完整、paired quality 或 success 严格改善、独立 guard 通过，并由未参与 development/selection/guard 的冻结统计单元在晋升后再次加载同一 package revision。attempt 在模型调用前持久化且不可覆盖。MiMo v2.6-flash 已用于 [PackagePatch v3 资格尝试](experiments/orchestration_qualification/RESULTS.md)：紧凑提案形成了真实候选，但独立 selection 结果为负且未晋升；该结果不能写作正向 E1。原 E1 runner 的合同和运行方式见 [P3 E1 qualification pilot](experiments/p3_e1/README.md)。
 
 scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分布的兼容名称，仅用于迁移 regression/golden 等价检查。它不是新鲜 holdout，也不支持新的科学发现、模型效果或 RSI 结论；正式研究仍需新的 host-private release、独立来源 cluster、重复、控制臂和真实 provider 收据。
 

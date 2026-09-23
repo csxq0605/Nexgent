@@ -90,6 +90,21 @@ def _proposal(parent):
     return patch, policy
 
 
+def _compact(parent, patch):
+    proposal = deepcopy(patch)
+    child = proposal.pop("child_manifest")
+    proposal["schema"] = "nexgent.package-patch-proposal.v1"
+    registries = ("entries", "roles", "workflows", "skills", "components")
+    proposal["manifest_delta"] = {
+        "set": {name: {identity: value for identity, value in child[name].items()
+                        if parent["manifest"][name].get(identity) != value}
+                for name in registries},
+        "remove": {name: sorted(set(parent["manifest"][name]) - set(child[name]))
+                   for name in registries},
+    }
+    return proposal
+
+
 class Gateway:
     def __init__(self, patch=None):
         self.roles = []
@@ -151,7 +166,7 @@ def test_atomic_add_replace_remove_component_set_executes(tmp_path):
 def test_generated_component_set_has_real_selection_activation(tmp_path):
     parent = multirole_package()
     patch, policy = _proposal(parent)
-    gateway = Gateway(patch)
+    gateway = Gateway(_compact(parent, patch))
     tasks = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
     evolution = EvolutionService(tasks)
     evolution.register("general", parent)
