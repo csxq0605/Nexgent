@@ -2,7 +2,7 @@
 
 **通用 RSI 智能体框架：自主组织任务执行，从反馈中改进技能、协作和工作方式，并能运行 benchmark 检验效果。**
 
-目标形态是一个无状态、任务类型无关的 Kernel 与通用 Compiler/Runtime，由多智能体根据任务自行组成并改进任务专一的角色、技能和协作程序。本分支已接通模型提出图操作、编译 pending 子图并在同一任务执行与恢复；任务图可创建带冻结身份的新模型角色、用有类型的消息边交流，也可指定一个自建规划角色在节点反馈后改写未开始的图。技能提案可编译为不可变子包，由委派 Episode 直接执行，或由保留通用规划器的子 Episode 自行选择和运行。任务来源的技能还可经过反馈、独立候选验证与 guard 后通过 channel 在后续任务复用；目前该完整闭环只有确定性测试证据。真实 MiMo 已完成一次自设计的 7 节点、多角色 DAG 任务，另一次真实模型提案经编译反馈修复形成了可执行技能子包；父任务仍未自主完成技能委派，执行中二次改图、跨任务有效复用和 RSI 效益也尚未证实。[架构决策](docs/design/stateless-kernel-and-self-designed-teams.md)、[任务时图合同](docs/design/task-time-self-orchestration.md)、[任务中创建能力](docs/design/task-time-skill-invention.md)和[真实探针记录](docs/research/task-time-self-orchestration-live-20260923.md)区分这些证据。
+目标形态是一个无状态、任务类型无关的 Kernel 与通用 Compiler/Runtime，由多智能体根据任务自行组成并改进任务专一的角色、技能和协作程序。本分支已接通模型提出图操作、编译 pending 子图并在同一任务执行与恢复；任务图可创建带冻结身份的新模型角色、用有类型的消息边交流，也可指定一个自建规划角色在节点反馈后改写未开始的图。技能提案可编译为不可变子包，由委派 Episode 直接执行，或由保留通用规划器的子 Episode 自行选择和运行。任务最终图、角色和可选技能可从创建者收据组成一个待独立评价的 O/S 候选；纯图／角色候选不要求先造技能。任务来源的技能也可经反馈、独立候选验证与 guard 后通过 channel 在后续任务复用；目前这些跨任务闭环只有确定性测试证据。真实 MiMo 已完成一次自设计的 7 节点、多角色 DAG 任务，另一次真实模型提案经编译反馈修复形成了可执行技能子包；父任务仍未自主完成技能委派，执行中二次改图、跨任务有效复用和 RSI 效益也尚未证实。[架构决策](docs/design/stateless-kernel-and-self-designed-teams.md)、[任务时图合同](docs/design/task-time-self-orchestration.md)、[任务中创建能力](docs/design/task-time-skill-invention.md)和[真实探针记录](docs/research/task-time-self-orchestration-live-20260923.md)区分这些证据。
 
 Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具、任务、数据和评分不能进入核心。OpenFOAM 不成为框架的默认任务定义；同一核心必须能执行非 CFD 任务与 benchmark。
 
