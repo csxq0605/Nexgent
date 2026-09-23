@@ -609,7 +609,8 @@ class TaskService:
         return component_id, component["ref"]
 
     def _materialize_workflow(self, package, workflow_ref, capability_lease,
-                              *, proposed_workflow=None):
+                              *, proposed_workflow=None,
+                              capability_authority=None):
         """Resolve a frozen or proposed graph against the same manifest and lease."""
         manifest = package["manifest"]
         registered = manifest["workflows"].get(workflow_ref)
@@ -637,7 +638,33 @@ class TaskService:
         roles = manifest["roles"]
         components = manifest["components"]
         task_roles = workflow.get("task_roles", {})
-        def authorize_nodes(definition):
+        def authorize_nodes(definition, *, inside_loop=False):
+            definition_nodes, definition_dependencies, _, _ = _validate(definition)
+            lifecycle_methods = {
+                "develop_tool", "release_tool", "develop_service",
+                "activate_service", "release_service",
+            }
+            lifecycle_nodes = [
+                node_id for node_id, node in definition_nodes.items()
+                if node["method"] in lifecycle_methods
+            ]
+            if inside_loop and lifecycle_nodes:
+                raise ContractError(
+                    "Workflow capability lifecycle nodes cannot repeat inside a loop")
+            ancestors = {}
+            def node_ancestors(node_id):
+                if node_id not in ancestors:
+                    result = set(definition_dependencies[node_id])
+                    for dependency in tuple(result):
+                        result.update(node_ancestors(dependency))
+                    ancestors[node_id] = result
+                return ancestors[node_id]
+            for index, node_id in enumerate(lifecycle_nodes):
+                for other in lifecycle_nodes[index + 1:]:
+                    if (node_id not in node_ancestors(other)
+                            and other not in node_ancestors(node_id)):
+                        raise ContractError(
+                            "Workflow capability lifecycle nodes must be totally ordered")
             ask_fields = {"role", "prompt", "payload", "max_tokens"}
             capability_arguments = {
                 "read_artifact": ({"artifact_id"}, {"artifact_id"}),
@@ -648,7 +675,26 @@ class TaskService:
                     {"proposal", "constraints"},
                 ),
                 "tool": ({"name", "arguments"}, {"name"}),
+                "develop_tool": ({"proposal"}, {"proposal"}),
+                "develop_service": ({"proposal"}, {"proposal"}),
+                "activate_service": (
+                    {"definition_id", "expected_revision"},
+                    {"definition_id", "expected_revision"},
+                ),
+                "release_service": (
+                    {"expected_revision"}, {"expected_revision"}),
+                "capability_inventory": (set(), set()),
             }
+            def authority_grants(kind, effect):
+                if capability_authority is None:
+                    return False
+                from .capability_authority import require_definition_authorized
+                try:
+                    require_definition_authorized(
+                        capability_authority, kind, effect, [], [])
+                except (ContractError, PermissionError):
+                    return False
+                return True
             def bounded_fields(fields):
                 names = sorted(fields)
                 rendered = ", ".join(name[:48] for name in names[:6])
@@ -820,10 +866,27 @@ class TaskService:
                             "Workflow ask node must provide the model payload argument")
                 if method == "tool":
                     tool_name = params.get("name") if isinstance(params, dict) else None
-                    if not isinstance(tool_name, str) or tool_name not in capability_lease:
+                    dynamic_name = (
+                        "name" in node.get("bindings", {})
+                        or "name" in artifact_fields.get(node.get("id"), set())
+                    )
+                    if dynamic_name:
+                        if not authority_grants("tool", "local_compute"):
+                            raise PermissionError(
+                                "Workflow tool name binding requires tool-development authority")
+                    elif not isinstance(tool_name, str) or tool_name not in capability_lease:
                         raise PermissionError(
                             "Workflow tool operator must resolve to the Episode capability lease")
-                    self.tools.get(tool_name)
+                    else:
+                        self.tools.get(tool_name)
+                if method == "develop_tool" and not authority_grants(
+                        "tool", "local_compute"):
+                    raise PermissionError(
+                        "Workflow tool development requires tool-development authority")
+                if method in {"develop_service", "activate_service", "release_service"} \
+                        and not authority_grants("service_provider", "model_context"):
+                    raise PermissionError(
+                        "Workflow service lifecycle requires model-context service authority")
                 if method == "skill":
                     skill_name = params.get("name") if isinstance(params, dict) else None
                     if not isinstance(skill_name, str) or skill_name not in manifest.get("skills", {}):
@@ -842,7 +905,7 @@ class TaskService:
                 if method == "loop":
                     if not isinstance(node.get("body"), dict):
                         raise ContractError("Loop body must be a workflow")
-                    authorize_nodes(node["body"])
+                    authorize_nodes(node["body"], inside_loop=True)
         authorize_nodes(workflow)
         for rule in workflow.get("revision_rules", []):
             if (not isinstance(rule, dict)
@@ -1084,7 +1147,8 @@ class TaskService:
             raise RecoveryRequired("Frozen workflow has an unexpected generated snapshot")
         workflow = self._materialize_workflow(
             package, workflow_ref[0], state["capabilities"],
-            proposed_workflow=workflow_snapshot[0])
+            proposed_workflow=workflow_snapshot[0],
+            capability_authority=state["task"].get("capability_authority"))
         workflow_current = [workflow]
         if state.get("plan_execution") is None:
             plan = plan_from_workflow(workflow, component_id)
@@ -1389,7 +1453,9 @@ class TaskService:
                         repair_path=f"graph-repair/{current.plan.revision}/{rule['id']}",
                         materialize_callback=lambda candidate: self._materialize_workflow(
                             package, "generated", state["capabilities"],
-                            proposed_workflow=candidate),
+                            proposed_workflow=candidate,
+                            capability_authority=state["task"].get(
+                                "capability_authority")),
                         repair_callback=repair,
                     )
                 except GraphRepairExhausted as exc:
@@ -1407,7 +1473,8 @@ class TaskService:
                 return revised_workflow, revision
             target_ref = rule["workflow_ref"]
             revised_workflow = self._materialize_workflow(
-                package, target_ref, state["capabilities"])
+                package, target_ref, state["capabilities"],
+                capability_authority=state["task"].get("capability_authority"))
             revised_plan = plan_from_workflow(
                 revised_workflow, component_id, revision=current.plan.revision + 1)
             revision = PlanRevision(
@@ -1563,6 +1630,12 @@ class TaskService:
                     [lease["name"] for lease in active_leases])
             if state["task"].get("capability_authority") is not None:
                 payload["tools"] = payload["tools"] + self._dynamic_inventory(identity)
+                services = self._service_inventory(identity)
+                if services is not None:
+                    payload["services"] = services
+            from .self_orchestration_seed import available_operators_for_authority
+            payload["available_operators"] = available_operators_for_authority(
+                state["task"].get("capability_authority"))
             payload.update(episode_id=identity, input_refs=state["input_refs"],
                            memory_snapshot=self.store.memory_snapshot(state["memory_snapshot_id"], identity),
                            skills=deepcopy(package["manifest"].get("skills", {})),

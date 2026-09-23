@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..tasks.self_orchestration_seed import self_orchestration_package
+from ..tasks.capability_authority import make_episode_authority
 from .tasks_window import ACCEPTANCE, STATUS, TaskWorker, task_status
 
 
@@ -55,7 +56,12 @@ QTabBar::tab:selected { color:#234d37; border-bottom:2px solid #628d60; }
 QTabWidget::pane { border:0; }
 """
 
-MAIN_PACKAGE_CHANNEL = "nexgent-main"
+# Preserve the earlier channel and its promoted package identity. This channel
+# starts a new graph baseline that exposes task-time capability development.
+MAIN_PACKAGE_CHANNEL = "nexgent-main-capabilities-v1"
+MAIN_CAPABILITY_AUTHORITY = make_episode_authority(
+    ["tool", "service_provider"], ["local_compute", "model_context"],
+    max_definitions=32, max_invocations=128, version=2)
 
 
 def _json(value) -> str:
@@ -81,6 +87,37 @@ def _list_summary(value, empty):
     if isinstance(value, list):
         return "\n".join(f"• {_brief(item)}" for item in value)
     return _brief(value)
+
+
+def _capability_evidence(state):
+    """Summarize verified identities without showing source or model payloads."""
+    authority = (state.get("task") or {}).get("capability_authority")
+    rows = []
+    if isinstance(authority, dict):
+        rows.append("任务能力授权：" + ", ".join(authority.get("allowed_kinds", [])))
+        rows.append("授权摘要：" + str(authority.get("digest", "未记录"))[:16])
+    labels = {
+        "capability_definition_staged": "工具定义已暂存",
+        "capability_instance_mounted": "工具已激活",
+        "capability_instance_released": "工具已释放",
+        "service_definition_staged": "服务定义已暂存",
+        "service_provider_activated": "服务已激活",
+        "service_provider_released": "服务已释放",
+        "service_applied": "服务已应用于模型调用",
+    }
+    for event in (state.get("events") or [])[-80:]:
+        if not isinstance(event, dict) or event.get("kind") not in labels:
+            continue
+        content = event.get("content") or {}
+        if not isinstance(content, dict):
+            continue
+        binding = content.get("binding") or {}
+        identity = (content.get("definition_id")
+                    or binding.get("definition_id")
+                    or content.get("name") or "")
+        rows.append("• " + labels[event["kind"]] +
+                    (" · " + str(identity)[:52] if identity else ""))
+    return rows
 
 
 class MainWindow(QMainWindow):
@@ -293,6 +330,7 @@ class MainWindow(QMainWindow):
         try:
             state = self.service.create(
                 objective, context={"split_role": "development"},
+                capability_authority=deepcopy(MAIN_CAPABILITY_AUTHORITY),
                 **self._package_selection())
         except Exception as exc:
             self._error(f"创建 Episode 失败：{exc}")
@@ -445,9 +483,10 @@ class MainWindow(QMainWindow):
                        if isinstance(event, dict)]
         self.evidence_view.setPlainText("\n".join([
             "证据概览",
-            f"模型/工具调用收据：{len(calls)}",
+            f"模型调用收据：{len(calls)}",
             f"事件：{len(events)}",
             f"工件：{len(state.get('artifacts') or [])}", "",
+            "能力与版本", "\n".join(_capability_evidence(state)) or "尚无能力变更", "",
             "最近事件", "\n".join(f"• {name}" for name in event_names) if event_names else "暂无事件", "",
             "完整收据和原始字段请在高级控制台查看，或导出该 Episode。",
         ]))

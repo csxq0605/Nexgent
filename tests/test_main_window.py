@@ -5,7 +5,9 @@ import threading
 
 from PyQt6.QtCore import Qt
 
-from nexgent.ui.main_window import MainWindow
+from nexgent.ui.main_window import (
+    MAIN_CAPABILITY_AUTHORITY, MAIN_PACKAGE_CHANNEL, MainWindow,
+)
 from nexgent.tasks.evolution import EvolutionService
 from nexgent.tasks.runtime import TaskService
 
@@ -77,6 +79,7 @@ def test_main_starts_from_conversation_and_uses_task_service(qtbot, tmp_path):
     assert service.created_packages[0]["provenance"]["origin"] == (
         "nexgent.self-orchestration-seed")
     assert service.created_options[0]["context"]["split_role"] == "development"
+    assert service.created_options[0]["capability_authority"] == MAIN_CAPABILITY_AUTHORITY
     assert window.selected_id == "episode-0001"
     assert "目标已接收" in window.messages.toPlainText()
     assert not hasattr(window, "objective")
@@ -93,13 +96,24 @@ def test_real_main_resolves_a_project_package_channel(qtbot, tmp_path):
     qtbot.addWidget(window)
 
     selection = window._package_selection()
-    assert selection == {"package_channel": "nexgent-main"}
-    active = EvolutionService(service).active("nexgent-main")
+    assert selection == {"package_channel": MAIN_PACKAGE_CHANNEL}
+    active = EvolutionService(service).active(MAIN_PACKAGE_CHANNEL)
     assert active["package"]["provenance"]["origin"] == (
         "nexgent.self-orchestration-seed")
     assert window._package_selection() == selection
     episode = service.create("Plan a task", **selection)
     assert episode["package_digest"] == active["package_digest"]
+
+
+def test_main_keeps_prior_channel_registration_intact(qtbot, tmp_path):
+    service = TaskService(tmp_path)
+    evolution = EvolutionService(service)
+    from nexgent.tasks.self_orchestration_seed import self_orchestration_package
+    old = evolution.register("nexgent-main", self_orchestration_package())
+    window = MainWindow(tmp_path, service=service)
+    qtbot.addWidget(window)
+    assert window._package_selection() == {"package_channel": MAIN_PACKAGE_CHANNEL}
+    assert EvolutionService(service).active("nexgent-main")["package_digest"] == old["package_digest"]
 
 
 def test_new_conversation_keeps_advanced_controls_out_of_main(qtbot, tmp_path):
@@ -145,3 +159,29 @@ def test_main_information_window_summarizes_run_without_raw_json(qtbot, tmp_path
     assert "答案已验证" in window.messages.toPlainText()
     assert "答案已验证" in window.delivery_view.toPlainText()
     assert '"nodes"' not in window.run_view.toPlainText()
+
+
+def test_main_evidence_summarizes_service_identity_without_source(qtbot, tmp_path):
+    service = FakeMainService()
+    episode = service.create("整理证据")
+    state = service.states[episode["id"]]
+    state["task"]["capability_authority"] = MAIN_CAPABILITY_AUTHORITY
+    state["events"] = [
+        {"kind": "service_definition_staged", "content": {
+            "definition_id": "service-definition-abc", "source": "private source"}},
+        {"kind": "service_provider_activated", "content": {
+            "definition_id": "service-definition-abc", "revision": 1}},
+        {"kind": "service_applied", "content": {
+            "binding": {"definition_id": "service-definition-abc"},
+            "payload": "private model payload"}},
+    ]
+    window = MainWindow(tmp_path, service=service)
+    qtbot.addWidget(window)
+    window.show_task(episode["id"])
+    evidence = window.evidence_view.toPlainText()
+    assert "服务定义已暂存" in evidence
+    assert "服务已激活" in evidence
+    assert "服务已应用于模型调用" in evidence
+    assert "service-definition-abc" in evidence
+    assert "private source" not in evidence
+    assert "private model payload" not in evidence

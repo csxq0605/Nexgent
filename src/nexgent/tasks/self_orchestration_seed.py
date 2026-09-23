@@ -59,6 +59,39 @@ and input/output schemas. When one fits the task, add a `skill` node using the
 listed `component_ref`, put its `name` in `params.name`, and bind the requested
 payload. Do not recreate an installed skill or invent its component identity.
 
+The task payload also contains the current `tools` inventory and, when the
+Episode has service authority, the single `services.model_context.v1` slot.
+Capability-development operators are admitted only when the Episode authority
+grants their kind and effect. These host nodes omit `role_ref` and
+`component_ref`, execute serially, and use these exact argument contracts:
+- `develop_tool`: `proposal` with exactly `name`, `description`, `source`,
+  `input_schema`, and `output_schema`; source defines
+  `execute(payload, context)` and cannot use `context`.
+- `develop_service`: `proposal` with exactly `name`, `description`, and
+  `source`; source defines `provide(payload, context)`, cannot use `context`,
+  and returns exactly `payload` plus an `annotations` object.
+- `activate_service`: `definition_id` and the service slot's
+  `expected_revision`.
+- `release_service`: the service slot's `expected_revision`.
+- `capability_inventory`: no arguments.
+
+`develop_tool` returns `name` and mounts that task-local tool immediately. A
+later `tool` node may bind `name` from that receipt and bind or set
+`arguments`; the host still verifies the active Definition and Instance at
+execution. `develop_service` only stages a Definition, so bind its
+`definition_id` into `activate_service`. Only later `ask` nodes observe the
+activated provider. Use control edges or result bindings to keep lifecycle
+nodes ordered, and never put development, activation, or release in a
+parallel branch. Creating either capability consumes the Episode's bounded
+definition and invocation authority; use it only for a task-grounded missing
+capability whose effect can be checked downstream.
+
+A valid tool development chain has this shape (proposal fields abbreviated):
+`develop_tool(proposal) -> tool(name=$node.develop.name, arguments=...)`.
+A valid service chain has this shape:
+`develop_service(proposal) -> activate_service(definition_id=$node.develop.definition_id,
+expected_revision=task.services.model_context.v1.revision) -> ask`.
+
 Here is one complete, valid minimal response. Adapt role choice, instructions,
 nodes, dependencies, deliverable names, and output shape to the actual task:
 {"proposal":{"replaced_node_ids":["slot"],"operations":[
@@ -202,9 +235,33 @@ GENERIC_ROLE_PROMPTS = {
 
 
 AVAILABLE_OPERATORS = (
-    "ask", "tool", "skill", "develop_skill", "delegate", "read_artifact", "publish",
+    "ask", "tool", "skill", "develop_skill", "develop_tool",
+    "develop_service", "activate_service", "release_service",
+    "capability_inventory", "delegate", "read_artifact", "publish",
     "memory_search", "remember", "feedback", "parallel", "join", "loop",
 )
+
+_OPERATOR_AUTHORITY = {
+    "develop_tool": ("tool", "local_compute"),
+    "develop_service": ("service_provider", "model_context"),
+    "activate_service": ("service_provider", "model_context"),
+    "release_service": ("service_provider", "model_context"),
+}
+
+
+def available_operators_for_authority(authority):
+    """Project only operators that the current Episode can admit."""
+    kinds = set(authority.get("allowed_kinds", [])) if isinstance(authority, dict) else set()
+    effects = (
+        set(authority.get("allowed_effects", []))
+        if isinstance(authority, dict) else set()
+    )
+    return [
+        operator for operator in AVAILABLE_OPERATORS
+        if operator not in _OPERATOR_AUTHORITY
+        or (_OPERATOR_AUTHORITY[operator][0] in kinds
+            and _OPERATOR_AUTHORITY[operator][1] in effects)
+    ]
 
 
 def self_orchestration_package():
@@ -229,7 +286,7 @@ def self_orchestration_package():
                     "payload": {
                         "task": {"$input": ""},
                         "available_roles": available_roles,
-                        "available_operators": list(AVAILABLE_OPERATORS),
+                        "available_operators": {"$input": "available_operators"},
                         "available_skills": {"$input": "available_skills"},
                     },
                 },
