@@ -53,13 +53,15 @@ Nexgent 核心不内置任务域。正式研究通过 `nexgent.task_benchmarks` 
 | 任务族 | 用途 | 结论边界 |
 | --- | --- | --- |
 | Workbench private-v2 | 工件、隐藏评价、防泄漏资格检查 | 仓库工程 fixture，不作外部统计证据 |
-| τ-bench retail/airline | 工具调用、政策遵守、交互可靠性 | 主任务族；报告成功率和 `pass^k`，[ICLR 2025](https://proceedings.iclr.cc/paper_files/paper/2025/hash/1b126cc38b8638e07bef37e7b2bb72bf-Abstract-Conference.html) |
+| 当前 τ-bench 文本 retail/airline | 工具调用、政策遵守、交互可靠性 | 主任务族候选；固定[当前官方仓库](https://github.com/sierra-research/tau2-bench)版本、模拟用户模型与数据库状态，报告成功率和 `pass^k`；旧仓库任务已标记过时，公开 base split 不当成私有 final holdout |
 | SWE-bench-Live | 新鲜代码任务与可执行修复 | 固定容器；阻断答案仓库访问，[论文](https://arxiv.org/abs/2505.23419) |
 | WebArena 私有变体 | 长程规划、自托管网站、多工具状态 | 公开原题只作可比性分析，[ICLR 2024](https://proceedings.iclr.cc/paper_files/paper/2024/hash/4410c0711e9154a7a2d26f9b3816d1ef-Abstract-Conference.html) |
 | 最新 LiveBench slice | 客观推理/数据分析迁移 | 非交互补充，[ICLR 2025](https://proceedings.iclr.cc/paper_files/paper/2025/hash/e4a46394ba5378b3f9a186a5b4c650d1-Abstract-Conference.html) |
 | OpenFOAM cavity | 科学工具型独立 demo | 单列 CFD 域内结果，不进入通用 RSI 宏平均 |
 
 现有 BBH 插件只有两个子任务且固定程序已饱和，只适合接口回归。静态 SWE-bench Verified/Pro 不作为唯一主证据；使用时单列污染、测试设计和任务质量限制。[Verified 审计](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)、[Pro 审计](https://openai.com/index/separating-signal-from-noise-coding-evaluations/)
+
+三类外部插件的当期官方版本、接入顺序及本机成本判断见[adapter 可行性复核](external-benchmark-adapter-feasibility-20260923.md)。它只是来源和实现审查，不替代真实接入或正式结果。
 
 ## 5. Split、来源组与重复
 
