@@ -20,6 +20,7 @@ import time
 import uuid
 
 from ..kernel.programs import digest
+from .capability_authority import validate_episode_authority
 from .benchmarks import (
     host_runtime_fingerprint, validate_adapter, validate_snapshot, validate_tasks,
 )
@@ -854,7 +855,8 @@ class EvolutionService:
     def _cost_projection(usage, weights=STANDARD_COST_WEIGHTS):
         return normalized_work_projection(usage, weights)
 
-    def _create_frozen(self, package, benchmark_id, task_ref, snapshot, budget, registration):
+    def _create_frozen(self, package, benchmark_id, task_ref, snapshot, budget,
+                       registration, capability_authority=None):
         context = deepcopy(task_ref.get("context") or {})
         if "evolution_registration" in context:
             raise ContractError("Evolution registration context is host-owned")
@@ -869,7 +871,8 @@ class EvolutionService:
             task_ref["objective"], task_ref.get("inputs"), task_ref.get("deliverables"), budget,
             task_ref.get("capabilities"), package, context,
             constraints=task_ref.get("constraints"),
-            benchmark_registration=benchmark_registration)
+            benchmark_registration=benchmark_registration,
+            capability_authority=capability_authority)
 
     def _run_frozen(self, state, adapter, task_ref, snapshot, stop_event):
         error = None
@@ -890,7 +893,8 @@ class EvolutionService:
                 "failure_class": classified["failure_class"], "error": error}
 
     def plan_pair(self, candidate_id, adapter, *, split="development", split_role="development",
-                  seed=0, budget=None, policy=None, **options):
+                  seed=0, budget=None, policy=None, capability_authority=None,
+                  **options):
         """Freeze tasks, evaluator identity, budget, and gates before either arm runs."""
         candidate = self.candidate(candidate_id)
         if split_role in {"holdout", "final_holdout"} or split in {"holdout", "final_holdout"}:
@@ -901,6 +905,10 @@ class EvolutionService:
         benchmark_id = _identifier(getattr(adapter, "id", ""), "Benchmark id")
         snapshot = validate_snapshot(adapter.snapshot())
         tasks = validate_tasks(adapter.tasks(split=split, seed=seed, **options))
+        if any("capability_authority" in task for task in tasks):
+            raise ContractError("Benchmark task cannot grant capability authority")
+        authority = (validate_episode_authority(capability_authority)
+                     if capability_authority is not None else None)
         if not tasks or any(not isinstance(task, dict) or not isinstance(task.get("objective"), str)
                             for task in tasks):
             raise ContractError("Evolution benchmark must provide valid tasks")
@@ -926,6 +934,9 @@ class EvolutionService:
                   "arm_schedule": arm_schedule, "environment": environment,
                    "environment_digest": digest(environment),
                    "budget": _copy({} if budget is None else budget, "Trial budget"),
+                   "capability_authority": authority,
+                   "capability_authority_digest": (
+                       authority["digest"] if authority is not None else None),
                    "cost_projection": cost_projection_spec(),
                    "outcome_policy": outcome_policy(),
                    "policy": asdict(policy), "policy_digest": digest(asdict(policy)),
@@ -960,6 +971,12 @@ class EvolutionService:
         snapshot = suite["snapshot"]
         tasks = suite["tasks"]
         budget = plan["budget"]
+        authority = plan.get("capability_authority")
+        if authority is not None:
+            authority = validate_episode_authority(authority)
+        if plan.get("capability_authority_digest") != (
+                authority["digest"] if authority is not None else None):
+            raise ContractError("Paired trial capability authority changed")
         if (digest(self._environment_snapshot(tasks)) != plan.get("environment_digest")
                 or len(plan.get("arm_schedule", [])) != len(tasks)
                 or plan.get("outcome_policy") != outcome_policy()):
@@ -991,8 +1008,8 @@ class EvolutionService:
             # memory on create, so neither arm can write information that the
             # other arm later reads from its initial snapshot.
             states = {
-                "parent": self._create_frozen(parent, benchmark_id, task_ref, snapshot, budget, registration),
-                "candidate": self._create_frozen(proposed, benchmark_id, task_ref, snapshot, budget, registration),
+                "parent": self._create_frozen(parent, benchmark_id, task_ref, snapshot, budget, registration, authority),
+                "candidate": self._create_frozen(proposed, benchmark_id, task_ref, snapshot, budget, registration, authority),
             }
             memory = {name: self.store.memory_snapshot(state["memory_snapshot_id"], state["id"])
                       for name, state in states.items()}
@@ -1233,7 +1250,8 @@ class EvolutionService:
     def decision(self, decision_id):
         return self._get("task_evolution_decisions", decision_id)
 
-    def plan_monitor(self, candidate_id, adapter, *, split="guard", seed=0, budget=None, **options):
+    def plan_monitor(self, candidate_id, adapter, *, split="guard", seed=0,
+                     budget=None, capability_authority=None, **options):
         """Pre-register public guard tasks and evaluator identity for a deployment."""
         candidate = self.candidate(candidate_id)
         if split in {"development", "selection", "final_holdout", "holdout"}:
@@ -1242,6 +1260,10 @@ class EvolutionService:
         benchmark_id = _identifier(getattr(adapter, "id", ""), "Benchmark id")
         snapshot = validate_snapshot(adapter.snapshot())
         tasks = validate_tasks(adapter.tasks(split=split, seed=seed, **options))
+        if any("capability_authority" in task for task in tasks):
+            raise ContractError("Benchmark task cannot grant capability authority")
+        authority = (validate_episode_authority(capability_authority)
+                     if capability_authority is not None else None)
         if not tasks or any(not isinstance(task, dict) or not isinstance(task.get("objective"), str)
                             for task in tasks):
             raise ContractError("Monitoring plan must provide valid tasks")
@@ -1260,6 +1282,9 @@ class EvolutionService:
                    "environment": environment, "environment_digest": digest(environment),
                    "outcome_policy": outcome_policy(),
                    "budget": _copy({} if budget is None else budget, "Monitoring budget"),
+                   "capability_authority": authority,
+                   "capability_authority_digest": (
+                       authority["digest"] if authority is not None else None),
                   "created_at": time.time()}
         result = self._insert("task_evolution_monitor_plans", record)
         self._event(candidate["channel"], "monitoring_planned",
@@ -1316,6 +1341,11 @@ class EvolutionService:
                 or monitor_plan.get("component_id") != candidate.get("component_id")
                 or monitor_plan.get("component_target") != candidate.get("component_target")):
             raise ContractError("Monitoring plan does not belong to the promoted candidate")
+        selection_plan = self.plan(self.trial(decision["trial_id"])["plan_id"])
+        if (selection_plan.get("capability_authority_digest")
+                != monitor_plan.get("capability_authority_digest")):
+            raise ContractError(
+                "Monitoring capability authority differs from selection")
         promotion = {"candidate_id": candidate_id, "decision_id": decision_id,
                      "trial_id": decision["trial_id"], "policy": deepcopy(decision["policy"]),
                      "component_id": candidate.get("component_id"),
@@ -1386,6 +1416,12 @@ class EvolutionService:
                 or digest(validate_snapshot(adapter.snapshot())) != digest(suite["snapshot"])):
             raise ContractError("Active monitoring plan identity changed")
         tasks = suite["tasks"]
+        authority = plan.get("capability_authority")
+        if authority is not None:
+            authority = validate_episode_authority(authority)
+        if plan.get("capability_authority_digest") != (
+                authority["digest"] if authority is not None else None):
+            raise ContractError("Monitoring capability authority changed")
         if (plan.get("task_schedule") != [digest(task) for task in tasks]
                 or digest(self._environment_snapshot(tasks)) != plan.get("environment_digest")):
             raise ContractError("Monitoring execution environment changed from its plan")
@@ -1426,6 +1462,7 @@ class EvolutionService:
                 plan["budget"], task_ref.get("capabilities"), context=context,
                 constraints=task_ref.get("constraints"), package_channel=channel,
                 benchmark_registration=benchmark_registration,
+                capability_authority=authority,
                 expected_package_registration={
                     "channel": channel, "revision": active["revision"],
                     "package_id": active["package_id"],

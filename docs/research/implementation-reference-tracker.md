@@ -19,3 +19,5 @@
 [四次限额 MiMo 收据](../../experiments/kernel_spike/RESULTS.md)均未通过独立任务质量检查。真实模型能生成服务 Definition、图中的读工件／激活／模型节点；首次将工件 ID 当数据，第二次绑定带点的服务接口键失败，第三次服务抹掉模型输入却因交付 schema 泄露 A 而机械完成，第四次把绑定语法写成普通字符串并在激活时失败。第三次的服务确实作用于两次模型请求，但不构成任务成功。已为普通 Main 图加路径安全的服务状态投影、提示读工件并保留原输入字段，给实验加独立事实检查，并让服务激活的参数错误在图编译时被拒绝；22 项相关定向测试通过。`nexgent-main-capabilities-v2` 是新基线 channel，旧 channel 身份不静默改写。
 
 与 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的作用域服务相比，目前仍只有窄的 Python 上下文服务，没有通用 provider 生命周期。与 [AutoSci 论文版本](https://github.com/skyllwt/AutoSci/tree/arxiv-v1) 的 SciDAG／SciEvolve、[ADAS](https://arxiv.org/abs/2408.08435v2) 的可执行智能体搜索、[AFlow](https://arxiv.org/abs/2410.10762v4) 的图搜索相比，本轮只验证了生成图的执行和失败边界；**没有**反馈选择出的图版本、跨任务采用、同资源对照或改进收益。D/E/F 出口保持未通过。
+
+E0 前置改动：`EvolutionService.plan_pair/plan_monitor` 新增宿主授予的冻结 `EpisodeAuthority` 和摘要；配对父子两臂、监控 Episode 均由该计划传入同一授权，benchmark 任务行不能自行提供授权。既有任务来源技能的选择／晋升／guard／新任务复用测试在有授权、无授权两种模式下均通过。这只解决未来能力候选的公平执行条件，未将动态工具／服务 Definition 放入可发布包，也未证明其调用激活或 RSI 收益。

@@ -82,7 +82,7 @@ grants their kind and effect. These host nodes omit `role_ref` and
   `input_schema`, and `output_schema`; source defines
   `execute(payload, context)` and cannot use `context`.
 - `develop_service`: `proposal` with exactly `name`, `description`, and
-  `source`; source defines `provide(payload, context)`, cannot use `context`,
+  `source`; source defines `provide(request, context)`, cannot use `context`,
   and returns exactly `payload` plus an `annotations` object.
 - `activate_service`: `definition_id` and the service slot's
   `expected_revision`.
@@ -102,9 +102,12 @@ capability whose effect can be checked downstream.
 
 A valid tool development chain has this shape (proposal fields abbreviated):
 `develop_tool(proposal) -> tool(name=$node.develop.name, arguments=...)`.
-A valid service chain has this shape:
-`develop_service(proposal) -> activate_service(definition_id=$node.develop.definition_id,
-expected_revision=$input.model_context_service.revision) -> ask`.
+A valid service chain has this shape. Put references in `bindings` as JSON
+objects, never strings beginning with `$node.` or `$input.` in `params`:
+`{"id":"activate","method":"activate_service","bindings":{
+"definition_id":{"$node":"develop.definition_id"},
+"expected_revision":{"$input":"model_context_service.revision"}}}`.
+Add a control edge from `activate` to each `ask` that must use the service.
 
 Here is one complete, valid minimal response. Adapt role choice, instructions,
 nodes, dependencies, deliverable names, and output shape to the actual task:

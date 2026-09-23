@@ -2,13 +2,16 @@
 
 from copy import deepcopy
 
+import pytest
+
+from nexgent.tasks.capability_authority import make_episode_authority
 from nexgent.tasks.evolution import EvolutionService, PromotionPolicy
 from nexgent.tasks.generation import GenerationService
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.self_orchestration_seed import self_orchestration_package
 from nexgent.tasks.task_skill_adoption import TaskSkillAdoptionService
 from nexgent.tasks.task_skill_compiler import TASK_SKILL_PROPOSAL_SCHEMA
-from nexgent.tasks.tools import ToolRegistry
+from nexgent.tasks.tools import ContractError, ToolRegistry
 
 
 RESULT_SPEC = [{"name": "result", "schema": {
@@ -189,7 +192,9 @@ class FreshTaskBenchmark:
         }
 
 
-def test_task_origin_skill_passes_selection_guard_and_fresh_channel_reuse(tmp_path):
+@pytest.mark.parametrize("with_authority", [False, True])
+def test_task_origin_skill_passes_selection_guard_and_fresh_channel_reuse(
+        tmp_path, with_authority):
     gateway = TaskSkillGateway()
     tasks = TaskService(
         tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
@@ -226,14 +231,35 @@ def test_task_origin_skill_passes_selection_guard_and_fresh_channel_reuse(tmp_pa
     adopted_component = adopted["adoption"]["adopted_component_id"]
     adopted_path = adopted["adoption"]["adopted_path"]
 
+    class GrantingBenchmark(FreshTaskBenchmark):
+        def tasks(self, *args, **kwargs):
+            rows = super().tasks(*args, **kwargs)
+            rows[0]["capability_authority"] = make_episode_authority(
+                ["tool"], ["local_compute"])
+            return rows
+
+    with pytest.raises(ContractError, match="cannot grant capability authority"):
+        evolution.plan_pair(
+            candidate["id"], GrantingBenchmark(), split="selection",
+            split_role="selection")
+
     policy = PromotionPolicy(
         min_quality_delta=0.5, max_cost_ratio=20.0,
         monitor_min_score=0.5, monitor_min_success_rate=1.0,
     )
+    authority = (make_episode_authority(["tool"], ["local_compute"])
+                 if with_authority else None)
     selection_plan = evolution.plan_pair(
         candidate["id"], benchmark, split="selection",
-        split_role="selection", seed=17, policy=policy)
+        split_role="selection", seed=17, policy=policy,
+        capability_authority=authority)
     trial = evolution.run_pair(selection_plan["id"], benchmark)
+    assert selection_plan["capability_authority_digest"] == (
+        authority["digest"] if authority is not None else None)
+    for pair in trial["pairs"]:
+        for arm in ("parent", "candidate"):
+            episode = tasks.get_private(pair[arm]["episode_id"])
+            assert episode["task"].get("capability_authority") == authority
     decision = evolution.assess(trial["id"])
     assert decision["eligible"] is True
     assert decision["gates"]["behavior_activated"] is True
@@ -245,12 +271,23 @@ def test_task_origin_skill_passes_selection_guard_and_fresh_channel_reuse(tmp_pa
     assert candidate["component_target"]["component_ids"] == [adopted_component]
 
     monitor_plan = evolution.plan_monitor(
-        candidate["id"], benchmark, split="guard", seed=23)
+        candidate["id"], benchmark, split="guard", seed=23,
+        capability_authority=authority)
+    if authority is not None:
+        mismatched = evolution.plan_monitor(
+            candidate["id"], benchmark, split="guard", seed=24)
+        with pytest.raises(ContractError, match="differs from selection"):
+            evolution.promote(
+                candidate["id"], decision["id"],
+                monitor_plan_id=mismatched["id"])
     promoted = evolution.promote(
         candidate["id"], decision["id"], monitor_plan_id=monitor_plan["id"])
     assert promoted["revision"] == 1
     assert promoted["package_id"] == candidate["package_id"]
     guard = evolution.run_monitor("task-skills", benchmark)
+    for episode_id in guard["episode_ids"]:
+        assert tasks.get_private(episode_id)["task"].get(
+            "capability_authority") == authority
     monitored = evolution.monitor("task-skills", guard["episode_ids"])
     assert monitored["degraded"] is False
     assert monitored["rolled_back"] is False
