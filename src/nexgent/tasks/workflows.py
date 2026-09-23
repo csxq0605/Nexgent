@@ -259,6 +259,24 @@ def _failed(exc):
     return {"status": "failed", "value": {"error": message, "error_type": type(exc).__name__}, "error": message}
 
 
+def _causal_node_error(nodes, receipts):
+    """Prefer a failed operation over fallout from binding a skipped descendant."""
+    failures = [
+        (node_id, receipts[node_id].get("error"))
+        for node_id in nodes
+        if node_id in receipts and receipts[node_id]["status"] == "failed"
+    ]
+    if not failures:
+        return None
+    node_id, error = next(
+        ((node_id, error) for node_id, error in failures
+         if not (isinstance(error, str)
+                 and "Binding refers to skipped node" in error)),
+        failures[0],
+    )
+    return f"Node {node_id} failed: {str(error or 'unknown failure')[:1200]}"
+
+
 def _run(workflow, payload, invoke, stop_event, max_parallel, prefix, limiter):
     nodes, dependencies, controls, artifacts = _validate(workflow)
     if "input_schema" in workflow:
@@ -364,8 +382,11 @@ def _run(workflow, payload, invoke, stop_event, max_parallel, prefix, limiter):
     except Exception as exc:
         status, outputs, output_error = "failed", {}, f"{type(exc).__name__}: {str(exc)[:1200]}"
     result = {"status": status, "outputs": outputs, "nodes": receipts}
+    causal_error = _causal_node_error(nodes, receipts)
     if output_error:
-        result["error"] = output_error
+        result["output_error"] = output_error
+    if causal_error or output_error:
+        result["error"] = causal_error or output_error
     return result
 
 
@@ -740,7 +761,8 @@ def run_executable_workflow(
         for node_id, state in state_by_id.items():
             if (state.status is NodeStatus.RUNNING
                     and (node_id not in resumable_local_nodes
-                         or nodes[node_id]["method"] != "loop")):
+                         or nodes[node_id]["method"] not in {
+                             "loop", "develop_skill"})):
                 raise WorkflowError("Running plan node requires host recovery")
             if state.status.terminal and node_id not in receipts:
                 raise WorkflowError("Terminal plan node is missing its host receipt")
@@ -869,6 +891,9 @@ def run_executable_workflow(
             output_error = f"{type(exc).__name__}: {str(exc)[:1200]}"
         result = {"status": status, "outputs": outputs, "nodes": receipts,
                   "plan_execution": execution}
+        causal_error = _causal_node_error(nodes, receipts)
         if output_error:
-            result["error"] = output_error
+            result["output_error"] = output_error
+        if causal_error or output_error:
+            result["error"] = causal_error or output_error
         return result

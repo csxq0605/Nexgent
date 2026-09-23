@@ -87,7 +87,13 @@ result to `develop_skill` as `{"proposal":{"$node":"coder"}}` and set
 `allowed_tools`, and `max_patch_bytes`. These are host RPC method names, not
 Python libraries: pure computation needs `allowed_rpc_methods:[]`;
 `context.read_artifact` needs `["read_artifact"]`. Never name `python` as an RPC
-method. For a child that needs the parent's input artifacts, bind the
+method. To let the compiler return a rejected proposal to a model, also set
+`params.repair` to `{"role":"generalist","max_attempts":2,"max_tokens":1200}`
+using an ask-capable available role. The attempt bound includes the coder's
+initial proposal. Repair receives the same TaskSpec, the full prior proposal,
+and the compiler diagnostic, and must return a corrected full proposal. Omit
+`repair` when no model repair call is authorized. For a child that needs the
+parent's input artifacts, bind the
 delegate's `package_id` to
 `{"$node":"develop.package_id"}` and its `task` to an object containing
 `objective`, `input_refs`, `deliverables`, and `capabilities` from `$input`.

@@ -538,14 +538,30 @@ class TaskService:
         task_roles = workflow.get("task_roles", {})
         def authorize_nodes(definition):
             ask_fields = {"role", "prompt", "payload", "max_tokens"}
+            capability_arguments = {
+                "read_artifact": ({"artifact_id"}, {"artifact_id"}),
+                "publish": ({"content", "name", "schema", "input_refs"}, {"content"}),
+                "delegate": ({"task", "package_id"}, {"task"}),
+                "develop_skill": (
+                    {"proposal", "constraints", "mode", "repair"},
+                    {"proposal", "constraints"},
+                ),
+                "tool": ({"name", "arguments"}, {"name"}),
+            }
+            def bounded_fields(fields):
+                names = sorted(fields)
+                rendered = ", ".join(name[:48] for name in names[:6])
+                if len(names) > 6:
+                    rendered += f", ... ({len(names) - 6} more)"
+                return rendered
             role_artifact_targets = {
                 edge.get("consumer_node") for edge in definition.get("artifact_edges", [])
                 if isinstance(edge, dict) and edge.get("input_port") == "role"
             }
-            ask_artifact_fields = {}
+            artifact_fields = {}
             for edge in definition.get("artifact_edges", []):
                 if isinstance(edge, dict) and isinstance(edge.get("input_port"), str):
-                    ask_artifact_fields.setdefault(edge.get("consumer_node"), set()).add(
+                    artifact_fields.setdefault(edge.get("consumer_node"), set()).add(
                         edge["input_port"].split(".", 1)[0])
             for node in definition.get("nodes", []):
                 if not isinstance(node, dict):
@@ -579,6 +595,28 @@ class TaskService:
                         raise ContractError(
                             "Workflow role_ref requires an explicit matching role component_ref")
                 params = node.get("params", {})
+                provided_fields = (
+                    set(params)
+                    | set(node.get("bindings", {}))
+                    | artifact_fields.get(node.get("id"), set())
+                )
+                if method in capability_arguments:
+                    allowed_fields, required_fields = capability_arguments[method]
+                    unsupported = provided_fields - allowed_fields
+                    missing = required_fields - provided_fields
+                    if unsupported or missing:
+                        problems = []
+                        if unsupported:
+                            problems.append(
+                                "unsupported top-level arguments: "
+                                + bounded_fields(unsupported))
+                        if missing:
+                            problems.append(
+                                "missing required arguments: "
+                                + bounded_fields(missing))
+                        raise ContractError(
+                            f"Workflow {method} node {node.get('id')!r} has invalid "
+                            "capability arguments (" + "; ".join(problems) + ")")
                 if method == "ask":
                     if role_ref is None or component_ref is None:
                         raise ContractError(
@@ -586,7 +624,7 @@ class TaskService:
                     provided_ask_fields = (
                         set(node.get("params", {}))
                         | set(node.get("bindings", {}))
-                        | ask_artifact_fields.get(node.get("id"), set())
+                        | artifact_fields.get(node.get("id"), set())
                     )
                     unsupported = provided_ask_fields - ask_fields
                     if unsupported:
@@ -878,43 +916,63 @@ class TaskService:
                 if node_state.status is NodeStatus.RUNNING:
                     node_id = node_state.node_id
                     path = f"plan/nodes/{node_id}"
-                    if (methods[node_id] != "loop"
+                    method = methods[node_id]
+                    if (method not in {"loop", "develop_skill"}
                             or node_id in receipts
-                            or self.store.rpc_find(identity, path) is not None
                             or node_state.iteration_count != 0):
                         raise RecoveryRequired(
                             f"Plan node {node_id} was admitted without a durable outcome")
                     try:
-                        loop_params = _node_parameters(
+                        resumed_params = _node_parameters(
                             node_id, workflow_nodes, workflow_artifacts,
                             payload, receipts,
                         )
                     except Exception as exc:
                         raise RecoveryRequired(
-                            f"Running loop node {node_id} inputs cannot be reconstructed"
+                            f"Running plan node {node_id} inputs cannot be reconstructed"
                         ) from exc
-                    if (tuple(self._references(identity, loop_params))
+                    if (tuple(self._references(identity, resumed_params))
                             != node_state.input_artifact_refs):
                         raise RecoveryRequired(
-                            f"Running loop node {node_id} input evidence differs from its dependencies")
-                    for journal in self.store.rpc_under(
-                            identity, f"{path}/iterations/"):
-                        request = journal.get("request")
-                        if (journal.get("status") not in {"completed", "failed"}
-                                or not isinstance(request, dict)
-                                or set(request) != {"method", "params", "package_digest"}
-                                or request.get("method") not in CAPABILITIES
-                                or not isinstance(request.get("params"), dict)
-                                or request.get("package_digest") != package["digest"]):
+                            f"Running plan node {node_id} input evidence differs from its dependencies")
+                    if method == "loop":
+                        if self.store.rpc_find(identity, path) is not None:
                             raise RecoveryRequired(
-                                f"Running loop node {node_id} has an unfinished nested RPC")
+                                f"Running loop node {node_id} has an unexpected parent RPC")
+                        for journal in self.store.rpc_under(
+                                identity, f"{path}/iterations/"):
+                            request = journal.get("request")
+                            if (journal.get("status") not in {"completed", "failed"}
+                                    or not isinstance(request, dict)
+                                    or set(request) != {"method", "params", "package_digest"}
+                                    or request.get("method") not in CAPABILITIES
+                                    or not isinstance(request.get("params"), dict)
+                                    or request.get("package_digest") != package["digest"]):
+                                raise RecoveryRequired(
+                                    f"Running loop node {node_id} has an unfinished nested RPC")
+                            try:
+                                self.store.rpc_find(
+                                    identity, journal["call_path"], request)
+                            except (KeyError, TypeError, ValueError) as exc:
+                                raise RecoveryRequired(
+                                    f"Running loop node {node_id} nested RPC identity is invalid"
+                                ) from exc
+                    else:
+                        parent_request = {
+                            "method": method,
+                            "params": resumed_params,
+                            "package_digest": package["digest"],
+                        }
                         try:
-                            self.store.rpc_find(
-                                identity, journal["call_path"], request)
+                            journal = self.store.rpc_find(
+                                identity, path, parent_request)
                         except (KeyError, TypeError, ValueError) as exc:
                             raise RecoveryRequired(
-                                f"Running loop node {node_id} nested RPC identity is invalid"
+                                f"Running develop_skill node {node_id} RPC identity is invalid"
                             ) from exc
+                        if journal is None or journal.get("status") != "started":
+                            raise RecoveryRequired(
+                                f"Running develop_skill node {node_id} has no resumable parent RPC")
                     resumable_local_nodes.add(node_id)
                     continue
                 if not node_state.status.terminal:
@@ -1426,7 +1484,7 @@ class TaskService:
                 return existing["result"]
             if existing["status"] == "failed":
                 raise RuntimeError(existing["error"])
-            if method not in {"delegate", "parallel"}:
+            if method not in {"delegate", "parallel", "develop_skill"}:
                 raise RecoveryRequired(f"Unfinished capability {path}; automatic repetition refused")
             node = deepcopy(self.store.get(identity)["nodes"].get(path) or {})
             if not node or node.get("method") != method:
@@ -1616,6 +1674,11 @@ class TaskService:
                 compile_task_skill_planner_proposal,
                 compile_task_skill_proposal,
             )
+            from .task_skill_repair import (
+                MAX_TASK_SKILL_COMPILE_ATTEMPTS,
+                TASK_SKILL_REPAIR_PROMPT,
+                compile_with_task_skill_repair,
+            )
 
             state = self.store.get(identity)
             constraints = params.get("constraints")
@@ -1639,27 +1702,86 @@ class TaskService:
                     or not set(requested_methods) <= set(policy_methods)):
                 raise PermissionError("Task-authored skill RPC methods exceed the host policy")
             proposal = deepcopy(params.get("proposal"))
-            if isinstance(proposal, dict):
-                proposal.setdefault("parent_package_digest", package["digest"])
             mode = params.get("mode", "direct")
             if mode not in {"direct", "planner_preserving"}:
                 raise ContractError("develop_skill mode is unsupported")
             compiler = (compile_task_skill_planner_proposal
                         if mode == "planner_preserving"
                         else compile_task_skill_proposal)
-            child = compiler(
-                package, proposal, constraints,
-                provenance={"episode_id": identity, "node_id": path},
+            repair = params.get("repair")
+            if repair is None:
+                max_attempts = 1
+                repair_role = None
+                repair_tokens = None
+            else:
+                if (not isinstance(repair, dict)
+                        or set(repair) != {"role", "max_attempts", "max_tokens"}
+                        or not isinstance(repair.get("role"), str)
+                        or type(repair.get("max_attempts")) is not int
+                        or not 2 <= repair["max_attempts"] <= MAX_TASK_SKILL_COMPILE_ATTEMPTS
+                        or type(repair.get("max_tokens")) is not int
+                        or not 1 <= repair["max_tokens"] <= 6000):
+                    raise ContractError("develop_skill repair configuration is invalid")
+                repair_role = package["manifest"].get("roles", {}).get(repair["role"])
+                if (not isinstance(repair_role, dict)
+                        or "ask" not in repair_role.get("capabilities", [])):
+                    raise PermissionError(
+                        "develop_skill repair role is not an ask-capable package role")
+                repair_role = repair["role"]
+                max_attempts = repair["max_attempts"]
+                repair_tokens = repair["max_tokens"]
+
+            def compile_proposal(candidate):
+                bound = deepcopy(candidate)
+                if isinstance(bound, dict):
+                    bound.setdefault("parent_package_digest", package["digest"])
+                return compiler(
+                    package, bound, constraints,
+                    provenance={"episode_id": identity, "node_id": path},
+                )
+
+            def repair_proposal(request, repair_path):
+                return self._dispatch(
+                    identity, package, "ask", {
+                        "role": repair_role,
+                        "prompt": TASK_SKILL_REPAIR_PROMPT,
+                        "payload": request,
+                        "max_tokens": repair_tokens,
+                    }, f"{path}/repair/{repair_path}", stop_event, notify)
+
+            task_spec = deepcopy(state["task"])
+            task_spec.pop("inputs", None)
+            task_spec.update(
+                episode_id=identity,
+                input_refs=deepcopy(state["input_refs"]),
+                memory_snapshot=self.store.memory_snapshot(
+                    state["memory_snapshot_id"], identity),
+                skills=deepcopy(package["manifest"].get("skills", {})),
+                available_skills=_available_skill_inventory(package),
             )
+            compiled = compile_with_task_skill_repair(
+                task_spec=task_spec,
+                initial_proposal=proposal,
+                compile_callback=compile_proposal,
+                repair_callback=repair_proposal,
+                max_attempts=max_attempts,
+                repair_path="compiler",
+            )
+            child = compiled.child
+            accepted = deepcopy(compiled.accepted_proposal)
+            accepted.setdefault("parent_package_digest", package["digest"])
             self.store.lease_task_package(child, identity)
-            skill_name = proposal["skill"]["name"]
+            skill_name = accepted["skill"]["name"]
             self.store.event(identity, "task_skill_compiled", {
                 "node_id": path,
                 "package_id": child["id"],
                 "package_digest": child["digest"],
                 "skill_name": skill_name,
                 "mode": mode,
-                "proposal_digest": digest(proposal),
+                "proposal_digest": digest(accepted),
+                "compile_attempts": compiled.attempt_count,
+                "compiler_diagnostics": [
+                    item.as_dict() for item in compiled.diagnostics],
             })
             return {"package_id": child["id"],
                     "package_digest": child["digest"],

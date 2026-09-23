@@ -35,3 +35,7 @@
 | 6 | 2 | 加上网关参数编译检查后，规划器创建 v2 图，coder 节点完成；它仍将提案字段写成 `schema_version` 而非 `schema`，`develop_skill` 拒绝 `Task skill proposal has an invalid envelope`。Episode `episode-e12cf4e8017a4389`，未生成子包。 |
 
 前两次失败使规划提示补上精确提案 envelope、RPC 名称与工件读取方式，但后两次因 Provider 故障没有检验这次修订。第五次暴露了宿主图编译器漏检 `ask` 参数的缺陷；第六次虽通过图编译，却再次暴露技能提案字段错误。六次都证明模型可选择技能创建图；**没有一次证明真实模型创建的技能成功执行**。确定性测试的子包加载与 `answer:42` 只证明框架路径可运行。现在图编译阶段会拒绝错误网关参数并交给已有图修复回合；技能提案本身仍需要可恢复的模型修复。真实任务的独立验证与新任务复用仍未发生。
+
+## 非技能任务的团队选择探针
+
+以 API 延迟事故的两种根因假设作为通用分析任务，输入公开的观察和假设，要求模型自行选择最小团队。MiMo v2.6-flash 提出的 v2 图为 `architect → 两个 read_artifact 并行 → investigator → critic → verifier → publish`，使用三个不同的既有角色，没有创建任务专用角色或消息边。两项 `read_artifact` 节点均缺少必需的 `artifact_id` 参数，执行时报 `KeyError`，下游全部跳过；Episode `episode-363450c3f7064bf5`，实际 1 次模型调用，任务失败。这证明模型能提出与先前 generalist/verifier 不同的图形，但本次没有完成节点链，更不能作为多智能体效果证据。需让通用能力参数合同在图编译阶段拒绝并反馈这种错误，避免“合法图、不可执行节点”。
