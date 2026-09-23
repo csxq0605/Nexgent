@@ -385,6 +385,7 @@ class ScientificDiscoveryTaskBenchmark:
         splits=SPLITS,
         default_split="development",
         modes=("fixed",),
+        allowed_suite_roles=("demo_only",),
         required_capabilities=TOOL_NAMES,
         evidence_scope=EVIDENCE_SCOPE,
     )

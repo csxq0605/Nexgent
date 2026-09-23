@@ -9,8 +9,9 @@ channels.  Those responsibilities remain in the P3/P4 control planes.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 import hashlib
+from importlib.metadata import entry_points
 import inspect
 import json
 import math
@@ -19,11 +20,13 @@ import platform
 import random
 import sys
 import time
+import types
 import uuid
 
 from ..kernel.programs import digest
 from .benchmarks import (
-    host_runtime_fingerprint, validate_adapter, validate_snapshot, validate_tasks,
+    BenchmarkRegistry, ENTRY_POINT_GROUP, descriptor_of, host_runtime_fingerprint,
+    validate_adapter, validate_snapshot, validate_tasks,
 )
 from .meta_evaluation import _LIMIT_KEYS, _USAGE_KEYS
 from .outcomes import classify_benchmark_outcome, outcome_policy
@@ -53,8 +56,88 @@ def _copy(value, label):
         raise ContractError(f"{label} must be finite JSON: {str(exc)[:500]}") from None
 
 
-def _callable_fingerprint(value):
+def _stable_code_constant(value):
+    if isinstance(value, types.CodeType):
+        return {"code": _code_fingerprint(value)}
+    if isinstance(value, bytes):
+        return {"bytes": value.hex()}
+    if isinstance(value, tuple):
+        return {"tuple": [_stable_code_constant(item) for item in value]}
+    if isinstance(value, frozenset):
+        items = [_stable_code_constant(item) for item in value]
+        return {"frozenset": sorted(
+            items, key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")))}
+    if value is Ellipsis:
+        return {"singleton": "ellipsis"}
+    if isinstance(value, complex):
+        return {"complex": [value.real, value.imag]}
+    if type(value) is float and not math.isfinite(value):
+        return {"float": repr(value)}
+    if value is None or type(value) in {bool, int, float, str}:
+        return value
+    return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
+
+
+def _code_fingerprint(code):
+    if code is None:
+        return None
+    return {
+        "bytecode": code.co_code.hex(),
+        "constants": [_stable_code_constant(value) for value in code.co_consts],
+        "names": list(code.co_names),
+        "varnames": list(code.co_varnames),
+        "freevars": list(code.co_freevars),
+        "cellvars": list(code.co_cellvars),
+        "argcount": code.co_argcount,
+        "posonlyargcount": code.co_posonlyargcount,
+        "kwonlyargcount": code.co_kwonlyargcount,
+        "flags": code.co_flags,
+        "stacksize": code.co_stacksize,
+        "exceptiontable": getattr(code, "co_exceptiontable", b"").hex(),
+    }
+
+
+def _normalize_dataclass_state(value):
+    if is_dataclass(value) and not isinstance(value, type):
+        value = asdict(value)
+    if isinstance(value, dict):
+        return {key: _normalize_dataclass_state(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_dataclass_state(item) for item in value]
+    return value
+
+
+def _stable_runtime_value(value, label, seen=None):
+    value = _normalize_dataclass_state(value)
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            raise ContractError(f"{label} must use string object keys")
+        return {key: _stable_runtime_value(item, label, seen)
+                for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_stable_runtime_value(item, label, seen) for item in value]
+    if isinstance(value, bytes):
+        return {"bytes": value.hex()}
+    if isinstance(value, types.CodeType):
+        return {"code": _code_fingerprint(value)}
+    if inspect.isfunction(value) or inspect.ismethod(value):
+        return {"callable": _callable_fingerprint(value, _seen=seen)}
+    if inspect.ismodule(value):
+        return {"module": value.__name__}
+    if isinstance(value, type):
+        return {"class": f"{value.__module__}.{value.__qualname__}"}
+    return _copy(value, label)
+
+
+def _callable_fingerprint(value, _seen=None):
     target = getattr(value, "__func__", value)
+    seen = set() if _seen is None else set(_seen)
+    if id(target) in seen:
+        return {"recursive_reference": {
+            "module": getattr(target, "__module__", None),
+            "qualname": getattr(target, "__qualname__", None),
+        }}
+    seen.add(id(target))
     code = getattr(target, "__code__", None)
     try:
         source = inspect.getsource(target)
@@ -63,33 +146,32 @@ def _callable_fingerprint(value):
     closure = []
     for cell in getattr(target, "__closure__", None) or ():
         try:
-            closure.append(_copy(cell.cell_contents, "Evaluator closure state"))
-        except ContractError:
-            closure.append({"type": f"{type(cell.cell_contents).__module__}."
-                                    f"{type(cell.cell_contents).__qualname__}"})
+            closure.append(_stable_runtime_value(
+                cell.cell_contents, "Evaluator closure state", seen))
+        except ValueError as exc:
+            raise ContractError("Evaluator closure state is unavailable") from exc
     globals_used = {}
     namespace = getattr(target, "__globals__", {})
     for name in sorted(set(getattr(code, "co_names", ()))):
         if name not in namespace or name == "__builtins__":
             continue
         item = namespace[name]
-        try:
-            globals_used[name] = {"value": _copy(item, "Evaluator global state")}
-        except ContractError:
-            if inspect.isfunction(item):
-                globals_used[name] = {"callable": {
-                    "module": getattr(item, "__module__", None),
-                    "qualname": getattr(item, "__qualname__", None),
-                    "bytecode": getattr(getattr(item, "__code__", None), "co_code", b"").hex(),
-                }}
-            else:
-                globals_used[name] = {"type": f"{type(item).__module__}.{type(item).__qualname__}"}
+        globals_used[name] = _stable_runtime_value(
+            item, "Evaluator global state", seen)
     return {
+        "python_abi": {
+            "implementation": sys.implementation.name,
+            "cache_tag": sys.implementation.cache_tag,
+            "version": list(sys.version_info[:3]),
+        },
         "module": getattr(target, "__module__", None),
         "qualname": getattr(target, "__qualname__", None),
         "source": source,
-        "bytecode": code.co_code.hex() if code is not None else None,
-        "constants": repr(code.co_consts) if code is not None else None,
+        "code": _code_fingerprint(code),
+        "defaults": _stable_runtime_value(
+            getattr(target, "__defaults__", None), "Evaluator positional defaults", seen),
+        "kwdefaults": _stable_runtime_value(
+            getattr(target, "__kwdefaults__", None), "Evaluator keyword defaults", seen),
         "closure": closure,
         "globals": globals_used,
     }
@@ -97,14 +179,16 @@ def _callable_fingerprint(value):
 
 def _adapter_fingerprint(adapter):
     try:
-        instance_state = _copy(vars(adapter), "Study adapter instance state")
-    except TypeError:
+        instance_state = _copy(
+            _normalize_dataclass_state(vars(adapter)), "Study adapter instance state")
+    except (TypeError, ContractError):
         instance_state = {}
     class_state = {}
     for name, value in vars(type(adapter)).items():
         if name.startswith("__") or callable(value) or isinstance(value, (staticmethod, classmethod)):
             continue
-        class_state[name] = _copy(value, "Study adapter class state")
+        class_state[name] = _copy(
+            _normalize_dataclass_state(value), "Study adapter class state")
     module = sys.modules.get(type(adapter).__module__)
     module_path = Path(getattr(module, "__file__", ""))
     module_digest = (hashlib.sha256(module_path.read_bytes()).hexdigest()
@@ -120,6 +204,23 @@ def _adapter_fingerprint(adapter):
         "methods": {name: _callable_fingerprint(getattr(adapter, name))
                     for name in ("snapshot", "tasks", "evaluate")},
     })
+
+
+def _descriptor_digest(adapter):
+    return digest(descriptor_of(adapter, require_explicit=False).as_dict())
+
+
+def _load_installed_authority(project_root, identity):
+    points = [point for point in entry_points(group=ENTRY_POINT_GROUP)
+              if point.name == identity]
+    if not points:
+        return None
+    registry = BenchmarkRegistry(project_root, points=points)
+    canonical = registry.adapters().get(identity)
+    if canonical is None:
+        raise ContractError(
+            "Installed benchmark authority is unavailable or ambiguous")
+    return canonical
 
 
 def _execution_environment(task_service, adapter):
@@ -163,33 +264,67 @@ def public_study_records(store, limit=50):
             values.append(value)
         return values
 
+    plan_records = read(plans)
+    for value in plan_records:
+        value["suite_role"] = _study_suite_role(value)
+    report_records = [_sanitize_study_report(value) for value in read(reports)]
     return {
         "plans": [{key: value.get(key) for key in (
             "id", "benchmark_id", "split", "seeds", "arms", "baseline_arm",
             "candidate_arm", "provider", "model", "resolved_model",
             "model_profile_digest", "model_version_binding", "expected_observed_model",
-            "expected_provider_revision", "policy", "statistics",
-            "adapter_fingerprint", "execution_environment_digest",
+            "expected_provider_revision", "policy", "suite_role", "statistics",
+            "benchmark_descriptor_digest", "adapter_fingerprint",
+            "benchmark_authority_fingerprint",
+            "benchmark_authority_snapshot_digest",
+            "execution_environment_digest",
             "protocol_digest", "created_at", "record_digest")}
-                  for value in read(plans)],
+                  for value in plan_records],
         "reports": [{key: value.get(key) for key in (
             "id", "plan_id", "run_id", "complete_pair_count", "planned_pair_count",
             "independent_cluster_count", "planned_cluster_count",
             "metrics", "gates", "engineering_acceptance", "statistical_support",
-            "version_scope", "claim_scope", "created_at", "record_digest")}
-                    for value in read(reports)],
+            "suite_role", "version_scope", "claim_scope", "created_at", "record_digest")}
+                    for value in report_records],
     }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class StudyPolicy:
     estimand: str = "superiority"
     min_quality_delta: float = 0.0
     min_success_delta: float = 0.0
     max_work_proxy_ratio: float = 1.25
     max_regressions: int = 0
-    min_complete_pairs: int = 5
+    min_independent_clusters: int = 5
     confidence: float = 0.95
+
+    def __init__(self, estimand="superiority", min_quality_delta=0.0,
+                 min_success_delta=0.0, max_work_proxy_ratio=1.25,
+                 max_regressions=0, min_independent_clusters=None,
+                 confidence=0.95, *, min_complete_pairs=None):
+        if (min_independent_clusters is not None
+                and min_complete_pairs is not None
+                and min_independent_clusters != min_complete_pairs):
+            raise ContractError(
+                "Study cluster threshold aliases must have the same value")
+        threshold = (min_independent_clusters
+                     if min_independent_clusters is not None else
+                     min_complete_pairs if min_complete_pairs is not None else 5)
+        for name, value in (
+                ("estimand", estimand),
+                ("min_quality_delta", min_quality_delta),
+                ("min_success_delta", min_success_delta),
+                ("max_work_proxy_ratio", max_work_proxy_ratio),
+                ("max_regressions", max_regressions),
+                ("min_independent_clusters", threshold),
+                ("confidence", confidence)):
+            object.__setattr__(self, name, value)
+
+    @property
+    def min_complete_pairs(self):
+        """Compatibility alias for callers using the original policy name."""
+        return self.min_independent_clusters
 
     def normalized(self):
         value = asdict(self)
@@ -210,10 +345,64 @@ class StudyPolicy:
         if not 0 < value["confidence"] < 1:
             raise ContractError("Study confidence must be between zero and one")
         if (type(value["max_regressions"]) is not int or value["max_regressions"] < 0
-                or type(value["min_complete_pairs"]) is not int
-                or not 2 <= value["min_complete_pairs"] <= 10000):
+                or type(value["min_independent_clusters"]) is not int
+                or not 2 <= value["min_independent_clusters"] <= 10000):
             raise ContractError("Study count thresholds are invalid")
         return value
+
+
+def _policy_independent_cluster_minimum(policy):
+    """Read the canonical threshold while accepting frozen pre-rename plans."""
+    if not isinstance(policy, dict):
+        raise ContractError("Study policy must be an object")
+    minimum = policy.get("min_independent_clusters")
+    legacy = policy.get("min_complete_pairs")
+    if minimum is not None and legacy is not None and minimum != legacy:
+        raise ContractError("Study cluster threshold aliases differ")
+    minimum = minimum if minimum is not None else legacy
+    if type(minimum) is not int or not 2 <= minimum <= 10000:
+        raise ContractError("Study independent cluster threshold is invalid")
+    return minimum
+
+
+def _study_suite_role(plan):
+    role = plan.get("suite_role", "legacy_unclassified")
+    return (role if role in {"qualification", "primary", "transfer", "demo_only"}
+            else "legacy_unclassified")
+
+
+def _claim_eligible_suite_role(role):
+    return role in {"qualification", "primary", "transfer"}
+
+
+def _study_evidence_label(version_scope):
+    return {
+        "none": "deterministic",
+        "request_alias_time_window": "time_window",
+        "provider_reported_revision": "provider_revision",
+    }.get(version_scope, "unresolved_version")
+
+
+def _sanitize_study_report(report):
+    value = deepcopy(report)
+    role = _study_suite_role(value)
+    eligible = _claim_eligible_suite_role(role)
+    value["suite_role"] = role
+    gates = deepcopy(value.get("gates")) if isinstance(value.get("gates"), dict) else {}
+    gates["claim_eligible_role"] = eligible
+    value["gates"] = gates
+    evidence = _study_evidence_label(
+        value.get("version_scope", "request_alias_time_window"))
+    if not eligible:
+        value["statistical_support"] = False
+        value["claim_scope"] = (
+            f"benchmark_local_{role}_{evidence}_effect_not_established")
+    elif value.get("statistical_support") is True:
+        estimand = ("noninferiority" if "noninferiority" in str(
+            value.get("claim_scope", "")) else "superiority")
+        value["claim_scope"] = (
+            f"benchmark_local_{role}_{evidence}_{estimand}_supported")
+    return value
 
 
 class TaskStudyExecutor:
@@ -347,6 +536,7 @@ class RSIStudyService:
         self._executor = TaskStudyExecutor(task_service, adapter)
         self._executor_authority = self._executor
         self._adapter_authority = self._executor.adapter
+        self._installed_authorities = {}
         with self.store.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS task_rsi_study_plans(
@@ -414,13 +604,47 @@ class RSIStudyService:
             raise ContractError("RSI study executor authority changed")
         if plan is not None and (
                 executor.adapter.id != plan["benchmark_id"]
+                or (plan.get("benchmark_descriptor_digest") is not None
+                    and _descriptor_digest(executor.adapter)
+                    != plan["benchmark_descriptor_digest"])
                 or _adapter_fingerprint(executor.adapter) != plan["adapter_fingerprint"]
                 or validate_snapshot(executor.adapter.snapshot())
                    != plan["benchmark_snapshot"]
                 or digest(_execution_environment(self.tasks, executor.adapter))
                    != plan["execution_environment_digest"]):
             raise ContractError("RSI study evaluator changed after registration")
+        if plan is not None:
+            self._validate_installed_authority(executor.adapter, plan=plan)
         return executor
+
+    def _installed_authority(self, identity):
+        if identity not in self._installed_authorities:
+            self._installed_authorities[identity] = _load_installed_authority(
+                self.tasks.project_root, identity)
+        return self._installed_authorities[identity]
+
+    def _validate_installed_authority(self, adapter, plan=None):
+        authority = self._installed_authority(adapter.id)
+        if authority is None:
+            if plan is not None and plan.get("benchmark_authority_fingerprint") is not None:
+                raise ContractError("Installed benchmark authority disappeared")
+            return {"fingerprint": None, "snapshot_digest": None}
+        authority_fingerprint = _adapter_fingerprint(authority)
+        authority_snapshot_digest = digest(validate_snapshot(authority.snapshot()))
+        if (type(adapter) is not type(authority)
+                or _adapter_fingerprint(adapter) != authority_fingerprint
+                or digest(validate_snapshot(adapter.snapshot())) != authority_snapshot_digest):
+            raise ContractError(
+                "Study adapter implementation differs from the installed benchmark authority")
+        if plan is not None and (
+                plan.get("benchmark_authority_fingerprint") not in {
+                    None, authority_fingerprint}
+                or plan.get("benchmark_authority_snapshot_digest") not in {
+                    None, authority_snapshot_digest}):
+            raise ContractError(
+                "Installed benchmark authority changed after registration")
+        return {"fingerprint": authority_fingerprint,
+                "snapshot_digest": authority_snapshot_digest}
 
     def _get(self, table, identity):
         with self.store.connect() as db:
@@ -459,7 +683,7 @@ class RSIStudyService:
     def create_plan(self, *, arms, baseline_arm, candidate_arm, split,
                     seeds, episode_budget, provider, model, policy=None,
                     require_model_calls=True, observed_model=None,
-                    provider_revision=None):
+                    provider_revision=None, role=None):
         if split != "final_holdout":
             raise ContractError("Confirmatory RSI studies require final_holdout tasks")
         if (not isinstance(seeds, list) or not 2 <= len(seeds) <= 1000
@@ -490,6 +714,24 @@ class RSIStudyService:
             raise ContractError("No-model studies cannot bind a provider revision")
         episode_budget = self._budget(episode_budget)
         policy = (policy or StudyPolicy()).normalized()
+        executor = self._trusted_executor()
+        descriptor = descriptor_of(executor.adapter, require_explicit=False)
+        if "confirmatory" not in descriptor.modes:
+            raise ContractError(
+                "RSI studies require a benchmark with confirmatory mode")
+        if role is None:
+            if descriptor.allowed_suite_roles != ("qualification",):
+                raise ContractError(
+                    "Study role must be explicit unless qualification is the only allowed role")
+            suite_role = "qualification"
+        else:
+            suite_role = role
+        if suite_role not in descriptor.allowed_suite_roles:
+            raise ContractError(
+                "Requested study role is not allowed by the benchmark descriptor")
+        if suite_role == "demo_only":
+            raise ContractError("Demo-only benchmarks cannot create confirmatory RSI studies")
+        authority = self._validate_installed_authority(executor.adapter)
         packages = {}
         for name, package in arms.items():
             package = _copy(package, f"Study arm {name}")
@@ -500,7 +742,6 @@ class RSIStudyService:
         if packages[baseline_arm]["package_digest"] == packages[candidate_arm]["package_digest"]:
             raise ContractError("Study arms must be distinct immutable packages")
 
-        executor = self._trusted_executor()
         snapshot = deepcopy(executor.snapshot)
         rows = []
         for seed in seeds:
@@ -573,6 +814,10 @@ class RSIStudyService:
             "expected_observed_model": observed_model,
             "expected_provider_revision": provider_revision,
             "require_model_calls": require_model_calls, "policy": policy,
+            "suite_role": suite_role,
+            "benchmark_descriptor_digest": _descriptor_digest(executor.adapter),
+            "benchmark_authority_fingerprint": authority["fingerprint"],
+            "benchmark_authority_snapshot_digest": authority["snapshot_digest"],
             "outcome_policy": outcome_policy(),
             "adapter_fingerprint": _adapter_fingerprint(executor.adapter),
             "execution_environment": deepcopy(executor.environment),
@@ -895,7 +1140,7 @@ class RSIStudyService:
             raise ContractError("Study run does not match its immutable plan")
         existing_id = "rsi-study-report-" + digest({"run": run_id})[:24]
         try:
-            return self.report(existing_id)
+            return _sanitize_study_report(self.report(existing_id))
         except KeyError:
             pass
         rows = {}
@@ -962,10 +1207,12 @@ class RSIStudyService:
                             else 1.0 if candidate_work == 0 else math.inf)
         regressions = sum(delta < 0 for delta in deltas)
         policy = plan["policy"]
+        minimum_clusters = _policy_independent_cluster_minimum(policy)
         complete = not missing and len(pairs) == len(plan["tasks"])
-        enough = len(cluster_rows) >= policy["min_complete_pairs"]
+        enough = len(cluster_rows) >= minimum_clusters
         gates = {
             "complete_pairs": complete,
+            "minimum_independent_clusters": enough,
             "minimum_pairs": enough,
             "quality": mean_delta is not None and mean_delta >= policy["min_quality_delta"],
             "success": mean_success_delta is not None
@@ -981,16 +1228,15 @@ class RSIStudyService:
         p_value = self._sign_flip_p(
             [delta - policy["min_quality_delta"] for delta in deltas], seed)
         engineering_pass = all(gates.values())
+        suite_role = _study_suite_role(plan)
+        claim_eligible_role = _claim_eligible_suite_role(suite_role)
+        gates["claim_eligible_role"] = claim_eligible_role
         statistical_support = bool(
-            engineering_pass and interval is not None
+            engineering_pass and claim_eligible_role and interval is not None
             and interval[0] > policy["min_quality_delta"] and p_value is not None
             and p_value < (1.0 - policy["confidence"]))
         version_scope = plan.get("model_version_binding", "request_alias_time_window")
-        evidence_label = {
-            "none": "deterministic",
-            "request_alias_time_window": "time_window",
-            "provider_reported_revision": "provider_revision",
-        }.get(version_scope, "unresolved_version")
+        evidence_label = _study_evidence_label(version_scope)
         record = {
             "schema": STUDY_REPORT_SCHEMA, "id": existing_id,
             "created_at": time.time(), "plan_id": plan["id"],
@@ -1002,16 +1248,18 @@ class RSIStudyService:
             "missing": missing, "pairs": pairs, "clusters": cluster_rows,
             "metrics": {"mean_quality_delta": mean_delta,
                         "mean_success_delta": mean_success_delta,
+                        "min_independent_clusters": minimum_clusters,
                         "work_proxy_ratio": (work_proxy_ratio
                                              if math.isfinite(work_proxy_ratio) else None),
                         "regressions": regressions,
                         "quality_interval": interval, "paired_sign_flip_p": p_value},
             "gates": gates, "engineering_acceptance": engineering_pass,
             "statistical_support": statistical_support,
+            "suite_role": suite_role,
             "version_scope": version_scope,
             "claim_scope": (
-                f"benchmark_local_{evidence_label}_{policy['estimand']}_supported"
+                f"benchmark_local_{suite_role}_{evidence_label}_{policy['estimand']}_supported"
                 if statistical_support else
-                f"benchmark_local_{evidence_label}_effect_not_established"),
+                f"benchmark_local_{suite_role}_{evidence_label}_effect_not_established"),
         }
         return self._insert("task_rsi_study_reports", record)

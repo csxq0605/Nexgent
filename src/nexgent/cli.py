@@ -179,13 +179,15 @@ def _run_task_command(args):
                     model=args.model, policy=policy,
                     require_model_calls=not args.no_require_model_calls,
                     observed_model=args.observed_model,
-                    provider_revision=args.provider_revision)
+                    provider_revision=args.provider_revision,
+                    role=args.role)
                 return _record_result(result, (
                     "schema", "id", "benchmark_id", "split", "seeds", "arms",
                     "baseline_arm", "candidate_arm", "episode_budget", "provider",
                     "model", "resolved_model", "model_profile_digest",
                     "model_version_binding", "expected_observed_model",
                     "expected_provider_revision", "require_model_calls", "policy",
+                    "suite_role", "benchmark_descriptor_digest",
                     "adapter_fingerprint", "execution_environment_digest", "statistics",
                     "protocol_digest", "created_at", "record_digest"))
             if args.command == "rsi-study-run":
@@ -200,7 +202,8 @@ def _run_task_command(args):
                 "complete_pair_count", "planned_pair_count", "independent_cluster_count",
                 "planned_cluster_count", "missing", "metrics",
                 "gates", "engineering_acceptance", "statistical_support",
-                "version_scope", "claim_scope", "created_at", "record_digest"))
+                "suite_role", "version_scope", "claim_scope", "created_at",
+                "record_digest"))
         from .tasks.evolution import EvolutionService
         from .tasks.evolution_view import public_evolution_event
 
@@ -465,7 +468,7 @@ def _task_failed(command, result):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="NExgent task agent runtime and legacy RSI research tools")
+    parser = argparse.ArgumentParser(description="Nexgent task agent runtime and legacy RSI research tools")
     parser.add_argument("--root", type=Path, default=project_root())
     sub = parser.add_subparsers(dest="command", required=True)
     gui = sub.add_parser("gui", help="Open the task workspace")
@@ -666,6 +669,9 @@ def main(argv=None):
     rsi_study_plan.add_argument("--seeds", type=int, nargs="+", required=True)
     rsi_study_plan.add_argument("--provider", required=True)
     rsi_study_plan.add_argument("--model", required=True)
+    rsi_study_plan.add_argument(
+        "--role", choices=("qualification", "primary", "transfer", "demo_only"),
+        help="Explicit benchmark suite role; primary and transfer must be requested")
     rsi_study_plan.add_argument(
         "--observed-model", help="Exact model identity expected in provider responses")
     rsi_study_plan.add_argument(

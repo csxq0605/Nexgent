@@ -230,6 +230,7 @@ class WorkbenchBenchmark:
         splits=tuple(SPLITS),
         default_split="development",
         modes=("fixed", "confirmatory", "recovery"),
+        allowed_suite_roles=("qualification",),
         required_capabilities=(
             "workbench.inspect_sources", "workbench.validate_delivery"),
         evidence_scope="Engineering task acceptance; no RSI/statistical efficacy claim.",

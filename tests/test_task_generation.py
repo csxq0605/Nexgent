@@ -149,8 +149,12 @@ def test_v2_mutation_policy_resolves_authoritative_component_identity():
     memory_parent = make_package(
         {**parent["files"], "memory.txt": "frozen memory policy"}, memory_manifest,
         provenance={"fixture": "memory-component"})
-    with pytest.raises(ContractError, match="only O or S"):
-        GenerationService._mutation_policy(v2_policy("memory-policy"), memory_parent)
+    memory_policy = GenerationService._mutation_policy(
+        v2_policy("memory-policy"), memory_parent)
+    assert memory_policy["targeting"] == "manifest_memory_component_v2"
+    assert memory_policy["resolved_components"]["memory-policy"] == {
+        "component_id": "memory-policy", "class": "M", "kind": "resource",
+        "ref": "memory.txt", "files": ["memory.txt"]}
 
 
 def test_v2_generation_targets_component_id_and_records_resolved_identity(tmp_path):

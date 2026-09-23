@@ -328,6 +328,7 @@ class OpenFOAMCavityBenchmark:
         splits=tuple(SPLITS),
         default_split="smoke",
         modes=("fixed", "recovery"),
+        allowed_suite_roles=("demo_only",),
         required_capabilities=(
             "openfoam.probe_environment", "openfoam.prepare_cavity",
             "openfoam.run_cavity", "openfoam.validate_delivery"),

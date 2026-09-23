@@ -79,7 +79,7 @@ paired plan 冻结宿主能够重算的 execution environment、工具描述、�
 
 这条链有三种不同证据等级。E0 确定性工程合同可以证明身份、隔离、计划执行/修订/恢复、门控、递归版本、加载和回滚等**机制**；E1 真实 provider Episode 才能证明模型确实根据反馈产生并执行了行为变化；多个冻结任务、重复和对照才能支持**统计 RSI 效益**。manifest-v2/ExecutablePlan 与反馈驱动 RSI 的当前结论上限仍是 E0。正向 E1 exporter 与一次性 qualification runner 已实现并通过伪造反例审计，但真实 MiMo generation 尚未执行，仓库中没有对应尝试收据；不能声称 E1 模型生成激活、候选改进或自我迭代收益已经成立。P1 的真实普通任务交付和 P2 的真实求解器 smoke 是各自执行路径的证据，不抬高这一 RSI 证据等级。
 
-工程下一阶段先审查并提交工作树中的纯 M 路由及 benchmark 统计合同，再把 O/S 从单组件 replace 扩为整包原子编排与技能候选；随后在真实模型驱动的多角色 benchmark 上，与固定编排、等预算单智能体和 memory-only 做未见任务对照。单组件 E1 pilot 保留为兼容资格检查，不能代表目标架构验收。详见[编排与技能可进化 v3](docs/design/orchestration-skill-evolution-v3.md)与[分阶段计划](REFACTOR_PLAN.md)。
+工程上已分别接通多组件 O/S 的整包原子候选和纯 M 的独立 MemoryService release/snapshot；O/S+M 复合发布仍待实现。下一阶段需在真实模型驱动的多角色 benchmark 上，与固定编排、等预算单智能体和 memory-only 做未见任务对照，并验证改进后跨任务复用。单组件 E1 pilot 保留为兼容资格检查，不能代表目标架构验收。详见[编排与技能可进化 v3](docs/design/orchestration-skill-evolution-v3.md)与[分阶段计划](REFACTOR_PLAN.md)。
 
 这个边界来自[编排与 RSI 研究综合](docs/research/agent-orchestration-rsi-synthesis-20260916.md)：持久化、实际执行和有效必须分别检查，且“失败证据 → 候选变化 → 验证 → 后续实际加载 → 结果”缺一不可。0.8 的[框架验证](docs/research/framework-validation-20260916.md)、[v1 机制审查](docs/research/framework-mechanism-v1-review.md)和[v2 机制审查](docs/research/framework-mechanism-v2-review.md)记录过机制未激活、契约错误和实际后代零增益，因此源码变化、记忆写入或候选数量都不能单独作为 RSI 成功证据。P1 实跑记录格式见[任务运行时验证模板](docs/research/task-runtime-validation-20260920.md)。
 

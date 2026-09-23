@@ -25,6 +25,7 @@ ENTRY_POINT_GROUP = "nexgent.task_benchmarks"
 SDK_SCHEMA = "nexgent.task-benchmark-sdk.v1"
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9_.-]{0,99}")
 _MODES = frozenset({"fixed", "confirmatory", "recovery"})
+_SUITE_ROLES = frozenset({"qualification", "primary", "transfer", "demo_only"})
 
 
 def _json_copy(value, label):
@@ -56,6 +57,7 @@ class BenchmarkDescriptor:
     splits: tuple[str, ...]
     default_split: str
     modes: tuple[str, ...] = ("fixed",)
+    allowed_suite_roles: tuple[str, ...] = ("demo_only",)
     required_capabilities: tuple[str, ...] = ()
     evidence_scope: str = "Benchmark-local task evaluation"
 
@@ -74,6 +76,11 @@ class BenchmarkDescriptor:
         if (not isinstance(self.modes, tuple) or not self.modes
                 or set(self.modes) - _MODES or len(set(self.modes)) != len(self.modes)):
             raise ContractError("Benchmark modes are invalid")
+        if (not isinstance(self.allowed_suite_roles, tuple)
+                or not self.allowed_suite_roles
+                or set(self.allowed_suite_roles) - _SUITE_ROLES
+                or len(set(self.allowed_suite_roles)) != len(self.allowed_suite_roles)):
+            raise ContractError("Benchmark allowed suite roles are invalid")
         if (not isinstance(self.required_capabilities, tuple)
                 or any(not isinstance(value, str) or not value or len(value) > 120
                        for value in self.required_capabilities)
@@ -82,7 +89,8 @@ class BenchmarkDescriptor:
 
     def as_dict(self):
         value = asdict(self)
-        for name in ("splits", "modes", "required_capabilities"):
+        for name in ("splits", "modes", "allowed_suite_roles",
+                     "required_capabilities"):
             value[name] = list(value[name])
         return value
 

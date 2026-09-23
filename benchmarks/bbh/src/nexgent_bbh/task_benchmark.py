@@ -143,6 +143,7 @@ class BigBenchHardTaskBenchmark:
         splits=SPLITS,
         default_split="development",
         modes=("fixed", "confirmatory"),
+        allowed_suite_roles=("qualification",),
         required_capabilities=(),
         evidence_scope=EVIDENCE_SCOPE,
     )

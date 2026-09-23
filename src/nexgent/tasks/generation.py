@@ -1,10 +1,10 @@
-"""Feedback-bound generation of immutable AgentPackage candidates.
+"""Feedback-bound generation of immutable package or memory candidates.
 
 The improver is an ordinary, separately versioned AgentPackage.  It executes
-through :class:`TaskService` and can only return a declarative BehaviorPatch.
-The host owns feedback boundaries, patch validation, package construction, and
-candidate admission.  A failed generation is durable evidence, never a
-candidate.
+through :class:`TaskService` and can only return a declarative package
+BehaviorPatch or an independent MemoryComponentPatch.  The host owns feedback
+boundaries, patch validation and candidate admission.  A failed generation is
+durable evidence, never a candidate.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ FEEDBACK_SCHEMA = "nexgent.feedback-bundle.v1"
 PATCH_SCHEMA = "nexgent.behavior-patch.v1"
 PATCH_SCHEMA_V2 = "nexgent.behavior-patch.v2"
 PACKAGE_PATCH_SCHEMA = "nexgent.package-patch.v3"
+MEMORY_PATCH_SCHEMA = "nexgent.memory-component-patch.v1"
 LEGACY_PATCH_SCHEMA = PATCH_SCHEMA
 GENERATION_SCHEMA = "nexgent.candidate-generation.v1"
 _TERMINAL = frozenset({"completed", "failed"})
@@ -179,7 +180,7 @@ def _component_registry_snapshot(package):
             "components": components}
 
 
-def _patch_schema(schema=PATCH_SCHEMA):
+def _patch_schema(schema=PATCH_SCHEMA, *, memory_targeted=False):
     if schema == PACKAGE_PATCH_SCHEMA:
         hypothesis_keys = ["failure_mechanism", "expected_behavior",
                            "applicability", "falsifier"]
@@ -205,19 +206,33 @@ def _patch_schema(schema=PATCH_SCHEMA):
                                        "maxItems": 64,
                                        "items": {"type": "string"}},
             }}
-    component_targeted = schema == PATCH_SCHEMA_V2
-    operation = {
-        "type": "object",
-        "required": (["op", "component_id"] if component_targeted else ["op", "path"]),
-        "properties": {
-            "op": {"enum": ["replace", "add", "remove"]},
-            "old_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-            "content": {"type": "string", "maxLength": 100000},
-        },
-        "additionalProperties": False,
-    }
-    operation["properties"]["component_id" if component_targeted else "path"] = {
-        "type": "string", "minLength": 1, "maxLength": 100 if component_targeted else 240}
+    component_targeted = schema == PATCH_SCHEMA_V2 or memory_targeted
+    if memory_targeted:
+        operation = {
+            "type": "object",
+            "required": ["op", "component_id", "surface", "old_digest", "value"],
+            "properties": {
+                "op": {"const": "replace"},
+                "component_id": {"type": "string", "minLength": 1, "maxLength": 100},
+                "surface": {"enum": ["policy", "data"]},
+                "old_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "value": {"type": "object"},
+            },
+            "additionalProperties": False,
+        }
+    else:
+        operation = {
+            "type": "object",
+            "required": (["op", "component_id"] if component_targeted else ["op", "path"]),
+            "properties": {
+                "op": {"enum": ["replace", "add", "remove"]},
+                "old_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "content": {"type": "string", "maxLength": 100000},
+            },
+            "additionalProperties": False,
+        }
+        operation["properties"]["component_id" if component_targeted else "path"] = {
+            "type": "string", "minLength": 1, "maxLength": 100 if component_targeted else 240}
     hypothesis_keys = ["failure_mechanism", "expected_behavior", "applicability", "falsifier"]
     hypothesis_properties = {
         key: {"type": "string", "minLength": 1, "maxLength": 5000}
@@ -226,7 +241,8 @@ def _patch_schema(schema=PATCH_SCHEMA):
         hypothesis_keys.append("component_id")
         hypothesis_properties["component_id"] = {
             "type": "string", "minLength": 1, "maxLength": 100}
-    probe_properties = {"kind": {"const": "component_loaded"}}
+    probe_properties = {"kind": {"const": (
+        "memory_snapshot_frozen" if memory_targeted else "component_loaded")}}
     probe_properties["component_id" if component_targeted else "path"] = {
         "type": "string", "minLength": 1,
         "maxLength": 100 if component_targeted else 240}
@@ -459,14 +475,26 @@ class GenerationService:
             improve_ref = parent["manifest"]["entries"].get("improve")
             improve_path = improve_ref.split(":", 1)[0] if improve_ref else None
             registry = _component_registry_snapshot(parent)["components"]
-            resolved = {}
+            descriptors = {}
             for component_id in component_ids:
                 descriptor = registry.get(component_id)
                 if descriptor is None:
                     raise ContractError(f"Unknown manifest component id: {component_id!r}")
-                if descriptor["class"] not in {"O", "S"}:
-                    raise ContractError(
-                        "Component-targeted manifest v2 evolution currently permits only O or S")
+                descriptors[component_id] = descriptor
+            classes = {descriptor["class"] for descriptor in descriptors.values()}
+            if "M" in classes and classes != {"M"}:
+                raise ContractError(
+                    "O/S and M component updates cannot share one patch before compound release")
+            memory_targeted = classes == {"M"}
+            if memory_targeted and len(component_ids) != 1:
+                raise ContractError("Memory evolution permits exactly one M component")
+            resolved = {}
+            for component_id in component_ids:
+                descriptor = descriptors[component_id]
+                if memory_targeted and descriptor["kind"] != "resource":
+                    raise ContractError("M evolution requires a manifest resource component")
+                if not memory_targeted and descriptor["class"] not in {"O", "S"}:
+                    raise ContractError("Unsupported manifest component class")
                 if len(descriptor["files"]) != 1:
                     raise ContractError(
                         "Mutable manifest components must resolve to exactly one declared file")
@@ -483,10 +511,14 @@ class GenerationService:
                         "Mutation policy cannot expose evaluator, gate, permission, manifest, or hidden paths")
                 resolved[component_id] = descriptor
             return {
-                "targeting": "manifest_component_v2",
+                "targeting": ("manifest_memory_component_v2" if memory_targeted
+                              else "manifest_component_v2"),
                 "mutable_components": list(component_ids),
                 "resolved_components": resolved,
                 "manifest_digest": digest(parent["manifest"]),
+                "component_declaration_digests": {
+                    component_id: parent["component_digests"][descriptor["files"][0]]
+                    for component_id, descriptor in resolved.items()},
                 "allowed_operations": allowed,
                 "max_patch_bytes": max_bytes,
             }
@@ -517,7 +549,8 @@ class GenerationService:
                 "allowed_operations": allowed, "max_patch_bytes": max_bytes}
 
     @staticmethod
-    def _apply_patch(parent, patch, policy, generation_id, feedback, improver):
+    def _apply_patch(parent, patch, policy, generation_id, feedback, improver,
+                     *, memory_parent=None):
         patch = _copy(patch, "BehaviorPatch")
         if policy.get("targeting") == "manifest_component_set_v3":
             from .package_patch_v3 import apply_package_patch
@@ -535,16 +568,23 @@ class GenerationService:
                                         policy["package_patch_policy"],
                                         provenance=provenance)
             return child, patch
-        component_targeted = policy.get("targeting") == "manifest_component_v2"
+        component_targeted = policy.get("targeting") in {
+            "manifest_component_v2", "manifest_memory_component_v2"}
+        memory_targeted = policy.get("targeting") == "manifest_memory_component_v2"
         if component_targeted:
             registry = _component_registry_snapshot(parent)
             if (policy.get("manifest_digest") != registry["manifest_digest"]
                     or any(policy.get("resolved_components", {}).get(component_id)
                            != registry["components"].get(component_id)
+                           for component_id in policy.get("mutable_components", []))
+                    or any(policy.get("component_declaration_digests", {}).get(component_id)
+                           != parent["component_digests"].get(
+                               registry["components"][component_id]["files"][0])
                            for component_id in policy.get("mutable_components", []))):
                 raise ContractError(
                     "BehaviorPatch component policy differs from the frozen parent manifest")
-        expected_schema = PATCH_SCHEMA_V2 if component_targeted else PATCH_SCHEMA
+        expected_schema = (MEMORY_PATCH_SCHEMA if memory_targeted else
+                           PATCH_SCHEMA_V2 if component_targeted else PATCH_SCHEMA)
         hypothesis_fields = {"failure_mechanism", "expected_behavior",
                              "applicability", "falsifier"}
         if component_targeted:
@@ -563,7 +603,8 @@ class GenerationService:
         if component_targeted:
             component_id = probe.get("component_id") if isinstance(probe, dict) else None
             if (not isinstance(probe, dict) or set(probe) != {"kind", "component_id"}
-                    or probe.get("kind") != "component_loaded"
+                    or probe.get("kind") != (
+                        "memory_snapshot_frozen" if memory_targeted else "component_loaded")
                     or component_id not in policy["mutable_components"]
                     or patch["hypothesis"].get("component_id") != component_id):
                 raise ContractError(
@@ -577,6 +618,29 @@ class GenerationService:
         encoded = json.dumps(patch, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
         if len(encoded.encode("utf-8")) > policy["max_patch_bytes"]:
             raise ContractError("BehaviorPatch exceeds its byte budget")
+        if memory_targeted:
+            if (not isinstance(memory_parent, dict)
+                    or set(memory_parent) != {"policy", "data"}):
+                raise ContractError("Memory patch requires the frozen active memory resource")
+            if len(patch["operations"]) != 1:
+                raise ContractError("Memory patch requires exactly one replacement")
+            operation = patch["operations"][0]
+            expected_keys = {"op", "component_id", "surface", "old_digest", "value"}
+            if (not isinstance(operation, dict) or set(operation) != expected_keys
+                    or operation.get("op") != "replace"
+                    or operation.get("component_id") != component_id):
+                raise ContractError("Memory patch operation fields do not match one replacement")
+            surface = operation.get("surface")
+            if surface not in {"policy", "data"}:
+                raise ContractError("Memory patch surface must be policy or data")
+            if operation["old_digest"] != digest(memory_parent[surface]):
+                raise ContractError("Memory patch old digest does not match the active memory surface")
+            value = operation["value"]
+            if not isinstance(value, dict) or digest(value) == digest(memory_parent[surface]):
+                raise ContractError("Memory patch replacement must be a changed object")
+            resource = deepcopy(memory_parent)
+            resource[surface] = deepcopy(value)
+            return resource, patch
         files, seen = deepcopy(parent["files"]), set()
         for operation in patch["operations"]:
             if not isinstance(operation, dict):
@@ -645,9 +709,10 @@ class GenerationService:
                   "episode_id": episode["id"] if episode else None,
                   "episode_status": episode.get("status") if episode else None,
                   "usage": deepcopy(episode.get("usage")) if episode else None,
-                  "execution": deepcopy(episode.get("execution")) if episode else None,
-                  "patch_digest": patch_digest, "candidate_id": None,
-                  "candidate_package_id": None, "completed_at": time.time()}
+                   "execution": deepcopy(episode.get("execution")) if episode else None,
+                   "patch_digest": patch_digest, "candidate_id": None,
+                   "candidate_package_id": None, "memory_candidate_id": None,
+                   "memory_candidate_digest": None, "completed_at": time.time()}
         result = self._insert("task_candidate_generations", record)
         self.evolution._event(base["channel"], "candidate_generation_missing", {
             "generation_id": base["id"], "feedback_bundle_id": base["feedback_bundle_id"],
@@ -660,7 +725,8 @@ class GenerationService:
     def generate(self, channel, feedback_bundle_id, improver_package, mutation_policy,
                  expected_revision, *, improver_channel=None,
                  expected_improver_revision=None, budget=None, stop_event=None,
-                 admission_check=None):
+                 admission_check=None, memory_channel=None,
+                 expected_memory_revision=None):
         """Execute ``improve`` and admit its valid child, or persist missing evidence."""
         if admission_check is not None and not callable(admission_check):
             raise TypeError("admission_check must be callable")
@@ -700,12 +766,44 @@ class GenerationService:
         if improver_package["id"] == active["package_id"]:
             raise ContractError("Improver AgentPackage must be independently versioned")
         policy = self._mutation_policy(mutation_policy, active["package"])
+        memory_targeted = policy["targeting"] == "manifest_memory_component_v2"
+        memory_service = None
+        memory_registration = None
+        memory_parent = None
+        if memory_targeted:
+            if (memory_channel is None or type(expected_memory_revision) is not int
+                    or expected_memory_revision < 0):
+                raise ContractError(
+                    "Memory generation requires a memory channel and expected revision")
+            from .memory import MemoryService
+            memory_service = MemoryService(self.tasks)
+            resolved_memory = memory_service.active(memory_channel)
+            if resolved_memory["revision"] != expected_memory_revision:
+                raise ContractError("Memory generation expected revision is stale")
+            if (resolved_memory["package_id"] != active["package_id"]
+                    or resolved_memory["package_digest"] != active["package_digest"]):
+                raise ContractError(
+                    "Active memory belongs to a different task package release")
+            memory_registration = {key: deepcopy(resolved_memory[key]) for key in (
+                "channel", "revision", "memory_id", "memory_digest",
+                "package_id", "package_digest")}
+            memory_parent = memory_service.version(memory_registration["memory_id"])
+            policy = {**policy,
+                      "memory_release": deepcopy(memory_registration),
+                      "memory_resource_digest": digest(memory_parent["resource"]),
+                      "memory_surface_digests": {
+                          surface: digest(memory_parent["resource"][surface])
+                          for surface in ("policy", "data")}}
+        elif memory_channel is not None or expected_memory_revision is not None:
+            raise ContractError("Memory release arguments require a pure M component policy")
         registry = _component_registry_snapshot(active["package"])
         if feedback.get("parent_component_registry") != registry:
             raise ContractError("Feedback component registry does not match the frozen parent")
         patch_schema = (PACKAGE_PATCH_SCHEMA if policy["targeting"] == "manifest_component_set_v3"
+                        else MEMORY_PATCH_SCHEMA if memory_targeted
                         else PATCH_SCHEMA_V2 if policy["targeting"] == "manifest_component_v2"
                         else PATCH_SCHEMA)
+        deliverable_name = "memory_patch" if memory_targeted else "behavior_patch"
         improver_entry = improver_package["manifest"]["entries"]["improve"]
         # The complete immutable package is the conservative execution closure:
         # controlled code may load source modules or read packaged resources.
@@ -728,6 +826,7 @@ class GenerationService:
             "patch_contract": patch_schema,
             "targeting": policy["targeting"],
             "legacy_path_patch": policy["targeting"] == "legacy_path_v1",
+            "memory_parent_registration": deepcopy(memory_registration),
             "mutation_policy": policy, "mutation_policy_digest": digest(policy),
             "created_at": time.time(),
         }
@@ -740,15 +839,29 @@ class GenerationService:
                                    "digest": active["package"]["component_digests"][path],
                                    "content": active["package"]["files"][path],
                                    "exists": True})
-        elif policy["targeting"] == "manifest_component_v2":
+        elif policy["targeting"] in {"manifest_component_v2", "manifest_memory_component_v2"}:
             components = []
             for component_id in policy["mutable_components"]:
                 descriptor = deepcopy(policy["resolved_components"][component_id])
                 path = descriptor["files"][0]
-                components.append({**descriptor, "path": path,
-                                   "digest": active["package"]["component_digests"][path],
-                                   "content": active["package"]["files"][path],
-                                   "exists": True})
+                if memory_targeted:
+                    components.append({
+                        **descriptor, "path": path,
+                        "declaration_digest": active["package"]["component_digests"][path],
+                        "memory_registration": deepcopy(memory_registration),
+                        "memory_resource_digest": digest(memory_parent["resource"]),
+                        "surface_digests": deepcopy(policy["memory_surface_digests"]),
+                        "surface_shape": {
+                            "policy_fields": sorted(memory_parent["resource"]["policy"]),
+                            "data_fields": sorted(memory_parent["resource"]["data"]),
+                            "item_count": len(memory_parent["resource"]["data"]["items"]),
+                        },
+                        "exists": True})
+                else:
+                    components.append({**descriptor, "path": path,
+                                       "digest": active["package"]["component_digests"][path],
+                                       "content": active["package"]["files"][path],
+                                       "exists": True})
         else:
             components = [{"path": path, "class": policy["component_classes"][path],
                            "digest": active["package"]["component_digests"].get(path),
@@ -758,15 +871,17 @@ class GenerationService:
                           for path in policy["mutable_paths"]]
         feedback_input = {key: deepcopy(value) for key, value in feedback.items()
                           if key != "record_digest"}
-        if policy["targeting"] in {"manifest_component_v2", "manifest_component_set_v3"}:
+        if policy["targeting"] in {"manifest_component_v2", "manifest_memory_component_v2",
+                                   "manifest_component_set_v3"}:
+            mutable_component_ids = (policy["package_patch_policy"]["mutable_components"]
+                                     if policy["targeting"] == "manifest_component_set_v3"
+                                     else policy["mutable_components"])
             feedback_input["parent_component_registry"] = {
                 "manifest_version": 2,
                 "manifest_digest": registry["manifest_digest"],
                 "components": {
                     component_id: deepcopy(registry["components"][component_id])
-                    for component_id in (policy["mutable_components"]
-                                         if policy["targeting"] == "manifest_component_v2"
-                                         else policy["package_patch_policy"]["mutable_components"])}}
+                    for component_id in mutable_component_ids}}
         inputs = {"feedback_bundle": feedback_input,
                   "parent_components": components,
                   "mutation_policy": policy}
@@ -789,10 +904,15 @@ class GenerationService:
                                "rsi_role": "candidate_generation", "channel": channel,
                                "channel_revision": active["revision"],
                                "feedback_bundle_id": feedback["id"]}
+            if memory_targeted:
+                episode_context["target_memory_registration"] = deepcopy(memory_registration)
             episode = self.tasks.create(
-                "Generate one feedback-bound BehaviorPatch for the active AgentPackage",
+                ("Generate one feedback-bound MemoryComponentPatch for the active memory release"
+                 if memory_targeted else
+                 "Generate one feedback-bound BehaviorPatch for the active AgentPackage"),
                 inputs=inputs,
-                deliverables=[{"name": "behavior_patch", "schema": _patch_schema(patch_schema)}],
+                deliverables=[{"name": deliverable_name, "schema": _patch_schema(
+                    patch_schema, memory_targeted=memory_targeted)}],
                 budget=budget, capabilities=[], package=improver_package,
                 context=episode_context,
                 constraints={"allowed_effects": [], "wall_seconds": 1200}, entry="improve",
@@ -814,11 +934,18 @@ class GenerationService:
         if episode.get("usage", {}).get("usage_complete") is not True:
             return self._missing(base, "Improver Episode usage receipt is incomplete", episode=episode)
         try:
-            if set(episode["output_refs"]) != {"behavior_patch"}:
-                raise ContractError("Improver did not publish exactly one BehaviorPatch deliverable")
-            artifact = self.store.read(episode["output_refs"]["behavior_patch"], episode["id"])
+            if set(episode["output_refs"]) != {deliverable_name}:
+                raise ContractError(
+                    f"Improver did not publish exactly one {deliverable_name} deliverable")
+            artifact = self.store.read(episode["output_refs"][deliverable_name], episode["id"])
             if artifact["producer"].get("package_digest") != improver_package["digest"]:
                 raise ContractError("BehaviorPatch producer does not match the improver package")
+            if memory_targeted and (
+                    artifact.get("name") != "memory_patch"
+                    or artifact.get("schema_ref") != MEMORY_PATCH_SCHEMA
+                    or artifact.get("validation", {}).get("schema_status") != "passed"):
+                raise ContractError(
+                    "MemoryComponentPatch artifact identity or validation is invalid")
             execution = episode.get("execution") or {}
             if (execution.get("entry") != "improve"
                     or execution.get("package_digest") != improver_package["digest"]):
@@ -837,10 +964,13 @@ class GenerationService:
             entry_path = improver_entry.split(":", 1)[0]
             if entry_path not in loaded:
                 raise ContractError("Improver execution closure is missing")
-            child, patch = self._apply_patch(active["package"], artifact["content"], policy,
-                                             generation_id, feedback, improver_package)
+            candidate_value, patch = self._apply_patch(
+                active["package"], artifact["content"], policy,
+                generation_id, feedback, improver_package,
+                memory_parent=(memory_parent["resource"] if memory_targeted else None))
             patch_digest = digest(patch)
-            if policy["targeting"] == "manifest_component_v2":
+            if policy["targeting"] in {"manifest_component_v2",
+                                        "manifest_memory_component_v2"}:
                 component_id = patch["activation_probe"]["component_id"]
                 component_target = deepcopy(policy["resolved_components"][component_id])
             else:
@@ -851,37 +981,119 @@ class GenerationService:
                     or current["package_digest"] != active["package_digest"]):
                 return self._missing(base, "Active parent changed during candidate generation",
                                      episode=episode, patch_digest=patch_digest)
-            activation_probe = (
-                {"kind": "component_set_loaded",
-                 "component_ids": patch["activation_targets"]}
-                if policy["targeting"] == "manifest_component_set_v3"
-                else patch["activation_probe"])
-            candidate = self.evolution.propose(
-                channel, child, hypothesis=patch["hypothesis"],
-                feedback_episode_ids=[item["episode_id"] for item in feedback["episode_refs"]],
-                activation_probe=activation_probe,
-                component_classes=(None if component_id is not None
-                                   or policy["targeting"] == "manifest_component_set_v3"
-                                   else policy["component_classes"]),
-                component_target=component_target, origin="generated",
-                package_patch=(patch if policy["targeting"] == "manifest_component_set_v3"
-                               else None),
-                mutation_policy=(policy["package_patch_policy"]
-                                 if policy["targeting"] == "manifest_component_set_v3"
-                                 else None))
-            component_target = deepcopy(candidate.get("component_target"))
+            if memory_targeted:
+                current_memory = memory_service.active(memory_registration["channel"])
+                if any(current_memory[key] != memory_registration[key]
+                       for key in memory_registration):
+                    return self._missing(
+                        base, "Active memory changed during candidate generation",
+                        episode=episode, patch_digest=patch_digest)
+                declaration_digest = policy[
+                    "component_declaration_digests"][component_id]
+                component_contract_digest = digest({
+                    "manifest_digest": policy["manifest_digest"],
+                    "component_target": component_target,
+                    "component_declaration_digest": declaration_digest,
+                    "patch_contract": patch_schema,
+                })
+                change_scope = {
+                    "component_id": component_id,
+                    "surface": patch["operations"][0]["surface"],
+                }
+                provenance = {
+                    "origin": "generated_memory_component",
+                    "generation_id": generation_id,
+                    "feedback_bundle_id": feedback["id"],
+                    "feedback_digest": feedback["digest"],
+                    "improver_package_id": improver_package["id"],
+                    "improver_package_digest": improver_package["digest"],
+                    "memory_patch_digest": patch_digest,
+                    "task_package_registration": {
+                        "channel": channel, "revision": active["revision"],
+                        "package_id": active["package_id"],
+                        "package_digest": active["package_digest"]},
+                    "memory_parent_registration": deepcopy(memory_registration),
+                    "component_id": component_id,
+                    "component_target": deepcopy(component_target),
+                    "manifest_digest": policy["manifest_digest"],
+                    "component_declaration_digest": declaration_digest,
+                    "component_contract_digest": component_contract_digest,
+                    "change_scope": deepcopy(change_scope),
+                }
+                memory_record = {
+                    **base, "status": "generated", "reason": None,
+                    "episode_id": episode["id"], "episode_status": episode["status"],
+                    "usage": deepcopy(episode["usage"]),
+                    "execution": deepcopy(episode["execution"]),
+                    "patch_digest": patch_digest, "component_id": component_id,
+                    "component_target": component_target,
+                    "manifest_digest": policy["manifest_digest"],
+                    "component_declaration_digest": declaration_digest,
+                    "component_contract_digest": component_contract_digest,
+                    "change_scope": deepcopy(change_scope),
+                    "candidate_kind": "memory_version", "candidate_id": None,
+                    "candidate_package_id": None, "candidate_package_digest": None,
+                    "completed_at": time.time(),
+                }
+                memory_candidate, result = memory_service.admit_generated(
+                    active["package"], candidate_value,
+                    parent_id=memory_registration["memory_id"], provenance=provenance,
+                    generation_record=memory_record)
+                child = None
+                candidate = None
+            else:
+                child = candidate_value
+                activation_probe = (
+                    {"kind": "component_set_loaded",
+                     "component_ids": patch["activation_targets"]}
+                    if policy["targeting"] == "manifest_component_set_v3"
+                    else patch["activation_probe"])
+                candidate = self.evolution.propose(
+                    channel, child, hypothesis=patch["hypothesis"],
+                    feedback_episode_ids=[item["episode_id"] for item in feedback["episode_refs"]],
+                    activation_probe=activation_probe,
+                    component_classes=(None if component_id is not None
+                                       or policy["targeting"] == "manifest_component_set_v3"
+                                       else policy["component_classes"]),
+                    component_target=component_target, origin="generated",
+                    package_patch=(patch if policy["targeting"] == "manifest_component_set_v3"
+                                   else None),
+                    mutation_policy=(policy["package_patch_policy"]
+                                     if policy["targeting"] == "manifest_component_set_v3"
+                                     else None))
+                component_target = deepcopy(candidate.get("component_target"))
         except Exception as exc:
             return self._missing(base, f"{type(exc).__name__}: {str(exc)}", episode=episode,
                                  patch_digest=(digest(artifact["content"])
                                                if 'artifact' in locals() else None))
+
+        if memory_targeted:
+            self.evolution._event(channel, "memory_candidate_generated", {
+                "generation_id": generation_id, "feedback_bundle_id": feedback["id"],
+                "improver_episode_id": episode["id"],
+                "improver_package_id": improver_package["id"],
+                "improver_registration": improver_registration,
+                "improver_closure_digest": closure_digest, "patch_digest": patch_digest,
+                "component_id": component_id, "component_target": component_target,
+                "memory_parent_registration": memory_registration,
+                "memory_candidate_id": memory_candidate["id"],
+                "memory_candidate_digest": memory_candidate["digest"],
+                "record_digest": result["record_digest"],
+            })
+            return result
 
         record = {**base, "status": "generated", "reason": None,
                   "episode_id": episode["id"], "episode_status": episode["status"],
                   "usage": deepcopy(episode["usage"]), "execution": deepcopy(episode["execution"]),
                   "patch_digest": patch_digest, "component_id": component_id,
                   "component_target": component_target,
+                  "component_declaration_digest": (
+                      policy.get("component_declaration_digests", {}).get(component_id)),
+                  "candidate_kind": "agent_package",
                   "candidate_id": candidate["id"],
-                  "candidate_package_id": child["id"], "candidate_package_digest": child["digest"],
+                  "candidate_package_id": child["id"],
+                  "candidate_package_digest": child["digest"],
+                  "memory_candidate_id": None, "memory_candidate_digest": None,
                   "completed_at": time.time()}
         result = self._insert("task_candidate_generations", record)
         self.evolution._event(channel, "candidate_generated", {
@@ -891,6 +1103,7 @@ class GenerationService:
             "improver_closure_digest": closure_digest, "patch_digest": patch_digest,
             "component_id": component_id, "component_target": component_target,
             "candidate_id": candidate["id"], "candidate_package_id": child["id"],
+            "memory_candidate_id": None, "memory_candidate_digest": None,
             "record_digest": result["record_digest"],
         })
         return result

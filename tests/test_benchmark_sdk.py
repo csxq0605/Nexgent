@@ -138,13 +138,28 @@ def test_current_task_plugins_expose_explicit_descriptors_and_host_identity_is_s
     openfoam = OpenFOAMCavityBenchmark()
     assert workbench.descriptor.id == workbench.id
     assert "confirmatory" in workbench.descriptor.modes
+    assert workbench.descriptor.allowed_suite_roles == ("qualification",)
     assert openfoam.descriptor.id == openfoam.id
     assert "confirmatory" not in openfoam.descriptor.modes
+    assert openfoam.descriptor.allowed_suite_roles == ("demo_only",)
     assert "host_runtime" not in openfoam.snapshot()
     runtime = host_runtime_fingerprint()
     assert runtime["schema"] == "nexgent.task-benchmark-host-runtime.v1"
     assert {"benchmarks.py", "outcomes.py", "runtime.py", "tools.py",
             "store.py", "packages.py"} <= set(runtime["files"])
+
+
+def test_benchmark_descriptor_defaults_to_demo_only_and_validates_roles():
+    descriptor = BenchmarkDescriptor(
+        id="safe-default", version="1", title="Safe default",
+        splits=("development",), default_split="development")
+    assert descriptor.allowed_suite_roles == ("demo_only",)
+    assert descriptor.as_dict()["allowed_suite_roles"] == ["demo_only"]
+    with pytest.raises(ContractError, match="suite roles"):
+        BenchmarkDescriptor(
+            id="unsafe", version="1", title="Unsafe",
+            splits=("development",), default_split="development",
+            allowed_suite_roles=("unregistered",))
 
 
 def test_task_registration_freezes_host_runtime_separately_from_plugin_snapshot(

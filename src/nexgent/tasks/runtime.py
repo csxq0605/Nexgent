@@ -210,7 +210,8 @@ class TaskService:
                package=None, context=None, *, constraints=None, entry="execute", parent_episode_id=None,
                package_channel=None, benchmark_registration=None,
                expected_package_registration=None, improver_channel_registration=None,
-               memory_channel=None, expected_memory_registration=None):
+               memory_channel=None, expected_memory_registration=None,
+               _memory_candidate=None, _memory_candidate_token=None):
         if not isinstance(objective, str) or not objective.strip() or len(objective) > 20000:
             raise ContractError("Task objective must be nonempty and at most 20000 characters")
         explicit_package = package is not None
@@ -241,7 +242,31 @@ class TaskService:
             raise ContractError("Expected package registration requires a package channel")
         verify_package(package)
         memory_registration = None
-        if memory_channel is not None:
+        frozen_memory_version = None
+        if _memory_candidate is not None:
+            from .memory import _CANDIDATE_EVALUATION_TOKEN
+            if _memory_candidate_token is not _CANDIDATE_EVALUATION_TOKEN:
+                raise PermissionError("Candidate memory snapshots are host-private")
+            if (memory_channel is not None or expected_memory_registration is not None
+                    or parent_episode_id is not None or not isinstance(_memory_candidate, dict)
+                    or set(_memory_candidate) != {"registration", "version"}):
+                raise ContractError("Candidate memory evaluation inputs are invalid")
+            memory_registration = _json_copy(
+                _memory_candidate["registration"], label="Candidate memory registration")
+            frozen_memory_version = _json_copy(
+                _memory_candidate["version"], label="Candidate memory version")
+            registration_keys = {"channel", "revision", "memory_id", "memory_digest",
+                                 "package_id", "package_digest"}
+            if (set(memory_registration) != registration_keys
+                    or frozen_memory_version.get("status") != "candidate"
+                    or memory_registration["memory_id"] != frozen_memory_version.get("id")
+                    or memory_registration["memory_digest"] != frozen_memory_version.get("digest")
+                    or memory_registration["package_id"] != package["id"]
+                    or memory_registration["package_digest"] != package["digest"]
+                    or frozen_memory_version.get("package_id") != package["id"]
+                    or frozen_memory_version.get("package_digest") != package["digest"]):
+                raise ContractError("Candidate memory snapshot identity is invalid")
+        elif memory_channel is not None:
             from .memory import active_memory_registration
             memory_registration = active_memory_registration(self.store, memory_channel)
             if (memory_registration["package_id"] != package["id"]
@@ -261,10 +286,9 @@ class TaskService:
                         "Active memory registration differs from the expected deployment")
         elif expected_memory_registration is not None:
             raise ContractError("Expected memory registration requires a memory channel")
-        frozen_memory_version = None
         if memory_registration is None and parent_episode_id is not None:
             memory_registration = self.store.memory_registration(parent_episode_id)
-        if memory_registration is not None:
+        if memory_registration is not None and frozen_memory_version is None:
             from .memory import memory_version
             # Fully verify and JSON-bound the resource before EpisodeStore starts
             # its atomic registration/snapshot transaction.
@@ -294,6 +318,8 @@ class TaskService:
             raise ContractError("Benchmark registration context is host-owned")
         if "improver_channel_registration" in context:
             raise ContractError("Improver channel registration context is host-owned")
+        if (_memory_candidate is None and "memory_candidate_evaluation" in context):
+            raise ContractError("Memory candidate evaluation context is host-owned")
         if ("memory_channel_registration" in context
                 or "memory_registration_digest" in context):
             raise ContractError("Memory channel registration context is host-owned")
@@ -366,7 +392,8 @@ class TaskService:
             task, package, parent_episode_id,
             benchmark_registration=benchmark_registration,
             memory_registration=memory_registration,
-            memory_version=frozen_memory_version)
+            memory_version=frozen_memory_version,
+            _allow_candidate_memory=_memory_candidate is not None)
         refs = {}
         for name, value in task["inputs"].items():
             artifact = self.store.publish(episode["id"], value, name=name, scope="tree", node_id="input")
@@ -399,6 +426,13 @@ class TaskService:
         """Remove recovery-only requests and receipts from user-facing state."""
         state = deepcopy(state)
         state.pop("plan_node_receipts", None)
+        context = state.get("task", {}).get("context", {})
+        if context.get("rsi_role") == "candidate_generation":
+            memory_patch_ref = state.get("output_refs", {}).get("memory_patch")
+            for artifact in state.get("artifacts", []):
+                if (isinstance(artifact, dict)
+                        and artifact.get("id") == memory_patch_ref):
+                    artifact.pop("content", None)
         for node in state.get("nodes", {}).values():
             if isinstance(node, dict):
                 for key in ("request", "plan_receipt", "result"):

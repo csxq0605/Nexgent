@@ -106,13 +106,20 @@ class EpisodeStore:
         return json.loads(row[0])
 
     def create(self, task, package, parent_episode_id=None, *, benchmark_registration=None,
-               memory_registration=None, memory_version=None):
+               memory_registration=None, memory_version=None,
+               _allow_candidate_memory=False):
         task = deepcopy(task)
         benchmark_registration = (None if benchmark_registration is None
                                   else deepcopy(benchmark_registration))
         memory_registration = (None if memory_registration is None
                                else deepcopy(memory_registration))
         memory_version = None if memory_version is None else deepcopy(memory_version)
+        if (_allow_candidate_memory
+                and (not isinstance(memory_registration, dict)
+                     or memory_registration.get("channel") != "candidate-selection"
+                     or not isinstance(task.get("context", {}).get(
+                         "memory_candidate_evaluation"), dict))):
+            raise PermissionError("Candidate memory snapshots are host-private")
         if not isinstance(task, dict) or not isinstance(task.get("objective"), str) or not task["objective"].strip():
             raise ValueError("A task requires a nonempty objective")
         if not isinstance(task.get("inputs", {}), dict):
@@ -170,7 +177,9 @@ class EpisodeStore:
                 # rewrite that in-flight choice. Retired versions remain valid for
                 # already resolved or delegated Episodes, but cannot be resolved
                 # anew by active_memory_registration().
-                allowed_statuses = {"accepted", "retired"}
+                allowed_statuses = ({"accepted", "retired", "candidate"}
+                                    if _allow_candidate_memory
+                                    else {"accepted", "retired"})
                 if (not isinstance(memory_version, dict)
                         or memory_row is None
                         or memory_row[0] not in allowed_statuses

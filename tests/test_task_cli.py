@@ -97,6 +97,46 @@ def test_task_loads_json_files_and_forwards_explicit_runtime_options(task_servic
     assert json.loads(capsys.readouterr().out)["status"] == "completed"
 
 
+def test_rsi_study_plan_forwards_role_and_projects_authority_fields(
+        monkeypatch, task_service, tmp_path, capsys):
+    calls = []
+
+    class FakeStudies:
+        def __init__(self, service, adapter):
+            assert service is task_service
+            assert adapter == "adapter"
+
+        def create_plan(self, **kwargs):
+            calls.append(kwargs)
+            return {
+                "schema": "nexgent.rsi-study-plan.v1",
+                "id": "plan-1",
+                "benchmark_id": "generic",
+                "suite_role": "primary",
+                "benchmark_descriptor_digest": "descriptor-digest",
+                "adapter_fingerprint": "adapter-fingerprint",
+                "execution_environment_digest": "environment-digest",
+                "protocol_digest": "protocol-digest",
+                "record_digest": "record-digest",
+            }
+
+    monkeypatch.setattr("nexgent.tasks.studies.RSIStudyService", FakeStudies)
+    monkeypatch.setattr(cli, "_task_benchmark", lambda *_: "adapter")
+    code = cli.main([
+        "--root", str(tmp_path), "rsi-study-plan", "generic",
+        "--baseline-package", '{"id":"baseline"}',
+        "--candidate-package", '{"id":"candidate"}',
+        "--seeds", "1", "2", "--provider", "none", "--model", "none",
+        "--role", "primary", "--no-require-model-calls",
+    ])
+
+    assert code == 0
+    assert calls[0]["role"] == "primary"
+    output = json.loads(capsys.readouterr().out)
+    assert output["suite_role"] == "primary"
+    assert output["benchmark_descriptor_digest"] == "descriptor-digest"
+
+
 def test_task_register_only_accepts_inline_json_without_running(task_service, tmp_path, capsys):
     code = cli.main(["--root", str(tmp_path), "task", "store this", "--input", '{"value": 7}',
                      "--register-only"])

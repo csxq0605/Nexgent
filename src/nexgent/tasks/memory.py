@@ -21,6 +21,7 @@ from .tools import ContractError
 SCHEMA = "nexgent.memory-version.v1"
 STATUSES = frozenset({"candidate", "accepted", "rejected", "retired"})
 MEMORY_KINDS = frozenset({"experience", "procedure", "factual_note", "preference"})
+_CANDIDATE_EVALUATION_TOKEN = object()
 
 
 def _copy(value, label="Memory value"):
@@ -78,7 +79,8 @@ def _normalize_resource(resource):
     items = []
     for index, raw in enumerate(raw_items):
         if not isinstance(raw, dict) or set(raw) - {
-                "kind", "content", "applies_to", "counterexamples", "evidence_refs"}:
+                "id", "version", "kind", "content", "applies_to",
+                "counterexamples", "evidence_refs"}:
             raise ContractError("Memory items contain unsupported fields")
         kind = raw.get("kind")
         if kind not in MEMORY_KINDS or "content" not in raw:
@@ -94,6 +96,9 @@ def _normalize_resource(resource):
                 "applies_to": applies_to, "counterexamples": counterexamples,
                 "evidence_refs": evidence_refs}
         item_id = "memory-entry-" + digest({"index": index, "item": body})[:24]
+        if (("id" in raw and raw["id"] != item_id)
+                or ("version" in raw and raw["version"] != 1)):
+            raise ContractError("Memory item identity does not match its immutable content")
         items.append({"id": item_id, "version": 1, **body})
     return {"policy": {"retrieval": retrieval, "writeback": writeback},
             "data": {"items": items}}
@@ -151,6 +156,9 @@ class MemoryService:
                 CREATE TABLE IF NOT EXISTS task_memory_selection_plans(
                     id TEXT PRIMARY KEY, memory_id TEXT UNIQUE NOT NULL,
                     data TEXT NOT NULL, digest TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS task_memory_selection_executions(
+                    id TEXT PRIMARY KEY, plan_id TEXT UNIQUE NOT NULL,
+                    memory_id TEXT NOT NULL, data TEXT NOT NULL, digest TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS task_memory_retirements(
                     id TEXT PRIMARY KEY, memory_id TEXT UNIQUE NOT NULL,
                     data TEXT NOT NULL, digest TEXT NOT NULL);
@@ -224,6 +232,106 @@ class MemoryService:
                         package["digest"], encoded, record_digest, now, now))
         return self.version(identity)
 
+    def admit_generated(self, package, resource, *, parent_id, provenance,
+                        generation_record):
+        """Atomically persist one routed M candidate and its generation receipt."""
+        verify_package(package)
+        self.store.put_package(package)
+        normalized = _normalize_resource(resource)
+        provenance = _copy(provenance, "Memory provenance")
+        generation_record = _copy(generation_record, "Memory generation record")
+        parent = self.version(parent_id)
+        if (parent["status"] != "accepted"
+                or parent["package_id"] != package["id"]
+                or parent["package_digest"] != package["digest"]):
+            raise ContractError(
+                "Generated memory must extend the accepted memory for the unchanged package")
+        generation = parent["generation"] + 1
+        identity_payload = {"package_id": package["id"], "package_digest": package["digest"],
+                            "parent_id": parent_id, "generation": generation,
+                            "resource": normalized}
+        version_digest = digest(identity_payload)
+        identity = "memory-version-" + version_digest[:24]
+        provenance.update({
+            "memory_candidate_id": identity,
+            "memory_candidate_digest": version_digest,
+            "parent_memory_digest": parent["digest"],
+        })
+        now = time.time()
+        generation_record.update({
+            "memory_candidate_id": identity,
+            "memory_candidate_digest": version_digest,
+            "memory_parent_digest": parent["digest"],
+            "memory_resource_digest": digest(normalized),
+            "memory_policy_digest": digest(normalized["policy"]),
+            "memory_data_digest": digest(normalized["data"]),
+        })
+        if (generation_record.get("status") != "generated"
+                or generation_record.get("targeting") != "manifest_memory_component_v2"
+                or generation_record.get("candidate_id") is not None
+                or generation_record.get("candidate_package_id") is not None
+                or generation_record.get("parent_package_id") != package["id"]
+                or generation_record.get("parent_package_digest") != package["digest"]
+                or generation_record.get("id") != provenance.get("generation_id")):
+            raise ContractError("Generated memory receipt does not match its candidate")
+        generation_encoded = self._encode(generation_record)
+        generation_digest = digest(generation_record)
+        provenance["generation_record"] = {
+            "id": generation_record["id"], "digest": generation_digest}
+        record = {"schema": SCHEMA, "id": identity, "digest": version_digest,
+                  "parent_id": parent_id, "generation": generation,
+                  "package_id": package["id"], "package_digest": package["digest"],
+                  "resource": normalized, "provenance": provenance, "created_at": now}
+        package_release = provenance.get("task_package_registration")
+        memory_release = provenance.get("memory_parent_registration")
+        if (not isinstance(package_release, dict) or not isinstance(memory_release, dict)
+                or memory_release.get("memory_id") != parent_id
+                or memory_release.get("memory_digest") != parent["digest"]
+                or memory_release.get("package_id") != package["id"]
+                or memory_release.get("package_digest") != package["digest"]):
+            raise ContractError("Generated memory receipt lacks frozen channel releases")
+        encoded, record_digest = self._encode(record), digest(record)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            package_row = db.execute(
+                "SELECT package_id,revision,data FROM task_package_channels WHERE name=?",
+                (package_release.get("channel"),)).fetchone()
+            memory_row = db.execute(
+                "SELECT memory_id,revision,data FROM task_memory_channels WHERE name=?",
+                (memory_release.get("channel"),)).fetchone()
+            if (package_row is None or memory_row is None
+                    or package_row[0] != package_release.get("package_id")
+                    or package_row[1] != package_release.get("revision")
+                    or any(json.loads(package_row[2]).get(key) != value
+                           for key, value in package_release.items())
+                    or memory_row[0] != memory_release.get("memory_id")
+                    or memory_row[1] != memory_release.get("revision")
+                    or any(json.loads(memory_row[2]).get(key) != value
+                           for key, value in memory_release.items())):
+                raise ContractError("Package or memory release changed during M admission")
+            parent_row = db.execute(
+                "SELECT status,data,record_digest FROM task_memory_versions WHERE id=?",
+                (parent_id,)).fetchone()
+            if (parent_row is None or parent_row[0] != "accepted"
+                    or parent_row[1] != self._encode({
+                        key: value for key, value in parent.items()
+                        if key not in {"status", "record_digest"}})
+                    or parent_row[2] != parent["record_digest"]):
+                raise ContractError("Memory parent changed during M admission")
+            if db.execute("SELECT 1 FROM task_memory_versions WHERE id=?", (identity,)).fetchone():
+                raise ContractError("Generated memory candidate already exists")
+            if db.execute("SELECT 1 FROM task_candidate_generations WHERE id=?",
+                          (generation_record["id"],)).fetchone():
+                raise ContractError("Memory generation receipt already exists")
+            db.execute("INSERT INTO task_memory_versions VALUES(?,?,?,?,?,?,?,?,?,?)",
+                       (identity, parent_id, generation, "candidate", package["id"],
+                        package["digest"], encoded, record_digest, now, now))
+            db.execute("INSERT INTO task_candidate_generations VALUES(?,?,?)",
+                       (generation_record["id"], generation_encoded, generation_digest))
+        stored_generation = deepcopy(generation_record)
+        stored_generation["record_digest"] = generation_digest
+        return self.version(identity), stored_generation
+
     def version(self, identity):
         return _load_version(self.store, identity)
 
@@ -244,12 +352,183 @@ class MemoryService:
             identities = [row[0] for row in db.execute(query, values)]
         return [self.version(identity) for identity in identities]
 
+    def _verify_generated_component_candidate(self, version, *, verify_active_package=True):
+        """Require a complete immutable generation closure for routed M candidates."""
+        provenance = version.get("provenance") or {}
+        if provenance.get("origin") != "generated_memory_component":
+            return None
+        generation_id = provenance.get("generation_id")
+        if not isinstance(generation_id, str) or not generation_id:
+            raise ContractError("Generated memory candidate has no generation closure")
+        try:
+            with self.store.connect() as db:
+                generation_row = db.execute(
+                    "SELECT data,digest FROM task_candidate_generations WHERE id=?",
+                    (generation_id,)).fetchone()
+                feedback_row = db.execute(
+                    "SELECT data,digest FROM task_feedback_bundles WHERE id=?",
+                    (provenance.get("feedback_bundle_id"),)).fetchone()
+        except Exception as exc:
+            raise ContractError("Generated memory candidate has no generation closure") from exc
+        if generation_row is None or feedback_row is None:
+            raise ContractError("Generated memory candidate has no generation closure")
+        generation = json.loads(generation_row[0])
+        feedback = json.loads(feedback_row[0])
+        if digest(generation) != generation_row[1] or digest(feedback) != feedback_row[1]:
+            raise ContractError("Generated memory closure integrity mismatch")
+        policy = generation.get("mutation_policy") or {}
+        generation_binding = provenance.get("generation_record")
+        component_id = provenance.get("component_id")
+        component_target = provenance.get("component_target")
+        release = provenance.get("memory_parent_registration")
+        package_registration = provenance.get("task_package_registration")
+        required = (
+            generation.get("status") == "generated"
+            and generation_binding == {
+                "id": generation_id, "digest": generation_row[1]}
+            and generation.get("targeting") == "manifest_memory_component_v2"
+            and generation.get("memory_candidate_id") == version["id"]
+            and generation.get("memory_candidate_digest") == version["digest"]
+            and provenance.get("memory_candidate_id") == version["id"]
+            and provenance.get("memory_candidate_digest") == version["digest"]
+            and generation.get("parent_package_id") == version["package_id"]
+            and generation.get("parent_package_digest") == version["package_digest"]
+            and generation.get("candidate_id") is None
+            and generation.get("candidate_package_id") is None
+            and generation.get("memory_parent_registration") == release
+            and generation.get("component_id") == component_id
+            and generation.get("component_target") == component_target
+            and generation.get("component_declaration_digest")
+                == provenance.get("component_declaration_digest")
+            and generation.get("manifest_digest") == provenance.get("manifest_digest")
+            and generation.get("component_contract_digest")
+                == provenance.get("component_contract_digest")
+            and generation.get("change_scope") == provenance.get("change_scope")
+            and generation.get("feedback_bundle_id") == provenance.get("feedback_bundle_id")
+            and generation.get("feedback_digest") == provenance.get("feedback_digest")
+            and generation.get("improver_package_id") == provenance.get("improver_package_id")
+            and generation.get("improver_package_digest")
+                == provenance.get("improver_package_digest")
+            and generation.get("patch_digest") == provenance.get("memory_patch_digest")
+            and policy.get("targeting") == "manifest_memory_component_v2"
+            and generation.get("patch_contract") == "nexgent.memory-component-patch.v1"
+            and policy.get("memory_release") == release
+            and policy.get("manifest_digest") == provenance.get("manifest_digest")
+            and policy.get("resolved_components", {}).get(component_id) == component_target
+            and policy.get("component_declaration_digests", {}).get(component_id)
+                == provenance.get("component_declaration_digest")
+            and isinstance(release, dict)
+            and release.get("memory_id") == version["parent_id"]
+            and release.get("memory_digest") == self.version(version["parent_id"])["digest"]
+            and provenance.get("parent_memory_digest") == release.get("memory_digest")
+            and generation.get("memory_parent_digest") == release.get("memory_digest")
+            and generation.get("memory_resource_digest") == digest(version["resource"])
+            and generation.get("memory_policy_digest") == digest(version["resource"]["policy"])
+            and generation.get("memory_data_digest") == digest(version["resource"]["data"])
+            and isinstance(package_registration, dict)
+            and package_registration == {
+                "channel": generation.get("channel"),
+                "revision": generation.get("channel_revision"),
+                "package_id": version["package_id"],
+                "package_digest": version["package_digest"]}
+            and feedback.get("id") == generation.get("feedback_bundle_id")
+            and feedback.get("digest") == generation.get("feedback_digest")
+            and feedback.get("channel") == generation.get("channel")
+            and feedback.get("channel_revision") == generation.get("channel_revision")
+            and feedback.get("parent_package_id") == version["package_id"]
+            and feedback.get("parent_package_digest") == version["package_digest"]
+        )
+        if not required:
+            raise ContractError("Generated memory candidate closure is incomplete")
+        try:
+            package = self.store.package(version["package_id"])
+            component = package["manifest"]["components"][component_id]
+            path = component["ref"]
+            episode = self.tasks.get_private(generation["episode_id"])
+            artifact = self.store.read(
+                episode["output_refs"]["memory_patch"], episode["id"])
+            improver = self.store.package(generation["improver_package_id"])
+            if verify_active_package:
+                from .evolution import active_package_registration
+                active_package = active_package_registration(
+                    self.store, package_registration["channel"])
+            else:
+                active_package = package_registration
+        except (KeyError, PermissionError, TypeError, ValueError) as exc:
+            raise ContractError("Generated memory execution closure is unavailable") from exc
+        patch = artifact.get("content")
+        operation = (patch.get("operations") or [None])[0] if isinstance(patch, dict) else None
+        parent = self.version(version["parent_id"])
+        surface = operation.get("surface") if isinstance(operation, dict) else None
+        expected_resource = deepcopy(parent["resource"])
+        if surface in {"policy", "data"} and isinstance(operation.get("value"), dict):
+            expected_resource[surface] = deepcopy(operation["value"])
+        execution = episode.get("execution") or {}
+        context = episode.get("task", {}).get("context", {})
+        improver_entry = generation.get("improver_entry")
+        improve_path = improver_entry.split(":", 1)[0] if isinstance(improver_entry, str) else None
+        expected_contract_digest = digest({
+            "manifest_digest": provenance.get("manifest_digest"),
+            "component_target": component_target,
+            "component_declaration_digest": provenance.get("component_declaration_digest"),
+            "patch_contract": "nexgent.memory-component-patch.v1",
+        })
+        if (component != {"class": "M", "kind": "resource", "ref": path}
+                or component_target != {"component_id": component_id, "class": "M",
+                                        "kind": "resource", "ref": path, "files": [path]}
+                or package["component_digests"].get(path)
+                    != provenance.get("component_declaration_digest")
+                or (verify_active_package
+                    and any(active_package[key] != package_registration[key]
+                            for key in package_registration))
+                or not isinstance(patch, dict)
+                or patch.get("schema") != "nexgent.memory-component-patch.v1"
+                or patch.get("activation_probe") != {
+                    "kind": "memory_snapshot_frozen", "component_id": component_id}
+                or set(episode.get("output_refs", {})) != {"memory_patch"}
+                or artifact.get("name") != "memory_patch"
+                or artifact.get("schema_ref") != generation.get("patch_contract")
+                or artifact.get("validation", {}).get("schema_status") != "passed"
+                or not isinstance(operation, dict)
+                or set(operation) != {"op", "component_id", "surface", "old_digest", "value"}
+                or operation.get("op") != "replace"
+                or operation.get("component_id") != component_id
+                or surface not in {"policy", "data"}
+                or provenance.get("change_scope") != {
+                    "component_id": component_id, "surface": surface}
+                or provenance.get("component_contract_digest") != expected_contract_digest
+                or operation.get("old_digest") != digest(parent["resource"][surface])
+                or _normalize_resource(expected_resource) != version["resource"]
+                or digest(patch) != generation.get("patch_digest")
+                or artifact.get("producer", {}).get("package_digest") != improver["digest"]
+                or improver["digest"] != generation.get("improver_package_digest")
+                or improver.get("manifest", {}).get("entries", {}).get("improve")
+                    != improver_entry
+                or generation.get("improver_closure") != improver.get("component_digests")
+                or generation.get("improver_closure_digest") != digest({
+                    "entry": improver_entry,
+                    "components": improver.get("component_digests")})
+                or episode.get("status") != "completed"
+                or episode.get("package_id") != generation.get("improver_package_id")
+                or episode.get("package_digest") != generation.get("improver_package_digest")
+                or episode.get("task", {}).get("entry") != "improve"
+                or episode.get("usage", {}).get("usage_complete") is not True
+                or generation.get("usage") != episode.get("usage")
+                or generation.get("execution") != execution
+                or execution.get("entry") != "improve"
+                or execution.get("package_digest") != generation.get("improver_package_digest")
+                or improve_path not in (execution.get("loaded_modules") or [])
+                or context.get("target_memory_registration") != release):
+            raise ContractError("Generated memory execution closure is invalid")
+        return generation
+
     def plan_selection(self, identity, *, criteria, evaluator_snapshot,
                        channel=None, expected_revision=None):
         """Freeze host selection inputs and the intended release edge."""
         version = self.version(identity)
         if version["status"] != "candidate":
             raise ContractError("Only candidate memory can enter selection")
+        self._verify_generated_component_candidate(version)
         criteria = _copy(criteria, "Memory selection criteria")
         evaluator_snapshot = _copy(evaluator_snapshot, "Memory evaluator snapshot")
         if not isinstance(criteria, dict) or not isinstance(evaluator_snapshot, dict):
@@ -323,6 +602,164 @@ class MemoryService:
             raise ContractError("Memory selection plan digest mismatch")
         return {**plan, "digest": row[1]}
 
+    def selection_execution(self, plan_id):
+        with self.store.connect() as db:
+            row = db.execute(
+                "SELECT data,digest FROM task_memory_selection_executions WHERE plan_id=?",
+                (plan_id,)).fetchone()
+        if row is None:
+            return None
+        record = json.loads(row[0])
+        if digest(record) != row[1]:
+            raise ContractError("Memory selection execution receipt digest mismatch")
+        return {**record, "digest": row[1]}
+
+    def evaluate_generated_candidate(self, plan_id, *, adapter, task_ref,
+                                     budget=None, stop_event=None):
+        """Run one host-frozen candidate snapshot Episode and persist its receipt."""
+        plan = self.selection_plan(plan_id)
+        version = self.version(plan["memory_id"])
+        if version["status"] != "candidate":
+            raise ContractError("Only candidate memory can run selection evaluation")
+        self._verify_generated_component_candidate(version)
+        existing = self.selection_execution(plan_id)
+        if existing is not None:
+            return existing
+        from .benchmarks import validate_snapshot
+        evaluator_snapshot = validate_snapshot(adapter.snapshot())
+        if digest(evaluator_snapshot) != plan["evaluator_snapshot_digest"]:
+            raise ContractError("Memory evaluator differs from the frozen selection plan")
+        task_ref = _copy(task_ref, "Memory selection task")
+        if not isinstance(task_ref, dict) or not isinstance(task_ref.get("objective"), str):
+            raise ContractError("Memory selection task must be a frozen task object")
+        context = deepcopy(task_ref.get("context") or {})
+        if not isinstance(context, dict) or "memory_candidate_evaluation" in context:
+            raise ContractError("Memory selection task context is invalid")
+        context["memory_writeback"] = False
+        context["memory_candidate_evaluation"] = {
+            "plan_id": plan_id, "memory_id": version["id"],
+            "memory_digest": version["digest"]}
+        registration = {
+            "channel": "candidate-selection", "revision": 0,
+            "memory_id": version["id"], "memory_digest": version["digest"],
+            "package_id": version["package_id"],
+            "package_digest": version["package_digest"],
+        }
+        benchmark_registration = {
+            "benchmark_id": getattr(adapter, "id", None),
+            "task_ref": deepcopy(task_ref),
+            "snapshot": deepcopy(evaluator_snapshot),
+        }
+        if not isinstance(benchmark_registration["benchmark_id"], str):
+            raise ContractError("Memory selection evaluator requires a stable id")
+        package = self.store.package(version["package_id"])
+        episode = self.tasks.create(
+            task_ref["objective"], task_ref.get("inputs"), task_ref.get("deliverables"),
+            budget, task_ref.get("capabilities"), package, context,
+            constraints=task_ref.get("constraints"), entry=task_ref.get("entry", "execute"),
+            benchmark_registration=benchmark_registration,
+            _memory_candidate={"registration": registration, "version": version},
+            _memory_candidate_token=_CANDIDATE_EVALUATION_TOKEN)
+        self.tasks.run(episode["id"], stop_event=stop_event)
+        evaluation = self.tasks.evaluate(
+            episode["id"], adapter, deepcopy(task_ref),
+            snapshot=deepcopy(evaluator_snapshot))
+        episode = self.tasks.get_private(episode["id"])
+        snapshot = self.store.memory_snapshot(
+            episode["memory_snapshot_id"], episode["id"])
+        candidate_item_ids = {
+            item["id"] for item in version["resource"]["data"]["items"]}
+        consumed = [event for event in episode["events"]
+                    if event["kind"] == "memory_consumed"
+                    and event["content"].get("snapshot_id") == snapshot["id"]]
+        memory_consumed = bool(candidate_item_ids and any(
+            candidate_item_ids & set(event["content"].get("item_ids") or [])
+            for event in consumed))
+        report = evaluation["evaluation"]
+        verdict = ("accepted" if memory_consumed and episode["status"] == "completed"
+                   and report.get("accepted") is True else "rejected")
+        now = time.time()
+        receipt = {
+            "id": _id("memory-selection-execution"), "plan_id": plan_id,
+            "plan_digest": plan["digest"], "memory_id": version["id"],
+            "memory_digest": version["digest"], "package_id": version["package_id"],
+            "package_digest": version["package_digest"], "episode_id": episode["id"],
+            "episode_status": episode["status"], "task_digest": digest(task_ref),
+            "evaluator_snapshot_digest": digest(evaluator_snapshot),
+            "snapshot_id": snapshot["id"], "snapshot_digest": snapshot["digest"],
+            "snapshot_source": deepcopy(snapshot.get("source")),
+            "memory_consumed": memory_consumed,
+            "consumption_event_digests": [event["digest"] for event in consumed],
+            "evaluation_digest": digest(report), "verdict": verdict,
+            "created_at": now,
+        }
+        encoded, receipt_digest = self._encode(receipt), digest(receipt)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute(
+                    "SELECT 1 FROM task_memory_selection_executions WHERE plan_id=?",
+                    (plan_id,)).fetchone():
+                raise ContractError("Memory selection execution is already frozen")
+            status = db.execute(
+                "SELECT status FROM task_memory_versions WHERE id=?",
+                (version["id"],)).fetchone()
+            if status is None or status[0] != "candidate":
+                raise ContractError("Memory candidate changed during selection execution")
+            db.execute("INSERT INTO task_memory_selection_executions VALUES(?,?,?,?,?)",
+                       (receipt["id"], plan_id, version["id"], encoded, receipt_digest))
+        return {**receipt, "digest": receipt_digest}
+
+    def _verify_selection_execution(self, plan, version):
+        receipt = self.selection_execution(plan["id"])
+        if receipt is None:
+            raise ContractError(
+                "Generated memory assessment requires a selection execution receipt")
+        try:
+            episode = self.tasks.get_private(receipt["episode_id"])
+            snapshot = self.store.memory_snapshot(
+                receipt["snapshot_id"], receipt["episode_id"])
+            registration = self.store.memory_registration(receipt["episode_id"])
+        except (KeyError, PermissionError, ValueError) as exc:
+            raise ContractError("Memory selection execution evidence is unavailable") from exc
+        consumed = [event for event in episode["events"]
+                    if event["kind"] == "memory_consumed"
+                    and event["content"].get("snapshot_id") == snapshot["id"]]
+        candidate_item_ids = {
+            item["id"] for item in version["resource"]["data"]["items"]}
+        memory_consumed = bool(candidate_item_ids and any(
+            candidate_item_ids & set(event["content"].get("item_ids") or [])
+            for event in consumed))
+        expected_source = {
+            "channel": "candidate-selection", "revision": 0,
+            "memory_id": version["id"], "memory_digest": version["digest"],
+            "package_id": version["package_id"],
+            "package_digest": version["package_digest"],
+        }
+        evaluation = episode.get("evaluation") or {}
+        expected_verdict = ("accepted" if memory_consumed
+                            and episode["status"] == "completed"
+                            and evaluation.get("accepted") is True else "rejected")
+        if (receipt.get("plan_id") != plan["id"]
+                or receipt.get("plan_digest") != plan["digest"]
+                or receipt.get("memory_id") != version["id"]
+                or receipt.get("memory_digest") != version["digest"]
+                or receipt.get("package_id") != version["package_id"]
+                or receipt.get("package_digest") != version["package_digest"]
+                or receipt.get("task_digest") != digest(
+                    self.store.benchmark_registration(episode["id"])["task_ref"])
+                or receipt.get("evaluator_snapshot_digest")
+                    != plan["evaluator_snapshot_digest"]
+                or receipt.get("snapshot_digest") != snapshot["digest"]
+                or receipt.get("snapshot_source") != expected_source
+                or registration != expected_source
+                or receipt.get("memory_consumed") is not memory_consumed
+                or receipt.get("consumption_event_digests")
+                    != [event["digest"] for event in consumed]
+                or receipt.get("evaluation_digest") != digest(evaluation)
+                or receipt.get("verdict") != expected_verdict):
+            raise ContractError("Memory selection execution receipt is invalid")
+        return receipt
+
     def assess(self, plan_id, *, evaluator_snapshot, verdict, reason, evidence=None):
         """Record one host decision against a frozen selection plan."""
         if verdict not in {"accepted", "rejected"}:
@@ -339,6 +776,18 @@ class MemoryService:
                 raise ContractError("Memory release changed during selection")
         identity = plan["memory_id"]
         evidence = _copy({} if evidence is None else evidence, "Memory assessment evidence")
+        version = self.version(identity)
+        if ((version.get("provenance") or {}).get("origin")
+                == "generated_memory_component"):
+            self._verify_generated_component_candidate(version)
+            execution_receipt = self._verify_selection_execution(plan, version)
+            expected_evidence = {
+                "selection_execution_id": execution_receipt["id"],
+                "selection_execution_digest": execution_receipt["digest"],
+            }
+            if evidence != expected_evidence or verdict != execution_receipt["verdict"]:
+                raise ContractError(
+                    "Generated memory assessment must match its host selection execution")
         now = time.time()
         decision = {"id": _id("memory-decision"), "memory_id": identity,
                     "plan_id": plan_id, "plan_digest": plan["digest"],
@@ -460,10 +909,26 @@ class MemoryService:
         target = self.version(identity)
         if target["status"] != "accepted" or target["parent_id"] != active["memory_id"]:
             raise ContractError("Promotion requires an accepted direct memory child")
+        generated_component = ((target.get("provenance") or {}).get("origin")
+                               == "generated_memory_component")
+        if (generated_component
+                and (target["package_id"] != active["package_id"]
+                     or target["package_digest"] != active["package_digest"])):
+            raise ContractError("Memory promotion cannot change the task package")
+        self._verify_generated_component_candidate(target, verify_active_package=False)
         decision = self.decision(identity)
         if decision is None:
             raise ContractError("Promotion requires a frozen host selection decision")
         plan = self.selection_plan(decision["plan_id"])
+        if generated_component:
+            execution_receipt = self._verify_selection_execution(plan, target)
+            if (execution_receipt["verdict"] != "accepted"
+                    or execution_receipt["memory_consumed"] is not True
+                    or decision.get("evidence") != {
+                        "selection_execution_id": execution_receipt["id"],
+                        "selection_execution_digest": execution_receipt["digest"]}):
+                raise ContractError(
+                    "Generated memory promotion requires accepted execution evidence")
         expected_release = plan.get("release")
         if (decision["verdict"] != "accepted" or expected_release is None
                 or any(active[key] != expected_release[key] for key in expected_release)):
@@ -474,6 +939,27 @@ class MemoryService:
                  "revision": expected_revision + 1, "updated_at": time.time()}
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            memory_row = db.execute(
+                "SELECT memory_id,revision,data FROM task_memory_channels WHERE name=?",
+                (channel,)).fetchone()
+            if (memory_row is None or memory_row[0] != active["memory_id"]
+                    or memory_row[1] != active["revision"]
+                    or memory_row[2] != self._encode(active)):
+                raise ContractError(
+                    "Memory release record changed during memory promotion")
+            package_release = (target.get("provenance") or {}).get(
+                "task_package_registration")
+            if generated_component:
+                package_row = db.execute(
+                    "SELECT package_id,revision,data FROM task_package_channels WHERE name=?",
+                    (package_release.get("channel"),)).fetchone()
+                if (package_row is None
+                        or package_row[0] != package_release.get("package_id")
+                        or package_row[1] != package_release.get("revision")
+                        or any(json.loads(package_row[2]).get(key) != value
+                               for key, value in package_release.items())):
+                    raise ContractError(
+                        "Task package release changed during memory promotion")
             row = db.execute("SELECT status FROM task_memory_versions WHERE id=?",
                              (identity,)).fetchone()
             if not row or row[0] != "accepted":
