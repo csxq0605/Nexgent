@@ -120,3 +120,9 @@ Windows 上最终脚本由子智能体与根代理分别定向运行通过。最
 这是**模型生成并实际使用新工具**的任务内证据，比 A3 的人工预写租约多了一步。实验程序仍预设“先请模型开发工具，再调用，再写答案”的路线；模型没有独立决定是否开发、没有编写服务／策略插件，也没有经过跨任务独立评价与默认采用。`tool_work_units=0` 是既有可信工具工作量账，**不等于零计算成本**；受控 worker 此次执行 9 个 trace 事件，每次硬上限 20 万，且不是 OS 级容器。结果只属于 C1 工具切片，不宣称 B／C 全部通过或 RSI 净收益。
 
 对照边界：固定 [DeepSeek Harness 源码审计](../../docs/research/kernel-reference-audit-20260923.md)里的作用域服务／provider／模型工具分层，Nexgent 此次只实现了**模型写工具定义 → Episode 实例 → 调用收据**，服务生命周期和 provider 替换未实现。[AutoSci](https://github.com/skyllwt/AutoSci/tree/arxiv-v1)的技能／图／反馈更新、[ADAS](https://arxiv.org/abs/2408.08435v2)的可执行 Agent 搜索、[AFlow](https://arxiv.org/abs/2410.10762v4)的工作流搜索，仍对应后续 D/E 的编排与候选评价；一次算术工具成功不能代替它们。OpenFOAM 等领域 demo 没有参与本次核心验收。
+
+## C 服务切片：默认任务智能体真实开发并激活上下文服务
+
+2026-09-24 使用 [`python_service_seed_live.py`](python_service_seed_live.py)进行一次限额 MiMo `mimo-v2.6-flash` 运行。[脱敏收据](evidence-python-service-seed-live-20260924.json)的 SHA-256 为 `496885F4AB11D3B8EDE330C0E94CD7FA6024A9DB7846752F0B785BCAB402E474`，原始 SQLite 在收据标明的本机 scratch。普通 `TaskService` 默认种子包从无已安装工具开始，由真实模型选择 `develop_service`，编写 `comparison.criteria` 的 `provide(payload, context)`，随后选择 `activate_service`。同一 Episode 的后三次模型调用经过该服务并留下 Definition／Instance／Authority 与有效 payload 摘要；最终工件根据 50ms 延迟上限选 A。Episode `episode-b194c9017d83486c` 为 `completed`，模型调用 5、节点 15，实际报告 11,889 prompt / 770 completion token，服务应用 3 次，自动重试 0，凭据扫描通过。
+
+这验证模型生成的**任务内服务**能改变后续模型调用的 JSON 上下文，且默认任务智能体能自己发出开发、激活动作。任务文字明确要求开发服务，故仍**不能证明模型会自主判断能力缺口**；这也不是工作流／角色／DAG 的更新。服务未跨任务独立评价和采用，没有固定框架对照、成本收益或 RSI 净收益。受控 Python worker 每次上限 20 万 trace 事件，不是 OS 容器；服务调用与工具共用 root `max_tool_calls`，实际 worker 指令暂未纳入 `max_tool_work_units`。DeepSeek 式 Definition/provider/consumer 的首个窄接口有运行证据；AutoSci、ADAS、AFlow 对应的编排搜索和跨任务选择仍在 D/E 阶段。
