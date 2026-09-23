@@ -11,7 +11,8 @@ def request_params(base_url, model, messages, max_tokens):
     result = {"model": model, "messages": messages, "response_format": {"type": "json_object"},
               "max_completion_tokens": max_tokens}
     if (urlsplit(base_url).hostname in {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"}
-            and model.lower().startswith("mimo-v2.5")):
+            and (model.lower().startswith("mimo-v2.5")
+                 or model.lower() == "mimo-v2.6-flash")):
         # MiMo counts default thinking against this bound. Structured program
         # generation uses the budget for its JSON/source output instead.
         result["extra_body"] = {"thinking": {"type": "disabled"}}

@@ -6,7 +6,7 @@
 
 Nexgent 是通用、可运行 benchmark 的 RSI 智能体框架。领域插件提供任务、工具与独立评价；核心只处理角色、工作流、技能、记忆、版本和证据。下一阶段的主问题不是单次文件改写能否晋升，而是：**任务反馈能否使多智能体组织与技能协议改变，并在后续未见任务中带来可归因、预算可比的收益。**
 
-manifest v2 已登记 role/workflow/skill/O/M/S component；ExecutablePlan v1 已能执行有界 DAG、并行、join、委派、局部预算、失败路由和预登记 revision。但当前 `BehaviorPatch v2` 的 hypothesis、activation probe、候选、选择、晋升和 guard 都围绕一个 `component_id`。默认 R0 仅可 `replace` 一个现有 O/S 文件。workflow 文件内部可以改节点与边，却不能在同一原子候选中连带增加角色、改变多个技能、替换对应提示资源或删除不再使用的组件。已有 E0 机制不能替代这种复合进化能力。
+manifest v2 已登记 role/workflow/skill/O/M/S component；ExecutablePlan v1 已能执行有界 DAG、并行、join、委派、局部预算、失败路由和预登记 revision。旧 `BehaviorPatch v2` 的 hypothesis、activation probe、候选、选择、晋升和 guard 围绕一个 `component_id`；PackagePatch v3 补足多组件构造和证据合同。E0 工程闭环仍不能替代真实模型生成有效候选和独立 benchmark 收益。
 
 ## 可进化对象
 
@@ -27,7 +27,7 @@ manifest v2 已登记 role/workflow/skill/O/M/S component；ExecutablePlan v1 �
 
 1. `parent_package_digest`、冻结 mutation policy 和可修改组件集合；
 2. 有序的组件操作：`add`、`replace`、`remove`，每项声明稳定 `component_id`、class/kind、旧摘要或新引用、文件变更及理由；
-3. 对 manifest 注册表的显式差量，覆盖 role、workflow、skill、entry、component 与 orchestrator 引用；
+3. 完整的 child manifest，覆盖 role、workflow、skill、entry、component 与 orchestrator 引用；宿主从父子 manifest 计算显式差量并逐项核验；
 4. 假设：失败证据引用、预期行为、适用范围、反证条件、**全部目标组件**及其依赖关系；
 5. 激活计划：哪些任务/节点应加载每项变更、怎样从宿主收据确认，而非由改进器自报。
 
@@ -74,7 +74,7 @@ manifest v2 已登记 role/workflow/skill/O/M/S component；ExecutablePlan v1 �
 
 固定多角色 AgentPackage 和等调用量单角色包已作为领域无关基线实现；它们都通过同一 canonical benchmark 入口运行并由宿主独立评分。[公开 BBH development 单题资格运行](../../experiments/orchestration_qualification/RESULTS.md)中，MiMo v2.6-flash 的多角色包完成了 3 次模型调用、交接和交付，但得 0 分；单角色 3 次调用得 1 分。它证明“实际运行”路径，不支持多智能体收益。
 
-`package_patch_v3.py` 现有一个宿主侧整包构造器，定向合同测试证明 O/S 的多组件 add/replace/remove 可在一个不可变 child 中重建、实际执行，并拒绝越权、悬挂引用和部分声明。workflow 执行收据也开始记录实际加载的 workflow/role/skill 文件摘要所需路径。**尚未完成**的是把 PackagePatch v3 接入 R0 真实生成、候选入库、逐组件选择/guard、M-only/完整进化臂和统计对照；因此目前不能称为端到端复合 RSI。
+`package_patch_v3.py` 是宿主侧整包构造器。PackagePatch v3 已接入默认 R0、候选入库、逐组件选择、晋升和 guard；确定性模型替身的端到端测试同时变更 workflow、role prompt 和 skill，并执行角色删除/新增，验证了加载证据和回滚入口。真实 MiMo v2.6-flash [生成资格运行](../../experiments/orchestration_qualification/RESULTS.md)尚未产生合法候选：一次默认思考耗尽输出预算，关闭思考后返回的 child manifest 仍缺少有效引用。**M-only/完整进化臂、模型产出候选的真实选择收益和统计对照仍未完成**，不能称为已证实 RSI。下一步应压缩模型面对的 manifest 编辑表示，同时保留宿主完整重建和核验。
 
 ## 研究依据与限度
 

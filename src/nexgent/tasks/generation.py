@@ -23,6 +23,7 @@ from .tools import ContractError
 FEEDBACK_SCHEMA = "nexgent.feedback-bundle.v1"
 PATCH_SCHEMA = "nexgent.behavior-patch.v1"
 PATCH_SCHEMA_V2 = "nexgent.behavior-patch.v2"
+PACKAGE_PATCH_SCHEMA = "nexgent.package-patch.v3"
 LEGACY_PATCH_SCHEMA = PATCH_SCHEMA
 GENERATION_SCHEMA = "nexgent.candidate-generation.v1"
 _TERMINAL = frozenset({"completed", "failed"})
@@ -179,6 +180,31 @@ def _component_registry_snapshot(package):
 
 
 def _patch_schema(schema=PATCH_SCHEMA):
+    if schema == PACKAGE_PATCH_SCHEMA:
+        hypothesis_keys = ["failure_mechanism", "expected_behavior",
+                           "applicability", "falsifier"]
+        return {
+            "type": "object", "additionalProperties": False,
+            "required": ["schema", "parent_package_digest", "hypothesis",
+                         "operations", "child_manifest", "activation_targets"],
+            "properties": {
+                "schema": {"const": PACKAGE_PATCH_SCHEMA},
+                "parent_package_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "hypothesis": {"type": "object", "additionalProperties": False,
+                               "required": hypothesis_keys + ["component_ids"],
+                               "properties": {
+                                   **{key: {"type": "string", "minLength": 1,
+                                            "maxLength": 5000} for key in hypothesis_keys},
+                                   "component_ids": {"type": "array", "minItems": 1,
+                                                     "maxItems": 64,
+                                                     "items": {"type": "string"}}}},
+                "operations": {"type": "array", "minItems": 1, "maxItems": 64,
+                               "items": {"type": "object"}},
+                "child_manifest": {"type": "object"},
+                "activation_targets": {"type": "array", "minItems": 1,
+                                       "maxItems": 64,
+                                       "items": {"type": "string"}},
+            }}
     component_targeted = schema == PATCH_SCHEMA_V2
     operation = {
         "type": "object",
@@ -372,6 +398,36 @@ class GenerationService:
         policy = _copy(policy, "Mutation policy")
         if not isinstance(policy, dict):
             raise ContractError("Mutation policy must be an object")
+        if policy.get("patch_contract") == PACKAGE_PATCH_SCHEMA:
+            if parent["manifest"].get("manifest_version") != 2:
+                raise ContractError("PackagePatch v3 requires a manifest-v2 parent")
+            builder = {key: value for key, value in policy.items()
+                       if key != "patch_contract"}
+            if set(builder) != {"mutable_components", "allow_add", "allow_remove",
+                                "max_patch_bytes", "capability_ceiling",
+                                "tool_ceiling", "max_parallel"}:
+                raise ContractError("PackagePatch v3 mutation policy is incomplete")
+            if (not isinstance(builder["mutable_components"], list)
+                    or not builder["mutable_components"]
+                    or any(not isinstance(identity, str)
+                           for identity in builder["mutable_components"])
+                    or len(set(builder["mutable_components"])) != len(builder["mutable_components"])
+                    or any(identity not in parent["manifest"]["components"]
+                           for identity in builder["mutable_components"])):
+                raise ContractError("PackagePatch v3 mutable component set is invalid")
+            registry = _component_registry_snapshot(parent)
+            improve = parent["manifest"]["entries"].get("improve")
+            improve_path = improve.split(":", 1)[0] if improve else None
+            for identity in builder["mutable_components"]:
+                descriptor = registry["components"][identity]
+                if (descriptor["class"] not in {"O", "S"}
+                        or len(descriptor["files"]) != 1
+                        or descriptor["files"][0] == improve_path
+                        or _path_tokens(descriptor["files"][0]) & _FORBIDDEN_TOKENS):
+                    raise ContractError("PackagePatch v3 includes an unsafe mutable component")
+            return {"targeting": "manifest_component_set_v3",
+                    "package_patch_policy": builder,
+                    "manifest_digest": registry["manifest_digest"]}
         manifest_v2 = parent["manifest"].get("manifest_version", 1) == 2
         default_operations = ["replace"] if manifest_v2 else ["replace", "add", "remove"]
         allowed = policy.get("allowed_operations", default_operations)
@@ -463,6 +519,22 @@ class GenerationService:
     @staticmethod
     def _apply_patch(parent, patch, policy, generation_id, feedback, improver):
         patch = _copy(patch, "BehaviorPatch")
+        if policy.get("targeting") == "manifest_component_set_v3":
+            from .package_patch_v3 import apply_package_patch
+            if policy.get("manifest_digest") != digest(parent["manifest"]):
+                raise ContractError("PackagePatch v3 parent manifest changed")
+            provenance = {
+                "origin": "generated", "generation_id": generation_id,
+                "feedback_bundle_id": feedback["id"],
+                "feedback_digest": feedback["digest"],
+                "improver_package_id": improver["id"],
+                "improver_package_digest": improver["digest"],
+                "behavior_patch_digest": digest(patch),
+            }
+            child = apply_package_patch(parent, patch,
+                                        policy["package_patch_policy"],
+                                        provenance=provenance)
+            return child, patch
         component_targeted = policy.get("targeting") == "manifest_component_v2"
         if component_targeted:
             registry = _component_registry_snapshot(parent)
@@ -631,7 +703,8 @@ class GenerationService:
         registry = _component_registry_snapshot(active["package"])
         if feedback.get("parent_component_registry") != registry:
             raise ContractError("Feedback component registry does not match the frozen parent")
-        patch_schema = (PATCH_SCHEMA_V2 if policy["targeting"] == "manifest_component_v2"
+        patch_schema = (PACKAGE_PATCH_SCHEMA if policy["targeting"] == "manifest_component_set_v3"
+                        else PATCH_SCHEMA_V2 if policy["targeting"] == "manifest_component_v2"
                         else PATCH_SCHEMA)
         improver_entry = improver_package["manifest"]["entries"]["improve"]
         # The complete immutable package is the conservative execution closure:
@@ -658,7 +731,16 @@ class GenerationService:
             "mutation_policy": policy, "mutation_policy_digest": digest(policy),
             "created_at": time.time(),
         }
-        if policy["targeting"] == "manifest_component_v2":
+        if policy["targeting"] == "manifest_component_set_v3":
+            components = []
+            for component_id in policy["package_patch_policy"]["mutable_components"]:
+                descriptor = deepcopy(registry["components"][component_id])
+                path = descriptor["files"][0]
+                components.append({**descriptor, "path": path,
+                                   "digest": active["package"]["component_digests"][path],
+                                   "content": active["package"]["files"][path],
+                                   "exists": True})
+        elif policy["targeting"] == "manifest_component_v2":
             components = []
             for component_id in policy["mutable_components"]:
                 descriptor = deepcopy(policy["resolved_components"][component_id])
@@ -676,16 +758,21 @@ class GenerationService:
                           for path in policy["mutable_paths"]]
         feedback_input = {key: deepcopy(value) for key, value in feedback.items()
                           if key != "record_digest"}
-        if policy["targeting"] == "manifest_component_v2":
+        if policy["targeting"] in {"manifest_component_v2", "manifest_component_set_v3"}:
             feedback_input["parent_component_registry"] = {
                 "manifest_version": 2,
                 "manifest_digest": registry["manifest_digest"],
                 "components": {
                     component_id: deepcopy(registry["components"][component_id])
-                    for component_id in policy["mutable_components"]}}
+                    for component_id in (policy["mutable_components"]
+                                         if policy["targeting"] == "manifest_component_v2"
+                                         else policy["package_patch_policy"]["mutable_components"])}}
         inputs = {"feedback_bundle": feedback_input,
                   "parent_components": components,
                   "mutation_policy": policy}
+        if policy["targeting"] == "manifest_component_set_v3":
+            inputs["parent_manifest"] = deepcopy(active["package"]["manifest"])
+            inputs["parent_package_digest"] = active["package"]["digest"]
         def admit(boundary):
             if admission_check is not None:
                 admission_check({
@@ -764,13 +851,25 @@ class GenerationService:
                     or current["package_digest"] != active["package_digest"]):
                 return self._missing(base, "Active parent changed during candidate generation",
                                      episode=episode, patch_digest=patch_digest)
+            activation_probe = (
+                {"kind": "component_set_loaded",
+                 "component_ids": patch["activation_targets"]}
+                if policy["targeting"] == "manifest_component_set_v3"
+                else patch["activation_probe"])
             candidate = self.evolution.propose(
                 channel, child, hypothesis=patch["hypothesis"],
                 feedback_episode_ids=[item["episode_id"] for item in feedback["episode_refs"]],
-                activation_probe=patch["activation_probe"],
+                activation_probe=activation_probe,
                 component_classes=(None if component_id is not None
+                                   or policy["targeting"] == "manifest_component_set_v3"
                                    else policy["component_classes"]),
-                component_target=component_target, origin="generated")
+                component_target=component_target, origin="generated",
+                package_patch=(patch if policy["targeting"] == "manifest_component_set_v3"
+                               else None),
+                mutation_policy=(policy["package_patch_policy"]
+                                 if policy["targeting"] == "manifest_component_set_v3"
+                                 else None))
+            component_target = deepcopy(candidate.get("component_target"))
         except Exception as exc:
             return self._missing(base, f"{type(exc).__name__}: {str(exc)}", episode=episode,
                                  patch_digest=(digest(artifact["content"])

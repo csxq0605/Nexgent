@@ -1,0 +1,38 @@
+{
+  "schema": "nexgent.package-patch-v3-qualification.v1",
+  "status": "missing",
+  "feedback_episode_id": "episode-98c445e18e7f4dac",
+  "patch_contract": "nexgent.package-patch.v3",
+  "started_at": 1790138607.5617032,
+  "feedback_bundle_id": "feedback-052f01cf9663497d",
+  "feedback_digest": "9a60c11d2b4efd5edf04a1cbb47301aec8efe0c1257c13dac16e6bb123aa628b",
+  "parent_package_digest": "54110e964849245b84b97ca30c93b92c482d2b22294478be4fb0b082595956c3",
+  "generation_id": "generation-981b360e034346d4",
+  "improver_episode_id": "episode-76a60db3b2964019",
+  "candidate_id": null,
+  "candidate_package_id": null,
+  "reason_type": "ModelBudgetError",
+  "reason": "ModelBudgetError: Requested output tokens exceed the host completion ceiling",
+  "usage": {
+    "model_calls": 0,
+    "reserved_completion_tokens": 0,
+    "charged_completion_tokens": 0,
+    "completion_tokens": 0,
+    "known_usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0
+    },
+    "usage_missing_call_ids": [],
+    "tool_usage_missing_call_ids": [],
+    "reserved_tool_work_units": 0,
+    "charged_tool_work_units": 0,
+    "tool_work_units": 0,
+    "usage_complete": true,
+    "billing_unknown_call_ids": [],
+    "tool_calls": 0,
+    "nodes": 6
+  },
+  "completed_at": 1790138609.792529,
+  "model_calls": []
+}

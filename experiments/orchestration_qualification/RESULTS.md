@@ -27,3 +27,32 @@ establishes neither a general negative effect nor RSI benefit. The immediate
 research question is whether feedback-generated orchestration or skill changes
 can improve later unseen tasks under the same budget and whether they beat
 fixed multi-role, single-role, and memory-only controls.
+
+## Multi-component R0 generation qualification
+
+The host now accepts one atomic `PackagePatch v3` spanning O/S workflow,
+roles, prompts, skills, and manifest changes. A deterministic model double
+completed the whole feedback → generated candidate → paired selection →
+promotion → guard path with a package that replaced a workflow, role prompt,
+and publishing skill, removed a role, and added a new role. This verifies the
+contract and evidence plumbing, **not model quality**.
+
+The same public BBH development feedback then went to the reference R0 with
+`mimo-v2.6-flash` and a 6,000-token completion ceiling:
+
+| Receipt | Outcome |
+| --- | --- |
+| [Setup](receipts/improve-v3-setup-failure.json) | Requested 12,000 tokens exceeded the TaskService host ceiling; zero model calls. |
+| [Dependency](receipts/improve-v3-dependency-failure.json) | Wrong Python environment lacked `openai`; one failed local worker call, no provider response. |
+| [Thinking budget](receipts/improve-v3-budget-exhausted.json) | MiMo returned `finish_reason=length`, using all 6,000 completion tokens; no candidate. |
+| [Non-thinking](receipts/improve-v3-invalid-patch.json) | MiMo returned 1,248 completion tokens, but the patch was invalid; no candidate. |
+
+The last response included three role replacements, but placed
+`activation_targets` inside `child_manifest` and omitted a valid workflow
+registry reference. Moving that field alone still leaves an invalid child,
+so this is a model-output failure rather than a hidden evaluator result.
+The gateway now sends MiMo's verified `thinking: disabled` setting for this
+model, giving JSON output room within the host ceiling. There is **no real
+model-generated v3 candidate and no measured RSI improvement** yet. Next,
+reduce the model-facing manifest burden while retaining host-side atomic
+validation, then rerun selection on unseen development tasks.

@@ -120,6 +120,12 @@ def test_provider_specific_options_do_not_pollute_other_models(host, model):
     assert "extra_body" not in request_params(host, model, [], 1000)
 
 
+def test_mimo_26_flash_uses_verified_non_thinking_json_budget():
+    params = request_params("https://api.xiaomimimo.com/v1",
+                            "mimo-v2.6-flash", [], 6000)
+    assert params["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
 @pytest.mark.parametrize("stop_requested", [False, True])
 def test_actual_provider_worker_process_is_stopped_with_bounded_wait(tmp_path, monkeypatch, stop_requested):
     popen, children = subprocess.Popen, []

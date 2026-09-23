@@ -15,3 +15,10 @@ receipt records actual usage, which must be compared as well as the ceilings.
 This is an execution qualification, not an orchestration benefit or RSI result.
 The benchmark is public and narrow. A later study must compare fixed multi-role,
 equal-budget single-role, memory-only, and evolved O/S packages on unseen tasks.
+
+`python -m experiments.orchestration_qualification.improve_v3 --root PROJECT
+--feedback-episode EPISODE_ID` freezes development feedback from a prior
+qualification Episode and asks the reference R0 to generate a PackagePatch v3.
+The receipt is saved before the model call. This step can yield a generated
+candidate or durable missing evidence; generation alone never proves benefit.
+The complete child manifest makes this a demanding model-output contract.

@@ -87,6 +87,28 @@ def _manifest_component(package, component_id):
 
 
 def _loaded_evidence(component, execution, package):
+    if component.get("kind") == "component_set":
+        loaded_modules = (execution or {}).get("loaded_modules") or []
+        package_loaded = (execution or {}).get("package_digest") == package["digest"]
+        members = []
+        for identity in component["component_ids"]:
+            member = component["members"][identity]
+            if member["operation"] == "remove":
+                old_files = member["parent"]["files"]
+                absent = (identity not in package["manifest"]["components"]
+                          and all(path not in package["files"] and path not in loaded_modules
+                                  for path in old_files))
+                members.append({"component_id": identity, "operation": "remove",
+                                "parent_files": old_files, "absent": absent,
+                                "loaded": absent and package_loaded})
+            else:
+                actual = _loaded_evidence(member["child"], execution, package)
+                members.append({"component_id": identity,
+                                "operation": member["operation"], **actual})
+        return {"kind": "component_set", "component_ids": component["component_ids"],
+                "members": members, "expected_package_digest": package["digest"],
+                "loaded_package_digest": (execution or {}).get("package_digest"),
+                "loaded": package_loaded and all(row["loaded"] for row in members)}
     loaded_modules = (execution or {}).get("loaded_modules") or []
     actual = [path for path in component["files"] if path in loaded_modules]
     expected_digests = {
@@ -491,7 +513,7 @@ class EvolutionService:
 
     def propose(self, channel, package, *, hypothesis, feedback_episode_ids,
                 activation_probe=None, component_classes=None, component_target=None,
-                origin="imported"):
+                origin="imported", package_patch=None, mutation_policy=None):
         """Admit a candidate bound to local non-holdout feedback and a hypothesis."""
         active = self.active(channel)
         verify_package(package, active["package"])
@@ -512,11 +534,49 @@ class EvolutionService:
         if (package["manifest"].get("entries", {}).get("improve")
                 != parent["manifest"].get("entries", {}).get("improve")):
             raise ContractError("Candidate cannot change the frozen improve entry")
-        if package["manifest"] != parent["manifest"]:
+        component_set = package_patch is not None
+        if not component_set and package["manifest"] != parent["manifest"]:
             raise ContractError("Candidates must preserve the frozen parent manifest")
         activation_probe = ({"kind": "package_loaded"} if activation_probe is None
                             else _copy(activation_probe, "Activation probe"))
-        if manifest_v2:
+        if component_set:
+            from .package_patch_v3 import apply_package_patch
+            if not manifest_v2 or component_target is not None or component_classes not in (None, {}):
+                raise ContractError("PackagePatch v3 requires host-resolved manifest-v2 targets")
+            if not isinstance(activation_probe, dict) or set(activation_probe) != {
+                    "kind", "component_ids"} or activation_probe.get("kind") != "component_set_loaded":
+                raise ContractError("PackagePatch v3 needs a component-set activation probe")
+            patch = _copy(package_patch, "PackagePatch")
+            if hypothesis != patch.get("hypothesis") or activation_probe.get(
+                    "component_ids") != patch.get("activation_targets"):
+                raise ContractError("PackagePatch hypothesis or activation identity changed")
+            provenance = deepcopy(package.get("provenance") or {})
+            provenance.pop("package_patch_digest", None)
+            replay = apply_package_patch(parent, patch, mutation_policy,
+                                         provenance=provenance)
+            if replay != package:
+                raise ContractError("Candidate differs from the host-replayed PackagePatch")
+            ids = patch["activation_targets"]
+            members = {}
+            for operation in patch["operations"]:
+                identity = operation["component_id"]
+                members[identity] = {
+                    "operation": operation["op"],
+                    "parent": (_manifest_component(parent, identity)
+                               if operation["op"] != "add" else None),
+                    "child": (_manifest_component(package, identity)
+                              if operation["op"] != "remove" else None),
+                }
+            resolved_target = {"kind": "component_set", "component_ids": ids,
+                               "members": members,
+                               "package_patch_digest": digest(patch),
+                               "mutation_policy_digest": digest(mutation_policy)}
+            component_classes = {
+                identity: (member["child"] or member["parent"])["class"]
+                for identity, member in members.items()}
+            component_id = None
+            targeting = "manifest_component_set_v3"
+        elif manifest_v2:
             if (not isinstance(activation_probe, dict)
                     or set(activation_probe) != {"kind", "component_id"}
                     or activation_probe.get("kind") != "component_loaded"
@@ -600,7 +660,7 @@ class EvolutionService:
         if not (component_delta["added"] or component_delta["removed"]
                 or component_delta["changed"] or component_delta["manifest_changed"]):
             raise ContractError("Candidate package has no component delta")
-        if manifest_v2:
+        if manifest_v2 and not component_set:
             changed_files = set(component_delta["added"] + component_delta["removed"]
                                 + component_delta["changed"])
             overlapping = {
@@ -712,6 +772,7 @@ class EvolutionService:
         provenance = child.get("provenance") or {}
         improve_path = (generation.get("improver_entry") or "").split(":", 1)[0]
         component_targeted = candidate.get("targeting") == "manifest_component_v2"
+        component_set_targeted = candidate.get("targeting") == "manifest_component_set_v3"
         artifact_content = artifact.get("content")
         if (episode.get("status") != "completed"
                 or set(episode.get("output_refs", {})) != {"behavior_patch"}
@@ -739,7 +800,13 @@ class EvolutionService:
                          or artifact_content.get("schema") != "nexgent.behavior-patch.v2"
                          or child.get("manifest") != self.store.package(
                              candidate["parent_package_id"]).get("manifest")))
-                or (not component_targeted
+                or (component_set_targeted
+                    and (generation.get("patch_contract") != "nexgent.package-patch.v3"
+                         or not isinstance(artifact_content, dict)
+                         or artifact_content.get("schema") != "nexgent.package-patch.v3"
+                         or candidate.get("component_target", {}).get(
+                             "package_patch_digest") != generation.get("patch_digest")))
+                or (not component_targeted and not component_set_targeted
                     and (generation.get("patch_contract") not in {
                              None, "nexgent.behavior-patch.v1"}
                          or not isinstance(artifact_content, dict)
@@ -755,6 +822,17 @@ class EvolutionService:
                 or provenance.get("improver_package_digest") != improver.get("digest")
                 or provenance.get("behavior_patch_digest") != generation["patch_digest"]):
             raise ContractError("Candidate improver execution closure is invalid")
+        if component_set_targeted:
+            from .package_patch_v3 import apply_package_patch
+            parent = self.store.package(candidate["parent_package_id"])
+            source_provenance = deepcopy(provenance)
+            source_provenance.pop("package_patch_digest", None)
+            replay = apply_package_patch(
+                parent, artifact_content,
+                (generation.get("mutation_policy") or {}).get("package_patch_policy"),
+                provenance=source_provenance)
+            if replay != child:
+                raise ContractError("Candidate PackagePatch replay differs from generation")
         return generation
 
     @staticmethod
@@ -1033,6 +1111,23 @@ class EvolutionService:
             activation_rows = [{"episode_id": row["candidate"]["episode_id"],
                                 "package_loaded": row["candidate"].get("error") is None}
                                for row in trial["pairs"]]
+        elif (probe.get("kind") == "component_set_loaded"
+              and candidate.get("targeting") == "manifest_component_set_v3"):
+            component = candidate.get("component_target")
+            if (not isinstance(component, dict)
+                    or component.get("kind") != "component_set"
+                    or component.get("component_ids") != probe.get("component_ids")):
+                behavior_activated = False
+            else:
+                for row in trial["pairs"]:
+                    actual = _loaded_evidence(
+                        component, row["candidate"].get("execution"), candidate_package)
+                    if row["candidate"].get("loaded_evidence") != actual:
+                        raise ContractError("Paired trial component-set evidence changed")
+                    activation_rows.append({"episode_id": row["candidate"]["episode_id"],
+                                            **actual})
+                behavior_activated = bool(activation_rows) and all(
+                    row["loaded"] for row in activation_rows)
         elif (probe.get("kind") == "component_loaded"
               and candidate.get("targeting") == "manifest_component_v2"):
             component = candidate.get("component_target")
@@ -1162,7 +1257,8 @@ class EvolutionService:
             raise ContractError("Candidate has no eligible paired promotion decision")
         if (decision.get("component_id") != candidate.get("component_id")
                 or decision.get("component_target") != candidate.get("component_target")
-                or (candidate.get("targeting") == "manifest_component_v2"
+                or (candidate.get("targeting") in {
+                        "manifest_component_v2", "manifest_component_set_v3"}
                     and (not decision.get("loaded_evidence")
                          or not all(row.get("loaded") is True
                                     for row in decision["loaded_evidence"])))):

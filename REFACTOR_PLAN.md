@@ -1,6 +1,6 @@
 # Nexgent vNext 重构计划
 
-日期：2026-09-21。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地，AgentPackage manifest v2 与 ExecutablePlan v1 已把 role/workflow/orchestrator/O-M-S component 接到真实 runtime、revision 和宿主账本恢复。P2 独立 OpenFOAM Re=10 smoke 已在真实 WSL2/Foundation 8 环境通过。P3 的稳定 component-id O/S 演化链与双合同 reference R0 已实现；P4 已有 durable-claim 可恢复 cycle；P5 已实现通用预注册 final-holdout 配对执行器。当前 RSI 证据上限仍是 E0 工程合同；真实 E1 generation activation、M route 和正式外部多任务研究尚未完成。
+日期：2026-09-23。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地，AgentPackage manifest v2 与 ExecutablePlan v1 已把 role/workflow/orchestrator/O-M-S component 接到真实 runtime、revision 和宿主账本恢复。P2 独立 OpenFOAM Re=10 smoke 已在真实 WSL2/Foundation 8 环境通过。P3 已新增多组件 O/S PackagePatch v3、默认 R0 输出合同、组件集合选择/晋升/guard 的确定性端到端验证；P4 已有 durable-claim 可恢复 cycle；P5 已实现通用预注册 final-holdout 配对执行器。真实 MiMo v2.6-flash 的 v3 生成尝试未产生合法候选，当前 RSI 效益证据上限仍是 E0 工程合同；M route 和正式外部多任务研究尚未完成。
 
 ## 1. 产品与执行范围
 
@@ -82,7 +82,7 @@ development Episode
 
 `GenerationService` 只从本地、终态、明确标记为 development 且绑定当前 active 父包的 Episode 捕获有界反馈。独立版本化的 `R0` 通过同一 `TaskService` 运行，只能交付严格的声明式 `BehaviorPatch`；可信宿主验证可修改路径、O/M/S 分类、旧摘要、大小、激活探针和完整 child 包。`R0` 的 improve entry 与执行闭包在 P3 冻结，候选不得修改 evaluator、gate、权限、预算核算或宿主控制代码。
 
-产品默认 reference R0 使 `rsi-generate` 无需外部 improver JSON 也能通过配置模型执行真实 generation。它按宿主归一化 policy 支持 legacy path-v1 和 manifest component-id-v2；v2 强制 hypothesis/operation/probe 使用同一 id，调用者与模型都不能提供权威 path/class。两条合同都只允许一个现有 O/S 文件的单次 `replace`，拒绝 M、多文件、add/remove 和控制面修改。调用方仍可显式传入冻结 improver package，或以 improver channel + expected revision 使用 P4 部署版本。默认 R0 只生成候选，不自动 selection、promotion 或 guard，也不包含 demo/benchmark 专用逻辑。
+产品默认 reference R0 使 `rsi-generate` 无需外部 improver JSON 也能通过配置模型执行真实 generation。它保留 legacy path-v1 与 manifest component-id-v2 的单文件合同，并新增 manifest component-set-v3：O/S 多组件 add/replace/remove 及完整 child manifest 由宿主核验，M 和控制面修改仍受独立边界限制。调用方仍可显式传入冻结 improver package，或以 improver channel + expected revision 使用 P4 部署版本。默认 R0 只生成候选，不自动 selection、promotion 或 guard，也不包含 demo/benchmark 专用逻辑。
 
 `EvolutionService` 把 paired suite、benchmark/evaluator snapshot、父子顺序、预算、可重算的 execution environment/tool/runtime snapshot 及 PromotionPolicy 在结果产生前冻结。实际 provider/model 身份由逐调用 receipt 证明，并在正式实验中与预登记配置核对；当前计划记录本身不声称已预先完整冻结二者。development decision 不能晋升，final holdout 不能进入演化；selection 缺分、用量不完整、身份不一致和关键回归均 fail closed。选择门的 `cost` 是模型调用、charged completion tokens、工具调用和节点用量形成的 normalized work unit，不是供应商货币费用。eligible 与 promote 分开；只有 `GenerationService` 闭合真实 R0 生成收据的 candidate 有部署权限，受控导入只进入研究/archive；promote 还要求父包仍为 active，并强制绑定预登记 monitor plan。普通任务只在创建时通过 `package_channel` 解析部署包。guard plan 与阈值在晋升前冻结，其完整任务多重集只允许一次执行；缺项、重复项、usage 不完整或 evaluator receipt 不匹配均 fail closed，退化时沿已记录部署边回滚。
 
@@ -122,7 +122,7 @@ TaskService benchmark 的 SDK 已收敛为显式 descriptor/protocol、隔离 re
 
 TaskService 现将工具调用次数与数值/外部工作量分开核算。`ToolSpec` 声明调用前固定预留，可信 handler 经 `ToolContext` 在实际工作边界持久计费，root Episode 对并行和委派共享原子预算；崩溃或未知结算保留预留且使 usage 不完整。P3/P4/P5 的成本门统一读取宿主 `charged_tool_work_units`，历史记录按显式零基线只读兼容。框架不能自动推断任意求解器的 FLOPs；scientific-discovery DomainPack 已在数值批次边界接入宿主可信计量，返回值中的 `work_units` 只作诊断。完整合同见[工具工作量计量](docs/design/tool-work-accounting.md)。
 
-P3 现有一个独立的正向 E1 exporter 与领域中立 qualification runner。它只接受仓库当前 immutable reference R0 的单一 `rsi_improver` 模型输出；现有 qualification fixture 仍使用 legacy path-v1 目标。runner 要求输出摘要等于入库 patch、usage/模型身份完整、paired quality 或 success 严格改善、独立 guard 通过，并由未参与 development/selection/guard 的冻结统计单元在晋升后再次加载同一 package revision。attempt 在模型调用前持久化且不可覆盖。该 runner 尚未执行真实 MiMo generation：自动外发审查要求用户明确授权把脱敏 FeedbackBundle、目标 component 内容和 mutation policy 发往已配置的 MiMo endpoint。合同和运行方式见 [P3 E1 qualification pilot](experiments/p3_e1/README.md)。
+P3 现有一个独立的正向 E1 exporter 与领域中立 qualification runner。它只接受仓库当前 immutable reference R0 的单一 `rsi_improver` 模型输出；现有 qualification fixture 仍使用 legacy path-v1 目标。runner 要求输出摘要等于入库 patch、usage/模型身份完整、paired quality 或 success 严格改善、独立 guard 通过，并由未参与 development/selection/guard 的冻结统计单元在晋升后再次加载同一 package revision。attempt 在模型调用前持久化且不可覆盖。MiMo v2.6-flash 已用于 [PackagePatch v3 资格尝试](experiments/orchestration_qualification/RESULTS.md)，真实 R0 输出尚未形成合法候选；该负结果不能写作 E1。原 E1 runner 的合同和运行方式见 [P3 E1 qualification pilot](experiments/p3_e1/README.md)。
 
 scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分布的兼容名称，仅用于迁移 regression/golden 等价检查。它不是新鲜 holdout，也不支持新的科学发现、模型效果或 RSI 结论；正式研究仍需新的 host-private release、独立来源 cluster、重复、控制臂和真实 provider 收据。
 

@@ -17,6 +17,39 @@ IMPROVER_SOURCE = '''def improve(payload, context):
     if len(str(feedback)) > 300000:
         raise ValueError('Feedback exceeds the reference improver input bound')
     targeting = policy.get('targeting')
+    if targeting == 'manifest_component_set_v3':
+        envelope = policy.get('package_patch_policy')
+        if not isinstance(envelope, dict):
+            raise ValueError('Invalid PackagePatch mutation policy')
+        parent_manifest = context.read_artifact(refs.get('parent_manifest'))['content']
+        parent_digest = context.read_artifact(refs.get('parent_package_digest'))['content']
+        if (not isinstance(parent_manifest, dict)
+                or not isinstance(parent_digest, str)
+                or policy.get('manifest_digest') is None):
+            raise ValueError('PackagePatch parent identity is incomplete')
+        exposed = [item for item in components
+                   if item.get('class') in ['O', 'S']
+                   and item.get('component_id') in envelope.get('mutable_components', [])
+                   and item.get('exists') is True
+                   and isinstance(item.get('content'), str)]
+        if not exposed or sum(len(item['content']) for item in exposed) > 500000:
+            raise ValueError('PackagePatch parent components exceed the input bound')
+        patch = context.ask('rsi_improver', context.resource('prompts/improve.md'), {
+            'feedback_bundle': feedback,
+            'parent_components': exposed,
+            'parent_manifest': parent_manifest,
+            'parent_package_digest': parent_digest,
+            'mutation_policy': policy,
+        }, max_tokens=6000)
+        if (not isinstance(patch, dict)
+                or set(patch.keys()) != set([
+                    'schema', 'parent_package_digest', 'hypothesis', 'operations',
+                    'child_manifest', 'activation_targets'])
+                or patch.get('schema') != 'nexgent.package-patch.v3'
+                or patch.get('parent_package_digest') != parent_digest):
+            raise ValueError('The reference improver abstained or returned an invalid PackagePatch')
+        artifact = context.publish(patch, name='behavior_patch')
+        return {'deliverables': {'behavior_patch': artifact['id']}}
     if targeting == 'manifest_component_v2':
         patch_schema = 'nexgent.behavior-patch.v2'
         target_field = 'component_id'
@@ -152,12 +185,14 @@ For `manifest_component_v2`, produce exactly one `nexgent.behavior-patch.v2` JSO
 
 Use exactly one `replace` operation on an existing component classified O or S by `mutation_policy`. Under v2, copy the same stable `component_id` into the hypothesis, operation, and activation probe; never supply a path or class. Copy the exact digest from the matching parent component and return the complete replacement text, not a diff. Preserve registered entry functions and keep Python within the controlled package language. Do not add domain answers, benchmark names, evaluator logic, hidden data, permissions, manifests, gates, or provider credentials. Prefer the smallest change that applies across tasks with the same failure mechanism.
 
-The hypothesis must be falsifiable on later Episodes. The activation probe must name a component changed by the patch. Do not claim the patch works; selection and guard evaluation decide that independently.
+For `manifest_component_set_v3`, produce a `nexgent.package-patch.v3` object with exactly `schema`, `parent_package_digest`, `hypothesis`, `operations`, `child_manifest`, and `activation_targets`. The hypothesis has the four explanatory strings above plus `component_ids`, listing every changed component. Each operation names a stable `component_id` and is an `add`, `replace`, or `remove`; for add include `path` and full `content`, for remove include the parent `old_digest`, and for replace include `old_digest` plus full `content` when its file changes. Return the complete child manifest, including its updated role/skill/workflow/component registries. Activation targets must equal the changed component IDs. Use the supplied parent manifest and package digest exactly, keep the improve entry and host controls frozen, and stay within the mutation policy's capability, tool, parallelism, and byte ceilings. A coherent multi-file change may alter the workflow DAG and the roles or skills it actually uses. Abstain if the evidence does not support such a change.
+
+The hypothesis must be falsifiable on later Episodes. The activation probe or targets must name changed components. Do not claim the patch works; selection and guard evaluation decide that independently.
 """
 
 
 def default_improver_package():
-    """Return the dual-contract reference R0 used when no custom improver is supplied."""
+    """Return the v1/v2/v3 reference R0 used without a custom improver."""
     return make_package(
         {"improver.py": IMPROVER_SOURCE, "prompts/improve.md": IMPROVER_PROMPT},
         {"entries": {"execute": "improver.py:improve",
