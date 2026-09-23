@@ -57,6 +57,15 @@ def main():
         "model_calls": result.get("usage", {}).get("model_calls"),
         "nodes": {key: value.get("status")
                   for key, value in result.get("nodes", {}).items()},
+        "node_errors": {key: value.get("error")
+                        for key, value in result.get("nodes", {}).items()
+                        if value.get("error")},
+        "compiled_skills": [
+            {key: event["content"].get(key)
+             for key in ("package_id", "skill_name", "compile_attempts")}
+            for event in result.get("events", [])
+            if event.get("kind") == "task_skill_compiled"
+        ],
         "children": result.get("child_episode_ids", []),
         "output_refs": result.get("output_refs", {}),
     }

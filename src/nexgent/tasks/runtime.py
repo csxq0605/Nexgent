@@ -554,15 +554,82 @@ class TaskService:
                 if len(names) > 6:
                     rendered += f", ... ({len(names) - 6} more)"
                 return rendered
+            def binding_reference(value):
+                return (isinstance(value, dict) and len(value) == 1
+                        and next(iter(value)) in {"$input", "$node", "$first_success"})
+            def validate_delegate_task(node, params, input_ports):
+                bindings = node.get("bindings", {})
+                if "task" in bindings:
+                    task = bindings["task"]
+                elif "task" in params:
+                    task = params["task"]
+                elif any(port.startswith("task.") for port in input_ports):
+                    task = {}
+                else:
+                    task = None
+                if "task" in input_ports or binding_reference(task):
+                    return
+                if not isinstance(task, dict):
+                    raise ContractError(
+                        f"Workflow delegate node {node.get('id')!r} task must be an object "
+                        "or a dynamic binding")
+                dynamic_fields = {
+                    port.split(".", 1)[1]
+                    for port in input_ports
+                    if port.startswith("task.") and port.count(".") == 1
+                }
+                objective = task.get("objective")
+                if ("objective" not in dynamic_fields
+                        and not binding_reference(objective)
+                        and (not isinstance(objective, str) or not objective.strip()
+                             or len(objective) > 20000)):
+                    raise ContractError(
+                        f"Workflow delegate node {node.get('id')!r} task requires a "
+                        "nonempty bounded objective")
+                deliverables = task.get("deliverables")
+                if ("deliverables" not in dynamic_fields
+                        and not binding_reference(deliverables)
+                        and (not isinstance(deliverables, list) or not deliverables
+                             or len(deliverables) > 256
+                             or any(not isinstance(item, dict)
+                                    and not binding_reference(item)
+                                    for item in deliverables))):
+                    raise ContractError(
+                        f"Workflow delegate node {node.get('id')!r} task deliverables "
+                        "must be a nonempty bounded list of objects")
+                input_refs = task.get("input_refs")
+                if ("input_refs" in task and "input_refs" not in dynamic_fields
+                        and not binding_reference(input_refs)
+                        and (not isinstance(input_refs, dict)
+                             or any(not isinstance(ref, str)
+                                    and not binding_reference(ref)
+                                    for ref in input_refs.values()))):
+                    raise ContractError(
+                        f"Workflow delegate node {node.get('id')!r} task input_refs "
+                        "must map names to artifact identities")
+                capabilities = task.get("capabilities")
+                if ("capabilities" in task and "capabilities" not in dynamic_fields
+                        and not binding_reference(capabilities)
+                        and (not isinstance(capabilities, list)
+                             or len(capabilities) > 256
+                             or any(not isinstance(name, str)
+                                    and not binding_reference(name)
+                                    for name in capabilities))):
+                    raise ContractError(
+                        f"Workflow delegate node {node.get('id')!r} task capabilities "
+                        "must be a bounded list of names")
             role_artifact_targets = {
                 edge.get("consumer_node") for edge in definition.get("artifact_edges", [])
                 if isinstance(edge, dict) and edge.get("input_port") == "role"
             }
             artifact_fields = {}
+            artifact_ports = {}
             for edge in definition.get("artifact_edges", []):
                 if isinstance(edge, dict) and isinstance(edge.get("input_port"), str):
                     artifact_fields.setdefault(edge.get("consumer_node"), set()).add(
                         edge["input_port"].split(".", 1)[0])
+                    artifact_ports.setdefault(edge.get("consumer_node"), set()).add(
+                        edge["input_port"])
             for node in definition.get("nodes", []):
                 if not isinstance(node, dict):
                     raise ContractError("Workflow nodes must be objects")
@@ -617,6 +684,9 @@ class TaskService:
                         raise ContractError(
                             f"Workflow {method} node {node.get('id')!r} has invalid "
                             "capability arguments (" + "; ".join(problems) + ")")
+                if method == "delegate":
+                    validate_delegate_task(
+                        node, params, artifact_ports.get(node.get("id"), set()))
                 if method == "ask":
                     if role_ref is None or component_ref is None:
                         raise ContractError(

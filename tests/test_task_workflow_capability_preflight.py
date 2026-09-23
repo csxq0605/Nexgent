@@ -107,6 +107,121 @@ def test_graph_repair_receives_read_artifact_contract_error_before_execution(tmp
     }
 
 
+def test_delegate_object_shaped_deliverables_are_rejected_at_compile_time(tmp_path):
+    """Regression for episode-fe1154b1bbec4d4e's failed delegate admission."""
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    with pytest.raises(ContractError, match="deliverables.*nonempty bounded list"):
+        _materialize(service, {
+            "id": "run_skill",
+            "method": "delegate",
+            "bindings": {"task": {
+                "objective": {"$input": "objective"},
+                "deliverables": {
+                    "result": {"schema": {"type": "object"}},
+                },
+                "input_refs": {"value": {"$input": "input_refs.value"}},
+            }},
+        })
+
+
+def test_graph_repair_receives_delegate_task_shape_error_before_child_creation(tmp_path):
+    package = self_orchestration_package()
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    base = service._materialize_workflow(package, "main", [])
+    execution = PlanExecution.create(
+        "delegate-preflight",
+        plan_from_workflow(base, "self-orchestration-workflow"),
+    )
+    execution = execution.transition_node(
+        "architect", NodeStatus.RUNNING, attempt_ref="attempt://architect/1")
+    execution = execution.transition_node("architect", NodeStatus.COMPLETED)
+    invalid_task = {
+        "objective": {"$input": "objective"},
+        "deliverables": {"result": {"schema": {"type": "object"}}},
+    }
+    repaired_task = {
+        "objective": {"$input": "objective"},
+        "deliverables": [{"name": "result", "schema": {"type": "object"}}],
+    }
+    requests = []
+
+    def proposal(task):
+        return {"operations": [{
+            "op": "replace_node", "node_id": "slot",
+            "node": {"id": "slot", "method": "delegate",
+                     "bindings": {"task": task}},
+        }]}
+
+    def repair(request, path):
+        requests.append((request, path))
+        return proposal(repaired_task)
+
+    result = compile_with_graph_repair(
+        execution=execution,
+        base_workflow=base,
+        initial_proposal=proposal(invalid_task),
+        patch_id="delegate-task-shape",
+        replaced_node_ids=["slot"],
+        materialize_callback=lambda workflow: service._materialize_workflow(
+            package, "generated", [], proposed_workflow=workflow),
+        repair_callback=repair,
+        max_attempts=2,
+    )
+
+    assert result.attempt_count == 2
+    assert result.diagnostics[0].stage == "materialize"
+    assert result.diagnostics[0].error_type == "ContractError"
+    assert "deliverables" in result.diagnostics[0].message
+    assert requests[0][1] == "graph_repair/attempts/2"
+    assert result.revised_workflow["nodes"][1]["bindings"]["task"] == repaired_task
+
+
+@pytest.mark.parametrize(("task", "message"), [
+    ({"deliverables": [{"name": "result"}]}, "objective"),
+    ({"objective": "inspect"}, "deliverables"),
+    ({"objective": "inspect", "deliverables": [{}], "input_refs": []},
+     "input_refs"),
+    ({"objective": "inspect", "deliverables": [{}], "capabilities": {}},
+     "capabilities"),
+])
+def test_delegate_literal_task_requires_basic_child_task_shape(tmp_path, task, message):
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    with pytest.raises(ContractError, match=message):
+        _materialize(service, {
+            "id": "delegate",
+            "method": "delegate",
+            "params": {"task": task},
+        })
+
+
+def test_delegate_task_allows_whole_and_nested_dynamic_bindings(tmp_path):
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    workflow = {
+        "nodes": [
+            {"id": "source", "method": "join", "params": {
+                "deliverables": [{"name": "result", "schema": {}}],
+                "capability": "test.dynamic",
+            }},
+            {"id": "whole", "method": "delegate", "bindings": {
+                "task": {"$node": "source"},
+            }},
+            {"id": "nested", "method": "delegate", "bindings": {"task": {
+                "objective": {"$input": "objective"},
+                "deliverables": {"$node": "source.deliverables"},
+                "input_refs": {"value": {"$input": "input_refs.value"}},
+                "capabilities": [{"$node": "source.capability"}],
+            }}},
+        ],
+        "outputs": {},
+    }
+
+    materialized = service._materialize_workflow(
+        self_orchestration_package(), "generated", [], proposed_workflow=workflow)
+    assert [node["id"] for node in materialized["nodes"]] == [
+        "source", "whole", "nested",
+    ]
+
+
 @pytest.mark.parametrize(("method", "params", "missing", "unsupported"), [
     ("publish", {"payload": {"answer": 1}}, "content", "payload"),
     ("delegate", {"objective": "inspect"}, "task", "objective"),
