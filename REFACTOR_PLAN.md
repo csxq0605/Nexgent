@@ -8,6 +8,8 @@
 
 唯一产品是 **通用 RSI 智能体框架 Nexgent**。它应能组织智能体完成普通任务，并通过独立 benchmark 检验任务能力、持久改进和递归效用。科学发现与 OpenFOAM 都是可选插件/场景；核心不能依赖 CFD 方程、求解器、case、论文五阶段流程或某个 demo 的评分。
 
+进一步的目标架构已固定为[无状态底座与任务专一型自设计团队](docs/design/stateless-kernel-and-self-designed-teams.md)：同一通用 Compiler/Runtime 接纳由智能体为当前任务提出的团队、技能和协作程序；外部 Store 保存任务状态、记忆与版本。P1 的固定多角色包和 P3/P5 的研究执行器只是底座及资格工具，不能充当“已能自主形成并演化任务专一团队”的验收。后续实施先补任务驱动的设计／执行／能力开发／复用路径，再扩大 demo 与统计试验。
+
 当前实现阶段仍遵守该产品边界。定位依据见[设计决策](docs/design/product-and-refactor-decision.md)，接口和执行模型见[架构](docs/design/agent-architecture-vnext.md)与[ExecutablePlan v1 / manifest v2](docs/design/executable-plan-v1.md)，P3 的现行合同见[反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)，研究依据与冻结实验见[P3 跨任务 RSI 设计](docs/research/p3-cross-task-rsi-design-20260920.md)及[RSI orchestration research refresh](docs/research/rsi-orchestration-refresh-20260921.md)。
 
 ## 2. 对旧完成判断的修正

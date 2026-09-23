@@ -2,6 +2,8 @@
 
 **通用 RSI 智能体框架：自主组织任务执行，从反馈中改进技能、协作和工作方式，并能运行 benchmark 检验效果。**
 
+目标形态是一个无状态、任务类型无关的 Kernel 与通用 Compiler/Runtime，由多智能体根据任务自行组成并改进任务专一的角色、技能和协作程序。现有 0.9 已有版本化工作流运行底座，但尚未证明自主形成团队、开发新能力和跨任务有效复用；[架构决策](docs/design/stateless-kernel-and-self-designed-teams.md)明确目标与现状的边界。
+
 Nexgent 本身是产品。科学发现与 OpenFOAM 是独立 demo，领域工具、任务、数据和评分不能进入核心。OpenFOAM 不成为框架的默认任务定义；同一核心必须能执行非 CFD 任务与 benchmark。
 
 ## 定位与当前状态
