@@ -555,14 +555,19 @@ class TaskService:
                     raise ContractError("Workflow operator is not registered by the host")
                 role_ref = node.get("role_ref")
                 component_ref = node.get("component_ref")
+                task_role = task_roles.get(role_ref)
                 component = None
                 if component_ref is not None:
-                    component = components.get(component_ref)
+                    if (isinstance(task_role, dict)
+                            and component_ref == task_role.get("component_ref")):
+                        component = {"kind": "role", "ref": role_ref}
+                    else:
+                        component = components.get(component_ref)
                     if not isinstance(component, dict):
                         raise ContractError(
                             f"Workflow component is not registered: {component_ref}")
                 if role_ref is not None:
-                    role = roles.get(role_ref)
+                    role = task_role if isinstance(task_role, dict) else roles.get(role_ref)
                     if not isinstance(role, dict):
                         raise ContractError(f"Workflow role is not registered: {role_ref}")
                     if method in CAPABILITIES and method not in role.get("capabilities", []):
