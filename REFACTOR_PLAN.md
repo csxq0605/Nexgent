@@ -155,6 +155,7 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 - [x] D0.1 对 Main 图做四次限额 MiMo 实跑并保留全部负结果；修正输入工件绑定、服务状态绑定、上下文服务抹除证据和编译期激活参数类型检查。第三次的 `completed` 因服务清空证据且 schema 泄露答案，被独立复核判为失败；图的真实任务质量仍未通过，[收据](experiments/kernel_spike/RESULTS.md)。
 - [ ] C 完整出口：真实任务中的能力缺口判断、隔离测试与反馈修复；覆盖服务／工具的受权文件或外部操作，保持 evaluator 独立。
 - [ ] D1 让同一入口按任务选用 DAG、开放循环或代码编排，并在真实任务中根据中途反馈修改执行策略；保留恢复和成本收据。
+- [ ] D1-A 先按[可进化执行策略检查点](docs/design/adaptive-orchestration-switch-v1.md)修复跨后端切换的组件激活合同，记录真实 active strategy 身份；D1-B/C 再实现任务内选择和中途反馈重选，D1-D 做冻结对照。现有双后端与 DAG 修订不计作已完成。
 - [x] E0 独立配对／guard 的宿主能力授权冻结：父子两臂和监控任务使用计划中的同一 `EpisodeAuthority`，benchmark 任务不能自授。确定性双模式回归通过；动态工具／服务发布与行为激活门仍未接入。
 - [x] E1 惰性[可携带能力发布合同](docs/design/capability-release-v1.md)：冻结纯 tool/service 的源码、接口、权限要求与创建任务谱系；不授权、不部署、不复用原 Definition。11 项新合同测试通过；E 阶段出口仍未通过。
 - [x] E2-A 包候选结构：AgentPackage manifest v2 可声明纯工具及 `model_context.v1` 服务组件，PackagePatch v3 可携带新增 S 组件；演化门要求对应的运行激活证据。100 项定向测试通过。此步仅建立候选与证据合同，尚未证明跨任务运行。
