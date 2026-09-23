@@ -90,3 +90,11 @@ Windows 上最终脚本由子智能体与根代理分别定向运行通过。最
 [`python_live_route.py`](python_live_route.py)在独立临时项目通过现有 `TaskService` 创建普通 Episode，固定 `mimo-v2.6-flash` 配置和同题输入，最多两次模型调用、512 completion token、一次工具调用，SDK 自动重试为零。凭据仅在内存读取，收据只记录配置引用和不含密钥的 profile 摘要。2026-09-23 唯一一次定向运行退出码 0；[脱敏收据](evidence-python-live-20260923.json)记录 Episode `completed`、两次真实模型调用共 260 prompt / 28 completion token、一次 `spike.multiply(6,7) → 42`、交付工件 `{"answer":42}`，并通过本地密钥字节扫描。原始 Episode 数据库保存在收据标明的本机 scratch 目录。
 
 这证明现有 Python 路径能够把真实模型选择、预授权工具执行、预算用量和交付连在同一 Episode 中。模型通过两次 JSON `ask` 交互，**不是 provider-native tool calling**；工具由人工预先编写并在 Episode 创建时授权，任务中开发、安装、卸载和跨任务进化仍未证明。此次没有为同题任务测试动态租约，不能借真实模型成功覆盖前述任务内装入负结果。
+
+## A3：DeepSeek 路线真实 MiMo 模型调用
+
+[`dsh_mimo_driver.ts`](dsh_mimo_driver.ts)、[`dsh_mimo_plugin.mjs`](dsh_mimo_plugin.mjs) 和 [`dsh_mimo.patch.yml`](dsh_mimo.patch.yml)沿用固定上游 headless profile，以相同配置摘要接入 `mimo-v2.6-flash`，上限两次请求／一次工具、零自动重试。唯一一次真实运行的[失败摘要](evidence-a3-dsh-mimo-failure-20260923.json)与[运行后补强清单](evidence-a3-dsh-mimo-enrichment-20260923.json)均入库；原始 session、plugin receipt、stdout/stderr 和当时执行的脚本副本保存在摘要指向的本机 scratch 目录。
+
+第一次请求得到模型原生 `spike.multiply({left:6,right:7})` tool call，MiMo 返回 627 input / 28 output token；DeepSeek session 持久记录工具调用和结果 42，handler 只执行一次。第二次请求已发出并返回 envelope，但当时的 adapter 未能将最终 `message.content` 解码为约定 JSON；分类为 `provider_protocol/final_decode`，进程退出码 1。总请求开始数为 2、完整模型收据数为 1、重试数为 0，**没有最终交付**。运行版本未先保存第二响应的 shape、finish reason 和 usage，因此不能在不重新请求的情况下确定是空内容、数组还是其他形态；不猜测根因。运行后只补强了后续尝试的观测字段，做本地语法／预检，没有再调用 provider。
+
+因此这条路线只证明真实原生 tool-call 与工具闭环接通，不能算同题完整成功。其原执行仍没有进入 Nexgent Episode 的事前准入、预算或真实任务评分。Python 路线的完整 Episode 成功与 DeepSeek 路线的最终解码失败需并列进入内核 ADR，不能把两条路线成功片段拼成一次成功执行。

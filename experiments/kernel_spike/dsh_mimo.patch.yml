@@ -1,0 +1,26 @@
+# Fixed Stage A3 live MiMo overlay over the shipped headless profile.
+- id: agent-default-model
+  config:
+    provider: nexgent-mimo-local
+    model: mimo-v2.6-flash
+
+- id: llm-deepseek
+  disabled: true
+
+- id: llm-pi-ai
+  disabled: true
+
+- id: session-title-llm
+  disabled: true
+
+- id: agent-instructions
+  disabled: true
+
+- id: session-persistence-jsonl
+  config:
+    root: !!js process.env.DSH_MIMO_SESSION_ROOT
+    compression: none
+
+- insert:
+    - id: nexgent-a3-mimo-live-smoke
+      name: './dsh_mimo_plugin.mjs'
