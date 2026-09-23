@@ -82,14 +82,16 @@ def _failed_qualification(tasks, evolution, plan_id, exc):
 
 
 def _qualification(tasks, evolution, adapter, candidate, *, seed, excluded,
-                   remaining_budget):
+                   remaining_budget, development_episode_budget=None):
     preview = adapter.tasks(split="development", seed=seed)
     units = _disjoint_units(excluded, preview)
     episode_count = 2 * len(preview)
     parent = tasks.store.package(candidate["parent_package_id"])
     child = tasks.store.package(candidate["package_id"])
     try:
-        estimate = paired_episode_budget(parent, child)
+        estimate = paired_episode_budget(
+            parent, child,
+            development_episode_budget=development_episode_budget)
     except Exception as exc:
         raise DevelopmentQualificationError({
             "failure_type": type(exc).__name__,
@@ -171,6 +173,11 @@ def main(argv=None):
     parser.add_argument("--max-model-calls", type=int, default=48)
     parser.add_argument("--max-completion-tokens", type=int, default=80000)
     parser.add_argument("--max-nodes", type=int, default=400)
+    parser.add_argument("--development-max-model-calls", type=int)
+    parser.add_argument("--development-max-completion-tokens", type=int,
+                        default=None)
+    parser.add_argument("--development-max-tool-calls", type=int)
+    parser.add_argument("--development-max-nodes", type=int)
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
@@ -203,6 +210,24 @@ def main(argv=None):
         "capability_ceiling": ["ask"], "tool_ceiling": [], "max_parallel": 2,
     }
     adapter = BigBenchHardTaskBenchmark(data_path=args.data, samples_per_task=1)
+    development_limits = (
+        args.development_max_model_calls,
+        args.development_max_completion_tokens,
+        args.development_max_tool_calls,
+        args.development_max_nodes,
+    )
+    if any(value is not None for value in development_limits):
+        if any(value is None for value in development_limits):
+            raise ValueError(
+                "Development Episode budget must specify every runtime limit")
+        development_episode_budget = {
+            "max_model_calls": args.development_max_model_calls,
+            "max_completion_tokens": args.development_max_completion_tokens,
+            "max_tool_calls": args.development_max_tool_calls,
+            "max_nodes": args.development_max_nodes,
+        }
+    else:
+        development_episode_budget = None
     next_seed = args.first_seed
 
     def generate(attempt, attempt_id, repair, remaining):
@@ -227,7 +252,8 @@ def main(argv=None):
             next_seed = seed + 1
             projected = _qualification(
                 tasks, evolution, adapter, candidate, seed=seed,
-                excluded=excluded, remaining_budget=remaining)
+                excluded=excluded, remaining_budget=remaining,
+                development_episode_budget=development_episode_budget)
             units = [row["statistical_unit_id"] for row in projected["tasks"]]
             excluded.update(units)
             return projected

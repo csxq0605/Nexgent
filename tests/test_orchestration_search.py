@@ -4,6 +4,7 @@ import json
 import pytest
 
 from experiments.orchestration_qualification.search_v3 import (
+    _qualification as run_qualification,
     _used_statistical_units)
 
 from nexgent.kernel.programs import digest
@@ -19,6 +20,7 @@ from nexgent.tasks.orchestration_search import (
     assess_qualification,
     normalize_qualification,
     orchestration_delta,
+    orchestration_projection,
     paired_episode_budget,
     repair_brief,
 )
@@ -27,6 +29,7 @@ from nexgent.tasks.orchestration_search_seed import (
 from nexgent.tasks.package_runner import CapabilityAbort
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
+from nexgent.tasks.self_orchestration_seed import self_orchestration_package
 from nexgent.tasks.tools import ContractError, ToolRegistry
 
 
@@ -140,8 +143,208 @@ def test_paired_budget_fails_closed_for_dynamic_delegation():
     child = make_package(files, deepcopy(parent["manifest"]), parent=parent,
                          provenance={"fixture": "dynamic-delegate"})
 
-    with pytest.raises(ContractError, match="no package-static"):
+    with pytest.raises(ContractError, match="explicit development Episode budget"):
         paired_episode_budget(parent, child)
+
+
+@pytest.mark.parametrize("kind", ["revision", "delegate", "parallel", "external_skill"])
+def test_dynamic_graphs_use_one_explicit_runtime_cap_for_both_arms(kind):
+    parent = multirole_package()
+    files = deepcopy(parent["files"])
+    manifest = deepcopy(parent["manifest"])
+    workflow = json.loads(files["workflows/main.json"])
+    proposer = next(node for node in workflow["nodes"]
+                    if node["id"] == "proposer_a")
+    if kind == "revision":
+        workflow["revision_rules"] = [{
+            "id": "replan",
+            "after_node": "proposer_a",
+            "when": {"path": "$status", "equals": "failed"},
+            "planner_role_ref": "proposer_a",
+            "planner_max_tokens": 1200,
+            "replace_node_ids": ["proposer_b"],
+            "max_compile_attempts": 2,
+        }]
+    elif kind == "delegate":
+        proposer["method"] = "delegate"
+    elif kind == "parallel":
+        proposer.update(method="parallel", role_ref=None, component_ref=None,
+                        params={"requests": []})
+    else:
+        files["skills/prepare.py"] += (
+            "\ndef external_work(context):\n"
+            "    return context.ask('proposer_a', 'bounded', max_tokens=1)\n")
+        manifest["skills"]["prepare"].update(
+            allowed_rpc_methods=["ask"], allowed_tools=[])
+    files["workflows/main.json"] = json.dumps(workflow, sort_keys=True)
+    child = make_package(files, manifest, parent=parent,
+                         provenance={"fixture": f"dynamic-{kind}"})
+    cap = {"max_model_calls": 8, "max_completion_tokens": 12000,
+           "max_tool_calls": 0, "max_nodes": 40}
+
+    estimate = paired_episode_budget(
+        parent, child, development_episode_budget=cap)
+
+    assert estimate["episode_budget"] == cap
+    assert set(estimate["arms"]) == {"parent", "candidate"}
+
+
+def test_dynamic_graph_explicit_budget_must_cover_static_paired_arm():
+    parent = multirole_package()
+    files = deepcopy(parent["files"])
+    workflow = json.loads(files["workflows/main.json"])
+    workflow["revision_rules"] = [{
+        "id": "replan", "after_node": "proposer_a",
+        "when": {"path": "$status", "equals": "failed"},
+        "planner_role_ref": "proposer_a", "planner_max_tokens": 1600,
+        "replace_node_ids": ["proposer_b"],
+    }]
+    files["workflows/main.json"] = json.dumps(workflow, sort_keys=True)
+    child = make_package(files, deepcopy(parent["manifest"]), parent=parent,
+                         provenance={"fixture": "dynamic-insufficient"})
+
+    with pytest.raises(ContractError, match="insufficient"):
+        paired_episode_budget(parent, child, development_episode_budget={
+            "max_model_calls": 2, "max_completion_tokens": 3200,
+            "max_tool_calls": 0, "max_nodes": 30,
+        })
+
+
+def test_self_orchestration_seed_is_admitted_under_explicit_runtime_cap():
+    package = self_orchestration_package()
+    cap = {"max_model_calls": 20, "max_completion_tokens": 80000,
+           "max_tool_calls": 20, "max_nodes": 100}
+
+    estimate = paired_episode_budget(
+        package, package, development_episode_budget=cap)
+
+    assert estimate == {
+        "arms": {"parent": None, "candidate": None},
+        "episode_budget": cap,
+    }
+
+
+def test_projection_materializes_task_roles_and_planner_without_prompt_text():
+    parent = multirole_package()
+    files = deepcopy(parent["files"])
+    workflow = json.loads(files["workflows/main.json"])
+    workflow["task_roles"] = {
+        "specialist": {"identity": "Task specialist",
+                       "prompt": "PRIVATE SPECIALIST INSTRUCTION",
+                       "capabilities": ["ask"]},
+        "planner": {"identity": "Task planner",
+                    "prompt": "PRIVATE PLANNER INSTRUCTION",
+                    "capabilities": ["ask"]},
+    }
+    proposer = next(node for node in workflow["nodes"]
+                    if node["id"] == "proposer_a")
+    proposer["role_ref"] = "task:specialist"
+    proposer.pop("component_ref")
+    workflow["revision_rules"] = [{
+        "id": "replan", "after_node": "proposer_a",
+        "when": {"path": "$status", "equals": "failed"},
+        "planner_role_ref": "task:planner",
+        "replace_node_ids": ["proposer_b"],
+    }]
+    files["workflows/main.json"] = json.dumps(workflow, sort_keys=True)
+    child = make_package(files, deepcopy(parent["manifest"]), parent=parent,
+                         provenance={"fixture": "task-role-projection"})
+
+    projected = orchestration_projection(child)
+    encoded = json.dumps(projected, sort_keys=True)
+    role_refs = [ref for ref in projected["used_roles"]
+                 if ref.startswith("task-role://")]
+    graph = projected["workflows"]["main-workflow"]["graph"]
+
+    assert len(role_refs) == 2
+    assert all(projected["used_roles"][ref]["content_digest"]
+               for ref in role_refs)
+    assert graph["revision_rules"][0]["planner_role_ref"] in role_refs
+    assert "PRIVATE SPECIALIST INSTRUCTION" not in encoded
+    assert "PRIVATE PLANNER INSTRUCTION" not in encoded
+
+
+def test_search_v3_dynamic_qualification_requires_and_freezes_common_cap():
+    parent = multirole_package()
+    files = deepcopy(parent["files"])
+    workflow = json.loads(files["workflows/main.json"])
+    next(node for node in workflow["nodes"]
+         if node["id"] == "proposer_a")["method"] = "delegate"
+    files["workflows/main.json"] = json.dumps(workflow, sort_keys=True)
+    child = make_package(files, deepcopy(parent["manifest"]), parent=parent,
+                         provenance={"fixture": "qualification-dynamic"})
+    task_ref = {"id": "task-1", "objective": "fixture",
+                "statistical_unit_id": "unit-1"}
+    candidate = {"id": "candidate-1", "parent_package_id": parent["id"],
+                 "package_id": child["id"]}
+    cap = {"max_model_calls": 4, "max_completion_tokens": 8000,
+           "max_tool_calls": 0, "max_nodes": 40}
+
+    class Store:
+        def package(self, identity):
+            return {parent["id"]: parent, child["id"]: child}[identity]
+
+    class Tasks:
+        store = Store()
+
+        @staticmethod
+        def get_private(identity):
+            return {"id": identity, "status": "completed",
+                    "outcome": {"delivery_status": "delivered",
+                                "schema_validation": "passed"}}
+
+    class Adapter:
+        @staticmethod
+        def tasks(**kwargs):
+            return [deepcopy(task_ref)]
+
+    class Evolution:
+        def __init__(self):
+            self.budgets = []
+
+        def plan_pair(self, *args, budget, **kwargs):
+            self.budgets.append(deepcopy(budget))
+            return {"id": "plan-1", "suite": {"tasks": [deepcopy(task_ref)]}}
+
+        @staticmethod
+        def run_pair(identity, adapter):
+            usage = {"model_calls": 1, "charged_completion_tokens": 10,
+                     "tool_calls": 0, "nodes": 3, "usage_complete": True}
+            evaluation = {"score_available": True, "score": 1.0}
+            return {"id": "trial-1", "pairs": [{
+                "parent": {"episode_id": "parent-episode", "usage": usage,
+                           "evaluation": evaluation},
+                "candidate": {"episode_id": "candidate-episode", "usage": usage,
+                              "evaluation": evaluation,
+                              "loaded_evidence": {"loaded": True}},
+            }]}
+
+    evolution = Evolution()
+    full_remaining = {"model_calls": 8, "completion_tokens": 16000,
+                      "tool_calls": 0, "nodes": 80}
+
+    with pytest.raises(DevelopmentQualificationError) as omitted:
+        run_qualification(
+            Tasks(), evolution, Adapter(), candidate, seed=1, excluded=set(),
+            remaining_budget=full_remaining)
+    assert omitted.value.failure["failure_type"] == "ContractError"
+    assert evolution.budgets == []
+
+    with pytest.raises(DevelopmentQualificationError) as insufficient:
+        run_qualification(
+            Tasks(), evolution, Adapter(), candidate, seed=1, excluded=set(),
+            remaining_budget={**full_remaining, "model_calls": 7},
+            development_episode_budget=cap)
+    assert insufficient.value.failure["failure_type"] == "InsufficientSearchBudget"
+    assert evolution.budgets == []
+
+    result = run_qualification(
+        Tasks(), evolution, Adapter(), candidate, seed=1, excluded=set(),
+        remaining_budget=full_remaining, development_episode_budget=cap)
+
+    assert evolution.budgets == [cap]
+    assert result["candidate_id"] == candidate["id"]
+    assert result["usage"]["model_calls"] == 2
 
 
 def test_restarted_search_excludes_units_from_every_prior_benchmark_episode():

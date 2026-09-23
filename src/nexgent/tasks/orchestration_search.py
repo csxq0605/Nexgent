@@ -17,6 +17,7 @@ import time
 import uuid
 
 from ..kernel.programs import digest
+from .dynamic_roles import materialize_task_roles
 from .package_runner import CapabilityAbort
 from .packages import verify_package
 from .tools import ContractError
@@ -66,6 +67,16 @@ def _node_refs(value):
     return refs
 
 
+def _without_prompt_text(value):
+    """Copy structural values while withholding embedded model instructions."""
+    if isinstance(value, dict):
+        return {key: _without_prompt_text(child)
+                for key, child in value.items() if key != "prompt"}
+    if isinstance(value, list):
+        return [_without_prompt_text(child) for child in value]
+    return deepcopy(value)
+
+
 def _graph_projection(graph):
     if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
         raise ContractError("Orchestration workflow must contain a node list")
@@ -79,7 +90,7 @@ def _graph_projection(graph):
             "role_ref": node.get("role_ref"),
             "component_ref": node.get("component_ref"),
             "depends_on": sorted(_node_refs(node.get("bindings", {}))),
-            "params": deepcopy(node.get("params", {})),
+            "params": _without_prompt_text(node.get("params", {})),
             "condition": deepcopy(node.get("condition")),
             "on_failure": deepcopy(node.get("on_failure")),
             "retry": deepcopy(node.get("retry")),
@@ -114,6 +125,7 @@ def orchestration_projection(package):
     components = manifest.get("components", {})
     workflows = {}
     used_roles = set()
+    task_roles = {}
     root = manifest.get("orchestrator")
     if not isinstance(root, str):
         raise ContractError("Package has no registered orchestrator identity")
@@ -132,9 +144,19 @@ def orchestration_projection(package):
         if not isinstance(declaration, dict) or not isinstance(declaration.get("ref"), str):
             raise ContractError("O workflow component has no registered workflow")
         try:
-            graph = json.loads(package["files"][declaration["ref"]])
+            graph = materialize_task_roles(
+                json.loads(package["files"][declaration["ref"]]))
         except (KeyError, TypeError, json.JSONDecodeError) as exc:
             raise ContractError("O workflow component is not valid JSON") from exc
+        for role_ref, role in graph.get("task_roles", {}).items():
+            structural = {
+                "component_ref": role.get("component_ref"),
+                "capabilities": sorted(role.get("capabilities", [])),
+                "digest": role.get("digest"),
+            }
+            previous = task_roles.setdefault(role_ref, structural)
+            if previous != structural:
+                raise ContractError("Task role identity has conflicting definitions")
         projected = _graph_projection(graph)
         stack = list(projected["nodes"])
         while stack:
@@ -148,6 +170,10 @@ def orchestration_projection(package):
                     and nested.get("kind") == "workflow"):
                 pending.append(row["component_ref"])
         for rule in projected.get("revision_rules", []):
+            planner_role_ref = (
+                rule.get("planner_role_ref") if isinstance(rule, dict) else None)
+            if isinstance(planner_role_ref, str):
+                used_roles.add(planner_role_ref)
             workflow_ref = rule.get("workflow_ref") if isinstance(rule, dict) else None
             owners = [identity for identity, declaration in components.items()
                       if declaration.get("class") == "O"
@@ -163,6 +189,14 @@ def orchestration_projection(package):
         raise ContractError("Package has no executable O workflow component")
     roles = {}
     for role_ref in sorted(used_roles):
+        if role_ref in task_roles:
+            role = task_roles[role_ref]
+            roles[role_ref] = {
+                "component_ids": [role["component_ref"]],
+                "capabilities": list(role["capabilities"]),
+                "content_digest": role["digest"],
+            }
+            continue
         declaration = manifest.get("roles", {}).get(role_ref)
         if not isinstance(declaration, dict):
             raise ContractError("Workflow references an unregistered role")
@@ -212,11 +246,15 @@ def _controlled_source_is_statically_local(package, component_ref):
                    for node in ast.walk(tree))
 
 
+class _DynamicWorkBudget(ContractError):
+    """A valid graph whose complete work cannot be inferred from its package."""
+
+
 def _graph_work_budget(graph, package):
     """Conservatively bound one reachable workflow execution."""
     if graph.get("revision_rules"):
-        raise ContractError(
-            "Dynamic workflow revision has no static development budget bound")
+        raise _DynamicWorkBudget(
+            "Dynamic workflow revision has no package-static development budget bound")
     total = {"model_calls": 0, "completion_tokens": 0,
              "tool_calls": 0, "nodes": 0}
     nodes = graph.get("nodes")
@@ -241,12 +279,13 @@ def _graph_work_budget(graph, package):
             for key in total:
                 total[key] += bound * nested[key]
         elif method in {"parallel", "delegate"}:
-            raise ContractError(
+            raise _DynamicWorkBudget(
                 f"{method} node has no package-static descendant work bound")
         elif method == "skill":
             if not _controlled_source_is_statically_local(
                     package, node.get("component_ref")):
-                raise ContractError("Workflow skill has dynamic external work")
+                raise _DynamicWorkBudget(
+                    "Workflow skill has dynamic external work")
         elif method not in {"join", "read_artifact", "publish", "memory_search",
                             "remember"}:
             raise ContractError(f"Workflow method has no static work model: {method}")
@@ -275,21 +314,68 @@ def reachable_work_budget(package):
     return _graph_work_budget(graph, package)
 
 
-def paired_episode_budget(parent, candidate):
-    """Give both paired arms the same cap covering the more expensive graph."""
-    arms = {"parent": reachable_work_budget(parent),
-            "candidate": reachable_work_budget(candidate)}
+def _development_episode_budget(value):
+    fields = {"max_model_calls", "max_completion_tokens",
+              "max_tool_calls", "max_nodes"}
+    value = _copy(value, "Development Episode budget")
+    if (not isinstance(value, dict) or set(value) != fields
+            or any(type(value[key]) is not int or value[key] < 0
+                   for key in fields)
+            or value["max_nodes"] < 1):
+        raise ContractError(
+            "Development Episode budget must freeze every nonnegative runtime limit")
+    return value
+
+
+def _estimated_episode_budget(arms):
     cap = {key: max(arms["parent"][key], arms["candidate"][key])
            for key in arms["parent"]}
     # Runtime bookkeeping has bounded non-model nodes around the graph.  Keep
     # the established floor while deriving model/tool work from reachable code.
     cap["nodes"] = max(30, cap["nodes"] + 8)
-    return {"arms": arms, "episode_budget": {
+    return {
         "max_model_calls": cap["model_calls"],
         "max_completion_tokens": cap["completion_tokens"],
         "max_tool_calls": cap["tool_calls"],
         "max_nodes": cap["nodes"],
-    }}
+    }
+
+
+def paired_episode_budget(parent, candidate, *, development_episode_budget=None):
+    """Give paired arms one cap, estimating static graphs and capping dynamic ones.
+
+    A package-static estimate remains the default for simple workflows.  Graphs
+    with runtime revision, delegation, parallel RPC, or externally acting
+    skills require an explicit Episode cap; runtime accounting then enforces
+    that same frozen cap independently on both paired arms.
+    """
+    explicit = (None if development_episode_budget is None else
+                _development_episode_budget(development_episode_budget))
+    arms, static_arms, dynamic_error = {}, {}, None
+    for name, package in (("parent", parent), ("candidate", candidate)):
+        try:
+            budget = reachable_work_budget(package)
+            static_arms[name] = budget
+        except _DynamicWorkBudget as exc:
+            dynamic_error = exc
+            # A dynamic arm has no honest package-static estimate: a revision
+            # may replace pending base nodes and descendants are runtime data.
+            budget = None
+        arms[name] = budget
+    if dynamic_error is not None and explicit is None:
+        raise ContractError(
+            "Dynamic workflow work requires an explicit development Episode budget"
+        ) from dynamic_error
+    if explicit is None:
+        return {"arms": arms, "episode_budget": _estimated_episode_budget(arms)}
+    if static_arms:
+        static_values = list(static_arms.values())
+        static_required = _estimated_episode_budget({
+            "parent": static_values[0], "candidate": static_values[-1]})
+        if any(explicit[key] < static_required[key] for key in static_required):
+            raise ContractError(
+                "Explicit development Episode budget is insufficient for the static paired arm")
+    return {"arms": arms, "episode_budget": explicit}
 
 
 def normalize_qualification(candidate_id, value):
