@@ -13,7 +13,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from nexgent.tasks.evolution import EvolutionService
+from nexgent.tasks.evolution import EvolutionService, PromotionPolicy
 from nexgent.tasks.generation import GenerationService
 from nexgent.kernel.programs import digest
 from nexgent.tasks.dynamic_roles import materialize_task_roles
@@ -179,6 +179,20 @@ def test_adoption_uses_generation_closure_and_preserves_active_planner(tmp_path)
 def test_adoption_freezes_final_generated_workflow_roles_and_optional_skill(
         tmp_path, include_skill):
     role_prompt = "Solve the bounded task and return an integer answer."
+    baseline_proposal = {
+        "replaced_node_ids": ["slot"],
+        "operations": [
+            {"op": "remove_node", "node_id": "slot"},
+            {"op": "add_node", "node": {
+                "id": "publish", "method": "publish",
+                "params": {"name": "result", "content": {"answer": 0}},
+            }},
+            {"op": "add_control_edge", "edge": {
+                "from": "architect", "to": "publish"}},
+        ],
+        "outputs": {"deliverables": {"result": {"$node": "publish.id"}}},
+        "revision_rules": [],
+    }
     workflow_proposal = {
         "replaced_node_ids": ["slot"],
         "task_roles": {
@@ -269,7 +283,10 @@ def test_adoption_freezes_final_generated_workflow_roles_and_optional_skill(
                                   "total_tokens": 2},
                     })
                     if role == "architect":
-                        return {"proposal": deepcopy(workflow_proposal)}
+                        objective = payload["task"]["objective"]
+                        return {"proposal": deepcopy(
+                            workflow_proposal if objective.startswith("Create and exercise")
+                            else baseline_proposal)}
                     assert role.startswith("task-role://bounded_solver/") or (
                         role.startswith("adopted_role_"))
                     assert prompt == role_prompt
@@ -355,3 +372,83 @@ def test_adoption_freezes_final_generated_workflow_roles_and_optional_skill(
         assert adoption["adopted_skills"] == []
     assert evolution._verify_generated_candidate(candidate)["id"] == generated["id"]
     assert evolution.active("task-os")["package_id"] == parent["id"]
+
+    if not include_skill:
+        class FreshGraphBenchmark:
+            id = "task-os-graph-reuse"
+
+            def snapshot(self):
+                return {"id": self.id, "evaluator_digest": "task-os-graph-v1"}
+
+            def tasks(self, split="selection", seed=0):
+                return [{
+                    "id": f"{split}/{seed}/fresh-graph",
+                    "objective": "Solve one fresh task with the reusable graph",
+                    "inputs": {},
+                    "deliverables": [{"name": "result", "schema": {
+                        "type": "object", "required": ["answer"],
+                        "properties": {"answer": {"type": "integer"}},
+                    }}],
+                    "capabilities": [],
+                    "context": {"split": split, "split_role": split},
+                }]
+
+            def evaluate(self, task_ref, outputs, execution_view):
+                score = 1.0 if outputs["result"]["answer"] == 7 else 0.0
+                return {"status": "accepted", "accepted": True,
+                        "score_available": True, "score": score}
+
+        benchmark = FreshGraphBenchmark()
+        policy = PromotionPolicy(
+            min_quality_delta=0.5, max_cost_ratio=20.0,
+            monitor_min_score=0.5, monitor_min_success_rate=1.0,
+        )
+        selection_plan = evolution.plan_pair(
+            candidate["id"], benchmark, split="selection",
+            split_role="selection", seed=11, policy=policy,
+            budget={"max_model_calls": 2, "max_completion_tokens": 6000,
+                    "max_tool_calls": 0, "max_nodes": 20},
+        )
+        trial = evolution.run_pair(selection_plan["id"], benchmark)
+        decision = evolution.assess(trial["id"])
+        assert decision["eligible"] is True, decision["gates"]
+        assert decision["measurements"]["parent"]["quality"] == 0.0
+        assert decision["measurements"]["candidate"]["quality"] == 1.0
+        assert len(decision["loaded_evidence"]) == 1
+        assert {row["component_id"]
+                for row in decision["loaded_evidence"][0]["members"]} == set(
+                    adoption["component_ids"])
+        assert all(row["loaded"] is True for row in decision["loaded_evidence"])
+
+        monitor_plan = evolution.plan_monitor(
+            candidate["id"], benchmark, split="guard", seed=13,
+            budget={"max_model_calls": 2, "max_completion_tokens": 6000,
+                    "max_tool_calls": 0, "max_nodes": 20},
+        )
+        promoted = evolution.promote(
+            candidate["id"], decision["id"], monitor_plan_id=monitor_plan["id"])
+        assert promoted["revision"] == 1
+        assert promoted["package_id"] == candidate["package_id"]
+        guard = evolution.run_monitor("task-os", benchmark)
+        monitored = evolution.monitor("task-os", guard["episode_ids"])
+        assert monitored["degraded"] is False
+        assert all(report["loaded_evidence"]["loaded"] is True
+                   for report in guard["reports"])
+
+        reuse = tasks.create(
+            "Solve a new ordinary task through the promoted graph",
+            deliverables=[{"name": "result", "schema": {
+                "type": "object", "required": ["answer"],
+                "properties": {"answer": {"type": "integer"}},
+            }}],
+            package_channel="task-os",
+            budget={"max_model_calls": 2, "max_completion_tokens": 6000,
+                    "max_tool_calls": 0, "max_nodes": 20},
+        )
+        reuse = tasks.run(reuse["id"])
+        assert reuse["status"] == "completed", reuse.get("last_error")
+        assert reuse["package_id"] == candidate["package_id"]
+        assert reuse["task"]["context"]["package_channel_registration"][
+            "revision"] == 1
+        assert tasks.store.read(reuse["output_refs"]["result"], reuse["id"])[
+            "content"] == {"answer": 7}
