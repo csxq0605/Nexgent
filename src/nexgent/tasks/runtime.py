@@ -1814,9 +1814,10 @@ class TaskService:
                         seen_activations.add(marker)
                         activations.append(evidence)
                 execution["execution"]["activated_components"] = activations
-                execution["execution"]["loaded_modules"] = sorted(set(
-                    execution["execution"].get("loaded_modules", []))
-                    | {item["source_path"] for item in activations})
+                execution["execution"]["loaded_modules"] = list(dict.fromkeys([
+                    *execution["execution"].get("loaded_modules", []),
+                    *(item["source_path"] for item in activations),
+                ]))
                 self._complete(identity, execution)
             except InterruptedError as exc:
                 self._change(identity, lambda s: s.update(
@@ -2622,6 +2623,7 @@ class TaskService:
                         "max_tokens": repair_tokens,
                     }, f"{path}/repair/{repair_path}", stop_event, notify)
 
+            from .self_orchestration_seed import available_operators_for_authority
             task_spec = deepcopy(state["task"])
             task_spec.pop("inputs", None)
             task_spec.update(
@@ -2631,6 +2633,8 @@ class TaskService:
                     state["memory_snapshot_id"], identity),
                 skills=deepcopy(package["manifest"].get("skills", {})),
                 available_skills=_available_skill_inventory(package),
+                available_operators=available_operators_for_authority(
+                    state["task"].get("capability_authority")),
             )
             compiled = compile_with_task_skill_repair(
                 task_spec=task_spec,

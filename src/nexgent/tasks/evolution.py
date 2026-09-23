@@ -135,7 +135,7 @@ def _loaded_evidence(component, execution, package):
         and row.get("package_digest") == package["digest"]
         and row.get("source_path") in component["files"]
     ]
-    return {"component_id": component["component_id"],
+    result = {"component_id": component["component_id"],
             "class": component["class"], "kind": component["kind"],
             "ref": component["ref"], "expected_files": list(component["files"]),
             "expected_file_digests": expected_digests,
@@ -144,12 +144,14 @@ def _loaded_evidence(component, execution, package):
             "loaded_modules_digest": digest(loaded_modules),
             "expected_package_digest": package["digest"],
             "loaded_package_digest": (execution or {}).get("package_digest"),
-            "activation_required": activation_required,
-            "activation_matches": len(activation_matches),
             "loaded": (bool(component["files"])
                        and len(actual) == len(component["files"])
                        and loaded_digests == expected_digests and package_loaded
                        and (not activation_required or bool(activation_matches)))}
+    if activation_required:
+        result["activation_required"] = True
+        result["activation_matches"] = len(activation_matches)
+    return result
 
 
 @dataclass(frozen=True)
