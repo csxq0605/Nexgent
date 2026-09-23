@@ -46,7 +46,7 @@ def bounded_value(value, budget, depth=0, item_limit=12):
         projected = {}
         priority = [
             'kind', 'objective', 'contract', 'deliverables', 'constraints',
-            'tools', 'skills', 'input_refs', 'inspected_inputs', 'context',
+            'tools', 'services', 'skills', 'input_refs', 'inspected_inputs', 'context',
             'memory_snapshot', 'action_protocol',
             'request', 'method', 'params', 'ok', 'result', 'error', 'id', 'name',
             'content_digest', 'schema_ref', 'validation', 'approved', 'findings',
@@ -94,7 +94,7 @@ def request_view(request, budget):
                 compact['params'][key] = bounded_value(params[key], budget, 2)
         compact['params']['content_omitted'] = True
         return compact
-    if method == 'develop_tool' and isinstance(params, dict):
+    if method in ('develop_tool', 'develop_service') and isinstance(params, dict):
         proposal = params.get('proposal')
         compact = {'method': method, 'params': {'proposal': {}}}
         if isinstance(proposal, dict):
@@ -199,6 +199,10 @@ def task_view(task):
             'effect_class': tool.get('effect_class'),
             'input_schema': tool.get('input_schema', {}),
         }, budget, item_limit=1000))
+    if task.get('services') is not None:
+        projected['services'] = bounded_value(
+            task['services'], budget, item_limit=1000
+        )
     projected['skills'] = bounded_value(task.get('skills', {}), budget, item_limit=1000)
     projected['memory_snapshot'] = bounded_value(
         task.get('memory_snapshot', {}), budget, item_limit=1000)
@@ -222,6 +226,16 @@ def capability_development_view(authority):
         return None
     # This is the model-facing authority summary.  Credential handles,
     # content digests, and other host identity fields stay out of prompts.
+    kinds = authority.get('allowed_kinds', [])
+    effects = authority.get('allowed_effects', [])
+    actions = []
+    if 'tool' in kinds and 'local_compute' in effects:
+        actions.append('develop_tool')
+    if 'service_provider' in kinds and 'model_context' in effects:
+        actions.extend([
+            'develop_service', 'activate_service', 'release_service'
+        ])
+    actions.append('capability_inventory')
     return {
         'enabled': True,
         'runtime': authority.get('runtime'),
@@ -230,7 +244,7 @@ def capability_development_view(authority):
         'allowed_operations': authority.get('allowed_operations', []),
         'max_definitions': authority.get('max_definitions'),
         'max_invocations': authority.get('max_invocations'),
-        'actions': ['develop_tool', 'capability_inventory'],
+        'actions': actions,
     }
 
 
@@ -239,6 +253,12 @@ def refresh_capability_inventory(task, inventory):
             or not isinstance(inventory.get('tools'), list)):
         raise ValueError('Capability inventory returned an invalid envelope')
     task['tools'] = inventory['tools']
+    if 'services' in inventory:
+        if not isinstance(inventory['services'], dict):
+            raise ValueError('Capability service inventory must be an object')
+        task['services'] = inventory['services']
+    elif 'services' in task:
+        raise ValueError('Capability inventory omitted authorized services')
 
 
 def execute(payload, context):
@@ -249,13 +269,20 @@ def execute(payload, context):
         payload.get('capability_authority')
     )
     tools = payload.get('tools', [])
+    services = None
     if capability_development is not None:
-        development_protocol = context.resource(
-            'prompts/capability_development.md'
-        )
-        protocol = protocol + '\\n\\n' + development_protocol
+        actions = capability_development['actions']
+        if 'develop_tool' in actions:
+            protocol = protocol + '\\n\\n' + context.resource(
+                'prompts/capability_development.md'
+            )
+        if 'develop_service' in actions:
+            protocol = protocol + '\\n\\n' + context.resource(
+                'prompts/service_development.md'
+            )
         inventory = context.capability_inventory()
         tools = inventory.get('tools', [])
+        services = inventory.get('services')
     inspected_inputs = []
     for name, artifact_id in sorted(payload.get('input_refs', {}).items()):
         artifact = context.read_artifact(artifact_id)
@@ -275,6 +302,8 @@ def execute(payload, context):
     }
     if capability_development is not None:
         task['capability_development'] = capability_development
+    if services is not None:
+        task['services'] = services
     history = [{'kind': 'task_opened', 'input_artifacts': inspected_inputs}]
     projected_task = task_view(task)
     decision_prompt = task_prompt + '\\n\\n' + protocol
@@ -392,13 +421,17 @@ def execute(payload, context):
                 context.call('agent/actions.py:dispatch', {
                     'request': {'method': 'plan', 'params': {'plan': checked['plan']}},
                     'capability_development': capability_development is not None,
+                    'capability_actions': (capability_development or {}).get('actions', []),
                 })
             result = context.call('agent/actions.py:dispatch', {
                 'request': checked['request'],
                 'capability_development': capability_development is not None,
+                'capability_actions': (capability_development or {}).get('actions', []),
             })
             action_method = checked['request'].get('method')
-            if action_method == 'develop_tool':
+            if action_method in (
+                    'develop_tool', 'develop_service', 'activate_service',
+                    'release_service'):
                 inventory = context.capability_inventory()
                 refresh_capability_inventory(task, inventory)
                 projected_task = task_view(task)
@@ -540,13 +573,45 @@ ACTIONS_SOURCE = '''def dispatch(payload, context):
     if not isinstance(method, str) or not isinstance(params, dict):
         raise ValueError('Action request needs method text and params object')
     capability_development = payload.get('capability_development') is True
-    if method in ('develop_tool', 'capability_inventory') and not capability_development:
+    capability_actions = payload.get('capability_actions')
+    if not isinstance(capability_actions, list):
+        capability_actions = (
+            ['develop_tool', 'capability_inventory']
+            if capability_development else []
+        )
+    gated_actions = (
+        'develop_tool', 'develop_service', 'activate_service',
+        'release_service', 'capability_inventory'
+    )
+    if method in gated_actions and method not in capability_actions:
         raise ValueError('Capability development is unavailable for this Episode')
     if method == 'develop_tool':
         proposal = params.get('proposal')
         if not isinstance(proposal, dict):
             raise ValueError('develop_tool requires a proposal object')
         return context.develop_tool(proposal)
+    if method == 'develop_service':
+        proposal = params.get('proposal')
+        if not isinstance(proposal, dict):
+            raise ValueError('develop_service requires a proposal object')
+        return context.develop_service(proposal)
+    if method == 'activate_service':
+        if (set(params) != {'definition_id', 'expected_revision'}
+                or not isinstance(params.get('definition_id'), str)
+                or not isinstance(params.get('expected_revision'), int)
+                or isinstance(params.get('expected_revision'), bool)):
+            raise ValueError(
+                'activate_service requires definition_id and expected_revision'
+            )
+        return context.activate_service(
+            params['definition_id'], params['expected_revision']
+        )
+    if method == 'release_service':
+        if (set(params) != {'expected_revision'}
+                or not isinstance(params.get('expected_revision'), int)
+                or isinstance(params.get('expected_revision'), bool)):
+            raise ValueError('release_service requires expected_revision')
+        return context.release_service(params['expected_revision'])
     if method == 'capability_inventory':
         if params:
             raise ValueError('capability_inventory accepts empty params')
@@ -561,10 +626,14 @@ ACTIONS_SOURCE = '''def dispatch(payload, context):
         for item in requests:
             if not isinstance(item, dict) or not isinstance(item.get('method'), str) or not isinstance(item.get('params'), dict):
                 raise ValueError('Each parallel action needs method text and params object')
-            if item['method'] == 'develop_tool':
-                raise ValueError('develop_tool requires a serial decision point')
-            if (item['method'] == 'capability_inventory'
-                    and not capability_development):
+            if item['method'] in (
+                    'develop_tool', 'develop_service', 'activate_service',
+                    'release_service'):
+                raise ValueError(
+                    item['method'] + ' requires a serial decision point'
+                )
+            if (item['method'] in gated_actions
+                    and item['method'] not in capability_actions):
                 raise ValueError(
                     'Capability development is unavailable for this Episode'
                 )
@@ -607,7 +676,7 @@ PROTOCOL_PROMPT = """Decision protocol:
 Request one action:
 {"request": {"method": "tool|parallel|skill|delegate|read_artifact|publish|memory_search|remember|feedback", "params": {}}, "plan": {}}
 
-The optional `plan` is a bounded JSON object recorded by the host. Tool requests always use `{"method": "tool", "params": {"name": "installed.tool.name", "arguments": {...}}}`; never use an installed tool name as `method`. Publish requests use `{"method": "publish", "params": {"content": ..., "name": "declared_name"}}`; omit `schema` for a declared deliverable because the host applies its contract. Parallel requests use `{"requests": [{"method": ..., "params": ...}]}`.
+The method may be one of the core actions above or an action explicitly listed in `task.capability_development.actions`. The optional `plan` is a bounded JSON object recorded by the host. Tool requests always use `{"method": "tool", "params": {"name": "installed.tool.name", "arguments": {...}}}`; never use an installed tool name as `method`. Publish requests use `{"method": "publish", "params": {"content": ..., "name": "declared_name"}}`; omit `schema` for a declared deliverable because the host applies its contract. Parallel requests use `{"requests": [{"method": ..., "params": ...}]}`.
 
 Finish only after publication:
 {"done": {"deliverables": {"declared_name": "artifact-..."}, "summary": "...", "limitations": ["..."]}}
@@ -625,6 +694,21 @@ After successful development the host refreshes `task.tools` for the next decisi
 {"request": {"method": "capability_inventory", "params": {}}}
 
 The observation history omits previously submitted source text while retaining its name, description, and schemas. Invoke a developed tool through the ordinary `tool` action after its schema appears in `task.tools`.
+"""
+
+
+SERVICE_DEVELOPMENT_PROMPT = """Task-time service development is enabled for this Episode under the bounded authority summarized in `task.capability_development`.
+
+The `model_context.v1` slot can host one task-local pure provider. It transforms only the JSON payload visible to subsequent model calls; it cannot change prompts, roles, providers, budgets, tools, or host state. Create a missing provider at a serial decision point with:
+{"request": {"method": "develop_service", "params": {"proposal": {"name": "context.logical_name", "description": "how the provider improves model-visible context", "source": "def provide(payload, context):\\n    visible = payload['payload'].copy()\\n    visible['guidance'] = '...derived task guidance...'\\n    return {'payload': visible, 'annotations': {'purpose': '...'}}\\n"}}}}
+
+The source must define exactly `provide(payload, context)`, use no imports or `context`, and return exactly `payload` plus an `annotations` object. Development stages an immutable Definition but does not activate it. Read the returned `definition_id`, then compare-and-swap the single slot using the current revision in `task.services.model_context.v1`:
+{"request": {"method": "activate_service", "params": {"definition_id": "service-definition-...", "expected_revision": 0}}}
+
+After activation, the host refreshes `task.services`; every later model call in this Episode, including task decisions and delivery review, passes through that exact provider version. To deactivate the current provider, use its current revision:
+{"request": {"method": "release_service", "params": {"expected_revision": 1}}}
+
+All lifecycle actions are serial. Use `capability_inventory` with empty params to refresh both tool and service state. The observation history omits submitted service source while retaining its name and description. Develop and activate a provider only when changing model-visible context is justified by the task and can be checked through later evidence.
 """
 
 
@@ -665,6 +749,7 @@ def default_package():
         "prompts/task.md": TASK_PROMPT,
         "prompts/protocol.md": PROTOCOL_PROMPT,
         "prompts/capability_development.md": CAPABILITY_DEVELOPMENT_PROMPT,
+        "prompts/service_development.md": SERVICE_DEVELOPMENT_PROMPT,
         "prompts/analyze.md": ANALYZE_PROMPT,
         "prompts/review.md": REVIEW_PROMPT,
         "prompts/delivery_review.md": DELIVERY_REVIEW_PROMPT,
