@@ -705,6 +705,7 @@ class TaskService:
 
         state = self.store.get(identity)
         workflow_ref = [state.get("plan_workflow_ref") or initial_workflow_ref]
+        loaded_workflow_refs = {workflow_ref[0]}
         workflow = self._materialize_workflow(
             package, workflow_ref[0], state["capabilities"])
         if state.get("plan_execution") is None:
@@ -902,6 +903,7 @@ class TaskService:
                 reason_ref=rule.get("reason_ref"),
             )
             workflow_ref[0] = target_ref
+            loaded_workflow_refs.add(target_ref)
             return revised_workflow, revision
 
         def invoke(method, params, path):
@@ -946,10 +948,39 @@ class TaskService:
         )
         if result["status"] != "completed":
             raise ContractError(result.get("error") or "Executable plan did not complete")
+        plan_history = set(self.store.get(identity).get("plan_history_refs") or [])
+        for event in self.store.events(identity):
+            content = event.get("content") or {}
+            if (event.get("kind") in {"plan_committed", "plan_revised"}
+                    and content.get("plan_ref") in plan_history
+                    and content.get("workflow_ref") in package["manifest"]["workflows"]):
+                loaded_workflow_refs.add(content["workflow_ref"])
+        loaded_files = {
+            package["manifest"]["workflows"][ref]["ref"]
+            for ref in loaded_workflow_refs
+        }
+        for journal in self.store.rpc_under(identity, "plan/nodes/"):
+            request = journal.get("request") or {}
+            if (journal.get("status") != "completed"
+                    or request.get("package_digest") != package["digest"]):
+                continue
+            params = request.get("params") or {}
+            if request.get("method") == "ask":
+                role = package["manifest"]["roles"].get(params.get("role"))
+                if isinstance(role, dict) and role.get("prompt_ref"):
+                    loaded_files.add(role["prompt_ref"])
+            elif request.get("method") == "skill":
+                skill = package["manifest"].get("skills", {}).get(params.get("name"))
+                if isinstance(skill, dict):
+                    ref = skill["ref"]
+                    loaded_files.add(ref.split(":", 1)[0]
+                                     if skill["kind"] == "controlled_code" else ref)
         return {
             "value": result["outputs"],
             "execution": {
                 "kind": "executable_plan",
+                "package_digest": package["digest"],
+                "loaded_modules": sorted(loaded_files),
                 "plan_ref": result["plan_execution"].plan.ref,
                 "plan_revision": result["plan_execution"].plan.revision,
                 "workflow_ref": workflow_ref[0],

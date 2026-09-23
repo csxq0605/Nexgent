@@ -72,7 +72,9 @@ manifest v2 已登记 role/workflow/skill/O/M/S component；ExecutablePlan v1 �
 
 ### 2026-09-23 首个执行切面
 
-固定多角色 AgentPackage 和等调用量单角色包已作为领域无关基线实现；它们都通过同一 canonical benchmark 入口运行并由宿主独立评分。[公开 BBH development 单题资格运行](../../experiments/orchestration_qualification/RESULTS.md)中，MiMo v2.6-flash 的多角色包完成了 3 次模型调用、交接和交付，但得 0 分；单角色 3 次调用得 1 分。它证明“实际运行”路径，不支持多智能体收益，也**尚未实现**本文件的 PackagePatch v3、M-only/完整进化臂或统计对照。
+固定多角色 AgentPackage 和等调用量单角色包已作为领域无关基线实现；它们都通过同一 canonical benchmark 入口运行并由宿主独立评分。[公开 BBH development 单题资格运行](../../experiments/orchestration_qualification/RESULTS.md)中，MiMo v2.6-flash 的多角色包完成了 3 次模型调用、交接和交付，但得 0 分；单角色 3 次调用得 1 分。它证明“实际运行”路径，不支持多智能体收益。
+
+`package_patch_v3.py` 现有一个宿主侧整包构造器，定向合同测试证明 O/S 的多组件 add/replace/remove 可在一个不可变 child 中重建、实际执行，并拒绝越权、悬挂引用和部分声明。workflow 执行收据也开始记录实际加载的 workflow/role/skill 文件摘要所需路径。**尚未完成**的是把 PackagePatch v3 接入 R0 真实生成、候选入库、逐组件选择/guard、M-only/完整进化臂和统计对照；因此目前不能称为端到端复合 RSI。
 
 ## 研究依据与限度
 
