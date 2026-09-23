@@ -67,6 +67,9 @@ class EpisodeStore:
                     package_id TEXT NOT NULL, root_id TEXT NOT NULL,
                     creator_episode TEXT NOT NULL, created REAL NOT NULL,
                     PRIMARY KEY(package_id,root_id));
+                CREATE TABLE IF NOT EXISTS task_capability_leases(
+                    episode TEXT NOT NULL, name TEXT NOT NULL, data TEXT NOT NULL,
+                    PRIMARY KEY(episode,name));
                 CREATE TABLE IF NOT EXISTS task_events(
                     episode TEXT, sequence INTEGER, kind TEXT, created REAL,
                     data TEXT, previous TEXT, digest TEXT,
@@ -457,6 +460,92 @@ class EpisodeStore:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             return self._event(db, episode_id, kind, data)
+
+    def capability_lease(self, episode_id, name):
+        with self.connect() as db:
+            self._get(db, episode_id)
+            row = db.execute(
+                "SELECT data FROM task_capability_leases WHERE episode=? AND name=?",
+                (episode_id, name)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def capability_leases(self, episode_id, *, active_only=False):
+        with self.connect() as db:
+            self._get(db, episode_id)
+            rows = db.execute(
+                "SELECT data FROM task_capability_leases WHERE episode=? ORDER BY name",
+                (episode_id,)).fetchall()
+        leases = [json.loads(row[0]) for row in rows]
+        return [row for row in leases if row["status"] == "active"] if active_only else leases
+
+    def mount_capability(self, episode_id, descriptor, *, expected_revision=None):
+        """Atomically grant a frozen host tool inside an immutable Episode ceiling."""
+        if (not isinstance(descriptor, dict) or not isinstance(descriptor.get("name"), str)
+                or not descriptor["name"] or descriptor.get("digest") != _digest(
+                    {key: value for key, value in descriptor.items() if key != "digest"})):
+            raise ValueError("Capability descriptor identity is invalid")
+        name = descriptor["name"]
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            state = self._get(db, episode_id)
+            if state["task"].get("capability_mode") != "leased":
+                raise PermissionError("Episode does not use capability leases")
+            if state["status"] not in {"ready", "paused", "waiting_input"}:
+                raise PermissionError("Capability leases change only while an Episode is stopped")
+            if name not in state["capabilities"]:
+                raise PermissionError("Capability is outside the Episode's frozen ceiling")
+            row = db.execute(
+                "SELECT data FROM task_capability_leases WHERE episode=? AND name=?",
+                (episode_id, name)).fetchone()
+            previous = json.loads(row[0]) if row else None
+            if previous is not None:
+                if previous["descriptor"] != descriptor:
+                    raise PermissionError("Cannot rebind a frozen capability lease")
+                if previous["status"] == "active":
+                    if expected_revision is not None and expected_revision != previous["revision"]:
+                        raise StateConflict("Capability lease revision changed")
+                    return previous
+                if expected_revision != previous["revision"]:
+                    raise StateConflict("Capability lease revision changed")
+            elif expected_revision is not None:
+                raise StateConflict("Capability lease does not have the expected revision")
+            now = time.time()
+            record = {"episode_id": episode_id, "name": name, "status": "active",
+                      "revision": previous["revision"] + 1 if previous else 1,
+                      "descriptor": deepcopy(descriptor),
+                      "created_at": previous["created_at"] if previous else now,
+                      "updated_at": now}
+            db.execute("INSERT OR REPLACE INTO task_capability_leases VALUES(?,?,?)",
+                       (episode_id, name, _json(record)))
+            self._event(db, episode_id, "capability_mounted",
+                        {"name": name, "revision": record["revision"],
+                         "descriptor_digest": descriptor["digest"]})
+            return record
+
+    def release_capability(self, episode_id, name, *, expected_revision):
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            state = self._get(db, episode_id)
+            if state["status"] not in {"ready", "paused", "waiting_input"}:
+                raise PermissionError("Capability leases change only while an Episode is stopped")
+            row = db.execute(
+                "SELECT data FROM task_capability_leases WHERE episode=? AND name=?",
+                (episode_id, name)).fetchone()
+            if row is None:
+                raise KeyError(name)
+            record = json.loads(row[0])
+            if record["revision"] != expected_revision:
+                raise StateConflict("Capability lease revision changed")
+            if record["status"] == "released":
+                return record
+            record.update(status="released", revision=record["revision"] + 1,
+                          updated_at=time.time())
+            db.execute("UPDATE task_capability_leases SET data=? WHERE episode=? AND name=?",
+                       (_json(record), episode_id, name))
+            self._event(db, episode_id, "capability_released",
+                        {"name": name, "revision": record["revision"],
+                         "descriptor_digest": record["descriptor"]["digest"]})
+            return record
 
     def events(self, episode_id):
         with self.connect() as db:

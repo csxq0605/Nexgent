@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from importlib.metadata import entry_points
+import hashlib
 import json
 import re
 from typing import Callable
@@ -162,6 +163,9 @@ class ToolSpec:
     handler: Callable
     description: str = ""
     work_units_per_call: int = 0
+    provider_id: str = ""
+    provider_version: str = ""
+    handler_digest: str = ""
 
     def describe(self):
         return {"name": self.name, "description": self.description,
@@ -198,6 +202,29 @@ class ToolRegistry:
     def describe(self, allowed=None):
         names = sorted(self._tools) if allowed is None else allowed
         return [self.get(name).describe() for name in names]
+
+    def lease_descriptor(self, name):
+        """Freeze a trusted host tool's implementation identity for one Episode."""
+        tool = self.get(name)
+        if (not tool.provider_id or not tool.provider_version
+                or not re.fullmatch(r"[0-9a-f]{64}", tool.handler_digest)):
+            raise ContractError("Leased tools require a provider, version and handler SHA-256")
+        descriptor = {**tool.describe(), "provider_id": tool.provider_id,
+                      "provider_version": tool.provider_version,
+                      "handler_digest": tool.handler_digest}
+        encoded = json.dumps(descriptor, ensure_ascii=False, sort_keys=True,
+                             separators=(",", ":"), allow_nan=False).encode("utf-8")
+        descriptor["digest"] = hashlib.sha256(encoded).hexdigest()
+        return descriptor
+
+    def resolve_lease(self, record):
+        """Fail closed if the installed tool differs from a durable lease."""
+        if not isinstance(record, dict) or record.get("status") != "active":
+            raise ContractError("Capability lease is not active")
+        descriptor = self.lease_descriptor(record["name"])
+        if descriptor != record.get("descriptor"):
+            raise ContractError("Installed tool differs from the frozen capability lease")
+        return self.get(record["name"])
 
     @classmethod
     def discover(cls):
