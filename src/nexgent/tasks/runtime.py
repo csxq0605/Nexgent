@@ -22,12 +22,15 @@ from .benchmarks import (
 )
 from .outcomes import classify_benchmark_outcome
 from .package_runner import CapabilityAbort, run_package
-from .packages import CAPABILITIES, PackageError, verify_package
+from .packages import CAPABILITIES, PackageError, split_ref, verify_package
 from .store import EpisodeStore, RecoveryRequired, StateConflict
 from .tools import ContractError, ToolRegistry, task_benchmarks, validate
 
 
-_EFFECT_CLASSES = frozenset({"read", "artifact_write", "local_compute", "external_compute"})
+_EFFECT_CLASSES = frozenset({
+    "read", "artifact_write", "local_compute", "external_compute",
+    "model_context",
+})
 _DELEGATED_PUBLIC_CONTEXT_FIELDS = frozenset({
     "memory_namespace", "split", "split_role", "memory_writeback", "rsi_role",
 })
@@ -106,6 +109,55 @@ def _available_skill_inventory(package):
             "output_schema": deepcopy(skill.get("output_schema", {})),
         })
     return inventory
+
+
+def _package_capability_binding(package, kind, name):
+    """Return the unique immutable S-component binding for a package capability."""
+    registry_name = "tools" if kind == "tool" else "services"
+    declaration = package["manifest"].get(registry_name, {}).get(name)
+    if not isinstance(declaration, dict):
+        return None
+    matches = [
+        component_id
+        for component_id, component in package["manifest"].get(
+            "components", {}).items()
+        if component == {"class": "S", "kind": kind, "ref": name}
+    ]
+    if len(matches) != 1:
+        raise ContractError(
+            f"AgentPackage {kind} {name!r} needs exactly one S component")
+    source_path, _ = split_ref(declaration["ref"], package["files"])
+    return {
+        "scope": "agent_package",
+        "kind": kind,
+        "name": name,
+        "package_id": package["id"],
+        "package_digest": package["digest"],
+        "component_id": matches[0],
+        "declaration_digest": digest(declaration),
+        "source_path": source_path,
+        "source_digest": package["component_digests"][source_path],
+    }
+
+
+def _package_tool_inventory(package):
+    result = []
+    for name, declaration in sorted(
+            package["manifest"].get("tools", {}).items()):
+        binding = _package_capability_binding(package, "tool", name)
+        result.append({
+            "name": name,
+            "description": declaration["description"],
+            "input_schema": deepcopy(declaration["input_schema"]),
+            "output_schema": deepcopy(declaration["output_schema"]),
+            "effect_class": declaration["effect_class"],
+            "work_units_per_call": declaration["work_units_per_call"],
+            "source": "agent_package",
+            "component_ref": binding["component_id"],
+            "package_digest": binding["package_digest"],
+            "declaration_digest": binding["declaration_digest"],
+        })
+    return result
 
 
 def _capability_failure_domain(method, exc):
@@ -272,6 +324,13 @@ class TaskService:
         elif expected_package_registration is not None:
             raise ContractError("Expected package registration requires a package channel")
         verify_package(package)
+        package_tool_names = set(package["manifest"].get("tools", {}))
+        installed_tool_names = {item["name"] for item in self.tools.describe()}
+        collisions = sorted(package_tool_names & installed_tool_names)
+        if collisions:
+            raise ContractError(
+                "AgentPackage tools shadow installed capabilities: "
+                + ", ".join(collisions))
         memory_registration = None
         frozen_memory_version = None
         if _memory_candidate is not None:
@@ -508,33 +567,49 @@ class TaskService:
                 "input_schema": deepcopy(definition["input_schema"]),
                 "output_schema": deepcopy(definition["output_schema"]),
                 "effect_class": definition["effect_class"], "work_units_per_call": 0,
+                "source": "episode_definition",
                 "definition_id": definition["id"], "definition_digest": definition["digest"],
                 "instance_revision": instance["revision"],
             })
         return result
 
-    def _service_inventory(self, identity):
+    def _service_inventory(self, identity, package):
         from .capability_authority import require_definition_authorized
         authority = self.store.get(identity)["task"].get("capability_authority")
+        instance = self.store.service_instance(identity)
+        if instance is not None and instance["status"] == "active":
+            if authority is None:
+                raise ContractError("Service provider identity or authority changed")
+            definition = self.store.service_definition(instance["definition_id"])
+            if (instance["definition_digest"] != definition["digest"]
+                    or instance["authority_digest"] != authority["digest"]
+                    or definition["origin_episode_id"] != identity):
+                raise ContractError("Service provider identity or authority changed")
+            return {"model_context.v1": {
+                "status": instance["status"], "revision": instance["revision"],
+                "source": "episode_definition",
+                "definition_id": definition["id"], "definition_digest": definition["digest"],
+                "name": definition["name"], "description": definition["description"],
+            }}
+        binding = _package_capability_binding(
+            package, "service_provider", "model_context.v1")
+        if binding is not None:
+            declaration = package["manifest"]["services"]["model_context.v1"]
+            return {"model_context.v1": {
+                "status": "active", "source": "agent_package",
+                "name": declaration["name"], "description": declaration["description"],
+                "component_ref": binding["component_id"],
+                "package_digest": binding["package_digest"],
+                "declaration_digest": binding["declaration_digest"],
+            }}
         if authority is None:
             return None
         try:
             require_definition_authorized(authority, "service_provider", "model_context", [], [])
         except (PermissionError, ContractError):
             return None
-        instance = self.store.service_instance(identity)
-        if instance is None:
-            return {"model_context.v1": {"status": "empty", "revision": 0}}
-        definition = self.store.service_definition(instance["definition_id"])
-        if (instance["definition_digest"] != definition["digest"]
-                or instance["authority_digest"] != authority["digest"]
-                or definition["origin_episode_id"] != identity):
-            raise ContractError("Service provider identity or authority changed")
-        return {"model_context.v1": {
-            "status": instance["status"], "revision": instance["revision"],
-            "definition_id": definition["id"], "definition_digest": definition["digest"],
-            "name": definition["name"], "description": definition["description"],
-        }}
+        revision = 0 if instance is None else instance["revision"]
+        return {"model_context.v1": {"status": "empty", "revision": revision}}
 
     def list(self):
         return [self.get(state["id"]) for state in self.store.list() if not state["parent_episode_id"]]
@@ -894,6 +969,14 @@ class TaskService:
                         if not authority_grants("tool", "local_compute"):
                             raise PermissionError(
                                 "Workflow tool name binding requires tool-development authority")
+                    elif (isinstance(tool_name, str)
+                          and tool_name in manifest.get("tools", {})):
+                        binding = _package_capability_binding(
+                            package, "tool", tool_name)
+                        if (role_ref is not None
+                                or component_ref != binding["component_id"]):
+                            raise ContractError(
+                                "Workflow package tool requires its matching S component_ref")
                     elif not isinstance(tool_name, str) or tool_name not in capability_lease:
                         raise PermissionError(
                             "Workflow tool operator must resolve to the Episode capability lease")
@@ -918,10 +1001,14 @@ class TaskService:
                             "Workflow skill nodes require an explicit matching skill component_ref")
                 if (method in {"join", "loop"} and (role_ref is not None or component_ref is not None)):
                     raise ContractError("Local workflow nodes cannot declare role_ref or component_ref")
+                package_tool_component = (
+                    method == "tool" and isinstance(params, dict)
+                    and params.get("name") in manifest.get("tools", {}))
                 if (method not in {"ask", "skill", "join", "loop"}
                         and role_ref is None and component_ref is not None):
-                    raise ContractError(
-                        f"Workflow {method} nodes cannot declare component_ref without role_ref")
+                    if not package_tool_component:
+                        raise ContractError(
+                            f"Workflow {method} nodes cannot declare component_ref without role_ref")
                 if method == "loop":
                     if not isinstance(node.get("body"), dict):
                         raise ContractError("Loop body must be a workflow")
@@ -1648,15 +1735,16 @@ class TaskService:
                 # deriving the inventory from current leases.
                 payload["tools"] = self.tools.describe(
                     [lease["name"] for lease in active_leases])
+            payload["tools"] = payload["tools"] + _package_tool_inventory(package)
             if state["task"].get("capability_authority") is not None:
                 payload["tools"] = payload["tools"] + self._dynamic_inventory(identity)
-                services = self._service_inventory(identity)
-                if services is not None:
-                    payload["services"] = services
-                    # Binding paths are dot-separated, so the dotted service
-                    # interface key needs a separate path-safe projection.
-                    payload["model_context_service"] = deepcopy(
-                        services["model_context.v1"])
+            services = self._service_inventory(identity, package)
+            if services is not None:
+                payload["services"] = services
+                # Binding paths are dot-separated, so the dotted service
+                # interface key needs a separate path-safe projection.
+                payload["model_context_service"] = deepcopy(
+                    services["model_context.v1"])
             from .self_orchestration_seed import available_operators_for_authority
             payload["available_operators"] = available_operators_for_authority(
                 state["task"].get("capability_authority"))
@@ -1708,6 +1796,27 @@ class TaskService:
                     execution = self._run_workflow_orchestrator(
                         identity, package, workflow_orchestrator[0],
                         workflow_orchestrator[1], payload, stop_event, notify)
+                activations = []
+                seen_activations = set()
+                for event in self.store.events(identity):
+                    if event.get("kind") != "package_capability_activated":
+                        continue
+                    content = event.get("content") or {}
+                    evidence = {
+                        key: content.get(key) for key in (
+                            "component_id", "kind", "package_digest", "source_path")
+                    }
+                    marker = tuple(evidence.values())
+                    if (evidence["package_digest"] == package["digest"]
+                            and all(isinstance(value, str) and value
+                                    for value in evidence.values())
+                            and marker not in seen_activations):
+                        seen_activations.add(marker)
+                        activations.append(evidence)
+                execution["execution"]["activated_components"] = activations
+                execution["execution"]["loaded_modules"] = sorted(set(
+                    execution["execution"].get("loaded_modules", []))
+                    | {item["source_path"] for item in activations})
                 self._complete(identity, execution)
             except InterruptedError as exc:
                 self._change(identity, lambda s: s.update(
@@ -1905,10 +2014,11 @@ class TaskService:
         finally:
             notify()
 
-    def _ask(self, identity, path, params, stop_event, notify):
+    def _ask(self, identity, package, path, params, stop_event, notify):
         state = self.store.get(identity)
         params = deepcopy(params)
         service_binding = None
+        package_service_binding = None
         instance = self.store.service_instance(identity)
         if instance is not None and instance["status"] == "active":
             from .capability_authority import require_definition_authorized
@@ -1975,6 +2085,71 @@ class TaskService:
                     "error": f"{type(exc).__name__}: {str(exc)[:1000]}",
                 })
                 raise
+        else:
+            declaration = package["manifest"].get(
+                "services", {}).get("model_context.v1")
+            if isinstance(declaration, dict):
+                from .packages import (
+                    MODEL_CONTEXT_INPUT_SCHEMA, MODEL_CONTEXT_OUTPUT_SCHEMA,
+                )
+                package_service_binding = _package_capability_binding(
+                    package, "service_provider", "model_context.v1")
+                service_binding = package_service_binding
+                request = {
+                    "schema": "nexgent.model-context-request.v1",
+                    "role": params["role"], "node_id": path,
+                    "payload": params.get("payload"),
+                }
+                validate(request, MODEL_CONTEXT_INPUT_SCHEMA,
+                         label="model-context service input",
+                         allow_artifact_refs=False)
+                self.store.reserve_package_service_application(
+                    identity, path, package_service_binding)
+                started = time.monotonic()
+                try:
+                    instruction_limit = 200_000
+                    execution = run_package(
+                        package, "service:model_context.v1", request,
+                        handle=None, stop_event=stop_event, timeout=120, max_rpc=0,
+                        max_instructions=instruction_limit)
+                    output = execution["value"]
+                    validate(output, MODEL_CONTEXT_OUTPUT_SCHEMA,
+                             label="model-context service output",
+                             allow_artifact_refs=False)
+                    transformed = _json_copy(
+                        output["payload"], label="Model-context payload")
+                    original = request["payload"]
+                    if type(original) is dict:
+                        if type(transformed) is not dict or any(
+                                key not in transformed or transformed[key] != value
+                                for key, value in original.items()):
+                            raise ContractError(
+                                "Model-context service must preserve existing payload fields")
+                    if len(json.dumps(
+                            output, ensure_ascii=False, allow_nan=False)) > 240000:
+                        raise ContractError(
+                            "Model-context service output exceeds model input limit")
+                    self.store.event(identity, "service_applied", {
+                        "node_id": path, "binding": package_service_binding,
+                        "package_id": package["id"],
+                        "package_digest": package["digest"],
+                        "component_id": package_service_binding["component_id"],
+                        "input_digest": digest(request),
+                        "output_digest": digest(output),
+                        "annotations": output["annotations"],
+                        "worker_instruction_limit": instruction_limit,
+                        "worker_execution": execution["execution"],
+                        "elapsed_seconds": time.monotonic() - started,
+                    })
+                    params["payload"] = transformed
+                except BaseException as exc:
+                    self.store.settle_package_service_application(
+                        identity, path, status="failed")
+                    self.store.event(identity, "service_application_failed", {
+                        "node_id": path, "binding": package_service_binding,
+                        "error": f"{type(exc).__name__}: {str(exc)[:1000]}",
+                    })
+                    raise
         def reserve(receipt):
             receipt.update(episode_id=identity, node_id=path, package_digest=state["package_digest"])
             if service_binding is not None:
@@ -1982,13 +2157,31 @@ class TaskService:
                 receipt["effective_payload_digest"] = digest(params["payload"])
             self.store.reserve_model(state["root_episode_id"], receipt)
             notify()
-        gateway = (self.gateway_factory(reserve, stop_event) if self.gateway_factory else
-                   ModelGateway(self.project_root, reserve=reserve, stop_event=stop_event, max_completion_tokens=6000))
         try:
-            return gateway.ask(**params)
+            gateway = (self.gateway_factory(reserve, stop_event) if self.gateway_factory else
+                       ModelGateway(self.project_root, reserve=reserve,
+                                    stop_event=stop_event, max_completion_tokens=6000))
+            result = gateway.ask(**params)
+            if package_service_binding is not None:
+                self.store.settle_package_service_application(
+                    identity, path, status="completed")
+                self.store.event(identity, "package_capability_activated", {
+                    "component_id": package_service_binding["component_id"],
+                    "kind": "service_provider",
+                    "package_digest": package_service_binding["package_digest"],
+                    "source_path": package_service_binding["source_path"],
+                    "node_id": path,
+                })
+            return result
         except CapabilityAbort:
+            if package_service_binding is not None:
+                self.store.settle_package_service_application(
+                    identity, path, status="failed")
             raise
         except Exception as exc:
+            if package_service_binding is not None:
+                self.store.settle_package_service_application(
+                    identity, path, status="failed")
             # A provider/configuration failure remains fatal even when the call
             # originated inside a skill or workflow action. Asking the model to
             # repair its own unavailable provider would hide the real failure.
@@ -2058,9 +2251,80 @@ class TaskService:
             raise failure
         return result
 
+    def _invoke_package_tool(self, identity, package, name, arguments, path,
+                             stop_event):
+        """Execute one promoted immutable S tool under the root budgets."""
+        from .tools import validate_tool_input
+        declaration = package["manifest"].get("tools", {}).get(name)
+        binding = _package_capability_binding(package, "tool", name)
+        if not isinstance(declaration, dict) or binding is None:
+            raise PermissionError(f"AgentPackage tool is not registered: {name}")
+        state = self.store.get(identity)
+        allowed = state["task"].get("constraints", {}).get("allowed_effects")
+        if allowed is not None and declaration["effect_class"] not in allowed:
+            raise PermissionError(
+                f"Tool effect {declaration['effect_class']!r} is not allowed by this task")
+        validate_tool_input(
+            arguments, declaration["input_schema"],
+            artifact_resolver=lambda ref: self.store.read(ref, identity),
+            label=name + " input")
+        self.store.reserve_tool(
+            identity, path,
+            {"name": name, "arguments": deepcopy(arguments),
+             "package_capability": deepcopy(binding)},
+            reserved_work_units=declaration["work_units_per_call"])
+        receipt = {
+            "call_id": identity + "/" + path, "episode_id": identity,
+            "name": name, "arguments": deepcopy(arguments),
+            "package_capability": deepcopy(binding),
+            "status": "started", "started_at": time.time(),
+            "work_reservation": {
+                "schema": "nexgent.tool-work.v1",
+                "reserved_work_units": declaration["work_units_per_call"],
+            },
+        }
+        started = time.monotonic()
+        result, failure = None, None
+        try:
+            instruction_limit = 200_000
+            execution = run_package(
+                package, "tool:" + name, arguments,
+                handle=None, stop_event=stop_event, timeout=120, max_rpc=0,
+                max_instructions=instruction_limit)
+            result = execution["value"]
+            validate(result, declaration["output_schema"], label=name + " output",
+                     allow_artifact_refs=False)
+            instructions = execution["execution"]["instructions"]
+            if instructions:
+                self.store.add_tool_work(identity, path, instructions)
+            receipt.update(
+                status="completed", result=deepcopy(result),
+                execution=execution["execution"],
+                worker_instruction_limit=instruction_limit,
+                worker_instructions=instructions)
+        except BaseException as exc:
+            failure = exc
+            receipt.update(
+                status="failed", error=f"{type(exc).__name__}: {str(exc)[:1000]}")
+        finally:
+            accounting = self.store.settle_tool(
+                identity, path, status="completed" if failure is None else "failed")
+            receipt["work_accounting"] = accounting
+            receipt.update(
+                finished_at=time.time(), elapsed_seconds=time.monotonic() - started)
+            self.store.event(identity, "tool", receipt)
+        if failure is not None:
+            raise failure
+        self.store.event(identity, "package_capability_activated", {
+            "component_id": binding["component_id"], "kind": "tool",
+            "package_digest": binding["package_digest"],
+            "source_path": binding["source_path"], "node_id": path,
+        })
+        return result
+
     def _invoke(self, identity, package, method, params, path, stop_event, notify):
         if method == "ask":
-            return self._ask(identity, path, params, stop_event, notify)
+            return self._ask(identity, package, path, params, stop_event, notify)
         if method == "capability_inventory":
             if params:
                 raise ContractError("Capability inventory accepts no arguments")
@@ -2072,8 +2336,9 @@ class TaskService:
                 installed = self.tools.describe([item["name"] for item in leases])
             else:
                 installed = self.tools.describe(state["capabilities"])
-            result = {"tools": installed + self._dynamic_inventory(identity)}
-            services = self._service_inventory(identity)
+            result = {"tools": installed + _package_tool_inventory(package)
+                      + self._dynamic_inventory(identity)}
+            services = self._service_inventory(identity, package)
             if services is not None:
                 result["services"] = services
             return result
@@ -2150,6 +2415,9 @@ class TaskService:
         if method == "tool":
             name, arguments = params["name"], params.get("arguments") or {}
             state = self.store.get(identity)
+            if name in package["manifest"].get("tools", {}):
+                return self._invoke_package_tool(
+                    identity, package, name, arguments, path, stop_event)
             dynamic = self.store.tool_instance(identity, name)
             if dynamic is not None:
                 return self._invoke_dynamic_tool(identity, name, arguments, path, stop_event)
@@ -2245,7 +2513,7 @@ class TaskService:
             kind = skill.get("kind")
             if kind == "prompt_protocol":
                 prompt = package["files"][skill["ref"]]
-                result = self._ask(identity, path, {"role": name, "prompt": prompt, "payload": payload,
+                result = self._ask(identity, package, path, {"role": name, "prompt": prompt, "payload": payload,
                     "max_tokens": skill.get("max_tokens", 3000)}, stop_event, notify)
             elif kind == "workflow":
                 from .workflows import run_workflow

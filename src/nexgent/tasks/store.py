@@ -575,6 +575,18 @@ class EpisodeStore:
                 raise BudgetExhausted("Episode tool-definition limit exhausted")
             if definition["name"] in episode["capabilities"]:
                 raise PermissionError("Task-authored tool cannot shadow an installed grant")
+            from .packages import verify_package
+            package_row = db.execute(
+                "SELECT data FROM task_packages WHERE id=?",
+                (episode["package_id"],),
+            ).fetchone()
+            if package_row is None:
+                raise PermissionError("Episode AgentPackage is absent")
+            episode_package = json.loads(package_row[0])
+            verify_package(episode_package)
+            if definition["name"] in episode_package["manifest"].get("tools", {}):
+                raise PermissionError(
+                    "Task-authored tool cannot shadow an AgentPackage tool")
             self._put_package_row(db, package)
             db.execute("INSERT OR IGNORE INTO task_skill_package_leases VALUES(?,?,?,?)",
                        (package["id"], episode["root_episode_id"], episode_id, time.time()))
@@ -943,9 +955,12 @@ class EpisodeStore:
                 (root_id,)).fetchone()[0]
             if root_tools + root_services >= root["budget"]["max_tool_calls"]:
                 raise BudgetExhausted("Root Episode capability-call budget exhausted")
-            used = db.execute(
-                "SELECT COUNT(*) FROM task_service_applications WHERE episode=?",
-                (episode_id,)).fetchone()[0]
+            used = sum(
+                1 for stored, in db.execute(
+                    "SELECT data FROM task_service_applications WHERE episode=?",
+                    (episode_id,))
+                if json.loads(stored).get("binding", {}).get("scope")
+                != "agent_package")
             for stored, in db.execute(
                     "SELECT data FROM task_resources WHERE episode=? AND kind='tool'",
                     (episode_id,)):
@@ -959,6 +974,130 @@ class EpisodeStore:
             db.execute("INSERT INTO task_service_applications VALUES(?,?,?)",
                        (episode_id, node_id, _json(record)))
             self._event(db, episode_id, "service_application_admitted", record)
+        return record
+
+    @staticmethod
+    def _checked_package_capability(db, episode, binding, *, kind, name):
+        """Verify a package capability receipt against the Episode package."""
+        from .packages import split_ref, verify_package
+
+        fields = {
+            "scope", "kind", "name", "package_id", "package_digest",
+            "component_id", "declaration_digest", "source_path", "source_digest",
+        }
+        if (not isinstance(binding, dict) or set(binding) != fields
+                or binding.get("scope") != "agent_package"
+                or binding.get("kind") != kind or binding.get("name") != name
+                or episode.get("package_id") != binding.get("package_id")
+                or episode.get("package_digest") != binding.get("package_digest")):
+            raise PermissionError("AgentPackage capability binding changed")
+        row = db.execute(
+            "SELECT digest,data FROM task_packages WHERE id=?",
+            (episode["package_id"],),
+        ).fetchone()
+        if row is None:
+            raise PermissionError("AgentPackage capability package is absent")
+        package = json.loads(row[1])
+        verify_package(package)
+        if row[0] != package["digest"] or package["digest"] != binding["package_digest"]:
+            raise PermissionError("AgentPackage capability package digest changed")
+        registry_name = "tools" if kind == "tool" else "services"
+        declaration = package["manifest"].get(registry_name, {}).get(name)
+        component = package["manifest"].get("components", {}).get(
+            binding["component_id"])
+        expected_component = {"class": "S", "kind": kind, "ref": name}
+        if not isinstance(declaration, dict) or component != expected_component:
+            raise PermissionError("AgentPackage capability component changed")
+        source_path, _ = split_ref(declaration["ref"], package["files"])
+        if (binding["declaration_digest"] != _digest(declaration)
+                or binding["source_path"] != source_path
+                or binding["source_digest"]
+                != package["component_digests"].get(source_path)):
+            raise PermissionError("AgentPackage capability declaration changed")
+        return declaration
+
+    def reserve_package_service_application(self, episode_id, node_id, binding):
+        """Admit one static AgentPackage model-context application."""
+        if not isinstance(node_id, str) or not node_id:
+            raise ValueError("Service application needs a stable model node")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            episode = self._get(db, episode_id)
+            declaration = self._checked_package_capability(
+                db, episode, binding, kind="service_provider",
+                name="model_context.v1")
+            allowed = episode["task"].get("constraints", {}).get("allowed_effects")
+            if allowed is not None and declaration["effect_class"] not in allowed:
+                raise PermissionError("Package service effect exceeds Episode constraints")
+            old = db.execute(
+                "SELECT data FROM task_service_applications WHERE episode=? AND node_id=?",
+                (episode_id, node_id),
+            ).fetchone()
+            if old:
+                record = json.loads(old[0])
+                if record.get("binding") != binding:
+                    raise StateConflict("Service application changes provider identity")
+                return record
+            root_id = episode["root_episode_id"]
+            root = self._get(db, root_id)
+            root_tools = db.execute(
+                "SELECT COUNT(*) FROM task_resources WHERE root_id=? AND kind='tool'",
+                (root_id,),
+            ).fetchone()[0]
+            root_services = db.execute(
+                "SELECT COUNT(*) FROM task_service_applications a "
+                "JOIN task_episodes e ON a.episode=e.id WHERE e.root_id=?",
+                (root_id,),
+            ).fetchone()[0]
+            if root_tools + root_services >= root["budget"]["max_tool_calls"]:
+                raise BudgetExhausted("Root Episode capability-call budget exhausted")
+            record = {
+                "episode_id": episode_id, "node_id": node_id,
+                "binding": deepcopy(binding), "status": "admitted",
+                "created_at": time.time(),
+            }
+            db.execute(
+                "INSERT INTO task_service_applications VALUES(?,?,?)",
+                (episode_id, node_id, _json(record)),
+            )
+            self._event(db, episode_id, "service_application_admitted", record)
+        return record
+
+    def settle_package_service_application(self, episode_id, node_id, *, status):
+        """Settle a package service only after its downstream model call."""
+        if status not in {"completed", "failed"}:
+            raise ValueError("Package service settlement status is invalid")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            episode = self._get(db, episode_id)
+            row = db.execute(
+                "SELECT data FROM task_service_applications WHERE episode=? AND node_id=?",
+                (episode_id, node_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(node_id)
+            record = json.loads(row[0])
+            binding = record.get("binding")
+            self._checked_package_capability(
+                db, episode, binding, kind="service_provider",
+                name="model_context.v1")
+            if record.get("status") in {"completed", "failed"}:
+                if record["status"] != status:
+                    raise ValueError(
+                        "Terminal package service settlement cannot change status")
+                return record
+            if record.get("status") != "admitted":
+                raise ValueError("Package service application status is invalid")
+            record["status"] = status
+            record["finished_at"] = time.time()
+            db.execute(
+                "UPDATE task_service_applications SET data=? "
+                "WHERE episode=? AND node_id=?",
+                (_json(record), episode_id, node_id),
+            )
+            self._event(db, episode_id, "service_application_" + status, {
+                "node_id": node_id, "binding": deepcopy(binding),
+            })
         return record
 
     @staticmethod
@@ -1193,6 +1332,9 @@ class EpisodeStore:
                 raise BudgetExhausted(f"Root Episode {kind} budget exhausted")
             if kind == "tool":
                 dynamic = data.get("dynamic_capability")
+                packaged = data.get("package_capability")
+                if dynamic is not None and packaged is not None:
+                    raise ValueError("Tool reservation has conflicting capability sources")
                 if dynamic is not None:
                     if (not isinstance(dynamic, dict)
                             or set(dynamic) != {"name", "definition_id", "definition_digest",
@@ -1218,11 +1360,27 @@ class EpisodeStore:
                             (episode_id,)):
                         if json.loads(stored).get("data", {}).get("dynamic_capability"):
                             count_dynamic += 1
-                    count_dynamic += db.execute(
-                        "SELECT COUNT(*) FROM task_service_applications WHERE episode=?",
-                        (episode_id,)).fetchone()[0]
+                    count_dynamic += sum(
+                        1 for stored, in db.execute(
+                            "SELECT data FROM task_service_applications WHERE episode=?",
+                            (episode_id,))
+                        if json.loads(stored).get("binding", {}).get("scope")
+                        != "agent_package")
                     if count_dynamic >= authority["max_invocations"]:
                         raise BudgetExhausted("Episode dynamic-tool invocation limit exhausted")
+                if packaged is not None:
+                    declaration = self._checked_package_capability(
+                        db, episode, packaged, kind="tool",
+                        name=packaged.get("name"))
+                    if data.get("name") != packaged["name"]:
+                        raise PermissionError(
+                            "AgentPackage tool reservation name changed")
+                    allowed = episode["task"].get(
+                        "constraints", {}).get("allowed_effects")
+                    if (allowed is not None
+                            and declaration["effect_class"] not in allowed):
+                        raise PermissionError(
+                            "Package tool effect exceeds Episode constraints")
                 accounting = data.get("work_accounting")
                 if (not isinstance(accounting, dict)
                         or accounting.get("schema") != "nexgent.tool-work.v1"

@@ -25,3 +25,5 @@ E0 前置改动：`EvolutionService.plan_pair/plan_monitor` 新增宿主授予�
 E1 新增[惰性 CapabilityRelease v1](../design/capability-release-v1.md)及 11 项来源／篡改测试。它从源 Definition 验证并冻结纯能力的源码、schema、interface 和 creator 谱系，但不具备部署权；与 DeepSeek 的作用域实现不同，此对象预备进入 Nexgent 的候选选择链，与 AutoSci/ADAS/AFlow 的可遗传行为候选作机制对照。目前它尚未进入 AgentPackage、配对评价或新任务，E 出口仍未通过。
 
 E2-A 将纯工具与 `model_context.v1` 服务列为 AgentPackage manifest v2 的 S 组件，PackagePatch v3 能声明对应新增／修改；Generation 与 Evolution 解析这些组件，并要求运行轨迹中同时有模块加载及组件激活收据。100 项定向测试通过。此处借鉴 [ADAS](https://arxiv.org/abs/2408.08435) 和 [AFlow](https://arxiv.org/abs/2410.10762) 的可执行候选思想，尚未证明候选在新任务实际运行、独立效果或晋升收益。下一步 E2-B 接入后续任务运行时，再做 E3 的任务来源候选与配对评价。
+
+E2-B 将包内工具和 `model_context.v1` 服务接到新任务的实际执行路径：工具清单与工作流节点带冻结的 S 组件身份，调用受 schema／effect／root 预算约束；服务默认作用于后续模型输入，任务内有效服务可覆盖它。完成的工具调用或服务加后续完成的模型调用才生成 `execution.activated_components`，同时记录源码路径。六项新增用例和相邻旧路径合计 28 项通过，失败运行不产生激活。与 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md) 的作用域服务借鉴在此是明确的包组件加运行收据；与 [AutoSci](https://arxiv.org/abs/2605.31468) 的跨项目版本化更新相比，尚缺任务来源候选晋升与新任务继承的全链路证据，也未证明效果。
