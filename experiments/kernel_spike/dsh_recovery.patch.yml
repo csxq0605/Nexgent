@@ -1,0 +1,26 @@
+# Keyless hard-crash recovery overlay over the shipped headless profile.
+- id: agent-default-model
+  config:
+    provider: spike-recovery-mock
+    model: fixed
+
+- id: llm-deepseek
+  disabled: true
+
+- id: llm-pi-ai
+  disabled: true
+
+- id: session-title-llm
+  disabled: true
+
+- id: agent-instructions
+  disabled: true
+
+- id: session-persistence-jsonl
+  config:
+    root: !!js process.env.DSH_RECOVERY_SESSION_ROOT
+    compression: none
+
+- insert:
+    - id: nexgent-a3-recovery-spike
+      name: './dsh_recovery_plugin.mjs'

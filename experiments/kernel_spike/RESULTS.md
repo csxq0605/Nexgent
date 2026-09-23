@@ -66,4 +66,21 @@ node experiments/kernel_spike/dsh_driver.ts ..\NExgent-upstream-deepseek-46a7f68
 
 独立审查还指出：本地文件哈希只证明在给定摘要下的内部一致性，不能阻止一起改写摘要和收据；构建入口、patch 和 lockfile 的摘要尚未在投影进程里对原文件重算；诊断 evaluator 尚未独立重验所有来源。修订版 snapshot 已绑定 validator、bridge 和 adapter 源码摘要，并单列外部成本未知，但仍不是可信来源认证。生产路径需要可信来源锚点、宿主侧复核及外部成本结算。不能把这次 `accepted/1.0` 迁移解释成独立任务质量评价。
 
-至此 A2 的**诊断投影**已跑通，生产桥接仍不存在。若采用 DeepSeek 执行后端，阶段 B 必须实现调用前准入、能力／handler 版本绑定、外部完成结算、side receipt 与 session 的可靠关联，并使真实 BenchmarkAdapter 只接收宿主认可的原任务证据。阶段 A3 还需本机跨进程恢复和同一真实模型路径的实测。
+至此 A2 的**诊断投影**已跑通，生产桥接仍不存在。若采用 DeepSeek 执行后端，阶段 B 必须实现调用前准入、能力／handler 版本绑定、外部完成结算、side receipt 与 session 的可靠关联，并使真实 BenchmarkAdapter 只接收宿主认可的原任务证据。A3 的跨进程恢复见下节；同一真实模型路径仍待实测。
+
+## A3：DeepSeek 跨进程恢复定向实验
+
+新增 [`dsh_recovery_driver.ts`](dsh_recovery_driver.ts)、[`dsh_recovery_plugin.mjs`](dsh_recovery_plugin.mjs) 与 [`dsh_recovery.patch.yml`](dsh_recovery.patch.yml)。它们仍使用固定上游、官方 `headless` profile、人工编写的工具和固定模型 adapter；两次启动使用相同 cwd、DSH_HOME、session 存储，再通过公开 `--session-id` 恢复。父进程在工具结果已进入持久 JSONL、或 handler 已进入但无持久结果时强制结束子进程。实验保存 crash 前后 session、append-only handler 入口账本、插件 side receipt、两阶段 stdout/stderr 和各文件 SHA-256。
+
+```powershell
+node experiments/kernel_spike/dsh_recovery_driver.ts ..\NExgent-upstream-deepseek-46a7f68
+```
+
+Windows 上最终脚本由子智能体与根代理分别定向运行通过。最新收据位于 `E:\PKU\program\2026\Aug\te\.nexgent-dsh-recovery-jF0Qp6`；[摘要与哈希清单](evidence-a3-recovery-20260923.json)入库，九份原始收据／组仍在本机 scratch。运行前后上游 tracked tree 均 clean；摘要绑定实际执行的 CLI 构建入口、patch、插件与 lockfile 摘要。首次运行在 Windows 对只读 marker 句柄 `fsync` 触发 `EPERM`，失败收据留在 `.nexgent-dsh-recovery-0bCU8q`；改为可写句柄写入并同步后通过。
+
+| 进程终止切面 | 恢复后的持久事件与外部账本 | 固定 adapter 的交付 |
+| --- | --- | --- |
+| 成功 `tool/result` 已在 crash 前的 session JSONL | 相同 call ID 的 `tool/call` 1、成功结果 1、未知结果 0、handler 入口 1；旧 turn 被标记 interrupted | `{"answer":42}`，没有再次发出工具调用 |
+| `tool/call` 已在 JSONL、handler 已进入但没有持久 `tool/result` | 相同 call ID 的调用 1、成功结果 0、`TOOL_OUTCOME_UNKNOWN` 1、handler 入口 1；旧 turn 被标记 interrupted | `{"status":"unknown","action":"verify_external_state"}`，没有再次发出工具调用 |
+
+每组 phase 1 都由父进程请求 `SIGKILL` 而结束，phase 2 退出码 0。断言还核对 crash 前的 session 是恢复后日志的前缀、结构化账本字段、`turn/end.reason.kind=interrupted`、固定 adapter 请求收据及输入摘要。此结果证明**进程终止后，恢复的历史使这个固定 adapter 能避免重发**；它不证明运行时对任意模型具有 exactly-once 去重、断电级持久性，也不证明真实外部业务副作用的提交／对账。未知组账本只证明 handler 已进入。外部原执行仍未进入 Nexgent 的预算和 evaluator，真实模型接通及生产技术选型尚待完成。
