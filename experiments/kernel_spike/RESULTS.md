@@ -42,10 +42,12 @@ $env:PYTHONPATH=(Resolve-Path 'src').Path
 node experiments/kernel_spike/dsh_driver.ts ..\NExgent-upstream-deepseek-46a7f68
 ```
 
-2026-09-23 本机定向运行退出码 0；原始收据保存在独立工作区目录 `E:\PKU\program\2026\Aug\te\.nexgent-dsh-spike-jcxy5n\receipts`，摘要为 `summary.json`，另外保留 headless 输出、主任务及另一任务的持久 session JSONL、插件 side receipts 和 stderr。首次把试验项目放在 `%TEMP%` 时，第二 Agent 创建触发受限环境的 `EPERM: realpath C:\Users\Lenovo`；失败收据保留在 `%TEMP%\nexgent-dsh-spike-R4vp0m\receipts`。移到可访问的 E: 工作区后，同一断言通过，无需提升沙箱权限。
+2026-09-23 本机定向运行退出码 0；一轮原始收据在独立工作区目录 `E:\PKU\program\2026\Aug\te\.nexgent-dsh-spike-jcxy5n\receipts`，第二次独立通过在 `E:\PKU\program\2026\Aug\te\.nexgent-dsh-spike-MBaDnk\receipts`。摘要为 `summary.json`，另外保留 headless 输出、主任务及另一任务的 session JSONL、插件 side receipts 和 stderr。这些 scratch 收据没有入 Git，不能当作长期归档。首次把试验项目放在 `%TEMP%` 时，第二 Agent 创建触发受限环境的 `EPERM: realpath C:\Users\Lenovo`；失败收据保留在 `%TEMP%\nexgent-dsh-spike-R4vp0m\receipts`。移到 E: 后的第一次运行 `...\.nexgent-dsh-spike-NRwurd` 因诊断脚本错误地断言只能有一个 session 日志而失败；修正为检查主、次两个日志后通过，无需提升沙箱权限。
 
-通过的是**固定模型替身和人工编写工具的后端合同**：主 Agent 第一请求的工具 schema 只有 `spike.multiply`；同进程第二 Agent 的工具列表为空，直接调用同名工具失败；主 Agent 的模型接口请求 `multiply(6,7)` 并收到 42。工具执行时调用 disposer，下一条持久 `request/header` 已没有该 schema；模型接口再次请求同名工具，持久 `tool/result` 记录 unknown-tool 错误；最后交付精确 `{"answer":42}`。诊断插件 SHA-256 为 `6ca07a39515b539c16c0d6bee50ed0e03cd68de7f640f8c3d99f7b2847e3d892`。外部模型调用为 0。
+通过的是**固定模型替身和人工编写工具处理器的后端合同**：主 Agent 第一请求的工具 schema 只有 `spike.multiply`；同进程第二 Agent 的工具列表为空，直接调用同名工具失败；主 Agent 的模型接口请求 `multiply(6,7)` 并收到 42。工具执行时调用 disposer，下一条持久 `request/header` 已没有该 schema；模型接口再次请求同名工具，持久 `tool/result` 记录 unknown-tool 错误；最后交付精确 `{"answer":42}`。诊断插件 SHA-256 为 `6ca07a39515b539c16c0d6bee50ed0e03cd68de7f640f8c3d99f7b2847e3d892`。三次模型请求由固定 adapter 接收；并未测试或审计外部网络调用。
 
-此处的“隔离”仅是 DeepSeek 同进程 Agent 作用域注册；诊断插件自身在宿主进程执行，**不是 OS 代码沙箱**。Creator 的 profile 持久安装也不能代替任务内隔离试装。上游持久日志记录模型工具 schema、调用、结果和会话顺序，但不包含 Nexgent 所需的 handler 摘要、依赖锁定、能力版本及准入账；插件摘要只在独立收据中，生产桥接需将其与事件绑定。
+此处的“隔离”仅是 DeepSeek 同进程 Agent 作用域的**工具处理器注册／释放**；诊断插件在启动前通过 profile 全局加载，并未证明任务内动态插件加载／卸载。它在宿主进程执行，**不是 OS 代码沙箱**。Creator 的 profile 持久安装也不能代替任务内隔离试装。主任务持久日志记录模型工具 schema、调用、结果和会话顺序；第二 Agent 的拒绝仅在插件 side receipt 中，第二 Agent session 日志没有对应的 `tool/call`／`tool/result`。上游日志不包含 Nexgent 所需的 handler 摘要、依赖锁定、能力版本及准入账；生产桥接需把实际 handler 与事件绑定。
+
+初版 runner 只核对源码 `.git/HEAD`，未核对构建产物。独立审查指出这不足以把运行结果严格归给固定提交；修订 runner 增加 tracked source clean 检查，并在摘要中记录实际执行的 `apps/cli/lib/bin.js`、pnpm lockfile、overlay patch 和复制收据的 SHA-256。初次加入 Git clean 检查时，受限用户触发 Git `dubious ownership`，未改全局配置，而是在该次只读 Git 命令中指定固定上游目录为 safe.directory 后重跑成功。修订后第三轮通过的收据位于 `E:\PKU\program\2026\Aug\te\.nexgent-dsh-spike-lTgig9\receipts`；可供 PR 审查的[摘要与哈希清单](evidence-a2-20260923.json)已入库。原始 JSONL 仍只在本机 scratch，清单不是完整构建依赖闭包或远端原始收据归档。上游 install/build/27+1 测试是独立命令观察，不由本轮同题收据证明。
 
 **共同合同尚未完整通过：**真实模型、重启恢复和 Nexgent Episode／benchmark 评价投影仍待验证。当前 `TaskService` 没有公开的外部执行结算接口；事后导入 DeepSeek 日志不能冒充执行前预算准入或原任务完成。A2 下一项是构造清楚标记为“外部证据投影”的诊断 Episode，再判定 A3 的生产桥接与技术选型。

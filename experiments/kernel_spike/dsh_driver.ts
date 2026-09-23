@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 
 const EXPECTED_UPSTREAM = '46a7f68b0922371ce7144b668b90e377d8e799f4'
 const TASK = '计算 6 × 7 并交付 JSON {"answer":42}'
@@ -64,6 +64,10 @@ async function gitHead(): Promise<string> {
   return (await readFile(join(upstream, '.git', head.slice('ref: '.length)), 'utf8')).trim()
 }
 
+async function sha256(path: string): Promise<string> {
+  return createHash('sha256').update(await readFile(path)).digest('hex')
+}
+
 async function runHeadless(): Promise<{ code: number; stdout: string; stderr: string }> {
   await mkdir(projectRoot, { recursive: true })
   const env = { ...process.env }
@@ -99,6 +103,13 @@ await mkdir(artifactRoot, { recursive: true })
 try {
   const head = await gitHead()
   expect(head === EXPECTED_UPSTREAM, `upstream drift: expected ${EXPECTED_UPSTREAM}, got ${head}`)
+  const trackedStatus = spawnSync('git', ['-c', `safe.directory=${upstream.replaceAll('\\', '/')}`,
+    'status', '--porcelain', '--untracked-files=no'],
+    { cwd: upstream, encoding: 'utf8' })
+  expect(trackedStatus.status === 0 && trackedStatus.stdout.trim() === '',
+    `upstream tracked source is dirty: ${trackedStatus.stdout || trackedStatus.stderr}`)
+  const builtEntrypointSha256 = await sha256(join(upstream, 'apps', 'cli', 'lib', 'bin.js'))
+  const lockfileSha256 = await sha256(join(upstream, 'pnpm-lock.yaml'))
   const processResult = await runHeadless()
   await writeFile(join(artifactRoot, 'stdout.jsonl'), processResult.stdout)
   await writeFile(join(artifactRoot, 'stderr.txt'), processResult.stderr)
@@ -159,7 +170,12 @@ try {
 
   const profileManifest = join(dshHome, 'profiles', 'headless', 'package.json')
   await writeFile(join(artifactRoot, 'profile-package.json'), await readFile(profileManifest, 'utf8'))
-  const pluginSha256 = createHash('sha256').update(await readFile(pluginPath)).digest('hex')
+  const pluginSha256 = await sha256(pluginPath)
+  const patchSha256 = await sha256(patchPath)
+  const receiptFiles = ['stdout.jsonl', 'stderr.txt', 'session.jsonl',
+    'sibling-session.jsonl', 'plugin-receipts.jsonl', 'profile-package.json']
+  const receiptSha256 = Object.fromEntries(await Promise.all(receiptFiles.map(async name =>
+    [name, await sha256(join(artifactRoot, name))] as const)))
   const summary = {
     passed: true,
     backend: 'deepseek-harness',
@@ -169,16 +185,20 @@ try {
     taskSessionId: sessionEvent.sessionId,
     siblingSessionId: 'dsh-spike-other-scope',
     pluginSha256,
+    patchSha256,
+    builtEntrypointSha256,
+    lockfileSha256,
+    receiptSha256,
     task: TASK,
     final: final.text,
     assertions: {
-      installedInTaskScope: true,
+      agentScopedToolRegistered: true,
       hiddenFromSiblingScope: true,
       firstCallReturned42: true,
       unloadedBeforeSecondRequest: true,
       postUnloadCallFailed: true,
-      durableRawLogCopied: true,
-      externalProviderInvoked: false,
+      materializedSessionJsonlCopied: true,
+      fixedAdapterRequestsObserved: modelRequests.length,
     },
     isolation: 'Agent-scoped registry only; the fixture plugin executes in the host process and is not an OS sandbox.',
     sourcePaths: { upstream, patchPath, pluginPath },
