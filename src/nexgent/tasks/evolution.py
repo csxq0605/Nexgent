@@ -23,6 +23,10 @@ from ..kernel.programs import digest
 from .benchmarks import (
     host_runtime_fingerprint, validate_adapter, validate_snapshot, validate_tasks,
 )
+from .costs import (
+    COST_PROJECTION_SCHEMA, LEGACY_EVOLUTION_COST_WEIGHTS, STANDARD_COST_WEIGHTS,
+    cost_projection_spec, normalized_work_projection,
+)
 from .outcomes import classify_benchmark_outcome, outcome_policy
 from .packages import safe_path, split_ref, verify_package
 from .tools import ContractError
@@ -837,11 +841,12 @@ class EvolutionService:
 
     @staticmethod
     def _cost(usage):
-        # A transparent normalized work unit. Raw usage is retained in every pair.
-        return (usage.get("model_calls", 0) + usage.get("tool_calls", 0)
-                + usage.get("charged_completion_tokens", 0) / 1000
-                + usage.get("charged_tool_work_units", 0)
-                + usage.get("nodes", 0) / 10)
+        projection = EvolutionService._cost_projection(usage)
+        return projection["conservative_work"] if projection is not None else 0.0
+
+    @staticmethod
+    def _cost_projection(usage, weights=STANDARD_COST_WEIGHTS):
+        return normalized_work_projection(usage, weights)
 
     def _create_frozen(self, package, benchmark_id, task_ref, snapshot, budget, registration):
         context = deepcopy(task_ref.get("context") or {})
@@ -915,6 +920,7 @@ class EvolutionService:
                   "arm_schedule": arm_schedule, "environment": environment,
                    "environment_digest": digest(environment),
                    "budget": _copy({} if budget is None else budget, "Trial budget"),
+                   "cost_projection": cost_projection_spec(),
                    "outcome_policy": outcome_policy(),
                    "policy": asdict(policy), "policy_digest": digest(asdict(policy)),
                   "created_at": time.time()}
@@ -1016,6 +1022,7 @@ class EvolutionService:
                   "suite": suite,
                   "suite_digest": plan["suite_digest"], "split_role": suite["split_role"],
                   "policy": deepcopy(plan["policy"]), "policy_digest": plan["policy_digest"],
+                  "cost_projection": deepcopy(plan.get("cost_projection")),
                   "arm_order": arm_order, "pairs": pairs, "created_at": time.time()}
         result = self._insert("task_evolution_trials", record)
         self._finish_run("paired", plan_id, record["id"])
@@ -1054,6 +1061,16 @@ class EvolutionService:
                 return float(value)
             return None
 
+        projection_spec = trial.get("cost_projection")
+        if projection_spec is None:
+            cost_weights = LEGACY_EVOLUTION_COST_WEIGHTS
+        elif (not isinstance(projection_spec, dict)
+              or projection_spec.get("schema") != COST_PROJECTION_SCHEMA
+              or projection_spec.get("gate_basis") != "conservative_work"):
+            raise ContractError("Paired trial cost projection is invalid")
+        else:
+            cost_weights = projection_spec.get("weights")
+
         deltas, failure_reasons = [], []
         for pair in trial["pairs"]:
             row = {"task_ref_digest": pair["task_ref_digest"], "arm_order": pair["arm_order"]}
@@ -1072,10 +1089,15 @@ class EvolutionService:
                     reasons.append("acceptance_missing")
                 if run.get("usage", {}).get("usage_complete") is not True:
                     reasons.append("usage_incomplete")
+                cost_projection = self._cost_projection(run.get("usage", {}), cost_weights)
+                if cost_projection is None:
+                    reasons.append("usage_invalid")
                 row[side] = {"episode_id": run["episode_id"], "score": value,
                              "accepted": evaluation.get("accepted"),
                              "failure_class": run.get("failure_class"),
-                             "cost": self._cost(run.get("usage", {})),
+                             "cost": (cost_projection["conservative_work"]
+                                      if cost_projection is not None else 0.0),
+                             "cost_projection": cost_projection,
                              "usage_complete": run.get("usage", {}).get("usage_complete") is True,
                              "failure_reasons": reasons}
                 row_reasons.extend(f"{side}:{reason}" for reason in reasons)
@@ -1091,10 +1113,16 @@ class EvolutionService:
             scores = [row["score"] for row in rows]
             complete_scores = all(value is not None for value in scores)
             complete_acceptance = all(type(row["accepted"]) is bool for row in rows)
+            reported_work = [
+                (row.get("cost_projection") or {}).get("reported_token_work")
+                for row in rows]
             return {"quality": sum(scores) / len(scores) if complete_scores else None,
                     "success_rate": (sum(row["accepted"] is True for row in rows) / len(rows)
                                      if complete_acceptance else None),
                     "cost": sum(row["cost"] for row in rows),
+                    "reported_token_work": (sum(reported_work)
+                                             if all(value is not None
+                                                    for value in reported_work) else None),
                     "all_accepted": all(row["accepted"] is True for row in rows),
                     "score_complete": complete_scores,
                     "acceptance_complete": complete_acceptance,

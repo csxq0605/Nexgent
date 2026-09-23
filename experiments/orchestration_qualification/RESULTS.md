@@ -79,10 +79,11 @@ three calls for every Episode. The persisted call ledger records
 | Parent fixed multi-role | 1, 1 | 100% | 17.0 |
 | Generated skill candidate | 0, 0 | 0% | 17.0 |
 
-The candidate failed before publication in both tasks: its edited skill
-selected a string-valued `answer` field as the entire deliverable although
-the task required an object. The host rejected the artifact schema, the
-changed skill did not complete, and component activation was false. All
+The candidate failed during publication in both tasks: its adjudicator
+returned a string-valued `answer` inside the deliverables mapping although the
+task required an object. The host rejected the artifact schema. This input
+took a publisher path shared by parent and candidate, so the candidate's edited
+branch did not complete or activate. All
 quality, success, regression, completion, and activation gates failed;
 **the candidate was not promoted**. This is a measured negative result for
 one candidate on a two-item public selection slice, not a general estimate
@@ -90,3 +91,96 @@ of RSI effectiveness. The next research step is to feed rejected-candidate
 diagnostics into generation without leaking selection answers, then compare
 more than one candidate against fixed, equal-call single-role, and memory-only
 controls on independent tasks.
+
+### Failure audit
+
+The generated hypothesis is contradicted by its own development evidence.
+That Episode completed, delivered an artifact, and passed host schema
+validation; only independent exact-answer evaluation rejected it. The bounded
+FeedbackBundle previously exposed the evaluation status and an opaque outcome
+digest, but not the host-owned delivery/schema statuses. R0 therefore had too
+little positive evidence to justify changing the publishing boundary and
+nevertheless guessed a response-shape failure.
+
+The paired score drop cannot be attributed causally to the edited skill. In
+both candidate Episodes the adjudicator returned
+`{"deliverables":{"answer": <string>}}`; both parent and candidate publish
+implementations take the shared `decision.get("deliverables")` path for that
+shape and would publish the invalid string. The parent arm happened to receive
+nested object values from its separate stochastic model calls and passed. The
+candidate's new `if name in decision` branch was not exercised, although it is
+a latent regression for a different top-level single-deliverable shape because
+it can unwrap an object-schema deliverable to a scalar. The recorded
+`behavior_activated=false` is therefore accurate: this trial rejects the
+candidate but does not isolate a beneficial or harmful causal effect of its
+only code change. Repeated runs or controlled model outputs are required to
+separate package effects from provider-output variance.
+
+This was not a completion-budget or truncation failure. Candidate generation
+returned 830 completion tokens under a 6,000-token ceiling, and all six
+selection Episodes completed their three model calls with short provider
+responses before the candidate failed in the deterministic publish skill. The
+earlier 6,000-token `finish_reason=length` attempt is evidence that the original
+full-manifest output contract was too large for this setup; the compact delta
+contract removed that separate failure mode.
+
+The reference feedback now includes only fixed host-owned outcome statuses
+(`delivery_status`, `acceptance_status`, and `schema_validation`), never
+artifact contents or evaluator diagnostics. Its prompt treats a delivered,
+schema-valid Episode as evidence against a publisher/schema diagnosis, treats
+digests as identities rather than contents, requires abstention when the
+bounded projection cannot distinguish causes, and preserves object deliverable
+types across publisher changes. These are domain-neutral generation guards;
+they do not use BBH names, answers, or evaluator logic.
+
+### Development preflight after the rejection
+
+The same rejected candidate was later run through a new development preflight
+with seed 1. Its two BBH statistical units differed from the generating
+development unit; the preflight did not reuse the selection cases. The
+[attempt receipt](receipts/preflight-v3-development.json) records all four
+parent/candidate Episodes; the [host call ledger](receipts/preflight-v3-call-ledger.json)
+records twelve received MiMo v2.6-flash calls, three per Episode. The
+parent had one protocol failure and one correct answer (scores 0, 1); the
+candidate had two protocol failures (scores 0, 0), and neither changed
+component loaded. The Episode-level error was a generic missing
+`deliverables` binding, but the persisted publish-node receipts locate the
+causal failures at host schema validation: one parent adjudicator supplied an
+object encoded as a string; both candidate runs passed a string where the
+deliverable schema required an object. The changed publisher branch was not
+shown to execute, so these runs do not causally attribute the failure to the
+candidate edit. They show a shared brittle model-to-artifact boundary and
+candidate non-activation.
+
+This post-selection run is **diagnostic development evidence**, not a second
+independent selection or a rescue of the rejected candidate. It motivates
+pre-selection execution checks and generic structured-output repair. A later
+candidate needs fresh selection units after using these diagnostics.
+
+### Revised R0: second generated candidate and independent selection
+
+With the host-owned outcome statuses above, the same public development
+feedback produced [one valid S candidate](receipts/improve-v3-r0-diagnostic-generated.json)
+using MiMo v2.6-flash: one model call, 9,495 prompt and 502 completion tokens.
+It changed only the adjudicator-role prompt to require a single JSON object
+whose top-level keys are the required deliverables. This is a generated
+hypothesis about the model-to-artifact handoff, not an orchestration change.
+
+The new [development preflight](receipts/preflight-v3-r0-diagnostic-development.json)
+used seed 2 and two statistical units disjoint from generating feedback and
+the earlier preflight. Both candidate Episodes completed and scored **1**, and
+both loaded the changed role; the two parent Episodes failed
+schema validation and scored **0**. This was a promising execution check, but
+model outputs differ across paired runs, so it cannot isolate the prompt's
+causal effect.
+
+The frozen candidate then used previously unused seed 11 selection units.
+The [selection receipt](receipts/select-v3-r0-diagnostic-selection.json)
+records **parent 1/2, candidate 1/2**, with the candidate loaded on both tasks.
+One task was correct in both arms; the other failed in both. Conservative
+normalized work was equal at 29.6 per arm; provider-reported token work was
+22.888 versus 22.949. The success-rate and candidate-completion gates failed,
+so `eligible=false` and **the candidate was not promoted**. The development
+contrast did not replicate on independent selection. These public two-task
+samples do not establish an RSI benefit, and the used selection units are now
+spent for adaptation.

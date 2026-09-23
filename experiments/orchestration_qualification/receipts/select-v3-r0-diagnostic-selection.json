@@ -1,0 +1,407 @@
+{
+  "schema": "nexgent.package-patch-v3-selection.v1",
+  "status": "completed",
+  "candidate_id": "candidate-7b06d55d55024817",
+  "split": "selection",
+  "seed": 11,
+  "started_at": 1790144795.2799993,
+  "plan_id": "plan-a3a37a5ed44346c1",
+  "suite_digest": "d70fb6d17ada4a00559237a83090f87f9b8095721071c0d4995f51e976938b49",
+  "candidate_package_digest": "10e54d9c5eda18ec0fee56bf578121f8c762e4024fcd563f17456c961059aa3c",
+  "parent_package_digest": "54110e964849245b84b97ca30c93b92c482d2b22294478be4fb0b082595956c3",
+  "policy_digest": "d6e9b43c3ef939809cecd411be83d63d8c2ccf5ef9f52e23a9cdf96b10b8dd51",
+  "task_ids": [
+    "bbh/bbh-two-task-task-v1/selection/11/bbh-912d2e768db2c0ddfdc0cf82",
+    "bbh/bbh-two-task-task-v1/selection/11/bbh-71f0cfc2200678e518f35ef9"
+  ],
+  "trial_id": "trial-02ff540a7fd54cb4",
+  "decision_id": "decision-b464574094de4269",
+  "eligible": false,
+  "gates": {
+    "selection_role": true,
+    "measurement_complete": true,
+    "quality": true,
+    "success_rate": false,
+    "cost": true,
+    "regressions": true,
+    "candidate_completed": false,
+    "behavior_activated": true
+  },
+  "measurements": {
+    "parent": {
+      "quality": 0.5,
+      "success_rate": 0.5,
+      "cost": 29.6,
+      "reported_token_work": 22.887999999999998,
+      "all_accepted": false,
+      "score_complete": true,
+      "acceptance_complete": true,
+      "usage_complete": true
+    },
+    "candidate": {
+      "quality": 0.5,
+      "success_rate": 0.5,
+      "cost": 29.6,
+      "reported_token_work": 22.948999999999998,
+      "all_accepted": false,
+      "score_complete": true,
+      "acceptance_complete": true,
+      "usage_complete": true
+    },
+    "regressions": 0,
+    "paired_task_deltas": [
+      {
+        "task_ref_digest": "b814395daf067dfcc179d39634b2e72eaff6b87202bc28c08e87c09bc99e9a3f",
+        "arm_order": [
+          "parent",
+          "candidate"
+        ],
+        "parent": {
+          "episode_id": "episode-410e2e97652e4734",
+          "score": 1.0,
+          "accepted": true,
+          "failure_class": null,
+          "cost": 14.8,
+          "cost_projection": {
+            "schema": "nexgent.normalized-work-projection.v1",
+            "weights": {
+              "model_calls": 1.0,
+              "charged_completion_tokens": 0.001,
+              "tool_calls": 1.0,
+              "charged_tool_work_units": 1.0,
+              "nodes": 1.0
+            },
+            "conservative_work": 14.8,
+            "conservative_token_basis": "charged_completion_tokens",
+            "charged_completion_tokens": 4800,
+            "reported_token_work": 11.356,
+            "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+            "reported_tokens": {
+              "prompt_tokens": 1286,
+              "completion_tokens": 70,
+              "total_tokens": 1356
+            }
+          },
+          "usage_complete": true,
+          "failure_reasons": []
+        },
+        "candidate": {
+          "episode_id": "episode-fc62ccee95714c04",
+          "score": 1.0,
+          "accepted": true,
+          "failure_class": null,
+          "cost": 14.8,
+          "cost_projection": {
+            "schema": "nexgent.normalized-work-projection.v1",
+            "weights": {
+              "model_calls": 1.0,
+              "charged_completion_tokens": 0.001,
+              "tool_calls": 1.0,
+              "charged_tool_work_units": 1.0,
+              "nodes": 1.0
+            },
+            "conservative_work": 14.8,
+            "conservative_token_basis": "charged_completion_tokens",
+            "charged_completion_tokens": 4800,
+            "reported_token_work": 11.391,
+            "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+            "reported_tokens": {
+              "prompt_tokens": 1326,
+              "completion_tokens": 65,
+              "total_tokens": 1391
+            }
+          },
+          "usage_complete": true,
+          "failure_reasons": []
+        },
+        "score_delta": 0.0,
+        "failure_reasons": []
+      },
+      {
+        "task_ref_digest": "3a4f38791ba2d09924d9a874f4c5a85d71b60a7694bfa8b4a4babb5764ec197d",
+        "arm_order": [
+          "candidate",
+          "parent"
+        ],
+        "parent": {
+          "episode_id": "episode-0b5789c7599048e1",
+          "score": 0.0,
+          "accepted": false,
+          "failure_class": "observed_system_failure",
+          "cost": 14.8,
+          "cost_projection": {
+            "schema": "nexgent.normalized-work-projection.v1",
+            "weights": {
+              "model_calls": 1.0,
+              "charged_completion_tokens": 0.001,
+              "tool_calls": 1.0,
+              "charged_tool_work_units": 1.0,
+              "nodes": 1.0
+            },
+            "conservative_work": 14.8,
+            "conservative_token_basis": "charged_completion_tokens",
+            "charged_completion_tokens": 4800,
+            "reported_token_work": 11.532,
+            "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+            "reported_tokens": {
+              "prompt_tokens": 1392,
+              "completion_tokens": 140,
+              "total_tokens": 1532
+            }
+          },
+          "usage_complete": true,
+          "failure_reasons": []
+        },
+        "candidate": {
+          "episode_id": "episode-7b48c7561b0041a5",
+          "score": 0.0,
+          "accepted": false,
+          "failure_class": null,
+          "cost": 14.8,
+          "cost_projection": {
+            "schema": "nexgent.normalized-work-projection.v1",
+            "weights": {
+              "model_calls": 1.0,
+              "charged_completion_tokens": 0.001,
+              "tool_calls": 1.0,
+              "charged_tool_work_units": 1.0,
+              "nodes": 1.0
+            },
+            "conservative_work": 14.8,
+            "conservative_token_basis": "charged_completion_tokens",
+            "charged_completion_tokens": 4800,
+            "reported_token_work": 11.558,
+            "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+            "reported_tokens": {
+              "prompt_tokens": 1427,
+              "completion_tokens": 131,
+              "total_tokens": 1558
+            }
+          },
+          "usage_complete": true,
+          "failure_reasons": []
+        },
+        "score_delta": 0.0,
+        "failure_reasons": []
+      }
+    ],
+    "failure_reasons": []
+  },
+  "pairs": [
+    {
+      "task_ref_digest": "b814395daf067dfcc179d39634b2e72eaff6b87202bc28c08e87c09bc99e9a3f",
+      "arm_order": [
+        "parent",
+        "candidate"
+      ],
+      "arms": {
+        "parent": {
+          "episode_id": "episode-410e2e97652e4734",
+          "score": 1.0,
+          "accepted": true,
+          "usage": {
+            "model_calls": 3,
+            "reserved_completion_tokens": 4800,
+            "charged_completion_tokens": 4800,
+            "completion_tokens": 70,
+            "known_usage": {
+              "prompt_tokens": 1286,
+              "completion_tokens": 70,
+              "total_tokens": 1356
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 7
+          },
+          "loaded": null,
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        },
+        "candidate": {
+          "episode_id": "episode-fc62ccee95714c04",
+          "score": 1.0,
+          "accepted": true,
+          "usage": {
+            "model_calls": 3,
+            "reserved_completion_tokens": 4800,
+            "charged_completion_tokens": 4800,
+            "completion_tokens": 65,
+            "known_usage": {
+              "prompt_tokens": 1326,
+              "completion_tokens": 65,
+              "total_tokens": 1391
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 7
+          },
+          "loaded": true,
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "task_ref_digest": "3a4f38791ba2d09924d9a874f4c5a85d71b60a7694bfa8b4a4babb5764ec197d",
+      "arm_order": [
+        "candidate",
+        "parent"
+      ],
+      "arms": {
+        "parent": {
+          "episode_id": "episode-0b5789c7599048e1",
+          "score": 0.0,
+          "accepted": false,
+          "usage": {
+            "model_calls": 3,
+            "reserved_completion_tokens": 4800,
+            "charged_completion_tokens": 4800,
+            "completion_tokens": 140,
+            "known_usage": {
+              "prompt_tokens": 1392,
+              "completion_tokens": 140,
+              "total_tokens": 1532
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 7
+          },
+          "loaded": null,
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        },
+        "candidate": {
+          "episode_id": "episode-7b48c7561b0041a5",
+          "score": 0.0,
+          "accepted": false,
+          "usage": {
+            "model_calls": 3,
+            "reserved_completion_tokens": 4800,
+            "charged_completion_tokens": 4800,
+            "completion_tokens": 131,
+            "known_usage": {
+              "prompt_tokens": 1427,
+              "completion_tokens": 131,
+              "total_tokens": 1558
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 7
+          },
+          "loaded": true,
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "completed_at": 1790144936.2519848
+}

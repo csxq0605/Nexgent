@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from nexgent.kernel.programs import digest
 from nexgent.tasks.evolution import EvolutionService
 from nexgent.tasks.generation import GenerationService, MEMORY_PATCH_SCHEMA
+from nexgent.tasks.improver_seed import default_improver_package
 from nexgent.tasks.memory import MemoryService
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
@@ -138,8 +139,9 @@ def improver_package(patch):
         provenance={"fixture": "memory-component-improver"})
 
 
-def prepared(tmp_path):
-    tasks = TaskService(tmp_path, tools=ToolRegistry())
+def prepared(tmp_path, gateway_factory=None):
+    tasks = TaskService(tmp_path, tools=ToolRegistry(),
+                        gateway_factory=gateway_factory)
     evolution = EvolutionService(tasks)
     generation = GenerationService(tasks, evolution)
     memory = MemoryService(tasks)
@@ -156,6 +158,64 @@ def prepared(tmp_path):
     feedback = generation.capture_feedback("agents", [episode["id"]], expected_revision=0)
     return (tasks, evolution, generation, memory, package, package_registration,
             root, memory_registration, feedback)
+
+
+class ReferenceMemoryGateway:
+    def __init__(self, patch):
+        self.patch = deepcopy(patch)
+        self.calls = []
+
+    def __call__(self, reserve, stop_event):
+        owner = self
+
+        class Bound:
+            def ask(self, role, prompt, payload=None, max_tokens=4000):
+                owner.calls.append({"role": role, "prompt": prompt,
+                                    "payload": deepcopy(payload),
+                                    "max_tokens": max_tokens})
+                record = {"call_id": "memory-r0-1", "role": role,
+                          "model": "MEMORY-R0-DOUBLE", "status": "started",
+                          "reserved_completion_tokens": max_tokens}
+                reserve(record)
+                reserve({**record, "status": "completed",
+                         "billing_status": "usage_reported",
+                         "usage": {"prompt_tokens": 1, "completion_tokens": 1,
+                                   "total_tokens": 2}})
+                return deepcopy(owner.patch)
+
+        return Bound()
+
+
+def test_default_reference_improver_generates_pure_memory_patch(tmp_path):
+    gateway = ReferenceMemoryGateway({})
+    (_, evolution, generation, memory, package, package_registration,
+     root, memory_registration, feedback) = prepared(tmp_path, gateway)
+    gateway.patch = memory_patch(root)
+    result = generation.generate(
+        "agents", feedback["id"], default_improver_package(),
+        {"mutable_components": ["working-memory"],
+         "allowed_operations": ["replace"], "max_patch_bytes": 100000},
+        package_registration["revision"], memory_channel="working",
+        expected_memory_revision=memory_registration["revision"],
+        budget={"max_model_calls": 1, "max_completion_tokens": 6000,
+                "max_tool_calls": 0, "max_nodes": 12})
+
+    assert result["status"] == "generated", result.get("reason")
+    assert result["targeting"] == "manifest_memory_component_v2"
+    assert result["patch_contract"] == MEMORY_PATCH_SCHEMA
+    assert result["candidate_kind"] == "memory_version"
+    assert result["candidate_id"] is None
+    candidate = memory.version(result["memory_candidate_id"])
+    assert candidate["resource"]["data"]["items"][0]["content"] == {
+        "lesson": "PRIVATE_MEMORY_BODY_MARKER"}
+    assert evolution.active("agents")["package_id"] == package["id"]
+    assert gateway.calls[0]["role"] == "rsi_improver"
+    assert gateway.calls[0]["max_tokens"] == 6000
+    assert "manifest_memory_component_v2" in gateway.calls[0]["prompt"]
+    assert "Parent memory bodies are intentionally unavailable" in gateway.calls[0]["prompt"]
+    assert "memory_resource_digest" in gateway.calls[0]["payload"][
+        "parent_components"][0]
+    assert "content" not in gateway.calls[0]["payload"]["parent_components"][0]
 
 
 def test_pure_m_generation_routes_through_memory_release_and_episode_snapshot(tmp_path):

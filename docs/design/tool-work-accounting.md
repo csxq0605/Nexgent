@@ -51,3 +51,21 @@ reservation for irreducible work and charge deterministic solver operations at
 their execution boundary. Work units are an auditable experiment-specific
 proxy; they are not wall time, FLOPs, energy, or currency. Those measurements
 must remain separate receipts when available.
+
+## Shared P3/P5 cost projection
+
+P3 selection and P5 studies use the same versioned normalized-work projection.
+The gate value remains conservative: model calls, non-refundable charged
+completion-token reservations, tool calls, charged tool work, and nodes are
+weighted and summed. This value protects budgets and is the only projection
+used by promotion or study work gates.
+
+When every model call has complete provider-reported usage, the projection also
+records a descriptive value that replaces charged completion tokens with the
+reported prompt plus completion tokens. If any call lacks either token count,
+that value is `null`; partial known totals are never presented as complete.
+Provider-reported token work does not refund a reservation or alter a gate.
+
+Both values are normalized estimates for comparisons under one frozen protocol.
+They are not vendor prices, invoices, or monetary cost. Pricing requires a
+separate provider/model price schedule and billing receipt.

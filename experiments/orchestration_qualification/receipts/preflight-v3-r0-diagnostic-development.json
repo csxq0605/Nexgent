@@ -1,0 +1,267 @@
+{
+  "schema": "nexgent.package-patch-v3-development-preflight.v1",
+  "status": "completed",
+  "candidate_id": "candidate-7b06d55d55024817",
+  "split": "development",
+  "seed": 2,
+  "started_at": 1790144566.5200217,
+  "plan_id": "plan-aa1c3b375f4248b3",
+  "suite_digest": "74bd5323ff93a5caebfaefe160cce8ebfb96a1e2a6dbfedb4ddf4ba0e1d6b434",
+  "task_ids": [
+    "bbh/bbh-two-task-task-v1/development/2/bbh-1899d75c26477c7443704581",
+    "bbh/bbh-two-task-task-v1/development/2/bbh-16ff24ffe1c36a26e3a7e534"
+  ],
+  "statistical_units": [
+    "bbh/example/bbh-1899d75c26477c7443704581",
+    "bbh/example/bbh-16ff24ffe1c36a26e3a7e534"
+  ],
+  "excluded_feedback_units": [
+    "bbh/example/bbh-2cd2be58324283dbec774385"
+  ],
+  "candidate_package_digest": "10e54d9c5eda18ec0fee56bf578121f8c762e4024fcd563f17456c961059aa3c",
+  "parent_package_digest": "54110e964849245b84b97ca30c93b92c482d2b22294478be4fb0b082595956c3",
+  "trial_id": "trial-da44d2300f7343a1",
+  "pairs": [
+    {
+      "task_ref_digest": "a49961dc55c7ca302028d2d544ab1fbad345d2046b74dc1fba9eddd8e2b80b7c",
+      "arms": {
+        "parent": {
+          "episode_id": "episode-7abe92c5877045f3",
+          "status": "failed",
+          "failure_domain": "protocol",
+          "error_type": "ContractError",
+          "failed_nodes": [
+            {
+              "id": "plan/nodes/publish",
+              "method": "skill",
+              "error_type": "PackageError",
+              "schema_type_mismatch": true
+            }
+          ],
+          "score": 0.0,
+          "score_available": true,
+          "failure_class": "observed_system_failure",
+          "loaded": null,
+          "usage": {
+            "model_calls": 3,
+            "reserved_completion_tokens": 4800,
+            "charged_completion_tokens": 4800,
+            "completion_tokens": 63,
+            "known_usage": {
+              "prompt_tokens": 1293,
+              "completion_tokens": 63,
+              "total_tokens": 1356
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 7
+          },
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        },
+        "candidate": {
+          "episode_id": "episode-fb28c80923154677",
+          "status": "completed",
+          "failure_domain": null,
+          "error_type": null,
+          "failed_nodes": [],
+          "score": 1.0,
+          "score_available": true,
+          "failure_class": null,
+          "loaded": true,
+          "usage": {
+            "model_calls": 3,
+            "reserved_completion_tokens": 4800,
+            "charged_completion_tokens": 4800,
+            "completion_tokens": 49,
+            "known_usage": {
+              "prompt_tokens": 1324,
+              "completion_tokens": 49,
+              "total_tokens": 1373
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 7
+          },
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "task_ref_digest": "b199614d742c4de3d5a28c5877acb385a2ebee58b35caf2086309e505792ed96",
+      "arms": {
+        "parent": {
+          "episode_id": "episode-710d8ee91fdb4d47",
+          "status": "failed",
+          "failure_domain": "protocol",
+          "error_type": "ContractError",
+          "failed_nodes": [
+            {
+              "id": "plan/nodes/publish",
+              "method": "skill",
+              "error_type": "PackageError",
+              "schema_type_mismatch": true
+            }
+          ],
+          "score": 0.0,
+          "score_available": true,
+          "failure_class": "observed_system_failure",
+          "loaded": null,
+          "usage": {
+            "model_calls": 3,
+            "reserved_completion_tokens": 4800,
+            "charged_completion_tokens": 4800,
+            "completion_tokens": 153,
+            "known_usage": {
+              "prompt_tokens": 1413,
+              "completion_tokens": 153,
+              "total_tokens": 1566
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 7
+          },
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        },
+        "candidate": {
+          "episode_id": "episode-99fcd7ccebbb4143",
+          "status": "completed",
+          "failure_domain": null,
+          "error_type": null,
+          "failed_nodes": [],
+          "score": 1.0,
+          "score_available": true,
+          "failure_class": null,
+          "loaded": true,
+          "usage": {
+            "model_calls": 3,
+            "reserved_completion_tokens": 4800,
+            "charged_completion_tokens": 4800,
+            "completion_tokens": 135,
+            "known_usage": {
+              "prompt_tokens": 1439,
+              "completion_tokens": 135,
+              "total_tokens": 1574
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 7
+          },
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "completed_at": 1790144705.267678
+}

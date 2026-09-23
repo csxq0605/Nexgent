@@ -1,6 +1,8 @@
 # Nexgent vNext 重构计划
 
-日期：2026-09-23。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地，AgentPackage manifest v2 与 ExecutablePlan v1 已把 role/workflow/orchestrator/O-M-S component 接到真实 runtime、revision 和宿主账本恢复。P2 独立 OpenFOAM Re=10 smoke 已在真实 WSL2/Foundation 8 环境通过。P3 已新增多组件 O/S PackagePatch v3、默认 R0 输出合同、组件集合选择/晋升/guard 的确定性端到端验证，并接入纯 M 候选的独立 MemoryService release/snapshot 路径；P4 已有 durable-claim 可恢复 cycle；P5 已实现通用预注册 final-holdout 配对执行器。真实 MiMo v2.6-flash 已通过紧凑注册表差量生成合法 v3 候选，但在独立 selection 两题中由父包 2/2 降为 0/2，未晋升；当前没有正向 RSI 效益证据。M 的真实模型效果、O/S+M 原子复合发布和正式外部多任务研究尚未完成。
+日期：2026-09-23。状态：P0 设计已固定；P1 任务执行、交付评审与恢复基础已落地，AgentPackage manifest v2 与 ExecutablePlan v1 已把 role/workflow/orchestrator/O-M-S component 接到真实 runtime、revision 和宿主账本恢复。P2 独立 OpenFOAM Re=10 smoke 已在真实 WSL2/Foundation 8 环境通过。P3 已新增多组件 O/S PackagePatch v3、默认 R0 输出合同、组件集合选择/晋升/guard 的确定性端到端验证，并接入纯 M 候选的独立 MemoryService release/snapshot 路径；P4 已有 durable-claim 可恢复 cycle；P5 已实现通用预注册 final-holdout 配对执行器。真实 MiMo v2.6-flash 已生成两个合法 S 候选：第一次 selection 为父包 2/2、候选 0/2，但修改分支未执行；第二次候选实际加载而 selection 与父包同为 1/2。两者均未晋升，当前没有正向 RSI 效益证据。M 的真实模型效果、O/S+M 原子复合发布和正式外部多任务研究尚未完成。
+
+逐项可声称能力、自身设计限制与继续/停止门，统一记录在 [RSI readiness 审计](docs/research/rsi-readiness-audit-20260923.md)。selection 的父子分数是观测值；由于两臂模型输出形状不同且候选改动未实际加载，不能把 2/2→0/2 因果归于那次补丁。
 
 ## 1. 产品与执行范围
 
@@ -86,7 +88,7 @@ development Episode
 
 `EvolutionService` 把 paired suite、benchmark/evaluator snapshot、父子顺序、预算、可重算的 execution environment/tool/runtime snapshot 及 PromotionPolicy 在结果产生前冻结。实际 provider/model 身份由逐调用 receipt 证明，并在正式实验中与预登记配置核对；当前计划记录本身不声称已预先完整冻结二者。development decision 不能晋升，final holdout 不能进入演化；selection 缺分、用量不完整、身份不一致和关键回归均 fail closed。选择门的 `cost` 是模型调用、charged completion tokens、工具调用和节点用量形成的 normalized work unit，不是供应商货币费用。eligible 与 promote 分开；只有 `GenerationService` 闭合真实 R0 生成收据的 candidate 有部署权限，受控导入只进入研究/archive；promote 还要求父包仍为 active，并强制绑定预登记 monitor plan。普通任务只在创建时通过 `package_channel` 解析部署包。guard plan 与阈值在晋升前冻结，其完整任务多重集只允许一次执行；缺项、重复项、usage 不完整或 evaluator receipt 不匹配均 fail closed，退化时沿已记录部署边回滚。
 
-当前完成的是工程机制：不可变记录、hash-linked 事件、只读安全投影、普通任务的通道加载、内置参考 R0，以及一个以固定无模型 fixture 执行 feedback → generation → selection → promotion → new Episode → guard → rollback 的确定性闭环和脱敏证据导出。尚未完成的 P3 研究出口包括：内置或冻结 `R0` 从真实模型反馈产生有效候选、候选在独立 selection 上胜过父代、晋升后在新任务中激活所声称行为，以及由重复和对照支持的效应估计。候选未变好时必须报告 rejected/missing；不能把代码路径、模拟测试、candidate 数量、一次模型调用或一次部署写成 RSI 效益。
+当前完成的是工程机制：不可变记录、hash-linked 事件、只读安全投影、普通任务的通道加载、内置参考 R0，以及一个以固定无模型 fixture 执行 feedback → generation → selection → promotion → new Episode → guard → rollback 的确定性闭环和脱敏证据导出。真实 MiMo v2.6-flash 已从开发反馈生成两个有效 S 候选；两者均未通过独立 selection，后者虽实际加载但与父代同为 1/2。尚未完成的 P3 研究出口包括：真实 O 编排候选、独立 selection 改善、晋升后在新任务中激活所声称行为，以及由重复和对照支持的效应估计。候选未变好时必须报告 rejected/missing；不能把代码路径、模拟测试、candidate 数量、一次模型调用或一次部署写成 RSI 效益。
 
 通用 `RSICycleService` 已将上述 P3 步骤组织成可恢复持久状态机：创建时冻结 task channel revision、improver、selection/guard adapter snapshot、预算、seed 与 policy；运行时逐阶段保存已有不可变证据引用。paired/monitor 单次 claim 可在“run record 已写入、claim 尚未完成”的中断窗口唯一关联并原子收口；promotion 后的 guard 和 rollback 绑定预期 revision/package/monitor plan，通道漂移 fail closed。`rsi-cycle-start/resume/show/recover` 消除了正常路径的手工 ID 串接，默认信息窗口可查询脱敏 cycle 状态。Cycle 还可冻结独立 recursive improver channel 的 revision/package/digest，让已部署 R 承担下一轮 generation；可信宿主在 Episode 创建和启动边界重新核验登记，避免 R channel 漂移后错误执行旧包或产生模型费用。
 
@@ -137,7 +139,7 @@ scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分
 | Main 对话与信息窗口 | 默认入口已切换为自然语言 Main；运行、成果、证据在右侧信息窗，高级任务控制台仍可打开；项目级消息历史、附件上下文和澄清回合仍待后续切片 |
 | Task benchmark SDK 与失败测量 | 0.9 canonical descriptor/registry、插件隔离、host runtime 指纹及 P3/P5 共享 outcome policy 已实现；BBH 两任务与 scientific-discovery 已迁移并保留 legacy 兼容入口；科学历史 holdout 仅作迁移回归材料 |
 | OpenFOAM 插件及真实 demo P2 | 独立 smoke 插件已实现并真实通过；正式精度与收敛协议未执行 |
-| 跨任务行为更新 P3 | manifest-v2 component id 已贯穿 feedback、BehaviorPatch v2、加载摘要、selection、promotion、guard 与 evidence；默认 R0 同时支持 legacy v1；纯 M 的生成、独立 release、snapshot 与拒绝混合补丁已有定向工程验证，真实模型效果待检验 |
+| 跨任务行为更新 P3 | manifest-v2 component id 与整包 PackagePatch v3 已贯穿反馈、生成、选择、加载证据和部署门；真实模型生成两个 S 候选，独立选择均拒绝，尚无 O 改善或晋升后复用；纯 M 的独立 release/snapshot 有定向工程验证，真实模型效果待检验 |
 | 改进器递归执行 P4 | 独立 R 通道、自更新、真实后代元评测、guard/rollback、durable invocation claim、逐副作用 admission 与 recoverable cycle 已闭合；真实模型/统计递归效益待完成 |
 | 冻结正式研究 P5 | 通用 final-holdout 配对执行器、预注册 schema、CLI/信息窗已实现；外部多任务族正式研究待登记与执行 |
 | 0.8 的源码机制与历史结果 | 保留；不能替代以上状态 |
@@ -147,9 +149,9 @@ scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分
 本阶段优先解决**编排和技能的实际可进化范围，以及模型驱动的多智能体 benchmark**，不把当前单组件 E1 pilot 当作最终框架的替代验收。完整合同、逐组件激活证据与四臂对照见[编排与技能可进化 v3](docs/design/orchestration-skill-evolution-v3.md)。
 
 1. **纯 M 与 benchmark 合同**：纯 M 路由、benchmark suite role、独立来源 cluster、evaluator identity 和 CLI 投影已从原工作树合入隔离分支；纯 M 进入 MemoryService 独立 release/snapshot，O/S+M 在原子复合合同前整体拒绝。现阶段只证明定向工程合同，后续仍需真实模型、跨任务复用和独立评价。
-2. **扩大 O/S 候选单位**：从单组件 replace 扩展为整包原子 PackagePatch，支持相互依赖的 role、workflow、skill、prompt 与 manifest 注册表的多组件 add/replace/remove。每个操作要有稳定身份、旧/新摘要、引用校验和不可变 lineage；宿主权限、评价、R 活跃实现与隐藏数据不可变。
-3. **模型驱动的多角色 benchmark**：在同一个 TaskService/canonical adapter 上观察至少两个模型角色、真实工件交接、交付和独立评价；零模型调用的程序适配路径只作 control，不计作编排证据。先用 Workbench 开发任务定位无效工件引用与预算耗尽，再扩展外部任务族。
-4. **反馈搜索与对照**：R0 从来源绑定的失败反馈提出多个 O/S 候选，逐组件证明实际加载和执行；预注册固定多智能体编排、等预算单智能体、memory-only、完整进化四臂，在未见任务上按来源 cluster 比较质量和实际成本。
+2. **扩大 O/S 候选单位**：整包原子 PackagePatch v3 的 role、workflow、skill、prompt 与 manifest 多组件 add/replace/remove 已有确定性闭环；现在须让真实 R0 提出并验证 O 编排改动，而非只生成 S 提示或发布技能改动。增加有界修复与多候选搜索，开发预检在独立选择前证明实际组件激活。
+3. **模型驱动的多角色 benchmark**：同一 TaskService/canonical BBH adapter 上已经观察到两个 MiMo proposer、一个 adjudicator、发布和独立评价；这只是公开小样本资格验证。后续用 Workbench 和新鲜外部任务族检验模型交付、工具使用与跨分布稳健性，零模型调用路径只作 control。
+4. **反馈搜索与对照**：固定多角色、等预算单角色、memory-only、完整进化四臂已有非因果 qualification harness，且能检查真实模型收据与角色结构；它不能代替正式研究。须预注册同来源 cluster 的四臂联合消耗、冻结 M release、外层改进成本和缺测/多重比较规则，再在未见任务上估计质量与成本。
 5. **E1 与后续研究**：在上述完整目标面上闭合真实 provider 候选的 generation、selection、promotion、guard 和后续复用；旧的单组件 qualification pilot 仍可作为兼容回归，但不代表目标架构验收。然后做多 benchmark/seed 聚合、M 的独立因果检验、原子 O/S+M 复合发布和 R0/R1 后代效用比较。
 6. **产品与 demo**：Main 完成持久多轮、附件、澄清、Benchmark/RSI Lab 信息视图；OpenFOAM 的 Re=100/收敛/参考解作为后置独立 demo 扩展。
 

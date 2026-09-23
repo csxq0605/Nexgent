@@ -322,6 +322,9 @@ def test_feedback_bundle_is_immutable_bounded_and_excludes_hidden_evaluator_cont
     assert bundle["episode_refs"][0]["evaluation"]["public_metrics"] == {
         "status": "accepted", "score_available": True, "score": 0.25,
         "accepted": True, "execution_status": "completed"}
+    assert bundle["episode_refs"][0]["outcome"]["public_status"] == {
+        "delivery_status": "delivered", "acceptance_status": "passed",
+        "schema_validation": "passed"}
     assert "DO_NOT_EXPOSE_ME" not in serialized
     assert all("content" not in item for item in bundle["episode_refs"][0]["artifacts"])
     assert all(set(item) == {"sequence", "kind", "digest"}
@@ -332,6 +335,15 @@ def test_feedback_bundle_is_immutable_bounded_and_excludes_hidden_evaluator_cont
     assert all(not ({"request", "result", "arguments", "prompt", "payload"} & set(node))
                for node in trace["nodes"])
     assert generation.feedback(bundle["id"])["record_digest"] == bundle["record_digest"]
+
+
+def test_reference_improver_prompt_separates_quality_from_protocol_failure():
+    prompt = default_improver_package()["files"]["prompts/improve.md"]
+    assert "schema_validation=passed" in prompt
+    assert "did not fail publication" in prompt
+    assert "Digests prove identity only" in prompt
+    assert "object-schema deliverable remains the complete object" in prompt
+    assert "abstain instead of selecting one speculatively" in prompt
 
 
 def test_feedback_execution_trace_hashes_package_controlled_role_names(tmp_path):

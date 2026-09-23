@@ -30,3 +30,13 @@ disjoint BBH selection tasks, then runs the parent/candidate pair under the
 same three-call hard budget and records the independent decision. Use the
 current worktree's `src` and `benchmarks/bbh/src` on `PYTHONPATH` when a
 different editable BBH checkout is installed in the Python environment.
+
+Before spending the selection pool, `python -m
+experiments.orchestration_qualification.preflight_v3 --root PROJECT --data
+BBH_DATA --candidate-id CANDIDATE_ID --seed 1` runs a paired development
+preflight through the same `EvolutionService` and `TaskService`. It rejects
+overlap with the generating feedback task before model calls, records only
+bounded execution/score/activation diagnostics, and makes no promotion
+decision. A candidate that fails publication or schema checks here should be
+revised using new development evidence; a selection split used for revision
+is spent and cannot be counted as independent selection again.

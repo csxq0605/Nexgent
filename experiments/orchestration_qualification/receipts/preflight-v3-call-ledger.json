@@ -1,0 +1,110 @@
+{
+  "schema": "nexgent.package-patch-v3-preflight-call-ledger.v1",
+  "preflight_receipt": "preflight-v3-development.json",
+  "episodes": [
+    {
+      "episode_id": "episode-cf213d7cd1ca4bd3",
+      "model_calls": [
+        {
+          "role": "proposer_a",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        },
+        {
+          "role": "proposer_b",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        },
+        {
+          "role": "adjudicator",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        }
+      ]
+    },
+    {
+      "episode_id": "episode-efec769a0a8b4099",
+      "model_calls": [
+        {
+          "role": "proposer_a",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        },
+        {
+          "role": "proposer_b",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        },
+        {
+          "role": "adjudicator",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        }
+      ]
+    },
+    {
+      "episode_id": "episode-7476122b02dd49c6",
+      "model_calls": [
+        {
+          "role": "proposer_a",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        },
+        {
+          "role": "proposer_b",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        },
+        {
+          "role": "adjudicator",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        }
+      ]
+    },
+    {
+      "episode_id": "episode-2f5b1dfea4194558",
+      "model_calls": [
+        {
+          "role": "proposer_a",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        },
+        {
+          "role": "proposer_b",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        },
+        {
+          "role": "adjudicator",
+          "configured_model": "mimo-v2.6-flash",
+          "observed_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "status": "received"
+        }
+      ]
+    }
+  ]
+}

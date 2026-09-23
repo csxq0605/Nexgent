@@ -28,6 +28,10 @@ from .benchmarks import (
     BenchmarkRegistry, ENTRY_POINT_GROUP, descriptor_of, host_runtime_fingerprint,
     validate_adapter, validate_snapshot, validate_tasks,
 )
+from .costs import (
+    COST_PROJECTION_SCHEMA, STANDARD_COST_WEIGHTS, cost_projection_spec,
+    normalized_work_projection,
+)
 from .meta_evaluation import _LIMIT_KEYS, _USAGE_KEYS
 from .outcomes import classify_benchmark_outcome, outcome_policy
 from .packages import verify_package
@@ -829,11 +833,8 @@ class RSIStudyService:
                            "independence": "cluster_id", "interval": "cluster_bootstrap",
                            "resamples": 10000, "test": "paired_sign_flip",
                            "missing": "fail_closed",
-                           "work_proxy": {"model_calls": 1.0,
-                                          "charged_completion_tokens": 0.001,
-                                          "tool_calls": 1.0,
-                                          "charged_tool_work_units": 1.0,
-                                          "nodes": 1.0}},
+                           "cost_projection": cost_projection_spec(),
+                           "work_proxy": cost_projection_spec()["weights"]},
         }
         record = {
             "schema": STUDY_PLAN_SCHEMA, "id": plan_id, "created_at": time.time(),
@@ -1091,14 +1092,12 @@ class RSIStudyService:
 
     @staticmethod
     def _work(usage):
-        if not isinstance(usage, dict):
-            return None
-        values = [usage.get(key) for key in _USAGE_KEYS]
-        if any(type(value) is not int or value < 0 for value in values):
-            return None
-        return (usage["model_calls"] + usage["charged_completion_tokens"] / 1000.0
-                + usage["tool_calls"] + usage["charged_tool_work_units"]
-                + usage["nodes"])
+        projection = RSIStudyService._work_projection(usage)
+        return projection["conservative_work"] if projection is not None else None
+
+    @staticmethod
+    def _work_projection(usage, weights=STANDARD_COST_WEIGHTS):
+        return normalized_work_projection(usage, weights)
 
     @staticmethod
     def _bootstrap_interval(values, confidence, seed):
@@ -1169,12 +1168,28 @@ class RSIStudyService:
                     or candidate.get("package_digest")
                        != plan["arms"][plan["candidate_arm"]]["package_digest"]):
                 raise ContractError("Study pair differs from its frozen plan")
-            base_work, candidate_work = self._work(baseline["usage"]), self._work(
-                candidate["usage"])
-            if base_work is None or candidate_work is None:
+            statistics = plan.get("statistics", {})
+            projection_spec = statistics.get("cost_projection")
+            if projection_spec is not None:
+                if (not isinstance(projection_spec, dict)
+                        or projection_spec.get("schema") != COST_PROJECTION_SCHEMA
+                        or projection_spec.get("gate_basis") != "conservative_work"):
+                    raise ContractError("Study cost projection is invalid")
+                work_weights = projection_spec.get("weights")
+            else:
+                work_weights = statistics.get("work_proxy")
+            if work_weights is None:
+                # All earlier P5 reports used these same weights even before
+                # the projection became a named shared contract.
+                work_weights = STANDARD_COST_WEIGHTS
+            base_projection = self._work_projection(baseline["usage"], work_weights)
+            candidate_projection = self._work_projection(candidate["usage"], work_weights)
+            if base_projection is None or candidate_projection is None:
                 missing.append({"row_index": index, "baseline_status": "usage_missing",
                                 "candidate_status": "usage_missing"})
                 continue
+            base_work = base_projection["conservative_work"]
+            candidate_work = candidate_projection["conservative_work"]
             pairs.append({
                 "row_index": index, "task_digest": baseline["task_digest"],
                 "statistical_unit_id": task["statistical_unit_id"],
@@ -1185,6 +1200,8 @@ class RSIStudyService:
                 "quality_delta": candidate["score"] - baseline["score"],
                 "success_delta": int(candidate["accepted"]) - int(baseline["accepted"]),
                 "baseline_work": base_work, "candidate_work": candidate_work,
+                "baseline_cost_projection": base_projection,
+                "candidate_cost_projection": candidate_projection,
             })
         by_cluster = {}
         for pair in pairs:
@@ -1205,6 +1222,19 @@ class RSIStudyService:
         candidate_work = sum(pair["candidate_work"] for pair in pairs)
         work_proxy_ratio = (candidate_work / baseline_work if baseline_work > 0
                             else 1.0 if candidate_work == 0 else math.inf)
+        baseline_reported_work = [
+            pair["baseline_cost_projection"]["reported_token_work"] for pair in pairs]
+        candidate_reported_work = [
+            pair["candidate_cost_projection"]["reported_token_work"] for pair in pairs]
+        reported_work_proxy_ratio = None
+        if (all(value is not None for value in baseline_reported_work)
+                and all(value is not None for value in candidate_reported_work)):
+            baseline_reported_total = sum(baseline_reported_work)
+            candidate_reported_total = sum(candidate_reported_work)
+            ratio = (candidate_reported_total / baseline_reported_total
+                     if baseline_reported_total > 0 else
+                     1.0 if candidate_reported_total == 0 else math.inf)
+            reported_work_proxy_ratio = ratio if math.isfinite(ratio) else None
         regressions = sum(delta < 0 for delta in deltas)
         policy = plan["policy"]
         minimum_clusters = _policy_independent_cluster_minimum(policy)
@@ -1251,6 +1281,7 @@ class RSIStudyService:
                         "min_independent_clusters": minimum_clusters,
                         "work_proxy_ratio": (work_proxy_ratio
                                              if math.isfinite(work_proxy_ratio) else None),
+                        "reported_token_work_proxy_ratio": reported_work_proxy_ratio,
                         "regressions": regressions,
                         "quality_interval": interval, "paired_sign_flip_p": p_value},
             "gates": gates, "engineering_acceptance": engineering_pass,

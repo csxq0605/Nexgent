@@ -72,6 +72,17 @@ def _public_evaluation(evaluation):
     return {"digest": digest(evaluation), "public_metrics": _copy(public, "Evaluation metrics")}
 
 
+def _public_outcome(outcome):
+    """Expose host-owned delivery states without evaluator text or artifacts."""
+    if not isinstance(outcome, dict):
+        return None
+    public = {key: deepcopy(outcome[key]) for key in
+              ("delivery_status", "acceptance_status", "schema_validation")
+              if key in outcome}
+    return {"digest": digest(outcome),
+            "public_status": _copy(public, "Outcome status")}
+
+
 def _artifact_ref(artifact):
     producer = artifact.get("producer") or {}
     return {
@@ -381,6 +392,7 @@ class GenerationService:
                 "memory": {"snapshot_id": snapshot["id"], "digest": snapshot["digest"],
                            "item_version_refs": deepcopy(snapshot.get("item_version_refs") or [])[:128]},
                 "evaluation": _public_evaluation(episode.get("evaluation")),
+                "outcome": _public_outcome(episode.get("outcome")),
                 "execution_trace": _public_execution_trace(episode),
                 "usage": {"digest": digest(usage), "summary": {
                     key: usage.get(key) for key in

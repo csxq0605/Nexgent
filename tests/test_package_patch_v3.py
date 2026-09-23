@@ -14,13 +14,14 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from nexgent.tasks.multirole_seed import multirole_package
+from nexgent.tasks.multirole_seed import PUBLISH_SOURCE, multirole_package
 from nexgent.tasks.evolution import EvolutionService, PromotionPolicy
 from nexgent.tasks.generation import GenerationService
 from nexgent.tasks.improver_seed import default_improver_package
 from nexgent.tasks.package_patch_v3 import (
     PACKAGE_PATCH_SCHEMA, apply_package_patch,
 )
+from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.tools import ContractError, ToolRegistry
 
@@ -133,6 +134,101 @@ class Gateway:
                 return {"deliverables": {"result": {"answer": "yes"}}}
 
         return Bound()
+
+
+def _candidate_with_observed_publisher_edit(parent):
+    old = '''        if set(decision) == {name} and (
+                not expected_object or isinstance(decision[name], dict)):
+            contents = {name: decision[name]}
+        else:
+            contents = {name: decision}
+'''
+    new = '''        if name in decision:
+            contents = {name: decision[name]}
+        elif not expected_object or set(decision) - {"rationale"}:
+            contents = {name: decision}
+        else:
+            stripped = {k: v for k, v in decision.items() if k != "rationale"}
+            contents = {name: stripped if stripped else decision}
+'''
+    assert old in PUBLISH_SOURCE
+    files = deepcopy(parent["files"])
+    files["skills/publish.py"] = PUBLISH_SOURCE.replace(old, new)
+    return make_package(files, deepcopy(parent["manifest"]),
+                        provenance={"fixture": "observed-r0-publisher-edit"})
+
+
+class FixedDecisionGateway:
+    def __init__(self, decision):
+        self.decision = deepcopy(decision)
+        self.calls = 0
+
+    def __call__(self, reserve, stop_event):
+        owner = self
+
+        class Bound:
+            def ask(self, role, prompt, payload=None, max_tokens=4000):
+                owner.calls += 1
+                record = {"call_id": f"fixed-{owner.calls}", "role": role,
+                          "model": "FIXED-DECISION", "status": "started",
+                          "reserved_completion_tokens": max_tokens}
+                reserve(record)
+                reserve({**record, "status": "completed",
+                         "billing_status": "usage_reported",
+                         "usage": {"prompt_tokens": 1, "completion_tokens": 1,
+                                   "total_tokens": 2}})
+                if role == "adjudicator":
+                    return deepcopy(owner.decision)
+                return {"proposal": role}
+
+        return Bound()
+
+
+def _run_fixed_decision(root, package, decision):
+    gateway = FixedDecisionGateway(decision)
+    tasks = TaskService(root, tools=ToolRegistry(), gateway_factory=gateway)
+    episode = tasks.create(
+        "Publish one schema-bound result",
+        deliverables=[{"name": "result", "schema": {
+            "type": "object", "additionalProperties": False,
+            "required": ["result"],
+            "properties": {"result": {"type": "string"}}}}],
+        package=package,
+        budget={"max_model_calls": 3, "max_completion_tokens": 4800,
+                "max_tool_calls": 0, "max_nodes": 30})
+    return tasks, tasks.run(episode["id"])
+
+
+def test_publisher_counterfactual_separates_shared_shape_failure_from_edit(tmp_path):
+    parent = multirole_package()
+    candidate = _candidate_with_observed_publisher_edit(parent)
+
+    # This is the shape observed in both rejected candidate selection Episodes.
+    # It bypasses the edited fallback, so both package versions reject the same
+    # scalar value for an object-schema deliverable.
+    observed = {"deliverables": {"result": "scalar"}}
+    _, parent_observed = _run_fixed_decision(tmp_path / "parent-observed", parent,
+                                             observed)
+    _, candidate_observed = _run_fixed_decision(
+        tmp_path / "candidate-observed", candidate, observed)
+    assert parent_observed["status"] == "failed"
+    assert candidate_observed["status"] == "failed"
+    assert "is not of type 'object'" in parent_observed["nodes"][
+        "plan/nodes/publish"]["error"]
+    assert "is not of type 'object'" in candidate_observed["nodes"][
+        "plan/nodes/publish"]["error"]
+
+    # The edit does have a latent effect for a different top-level shape: the
+    # parent preserves the object, while the candidate unwraps it to a scalar.
+    top_level = {"result": "scalar"}
+    parent_tasks, parent_top = _run_fixed_decision(
+        tmp_path / "parent-top", parent, top_level)
+    _, candidate_top = _run_fixed_decision(
+        tmp_path / "candidate-top", candidate, top_level)
+    assert parent_top["status"] == "completed"
+    assert parent_tasks.store.read(
+        parent_top["output_refs"]["result"], parent_top["id"])["content"] == top_level
+    assert candidate_top["status"] == "failed"
 
 
 def test_atomic_add_replace_remove_component_set_executes(tmp_path):

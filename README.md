@@ -73,11 +73,11 @@ flowchart LR
 
 后续自进化的对象是版本化智能体行为，而不是宿主评价器或领域答案：任务编排与角色交接、技能实现和提示协议、记忆写入与检索策略，以及用于诊断和产生改进的策略。真实任务的交付质量、独立 benchmark 分数、评审缺陷、工具错误、恢复结果、回归和资源成本共同构成反馈；代理自评只能作为其中一项有来源的信号。
 
-闭环依次留下可核查证据：只从当前通道父包的 development Episode 捕获 `FeedbackBundle`；独立、版本化且冻结的 `R0` 只能输出声明式 `BehaviorPatch`；可信宿主验证补丁只改变编排 O、记忆策略 M 或技能/提示协议 S，并构造不可变 child `AgentPackage`；冻结候选在 selection 任务上与父包交错配对，按预登记政策形成 decision；只有由 `GenerationService` 真实执行 R0 并闭合生成收据的 eligible candidate 才有部署资格，受控导入的 candidate 只进入研究 archive；显式 compare-and-swap 晋升必须绑定预登记 monitor plan；guard plan 的完整任务多重集只能消费一次，缺项、重复项或 usage 不完整均 fail closed，并可沿部署边回滚。未通过的候选和缺测全部保留。
+闭环依次留下可核查证据：只从当前通道父包的 development Episode 捕获 `FeedbackBundle`；独立、版本化且冻结的 `R0` 输出声明式 O/S 包补丁或独立的纯 M 记忆补丁；可信宿主验证后分别构造不可变 child `AgentPackage` 或 MemoryService release，当前拒绝 O/S+M 混合补丁；冻结候选在 selection 任务上与父版本配对，按预登记政策形成 decision；只有真实执行 R0 且闭合生成收据的 eligible candidate 才有部署资格；显式 compare-and-swap 晋升及 guard 保护后续使用。未通过的候选和缺测全部保留。
 
 paired plan 冻结宿主能够重算的 execution environment、工具描述、运行时实现摘要和 arm schedule。当前计划对象不会预先完整冻结实际 provider/model；二者由每次模型调用的 receipt 证明，正式实验再核验这些收据是否符合预登记配置。选择门中的 `cost` 是由模型调用、charged completion tokens、工具调用和节点用量构成的透明 normalized work unit，便于同一协议内比较，不代表供应商货币费用。
 
-这条链有三种不同证据等级。E0 确定性工程合同可以证明身份、隔离、计划执行/修订/恢复、门控、递归版本、加载和回滚等**机制**；E1 真实 provider Episode 才能证明模型确实根据反馈产生并执行了行为变化；多个冻结任务、重复和对照才能支持**统计 RSI 效益**。manifest-v2/ExecutablePlan 与反馈驱动 RSI 的当前结论上限仍是 E0。正向 E1 exporter 与一次性 qualification runner 已实现并通过伪造反例审计，但真实 MiMo generation 尚未执行，仓库中没有对应尝试收据；不能声称 E1 模型生成激活、候选改进或自我迭代收益已经成立。P1 的真实普通任务交付和 P2 的真实求解器 smoke 是各自执行路径的证据，不抬高这一 RSI 证据等级。
+这条链有三种不同证据等级。E0 确定性工程合同可以证明身份、隔离、计划执行/修订/恢复、门控、递归版本、加载和回滚等**机制**；E1 真实 provider Episode 才能证明模型确实根据反馈产生并执行了行为变化；多个冻结任务、重复和对照才能支持**统计 RSI 效益**。真实 MiMo v2.6-flash 已从 development 反馈生成两个合法的 S 候选：第一个在两项独立 selection 上为父包 2/2、候选 0/2，但改动分支未执行，不能因果归咎于它；第二个提示候选实际加载，开发预检为候选 2/2、父包 0/2，独立 selection 两者均为 1/2。两个候选均未晋升；收据见[资格结果](experiments/orchestration_qualification/RESULTS.md)。因此已有真实生成和选择证据，仍没有正向 RSI 效果、O 编排改进或递归收益。P1 的普通任务交付和 P2 的求解器 smoke 不抬高这一 RSI 结论。
 
 工程上已分别接通多组件 O/S 的整包原子候选和纯 M 的独立 MemoryService release/snapshot；O/S+M 复合发布仍待实现。下一阶段需在真实模型驱动的多角色 benchmark 上，与固定编排、等预算单智能体和 memory-only 做未见任务对照，并验证改进后跨任务复用。单组件 E1 pilot 保留为兼容资格检查，不能代表目标架构验收。详见[编排与技能可进化 v3](docs/design/orchestration-skill-evolution-v3.md)与[分阶段计划](REFACTOR_PLAN.md)。
 
