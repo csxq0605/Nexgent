@@ -21,4 +21,17 @@ $env:PYTHONPATH=(Resolve-Path 'src').Path
 
 ## DeepSeek Harness 路径
 
-尚未实跑；不能从文档中的 scoped registry、Creator 或插件管理接口推断 Nexgent Episode 桥接成立。使用固定版本 `46a7f68` 按共同合同测试后再填入结果。
+固定 `dsh-v0.1.7-rc.1` / `46a7f68b0922371ce7144b668b90e377d8e799f4` 已在独立目录检出，`git rev-parse HEAD` 与目标 SHA 一致。使用本机 Node `24.15.0`，把 Corepack 缓存放在试验工作区以取得仓库指定 pnpm `11.7.0`。`corepack pnpm install --frozen-lockfile --ignore-scripts` 通过；完整 `corepack pnpm run build` 在宿主环境退出码 0，`corepack pnpm dsh --version` 返回 `0.1.7-rc.1`。
+
+首次受限构建遇到 Node `os.userInfo()` 的 `uv_os_get_passwd returned ENOMEM`；单独执行同一调用在受限环境失败、宿主环境成功。重跑构建成功，故这次不是上游 TypeScript 编译错误。依赖安装采用 `--ignore-scripts`，暂未验证依赖构建脚本的所有功能。
+
+定向上游检查：
+
+| 运行项 | 实际结果 | 证据边界 |
+| --- | --- | --- |
+| `corepack pnpm exec vitest run packages/core/tools/tests/scoped.spec.ts --reporter=dot` | 27 passed | 证明固定源码中 scope-aware ToolRuntime 对显式注册的可见性、调用、释放合同；不是 Nexgent 任务或模型开发插件 |
+| `corepack pnpm exec vitest run --config vitest.e2e.config.ts apps/cli/tests/profiles/headless/tests/source-tool.built.e2e.ts --reporter=dot` | 1 passed | 官方命名 headless profile 经固定模型接口到宿主工具及持久 `tool/call`／`tool/result`；这是上游自带 shell smoke，不是本合同的 `multiply` 工具或 Episode 桥接 |
+
+第一次运行 headless 测试没有传其 `vitest.e2e.config.ts`，默认配置只收 `*.spec.ts`，因此报 `No test files found`；使用专用配置后通过。两项定向测试与完整源码构建都只在固定上游检出中运行，不能算 Nexgent 实现通过。
+
+**共同合同仍未通过：**尚需在官方 profile 中完成同一个 `multiply(6,7)` 的模型选择、任务作用域装入／卸载和 Nexgent Episode／评价投影。上游日志自身不包含 Nexgent 所需的 handler digest 与能力版本，这些字段必须由桥接层补充。Creator 的 profile 持久安装也不能代替任务内隔离试装。
