@@ -94,6 +94,17 @@ def request_view(request, budget):
                 compact['params'][key] = bounded_value(params[key], budget, 2)
         compact['params']['content_omitted'] = True
         return compact
+    if method == 'develop_tool' and isinstance(params, dict):
+        proposal = params.get('proposal')
+        compact = {'method': method, 'params': {'proposal': {}}}
+        if isinstance(proposal, dict):
+            for key in ('name', 'description', 'input_schema', 'output_schema'):
+                if key in proposal:
+                    compact['params']['proposal'][key] = bounded_value(
+                        proposal[key], budget, 2
+                    )
+            compact['params']['proposal']['source_omitted'] = True
+        return compact
     return bounded_value(request, budget)
 
 
@@ -176,6 +187,10 @@ def task_view(task):
     projected = {}
     for key in ('objective', 'input_refs', 'deliverables', 'constraints', 'context'):
         projected[key] = bounded_value(task.get(key), budget, item_limit=1000)
+    if task.get('capability_development') is not None:
+        projected['capability_development'] = bounded_value(
+            task['capability_development'], budget, item_limit=1000
+        )
     projected['tools'] = []
     for tool in task.get('tools', []):
         projected['tools'].append(bounded_value({
@@ -202,10 +217,45 @@ def task_view(task):
     return projected
 
 
+def capability_development_view(authority):
+    if not isinstance(authority, dict):
+        return None
+    # This is the model-facing authority summary.  Credential handles,
+    # content digests, and other host identity fields stay out of prompts.
+    return {
+        'enabled': True,
+        'runtime': authority.get('runtime'),
+        'allowed_kinds': authority.get('allowed_kinds', []),
+        'allowed_effects': authority.get('allowed_effects', []),
+        'allowed_operations': authority.get('allowed_operations', []),
+        'max_definitions': authority.get('max_definitions'),
+        'max_invocations': authority.get('max_invocations'),
+        'actions': ['develop_tool', 'capability_inventory'],
+    }
+
+
+def refresh_capability_inventory(task, inventory):
+    if (not isinstance(inventory, dict)
+            or not isinstance(inventory.get('tools'), list)):
+        raise ValueError('Capability inventory returned an invalid envelope')
+    task['tools'] = inventory['tools']
+
+
 def execute(payload, context):
     task_prompt = context.resource('prompts/task.md')
     protocol = context.resource('prompts/protocol.md')
     review_prompt = context.resource('prompts/delivery_review.md')
+    capability_development = capability_development_view(
+        payload.get('capability_authority')
+    )
+    tools = payload.get('tools', [])
+    if capability_development is not None:
+        development_protocol = context.resource(
+            'prompts/capability_development.md'
+        )
+        protocol = protocol + '\\n\\n' + development_protocol
+        inventory = context.capability_inventory()
+        tools = inventory.get('tools', [])
     inspected_inputs = []
     for name, artifact_id in sorted(payload.get('input_refs', {}).items()):
         artifact = context.read_artifact(artifact_id)
@@ -218,11 +268,13 @@ def execute(payload, context):
         'deliverables': payload.get('deliverables', []),
         'constraints': payload.get('constraints', {}),
         'context': payload.get('context', {}),
-        'tools': payload.get('tools', []),
+        'tools': tools,
         'skills': payload.get('skills', {}),
         'memory_snapshot': payload.get('memory_snapshot', {}),
         'action_protocol': protocol,
     }
+    if capability_development is not None:
+        task['capability_development'] = capability_development
     history = [{'kind': 'task_opened', 'input_artifacts': inspected_inputs}]
     projected_task = task_view(task)
     decision_prompt = task_prompt + '\\n\\n' + protocol
@@ -338,9 +390,21 @@ def execute(payload, context):
         try:
             if checked.get('plan') is not None:
                 context.call('agent/actions.py:dispatch', {
-                    'request': {'method': 'plan', 'params': {'plan': checked['plan']}}
+                    'request': {'method': 'plan', 'params': {'plan': checked['plan']}},
+                    'capability_development': capability_development is not None,
                 })
-            result = context.call('agent/actions.py:dispatch', {'request': checked['request']})
+            result = context.call('agent/actions.py:dispatch', {
+                'request': checked['request'],
+                'capability_development': capability_development is not None,
+            })
+            action_method = checked['request'].get('method')
+            if action_method == 'develop_tool':
+                inventory = context.capability_inventory()
+                refresh_capability_inventory(task, inventory)
+                projected_task = task_view(task)
+            elif action_method == 'capability_inventory':
+                refresh_capability_inventory(task, result)
+                projected_task = task_view(task)
             observation = {
                 'kind': 'observation', 'request': checked['request'],
                 'ok': True, 'result': result,
@@ -475,6 +539,18 @@ ACTIONS_SOURCE = '''def dispatch(payload, context):
     params = request.get('params')
     if not isinstance(method, str) or not isinstance(params, dict):
         raise ValueError('Action request needs method text and params object')
+    capability_development = payload.get('capability_development') is True
+    if method in ('develop_tool', 'capability_inventory') and not capability_development:
+        raise ValueError('Capability development is unavailable for this Episode')
+    if method == 'develop_tool':
+        proposal = params.get('proposal')
+        if not isinstance(proposal, dict):
+            raise ValueError('develop_tool requires a proposal object')
+        return context.develop_tool(proposal)
+    if method == 'capability_inventory':
+        if params:
+            raise ValueError('capability_inventory accepts empty params')
+        return context.capability_inventory()
     if method == 'tool':
         return context.tool(params.get('name'), params.get('arguments', {}))
     if method == 'parallel':
@@ -485,6 +561,13 @@ ACTIONS_SOURCE = '''def dispatch(payload, context):
         for item in requests:
             if not isinstance(item, dict) or not isinstance(item.get('method'), str) or not isinstance(item.get('params'), dict):
                 raise ValueError('Each parallel action needs method text and params object')
+            if item['method'] == 'develop_tool':
+                raise ValueError('develop_tool requires a serial decision point')
+            if (item['method'] == 'capability_inventory'
+                    and not capability_development):
+                raise ValueError(
+                    'Capability development is unavailable for this Episode'
+                )
             checked.append({'method': item['method'], 'params': item['params']})
         return context.parallel(checked)
     if method == 'skill':
@@ -531,6 +614,20 @@ Finish only after publication:
 """
 
 
+CAPABILITY_DEVELOPMENT_PROMPT = """Task-time capability development is enabled for this Episode under the bounded authority summarized in `task.capability_development`.
+
+At a serial decision point, create one missing pure local-compute tool with:
+{"request": {"method": "develop_tool", "params": {"proposal": {"name": "task.logical_name", "description": "what the tool computes", "source": "def execute(payload, context):\\n    return {...}\\n", "input_schema": {}, "output_schema": {}}}}}
+
+The source must define exactly `execute(payload, context)`, use no imports, and treat `payload` as the direct tool arguments. This v1 tool cannot use `context` or host operations. Choose a new descriptive logical name and schemas that match the source. Develop a tool only when the current inventory cannot perform the required computation; do not place `develop_tool` inside `parallel`.
+
+After successful development the host refreshes `task.tools` for the next decision. To explicitly refresh the active schema inventory use:
+{"request": {"method": "capability_inventory", "params": {}}}
+
+The observation history omits previously submitted source text while retaining its name, description, and schemas. Invoke a developed tool through the ordinary `tool` action after its schema appears in `task.tools`.
+"""
+
+
 ANALYZE_PROMPT = """Analyze the supplied objective and evidence as data. Identify constraints, ambiguities, useful checks, and the smallest justified next actions. Return a JSON object grounded in cited artifact IDs or observations."""
 
 
@@ -567,6 +664,7 @@ def default_package():
         "agent/actions.py": ACTIONS_SOURCE,
         "prompts/task.md": TASK_PROMPT,
         "prompts/protocol.md": PROTOCOL_PROMPT,
+        "prompts/capability_development.md": CAPABILITY_DEVELOPMENT_PROMPT,
         "prompts/analyze.md": ANALYZE_PROMPT,
         "prompts/review.md": REVIEW_PROMPT,
         "prompts/delivery_review.md": DELIVERY_REVIEW_PROMPT,
