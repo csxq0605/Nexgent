@@ -4,7 +4,7 @@
 
 | 阶段 | 目标与来源 | 当前实际证据 | 出口状态／下一项 |
 | --- | --- | --- | --- |
-| A 内核选型 | [同题小样](../../experiments/kernel_spike/CONTRACT.md)；[DeepSeek 架构](https://github.com/deepseek-ai/deepseek-harness/blob/46a7f68b0922371ce7144b668b90e377d8e799f4/docs/architecture.md)服务／provider／工具分离 | [A1 固定源码对照](kernel-reference-audit-20260923.md)；[A2 运行记录](../../experiments/kernel_spike/RESULTS.md)：Python 预先授权路径通过、任务内装入拒绝；DeepSeek 源码构建和上游 scoped/headless 定向测试通过，尚无同题任务与 Episode 桥接 | A1 已完成，A2 实现中；补同题任务生命周期／恢复与评价投影，再提交 ADR |
+| A 内核选型 | [同题小样](../../experiments/kernel_spike/CONTRACT.md)；[DeepSeek 架构](https://github.com/deepseek-ai/deepseek-harness/blob/46a7f68b0922371ce7144b668b90e377d8e799f4/docs/architecture.md)服务／provider／工具分离 | [A1 固定源码对照](kernel-reference-audit-20260923.md)；[A2 运行记录](../../experiments/kernel_spike/RESULTS.md)：Python 预先授权路径通过、任务内装入拒绝；DeepSeek 固定模型同题 headless 实跑两次通过作用域装入／卸载、模型接口、持久调用与最终交付，尚无 Episode 桥接 | A1 已完成，A2 实现中；补评价投影、重启恢复和真实模型检查，再提交 ADR |
 | B 能力内核 | DeepSeek scoped registry、可替换 loop；Nexgent 自有 Episode 和权限账本 | 已安装 DomainPack 工具；`ToolRegistry` 只有注册，没有任务作用域装入／卸载 | 未开始；依赖 A 选型 |
 | C 自主能力开发 | DeepSeek Creator 的发现／管理入口；通用工具与服务插件双对象 | `develop_skill` 受限技能的局部实证；无通用插件运行 | 未开始；需真实模型开发并使用两种插件能力 |
 | D 执行与编排 | [AutoSci](https://arxiv.org/abs/2605.31468v1)技能／图更新、[ADAS](https://arxiv.org/abs/2408.08435v2)代码 Agent、[AFlow](https://arxiv.org/abs/2410.10762v4)工作流搜索 | 真实模型完成 7 节点 DAG；反馈后的第二版图未完成 | 未达新出口；需非 DAG 后端与真实中途策略修改 |
