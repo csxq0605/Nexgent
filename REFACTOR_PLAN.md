@@ -8,7 +8,7 @@
 
 唯一产品是 **通用 RSI 智能体框架 Nexgent**。它应能组织智能体完成普通任务，并通过独立 benchmark 检验任务能力、持久改进和递归效用。科学发现与 OpenFOAM 都是可选插件/场景；核心不能依赖 CFD 方程、求解器、case、论文五阶段流程或某个 demo 的评分。
 
-进一步的目标架构已固定为[无状态底座与任务专一型自设计团队](docs/design/stateless-kernel-and-self-designed-teams.md)：同一通用 Compiler/Runtime 接纳由智能体为当前任务提出的团队、技能和协作程序；外部 Store 保存任务状态、记忆与版本。P1 的固定多角色包和 P3/P5 的研究执行器只是底座及资格工具，不能充当“已能自主形成并演化任务专一团队”的验收。后续实施先补任务驱动的设计／执行／能力开发／复用路径，再扩大 demo 与统计试验。
+进一步的目标架构已固定为[无状态底座与任务专一型自设计团队](docs/design/stateless-kernel-and-self-designed-teams.md)，任务时的编排合同见[自编排图架构](docs/design/task-time-self-orchestration.md)：同一通用 Compiler/Runtime 接纳由智能体为当前任务提出的团队、技能和协作程序；外部 Store 保存任务状态、记忆与版本。P1 的固定多角色包和 P3/P5 的研究执行器只是底座及资格工具。当前分支已新增任务时图提案、图操作编译、pending 修订和生成图恢复；这只满足自主形成执行图的首个纵切，不等于技能开发和跨任务演化。后续实施先补任务驱动的设计／执行／能力开发／复用路径，再扩大 demo 与统计试验。
 
 当前实现阶段仍遵守该产品边界。定位依据见[设计决策](docs/design/product-and-refactor-decision.md)，接口和执行模型见[架构](docs/design/agent-architecture-vnext.md)与[ExecutablePlan v1 / manifest v2](docs/design/executable-plan-v1.md)，P3 的现行合同见[反馈演化控制面](docs/design/p3-feedback-evolution-control-plane.md)，研究依据与冻结实验见[P3 跨任务 RSI 设计](docs/research/p3-cross-task-rsi-design-20260920.md)及[RSI orchestration research refresh](docs/research/rsi-orchestration-refresh-20260921.md)。
 
@@ -49,7 +49,7 @@
 
 AgentPackage manifest v2 新增显式 role、workflow、component 与 orchestrator 注册。component 以稳定 id 绑定 O/M/S 分类和 role/workflow/skill/entry/resource 引用；v2 谱系不能降级到 v1，也不能让同一稳定 component id 悄然改变 class/kind/ref。O 类 workflow orchestrator 的冻结 JSON workflow 会在执行边界编译为 `nexgent.executable-plan.v1`，由宿主核验角色能力、组件引用、Episode 工具 lease、控制/工件边、join、局部上限、失败路由和 revision 规则，再通过真实模型、技能、工具、委派与发布路径运行。
 
-计划 revision 只允许切换到同一不可变 AgentPackage 内已注册的 workflow，并只能替换尚未开始的子图；运行中和终态节点及其收据不可改写。恢复时持久计划只是投影，宿主 RPC journal、工件可见性和节点收据才是权威证据：已完成节点通过交叉核验后复用，已 admission 却没有持久 outcome 的 running 节点进入 `recovery_required`，不盲目重放外部副作用。该纵切面证明声明、执行、修订和恢复合同已连通，不证明模型会生成优质计划或在反馈后选择有效修订。详见[ExecutablePlan v1 与 manifest v2](docs/design/executable-plan-v1.md)。
+原计划 revision 只允许切换到同一不可变 AgentPackage 内已注册的 workflow；现在还可由已完成节点的 `proposal_path` 读取模型图提案，在 manifest 与 Episode lease 内新增／删除／改写 pending 节点和边。运行中和终态节点及其收据不可改写。生成图的已解析完整内容与摘要一起持久化；恢复时持久计划仍只是投影，宿主 RPC journal、工件可见性和节点收据才是权威证据。已完成节点通过交叉核验后复用，已 admission 却没有持久 outcome 的 running 节点进入 `recovery_required`。该纵切面证明声明、执行、任务时生成图修订和恢复合同已连通，不证明模型能稳定产生高质量组织或跨任务改进。详见[ExecutablePlan v1 与 manifest v2](docs/design/executable-plan-v1.md)和[真实模型探针](docs/research/task-time-self-orchestration-live-20260923.md)。
 
 代码与确定性测试已经覆盖受限子进程、版本化多文件包、模型/工具节点、显式工件、当前记忆快照、树级共享预算、停止恢复、交付 schema 核验、包内 reviewer 修订和冻结 benchmark 评价。简单任务仍可走单体路径，不靠强制增加角色数制造协作证据。
 

@@ -430,6 +430,8 @@ class TaskService:
         """Remove recovery-only requests and receipts from user-facing state."""
         state = deepcopy(state)
         state.pop("plan_node_receipts", None)
+        state.pop("plan_workflow_snapshot", None)
+        state.pop("plan_workflow_versions", None)
         context = state.get("task", {}).get("context", {})
         if context.get("rsi_role") == "candidate_generation":
             memory_patch_ref = state.get("output_refs", {}).get("memory_patch")
@@ -444,6 +446,8 @@ class TaskService:
         for child in state.get("children", []):
             if isinstance(child, dict):
                 child.pop("plan_node_receipts", None)
+                child.pop("plan_workflow_snapshot", None)
+                child.pop("plan_workflow_versions", None)
                 for node in child.get("nodes", {}).values():
                     if isinstance(node, dict):
                         for key in ("request", "plan_receipt", "result"):
@@ -478,93 +482,110 @@ class TaskService:
             return None
         return component_id, component["ref"]
 
-    def _materialize_workflow(self, package, workflow_ref, capability_lease):
-        """Resolve node references only against the frozen v2 manifest and lease."""
+    def _materialize_workflow(self, package, workflow_ref, capability_lease,
+                              *, proposed_workflow=None):
+        """Resolve a frozen or proposed graph against the same manifest and lease."""
         manifest = package["manifest"]
         registered = manifest["workflows"].get(workflow_ref)
-        if not isinstance(registered, dict):
-            raise ContractError(f"Workflow is not registered: {workflow_ref}")
-        try:
-            workflow = json.loads(package["files"][registered["ref"]])
-        except (KeyError, TypeError, ValueError):
-            raise ContractError(f"Registered workflow cannot be loaded: {workflow_ref}") from None
+        if proposed_workflow is None:
+            if not isinstance(registered, dict):
+                raise ContractError(f"Workflow is not registered: {workflow_ref}")
+            try:
+                workflow = json.loads(package["files"][registered["ref"]])
+            except (KeyError, TypeError, ValueError):
+                raise ContractError(f"Registered workflow cannot be loaded: {workflow_ref}") from None
+        else:
+            workflow = _json_copy(proposed_workflow, label="Proposed workflow")
+            if len(json.dumps(workflow, ensure_ascii=False)) > 240000:
+                raise ContractError("Proposed workflow exceeds the task-time graph size limit")
         if not isinstance(workflow, dict):
-            raise ContractError("Registered workflow must contain an object")
+            raise ContractError("Workflow must contain an object")
         workflow = deepcopy(workflow)
-        workflow.setdefault("input_schema", deepcopy(registered.get("input_schema", {})))
-        workflow.setdefault("output_schema", deepcopy(registered.get("output_schema", {})))
+        if registered is not None:
+            workflow.setdefault("input_schema", deepcopy(registered.get("input_schema", {})))
+            workflow.setdefault("output_schema", deepcopy(registered.get("output_schema", {})))
+        from .workflows import _validate
+        _validate(workflow)
         roles = manifest["roles"]
         components = manifest["components"]
-        role_artifact_targets = {
-            edge.get("consumer_node") for edge in workflow.get("artifact_edges", [])
-            if isinstance(edge, dict) and edge.get("input_port") == "role"
-        }
-        for node in workflow.get("nodes", []):
-            if not isinstance(node, dict):
-                raise ContractError("Workflow nodes must be objects")
-            method = node.get("method")
-            if method not in CAPABILITIES | {"join", "loop"}:
-                raise ContractError("Workflow operator is not registered by the host")
-            role_ref = node.get("role_ref")
-            component_ref = node.get("component_ref")
-            component = None
-            if component_ref is not None:
-                component = components.get(component_ref)
-                if not isinstance(component, dict):
+        def authorize_nodes(definition):
+            role_artifact_targets = {
+                edge.get("consumer_node") for edge in definition.get("artifact_edges", [])
+                if isinstance(edge, dict) and edge.get("input_port") == "role"
+            }
+            for node in definition.get("nodes", []):
+                if not isinstance(node, dict):
+                    raise ContractError("Workflow nodes must be objects")
+                method = node.get("method")
+                if method not in CAPABILITIES | {"join", "loop"}:
+                    raise ContractError("Workflow operator is not registered by the host")
+                role_ref = node.get("role_ref")
+                component_ref = node.get("component_ref")
+                component = None
+                if component_ref is not None:
+                    component = components.get(component_ref)
+                    if not isinstance(component, dict):
+                        raise ContractError(
+                            f"Workflow component is not registered: {component_ref}")
+                if role_ref is not None:
+                    role = roles.get(role_ref)
+                    if not isinstance(role, dict):
+                        raise ContractError(f"Workflow role is not registered: {role_ref}")
+                    if method in CAPABILITIES and method not in role.get("capabilities", []):
+                        raise PermissionError(
+                            f"Role {role_ref!r} is not leased capability {method!r}")
+                    if (component is None
+                            or (component.get("kind"), component.get("ref"))
+                            != ("role", role_ref)):
+                        raise ContractError(
+                            "Workflow role_ref requires an explicit matching role component_ref")
+                params = node.get("params", {})
+                if method == "ask":
+                    if role_ref is None or component_ref is None:
+                        raise ContractError(
+                            "Workflow ask nodes require explicit role_ref and component_ref")
+                    if ("role" in node.get("bindings", {})
+                            or node.get("id") in role_artifact_targets):
+                        raise ContractError(
+                            "Workflow ask role is derived from role_ref and cannot be bound")
+                    if "role" in params and params["role"] != role_ref:
+                        raise ContractError(
+                            "Workflow ask params.role conflicts with its frozen role_ref")
+                    params["role"] = role_ref
+                    prompt_ref = roles[role_ref].get("prompt_ref")
+                    if prompt_ref is not None:
+                        params.setdefault("prompt", package["files"][prompt_ref])
+                if method == "tool":
+                    tool_name = params.get("name") if isinstance(params, dict) else None
+                    if not isinstance(tool_name, str) or tool_name not in capability_lease:
+                        raise PermissionError(
+                            "Workflow tool operator must resolve to the Episode capability lease")
+                    self.tools.get(tool_name)
+                if method == "skill":
+                    skill_name = params.get("name") if isinstance(params, dict) else None
+                    if not isinstance(skill_name, str) or skill_name not in manifest.get("skills", {}):
+                        raise ContractError("Workflow skill operator must resolve to a frozen skill")
+                    if (role_ref is not None or component is None
+                            or (component.get("kind"), component.get("ref"))
+                            != ("skill", skill_name)):
+                        raise ContractError(
+                            "Workflow skill nodes require an explicit matching skill component_ref")
+                if (method in {"join", "loop"} and (role_ref is not None or component_ref is not None)):
+                    raise ContractError("Local workflow nodes cannot declare role_ref or component_ref")
+                if (method not in {"ask", "skill", "join", "loop"}
+                        and role_ref is None and component_ref is not None):
                     raise ContractError(
-                        f"Workflow component is not registered: {component_ref}")
-            if role_ref is not None:
-                role = roles.get(role_ref)
-                if not isinstance(role, dict):
-                    raise ContractError(f"Workflow role is not registered: {role_ref}")
-                if method in CAPABILITIES and method not in role.get("capabilities", []):
-                    raise PermissionError(
-                        f"Role {role_ref!r} is not leased capability {method!r}")
-                if (component is None
-                        or (component.get("kind"), component.get("ref"))
-                        != ("role", role_ref)):
-                    raise ContractError(
-                        "Workflow role_ref requires an explicit matching role component_ref")
-            params = node.get("params", {})
-            if method == "ask":
-                if role_ref is None or component_ref is None:
-                    raise ContractError(
-                        "Workflow ask nodes require explicit role_ref and component_ref")
-                if ("role" in node.get("bindings", {})
-                        or node.get("id") in role_artifact_targets):
-                    raise ContractError(
-                        "Workflow ask role is derived from role_ref and cannot be bound")
-                if "role" in params and params["role"] != role_ref:
-                    raise ContractError(
-                        "Workflow ask params.role conflicts with its frozen role_ref")
-                params["role"] = role_ref
-                prompt_ref = roles[role_ref].get("prompt_ref")
-                if prompt_ref is not None:
-                    params.setdefault("prompt", package["files"][prompt_ref])
-            if method == "tool":
-                tool_name = params.get("name") if isinstance(params, dict) else None
-                if not isinstance(tool_name, str) or tool_name not in capability_lease:
-                    raise PermissionError(
-                        "Workflow tool operator must resolve to the Episode capability lease")
-                self.tools.get(tool_name)
-            if method == "skill":
-                skill_name = params.get("name") if isinstance(params, dict) else None
-                if not isinstance(skill_name, str) or skill_name not in manifest.get("skills", {}):
-                    raise ContractError("Workflow skill operator must resolve to a frozen skill")
-                if (role_ref is not None or component is None
-                        or (component.get("kind"), component.get("ref"))
-                        != ("skill", skill_name)):
-                    raise ContractError(
-                        "Workflow skill nodes require an explicit matching skill component_ref")
-            if (method in {"join", "loop"} and (role_ref is not None or component_ref is not None)):
-                raise ContractError("Local workflow nodes cannot declare role_ref or component_ref")
-            if (method not in {"ask", "skill", "join", "loop"}
-                    and role_ref is None and component_ref is not None):
-                raise ContractError(
-                    f"Workflow {method} nodes cannot declare component_ref without role_ref")
+                        f"Workflow {method} nodes cannot declare component_ref without role_ref")
+                if method == "loop":
+                    if not isinstance(node.get("body"), dict):
+                        raise ContractError("Loop body must be a workflow")
+                    authorize_nodes(node["body"])
+        authorize_nodes(workflow)
         for rule in workflow.get("revision_rules", []):
-            if not isinstance(rule, dict) or rule.get("workflow_ref") not in manifest["workflows"]:
-                raise ContractError("Workflow revision must resolve to a frozen registered workflow")
+            if (not isinstance(rule, dict)
+                    or ("workflow_ref" in rule and
+                        rule["workflow_ref"] not in manifest["workflows"])):
+                raise ContractError("Workflow revision references an unknown frozen workflow")
         def has_retry(definition):
             return (any(route.get("action") == "retry"
                         for route in definition.get("failure_routes", [])
@@ -580,9 +601,13 @@ class TaskService:
                 "ExecutablePlan v1 runtime does not support RETRY failure routes")
         return workflow
 
-    def _persist_plan(self, identity, execution, receipts, workflow_ref):
+    def _persist_plan(self, identity, execution, receipts, workflow_ref,
+                      workflow_snapshot=None):
         """Save the plan projection; RPC and artifact ledgers remain authoritative."""
         from .orchestration import NodeStatus
+
+        if workflow_snapshot is not None and workflow_ref != "generated://" + digest(workflow_snapshot):
+            raise RecoveryRequired("Generated workflow identity differs from its content")
 
         previous = self.store.get(identity)
         previous_ref = previous.get("current_plan_ref")
@@ -618,6 +643,12 @@ class TaskService:
             } for revision in execution.revisions]
             state["plan_execution"] = execution.as_dict()
             state["plan_workflow_ref"] = workflow_ref
+            state["plan_workflow_snapshot"] = deepcopy(workflow_snapshot)
+            if workflow_snapshot is not None:
+                versions = state.setdefault("plan_workflow_versions", {})
+                if workflow_ref in versions and versions[workflow_ref] != workflow_snapshot:
+                    raise RecoveryRequired("Generated workflow version changed after publication")
+                versions[workflow_ref] = deepcopy(workflow_snapshot)
             state["plan_node_receipts"] = deepcopy(receipts)
             state["plan"] = execution.plan.as_dict()
             active_paths = set()
@@ -743,9 +774,27 @@ class TaskService:
 
         state = self.store.get(identity)
         workflow_ref = [state.get("plan_workflow_ref") or initial_workflow_ref]
-        loaded_workflow_refs = {workflow_ref[0]}
+        loaded_workflow_refs = (
+            {workflow_ref[0]} if workflow_ref[0] in package["manifest"]["workflows"]
+            else set())
+        workflow_snapshot = [state.get("plan_workflow_snapshot")]
+        workflow_versions = state.get("plan_workflow_versions") or {}
+        if (not isinstance(workflow_versions, dict)
+                or any(not isinstance(candidate, dict)
+                       or ref != "generated://" + digest(candidate)
+                       for ref, candidate in workflow_versions.items())):
+            raise RecoveryRequired("Generated workflow version archive is invalid")
+        if workflow_ref[0].startswith("generated://"):
+            if (not isinstance(workflow_snapshot[0], dict)
+                    or workflow_ref[0] != "generated://" + digest(workflow_snapshot[0])
+                    or workflow_versions.get(workflow_ref[0]) != workflow_snapshot[0]):
+                raise RecoveryRequired("Generated workflow snapshot is missing or changed")
+        elif workflow_snapshot[0] is not None:
+            raise RecoveryRequired("Frozen workflow has an unexpected generated snapshot")
         workflow = self._materialize_workflow(
-            package, workflow_ref[0], state["capabilities"])
+            package, workflow_ref[0], state["capabilities"],
+            proposed_workflow=workflow_snapshot[0])
+        workflow_current = [workflow]
         if state.get("plan_execution") is None:
             plan = plan_from_workflow(workflow, component_id)
             execution = PlanExecution.create(identity, plan)
@@ -924,10 +973,72 @@ class TaskService:
 
         def persist(current, current_receipts):
             self._persist_plan(
-                identity, current, current_receipts, workflow_ref[0])
+                identity, current, current_receipts, workflow_ref[0],
+                workflow_snapshot[0])
             notify()
 
-        def resolve_revision(rule, current):
+        def resolve_revision(rule, current, trigger_receipt):
+            if "proposal_path" in rule:
+                from .graph_compiler_repair import (
+                    GraphRepairExhausted, compile_with_graph_repair,
+                )
+                from .workflows import _get
+                proposal = _get(trigger_receipt["value"], rule["proposal_path"])
+                if not isinstance(proposal, dict):
+                    raise ContractError("Graph proposal must be a JSON object")
+                def repair(request, repair_path):
+                    source = next(node for node in workflow_current[0]["nodes"]
+                                  if node["id"] == rule["after_node"])
+                    if source["method"] != "ask" or not source.get("role_ref"):
+                        raise ContractError(
+                            "Graph compiler repair needs a model role at the checkpoint")
+                    self.store.event(identity, "graph_compiler_rejected", {
+                        "plan_ref": current.plan.ref,
+                        "rule_id": rule["id"],
+                        "diagnostic": request["diagnostic"],
+                    })
+                    params = source["params"]
+                    reply = self._dispatch(
+                        identity, package, "ask", {
+                            "role": source["role_ref"],
+                            "prompt": params["prompt"] + "\nThe previous graph did not compile. "
+                                      "Use compiler_feedback to return a complete corrected JSON "
+                                      "proposal in the same envelope. Do not repeat the invalid graph.",
+                            "payload": {"task": payload, "compiler_feedback": request},
+                            "max_tokens": params.get("max_tokens", 4000),
+                        },
+                        f"plan/{repair_path}", stop_event, notify, admitted=True,
+                    )
+                    return _get(reply, rule["proposal_path"])
+
+                try:
+                    compiled = compile_with_graph_repair(
+                        execution=current,
+                        base_workflow=workflow_current[0],
+                        initial_proposal=proposal,
+                        patch_id=rule["id"],
+                        replaced_node_ids=rule.get("replace_node_ids"),
+                        reason_ref=rule.get("reason_ref"),
+                        max_attempts=rule.get("max_compile_attempts", 1),
+                        repair_path=f"graph-repair/{current.plan.revision}/{rule['id']}",
+                        materialize_callback=lambda candidate: self._materialize_workflow(
+                            package, "generated", state["capabilities"],
+                            proposed_workflow=candidate),
+                        repair_callback=repair,
+                    )
+                except GraphRepairExhausted as exc:
+                    self.store.event(identity, "graph_compiler_rejected", {
+                        "plan_ref": current.plan.ref,
+                        "rule_id": rule["id"],
+                        "diagnostic": exc.diagnostics[-1].as_dict(),
+                    })
+                    raise
+                revised_workflow, revision = compiled.revised_workflow, compiled.revision
+                target_ref = "generated://" + digest(revised_workflow)
+                workflow_ref[0] = target_ref
+                workflow_snapshot[0] = revised_workflow
+                workflow_current[0] = revised_workflow
+                return revised_workflow, revision
             target_ref = rule["workflow_ref"]
             revised_workflow = self._materialize_workflow(
                 package, target_ref, state["capabilities"])
@@ -941,6 +1052,8 @@ class TaskService:
                 reason_ref=rule.get("reason_ref"),
             )
             workflow_ref[0] = target_ref
+            workflow_snapshot[0] = None
+            workflow_current[0] = revised_workflow
             loaded_workflow_refs.add(target_ref)
             return revised_workflow, revision
 
@@ -981,8 +1094,10 @@ class TaskService:
             initial_receipts=receipts,
             resumable_local_nodes=resumable_local_nodes,
             stop_event=stop_event,
-            max_parallel=lambda: package["manifest"]["workflows"][
-                workflow_ref[0]].get("max_parallel", 4),
+            max_parallel=lambda: package["manifest"]["workflows"].get(
+                workflow_ref[0],
+                package["manifest"]["workflows"][initial_workflow_ref]
+            ).get("max_parallel", 4),
         )
         if result["status"] != "completed":
             raise ContractError(result.get("error") or "Executable plan did not complete")

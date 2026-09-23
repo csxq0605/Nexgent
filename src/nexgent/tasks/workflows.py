@@ -374,6 +374,61 @@ promptly. Already admitted work is joined even for any_success and cancellation.
                 threading.BoundedSemaphore(max_parallel))
 
 
+def _validate_revision_rules(workflow, nodes):
+    """Validate the bounded trigger and source contract for plan revisions."""
+    rules = workflow.get("revision_rules", [])
+    if not isinstance(rules, list) or len(rules) > 16:
+        raise WorkflowError("Workflow revision_rules must be a bounded list")
+    rule_ids = set()
+    for rule in rules:
+        workflow_ref = rule.get("workflow_ref") if isinstance(rule, dict) else None
+        proposal_path = rule.get("proposal_path") if isinstance(rule, dict) else None
+        sources = sum(source is not None for source in (workflow_ref, proposal_path))
+        replacement_scope = (rule.get("replace_node_ids")
+                             if isinstance(rule, dict) else None)
+        if proposal_path is not None:
+            invalid_scope = (
+                "replace_node_ids" in rule
+                and (not isinstance(replacement_scope, list)
+                     or not replacement_scope
+                     or any(node_id not in nodes for node_id in replacement_scope))
+            )
+            compile_attempts = rule.get("max_compile_attempts", 1)
+            invalid_compile_attempts = (
+                type(compile_attempts) is not int
+                or not 1 <= compile_attempts <= 4
+            )
+        else:
+            invalid_scope = (
+                not isinstance(replacement_scope, list)
+                or not replacement_scope
+                or any(node_id not in nodes for node_id in replacement_scope)
+            )
+            invalid_compile_attempts = (
+                isinstance(rule, dict) and "max_compile_attempts" in rule
+            )
+        if (not isinstance(rule, dict)
+                or not re.fullmatch(r"[a-z][a-z0-9_.-]{0,99}", str(rule.get("id", "")))
+                or rule["id"] in rule_ids
+                or rule.get("after_node") not in nodes
+                or sources != 1
+                or (workflow_ref is not None
+                    and (not isinstance(workflow_ref, str) or not workflow_ref))
+                or (proposal_path is not None
+                    and (not isinstance(proposal_path, str)
+                         or not proposal_path
+                         or any(not part for part in proposal_path.split("."))))
+                or invalid_scope
+                or invalid_compile_attempts):
+            raise WorkflowError("Workflow revision rule is invalid")
+        when = rule.get("when")
+        if (not isinstance(when, dict) or not isinstance(when.get("path"), str)
+                or "equals" not in when):
+            raise WorkflowError("Workflow revision condition needs path and equals")
+        rule_ids.add(rule["id"])
+    return rules
+
+
 def plan_from_workflow(workflow, plan_id, *, revision=1):
     """Compile a validated workflow resource into the v1 executable-plan contract."""
     try:
@@ -471,25 +526,7 @@ def plan_from_workflow(workflow, plan_id, *, revision=1):
                 failure_kinds=tuple(route.get("failure_kinds", ["*"])),
             ))
 
-        rules = workflow.get("revision_rules", [])
-        if not isinstance(rules, list) or len(rules) > 16:
-            raise WorkflowError("Workflow revision_rules must be a bounded list")
-        rule_ids = set()
-        for rule in rules:
-            if (not isinstance(rule, dict)
-                    or not re.fullmatch(r"[a-z][a-z0-9_.-]{0,99}", str(rule.get("id", "")))
-                    or rule["id"] in rule_ids
-                    or rule.get("after_node") not in nodes
-                    or not isinstance(rule.get("workflow_ref"), str)
-                    or not isinstance(rule.get("replace_node_ids"), list)
-                    or not rule["replace_node_ids"]
-                    or any(node_id not in nodes for node_id in rule["replace_node_ids"])):
-                raise WorkflowError("Workflow revision rule is invalid")
-            when = rule.get("when")
-            if (not isinstance(when, dict) or not isinstance(when.get("path"), str)
-                    or "equals" not in when):
-                raise WorkflowError("Workflow revision condition needs path and equals")
-            rule_ids.add(rule["id"])
+        _validate_revision_rules(workflow, nodes)
 
         return PlanSpec(
             id=plan_id,
@@ -558,6 +595,34 @@ def run_executable_workflow(
     def check_stop():
         if stop_event.is_set():
             raise InterruptedError("Workflow execution stopped")
+
+    def apply_first_matching_revision(node_ids):
+        """Apply one durable trigger that has not entered revision history."""
+        nonlocal active, execution, receipts
+        applied_rule_ids = {revision.id for revision in execution.revisions}
+        for node_id in node_ids:
+            receipt = receipts.get(node_id)
+            if receipt is None:
+                continue
+            for rule in active.get("revision_rules", []):
+                if (rule["id"] in applied_rule_ids
+                        or rule["after_node"] != node_id
+                        or not _revision_matches(rule, receipt)):
+                    continue
+                revised_workflow, revision = resolve_revision(
+                    rule, execution, deepcopy(receipt))
+                if not isinstance(revision, PlanRevision):
+                    raise WorkflowError("Revision resolver did not return PlanRevision")
+                execution = execution.apply_revision(revision)
+                active = deepcopy(revised_workflow)
+                current = {state.node_id: state for state in execution.node_executions}
+                receipts = {
+                    key: value for key, value in receipts.items()
+                    if key in current and current[key].status.terminal
+                }
+                persist(execution, receipts)
+                return True
+        return False
 
     def admit(node_id, attempt_ref, input_refs):
         nonlocal execution
@@ -636,6 +701,9 @@ def run_executable_workflow(
         active_parallelism = parallelism()
         limiter = threading.BoundedSemaphore(active_parallelism)
         nodes, dependencies, controls, artifacts = _validate(active)
+        # Validate revision sources even when this runner is used directly,
+        # rather than through the manifest compiler's plan_from_workflow path.
+        _validate_revision_rules(active, nodes)
         current_ids = set(nodes)
         if current_ids != {node.id for node in execution.plan.nodes}:
             raise WorkflowError("Current workflow nodes differ from the persisted plan")
@@ -654,6 +722,16 @@ def run_executable_workflow(
             if state.status.terminal and node_id not in receipts:
                 raise WorkflowError("Terminal plan node is missing its host receipt")
         persist(execution, receipts)
+
+        # A process may stop after durably recording the trigger receipt but
+        # before committing its PlanRevision. Recover that boundary before any
+        # pending node from the obsolete graph can be admitted.
+        durable_triggers = [
+            node_id for node_id in nodes
+            if node_id in receipts and state_by_id[node_id].status.terminal
+        ]
+        if apply_first_matching_revision(durable_triggers):
+            continue
 
         revised = False
         while pending:
@@ -742,23 +820,7 @@ def run_executable_workflow(
                         interruption = exc
             persist(execution, receipts)
 
-            for node_id in finished_now:
-                for rule in active.get("revision_rules", []):
-                    if rule["after_node"] != node_id or not _revision_matches(rule, receipts[node_id]):
-                        continue
-                    revised_workflow, revision = resolve_revision(rule, execution)
-                    if not isinstance(revision, PlanRevision):
-                        raise WorkflowError("Revision resolver did not return PlanRevision")
-                    execution = execution.apply_revision(revision)
-                    active = deepcopy(revised_workflow)
-                    current = {state.node_id: state for state in execution.node_executions}
-                    receipts = {key: value for key, value in receipts.items()
-                                if key in current and current[key].status.terminal}
-                    persist(execution, receipts)
-                    revised = True
-                    break
-                if revised:
-                    break
+            revised = apply_first_matching_revision(finished_now)
             if interruption is not None:
                 raise interruption
             check_stop()
