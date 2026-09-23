@@ -71,7 +71,8 @@ SOURCE = '''def execute(payload, context):
             'context calls, or markdown. Input schema requires integer a,b; output '
             'schema requires integer answer. Choose a fresh descriptive tool name.',
             {'a': a, 'b': b, 'available_tools': available}, max_tokens=1400)
-        developed = context.develop_tool(proposed['proposal'])
+        proposal = proposed.get('proposal', proposed)
+        developed = context.develop_tool(proposal)
         value = context.tool(developed['name'], {'a': a, 'b': b})
     else:
         value = context.ask(
@@ -178,7 +179,7 @@ def run():
     adoption = TaskCapabilityAdoptionService(tasks, evolution, generation)
     evolution.register(CHANNEL, _package())
     report = {
-        "schema": "nexgent.portable-capability-live.v1",
+        "schema": "nexgent.portable-capability-live.v2",
         "profile_identity": identity, "profile_digest": profile_digest,
         "retry_policy": {"automatic_retries": 0, "attempts_per_ask": 1},
         "budgets": {"creator": CREATOR_BUDGET, "paired": PAIR_BUDGET},
@@ -281,7 +282,7 @@ def run():
     serialized = json.dumps(report, ensure_ascii=False, sort_keys=True)
     report["leak_scan_passed"] = _leak_free(root, serialized, profile.api_key)
     if not report["leak_scan_passed"]:
-        report = {"schema": "nexgent.portable-capability-live.v1",
+        report = {"schema": "nexgent.portable-capability-live.v2",
                   "passed": False, "leak_scan_passed": False}
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report.get("passed") else 1

@@ -385,3 +385,19 @@ def test_adoption_rejects_stale_revision_before_candidate_generation(tmp_path):
         adoption.adopt(
             "portable", definition_id, creator["id"], feedback["id"], 1,
             deepcopy(HYPOTHESIS))
+
+
+def test_completed_service_use_accepts_real_gateway_received_receipt(tmp_path):
+    gateway, tasks, evolution, generation, adoption, parent = _system(tmp_path)
+    creator, definition_id = _creator(tasks, "service_provider")
+    definition = tasks.store.service_definition(definition_id)
+    assert TaskCapabilityAdoptionService._used(creator, definition)
+    received = deepcopy(creator)
+    for call in received["calls"]:
+        if call.get("service_provider", {}).get("definition_id") == definition_id:
+            call["status"] = "received"
+    assert TaskCapabilityAdoptionService._used(received, definition)
+    for call in received["calls"]:
+        if call.get("service_provider", {}).get("definition_id") == definition_id:
+            call["status"] = "started"
+    assert not TaskCapabilityAdoptionService._used(received, definition)

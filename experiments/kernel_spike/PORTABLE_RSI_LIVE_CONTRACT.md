@@ -12,3 +12,7 @@ This is a mechanism probe, not a general RSI effectiveness study. The arithmetic
 - No post hoc substitutions: the model-generated source, tool name, recorded proposal, candidate package, benchmark operands, threshold, and budgets are not edited after execution starts. Failure at any stage ends the run; no repeated sampling to select a success.
 
 The root capability-call and tool-work budgets are explicit for both arms. A model-authored tool that hardcodes 42 will fail the unseen operands. Even a fully successful run establishes one task-family inheritance mechanism, not transferable performance across families, autonomous gap detection, or recursive improver gains.
+
+## v2 protocol amendment, fixed before its run
+
+The v1 run stopped before Definition creation because the model returned the five proposal fields at the JSON top level while the experiment program expected a `proposal` wrapper. Commit `26f0a4f` preserves that source and failure. V2 accepts either the same top-level proposal or its `proposal` wrapper, then passes it unchanged through Nexgent's existing Definition validator. It changes no operands, model, prompt, budgets, evaluator, promotion threshold, or stopping rule. V2 is one separate attempt and will be reported separately regardless of outcome.
