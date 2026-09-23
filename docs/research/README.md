@@ -4,6 +4,8 @@ Nexgent 是通用、可运行 benchmark 的 RSI 智能体框架。2026-09-23 的
 
 ## 当前设计
 
+- [实现、目标与参考来源对照账本](implementation-reference-tracker.md)：每阶段提交更新实际激活证据、未通过出口及固定的参考版本。
+- [Stage A1 固定源码对照](kernel-reference-audit-20260923.md)与[同题小样合同](../../experiments/kernel_spike/CONTRACT.md)：内核路径比较和实跑检查项。
 - [能力内核与可演化执行系统](../design/rsi-capability-kernel.md)：DeepSeek Harness、AutoSci、ADAS/AFlow、RHI/HSI 的参考机制与待检验问题；目标设计，不是已实现声明。
 - [真实任务时编排与技能探针](task-time-self-orchestration-live-20260923.md)：模型图、技能、检查点成功与失败的证据边界。
 - [仓库当前计划](../../REFACTOR_PLAN.md)与[旧 P0–P5 快照](../history/refactor-plan-p0-p5-20260923.md)：现行实施顺序与历史交付分开读取。
