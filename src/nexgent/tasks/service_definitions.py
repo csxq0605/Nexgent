@@ -4,7 +4,8 @@ This module only validates source and produces content-addressed records. It
 does not execute, persist, mount, or activate a provider. ``model_context.v1``
 is deliberately narrow: a provider may transform the JSON payload visible to
 one model request, but it cannot change the prompt, role, provider, budget, or
-call host capabilities.
+call host capabilities. When the original model payload is an object, the
+provider may add fields but must preserve its existing top-level fields.
 """
 
 from __future__ import annotations

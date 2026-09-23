@@ -831,6 +831,26 @@ class TaskService:
                         raise ContractError(
                             f"Workflow {method} node {node.get('id')!r} has invalid "
                             "capability arguments (" + "; ".join(problems) + ")")
+                if method in {"activate_service", "release_service"}:
+                    bindings = node.get("bindings", {})
+                    for field in ("definition_id", "expected_revision"):
+                        if field in bindings and not binding_reference(bindings[field]):
+                            raise ContractError(
+                                f"Workflow {method} {field} binding must use "
+                                "{'$node': 'node.field'} or {'$input': 'path'}")
+                    revision = params.get("expected_revision")
+                    if ("expected_revision" in params
+                            and (type(revision) is not int or revision < 0)):
+                        raise ContractError(
+                            f"Workflow {method} expected_revision must be a "
+                            "nonnegative integer or a binding")
+                    definition_id = params.get("definition_id")
+                    if ("definition_id" in params and
+                            (not isinstance(definition_id, str)
+                             or definition_id.startswith(("$node.", "$input.")))):
+                        raise ContractError(
+                            "Workflow activate_service definition_id must be "
+                            "a literal identifier or a binding")
                 if method == "delegate":
                     validate_delegate_task(
                         node, params, artifact_ports.get(node.get("id"), set()))
@@ -1633,6 +1653,10 @@ class TaskService:
                 services = self._service_inventory(identity)
                 if services is not None:
                     payload["services"] = services
+                    # Binding paths are dot-separated, so the dotted service
+                    # interface key needs a separate path-safe projection.
+                    payload["model_context_service"] = deepcopy(
+                        services["model_context.v1"])
             from .self_orchestration_seed import available_operators_for_authority
             payload["available_operators"] = available_operators_for_authority(
                 state["task"].get("capability_authority"))
@@ -1923,6 +1947,13 @@ class TaskService:
                 validate(output, MODEL_CONTEXT_OUTPUT_SCHEMA,
                          label="model-context service output", allow_artifact_refs=False)
                 transformed = _json_copy(output["payload"], label="Model-context payload")
+                original = request["payload"]
+                if type(original) is dict:
+                    if type(transformed) is not dict or any(
+                            key not in transformed or transformed[key] != value
+                            for key, value in original.items()):
+                        raise ContractError(
+                            "Model-context service must preserve existing payload fields")
                 if len(json.dumps(output, ensure_ascii=False, allow_nan=False)) > 240000:
                     raise ContractError("Model-context service output exceeds model input limit")
                 self.store.event(identity, "service_applied", {

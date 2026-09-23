@@ -58,7 +58,7 @@ QTabWidget::pane { border:0; }
 
 # Preserve the earlier channel and its promoted package identity. This channel
 # starts a new graph baseline that exposes task-time capability development.
-MAIN_PACKAGE_CHANNEL = "nexgent-main-capabilities-v1"
+MAIN_PACKAGE_CHANNEL = "nexgent-main-capabilities-v2"
 MAIN_CAPABILITY_AUTHORITY = make_episode_authority(
     ["tool", "service_provider"], ["local_compute", "model_context"],
     max_definitions=32, max_invocations=128, version=2)

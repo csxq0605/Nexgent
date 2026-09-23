@@ -152,6 +152,7 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 - [x] C1 工具切片：冻结基于 effect／操作／运行环境的 EpisodeAuthority，模型从未知名称开发本地计算 Definition，任务内挂载、重读、调用；[真实 MiMo 收据](experiments/kernel_spike/evidence-python-dynamic-tool-live-20260924.json)与定向回归已记录。此项不代表 C 阶段全部完成。
 - [x] C2 服务切片：默认任务智能体以真实 MiMo 开发、激活 `model_context.v1` 并在后续模型请求中使用；[真实收据](experiments/kernel_spike/evidence-python-service-seed-live-20260924.json)与受限预算已记录。题目明确要求开发服务，自主缺口判断及跨任务采用未验收。
 - [x] D0 图接入薄片：保留 Main 的 architect／pending DAG，确定性图验证任务内工具开发与动态调用、服务激活与后续模型节点。此项是编排执行能力，不是反馈搜索收益。
+- [x] D0.1 对 Main 图做四次限额 MiMo 实跑并保留全部负结果；修正输入工件绑定、服务状态绑定、上下文服务抹除证据和编译期激活参数类型检查。第三次的 `completed` 因服务清空证据且 schema 泄露答案，被独立复核判为失败；图的真实任务质量仍未通过，[收据](experiments/kernel_spike/RESULTS.md)。
 - [ ] C 完整出口：真实任务中的能力缺口判断、隔离测试与反馈修复；覆盖服务／工具的受权文件或外部操作，保持 evaluator 独立。
 - [ ] D1 让同一入口按任务选用 DAG、开放循环或代码编排，并在真实任务中根据中途反馈修改执行策略；保留恢复和成本收据。
 - [ ] E 将任务来源的工具／服务／编排候选接入独立评价、晋升、后续任务自动复用与回滚，再进入 F 的对照研究。

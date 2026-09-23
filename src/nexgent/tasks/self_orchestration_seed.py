@@ -61,6 +61,20 @@ payload. Do not recreate an installed skill or invent its component identity.
 
 The task payload also contains the current `tools` inventory and, when the
 Episode has service authority, the single `services.model_context.v1` slot.
+`develop_service` source receives `provide(request, context)` where request
+has `schema`, `role`, `node_id`, and `payload`. Copy `request['payload']`
+and add context fields; keep every existing top-level field and value intact.
+Returning only criteria or annotations drops task evidence and is rejected.
+For graph bindings, use the equivalent path-safe
+`{"$input":"model_context_service.revision"}`; the dotted interface key
+itself cannot be addressed with the dot-separated binding syntax.
+`task.input_refs` contains artifact IDs, not the artifacts' JSON contents.
+When a worker or service needs actual input data, add a `read_artifact` node
+with `artifact_id` bound from `{"$input":"input_refs.<name>"}`, then bind
+its `{"$node":"<read_node>.content"}` into the later ask/tool payload.
+Never treat an artifact ID as option values, measurements, or task evidence.
+Verifier nodes must receive the same read content, not just a candidate
+answer; do not invent measurements absent from the read artifact.
 Capability-development operators are admitted only when the Episode authority
 grants their kind and effect. These host nodes omit `role_ref` and
 `component_ref`, execute serially, and use these exact argument contracts:
@@ -90,7 +104,7 @@ A valid tool development chain has this shape (proposal fields abbreviated):
 `develop_tool(proposal) -> tool(name=$node.develop.name, arguments=...)`.
 A valid service chain has this shape:
 `develop_service(proposal) -> activate_service(definition_id=$node.develop.definition_id,
-expected_revision=task.services.model_context.v1.revision) -> ask`.
+expected_revision=$input.model_context_service.revision) -> ask`.
 
 Here is one complete, valid minimal response. Adapt role choice, instructions,
 nodes, dependencies, deliverable names, and output shape to the actual task:

@@ -126,3 +126,16 @@ Windows 上最终脚本由子智能体与根代理分别定向运行通过。最
 2026-09-24 使用 [`python_service_seed_live.py`](python_service_seed_live.py)进行一次限额 MiMo `mimo-v2.6-flash` 运行。[脱敏收据](evidence-python-service-seed-live-20260924.json)的 SHA-256 为 `496885F4AB11D3B8EDE330C0E94CD7FA6024A9DB7846752F0B785BCAB402E474`，原始 SQLite 在收据标明的本机 scratch。普通 `TaskService` 默认种子包从无已安装工具开始，由真实模型选择 `develop_service`，编写 `comparison.criteria` 的 `provide(payload, context)`，随后选择 `activate_service`。同一 Episode 的后三次模型调用经过该服务并留下 Definition／Instance／Authority 与有效 payload 摘要；最终工件根据 50ms 延迟上限选 A。Episode `episode-b194c9017d83486c` 为 `completed`，模型调用 5、节点 15，实际报告 11,889 prompt / 770 completion token，服务应用 3 次，自动重试 0，凭据扫描通过。
 
 这验证模型生成的**任务内服务**能改变后续模型调用的 JSON 上下文，且默认任务智能体能自己发出开发、激活动作。任务文字明确要求开发服务，故仍**不能证明模型会自主判断能力缺口**；这也不是工作流／角色／DAG 的更新。服务未跨任务独立评价和采用，没有固定框架对照、成本收益或 RSI 净收益。受控 Python worker 每次上限 20 万 trace 事件，不是 OS 容器；服务调用与工具共用 root `max_tool_calls`，实际 worker 指令暂未纳入 `max_tool_work_units`。DeepSeek 式 Definition/provider/consumer 的首个窄接口有运行证据；AutoSci、ADAS、AFlow 对应的编排搜索和跨任务选择仍在 D/E 阶段。
+
+### Main 图种子的四次真实服务任务：负结果与合同修复
+
+使用 [`python_main_graph_service_live.py`](python_main_graph_service_live.py) 通过 Main 相同的版本化图 package/channel 和 v2 EpisodeAuthority 调用 MiMo `mimo-v2.6-flash`。每轮限制最多 8 次模型调用、8 次能力调用、100 节点，自动重试 0；这是图执行机制探针，不是 RSI 收益研究。四轮均保留脱敏 JSON 与本机 scratch 原始 Episode：
+
+| 轮次／收据 SHA-256 | 机械状态与真实判断 | 发现／后续修复 |
+| --- | --- | --- |
+| [v1](evidence-python-main-graph-service-live-20260924.json) `05AC92E059E7EA069B056C263C6642D3FE7D28606C58CDCFED99BDF8940D94DA` | `failed`；服务已开发、激活并作用于模型调用，选择错误，发布被当时写死 A 的 schema 拒绝 | 图把输入工件 ID 当作内容；规划提示改为先 `read_artifact` 再传 `.content` |
+| [v2](evidence-python-main-graph-service-live-v2-20260924.json) `E3E208D265DB77B6D594AFD5BB3C3E23D44DDD9DF74C4AC5B18137FABB6BC173` | `failed`；模型读了真实输入，服务未激活 | `services.model_context.v1.revision` 无法经点分隔 binder 访问；增加 `model_context_service.revision` 路径安全投影 |
+| [v3](evidence-python-main-graph-service-live-v3-20260924.json) `735134D5012BCF789E3C6E4315DC2CFF1A3FFB4F0B7680B2ABD1B8F9AEC88E5F` | 机械状态 `completed`，**任务质量失败**；两次服务应用，选择 A，但理由声称选项数据缺失，验证节点也返回 `valid=false` | 模型写的服务用纯准则覆盖了原 payload，清空了实际输入；且旧实验 schema 的 `const: A` 泄露答案并制造假阳性。现在要求服务保留原有 top-level 字段，实验 schema 只允许 A/B，另由独立事实检查评分 |
+| [v4](evidence-python-main-graph-service-live-v4-20260924.json) `43CF7BC0E8B8F4BAA50E69C8A1CAA7478317F3468040A550BD71BCADF4914E87` | `failed`；模型调用 3、节点 6，服务 Definition 已生成但未激活；独立质量检查失败 | 架构智能体把 `$node...`／`$input...` 放进普通字符串参数；运行时才发现 `expected_revision` 非整数。现于图编译期拒绝并向修复循环提供诊断 |
+
+`model_context.v1` 的当前安全边界只允许添加模型 payload 的顶层字段，不能删改已有证据；这是首版窄接口，不是通用 provider。上述修订通过 22 项服务／图／Main 定向测试；最后一次实跑发生在编译期类型检查加入之前，故**没有**测试宣称该修复能让 MiMo 的图完成任务。四次样本不能估计成功率。它们说明图编译、数据传递、服务变换和独立评价必须同时正确，仍未证明模型能根据反馈更新编排并跨任务采用。

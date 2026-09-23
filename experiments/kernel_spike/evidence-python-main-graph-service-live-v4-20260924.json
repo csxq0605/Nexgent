@@ -1,0 +1,196 @@
+{
+  "schema": "nexgent.main-graph-service-live.v1",
+  "passed": false,
+  "quality_check": {
+    "expected_choice": "A",
+    "observed_choice": null,
+    "verifier_accepted": false,
+    "factual_reason": false,
+    "passed": false
+  },
+  "profile_identity": {
+    "provider": "mimo",
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "model": "mimo-v2.6-flash",
+    "credential_ref": "NEXGENT_API_KEY",
+    "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242"
+  },
+  "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+  "retry_policy": {
+    "automatic_retries": 0,
+    "attempts_per_ask": 1
+  },
+  "budget": {
+    "max_model_calls": 8,
+    "max_completion_tokens": 28000,
+    "max_tool_calls": 8,
+    "max_tool_work_units": 0,
+    "max_nodes": 100
+  },
+  "episode": {
+    "id": "episode-14d8c126a199494e",
+    "status": "failed",
+    "package_digest": "a079be95e07bdfb848cf0c091b236687ae1a9ba0eab0d5cc447cb109de485867",
+    "plan_revision": 2,
+    "output_refs": {},
+    "usage": {
+      "model_calls": 3,
+      "reserved_completion_tokens": 15000,
+      "charged_completion_tokens": 15000,
+      "completion_tokens": 1618,
+      "known_usage": {
+        "prompt_tokens": 21394,
+        "completion_tokens": 1618,
+        "total_tokens": 23012
+      },
+      "usage_missing_call_ids": [],
+      "tool_usage_missing_call_ids": [],
+      "reserved_tool_work_units": 0,
+      "charged_tool_work_units": 0,
+      "tool_work_units": 0,
+      "usage_complete": true,
+      "billing_unknown_call_ids": [],
+      "tool_calls": 0,
+      "nodes": 6
+    },
+    "last_error": "ContractError: Node activate_service failed: ContractError: Service activation requires definition and exact revision"
+  },
+  "model_receipts": [
+    {
+      "call_id": "model-80b856c0dca34844a7a7a52a03b4a215",
+      "role": "architect",
+      "model": "mimo/mimo-v2.6-flash",
+      "provider_model": "mimo-v2.6-flash",
+      "configured_provider_model": "mimo-v2.6-flash",
+      "observed_provider_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+      "profile_identity": {
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "credential_ref": "NEXGENT_API_KEY",
+        "model": "mimo-v2.6-flash",
+        "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+        "provider": "mimo"
+      },
+      "status": "received",
+      "finish_reason": "stop",
+      "billing_status": "usage_reported",
+      "max_completion_tokens": 5000,
+      "reserved_completion_tokens": 5000,
+      "usage": {
+        "completion_tokens": 650,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 4323,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4973
+      }
+    },
+    {
+      "call_id": "model-ac119ba115af4f1fb622ffb92a92dfeb",
+      "role": "architect",
+      "model": "mimo/mimo-v2.6-flash",
+      "provider_model": "mimo-v2.6-flash",
+      "configured_provider_model": "mimo-v2.6-flash",
+      "observed_provider_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+      "profile_identity": {
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "credential_ref": "NEXGENT_API_KEY",
+        "model": "mimo-v2.6-flash",
+        "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+        "provider": "mimo"
+      },
+      "status": "received",
+      "finish_reason": "stop",
+      "billing_status": "usage_reported",
+      "max_completion_tokens": 5000,
+      "reserved_completion_tokens": 5000,
+      "usage": {
+        "completion_tokens": 334,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 8752,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "total_tokens": 9086
+      }
+    },
+    {
+      "call_id": "model-d4c4a862b66a4618bfbadc161e80dda2",
+      "role": "architect",
+      "model": "mimo/mimo-v2.6-flash",
+      "provider_model": "mimo-v2.6-flash",
+      "configured_provider_model": "mimo-v2.6-flash",
+      "observed_provider_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+      "profile_identity": {
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "credential_ref": "NEXGENT_API_KEY",
+        "model": "mimo-v2.6-flash",
+        "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+        "provider": "mimo"
+      },
+      "status": "received",
+      "finish_reason": "stop",
+      "billing_status": "usage_reported",
+      "max_completion_tokens": 5000,
+      "reserved_completion_tokens": 5000,
+      "usage": {
+        "completion_tokens": 634,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 8319,
+        "prompt_tokens_details": {
+          "cached_tokens": 4096
+        },
+        "total_tokens": 8953
+      }
+    }
+  ],
+  "service_events": [
+    {
+      "kind": "service_definition_staged",
+      "content": {
+        "definition_id": "service-definition-4139148ade9d23b6580c424b",
+        "definition_digest": "4139148ade9d23b6580c424b2e299e9f5bff5dfe9ef7fb92f99e1ae598a76131",
+        "service_interface": "model_context.v1",
+        "authority_digest": "f37bd4fc73ef5106c52b9e3cadf6d6262dd197452e9a2ffab048b0b83c6c3317"
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-9c6aea4797784380",
+      "name": "options",
+      "content": {
+        "A": {
+          "latency_ms": 40,
+          "monthly_cost": 2
+        },
+        "B": {
+          "latency_ms": 70,
+          "monthly_cost": 1
+        },
+        "latency_ceiling_ms": 50
+      }
+    }
+  ],
+  "failure": {
+    "stage": "episode_run",
+    "class": "task_protocol",
+    "remote_outcome_unknown": false,
+    "episode_failure_domain": "protocol"
+  },
+  "scratch_root": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-main-graph-live-uyie_mwy",
+  "interpretation": "One graph-seed task prompted to develop a service; no spontaneous gap choice, cross-task adoption, or RSI gain.",
+  "leak_scan_passed": true
+}

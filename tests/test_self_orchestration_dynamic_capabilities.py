@@ -174,9 +174,9 @@ def test_graph_activates_model_context_service_before_later_ask(tmp_path):
         }},
         {"op": "add_node", "node": {
             "id": "activate", "method": "activate_service",
-            "params": {"expected_revision": 0},
             "bindings": {
                 "definition_id": {"$node": "develop.definition_id"},
+                "expected_revision": {"$input": "model_context_service.revision"},
             },
         }},
         {"op": "add_node", "node": {
@@ -225,6 +225,9 @@ def test_graph_activates_model_context_service_before_later_ask(tmp_path):
     assert gateway.calls[0]["payload"]["task"]["services"] == {
         "model_context.v1": {"status": "empty", "revision": 0},
     }
+    assert gateway.calls[0]["payload"]["task"]["model_context_service"] == {
+        "status": "empty", "revision": 0,
+    }
     assert gateway.calls[1]["payload"]["computed_hint"] == 42
     available = gateway.calls[0]["payload"]["available_operators"]
     assert "develop_service" in available
@@ -233,6 +236,60 @@ def test_graph_activates_model_context_service_before_later_ask(tmp_path):
     instance = service.store.service_instance(episode["id"])
     assert instance["status"] == "active"
     assert instance["revision"] == 1
+
+
+def test_graph_reads_input_artifact_content_before_model_comparison(tmp_path):
+    graph = _proposal([
+        {"op": "add_node", "node": {
+            "id": "load", "method": "read_artifact",
+            "bindings": {"artifact_id": {"$input": "input_refs.options"}},
+        }},
+        {"op": "add_node", "node": {
+            "id": "develop", "method": "develop_service",
+            "params": {"proposal": _service_proposal()},
+        }},
+        {"op": "add_node", "node": {
+            "id": "activate", "method": "activate_service",
+            "params": {"expected_revision": 0},
+            "bindings": {"definition_id": {"$node": "develop.definition_id"}},
+        }},
+        {"op": "add_node", "node": {
+            "id": "worker", "method": "ask", "role_ref": "generalist",
+            "component_ref": "generalist-role", "params": {"max_tokens": 100},
+            "bindings": {"payload": {"options": {"$node": "load.content"}}},
+        }},
+        {"op": "add_node", "node": {
+            "id": "publish", "method": "publish",
+            "params": {"name": "result"},
+            "bindings": {"content": {"$node": "worker"}},
+        }},
+        {"op": "add_control_edge", "edge": {"from": "architect", "to": "load"}},
+        {"op": "add_control_edge", "edge": {"from": "architect", "to": "develop"}},
+        {"op": "add_control_edge", "edge": {"from": "activate", "to": "worker"}},
+    ])
+    def worker(role, payload):
+        assert payload["options"] == {
+            "A": {"latency_ms": 40}, "B": {"latency_ms": 70},
+            "latency_ceiling_ms": 50,
+        }
+        assert payload["computed_hint"] == 42
+        return {"answer": 42}
+
+    gateway = GraphGateway(graph, worker=worker)
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    authority = make_episode_authority(
+        ["service_provider"], ["model_context"], version=2)
+    episode = service.create(
+        "Compare the actual input evidence", package=self_orchestration_package(),
+        inputs={"options": {"A": {"latency_ms": 40},
+                            "B": {"latency_ms": 70},
+                            "latency_ceiling_ms": 50}},
+        deliverables=_deliverable(), capability_authority=authority,
+    )
+    result = service.run(episode["id"])
+    assert result["status"] == "completed", result.get("last_error")
+    assert service.store.read(result["output_refs"]["result"], episode["id"])[
+        "content"] == {"answer": 42}
 
 
 def test_graph_capability_development_fails_closed_without_authority(tmp_path):
@@ -287,6 +344,27 @@ def test_graph_rejects_unordered_capability_lifecycle_nodes(tmp_path):
     }
 
     with pytest.raises(ContractError, match="lifecycle nodes must be totally ordered"):
+        service._materialize_workflow(
+            self_orchestration_package(), "generated", [],
+            proposed_workflow=workflow, capability_authority=authority)
+
+
+def test_graph_compiler_rejects_literal_binding_shorthand_before_execution(tmp_path):
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    authority = make_episode_authority(
+        ["service_provider"], ["model_context"], version=2)
+    workflow = {
+        "nodes": [
+            {"id": "develop", "method": "develop_service",
+             "params": {"proposal": _service_proposal()}},
+            {"id": "activate", "method": "activate_service",
+             "params": {"definition_id": "$node.develop.definition_id",
+                        "expected_revision": "$input.model_context_service.revision"}},
+        ],
+        "control_edges": [{"from": "develop", "to": "activate"}],
+        "outputs": {},
+    }
+    with pytest.raises(ContractError, match="expected_revision.*binding"):
         service._materialize_workflow(
             self_orchestration_package(), "generated", [],
             proposed_workflow=workflow, capability_authority=authority)

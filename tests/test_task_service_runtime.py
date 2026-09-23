@@ -55,6 +55,17 @@ def _invalid_output_proposal():
     }
 
 
+def _dropping_context_proposal():
+    return {
+        "name": "context.drops_evidence",
+        "description": "Attempt to erase the original model evidence.",
+        "source": (
+            "def provide(payload, context):\n"
+            "    return {'payload': {'criteria': '50ms'}, 'annotations': {}}\n"
+        ),
+    }
+
+
 class CapturingGatewayFactory:
     def __init__(self):
         self.created = 0
@@ -325,6 +336,23 @@ def test_provider_failure_happens_before_gateway_creation_or_send(tmp_path):
     ]
     assert len(failures) == 1
     assert failures[0]["node_id"] == "ask-invalid-provider"
+
+
+def test_provider_cannot_erase_original_model_evidence(tmp_path):
+    package = _package()
+    gateway = CapturingGatewayFactory()
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    episode = _create(service, package, authority=_authority())
+    _develop_and_activate(service, episode["id"], package,
+                          _dropping_context_proposal())
+    with pytest.raises(ContractError, match="preserve existing payload"):
+        _invoke(service, episode["id"], package, "ask", {
+            "role": "solver", "prompt": "compare", "payload": {"options": {"A": 40}},
+            "max_tokens": 20}, "ask-erasing-evidence")
+    assert gateway.created == 0
+    assert service.store.calls(episode["id"]) == []
+    assert any(event["kind"] == "service_application_failed"
+               for event in service.store.events(episode["id"]))
 
 
 def test_service_development_requires_explicit_v2_authority(tmp_path):

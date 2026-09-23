@@ -13,3 +13,9 @@
 | G 产品 | Main 展示同一任务／版本／能力身份 | Main 保留 graph seed，以显式受限 v2 EpisodeAuthority 创建任务；新版本化 `nexgent-main-capabilities-v1` channel 避免静默覆盖旧 `nexgent-main` 登记；证据栏展示工具／服务 Definition、Instance 和服务应用身份，隐藏源码与模型 payload。界面仍是一次输入创建一个 Episode，未实现原任务多轮继续 | 最小能力证据视图确定性通过；尚未达到 Main 持久多轮、候选采用／回滚及产品出口 |
 
 更新规则：每条新“已实现”要附代码和定向运行证据；“效果改善”另附独立任务、父子对照、成本与失败。上游参考固定 SHA／论文版本；确需升级时注明迁移影响。负结果和基础设施问题也追加，不删除前一次结论。子智能体审查、手写小样及模型替身均不能替代 Nexgent 产品的自动执行证据。
+
+## 2026-09-24 Main 图执行实测与差距更新
+
+[四次限额 MiMo 收据](../../experiments/kernel_spike/RESULTS.md)均未通过独立任务质量检查。真实模型能生成服务 Definition、图中的读工件／激活／模型节点；首次将工件 ID 当数据，第二次绑定带点的服务接口键失败，第三次服务抹掉模型输入却因交付 schema 泄露 A 而机械完成，第四次把绑定语法写成普通字符串并在激活时失败。第三次的服务确实作用于两次模型请求，但不构成任务成功。已为普通 Main 图加路径安全的服务状态投影、提示读工件并保留原输入字段，给实验加独立事实检查，并让服务激活的参数错误在图编译时被拒绝；22 项相关定向测试通过。`nexgent-main-capabilities-v2` 是新基线 channel，旧 channel 身份不静默改写。
+
+与 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的作用域服务相比，目前仍只有窄的 Python 上下文服务，没有通用 provider 生命周期。与 [AutoSci 论文版本](https://github.com/skyllwt/AutoSci/tree/arxiv-v1) 的 SciDAG／SciEvolve、[ADAS](https://arxiv.org/abs/2408.08435v2) 的可执行智能体搜索、[AFlow](https://arxiv.org/abs/2410.10762v4) 的图搜索相比，本轮只验证了生成图的执行和失败边界；**没有**反馈选择出的图版本、跨任务采用、同资源对照或改进收益。D/E/F 出口保持未通过。
