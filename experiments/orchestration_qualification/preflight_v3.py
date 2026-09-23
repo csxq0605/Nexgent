@@ -51,6 +51,9 @@ def main(argv=None):
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--candidate-id", required=True)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--max-model-calls", type=int, default=3)
+    parser.add_argument("--max-completion-tokens", type=int, default=4800)
+    parser.add_argument("--max-nodes", type=int, default=30)
     args = parser.parse_args(argv)
     root = args.root.resolve()
     output = root / ".nexgent" / "exports" / "orchestration-qualification"
@@ -76,16 +79,22 @@ def main(argv=None):
         adapter = BigBenchHardTaskBenchmark(data_path=args.data, samples_per_task=1)
         preview = adapter.tasks(split="development", seed=args.seed)
         task_units = _disjoint_units(excluded, preview)
+        if (args.max_model_calls < 1 or args.max_completion_tokens < 1
+                or args.max_nodes < 1):
+            raise ValueError("Preflight hard limits must be positive")
+        budget = {"max_model_calls": args.max_model_calls,
+                  "max_completion_tokens": args.max_completion_tokens,
+                  "max_tool_calls": 0, "max_nodes": args.max_nodes}
         plan = evolution.plan_pair(
             args.candidate_id, adapter, split="development",
             split_role="development", seed=args.seed,
-            budget={"max_model_calls": 3, "max_completion_tokens": 4800,
-                    "max_tool_calls": 0, "max_nodes": 30},
+            budget=budget,
             policy=PromotionPolicy())
         task_ids = [task["id"] for task in plan["suite"]["tasks"]]
         if [task["id"] for task in preview] != task_ids:
             raise ValueError("Preflight task selection changed during planning")
         receipt.update(plan_id=plan["id"], suite_digest=plan["suite_digest"],
+                       episode_budget=budget,
                        task_ids=task_ids, statistical_units=task_units,
                        excluded_feedback_units=sorted(excluded),
                        candidate_package_digest=plan["package_digest"],

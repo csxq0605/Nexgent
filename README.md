@@ -20,14 +20,14 @@ P4 已把 `R0 自更新为 R1 → R0/R1 从共同 A0 产生后代 → 下游效�
 
 真实 Provider 验证已经执行：2026-09-21 的 MiMo 普通任务用 3 次模型调用完成 schema 合法交付，证明 P1 模型驱动交付路径可用；同日 Workbench development 仍在 20 次调用后耗尽预算且没有交付或独立评价。此前 Qwen 因账户欠费被供应商拒绝，Gemini 最小探针连接失败。仓库不把普通任务交付、Workbench 失败、确定性控制面测试或 P2 求解器运行写成 RSI 效益。
 
-2026-09-23 的[多角色编排资格运行](experiments/orchestration_qualification/RESULTS.md)进一步证明：领域无关的三模型角色包可以经过 canonical BBH TaskService 执行、交接、发布并接受独立评价。在同一公开 development 单题、MiMo v2.6-flash 和 3 次调用上限下，固定多角色得 0，单角色顺序修订得 1。该单题负结果不构成普遍效应，也没有激活 O/S 自进化。
+2026-09-23 的[多角色编排资格运行](experiments/orchestration_qualification/RESULTS.md)证明领域无关的角色包可以经过 canonical BBH TaskService 执行、交接、发布并接受独立评价。固定三角色在一项公开 development 题得 0，等调用量单角色得 1。随后 MiMo v2.6-flash 生成了真正改变可达工作流的 O 候选：五个模型角色节点在新 development 任务上实际运行，候选得 2/2、父包得 1/2；独立 selection 有一次候选模型响应违反 JSON 合同，且工作量上升，所有晋升门未通过。纯 M 真实尝试中改进器选择 abstain，未生成候选。这些都是资格试验，未证明 RSI 效益。
 
 | 内容 | 状态 |
 | --- | --- |
 | P1 通用任务运行器、AgentPackage、交付评审、工具/技能、工件、记忆、预算和恢复 | 0.9 基础、manifest v2、ExecutablePlan v1 与宿主可信账本已实现并通过定向合同测试；真实 MiMo 普通任务已形成 schema 合法交付，manifest-v2 计划路径仍只有 E0 工程合同证据，独立 Workbench 仍失败 |
 | P1 普通任务与 benchmark 的统一入口 | 0.9 已接入 CLI、默认 GUI 和插件合同；BBH 两任务与 scientific-discovery 已提供 canonical TaskService adapter 和无模型 reference package，legacy 入口继续保留 |
 | P2 OpenFOAM 方腔 demo | 独立插件与 Re=10、20×20×1 smoke 已实现；真实 WSL2/Foundation 8 求解、U/p 解析、固定无模型 TaskService 受控恢复和隐藏评价已通过 |
-| P3 跨任务行为更新 | PackagePatch v3 的多组件 O/S 生成、加载证据、selection、promotion 和 guard 已通过确定性端到端验证；MiMo v2.6-flash 用紧凑注册表差量生成真实候选，但独立 selection 从父包 2/2 降到 0/2，未晋升；M 复合、真实正向 E1 和统计效益仍未完成 |
+| P3 跨任务行为更新 | PackagePatch v3 的多组件 O/S 与纯 M 独立控制路径已有确定性验证；MiMo 生成两个 S 候选和一个实际执行的 O 候选，独立 selection 均未达到晋升门；纯 M 真实尝试 abstain；O/S+M 复合、晋升后复用、正向 E1 和统计效益仍未完成 |
 | P4 改进过程可更新与递归执行 | 独立 R archive/channel、自更新、真实后代元评测、预登记 guard、自动回滚与可恢复 cycle 已形成确定性机制闭环；真实模型与统计递归效益待检验 |
 | P5 冻结研究和完整产品验收 | 通用 final-holdout 配对研究执行器、预注册 schema 与脱敏信息窗已实现；正式外部多任务族研究尚未登记或执行 |
 | 0.8 源码执行、自修改、历史 benchmark 与研究窗口 | 保留；其证据不替代 0.9 P1 或 P2–P5 验收 |
@@ -44,7 +44,8 @@ P4 已把 `R0 自更新为 R1 → R0/R1 从共同 A0 产生后代 → 下游效�
 - [P5 预注册 RSI 研究](docs/research/p5-preregistered-rsi-study.md)：证据等级、实验臂、外部 benchmark 矩阵、防泄漏、缺测与统计职责。
 - [Task benchmark SDK 与 canonical 迁移](docs/design/benchmark-sdk.md)：TaskService 插件的显式 descriptor、隔离发现、JSON 合同、BBH/scientific-discovery canonical 路径与 legacy 兼容边界。
 - [RSI orchestration research refresh](docs/research/rsi-orchestration-refresh-20260921.md)：当前证据等级、可证伪实验与 scientific-discovery 迁移的结论上限。
-- [编排与技能可进化 v3](docs/design/orchestration-skill-evolution-v3.md)：复合 O/S 候选、真实多角色 benchmark、逐组件激活与等预算对照的下一阶段合同；尚未实现。
+- [编排与技能可进化 v3](docs/design/orchestration-skill-evolution-v3.md)：复合 O/S 候选、真实多角色 benchmark、逐组件激活与等预算对照的合同；候选执行已部分实现，正式对照尚未完成。
+- [四臂确认协议与交互效应边界](docs/research/four-arm-confirmatory-protocol-v1.md)：固定编排、等预算单角色、纯记忆与完整系统的冻结设计；分离 O/S 与 M 交互作用还需第五臂。
 - [P3 E1 qualification pilot](experiments/p3_e1/README.md)：一次性 generation 流程、不可覆盖 attempt 收据、严格模型/patch/paired gain/guard/reuse 闭合及结论边界；真实模型尝试尚未执行。
 - [工具工作量计量](docs/design/tool-work-accounting.md)：调用前预留、持久增量、未知结算、恢复复用及科学插件接入边界。
 - [P3 跨任务 RSI 研究设计](docs/research/p3-cross-task-rsi-design-20260920.md)：一手论文方法、可证伪假设、对照和冻结试验协议。
@@ -77,7 +78,7 @@ flowchart LR
 
 paired plan 冻结宿主能够重算的 execution environment、工具描述、运行时实现摘要和 arm schedule。当前计划对象不会预先完整冻结实际 provider/model；二者由每次模型调用的 receipt 证明，正式实验再核验这些收据是否符合预登记配置。选择门中的 `cost` 是由模型调用、charged completion tokens、工具调用和节点用量构成的透明 normalized work unit，便于同一协议内比较，不代表供应商货币费用。
 
-这条链有三种不同证据等级。E0 确定性工程合同可以证明身份、隔离、计划执行/修订/恢复、门控、递归版本、加载和回滚等**机制**；E1 真实 provider Episode 才能证明模型确实根据反馈产生并执行了行为变化；多个冻结任务、重复和对照才能支持**统计 RSI 效益**。真实 MiMo v2.6-flash 已从 development 反馈生成两个合法的 S 候选：第一个在两项独立 selection 上为父包 2/2、候选 0/2，但改动分支未执行，不能因果归咎于它；第二个提示候选实际加载，开发预检为候选 2/2、父包 0/2，独立 selection 两者均为 1/2。两个候选均未晋升；收据见[资格结果](experiments/orchestration_qualification/RESULTS.md)。因此已有真实生成和选择证据，仍没有正向 RSI 效果、O 编排改进或递归收益。P1 的普通任务交付和 P2 的求解器 smoke 不抬高这一 RSI 结论。
+这条链有三种不同证据等级。E0 确定性工程合同可以证明身份、隔离、计划执行/修订/恢复、门控、递归版本、加载和回滚等**机制**；E1 真实 provider Episode 才能证明模型确实根据反馈产生并执行了行为变化；多个冻结任务、重复和对照才能支持**统计 RSI 效益**。MiMo v2.6-flash 已从 development 反馈生成两个合法 S 候选与一个真实 O 候选。第一个 S 候选的修改分支未在 selection 执行；第二个 S 候选 selection 与父包同为 1/2。O 候选新增验证角色，开发预检为候选 2/2、父包 1/2；独立 selection 因一次响应违反 JSON 合同及更高工作量未通过门槛。纯 M 真实尝试明确 abstain。全部未晋升；原始收据见[编排资格结果](experiments/orchestration_qualification/RESULTS.md)与[记忆资格运行](experiments/memory_qualification/README.md)。因此已有真实生成和编排激活，却没有正向 RSI 效果、持久复用或递归收益。
 
 工程上已分别接通多组件 O/S 的整包原子候选和纯 M 的独立 MemoryService release/snapshot；O/S+M 复合发布仍待实现。下一阶段需在真实模型驱动的多角色 benchmark 上，与固定编排、等预算单智能体和 memory-only 做未见任务对照，并验证改进后跨任务复用。单组件 E1 pilot 保留为兼容资格检查，不能代表目标架构验收。详见[编排与技能可进化 v3](docs/design/orchestration-skill-evolution-v3.md)与[分阶段计划](REFACTOR_PLAN.md)。
 

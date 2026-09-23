@@ -40,3 +40,28 @@ bounded execution/score/activation diagnostics, and makes no promotion
 decision. A candidate that fails publication or schema checks here should be
 revised using new development evidence; a selection split used for revision
 is spent and cannot be counted as independent selection again.
+
+## Bounded O search and failure reconciliation
+
+`python -m experiments.orchestration_qualification.search_v3 --root PROJECT
+--data BBH_DATA --feedback-episode EPISODE_ID --max-attempts 3
+--target-qualified 1` runs a bounded, repair-aware development search for an
+executable orchestration change. It requires a terminal development Episode
+from the active multi-role parent. A proposal changing only prompt or skill
+text cannot count as O evolution. The runner checks the reachable workflow,
+then derives a common parent/candidate Episode budget from both workflows.
+Dynamic work it cannot bound fails before a development plan is opened.
+
+The search writes an append-only intent before every model generation. Each
+attempt uses fresh development statistical units; it never opens selection.
+`qualified` means only that a candidate passed a public development execution
+floor. Independent selection, promotion, guard, and later reuse remain separate
+gates. Used units and model calls are not replayed after a failed attempt.
+
+For an older interrupted search with a known plan, use
+`python -m experiments.orchestration_qualification.reconcile_failed_search
+--root PROJECT --search-id SEARCH_ID --plan-id PLAN_ID
+--failure-type BudgetExhausted` after auditing the immutable host records.
+The command only closes the failed intent; it does not run or resume Episodes.
+See [the real O candidate and failed selection](RESULTS.md) for the current
+qualification result.

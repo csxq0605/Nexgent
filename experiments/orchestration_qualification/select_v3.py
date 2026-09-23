@@ -19,6 +19,9 @@ def main(argv=None):
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--candidate-id", required=True)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--max-model-calls", type=int, default=3)
+    parser.add_argument("--max-completion-tokens", type=int, default=4800)
+    parser.add_argument("--max-nodes", type=int, default=30)
     args = parser.parse_args(argv)
     root = args.root.resolve()
     output = root / ".nexgent" / "exports" / "orchestration-qualification"
@@ -39,12 +42,18 @@ def main(argv=None):
         evolution = EvolutionService(tasks)
         adapter = BigBenchHardTaskBenchmark(data_path=args.data, samples_per_task=1)
         policy = PromotionPolicy()
+        if (args.max_model_calls < 1 or args.max_completion_tokens < 1
+                or args.max_nodes < 1):
+            raise ValueError("Selection hard limits must be positive")
+        budget = {"max_model_calls": args.max_model_calls,
+                  "max_completion_tokens": args.max_completion_tokens,
+                  "max_tool_calls": 0, "max_nodes": args.max_nodes}
         plan = evolution.plan_pair(
             args.candidate_id, adapter, split="selection", split_role="selection",
             seed=args.seed,
-            budget={"max_model_calls": 3, "max_completion_tokens": 4800,
-                    "max_tool_calls": 0, "max_nodes": 30}, policy=policy)
+            budget=budget, policy=policy)
         receipt.update(plan_id=plan["id"], suite_digest=plan["suite_digest"],
+                       episode_budget=budget,
                        candidate_package_digest=plan["package_digest"],
                        parent_package_digest=plan["parent_package_digest"],
                        policy_digest=plan["policy_digest"],

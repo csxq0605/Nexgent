@@ -15,7 +15,7 @@ from jsonschema import Draft202012Validator
 
 from ..kernel.programs import digest
 from ..kernel.store import BudgetExhausted
-from ..models.gateway import ModelGateway, ModelTransportError
+from ..models.gateway import ModelError, ModelGateway, ModelTransportError
 from .benchmarks import (
     BenchmarkRegistry, describe_adapter, host_runtime_fingerprint,
     validate_report, validate_snapshot, validate_tasks,
@@ -89,6 +89,10 @@ def _capability_failure_domain(method, exc):
     if isinstance(cause, (RecoveryRequired, ModelTransportError, OSError, TimeoutError,
                           StateConflict)):
         return "infrastructure"
+    if isinstance(cause, ModelError):
+        # A received but unparsable model reply is an observed agent output
+        # failure. Transport/configuration failures remain infrastructure.
+        return "agent"
     if isinstance(cause, BudgetExhausted):
         return "agent"
     if isinstance(cause, (ContractError, PermissionError, KeyError, TypeError, ValueError)):
@@ -1117,6 +1121,36 @@ class TaskService:
             except RecoveryRequired as exc:
                 self._change(identity, lambda s: s.update(
                     status="waiting_input", last_error=str(exc), failure_domain="infrastructure"))
+            except CapabilityAbort as exc:
+                # Direct workflow nodes invoke host capabilities without the
+                # controlled-code subprocess. Preserve their uncatchable
+                # control signal at the host boundary instead of leaving the
+                # Episode running after a budget or provider failure.
+                cause = exc.cause
+                if isinstance(cause, InterruptedError) or stop_event.is_set():
+                    status, domain = "paused", "infrastructure"
+                elif isinstance(cause, RecoveryRequired):
+                    status, domain = "waiting_input", "infrastructure"
+                else:
+                    status = "failed"
+                    domain = _capability_failure_domain("ask", exc)
+                self._change(identity, lambda s: s.update(
+                    status=status,
+                    last_error=f"{type(cause).__name__}: {str(cause)[:1200]}",
+                    failure_domain=domain))
+            except CapabilityAbort as abort:
+                cause = abort.cause
+                if isinstance(cause, RecoveryRequired):
+                    status, domain = "waiting_input", "infrastructure"
+                elif isinstance(cause, InterruptedError):
+                    status, domain = "paused", "infrastructure"
+                else:
+                    status = "failed"
+                    domain = _capability_failure_domain("workflow", cause)
+                self._change(identity, lambda s: s.update(
+                    status=status,
+                    last_error=f"{type(cause).__name__}: {str(cause)[:1200]}",
+                    failure_domain=domain))
             except Exception as exc:
                 if recovery_errors:
                     self._change(identity, lambda s: s.update(
@@ -1127,6 +1161,16 @@ class TaskService:
                     self._change(identity, lambda s: s.update(status="paused" if stop_event.is_set() else "failed",
                         last_error=f"{type(exc).__name__}: {str(exc)[:1200]}",
                         failure_domain=failure_domain))
+            except (KeyboardInterrupt, SystemExit) as exc:
+                # Host interruption (notably KeyboardInterrupt) still runs the
+                # finally block. Persist a non-running terminal projection
+                # before propagating it so paired trials cannot leave an
+                # Episode looking active after the process has stopped.
+                self._change(identity, lambda s: s.update(
+                    status="paused",
+                    last_error=f"{type(exc).__name__}: {str(exc)[:1200]}",
+                    failure_domain="infrastructure"))
+                raise
             finally:
                 self.store.event(identity, "episode_finished", {"status": self.store.get(identity)["status"]})
                 notify()

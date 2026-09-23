@@ -19,6 +19,7 @@ from nexgent.tasks.multirole_seed import (
 )
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.tools import ToolRegistry
+from nexgent.models.gateway import ModelError
 
 
 class PublicTask:
@@ -148,3 +149,57 @@ def test_equal_call_single_role_control_uses_one_role_three_times(
     assert [role for role, _ in gateway.calls] == ["solver"] * 3
     assert "previous_draft" in gateway.calls[1][1]
     assert "review" in gateway.calls[2][1]
+
+
+def test_direct_workflow_budget_abort_is_recorded_as_terminal_agent_failure(tmp_path):
+    adapter = PublicTask()
+    gateway = ThreeRoleGateway({"deliverables": {"result": {"answer": "yes"}}})
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    task = adapter.tasks()[0]
+    episode = service.create(
+        task["objective"], task["inputs"], task["deliverables"],
+        {"max_model_calls": 2, "max_completion_tokens": 3200,
+         "max_tool_calls": 0, "max_nodes": 30},
+        task["capabilities"], multirole_package(), task["context"])
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "failed"
+    assert result["failure_domain"] == "agent"
+    assert result["usage"]["model_calls"] == 2
+    assert "BudgetExhausted" in result["last_error"]
+
+
+def test_invalid_model_json_is_observed_agent_failure(tmp_path):
+    class InvalidGateway:
+        def __call__(self, reserve, stop_event):
+            class Bound:
+                def ask(self, role, prompt, payload=None, max_tokens=4000):
+                    receipt = {"call_id": f"invalid-{role}", "role": role,
+                               "model": "INVALID-JSON-DOUBLE", "status": "started",
+                               "reserved_completion_tokens": max_tokens}
+                    reserve(receipt)
+                    reserve({**receipt, "status": "invalid",
+                             "billing_status": "usage_reported",
+                             "usage": {"prompt_tokens": 2,
+                                       "completion_tokens": 1,
+                                       "total_tokens": 3}})
+                    raise ModelError("Provider must return one valid JSON object")
+
+            return Bound()
+
+    task = PublicTask().tasks()[0]
+    service = TaskService(tmp_path, tools=ToolRegistry(),
+                          gateway_factory=InvalidGateway())
+    episode = service.create(
+        task["objective"], task["inputs"], task["deliverables"],
+        {"max_model_calls": 3, "max_completion_tokens": 4800,
+         "max_tool_calls": 0, "max_nodes": 30},
+        task["capabilities"], multirole_package(), task["context"])
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "failed"
+    assert result["failure_domain"] == "agent"
+    assert any(call["status"] == "invalid"
+               for call in service.store.calls(episode["id"]))

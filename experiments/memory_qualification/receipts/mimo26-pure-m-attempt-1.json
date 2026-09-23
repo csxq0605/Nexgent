@@ -1,0 +1,119 @@
+{
+  "schema": "nexgent.pure-m-qualification.v1",
+  "status": "generation_abstained_or_missing",
+  "claim": "mechanism_qualification_only",
+  "attempt_id": "memory-attempt-bbh-mimo26-20260923-01",
+  "benchmark_id": "bbh",
+  "started_at": 1790147116.368522,
+  "frozen_tasks": {
+    "feedback": {
+      "id": "bbh/bbh-two-task-task-v1/development/5/bbh-149145782ed594a13c6266ec",
+      "digest": "a5732a0596e74c6518a57130e3e2b7d823a4ac05e7df475e315ce7f41b171d36",
+      "statistical_unit_id": "bbh/example/bbh-149145782ed594a13c6266ec"
+    },
+    "selection": {
+      "id": "bbh/bbh-two-task-task-v1/selection/29/bbh-798b034daca90d58915eaa22",
+      "digest": "b8b48b2bae13ccc842d4947ac93e52f62ee6c177f4e0626693ceea62a6ac9d4d",
+      "statistical_unit_id": "bbh/example/bbh-798b034daca90d58915eaa22"
+    },
+    "reuse": {
+      "id": "bbh/bbh-two-task-task-v1/development/7/bbh-0e8510e508087a02ecddce03",
+      "digest": "4df411d152dfd521bd5a4e78c8a0678c75cc4c1fe19fd5d168fa80fb0eef2d28",
+      "statistical_unit_id": "bbh/example/bbh-0e8510e508087a02ecddce03"
+    }
+  },
+  "benchmark_snapshot_digest": "30c373fee7ad6447a26373ede193e326b0ac7bee8e2737df80713e5b77e75dac",
+  "parent_package_digest": "febeb9f9aee5fd000e31637962866660206c54f2ffb09144f05fbd67eadc261e",
+  "parent_memory_id": "memory-version-ed8706f5ca524b158fcd89a7",
+  "parent_memory_digest": "ed8706f5ca524b158fcd89a739883a56635741e839a686411760d52ff03c0319",
+  "development": {
+    "episode_id": "episode-a368c3a037f449fe",
+    "status": "observed_failure",
+    "score_available": true,
+    "score": 0.0,
+    "accepted": false,
+    "usage": {
+      "model_calls": 3,
+      "reserved_completion_tokens": 4800,
+      "charged_completion_tokens": 4800,
+      "completion_tokens": 125,
+      "known_usage": {
+        "prompt_tokens": 1361,
+        "completion_tokens": 125,
+        "total_tokens": 1486
+      },
+      "usage_missing_call_ids": [],
+      "tool_usage_missing_call_ids": [],
+      "reserved_tool_work_units": 0,
+      "charged_tool_work_units": 0,
+      "tool_work_units": 0,
+      "usage_complete": true,
+      "billing_unknown_call_ids": [],
+      "tool_calls": 0,
+      "nodes": 8
+    },
+    "model_calls": [
+      {
+        "role": "proposer_a",
+        "configured_model": "mimo-v2.6-flash",
+        "observed_model": "mimo-v2.6-flash",
+        "provider_revision": null,
+        "status": "received"
+      },
+      {
+        "role": "proposer_b",
+        "configured_model": "mimo-v2.6-flash",
+        "observed_model": "mimo-v2.6-flash",
+        "provider_revision": null,
+        "status": "received"
+      },
+      {
+        "role": "adjudicator",
+        "configured_model": "mimo-v2.6-flash",
+        "observed_model": "mimo-v2.6-flash",
+        "provider_revision": null,
+        "status": "received"
+      }
+    ]
+  },
+  "feedback_bundle_id": "feedback-533343e7de6d46d1",
+  "feedback_bundle_digest": "a2179eebdd37bff9a66caeb18ba2050622fd28878b48a52eacd3a6020cbc64ff",
+  "generation": {
+    "id": "generation-a15604515dbc4ea6",
+    "status": "missing",
+    "reason_type": "PackageError",
+    "episode_id": "episode-13c9fe1a6f764444",
+    "memory_candidate_id": null,
+    "memory_candidate_digest": null,
+    "usage": {
+      "model_calls": 1,
+      "reserved_completion_tokens": 6000,
+      "charged_completion_tokens": 6000,
+      "completion_tokens": 94,
+      "known_usage": {
+        "prompt_tokens": 7913,
+        "completion_tokens": 94,
+        "total_tokens": 8007
+      },
+      "usage_missing_call_ids": [],
+      "tool_usage_missing_call_ids": [],
+      "reserved_tool_work_units": 0,
+      "charged_tool_work_units": 0,
+      "tool_work_units": 0,
+      "usage_complete": true,
+      "billing_unknown_call_ids": [],
+      "tool_calls": 0,
+      "nodes": 4
+    },
+    "model_calls": [
+      {
+        "role": "rsi_improver",
+        "configured_model": "mimo-v2.6-flash",
+        "observed_model": "mimo-v2.6-flash",
+        "provider_revision": null,
+        "status": "received"
+      }
+    ]
+  },
+  "completed_at": 1790147151.402966
+}

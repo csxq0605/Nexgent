@@ -1,0 +1,436 @@
+{
+  "schema": "nexgent.package-patch-v3-selection.v1",
+  "status": "completed",
+  "candidate_id": "candidate-767f1a56916f4ed2",
+  "split": "selection",
+  "seed": 47,
+  "started_at": 1790147853.4098952,
+  "plan_id": "plan-5be49017e397409a",
+  "suite_digest": "3e4a9a314607ee6b11e5267cc15f53759248294516ed7551cfff31debd966a09",
+  "episode_budget": {
+    "max_model_calls": 5,
+    "max_completion_tokens": 8000,
+    "max_tool_calls": 0,
+    "max_nodes": 30
+  },
+  "candidate_package_digest": "02ae08557cbc6bec2b81bf21463ddd8b268d2c8f90944095fde98d22b6a84f24",
+  "parent_package_digest": "54110e964849245b84b97ca30c93b92c482d2b22294478be4fb0b082595956c3",
+  "policy_digest": "d6e9b43c3ef939809cecd411be83d63d8c2ccf5ef9f52e23a9cdf96b10b8dd51",
+  "task_ids": [
+    "bbh/bbh-two-task-task-v1/selection/47/bbh-8b5d9e7057fb3deb1e87bc39",
+    "bbh/bbh-two-task-task-v1/selection/47/bbh-8af0dcf6ca1f56f29c25a76b"
+  ],
+  "trial_id": "trial-9f4a5622b18e46d3",
+  "decision_id": "decision-eddc397a4d364974",
+  "eligible": false,
+  "gates": {
+    "selection_role": true,
+    "measurement_complete": false,
+    "quality": false,
+    "success_rate": false,
+    "cost": false,
+    "regressions": true,
+    "candidate_completed": false,
+    "behavior_activated": false
+  },
+  "measurements": {
+    "parent": {
+      "quality": 0.5,
+      "success_rate": 0.5,
+      "cost": 29.6,
+      "reported_token_work": 22.926000000000002,
+      "all_accepted": false,
+      "score_complete": true,
+      "acceptance_complete": true,
+      "usage_complete": true
+    },
+    "candidate": {
+      "quality": null,
+      "success_rate": null,
+      "cost": 34.8,
+      "reported_token_work": 26.735999999999997,
+      "all_accepted": false,
+      "score_complete": false,
+      "acceptance_complete": false,
+      "usage_complete": true
+    },
+    "regressions": 0,
+    "paired_task_deltas": [
+      {
+        "task_ref_digest": "98a12c2164af72ec853337a9ee80b991455cef50e4a423f02e9fbf1e6407fb97",
+        "arm_order": [
+          "parent",
+          "candidate"
+        ],
+        "parent": {
+          "episode_id": "episode-0724b030318b43ac",
+          "score": 0.0,
+          "accepted": false,
+          "failure_class": null,
+          "cost": 14.8,
+          "cost_projection": {
+            "schema": "nexgent.normalized-work-projection.v1",
+            "weights": {
+              "model_calls": 1.0,
+              "charged_completion_tokens": 0.001,
+              "tool_calls": 1.0,
+              "charged_tool_work_units": 1.0,
+              "nodes": 1.0
+            },
+            "conservative_work": 14.8,
+            "conservative_token_basis": "charged_completion_tokens",
+            "charged_completion_tokens": 4800,
+            "reported_token_work": 11.492,
+            "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+            "reported_tokens": {
+              "prompt_tokens": 1356,
+              "completion_tokens": 136,
+              "total_tokens": 1492
+            }
+          },
+          "usage_complete": true,
+          "failure_reasons": []
+        },
+        "candidate": {
+          "episode_id": "episode-870fdd206eff4433",
+          "score": null,
+          "accepted": null,
+          "failure_class": "infrastructure_missing",
+          "cost": 12.8,
+          "cost_projection": {
+            "schema": "nexgent.normalized-work-projection.v1",
+            "weights": {
+              "model_calls": 1.0,
+              "charged_completion_tokens": 0.001,
+              "tool_calls": 1.0,
+              "charged_tool_work_units": 1.0,
+              "nodes": 1.0
+            },
+            "conservative_work": 12.8,
+            "conservative_token_basis": "charged_completion_tokens",
+            "charged_completion_tokens": 4800,
+            "reported_token_work": 9.789,
+            "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+            "reported_tokens": {
+              "prompt_tokens": 1264,
+              "completion_tokens": 525,
+              "total_tokens": 1789
+            }
+          },
+          "usage_complete": true,
+          "failure_reasons": [
+            "score_unavailable",
+            "acceptance_missing"
+          ]
+        },
+        "score_delta": null,
+        "failure_reasons": [
+          "candidate:score_unavailable",
+          "candidate:acceptance_missing"
+        ]
+      },
+      {
+        "task_ref_digest": "1e07b7eb34f56538707d0d23946340435533983e470b0f5f5cd69fbc754bc788",
+        "arm_order": [
+          "candidate",
+          "parent"
+        ],
+        "parent": {
+          "episode_id": "episode-32993afbaa6148e2",
+          "score": 1.0,
+          "accepted": true,
+          "failure_class": null,
+          "cost": 14.8,
+          "cost_projection": {
+            "schema": "nexgent.normalized-work-projection.v1",
+            "weights": {
+              "model_calls": 1.0,
+              "charged_completion_tokens": 0.001,
+              "tool_calls": 1.0,
+              "charged_tool_work_units": 1.0,
+              "nodes": 1.0
+            },
+            "conservative_work": 14.8,
+            "conservative_token_basis": "charged_completion_tokens",
+            "charged_completion_tokens": 4800,
+            "reported_token_work": 11.434,
+            "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+            "reported_tokens": {
+              "prompt_tokens": 1338,
+              "completion_tokens": 96,
+              "total_tokens": 1434
+            }
+          },
+          "usage_complete": true,
+          "failure_reasons": []
+        },
+        "candidate": {
+          "episode_id": "episode-53e0cf57014b47c0",
+          "score": 1.0,
+          "accepted": true,
+          "failure_class": null,
+          "cost": 22.0,
+          "cost_projection": {
+            "schema": "nexgent.normalized-work-projection.v1",
+            "weights": {
+              "model_calls": 1.0,
+              "charged_completion_tokens": 0.001,
+              "tool_calls": 1.0,
+              "charged_tool_work_units": 1.0,
+              "nodes": 1.0
+            },
+            "conservative_work": 22.0,
+            "conservative_token_basis": "charged_completion_tokens",
+            "charged_completion_tokens": 8000,
+            "reported_token_work": 16.947,
+            "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+            "reported_tokens": {
+              "prompt_tokens": 2688,
+              "completion_tokens": 259,
+              "total_tokens": 2947
+            }
+          },
+          "usage_complete": true,
+          "failure_reasons": []
+        },
+        "score_delta": 0.0,
+        "failure_reasons": []
+      }
+    ],
+    "failure_reasons": [
+      "98a12c2164af72ec853337a9ee80b991455cef50e4a423f02e9fbf1e6407fb97:candidate:score_unavailable",
+      "98a12c2164af72ec853337a9ee80b991455cef50e4a423f02e9fbf1e6407fb97:candidate:acceptance_missing"
+    ]
+  },
+  "pairs": [
+    {
+      "task_ref_digest": "98a12c2164af72ec853337a9ee80b991455cef50e4a423f02e9fbf1e6407fb97",
+      "arm_order": [
+        "parent",
+        "candidate"
+      ],
+      "arms": {
+        "parent": {
+          "episode_id": "episode-0724b030318b43ac",
+          "score": 0.0,
+          "accepted": false,
+          "usage": {
+            "model_calls": 3,
+            "reserved_completion_tokens": 4800,
+            "charged_completion_tokens": 4800,
+            "completion_tokens": 136,
+            "known_usage": {
+              "prompt_tokens": 1356,
+              "completion_tokens": 136,
+              "total_tokens": 1492
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 7
+          },
+          "loaded": null,
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        },
+        "candidate": {
+          "episode_id": "episode-870fdd206eff4433",
+          "score": null,
+          "accepted": null,
+          "usage": {
+            "model_calls": 3,
+            "reserved_completion_tokens": 4800,
+            "charged_completion_tokens": 4800,
+            "completion_tokens": 525,
+            "known_usage": {
+              "prompt_tokens": 1264,
+              "completion_tokens": 525,
+              "total_tokens": 1789
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 5
+          },
+          "loaded": false,
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "invalid"
+            },
+            {
+              "role": "verify",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "task_ref_digest": "1e07b7eb34f56538707d0d23946340435533983e470b0f5f5cd69fbc754bc788",
+      "arm_order": [
+        "candidate",
+        "parent"
+      ],
+      "arms": {
+        "parent": {
+          "episode_id": "episode-32993afbaa6148e2",
+          "score": 1.0,
+          "accepted": true,
+          "usage": {
+            "model_calls": 3,
+            "reserved_completion_tokens": 4800,
+            "charged_completion_tokens": 4800,
+            "completion_tokens": 96,
+            "known_usage": {
+              "prompt_tokens": 1338,
+              "completion_tokens": 96,
+              "total_tokens": 1434
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 7
+          },
+          "loaded": null,
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        },
+        "candidate": {
+          "episode_id": "episode-53e0cf57014b47c0",
+          "score": 1.0,
+          "accepted": true,
+          "usage": {
+            "model_calls": 5,
+            "reserved_completion_tokens": 8000,
+            "charged_completion_tokens": 8000,
+            "completion_tokens": 259,
+            "known_usage": {
+              "prompt_tokens": 2688,
+              "completion_tokens": 259,
+              "total_tokens": 2947
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 0,
+            "tool_work_units": 0,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 0,
+            "nodes": 9
+          },
+          "loaded": true,
+          "model_calls": [
+            {
+              "role": "proposer_a",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "proposer_b",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "verify",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            },
+            {
+              "role": "adjudicator",
+              "configured_model": "mimo-v2.6-flash",
+              "observed_model": "mimo-v2.6-flash",
+              "provider_revision": null,
+              "status": "received"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "completed_at": 1790147914.0732045
+}

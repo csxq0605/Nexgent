@@ -184,3 +184,35 @@ so `eligible=false` and **the candidate was not promoted**. The development
 contrast did not replicate on independent selection. These public two-task
 samples do not establish an RSI benefit, and the used selection units are now
 spent for adaptation.
+
+### First generated O graph and budget failure
+
+The repair-aware O-search R0 made one MiMo v2.6-flash call (8,412 prompt /
+1,399 completion tokens) and generated a valid PackagePatch v3 that changed
+the reachable workflow. It added a `verify` role between an initial comparison
+and final adjudication: five model `ask` nodes rather than the parent's three.
+The [first attempt incident](receipts/o-search-attempt1-budget-incident.json)
+shows a runner mistake: the first development pair still had a three-call
+Episode cap. The parent completed, but the candidate hit `BudgetExhausted` and
+the paired trial was not sealed. That partial seed-8 run is **not a score** and
+cannot be replayed as though it had not occurred.
+
+We then kept the generated candidate fixed and used fresh development seed 9
+with an equal five-call/8,000-completion-token cap in both arms. The
+[development receipt](receipts/preflight-v3-o-candidate-development.json)
+records parent **1/2**, candidate **2/2**; both candidate Episodes loaded the
+new graph, made five received role calls, and delivered valid artifacts. This
+qualifies execution only. The candidate used two more model calls per task,
+so cost is part of the independent decision.
+
+Fresh selection seed 47 used the same cap. The
+[selection receipt](receipts/select-v3-o-candidate-selection.json) records
+parent **1/2**. The candidate completed and scored 1 on one task; on the other,
+its `proposer_b` response was received but was not valid JSON, so the historical
+receipt marks that score missing. The candidate had higher conservative work
+(34.8 versus 29.6 for the two tasks), and measurement, quality, success,
+cost, completion, and activation gates failed. `eligible=false`; there was no
+promotion or guard. This is **not positive RSI evidence**. The generic runtime
+subsequently learned to classify a received invalid-JSON reply as an observed
+agent failure rather than infrastructure missing, but this sealed selection
+decision and the used units were not rewritten or replayed.

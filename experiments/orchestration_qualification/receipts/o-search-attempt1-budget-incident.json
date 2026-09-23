@@ -1,0 +1,50 @@
+{
+  "schema": "nexgent.orchestration-search-incident.v1",
+  "status": "interrupted_before_development_trial",
+  "search_id": "orchestration-search-a636920e620140ee",
+  "attempt_id": "orchestration-search-a636920e620140ee/attempt-1",
+  "journal_events_at_capture": ["started", "attempt_started"],
+  "feedback_bundle_id": "feedback-7e0527edeb8a43db",
+  "generation_id": "generation-829b747b1cd745e3",
+  "generation_status": "generated",
+  "generation_usage": {
+    "model_calls": 1,
+    "prompt_tokens": 8412,
+    "completion_tokens": 1399
+  },
+  "candidate_id": "candidate-767f1a56916f4ed2",
+  "candidate_component_delta": {
+    "added": ["prompts/verify.md"],
+    "changed": ["prompts/adjudicator.md", "workflows/main.json"],
+    "manifest_changed": true,
+    "removed": []
+  },
+  "candidate_model_call_structure": {
+    "parent_ask_nodes": 3,
+    "candidate_ask_nodes": 5
+  },
+  "development_plan_id": "plan-b315c52d0c614858",
+  "development_seed": 8,
+  "episode_budget": {
+    "max_model_calls": 3,
+    "max_completion_tokens": 4800,
+    "max_tool_calls": 0,
+    "max_nodes": 30
+  },
+  "partial_episodes": {
+    "parent": {
+      "episode_id": "episode-6b7e61fcc6c34d28",
+      "status_at_capture": "completed",
+      "model_calls": 3
+    },
+    "candidate": {
+      "episode_id": "episode-dc0f534e5c174375",
+      "status_at_capture": "running",
+      "model_calls": 3
+    }
+  },
+  "failure_type": "BudgetExhausted",
+  "trial_created": false,
+  "selection_opened": false,
+  "interpretation": "The runner gave both arms a three-call cap despite the generated candidate requiring five ask nodes. The partial development run has no score or selection standing. Seed 8 was not reused."
+}
