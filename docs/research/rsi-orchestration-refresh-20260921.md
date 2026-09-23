@@ -5,9 +5,9 @@
 Nexgent 继续定位为通用 RSI 智能体框架。科学发现、OpenFOAM、BBH 和
 Workbench 是可替换的 benchmark 或 demo，不是核心编排。当前
 `O/M/S/R + TaskService + FeedbackBundle + paired gate + guard/rollback`
-和相关一手工作的方法边界一致；现在缺的是实际效用证据，而不是继续扩大可修改面。
+和相关一手工作的方法边界一致；现在同时缺少**真实效用证据**和目标架构所需的**复合编排/技能修改面**。当前单组件 replace 可以测试一个局部机制，却不足以检验角色组织、DAG、技能协议的联合进化；修改范围及对照的下一阶段合同见[编排与技能可进化 v3](../design/orchestration-skill-evolution-v3.md)。
 
-下一阶段优先闭合两条可证伪链：
+下一阶段先扩充复合 O/S 候选及真实多角色 benchmark，再闭合两条可证伪链：
 
 1. `FeedbackBundle → BehaviorPatch → child AgentPackage → selection 激活
    → paired gain → channel 后续复用`；

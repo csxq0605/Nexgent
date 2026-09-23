@@ -144,10 +144,14 @@ scientific-discovery 的 canonical `final_holdout` 只是历史 confirmation 分
 
 ### 下一阶段
 
-1. **M 路由**：先只支持 manifest-v2 `class=M, kind=resource` 的纯 M patch，路由到 `MemoryService.admit → plan_selection → assess → promote → Episode snapshot`；O/S+M 混合补丁在 compound release 出现前整体拒绝，避免两个 CAS 通道形成中间态。
-2. **多 benchmark / 多 seed 聚合**：把 P5 的冻结 cell 与 P3/P4 component identity 链接，至少覆盖工具/政策、新鲜可执行代码和私有交互任务族；OpenFOAM 只作为一个外部工具 demo/task family。
-3. **E1 激活**：只有获得精确外部发送授权后，运行一次冻结 qualification；payload 仅含审查过的脱敏 FeedbackBundle、目标 component 内容和 mutation policy，并保存 provider/model/usage receipt。一次 E1 激活仍不能替代重复、对照和未写回 holdout。
-4. **独立 demo 扩展**：OpenFOAM 若继续扩展，另行冻结 Re=100、独立参考、网格/时间收敛和稳态判据；它不改变通用框架优先级。
+本阶段优先解决**编排和技能的实际可进化范围，以及模型驱动的多智能体 benchmark**，不把当前单组件 E1 pilot 当作最终框架的替代验收。完整合同、逐组件激活证据与四臂对照见[编排与技能可进化 v3](docs/design/orchestration-skill-evolution-v3.md)。
+
+1. **收尾工作树**：审查并提交纯 M 路由、benchmark suite role、独立来源 cluster、evaluator identity 和 CLI 投影的现有未提交实现；只报告相应定向测试及推送后的 CI。纯 M 进入 MemoryService 独立 release/snapshot；O/S+M 在原子复合合同前整体拒绝。
+2. **扩大 O/S 候选单位**：从单组件 replace 扩展为整包原子 PackagePatch，支持相互依赖的 role、workflow、skill、prompt 与 manifest 注册表的多组件 add/replace/remove。每个操作要有稳定身份、旧/新摘要、引用校验和不可变 lineage；宿主权限、评价、R 活跃实现与隐藏数据不可变。
+3. **模型驱动的多角色 benchmark**：在同一个 TaskService/canonical adapter 上观察至少两个模型角色、真实工件交接、交付和独立评价；零模型调用的程序适配路径只作 control，不计作编排证据。先用 Workbench 开发任务定位无效工件引用与预算耗尽，再扩展外部任务族。
+4. **反馈搜索与对照**：R0 从来源绑定的失败反馈提出多个 O/S 候选，逐组件证明实际加载和执行；预注册固定多智能体编排、等预算单智能体、memory-only、完整进化四臂，在未见任务上按来源 cluster 比较质量和实际成本。
+5. **E1 与后续研究**：在上述完整目标面上闭合真实 provider 候选的 generation、selection、promotion、guard 和后续复用；旧的单组件 qualification pilot 仍可作为兼容回归，但不代表目标架构验收。然后做多 benchmark/seed 聚合、M 的独立因果检验、原子 O/S+M 复合发布和 R0/R1 后代效用比较。
+6. **产品与 demo**：Main 完成持久多轮、附件、澄清、Benchmark/RSI Lab 信息视图；OpenFOAM 的 Re=100/收敛/参考解作为后置独立 demo 扩展。
 
 ## 6. 分阶段 PR 与历史提交
 

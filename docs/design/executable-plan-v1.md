@@ -68,7 +68,7 @@ component-targeted evolution 与 P4 recoverable cycle 已完成 E0 工程切片�
 
 当前 manifest-v2/ExecutablePlan 纵切面的证据是 **E0 工程合同**：定向确定性测试覆盖注册拒绝、能力解析、并行 role、join/checker、pending 子图 revision、持久 receipt 与恢复不重放。它支持“声明、实际 runtime、revision 和 recovery 已连通”的结论。
 
-P3 的正向 exporter 与一次性 qualification runner 已存在，但真实 E1 model generation activation 尚未执行。执行需要把审查后的脱敏 FeedbackBundle、目标 component 内容和 mutation policy 发送给已配置的外部 provider；当前没有这项外部发送授权。
+P3 的正向 exporter 与一次性 qualification runner 已存在，但真实 E1 model generation activation 尚未执行，文档指定的默认输出路径没有尝试收据。该实验会把审查后的脱敏 FeedbackBundle、目标 component 内容和 mutation policy 发送给已配置的外部 provider；执行时应核对会话授权与实际 payload/destination，并留存尝试收据。单组件 E1 也不能代替[复合编排与技能演化](orchestration-skill-evolution-v3.md)的验收。
 
 因此目前不能声称：
 
