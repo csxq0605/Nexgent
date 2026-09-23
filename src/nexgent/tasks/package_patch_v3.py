@@ -17,8 +17,10 @@ from .tools import ContractError
 
 
 PACKAGE_PATCH_SCHEMA = "nexgent.package-patch.v3"
-_REGISTRIES = {"entry": "entries", "role": "roles", "workflow": "workflows",
-               "skill": "skills"}
+_REGISTRIES = {
+    "entry": "entries", "role": "roles", "workflow": "workflows",
+    "skill": "skills", "tool": "tools", "service_provider": "services",
+}
 _FORBIDDEN = frozenset({
     "benchmark", "evaluator", "evaluation", "gate", "gating", "permission",
     "permissions", "manifest", "holdout", "secret", "hidden",
@@ -54,6 +56,10 @@ def _path(manifest, component_id, *, mutable=True):
                     else item["ref"])
         elif kind == "role":
             path = manifest["roles"][ref].get("prompt_ref")
+        elif kind == "tool":
+            path = manifest.get("tools", {})[ref]["ref"].split(":", 1)[0]
+        elif kind == "service_provider":
+            path = manifest.get("services", {})[ref]["ref"].split(":", 1)[0]
         else:
             raise ContractError(f"Unsupported component kind: {kind}")
     except (KeyError, TypeError, AttributeError) as exc:
@@ -77,8 +83,10 @@ def _owned_by(manifest, path):
 
 
 def _check_manifest_delta(parent, child, changed_ids):
-    permitted = {"entries", "roles", "workflows", "skills", "components",
-                 "orchestrator"}
+    permitted = {
+        "entries", "roles", "workflows", "skills", "tools", "services",
+        "components", "orchestrator",
+    }
     for field in set(parent) | set(child):
         if field not in permitted and child.get(field) != parent.get(field):
             raise ContractError(f"PackagePatch cannot change manifest field: {field}")
@@ -105,6 +113,8 @@ def _check_manifest_delta(parent, child, changed_ids):
 
 def _check_envelope(manifest, files, policy):
     capabilities = set(policy["capability_ceiling"])
+    if not set(manifest.get("tools", {})) <= set(policy["tool_ceiling"]):
+        raise ContractError("PackagePatch expands the portable-tool ceiling")
     for role in manifest["roles"].values():
         if not set(role.get("capabilities", [])) <= capabilities:
             raise ContractError("PackagePatch expands the role capability envelope")
@@ -178,8 +188,9 @@ def apply_package_patch(parent, patch, policy, *, provenance):
     old_manifest = parent["manifest"]
     manifest = patch["child_manifest"]
     if (manifest.get("manifest_version") != 2
-            or any(not isinstance(manifest.get(name), dict)
-                   for name in ("entries", "roles", "workflows", "skills", "components"))
+            or any(not isinstance(manifest.get(name, {}), dict)
+                   for name in ("entries", "roles", "workflows", "skills", "tools",
+                                "services", "components"))
             or any(not isinstance(item, dict)
                    for item in manifest["components"].values())
             or not isinstance(manifest.get("orchestrator"), str)):

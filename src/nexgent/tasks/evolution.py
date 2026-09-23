@@ -67,6 +67,12 @@ def _manifest_component(package, component_id):
             skill = manifest.get("skills", {})[ref]
             files = [split_ref(skill["ref"], package["files"])[0]
                      if skill["kind"] == "controlled_code" else skill["ref"]]
+        elif kind == "tool":
+            files = [split_ref(manifest["tools"][ref]["ref"],
+                               package["files"])[0]]
+        elif kind == "service_provider":
+            files = [split_ref(manifest["services"][ref]["ref"],
+                               package["files"])[0]]
         elif kind == "workflow":
             files = [manifest["workflows"][ref]["ref"]]
         elif kind == "role":
@@ -120,6 +126,15 @@ def _loaded_evidence(component, execution, package):
         path: package["component_digests"][path] for path in component["files"]}
     loaded_digests = {path: expected_digests[path] for path in actual}
     package_loaded = (execution or {}).get("package_digest") == package["digest"]
+    activation_required = component["kind"] in {"tool", "service_provider"}
+    activation_matches = [
+        row for row in ((execution or {}).get("activated_components") or [])
+        if isinstance(row, dict)
+        and row.get("component_id") == component["component_id"]
+        and row.get("kind") == component["kind"]
+        and row.get("package_digest") == package["digest"]
+        and row.get("source_path") in component["files"]
+    ]
     return {"component_id": component["component_id"],
             "class": component["class"], "kind": component["kind"],
             "ref": component["ref"], "expected_files": list(component["files"]),
@@ -129,9 +144,12 @@ def _loaded_evidence(component, execution, package):
             "loaded_modules_digest": digest(loaded_modules),
             "expected_package_digest": package["digest"],
             "loaded_package_digest": (execution or {}).get("package_digest"),
+            "activation_required": activation_required,
+            "activation_matches": len(activation_matches),
             "loaded": (bool(component["files"])
                        and len(actual) == len(component["files"])
-                       and loaded_digests == expected_digests and package_loaded)}
+                       and loaded_digests == expected_digests and package_loaded
+                       and (not activation_required or bool(activation_matches)))}
 
 
 @dataclass(frozen=True)

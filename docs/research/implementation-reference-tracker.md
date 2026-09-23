@@ -23,3 +23,5 @@
 E0 前置改动：`EvolutionService.plan_pair/plan_monitor` 新增宿主授予的冻结 `EpisodeAuthority` 和摘要；配对父子两臂、监控 Episode 均由该计划传入同一授权，benchmark 任务行不能自行提供授权。既有任务来源技能的选择／晋升／guard／新任务复用测试在有授权、无授权两种模式下均通过。这只解决未来能力候选的公平执行条件，未将动态工具／服务 Definition 放入可发布包，也未证明其调用激活或 RSI 收益。
 
 E1 新增[惰性 CapabilityRelease v1](../design/capability-release-v1.md)及 11 项来源／篡改测试。它从源 Definition 验证并冻结纯能力的源码、schema、interface 和 creator 谱系，但不具备部署权；与 DeepSeek 的作用域实现不同，此对象预备进入 Nexgent 的候选选择链，与 AutoSci/ADAS/AFlow 的可遗传行为候选作机制对照。目前它尚未进入 AgentPackage、配对评价或新任务，E 出口仍未通过。
+
+E2-A 将纯工具与 `model_context.v1` 服务列为 AgentPackage manifest v2 的 S 组件，PackagePatch v3 能声明对应新增／修改；Generation 与 Evolution 解析这些组件，并要求运行轨迹中同时有模块加载及组件激活收据。100 项定向测试通过。此处借鉴 [ADAS](https://arxiv.org/abs/2408.08435) 和 [AFlow](https://arxiv.org/abs/2410.10762) 的可执行候选思想，尚未证明候选在新任务实际运行、独立效果或晋升收益。下一步 E2-B 接入后续任务运行时，再做 E3 的任务来源候选与配对评价。

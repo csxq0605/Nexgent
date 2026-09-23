@@ -160,6 +160,12 @@ def _component_descriptor(package, component_id):
         elif kind == "role":
             prompt_ref = manifest["roles"][ref].get("prompt_ref")
             paths = [] if prompt_ref is None else [prompt_ref]
+        elif kind == "tool":
+            paths = [split_ref(manifest.get("tools", {})[ref]["ref"],
+                               package["files"])[0]]
+        elif kind == "service_provider":
+            paths = [split_ref(manifest.get("services", {})[ref]["ref"],
+                               package["files"])[0]]
         elif kind == "resource":
             paths = [ref]
         else:
