@@ -1,6 +1,6 @@
 # Nexgent 仓库重构计划
 
-修订日期：2026-09-23。基线提交：`4722cf7`。**本次重新确定目标、依赖与验收；新阶段的实现尚未开始，没有真实 RSI 收益结论。** 基线不包含工作树中尚未提交的 benchmark／memory 诊断改动。
+修订日期：2026-09-24。计划制定基线提交：`4722cf7`；本次进度复核提交：`9fc14a9`。**A 的技术选型已经完成，B–E 有纵向机制和一次真实模型跨任务工具复用证据，但 B–G 的完整出口均未验收，也没有通用 RSI 收益结论。** 以下阶段出口仍是验收标准，不能用已勾选的薄片代替。
 
 本文件是当前实施顺序的唯一入口；[能力内核决策](docs/design/rsi-capability-kernel.md)定义目标和待决技术选型，[产品决策](docs/design/product-and-refactor-decision.md)保留产品边界。旧 P0–P5 计划转为[历史快照](docs/history/refactor-plan-p0-p5-20260923.md)，其中的完成标记只解释当时的交付，不对应下列新阶段。
 
@@ -28,15 +28,15 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 | 对象 | 已有资产与证据 | 缺口／新阶段 |
 | --- | --- | --- |
 | 执行底座 | TaskService、AgentPackage、模型与工具调用、工件、预算、停止恢复；普通任务和 benchmark 共用执行路径 | 服务接口与生命周期仍集中在宿主实现，缺少可替换插件运行时；A–B |
-| 工具／插件 | ToolRegistry 从已安装的 nexgent.domains entry point 加载可信处理器 | 模型不能定义并试装新 ToolSpec／服务插件；现有受限 worker 不是 OS 容器；B–C |
+| 工具／插件 | ToolRegistry 加载可信处理器；真实 MiMo 已在普通 Episode 中开发、试装并调用新名称的纯本地计算工具，也开发、激活并应用过 `model_context.v1` 服务 | 两者仍是窄接口；缺少可替换 provider／服务生命周期、依赖解析、受权外部操作和自主缺口判断；受限 worker 不是 OS 容器；B–C |
 | 技能开发 | develop_skill 编译受控 Python 子包；确定性测试覆盖开发、修复、委派；真实模型写出过可运行代码 | 真实父任务自主创建并调用技能尚未成功，不能替代工具／插件开发；C |
 | 编排 | 任务角色、定向消息边、pending DAG 修改与恢复；真实 MiMo 完成一个 7 节点、多角色任务 | 真实反馈后第二次改图未成功；任务角色仅 ask，缺少持久 mailbox；执行循环与上下文策略不够可替换；D |
-| 跨任务采用 | 图／角色候选有确定性配对评价、加载检查、晋升、guard、新任务 channel 复用 | 普通 Main 任务不会自动驱动完整采用链；图与新技能联合激活未证明；E |
+| 跨任务采用 | 图／角色候选有确定性评价机制；一次真实 MiMo 创建的工具已通过配对、晋升、guard，并被新进程中的独立任务自动读取与调用 | 该次由实验程序显式串接，父版因 JSON 协议失败；普通 Main 任务不会自动驱动采用链，尚无跨任务族净收益或图与技能联合激活；E |
 | 记忆 | 独立 MemoryService release、快照、选择与回滚；真实 M 提案曾 abstain | 与 O/S 的一致版本组合、真实检索激活及收益未验证；E–F |
 | 递归 | 独立 R 通道与 R0/R1 后代比较、恢复、guard 有确定性测试 | 无真实模型递归收益；F |
 | 产品／研究 | Main 与高级信息窗、benchmark SDK、两臂／四臂研究执行器 | 插件树、完整轨迹、能力开发与演化状态未连通；正式多任务研究未执行；B–G |
 
-证据入口：[真实自编排及技能探针](docs/research/task-time-self-orchestration-live-20260923.md)、[候选资格结果](experiments/orchestration_qualification/RESULTS.md)、[记忆资格结果](experiments/memory_qualification/README.md)、[readiness 审计](docs/research/rsi-readiness-audit-20260923.md)。确定性评分替身只能证明机制连通。已有真实 O/S selection 未过门，尚无真实晋升后的净收益。
+证据入口：[真实自编排及技能探针](docs/research/task-time-self-orchestration-live-20260923.md)、[候选资格结果](experiments/orchestration_qualification/RESULTS.md)、[记忆资格结果](experiments/memory_qualification/README.md)、[readiness 审计](docs/research/rsi-readiness-audit-20260923.md)、[便携能力真实试验](experiments/kernel_spike/RESULTS.md#e3-b-跨任务便携能力真实试验-v2路径通过效果解释受限)。确定性评分替身只能证明机制连通；一次真实工具晋升只证明继承路径，不能推出净收益。已有真实 O/S selection 未过门。
 
 ## 3. 方法来源与落地责任
 
@@ -51,7 +51,7 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 
 ## 4. 新阶段与验收
 
-当前状态：**A 的内核选型已完成，选择 Python Episode 作为唯一生产执行边界；真实 MiMo 已分别在普通任务中开发并使用新工具和首个上下文服务；图编排中的能力开发有确定性执行证据。B–G 的完整阶段出口均未验收。** [ADR 001](docs/design/adr-001-python-episode-kernel.md)基于固定源码、两路线真实／替身小样、恢复、失败及迁移责任。[新工具切片](experiments/kernel_spike/RESULTS.md#c1-工具切片真实模型在任务中开发未知名称工具)从空清单出发，让模型生成源码／schema 并在原 Episode 内试装、调用和交付；[服务切片](experiments/kernel_spike/RESULTS.md#c-服务切片默认任务智能体真实开发并激活上下文服务)让默认任务智能体生成、激活 `model_context.v1`，后续模型调用使用该版本。两次题目均明确要求开发，不能证明自主能力缺口判断。DeepSeek 真实 MiMo 产生原生工具调用并取得结果，但最终 JSON 解码失败、未交付；外部原执行未受 Nexgent 准入／计费／恢复管理。当前受控代码只允许无凭据、无外部依赖的窄接口；跨任务独立采用、编排搜索和 RSI 净收益没有证据。已有旧控制面作为迁移资产，不直接填入 B–G 阶段完成数。
+当前状态：**A 的内核选型已完成，选择 Python Episode 作为唯一生产执行边界；真实 MiMo 已在普通任务中分别开发并使用新工具和首个上下文服务；一次模型编写的纯工具经独立配对、晋升和 guard，在新进程中的独立任务实际复用。B–G 的完整阶段出口均未验收。** [ADR 001](docs/design/adr-001-python-episode-kernel.md)基于固定源码、两路线真实／替身小样、恢复、失败及迁移责任。[新工具切片](experiments/kernel_spike/RESULTS.md#c1-工具切片真实模型在任务中开发未知名称工具)从空清单出发，让模型生成源码／schema 并在原 Episode 内试装、调用和交付；[服务切片](experiments/kernel_spike/RESULTS.md#c-服务切片默认任务智能体真实开发并激活上下文服务)让默认任务智能体生成、激活 `model_context.v1`，后续模型调用使用该版本。[跨任务试验](experiments/kernel_spike/RESULTS.md#e3-b-跨任务便携能力真实试验-v2路径通过效果解释受限)的父版因 JSON 协议失败，候选成本更高，且采用链由实验程序显式串接；不能据此宣称通用 RSI 收益。题目明确要求开发能力，不能证明自主缺口判断。DeepSeek 真实 MiMo 产生原生工具调用并取得结果，但最终 JSON 解码失败、未交付；外部原执行未受 Nexgent 准入／计费／恢复管理。当前受控代码只允许无凭据、无外部依赖的窄接口；编排搜索和 RSI 净收益没有证据。已有旧控制面作为迁移资产，不直接填入 B–G 阶段完成数。
 
 ### A. 内核边界与技术选型
 
