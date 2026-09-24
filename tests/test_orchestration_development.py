@@ -5,9 +5,12 @@ import pytest
 
 from nexgent.tasks.benchmarks import BenchmarkDescriptor
 from nexgent.tasks.orchestration_development import (
-    DevelopmentOrchestrationQualifier, public_task_fingerprint,
+    DevelopmentOrchestrationQualifier, _candidate_failure_code,
+    public_task_fingerprint,
 )
-from nexgent.tasks.orchestration_search import DevelopmentQualificationError
+from nexgent.tasks.orchestration_search import (
+    DevelopmentQualificationError, assess_qualification, repair_brief,
+)
 from nexgent.tasks.tools import ContractError
 
 
@@ -206,6 +209,66 @@ def test_runs_one_equal_budget_pair_and_returns_only_strict_public_projection(
     assert "private" not in json.dumps(result)
     assert result["usage"]["model_calls"] == 2
     assert service(value, REMAINING) == result
+    assert evolution.run_calls == 1
+
+
+def test_candidate_host_error_reaches_repair_only_as_fixed_code(
+        tmp_path, monkeypatch):
+    service, tasks, evolution, value = qualifier(tmp_path, monkeypatch)
+    run_pair = evolution.run_pair
+
+    def failed_candidate(*args, **kwargs):
+        trial = run_pair(*args, **kwargs)
+        episode = tasks.private[trial["pairs"][0]["candidate"]["episode_id"]]
+        episode.update(status="failed", failure_domain="protocol",
+                       last_error=("ContractError: Workflow ask node has "
+                                   "unsupported gateway arguments: secret-value"))
+        return trial
+
+    evolution.run_pair = failed_candidate
+    result = service(value, REMAINING)
+    assessment = assess_qualification(result)
+    brief = repair_brief(1, assessment)
+
+    assert result["tasks"][0]["candidate_failure_code"] == (
+        "candidate_workflow_gateway_invalid")
+    assert "candidate_workflow_gateway_invalid" in brief["failure_codes"]
+    assert "secret-value" not in json.dumps(result)
+    assert "secret-value" not in json.dumps(brief)
+
+
+def test_candidate_error_projection_ignores_embedded_untrusted_phrases():
+    episode = {"status": "failed", "failure_domain": "protocol",
+               "last_error": ("ContractError: unrelated task payload mentioned "
+                              "Workflow ask node has unsupported gateway arguments: x")}
+    assert _candidate_failure_code(episode) is None
+    episode["last_error"] = (
+        "ContractError: ledger: Additional properties are not allowed "
+        "('excluded_rows' was unexpected)")
+    assert _candidate_failure_code(episode) == "candidate_artifact_schema_invalid"
+    episode.update(failure_domain="agent", last_error=(
+        "ModelError: Provider must return one valid JSON object"))
+    assert _candidate_failure_code(episode) == "candidate_model_output_invalid"
+
+
+def test_infrastructure_failure_invalidates_paired_development(
+        tmp_path, monkeypatch):
+    service, tasks, evolution, value = qualifier(tmp_path, monkeypatch)
+    run_pair = evolution.run_pair
+
+    def failed_parent(*args, **kwargs):
+        trial = run_pair(*args, **kwargs)
+        episode = tasks.private[trial["pairs"][0]["parent"]["episode_id"]]
+        episode.update(status="failed", failure_domain="infrastructure",
+                       last_error="transport secret-value")
+        return trial
+
+    evolution.run_pair = failed_parent
+    with pytest.raises(DevelopmentQualificationError) as error:
+        service(value, REMAINING)
+    assert error.value.failure["failure_type"] == "ContractError"
+    assert error.value.failure["retry_safe"] is False
+    assert "secret-value" not in json.dumps(error.value.failure)
     assert evolution.run_calls == 1
 
 

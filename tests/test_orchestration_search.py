@@ -386,6 +386,14 @@ def test_development_projection_rejects_private_evaluator_fields_and_builds_boun
     assert "statistical_unit_id" not in json.dumps(brief)
 
 
+def test_qualification_rejects_unbounded_candidate_failure_detail():
+    value = _qualification("candidate-1")
+    value["tasks"][0]["candidate_status"] = "failed"
+    value["tasks"][0]["candidate_failure_code"] = "raw private evaluator answer"
+    with pytest.raises(ContractError, match="failure code"):
+        normalize_qualification("candidate-1", value)
+
+
 def test_search_journal_is_append_only_and_digest_chained(tmp_path):
     tasks = TaskService(tmp_path, tools=ToolRegistry())
     journal = OrchestrationSearchJournal(tasks.store)

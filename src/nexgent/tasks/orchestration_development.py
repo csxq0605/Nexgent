@@ -6,12 +6,15 @@ returns only the bounded public projection accepted by
 ``normalize_qualification``.  A durable intent is written before planning so a
 crash or provider failure cannot be silently retried with the same candidate,
 benchmark snapshot, seed, task sample, and Episode budget.
+Known host-classified candidate execution errors are reduced to fixed codes;
+raw Episode errors and evaluator-private data never enter repair input.
 """
 
 from __future__ import annotations
 
 from copy import deepcopy
 import json
+import re
 import time
 
 from ..kernel.programs import digest
@@ -30,6 +33,31 @@ from .tools import ContractError
 _TERMINAL = frozenset({"completed", "failed"})
 _USAGE_KEYS = ("model_calls", "completion_tokens", "tool_calls", "nodes")
 _JOURNAL_SCHEMA = "nexgent.orchestration-development-run.v1"
+
+
+def _candidate_failure_code(episode):
+    """Project only known host error classes, never node text or task data."""
+    if episode.get("status") != "failed":
+        return None
+    error = episode.get("last_error")
+    if not isinstance(error, str):
+        return None
+    domain = episode.get("failure_domain")
+    if (domain == "protocol" and error.startswith(
+            "ContractError: Workflow ask node has unsupported gateway arguments: ")):
+        return "candidate_workflow_gateway_invalid"
+    if (domain == "protocol"
+            and re.match(
+                r"^ContractError: [A-Za-z][A-Za-z0-9_. /-]{0,100}: "
+                r"Additional properties are not allowed\b", error)):
+        return "candidate_artifact_schema_invalid"
+    if (domain == "agent"
+            and error in {
+                "ModelError: Provider must return one valid JSON object",
+                "ModelError: Provider must return a JSON object",
+            }):
+        return "candidate_model_output_invalid"
+    return None
 
 
 def _copy(value, label):
@@ -391,13 +419,17 @@ class DevelopmentOrchestrationQualifier:
             child = pair["candidate"]
             parent_episode = self.tasks.get_private(parent["episode_id"])
             child_episode = self.tasks.get_private(child["episode_id"])
+            if any(episode.get("failure_domain") == "infrastructure"
+                   for episode in (parent_episode, child_episode)):
+                raise ContractError(
+                    "Infrastructure failure invalidated paired development evidence")
             for run in (parent, child):
                 observed = run.get("usage") or {}
                 _sum_usage(usage, observed)
                 if observed.get("usage_complete") is not True:
                     usage["usage_complete"] = False
             outcome = child_episode.get("outcome") or {}
-            rows.append({
+            row = {
                 "statistical_unit_id": unit,
                 "parent_status": parent_episode["status"],
                 "candidate_status": child_episode["status"],
@@ -413,7 +445,11 @@ class DevelopmentOrchestrationQualifier:
                     child_episode["status"] == "completed"
                     and outcome.get("delivery_status") == "delivered"
                     and outcome.get("schema_validation") == "passed"),
-            })
+            }
+            failure_code = _candidate_failure_code(child_episode)
+            if failure_code is not None:
+                row["candidate_failure_code"] = failure_code
+            rows.append(row)
         value = {
             "schema": QUALIFICATION_SCHEMA,
             "candidate_id": candidate["id"],

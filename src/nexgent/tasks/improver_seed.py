@@ -515,6 +515,12 @@ In this v3 contract, `path` belongs only to `add`; never put `path` in a `replac
 
 For workflow `ask` nodes, the host gateway accepts only `role`, `prompt`, `payload`, and `max_tokens` as parameter or binding names. Put task-specific fields inside `payload`; never add them as peer gateway arguments. If repair reports `ask_unsupported_gateway_arguments`, correct the graph interface before changing the task logic.
 
+The host may report `candidate_workflow_gateway_invalid`,
+`candidate_artifact_schema_invalid`, or `candidate_model_output_invalid` after
+development execution. These are failure classes, not node IDs or task answers.
+Use the public graph and declared deliverable schemas to form a new hypothesis;
+do not invent an omitted node, schema field, or hidden evaluator expectation.
+
 The hypothesis must be falsifiable on later Episodes. The activation probe or targets must name changed components. Do not claim the patch works; selection and guard evaluation decide that independently.
 """
 

@@ -28,6 +28,11 @@ SEARCH_EVENT_SCHEMA = "nexgent.orchestration-search-event.v1"
 QUALIFICATION_SCHEMA = "nexgent.orchestration-development-qualification.v1"
 REPAIR_SCHEMA = "nexgent.orchestration-repair-brief.v1"
 _TERMINAL = frozenset({"completed", "failed"})
+_CANDIDATE_FAILURE_CODES = frozenset({
+    "candidate_workflow_gateway_invalid",
+    "candidate_artifact_schema_invalid",
+    "candidate_model_output_invalid",
+})
 
 
 class DevelopmentQualificationError(ContractError):
@@ -402,8 +407,15 @@ def normalize_qualification(candidate_id, value):
     }
     seen = set()
     for row in value["tasks"]:
-        if not isinstance(row, dict) or set(row) != task_fields:
+        if (not isinstance(row, dict)
+                or set(row) not in (task_fields,
+                                    task_fields | {"candidate_failure_code"})):
             raise ContractError("Development qualification exposes unknown task fields")
+        if "candidate_failure_code" in row:
+            if (row["candidate_status"] != "failed"
+                    or not isinstance(row["candidate_failure_code"], str)
+                    or row["candidate_failure_code"] not in _CANDIDATE_FAILURE_CODES):
+                raise ContractError("Development candidate failure code is invalid")
         unit = row["statistical_unit_id"]
         if not isinstance(unit, str) or not unit or unit in seen:
             raise ContractError("Development qualification units must be unique")
@@ -441,6 +453,8 @@ def assess_qualification(qualification, *, minimum_mean_delta=0.0):
     for row in qualification["tasks"]:
         if row["candidate_status"] != "completed":
             failures.add("candidate_execution_failed")
+        if "candidate_failure_code" in row:
+            failures.add(row["candidate_failure_code"])
         if not row["activation_loaded"]:
             failures.add("orchestration_not_loaded")
         if not row["artifact_contract_valid"]:
