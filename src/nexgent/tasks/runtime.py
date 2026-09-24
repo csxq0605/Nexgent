@@ -1116,6 +1116,40 @@ class TaskService:
                 "Strategy handoff selector RPC evidence changed")
         return handoff
 
+    def _strategy_handoff_read_events(self, identity, handoff_ref, *, node_id=None):
+        """Return target-segment reads of the exact committed handoff."""
+        return [
+            event for event in self.store.events(identity)
+            if (event.get("kind") == "artifact_read"
+                and (event.get("content") or {}).get("artifact_id")
+                == handoff_ref
+                and (event.get("content") or {}).get(
+                    "node_id", "").startswith("strategy/segments/2/rpc.")
+                and (node_id is None
+                     or (event.get("content") or {}).get("node_id") == node_id))
+        ]
+
+    def _require_strategy_handoff_first_action(self, identity, checkpoint):
+        """Require the exact handoff read as the switched target's first RPC."""
+        handoff_ref = checkpoint["handoff_artifact"]["ref"]
+        handoff = self.store.read(handoff_ref, identity)
+        selector_path = handoff["content"]["selector_rpc"]["call_path"]
+        selector_number = int(selector_path.rsplit(".", 1)[1])
+        first_target_path = f"strategy/segments/2/rpc.{selector_number + 1}"
+        journal = self.store.rpc_find(identity, first_target_path)
+        request = journal.get("request") if isinstance(journal, dict) else None
+        if (not isinstance(journal, dict)
+                or journal.get("status") != "completed"
+                or not isinstance(request, dict)
+                or request.get("method") != "read_artifact"
+                or request.get("params") != {"artifact_id": handoff_ref}
+                or request.get("package_digest") != checkpoint["package_digest"]
+                or not self._strategy_handoff_read_events(
+                    identity, handoff_ref, node_id=first_target_path)):
+            raise ContractError(
+                "Switched strategy must read its exact durable handoff as "
+                "the target segment's first host action")
+
     def _strategy_checkpoint_rpc_path(
             self, identity, rule_id, trigger_node_id, receipt_digest):
         """Recover or allocate the selector slot for one durable DAG trigger."""
@@ -2450,19 +2484,8 @@ class TaskService:
                         if rpc_prefix[0] else f"rpc.{counter[0]}")
                 try:
                     if rpc_prefix[0] and method == "ask":
-                        handoff_ref = payload.get("strategy_handoff_ref")
-                        handoff_reads = [
-                            event for event in self.store.events(identity)
-                            if (event.get("kind") == "artifact_read"
-                                and (event.get("content") or {}).get("artifact_id")
-                                == handoff_ref
-                                and (event.get("content") or {}).get(
-                                    "node_id", "").startswith(rpc_prefix[0] + "/"))
-                        ]
-                        if not handoff_reads:
-                            raise ContractError(
-                                "Switched strategy must read its durable handoff "
-                                "before the first model call")
+                        self._require_strategy_handoff_first_action(
+                            identity, strategy_checkpoint)
                     return self._dispatch(
                         identity, package, method, params, path,
                         stop_event, notify)
@@ -2618,6 +2641,9 @@ class TaskService:
                         )
                         execution["execution"]["kind"] = "controlled_code"
                 self._remaining_wall_seconds(identity)
+                if strategy_checkpoint is not None:
+                    self._require_strategy_handoff_first_action(
+                        identity, strategy_checkpoint)
                 activations = []
                 seen_activations = set()
                 for event in self.store.events(identity):

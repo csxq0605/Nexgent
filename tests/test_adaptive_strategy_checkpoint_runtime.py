@@ -15,7 +15,9 @@ RESULT_SPEC = [{
 }]
 
 
-def checkpoint_package(failure_domain="agent"):
+def checkpoint_package(
+        failure_domain="agent", *, read_handoff=True,
+        publish_before_handoff=False):
     workflow = {
         "nodes": [
             {
@@ -44,7 +46,7 @@ def checkpoint_package(failure_domain="agent"):
             "feedback_path": "feedback",
         }],
     }
-    source = """
+    source = ("""
 def execute(task, context):
     handoff = context.read_artifact(task['strategy_handoff_ref'])
     result = context.publish({
@@ -57,7 +59,28 @@ def execute(task, context):
         'summary': 'continued from the durable strategy handoff',
         'limitations': [],
     }
-"""
+""" if read_handoff and not publish_before_handoff else """
+def execute(task, context):
+    result = context.publish(
+        {'answer': 'published-before-handoff'}, name='result',
+        schema={'type': 'object', 'required': ['answer']})
+    context.read_artifact(task['strategy_handoff_ref'])
+    return {
+        'deliverables': {'result': result['id']},
+        'summary': 'read the handoff after another host action',
+        'limitations': [],
+    }
+""" if publish_before_handoff else """
+def execute(task, context):
+    result = context.publish(
+        {'answer': 'bypassed-handoff'}, name='result',
+        schema={'type': 'object', 'required': ['answer']})
+    return {
+        'deliverables': {'result': result['id']},
+        'summary': 'did not read the strategy handoff',
+        'limitations': [],
+    }
+""")
     return make_package({
         "agent.py": source,
         "workflows/main.json": json.dumps(workflow),
@@ -225,6 +248,53 @@ def test_completed_feedback_switches_to_entry_in_the_same_episode(tmp_path):
         "nexgent.strategy-selection-request.v1",
         "nexgent.strategy-checkpoint-selection.v1",
     ]
+
+
+def test_switched_entry_cannot_complete_without_reading_exact_handoff(tmp_path):
+    gateway = CheckpointGateway()
+    service = TaskService(
+        tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    episode = service.create(
+        "Reject a switched entry that bypasses its durable handoff",
+        deliverables=RESULT_SPEC,
+        package=checkpoint_package(read_handoff=False),
+    )
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "failed"
+    assert "read its exact durable handoff" in result["last_error"]
+    assert result["output_refs"] == {}
+    assert result.get("execution") is None
+    assert not [event for event in result["events"]
+                if event["kind"] == "artifact_read"]
+    assert [call["schema"] for call in gateway.calls] == [
+        "nexgent.strategy-selection-request.v1",
+        "nexgent.strategy-checkpoint-selection.v1",
+    ]
+
+
+def test_switched_entry_must_read_handoff_before_publish(tmp_path):
+    gateway = CheckpointGateway()
+    service = TaskService(
+        tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    episode = service.create(
+        "Reject a switched entry that publishes before reading its handoff",
+        deliverables=RESULT_SPEC,
+        package=checkpoint_package(publish_before_handoff=True),
+    )
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "failed"
+    assert "first host action" in result["last_error"]
+    reads = [event["content"] for event in result["events"]
+             if event["kind"] == "artifact_read"]
+    assert len(reads) == 1
+    assert reads[0]["node_id"] == "strategy/segments/2/rpc.3"
+    first_target = service.store.rpc_find(
+        episode["id"], "strategy/segments/2/rpc.2")
+    assert first_target["request"]["method"] == "publish"
 
 
 def test_checkpoint_continue_is_durable_and_finishes_the_dag(tmp_path):
