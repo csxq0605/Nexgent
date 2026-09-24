@@ -1,0 +1,363 @@
+{
+  "batch_caps": {
+    "completion_token_reservations": 48000,
+    "episodes": 4,
+    "nodes": 128,
+    "started_model_calls": 20,
+    "tool_calls": 4,
+    "tool_work_units": 4
+  },
+  "budget_per_episode": {
+    "max_completion_tokens": 12000,
+    "max_model_calls": 5,
+    "max_nodes": 32,
+    "max_tool_calls": 1,
+    "max_tool_work_units": 1
+  },
+  "conditions": [
+    {
+      "canonical_task_sha256": "030255de20758343b81b4d8ec87a32c73da814bf48cc693a23e8a9cbd6527c60",
+      "condition_id": "D1C-SWITCH-PRIMARY",
+      "fault_injection_point": null,
+      "inputs_sha256": "d6468f82cb9e6fb2fccdeefc6bb68b74182013fa28c08e637faf8ed0a6f33d5b"
+    },
+    {
+      "canonical_task_sha256": "e610cc8a18134f062c5a3ad6efad6259c59f99248bf970318f4d28d40a197ea7",
+      "condition_id": "D1C-NO-GAP",
+      "fault_injection_point": null,
+      "inputs_sha256": "44611ee2c879ffda9b621f35db558167775101e0b64e7d1a83944d354349ec1c"
+    },
+    {
+      "canonical_task_sha256": "3ff67b8e63c8315c8b8c7fd89f0ddb1c382cb56d5fde92a0d1127a6087a7263e",
+      "condition_id": "D1C-INFRA-CONTROL",
+      "fault_injection_point": null,
+      "inputs_sha256": "e6689c46dc42a01346fa5364fb917f58081bae66acff8fafb4d9c4b332458349"
+    },
+    {
+      "canonical_task_sha256": "030255de20758343b81b4d8ec87a32c73da814bf48cc693a23e8a9cbd6527c60",
+      "condition_id": "D1C-SWITCH-RECOVERY",
+      "fault_injection_point": "after_checkpoint_commit_before_target_entry",
+      "inputs_sha256": "d6468f82cb9e6fb2fccdeefc6bb68b74182013fa28c08e637faf8ed0a6f33d5b"
+    }
+  ],
+  "constraints_per_episode": {
+    "allowed_effects": [
+      "local_compute"
+    ],
+    "wall_seconds": 180
+  },
+  "contract_revision": "2026-09-24/D1-C.2",
+  "contract_sha256": "a94170265b6a539ce97994e61b742434133ffd85bbd797a98c72164fd264b244",
+  "created_at": "2026-09-24T04:27:27Z",
+  "episode_order": [
+    "D1C-SWITCH-PRIMARY",
+    "D1C-NO-GAP",
+    "D1C-INFRA-CONTROL",
+    "D1C-SWITCH-RECOVERY"
+  ],
+  "evaluator": {
+    "interface": "evaluate(condition_id, final_content, frozen_inputs)",
+    "route_blind": true,
+    "source_sha256": "91278138feb3a7992218ef8486c85c5fcd1241ccce496ba8d8f3a2f7d1eb4606"
+  },
+  "git": {
+    "commit": "8486897d53c5f0a373f7e0a2882ec7b2512d939f",
+    "dirty": false,
+    "dirty_paths": [],
+    "executed_source_sha256": {
+      "experiments/strategy_checkpoint/__init__.py": "5c0918ebcfb27bd9bbb4b9210d6e740b34097e44d3d03b732c7640bd852a6c1f",
+      "experiments/strategy_checkpoint/evaluator.py": "91278138feb3a7992218ef8486c85c5fcd1241ccce496ba8d8f3a2f7d1eb4606",
+      "experiments/strategy_checkpoint/run.py": "9ad13c330d55efdeca96b484f13ecf17be819dc6826f05c49ad67a5f95669763",
+      "src/nexgent/__init__.py": "6862ebe24f311e74ea9d01bdabfbd113ac6c8dc08d6901503d2e3088e4df17dd",
+      "src/nexgent/__main__.py": "482b8693e2fe6dbd732e3d7961e03827d3efa187bad11d29da188be580ebbeea",
+      "src/nexgent/agents/__init__.py": "fa5e9cc08aad4394770e3b67a2096ba0c9894023acd54c924942b59de53cbacc",
+      "src/nexgent/agents/broker.py": "0efaa0da298ab671fe457e9f3ab4cb0ecf94fe565e16f7dd9933374f551ce34e",
+      "src/nexgent/agents/seed.py": "fd0bb0a03beace4e42daad905cc9feb760b573acb8bea8761fd271f643d65cb6",
+      "src/nexgent/benchmarks/__init__.py": "8bc81f111e4270119d911e93cc2f06bb35376036b789e247d9254d9ecb063fde",
+      "src/nexgent/benchmarks/evaluation.py": "6a1663a9206a1cf9e0bf01531dbc7a90bdf23b19dbeaf9cc97492e7f578629f7",
+      "src/nexgent/cli.py": "36667823ca304b1fc9f48a0d8c701fcf2ca825570eb3e4784cb1f6a9873476ba",
+      "src/nexgent/evolution/__init__.py": "55f497d65cddd9248aff935978830bf198e160c52429487986c5e3f3367e5327",
+      "src/nexgent/evolution/controller.py": "b859148217fbe1366f7f6b2237d599e85f9540b5f441c34f4e5963b82a2b7954",
+      "src/nexgent/evolution/meta_evaluation.py": "24f40f00032015a17eecb3511378aa12f8228096804d40604f24732f83345b48",
+      "src/nexgent/kernel/__init__.py": "be1ee17550e415377f28804bbbe7fc50a4be82529e7dfb90c1147e9d27fd0ecf",
+      "src/nexgent/kernel/programs.py": "57deb98ba270caabf46298583189be6a45248b9099168a59264e584d412563d6",
+      "src/nexgent/kernel/runner.py": "c3129f6da8fef77b1ebf6c862bc74250c3e06b588b3e7ac9b098de2c7cca55de",
+      "src/nexgent/kernel/store.py": "062d308aea510319756fd55290e0f0b27b533e7500eda3b3002dad10e41eef94",
+      "src/nexgent/kernel/tooling.py": "97596ecf70c49fa49a6f0b5e105edd139408b17a9e5ee429f882ba56a0bc8cc5",
+      "src/nexgent/kernel/worker.py": "4d4ddc3bd24f1cb4bc3d37d9a0963a38a8d05fdda938b7b895e202768a99be9b",
+      "src/nexgent/models/__init__.py": "301736fc94ecadd62cd46ff4a81680439e1e5b1384dbbda7d505a2d8ba7fa1a2",
+      "src/nexgent/models/config.py": "e06708546a7e37c2f2ad9ec508457d4a027d22900403033ec42a3742753a1ee6",
+      "src/nexgent/models/gateway.py": "cc60decbb0393af44509ed278f34b4d8cff25b5547bc010cdb4b9ebafae220ca",
+      "src/nexgent/models/worker.py": "3bbf2d62795345e1838883576f7d278c2acd1e8fd193d2d669cd0af53dbcf5e2",
+      "src/nexgent/research/__init__.py": "2fad16e4dfa8e975c77fcf0a8a6f506f0e9e859218f57110e0818a0341e4af16",
+      "src/nexgent/research/library.py": "21076d679a0f2909f28e88501afa8cad2cdff6716f48333975fa1ac4801d816c",
+      "src/nexgent/research/literature.py": "1e168445c21c02a6062bd30cf423fc04169a71bb78d85b31af5f5afe5778a6ef",
+      "src/nexgent/tasks/__init__.py": "9d1493de1f5764bef27b58c21085af946f519f36419bbfeb44642d54a4fe5256",
+      "src/nexgent/tasks/adaptive_orchestration_seed.py": "1dfedd184a548f38d27de10d9e426180df2e259d4f6e234208b4796e7921abaa",
+      "src/nexgent/tasks/benchmarks.py": "29efd1840aa4581de96f147e8ef685ca561eac8e264417fcdff051bde19cf24c",
+      "src/nexgent/tasks/capability_authority.py": "e96ac1d443e634a17a3838db66444d16d99d7aecc90dd6b8a57c77c9afecc487",
+      "src/nexgent/tasks/capability_definitions.py": "7651d61a6bf29cf4b7bc8830986a3f5fa5f550392d5f239108f3672c64fce11d",
+      "src/nexgent/tasks/capability_releases.py": "be9e5806b9a978cb7a75b34aed2047cf3bc73ae15e07845fe39466a7cf828e26",
+      "src/nexgent/tasks/costs.py": "4a23aaf93d02b97f3714dad3133b8b498a639193a13929b52131b5da97266600",
+      "src/nexgent/tasks/cycles.py": "487d543771342f6020be42797cb7f2ec3671110218f480a5f57e52b0acf13f35",
+      "src/nexgent/tasks/dynamic_roles.py": "72f66e25cb60a4abb59ca2979e07402b559f197f99374232d3c03ac8ad228e25",
+      "src/nexgent/tasks/evidence.py": "a31d64490432625403e50c38c2a5e6926a0594a723b9bad0505674b576388026",
+      "src/nexgent/tasks/evolution.py": "f16bb99d5f6cb1337fd6035cd7f2c8fc331ec00a52903015d2f5f28a202eaad7",
+      "src/nexgent/tasks/evolution_view.py": "dedb75c6e1b7d1649e90d6af86d63b82acd4d31fa4d996c3b1f6182e84d34f37",
+      "src/nexgent/tasks/feedback_trigger.py": "782d3a7a61d18a9bc6607f2b97ae7e8a98fd8936cdb017ad7d19b4756bb4f31c",
+      "src/nexgent/tasks/four_arm_assessment.py": "561a34ccd08be5fe82e9b60283e56f3dde0f1d702bca221fe8f94b74108b8a4e",
+      "src/nexgent/tasks/four_arm_studies.py": "59c4ece11473069828aa5041763c72ee6a79f4b5b968b1e5dbbe19e02a57f564",
+      "src/nexgent/tasks/generation.py": "22d83cf8d174a028807c692374418789abb6513148cebfbd2e84a51a99b860f8",
+      "src/nexgent/tasks/graph_compiler_repair.py": "b00b23440e44280aebb969db04a4ca5ccfb3c48fbcba9e14880fb3842016cf64",
+      "src/nexgent/tasks/guards.py": "3d7c52b2ee40cee3123ce9e104c7a70bfdda1167452a1bd9414af94218295fe2",
+      "src/nexgent/tasks/improver_seed.py": "13d210dc6c82a800dbce3117f5f848b49e2d4ff545a9777c682dfdc594fe6b1c",
+      "src/nexgent/tasks/improvers.py": "e23471a2d1a25589caa597973c1abe388146826ccc34375bbfbce9c045d84b38",
+      "src/nexgent/tasks/memory.py": "7ca666c1dbe0ae6978bc5e34862298940da5000478e0d3d23a01794ddd18fa8e",
+      "src/nexgent/tasks/memory_view.py": "b7d5cca4a12d085d0958c5a5e95b5eadaf9b9ff91e910dd331bd08187cadc349",
+      "src/nexgent/tasks/messages.py": "ddda854b3f7395d6364c0f7fbc98b247e7493d76cbfac9cc941120647471dd3c",
+      "src/nexgent/tasks/meta_evaluation.py": "765e78bc2ed53981b21774e17a880d09f1be2151b7f5dfb2d9237c6bea49151f",
+      "src/nexgent/tasks/multirole_seed.py": "783f2f47e2714134439be14b3acfd48a441f4b2dd1f4e3c33e42bc345eb85eec",
+      "src/nexgent/tasks/orchestration.py": "23081eb6ec37cc685899a6738b1340c6b6deb09c0a56914dd429291e6980a05a",
+      "src/nexgent/tasks/orchestration_search.py": "888ce24d92c8cb24c6e4acb167af8c527e90bdde137e8445caeb100c4f126e61",
+      "src/nexgent/tasks/orchestration_search_seed.py": "a2f0c924c6d6d7797831b21ed7e66716d73fbda34db1cdb3b1e4c2272df15803",
+      "src/nexgent/tasks/outcomes.py": "f069a4c68e25d569d94c8fe67b68d84d8fee9c489a1d9a536439cedf41782000",
+      "src/nexgent/tasks/package_patch_v3.py": "901c4f8529d33869d4e5a527061f7bd5842f0b178b95b2b1494e723969c4a26f",
+      "src/nexgent/tasks/package_runner.py": "78e6b095f0e24d2a819bbd933287e5d681216541efac15a65a5d8eb61c0a0303",
+      "src/nexgent/tasks/package_worker.py": "87ec420c61983ea1ede586a66c5653357806fa802c62145e1eb6b3ce88fed68b",
+      "src/nexgent/tasks/packages.py": "3c5aa66ff3c5e2193e6cd625d35899aefb4ba8bad5338d2977e30ed29262c890",
+      "src/nexgent/tasks/patches.py": "1bd292b91c17764a2681cfda0abcffa1d6fbda3797de6c0edcc3009f3c02833d",
+      "src/nexgent/tasks/pending_graph_patch.py": "e63251eb01cc1b012ed05c4deab37ca3972f9481ee8f55b563e52ac1f2ff11fc",
+      "src/nexgent/tasks/recursive_cycles.py": "d5b2c078d3ce1bebbc579add25d605aaaaa9f6e5b1fe547594341b99b34689c2",
+      "src/nexgent/tasks/runtime.py": "f937a6dd2c1ac775772cffc3b1b00ec379c2b1d3c4886027214083d5ddb9e0d5",
+      "src/nexgent/tasks/seed.py": "325298e1d33ae282c13f6e27f08619a94562480e48bd5633f29b1f6172f85278",
+      "src/nexgent/tasks/self_orchestration_seed.py": "32a06b4a636cb484f438dd4966939bb3da86d76ee99587a508b5472a1c61a254",
+      "src/nexgent/tasks/service_definitions.py": "21c1a5de71369f66d3c0d76b902ca5b11b5d13a0b65347cdead58c3db766fde1",
+      "src/nexgent/tasks/store.py": "2a36670f082e223a78fe6eeea95bd2fe6a000efff2ea5bceb8052f1d83c2578e",
+      "src/nexgent/tasks/strategy_checkpoints.py": "bb672ced7db44a92e7a26747f73b98ab4ae17381047b4c23f0d51ed9119fbb15",
+      "src/nexgent/tasks/strategy_decisions.py": "e16efea50d90747deb352ed42e96073c41f842ada8fec2802dfac6b54f0753f0",
+      "src/nexgent/tasks/studies.py": "430fbdf304b2bd413a01e73f649836dce811fd9eb627e863622ce1b520a29fca",
+      "src/nexgent/tasks/task_capability_adoption.py": "989d37e07486b11e7c9aa8f93688b39726fd8ac8406c22e51bcd9bfb4d39644b",
+      "src/nexgent/tasks/task_skill_adoption.py": "b4b3e4e64581996a8873a46ad1b146a3063a5caaa39970805d934771e6337648",
+      "src/nexgent/tasks/task_skill_compiler.py": "843168a6107de0810e665d32e49412efbcfb1f6ce017b30f0c7e38cb0548742a",
+      "src/nexgent/tasks/task_skill_repair.py": "ddabbd2f19b875fa36e3f45c8817248c7b764793b2dac4b5b45d8b32f76346be",
+      "src/nexgent/tasks/tools.py": "2af53c07926cd87f02fbe5ff7ca9348a7150aefe8a444f346297d4b14fb8f6f6",
+      "src/nexgent/tasks/workflows.py": "f4ca6a34c92d7b638dd951be5f8883d5cfde2de8f26f9c91f4e4cf31ed5bd9a6",
+      "src/nexgent/ui/__init__.py": "5edf9416653b8f5282c7abfe5f9e7126773826d29ebe62798d143b26b06d0d73",
+      "src/nexgent/ui/app.py": "b32ceee0489bc2389818c6ab78b4e07cbb269749abec7cbfa57889676f8240ad",
+      "src/nexgent/ui/main_window.py": "19fd86a6823ea33a9fde09d523f18e31c5c636394c7bd9a295e8b0e74d2a4c30",
+      "src/nexgent/ui/meta_evidence.py": "46a9581e8d70a00cb36c7af2439530d65bef13bb574ed8836a44bbeeeded09af",
+      "src/nexgent/ui/tasks_window.py": "16e2caca8c075d03f54b8fda169f866ec0c24e3f503359313da782b1777f426d",
+      "src/nexgent/ui/window.py": "754cf658e4fc7cf4004c12bacbb33002b080ec8c656d4d8ed72508502b08d1ef"
+    }
+  },
+  "manifest_digest": "378c896db6f9a64fa26d4ce6b01b8b19b246861d18aaaa08793b2cc4cd244a26",
+  "model_profile": {
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "configured_model": "mimo-v2.6-flash",
+    "credential_ref": "NEXGENT_API_KEY",
+    "credential_source_profile_id": "mimo/mimo-v2.5",
+    "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+    "profile_id": "mimo/mimo-v2.6-flash",
+    "provider": "mimo"
+  },
+  "package": {
+    "candidate_set": {
+      "candidate_set_digest": "aa3af9bc5ff8c1ed66e0a66f154804e2f959a25e90b04a93b64f5fed1510ab05",
+      "candidates": [
+        {
+          "backend": "executable_plan",
+          "component_digest": "1fc62cd986e682f2beab747472265287ce5589aa83f9957e5c92a2b9ff3747e9",
+          "component_id": "checkpoint-release-dag",
+          "kind": "workflow",
+          "package_digest": "f32fc873e51949e69235f64692ea38a855970bf04aaeaac48248ed96e51f6e17",
+          "package_id": "package-d9de886aafcfe7904687a19b",
+          "ref": "release_checkpoint",
+          "shape": "dag",
+          "source_digest": "1ca441d1f03e6bc2f3730b2bbd63ffbe6413ef57655b66f23ed4a5e81ab4f534",
+          "source_kind": "workflow_graph",
+          "source_path": "workflows/release_checkpoint.json"
+        },
+        {
+          "backend": "controlled_code",
+          "component_digest": "8f94f3ca7aaa2413a21a7609cb9aed9fc2868904361e8273994a80ca1d7e626a",
+          "component_id": "handoff-recovery-entry",
+          "kind": "entry",
+          "package_digest": "f32fc873e51949e69235f64692ea38a855970bf04aaeaac48248ed96e51f6e17",
+          "package_id": "package-d9de886aafcfe7904687a19b",
+          "ref": "execute",
+          "shape": "open_loop",
+          "source_digest": "27af141ef0debc4b269e6e2fcecf079b95109332a800f2e8db089c02a9f2e5d5",
+          "source_kind": "python_source",
+          "source_path": "agent/recovery.py"
+        }
+      ],
+      "package_digest": "f32fc873e51949e69235f64692ea38a855970bf04aaeaac48248ed96e51f6e17",
+      "package_id": "package-d9de886aafcfe7904687a19b",
+      "schema": "nexgent.strategy-candidate-set.v1"
+    },
+    "digest": "f32fc873e51949e69235f64692ea38a855970bf04aaeaac48248ed96e51f6e17",
+    "entry": "execute",
+    "entry_ref": "agent/recovery.py:execute",
+    "entry_source_sha256": "27af141ef0debc4b269e6e2fcecf079b95109332a800f2e8db089c02a9f2e5d5",
+    "id": "package-d9de886aafcfe7904687a19b",
+    "prompt_sha256": {
+      "checkpoint_selector": "2f3abe0a6a38e111076e434d1ec8e782a3a6ed43a736661c4f025493eed56b11",
+      "draft": "d2b4ebd6cee93cffec14f3721d330f93fee1a4904c4bc521d310e2cb5e7fb346",
+      "repair": "e9e416064bb0cc3ac7803ad98d88e6eec23079846a1a23492ccc3198d938b391",
+      "reviewer": "ebcabe166e3256ed9cf15f67c5d88e6ca9b9523f0e93279065c639f1b58c9dd3"
+    },
+    "selector_prompt_sha256": "2f3abe0a6a38e111076e434d1ec8e782a3a6ed43a736661c4f025493eed56b11",
+    "workflow_sha256": "ee6849fc9028d31c181d1c9b59d306c9ad62b1de332a39fd8f3f5200fa89f2fa"
+  },
+  "preflight": {
+    "batch_usage": {
+      "completion_token_reservations": 25400,
+      "episodes": 4,
+      "nodes": 78,
+      "started_model_calls": 10,
+      "tool_calls": 4,
+      "tool_work_units": 4
+    },
+    "checks": {
+      "all_completed": true,
+      "all_quality_full_pass": true,
+      "batch_caps_respected": true,
+      "controls_never_call_selector": true,
+      "episode_caps_respected": true,
+      "four_rows_fixed_order": true,
+      "host_start_exact": true,
+      "no_external_model_called": true,
+      "old_publisher_skipped_after_switch": true,
+      "recovery_exactly_once": true,
+      "selector_projection_bounded": true,
+      "switch_handoff_first_and_rechecked": true,
+      "switch_only_on_material_gap": true,
+      "validator_once_each": true
+    },
+    "external_model_called": false,
+    "passed": true,
+    "rows": [
+      {
+        "artifact_digest": "39c2dac37f3a30c4693ec9b24b22cd5bfa7f480a1c430ca67254d7133ce68d2a",
+        "checkpoint_action": "switch",
+        "condition": "D1C-SWITCH-PRIMARY",
+        "deadline_stable": true,
+        "failure_class": null,
+        "feedback_verdict": "material_protocol_gap",
+        "handoff_consumed": true,
+        "model_calls": 4,
+        "quality": true,
+        "reserved_tokens": 9200,
+        "selector_receipt": 1,
+        "start_strategy": "checkpoint-release-dag",
+        "target_backend": "controlled_code",
+        "task_digest": "030255de20758343b81b4d8ec87a32c73da814bf48cc693a23e8a9cbd6527c60"
+      },
+      {
+        "artifact_digest": "adb6d67b31ea8355fc1dc3a80c5eb17341d026cb71d9890541c21eb669000fe1",
+        "checkpoint_action": "continue_without_selector",
+        "condition": "D1C-NO-GAP",
+        "deadline_stable": true,
+        "failure_class": null,
+        "feedback_verdict": "compatible",
+        "handoff_consumed": false,
+        "model_calls": 1,
+        "quality": true,
+        "reserved_tokens": 3500,
+        "selector_receipt": 0,
+        "start_strategy": "checkpoint-release-dag",
+        "target_backend": "executable_plan",
+        "task_digest": "e610cc8a18134f062c5a3ad6efad6259c59f99248bf970318f4d28d40a197ea7"
+      },
+      {
+        "artifact_digest": "adb6d67b31ea8355fc1dc3a80c5eb17341d026cb71d9890541c21eb669000fe1",
+        "checkpoint_action": "continue_without_selector",
+        "condition": "D1C-INFRA-CONTROL",
+        "deadline_stable": true,
+        "failure_class": null,
+        "feedback_verdict": "infrastructure",
+        "handoff_consumed": false,
+        "model_calls": 1,
+        "quality": true,
+        "reserved_tokens": 3500,
+        "selector_receipt": 0,
+        "start_strategy": "checkpoint-release-dag",
+        "target_backend": "executable_plan",
+        "task_digest": "3ff67b8e63c8315c8b8c7fd89f0ddb1c382cb56d5fde92a0d1127a6087a7263e"
+      },
+      {
+        "artifact_digest": "39c2dac37f3a30c4693ec9b24b22cd5bfa7f480a1c430ca67254d7133ce68d2a",
+        "checkpoint_action": "switch",
+        "condition": "D1C-SWITCH-RECOVERY",
+        "deadline_stable": true,
+        "failure_class": null,
+        "feedback_verdict": "material_protocol_gap",
+        "handoff_consumed": true,
+        "model_calls": 4,
+        "quality": true,
+        "reserved_tokens": 9200,
+        "selector_receipt": 1,
+        "start_strategy": "checkpoint-release-dag",
+        "target_backend": "controlled_code",
+        "task_digest": "030255de20758343b81b4d8ec87a32c73da814bf48cc693a23e8a9cbd6527c60"
+      }
+    ],
+    "test_names": [
+      "test_offline_batch_exercises_all_frozen_conditions",
+      "test_route_blind_evaluator_boundary",
+      "test_invalid_selector_has_no_fallback",
+      "test_recovery_preserves_checkpoint_handoff_budget_and_deadline"
+    ]
+  },
+  "profile_digest": "da5ef791bce8a9c80d9b50c45d3dc1103c79a631fed92a2fb2eb311ca404ef2d",
+  "retry_policy": {
+    "provider_attempts_per_call": 1,
+    "sdk_automatic_retries": 0
+  },
+  "schema": "nexgent.d1c-run-manifest.v1",
+  "strategy_start": {
+    "budget_digest": "27d714b578337303ddba4fca4af511cc7e381eb2dbdd2ae455c607a92d787092",
+    "constraints_digest": "247d47f115dc4e1fafb282f82e9043015ae05ca54ae47a388003f133bc1e06c0",
+    "initial_component_id": "checkpoint-release-dag",
+    "initial_component_source_digest": "1ca441d1f03e6bc2f3730b2bbd63ffbe6413ef57655b66f23ed4a5e81ab4f534",
+    "option": {
+      "policy_id": "d1c_experimental_intervention",
+      "schema": "nexgent.strategy-start.v1",
+      "selected_component_id": "checkpoint-release-dag"
+    },
+    "option_digest": "2707426c08224cbc5607d81ca2f57b77601224b5a430ee37143e214bf66fb3c9",
+    "record": {
+      "candidate_set_digest": "aa3af9bc5ff8c1ed66e0a66f154804e2f959a25e90b04a93b64f5fed1510ab05",
+      "package_digest": "f32fc873e51949e69235f64692ea38a855970bf04aaeaac48248ed96e51f6e17",
+      "package_id": "package-d9de886aafcfe7904687a19b",
+      "policy_id": "d1c_experimental_intervention",
+      "schema": "nexgent.strategy-start.v1",
+      "selected_candidate": {
+        "backend": "executable_plan",
+        "component_digest": "1fc62cd986e682f2beab747472265287ce5589aa83f9957e5c92a2b9ff3747e9",
+        "component_id": "checkpoint-release-dag",
+        "kind": "workflow",
+        "package_digest": "f32fc873e51949e69235f64692ea38a855970bf04aaeaac48248ed96e51f6e17",
+        "package_id": "package-d9de886aafcfe7904687a19b",
+        "ref": "release_checkpoint",
+        "shape": "dag",
+        "source_digest": "1ca441d1f03e6bc2f3730b2bbd63ffbe6413ef57655b66f23ed4a5e81ab4f534",
+        "source_kind": "workflow_graph",
+        "source_path": "workflows/release_checkpoint.json"
+      },
+      "selected_component_id": "checkpoint-release-dag",
+      "selection_source": "host_policy",
+      "strategy_start_digest": "cfaa7dffa27e2f5620e8263da33d2017ae6e87618a7a1fed60b391553979e180"
+    },
+    "record_digest": "cfaa7dffa27e2f5620e8263da33d2017ae6e87618a7a1fed60b391553979e180",
+    "schema": "nexgent.strategy-start.v1"
+  },
+  "task": {
+    "prompt_sha256": "c602b45814e1568c920c380485b1fc104e84291592fb915f323a89bf2b24a98c",
+    "schema_sha256": "ce7a09a3931a6eca4bd6421f55e98b056618e510b57b879d722d17370af93136"
+  },
+  "validator": {
+    "source_sha256": "6534b74ca53dc2a2a8b3605bd9e86a5afcb128839152e25af21b186ae37be4d1",
+    "tool": "d1c.validate_release_draft"
+  }
+}

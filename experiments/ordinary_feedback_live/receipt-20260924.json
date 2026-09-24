@@ -1,0 +1,53 @@
+{
+  "schema": "nexgent.ordinary-feedback-live-receipt.v1",
+  "run_kind": "exploratory_mechanism_smoke",
+  "project": "NExgent-live-rsi-20260924",
+  "model": "mimo-v2.6-flash",
+  "entry": "nexgent task",
+  "source_episode_id": "episode-0337af3cdb294364",
+  "source_status": "completed",
+  "source_model_calls": 3,
+  "source_result": {
+    "sum": 16,
+    "mean": 5.33
+  },
+  "feedback_work_id": "feedback-work-495308ea1ae079213f1cd860",
+  "feedback_bundle_id": "feedback-17261a4e23004ec9",
+  "development_episode_id": "episode-c5959df4c3494b00",
+  "development_model_calls": 1,
+  "development_choice": {
+    "candidate_type": "orchestration",
+    "source_ref": "episode_os"
+  },
+  "candidate_id": "candidate-0b6b910f11584781",
+  "selection_plan_id": "plan-dbbb02744e814db4",
+  "selection_trial_id": "trial-1377b06c9ef54412",
+  "selection_decision_id": "decision-7e8eb3ac94614f50",
+  "selection_parent": {
+    "episode_id": "episode-ba31de3148194024",
+    "accepted": false,
+    "score": 0.0,
+    "model_calls": 4
+  },
+  "selection_candidate": {
+    "episode_id": "episode-51451ce828ad44fc",
+    "accepted": false,
+    "score": 0.0,
+    "model_calls": 3
+  },
+  "decision_gates": {
+    "behavior_activated": false,
+    "candidate_completed": false,
+    "cost": true,
+    "measurement_complete": true,
+    "quality": true,
+    "regressions": true,
+    "selection_role": true,
+    "success_rate": false
+  },
+  "work_status": "rejected",
+  "work_reason": "independent_selection_rejected",
+  "active_channel_revision": 0,
+  "guard_run": false,
+  "later_reuse": false
+}

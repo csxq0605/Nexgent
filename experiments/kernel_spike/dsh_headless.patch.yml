@@ -1,0 +1,26 @@
+# Keyless Stage A overlay over the shipped headless profile.
+- id: agent-default-model
+  config:
+    provider: spike-mock
+    model: fixed
+
+- id: llm-deepseek
+  disabled: true
+
+- id: llm-pi-ai
+  disabled: true
+
+- id: session-title-llm
+  disabled: true
+
+- id: agent-instructions
+  disabled: true
+
+- id: session-persistence-jsonl
+  config:
+    root: !!js process.env.DSH_SPIKE_SESSION_ROOT
+    compression: none
+
+- insert:
+    - id: nexgent-stage-a-dsh-spike
+      name: './dsh_spike_plugin.mjs'

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexgent-openfoam-cavity"
+version = "0.1.0"
+description = "Optional Foundation OpenFOAM 8 cavity smoke task and benchmark"
+requires-python = ">=3.11"
+dependencies = ["nexgent>=0.9.0", "jsonschema>=4.22,<5"]
+license = "MIT"
+
+[project.entry-points."nexgent.domains"]
+openfoam_cavity = "nexgent_openfoam.plugin:domain_pack"
+
+[project.entry-points."nexgent.task_benchmarks"]
+openfoam_cavity = "nexgent_openfoam.plugin:benchmark_adapter"
+
+[tool.setuptools.packages.find]
+where = ["src"]

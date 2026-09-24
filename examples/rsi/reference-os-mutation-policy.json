@@ -1,0 +1,14 @@
+{
+  "mutable_paths": [
+    "agent/main.py",
+    "prompts/task.md"
+  ],
+  "component_classes": {
+    "agent/main.py": "O",
+    "prompts/task.md": "S"
+  },
+  "allowed_operations": [
+    "replace"
+  ],
+  "max_patch_bytes": 30000
+}

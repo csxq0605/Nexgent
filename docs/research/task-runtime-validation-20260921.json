@@ -1,0 +1,73 @@
+{
+  "schema": "nexgent.task-runtime-validation.v1",
+  "date": "2026-09-21",
+  "git_commit": "f2976a61671d180825cd2b9f427044f4e03316c2",
+  "provider_scope": {
+    "profile": "mimo/mimo-v2.5",
+    "configured_model": "mimo-v2.5",
+    "observed_model": "mimo-v2.5",
+    "provider_revision": null,
+    "claim_scope": "request_alias_time_window"
+  },
+  "episodes": [
+    {
+      "id": "episode-29c12c25d12746fc",
+      "kind": "ordinary_task_qualification",
+      "package_id": "package-25679f93c73f9e9a82a918b9",
+      "package_digest": "dd684d6dbb2ff8059a2a95986759a8d76916f588a6f38820ad3c82e6ab7eb2cd",
+      "status": "completed",
+      "outcome": {
+        "delivery_status": "delivered",
+        "schema_validation": "passed",
+        "acceptance_status": "not_evaluated"
+      },
+      "artifact": {
+        "id": "artifact-072698ec561e4a37",
+        "content": {
+          "answer": "Nexgent is a generic RSI agent framework, and OpenFOAM is an independent demo.",
+          "evidence_ids": ["f1", "f2"]
+        }
+      },
+      "usage": {
+        "model_calls": 3,
+        "tool_calls": 0,
+        "nodes": 7,
+        "prompt_tokens": 4203,
+        "completion_tokens": 158,
+        "total_tokens": 4361,
+        "reserved_completion_tokens": 7600,
+        "usage_complete": true
+      },
+      "model_roles": ["task_agent", "task_agent", "task_reviewer"],
+      "claim": "Real model-driven ordinary-task delivery; no independent benchmark or RSI-effect claim."
+    },
+    {
+      "id": "episode-933d0549a14c4c7e",
+      "kind": "workbench_development",
+      "package_digest": "dd684d6dbb2ff8059a2a95986759a8d76916f588a6f38820ad3c82e6ab7eb2cd",
+      "status": "failed",
+      "last_error": "BudgetExhausted: Root Episode model-call budget exhausted",
+      "failure_domain": "protocol",
+      "evaluation": {
+        "status": "unavailable",
+        "score_available": false,
+        "accepted": null
+      },
+      "usage": {
+        "model_calls": 20,
+        "tool_calls": 2,
+        "nodes": 29,
+        "prompt_tokens": 78545,
+        "completion_tokens": 6265,
+        "total_tokens": 84810,
+        "reserved_completion_tokens": 47400,
+        "usage_complete": true
+      },
+      "tool_receipts": [
+        {"name": "workbench.inspect_sources", "status": "completed"},
+        {"name": "workbench.validate_delivery", "status": "failed", "error_type": "KeyError", "invalid_reference": "pending"}
+      ],
+      "claim": "Observed Workbench orchestration failure; no deliverable and no benchmark score."
+    }
+  ]
+}

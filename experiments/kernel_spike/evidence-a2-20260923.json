@@ -1,0 +1,38 @@
+{
+  "passed": true,
+  "backend": "deepseek-harness",
+  "upstreamCommit": "46a7f68b0922371ce7144b668b90e377d8e799f4",
+  "profile": "headless",
+  "model": "spike-mock/fixed",
+  "taskSessionId": "session-cf687fc8-96c2-42de-8c8d-411693631927",
+  "siblingSessionId": "dsh-spike-other-scope",
+  "pluginSha256": "6ca07a39515b539c16c0d6bee50ed0e03cd68de7f640f8c3d99f7b2847e3d892",
+  "patchSha256": "4de634033f9523238ae8fbfce13a04120eddc4b82a08462a02e34d68f8bf5770",
+  "builtEntrypointSha256": "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854",
+  "lockfileSha256": "f561d4d2b02ca15f94fc9177500ab4646c38d847cf1c52ac50bd4022690d2f50",
+  "receiptSha256": {
+    "stdout.jsonl": "2700317bcb26b3a356b76913456d180d62e972d05e20b401e4efefe7dfca7425",
+    "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "session.jsonl": "a89b0fb95a1c8b37b38475ebe1c89d858aede1f8cdff0cc29b15079fdf113297",
+    "sibling-session.jsonl": "9763bf148629368d9b88e3190cb8e14e93db870a5f26a305a7a12a5a2d8265ed",
+    "plugin-receipts.jsonl": "dafc55c21c7c0cc53a6ac68ceef008a85e6010427b83b64f47ff9231799af80a",
+    "profile-package.json": "563c0b6082748a6e93daad51514f01335c51fc9c44f5f88253383f18ac2557b5"
+  },
+  "task": "计算 6 × 7 并交付 JSON {\"answer\":42}",
+  "final": "{\"answer\":42}",
+  "assertions": {
+    "agentScopedToolRegistered": true,
+    "hiddenFromSiblingScope": true,
+    "firstCallReturned42": true,
+    "unloadedBeforeSecondRequest": true,
+    "postUnloadCallFailed": true,
+    "materializedSessionJsonlCopied": true,
+    "fixedAdapterRequestsObserved": 3
+  },
+  "isolation": "Agent-scoped registry only; the fixture plugin executes in the host process and is not an OS sandbox.",
+  "sourcePaths": {
+    "upstream": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-upstream-deepseek-46a7f68",
+    "patchPath": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_headless.patch.yml",
+    "pluginPath": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_spike_plugin.mjs"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "schema": "nexgent.package-patch-v3-qualification.v1",
+  "status": "missing",
+  "feedback_episode_id": "episode-98c445e18e7f4dac",
+  "patch_contract": "nexgent.package-patch.v3",
+  "started_at": 1790138669.4515533,
+  "feedback_bundle_id": "feedback-9f735dadb77641eb",
+  "feedback_digest": "9a60c11d2b4efd5edf04a1cbb47301aec8efe0c1257c13dac16e6bb123aa628b",
+  "parent_package_digest": "54110e964849245b84b97ca30c93b92c482d2b22294478be4fb0b082595956c3",
+  "generation_id": "generation-8935ff4753fa4649",
+  "improver_episode_id": "episode-d5d74a78367c46aa",
+  "candidate_id": null,
+  "candidate_package_id": null,
+  "reason_type": "ModelTransportError",
+  "reason": "ModelTransportError: Provider worker failed (ModuleNotFoundError, phase=unknown); no automatic retry or offline fallback",
+  "usage": {
+    "model_calls": 1,
+    "reserved_completion_tokens": 6000,
+    "charged_completion_tokens": 6000,
+    "completion_tokens": null,
+    "known_usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0
+    },
+    "usage_missing_call_ids": [
+      "model-98d19adf72f844ac8058ff95849c092a"
+    ],
+    "tool_usage_missing_call_ids": [],
+    "reserved_tool_work_units": 0,
+    "charged_tool_work_units": 0,
+    "tool_work_units": 0,
+    "usage_complete": false,
+    "billing_unknown_call_ids": [
+      "model-98d19adf72f844ac8058ff95849c092a"
+    ],
+    "tool_calls": 0,
+    "nodes": 6
+  },
+  "completed_at": 1790138671.0558631,
+  "model_calls": [
+    {
+      "role": "rsi_improver",
+      "configured_model": "mimo-v2.6-flash",
+      "observed_model": null,
+      "provider_revision": null,
+      "status": "failed"
+    }
+  ]
+}

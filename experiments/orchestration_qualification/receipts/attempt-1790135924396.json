@@ -1,0 +1,51 @@
+{
+  "schema": "nexgent.orchestration-qualification.v1",
+  "status": "failed",
+  "benchmark_id": "bbh",
+  "split": "development",
+  "seed": 0,
+  "package_id": "package-b9634703f008bb640ce4bc16",
+  "package_digest": "12f83be80d7f8967ec78e5f116fa01ad7ded88306cd48fadad791c5465a25fa0",
+  "task_id": "bbh/bbh-two-task-task-v1/development/0/bbh-2cd2be58324283dbec774385",
+  "started_at": 1790135924.396522,
+  "claim_limit": "One BBH development case checks model-driven orchestration only; it is not RSI evidence.",
+  "episode_id": "episode-946f0304bd7a451b",
+  "episode_status": "failed",
+  "failure_domain": "protocol",
+  "last_error_type": "ContractError",
+  "usage": {
+    "model_calls": 3,
+    "reserved_completion_tokens": 4800,
+    "charged_completion_tokens": 4800,
+    "completion_tokens": 105,
+    "known_usage": {
+      "prompt_tokens": 1312,
+      "completion_tokens": 105,
+      "total_tokens": 1417
+    },
+    "usage_missing_call_ids": [],
+    "tool_usage_missing_call_ids": [],
+    "reserved_tool_work_units": 0,
+    "charged_tool_work_units": 0,
+    "tool_work_units": 0,
+    "usage_complete": true,
+    "billing_unknown_call_ids": [],
+    "tool_calls": 0,
+    "nodes": 7
+  },
+  "evaluation": {
+    "status": "observed_failure",
+    "score_available": true,
+    "score": 0.0,
+    "accepted": false,
+    "execution_status": "failed",
+    "failure_domain": "protocol",
+    "outcome_policy_id": "terminal-responsibility-v1"
+  },
+  "role_nodes": {
+    "plan/nodes/adjudicator": "adjudicator",
+    "plan/nodes/proposer_a": "proposer_a",
+    "plan/nodes/proposer_b": "proposer_b"
+  },
+  "completed_at": 1790135935.5048616
+}

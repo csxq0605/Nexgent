@@ -1,0 +1,126 @@
+{
+  "schema": "nexgent.portable-capability-live.v1",
+  "profile_identity": {
+    "provider": "mimo",
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "model": "mimo-v2.6-flash",
+    "credential_ref": "NEXGENT_API_KEY",
+    "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242"
+  },
+  "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+  "retry_policy": {
+    "automatic_retries": 0,
+    "attempts_per_ask": 1
+  },
+  "budgets": {
+    "creator": {
+      "max_model_calls": 1,
+      "max_completion_tokens": 1800,
+      "max_tool_calls": 1,
+      "max_tool_work_units": 200000,
+      "max_nodes": 16
+    },
+    "paired": {
+      "max_model_calls": 1,
+      "max_completion_tokens": 1800,
+      "max_tool_calls": 1,
+      "max_tool_work_units": 200000,
+      "max_nodes": 16
+    }
+  },
+  "task_family": "exact integer multiplication",
+  "numbers": {
+    "creator": [
+      6,
+      7
+    ],
+    "selection": [
+      123456789,
+      987654321
+    ],
+    "guard": [
+      98765431,
+      123457
+    ],
+    "reuse": [
+      1234567,
+      8901234
+    ]
+  },
+  "scratch_root": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-portable-live-k_egz63q",
+  "stages": {
+    "creator": {
+      "id": "episode-d17f759bd7124a3f",
+      "status": "failed",
+      "result": null,
+      "usage": {
+        "model_calls": 1,
+        "reserved_completion_tokens": 1400,
+        "charged_completion_tokens": 1400,
+        "completion_tokens": 140,
+        "known_usage": {
+          "prompt_tokens": 140,
+          "completion_tokens": 140,
+          "total_tokens": 280
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 0,
+        "nodes": 2
+      },
+      "activated_components": [],
+      "model_receipts": [
+        {
+          "call_id": "model-74e33933c3344de4822de7440526ddf0",
+          "role": "tool_builder",
+          "model": "mimo/mimo-v2.6-flash",
+          "provider_model": "mimo-v2.6-flash",
+          "configured_provider_model": "mimo-v2.6-flash",
+          "observed_provider_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+          "profile_identity": {
+            "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "credential_ref": "NEXGENT_API_KEY",
+            "model": "mimo-v2.6-flash",
+            "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+            "provider": "mimo"
+          },
+          "status": "received",
+          "finish_reason": "stop",
+          "billing_status": "usage_reported",
+          "max_completion_tokens": 1400,
+          "reserved_completion_tokens": 1400,
+          "usage": {
+            "completion_tokens": 140,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens": 140,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 280
+          }
+        }
+      ],
+      "failure": {
+        "stage": "episode_run",
+        "class": "task_protocol",
+        "remote_outcome_unknown": false,
+        "episode_failure_domain": "agent"
+      }
+    }
+  },
+  "passed": false,
+  "failure": {
+    "type": "RuntimeError",
+    "message": "creator did not complete"
+  },
+  "leak_scan_passed": true
+}

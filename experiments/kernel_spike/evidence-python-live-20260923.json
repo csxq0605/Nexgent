@@ -1,0 +1,176 @@
+{
+  "schema": "nexgent.python-live-route.v1",
+  "passed": true,
+  "backend": "nexgent-python-live",
+  "profile_identity": {
+    "provider": "mimo",
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "model": "mimo-v2.6-flash",
+    "credential_ref": "NEXGENT_API_KEY",
+    "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242"
+  },
+  "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+  "credential_configured": true,
+  "observed_model_identity": [
+    {
+      "configured": "mimo-v2.6-flash",
+      "observed": "mimo-v2.6-flash",
+      "revision": null
+    },
+    {
+      "configured": "mimo-v2.6-flash",
+      "observed": "mimo-v2.6-flash",
+      "revision": null
+    }
+  ],
+  "retry_policy": {
+    "automatic_retries": 0,
+    "attempts_per_ask": 1
+  },
+  "budget": {
+    "max_model_calls": 2,
+    "max_completion_tokens": 512,
+    "max_tool_calls": 1,
+    "max_tool_work_units": 0,
+    "max_nodes": 8
+  },
+  "episode": {
+    "id": "episode-0b1e8a4de8f34ecf",
+    "status": "completed",
+    "package_digest": "380c864afdbd5fc14aed04ffae9f24b318aeadef9d30f2ead714c51efca40b3e",
+    "output_refs": {
+      "result": "artifact-739601232fb34f79"
+    },
+    "usage": {
+      "model_calls": 2,
+      "reserved_completion_tokens": 512,
+      "charged_completion_tokens": 512,
+      "completion_tokens": 28,
+      "known_usage": {
+        "prompt_tokens": 260,
+        "completion_tokens": 28,
+        "total_tokens": 288
+      },
+      "usage_missing_call_ids": [],
+      "tool_usage_missing_call_ids": [],
+      "reserved_tool_work_units": 0,
+      "charged_tool_work_units": 0,
+      "tool_work_units": 0,
+      "usage_complete": true,
+      "billing_unknown_call_ids": [],
+      "tool_calls": 1,
+      "nodes": 4
+    }
+  },
+  "model_receipts": [
+    {
+      "call_id": "model-58318a593d4d45cb815d65b2bdf83f2a",
+      "role": "tool_selector",
+      "model": "mimo/mimo-v2.6-flash",
+      "provider_model": "mimo-v2.6-flash",
+      "configured_provider_model": "mimo-v2.6-flash",
+      "observed_provider_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+      "profile_identity": {
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "credential_ref": "NEXGENT_API_KEY",
+        "model": "mimo-v2.6-flash",
+        "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+        "provider": "mimo"
+      },
+      "status": "received",
+      "finish_reason": "stop",
+      "billing_status": "usage_reported",
+      "max_completion_tokens": 128,
+      "reserved_completion_tokens": 128,
+      "usage": {
+        "completion_tokens": 19,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 187,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 206
+      }
+    },
+    {
+      "call_id": "model-87adb1164b7746a094baea8de370fe28",
+      "role": "answer_writer",
+      "model": "mimo/mimo-v2.6-flash",
+      "provider_model": "mimo-v2.6-flash",
+      "configured_provider_model": "mimo-v2.6-flash",
+      "observed_provider_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+      "profile_identity": {
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "credential_ref": "NEXGENT_API_KEY",
+        "model": "mimo-v2.6-flash",
+        "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+        "provider": "mimo"
+      },
+      "status": "received",
+      "finish_reason": "stop",
+      "billing_status": "usage_reported",
+      "max_completion_tokens": 384,
+      "reserved_completion_tokens": 384,
+      "usage": {
+        "completion_tokens": 9,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 73,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 82
+      }
+    }
+  ],
+  "tool_receipts": [
+    {
+      "arguments": {
+        "left": 6,
+        "right": 7
+      },
+      "call_id": "episode-0b1e8a4de8f34ecf/rpc.2",
+      "elapsed_seconds": 0.031000000002677552,
+      "episode_id": "episode-0b1e8a4de8f34ecf",
+      "finished_at": 1790179042.2322907,
+      "name": "spike.multiply",
+      "result": {
+        "value": 42
+      },
+      "started_at": 1790179042.205886,
+      "status": "completed",
+      "work_accounting": {
+        "charged_work_units": 0,
+        "measured_work_units": 0,
+        "reserved_work_units": 0,
+        "schema": "nexgent.tool-work.v1",
+        "usage_complete": true
+      },
+      "work_reservation": {
+        "reserved_work_units": 0,
+        "schema": "nexgent.tool-work.v1"
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-739601232fb34f79",
+      "name": "result",
+      "content": {
+        "answer": 42
+      }
+    }
+  ],
+  "handler_digest": "cbbe2bd618165bfcb2c0e37dfc071fe7ab2b3f4e208c5c89ec99ec9130af65ad",
+  "failure": null,
+  "api_boundary": "The current Python task API exchanges JSON through two ask calls; it does not expose provider-native tool calling. The model selects a host-authorized tool in call one, the host executes it, and call two writes the answer from the completed result.",
+  "scratch_root": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-python-live-4sss09kz",
+  "leak_scan_passed": true
+}

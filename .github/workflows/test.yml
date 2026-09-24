@@ -1,181 +1,26 @@
-﻿name: Tests
-
+name: RSI framework checks
 on:
-  push:
-    branches: [ main, master, develop ]
-  pull_request:
-    branches: [ main, master, develop ]
   workflow_dispatch:
-    inputs:
-      run_e2e:
-        description: 'E2E test scope (default: none)'
-        required: false
-        default: 'none'
-        type: choice
-        options:
-          - 'none'
-          - 'fast'
-          - 'all'
-
 env:
-  # pytest-qt must never try to connect to a display on Linux CI.
   QT_QPA_PLATFORM: offscreen
-
+  NEXGENT_API_KEY: test-key-for-testing
+  NEXGENT_BASE_URL: http://localhost:8080/v1
 jobs:
-  # ─────────────────────────────────────────────────────────────
-  # 1. Unit tests (always run, no API key needed)
-  # ─────────────────────────────────────────────────────────────
-  unit-tests:
-    runs-on: ubuntu-latest
+  tests:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.12']
+    runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install Qt runtime libraries
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e "./nexgent[dev,demo]"
-        pip install playwright
-
-    - name: Install Playwright browsers
-      run: |
-        playwright install chromium --with-deps
-
-    - name: Run nexgent tests
-      run: |
-        python -m pytest nexgent/tests/ \
-          -v --tb=short
-
-    - name: Run stage unit tests
-      env:
-        MIMO_API_KEY: test-key-for-testing
-        MIMO_BASE_URL: http://localhost:8080/v1
-        MIMO_MODEL: test-model
-      run: |
-        python -m pytest tests/test_stage_unit.py \
-          -v --tb=short
-
-    - name: Run interactive demo-project tests
-      run: |
-        python -m pytest nexgent/demo-project/tests/ \
-          -v --tb=short
-
-    - name: Run tests with coverage
-      if: matrix.python-version == '3.12'
-      run: |
-        python -m pytest nexgent/tests/ \
-          --cov=nexgent \
-          --cov-report=xml \
-          --cov-report=term-missing
-
-    - name: Upload coverage to Codecov
-      if: matrix.python-version == '3.12'
-      uses: codecov/codecov-action@v5
-      with:
-        files: ./coverage.xml
-        fail_ci_if_error: false
-
-  # ─────────────────────────────────────────────────────────────
-  # 2. Fast E2E tests (~57 tests, <5min, single API call each)
-  #    Only runs on manual trigger with run_e2e=fast/all
-  # ─────────────────────────────────────────────────────────────
-  e2e-fast:
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      (github.event.inputs.run_e2e == 'fast' ||
-       github.event.inputs.run_e2e == 'all')
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-
-    - name: Install Qt runtime libraries
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e "./nexgent[dev]"
-        pip install playwright
-
-    - name: Install Playwright browsers
-      run: |
-        playwright install chromium --with-deps
-
-    - name: Run fast Harness E2E tests
-      env:
-        MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
-        MIMO_BASE_URL: ${{ secrets.MIMO_BASE_URL }}
-        MIMO_MODEL: ${{ secrets.MIMO_MODEL }}
-      run: |
-        python -m pytest nexgent/tests/test_e2e.py -m "not slow" -v --tb=short
-
-    - name: Run fast Stage E2E tests
-      env:
-        MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
-        MIMO_BASE_URL: ${{ secrets.MIMO_BASE_URL }}
-        MIMO_MODEL: ${{ secrets.MIMO_MODEL }}
-      run: |
-        python -m pytest tests/test_e2e.py -v --tb=short
-
-  # ─────────────────────────────────────────────────────────────
-  # 3. Full E2E tests (~16 slow tests, ~6min, multi-step/heavy API)
-  #    Only runs on manual trigger with run_e2e=all
-  # ─────────────────────────────────────────────────────────────
-  e2e-full:
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      github.event.inputs.run_e2e == 'all'
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-
-    - name: Install Qt runtime libraries
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e "./nexgent[dev]"
-        pip install playwright
-
-    - name: Install Playwright browsers
-      run: |
-        playwright install chromium --with-deps
-
-    - name: Run slow Harness E2E tests
-      env:
-        MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
-        MIMO_BASE_URL: ${{ secrets.MIMO_BASE_URL }}
-        MIMO_MODEL: ${{ secrets.MIMO_MODEL }}
-      run: |
-        python -m pytest nexgent/tests/test_e2e.py -m "slow" -v --tb=short
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Linux Qt libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
+      - run: python -m pip install -e '.[dev]' -e benchmarks/scientific_discovery -e benchmarks/bbh -e benchmarks/workbench -e benchmarks/openfoam
+      - name: Framework, benchmark contracts and durable runtime acceptance
+        run: python -m pytest tests -q

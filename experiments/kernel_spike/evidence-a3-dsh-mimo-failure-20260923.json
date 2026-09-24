@@ -1,0 +1,40 @@
+{
+  "schema": "nexgent.dsh-mimo-live-failure.v1",
+  "passed": false,
+  "backend": "deepseek-harness",
+  "profile": "headless",
+  "profile_identity": {
+    "provider": "mimo",
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "model": "mimo-v2.6-flash",
+    "credential_ref": "NEXGENT_API_KEY",
+    "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242"
+  },
+  "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+  "credential_configured": true,
+  "secret_leak_scan_passed": true,
+  "failure_class": "provider_protocol",
+  "stage": "final_decode",
+  "remote_outcome_unknown": false,
+  "process": {
+    "code": 1,
+    "signal": null,
+    "timed_out": false
+  },
+  "provider_requests_started": 2,
+  "provider_responses_received": 1,
+  "retries": 0,
+  "copied_receipts": [
+    "plugin-receipts.jsonl",
+    "session-1.jsonl"
+  ],
+  "source_identity": {
+    "upstream_commit": "46a7f68b0922371ce7144b668b90e377d8e799f4",
+    "built_entrypoint_sha256": "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854",
+    "llm_entry_sha256": "b8614b7ad251c4ae121aeef3a423b9f2eff99ec602be8eb36ab35ee3511bb7f6",
+    "lockfile_sha256": "f561d4d2b02ca15f94fc9177500ab4646c38d847cf1c52ac50bd4022690d2f50",
+    "patch_sha256": "6d6765fa2996f16388328d08d4e8a5a9521f6837bc0e18da541b1d06ed7faad6",
+    "plugin_sha256": "7a8d6f914a419a83b92b276d9457530130c78c81b42376fb821faa12e1782e06"
+  },
+  "artifact_root": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-dsh-mimo-RHhGWO\\receipts"
+}

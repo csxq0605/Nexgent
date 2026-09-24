@@ -1,0 +1,638 @@
+"""Host contract tests; no providers, solvers, or formal experiments."""
+
+import json
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+
+import pytest
+
+from nexgent.kernel.store import BudgetExhausted, Store
+from nexgent.kernel.programs import digest
+from nexgent.tasks.packages import make_package
+from nexgent.tasks.strategy_checkpoints import build_strategy_checkpoint
+from nexgent.tasks.strategy_decisions import build_strategy_candidate_set
+from nexgent.tasks.store import EpisodeStore, RecoveryRequired, StateConflict
+
+
+@pytest.fixture
+def package():
+    return make_package({"agent.py": "def execute(task, ctx):\n    return task\n"},
+                        {"entries": {"execute": "agent.py:execute"}})
+
+
+@pytest.fixture
+def store(tmp_path):
+    return EpisodeStore(tmp_path)
+
+
+def task(**changes):
+    spec = {"objective": "Deliver an answer", "inputs": {"document": {"facts": [1, 2]}},
+            "capabilities": ["ask", "tool", "delegate", "publish", "memory_search", "remember"],
+            "budget": {"max_model_calls": 2, "max_completion_tokens": 1000, "max_tool_calls": 2, "max_nodes": 3},
+            "context": {"memory_namespace": "study-a", "split": "development"}}
+    spec.update(changes)
+    return spec
+
+
+def receipt(identity, status="started", **changes):
+    result = {"call_id": identity, "status": status, "reserved_completion_tokens": 500,
+              "model": "contract-stub", "role": "worker", "request_digest": identity, "usage": {}}
+    result.update(changes)
+    return result
+
+
+def checkpoint_package():
+    files = {
+        "agent/main.py": "def execute(task, ctx):\n    return task\n",
+        "workflows/main.json": json.dumps({
+            "nodes": [{"id": "inspect", "method": "join"},
+                      {"id": "finish", "method": "join"}],
+            "outputs": {},
+        }),
+    }
+    return make_package(files, {
+        "manifest_version": 2,
+        "entries": {"execute": "agent/main.py:execute"},
+        "skills": {},
+        "roles": {},
+        "workflows": {"main": {"ref": "workflows/main.json", "max_parallel": 1}},
+        "components": {
+            "dag-main": {"class": "O", "kind": "workflow", "ref": "main"},
+            "open-loop": {"class": "O", "kind": "entry", "ref": "execute"},
+        },
+        "orchestrator": "dag-main",
+    })
+
+
+def checkpoint_case(store):
+    package = checkpoint_package()
+    candidates = build_strategy_candidate_set(package, ["dag-main", "open-loop"])
+    episode = store.create(task(strategy_candidate_set=candidates), package)
+    trigger_receipt = {
+        "status": "completed",
+        "value": {"finding": "evidence gap"},
+        "failure_domain": "agent",
+    }
+    state = store.get(episode["id"])
+    state.update({
+        "current_plan_ref": "plan-checkpoint",
+        "plan_revision": 1,
+        "plan_node_receipts": {"inspect": trigger_receipt},
+        "plan_execution": {"node_executions": [
+            {"node_id": "inspect", "status": "completed",
+             "output_artifact_refs": []},
+            {"node_id": "finish", "status": "pending",
+             "output_artifact_refs": []},
+        ]},
+    })
+    state = store.save(state)
+    decision_digest = digest({"startup": episode["id"]})
+    store.event(episode["id"], "strategy_decision", {
+        "decision_digest": decision_digest,
+        "candidate_set_digest": candidates["candidate_set_digest"],
+        "package_digest": package["digest"],
+    })
+    content = {"completed": [], "pending": ["finish"], "observations": [
+        {"node_id": "inspect", "finding": "evidence gap"},
+    ]}
+    content_digest = digest(content)
+    trigger_digest = digest(trigger_receipt)
+    handoff_ref = store.strategy_handoff_ref(
+        episode["id"], "inspect", trigger_digest, content_digest)
+    zero = {key: 0 for key in (
+        "model_calls", "completion_tokens", "tool_calls",
+        "tool_work_units", "nodes")}
+    remaining = {
+        "model_calls": state["budget"]["max_model_calls"],
+        "completion_tokens": state["budget"]["max_completion_tokens"],
+        "tool_calls": state["budget"]["max_tool_calls"],
+        "tool_work_units": state["budget"]["max_tool_work_units"],
+        "nodes": state["budget"]["max_nodes"],
+    }
+    checkpoint = build_strategy_checkpoint(
+        episode_id=episode["id"], root_episode_id=episode["root_episode_id"],
+        candidate_set=candidates, decision_digest=decision_digest,
+        source_segment_id="strategy-segment-1",
+        source_component_id="dag-main",
+        trigger={
+            "node_id": "inspect", "receipt_digest": trigger_digest,
+            "receipt_status": "completed", "failure_domain": "agent",
+        },
+        plan={
+            "ref": "plan-checkpoint", "revision": 1,
+            "completed_artifact_refs": [], "pending_node_ids": ["finish"],
+        },
+        root_budget={"usage": zero, "remaining": remaining},
+        handoff_artifact={"ref": handoff_ref, "digest": content_digest},
+        model_suggestion={
+            "target_component_id": "open-loop",
+            "reason": "The durable finding needs an open-loop recovery.",
+        },
+    )
+    return episode, candidates, state, checkpoint, content
+
+
+def test_task_tables_preserve_research_records(tmp_path, package):
+    legacy = Store(tmp_path)
+    old = {"id": "study-0123456789abcdef", "budget": {}, "phase": "archived"}
+    legacy.save(old)
+    legacy.event(old["id"], "historical", {"kept": True})
+    before = legacy.events(old["id"])
+    new = EpisodeStore(tmp_path)
+    episode = new.create(task(), package)
+    state = new.get(episode["id"])
+    state["status"] = "completed"
+    new.save(state)
+    assert new.path == legacy.path
+    assert legacy.get(old["id"]) == old
+    assert legacy.events(old["id"]) == before
+    assert legacy.calls(old["id"]) == []
+
+
+def test_projection_is_optimistic_and_identity_is_frozen(store, package):
+    episode = store.create(task(), package)
+    updated = deepcopy(episode)
+    updated["status"] = "running"
+    saved = store.save(updated)
+    assert saved["revision"] == 1
+    assert updated["revision"] == 0
+    with pytest.raises(StateConflict):
+        store.save(episode)
+    for key, replacement in [("task", {"objective": "changed"}), ("budget", {}), ("package_digest", "forged"),
+                             ("capabilities", ["shell"]), ("root_episode_id", "other")]:
+        state = store.get(episode["id"])
+        state[key] = replacement
+        with pytest.raises(PermissionError, match="Immutable"):
+            store.save(state)
+    state = store.get(episode["id"])
+    state["notes"] = "x" * 1_000_001
+    with pytest.raises(ValueError, match="1 MB"):
+        store.save(state)
+    assert store.get(episode["id"])["revision"] == 1
+
+
+def test_strategy_checkpoint_commit_is_atomic_durable_and_idempotent(store):
+    episode, candidates, state, checkpoint, content = checkpoint_case(store)
+
+    committed = store.commit_strategy_checkpoint(
+        episode["id"], checkpoint, candidates, content,
+        expected_revision=state["revision"])
+
+    assert committed["checkpoint"] == checkpoint
+    artifact = committed["handoff_artifact"]
+    assert artifact["id"] == checkpoint["handoff_artifact"]["ref"]
+    assert artifact["content"] == content
+    assert artifact["content_digest"] == checkpoint["handoff_artifact"]["digest"]
+    assert artifact["input_artifact_refs"] == []
+    assert store.read(artifact["id"], episode["id"]) == artifact
+    saved = store.get(episode["id"])
+    assert saved["revision"] == state["revision"] + 1
+    assert saved["strategy_checkpoint"] == checkpoint
+    kinds = [event["kind"] for event in store.events(episode["id"])]
+    assert kinds[-2:] == ["artifact_published", "strategy_checkpoint"]
+
+    replay = EpisodeStore(store.root).commit_strategy_checkpoint(
+        episode["id"], checkpoint, candidates, content,
+        expected_revision=state["revision"])
+    assert replay == committed
+    assert len([event for event in store.events(episode["id"])
+                if event["kind"] == "strategy_checkpoint"]) == 1
+    assert [item["id"] for item in store.artifacts(episode["id"])] == [artifact["id"]]
+
+
+def test_strategy_checkpoint_rolls_back_artifact_and_events_on_commit_failure(
+        store, monkeypatch):
+    episode, candidates, state, checkpoint, content = checkpoint_case(store)
+    original_event = EpisodeStore._event
+
+    def fail_checkpoint_event(db, episode_id, kind, data):
+        if kind == "strategy_checkpoint":
+            raise RuntimeError("fault after handoff insert")
+        return original_event(db, episode_id, kind, data)
+
+    monkeypatch.setattr(EpisodeStore, "_event", staticmethod(fail_checkpoint_event))
+    with pytest.raises(RuntimeError, match="fault after handoff"):
+        store.commit_strategy_checkpoint(
+            episode["id"], checkpoint, candidates, content,
+            expected_revision=state["revision"])
+
+    assert store.artifacts(episode["id"]) == []
+    assert store.get(episode["id"]).get("strategy_checkpoint") is None
+    assert [event["kind"] for event in store.events(episode["id"])] == [
+        "task_registered", "strategy_decision"]
+
+
+def test_strategy_checkpoint_rejects_revision_conflict_without_partial_records(store):
+    episode, candidates, state, checkpoint, content = checkpoint_case(store)
+
+    with pytest.raises(StateConflict, match="newer revision"):
+        store.commit_strategy_checkpoint(
+            episode["id"], checkpoint, candidates, content,
+            expected_revision=state["revision"] - 1)
+
+    assert store.artifacts(episode["id"]) == []
+    assert not [event for event in store.events(episode["id"])
+                if event["kind"] == "strategy_checkpoint"]
+
+
+def test_strategy_checkpoint_conflicting_replay_and_tamper_fail_closed(store):
+    episode, candidates, state, checkpoint, content = checkpoint_case(store)
+    store.commit_strategy_checkpoint(
+        episode["id"], checkpoint, candidates, content,
+        expected_revision=state["revision"])
+    changed = build_strategy_checkpoint(
+        episode_id=checkpoint["episode_id"],
+        root_episode_id=checkpoint["root_episode_id"],
+        candidate_set=candidates,
+        decision_digest=checkpoint["decision_digest"],
+        source_segment_id=checkpoint["source_segment"]["segment_id"],
+        source_component_id=checkpoint["source_segment"]["component_id"],
+        trigger=checkpoint["trigger"], plan=checkpoint["plan"],
+        root_budget=checkpoint["root_budget"],
+        handoff_artifact=checkpoint["handoff_artifact"],
+        model_suggestion={
+            "target_component_id": "open-loop",
+            "reason": "A changed replay must not replace durable routing.",
+        },
+    )
+    with pytest.raises(StateConflict, match="different strategy checkpoint"):
+        store.commit_strategy_checkpoint(
+            episode["id"], changed, candidates, content,
+            expected_revision=state["revision"])
+
+    artifact_ref = checkpoint["handoff_artifact"]["ref"]
+    with store.connect() as db:
+        row = db.execute(
+            "SELECT data FROM task_artifacts WHERE id=?", (artifact_ref,)
+        ).fetchone()
+        artifact = json.loads(row[0])
+        artifact["content"] = {"tampered": True}
+        db.execute("UPDATE task_artifacts SET data=? WHERE id=?",
+                   (json.dumps(artifact), artifact_ref))
+    with pytest.raises(RecoveryRequired, match="handoff artifact changed"):
+        EpisodeStore(store.root).commit_strategy_checkpoint(
+            episode["id"], checkpoint, candidates, content,
+            expected_revision=state["revision"])
+
+
+def test_child_cannot_widen_access_or_reset_account(store, package):
+    parent = store.create(task(), package)
+    child = store.create(task(budget={"max_model_calls": 9999}, capabilities=["ask"]), package, parent["id"])
+    assert child["root_episode_id"] == parent["id"]
+    assert child["budget"] == parent["budget"]
+    with pytest.raises(PermissionError, match="capabilities"):
+        store.create(task(capabilities=["shell"]), package, parent["id"])
+    with pytest.raises(PermissionError, match="memory boundary"):
+        store.create(task(context={"split": "train"}), package, parent["id"])
+    store.reserve_model(child["id"], receipt("first"))
+    store.reserve_model(parent["id"], receipt("second"))
+    with pytest.raises(BudgetExhausted):
+        store.reserve_model(child["id"], receipt("third"))
+    assert store.usage(child["id"])["model_calls"] == 2
+
+
+def test_model_concurrent_admission_cannot_overspend(store, package):
+    parent = store.create(task(), package)
+    child = store.create(task(), package, parent["id"])
+
+    def admit(index):
+        try:
+            store.reserve_model([parent["id"], child["id"]][index % 2], receipt(f"call-{index}"))
+            return True
+        except BudgetExhausted:
+            return False
+
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        admitted = list(workers.map(admit, range(24)))
+    assert sum(admitted) == 2
+    usage = store.usage(parent["id"])
+    assert usage["reserved_completion_tokens"] == 1000
+    assert usage["completion_tokens"] is None
+    assert len(usage["usage_missing_call_ids"]) == 2
+
+
+def test_unknown_costs_never_refunded_and_legacy_receipt_shape(store, package):
+    episode = store.create(task(), package)
+    store.reserve_model(episode["id"], receipt("first"))
+    store.reserve_model(episode["id"], receipt("first", "failed", reserved_completion_tokens=1,
+                                               usage={"prompt_tokens": 7}))
+    usage = store.usage(episode["id"])
+    assert usage["reserved_completion_tokens"] == 500
+    assert usage["completion_tokens"] is None
+    assert usage["usage_complete"] is False
+    store.reserve_model(episode["id"], receipt("second"))
+    with pytest.raises(BudgetExhausted):
+        store.reserve_model(episode["id"], receipt("third"))
+    with pytest.raises(ValueError, match="earlier state"):
+        store.reserve_model(episode["id"], receipt("first"))
+    with pytest.raises(ValueError, match="identity"):
+        store.reserve_model(episode["id"], receipt("second", model="changed"))
+    with pytest.raises(ValueError, match="reserve budget"):
+        store.reserve_model(episode["id"], receipt("not-started", "received"))
+
+
+def test_reported_token_overrun_is_charged_and_cannot_decrease(store, package):
+    episode = store.create(task(), package)
+    store.reserve_model(episode["id"], receipt("first"))
+    complete = receipt("first", "received", usage={"prompt_tokens": 50, "completion_tokens": 700, "total_tokens": 750},
+                       billing_status="usage_reported")
+    store.reserve_model(episode["id"], complete)
+    usage = store.usage(episode["id"])
+    assert usage["charged_completion_tokens"] == 700
+    assert usage["completion_tokens"] == 700
+    assert usage["usage_complete"]
+    with pytest.raises(BudgetExhausted):
+        store.reserve_model(episode["id"], receipt("second"))
+    with pytest.raises(ValueError, match="refunded"):
+        store.reserve_model(episode["id"], receipt("first", "received", usage={"completion_tokens": 2}))
+
+
+@pytest.mark.parametrize("kind,maximum", [("tool", 2), ("node", 3)])
+def test_node_and_tool_concurrent_admission_share_root(store, package, kind, maximum):
+    root = store.create(task(), package)
+    child = store.create(task(), package, root["id"])
+    reserve = getattr(store, "reserve_" + kind)
+
+    def admit(index):
+        try:
+            reserve([root["id"], child["id"]][index % 2], str(index))
+            return True
+        except BudgetExhausted:
+            return False
+
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        assert sum(workers.map(admit, range(16))) == maximum
+    assert store.usage(root["id"])["tool_calls" if kind == "tool" else "nodes"] == maximum
+    assert store.get(root["id"])["revision"] == 0
+
+
+def test_tool_work_is_reserved_metered_settled_and_unknown_is_fail_closed(store, package):
+    episode = store.create(task(budget={
+        "max_model_calls": 0, "max_completion_tokens": 0,
+        "max_tool_calls": 3, "max_tool_work_units": 20, "max_nodes": 3,
+    }), package)
+    store.reserve_tool(episode["id"], "metered", {"name": "compute"},
+                       reserved_work_units=5)
+    assert store.add_tool_work(episode["id"], "metered", 3)["charged_work_units"] == 5
+    assert store.add_tool_work(episode["id"], "metered", 4)["charged_work_units"] == 7
+    settled = store.settle_tool(episode["id"], "metered", status="completed")
+    assert settled == {
+        "schema": "nexgent.tool-work.v1", "reserved_work_units": 5,
+        "measured_work_units": 7, "charged_work_units": 7,
+        "usage_complete": True,
+    }
+    assert store.settle_tool(episode["id"], "metered", status="completed") == settled
+    with pytest.raises(ValueError, match="cannot change status"):
+        store.settle_tool(episode["id"], "metered", status="failed")
+    # A durable reservation without a terminal settlement is charged at its
+    # baseline and makes the aggregate receipt incomplete.
+    store.reserve_tool(episode["id"], "unknown", {"name": "crashed"},
+                       reserved_work_units=4)
+    usage = store.usage(episode["id"])
+    assert usage["tool_calls"] == 2
+    assert usage["reserved_tool_work_units"] == 9
+    assert usage["charged_tool_work_units"] == 11
+    assert usage["tool_work_units"] is None
+    assert usage["tool_usage_missing_call_ids"] == [f"{episode['id']}/unknown"]
+    assert usage["usage_complete"] is False
+    with pytest.raises(ValueError, match="positive integers"):
+        store.add_tool_work(episode["id"], "unknown", -1)
+    with pytest.raises(ValueError, match="positive integers"):
+        store.add_tool_work(episode["id"], "unknown", float("nan"))
+    with pytest.raises(ValueError, match="Terminal"):
+        store.add_tool_work(episode["id"], "metered", 1)
+
+
+def test_tool_usage_missing_ids_are_episode_qualified_across_descendants(store, package):
+    root = store.create(task(budget={
+        "max_model_calls": 0, "max_completion_tokens": 0,
+        "max_tool_calls": 2, "max_tool_work_units": 0, "max_nodes": 3,
+    }), package)
+    child = store.create(task(capabilities=[]), package, root["id"])
+    store.reserve_tool(root["id"], "same-path", reserved_work_units=0)
+    store.reserve_tool(child["id"], "same-path", reserved_work_units=0)
+
+    missing = store.usage(root["id"])["tool_usage_missing_call_ids"]
+    assert missing == [
+        f"{root['id']}/same-path",
+        f"{child['id']}/same-path",
+    ]
+    assert len(set(missing)) == 2
+
+
+def test_tool_work_reservation_is_atomic_and_cannot_overspend(store, package):
+    root = store.create(task(budget={
+        "max_model_calls": 0, "max_completion_tokens": 0,
+        "max_tool_calls": 8, "max_tool_work_units": 10, "max_nodes": 3,
+    }), package)
+    child = store.create(task(capabilities=[]), package, root["id"])
+
+    def admit(index):
+        try:
+            store.reserve_tool(
+                [root["id"], child["id"]][index % 2], f"work-{index}",
+                reserved_work_units=6)
+            return True
+        except BudgetExhausted:
+            return False
+
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        assert sum(workers.map(admit, range(16))) == 1
+    usage = store.usage(root["id"])
+    assert usage["reserved_tool_work_units"] == 6
+    assert usage["charged_tool_work_units"] == 6
+    assert usage["usage_complete"] is False
+
+
+def test_rpc_unknown_outcome_requires_reconciliation_and_failure_replays(store, package):
+    episode = store.create(task(), package)
+    request = {"tool": "local", "args": {"port": "input"}}
+    original = store.rpc_start(episode["id"], "entry/0/tool", request)
+    restarted = EpisodeStore(store.root)
+    assert restarted.rpc_find(episode["id"], "entry/0/tool", request) == original
+    with pytest.raises(RecoveryRequired):
+        restarted.rpc_start(episode["id"], "entry/0/tool", request)
+    with pytest.raises(ValueError, match="digest"):
+        restarted.rpc_find(episode["id"], "entry/0/tool", {"tool": "changed"})
+    terminal = restarted.rpc_finish(episode["id"], "entry/0/tool", error={"type": "ToolFailure", "message": "failed"})
+    assert terminal["status"] == "failed"
+    assert restarted.rpc_start(episode["id"], "entry/0/tool", request) == terminal
+    with pytest.raises(ValueError, match="terminal"):
+        restarted.rpc_finish(episode["id"], "entry/0/tool", result={"success": True})
+    assert store.get(episode["id"])["revision"] == 0
+
+
+def test_rpc_concurrent_start_admits_only_one(store, package):
+    episode = store.create(task(), package)
+
+    def begin(_):
+        try:
+            store.rpc_start(episode["id"], "same-path", {"work": 1})
+            return True
+        except RecoveryRequired:
+            return False
+
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        assert sum(workers.map(begin, range(16))) == 1
+    finished = store.rpc_finish(episode["id"], "same-path", result={"work": "done"})
+    assert store.rpc_start(episode["id"], "same-path", {"work": 1}) == finished
+
+
+def test_artifact_provenance_type_scope_and_integrity(store, package):
+    root = store.create(task(), package)
+    child = store.create(task(), package, root["id"])
+    outsider = store.create(task(), package)
+    artifact = store.publish(root["id"], {"facts": [1, 2]}, "evidence.v1", node_id="collect", attempt_id="collect/0",
+                             scope="tree", validation={"schema_status": "passed", "checker_ref": "contract-checker"})
+    assert artifact["validation"] == {"schema_status": "passed", "checker_ref": "contract-checker"}
+    assert store.read(artifact["id"], child["id"], "evidence.v1")["content"] == {"facts": [1, 2]}
+    assert artifact["producer"] == {"episode_id": root["id"], "node_id": "collect", "attempt_id": "collect/0", "package_digest": package["digest"]}
+    output = store.publish(child["id"], "answer", "text.v1", input_refs=[artifact["id"]], scope="tree")
+    assert store.read(output, root["id"])["input_artifact_refs"] == [artifact["id"]]
+    with pytest.raises(PermissionError, match="tree"):
+        store.read(artifact, outsider["id"])
+    private = store.publish(root["id"], "private")
+    with pytest.raises(PermissionError, match="different Episode"):
+        store.read(private, child["id"])
+    with pytest.raises(ValueError, match="type"):
+        store.read(artifact, root["id"], "wrong.type")
+    with pytest.raises(PermissionError, match="package"):
+        store.publish(root["id"], "forged", package_digest="different")
+    with pytest.raises(PermissionError):
+        store.publish(outsider["id"], "forged dependency", input_refs=[artifact["id"]])
+    assert len(store.artifacts(root["id"])) == 2
+    with store.connect() as db:
+        tampered = deepcopy(artifact)
+        tampered["content"] = {"facts": [999]}
+        db.execute("UPDATE task_artifacts SET data=? WHERE id=?", (json.dumps(tampered), artifact["id"]))
+    with pytest.raises(ValueError, match="integrity"):
+        store.read(artifact, root["id"])
+
+
+def test_public_artifact_still_preserves_namespace_and_split(store, package):
+    episode = store.create(task(), package)
+    public = store.publish(episode["id"], b"binary-evidence", media_type="application/octet-stream", scope="public")
+    other = store.create(task(context={"memory_namespace": "study-b", "split": "development"}), package)
+    holdout = store.create(task(context={"memory_namespace": "study-a", "split": "final_holdout"}), package)
+    assert store.read(public, episode["id"])["content"] == b"binary-evidence"
+    for target in (other, holdout):
+        with pytest.raises(PermissionError, match="information boundary"):
+            store.read(public, target["id"])
+
+
+def test_memory_namespace_split_and_holdout_cannot_be_overridden(store, package):
+    first = store.create(task(), package)
+    same = store.create(task(), package)
+    other = store.create(task(context={"memory_namespace": "other", "split": "development"}), package)
+    holdout = store.create(task(context={"memory_namespace": "study-a", "split": "final_holdout"}), package)
+    item = store.remember(first["id"], {"lesson": "Check input binding before retry"})
+    assert item["status"] == "candidate"
+    assert store.search(first["id"], "input") == [item]
+    assert store.search(same["id"], "input") == []
+    assert store.search(other["id"]) == []
+    assert store.search(holdout["id"]) == []
+    with pytest.raises(PermissionError, match="namespace"):
+        store.search(other["id"], namespace="study-a")
+    with pytest.raises(PermissionError, match="split"):
+        store.search(holdout["id"], split="development")
+    with pytest.raises(PermissionError, match="holdout"):
+        store.remember(holdout["id"], "leak")
+    with pytest.raises(PermissionError):
+        store.remember(holdout["id"], "leak", split="development")
+    with pytest.raises(PermissionError, match="candidate"):
+        store.remember(first["id"], "self-certified", status="accepted")
+
+
+def test_snapshot_records_actual_retrieval_and_rejects_unread_items(store, package):
+    episode = store.create(task(), package)
+    item = store.remember(episode["id"], "input binding")
+    with pytest.raises(PermissionError, match="actually retrieved"):
+        store.snapshot(episode["id"], [item])
+    snapshot = store.snapshot(episode["id"], query="binding")
+    assert snapshot["item_version_refs"] == [{"id": item["id"], "version": 1}]
+    assert snapshot["items"] == [item]
+    traces = store.retrievals(episode["id"])
+    assert traces[-1]["query"] == "binding"
+    assert snapshot["retrieval_refs"] == [traces[-1]["id"]]
+    assert store.memory_snapshot(snapshot["id"], episode["id"]) == snapshot
+    other = store.create(task(), package)
+    with pytest.raises(PermissionError, match="different Episode"):
+        store.memory_snapshot(snapshot["id"], other["id"])
+    forged = deepcopy(item)
+    forged["content"] = "replacement text"
+    with pytest.raises(ValueError, match="immutable stored version"):
+        store.snapshot(episode["id"], [forged])
+    with store.connect() as db:
+        corrupted = deepcopy(snapshot)
+        corrupted["items"][0]["content"] = "corrupted"
+        db.execute("UPDATE task_snapshots SET data=? WHERE id=?", (json.dumps(corrupted), snapshot["id"]))
+    with pytest.raises(ValueError, match="integrity"):
+        store.memory_snapshot(snapshot["id"], episode["id"])
+    assert store.get(episode["id"])["revision"] == 0
+
+
+def test_once_is_atomic_durable_and_shared_by_children(store, package):
+    root = store.create(task(), package)
+    child = store.create(task(), package, root["id"])
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        assert sum(workers.map(lambda index: store.once([root["id"], child["id"]][index % 2], "workbench.fail_once:join"), range(16))) == 1
+    assert not EpisodeStore(store.root).once(child["id"], "workbench.fail_once:join")
+    other = store.create(task(), package)
+    assert store.once(other["id"], "workbench.fail_once:join")
+
+
+def test_deadline_is_atomic_durable_and_shared_by_children(store, package, monkeypatch):
+    root = store.create(task(constraints={"wall_seconds": 60}), package)
+    child = store.create(task(constraints={"wall_seconds": 1}), package, root["id"])
+
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        deadlines = list(workers.map(
+            lambda index: EpisodeStore(store.root).start_deadline(
+                [root["id"], child["id"]][index % 2]),
+            range(16)))
+
+    assert all(deadline == deadlines[0] for deadline in deadlines)
+    assert deadlines[0]["root_episode_id"] == root["id"]
+    assert deadlines[0]["wall_seconds"] == 60
+    assert deadlines[0]["deadline_at"] - deadlines[0]["started_at"] == 60
+    restarted = EpisodeStore(store.root)
+    assert restarted.start_deadline(child["id"]) == deadlines[0]
+    monkeypatch.setattr(
+        "nexgent.tasks.store.time.time",
+        lambda: deadlines[0]["deadline_at"] - 12.5)
+    assert restarted.remaining_seconds(child["id"]) == 12.5
+    monkeypatch.setattr(
+        "nexgent.tasks.store.time.time",
+        lambda: deadlines[0]["deadline_at"] + 1)
+    assert restarted.remaining_seconds(root["id"]) == 0.0
+
+
+@pytest.mark.parametrize("constraints", [
+    {"wall_seconds": True}, {"wall_seconds": 0}, {"wall_seconds": -1},
+    {"wall_seconds": 1800.1}, {"wall_seconds": "60"}, None,
+])
+def test_deadline_rejects_invalid_root_wall_seconds_without_freezing(
+        store, package, constraints):
+    episode = store.create(task(constraints=constraints), package)
+    with pytest.raises(ValueError, match=r"\(0, 1800\]"):
+        store.start_deadline(episode["id"])
+    with store.connect() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM task_deadlines WHERE root_id=?",
+            (episode["id"],)).fetchone()[0] == 0
+
+
+def test_event_sequence_chain_and_lock_identity(store, package):
+    episode = store.create(task(), package)
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        list(workers.map(lambda index: store.event(episode["id"], "concurrent", {"index": index}), range(16)))
+    events = store.events(episode["id"])
+    assert [e["sequence"] for e in events] == list(range(1, 18))
+    assert all(right["previous"] == left["digest"] for left, right in zip(events, events[1:]))
+    with store.lock(episode["id"]):
+        with pytest.raises(OSError):
+            with store.lock(episode["id"]):
+                pass
+    with pytest.raises(ValueError, match="identity"):
+        with store.lock("../../outside"):
+            pass

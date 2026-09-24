@@ -1,0 +1,325 @@
+{
+  "created_utc": "2026-09-15T17:43:33.310648+00:00",
+  "build_tool": "setuptools.setup(build --build-base UNIQUE, bdist_wheel --bdist-dir UNIQUE)",
+  "wheels": [
+    {
+      "name": "nexgent",
+      "version": "0.8.0",
+      "wheel": "build-validation\\package-0.8.0-final\\wheel-nexgent\\nexgent-0.8.0-py3-none-any.whl",
+      "sha256": "bb4c9f7bafa043a5652aca0e98d554521adf3067fbc111523bd117ec3f023289",
+      "bytes": 96713,
+      "requires_dist": [
+        "openai>=1.0",
+        "requests>=2.31",
+        "python-dotenv>=1.0",
+        "PyQt6<7,>=6.8",
+        "pytest>=8; extra == \"dev\"",
+        "pytest-qt>=4.5; extra == \"dev\""
+      ],
+      "entry_points": "[console_scripts]\nnexgent = nexgent.cli:main\nnexgent-gui = nexgent.ui.app:main\n",
+      "files": [
+        "nexgent-0.8.0.dist-info/METADATA",
+        "nexgent-0.8.0.dist-info/RECORD",
+        "nexgent-0.8.0.dist-info/WHEEL",
+        "nexgent-0.8.0.dist-info/entry_points.txt",
+        "nexgent-0.8.0.dist-info/licenses/LICENSE",
+        "nexgent-0.8.0.dist-info/top_level.txt",
+        "nexgent/__init__.py",
+        "nexgent/__main__.py",
+        "nexgent/agents/__init__.py",
+        "nexgent/agents/broker.py",
+        "nexgent/agents/seed.py",
+        "nexgent/benchmarks/__init__.py",
+        "nexgent/benchmarks/evaluation.py",
+        "nexgent/cli.py",
+        "nexgent/evolution/__init__.py",
+        "nexgent/evolution/controller.py",
+        "nexgent/evolution/meta_evaluation.py",
+        "nexgent/kernel/__init__.py",
+        "nexgent/kernel/programs.py",
+        "nexgent/kernel/runner.py",
+        "nexgent/kernel/store.py",
+        "nexgent/kernel/tooling.py",
+        "nexgent/kernel/worker.py",
+        "nexgent/models/__init__.py",
+        "nexgent/models/config.py",
+        "nexgent/models/gateway.py",
+        "nexgent/models/worker.py",
+        "nexgent/research/__init__.py",
+        "nexgent/research/library.py",
+        "nexgent/research/literature.py",
+        "nexgent/ui/__init__.py",
+        "nexgent/ui/app.py",
+        "nexgent/ui/meta_evidence.py",
+        "nexgent/ui/window.py"
+      ],
+      "clean_build_base": "build-validation\\package-0.8.0-final\\build-nexgent",
+      "project": ".",
+      "source_bytes_match": true,
+      "source_file_count": 28,
+      "forbidden_domain_imports": [],
+      "delivery_wheel": "dist\\nexgent-0.8.0-py3-none-any.whl"
+    },
+    {
+      "name": "nexgent-scientific-discovery",
+      "version": "0.1.0",
+      "wheel": "build-validation\\package-0.8.0-final\\wheel-nexgent-scientific-discovery\\nexgent_scientific_discovery-0.1.0-py3-none-any.whl",
+      "sha256": "557a37114b89199ec2b1dca3c334251584829afdcd019a154a71af6500bbb30c",
+      "bytes": 20262,
+      "requires_dist": [
+        "nexgent>=0.8.0",
+        "numpy>=1.26",
+        "scipy>=1.12"
+      ],
+      "entry_points": "[nexgent.benchmarks]\nscientific_discovery = nexgent_scientific_discovery:ScientificDiscoveryBenchmark\n",
+      "files": [
+        "nexgent_scientific_discovery-0.1.0.dist-info/METADATA",
+        "nexgent_scientific_discovery-0.1.0.dist-info/RECORD",
+        "nexgent_scientific_discovery-0.1.0.dist-info/WHEEL",
+        "nexgent_scientific_discovery-0.1.0.dist-info/entry_points.txt",
+        "nexgent_scientific_discovery-0.1.0.dist-info/top_level.txt",
+        "nexgent_scientific_discovery/__init__.py",
+        "nexgent_scientific_discovery/adapter.py",
+        "nexgent_scientific_discovery/baselines.py",
+        "nexgent_scientific_discovery/benchmark.py",
+        "nexgent_scientific_discovery/expressions.py",
+        "nexgent_scientific_discovery/literature.py",
+        "nexgent_scientific_discovery/roles.py",
+        "nexgent_scientific_discovery/toolbox.py"
+      ],
+      "clean_build_base": "build-validation\\package-0.8.0-final\\build-nexgent-scientific-discovery",
+      "project": "benchmarks\\scientific_discovery",
+      "source_bytes_match": true,
+      "source_file_count": 8,
+      "delivery_wheel": "dist\\nexgent_scientific_discovery-0.1.0-py3-none-any.whl"
+    },
+    {
+      "name": "nexgent-bbh",
+      "version": "0.1.0",
+      "wheel": "build-validation\\package-0.8.0-final\\wheel-nexgent-bbh\\nexgent_bbh-0.1.0-py3-none-any.whl",
+      "sha256": "a57b519f7a966ec6e34213bc67951e9701eb8809ab18b4d9aba74d54e6b37b70",
+      "bytes": 9115,
+      "requires_dist": [
+        "nexgent>=0.8.0"
+      ],
+      "entry_points": "[console_scripts]\nnexgent-bbh-download = nexgent_bbh.data:main\n\n[nexgent.benchmarks]\nbbh = nexgent_bbh:BigBenchHardBenchmark\n",
+      "files": [
+        "nexgent_bbh-0.1.0.dist-info/METADATA",
+        "nexgent_bbh-0.1.0.dist-info/RECORD",
+        "nexgent_bbh-0.1.0.dist-info/WHEEL",
+        "nexgent_bbh-0.1.0.dist-info/entry_points.txt",
+        "nexgent_bbh-0.1.0.dist-info/top_level.txt",
+        "nexgent_bbh/__init__.py",
+        "nexgent_bbh/baseline.py",
+        "nexgent_bbh/benchmark.py",
+        "nexgent_bbh/data.py"
+      ],
+      "clean_build_base": "build-validation\\package-0.8.0-final\\build-nexgent-bbh",
+      "project": "benchmarks\\bbh",
+      "source_bytes_match": true,
+      "source_file_count": 4,
+      "delivery_wheel": "dist\\nexgent_bbh-0.1.0-py3-none-any.whl"
+    }
+  ],
+  "installed_core_only": {
+    "window_size": [
+      1480,
+      980
+    ],
+    "benchmark_hint": "没有可用的基准插件。请先安装插件，例如 python -m pip install /path/to/benchmark-plugin，并按插件说明准备数据。",
+    "installed_benchmarks": [],
+    "studies": 0,
+    "source_workers_remaining": 0,
+    "research_or_model_requests": 0,
+    "screenshot": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent\\build-validation\\package-0.8.0-final\\core-only-ui-0.8.0.png",
+    "window_closed": true,
+    "entry_point": "nexgent.ui.app:main",
+    "exit_code": 0,
+    "python": "3.12.14 (main, Aug 25 2026, 14:01:42) [MSC v.1944 64 bit (AMD64)]",
+    "executable": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent\\build-validation\\package-0.8.0-final\\core-only-venv\\Scripts\\python.exe",
+    "installed_core": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent\\build-validation\\package-0.8.0-final\\core-only-venv\\Lib\\site-packages\\nexgent\\__init__.py",
+    "forbidden_dependencies_absent": {
+      "numpy": true,
+      "scipy": true,
+      "nexgent_scientific_discovery": true,
+      "nexgent_bbh": true,
+      "nexgent.science": true
+    },
+    "distributions": [
+      {
+        "name": "annotated-types",
+        "version": "0.8.0"
+      },
+      {
+        "name": "anyio",
+        "version": "4.15.1"
+      },
+      {
+        "name": "certifi",
+        "version": "2026.7.22"
+      },
+      {
+        "name": "charset-normalizer",
+        "version": "3.5.1"
+      },
+      {
+        "name": "h11",
+        "version": "0.16.0"
+      },
+      {
+        "name": "httpcore2",
+        "version": "2.13.0"
+      },
+      {
+        "name": "httpx2",
+        "version": "2.13.0"
+      },
+      {
+        "name": "idna",
+        "version": "3.19"
+      },
+      {
+        "name": "jiter",
+        "version": "0.17.0"
+      },
+      {
+        "name": "nexgent",
+        "version": "0.8.0"
+      },
+      {
+        "name": "openai",
+        "version": "3.14.0"
+      },
+      {
+        "name": "pip",
+        "version": "25.0.1"
+      },
+      {
+        "name": "pydantic",
+        "version": "2.13.5"
+      },
+      {
+        "name": "pydantic_core",
+        "version": "2.46.5"
+      },
+      {
+        "name": "PyQt6",
+        "version": "6.11.0"
+      },
+      {
+        "name": "PyQt6-Qt6",
+        "version": "6.11.2"
+      },
+      {
+        "name": "PyQt6_sip",
+        "version": "13.12.0"
+      },
+      {
+        "name": "python-dotenv",
+        "version": "1.2.3"
+      },
+      {
+        "name": "requests",
+        "version": "2.34.2"
+      },
+      {
+        "name": "sniffio",
+        "version": "1.3.1"
+      },
+      {
+        "name": "truststore",
+        "version": "0.10.4"
+      },
+      {
+        "name": "typing-inspection",
+        "version": "0.4.4"
+      },
+      {
+        "name": "typing_extensions",
+        "version": "4.16.0"
+      },
+      {
+        "name": "urllib3",
+        "version": "2.7.0"
+      }
+    ],
+    "kernel_execution": {
+      "value": [
+        {
+          "ok": true,
+          "submission": {
+            "answer": 42
+          }
+        }
+      ],
+      "execution": {
+        "bundle_id": "agent-afc4c39616e1efc4ccaa",
+        "entry": "solve_batch",
+        "pid": 35536,
+        "source_digest": "ffc86228c88e38c5ad15d3e6a7d65f6676b7f9f0ed8a5f28c31584246cb1053a",
+        "elapsed_seconds": 0.0,
+        "rpc_count": 0,
+        "work_units": 0,
+        "instructions": 9,
+        "tool_receipts": [],
+        "science_receipts": [],
+        "isolation": {
+          "language": "capability_python",
+          "audit_hook": true,
+          "memory_limit": {
+            "kind": "process_commit",
+            "bytes": 536870912
+          },
+          "os_filesystem_container": false
+        }
+      }
+    },
+    "published_screenshot": "docs\\validation\\core-only-ui-0.8.0.png",
+    "screenshot_sha256": "e7f34ed8676fe6f471cea103a2cdb71869dc06d50f89af0c3c2b9d50f9043395"
+  },
+  "installed_entrypoints": [
+    {
+      "check": "pip_check",
+      "exit_code": 0,
+      "stdout": "No broken requirements found.\n",
+      "stderr": ""
+    },
+    {
+      "check": "console_help",
+      "exit_code": 0,
+      "stdout": "usage: nexgent [-h] [--root ROOT]\n               {gui,list,benchmarks,evaluate,research,resume,show,export,meta-evaluate}\n               ...\n\nNexgent general RSI agent framework\n\npositional arguments:\n  {gui,list,benchmarks,evaluate,research,resume,show,export,meta-evaluate}\n    evaluate            Run a fixed program on an installed benchmark without\n                        evolution\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n",
+      "stderr": ""
+    },
+    {
+      "check": "gui_help",
+      "exit_code": 0,
+      "stdout": "usage: nexgent-gui [-h] [--project PROJECT]\n\nNExgent RSI 实验空间\n\noptions:\n  -h, --help         show this help message and exit\n  --project PROJECT  研究工作区目录\n",
+      "stderr": ""
+    },
+    {
+      "check": "module_help",
+      "exit_code": 0,
+      "stdout": "usage: __main__.py [-h] [--root ROOT]\n                   {gui,list,benchmarks,evaluate,research,resume,show,export,meta-evaluate}\n                   ...\n\nNexgent general RSI agent framework\n\npositional arguments:\n  {gui,list,benchmarks,evaluate,research,resume,show,export,meta-evaluate}\n    evaluate            Run a fixed program on an installed benchmark without\n                        evolution\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n",
+      "stderr": ""
+    },
+    {
+      "check": "no_plugin_registry",
+      "exit_code": 0,
+      "stdout": "[]\n",
+      "stderr": ""
+    },
+    {
+      "check": "empty_history",
+      "exit_code": 0,
+      "stdout": "[]\n",
+      "stderr": ""
+    }
+  ],
+  "scope": "Stage 3 frozen software packaging acceptance. Independent Windows CPython 3.12 environment, only core wheel and declared runtime dependencies installed. No real model calls. Plugin wheels validated against exact source bytes and metadata; not installed into the core-only environment.",
+  "build_cache_handling": "New build-base and bdist directories per wheel; old build/lib and 0.7 wheel retained and excluded. pip cache redirected into this workspace after user-global cache permissions prevented index updates.",
+  "limitations": [
+    "This local clean-install check uses Windows CPython 3.12.14, not a new Linux packaging run.",
+    "No scientific or RSI performance conclusion follows from package, UI, or deterministic kernel checks.",
+    "The parent may rebuild the core after the next explicitly validated source fix; these hashes identify this stage only."
+  ]
+}

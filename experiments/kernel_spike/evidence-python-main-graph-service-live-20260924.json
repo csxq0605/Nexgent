@@ -1,0 +1,304 @@
+{
+  "schema": "nexgent.main-graph-service-live.v1",
+  "passed": false,
+  "profile_identity": {
+    "provider": "mimo",
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "model": "mimo-v2.6-flash",
+    "credential_ref": "NEXGENT_API_KEY",
+    "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242"
+  },
+  "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+  "retry_policy": {
+    "automatic_retries": 0,
+    "attempts_per_ask": 1
+  },
+  "budget": {
+    "max_model_calls": 8,
+    "max_completion_tokens": 28000,
+    "max_tool_calls": 8,
+    "max_tool_work_units": 0,
+    "max_nodes": 100
+  },
+  "episode": {
+    "id": "episode-79c260f80da74a03",
+    "status": "failed",
+    "package_digest": "80ee5b7d1226b40a62dde70176949ff93fb4ff03af833ccbcdad75f567bb328b",
+    "plan_revision": 2,
+    "output_refs": {},
+    "usage": {
+      "model_calls": 3,
+      "reserved_completion_tokens": 6400,
+      "charged_completion_tokens": 6400,
+      "completion_tokens": 809,
+      "known_usage": {
+        "prompt_tokens": 4266,
+        "completion_tokens": 809,
+        "total_tokens": 5075
+      },
+      "usage_missing_call_ids": [],
+      "tool_usage_missing_call_ids": [],
+      "reserved_tool_work_units": 0,
+      "charged_tool_work_units": 0,
+      "tool_work_units": 0,
+      "usage_complete": true,
+      "billing_unknown_call_ids": [],
+      "tool_calls": 0,
+      "nodes": 6
+    },
+    "last_error": "ContractError: Node publish failed: ContractError: result/choice: 'A' was expected"
+  },
+  "model_receipts": [
+    {
+      "call_id": "model-4dcc51bb0edf465497685fd606549821",
+      "role": "architect",
+      "model": "mimo/mimo-v2.6-flash",
+      "provider_model": "mimo-v2.6-flash",
+      "configured_provider_model": "mimo-v2.6-flash",
+      "observed_provider_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+      "profile_identity": {
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "credential_ref": "NEXGENT_API_KEY",
+        "model": "mimo-v2.6-flash",
+        "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+        "provider": "mimo"
+      },
+      "status": "received",
+      "finish_reason": "stop",
+      "billing_status": "usage_reported",
+      "max_completion_tokens": 5000,
+      "reserved_completion_tokens": 5000,
+      "usage": {
+        "completion_tokens": 670,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 4079,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4749
+      }
+    },
+    {
+      "call_id": "model-c2778f9c26b4421a86c10675b10d48f7",
+      "role": "generalist",
+      "model": "mimo/mimo-v2.6-flash",
+      "provider_model": "mimo-v2.6-flash",
+      "configured_provider_model": "mimo-v2.6-flash",
+      "observed_provider_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+      "profile_identity": {
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "credential_ref": "NEXGENT_API_KEY",
+        "model": "mimo-v2.6-flash",
+        "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+        "provider": "mimo"
+      },
+      "status": "received",
+      "finish_reason": "stop",
+      "billing_status": "usage_reported",
+      "max_completion_tokens": 800,
+      "reserved_completion_tokens": 800,
+      "usage": {
+        "completion_tokens": 43,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 86,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 129
+      },
+      "service_provider": {
+        "authority_digest": "f37bd4fc73ef5106c52b9e3cadf6d6262dd197452e9a2ffab048b0b83c6c3317",
+        "definition_digest": "498a84fdd338e40ae1aea3f322eb73d61692840a0041e8e7b5ae0e7cc4253515",
+        "definition_id": "service-definition-498a84fdd338e40ae1aea3f3",
+        "instance_revision": 1
+      },
+      "effective_payload_digest": "bab58cb02fdd9a5764871e38608e4cd9d309c14eeea804c96686a127d994c9f2"
+    },
+    {
+      "call_id": "model-9b12c5c097844e588b86008fc2195ba7",
+      "role": "verifier",
+      "model": "mimo/mimo-v2.6-flash",
+      "provider_model": "mimo-v2.6-flash",
+      "configured_provider_model": "mimo-v2.6-flash",
+      "observed_provider_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+      "profile_identity": {
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "credential_ref": "NEXGENT_API_KEY",
+        "model": "mimo-v2.6-flash",
+        "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+        "provider": "mimo"
+      },
+      "status": "received",
+      "finish_reason": "stop",
+      "billing_status": "usage_reported",
+      "max_completion_tokens": 600,
+      "reserved_completion_tokens": 600,
+      "usage": {
+        "completion_tokens": 96,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 101,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 197
+      },
+      "service_provider": {
+        "authority_digest": "f37bd4fc73ef5106c52b9e3cadf6d6262dd197452e9a2ffab048b0b83c6c3317",
+        "definition_digest": "498a84fdd338e40ae1aea3f322eb73d61692840a0041e8e7b5ae0e7cc4253515",
+        "definition_id": "service-definition-498a84fdd338e40ae1aea3f3",
+        "instance_revision": 1
+      },
+      "effective_payload_digest": "bab58cb02fdd9a5764871e38608e4cd9d309c14eeea804c96686a127d994c9f2"
+    }
+  ],
+  "service_events": [
+    {
+      "kind": "service_definition_staged",
+      "content": {
+        "definition_id": "service-definition-498a84fdd338e40ae1aea3f3",
+        "definition_digest": "498a84fdd338e40ae1aea3f322eb73d61692840a0041e8e7b5ae0e7cc4253515",
+        "service_interface": "model_context.v1",
+        "authority_digest": "f37bd4fc73ef5106c52b9e3cadf6d6262dd197452e9a2ffab048b0b83c6c3317"
+      }
+    },
+    {
+      "kind": "service_provider_activated",
+      "content": {
+        "definition_id": "service-definition-498a84fdd338e40ae1aea3f3",
+        "service_interface": "model_context.v1"
+      }
+    },
+    {
+      "kind": "service_application_admitted",
+      "content": {
+        "binding": {
+          "authority_digest": "f37bd4fc73ef5106c52b9e3cadf6d6262dd197452e9a2ffab048b0b83c6c3317",
+          "definition_digest": "498a84fdd338e40ae1aea3f322eb73d61692840a0041e8e7b5ae0e7cc4253515",
+          "definition_id": "service-definition-498a84fdd338e40ae1aea3f3",
+          "instance_revision": 1
+        }
+      }
+    },
+    {
+      "kind": "service_applied",
+      "content": {
+        "binding": {
+          "authority_digest": "f37bd4fc73ef5106c52b9e3cadf6d6262dd197452e9a2ffab048b0b83c6c3317",
+          "definition_digest": "498a84fdd338e40ae1aea3f322eb73d61692840a0041e8e7b5ae0e7cc4253515",
+          "definition_id": "service-definition-498a84fdd338e40ae1aea3f3",
+          "instance_revision": 1
+        },
+        "input_digest": "1bf2285fd1e0b9aabd537a8a486458e37a29324a1f6c7c78fd128017e855c4cb",
+        "output_digest": "4219318c2af63af0c682d040db088324fe9d6c280a4b7d833688291ff0566eab",
+        "worker_instruction_limit": 200000,
+        "worker_execution": {
+          "elapsed_seconds": 0.0,
+          "entry": "execute",
+          "instructions": 10,
+          "isolation": {
+            "audit_hook": true,
+            "language": "capability_python",
+            "memory_limit": {
+              "bytes": 536870912,
+              "kind": "process_commit"
+            },
+            "os_filesystem_container": false
+          },
+          "loaded_modules": [
+            "service.py"
+          ],
+          "local_calls": [],
+          "package_digest": "104182dd1038bfb2fe49010cbcc152c09574858b37d2739d9b3d7e4771850d57",
+          "package_id": "package-25b8dcbfc624fb786e43af12",
+          "pid": 50092,
+          "rpc_count": 0
+        }
+      }
+    },
+    {
+      "kind": "service_application_admitted",
+      "content": {
+        "binding": {
+          "authority_digest": "f37bd4fc73ef5106c52b9e3cadf6d6262dd197452e9a2ffab048b0b83c6c3317",
+          "definition_digest": "498a84fdd338e40ae1aea3f322eb73d61692840a0041e8e7b5ae0e7cc4253515",
+          "definition_id": "service-definition-498a84fdd338e40ae1aea3f3",
+          "instance_revision": 1
+        }
+      }
+    },
+    {
+      "kind": "service_applied",
+      "content": {
+        "binding": {
+          "authority_digest": "f37bd4fc73ef5106c52b9e3cadf6d6262dd197452e9a2ffab048b0b83c6c3317",
+          "definition_digest": "498a84fdd338e40ae1aea3f322eb73d61692840a0041e8e7b5ae0e7cc4253515",
+          "definition_id": "service-definition-498a84fdd338e40ae1aea3f3",
+          "instance_revision": 1
+        },
+        "input_digest": "8513327e458ef17eb5b9b530fb312480319c5e814e8bc980322489a64422e3b5",
+        "output_digest": "4219318c2af63af0c682d040db088324fe9d6c280a4b7d833688291ff0566eab",
+        "worker_instruction_limit": 200000,
+        "worker_execution": {
+          "elapsed_seconds": 0.0,
+          "entry": "execute",
+          "instructions": 10,
+          "isolation": {
+            "audit_hook": true,
+            "language": "capability_python",
+            "memory_limit": {
+              "bytes": 536870912,
+              "kind": "process_commit"
+            },
+            "os_filesystem_container": false
+          },
+          "loaded_modules": [
+            "service.py"
+          ],
+          "local_calls": [],
+          "package_digest": "104182dd1038bfb2fe49010cbcc152c09574858b37d2739d9b3d7e4771850d57",
+          "package_id": "package-25b8dcbfc624fb786e43af12",
+          "pid": 21080,
+          "rpc_count": 0
+        }
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-5ae6a442e58d482f",
+      "name": "options",
+      "content": {
+        "A": {
+          "latency_ms": 40,
+          "monthly_cost": 2
+        },
+        "B": {
+          "latency_ms": 70,
+          "monthly_cost": 1
+        },
+        "latency_ceiling_ms": 50
+      }
+    }
+  ],
+  "failure": {
+    "stage": "episode_run",
+    "class": "task_protocol",
+    "remote_outcome_unknown": false,
+    "episode_failure_domain": "protocol"
+  },
+  "scratch_root": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-main-graph-live-np8ow64k",
+  "interpretation": "One graph-seed task prompted to develop a service; no spontaneous gap choice, cross-task adoption, or RSI gain.",
+  "leak_scan_passed": true
+}

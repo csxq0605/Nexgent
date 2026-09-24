@@ -1,0 +1,185 @@
+{
+  "passed": true,
+  "backend": "deepseek-harness",
+  "upstreamCommit": "46a7f68b0922371ce7144b668b90e377d8e799f4",
+  "upstreamTrackedTree": {
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "statusMode": "git status --porcelain=v1 --untracked-files=no",
+    "safeDirectoryScope": "per-command"
+  },
+  "profile": "headless",
+  "executedInputs": {
+    "cliBin": {
+      "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-upstream-deepseek-46a7f68\\apps\\cli\\lib\\bin.js",
+      "sha256": "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854"
+    },
+    "patch": {
+      "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_recovery.patch.yml",
+      "sha256": "902259a4aa8c5a908c29836b3bc2d84b9951df3549f7f91f9fdb4bd640e7ad0f"
+    },
+    "plugin": {
+      "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_recovery_plugin.mjs",
+      "sha256": "fb3f19d2dcbac84bc10e111f5d6cdf1868a69a202b0cbbb30f2c6e5f4673fffb"
+    },
+    "lockfile": {
+      "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-upstream-deepseek-46a7f68\\pnpm-lock.yaml",
+      "sha256": "f561d4d2b02ca15f94fc9177500ab4646c38d847cf1c52ac50bd4022690d2f50"
+    }
+  },
+  "scratchRoot": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-dsh-recovery-jF0Qp6",
+  "outcomes": {
+    "completed": {
+      "passed": true,
+      "scenario": "completed",
+      "backend": "deepseek-harness",
+      "upstreamCommit": "46a7f68b0922371ce7144b668b90e377d8e799f4",
+      "profile": "headless",
+      "model": "spike-recovery-mock/fixed",
+      "executedInputs": {
+        "cliBin": {
+          "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-upstream-deepseek-46a7f68\\apps\\cli\\lib\\bin.js",
+          "sha256": "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854"
+        },
+        "patch": {
+          "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_recovery.patch.yml",
+          "sha256": "902259a4aa8c5a908c29836b3bc2d84b9951df3549f7f91f9fdb4bd640e7ad0f"
+        },
+        "plugin": {
+          "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_recovery_plugin.mjs",
+          "sha256": "fb3f19d2dcbac84bc10e111f5d6cdf1868a69a202b0cbbb30f2c6e5f4673fffb"
+        },
+        "lockfile": {
+          "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-upstream-deepseek-46a7f68\\pnpm-lock.yaml",
+          "sha256": "f561d4d2b02ca15f94fc9177500ab4646c38d847cf1c52ac50bd4022690d2f50"
+        }
+      },
+      "sessionId": "session-fea47634-049e-4a43-8e2d-2821fa44333a",
+      "marker": "completed-result-durable",
+      "phase1Exit": {
+        "code": null,
+        "signal": "SIGKILL"
+      },
+      "phase2Exit": {
+        "code": 0,
+        "signal": null
+      },
+      "counts": {
+        "toolCalls": 1,
+        "successfulResults": 1,
+        "unknownOutcomeResults": 0,
+        "handlerEntriesObserved": 1,
+        "interruptedTurnEnds": 1,
+        "fixedAdapterRequestReceipts": 3,
+        "handlerEntryReceipts": 1
+      },
+      "fixedAdapterRequests": {
+        "provider": "spike-recovery-mock",
+        "model": "fixed",
+        "receiptType": "model_request",
+        "source": "plugin-receipts.jsonl",
+        "count": 3
+      },
+      "receiptManifest": {
+        "path": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-dsh-recovery-jF0Qp6\\completed\\receipts\\receipts.sha256.json",
+        "sha256": "de9cf0d12263a13fd8e41c2f91561e0047381283f2d12d7bce74a5cca92b30e8",
+        "rawReceiptCount": 9
+      },
+      "final": "{\"answer\":42}",
+      "assertions": {
+        "officialNamedHeadlessProfile": true,
+        "publicSessionIdResume": true,
+        "processKilledAfterCheckpointReturned": true,
+        "exactlyOneHandlerEntryObserved": true,
+        "crashPrefixPreserved": true,
+        "interruptedTurnReasonObserved": true,
+        "fixedAdapterDidNotReissueCompletedCallAfterRestart": true,
+        "fixedAdapterRequestsRecorded": true
+      },
+      "evidenceScope": "The process-kill experiment shows that restored history let this fixed adapter avoid reissuing the completed call. It does not establish runtime exactly-once deduplication or power-loss durability.",
+      "artifacts": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-dsh-recovery-jF0Qp6\\completed\\receipts",
+      "persistedSession": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-dsh-recovery-jF0Qp6\\completed\\sessions\\--E-PKU-program-2026-Aug-te-.nexgent-dsh-recovery-jF0Qp6-completed-project--\\session-fea47634-049e-4a43-8e2d-2821fa44333a\\session.v4.jsonl",
+      "commands": {
+        "phase1": "C:\\Program Files\\nodejs\\node.exe E:\\PKU\\program\\2026\\Aug\\te\\NExgent-upstream-deepseek-46a7f68\\apps\\cli\\lib\\bin.js --profile headless --patch E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_recovery.patch.yml --json 计算 6 × 7；工具结果后等待恢复。",
+        "phase2": "C:\\Program Files\\nodejs\\node.exe E:\\PKU\\program\\2026\\Aug\\te\\NExgent-upstream-deepseek-46a7f68\\apps\\cli\\lib\\bin.js --profile headless --patch E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_recovery.patch.yml --json --session-id session-fea47634-049e-4a43-8e2d-2821fa44333a 从持久历史恢复并交付 JSON {\"answer\":42}，不要重放已完成工具。"
+      }
+    },
+    "unknown": {
+      "passed": true,
+      "scenario": "unknown",
+      "backend": "deepseek-harness",
+      "upstreamCommit": "46a7f68b0922371ce7144b668b90e377d8e799f4",
+      "profile": "headless",
+      "model": "spike-recovery-mock/fixed",
+      "executedInputs": {
+        "cliBin": {
+          "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-upstream-deepseek-46a7f68\\apps\\cli\\lib\\bin.js",
+          "sha256": "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854"
+        },
+        "patch": {
+          "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_recovery.patch.yml",
+          "sha256": "902259a4aa8c5a908c29836b3bc2d84b9951df3549f7f91f9fdb4bd640e7ad0f"
+        },
+        "plugin": {
+          "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_recovery_plugin.mjs",
+          "sha256": "fb3f19d2dcbac84bc10e111f5d6cdf1868a69a202b0cbbb30f2c6e5f4673fffb"
+        },
+        "lockfile": {
+          "path": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-upstream-deepseek-46a7f68\\pnpm-lock.yaml",
+          "sha256": "f561d4d2b02ca15f94fc9177500ab4646c38d847cf1c52ac50bd4022690d2f50"
+        }
+      },
+      "sessionId": "session-487ca1f9-320e-4a35-9580-07e5962627c1",
+      "marker": "unknown-tool-entered",
+      "phase1Exit": {
+        "code": null,
+        "signal": "SIGKILL"
+      },
+      "phase2Exit": {
+        "code": 0,
+        "signal": null
+      },
+      "counts": {
+        "toolCalls": 1,
+        "successfulResults": 0,
+        "unknownOutcomeResults": 1,
+        "handlerEntriesObserved": 1,
+        "interruptedTurnEnds": 1,
+        "fixedAdapterRequestReceipts": 2,
+        "handlerEntryReceipts": 1
+      },
+      "fixedAdapterRequests": {
+        "provider": "spike-recovery-mock",
+        "model": "fixed",
+        "receiptType": "model_request",
+        "source": "plugin-receipts.jsonl",
+        "count": 2
+      },
+      "receiptManifest": {
+        "path": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-dsh-recovery-jF0Qp6\\unknown\\receipts\\receipts.sha256.json",
+        "sha256": "2b4eca5297c445f579562a9ed6c07f5e4fc7c9a496bb36318330113ecf25ab1a",
+        "rawReceiptCount": 9
+      },
+      "final": "{\"status\":\"unknown\",\"action\":\"verify_external_state\"}",
+      "assertions": {
+        "officialNamedHeadlessProfile": true,
+        "publicSessionIdResume": true,
+        "processKilledAfterCheckpointReturned": true,
+        "exactlyOneHandlerEntryObserved": true,
+        "crashPrefixPreserved": true,
+        "interruptedTurnReasonObserved": true,
+        "fixedAdapterDidNotReissueUnknownCallAfterRestart": true,
+        "fixedAdapterRequestsRecorded": true
+      },
+      "evidenceScope": "The ledger proves handler entry, not business-effect commit. Recovery recorded the missing durable result as unknown, and this fixed adapter chose not to reissue the call.",
+      "artifacts": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-dsh-recovery-jF0Qp6\\unknown\\receipts",
+      "persistedSession": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-dsh-recovery-jF0Qp6\\unknown\\sessions\\--E-PKU-program-2026-Aug-te-.nexgent-dsh-recovery-jF0Qp6-unknown-project--\\session-487ca1f9-320e-4a35-9580-07e5962627c1\\session.v4.jsonl",
+      "commands": {
+        "phase1": "C:\\Program Files\\nodejs\\node.exe E:\\PKU\\program\\2026\\Aug\\te\\NExgent-upstream-deepseek-46a7f68\\apps\\cli\\lib\\bin.js --profile headless --patch E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_recovery.patch.yml --json 计算 6 × 7；工具结果后等待恢复。",
+        "phase2": "C:\\Program Files\\nodejs\\node.exe E:\\PKU\\program\\2026\\Aug\\te\\NExgent-upstream-deepseek-46a7f68\\apps\\cli\\lib\\bin.js --profile headless --patch E:\\PKU\\program\\2026\\Aug\\te\\NExgent-orchestration\\experiments\\kernel_spike\\dsh_recovery.patch.yml --json --session-id session-487ca1f9-320e-4a35-9580-07e5962627c1 从未知工具结果恢复；不要重试，交付安全状态 JSON。"
+      }
+    }
+  },
+  "evidenceScope": "This is process-kill recovery with a deterministic fixed adapter. It does not establish runtime exactly-once deduplication or power-loss durability; an unknown-outcome ledger row records handler entry, not business-effect commit.",
+  "isolation": "The fixture plugin and tool execute in the host process; this is Agent scope plus process-crash recovery, not an OS sandbox."
+}

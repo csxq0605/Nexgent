@@ -1,0 +1,291 @@
+{
+  "schema": "nexgent.dynamic-tool-live.v1",
+  "passed": true,
+  "profile_identity": {
+    "provider": "mimo",
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "model": "mimo-v2.6-flash",
+    "credential_ref": "NEXGENT_API_KEY",
+    "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242"
+  },
+  "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+  "retry_policy": {
+    "automatic_retries": 0,
+    "attempts_per_ask": 1
+  },
+  "budget": {
+    "max_model_calls": 2,
+    "max_completion_tokens": 1400,
+    "max_tool_calls": 1,
+    "max_tool_work_units": 0,
+    "max_nodes": 12
+  },
+  "episode": {
+    "id": "episode-d30ca5aa3ec74462",
+    "status": "completed",
+    "package_digest": "28161e2dd64851dd09526d456b653e44f6e1962c7e8b9ddf67b10628b030a320",
+    "output_refs": {
+      "result": "artifact-df2edd52b5084a3b"
+    },
+    "usage": {
+      "model_calls": 2,
+      "reserved_completion_tokens": 1300,
+      "charged_completion_tokens": 1300,
+      "completion_tokens": 300,
+      "known_usage": {
+        "prompt_tokens": 254,
+        "completion_tokens": 300,
+        "total_tokens": 554
+      },
+      "usage_missing_call_ids": [],
+      "tool_usage_missing_call_ids": [],
+      "reserved_tool_work_units": 0,
+      "charged_tool_work_units": 0,
+      "tool_work_units": 0,
+      "usage_complete": true,
+      "billing_unknown_call_ids": [],
+      "tool_calls": 1,
+      "nodes": 7
+    },
+    "last_error": null
+  },
+  "model_receipts": [
+    {
+      "call_id": "model-d5b52f8230d4460f9fc5f82ae47039d8",
+      "role": "tool_builder",
+      "model": "mimo/mimo-v2.6-flash",
+      "provider_model": "mimo-v2.6-flash",
+      "configured_provider_model": "mimo-v2.6-flash",
+      "observed_provider_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+      "profile_identity": {
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "credential_ref": "NEXGENT_API_KEY",
+        "model": "mimo-v2.6-flash",
+        "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+        "provider": "mimo"
+      },
+      "status": "received",
+      "finish_reason": "stop",
+      "billing_status": "usage_reported",
+      "max_completion_tokens": 1000,
+      "reserved_completion_tokens": 1000,
+      "usage": {
+        "completion_tokens": 293,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 152,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 445
+      }
+    },
+    {
+      "call_id": "model-52f1f982ccc842b4b7503ed4f1845f8c",
+      "role": "answer_writer",
+      "model": "mimo/mimo-v2.6-flash",
+      "provider_model": "mimo-v2.6-flash",
+      "configured_provider_model": "mimo-v2.6-flash",
+      "observed_provider_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+      "profile_identity": {
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "credential_ref": "NEXGENT_API_KEY",
+        "model": "mimo-v2.6-flash",
+        "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+        "provider": "mimo"
+      },
+      "status": "received",
+      "finish_reason": "stop",
+      "billing_status": "usage_reported",
+      "max_completion_tokens": 300,
+      "reserved_completion_tokens": 300,
+      "usage": {
+        "completion_tokens": 7,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 102,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 109
+      }
+    }
+  ],
+  "definitions": [
+    {
+      "definition": {
+        "bundle_digest": "dda7ff2e3d25590316d8b690c0173dc53aff16d5ee1b92b03c0e1bff5a8d5300",
+        "credential_handles": [],
+        "declared_operations": [],
+        "dependency_lock": [],
+        "description": "Multiplies two integer values and returns their product as an integer. Task-local, reusable tool for arithmetic multiplication of 6 and 7.",
+        "digest": "e42d09888a4b3208c16f3fdddf59ba78c7e6d7fc02c32b4169b8bc37eeee7c0a",
+        "effect_class": "local_compute",
+        "entry": "tool.py:execute",
+        "entry_digest": "9378962b9735952c8eda621f4a49f998ec7d13ca91594cfbad4c451391ea2a4c",
+        "id": "definition-e42d09888a4b3208c16f3fdd",
+        "input_schema": {
+          "properties": {
+            "a": {
+              "description": "First integer operand",
+              "type": "integer"
+            },
+            "b": {
+              "description": "Second integer operand",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "a",
+            "b"
+          ],
+          "type": "object"
+        },
+        "interface_version": 1,
+        "kind": "tool",
+        "name": "multiply_integers",
+        "origin_episode_id": "episode-d30ca5aa3ec74462",
+        "output_schema": {
+          "properties": {
+            "operands": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "operation": {
+              "type": "string"
+            },
+            "result": {
+              "description": "Product of a and b",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "result",
+            "operation",
+            "operands"
+          ],
+          "type": "object"
+        },
+        "package_digest": "dda7ff2e3d25590316d8b690c0173dc53aff16d5ee1b92b03c0e1bff5a8d5300",
+        "package_id": "package-e60207638f45f56cb8d868c0",
+        "runtime": "controlled-python-v1",
+        "schema": "nexgent.capability-definition.v1",
+        "version": 1
+      },
+      "instance": {
+        "authority_digest": "d75e9ae319bcbec7d48b918cf88e2a1c9be34699e924c18c75c9e900f95d35a7",
+        "created_at": 1790184977.6900117,
+        "definition_digest": "e42d09888a4b3208c16f3fdddf59ba78c7e6d7fc02c32b4169b8bc37eeee7c0a",
+        "definition_id": "definition-e42d09888a4b3208c16f3fdd",
+        "episode_id": "episode-d30ca5aa3ec74462",
+        "name": "multiply_integers",
+        "record_digest": "4d98eae36bf532d201dd263644b0979af1df9d8b6d3ad4ea6a5a6f74ef78bc4c",
+        "revision": 1,
+        "schema": "nexgent.capability-instance.v1",
+        "status": "active",
+        "updated_at": 1790184977.6900117
+      },
+      "source": "def execute(payload, context):\n    a = payload.get(\"a\")\n    b = payload.get(\"b\")\n    if not isinstance(a, int) or not isinstance(b, int):\n        return {\"error\": \"Both 'a' and 'b' must be integers\", \"a\": a, \"b\": b}\n    return {\"result\": a * b, \"operation\": \"multiply\", \"operands\": [a, b]}"
+    }
+  ],
+  "tool_receipts": [
+    {
+      "arguments": {
+        "a": 6,
+        "b": 7
+      },
+      "call_id": "episode-d30ca5aa3ec74462/rpc.5",
+      "dynamic_capability": {
+        "authority_digest": "d75e9ae319bcbec7d48b918cf88e2a1c9be34699e924c18c75c9e900f95d35a7",
+        "definition_digest": "e42d09888a4b3208c16f3fdddf59ba78c7e6d7fc02c32b4169b8bc37eeee7c0a",
+        "definition_id": "definition-e42d09888a4b3208c16f3fdd",
+        "instance_revision": 1,
+        "name": "multiply_integers"
+      },
+      "elapsed_seconds": 0.28100000000267755,
+      "entry_digest": "9378962b9735952c8eda621f4a49f998ec7d13ca91594cfbad4c451391ea2a4c",
+      "episode_id": "episode-d30ca5aa3ec74462",
+      "execution": {
+        "elapsed_seconds": 0.0,
+        "entry": "execute",
+        "instructions": 9,
+        "isolation": {
+          "audit_hook": true,
+          "language": "capability_python",
+          "memory_limit": {
+            "bytes": 536870912,
+            "kind": "process_commit"
+          },
+          "os_filesystem_container": false
+        },
+        "loaded_modules": [
+          "tool.py"
+        ],
+        "local_calls": [],
+        "package_digest": "dda7ff2e3d25590316d8b690c0173dc53aff16d5ee1b92b03c0e1bff5a8d5300",
+        "package_id": "package-e60207638f45f56cb8d868c0",
+        "pid": 45296,
+        "rpc_count": 0
+      },
+      "finished_at": 1790184978.0645578,
+      "name": "multiply_integers",
+      "package_digest": "dda7ff2e3d25590316d8b690c0173dc53aff16d5ee1b92b03c0e1bff5a8d5300",
+      "package_id": "package-e60207638f45f56cb8d868c0",
+      "result": {
+        "operands": [
+          6,
+          7
+        ],
+        "operation": "multiply",
+        "result": 42
+      },
+      "started_at": 1790184977.7850463,
+      "status": "completed",
+      "work_accounting": {
+        "charged_work_units": 0,
+        "measured_work_units": 0,
+        "reserved_work_units": 0,
+        "schema": "nexgent.tool-work.v1",
+        "usage_complete": true
+      },
+      "worker_instruction_limit": 200000,
+      "worker_instructions": 9
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-df2edd52b5084a3b",
+      "name": "result",
+      "content": {
+        "answer": 42,
+        "developed": {
+          "authority_digest": "d75e9ae319bcbec7d48b918cf88e2a1c9be34699e924c18c75c9e900f95d35a7",
+          "definition_digest": "e42d09888a4b3208c16f3fdddf59ba78c7e6d7fc02c32b4169b8bc37eeee7c0a",
+          "definition_id": "definition-e42d09888a4b3208c16f3fdd",
+          "instance_revision": 1,
+          "name": "multiply_integers"
+        },
+        "tool_result": {
+          "operands": [
+            6,
+            7
+          ],
+          "operation": "multiply",
+          "result": 42
+        }
+      }
+    }
+  ],
+  "failure": null,
+  "scratch_root": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-dynamic-live-n_hn6rxx",
+  "interpretation": "Task-local tool development only; no service plugin, adoption, or RSI gain.",
+  "leak_scan_passed": true
+}

@@ -1,0 +1,106 @@
+{
+  "created_utc": "2026-09-15T18:08:51.344626+00:00",
+  "study_id": "study-6e02dda373304307",
+  "state_status": "completed",
+  "generation": 2,
+  "usage": {
+    "model_calls": 16,
+    "reserved_completion_tokens": 65600,
+    "reported_total_tokens": 632912,
+    "unknown_usage_calls": 0,
+    "evaluations": 10,
+    "numeric_work_units": 108622446,
+    "physical_numeric_work_units": 108622446
+  },
+  "conclusion": {
+    "executable_meta_changed": true,
+    "inherited_improver_executed": [],
+    "mean_transfer_delta": 0.0
+  },
+  "active_program": "agent-b527a91f129f9e435c74",
+  "research_program": "agent-34b66eabb2e6946adbfd",
+  "archive_count": 3,
+  "evaluation_count": 2,
+  "view_summary": "存在改进器或编排修改；0 个修改后的改进器有继承执行记录。源码变化、开发探测与独立后代效能分别核对。",
+  "probes": [
+    {
+      "rpc": "rpc-da94574b13714deea636aae9ac35cc59",
+      "probe_id": "probe-dbda72dadd7344cc",
+      "status": "completed",
+      "paired_development_gain": 0.0,
+      "model_calls_with_identity": 8,
+      "arms": [
+        {
+          "arm": "evolved",
+          "status": "complete",
+          "development_gain": 0.0,
+          "offspring_count": 0
+        },
+        {
+          "arm": "initial",
+          "status": "complete",
+          "development_gain": 0.0,
+          "offspring_count": 0
+        }
+      ]
+    },
+    {
+      "rpc": "rpc-68fb628602c647d7ab71750cacc903d9",
+      "probe_id": null,
+      "status": "failed",
+      "paired_development_gain": null,
+      "model_calls_with_identity": null,
+      "arms": []
+    }
+  ],
+  "screenshots": [
+    {
+      "tab": "研究进展",
+      "path": "docs\\validation\\pilot-v2-progress.png",
+      "sha256": "8fdef3090fbe36a9d1a4dc7a42855992f75d1f7138c69b03c97c42ae3dda47f9",
+      "size": [
+        1480,
+        980
+      ]
+    },
+    {
+      "tab": "改进器效能",
+      "path": "docs\\validation\\pilot-v2-improver.png",
+      "sha256": "f919f85c2092b59534536ac9851483991ba2dbeab3cf7da5999cca3b93088556",
+      "size": [
+        1480,
+        980
+      ]
+    },
+    {
+      "tab": "源码谱系",
+      "path": "docs\\validation\\pilot-v2-lineage.png",
+      "sha256": "bd40debe01555839778cd56d05d5a7a78316f86f1b010a8f3e7c6ec807665d02",
+      "size": [
+        1480,
+        980
+      ]
+    }
+  ],
+  "capture_research_calls": 0,
+  "capture_model_calls": 0,
+  "capture_source_executions": 0,
+  "scope": "Actual completed main study only. Separate conditional meta studies are not resumed or run; their terminal evidence will be captured separately.",
+  "window_closed": true,
+  "displayed_independent_report": {
+    "meta_study_id": "study-4ba1dd861ddbeb30",
+    "benchmark_id": "bbh",
+    "seeds": [
+      903
+    ],
+    "complete_pairs": 1,
+    "requested_pairs": 1,
+    "paired_difference_mean": 0.0,
+    "reported_total_tokens": 137335,
+    "scope": "The attached BBH conditional comparison completed before capture; this panel is not the scientific-discovery conditional result."
+  },
+  "observed_ui_limitations": [
+    "The independent comparison panel does not label the report benchmark, so the displayed BBH result can be mistaken for the main scientific benchmark. It shows the one report currently attached to the main study. Reported to the parent; frozen UI was not changed.",
+    "Zero offspring from both development-probe arms is preserved in this receipt and full evidence; the default panel displays zero gains and completed execution, without an offspring-count column."
+  ]
+}

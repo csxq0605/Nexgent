@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexgent-bbh"
+version = "0.2.0"
+description = "Pinned BIG-Bench Hard two-task adapter for the Nexgent RSI runtime"
+requires-python = ">=3.11"
+dependencies = ["nexgent>=0.9.0"]
+license = "MIT"
+
+[project.entry-points."nexgent.benchmarks"]
+bbh = "nexgent_bbh:BigBenchHardBenchmark"
+
+[project.entry-points."nexgent.task_benchmarks"]
+bbh = "nexgent_bbh:BigBenchHardTaskBenchmark"
+
+[project.scripts]
+nexgent-bbh-download = "nexgent_bbh.data:main"
+nexgent-bbh-reference-package = "nexgent_bbh.task_benchmark:reference_package_main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

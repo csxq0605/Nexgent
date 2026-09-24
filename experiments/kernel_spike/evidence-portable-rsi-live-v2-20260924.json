@@ -1,0 +1,435 @@
+{
+  "schema": "nexgent.portable-capability-live.v2",
+  "profile_identity": {
+    "provider": "mimo",
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "model": "mimo-v2.6-flash",
+    "credential_ref": "NEXGENT_API_KEY",
+    "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242"
+  },
+  "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+  "retry_policy": {
+    "automatic_retries": 0,
+    "attempts_per_ask": 1
+  },
+  "budgets": {
+    "creator": {
+      "max_model_calls": 1,
+      "max_completion_tokens": 1800,
+      "max_tool_calls": 1,
+      "max_tool_work_units": 200000,
+      "max_nodes": 16
+    },
+    "paired": {
+      "max_model_calls": 1,
+      "max_completion_tokens": 1800,
+      "max_tool_calls": 1,
+      "max_tool_work_units": 200000,
+      "max_nodes": 16
+    }
+  },
+  "task_family": "exact integer multiplication",
+  "numbers": {
+    "creator": [
+      6,
+      7
+    ],
+    "selection": [
+      123456789,
+      987654321
+    ],
+    "guard": [
+      98765431,
+      123457
+    ],
+    "reuse": [
+      1234567,
+      8901234
+    ]
+  },
+  "scratch_root": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-portable-live-2b4_n5u7",
+  "stages": {
+    "creator": {
+      "id": "episode-5e5315780a484808",
+      "status": "completed",
+      "result": {
+        "answer": 42
+      },
+      "usage": {
+        "model_calls": 1,
+        "reserved_completion_tokens": 1400,
+        "charged_completion_tokens": 1400,
+        "completion_tokens": 190,
+        "known_usage": {
+          "prompt_tokens": 140,
+          "completion_tokens": 190,
+          "total_tokens": 330
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 1,
+        "nodes": 5
+      },
+      "activated_components": [],
+      "model_receipts": [
+        {
+          "call_id": "model-35667b84aaf645c1b2daa2c9b653d7b1",
+          "role": "tool_builder",
+          "model": "mimo/mimo-v2.6-flash",
+          "provider_model": "mimo-v2.6-flash",
+          "configured_provider_model": "mimo-v2.6-flash",
+          "observed_provider_model": "mimo-v2.6-flash",
+          "provider_revision": null,
+          "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+          "profile_identity": {
+            "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "credential_ref": "NEXGENT_API_KEY",
+            "model": "mimo-v2.6-flash",
+            "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+            "provider": "mimo"
+          },
+          "status": "received",
+          "finish_reason": "stop",
+          "billing_status": "usage_reported",
+          "max_completion_tokens": 1400,
+          "reserved_completion_tokens": 1400,
+          "usage": {
+            "completion_tokens": 190,
+            "completion_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "prompt_tokens": 140,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 330
+          }
+        }
+      ],
+      "failure": null
+    },
+    "generation": {
+      "status": "generated",
+      "reason": null,
+      "candidate_id": "candidate-f94277a750744a24",
+      "component_id": "adopted-capability-eb1d32f942dee6c3a347"
+    },
+    "selection": {
+      "decision_id": "decision-590025f86b4a42b2",
+      "eligible": true,
+      "gates": {
+        "selection_role": true,
+        "measurement_complete": true,
+        "quality": true,
+        "success_rate": true,
+        "cost": true,
+        "regressions": true,
+        "candidate_completed": true,
+        "behavior_activated": true
+      },
+      "measurements": {
+        "parent": {
+          "quality": 0.0,
+          "success_rate": 0.0,
+          "cost": 3.4,
+          "reported_token_work": 3.1,
+          "all_accepted": false,
+          "score_complete": true,
+          "acceptance_complete": true,
+          "usage_complete": true
+        },
+        "candidate": {
+          "quality": 1.0,
+          "success_rate": 1.0,
+          "cost": 13.0,
+          "reported_token_work": 13.0,
+          "all_accepted": true,
+          "score_complete": true,
+          "acceptance_complete": true,
+          "usage_complete": true
+        },
+        "regressions": 0,
+        "paired_task_deltas": [
+          {
+            "task_ref_digest": "2704e7f6a9ee731537221e7e3ed867371b340fbc0bfcbc1825c168e8f98ff4d1",
+            "arm_order": [
+              "parent",
+              "candidate"
+            ],
+            "parent": {
+              "episode_id": "episode-14914db1a98b440f",
+              "score": 0.0,
+              "accepted": false,
+              "failure_class": "observed_system_failure",
+              "cost": 3.4,
+              "cost_projection": {
+                "schema": "nexgent.normalized-work-projection.v1",
+                "weights": {
+                  "model_calls": 1.0,
+                  "charged_completion_tokens": 0.001,
+                  "tool_calls": 1.0,
+                  "charged_tool_work_units": 1.0,
+                  "nodes": 1.0
+                },
+                "conservative_work": 3.4,
+                "conservative_token_basis": "charged_completion_tokens",
+                "charged_completion_tokens": 400,
+                "reported_token_work": 3.1,
+                "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+                "reported_tokens": {
+                  "prompt_tokens": 74,
+                  "completion_tokens": 26,
+                  "total_tokens": 100
+                }
+              },
+              "usage_complete": true,
+              "failure_reasons": []
+            },
+            "candidate": {
+              "episode_id": "episode-dacbf3118cfe4f13",
+              "score": 1.0,
+              "accepted": true,
+              "failure_class": null,
+              "cost": 13.0,
+              "cost_projection": {
+                "schema": "nexgent.normalized-work-projection.v1",
+                "weights": {
+                  "model_calls": 1.0,
+                  "charged_completion_tokens": 0.001,
+                  "tool_calls": 1.0,
+                  "charged_tool_work_units": 1.0,
+                  "nodes": 1.0
+                },
+                "conservative_work": 13.0,
+                "conservative_token_basis": "charged_completion_tokens",
+                "charged_completion_tokens": 0,
+                "reported_token_work": 13.0,
+                "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+                "reported_tokens": {
+                  "prompt_tokens": 0,
+                  "completion_tokens": 0,
+                  "total_tokens": 0
+                }
+              },
+              "usage_complete": true,
+              "failure_reasons": []
+            },
+            "score_delta": 1.0,
+            "failure_reasons": []
+          }
+        ],
+        "failure_reasons": []
+      },
+      "arms": [
+        {
+          "parent": {
+            "id": "episode-14914db1a98b440f",
+            "status": "failed",
+            "result": null,
+            "usage": {
+              "model_calls": 1,
+              "reserved_completion_tokens": 400,
+              "charged_completion_tokens": 400,
+              "completion_tokens": 26,
+              "known_usage": {
+                "prompt_tokens": 74,
+                "completion_tokens": 26,
+                "total_tokens": 100
+              },
+              "usage_missing_call_ids": [],
+              "tool_usage_missing_call_ids": [],
+              "reserved_tool_work_units": 0,
+              "charged_tool_work_units": 0,
+              "tool_work_units": 0,
+              "usage_complete": true,
+              "billing_unknown_call_ids": [],
+              "tool_calls": 0,
+              "nodes": 2
+            },
+            "activated_components": [],
+            "model_receipts": [
+              {
+                "call_id": "model-b00a1aed63c748939cd6850bed6ea13b",
+                "role": "solver",
+                "model": "mimo/mimo-v2.6-flash",
+                "provider_model": "mimo-v2.6-flash",
+                "configured_provider_model": "mimo-v2.6-flash",
+                "observed_provider_model": "mimo-v2.6-flash",
+                "provider_revision": null,
+                "profile_digest": "10c596c54a815a81eb70d12500c5526d5ac0ada5315ffa52378372198c5e0874",
+                "profile_identity": {
+                  "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+                  "credential_ref": "NEXGENT_API_KEY",
+                  "model": "mimo-v2.6-flash",
+                  "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+                  "provider": "mimo"
+                },
+                "status": "invalid",
+                "finish_reason": "stop",
+                "billing_status": "usage_reported",
+                "max_completion_tokens": 400,
+                "reserved_completion_tokens": 400,
+                "usage": {
+                  "completion_tokens": 26,
+                  "completion_tokens_details": {
+                    "reasoning_tokens": 0
+                  },
+                  "prompt_tokens": 74,
+                  "prompt_tokens_details": {
+                    "cached_tokens": 0
+                  },
+                  "total_tokens": 100
+                },
+                "error_type": "ModelError"
+              }
+            ],
+            "failure": {
+              "stage": "episode_run",
+              "class": "provider_response",
+              "remote_outcome_unknown": false,
+              "episode_failure_domain": "agent"
+            }
+          },
+          "candidate": {
+            "id": "episode-dacbf3118cfe4f13",
+            "status": "completed",
+            "result": {
+              "answer": 121932631112635269
+            },
+            "usage": {
+              "model_calls": 0,
+              "reserved_completion_tokens": 0,
+              "charged_completion_tokens": 0,
+              "completion_tokens": 0,
+              "known_usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0
+              },
+              "usage_missing_call_ids": [],
+              "tool_usage_missing_call_ids": [],
+              "reserved_tool_work_units": 0,
+              "charged_tool_work_units": 9,
+              "tool_work_units": 9,
+              "usage_complete": true,
+              "billing_unknown_call_ids": [],
+              "tool_calls": 1,
+              "nodes": 3
+            },
+            "activated_components": [
+              {
+                "component_id": "adopted-capability-eb1d32f942dee6c3a347",
+                "kind": "tool",
+                "package_digest": "38d6b998cfe499baa3426be6e239f150064aefaa5dc9709789aeb71302685d9a",
+                "source_path": "capabilities/adopted/eb1d32f942dee6c3a347.py"
+              }
+            ],
+            "model_receipts": [],
+            "failure": null
+          }
+        }
+      ]
+    },
+    "promotion": {
+      "revision": 1,
+      "package_id": "package-f691fa5afc170ed1fe22c9c5"
+    },
+    "guard": {
+      "degraded": false,
+      "rolled_back": false,
+      "episodes": [
+        {
+          "id": "episode-e5163b99caea48ec",
+          "status": "completed",
+          "result": {
+            "answer": 12193283814967
+          },
+          "usage": {
+            "model_calls": 0,
+            "reserved_completion_tokens": 0,
+            "charged_completion_tokens": 0,
+            "completion_tokens": 0,
+            "known_usage": {
+              "prompt_tokens": 0,
+              "completion_tokens": 0,
+              "total_tokens": 0
+            },
+            "usage_missing_call_ids": [],
+            "tool_usage_missing_call_ids": [],
+            "reserved_tool_work_units": 0,
+            "charged_tool_work_units": 9,
+            "tool_work_units": 9,
+            "usage_complete": true,
+            "billing_unknown_call_ids": [],
+            "tool_calls": 1,
+            "nodes": 3
+          },
+          "activated_components": [
+            {
+              "component_id": "adopted-capability-eb1d32f942dee6c3a347",
+              "kind": "tool",
+              "package_digest": "38d6b998cfe499baa3426be6e239f150064aefaa5dc9709789aeb71302685d9a",
+              "source_path": "capabilities/adopted/eb1d32f942dee6c3a347.py"
+            }
+          ],
+          "model_receipts": [],
+          "failure": null
+        }
+      ]
+    },
+    "reuse_process": {
+      "exit_code": 0,
+      "result": {
+        "id": "episode-9037b47fb4e04b87",
+        "status": "completed",
+        "result": {
+          "answer": 10989169755678
+        },
+        "usage": {
+          "model_calls": 0,
+          "reserved_completion_tokens": 0,
+          "charged_completion_tokens": 0,
+          "completion_tokens": 0,
+          "known_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+          },
+          "usage_missing_call_ids": [],
+          "tool_usage_missing_call_ids": [],
+          "reserved_tool_work_units": 0,
+          "charged_tool_work_units": 9,
+          "tool_work_units": 9,
+          "usage_complete": true,
+          "billing_unknown_call_ids": [],
+          "tool_calls": 1,
+          "nodes": 3
+        },
+        "activated_components": [
+          {
+            "component_id": "adopted-capability-eb1d32f942dee6c3a347",
+            "kind": "tool",
+            "package_digest": "38d6b998cfe499baa3426be6e239f150064aefaa5dc9709789aeb71302685d9a",
+            "source_path": "capabilities/adopted/eb1d32f942dee6c3a347.py"
+          }
+        ],
+        "model_receipts": [],
+        "failure": null,
+        "expected_answer": 10989169755678
+      },
+      "stderr_type": null
+    }
+  },
+  "passed": true,
+  "source": {
+    "definition_id": "definition-8e9b5d6b8766fef8ae6f6830",
+    "definition_digest": "8e9b5d6b8766fef8ae6f6830d6b1515495b37fba099a45ee8039069a798f3e09",
+    "name": "integer_multiplication_tool"
+  },
+  "leak_scan_passed": true
+}

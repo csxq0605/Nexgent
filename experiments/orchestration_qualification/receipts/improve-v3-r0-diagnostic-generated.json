@@ -1,0 +1,46 @@
+{
+  "schema": "nexgent.package-patch-v3-qualification.v1",
+  "status": "generated",
+  "feedback_episode_id": "episode-98c445e18e7f4dac",
+  "patch_contract": "nexgent.package-patch.v3",
+  "started_at": 1790144456.266276,
+  "feedback_bundle_id": "feedback-05b46ddc798e41ff",
+  "feedback_digest": "e9c8ee80b20d245d1dea5c12b412157eddc1729fb72b45829fd1fa1748108201",
+  "parent_package_digest": "54110e964849245b84b97ca30c93b92c482d2b22294478be4fb0b082595956c3",
+  "generation_id": "generation-21689582ffb24626",
+  "improver_episode_id": "episode-892d034604204185",
+  "candidate_id": "candidate-7b06d55d55024817",
+  "candidate_package_id": "package-4e088ced3b0d9c54f8d6c370",
+  "reason_type": null,
+  "reason": "",
+  "usage": {
+    "model_calls": 1,
+    "reserved_completion_tokens": 6000,
+    "charged_completion_tokens": 6000,
+    "completion_tokens": 502,
+    "known_usage": {
+      "prompt_tokens": 9495,
+      "completion_tokens": 502,
+      "total_tokens": 9997
+    },
+    "usage_missing_call_ids": [],
+    "tool_usage_missing_call_ids": [],
+    "reserved_tool_work_units": 0,
+    "charged_tool_work_units": 0,
+    "tool_work_units": 0,
+    "usage_complete": true,
+    "billing_unknown_call_ids": [],
+    "tool_calls": 0,
+    "nodes": 7
+  },
+  "completed_at": 1790144477.5970583,
+  "model_calls": [
+    {
+      "role": "rsi_improver",
+      "configured_model": "mimo-v2.6-flash",
+      "observed_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "status": "received"
+    }
+  ]
+}

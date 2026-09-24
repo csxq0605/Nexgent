@@ -1,0 +1,43 @@
+{
+  "schema": "nexgent.redacted-ordinary-probe.v1",
+  "contract": "WORKBENCH_METERED_REPAIR_CONTRACT.md",
+  "code_baseline": "790d89f",
+  "model": "mimo-v2.6-flash",
+  "source": {
+    "episode_id": "episode-db407130024b45f9",
+    "status": "failed",
+    "failure_domain": "agent",
+    "failure_type": "ModelBudgetError",
+    "model_calls": 1,
+    "completion_tokens": 5000,
+    "usage_complete": true
+  },
+  "development_planner": {
+    "episode_id": "episode-3fa5753783e848bf",
+    "status": "completed",
+    "model_calls": 1,
+    "usage_complete": true,
+    "route": "orchestration_search"
+  },
+  "search": {
+    "historical_status": "exhausted",
+    "attempts": [
+      {"generation_id": "generation-2f0cd02311eb4362",
+        "status": "missing", "reason_type": "PackageError",
+        "failure_codes": ["generation_PackageError",
+          "missing_hypothesis_component_ids"],
+        "model_calls": 1, "usage_complete": true},
+      {"generation_id": "generation-ced2de313f494108",
+        "status": "missing", "reason_type": "ModelTransportError",
+        "failure_codes": ["generation_ModelTransportError"],
+        "model_calls": 1, "usage_complete": false}
+    ],
+    "qualified_count": 0,
+    "development_pairs": 0,
+    "selection_opened": false
+  },
+  "active_channel_revision": 0,
+  "guard_run": false,
+  "new_task_reuse_run": false,
+  "claim_limit": "Single negative development probe; no graph preflight, selection, or RSI benefit was evaluated."
+}

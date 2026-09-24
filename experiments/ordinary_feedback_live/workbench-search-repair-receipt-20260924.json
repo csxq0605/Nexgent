@@ -1,0 +1,69 @@
+{
+  "schema": "nexgent.ordinary-search-live-receipt.v1",
+  "contract": "WORKBENCH_SEARCH_REPAIR_CONTRACT.md",
+  "model": "mimo-v2.6-flash",
+  "source_task": "workbench development seed 13 public fields; repeated mechanism probe",
+  "source_episode_id": "episode-801c776e3f2a4254",
+  "source_status": "failed",
+  "source_model_calls": 1,
+  "source_error_class": "model_response_not_json_object",
+  "feedback_work_id": "feedback-work-fe3be95eb981488c4ed0a177",
+  "development_episode_id": "episode-d17b2450eee24290",
+  "development_model_calls": 1,
+  "development_choice": {
+    "candidate_type": "orchestration",
+    "source_ref": "orchestration_search"
+  },
+  "search_id": "orchestration-search-587bfe35b2277b578dd213bc473ef86f553f272d",
+  "search_status": "exhausted",
+  "attempts": [
+    {
+      "number": 1,
+      "generation_id": "generation-b66337be940047b0",
+      "generation_episode_id": "episode-3896a2f0b2e34f89",
+      "generation_model_calls": 1,
+      "generation_status": "generated",
+      "candidate_id": "candidate-4e4f7f1a81c24e8c",
+      "executable_orchestration_delta": true,
+      "qualification_seed": 14,
+      "qualification_plan_id": "plan-c395829b318b4014",
+      "qualification_trial_id": "trial-e9abc7692d3046b2",
+      "qualification_parent": {
+        "episode_id": "episode-0243f8800a4f4c02",
+        "status": "failed",
+        "score": 0,
+        "model_calls": 2,
+        "error_class": "publish_ledger_unexpected_excluded_rows"
+      },
+      "qualification_candidate": {
+        "episode_id": "episode-57ec843816c24e7d",
+        "status": "failed",
+        "score": 0,
+        "model_calls": 0,
+        "error_class": "ask_unsupported_gateway_argument_prior_findings"
+      },
+      "qualification_failure_codes": [
+        "artifact_contract_invalid",
+        "candidate_execution_failed",
+        "orchestration_not_loaded"
+      ]
+    },
+    {
+      "number": 2,
+      "generation_id": "generation-1d964268fe204fba",
+      "generation_episode_id": "episode-1c4321a91f2e4566",
+      "generation_model_calls": 1,
+      "generation_status": "missing",
+      "reason_type": "ContractError",
+      "failure_code": "generation_ContractError",
+      "error_class": "candidate_workflow_json_invalid"
+    }
+  ],
+  "qualified_candidate_count": 0,
+  "independent_selection_run": false,
+  "guard_run": false,
+  "later_reuse": false,
+  "work_status": "rejected",
+  "work_reason": "orchestration_search_exhausted",
+  "active_channel_revision": 0
+}

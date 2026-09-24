@@ -1,0 +1,114 @@
+{
+  "schema": "nexgent.orchestration-qualification.v1",
+  "status": "completed",
+  "benchmark_id": "bbh",
+  "split": "development",
+  "seed": 0,
+  "case_index": 0,
+  "arm": "single_equal_calls",
+  "package_id": "package-2f490d157cf5e1627ebf150c",
+  "package_digest": "67293f2ffcbb389a52b5a7a573835ef15c6b5380e9d7c57219cc5c8e6905b5f8",
+  "task_id": "bbh/bbh-two-task-task-v1/development/0/bbh-2cd2be58324283dbec774385",
+  "started_at": 1790136238.2229211,
+  "claim_limit": "One BBH development case checks model-driven orchestration only; it is not RSI evidence.",
+  "episode_id": "episode-040879faa04d4694",
+  "episode_status": "completed",
+  "failure_domain": null,
+  "last_error_type": null,
+  "usage": {
+    "model_calls": 3,
+    "reserved_completion_tokens": 4800,
+    "charged_completion_tokens": 4800,
+    "completion_tokens": 122,
+    "known_usage": {
+      "prompt_tokens": 1248,
+      "completion_tokens": 122,
+      "total_tokens": 1370
+    },
+    "usage_missing_call_ids": [],
+    "tool_usage_missing_call_ids": [],
+    "reserved_tool_work_units": 0,
+    "charged_tool_work_units": 0,
+    "tool_work_units": 0,
+    "usage_complete": true,
+    "billing_unknown_call_ids": [],
+    "tool_calls": 0,
+    "nodes": 7
+  },
+  "evaluation": {
+    "schema": "nexgent-bbh-task-report-v1",
+    "benchmark": "bbh",
+    "task_ref": "bbh/bbh-two-task-task-v1/development/0/bbh-2cd2be58324283dbec774385",
+    "task_id": "bbh-2cd2be58324283dbec774385",
+    "split": "development",
+    "native_split": "development",
+    "seed": 0,
+    "family": "boolean_expressions",
+    "group": "boolean_expressions",
+    "status": "accepted",
+    "score_available": true,
+    "score": 1.0,
+    "accepted": true,
+    "reasons": [],
+    "suite_digest": "c441555eefbebfc2960c5e6e182db7970edb2705c9232134e4eefa7651a5c6dc",
+    "manifest_digest": "957355585c13c6d6a937c57f346ecb6c69b82d33d58c95ee3d5a7274998e3f80",
+    "evaluator_digest": "548be20adad091d61c09d4c9b4e00405cfbd11f4ff6b103ccf8437338b1f004c",
+    "cost_semantics": {
+      "quality_unit": "one case-sensitive exact-match task after whitespace normalization",
+      "canonical_usage": "TaskService host ledger: model calls/tokens, tool calls and nodes; token totals are unavailable when provider usage receipts are incomplete",
+      "legacy_comparison": "Canonical reports do not claim the legacy source_instruction_events scalar; cost numbers from the two runtimes must not be compared as the same unit"
+    },
+    "host_usage": {
+      "model_calls": 3,
+      "reserved_completion_tokens": 4800,
+      "charged_completion_tokens": 4800,
+      "completion_tokens": 122,
+      "known_usage": {
+        "prompt_tokens": 1248,
+        "completion_tokens": 122,
+        "total_tokens": 1370
+      },
+      "usage_missing_call_ids": [],
+      "tool_usage_missing_call_ids": [],
+      "reserved_tool_work_units": 0,
+      "charged_tool_work_units": 0,
+      "tool_work_units": 0,
+      "usage_complete": true,
+      "billing_unknown_call_ids": [],
+      "tool_calls": 0,
+      "nodes": 7
+    },
+    "scope": "Exact-answer accuracy on disjoint subsets of boolean_expressions and word_sorting only. This is not a full 23-task BBH result or evidence of RSI.",
+    "report_identity": "77a9d10b18cbd59d8edd165e22646763f3c57d3293ee38cfdeb0ec901023f2a2",
+    "execution_status": "completed"
+  },
+  "model_calls": [
+    {
+      "role": "solver",
+      "configured_model": "mimo-v2.6-flash",
+      "observed_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "status": "received"
+    },
+    {
+      "role": "solver",
+      "configured_model": "mimo-v2.6-flash",
+      "observed_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "status": "received"
+    },
+    {
+      "role": "solver",
+      "configured_model": "mimo-v2.6-flash",
+      "observed_model": "mimo-v2.6-flash",
+      "provider_revision": null,
+      "status": "received"
+    }
+  ],
+  "role_nodes": {
+    "plan/nodes/draft": "solver",
+    "plan/nodes/finalize": "solver",
+    "plan/nodes/review": "solver"
+  },
+  "completed_at": 1790136258.696507
+}

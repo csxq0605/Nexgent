@@ -1,0 +1,28 @@
+{
+  "schema": "nexgent.dsh-mimo-live-post-run-enrichment.v1",
+  "source_failure": "failure.json",
+  "provider_calls_reissued": 0,
+  "observations": {
+    "first_native_tool_call_received": true,
+    "first_usage": {
+      "inputTokens": 627,
+      "outputTokens": 28,
+      "totalTokens": 655
+    },
+    "tool_executions": 1,
+    "second_request_started": 1,
+    "classified_failure": "provider_protocol/final_decode",
+    "remote_outcome_unknown": false
+  },
+  "receipt_sha256": {
+    "failure.json": "653b98034464ec22f204ef448ae93d2905461bf3eee4a8e476fa5aff382b8d35",
+    "stdout.jsonl": "dea54be733dd8b3b8cd610b27866425f4bbcf8dfe63dffe2ac740c5dafebd538",
+    "stderr.txt": "5ee298332fe92672174a524f234ac9ae154fa6d1b67c95cd0f7905c3f7ae1506",
+    "plugin-receipts.jsonl": "6b239716a3b62e2f60bc781903208c1857650dea3dd416c8cd24127c072f9aa6",
+    "session-1.jsonl": "a0a3276d9c4d9700582264d836eda574e85b8d0b1fd64c8bfcd2049bc3fd8973",
+    "executed-dsh_mimo_plugin.mjs": "7a8d6f914a419a83b92b276d9457530130c78c81b42376fb821faa12e1782e06",
+    "executed-dsh_mimo.patch.yml": "6d6765fa2996f16388328d08d4e8a5a9521f6837bc0e18da541b1d06ed7faad6",
+    "executed-dsh_mimo_driver.ts": "ab75add725d1ecc16d502eff2cea3d278c4077d8ffa62cafb3ee4668744d672a"
+  },
+  "limitation": "The executed adapter classified the second returned envelope before persisting its response id, finish reason, usage, or content shape; those fields cannot be reconstructed without another provider call, which was not made."
+}
