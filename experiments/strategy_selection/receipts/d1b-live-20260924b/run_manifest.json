@@ -1,0 +1,222 @@
+{
+  "authority": {
+    "capabilities": [],
+    "capability_authority": null,
+    "digest": "69e8915c228d5bf4ae4df835d4cca606b56b10b4b095a29d8930afa649b68409"
+  },
+  "batch_caps": {
+    "completion_token_reservations": 112000,
+    "episodes": 4,
+    "started_model_calls": 32
+  },
+  "budget_per_episode": {
+    "max_completion_tokens": 28000,
+    "max_model_calls": 8,
+    "max_nodes": 100,
+    "max_tool_calls": 0,
+    "max_tool_work_units": 0
+  },
+  "constraints_per_episode": {
+    "allowed_effects": [],
+    "wall_seconds": 180
+  },
+  "contract_revision": "2026-09-24/D1-B.1",
+  "created_at": "2026-09-24T02:39:24Z",
+  "episode_order": [
+    "D1B-OL-PRIMARY",
+    "D1B-DAG-PRIMARY",
+    "D1B-OL-RECOVERY",
+    "D1B-SELECTOR-UNKNOWN"
+  ],
+  "evaluator_digest": "70a0a5a4d44fe32065158d6c57c4c41cb2eccecf9e64bf9d8381c48be5b9d4d8",
+  "evaluator_identity": {
+    "check_names": [
+      "tests_passed",
+      "coverage",
+      "open_sev1",
+      "open_sev2",
+      "rollback_minutes",
+      "evidence_age_hours"
+    ],
+    "dag_all_critical": true,
+    "dag_threshold": 12,
+    "ol_critical": [
+      "OL-4",
+      "OL-6",
+      "OL-10"
+    ],
+    "ol_threshold": 9,
+    "source_sha256": "90a789e5b48a9cb27eed454d4b870f9de325ce306101bec9237a8fe321d4d28e"
+  },
+  "git": {
+    "commit": "64734c27855f2f278b4a86f13949f4a69fe416ff",
+    "dirty": false,
+    "dirty_paths": [],
+    "executed_source_sha256": {
+      "experiments/strategy_selection/run.py": "2334a6ec058eb2b3c8c1996ea7c24f8e2988f8539b4737934eb452ea3af819b2",
+      "src/nexgent/__init__.py": "6862ebe24f311e74ea9d01bdabfbd113ac6c8dc08d6901503d2e3088e4df17dd",
+      "src/nexgent/__main__.py": "482b8693e2fe6dbd732e3d7961e03827d3efa187bad11d29da188be580ebbeea",
+      "src/nexgent/agents/__init__.py": "fa5e9cc08aad4394770e3b67a2096ba0c9894023acd54c924942b59de53cbacc",
+      "src/nexgent/agents/broker.py": "0efaa0da298ab671fe457e9f3ab4cb0ecf94fe565e16f7dd9933374f551ce34e",
+      "src/nexgent/agents/seed.py": "fd0bb0a03beace4e42daad905cc9feb760b573acb8bea8761fd271f643d65cb6",
+      "src/nexgent/benchmarks/__init__.py": "8bc81f111e4270119d911e93cc2f06bb35376036b789e247d9254d9ecb063fde",
+      "src/nexgent/benchmarks/evaluation.py": "6a1663a9206a1cf9e0bf01531dbc7a90bdf23b19dbeaf9cc97492e7f578629f7",
+      "src/nexgent/cli.py": "36667823ca304b1fc9f48a0d8c701fcf2ca825570eb3e4784cb1f6a9873476ba",
+      "src/nexgent/evolution/__init__.py": "55f497d65cddd9248aff935978830bf198e160c52429487986c5e3f3367e5327",
+      "src/nexgent/evolution/controller.py": "b859148217fbe1366f7f6b2237d599e85f9540b5f441c34f4e5963b82a2b7954",
+      "src/nexgent/evolution/meta_evaluation.py": "24f40f00032015a17eecb3511378aa12f8228096804d40604f24732f83345b48",
+      "src/nexgent/kernel/__init__.py": "be1ee17550e415377f28804bbbe7fc50a4be82529e7dfb90c1147e9d27fd0ecf",
+      "src/nexgent/kernel/programs.py": "57deb98ba270caabf46298583189be6a45248b9099168a59264e584d412563d6",
+      "src/nexgent/kernel/runner.py": "c3129f6da8fef77b1ebf6c862bc74250c3e06b588b3e7ac9b098de2c7cca55de",
+      "src/nexgent/kernel/store.py": "062d308aea510319756fd55290e0f0b27b533e7500eda3b3002dad10e41eef94",
+      "src/nexgent/kernel/tooling.py": "97596ecf70c49fa49a6f0b5e105edd139408b17a9e5ee429f882ba56a0bc8cc5",
+      "src/nexgent/kernel/worker.py": "4d4ddc3bd24f1cb4bc3d37d9a0963a38a8d05fdda938b7b895e202768a99be9b",
+      "src/nexgent/models/__init__.py": "301736fc94ecadd62cd46ff4a81680439e1e5b1384dbbda7d505a2d8ba7fa1a2",
+      "src/nexgent/models/config.py": "e06708546a7e37c2f2ad9ec508457d4a027d22900403033ec42a3742753a1ee6",
+      "src/nexgent/models/gateway.py": "cc60decbb0393af44509ed278f34b4d8cff25b5547bc010cdb4b9ebafae220ca",
+      "src/nexgent/models/worker.py": "3bbf2d62795345e1838883576f7d278c2acd1e8fd193d2d669cd0af53dbcf5e2",
+      "src/nexgent/research/__init__.py": "2fad16e4dfa8e975c77fcf0a8a6f506f0e9e859218f57110e0818a0341e4af16",
+      "src/nexgent/research/library.py": "21076d679a0f2909f28e88501afa8cad2cdff6716f48333975fa1ac4801d816c",
+      "src/nexgent/research/literature.py": "1e168445c21c02a6062bd30cf423fc04169a71bb78d85b31af5f5afe5778a6ef",
+      "src/nexgent/tasks/__init__.py": "9d1493de1f5764bef27b58c21085af946f519f36419bbfeb44642d54a4fe5256",
+      "src/nexgent/tasks/adaptive_orchestration_seed.py": "1dfedd184a548f38d27de10d9e426180df2e259d4f6e234208b4796e7921abaa",
+      "src/nexgent/tasks/benchmarks.py": "29efd1840aa4581de96f147e8ef685ca561eac8e264417fcdff051bde19cf24c",
+      "src/nexgent/tasks/capability_authority.py": "e96ac1d443e634a17a3838db66444d16d99d7aecc90dd6b8a57c77c9afecc487",
+      "src/nexgent/tasks/capability_definitions.py": "7651d61a6bf29cf4b7bc8830986a3f5fa5f550392d5f239108f3672c64fce11d",
+      "src/nexgent/tasks/capability_releases.py": "be9e5806b9a978cb7a75b34aed2047cf3bc73ae15e07845fe39466a7cf828e26",
+      "src/nexgent/tasks/costs.py": "4a23aaf93d02b97f3714dad3133b8b498a639193a13929b52131b5da97266600",
+      "src/nexgent/tasks/cycles.py": "487d543771342f6020be42797cb7f2ec3671110218f480a5f57e52b0acf13f35",
+      "src/nexgent/tasks/dynamic_roles.py": "72f66e25cb60a4abb59ca2979e07402b559f197f99374232d3c03ac8ad228e25",
+      "src/nexgent/tasks/evidence.py": "a31d64490432625403e50c38c2a5e6926a0594a723b9bad0505674b576388026",
+      "src/nexgent/tasks/evolution.py": "f16bb99d5f6cb1337fd6035cd7f2c8fc331ec00a52903015d2f5f28a202eaad7",
+      "src/nexgent/tasks/evolution_view.py": "dedb75c6e1b7d1649e90d6af86d63b82acd4d31fa4d996c3b1f6182e84d34f37",
+      "src/nexgent/tasks/four_arm_assessment.py": "561a34ccd08be5fe82e9b60283e56f3dde0f1d702bca221fe8f94b74108b8a4e",
+      "src/nexgent/tasks/four_arm_studies.py": "59c4ece11473069828aa5041763c72ee6a79f4b5b968b1e5dbbe19e02a57f564",
+      "src/nexgent/tasks/generation.py": "7086892d4b6ec33c48def5dc374251cfc2d4b36a3bf589cd43ce297fac69b1df",
+      "src/nexgent/tasks/graph_compiler_repair.py": "3a51f32513ed151e2df511ffd2d3052f9d7b188f0bcdf682053cb7cc5fbf564b",
+      "src/nexgent/tasks/guards.py": "3d7c52b2ee40cee3123ce9e104c7a70bfdda1167452a1bd9414af94218295fe2",
+      "src/nexgent/tasks/improver_seed.py": "13d210dc6c82a800dbce3117f5f848b49e2d4ff545a9777c682dfdc594fe6b1c",
+      "src/nexgent/tasks/improvers.py": "e23471a2d1a25589caa597973c1abe388146826ccc34375bbfbce9c045d84b38",
+      "src/nexgent/tasks/memory.py": "7ca666c1dbe0ae6978bc5e34862298940da5000478e0d3d23a01794ddd18fa8e",
+      "src/nexgent/tasks/memory_view.py": "b7d5cca4a12d085d0958c5a5e95b5eadaf9b9ff91e910dd331bd08187cadc349",
+      "src/nexgent/tasks/messages.py": "ddda854b3f7395d6364c0f7fbc98b247e7493d76cbfac9cc941120647471dd3c",
+      "src/nexgent/tasks/meta_evaluation.py": "765e78bc2ed53981b21774e17a880d09f1be2151b7f5dfb2d9237c6bea49151f",
+      "src/nexgent/tasks/multirole_seed.py": "783f2f47e2714134439be14b3acfd48a441f4b2dd1f4e3c33e42bc345eb85eec",
+      "src/nexgent/tasks/orchestration.py": "23081eb6ec37cc685899a6738b1340c6b6deb09c0a56914dd429291e6980a05a",
+      "src/nexgent/tasks/orchestration_search.py": "888ce24d92c8cb24c6e4acb167af8c527e90bdde137e8445caeb100c4f126e61",
+      "src/nexgent/tasks/orchestration_search_seed.py": "a2f0c924c6d6d7797831b21ed7e66716d73fbda34db1cdb3b1e4c2272df15803",
+      "src/nexgent/tasks/outcomes.py": "f069a4c68e25d569d94c8fe67b68d84d8fee9c489a1d9a536439cedf41782000",
+      "src/nexgent/tasks/package_patch_v3.py": "901c4f8529d33869d4e5a527061f7bd5842f0b178b95b2b1494e723969c4a26f",
+      "src/nexgent/tasks/package_runner.py": "78e6b095f0e24d2a819bbd933287e5d681216541efac15a65a5d8eb61c0a0303",
+      "src/nexgent/tasks/package_worker.py": "87ec420c61983ea1ede586a66c5653357806fa802c62145e1eb6b3ce88fed68b",
+      "src/nexgent/tasks/packages.py": "3c5aa66ff3c5e2193e6cd625d35899aefb4ba8bad5338d2977e30ed29262c890",
+      "src/nexgent/tasks/patches.py": "1bd292b91c17764a2681cfda0abcffa1d6fbda3797de6c0edcc3009f3c02833d",
+      "src/nexgent/tasks/pending_graph_patch.py": "5168935479b709ba3a1cf52c81e4e052232668954a36bba3302d7d40d8e11591",
+      "src/nexgent/tasks/recursive_cycles.py": "d5b2c078d3ce1bebbc579add25d605aaaaa9f6e5b1fe547594341b99b34689c2",
+      "src/nexgent/tasks/runtime.py": "ae7a2d0e692a376b36fc221148afc184a398b8ed6f998a0f6559a022772e5425",
+      "src/nexgent/tasks/seed.py": "0d1436562b9f1960d10305f9b6019b74f7750ff7336afc91528ba14971fe1a14",
+      "src/nexgent/tasks/self_orchestration_seed.py": "dc08c6dc30c4596106ab62db5e82156d594a166963dc589fbf3ec45437f9b3a5",
+      "src/nexgent/tasks/service_definitions.py": "21c1a5de71369f66d3c0d76b902ca5b11b5d13a0b65347cdead58c3db766fde1",
+      "src/nexgent/tasks/store.py": "8e4a4070bdfc1a12bd8e4f686f67640d6e0261c7145a1ed55d161b01133091e8",
+      "src/nexgent/tasks/strategy_decisions.py": "1177a4c983ffde458307f5c837b8a15936e65fa08964b99f89bb41b95b0e9801",
+      "src/nexgent/tasks/studies.py": "430fbdf304b2bd413a01e73f649836dce811fd9eb627e863622ce1b520a29fca",
+      "src/nexgent/tasks/task_capability_adoption.py": "989d37e07486b11e7c9aa8f93688b39726fd8ac8406c22e51bcd9bfb4d39644b",
+      "src/nexgent/tasks/task_skill_adoption.py": "b4b3e4e64581996a8873a46ad1b146a3063a5caaa39970805d934771e6337648",
+      "src/nexgent/tasks/task_skill_compiler.py": "843168a6107de0810e665d32e49412efbcfb1f6ce017b30f0c7e38cb0548742a",
+      "src/nexgent/tasks/task_skill_repair.py": "ddabbd2f19b875fa36e3f45c8817248c7b764793b2dac4b5b45d8b32f76346be",
+      "src/nexgent/tasks/tools.py": "2af53c07926cd87f02fbe5ff7ca9348a7150aefe8a444f346297d4b14fb8f6f6",
+      "src/nexgent/tasks/workflows.py": "08658efa25a99b744756f16d45b5abc1c0e3b88c6050515160b1954dd5cb81b4",
+      "src/nexgent/ui/__init__.py": "5edf9416653b8f5282c7abfe5f9e7126773826d29ebe62798d143b26b06d0d73",
+      "src/nexgent/ui/app.py": "b32ceee0489bc2389818c6ab78b4e07cbb269749abec7cbfa57889676f8240ad",
+      "src/nexgent/ui/main_window.py": "19fd86a6823ea33a9fde09d523f18e31c5c636394c7bd9a295e8b0e74d2a4c30",
+      "src/nexgent/ui/meta_evidence.py": "46a9581e8d70a00cb36c7af2439530d65bef13bb574ed8836a44bbeeeded09af",
+      "src/nexgent/ui/tasks_window.py": "16e2caca8c075d03f54b8fda169f866ec0c24e3f503359313da782b1777f426d",
+      "src/nexgent/ui/window.py": "754cf658e4fc7cf4004c12bacbb33002b080ec8c656d4d8ed72508502b08d1ef"
+    }
+  },
+  "manifest_digest": "63de7b8707dd590b12a9b6ead8a25dbc7ba2997ce54393680608b5f53316f9d7",
+  "model_profile": {
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "configured_model": "mimo-v2.6-flash",
+    "credential_ref": "NEXGENT_API_KEY",
+    "credential_source_profile_id": "mimo/mimo-v2.5",
+    "models_json_sha256": "8bb1b105785f23c30002e231be8096d2ec87aab67c467dcfad84c5c240eb0242",
+    "profile_id": "mimo/mimo-v2.6-flash",
+    "provider": "mimo"
+  },
+  "package": {
+    "candidate_set": {
+      "candidate_set_digest": "b2fd75d27bfe37e7b7e8fe0060f4e22bd29c581d6bd53807f32bcaab5ef71947",
+      "candidates": [
+        {
+          "backend": "controlled_code",
+          "component_digest": "8f94f3ca7aaa2413a21a7609cb9aed9fc2868904361e8273994a80ca1d7e626a",
+          "component_id": "ordinary-open-loop",
+          "kind": "entry",
+          "package_digest": "f861494a611bde3904379bf63c0aaada0c129cc80cbc8a1cb8cbe3e6e515696d",
+          "package_id": "package-bad76f93eba343dce988b63f",
+          "ref": "execute",
+          "shape": "open_loop",
+          "source_digest": "3bebb85f3efc56d7a3d51df4ed5fa94d270ce2f1ec44ed7dd1de758497802a08",
+          "source_kind": "python_source",
+          "source_path": "agent/main.py"
+        },
+        {
+          "backend": "executable_plan",
+          "component_digest": "53a19f6902677fda6169c3d79a39d4669580cf94f42c127d03c6349f5943ac61",
+          "component_id": "self-orchestration-workflow",
+          "kind": "workflow",
+          "package_digest": "f861494a611bde3904379bf63c0aaada0c129cc80cbc8a1cb8cbe3e6e515696d",
+          "package_id": "package-bad76f93eba343dce988b63f",
+          "ref": "main",
+          "shape": "dag",
+          "source_digest": "ebf9cf7ae834d41b91d2e02034b48b52f704ca7727d010f2e38f042b473867d4",
+          "source_kind": "workflow_graph",
+          "source_path": "workflows/main.json"
+        }
+      ],
+      "package_digest": "f861494a611bde3904379bf63c0aaada0c129cc80cbc8a1cb8cbe3e6e515696d",
+      "package_id": "package-bad76f93eba343dce988b63f",
+      "schema": "nexgent.strategy-candidate-set.v1"
+    },
+    "digest": "f861494a611bde3904379bf63c0aaada0c129cc80cbc8a1cb8cbe3e6e515696d",
+    "entry": "execute",
+    "entry_ref": "agent/main.py:execute",
+    "id": "package-bad76f93eba343dce988b63f",
+    "selector": {
+      "component_digest": "b180b885d27c7dfe9535cd04c1f5eeda8624c12170792ad1cd0b51d94b09672d",
+      "component_id": "strategy-selector-role",
+      "kind": "role",
+      "output_schema": "nexgent.strategy-decision.v1",
+      "package_digest": "f861494a611bde3904379bf63c0aaada0c129cc80cbc8a1cb8cbe3e6e515696d",
+      "package_id": "package-bad76f93eba343dce988b63f",
+      "role_digest": "f6db073a227be29dc6c062a1ea23536aed06aa78c7324d8d56cf74d91dc8a805",
+      "role_ref": "strategy_selector",
+      "schema": "nexgent.strategy-selector.v1",
+      "selector_digest": "b97a8bc37a5a7e7f0c5daf061a605ecbac7cdec7e8021e4c7d225d8795bb648f",
+      "source_digest": "05518c12d3741823bf26e34ffc3e4bce76c51d3c78b31eb810deb76270daa894",
+      "source_path": "prompts/strategy_selector.md"
+    },
+    "selector_prompt_sha256": "05518c12d3741823bf26e34ffc3e4bce76c51d3c78b31eb810deb76270daa894"
+  },
+  "profile_digest": "da5ef791bce8a9c80d9b50c45d3dc1103c79a631fed92a2fb2eb311ca404ef2d",
+  "retry_policy": {
+    "provider_attempts_per_call": 1,
+    "sdk_automatic_retries": 0
+  },
+  "schema": "nexgent.d1b-run-manifest.v1",
+  "tasks": {
+    "TASK-DAG-01": {
+      "canonical_task_sha256": "8becd0964e533628462e417c202cc2da8ca6536f5317bd4cffb214610b8105c4",
+      "deliverable_schema_sha256": "65e613a0548a500ef756a036095fddbf274ff9a55312727ad6cf5e4bb5a7b19b",
+      "inputs_sha256": "be71c869bee5a85563f5d6090ed0eb62a4e75c142fb67c1ef9cf798cf19f1bc5",
+      "prompt_sha256": "44bf16894647b13313f45754b3b92994fe87c7018fdc62bdedf8f2cceb74033c"
+    },
+    "TASK-OL-01": {
+      "canonical_task_sha256": "f5499b3379e2608c21e471f93d9fa2a876fed9674a9703c46d6ddcfe2b768a13",
+      "deliverable_schema_sha256": "9a64c3a74170764b6f99b06a891f86d439736834680e8113ec7c2dfce70e6024",
+      "inputs_sha256": "658367085999567c3a3d7632a3564a8e45130e094007f860eb5b99d6e6b005a8",
+      "prompt_sha256": "f8b0b3ee87e8249d4ff5be80ec3dcde5a9aa747d0b37402799351220b22e6669"
+    }
+  }
+}
