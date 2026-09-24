@@ -1,6 +1,6 @@
 # Nexgent 仓库重构计划
 
-修订日期：2026-09-24。计划制定基线提交：`4722cf7`；本次进度复核提交：`9fc14a9`。**A 的技术选型已经完成，B–E 有纵向机制和一次真实模型跨任务工具复用证据，但 B–G 的完整出口均未验收，也没有通用 RSI 收益结论。** 以下阶段出口仍是验收标准，不能用已勾选的薄片代替。
+修订日期：2026-09-24。计划制定基线提交：`4722cf7`；本次进度复核提交：`10f1239`。**A 的技术选型已经完成，B–E 有纵向机制和一次真实模型跨任务工具复用证据，但 B–G 的完整出口均未验收，也没有通用 RSI 收益结论。** 以下阶段出口仍是验收标准，不能用已勾选的薄片代替。
 
 本文件是当前实施顺序的唯一入口；[能力内核决策](docs/design/rsi-capability-kernel.md)定义目标和待决技术选型，[产品决策](docs/design/product-and-refactor-decision.md)保留产品边界。旧 P0–P5 计划转为[历史快照](docs/history/refactor-plan-p0-p5-20260923.md)，其中的完成标记只解释当时的交付，不对应下列新阶段。
 
@@ -27,10 +27,10 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 
 | 对象 | 已有资产与证据 | 缺口／新阶段 |
 | --- | --- | --- |
-| 执行底座 | TaskService、AgentPackage、模型与工具调用、工件、预算、停止恢复；普通任务和 benchmark 共用执行路径 | 服务接口与生命周期仍集中在宿主实现，缺少可替换插件运行时；A–B |
-| 工具／插件 | ToolRegistry 加载可信处理器；真实 MiMo 已在普通 Episode 中开发、试装并调用新名称的纯本地计算工具，也开发、激活并应用过 `model_context.v1` 服务 | 两者仍是窄接口；缺少可替换 provider／服务生命周期、依赖解析、受权外部操作和自主缺口判断；受限 worker 不是 OS 容器；B–C |
+| 执行底座 | TaskService、AgentPackage、模型与工具调用、工件、预算、停止恢复；普通任务和 benchmark 共用执行路径 | 服务接口与生命周期仍集中在宿主实现，执行策略尚不能由任务选择；A–B、D |
+| 工具／插件 | ToolRegistry 支持受信宿主 ToolProvider v1 的带版本替换、卸载及清单，旧租约漂移拒绝；真实 MiMo 已在普通 Episode 中开发、试装并调用纯本地计算工具，也开发、激活并应用过 `model_context.v1` 服务 | provider 仍仅进程内注册，缺少任务／会话作用域、调用排空、服务生命周期、依赖解析、加载字节测量、受权外部操作和自主缺口判断；受限 worker 不是 OS 容器；B–C |
 | 技能开发 | develop_skill 编译受控 Python 子包；确定性测试覆盖开发、修复、委派；真实模型写出过可运行代码 | 真实父任务自主创建并调用技能尚未成功，不能替代工具／插件开发；C |
-| 编排 | 任务角色、定向消息边、pending DAG 修改与恢复；真实 MiMo 完成一个 7 节点、多角色任务 | 真实反馈后第二次改图未成功；任务角色仅 ask，缺少持久 mailbox；执行循环与上下文策略不够可替换；D |
+| 编排 | 任务角色、定向消息边、pending DAG 修改与恢复；真实 MiMo 完成一个 7 节点、多角色任务。PackagePatch v4 的 DAG↔代码切换已在确定性真实后端执行中通过激活门；同包双候选种子和选择数据合同已建立 | 任务模型尚未在同一入口选择或中途更换执行策略；v4 尚无模型生成，任务角色仅 ask，缺少持久 mailbox；D |
 | 跨任务采用 | 图／角色候选有确定性评价机制；一次真实 MiMo 创建的工具已通过配对、晋升、guard，并被新进程中的独立任务自动读取与调用 | 该次由实验程序显式串接，父版因 JSON 协议失败；普通 Main 任务不会自动驱动采用链，尚无跨任务族净收益或图与技能联合激活；E |
 | 记忆 | 独立 MemoryService release、快照、选择与回滚；真实 M 提案曾 abstain | 与 O/S 的一致版本组合、真实检索激活及收益未验证；E–F |
 | 递归 | 独立 R 通道与 R0/R1 后代比较、恢复、guard 有确定性测试 | 无真实模型递归收益；F |
@@ -51,7 +51,7 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 
 ## 4. 新阶段与验收
 
-当前状态：**A 的内核选型已完成，选择 Python Episode 作为唯一生产执行边界；真实 MiMo 已在普通任务中分别开发并使用新工具和首个上下文服务；一次模型编写的纯工具经独立配对、晋升和 guard，在新进程中的独立任务实际复用。B–G 的完整阶段出口均未验收。** [ADR 001](docs/design/adr-001-python-episode-kernel.md)基于固定源码、两路线真实／替身小样、恢复、失败及迁移责任。[新工具切片](experiments/kernel_spike/RESULTS.md#c1-工具切片真实模型在任务中开发未知名称工具)从空清单出发，让模型生成源码／schema 并在原 Episode 内试装、调用和交付；[服务切片](experiments/kernel_spike/RESULTS.md#c-服务切片默认任务智能体真实开发并激活上下文服务)让默认任务智能体生成、激活 `model_context.v1`，后续模型调用使用该版本。[跨任务试验](experiments/kernel_spike/RESULTS.md#e3-b-跨任务便携能力真实试验-v2路径通过效果解释受限)的父版因 JSON 协议失败，候选成本更高，且采用链由实验程序显式串接；不能据此宣称通用 RSI 收益。题目明确要求开发能力，不能证明自主缺口判断。DeepSeek 真实 MiMo 产生原生工具调用并取得结果，但最终 JSON 解码失败、未交付；外部原执行未受 Nexgent 准入／计费／恢复管理。当前受控代码只允许无凭据、无外部依赖的窄接口；编排搜索和 RSI 净收益没有证据。已有旧控制面作为迁移资产，不直接填入 B–G 阶段完成数。
+当前状态：**A 的内核选型已完成，选择 Python Episode 作为唯一生产执行边界；B 的受信工具 provider 已可版本化替换；DAG↔代码执行策略切换有确定性实际后端和激活门证据，但没有任务模型选择；真实 MiMo 已在普通任务中分别开发并使用新工具和首个上下文服务；一次模型编写的纯工具经独立配对、晋升和 guard，在新进程中的独立任务实际复用。B–G 的完整阶段出口均未验收。** [ADR 001](docs/design/adr-001-python-episode-kernel.md)基于固定源码、两路线真实／替身小样、恢复、失败及迁移责任。[新工具切片](experiments/kernel_spike/RESULTS.md#c1-工具切片真实模型在任务中开发未知名称工具)从空清单出发，让模型生成源码／schema 并在原 Episode 内试装、调用和交付；[服务切片](experiments/kernel_spike/RESULTS.md#c-服务切片默认任务智能体真实开发并激活上下文服务)让默认任务智能体生成、激活 `model_context.v1`，后续模型调用使用该版本。[跨任务试验](experiments/kernel_spike/RESULTS.md#e3-b-跨任务便携能力真实试验-v2路径通过效果解释受限)的父版因 JSON 协议失败，候选成本更高，且采用链由实验程序显式串接；不能据此宣称通用 RSI 收益。题目明确要求开发能力，不能证明自主缺口判断。DeepSeek 真实 MiMo 产生原生工具调用并取得结果，但最终 JSON 解码失败、未交付；外部原执行未受 Nexgent 准入／计费／恢复管理。当前受控代码只允许无凭据、无外部依赖的窄接口；编排搜索和 RSI 净收益没有证据。已有旧控制面作为迁移资产，不直接填入 B–G 阶段完成数。
 
 ### A. 内核边界与技术选型
 
@@ -148,14 +148,17 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 - [x] A1 固定参考项目 commit／tag，完成插件内核、Creator、loop 与日志接口的[源码对照](docs/research/kernel-reference-audit-20260923.md)。
 - [x] A2 同题诊断小样：Python 预先授权路径与任务内装入负结果；DeepSeek 固定模型 Agent 作用域工具运行和独立 Nexgent 证据投影。任务内插件试装及原执行生产桥接未通过，计入 A3/B。
 - [x] A3 实跑两条小样，记录失败、恢复、兼容与维护成本，提交[技术 ADR](docs/design/adr-001-python-episode-kernel.md)。Python 同一 Episode 的真实模型＋租约通过；DeepSeek 真实最终解码失败并保留负结果。
-- [ ] B1 按 ADR 建立版本化能力接口及现有 ToolRegistry／AgentPackage 适配；同步最小事件与能力视图。
+- [x] B1-A 受信宿主 ToolProvider v1 注册薄片：可带版本替换／卸载一个 provider，ToolRegistry 的分发入口不变；声明快照、并发清单一致性、旧租约漂移拒绝有定向测试。仅进程内实现，不代表 B 整体出口。
+- [ ] B1-B 按 ADR 把 AgentPackage 工具／服务和执行策略接到统一版本化能力接口，补任务／会话作用域、依赖、加载／卸载清理、最小事件与界面能力视图；用替换一个工具 provider 和一种执行策略的真实任务验收 B。
 - [x] C1 工具切片：冻结基于 effect／操作／运行环境的 EpisodeAuthority，模型从未知名称开发本地计算 Definition，任务内挂载、重读、调用；[真实 MiMo 收据](experiments/kernel_spike/evidence-python-dynamic-tool-live-20260924.json)与定向回归已记录。此项不代表 C 阶段全部完成。
 - [x] C2 服务切片：默认任务智能体以真实 MiMo 开发、激活 `model_context.v1` 并在后续模型请求中使用；[真实收据](experiments/kernel_spike/evidence-python-service-seed-live-20260924.json)与受限预算已记录。题目明确要求开发服务，自主缺口判断及跨任务采用未验收。
 - [x] D0 图接入薄片：保留 Main 的 architect／pending DAG，确定性图验证任务内工具开发与动态调用、服务激活与后续模型节点。此项是编排执行能力，不是反馈搜索收益。
 - [x] D0.1 对 Main 图做四次限额 MiMo 实跑并保留全部负结果；修正输入工件绑定、服务状态绑定、上下文服务抹除证据和编译期激活参数类型检查。第三次的 `completed` 因服务清空证据且 schema 泄露答案，被独立复核判为失败；图的真实任务质量仍未通过，[收据](experiments/kernel_spike/RESULTS.md)。
 - [ ] C 完整出口：真实任务中的能力缺口判断、隔离测试与反馈修复；覆盖服务／工具的受权文件或外部操作，保持 evaluator 独立。
 - [ ] D1 让同一入口按任务选用 DAG、开放循环或代码编排，并在真实任务中根据中途反馈修改执行策略；保留恢复和成本收据。
-- [ ] D1-A 先按[可进化执行策略检查点](docs/design/adaptive-orchestration-switch-v1.md)修复跨后端切换的组件激活合同，记录真实 active strategy 身份；D1-B/C 再实现任务内选择和中途反馈重选，D1-D 做冻结对照。现有双后端与 DAG 修订不计作已完成。
+- [x] D1-A 按[可进化执行策略检查点](docs/design/adaptive-orchestration-switch-v1.md)引入显式 PackagePatch v4；DAG↔代码双向切换的 changed／activation 身份分离并经实际后端、来源摘要、预算与演化门定向验证。v3 原义不变；此项不代表模型已选择或生成切换。
+- [x] D1-B.0 将真实开放循环和 Main DAG 组合为同包双 O 候选，冻结候选／模型选择纯合同；30 项联合定向测试通过。当前仍按旧静态 orchestrator 运行。
+- [ ] D1-B.1 同一普通入口以模型决策选择 DAG／开放循环，持久化预算与决策身份，并验证恢复不重复请求；其后 D1-C 做中途反馈重选，D1-D 做冻结对照。
 - [x] E0 独立配对／guard 的宿主能力授权冻结：父子两臂和监控任务使用计划中的同一 `EpisodeAuthority`，benchmark 任务不能自授。确定性双模式回归通过；动态工具／服务发布与行为激活门仍未接入。
 - [x] E1 惰性[可携带能力发布合同](docs/design/capability-release-v1.md)：冻结纯 tool/service 的源码、接口、权限要求与创建任务谱系；不授权、不部署、不复用原 Definition。11 项新合同测试通过；E 阶段出口仍未通过。
 - [x] E2-A 包候选结构：AgentPackage manifest v2 可声明纯工具及 `model_context.v1` 服务组件，PackagePatch v3 可携带新增 S 组件；演化门要求对应的运行激活证据。100 项定向测试通过。此步仅建立候选与证据合同，尚未证明跨任务运行。
