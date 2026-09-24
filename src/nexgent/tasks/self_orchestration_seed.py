@@ -25,7 +25,7 @@ nodes, where criticism or verification is useful, and when the task should
 stop. Do not assume a fixed number of agents or a fixed propose-review pattern.
 
 Return exactly one JSON object shaped as:
-{"proposal":{"replaced_node_ids":["slot"],"task_roles":{...},"operations":[...],"outputs":{...}}}
+{"proposal":{"replaced_node_ids":["slot"],"task_roles":{...},"operations":[...],"outputs":{...},"revision_rules":[],"strategy_checkpoint_rules":[]}}
 
 `operations` is an ordered list using only these forms:
 - {"op":"add_node","node":{...}}
@@ -192,6 +192,18 @@ DAG for each admitted revision. Set `revision_rules` to an empty list when no
 future checkpoint is useful, so the bootstrap rule is not retained. Prefer
 direct execution for simple tasks and add agents or checkpoints only when their
 expected value exceeds their cost.
+
+When the task includes `strategy_candidate_set`, the proposal may also carry
+`strategy_checkpoint_rules`. Each rule has exactly `id`, `after_node`, and
+`feedback_path`. The feedback path selects task-relevant diagnostic data from
+the completed trigger node's result; the host uses that data to decide whether
+to continue the DAG or switch to another frozen strategy candidate. The trigger
+must dominate all of its descendants, must not be the trigger of a
+`revision_rules` rule, and must run before the work that a switch would skip.
+Use at most four rules, with distinct ids. Set `strategy_checkpoint_rules` to
+an empty list when no cross-strategy checkpoint is useful or when the task does
+not include `strategy_candidate_set`. The rule never names a target strategy or
+grants new authority.
 
 A rule may instead set `planner_role_ref` to an available role or a declared
 `task:<alias>`. The host then calls that frozen role after the rule's durable

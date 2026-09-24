@@ -359,3 +359,23 @@ def test_graph_ops_validate_outputs_and_revision_rules():
             "operations": [],
             "revision_rules": [{"id": "invalid"}],
         })
+
+
+def test_graph_ops_admit_only_valid_strategy_checkpoint_rules():
+    rule = {
+        "id": "explore-feedback",
+        "after_node": "explore",
+        "feedback_path": "feedback",
+    }
+
+    revised = apply_graph_ops(_base_workflow(), {
+        "operations": [],
+        "strategy_checkpoint_rules": [rule],
+    })
+
+    assert revised["strategy_checkpoint_rules"] == [rule]
+    with pytest.raises(WorkflowError, match="strategy checkpoint rule"):
+        apply_graph_ops(_base_workflow(), {
+            "operations": [],
+            "strategy_checkpoint_rules": [{**rule, "feedback_path": ""}],
+        })

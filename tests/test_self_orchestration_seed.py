@@ -30,6 +30,9 @@ def test_self_orchestration_seed_compiles_without_a_fixed_team_topology():
     assert '"op":"remove_node","node_id":"slot"' in prompt
     assert "available_roles" in prompt
     assert "revision_rules" in prompt
+    assert "strategy_checkpoint_rules" in prompt
+    assert "strategy_candidate_set" in prompt
+    assert "feedback_path" in prompt
     assert all(term not in prompt.casefold()
                for term in ("benchmark", "openfoam", "scientific discovery"))
 

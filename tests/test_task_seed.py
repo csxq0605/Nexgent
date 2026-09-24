@@ -9,6 +9,7 @@ import threading
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nexgent.tasks.packages import make_package
+from nexgent.tasks.package_runner import run_package
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.seed import default_package
 from nexgent.tasks.tools import ToolRegistry, ToolSpec, artifact_ref_schema
@@ -64,6 +65,48 @@ def published_id(payload):
     observations = [item for item in payload["history"]
                     if item.get("kind") == "observation" and item.get("ok")]
     return observations[-1]["result"]["id"]
+
+
+def test_default_entry_reads_and_exposes_exact_strategy_handoff_before_model_work():
+    calls = []
+    handoff_ref = "artifact-strategy-handoff"
+    handoff = {
+        "id": handoff_ref,
+        "content": {
+            "schema": "nexgent.strategy-handoff.v1",
+            "trigger": {"failure_domain": "agent", "finding": "needs repair"},
+        },
+    }
+
+    def handle(method, params):
+        calls.append((method, deepcopy(params)))
+        if method == "read_artifact":
+            assert params == {"artifact_id": handoff_ref}
+            return deepcopy(handoff)
+        assert method == "ask"
+        if params["role"] == "task_agent":
+            assert params["payload"]["task"]["strategy_handoff"] == {
+                "artifact_id": handoff_ref,
+                "artifact": handoff,
+            }
+            return {"done": {"deliverables": {}, "summary": "handoff consumed",
+                             "limitations": []}}
+        return {"approved": True, "findings": [], "repairs": []}
+
+    result = run_package(default_package(), "execute", {
+        "objective": "Continue from the supplied strategy handoff",
+        "strategy_handoff_ref": handoff_ref,
+        "input_refs": {},
+        "deliverables": [],
+        "constraints": {},
+        "context": {},
+        "tools": [],
+        "skills": {},
+        "memory_snapshot": {},
+    }, handle, timeout=20)
+
+    assert result["value"]["summary"] == "handoff consumed"
+    assert [method for method, _ in calls] == ["read_artifact", "ask", "ask"]
 
 
 def test_default_package_identity_includes_prompts_and_has_no_improve_entry():

@@ -143,6 +143,64 @@ def test_full_revised_workflow_api_succeeds_without_repair_rpc():
     assert result.revised_workflow["nodes"][1]["role_ref"] == "role://worker-v3"
 
 
+def test_graph_ops_preserve_strategy_checkpoint_rules_through_compilation():
+    rule = {
+        "id": "work-feedback",
+        "after_node": "work",
+        "feedback_path": "feedback",
+    }
+
+    result = _compile(
+        {
+            **_replace_work(),
+            "strategy_checkpoint_rules": [rule],
+        },
+        lambda request, path: pytest.fail("valid proposal must not request repair"),
+    )
+
+    assert result.revised_workflow["strategy_checkpoint_rules"] == [rule]
+
+
+def test_new_checkpoint_cannot_target_completed_work_but_carried_rule_survives():
+    rule = {
+        "id": "seed-feedback",
+        "after_node": "seed",
+        "feedback_path": "feedback",
+    }
+    diagnostics = []
+
+    def repair(request, path):
+        diagnostics.append(request["diagnostic"])
+        return _replace_work()
+
+    repaired = _compile(
+        {**_replace_work(), "strategy_checkpoint_rules": [rule]}, repair)
+
+    assert repaired.attempt_count == 2
+    assert "running or completed" in diagnostics[0]["message"]
+
+    base = _workflow()
+    base["strategy_checkpoint_rules"] = [rule]
+    execution = PlanExecution.create(
+        "carried-rule-execution", plan_from_workflow(base, "carried-rule-plan"))
+    execution = execution.transition_node(
+        "seed", NodeStatus.RUNNING, attempt_ref="attempt://seed/1")
+    execution = execution.transition_node("seed", NodeStatus.COMPLETED)
+    carried = compile_with_graph_repair(
+        execution=execution,
+        base_workflow=base,
+        initial_proposal=_replace_work(),
+        patch_id="carry-checkpoint",
+        replaced_node_ids=("work",),
+        materialize_callback=lambda workflow: workflow,
+        repair_callback=lambda request, path: pytest.fail(
+            "an unchanged checkpoint rule must survive"),
+    )
+
+    assert carried.attempt_count == 1
+    assert carried.revised_workflow["strategy_checkpoint_rules"] == [rule]
+
+
 def test_dynamic_replacement_scope_may_be_repaired_with_the_proposal():
     initial = {**_replace_work(), "replaced_node_ids": ["seed"]}
 

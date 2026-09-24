@@ -154,10 +154,39 @@ def _candidate_workflow(base_workflow, proposal):
         return _snapshot(candidate, "Proposed revised workflow")
     graph_ops = {
         key: proposal[key]
-        for key in ("operations", "outputs", "revision_rules", "task_roles")
+        for key in (
+            "operations", "outputs", "revision_rules",
+            "strategy_checkpoint_rules", "task_roles",
+        )
         if key in proposal
     }
     return apply_graph_ops(base_workflow, graph_ops)
+
+
+def _reject_new_checkpoint_on_admitted_work(
+        execution, base_workflow, revised_workflow):
+    """Keep carried rules stable while blocking new rules on admitted nodes."""
+    base_rules = {
+        rule.get("id"): rule
+        for rule in base_workflow.get("strategy_checkpoint_rules", [])
+        if isinstance(rule, dict) and isinstance(rule.get("id"), str)
+    }
+    existing_states = {
+        node.node_id: node.status for node in execution.node_executions
+    }
+    revised_rules = revised_workflow.get("strategy_checkpoint_rules", [])
+    if not isinstance(revised_rules, list):
+        return
+    for rule in revised_rules:
+        if not isinstance(rule, dict):
+            continue
+        if base_rules.get(rule.get("id")) == rule:
+            continue
+        trigger_state = existing_states.get(rule.get("after_node"))
+        if trigger_state is not None and trigger_state is not NodeStatus.PENDING:
+            raise ContractError(
+                "New strategy checkpoint rules cannot target work that is "
+                "running or completed")
 
 
 def _replacement_scope(proposal, fixed_scope):
@@ -266,6 +295,8 @@ def compile_with_graph_repair(
                 failure = _diagnostic(attempt, "materialize", exc)
             else:
                 try:
+                    _reject_new_checkpoint_on_admitted_work(
+                        execution, base, materialized)
                     patch = PendingGraphPatch(
                         id=patch_id,
                         base_plan_ref=proposal.get("base_plan_ref", execution.plan.ref),

@@ -188,6 +188,137 @@ def test_adaptive_seed_preserves_the_legacy_main_dag_execution_path(tmp_path):
     assert artifact["content"] == {"answer": "dag-ran"}
 
 
+class _CheckpointGatewayFactory:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, reserve, stop_event):
+        owner = self
+
+        class Gateway:
+            def ask(self, role, prompt, payload=None, max_tokens=4000):
+                owner.calls.append({"role": role, "payload": deepcopy(payload)})
+                number = len(owner.calls)
+                receipt = {
+                    "call_id": f"adaptive-checkpoint-{number}",
+                    "role": role,
+                    "model": "ADAPTIVE-CHECKPOINT-TEST-DOUBLE",
+                    "status": "started",
+                    "reserved_completion_tokens": max_tokens,
+                    "max_tokens": max_tokens,
+                }
+                reserve(receipt)
+                reserve({
+                    **receipt,
+                    "status": "completed",
+                    "billing_status": "usage_reported",
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1,
+                              "total_tokens": 2},
+                })
+                if role == "strategy_selector":
+                    if payload["schema"] == "nexgent.strategy-selection-request.v1":
+                        return {
+                            "selected_component_id": MAIN_DAG_COMPONENT_ID,
+                            "basis": ["Start with the bounded graph."],
+                            "stop_conditions": ["The task completes."],
+                            "estimated_cost": {"model_calls": 4, "nodes": 3},
+                        }
+                    return {
+                        "target_component_id": OPEN_LOOP_COMPONENT_ID,
+                        "reason": "The diagnostic calls for iterative recovery.",
+                    }
+                if role == "architect":
+                    return {"proposal": {
+                        "replaced_node_ids": ["slot"],
+                        "operations": [
+                            {"op": "remove_node", "node_id": "slot"},
+                            {"op": "add_node", "node": {
+                                "id": "inspect", "method": "join",
+                                "params": {"feedback": {
+                                    "failure_domain": "agent",
+                                    "finding": "Continue with adaptive correction.",
+                                }},
+                            }},
+                            {"op": "add_node", "node": {
+                                "id": "finish", "method": "publish",
+                                "params": {
+                                    "name": "result",
+                                    "content": {"answer": "dag fallback"},
+                                },
+                            }},
+                            {"op": "add_control_edge", "edge": {
+                                "from": "architect", "to": "inspect",
+                            }},
+                            {"op": "add_control_edge", "edge": {
+                                "from": "inspect", "to": "finish",
+                            }},
+                        ],
+                        "outputs": {"deliverables": {
+                            "result": {"$node": "finish.id"},
+                        }},
+                        "revision_rules": [],
+                        "strategy_checkpoint_rules": [{
+                            "id": "inspect-feedback",
+                            "after_node": "inspect",
+                            "feedback_path": "feedback",
+                        }],
+                    }}
+                if role == "task_agent":
+                    assert payload["task"]["strategy_handoff"]["artifact"][
+                        "content"]["trigger"]["failure_domain"] == "agent"
+                    task_agent_calls = [
+                        call for call in owner.calls if call["role"] == "task_agent"
+                    ]
+                    if len(task_agent_calls) == 1:
+                        return {"request": {
+                            "method": "publish",
+                            "params": {
+                                "name": "result",
+                                "content": {"answer": "open-loop recovery"},
+                            },
+                        }}
+                    observations = [
+                        item for item in payload["history"]
+                        if item.get("kind") == "observation" and item.get("ok")
+                    ]
+                    return {"done": {
+                        "deliverables": {
+                            "result": observations[-1]["result"]["id"],
+                        },
+                        "summary": "continued from the durable handoff",
+                        "limitations": [],
+                    }}
+                assert role == "task_reviewer"
+                return {"approved": True, "findings": [], "repairs": []}
+
+        return Gateway()
+
+
+def test_adaptive_seed_model_graph_can_checkpoint_into_real_open_loop(tmp_path):
+    gateway = _CheckpointGatewayFactory()
+    service = TaskService(tmp_path, gateway_factory=gateway)
+    episode = service.create(
+        "Switch from a generated graph when its diagnostic warrants recovery",
+        deliverables=[{
+            "name": "result",
+            "schema": {"type": "object", "required": ["answer"]},
+        }],
+        package=adaptive_orchestration_package(),
+    )
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "completed", result.get("last_error")
+    assert result["strategy_checkpoint"]["resolution"][
+        "selected_component_id"] == OPEN_LOOP_COMPONENT_ID
+    artifact = service.store.read(result["output_refs"]["result"], episode["id"])
+    assert artifact["content"] == {"answer": "open-loop recovery"}
+    assert [call["role"] for call in gateway.calls] == [
+        "strategy_selector", "architect", "strategy_selector",
+        "task_agent", "task_agent", "task_reviewer",
+    ]
+
+
 def test_adaptive_seed_rejects_resource_and_component_collisions():
     open_loop = default_package()
     conflicting_files = deepcopy(open_loop["files"])
