@@ -489,6 +489,86 @@ def _validate_revision_rules(workflow, nodes):
     return rules
 
 
+def _validate_strategy_checkpoint_rules(workflow, nodes, dependencies):
+    """Validate bounded, unambiguous cuts for cross-strategy handoff."""
+    rules = workflow.get("strategy_checkpoint_rules", [])
+    if not isinstance(rules, list) or len(rules) > 4:
+        raise WorkflowError(
+            "Workflow strategy_checkpoint_rules must be a bounded list")
+
+    revision_rules = workflow.get("revision_rules", [])
+    revision_ids = {
+        rule.get("id") for rule in revision_rules if isinstance(rule, dict)
+    }
+    revision_nodes = {
+        rule.get("after_node") for rule in revision_rules if isinstance(rule, dict)
+    }
+
+    # A trigger is a safe graph cut only when every path into work below it
+    # passes through the trigger.  This also ensures none of that work can be
+    # admitted in the same frontier as the trigger itself.
+    all_nodes = set(nodes)
+    dominators = {}
+    unresolved = set(nodes)
+    while unresolved:
+        progressed = False
+        for node_id in list(unresolved):
+            parents = dependencies[node_id]
+            if any(parent not in dominators for parent in parents):
+                continue
+            dominators[node_id] = ({node_id} if not parents else
+                                   {node_id} | set.intersection(
+                                       *(dominators[parent] for parent in parents)))
+            unresolved.remove(node_id)
+            progressed = True
+        if not progressed:  # _validate has already rejected dependency cycles.
+            raise WorkflowError("Workflow checkpoint dominance is unavailable")
+
+    children = {node_id: set() for node_id in nodes}
+    for child, parents in dependencies.items():
+        for parent in parents:
+            children[parent].add(child)
+
+    rule_ids = set()
+    for rule in rules:
+        if not isinstance(rule, dict):
+            raise WorkflowError("Workflow strategy checkpoint rule is invalid")
+        rule_id = rule.get("id")
+        after_node = rule.get("after_node")
+        feedback_path = rule.get("feedback_path")
+        path_parts = (feedback_path.split(".")
+                      if isinstance(feedback_path, str) else ())
+        if (set(rule) != {"id", "after_node", "feedback_path"}
+                or not isinstance(rule_id, str)
+                or not re.fullmatch(r"[a-z][a-z0-9_.-]{0,99}", rule_id)
+                or rule_id in rule_ids
+                or rule_id in revision_ids
+                or not isinstance(after_node, str)
+                or after_node not in all_nodes
+                or after_node in revision_nodes
+                or not isinstance(feedback_path, str)
+                or not feedback_path
+                or len(feedback_path) > 500
+                or len(path_parts) > 32
+                or any(not part or len(part) > 100 for part in path_parts)):
+            raise WorkflowError("Workflow strategy checkpoint rule is invalid")
+
+        descendants = set()
+        frontier = list(children[after_node])
+        while frontier:
+            descendant = frontier.pop()
+            if descendant in descendants:
+                continue
+            descendants.add(descendant)
+            frontier.extend(children[descendant])
+        if any(after_node not in dominators[node_id]
+               for node_id in descendants):
+            raise WorkflowError(
+                "Workflow strategy checkpoint trigger must dominate its descendants")
+        rule_ids.add(rule_id)
+    return rules
+
+
 def plan_from_workflow(workflow, plan_id, *, revision=1):
     """Compile a validated workflow resource into the v1 executable-plan contract."""
     try:
@@ -589,6 +669,7 @@ def plan_from_workflow(workflow, plan_id, *, revision=1):
             ))
 
         _validate_revision_rules(workflow, nodes)
+        _validate_strategy_checkpoint_rules(workflow, nodes, dependencies)
 
         return PlanSpec(
             id=plan_id,
@@ -620,6 +701,7 @@ def run_executable_workflow(
     execution,
     persist,
     resolve_revision,
+    resolve_strategy_checkpoint=None,
     receipt_evidence,
     record_local_receipt,
     initial_receipts=None,
@@ -632,12 +714,20 @@ def run_executable_workflow(
     External nodes still enter the ordinary host ``invoke`` path.  The caller
     supplies receipts reconstructed from the RPC journal on resume; package
     output is never accepted as a substitute for that host ledger.
+
+    ``resolve_strategy_checkpoint(rule, execution, receipt, feedback)`` may
+    return ``{"action": "continue"}`` or a switch tagged with an opaque,
+    finite-JSON ``checkpoint``.  A switch stops before the next frontier and
+    leaves all pending node state untouched.
     """
     if not isinstance(execution, PlanExecution):
         raise ValueError("Executable workflow requires PlanExecution")
     if (not callable(invoke) or not callable(persist) or not callable(resolve_revision)
             or not callable(receipt_evidence) or not callable(record_local_receipt)):
         raise ValueError("Executable workflow callbacks must be callable")
+    if (resolve_strategy_checkpoint is not None
+            and not callable(resolve_strategy_checkpoint)):
+        raise ValueError("Strategy checkpoint resolver must be callable")
     if not callable(max_parallel) and (
             type(max_parallel) is not int or not 1 <= max_parallel <= 32):
         raise ValueError("max_parallel must be in [1,32]")
@@ -647,6 +737,7 @@ def run_executable_workflow(
     receipts = deepcopy(initial_receipts or {})
     resumable_local_nodes = set(resumable_local_nodes)
     execution_lock = threading.RLock()
+    evaluated_checkpoint_rules = set()
 
     def parallelism():
         value = max_parallel() if callable(max_parallel) else max_parallel
@@ -685,6 +776,58 @@ def run_executable_workflow(
                 persist(execution, receipts)
                 return True
         return False
+
+    def resolve_first_strategy_checkpoint(node_ids):
+        """Resolve one durable completed trigger before admitting more work."""
+        if resolve_strategy_checkpoint is None:
+            return None
+        for node_id in node_ids:
+            receipt = receipts.get(node_id)
+            if receipt is None or receipt.get("status") != "completed":
+                continue
+            for rule in active.get("strategy_checkpoint_rules", []):
+                if (rule["id"] in evaluated_checkpoint_rules
+                        or rule["after_node"] != node_id):
+                    continue
+                feedback = _get(receipt["value"], rule["feedback_path"])
+                resolution = resolve_strategy_checkpoint(
+                    deepcopy(rule), execution, deepcopy(receipt),
+                    deepcopy(feedback),
+                )
+                try:
+                    canonical(resolution)
+                except (TypeError, ValueError, RecursionError) as exc:
+                    raise WorkflowError(
+                        f"Strategy checkpoint resolver returned invalid JSON: {exc}"
+                    ) from None
+                if not isinstance(resolution, dict):
+                    raise WorkflowError(
+                        "Strategy checkpoint resolver returned an invalid result")
+                action = resolution.get("action")
+                if (action == "continue" and set(resolution) == {"action"}):
+                    evaluated_checkpoint_rules.add(rule["id"])
+                    continue
+                if (action == "switch"
+                        and set(resolution) == {"action", "checkpoint"}):
+                    evaluated_checkpoint_rules.add(rule["id"])
+                    return {
+                        "rule_id": rule["id"],
+                        "after_node": rule["after_node"],
+                        "feedback_path": rule["feedback_path"],
+                        "checkpoint": deepcopy(resolution["checkpoint"]),
+                    }
+                raise WorkflowError(
+                    "Strategy checkpoint resolver returned an invalid result")
+        return None
+
+    def checkpointed_result(checkpoint):
+        return {
+            "status": "checkpointed",
+            "outputs": {},
+            "nodes": deepcopy(receipts),
+            "plan_execution": execution,
+            "strategy_checkpoint": checkpoint,
+        }
 
     def admit(node_id, attempt_ref, input_refs):
         nonlocal execution
@@ -766,6 +909,7 @@ def run_executable_workflow(
         # Validate revision sources even when this runner is used directly,
         # rather than through the manifest compiler's plan_from_workflow path.
         _validate_revision_rules(active, nodes)
+        _validate_strategy_checkpoint_rules(active, nodes, dependencies)
         current_ids = set(nodes)
         if current_ids != {node.id for node in execution.plan.nodes}:
             raise WorkflowError("Current workflow nodes differ from the persisted plan")
@@ -793,6 +937,9 @@ def run_executable_workflow(
             node_id for node_id in nodes
             if node_id in receipts and state_by_id[node_id].status.terminal
         ]
+        checkpoint = resolve_first_strategy_checkpoint(durable_triggers)
+        if checkpoint is not None:
+            return checkpointed_result(checkpoint)
         if apply_first_matching_revision(durable_triggers):
             continue
 
@@ -883,6 +1030,12 @@ def run_executable_workflow(
                         interruption = exc
             persist(execution, receipts)
 
+            checkpoint = (
+                None if interruption is not None
+                else resolve_first_strategy_checkpoint(finished_now)
+            )
+            if checkpoint is not None:
+                return checkpointed_result(checkpoint)
             revised = apply_first_matching_revision(finished_now)
             if interruption is not None:
                 raise interruption
