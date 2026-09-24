@@ -317,7 +317,7 @@ def self_orchestration_package():
                 "method": "ask",
                 "role_ref": "architect",
                 "component_ref": "architect-role",
-                "params": {"max_tokens": 5000},
+                "params": {"max_tokens": 8000},
                 "bindings": {
                     "payload": {
                         "task": {"$input": ""},

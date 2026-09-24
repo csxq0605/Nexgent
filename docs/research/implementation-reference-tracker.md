@@ -54,6 +54,8 @@ E3-B.2 后续修复把开发配对中宿主已识别的候选工作流接口、�
 
 [格式恢复后真实探针](../../experiments/ordinary_feedback_live/WORKBENCH_METERED_REPAIR_RESULTS.md)没有触发格式恢复：来源 architect 达到单次输出 token 上限，R0 正常选择 O 搜索，但第一次候选缺必要补丁字段，第二次 Provider 传输失败且计量不完整。当前搜索把后者错误归为普通搜索耗尽；后续补上基础设施／计量门，保留已知成本并终止。它显示从 AutoSci／AFlow 的“生成候选”到“有效候选竞争”仍有模型合同与 Provider 稳定性缺口；不能从这批负样本宣称编排搜索改进有效。
 
+来源 `finish_reason=length` 且恰好输出 5000 token，说明 5000 的 architect 单次上限是实际截断点。通用自编排种子现用 8000，宿主网关容许至 12000，Episode 总预算与调用账本保持不变；14 项相关定向测试通过。额度调整是可测的资源假设，不是任务能力或编排收益。未来对照须报告预留和实耗 token，不能让提高上限独自解释“进化”效果。
+
 D1-A 已按[执行策略切换检查点](../design/adaptive-orchestration-switch-v1.md)落地：显式 PackagePatch v4 仅覆盖 entry↔workflow 切换，`activation_targets` 等于改动组件减去下线旧 orchestrator；v3 仍按旧相等合同。两方向候选均走真实 `TaskService` 后端和演化配对验证，篡改源码摘要、原生后端身份、空目标及夹带未激活组件会拒绝。`strategy_entered` 只记录入场尝试，完成态 `active_strategy` 才是激活证据。与 AutoSci SciDAG/SciEvolve、AFlow 代码工作流搜索、ADAS 程序化 Agent 候选的对照因此从“静态双后端”推进到“可检验切换补丁”；模型还不能在任务中生成或选择此切换，不能声称编排已自进化。
 
 D1-B 前置采用真实默认开放循环代码和 Main DAG 组成单包双 O 候选，并把候选集合和模型决策拆成纯合同；候选来源、组件、后端及摘要只能由宿主填，模型只提交选择、依据、停止条件和可缺省成本估计。随后 `TaskService.run` 在冻结同包候选时通过真实 gateway 请求一次选择，把模型／预算收据及决策身份写为可恢复 Episode 事实，再分派到被选的真实后端；异常选择不静默回退，未知模型结果不自动重发。完成的策略必须留下 `active_strategy`，演化门对任意 O 目标都验证实际激活，不能只靠源码加载。集成与恢复的定向测试通过。root 绝对截止时间现已贯穿选择器、受控代码、图准入及恢复；未知已入场模型调用保持待核对。真实 MiMo D1-B 探针按预注册合同判负：两个主任务均失败，结构化三服务审查选成开放循环，H1–H4 均不通过。D1-C 增加确定性检查点、模型选择边界、同一 Episode 原子交接与恢复；生产 Main 图提案可声明检查点，默认开放循环先读取 handoff，宿主固定的 `StrategyStart` 保留来源而不伪造模型调用。[策略设计检查点](../design/adaptive-orchestration-switch-v1.md)仍将 AutoSci 图更新、AFlow／ADAS 外层搜索与 Nexgent 的中途交接分开。[D1-C 首批探索性尝试](../../experiments/strategy_checkpoint/RESULTS.md)四条件离线预检通过，但四个真实模型草稿均未通过 base-policy 前提，故未准入 selector；运行时合同仍标“草案；不得运行”，不能算正式预注册确认。接口与评分不一致须在新 READY 合同中先修正；真实中途切换与恢复仍未知，不能重标旧结果。

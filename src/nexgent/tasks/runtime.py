@@ -3433,7 +3433,7 @@ class TaskService:
                        if self.gateway_factory else ModelGateway(
                            self.project_root, reserve=reserve,
                            stop_event=stop_event,
-                           max_completion_tokens=6000))
+                           max_completion_tokens=12000))
             try:
                 result_value = gateway.ask(**phase_params)
             except ModelOutputFormatError as exc:
