@@ -1,0 +1,50 @@
+{
+  "schema": "nexgent.ordinary-search-live-receipt.v1",
+  "contract": "WORKBENCH_SEARCH_FLOW_CONTRACT.md",
+  "model": "mimo-v2.6-flash",
+  "source_task": "workbench development seed 13 public fields",
+  "entry": "nexgent task",
+  "source_episode_id": "episode-b22fd2a8eea34fd3",
+  "source_status": "failed",
+  "source_model_calls": 3,
+  "source_error_class": "publish_ledger_missing_revision",
+  "feedback_work_id": "feedback-work-3a6c2f779560e5b10365fda4",
+  "development_episode_id": "episode-1002624dfbba48c1",
+  "development_model_calls": 1,
+  "development_choice": {
+    "candidate_type": "orchestration",
+    "source_ref": "orchestration_search"
+  },
+  "search_id": "orchestration-search-155def8db46a6b6935aef4ee13ff91a906be71d5",
+  "search_status": "exhausted",
+  "attempts": [
+    {
+      "number": 1,
+      "generation_id": "generation-d3e2e959f19d4153",
+      "episode_id": "episode-b4d8f2a66e5a4ff0",
+      "model_calls": 1,
+      "status": "missing",
+      "reason_type": "PackageError",
+      "failure_code": "generation_PackageError",
+      "public_schema_issue": "behavior_patch/hypothesis requires component_ids"
+    },
+    {
+      "number": 2,
+      "generation_id": "generation-5f5cd05f23284856",
+      "episode_id": "episode-fff9638768e24a77",
+      "model_calls": 1,
+      "status": "missing",
+      "reason_type": "ContractError",
+      "failure_code": "generation_ContractError",
+      "public_schema_issue": "PackagePatch replacement invalid"
+    }
+  ],
+  "qualified_candidate_count": 0,
+  "development_qualification_run": false,
+  "independent_selection_run": false,
+  "guard_run": false,
+  "later_reuse": false,
+  "work_status": "rejected",
+  "work_reason": "orchestration_search_exhausted",
+  "active_channel_revision": 0
+}
