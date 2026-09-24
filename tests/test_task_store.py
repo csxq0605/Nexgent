@@ -7,7 +7,10 @@ from copy import deepcopy
 import pytest
 
 from nexgent.kernel.store import BudgetExhausted, Store
+from nexgent.kernel.programs import digest
 from nexgent.tasks.packages import make_package
+from nexgent.tasks.strategy_checkpoints import build_strategy_checkpoint
+from nexgent.tasks.strategy_decisions import build_strategy_candidate_set
 from nexgent.tasks.store import EpisodeStore, RecoveryRequired, StateConflict
 
 
@@ -36,6 +39,97 @@ def receipt(identity, status="started", **changes):
               "model": "contract-stub", "role": "worker", "request_digest": identity, "usage": {}}
     result.update(changes)
     return result
+
+
+def checkpoint_package():
+    files = {
+        "agent/main.py": "def execute(task, ctx):\n    return task\n",
+        "workflows/main.json": json.dumps({
+            "nodes": [{"id": "inspect", "method": "join"},
+                      {"id": "finish", "method": "join"}],
+            "outputs": {},
+        }),
+    }
+    return make_package(files, {
+        "manifest_version": 2,
+        "entries": {"execute": "agent/main.py:execute"},
+        "skills": {},
+        "roles": {},
+        "workflows": {"main": {"ref": "workflows/main.json", "max_parallel": 1}},
+        "components": {
+            "dag-main": {"class": "O", "kind": "workflow", "ref": "main"},
+            "open-loop": {"class": "O", "kind": "entry", "ref": "execute"},
+        },
+        "orchestrator": "dag-main",
+    })
+
+
+def checkpoint_case(store):
+    package = checkpoint_package()
+    candidates = build_strategy_candidate_set(package, ["dag-main", "open-loop"])
+    episode = store.create(task(strategy_candidate_set=candidates), package)
+    trigger_receipt = {
+        "status": "completed",
+        "value": {"finding": "evidence gap"},
+        "failure_domain": "agent",
+    }
+    state = store.get(episode["id"])
+    state.update({
+        "current_plan_ref": "plan-checkpoint",
+        "plan_revision": 1,
+        "plan_node_receipts": {"inspect": trigger_receipt},
+        "plan_execution": {"node_executions": [
+            {"node_id": "inspect", "status": "completed",
+             "output_artifact_refs": []},
+            {"node_id": "finish", "status": "pending",
+             "output_artifact_refs": []},
+        ]},
+    })
+    state = store.save(state)
+    decision_digest = digest({"startup": episode["id"]})
+    store.event(episode["id"], "strategy_decision", {
+        "decision_digest": decision_digest,
+        "candidate_set_digest": candidates["candidate_set_digest"],
+        "package_digest": package["digest"],
+    })
+    content = {"completed": [], "pending": ["finish"], "observations": [
+        {"node_id": "inspect", "finding": "evidence gap"},
+    ]}
+    content_digest = digest(content)
+    trigger_digest = digest(trigger_receipt)
+    handoff_ref = store.strategy_handoff_ref(
+        episode["id"], "inspect", trigger_digest, content_digest)
+    zero = {key: 0 for key in (
+        "model_calls", "completion_tokens", "tool_calls",
+        "tool_work_units", "nodes")}
+    remaining = {
+        "model_calls": state["budget"]["max_model_calls"],
+        "completion_tokens": state["budget"]["max_completion_tokens"],
+        "tool_calls": state["budget"]["max_tool_calls"],
+        "tool_work_units": state["budget"]["max_tool_work_units"],
+        "nodes": state["budget"]["max_nodes"],
+    }
+    checkpoint = build_strategy_checkpoint(
+        episode_id=episode["id"], root_episode_id=episode["root_episode_id"],
+        candidate_set=candidates, decision_digest=decision_digest,
+        source_segment_id="strategy-segment-1",
+        source_component_id="dag-main",
+        trigger={
+            "node_id": "inspect", "receipt_digest": trigger_digest,
+            "receipt_status": "completed", "failure_domain": "agent",
+        },
+        plan={
+            "ref": "plan-checkpoint", "revision": 1,
+            "completed_artifact_refs": [], "pending_node_ids": ["finish"],
+        },
+        root_budget={"usage": zero, "remaining": remaining},
+        handoff_artifact={"ref": handoff_ref, "digest": content_digest},
+        model_suggestion={
+            "target_component_id": "open-loop",
+            "reason": "The durable finding needs an open-loop recovery.",
+        },
+    )
+    return episode, candidates, state, checkpoint, content
 
 
 def test_task_tables_preserve_research_records(tmp_path, package):
@@ -75,6 +169,110 @@ def test_projection_is_optimistic_and_identity_is_frozen(store, package):
     with pytest.raises(ValueError, match="1 MB"):
         store.save(state)
     assert store.get(episode["id"])["revision"] == 1
+
+
+def test_strategy_checkpoint_commit_is_atomic_durable_and_idempotent(store):
+    episode, candidates, state, checkpoint, content = checkpoint_case(store)
+
+    committed = store.commit_strategy_checkpoint(
+        episode["id"], checkpoint, candidates, content,
+        expected_revision=state["revision"])
+
+    assert committed["checkpoint"] == checkpoint
+    artifact = committed["handoff_artifact"]
+    assert artifact["id"] == checkpoint["handoff_artifact"]["ref"]
+    assert artifact["content"] == content
+    assert artifact["content_digest"] == checkpoint["handoff_artifact"]["digest"]
+    assert artifact["input_artifact_refs"] == []
+    assert store.read(artifact["id"], episode["id"]) == artifact
+    saved = store.get(episode["id"])
+    assert saved["revision"] == state["revision"] + 1
+    assert saved["strategy_checkpoint"] == checkpoint
+    kinds = [event["kind"] for event in store.events(episode["id"])]
+    assert kinds[-2:] == ["artifact_published", "strategy_checkpoint"]
+
+    replay = EpisodeStore(store.root).commit_strategy_checkpoint(
+        episode["id"], checkpoint, candidates, content,
+        expected_revision=state["revision"])
+    assert replay == committed
+    assert len([event for event in store.events(episode["id"])
+                if event["kind"] == "strategy_checkpoint"]) == 1
+    assert [item["id"] for item in store.artifacts(episode["id"])] == [artifact["id"]]
+
+
+def test_strategy_checkpoint_rolls_back_artifact_and_events_on_commit_failure(
+        store, monkeypatch):
+    episode, candidates, state, checkpoint, content = checkpoint_case(store)
+    original_event = EpisodeStore._event
+
+    def fail_checkpoint_event(db, episode_id, kind, data):
+        if kind == "strategy_checkpoint":
+            raise RuntimeError("fault after handoff insert")
+        return original_event(db, episode_id, kind, data)
+
+    monkeypatch.setattr(EpisodeStore, "_event", staticmethod(fail_checkpoint_event))
+    with pytest.raises(RuntimeError, match="fault after handoff"):
+        store.commit_strategy_checkpoint(
+            episode["id"], checkpoint, candidates, content,
+            expected_revision=state["revision"])
+
+    assert store.artifacts(episode["id"]) == []
+    assert store.get(episode["id"]).get("strategy_checkpoint") is None
+    assert [event["kind"] for event in store.events(episode["id"])] == [
+        "task_registered", "strategy_decision"]
+
+
+def test_strategy_checkpoint_rejects_revision_conflict_without_partial_records(store):
+    episode, candidates, state, checkpoint, content = checkpoint_case(store)
+
+    with pytest.raises(StateConflict, match="newer revision"):
+        store.commit_strategy_checkpoint(
+            episode["id"], checkpoint, candidates, content,
+            expected_revision=state["revision"] - 1)
+
+    assert store.artifacts(episode["id"]) == []
+    assert not [event for event in store.events(episode["id"])
+                if event["kind"] == "strategy_checkpoint"]
+
+
+def test_strategy_checkpoint_conflicting_replay_and_tamper_fail_closed(store):
+    episode, candidates, state, checkpoint, content = checkpoint_case(store)
+    store.commit_strategy_checkpoint(
+        episode["id"], checkpoint, candidates, content,
+        expected_revision=state["revision"])
+    changed = build_strategy_checkpoint(
+        episode_id=checkpoint["episode_id"],
+        root_episode_id=checkpoint["root_episode_id"],
+        candidate_set=candidates,
+        decision_digest=checkpoint["decision_digest"],
+        source_segment_id=checkpoint["source_segment"]["segment_id"],
+        source_component_id=checkpoint["source_segment"]["component_id"],
+        trigger=checkpoint["trigger"], plan=checkpoint["plan"],
+        root_budget=checkpoint["root_budget"],
+        handoff_artifact=checkpoint["handoff_artifact"],
+        model_suggestion={
+            "target_component_id": "open-loop",
+            "reason": "A changed replay must not replace durable routing.",
+        },
+    )
+    with pytest.raises(StateConflict, match="different strategy checkpoint"):
+        store.commit_strategy_checkpoint(
+            episode["id"], changed, candidates, content,
+            expected_revision=state["revision"])
+
+    artifact_ref = checkpoint["handoff_artifact"]["ref"]
+    with store.connect() as db:
+        row = db.execute(
+            "SELECT data FROM task_artifacts WHERE id=?", (artifact_ref,)
+        ).fetchone()
+        artifact = json.loads(row[0])
+        artifact["content"] = {"tampered": True}
+        db.execute("UPDATE task_artifacts SET data=? WHERE id=?",
+                   (json.dumps(artifact), artifact_ref))
+    with pytest.raises(RecoveryRequired, match="handoff artifact changed"):
+        EpisodeStore(store.root).commit_strategy_checkpoint(
+            episode["id"], checkpoint, candidates, content,
+            expected_revision=state["revision"])
 
 
 def test_child_cannot_widen_access_or_reset_account(store, package):

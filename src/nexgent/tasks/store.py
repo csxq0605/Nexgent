@@ -1624,6 +1624,260 @@ class EpisodeStore:
             return True
 
     @staticmethod
+    def strategy_handoff_ref(episode_id, trigger_node_id,
+                             trigger_receipt_digest, content_digest):
+        """Return the host-owned identity for one strategy handoff artifact."""
+        if not isinstance(episode_id, str) or not episode_id:
+            raise ValueError("Strategy handoff requires an Episode identity")
+        if not isinstance(trigger_node_id, str) or not trigger_node_id:
+            raise ValueError("Strategy handoff requires a trigger node identity")
+        sha256 = re.compile(r"[0-9a-f]{64}")
+        if (not isinstance(trigger_receipt_digest, str)
+                or sha256.fullmatch(trigger_receipt_digest) is None
+                or not isinstance(content_digest, str)
+                or sha256.fullmatch(content_digest) is None):
+            raise ValueError("Strategy handoff requires lowercase SHA-256 digests")
+        identity = _digest({
+            "episode_id": episode_id,
+            "trigger_node_id": trigger_node_id,
+            "trigger_receipt_digest": trigger_receipt_digest,
+            "content_digest": content_digest,
+        })
+        return "artifact-strategy-handoff-" + identity
+
+    @staticmethod
+    def _checked_event_chain(db, episode_id):
+        """Read an Episode journal only after validating its hash chain."""
+        rows = db.execute(
+            "SELECT sequence,kind,created,data,previous,digest "
+            "FROM task_events WHERE episode=? ORDER BY sequence",
+            (episode_id,),
+        ).fetchall()
+        events = []
+        previous = "genesis"
+        for expected_sequence, row in enumerate(rows, 1):
+            content = json.loads(row[3])
+            record = {
+                "episode_id": episode_id, "sequence": row[0],
+                "kind": row[1], "created": row[2], "content": content,
+                "previous": row[4],
+            }
+            if (row[0] != expected_sequence or row[4] != previous
+                    or row[5] != _digest(record)):
+                raise RecoveryRequired("Episode event journal integrity changed")
+            record["digest"] = row[5]
+            events.append(record)
+            previous = row[5]
+        return events
+
+    def commit_strategy_checkpoint(
+            self, episode_id, checkpoint, candidate_set, handoff_content, *,
+            expected_revision):
+        """Atomically publish and route one durable strategy checkpoint.
+
+        A retry of the exact committed checkpoint is idempotent, including
+        when it carries the revision that preceded the first commit.  Any
+        other checkpoint for the Episode, or any changed durable evidence,
+        fails closed.
+        """
+        from .strategy_checkpoints import validate_strategy_checkpoint
+        from .strategy_decisions import validate_strategy_candidate_set
+
+        checkpoint = validate_strategy_checkpoint(checkpoint, candidate_set)
+        candidate_set = validate_strategy_candidate_set(candidate_set)
+        # Canonicalize before opening the write transaction so non-JSON or
+        # over-limit handoffs cannot leave partial ledger records.
+        handoff_content = json.loads(_json(handoff_content))
+        content_digest = _digest(handoff_content)
+        handoff = checkpoint["handoff_artifact"]
+        trigger = checkpoint["trigger"]
+        expected_ref = self.strategy_handoff_ref(
+            episode_id, trigger["node_id"], trigger["receipt_digest"],
+            content_digest)
+        if handoff["digest"] != content_digest or handoff["ref"] != expected_ref:
+            raise ValueError("Strategy handoff artifact identity changed")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("Strategy checkpoint requires a nonnegative expected revision")
+
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            state = self._get(db, episode_id)
+            events = self._checked_event_chain(db, episode_id)
+            prior = [event for event in events
+                     if event["kind"] == "strategy_checkpoint"]
+            if prior and state.get("strategy_checkpoint") != prior[-1]["content"]:
+                raise RecoveryRequired("Strategy checkpoint projection changed")
+            if not prior and state.get("strategy_checkpoint") is not None:
+                raise RecoveryRequired("Uncommitted strategy checkpoint state exists")
+            same_trigger = [event for event in prior
+                            if event["content"].get("trigger") == trigger]
+            if len(same_trigger) > 1:
+                raise RecoveryRequired("Strategy trigger has multiple checkpoints")
+            frozen = state["task"].get("strategy_candidate_set")
+            if frozen != candidate_set:
+                raise PermissionError("Strategy candidate set differs from the frozen Episode set")
+            if (candidate_set["package_id"] != state["package_id"]
+                    or candidate_set["package_digest"] != state["package_digest"]
+                    or checkpoint["episode_id"] != episode_id
+                    or checkpoint["root_episode_id"] != state["root_episode_id"]
+                    or checkpoint["package_digest"] != state["package_digest"]):
+                raise PermissionError("Strategy checkpoint crosses its frozen Episode identity")
+
+            artifact_row = db.execute(
+                "SELECT episode,root_id,data FROM task_artifacts WHERE id=?",
+                (expected_ref,),
+            ).fetchone()
+
+            # Replays are checked before the optimistic revision comparison:
+            # the first successful call necessarily advanced that revision.
+            if same_trigger:
+                if same_trigger[0]["content"] != checkpoint:
+                    raise StateConflict("A different strategy checkpoint is already committed")
+                if artifact_row is None:
+                    raise RecoveryRequired("Strategy checkpoint handoff artifact is missing")
+                artifact = json.loads(artifact_row[2])
+                if (artifact_row[:2] != (episode_id, state["root_episode_id"])
+                        or artifact.get("id") != expected_ref
+                        or artifact.get("content_digest") != content_digest
+                        or artifact.get("content") != handoff_content
+                        or artifact.get("encoding") != "json"):
+                    raise RecoveryRequired("Strategy checkpoint handoff artifact changed")
+                published = [event for event in events
+                             if (event["kind"] == "artifact_published"
+                                 and event["content"].get("id") == expected_ref)]
+                metadata = {key: value for key, value in artifact.items()
+                            if key != "content"}
+                if len(published) != 1 or published[0]["content"] != metadata:
+                    raise RecoveryRequired("Strategy handoff publication evidence changed")
+                return {
+                    "checkpoint": deepcopy(checkpoint),
+                    "handoff_artifact": deepcopy(artifact),
+                }
+
+            if artifact_row is not None:
+                raise RecoveryRequired("Uncommitted strategy handoff artifact exists")
+            if (checkpoint["resolution"]["action"] == "switch"
+                    and any(event["content"].get("resolution", {}).get("action")
+                            == "switch" for event in prior)):
+                raise PermissionError("Episode already committed its strategy switch")
+            if state["revision"] != expected_revision:
+                raise StateConflict("Episode projection has a newer revision")
+
+            decisions = [event["content"] for event in events
+                         if event["kind"] == "strategy_decision"]
+            if (len(decisions) != 1
+                    or decisions[0].get("decision_digest")
+                    != checkpoint["decision_digest"]
+                    or decisions[0].get("candidate_set_digest")
+                    != candidate_set["candidate_set_digest"]
+                    or decisions[0].get("package_digest")
+                    != state["package_digest"]):
+                raise RecoveryRequired("Strategy checkpoint lacks its startup decision evidence")
+
+            plan = checkpoint["plan"]
+            if (state.get("current_plan_ref") != plan["ref"]
+                    or state.get("plan_revision") != plan["revision"]):
+                raise RecoveryRequired("Strategy checkpoint plan identity changed")
+            receipts = state.get("plan_node_receipts")
+            receipt = receipts.get(trigger["node_id"]) if isinstance(receipts, dict) else None
+            if (not isinstance(receipt, dict)
+                    or receipt.get("status") != "completed"
+                    or _digest(receipt) != trigger["receipt_digest"]):
+                raise RecoveryRequired("Strategy checkpoint trigger receipt changed")
+            execution = state.get("plan_execution")
+            node_executions = (execution.get("node_executions")
+                               if isinstance(execution, dict) else None)
+            if not isinstance(node_executions, list):
+                raise RecoveryRequired("Strategy checkpoint plan execution is unavailable")
+            pending = sorted(
+                node.get("node_id") for node in node_executions
+                if isinstance(node, dict) and node.get("status") == "pending")
+            completed_refs = sorted({
+                ref
+                for node in node_executions
+                if isinstance(node, dict) and node.get("status") == "completed"
+                for ref in node.get("output_artifact_refs", [])
+            })
+            if (pending != plan["pending_node_ids"]
+                    or completed_refs != plan["completed_artifact_refs"]):
+                raise RecoveryRequired("Strategy checkpoint plan progress changed")
+            if expected_ref in completed_refs:
+                raise RecoveryRequired("Strategy handoff must be a new artifact")
+            for ref in completed_refs:
+                try:
+                    self.read(ref, episode_id)
+                except (KeyError, PermissionError, ValueError) as exc:
+                    raise RecoveryRequired(
+                        "Strategy checkpoint completed artifact evidence changed"
+                    ) from exc
+
+            usage = self.usage(state["root_episode_id"])
+            budget_usage = {
+                "model_calls": usage["model_calls"],
+                "completion_tokens": usage["charged_completion_tokens"],
+                "tool_calls": usage["tool_calls"],
+                "tool_work_units": usage["charged_tool_work_units"],
+                "nodes": usage["nodes"],
+            }
+            limits = self._get(db, state["root_episode_id"])["budget"]
+            budget_remaining = {
+                "model_calls": max(0, limits["max_model_calls"] - budget_usage["model_calls"]),
+                "completion_tokens": max(0, limits["max_completion_tokens"] - budget_usage["completion_tokens"]),
+                "tool_calls": max(0, limits["max_tool_calls"] - budget_usage["tool_calls"]),
+                "tool_work_units": max(0, limits["max_tool_work_units"] - budget_usage["tool_work_units"]),
+                "nodes": max(0, limits["max_nodes"] - budget_usage["nodes"]),
+            }
+            if checkpoint["root_budget"] != {
+                    "usage": budget_usage, "remaining": budget_remaining}:
+                raise RecoveryRequired("Strategy checkpoint root budget changed")
+
+            namespace, split = self._scope(state)
+            artifact = {
+                "id": expected_ref,
+                "schema_ref": "nexgent.strategy-handoff.v1",
+                "media_type": "application/json",
+                "content": deepcopy(handoff_content),
+                "encoding": "json",
+                "content_digest": content_digest,
+                "producer": {
+                    "episode_id": episode_id,
+                    "node_id": trigger["node_id"],
+                    "attempt_id": checkpoint["source_segment"]["segment_id"],
+                    "package_digest": state["package_digest"],
+                },
+                "input_artifact_refs": deepcopy(plan["completed_artifact_refs"]),
+                "created_at": time.time(),
+                "visibility_scope": "episode",
+                "namespace": namespace,
+                "split": split,
+                "name": "strategy-handoff",
+                "validation": {
+                    "schema_status": "passed",
+                    "checker_ref": "nexgent.strategy-checkpoint.v1",
+                },
+            }
+            db.execute(
+                "INSERT INTO task_artifacts VALUES(?,?,?,?)",
+                (expected_ref, episode_id, state["root_episode_id"], _json(artifact)),
+            )
+            self._event(db, episode_id, "artifact_published", {
+                key: deepcopy(value) for key, value in artifact.items()
+                if key != "content"
+            })
+            self._event(db, episode_id, "strategy_checkpoint", checkpoint)
+            state["strategy_checkpoint"] = deepcopy(checkpoint)
+            state["revision"] += 1
+            state["updated_at"] = time.time()
+            db.execute(
+                "UPDATE task_episodes SET updated=?,state=? WHERE id=?",
+                (state["updated_at"], _json(state), episode_id),
+            )
+            return {
+                "checkpoint": deepcopy(checkpoint),
+                "handoff_artifact": deepcopy(artifact),
+            }
+
+    @staticmethod
     def _scope(episode, namespace=None, split=None):
         context = episode["task"].get("context", {})
         actual_namespace = context.get("memory_namespace", "default")
