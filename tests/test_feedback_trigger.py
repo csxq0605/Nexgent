@@ -109,6 +109,34 @@ def test_terminal_hook_enqueues_one_keyed_item_and_drain_projects_public_feedbac
     assert trigger.drain() == []
 
 
+@pytest.mark.parametrize("failure_domain,usage_complete,reason", [
+    ("infrastructure", True, "source_infrastructure_failure"),
+    ("agent", False, "source_usage_incomplete"),
+])
+def test_unknown_or_infrastructure_source_never_starts_rsi_development(
+        tmp_path, monkeypatch, failure_domain, usage_complete, reason):
+    tasks, _, _, trigger, _ = _services(tmp_path, attach=False)
+    episode = tasks.create(
+        "A public task with an uncertain terminal outcome",
+        package_channel="general",
+        context={"split": "development", "split_role": "development"})
+    state = tasks.store.get(episode["id"])
+    state["status"] = "failed"
+    state["failure_domain"] = failure_domain
+    tasks.store.save(state)
+    original_usage = tasks.store.usage
+    monkeypatch.setattr(tasks.store, "usage", lambda identity: {
+        **original_usage(identity), "usage_complete": usage_complete})
+    trigger.observe_terminal(episode["id"])
+
+    [work] = trigger.drain()
+
+    assert work["status"] == "deferred"
+    assert work["reason"] == reason
+    assert "feedback_bundle" not in work
+    assert tasks.store.feedback_triggers(statuses=["feedback_captured"], limit=10) == []
+
+
 def test_normal_channel_task_without_split_is_frozen_as_development_and_triggered(tmp_path):
     tasks, _, _, trigger, _ = _services(tmp_path)
     state = tasks.create("Normal CLI-style task", package_channel="general")

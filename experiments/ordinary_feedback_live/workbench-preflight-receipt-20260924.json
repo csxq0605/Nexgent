@@ -1,0 +1,50 @@
+{
+  "schema": "nexgent.ordinary-search-live-receipt.v1",
+  "contract": "WORKBENCH_PREFLIGHT_CONTRACT.md",
+  "model": "mimo-v2.6-flash",
+  "source_task": "workbench development seed 15 public fields",
+  "source_episode_id": "episode-d4f2d296b11c4c04",
+  "source_status": "failed",
+  "source_failure_domain": "infrastructure",
+  "source_model_calls": 1,
+  "source_usage_complete": false,
+  "source_error_class": "provider_dns_resolution_failure",
+  "feedback_work_id": "feedback-work-faa734273ae74d8171f1b3e9",
+  "development_episode_id": "episode-ffce4ee684b344a4",
+  "development_model_calls": 1,
+  "development_choice": {
+    "candidate_type": "orchestration",
+    "source_ref": "orchestration_search"
+  },
+  "search_id": "orchestration-search-b608c22af7419798fcb037441b365b77669cb425",
+  "attempts": [
+    {
+      "number": 1,
+      "generation_id": "generation-53b2331acefe4cd1",
+      "episode_id": "episode-8d249008952447e0",
+      "model_calls": 1,
+      "status": "missing",
+      "reason_type": "ContractError",
+      "error_class": "candidate_workflow_json_invalid"
+    },
+    {
+      "number": 2,
+      "generation_id": "generation-0358113214da4105",
+      "episode_id": "episode-2f4f459797a84367",
+      "model_calls": 1,
+      "status": "missing",
+      "reason_type": "PackageError",
+      "error_class": "compact_package_patch_unknown_fields"
+    }
+  ],
+  "search_status": "exhausted",
+  "static_preflight_exercised": false,
+  "qualified_candidate_count": 0,
+  "independent_selection_run": false,
+  "guard_run": false,
+  "later_reuse": false,
+  "work_status": "rejected",
+  "work_reason": "orchestration_search_exhausted",
+  "active_channel_revision": 0,
+  "discovered_control_error": "infrastructure_source_was_sent_to_rsi_development"
+}

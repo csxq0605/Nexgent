@@ -1374,6 +1374,10 @@ class AutoEvolutionService:
             return self._defer(work, "source_no_longer_terminal")
         if self._source_kind(episode) != "ordinary_development":
             return self._defer(work, "source_boundary_changed")
+        if episode.get("failure_domain") == "infrastructure":
+            return self._defer(work, "source_infrastructure_failure")
+        if self.store.usage(episode["id"]).get("usage_complete") is not True:
+            return self._defer(work, "source_usage_incomplete")
         policy = work.get("policy")
         if (not isinstance(policy, dict)
                 or digest(policy) != work.get("policy_digest")):
