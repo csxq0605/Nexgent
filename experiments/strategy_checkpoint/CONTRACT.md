@@ -1,6 +1,6 @@
 # D1-C 反馈检查点真实模型探针：预注册合同草案
 
-日期：2026-09-24。状态：**草案；不得运行。第 4 节仍有生产前提尚未满足。**
+日期：2026-09-24。状态：**草案；不得运行。代码前提已有定向测试，但四条件离线预检和冻结运行清单尚未完成。**
 
 本合同预注册一个任务类型无关的运行时机制探针：同一普通任务 Episode 从冻结 DAG 开始，在持久化、可归因的中途反馈检查点，由真实 MiMo v2.6-flash 决定继续 DAG 或切换到同包受控代码入口。若切换，入口必须读取冻结 handoff，沿用同一根预算和绝对截止时间，再交付最终工件。
 
@@ -50,12 +50,12 @@ D1-C 不得覆盖、重标或解释为修复该负结果。本合同冻结初始
 
 ## 4. 运行前必须满足的前提与状态
 
-以下四项是执行本合同的硬前提。前三项属于生产执行路径，第四项隔离 D1-B 的启动选择负结果；任一未关闭时禁止发起 Provider 请求。
+以下四项是执行本合同的硬前提。前三项属于生产执行路径，第四项隔离 D1-B 的启动选择负结果。代码路径已有定向测试；仍须完成第 5、9、11 节的四条件离线预检、评价器隔离和冻结运行清单，才可发起 Provider 请求。
 
-1. **生产 DAG 暴露 checkpoint。** 生产 adaptive package 的 DAG／GraphProposal 合同必须能声明并编译 `strategy_checkpoint_rules`，绑定安全图切口、触发节点和反馈路径。仅在测试包手写规则不满足此项。
-2. **生产 entry 能读取 handoff。** 同包真实受控代码 entry 必须识别 `strategy_handoff_ref`，在任何 post-switch 模型、工具、技能或发布动作前读取并验证 handoff。测试专用 entry 不满足此项。
+1. **生产 DAG 暴露 checkpoint：代码路径已实现，真实任务待验。** `994c6ae` 让生产 adaptive package 的 DAG／GraphProposal 声明并编译 `strategy_checkpoint_rules`；模型图提案到真实默认 entry 的定向纵向测试通过。真实 MiMo 是否生成有用检查点尚未验证。
+2. **生产 entry 能读取 handoff：代码路径已实现，真实任务待验。** `994c6ae` 让同包默认受控代码 entry 在任何后续模型、工具、技能或发布动作前读取 `strategy_handoff_ref`，并把准确工件提供给任务智能体。
 3. **完成态 handoff 消费不变量：已实现，真实任务待验。** `66bd44c` 要求 switched entry 的第一个宿主调用读取准确 handoff，且在完成和写入 `active_strategy` 前再次核验；零模型调用、先发布后读取的负测试均拒绝。该确定性测试不能替代生产 entry 的真实运行收据。
-4. **宿主冻结 `StrategyStart`。** D1-C probe 必须以版本化、持久、宿主生成的 start record 将初始组件固定为 DAG，并绑定 package/candidate/source digest、预算和原因 `d1c_experimental_intervention`。不得通过真实启动 selector 或人工预填假的模型 receipt 达到这一点。
+4. **宿主冻结 `StrategyStart`：代码路径已实现，真实任务待验。** `d404efb` 提供版本化、持久、宿主生成的 start record，将初始组件固定为 DAG，绑定 package/candidate/source digest 与来源 `host_policy`，并留下不含模型收据的决策事件。探针的 policy ID 固定为 `d1c_experimental_intervention`；不得通过真实启动 selector 或人工预填假的模型 receipt 达到这一点。
 
 关闭前提后，须为每项增加定向离线测试，并把测试名称、执行 commit 和结果摘要写入 run manifest 的 preflight；本合同正文不因实现细节修复而回写成功声明。
 
