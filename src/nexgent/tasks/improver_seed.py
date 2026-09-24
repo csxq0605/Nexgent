@@ -331,6 +331,12 @@ the non-abstention receipts addresses the observed failure. For `no_change`,
 set `source_ref` and `hypothesis` to null and give a concise evidence-based
 reason.
 
+An Episode execution trace may contain a host-projected `workflow_diagnostic`.
+When it includes `consumer`, `producer`, `requested_path`, and `output_schema`,
+use those fields as bounded structural evidence about the workflow contract.
+When it contains only `code`, the host could not determine the graph relation;
+do not guess missing nodes, paths, schemas, or task data.
+
 For any other candidate, provide exactly one hypothesis with nonempty
 `failure_mechanism`, `expected_behavior`, `applicability`, and `falsifier`.
 Tie the mechanism to explicit public fields and the selected option's evidence.
@@ -357,6 +363,11 @@ the quality error. Digests prove identity only; never infer their contents. Do
 not propose a publisher/schema repair unless the feedback explicitly records a
 protocol, delivery, or schema failure. When the available projection cannot
 distinguish competing mechanisms, abstain instead of selecting one speculatively.
+If `execution_trace.workflow_diagnostic` includes `consumer`, `producer`,
+`requested_path`, and `output_schema`, those host-projected fields are explicit
+structural evidence and may support a workflow repair. A diagnostic containing
+only `code` identifies the failure class but not a repair target; never invent
+the omitted graph relation or output contract.
 
 For `legacy_path_v1`, produce exactly one `nexgent.behavior-patch.v1` JSON object:
 

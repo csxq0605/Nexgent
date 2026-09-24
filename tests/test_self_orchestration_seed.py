@@ -33,6 +33,8 @@ def test_self_orchestration_seed_compiles_without_a_fixed_team_topology():
     assert "strategy_checkpoint_rules" in prompt
     assert "strategy_candidate_set" in prompt
     assert "feedback_path" in prompt
+    assert "does not add\nan automatic `result` wrapper" in prompt
+    assert '{"$node":"inspect.issues"}' in prompt
     assert all(term not in prompt.casefold()
                for term in ("benchmark", "openfoam", "scientific discovery"))
 

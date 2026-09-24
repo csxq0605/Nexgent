@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from nexgent.tasks.workflows import WorkflowError, run_workflow
+from nexgent.tasks.workflows import WorkflowError, plan_from_workflow, run_workflow
 
 
 def test_control_and_artifact_dependencies_are_separate():
@@ -170,6 +170,95 @@ def test_missing_binding_path_is_node_failure_and_never_invoked():
     assert result["status"] == "failed"
     assert result["nodes"]["a"]["value"]["error_type"] == "WorkflowError"
     assert calls == []
+
+
+def test_closed_output_schema_rejects_impossible_binding_before_execution():
+    workflow = {
+        "nodes": [
+            {"id": "inspect", "method": "tool", "output_schema": {
+                "type": "object",
+                "properties": {"issues": {"type": "array"}},
+                "required": ["issues"],
+                "additionalProperties": False,
+            }},
+            {"id": "reconcile", "method": "ask", "bindings": {
+                "payload": {"inspect": {"$node": "inspect.result"}},
+            }},
+        ],
+    }
+    calls = []
+
+    with pytest.raises(
+            WorkflowError,
+            match=r"reconcile.*unavailable output path inspect\.result"):
+        run_workflow(workflow, {}, lambda *args: calls.append(args))
+
+    assert calls == []
+
+
+def test_declared_and_open_output_paths_remain_compilable():
+    closed = {
+        "nodes": [
+            {"id": "inspect", "method": "tool", "output_schema": {
+                "type": "object",
+                "properties": {"issues": {"type": "array"}},
+                "required": ["issues"],
+                "additionalProperties": False,
+            }},
+            {"id": "consume", "method": "join", "bindings": {
+                "issues": {"$node": "inspect.issues"},
+            }},
+        ],
+        "outputs": {"issues": {"$node": "consume.issues"}},
+    }
+    assert plan_from_workflow(closed, "declared-path").id == "declared-path"
+
+    open_result = deepcopy(closed)
+    open_result["nodes"][0]["output_schema"] = {"type": "object"}
+    open_result["nodes"][1]["bindings"] = {
+        "result": {"$node": "inspect.result"},
+    }
+    assert plan_from_workflow(open_result, "open-path").id == "open-path"
+
+
+def test_nested_closed_output_schema_rejects_missing_descendant():
+    workflow = {
+        "nodes": [
+            {"id": "source", "method": "tool", "output_schema": {
+                "type": "object",
+                "properties": {"receipt": {
+                    "type": "object",
+                    "properties": {"status": {"type": "string"}},
+                    "additionalProperties": False,
+                }},
+                "additionalProperties": False,
+            }},
+            {"id": "consume", "method": "join", "bindings": {
+                "value": {"$node": "source.receipt.result"},
+            }},
+        ],
+    }
+
+    with pytest.raises(WorkflowError, match="source.receipt.result"):
+        plan_from_workflow(workflow, "nested-impossible-path")
+
+
+def test_schema_path_preflight_fails_open_beyond_bounded_depth():
+    deep_path = ".".join(f"level{index}" for index in range(80))
+    workflow = {
+        "nodes": [
+            {"id": "source", "method": "tool", "output_schema": {
+                "type": "object", "properties": {},
+                "additionalProperties": False,
+            }},
+            {"id": "consume", "method": "join", "bindings": {
+                "value": {"$node": f"source.{deep_path}"},
+            }},
+        ],
+    }
+
+    assert plan_from_workflow(workflow, "bounded-schema-path").id == \
+        "bounded-schema-path"
 
 
 def test_cancel_joins_all_admitted_parallel_calls():

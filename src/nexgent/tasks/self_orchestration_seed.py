@@ -54,6 +54,13 @@ the node prompt. Omit `params.prompt` on every node that uses `task:<alias>`;
 put node-specific context in `bindings.payload`. Supplying a different
 `params.prompt` is a contract error and cannot override the role definition.
 
+Every completed node exposes its returned JSON directly. A tool does not add
+an automatic `result` wrapper: bind its whole response with
+`{"$node":"inspect"}` or an actual output field with
+`{"$node":"inspect.issues"}`. Use `{"$node":"inspect.result"}` only if the
+tool's declared output schema really has a top-level `result` field. Ask
+nodes likewise expose the JSON object they return, without an extra wrapper.
+
 `available_skills` lists installed skills with `name`, `component_ref`, kind,
 and input/output schemas. When one fits the task, add a `skill` node using the
 listed `component_ref`, put its `name` in `params.name`, and bind the requested

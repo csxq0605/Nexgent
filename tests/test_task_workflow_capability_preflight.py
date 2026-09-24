@@ -4,12 +4,13 @@ from copy import deepcopy
 
 import pytest
 
+from nexgent.tasks.capability_authority import make_episode_authority
 from nexgent.tasks.graph_compiler_repair import compile_with_graph_repair
 from nexgent.tasks.orchestration import NodeStatus, PlanExecution
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.self_orchestration_seed import self_orchestration_package
 from nexgent.tasks.tools import ContractError, ToolRegistry, ToolSpec
-from nexgent.tasks.workflows import plan_from_workflow
+from nexgent.tasks.workflows import WorkflowError, plan_from_workflow
 
 
 def _tool_registry():
@@ -19,6 +20,21 @@ def _tool_registry():
         output_schema={"type": "object"},
         effect_class="local_compute",
         handler=lambda arguments, context: arguments,
+    )])
+
+
+def _closed_tool_registry():
+    return ToolRegistry([ToolSpec(
+        name="test.inspect",
+        input_schema={"type": "object"},
+        output_schema={
+            "type": "object",
+            "properties": {"issues": {"type": "array"}},
+            "required": ["issues"],
+            "additionalProperties": False,
+        },
+        effect_class="local_compute",
+        handler=lambda arguments, context: {"issues": []},
     )])
 
 
@@ -292,6 +308,82 @@ def test_dynamic_bindings_and_artifact_ports_satisfy_capability_contracts(tmp_pa
     assert [node["method"] for node in materialized["nodes"]] == [
         "join", "read_artifact", "publish", "delegate", "develop_skill", "tool",
     ]
+
+
+def test_static_tool_contract_rejects_synthetic_result_wrapper_at_materialize(tmp_path):
+    service = TaskService(tmp_path, tools=_closed_tool_registry())
+    workflow = {
+        "nodes": [
+            {"id": "inspect", "method": "tool", "params": {
+                "name": "test.inspect", "arguments": {},
+            }},
+            {"id": "consume", "method": "join", "bindings": {
+                "inspect": {"$node": "inspect.result"},
+            }},
+        ],
+        "outputs": {},
+    }
+
+    with pytest.raises(
+            WorkflowError,
+            match=r"consume.*unavailable output path inspect\.result"):
+        service._materialize_workflow(
+            self_orchestration_package(), "generated", ["test.inspect"],
+            proposed_workflow=workflow,
+        )
+
+
+def test_trusted_tool_contract_replaces_planner_schema_and_is_stable(tmp_path):
+    service = TaskService(tmp_path, tools=_closed_tool_registry())
+    workflow = {
+        "nodes": [{
+            "id": "echo", "method": "tool",
+            "params": {"name": "test.inspect", "arguments": {}},
+            "output_schema": {"type": "string"},
+        }],
+        "outputs": {},
+    }
+
+    first = service._materialize_workflow(
+        self_orchestration_package(), "generated", ["test.inspect"],
+        proposed_workflow=workflow,
+    )
+    second = service._materialize_workflow(
+        self_orchestration_package(), "generated", ["test.inspect"],
+        proposed_workflow=first,
+    )
+
+    assert first["nodes"][0]["output_schema"] == _closed_tool_registry().get(
+        "test.inspect").output_schema
+    assert second == first
+    assert plan_from_workflow(first, "trusted-tool") == plan_from_workflow(
+        second, "trusted-tool")
+
+
+def test_dynamic_tool_name_does_not_receive_an_invented_output_contract(tmp_path):
+    service = TaskService(tmp_path, tools=_closed_tool_registry())
+    workflow = {
+        "nodes": [
+            {"id": "developed", "method": "join", "params": {
+                "name": "task.created-at-runtime",
+            }},
+            {"id": "invoke", "method": "tool",
+             "params": {"arguments": {}},
+             "bindings": {"name": {"$node": "developed.name"}}},
+        ],
+        "outputs": {},
+    }
+    authority = make_episode_authority(
+        ["tool"], ["local_compute"], max_definitions=1, max_invocations=1)
+
+    materialized = service._materialize_workflow(
+        self_orchestration_package(), "generated", [],
+        proposed_workflow=workflow, capability_authority=authority,
+    )
+
+    invoke = next(node for node in materialized["nodes"]
+                  if node["id"] == "invoke")
+    assert "output_schema" not in invoke
 
 
 def test_capability_error_remains_bounded_for_many_long_unknown_fields(tmp_path):

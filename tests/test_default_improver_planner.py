@@ -212,3 +212,7 @@ def test_default_improver_registers_distinct_planning_and_generation_entries():
     }
     assert "prompts/develop.md" in package["files"]
     assert "prompts/improve.md" in package["files"]
+    assert "workflow_diagnostic" in package["files"]["prompts/develop.md"]
+    assert "workflow_diagnostic" in package["files"]["prompts/improve.md"]
+    assert "do not guess" in package["files"]["prompts/develop.md"]
+    assert "never invent" in package["files"]["prompts/improve.md"]

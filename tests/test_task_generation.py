@@ -9,7 +9,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nexgent.tasks.evolution import EvolutionService
 from nexgent.tasks.evolution_view import public_evolution_event
-from nexgent.tasks.generation import GenerationService, PATCH_SCHEMA, PATCH_SCHEMA_V2
+from nexgent.tasks.generation import (
+    GenerationService, PATCH_SCHEMA, PATCH_SCHEMA_V2, _public_execution_trace,
+)
 from nexgent.tasks import improvers as improver_module
 from nexgent.tasks.improvers import ImproverService
 from nexgent.tasks.improver_seed import default_improver_package
@@ -346,6 +348,104 @@ def test_feedback_bundle_is_immutable_bounded_and_excludes_hidden_evaluator_cont
     assert all(not ({"request", "result", "arguments", "prompt", "payload"} & set(node))
                for node in trace["nodes"])
     assert generation.feedback(bundle["id"])["record_digest"] == bundle["record_digest"]
+
+
+def test_public_trace_projects_unique_workflow_binding_failure_without_values():
+    secret = "PRIVATE_TOOL_OUTPUT_MUST_NOT_CROSS_THE_BOUNDARY"
+    episode = {
+        "last_error": (
+            "ContractError: Node reconcile failed: WorkflowError: "
+            "Binding path is unavailable: result"),
+        "failure_domain": "orchestration",
+        "nodes": {},
+        "plan_workflow_snapshot": {
+            "nodes": [
+                {
+                    "id": "inspect",
+                    "method": "tool",
+                    "params": {"credential": secret},
+                    "output_schema": {
+                        "type": "object",
+                        "properties": {"issues": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": secret,
+                        }},
+                        "required": ["issues"],
+                        "additionalProperties": False,
+                        "description": secret,
+                    },
+                },
+                {
+                    "id": "reconcile",
+                    "method": "ask",
+                    "bindings": {
+                        "payload": {"inspection": {"$node": "inspect.result"}},
+                        "private_prompt": secret,
+                    },
+                },
+            ],
+            "private_evaluator": secret,
+        },
+    }
+
+    trace = _public_execution_trace(episode)
+
+    assert trace["workflow_diagnostic"] == {
+        "code": "workflow_binding_path_unavailable",
+        "consumer": "reconcile",
+        "producer": "inspect",
+        "requested_path": "result",
+        "output_schema": {
+            "type": "object",
+            "properties": {"issues": {
+                "type": "array", "items": {"type": "string"},
+            }},
+            "required": ["issues"],
+            "additionalProperties": False,
+        },
+    }
+    serialized = json.dumps(trace, ensure_ascii=False)
+    assert secret not in serialized
+    assert "params" not in serialized
+    assert "bindings" not in serialized
+
+
+@pytest.mark.parametrize("mutation", [
+    "ambiguous", "sensitive_path", "unknown_consumer", "malformed_schema",
+    "deep_binding", "duplicate_node",
+])
+def test_public_trace_reduces_uncertain_binding_failure_to_safe_code(mutation):
+    consumer = "reconcile" if mutation != "unknown_consumer" else "missing"
+    path = "result" if mutation != "sensitive_path" else "private_token"
+    bindings = {"left": {"$node": f"inspect.{path}"}}
+    if mutation == "ambiguous":
+        bindings["right"] = {"$node": "second.result"}
+    if mutation == "deep_binding":
+        bindings = {"$node": "inspect.result"}
+        for _ in range(18):
+            bindings = {"nested": bindings}
+    inspect_schema = ({"type": "object", "required": [{}]}
+                      if mutation == "malformed_schema" else {})
+    nodes = [
+        {"id": "inspect", "method": "tool", "output_schema": inspect_schema},
+        {"id": "second", "method": "tool", "output_schema": {}},
+        {"id": "reconcile", "method": "ask", "bindings": bindings},
+    ]
+    if mutation == "duplicate_node":
+        nodes.append({"id": "inspect", "method": "tool", "output_schema": {}})
+    episode = {
+        "last_error": (
+            f"ContractError: Node {consumer} failed: WorkflowError: "
+            f"Binding path is unavailable: {path}"),
+        "nodes": {},
+        "plan_workflow_snapshot": {"nodes": nodes},
+    }
+
+    trace = _public_execution_trace(episode)
+
+    assert trace["workflow_diagnostic"] == {
+        "code": "workflow_binding_path_unavailable",
+    }
 
 
 def test_feedback_bundle_projects_only_bounded_task_authored_public_signals(tmp_path):

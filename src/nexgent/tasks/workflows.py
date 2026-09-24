@@ -61,6 +61,125 @@ def _node_ref(ref, ids):
     return node, path
 
 
+def _schema_path_impossible(schema, path):
+    """Return true only when a local schema proves ``path`` cannot exist.
+
+    Workflows may consume model or dynamically supplied JSON whose shape is
+    deliberately open.  The compiler must therefore avoid treating an absent
+    ``properties`` entry as an error unless the schema closes that object.  A
+    false result means "possible or unknown", not that the path is guaranteed
+    to be present at runtime.
+    """
+    parts = path.split(".") if path else []
+    # This is a conservative preflight, not a JSON Schema evaluator. Keep
+    # task-authored paths from driving Python recursion and fail open when the
+    # requested proof exceeds the bounded inspection budget.
+    if len(path) > 4000 or len(parts) > 64:
+        return False
+
+    def impossible(current, remaining):
+        if not remaining:
+            return current is False
+        if current is False:
+            return True
+        if current is True or not isinstance(current, dict):
+            return False
+
+        # Literal schemas let us decide without approximating JSON Schema
+        # composition rules.
+        literals = ([current["const"]] if "const" in current else
+                    current.get("enum") if isinstance(current.get("enum"), list)
+                    else None)
+        if literals is not None:
+            for literal in literals:
+                try:
+                    _get(literal, ".".join(remaining))
+                    return False
+                except WorkflowError:
+                    continue
+            return True
+
+        part, rest = remaining[0], remaining[1:]
+        declared = current.get("type")
+        types = ({declared} if isinstance(declared, str) else
+                 set(declared) if isinstance(declared, list)
+                 and all(isinstance(item, str) for item in declared) else None)
+        object_possible = types is None or "object" in types
+        array_possible = types is None or "array" in types
+
+        outcomes = []
+        if object_possible:
+            properties = current.get("properties", {})
+            property_schema = (properties.get(part) if isinstance(properties, dict)
+                               and part in properties else None)
+            patterns = current.get("patternProperties", {})
+            if isinstance(patterns, dict) and patterns:
+                # Running arbitrary regular expressions here would put an
+                # untrusted schema on the compiler's critical path. Treat
+                # pattern-governed properties as unknown instead.
+                return False
+            applicable = [] if property_schema is None else [property_schema]
+            if applicable:
+                outcomes.append(any(impossible(item, rest) for item in applicable))
+            else:
+                additional = current.get("additionalProperties", True)
+                outcomes.append(
+                    True if additional is False else impossible(additional, rest))
+
+        if array_possible:
+            if not part.isdecimal():
+                outcomes.append(True)
+            else:
+                index = int(part)
+                max_items = current.get("maxItems")
+                if type(max_items) is int and index >= max_items:
+                    outcomes.append(True)
+                else:
+                    prefix = current.get("prefixItems", [])
+                    if isinstance(prefix, list) and index < len(prefix):
+                        outcomes.append(impossible(prefix[index], rest))
+                    else:
+                        items = current.get("items", True)
+                        outcomes.append(
+                            True if items is False else impossible(items, rest))
+
+        # A path is impossible only if every type allowed by this schema makes
+        # it impossible. Unknown/non-container types keep the result open.
+        if types is not None and any(
+                item not in {"object", "array"} for item in types):
+            outcomes.append(True)
+        return bool(outcomes) and all(outcomes)
+
+    return impossible(schema, parts)
+
+
+def _validate_binding_paths(value, nodes, context):
+    """Reject node-result paths that declared output schemas rule out."""
+    if isinstance(value, dict):
+        if "$node" in value:
+            node_id, path = _node_ref(value["$node"], nodes)
+            if _schema_path_impossible(nodes[node_id].get("output_schema", {}), path):
+                rendered = path or "<root>"
+                raise WorkflowError(
+                    f"{context} refers to unavailable output path "
+                    f"{node_id}.{rendered}")
+            return
+        if "$first_success" in value:
+            refs = value["$first_success"]
+            if (isinstance(refs, list) and refs
+                    and all(_schema_path_impossible(
+                        nodes[node_id].get("output_schema", {}), path)
+                        for node_id, path in (_node_ref(ref, nodes) for ref in refs))):
+                raise WorkflowError(
+                    f"{context} has no schema-compatible first-success output path")
+            return
+        for item in value.values():
+            _validate_binding_paths(item, nodes, context)
+    elif isinstance(value, list):
+        for item in value:
+            _validate_binding_paths(item, nodes, context)
+
+
 def _references(value, ids):
     refs = set()
     if isinstance(value, dict):
@@ -175,6 +294,12 @@ def _validate(workflow, depth=0):
             if until is not None and (not isinstance(until, dict) or not isinstance(until.get("path"), str) or "equals" not in until):
                 raise WorkflowError("Loop until conditions need path and equals")
             _validate(node.get("body"), depth + 1)
+            if (until is not None
+                    and _schema_path_impossible(
+                        node["body"].get("output_schema", {}), until["path"])):
+                raise WorkflowError(
+                    f"Loop node {node['id']} until condition refers to an "
+                    "unavailable body output path")
         by_id[node["id"]] = node
     controls = workflow.get("control_edges", [])
     artifacts = workflow.get("artifact_edges", [])
@@ -184,6 +309,11 @@ def _validate(workflow, depth=0):
     incoming_artifact = {node: [] for node in by_id}
     dependencies = {node: _references({"params": item.get("params", {}), "bindings": item.get("bindings", {})}, by_id)
                     for node, item in by_id.items()}
+    for node_id, item in by_id.items():
+        _validate_binding_paths(
+            {"params": item.get("params", {}),
+             "bindings": item.get("bindings", {})},
+            by_id, f"Workflow node {node_id}")
     for edge in controls:
         if (not isinstance(edge, dict) or not isinstance(edge.get("from"), str)
                 or not isinstance(edge.get("to"), str) or edge["from"] not in by_id or edge["to"] not in by_id):
@@ -191,6 +321,12 @@ def _validate(workflow, depth=0):
         condition = edge.get("condition")
         if condition is not None and (not isinstance(condition, dict) or not isinstance(condition.get("path"), str) or "equals" not in condition):
             raise WorkflowError("Control conditions need path and equals")
+        if (condition is not None and condition["path"] != "$status"
+                and _schema_path_impossible(
+                    by_id[edge["from"]].get("output_schema", {}),
+                    condition["path"])):
+            raise WorkflowError(
+                "Control condition refers to an unavailable producer output path")
         incoming_control[edge["to"]].append(edge)
         dependencies[edge["to"]].add(edge["from"])
     for edge in artifacts:
@@ -201,6 +337,11 @@ def _validate(workflow, depth=0):
             raise WorkflowError("Artifact edge needs valid producers, consumers and port paths")
         if not edge["input_port"] or any(not part for part in edge["input_port"].split(".")):
             raise WorkflowError("Artifact input ports must be nonempty dotted paths")
+        if _schema_path_impossible(
+                by_id[edge["producer_node"]].get("output_schema", {}),
+                edge["output_port"]):
+            raise WorkflowError(
+                "Artifact edge refers to an unavailable producer output path")
         if "message" in edge:
             try:
                 expected_schema = message_schema_ref(
@@ -217,6 +358,7 @@ def _validate(workflow, depth=0):
     if not isinstance(outputs, dict):
         raise WorkflowError("Workflow outputs must be a binding object")
     _references(outputs, by_id)
+    _validate_binding_paths(outputs, by_id, "Workflow output")
     remaining = {node: set(deps) for node, deps in dependencies.items()}
     while remaining:
         ready = {node for node, deps in remaining.items() if not deps}

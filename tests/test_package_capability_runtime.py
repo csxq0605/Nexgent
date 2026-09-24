@@ -223,6 +223,7 @@ def test_workflow_package_tool_requires_exact_component_binding(tmp_path):
     package = _tool_workflow_package()
     materialized = service._materialize_workflow(package, "main", [])
     assert materialized["nodes"][0]["component_ref"] == "portable-tool"
+    assert materialized["nodes"][0]["output_schema"] == TOOL_OUTPUT
 
     with pytest.raises(ContractError, match="matching S component_ref"):
         bad = _tool_workflow_package(component_ref="main-workflow")

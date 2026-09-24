@@ -50,6 +50,15 @@ _PUBLIC_FAILURE_CODES = frozenset({
     "tool_failure", "unknown_failure", "unsupported_capability",
     "validation_failed",
 })
+_PUBLIC_WORKFLOW_IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,79}")
+_PUBLIC_WORKFLOW_PATH_PART = re.compile(r"[A-Za-z0-9_-]{1,80}")
+_PUBLIC_BINDING_FAILURE = re.compile(
+    r"(?:^|:\s)Node (?P<consumer>[A-Za-z][A-Za-z0-9_-]{0,79}) failed: "
+    r"WorkflowError: Binding path is unavailable: (?P<path>[A-Za-z0-9_.-]{1,320})$"
+)
+_PUBLIC_SCHEMA_TYPES = frozenset({
+    "array", "boolean", "integer", "null", "number", "object", "string",
+})
 
 
 def _copy(value, label="Generation value"):
@@ -121,6 +130,167 @@ def _error_type(value):
     return name if name.isidentifier() and len(name) <= 120 else "RuntimeError"
 
 
+def _public_workflow_identifier(value):
+    if (not isinstance(value, str)
+            or _PUBLIC_WORKFLOW_IDENTIFIER.fullmatch(value) is None
+            or _path_tokens(value) & _PUBLIC_FEEDBACK_SECRET_TOKENS):
+        return None
+    return value
+
+
+def _public_workflow_path(value):
+    if not isinstance(value, str) or not value or len(value) > 320:
+        return None
+    parts = value.split(".")
+    if (any(_PUBLIC_WORKFLOW_PATH_PART.fullmatch(part) is None for part in parts)
+            or _path_tokens(value) & _PUBLIC_FEEDBACK_SECRET_TOKENS):
+        return None
+    return value
+
+
+def _public_output_schema(schema, depth=0):
+    """Project structural JSON Schema fields without descriptions or values."""
+    if depth > 8 or not isinstance(schema, dict) or len(schema) > 64:
+        return None
+    projected = {}
+    declared = schema.get("type")
+    if declared is not None:
+        if isinstance(declared, str) and declared in _PUBLIC_SCHEMA_TYPES:
+            projected["type"] = declared
+        elif (isinstance(declared, list) and declared
+              and len(declared) <= len(_PUBLIC_SCHEMA_TYPES)
+              and all(isinstance(item, str) for item in declared)
+              and len(set(declared)) == len(declared)
+              and all(item in _PUBLIC_SCHEMA_TYPES for item in declared)):
+            projected["type"] = list(declared)
+        else:
+            return None
+    properties = schema.get("properties")
+    if properties is not None:
+        if not isinstance(properties, dict) or len(properties) > 64:
+            return None
+        public_properties = {}
+        for name, child in properties.items():
+            public_name = _public_workflow_identifier(name)
+            public_child = _public_output_schema(child, depth + 1)
+            if public_name is None or public_child is None:
+                return None
+            public_properties[public_name] = public_child
+        projected["properties"] = public_properties
+    required = schema.get("required")
+    if required is not None:
+        if (not isinstance(required, list) or len(required) > 64
+                or any(not isinstance(name, str) for name in required)
+                or len(set(required)) != len(required)):
+            return None
+        public_required = [_public_workflow_identifier(name) for name in required]
+        if any(name is None for name in public_required):
+            return None
+        projected["required"] = public_required
+    additional = schema.get("additionalProperties")
+    if additional is not None:
+        if type(additional) is bool:
+            projected["additionalProperties"] = additional
+        else:
+            public_additional = _public_output_schema(additional, depth + 1)
+            if public_additional is None:
+                return None
+            projected["additionalProperties"] = public_additional
+    items = schema.get("items")
+    if items is not None:
+        if type(items) is bool:
+            projected["items"] = items
+        else:
+            public_items = _public_output_schema(items, depth + 1)
+            if public_items is None:
+                return None
+            projected["items"] = public_items
+    return projected
+
+
+def _binding_refs(value, depth=0):
+    if depth > 16:
+        return None
+    refs = []
+    if isinstance(value, dict):
+        if set(value) == {"$node"} and isinstance(value["$node"], str):
+            refs.append(value["$node"])
+        else:
+            for child in value.values():
+                child_refs = _binding_refs(child, depth + 1)
+                if child_refs is None:
+                    return None
+                refs.extend(child_refs)
+    elif isinstance(value, list):
+        for child in value:
+            child_refs = _binding_refs(child, depth + 1)
+            if child_refs is None:
+                return None
+            refs.extend(child_refs)
+    return refs if len(refs) <= 512 else None
+
+
+def _public_workflow_diagnostic(episode):
+    """Return a repairable graph error without crossing the task-data boundary."""
+    error = episode.get("last_error")
+    if not isinstance(error, str) or "Binding path is unavailable" not in error:
+        return None
+    fallback = {"code": "workflow_binding_path_unavailable"}
+    match = _PUBLIC_BINDING_FAILURE.search(error)
+    if match is None:
+        return fallback
+    consumer = _public_workflow_identifier(match.group("consumer"))
+    requested_path = _public_workflow_path(match.group("path"))
+    workflow = episode.get("plan_workflow_snapshot")
+    nodes = workflow.get("nodes") if isinstance(workflow, dict) else None
+    if (consumer is None or requested_path is None or not isinstance(nodes, list)
+            or not 1 <= len(nodes) <= 256):
+        return fallback
+    by_id = {}
+    for node in nodes:
+        node_id = (_public_workflow_identifier(node.get("id"))
+                   if isinstance(node, dict) else None)
+        if node_id is None or node_id in by_id:
+            return fallback
+        by_id[node_id] = node
+    consumer_node = by_id.get(consumer)
+    if consumer_node is None:
+        return fallback
+    matches = []
+    refs = _binding_refs({
+            "params": consumer_node.get("params", {}),
+            "bindings": consumer_node.get("bindings", {}),
+    })
+    if refs is None:
+        return fallback
+    for ref in refs:
+        producer, separator, path = ref.partition(".")
+        if separator and path == requested_path:
+            matches.append(producer)
+    if len(matches) != 1:
+        return fallback
+    producer = _public_workflow_identifier(matches[0])
+    producer_node = by_id.get(producer)
+    if producer is None or producer_node is None:
+        return fallback
+    output_schema = _public_output_schema(producer_node.get("output_schema", {}))
+    if output_schema is None:
+        return fallback
+    diagnostic = {
+        "code": fallback["code"],
+        "consumer": consumer,
+        "producer": producer,
+        "requested_path": requested_path,
+        "output_schema": output_schema,
+    }
+    try:
+        if len(json.dumps(diagnostic, separators=(",", ":"))) > 8192:
+            return fallback
+    except (TypeError, ValueError, RecursionError):
+        return fallback
+    return diagnostic
+
+
 def _public_execution_trace(episode):
     """Expose failure shape and action flow without arguments, outputs, or prompts."""
     nodes = sorted((episode.get("nodes") or {}).values(),
@@ -146,13 +316,17 @@ def _public_execution_trace(episode):
     for row in rows:
         key = (row.get("method") or "unknown") + ":" + (row.get("status") or "unknown")
         counts[key] = counts.get(key, 0) + 1
-    return {
+    trace = {
         "failure_domain": episode.get("failure_domain"),
         "last_error_type": _error_type(episode.get("last_error")),
         "node_counts": counts,
         "nodes": rows,
         "truncated_nodes": max(0, len(nodes) - len(rows)),
     }
+    diagnostic = _public_workflow_diagnostic(episode)
+    if diagnostic is not None:
+        trace["workflow_diagnostic"] = diagnostic
+    return trace
 
 
 def _checked_event_chain(episode_id, events):

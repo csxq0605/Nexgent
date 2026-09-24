@@ -1635,6 +1635,49 @@ class TaskService:
             workflow.setdefault("output_schema", deepcopy(registered.get("output_schema", {})))
         from .dynamic_roles import materialize_task_roles
         workflow = materialize_task_roles(workflow)
+
+        def project_tool_output_schemas(definition):
+            """Freeze trusted static tool result contracts into the graph.
+
+            The ``tool`` operator returns the tool's JSON value directly.  A
+            planner-provided node schema is therefore not authoritative for a
+            statically resolved installed or package tool.  Dynamic tool-name
+            bindings stay unresolved until execution and retain their existing
+            workflow declaration, if any.
+            """
+            artifact_names = {
+                edge.get("consumer_node")
+                for edge in definition.get("artifact_edges", [])
+                if (isinstance(edge, dict)
+                    and edge.get("input_port") == "name")
+            }
+            for node in definition.get("nodes", []):
+                if not isinstance(node, dict):
+                    continue
+                if node.get("method") == "loop" and isinstance(node.get("body"), dict):
+                    project_tool_output_schemas(node["body"])
+                if node.get("method") != "tool":
+                    continue
+                bindings = node.get("bindings", {})
+                if (isinstance(bindings, dict) and "name" in bindings) \
+                        or node.get("id") in artifact_names:
+                    continue
+                params = node.get("params", {})
+                name = params.get("name") if isinstance(params, dict) else None
+                declaration = (manifest.get("tools", {}).get(name)
+                               if isinstance(name, str) else None)
+                if isinstance(declaration, dict):
+                    schema = declaration["output_schema"]
+                elif isinstance(name, str) and name in capability_lease:
+                    # get() returns a frozen declaration copy. In lease mode
+                    # run() has already resolved the durable descriptor before
+                    # materialization, so provider drift fails closed first.
+                    schema = self.tools.get(name).output_schema
+                else:
+                    continue
+                node["output_schema"] = deepcopy(schema)
+
+        project_tool_output_schemas(workflow)
         from .workflows import _validate
         _validate(workflow)
         roles = manifest["roles"]
