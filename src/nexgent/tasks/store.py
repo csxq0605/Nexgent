@@ -1522,6 +1522,10 @@ class EpisodeStore:
         root_id = self.get(root_id)["root_episode_id"]
         with self.connect() as db:
             resources = dict(db.execute("SELECT kind,COUNT(*) FROM task_resources WHERE root_id=? GROUP BY kind", (root_id,)))
+            service_applications = db.execute(
+                "SELECT COUNT(*) FROM task_service_applications a "
+                "JOIN task_episodes e ON a.episode=e.id WHERE e.root_id=?",
+                (root_id,)).fetchone()[0]
             tool_resources = [json.loads(row[0]) for row in db.execute(
                 "SELECT data FROM task_resources WHERE root_id=? AND kind='tool' ORDER BY rowid",
                 (root_id,))]
@@ -1559,7 +1563,12 @@ class EpisodeStore:
                 "tool_work_units": None if tool_missing else measured_tool_work,
                 "usage_complete": not missing and not tool_missing,
                 "billing_unknown_call_ids": [c["call_id"] for c in calls if c.get("billing_status") != "usage_reported"],
-                "tool_calls": resources.get("tool", 0), "nodes": resources.get("node", 0)}
+                # Both tool dispatches and model-context service applications
+                # spend max_tool_calls at admission; report that same charged
+                # quantity in budget and strategy receipts.
+                "tool_calls": resources.get("tool", 0) + service_applications,
+                "service_applications": service_applications,
+                "nodes": resources.get("node", 0)}
 
     def start_deadline(self, episode_id):
         """Freeze and return the absolute wall deadline shared by a task tree."""

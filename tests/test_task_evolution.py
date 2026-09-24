@@ -69,6 +69,29 @@ def test_nondefault_strategy_requires_actual_activation_not_only_loaded_source()
     assert _loaded_evidence(target, execution, package)["loaded"] is True
 
 
+def test_revised_dag_strategy_uses_invocation_identity_not_bootstrap_ref():
+    package = adaptive_orchestration_package()
+    path = "workflows/main.json"
+    target = {"component_id": "self-orchestration-workflow", "class": "O",
+              "kind": "workflow", "ref": "main", "files": [path]}
+    execution = {
+        "package_digest": package["digest"], "loaded_modules": [path],
+        "kind": "executable_plan", "workflow_ref": "generated://revision",
+        "plan_ref": "plan://revision", "plan_revision": 1,
+        "active_strategy": {
+            "kind": "workflow", "component_id": target["component_id"],
+            "package_digest": package["digest"], "source_path": path,
+            "source_digest": package["component_digests"][path],
+            "backend": "executable_plan",
+            "invocation": {"workflow_ref": "generated://revision",
+                           "plan_ref": "plan://revision", "plan_revision": 1},
+        },
+    }
+    assert _loaded_evidence(target, execution, package)["loaded"] is True
+    execution["active_strategy"]["invocation"]["workflow_ref"] = "generated://other"
+    assert _loaded_evidence(target, execution, package)["loaded"] is False
+
+
 class PairedBenchmark:
     id = "paired-contract"
 

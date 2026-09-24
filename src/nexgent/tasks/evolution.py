@@ -148,7 +148,13 @@ def _loaded_evidence(component, execution, package):
         and (component["kind"] != "entry"
              or (execution or {}).get("entry") == component["ref"])
         and (component["kind"] != "workflow"
-             or (execution or {}).get("workflow_ref") == component["ref"]))
+             or (isinstance(active_strategy.get("invocation"), dict)
+                 and active_strategy["invocation"].get("workflow_ref")
+                 == (execution or {}).get("workflow_ref")
+                 and active_strategy["invocation"].get("plan_ref")
+                 == (execution or {}).get("plan_ref")
+                 and active_strategy["invocation"].get("plan_revision")
+                 == (execution or {}).get("plan_revision"))))
     activation_required = component["kind"] in {"tool", "service_provider"}
     activation_matches = [
         row for row in ((execution or {}).get("activated_components") or [])

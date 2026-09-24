@@ -246,6 +246,8 @@ def test_package_service_transforms_then_activates_only_after_model_completion(t
         "package_digest": package["digest"],
         "source_path": "capabilities/context.py",
     }]
+    assert completed["usage"]["tool_calls"] == 1
+    assert completed["usage"]["service_applications"] == 1
     assert "capabilities/context.py" in completed["execution"]["loaded_modules"]
 
 
@@ -260,5 +262,7 @@ def test_package_service_cannot_drop_payload_and_does_not_send_model_call(tmp_pa
     assert failed["status"] == "failed"
     assert gateway.created == 0
     assert gateway.payloads == []
+    assert failed["usage"]["tool_calls"] == 1
+    assert failed["usage"]["service_applications"] == 1
     assert not [event for event in failed["events"]
                 if event["kind"] == "package_capability_activated"]
