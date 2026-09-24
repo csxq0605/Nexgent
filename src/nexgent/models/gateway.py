@@ -19,6 +19,15 @@ class ModelError(RuntimeError):
     pass
 
 
+class ModelOutputFormatError(ModelError):
+    """A received model reply violated the strict JSON-object envelope."""
+
+    def __init__(self, message, *, code, candidate=None):
+        super().__init__(message)
+        self.code = code
+        self.candidate = deepcopy(candidate)
+
+
 class ModelBudgetError(ModelError):
     pass
 
@@ -45,9 +54,17 @@ def json_object(content):
     if text.startswith("```json\n") and text.endswith("```"):
         text = text[8:-3].strip()
     try:
-        result = json.loads(text, object_pairs_hook=unique, parse_constant=nonfinite)
-    except (ValueError, TypeError):
+        decoder = json.JSONDecoder(
+            object_pairs_hook=unique, parse_constant=nonfinite)
+        result, end = decoder.raw_decode(text)
+    except (ValueError, TypeError, RecursionError):
         raise ModelError("Provider must return one valid JSON object") from None
+    if text[end:].strip():
+        if isinstance(result, dict):
+            raise ModelOutputFormatError(
+                "Provider must return one valid JSON object",
+                code="extra_data_after_complete_object", candidate=result)
+        raise ModelError("Provider must return one valid JSON object")
     if not isinstance(result, dict):
         raise ModelError("Provider must return a JSON object")
     return result
@@ -212,6 +229,8 @@ class ModelGateway:
             raise
         except ModelError as exc:
             receipt.update(status="invalid", error_type=type(exc).__name__)
+            if isinstance(exc, ModelOutputFormatError):
+                receipt["format_error_code"] = exc.code
             raise
         except Exception as exc:
             receipt.update(status="failed", error_type=type(exc).__name__)

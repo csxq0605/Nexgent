@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from nexgent.kernel.programs import digest
-from nexgent.models.gateway import ModelTransportError
+from nexgent.models.gateway import ModelOutputFormatError, ModelTransportError
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService, ToolContext
 from nexgent.tasks.tools import (
@@ -55,6 +55,67 @@ class DeterministicGatewayFactory:
                          "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}})
                 owner.finished.set()
                 return {"value": 7, "evidence": "deterministic_contract_double"}
+
+        return Gateway()
+
+
+class FormatRepairGatewayFactory:
+    """Provider double for the host's strict two-phase JSON repair."""
+
+    def __init__(self, candidate, repaired=None, *, interrupt_after_admission=False,
+                 complete_usage=True):
+        self.candidate = deepcopy(candidate)
+        self.repaired = deepcopy(candidate if repaired is None else repaired)
+        self.interrupt_after_admission = interrupt_after_admission
+        self.complete_usage = complete_usage
+        self.calls = []
+        self.admitted = []
+
+    def __call__(self, reserve, stop_event):
+        owner = self
+
+        class Gateway:
+            def ask(self, role, prompt, payload=None, max_tokens=4000):
+                number = len(owner.calls) + 1
+                owner.calls.append({
+                    "role": role, "prompt": prompt,
+                    "payload": deepcopy(payload), "max_tokens": max_tokens,
+                })
+                receipt = {
+                    "call_id": f"format-repair-model-{number}",
+                    "role": role, "model": "FORMAT-REPAIR-DOUBLE",
+                    "status": "started",
+                    "reserved_completion_tokens": max_tokens,
+                    "max_tokens": max_tokens,
+                }
+                reserve(receipt)
+                owner.admitted.append(number)
+                if number == 1 and owner.interrupt_after_admission:
+                    raise KeyboardInterrupt("controlled interruption")
+                usage = {
+                    "prompt_tokens": 2, "completion_tokens": 3,
+                    "total_tokens": 5,
+                }
+                if number == 1:
+                    reserve({
+                        **receipt, "status": "invalid",
+                        "billing_status": ("usage_reported" if owner.complete_usage
+                                           else "unknown"),
+                        "usage": usage if owner.complete_usage else {},
+                        "output_text": json.dumps(owner.candidate) + "\nparameter",
+                        "format_error_code": "extra_data_after_complete_object",
+                    })
+                    raise ModelOutputFormatError(
+                        "Provider must return one valid JSON object",
+                        code="extra_data_after_complete_object",
+                        candidate=owner.candidate)
+                reserve({
+                    **receipt, "status": "received",
+                    "billing_status": "usage_reported", "usage": usage,
+                    "output": deepcopy(owner.repaired),
+                    "output_text": json.dumps(owner.repaired),
+                })
+                return deepcopy(owner.repaired)
 
         return Gateway()
 
@@ -530,6 +591,135 @@ def test_unknown_started_model_rpc_requires_user_recovery_without_repeating_mode
     assert gateway.calls == []
     assert service.store.rpc_find(state["id"], "rpc.1", request)["status"] == "started"
     assert "Unfinished" in result["last_error"] or "Recovery" in result["last_error"]
+
+
+def test_trailing_text_json_gets_one_durable_semantics_preserving_repair(tmp_path):
+    gateway = FormatRepairGatewayFactory({"value": 7})
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    package = controlled_package("""def execute(payload, context):
+    value = context.ask('worker', 'return an object', max_tokens=8)
+    artifact = context.publish(value, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+""")
+    state = service.create(
+        "Repair a transport envelope", package=package, deliverables=result_spec(),
+        budget={"max_model_calls": 2, "max_completion_tokens": 16,
+                "max_tool_calls": 0, "max_nodes": 8})
+
+    result = service.run(state["id"])
+
+    assert result["status"] == "completed", result.get("last_error")
+    assert result["usage"]["model_calls"] == 2
+    assert service.store.read(
+        result["output_refs"]["result"], state["id"])["content"] == {"value": 7}
+    assert len(gateway.calls) == 2
+    assert gateway.calls[1]["payload"] == {
+        "schema": "nexgent.json-format-repair.v1",
+        "candidate": {"value": 7},
+    }
+    phases = service.store.rpc_under(state["id"], "rpc.1/model.")
+    assert [(item["call_path"], item["status"]) for item in phases] == [
+        ("rpc.1/model.json-repair", "completed"),
+        ("rpc.1/model.primary", "failed"),
+    ]
+
+
+def test_json_format_repair_cannot_change_object_content(tmp_path):
+    gateway = FormatRepairGatewayFactory({"value": 7}, {"value": 8})
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    package = controlled_package("""def execute(payload, context):
+    value = context.ask('worker', 'return an object', max_tokens=8)
+    artifact = context.publish(value, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+""")
+    state = service.create(
+        "Reject semantic repair changes", package=package,
+        deliverables=result_spec(),
+        budget={"max_model_calls": 2, "max_completion_tokens": 16,
+                "max_tool_calls": 0, "max_nodes": 8})
+
+    result = service.run(state["id"])
+
+    assert result["status"] == "failed"
+    assert result["failure_domain"] == "agent"
+    assert "changed object content" in result["last_error"]
+    assert len(gateway.calls) == 2
+
+
+def test_unmetered_primary_format_failure_does_not_start_repair(tmp_path):
+    gateway = FormatRepairGatewayFactory({"value": 7}, complete_usage=False)
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    package = controlled_package("""def execute(payload, context):
+    value = context.ask('worker', 'return an object', max_tokens=8)
+    artifact = context.publish(value, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+""")
+    state = service.create(
+        "Do not repair an unmetered response", package=package,
+        deliverables=result_spec(),
+        budget={"max_model_calls": 2, "max_completion_tokens": 16,
+                "max_tool_calls": 0, "max_nodes": 8})
+
+    result = service.run(state["id"])
+
+    assert result["status"] == "waiting_input"
+    assert result["failure_domain"] == "infrastructure"
+    assert "completely metered" in result["last_error"]
+    assert len(gateway.calls) == 1
+    assert result["usage"]["usage_complete"] is False
+
+
+def test_json_format_repair_uses_existing_root_model_budget(tmp_path):
+    gateway = FormatRepairGatewayFactory({"value": 7})
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    package = controlled_package("""def execute(payload, context):
+    value = context.ask('worker', 'return an object', max_tokens=8)
+    artifact = context.publish(value, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+""")
+    state = service.create(
+        "Bound JSON repair by the root budget", package=package,
+        deliverables=result_spec(),
+        budget={"max_model_calls": 1, "max_completion_tokens": 8,
+                "max_tool_calls": 0, "max_nodes": 8})
+
+    result = service.run(state["id"])
+
+    assert result["status"] == "failed"
+    assert result["failure_domain"] == "agent"
+    assert "model-call budget exhausted" in result["last_error"]
+    assert len(gateway.calls) == 2
+    assert gateway.admitted == [1]
+    assert result["usage"]["model_calls"] == 1
+
+
+def test_unknown_json_repair_phase_is_never_replayed(tmp_path):
+    gateway = FormatRepairGatewayFactory(
+        {"value": 7}, interrupt_after_admission=True)
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    package = controlled_package("""def execute(payload, context):
+    value = context.ask('worker', 'return an object', max_tokens=8)
+    artifact = context.publish(value, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+""")
+    state = service.create(
+        "Do not replay an unknown provider call", package=package,
+        deliverables=result_spec(),
+        budget={"max_model_calls": 2, "max_completion_tokens": 16,
+                "max_tool_calls": 0, "max_nodes": 8})
+
+    with pytest.raises(KeyboardInterrupt, match="controlled interruption"):
+        service.run(state["id"])
+    assert len(gateway.calls) == 1
+
+    resumed = TaskService(
+        tmp_path, tools=ToolRegistry(), gateway_factory=gateway).run(state["id"])
+
+    assert resumed["status"] == "waiting_input"
+    assert resumed["failure_domain"] == "infrastructure"
+    assert len(gateway.calls) == 1
+    assert service.store.rpc_find(
+        state["id"], "rpc.1/model.primary")["status"] == "started"
 
 
 def test_delegated_interruption_resumes_same_child_and_preserves_paid_model_result(tmp_path):

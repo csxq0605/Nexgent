@@ -292,9 +292,13 @@ def test_unknown_started_nested_repair_refuses_provider_repeat_on_resume(tmp_pat
 
     resumed = TaskService(tmp_path, gateway_factory=gateway).run(episode["id"])
 
-    assert resumed["status"] == "failed"
+    # Ask is now a resumable two-phase composite.  The admitted repair phase
+    # remains unresolved and requires reconciliation instead of being collapsed
+    # into an agent failure; in either case the Provider call is not repeated.
+    assert resumed["status"] == "waiting_input"
+    assert resumed["failure_domain"] == "infrastructure"
     assert len(gateway.calls) == 3
     assert resumed["usage"]["model_calls"] == 3
-    assert "automatic repetition refused" in resumed["last_error"]
+    assert "unknown or non-replayable" in resumed["last_error"]
     assert service.store.rpc_find(episode["id"], repair_path)[
         "status"] == "started"

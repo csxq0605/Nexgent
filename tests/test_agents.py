@@ -17,7 +17,10 @@ from nexgent.agents import ImprovementBroker, seed_files
 from nexgent.agents.seed import WORKFLOW_SOURCE, META_SOURCE
 from nexgent.kernel.programs import make_bundle
 from nexgent.kernel.runner import ProgramRunner
-from nexgent.models import ModelGateway, ModelError, ModelConfigurationError, ModelBudgetError
+from nexgent.models import (
+    ModelBudgetError, ModelConfigurationError, ModelError, ModelGateway,
+    ModelOutputFormatError,
+)
 from nexgent.models.worker import request_params, error_payload
 from nexgent.research import LiteratureSearch
 
@@ -95,6 +98,22 @@ def test_invalid_model_json_is_recorded_without_retry(tmp_path, content):
         gateway.ask("analyst", "Analyze", {})
     assert len(replies.requests) == 1
     assert receipts[-1]["status"] == "invalid" and receipts[-1]["usage"]["total_tokens"] == 70
+
+
+def test_complete_object_with_trailing_text_is_typed_but_still_rejected(tmp_path):
+    replies, receipts = Replies('{"finding":"kept"}\nparameter'), []
+    gateway = ModelGateway(
+        configured(tmp_path), reserve=receipts.append, transport=replies)
+
+    with pytest.raises(ModelOutputFormatError) as caught:
+        gateway.ask("analyst", "Analyze", {})
+
+    assert caught.value.code == "extra_data_after_complete_object"
+    assert caught.value.candidate == {"finding": "kept"}
+    assert len(replies.requests) == 1
+    assert receipts[-1]["status"] == "invalid"
+    assert receipts[-1]["format_error_code"] == (
+        "extra_data_after_complete_object")
 
 
 def test_length_and_stop_after_billable_response_keep_usage(tmp_path):
