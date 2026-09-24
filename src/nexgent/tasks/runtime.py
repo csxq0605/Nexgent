@@ -29,6 +29,10 @@ from .strategy_decisions import (
     parse_strategy_decision, strategy_candidate_set_from_manifest,
     strategy_selector_component, validate_strategy_candidate_set,
 )
+from .strategy_checkpoints import (
+    ATTRIBUTABLE_TRIGGER_DOMAINS, build_strategy_checkpoint,
+    validate_strategy_checkpoint,
+)
 from .tools import ContractError, ToolRegistry, task_benchmarks, validate
 
 
@@ -939,7 +943,7 @@ class TaskService:
 
     def _active_strategy_receipt(
             self, identity, package, execution, selected_component_id,
-            strategy_decision=None):
+            strategy_decision=None, strategy_checkpoint=None):
         """Bind the selected O component to the backend that actually returned."""
         manifest = package["manifest"]
         if manifest.get("manifest_version", 1) != 2:
@@ -980,11 +984,17 @@ class TaskService:
                 decision_digest=strategy_decision["decision_digest"],
                 candidate_set_digest=strategy_decision["candidate_set_digest"],
             )
+        if strategy_checkpoint is not None:
+            receipt.update(
+                checkpoint_digest=strategy_checkpoint["checkpoint_digest"],
+                strategy_handoff_ref=strategy_checkpoint["handoff_artifact"]["ref"],
+                source_segment_id=strategy_checkpoint["source_segment"]["segment_id"],
+            )
         return receipt
 
     def _record_strategy_entered(
             self, identity, package, selected_component_id, backend,
-            strategy_decision=None):
+            strategy_decision=None, strategy_checkpoint=None):
         """Persist backend entry separately from successful activation evidence."""
         manifest = package["manifest"]
         if manifest.get("manifest_version", 1) != 2:
@@ -1023,7 +1033,292 @@ class TaskService:
                 decision_digest=strategy_decision["decision_digest"],
                 candidate_set_digest=strategy_decision["candidate_set_digest"],
             )
+        if strategy_checkpoint is not None:
+            content.update(
+                checkpoint_digest=strategy_checkpoint["checkpoint_digest"],
+                strategy_handoff_ref=strategy_checkpoint["handoff_artifact"]["ref"],
+                source_segment_id=strategy_checkpoint["source_segment"]["segment_id"],
+            )
         self.store.event(identity, "strategy_entered", content)
+
+    @staticmethod
+    def _strategy_checkpoint_failure_domain(receipt, feedback):
+        """Return a host-usable attribution only when the feedback is explicit."""
+        receipt_domain = receipt.get("failure_domain")
+        feedback_domain = (
+            feedback.get("failure_domain") if isinstance(feedback, dict) else None)
+        declared = [value for value in (receipt_domain, feedback_domain)
+                    if value is not None]
+        if not declared or len(set(declared)) != 1:
+            return None
+        domain = declared[0]
+        return domain if domain in ATTRIBUTABLE_TRIGGER_DOMAINS else None
+
+    @staticmethod
+    def _strategy_checkpoint_plan(execution):
+        completed_refs = sorted({
+            ref
+            for node in execution.node_executions
+            if node.status.value == "completed"
+            for ref in node.output_artifact_refs
+        })
+        pending = sorted(
+            node.node_id for node in execution.node_executions
+            if node.status.value == "pending")
+        return {
+            "ref": execution.plan.ref,
+            "revision": execution.plan.revision,
+            "completed_artifact_refs": completed_refs,
+            "pending_node_ids": pending,
+        }
+
+    def _strategy_checkpoint_budget(self, identity):
+        state = self.store.get(identity)
+        root = self.store.get(state["root_episode_id"])
+        usage = self.store.usage(root["id"])
+        normalized = {
+            "model_calls": usage["model_calls"],
+            "completion_tokens": usage["charged_completion_tokens"],
+            "tool_calls": usage["tool_calls"],
+            "tool_work_units": usage["charged_tool_work_units"],
+            "nodes": usage["nodes"],
+        }
+        return {
+            "usage": normalized,
+            "remaining": self._remaining_budget(root["budget"], usage),
+        }
+
+    def _strategy_checkpoint_handoff(self, identity, checkpoint):
+        """Read a handoff only when its checkpoint-selector evidence still matches."""
+        handoff = self.store.read(checkpoint["handoff_artifact"]["ref"], identity)
+        if handoff.get("content_digest") != checkpoint["handoff_artifact"]["digest"]:
+            raise RecoveryRequired("Committed strategy handoff artifact changed")
+        content = handoff.get("content")
+        selector = content.get("selector_rpc") if isinstance(content, dict) else None
+        path = selector.get("call_path") if isinstance(selector, dict) else None
+        journal = self.store.rpc_find(identity, path) if isinstance(path, str) else None
+        if (not isinstance(selector, dict)
+                or set(selector) != {
+                    "call_path", "request_digest", "result_digest"}
+                or not isinstance(path, str)
+                or re.fullmatch(r"strategy/segments/2/rpc\.[1-9][0-9]*", path)
+                is None
+                or not isinstance(journal, dict)
+                or journal.get("status") != "completed"
+                or journal.get("request_digest") != selector["request_digest"]
+                or digest(journal.get("result")) != selector["result_digest"]
+                or journal.get("result") != {
+                    "target_component_id": checkpoint["resolution"][
+                        "selected_component_id"],
+                    "reason": checkpoint["resolution"]["reason"],
+                }):
+            raise RecoveryRequired(
+                "Strategy handoff selector RPC evidence changed")
+        return handoff
+
+    def _strategy_checkpoint_rpc_path(
+            self, identity, rule_id, trigger_node_id, receipt_digest):
+        """Recover or allocate the selector slot for one durable DAG trigger."""
+        prefix = "strategy/segments/2/rpc."
+        journals = self.store.rpc_under(identity, "strategy/segments/2/")
+        matches = []
+        used = []
+        for journal in journals:
+            path = journal.get("call_path")
+            if not isinstance(path, str) or not path.startswith(prefix):
+                continue
+            suffix = path[len(prefix):]
+            if suffix.isdigit() and int(suffix) > 0:
+                used.append(int(suffix))
+            request = journal.get("request") or {}
+            params = request.get("params") or {}
+            payload = params.get("payload") or {}
+            trigger = payload.get("trigger") or {}
+            if (payload.get("schema") == "nexgent.strategy-checkpoint-selection.v1"
+                    and trigger.get("rule_id") == rule_id
+                    and trigger.get("node_id") == trigger_node_id
+                    and trigger.get("receipt_digest") == receipt_digest):
+                matches.append(path)
+        if len(matches) > 1:
+            raise RecoveryRequired(
+                "Strategy checkpoint trigger has multiple selector RPCs")
+        if matches:
+            return matches[0]
+        return prefix + str(max(used, default=0) + 1)
+
+    def _strategy_checkpoint_resolution(
+            self, identity, package, payload, strategy_decision, component_id,
+            rule, execution, receipt, feedback, stop_event, notify):
+        """Resolve and atomically commit one eligible DAG-to-entry switch."""
+        failure_domain = self._strategy_checkpoint_failure_domain(receipt, feedback)
+        if failure_domain is None:
+            return {"action": "continue"}
+
+        state = self.store.get(identity)
+        candidate_set = validate_strategy_candidate_set(
+            state["task"]["strategy_candidate_set"])
+        selector = strategy_selector_component(package)
+        receipt_digest = digest(receipt)
+        request_payload = {
+            "schema": "nexgent.strategy-checkpoint-selection.v1",
+            "task": self._strategy_selector_task(payload),
+            "candidate_set": deepcopy(candidate_set),
+            "selector_component": deepcopy(selector),
+            "startup_decision": {
+                "decision_id": strategy_decision["decision_id"],
+                "decision_digest": strategy_decision["decision_digest"],
+                "selected_component_id": component_id,
+            },
+            "source_segment": {
+                "segment_id": "strategy-segment-1",
+                "component_id": component_id,
+            },
+            "trigger": {
+                "rule_id": rule["id"],
+                "node_id": rule["after_node"],
+                "receipt_digest": receipt_digest,
+                "failure_domain": failure_domain,
+                "feedback": deepcopy(feedback),
+            },
+            "plan": self._strategy_checkpoint_plan(execution),
+        }
+        path = self._strategy_checkpoint_rpc_path(
+            identity, rule["id"], rule["after_node"], receipt_digest)
+        params = {
+            "role": selector["role_ref"],
+            "prompt": (
+                package["files"][selector["source_path"]]
+                + "\n\nThis is a mid-execution strategy checkpoint. Return exactly "
+                  "one JSON object with target_component_id and reason. Use null "
+                  "target_component_id to continue the current DAG; otherwise select "
+                  "one frozen entry candidate. reason must be concise nonempty text."
+            ),
+            "payload": request_payload,
+            "max_tokens": 1200,
+        }
+
+        continued = [
+            event["content"] for event in self.store.events(identity)
+            if (event.get("kind") == "strategy_checkpoint_continued"
+                and (event.get("content") or {}).get("trigger_receipt_digest")
+                == receipt_digest
+                and (event.get("content") or {}).get("rule_id") == rule["id"]
+                and (event.get("content") or {}).get("source_component_id")
+                == component_id)
+        ]
+        if len(continued) > 1:
+            raise RecoveryRequired("Strategy checkpoint has multiple continue decisions")
+        if continued:
+            record = continued[0]
+            request = {
+                "method": "ask", "params": params,
+                "package_digest": package["digest"],
+            }
+            try:
+                journal = self.store.rpc_find(identity, path, request)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RecoveryRequired(
+                    "Durable strategy continue request changed") from exc
+            selector_result = journal.get("result") if isinstance(journal, dict) else None
+            if (record.get("rule_id") != rule["id"]
+                    or record.get("source_component_id") != component_id
+                    or record.get("candidate_set_digest")
+                    != candidate_set["candidate_set_digest"]
+                    or not isinstance(journal, dict)
+                    or journal.get("status") != "completed"
+                    or selector_result != {
+                        "target_component_id": None,
+                        "reason": record.get("reason"),
+                    }
+                    or record.get("selector_result_digest")
+                    != digest(selector_result)):
+                raise RecoveryRequired("Durable strategy continue decision changed")
+            return {"action": "continue"}
+
+        suggestion = self._dispatch(
+            identity, package, "ask", params, path, stop_event, notify)
+        if (not isinstance(suggestion, dict)
+                or set(suggestion) != {"target_component_id", "reason"}):
+            raise ContractError(
+                "Strategy checkpoint selector must return target_component_id and reason")
+        if (not isinstance(suggestion.get("reason"), str)
+                or not suggestion["reason"].strip()
+                or suggestion["reason"] != suggestion["reason"].strip()
+                or len(suggestion["reason"]) > 2000):
+            raise ContractError(
+                "Strategy checkpoint selector reason must be bounded nonempty text")
+
+        if suggestion["target_component_id"] is None:
+            journal = self.store.rpc_find(identity, path)
+            if journal is None or journal.get("status") != "completed":
+                raise RecoveryRequired(
+                    "Strategy checkpoint continue decision lacks a completed RPC")
+            self.store.event(identity, "strategy_checkpoint_continued", {
+                "schema": "nexgent.strategy-checkpoint-continue.v1",
+                "rule_id": rule["id"],
+                "source_component_id": component_id,
+                "trigger_receipt_digest": receipt_digest,
+                "candidate_set_digest": candidate_set["candidate_set_digest"],
+                "selector_result_digest": digest(journal.get("result")),
+                "reason": suggestion.get("reason"),
+            })
+            return {"action": "continue"}
+
+        plan = self._strategy_checkpoint_plan(execution)
+        journal = self.store.rpc_find(identity, path)
+        if journal is None or journal.get("status") != "completed":
+            raise RecoveryRequired(
+                "Strategy checkpoint switch lacks a completed selector RPC")
+        handoff_content = {
+            "schema": "nexgent.strategy-handoff.v1",
+            "episode_id": identity,
+            "source_component_id": component_id,
+            "source_segment_id": "strategy-segment-1",
+            "trigger": {
+                "rule_id": rule["id"],
+                "node_id": rule["after_node"],
+                "receipt_digest": receipt_digest,
+                "failure_domain": failure_domain,
+                "feedback": deepcopy(feedback),
+            },
+            "plan": deepcopy(plan),
+            "selector_rpc": {
+                "call_path": path,
+                "request_digest": journal["request_digest"],
+                "result_digest": digest(journal.get("result")),
+            },
+            "completed_receipts": {
+                node_id: deepcopy(node_receipt)
+                for node_id, node_receipt in sorted(
+                    (self.store.get(identity).get("plan_node_receipts") or {}).items())
+                if node_receipt.get("status") == "completed"
+            },
+        }
+        content_digest = digest(handoff_content)
+        handoff_ref = self.store.strategy_handoff_ref(
+            identity, rule["after_node"], receipt_digest, content_digest)
+        checkpoint = build_strategy_checkpoint(
+            episode_id=identity,
+            root_episode_id=state["root_episode_id"],
+            candidate_set=candidate_set,
+            decision_digest=strategy_decision["decision_digest"],
+            source_segment_id="strategy-segment-1",
+            source_component_id=component_id,
+            trigger={
+                "node_id": rule["after_node"],
+                "receipt_digest": receipt_digest,
+                "receipt_status": receipt["status"],
+                "failure_domain": failure_domain,
+            },
+            plan=plan,
+            root_budget=self._strategy_checkpoint_budget(identity),
+            handoff_artifact={"ref": handoff_ref, "digest": content_digest},
+            model_suggestion=suggestion,
+        )
+        committed = self.store.commit_strategy_checkpoint(
+            identity, checkpoint, candidate_set, handoff_content,
+            expected_revision=self.store.get(identity)["revision"])
+        return {"action": "switch", "checkpoint": committed["checkpoint"]}
 
     def _materialize_workflow(self, package, workflow_ref, capability_lease,
                               *, proposed_workflow=None,
@@ -1566,7 +1861,7 @@ class TaskService:
 
     def _run_workflow_orchestrator(
             self, identity, package, component_id, initial_workflow_ref,
-            payload, stop_event, notify):
+            payload, stop_event, notify, strategy_decision=None):
         from .orchestration import (
             NodeStatus, PlanExecution, PlanRevision, plan_execution_from_dict,
         )
@@ -1973,6 +2268,14 @@ class TaskService:
                 self._remaining_wall_seconds(identity)
             return self._references(identity, value)
 
+        def resolve_strategy_checkpoint(
+                rule, current, trigger_receipt, feedback):
+            if strategy_decision is None:
+                return {"action": "continue"}
+            return self._strategy_checkpoint_resolution(
+                identity, package, payload, strategy_decision, component_id,
+                rule, current, trigger_receipt, feedback, stop_event, notify)
+
         result = run_executable_workflow(
             workflow,
             payload,
@@ -1980,6 +2283,7 @@ class TaskService:
             execution=execution,
             persist=persist,
             resolve_revision=resolve_revision,
+            resolve_strategy_checkpoint=resolve_strategy_checkpoint,
             receipt_evidence=receipt_evidence,
             record_local_receipt=record_local_receipt,
             initial_receipts=receipts,
@@ -1990,6 +2294,19 @@ class TaskService:
                 package["manifest"]["workflows"][initial_workflow_ref]
             ).get("max_parallel", 4),
         )
+        if result["status"] == "checkpointed":
+            return {
+                "strategy_checkpoint": deepcopy(
+                    result["strategy_checkpoint"]["checkpoint"]),
+                "execution": {
+                    "kind": "executable_plan",
+                    "package_digest": package["digest"],
+                    "loaded_modules": [],
+                    "plan_ref": result["plan_execution"].plan.ref,
+                    "plan_revision": result["plan_execution"].plan.revision,
+                    "workflow_ref": workflow_ref[0],
+                },
+            }
         if result["status"] != "completed":
             raise ContractError(result.get("error") or "Executable plan did not complete")
         plan_history = set(self.store.get(identity).get("plan_history_refs") or [])
@@ -2123,13 +2440,32 @@ class TaskService:
                            skills=deepcopy(package["manifest"].get("skills", {})),
                            available_skills=_available_skill_inventory(package))
             counter = [0]
+            rpc_prefix = [None]
             recovery_errors = []
             failure_domains = []
 
             def handle(method, params):
                 counter[0] += 1
+                path = (f"{rpc_prefix[0]}/rpc.{counter[0]}"
+                        if rpc_prefix[0] else f"rpc.{counter[0]}")
                 try:
-                    return self._dispatch(identity, package, method, params, f"rpc.{counter[0]}", stop_event, notify)
+                    if rpc_prefix[0] and method == "ask":
+                        handoff_ref = payload.get("strategy_handoff_ref")
+                        handoff_reads = [
+                            event for event in self.store.events(identity)
+                            if (event.get("kind") == "artifact_read"
+                                and (event.get("content") or {}).get("artifact_id")
+                                == handoff_ref
+                                and (event.get("content") or {}).get(
+                                    "node_id", "").startswith(rpc_prefix[0] + "/"))
+                        ]
+                        if not handoff_reads:
+                            raise ContractError(
+                                "Switched strategy must read its durable handoff "
+                                "before the first model call")
+                    return self._dispatch(
+                        identity, package, method, params, path,
+                        stop_event, notify)
                 except RecoveryRequired as exc:
                     # The subprocess protocol wraps handler exceptions. Keep a
                     # host-side signal so an uncertain admitted call cannot be
@@ -2153,6 +2489,9 @@ class TaskService:
             notify()
             try:
                 strategy_decision = None
+                strategy_checkpoint = None
+                selected_candidate = None
+                entry_to_run = state["task"]["entry"]
                 if state["task"].get("strategy_candidate_set") is not None:
                     strategy_decision = self._strategy_decision(
                         identity, package, payload, stop_event, notify)
@@ -2162,6 +2501,53 @@ class TaskService:
                         (selected_component_id, selected_candidate["ref"])
                         if selected_candidate["kind"] == "workflow" else None
                     )
+                    committed_checkpoint = self.store.get(identity).get(
+                        "strategy_checkpoint")
+                    if committed_checkpoint is not None:
+                        strategy_checkpoint = validate_strategy_checkpoint(
+                            committed_checkpoint,
+                            state["task"]["strategy_candidate_set"])
+                        resolution = strategy_checkpoint["resolution"]
+                        if (strategy_checkpoint["decision_digest"]
+                                != strategy_decision["decision_digest"]
+                                or strategy_checkpoint["source_segment"]["component_id"]
+                                != selected_component_id
+                                or resolution["action"] != "switch"):
+                            raise RecoveryRequired(
+                                "Committed strategy checkpoint routing changed")
+                        candidates = {
+                            item["component_id"]: item
+                            for item in state["task"]["strategy_candidate_set"]["candidates"]
+                        }
+                        selected_candidate = candidates.get(
+                            resolution["selected_component_id"])
+                        if (not isinstance(selected_candidate, dict)
+                                or selected_candidate.get("kind") != "entry"):
+                            raise RecoveryRequired(
+                                "Committed strategy checkpoint target changed")
+                        handoff = self._strategy_checkpoint_handoff(
+                            identity, strategy_checkpoint)
+                        # Re-enter the store's idempotent commit path so the
+                        # hash-chained event, state projection, and artifact
+                        # publication are checked together before routing.
+                        replayed = self.store.commit_strategy_checkpoint(
+                            identity, strategy_checkpoint,
+                            state["task"]["strategy_candidate_set"],
+                            handoff["content"],
+                            expected_revision=self.store.get(identity)["revision"])
+                        if replayed["handoff_artifact"]["id"] != handoff["id"]:
+                            raise RecoveryRequired(
+                                "Committed strategy handoff replay changed")
+                        selected_component_id = selected_candidate["component_id"]
+                        entry_to_run = selected_candidate["ref"]
+                        payload["strategy_handoff_ref"] = handoff["id"]
+                        rpc_prefix[0] = "strategy/segments/2"
+                        # Target calls follow the last selector slot and replay
+                        # from that same boundary after a process restart.
+                        counter[0] = int(
+                            handoff["content"]["selector_rpc"]["call_path"].rsplit(
+                                ".", 1)[1])
+                        workflow_orchestrator = None
                 else:
                     workflow_orchestrator = self._workflow_orchestrator(
                         package, state["task"]["entry"])
@@ -2174,9 +2560,10 @@ class TaskService:
                     if selected_component_id is not None:
                         self._record_strategy_entered(
                             identity, package, selected_component_id,
-                            "controlled_code", strategy_decision)
+                            "controlled_code", strategy_decision,
+                            strategy_checkpoint)
                     execution = run_package(
-                        package, state["task"]["entry"], payload, handle,
+                        package, entry_to_run, payload, handle,
                         stop_event=stop_event,
                         timeout=self._package_timeout(
                             identity, state["task"].get("constraints", {}).get(
@@ -2191,7 +2578,45 @@ class TaskService:
                         "executable_plan", strategy_decision)
                     execution = self._run_workflow_orchestrator(
                         identity, package, workflow_orchestrator[0],
-                        workflow_orchestrator[1], payload, stop_event, notify)
+                        workflow_orchestrator[1], payload, stop_event, notify,
+                        strategy_decision)
+                    if execution.get("strategy_checkpoint") is not None:
+                        strategy_checkpoint = validate_strategy_checkpoint(
+                            execution["strategy_checkpoint"],
+                            state["task"]["strategy_candidate_set"])
+                        resolution = strategy_checkpoint["resolution"]
+                        candidates = {
+                            item["component_id"]: item
+                            for item in state["task"]["strategy_candidate_set"]["candidates"]
+                        }
+                        selected_candidate = candidates.get(
+                            resolution["selected_component_id"])
+                        if (resolution["action"] != "switch"
+                                or not isinstance(selected_candidate, dict)
+                                or selected_candidate.get("kind") != "entry"):
+                            raise RecoveryRequired(
+                                "Strategy checkpoint did not resolve to an entry")
+                        handoff = self._strategy_checkpoint_handoff(
+                            identity, strategy_checkpoint)
+                        selected_component_id = selected_candidate["component_id"]
+                        payload["strategy_handoff_ref"] = handoff["id"]
+                        rpc_prefix[0] = "strategy/segments/2"
+                        counter[0] = int(
+                            handoff["content"]["selector_rpc"]["call_path"].rsplit(
+                                ".", 1)[1])
+                        self._record_strategy_entered(
+                            identity, package, selected_component_id,
+                            "controlled_code", strategy_decision,
+                            strategy_checkpoint)
+                        execution = run_package(
+                            package, selected_candidate["ref"], payload, handle,
+                            stop_event=stop_event,
+                            timeout=self._package_timeout(
+                                identity, state["task"].get("constraints", {}).get(
+                                    "wall_seconds", 1200)),
+                            max_rpc=512, max_instructions=5_000_000,
+                        )
+                        execution["execution"]["kind"] = "controlled_code"
                 self._remaining_wall_seconds(identity)
                 activations = []
                 seen_activations = set()
@@ -2219,7 +2644,8 @@ class TaskService:
                     execution["execution"]["active_strategy"] = (
                         self._active_strategy_receipt(
                             identity, package, execution["execution"],
-                            selected_component_id, strategy_decision))
+                            selected_component_id, strategy_decision,
+                            strategy_checkpoint))
                 self._complete(identity, execution)
             except TimeoutError as exc:
                 self._change(identity, lambda s: s.update(
