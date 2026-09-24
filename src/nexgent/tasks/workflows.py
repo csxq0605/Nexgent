@@ -728,6 +728,10 @@ def run_executable_workflow(
     if (resolve_strategy_checkpoint is not None
             and not callable(resolve_strategy_checkpoint)):
         raise ValueError("Strategy checkpoint resolver must be callable")
+    if (workflow.get("strategy_checkpoint_rules")
+            and resolve_strategy_checkpoint is None):
+        raise WorkflowError(
+            "Workflow strategy checkpoints require a host resolver")
     if not callable(max_parallel) and (
             type(max_parallel) is not int or not 1 <= max_parallel <= 32):
         raise ValueError("max_parallel must be in [1,32]")

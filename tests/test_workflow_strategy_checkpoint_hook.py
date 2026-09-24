@@ -68,6 +68,20 @@ def test_checkpoint_rule_accepts_exact_bounded_contract():
     assert plan.id == "valid-checkpoint-plan"
 
 
+def test_checkpoint_rule_cannot_be_silently_ignored_without_host_resolver():
+    workflow = _workflow()
+    plan = plan_from_workflow(workflow, "checkpoint-plan")
+    with pytest.raises(WorkflowError, match="require a host resolver"):
+        run_executable_workflow(
+            workflow, {}, lambda method, params, path: None,
+            execution=PlanExecution.create("checkpoint-execution", plan),
+            persist=lambda current, receipts: None,
+            resolve_revision=lambda rule, current, receipt: None,
+            receipt_evidence=lambda kind, value: (),
+            record_local_receipt=lambda method, params, path, receipt: None,
+        )
+
+
 @pytest.mark.parametrize("rules", [
     [_rule(extra=True)],
     [7],
