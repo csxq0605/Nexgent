@@ -10,6 +10,7 @@ from nexgent.tasks.adaptive_orchestration_seed import (
 )
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.packages import make_package
+from nexgent.tasks.strategy_decisions import STRATEGY_START_SCHEMA
 from nexgent.tasks.tools import ContractError, ToolRegistry
 
 
@@ -286,3 +287,161 @@ def test_packages_without_strategy_candidates_keep_the_legacy_path(tmp_path):
     assert "strategy_candidate_set" not in result["task"]
     assert not [event for event in result["events"]
                 if event["kind"] == "strategy_decision"]
+
+
+def test_host_strategy_start_freezes_dag_and_skips_startup_selector(tmp_path):
+    package = adaptive_orchestration_package()
+    gateway = StrategyGateway(OPEN_LOOP_COMPONENT_ID)
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    episode = service.create(
+        "Start the preregistered DAG without asking the startup selector",
+        deliverables=RESULT_SPEC,
+        package=package,
+        strategy_start={
+            "schema": STRATEGY_START_SCHEMA,
+            "policy_id": "test_host_policy",
+            "selected_component_id": MAIN_DAG_COMPONENT_ID,
+        },
+    )
+
+    frozen = episode["task"]["strategy_start"]
+    assert frozen["selection_source"] == "host_policy"
+    assert frozen["package_id"] == package["id"]
+    assert frozen["package_digest"] == package["digest"]
+    assert frozen["selected_candidate"]["component_id"] == MAIN_DAG_COMPONENT_ID
+    assert frozen["selected_candidate"]["source_digest"]
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "completed", result.get("last_error")
+    assert [call["role"] for call in gateway.calls] == ["architect", "generalist"]
+    decision = next(event["content"] for event in result["events"]
+                    if event["kind"] == "strategy_decision")
+    assert decision["selection_source"] == "host_policy"
+    assert decision["strategy_start"] == frozen
+    assert decision["selected_component_id"] == MAIN_DAG_COMPONENT_ID
+    assert "model_receipt" not in decision
+    assert "selector_rpc_receipt" not in decision
+    assert decision["budget_receipt"]["usage_before"] == (
+        decision["budget_receipt"]["usage_after"])
+    assert not [event for event in result["events"]
+                if (event["kind"] == "rpc_started"
+                    and event["content"]["call_path"] == "strategy/selector")]
+    assert result["execution"]["active_strategy"]["decision_digest"] == (
+        decision["decision_digest"])
+
+
+def test_host_strategy_start_recovers_decision_without_selector_request(tmp_path):
+    package = adaptive_orchestration_package()
+    gateway = StrategyGateway(OPEN_LOOP_COMPONENT_ID)
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    episode = service.create(
+        "Recover a frozen host start",
+        deliverables=RESULT_SPEC,
+        package=package,
+        strategy_start={
+            "schema": STRATEGY_START_SCHEMA,
+            "policy_id": "test_host_policy",
+            "selected_component_id": MAIN_DAG_COMPONENT_ID,
+        },
+    )
+    original_event = service.store.event
+    failed = {"value": False}
+
+    def fail_before_decision_commit(identity, kind, data):
+        if kind == "strategy_decision" and not failed["value"]:
+            failed["value"] = True
+            raise RuntimeError("fault before host strategy decision commit")
+        return original_event(identity, kind, data)
+
+    service.store.event = fail_before_decision_commit
+    first = service.run(episode["id"])
+    resumed = TaskService(
+        tmp_path, tools=ToolRegistry(), gateway_factory=gateway).run(episode["id"])
+
+    assert first["status"] == "failed"
+    assert resumed["status"] == "completed", resumed.get("last_error")
+    assert [call["role"] for call in gateway.calls] == ["architect", "generalist"]
+    assert len([event for event in resumed["events"]
+                if event["kind"] == "strategy_decision"]) == 1
+    assert not [event for event in resumed["events"]
+                if (event["kind"] == "rpc_started"
+                    and event["content"]["call_path"] == "strategy/selector")]
+
+
+def test_host_strategy_start_rejects_a_model_sourced_recovery_record(tmp_path):
+    package = adaptive_orchestration_package()
+    gateway = StrategyGateway(MAIN_DAG_COMPONENT_ID)
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    episode = service.create(
+        "Refuse recovery from the wrong startup authority",
+        package=package,
+        strategy_start={
+            "schema": STRATEGY_START_SCHEMA,
+            "policy_id": "test_host_policy",
+            "selected_component_id": MAIN_DAG_COMPONENT_ID,
+        },
+    )
+    service.store.event(episode["id"], "strategy_decision", {
+        "schema": "nexgent.strategy-decision.v1",
+        "selected_component_id": MAIN_DAG_COMPONENT_ID,
+    })
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "waiting_input"
+    assert "source differs from the frozen start policy" in result["last_error"]
+    assert gateway.calls == []
+
+
+def test_child_host_strategy_start_receipt_uses_root_budget(tmp_path):
+    package = adaptive_orchestration_package()
+    gateway = StrategyGateway(MAIN_DAG_COMPONENT_ID)
+    service = TaskService(tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    parent = service.create(
+        "Own the task tree budget",
+        package=package,
+        budget={"max_model_calls": 7},
+    )
+    child = service.create(
+        "Use the root budget for a host-selected child",
+        package=package,
+        parent_episode_id=parent["id"],
+        strategy_start={
+            "schema": STRATEGY_START_SCHEMA,
+            "policy_id": "test_host_policy",
+            "selected_component_id": MAIN_DAG_COMPONENT_ID,
+        },
+    )
+
+    result = service.run(child["id"])
+
+    assert result["status"] == "completed", result.get("last_error")
+    decision = next(event["content"] for event in result["events"]
+                    if event["kind"] == "strategy_decision")
+    assert decision["budget_receipt"]["limits"]["max_model_calls"] == 7
+    assert decision["budget_receipt"]["remaining_before"]["model_calls"] == 7
+
+
+def test_host_strategy_start_rejects_non_candidate_and_nonadaptive_package(tmp_path):
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    option = {
+        "schema": STRATEGY_START_SCHEMA,
+        "policy_id": "test_host_policy",
+        "selected_component_id": "not-a-candidate",
+    }
+    with pytest.raises(ContractError, match="unknown component"):
+        service.create(
+            "Reject a host choice outside the candidate set",
+            package=adaptive_orchestration_package(),
+            strategy_start=option,
+        )
+
+    from nexgent.tasks.seed import default_package
+    option["selected_component_id"] = OPEN_LOOP_COMPONENT_ID
+    with pytest.raises(ContractError, match="adaptive candidates"):
+        service.create(
+            "Reject a host start without adaptive candidates",
+            package=default_package(),
+            strategy_start=option,
+        )

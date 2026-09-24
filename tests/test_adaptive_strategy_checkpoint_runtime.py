@@ -5,7 +5,9 @@ import pytest
 
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
-from nexgent.tasks.strategy_decisions import CANDIDATE_SET_SCHEMA
+from nexgent.tasks.strategy_decisions import (
+    CANDIDATE_SET_SCHEMA, STRATEGY_START_SCHEMA,
+)
 from nexgent.tasks.tools import ToolRegistry
 
 
@@ -248,6 +250,36 @@ def test_completed_feedback_switches_to_entry_in_the_same_episode(tmp_path):
         "nexgent.strategy-selection-request.v1",
         "nexgent.strategy-checkpoint-selection.v1",
     ]
+
+
+def test_host_started_dag_can_commit_and_execute_checkpoint_switch(tmp_path):
+    gateway = CheckpointGateway()
+    service = TaskService(
+        tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    episode = service.create(
+        "Start the DAG by policy, then switch on attributable feedback",
+        deliverables=RESULT_SPEC,
+        package=checkpoint_package(),
+        strategy_start={
+            "schema": STRATEGY_START_SCHEMA,
+            "policy_id": "test_host_policy",
+            "selected_component_id": "dag-main",
+        },
+    )
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "completed", result.get("last_error")
+    decision = next(event["content"] for event in result["events"]
+                    if event["kind"] == "strategy_decision")
+    checkpoint = result["strategy_checkpoint"]
+    assert decision["selection_source"] == "host_policy"
+    assert checkpoint["decision_digest"] == decision["decision_digest"]
+    assert checkpoint["resolution"]["selected_component_id"] == "open-loop"
+    assert [call["schema"] for call in gateway.calls] == [
+        "nexgent.strategy-checkpoint-selection.v1",
+    ]
+    assert result["usage"]["model_calls"] == 1
 
 
 def test_switched_entry_cannot_complete_without_reading_exact_handoff(tmp_path):

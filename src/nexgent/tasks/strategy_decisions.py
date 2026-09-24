@@ -19,6 +19,7 @@ from .tools import ContractError
 CANDIDATE_SET_SCHEMA = "nexgent.strategy-candidate-set.v1"
 STRATEGY_DECISION_SCHEMA = "nexgent.strategy-decision.v1"
 STRATEGY_SELECTOR_SCHEMA = "nexgent.strategy-selector.v1"
+STRATEGY_START_SCHEMA = "nexgent.strategy-start.v1"
 
 _MODEL_DECISION_FIELDS = frozenset({
     "selected_component_id", "basis", "stop_conditions", "estimated_cost",
@@ -31,6 +32,14 @@ _CANDIDATE_FIELDS = frozenset({
 _CANDIDATE_SET_FIELDS = frozenset({
     "schema", "package_id", "package_digest", "candidates",
     "candidate_set_digest",
+})
+_STRATEGY_START_OPTION_FIELDS = frozenset({
+    "schema", "policy_id", "selected_component_id",
+})
+_STRATEGY_START_FIELDS = frozenset({
+    "schema", "policy_id", "selection_source", "candidate_set_digest",
+    "package_id", "package_digest", "selected_component_id",
+    "selected_candidate", "strategy_start_digest",
 })
 ESTIMATED_COST_FIELDS = frozenset({
     "model_calls", "completion_tokens", "tool_calls", "tool_work_units",
@@ -233,6 +242,65 @@ def validate_strategy_candidate_set(candidate_set):
     if candidate_set["candidate_set_digest"] != digest(body):
         raise ContractError("Strategy candidate set identity changed")
     return candidate_set
+
+
+def build_strategy_start(option, candidate_set):
+    """Freeze one host-policy choice against an immutable candidate set.
+
+    ``option`` is the small caller-facing policy input.  Package, component,
+    and source identities are copied only from the host-verified candidate
+    set, so callers cannot manufacture an apparently same-package start.
+    """
+    option = _finite_json(option, "Strategy start")
+    candidates = validate_strategy_candidate_set(candidate_set)
+    if (not isinstance(option, dict)
+            or set(option) != _STRATEGY_START_OPTION_FIELDS
+            or option.get("schema") != STRATEGY_START_SCHEMA
+            or not isinstance(option.get("policy_id"), str)
+            or not option["policy_id"].strip()
+            or option["policy_id"] != option["policy_id"].strip()
+            or len(option["policy_id"]) > 240
+            or not isinstance(option.get("selected_component_id"), str)
+            or not option["selected_component_id"]):
+        raise ContractError(
+            "Strategy start must contain a versioned policy and component identity")
+    candidate_by_id = {
+        candidate["component_id"]: candidate
+        for candidate in candidates["candidates"]
+    }
+    selected = candidate_by_id.get(option["selected_component_id"])
+    if selected is None:
+        raise ContractError("Strategy start selected an unknown component")
+    body = {
+        "schema": STRATEGY_START_SCHEMA,
+        "policy_id": option["policy_id"],
+        "selection_source": "host_policy",
+        "candidate_set_digest": candidates["candidate_set_digest"],
+        "package_id": candidates["package_id"],
+        "package_digest": candidates["package_digest"],
+        "selected_component_id": selected["component_id"],
+        "selected_candidate": deepcopy(selected),
+    }
+    return {**body, "strategy_start_digest": digest(body)}
+
+
+def validate_strategy_start(strategy_start, candidate_set):
+    """Return an integrity-checked frozen host-policy start record."""
+    strategy_start = _finite_json(strategy_start, "Strategy start")
+    candidates = validate_strategy_candidate_set(candidate_set)
+    if (not isinstance(strategy_start, dict)
+            or set(strategy_start) != _STRATEGY_START_FIELDS
+            or strategy_start.get("schema") != STRATEGY_START_SCHEMA
+            or strategy_start.get("selection_source") != "host_policy"):
+        raise ContractError("Frozen strategy start envelope is invalid")
+    expected = build_strategy_start({
+        "schema": strategy_start.get("schema"),
+        "policy_id": strategy_start.get("policy_id"),
+        "selected_component_id": strategy_start.get("selected_component_id"),
+    }, candidates)
+    if strategy_start != expected:
+        raise ContractError("Frozen strategy start identity changed")
+    return strategy_start
 
 
 def _bounded_text_list(value, label):

@@ -26,8 +26,9 @@ from .packages import CAPABILITIES, PackageError, split_ref, verify_package
 from .store import EpisodeStore, RecoveryRequired, StateConflict
 from .strategy_decisions import (
     STRATEGY_DECISION_SCHEMA,
-    parse_strategy_decision, strategy_candidate_set_from_manifest,
-    strategy_selector_component, validate_strategy_candidate_set,
+    build_strategy_start, parse_strategy_decision,
+    strategy_candidate_set_from_manifest, strategy_selector_component,
+    validate_strategy_candidate_set, validate_strategy_start,
 )
 from .strategy_checkpoints import (
     ATTRIBUTABLE_TRIGGER_DOMAINS, build_strategy_checkpoint,
@@ -333,6 +334,7 @@ class TaskService:
 
     def create(self, objective, inputs=None, deliverables=None, budget=None, capabilities=None,
                package=None, context=None, *, constraints=None, entry="execute", parent_episode_id=None,
+               strategy_start=None,
                package_channel=None, benchmark_registration=None,
                expected_package_registration=None, improver_channel_registration=None,
                memory_channel=None, expected_memory_registration=None,
@@ -551,6 +553,14 @@ class TaskService:
         if "strategy_candidates" in package["manifest"]:
             strategy_candidate_set = strategy_candidate_set_from_manifest(package)
             strategy_selector = strategy_selector_component(package)
+        if strategy_start is not None and (
+                strategy_candidate_set is None or entry != "execute"):
+            raise ContractError(
+                "Strategy start requires adaptive candidates on the execute entry")
+        frozen_strategy_start = (
+            build_strategy_start(strategy_start, strategy_candidate_set)
+            if strategy_start is not None else None
+        )
         task = {"schema_version": 1, "objective": objective, "inputs": inputs,
                 "deliverables": deliverables, "budget": budget, "capabilities": capabilities,
                 "context": context, "constraints": constraints, "entry": entry,
@@ -562,6 +572,8 @@ class TaskService:
             # context, and run() re-derives both identities from the package.
             task["strategy_candidate_set"] = strategy_candidate_set
             task["strategy_selector"] = strategy_selector
+            if frozen_strategy_start is not None:
+                task["strategy_start"] = frozen_strategy_start
         if capability_authority is not None:
             from .capability_authority import validate_episode_authority
             task["capability_authority"] = validate_episode_authority(capability_authority)
@@ -791,6 +803,17 @@ class TaskService:
 
     def _validate_strategy_decision_record(
             self, identity, record, candidate_set, selector):
+        frozen_start = self.store.get(identity)["task"].get("strategy_start")
+        host_record = (
+            isinstance(record, dict)
+            and record.get("selection_source") == "host_policy"
+        )
+        if (frozen_start is not None) != host_record:
+            raise RecoveryRequired(
+                "Persisted StrategyDecision source differs from the frozen start policy")
+        if host_record:
+            return self._validate_host_strategy_decision_record(
+                identity, record, candidate_set)
         required = {
             "schema", "candidate_set_digest", "package_id", "package_digest",
             "selected_component_id", "selected_candidate", "basis",
@@ -835,6 +858,84 @@ class TaskService:
             raise RecoveryRequired("Persisted StrategyDecision model receipt changed")
         return deepcopy(record)
 
+    def _validate_host_strategy_decision_record(
+            self, identity, record, candidate_set):
+        required = {
+            "schema", "candidate_set_digest", "package_id", "package_digest",
+            "selected_component_id", "selected_candidate", "basis",
+            "stop_conditions", "estimated_cost", "selection_source",
+            "strategy_start", "budget_receipt", "decision_id",
+            "decision_digest",
+        }
+        state = self.store.get(identity)
+        frozen_start = validate_strategy_start(
+            state["task"].get("strategy_start"), candidate_set)
+        if (not isinstance(record, dict) or set(record) != required
+                or record.get("schema") != STRATEGY_DECISION_SCHEMA
+                or record.get("selection_source") != "host_policy"
+                or record.get("strategy_start") != frozen_start
+                or record.get("candidate_set_digest")
+                != candidate_set["candidate_set_digest"]
+                or not isinstance(record.get("decision_id"), str)
+                or not isinstance(record.get("decision_digest"), str)):
+            raise RecoveryRequired("Persisted host StrategyDecision identity is invalid")
+        body = {key: deepcopy(value) for key, value in record.items()
+                if key not in {"decision_id", "decision_digest"}}
+        expected_digest = digest(body)
+        if (record["decision_digest"] != expected_digest
+                or record["decision_id"]
+                != "strategy-decision-" + expected_digest[:24]):
+            raise RecoveryRequired("Persisted host StrategyDecision digest changed")
+        parsed = parse_strategy_decision({
+            key: deepcopy(record[key]) for key in (
+                "selected_component_id", "basis", "stop_conditions",
+                "estimated_cost")
+        }, candidate_set)
+        if (record.get("selected_candidate") != parsed["selected_candidate"]
+                or record.get("package_id") != parsed["package_id"]
+                or record.get("package_digest") != parsed["package_digest"]
+                or record.get("selected_component_id")
+                != frozen_start["selected_component_id"]):
+            raise RecoveryRequired("Persisted host StrategyDecision selection changed")
+        return deepcopy(record)
+
+    def _host_strategy_decision(self, identity, candidate_set, strategy_start):
+        """Build the durable startup decision without claiming a model call."""
+        state = self.store.get(identity)
+        root_state = self.store.get(state["root_episode_id"])
+        root_budget = root_state["budget"]
+        start = validate_strategy_start(strategy_start, candidate_set)
+        usage = self.store.usage(state["root_episode_id"])
+        parsed = parse_strategy_decision({
+            "selected_component_id": start["selected_component_id"],
+            "basis": [f"Frozen host policy {start['policy_id']} selected this candidate."],
+            "stop_conditions": [
+                "Initial host selection ends when execution enters the frozen candidate."
+            ],
+            "estimated_cost": None,
+        }, candidate_set)
+        body = {
+            key: deepcopy(value) for key, value in parsed.items()
+            if key != "decision_digest"
+        }
+        body.update({
+            "selection_source": "host_policy",
+            "strategy_start": deepcopy(start),
+            "budget_receipt": {
+                "limits": deepcopy(root_budget),
+                "usage_before": deepcopy(usage),
+                "remaining_before": self._remaining_budget(root_budget, usage),
+                "usage_after": deepcopy(usage),
+                "remaining_after": self._remaining_budget(root_budget, usage),
+            },
+        })
+        decision_digest = digest(body)
+        return {
+            **body,
+            "decision_id": "strategy-decision-" + decision_digest[:24],
+            "decision_digest": decision_digest,
+        }
+
     def _strategy_decision(
             self, identity, package, payload, stop_event, notify):
         """Commit or recover the one startup StrategyDecision for this Episode."""
@@ -857,6 +958,16 @@ class TaskService:
         if committed:
             return self._validate_strategy_decision_record(
                 identity, committed[0], current, selector)
+
+        frozen_start = state["task"].get("strategy_start")
+        if frozen_start is not None:
+            decision = self._host_strategy_decision(
+                identity, current, frozen_start)
+            # This event is the same atomic decision boundary used by the
+            # model selector.  A crash before it is retried from the immutable
+            # StrategyStart; a crash after it validates and reuses the event.
+            self.store.event(identity, "strategy_decision", decision)
+            return decision
 
         path = "strategy/selector"
         journal = self.store.rpc_find(identity, path)
