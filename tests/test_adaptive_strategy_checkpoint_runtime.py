@@ -252,6 +252,115 @@ def test_completed_feedback_switches_to_entry_in_the_same_episode(tmp_path):
     ]
 
 
+def test_checkpoint_selector_gets_safe_pending_and_entry_contracts(tmp_path):
+    evaluator_secret = "PRIVATE_EVALUATOR_SENTINEL"
+    route_secret = "PRIVATE_ROUTE_SENTINEL"
+    source_secret = "PRIVATE_ENTRY_SOURCE_SENTINEL"
+    base = checkpoint_package()
+    files = deepcopy(base["files"])
+    manifest = deepcopy(base["manifest"])
+    workflow = json.loads(files["workflows/main.json"])
+    workflow["nodes"][0]["params"]["evaluator_private"] = evaluator_secret
+    workflow["failure_routes"] = [{
+        "from": "finish",
+        "action": "fail_plan",
+        "failure_kinds": [route_secret],
+    }]
+    files["workflows/main.json"] = json.dumps(workflow)
+    files["agent.py"] += f"\n# {source_secret}\n"
+    package = make_package(files, manifest)
+    gateway = CheckpointGateway()
+    service = TaskService(
+        tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    episode = service.create(
+        "Project only safe host facts at the strategy checkpoint",
+        deliverables=RESULT_SPEC,
+        context={"evaluation_private": evaluator_secret},
+        package=package,
+    )
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "completed", result.get("last_error")
+    checkpoint_request = next(
+        call for call in gateway.calls
+        if call["schema"] == "nexgent.strategy-checkpoint-selection.v1")
+    assert checkpoint_request["pending_nodes"] == [{
+        "node_id": "finish",
+        "method": "publish",
+        "capability": "publish",
+        "role_ref": None,
+        "component_ref": None,
+        "bindings": {
+            "depends_on_node_ids": ["inspect"],
+            "artifact_inputs": [],
+        },
+    }]
+    entry = checkpoint_request["target_entry_candidates"]
+    assert len(entry) == 1
+    assert entry[0]["component_id"] == "open-loop"
+    assert entry[0]["component_digest"]
+    assert entry[0]["ref"] == "execute"
+    assert entry[0]["backend"] == "controlled_code"
+    assert entry[0]["capability_contract"] == {
+        "possible_rpc_methods": ["publish", "read_artifact"],
+    }
+    assert entry[0]["source_identity"] == {
+        "package_id": package["id"],
+        "package_digest": package["digest"],
+        "source_kind": "python_source",
+        "source_path": "agent.py",
+        "source_digest": package["component_digests"]["agent.py"],
+    }
+    serialized = json.dumps(checkpoint_request, ensure_ascii=False)
+    assert evaluator_secret not in serialized
+    assert route_secret not in serialized
+    assert source_secret not in serialized
+    assert "failure_routes" not in serialized
+    assert "evaluation_private" not in serialized
+
+
+def test_checkpoint_selector_refuses_unbounded_pending_projection(tmp_path):
+    base = checkpoint_package()
+    files = deepcopy(base["files"])
+    manifest = deepcopy(base["manifest"])
+    workflow = json.loads(files["workflows/main.json"])
+    pending = [{
+        "id": f"pending-{index}",
+        "method": "join",
+        "params": {"index": index},
+    } for index in range(65)]
+    workflow["nodes"] = [workflow["nodes"][0], *pending]
+    workflow["control_edges"] = [
+        {"from": "inspect", "to": "pending-0"},
+        *[
+            {"from": f"pending-{index - 1}", "to": f"pending-{index}"}
+            for index in range(1, 65)
+        ],
+    ]
+    workflow["outputs"] = {}
+    files["workflows/main.json"] = json.dumps(workflow)
+    package = make_package(files, manifest)
+    gateway = CheckpointGateway()
+    service = TaskService(
+        tmp_path, tools=ToolRegistry(), gateway_factory=gateway)
+    episode = service.create(
+        "Reject an oversized checkpoint selector projection",
+        package=package,
+        strategy_start={
+            "schema": STRATEGY_START_SCHEMA,
+            "policy_id": "bounded_projection_test",
+            "selected_component_id": "dag-main",
+        },
+    )
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "failed"
+    assert "pending-node projection exceeds its bound" in result["last_error"]
+    assert gateway.calls == []
+
+
 def test_host_started_dag_can_commit_and_execute_checkpoint_switch(tmp_path):
     gateway = CheckpointGateway()
     service = TaskService(

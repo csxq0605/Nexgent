@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
@@ -48,6 +49,9 @@ _RESUMABLE_COMPOSITE_METHODS = frozenset({
     "delegate", "parallel", "develop_skill", "develop_tool", "release_tool",
     "develop_service", "activate_service", "release_service",
 })
+_MAX_CHECKPOINT_PENDING_NODES = 64
+_MAX_CHECKPOINT_TARGET_ENTRIES = 16
+_MAX_CHECKPOINT_CONTEXT_BYTES = 64_000
 
 
 class _CompositePending(Exception):
@@ -1183,6 +1187,110 @@ class TaskService:
             "pending_node_ids": pending,
         }
 
+    @staticmethod
+    def _strategy_checkpoint_pending_nodes(execution):
+        """Project only host-compiled facts needed to assess the pending DAG."""
+        pending = {
+            node.node_id for node in execution.node_executions
+            if node.status.value == "pending"
+        }
+        if len(pending) > _MAX_CHECKPOINT_PENDING_NODES:
+            raise ContractError(
+                "Strategy checkpoint pending-node projection exceeds its bound")
+        control_dependencies = {node_id: set() for node_id in pending}
+        for binding in execution.plan.control_bindings:
+            if binding.target_node_id in pending:
+                control_dependencies[binding.target_node_id].add(
+                    binding.source_node_id)
+        artifact_inputs = {node_id: [] for node_id in pending}
+        for binding in execution.plan.artifact_bindings:
+            if binding.consumer_node_id in pending:
+                artifact_inputs[binding.consumer_node_id].append({
+                    "producer_node_id": binding.producer_node_id,
+                    "output_port": binding.output_port,
+                    "input_port": binding.input_port,
+                })
+
+        result = []
+        for node in sorted(
+                (item for item in execution.plan.nodes if item.id in pending),
+                key=lambda item: item.id):
+            match = re.fullmatch(r"operator://([^/]+)/[0-9a-f]{64}",
+                                 node.operator_ref)
+            if match is None:
+                raise RecoveryRequired(
+                    "Pending plan node has an invalid frozen operator identity")
+            method = match.group(1)
+            result.append({
+                "node_id": node.id,
+                "method": method,
+                "capability": method if method in CAPABILITIES else None,
+                "role_ref": node.role_ref,
+                "component_ref": node.component_ref,
+                "bindings": {
+                    "depends_on_node_ids": sorted(
+                        control_dependencies[node.id]),
+                    "artifact_inputs": sorted(
+                        artifact_inputs[node.id],
+                        key=lambda value: (
+                            value["input_port"], value["producer_node_id"],
+                            value["output_port"]),
+                    ),
+                },
+            })
+        return result
+
+    @staticmethod
+    def _strategy_checkpoint_entry_candidates(package, candidate_set):
+        """Describe switchable entries without exposing their source text."""
+        entries = []
+        for candidate in candidate_set["candidates"]:
+            if candidate["kind"] != "entry":
+                continue
+            if len(entries) >= _MAX_CHECKPOINT_TARGET_ENTRIES:
+                raise ContractError(
+                    "Strategy checkpoint target-entry projection exceeds its bound")
+            source = package["files"][candidate["source_path"]]
+            tree = ast.parse(source, filename=candidate["source_path"])
+            rpc_methods = sorted({
+                node.attr for node in ast.walk(tree)
+                if isinstance(node, ast.Attribute) and node.attr in CAPABILITIES
+            })
+            entries.append({
+                "component_id": candidate["component_id"],
+                "component_digest": candidate["component_digest"],
+                "ref": candidate["ref"],
+                "backend": candidate["backend"],
+                "capability_contract": {
+                    "possible_rpc_methods": rpc_methods,
+                },
+                "source_identity": {
+                    "package_id": candidate["package_id"],
+                    "package_digest": candidate["package_digest"],
+                    "source_kind": candidate["source_kind"],
+                    "source_path": candidate["source_path"],
+                    "source_digest": candidate["source_digest"],
+                },
+            })
+        return entries
+
+    @classmethod
+    def _strategy_checkpoint_selector_context(
+            cls, package, candidate_set, execution):
+        context = {
+            "pending_nodes": cls._strategy_checkpoint_pending_nodes(execution),
+            "target_entry_candidates": cls._strategy_checkpoint_entry_candidates(
+                package, candidate_set),
+        }
+        encoded = json.dumps(
+            context, ensure_ascii=False, allow_nan=False,
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        if len(encoded) > _MAX_CHECKPOINT_CONTEXT_BYTES:
+            raise ContractError(
+                "Strategy checkpoint selector context exceeds its byte bound")
+        return context
+
     def _strategy_checkpoint_budget(self, identity):
         state = self.store.get(identity)
         root = self.store.get(state["root_episode_id"])
@@ -1304,6 +1412,8 @@ class TaskService:
             state["task"]["strategy_candidate_set"])
         selector = strategy_selector_component(package)
         receipt_digest = digest(receipt)
+        selector_context = self._strategy_checkpoint_selector_context(
+            package, candidate_set, execution)
         request_payload = {
             "schema": "nexgent.strategy-checkpoint-selection.v1",
             "task": self._strategy_selector_task(payload),
@@ -1326,6 +1436,7 @@ class TaskService:
                 "feedback": deepcopy(feedback),
             },
             "plan": self._strategy_checkpoint_plan(execution),
+            **selector_context,
         }
         path = self._strategy_checkpoint_rpc_path(
             identity, rule["id"], rule["after_node"], receipt_digest)
