@@ -160,14 +160,14 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 - [x] D1-B.0 将真实开放循环和 Main DAG 组合为同包双 O 候选，冻结候选／模型选择纯合同；30 项联合定向测试通过。随后由 D1-B.1 接入执行。
 - [x] D1-B.1 同一普通入口由模型在冻结候选中选择 DAG／开放循环，持久化决策、模型调用与预算收据；completed 选择可恢复而不重发，started 未知结果等待核对，非法选择不回退。13 项集成定向测试通过；仅为确定性模型边界，真实 MiMo 选择与效果尚未验证。
 - [x] D1-B.2 已持久化的 root Episode 绝对 wall-clock 截止时间接入 selector、DAG、代码与恢复准入；34 项相关定向测试通过。按[预注册合同](experiments/strategy_selection/CONTRACT.md)运行两批真实 MiMo 探针：[结果](experiments/strategy_selection/RESULTS.md)中第一批为本地 SDK 缺失，第二批两个主任务均失败，DAG 题被选为开放循环；H1–H4 均不通过。
-- [x] D1-C 机制切片：已完成 DAG 节点反馈触发真实 gateway 选择、同一 Episode 原子交接、entry 首个动作读取 handoff、恢复不重跑已完成节点；多检查点 continue→switch 的 RPC 槽位独立。生产 Main 图提案可声明检查点，默认开放循环可读取 handoff；宿主可通过有来源记录的 `StrategyStart` 冻结实验初始 DAG 而不伪造模型收据。机制及生产接线已有定向测试，[真实探针合同草案](experiments/strategy_checkpoint/CONTRACT.md)已固定，四条件离线预检及真实 MiMo 中途切换收据尚缺。D1 整体出口和 D1-D 冻结对照未过。
+- [x] D1-C 机制切片：已完成 DAG 节点反馈触发真实 gateway 选择、同一 Episode 原子交接、entry 首个动作读取 handoff、恢复不重跑已完成节点；多检查点 continue→switch 的 RPC 槽位独立。生产 Main 图提案可声明检查点，默认开放循环可读取 handoff；宿主可通过有来源记录的 `StrategyStart` 冻结实验初始 DAG 而不伪造模型收据。四条件离线预检通过；[首批真实 MiMo 结果](experiments/strategy_checkpoint/RESULTS.md)四行均因初始草稿未过 base 前提而失败，selector 从未准入，真实切换／恢复未验证。D1 整体出口和 D1-D 冻结对照未过。
 - [x] E0 独立配对／guard 的宿主能力授权冻结：父子两臂和监控任务使用计划中的同一 `EpisodeAuthority`，benchmark 任务不能自授。确定性双模式回归通过；动态工具／服务发布与行为激活门仍未接入。
 - [x] E1 惰性[可携带能力发布合同](docs/design/capability-release-v1.md)：冻结纯 tool/service 的源码、接口、权限要求与创建任务谱系；不授权、不部署、不复用原 Definition。11 项新合同测试通过；E 阶段出口仍未通过。
 - [x] E2-A 包候选结构：AgentPackage manifest v2 可声明纯工具及 `model_context.v1` 服务组件，PackagePatch v3 可携带新增 S 组件；演化门要求对应的运行激活证据。100 项定向测试通过。此步仅建立候选与证据合同，尚未证明跨任务运行。
 - [x] E2-B 包能力运行时：后续任务可从包清单读取工具及服务；工具在受控 worker 中调用，服务在后续模型调用前自动应用；预算、名称冲突、失败无激活、成功后组件身份收据的 28 项定向回归通过。此项为确定性运行时验证，尚未通过任务来源候选的晋升／真实模型跨任务收益。
 - [x] E3-A 任务来源能力采用桥：已成功使用的任务内 tool/service Definition 可生成携带源码的包候选；两类候选在确定性模型边界下均通过独立配对、激活证据、guard、晋升，并由重建的 TaskService 在新 Episode 中自动调用／应用。未使用的 Definition 和过期反馈拒绝。4 项新纵向测试通过；并非真实模型效果证明。
 - [x] E3-B.1 单次真实 MiMo 能力继承探针：v1 输出包装解析失败已保留；v2 模型生成通用工具、完成独立配对与晋升、通过 guard，并在单独 OS 进程的新任务中实际调用。selection 父版本因非 JSON 响应失败，候选质量 1／父 0 且候选成本较高；只说明技术路径，不构成多任务净收益。[原始解释](experiments/kernel_spike/RESULTS.md)。
-- [ ] E3-B.2 按[普通任务反馈进化合同](docs/design/ordinary-feedback-evolution-v1.md)分片实现：a 安全反馈投影已实现并通过 35 项定向测试，但持久触发仍缺；b 同包开发 Episode 自主判断缺口并提交候选，c 独立配对／guard 后自动复用与回滚，d 多任务族净效果对照均未完成。当前普通任务无自动触发，E 阶段完整出口仍未过。
+- [ ] E3-B.2 按[普通任务反馈进化合同](docs/design/ordinary-feedback-evolution-v1.md)分片实现：a 安全反馈投影及显式宿主挂载的持久终态触发／outbox 已实现，14 项触发定向测试通过；生产 Main／CLI 尚未装配策略源与后台 drain，因此普通产品路径未自动运行进化。b 同包开发 Episode 自主判断缺口并提交候选，c 独立配对／guard 后自动复用与回滚，d 多任务族净效果对照均未完成。E 阶段完整出口仍未过。
 - [ ] E 将任务来源的工具／服务／编排候选接入独立评价、晋升、后续任务自动复用与回滚，再进入 F 的对照研究。
 
 计划重定见 `3919a0d`；后续逐阶段提交记录在[实现与来源对照账本](docs/research/implementation-reference-tracker.md)。A2–G 的完成状态由实际代码与运行收据逐项更新。
