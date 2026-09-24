@@ -4,7 +4,7 @@
 
 ## 冻结设置
 
-- 代码基线：`d16b903`；新建隔离项目 `NExgent-live-search-20260924`，使用普通 `nexgent task` 入口和 `mimo-v2.6-flash`。密钥仅从本机 Manyselves 配置加载到试验进程环境，不写入仓库、项目配置或收据。
+- 代码基线：`0760175`（在 `d16b903` 的真实搜索接线上修正项目配置重复规范化）；新建隔离项目 `NExgent-live-search-20260924`，使用普通 `nexgent task` 入口和 `mimo-v2.6-flash`。密钥仅从本机 Manyselves 配置加载到试验进程环境，不写入仓库、项目配置或收据。
 - 来源任务：`WorkbenchBenchmark.tasks('development', 13)[0]` 的公开 objective、inputs、deliverables、constraints；不读取或传送 `_evaluation`。允许 `workbench.inspect_sources`、`workbench.validate_delivery` 两项既有工具。普通任务使用 `workbench-rsi` channel，默认 R0 为 `workbench-r0`。
 - 来源及 selection／guard 的单 Episode 上限：12 次模型调用、48,000 预留完成 token、24 次工具调用、96 个节点。selection 固定 seed 0，guard 固定 seed 0；晋升门沿用上一轮：质量增量至少 0.01、成功率 1、回归 0、成本比不超过 3，guard 最低分及成功率均为 1。
 - 新的 opt-in 编排搜索：最多 2 次候选尝试，首个 development seed 13、最多扫描 8 个 seed，开发集最低均值增量 0；搜索合计最多 24 次模型调用、96,000 预留完成 token、32 次工具调用、240 个节点。每个开发集 Episode 最多 8 次模型调用、32,000 预留完成 token、16 次工具调用、96 个节点。宿主排除与来源任务内容相同的样本。
