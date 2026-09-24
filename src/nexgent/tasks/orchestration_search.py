@@ -478,6 +478,57 @@ def repair_brief(attempt, assessment):
     }
 
 
+def static_gateway_preflight(package):
+    """Reject impossible ask arguments before spending paired development calls.
+
+    This checks the host gateway's fixed interface only. It deliberately does
+    not infer task answers, tool permissions, or dynamic execution outcomes.
+    """
+    manifest = package["manifest"]
+    reachable = orchestration_projection(package)["workflows"]
+    allowed = {"role", "prompt", "payload", "max_tokens"}
+
+    def issues(graph):
+        artifact_fields = {}
+        edges = graph.get("artifact_edges", [])
+        nodes = graph.get("nodes", [])
+        if not isinstance(edges, list) or not isinstance(nodes, list):
+            return "invalid_workflow_structure"
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            target, port = edge.get("consumer_node"), edge.get("input_port")
+            if isinstance(target, str) and isinstance(port, str):
+                artifact_fields.setdefault(target, set()).add(port.split(".", 1)[0])
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            if node.get("method") == "loop" and isinstance(node.get("body"), dict):
+                nested = issues(node["body"])
+                if nested is not None:
+                    return nested
+            if node.get("method") != "ask":
+                continue
+            params, bindings = node.get("params", {}), node.get("bindings", {})
+            if not isinstance(params, dict) or not isinstance(bindings, dict):
+                return "invalid_workflow_structure"
+            supplied = (set(params)
+                        | set(bindings)
+                        | artifact_fields.get(node.get("id"), set()))
+            if supplied - allowed:
+                return "ask_unsupported_gateway_arguments"
+        return None
+
+    for component_id in sorted(reachable):
+        component = manifest["components"][component_id]
+        declaration = manifest["workflows"][component["ref"]]
+        graph = json.loads(package["files"][declaration["ref"]])
+        failure_code = issues(graph)
+        if failure_code is not None:
+            return [failure_code]
+    return []
+
+
 def public_generation_failure_codes(generation):
     """Forward only the fixed host code, never a raw validation exception."""
     if generation.get("status") != "missing":
@@ -937,6 +988,13 @@ class BoundedOrchestrationSearch:
                               "failure_codes": ["no_executable_orchestration_delta"],
                               "mean_quality_delta": None, "task_count": 0,
                               "claim_limit": "S-only changes are not O search."}
+            elif (preflight_codes := static_gateway_preflight(child)):
+                assessment = {"eligible_for_selection": False,
+                              "failure_codes": preflight_codes,
+                              "mean_quality_delta": None, "task_count": 0,
+                              "claim_limit": (
+                                  "Static host gateway contract failed before "
+                                  "paired development execution.")}
             else:
                 seen_packages.add(candidate["package_digest"])
                 try:

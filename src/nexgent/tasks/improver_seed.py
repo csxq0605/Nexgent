@@ -513,6 +513,8 @@ For `manifest_component_set_v3`, return a compact `nexgent.package-patch-proposa
 
 In this v3 contract, `path` belongs only to `add`; never put `path` in a `replace` or `remove` operation. If `repair_context.failure_codes` contains `missing_hypothesis_component_ids`, include `hypothesis.component_ids` as a complete list of changed component IDs. If it contains `replacement_forbids_path`, remove `path` from every replacement instead of repeating that proposal.
 
+For workflow `ask` nodes, the host gateway accepts only `role`, `prompt`, `payload`, and `max_tokens` as parameter or binding names. Put task-specific fields inside `payload`; never add them as peer gateway arguments. If repair reports `ask_unsupported_gateway_arguments`, correct the graph interface before changing the task logic.
+
 The hypothesis must be falsifiable on later Episodes. The activation probe or targets must name changed components. Do not claim the patch works; selection and guard evaluation decide that independently.
 """
 

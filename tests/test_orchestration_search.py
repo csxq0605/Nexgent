@@ -26,6 +26,7 @@ from nexgent.tasks.orchestration_search import (
     paired_episode_budget,
     public_generation_failure_codes,
     repair_brief,
+    static_gateway_preflight,
 )
 from nexgent.tasks.orchestration_search_seed import (
     orchestration_search_improver_package)
@@ -701,6 +702,61 @@ def test_bounded_search_skips_s_only_attempt_then_qualifies_real_o_delta(tmp_pat
         "S-only changes are not O search.")
     assert len([event for event in result["events"]
                 if event["kind"] == "attempt_started"]) == 2
+
+
+def test_static_ask_preflight_repairs_before_spending_paired_calls(tmp_path):
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    parent = multirole_package()
+    valid = _child(parent)
+    files = deepcopy(valid["files"])
+    graph = json.loads(files["workflows/main.json"])
+    ask = next(node for node in graph["nodes"] if node["method"] == "ask")
+    ask["bindings"]["prior_findings"] = {"$input": "task"}
+    files["workflows/main.json"] = json.dumps(graph, sort_keys=True)
+    invalid = make_package(files, deepcopy(valid["manifest"]), parent=parent,
+                           provenance={"fixture": "invalid-ask-arguments"})
+    assert static_gateway_preflight(invalid) == [
+        "ask_unsupported_gateway_arguments"]
+    for package in (parent, invalid, valid):
+        tasks.store.put_package(package)
+    candidates = {
+        "candidate-invalid": _candidate("candidate-invalid", parent, invalid),
+        "candidate-valid": _candidate("candidate-valid", parent, valid),
+    }
+    records = {
+        "generation-invalid": _generation(
+            "generation-invalid", parent, invalid, "candidate-invalid"),
+        "generation-valid": _generation(
+            "generation-valid", parent, valid, "candidate-valid"),
+    }
+    service = BoundedOrchestrationSearch(
+        tasks, _Evolution(parent, candidates), _Generation(records))
+    order = iter(records.values())
+    repairs, qualified = [], []
+
+    def generate(_attempt, _attempt_id, repair, _remaining):
+        repairs.append(deepcopy(repair))
+        return deepcopy(next(order))
+
+    def qualify(candidate, _remaining):
+        qualified.append(candidate["id"])
+        return _qualification(candidate["id"], delta=0.25)
+
+    result = service.run(
+        "general", "feedback-1", 0,
+        {"max_attempts": 2, "target_qualified": 1,
+         "minimum_mean_delta": 0.0, "max_model_calls": 6,
+         "max_completion_tokens": 100, "max_tool_calls": 0,
+         "max_nodes": 30},
+        generate=generate, qualify=qualify)
+
+    assert result["status"] == "qualified"
+    assert qualified == ["candidate-valid"]
+    assert repairs[1]["failure_codes"] == [
+        "ask_unsupported_gateway_arguments"]
+    first = next(event for event in result["events"]
+                 if event["kind"] == "attempt_finished")
+    assert "qualification" not in first["content"]
 
 
 def test_caller_owned_finished_search_replays_without_spending(tmp_path):
