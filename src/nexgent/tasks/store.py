@@ -547,7 +547,12 @@ class EpisodeStore:
     def feedback_triggers(self, *, statuses=None, limit=256):
         if type(limit) is not int or not 1 <= limit <= 256:
             raise ValueError("Feedback trigger page limit must be in [1, 256]")
-        allowed = {"observed", "feedback_capture_started", "feedback_captured", "deferred"}
+        allowed = {
+            "observed", "feedback_capture_started", "feedback_captured",
+            "development_planned", "development_run", "candidate_generation_started",
+            "candidate_ready",
+            "no_change", "rejected", "deferred",
+        }
         if statuses is None:
             statuses = sorted(allowed)
         if (not isinstance(statuses, (list, tuple)) or not statuses
@@ -561,12 +566,23 @@ class EpisodeStore:
         return [json.loads(row[0]) for row in rows]
 
     def transition_feedback_trigger(self, identity, *, expected_revision, status,
-                                    reason=None, feedback_bundle=None):
+                                    reason=None, feedback_bundle=None,
+                                    development_intent=None,
+                                    development_episode=None,
+                                    development_plan=None,
+                                    candidate=None):
         """CAS one outbox state while keeping evaluator-private data out."""
         transitions = {
             "observed": {"feedback_capture_started", "deferred"},
             "feedback_capture_started": {"feedback_captured", "deferred"},
-            "feedback_captured": set(),
+            "feedback_captured": {"development_planned", "deferred"},
+            "development_planned": {"development_run", "deferred"},
+            "development_run": {"candidate_generation_started", "no_change", "rejected",
+                                "deferred"},
+            "candidate_generation_started": {"candidate_ready", "rejected", "deferred"},
+            "candidate_ready": set(),
+            "no_change": set(),
+            "rejected": set(),
             "deferred": set(),
         }
         if status not in transitions:
@@ -580,6 +596,73 @@ class EpisodeStore:
                     or any(not isinstance(value, str) or not value
                            for value in feedback_bundle.values())):
                 raise ValueError("Feedback bundle reference is invalid")
+        if development_intent is not None:
+            required = {"feedback_bundle", "improver", "options", "options_digest"}
+            bundle = development_intent.get("feedback_bundle") \
+                if isinstance(development_intent, dict) else None
+            improver = development_intent.get("improver") \
+                if isinstance(development_intent, dict) else None
+            options = development_intent.get("options") \
+                if isinstance(development_intent, dict) else None
+            if (not isinstance(development_intent, dict)
+                    or set(development_intent) != required
+                    or not isinstance(bundle, dict) or set(bundle) != {"id", "digest"}
+                    or any(not isinstance(value, str) or not value
+                           for value in bundle.values())
+                    or not isinstance(improver, dict)
+                    or set(improver) != {"channel", "revision", "package_id",
+                                        "package_digest"}
+                    or not isinstance(improver["channel"], str)
+                    or not improver["channel"] or type(improver["revision"]) is not int
+                    or improver["revision"] < 0
+                    or any(not isinstance(improver[key], str) or not improver[key]
+                           for key in ("package_id", "package_digest"))
+                    or not isinstance(options, list) or not 1 <= len(options) <= 64
+                    or any(not isinstance(option, dict)
+                           or set(option) != {"candidate_type", "source_ref", "evidence"}
+                           or option["candidate_type"] not in {
+                               "tool", "service_provider", "orchestration", "no_change"}
+                           or (option["source_ref"] is not None
+                               and (not isinstance(option["source_ref"], str)
+                                    or not option["source_ref"]))
+                           or not isinstance(option["evidence"], dict)
+                           for option in options)
+                    or _digest(options)
+                    != development_intent.get("options_digest")):
+                raise ValueError("Feedback development intent is invalid")
+        if development_episode is not None:
+            required = {"id", "package_id", "package_digest"}
+            if (not isinstance(development_episode, dict)
+                    or set(development_episode) != required
+                    or any(not isinstance(value, str) or not value
+                           for value in development_episode.values())):
+                raise ValueError("Feedback development Episode reference is invalid")
+        if development_plan is not None:
+            required = {"artifact_id", "digest", "candidate_type", "source_ref",
+                        "hypothesis_digest"}
+            if (not isinstance(development_plan, dict)
+                    or set(development_plan) != required
+                    or any(not isinstance(development_plan.get(key), str)
+                           or not development_plan[key]
+                           for key in ("artifact_id", "digest", "candidate_type"))
+                    or development_plan.get("candidate_type") not in {
+                        "tool", "service_provider", "orchestration", "no_change"}
+                    or (development_plan.get("source_ref") is not None
+                        and (not isinstance(development_plan["source_ref"], str)
+                             or not development_plan["source_ref"]))
+                    or (development_plan.get("hypothesis_digest") is not None
+                        and (not isinstance(development_plan["hypothesis_digest"], str)
+                             or not development_plan["hypothesis_digest"]))):
+                raise ValueError("Feedback development plan reference is invalid")
+        if candidate is not None:
+            required = {"kind", "candidate_id", "candidate_package_id",
+                        "generation_id", "record_digest"}
+            if (not isinstance(candidate, dict) or set(candidate) != required
+                    or candidate.get("kind") not in {
+                        "tool", "service_provider", "orchestration"}
+                    or any(not isinstance(value, str) or not value
+                           for value in candidate.values())):
+                raise ValueError("Feedback candidate reference is invalid")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -596,12 +679,41 @@ class EpisodeStore:
                 raise ValueError("Captured feedback requires an immutable bundle reference")
             if status != "feedback_captured" and feedback_bundle is not None:
                 raise ValueError("Only captured feedback may attach a bundle reference")
+            if status == "development_planned" and development_intent is None:
+                raise ValueError("Planned development requires a frozen intent")
+            if status != "development_planned" and development_intent is not None:
+                raise ValueError("Only planned development may attach an intent")
+            if status == "development_run" and development_episode is None:
+                raise ValueError("Development run requires an Episode reference")
+            if status != "development_run" and development_episode is not None:
+                raise ValueError("Only development run may attach an Episode reference")
+            if status not in {"candidate_generation_started", "candidate_ready",
+                              "no_change", "rejected"} \
+                    and development_plan is not None:
+                raise ValueError("Only candidate development may attach a plan reference")
+            effective_plan = (development_plan if development_plan is not None
+                              else record.get("development_plan"))
+            if status in {"candidate_generation_started", "candidate_ready", "no_change"} \
+                    and effective_plan is None:
+                raise ValueError("Candidate development requires a plan reference")
+            if status == "candidate_ready" and candidate is None:
+                raise ValueError("Candidate-ready development requires a candidate reference")
+            if status != "candidate_ready" and candidate is not None:
+                raise ValueError("Only candidate-ready development may attach a candidate")
             record["status"] = status
             record["reason"] = reason
             record["revision"] += 1
             record["updated_at"] = time.time()
             if feedback_bundle is not None:
                 record["feedback_bundle"] = deepcopy(feedback_bundle)
+            if development_intent is not None:
+                record["development_intent"] = deepcopy(development_intent)
+            if development_episode is not None:
+                record["development_episode"] = deepcopy(development_episode)
+            if development_plan is not None:
+                record["development_plan"] = deepcopy(development_plan)
+            if candidate is not None:
+                record["candidate"] = deepcopy(candidate)
             encoded = _json(record)
             db.execute(
                 "UPDATE task_feedback_outbox SET status=?,revision=?,updated=?,data=? "

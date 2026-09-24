@@ -17,6 +17,7 @@ from .tools import ContractError
 
 WORK_SCHEMA = "nexgent.ordinary-feedback-work.v1"
 POLICY_SCHEMA = "nexgent.ordinary-feedback-policy.v1"
+DEVELOPMENT_PLAN_SCHEMA = "nexgent.ordinary-development-plan.v1"
 _CANDIDATE_TYPES = frozenset({
     "tool", "service_provider", "orchestration", "no_change",
 })
@@ -177,6 +178,22 @@ class AutoEvolutionService:
         if self.store.benchmark_registration(episode["id"]) is not None:
             return "benchmark"
         context = episode.get("task", {}).get("context") or {}
+        if context.get("rsi_role") == "ordinary_feedback_development":
+            # rsi_role itself is public context.  Only the host-owned improver
+            # registration plus an already-frozen work item can establish the
+            # internal coordinator boundary.
+            registration = context.get("improver_channel_registration")
+            work_id = context.get("feedback_work_id")
+            try:
+                work = self.store.feedback_trigger(work_id)
+            except (KeyError, TypeError):
+                work = None
+            intent = work.get("development_intent") if isinstance(work, dict) else None
+            if (isinstance(registration, dict) and isinstance(intent, dict)
+                    and registration == intent.get("improver")
+                    and context.get("feedback_bundle_id")
+                    == intent.get("feedback_bundle", {}).get("id")):
+                return "internal_rsi"
         split, role = context.get("split"), context.get("split_role")
         if split in {"selection", "guard", "final_holdout", "holdout"} or role in {
                 "selection", "monitoring", "guard", "final_holdout", "holdout"}:
@@ -203,6 +220,8 @@ class AutoEvolutionService:
         channel = registration["channel"] if registration else None
         parent_revision = registration["revision"] if registration else None
         source_kind = self._source_kind(episode)
+        if source_kind == "internal_rsi":
+            return None
         policy = deepcopy(self.policies.get(channel)) if channel is not None else None
         if registration is None:
             status, reason = "deferred", "missing_package_channel"
@@ -255,6 +274,456 @@ class AutoEvolutionService:
             from .generation import GenerationService
             self._generation = GenerationService(self.tasks, self._evolution)
         return self._evolution, self._generation
+
+    @staticmethod
+    def _plan_schema():
+        hypothesis = {
+            "type": "object",
+            "required": ["failure_mechanism", "expected_behavior",
+                         "applicability", "falsifier"],
+            "properties": {
+                key: {"type": "string", "minLength": 1, "maxLength": 5000}
+                for key in ("failure_mechanism", "expected_behavior",
+                            "applicability", "falsifier")
+            },
+            "additionalProperties": False,
+        }
+        return {
+            "$id": DEVELOPMENT_PLAN_SCHEMA,
+            "type": "object",
+            "required": ["schema", "candidate_type", "source_ref",
+                         "hypothesis", "reason"],
+            "properties": {
+                "schema": {"const": DEVELOPMENT_PLAN_SCHEMA},
+                "candidate_type": {"enum": sorted(_CANDIDATE_TYPES)},
+                "source_ref": {"type": ["string", "null"]},
+                "hypothesis": {"oneOf": [hypothesis, {"type": "null"}]},
+                "reason": {"type": "string", "minLength": 1, "maxLength": 5000},
+            },
+            "additionalProperties": False,
+        }
+
+    def _candidate_options(self, work, episode, active):
+        """Return bounded reusable receipts; never expose source or private context."""
+        from .task_capability_adoption import TaskCapabilityAdoptionService
+
+        allowed = set(work["policy"]["candidate_types"])
+        options = []
+        with self.store.connect() as db:
+            rows = db.execute(
+                "SELECT id,data FROM task_capability_definitions "
+                "WHERE origin_episode=? ORDER BY id",
+                (episode["id"],),
+            ).fetchall()
+        adoption = TaskCapabilityAdoptionService(
+            self.tasks, self._services()[0], self._services()[1])
+        # Reserve three slots for episode O/S, generic package patch, and
+        # explicit abstention while keeping the total option set at 64.
+        for definition_id, encoded in rows[:61]:
+            try:
+                projected = json.loads(encoded)
+                kind = projected.get("kind")
+                if kind not in {"tool", "service_provider"} or kind not in allowed:
+                    continue
+                loader = (self.store.tool_definition if kind == "tool"
+                          else self.store.service_definition)
+                definition = loader(definition_id)
+                if not adoption._used(episode, definition):
+                    continue
+                options.append({
+                    "candidate_type": kind,
+                    "source_ref": definition_id,
+                    "evidence": {
+                        "definition_digest": definition["digest"],
+                        "successful_use": True,
+                    },
+                })
+            except (KeyError, ValueError, ContractError):
+                continue
+
+        if "orchestration" in allowed:
+            workflow_ref = episode.get("plan_workflow_ref")
+            has_workflow = (isinstance(workflow_ref, str)
+                            and workflow_ref.startswith("generated://"))
+            has_skill = any(
+                event.get("kind") == "task_skill_compiled"
+                for event in episode.get("events") or [])
+            if has_workflow or has_skill:
+                options.append({
+                    "candidate_type": "orchestration", "source_ref": "episode_os",
+                    "evidence": {
+                        "workflow_digest": (workflow_ref.removeprefix("generated://")
+                                            if has_workflow else None),
+                        "compiled_skill_observed": has_skill,
+                    },
+                })
+            if self._mutation_policy(active["package"]) is not None:
+                options.append({
+                    "candidate_type": "orchestration", "source_ref": "package_patch",
+                    "evidence": {"parent_component_registry_digest": digest(
+                        self._services()[1].feedback(
+                            work["feedback_bundle"]["id"])["parent_component_registry"])},
+                })
+        if "no_change" in allowed:
+            options.append({
+                "candidate_type": "no_change", "source_ref": None,
+                "evidence": {"abstention_allowed": True},
+            })
+        return _finite_json(options, "Feedback development options", maximum=32_768)
+
+    @staticmethod
+    def _mutation_policy(parent):
+        """Derive a package-local O/S envelope without evaluator or permission state."""
+        manifest = parent["manifest"]
+        if manifest.get("manifest_version", 1) == 2:
+            from .generation import _component_registry_snapshot
+
+            registry = _component_registry_snapshot(parent)["components"]
+            improve_ref = manifest["entries"].get("improve")
+            improve_path = improve_ref.split(":", 1)[0] if improve_ref else None
+            mutable = sorted(
+                component_id for component_id, descriptor in registry.items()
+                if descriptor.get("class") in {"O", "S"}
+                and len(descriptor.get("files") or []) == 1
+                and descriptor["files"][0] != improve_path
+            )
+            if not mutable:
+                return None
+            tools = set(manifest.get("tools") or {})
+            for registration in (manifest.get("workflows") or {}).values():
+                try:
+                    definition = json.loads(parent["files"][registration["ref"]])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                pending = list(definition.get("nodes") or [])
+                while pending:
+                    node = pending.pop()
+                    if not isinstance(node, dict):
+                        continue
+                    if node.get("method") == "tool":
+                        name = (node.get("params") or {}).get("name")
+                        if isinstance(name, str):
+                            tools.add(name)
+                    body = node.get("body")
+                    if isinstance(body, dict):
+                        pending.extend(body.get("nodes") or [])
+            return {
+                "patch_contract": "nexgent.package-patch.v3",
+                "mutable_components": mutable,
+                "allow_add": True,
+                "allow_remove": True,
+                "max_patch_bytes": 500_000,
+                "capability_ceiling": sorted({
+                    capability
+                    for role in (manifest.get("roles") or {}).values()
+                    for capability in role.get("capabilities", [])
+                }),
+                "tool_ceiling": sorted(tools),
+                "max_parallel": max((
+                    registration.get("max_parallel", 4)
+                    for registration in (manifest.get("workflows") or {}).values()
+                ), default=1),
+            }
+
+        entries = manifest.get("entries") or {}
+        execute_path = entries["execute"].split(":", 1)[0]
+        improve_ref = entries.get("improve")
+        improve_path = improve_ref.split(":", 1)[0] if improve_ref else None
+        paths = [execute_path]
+        classes = {execute_path: "O"}
+        for skill in (manifest.get("skills") or {}).values():
+            ref = skill.get("ref")
+            path = ref.split(":", 1)[0] if skill.get("kind") == "controlled_code" else ref
+            if isinstance(path, str) and path != improve_path and path in parent["files"]:
+                paths.append(path)
+                classes[path] = "S"
+        paths = sorted(set(path for path in paths if path != improve_path))
+        if not paths:
+            return None
+        return {
+            "mutable_paths": paths,
+            "component_classes": {path: classes[path] for path in paths},
+            "allowed_operations": ["replace"],
+            "max_patch_bytes": 300_000,
+        }
+
+    @staticmethod
+    def _plan_reference(artifact, plan):
+        return {
+            "artifact_id": artifact["id"],
+            "digest": artifact["content_digest"],
+            "candidate_type": plan["candidate_type"],
+            "source_ref": plan["source_ref"],
+            "hypothesis_digest": (digest(plan["hypothesis"])
+                                  if plan["hypothesis"] is not None else None),
+        }
+
+    @staticmethod
+    def _validate_plan(value, options):
+        value = _finite_json(value, "Feedback development plan", maximum=32_768)
+        required = {"schema", "candidate_type", "source_ref", "hypothesis", "reason"}
+        if (not isinstance(value, dict) or set(value) != required
+                or value.get("schema") != DEVELOPMENT_PLAN_SCHEMA
+                or value.get("candidate_type") not in _CANDIDATE_TYPES
+                or not isinstance(value.get("reason"), str)
+                or not value["reason"].strip() or len(value["reason"]) > 5000):
+            raise ContractError("Feedback development plan is invalid")
+        selected = {
+            "candidate_type": value["candidate_type"],
+            "source_ref": value["source_ref"],
+        }
+        allowed = [
+            {"candidate_type": option["candidate_type"],
+             "source_ref": option["source_ref"]}
+            for option in options
+        ]
+        if selected not in allowed:
+            raise ContractError("Feedback development plan selects unavailable evidence")
+        if value["candidate_type"] == "no_change":
+            if value["source_ref"] is not None or value["hypothesis"] is not None:
+                raise ContractError("No-change development must not invent a hypothesis")
+            return value
+        fields = {"failure_mechanism", "expected_behavior", "applicability", "falsifier"}
+        hypothesis = value.get("hypothesis")
+        if (not isinstance(hypothesis, dict) or set(hypothesis) != fields
+                or any(not isinstance(hypothesis[field], str)
+                       or not hypothesis[field].strip()
+                       or len(hypothesis[field]) > 5000 for field in fields)):
+            raise ContractError("Feedback development hypothesis is invalid")
+        return value
+
+    def _development_episode(self, work, intent):
+        with self.store.connect() as db:
+            rows = db.execute(
+                "SELECT state FROM task_episodes "
+                "WHERE json_extract(state,'$.task.context.rsi_role')=? "
+                "AND json_extract(state,'$.task.context.feedback_work_id')=? "
+                "AND json_extract(state,'$.task.context.feedback_bundle_id')=? "
+                "AND json_extract(state,'$.task.context.improver_channel_registration.channel')=? "
+                "AND json_extract(state,'$.task.context.improver_channel_registration.revision')=? "
+                "AND json_extract(state,'$.task.context.improver_channel_registration.package_id')=? "
+                "AND json_extract(state,'$.task.context.improver_channel_registration.package_digest')=? "
+                "ORDER BY id LIMIT 2",
+                ("ordinary_feedback_development", work["id"],
+                 intent["feedback_bundle"]["id"],
+                 intent["improver"]["channel"],
+                 intent["improver"]["revision"],
+                 intent["improver"]["package_id"],
+                 intent["improver"]["package_digest"]),
+            ).fetchall()
+        matches = [json.loads(row[0]) for row in rows]
+        if len(matches) > 1:
+            raise ContractError("Feedback work has multiple development Episodes")
+        if matches:
+            episode = matches[0]
+            if (episode["package_id"] != intent["improver"]["package_id"]
+                    or episode["package_digest"] != intent["improver"]["package_digest"]):
+                raise ContractError("Feedback development Episode improver changed")
+            return episode
+        feedback = self._services()[1].feedback(intent["feedback_bundle"]["id"])
+        public_keys = {
+            "schema", "id", "digest", "channel", "channel_revision",
+            "parent_package_id", "parent_package_digest",
+            "parent_component_registry", "episode_refs", "created_at",
+        }
+        public_feedback = {
+            key: deepcopy(feedback[key]) for key in public_keys if key in feedback
+        }
+        registration = intent["improver"]
+        from .improvers import active_improver_registration
+        active_improver = active_improver_registration(self.store, registration["channel"])
+        if any(active_improver[key] != registration[key]
+               for key in ("channel", "revision", "package_id", "package_digest")):
+            raise ContractError("Feedback development improver revision changed")
+        return self.tasks.create(
+            "Select one task-agnostic candidate from bounded public task feedback",
+            inputs={"feedback_bundle": public_feedback,
+                    "candidate_options": deepcopy(intent["options"])},
+            deliverables=[{"name": "development_plan",
+                           "schema": self._plan_schema()}],
+            budget=deepcopy(work["policy"]["budget"]), capabilities=[],
+            package=active_improver["package"], entry="execute",
+            context={
+                "split": work["policy"]["development_split"],
+                "split_role": "development",
+                "rsi_role": "ordinary_feedback_development",
+                "feedback_work_id": work["id"],
+                "feedback_bundle_id": intent["feedback_bundle"]["id"],
+                "channel": work["channel_id"],
+                "channel_revision": work["parent_revision"],
+            },
+            constraints={"allowed_effects": [], "wall_seconds": 1200},
+            improver_channel_registration={
+                key: registration[key]
+                for key in ("channel", "revision", "package_id", "package_digest")
+            },
+        )
+
+    def _candidate_reference(self, generated, candidate_type):
+        if generated.get("status") != "generated":
+            return None
+        candidate_id = generated.get("candidate_id")
+        if not isinstance(candidate_id, str):
+            return None
+        candidate = self._services()[0].candidate(candidate_id)
+        return {
+            "kind": candidate_type,
+            "candidate_id": candidate["id"],
+            "candidate_package_id": candidate["package_id"],
+            "generation_id": generated["id"],
+            "record_digest": generated["record_digest"],
+        }
+
+    def _dispatch_plan(self, work, plan):
+        evolution, generation = self._services()
+        source = self.tasks.get_private(work["source_episode_id"])
+        common = (work["channel_id"], work["feedback_bundle"]["id"],
+                  work["parent_revision"], plan["hypothesis"])
+        if plan["candidate_type"] in {"tool", "service_provider"}:
+            from .task_capability_adoption import TaskCapabilityAdoptionService
+            result = TaskCapabilityAdoptionService(
+                self.tasks, evolution, generation).adopt(
+                    common[0], plan["source_ref"], source["id"], common[1],
+                    common[2], common[3], budget=deepcopy(work["policy"]["budget"]))
+            return result["generation"]
+        if plan["source_ref"] == "episode_os":
+            from .task_skill_adoption import TaskSkillAdoptionService
+            result = TaskSkillAdoptionService(
+                self.tasks, evolution, generation).adopt_episode(
+                    common[0], None, source["id"], common[1], common[2], common[3],
+                    budget=deepcopy(work["policy"]["budget"]))
+            return result["generation"]
+        if plan["source_ref"] == "package_patch":
+            policy = self._mutation_policy(evolution.active(common[0])["package"])
+            if policy is None:
+                raise ContractError("Active package has no mutable orchestration surface")
+            improver = work["development_intent"]["improver"]
+            return generation.generate(
+                common[0], common[1], None, policy, common[2],
+                improver_channel=improver["channel"],
+                expected_improver_revision=improver["revision"],
+                budget=deepcopy(work["policy"]["budget"]))
+        raise ContractError("Feedback development plan has no supported dispatch")
+
+    def develop(self, identity):
+        """Autonomously plan and propose one candidate; never score or promote it."""
+        work = self.store.feedback_trigger(identity)
+        with self.store.lock(work["source_episode_id"]):
+            work = self.store.feedback_trigger(identity)
+            if work["status"] in {"candidate_ready", "no_change", "rejected", "deferred"}:
+                return work
+            if work["status"] == "feedback_captured":
+                episode = self.tasks.get_private(work["source_episode_id"])
+                evolution, _ = self._services()
+                active = evolution.active(work["channel_id"])
+                if (active["revision"] != work["parent_revision"]
+                        or active["package_id"] != work["source"]["package_id"]
+                        or active["package_digest"] != work["source"]["package_digest"]):
+                    return self._defer(work, "parent_revision_changed")
+                improver_policy = work["policy"].get("improver")
+                if not isinstance(improver_policy, dict):
+                    return self._defer(work, "improver_unavailable")
+                from .improvers import active_improver_registration
+                try:
+                    improver = active_improver_registration(
+                        self.store, improver_policy["channel"])
+                except (KeyError, ContractError):
+                    return self._defer(work, "improver_unavailable")
+                if (improver["revision"] != improver_policy["revision"]
+                        or any(improver.get(key) != improver_policy.get(key)
+                               for key in ("package_id", "package_digest")
+                               if key in improver_policy)):
+                    return self._defer(work, "improver_revision_changed")
+                options = self._candidate_options(work, episode, active)
+                if not options:
+                    return self._defer(work, "no_candidate_type_available")
+                registration = {key: deepcopy(improver[key]) for key in (
+                    "channel", "revision", "package_id", "package_digest")}
+                intent = {
+                    "feedback_bundle": deepcopy(work["feedback_bundle"]),
+                    "improver": registration,
+                    "options": options,
+                    "options_digest": digest(options),
+                }
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status="development_planned", development_intent=intent)
+            if work["status"] == "development_planned":
+                try:
+                    episode = self._development_episode(work, work["development_intent"])
+                except ContractError:
+                    return self._defer(work, "development_episode_rejected")
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status="development_run", development_episode={
+                        "id": episode["id"], "package_id": episode["package_id"],
+                        "package_digest": episode["package_digest"],
+                    })
+            if work["status"] != "development_run":
+                if work["status"] != "candidate_generation_started":
+                    return work
+                # GenerationService has no caller-supplied idempotency key.
+                # A coordinator that restarts in this state cannot distinguish
+                # "not called" from "called but result not committed", so it
+                # must defer for reconciliation instead of sending again.
+                return self._defer(work, "candidate_generation_outcome_unknown")
+            episode = self.tasks.get_private(work["development_episode"]["id"])
+            if episode["status"] not in _TERMINAL:
+                try:
+                    episode = self.tasks.run(episode["id"])
+                except Exception:
+                    # The same Episode remains the only recovery identity.  A
+                    # later drain may resume it; this turn must not create a
+                    # second model request after an unknown outcome.
+                    return self.store.feedback_trigger(work["id"])
+            if episode["status"] not in _TERMINAL:
+                return self.store.feedback_trigger(work["id"])
+            if episode["status"] != "completed" or episode.get("usage", {}).get(
+                    "usage_complete") is not True:
+                return self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"], status="rejected",
+                    reason="development_episode_incomplete")
+            try:
+                if set(episode["output_refs"]) != {"development_plan"}:
+                    raise ContractError("Development Episode did not publish one plan")
+                artifact = self.store.read(
+                    episode["output_refs"]["development_plan"], episode["id"])
+                plan = self._validate_plan(
+                    artifact["content"], work["development_intent"]["options"])
+                plan_ref = self._plan_reference(artifact, plan)
+            except (KeyError, ValueError, ContractError):
+                return self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"], status="rejected",
+                    reason="development_plan_rejected")
+            if plan["candidate_type"] == "no_change":
+                return self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"], status="no_change",
+                    reason=plan["reason"][:200], development_plan=plan_ref)
+            work = self.store.transition_feedback_trigger(
+                work["id"], expected_revision=work["revision"],
+                status="candidate_generation_started", development_plan=plan_ref)
+            try:
+                generated = self._dispatch_plan(work, plan)
+                candidate = self._candidate_reference(generated, plan["candidate_type"])
+            except (KeyError, ValueError, ContractError):
+                candidate = None
+            except Exception:
+                return self._defer(work, "candidate_generation_outcome_unknown")
+            if candidate is None:
+                return self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"], status="rejected",
+                    reason="candidate_generation_rejected")
+            return self.store.transition_feedback_trigger(
+                work["id"], expected_revision=work["revision"], status="candidate_ready",
+                candidate=candidate)
+
+    def drain_development(self, *, limit=16):
+        """Advance captured work without running selection, guard, or promotion."""
+        rows = self.store.feedback_triggers(
+            statuses=["feedback_captured", "development_planned", "development_run",
+                      "candidate_generation_started"],
+            limit=limit)
+        return [self.develop(row["id"]) for row in rows]
 
     def _matching_feedback(self, work):
         """Find a bundle committed before a coordinator interruption."""
@@ -361,7 +830,11 @@ class AutoEvolutionService:
     def scan(self, *, after_id=None, limit=256, drain=True):
         """Discover one restart-safe page of terminal Episodes and optionally drain it."""
         episode_ids = self.store.terminal_episode_ids(after_id=after_id, limit=limit)
-        observed = [self.observe_terminal(identity) for identity in episode_ids]
+        observed = []
+        for identity in episode_ids:
+            record = self.observe_terminal(identity)
+            if record is not None:
+                observed.append(record)
         advanced = self.drain(limit=limit) if drain else []
         return {
             "observed": observed,
