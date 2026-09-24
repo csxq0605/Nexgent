@@ -1,0 +1,33 @@
+{
+  "schema": "nexgent.redacted-ordinary-probe.v1",
+  "contract": "WORKBENCH_GRAPH_PREFLIGHT_CONTRACT.md",
+  "code_baseline": "90aae8f",
+  "model": "mimo-v2.6-flash",
+  "source": {
+    "episode_id": "episode-fa45c59551354635",
+    "status": "failed",
+    "failure_domain": "protocol",
+    "failure_type": "KeyError",
+    "model_calls": 4,
+    "tool_calls": 3,
+    "usage_complete": true
+  },
+  "development_planner": {
+    "episode_id": "episode-7bd828453f7e431e",
+    "status": "failed",
+    "failure_domain": "agent",
+    "failure_type": "ModelError",
+    "json_parse_error": "extra_data_after_complete_object",
+    "model_calls": 1,
+    "usage_complete": true
+  },
+  "feedback_work": {"status": "rejected",
+    "reason": "development_episode_incomplete"},
+  "candidate_generations": 0,
+  "development_pairs": 0,
+  "selection_opened": false,
+  "guard_run": false,
+  "new_task_reuse_run": false,
+  "active_channel_revision": 0,
+  "claim_limit": "No candidate existed; graph preflight and RSI benefit were not evaluated."
+}
