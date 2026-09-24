@@ -116,6 +116,26 @@ def _policy(value):
             raise ContractError("Feedback trigger improver identity is invalid")
     search = value.get("orchestration_search")
     if search is not None:
+        # Project composition validates policy once before attaching the
+        # coordinator, which validates it again. Preserve the same canonical
+        # contract across both boundaries rather than rejecting our own output.
+        canonical_keys = {
+            "policy", "first_seed", "max_seed_scan",
+            "development_episode_budget",
+        }
+        if isinstance(search, dict) and set(search) == canonical_keys:
+            canonical = search.get("policy")
+            if (not isinstance(canonical, dict)
+                    or canonical.get("target_qualified") != 1):
+                raise ContractError("Feedback orchestration search policy is invalid")
+            search = {
+                **{key: item for key, item in canonical.items()
+                   if key != "target_qualified"},
+                "first_seed": search["first_seed"],
+                "max_seed_scan": search["max_seed_scan"],
+                "development_episode_budget": search[
+                    "development_episode_budget"],
+            }
         allowed_search = {
             "max_attempts", "first_seed", "max_seed_scan", "minimum_mean_delta",
             "max_model_calls", "max_completion_tokens", "max_tool_calls", "max_nodes",

@@ -63,6 +63,31 @@ def test_project_bootstraps_one_improver_and_attaches_trigger(tmp_path):
         "test-tasks"]["improver"]
 
 
+def test_search_policy_survives_project_composition(tmp_path):
+    _write_config(tmp_path)
+    path = tmp_path / CONFIG_FILE
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config["channels"]["test-tasks"]["orchestration_search"] = {
+        "max_attempts": 2, "first_seed": 13, "max_seed_scan": 8,
+        "minimum_mean_delta": 0,
+        "max_model_calls": 24, "max_completion_tokens": 96000,
+        "max_tool_calls": 32, "max_nodes": 240,
+        "development_episode_budget": {
+            "max_model_calls": 8, "max_completion_tokens": 32000,
+            "max_tool_calls": 16, "max_nodes": 96,
+        },
+    }
+    path.write_text(json.dumps(config), encoding="utf-8")
+
+    loaded = load_auto_evolution_config(tmp_path)
+    trigger = configure_auto_evolution(TaskService(tmp_path))
+
+    assert trigger.policies["test-tasks"]["orchestration_search"] == loaded[
+        "channels"]["test-tasks"]["orchestration_search"]
+    assert trigger.policies["test-tasks"]["orchestration_search"]["policy"][
+        "target_qualified"] == 1
+
+
 def test_bad_or_stale_project_policy_fails_before_running_task(tmp_path):
     _write_config(tmp_path)
     path = tmp_path / CONFIG_FILE
