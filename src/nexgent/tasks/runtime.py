@@ -39,6 +39,10 @@ _EFFECT_CLASSES = frozenset({
 _DELEGATED_PUBLIC_CONTEXT_FIELDS = frozenset({
     "memory_namespace", "split", "split_role", "memory_writeback", "rsi_role",
 })
+_RESUMABLE_COMPOSITE_METHODS = frozenset({
+    "delegate", "parallel", "develop_skill", "develop_tool", "release_tool",
+    "develop_service", "activate_service", "release_service",
+})
 
 
 class _CompositePending(Exception):
@@ -51,6 +55,10 @@ class _CompositePaused(_CompositePending, InterruptedError):
 
 class _CompositeRecovery(_CompositePending, RecoveryRequired):
     pass
+
+
+class TaskDeadlineExceeded(TimeoutError):
+    """The immutable root Episode wall deadline has been consumed."""
 
 
 def _check_local_schema(schema, *, label):
@@ -210,6 +218,7 @@ class ToolContext:
         self._input_refs = set()
 
     def check_stop(self):
+        self.service._remaining_wall_seconds(self.episode_id)
         if self.stop_event.is_set():
             raise InterruptedError("Task tool was stopped")
 
@@ -292,6 +301,31 @@ class TaskService:
             state = self.store.get(identity)
             update(state)
             return self.store.save(state)
+
+    def _remaining_wall_seconds(self, identity):
+        remaining = self.store.remaining_seconds(identity)
+        if remaining <= 0:
+            raise TaskDeadlineExceeded("Task wall deadline expired")
+        return remaining
+
+    def _deadline_expired(self, identity):
+        return self.store.remaining_seconds(identity) <= 0
+
+    def _package_timeout(self, identity, ceiling):
+        """Bound one controlled-code worker by the root's absolute deadline."""
+        return min(float(ceiling), self._remaining_wall_seconds(identity))
+
+    def _unresolved_external_rpc(self, identity, state=None):
+        """Return a started, non-resumable RPC that needs reconciliation."""
+        state = self.store.get(identity) if state is None else state
+        for path, node in state.get("nodes", {}).items():
+            method = node.get("method")
+            if method in _RESUMABLE_COMPOSITE_METHODS:
+                continue
+            journal = self.store.rpc_find(identity, path)
+            if journal is not None and journal.get("status") == "started":
+                return path
+        return None
 
     def create(self, objective, inputs=None, deliverables=None, budget=None, capabilities=None,
                package=None, context=None, *, constraints=None, entry="execute", parent_episode_id=None,
@@ -1930,6 +1964,15 @@ class TaskService:
                 raise RecoveryRequired(
                     f"Local plan node {path} differs from its host journal")
 
+        def receipt_evidence(kind, value):
+            # Input evidence is computed immediately before the workflow marks
+            # a ready node RUNNING.  Check the absolute deadline at that DAG
+            # admission boundary; output evidence belongs to work that was
+            # already admitted and must still be durably settled.
+            if kind == "input":
+                self._remaining_wall_seconds(identity)
+            return self._references(identity, value)
+
         result = run_executable_workflow(
             workflow,
             payload,
@@ -1937,7 +1980,7 @@ class TaskService:
             execution=execution,
             persist=persist,
             resolve_revision=resolve_revision,
-            receipt_evidence=lambda _kind, value: self._references(identity, value),
+            receipt_evidence=receipt_evidence,
             record_local_receipt=record_local_receipt,
             initial_receipts=receipts,
             resumable_local_nodes=resumable_local_nodes,
@@ -1996,6 +2039,7 @@ class TaskService:
                 return self.get(identity)
             if state["status"] == "cancelled":
                 raise ContractError("A cancelled task needs a new task identity")
+            self.store.start_deadline(identity)
             benchmark_registration = self.store.benchmark_registration(identity)
             if (benchmark_registration is not None
                     and benchmark_registration.get("host_runtime")
@@ -2027,10 +2071,28 @@ class TaskService:
                         or package["digest"] != improver_registration["package_digest"]):
                     raise ContractError(
                         "Active improver registration differs from the Episode package")
+            try:
+                remaining_at_start = self._remaining_wall_seconds(identity)
+            except TaskDeadlineExceeded as exc:
+                unresolved_path = self._unresolved_external_rpc(identity, state)
+                status = "waiting_input" if unresolved_path else "failed"
+                error = (f"Unfinished capability {unresolved_path}; reconciliation "
+                         "is required and automatic repetition is refused"
+                         if unresolved_path else str(exc))
+                self._change(identity, lambda s: s.update(
+                    status=status, last_error=error,
+                    failure_domain="infrastructure"))
+                self.store.event(identity, "episode_finished", {"status": status})
+                if on_update:
+                    on_update(self.get(identity))
+                return self.get(identity)
             self._change(identity, lambda s: s.update(
                 status="running", last_error=None, failure_domain=None,
                 evaluation=None))
             self.store.event(identity, "episode_started", {"package_digest": package["digest"], "resume": bool(state["nodes"])})
+            deadline_timer = threading.Timer(remaining_at_start, stop_event.set)
+            deadline_timer.daemon = True
+            deadline_timer.start()
 
             def notify():
                 if on_update:
@@ -2116,8 +2178,9 @@ class TaskService:
                     execution = run_package(
                         package, state["task"]["entry"], payload, handle,
                         stop_event=stop_event,
-                        timeout=state["task"].get("constraints", {}).get(
-                            "wall_seconds", 1200),
+                        timeout=self._package_timeout(
+                            identity, state["task"].get("constraints", {}).get(
+                                "wall_seconds", 1200)),
                         max_rpc=512, max_instructions=5_000_000,
                     )
                     execution["execution"]["kind"] = "controlled_code"
@@ -2129,6 +2192,7 @@ class TaskService:
                     execution = self._run_workflow_orchestrator(
                         identity, package, workflow_orchestrator[0],
                         workflow_orchestrator[1], payload, stop_event, notify)
+                self._remaining_wall_seconds(identity)
                 activations = []
                 seen_activations = set()
                 for event in self.store.events(identity):
@@ -2157,9 +2221,17 @@ class TaskService:
                             identity, package, execution["execution"],
                             selected_component_id, strategy_decision))
                 self._complete(identity, execution)
-            except InterruptedError as exc:
+            except TimeoutError as exc:
                 self._change(identity, lambda s: s.update(
-                    status="paused", last_error=str(exc), failure_domain="infrastructure"))
+                    status="failed",
+                    last_error=f"{type(exc).__name__}: {str(exc)[:1200]}",
+                    failure_domain="infrastructure"))
+            except InterruptedError as exc:
+                expired = self._deadline_expired(identity)
+                error = ("Task wall deadline expired" if expired else str(exc))
+                self._change(identity, lambda s: s.update(
+                    status="failed" if expired else "paused", last_error=error,
+                    failure_domain="infrastructure"))
             except RecoveryRequired as exc:
                 self._change(identity, lambda s: s.update(
                     status="waiting_input", last_error=str(exc), failure_domain="infrastructure"))
@@ -2169,10 +2241,14 @@ class TaskService:
                 # control signal at the host boundary instead of leaving the
                 # Episode running after a budget or provider failure.
                 cause = exc.cause
-                if isinstance(cause, InterruptedError) or stop_event.is_set():
-                    status, domain = "paused", "infrastructure"
-                elif isinstance(cause, RecoveryRequired):
+                if isinstance(cause, RecoveryRequired):
                     status, domain = "waiting_input", "infrastructure"
+                elif (isinstance(cause, TimeoutError)
+                        or self._deadline_expired(identity)):
+                    status, domain = "failed", "infrastructure"
+                    cause = TaskDeadlineExceeded("Task wall deadline expired")
+                elif isinstance(cause, InterruptedError) or stop_event.is_set():
+                    status, domain = "paused", "infrastructure"
                 else:
                     status = "failed"
                     domain = _capability_failure_domain("ask", exc)
@@ -2184,6 +2260,10 @@ class TaskService:
                 cause = abort.cause
                 if isinstance(cause, RecoveryRequired):
                     status, domain = "waiting_input", "infrastructure"
+                elif (isinstance(cause, TimeoutError)
+                      or self._deadline_expired(identity)):
+                    status, domain = "failed", "infrastructure"
+                    cause = TaskDeadlineExceeded("Task wall deadline expired")
                 elif isinstance(cause, InterruptedError):
                     status, domain = "paused", "infrastructure"
                 else:
@@ -2200,8 +2280,12 @@ class TaskService:
                         failure_domain="infrastructure"))
                 else:
                     failure_domain = _terminal_failure_domain(exc, failure_domains)
-                    self._change(identity, lambda s: s.update(status="paused" if stop_event.is_set() else "failed",
-                        last_error=f"{type(exc).__name__}: {str(exc)[:1200]}",
+                    expired = self._deadline_expired(identity)
+                    paused = stop_event.is_set() and not expired
+                    error = ("TaskDeadlineExceeded: Task wall deadline expired" if expired
+                             else f"{type(exc).__name__}: {str(exc)[:1200]}")
+                    self._change(identity, lambda s: s.update(status="paused" if paused else "failed",
+                        last_error=error,
                         failure_domain=failure_domain))
             except (KeyboardInterrupt, SystemExit) as exc:
                 # Host interruption (notably KeyboardInterrupt) still runs the
@@ -2214,6 +2298,7 @@ class TaskService:
                     failure_domain="infrastructure"))
                 raise
             finally:
+                deadline_timer.cancel()
                 self.store.event(identity, "episode_finished", {"status": self.store.get(identity)["status"]})
                 notify()
             return self.get(identity)
@@ -2298,9 +2383,7 @@ class TaskService:
                 return existing["result"]
             if existing["status"] == "failed":
                 raise RuntimeError(existing["error"])
-            if method not in {"delegate", "parallel", "develop_skill", "develop_tool",
-                              "release_tool", "develop_service", "activate_service",
-                              "release_service"}:
+            if method not in _RESUMABLE_COMPOSITE_METHODS:
                 raise RecoveryRequired(f"Unfinished capability {path}; automatic repetition refused")
             node = deepcopy(self.store.get(identity)["nodes"].get(path) or {})
             if not node or node.get("method") != method:
@@ -2308,6 +2391,10 @@ class TaskService:
             node.update(status="running", resumed_at=time.time())
             self._change(identity, lambda s: s["nodes"].update({path: deepcopy(node)}))
         else:
+            # The RPC journal is the admission boundary.  Refuse to create a
+            # new durable call after the root wall deadline, including for DAG
+            # nodes whose plan-level admission was concurrent with expiry.
+            self._remaining_wall_seconds(identity)
             refs = self._references(identity, params)
             self.store.reserve_node(identity, path, {"method": method})
             self.store.rpc_start(identity, path, request)
@@ -2328,11 +2415,17 @@ class TaskService:
         except CapabilityAbort as abort:
             cause = abort.cause
             error = f"{type(cause).__name__}: {str(cause)[:1200]}"
-            self.store.rpc_finish(identity, path, error=error)
             node = deepcopy(self.store.get(identity)["nodes"].get(path, node))
-            node.update(status="waiting_input" if isinstance(cause, RecoveryRequired)
-                        else "paused" if isinstance(cause, InterruptedError) else "failed",
-                        finished_at=time.time(), error=error)
+            if isinstance(cause, RecoveryRequired):
+                # The external outcome is unknown.  Keep the RPC journal
+                # started so recovery cannot mistake it for a safe retry or a
+                # provider-declared terminal failure.
+                node.update(status="waiting_input", interrupted_at=time.time(),
+                            error=error)
+            else:
+                self.store.rpc_finish(identity, path, error=error)
+                node.update(status="paused" if isinstance(cause, InterruptedError)
+                            else "failed", finished_at=time.time(), error=error)
             self._change(identity, lambda s: s["nodes"].update({path: node}))
             raise
         except _CompositePending as exc:
@@ -2390,7 +2483,8 @@ class TaskService:
                 instruction_limit = 200_000
                 execution = run_package(
                     self.store.package(definition["package_id"]), "execute", request,
-                    handle=None, stop_event=stop_event, timeout=120, max_rpc=0,
+                    handle=None, stop_event=stop_event,
+                    timeout=self._package_timeout(identity, 120), max_rpc=0,
                     max_instructions=instruction_limit)
                 output = execution["value"]
                 validate(output, MODEL_CONTEXT_OUTPUT_SCHEMA,
@@ -2449,7 +2543,8 @@ class TaskService:
                     instruction_limit = 200_000
                     execution = run_package(
                         package, "service:model_context.v1", request,
-                        handle=None, stop_event=stop_event, timeout=120, max_rpc=0,
+                        handle=None, stop_event=stop_event,
+                        timeout=self._package_timeout(identity, 120), max_rpc=0,
                         max_instructions=instruction_limit)
                     output = execution["value"]
                     validate(output, MODEL_CONTEXT_OUTPUT_SCHEMA,
@@ -2521,6 +2616,17 @@ class TaskService:
             if package_service_binding is not None:
                 self.store.settle_package_service_application(
                     identity, path, status="failed")
+            admitted_unknown = any(
+                call.get("episode_id") == identity
+                and call.get("node_id") == path
+                and call.get("status") == "started"
+                for call in self.store.calls(state["root_episode_id"])
+            )
+            if admitted_unknown and (
+                    stop_event.is_set() or self._deadline_expired(identity)):
+                raise CapabilityAbort(RecoveryRequired(
+                    f"Model call {path} was interrupted after provider admission; "
+                    "automatic repetition refused")) from exc
             # A provider/configuration failure remains fatal even when the call
             # originated inside a skill or workflow action. Asking the model to
             # repair its own unavailable provider would hide the real failure.
@@ -2568,7 +2674,8 @@ class TaskService:
             instruction_limit = 200_000
             execution = run_package(
                 self.store.package(definition["package_id"]), "execute", arguments,
-                handle=None, stop_event=stop_event, timeout=120, max_rpc=0,
+                handle=None, stop_event=stop_event,
+                timeout=self._package_timeout(identity, 120), max_rpc=0,
                 max_instructions=instruction_limit)
             result = execution["value"]
             validate(result, definition["output_schema"], label=name + " output",
@@ -2628,7 +2735,8 @@ class TaskService:
             instruction_limit = 200_000
             execution = run_package(
                 package, "tool:" + name, arguments,
-                handle=None, stop_event=stop_event, timeout=120, max_rpc=0,
+                handle=None, stop_event=stop_event,
+                timeout=self._package_timeout(identity, 120), max_rpc=0,
                 max_instructions=instruction_limit)
             result = execution["value"]
             validate(result, declaration["output_schema"], label=name + " output",
@@ -2874,7 +2982,10 @@ class TaskService:
                             f"Skill {name!r} is not allowed to call tool {p.get('name')!r}")
                     counter[0] += 1
                     return self._dispatch(identity, package, m, p, f"{path}/skill.{counter[0]}", stop_event, notify)
-                execution = run_package(package, "skill:" + name, payload, handle, stop_event=stop_event, timeout=300)
+                execution = run_package(
+                    package, "skill:" + name, payload, handle,
+                    stop_event=stop_event,
+                    timeout=self._package_timeout(identity, 300))
                 result = execution["value"]
                 self.store.event(identity, "skill_execution", execution["execution"])
             else:
