@@ -1,0 +1,57 @@
+{
+  "schema": "nexgent.ordinary-feedback-live-receipt.v1",
+  "contract": "WORKBENCH_BINDING_REPAIR_CONTRACT.md",
+  "run_kind": "single_preregistered_binding_repair_mechanism_probe",
+  "model": "mimo-v2.6-flash",
+  "entry": "nexgent task",
+  "source_task": "workbench development seed 11 public fields",
+  "source_episode_id": "episode-b987614f86964fc8",
+  "source_status": "failed",
+  "source_model_calls": 4,
+  "source_tool_calls": 1,
+  "source_graph_compiler_rejections": 2,
+  "source_error_class": "publish_report_invalid_input_digest_placeholder",
+  "feedback_work_id": "feedback-work-f56a8f3ef130187ce7bff087",
+  "development_episode_id": "episode-daf5a5b0974c49a1",
+  "development_model_calls": 1,
+  "development_choice": {
+    "candidate_type": "orchestration",
+    "source_ref": "package_patch"
+  },
+  "generation_episode_id": "episode-446b7b755c354996",
+  "generation_model_calls": 1,
+  "candidate_id": "candidate-e0f45c04dacc4eca",
+  "candidate_changed_components": ["architect-role"],
+  "selection_plan_id": "plan-efe28b8dff2f49a1",
+  "selection_trial_id": "trial-77ab2cf28ebe4dd2",
+  "selection_decision_id": "decision-8aa78dbfa9a14b33",
+  "selection_parent": {
+    "episode_id": "episode-221f96a3a1114aff",
+    "accepted": false,
+    "score": 0.0,
+    "model_calls": 4,
+    "error_class": "publish_ledger_missing_revision"
+  },
+  "selection_candidate": {
+    "episode_id": "episode-8eca02a275f146e9",
+    "accepted": false,
+    "score": 0.0,
+    "model_calls": 3,
+    "error_class": "missing_model_output_ledger_binding"
+  },
+  "decision_gates": {
+    "behavior_activated": false,
+    "candidate_completed": false,
+    "cost": true,
+    "measurement_complete": true,
+    "quality": false,
+    "regressions": true,
+    "selection_role": true,
+    "success_rate": false
+  },
+  "work_status": "rejected",
+  "work_reason": "independent_selection_rejected",
+  "active_channel_revision": 0,
+  "guard_run": false,
+  "later_reuse": false
+}
