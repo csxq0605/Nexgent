@@ -2243,7 +2243,7 @@ class TaskService:
                 cause = exc.cause
                 if isinstance(cause, RecoveryRequired):
                     status, domain = "waiting_input", "infrastructure"
-                elif (isinstance(cause, TimeoutError)
+                elif (isinstance(cause, TaskDeadlineExceeded)
                         or self._deadline_expired(identity)):
                     status, domain = "failed", "infrastructure"
                     cause = TaskDeadlineExceeded("Task wall deadline expired")
@@ -2252,23 +2252,6 @@ class TaskService:
                 else:
                     status = "failed"
                     domain = _capability_failure_domain("ask", exc)
-                self._change(identity, lambda s: s.update(
-                    status=status,
-                    last_error=f"{type(cause).__name__}: {str(cause)[:1200]}",
-                    failure_domain=domain))
-            except CapabilityAbort as abort:
-                cause = abort.cause
-                if isinstance(cause, RecoveryRequired):
-                    status, domain = "waiting_input", "infrastructure"
-                elif (isinstance(cause, TimeoutError)
-                      or self._deadline_expired(identity)):
-                    status, domain = "failed", "infrastructure"
-                    cause = TaskDeadlineExceeded("Task wall deadline expired")
-                elif isinstance(cause, InterruptedError):
-                    status, domain = "paused", "infrastructure"
-                else:
-                    status = "failed"
-                    domain = _capability_failure_domain("workflow", cause)
                 self._change(identity, lambda s: s.update(
                     status=status,
                     last_error=f"{type(cause).__name__}: {str(cause)[:1200]}",
