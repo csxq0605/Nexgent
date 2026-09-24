@@ -478,6 +478,16 @@ def repair_brief(attempt, assessment):
     }
 
 
+def public_generation_failure_codes(generation):
+    """Forward only the fixed host code, never a raw validation exception."""
+    if generation.get("status") != "missing":
+        return []
+    from .generation import _PUBLIC_PATCH_ERRORS
+
+    code = generation.get("public_patch_error_code")
+    return [code] if code in _PUBLIC_PATCH_ERRORS.values() else []
+
+
 class OrchestrationSearchJournal:
     """Append-only, digest-chained storage for search decisions."""
 
@@ -900,7 +910,8 @@ class BoundedOrchestrationSearch:
             if stored.get("status") != "generated":
                 assessment = {"eligible_for_selection": False,
                               "failure_codes": ["generation_" +
-                                                (stored.get("reason_type") or "missing")],
+                                                (stored.get("reason_type") or "missing"),
+                                                *public_generation_failure_codes(stored)],
                               "mean_quality_delta": None, "task_count": 0,
                               "claim_limit": "No candidate was generated."}
                 event["assessment"] = assessment

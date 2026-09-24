@@ -259,6 +259,16 @@ def test_atomic_add_replace_remove_component_set_executes(tmp_path):
     assert result["usage"]["model_calls"] == 3
 
 
+def test_replacement_path_is_rejected_with_fixed_public_diagnostic():
+    parent = multirole_package()
+    patch, policy = _proposal(parent)
+    patch["operations"][0]["path"] = "workflows/main.json"
+
+    with pytest.raises(ContractError, match="replacement must not include path"):
+        apply_package_patch(parent, patch, policy,
+                            provenance={"fixture": "invalid-replacement-path"})
+
+
 def test_generated_component_set_has_real_selection_activation(tmp_path):
     parent = multirole_package()
     patch, policy = _proposal(parent)

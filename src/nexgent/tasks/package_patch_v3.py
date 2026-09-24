@@ -236,10 +236,16 @@ def apply_package_patch(parent, patch, policy, *, provenance):
                     raise ContractError("PackagePatch remove is not allowed")
                 del files[path]
             else:
-                if (after is None or set(operation) not in (
+                if after is None:
+                    raise ContractError(
+                        "PackagePatch replacement lacks child component declaration")
+                if "path" in operation:
+                    raise ContractError(
+                        "PackagePatch replacement must not include path")
+                if set(operation) not in (
                         {"op", "component_id", "old_digest"},
-                        {"op", "component_id", "old_digest", "content"})):
-                    raise ContractError("PackagePatch replacement is invalid")
+                        {"op", "component_id", "old_digest", "content"}):
+                    raise ContractError("PackagePatch replacement fields are invalid")
                 if _path(manifest, identity) != path:
                     raise ContractError("Stable PackagePatch component changed its file")
                 if "content" in operation:

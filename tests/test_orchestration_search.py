@@ -10,7 +10,8 @@ from experiments.orchestration_qualification.search_v3 import (
 from nexgent.kernel.programs import digest
 from nexgent.kernel.store import BudgetExhausted
 from nexgent.tasks.evolution import EvolutionService
-from nexgent.tasks.generation import GenerationService
+from nexgent.tasks.generation import (
+    GenerationService, _public_patch_error_code, _search_repair)
 from nexgent.tasks.multirole_seed import multirole_package
 from nexgent.tasks.orchestration_search import (
     BoundedOrchestrationSearch,
@@ -23,6 +24,7 @@ from nexgent.tasks.orchestration_search import (
     orchestration_delta,
     orchestration_projection,
     paired_episode_budget,
+    public_generation_failure_codes,
     repair_brief,
 )
 from nexgent.tasks.orchestration_search_seed import (
@@ -497,6 +499,55 @@ def test_search_improver_freezes_repair_and_attempt_identity():
     assert json.loads(package["files"]["repair_context.json"]) == repair
     assert package["provenance"]["search_attempt_id"] == "search-1/attempt-2"
     assert package["manifest"]["entries"]["improve"] == "improver.py:improve"
+
+
+def test_generation_validator_codes_reach_repair_without_raw_error_text():
+    missing_ids = (
+        "PackageError: RuntimeError: ContractError: "
+        "behavior_patch/hypothesis: 'component_ids' is a required property")
+    assert _public_patch_error_code(missing_ids) == (
+        "missing_hypothesis_component_ids")
+    assert _public_patch_error_code(missing_ids + " SECRET") is None
+    assert _public_patch_error_code(
+        "ContractError: PackagePatch replacement must not include path") == (
+            "replacement_forbids_path")
+    assert _public_patch_error_code(
+        "ContractError: PackagePatch replacement must not include path SECRET") \
+        is None
+
+    record = {"status": "missing", "reason_type": "PackageError",
+              "reason": missing_ids + " raw private payload",
+              "public_patch_error_code": "missing_hypothesis_component_ids"}
+    codes = ["generation_PackageError", *public_generation_failure_codes(record)]
+    brief = repair_brief(1, {"failure_codes": codes,
+                             "mean_quality_delta": None})
+    _, accepted, _ = _search_repair(
+        "orchestration-search-test/attempt-2", brief)
+    assert accepted["failure_codes"] == codes
+    assert "raw private payload" not in json.dumps(accepted)
+
+
+def test_missing_generation_persists_code_but_public_event_omits_reason(tmp_path):
+    tasks = TaskService(tmp_path)
+    evolution = EvolutionService(tasks)
+    evolution.register("general", multirole_package())
+    generation = GenerationService(tasks, evolution)
+    reason = (
+        "PackageError: RuntimeError: ContractError: "
+        "behavior_patch/hypothesis: 'component_ids' is a required property")
+
+    record = generation._missing({
+        "id": "generation-validation-fixture", "channel": "general",
+        "feedback_bundle_id": "feedback-validation-fixture",
+    }, reason)
+
+    stored = generation.generation(record["id"])
+    assert stored["public_patch_error_code"] == (
+        "missing_hypothesis_component_ids")
+    event = evolution.events("general")[-1]
+    assert event["kind"] == "candidate_generation_missing"
+    assert "reason" not in event["content"]
+    assert reason not in json.dumps(event)
 
 
 def test_host_interrupt_cannot_leave_workflow_episode_running(tmp_path):

@@ -140,6 +140,28 @@ def _error_type(value):
     return name if name.isidentifier() and len(name) <= 120 else "RuntimeError"
 
 
+_PUBLIC_PATCH_ERRORS = {
+    "PackageError: RuntimeError: ContractError: behavior_patch/hypothesis: "
+    "'component_ids' is a required property":
+        "missing_hypothesis_component_ids",
+    "ContractError: PackagePatch replacement must not include path":
+        "replacement_forbids_path",
+    "ContractError: PackagePatch replacement lacks child component declaration":
+        "replacement_missing_child_declaration",
+    "ContractError: PackagePatch replacement fields are invalid":
+        "replacement_fields_invalid",
+    "ContractError: PackagePatch replacement is invalid":
+        "replacement_fields_or_declaration_invalid",
+    "ContractError: PackagePatch replacement has no component effect":
+        "replacement_no_component_effect",
+}
+
+
+def _public_patch_error_code(reason):
+    """Return a fixed host code only for an exact trusted validation error."""
+    return _PUBLIC_PATCH_ERRORS.get(reason)
+
+
 def _public_workflow_identifier(value):
     if (not isinstance(value, str)
             or _PUBLIC_WORKFLOW_IDENTIFIER.fullmatch(value) is None
@@ -1117,6 +1139,7 @@ class GenerationService:
         reason = str(reason)[:1500]
         record = {**base, "status": "missing", "reason": reason,
                   "reason_type": _error_type(reason), "reason_digest": digest(reason),
+                  "public_patch_error_code": _public_patch_error_code(reason),
                   "episode_id": episode["id"] if episode else None,
                   "episode_status": episode.get("status") if episode else None,
                   "usage": deepcopy(episode.get("usage")) if episode else None,
