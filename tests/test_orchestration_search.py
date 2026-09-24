@@ -662,6 +662,41 @@ def _candidate(identity, parent, child):
             "origin": "generated"}
 
 
+def test_incomplete_generation_usage_stops_search_with_known_cost(tmp_path):
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    parent = multirole_package()
+    tasks.store.put_package(parent)
+    record = _generation("generation-transport", parent, parent, None)
+    record.update(status="missing", reason_type="ModelTransportError")
+    record["usage"]["usage_complete"] = False
+    service = BoundedOrchestrationSearch(
+        tasks, _Evolution(parent, {}),
+        _Generation({record["id"]: record}))
+    calls = []
+
+    def generate(*_args):
+        calls.append(1)
+        return deepcopy(record)
+
+    result = service.run(
+        "general", "feedback-1", 0,
+        {"max_attempts": 2, "target_qualified": 1,
+         "minimum_mean_delta": 0.0, "max_model_calls": 3,
+         "max_completion_tokens": 100, "max_tool_calls": 0,
+         "max_nodes": 20},
+        generate=generate,
+        qualify=lambda *_args: pytest.fail("incomplete generation was qualified"))
+
+    assert calls == [1]
+    assert result["status"] == "failed"
+    assert result["failure_phase"] == "generation"
+    assert result["usage"]["model_calls"] == 1
+    failure = next(event["content"]["failure"] for event in result["events"]
+                   if event["kind"] == "attempt_failed")
+    assert failure["failure_type"] == "GenerationUsageIncomplete"
+    assert failure["usage"]["usage_complete"] is False
+
+
 def test_bounded_search_skips_s_only_attempt_then_qualifies_real_o_delta(tmp_path):
     tasks = TaskService(tmp_path, tools=ToolRegistry())
     parent = multirole_package()

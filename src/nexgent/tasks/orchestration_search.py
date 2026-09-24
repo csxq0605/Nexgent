@@ -973,6 +973,33 @@ class BoundedOrchestrationSearch:
                     or stored.get("feedback_bundle_id") != feedback_bundle_id
                     or stored.get("channel_revision") != expected_revision):
                 raise ContractError("Search generation crossed its frozen parent")
+            observed_usage = stored.get("usage") or {}
+            episode_id = stored.get("episode_id")
+            infrastructure = False
+            if isinstance(episode_id, str):
+                generation_episode = self.tasks.get_private(episode_id)
+                infrastructure = (generation_episode.get("failure_domain")
+                                  == "infrastructure")
+            if (infrastructure
+                    or observed_usage.get("usage_complete") is False
+                    or (episode_id is not None
+                        and observed_usage.get("usage_complete") is not True)):
+                failure = {
+                    "failure_type": (
+                        "GenerationInfrastructureFailure" if infrastructure
+                        else "GenerationUsageIncomplete"),
+                    "evidence_refs": {"generation_id": stored["id"],
+                                      "episode_id": episode_id},
+                    "usage": {**self._usage(stored),
+                              "usage_complete": False},
+                    "retry_safe": False,
+                }
+                return terminal_failure(
+                    {"attempt": attempt, "attempt_id": attempt_id,
+                     "generation_id": stored["id"],
+                     "generation_status": stored.get("status"),
+                     "repair_input": deepcopy(repair)},
+                    "generation", DevelopmentQualificationError(failure))
             self._add_usage(total, self._usage(stored))
             remaining = self._remaining(policy, total)
             if min(remaining.values()) < 0:

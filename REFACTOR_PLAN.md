@@ -172,6 +172,7 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 - [x] E3-B.2 下一次[普通任务真实探针](experiments/ordinary_feedback_live/WORKBENCH_CANDIDATE_REPAIR_RESULTS.md)再次由 R0 选择 O 搜索，MiMo 两次生成合法 O 包却均无可执行编排增量，0 个 development 配对、0 个 selection 资格。按该负结果把静态接口预检移到无增量判断之前，并拒绝未知根图字段；42 项编排及 17 项生成修复定向测试通过。该修复尚未真实复测；普通任务 selection→guard→新任务复用仍是 E3-B.2 的首要未过出口。
 - [ ] E3-B.2 [图预检下一次真实探针](experiments/ordinary_feedback_live/WORKBENCH_GRAPH_PREFLIGHT_RESULTS.md)在默认 R0 开发规划处停下：来源 4 次模型调用后协议失败，R0 1 次完整计量调用返回 JSON 后带尾随文本，严格网关拒绝。没有候选，故不能评价图预检。先设计有界、持久记账的格式修复，再继续同一真实链路；不得将模型格式波动冒充 RSI 改进。
 - [x] E3-B.2 格式恢复与纵向接线：宿主只对“完整 JSON 对象后有尾随文本”另开一次有独立 RPC／模型收据的修复调用；原响应仍无效，修复对象须与首个完整对象一致，计量不完整或未知调用不重放。另新增普通任务→O 搜索→真实配对→selection→guard→新 TaskService 复用的确定性模型边界纵向测试。联合 98 项定向测试通过。此结果证明接线和恢复边界，不证明 MiMo 真实晋升或净收益；下一步仍需预注册普通入口实跑。
+- [ ] E3-B.2 [格式恢复后真实普通任务](experiments/ordinary_feedback_live/WORKBENCH_METERED_REPAIR_RESULTS.md)仍未生成有效候选：来源 architect 输出耗尽 5000 token；R0 完成并选 O 搜索；首候选缺 component_ids，次候选遇传输故障且计量不完整。旧搜索器误把后者算普通耗尽；现按已知成本终止为不可重试的 generation 失败，30 项搜索定向测试通过。格式修复与图预检均未在本轮触发，真实 selection／guard／复用仍待完成。
 - [ ] E 将任务来源的工具／服务／编排候选接入独立评价、晋升、后续任务自动复用与回滚，再进入 F 的对照研究。
 
 计划重定见 `3919a0d`；后续逐阶段提交记录在[实现与来源对照账本](docs/research/implementation-reference-tracker.md)。A2–G 的完成状态由实际代码与运行收据逐项更新。
