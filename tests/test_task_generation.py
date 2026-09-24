@@ -283,6 +283,17 @@ def feedback_episode(tasks, parent, *, split="development", split_role="developm
     return state["id"]
 
 
+def feedback_package(feedback_statements):
+    source = """def execute(payload, context):
+    artifact = context.publish({'version': 0}, name='result')
+FEEDBACK
+    return {'deliverables': {'result': artifact['id']}}
+""".replace("FEEDBACK", "\n".join("    " + line for line in feedback_statements))
+    return make_package(
+        {"main.py": source}, {"entries": {"execute": "main.py:execute"}},
+        provenance={"fixture": "task-authored-feedback"})
+
+
 def captured(tmp_path, *, evaluate=True):
     tasks, evolution, generation, parent = prepared(tmp_path)
     episode_id = feedback_episode(tasks, parent, evaluate=evaluate)
@@ -335,6 +346,87 @@ def test_feedback_bundle_is_immutable_bounded_and_excludes_hidden_evaluator_cont
     assert all(not ({"request", "result", "arguments", "prompt", "payload"} & set(node))
                for node in trace["nodes"])
     assert generation.feedback(bundle["id"])["record_digest"] == bundle["record_digest"]
+
+
+def test_feedback_bundle_projects_only_bounded_task_authored_public_signals(tmp_path):
+    secret = "PRIVATE_PROMPT_CREDENTIAL_MUST_NOT_CROSS_THE_BOUNDARY"
+    parent = feedback_package([
+        "context.feedback({'valid': False, 'passed': True, "
+        "'failure_code': 'schema_mismatch', "
+        "'artifact_refs': [artifact['id'], 'artifact-not-local', 7], "
+        f"'summary': {secret!r}, 'prompt': {secret!r}, "
+        f"'credentials': {{'token': {secret!r}}}, "
+        f"'evaluator_private': {secret!r}}})",
+        "context.feedback({'valid': 'yes', 'failure_code': 'api_key_leaked', "
+        f"'private': {secret!r}}})",
+        "context.feedback({'failure_code': 'confidentialprojectcodename'})",
+    ])
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    evolution = EvolutionService(tasks)
+    generation = GenerationService(tasks, evolution)
+    evolution.register("general", parent)
+    episode_id = feedback_episode(tasks, parent, evaluate=False)
+
+    bundle = generation.capture_feedback("general", [episode_id], expected_revision=0)
+
+    episode = bundle["episode_refs"][0]
+    claims = episode["public_feedback"]
+    feedback_digests = [event["digest"] for event in episode["events"]
+                        if event["kind"] == "feedback"]
+    assert [claim["event_digest"] for claim in claims] == feedback_digests
+    assert all(claim["source"] == "task_agent" for claim in claims)
+    assert claims[0]["claim_status"] == "unverified"
+    assert claims[0]["signals"] == {"valid": False, "passed": True}
+    assert claims[0]["failure_code"] == "schema_mismatch"
+    assert len(claims[0]["artifact_refs"]) == 1
+    assert claims[0]["artifact_refs"][0] == episode["artifacts"][0]["id"]
+    assert claims[1]["signals"] == {}
+    assert "failure_code" not in claims[1]
+    assert claims[2]["signals"] == {}
+    assert "failure_code" not in claims[2]
+    serialized = json.dumps(bundle, ensure_ascii=False)
+    assert secret not in serialized
+    assert "artifact-not-local" not in serialized
+    assert "api_key_leaked" not in serialized
+    assert "confidentialprojectcodename" not in serialized
+
+
+@pytest.mark.parametrize("feedback_statements,reason", [
+    (["context.feedback({'note': " + repr("x" * 16_385) + "})"], "capture bound"),
+    (["context.feedback({'valid': True})"] * 33, "too many"),
+])
+def test_feedback_projection_rejects_oversized_or_excessive_claims(
+        tmp_path, feedback_statements, reason):
+    parent = feedback_package(feedback_statements)
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    evolution = EvolutionService(tasks)
+    generation = GenerationService(tasks, evolution)
+    evolution.register("general", parent)
+    episode_id = feedback_episode(tasks, parent, evaluate=False)
+
+    with pytest.raises(ContractError, match=reason):
+        generation.capture_feedback("general", [episode_id], expected_revision=0)
+
+
+def test_feedback_projection_rejects_tampered_event_before_reading_claim(tmp_path):
+    parent = feedback_package(["context.feedback({'valid': True})"])
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    evolution = EvolutionService(tasks)
+    generation = GenerationService(tasks, evolution)
+    evolution.register("general", parent)
+    episode_id = feedback_episode(tasks, parent, evaluate=False)
+    with tasks.store.connect() as db:
+        row = db.execute(
+            "SELECT data FROM task_events WHERE episode=? AND kind='feedback'",
+            (episode_id,)).fetchone()
+        content = json.loads(row[0])
+        content["content"] = {"valid": False, "secret": "TAMPERED_PRIVATE_VALUE"}
+        db.execute(
+            "UPDATE task_events SET data=? WHERE episode=? AND kind='feedback'",
+            (json.dumps(content), episode_id))
+
+    with pytest.raises(ContractError, match="journal integrity"):
+        generation.capture_feedback("general", [episode_id], expected_revision=0)
 
 
 def test_reference_improver_prompt_separates_quality_from_protocol_failure():

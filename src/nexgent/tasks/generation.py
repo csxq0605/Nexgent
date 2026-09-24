@@ -33,6 +33,23 @@ _FORBIDDEN_TOKENS = frozenset({
     "benchmark", "evaluator", "evaluation", "gate", "gating", "permission",
     "permissions", "manifest", "holdout", "secret", "hidden",
 })
+_PUBLIC_FEEDBACK_SIGNALS = ("valid", "passed", "approved", "success")
+_PUBLIC_FEEDBACK_MAX_EVENTS = 32
+_PUBLIC_FEEDBACK_MAX_BYTES = 16_384
+_PUBLIC_FEEDBACK_MAX_ARTIFACT_REFS = 16
+_PUBLIC_FEEDBACK_SECRET_TOKENS = frozenset({
+    "auth", "authorization", "credential", "credentials", "evaluator",
+    "hidden", "key", "password", "private", "prompt", "secret", "token",
+})
+_FAILURE_CODE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
+_PUBLIC_FAILURE_CODES = frozenset({
+    "artifact_invalid", "artifact_missing", "contract_violation",
+    "dependency_failure", "execution_failed", "incomplete_output",
+    "invalid_output", "missing_output", "model_failure", "permission_denied",
+    "publication_failed", "resource_exhausted", "schema_mismatch", "timeout",
+    "tool_failure", "unknown_failure", "unsupported_capability",
+    "validation_failed",
+})
 
 
 def _copy(value, label="Generation value"):
@@ -136,6 +153,98 @@ def _public_execution_trace(episode):
         "nodes": rows,
         "truncated_nodes": max(0, len(nodes) - len(rows)),
     }
+
+
+def _checked_event_chain(episode_id, events):
+    """Validate the durable journal before projecting task-authored content."""
+    previous = "genesis"
+    checked = []
+    for sequence, event in enumerate(events, 1):
+        if not isinstance(event, dict):
+            raise ContractError("Feedback Episode event journal integrity changed")
+        record = {
+            "episode_id": event.get("episode_id"),
+            "sequence": event.get("sequence"),
+            "kind": event.get("kind"),
+            "created": event.get("created"),
+            "content": event.get("content"),
+            "previous": event.get("previous"),
+        }
+        try:
+            valid_digest = digest(record) == event.get("digest")
+        except (TypeError, ValueError, RecursionError):
+            valid_digest = False
+        if (record["episode_id"] != episode_id or record["sequence"] != sequence
+                or record["previous"] != previous or not valid_digest):
+            raise ContractError("Feedback Episode event journal integrity changed")
+        checked.append(event)
+        previous = event["digest"]
+    return checked
+
+
+def _safe_failure_code(value):
+    if (not isinstance(value, str) or len(value) > 64
+            or _FAILURE_CODE.fullmatch(value) is None
+            or _path_tokens(value) & _PUBLIC_FEEDBACK_SECRET_TOKENS
+            or value not in _PUBLIC_FAILURE_CODES):
+        return None
+    return value
+
+
+def _public_feedback(episode_id, events, artifacts):
+    """Project fixed low-risk fields from untrusted task-agent feedback claims."""
+    feedback_events = [event for event in events if event.get("kind") == "feedback"]
+    if len(feedback_events) > _PUBLIC_FEEDBACK_MAX_EVENTS:
+        raise ContractError("Feedback Episode contains too many public feedback claims")
+    local_artifacts = {
+        artifact.get("id"): artifact for artifact in artifacts
+        if isinstance(artifact, dict)
+        and (artifact.get("producer") or {}).get("episode_id") == episode_id
+    }
+    projected = []
+    for event in feedback_events:
+        record = event.get("content")
+        if (not isinstance(record, dict) or record.get("source") != "agent_review"
+                or record.get("validity") != "claimed"):
+            continue
+        content = record.get("content")
+        if not isinstance(content, dict):
+            continue
+        try:
+            encoded = json.dumps(content, ensure_ascii=False, sort_keys=True,
+                                 separators=(",", ":"), allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError, RecursionError):
+            continue
+        if len(encoded) > _PUBLIC_FEEDBACK_MAX_BYTES:
+            raise ContractError("Public feedback claim exceeds the capture bound")
+
+        claim = {
+            "event_digest": event["digest"],
+            "source": "task_agent",
+            "claim_status": "unverified",
+            "signals": {key: content[key] for key in _PUBLIC_FEEDBACK_SIGNALS
+                        if type(content.get(key)) is bool},
+        }
+        failure_code = _safe_failure_code(content.get("failure_code"))
+        if failure_code is not None:
+            claim["failure_code"] = failure_code
+
+        requested_refs = content.get("artifact_refs")
+        if isinstance(requested_refs, list):
+            if len(requested_refs) > _PUBLIC_FEEDBACK_MAX_ARTIFACT_REFS:
+                raise ContractError("Public feedback artifact references exceed the capture bound")
+            seen = set()
+            resolved = []
+            for identity in requested_refs:
+                if (not isinstance(identity, str) or identity in seen
+                        or identity not in local_artifacts):
+                    continue
+                seen.add(identity)
+                resolved.append(identity)
+            if resolved:
+                claim["artifact_refs"] = resolved
+        projected.append(claim)
+    return projected
 
 
 def _component_descriptor(package, component_id):
@@ -376,7 +485,7 @@ class GenerationService:
 
             snapshot = self.store.memory_snapshot(episode["memory_snapshot_id"], identity)
             usage = episode["usage"]
-            events = episode["events"]
+            events = _checked_event_chain(identity, episode["events"])
             artifacts = episode["artifacts"]
             if len(events) > 512 or len(artifacts) > 256:
                 raise ContractError("Feedback Episode evidence exceeds the capture bound")
@@ -407,6 +516,7 @@ class GenerationService:
                      "charged_tool_work_units", "nodes", "usage_complete")}},
                 "events": [{"sequence": event["sequence"], "kind": event["kind"],
                             "digest": event["digest"]} for event in events],
+                "public_feedback": _public_feedback(identity, events, artifacts),
                 "artifacts": [_artifact_ref(artifact) for artifact in artifacts],
                 "outcome_digest": digest(episode.get("outcome")),
             })
