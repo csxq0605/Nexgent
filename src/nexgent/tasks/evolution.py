@@ -129,10 +129,11 @@ def _loaded_evidence(component, execution, package):
     loaded_digests = {path: expected_digests[path] for path in actual}
     package_loaded = (execution or {}).get("package_digest") == package["digest"]
     active_strategy = (execution or {}).get("active_strategy") or {}
-    strategy_required = (
-        component["class"] == "O"
-        and component["component_id"] == package["manifest"].get("orchestrator")
-        and component["kind"] in {"entry", "workflow"})
+    # A task may select a non-default O component from a frozen strategy set.
+    # Loaded source alone is not behavior activation for any executable O
+    # target, regardless of the manifest's legacy fallback orchestrator.
+    strategy_required = (component["class"] == "O"
+                         and component["kind"] in {"entry", "workflow"})
     strategy_backend = "controlled_code" if component["kind"] == "entry" else "executable_plan"
     strategy_matches = (
         strategy_required

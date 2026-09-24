@@ -1,10 +1,10 @@
 """Pre-selection seed containing both existing task execution strategies.
 
-This module deliberately does not select a strategy.  It assembles the real
-open-loop entry from :mod:`nexgent.tasks.seed` and the real Main workflow from
-:mod:`nexgent.tasks.self_orchestration_seed` into one manifest-v2 package.  The
-legacy ``orchestrator`` remains the workflow, so existing TaskService behavior
-is unchanged until a later host-side StrategyDecision implementation exists.
+It assembles the real open-loop entry from :mod:`nexgent.tasks.seed` and the
+real Main workflow from :mod:`nexgent.tasks.self_orchestration_seed` into one
+manifest-v2 package.  ``strategy_candidates`` opts the public ``execute`` entry
+into the host's durable task-time selector.  The legacy ``orchestrator`` remains
+the compatibility default for packages without that declaration.
 """
 
 from __future__ import annotations
@@ -14,13 +14,35 @@ from copy import deepcopy
 from .packages import PackageError, make_package, split_ref, verify_package
 from .seed import default_package
 from .self_orchestration_seed import self_orchestration_package
-from .strategy_decisions import CANDIDATE_SET_SCHEMA, build_strategy_candidate_set
+from .strategy_decisions import (
+    CANDIDATE_SET_SCHEMA, strategy_candidate_set_from_manifest,
+)
 from .tools import ContractError
 
 
 STRATEGY_CANDIDATE_SET_SCHEMA = CANDIDATE_SET_SCHEMA
 OPEN_LOOP_COMPONENT_ID = "ordinary-open-loop"
 MAIN_DAG_COMPONENT_ID = "self-orchestration-workflow"
+STRATEGY_SELECTOR_COMPONENT_ID = "strategy-selector-role"
+STRATEGY_SELECTOR_ROLE = "strategy_selector"
+STRATEGY_SELECTOR_PROMPT_PATH = "prompts/strategy_selector.md"
+STRATEGY_SELECTOR_PROMPT = """You select one execution strategy for a frozen task.
+
+Choose exactly one supplied candidate component. Prefer a DAG when the task
+benefits from explicit decomposition, parallel independent work, or structured
+review. Prefer an open loop when each next action depends on observations,
+tool results, or iterative correction. Use only the visible task evidence,
+artifact references, constraints, candidate identities, and remaining budget
+supplied by the host. Do not invent package, source, permission, budget, or
+component identities.
+
+Return exactly one JSON object with selected_component_id, basis,
+stop_conditions, and estimated_cost. basis and stop_conditions are nonempty
+lists of concise strings. estimated_cost is null or a nonempty object using
+only model_calls, completion_tokens, tool_calls, tool_work_units, and nodes,
+with nonnegative integer values. The estimate is diagnostic and grants no
+authority.
+"""
 
 
 def _merge_unique(target, additions, label):
@@ -42,7 +64,8 @@ def strategy_candidate_bindings(package):
     manifest = package["manifest"]
     candidate_set = manifest.get("strategy_candidates")
     if (not isinstance(candidate_set, dict)
-            or set(candidate_set) != {"schema", "component_ids"}
+            or set(candidate_set) != {
+                "schema", "component_ids", "selector_component_id"}
             or candidate_set.get("schema") != STRATEGY_CANDIDATE_SET_SCHEMA):
         raise PackageError("Adaptive seed needs an exact versioned strategy candidate set")
     component_ids = candidate_set.get("component_ids")
@@ -51,7 +74,7 @@ def strategy_candidate_bindings(package):
             or len(component_ids) != len(set(component_ids))):
         raise PackageError("Strategy candidate IDs must be a unique list")
     try:
-        candidates = build_strategy_candidate_set(package, component_ids)["candidates"]
+        candidates = strategy_candidate_set_from_manifest(package)["candidates"]
     except ContractError as exc:
         raise PackageError("Strategy candidate: " + str(exc)) from exc
     fields = ("component_id", "kind", "ref", "source_path", "source_digest")
@@ -107,6 +130,8 @@ def adaptive_orchestration_package(*, open_loop_package=None, main_dag_package=N
         if path != dag_placeholder_path
     }
     _merge_unique(files, dag_resources, "package file")
+    _merge_unique(files, {STRATEGY_SELECTOR_PROMPT_PATH: STRATEGY_SELECTOR_PROMPT},
+                  "package file")
 
     skills = deepcopy(open_manifest.get("skills", {}))
     _merge_unique(skills, dag_manifest.get("skills", {}), "skill name")
@@ -124,12 +149,26 @@ def adaptive_orchestration_package(*, open_loop_package=None, main_dag_package=N
             raise PackageError(
                 f"Adaptive seed has conflicting component id: {component_id!r}")
         components[component_id] = component
+    if STRATEGY_SELECTOR_COMPONENT_ID in components:
+        raise PackageError(
+            f"Adaptive seed has conflicting component id: {STRATEGY_SELECTOR_COMPONENT_ID!r}")
+    components[STRATEGY_SELECTOR_COMPONENT_ID] = {
+        "class": "S", "kind": "role", "ref": STRATEGY_SELECTOR_ROLE,
+    }
+    roles = deepcopy(dag_manifest["roles"])
+    if STRATEGY_SELECTOR_ROLE in roles:
+        raise PackageError(
+            f"Adaptive seed has conflicting role id: {STRATEGY_SELECTOR_ROLE!r}")
+    roles[STRATEGY_SELECTOR_ROLE] = {
+        "prompt_ref": STRATEGY_SELECTOR_PROMPT_PATH,
+        "capabilities": ["ask"],
+    }
 
     manifest = {
         "manifest_version": 2,
         "entries": deepcopy(open_manifest["entries"]),
         "skills": skills,
-        "roles": deepcopy(dag_manifest["roles"]),
+        "roles": roles,
         "workflows": deepcopy(dag_manifest["workflows"]),
         "components": components,
         # Compatibility default only.  This field is not a task-time choice.
@@ -137,6 +176,7 @@ def adaptive_orchestration_package(*, open_loop_package=None, main_dag_package=N
         "strategy_candidates": {
             "schema": STRATEGY_CANDIDATE_SET_SCHEMA,
             "component_ids": [OPEN_LOOP_COMPONENT_ID, MAIN_DAG_COMPONENT_ID],
+            "selector_component_id": STRATEGY_SELECTOR_COMPONENT_ID,
         },
     }
     for registry in ("tools", "services"):
@@ -147,8 +187,8 @@ def adaptive_orchestration_package(*, open_loop_package=None, main_dag_package=N
 
     package = make_package(files, manifest, provenance={
         "origin": "nexgent.adaptive-orchestration-seed",
-        "scope": "pre-selection package with frozen open-loop and Main DAG candidates",
-        "activation": "opt-in; task-time selection is not implemented",
+        "scope": "task-time selected package with frozen open-loop and Main DAG candidates",
+        "activation": "opt-in host StrategyDecision on the public execute entry",
         "sources": {
             "open_loop": {"id": open_loop["id"], "digest": open_loop["digest"]},
             "main_dag": {"id": main_dag["id"], "digest": main_dag["digest"]},

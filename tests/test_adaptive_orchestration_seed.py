@@ -12,6 +12,8 @@ from nexgent.tasks.adaptive_orchestration_seed import (
     MAIN_DAG_COMPONENT_ID,
     OPEN_LOOP_COMPONENT_ID,
     STRATEGY_CANDIDATE_SET_SCHEMA,
+    STRATEGY_SELECTOR_COMPONENT_ID,
+    STRATEGY_SELECTOR_PROMPT_PATH,
     adaptive_orchestration_package,
     strategy_candidate_bindings,
 )
@@ -33,6 +35,7 @@ def test_adaptive_seed_binds_two_real_candidate_sources_without_enabling_selecti
     assert package["manifest"]["strategy_candidates"] == {
         "schema": STRATEGY_CANDIDATE_SET_SCHEMA,
         "component_ids": [OPEN_LOOP_COMPONENT_ID, MAIN_DAG_COMPONENT_ID],
+        "selector_component_id": STRATEGY_SELECTOR_COMPONENT_ID,
     }
 
     bindings = {item["component_id"]: item
@@ -60,7 +63,11 @@ def test_adaptive_seed_binds_two_real_candidate_sources_without_enabling_selecti
     for path, content in main_dag["files"].items():
         if path != "agent/main.py":
             assert package["files"][path] == content
-    assert "selection is not implemented" in package["provenance"]["activation"]
+    assert "StrategyDecision" in package["provenance"]["activation"]
+    selector = package["manifest"]["components"][STRATEGY_SELECTOR_COMPONENT_ID]
+    assert selector == {"class": "S", "kind": "role", "ref": "strategy_selector"}
+    assert package["manifest"]["roles"]["strategy_selector"]["prompt_ref"] == (
+        STRATEGY_SELECTOR_PROMPT_PATH)
 
 
 def test_adaptive_seed_open_loop_entry_executes_under_controlled_runner_without_a_model():
@@ -123,6 +130,13 @@ class _DagGatewayFactory:
                     "usage": {"prompt_tokens": 1, "completion_tokens": 1,
                               "total_tokens": 2},
                 })
+                if role == "strategy_selector":
+                    return {
+                        "selected_component_id": MAIN_DAG_COMPONENT_ID,
+                        "basis": ["The task benefits from an explicit graph."],
+                        "stop_conditions": ["The requested result is published."],
+                        "estimated_cost": {"model_calls": 2, "nodes": 3},
+                    }
                 if role == "architect":
                     return {"proposal": {
                         "replaced_node_ids": ["slot"],
@@ -169,7 +183,7 @@ def test_adaptive_seed_preserves_the_legacy_main_dag_execution_path(tmp_path):
     assert result["execution"]["kind"] == "executable_plan"
     assert result["execution"]["active_strategy"]["component_id"] == (
         MAIN_DAG_COMPONENT_ID)
-    assert gateway.roles == ["architect", "generalist"]
+    assert gateway.roles == ["strategy_selector", "architect", "generalist"]
     artifact = service.store.read(result["output_refs"]["result"], episode["id"])
     assert artifact["content"] == {"answer": "dag-ran"}
 

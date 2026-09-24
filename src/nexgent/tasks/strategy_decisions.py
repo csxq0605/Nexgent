@@ -18,6 +18,7 @@ from .tools import ContractError
 
 CANDIDATE_SET_SCHEMA = "nexgent.strategy-candidate-set.v1"
 STRATEGY_DECISION_SCHEMA = "nexgent.strategy-decision.v1"
+STRATEGY_SELECTOR_SCHEMA = "nexgent.strategy-selector.v1"
 
 _MODEL_DECISION_FIELDS = frozenset({
     "selected_component_id", "basis", "stop_conditions", "estimated_cost",
@@ -124,6 +125,58 @@ def build_strategy_candidate_set(package, component_ids):
         "candidates": candidates,
     }
     return {**body, "candidate_set_digest": digest(body)}
+
+
+def strategy_candidate_set_from_manifest(package):
+    """Build the opt-in candidate set declared by one verified v2 package."""
+    verify_package(package)
+    manifest = package["manifest"]
+    declaration = manifest.get("strategy_candidates")
+    if (manifest.get("manifest_version", 1) != 2
+            or not isinstance(declaration, dict)
+            or set(declaration) != {
+                "schema", "component_ids", "selector_component_id"}
+            or declaration.get("schema") != CANDIDATE_SET_SCHEMA):
+        raise ContractError(
+            "Adaptive execution needs an exact versioned strategy candidate declaration")
+    component_ids = declaration.get("component_ids")
+    if not isinstance(component_ids, list) or len(component_ids) < 2:
+        raise ContractError("Adaptive execution needs at least two strategy candidates")
+    return build_strategy_candidate_set(package, component_ids)
+
+
+def strategy_selector_component(package):
+    """Resolve the package's versioned selector role and prompt identity."""
+    verify_package(package)
+    declaration = package["manifest"].get("strategy_candidates") or {}
+    component_id = declaration.get("selector_component_id")
+    component = package["manifest"].get("components", {}).get(component_id)
+    if (not isinstance(component_id, str) or not component_id
+            or not isinstance(component, dict)
+            or component.get("class") != "S"
+            or component.get("kind") != "role"):
+        raise ContractError("Strategy selector must reference one package S role component")
+    role_ref = component.get("ref")
+    role = package["manifest"].get("roles", {}).get(role_ref)
+    if (not isinstance(role, dict)
+            or set(role.get("capabilities", [])) != {"ask"}
+            or not isinstance(role.get("prompt_ref"), str)):
+        raise ContractError("Strategy selector role must have one versioned prompt and ask capability")
+    source_path = role["prompt_ref"]
+    body = {
+        "schema": STRATEGY_SELECTOR_SCHEMA,
+        "component_id": component_id,
+        "component_digest": digest(component),
+        "kind": "role",
+        "role_ref": role_ref,
+        "role_digest": digest(role),
+        "package_id": package["id"],
+        "package_digest": package["digest"],
+        "source_path": source_path,
+        "source_digest": package["component_digests"][source_path],
+        "output_schema": STRATEGY_DECISION_SCHEMA,
+    }
+    return {**body, "selector_digest": digest(body)}
 
 
 def validate_strategy_candidate_set(candidate_set):

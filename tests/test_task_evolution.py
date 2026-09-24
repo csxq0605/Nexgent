@@ -4,7 +4,8 @@ import pytest
 
 from nexgent.kernel.programs import digest
 from nexgent.tasks.evidence import build_rsi_mechanism_evidence
-from nexgent.tasks.evolution import EvolutionService, PromotionPolicy
+from nexgent.tasks.evolution import EvolutionService, PromotionPolicy, _loaded_evidence
+from nexgent.tasks.adaptive_orchestration_seed import adaptive_orchestration_package
 from nexgent.tasks.generation import GenerationService, PATCH_SCHEMA, PATCH_SCHEMA_V2
 from nexgent.tasks.packages import PackageError, make_package
 from nexgent.tasks.runtime import TaskService
@@ -44,6 +45,28 @@ def v2_package(version, *, parent=None):
     }
     return make_package({"main.py": source}, manifest, parent=parent,
                         provenance={"fixture": f"v2-{version}"})
+
+
+def test_nondefault_strategy_requires_actual_activation_not_only_loaded_source():
+    package = adaptive_orchestration_package()
+    component_id = "ordinary-open-loop"
+    path = "agent/main.py"
+    target = {"component_id": component_id, "class": "O", "kind": "entry",
+              "ref": "execute", "files": [path]}
+    execution = {"package_digest": package["digest"],
+                 "loaded_modules": [path], "kind": "controlled_code",
+                 "entry": "execute"}
+
+    assert _loaded_evidence(target, execution, package)["loaded"] is False
+    execution["active_strategy"] = {
+        "kind": "entry", "component_id": "self-orchestration-workflow",
+        "package_digest": package["digest"], "source_path": path,
+        "source_digest": package["component_digests"][path],
+        "backend": "controlled_code",
+    }
+    assert _loaded_evidence(target, execution, package)["loaded"] is False
+    execution["active_strategy"]["component_id"] = component_id
+    assert _loaded_evidence(target, execution, package)["loaded"] is True
 
 
 class PairedBenchmark:

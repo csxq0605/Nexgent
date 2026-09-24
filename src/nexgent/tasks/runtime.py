@@ -24,6 +24,11 @@ from .outcomes import classify_benchmark_outcome
 from .package_runner import CapabilityAbort, run_package
 from .packages import CAPABILITIES, PackageError, split_ref, verify_package
 from .store import EpisodeStore, RecoveryRequired, StateConflict
+from .strategy_decisions import (
+    STRATEGY_DECISION_SCHEMA,
+    parse_strategy_decision, strategy_candidate_set_from_manifest,
+    strategy_selector_component, validate_strategy_candidate_set,
+)
 from .tools import ContractError, ToolRegistry, task_benchmarks, validate
 
 
@@ -503,11 +508,22 @@ class TaskService:
             raise ContractError("Deliverable names must be unique nonempty text")
         for item in deliverables:
             _check_local_schema(item.get("schema", {}), label=f"Deliverable {item['name']}")
+        strategy_candidate_set = None
+        strategy_selector = None
+        if "strategy_candidates" in package["manifest"]:
+            strategy_candidate_set = strategy_candidate_set_from_manifest(package)
+            strategy_selector = strategy_selector_component(package)
         task = {"schema_version": 1, "objective": objective, "inputs": inputs,
                 "deliverables": deliverables, "budget": budget, "capabilities": capabilities,
                 "context": context, "constraints": constraints, "entry": entry,
                 "tools": self.tools.describe(
                     initially_active_capabilities if lease_mode else capabilities)}
+        if strategy_candidate_set is not None and entry == "execute":
+            # These host-derived fields are part of the immutable task record
+            # committed by EpisodeStore.create. Callers cannot inject them via
+            # context, and run() re-derives both identities from the package.
+            task["strategy_candidate_set"] = strategy_candidate_set
+            task["strategy_selector"] = strategy_selector
         if capability_authority is not None:
             from .capability_authority import validate_episode_authority
             task["capability_authority"] = validate_episode_authority(capability_authority)
@@ -683,8 +699,213 @@ class TaskService:
             return None
         return component_id, component["ref"]
 
+    @staticmethod
+    def _remaining_budget(limits, usage):
+        """Project the admission-relevant remainder without refunding reserves."""
+        return {
+            "model_calls": max(0, limits["max_model_calls"] - usage["model_calls"]),
+            "completion_tokens": max(
+                0, limits["max_completion_tokens"]
+                - usage["charged_completion_tokens"]),
+            "tool_calls": max(0, limits["max_tool_calls"] - usage["tool_calls"]),
+            "tool_work_units": max(
+                0, limits["max_tool_work_units"]
+                - usage["charged_tool_work_units"]),
+            "nodes": max(0, limits["max_nodes"] - usage["nodes"]),
+        }
+
+    @staticmethod
+    def _strategy_selector_task(payload):
+        """Expose task evidence useful for routing, excluding evaluation context."""
+        task = {
+            key: deepcopy(payload[key]) for key in (
+                "objective", "input_refs", "deliverables", "constraints",
+                "capabilities")
+            if key in payload
+        }
+        task["available_capabilities"] = [
+            {key: deepcopy(item[key]) for key in (
+                "name", "description", "effect_class", "source")
+             if key in item}
+            for item in payload.get("tools", [])
+            if isinstance(item, dict)
+        ]
+        return task
+
+    @staticmethod
+    def _strategy_model_receipt(calls, identity, path):
+        matches = [
+            call for call in calls
+            if call.get("episode_id") == identity and call.get("node_id") == path
+        ]
+        if (len(matches) != 1
+                or matches[0].get("status") not in {"received", "completed"}):
+            raise RecoveryRequired(
+                "Completed strategy selector RPC lacks one terminal model receipt")
+        call = matches[0]
+        fields = (
+            "call_id", "status", "model", "role", "request_digest",
+            "response_id", "observed_provider_model", "provider_revision",
+            "reserved_completion_tokens", "billing_status", "usage",
+            "service_provider", "effective_payload_digest",
+        )
+        return {key: deepcopy(call.get(key)) for key in fields if key in call}
+
+    def _validate_strategy_decision_record(
+            self, identity, record, candidate_set, selector):
+        required = {
+            "schema", "candidate_set_digest", "package_id", "package_digest",
+            "selected_component_id", "selected_candidate", "basis",
+            "stop_conditions", "estimated_cost", "selector_component",
+            "selector_rpc_receipt", "model_receipt", "budget_receipt",
+            "decision_id", "decision_digest",
+        }
+        if (not isinstance(record, dict) or set(record) != required
+                or record.get("schema") != STRATEGY_DECISION_SCHEMA
+                or record.get("candidate_set_digest")
+                != candidate_set["candidate_set_digest"]
+                or record.get("selector_component") != selector
+                or not isinstance(record.get("decision_id"), str)
+                or not isinstance(record.get("decision_digest"), str)):
+            raise RecoveryRequired("Persisted StrategyDecision identity is invalid")
+        body = {key: deepcopy(value) for key, value in record.items()
+                if key not in {"decision_id", "decision_digest"}}
+        expected_digest = digest(body)
+        if (record["decision_digest"] != expected_digest
+                or record["decision_id"]
+                != "strategy-decision-" + expected_digest[:24]):
+            raise RecoveryRequired("Persisted StrategyDecision digest changed")
+        parsed = parse_strategy_decision({
+            key: deepcopy(record[key]) for key in (
+                "selected_component_id", "basis", "stop_conditions",
+                "estimated_cost")
+        }, candidate_set)
+        if (record.get("selected_candidate") != parsed["selected_candidate"]
+                or record.get("package_id") != parsed["package_id"]
+                or record.get("package_digest") != parsed["package_digest"]):
+            raise RecoveryRequired("Persisted StrategyDecision selection changed")
+        journal = self.store.rpc_find(identity, "strategy/selector")
+        rpc_receipt = record["selector_rpc_receipt"]
+        if (journal is None or journal.get("status") != "completed"
+                or rpc_receipt.get("call_path") != "strategy/selector"
+                or rpc_receipt.get("request_digest") != journal.get("request_digest")
+                or rpc_receipt.get("result_digest") != digest(journal.get("result"))):
+            raise RecoveryRequired("Persisted StrategyDecision RPC receipt changed")
+        root_id = self.store.get(identity)["root_episode_id"]
+        if record["model_receipt"] != self._strategy_model_receipt(
+                self.store.calls(root_id), identity, "strategy/selector"):
+            raise RecoveryRequired("Persisted StrategyDecision model receipt changed")
+        return deepcopy(record)
+
+    def _strategy_decision(
+            self, identity, package, payload, stop_event, notify):
+        """Commit or recover the one startup StrategyDecision for this Episode."""
+        state = self.store.get(identity)
+        frozen = state["task"].get("strategy_candidate_set")
+        frozen_selector = state["task"].get("strategy_selector")
+        current = strategy_candidate_set_from_manifest(package)
+        selector = strategy_selector_component(package)
+        if (validate_strategy_candidate_set(frozen) != current
+                or frozen_selector != selector):
+            raise RecoveryRequired(
+                "Frozen strategy candidates or selector differ from the Episode package")
+
+        committed = [
+            event["content"] for event in self.store.events(identity)
+            if event.get("kind") == "strategy_decision"
+        ]
+        if len(committed) > 1:
+            raise RecoveryRequired("Episode has multiple startup StrategyDecisions")
+        if committed:
+            return self._validate_strategy_decision_record(
+                identity, committed[0], current, selector)
+
+        path = "strategy/selector"
+        journal = self.store.rpc_find(identity, path)
+        if journal is None:
+            usage_before = self.store.usage(state["root_episode_id"])
+            selector_payload = {
+                "schema": "nexgent.strategy-selection-request.v1",
+                "task": self._strategy_selector_task(payload),
+                "candidate_set": deepcopy(current),
+                "selector_component": deepcopy(selector),
+                "budget": {
+                    "limits": deepcopy(state["budget"]),
+                    "usage_before": usage_before,
+                    "remaining_before": self._remaining_budget(
+                        state["budget"], usage_before),
+                },
+            }
+            prompt = package["files"][selector["source_path"]]
+            params = {
+                "role": selector["role_ref"],
+                "prompt": prompt,
+                "payload": selector_payload,
+                "max_tokens": 1200,
+            }
+        else:
+            request = journal.get("request") or {}
+            params = deepcopy(request.get("params"))
+            if (request.get("method") != "ask"
+                    or request.get("package_digest") != package["digest"]
+                    or not isinstance(params, dict)
+                    or params.get("role") != selector["role_ref"]
+                    or params.get("prompt")
+                    != package["files"][selector["source_path"]]
+                    or (params.get("payload") or {}).get("candidate_set") != current
+                    or (params.get("payload") or {}).get("selector_component")
+                    != selector
+                    or (params.get("payload") or {}).get("task")
+                    != self._strategy_selector_task(payload)):
+                raise RecoveryRequired("Strategy selector request identity changed")
+
+        model_output = self._dispatch(
+            identity, package, "ask", params, path, stop_event, notify)
+        parsed = parse_strategy_decision(model_output, current)
+        journal = self.store.rpc_find(identity, path)
+        if journal is None or journal.get("status") != "completed":
+            raise RecoveryRequired("Strategy selector has no completed RPC receipt")
+        usage_after = self.store.usage(state["root_episode_id"])
+        budget_before = deepcopy(params["payload"]["budget"])
+        body = {
+            key: deepcopy(value) for key, value in parsed.items()
+            if key != "decision_digest"
+        }
+        body.update({
+            "selector_component": deepcopy(selector),
+            "selector_rpc_receipt": {
+                key: deepcopy(journal.get(key)) for key in (
+                    "call_path", "request_digest", "status", "started_at",
+                    "finished_at") if key in journal
+            },
+            "model_receipt": self._strategy_model_receipt(
+                self.store.calls(state["root_episode_id"]), identity, path),
+            "budget_receipt": {
+                "limits": deepcopy(state["budget"]),
+                "usage_before": budget_before["usage_before"],
+                "remaining_before": budget_before["remaining_before"],
+                "usage_after": usage_after,
+                "remaining_after": self._remaining_budget(
+                    state["budget"], usage_after),
+            },
+        })
+        body["selector_rpc_receipt"]["result_digest"] = digest(
+            journal.get("result"))
+        decision_digest = digest(body)
+        decision = {
+            **body,
+            "decision_id": "strategy-decision-" + decision_digest[:24],
+            "decision_digest": decision_digest,
+        }
+        # The append-only event is the atomic decision commit. If the process
+        # stops before this append, the completed RPC journal reconstructs the
+        # same decision without another model call.
+        self.store.event(identity, "strategy_decision", decision)
+        return decision
+
     def _active_strategy_receipt(
-            self, identity, package, execution, selected_component_id):
+            self, identity, package, execution, selected_component_id,
+            strategy_decision=None):
         """Bind the selected O component to the backend that actually returned."""
         manifest = package["manifest"]
         if manifest.get("manifest_version", 1) != 2:
@@ -706,7 +927,7 @@ class TaskService:
                           "plan_revision": execution.get("plan_revision")}
         if execution.get("kind") != backend:
             raise ContractError("Active strategy backend differs from the executed backend")
-        return {
+        receipt = {
             "kind": kind,
             "component_id": component_id,
             "package_digest": package["digest"],
@@ -719,9 +940,17 @@ class TaskService:
                 "usage": self.store.usage(identity),
             },
         }
+        if strategy_decision is not None:
+            receipt.update(
+                decision_id=strategy_decision["decision_id"],
+                decision_digest=strategy_decision["decision_digest"],
+                candidate_set_digest=strategy_decision["candidate_set_digest"],
+            )
+        return receipt
 
     def _record_strategy_entered(
-            self, identity, package, selected_component_id, backend):
+            self, identity, package, selected_component_id, backend,
+            strategy_decision=None):
         """Persist backend entry separately from successful activation evidence."""
         manifest = package["manifest"]
         if manifest.get("manifest_version", 1) != 2:
@@ -737,18 +966,30 @@ class TaskService:
             event.get("kind") == "strategy_entered"
             for event in self.store.events(identity)) + 1
         state = self.store.get(identity)
-        self.store.event(identity, "strategy_entered", {
+        prior_entries = [
+            event for event in self.store.events(identity)
+            if event.get("kind") == "strategy_entered"
+        ]
+        content = {
             "schema": "nexgent.strategy-entry.v1",
             "attempt_id": f"{identity}/strategy/{attempts}",
             "attempt": attempts,
-            "resume": bool(state.get("nodes")),
+            "resume": (bool(prior_entries) if strategy_decision is not None
+                       else bool(state.get("nodes"))),
             "kind": component["kind"],
             "component_id": component_id,
             "package_digest": package["digest"],
             "source_path": source_path,
             "source_digest": package["component_digests"][source_path],
             "backend": backend,
-        })
+        }
+        if strategy_decision is not None:
+            content.update(
+                decision_id=strategy_decision["decision_id"],
+                decision_digest=strategy_decision["decision_digest"],
+                candidate_set_digest=strategy_decision["candidate_set_digest"],
+            )
+        self.store.event(identity, "strategy_entered", content)
 
     def _materialize_workflow(self, package, workflow_ref, capability_lease,
                               *, proposed_workflow=None,
@@ -1849,16 +2090,29 @@ class TaskService:
 
             notify()
             try:
-                workflow_orchestrator = self._workflow_orchestrator(
-                    package, state["task"]["entry"])
-                selected_component_id = None
+                strategy_decision = None
+                if state["task"].get("strategy_candidate_set") is not None:
+                    strategy_decision = self._strategy_decision(
+                        identity, package, payload, stop_event, notify)
+                    selected_candidate = strategy_decision["selected_candidate"]
+                    selected_component_id = selected_candidate["component_id"]
+                    workflow_orchestrator = (
+                        (selected_component_id, selected_candidate["ref"])
+                        if selected_candidate["kind"] == "workflow" else None
+                    )
+                else:
+                    workflow_orchestrator = self._workflow_orchestrator(
+                        package, state["task"]["entry"])
+                    selected_component_id = None
                 if workflow_orchestrator is None:
-                    if (package["manifest"].get("manifest_version", 1) == 2
+                    if (strategy_decision is None
+                            and package["manifest"].get("manifest_version", 1) == 2
                             and state["task"]["entry"] == "execute"):
                         selected_component_id = package["manifest"]["orchestrator"]
+                    if selected_component_id is not None:
                         self._record_strategy_entered(
                             identity, package, selected_component_id,
-                            "controlled_code")
+                            "controlled_code", strategy_decision)
                     execution = run_package(
                         package, state["task"]["entry"], payload, handle,
                         stop_event=stop_event,
@@ -1871,7 +2125,7 @@ class TaskService:
                     selected_component_id = workflow_orchestrator[0]
                     self._record_strategy_entered(
                         identity, package, selected_component_id,
-                        "executable_plan")
+                        "executable_plan", strategy_decision)
                     execution = self._run_workflow_orchestrator(
                         identity, package, workflow_orchestrator[0],
                         workflow_orchestrator[1], payload, stop_event, notify)
@@ -1901,7 +2155,7 @@ class TaskService:
                     execution["execution"]["active_strategy"] = (
                         self._active_strategy_receipt(
                             identity, package, execution["execution"],
-                            selected_component_id))
+                            selected_component_id, strategy_decision))
                 self._complete(identity, execution)
             except InterruptedError as exc:
                 self._change(identity, lambda s: s.update(
