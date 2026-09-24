@@ -1,6 +1,7 @@
 """Focused E3-B.2b planning and candidate-dispatch tests."""
 
 import json
+import threading
 
 from nexgent.kernel.programs import digest
 from nexgent.tasks.evolution import EvolutionService
@@ -223,6 +224,144 @@ def test_unknown_generation_outcome_is_deferred_and_never_replayed(tmp_path, mon
     assert len(calls) == 1
     assert trigger.develop(work["id"])["status"] == "deferred"
     assert len(calls) == 1
+
+
+def test_development_stop_event_reaches_planner_and_generation(
+        tmp_path, monkeypatch):
+    parent = _parent()
+    replacement = parent["files"]["main.py"].replace("'version': 0", "'version': 1")
+    patch = {
+        "schema": "nexgent.behavior-patch.v1", "hypothesis": _hypothesis(),
+        "operations": [{
+            "op": "replace", "path": "main.py",
+            "old_digest": parent["component_digests"]["main.py"],
+            "content": replacement,
+        }],
+        "activation_probe": {"kind": "component_loaded", "path": "main.py"},
+    }
+    plan = {
+        "schema": DEVELOPMENT_PLAN_SCHEMA,
+        "candidate_type": "orchestration", "source_ref": "package_patch",
+        "hypothesis": _hypothesis(), "reason": "Attempt one bounded repair.",
+    }
+    tasks, _, trigger, _, _, _ = _setup(tmp_path, plan, patch=patch)
+    stop = threading.Event()
+    run_events = []
+    generation_events = []
+    original_run = tasks.run
+    original_generate = trigger._generation.generate
+
+    def observed_run(identity, *args, **kwargs):
+        run_events.append(kwargs.get("stop_event"))
+        return original_run(identity, *args, **kwargs)
+
+    def observed_generate(*args, **kwargs):
+        generation_events.append(kwargs.get("stop_event"))
+        return original_generate(*args, **kwargs)
+
+    monkeypatch.setattr(tasks, "run", observed_run)
+    monkeypatch.setattr(trigger._generation, "generate", observed_generate)
+
+    [work] = trigger.drain_development(stop_event=stop)
+
+    assert work["status"] == "candidate_ready"
+    assert generation_events == [stop]
+    # One planner Episode and one improver Episode use the same cancellation.
+    assert run_events == [stop, stop]
+
+
+def test_dispatch_passes_stop_event_to_capability_and_skill_adoption(
+        tmp_path, monkeypatch):
+    plan = {
+        "schema": DEVELOPMENT_PLAN_SCHEMA,
+        "candidate_type": "no_change", "source_ref": None,
+        "hypothesis": None, "reason": "No reusable change.",
+    }
+    _, _, trigger, _, _, work = _setup(tmp_path, plan)
+    stop = threading.Event()
+    seen = []
+
+    from nexgent.tasks.task_capability_adoption import TaskCapabilityAdoptionService
+    from nexgent.tasks.task_skill_adoption import TaskSkillAdoptionService
+
+    def capability(_self, *args, **kwargs):
+        seen.append(("capability", kwargs.get("stop_event")))
+        return {"generation": {"status": "missing"}}
+
+    def skill(_self, *args, **kwargs):
+        seen.append(("skill", kwargs.get("stop_event")))
+        return {"generation": {"status": "missing"}}
+
+    monkeypatch.setattr(TaskCapabilityAdoptionService, "adopt", capability)
+    monkeypatch.setattr(TaskSkillAdoptionService, "adopt_episode", skill)
+    trigger._dispatch_plan(work, {
+        "candidate_type": "tool", "source_ref": "definition-fixture",
+        "hypothesis": _hypothesis()}, stop_event=stop)
+    trigger._dispatch_plan(work, {
+        "candidate_type": "orchestration", "source_ref": "episode_os",
+        "hypothesis": _hypothesis()}, stop_event=stop)
+
+    assert seen == [("capability", stop), ("skill", stop)]
+
+
+def test_advance_passes_stop_event_to_both_model_work_queues(
+        tmp_path, monkeypatch):
+    plan = {
+        "schema": DEVELOPMENT_PLAN_SCHEMA,
+        "candidate_type": "no_change", "source_ref": None,
+        "hypothesis": None, "reason": "No reusable change.",
+    }
+    _, _, trigger, _, _, _ = _setup(tmp_path, plan)
+    stop = threading.Event()
+    seen = []
+    monkeypatch.setattr(
+        trigger, "drain_development",
+        lambda *, limit, stop_event: seen.append(("development", stop_event)) or [])
+    monkeypatch.setattr(
+        trigger, "drain_evolution",
+        lambda *, limit, stop_event: seen.append(("evolution", stop_event)) or [])
+
+    trigger.advance(stop_event=stop)
+
+    assert seen == [("development", stop), ("evolution", stop)]
+
+
+def test_cancelled_generation_defers_without_replaying_uncertain_boundary(
+        tmp_path, monkeypatch):
+    parent = _parent()
+    replacement = parent["files"]["main.py"].replace("'version': 0", "'version': 1")
+    patch = {
+        "schema": "nexgent.behavior-patch.v1", "hypothesis": _hypothesis(),
+        "operations": [{
+            "op": "replace", "path": "main.py",
+            "old_digest": parent["component_digests"]["main.py"],
+            "content": replacement,
+        }],
+        "activation_probe": {"kind": "component_loaded", "path": "main.py"},
+    }
+    plan = {
+        "schema": DEVELOPMENT_PLAN_SCHEMA,
+        "candidate_type": "orchestration", "source_ref": "package_patch",
+        "hypothesis": _hypothesis(), "reason": "Attempt one bounded repair.",
+    }
+    _, _, trigger, _, _, _ = _setup(tmp_path, plan, patch=patch)
+    stop = threading.Event()
+    calls = []
+
+    def interrupted(work, selected, *, stop_event=None):
+        calls.append(stop_event)
+        stop_event.set()
+        return {"status": "missing"}
+
+    monkeypatch.setattr(trigger, "_dispatch_plan", interrupted)
+    [work] = trigger.drain_development(stop_event=stop)
+
+    assert calls == [stop]
+    assert work["status"] == "deferred"
+    assert work["reason"] == "candidate_generation_interrupted"
+    assert trigger.develop(work["id"], stop_event=threading.Event())["status"] == (
+        "deferred")
+    assert calls == [stop]
 
 
 def test_user_context_cannot_forge_internal_development_role(tmp_path):

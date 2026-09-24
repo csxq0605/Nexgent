@@ -61,17 +61,26 @@ class TaskWorker(QThread):
     updated = pyqtSignal(dict)
     result = pyqtSignal(dict)
     failed = pyqtSignal(str)
+    evolution = pyqtSignal(dict)
+    evolution_failed = pyqtSignal(str)
 
-    def __init__(self, service, episode_id, parent=None):
+    def __init__(self, service, episode_id, parent=None, *, after_run=None):
         super().__init__(parent)
         self.service, self.episode_id = service, episode_id
         self.stop_event = threading.Event()
+        self.after_run = after_run
 
     def run(self):
         try:
             state = self.service.run(self.episode_id, on_update=lambda s: self.updated.emit(deepcopy(s)),
                                      stop_event=self.stop_event)
             self.result.emit(deepcopy(state))
+            if (self.after_run is not None and state.get("status") in
+                    {"completed", "failed", "cancelled"} and not self.stop_event.is_set()):
+                try:
+                    self.evolution.emit(self.after_run())
+                except Exception as exc:
+                    self.evolution_failed.emit(type(exc).__name__)
         except Exception as exc:
             # Persisted service state remains the authority after failure.
             try:

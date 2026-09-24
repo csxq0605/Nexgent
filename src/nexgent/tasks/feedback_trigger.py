@@ -123,12 +123,7 @@ def _policy(value):
 
 
 class AutoEvolutionService:
-    """Observe terminal ordinary Episodes and project bounded public feedback.
-
-    This is the E3-B.2a trigger/outbox boundary.  It deliberately does not
-    generate candidates, run benchmark tasks, score outputs, or promote a
-    package.  Those are later coordinator states.
-    """
+    """Coordinate ordinary feedback through development and guarded adoption."""
 
     def __init__(self, task_service, *, policies=None, evolution_service=None,
                  generation_service=None, evaluator_available=None, attach=True):
@@ -220,6 +215,10 @@ class AutoEvolutionService:
         channel = registration["channel"] if registration else None
         parent_revision = registration["revision"] if registration else None
         source_kind = self._source_kind(episode)
+        if source_kind == "ordinary_development":
+            # This is a bounded local projection only.  It never evaluates the
+            # task or changes its outcome, so it is safe in the terminal hook.
+            self._record_reuse(episode, registration)
         if source_kind == "internal_rsi":
             return None
         policy = deepcopy(self.policies.get(channel)) if channel is not None else None
@@ -574,7 +573,7 @@ class AutoEvolutionService:
             "record_digest": generated["record_digest"],
         }
 
-    def _dispatch_plan(self, work, plan):
+    def _dispatch_plan(self, work, plan, *, stop_event=None):
         evolution, generation = self._services()
         source = self.tasks.get_private(work["source_episode_id"])
         common = (work["channel_id"], work["feedback_bundle"]["id"],
@@ -584,14 +583,16 @@ class AutoEvolutionService:
             result = TaskCapabilityAdoptionService(
                 self.tasks, evolution, generation).adopt(
                     common[0], plan["source_ref"], source["id"], common[1],
-                    common[2], common[3], budget=deepcopy(work["policy"]["budget"]))
+                    common[2], common[3], budget=deepcopy(work["policy"]["budget"]),
+                    stop_event=stop_event)
             return result["generation"]
         if plan["source_ref"] == "episode_os":
             from .task_skill_adoption import TaskSkillAdoptionService
             result = TaskSkillAdoptionService(
                 self.tasks, evolution, generation).adopt_episode(
                     common[0], None, source["id"], common[1], common[2], common[3],
-                    budget=deepcopy(work["policy"]["budget"]))
+                    budget=deepcopy(work["policy"]["budget"]),
+                    stop_event=stop_event)
             return result["generation"]
         if plan["source_ref"] == "package_patch":
             policy = self._mutation_policy(evolution.active(common[0])["package"])
@@ -602,10 +603,11 @@ class AutoEvolutionService:
                 common[0], common[1], None, policy, common[2],
                 improver_channel=improver["channel"],
                 expected_improver_revision=improver["revision"],
-                budget=deepcopy(work["policy"]["budget"]))
+                budget=deepcopy(work["policy"]["budget"]),
+                stop_event=stop_event)
         raise ContractError("Feedback development plan has no supported dispatch")
 
-    def develop(self, identity):
+    def develop(self, identity, *, stop_event=None):
         """Autonomously plan and propose one candidate; never score or promote it."""
         work = self.store.feedback_trigger(identity)
         with self.store.lock(work["source_episode_id"]):
@@ -670,7 +672,7 @@ class AutoEvolutionService:
             episode = self.tasks.get_private(work["development_episode"]["id"])
             if episode["status"] not in _TERMINAL:
                 try:
-                    episode = self.tasks.run(episode["id"])
+                    episode = self.tasks.run(episode["id"], stop_event=stop_event)
                 except Exception:
                     # The same Episode remains the only recovery identity.  A
                     # later drain may resume it; this turn must not create a
@@ -699,17 +701,25 @@ class AutoEvolutionService:
                 return self.store.transition_feedback_trigger(
                     work["id"], expected_revision=work["revision"], status="no_change",
                     reason=plan["reason"][:200], development_plan=plan_ref)
+            if stop_event is not None and stop_event.is_set():
+                # Candidate generation has no caller-owned idempotency key. Do
+                # not enter its uncertainty boundary after cancellation.
+                return work
             work = self.store.transition_feedback_trigger(
                 work["id"], expected_revision=work["revision"],
                 status="candidate_generation_started", development_plan=plan_ref)
             try:
-                generated = self._dispatch_plan(work, plan)
+                generated = self._dispatch_plan(work, plan, stop_event=stop_event)
                 candidate = self._candidate_reference(generated, plan["candidate_type"])
             except (KeyError, ValueError, ContractError):
                 candidate = None
             except Exception:
                 return self._defer(work, "candidate_generation_outcome_unknown")
             if candidate is None:
+                if stop_event is not None and stop_event.is_set():
+                    # The generation boundary was entered but produced no
+                    # candidate. Repetition is unsafe after cancellation.
+                    return self._defer(work, "candidate_generation_interrupted")
                 return self.store.transition_feedback_trigger(
                     work["id"], expected_revision=work["revision"], status="rejected",
                     reason="candidate_generation_rejected")
@@ -717,13 +727,356 @@ class AutoEvolutionService:
                 work["id"], expected_revision=work["revision"], status="candidate_ready",
                 candidate=candidate)
 
-    def drain_development(self, *, limit=16):
+    def drain_development(self, *, limit=16, stop_event=None):
         """Advance captured work without running selection, guard, or promotion."""
         rows = self.store.feedback_triggers(
             statuses=["feedback_captured", "development_planned", "development_run",
                       "candidate_generation_started"],
             limit=limit)
-        return [self.develop(row["id"]) for row in rows]
+        results = []
+        for row in rows:
+            if stop_event is not None and stop_event.is_set():
+                break
+            results.append(self.develop(row["id"], stop_event=stop_event))
+        return results
+
+    def _adapter(self, work):
+        """Resolve only the host-installed evaluator frozen by policy."""
+        evaluator_id = work["policy"]["evaluator_id"]
+        try:
+            adapter = self.tasks._benchmark_registry().get(evaluator_id)
+        except Exception as exc:
+            raise ContractError("Independent evaluator is unavailable") from exc
+        if getattr(adapter, "id", None) != evaluator_id:
+            raise ContractError("Independent evaluator identity changed")
+        snapshot = _finite_json(adapter.snapshot(), "Independent evaluator snapshot")
+        frozen = ((work.get("evolution") or {}).get("selection_intent") or {}).get(
+            "snapshot_digest")
+        if frozen is not None and frozen != digest(snapshot):
+            raise ContractError("Independent evaluator snapshot changed")
+        return adapter, snapshot
+
+    @staticmethod
+    def _reference(record, *, fields=("id", "record_digest")):
+        result = {key: deepcopy(record[key]) for key in fields}
+        if any(not isinstance(value, str) or not value for value in result.values()):
+            raise ContractError("Evolution evidence reference is invalid")
+        return result
+
+    def _recover_run(self, kind, plan_id, adapter, runner, *, stop_event=None):
+        """Return an immutable completed run or decline to replay uncertainty."""
+        evolution, _ = self._services()
+        claim = evolution.inspect_run_claim(kind, plan_id)
+        if claim is None:
+            return None
+        if claim["status"] == "running" and claim.get("durable_record_id") is not None:
+            evolution.recover_run_claim(kind, plan_id)
+            claim = evolution.inspect_run_claim(kind, plan_id)
+        if claim is None or claim["status"] != "completed":
+            return None
+        return runner(plan_id, adapter, stop_event=stop_event)
+
+    def evolve(self, identity, *, stop_event=None):
+        """Advance one ready candidate through independent selection and guard."""
+        work = self.store.feedback_trigger(identity)
+        with self.store.lock(work["source_episode_id"]):
+            work = self.store.feedback_trigger(identity)
+            terminal = {"completed", "rejected", "rolled_back", "deferred",
+                        "no_change"}
+            if work["status"] in terminal:
+                return work
+            if work["status"] in {"selection_plan_started", "guard_plan_started"}:
+                # Neither planning API accepts a caller idempotency key.  A
+                # restart cannot prove whether its immutable plan committed.
+                return self._defer(work, work["status"] + "_outcome_unknown")
+            if work["status"] not in {
+                    "candidate_ready", "selection_planned", "selection_run",
+                    "paired_assessed", "guard_planned", "promoted", "guard_run",
+                    "guard_assessed"}:
+                return work
+
+            evolution, _ = self._services()
+            try:
+                adapter, snapshot = self._adapter(work)
+            except ContractError:
+                return self._defer(work, "independent_evaluator_unavailable_or_changed")
+            candidate_id = work["candidate"]["candidate_id"]
+
+            if work["status"] == "candidate_ready":
+                if stop_event is not None and stop_event.is_set():
+                    return work
+                intent = {
+                    "evaluator_id": work["policy"]["evaluator_id"],
+                    "snapshot_digest": digest(snapshot),
+                    "split": work["policy"]["selection_split"], "seed": 0,
+                }
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status="selection_plan_started",
+                    evolution_update={"selection_intent": intent})
+                try:
+                    from .evolution import PromotionPolicy
+                    plan = evolution.plan_pair(
+                        candidate_id, adapter, split=intent["split"],
+                        split_role="selection", seed=intent["seed"],
+                        budget=deepcopy(work["policy"]["budget"]),
+                        policy=PromotionPolicy(**work["policy"]["promotion_policy"]))
+                except ContractError:
+                    return self._defer(work, "selection_plan_rejected")
+                except Exception:
+                    return self._defer(work, "selection_plan_outcome_unknown")
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status="selection_planned",
+                    evolution_update={"selection_plan": self._reference(plan)})
+
+            if work["status"] == "selection_planned":
+                if stop_event is not None and stop_event.is_set():
+                    return work
+                plan_id = work["evolution"]["selection_plan"]["id"]
+                try:
+                    trial = evolution.run_pair(
+                        plan_id, adapter, stop_event=stop_event)
+                except Exception:
+                    try:
+                        trial = self._recover_run(
+                            "paired", plan_id, adapter, evolution.run_pair,
+                            stop_event=stop_event)
+                    except Exception:
+                        trial = None
+                    if trial is None:
+                        return self._defer(work, "selection_run_outcome_unknown")
+                if stop_event is not None and stop_event.is_set():
+                    # run_pair is idempotent after its durable claim commits;
+                    # keep the coordinator before assessment and promotion.
+                    return work
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status="selection_run",
+                    evolution_update={"selection_trial": self._reference(trial)})
+
+            if work["status"] == "selection_run":
+                if stop_event is not None and stop_event.is_set():
+                    return work
+                try:
+                    decision = evolution.assess(
+                        work["evolution"]["selection_trial"]["id"])
+                except ContractError:
+                    return self.store.transition_feedback_trigger(
+                        work["id"], expected_revision=work["revision"],
+                        status="rejected", reason="paired_assessment_rejected")
+                decision_ref = self._reference(decision)
+                decision_ref["eligible"] = decision["eligible"] is True
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status="paired_assessed",
+                    evolution_update={"selection_decision": decision_ref})
+
+            if work["status"] == "paired_assessed":
+                if work["evolution"]["selection_decision"]["eligible"] is not True:
+                    return self.store.transition_feedback_trigger(
+                        work["id"], expected_revision=work["revision"],
+                        status="rejected", reason="independent_selection_rejected")
+                if stop_event is not None and stop_event.is_set():
+                    return work
+                intent = {
+                    "evaluator_id": work["policy"]["evaluator_id"],
+                    "snapshot_digest": digest(snapshot),
+                    "split": work["policy"]["guard_split"], "seed": 0,
+                }
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status="guard_plan_started",
+                    evolution_update={"guard_intent": intent})
+                try:
+                    plan = evolution.plan_monitor(
+                        candidate_id, adapter, split=intent["split"],
+                        seed=intent["seed"],
+                        budget=deepcopy(work["policy"]["budget"]))
+                except ContractError:
+                    return self._defer(work, "guard_plan_rejected")
+                except Exception:
+                    return self._defer(work, "guard_plan_outcome_unknown")
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status="guard_planned",
+                    evolution_update={"guard_plan": self._reference(plan)})
+
+            if work["status"] == "guard_planned":
+                if stop_event is not None and stop_event.is_set():
+                    return work
+                decision_id = work["evolution"]["selection_decision"]["id"]
+                monitor_plan_id = work["evolution"]["guard_plan"]["id"]
+                candidate = evolution.candidate(candidate_id)
+                active = evolution.active(work["channel_id"])
+                promotion = active.get("promotion") or {}
+                if (active["package_id"] == candidate["package_id"]
+                        and promotion.get("candidate_id") == candidate_id
+                        and promotion.get("decision_id") == decision_id
+                        and promotion.get("monitor_plan_id") == monitor_plan_id):
+                    promoted = active
+                else:
+                    try:
+                        promoted = evolution.promote(
+                            candidate_id, decision_id,
+                            monitor_plan_id=monitor_plan_id)
+                    except Exception:
+                        active = evolution.active(work["channel_id"])
+                        promotion = active.get("promotion") or {}
+                        if not (active["package_id"] == candidate["package_id"]
+                                and promotion.get("candidate_id") == candidate_id
+                                and promotion.get("decision_id") == decision_id
+                                and promotion.get("monitor_plan_id") == monitor_plan_id):
+                            return self._defer(work, "promotion_outcome_unknown")
+                        promoted = active
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"], status="promoted",
+                    evolution_update={"promotion": {
+                        "revision": promoted["revision"],
+                        "package_id": promoted["package_id"],
+                        "package_digest": promoted["package_digest"],
+                    }})
+
+            if work["status"] == "promoted":
+                if stop_event is not None and stop_event.is_set():
+                    return work
+                promoted = work["evolution"]["promotion"]
+                plan_id = work["evolution"]["guard_plan"]["id"]
+                try:
+                    guard = evolution.run_monitor(
+                        work["channel_id"], adapter,
+                        stop_event=stop_event,
+                        expected_revision=promoted["revision"],
+                        expected_package_id=promoted["package_id"],
+                        expected_monitor_plan_id=plan_id)
+                except Exception:
+                    try:
+                        guard = self._recover_run(
+                            "monitor", plan_id, adapter,
+                            lambda identity, frozen_adapter, *, stop_event=None:
+                            evolution.run_monitor(
+                                work["channel_id"], frozen_adapter,
+                                stop_event=stop_event,
+                                expected_revision=promoted["revision"],
+                                expected_package_id=promoted["package_id"],
+                                expected_monitor_plan_id=identity),
+                            stop_event=stop_event)
+                    except Exception:
+                        guard = None
+                    if guard is None:
+                        return self._defer(work, "guard_run_outcome_unknown")
+                if stop_event is not None and stop_event.is_set():
+                    # The monitor claim can be replayed without running tasks;
+                    # defer assessment/rollback until the caller resumes.
+                    return work
+                guard_ref = self._reference(guard)
+                guard_ref["episode_ids"] = list(guard["episode_ids"])
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status="guard_run", evolution_update={"guard_run": guard_ref})
+
+            if work["status"] == "guard_run":
+                if stop_event is not None and stop_event.is_set():
+                    return work
+                promoted = work["evolution"]["promotion"]
+                plan_id = work["evolution"]["guard_plan"]["id"]
+                try:
+                    result = evolution.monitor(
+                        work["channel_id"],
+                        work["evolution"]["guard_run"]["episode_ids"],
+                        rollback_on_regression=True,
+                        expected_revision=promoted["revision"],
+                        expected_package_id=promoted["package_id"],
+                        expected_monitor_plan_id=plan_id)
+                except Exception:
+                    return self._defer(work, "guard_assessment_outcome_unknown")
+                assessment = {
+                    "degraded": result["degraded"] is True,
+                    "rolled_back": result["rolled_back"] is True,
+                    "metrics_digest": digest(result["metrics"]),
+                    "active_package_id": result["active"]["package_id"],
+                    "active_revision": result["active"]["revision"],
+                }
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status="guard_assessed",
+                    evolution_update={"guard_assessment": assessment})
+
+            if work["status"] == "guard_assessed":
+                assessment = work["evolution"]["guard_assessment"]
+                if assessment["rolled_back"]:
+                    status, reason = "rolled_back", "guard_regression_rolled_back"
+                elif assessment["degraded"]:
+                    status, reason = "rejected", "guard_regression"
+                else:
+                    status, reason = "completed", None
+                return self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status=status, reason=reason)
+            return work
+
+    def drain_evolution(self, *, limit=16, stop_event=None):
+        """Advance a bounded page of ready/active adoption work."""
+        rows = self.store.feedback_triggers(statuses=[
+            "candidate_ready", "selection_plan_started", "selection_planned",
+            "selection_run", "paired_assessed", "guard_plan_started",
+            "guard_planned", "promoted", "guard_run", "guard_assessed",
+        ], limit=limit)
+        results = []
+        for row in rows:
+            if stop_event is not None and stop_event.is_set():
+                break
+            results.append(self.evolve(row["id"], stop_event=stop_event))
+        return results
+
+    def advance(self, *, limit=16, stop_event=None):
+        """Run one bounded coordinator pass across all three durable queues."""
+        captured = self.drain(limit=limit)
+        developed = self.drain_development(limit=limit, stop_event=stop_event)
+        evolved = self.drain_evolution(limit=limit, stop_event=stop_event)
+        return {"feedback": captured, "development": developed,
+                "evolution": evolved}
+
+    def _record_reuse(self, episode, registration):
+        if registration is None:
+            return []
+        completed = self.store.feedback_triggers(statuses=["completed"], limit=256)
+        recorded = []
+        for work in completed:
+            promoted = (work.get("evolution") or {}).get("promotion") or {}
+            if (work.get("channel_id") != registration["channel"]
+                    or promoted.get("revision") != registration["revision"]
+                    or promoted.get("package_id") != episode.get("package_id")
+                    or promoted.get("package_digest") != episode.get("package_digest")):
+                continue
+            try:
+                candidate = self._services()[0].candidate(
+                    work["candidate"]["candidate_id"])
+                package = self.store.package(candidate["package_id"])
+                execution = episode.get("execution") or {}
+                target = candidate.get("component_target")
+                if target is not None:
+                    from .evolution import _loaded_evidence
+                    activation = _loaded_evidence(target, execution, package)
+                else:
+                    probe = candidate.get("activation_probe") or {}
+                    path = probe.get("path")
+                    loaded = path in (execution.get("loaded_modules") or [])
+                    activation = {"loaded": loaded, "legacy": True, "path": path}
+                if activation.get("loaded") is not True:
+                    continue
+                evidence = {
+                    "episode_id": episode["id"], "package_id": episode["package_id"],
+                    "package_digest": episode["package_digest"],
+                    "channel_revision": registration["revision"],
+                    "component_id": candidate.get("component_id"),
+                    "activation": activation,
+                    "activation_digest": digest(activation),
+                }
+                recorded.append(self.store.record_feedback_reuse(work["id"], evidence))
+            except (KeyError, ValueError, ContractError):
+                continue
+        return recorded
 
     def _matching_feedback(self, work):
         """Find a bundle committed before a coordinator interruption."""

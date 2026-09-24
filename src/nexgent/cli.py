@@ -11,6 +11,7 @@ from .evolution.controller import StudyController
 
 TASK_COMMANDS = {
     "task", "task-resume", "task-show", "task-list", "task-export", "task-benchmark",
+    "rsi-auto-advance",
     "rsi-status", "rsi-events", "rsi-register", "rsi-feedback", "rsi-generate",
     "rsi-plan", "rsi-run-plan", "rsi-assess", "rsi-plan-monitor", "rsi-promote",
     "rsi-run-monitor", "rsi-monitor", "rsi-rollback",
@@ -142,6 +143,32 @@ def _run_task_command(args):
     from .tasks.runtime import TaskService
 
     service = TaskService(args.root)
+    auto_evolution = None
+    if args.command in {"task", "task-resume", "rsi-auto-advance"}:
+        from .tasks.auto_runtime import configure_auto_evolution
+        auto_evolution = configure_auto_evolution(service, project_root=args.root)
+
+    def finish_ordinary(state):
+        result = _task_summary(state)
+        registration = ((state.get("task") or {}).get("context") or {}).get(
+            "package_channel_registration") or {}
+        if (auto_evolution is not None
+                and registration.get("channel") in auto_evolution.policies
+                and state.get("status") in {"completed", "failed", "cancelled"}):
+            from .tasks.auto_runtime import advance_auto_evolution
+            try:
+                result["auto_evolution"] = advance_auto_evolution(
+                    auto_evolution, source_episode_id=state["id"])
+            except Exception as exc:
+                # The task's delivery remains valid and durable coordinator
+                # work can resume in the next ordinary invocation.
+                result["auto_evolution"] = {
+                    "configured": True, "status": "interrupted",
+                    "error_type": type(exc).__name__}
+        return result
+    if args.command == "rsi-auto-advance":
+        from .tasks.auto_runtime import advance_auto_evolution
+        return advance_auto_evolution(auto_evolution, stop_event=_stop_event())
     if args.command.startswith("rsi-"):
         if args.command == "rsi-study-list":
             from .tasks.studies import public_study_records
@@ -422,7 +449,7 @@ def _run_task_command(args):
 
     stop = _stop_event()
     if args.command == "task-resume":
-        return _task_summary(service.run(args.episode_id, stop_event=stop))
+        return finish_ordinary(service.run(args.episode_id, stop_event=stop))
     if args.command == "task-benchmark":
         if args.package and args.package_channel:
             raise ValueError("Specify either --package or --package-channel")
@@ -445,9 +472,22 @@ def _run_task_command(args):
     if args.package and args.package_channel:
         raise ValueError("Specify either --package or --package-channel")
     package = _object_argument(str(args.package), label="package") if args.package else None
+    package_channel = args.package_channel
+    if package is None and package_channel is None and auto_evolution is not None:
+        from .tasks.auto_runtime import single_auto_channel
+        package_channel = single_auto_channel(auto_evolution)
+        if package_channel is None:
+            raise ValueError(
+                "Configured auto-evolution has multiple channels; "
+                "specify --package-channel")
+    if (auto_evolution is not None and package_channel is not None
+            and package_channel not in auto_evolution.policies):
+        raise ValueError("Package channel has no auto-evolution policy")
     state = service.create(args.objective, inputs=inputs, budget=_task_budget(args),
                            capabilities=args.capability, package=package,
-                           package_channel=args.package_channel,
+                           package_channel=package_channel,
+                           context=({"split": "development", "split_role": "development"}
+                                    if auto_evolution is not None else None),
                            deliverables=deliverables, constraints=constraints,
                            capability_authority=(
                                _object_argument(args.capability_authority,
@@ -455,7 +495,7 @@ def _run_task_command(args):
                                if args.capability_authority else None))
     if args.register_only:
         return _task_summary(state)
-    return _task_summary(service.run(state["id"], stop_event=stop))
+    return finish_ordinary(service.run(state["id"], stop_event=stop))
 
 
 def _task_failed(command, result):
@@ -495,6 +535,7 @@ def main(argv=None):
     _add_task_budget(task)
     resume_task = sub.add_parser("task-resume", help="Resume a persisted task episode")
     resume_task.add_argument("episode_id")
+    sub.add_parser("rsi-auto-advance", help="Resume configured ordinary feedback work without IDs")
     show_task = sub.add_parser("task-show", help="Show a persisted task episode")
     show_task.add_argument("episode_id")
     sub.add_parser("task-list", help="List top-level task episodes")

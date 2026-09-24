@@ -1,12 +1,14 @@
 # 普通任务反馈到跨任务能力采用：实施合同 v1
 
-日期：2026-09-24。本文固定 E3-B.2 的实施边界；它不是已实现功能。Nexgent 的普通任务、benchmark 和后续任务使用同一 AgentPackage／TaskService 执行合同，科学发现及 OpenFOAM 仅提供可插拔任务与独立评价器。
+日期：2026-09-24。本文固定 E3-B.2 的实施边界，并按实际收据标记进度。Nexgent 的普通任务、benchmark 和后续任务使用同一 AgentPackage／TaskService 执行合同，科学发现及 OpenFOAM 仅提供可插拔任务与独立评价器。
 
-## 已有链与实际断点
+## 现有链与实际边界
 
 `GenerationService.capture_feedback` 能冻结开发 split 的终态 Episode；`TaskCapabilityAdoptionService` 能从实际用过的工具／服务 Definition 构造候选；`TaskSkillAdoptionService` 能从任务生成的工作流构造 O/S 候选；`EvolutionService` 已有配对评价、晋升、guard 和回滚；`RSICycleService` 持久协调手动创建的生成—评价—guard 流程。新任务可从晋升后的包通道读取工具／服务。
 
-但普通任务结束时没有触发这些服务的持久工作项。现有采用调用只出现在测试与实验脚本中，使用者仍要人工给出 Definition、Episode、反馈、版本和假设的 ID。任务内 `context.feedback` 已记录内容，但 FeedbackBundle 当前仅暴露事件摘要，改进器无法读取经过筛选的失败说明。普通 CLI 任务未注册开发 split／包通道；Main 已注册开发 split，但没有自动入队。没有独立 BenchmarkAdapter 的任意用户任务不能由系统自行打分晋升。
+普通 Main／CLI 现在从项目级 `nexgent.auto-evolution.json` 解析任务包通道、版本化 R0、独立 BenchmarkAdapter 和有界策略。终态 hook 写持久 outbox，启动后的扫描补回 hook 中断窗口；R0 用独立的 `execute` 入口在公开反馈上选择候选或放弃，原有 `improve` 入口生成补丁。协调器调用现有采用／生成、独立配对、CAS 晋升、guard 与回滚，并只在后续任务真实加载组件时留下复用证据。缺少配置或独立评价器时，框架不能声称自主晋升。配置是宿主一次性选择评价范围，不能由被改进智能体指定私有评分任务。
+
+[首次真实普通入口样本](../../experiments/ordinary_feedback_live/RESULTS.md)到达候选和独立 selection，因父、候选均失败而被拒绝；没有晋升、guard 或后续复用。确定性纵向测试覆盖成功晋升及回滚，但尚不能代替真实模型的正向效果。
 
 ## 目标状态机
 
@@ -19,7 +21,7 @@
 1. 仅从具有冻结包通道和开发角色的终态普通 Episode 创建工作项。未配置通道策略、无独立评价器或冻结父版本已变化时，明确记为 `deferred`，不自行评价或晋升。
 2. FeedbackBundle 提供有界、脱敏的公开 outcome／evaluation／调用成本，以及 `context.feedback` 的安全投影；私有评分答案、凭据、模型原文和未授权工件不得进入开发 Episode。
 3. 后续能力开发本身是同一 AgentPackage 的受限普通 Episode。它从反馈判断 `tool`、`service_provider`、`orchestration` 或 `no_change`，提交一次版本化的候选意图与可证伪假设。宿主根据实际创建／使用／编译收据反查模型声称的对象 ID；单工作项最多一个候选，防止复合晋升失去因果归因。
-4. 已用工具／服务走 `TaskCapabilityAdoptionService`；任务生成的工作流走 `TaskSkillAdoptionService`；通用 O 补丁走现有 `GenerationService`。候选生成完成后，交给 `RSICycleService` 从候选进入配对评价及 guard，沿用同预算、独立评分、激活证据、CAS 晋升与回滚。
+4. 已用工具／服务走 `TaskCapabilityAdoptionService`；任务生成的工作流走 `TaskSkillAdoptionService`；通用 O 补丁走现有 `GenerationService`。候选生成完成后，协调器通过 `EvolutionService` 进入配对评价及 guard，沿用同预算、独立评分、激活证据、CAS 晋升与回滚。
 5. 晋升后新普通 Episode 自动读取包通道新版本；只有它的实际 `activated_components` 或 `active_strategy` 匹配晋升组件时，才能记录 `reuse_observed`。晋升事件本身不等于后续复用，更不等于多任务净收益。
 
 ## 分片验收

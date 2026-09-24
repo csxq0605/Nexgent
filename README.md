@@ -15,13 +15,13 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立插件／demo；领�
 | 普通任务与编排 | Main 使用任务时规划包；真实 MiMo 设计并完成过一个 7 节点、多角色 DAG；确定性测试覆盖反馈修订与恢复 | 真实任务内反馈后的第二次改图、可替换执行循环和稳定自主协作 |
 | 任务内技能 | 模型真实生成并修复过可运行技能；代码由手工诊断子任务验证；确定性测试覆盖自主委派 | 真实父任务自主创建、调用并交付；通用工具／插件开发不能由受限技能代替 |
 | 工具／插件内核 | ToolRegistry 加载已安装宿主工具 | 模型开发、试装和发现新的工具／服务插件；隔离执行与生命周期 |
-| 跨任务更新 | 图／角色与技能采用、配对评价、加载检查、晋升、guard、channel 复用有确定性证据 | 普通任务来源的自动采用链、真实独立复用收益、O/S/M 一致版本组合 |
+| 跨任务更新 | 普通 Main／CLI 可由项目策略自动触发反馈、模型规划、候选与独立配对；首次 MiMo 普通入口候选被正确拒绝；确定性测试覆盖晋升、guard 与复用 | 真实模型晋升后的 guard／跨任务复用、净收益和 O/S/M 一致版本组合 |
 | 递归与研究 | R0/R1 后代比较、guard 和 study 服务有确定性机制 | 真实递归效用、正式多任务族研究 |
 | 界面与 demo | Main 与高级任务／证据窗口；独立 OpenFOAM Re=10 smoke 真实跑通 | 持久多轮与附件、插件／能力视图及 RSI Lab 的完整运行接入 |
 
-真实 MiMo v2.6-flash 生成过 O/S 候选，但独立 selection 未达到晋升门；纯 M 尝试 abstain。任务自建 planner 已在真实探针中被完成节点收据触发，但新图未成功编译，另一次响应读取失败。**当前没有正向 RSI 或递归收益证据。**
+真实 MiMo v2.6-flash 已从普通任务自动走到公开反馈、模型规划、编排候选和独立 selection；该候选被拒绝。先前 O/S 资格 selection 未达到晋升门，纯 M 尝试 abstain；任务自建 planner 的真实探针也未成功编译新图。**当前没有正向 RSI 或递归收益证据。**
 
-当前 Main 首次使用会建立 `nexgent-main` 包 channel，初始版本为 `self_orchestration_package()`；以后从该 channel 加载版本。底层 `TaskService.create()` 和 CLI 未指定包时仍使用兼容默认。内核当前不支持模型直接热装宿主插件，受限 Python worker 也不等同于 OS 容器。
+Main 在未配置自动进化的项目中使用 `nexgent-main-capabilities-v2` 包 channel，初始版本为 `self_orchestration_package()`。配置了自动进化的项目由宿主指定默认 channel；Main 与普通 CLI 从同一通道加载新版本。底层 `TaskService.create()` 未指定包时仍使用兼容默认。内核当前不支持模型直接热装宿主插件，受限 Python worker 也不等同于 OS 容器。
 
 ## 实施与阅读入口
 
@@ -30,6 +30,7 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立插件／demo；领�
 - [仓库计划](REFACTOR_PLAN.md)：当前基线、每阶段交付／验收、迁移、协作及立即执行队列。
 - [RSI 能力内核](docs/design/rsi-capability-kernel.md)：目标对象、插件开发、执行策略、证据和信任边界；不是当前能力声明。
 - [产品决策](docs/design/product-and-refactor-decision.md)：通用框架、独立 demo 和 Main 入口的不变要求。
+- [普通任务自动改进配置](docs/guides/ordinary-auto-evolution.md)与[首次真实负结果](experiments/ordinary_feedback_live/RESULTS.md)：项目级评价策略、实际入口和证据边界。
 - [架构导航](docs/architecture.md)：当前目标与已有 0.9 合同的关系。
 - [研究索引](docs/research/README.md)：方法来源、实际探针、失败记录与历史研究。
 - [真实自编排／技能探针](docs/research/task-time-self-orchestration-live-20260923.md)、[候选资格结果](experiments/orchestration_qualification/RESULTS.md)、[记忆资格结果](experiments/memory_qualification/README.md)：成功、失败与缺测各自的结论边界。
@@ -57,6 +58,8 @@ python -m venv .venv
 本机环境、workbench、openfoam、scientific_discovery、BBH 四项插件和 BBH 数据已准备。模型读取被 Git 忽略的 `models.json` / `.env`；示例见 [models.example.json](models.example.json) 和 [.env.example](.env.example)。凭证留在模型请求宿主，不进入智能体源码进程。
 
 `nexgent gui` 和 `nexgent-gui` 默认打开 Nexgent Main 对话。普通用户输入自然语言即可创建并执行 Episode；任务创建、恢复、查看和导出仍使用同一个 `.nexgent` 持久存储。需要原始 JSON 合同、预算、工具授权和 RSI 脱敏投影时，使用“打开高级控制台”或 `--task-console`：
+
+要让普通任务自动捕获反馈、提出候选并进行独立评价，先按[项目配置指南](docs/guides/ordinary-auto-evolution.md)安装评价插件并设置一次性通道策略。没有此配置时不会自行给用户任务打分或晋升。
 
 [Windows 实际运行截图](docs/validation/nexgent-main-real-episode-20260923.png)展示了一条 MiMo 多角色 benchmark Episode 在 Main 对话与右侧运行信息窗中的状态；它是当前界面证据，不代表 RSI Lab 已完成。
 
@@ -126,7 +129,7 @@ python -m venv .venv
 
 正式 final-holdout 比较使用 `rsi-study-plan` 冻结两个包、宿主私有 benchmark snapshot、显式统计单位/来源 cluster、seed、provider/model revision、执行环境、完整预算与统计政策，再依次执行 `rsi-study-run` 和 `rsi-study-assess`。统计检验按独立 cluster 聚合；模型供应商只返回滚动别名时，报告保持时间窗口内的 benchmark 局部结论。`rsi-study-list` 与 GUI 只显示脱敏摘要。当前没有外部多任务族正式结果；确定性 study pilot 只验证研究控制面。
 
-内置 reference R0 是通用改进器，不包含科学发现、OpenFOAM 或任何 benchmark 的答案与评分逻辑。它按宿主归一化的 `mutation_policy.targeting` 选择旧 BehaviorPatch v1/v2 或多组件 PackagePatch v3；v3 允许 O/S 多文件与注册表 add/replace/remove，模型只需交付更紧凑的注册表差量，R0 据冻结父 manifest 组装完整子包提案，宿主重新构造并校验。旧 v1/v2 保持原单文件约束。模型返回 abstain、非法 patch、调用失败或预算耗尽时，generation 持久记录为 missing。生成 candidate 后仍必须完成 paired selection、显式 promotion 和 guard，默认命令不会自动部署。真实 MiMo v2.6-flash 已生成候选，但独立 selection 出现 0/2 负结果，见[资格结果](experiments/orchestration_qualification/RESULTS.md)。
+内置 reference R0 是通用改进器，不包含科学发现、OpenFOAM 或任何 benchmark 的答案与评分逻辑。它用独立 `execute` 入口规划公开反馈，用 `improve` 入口按宿主归一化的 `mutation_policy.targeting` 选择旧 BehaviorPatch v1/v2 或多组件 PackagePatch v3；v3 允许 O/S 多文件与注册表 add/replace/remove，模型只需交付更紧凑的注册表差量，R0 据冻结父 manifest 组装完整子包提案，宿主重新构造并校验。旧 v1/v2 保持原单文件约束。模型返回 abstain、非法 patch、调用失败或预算耗尽时，generation 持久记录为 missing。手动 `rsi-generate` 不会单独部署候选；配置了自动进化的普通任务则由宿主继续进行 selection、晋升与 guard。真实 MiMo v2.6-flash 的首次普通入口样本在 selection 被拒绝，见[运行收据](experiments/ordinary_feedback_live/RESULTS.md)。
 
 P3 的每个写操作都有独立 CLI 和 Python API。P4 既保留显式服务 API，也提供 `rsi-improver-cycle-start/resume/show/recover`；cycle 仍逐步形成 meta feedback、R self-generation、meta trial/decision、guard plan 和 promotion，不能跳过门控。GUI 的“RSI 与版本”页保持只读。`rsi-*` 输出不暴露 AgentPackage 源文件、私有任务内容或 evaluator 实现。操作顺序见[运行与恢复](docs/operations.md)，完整合同见[P3 控制面设计](docs/design/p3-feedback-evolution-control-plane.md)与[P4 递归控制面](docs/design/p4-recursive-improver-control-plane.md)。
 

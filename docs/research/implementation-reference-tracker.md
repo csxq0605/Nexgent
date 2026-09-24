@@ -30,7 +30,9 @@ E2-B 将包内工具和 `model_context.v1` 服务接到新任务的实际执行�
 
 E3-A 新增 `TaskCapabilityAdoptionService`：只有创建 Episode 实际成功使用过的 Definition，才可转换为惰性 Release／PackagePatch v3 候选；原始 Definition 保持 Episode origin 约束。工具与服务各自的确定性纵向用例均走通反馈冻结、候选生成、同预算独立配对、行为激活门、晋升、guard，以及重建 TaskService 后新 Episode 自动复用；未使用和陈旧版本被拒。4 项新测试通过，连同 E2 的激活／运行时共 12 项通过。这里把 [AutoSci](https://arxiv.org/abs/2605.31468) 的反馈到版本化能力，以及 [ADAS](https://arxiv.org/abs/2408.08435)／[AFlow](https://arxiv.org/abs/2410.10762) 的可执行候选评估接到 Nexgent 的通用任务包；但模型边界是确定性替身，且未验证单独 OS 进程、真实模型的增益或跨任务族迁移，因此不计作 E 出口和正向 RSI 结果。
 
-E3-B [真实 MiMo 两次独立尝试](../../experiments/kernel_spike/RESULTS.md)：v1 是试验程序的提案包装解析失败；修订后的 v2 由模型写出通用纯工具，经一次独立 selection 晋升、guard，再由单独 OS 进程在新整数任务上自动调用并留下组件激活证据。父版本 selection 的模型响应不是合法 JSON，候选额外的工具工作使归一化成本更高。这个结果填补了 DeepSeek 式任务内开发到 AutoSci 式版本化复用的**单个机制样本**，但不构成 ADAS/AFlow 所要求的跨任务搜索效果证据。E 仍缺普通反馈自动触发，F 仍缺多任务族、对照重复及递归改进实验。
+E3-B [真实 MiMo 两次独立尝试](../../experiments/kernel_spike/RESULTS.md)：v1 是试验程序的提案包装解析失败；修订后的 v2 由模型写出通用纯工具，经一次独立 selection 晋升、guard，再由单独 OS 进程的新整数任务自动调用并留下组件激活证据。父版本 selection 的模型响应不是合法 JSON，候选额外的工具工作使归一化成本更高。这个结果填补了 DeepSeek 式任务内开发到 AutoSci 式版本化复用的**单个机制样本**，但不构成 ADAS/AFlow 所要求的跨任务搜索效果证据。当时 E 尚缺普通反馈自动触发，F 仍缺多任务族、对照重复及递归改进实验。
+
+E3-B.2 将普通 Main／CLI 接到项目配置的持久反馈协调器：真实 R0 先看公开反馈与宿主候选收据，选择放弃、任务来源工具／服务／编排采用或通用包补丁，再由宿主独立配对、晋升、guard 与后续加载证据决定保留。这落实 [AutoSci](https://arxiv.org/abs/2605.31468) 的任务图／能力更新与 [ADAS](https://arxiv.org/abs/2408.08435)、[AFlow](https://arxiv.org/abs/2410.10762) 的可执行候选外层评价，但仍没有它们所需的多任务搜索收益证据。[首次真实普通入口收据](../../experiments/ordinary_feedback_live/RESULTS.md)到达独立 selection 并正确拒绝父、候选均失败的编排候选；未到 guard 和真实模型下一任务复用。成功采用／guard 回滚／复用目前只有确定性纵向测试。下一步先做同任务族的真实闭环，再作固定编排、等预算单智能体、仅记忆与完整系统对照。
 
 D1-A 已按[执行策略切换检查点](../design/adaptive-orchestration-switch-v1.md)落地：显式 PackagePatch v4 仅覆盖 entry↔workflow 切换，`activation_targets` 等于改动组件减去下线旧 orchestrator；v3 仍按旧相等合同。两方向候选均走真实 `TaskService` 后端和演化配对验证，篡改源码摘要、原生后端身份、空目标及夹带未激活组件会拒绝。`strategy_entered` 只记录入场尝试，完成态 `active_strategy` 才是激活证据。与 AutoSci SciDAG/SciEvolve、AFlow 代码工作流搜索、ADAS 程序化 Agent 候选的对照因此从“静态双后端”推进到“可检验切换补丁”；模型还不能在任务中生成或选择此切换，不能声称编排已自进化。
 

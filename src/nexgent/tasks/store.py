@@ -550,8 +550,10 @@ class EpisodeStore:
         allowed = {
             "observed", "feedback_capture_started", "feedback_captured",
             "development_planned", "development_run", "candidate_generation_started",
-            "candidate_ready",
-            "no_change", "rejected", "deferred",
+            "candidate_ready", "selection_plan_started", "selection_planned",
+            "selection_run", "paired_assessed", "guard_plan_started",
+            "guard_planned", "promoted", "guard_run", "guard_assessed",
+            "completed", "rolled_back", "no_change", "rejected", "deferred",
         }
         if statuses is None:
             statuses = sorted(allowed)
@@ -570,7 +572,7 @@ class EpisodeStore:
                                     development_intent=None,
                                     development_episode=None,
                                     development_plan=None,
-                                    candidate=None):
+                                    candidate=None, evolution_update=None):
         """CAS one outbox state while keeping evaluator-private data out."""
         transitions = {
             "observed": {"feedback_capture_started", "deferred"},
@@ -580,7 +582,18 @@ class EpisodeStore:
             "development_run": {"candidate_generation_started", "no_change", "rejected",
                                 "deferred"},
             "candidate_generation_started": {"candidate_ready", "rejected", "deferred"},
-            "candidate_ready": set(),
+            "candidate_ready": {"selection_plan_started", "deferred"},
+            "selection_plan_started": {"selection_planned", "deferred"},
+            "selection_planned": {"selection_run", "deferred"},
+            "selection_run": {"paired_assessed", "deferred"},
+            "paired_assessed": {"guard_plan_started", "rejected", "deferred"},
+            "guard_plan_started": {"guard_planned", "deferred"},
+            "guard_planned": {"promoted", "deferred"},
+            "promoted": {"guard_run", "deferred"},
+            "guard_run": {"guard_assessed", "deferred"},
+            "guard_assessed": {"completed", "rejected", "rolled_back", "deferred"},
+            "completed": set(),
+            "rolled_back": set(),
             "no_change": set(),
             "rejected": set(),
             "deferred": set(),
@@ -663,6 +676,87 @@ class EpisodeStore:
                     or any(not isinstance(value, str) or not value
                            for value in candidate.values())):
                 raise ValueError("Feedback candidate reference is invalid")
+        if evolution_update is not None:
+            allowed_evolution = {
+                "selection_intent", "selection_plan", "selection_trial",
+                "selection_decision", "guard_intent", "guard_plan",
+                "promotion", "guard_run", "guard_assessment",
+            }
+            if (not isinstance(evolution_update, dict) or not evolution_update
+                    or not set(evolution_update) <= allowed_evolution):
+                raise ValueError("Feedback evolution reference is invalid")
+            try:
+                encoded_evolution = json.dumps(
+                    evolution_update, ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":"), allow_nan=False)
+            except (TypeError, ValueError, RecursionError):
+                raise ValueError("Feedback evolution reference must be finite JSON") from None
+            if len(encoded_evolution.encode("utf-8")) > 32_768:
+                raise ValueError("Feedback evolution reference is too large")
+            if len(evolution_update) != 1:
+                raise ValueError("Feedback evolution transition records one evidence item")
+            key, value = next(iter(evolution_update.items()))
+            if not isinstance(value, dict):
+                raise ValueError("Feedback evolution evidence must be an object")
+            simple_ref = {"id", "record_digest"}
+            intent_ref = {"evaluator_id", "snapshot_digest", "split", "seed"}
+            expected_fields = {
+                "selection_intent": intent_ref,
+                "selection_plan": simple_ref,
+                "selection_trial": simple_ref,
+                "selection_decision": simple_ref | {"eligible"},
+                "guard_intent": intent_ref,
+                "guard_plan": simple_ref,
+                "promotion": {"revision", "package_id", "package_digest"},
+                "guard_run": simple_ref | {"episode_ids"},
+                "guard_assessment": {
+                    "degraded", "rolled_back", "metrics_digest",
+                    "active_package_id", "active_revision"},
+            }
+            if set(value) != expected_fields[key]:
+                raise ValueError("Feedback evolution evidence shape is invalid")
+            if key in {"selection_intent", "guard_intent"}:
+                if (any(not isinstance(value.get(field), str) or not value[field]
+                        or len(value[field]) > 200
+                        for field in ("evaluator_id", "split"))
+                        or not isinstance(value.get("snapshot_digest"), str)
+                        or len(value["snapshot_digest"]) != 64
+                        or type(value.get("seed")) is not int):
+                    raise ValueError("Feedback evaluator intent is invalid")
+            elif key in {"selection_plan", "selection_trial", "guard_plan"}:
+                if any(not isinstance(value.get(field), str) or not value[field]
+                       for field in simple_ref):
+                    raise ValueError("Feedback evolution record reference is invalid")
+            elif key == "selection_decision":
+                if (any(not isinstance(value.get(field), str) or not value[field]
+                        for field in simple_ref)
+                        or type(value.get("eligible")) is not bool):
+                    raise ValueError("Feedback selection decision is invalid")
+            elif key == "promotion":
+                if (type(value.get("revision")) is not int or value["revision"] < 0
+                        or any(not isinstance(value.get(field), str) or not value[field]
+                               for field in ("package_id", "package_digest"))):
+                    raise ValueError("Feedback promotion reference is invalid")
+            elif key == "guard_run":
+                episodes = value.get("episode_ids")
+                if (any(not isinstance(value.get(field), str) or not value[field]
+                        for field in simple_ref)
+                        or not isinstance(episodes, list) or not episodes
+                        or len(episodes) > 128 or len(set(episodes)) != len(episodes)
+                        or any(not isinstance(item, str) or not item
+                               for item in episodes)):
+                    raise ValueError("Feedback guard run reference is invalid")
+            elif key == "guard_assessment":
+                if (type(value.get("degraded")) is not bool
+                        or type(value.get("rolled_back")) is not bool
+                        or value["rolled_back"] and not value["degraded"]
+                        or not isinstance(value.get("metrics_digest"), str)
+                        or len(value["metrics_digest"]) != 64
+                        or not isinstance(value.get("active_package_id"), str)
+                        or not value["active_package_id"]
+                        or type(value.get("active_revision")) is not int
+                        or value["active_revision"] < 0):
+                    raise ValueError("Feedback guard assessment is invalid")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -700,6 +794,27 @@ class EpisodeStore:
                 raise ValueError("Candidate-ready development requires a candidate reference")
             if status != "candidate_ready" and candidate is not None:
                 raise ValueError("Only candidate-ready development may attach a candidate")
+            if evolution_update is not None:
+                prior_evolution = record.get("evolution") or {}
+                overlap = set(prior_evolution) & set(evolution_update)
+                if overlap and any(prior_evolution[key] != evolution_update[key]
+                                   for key in overlap):
+                    raise ValueError("Feedback evolution evidence is immutable")
+            required_evolution = {
+                "selection_plan_started": "selection_intent",
+                "selection_planned": "selection_plan",
+                "selection_run": "selection_trial",
+                "paired_assessed": "selection_decision",
+                "guard_plan_started": "guard_intent",
+                "guard_planned": "guard_plan",
+                "promoted": "promotion", "guard_run": "guard_run",
+                "guard_assessed": "guard_assessment",
+            }
+            required_key = required_evolution.get(status)
+            if (required_key is not None
+                    and (evolution_update is None
+                         or set(evolution_update) != {required_key})):
+                raise ValueError("Feedback evolution transition lacks its evidence")
             record["status"] = status
             record["reason"] = reason
             record["revision"] += 1
@@ -714,11 +829,71 @@ class EpisodeStore:
                 record["development_plan"] = deepcopy(development_plan)
             if candidate is not None:
                 record["candidate"] = deepcopy(candidate)
+            if evolution_update is not None:
+                record.setdefault("evolution", {}).update(deepcopy(evolution_update))
             encoded = _json(record)
             db.execute(
                 "UPDATE task_feedback_outbox SET status=?,revision=?,updated=?,data=? "
                 "WHERE id=?", (status, record["revision"], record["updated_at"],
                                encoded, record["id"]))
+        return record
+
+    def record_feedback_reuse(self, identity, evidence):
+        """Attach bounded host-verified later-use evidence to a completed work item."""
+        required = {
+            "episode_id", "package_id", "package_digest", "channel_revision",
+            "component_id", "activation", "activation_digest",
+        }
+        if (not isinstance(evidence, dict) or set(evidence) != required
+                or any(not isinstance(evidence.get(key), str) or not evidence[key]
+                       for key in ("episode_id", "package_id", "package_digest",
+                                   "activation_digest"))
+                or type(evidence.get("channel_revision")) is not int
+                or evidence["channel_revision"] < 0
+                or (evidence.get("component_id") is not None
+                    and (not isinstance(evidence["component_id"], str)
+                         or not evidence["component_id"]))
+                or not isinstance(evidence.get("activation"), dict)
+                or _digest(evidence["activation"]) != evidence["activation_digest"]):
+            raise ValueError("Feedback reuse evidence is invalid")
+        encoded_evidence = _json(evidence)
+        if len(encoded_evidence.encode("utf-8")) > 16_384:
+            raise ValueError("Feedback reuse evidence is too large")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT data FROM task_feedback_outbox WHERE id=? OR trigger_key=?",
+                (identity, identity)).fetchone()
+            if row is None:
+                raise KeyError(identity)
+            record = json.loads(row[0])
+            if record.get("status") != "completed":
+                raise StateConflict("Reuse evidence requires a completed evolution work item")
+            promotion = (record.get("evolution") or {}).get("promotion") or {}
+            if (promotion.get("revision") != evidence["channel_revision"]
+                    or promotion.get("package_id") != evidence["package_id"]
+                    or promotion.get("package_digest") != evidence["package_digest"]):
+                raise ValueError("Reuse evidence does not match the promoted package")
+            episode = self._get(db, evidence["episode_id"])
+            registration = (episode.get("task", {}).get("context") or {}).get(
+                "package_channel_registration") or {}
+            if (episode.get("status") not in {"completed", "failed", "cancelled"}
+                    or episode.get("package_id") != evidence["package_id"]
+                    or episode.get("package_digest") != evidence["package_digest"]
+                    or registration.get("channel") != record.get("channel_id")
+                    or registration.get("revision") != evidence["channel_revision"]):
+                raise ValueError("Reuse Episode does not match the promoted deployment")
+            observed = record.setdefault("reuse_observed", [])
+            if any(item["episode_id"] == evidence["episode_id"] for item in observed):
+                return record
+            if len(observed) >= 128:
+                raise ValueError("Feedback reuse evidence limit reached")
+            observed.append(deepcopy(evidence))
+            record["revision"] += 1
+            record["updated_at"] = time.time()
+            db.execute(
+                "UPDATE task_feedback_outbox SET revision=?,updated=?,data=? WHERE id=?",
+                (record["revision"], record["updated_at"], _json(record), record["id"]))
         return record
 
     def save(self, state):

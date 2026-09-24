@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import html
 import json
+import threading
 from copy import deepcopy
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -62,6 +63,25 @@ MAIN_PACKAGE_CHANNEL = "nexgent-main-capabilities-v2"
 MAIN_CAPABILITY_AUTHORITY = make_episode_authority(
     ["tool", "service_provider"], ["local_compute", "model_context"],
     max_definitions=32, max_invocations=128, version=2)
+
+
+class AutoEvolutionWorker(QThread):
+    result = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+
+    def __init__(self, trigger, parent=None):
+        super().__init__(parent)
+        self.trigger = trigger
+        self.stop_event = threading.Event()
+
+    def run(self):
+        from ..tasks.auto_runtime import advance_auto_evolution
+
+        try:
+            self.result.emit(advance_auto_evolution(
+                self.trigger, stop_event=self.stop_event))
+        except Exception as exc:
+            self.failed.emit(type(exc).__name__)
 
 
 def _json(value) -> str:
@@ -131,17 +151,46 @@ class MainWindow(QMainWindow):
 
             service = TaskService(self.project_root)
         self.service = service
+        self._auto_evolution = None
+        from ..tasks.runtime import TaskService
+        if isinstance(service, TaskService):
+            from ..tasks.auto_runtime import configure_auto_evolution
+            self._auto_evolution = configure_auto_evolution(
+                service, project_root=self.project_root)
         self.selected_id: str | None = None
         self.worker: TaskWorker | None = None
+        self._recovery_worker: AutoEvolutionWorker | None = None
         self._selected_state: dict | None = None
         self._console = None
         self._event_counts: dict[str, int] = {}
+        self._close_when_finished = False
         self.setWindowTitle("Nexgent · Main")
         self.resize(1440, 900)
         self.setStyleSheet(MAIN_STYLE)
         self._build()
         self.refresh_tasks()
         self._welcome()
+        if (self._auto_evolution is not None
+                and (self.service.store.terminal_episode_ids(limit=1)
+                     or self.service.store.feedback_triggers(limit=1))):
+            QTimer.singleShot(0, self._start_recovery)
+
+    def _start_recovery(self):
+        if self._recovery_worker is not None or self._auto_evolution is None:
+            return
+        self._recovery_worker = AutoEvolutionWorker(self._auto_evolution, self)
+        self._recovery_worker.result.connect(self._auto_result)
+        self._recovery_worker.failed.connect(self._auto_error)
+        self._recovery_worker.finished.connect(self._recovery_finished)
+        self._recovery_worker.start()
+
+    def _recovery_finished(self):
+        worker = self._recovery_worker
+        self._recovery_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        if self._close_when_finished and self.worker is None:
+            self.close()
 
     @staticmethod
     def _reader():
@@ -329,7 +378,8 @@ class MainWindow(QMainWindow):
             return
         try:
             state = self.service.create(
-                objective, context={"split_role": "development"},
+                objective, context={"split": "development",
+                                    "split_role": "development"},
                 capability_authority=deepcopy(MAIN_CAPABILITY_AUTHORITY),
                 **self._package_selection())
         except Exception as exc:
@@ -352,12 +402,18 @@ class MainWindow(QMainWindow):
             return {"package": self_orchestration_package()}
         from ..tasks.evolution import EvolutionService
 
+        from ..tasks.auto_runtime import single_auto_channel
+
+        channel = single_auto_channel(self._auto_evolution)
+        if self._auto_evolution is not None and channel is None:
+            raise ValueError("请为 Main 配置自动改进的 default_channel")
+        channel = channel or MAIN_PACKAGE_CHANNEL
         evolution = EvolutionService(self.service)
         try:
-            evolution.active(MAIN_PACKAGE_CHANNEL)
+            evolution.active(channel)
         except KeyError:
-            evolution.register(MAIN_PACKAGE_CHANNEL, self_orchestration_package())
-        return {"package_channel": MAIN_PACKAGE_CHANNEL}
+            evolution.register(channel, self_orchestration_package())
+        return {"package_channel": channel}
 
     def show_task(self, episode_id, *, preserve_conversation=False):
         try:
@@ -389,13 +445,40 @@ class MainWindow(QMainWindow):
             self._render(state)
             return
         self.worker = TaskWorker(self.service, episode_id, self)
+        if self._auto_evolution is not None:
+            from ..tasks.auto_runtime import advance_auto_evolution
+            self.worker.after_run = lambda: advance_auto_evolution(
+                self._auto_evolution, source_episode_id=episode_id,
+                stop_event=self.worker.stop_event)
         self.worker.updated.connect(self._update)
-        self.worker.result.connect(self._update)
+        self.worker.result.connect(self._task_result)
         self.worker.failed.connect(self._worker_error)
+        self.worker.evolution.connect(self._auto_result)
+        self.worker.evolution_failed.connect(self._auto_error)
         self.worker.finished.connect(self._finished)
         self.status_label.setText("执行中")
         self._buttons()
         self.worker.start()
+
+    def _task_result(self, state):
+        self._update(state)
+        if self._auto_evolution is not None and state.get("status") in {
+                "completed", "failed", "cancelled"}:
+            self.status_label.setText("任务已结束；正在检查改进证据")
+
+    def _auto_result(self, result):
+        work = result.get("work") or []
+        if not work:
+            return
+        summary = "、".join(
+            f"{row['status']} ({row['id']})"
+            + (f" · {row['reason']}" if row.get("reason") else "")
+            for row in work)
+        self._append("system", "自动改进：" + summary, color="#6c7c72")
+
+    def _auto_error(self, error_type):
+        self._append("system", "自动改进中断；持久工作可恢复。" + error_type,
+                     color="#98421c")
 
     def _update(self, state):
         if state.get("id") != self.selected_id:
@@ -428,6 +511,8 @@ class MainWindow(QMainWindow):
             self._error(f"读取最终状态失败：{exc}")
         self.refresh_tasks()
         self._buttons()
+        if self._close_when_finished and self._recovery_worker is None:
+            self.close()
 
     def stop_running(self):
         if self.worker is not None:
@@ -516,8 +601,20 @@ class MainWindow(QMainWindow):
             self._error(f"导出失败：{exc}")
 
     def closeEvent(self, event):
+        if self._recovery_worker is not None:
+            self._recovery_worker.stop_event.set()
+            if not self._recovery_worker.wait(5000):
+                self._close_when_finished = True
+                self.statusBar().showMessage("正在等待当前模型或评价步骤结束后关闭")
+                event.ignore()
+                return
+            self._recovery_worker = None
         if self.worker is not None:
             self.worker.stop_event.set()
-            self.worker.wait(5000)
+            if not self.worker.wait(5000):
+                self._close_when_finished = True
+                self.statusBar().showMessage("正在等待当前模型或评价步骤结束后关闭")
+                event.ignore()
+                return
             self.worker = None
         event.accept()
