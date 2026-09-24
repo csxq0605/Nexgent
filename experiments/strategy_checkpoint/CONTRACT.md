@@ -1,6 +1,6 @@
 # D1-C 反馈检查点真实模型探针：预注册合同草案
 
-日期：2026-09-24。状态：**草案；不得运行。代码前提已有定向测试，但四条件离线预检和冻结运行清单尚未完成。**
+日期：2026-09-24。合同修订：`2026-09-24/D1-C.2`（首次 Provider 请求前修正 no-gap 的最终版本号矛盾）。状态：**草案；不得运行。代码前提已有定向测试，但四条件离线预检和冻结运行清单尚未完成。**
 
 本合同预注册一个任务类型无关的运行时机制探针：同一普通任务 Episode 从冻结 DAG 开始，在持久化、可归因的中途反馈检查点，由真实 MiMo v2.6-flash 决定继续 DAG 或切换到同包受控代码入口。若切换，入口必须读取冻结 handoff，沿用同一根预算和绝对截止时间，再交付最终工件。
 
@@ -40,7 +40,7 @@ D1-C 不得覆盖、重标或解释为修复该负结果。本合同冻结初始
 
 | 编号 | 假设 | 支持条件 | 直接判负 |
 | --- | --- | --- | --- |
-| H1 | 检查点反馈来自真实、可验证的协议缺口 | 主切换样本的 DAG 草稿先通过 base policy 独立检查，再因冻结 update 的实质变化未通过 updated policy；反馈由宿主 validator 生成并绑定两个 policy digest、草稿 digest 和逐项失败 | 草稿本来就不满足 base policy；缺口只由模型自述；update 未实质改变判定；或反馈缺少来源摘要 |
+| H1 | 检查点反馈来自真实、可验证的协议缺口 | 主切换样本的已发布 DAG 草稿先以版本 1、base-policy 证据引用通过完整的独立质量检查，再因冻结 update 的实质变化未通过 updated policy；反馈由宿主 validator 生成并绑定两个 policy digest、草稿工件 digest 和逐项失败 | 草稿本来就不满足 base policy 的完整交付合同；缺口只由模型自述；update 未实质改变判定；或反馈缺少来源摘要 |
 | H2 | MiMo 反馈后选择并实际进入 entry | checkpoint selector 的 observed model 为 `mimo-v2.6-flash`，返回冻结 entry ID；checkpoint/handoff 原子提交；旧 DAG pending publisher 未运行；真实 controlled-code worker 进入并形成完成态 `active_strategy` | 无合法选择、选择 continue／未知候选、只从 manifest 推断切换、旧 pending 节点运行、或目标后端未完成 |
 | H3 | 切换实际消费 handoff | 新 segment 的第一个 host action 是读取 checkpoint 绑定的准确 handoff；完成前再次核验同一 artifact/digest；最终工件能追溯到 feedback、updated policy 和前段草稿 | 未读 handoff、读错 handoff、读取发生在首个模型／发布动作之后、无模型调用时绕过读取、或最终结果没有使用 update |
 | H4 | 切换形成有效交付 | `D1C-SWITCH-PRIMARY` 和 `D1C-SWITCH-RECOVERY` 均通过路线无关的确定性满分门 | 机械 `completed` 但质量未通过；评分器收到策略／checkpoint 信息；或额外未登记调用解释完成 |
@@ -172,13 +172,15 @@ DAG 依次执行：
 3. 发布中间草稿工件；
 4. 本地通用 validator 读取草稿、base policy 和 policy update；
 5. 在 validator 完成收据后评估 checkpoint；
-6. 若继续，pending publisher 原样发布已验证草稿为最终工件。
+6. 若继续，pending publisher 发布 validator 的**机械元数据归一化草稿**为最终工件：只把 `policy_revision` 从 1 改成已验证 update 的 2，并把每项 `evidence_refs` 中的 `release_policy.json` 换成 `policy_update.json`。六项检查、各服务 `passed`／`blockers`、整体结论、blocking services 和 summary 必须保持原值；不得由宿主修复任何实质判断。归一化前后内容与差异均保存摘要。
 
 Checkpoint trigger 必须支配所有 pending descendants；validator 与 pending publisher 之间不得并行。旧 pending publisher 在 switch 后不得准入或执行。
 
 ### 8.2 宿主 validator
 
 Validator 是纯本地、任务输入驱动的 JSON policy checker，不接收候选路线或预期 selector 输出。它必须分别给草稿按 base policy 和 updated policy 逐项评分，并返回输入、草稿、policy 和检查结果摘要。
+
+它必须从**已发布草稿工件**读取内容并核验摘要；base-policy 前提采用完整交付合同（包括版本 1、schema、证据引用和 summary）。再把草稿做上述机械元数据归一化，并用 update policy 评价归一化副本的实质检查。归一化只供继续 DAG 的 pending publisher 使用，其允许修改的两个字段及前后摘要写入 validator 收据；任何其他字段改变均判为合同失败。对 material update，即使归一化元数据也不能改变旧的检查和 blockers，所以不能把旧草稿算作已修复。
 
 - 草稿未通过 base policy：`precondition_failure`，不得把后续切换记为 H1 支持。
 - 同时通过 base 与 update：输出 `compatible`，不含 `failure_domain`。
@@ -219,7 +221,7 @@ Runtime 在完成前必须独立检查该 handoff read；entry 自述“已读�
 ### 9.2 `D1C-NO-GAP`
 
 - 输入：semantically identical update，阈值不变。
-- 预期机制：validator 输出 `compatible`；不发起 checkpoint selector；DAG pending publisher 发布草稿。
+- 预期机制：validator 输出 `compatible`；不发起 checkpoint selector；DAG pending publisher 发布仅做上述机械元数据归一化的草稿。
 - 预期质量：policy revision 2；atlas 通过；borealis 只因 `open_sev2` 失败；cygnus 只因 `rollback_minutes` 失败；overall `hold`。
 
 ### 9.3 `D1C-INFRA-CONTROL`
@@ -287,7 +289,7 @@ Evaluator 只接收 Episode condition ID、冻结输入和最终 `release_review
 - 初始预算，DAG 草稿后、checkpoint 前后、switch 后和结束时的用量／预留／剩余量；原始绝对 deadline；
 - 全部模型收据：call ID、role、configured／observed model、provider revision、request／response digest、status、finish reason、billing status、usage、attempt count；
 - DAG plan/ref/revision、节点状态、RPC path、输入／输出 artifact refs；
-- 草稿 artifact ID/digest、base/update policy digest、validator 逐项结果与 feedback digest；
+- 草稿 artifact ID/digest、base/update policy digest、validator 逐项结果与 feedback digest；若继续，保存机械元数据归一化前后内容摘要与精确字段差异；
 - checkpoint selector 请求投影、原始响应、解析结果和 RPC journal；
 - StrategyCheckpoint、source segment、trigger receipt、pending node IDs、resolution、root budget snapshot；
 - handoff artifact ID/digest/content projection及原子发布事件；
