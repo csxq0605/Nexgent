@@ -716,13 +716,14 @@ def test_static_ask_preflight_repairs_before_spending_paired_calls(tmp_path):
     tasks = TaskService(tmp_path, tools=ToolRegistry())
     parent = multirole_package()
     valid = _child(parent)
-    files = deepcopy(valid["files"])
+    files = deepcopy(parent["files"])
     graph = json.loads(files["workflows/main.json"])
     ask = next(node for node in graph["nodes"] if node["method"] == "ask")
     ask["bindings"]["prior_findings"] = {"$input": "task"}
     files["workflows/main.json"] = json.dumps(graph, sort_keys=True)
-    invalid = make_package(files, deepcopy(valid["manifest"]), parent=parent,
+    invalid = make_package(files, deepcopy(parent["manifest"]), parent=parent,
                            provenance={"fixture": "invalid-ask-arguments"})
+    assert orchestration_delta(parent, invalid)["changed"] is False
     assert static_gateway_preflight(invalid) == [
         "ask_unsupported_gateway_arguments"]
     for package in (parent, invalid, valid):
@@ -765,6 +766,19 @@ def test_static_ask_preflight_repairs_before_spending_paired_calls(tmp_path):
     first = next(event for event in result["events"]
                  if event["kind"] == "attempt_finished")
     assert "qualification" not in first["content"]
+
+
+def test_static_preflight_rejects_inert_root_workflow_field():
+    parent = multirole_package()
+    files = deepcopy(parent["files"])
+    graph = json.loads(files["workflows/main.json"])
+    graph["error_routing"] = {"on_failure": "ignore"}
+    files["workflows/main.json"] = json.dumps(graph, sort_keys=True)
+    invalid = make_package(files, deepcopy(parent["manifest"]), parent=parent,
+                           provenance={"fixture": "inert-root-field"})
+
+    assert orchestration_delta(parent, invalid)["changed"] is False
+    assert static_gateway_preflight(invalid) == ["unsupported_workflow_fields"]
 
 
 def test_caller_owned_finished_search_replays_without_spending(tmp_path):

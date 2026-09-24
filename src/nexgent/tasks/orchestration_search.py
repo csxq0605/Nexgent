@@ -493,7 +493,7 @@ def repair_brief(attempt, assessment):
 
 
 def static_gateway_preflight(package):
-    """Reject impossible ask arguments before spending paired development calls.
+    """Reject inert graph fields and impossible ask arguments before paired calls.
 
     This checks the host gateway's fixed interface only. It deliberately does
     not infer task answers, tool permissions, or dynamic execution outcomes.
@@ -501,8 +501,17 @@ def static_gateway_preflight(package):
     manifest = package["manifest"]
     reachable = orchestration_projection(package)["workflows"]
     allowed = {"role", "prompt", "payload", "max_tokens"}
+    workflow_fields = {
+        "nodes", "control_edges", "artifact_edges", "outputs",
+        "input_schema", "output_schema", "join_policy", "task_roles",
+        "failure_routes", "revision_rules", "strategy_checkpoint_rules",
+    }
 
     def issues(graph):
+        if not isinstance(graph, dict):
+            return "invalid_workflow_structure"
+        if set(graph) - workflow_fields:
+            return "unsupported_workflow_fields"
         artifact_fields = {}
         edges = graph.get("artifact_edges", [])
         nodes = graph.get("nodes", [])
@@ -997,18 +1006,18 @@ class BoundedOrchestrationSearch:
                               "failure_codes": ["duplicate_candidate"],
                               "mean_quality_delta": None, "task_count": 0,
                               "claim_limit": "Duplicate generation is not search progress."}
-            elif not delta["changed"]:
-                assessment = {"eligible_for_selection": False,
-                              "failure_codes": ["no_executable_orchestration_delta"],
-                              "mean_quality_delta": None, "task_count": 0,
-                              "claim_limit": "S-only changes are not O search."}
             elif (preflight_codes := static_gateway_preflight(child)):
                 assessment = {"eligible_for_selection": False,
                               "failure_codes": preflight_codes,
                               "mean_quality_delta": None, "task_count": 0,
                               "claim_limit": (
-                                  "Static host gateway contract failed before "
+                                  "Static host workflow contract failed before "
                                   "paired development execution.")}
+            elif not delta["changed"]:
+                assessment = {"eligible_for_selection": False,
+                              "failure_codes": ["no_executable_orchestration_delta"],
+                              "mean_quality_delta": None, "task_count": 0,
+                              "claim_limit": "S-only changes are not O search."}
             else:
                 seen_packages.add(candidate["package_digest"])
                 try:

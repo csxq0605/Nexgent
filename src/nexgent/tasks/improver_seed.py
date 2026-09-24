@@ -515,6 +515,13 @@ In this v3 contract, `path` belongs only to `add`; never put `path` in a `replac
 
 For workflow `ask` nodes, the host gateway accepts only `role`, `prompt`, `payload`, and `max_tokens` as parameter or binding names. Put task-specific fields inside `payload`; never add them as peer gateway arguments. If repair reports `ask_unsupported_gateway_arguments`, correct the graph interface before changing the task logic.
 
+Executable workflow graph fields are `nodes`, `control_edges`, `artifact_edges`,
+`outputs`, `input_schema`, `output_schema`, `join_policy`, `task_roles`,
+`failure_routes`, `revision_rules`, and `strategy_checkpoint_rules`.
+Do not invent root fields such as `error_routing`: the host cannot execute them.
+If repair reports `unsupported_workflow_fields`, express the intended behavior
+with supported nodes, edges, or a supported failure route.
+
 The host may report `candidate_workflow_gateway_invalid`,
 `candidate_artifact_schema_invalid`, or `candidate_model_output_invalid` after
 development execution. These are failure classes, not node IDs or task answers.

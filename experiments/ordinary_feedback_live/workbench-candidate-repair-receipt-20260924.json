@@ -1,0 +1,37 @@
+{
+  "schema": "nexgent.redacted-ordinary-probe.v1",
+  "contract": "WORKBENCH_CANDIDATE_REPAIR_CONTRACT.md",
+  "code_baseline": "f8fbbab",
+  "model": "mimo-v2.6-flash",
+  "source": {
+    "episode_id": "episode-950f5645f0a3480f",
+    "status": "failed",
+    "failure_domain": "protocol",
+    "failure_code": "workflow_binding_path_unavailable",
+    "model_calls": 2,
+    "tool_calls": 1,
+    "usage_complete": true
+  },
+  "improver": {"status": "completed", "model_calls": 1,
+    "route": "orchestration_search"},
+  "search": {
+    "status": "exhausted",
+    "attempts": [
+      {"status": "generated", "model_calls": 1,
+        "changed_component_class": "O", "executable_orchestration_delta": false,
+        "failure_codes": ["no_executable_orchestration_delta"],
+        "observed_change": "ask binding field not admitted by the gateway"},
+      {"status": "generated", "model_calls": 1,
+        "changed_component_class": "O", "executable_orchestration_delta": false,
+        "failure_codes": ["no_executable_orchestration_delta"],
+        "observed_change": "unsupported root workflow field"}
+    ],
+    "qualified_count": 0,
+    "development_pairs": 0,
+    "selection_opened": false
+  },
+  "active_channel_revision": 0,
+  "guard_run": false,
+  "new_task_reuse_run": false,
+  "claim_limit": "Single development mechanism probe; no orchestration or RSI benefit established."
+}
