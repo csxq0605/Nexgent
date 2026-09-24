@@ -777,10 +777,15 @@ class BoundedOrchestrationSearch:
         }
 
     def run(self, channel, feedback_bundle_id, expected_revision, policy, *,
-            generate, qualify):
+            generate, qualify, search_id=None):
         if not callable(generate) or not callable(qualify):
             raise TypeError("Search generation and qualification must be callable")
         policy = self._policy(policy)
+        if search_id is not None and (
+                not isinstance(search_id, str) or not search_id
+                or len(search_id) > 200
+                or not search_id.startswith("orchestration-search-")):
+            raise ContractError("Caller-owned search id is invalid")
         active = self.evolution.active(channel)
         feedback = self.generation.feedback(feedback_bundle_id)
         if (active["revision"] != expected_revision
@@ -788,19 +793,36 @@ class BoundedOrchestrationSearch:
                 or feedback["channel_revision"] != expected_revision
                 or feedback["parent_package_digest"] != active["package_digest"]):
             raise ContractError("Search parent or feedback revision is stale")
+        binding = {
+            "schema": SEARCH_SCHEMA, "channel": channel,
+            "channel_revision": expected_revision,
+            "feedback_bundle_id": feedback_bundle_id,
+            "parent_package_digest": active["package_digest"], "policy": policy,
+        }
+        if search_id is not None:
+            prior = self.journal.events(search_id)
+            if prior:
+                if (prior[0]["kind"] != "started"
+                        or prior[0]["content"] != binding):
+                    raise ContractError(
+                        "Caller-owned search id is bound to different frozen inputs")
+                finished = [event for event in prior if event["kind"] == "finished"]
+                if len(finished) == 1 and prior[-1]["kind"] == "finished":
+                    return {"id": search_id, **deepcopy(finished[0]["content"]),
+                            "events": prior}
+                raise ContractError(
+                    "Caller-owned search is unfinished; reconcile its open attempt "
+                    "before spending again")
         unfinished = self.journal.open_searches(channel, feedback_bundle_id)
         if unfinished:
             raise ContractError(
                 "An earlier orchestration search is unfinished; reconcile its "
                 "attempt intent before spending again: " + ",".join(unfinished))
-        search_id = _id("orchestration-search")
+        search_id = search_id or _id("orchestration-search")
         total = {"model_calls": 0, "completion_tokens": 0,
                  "tool_calls": 0, "nodes": 0}
         qualified, seen_packages, repair = [], set(), None
-        self.journal.append(search_id, "started", {
-            "schema": SEARCH_SCHEMA, "channel": channel,
-            "feedback_bundle_id": feedback_bundle_id,
-            "parent_package_digest": active["package_digest"], "policy": policy})
+        self.journal.append(search_id, "started", binding)
 
         def terminal_failure(attempt_event, phase, exc):
             if isinstance(exc, DevelopmentQualificationError):

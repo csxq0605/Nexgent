@@ -17,6 +17,7 @@ from nexgent.tasks.orchestration_search import (
     DevelopmentQualificationError,
     OrchestrationSearchJournal,
     QUALIFICATION_SCHEMA,
+    SEARCH_SCHEMA,
     assess_qualification,
     normalize_qualification,
     orchestration_delta,
@@ -649,6 +650,99 @@ def test_bounded_search_skips_s_only_attempt_then_qualifies_real_o_delta(tmp_pat
         "S-only changes are not O search.")
     assert len([event for event in result["events"]
                 if event["kind"] == "attempt_started"]) == 2
+
+
+def test_caller_owned_finished_search_replays_without_spending(tmp_path):
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    parent = multirole_package()
+    child = _child(parent)
+    for package in (parent, child):
+        tasks.store.put_package(package)
+    candidate = _candidate("candidate-o", parent, child)
+    record = _generation("generation-o", parent, child, candidate["id"])
+    service = BoundedOrchestrationSearch(
+        tasks, _Evolution(parent, {candidate["id"]: candidate}),
+        _Generation({record["id"]: record}))
+    policy = {"max_attempts": 1, "target_qualified": 1,
+              "minimum_mean_delta": 0.0, "max_model_calls": 6,
+              "max_completion_tokens": 100, "max_tool_calls": 0,
+              "max_nodes": 30}
+    search_id = "orchestration-search-feedback-work-1"
+
+    first = service.run(
+        "general", "feedback-1", 0, policy, search_id=search_id,
+        generate=lambda *_: deepcopy(record),
+        qualify=lambda item, _: _qualification(item["id"], delta=0.25))
+
+    def repeated(*_args, **_kwargs):
+        pytest.fail("finished caller-owned search spent work again")
+
+    replay = service.run(
+        "general", "feedback-1", 0, policy, search_id=search_id,
+        generate=repeated, qualify=repeated)
+
+    assert replay == first
+    assert replay["id"] == search_id
+
+
+def test_caller_owned_search_id_is_bound_to_frozen_inputs(tmp_path):
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    parent = multirole_package()
+    child = _child(parent)
+    for package in (parent, child):
+        tasks.store.put_package(package)
+    candidate = _candidate("candidate-o", parent, child)
+    record = _generation("generation-o", parent, child, candidate["id"])
+    service = BoundedOrchestrationSearch(
+        tasks, _Evolution(parent, {candidate["id"]: candidate}),
+        _Generation({record["id"]: record}))
+    policy = {"max_attempts": 1, "target_qualified": 1,
+              "minimum_mean_delta": 0.0, "max_model_calls": 6,
+              "max_completion_tokens": 100, "max_tool_calls": 0,
+              "max_nodes": 30}
+    search_id = "orchestration-search-feedback-work-1"
+    service.run(
+        "general", "feedback-1", 0, policy, search_id=search_id,
+        generate=lambda *_: deepcopy(record),
+        qualify=lambda item, _: _qualification(item["id"], delta=0.25))
+    changed = {**policy, "minimum_mean_delta": 0.1}
+
+    with pytest.raises(ContractError, match="different frozen inputs"):
+        service.run(
+            "general", "feedback-1", 0, changed, search_id=search_id,
+            generate=lambda *_: pytest.fail("mismatched search generated"),
+            qualify=lambda *_: pytest.fail("mismatched search qualified"))
+
+
+def test_caller_owned_open_search_fails_closed_without_spending(tmp_path):
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    parent = multirole_package()
+    tasks.store.put_package(parent)
+    service = BoundedOrchestrationSearch(
+        tasks, _Evolution(parent, {}), _Generation({
+            "placeholder": {
+                "parent_package_digest": parent["digest"],
+            },
+        }))
+    policy = {"max_attempts": 1, "target_qualified": 1,
+              "minimum_mean_delta": 0.0, "max_model_calls": 6,
+              "max_completion_tokens": 100, "max_tool_calls": 0,
+              "max_nodes": 30}
+    search_id = "orchestration-search-feedback-work-1"
+    service.journal.append(search_id, "started", {
+        "schema": SEARCH_SCHEMA, "channel": "general", "channel_revision": 0,
+        "feedback_bundle_id": "feedback-1",
+        "parent_package_digest": parent["digest"], "policy": policy,
+    })
+    service.journal.append(search_id, "attempt_started", {
+        "attempt": 1, "attempt_id": search_id + "/attempt-1",
+    })
+
+    with pytest.raises(ContractError, match="unfinished"):
+        service.run(
+            "general", "feedback-1", 0, policy, search_id=search_id,
+            generate=lambda *_: pytest.fail("open search generated again"),
+            qualify=lambda *_: pytest.fail("open search qualified again"))
 
 
 def test_qualification_exception_is_terminal_journalled_and_never_retried(tmp_path):
