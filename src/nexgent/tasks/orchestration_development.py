@@ -61,6 +61,52 @@ def _sum_usage(total, value):
     total["nodes"] += value.get("nodes", 0)
 
 
+def _task_fingerprint_payload(task_ref, *, inputs=None):
+    if not isinstance(task_ref, dict):
+        raise ContractError("Task fingerprint source must be an object")
+    objective = task_ref.get("objective")
+    if not isinstance(objective, str) or not objective:
+        raise ContractError("Task fingerprint requires an objective")
+    value = {
+        "objective": objective,
+        "inputs": task_ref.get("inputs", {}) if inputs is None else inputs,
+        "deliverables": task_ref.get(
+            "deliverables", [{"name": "result", "schema": {}}]),
+        "constraints": task_ref.get("constraints", {}),
+    }
+    return _copy(value, "Public task fingerprint payload")
+
+
+def public_task_fingerprint(task_ref):
+    """Digest public task content without reading evaluator-private fields."""
+    return digest(_task_fingerprint_payload(task_ref))
+
+
+def _private_source_fingerprint(tasks, episode_id):
+    if not isinstance(episode_id, str) or not episode_id:
+        raise ContractError("Source Episode identity must be nonempty")
+    state = tasks.get_private(episode_id)
+    task = state.get("task") or {}
+    refs = state.get("input_refs") or {}
+    if not isinstance(refs, dict) or set(refs) != set(task.get("inputs") or {}):
+        raise ContractError("Source Episode input artifacts are incomplete")
+    inputs = {
+        name: tasks.store.read(ref, episode_id)["content"]
+        for name, ref in sorted(refs.items())
+    }
+    return digest(_task_fingerprint_payload(task, inputs=inputs))
+
+
+def _fingerprint(value):
+    if not isinstance(value, str) or len(value) != 64:
+        raise ContractError("Source task fingerprint must be a SHA-256 digest")
+    try:
+        int(value, 16)
+    except ValueError:
+        raise ContractError("Source task fingerprint must be a SHA-256 digest") from None
+    return value.lower()
+
+
 class DevelopmentOrchestrationQualifier:
     """Callable development qualifier for ``BoundedOrchestrationSearch``.
 
@@ -73,7 +119,8 @@ class DevelopmentOrchestrationQualifier:
     """
 
     def __init__(self, tasks, evolution, adapter, *, snapshot, seed,
-                 source_statistical_units, development_episode_budget=None, options=None,
+                 source_statistical_units=None, source_episode_id=None,
+                 source_task_fingerprint=None, development_episode_budget=None, options=None,
                  capability_authority=None, stop_event=None, max_seed_scan=128):
         self.tasks = tasks
         self.evolution = evolution
@@ -92,8 +139,9 @@ class DevelopmentOrchestrationQualifier:
             raise ContractError("Development qualification seed scan is invalid")
         self.first_seed = seed
         self.max_seed_scan = max_seed_scan
+        source_statistical_units = (() if source_statistical_units is None
+                                    else source_statistical_units)
         if (not isinstance(source_statistical_units, (list, tuple, set))
-                or not source_statistical_units
                 or len(source_statistical_units) > 1024
                 or any(not isinstance(unit, str) or not unit or len(unit) > 500
                        for unit in source_statistical_units)
@@ -101,6 +149,24 @@ class DevelopmentOrchestrationQualifier:
             raise ContractError(
                 "Host must bind unique source statistical units for qualification")
         self.source_statistical_units = tuple(sorted(source_statistical_units))
+        self.source_episode_id = source_episode_id
+        derived_fingerprint = (None if source_episode_id is None else
+                               _private_source_fingerprint(tasks, source_episode_id))
+        supplied_fingerprint = (None if source_task_fingerprint is None else
+                                _fingerprint(source_task_fingerprint))
+        if (derived_fingerprint is not None and supplied_fingerprint is not None
+                and derived_fingerprint != supplied_fingerprint):
+            raise ContractError("Source Episode differs from its public task fingerprint")
+        self.source_task_fingerprint = derived_fingerprint or supplied_fingerprint
+        if (not self.source_statistical_units
+                and self.source_task_fingerprint is None):
+            raise ContractError(
+                "Qualification requires source units or a public task fingerprint")
+        if (any(unit.startswith("ordinary:")
+                for unit in self.source_statistical_units)
+                and self.source_task_fingerprint is None):
+            raise ContractError(
+                "Synthetic ordinary source units require a task fingerprint")
         self.episode_budget = (None if development_episode_budget is None else
                                _copy(development_episode_budget,
                                      "Development Episode budget"))
@@ -126,6 +192,11 @@ class DevelopmentOrchestrationQualifier:
 
     def _source_and_prior_units(self, candidate):
         source_ids = set(candidate.get("feedback_episode_ids") or [])
+        if self.source_episode_id is not None:
+            if self.source_episode_id not in source_ids:
+                raise ContractError(
+                    "Source Episode is not candidate feedback evidence")
+            source_ids.add(self.source_episode_id)
         excluded = set(self.source_statistical_units)
         registered_source_units = set()
         for state in self.tasks.store.list():
@@ -188,6 +259,7 @@ class DevelopmentOrchestrationQualifier:
             "snapshot_digest": digest(self.snapshot),
             "options_digest": digest(self.options),
             "source_statistical_units": list(self.source_statistical_units),
+            "source_task_fingerprint": self.source_task_fingerprint,
             "episode_budget": episode_budget,
         }
         for run_id, encoded, stored_digest in rows:
@@ -378,7 +450,12 @@ class DevelopmentOrchestrationQualifier:
                 split="development", seed=seed, **deepcopy(self.options)))
             proposed_units = _statistical_units(
                 proposed, "Development qualification tasks")
-            if excluded.isdisjoint(proposed_units):
+            duplicates_source = (
+                self.source_task_fingerprint is not None
+                and any(public_task_fingerprint(task_ref)
+                        == self.source_task_fingerprint
+                        for task_ref in proposed))
+            if excluded.isdisjoint(proposed_units) and not duplicates_source:
                 preview, units, selected_seed = proposed, proposed_units, seed
                 break
         if preview is None:
@@ -411,6 +488,7 @@ class DevelopmentOrchestrationQualifier:
             "task_refs_digest": digest(preview),
             "statistical_units": units,
             "source_statistical_units": list(self.source_statistical_units),
+            "source_task_fingerprint": self.source_task_fingerprint,
             "episode_budget": cap,
         }
         record, created = self._begin(identity)
@@ -452,4 +530,4 @@ class DevelopmentOrchestrationQualifier:
             raise DevelopmentQualificationError(failure) from None
 
 
-__all__ = ["DevelopmentOrchestrationQualifier"]
+__all__ = ["DevelopmentOrchestrationQualifier", "public_task_fingerprint"]

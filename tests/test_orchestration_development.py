@@ -5,7 +5,7 @@ import pytest
 
 from nexgent.tasks.benchmarks import BenchmarkDescriptor
 from nexgent.tasks.orchestration_development import (
-    DevelopmentOrchestrationQualifier,
+    DevelopmentOrchestrationQualifier, public_task_fingerprint,
 )
 from nexgent.tasks.orchestration_search import DevelopmentQualificationError
 from nexgent.tasks.tools import ContractError
@@ -51,12 +51,26 @@ class SeededAdapter(Adapter):
         return super().tasks(split, seed, **options)
 
 
+class OrdinarySourceAdapter(Adapter):
+    def tasks(self, split, seed, **options):
+        value = 11 if seed == 11 else seed
+        return [{"id": f"task-{seed}", "objective": "Inspect the case",
+                 "statistical_unit_id": f"unit-{seed}",
+                 "inputs": {"case": {"value": value}},
+                 "deliverables": [{"name": "result", "schema": {
+                     "type": "object"}}],
+                 "constraints": {"mode": "strict"}, "context": {},
+                 "capabilities": [],
+                 "_evaluation": {"hidden_answer": f"secret-{seed}"}}]
+
+
 class Store:
     def __init__(self, path):
         self.path = path
         self.states = []
         self.registrations = {}
         self.packages = {"parent": {"id": "parent"}, "child": {"id": "child"}}
+        self.artifacts = {}
 
     def connect(self):
         return sqlite3.connect(self.path)
@@ -69,6 +83,9 @@ class Store:
 
     def package(self, identity):
         return self.packages[identity]
+
+    def read(self, ref, episode_id):
+        return self.artifacts[ref]
 
 
 class Tasks:
@@ -227,6 +244,54 @@ def test_sequential_candidates_advance_to_fresh_development_seed(
     assert [call["seed"] for call in evolution.plan_calls] == [7, 8]
     assert first_result["tasks"][0]["statistical_unit_id"] == "unit-7"
     assert second_result["tasks"][0]["statistical_unit_id"] == "unit-8"
+
+
+def test_ordinary_source_fingerprint_skips_exact_development_task(
+        tmp_path, monkeypatch):
+    tasks = Tasks(tmp_path / "ordinary.sqlite")
+    value = candidate()
+    source_task = {
+        "objective": "Inspect the case", "inputs": {"case": {"value": 11}},
+        "deliverables": [{"name": "result", "schema": {"type": "object"}}],
+        "constraints": {"mode": "strict"}}
+    tasks.private["source-episode"] = {
+        "id": "source-episode", "task": source_task,
+        "input_refs": {"case": "artifact-case"}}
+    tasks.store.states.append({
+        "id": "source-episode", "status": "completed",
+        "task": {"context": {}}})
+    tasks.store.artifacts["artifact-case"] = {
+        "id": "artifact-case", "content": {"value": 11}}
+    evolution = Evolution(tasks, value)
+    adapter = OrdinarySourceAdapter()
+    monkeypatch.setattr(
+        "nexgent.tasks.orchestration_development.paired_episode_budget",
+        lambda parent, child, development_episode_budget=None: {
+            "arms": {"parent": {}, "candidate": {}},
+            "episode_budget": dict(CAP)})
+    service = DevelopmentOrchestrationQualifier(
+        tasks, evolution, adapter, snapshot=adapter.snapshot(), seed=11,
+        source_episode_id="source-episode",
+        source_statistical_units=["ordinary:source-episode"],
+        development_episode_budget=CAP)
+
+    result = service(value, REMAINING)
+
+    assert evolution.plan_calls[0]["seed"] == 12
+    assert result["tasks"][0]["statistical_unit_id"] == "unit-12"
+    with tasks.store.connect() as db:
+        encoded = db.execute(
+            "SELECT data FROM task_orchestration_development_runs").fetchone()[0]
+    assert "hidden_answer" not in encoded
+    assert "Inspect the case" not in encoded
+    assert "artifact-case" not in encoded
+
+
+def test_public_task_fingerprint_does_not_depend_on_private_evaluation():
+    task = OrdinarySourceAdapter().tasks("development", 11)[0]
+    changed = {**task, "_evaluation": {"hidden_answer": "different-secret"}}
+
+    assert public_task_fingerprint(task) == public_task_fingerprint(changed)
 
 
 def test_failed_call_is_sanitized_persisted_and_never_retried(
