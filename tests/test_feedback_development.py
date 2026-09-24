@@ -1,9 +1,13 @@
 """Focused E3-B.2b planning and candidate-dispatch tests."""
 
+from copy import deepcopy
 import json
 import threading
 
+import pytest
+
 from nexgent.kernel.programs import digest
+from nexgent.tasks.benchmarks import BenchmarkDescriptor
 from nexgent.tasks.evolution import EvolutionService
 from nexgent.tasks.feedback_trigger import (
     AutoEvolutionService,
@@ -11,9 +15,12 @@ from nexgent.tasks.feedback_trigger import (
 )
 from nexgent.tasks.generation import GenerationService
 from nexgent.tasks.improvers import ImproverService, active_improver_registration
+from nexgent.tasks.multirole_seed import multirole_package
+from nexgent.tasks.orchestration_development import DevelopmentOrchestrationQualifier
+from nexgent.tasks.orchestration_search import QUALIFICATION_SCHEMA
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
-from nexgent.tasks.tools import ToolRegistry
+from nexgent.tasks.tools import ContractError, ToolRegistry
 
 
 PRIVATE_TEXT = "PRIVATE-EVALUATOR-DATA-MUST-NOT-ENTER-DEVELOPMENT"
@@ -96,6 +103,129 @@ def _hypothesis():
         "applicability": "Tasks executed by the same generic loop.",
         "falsifier": "Independent tasks do not improve when the component is loaded.",
     }
+
+
+class _SearchAdapter:
+    id = "ordinary-search-evaluator"
+    descriptor = BenchmarkDescriptor(
+        id=id, version="1", title="Ordinary search fixture",
+        splits=("development",), default_split="development",
+        allowed_suite_roles=("qualification",))
+
+    def describe(self):
+        return {"id": self.id}
+
+    def snapshot(self):
+        return {"dataset": "ordinary-search-v1"}
+
+    def tasks(self, split, seed, **_options):
+        return [{
+            "id": f"fresh-{seed}", "objective": "Solve a fresh public task",
+            "statistical_unit_id": f"fresh-unit-{seed}", "inputs": {},
+            "context": {}, "constraints": {}, "deliverables": [],
+            "capabilities": [],
+        }]
+
+    def evaluate(self, task_ref, deliverables, execution_view):
+        raise AssertionError("Qualification is projected by the deterministic boundary")
+
+
+def _search_patch(parent):
+    workflow = json.loads(parent["files"]["workflows/main.json"])
+    proposer = next(node for node in workflow["nodes"]
+                    if node["id"] == "proposer_b")
+    proposer["role_ref"] = "proposer_a"
+    proposer["component_ref"] = "proposer-a-role"
+    return {
+        "schema": "nexgent.package-patch.v3",
+        "parent_package_digest": parent["digest"],
+        "hypothesis": {
+            **_hypothesis(), "component_ids": ["main-workflow"],
+        },
+        "activation_targets": ["main-workflow"],
+        "operations": [{
+            "op": "replace", "component_id": "main-workflow",
+            "old_digest": parent["component_digests"]["workflows/main.json"],
+            "content": json.dumps(workflow, sort_keys=True),
+        }],
+        "child_manifest": deepcopy(parent["manifest"]),
+    }
+
+
+def _search_setup(tmp_path, monkeypatch):
+    from nexgent.tasks import runtime as runtime_module
+
+    adapter = _SearchAdapter()
+    monkeypatch.setattr(runtime_module, "task_benchmarks",
+                        lambda *_args, **_kwargs: {adapter.id: adapter})
+    tasks = TaskService(tmp_path, tools=ToolRegistry())
+    evolution = EvolutionService(tasks)
+    parent = multirole_package()
+    evolution.register("general", parent)
+    generation = GenerationService(tasks, evolution)
+    plan = {
+        "schema": DEVELOPMENT_PLAN_SCHEMA,
+        "candidate_type": "orchestration",
+        "source_ref": "orchestration_search",
+        "hypothesis": _hypothesis(),
+        "reason": "Search bounded O variants against fresh development tasks.",
+    }
+    improver = _improver(plan, _search_patch(parent))
+    ImproverService(tasks).register(
+        "ordinary-improver", improver,
+        {"mutable_paths": ["improver.py"], "allowed_operations": ["replace"]})
+    trigger = AutoEvolutionService(
+        tasks,
+        policies={"general": {
+            "evaluator_id": adapter.id,
+            "candidate_types": ["orchestration", "no_change"],
+            "budget": {"max_model_calls": 0, "max_completion_tokens": 0,
+                       "max_tool_calls": 0, "max_nodes": 8},
+            "improver": {"channel": "ordinary-improver", "revision": 0},
+            "orchestration_search": {
+                "max_attempts": 2, "first_seed": 7,
+                "minimum_mean_delta": 0.0,
+                "max_model_calls": 1, "max_completion_tokens": 100,
+                "max_tool_calls": 0, "max_nodes": 20,
+                "development_episode_budget": {
+                    "max_model_calls": 1, "max_completion_tokens": 50,
+                    "max_tool_calls": 0, "max_nodes": 10,
+                },
+            },
+        }},
+        evolution_service=evolution, generation_service=generation)
+    episode = tasks.create(
+        "Ordinary source task", package_channel="general",
+        context={"split": "development", "split_role": "development"})
+    state = tasks.get_private(episode["id"])
+    state["status"] = "completed"
+    state["usage"]["usage_complete"] = True
+    state["outcome"] = {"delivery_status": "delivered",
+                        "schema_validation": "passed"}
+    tasks.store.save(state)
+    trigger.observe_terminal(episode["id"])
+    [captured] = trigger.drain()
+
+    def qualify(_self, candidate, _remaining):
+        return {
+            "schema": QUALIFICATION_SCHEMA,
+            "candidate_id": candidate["id"],
+            "tasks": [{
+                "statistical_unit_id": "fresh-unit-7",
+                "parent_status": "completed", "candidate_status": "completed",
+                "parent_score_available": True,
+                "candidate_score_available": True,
+                "parent_score": 0.25, "candidate_score": 0.5,
+                "activation_loaded": True, "artifact_contract_valid": True,
+            }],
+            "usage": {"model_calls": 0, "completion_tokens": 0,
+                      "tool_calls": 0, "nodes": 0, "usage_complete": True},
+            "evidence_refs": {"plan_id": "deterministic-plan",
+                              "trial_id": "deterministic-trial"},
+        }
+
+    monkeypatch.setattr(DevelopmentOrchestrationQualifier, "__call__", qualify)
+    return tasks, evolution, generation, trigger, parent, improver, captured
 
 
 def test_failed_generated_workflow_is_not_offered_for_direct_reuse(tmp_path):
@@ -425,3 +555,77 @@ def test_forged_planning_context_cannot_hijack_recovered_development_episode(tmp
     [work] = trigger.drain_development()
     assert work["status"] == "no_change"
     assert work["development_episode"]["id"] != forged["id"]
+
+
+def test_ordinary_feedback_can_select_bounded_search_and_reach_candidate_ready(
+        tmp_path, monkeypatch):
+    tasks, evolution, generation, trigger, parent, improver, captured = \
+        _search_setup(tmp_path, monkeypatch)
+
+    [work] = trigger.drain_development()
+
+    assert work["status"] == "candidate_ready"
+    assert work["development_plan"]["source_ref"] == "orchestration_search"
+    assert work["search_intent"]["policy"]["target_qualified"] == 1
+    assert work["search_intent"]["source_statistical_units"] == [
+        "ordinary:" + work["source_episode_id"]]
+    options = {(item["candidate_type"], item["source_ref"])
+               for item in work["development_intent"]["options"]}
+    assert ("orchestration", "package_patch") in options
+    assert ("orchestration", "orchestration_search") in options
+    candidate = evolution.candidate(work["candidate"]["candidate_id"])
+    generated = generation.generation(work["candidate"]["generation_id"])
+    assert candidate["parent_package_id"] == parent["id"]
+    assert generated["improver_package_id"] == improver["id"]
+    assert evolution.active("general")["revision"] == 0
+    assert captured["id"] == work["id"]
+
+
+def test_finished_search_recovers_candidate_without_second_generation(
+        tmp_path, monkeypatch):
+    _, _, generation, trigger, _, _, _ = _search_setup(tmp_path, monkeypatch)
+    calls = []
+    original_generate = generation.generate
+    original_transition = trigger.store.transition_feedback_trigger
+    interrupted = {"value": False}
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs.get("search_attempt_id"))
+        return original_generate(*args, **kwargs)
+
+    def lose_candidate_ready(identity, **kwargs):
+        if kwargs.get("status") == "candidate_ready" and not interrupted["value"]:
+            interrupted["value"] = True
+            raise RuntimeError("simulated coordinator interruption after search finish")
+        return original_transition(identity, **kwargs)
+
+    monkeypatch.setattr(generation, "generate", counted)
+    monkeypatch.setattr(trigger.store, "transition_feedback_trigger",
+                        lose_candidate_ready)
+    with pytest.raises(RuntimeError, match="coordinator interruption"):
+        trigger.drain_development()
+    monkeypatch.setattr(trigger.store, "transition_feedback_trigger",
+                        original_transition)
+
+    [work] = trigger.drain_development()
+
+    assert work["status"] == "candidate_ready"
+    assert len(calls) == 1
+
+
+def test_open_or_unknown_search_fails_closed_without_replay(
+        tmp_path, monkeypatch):
+    _, _, _, trigger, _, _, _ = _search_setup(tmp_path, monkeypatch)
+    calls = []
+
+    def unresolved(_work, *, stop_event=None):
+        calls.append(stop_event)
+        raise ContractError("caller-owned search is unfinished")
+
+    monkeypatch.setattr(trigger, "_run_orchestration_search", unresolved)
+    [work] = trigger.drain_development()
+
+    assert work["status"] == "deferred"
+    assert work["reason"] == "orchestration_search_outcome_unknown"
+    assert trigger.develop(work["id"])["status"] == "deferred"
+    assert len(calls) == 1

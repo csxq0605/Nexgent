@@ -572,7 +572,8 @@ class EpisodeStore:
                                     development_intent=None,
                                     development_episode=None,
                                     development_plan=None,
-                                    candidate=None, evolution_update=None):
+                                    candidate=None, evolution_update=None,
+                                    search_intent=None):
         """CAS one outbox state while keeping evaluator-private data out."""
         transitions = {
             "observed": {"feedback_capture_started", "deferred"},
@@ -676,6 +677,70 @@ class EpisodeStore:
                     or any(not isinstance(value, str) or not value
                            for value in candidate.values())):
                 raise ValueError("Feedback candidate reference is invalid")
+        if search_intent is not None:
+            required = {
+                "id", "evaluator_id", "evaluator_snapshot",
+                "evaluator_snapshot_digest", "policy", "first_seed",
+                "max_seed_scan", "development_episode_budget",
+                "source_statistical_units",
+            }
+            policy_fields = {
+                "max_attempts", "target_qualified", "minimum_mean_delta",
+                "max_model_calls", "max_completion_tokens", "max_tool_calls",
+                "max_nodes",
+            }
+            policy = search_intent.get("policy") \
+                if isinstance(search_intent, dict) else None
+            units = search_intent.get("source_statistical_units") \
+                if isinstance(search_intent, dict) else None
+            development_budget = search_intent.get("development_episode_budget") \
+                if isinstance(search_intent, dict) else None
+            budget_fields = {
+                "max_model_calls", "max_completion_tokens", "max_tool_calls",
+                "max_nodes",
+            }
+            if (not isinstance(search_intent, dict)
+                    or set(search_intent) != required
+                    or not isinstance(search_intent.get("id"), str)
+                    or not search_intent["id"].startswith("orchestration-search-")
+                    or len(search_intent["id"]) > 200
+                    or not isinstance(search_intent.get("evaluator_id"), str)
+                    or not search_intent["evaluator_id"]
+                    or not isinstance(search_intent.get("evaluator_snapshot"), dict)
+                    or not isinstance(search_intent.get("evaluator_snapshot_digest"), str)
+                    or len(search_intent["evaluator_snapshot_digest"]) != 64
+                    or _digest(search_intent["evaluator_snapshot"])
+                    != search_intent["evaluator_snapshot_digest"]
+                    or not isinstance(policy, dict) or set(policy) != policy_fields
+                    or policy.get("target_qualified") != 1
+                    or type(policy.get("max_attempts")) is not int
+                    or not 1 <= policy["max_attempts"] <= 16
+                    or type(policy.get("minimum_mean_delta")) not in {int, float}
+                    or any(type(policy.get(key)) is not int or policy[key] < 0
+                           for key in budget_fields)
+                    or type(search_intent.get("first_seed")) is not int
+                    or type(search_intent.get("max_seed_scan")) is not int
+                    or not 1 <= search_intent["max_seed_scan"] <= 10_000
+                    or (development_budget is not None
+                        and (not isinstance(development_budget, dict)
+                             or set(development_budget) != budget_fields
+                             or any(type(development_budget.get(key)) is not int
+                                    or development_budget[key] < 0
+                                    for key in budget_fields)
+                             or development_budget["max_nodes"] < 1))
+                    or not isinstance(units, list) or len(units) != 1
+                    or not isinstance(units[0], str)
+                    or not units[0].startswith("ordinary:")):
+                raise ValueError("Feedback orchestration search intent is invalid")
+            try:
+                encoded_search = json.dumps(
+                    search_intent, ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":"), allow_nan=False)
+            except (TypeError, ValueError, RecursionError):
+                raise ValueError(
+                    "Feedback orchestration search intent must be finite JSON") from None
+            if len(encoded_search.encode("utf-8")) > 65_536:
+                raise ValueError("Feedback orchestration search intent is too large")
         if evolution_update is not None:
             allowed_evolution = {
                 "selection_intent", "selection_plan", "selection_trial",
@@ -794,6 +859,19 @@ class EpisodeStore:
                 raise ValueError("Candidate-ready development requires a candidate reference")
             if status != "candidate_ready" and candidate is not None:
                 raise ValueError("Only candidate-ready development may attach a candidate")
+            if search_intent is not None:
+                if (status != "candidate_generation_started"
+                        or effective_plan.get("source_ref") != "orchestration_search"
+                        or search_intent["source_statistical_units"]
+                        != ["ordinary:" + record["source_episode_id"]]
+                        or search_intent["evaluator_id"]
+                        != record["policy"]["evaluator_id"]):
+                    raise ValueError(
+                        "Search intent does not match feedback development")
+            if (status == "candidate_generation_started"
+                    and effective_plan.get("source_ref") == "orchestration_search"
+                    and search_intent is None):
+                raise ValueError("Orchestration search requires a frozen intent")
             if evolution_update is not None:
                 prior_evolution = record.get("evolution") or {}
                 overlap = set(prior_evolution) & set(evolution_update)
@@ -829,6 +907,8 @@ class EpisodeStore:
                 record["development_plan"] = deepcopy(development_plan)
             if candidate is not None:
                 record["candidate"] = deepcopy(candidate)
+            if search_intent is not None:
+                record["search_intent"] = deepcopy(search_intent)
             if evolution_update is not None:
                 record.setdefault("evolution", {}).update(deepcopy(evolution_update))
             encoded = _json(record)

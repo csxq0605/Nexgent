@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import math
 import time
 
 from ..kernel.programs import digest
@@ -35,6 +36,9 @@ _PROMOTION_KEYS = frozenset({
     "max_absolute_cost_when_parent_zero", "max_regressions",
     "monitor_min_score", "monitor_min_success_rate",
 })
+_SEARCH_BUDGET_KEYS = frozenset({
+    "max_model_calls", "max_completion_tokens", "max_tool_calls", "max_nodes",
+})
 
 
 def _finite_json(value, label, maximum=65_536):
@@ -56,7 +60,7 @@ def _policy(value):
     allowed = {
         "evaluator_id", "candidate_types", "development_split",
         "selection_split", "guard_split", "budget", "permissions",
-        "improver", "promotion_policy",
+        "improver", "promotion_policy", "orchestration_search",
     }
     if not set(value) <= allowed:
         raise ContractError("Feedback trigger policy contains unknown fields")
@@ -110,7 +114,48 @@ def _policy(value):
                 or any(not isinstance(improver.get(key), str) or not improver[key]
                        for key in set(improver) - {"channel", "revision"})):
             raise ContractError("Feedback trigger improver identity is invalid")
-    return {
+    search = value.get("orchestration_search")
+    if search is not None:
+        allowed_search = {
+            "max_attempts", "first_seed", "max_seed_scan", "minimum_mean_delta",
+            "max_model_calls", "max_completion_tokens", "max_tool_calls", "max_nodes",
+            "development_episode_budget",
+        }
+        required_search = {"max_attempts"} | _SEARCH_BUDGET_KEYS
+        if (not isinstance(search, dict) or not set(search) <= allowed_search
+                or not required_search <= set(search)
+                or type(search.get("max_attempts")) is not int
+                or not 1 <= search["max_attempts"] <= 16
+                or type(search.get("first_seed", 0)) is not int
+                or type(search.get("max_seed_scan", 128)) is not int
+                or not 1 <= search.get("max_seed_scan", 128) <= 10_000
+                or type(search.get("minimum_mean_delta", 0.0)) not in {int, float}
+                or not math.isfinite(search.get("minimum_mean_delta", 0.0))
+                or any(type(search[key]) is not int or search[key] < 0
+                       for key in _SEARCH_BUDGET_KEYS)):
+            raise ContractError("Feedback orchestration search policy is invalid")
+        development_budget = search.get("development_episode_budget")
+        if development_budget is not None and (
+                not isinstance(development_budget, dict)
+                or set(development_budget) != _SEARCH_BUDGET_KEYS
+                or any(type(development_budget[key]) is not int
+                       or development_budget[key] < 0
+                       for key in _SEARCH_BUDGET_KEYS)
+                or development_budget["max_nodes"] < 1):
+            raise ContractError(
+                "Feedback orchestration development budget is invalid")
+        search = {
+            "policy": {
+                "max_attempts": search["max_attempts"],
+                "target_qualified": 1,
+                "minimum_mean_delta": search.get("minimum_mean_delta", 0.0),
+                **{key: search[key] for key in sorted(_SEARCH_BUDGET_KEYS)},
+            },
+            "first_seed": search.get("first_seed", 0),
+            "max_seed_scan": search.get("max_seed_scan", 128),
+            "development_episode_budget": deepcopy(development_budget),
+        }
+    result = {
         "schema": POLICY_SCHEMA,
         "evaluator_id": evaluator_id,
         "candidate_types": sorted(candidate_types),
@@ -120,6 +165,9 @@ def _policy(value):
         "improver": deepcopy(improver),
         "promotion_policy": deepcopy(promotion),
     }
+    if search is not None:
+        result["orchestration_search"] = search
+    return result
 
 
 class AutoEvolutionService:
@@ -316,9 +364,9 @@ class AutoEvolutionService:
             ).fetchall()
         adoption = TaskCapabilityAdoptionService(
             self.tasks, self._services()[0], self._services()[1])
-        # Reserve three slots for episode O/S, generic package patch, and
-        # explicit abstention while keeping the total option set at 64.
-        for definition_id, encoded in rows[:61]:
+        # Reserve four slots for episode O/S, direct O/S patching, bounded O
+        # search, and explicit abstention while keeping the total at 64.
+        for definition_id, encoded in rows[:60]:
             try:
                 projected = json.loads(encoded)
                 kind = projected.get("kind")
@@ -358,12 +406,29 @@ class AutoEvolutionService:
                         "compiled_skill_observed": has_skill,
                     },
                 })
-            if self._mutation_policy(active["package"]) is not None:
+            mutation_policy = self._mutation_policy(active["package"])
+            if mutation_policy is not None:
                 options.append({
                     "candidate_type": "orchestration", "source_ref": "package_patch",
                     "evidence": {"parent_component_registry_digest": digest(
                         self._services()[1].feedback(
                             work["feedback_bundle"]["id"])["parent_component_registry"])},
+                })
+            search_policy = work["policy"].get("orchestration_search")
+            orchestration_policy = self._orchestration_mutation_policy(
+                active["package"])
+            if search_policy is not None and orchestration_policy is not None:
+                options.append({
+                    "candidate_type": "orchestration",
+                    "source_ref": "orchestration_search",
+                    "evidence": {
+                        "search_policy_digest": digest(search_policy),
+                        "parent_component_registry_digest": digest(
+                            self._services()[1].feedback(
+                                work["feedback_bundle"]["id"])[
+                                    "parent_component_registry"]),
+                        "target_class": "O",
+                    },
                 })
         if "no_change" in allowed:
             options.append({
@@ -446,6 +511,32 @@ class AutoEvolutionService:
             "component_classes": {path: classes[path] for path in paths},
             "allowed_operations": ["replace"],
             "max_patch_bytes": 300_000,
+        }
+
+    @classmethod
+    def _orchestration_mutation_policy(cls, parent):
+        """Narrow the optional search surface to O while preserving direct O/S."""
+        policy = cls._mutation_policy(parent)
+        if policy is None:
+            return None
+        if policy.get("patch_contract") == "nexgent.package-patch.v3":
+            from .generation import _component_registry_snapshot
+
+            registry = _component_registry_snapshot(parent)["components"]
+            mutable = [identity for identity in policy["mutable_components"]
+                       if registry[identity].get("class") == "O"]
+            if not mutable:
+                return None
+            return {**deepcopy(policy), "mutable_components": mutable}
+        classes = policy.get("component_classes") or {}
+        paths = [path for path in policy["mutable_paths"]
+                 if classes.get(path) == "O"]
+        if not paths:
+            return None
+        return {
+            **deepcopy(policy),
+            "mutable_paths": paths,
+            "component_classes": {path: "O" for path in paths},
         }
 
     @staticmethod
@@ -575,6 +666,99 @@ class AutoEvolutionService:
             "record_digest": generated["record_digest"],
         }
 
+    def _search_intent(self, work):
+        adapter, snapshot = self._adapter(work)
+        search = deepcopy(work["policy"].get("orchestration_search"))
+        if search is None:
+            raise ContractError("Orchestration search is not configured")
+        snapshot = _finite_json(
+            snapshot, "Orchestration search evaluator snapshot", maximum=32_768)
+        identity = "orchestration-search-" + digest({
+            "feedback_work_id": work["id"],
+            "feedback_bundle_id": work["feedback_bundle"]["id"],
+            "parent_revision": work["parent_revision"],
+            "development_plan": work["development_plan"],
+            "search_policy": search,
+            "evaluator_snapshot_digest": digest(snapshot),
+        })[:40]
+        return {
+            "id": identity,
+            "evaluator_id": work["policy"]["evaluator_id"],
+            "evaluator_snapshot": snapshot,
+            "evaluator_snapshot_digest": digest(snapshot),
+            "policy": deepcopy(search["policy"]),
+            "first_seed": search["first_seed"],
+            "max_seed_scan": search["max_seed_scan"],
+            "development_episode_budget": deepcopy(
+                search["development_episode_budget"]),
+            "source_statistical_units": [
+                "ordinary:" + work["source_episode_id"]],
+        }
+
+    def _search_candidate_reference(self, result):
+        qualified = result.get("qualified_candidate_ids") or []
+        if result.get("status") != "qualified" or len(qualified) != 1:
+            return None
+        candidate_id = qualified[0]
+        attempts = [event.get("content") or {} for event in result.get("events") or []
+                    if event.get("kind") == "attempt_finished"]
+        matches = [event for event in attempts
+                   if event.get("candidate_id") == candidate_id
+                   and isinstance(event.get("generation_id"), str)]
+        if len(matches) != 1:
+            raise ContractError("Qualified search candidate has no unique generation")
+        generated = self._services()[1].generation(matches[0]["generation_id"])
+        reference = self._candidate_reference(generated, "orchestration")
+        if reference is None or reference["candidate_id"] != candidate_id:
+            raise ContractError("Qualified search candidate generation is inconsistent")
+        return reference
+
+    def _run_orchestration_search(self, work, *, stop_event=None):
+        from .orchestration_development import DevelopmentOrchestrationQualifier
+        from .orchestration_search import BoundedOrchestrationSearch
+
+        evolution, generation = self._services()
+        intent = work.get("search_intent")
+        if not isinstance(intent, dict):
+            raise ContractError("Orchestration search lacks its frozen intent")
+        adapter, snapshot = self._adapter(work)
+        if (adapter.id != intent["evaluator_id"]
+                or digest(snapshot) != intent["evaluator_snapshot_digest"]
+                or snapshot != intent["evaluator_snapshot"]):
+            raise ContractError("Orchestration search evaluator snapshot changed")
+        qualifier = DevelopmentOrchestrationQualifier(
+            self.tasks, evolution, adapter,
+            snapshot=deepcopy(intent["evaluator_snapshot"]),
+            seed=intent["first_seed"],
+            source_statistical_units=intent["source_statistical_units"],
+            source_episode_id=work["source_episode_id"],
+            development_episode_budget=deepcopy(
+                intent["development_episode_budget"]),
+            stop_event=stop_event,
+            max_seed_scan=intent["max_seed_scan"],
+        )
+        parent = evolution.active(work["channel_id"])["package"]
+        mutation_policy = self._orchestration_mutation_policy(parent)
+        if mutation_policy is None:
+            raise ContractError("Active package has no mutable orchestration surface")
+        improver = work["development_intent"]["improver"]
+
+        def generate(_attempt, attempt_id, repair, remaining):
+            budget = {"max_" + key: value for key, value in remaining.items()}
+            return generation.generate(
+                work["channel_id"], work["feedback_bundle"]["id"], None,
+                mutation_policy, work["parent_revision"],
+                improver_channel=improver["channel"],
+                expected_improver_revision=improver["revision"],
+                budget=budget, stop_event=stop_event,
+                search_attempt_id=attempt_id, repair_brief=repair)
+
+        return BoundedOrchestrationSearch(
+            self.tasks, evolution, generation).run(
+                work["channel_id"], work["feedback_bundle"]["id"],
+                work["parent_revision"], deepcopy(intent["policy"]),
+                search_id=intent["id"], generate=generate, qualify=qualifier)
+
     def _dispatch_plan(self, work, plan, *, stop_event=None):
         evolution, generation = self._services()
         source = self.tasks.get_private(work["source_episode_id"])
@@ -607,7 +791,20 @@ class AutoEvolutionService:
                 expected_improver_revision=improver["revision"],
                 budget=deepcopy(work["policy"]["budget"]),
                 stop_event=stop_event)
+        if plan["source_ref"] == "orchestration_search":
+            return self._run_orchestration_search(work, stop_event=stop_event)
         raise ContractError("Feedback development plan has no supported dispatch")
+
+    def _stored_development_plan(self, work):
+        reference = work.get("development_plan") or {}
+        artifact = self.store.read(
+            reference["artifact_id"], work["development_episode"]["id"])
+        plan = self._validate_plan(
+            artifact["content"], work["development_intent"]["options"])
+        if (artifact.get("content_digest") != reference.get("digest")
+                or self._plan_reference(artifact, plan) != reference):
+            raise ContractError("Stored development plan differs from its reference")
+        return plan
 
     def develop(self, identity, *, stop_event=None):
         """Autonomously plan and propose one candidate; never score or promote it."""
@@ -663,60 +860,85 @@ class AutoEvolutionService:
                         "id": episode["id"], "package_id": episode["package_id"],
                         "package_digest": episode["package_digest"],
                     })
-            if work["status"] != "development_run":
-                if work["status"] != "candidate_generation_started":
-                    return work
-                # GenerationService has no caller-supplied idempotency key.
-                # A coordinator that restarts in this state cannot distinguish
-                # "not called" from "called but result not committed", so it
-                # must defer for reconciliation instead of sending again.
+            resuming_search = work["status"] == "candidate_generation_started" \
+                and (work.get("development_plan") or {}).get("source_ref") \
+                == "orchestration_search"
+            if work["status"] == "candidate_generation_started" and not resuming_search:
+                # Direct generation has no caller-supplied idempotency key. A
+                # restart cannot distinguish an uncalled provider from an
+                # uncommitted response, so it must never replay that boundary.
                 return self._defer(work, "candidate_generation_outcome_unknown")
-            episode = self.tasks.get_private(work["development_episode"]["id"])
-            if episode["status"] not in _TERMINAL:
-                try:
-                    episode = self.tasks.run(episode["id"], stop_event=stop_event)
-                except Exception:
-                    # The same Episode remains the only recovery identity.  A
-                    # later drain may resume it; this turn must not create a
-                    # second model request after an unknown outcome.
-                    return self.store.feedback_trigger(work["id"])
-            if episode["status"] not in _TERMINAL:
-                return self.store.feedback_trigger(work["id"])
-            if episode["status"] != "completed" or episode.get("usage", {}).get(
-                    "usage_complete") is not True:
-                return self.store.transition_feedback_trigger(
-                    work["id"], expected_revision=work["revision"], status="rejected",
-                    reason="development_episode_incomplete")
-            try:
-                if set(episode["output_refs"]) != {"development_plan"}:
-                    raise ContractError("Development Episode did not publish one plan")
-                artifact = self.store.read(
-                    episode["output_refs"]["development_plan"], episode["id"])
-                plan = self._validate_plan(
-                    artifact["content"], work["development_intent"]["options"])
-                plan_ref = self._plan_reference(artifact, plan)
-            except (KeyError, ValueError, ContractError):
-                return self.store.transition_feedback_trigger(
-                    work["id"], expected_revision=work["revision"], status="rejected",
-                    reason="development_plan_rejected")
-            if plan["candidate_type"] == "no_change":
-                return self.store.transition_feedback_trigger(
-                    work["id"], expected_revision=work["revision"], status="no_change",
-                    reason=plan["reason"][:200], development_plan=plan_ref)
-            if stop_event is not None and stop_event.is_set():
-                # Candidate generation has no caller-owned idempotency key. Do
-                # not enter its uncertainty boundary after cancellation.
+            if work["status"] not in {"development_run", "candidate_generation_started"}:
                 return work
-            work = self.store.transition_feedback_trigger(
-                work["id"], expected_revision=work["revision"],
-                status="candidate_generation_started", development_plan=plan_ref)
+            if resuming_search:
+                try:
+                    plan = self._stored_development_plan(work)
+                except (KeyError, ValueError, ContractError):
+                    return self._defer(work, "orchestration_search_intent_invalid")
+            else:
+                episode = self.tasks.get_private(work["development_episode"]["id"])
+                if episode["status"] not in _TERMINAL:
+                    try:
+                        episode = self.tasks.run(episode["id"], stop_event=stop_event)
+                    except Exception:
+                        # The same Episode remains the only recovery identity. A
+                        # later drain may resume it without creating a duplicate.
+                        return self.store.feedback_trigger(work["id"])
+                if episode["status"] not in _TERMINAL:
+                    return self.store.feedback_trigger(work["id"])
+                if episode["status"] != "completed" or episode.get("usage", {}).get(
+                        "usage_complete") is not True:
+                    return self.store.transition_feedback_trigger(
+                        work["id"], expected_revision=work["revision"], status="rejected",
+                        reason="development_episode_incomplete")
+                try:
+                    if set(episode["output_refs"]) != {"development_plan"}:
+                        raise ContractError("Development Episode did not publish one plan")
+                    artifact = self.store.read(
+                        episode["output_refs"]["development_plan"], episode["id"])
+                    plan = self._validate_plan(
+                        artifact["content"], work["development_intent"]["options"])
+                    plan_ref = self._plan_reference(artifact, plan)
+                except (KeyError, ValueError, ContractError):
+                    return self.store.transition_feedback_trigger(
+                        work["id"], expected_revision=work["revision"], status="rejected",
+                        reason="development_plan_rejected")
+                if plan["candidate_type"] == "no_change":
+                    return self.store.transition_feedback_trigger(
+                        work["id"], expected_revision=work["revision"], status="no_change",
+                        reason=plan["reason"][:200], development_plan=plan_ref)
+                if stop_event is not None and stop_event.is_set():
+                    return work
+                if plan["source_ref"] == "orchestration_search":
+                    provisional = {**work, "development_plan": plan_ref}
+                    try:
+                        search_intent = self._search_intent(provisional)
+                    except (KeyError, ValueError, ContractError):
+                        return self.store.transition_feedback_trigger(
+                            work["id"], expected_revision=work["revision"],
+                            status="rejected", reason="orchestration_search_unavailable",
+                            development_plan=plan_ref)
+                else:
+                    search_intent = None
+                work = self.store.transition_feedback_trigger(
+                    work["id"], expected_revision=work["revision"],
+                    status="candidate_generation_started", development_plan=plan_ref,
+                    search_intent=search_intent)
             try:
                 generated = self._dispatch_plan(work, plan, stop_event=stop_event)
-                candidate = self._candidate_reference(generated, plan["candidate_type"])
+                candidate = (self._search_candidate_reference(generated)
+                             if plan["source_ref"] == "orchestration_search"
+                             else self._candidate_reference(
+                                 generated, plan["candidate_type"]))
             except (KeyError, ValueError, ContractError):
+                if plan["source_ref"] == "orchestration_search":
+                    return self._defer(work, "orchestration_search_outcome_unknown")
                 candidate = None
             except Exception:
-                return self._defer(work, "candidate_generation_outcome_unknown")
+                return self._defer(
+                    work, "orchestration_search_outcome_unknown"
+                    if plan["source_ref"] == "orchestration_search"
+                    else "candidate_generation_outcome_unknown")
             if candidate is None:
                 if stop_event is not None and stop_event.is_set():
                     # The generation boundary was entered but produced no
@@ -724,7 +946,9 @@ class AutoEvolutionService:
                     return self._defer(work, "candidate_generation_interrupted")
                 return self.store.transition_feedback_trigger(
                     work["id"], expected_revision=work["revision"], status="rejected",
-                    reason="candidate_generation_rejected")
+                    reason=("orchestration_search_" + generated.get("status", "rejected")
+                            if plan["source_ref"] == "orchestration_search"
+                            else "candidate_generation_rejected"))
             return self.store.transition_feedback_trigger(
                 work["id"], expected_revision=work["revision"], status="candidate_ready",
                 candidate=candidate)
