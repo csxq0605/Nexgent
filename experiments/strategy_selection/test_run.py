@@ -126,3 +126,16 @@ def test_deadline_runtime_probe_is_local_and_integrated():
     result = run._deadline_runtime_preflight()
     assert result["external_model_called"] is False
     assert result["passed"], result["checks"]
+
+
+def test_local_sdk_import_failure_is_not_remote_outcome_unknown():
+    state = {"status": "failed", "events": [],
+             "failure_domain": "infrastructure"}
+    calls = [{"error_type": "ModelTransportError",
+              "transport_diagnostics": {
+                  "cause_types": ["ModuleNotFoundError"],
+                  "connection_phase": "unknown"}}]
+    failure = run._failure_receipt(
+        state, calls, None, expected_unknown=False, unknown_ok=None)
+    assert failure["class"] == "provider_transport"
+    assert failure["remote_outcome_unknown"] is False

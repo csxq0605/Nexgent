@@ -500,8 +500,12 @@ def _failure_receipt(state, calls, selected, *, expected_unknown, unknown_ok):
         failure_class, remote_unknown = "remote_outcome_unknown", True
     elif last.get("error_type") == "ModelTransportError":
         failure_class = "provider_transport"
-        remote_unknown = diagnostics.get("connection_phase") in {
-            "request_write", "response_read", "http_response", "unknown"}
+        local_import_failure = "ModuleNotFoundError" in diagnostics.get(
+            "cause_types", [])
+        remote_unknown = (not local_import_failure
+                          and diagnostics.get("connection_phase") in {
+                              "request_write", "response_read",
+                              "http_response", "unknown"})
     elif last.get("error_type") in {"ModelConfigurationError", "ModelBudgetError"}:
         failure_class, remote_unknown = "configuration_or_budget", False
     elif not calls:
