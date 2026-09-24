@@ -683,6 +683,73 @@ class TaskService:
             return None
         return component_id, component["ref"]
 
+    def _active_strategy_receipt(
+            self, identity, package, execution, selected_component_id):
+        """Bind the selected O component to the backend that actually returned."""
+        manifest = package["manifest"]
+        if manifest.get("manifest_version", 1) != 2:
+            return None
+        component_id = selected_component_id
+        component = manifest["components"][component_id]
+        kind, ref = component["kind"], component["ref"]
+        if kind == "entry":
+            source_path, _ = split_ref(manifest["entries"][ref], package["files"])
+            backend = "controlled_code"
+            invocation = {"entry": execution.get("entry"),
+                          "rpc_count": execution.get("rpc_count"),
+                          "instructions": execution.get("instructions")}
+        else:
+            source_path = manifest["workflows"][ref]["ref"]
+            backend = "executable_plan"
+            invocation = {"workflow_ref": execution.get("workflow_ref"),
+                          "plan_ref": execution.get("plan_ref"),
+                          "plan_revision": execution.get("plan_revision")}
+        if execution.get("kind") != backend:
+            raise ContractError("Active strategy backend differs from the executed backend")
+        return {
+            "kind": kind,
+            "component_id": component_id,
+            "package_digest": package["digest"],
+            "source_path": source_path,
+            "source_digest": package["component_digests"][source_path],
+            "backend": backend,
+            "invocation": invocation,
+            "budget_receipt": {
+                "limits": deepcopy(self.store.get(identity)["budget"]),
+                "usage": self.store.usage(identity),
+            },
+        }
+
+    def _record_strategy_entered(
+            self, identity, package, selected_component_id, backend):
+        """Persist backend entry separately from successful activation evidence."""
+        manifest = package["manifest"]
+        if manifest.get("manifest_version", 1) != 2:
+            return
+        component_id = selected_component_id
+        component = manifest["components"][component_id]
+        if component["kind"] == "entry":
+            source_path, _ = split_ref(
+                manifest["entries"][component["ref"]], package["files"])
+        else:
+            source_path = manifest["workflows"][component["ref"]]["ref"]
+        attempts = sum(
+            event.get("kind") == "strategy_entered"
+            for event in self.store.events(identity)) + 1
+        state = self.store.get(identity)
+        self.store.event(identity, "strategy_entered", {
+            "schema": "nexgent.strategy-entry.v1",
+            "attempt_id": f"{identity}/strategy/{attempts}",
+            "attempt": attempts,
+            "resume": bool(state.get("nodes")),
+            "kind": component["kind"],
+            "component_id": component_id,
+            "package_digest": package["digest"],
+            "source_path": source_path,
+            "source_digest": package["component_digests"][source_path],
+            "backend": backend,
+        })
+
     def _materialize_workflow(self, package, workflow_ref, capability_lease,
                               *, proposed_workflow=None,
                               capability_authority=None):
@@ -1784,7 +1851,14 @@ class TaskService:
             try:
                 workflow_orchestrator = self._workflow_orchestrator(
                     package, state["task"]["entry"])
+                selected_component_id = None
                 if workflow_orchestrator is None:
+                    if (package["manifest"].get("manifest_version", 1) == 2
+                            and state["task"]["entry"] == "execute"):
+                        selected_component_id = package["manifest"]["orchestrator"]
+                        self._record_strategy_entered(
+                            identity, package, selected_component_id,
+                            "controlled_code")
                     execution = run_package(
                         package, state["task"]["entry"], payload, handle,
                         stop_event=stop_event,
@@ -1792,7 +1866,12 @@ class TaskService:
                             "wall_seconds", 1200),
                         max_rpc=512, max_instructions=5_000_000,
                     )
+                    execution["execution"]["kind"] = "controlled_code"
                 else:
+                    selected_component_id = workflow_orchestrator[0]
+                    self._record_strategy_entered(
+                        identity, package, selected_component_id,
+                        "executable_plan")
                     execution = self._run_workflow_orchestrator(
                         identity, package, workflow_orchestrator[0],
                         workflow_orchestrator[1], payload, stop_event, notify)
@@ -1818,6 +1897,11 @@ class TaskService:
                     *execution["execution"].get("loaded_modules", []),
                     *(item["source_path"] for item in activations),
                 ]))
+                if selected_component_id is not None:
+                    execution["execution"]["active_strategy"] = (
+                        self._active_strategy_receipt(
+                            identity, package, execution["execution"],
+                            selected_component_id))
                 self._complete(identity, execution)
             except InterruptedError as exc:
                 self._change(identity, lambda s: s.update(

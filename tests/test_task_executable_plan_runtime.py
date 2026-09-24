@@ -335,6 +335,11 @@ def test_checker_feedback_revises_pending_repair_and_resume_does_not_replay(tmp_
     assert started.count("plan/nodes/alpha") == 1
     assert started.count("plan/nodes/beta") == 1
     assert started.count("plan/nodes/checker") == 1
+    strategy_attempts = [event["content"] for event in resumed["events"]
+                         if event["kind"] == "strategy_entered"]
+    assert [row["attempt"] for row in strategy_attempts] == [1, 2]
+    assert [row["resume"] for row in strategy_attempts] == [False, True]
+    assert len({row["attempt_id"] for row in strategy_attempts}) == 2
 
 
 def test_parallel_limit_admits_only_started_node_and_resume_runs_pending_peer(tmp_path):
@@ -475,6 +480,62 @@ def test_manifest_v1_runtime_remains_on_controlled_entry_path(tmp_path):
     assert result["current_plan_ref"] is None
     assert result["plan_execution"] is None
     assert result["execution"]["entry"] == "execute"
+
+
+def test_manifest_v2_non_execute_entry_does_not_claim_orchestrator_activation(tmp_path):
+    source = """def execute(payload, context):
+    raise RuntimeError('execute should not run')
+
+def improve(payload, context):
+    artifact = context.publish({'improved': True}, name='result')
+    return {'deliverables': {'result': artifact['id']}}
+"""
+    package = make_package({"main.py": source}, {
+        "manifest_version": 2,
+        "entries": {"execute": "main.py:execute", "improve": "main.py:improve"},
+        "roles": {}, "skills": {}, "workflows": {},
+        "components": {
+            "task-orchestrator": {"class": "O", "kind": "entry", "ref": "execute"}},
+        "orchestrator": "task-orchestrator",
+    })
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    episode = service.create(
+        "Run only the improver entry", deliverables=RESULT_SPEC,
+        package=package, entry="improve")
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "completed"
+    assert result["execution"]["entry"] == "improve"
+    assert "active_strategy" not in result["execution"]
+    assert not [event for event in result["events"]
+                if event["kind"] == "strategy_entered"]
+
+
+def test_failed_strategy_entry_is_audited_without_activation_receipt(tmp_path):
+    package = make_package({"main.py": """def execute(payload, context):
+    raise RuntimeError('strategy failed after entry')
+"""}, {
+        "manifest_version": 2,
+        "entries": {"execute": "main.py:execute"},
+        "roles": {}, "skills": {}, "workflows": {},
+        "components": {
+            "task-orchestrator": {"class": "O", "kind": "entry", "ref": "execute"}},
+        "orchestrator": "task-orchestrator",
+    })
+    service = TaskService(tmp_path, tools=ToolRegistry())
+    episode = service.create("Fail after backend entry", package=package)
+
+    result = service.run(episode["id"])
+
+    assert result["status"] == "failed"
+    assert result.get("execution") is None
+    entered = [event["content"] for event in result["events"]
+               if event["kind"] == "strategy_entered"]
+    assert len(entered) == 1
+    assert entered[0]["backend"] == "controlled_code"
+    assert entered[0]["package_digest"] == package["digest"]
+    assert entered[0]["source_digest"] == package["component_digests"]["main.py"]
 
 
 def test_resume_rejects_valid_but_substituted_input_artifact_evidence(tmp_path):

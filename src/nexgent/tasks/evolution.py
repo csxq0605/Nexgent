@@ -117,6 +117,8 @@ def _loaded_evidence(component, execution, package):
                 members.append({"component_id": identity,
                                 "operation": member["operation"], **actual})
         return {"kind": "component_set", "component_ids": component["component_ids"],
+                "changed_component_ids": component.get(
+                    "changed_component_ids", component["component_ids"]),
                 "members": members, "expected_package_digest": package["digest"],
                 "loaded_package_digest": (execution or {}).get("package_digest"),
                 "loaded": package_loaded and all(row["loaded"] for row in members)}
@@ -126,6 +128,26 @@ def _loaded_evidence(component, execution, package):
         path: package["component_digests"][path] for path in component["files"]}
     loaded_digests = {path: expected_digests[path] for path in actual}
     package_loaded = (execution or {}).get("package_digest") == package["digest"]
+    active_strategy = (execution or {}).get("active_strategy") or {}
+    strategy_required = (
+        component["class"] == "O"
+        and component["component_id"] == package["manifest"].get("orchestrator")
+        and component["kind"] in {"entry", "workflow"})
+    strategy_backend = "controlled_code" if component["kind"] == "entry" else "executable_plan"
+    strategy_matches = (
+        strategy_required
+        and (execution or {}).get("kind") == strategy_backend
+        and active_strategy.get("kind") == component["kind"]
+        and active_strategy.get("component_id") == component["component_id"]
+        and active_strategy.get("package_digest") == package["digest"]
+        and active_strategy.get("source_path") in component["files"]
+        and active_strategy.get("source_digest")
+        == expected_digests.get(active_strategy.get("source_path"))
+        and active_strategy.get("backend") == strategy_backend
+        and (component["kind"] != "entry"
+             or (execution or {}).get("entry") == component["ref"])
+        and (component["kind"] != "workflow"
+             or (execution or {}).get("workflow_ref") == component["ref"]))
     activation_required = component["kind"] in {"tool", "service_provider"}
     activation_matches = [
         row for row in ((execution or {}).get("activated_components") or [])
@@ -147,7 +169,8 @@ def _loaded_evidence(component, execution, package):
             "loaded": (bool(component["files"])
                        and len(actual) == len(component["files"])
                        and loaded_digests == expected_digests and package_loaded
-                       and (not activation_required or bool(activation_matches)))}
+                       and (not activation_required or bool(activation_matches))
+                       and (not strategy_required or strategy_matches))}
     if activation_required:
         result["activation_required"] = True
         result["activation_matches"] = len(activation_matches)
@@ -599,6 +622,7 @@ class EvolutionService:
                               if operation["op"] != "remove" else None),
                 }
             resolved_target = {"kind": "component_set", "component_ids": ids,
+                               "changed_component_ids": patch["hypothesis"]["component_ids"],
                                "members": members,
                                "package_patch_digest": digest(patch),
                                "mutation_policy_digest": digest(mutation_policy)}
@@ -606,7 +630,9 @@ class EvolutionService:
                 identity: (member["child"] or member["parent"])["class"]
                 for identity, member in members.items()}
             component_id = None
-            targeting = "manifest_component_set_v3"
+            targeting = ("manifest_component_set_v4"
+                         if patch["schema"] == "nexgent.package-patch.v4"
+                         else "manifest_component_set_v3")
         elif manifest_v2:
             if (not isinstance(activation_probe, dict)
                     or set(activation_probe) != {"kind", "component_id"}
@@ -1183,7 +1209,8 @@ class EvolutionService:
                                 "package_loaded": row["candidate"].get("error") is None}
                                for row in trial["pairs"]]
         elif (probe.get("kind") == "component_set_loaded"
-              and candidate.get("targeting") == "manifest_component_set_v3"):
+              and candidate.get("targeting") in {
+                  "manifest_component_set_v3", "manifest_component_set_v4"}):
             component = candidate.get("component_target")
             if (not isinstance(component, dict)
                     or component.get("kind") != "component_set"
@@ -1337,7 +1364,8 @@ class EvolutionService:
         if (decision.get("component_id") != candidate.get("component_id")
                 or decision.get("component_target") != candidate.get("component_target")
                 or (candidate.get("targeting") in {
-                        "manifest_component_v2", "manifest_component_set_v3"}
+                        "manifest_component_v2", "manifest_component_set_v3",
+                        "manifest_component_set_v4"}
                     and (not decision.get("loaded_evidence")
                          or not all(row.get("loaded") is True
                                     for row in decision["loaded_evidence"])))):

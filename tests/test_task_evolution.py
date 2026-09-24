@@ -270,6 +270,12 @@ def test_v2_component_identity_and_loaded_evidence_reach_guard_and_promotion(tmp
         policy=PromotionPolicy(monitor_min_score=2.0))
     candidate_run = trial["pairs"][0]["candidate"]
     candidate_package = tasks.store.package(candidate["package_id"])
+    active_strategy = candidate_run["execution"]["active_strategy"]
+    assert active_strategy["component_id"] == "task-orchestrator"
+    assert active_strategy["kind"] == "entry"
+    assert active_strategy["backend"] == "controlled_code"
+    assert active_strategy["source_digest"] == candidate_package[
+        "component_digests"]["main.py"]
     assert candidate_run["loaded_evidence"] == {
         "component_id": "task-orchestrator", "class": "O", "kind": "entry",
         "ref": "execute", "expected_files": ["main.py"],

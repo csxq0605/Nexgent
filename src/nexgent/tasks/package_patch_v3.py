@@ -17,6 +17,7 @@ from .tools import ContractError
 
 
 PACKAGE_PATCH_SCHEMA = "nexgent.package-patch.v3"
+PACKAGE_PATCH_SWITCH_SCHEMA = "nexgent.package-patch.v4"
 _REGISTRIES = {
     "entry": "entries", "role": "roles", "workflow": "workflows",
     "skill": "skills", "tool": "tools", "service_provider": "services",
@@ -145,7 +146,7 @@ def apply_package_patch(parent, patch, policy, *, provenance):
     if (not isinstance(patch, dict)
             or set(patch) != {"schema", "parent_package_digest", "hypothesis",
                            "operations", "child_manifest", "activation_targets"}
-            or patch["schema"] != PACKAGE_PATCH_SCHEMA
+            or patch["schema"] not in {PACKAGE_PATCH_SCHEMA, PACKAGE_PATCH_SWITCH_SCHEMA}
             or patch["parent_package_digest"] != parent["digest"]
             or not isinstance(patch["hypothesis"], dict)
             or set(patch["hypothesis"]) != {
@@ -254,10 +255,28 @@ def apply_package_patch(parent, patch, policy, *, provenance):
     if (not isinstance(identities, list) or len(identities) != len(changed_ids)
             or not all(isinstance(item, str) for item in identities)
             or set(identities) != changed_ids
-            or len(targets) != len(changed_ids)
-            or not all(isinstance(item, str) for item in targets)
-            or set(targets) != changed_ids):
-        raise ContractError("PackagePatch hypothesis and activation must name every changed component")
+            or not all(isinstance(item, str) for item in targets)):
+        raise ContractError("PackagePatch hypothesis must name every changed component")
+
+    old_orchestrator = old_manifest["orchestrator"]
+    new_orchestrator = manifest["orchestrator"]
+    old_kind = old_manifest["components"][old_orchestrator]["kind"]
+    new_kind = manifest["components"][new_orchestrator]["kind"]
+    backend_switch = (old_orchestrator != new_orchestrator
+                      and {old_kind, new_kind} == {"entry", "workflow"})
+    if patch["schema"] == PACKAGE_PATCH_SWITCH_SCHEMA:
+        expected_targets = changed_ids - {old_orchestrator}
+        if (not backend_switch or not targets
+                or len(set(targets)) != len(targets)
+                or set(targets) != expected_targets
+                or new_orchestrator not in targets or old_orchestrator in targets
+                or any(identity not in manifest["components"] for identity in targets)):
+            raise ContractError(
+                "PackagePatch v4 must activate every changed component except the "
+                "retired entry/workflow orchestrator")
+    elif set(targets) != changed_ids or len(targets) != len(changed_ids):
+        raise ContractError(
+            "PackagePatch v3 activation must name every changed component")
 
     old_ids = set(old_manifest["components"])
     new_ids = set(manifest["components"])

@@ -15,15 +15,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from nexgent.tasks.multirole_seed import PUBLISH_SOURCE, multirole_package
-from nexgent.tasks.evolution import EvolutionService, PromotionPolicy
+from nexgent.tasks.evolution import EvolutionService, PromotionPolicy, _loaded_evidence
 from nexgent.tasks.generation import GenerationService
 from nexgent.tasks.improver_seed import default_improver_package
 from nexgent.tasks.package_patch_v3 import (
-    PACKAGE_PATCH_SCHEMA, apply_package_patch,
+    PACKAGE_PATCH_SCHEMA, PACKAGE_PATCH_SWITCH_SCHEMA, apply_package_patch,
 )
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
-from nexgent.tasks.tools import ContractError, ToolRegistry
+from nexgent.tasks.tools import ContractError, ToolRegistry, ToolSpec
 
 
 def _proposal(parent):
@@ -368,4 +368,192 @@ def test_atomic_patch_rejects_partial_or_unauthorized_changes(damage):
     else:
         patch["child_manifest"]["roles"].pop("critic")
     with pytest.raises(ContractError):
+        apply_package_patch(parent, patch, policy, provenance={"origin": "test"})
+
+
+def _strategy_source(kind, revision):
+    if kind == "entry":
+        return (
+            "def execute(payload, context):\n"
+            f"    result = context.tool('switch.publish', {{'answer': 'entry-{revision}'}})\n"
+            "    return {'deliverables': {'result': result['artifact_id']}}\n")
+    workflow = {
+        "nodes": [{"id": "publish", "method": "tool",
+                   "params": {"name": "switch.publish",
+                              "arguments": {"answer": f"workflow-{revision}"}}}],
+        "outputs": {"deliverables": {"result": {"$node": "publish.artifact_id"}},
+                    "summary": f"workflow-{revision}"},
+    }
+    return json.dumps(workflow, sort_keys=True)
+
+
+def _switch_package(active_kind):
+    manifest = {
+        "manifest_version": 2,
+        "entries": {"execute": "agent/main.py:execute"},
+        "roles": {}, "skills": {},
+        "workflows": {"main": {"ref": "workflows/main.json", "max_parallel": 1,
+                                 "input_schema": {"type": "object"},
+                                 "output_schema": {"type": "object"}}},
+        "components": {
+            "entry-strategy": {"class": "O", "kind": "entry", "ref": "execute"},
+            "workflow-strategy": {"class": "O", "kind": "workflow", "ref": "main"},
+        },
+        "orchestrator": f"{active_kind}-strategy",
+    }
+    return make_package({"agent/main.py": _strategy_source("entry", "parent"),
+                         "workflows/main.json": _strategy_source("workflow", "parent")},
+                        manifest, provenance={"fixture": "switch-parent"})
+
+
+def _switch_patch(parent, target_kind):
+    manifest = deepcopy(parent["manifest"])
+    manifest["orchestrator"] = f"{target_kind}-strategy"
+    patch = {
+        "schema": PACKAGE_PATCH_SWITCH_SCHEMA,
+        "parent_package_digest": parent["digest"],
+        "hypothesis": {
+            "failure_mechanism": "the old backend is unsuitable",
+            "expected_behavior": "the other backend publishes the result",
+            "applicability": "tasks admitted to the frozen switch fixture",
+            "falsifier": "the selected backend or source identity is not executed",
+            "component_ids": ["entry-strategy", "workflow-strategy"],
+        },
+        "operations": [
+            {"op": "replace", "component_id": "entry-strategy",
+             "old_digest": parent["component_digests"]["agent/main.py"],
+             "content": _strategy_source("entry", "candidate")},
+            {"op": "replace", "component_id": "workflow-strategy",
+             "old_digest": parent["component_digests"]["workflows/main.json"],
+             "content": _strategy_source("workflow", "candidate")},
+        ],
+        "child_manifest": manifest,
+        "activation_targets": [f"{target_kind}-strategy"],
+    }
+    policy = {
+        "mutable_components": ["entry-strategy", "workflow-strategy"],
+        "allow_add": False, "allow_remove": False, "max_patch_bytes": 100000,
+        "capability_ceiling": [], "tool_ceiling": ["switch.publish"],
+        "max_parallel": 1,
+    }
+    return patch, policy
+
+
+@pytest.mark.parametrize(("parent_kind", "target_kind"), [
+    ("workflow", "entry"), ("entry", "workflow"),
+])
+def test_v4_cross_backend_switch_activates_only_the_executed_strategy(
+        tmp_path, parent_kind, target_kind):
+    def publish(arguments, context):
+        artifact = context.publish({"answer": arguments["answer"]}, name="result")
+        return {"artifact_id": artifact["id"]}
+
+    tool = ToolSpec("switch.publish", {"type": "object"}, {"type": "object"},
+                    "artifact_write", publish)
+    tasks = TaskService(tmp_path, tools=ToolRegistry([tool]))
+    evolution = EvolutionService(tasks)
+    parent = _switch_package(parent_kind)
+    evolution.register("switch", parent)
+    deliverables = [{"name": "result", "schema": {
+        "type": "object", "required": ["answer"],
+        "properties": {"answer": {"type": "string"}}}}]
+    budget = {"max_model_calls": 0, "max_completion_tokens": 100,
+              "max_tool_calls": 2, "max_nodes": 10}
+    observed = tasks.create(
+        "Exercise the original backend", deliverables=deliverables,
+        capabilities=[tool.name], package=parent,
+        context={"split": "development", "split_role": "development"},
+        constraints={"allowed_effects": ["artifact_write"]}, budget=budget)
+    assert tasks.run(observed["id"])["status"] == "completed"
+
+    patch, policy = _switch_patch(parent, target_kind)
+    child = apply_package_patch(parent, patch, policy,
+                                provenance={"origin": "switch-test"})
+    candidate = evolution.propose(
+        "switch", child, hypothesis=patch["hypothesis"],
+        feedback_episode_ids=[observed["id"]],
+        activation_probe={"kind": "component_set_loaded",
+                          "component_ids": patch["activation_targets"]},
+        origin="imported", package_patch=patch, mutation_policy=policy)
+    assert candidate["targeting"] == "manifest_component_set_v4"
+
+    class SwitchBenchmark:
+        id = "backend-switch"
+
+        def snapshot(self):
+            return {"id": self.id, "version": 1,
+                    "evaluator_digest": "backend-switch-v1"}
+
+        def tasks(self, split="selection", seed=0):
+            return [{"id": "selection/switch", "objective": "Run the selected backend",
+                     "inputs": {}, "deliverables": deliverables,
+                     "capabilities": [tool.name],
+                     "constraints": {"allowed_effects": ["artifact_write"]},
+                     "context": {"split": split, "split_role": split}}]
+
+        def evaluate(self, task_ref, outputs, execution_view):
+            return {"status": "accepted", "accepted": True,
+                    "score_available": True, "score": 1.0}
+
+    plan = evolution.plan_pair(
+        candidate["id"], SwitchBenchmark(), split="selection",
+        split_role="selection", budget=budget,
+        policy=PromotionPolicy(max_cost_ratio=2))
+    trial = evolution.run_pair(plan["id"], SwitchBenchmark())
+    candidate_run = trial["pairs"][0]["candidate"]
+    evidence = candidate_run["loaded_evidence"]
+    execution = candidate_run["execution"]
+    expected_component = f"{target_kind}-strategy"
+    old_path = ("workflows/main.json" if parent_kind == "workflow"
+                else "agent/main.py")
+    assert evidence["loaded"] is True
+    assert evidence["component_ids"] == [expected_component]
+    assert set(evidence["changed_component_ids"]) == {
+        "entry-strategy", "workflow-strategy"}
+    assert [row["component_id"] for row in evidence["members"]] == [
+        expected_component]
+    assert old_path not in execution["loaded_modules"]
+    assert execution["active_strategy"]["component_id"] == expected_component
+    assert execution["active_strategy"]["kind"] == target_kind
+    assert execution["active_strategy"]["source_digest"] == child[
+        "component_digests"][execution["active_strategy"]["source_path"]]
+    entered = [event for event in tasks.get(candidate_run["episode_id"])["events"]
+               if event["kind"] == "strategy_entered"]
+    assert entered[-1]["content"]["backend"] == execution["kind"]
+
+    tampered = deepcopy(execution)
+    tampered["active_strategy"]["source_digest"] = "0" * 64
+    assert _loaded_evidence(
+        candidate["component_target"], tampered, child)["loaded"] is False
+    tampered = deepcopy(execution)
+    tampered["kind"] = ("executable_plan" if target_kind == "entry"
+                        else "controlled_code")
+    assert _loaded_evidence(
+        candidate["component_target"], tampered, child)["loaded"] is False
+
+
+def test_v4_switch_rejects_empty_activation_and_v3_keeps_legacy_equality():
+    parent = _switch_package("workflow")
+    patch, policy = _switch_patch(parent, "entry")
+    patch["activation_targets"] = []
+    with pytest.raises(ContractError, match="v4"):
+        apply_package_patch(parent, patch, policy, provenance={"origin": "test"})
+    patch, policy = _switch_patch(parent, "entry")
+    patch["schema"] = PACKAGE_PATCH_SCHEMA
+    with pytest.raises(ContractError, match="v3 activation"):
+        apply_package_patch(parent, patch, policy, provenance={"origin": "test"})
+
+
+def test_v4_switch_rejects_a_changed_component_omitted_from_activation():
+    parent = _switch_package("workflow")
+    patch, policy = _switch_patch(parent, "entry")
+    patch["child_manifest"]["components"]["dormant-support"] = {
+        "class": "S", "kind": "resource", "ref": "support/dormant.txt"}
+    patch["operations"].append({
+        "op": "add", "component_id": "dormant-support",
+        "path": "support/dormant.txt", "content": "unexercised change"})
+    patch["hypothesis"]["component_ids"].append("dormant-support")
+    policy["allow_add"] = True
+
+    with pytest.raises(ContractError, match="activate every changed component"):
         apply_package_patch(parent, patch, policy, provenance={"origin": "test"})
