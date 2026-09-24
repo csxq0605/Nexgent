@@ -28,6 +28,15 @@ from nexgent.tasks.task_skill_compiler import (
 from nexgent.tasks.tools import ContractError, ToolRegistry
 
 
+def test_failed_generated_workflow_is_not_adopted_even_with_archive_ref():
+    with pytest.raises(ContractError, match="failed or incomplete workflow"):
+        TaskSkillAdoptionService._creator_workflow({
+            "status": "failed", "usage": {"usage_complete": True},
+            "plan_workflow_ref": "generated://archived-but-failed",
+            "plan_workflow_snapshot": {}, "plan_workflow_versions": {},
+        })
+
+
 def _parent_package():
     workflow = {
         "nodes": [

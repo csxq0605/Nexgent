@@ -347,7 +347,9 @@ class AutoEvolutionService:
             has_skill = any(
                 event.get("kind") == "task_skill_compiled"
                 for event in episode.get("events") or [])
-            if has_workflow or has_skill:
+            source_completed = (episode.get("status") == "completed"
+                                and episode.get("usage", {}).get("usage_complete") is True)
+            if source_completed and (has_workflow or has_skill):
                 options.append({
                     "candidate_type": "orchestration", "source_ref": "episode_os",
                     "evidence": {

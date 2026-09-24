@@ -1,0 +1,50 @@
+{
+  "schema": "nexgent.ordinary-feedback-live-receipt.v1",
+  "contract": "WORKBENCH_ALIGNED_CONTRACT.md",
+  "run_kind": "single_preregistered_same_family_mechanism_probe",
+  "model": "mimo-v2.6-flash",
+  "entry": "nexgent task",
+  "source_task": "workbench development seed 11 public fields",
+  "source_episode_id": "episode-102f766b1a3e4b07",
+  "source_status": "failed",
+  "source_model_calls": 2,
+  "source_error_class": "generated_workflow_missing_result_binding",
+  "feedback_work_id": "feedback-work-8569150278b01aa4c69fdd93",
+  "development_episode_id": "episode-e8c48f2c23644e6d",
+  "development_model_calls": 1,
+  "development_choice": {
+    "candidate_type": "orchestration",
+    "source_ref": "episode_os"
+  },
+  "candidate_id": "candidate-de7802f7463343a7",
+  "selection_plan_id": "plan-706b64482bea400e",
+  "selection_trial_id": "trial-766e14acc0e5477a",
+  "selection_decision_id": "decision-9295b328da2b4ad3",
+  "selection_parent": {
+    "episode_id": "episode-bc09eb6405794a49",
+    "accepted": false,
+    "score": 0.0,
+    "model_calls": 3
+  },
+  "selection_candidate": {
+    "episode_id": "episode-15921581133c4060",
+    "accepted": false,
+    "score": 0.0,
+    "model_calls": 1
+  },
+  "decision_gates": {
+    "behavior_activated": false,
+    "candidate_completed": false,
+    "cost": true,
+    "measurement_complete": true,
+    "quality": false,
+    "regressions": true,
+    "selection_role": true,
+    "success_rate": false
+  },
+  "work_status": "rejected",
+  "work_reason": "independent_selection_rejected",
+  "active_channel_revision": 0,
+  "guard_run": false,
+  "later_reuse": false
+}

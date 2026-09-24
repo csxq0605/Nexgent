@@ -167,7 +167,7 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 - [x] E2-B 包能力运行时：后续任务可从包清单读取工具及服务；工具在受控 worker 中调用，服务在后续模型调用前自动应用；预算、名称冲突、失败无激活、成功后组件身份收据的 28 项定向回归通过。此项为确定性运行时验证，尚未通过任务来源候选的晋升／真实模型跨任务收益。
 - [x] E3-A 任务来源能力采用桥：已成功使用的任务内 tool/service Definition 可生成携带源码的包候选；两类候选在确定性模型边界下均通过独立配对、激活证据、guard、晋升，并由重建的 TaskService 在新 Episode 中自动调用／应用。未使用的 Definition 和过期反馈拒绝。4 项新纵向测试通过；并非真实模型效果证明。
 - [x] E3-B.1 单次真实 MiMo 能力继承探针：v1 输出包装解析失败已保留；v2 模型生成通用工具、完成独立配对与晋升、通过 guard，并在单独 OS 进程的新任务中实际调用。selection 父版本因非 JSON 响应失败，候选质量 1／父 0 且候选成本较高；只说明技术路径，不构成多任务净收益。[原始解释](experiments/kernel_spike/RESULTS.md)。
-- [ ] E3-B.2 按[普通任务反馈进化合同](docs/design/ordinary-feedback-evolution-v1.md)分片实现：a 持久终态触发与重启扫描、b 公开反馈→模型 R0 规划→候选、c 候选→独立配对→拒绝／晋升→guard／回滚→后续真实加载收据，机制已接到普通 Main／CLI；64 项相邻定向测试通过。首次[真实 MiMo 普通入口](experiments/ordinary_feedback_live/RESULTS.md)完成 3 次源任务模型调用、1 次开发规划调用，生成编排候选并跑到独立 selection；父、候选均失败，拒绝晋升。真实模型的 guard／复用正例与 d 多任务族净效果对照均未完成。E 阶段完整出口仍未过。
+- [ ] E3-B.2 按[普通任务反馈进化合同](docs/design/ordinary-feedback-evolution-v1.md)分片实现：a 持久终态触发与重启扫描、b 公开反馈→模型 R0 规划→候选、c 候选→独立配对→拒绝／晋升→guard／回滚→后续真实加载收据，机制已接到普通 Main／CLI；73 项相邻定向测试通过。首次[真实普通入口](experiments/ordinary_feedback_live/RESULTS.md)完成源任务、模型开发规划、编排候选与独立 selection，父、候选均失败而拒绝。[同任务族 READY 探针](experiments/ordinary_feedback_live/WORKBENCH_ALIGNED_RESULTS.md)也到达独立拒绝：来源图因绑定错误失败，却被 R0 原样采用；现已在候选准入和采用服务阻止失败整图直接复用。真实模型的 guard／复用正例与 d 多任务族净效果对照均未完成。E 阶段完整出口仍未过。
 - [ ] E 将任务来源的工具／服务／编排候选接入独立评价、晋升、后续任务自动复用与回滚，再进入 F 的对照研究。
 
 计划重定见 `3919a0d`；后续逐阶段提交记录在[实现与来源对照账本](docs/research/implementation-reference-tracker.md)。A2–G 的完成状态由实际代码与运行收据逐项更新。

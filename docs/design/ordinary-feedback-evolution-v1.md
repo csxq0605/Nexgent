@@ -21,6 +21,7 @@
 1. 仅从具有冻结包通道和开发角色的终态普通 Episode 创建工作项。未配置通道策略、无独立评价器或冻结父版本已变化时，明确记为 `deferred`，不自行评价或晋升。
 2. FeedbackBundle 提供有界、脱敏的公开 outcome／evaluation／调用成本，以及 `context.feedback` 的安全投影；私有评分答案、凭据、模型原文和未授权工件不得进入开发 Episode。
 3. 后续能力开发本身是同一 AgentPackage 的受限普通 Episode。它从反馈判断 `tool`、`service_provider`、`orchestration` 或 `no_change`，提交一次版本化的候选意图与可证伪假设。宿主根据实际创建／使用／编译收据反查模型声称的对象 ID；单工作项最多一个候选，防止复合晋升失去因果归因。
+   直接采用任务生成的**整张工作流**还要求来源 Episode 已完成且使用量完整；只有归档、但执行失败的图不能作为 `episode_os` 候选。失败图的修复应走通用包补丁路径，再由独立任务检验。
 4. 已用工具／服务走 `TaskCapabilityAdoptionService`；任务生成的工作流走 `TaskSkillAdoptionService`；通用 O 补丁走现有 `GenerationService`。候选生成完成后，协调器通过 `EvolutionService` 进入配对评价及 guard，沿用同预算、独立评分、激活证据、CAS 晋升与回滚。
 5. 晋升后新普通 Episode 自动读取包通道新版本；只有它的实际 `activated_components` 或 `active_strategy` 匹配晋升组件时，才能记录 `reuse_observed`。晋升事件本身不等于后续复用，更不等于多任务净收益。
 

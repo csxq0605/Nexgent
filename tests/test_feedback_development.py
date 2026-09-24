@@ -98,6 +98,19 @@ def _hypothesis():
     }
 
 
+def test_failed_generated_workflow_is_not_offered_for_direct_reuse(tmp_path):
+    plan = {
+        "schema": DEVELOPMENT_PLAN_SCHEMA, "candidate_type": "no_change",
+        "source_ref": None, "hypothesis": None, "reason": "No reusable evidence.",
+    }
+    tasks, evolution, trigger, _, episode, work = _setup(tmp_path, plan)
+    failed = tasks.get_private(episode["id"])
+    failed["status"] = "failed"
+    failed["plan_workflow_ref"] = "generated://archived-but-failed"
+    options = trigger._candidate_options(work, failed, evolution.active("general"))
+    assert {item["source_ref"] for item in options} == {"package_patch", None}
+
+
 def test_public_feedback_planner_can_abstain_without_candidate_or_promotion(tmp_path):
     plan = {
         "schema": DEVELOPMENT_PLAN_SCHEMA,

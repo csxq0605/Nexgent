@@ -198,6 +198,10 @@ class TaskSkillAdoptionService:
         if not (isinstance(workflow_ref, str)
                 and workflow_ref.startswith("generated://")):
             return None
+        if (creator.get("status") != "completed"
+                or creator.get("usage", {}).get("usage_complete") is not True):
+            raise ContractError(
+                "Task-skill adoption cannot reuse a failed or incomplete workflow")
         if (not isinstance(workflow, dict)
                 or workflow_ref != "generated://" + digest(workflow)
                 or not isinstance(versions, dict)
@@ -250,7 +254,7 @@ class TaskSkillAdoptionService:
                 or active["revision"] != expected_revision):
             raise ContractError("Task-skill adoption feedback or active parent is stale")
         try:
-            creator = self.store.get(creator_episode_id)
+            creator = self.tasks.get_private(creator_episode_id)
         except KeyError as exc:
             raise ContractError("Task-skill adoption creator is not local") from exc
         feedback_episode_ids = {
