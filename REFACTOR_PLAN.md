@@ -160,7 +160,7 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 - [x] D1-B.0 将真实开放循环和 Main DAG 组合为同包双 O 候选，冻结候选／模型选择纯合同；30 项联合定向测试通过。随后由 D1-B.1 接入执行。
 - [x] D1-B.1 同一普通入口由模型在冻结候选中选择 DAG／开放循环，持久化决策、模型调用与预算收据；completed 选择可恢复而不重发，started 未知结果等待核对，非法选择不回退。13 项集成定向测试通过；仅为确定性模型边界，真实 MiMo 选择与效果尚未验证。
 - [x] D1-B.2 已持久化的 root Episode 绝对 wall-clock 截止时间接入 selector、DAG、代码与恢复准入；34 项相关定向测试通过。按[预注册合同](experiments/strategy_selection/CONTRACT.md)运行两批真实 MiMo 探针：[结果](experiments/strategy_selection/RESULTS.md)中第一批为本地 SDK 缺失，第二批两个主任务均失败，DAG 题被选为开放循环；H1–H4 均不通过。
-- [x] D1-C 机制切片：已完成 DAG 节点反馈可触发真实 gateway 选择，同一 Episode 原子保存检查点与交接工件、转入 entry 后端，恢复时核验收据且不重跑已完成节点；多检查点 continue→switch 的 RPC 槽位独立。63 项相关定向测试通过。尚无真实 MiMo 中途切换成功收据，故 D1 整体出口未过；D1-D 冻结对照也未完成。
+- [x] D1-C 机制切片：已完成 DAG 节点反馈触发真实 gateway 选择、同一 Episode 原子交接、entry 首个动作读取 handoff、恢复不重跑已完成节点；多检查点 continue→switch 的 RPC 槽位独立。生产 Main 图提案可声明检查点，默认开放循环可读取 handoff；宿主可通过有来源记录的 `StrategyStart` 冻结实验初始 DAG 而不伪造模型收据。机制及生产接线已有定向测试，[真实探针合同草案](experiments/strategy_checkpoint/CONTRACT.md)已固定，四条件离线预检及真实 MiMo 中途切换收据尚缺。D1 整体出口和 D1-D 冻结对照未过。
 - [x] E0 独立配对／guard 的宿主能力授权冻结：父子两臂和监控任务使用计划中的同一 `EpisodeAuthority`，benchmark 任务不能自授。确定性双模式回归通过；动态工具／服务发布与行为激活门仍未接入。
 - [x] E1 惰性[可携带能力发布合同](docs/design/capability-release-v1.md)：冻结纯 tool/service 的源码、接口、权限要求与创建任务谱系；不授权、不部署、不复用原 Definition。11 项新合同测试通过；E 阶段出口仍未通过。
 - [x] E2-A 包候选结构：AgentPackage manifest v2 可声明纯工具及 `model_context.v1` 服务组件，PackagePatch v3 可携带新增 S 组件；演化门要求对应的运行激活证据。100 项定向测试通过。此步仅建立候选与证据合同，尚未证明跨任务运行。
