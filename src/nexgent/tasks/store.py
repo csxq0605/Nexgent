@@ -140,6 +140,19 @@ class EpisodeStore:
                 CREATE TABLE IF NOT EXISTS task_deadlines(
                     root_id TEXT PRIMARY KEY, started_at REAL NOT NULL,
                     deadline_at REAL NOT NULL, wall_seconds REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS task_feedback_outbox(
+                    id TEXT PRIMARY KEY,
+                    trigger_key TEXT NOT NULL UNIQUE,
+                    channel_id TEXT,
+                    parent_revision INTEGER,
+                    source_episode TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    updated REAL NOT NULL,
+                    data TEXT NOT NULL);
+                CREATE UNIQUE INDEX IF NOT EXISTS task_feedback_outbox_source
+                    ON task_feedback_outbox(channel_id,parent_revision,source_episode)
+                    WHERE channel_id IS NOT NULL AND parent_revision IS NOT NULL;
                 CREATE INDEX IF NOT EXISTS task_calls_root ON task_calls(root_id);
                 CREATE INDEX IF NOT EXISTS task_resources_root ON task_resources(root_id,kind);
                 CREATE INDEX IF NOT EXISTS task_memory_scope ON task_memory(namespace,split);
@@ -416,6 +429,185 @@ class EpisodeStore:
     def list(self):
         with self.connect() as db:
             return [json.loads(r[0]) for r in db.execute("SELECT state FROM task_episodes ORDER BY updated DESC,id")]
+
+    def terminal_episode_ids(self, *, after_id=None, limit=256):
+        """Return one stable, bounded page for restart-time trigger scans."""
+        if after_id is not None and (not isinstance(after_id, str) or not after_id):
+            raise ValueError("Terminal Episode cursor must be a nonempty identity")
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("Terminal Episode page limit must be in [1, 256]")
+        query = (
+            "SELECT id FROM task_episodes "
+            "WHERE json_extract(state,'$.status') IN ('completed','failed','cancelled') "
+        )
+        params = []
+        if after_id is not None:
+            query += "AND id>? "
+            params.append(after_id)
+        query += "ORDER BY id LIMIT ?"
+        params.append(limit)
+        with self.connect() as db:
+            return [row[0] for row in db.execute(query, params).fetchall()]
+
+    def put_feedback_trigger(self, record):
+        """Insert one terminal-Episode feedback intent without replacing it."""
+        record = deepcopy(record)
+        required = {
+            "id", "schema", "trigger_key", "channel_id", "parent_revision",
+            "source_episode_id", "status", "reason", "policy", "policy_digest",
+            "source", "created_at", "updated_at", "revision",
+        }
+        if not isinstance(record, dict) or set(record) != required:
+            raise ValueError("Feedback trigger record shape is invalid")
+        channel, parent_revision = record["channel_id"], record["parent_revision"]
+        configured = channel is not None or parent_revision is not None
+        if configured and (not isinstance(channel, str) or not channel
+                           or type(parent_revision) is not int
+                           or parent_revision < 0):
+            raise ValueError("Configured feedback trigger key is invalid")
+        if not configured and (channel is not None or parent_revision is not None):
+            raise ValueError("Unconfigured feedback trigger key must be fully null")
+        if (not isinstance(record["id"], str) or not record["id"]
+                or not isinstance(record["trigger_key"], str)
+                or len(record["trigger_key"]) != 64
+                or not isinstance(record["source_episode_id"], str)
+                or not record["source_episode_id"]
+                or record["status"] not in {"observed", "deferred"}
+                or type(record["revision"]) is not int or record["revision"] != 0
+                or type(record["created_at"]) not in {int, float}
+                or type(record["updated_at"]) not in {int, float}):
+            raise ValueError("Feedback trigger identity or state is invalid")
+        expected_key = _digest({
+            "schema": record["schema"], "channel_id": channel,
+            "parent_revision": parent_revision,
+            "source_episode_id": record["source_episode_id"],
+        })
+        if (record["schema"] != "nexgent.ordinary-feedback-work.v1"
+                or record["trigger_key"] != expected_key
+                or record["id"] != "feedback-work-" + expected_key[:24]
+                or (record["policy"] is None) != (record["policy_digest"] is None)
+                or (record["policy"] is not None
+                    and _digest(record["policy"]) != record["policy_digest"])):
+            raise ValueError("Feedback trigger key or policy digest is invalid")
+        encoded = _json(record)
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            source = self._get(db, record["source_episode_id"])
+            if source["status"] not in {"completed", "failed", "cancelled"}:
+                raise ValueError("Feedback trigger source must be terminal")
+            source_projection = record["source"]
+            if (not isinstance(source_projection, dict)
+                    or set(source_projection) != {
+                        "kind", "terminal_status", "package_id", "package_digest"}
+                    or source_projection["terminal_status"] != source["status"]
+                    or source_projection["package_id"] != source["package_id"]
+                    or source_projection["package_digest"] != source["package_digest"]):
+                raise ValueError("Feedback trigger source identity is invalid")
+            registration = (source.get("task", {}).get("context") or {}).get(
+                "package_channel_registration")
+            registration_keys = {"channel", "revision", "package_id", "package_digest"}
+            valid_registration = (
+                isinstance(registration, dict)
+                and set(registration) == registration_keys
+                and registration.get("package_id") == source["package_id"]
+                and registration.get("package_digest") == source["package_digest"]
+                and isinstance(registration.get("channel"), str)
+                and bool(registration["channel"])
+                and type(registration.get("revision")) is int
+                and registration["revision"] >= 0)
+            if configured and (not valid_registration
+                               or channel != registration["channel"]
+                               or parent_revision != registration["revision"]):
+                raise ValueError("Feedback trigger does not match the frozen package channel")
+            if not configured and valid_registration:
+                raise ValueError("Unconfigured feedback trigger hides a frozen package channel")
+            previous = db.execute(
+                "SELECT data FROM task_feedback_outbox WHERE trigger_key=?",
+                (record["trigger_key"],)).fetchone()
+            if previous is not None:
+                return json.loads(previous[0])
+            db.execute(
+                "INSERT INTO task_feedback_outbox "
+                "(id,trigger_key,channel_id,parent_revision,source_episode,status,"
+                "revision,updated,data) VALUES(?,?,?,?,?,?,?,?,?)",
+                (record["id"], record["trigger_key"], channel, parent_revision,
+                 record["source_episode_id"], record["status"], 0,
+                 record["updated_at"], encoded))
+        return record
+
+    def feedback_trigger(self, identity):
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT data FROM task_feedback_outbox WHERE id=? OR trigger_key=?",
+                (identity, identity)).fetchone()
+        if row is None:
+            raise KeyError(identity)
+        return json.loads(row[0])
+
+    def feedback_triggers(self, *, statuses=None, limit=256):
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("Feedback trigger page limit must be in [1, 256]")
+        allowed = {"observed", "feedback_capture_started", "feedback_captured", "deferred"}
+        if statuses is None:
+            statuses = sorted(allowed)
+        if (not isinstance(statuses, (list, tuple)) or not statuses
+                or any(status not in allowed for status in statuses)):
+            raise ValueError("Feedback trigger statuses are invalid")
+        marks = ",".join("?" for _ in statuses)
+        with self.connect() as db:
+            rows = db.execute(
+                f"SELECT data FROM task_feedback_outbox WHERE status IN ({marks}) "
+                "ORDER BY updated,id LIMIT ?", (*statuses, limit)).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def transition_feedback_trigger(self, identity, *, expected_revision, status,
+                                    reason=None, feedback_bundle=None):
+        """CAS one outbox state while keeping evaluator-private data out."""
+        transitions = {
+            "observed": {"feedback_capture_started", "deferred"},
+            "feedback_capture_started": {"feedback_captured", "deferred"},
+            "feedback_captured": set(),
+            "deferred": set(),
+        }
+        if status not in transitions:
+            raise ValueError("Feedback trigger target status is invalid")
+        if reason is not None and (not isinstance(reason, str) or not reason
+                                   or len(reason) > 200):
+            raise ValueError("Feedback trigger reason must be bounded text")
+        if feedback_bundle is not None:
+            if (not isinstance(feedback_bundle, dict)
+                    or set(feedback_bundle) != {"id", "digest"}
+                    or any(not isinstance(value, str) or not value
+                           for value in feedback_bundle.values())):
+                raise ValueError("Feedback bundle reference is invalid")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT data FROM task_feedback_outbox WHERE id=? OR trigger_key=?",
+                (identity, identity)).fetchone()
+            if row is None:
+                raise KeyError(identity)
+            record = json.loads(row[0])
+            if record["revision"] != expected_revision:
+                raise StateConflict("Feedback trigger has a newer revision")
+            if status not in transitions[record["status"]]:
+                raise StateConflict("Feedback trigger transition is invalid")
+            if status == "feedback_captured" and feedback_bundle is None:
+                raise ValueError("Captured feedback requires an immutable bundle reference")
+            if status != "feedback_captured" and feedback_bundle is not None:
+                raise ValueError("Only captured feedback may attach a bundle reference")
+            record["status"] = status
+            record["reason"] = reason
+            record["revision"] += 1
+            record["updated_at"] = time.time()
+            if feedback_bundle is not None:
+                record["feedback_bundle"] = deepcopy(feedback_bundle)
+            encoded = _json(record)
+            db.execute(
+                "UPDATE task_feedback_outbox SET status=?,revision=?,updated=?,data=? "
+                "WHERE id=?", (status, record["revision"], record["updated_at"],
+                               encoded, record["id"]))
+        return record
 
     def save(self, state):
         state = deepcopy(state)

@@ -294,6 +294,32 @@ class TaskService:
         self.gateway_factory = gateway_factory
         self._projection_lock = threading.RLock()
         self._parallel_context = threading.local()
+        self._feedback_trigger = None
+
+    def attach_feedback_trigger(self, trigger):
+        """Attach the bounded terminal observer used by AutoEvolutionService."""
+        callback = getattr(trigger, "observe_terminal", None)
+        if not callable(callback):
+            raise TypeError("Feedback trigger must provide observe_terminal")
+        if self._feedback_trigger is not None and self._feedback_trigger is not trigger:
+            raise ValueError("A feedback trigger is already attached")
+        self._feedback_trigger = trigger
+        return trigger
+
+    def _observe_terminal_feedback(self, identity):
+        """Best-effort enqueue; a restart scan closes any interruption window."""
+        trigger = self._feedback_trigger
+        if trigger is None:
+            return None
+        if self.store.get(identity).get("status") not in {
+                "completed", "failed", "cancelled"}:
+            return None
+        try:
+            return trigger.observe_terminal(identity)
+        except Exception:
+            # Task completion is the source of truth.  The coordinator scans
+            # terminal projections on restart and must not change task outcome.
+            return None
 
     def _benchmark_registry(self):
         """Use project-aware discovery while preserving injected no-arg test facades."""
@@ -484,6 +510,8 @@ class TaskService:
             raise ContractError("Task inputs, context, constraints and budget must be JSON objects")
         if "benchmark_registration" in context or "benchmark_registration_digest" in context:
             raise ContractError("Benchmark registration context is host-owned")
+        if "package_channel_registration" in context:
+            raise ContractError("Package channel registration context is host-owned")
         if "improver_channel_registration" in context:
             raise ContractError("Improver channel registration context is host-owned")
         if (_memory_candidate is None and "memory_candidate_evaluation" in context):
@@ -504,9 +532,15 @@ class TaskService:
             # omit it, but cannot choose or suppress the value persisted for a
             # newly created Episode.
             benchmark_registration["host_runtime"] = current_host_runtime
+        if (package_registration is not None and benchmark_registration is None
+                and "split" not in context and "split_role" not in context):
+            # A host-resolved package channel makes an otherwise ordinary task
+            # eligible for the public feedback loop. Freeze that role at task
+            # creation; benchmark and explicitly split tasks keep their own
+            # information boundaries.
+            context["split"] = "development"
+            context["split_role"] = "development"
         if package_registration is not None:
-            if "package_channel_registration" in context:
-                raise ContractError("Package channel registration context is host-owned")
             context["package_channel_registration"] = {
                 "channel": package_registration["channel"],
                 "revision": package_registration["revision"],
@@ -2609,6 +2643,7 @@ class TaskService:
         with self.store.lock(identity):
             state = self.store.get(identity)
             if state["status"] == "completed":
+                self._observe_terminal_feedback(identity)
                 return self.get(identity)
             if state["status"] == "cancelled":
                 raise ContractError("A cancelled task needs a new task identity")
@@ -2957,6 +2992,7 @@ class TaskService:
             finally:
                 deadline_timer.cancel()
                 self.store.event(identity, "episode_finished", {"status": self.store.get(identity)["status"]})
+                self._observe_terminal_feedback(identity)
                 notify()
             return self.get(identity)
 
