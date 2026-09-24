@@ -173,6 +173,7 @@ DAG、多智能体团队、工具插件和代码编排都是系统可使用及�
 - [ ] E3-B.2 [图预检下一次真实探针](experiments/ordinary_feedback_live/WORKBENCH_GRAPH_PREFLIGHT_RESULTS.md)在默认 R0 开发规划处停下：来源 4 次模型调用后协议失败，R0 1 次完整计量调用返回 JSON 后带尾随文本，严格网关拒绝。没有候选，故不能评价图预检。先设计有界、持久记账的格式修复，再继续同一真实链路；不得将模型格式波动冒充 RSI 改进。
 - [x] E3-B.2 格式恢复与纵向接线：宿主只对“完整 JSON 对象后有尾随文本”另开一次有独立 RPC／模型收据的修复调用；原响应仍无效，修复对象须与首个完整对象一致，计量不完整或未知调用不重放。另新增普通任务→O 搜索→真实配对→selection→guard→新 TaskService 复用的确定性模型边界纵向测试。联合 98 项定向测试通过。此结果证明接线和恢复边界，不证明 MiMo 真实晋升或净收益；下一步仍需预注册普通入口实跑。
 - [ ] E3-B.2 [格式恢复后真实普通任务](experiments/ordinary_feedback_live/WORKBENCH_METERED_REPAIR_RESULTS.md)仍未生成有效候选：来源 architect 输出耗尽 5000 token；R0 完成并选 O 搜索；首候选缺 component_ids，次候选遇传输故障且计量不完整。旧搜索器误把后者算普通耗尽；现按已知成本终止为不可重试的 generation 失败，30 项搜索定向测试通过。格式修复与图预检均未在本轮触发，真实 selection／guard／复用仍待完成。
+- [ ] E3-B.2 [architect 额度修正后的冻结实跑](experiments/ordinary_feedback_live/WORKBENCH_ARCHITECT_BUDGET_RESULTS.md)越过此前的 5000 token 截断，但来源任务交付 schema 失败；R0 选择 O 搜索，首候选违反补丁合同、第二次 Provider 超时且远端结果未知，搜索按不完整计量终止。0 个开发配对，0 个合格候选，0 次独立 selection。确定性纵向测试已证明代码链路接通，真实 MiMo 仍未走完。下一条关键路径是有效候选→development 配对→独立 selection→guard→新进程自动加载／激活；在此之前不把更多 DAG 机制、demo 或局部修复当作 RSI 出口。
 - [x] D/E 来源输出预算修正：自编排 architect 单次额度 5000→8000，默认模型网关上限 6000→12000；Episode 总预算仍控制实际花费。依据是上一真实来源明确的 `finish_reason=length`，14 项自编排／动态图定向测试通过。尚未实测更高额度的质量或净成本。
 - [ ] E 将任务来源的工具／服务／编排候选接入独立评价、晋升、后续任务自动复用与回滚，再进入 F 的对照研究。
 
