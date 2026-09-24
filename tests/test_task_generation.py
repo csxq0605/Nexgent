@@ -18,6 +18,7 @@ from nexgent.tasks.improver_seed import default_improver_package
 from nexgent.tasks.packages import make_package
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.tools import ContractError, ToolRegistry
+from nexgent.kernel.programs import digest
 
 
 PARENT_SOURCE = """def execute(payload, context):
@@ -325,6 +326,18 @@ def generation_with_channel(generation, bundle):
         improver_channel="recursive", expected_improver_revision=0,
         budget={"max_model_calls": 1, "max_completion_tokens": 6000,
                 "max_tool_calls": 0, "max_nodes": 8})
+
+
+def orchestration_repair(prior_attempt=1):
+    return {
+        "schema": "nexgent.orchestration-repair-brief.v1",
+        "prior_attempt": prior_attempt,
+        "failure_codes": ["workflow_binding_path_unavailable"],
+        "mean_quality_delta": None,
+        "instruction": (
+            "Change executable workflow topology, role assignment, or bounded "
+            "orchestration policy. Do not infer hidden answers or evaluator logic."),
+    }
 
 
 def test_feedback_bundle_is_immutable_bounded_and_excludes_hidden_evaluator_content(tmp_path):
@@ -715,6 +728,120 @@ def test_improver_channel_drift_before_episode_run_never_starts_package(
     assert gateway.calls == []
 
 
+def test_registered_r0_generation_freezes_public_search_repair_and_is_idempotent(
+        tmp_path):
+    tasks, generation, bundle, gateway = channel_captured(tmp_path)
+    repair = orchestration_repair()
+    arguments = {
+        "improver_channel": "recursive",
+        "expected_improver_revision": 0,
+        "budget": {"max_model_calls": 1, "max_completion_tokens": 6000,
+                   "max_tool_calls": 0, "max_nodes": 10},
+        "search_attempt_id": "orchestration-search-unit/attempt-2",
+        "repair_brief": repair,
+    }
+
+    result = generation.generate(
+        "general", bundle["id"], None, policy(), 0, **arguments)
+    recovered = generation.generate(
+        "general", bundle["id"], None, policy(), 0, **arguments)
+
+    assert result["status"] == "generated", result.get("reason")
+    assert recovered == result
+    assert len(gateway.calls) == 1
+    assert result["search_attempt_id"] == "orchestration-search-unit/attempt-2"
+    assert result["repair_digest"] == digest(repair)
+    assert result["improver_registration"] == {
+        "channel": "recursive", "revision": 0,
+        "package_id": result["improver_package_id"],
+        "package_digest": result["improver_package_digest"],
+    }
+    assert gateway.calls[0]["payload"]["repair_context"] == repair
+    episode = tasks.get_private(result["episode_id"])
+    assert episode["task"]["context"]["search_attempt_id"] == \
+        result["search_attempt_id"]
+    assert episode["task"]["context"]["repair_digest"] == digest(repair)
+    repair_artifact = tasks.store.read(
+        episode["input_refs"]["repair_context"], episode["id"])
+    assert repair_artifact["content"] == repair
+
+
+def test_first_search_attempt_freezes_null_repair_without_an_input_artifact(tmp_path):
+    tasks, generation, bundle, gateway = channel_captured(tmp_path)
+
+    result = generation.generate(
+        "general", bundle["id"], None, policy(), 0,
+        improver_channel="recursive", expected_improver_revision=0,
+        search_attempt_id="orchestration-search-unit/attempt-1",
+        budget={"max_model_calls": 1, "max_completion_tokens": 6000,
+                "max_tool_calls": 0, "max_nodes": 8})
+
+    assert result["status"] == "generated", result.get("reason")
+    assert result["repair_digest"] == digest(None)
+    assert "repair_context" not in gateway.calls[0]["payload"]
+    episode = tasks.get_private(result["episode_id"])
+    assert "repair_context" not in episode["input_refs"]
+    assert episode["task"]["context"]["repair_digest"] == digest(None)
+
+
+@pytest.mark.parametrize("attempt_id,mutate,reason", [
+    (None, lambda value: value, "requires a search attempt"),
+    ("orchestration-search-unit/attempt-1", lambda value: value,
+     "first search attempt"),
+    ("orchestration-search-unit/attempt-2",
+     lambda value: {**value, "private_evaluator": "hidden"}, "envelope"),
+    ("orchestration-search-unit/attempt-2",
+     lambda value: {**value, "failure_codes": ["private_evaluator_answer"]},
+     "failure codes"),
+    ("orchestration-search-unit/attempt-2",
+     lambda value: {**value, "prior_attempt": 7}, "envelope"),
+])
+def test_search_repair_boundary_rejects_unbound_or_private_inputs_before_execution(
+        tmp_path, attempt_id, mutate, reason):
+    tasks, generation, bundle, gateway = channel_captured(tmp_path)
+    episode_ids = {state["id"] for state in tasks.store.list()}
+
+    with pytest.raises(ContractError, match=reason):
+        generation.generate(
+            "general", bundle["id"], None, policy(), 0,
+            improver_channel="recursive", expected_improver_revision=0,
+            search_attempt_id=attempt_id,
+            repair_brief=mutate(orchestration_repair()))
+
+    assert gateway.calls == []
+    assert {state["id"] for state in tasks.store.list()} == episode_ids
+
+
+def test_uncertain_search_attempt_cannot_replay_generation(tmp_path):
+    tasks, generation, bundle, gateway = channel_captured(tmp_path)
+    episode_ids = {state["id"] for state in tasks.store.list()}
+
+    def interrupt_after_create(receipt):
+        if receipt["boundary"] == "generation_run":
+            raise KeyboardInterrupt("uncertain dispatch boundary")
+
+    with pytest.raises(KeyboardInterrupt, match="uncertain dispatch boundary"):
+        generation.generate(
+            "general", bundle["id"], None, policy(), 0,
+            improver_channel="recursive", expected_improver_revision=0,
+            search_attempt_id="orchestration-search-unit/attempt-1",
+            admission_check=interrupt_after_create)
+
+    created = [state for state in tasks.store.list()
+               if state["id"] not in episode_ids]
+    assert len(created) == 1
+    assert tasks.get_private(created[0]["id"])["task"]["context"][
+        "search_attempt_id"] == "orchestration-search-unit/attempt-1"
+    with pytest.raises(ContractError, match="uncertain.*without replaying"):
+        generation.generate(
+            "general", bundle["id"], None, policy(), 0,
+            improver_channel="recursive", expected_improver_revision=0,
+            search_attempt_id="orchestration-search-unit/attempt-1")
+    assert gateway.calls == []
+    assert len([state for state in tasks.store.list()
+                if state["id"] not in episode_ids]) == 1
+
+
 @pytest.mark.parametrize("response,component_class,expected_calls", [
     ({"decision": "abstain", "reason": "insufficient evidence"}, "O", 1),
     ({"unused": True}, "M", 0),
@@ -768,6 +895,7 @@ def test_generated_candidate_executes_actual_improve_entry_and_records_receipts(
     result = generation.generate("general", bundle["id"], improver, policy(), 0)
 
     assert result["status"] == "generated"
+    assert "search_attempt_id" not in result and "repair_digest" not in result
     assert result["improver_package_id"] == improver["id"]
     assert result["execution"]["entry"] == "improve"
     assert result["execution"]["package_digest"] == improver["digest"]

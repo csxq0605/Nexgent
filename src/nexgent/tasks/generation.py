@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import math
 import re
 import time
 import uuid
@@ -27,6 +28,7 @@ PACKAGE_PATCH_SCHEMA = "nexgent.package-patch.v3"
 MEMORY_PATCH_SCHEMA = "nexgent.memory-component-patch.v1"
 LEGACY_PATCH_SCHEMA = PATCH_SCHEMA
 GENERATION_SCHEMA = "nexgent.candidate-generation.v1"
+REPAIR_SCHEMA = "nexgent.orchestration-repair-brief.v1"
 _TERMINAL = frozenset({"completed", "failed"})
 _MUTABLE_CLASSES = frozenset({"O", "M", "S"})
 _FORBIDDEN_TOKENS = frozenset({
@@ -59,6 +61,14 @@ _PUBLIC_BINDING_FAILURE = re.compile(
 _PUBLIC_SCHEMA_TYPES = frozenset({
     "array", "boolean", "integer", "null", "number", "object", "string",
 })
+_SEARCH_ATTEMPT_ID = re.compile(
+    r"(?P<search>[A-Za-z][A-Za-z0-9_-]{0,119})/attempt-(?P<attempt>[1-9][0-9]?)"
+)
+_REPAIR_FAILURE_CODE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,79}")
+_REPAIR_INSTRUCTION = (
+    "Change executable workflow topology, role assignment, or bounded "
+    "orchestration policy. Do not infer hidden answers or evaluator logic."
+)
 
 
 def _copy(value, label="Generation value"):
@@ -289,6 +299,55 @@ def _public_workflow_diagnostic(episode):
     except (TypeError, ValueError, RecursionError):
         return fallback
     return diagnostic
+
+
+def _search_repair(search_attempt_id, repair_brief):
+    """Validate one host-public repair input and bind it to its attempt."""
+    if search_attempt_id is None:
+        if repair_brief is not None:
+            raise ContractError("A repair brief requires a search attempt identity")
+        return None, None, None
+    if (not isinstance(search_attempt_id, str) or len(search_attempt_id) > 160
+            or (match := _SEARCH_ATTEMPT_ID.fullmatch(search_attempt_id)) is None):
+        raise ContractError("Search attempt identity is invalid")
+    attempt = int(match.group("attempt"))
+    if not 1 <= attempt <= 16:
+        raise ContractError("Search attempt number exceeds its bound")
+    if attempt == 1:
+        if repair_brief is not None:
+            raise ContractError("The first search attempt cannot claim prior repair evidence")
+        return search_attempt_id, None, digest(None)
+    if repair_brief is None:
+        raise ContractError("A later search attempt requires one repair brief")
+    repair = _copy(repair_brief, "Orchestration repair brief")
+    expected = {
+        "schema", "prior_attempt", "failure_codes", "mean_quality_delta",
+        "instruction",
+    }
+    if (not isinstance(repair, dict) or set(repair) != expected
+            or repair.get("schema") != REPAIR_SCHEMA
+            or type(repair.get("prior_attempt")) is not int
+            or repair["prior_attempt"] != attempt - 1):
+        raise ContractError("Orchestration repair brief envelope is invalid")
+    codes = repair.get("failure_codes")
+    if (not isinstance(codes, list) or not codes or len(codes) > 32
+            or any(not isinstance(code, str)
+                   or _REPAIR_FAILURE_CODE.fullmatch(code) is None
+                   or _path_tokens(code) & (
+                       _PUBLIC_FEEDBACK_SECRET_TOKENS | _FORBIDDEN_TOKENS)
+                   for code in codes)
+            or len(set(codes)) != len(codes)):
+        raise ContractError("Orchestration repair failure codes are invalid")
+    delta = repair.get("mean_quality_delta")
+    if (delta is not None and (
+            type(delta) not in {int, float} or not math.isfinite(delta))):
+        raise ContractError("Orchestration repair quality delta must be finite or null")
+    if repair.get("instruction") != _REPAIR_INSTRUCTION:
+        raise ContractError("Orchestration repair instruction is not host-issued")
+    encoded = json.dumps(repair, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > 8192:
+        raise ContractError("Orchestration repair brief exceeds its byte bound")
+    return search_attempt_id, repair, digest(repair)
 
 
 def _public_execution_trace(episode):
@@ -585,6 +644,11 @@ class GenerationService:
                     id TEXT PRIMARY KEY, data TEXT NOT NULL, digest TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS task_candidate_generations(
                     id TEXT PRIMARY KEY, data TEXT NOT NULL, digest TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS task_candidate_generation_attempts(
+                    search_attempt_id TEXT PRIMARY KEY,
+                    binding_digest TEXT NOT NULL,
+                    generation_id TEXT NOT NULL,
+                    episode_id TEXT);
             """)
 
     @staticmethod
@@ -622,6 +686,51 @@ class GenerationService:
 
     def generation(self, generation_id):
         return self._get("task_candidate_generations", generation_id)
+
+    def _claim_search_attempt(self, search_attempt_id, binding_digest,
+                              generation_id):
+        if search_attempt_id is None:
+            return None
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT binding_digest,generation_id,episode_id "
+                "FROM task_candidate_generation_attempts WHERE search_attempt_id=?",
+                (search_attempt_id,),
+            ).fetchone()
+            if row is None:
+                db.execute(
+                    "INSERT INTO task_candidate_generation_attempts VALUES(?,?,?,NULL)",
+                    (search_attempt_id, binding_digest, generation_id),
+                )
+                return None
+        if row[0] != binding_digest:
+            raise ContractError("Search attempt identity is bound to different inputs")
+        try:
+            return self.generation(row[1])
+        except KeyError:
+            raise ContractError(
+                "Search attempt is already in progress or uncertain; reconcile it "
+                "without replaying generation") from None
+
+    def _bind_search_episode(self, search_attempt_id, generation_id, episode_id):
+        if search_attempt_id is None:
+            return
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT generation_id,episode_id FROM "
+                "task_candidate_generation_attempts WHERE search_attempt_id=?",
+                (search_attempt_id,),
+            ).fetchone()
+            if (row is None or row[0] != generation_id
+                    or row[1] not in {None, episode_id}):
+                raise ContractError("Search attempt Episode binding changed")
+            db.execute(
+                "UPDATE task_candidate_generation_attempts SET episode_id=? "
+                "WHERE search_attempt_id=?",
+                (episode_id, search_attempt_id),
+            )
 
     def _development_boundary(self, episode):
         context = episode["task"].get("context") or {}
@@ -1028,10 +1137,13 @@ class GenerationService:
                  expected_revision, *, improver_channel=None,
                  expected_improver_revision=None, budget=None, stop_event=None,
                  admission_check=None, memory_channel=None,
-                 expected_memory_revision=None):
+                 expected_memory_revision=None, search_attempt_id=None,
+                 repair_brief=None):
         """Execute ``improve`` and admit its valid child, or persist missing evidence."""
         if admission_check is not None and not callable(admission_check):
             raise TypeError("admission_check must be callable")
+        search_attempt_id, repair_context, repair_digest = _search_repair(
+            search_attempt_id, repair_brief)
         feedback = self.feedback(feedback_bundle_id)
         active = self.evolution.active(channel)
         if feedback["channel"] != channel:
@@ -1132,6 +1244,9 @@ class GenerationService:
             "mutation_policy": policy, "mutation_policy_digest": digest(policy),
             "created_at": time.time(),
         }
+        if search_attempt_id is not None:
+            base.update(search_attempt_id=search_attempt_id,
+                        repair_digest=repair_digest)
         if policy["targeting"] == "manifest_component_set_v3":
             components = []
             for component_id in policy["package_patch_policy"]["mutable_components"]:
@@ -1187,6 +1302,8 @@ class GenerationService:
         inputs = {"feedback_bundle": feedback_input,
                   "parent_components": components,
                   "mutation_policy": policy}
+        if repair_context is not None:
+            inputs["repair_context"] = deepcopy(repair_context)
         if policy["targeting"] == "manifest_component_set_v3":
             inputs["parent_manifest"] = deepcopy(active["package"]["manifest"])
             inputs["parent_package_digest"] = active["package"]["digest"]
@@ -1201,11 +1318,31 @@ class GenerationService:
 
         episode = None
         admit("generation_create")
+        if search_attempt_id is not None:
+            search_binding_digest = digest({
+                "search_attempt_id": search_attempt_id,
+                "repair_digest": repair_digest,
+                "channel": channel,
+                "channel_revision": active["revision"],
+                "parent_package_digest": active["package_digest"],
+                "feedback_digest": feedback["digest"],
+                "improver_package_digest": improver_package["digest"],
+                "improver_registration": improver_registration,
+                "mutation_policy_digest": base["mutation_policy_digest"],
+                "memory_parent_registration": memory_registration,
+            })
+            recovered = self._claim_search_attempt(
+                search_attempt_id, search_binding_digest, generation_id)
+            if recovered is not None:
+                return recovered
         try:
             episode_context = {"split": "development", "split_role": "development",
                                "rsi_role": "candidate_generation", "channel": channel,
                                "channel_revision": active["revision"],
                                "feedback_bundle_id": feedback["id"]}
+            if search_attempt_id is not None:
+                episode_context.update(search_attempt_id=search_attempt_id,
+                                       repair_digest=repair_digest)
             if memory_targeted:
                 episode_context["target_memory_registration"] = deepcopy(memory_registration)
             episode = self.tasks.create(
@@ -1219,6 +1356,8 @@ class GenerationService:
                 context=episode_context,
                 constraints={"allowed_effects": [], "wall_seconds": 1200}, entry="improve",
                 improver_channel_registration=improver_registration)
+            self._bind_search_episode(
+                search_attempt_id, generation_id, episode["id"])
         except Exception as exc:
             if episode is not None:
                 episode = self.tasks.get_private(episode["id"])
