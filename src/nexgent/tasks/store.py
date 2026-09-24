@@ -22,6 +22,8 @@ from ..kernel.store import BudgetExhausted
 
 
 MAX_JSON_BYTES = 1_000_000
+DEFAULT_WALL_SECONDS = 1200
+MAX_WALL_SECONDS = 1800
 DEFAULT_BUDGET = {"max_model_calls": 20, "max_completion_tokens": 80000,
                   "max_tool_calls": 20, "max_tool_work_units": 0,
                   "max_nodes": 100}
@@ -135,6 +137,9 @@ class EpisodeStore:
                 CREATE TABLE IF NOT EXISTS task_once(
                     root_id TEXT, identity TEXT, episode TEXT, created REAL,
                     PRIMARY KEY(root_id,identity));
+                CREATE TABLE IF NOT EXISTS task_deadlines(
+                    root_id TEXT PRIMARY KEY, started_at REAL NOT NULL,
+                    deadline_at REAL NOT NULL, wall_seconds REAL NOT NULL);
                 CREATE INDEX IF NOT EXISTS task_calls_root ON task_calls(root_id);
                 CREATE INDEX IF NOT EXISTS task_resources_root ON task_resources(root_id,kind);
                 CREATE INDEX IF NOT EXISTS task_memory_scope ON task_memory(namespace,split);
@@ -1555,6 +1560,41 @@ class EpisodeStore:
                 "usage_complete": not missing and not tool_missing,
                 "billing_unknown_call_ids": [c["call_id"] for c in calls if c.get("billing_status") != "usage_reported"],
                 "tool_calls": resources.get("tool", 0), "nodes": resources.get("node", 0)}
+
+    def start_deadline(self, episode_id):
+        """Freeze and return the absolute wall deadline shared by a task tree."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            episode = self._get(db, episode_id)
+            root_id = episode["root_episode_id"]
+            row = db.execute(
+                "SELECT started_at,deadline_at,wall_seconds "
+                "FROM task_deadlines WHERE root_id=?", (root_id,)).fetchone()
+            if row is None:
+                root = episode if episode_id == root_id else self._get(db, root_id)
+                constraints = root["task"].get("constraints", {})
+                wall_seconds = (constraints.get("wall_seconds", DEFAULT_WALL_SECONDS)
+                                if isinstance(constraints, dict) else None)
+                if (type(wall_seconds) not in {int, float}
+                        or not 0 < wall_seconds <= MAX_WALL_SECONDS):
+                    raise ValueError(
+                        "Episode wall deadline must be within (0, 1800] seconds")
+                started_at = time.time()
+                deadline_at = started_at + wall_seconds
+                db.execute(
+                    "INSERT INTO task_deadlines VALUES(?,?,?,?)",
+                    (root_id, started_at, deadline_at, wall_seconds))
+                row = (started_at, deadline_at, wall_seconds)
+        return {
+            "root_episode_id": root_id,
+            "started_at": row[0],
+            "deadline_at": row[1],
+            "wall_seconds": row[2],
+        }
+
+    def remaining_seconds(self, episode_id):
+        """Return nonnegative wall seconds remaining on the root deadline."""
+        return max(0.0, self.start_deadline(episode_id)["deadline_at"] - time.time())
 
     def once(self, episode_id, key):
         """Atomically consume a root-scoped tool marker, including after restart.

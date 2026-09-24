@@ -383,6 +383,47 @@ def test_once_is_atomic_durable_and_shared_by_children(store, package):
     assert store.once(other["id"], "workbench.fail_once:join")
 
 
+def test_deadline_is_atomic_durable_and_shared_by_children(store, package, monkeypatch):
+    root = store.create(task(constraints={"wall_seconds": 60}), package)
+    child = store.create(task(constraints={"wall_seconds": 1}), package, root["id"])
+
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        deadlines = list(workers.map(
+            lambda index: EpisodeStore(store.root).start_deadline(
+                [root["id"], child["id"]][index % 2]),
+            range(16)))
+
+    assert all(deadline == deadlines[0] for deadline in deadlines)
+    assert deadlines[0]["root_episode_id"] == root["id"]
+    assert deadlines[0]["wall_seconds"] == 60
+    assert deadlines[0]["deadline_at"] - deadlines[0]["started_at"] == 60
+    restarted = EpisodeStore(store.root)
+    assert restarted.start_deadline(child["id"]) == deadlines[0]
+    monkeypatch.setattr(
+        "nexgent.tasks.store.time.time",
+        lambda: deadlines[0]["deadline_at"] - 12.5)
+    assert restarted.remaining_seconds(child["id"]) == 12.5
+    monkeypatch.setattr(
+        "nexgent.tasks.store.time.time",
+        lambda: deadlines[0]["deadline_at"] + 1)
+    assert restarted.remaining_seconds(root["id"]) == 0.0
+
+
+@pytest.mark.parametrize("constraints", [
+    {"wall_seconds": True}, {"wall_seconds": 0}, {"wall_seconds": -1},
+    {"wall_seconds": 1800.1}, {"wall_seconds": "60"}, None,
+])
+def test_deadline_rejects_invalid_root_wall_seconds_without_freezing(
+        store, package, constraints):
+    episode = store.create(task(constraints=constraints), package)
+    with pytest.raises(ValueError, match=r"\(0, 1800\]"):
+        store.start_deadline(episode["id"])
+    with store.connect() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM task_deadlines WHERE root_id=?",
+            (episode["id"],)).fetchone()[0] == 0
+
+
 def test_event_sequence_chain_and_lock_identity(store, package):
     episode = store.create(task(), package)
     with ThreadPoolExecutor(max_workers=8) as workers:
