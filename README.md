@@ -6,7 +6,27 @@
 
 Nexgent 本身是产品。科学发现与 OpenFOAM 是独立插件／demo；领域阶段、工具和评分不定义核心。用户从 Main 提交目标，运行与能力变化通过信息窗口查看；同一执行体系可由 CLI 和 benchmark 调用。
 
-## 当前能力与缺口
+## 当前主线：Main 组织闭环
+
+2026-09-29 按 PR #2 纠偏：默认 Main 和 `nexgent run "任务"` 共用新的组织服务。
+负责人分派任务，成员并行工作、交换发现，负责人汇总；独立评价产生反馈，改进者
+可修改成员和工作规则。候选重跑并通过开发门控后保存，后续任务自动加载。
+多轮对话、运行过程、评价与组织版本保存在工作区。
+
+```bash
+nexgent run "根据给定材料完成任务"
+nexgent-gui
+```
+
+配置沿用 `models.json` 和 `.env`。CLI 的 `--root` / GUI 的 `--project` 指定工作区；
+`--model-root` 可从另一目录读取模型配置。详见[组织闭环说明](docs/organization-loop.md)。
+当前成员处理输入材料中的分析、写作和推理；工具型执行后端尚未接入新服务。
+本阶段门控是开发复评，不构成 held-out 或通用 RSI 收益证明。
+
+## PR #1 的历史资产与缺口
+
+下列记录描述旧内核路径。旧 `task` / `rsi-*` 命令和高级控制台保留，
+不再是默认 Main 的实现，也不能把其历史“测试通过”当作当前分支的验收。
 
 以 `4722cf7` 为本次计划的实现基线。已有工程资产包括 TaskService、AgentPackage manifest v2、ExecutablePlan、工件与调用账本、停止恢复、benchmark SDK，以及候选选择／晋升／回滚控制面。
 
@@ -21,7 +41,7 @@ Nexgent 本身是产品。科学发现与 OpenFOAM 是独立插件／demo；领�
 
 真实 MiMo v2.6-flash 已从普通任务自动走到公开反馈、模型规划、编排候选和独立 selection；该候选被拒绝。先前 O/S 资格 selection 未达到晋升门，纯 M 尝试 abstain；任务自建 planner 的真实探针也未成功编译新图。**当前没有正向 RSI 或递归收益证据。**
 
-Main 在未配置自动进化的项目中使用 `nexgent-main-capabilities-v2` 包 channel，初始版本为 `self_orchestration_package()`。配置了自动进化的项目由宿主指定默认 channel；Main 与普通 CLI 从同一通道加载新版本。底层 `TaskService.create()` 未指定包时仍使用兼容默认。内核当前不支持模型直接热装宿主插件，受限 Python worker 也不等同于 OS 容器。
+旧 Main 在未配置自动进化的项目中使用 `nexgent-main-capabilities-v2` 包 channel，初始版本为 `self_orchestration_package()`。这些通道属于旧内核；新的默认 Main 使用独立的组织版本。底层 `TaskService.create()` 未指定包时仍使用兼容默认。内核当前不支持模型直接热装宿主插件，受限 Python worker 也不等同于 OS 容器。
 
 ## 实施与阅读入口
 

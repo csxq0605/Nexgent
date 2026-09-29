@@ -22,6 +22,7 @@ def project_root(explicit=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Nexgent 通用任务智能体工作区")
     parser.add_argument("--project", type=Path, help="任务工作区目录")
+    parser.add_argument("--model-root", type=Path, help="读取已有模型配置的目录")
     parser.add_argument("--task-console", action="store_true", help="打开高级任务与证据控制台")
     parser.add_argument("--legacy-research", action="store_true", help="打开保留的 0.8 研究窗口")
     args = parser.parse_args(argv)
@@ -39,8 +40,10 @@ def main(argv=None):
         from .tasks_window import TaskWindow
         window = TaskWindow(project_root(args.project))
     else:
-        from .main_window import MainWindow
-        window = MainWindow(project_root(args.project))
+        from .organization_window import OrganizationWindow
+        from ..organization import OrganizationService
+        root = project_root(args.project)
+        window = OrganizationWindow(root, OrganizationService(root, model_root=args.model_root))
     window.show()
     return app.exec()
 

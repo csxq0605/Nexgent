@@ -519,6 +519,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Nexgent task agent runtime and legacy RSI research tools")
     parser.add_argument("--root", type=Path, default=project_root())
     sub = parser.add_subparsers(dest="command", required=True)
+    run = sub.add_parser("run", help="Complete a task with the learning organization (Main)")
+    run.add_argument("objective")
+    run.add_argument("--input", help="JSON context or @file")
+    run.add_argument("--conversation", help="Continue a conversation ID from an earlier run")
+    run.add_argument("--model-root", type=Path, help="Read existing model settings from another workspace")
     gui = sub.add_parser("gui", help="Open the task workspace")
     gui.add_argument("--legacy-research", action="store_true", help="Open the preserved 0.8 research window")
 
@@ -794,6 +799,14 @@ def main(argv=None):
         if args.legacy_research:
             gui_args.append("--legacy-research")
         return gui_main(gui_args)
+    if args.command == "run":
+        from .organization import OrganizationService
+        service = OrganizationService(args.root, model_root=args.model_root)
+        result = service.run(args.objective,
+                             inputs=_object_argument(args.input, label="input") if args.input else None,
+                             conversation_id=args.conversation, stop_event=_stop_event())
+        print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+        return 0 if result["status"] == "completed" else 1
     if args.command in TASK_COMMANDS:
         try:
             result = _run_task_command(args)
