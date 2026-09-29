@@ -239,7 +239,8 @@ def test_completed_feedback_switches_to_entry_in_the_same_episode(tmp_path):
         event["content"]["call_path"] for event in result["events"]
         if (event["kind"] == "rpc_started"
             and event["content"]["call_path"].startswith(
-                "strategy/segments/2/rpc."))
+                "strategy/segments/2/rpc.")
+            and "/model." not in event["content"]["call_path"])
     ]
     assert switched_paths == [
         "strategy/segments/2/rpc.1",
@@ -472,7 +473,8 @@ def test_two_rules_use_distinct_selector_slots_before_continue_then_switch(tmp_p
         event["content"]["call_path"] for event in result["events"]
         if (event["kind"] == "rpc_started"
             and event["content"]["call_path"].startswith(
-                "strategy/segments/2/rpc."))
+                "strategy/segments/2/rpc.")
+            and "/model." not in event["content"]["call_path"])
     ]
     assert segment_paths == [
         "strategy/segments/2/rpc.1",

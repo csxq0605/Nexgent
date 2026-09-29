@@ -363,6 +363,9 @@ class TaskService:
     def _unresolved_external_rpc(self, identity, state=None):
         """Return a started, non-resumable RPC that needs reconciliation."""
         state = self.store.get(identity) if state is None else state
+        for call in self.store.calls(state["root_episode_id"]):
+            if call.get("episode_id") == identity and call.get("status") == "started":
+                return str(call.get("node_id", "model")).split("/model.", 1)[0]
         for path, node in state.get("nodes", {}).items():
             method = node.get("method")
             if method in _RESUMABLE_COMPOSITE_METHODS:
@@ -834,7 +837,10 @@ class TaskService:
     def _strategy_model_receipt(calls, identity, path):
         matches = [
             call for call in calls
-            if call.get("episode_id") == identity and call.get("node_id") == path
+            if call.get("episode_id") == identity
+            and call.get("node_id") in {
+                path, f"{path}/model.primary", f"{path}/model.json-repair"}
+            and call.get("status") in {"received", "completed"}
         ]
         if (len(matches) != 1
                 or matches[0].get("status") not in {"received", "completed"}):
@@ -3413,7 +3419,8 @@ class TaskService:
                 # deliberately not replayed.  Only a strictly received object
                 # and the one classified repairable format error are resumable.
                 raise RecoveryRequired(
-                    f"Model phase {phase_path} has an unknown or non-replayable outcome")
+                    f"Model phase {phase_path} requires reconciliation for an unknown "
+                    "or non-replayable outcome; automatic repetition refused")
 
             def reserve(receipt_value):
                 receipt_value.update(
@@ -3449,6 +3456,11 @@ class TaskService:
                 # and issue another external request.
                 raise
             except Exception as exc:
+                unsettled = terminal_phase_receipt(phase_path, phase_digest)
+                if unsettled is not None and unsettled.get("status") == "started":
+                    raise RecoveryRequired(
+                        f"Model phase {phase_path} requires reconciliation; "
+                        "automatic repetition refused") from exc
                 self.store.rpc_finish(identity, phase_path, error={
                     "type": type(exc).__name__,
                     "message": str(exc)[:800],

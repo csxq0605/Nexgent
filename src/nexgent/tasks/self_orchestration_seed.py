@@ -300,8 +300,10 @@ def available_operators_for_authority(authority):
     ]
 
 
-def self_orchestration_package():
+def self_orchestration_package(*, architect_max_tokens=4000):
     """Return the opt-in seed whose task-time topology is model-authored."""
+    if type(architect_max_tokens) is not int or not 1 <= architect_max_tokens <= 12000:
+        raise ValueError("Architect output budget must be within 1..12000")
     available_roles = [
         {
             "role_ref": name,
@@ -317,7 +319,7 @@ def self_orchestration_package():
                 "method": "ask",
                 "role_ref": "architect",
                 "component_ref": "architect-role",
-                "params": {"max_tokens": 8000},
+                "params": {"max_tokens": architect_max_tokens},
                 "bindings": {
                     "payload": {
                         "task": {"$input": ""},

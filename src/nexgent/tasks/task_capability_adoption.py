@@ -82,7 +82,9 @@ class TaskCapabilityAdoptionService:
         return any(
             call.get("status") in {"completed", "received"}
             and call.get("episode_id") == creator["id"]
-            and call.get("node_id") in applied_nodes
+            and (call.get("node_id") in applied_nodes
+                 or call.get("node_id") in {
+                     f"{node}/model.primary" for node in applied_nodes})
             and all(call.get("service_provider", {}).get(key) == value
                     for key, value in binding.items())
             for call in creator.get("calls") or [])
