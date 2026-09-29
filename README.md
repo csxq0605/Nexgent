@@ -20,7 +20,7 @@ nexgent-gui
 
 配置沿用 `models.json` 和 `.env`。CLI 的 `--root` / GUI 的 `--project` 指定工作区；
 `--model-root` 可从另一目录读取模型配置。详见[组织闭环说明](docs/organization-loop.md)。
-当前成员处理输入材料中的分析、写作和推理；工具型执行后端尚未接入新服务。
+当前成员支持分析、写作、项目文件读取、CSV SQL 计算和成果文件生成。工具复用现有 ToolRegistry；Main 与 CLI 使用同一执行循环，评价读取实际工具证据。暂不支持通用代码执行和外部应用操作。
 本阶段门控是开发复评，不构成 held-out 或通用 RSI 收益证明。
 
 ## PR #1 的历史资产与缺口

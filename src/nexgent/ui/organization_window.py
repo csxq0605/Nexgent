@@ -1,5 +1,6 @@
 """Main conversation and organization view using the same service as `run`."""
 import html
+from pathlib import Path
 import threading
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -53,6 +54,7 @@ class OrganizationWindow(QMainWindow):
         layout.addWidget(self.status)
         body = QHBoxLayout()
         self.messages = QTextBrowser()
+        self.messages.setOpenExternalLinks(True)
         self.info = QPlainTextEdit()
         self.info.setReadOnly(True)
         body.addWidget(self.messages, 3)
@@ -117,7 +119,7 @@ class OrganizationWindow(QMainWindow):
         self.conversation_id = run["conversation_id"]
         stage = run["events"][-1]["stage"]
         labels = {"started": "开始任务", "assigned": "分派工作", "shared": "成员交换发现并修正", "collaborated": "汇总成员发现",
-                  "evaluated": "独立评价完成", "proposed": "提出组织改进", "gate": "改进评价完成", "finished": "本轮结束"}
+                  "tool_executed": "成员执行工具", "tools_completed": "工具执行与成果生成完成", "evaluated": "独立评价完成", "proposed": "提出组织改进", "gate": "改进评价完成", "finished": "本轮结束"}
         self.status.setText(labels.get(stage, stage))
         lines = [f"使用组织版本：{run['revision']}", "", "成员"]
         lines.extend(f"• {m['name']}：{m['role']}" for m in run["organization"]["members"])
@@ -139,6 +141,9 @@ class OrganizationWindow(QMainWindow):
     def completed(self, run):
         if run.get("answer"):
             self.append("Nexgent", run["answer"])
+        for artifact in run.get("result", {}).get("artifacts", []):
+            path = Path(artifact["path"])
+            self.messages.append('<p>成果：<a href="' + html.escape(path.as_uri(), quote=True) + '">' + html.escape(path.name) + '</a></p>')
         assessment = run.get("assessment", {})
         self.append("评价", assessment.get("feedback", run.get("error", run["status"])))
         delivery = {"completed": "任务已交付", "needs_revision": "结果仍需修改", "failed": "任务未完成", "interrupted": "任务已停止"}
