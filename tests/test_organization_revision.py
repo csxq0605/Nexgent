@@ -10,7 +10,7 @@ class RevisionModel(Model):
         result = super().ask(role, prompt, payload, **kwargs)
         if "Synthesize" in prompt:
             if "revision" in payload["task"]:
-                assert payload["task"]["revision"]["feedback"] == "Missing total"
+                assert payload["task"]["revision"]["feedback"].startswith("Missing total")
                 if self.fail_repair:
                     raise RuntimeError("repair unavailable")
                 return {"answer": "repaired"}
@@ -18,10 +18,10 @@ class RevisionModel(Model):
         if "Independently evaluate" in prompt:
             assert "revision" not in payload["task"]
             if payload["answer"] == "repaired":
-                assert payload["prior_attempt"]["assessment"]["feedback"] == "Missing total"
+                assert payload["prior_attempt"]["assessment"]["feedback"].startswith("Missing total")
                 assert "execution_evidence" in payload["prior_attempt"]
             score = self.repair_score if payload["answer"] == "repaired" else 5
-            return {"score": score, "accepted": score == 10, "feedback": "Correct" if score == 10 else "Missing total"}
+            return {"score": score, "accepted": score == 10, "feedback": "Correct" if score == 10 else "Missing total", "checks": [{"requirement": "Report total", "passed": score == 10}], "organization_reusable": True, "organization_feedback": "General roles"}
         if role == "improver":
             assert len(payload["attempts"]) == 2
             return {"organization": None, "reason": "Keep organization"}

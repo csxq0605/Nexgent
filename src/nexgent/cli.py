@@ -524,6 +524,12 @@ def main(argv=None):
     run.add_argument("--input", help="JSON context or @file")
     run.add_argument("--conversation", help="Continue a conversation ID from an earlier run")
     run.add_argument("--model-root", type=Path, help="Read existing model settings from another workspace")
+    feedback = sub.add_parser("feedback", help="Record user feedback on a delivered Main task for subsequent work and gated improvement")
+    feedback.add_argument("run_id")
+    feedback.add_argument("text")
+    resume = sub.add_parser("run-resume", help="Resume an unfinished Main task, reusing completed member work")
+    resume.add_argument("run_id")
+    resume.add_argument("--model-root", type=Path)
     gui = sub.add_parser("gui", help="Open the task workspace")
     gui.add_argument("--legacy-research", action="store_true", help="Open the preserved 0.8 research window")
 
@@ -799,6 +805,22 @@ def main(argv=None):
         if args.legacy_research:
             gui_args.append("--legacy-research")
         return gui_main(gui_args)
+    if args.command == "feedback":
+        from .organization import OrganizationService
+        try:
+            result = OrganizationService(args.root).feedback(args.run_id, args.text)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+        return 0
+    if args.command == "run-resume":
+        from .organization import OrganizationService
+        try:
+            result = OrganizationService(args.root, model_root=args.model_root).resume(args.run_id, stop_event=_stop_event())
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+        return 0 if result["status"] == "completed" else 1
     if args.command == "run":
         from .organization import OrganizationService
         service = OrganizationService(args.root, model_root=args.model_root)

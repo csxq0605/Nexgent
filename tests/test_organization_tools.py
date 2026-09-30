@@ -7,6 +7,36 @@ from nexgent.organization import OrganizationService
 from test_organization import Model
 
 
+def test_python_computation_uses_existing_worker(tmp_path):
+    tools = WorkspaceTools(tmp_path, tmp_path / 'output', allow_artifact_writes=False)
+    result = tools.call('run_python', {'code': '''def execute(payload, context):
+    best = {0: (0, [])}
+    for item in payload['items']:
+        for weight, state in list(best.items()):
+            next_weight = weight + item['weight']
+            value = state[0] + item['value']
+            if next_weight <= payload['capacity'] and value > best.get(next_weight, (-1, []))[0]:
+                best[next_weight] = (value, state[1] + [item['name']])
+    return max(best.values(), key=lambda state: state[0])
+''', 'payload': {'capacity': 5, 'items': [{'name': 'a', 'weight': 3, 'value': 7}, {'name': 'b', 'weight': 2, 'value': 6}, {'name': 'c', 'weight': 5, 'value': 12}]}})
+    assert result['value'] == [13, ['a', 'b']]
+    assert result['execution']['rpc_count'] == 0
+    assert not (tmp_path / 'output').exists()
+    for code in ['import os\ndef execute(payload, context):\n    return 0',
+                 'def execute(payload, context):\n    return context.tool("read_text", {})']:
+        with pytest.raises(ValueError):
+            tools.call('run_python', {'code': code, 'payload': {}})
+
+
+def test_python_worker_observes_task_cancellation(tmp_path):
+    import threading
+    stop = threading.Event()
+    stop.set()
+    tools = WorkspaceTools(tmp_path, tmp_path / 'output', stop_event=stop)
+    with pytest.raises(InterruptedError):
+        tools.call('run_python', {'code': 'def execute(payload, context):\n    return payload', 'payload': {}})
+
+
 def test_real_csv_query_and_isolated_artifacts(tmp_path):
     (tmp_path / "sales.csv").write_text("item,amount\na,12\nb,8\na,5\n", encoding="utf-8")
     tools = WorkspaceTools(tmp_path, tmp_path / ".nexgent" / "outputs" / "test")

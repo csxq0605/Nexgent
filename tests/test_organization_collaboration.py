@@ -253,6 +253,23 @@ def test_planner_can_leave_unused_default_members_idle(tmp_path):
     assert [e["member"] for e in run["events"] if e["stage"] == "member_started"] == ["analyst"]
 
 
+def test_idle_defaults_do_not_block_a_new_three_member_team(tmp_path):
+    class NewTeam(Model):
+        def ask(self, role, prompt, payload, **kwargs):
+            if "Assign the task" in prompt:
+                return {"recruits": [{"name": n, "role": "Distinct task responsibility"} for n in ['solver', 'writer', 'verifier']],
+                        "assignments": [{"member": n, "task": "Work", "depends_on": []} for n in ['solver', 'writer', 'verifier']],
+                        "peer_review": False}
+            if role == 'improver':
+                return {"organization": None, "reason": "Keep defaults"}
+            return super().ask(role, prompt, payload, **kwargs)
+    service = OrganizationService(tmp_path, gateway_factory=NewTeam)
+    run = service.run('Task needs three distinct members')
+    assert run['status'] == 'completed'
+    assert [m['name'] for m in run['result']['organization']['members']] == ['solver', 'writer', 'verifier']
+    assert len(service.store.active()[1]['members']) == 2
+
+
 def test_delivered_file_survives_short_conversation_window(tmp_path):
     service = OrganizationService(tmp_path, gateway_factory=Model)
     path = tmp_path / ".nexgent" / "older.txt"

@@ -28,7 +28,7 @@ class Model:
                 return {"answer": "candidate" if len(payload["organization"]["members"]) == 1 else "parent"}
             if "Independently evaluate" in prompt:
                 bad = self.reject and payload["answer"] == "candidate"
-                return {"score": 2 if bad else 9, "accepted": not bad, "feedback": "incorrect" if bad else "correct"}
+                return {"score": 2 if bad else 9, "accepted": not bad, "feedback": "incorrect" if bad else "correct", "checks": [{"requirement": "Correct answer", "passed": not bad}], "organization_reusable": True, "organization_feedback": "General roles"}
             if role == "improver":
                 if self.fail_improver:
                     raise RuntimeError("improver unavailable")
@@ -87,7 +87,7 @@ def test_previous_task_regression_rejects_candidate(tmp_path):
             result = super().ask(role, prompt, payload, **kwargs)
             if (role == "evaluator" and "answer" in payload and payload["task"]["objective"] == "previous task"
                     and payload["answer"] == "candidate"):
-                return {"score": 0, "accepted": False, "feedback": "regressed"}
+                return {"score": 0, "accepted": False, "feedback": "regressed", "checks": [{"requirement": "Correct answer", "passed": False}], "organization_reusable": True, "organization_feedback": "General roles"}
             return result
 
     result = OrganizationService(tmp_path, gateway_factory=Regression).run("new task")
@@ -184,7 +184,7 @@ def test_quality_repair_can_recruit_a_member(tmp_path):
                 return {"answer": "fixed" if len(payload["organization"]["members"]) == 3 else "wrong"}
             if "Independently evaluate" in prompt:
                 fixed = payload["answer"] == "fixed"
-                return {"score": 9 if fixed else 4, "accepted": fixed, "feedback": "checked"}
+                return {"score": 9 if fixed else 4, "accepted": fixed, "feedback": "checked", "checks": [{"requirement": "Correct answer", "passed": fixed}], "organization_reusable": True, "organization_feedback": "General roles"}
             return result
     result = OrganizationService(tmp_path, gateway_factory=Recruit).run("task needs expertise")
     assert result["evolution"]["status"] == "adopted"
