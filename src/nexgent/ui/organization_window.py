@@ -119,12 +119,15 @@ class OrganizationWindow(QMainWindow):
         self.conversation_id = run["conversation_id"]
         stage = run["events"][-1]["stage"]
         labels = {"started": "开始任务", "assigned": "分派工作", "shared": "成员交换发现并修正", "collaborated": "汇总成员发现",
-                  "tool_executed": "成员执行工具", "tools_completed": "工具执行与成果生成完成", "evaluated": "独立评价完成", "proposed": "提出组织改进", "gate": "改进评价完成", "finished": "本轮结束"}
+                  "tool_executed": "成员执行工具", "tools_completed": "工具执行与成果生成完成", "revising": "根据评价修订成果", "revised": "修订成果复验完成", "revision_failed": "修订未完成，保留已有成果", "evaluated": "独立评价完成", "proposed": "提出组织改进", "gate": "改进评价完成", "finished": "本轮结束"}
         self.status.setText(labels.get(stage, stage))
         lines = [f"使用组织版本：{run['revision']}", "", "成员"]
         lines.extend(f"• {m['name']}：{m['role']}" for m in run["organization"]["members"])
         lines.extend(["", "运行进展"])
         lines.extend("• " + labels.get(e["stage"], e["stage"]) for e in run["events"][-6:])
+        repair = next((e for e in reversed(run["events"]) if e["stage"] == "revising"), None)
+        if repair:
+            lines.extend(["", "修订依据：" + repair["assessment"]["feedback"]])
         if run.get("assessment"):
             assessment = run["assessment"]
             lines.extend(["", f"独立评价：{assessment['score']}/10", assessment["feedback"]])
