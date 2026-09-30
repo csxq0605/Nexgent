@@ -1,17 +1,16 @@
 # Nexgent 0.9
 
-**通用 RSI 智能体框架：在执行任务时开发和改进工具、插件、技能与执行策略，并用独立任务检验和保留有效变化。**
+**面向任务的 RSI Agent 系统：组织成员完成工作，获取独立反馈，并将通过门控的组织和策略改进用于后续任务。**
 
-2026-09-23 已重新制定[仓库计划](REFACTOR_PLAN.md)和[能力内核决策](docs/design/rsi-capability-kernel.md)。主线是可扩展能力内核、任务内开发和调用、跨任务验证与采用、改进策略递归；DAG 和多智能体团队是可替换的执行方式。新内核后端待技术小样决定，这些目标尚未完成。
-
-Nexgent 本身是产品。科学发现与 OpenFOAM 是独立插件／demo；领域阶段、工具和评分不定义核心。用户从 Main 提交目标，运行与能力变化通过信息窗口查看；同一执行体系可由 CLI 和 benchmark 调用。
+当前可运行主线是任务与组织闭环。模型网关、工具注册和配置复用 PR #1 的已有实现，
+按照 PR #2 的纠偏先完成产品流程。科学发现与 OpenFOAM 保留为独立插件／demo。
 
 ## 当前主线：Main 组织闭环
 
 2026-09-29 按 PR #2 纠偏：默认 Main 和 `nexgent run "任务"` 共用新的组织服务。
-负责人分派任务，成员并行工作、交换发现，负责人汇总；独立评价产生反馈，改进者
+负责人分派任务，无依赖成员并行工作，有依赖成员使用前序成果；必要时互评，负责人汇总。独立评价产生反馈，改进者
 可修改成员和工作规则。候选重跑并通过开发门控后保存，后续任务自动加载。
-多轮对话、运行过程、评价与组织版本保存在工作区。
+多轮对话、成果、运行过程、评价与组织版本保存在工作区。用户可以续聊修改已有成果。
 
 ```bash
 nexgent run "根据给定材料完成任务"
@@ -45,7 +44,7 @@ nexgent-gui
 
 ## 实施与阅读入口
 
-新阶段依次为：A 内核选型实测 → B 能力接口与生命周期 → C 模型工具／插件开发、D 可替换执行与编排 → E 自动任务来源进化 → F 独立效果与递归研究 → G 完整产品验收。最小 UI 接入随 B–E 同步；领域 demo 不占据核心阶段。
+当前实现与运行说明优先看 [Main 组织闭环](docs/organization-loop.md)。以下设计与研究链接保留历史背景，尚未实现的目标不代表当前产品能力。
 
 - [仓库计划](REFACTOR_PLAN.md)：当前基线、每阶段交付／验收、迁移、协作及立即执行队列。
 - [RSI 能力内核](docs/design/rsi-capability-kernel.md)：目标对象、插件开发、执行策略、证据和信任边界；不是当前能力声明。
@@ -77,11 +76,21 @@ python -m venv .venv
 
 本机环境、workbench、openfoam、scientific_discovery、BBH 四项插件和 BBH 数据已准备。模型读取被 Git 忽略的 `models.json` / `.env`；示例见 [models.example.json](models.example.json) 和 [.env.example](.env.example)。凭证留在模型请求宿主，不进入智能体源码进程。
 
-`nexgent gui` 和 `nexgent-gui` 默认打开 Nexgent Main 对话。普通用户输入自然语言即可创建并执行 Episode；任务创建、恢复、查看和导出仍使用同一个 `.nexgent` 持久存储。需要原始 JSON 合同、预算、工具授权和 RSI 脱敏投影时，使用“打开高级控制台”或 `--task-console`：
+`nexgent gui` 和 `nexgent-gui` 默认打开 Main。自然语言任务经组织服务执行、评价、
+修订与改进；已通过评价的成果立即展示，用户无需等完组织候选比较。
+CLI 用同一个服务：
 
-要让普通任务自动捕获反馈、提出候选并进行独立评价，先按[项目配置指南](docs/guides/ordinary-auto-evolution.md)安装评价插件并设置一次性通道策略。没有此配置时不会自行给用户任务打分或晋升。
+```powershell
+.venv\Scripts\python.exe -m nexgent --root ./my-project run "读取 sales.csv，生成销售汇总报告 report.md"
+.venv\Scripts\python.exe -m nexgent --root ./my-project run "修改上一份报告，补充说明" --conversation CONVERSATION_ID
+```
 
-[Windows 实际运行截图](docs/validation/nexgent-main-real-episode-20260923.png)展示了一条 MiMo 多角色 benchmark Episode 在 Main 对话与右侧运行信息窗中的状态；它是当前界面证据，不代表 RSI Lab 已完成。
+组织主线只需模型配置，不要求先安装 benchmark 或设置旧通道策略。
+
+### 保留的高级内核入口
+
+以下 `task` / `rsi-*` 命令使用旧内核；`--task-console` 打开对应高级界面。
+其自动进化配置见[旧项目配置指南](docs/guides/ordinary-auto-evolution.md)。
 
 ```powershell
 # 默认创建后执行；--input 接受内联 JSON、JSON 文件路径或 @file

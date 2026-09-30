@@ -83,7 +83,7 @@ def test_exhausted_tools_still_reach_evaluation(tmp_path):
             if "Perform your assigned" in prompt:
                 return {"tool": "list_files", "arguments": {}}
             if "Independently evaluate" in prompt:
-                assert len(payload["execution_evidence"][0]["tool_results"]) == 4
+                assert len(payload["execution_evidence"][0]["tool_results"]) == 8
             if role == "improver":
                 return {"organization": None, "reason": "Keep"}
             return result

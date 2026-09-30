@@ -44,6 +44,7 @@ class OrganizationWindow(QMainWindow):
         self.worker = None
         self.conversation_id = None
         self._closing = False
+        self._shown_delivery = None
         self.setWindowTitle("Nexgent · Main")
         self.resize(1200, 800)
         self.setStyleSheet(MAIN_STYLE)
@@ -82,6 +83,7 @@ class OrganizationWindow(QMainWindow):
                     self.append("你", run["objective"])
                     if run.get("answer"):
                         self.append("Nexgent", run["answer"])
+                        self.append_artifacts(run)
         self.show_organization()
 
     def append(self, who, text):
@@ -104,6 +106,7 @@ class OrganizationWindow(QMainWindow):
         objective = self.composer.toPlainText().strip()
         if not objective or self.worker:
             return
+        self._shown_delivery = None
         self.append("你", objective)
         self.composer.clear()
         self.send.setEnabled(False)
@@ -118,13 +121,25 @@ class OrganizationWindow(QMainWindow):
     def progress(self, run):
         self.conversation_id = run["conversation_id"]
         stage = run["events"][-1]["stage"]
-        labels = {"started": "开始任务", "assigned": "分派工作", "shared": "成员交换发现并修正", "collaborated": "汇总成员发现",
+        if stage == "evaluated" and run.get("assessment", {}).get("accepted"):
+            self.show_delivery(run)
+        labels = {"started": "开始任务", "member_started": "成员开始工作", "member_finished": "成员交付成果", "assigned": "分派工作", "shared": "成员交换发现并修正", "collaborated": "汇总成员发现",
                   "tool_executed": "成员执行工具", "tools_completed": "工具执行与成果生成完成", "revising": "根据评价修订成果", "revised": "修订成果复验完成", "revision_failed": "修订未完成，保留已有成果", "evaluated": "独立评价完成", "proposed": "提出组织改进", "gate": "改进评价完成", "finished": "本轮结束"}
-        self.status.setText(labels.get(stage, stage))
+        self.status.setText(("任务已交付 · " if self._shown_delivery else "") + labels.get(stage, stage))
         lines = [f"使用组织版本：{run['revision']}", "", "成员"]
         lines.extend(f"• {m['name']}：{m['role']}" for m in run["organization"]["members"])
+        assigned = next((e for e in reversed(run["events"]) if e["stage"] == "assigned"), None)
+        if assigned:
+            lines.extend(["", "本轮分工"])
+            for a in assigned["assignments"]:
+                dependency = "（等待 " + "、".join(a["depends_on"]) + "）" if a.get("depends_on") else ""
+                lines.append(f"• {a['member']}{dependency}：{a['task']}")
         lines.extend(["", "运行进展"])
-        lines.extend("• " + labels.get(e["stage"], e["stage"]) for e in run["events"][-6:])
+        for e in run["events"][-6:]:
+            detail = " · " + e["member"] if e.get("member") else ""
+            if e.get("tool"):
+                detail += " · " + e["tool"]
+            lines.append("• " + labels.get(e["stage"], e["stage"]) + detail)
         repair = next((e for e in reversed(run["events"]) if e["stage"] == "revising"), None)
         if repair:
             lines.extend(["", "修订依据：" + repair["assessment"]["feedback"]])
@@ -141,12 +156,20 @@ class OrganizationWindow(QMainWindow):
             lines.append(f"已保存组织版本：{evolution['revision']}")
         self.info.setPlainText("\n".join(lines))
 
-    def completed(self, run):
-        if run.get("answer"):
-            self.append("Nexgent", run["answer"])
+    def append_artifacts(self, run):
         for artifact in run.get("result", {}).get("artifacts", []):
             path = Path(artifact["path"])
             self.messages.append('<p>成果：<a href="' + html.escape(path.as_uri(), quote=True) + '">' + html.escape(path.name) + '</a></p>')
+
+    def show_delivery(self, run):
+        signature = (run.get("answer"), tuple(a["path"] for a in run.get("result", {}).get("artifacts", [])))
+        if run.get("answer") and signature != self._shown_delivery:
+            self.append("Nexgent" if self._shown_delivery is None else "Nexgent · 更新交付", run["answer"])
+            self.append_artifacts(run)
+            self._shown_delivery = signature
+
+    def completed(self, run):
+        self.show_delivery(run)
         assessment = run.get("assessment", {})
         self.append("评价", assessment.get("feedback", run.get("error", run["status"])))
         delivery = {"completed": "任务已交付", "needs_revision": "结果仍需修改", "failed": "任务未完成", "interrupted": "任务已停止"}

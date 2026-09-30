@@ -15,7 +15,8 @@ def test_real_csv_query_and_isolated_artifacts(tmp_path):
     artifact = tools.call("write_artifact", {"name": "report.txt", "content": "total 25"})
     assert Path(artifact["path"]).read_text() == "total 25"
     assert not (tmp_path / "report.txt").exists()
-    for path in ["../outside.txt", ".env", "models.json", artifact["path"]]:
+    assert tools.call("read_text", {"path": artifact["path"]})["content"] == "total 25"
+    for path in ["../outside.txt", ".env", "models.json"]:
         with pytest.raises(ValueError):
             tools.call("read_text", {"path": path})
     with pytest.raises(Exception):

@@ -8,9 +8,10 @@ from .tasks.tools import ToolRegistry, ToolSpec, validate
 
 
 class WorkspaceTools:
-    def __init__(self, root, output):
+    def __init__(self, root, output, *, shared_artifacts=(), allow_artifact_writes=True):
         self.root, self.output = Path(root).resolve(), Path(output).resolve()
         self.artifacts = []
+        self.shared_paths = {Path(a["path"]).resolve() for a in shared_artifacts}
         self.registry = ToolRegistry()
         for name, handler, properties, description, effect in (
             ("list_files", self.list_files, {}, "List readable project files (first 200).", "read"),
@@ -18,13 +19,27 @@ class WorkspaceTools:
             ("query_csv", self.query_csv, {"path": {"type": "string"}, "sql": {"type": "string"}},
              "Query a UTF-8 CSV using SQLite SQL. Table data has the CSV header columns as TEXT; CAST numeric columns. Returns up to 200 rows.", "local_compute"),
             ("write_artifact", self.write_artifact, {"name": {"type": "string"}, "content": {"type": "string", "maxLength": 30000}},
-             "Save a UTF-8 deliverable in your isolated output directory. Use a simple filename, not a project path.", "artifact_write"),
+             "Save a UTF-8 deliverable in your isolated output directory. Use the filename required by the user, not a project path. Other members and earlier attempts have separate directories, so the same filename is allowed there.", "artifact_write"),
         ):
+            if effect == "artifact_write" and not allow_artifact_writes:
+                continue
             self.registry.register(ToolSpec(name, {"type": "object", "properties": properties,
                 "required": list(properties), "additionalProperties": False}, {"type": "object"}, effect, handler, description))
 
     def source(self, path):
-        resolved = (self.root / path).resolve()
+        requested = Path(path)
+        resolved = (self.root / requested).resolve()
+        accessible = self.shared_paths | {Path(a["path"]).resolve() for a in self.artifacts}
+        if not resolved.exists() and requested.name == path:
+            matches = [p for p in accessible if p.name == path]
+            if len(matches) > 1:
+                raise ValueError("Several shared artifacts have this name; use the exact absolute path")
+            if matches:
+                resolved = matches[0]
+        if resolved in accessible:
+            if not resolved.is_file() or resolved.stat().st_size > 1_000_000:
+                raise ValueError("Shared artifact is missing or exceeds 1 MB")
+            return resolved
         relative = resolved.relative_to(self.root)
         if any(p.startswith('.') or p.casefold() in {"models.json", "node_modules", "venv", "__pycache__"} for p in relative.parts):
             raise ValueError("Private configuration and internal directories are not task inputs")
