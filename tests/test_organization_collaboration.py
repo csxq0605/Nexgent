@@ -207,3 +207,73 @@ def test_read_only_tools_cannot_write_even_when_model_requests_it(tmp_path):
     assert run["status"] == "completed"
     assert not run["result"]["artifacts"]
     assert not list((tmp_path / ".nexgent").rglob("unwanted.md"))
+
+
+def test_task_can_recruit_without_changing_persistent_organization(tmp_path):
+    from nexgent.organization import INITIAL_ORGANIZATION
+    service = OrganizationService(tmp_path, gateway_factory=Model)
+    initial = service.run("first task")
+    assert initial["evolution"]["status"] == "adopted"
+    stored = service.store.active()
+    assert len(stored[1]["members"]) == 1
+    class Recruit(DependencyModel):
+        def ask(self, role, prompt, payload, **kwargs):
+            if "Assign the task" in prompt:
+                # The planner creates a member only for this task.
+                return {"recruits": [INITIAL_ORGANIZATION["members"][1]], "peer_review": False,
+                        "assignments": [{"member": "analyst", "task": "Produce", "depends_on": []},
+                                        {"member": "checker", "task": "Verify", "depends_on": ["analyst"]}]}
+            return super().ask(role, prompt, payload, **kwargs)
+    run = OrganizationService(tmp_path, gateway_factory=Recruit).run("Need independent verification")
+    assert run["status"] == "completed"
+    assert len(run["organization"]["members"]) == 1
+    assert len(run["result"]["organization"]["members"]) == 2
+    assert service.store.active() == stored
+    event = next(e for e in run["events"] if e["stage"] == "assigned")
+    assert event["recruits"][0]["name"] == "checker"
+    assert run["result"]["execution_evidence"][1]["tool_results"][0]["result"]["rows"] == [(25,)]
+
+
+def test_planner_can_leave_unused_default_members_idle(tmp_path):
+    class Select(Model):
+        def ask(self, role, prompt, payload, **kwargs):
+            result = super().ask(role, prompt, payload, **kwargs)
+            if "Assign the task" in prompt:
+                result["assignments"] = [result["assignments"][0]]
+            if "Read the shared findings" in prompt:
+                raise AssertionError("Idle member must not execute")
+            if role == "improver":
+                return {"organization": None, "reason": "Keep defaults"}
+            return result
+    service = OrganizationService(tmp_path, gateway_factory=Select)
+    run = service.run("Simple task")
+    assert run["status"] == "completed"
+    assert len(run["organization"]["members"]) == 2
+    assert len(run["result"]["organization"]["members"]) == 1
+    assert [e["member"] for e in run["events"] if e["stage"] == "member_started"] == ["analyst"]
+
+
+def test_delivered_file_survives_short_conversation_window(tmp_path):
+    service = OrganizationService(tmp_path, gateway_factory=Model)
+    path = tmp_path / ".nexgent" / "older.txt"
+    path.write_text("retained source", encoding="utf-8")
+    service.store.save({"id": "old", "created": 1, "conversation_id": "conversation", "objective": "old task",
+                        "answer": "old answer", "result": {"artifacts": [{"path": str(path), "content": "retained source"}]}})
+    for i in range(5):
+        service.store.save({"id": str(i), "created": i+2, "conversation_id": "conversation",
+                            "objective": "later task", "answer": "later answer"})
+    class ReadOld(Model):
+        def ask(self, role, prompt, payload, **kwargs):
+            result = super().ask(role, prompt, payload, **kwargs)
+            if "Perform your assigned" in prompt:
+                assert all(t["user"] != "old task" for t in payload["task"]["conversation"])
+                if not payload["tool_results"]:
+                    return {"tool": "read_text", "arguments": {"path": "older.txt"}}
+                assert payload["tool_results"][0]["result"]["content"] == "retained source"
+            if role == "improver":
+                return {"organization": None, "reason": "Keep"}
+            return result
+    run = OrganizationService(tmp_path, gateway_factory=ReadOld).run("Read older file", conversation_id="conversation")
+    assert run["status"] == "completed"
+    assert run["available_artifacts"] == [{"path": str(path)}]
+    assert service.store.list()[0]["available_artifacts"] == run["available_artifacts"]

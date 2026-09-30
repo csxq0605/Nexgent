@@ -129,6 +129,17 @@ class OrganizationService:
                "objective": objective, "inputs": inputs or {}, "context": context,
                "revision": revision, "delivered_revision": revision, "organization": team, "status": "running", "events": [],
                "answer": None, "evolution": {"status": "not_started"}, "usage": {}}
+        # File references survive beyond the short conversational text window.
+        available_artifacts = []
+        seen_paths = set()
+        for previous in history:
+            if previous.get("conversation_id") == conversation_id:
+                for artifact in previous.get("result", {}).get("artifacts", []):
+                    if artifact["path"] not in seen_paths:
+                        available_artifacts.append({"path": artifact["path"]})
+                        seen_paths.add(artifact["path"])
+        available_artifacts = available_artifacts[:50]
+        run["available_artifacts"] = available_artifacts
         stop = stop_event or threading.Event()
         receipts, lock = {}, threading.RLock()
 
@@ -164,17 +175,24 @@ class OrganizationService:
 
         def execute(org, task, label):
             before = usage()
-            plan = ask("main", 'Assign the task across the listed members. Return {"assignments": [{"member": "exact member name", "task": "specific work", "depends_on": ["upstream member name"]}], "peer_review": boolean}. Set peer_review=false when dependent members already verify upstream work or extra cross-checks add no value; true requests one additional mutual review round. Assign every member exactly once. Use depends_on only when a member needs upstream finished findings or artifacts before starting; otherwise use []. Dependencies must be acyclic. Downstream members receive actual upstream results and can read/query those artifacts. Assign distinct useful work; do not ask a downstream member to repeat upstream work. No executable code or graph DSL.',
+            plan = ask("main", 'Assign the task across the listed members. Return {"recruits": [{"name": "new unique member name", "role": "distinct needed responsibility"}], "assignments": [{"member": "exact member name", "task": "specific work", "depends_on": ["upstream member name"]}], "peer_review": boolean}. Set peer_review=false when dependent members already verify upstream work or extra cross-checks add no value; true requests one additional mutual review round. Use existing members whenever their roles fit; use recruits=[] when they suffice. Recruit only distinct needed expertise. Existing members plus recruits must remain at most four. Select the members this task actually needs, assign each selected member exactly once, and leave unused members idle. Recruits exist for this task. Use depends_on only when a member needs upstream finished findings or artifacts before starting; otherwise use []. Dependencies must be acyclic. Downstream members receive actual upstream results and can read/query those artifacts. Assign distinct useful work; do not ask a downstream member to repeat upstream work. No executable code or graph DSL.',
                        {"task": task, "organization": org})
+            recruits = plan.get("recruits", [])
+            if not isinstance(recruits, list):
+                raise ValueError("Recruits must be a list of members")
+            org = organization({"members": org["members"] + recruits, "instructions": org["instructions"]})
             assignments = plan.get("assignments")
             peer_review = plan.get("peer_review", True)
             if type(peer_review) is not bool:
                 raise ValueError("peer_review must be a boolean")
-            names = [m["name"] for m in org["members"]]
-            if (not isinstance(assignments, list) or len(assignments) != len(names)
-                    or any(not isinstance(a, dict) for a in assignments)
-                    or sorted(a.get("member", "") for a in assignments) != sorted(names)):
-                raise ValueError("Planner must assign every member exactly once")
+            available = {m["name"]: m for m in org["members"]}
+            if (not isinstance(assignments, list) or not 1 <= len(assignments) <= 4
+                    or any(not isinstance(a, dict) or a.get("member") not in available for a in assignments)
+                    or len({a["member"] for a in assignments}) != len(assignments)):
+                raise ValueError("Planner must assign unique available members")
+            names = [a["member"] for a in assignments]
+            org = organization({"members": [available[n] for n in names], "instructions": org["instructions"]})
+            recruits = [r for r in recruits if r["name"] in names]
             for a in assignments:
                 _text(a.get("task"), 3000)
             dependencies = {}
@@ -188,7 +206,7 @@ class OrganizationService:
             schedule.prepare()
             completed = {}
             roles = {m["name"]: m["role"] for m in org["members"]}
-            emit("assigned", arm=label, assignments=assignments, peer_review=peer_review)
+            emit("assigned", arm=label, assignments=assignments, members=org["members"], recruits=recruits, peer_review=peer_review)
 
             def work(a):
                 member_index = names.index(a["member"])
@@ -196,6 +214,7 @@ class OrganizationService:
                 inherited = [artifact for result in upstream for artifact in result["artifacts"]]
                 inherited += [artifact for turn in task.get("conversation", []) for artifact in turn.get("artifacts", [])]
                 inherited += task.get("revision", {}).get("artifacts", [])
+                inherited += task.get("available_artifacts", [])
                 toolkit = WorkspaceTools(self.root, self.root / ".nexgent" / "outputs" / run["id"] / label / str(member_index),
                                          shared_artifacts=inherited, allow_artifact_writes=task.get("artifact_policy") != "read_only")
                 emit("member_started", arm=label, member=a["member"], depends_on=dependencies[a["member"]])
@@ -255,7 +274,7 @@ class OrganizationService:
                          {"task": task, "organization": org, "shared_findings": findings, "execution_evidence": evidence, "artifacts": artifacts})
             answer = _answer(result.get("answer"))
             after = usage()
-            return {"answer": answer, "execution_evidence": evidence, "artifacts": artifacts, "assignments": assignments, "model_calls": after["model_calls"] - before["model_calls"],
+            return {"answer": answer, "execution_evidence": evidence, "artifacts": artifacts, "assignments": assignments, "organization": org, "model_calls": after["model_calls"] - before["model_calls"],
                     "total_tokens": after["total_tokens"] - before["total_tokens"],
                     "tokens_complete": after["tokens_complete"]}
 
@@ -330,7 +349,7 @@ class OrganizationService:
                     and parent["tokens_complete"] and candidate["tokens_complete"]
                     and candidate["total_tokens"] <= max(1, parent["total_tokens"]) * token_ratio)
 
-        task = {"objective": objective, "inputs": run["inputs"], "conversation": context}
+        task = {"objective": objective, "inputs": run["inputs"], "conversation": context, "available_artifacts": available_artifacts}
         emit("started", revision=revision, members=team["members"])
         try:
             rubric = ask("evaluator", 'Write a concise acceptance rubric using only the mandatory requirements of this task and checkable facts. Do not invent constraints, stylistic preferences or required examples. Return {"criteria": "rubric", "required_artifacts": ["exact output filename explicitly required by the user"], "artifact_policy": "read_only if the user explicitly forbids file creation/modification, otherwise write"}. Only include output filenames, never input files; use [] for tasks without explicitly named output files. Do not solve tasks not asked by the user.', {"task": task})
@@ -351,8 +370,8 @@ class OrganizationService:
             # Delivery survives an optional improvement failure.
             run["status"] = "completed" if assessment["accepted"] else "needs_revision"
             run["evolution"] = {"status": "proposing", "scope": "development; not held-out evidence"}
-            proposal = ask("improver", 'Use task feedback to propose a small reusable improvement to the organization, or abstain. Check the shared findings for duplicated work and learn from prior gate feedback. Base execution cost is 2 + member_count calls. An optional peer-review round adds member_count calls for multi-member teams. Ask the lead to skip redundant peer review when a downstream member already verifies upstream work. Each tool invocation adds one model call (up to eight per member). Each attempt also uses one independent evaluation call. Failed answers receive at most one feedback-driven repair attempt with the same organization. Work costs include all attempts and their evaluation; use measured cost, not just member count. Asking a member to be silent DOES NOT skip its assigned work; removing a member or planning peer_review=false does reduce calls. Equal-score candidates can only pass if they actually reduce call count. Correct answers can still waste resources: an external evaluator already verifies the final answer, so an internal checker is only useful if its distinct contribution justifies the extra calls. Prefer removing redundant members for simple tasks; retain distinct expertise when needed. Improve roles/instructions, not task-specific answers. This organization must work for future unrelated tasks: never hard-code the current topic, answer, numbers, deadlines, output length or language. Generalize the lesson (for example verify user constraints before delivery). The lead assigns dependencies: independent members run in parallel; dependent members receive upstream results and artifacts before starting. The lead can request an additional peer-review round before synthesis; do this only when it adds value. You cannot alter the evaluator or gate. Return {"organization": {"members": [{"name": "name", "role": "responsibility"}], "instructions": "working rules"}, "reason": "why"}; or {"organization": null, "reason": "why no change"}. Use 1 to 4 members.',
-                           {"task": task, "organization": team, "answer": parent["answer"], "assessment": assessment, "attempts": parent["attempts"],
+            proposal = ask("improver", 'Use task feedback to propose a small reusable improvement to the organization, or abstain. Check the shared findings for duplicated work and learn from prior gate feedback. Base execution cost is 2 + member_count calls. An optional peer-review round adds member_count calls for multi-member teams. Ask the lead to skip redundant peer review when a downstream member already verifies upstream work. Each tool invocation adds one model call (up to eight per member). Each attempt also uses one independent evaluation call. Failed answers receive at most one feedback-driven repair attempt with the same organization. Work costs include all attempts and their evaluation; use measured cost, not just member count. Asking a member to be silent DOES NOT skip its assigned work; leaving an unnecessary member idle or planning peer_review=false reduces calls. Removing a default member that was already idle does not reduce calls; use the actual selected task organization and measured costs. Equal-score candidates can only pass if they actually reduce call count. Correct answers can still waste resources: an external evaluator already verifies the final answer, so an internal checker is only useful if its distinct contribution justifies the extra calls. Prefer removing redundant members for simple tasks; retain distinct expertise when needed. Improve roles/instructions, not task-specific answers. This organization must work for future unrelated tasks: never hard-code the current topic, answer, numbers, deadlines, output length or language. Generalize the lesson (for example verify user constraints before delivery). The lead may recruit temporary members when this task needs distinct expertise or independent checks; these recruits do not change the persistent defaults automatically. Propose persistent changes only when reusable across tasks. The lead assigns dependencies: independent members run in parallel; dependent members receive upstream results and artifacts before starting. The lead can request an additional peer-review round before synthesis; do this only when it adds value. You cannot alter the evaluator or gate. Return {"organization": {"members": [{"name": "name", "role": "responsibility"}], "instructions": "working rules"}, "reason": "why"}; or {"organization": null, "reason": "why no change"}. Use 1 to 4 members.',
+                           {"task": task, "organization": team, "task_organization": parent["organization"], "answer": parent["answer"], "assessment": assessment, "attempts": parent["attempts"],
                             "work": {"model_calls": parent["model_calls"], "total_tokens": parent["total_tokens"]},
                             "prior_feedback": [{"status": r["evolution"].get("status"),
                                                 "reason": r["evolution"].get("gate_feedback", r["evolution"].get("reason"))}
@@ -386,7 +405,7 @@ class OrganizationService:
                                      if r.get("assessment", {}).get("accepted") and r.get("rubric")
                                      and (r["objective"] != objective or r["inputs"] != run["inputs"])), None)
                     if passed and previous:
-                        regression_task = {"objective": previous["objective"], "inputs": previous["inputs"], "conversation": previous["context"], "artifact_policy": previous["rubric"].get("artifact_policy", "write")}
+                        regression_task = {"objective": previous["objective"], "inputs": previous["inputs"], "conversation": previous["context"], "artifact_policy": previous["rubric"].get("artifact_policy", "write"), "available_artifacts": previous.get("available_artifacts", [])}
                         old, old_eval = execute_reviewed(team, regression_task, "regression_parent", previous["rubric"])
                         new, new_eval = execute_reviewed(candidate_team, regression_task, "regression_candidate", previous["rubric"])
                         passed = gate(old, new, old_eval, new_eval)

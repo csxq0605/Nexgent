@@ -4,6 +4,7 @@ from pathlib import Path
 import threading
 
 from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                             QTextBrowser, QPlainTextEdit, QPushButton, QLabel)
 
@@ -88,6 +89,8 @@ class OrganizationWindow(QMainWindow):
 
     def append(self, who, text):
         self.messages.append("<b>" + html.escape(who) + "</b><p>" + html.escape(text).replace("\n", "<br>") + "</p>")
+        self.messages.moveCursor(QTextCursor.MoveOperation.End)
+        self.messages.ensureCursorVisible()
 
     def show_organization(self):
         revision, organization = self.service.store.active()
@@ -126,9 +129,12 @@ class OrganizationWindow(QMainWindow):
         labels = {"started": "开始任务", "member_started": "成员开始工作", "member_finished": "成员交付成果", "assigned": "分派工作", "shared": "成员交换发现并修正", "collaborated": "汇总成员发现",
                   "tool_executed": "成员执行工具", "tools_completed": "工具执行与成果生成完成", "revising": "根据评价修订成果", "revised": "修订成果复验完成", "revision_failed": "修订未完成，保留已有成果", "evaluated": "独立评价完成", "proposed": "提出组织改进", "gate": "改进评价完成", "finished": "本轮结束"}
         self.status.setText(("任务已交付 · " if self._shown_delivery else "") + labels.get(stage, stage))
-        lines = [f"使用组织版本：{run['revision']}", "", "成员"]
-        lines.extend(f"• {m['name']}：{m['role']}" for m in run["organization"]["members"])
         assigned = next((e for e in reversed(run["events"]) if e["stage"] == "assigned"), None)
+        members = assigned.get("members", run["organization"]["members"]) if assigned else run["organization"]["members"]
+        lines = [f"使用组织版本：{run['revision']}", "", "本轮成员"]
+        lines.extend(f"• {m['name']}：{m['role']}" for m in members)
+        if assigned and assigned.get("recruits"):
+            lines.append("临时加入：" + "、".join(m["name"] for m in assigned["recruits"]))
         if assigned:
             lines.extend(["", "本轮分工"])
             for a in assigned["assignments"]:
@@ -160,6 +166,8 @@ class OrganizationWindow(QMainWindow):
         for artifact in run.get("result", {}).get("artifacts", []):
             path = Path(artifact["path"])
             self.messages.append('<p>成果：<a href="' + html.escape(path.as_uri(), quote=True) + '">' + html.escape(path.name) + '</a></p>')
+            self.messages.moveCursor(QTextCursor.MoveOperation.End)
+            self.messages.ensureCursorVisible()
 
     def show_delivery(self, run):
         signature = (run.get("answer"), tuple(a["path"] for a in run.get("result", {}).get("artifacts", [])))
