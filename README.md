@@ -78,6 +78,8 @@ python -m venv .venv
 .venv\Scripts\nexgent-bbh-download.exe --destination .nexgent/benchmarks/bbh
 
 .\start.ps1
+# 任务工作区和模型配置可以使用不同目录
+.\start.ps1 -Project ./my-project -ModelRoot ./configured-models
 ```
 
 本机环境、workbench、openfoam、scientific_discovery、BBH 四项插件和 BBH 数据已准备。模型读取被 Git 忽略的 `models.json` / `.env`；示例见 [models.example.json](models.example.json) 和 [.env.example](.env.example)。凭证留在模型请求宿主，不进入智能体源码进程。
