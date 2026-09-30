@@ -3,6 +3,15 @@ from pathlib import Path
 import pytest
 
 from nexgent.organization_tools import WorkspaceTools
+
+
+def test_plain_python_body_uses_existing_worker_without_entrypoint_retries(tmp_path):
+    tools = WorkspaceTools(tmp_path, tmp_path / 'output')
+    result = tools.call('run_python', {'code': 'squares = [n * n for n in payload]\nreturn {"squares": squares, "total": sum(squares)}',
+                                     'payload': [3, 5, 8, 13]})
+    assert result['value'] == {'squares': [9, 25, 64, 169], 'total': 267}
+    with pytest.raises(Exception, match='Import|import'):
+        tools.call('run_python', {'code': 'import os\nreturn os.getcwd()', 'payload': {}})
 from nexgent.organization import OrganizationService
 from test_organization import Model
 

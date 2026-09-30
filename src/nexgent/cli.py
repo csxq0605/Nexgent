@@ -530,6 +530,11 @@ def main(argv=None):
     resume = sub.add_parser("run-resume", help="Resume an unfinished Main task, reusing completed member work")
     resume.add_argument("run_id")
     resume.add_argument("--model-root", type=Path)
+
+    run_list = sub.add_parser("run-list", help="List recent Main tasks without model calls")
+    run_list.add_argument("--conversation", help="Filter by conversation ID")
+    run_show = sub.add_parser("run-show", help="Read a saved Main task, including delivery, evaluation and feedback")
+    run_show.add_argument("run_id")
     gui = sub.add_parser("gui", help="Open the task workspace")
     gui.add_argument("--legacy-research", action="store_true", help="Open the preserved 0.8 research window")
 
@@ -809,6 +814,20 @@ def main(argv=None):
         from .organization import OrganizationService
         try:
             result = OrganizationService(args.root).feedback(args.run_id, args.text)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+        return 0
+    if args.command in {"run-list", "run-show"}:
+        from .organization import OrganizationStore
+        store = OrganizationStore(args.root)
+        try:
+            if args.command == "run-list":
+                result = [{k: r.get(k) for k in ("id", "conversation_id", "objective", "status", "revision", "delivered_revision", "usage")}
+                          for r in store.list() if not args.conversation or r["conversation_id"] == args.conversation]
+            else:
+                result = store.get(args.run_id)
+                result["feedback"] = store.feedback(args.run_id)
         except ValueError as exc:
             parser.error(str(exc))
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)

@@ -5,7 +5,7 @@ import threading
 
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui import QTextCursor
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
                             QTextBrowser, QPlainTextEdit, QPushButton, QLabel)
 
 from ..organization import OrganizationService
@@ -61,6 +61,10 @@ class OrganizationWindow(QMainWindow):
         layout = QVBoxLayout(container)
         self.status = QLabel("Main · 任务、协作与改进")
         layout.addWidget(self.status)
+        self.history_box = QComboBox()
+        self.history_box.setToolTip("打开已保存的对话，查看成果与反馈，继续执行任务。")
+        self.history_box.currentIndexChanged.connect(self.select_conversation)
+        layout.addWidget(self.history_box)
         body = QHBoxLayout()
         self.messages = QTextBrowser()
         self.messages.setOpenExternalLinks(True)
@@ -90,26 +94,66 @@ class OrganizationWindow(QMainWindow):
         for button in (self.send, self.feedback_button, self.resume_button, self.stop, self.new):
             buttons.addWidget(button)
         layout.addLayout(buttons)
-        history = self.service.store.list()
-        if history:
-            feedback = self.service.store.feedback()
-            self.conversation_id = history[0]["conversation_id"]
-            for run in reversed(history):
-                if run["conversation_id"] == self.conversation_id:
-                    self.append("你", run["objective"])
-                    if run.get("answer"):
-                        self.append("Nexgent", run["answer"])
-                        self.append_artifacts(run)
-                        if run["status"] != "running":
-                            self._feedback_run_id = run["id"]
-                        for item in reversed(feedback):
-                            if item["run_id"] == run["id"]:
-                                self.append("你的反馈", item["text"])
-            self.feedback_button.setEnabled(self._feedback_run_id is not None)
-            if history[0]['status'] in {'failed', 'interrupted'} and not history[0].get('assessment'):
-                self._recover_run_id = history[0]['id']
-                self.resume_button.setEnabled(True)
         self.show_organization()
+        history = self.refresh_history()
+        if history:
+            self.history_box.setCurrentIndex(1)
+
+    def refresh_history(self):
+        history = self.service.store.list()
+        self.history_box.blockSignals(True)
+        self.history_box.clear()
+        self.history_box.addItem("新对话", None)
+        seen = set()
+        for run in history:
+            cid = run["conversation_id"]
+            if cid not in seen:
+                self.history_box.addItem(run["objective"][:80].replace('\n', ' '), cid)
+                seen.add(cid)
+        self.history_box.setCurrentIndex(max(0, self.history_box.findData(self.conversation_id)))
+        self.history_box.blockSignals(False)
+        return history
+
+    def select_conversation(self, index):
+        if self.worker:
+            return
+        cid = self.history_box.itemData(index)
+        if cid is None:
+            self.new_conversation()
+            return
+        history = [r for r in self.service.store.list() if r["conversation_id"] == cid]
+        if not history:
+            return
+        self.conversation_id = cid
+        self.messages.clear()
+        self.composer.clear()
+        self._shown_delivery = None
+        self._feedback_run_id = None
+        latest = history[0]
+        self._recover_run_id = latest['id'] if latest['status'] in {'failed', 'interrupted'} and not latest.get('assessment') else None
+        for run in reversed(history):
+            self.append("你", run["objective"])
+            if run.get("answer"):
+                self.append("Nexgent", run["answer"])
+                self.append_artifacts(run)
+                if run["status"] != "running":
+                    self._feedback_run_id = run["id"]
+                for item in reversed(self.service.store.feedback(run["id"])):
+                    self.append("你的反馈", item["text"])
+            elif run.get('error'):
+                self.append("任务未完成", run['error'])
+        self._shown_delivery = (latest.get("answer"), tuple(a["path"] for a in latest.get("result", {}).get("artifacts", []))) if latest.get("answer") else None
+        self.show_organization()
+        if latest.get('events'):
+            self.progress(latest)
+        if latest.get('usage'):
+            note = " tokens" if latest['usage'].get('tokens_complete') else " 已知 tokens（部分用量未返回）"
+            self.info.appendPlainText(f"\n总用量：{latest['usage']['model_calls']} 次模型调用，{latest['usage']['total_tokens']}" + note)
+        delivery = {"completed": "任务已交付", "needs_revision": "结果仍需修改", "failed": "任务未完成", "interrupted": "任务已停止", "running": "运行尚未结束"}
+        self.status.setText("已打开保存的对话 · " + delivery.get(latest['status'], latest['status']) + " · " +
+                            EVOLUTION_LABELS.get(latest['evolution']['status'], latest['evolution']['status']))
+        self.feedback_button.setEnabled(self._feedback_run_id is not None)
+        self.resume_button.setEnabled(self._recover_run_id is not None)
 
     def append(self, who, text):
         self.messages.append("<b>" + html.escape(who) + "</b><p>" + html.escape(text).replace("\n", "<br>") + "</p>")
@@ -131,6 +175,11 @@ class OrganizationWindow(QMainWindow):
         self.resume_button.setEnabled(False)
         self.feedback_button.setEnabled(False)
         self.messages.clear()
+        self.history_box.blockSignals(True)
+        self.history_box.setCurrentIndex(0)
+        self.history_box.blockSignals(False)
+        self._shown_delivery = None
+        self.status.setText("Main · 任务、协作与改进")
         self.show_organization()
 
     def submit(self):
@@ -155,6 +204,7 @@ class OrganizationWindow(QMainWindow):
         self.new.setEnabled(False)
         self.feedback_button.setEnabled(False)
         self.resume_button.setEnabled(False)
+        self.history_box.setEnabled(False)
         self.worker = OrganizationWorker(self.service, objective, self.conversation_id, self, resume_id=resume_id)
         self.worker.updated.connect(self.progress)
         self.worker.result.connect(self.completed)
@@ -258,6 +308,8 @@ class OrganizationWindow(QMainWindow):
         self.new.setEnabled(True)
         self.feedback_button.setEnabled(self._feedback_run_id is not None)
         self.resume_button.setEnabled(self._recover_run_id is not None)
+        self.refresh_history()
+        self.history_box.setEnabled(True)
         if self._closing:
             self.close()
 

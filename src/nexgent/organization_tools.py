@@ -1,4 +1,4 @@
-"""Task tools using the existing registry and standard-library file/SQL engines."""
+"""Task tools reusing the existing registry, worker and mature source readers."""
 import csv
 import io
 from pathlib import Path
@@ -26,7 +26,7 @@ class WorkspaceTools:
             ("query_csv", self.query_csv, {"path": {"type": "string"}, "sql": {"type": "string"}},
              "Query a UTF-8 CSV using SQLite SQL. Table data has the CSV header columns as TEXT; CAST numeric columns. Returns up to 200 rows.", "local_compute"),
             ("run_python", self.run_python, {"code": {"type": "string", "maxLength": 30000}, "payload": {}},
-             "Compute with Python in the existing isolated worker. Define execute(payload, context) and return a JSON value. Lists, dicts, sets, tuples, comprehensions, loops, sorted, sum, min, max, range, enumerate, zip and preloaded math are available. Use named variables (no underscore/private names). No imports (including itertools), files, network, print or context calls. Pass observed input values in payload. Does not write files; save results with write_artifact if requested.", "local_compute"),
+             "Compute with Python in the existing isolated worker. Send Python statements ending with return of a JSON value; input data is in payload. A full def execute(payload, context) function is also accepted. Lists, dicts, sets, tuples, comprehensions, loops, sorted, sum, min, max, range, enumerate, zip and preloaded math are available. Use named variables (no underscore/private names). No imports (including itertools), files, network, print or context calls. Pass observed input values in payload. Does not write files; save results with write_artifact if requested.", "local_compute"),
             ("write_artifact", self.write_artifact, {"name": {"type": "string"}, "content": {"type": "string", "maxLength": 30000}},
              "Save a UTF-8 deliverable in your isolated output directory. Use the filename required by the user, not a project path. Other members and earlier attempts have separate directories, so the same filename is allowed there.", "artifact_write"),
         ):
@@ -164,6 +164,10 @@ class WorkspaceTools:
         return artifact
 
     def run_python(self, code, payload):
+        import ast
+        import textwrap
+        if not any(isinstance(node, ast.FunctionDef) and node.name == 'execute' for node in ast.parse(code).body):
+            code = 'def execute(payload, context):\n' + textwrap.indent(code, '    ')
         package = make_package({"compute.py": code}, {"entries": {"execute": "compute.py:execute"}})
         result = run_package(package, "execute", payload, stop_event=self.stop_event,
                              timeout=30, max_rpc=0)

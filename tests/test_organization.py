@@ -57,6 +57,26 @@ def test_task_collaboration_adoption_and_new_service_inheritance(tmp_path):
     assert later["usage"]["model_calls"] == 6
 
 
+def test_regression_reuses_scope_review_of_unchanged_candidate(tmp_path):
+    class ReviewOnce(Model):
+        def ask(self, role, prompt, payload, **kwargs):
+            result = super().ask(role, prompt, payload, **kwargs)
+            if 'Independently evaluate' in prompt and 'proposed_organization' not in payload:
+                result.pop('organization_reusable')
+                result.pop('organization_feedback')
+            return result
+
+    service = OrganizationService(tmp_path, gateway_factory=ReviewOnce)
+    service.store.save({'id': 'earlier', 'created': 0, 'conversation_id': 'other', 'objective': 'different task',
+                        'inputs': {}, 'context': [], 'answer': 'accepted answer', 'assessment': {'accepted': True},
+                        'rubric': {'criteria': 'Correct answer'}, 'evolution': {'status': 'abstained'}})
+    run = service.run('new task')
+    assert run['evolution']['status'] == 'adopted'
+    assert run['evolution']['assessment']['organization_reusable']
+    assert 'organization_reusable' not in run['evolution']['regression']['candidate']
+    assert run['evolution']['regression']['passed']
+
+
 def test_failed_candidate_cannot_change_active_organization(tmp_path):
     class Reject(Model):
         reject = True
