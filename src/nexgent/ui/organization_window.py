@@ -264,6 +264,7 @@ class OrganizationWindow(QMainWindow):
                   "tool_executed": "成员执行工具", "tools_completed": "工具执行与成果生成完成", "revising": "根据评价修订成果", "revised": "修订成果复验完成", "revision_failed": "修订未完成，保留已有成果", "evaluated": "独立评价完成", "proposed": "提出组织改进", "gate": "改进评价完成", "finished": "本轮结束"}
         labels.update(member_reused="复用已完成成员成果", peer_review_failed="互评格式失败，保留成员成果")
         labels['evaluation_tool_executed'] = '评价器独立核算'
+        labels.update(follow_up_requested='成员请求后续分工', follow_up_blocked='后续工作尚未解决')
         self.status.setText(("任务已交付 · " if self._shown_delivery else "") + labels.get(stage, stage))
         delivery_assignments = run.get("result", {}).get("assignments")
         assigned = next((e for e in reversed(run["events"]) if e["stage"] == "assigned"
@@ -287,7 +288,8 @@ class OrganizationWindow(QMainWindow):
             lines.extend(["", "本轮分工"])
             for a in assignments:
                 dependency = "（等待 " + "、".join(a["depends_on"]) + "）" if a.get("depends_on") else ""
-                lines.append(f"• {a['member']}{dependency}：{a['task']}")
+                phase = f"（追加第{a['round']}轮）" if a.get('round') else ''
+                lines.append(f"• {a['member']}{phase}{dependency}：{a['task']}")
         lines.extend(["", "运行进展"])
         for e in run["events"][-6:]:
             detail = " · " + e["member"] if e.get("member") else ""
