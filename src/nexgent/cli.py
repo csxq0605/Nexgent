@@ -522,6 +522,7 @@ def main(argv=None):
     run = sub.add_parser("run", help="Complete a task with the learning organization (Main)")
     run.add_argument("objective")
     run.add_argument("--input", help="JSON context or @file")
+    run.add_argument("--attach", type=Path, action="append", help="Attach a local Excel/CSV/text file (repeat for multiple files)")
     run.add_argument("--conversation", help="Continue a conversation ID from an earlier run")
     run.add_argument("--model-root", type=Path, help="Read existing model settings from another workspace")
     feedback = sub.add_parser("feedback", help="Record user feedback on a delivered Main task for subsequent work and gated improvement")
@@ -861,8 +862,11 @@ def main(argv=None):
     if args.command == "run":
         from .organization import OrganizationService
         service = OrganizationService(args.root, model_root=args.model_root)
+        inputs = _object_argument(args.input, label="input") if args.input else {}
+        if args.attach:
+            inputs['attachments'] = service.attach_files(args.attach)
         result = service.run(args.objective,
-                             inputs=_object_argument(args.input, label="input") if args.input else None,
+                             inputs=inputs,
                              conversation_id=args.conversation, stop_event=_stop_event())
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0 if result["status"] == "completed" else 1

@@ -24,7 +24,17 @@ nexgent-gui
 
 配置沿用 `models.json` 和 `.env`。CLI 的 `--root` / GUI 的 `--project` 指定工作区；
 `--model-root` 可从另一目录读取模型配置。详见[组织闭环说明](docs/organization-loop.md)。
-当前成员支持分析、写作、项目文件读取、公开网页资料读取、CSV SQL 计算、受限 Python 算法执行和成果文件生成。网页读取复用 requests 与 Beautiful Soup，返回实际来源 URL、标题和可分页正文；支持 HTML、文本与 JSON。工具复用现有 ToolRegistry 和 AgentPackage 进程执行器；Main 与 CLI 使用同一执行循环，评价读取实际工具证据；未通过时自动修订一次并按原要求复验，保留草稿与修订成果。Python 支持内置数据结构与 math，不支持导入库、文件或网络操作。外部应用操作尚未接入。
+当前成员支持分析、写作、项目文件读取、公开网页资料读取、CSV SQL 计算、受限 Python 算法执行和成果文件生成。网页读取复用 requests 与 Beautiful Soup，返回实际来源 URL、标题和可分页正文；支持 HTML、文本与 JSON。工具复用现有 ToolRegistry 和 AgentPackage 进程执行器；Main 与 CLI 使用同一执行循环，评价读取实际工具证据；未通过时自动修订一次并按原要求复验，保留草稿与修订成果。Python 支持内置数据结构与预载 math（兼容常见的 import math 写法），不开放其他库导入、文件或网络操作。外部应用操作尚未接入。
+
+Main 的“添加文件”可以直接选择 Excel、CSV 或文本材料；CLI 用 `--attach PATH`，可重复添加。
+选择的文件保存为任务输入快照，续聊、恢复和按反馈重跑可以读取，原文件保持原样。
+成员能读取和查询 `.xlsx`，交付带真实公式、计算值和可编辑输入的 Excel 工作簿；
+独立检查者及评价器读取实际工作簿核对。读写与公式计算复用 openpyxl、XlsxWriter
+和 formulas。支持有界标量公式及跨工作表引用，暂不支持宏、外部工作簿、命名区域和数组公式。
+
+```powershell
+nexgent --root ./my-project run "根据库存明细生成带公式的补货计划 purchase.xlsx，独立核算并读取成果检查" --attach ./inventory.xlsx
+```
 
 交付后可在 Main 输入意见并点击“提交本轮反馈”，或使用 `nexgent feedback RUN_ID "反馈内容"`。反馈持久保存，同对话后续任务会参考意见，改进者还会结合历史反馈提出可复用修改；反馈本身不会直接改写组织，候选仍须试跑并通过门控。
 

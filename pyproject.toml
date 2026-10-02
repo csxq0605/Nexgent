@@ -9,7 +9,7 @@ description = "A general task agent runtime with durable execution, artifacts, t
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["openai>=1.0", "requests>=2.31", "beautifulsoup4>=4.12,<5", "python-dotenv>=1.0", "PyQt6>=6.8,<7", "jsonschema>=4.22,<5"]
+dependencies = ["openai>=1.0", "requests>=2.31", "beautifulsoup4>=4.12,<5", "python-dotenv>=1.0", "PyQt6>=6.8,<7", "jsonschema>=4.22,<5", "openpyxl>=3.1,<4", "xlsxwriter>=3.2,<4", "formulas[excel]>=1.3,<2"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-qt>=4.5"]

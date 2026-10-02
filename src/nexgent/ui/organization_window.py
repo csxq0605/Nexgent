@@ -6,7 +6,7 @@ import threading
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
-                            QTextBrowser, QPlainTextEdit, QPushButton, QLabel)
+                            QTextBrowser, QPlainTextEdit, QPushButton, QLabel, QFileDialog)
 
 from ..organization import OrganizationService
 from .main_window import MAIN_STYLE
@@ -24,12 +24,13 @@ class OrganizationWorker(QThread):
     result = pyqtSignal(dict)
     failed = pyqtSignal(str)
 
-    def __init__(self, service, objective, conversation_id, parent=None, *, resume_id=None, learn_id=None):
+    def __init__(self, service, objective, conversation_id, parent=None, *, resume_id=None, learn_id=None, inputs=None):
         super().__init__(parent)
         self.service, self.objective = service, objective
         self.conversation_id = conversation_id
         self.resume_id = resume_id
         self.learn_id = learn_id
+        self.inputs = inputs
         self.stop = threading.Event()
 
     def run(self):
@@ -40,6 +41,7 @@ class OrganizationWorker(QThread):
                 result = self.service.resume(self.resume_id, stop_event=self.stop, on_update=self.updated.emit)
             else:
                 result = self.service.run(self.objective, conversation_id=self.conversation_id,
+                                          inputs=self.inputs,
                                           stop_event=self.stop, on_update=self.updated.emit)
             self.result.emit(result)
         except Exception as exc:
@@ -52,6 +54,7 @@ class OrganizationWindow(QMainWindow):
         self.service = service or OrganizationService(project_root)
         self.worker = None
         self.conversation_id = None
+        self.pending_attachments = []
         self._closing = False
         self._shown_delivery = None
         self._feedback_run_id = None
@@ -80,6 +83,16 @@ class OrganizationWindow(QMainWindow):
         self.composer.setMaximumHeight(120)
         self.composer.setPlaceholderText("描述任务并提供材料；Nexgent 会分工、汇总、评价，并尝试改进后续任务的组织方式。")
         layout.addWidget(self.composer)
+        attachments = QHBoxLayout()
+        self.attach_button = QPushButton('添加文件')
+        self.attach_button.clicked.connect(self.choose_files)
+        self.clear_attachments_button = QPushButton('清空附件')
+        self.clear_attachments_button.clicked.connect(self.clear_attachments)
+        self.attachment_label = QLabel('可添加 Excel、CSV 或文本材料')
+        attachments.addWidget(self.attach_button)
+        attachments.addWidget(self.clear_attachments_button)
+        attachments.addWidget(self.attachment_label, 1)
+        layout.addLayout(attachments)
         buttons = QHBoxLayout()
         self.send = QPushButton("发送并执行")
         self.send.clicked.connect(self.submit)
@@ -134,12 +147,15 @@ class OrganizationWindow(QMainWindow):
         self.conversation_id = cid
         self.messages.clear()
         self.composer.clear()
+        self.clear_attachments()
         self._shown_delivery = None
         self._feedback_run_id = None
         latest = history[0]
         self._recover_run_id = latest['id'] if latest['status'] in {'failed', 'interrupted'} and not latest.get('assessment') else None
         for run in reversed(history):
             self.append("你", self.task_label(run))
+            if run.get('inputs', {}).get('attachments'):
+                self.append('附件', '、'.join(a['name'] for a in run['inputs']['attachments']))
             if run.get("answer"):
                 self.append("Nexgent", run["answer"])
                 self.append_artifacts(run)
@@ -184,6 +200,7 @@ class OrganizationWindow(QMainWindow):
         if self.worker:
             return
         self.conversation_id = None
+        self.clear_attachments()
         self._feedback_run_id = None
         self._recover_run_id = None
         self.resume_button.setEnabled(False)
@@ -197,15 +214,39 @@ class OrganizationWindow(QMainWindow):
         self.status.setText("Main · 任务、协作与改进")
         self.show_organization()
 
+    def choose_files(self):
+        if self.worker:
+            return
+        paths, _ = QFileDialog.getOpenFileNames(self, '选择任务材料', '', '任务材料 (*.xlsx *.csv *.txt *.md *.json)')
+        if not paths:
+            return
+        try:
+            if len(self.pending_attachments) + len(paths) > 8:
+                raise ValueError('每个任务最多添加 8 个附件')
+            self.pending_attachments.extend(self.service.attach_files(paths))
+            self.attachment_label.setText('、'.join(a['name'] for a in self.pending_attachments))
+        except (ValueError, OSError) as exc:
+            self.append('附件未添加', str(exc))
+
+    def clear_attachments(self):
+        if self.worker:
+            return
+        self.pending_attachments = []
+        self.attachment_label.setText('可添加 Excel、CSV 或文本材料')
+
     def submit(self):
         objective = self.composer.toPlainText().strip()
         if not objective or self.worker:
             return
         self._shown_delivery = None
         self.append("你", objective)
+        inputs = {'attachments': self.pending_attachments[:]} if self.pending_attachments else None
+        if self.pending_attachments:
+            self.append('附件', '、'.join(a['name'] for a in self.pending_attachments))
+        self.clear_attachments()
         self.composer.clear()
         self._recover_run_id = None
-        self.start_worker(objective)
+        self.start_worker(objective, inputs=inputs)
 
     def resume_task(self):
         if self.worker or not self._recover_run_id:
@@ -224,14 +265,16 @@ class OrganizationWindow(QMainWindow):
         self.append("Nexgent", "根据保存的反馈重跑原任务，比较组织与策略修改；通过门控后用于后续任务。")
         self.start_worker("", learn_id=source_id)
 
-    def start_worker(self, objective, *, resume_id=None, learn_id=None):
+    def start_worker(self, objective, *, resume_id=None, learn_id=None, inputs=None):
         self.send.setEnabled(False)
         self.new.setEnabled(False)
         self.feedback_button.setEnabled(False)
         self.learn_button.setEnabled(False)
         self.resume_button.setEnabled(False)
         self.history_box.setEnabled(False)
-        self.worker = OrganizationWorker(self.service, objective, self.conversation_id, self, resume_id=resume_id, learn_id=learn_id)
+        self.attach_button.setEnabled(False)
+        self.clear_attachments_button.setEnabled(False)
+        self.worker = OrganizationWorker(self.service, objective, self.conversation_id, self, resume_id=resume_id, learn_id=learn_id, inputs=inputs)
         self.worker.updated.connect(self.progress)
         self.worker.result.connect(self.completed)
         self.worker.failed.connect(lambda error: self.append("运行失败", error))
@@ -355,6 +398,8 @@ class OrganizationWindow(QMainWindow):
         self.worker.deleteLater()
         self.worker = None
         self.send.setEnabled(True)
+        self.attach_button.setEnabled(True)
+        self.clear_attachments_button.setEnabled(True)
         self.new.setEnabled(True)
         self.feedback_button.setEnabled(self._feedback_run_id is not None)
         self.learn_button.setEnabled(self._feedback_run_id is not None)
