@@ -531,6 +531,10 @@ def main(argv=None):
     resume.add_argument("run_id")
     resume.add_argument("--model-root", type=Path)
 
+    learn = sub.add_parser("learn", help="Learn from feedback on a saved Main task using the existing organization gate")
+    learn.add_argument("run_id")
+    learn.add_argument("--model-root", type=Path)
+
     run_list = sub.add_parser("run-list", help="List recent Main tasks without model calls")
     run_list.add_argument("--conversation", help="Filter by conversation ID")
     run_show = sub.add_parser("run-show", help="Read a saved Main task, including delivery, evaluation and feedback")
@@ -823,7 +827,7 @@ def main(argv=None):
         store = OrganizationStore(args.root)
         try:
             if args.command == "run-list":
-                result = [{k: r.get(k) for k in ("id", "conversation_id", "objective", "status", "revision", "delivered_revision", "usage")}
+                result = [{k: r.get(k) for k in ("id", "conversation_id", "objective", "status", "revision", "delivered_revision", "learning_source_id", "usage")}
                           for r in store.list() if not args.conversation or r["conversation_id"] == args.conversation]
             else:
                 result = store.get(args.run_id)
@@ -832,6 +836,14 @@ def main(argv=None):
             parser.error(str(exc))
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0
+    if args.command == "learn":
+        from .organization import OrganizationService
+        try:
+            result = OrganizationService(args.root, model_root=args.model_root).learn(args.run_id, stop_event=_stop_event())
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+        return 0 if result['evolution']['status'] in {'adopted', 'rejected', 'abstained', 'unchanged', 'stale'} else 1
     if args.command == "run-resume":
         from .organization import OrganizationService
         try:

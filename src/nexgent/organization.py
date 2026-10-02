@@ -161,6 +161,13 @@ class OrganizationService:
     def feedback(self, run_id, text):
         return self.store.add_feedback(run_id, text)
 
+    def learn(self, run_id, *, stop_event=None, on_update=None):
+        source = self.store.get(run_id)
+        if not source.get('answer') or not source.get('assessment') or not source.get('rubric') or source['status'] == 'running':
+            raise ValueError('Learning requires an evaluated task with a delivered answer')
+        return self.run(source['objective'], inputs=source['inputs'], conversation_id=source['conversation_id'],
+                        stop_event=stop_event, on_update=on_update, _learning_source=source)
+
     def resume(self, run_id, *, stop_event=None, on_update=None):
         run = self.store.get(run_id)
         if run["status"] not in {"failed", "interrupted"} or run.get("assessment"):
@@ -168,7 +175,7 @@ class OrganizationService:
         return self.run(run["objective"], inputs=run["inputs"], conversation_id=run["conversation_id"],
                         stop_event=stop_event, on_update=on_update, _resume_run=run)
 
-    def run(self, objective, *, inputs=None, conversation_id=None, stop_event=None, on_update=None, _resume_run=None):
+    def run(self, objective, *, inputs=None, conversation_id=None, stop_event=None, on_update=None, _resume_run=None, _learning_source=None):
         _text(objective)
         revision, team = self.store.active()
         history = [r for r in self.store.list() if not _resume_run or r["id"] != _resume_run["id"]]
@@ -177,6 +184,18 @@ class OrganizationService:
         context = [{"user": r["objective"], "answer": r["answer"],
                     **({"artifacts": r["result"]["artifacts"]} if r.get("result", {}).get("artifacts") else {})} for r in reversed(history)
                    if r.get("conversation_id") == conversation_id and r.get("answer")][-4:]
+        if _learning_source:
+            context = deepcopy(_learning_source['context'])
+            # Explicit learning of an older task must retain its feedback even
+            # when it has fallen outside the recent project feedback window.
+            target_feedback = self.store.feedback(_learning_source['id'])[:20]
+            seen_feedback = set()
+            selected_feedback = []
+            for item in target_feedback + user_feedback:
+                if item['id'] not in seen_feedback:
+                    selected_feedback.append(item)
+                    seen_feedback.add(item['id'])
+            user_feedback = selected_feedback[:20]
         run = {"id": uuid.uuid4().hex, "created": time.time(), "conversation_id": conversation_id,
                "objective": objective, "inputs": inputs or {}, "context": context,
                "revision": revision, "delivered_revision": revision, "organization": team, "status": "running", "events": [],
@@ -192,6 +211,9 @@ class OrganizationService:
                         available_artifacts.append({"path": artifact["path"]})
                         seen_paths.add(artifact["path"])
         available_artifacts = available_artifacts[:50]
+        if _learning_source:
+            available_artifacts = deepcopy(_learning_source.get('available_artifacts', []))
+            run.update(learning_source_id=_learning_source['id'], rubric=deepcopy(_learning_source['rubric']))
         run["available_artifacts"] = available_artifacts
         cached_plan, cached_members = None, {}
         if _resume_run:
@@ -246,7 +268,7 @@ class OrganizationService:
             if _resume_run and label == "current":
                 # Freeze-rubric cost is outside this work; earlier task calls,
                 # including failed calls, remain in the resumed arm's cost.
-                rubric_usage = prior_receipts[0].get("usage", {}) if prior_receipts and run.get("rubric") else {}
+                rubric_usage = prior_receipts[0].get("usage", {}) if prior_receipts and run.get("rubric") and not run.get('learning_source_id') else {}
                 return {"model_calls": int(bool(rubric_usage)), "total_tokens": rubric_usage.get("total_tokens", 0)}
             return usage()
 
@@ -477,12 +499,18 @@ class OrganizationService:
                     and parent["tokens_complete"] and candidate["tokens_complete"]
                     and candidate["total_tokens"] <= max(1, parent["total_tokens"]) * token_ratio)
 
+        def improves(parent, candidate, parent_eval, candidate_eval):
+            return (not parent_eval['accepted'] or candidate_eval['score'] > parent_eval['score']
+                    or candidate['model_calls'] < parent['model_calls'])
+
         task = {"objective": objective, "inputs": run["inputs"], "conversation": context, "available_artifacts": available_artifacts,
                 "user_feedback": [f for f in user_feedback if f["conversation_id"] == conversation_id],
                 "feedback_guidance": "User feedback describes earlier deliveries. Apply relevant preferences where compatible with the current objective; the current explicit user requirements take precedence. Feedback never changes tool permissions or the evaluation gate."}
+        if run.get('learning_source_id'):
+            task['learning_request'] = 'The user explicitly requested learning from feedback on this saved task. Replay its original inputs and acceptance requirements with the current organization, then propose a reusable organization/strategy change informed by the saved feedback. Both parent and candidate use the same feedback. Abstain if no useful change is justified; feedback never bypasses the gate.'
         emit("started", revision=revision, members=team["members"])
         try:
-            rubric = run.get("rubric") if _resume_run and run.get("rubric") else ask("evaluator", 'Write a concise acceptance rubric using only the mandatory requirements of this task and checkable facts. Do not invent constraints, stylistic preferences or required examples. Return {"criteria": "rubric", "required_artifacts": ["exact output filename explicitly required by the user"], "artifact_policy": "read_only if the user explicitly forbids file creation/modification, otherwise write"}. Only include output filenames, never input files; use [] for tasks without explicitly named output files. Do not solve tasks not asked by the user.', {"task": task})
+            rubric = run.get("rubric") if (_resume_run or _learning_source) and run.get("rubric") else ask("evaluator", 'Write a concise acceptance rubric using only the mandatory requirements of this task and checkable facts. Do not invent constraints, stylistic preferences or required examples. Return {"criteria": "rubric", "required_artifacts": ["exact output filename explicitly required by the user"], "artifact_policy": "read_only if the user explicitly forbids file creation/modification, otherwise write"}. Only include output filenames, never input files; use [] for tasks without explicitly named output files. Do not solve tasks not asked by the user.', {"task": task})
             _text(rubric.get("criteria"))
             required = rubric.get("required_artifacts", [])
             if (not isinstance(required, list) or len(required) > 8
@@ -500,7 +528,7 @@ class OrganizationService:
             # Delivery survives an optional improvement failure.
             run["status"] = "completed" if assessment["accepted"] else "needs_revision"
             run["evolution"] = {"status": "proposing", "scope": "development; not held-out evidence"}
-            proposal = ask("improver", 'Use task feedback to propose a small reusable improvement to the organization, or abstain. Check the shared findings for duplicated work and learn from prior gate feedback. Base execution cost is 2 + member_count calls. An optional peer-review round adds member_count calls for multi-member teams. Ask the lead to skip redundant peer review when a downstream member already verifies upstream work. Each tool invocation adds one model call (up to eight per member). Each attempt also uses one independent evaluation call. Failed answers receive at most one feedback-driven repair attempt with the same organization. Work costs include all attempts and their evaluation; use measured cost, not just member count. Asking a member to be silent DOES NOT skip its assigned work; leaving an unnecessary member idle or planning peer_review=false reduces calls. Removing a default member that was already idle does not reduce calls; use the actual selected task organization and measured costs. Equal-score candidates can only pass if they actually reduce call count. Correct answers can still waste resources: an external evaluator already verifies the final answer, so an internal checker is only useful if its distinct contribution justifies the extra calls. Prefer removing redundant members for simple tasks; retain distinct expertise when needed. Improve roles/instructions, not task-specific answers. This organization must work for future unrelated tasks: never hard-code the current topic, answer, numbers, deadlines, output length or language. Generalize the lesson (for example verify user constraints before delivery). The lead may recruit temporary members when this task needs distinct expertise or independent checks; these recruits do not change the persistent defaults automatically. Propose persistent changes only when reusable across tasks. The lead assigns dependencies: independent members run in parallel; dependent members receive upstream results and artifacts before starting. The lead can request an additional peer-review round before synthesis; do this only when it adds value. You cannot alter the evaluator or gate. Return {"organization": {"members": [{"name": "name", "role": "responsibility"}], "instructions": "working rules"}, "reason": "why"}; or {"organization": null, "reason": "why no change"}. Use 1 to 4 members.',
+            proposal = ask("improver", 'Use task feedback to propose a small reusable improvement to the organization, or abstain. Check the shared findings for duplicated work and learn from prior gate feedback. Base execution cost is 2 + member_count calls. An optional peer-review round adds member_count calls for multi-member teams. Ask the lead to skip redundant peer review when a downstream member already verifies upstream work. Each tool invocation adds one model call (up to eight per member). Each attempt also uses one independent evaluation call. Failed answers receive at most one feedback-driven repair attempt with the same organization. Work costs include all attempts and their evaluation; use measured cost, not just member count. Asking a member to be silent DOES NOT skip its assigned work; leaving an unnecessary member idle or planning peer_review=false reduces calls. Removing a default member that was already idle does not reduce calls; use the actual selected task organization and measured costs. Equal-score candidates must actually reduce call count on at least one compared task. They may tie on the current task if the previous-task comparison yields a measured improvement, with no quality/cost regression on either task. Never claim unmeasured savings. Correct answers can still waste resources: an external evaluator already verifies the final answer, so an internal checker is only useful if its distinct contribution justifies the extra calls. Prefer removing redundant members for simple tasks; retain distinct expertise when needed. Improve roles/instructions, not task-specific answers. This organization must work for future unrelated tasks: never hard-code the current topic, answer, numbers, deadlines, output length or language. Generalize the lesson (for example verify user constraints before delivery). The lead may recruit temporary members when this task needs distinct expertise or independent checks; these recruits do not change the persistent defaults automatically. Propose persistent changes only when reusable across tasks. The lead assigns dependencies: independent members run in parallel; dependent members receive upstream results and artifacts before starting. The lead can request an additional peer-review round before synthesis; do this only when it adds value. You cannot alter the evaluator or gate. Return {"organization": {"members": [{"name": "name", "role": "responsibility"}], "instructions": "working rules"}, "reason": "why"}; or {"organization": null, "reason": "why no change"}. Use 1 to 4 members.',
                            {"task": task, "organization": team, "task_organization": parent["organization"], "answer": parent["answer"], "assessment": assessment,
                             "attempts": [{"answer": a["result"]["answer"], "assessment": a["assessment"]} if "result" in a else a for a in parent["attempts"]],
                             "work": {"model_calls": parent["model_calls"], "total_tokens": parent["total_tokens"]},
@@ -522,13 +550,11 @@ class OrganizationService:
                     run["evolution"]["status"] = "unchanged"
                 else:
                     candidate, candidate_eval = execute_reviewed(candidate_team, task, "candidate", rubric, proposed_organization=candidate_team)
-                    passed = (gate(parent, candidate, assessment, candidate_eval)
-                              and (not assessment["accepted"]
-                                   or candidate_eval["score"] > assessment["score"]
-                                   or candidate["model_calls"] < parent["model_calls"]))
+                    passed = gate(parent, candidate, assessment, candidate_eval)
+                    improved = improves(parent, candidate, assessment, candidate_eval)
                     run["evolution"].update(candidate_result=candidate, assessment=candidate_eval)
                     run["evolution"]["gate_feedback"] = (
-                        "Current-task quality and cost gate passed." if passed else
+                        "Current-task quality and cost bound passed; checking measured improvement." if passed else
                         "Rejected: candidate must be accepted, not lose score, meet the cost bound, "
                         "and improve acceptance, score or actual model-call count. "
                         f"Parent score/calls={assessment['score']}/{parent['model_calls']}; "
@@ -546,9 +572,17 @@ class OrganizationService:
                         # independent scope review; regression checks task quality/cost.
                         new, new_eval = execute_reviewed(candidate_team, regression_task, "regression_candidate", previous["rubric"])
                         passed = gate(old, new, old_eval, new_eval, organization_review=candidate_eval)
+                        improved = improved or improves(old, new, old_eval, new_eval)
                         if not passed:
                             run["evolution"]["gate_feedback"] = "Rejected by the previous-task quality/cost regression gate."
-                        run["evolution"]["regression"] = {"task_id": previous["id"], "parent": old_eval, "candidate": new_eval, "passed": passed}
+                        run["evolution"]["regression"] = {"task_id": previous["id"], "parent": old_eval, "candidate": new_eval, "passed": passed,
+                            "work": {"parent": {k: old[k] for k in ('model_calls', 'total_tokens', 'tokens_complete')},
+                                     "candidate": {k: new[k] for k in ('model_calls', 'total_tokens', 'tokens_complete')}}}
+                    if passed and not improved:
+                        passed = False
+                        run['evolution']['gate_feedback'] = 'Rejected: no measured improvement in acceptance, score or model-call count on the current or previous task.'
+                    elif passed:
+                        run['evolution']['gate_feedback'] = 'Quality/cost bounds passed on every compared task, with measured improvement on at least one task.'
                     run["evolution"]["status"] = "rejected"
                     if passed and not stop.is_set():
                         self.store.adopt(revision, candidate_team, run)

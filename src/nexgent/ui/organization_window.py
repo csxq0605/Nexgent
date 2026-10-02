@@ -24,16 +24,19 @@ class OrganizationWorker(QThread):
     result = pyqtSignal(dict)
     failed = pyqtSignal(str)
 
-    def __init__(self, service, objective, conversation_id, parent=None, *, resume_id=None):
+    def __init__(self, service, objective, conversation_id, parent=None, *, resume_id=None, learn_id=None):
         super().__init__(parent)
         self.service, self.objective = service, objective
         self.conversation_id = conversation_id
         self.resume_id = resume_id
+        self.learn_id = learn_id
         self.stop = threading.Event()
 
     def run(self):
         try:
-            if self.resume_id:
+            if self.learn_id:
+                result = self.service.learn(self.learn_id, stop_event=self.stop, on_update=self.updated.emit)
+            elif self.resume_id:
                 result = self.service.resume(self.resume_id, stop_event=self.stop, on_update=self.updated.emit)
             else:
                 result = self.service.run(self.objective, conversation_id=self.conversation_id,
@@ -91,7 +94,11 @@ class OrganizationWindow(QMainWindow):
         self.resume_button = QPushButton("恢复未完成任务")
         self.resume_button.clicked.connect(self.resume_task)
         self.resume_button.setEnabled(False)
-        for button in (self.send, self.feedback_button, self.resume_button, self.stop, self.new):
+        self.learn_button = QPushButton("按反馈改进组织")
+        self.learn_button.setToolTip("保存输入框中的反馈，并按原任务要求重新运行、比较组织候选；通过门控才应用于后续任务。")
+        self.learn_button.clicked.connect(self.learn_task)
+        self.learn_button.setEnabled(False)
+        for button in (self.send, self.feedback_button, self.learn_button, self.resume_button, self.stop, self.new):
             buttons.addWidget(button)
         layout.addLayout(buttons)
         self.show_organization()
@@ -108,7 +115,7 @@ class OrganizationWindow(QMainWindow):
         for run in history:
             cid = run["conversation_id"]
             if cid not in seen:
-                self.history_box.addItem(run["objective"][:80].replace('\n', ' '), cid)
+                self.history_box.addItem(self.task_label(run)[:80].replace('\n', ' '), cid)
                 seen.add(cid)
         self.history_box.setCurrentIndex(max(0, self.history_box.findData(self.conversation_id)))
         self.history_box.blockSignals(False)
@@ -132,7 +139,7 @@ class OrganizationWindow(QMainWindow):
         latest = history[0]
         self._recover_run_id = latest['id'] if latest['status'] in {'failed', 'interrupted'} and not latest.get('assessment') else None
         for run in reversed(history):
-            self.append("你", run["objective"])
+            self.append("你", self.task_label(run))
             if run.get("answer"):
                 self.append("Nexgent", run["answer"])
                 self.append_artifacts(run)
@@ -153,7 +160,12 @@ class OrganizationWindow(QMainWindow):
         self.status.setText("已打开保存的对话 · " + delivery.get(latest['status'], latest['status']) + " · " +
                             EVOLUTION_LABELS.get(latest['evolution']['status'], latest['evolution']['status']))
         self.feedback_button.setEnabled(self._feedback_run_id is not None)
+        self.learn_button.setEnabled(self._feedback_run_id is not None)
         self.resume_button.setEnabled(self._recover_run_id is not None)
+
+    @staticmethod
+    def task_label(run):
+        return ("按反馈改进组织：" if run.get('learning_source_id') else '') + run['objective']
 
     def append(self, who, text):
         self.messages.append("<b>" + html.escape(who) + "</b><p>" + html.escape(text).replace("\n", "<br>") + "</p>")
@@ -174,6 +186,7 @@ class OrganizationWindow(QMainWindow):
         self._recover_run_id = None
         self.resume_button.setEnabled(False)
         self.feedback_button.setEnabled(False)
+        self.learn_button.setEnabled(False)
         self.messages.clear()
         self.history_box.blockSignals(True)
         self.history_box.setCurrentIndex(0)
@@ -199,13 +212,24 @@ class OrganizationWindow(QMainWindow):
         self.append("Nexgent", "恢复未完成任务，继续使用已完成的成员成果。")
         self.start_worker("", resume_id=self._recover_run_id)
 
-    def start_worker(self, objective, *, resume_id=None):
+    def learn_task(self):
+        if self.worker or not self._feedback_run_id:
+            return
+        source_id = self._feedback_run_id
+        if self.composer.toPlainText().strip() and not self.submit_feedback():
+            return
+        self._shown_delivery = None
+        self.append("Nexgent", "根据保存的反馈重跑原任务，比较组织与策略修改；通过门控后用于后续任务。")
+        self.start_worker("", learn_id=source_id)
+
+    def start_worker(self, objective, *, resume_id=None, learn_id=None):
         self.send.setEnabled(False)
         self.new.setEnabled(False)
         self.feedback_button.setEnabled(False)
+        self.learn_button.setEnabled(False)
         self.resume_button.setEnabled(False)
         self.history_box.setEnabled(False)
-        self.worker = OrganizationWorker(self.service, objective, self.conversation_id, self, resume_id=resume_id)
+        self.worker = OrganizationWorker(self.service, objective, self.conversation_id, self, resume_id=resume_id, learn_id=learn_id)
         self.worker.updated.connect(self.progress)
         self.worker.result.connect(self.completed)
         self.worker.failed.connect(lambda error: self.append("运行失败", error))
@@ -224,6 +248,7 @@ class OrganizationWindow(QMainWindow):
         self.composer.clear()
         self.append("你的反馈", text)
         self.append("Nexgent", "反馈已保存，将用于后续任务与组织改进；组织修改仍需通过实际试跑和门控。")
+        return True
 
     def progress(self, run):
         self.conversation_id = run["conversation_id"]
@@ -240,14 +265,21 @@ class OrganizationWindow(QMainWindow):
         delivery_assignments = run.get("result", {}).get("assignments")
         assigned = next((e for e in reversed(run["events"]) if e["stage"] == "assigned"
                          and (delivery_assignments is None or e["assignments"] == delivery_assignments)), None)
-        members = assigned.get("members", run["organization"]["members"]) if assigned else run["organization"]["members"]
-        lines = [f"使用组织版本：{run['revision']}", "", "本轮成员"]
+        delivered_members = run.get("result", {}).get("organization", {}).get("members")
+        members = delivered_members or (assigned.get("members", run["organization"]["members"]) if assigned else run["organization"]["members"])
+        lines = [f"使用组织版本：{run.get('delivered_revision', run['revision'])}", "", "本轮成员"]
+        if run.get('learning_source_id'):
+            lines.insert(1, '参考已保存任务：' + run['learning_source_id'])
         lines.extend(f"• {m['name']}：{m['role']}" for m in members)
-        if assigned and assigned.get("recruits"):
-            lines.append("临时加入：" + "、".join(m["name"] for m in assigned["recruits"]))
-        if assigned:
+        persistent = run["evolution"].get("candidate", run["organization"]) if run['evolution']['status'] == 'adopted' else run["organization"]
+        defaults = {m["name"] for m in persistent["members"]}
+        recruits = [m["name"] for m in members if m["name"] not in defaults]
+        if recruits:
+            lines.append("临时加入：" + "、".join(recruits))
+        assignments = delivery_assignments if delivery_assignments is not None else assigned["assignments"] if assigned else []
+        if assignments:
             lines.extend(["", "本轮分工"])
-            for a in assigned["assignments"]:
+            for a in assignments:
                 dependency = "（等待 " + "、".join(a["depends_on"]) + "）" if a.get("depends_on") else ""
                 lines.append(f"• {a['member']}{dependency}：{a['task']}")
         lines.extend(["", "运行进展"])
@@ -270,6 +302,16 @@ class OrganizationWindow(QMainWindow):
             lines.append(evolution["reason"])
         if evolution.get("revision"):
             lines.append(f"已保存组织版本：{evolution['revision']}")
+        if evolution.get("candidate_result"):
+            parent = run.get("parent_result", run["result"])
+            candidate = evolution["candidate_result"]
+            lines.append(f"当前任务比较：{parent['model_calls']} → {candidate['model_calls']} 次工作调用")
+        regression = evolution.get("regression")
+        if regression and regression.get("work"):
+            before, after = regression["work"]["parent"], regression["work"]["candidate"]
+            lines.append(f"历史任务比较：{before['model_calls']} → {after['model_calls']} 次工作调用")
+        if evolution.get("gate_feedback"):
+            lines.append("门控结论：" + evolution["gate_feedback"])
         self.info.setPlainText("\n".join(lines))
 
     def append_artifacts(self, run):
@@ -307,6 +349,7 @@ class OrganizationWindow(QMainWindow):
         self.send.setEnabled(True)
         self.new.setEnabled(True)
         self.feedback_button.setEnabled(self._feedback_run_id is not None)
+        self.learn_button.setEnabled(self._feedback_run_id is not None)
         self.resume_button.setEnabled(self._recover_run_id is not None)
         self.refresh_history()
         self.history_box.setEnabled(True)
