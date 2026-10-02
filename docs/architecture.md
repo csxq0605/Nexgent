@@ -2,7 +2,7 @@
 
 Nexgent 是能够在任务中开发和改进能力、并在独立任务上检验效果的通用 RSI 智能体框架。工具、插件、技能、执行循环、编排和记忆策略均在目标范围内；DAG 只是执行表示之一。科学发现与 OpenFOAM 是可选环境。
 
-2026-09-23 重新制定实施计划。新的能力内核和模型插件开发尚未实现；已有 TaskService、版本化包、图编译、技能子包和演化控制面是迁移资产，不能据此宣布完整 RSI 已完成。
+2026-10-02 默认入口已接回通用运行时：`Nexgent` 组合 TaskService、可替换 AgentPackage、ToolProvider 和独立评价 adapter，Main / CLI / Python SDK 共用；组织提案保留为可选应用。见[实际框架入口](framework-runtime.md)。完整自动能力发布和递归改进尚未完成。
 
 ## 当前目标与实施
 

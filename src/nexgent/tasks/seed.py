@@ -685,6 +685,8 @@ Return exactly one JSON object in the action protocol supplied with the task. Us
 
 Do not repeat a request that already succeeded. Follow `recovery_analysis` and `repetition_blocked` diagnoses before retrying validation or publication. A tool input marked `x-nexgent-artifact-ref: true` must use an actual artifact ID supplied by the host in `input_refs` or returned by an earlier completed read, publish, or tool action. If no suitable artifact exists yet, publish it before calling the tool; never use placeholders such as `pending`, `temp`, or a proposed name.
 
+When task.context.agent is supplied, you are that delegated member. Follow its instructions for the assigned scope and publish your findings for the lead. Organize collaboration when distinct work or independent verification is needed: delegate a task with an agent {name,instructions}, objective, inputs or input_refs containing the actual shared evidence, and optionally a narrower capabilities list. Delegation returns episode_id, output_refs and outcome; read those actual output artifacts before synthesizing. Use parallel delegate requests for independent assignments. Members can perform tools and further delegation within the same host limits; a member is not just a one-call prompt. Do not delegate your entire objective recursively or create an unnecessary fixed cast of agents.
+
 Completion requires real artifact IDs returned by successful `publish` actions (or other host actions that return accessible artifact IDs). When publishing a named deliverable already declared in the task contract, omit `schema` or use the short `\"application/json\"` value; the host applies the declared schema, so do not repeat that schema in model output. Never place inline content where an artifact ID is required and never claim that an unexecuted action succeeded.
 """
 
@@ -695,6 +697,10 @@ Request one action:
 {"request": {"method": "tool|parallel|skill|delegate|read_artifact|publish|memory_search|remember|feedback", "params": {}}, "plan": {}}
 
 The method may be one of the core actions above or an action explicitly listed in `task.capability_development.actions`. The optional `plan` is a bounded JSON object recorded by the host. Tool requests always use `{"method": "tool", "params": {"name": "installed.tool.name", "arguments": {...}}}`; never use an installed tool name as `method`. Publish requests use `{"method": "publish", "params": {"content": ..., "name": "declared_name"}}`; omit `schema` for a declared deliverable because the host applies its contract. Parallel requests use `{"requests": [{"method": ..., "params": ...}]}`.
+
+Delegation uses a nested task (NOT name/objective directly in params):
+{"request":{"method":"delegate","params":{"task":{"objective":"specific distinct work","agent":{"name":"member_name","instructions":"role and responsibility"},"inputs":{"data":{}},"input_refs":{"shared_input_name":"artifact-actual-id"}}}}}
+Use inputs for JSON values, input_refs for actual artifact IDs keyed by name (never a list). For attachments, share the existing attachments input artifact under the same attachments name. Omit capabilities to inherit the parent's granted tools, or supply actual installed tool names to narrow them; action methods such as develop_tool are NOT tool capabilities. Omit package_id to use the current execution package. The result contains output_refs; inspect them with {"method":"read_artifact","params":{"artifact_id":"artifact-actual-id"}} before using member findings. Parallel delegation uses the same nested task shape inside each params object.
 
 Finish only after publication:
 {"done": {"deliverables": {"declared_name": "artifact-..."}, "summary": "...", "limitations": ["..."]}}

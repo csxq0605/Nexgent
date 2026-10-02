@@ -1,0 +1,277 @@
+{
+  "scope": "Framework entry qualification; not full RSI or release evidence",
+  "model": "mimo-v2.6-flash",
+  "cases": [
+    {
+      "episode_id": "episode-552d76b2eeb04201",
+      "status": "completed",
+      "strategy_package_digest": "b70e77147ef324505251d5ac366a4d8118d8c63b07fca2b1275535a7e44b80f5",
+      "strategy_kind": "controlled_code",
+      "main_usage": {
+        "model_calls": 6,
+        "reserved_completion_tokens": 14800,
+        "charged_completion_tokens": 14800,
+        "completion_tokens": 467,
+        "known_usage": {
+          "prompt_tokens": 18278,
+          "completion_tokens": 467,
+          "total_tokens": 18745
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 0,
+        "service_applications": 0,
+        "nodes": 11
+      },
+      "evaluation": {
+        "accepted": true,
+        "checks": [
+          {
+            "passed": true,
+            "requirement": "Summarize the three work records into a brief action list"
+          },
+          {
+            "passed": true,
+            "requirement": "Preserve completed vs not-completed distinction"
+          },
+          {
+            "passed": true,
+            "requirement": "No new facts added, output only the result"
+          },
+          {
+            "passed": true,
+            "requirement": "No extra members, files, or tools used"
+          }
+        ],
+        "evaluation_episode_id": "episode-18f336ad35c6479b",
+        "execution_status": "completed",
+        "feedback": "Deliverable lists exactly the three items with 已完成/未完成 distinctions preserved: 接口定义已经确定 and 测试环境已经准备 marked 已完成, 上传入口尚未接线 marked 未完成. No facts added or omitted. Execution shows no tool calls (0 tool_calls) as required by '无需额外成员、文件和工具', status completed, usage complete and within budget (6/20 model calls, 467/80000 completion tokens).",
+        "score": 10,
+        "score_available": true,
+        "status": "passed"
+      },
+      "evaluation_usage": {
+        "model_calls": 1,
+        "reserved_completion_tokens": 2400,
+        "charged_completion_tokens": 2400,
+        "completion_tokens": 200,
+        "known_usage": {
+          "prompt_tokens": 3520,
+          "completion_tokens": 200,
+          "total_tokens": 3720
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 0,
+        "service_applications": 0,
+        "nodes": 3
+      },
+      "delivery": {
+        "result": "- [已完成] 接口定义已经确定\n- [已完成] 测试环境已经准备\n- [未完成] 上传入口尚未接线"
+      },
+      "user_feedback": [
+        {
+          "created": 1790944034.6030781,
+          "episode_id": "episode-552d76b2eeb04201",
+          "text": "后续汇总在我明确只要待办时，请省略已完成项，不要新增事项。"
+        }
+      ],
+      "conversation_id": "c03af458bd99462fb74437b0ca5138b5",
+      "auto_evolution": {
+        "configured": false,
+        "rounds": 0,
+        "work": []
+      }
+    },
+    {
+      "episode_id": "episode-ca607bd0965e4cda",
+      "status": "completed",
+      "strategy_package_digest": "b70e77147ef324505251d5ac366a4d8118d8c63b07fca2b1275535a7e44b80f5",
+      "strategy_kind": "controlled_code",
+      "main_usage": {
+        "model_calls": 10,
+        "reserved_completion_tokens": 23200,
+        "charged_completion_tokens": 23200,
+        "completion_tokens": 774,
+        "known_usage": {
+          "prompt_tokens": 36268,
+          "completion_tokens": 774,
+          "total_tokens": 37042
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 0,
+        "service_applications": 0,
+        "nodes": 17
+      },
+      "evaluation": {
+        "accepted": true,
+        "checks": [
+          {
+            "passed": true,
+            "requirement": "Output only unfinished items based on the previous delivery"
+          },
+          {
+            "passed": true,
+            "requirement": "Omit completed items (接口定义已经确定, 测试环境已经准备)"
+          },
+          {
+            "passed": true,
+            "requirement": "No new content added"
+          }
+        ],
+        "evaluation_episode_id": "episode-7accff4522384750",
+        "execution_status": "completed",
+        "feedback": "Deliverable result is exactly '- [未完成] 上传入口尚未接线', which matches the prior delivery's sole uncompleted item (上传入口尚未接线), omits the completed items (接口定义已经确定, 测试环境已经准备), and adds no new facts. Objective satisfied with no extra members, files, or tools used (tool_calls=0).",
+        "score": 10,
+        "score_available": true,
+        "status": "passed"
+      },
+      "evaluation_usage": {
+        "model_calls": 1,
+        "reserved_completion_tokens": 2400,
+        "charged_completion_tokens": 2400,
+        "completion_tokens": 155,
+        "known_usage": {
+          "prompt_tokens": 4140,
+          "completion_tokens": 155,
+          "total_tokens": 4295
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 0,
+        "service_applications": 0,
+        "nodes": 3
+      },
+      "delivery": {
+        "result": "- [未完成] 上传入口尚未接线"
+      },
+      "user_feedback": [],
+      "conversation_id": "c03af458bd99462fb74437b0ca5138b5",
+      "auto_evolution": {
+        "configured": false,
+        "rounds": 0,
+        "work": []
+      }
+    },
+    {
+      "episode_id": "episode-d17a70eddaf74145",
+      "status": "failed",
+      "error": "ModelTransportError: Provider worker failed (APIConnectionError, phase=response_read); no automatic retry or offline fallback",
+      "main_usage": {
+        "model_calls": 20,
+        "reserved_completion_tokens": 47400,
+        "charged_completion_tokens": 47400,
+        "completion_tokens": null,
+        "known_usage": {
+          "prompt_tokens": 76514,
+          "completion_tokens": 5208,
+          "total_tokens": 81722
+        },
+        "usage_missing_call_ids": [
+          "model-def0ee0ecda14f1599cf6b622b31bd97"
+        ],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": false,
+        "billing_unknown_call_ids": [
+          "model-def0ee0ecda14f1599cf6b622b31bd97"
+        ],
+        "tool_calls": 3,
+        "service_applications": 0,
+        "nodes": 39
+      },
+      "child_episode_ids": []
+    },
+    {
+      "episode_id": "episode-499c391754134070",
+      "status": "failed",
+      "error": "ModelTransportError: Provider worker reached its 90s wall-time limit; remote completion is unknown",
+      "main_usage": {
+        "model_calls": 1,
+        "reserved_completion_tokens": 3000,
+        "charged_completion_tokens": 3000,
+        "completion_tokens": null,
+        "known_usage": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        },
+        "usage_missing_call_ids": [
+          "model-06d2e844df304d058250c6abb3a6eaa8"
+        ],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": false,
+        "billing_unknown_call_ids": [
+          "model-06d2e844df304d058250c6abb3a6eaa8"
+        ],
+        "tool_calls": 0,
+        "service_applications": 0,
+        "nodes": 3
+      },
+      "child_episode_ids": []
+    },
+    {
+      "episode_id": "episode-5bebb816fed249be",
+      "status": "paused",
+      "error": "Package execution stopped; worker terminated",
+      "main_usage": {
+        "model_calls": 20,
+        "reserved_completion_tokens": 56400,
+        "charged_completion_tokens": 56400,
+        "completion_tokens": null,
+        "known_usage": {
+          "prompt_tokens": 86646,
+          "completion_tokens": 3629,
+          "total_tokens": 90275
+        },
+        "usage_missing_call_ids": [
+          "model-1ff9e91959034648a89ec127e02f9465",
+          "model-4140d9b77c624f12933f8ce93b0afc55"
+        ],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": false,
+        "billing_unknown_call_ids": [
+          "model-1ff9e91959034648a89ec127e02f9465",
+          "model-4140d9b77c624f12933f8ce93b0afc55"
+        ],
+        "tool_calls": 3,
+        "service_applications": 0,
+        "nodes": 58
+      },
+      "child_episode_ids": [
+        "episode-a46b596367064213",
+        "episode-8912d95568c542ee",
+        "episode-15160824ab5f4bc4"
+      ]
+    }
+  ]
+}

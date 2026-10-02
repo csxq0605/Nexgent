@@ -216,5 +216,5 @@ def test_main_file_picker_and_cli_use_same_attachment_task_flow(tmp_path, qtbot,
     assert 'result.xlsx' in window.messages.toPlainText()
     original = module.OrganizationService
     monkeypatch.setattr(module, 'OrganizationService', lambda root, **kwargs: original(root, gateway_factory=ExcelModel))
-    assert main(['--root', str(service.root), 'run', 'Produce result.xlsx', '--attach', attachments[0]['path']]) == 0
+    assert main(['--root', str(service.root), 'run', 'Produce result.xlsx', '--organization-demo', '--attach', attachments[0]['path']]) == 0
     assert json.loads(capsys.readouterr().out)['assessment']['accepted']

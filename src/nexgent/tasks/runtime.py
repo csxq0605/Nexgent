@@ -4032,6 +4032,10 @@ class TaskService:
                     "skill_name": skill_name,
                     "mode": mode}
         if method == "delegate":
+            if (not isinstance(params.get('task'), dict)
+                    or not isinstance(params['task'].get('objective'), str)):
+                raise ContractError('delegate requires params.task with objective, optional agent {name,instructions}, '
+                                    'inputs or input_refs {name:artifact_id}; do not place these fields directly in params')
             state = self.store.get(identity)
             depth, cursor = 0, state
             while cursor["parent_episode_id"]:
@@ -4048,6 +4052,18 @@ class TaskService:
             else:
                 task = deepcopy(params["task"])
                 target = package if params.get("package_id") is None else self.store.package(params["package_id"])
+                child_context = _delegated_public_context(state['task'].get('context'))
+                # A member is an ordinary delegated Episode with its own role
+                # and instructions. These instructions do not grant tools,
+                # alter evaluation identity or change memory boundaries.
+                agent = task.get('agent')
+                if agent is not None:
+                    if (not isinstance(agent, dict) or set(agent) != {'name', 'instructions'}
+                            or not isinstance(agent['name'], str) or not 1 <= len(agent['name']) <= 60
+                            or not isinstance(agent['instructions'], str)
+                            or not 1 <= len(agent['instructions']) <= 3000):
+                        raise ContractError('A delegated agent needs a bounded name and instructions')
+                    child_context['agent'] = deepcopy(agent)
                 # Sharing an artifact does not transfer authority: all refs are checked
                 # before their content is copied into the narrowed child TaskSpec.
                 inputs = deepcopy(task.get("inputs", {}))
@@ -4059,7 +4075,7 @@ class TaskService:
                                            self.store.capability_leases(identity, active_only=True)]
                 child = self.create(task["objective"], inputs, task.get("deliverables"),
                     capabilities=task.get("capabilities", parent_capabilities), package=target,
-                    context=_delegated_public_context(state["task"].get("context")),
+                    context=child_context,
                     constraints=state["task"].get("constraints"),
                     parent_episode_id=identity,
                     capability_authority=task.get(
@@ -4202,6 +4218,11 @@ class TaskService:
         try:
             report = adapter.evaluate(task_ref, delivered,
                 {"inputs": state["task"]["inputs"], "tool_calls": tool_calls,
+                 "members": [{"episode_id": s['id'], "parent_episode_id": s['parent_episode_id'],
+                              "objective": s['task']['objective'],
+                              "agent": s['task'].get('context', {}).get('agent'),
+                              "status": s['status'], "output_refs": s['output_refs']}
+                             for s in descendants if s['id'] != identity],
                  "usage": self.store.usage(identity), "episode_id": identity,
                  "status": state["status"]})
             report = validate_report(report)

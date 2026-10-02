@@ -519,12 +519,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Nexgent task agent runtime and legacy RSI research tools")
     parser.add_argument("--root", type=Path, default=project_root())
     sub = parser.add_subparsers(dest="command", required=True)
-    run = sub.add_parser("run", help="Complete a task with the learning organization (Main)")
+    run = sub.add_parser("run", help="Complete a task through the composed framework (Main)")
     run.add_argument("objective")
     run.add_argument("--input", help="JSON context or @file")
     run.add_argument("--attach", type=Path, action="append", help="Attach a local Excel/CSV/text file (repeat for multiple files)")
     run.add_argument("--conversation", help="Continue a conversation ID from an earlier run")
     run.add_argument("--model-root", type=Path, help="Read existing model settings from another workspace")
+    run.add_argument("--organization-demo", action="store_true", help="Use the optional organization proposal application")
     feedback = sub.add_parser("feedback", help="Record user feedback on a delivered Main task for subsequent work and gated improvement")
     feedback.add_argument("run_id")
     feedback.add_argument("text")
@@ -532,7 +533,7 @@ def main(argv=None):
     resume.add_argument("run_id")
     resume.add_argument("--model-root", type=Path)
 
-    learn = sub.add_parser("learn", help="Learn from feedback on a saved Main task using the existing organization gate")
+    learn = sub.add_parser("learn", help="Replay a Main task with saved feedback and the current deployed strategy")
     learn.add_argument("run_id")
     learn.add_argument("--model-root", type=Path)
 
@@ -543,6 +544,7 @@ def main(argv=None):
     sub.add_parser("organization-show", help="Show the active members, working rules and saved skills without model calls")
     gui = sub.add_parser("gui", help="Open the task workspace")
     gui.add_argument("--legacy-research", action="store_true", help="Open the preserved 0.8 research window")
+    gui.add_argument("--organization-demo", action="store_true", help="Open the optional organization application")
 
     task = sub.add_parser("task", help="Register and execute an ordinary task")
     task.add_argument("objective")
@@ -815,8 +817,15 @@ def main(argv=None):
         gui_args = ["--project", str(args.root)]
         if args.legacy_research:
             gui_args.append("--legacy-research")
+        if args.organization_demo:
+            gui_args.append('--organization-demo')
         return gui_main(gui_args)
     if args.command == "feedback":
+        if args.run_id.startswith('episode-'):
+            from .application import Nexgent
+            result = Nexgent(args.root).feedback(args.run_id, args.text)
+            print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+            return 0
         from .organization import OrganizationService
         try:
             result = OrganizationService(args.root).feedback(args.run_id, args.text)
@@ -825,6 +834,22 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0
     if args.command in {"run-list", "run-show"}:
+        if args.command == 'run-list' or args.run_id.startswith('episode-'):
+            from .application import Nexgent
+            service = Nexgent(args.root)
+            if args.command == 'run-list':
+                result = [{k: s.get(k) for k in ('id', 'task', 'status', 'package_digest', 'usage')}
+                          for s in service.list() if not args.conversation
+                          or s['task'].get('context', {}).get('conversation_id') == args.conversation]
+                from .organization import OrganizationStore
+                result += [{k: r.get(k) for k in ('id', 'conversation_id', 'objective', 'status', 'revision', 'usage')}
+                           for r in OrganizationStore(args.root).list()
+                           if not args.conversation or r['conversation_id'] == args.conversation]
+            else:
+                result = service.get(args.run_id)
+                result['user_feedback'] = service.feedback_items(args.run_id)
+            print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+            return 0
         from .organization import OrganizationStore
         store = OrganizationStore(args.root)
         try:
@@ -844,6 +869,14 @@ def main(argv=None):
         print(json.dumps({"revision": revision, "organization": active}, ensure_ascii=False, indent=2), flush=True)
         return 0
     if args.command == "learn":
+        if args.run_id.startswith('episode-'):
+            from .application import Nexgent
+            service = Nexgent(args.root, model_root=args.model_root)
+            state = service.learn(args.run_id)
+            stop = _stop_event()
+            result = service.run(state['id'], stop_event=stop)
+            print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+            return 0 if result['status'] == 'completed' and (result.get('evaluation') or {}).get('accepted') is True else 1
         from .organization import OrganizationService
         try:
             result = OrganizationService(args.root, model_root=args.model_root).learn(args.run_id, stop_event=_stop_event())
@@ -852,6 +885,13 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0 if result['evolution']['status'] in {'adopted', 'rejected', 'abstained', 'unchanged', 'stale'} else 1
     if args.command == "run-resume":
+        if args.run_id.startswith('episode-'):
+            from .application import Nexgent
+            service = Nexgent(args.root, model_root=args.model_root)
+            stop = _stop_event()
+            result = service.run(args.run_id, stop_event=stop)
+            print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+            return 0 if result['status'] == 'completed' and (result.get('evaluation') or {}).get('accepted') is True else 1
         from .organization import OrganizationService
         try:
             result = OrganizationService(args.root, model_root=args.model_root).resume(args.run_id, stop_event=_stop_event())
@@ -860,6 +900,18 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0 if result["status"] == "completed" else 1
     if args.command == "run":
+        if not args.organization_demo:
+            from .application import Nexgent
+            service = Nexgent(args.root, model_root=args.model_root)
+            inputs = _object_argument(args.input, label='input') if args.input else {}
+            if args.attach:
+                inputs['attachments'] = service.attach_files(args.attach)
+            state = service.create(args.objective, inputs=inputs,
+                                   context={'conversation_id': args.conversation} if args.conversation else None)
+            stop = _stop_event()
+            result = service.run(state['id'], stop_event=stop)
+            print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+            return 0 if result['status'] == 'completed' and (result.get('evaluation') or {}).get('accepted') is True else 1
         from .organization import OrganizationService
         service = OrganizationService(args.root, model_root=args.model_root)
         inputs = _object_argument(args.input, label="input") if args.input else {}

@@ -1,6 +1,11 @@
-# Main 组织闭环（第一阶段）
+# 组织提案应用（可选 demo）
 
-普通入口：`nexgent run "任务"` 或 `nexgent-gui`。二者调用同一个
+这是旧组织服务的兼容入口，尚未迁成通用运行时上的 AgentPackage 策略。
+默认框架不会调用该组织服务。
+
+自 2026-10-02 起，默认 Main 使用[通用框架](framework-runtime.md)。本页描述保留的
+组织应用：`nexgent run "任务" --organization-demo` 或 `nexgent-gui --organization-demo`。
+下文历史示例中的组织任务也须加此选项。二者调用同一个
 `OrganizationService`。模型配置沿用 `models.json` / `.env`；可用
 `--model-root` 从已有工作区读取配置。GUI 使用 `--project` 选择任务工作区，
 CLI 使用全局 `--root`。无需配置旧 RSI channel、PackagePatch 或 Episode 合同。

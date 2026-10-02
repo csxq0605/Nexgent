@@ -10,6 +10,7 @@ from __future__ import annotations
 import html
 import json
 import threading
+import uuid
 from copy import deepcopy
 from pathlib import Path
 
@@ -30,8 +31,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..tasks.self_orchestration_seed import self_orchestration_package
-from ..tasks.capability_authority import make_episode_authority
+from ..application import Nexgent, framework_package, MAIN_PACKAGE_CHANNEL, MAIN_CAPABILITY_AUTHORITY
 from .tasks_window import ACCEPTANCE, STATUS, TaskWorker, task_status
 
 
@@ -56,14 +56,6 @@ QTabBar::tab { padding:9px 11px; color:#667b66; }
 QTabBar::tab:selected { color:#234d37; border-bottom:2px solid #628d60; }
 QTabWidget::pane { border:0; }
 """
-
-# Preserve the earlier channel and its promoted package identity. This channel
-# starts a new graph baseline that exposes task-time capability development.
-MAIN_PACKAGE_CHANNEL = "nexgent-main-capabilities-v2"
-MAIN_CAPABILITY_AUTHORITY = make_episode_authority(
-    ["tool", "service_provider"], ["local_compute", "model_context"],
-    max_definitions=32, max_invocations=128, version=2)
-
 
 class AutoEvolutionWorker(QThread):
     result = pyqtSignal(dict)
@@ -147,13 +139,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.project_root = Path(project_root).resolve()
         if service is None:
-            from ..tasks.runtime import TaskService
-
-            service = TaskService(self.project_root)
+            service = Nexgent(self.project_root)
         self.service = service
+        self.conversation_id = uuid.uuid4().hex
+        self.attachments = []
         self._auto_evolution = None
         from ..tasks.runtime import TaskService
-        if isinstance(service, TaskService):
+        if isinstance(service, Nexgent):
+            self._auto_evolution = service.auto_evolution
+        elif isinstance(service, TaskService):
             from ..tasks.auto_runtime import configure_auto_evolution
             self._auto_evolution = configure_auto_evolution(
                 service, project_root=self.project_root)
@@ -163,6 +157,7 @@ class MainWindow(QMainWindow):
         self._selected_state: dict | None = None
         self._console = None
         self._event_counts: dict[str, int] = {}
+        self._shown_outputs = set()
         self._close_when_finished = False
         self.setWindowTitle("Nexgent · Main")
         self.resize(1440, 900)
@@ -263,8 +258,17 @@ class MainWindow(QMainWindow):
         self.advanced_button.clicked.connect(self.open_advanced)
         self.export_button = QPushButton("导出成果")
         self.export_button.clicked.connect(self.export_selected)
+        self.attach_button = QPushButton("添加文件")
+        self.attach_button.clicked.connect(self.attach_inputs)
+        self.feedback_button = QPushButton("保存反馈")
+        self.feedback_button.clicked.connect(self.save_feedback)
+        self.learn_button = QPushButton("根据反馈再执行")
+        self.learn_button.clicked.connect(self.learn_selected)
+        controls.addWidget(self.attach_button)
         controls.addWidget(self.send_button)
         controls.addWidget(self.stop_button)
+        controls.addWidget(self.feedback_button)
+        controls.addWidget(self.learn_button)
         controls.addStretch()
         controls.addWidget(self.advanced_button)
         controls.addWidget(self.export_button)
@@ -321,6 +325,10 @@ class MainWindow(QMainWindow):
         self.send_button.setEnabled(not busy)
         self.stop_button.setEnabled(busy and not self.worker.stop_event.is_set() if busy else False)
         self.export_button.setEnabled(bool(self.selected_id))
+        delivered = bool((self._selected_state or {}).get('output_refs'))
+        self.attach_button.setEnabled(not busy and hasattr(self.service, 'attach_files'))
+        self.feedback_button.setEnabled(not busy and delivered and hasattr(self.service, 'feedback'))
+        self.learn_button.setEnabled(not busy and delivered and hasattr(self.service, 'learn'))
 
     def refresh_tasks(self):
         try:
@@ -355,6 +363,9 @@ class MainWindow(QMainWindow):
             self.show_task(current.data(Qt.ItemDataRole.UserRole))
 
     def new_conversation(self):
+        self.conversation_id = uuid.uuid4().hex
+        self.attachments = []
+        self.attach_button.setText('添加文件')
         self.selected_id = None
         self._selected_state = None
         self.task_list.clearSelection()
@@ -378,7 +389,8 @@ class MainWindow(QMainWindow):
             return
         try:
             state = self.service.create(
-                objective, context={"split": "development",
+                objective, inputs={'attachments': deepcopy(self.attachments)} if self.attachments else {},
+                context={"conversation_id": self.conversation_id, "split": "development",
                                     "split_role": "development"},
                 capability_authority=deepcopy(MAIN_CAPABILITY_AUTHORITY),
                 **self._package_selection())
@@ -394,12 +406,51 @@ class MainWindow(QMainWindow):
         self.refresh_tasks()
         self._start(state["id"])
 
+    def attach_inputs(self):
+        paths, _ = QFileDialog.getOpenFileNames(self, '选择任务输入', str(self.project_root),
+                                               '任务文件 (*.xlsx *.csv *.txt *.md *.json)')
+        if paths:
+            try:
+                self.attachments = self.service.attach_files(paths)
+                self.attach_button.setText(f'已添加 {len(self.attachments)} 个文件')
+            except Exception as exc:
+                self._error(str(exc))
+
+    def save_feedback(self):
+        text = self.composer.toPlainText().strip()
+        if not text or not self.selected_id:
+            self._error('请在消息框填写对当前交付的反馈。')
+            return
+        try:
+            self.service.feedback(self.selected_id, text)
+            self.composer.clear()
+            self._append('user', '反馈：' + text)
+        except Exception as exc:
+            self._error(str(exc))
+
+    def learn_selected(self):
+        if not self.selected_id or self.worker is not None:
+            return
+        try:
+            text = self.composer.toPlainText().strip()
+            if text:
+                self.service.feedback(self.selected_id, text)
+                self.composer.clear()
+            state = self.service.learn(self.selected_id)
+            self.selected_id = state['id']
+            self._append('main', '使用已保存反馈和当前框架版本重新执行。')
+            self._start(state['id'])
+        except Exception as exc:
+            self._error(str(exc))
+
     def _package_selection(self):
         """Resolve the project's promoted Main package before admitting a task."""
+        if isinstance(self.service, Nexgent):
+            return self.service.package_selection()
         from ..tasks.runtime import TaskService
 
         if not isinstance(self.service, TaskService):
-            return {"package": self_orchestration_package()}
+            return {"package": framework_package()}
         from ..tasks.evolution import EvolutionService
 
         from ..tasks.auto_runtime import single_auto_channel
@@ -412,7 +463,7 @@ class MainWindow(QMainWindow):
         try:
             evolution.active(channel)
         except KeyError:
-            evolution.register(channel, self_orchestration_package())
+            evolution.register(channel, framework_package())
         return {"package_channel": channel}
 
     def show_task(self, episode_id, *, preserve_conversation=False):
@@ -424,15 +475,22 @@ class MainWindow(QMainWindow):
         self.selected_id = episode_id
         self._render(state)
         if not preserve_conversation:
+            self.conversation_id = state.get('task', {}).get('context', {}).get('conversation_id', uuid.uuid4().hex)
             objective = (state.get("task") or {}).get("objective", episode_id)
             self.messages.clear()
             self._append("user", objective, color="#214a39")
             status = task_status(state)
-            self._append("main", f"这是该 Episode 的当前记录。状态：{status}")
+            self._append("main", f"已保存的任务。状态：{status}")
             outcome = state.get("outcome") or {}
             if outcome:
-                summary = outcome.get("summary") or outcome.get("delivery_status") or "已记录"
-                self._append("main", "交付摘要：" + _brief(summary, 320))
+                artifacts = [a for a in state.get('artifacts', [])
+                             if a.get('id') in state.get('output_refs', {}).values() and 'content' in a]
+                if artifacts:
+                    for artifact in artifacts:
+                        self._append('main', artifact['content'] if isinstance(artifact['content'], str) else _json(artifact['content']))
+                else:
+                    summary = outcome.get('summary') or outcome.get('delivery_status') or '已记录'
+                    self._append('main', '交付摘要：' + _brief(summary, 320))
         self._buttons()
 
     def _start(self, episode_id):
@@ -445,7 +503,7 @@ class MainWindow(QMainWindow):
             self._render(state)
             return
         self.worker = TaskWorker(self.service, episode_id, self)
-        if self._auto_evolution is not None:
+        if self._auto_evolution is not None and not isinstance(self.service, Nexgent):
             from ..tasks.auto_runtime import advance_auto_evolution
             self.worker.after_run = lambda: advance_auto_evolution(
                 self._auto_evolution, source_episode_id=episode_id,
@@ -462,6 +520,9 @@ class MainWindow(QMainWindow):
 
     def _task_result(self, state):
         self._update(state)
+        if isinstance(self.service, Nexgent):
+            self._auto_result(state.get('auto_evolution') or {})
+            return
         if self._auto_evolution is not None and state.get("status") in {
                 "completed", "failed", "cancelled"}:
             self.status_label.setText("任务已结束；正在检查改进证据")
@@ -484,13 +545,24 @@ class MainWindow(QMainWindow):
         if state.get("id") != self.selected_id:
             return
         self._render(state)
+        if state.get('status') == 'completed':
+            for artifact in state.get('artifacts', []):
+                key = state['id'], artifact.get('id')
+                if (artifact.get('id') in state.get('output_refs', {}).values()
+                        and 'content' in artifact and key not in self._shown_outputs):
+                    self._shown_outputs.add(key)
+                    self._append('main', artifact['content'] if isinstance(artifact['content'], str) else _json(artifact['content']))
         events = state.get("events") or []
         previous = self._event_counts.get(state["id"], 0)
         for event in events[previous:]:
             if isinstance(event, dict):
                 kind = event.get("kind", "event")
                 content = event.get("content") or {}
-                self._append("system", f"{kind} · {_json(content) if content else '已记录'}", color="#6c7c72")
+                if kind in {'episode_started', 'episode_finished', 'delivery_evaluation_started', 'benchmark_evaluated', 'tool'}:
+                    label = {'episode_started': '开始执行', 'episode_finished': '执行已结束',
+                             'delivery_evaluation_started': '正在独立评价', 'benchmark_evaluated': '独立评价已完成',
+                             'tool': '执行工具'}[kind]
+                    self._append('system', label + (' · ' + str(content['name']) if content.get('name') else ''), color='#6c7c72')
         self._event_counts[state["id"]] = len(events)
 
     def _worker_error(self, message):
@@ -572,6 +644,7 @@ class MainWindow(QMainWindow):
             f"事件：{len(events)}",
             f"工件：{len(state.get('artifacts') or [])}", "",
             "能力与版本", "\n".join(_capability_evidence(state)) or "尚无能力变更", "",
+            "持续改进：" + ('已连接项目改进策略' if self._auto_evolution is not None else '尚未配置跨任务改进策略'), "",
             "最近事件", "\n".join(f"• {name}" for name in event_names) if event_names else "暂无事件", "",
             "完整收据和原始字段请在高级控制台查看，或导出该 Episode。",
         ]))

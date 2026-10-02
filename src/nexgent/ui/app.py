@@ -24,6 +24,7 @@ def main(argv=None):
     parser.add_argument("--project", type=Path, help="任务工作区目录")
     parser.add_argument("--model-root", type=Path, help="读取已有模型配置的目录")
     parser.add_argument("--task-console", action="store_true", help="打开高级任务与证据控制台")
+    parser.add_argument("--organization-demo", action="store_true", help="打开可选的组织提案应用")
     parser.add_argument("--legacy-research", action="store_true", help="打开保留的 0.8 研究窗口")
     args = parser.parse_args(argv)
     if os.name == "nt":
@@ -39,11 +40,16 @@ def main(argv=None):
     elif args.task_console:
         from .tasks_window import TaskWindow
         window = TaskWindow(project_root(args.project))
-    else:
+    elif args.organization_demo:
         from .organization_window import OrganizationWindow
         from ..organization import OrganizationService
         root = project_root(args.project)
         window = OrganizationWindow(root, OrganizationService(root, model_root=args.model_root))
+    else:
+        from .main_window import MainWindow
+        from ..application import Nexgent
+        root = project_root(args.project)
+        window = MainWindow(root, Nexgent(root, model_root=args.model_root))
     window.show()
     return app.exec()
 

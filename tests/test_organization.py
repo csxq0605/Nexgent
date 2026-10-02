@@ -188,12 +188,12 @@ def test_structured_member_findings_are_preserved(tmp_path):
     assert result["evolution"]["status"] == "adopted"
 
 
-def test_ordinary_cli_routes_to_organization_service(tmp_path, monkeypatch, capsys):
+def test_optional_demo_cli_routes_to_organization_service(tmp_path, monkeypatch, capsys):
     import json
     from nexgent.cli import main
     service = OrganizationService(tmp_path, gateway_factory=Model)
     monkeypatch.setattr("nexgent.organization.OrganizationService", lambda root, **kwargs: service)
-    assert main(["--root", str(tmp_path), "run", "task", "--input", '{"facts": "supplied"}']) == 0
+    assert main(["--root", str(tmp_path), "run", "task", "--organization-demo", "--input", '{"facts": "supplied"}']) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["inputs"] == {"facts": "supplied"}
     assert result["evolution"]["status"] == "adopted"

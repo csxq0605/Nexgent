@@ -1,65 +1,55 @@
 # Nexgent 0.9
 
-**面向任务的 RSI Agent 系统：组织成员完成工作，获取独立反馈，并将通过门控的组织和策略改进用于后续任务。**
+**通用 RSI Agent 框架：完成任务、组织协作、获取独立反馈，并让经过门控的能力和执行策略变化作用于后续任务。**
 
-当前可运行主线是任务与组织闭环。模型网关、工具注册和配置复用 PR #1 的已有实现，
-按照 PR #2 的纠偏先完成产品流程。科学发现与 OpenFOAM 保留为独立插件／demo。
+组织提案、Excel、科学发现和 OpenFOAM 是框架上的应用或插件。
+2026-10-02 已纠正此前把组织应用当成框架主体的方向：默认 Main、CLI `run` 和
+Python SDK 复用同一个通用任务运行时，执行程序、工具提供者和评价器可独立组合。
+这次接通框架入口，不代表完整自主 RSI 已完成。
 
-## 当前主线：Main 组织闭环
+## 当前主线：通用运行框架
 
-2026-09-29 按 PR #2 纠偏：默认 Main 和 `nexgent run "任务"` 共用新的组织服务。
-负责人按任务选择或临时创建成员并分派工作，无依赖成员并行工作，有依赖成员使用前序成果；必要时互评，负责人汇总。独立评价产生反馈，改进者
-可修改成员和工作规则。候选重跑并通过开发门控后保存，后续任务自动加载。
-执行中成员可以请求后续分工；负责人也会在汇总时检查未完成工作，依据实际发现
-追加任务、重新分派或招募成员。后续成员收到已有成果和真实工具结果，最多追加
-两轮；必要工作仍未解决时不能通过验收。简单任务沿用原来的调用流程。
-多轮对话、成果、运行过程、评价与组织版本保存在工作区。用户可以续聊修改已有成果。
-Main 顶部可切换已保存的对话；CLI 用 `run-list` 查找任务或对话ID，`run-show RUN_ID`
-读取成果、评价和该任务的全部用户反馈，这些查看操作不调用模型。
-
-```bash
-nexgent run "根据给定材料完成任务"
-nexgent-gui
-```
-
-配置沿用 `models.json` 和 `.env`。CLI 的 `--root` / GUI 的 `--project` 指定工作区；
-`--model-root` 可从另一目录读取模型配置。详见[组织闭环说明](docs/organization-loop.md)。
-当前成员支持分析、写作、项目文件读取、公开网页资料读取、CSV SQL 计算、受限 Python 算法执行和成果文件生成。网页读取复用 requests 与 Beautiful Soup，返回实际来源 URL、标题和可分页正文；支持 HTML、文本与 JSON。工具复用现有 ToolRegistry 和 AgentPackage 进程执行器；Main 与 CLI 使用同一执行循环，评价读取实际工具证据；未通过时自动修订一次并按原要求复验，保留草稿与修订成果。Python 支持内置数据结构与预载 math（兼容常见的 import math 写法），不开放其他库导入、文件或网络操作。外部应用操作尚未接入。
-
-Main 的“添加文件”可以直接选择 Excel、CSV 或文本材料；CLI 用 `--attach PATH`，可重复添加。
-选择的文件保存为任务输入快照，续聊、恢复和按反馈重跑可以读取，原文件保持原样。
-成员能读取和查询 `.xlsx`，交付带真实公式、计算值和可编辑输入的 Excel 工作簿；
-独立检查者及评价器读取实际工作簿核对。读写与公式计算复用 openpyxl、XlsxWriter
-和 formulas。支持有界标量公式及跨工作表引用，暂不支持宏、外部工作簿、命名区域和数组公式。
+- `Nexgent` 组合既有 `TaskService`，没有另建任务执行器或私有协议。
+- 可版本化 `AgentPackage` 定义执行策略，默认是 Python 决策循环；应用可替换
+  程序、编排和技能，不要求固定组织角色或 DAG。
+- 成员是可执行的委派 Episode，具有任务内职责、工具使用和实际交付；可并行
+  执行并共享成果引用，由负责人读取后汇总。
+- `ToolRegistry` / `ToolProvider` 提供可替换能力。工作区读写、网页、CSV/Excel
+  和计算工具属于提供者；业务格式判断不进入通用执行器。
+- 独立评价在另一份固定宿主程序中运行，只授予读取和计算能力，不加载候选
+  工具或由候选修改评价提示。用户反馈、交付和对话跨进程保留。
+- 已配置的跨任务改进复用既有 AutoEvolution 和门控发布；下一任务读取当前
+  部署版本。未配置时明确显示，不会把按反馈重跑当成发布或进化。
 
 ```powershell
-nexgent --root ./my-project run "根据库存明细生成带公式的补货计划 purchase.xlsx，独立核算并读取成果检查" --attach ./inventory.xlsx
+nexgent --root ./my-project run "完成任务" --attach ./material.json
+nexgent --root ./my-project feedback EPISODE_ID "反馈内容"
+nexgent --root ./my-project learn EPISODE_ID
+nexgent-gui --project ./my-project
 ```
 
-交付后可在 Main 输入意见并点击“提交本轮反馈”，或使用 `nexgent feedback RUN_ID "反馈内容"`。反馈持久保存，同对话后续任务会参考意见，改进者还会结合历史反馈提出可复用修改；反馈本身不会直接改写组织，候选仍须试跑并通过门控。
+```python
+from nexgent import Nexgent
 
-要立即依据反馈改进，可点击 Main 的“按反馈改进组织”（输入框的意见会先保存），
-或执行 `nexgent learn RUN_ID`。系统按原任务的输入、上下文和验收要求重新运行，
-比较当前组织与候选，并在存在不同历史任务时检查回归。每项比较都必须满足质量和
-成本限制，至少一项有实测改善才可采纳；新组织用于后续任务。学习是新的运行记录，
-原任务和成果保留；Main 显示当前及历史任务的调用比较与门控结论。
+agent = Nexgent("my-project", tools=registry, package=agent_package, evaluator=adapter)
+task = agent.create("完成任务", inputs={"material": material})
+result = agent.run(task["id"])
+```
 
-模型连接失败或停止后，可点击 Main 的“恢复未完成任务”，或执行 `nexgent run-resume RUN_ID`。恢复沿用任务和验收要求，按执行轮次复用已完成成员的成果与追加计划，继续未完成的分工；同一成员上一轮的成果不会冒充下一轮工作，中断前用量仍计入整轮成本。旧研究入口的 `resume STUDY_ID` 保留。
-长期组织修改还须由独立评价确认角色和工作规则可用于后续不同任务，不能把本次主题、答案或文件名保存为通用角色。本阶段门控是开发复评，不构成 held-out 或通用 RSI 收益证明。
+模型配置沿用 `models.json` / `.env`，`--model-root` 可复用其他目录的配置。
+原组织应用保留为 `run --organization-demo` / `nexgent-gui --organization-demo`，
+既有组织版本、成果、反馈与恢复记录保留。
+旧组织服务尚未迁成 AgentPackage 策略；兼容保留不代表应用迁移已经完成。
 
-组织候选还可保存通用 Python 计算技能：从成功执行的算法中提炼参数化代码，候选
-成员实际调用，独立评价核算后再决定是否采纳；未试跑或未通过的代码不能变成
-后续能力。技能复用原有受限执行器，接受 JSON 输入，不增加文件、网络或主机权限。
-Main 显示已保存能力，`nexgent organization-show` 可查看当前成员、规则和技能。
-任务使用了计算工具时，评价器会自己调用基础计算工具核算，不使用被评价的候选技能。
-
-最小全流程已可运行，但产品仍需扩展真实工作能力、任务执行中的动态分工，以及
-后续任务退化时的恢复方式。长期多轮改进是否稳定有效，也仍需连续任务验证。
+当前还缺：默认入口下自动把任务内工具、服务和执行策略候选接入统一门控、
+发布并在下一任务真正复用；广泛宿主插件、记忆和改进策略自身的修改也未完成。
+下一步集中实现这些框架能力，不继续围绕组织 demo 调优。
+实际接口与限制见[通用框架入口](docs/framework-runtime.md)。
 
 ## PR #1 的历史资产与缺口
 
 下列记录描述旧内核路径。旧 `task` / `rsi-*` 命令和高级控制台保留，
-不再是默认 Main 的实现，也不能把其历史“测试通过”当作当前分支的验收。
+其中的任务执行资产已重新用于默认 Main；历史“测试通过”不等于本轮验收。
 
 以 `4722cf7` 为本次计划的实现基线。已有工程资产包括 TaskService、AgentPackage manifest v2、ExecutablePlan、工件与调用账本、停止恢复、benchmark SDK，以及候选选择／晋升／回滚控制面。
 
@@ -74,11 +64,11 @@ Main 显示已保存能力，`nexgent organization-show` 可查看当前成员�
 
 真实 MiMo v2.6-flash 已从普通任务自动走到公开反馈、模型规划、编排候选和独立 selection；该候选被拒绝。先前 O/S 资格 selection 未达到晋升门，纯 M 尝试 abstain；任务自建 planner 的真实探针也未成功编译新图。**当前没有正向 RSI 或递归收益证据。**
 
-旧 Main 在未配置自动进化的项目中使用 `nexgent-main-capabilities-v2` 包 channel，初始版本为 `self_orchestration_package()`。这些通道属于旧内核；新的默认 Main 使用独立的组织版本。底层 `TaskService.create()` 未指定包时仍使用兼容默认。内核当前不支持模型直接热装宿主插件，受限 Python worker 也不等同于 OS 容器。
+旧 Main 在未配置自动进化的项目中使用 `nexgent-main-capabilities-v2` 包 channel，初始版本为 `self_orchestration_package()`。这些通道保持原样；当前 Main 使用 nexgent-main-runtime-v1 的 Python 策略 channel。底层 `TaskService.create()` 未指定包时仍使用兼容默认。内核当前不支持模型直接热装宿主插件，受限 Python worker 也不等同于 OS 容器。
 
 ## 实施与阅读入口
 
-当前实现与运行说明优先看 [Main 组织闭环](docs/organization-loop.md)。以下设计与研究链接保留历史背景，尚未实现的目标不代表当前产品能力。
+当前实现与运行说明优先看 [通用框架入口](docs/framework-runtime.md)；[组织应用](docs/organization-loop.md)为可选 demo。以下设计与研究链接保留历史背景，尚未实现的目标不代表当前产品能力。
 
 - [仓库计划](REFACTOR_PLAN.md)：当前基线、每阶段交付／验收、迁移、协作及立即执行队列。
 - [RSI 能力内核](docs/design/rsi-capability-kernel.md)：目标对象、插件开发、执行策略、证据和信任边界；不是当前能力声明。
@@ -112,8 +102,7 @@ python -m venv .venv
 
 本机环境、workbench、openfoam、scientific_discovery、BBH 四项插件和 BBH 数据已准备。模型读取被 Git 忽略的 `models.json` / `.env`；示例见 [models.example.json](models.example.json) 和 [.env.example](.env.example)。凭证留在模型请求宿主，不进入智能体源码进程。
 
-`nexgent gui` 和 `nexgent-gui` 默认打开 Main。自然语言任务经组织服务执行、评价、
-修订与改进；已通过评价的成果立即展示，用户无需等完组织候选比较。
+`nexgent gui` 和 `nexgent-gui` 默认打开 Main。自然语言任务经 Nexgent / TaskService 执行并接受独立评价；已配置的项目策略处理跨任务改进。
 CLI 用同一个服务：
 
 ```powershell
@@ -121,7 +110,7 @@ CLI 用同一个服务：
 .venv\Scripts\python.exe -m nexgent --root ./my-project run "修改上一份报告，补充说明" --conversation CONVERSATION_ID
 ```
 
-组织主线只需模型配置，不要求先安装 benchmark 或设置旧通道策略。
+普通框架任务只需模型配置；跨任务自动改进还须连接独立评价与项目门控策略。
 
 ### 保留的高级内核入口
 

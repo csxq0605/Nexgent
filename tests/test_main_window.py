@@ -77,7 +77,7 @@ def test_main_starts_from_conversation_and_uses_task_service(qtbot, tmp_path):
 
     assert service.created == ["比较两个方案并给出有证据的建议"]
     assert service.created_packages[0]["provenance"]["origin"] == (
-        "nexgent.self-orchestration-seed")
+        "nexgent.default-task-agent")
     assert service.created_options[0]["context"]["split_role"] == "development"
     assert service.created_options[0]["capability_authority"] == MAIN_CAPABILITY_AUTHORITY
     assert window.selected_id == "episode-0001"
@@ -99,7 +99,7 @@ def test_real_main_resolves_a_project_package_channel(qtbot, tmp_path):
     assert selection == {"package_channel": MAIN_PACKAGE_CHANNEL}
     active = EvolutionService(service).active(MAIN_PACKAGE_CHANNEL)
     assert active["package"]["provenance"]["origin"] == (
-        "nexgent.self-orchestration-seed")
+        "nexgent.default-task-agent")
     assert window._package_selection() == selection
     episode = service.create("Plan a task", **selection)
     assert episode["package_digest"] == active["package_digest"]

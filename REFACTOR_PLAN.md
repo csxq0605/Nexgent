@@ -1,6 +1,19 @@
 # Nexgent 仓库重构计划
 
-## 2026-09-29 主线纠偏
+## 2026-10-02 框架与应用纠偏
+
+用户再次明确：组织提案是框架上的 demo 能力，目标是实现框架，不能继续按 demo
+表现针对性扩展。默认 Main / run / Python SDK 现在组合现有 TaskService、
+AgentPackage、ToolProvider 和独立评价 adapter；默认采用 Python 执行策略。
+成员通过真正可执行的委派 Episode 组织，反馈与交付使用同一任务账本。
+组织应用保留为 `--organization-demo`，不是默认框架边界。
+代码、用法与未完成项见[通用运行入口](docs/framework-runtime.md)。
+
+下一步优先把任务内开发出的工具、服务及执行策略修改接到既有门控和统一发布，
+使后续任务真正加载。项目已配置 AutoEvolution 时复用既有驱动；未配置不能
+假称已自动进化。暂停围绕 Excel/组织 demo 扩工具或调提案采纳率。
+
+## 2026-09-29 主线纠偏（历史）
 
 以 PR #2 为架构参考，先完成普通入口上的任务、组织协作、独立反馈、候选改进、
 门控采纳和下一任务复用。实现与使用见 [Main 组织闭环](docs/organization-loop.md)。
