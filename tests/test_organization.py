@@ -27,6 +27,13 @@ class Model:
             if "Synthesize" in prompt:
                 return {"answer": "candidate" if len(payload["organization"]["members"]) == 1 else "parent"}
             if "Independently evaluate" in prompt:
+                if payload.get('verification_required') and not payload.get('verification_results'):
+                    computation = next(t for e in payload['execution_evidence'] for t in e['tool_results']
+                                       if 'result' in t and (t['tool'] in {'run_python', 'query_csv'} or t['tool'].startswith('skill_')))
+                    if computation['tool'].startswith('skill_'):
+                        return {'tool': 'run_python', 'arguments': {'code': 'return {"sum": sum(payload), "squares": sum(n * n for n in payload)}',
+                                                                   'payload': payload['task']['inputs']['numbers']}}
+                    return {'tool': computation['tool'], 'arguments': computation['arguments']}
                 bad = self.reject and payload["answer"] == "candidate"
                 return {"score": 2 if bad else 9, "accepted": not bad, "feedback": "incorrect" if bad else "correct", "checks": [{"requirement": "Correct answer", "passed": not bad}], "organization_reusable": True, "organization_feedback": "General roles"}
             if role == "improver":

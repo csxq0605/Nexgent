@@ -1,7 +1,9 @@
 """Task tools reusing the existing registry, worker and mature source readers."""
 import csv
 import io
+from functools import partial
 from pathlib import Path
+import re
 import sqlite3
 import threading
 from urllib.parse import urlparse, urljoin
@@ -11,8 +13,34 @@ from .tasks.packages import make_package
 from .tasks.package_runner import run_package
 
 
+def compute_package(code):
+    import ast
+    import textwrap
+    if not any(isinstance(node, ast.FunctionDef) and node.name == 'execute' for node in ast.parse(code).body):
+        code = 'def execute(payload, context):\n' + textwrap.indent(code, '    ')
+    return make_package({"compute.py": code}, {"entries": {"execute": "compute.py:execute"}})
+
+
+def computation_skills(value):
+    if not isinstance(value, list) or len(value) > 4:
+        raise ValueError('Skills must be a list of at most four reusable computations')
+    skills = []
+    for item in value:
+        if (not isinstance(item, dict) or not isinstance(item.get('name'), str)
+                or not re.fullmatch(r'[a-z][a-z0-9_]{0,31}', item['name'])
+                or not isinstance(item.get('description'), str) or not item['description'].strip()
+                or len(item['description']) > 1000 or not isinstance(item.get('code'), str)
+                or not item['code'].strip() or len(item['code']) > 8000):
+            raise ValueError('A skill needs a simple name, a description and bounded Python code')
+        compute_package(item['code'])  # Reuse existing package validation before trial/adoption.
+        skills.append({k: item[k] for k in ('name', 'description', 'code')})
+    if len({s['name'] for s in skills}) != len(skills):
+        raise ValueError('Skill names must be unique')
+    return skills
+
+
 class WorkspaceTools:
-    def __init__(self, root, output, *, shared_artifacts=(), allow_artifact_writes=True, stop_event=None):
+    def __init__(self, root, output, *, shared_artifacts=(), allow_artifact_writes=True, stop_event=None, skills=()):
         self.root, self.output = Path(root).resolve(), Path(output).resolve()
         self.artifacts = []
         self.stop_event = stop_event if stop_event is not None else threading.Event()
@@ -34,6 +62,11 @@ class WorkspaceTools:
                 continue
             self.registry.register(ToolSpec(name, {"type": "object", "properties": properties,
                 "required": list(properties), "additionalProperties": False}, {"type": "object"}, effect, handler, description))
+        for skill in skills:
+            self.registry.register(ToolSpec('skill_' + skill['name'],
+                {"type": "object", "properties": {"payload": {}}, "required": ["payload"], "additionalProperties": False},
+                {"type": "object"}, 'local_compute', partial(self.run_python, skill['code']),
+                skill['description'] + ' Pass JSON input in payload. Reuses saved computation code; no imports, files, network or host calls.'))
 
     def source(self, path):
         requested = Path(path)
@@ -164,11 +197,7 @@ class WorkspaceTools:
         return artifact
 
     def run_python(self, code, payload):
-        import ast
-        import textwrap
-        if not any(isinstance(node, ast.FunctionDef) and node.name == 'execute' for node in ast.parse(code).body):
-            code = 'def execute(payload, context):\n' + textwrap.indent(code, '    ')
-        package = make_package({"compute.py": code}, {"entries": {"execute": "compute.py:execute"}})
+        package = compute_package(code)
         result = run_package(package, "execute", payload, stop_event=self.stop_event,
                              timeout=30, max_rpc=0)
         return {"value": result["value"], "execution": result["execution"]}

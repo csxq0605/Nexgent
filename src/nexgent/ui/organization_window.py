@@ -177,6 +177,8 @@ class OrganizationWindow(QMainWindow):
         self.info.setPlainText(f"当前组织版本：{revision}\n\n成员\n" +
                                "\n".join(f"• {m['name']}：{m['role']}" for m in organization["members"]) +
                                "\n\n工作方式\n" + organization["instructions"])
+        if organization.get('skills'):
+            self.info.appendPlainText("\n已保存能力\n" + '\n'.join('• skill_' + s['name'] + '：' + s['description'] for s in organization['skills']))
 
     def new_conversation(self):
         if self.worker:
@@ -261,6 +263,7 @@ class OrganizationWindow(QMainWindow):
         labels = {"started": "开始任务", "member_started": "成员开始工作", "member_finished": "成员交付成果", "assigned": "分派工作", "shared": "成员交换发现并修正", "collaborated": "汇总成员发现",
                   "tool_executed": "成员执行工具", "tools_completed": "工具执行与成果生成完成", "revising": "根据评价修订成果", "revised": "修订成果复验完成", "revision_failed": "修订未完成，保留已有成果", "evaluated": "独立评价完成", "proposed": "提出组织改进", "gate": "改进评价完成", "finished": "本轮结束"}
         labels.update(member_reused="复用已完成成员成果", peer_review_failed="互评格式失败，保留成员成果")
+        labels['evaluation_tool_executed'] = '评价器独立核算'
         self.status.setText(("任务已交付 · " if self._shown_delivery else "") + labels.get(stage, stage))
         delivery_assignments = run.get("result", {}).get("assignments")
         assigned = next((e for e in reversed(run["events"]) if e["stage"] == "assigned"
@@ -271,6 +274,9 @@ class OrganizationWindow(QMainWindow):
         if run.get('learning_source_id'):
             lines.insert(1, '参考已保存任务：' + run['learning_source_id'])
         lines.extend(f"• {m['name']}：{m['role']}" for m in members)
+        skills = run.get('result', {}).get('organization', run['organization']).get('skills', [])
+        if skills:
+            lines.extend(['', '本轮可用能力', *('• skill_' + s['name'] + '：' + s['description'] for s in skills)])
         persistent = run["evolution"].get("candidate", run["organization"]) if run['evolution']['status'] == 'adopted' else run["organization"]
         defaults = {m["name"] for m in persistent["members"]}
         recruits = [m["name"] for m in members if m["name"] not in defaults]
@@ -286,7 +292,7 @@ class OrganizationWindow(QMainWindow):
         for e in run["events"][-6:]:
             detail = " · " + e["member"] if e.get("member") else ""
             if e.get("tool"):
-                detail += " · " + e["tool"]
+                detail += " · " + str(e["tool"])
             lines.append("• " + labels.get(e["stage"], e["stage"]) + detail)
         repair = next((e for e in reversed(run["events"]) if e["stage"] == "revising"), None)
         if repair:
@@ -305,11 +311,11 @@ class OrganizationWindow(QMainWindow):
         if evolution.get("candidate_result"):
             parent = run.get("parent_result", run["result"])
             candidate = evolution["candidate_result"]
-            lines.append(f"当前任务比较：{parent['model_calls']} → {candidate['model_calls']} 次工作调用")
+            lines.append(f"当前任务比较：{parent['model_calls']} → {candidate['model_calls']} 次工作调用，{parent['total_tokens']} → {candidate['total_tokens']} tokens")
         regression = evolution.get("regression")
         if regression and regression.get("work"):
             before, after = regression["work"]["parent"], regression["work"]["candidate"]
-            lines.append(f"历史任务比较：{before['model_calls']} → {after['model_calls']} 次工作调用")
+            lines.append(f"历史任务比较：{before['model_calls']} → {after['model_calls']} 次工作调用，{before['total_tokens']} → {after['total_tokens']} tokens")
         if evolution.get("gate_feedback"):
             lines.append("门控结论：" + evolution["gate_feedback"])
         self.info.setPlainText("\n".join(lines))

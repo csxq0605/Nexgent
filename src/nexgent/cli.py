@@ -539,6 +539,7 @@ def main(argv=None):
     run_list.add_argument("--conversation", help="Filter by conversation ID")
     run_show = sub.add_parser("run-show", help="Read a saved Main task, including delivery, evaluation and feedback")
     run_show.add_argument("run_id")
+    sub.add_parser("organization-show", help="Show the active members, working rules and saved skills without model calls")
     gui = sub.add_parser("gui", help="Open the task workspace")
     gui.add_argument("--legacy-research", action="store_true", help="Open the preserved 0.8 research window")
 
@@ -835,6 +836,11 @@ def main(argv=None):
         except ValueError as exc:
             parser.error(str(exc))
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+        return 0
+    if args.command == "organization-show":
+        from .organization import OrganizationStore
+        revision, active = OrganizationStore(args.root).active()
+        print(json.dumps({"revision": revision, "organization": active}, ensure_ascii=False, indent=2), flush=True)
         return 0
     if args.command == "learn":
         from .organization import OrganizationService
