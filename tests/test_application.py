@@ -46,6 +46,9 @@ def test_default_framework_package_uses_existing_component_and_release_interface
     assert active['manifest']['components']['task-loop'] == {'class': 'O', 'kind': 'entry', 'ref': 'execute'}
     assert active['manifest']['workflows'] == {}
     assert {runtime.tools.get(n).provider_id for n in runtime.default_capabilities} == {'nexgent.workspace'}
+    assert runtime.create('Use ordinary capabilities')['budget']['max_tool_work_units'] == 200_000
+    assert runtime.create('Respect an explicit work limit',
+                          budget={'max_tool_work_units': 0})['budget']['max_tool_work_units'] == 0
 
 
 def test_registered_provider_and_python_strategy_execute_through_normal_entry(tmp_path):

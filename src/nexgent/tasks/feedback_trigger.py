@@ -376,11 +376,15 @@ class AutoEvolutionService:
 
         allowed = set(work["policy"]["candidate_types"])
         options = []
+        feedback = self._services()[1].feedback(work["feedback_bundle"]["id"])
+        creators = {ref["episode_id"]: self.tasks.get_private(ref["episode_id"])
+                    for ref in feedback["episode_refs"]}
         with self.store.connect() as db:
             rows = db.execute(
                 "SELECT id,data FROM task_capability_definitions "
-                "WHERE origin_episode=? ORDER BY id",
-                (episode["id"],),
+                "WHERE origin_episode IN (" + ",".join("?" for _ in creators)
+                + ") ORDER BY id LIMIT 60",
+                tuple(creators),
             ).fetchall()
         adoption = TaskCapabilityAdoptionService(
             self.tasks, self._services()[0], self._services()[1])
@@ -395,13 +399,16 @@ class AutoEvolutionService:
                 loader = (self.store.tool_definition if kind == "tool"
                           else self.store.service_definition)
                 definition = loader(definition_id)
-                if not adoption._used(episode, definition):
+                creator = creators[definition["origin_episode_id"]]
+                if not adoption._used(creator, definition):
                     continue
                 options.append({
                     "candidate_type": kind,
                     "source_ref": definition_id,
                     "evidence": {
                         "definition_digest": definition["digest"],
+                        "creator_episode_id": creator["id"],
+                        "name": definition["name"],
                         "successful_use": True,
                     },
                 })
@@ -786,9 +793,12 @@ class AutoEvolutionService:
                   work["parent_revision"], plan["hypothesis"])
         if plan["candidate_type"] in {"tool", "service_provider"}:
             from .task_capability_adoption import TaskCapabilityAdoptionService
+            loader = (self.store.tool_definition if plan["candidate_type"] == "tool"
+                      else self.store.service_definition)
+            creator_id = loader(plan["source_ref"])["origin_episode_id"]
             result = TaskCapabilityAdoptionService(
                 self.tasks, evolution, generation).adopt(
-                    common[0], plan["source_ref"], source["id"], common[1],
+                    common[0], plan["source_ref"], creator_id, common[1],
                     common[2], common[3], budget=deepcopy(work["policy"]["budget"]),
                     stop_event=stop_event)
             return result["generation"]
@@ -1324,9 +1334,36 @@ class AutoEvolutionService:
                 continue
         return recorded
 
+    def _feedback_episode_ids(self, work):
+        """Include actual member contributions under the same development parent.
+
+        Traverse the recorded delegation links, not all tasks in the project.
+        Different packages and private benchmark Episodes keep their boundary.
+        The existing FeedbackBundle supplies the frozen candidate evidence.
+        """
+        source = self.store.get(work["source_episode_id"])
+        result, pending = [source["id"]], [source]
+        while pending and len(result) < 128:
+            parent = pending.pop(0)
+            for identity in parent.get("child_episode_ids", []):
+                child = self.store.get(identity)
+                if (identity in result
+                        or child["parent_episode_id"] != parent["id"]
+                        or child["package_id"] != source["package_id"]
+                        or child["package_digest"] != source["package_digest"]
+                        or child["status"] not in _TERMINAL
+                        or self._source_kind(child) != "ordinary_development"):
+                    continue
+                result.append(identity)
+                pending.append(child)
+                if len(result) == 128:
+                    break
+        return result
+
     def _matching_feedback(self, work):
         """Find a bundle committed before a coordinator interruption."""
         _, generation = self._services()
+        episode_ids = set(self._feedback_episode_ids(work))
         try:
             with self.store.connect() as db:
                 rows = db.execute(
@@ -1343,8 +1380,7 @@ class AutoEvolutionService:
             except (KeyError, ContractError):
                 continue
             refs = bundle.get("episode_refs") or []
-            if (len(refs) == 1
-                    and refs[0].get("episode_id") == work["source_episode_id"]
+            if ({ref.get("episode_id") for ref in refs} == episode_ids
                     and bundle.get("parent_package_id") == work["source"]["package_id"]
                     and bundle.get("parent_package_digest")
                     == work["source"]["package_digest"]):
@@ -1415,7 +1451,7 @@ class AutoEvolutionService:
                                  "digest": recovered["digest"]})
         try:
             bundle = generation.capture_feedback(
-                work["channel_id"], [work["source_episode_id"]],
+                work["channel_id"], self._feedback_episode_ids(work),
                 expected_revision=work["parent_revision"])
         except ContractError:
             return self._defer(work, "feedback_capture_rejected")

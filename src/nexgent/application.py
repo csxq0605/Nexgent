@@ -58,8 +58,9 @@ class Nexgent(TaskService):
     are used by ordinary tasks, not a separate demo or test execution path.
     """
     def __init__(self, root, *, tools=None, package=None, channel=None,
-                 evaluator=None, model_root=None, gateway_factory=None):
+                 evaluator=None, benchmarks=None, model_root=None, gateway_factory=None):
         self.model_root = Path(model_root or root).resolve()
+        self.benchmark_adapters = dict(benchmarks or {})
         if gateway_factory is None:
             gateway_factory = lambda reserve, stop: ModelGateway(
                 self.model_root, reserve=reserve, stop_event=stop,
@@ -87,6 +88,17 @@ class Nexgent(TaskService):
         if config and not channel and single_auto_channel(self.auto_evolution) is None:
             raise ValueError('Main requires default_channel when several evolution policies are configured')
 
+    def _benchmark_registry(self):
+        registry = super()._benchmark_registry()
+        if not self.benchmark_adapters:
+            return registry
+        from .tasks.benchmarks import BenchmarkRegistry
+        adapters = registry.adapters()
+        if set(adapters) & set(self.benchmark_adapters):
+            raise ValueError('Injected benchmarks must use distinct installed identities')
+        return BenchmarkRegistry.from_mapping(
+            {**adapters, **self.benchmark_adapters}, project_root=self.project_root)
+
     def package_selection(self):
         return {'package_channel': self.main_channel}
 
@@ -101,6 +113,11 @@ class Nexgent(TaskService):
                     and options.get('benchmark_registration') is None
                     and not (context or {}).get('rsi_role'))
         if ordinary:
+            # Portable package tools charge their actual worker instructions.
+            # The legacy task API defaults to zero work units, which would
+            # prevent a newly adopted tool from running in the next task.
+            budget = deepcopy(budget or {})
+            budget.setdefault('max_tool_work_units', 200_000)
             inputs = deepcopy(inputs or {})
             validate_attachments(self.project_root, inputs)
             context = deepcopy(context or {})
@@ -134,7 +151,8 @@ class Nexgent(TaskService):
 
     def list(self):
         return [s for s in super().list()
-                if s['task'].get('context', {}).get('rsi_role') != 'delivery_evaluation']
+                if not s['task'].get('context', {}).get('rsi_role')
+                and self.store.benchmark_registration(s['id']) is None]
 
     def run(self, identity, on_update=None, stop_event=None):
         result = super().run(identity, on_update, stop_event)

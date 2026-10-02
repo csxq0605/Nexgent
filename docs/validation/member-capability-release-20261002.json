@@ -1,0 +1,152 @@
+{
+  "evidence_scope": "Ordinary Main public composition qualification with deterministic host Python strategy, improver and evaluator; no autonomous model evidence.",
+  "first": {
+    "qualification": "host-python-application-through-main",
+    "real_model": false,
+    "episode_id": "episode-6bb9aa8a2b894910",
+    "status": "completed",
+    "package_id": "package-09ebd72d7a8643a1af6ac252",
+    "package_digest": "4ec6924c356dba03a6b2cfc76827cdde0982630a17bf842e25d338c0cc2c02e9",
+    "members": [
+      "episode-91cf99bc3bcd4f2e"
+    ],
+    "evaluation": {
+      "accepted": true,
+      "execution_status": "completed",
+      "score": 1,
+      "score_available": true,
+      "status": "passed"
+    },
+    "auto_evolution": {
+      "active_revisions": {
+        "members": 1
+      },
+      "configured": true,
+      "global_pending": false,
+      "rounds": 1,
+      "source_pending": false,
+      "work": [
+        {
+          "channel": "members",
+          "id": "feedback-work-da34e948a86ed17a84f06f53",
+          "reason": null,
+          "status": "completed"
+        }
+      ]
+    },
+    "delivery": {
+      "result": {
+        "value": 14
+      }
+    },
+    "active_revision": 1,
+    "error": null
+  },
+  "new_process": {
+    "qualification": "host-python-application-through-main",
+    "real_model": false,
+    "episode_id": "episode-ca9d4bef64044c7f",
+    "status": "completed",
+    "package_id": "package-f10d787a307f72e2a9fb2b9d",
+    "package_digest": "aa0f9037fe75ecfe0c71f6981998da535f0bcd9a1e2480ceac1bdbfef5848adb",
+    "members": [],
+    "evaluation": {
+      "accepted": true,
+      "execution_status": "completed",
+      "score": 1,
+      "score_available": true,
+      "status": "passed"
+    },
+    "auto_evolution": {
+      "active_revisions": {
+        "members": 1
+      },
+      "configured": true,
+      "global_pending": false,
+      "rounds": 1,
+      "source_pending": false,
+      "work": [
+        {
+          "channel": "members",
+          "id": "feedback-work-99c6aa68070699d2e3080926",
+          "reason": "No new reusable component",
+          "status": "no_change"
+        }
+      ]
+    },
+    "delivery": {
+      "result": {
+        "value": 38
+      }
+    },
+    "active_revision": 1,
+    "error": null
+  },
+  "feedback_episode_ids": [
+    "episode-6bb9aa8a2b894910",
+    "episode-91cf99bc3bcd4f2e"
+  ],
+  "candidate": {
+    "candidate_id": "candidate-48c2b7d86fcf4004",
+    "candidate_package_id": "package-f10d787a307f72e2a9fb2b9d",
+    "generation_id": "generation-74ba303a246f4222",
+    "kind": "tool",
+    "record_digest": "7f3de28370e8dde815235611fefb3cfc91117df3075216e8d14d821c394bfc49"
+  },
+  "selection": {
+    "id": "decision-78458ce62e5f4cef",
+    "gates": {
+      "behavior_activated": true,
+      "candidate_completed": true,
+      "cost": true,
+      "measurement_complete": true,
+      "quality": true,
+      "regressions": true,
+      "selection_role": true,
+      "success_rate": true
+    },
+    "eligible": true
+  },
+  "guard": {
+    "active_package_id": "package-f10d787a307f72e2a9fb2b9d",
+    "active_revision": 1,
+    "degraded": false,
+    "metrics_digest": "246b388564e5cf4ac939505c14f0ebdac8bc0527b5f7feb3490ac4c2603b6803",
+    "rolled_back": false
+  },
+  "reuse": {
+    "usage": {
+      "model_calls": 0,
+      "reserved_completion_tokens": 0,
+      "charged_completion_tokens": 0,
+      "completion_tokens": 0,
+      "known_usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "usage_missing_call_ids": [],
+      "tool_usage_missing_call_ids": [],
+      "reserved_tool_work_units": 0,
+      "charged_tool_work_units": 6,
+      "tool_work_units": 6,
+      "usage_complete": true,
+      "billing_unknown_call_ids": [],
+      "tool_calls": 1,
+      "service_applications": 0,
+      "nodes": 3
+    },
+    "loaded_modules": [
+      "main.py",
+      "capabilities/adopted/b4f25e20e8caee8f1229.py"
+    ],
+    "activated_components": [
+      {
+        "component_id": "adopted-capability-b4f25e20e8caee8f1229",
+        "kind": "tool",
+        "package_digest": "aa0f9037fe75ecfe0c71f6981998da535f0bcd9a1e2480ceac1bdbfef5848adb",
+        "source_path": "capabilities/adopted/b4f25e20e8caee8f1229.py"
+      }
+    ]
+  }
+}

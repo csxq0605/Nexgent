@@ -437,6 +437,8 @@ def test_dispatch_passes_stop_event_to_capability_and_skill_adoption(
 
     monkeypatch.setattr(TaskCapabilityAdoptionService, "adopt", capability)
     monkeypatch.setattr(TaskSkillAdoptionService, "adopt_episode", skill)
+    monkeypatch.setattr(trigger.store, "tool_definition", lambda _identity: {
+        "origin_episode_id": work["source_episode_id"]})
     trigger._dispatch_plan(work, {
         "candidate_type": "tool", "source_ref": "definition-fixture",
         "hypothesis": _hypothesis()}, stop_event=stop)

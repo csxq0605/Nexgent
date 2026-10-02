@@ -16,6 +16,7 @@ Nexgent 核心不内置任务评分器。项目宿主先安装一个实现 `Benc
         "max_model_calls": 8,
         "max_completion_tokens": 32000,
         "max_tool_calls": 12,
+        "max_tool_work_units": 200000,
         "max_nodes": 48
       },
       "promotion_policy": {

@@ -528,13 +528,20 @@ class MainWindow(QMainWindow):
             self.status_label.setText("任务已结束；正在检查改进证据")
 
     def _auto_result(self, result):
-        work = result.get("work") or []
+        if result.get('rounds') == 0:
+            return
+        work = [row for row in result.get("work") or [] if row.get("channel")]
         if not work:
             return
-        summary = "、".join(
-            f"{row['status']} ({row['id']})"
-            + (f" · {row['reason']}" if row.get("reason") else "")
-            for row in work)
+        labels = {
+            'completed': '修改已通过验证并发布，后续任务会使用新版本',
+            'no_change': '本轮没有新修改',
+            'rejected': '候选未通过验证，保留当前版本',
+            'rolled_back': '后续检查未通过，已恢复前一版本',
+            'deferred': '本轮暂未发布修改',
+        }
+        summary = '；'.join(dict.fromkeys(
+            labels.get(row['status'], '正在验证候选修改') for row in work))
         self._append("system", "自动改进：" + summary, color="#6c7c72")
 
     def _auto_error(self, error_type):

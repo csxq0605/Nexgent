@@ -34,12 +34,18 @@ agent.feedback(task["id"], "后续需要更清楚地说明验证方法")
 创建 `Nexgent(root, tools=registry, package=package, evaluator=adapter)` 可替换
 工具注册表、初始执行策略和独立评价器。沿用现有 `ToolSpec` handler
 `(arguments, ToolContext)`、`make_package()` 和评价 adapter 合同；不要求私有 DSL。
+也可传入 `benchmarks={adapter.id: adapter}` 组合现有 BenchmarkAdapter，供项目改进
+策略调用；宿主负责在重启时提供同一版本的 adapter，或将其安装为已有评价插件。
 `package` 是新 channel 的初始版本，不能借构造函数覆盖已有部署。
 也可显式选择已注册的 `package_channel`；同一任务冻结所选包及已授予工具的版本。
 
 模型通过已有 `develop_tool` / `develop_service` 在受限 worker 中创建纯计算工具、
 或上下文服务。成员通过普通 `delegate` 创建，`task.agent` 含 `name` 和
 `instructions`；其职责不会增加权限。返回的 `output_refs` 是实际成果引用。
+
+配置自动改进时，反馈包会纳入相同包版本下的真实委派成员。成员成功使用的工具
+或服务可进入与主任务相同的候选、独立 selection、guard 和发布流程；只有实际
+通过门控的包版本会影响新任务。普通入口提供有限计算额度，显式预算仍优先。
 
 ```powershell
 nexgent --root ./my-project run "完成任务" --attach ./input.json
@@ -71,8 +77,10 @@ nexgent-gui --project ./my-project --organization-demo
 - 交付评价为开发反馈；它不是隐藏任务集上的收益证明。执行程序中的自检也不能
   冒充这个独立评价。评价失败保留实际交付，并显示验收失败或缺测。
 
-下一项框架工作是把普通任务开发出的工具、服务与执行策略修改自动交给现有门控，
-形成可跨任务加载的统一能力发布；同时用默认 Python 执行入口实际验证。
+工具、服务和执行策略候选已复用同一套现有门控。成员能力发布、跨进程加载和拒绝
+回退已通过 Python 策略集成验证；真实模型自主完成候选生成与发布仍待验证。
+公开组合接口的[普通 Main 发布与复用](validation/member-capability-release-20261002.md)
+使用确定性 Python 应用，不代表真实模型自主改进。
 不能用另一个定制 demo 的成功或组织提案采纳来替代这项工作。
 
 本轮[真实入口与失败记录](validation/framework-runtime-20261002.md)区分普通交付、

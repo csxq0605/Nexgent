@@ -9,9 +9,11 @@ AgentPackage、ToolProvider 和独立评价 adapter；默认采用 Python 执行
 组织应用保留为 `--organization-demo`，不是默认框架边界。
 代码、用法与未完成项见[通用运行入口](docs/framework-runtime.md)。
 
-下一步优先把任务内开发出的工具、服务及执行策略修改接到既有门控和统一发布，
-使后续任务真正加载。项目已配置 AutoEvolution 时复用既有驱动；未配置不能
-假称已自动进化。暂停围绕 Excel/组织 demo 扩工具或调提案采纳率。
+任务与成员开发的工具、服务和执行策略候选现已接到既有门控。公开组合接口下的
+Python 应用已通过普通 Main 验证工具发布、新进程实际加载；服务与 guard 回退
+通过集成验证，见[成员贡献发布](docs/validation/member-capability-release-20261002.md)。
+下一步验证默认 Python 策略下真实模型自主完成整轮。项目未配置改进策略不能
+假称已自动进化；继续暂停围绕 Excel/组织 demo 扩工具或调提案采纳率。
 
 ## 2026-09-29 主线纠偏（历史）
 
