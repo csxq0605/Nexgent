@@ -15,10 +15,10 @@ from .tasks.tools import ContractError
 
 
 REPLAY_ID = 'nexgent.project-regression'
-IMPROVER_CHANNEL = 'nexgent-project-improver-v2'
+IMPROVER_CHANNEL = 'nexgent-project-improver-v3'
 # At most five roots: planner, generator, two selection arms, one guard.
-PHASE_BUDGET = {'max_model_calls': 12, 'max_completion_tokens': 40000,
-                'max_tool_calls': 12, 'max_tool_work_units': 200000, 'max_nodes': 100}
+PHASE_BUDGET = {'max_model_calls': 40, 'max_completion_tokens': 160000,
+                'max_tool_calls': 20, 'max_tool_work_units': 200000, 'max_nodes': 100}
 
 
 def ordinary(state):
@@ -136,6 +136,53 @@ class ProjectRegression:
 
 class ProjectEvolution(AutoEvolutionService):
     """Default admission avoids spending on every successful delivery."""
+    def _feedback_event_digest(self, episode):
+        source_episode_id = episode['id']
+        registration = self._registration(episode) or {}
+        channel, parent_revision = registration.get('channel'), registration.get('revision')
+        feedback = [event for event in self.store.events(source_episode_id)
+                    if event['kind'] == 'user_feedback']
+        if not feedback:
+            return None
+        latest = feedback[-1]['digest']
+        # A pending observation can collect the new feedback. Once captured,
+        # reuse it only for that feedback snapshot; later corrections get a
+        # new work item instead of disappearing behind a terminal result.
+        for work in self.store.feedback_triggers(limit=256):
+            if (work['source_episode_id'] != source_episode_id
+                    or work['channel_id'] != channel or work['parent_revision'] != parent_revision):
+                continue
+            if work['status'] == 'observed' and not work.get('feedback_bundle'):
+                return work.get('feedback_event_digest')
+            if work.get('feedback_bundle'):
+                captured = self._services()[1].feedback(work['feedback_bundle']['id'])
+                if any(item.get('event_digest') == latest
+                       for ref in captured['episode_refs'] if ref['episode_id'] == source_episode_id
+                       for item in ref.get('user_feedback', [])):
+                    return work.get('feedback_event_digest')
+        return latest
+
+    def _candidate_options(self, work, episode, active):
+        options = super()._candidate_options(work, episode, active)
+        if ('orchestration' in work['policy']['candidate_types']
+                and 'task-instructions' in active['package']['manifest'].get('components', {})):
+            from .tasks.member_adoption import member_sources
+            feedback = self._services()[1].feedback(work['feedback_bundle']['id'])
+            members = member_sources(self.tasks, feedback, active['package'])
+            if members:
+                options.insert(0, {'candidate_type': 'orchestration', 'source_ref': 'task_members',
+                                   'evidence': {'completed_members': [
+                                       {**member, 'instructions': member['instructions'][:1000]} for member in members],
+                                                'scope': 'Generalize responsibilities and coordination; gate before reuse'}})
+        return options
+
+    def _dispatch_plan(self, work, plan, *, stop_event=None):
+        if plan['source_ref'] == 'task_members':
+            from .tasks.member_adoption import generate_team
+            evolution, generation = self._services()
+            return generate_team(self.tasks, evolution, generation, work, plan, stop_event)
+        return super()._dispatch_plan(work, plan, stop_event=stop_event)
+
     @staticmethod
     def _mutation_policy(parent):
         policy = AutoEvolutionService._mutation_policy(parent)
@@ -171,7 +218,11 @@ class ProjectEvolution(AutoEvolutionService):
             developed = db.execute('SELECT 1 FROM task_capability_definitions '
                                    'WHERE origin_episode IN (' + ','.join('?' for _ in creators)
                                    + ') LIMIT 1', tuple(creators)).fetchone()
-        if not feedback and not failed and not developed:
+        from .tasks.members import used_members
+        parent = self.store.package(state['package_id'])
+        members = [member for member in used_members(self.store, creators, parent)
+                   if member['name'] not in parent['manifest'].get('roles', {})]
+        if not feedback and not failed and not developed and not members:
             return None
         return super().observe_terminal(episode_id)
 

@@ -14,6 +14,8 @@ Python SDK 复用同一个通用任务运行时，执行程序、工具提供者
   程序、编排和技能，不要求固定组织角色或 DAG。
 - 成员是可执行的委派 Episode，具有任务内职责、工具使用和实际交付；可并行
   执行并共享成果引用，由负责人读取后汇总。
+- 完成的成员职责和协作策略可从反馈中概括为包内角色，经过门控后供后续任务
+  按名称复用。Main“协作”页、CLI `team` 与 SDK 使用同一成员和任务记录。
 - `ToolRegistry` / `ToolProvider` 提供可替换能力。工作区读写、网页、CSV/Excel
   和计算工具属于提供者；业务格式判断不进入通用执行器。
 - 独立评价在另一份固定宿主程序中运行，只授予读取和计算能力，不加载候选
@@ -28,6 +30,7 @@ Python SDK 复用同一个通用任务运行时，执行程序、工具提供者
 nexgent --root ./my-project run "完成任务" --attach ./material.json
 nexgent --root ./my-project feedback EPISODE_ID "反馈内容"
 nexgent --root ./my-project improve --advance
+nexgent --root ./my-project team
 nexgent --root ./my-project learn EPISODE_ID
 nexgent-gui --project ./my-project
 ```

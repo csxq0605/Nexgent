@@ -266,13 +266,19 @@ class AutoEvolutionService:
         return "unscoped"
 
     @staticmethod
-    def _trigger_key(channel, parent_revision, source_episode_id):
-        return digest({
+    def _trigger_key(channel, parent_revision, source_episode_id, feedback_event_digest=None):
+        fields = {
             "schema": WORK_SCHEMA,
             "channel_id": channel,
             "parent_revision": parent_revision,
             "source_episode_id": source_episode_id,
-        })
+        }
+        if feedback_event_digest is not None:
+            fields['feedback_event_digest'] = feedback_event_digest
+        return digest(fields)
+
+    def _feedback_event_digest(self, episode):
+        return None
 
     def observe_terminal(self, episode_id):
         """Do only the bounded, idempotent write used by TaskService.run."""
@@ -300,7 +306,8 @@ class AutoEvolutionService:
             status, reason = "deferred", "missing_channel_policy"
         else:
             status, reason = "observed", None
-        key = self._trigger_key(channel, parent_revision, episode_id)
+        feedback_event_digest = self._feedback_event_digest(episode)
+        key = self._trigger_key(channel, parent_revision, episode_id, feedback_event_digest)
         now = time.time()
         record = {
             "id": "feedback-work-" + key[:24],
@@ -323,6 +330,8 @@ class AutoEvolutionService:
             "updated_at": now,
             "revision": 0,
         }
+        if feedback_event_digest is not None:
+            record['feedback_event_digest'] = feedback_event_digest
         return self.store.put_feedback_trigger(record)
 
     def _has_evaluator(self, evaluator_id):
@@ -1388,6 +1397,12 @@ class AutoEvolutionService:
             except (KeyError, ContractError):
                 continue
             refs = bundle.get("episode_refs") or []
+            feedback_event_digest = work.get('feedback_event_digest')
+            if (feedback_event_digest is not None and not any(
+                    item.get('event_digest') == feedback_event_digest
+                    for ref in refs if ref.get('episode_id') == work['source_episode_id']
+                    for item in ref.get('user_feedback', []))):
+                continue
             if ({ref.get("episode_id") for ref in refs} == episode_ids
                     and bundle.get("parent_package_id") == work["source"]["package_id"]
                     and bundle.get("parent_package_digest")

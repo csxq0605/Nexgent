@@ -20,12 +20,14 @@ from .workspace import attach_files, validate_attachments, workspace_registry
 
 
 MAIN_PACKAGE_CHANNEL = 'nexgent-main-runtime-v1'
+MAIN_TASK_BUDGET = {'max_model_calls': 40, 'max_completion_tokens': 160000,
+                    'max_tool_calls': 20, 'max_tool_work_units': 200000, 'max_nodes': 100}
 MAIN_CAPABILITY_AUTHORITY = make_episode_authority(
     ['tool', 'service_provider'], ['local_compute', 'model_context'],
     max_definitions=32, max_invocations=128, version=2)
 
 
-def framework_package():
+def framework_package(*, members=None):
     """Use the existing Python seed with the existing component/release SDK.
 
     Naming the loop and instructions permits ordinary tool/service adoption
@@ -47,7 +49,21 @@ def framework_package():
                                ('service-development-guide', 'S', 'prompts/service_development.md'))},
                         **{'skill-' + name: {'class': 'S', 'kind': 'skill', 'ref': name}
                            for name in manifest['skills']}})
-    return make_package(seed['files'], manifest, provenance=seed['provenance'])
+    files = deepcopy(seed['files'])
+    if members is not None:
+        if (not isinstance(members, dict) or len(members) > 16
+                or any(not isinstance(instructions, str) or not instructions.strip()
+                       or len(instructions) > 3000 for instructions in members.values())):
+            raise ValueError('Initial members must map at most 16 names to bounded instructions')
+        for name, instructions in members.items():
+            from .tasks.packages import IDENTIFIER
+            if not isinstance(name, str) or not IDENTIFIER.fullmatch(name) or len(name) > 60:
+                raise ValueError('Initial member names must be identifiers of at most 60 characters')
+            path = 'members/' + name + '.md'
+            files[path] = instructions
+            manifest['roles'][name] = {'prompt_ref': path, 'description': name, 'capabilities': []}
+            manifest['components']['member-' + name] = {'class': 'O', 'kind': 'role', 'ref': name}
+    return make_package(files, manifest, provenance=seed['provenance'])
 
 
 class Nexgent(TaskService):
@@ -106,6 +122,32 @@ class Nexgent(TaskService):
     def package_selection(self):
         return {'package_channel': self.main_channel}
 
+    def team(self, identity=None):
+        """Show the deployed roster and actual collaboration on a user task."""
+        from .tasks.members import member_inventory
+        active = self.evolution.active(self.main_channel)
+        package = active['package'] if identity is None else self.store.package(self.store.get(identity)['package_id'])
+        assignments = []
+        if identity is not None:
+            pending = list(self.store.get(identity)['child_episode_ids'])
+            while pending and len(assignments) < 128:
+                child = self.store.get(pending.pop(0))
+                pending.extend(child['child_episode_ids'])
+                agent = child['task'].get('context', {}).get('agent')
+                if agent:
+                    role = self.store.package(child['package_id'])['manifest'].get('roles', {}).get(agent['name'], {})
+                    assignments.append({'episode_id': child['id'], 'parent_episode_id': child['parent_episode_id'],
+                                        'display_name': str(role.get('description', agent['name']))[:300],
+                                        'member': deepcopy(agent), 'objective': child['task']['objective'],
+                                        'status': child['status'], 'output_refs': deepcopy(child['output_refs']),
+                                        'summary': (child.get('outcome') or {}).get('summary', ''),
+                                        'error': child.get('last_error')})
+        return {'channel': self.main_channel, 'active_revision': active['revision'],
+                'active_package_digest': active['package_digest'],
+                'task_package_digest': package['digest'], 'members': member_inventory(package),
+                'deployed_members': member_inventory(active['package']),
+                'assignments': assignments}
+
     def attach_files(self, paths):
         return attach_files(self.project_root, paths)
 
@@ -122,7 +164,8 @@ class Nexgent(TaskService):
             # The legacy task API defaults to zero work units, which would
             # prevent a newly adopted tool from running in the next task.
             budget = deepcopy(budget or {})
-            budget.setdefault('max_tool_work_units', 200_000)
+            for name, value in MAIN_TASK_BUDGET.items():
+                budget.setdefault(name, value)
             inputs = deepcopy(inputs or {})
             context = deepcopy(context or {})
             conversation_id = context.get('conversation_id') or uuid.uuid4().hex

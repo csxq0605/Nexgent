@@ -533,6 +533,8 @@ def main(argv=None):
     improve.add_argument('--advance', action='store_true', help='Run pending feedback through existing release gates')
     improve.add_argument('--enable', choices=('on', 'off'), help='Persist the automatic improvement setting')
     improve.add_argument('--model-root', type=Path)
+    team = sub.add_parser('team', help='Inspect deployed reusable members and actual task collaboration')
+    team.add_argument('run_id', nargs='?')
     resume = sub.add_parser("run-resume", help="Resume an unfinished Main task, reusing completed member work")
     resume.add_argument("run_id")
     resume.add_argument("--model-root", type=Path)
@@ -824,6 +826,10 @@ def main(argv=None):
         if args.organization_demo:
             gui_args.append('--organization-demo')
         return gui_main(gui_args)
+    if args.command == 'team':
+        from .application import Nexgent
+        print(json.dumps(Nexgent(args.root).team(args.run_id), ensure_ascii=False, indent=2), flush=True)
+        return 0
     if args.command == 'improve':
         from .application import Nexgent
         service = Nexgent(args.root, model_root=args.model_root)

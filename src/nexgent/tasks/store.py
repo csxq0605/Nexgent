@@ -151,12 +151,25 @@ class EpisodeStore:
                     updated REAL NOT NULL,
                     data TEXT NOT NULL);
                 CREATE UNIQUE INDEX IF NOT EXISTS task_feedback_outbox_source
-                    ON task_feedback_outbox(channel_id,parent_revision,source_episode)
+                    ON task_feedback_outbox(channel_id,parent_revision,source_episode,
+                        COALESCE(json_extract(data,'$.feedback_event_digest'),''))
                     WHERE channel_id IS NOT NULL AND parent_revision IS NOT NULL;
                 CREATE INDEX IF NOT EXISTS task_calls_root ON task_calls(root_id);
                 CREATE INDEX IF NOT EXISTS task_resources_root ON task_resources(root_id,kind);
                 CREATE INDEX IF NOT EXISTS task_memory_scope ON task_memory(namespace,split);
             """)
+            index = db.execute("SELECT sql FROM sqlite_master WHERE type='index' "
+                               "AND name='task_feedback_outbox_source'").fetchone()
+            if index and 'json_extract' not in index[0]:
+                # Preserve existing work while permitting a subsequent human
+                # correction on the same source/version. Legacy identities
+                # still have exactly one slot with an empty feedback digest.
+                db.execute('BEGIN IMMEDIATE')
+                db.execute('DROP INDEX task_feedback_outbox_source')
+                db.execute("CREATE UNIQUE INDEX task_feedback_outbox_source "
+                           "ON task_feedback_outbox(channel_id,parent_revision,source_episode,"
+                           "COALESCE(json_extract(data,'$.feedback_event_digest'),'')) "
+                           "WHERE channel_id IS NOT NULL AND parent_revision IS NOT NULL")
 
     def connect(self):
         return sqlite3.connect(self.path, timeout=30)
@@ -457,7 +470,8 @@ class EpisodeStore:
             "source_episode_id", "status", "reason", "policy", "policy_digest",
             "source", "created_at", "updated_at", "revision",
         }
-        if not isinstance(record, dict) or set(record) != required:
+        if (not isinstance(record, dict) or not required <= set(record)
+                or set(record) - required - {'feedback_event_digest'}):
             raise ValueError("Feedback trigger record shape is invalid")
         channel, parent_revision = record["channel_id"], record["parent_revision"]
         configured = channel is not None or parent_revision is not None
@@ -477,11 +491,19 @@ class EpisodeStore:
                 or type(record["created_at"]) not in {int, float}
                 or type(record["updated_at"]) not in {int, float}):
             raise ValueError("Feedback trigger identity or state is invalid")
-        expected_key = _digest({
+        key_fields = {
             "schema": record["schema"], "channel_id": channel,
             "parent_revision": parent_revision,
             "source_episode_id": record["source_episode_id"],
-        })
+        }
+        if 'feedback_event_digest' in record:
+            event_digest = record['feedback_event_digest']
+            if (not isinstance(event_digest, str) or len(event_digest) != 64
+                    or not any(event['kind'] == 'user_feedback' and event['digest'] == event_digest
+                               for event in self.events(record['source_episode_id']))):
+                raise ValueError('Feedback trigger must reference actual feedback on its source')
+            key_fields['feedback_event_digest'] = event_digest
+        expected_key = _digest(key_fields)
         if (record["schema"] != "nexgent.ordinary-feedback-work.v1"
                 or record["trigger_key"] != expected_key
                 or record["id"] != "feedback-work-" + expected_key[:24]

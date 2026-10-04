@@ -514,6 +514,18 @@ class TaskService:
             initial_descriptors = []
         inputs = {} if inputs is None else _json_copy(inputs, label="Task inputs")
         context = {} if context is None else _json_copy(context, label="Task context")
+        # Derive the roster from this Episode's frozen package, including paired
+        # candidate replays. A caller cannot substitute a newer/live roster.
+        from .members import member_inventory
+        if not isinstance(context, dict):
+            raise ContractError('Task context must be a JSON object')
+        context.pop('organization', None)
+        members = member_inventory(package)
+        if members:
+            context['organization'] = {'members': members,
+                                       'package_digest': package['digest'],
+                                       'instruction': 'Delegate by setting task.agent to a member name. '
+                                                      'Choose relevant members; read their outputs before synthesis.'}
         benchmark_registration = (None if benchmark_registration is None else
                                   _json_copy(benchmark_registration,
                                              label="Benchmark registration"))
@@ -2964,7 +2976,7 @@ class TaskService:
                 activations = []
                 seen_activations = set()
                 for event in self.store.events(identity):
-                    if event.get("kind") != "package_capability_activated":
+                    if event.get("kind") not in {"package_capability_activated", "package_member_activated"}:
                         continue
                     content = event.get("content") or {}
                     evidence = {
@@ -4074,6 +4086,9 @@ class TaskService:
                 # alter evaluation identity or change memory boundaries.
                 agent = task.get('agent')
                 if agent is not None:
+                    if isinstance(agent, str):
+                        from .members import resolve_member
+                        agent = resolve_member(target, agent)
                     if (not isinstance(agent, dict) or set(agent) != {'name', 'instructions'}
                             or not isinstance(agent['name'], str) or not 1 <= len(agent['name']) <= 60
                             or not isinstance(agent['instructions'], str)
@@ -4115,6 +4130,16 @@ class TaskService:
                     f"Delegated child {child_id} requires recovery: {child_result.get('last_error') or 'unknown outcome'}")
             if child_result["status"] in {"ready", "running", "paused"}:
                 raise _CompositePaused(f"Delegated child {child_id} is {child_result['status']}")
+            role_name = params['task'].get('agent')
+            if (child_result['status'] == 'completed' and isinstance(role_name, str)
+                    and child_result['package_digest'] == package['digest']):
+                role = package['manifest'].get('roles', {}).get(role_name, {})
+                for component_id, component in package['manifest'].get('components', {}).items():
+                    if component.get('kind') == 'role' and component.get('ref') == role_name:
+                        self.store.event(identity, 'package_member_activated', {
+                            'component_id': component_id, 'kind': 'role',
+                            'package_digest': package['digest'], 'source_path': role['prompt_ref'],
+                            'child_episode_id': child_id})
             return {"episode_id": child_id, "status": child_result["status"], "output_refs": child_result["output_refs"],
                     "outcome": child_result["outcome"], "error": child_result.get("last_error")}
         if method == "memory_search":

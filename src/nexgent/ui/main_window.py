@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QTabWidget,
     QTextBrowser,
@@ -176,6 +177,7 @@ class MainWindow(QMainWindow):
         self._improvement_timer.start()
         self.refresh_tasks()
         self._welcome()
+        self._render_team()
         if (self._auto_evolution is not None
                 and (self.service.store.terminal_episode_ids(limit=1)
                      or self.service.store.feedback_triggers(limit=1))):
@@ -244,7 +246,9 @@ class MainWindow(QMainWindow):
             side.addWidget(self.improve_toggle)
             from ..project_improvement import ProjectEvolution
             if isinstance(self.service.auto_evolution, ProjectEvolution):
-                cost_notice = QLabel('改进独立计费：每个提案最多 60 次模型调用、200000 输出 tokens；历史不足时等待。')
+                from ..project_improvement import PHASE_BUDGET
+                cost_notice = QLabel(f"改进独立计费：每个提案最多 {5 * PHASE_BUDGET['max_model_calls']} 次模型调用、"
+                                     f"{5 * PHASE_BUDGET['max_completion_tokens']} 输出 tokens；历史不足时等待。")
                 cost_notice.setObjectName('Muted')
                 cost_notice.setWordWrap(True)
                 cost_notice.setMaximumWidth(220)
@@ -300,6 +304,13 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.stop_button)
         controls.addWidget(self.continue_button)
         controls.addStretch()
+        controls.addWidget(QLabel('模型调用上限'))
+        self.task_calls = QSpinBox()
+        self.task_calls.setRange(0, 100)
+        self.task_calls.setValue(40)
+        self.task_calls.setToolTip('本次任务、所有成员、成果修正和独立评价共享此上限。'
+                                  '新任务使用该预算；已创建任务的预算保持不变。改进另计。')
+        controls.addWidget(self.task_calls)
         main.addLayout(controls)
         followup_controls = QHBoxLayout()
         followup_controls.addWidget(self.feedback_button)
@@ -320,9 +331,11 @@ class MainWindow(QMainWindow):
         self.delivery_view = self._reader()
         self.evidence_view = self._reader()
         self.improvement_view = self._reader()
+        self.team_view = self._reader()
         inspector.addTab(self.run_view, "运行")
         inspector.addTab(self.delivery_view, "成果")
         inspector.addTab(self.evidence_view, "证据")
+        inspector.addTab(self.team_view, '协作')
         inspector.addTab(self.improvement_view, '改进')
         splitter.addWidget(inspector)
         splitter.setSizes([240, 760, 360])
@@ -377,6 +390,7 @@ class MainWindow(QMainWindow):
     def _buttons(self):
         busy = self.worker is not None or self._recovery_worker is not None
         self.send_button.setEnabled(not busy)
+        self.task_calls.setEnabled(not busy)
         active_worker = self.worker or self._recovery_worker
         self.stop_button.setEnabled(busy and not active_worker.stop_event.is_set() if busy else False)
         if hasattr(self, 'improve_toggle'):
@@ -465,6 +479,8 @@ class MainWindow(QMainWindow):
         try:
             state = self.service.create(
                 objective, inputs={'attachments': deepcopy(self.attachments)} if self.attachments else {},
+                budget={'max_model_calls': self.task_calls.value(),
+                        'max_completion_tokens': self.task_calls.value() * 4000},
                 context={"conversation_id": self.conversation_id, "split": "development",
                                     "split_role": "development"},
                 capability_authority=deepcopy(MAIN_CAPABILITY_AUTHORITY),
@@ -752,7 +768,30 @@ class MainWindow(QMainWindow):
             "完整收据和原始字段请在高级控制台查看，或导出该 Episode。",
         ]))
         self._render_improvement()
+        self._render_team(state['id'])
         self._buttons()
+
+    def _render_team(self, identity=None):
+        if not isinstance(self.service, Nexgent):
+            self.team_view.setPlainText('此执行器未连接成员目录。')
+            return
+        team = self.service.team(identity)
+        rows = [f"当前组织版本：{team['active_revision']}", '', '已发布成员（用于后续任务）']
+        for member in team['deployed_members']:
+            rows.extend([f"• {member['description']}（{member['name']}）", member['instructions'], ''])
+        if not team['deployed_members']:
+            rows.append('尚无已发布成员。智能体可根据任务创建成员；反馈验证通过后可用于后续任务。')
+        if team['task_package_digest'] != team['active_package_digest']:
+            rows.extend(['', '本任务使用较早的组织版本；进行中的任务保留原有成员和策略。'])
+        rows.extend(['', '本任务的实际分工与交付'])
+        for item in team['assignments']:
+            rows.extend([f"• {item['display_name']} · {STATUS.get(item['status'], item['status'])}",
+                         '任务：' + item['objective'], '职责：' + item['member']['instructions'],
+                         '交付：' + (', '.join(item['output_refs']) or '尚未交付'),
+                         '摘要：' + _brief(item['summary']), ''])
+        if not team['assignments']:
+            rows.append('本任务尚无成员分工。')
+        self.team_view.setPlainText('\n'.join(rows))
 
     def _render_improvement(self):
         if not isinstance(self.service, Nexgent):
@@ -801,6 +840,7 @@ class MainWindow(QMainWindow):
         self.improvement_view.setPlainText('\n'.join(lines))
 
     def _refresh_improvement_progress(self):
+        self._render_team(self.selected_id)
         if isinstance(self.service, Nexgent) and (self.worker is not None or self._recovery_worker is not None):
             self._render_improvement()
             if self._recovery_worker is not None:

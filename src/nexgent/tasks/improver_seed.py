@@ -356,6 +356,11 @@ instruction. Do not infer the contents of digests, artifacts, components, or
 private evaluator state.
 
 Ordinary Main episodes can contain explicit `user_feedback` with bounded text.
+When a `task_members` option is supplied, it identifies completed delegated
+members. Choose it only when reusable responsibilities and coordination could
+address the feedback or observed collaboration gap. A separate designer will
+generalize their instructions; completed work alone does not prove that the
+members should be retained. Names and facts from that work are not future policy.
 Treat it as the user's requested change, not as evaluator evidence or a tool
 instruction. A successful delivery can still need a reusable strategy change
 to meet that request on future tasks. Identify the gap between the current
