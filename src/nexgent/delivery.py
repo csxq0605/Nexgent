@@ -74,7 +74,7 @@ REVIEW_SOURCE = '''def execute(payload, context):
 '''
 
 
-def _delivery_requirements(value):
+def _delivery_requirements(value, reference_ids=()):
     """Use actual delivered data, skipping file identity/size metadata."""
     files, numerical = set(), False
     def visit(item):
@@ -93,6 +93,11 @@ def _delivery_requirements(value):
         elif isinstance(item, str):
             # Numbered headings/list markers describe presentation, not quantities.
             prose = re.sub(r'(?m)^\s*\d+[.)、]\s*', '', item)
+            prose = re.sub(r'(^|[\s：:；;])\d+[)）、](?=\s|[^\x00-\x7f])', r'\1', prose)
+            # Only host-known evidence references are identities. Invented
+            # artifact-like text retains its digits and cannot hide a claim.
+            prose = re.sub(r'\bartifact-[0-9a-f]{16}\b',
+                           lambda match: '' if match.group() in reference_ids else match.group(), prose)
             numerical |= bool(re.search(r'\d', prose))
     visit(value)
     return {'files': sorted(files), 'computation': numerical}
@@ -113,7 +118,7 @@ class ModelDeliveryEvaluator:
         self.on_update = on_update
 
     def snapshot(self):
-        return {'id': self.id, 'package_digest': self.package()['digest']}
+        return {'id': self.id, 'package_digest': self.package()['digest'], 'requirements_version': 2}
 
     @staticmethod
     def package():
@@ -126,7 +131,8 @@ class ModelDeliveryEvaluator:
         source = self.runtime.store.get(source_id)
         execution_view = deepcopy(execution_view)
         # A retry assesses execution evidence, not a previous evaluator's verdict.
-        previous_reviews = {s['id'] for s in self.runtime.store.list()
+        root_states = [s for s in self.runtime.store.list() if s['root_episode_id'] == source['root_episode_id']]
+        previous_reviews = {s['id'] for s in root_states
                             if s['root_episode_id'] == source['root_episode_id']
                             and s['package_digest'] == self.package()['digest']
                             and s['task'].get('context', {}).get('rsi_role') == 'delivery_evaluation'}
@@ -139,7 +145,10 @@ class ModelDeliveryEvaluator:
             names = [lease['name'] for lease in self.runtime.store.capability_leases(source_id, active_only=True)]
         capabilities = [tool['name'] for tool in self.runtime.tools.describe(names)
                         if tool['effect_class'] in {'read', 'local_compute'}]
-        requirements = _delivery_requirements(deliverables)
+        reference_ids = {artifact['id'] for state in root_states
+                         if state['id'] not in previous_reviews
+                         for artifact in self.runtime.store.artifacts(state['id'])}
+        requirements = _delivery_requirements(deliverables, reference_ids)
         requirements['computation'] |= any(
             call.get('status') == 'completed'
             and call.get('capability_descriptor', {}).get('effect_class') == 'local_compute'

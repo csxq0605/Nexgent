@@ -324,14 +324,22 @@ def execute(payload, context):
     projected_task = task_view(task)
     decision_prompt = task_prompt + '\\n\\n' + protocol
     max_decisions = 20
-    for step in range(max_decisions):
-        decision = context.ask(
-            'task_agent',
-            decision_prompt,
-            {'task': projected_task, 'history': history_view(history), 'step': step + 1,
-             'steps_remaining': max_decisions - step},
-            max_tokens=3000,
-        )
+    published_outputs = {}
+    pending_completion = None
+    for step in range(max_decisions + 1):
+        if step == max_decisions and pending_completion is None:
+            break
+        if pending_completion is not None:
+            decision = {'done': pending_completion}
+            pending_completion = None
+        else:
+            decision = context.ask(
+                'task_agent',
+                decision_prompt,
+                {'task': projected_task, 'history': history_view(history), 'step': step + 1,
+                 'steps_remaining': max_decisions - step},
+                max_tokens=3000,
+            )
         try:
             checked = context.call('agent/protocol.py:validate_decision', {'decision': decision})
         except Exception as error:
@@ -459,6 +467,18 @@ def execute(payload, context):
                 'ok': True, 'result': result,
             }
             history.append(observation)
+            if REVIEW_ON_PUBLICATION and action_method == 'publish':
+                declared = [item['name'] for item in task['deliverables']]
+                name = checked['request']['params'].get('name')
+                if name in declared and isinstance(result, dict) and isinstance(result.get('id'), str):
+                    published_outputs[name] = result['id']
+                    if all(item in published_outputs for item in declared):
+                        # Publication is a completion proposal, never acceptance.
+                        # The existing full artifact review may reject it and
+                        # return concrete repairs to the same decision loop.
+                        pending_completion = {'deliverables': published_outputs.copy(),
+                                              'summary': 'Published the declared task deliverables.',
+                                              'limitations': []}
             if context.call('agent/protocol.py:has_public_failure', {'result': result}):
                 trigger = event_view(observation, [6000])
                 recovery = context.skill('recover', {
@@ -692,6 +712,7 @@ Do not repeat a request that already succeeded. Follow `recovery_analysis` and `
 
 When task.context.agent is supplied, you are that delegated member. Follow its instructions for the assigned scope and publish your findings for the lead. Organize collaboration when distinct work or independent verification is needed: delegate a task with an agent {name,instructions}, objective, inputs or input_refs containing the actual shared evidence, and optionally a narrower capabilities list. Delegation returns episode_id, output_refs and outcome; read those actual output artifacts before synthesizing. Use parallel delegate requests for independent assignments. Members can perform tools and further delegation within the same host limits; a member is not just a one-call prompt. Do not delegate your entire objective recursively or create an unnecessary fixed cast of agents.
 When task.context.organization contains a member directory, reuse relevant members by setting task.agent to their registered name (a string). Their instructions come from the task's frozen package. You can still create an inline member for a missing responsibility. The directory does not require invoking every member or grant extra tools. Assignment objectives contain task-specific facts; reusable member instructions describe responsibilities and methods.
+Use task.context.delegation_scope to see your assignment and remaining delegation depth. An assigned member should perform its own scope directly; an independent checker is already that checker and must not delegate the same check again merely to make it independent. Further delegation needs genuinely distinct work and available depth. When the scope is complete, publish findings and return them to the lead; do not keep republishing the same result or create more members to perfect a completed assignment.
 
 Completion requires real artifact IDs returned by successful `publish` actions (or other host actions that return accessible artifact IDs). When publishing a named deliverable already declared in the task contract, omit `schema` or use the short `\"application/json\"` value; the host applies the declared schema, so do not repeat that schema in model output. Never place inline content where an artifact ID is required and never claim that an unexecuted action succeeded.
 """
@@ -773,10 +794,12 @@ Return a compact JSON object with `diagnosis`, `repairs`, and `next_action`. `re
 """
 
 
-def default_package():
+def default_package(*, review_on_publication=False):
     """Return the immutable general-purpose task package shipped by the core."""
+    if type(review_on_publication) is not bool:
+        raise ValueError('review_on_publication must be boolean')
     files = {
-        "agent/main.py": MAIN_SOURCE,
+        "agent/main.py": 'REVIEW_ON_PUBLICATION = ' + repr(review_on_publication) + '\n' + MAIN_SOURCE,
         "agent/protocol.py": PROTOCOL_SOURCE,
         "agent/actions.py": ACTIONS_SOURCE,
         "prompts/task.md": TASK_PROMPT,

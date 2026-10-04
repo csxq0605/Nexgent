@@ -519,6 +519,18 @@ class TaskService:
         from .members import member_inventory
         if not isinstance(context, dict):
             raise ContractError('Task context must be a JSON object')
+        depth, ancestor = 0, parent_episode_id
+        while ancestor is not None:
+            depth += 1
+            ancestor = self.store.get(ancestor)['parent_episode_id']
+        context['delegation_scope'] = {
+            'depth': depth, 'remaining_depth': max(0, 2 - depth),
+            'assignment': 'member' if parent_episode_id is not None else 'lead',
+            'instruction': ('Complete the assigned scope directly. You are already the assigned worker; '
+                            'do not delegate the same responsibility merely to make it independent. '
+                            'Further delegation is optional only for distinct work within remaining_depth.'
+                            if parent_episode_id is not None else
+                            'Choose distinct assignments when useful, read member outputs, then synthesize.')}
         context.pop('organization', None)
         members = member_inventory(package)
         if members:
@@ -3471,7 +3483,11 @@ class TaskService:
                 raise
             except Exception as exc:
                 unsettled = terminal_phase_receipt(phase_path, phase_digest)
-                if unsettled is not None and unsettled.get("status") == "started":
+                unknown_transport = (isinstance(exc, ModelTransportError)
+                                     and exc.diagnostics.get('connection_phase', 'unknown') in {
+                                         'unknown', 'request_write', 'response_read'})
+                if (unsettled is not None and (unsettled.get("status") == "started"
+                        or (unknown_transport and unsettled.get('billing_status') == 'unknown'))):
                     raise RecoveryRequired(
                         f"Model phase {phase_path} requires reconciliation; "
                         "automatic repetition refused") from exc

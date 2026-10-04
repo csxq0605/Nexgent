@@ -33,7 +33,7 @@ def framework_package(*, members=None):
     Naming the loop and instructions permits ordinary tool/service adoption
     and execution-strategy patches without replacing the task runner.
     """
-    seed = default_package()
+    seed = default_package(review_on_publication=True)
     manifest = deepcopy(seed['manifest'])
     manifest.update(manifest_version=2, roles={}, workflows={}, orchestrator='task-loop',
                     components={
