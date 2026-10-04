@@ -45,7 +45,8 @@ def json_object(content):
         result = {}
         for key, value in pairs:
             if key in result:
-                raise ValueError("Duplicate key")
+                raise ModelOutputFormatError("Provider JSON object contains a duplicate key",
+                                             code="duplicate_object_key")
             result[key] = value
         return result
     def nonfinite(value):

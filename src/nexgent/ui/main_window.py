@@ -219,6 +219,7 @@ class MainWindow(QMainWindow):
         project_label = QLabel(f"项目\n{self.project_root}")
         project_label.setObjectName("Muted")
         project_label.setWordWrap(True)
+        project_label.setMaximumWidth(220)
         side.addWidget(project_label)
         splitter.addWidget(sidebar)
 
@@ -244,7 +245,7 @@ class MainWindow(QMainWindow):
         composer_label.setObjectName("Muted")
         main.addWidget(composer_label)
         self.composer = QPlainTextEdit()
-        self.composer.setPlaceholderText("例如：比较这两份设计，给出有证据的建议；或运行一个 benchmark 任务。")
+        self.composer.setPlaceholderText("描述你要完成的任务，也可以添加资料文件；结果不合适时，在这里填写反馈。")
         self.composer.setMaximumHeight(105)
         self.composer.installEventFilter(self)
         main.addWidget(self.composer)
@@ -254,6 +255,8 @@ class MainWindow(QMainWindow):
         self.send_button.clicked.connect(self.send_message)
         self.stop_button = QPushButton("停止并保存")
         self.stop_button.clicked.connect(self.stop_running)
+        self.continue_button = QPushButton("继续完成")
+        self.continue_button.clicked.connect(lambda: self._start(self.selected_id) if self.selected_id else None)
         self.advanced_button = QPushButton("打开高级控制台")
         self.advanced_button.clicked.connect(self.open_advanced)
         self.export_button = QPushButton("导出成果")
@@ -262,17 +265,21 @@ class MainWindow(QMainWindow):
         self.attach_button.clicked.connect(self.attach_inputs)
         self.feedback_button = QPushButton("保存反馈")
         self.feedback_button.clicked.connect(self.save_feedback)
-        self.learn_button = QPushButton("根据反馈再执行")
+        self.learn_button = QPushButton("按反馈重做")
         self.learn_button.clicked.connect(self.learn_selected)
         controls.addWidget(self.attach_button)
         controls.addWidget(self.send_button)
         controls.addWidget(self.stop_button)
-        controls.addWidget(self.feedback_button)
-        controls.addWidget(self.learn_button)
+        controls.addWidget(self.continue_button)
         controls.addStretch()
-        controls.addWidget(self.advanced_button)
-        controls.addWidget(self.export_button)
         main.addLayout(controls)
+        followup_controls = QHBoxLayout()
+        followup_controls.addWidget(self.feedback_button)
+        followup_controls.addWidget(self.learn_button)
+        followup_controls.addStretch()
+        followup_controls.addWidget(self.advanced_button)
+        followup_controls.addWidget(self.export_button)
+        main.addLayout(followup_controls)
         self.error_label = QLabel()
         self.error_label.setStyleSheet("color:#98421c;background:#fff0e6;padding:7px;border-radius:6px;")
         self.error_label.setWordWrap(True)
@@ -329,6 +336,23 @@ class MainWindow(QMainWindow):
         self.attach_button.setEnabled(not busy and hasattr(self.service, 'attach_files'))
         self.feedback_button.setEnabled(not busy and delivered and hasattr(self.service, 'feedback'))
         self.learn_button.setEnabled(not busy and delivered and hasattr(self.service, 'learn'))
+        self.continue_button.setEnabled(not busy and self._can_continue(self._selected_state or {}))
+
+    def _can_continue(self, state):
+        return (state.get('status') in {'ready', 'paused', 'failed', 'waiting_input'}
+                or (isinstance(self.service, Nexgent) and state.get('status') == 'completed'
+                    and (state.get('evaluation') or {}).get('accepted') is not True
+                    and not state.get('delivery_revision_evaluated')))
+
+    def _status(self, state):
+        if isinstance(self.service, Nexgent) and state.get('status') == 'completed':
+            accepted = (state.get('evaluation') or {}).get('accepted')
+            if accepted is True:
+                return '已完成 · 验收通过'
+            if accepted is False:
+                return '已有成果 · 需修正'
+            return '已有成果 · 待验收'
+        return task_status(state)
 
     def refresh_tasks(self):
         try:
@@ -343,7 +367,7 @@ class MainWindow(QMainWindow):
                     if not isinstance(identity, str):
                         continue
                     objective = (state.get("task") or {}).get("objective", identity)
-                    item = QListWidgetItem(f"{str(objective)[:54]}\n{task_status(state)}")
+                    item = QListWidgetItem(f"{str(objective)[:54]}\n{self._status(state)}")
                     item.setData(Qt.ItemDataRole.UserRole, identity)
                     self.task_list.addItem(item)
                     if identity == selected:
@@ -411,7 +435,9 @@ class MainWindow(QMainWindow):
                                                '任务文件 (*.xlsx *.csv *.txt *.md *.json)')
         if paths:
             try:
-                self.attachments = self.service.attach_files(paths)
+                attached = {item['path']: item for item in self.attachments}
+                attached.update({item['path']: item for item in self.service.attach_files(paths)})
+                self.attachments = list(attached.values())
                 self.attach_button.setText(f'已添加 {len(self.attachments)} 个文件')
             except Exception as exc:
                 self._error(str(exc))
@@ -476,10 +502,12 @@ class MainWindow(QMainWindow):
         self._render(state)
         if not preserve_conversation:
             self.conversation_id = state.get('task', {}).get('context', {}).get('conversation_id', uuid.uuid4().hex)
+            self.attachments = deepcopy(state.get('task', {}).get('inputs', {}).get('attachments', []))
+            self.attach_button.setText(f'对话资料 {len(self.attachments)} 个' if self.attachments else '添加文件')
             objective = (state.get("task") or {}).get("objective", episode_id)
             self.messages.clear()
             self._append("user", objective, color="#214a39")
-            status = task_status(state)
+            status = self._status(state)
             self._append("main", f"已保存的任务。状态：{status}")
             outcome = state.get("outcome") or {}
             if outcome:
@@ -499,7 +527,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._error(f"读取 Episode 失败：{exc}")
             return
-        if state.get("status") not in {"ready", "paused", "failed", "waiting_input"}:
+        if not self._can_continue(state):
             self._render(state)
             return
         self.worker = TaskWorker(self.service, episode_id, self)
@@ -565,9 +593,13 @@ class MainWindow(QMainWindow):
             if isinstance(event, dict):
                 kind = event.get("kind", "event")
                 content = event.get("content") or {}
-                if kind in {'episode_started', 'episode_finished', 'delivery_evaluation_started', 'benchmark_evaluated', 'tool'}:
+                if kind in {'episode_started', 'episode_finished', 'delivery_evaluation_started', 'benchmark_evaluated',
+                            'delivery_revision_started', 'delivery_revision_finished', 'delivery_revision_stopped', 'tool'}:
                     label = {'episode_started': '开始执行', 'episode_finished': '执行已结束',
                              'delivery_evaluation_started': '正在独立评价', 'benchmark_evaluated': '独立评价已完成',
+                             'delivery_revision_started': '验收未通过，正在修正成果',
+                             'delivery_revision_finished': '修正成果已重新验收',
+                             'delivery_revision_stopped': '修正已保存，可继续完成',
                              'tool': '执行工具'}[kind]
                     self._append('system', label + (' · ' + str(content['name']) if content.get('name') else ''), color='#6c7c72')
         self._event_counts[state["id"]] = len(events)
@@ -585,7 +617,7 @@ class MainWindow(QMainWindow):
             if self.selected_id:
                 state = self.service.get(self.selected_id)
                 self._render(state)
-                self._append("main", f"Episode 已停止或完成：{task_status(state)}")
+                self._append("main", f"当前结果：{self._status(state)}")
         except Exception as exc:
             self._error(f"读取最终状态失败：{exc}")
         self.refresh_tasks()
@@ -601,7 +633,7 @@ class MainWindow(QMainWindow):
 
     def _render(self, state):
         self._selected_state = deepcopy(state)
-        status = task_status(state)
+        status = self._status(state)
         self.status_label.setText(status)
         nodes = state.get("nodes") or {}
         node_rows = []
@@ -627,19 +659,26 @@ class MainWindow(QMainWindow):
         if superseded:
             run_text.append(f"另有 {superseded} 条已替代的内部步骤，详见高级控制台。")
         if usage_rows:
-            run_text.extend(["", "资源用量", "\n".join(usage_rows)])
+            run_text.extend(["", "任务总用量（执行、修正与独立评价）", "\n".join(usage_rows)])
+        if state.get('task', {}).get('inputs', {}).get('attachments'):
+            run_text.extend(['', '对话资料', '\n'.join(item['name'] for item in state['task']['inputs']['attachments'])])
         if state.get("last_error"):
             run_text.extend(["", "最近错误", _brief(state["last_error"], 400)])
         self.run_view.setPlainText("\n".join(run_text))
         outcome = state.get("outcome") or {}
         acceptance = outcome.get("acceptance_status", "not_tested")
+        final_artifacts = [a for a in state.get('artifacts', [])
+                           if a.get('id') in state.get('output_refs', {}).values() and 'content' in a]
+        final_content = '\n\n'.join(
+            a['content'] if isinstance(a['content'], str) else _json(a['content'])
+            for a in final_artifacts)
         self.delivery_view.setPlainText("\n".join([
             f"交付：{outcome.get('delivery_status', '未记录')}",
             f"验收：{ACCEPTANCE.get(acceptance, acceptance)}", "",
             "摘要", _brief(outcome.get("summary")), "",
-            "输出", _list_summary(state.get("output_refs"), "暂无输出引用"), "",
-            "工件", _list_summary(state.get("artifacts"), "暂无交付工件"), "",
+            "成果", final_content or "暂无成果", "",
             "限制", _list_summary(outcome.get("limitations"), "未记录限制"),
+            "", "独立评价反馈", _brief((state.get('evaluation') or {}).get('feedback'), 1200),
         ]))
         calls = state.get("calls") or []
         events = state.get("events") or []

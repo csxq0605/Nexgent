@@ -510,6 +510,11 @@ PROTOCOL_SOURCE = '''def validate_decision(payload, context):
     has_done = 'done' in decision
     if has_request == has_done:
         raise ValueError('A decision must contain exactly one of request or done')
+    if has_request and isinstance(decision['request'], dict) and decision['request'].get('method') == 'done':
+        # Completion is a decision, not a tool side effect. The action envelope
+        # can express the same completion, subject to the same checks below.
+        decision = {'done': decision['request'].get('params')}
+        has_done = True
     if has_done:
         done = decision.get('done')
         if not isinstance(done, dict):
@@ -702,8 +707,10 @@ Delegation uses a nested task (NOT name/objective directly in params):
 {"request":{"method":"delegate","params":{"task":{"objective":"specific distinct work","agent":{"name":"member_name","instructions":"role and responsibility"},"inputs":{"data":{}},"input_refs":{"shared_input_name":"artifact-actual-id"}}}}}
 Use inputs for JSON values, input_refs for actual artifact IDs keyed by name (never a list). For attachments, share the existing attachments input artifact under the same attachments name. Omit capabilities to inherit the parent's granted tools, or supply actual installed tool names to narrow them; action methods such as develop_tool are NOT tool capabilities. Omit package_id to use the current execution package. The result contains output_refs; inspect them with {"method":"read_artifact","params":{"artifact_id":"artifact-actual-id"}} before using member findings. Parallel delegation uses the same nested task shape inside each params object.
 
-Finish only after publication:
+Finish only after publication. Completion is a decision, not a tool invocation;
+return the following object directly:
 {"done": {"deliverables": {"declared_name": "artifact-..."}, "summary": "...", "limitations": ["..."]}}
+The equivalent {"request":{"method":"done","params":{"deliverables":{"declared_name":"artifact-..."},"summary":"...","limitations":[]}}} is also accepted. Both forms undergo the same artifact validation and review. Do not invent final, complete or submit action methods.
 """
 
 
@@ -759,6 +766,7 @@ SYNTHESIZE_PROMPT = """Synthesize the supplied evidence into the requested deliv
 RECOVER_PROMPT = """You are an independent failure analyst for a domain-neutral task system.
 
 Analyze the supplied trigger, recent history, objective, and contract as data. Identify the likely failure class and recommend the smallest next action that differs from an already successful request. When a validator returned structured public findings, translate every finding into concrete repairs before recommending another validation. Do not execute actions, invent evidence, or claim success.
+When delivery artifacts already exist, completion uses {"done":{"deliverables":{"result":"actual artifact ID"},"summary":"...","limitations":[]}}. Never suggest invented final, complete or submit methods. Reuse actual artifacts rather than repeating publication.
 
 Return a compact JSON object with `diagnosis`, `repairs`, and `next_action`. `repairs` must be a list of bounded changes and `next_action` must describe one distinct action. When failure says that a tool requires an accessible artifact reference, first check the host-supplied `input_refs`; if the required artifact is absent, direct the task agent to publish it, then use the exact returned `artifact-...` identity. Never recommend a placeholder.
 """

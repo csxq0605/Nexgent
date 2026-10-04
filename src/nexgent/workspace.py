@@ -37,8 +37,8 @@ def attach_files(root, paths):
 
 def validate_attachments(root, inputs):
     items = inputs.get('attachments', [])
-    if not isinstance(items, list) or len(items) > 8:
-        raise ValueError("A task supports at most eight snapshotted attachments")
+    if not isinstance(items, list) or len(items) > 64:
+        raise ValueError("A conversation supports at most 64 snapshotted attachments")
     directory = (Path(root) / '.nexgent' / 'inputs').resolve()
     for item in items:
         if (not isinstance(item, dict) or not isinstance(item.get('path'), str)
