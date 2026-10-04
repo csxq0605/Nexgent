@@ -20,12 +20,14 @@ Python SDK 复用同一个通用任务运行时，执行程序、工具提供者
   工具或由候选修改评价提示。用户反馈、交付和对话跨进程保留。
 - 普通任务独立验收拒绝后自动修正一次并重新验收；执行、修正、评价共用任务预算。
   评价暂时不可用时保留成果，Main 可“继续完成”；附件和原资料可在重启后继续使用。
-- 已配置的跨任务改进复用既有 AutoEvolution 和门控发布；下一任务读取当前
-  部署版本。未配置时明确显示，不会把按反馈重跑当成发布或进化。
+- 默认跨任务改进使用真实项目任务和用户反馈，复用既有 AutoEvolution 和门控发布；
+  一个不同且验收通过的历史任务作为回归检查，历史不足时等待，不发起模型改进。
+  发布后新任务加载当前版本；Main 可查看提案、门控、实际采用和独立费用，也可关闭。
 
 ```powershell
 nexgent --root ./my-project run "完成任务" --attach ./material.json
 nexgent --root ./my-project feedback EPISODE_ID "反馈内容"
+nexgent --root ./my-project improve --advance
 nexgent --root ./my-project learn EPISODE_ID
 nexgent-gui --project ./my-project
 ```
@@ -45,7 +47,8 @@ result = agent.run(task["id"])
 
 任务与成员开发的工具、服务和执行策略候选复用同一套门控。宿主 Python 应用已从
 普通 Main 跑通成员工具发布及新进程复用；服务发布和独立拒绝回退通过集成验证。
-真实模型在默认策略下自主走完整轮仍未验证通过；广泛宿主插件、记忆和改进策略
+默认项目已无需编写 benchmark JSON 来启动改进。历史回归只提供开发证据，
+不会据此声称泛化或净收益；真实模型发布并复用仍需单独验证。广泛宿主插件、记忆和改进策略
 自身的修改也未完成。下一步集中推进这些框架能力，不继续围绕组织 demo 调优。
 实际接口与限制见[通用框架入口](docs/framework-runtime.md)。
 

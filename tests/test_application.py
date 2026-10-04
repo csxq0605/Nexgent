@@ -142,7 +142,9 @@ def test_feedback_and_conversation_survive_restart_and_learning_cannot_deploy(tm
     replay = restarted.learn(initial['id'])
     assert replay['task']['context']['learning_source_id'] == initial['id']
     assert restarted.evolution.active(restarted.main_channel)['revision'] == 0
-    assert restarted.advance(replay['id'])['configured'] is False
+    assert restarted.advance(replay['id'])['configured'] is True
+    assert restarted.improvement_status()['items'][0]['reason'] == 'waiting_for_distinct_completed_task'
+    assert restarted.evolution.active(restarted.main_channel)['revision'] == 0
 
 
 def test_workspace_provider_writes_and_reads_actual_output_without_special_executor(tmp_path):

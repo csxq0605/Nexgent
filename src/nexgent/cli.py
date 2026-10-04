@@ -529,6 +529,10 @@ def main(argv=None):
     feedback = sub.add_parser("feedback", help="Record user feedback on a delivered Main task for subsequent work and gated improvement")
     feedback.add_argument("run_id")
     feedback.add_argument("text")
+    improve = sub.add_parser('improve', help='Inspect or resume the ordinary project improvement workflow')
+    improve.add_argument('--advance', action='store_true', help='Run pending feedback through existing release gates')
+    improve.add_argument('--enable', choices=('on', 'off'), help='Persist the automatic improvement setting')
+    improve.add_argument('--model-root', type=Path)
     resume = sub.add_parser("run-resume", help="Resume an unfinished Main task, reusing completed member work")
     resume.add_argument("run_id")
     resume.add_argument("--model-root", type=Path)
@@ -820,6 +824,15 @@ def main(argv=None):
         if args.organization_demo:
             gui_args.append('--organization-demo')
         return gui_main(gui_args)
+    if args.command == 'improve':
+        from .application import Nexgent
+        service = Nexgent(args.root, model_root=args.model_root)
+        if args.enable is not None:
+            service.set_auto_improve(args.enable == 'on')
+        if args.advance:
+            service.advance(stop_event=_stop_event())
+        print(json.dumps(service.improvement_status(), ensure_ascii=False, indent=2), flush=True)
+        return 0
     if args.command == "feedback":
         if args.run_id.startswith('episode-'):
             from .application import Nexgent

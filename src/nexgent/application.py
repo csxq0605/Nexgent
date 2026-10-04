@@ -85,6 +85,10 @@ class Nexgent(TaskService):
             if package is not None and self.evolution.active(self.main_channel)['package_digest'] != package['digest']:
                 raise ValueError('The channel already owns another package; use a new channel or gated evolution')
         self.auto_evolution = configure_auto_evolution(self)
+        from .project_improvement import configure_project_improvement, load_enabled
+        if self.auto_evolution is None:
+            self.auto_evolution = configure_project_improvement(self)
+        self.auto_improve_enabled = load_enabled(self)
         if config and not channel and single_auto_channel(self.auto_evolution) is None:
             raise ValueError('Main requires default_channel when several evolution policies are configured')
 
@@ -168,6 +172,9 @@ class Nexgent(TaskService):
     def run(self, identity, on_update=None, stop_event=None):
         result = super().run(identity, on_update, stop_event)
         state = self.store.get(identity)
+        if (state['task'].get('context', {}).get('rsi_role')
+                or self.store.benchmark_registration(identity) is not None):
+            return result
         if (state['task'].get('context', {}).get('entry_surface') == 'main'
                 and not state['parent_episode_id'] and result['status'] == 'completed'
                 and (state.get('evaluation') or {}).get('accepted') is None
@@ -291,6 +298,8 @@ class Nexgent(TaskService):
             raise ValueError('Feedback requires a delivered task')
         record = {'episode_id': identity, 'text': text.strip(), 'created': time.time()}
         self.store.event(identity, 'user_feedback', record)
+        if self.auto_evolution is not None:
+            self.auto_evolution.observe_terminal(identity)
         return record
 
     def learn(self, identity):
@@ -313,5 +322,16 @@ class Nexgent(TaskService):
 
     def advance(self, identity=None, *, stop_event=None):
         from .tasks.auto_runtime import advance_auto_evolution
+        if not self.auto_improve_enabled:
+            return {'configured': self.auto_evolution is not None, 'enabled': False,
+                    'rounds': 0, 'work': []}
         return advance_auto_evolution(self.auto_evolution, source_episode_id=identity,
                                       stop_event=stop_event)
+
+    def improvement_status(self, identity=None):
+        from .project_improvement import improvement_status
+        return improvement_status(self, identity)
+
+    def set_auto_improve(self, enabled):
+        from .project_improvement import save_enabled
+        save_enabled(self, enabled)

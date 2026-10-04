@@ -1005,6 +1005,10 @@ class AutoEvolutionService:
             raise ContractError("Independent evaluator is unavailable") from exc
         if getattr(adapter, "id", None) != evaluator_id:
             raise ContractError("Independent evaluator identity changed")
+        # Product adapters may bind a frozen historical suite to this work.
+        # Installed static benchmarks continue to use their original adapter.
+        if callable(getattr(adapter, 'for_work', None)):
+            adapter = adapter.for_work(work)
         snapshot = _finite_json(adapter.snapshot(), "Independent evaluator snapshot")
         frozen = ((work.get("evolution") or {}).get("selection_intent") or {}).get(
             "snapshot_digest")
@@ -1054,6 +1058,8 @@ class AutoEvolutionService:
             evolution, _ = self._services()
             try:
                 adapter, snapshot = self._adapter(work)
+                if callable(getattr(adapter, 'with_stop_event', None)):
+                    adapter = adapter.with_stop_event(stop_event)
             except ContractError:
                 return self._defer(work, "independent_evaluator_unavailable_or_changed")
             candidate_id = work["candidate"]["candidate_id"]
@@ -1076,6 +1082,7 @@ class AutoEvolutionService:
                         candidate_id, adapter, split=intent["split"],
                         split_role="selection", seed=intent["seed"],
                         budget=deepcopy(work["policy"]["budget"]),
+                        capability_authority=deepcopy(getattr(self, 'capability_authority', None)),
                         policy=PromotionPolicy(**work["policy"]["promotion_policy"]))
                 except ContractError:
                     return self._defer(work, "selection_plan_rejected")
@@ -1148,7 +1155,8 @@ class AutoEvolutionService:
                     plan = evolution.plan_monitor(
                         candidate_id, adapter, split=intent["split"],
                         seed=intent["seed"],
-                        budget=deepcopy(work["policy"]["budget"]))
+                        budget=deepcopy(work["policy"]["budget"]),
+                        capability_authority=deepcopy(getattr(self, 'capability_authority', None)))
                 except ContractError:
                     return self._defer(work, "guard_plan_rejected")
                 except Exception:

@@ -15,7 +15,9 @@ from copy import deepcopy
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -56,6 +58,11 @@ QTabBar::tab { padding:9px 11px; color:#667b66; }
 QTabBar::tab:selected { color:#234d37; border-bottom:2px solid #628d60; }
 QTabWidget::pane { border:0; }
 """
+
+class DeliveryDocument(QTextDocument):
+    def loadResource(self, resource_type, url):
+        return None
+
 
 class AutoEvolutionWorker(QThread):
     result = pyqtSignal(dict)
@@ -163,6 +170,10 @@ class MainWindow(QMainWindow):
         self.resize(1440, 900)
         self.setStyleSheet(MAIN_STYLE)
         self._build()
+        self._improvement_timer = QTimer(self)
+        self._improvement_timer.setInterval(2000)
+        self._improvement_timer.timeout.connect(self._refresh_improvement_progress)
+        self._improvement_timer.start()
         self.refresh_tasks()
         self._welcome()
         if (self._auto_evolution is not None
@@ -184,6 +195,9 @@ class MainWindow(QMainWindow):
         self._recovery_worker = None
         if worker is not None:
             worker.deleteLater()
+        if self.selected_id:
+            self._render(self.service.get(self.selected_id))
+        self._buttons()
         if self._close_when_finished and self.worker is None:
             self.close()
 
@@ -214,6 +228,7 @@ class MainWindow(QMainWindow):
         side.addWidget(QLabel("最近任务"))
         self.task_list = QListWidget()
         self.task_list.setObjectName("TaskHistory")
+        self.task_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.task_list.currentItemChanged.connect(self._selection_changed)
         side.addWidget(self.task_list, 1)
         project_label = QLabel(f"项目\n{self.project_root}")
@@ -221,6 +236,19 @@ class MainWindow(QMainWindow):
         project_label.setWordWrap(True)
         project_label.setMaximumWidth(220)
         side.addWidget(project_label)
+        if isinstance(self.service, Nexgent):
+            self.improve_toggle = QCheckBox('自动改进后续任务')
+            self.improve_toggle.setChecked(self.service.auto_improve_enabled)
+            self.improve_toggle.setToolTip('保存反馈、验收失败或新能力会触发改进。历史回归验证通过后发布；可随时关闭。')
+            self.improve_toggle.toggled.connect(self._toggle_improve)
+            side.addWidget(self.improve_toggle)
+            from ..project_improvement import ProjectEvolution
+            if isinstance(self.service.auto_evolution, ProjectEvolution):
+                cost_notice = QLabel('改进独立计费：每个提案最多 60 次模型调用、200000 输出 tokens；历史不足时等待。')
+                cost_notice.setObjectName('Muted')
+                cost_notice.setWordWrap(True)
+                cost_notice.setMaximumWidth(220)
+                side.addWidget(cost_notice)
         splitter.addWidget(sidebar)
 
         center = QWidget()
@@ -291,9 +319,11 @@ class MainWindow(QMainWindow):
         self.run_view = self._reader()
         self.delivery_view = self._reader()
         self.evidence_view = self._reader()
+        self.improvement_view = self._reader()
         inspector.addTab(self.run_view, "运行")
         inspector.addTab(self.delivery_view, "成果")
         inspector.addTab(self.evidence_view, "证据")
+        inspector.addTab(self.improvement_view, '改进')
         splitter.addWidget(inspector)
         splitter.setSizes([240, 760, 360])
         self._buttons()
@@ -317,9 +347,26 @@ class MainWindow(QMainWindow):
     def _append(self, role: str, content: str, *, color: str = "#243c37"):
         label = {"user": "你", "main": "Nexgent · Main", "system": "运行记录"}.get(role, role)
         safe = html.escape(str(content)).replace("\n", "<br>")
-        self.messages.append(
-            f"<p style='margin:12px 8px;color:{color}'><b>{html.escape(label)}</b><br>{safe}</p>"
+        if role == 'main':
+            # Reuse Qt's Markdown renderer. Model text cannot load images or
+            # navigate the result pane to another document.
+            from bs4 import BeautifulSoup
+            document = DeliveryDocument()
+            document.setDefaultFont(self.messages.font())
+            document.setMarkdown(str(content), QTextDocument.MarkdownFeature.MarkdownNoHTML)
+            parsed = BeautifulSoup(document.toHtml(), 'html.parser')
+            for img in parsed.find_all('img'):
+                img.decompose()
+            for anchor in parsed.find_all('a'):
+                anchor.unwrap()
+            safe = parsed.body.decode_contents()
+        cursor = self.messages.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+        cursor.insertHtml(
+            f"<div style='margin:12px 8px;color:{color}'><p><b>{html.escape(label)}</b></p>{safe}</div>"
         )
+        self.messages.setTextCursor(cursor)
         scrollbar = self.messages.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
@@ -328,9 +375,12 @@ class MainWindow(QMainWindow):
         self.error_label.setVisible(bool(message))
 
     def _buttons(self):
-        busy = self.worker is not None
+        busy = self.worker is not None or self._recovery_worker is not None
         self.send_button.setEnabled(not busy)
-        self.stop_button.setEnabled(busy and not self.worker.stop_event.is_set() if busy else False)
+        active_worker = self.worker or self._recovery_worker
+        self.stop_button.setEnabled(busy and not active_worker.stop_event.is_set() if busy else False)
+        if hasattr(self, 'improve_toggle'):
+            self.improve_toggle.setEnabled(not busy)
         self.export_button.setEnabled(bool(self.selected_id))
         delivered = bool((self._selected_state or {}).get('output_refs'))
         self.attach_button.setEnabled(not busy and hasattr(self.service, 'attach_files'))
@@ -368,6 +418,7 @@ class MainWindow(QMainWindow):
                         continue
                     objective = (state.get("task") or {}).get("objective", identity)
                     item = QListWidgetItem(f"{str(objective)[:54]}\n{self._status(state)}")
+                    item.setToolTip(str(objective))
                     item.setData(Qt.ItemDataRole.UserRole, identity)
                     self.task_list.addItem(item)
                     if identity == selected:
@@ -451,6 +502,9 @@ class MainWindow(QMainWindow):
             self.service.feedback(self.selected_id, text)
             self.composer.clear()
             self._append('user', '反馈：' + text)
+            if isinstance(self.service, Nexgent) and self.service.auto_improve_enabled:
+                self._start_recovery()
+                self._buttons()
         except Exception as exc:
             self._error(str(exc))
 
@@ -556,8 +610,8 @@ class MainWindow(QMainWindow):
             self.status_label.setText("任务已结束；正在检查改进证据")
 
     def _auto_result(self, result):
-        if result.get('rounds') == 0:
-            return
+        if self.selected_id and isinstance(self.service, Nexgent):
+            self._render(self.service.get(self.selected_id))
         work = [row for row in result.get("work") or [] if row.get("channel")]
         if not work:
             return
@@ -626,6 +680,9 @@ class MainWindow(QMainWindow):
             self.close()
 
     def stop_running(self):
+        if self._recovery_worker is not None:
+            self._recovery_worker.stop_event.set()
+            self.status_label.setText('正在停止并保存改进')
         if self.worker is not None:
             self.worker.stop_event.set()
             self.status_label.setText("正在停止并保存")
@@ -694,7 +751,67 @@ class MainWindow(QMainWindow):
             "最近事件", "\n".join(f"• {name}" for name in event_names) if event_names else "暂无事件", "",
             "完整收据和原始字段请在高级控制台查看，或导出该 Episode。",
         ]))
+        self._render_improvement()
         self._buttons()
+
+    def _render_improvement(self):
+        if not isinstance(self.service, Nexgent):
+            self.improvement_view.setPlainText('此执行器未连接产品改进流程。')
+            return
+        status = self.service.improvement_status()
+        labels = {'observed': '等待回归任务', 'no_change': '无需修改',
+                  'completed': '已发布', 'rejected': '未通过门控',
+                  'rolled_back': '已回滚', 'deferred': '暂缓'}
+        reasons = {'waiting_for_distinct_completed_task': '需要另一个不同且验收通过的真实任务作为回归检查',
+                   'independent_selection_rejected': '改善幅度、成功率、实际加载或费用未达到发布条件',
+                   'candidate_generation_rejected': '本轮提案没有形成可运行的策略修改，保留当前版本',
+                   'parent_revision_changed': '已有新版本，旧提案不再发布'}
+        usage = status['usage']
+        lines = ['自动改进：' + ('开启' if status['enabled'] else '关闭'),
+                 f"当前任务策略版本：{status['active_revision']}",
+                 '根据真实任务和反馈提出修改，经历史任务回归门控后用于后续任务。',
+                 '历史回归属于开发证据，不代表未见任务上的泛化提升。', '',
+                 f"改进费用：模型 {usage['model_calls']} 次 · 工具 {usage['tool_calls']} 次",
+                 f"已报告 tokens：{usage['known_total_tokens']}" + ('' if usage['usage_complete'] else '（部分用量缺失）'), '']
+        for item in status['items'][-12:]:
+            lines.append(labels.get(item['status'], '验证中') + ' · ' + item['source_objective'][:80])
+            if item['reason'] and item['status'] != 'no_change':
+                lines.append(reasons.get(item['reason'], item['reason']))
+            proposal = item['proposal'] or {}
+            if proposal.get('reason'):
+                lines.append(_brief(proposal['reason'], 300))
+            if proposal.get('hypothesis'):
+                lines.append('修改目标：' + _brief(proposal['hypothesis']['expected_behavior'], 240))
+            selection = item.get('selection') or {}
+            if selection:
+                measures = selection['measurements']
+                lines.append(f"配对评分：原版本 {measures['parent']['quality']} → 候选 {measures['candidate']['quality']}")
+                gate_names = {'quality': '质量提升', 'success_rate': '成功率', 'cost': '费用',
+                              'regressions': '无退化', 'behavior_activated': '实际加载',
+                              'candidate_completed': '交付通过', 'measurement_complete': '证据完整',
+                              'selection_role': '配对检查'}
+                failed = [gate_names.get(key, key) for key, passed in selection['gates'].items() if not passed]
+                lines.append('门控：' + ('未通过 ' + '、'.join(failed) if failed else '全部通过'))
+            if item['promotion']:
+                lines.append(f"发布版本：{item['promotion']['revision']}")
+                lines.append(f"后续实际采用：{len(item['reuse_episode_ids'])} 个任务")
+            lines.append('')
+        if not status['items']:
+            lines.append('尚无改进提案。保存反馈、验收失败或生成新能力后会触发。')
+        self.improvement_view.setPlainText('\n'.join(lines))
+
+    def _refresh_improvement_progress(self):
+        if isinstance(self.service, Nexgent) and (self.worker is not None or self._recovery_worker is not None):
+            self._render_improvement()
+            if self._recovery_worker is not None:
+                self.status_label.setText('正在检查后续任务的改进')
+
+    def _toggle_improve(self, enabled):
+        self.service.set_auto_improve(enabled)
+        self._render_improvement()
+        if enabled:
+            self._start_recovery()
+            self._buttons()
 
     def open_advanced(self):
         from .tasks_window import TaskWindow

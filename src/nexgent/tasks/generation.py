@@ -825,6 +825,32 @@ class GenerationService:
                 "artifacts": [_artifact_ref(artifact) for artifact in artifacts],
                 "outcome_digest": digest(episode.get("outcome")),
             })
+            # Main's explicit human feedback is development input. Keep private
+            # benchmark reports and agent-authored feedback on their old projection.
+            if (task.get('context', {}).get('entry_surface') == 'main'
+                    and not episode.get('parent_episode_id')
+                    and self.store.benchmark_registration(identity) is None):
+                episode_refs[-1]['user_feedback'] = [
+                    {'text': event['content']['text'][:3000], 'event_digest': event['digest']}
+                    for event in events if event['kind'] == 'user_feedback'
+                    and isinstance(event['content'], dict)
+                    and isinstance(event['content'].get('text'), str)][-8:]
+                report = episode.get('evaluation') or {}
+                review_id = report.get('evaluation_episode_id')
+                if review_id:
+                    from ..delivery import ModelDeliveryEvaluator
+                    review = self.store.get(review_id)
+                    if (review['parent_episode_id'] == identity
+                            and review['package_digest'] == ModelDeliveryEvaluator.package()['digest']
+                            and review['task']['context'].get('rsi_role') == 'delivery_evaluation'):
+                        # User-facing delivery feedback is developmental evidence.
+                        # Private benchmark adapter diagnostics remain excluded.
+                        episode_refs[-1]['delivery_feedback'] = {
+                            'text': str(report.get('feedback') or '')[:3000],
+                            'checks': [{'requirement': str(check.get('requirement') or '')[:500],
+                                        'passed': check['passed']}
+                                       for check in report.get('checks', [])[:16]
+                                       if isinstance(check, dict) and type(check.get('passed')) is bool]}
 
         body = {"schema": FEEDBACK_SCHEMA, "channel": channel,
                 "channel_revision": active["revision"],

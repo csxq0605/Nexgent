@@ -1,0 +1,301 @@
+"""Default product composition: learn from real tasks, gate against frozen replays.
+
+These are developmental project regressions, never unseen benchmark evidence.
+The executor, improver, candidate release and rollback are the existing services.
+"""
+from copy import deepcopy
+import json
+
+from .delivery import ModelDeliveryEvaluator
+from .tasks.benchmarks import BenchmarkDescriptor
+from .tasks.feedback_trigger import AutoEvolutionService
+from .tasks.improvers import ImproverService, active_improver_registration
+from .tasks.improver_seed import default_improver_package
+from .tasks.tools import ContractError
+
+
+REPLAY_ID = 'nexgent.project-regression'
+IMPROVER_CHANNEL = 'nexgent-project-improver-v2'
+# At most five roots: planner, generator, two selection arms, one guard.
+PHASE_BUDGET = {'max_model_calls': 12, 'max_completion_tokens': 40000,
+                'max_tool_calls': 12, 'max_tool_work_units': 200000, 'max_nodes': 100}
+
+
+def ordinary(state):
+    task = state['task']
+    return (not state['parent_episode_id']
+            and task.get('context', {}).get('entry_surface') == 'main'
+            and not task.get('context', {}).get('rsi_role'))
+
+
+def task_unit(state, store):
+    """Correction/replay of one user request is one historical task, not new data."""
+    seen = set()
+    while state['id'] not in seen:
+        seen.add(state['id'])
+        source_id = state['task'].get('context', {}).get('learning_source_id')
+        if not source_id:
+            return state['id']
+        state = store.get(source_id)
+    raise ContractError('Cyclic learning history cannot be a regression unit')
+
+
+class ProjectRegression:
+    id = REPLAY_ID
+    descriptor = BenchmarkDescriptor(
+        id=REPLAY_ID, version='1', title='Real project task regressions',
+        splits=('development', 'selection', 'guard'), default_split='development',
+        evidence_scope='Frozen historical task replays; development evidence only')
+
+    def __init__(self, runtime, suite=None):
+        self.runtime, self.suite = runtime, suite
+        self.stop_event = None
+
+    def with_stop_event(self, stop_event):
+        self.stop_event = stop_event
+        return self
+
+    def describe(self):
+        return self.descriptor.as_dict()
+
+    def snapshot(self):
+        return {'id': self.id, 'version': '1',
+                'evaluator': ModelDeliveryEvaluator(self.runtime).snapshot(),
+                'suite': deepcopy(self.suite)}
+
+    def history(self, source):
+        unit = task_unit(source, self.runtime.store)
+        registration = source['task']['context']['package_channel_registration']
+        candidates = []
+        seen = {unit}
+        for state in reversed(self.runtime.store.list()):
+            reg = state['task'].get('context', {}).get('package_channel_registration', {})
+            if (not ordinary(state) or state['status'] != 'completed'
+                    or reg.get('channel') != registration['channel']
+                    or reg.get('revision') != registration['revision']
+                    or (state.get('evaluation') or {}).get('accepted') is not True
+                    or self.runtime.store.benchmark_registration(state['id']) is not None
+                    or task_unit(state, self.runtime.store) in seen):
+                continue
+            # Identical requests are not independent regression cases either.
+            if (state['task']['objective'] == source['task']['objective']
+                    and state['task']['inputs'] == source['task']['inputs']):
+                continue
+            seen.add(task_unit(state, self.runtime.store))
+            candidates.append(state)
+        return candidates
+
+    def ready(self, work):
+        source = self.runtime.store.get(work['source_episode_id'])
+        if not self.history(source):
+            return False, 'waiting_for_distinct_completed_task'
+        return True, None
+
+    def _case(self, state, *, feedback=False):
+        task = deepcopy(state['task'])
+        context = task['context']
+        context.pop('package_channel_registration', None)
+        context.pop('memory_binding_registration', None)
+        context.pop('entry_surface', None)
+        context.update(rsi_role='project_regression', memory_writeback=False)
+        if feedback:
+            context['learning_feedback'] = self.runtime.feedback_items(state['id'])
+        # The original frozen input/context matters; never inject later conversation.
+        return {key: task[key] for key in
+                ('objective', 'inputs', 'context', 'constraints', 'deliverables', 'capabilities')} | {
+                    'id': 'project:' + state['id']}
+
+    def for_work(self, work):
+        """Freeze once as an existing host artifact; reuse it after restart."""
+        source_id = work['source_episode_id']
+        name = 'project-regression-' + work['id']
+        for artifact in self.runtime.store.artifacts(source_id):
+            if (artifact.get('name') == name
+                    and artifact['producer'].get('node_id') is None
+                    and artifact['producer'].get('attempt_id') is None):
+                return ProjectRegression(self.runtime, artifact['content'])
+        source = self.runtime.store.get(source_id)
+        history = self.history(source)
+        if not history:
+            raise ContractError('A distinct completed task is needed for regression guard')
+        suite = {'source_episode_id': source_id, 'development': [self._case(source, feedback=True)],
+                 'selection': [self._case(source, feedback=True)],
+                 'guard': [self._case(history[0])],
+                 'scope': 'Historical project regression; selection reuses development task'}
+        self.runtime.store.publish(source_id, suite, name=name)
+        return ProjectRegression(self.runtime, suite)
+
+    def tasks(self, split='development', seed=0, **options):
+        if self.suite is None or split not in ('development', 'selection', 'guard'):
+            raise ContractError('Project regressions require a frozen work-specific suite')
+        return deepcopy(self.suite[split])
+
+    def evaluate(self, task_ref, deliverables, execution_view):
+        return ModelDeliveryEvaluator(self.runtime, self.stop_event).evaluate(task_ref, deliverables, execution_view)
+
+
+class ProjectEvolution(AutoEvolutionService):
+    """Default admission avoids spending on every successful delivery."""
+    @staticmethod
+    def _mutation_policy(parent):
+        policy = AutoEvolutionService._mutation_policy(parent)
+        if policy is not None and policy.get('patch_contract') == 'nexgent.package-patch.v3':
+            # Start with the mature single-component replacement contract.
+            # Explicit project policies retain multi-component graph evolution.
+            return {'mutable_components': policy['mutable_components'],
+                    'allowed_operations': ['replace'], 'max_patch_bytes': 300000}
+        return policy
+
+    @classmethod
+    def _orchestration_mutation_policy(cls, parent):
+        # Default composition does not schedule multi-attempt graph search.
+        return None
+
+    def observe_terminal(self, episode_id):
+        state = self.store.get(episode_id)
+        if not ordinary(state):
+            return None
+        if self.store.benchmark_registration(episode_id) is not None:
+            return None
+        registration = self._registration(state)
+        if state['status'] in {'completed', 'failed', 'cancelled'}:
+            self._record_reuse(state, registration)
+        # Explicit zero model budget must never launch separately funded model work.
+        if state['budget']['max_model_calls'] == 0 or state['budget']['max_completion_tokens'] == 0:
+            return None
+        feedback = self.tasks.feedback_items(episode_id)
+        failed = ((state.get('evaluation') or {}).get('accepted') is False
+                  or state['status'] == 'failed')
+        creators = self._feedback_episode_ids({'source_episode_id': episode_id})
+        with self.store.connect() as db:
+            developed = db.execute('SELECT 1 FROM task_capability_definitions '
+                                   'WHERE origin_episode IN (' + ','.join('?' for _ in creators)
+                                   + ') LIMIT 1', tuple(creators)).fetchone()
+        if not feedback and not failed and not developed:
+            return None
+        return super().observe_terminal(episode_id)
+
+    def _process_locked(self, identity):
+        work = self.store.feedback_trigger(identity)
+        if work['status'] == 'observed':
+            adapter = self.tasks._benchmark_registry().get(REPLAY_ID)
+            if not adapter.ready(work)[0]:
+                return work  # Remains pending; new real tasks can make it runnable.
+            adapter.for_work(work)
+        return super()._process_locked(identity)
+
+
+def configure_project_improvement(runtime):
+    runtime.benchmark_adapters[REPLAY_ID] = ProjectRegression(runtime)
+    improvers = ImproverService(runtime)
+    try:
+        registration = active_improver_registration(runtime.store, IMPROVER_CHANNEL)
+    except KeyError:
+        improvers.register(IMPROVER_CHANNEL, default_improver_package(),
+                          {'mutable_paths': ['improver.py'], 'allowed_operations': ['replace']})
+        registration = active_improver_registration(runtime.store, IMPROVER_CHANNEL)
+    trigger = ProjectEvolution(runtime, policies={runtime.main_channel: {
+        'evaluator_id': REPLAY_ID,
+        'candidate_types': ['orchestration', 'tool', 'service_provider', 'no_change'],
+        'budget': deepcopy(PHASE_BUDGET),
+        'improver': {key: registration[key] for key in
+                     ('channel', 'revision', 'package_id', 'package_digest')},
+        'promotion_policy': {'min_quality_delta': 0.1, 'min_success_rate': 1,
+                             'max_cost_ratio': 1.25, 'max_regressions': 0,
+                             'monitor_min_score': 7, 'monitor_min_success_rate': 1}}})
+    trigger.default_channel = runtime.main_channel
+    from .application import MAIN_CAPABILITY_AUTHORITY
+    trigger.capability_authority = deepcopy(MAIN_CAPABILITY_AUTHORITY)
+    return trigger
+
+
+def improvement_status(runtime, identity=None):
+    """Project existing records into product state, with disjoint root costs."""
+    enabled = runtime.auto_improve_enabled
+    rows = runtime.store.feedback_triggers(limit=256)
+    rows = [r for r in rows if r.get('channel_id') == runtime.main_channel]
+    roots, items = set(), []
+    for row in rows:
+        if identity and row['source_episode_id'] != identity:
+            continue
+        evolution = row.get('evolution') or {}
+        reason = row.get('reason')
+        if row['status'] == 'observed' and isinstance(runtime.auto_evolution, ProjectEvolution):
+            reason = runtime.benchmark_adapters[REPLAY_ID].ready(row)[1]
+        plan = row.get('development_plan') or {}
+        detail = None
+        if plan.get('artifact_id'):
+            episode_id = row['development_episode']['id']
+            detail = runtime.store.read(plan['artifact_id'], episode_id)['content']
+        episode_id = (row.get('development_episode') or {}).get('id')
+        if episode_id:
+            roots.add(runtime.store.get(episode_id)['root_episode_id'])
+        generation_id = (row.get('candidate') or {}).get('generation_id')
+        if generation_id:
+            generated = runtime.auto_evolution._services()[1].generation(generation_id)
+            if generated.get('episode_id'):
+                roots.add(runtime.store.get(generated['episode_id'])['root_episode_id'])
+        selection = evolution.get('selection_trial') or {}
+        if selection.get('id'):
+            trial = runtime.evolution.trial(selection['id'])
+            roots.update(p[arm]['episode_id'] for p in trial['pairs'] for arm in ('parent', 'candidate'))
+        roots.update((evolution.get('guard_run') or {}).get('episode_ids') or [])
+        decision_ref = evolution.get('selection_decision') or {}
+        selection_report = None
+        if decision_ref.get('id'):
+            decision = runtime.evolution.decision(decision_ref['id'])
+            selection_report = {key: deepcopy(decision[key]) for key in ('gates', 'measurements')}
+        items.append({'id': row['id'], 'source_episode_id': row['source_episode_id'],
+                      'source_objective': runtime.store.get(row['source_episode_id'])['task']['objective'],
+                      'status': row['status'], 'reason': reason,
+                      'proposal': deepcopy(detail), 'promotion': deepcopy(evolution.get('promotion')),
+                      'selection': selection_report,
+                      'reuse_episode_ids': [r['episode_id'] for r in row.get('reuse_observed', [])]})
+    # Include already admitted roots even if the process stopped before storing a phase result.
+    work_ids = {item['id'] for item in items}
+    bundle_ids = {row['feedback_bundle']['id'] for row in rows
+                  if row['id'] in work_ids and row.get('feedback_bundle')}
+    selection_ids = {(row.get('evolution', {}).get('selection_plan') or {}).get('id')
+                     for row in rows if row['id'] in work_ids}
+    guard_ids = {(row.get('evolution', {}).get('guard_plan') or {}).get('id')
+                 for row in rows if row['id'] in work_ids}
+    for state in runtime.store.list():
+        context = state['task'].get('context', {})
+        registration = context.get('evolution_registration') or {}
+        monitor = context.get('monitoring_registration') or {}
+        if (context.get('feedback_work_id') in work_ids
+                or context.get('feedback_bundle_id') in bundle_ids
+                or (registration.get('plan_id') is not None and registration['plan_id'] in selection_ids)
+                or (monitor.get('monitor_plan_id') is not None and monitor['monitor_plan_id'] in guard_ids)):
+            roots.add(state['root_episode_id'])
+    usages = [runtime.store.usage(root) for root in sorted(roots)]
+    usage = {key: sum(u.get(key, 0) for u in usages)
+             for key in ('model_calls', 'tool_calls', 'charged_completion_tokens')}
+    usage['known_total_tokens'] = sum(u['known_usage']['total_tokens'] for u in usages)
+    usage['usage_complete'] = all(u['usage_complete'] for u in usages)
+    return {'enabled': enabled, 'configured': runtime.auto_evolution is not None,
+            'mode': 'project_regression' if isinstance(runtime.auto_evolution, ProjectEvolution) else 'configured',
+            'active_revision': runtime.evolution.active(runtime.main_channel)['revision'],
+            'items': items, 'usage': usage, 'root_episode_ids': sorted(roots),
+            'phase_budget': deepcopy(PHASE_BUDGET) if isinstance(runtime.auto_evolution, ProjectEvolution) else None}
+
+
+def load_enabled(runtime):
+    path = runtime.project_root / '.nexgent' / 'product-settings.json'
+    if not path.is_file():
+        return True
+    value = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(value, dict) or type(value.get('auto_improve')) is not bool:
+        raise ValueError('Invalid product improvement setting')
+    return value['auto_improve']
+
+
+def save_enabled(runtime, enabled):
+    if type(enabled) is not bool:
+        raise ValueError('auto_improve must be boolean')
+    path = runtime.project_root / '.nexgent' / 'product-settings.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix('.tmp')
+    temp.write_text(json.dumps({'auto_improve': enabled}), encoding='utf-8')
+    temp.replace(path)
+    runtime.auto_improve_enabled = enabled

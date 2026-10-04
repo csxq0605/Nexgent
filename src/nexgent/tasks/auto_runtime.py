@@ -134,6 +134,8 @@ def advance_auto_evolution(trigger, *, source_episode_id=None, rounds=16,
     """
     if trigger is None:
         return {"configured": False, "rounds": 0, "work": []}
+    if getattr(getattr(trigger, 'tasks', None), 'auto_improve_enabled', True) is False:
+        return {'configured': True, 'enabled': False, 'rounds': 0, 'work': []}
     if (type(rounds) is not int or not 1 <= rounds <= 64
             or type(limit) is not int or not 1 <= limit <= 32):
         raise ValueError("Auto-evolution bounds are invalid")
