@@ -195,6 +195,7 @@ class PromotionPolicy:
     max_regressions: int = 0
     monitor_min_score: float = 0.0
     monitor_min_success_rate: float = 1.0
+    min_cost_reduction: float | None = None
 
     def __post_init__(self):
         finite = (self.min_quality_delta, self.min_success_rate, self.max_cost_ratio,
@@ -206,6 +207,17 @@ class PromotionPolicy:
                 or self.max_cost_ratio < 0 or self.max_absolute_cost_when_parent_zero < 0
                 or type(self.max_regressions) is not int or self.max_regressions < 0):
             raise ValueError("Invalid promotion policy")
+        if (self.min_cost_reduction is not None
+                and (type(self.min_cost_reduction) not in {int, float}
+                     or not math.isfinite(self.min_cost_reduction)
+                     or not 0 < self.min_cost_reduction < 1)):
+            raise ValueError('Cost improvement requires a strict reduction between zero and one')
+
+    def as_dict(self):
+        result = asdict(self)
+        if self.min_cost_reduction is None:
+            result.pop('min_cost_reduction')
+        return result
 
 
 class EvolutionService:
@@ -992,7 +1004,7 @@ class EvolutionService:
                        authority["digest"] if authority is not None else None),
                    "cost_projection": cost_projection_spec(),
                    "outcome_policy": outcome_policy(),
-                   "policy": asdict(policy), "policy_digest": digest(asdict(policy)),
+                   "policy": policy.as_dict(), "policy_digest": digest(policy.as_dict()),
                   "created_at": time.time()}
         result = self._insert("task_evolution_plans", record)
         self._event(candidate["channel"], "paired_trial_planned",
@@ -1118,7 +1130,7 @@ class EvolutionService:
         """Record an independent, deterministic promotion decision."""
         trial = self.trial(trial_id)
         policy = PromotionPolicy(**trial["policy"])
-        if digest(asdict(policy)) != trial.get("policy_digest"):
+        if digest(policy.as_dict()) != trial.get("policy_digest"):
             raise ContractError("Paired trial promotion policy identity mismatch")
         with self.store.connect() as db:
             existing = db.execute("SELECT data,digest FROM task_evolution_decisions").fetchall()
@@ -1274,6 +1286,12 @@ class EvolutionService:
                    if parent["cost"] == 0 else proposed["cost"] <= parent["cost"] * policy.max_cost_ratio)
         quality_ok = (parent["quality"] is not None and proposed["quality"] is not None
                       and proposed["quality"] >= parent["quality"] + policy.min_quality_delta)
+        quality_preserved = (parent['quality'] is not None and proposed['quality'] is not None
+                             and proposed['quality'] >= parent['quality'])
+        efficiency_ok = (policy.min_cost_reduction is not None and quality_preserved
+                         and parent['cost'] > 0
+                         and proposed['cost'] <= parent['cost'] * (1 - policy.min_cost_reduction))
+        quality_gain = quality_ok and quality_preserved and proposed['quality'] > parent['quality']
         gates = {"selection_role": trial.get("split_role") == "selection",
                  "measurement_complete": not failure_reasons,
                  "quality": quality_ok,
@@ -1282,16 +1300,21 @@ class EvolutionService:
                  "cost": cost_ok, "regressions": regressions <= policy.max_regressions,
                  "candidate_completed": proposed["all_accepted"],
                  "behavior_activated": behavior_activated}
+        if policy.min_cost_reduction is not None:
+            gates['quality'] = quality_preserved
+            gates['improvement'] = quality_gain or efficiency_ok
         record = {"id": _id("decision"), "trial_id": trial_id,
                   "candidate_id": trial["candidate_id"], "channel": trial["channel"],
                   "component_id": candidate.get("component_id"),
                   "component_target": deepcopy(candidate.get("component_target")),
                   "loaded_evidence": activation_rows,
-                  "policy": asdict(policy), "measurements": {"parent": parent, "candidate": proposed,
+                  "policy": policy.as_dict(), "measurements": {"parent": parent, "candidate": proposed,
                                                                "regressions": regressions,
                                                                "paired_task_deltas": deltas,
                                                                "failure_reasons": failure_reasons},
                   "gates": gates, "eligible": all(gates.values()), "created_at": time.time()}
+        if policy.min_cost_reduction is not None:
+            record['improvement_basis'] = ('quality' if quality_gain else 'efficiency' if efficiency_ok else None)
         result = self._insert("task_evolution_decisions", record)
         self._event(trial["channel"], "promotion_assessed",
                     {"decision_id": record["id"], "trial_id": trial_id,

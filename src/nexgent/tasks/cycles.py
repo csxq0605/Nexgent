@@ -9,7 +9,6 @@ only frozen intent, state-machine progress, and references to that evidence.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict
 import json
 import re
 import time
@@ -258,7 +257,7 @@ class RSICycleService:
                           "seed": selection_seed,
                           "budget": _copy(selection_budget, "Selection budget"),
                           "options": _copy(selection_options or {}, "Selection options"),
-                          "policy": asdict(policy)},
+                          "policy": policy.as_dict()},
             "guard": {**guard, "split": "guard", "seed": guard_seed,
                       "budget": _copy(guard_budget, "Guard budget"),
                       "options": _copy(guard_options or {}, "Guard options"),

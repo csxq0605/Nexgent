@@ -834,11 +834,13 @@ class MainWindow(QMainWindow):
                  '历史回归属于开发证据，不代表未见任务上的泛化提升。', '',
                  f"改进费用：模型 {usage['model_calls']} 次 · 工具 {usage['tool_calls']} 次",
                  f"已报告 tokens：{usage['known_total_tokens']}" + ('' if usage['usage_complete'] else '（部分用量缺失）'), '']
-        for item in status['items'][-12:]:
+        for item in reversed(status['items'][-12:]):
             lines.append(labels.get(item['status'], '验证中') + ' · ' + item['source_objective'][:80])
             if item['reason'] and item['status'] != 'no_change':
                 lines.append(reasons.get(item['reason'], item['reason']))
             proposal = item['proposal'] or {}
+            if item.get('learning_from'):
+                lines.append(f"本轮参考此前 {len(item['learning_from'])} 次改进的实际结果")
             if proposal.get('reason'):
                 lines.append(_brief(proposal['reason'], 300))
             if proposal.get('hypothesis'):
@@ -858,9 +860,14 @@ class MainWindow(QMainWindow):
                 measures = selection['measurements']
                 lines.append(f"配对评分：原版本 {measures['parent']['quality']} → 候选 {measures['candidate']['quality']}")
                 gate_names = {'quality': '质量提升', 'success_rate': '成功率', 'cost': '费用',
+                              'improvement': '质量或效率改善',
                               'regressions': '无退化', 'behavior_activated': '实际加载',
                               'candidate_completed': '交付通过', 'measurement_complete': '证据完整',
                               'selection_role': '配对检查'}
+                if 'improvement' in selection['gates']:
+                    gate_names['quality'] = '质量不退化'
+                if selection.get('improvement_basis') == 'efficiency':
+                    lines.append('改善依据：保持质量并降低执行消耗')
                 failed = [gate_names.get(key, key) for key, passed in selection['gates'].items() if not passed]
                 lines.append('门控：' + ('未通过 ' + '、'.join(failed) if failed else '全部通过'))
             if item['promotion']:

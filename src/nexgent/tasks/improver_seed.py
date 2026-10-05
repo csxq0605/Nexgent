@@ -9,6 +9,14 @@ IMPROVER_SOURCE = '''def execute(payload, context):
     refs = payload.get('input_refs', {})
     feedback = context.read_artifact(refs.get('feedback_bundle'))['content']
     options = context.read_artifact(refs.get('candidate_options'))['content']
+    experience = []
+    criteria = {}
+    if 'release_criteria' in refs:
+        criteria = context.read_artifact(refs['release_criteria'])['content']
+    if 'development_experience' in refs:
+        experience = context.read_artifact(refs['development_experience'])['content']
+        if not isinstance(experience, list) or len(experience) > 8 or len(str(experience)) > 24000:
+            raise ValueError('Development experience exceeds its public input bound')
     feedback_fields = set([
         'schema', 'id', 'digest', 'channel', 'channel_revision',
         'parent_package_id', 'parent_package_digest',
@@ -42,6 +50,8 @@ IMPROVER_SOURCE = '''def execute(payload, context):
                        context.resource('prompts/develop.md'), {
         'feedback_bundle': feedback,
         'candidate_options': allowed,
+        'development_experience': experience,
+        'release_criteria': criteria,
     }, max_tokens=3000)
     fields = set(['schema', 'candidate_type', 'source_ref', 'hypothesis', 'reason'])
     if (not isinstance(plan, dict) or set(plan.keys()) != fields
@@ -78,6 +88,11 @@ def improve(payload, context):
     feedback = context.read_artifact(refs.get('feedback_bundle'))['content']
     components = context.read_artifact(refs.get('parent_components'))['content']
     policy = context.read_artifact(refs.get('mutation_policy'))['content']
+    development = None
+    if 'development_context' in refs:
+        development = context.read_artifact(refs['development_context'])['content']
+        if not isinstance(development, dict) or len(str(development)) > 65536:
+            raise ValueError('Development context exceeds its public input bound')
     repair = None
     if 'repair_context' in refs:
         repair = context.read_artifact(refs.get('repair_context'))['content']
@@ -145,6 +160,8 @@ def improve(payload, context):
         }
         if repair is not None:
             model_input['repair_context'] = repair
+        if development is not None:
+            model_input['development_context'] = development
         patch = context.ask('rsi_improver', context.resource('prompts/improve.md'),
                             model_input, max_tokens=6000)
         fields = set(['schema', 'hypothesis', 'operations', 'activation_probe'])
@@ -203,6 +220,8 @@ def improve(payload, context):
         }
         if repair is not None:
             model_input['repair_context'] = repair
+        if development is not None:
+            model_input['development_context'] = development
         patch = context.ask('rsi_improver', context.resource('prompts/improve.md'),
                             model_input, max_tokens=6000)
         if isinstance(patch, dict) and patch.get('schema') == 'nexgent.package-patch-proposal.v1':
@@ -306,6 +325,8 @@ def improve(payload, context):
     }
     if repair is not None:
         model_input['repair_context'] = repair
+    if development is not None:
+        model_input['development_context'] = development
     patch = context.ask('rsi_improver', prompt, model_input, max_tokens=6000)
     if (not isinstance(patch, dict)
             or set(patch.keys()) != set(['schema', 'hypothesis', 'operations', 'activation_probe'])
@@ -347,6 +368,19 @@ def improve(payload, context):
 
 
 DEVELOPMENT_PROMPT = """You are the development planner for a domain-neutral task-agent system.
+
+`development_experience` contains frozen public outcomes of earlier changes in
+this project: hypotheses, aggregate selection gates, rollout status and later
+use counts. Learn from rejections and rollbacks; identify a materially different
+mechanism or abstain when the evidence still does not justify a useful change.
+Do not infer hidden tasks or answers, weaken gates, or treat a prior promotion
+as proof of generalization. Current feedback and the installed parent remain
+the basis of this proposal.
+`release_criteria` is the host's frozen public policy, not something to modify.
+When it includes `min_cost_reduction`, a change may preserve quality while
+strictly reducing conservative execution work by that fraction. Other gates
+still apply. Prefer fewer redundant steps when supported by actual evidence;
+adding responsibilities must justify their additional work.
 
 The supplied FeedbackBundle is the complete bounded public evidence available
 from ordinary development Episodes. It contains no hidden evaluator answers.
@@ -405,6 +439,12 @@ data, permissions, or facts absent from the supplied public evidence.
 
 
 IMPROVER_PROMPT = """You are the reference improver for a domain-neutral task-agent system.
+
+When supplied, `development_context.plan` is the selected development hypothesis
+and reason. Implement that bounded plan rather than diagnosing an unrelated
+change. `development_context.experience` gives frozen public outcomes of prior
+changes. Use them to avoid repeating rejected mechanisms; they never authorize
+changing evaluation, gates or permissions and reveal no private trial tasks.
 
 The supplied FeedbackBundle contains bounded public evidence from development Episodes. It may include task objectives, status, public evaluation metrics, resource summaries, artifact identities, and a redacted execution trace. It never contains hidden evaluator answers. Parent components and the mutation policy are authoritative data.
 

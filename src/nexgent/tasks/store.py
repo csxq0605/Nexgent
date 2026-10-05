@@ -641,7 +641,8 @@ class EpisodeStore:
             options = development_intent.get("options") \
                 if isinstance(development_intent, dict) else None
             if (not isinstance(development_intent, dict)
-                    or set(development_intent) != required
+                    or not required <= set(development_intent)
+                    or set(development_intent) - required - {'experience'}
                     or not isinstance(bundle, dict) or set(bundle) != {"id", "digest"}
                     or any(not isinstance(value, str) or not value
                            for value in bundle.values())
@@ -666,6 +667,12 @@ class EpisodeStore:
                     or _digest(options)
                     != development_intent.get("options_digest")):
                 raise ValueError("Feedback development intent is invalid")
+            if 'experience' in development_intent:
+                experience = development_intent['experience']
+                if (not isinstance(experience, list) or len(experience) > 8
+                        or any(not isinstance(item, dict) for item in experience)
+                        or len(json.dumps(experience, ensure_ascii=False, allow_nan=False).encode('utf-8')) > 24_000):
+                    raise ValueError('Development experience must be bounded public outcomes')
         if development_episode is not None:
             required = {"id", "package_id", "package_digest"}
             if (not isinstance(development_episode, dict)

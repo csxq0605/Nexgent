@@ -15,7 +15,7 @@ from .tasks.tools import ContractError
 
 
 REPLAY_ID = 'nexgent.project-regression'
-IMPROVER_CHANNEL = 'nexgent-project-improver-v4'
+IMPROVER_CHANNEL = 'nexgent-project-improver-v6'
 # At most five roots: planner, generator, two selection arms, one guard.
 PHASE_BUDGET = {'max_model_calls': 40, 'max_completion_tokens': 160000,
                 'max_tool_calls': 20, 'max_tool_work_units': 200000, 'max_nodes': 100}
@@ -136,6 +136,60 @@ class ProjectRegression:
 
 class ProjectEvolution(AutoEvolutionService):
     """Default admission avoids spending on every successful delivery."""
+    def _development_experience(self, work):
+        # Reuse durable outcomes as development feedback, not a second memory
+        # database. Freeze this projection in the existing development intent.
+        with self.store.connect() as db:
+            recent = db.execute(
+                "SELECT id FROM task_feedback_outbox WHERE channel_id=? AND id<>? "
+                "AND status IN ('completed','rolled_back','no_change','rejected') "
+                "ORDER BY updated DESC,id DESC LIMIT 8",
+                (work['channel_id'], work['id'])).fetchall()
+        rows = [self.store.feedback_trigger(row[0]) for row in reversed(recent)]
+        experience = []
+        for row in rows:
+            plan = row.get('development_plan') or {}
+            proposal = {}
+            if plan.get('artifact_id'):
+                proposal = self.store.read(plan['artifact_id'], row['development_episode']['id'])['content']
+            item = {'work_id': row['id'], 'parent_revision': row['parent_revision'],
+                    'status': row['status'], 'reason': (row.get('reason') or '')[:200],
+                    'candidate_type': plan.get('candidate_type'), 'source_ref': plan.get('source_ref'),
+                    'hypothesis': {key: value[:500] for key, value in
+                                   (proposal.get('hypothesis') or {}).items()},
+                    'proposal_reason': proposal.get('reason', '')[:500]}
+            if row.get('feedback_bundle'):
+                with self.store.connect() as db:
+                    receipt = db.execute(
+                        "SELECT id FROM task_candidate_generations "
+                        "WHERE json_extract(data,'$.feedback_bundle_id')=? "
+                        "ORDER BY json_extract(data,'$.completed_at') DESC,id DESC LIMIT 1",
+                        (row['feedback_bundle']['id'],)).fetchone()
+                if receipt:
+                    generated = self._services()[1].generation(receipt[0])
+                    item['generation'] = {key: generated.get(key) for key in
+                                          ('status', 'reason_type', 'public_patch_error_code')}
+            evolution = row.get('evolution') or {}
+            decision = evolution.get('selection_decision') or {}
+            if decision.get('id'):
+                result = self._services()[0].decision(decision['id'])
+                measures = result['measurements']
+                item['selection'] = {
+                    'failed_gates': [key for key, passed in result['gates'].items() if not passed],
+                    'parent': {key: measures['parent'][key] for key in ('quality', 'success_rate', 'cost')},
+                    'candidate': {key: measures['candidate'][key] for key in ('quality', 'success_rate', 'cost')},
+                    'regressions': measures['regressions']}
+                if result.get('improvement_basis'):
+                    item['selection']['improvement_basis'] = result['improvement_basis']
+            guard = evolution.get('guard_assessment')
+            if guard:
+                item['guard'] = {key: guard[key] for key in ('degraded', 'rolled_back')}
+            item['later_use_count'] = len(row.get('reuse_observed', []))
+            experience.append(item)
+        while len(json.dumps(experience, ensure_ascii=False).encode('utf-8')) > 24_000:
+            experience.pop(0)
+        return experience
+
     def _feedback_event_digest(self, episode):
         source_episode_id = episode['id']
         registration = self._registration(episode) or {}
@@ -261,6 +315,7 @@ def configure_project_improvement(runtime):
                      ('channel', 'revision', 'package_id', 'package_digest')},
         'promotion_policy': {'min_quality_delta': 0.1, 'min_success_rate': 1,
                              'max_cost_ratio': 1.25, 'max_regressions': 0,
+                             'min_cost_reduction': 0.2,
                              'monitor_min_score': 7, 'monitor_min_success_rate': 1}}})
     trigger.default_channel = runtime.main_channel
     from .application import MAIN_CAPABILITY_AUTHORITY
@@ -310,11 +365,14 @@ def improvement_status(runtime, identity=None):
         if decision_ref.get('id'):
             decision = runtime.evolution.decision(decision_ref['id'])
             selection_report = {key: deepcopy(decision[key]) for key in ('gates', 'measurements')}
+            selection_report['improvement_basis'] = decision.get('improvement_basis')
         items.append({'id': row['id'], 'source_episode_id': row['source_episode_id'],
                       'source_objective': runtime.store.get(row['source_episode_id'])['task']['objective'],
                       'status': row['status'], 'reason': reason,
                       'proposal': deepcopy(detail), 'promotion': deepcopy(evolution.get('promotion')),
                       'organization_change': organization,
+                      'learning_from': [item['work_id'] for item in
+                                        (row.get('development_intent') or {}).get('experience', [])],
                       'selection': selection_report,
                       'reuse_episode_ids': [r['episode_id'] for r in row.get('reuse_observed', [])]})
     # Include already admitted roots even if the process stopped before storing a phase result.

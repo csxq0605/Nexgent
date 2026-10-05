@@ -21,7 +21,10 @@ from the supplied source identities. Return exactly {"members": [{"name":
 "strategy": "general guidance on choosing members, sharing evidence and synthesis"}.
 At most eight members; instructions at most 3000 characters, strategy at most
 2000 characters. Do not change the executor, permissions, evaluator or gates.
-Independent trials will decide whether this organization helps future work.'''
+Independent trials will decide whether this organization helps future work.
+Follow development_context.plan and consider its frozen prior experience and
+public release criteria. Strategy describes task cooperation; omit rollout or
+gate procedures, which the host owns separately.'''
 
 ORGANIZATION_PROMPT = '''Design a bounded change to the reusable organization from
 the supplied task evidence, independent feedback and explicit human feedback.
@@ -38,7 +41,12 @@ Instructions are nonempty and at most 3000 characters; strategy is nonempty and
 at most 2000 characters. Do not persist task-specific facts, answers, names or
 attachments. Do not change executor, tools, permissions, evaluator or gates.
 Creating a member does not prove it useful: independent trials must actually
-use each changed member and demonstrate improvement before release.'''
+use each changed member and demonstrate improvement before release.
+Follow development_context.plan and consider its frozen experience of earlier
+changes. Rejected and rolled-back changes are evidence to revise the approach,
+not permission to weaken gates or infer hidden evaluation tasks. The frozen
+public release criteria describe what counts as improvement. Strategy describes
+task cooperation; omit rollout or gate procedures, which the host owns separately.'''
 
 
 DESIGN_SOURCE = '''def execute(payload, context):
@@ -46,9 +54,11 @@ DESIGN_SOURCE = '''def execute(payload, context):
 
 def improve(payload, context):
     feedback = context.read_artifact(payload['input_refs']['feedback_bundle'])['content']
+    development = context.read_artifact(payload['input_refs']['development_context'])['content']
     design = context.ask('rsi_team_designer', context.resource('design.md'), {
         'completed_members': SOURCES, 'deployed_members': DIRECTORY,
         'editable_members': EDITABLE, 'feedback_bundle': feedback,
+        'development_context': development,
     }, max_tokens=5000)
     fields = ['members', 'remove', 'strategy'] if ORGANIZATION_CHANGE else ['members', 'strategy']
     minimum = 0 if ORGANIZATION_CHANGE else 1
@@ -198,4 +208,7 @@ def generate_team(tasks, evolution, generation, work, plan, stop_event=None, *, 
     policy['allow_remove'] = organization_change
     return generation.generate(work['channel_id'], feedback['id'], improver, policy,
                                work['parent_revision'], budget=deepcopy(work['policy']['budget']),
-                               stop_event=stop_event)
+                               stop_event=stop_event,
+                               development_context={'plan': deepcopy(plan),
+                                                    'experience': deepcopy((work.get('development_intent') or {}).get('experience', [])),
+                                                    'release_criteria': deepcopy(work['policy']['promotion_policy'])})

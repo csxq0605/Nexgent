@@ -35,6 +35,7 @@ _PROMOTION_KEYS = frozenset({
     "min_quality_delta", "min_success_rate", "max_cost_ratio",
     "max_absolute_cost_when_parent_zero", "max_regressions",
     "monitor_min_score", "monitor_min_success_rate",
+    "min_cost_reduction",
 })
 _SEARCH_BUDGET_KEYS = frozenset({
     "max_model_calls", "max_completion_tokens", "max_tool_calls", "max_nodes",
@@ -102,6 +103,8 @@ def _policy(value):
                 and (type(promotion["max_regressions"]) is not int
                      or promotion["max_regressions"] < 0))):
         raise ContractError("Feedback trigger promotion policy fields are invalid")
+    if ('min_cost_reduction' in promotion and not 0 < promotion['min_cost_reduction'] < 1):
+        raise ContractError('Feedback cost improvement must require a strict reduction')
     improver = value.get("improver")
     if improver is not None:
         improver_keys = {"channel", "revision", "package_id", "package_digest"}
@@ -473,6 +476,10 @@ class AutoEvolutionService:
             })
         return _finite_json(options, "Feedback development options", maximum=32_768)
 
+    def _development_experience(self, work):
+        """Public aggregate outcomes from prior work; never private trial tasks."""
+        return []
+
     @staticmethod
     def _mutation_policy(parent):
         """Derive a package-local O/S envelope without evaluator or permission state."""
@@ -666,7 +673,9 @@ class AutoEvolutionService:
         return self.tasks.create(
             "Select one task-agnostic candidate from bounded public task feedback",
             inputs={"feedback_bundle": public_feedback,
-                    "candidate_options": deepcopy(intent["options"])},
+                    "candidate_options": deepcopy(intent["options"]),
+                    "development_experience": deepcopy(intent.get("experience", [])),
+                    "release_criteria": deepcopy(work['policy']['promotion_policy'])},
             deliverables=[{"name": "development_plan",
                            "schema": self._plan_schema()}],
             budget=deepcopy(work["policy"]["budget"]), capabilities=[],
@@ -829,7 +838,10 @@ class AutoEvolutionService:
                 improver_channel=improver["channel"],
                 expected_improver_revision=improver["revision"],
                 budget=deepcopy(work["policy"]["budget"]),
-                stop_event=stop_event)
+                stop_event=stop_event,
+                development_context={"plan": deepcopy(plan),
+                                     "experience": deepcopy(work["development_intent"].get("experience", [])),
+                                     "release_criteria": deepcopy(work['policy']['promotion_policy'])})
         if plan["source_ref"] == "orchestration_search":
             return self._run_orchestration_search(work, stop_event=stop_event)
         raise ContractError("Feedback development plan has no supported dispatch")
@@ -884,6 +896,8 @@ class AutoEvolutionService:
                     "improver": registration,
                     "options": options,
                     "options_digest": digest(options),
+                    "experience": _finite_json(self._development_experience(work),
+                                               "Development experience", maximum=24_000),
                 }
                 work = self.store.transition_feedback_trigger(
                     work["id"], expected_revision=work["revision"],

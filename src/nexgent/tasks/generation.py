@@ -1187,10 +1187,15 @@ class GenerationService:
                  expected_improver_revision=None, budget=None, stop_event=None,
                  admission_check=None, memory_channel=None,
                  expected_memory_revision=None, search_attempt_id=None,
-                 repair_brief=None):
+                 repair_brief=None, development_context=None):
         """Execute ``improve`` and admit its valid child, or persist missing evidence."""
         if admission_check is not None and not callable(admission_check):
             raise TypeError("admission_check must be callable")
+        if development_context is not None:
+            development_context = _copy(development_context, "Development context")
+            if (not isinstance(development_context, dict)
+                    or len(json.dumps(development_context, ensure_ascii=False).encode('utf-8')) > 65_536):
+                raise ContractError("Development context requires a bounded JSON object")
         search_attempt_id, repair_context, repair_digest = _search_repair(
             search_attempt_id, repair_brief)
         feedback = self.feedback(feedback_bundle_id)
@@ -1296,6 +1301,8 @@ class GenerationService:
         if search_attempt_id is not None:
             base.update(search_attempt_id=search_attempt_id,
                         repair_digest=repair_digest)
+        if development_context is not None:
+            base['development_context_digest'] = digest(development_context)
         if policy["targeting"] == "manifest_component_set_v3":
             components = []
             for component_id in policy["package_patch_policy"]["mutable_components"]:
@@ -1351,6 +1358,8 @@ class GenerationService:
         inputs = {"feedback_bundle": feedback_input,
                   "parent_components": components,
                   "mutation_policy": policy}
+        if development_context is not None:
+            inputs['development_context'] = deepcopy(development_context)
         if repair_context is not None:
             inputs["repair_context"] = deepcopy(repair_context)
         if policy["targeting"] == "manifest_component_set_v3":
@@ -1379,6 +1388,8 @@ class GenerationService:
                 "improver_registration": improver_registration,
                 "mutation_policy_digest": base["mutation_policy_digest"],
                 "memory_parent_registration": memory_registration,
+                **({'development_context_digest': base['development_context_digest']}
+                   if development_context is not None else {}),
             })
             recovered = self._claim_search_attempt(
                 search_attempt_id, search_binding_digest, generation_id)
