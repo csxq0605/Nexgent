@@ -835,22 +835,40 @@ class GenerationService:
                     for event in events if event['kind'] == 'user_feedback'
                     and isinstance(event['content'], dict)
                     and isinstance(event['content'].get('text'), str)][-8:]
-                report = episode.get('evaluation') or {}
-                review_id = report.get('evaluation_episode_id')
-                if review_id:
-                    from ..delivery import ModelDeliveryEvaluator
+                history = []
+                from ..delivery import ModelDeliveryEvaluator
+                for event in events:
+                    if event['kind'] != 'benchmark_evaluated':
+                        continue
+                    report = event['content'].get('report') or {}
+                    snapshot = event['content'].get('snapshot') or {}
+                    review_id = report.get('evaluation_episode_id')
+                    if not review_id or snapshot.get('id') != ModelDeliveryEvaluator.id:
+                        continue
                     review = self.store.get(review_id)
-                    if (review['parent_episode_id'] == identity
-                            and review['package_digest'] == ModelDeliveryEvaluator.package()['digest']
-                            and review['task']['context'].get('rsi_role') == 'delivery_evaluation'):
-                        # User-facing delivery feedback is developmental evidence.
-                        # Private benchmark adapter diagnostics remain excluded.
-                        episode_refs[-1]['delivery_feedback'] = {
-                            'text': str(report.get('feedback') or '')[:3000],
-                            'checks': [{'requirement': str(check.get('requirement') or '')[:500],
-                                        'passed': check['passed']}
-                                       for check in report.get('checks', [])[:16]
-                                       if isinstance(check, dict) and type(check.get('passed')) is bool]}
+                    package = self.store.package(review['package_id'])
+                    if (review['parent_episode_id'] != identity
+                            or review['package_digest'] != snapshot.get('package_digest')
+                            or package.get('provenance', {}).get('origin') != 'nexgent.host-delivery-evaluator'
+                            or review['task']['context'].get('rsi_role') != 'delivery_evaluation'):
+                        continue
+                    # Match the recorded host snapshot, including prior grader
+                    # versions. An eventual correction must not erase rejection.
+                    history.append({
+                        'accepted': report.get('accepted'),
+                        'score': report.get('score'), 'evaluation_episode_id': review_id,
+                        'text': str(report.get('feedback') or '')[:3000],
+                        'checks': [{'requirement': str(check.get('requirement') or '')[:500],
+                                    'passed': check['passed']}
+                                   for check in report.get('checks', [])[:16]
+                                   if isinstance(check, dict) and type(check.get('passed')) is bool]})
+                if history:
+                    recent = history[-4:]
+                    rejected = next((report for report in reversed(history) if report['accepted'] is False), None)
+                    if rejected is not None and rejected not in recent:
+                        recent = [rejected] + recent[-3:]
+                    episode_refs[-1]['delivery_feedback_history'] = recent
+                    episode_refs[-1]['delivery_feedback'] = {key: history[-1][key] for key in ('text', 'checks')}
 
         body = {"schema": FEEDBACK_SCHEMA, "channel": channel,
                 "channel_revision": active["revision"],

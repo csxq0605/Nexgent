@@ -229,6 +229,7 @@ class ProjectEvolution(AutoEvolutionService):
                                        {**member, 'instructions': member['instructions'][:1000]} for member in members],
                                                 'scope': 'Generalize responsibilities and coordination; gate before reuse'}})
             if any(ref.get('user_feedback') or ((ref.get('evaluation') or {}).get('public_metrics') or {}).get('accepted') is False
+                   or any(review['accepted'] is False for review in ref.get('delivery_feedback_history', []))
                    or ref.get('status') in {'failed', 'cancelled'} for ref in feedback['episode_refs']):
                 from .tasks.members import member_inventory
                 options.insert(0, {'candidate_type': 'orchestration', 'source_ref': 'organization_design',
@@ -274,7 +275,10 @@ class ProjectEvolution(AutoEvolutionService):
             return None
         feedback = self.tasks.feedback_items(episode_id)
         failed = ((state.get('evaluation') or {}).get('accepted') is False
-                  or state['status'] == 'failed')
+                  or state['status'] == 'failed'
+                  or any(event['kind'] == 'benchmark_evaluated'
+                         and event['content'].get('report', {}).get('accepted') is False
+                         for event in self.store.events(episode_id)))
         creators = self._feedback_episode_ids({'source_episode_id': episode_id})
         with self.store.connect() as db:
             developed = db.execute('SELECT 1 FROM task_capability_definitions '

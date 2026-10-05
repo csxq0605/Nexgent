@@ -248,6 +248,10 @@ class Nexgent(TaskService):
                          and (result.get('evaluation') or {}).get('accepted') is not None))
                 and not (stop_event is not None and stop_event.is_set())):
             try:
+                # Capture final evaluation (including a rescued rejection) even
+                # when model improvement is paused. Re-enabling can process it.
+                if self.auto_evolution is not None:
+                    self.auto_evolution.observe_terminal(identity)
                 evolution = self.advance(identity, stop_event=stop_event)
             except Exception as exc:
                 # Optional improvement cannot discard task delivery. The
