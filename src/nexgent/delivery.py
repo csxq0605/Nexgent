@@ -94,6 +94,10 @@ def _delivery_requirements(value, reference_ids=()):
             # Numbered headings/list markers describe presentation, not quantities.
             prose = re.sub(r'(?m)^\s*\d+[.)、]\s*', '', item)
             prose = re.sub(r'(^|[\s：:；;])\d+[)）、](?=\s|[^\x00-\x7f])', r'\1', prose)
+            # References to labelled facts/steps are ordinals. Function
+            # arguments, quantities and bare numeric values remain claims.
+            prose = re.sub(r'(?i)((?:\b(?:fact|claim|step|item|point|requirement)|'
+                           r'事实|结论|步骤|条目|要点|要求)\s*)[（(]\d+[）)]', r'\1', prose)
             # Only host-known evidence references are identities. Invented
             # artifact-like text retains its digits and cannot hide a claim.
             prose = re.sub(r'\bartifact-[0-9a-f]{16}\b',
@@ -118,7 +122,7 @@ class ModelDeliveryEvaluator:
         self.on_update = on_update
 
     def snapshot(self):
-        return {'id': self.id, 'package_digest': self.package()['digest'], 'requirements_version': 2}
+        return {'id': self.id, 'package_digest': self.package()['digest'], 'requirements_version': 3}
 
     @staticmethod
     def package():

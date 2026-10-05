@@ -860,7 +860,10 @@ def test_private_benchmark_registration_has_no_package_visible_enumeration_or_di
     result = service.run(state["id"])
     visible = service.store.read(result["output_refs"]["result"], state["id"])["content"]["context"]
     encoded = json.dumps(visible, sort_keys=True)
-    assert visible == {"memory_namespace": "study", "split": "final_holdout"}
+    public_context = deepcopy(visible)
+    scope = public_context.pop('delegation_scope')
+    assert scope['depth'] == 0 and scope['remaining_depth'] == 2
+    assert public_context == {"memory_namespace": "study", "split": "final_holdout"}
     assert "benchmark_registration" not in encoded
     assert all(digest(candidate) not in encoded for candidate in candidates)
     stored_registration = service.store.benchmark_registration(state["id"])
@@ -916,11 +919,15 @@ def test_final_holdout_delegate_inherits_only_public_context_whitelist(tmp_path)
         "split_role": "final_holdout",
         "memory_writeback": False,
         "rsi_role": "confirmatory_holdout",
+        "assignment": {"parent_objective": "delegate final holdout", "instructions": ""},
     }
-    assert child["task"]["context"] == expected
+    public_context = deepcopy(child['task']['context'])
+    scope = public_context.pop('delegation_scope')
+    assert scope['depth'] == 1 and scope['remaining_depth'] == 1
+    assert public_context == expected
     assert service.store.benchmark_registration(child["id"]) is None
     delivered = service.store.read(result["output_refs"]["result"], parent["id"])["content"]
-    assert delivered["context"] == expected
+    assert delivered["context"] == child['task']['context']
     assert not ({"study_plan_id", "study_cell_id", "provider_requirement",
                  "model_requirement", "monitoring_registration",
                  "benchmark_registration_digest"} & set(delivered["context"]))

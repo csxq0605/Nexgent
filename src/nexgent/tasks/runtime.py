@@ -4097,6 +4097,15 @@ class TaskService:
                 task = deepcopy(params["task"])
                 target = package if params.get("package_id") is None else self.store.package(params["package_id"])
                 child_context = _delegated_public_context(state['task'].get('context'))
+                instructions = task.get('instructions')
+                if instructions is not None and (not isinstance(instructions, str)
+                                                or not instructions.strip() or len(instructions) > 20000):
+                    raise ContractError('Assignment instructions must be nonempty text of at most 20000 characters')
+                # A short assignment objective must not discard inline facts
+                # from the parent's goal or the supplied assignment brief.
+                # This is task data, not role instructions or tool authority.
+                child_context['assignment'] = {'parent_objective': state['task']['objective'],
+                                               'instructions': instructions or ''}
                 # A member is an ordinary delegated Episode with its own role
                 # and instructions. These instructions do not grant tools,
                 # alter evaluation identity or change memory boundaries.

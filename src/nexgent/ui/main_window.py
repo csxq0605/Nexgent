@@ -88,6 +88,27 @@ def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=lambda item: f"<{type(item).__name__}>")
 
 
+def _delivery_message(content):
+    """Present prose in the conversation; the result pane/export stays exact."""
+    value = content
+    if isinstance(content, str):
+        try:
+            value = json.loads(content)
+        except (ValueError, TypeError):
+            return content
+    if isinstance(value, dict):
+        for name in ('answer', 'explanation', 'text', 'content', 'summary'):
+            prose = value.get(name)
+            if isinstance(prose, str) and prose.strip():
+                if len(value) == 1:
+                    return prose
+                return prose + '\n\n完整结构化结果可在“成果”页查看或导出。'
+    # Scalar strings remain strings, including quoted prose encoded as JSON.
+    if isinstance(value, str):
+        return value
+    return '```json\n' + _json(value) + '\n```'
+
+
 def _brief(value, limit=180):
     if value is None:
         return "未记录"
@@ -586,7 +607,7 @@ class MainWindow(QMainWindow):
                 if artifacts:
                     for artifact in artifacts:
                         self._shown_outputs.add((state['id'], artifact['id']))
-                        self._append('main', artifact['content'] if isinstance(artifact['content'], str) else _json(artifact['content']))
+                        self._append('main', _delivery_message(artifact['content']))
                 else:
                     summary = outcome.get('summary') or outcome.get('delivery_status') or '已记录'
                     self._append('main', '交付摘要：' + _brief(summary, 320))
@@ -657,7 +678,7 @@ class MainWindow(QMainWindow):
                 if (artifact.get('id') in state.get('output_refs', {}).values()
                         and 'content' in artifact and key not in self._shown_outputs):
                     self._shown_outputs.add(key)
-                    self._append('main', artifact['content'] if isinstance(artifact['content'], str) else _json(artifact['content']))
+                    self._append('main', _delivery_message(artifact['content']))
         events = state.get("events") or []
         previous = self._event_counts.get(state["id"], 0)
         for event in events[previous:]:

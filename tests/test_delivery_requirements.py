@@ -2,6 +2,11 @@
 from nexgent.delivery import _delivery_requirements
 
 
+def test_fact_and_step_cross_references_are_ordinals_but_function_arguments_remain_claims():
+    assert _delivery_requirements('事实(2)与结论（1）不一致。 See fact(2), claim(1), step(3).')['computation'] is False
+    assert _delivery_requirements('f(2) = 5; sin(2) is positive')['computation'] is True
+
+
 def test_known_reference_and_inline_list_do_not_require_computation():
     ref = 'artifact-c3e1b0c5308b4641'
     text = f'分析（{ref}）：1) 离线编辑；2) 联网同步；3) 冲突保留双方版本。'
