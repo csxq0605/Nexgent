@@ -12,7 +12,7 @@ def request_params(base_url, model, messages, max_tokens):
               "max_completion_tokens": max_tokens}
     if (urlsplit(base_url).hostname in {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"}
             and (model.lower().startswith("mimo-v2.5")
-                 or model.lower() == "mimo-v2.6-flash")):
+                 or model.lower() in {"mimo-v2.6-flash", "mimo-v2.6-pro"})):
         # MiMo counts default thinking against this bound. Structured program
         # generation uses the budget for its JSON/source output instead.
         result["extra_body"] = {"thinking": {"type": "disabled"}}
@@ -46,6 +46,13 @@ def response_payload(response):
     reason, identity = getattr(choice, "finish_reason", None), getattr(response, "id", None)
     observed_model = getattr(response, "model", None)
     system_fingerprint = getattr(response, "system_fingerprint", None)
+    if (isinstance(content, str) and isinstance(observed_model, str)
+            and observed_model.lower() in {"mimo-v2.6-pro", "mimo-v2.6-flash"}):
+        # MiMo's OpenAI-compatible endpoint can expose literal transport EOS
+        # markers. They are outside the JSON message, not model task content.
+        content = content.rstrip()
+        while content.endswith("<|im_end|>"):
+            content = content[:-len("<|im_end|>")].rstrip()
     return {"content": content[:240001] if isinstance(content, str) else None,
             "finish_reason": reason[:100] if isinstance(reason, str) else None,
             "response_id": identity[:500] if isinstance(identity, str) else None,

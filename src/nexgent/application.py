@@ -80,7 +80,7 @@ class Nexgent(TaskService):
         if gateway_factory is None:
             gateway_factory = lambda reserve, stop: ModelGateway(
                 self.model_root, reserve=reserve, stop_event=stop,
-                timeout=90, max_completion_tokens=12000)
+                timeout=180, max_completion_tokens=12000)
         super().__init__(root, tools=tools if tools is not None else workspace_registry(root),
                          gateway_factory=gateway_factory)
         self.default_capabilities = [t['name'] for t in self.tools.describe()
@@ -160,9 +160,8 @@ class Nexgent(TaskService):
                     and options.get('benchmark_registration') is None
                     and not (context or {}).get('rsi_role'))
         if ordinary:
-            # Portable package tools charge their actual worker instructions.
-            # The legacy task API defaults to zero work units, which would
-            # prevent a newly adopted tool from running in the next task.
+            # Task-local and adopted tools use the same bounded worker meter.
+            # Explicit caller limits still take precedence over Main defaults.
             budget = deepcopy(budget or {})
             for name, value in MAIN_TASK_BUDGET.items():
                 budget.setdefault(name, value)

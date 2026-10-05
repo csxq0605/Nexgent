@@ -21,6 +21,9 @@ The host supplies verification_requirements. Satisfy them through actual tool
 calls before returning a verdict. Read each delivered file and independently
 recompute numerical claims; previous agent observations do not count as your checks.
 Your actions cannot satisfy an action the user required another agent to do.
+After successful independent verification, return an assessment unless a specific
+unresolved requirement needs a different check. Do not repeat a successful computation
+with the same inputs. Judge the requested task, not extra requirements you invent.
 
 Return {"tool":"installed name","arguments":{}} for one verification action,
 or {"status":"passed|failed","score_available":true,"score":0..10,
@@ -39,7 +42,10 @@ REVIEW_SOURCE = '''def execute(payload, context):
     effects = {tool['name']: tool['effect_class'] for tool in tools}
     requirements = evidence['verification_requirements']
     for step in range(5):
-        result = context.ask('evaluator', context.resource('review.md'), {
+        prompt = context.resource('review.md')
+        if step == 4:
+            prompt += '\\nVerification action budget is exhausted. Return the final assessment JSON now. Do not request another tool. Mark unmet requirements failed or unavailable; never invent checks.'
+        result = context.ask('evaluator', prompt, {
             'evidence': evidence, 'tools': tools if step < 4 else [],
             'verification_results': trace, 'remaining_tool_calls': 4 - step,
         }, max_tokens=2400)
@@ -189,6 +195,7 @@ class ModelDeliveryEvaluator:
                     'feedback': '独立验收未完成，成果已保留。可以继续验收；预算用尽时需重新执行任务。'}
         report = self.runtime.store.read(result['output_refs']['assessment'], state['id'])['content']
         report = validate_report(report)
+        report['verification_method'] = 'model_review'
         if report['accepted'] is None:
             return {**report, 'evaluation_episode_id': state['id']}
         # Receipt existence is checked by the host, never by the model's prose.

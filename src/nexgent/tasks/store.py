@@ -25,7 +25,7 @@ MAX_JSON_BYTES = 1_000_000
 DEFAULT_WALL_SECONDS = 1200
 MAX_WALL_SECONDS = 1800
 DEFAULT_BUDGET = {"max_model_calls": 20, "max_completion_tokens": 80000,
-                  "max_tool_calls": 20, "max_tool_work_units": 0,
+                  "max_tool_calls": 20, "max_tool_work_units": 200_000,
                   "max_nodes": 100}
 
 
@@ -2010,8 +2010,8 @@ class EpisodeStore:
         }
         return self._reserve_resource(episode_id, call_id, "tool", data)
 
-    def add_tool_work(self, episode_id, call_id, units):
-        """Durably charge positive work while a trusted tool is executing."""
+    def add_tool_work(self, episode_id, call_id, units, *, consumed=False):
+        """Charge work; already consumed worker work survives budget exhaustion."""
         if type(units) is not int or units <= 0:
             raise ValueError("Tool work increments must be positive integers")
         with self.connect() as db:
@@ -2045,7 +2045,8 @@ class EpisodeStore:
                 other += prior.get("charged_work_units",
                                    prior.get("reserved_work_units", 0))
             charged = max(accounting["reserved_work_units"], proposed)
-            if other + charged > root["budget"].get("max_tool_work_units", 0):
+            exhausted = other + charged > root["budget"].get("max_tool_work_units", 0)
+            if exhausted and not consumed:
                 raise BudgetExhausted("Root Episode tool-work budget exhausted")
             accounting["measured_work_units"] = proposed
             accounting["charged_work_units"] = charged
@@ -2057,9 +2058,11 @@ class EpisodeStore:
                 "call_id": call_id, "increment": units,
                 "measured_work_units": proposed, "charged_work_units": charged,
             })
+        if exhausted:
+            raise BudgetExhausted("Root Episode tool-work budget exhausted")
         return deepcopy(accounting)
 
-    def settle_tool(self, episode_id, call_id, *, status):
+    def settle_tool(self, episode_id, call_id, *, status, usage_complete=True):
         """Finalize one tool meter; an absent settlement remains fail-closed."""
         if status not in {"completed", "failed"}:
             raise ValueError("Tool settlement status is invalid")
@@ -2086,7 +2089,7 @@ class EpisodeStore:
             accounting.update(
                 measured_work_units=measured,
                 charged_work_units=max(accounting["reserved_work_units"], measured),
-                usage_complete=True,
+                usage_complete=usage_complete,
             )
             record["status"] = status
             record["finished_at"] = time.time()

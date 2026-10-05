@@ -1,0 +1,65 @@
+{
+  "schema": "nexgent.dsh-mimo-live-result.v1",
+  "passed": true,
+  "backend": "deepseek-harness",
+  "profile": "headless",
+  "profile_identity": {
+    "provider": "mimo",
+    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    "model": "mimo-v2.6-pro",
+    "credential_ref": "NEXGENT_API_KEY",
+    "models_json_sha256": "b8383b8a5e66fef400aa068668e5c7da91d06e4fa4ed26b09772c75dd79c042f"
+  },
+  "profile_digest": "36479225875383feab2586c03736ae3e74c85488d0c93a7519ec490141dcf3fa",
+  "credential_configured": true,
+  "secret_leak_scan_passed": true,
+  "source_identity": {
+    "upstream_commit": "46a7f68b0922371ce7144b668b90e377d8e799f4",
+    "built_entrypoint_sha256": "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854",
+    "llm_entry_sha256": "b8614b7ad251c4ae121aeef3a423b9f2eff99ec602be8eb36ab35ee3511bb7f6",
+    "lockfile_sha256": "f561d4d2b02ca15f94fc9177500ab4646c38d847cf1c52ac50bd4022690d2f50",
+    "patch_sha256": "41389c1f07ea0f2250eff27630a678646ec8611295b5957bf19e75db0cda0a4b",
+    "plugin_sha256": "0b7825ce4355d9086f050fd800ca3f969900344c953776a7607c6078c0eb9ee9",
+    "driver_sha256": "73745b611200c2ff8578285ed6e3ffee755527e62ac721896faa732ca5ac8ded"
+  },
+  "session_id": "session-836dc3fa-5b82-4aea-85b0-a609c541ca3b",
+  "task": "Use the available multiply tool exactly once with left=6 and right=7. After the tool result, reply with exactly the JSON object {\"answer\":42} and no other text.",
+  "configured_model": "mimo-v2.6-pro",
+  "observed_models": [
+    "mimo-v2.6-pro",
+    "mimo-v2.6-pro"
+  ],
+  "provider_requests": 2,
+  "tool_executions": 1,
+  "usage": {
+    "input_tokens": 1295,
+    "output_tokens": 37,
+    "total_tokens": 1332
+  },
+  "final": "{\"answer\":42}",
+  "receipt_sha256": {
+    "stdout.jsonl": "de2a59bee4a13f54e549bcaff34e2b5f964845acdc21eae6ee6b6f44eaf230aa",
+    "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "session.jsonl": "00b3e02ecaebb310ea3f5fb9dd13cd3f803a86d69f4fcbbfdb1c5b1cf6added0",
+    "plugin-receipts.jsonl": "33ceeba805b319935bc99dbc67e88bd0619963daadbe3c83b82c800513fafc71",
+    "profile-package.json": "563c0b6082748a6e93daad51514f01335c51fc9c44f5f88253383f18ac2557b5",
+    "executed-dsh_mimo_plugin.mjs": "0b7825ce4355d9086f050fd800ca3f969900344c953776a7607c6078c0eb9ee9",
+    "executed-dsh_mimo.patch.yml": "41389c1f07ea0f2250eff27630a678646ec8611295b5957bf19e75db0cda0a4b",
+    "executed-dsh_mimo_driver.ts": "73745b611200c2ff8578285ed6e3ffee755527e62ac721896faa732ca5ac8ded"
+  },
+  "assertions": {
+    "fixed_headless_profile": true,
+    "target_model_override_explicit": false,
+    "native_provider_tool_call": true,
+    "diagnostic_handler_only": true,
+    "exactly_two_provider_completions": true,
+    "exactly_one_tool_execution": true,
+    "zero_retry_policy": true
+  },
+  "limitations": [
+    "The multiply handler is hand-written diagnostic code; the model did not develop it.",
+    "This is one connectivity task, not benchmark quality or RSI evidence.",
+    "The trusted plugin reads the credential in the host process and is not an OS sandbox."
+  ],
+  "artifact_root": "E:\\PKU\\program\\2026\\Aug\\te\\.nexgent-dsh-mimo-WhersF\\receipts"
+}

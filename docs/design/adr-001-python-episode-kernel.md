@@ -1,6 +1,8 @@
 # ADR 001：以 Python Episode 内核作为 Nexgent 的生产执行边界
 
-日期：2026-09-24。状态：**已决策；B–G 实现与 RSI 效果仍待验证。** 关联[重构计划](../../REFACTOR_PLAN.md)、[固定源码对照](../research/kernel-reference-audit-20260923.md)、[两路线实验与失败记录](../../experiments/kernel_spike/RESULTS.md)及[任务中能力授权合同](task-time-capability-authority.md)。
+日期：2026-09-24；复核：2026-10-05。状态：**当前生产保留 Python；DSH/Cordis 路线重新开放评估，RSI 效果仍待验证。** 关联[重构计划](../../REFACTOR_PLAN.md)、[固定源码对照](../research/kernel-reference-audit-20260923.md)、[两路线实验与失败记录](../../experiments/kernel_spike/RESULTS.md)及[任务中能力授权合同](task-time-capability-authority.md)。
+
+2026-10-05 补充：使用 `mimo-v2.6-pro`，固定 DSH headless 路线已完整通过两次原生模型请求、一次工具执行和最终 JSON 交付（1332 tokens）。适配器必须处理 MiMo 暴露的终止标记；请求头是配置变化事件，不能错误要求每次模型请求都有新 header。下文保留当时的负结果，不再将其作为“DSH 不能完整交付”的当前依据。该实验尚未接入 Nexgent 生产预算与发布链，不能声称生产迁移完成。
 
 ## 决策
 

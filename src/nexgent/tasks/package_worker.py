@@ -171,14 +171,21 @@ def main():
                 # A trace exception can be caught and disables tracing. A hard
                 # process exit preserves the limit even inside try/except.
                 sys.settrace(None)
-                print(canonical({"error": "Package instruction budget exhausted"}), flush=True)
+                print(canonical({"error": "Package instruction budget exhausted",
+                                 "execution": {"instructions": instructions[0]}}), flush=True)
                 os._exit(75)
         return trace
 
     sys.addaudithook(audit)
     sys.setrecursionlimit(350)
     sys.settrace(trace)
-    value = context.invoke(path, function, request["payload"])
+    try:
+        value = context.invoke(path, function, request["payload"])
+    except Exception as failure:
+        sys.settrace(None)
+        print(canonical({"error": f"{type(failure).__name__}: {str(failure)[:1500]}",
+                         "execution": {"instructions": instructions[0]}}), flush=True)
+        return 1
     sys.settrace(None)
     result = {"value": value, "execution": {"package_id": package["id"],
               "package_digest": package["digest"], "entry": request["entry"], "pid": os.getpid(),

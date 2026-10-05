@@ -18,7 +18,7 @@ def passed():
             'checks': [{'requirement': 'The supplied task is fulfilled', 'passed': True}]}
 
 
-def test_evaluation_shares_original_task_budget_and_reports_all_calls(tmp_path):
+def test_evaluation_shares_original_task_budget_and_reports_all_calls(qtbot, tmp_path):
     gateway = ScriptedGatewayFactory(lambda *_: passed())
     runtime = Nexgent(tmp_path, package=ANSWER, gateway_factory=gateway)
     zero = runtime.run(runtime.create('Deliver answer', budget={'max_model_calls': 0})['id'])
@@ -26,12 +26,18 @@ def test_evaluation_shares_original_task_budget_and_reports_all_calls(tmp_path):
     assert zero['usage']['model_calls'] == 0
     task = runtime.run(runtime.create('Deliver answer', budget={'max_model_calls': 1})['id'])
     assert task['evaluation']['accepted'] is True
+    assert task['evaluation']['verification_method'] == 'model_review'
     assert task['usage']['model_calls'] == 1
     evaluator = runtime.get(task['evaluation']['evaluation_episode_id'])
     assert evaluator['parent_episode_id'] == task['id']
     assert evaluator['root_episode_id'] == task['id']
     assert task['calls'] == evaluator['calls']
     assert len(runtime.list()) == 2
+    window = MainWindow(tmp_path, runtime)
+    qtbot.addWidget(window)
+    window.show_task(task['id'])
+    assert '模型审核通过' in window.status_label.text()
+    assert '验收：模型审核通过' in window.delivery_view.toPlainText()
 
 
 def test_numerical_verdict_without_verification_is_missing_evidence(tmp_path):
@@ -45,6 +51,30 @@ def test_numerical_verdict_without_verification_is_missing_evidence(tmp_path):
     assert result['usage']['model_calls'] == 5
     assert result['usage']['tool_calls'] == 1
     assert 'delivery_revision_id' not in result  # A reviewer failure is not agent rejection.
+
+
+def test_developed_tool_does_not_break_independent_workspace_verification(tmp_path):
+    strategy = package('''def execute(payload, context):
+    context.develop_tool({
+        'name': 'task.double', 'description': 'Double an integer',
+        'source': 'def execute(payload, context):\\n    return {"value": payload["value"] * 2}\\n',
+        'input_schema': {'type': 'object', 'properties': {'value': {'type': 'integer'}}, 'required': ['value']},
+        'output_schema': {'type': 'object'}
+    })
+    value = context.tool('task.double', {'value': 6})
+    ref = context.publish(value, name='result')
+    return {'deliverables': {'result': ref['id']}}
+''')
+    def policy(number, payload):
+        if number == 1:
+            return {'tool': 'run_python', 'arguments': {
+                'code': 'return {"value": payload["value"] * 2}', 'payload': {'value': 6}}}
+        assert payload['verification_results'][0]['result']['value'] == {'value': 12}
+        return passed()
+    runtime = Nexgent(tmp_path, package=strategy, gateway_factory=ScriptedGatewayFactory(policy))
+    result = runtime.run(runtime.create('Double 6 with a reusable tool')['id'])
+    assert result['evaluation']['accepted'] is True
+    assert result['usage']['tool_calls'] == 2
 
 
 def test_evaluator_must_open_actual_file_before_accepting(tmp_path):
@@ -254,5 +284,7 @@ def test_main_default_strategy_finishes_published_work_in_both_completion_forms(
     final = runtime.get(window.selected_id)
     assert final['status'] == 'completed', final.get('last_error')
     assert final['evaluation']['accepted'] is True
-    assert final['usage']['model_calls'] == 3
+    assert final['usage']['model_calls'] == 2
+    assert len(final['calls']) == 2
+    assert all(call['status'] in {'received', 'completed'} for call in final['calls'])
     assert len(runtime.list()) == 1

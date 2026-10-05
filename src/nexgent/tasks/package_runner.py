@@ -136,7 +136,10 @@ threads when the runner returns.
                 except ValueError:
                     raise PackageError("Invalid package worker protocol") from None
                 if "error" in message:
-                    raise PackageError(message["error"])
+                    failure = PackageError(message["error"])
+                    # Preserve the existing public error classification.
+                    failure.execution = message.get("execution")
+                    raise failure
                 if "result" in message:
                     result = message["result"]
                     if result["execution"]["rpc_count"] != rpc_count:

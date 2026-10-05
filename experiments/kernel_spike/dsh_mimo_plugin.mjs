@@ -8,7 +8,10 @@ const { join, resolve } = process.getBuiltinModule('node:path')
 const { pathToFileURL } = process.getBuiltinModule('node:url')
 
 const PROVIDER = 'nexgent-mimo-local'
-const MODEL = 'mimo-v2.6-flash'
+const MODEL = process.env.DSH_MIMO_MODEL ?? 'mimo-v2.6-flash'
+if (!['mimo-v2.6-flash', 'mimo-v2.6-pro'].includes(MODEL)) {
+  throw new Error('dsh-mimo: unsupported model')
+}
 const TOOL = 'spike.multiply'
 const CREDENTIAL_REF = 'NEXGENT_API_KEY'
 const MAX_COMPLETION_TOKENS = 256
@@ -138,8 +141,8 @@ function loadProfile() {
     ? models.flatMap(item => typeof item === 'string' ? [item]
       : item !== null && typeof item === 'object' && !Array.isArray(item) ? Object.keys(item) : [])
     : models !== null && typeof models === 'object' && !Array.isArray(models) ? Object.keys(models) : []
-  if (!configuredModels.includes('mimo-v2.5')) {
-    throw new SafeFailure('config_preflight', 'config_schema', 'mimo-v2.5 source catalog entry is missing')
+  if (!configuredModels.length) {
+    throw new SafeFailure('config_preflight', 'config_schema', 'source model catalog is empty')
   }
   const baseUrl = normalizeBaseUrl(provider.base_url)
   const apiKey = parseDotEnvValue(boundedRead(dotenvPath, 64 * 1024, '.env'), CREDENTIAL_REF)
@@ -391,6 +394,9 @@ async function providerCompletion(options) {
     message_content_kind: contentKind,
     message_content_bytes: typeof message.content === 'string'
       ? Buffer.byteLength(message.content, 'utf8') : null,
+    // This fixed synthetic task contains no user files or private task data.
+    // Retain the received final text so protocol errors can be diagnosed.
+    message_content: typeof message.content === 'string' ? message.content : null,
     provider_content_sha256: typeof message.content === 'string'
       ? sha256(Buffer.from(message.content, 'utf8')) : null,
     native_tool_call_count: Array.isArray(message.tool_calls) ? message.tool_calls.length : 0,
@@ -428,8 +434,12 @@ async function providerCompletion(options) {
     throw new SafeFailure('provider_protocol', 'final_decode', 'second provider response attempted another tool call')
   }
   const content = message.content
+  // MiMo can emit its literal end-of-message token in OpenAI-compatible text.
+  // Remove only that terminal transport marker; retain the strict JSON contract.
+  const finalContent = typeof content === 'string'
+    ? content.trim().replace(/(?:<\|im_end\|>\s*)+$/u, '').trim() : ''
   let final
-  try { final = JSON.parse(typeof content === 'string' ? content.trim() : '') } catch {
+  try { final = JSON.parse(finalContent) } catch {
     throw new SafeFailure('provider_protocol', 'final_decode', 'provider final is not a JSON object', false, {
       message_content_kind: contentKind,
       message_content_bytes: typeof content === 'string' ? Buffer.byteLength(content, 'utf8') : null,

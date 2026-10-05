@@ -21,7 +21,7 @@ from nexgent.models import (
     ModelBudgetError, ModelConfigurationError, ModelError, ModelGateway,
     ModelOutputFormatError,
 )
-from nexgent.models.worker import request_params, error_payload
+from nexgent.models.worker import request_params, error_payload, response_payload
 from nexgent.research import LiteratureSearch
 
 
@@ -139,10 +139,21 @@ def test_provider_specific_options_do_not_pollute_other_models(host, model):
     assert "extra_body" not in request_params(host, model, [], 1000)
 
 
-def test_mimo_26_flash_uses_verified_non_thinking_json_budget():
+@pytest.mark.parametrize('model', ['mimo-v2.6-flash', 'mimo-v2.6-pro'])
+def test_mimo_26_uses_non_thinking_json_budget(model):
     params = request_params("https://api.xiaomimimo.com/v1",
-                            "mimo-v2.6-flash", [], 6000)
+                            model, [], 6000)
     assert params["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+def test_mimo_transport_end_markers_do_not_corrupt_json_or_internal_text():
+    content = '{"text":"keep <|im_end|> inside the value"}<|im_end|><|im_end|>'
+    response = SimpleNamespace(model='mimo-v2.6-pro', choices=[SimpleNamespace(
+        message=SimpleNamespace(content=content), finish_reason='stop')])
+    decoded = response_payload(response)
+    assert json.loads(decoded['content']) == {'text': 'keep <|im_end|> inside the value'}
+    response.model = 'another-model'
+    assert response_payload(response)['content'] == content
 
 
 @pytest.mark.parametrize("stop_requested", [False, True])
