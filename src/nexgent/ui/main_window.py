@@ -585,6 +585,7 @@ class MainWindow(QMainWindow):
                              if a.get('id') in state.get('output_refs', {}).values() and 'content' in a]
                 if artifacts:
                     for artifact in artifacts:
+                        self._shown_outputs.add((state['id'], artifact['id']))
                         self._append('main', artifact['content'] if isinstance(artifact['content'], str) else _json(artifact['content']))
                 else:
                     summary = outcome.get('summary') or outcome.get('delivery_status') or '已记录'
@@ -821,6 +822,16 @@ class MainWindow(QMainWindow):
                 lines.append(_brief(proposal['reason'], 300))
             if proposal.get('hypothesis'):
                 lines.append('修改目标：' + _brief(proposal['hypothesis']['expected_behavior'], 240))
+            organization = item.get('organization_change')
+            if organization:
+                lines.append('候选组织修改（是否生效以发布／回滚状态为准）')
+                for label, key in (('新增成员', 'added'), ('调整成员', 'updated'), ('移除成员', 'removed')):
+                    for member in organization[key]:
+                        lines.append(label + '：' + member['name'])
+                        if key == 'updated':
+                            lines.append('原职责：' + _brief(member['before'], 180))
+                        lines.append('职责：' + _brief(member['instructions'], 360))
+                lines.append('协作方式：' + _brief(organization['strategy'], 600))
             selection = item.get('selection') or {}
             if selection:
                 measures = selection['measurements']

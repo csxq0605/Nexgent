@@ -15,7 +15,7 @@ from .tasks.tools import ContractError
 
 
 REPLAY_ID = 'nexgent.project-regression'
-IMPROVER_CHANNEL = 'nexgent-project-improver-v3'
+IMPROVER_CHANNEL = 'nexgent-project-improver-v4'
 # At most five roots: planner, generator, two selection arms, one guard.
 PHASE_BUDGET = {'max_model_calls': 40, 'max_completion_tokens': 160000,
                 'max_tool_calls': 20, 'max_tool_work_units': 200000, 'max_nodes': 100}
@@ -174,13 +174,21 @@ class ProjectEvolution(AutoEvolutionService):
                                    'evidence': {'completed_members': [
                                        {**member, 'instructions': member['instructions'][:1000]} for member in members],
                                                 'scope': 'Generalize responsibilities and coordination; gate before reuse'}})
+            if any(ref.get('user_feedback') or ((ref.get('evaluation') or {}).get('public_metrics') or {}).get('accepted') is False
+                   or ref.get('status') in {'failed', 'cancelled'} for ref in feedback['episode_refs']):
+                from .tasks.members import member_inventory
+                options.insert(0, {'candidate_type': 'orchestration', 'source_ref': 'organization_design',
+                                   'evidence': {'deployed_members': member_inventory(active['package']),
+                                                'scope': 'Create missing responsibilities, revise or retire deployed members '
+                                                         'and improve coordination from feedback; gate before future use'}})
         return options
 
     def _dispatch_plan(self, work, plan, *, stop_event=None):
-        if plan['source_ref'] == 'task_members':
+        if plan['source_ref'] in {'task_members', 'organization_design'}:
             from .tasks.member_adoption import generate_team
             evolution, generation = self._services()
-            return generate_team(self.tasks, evolution, generation, work, plan, stop_event)
+            return generate_team(self.tasks, evolution, generation, work, plan, stop_event,
+                                 organization_change=plan['source_ref'] == 'organization_design')
         return super()._dispatch_plan(work, plan, stop_event=stop_event)
 
     @staticmethod
@@ -282,10 +290,16 @@ def improvement_status(runtime, identity=None):
         if episode_id:
             roots.add(runtime.store.get(episode_id)['root_episode_id'])
         generation_id = (row.get('candidate') or {}).get('generation_id')
+        organization = None
         if generation_id:
             generated = runtime.auto_evolution._services()[1].generation(generation_id)
             if generated.get('episode_id'):
                 roots.add(runtime.store.get(generated['episode_id'])['root_episode_id'])
+            if (plan.get('source_ref') in {'task_members', 'organization_design'}
+                    and row['candidate'].get('candidate_package_id')):
+                from .tasks.members import organization_changes
+                organization = organization_changes(runtime.store.package(row['source']['package_id']),
+                                                    runtime.store.package(row['candidate']['candidate_package_id']))
         selection = evolution.get('selection_trial') or {}
         if selection.get('id'):
             trial = runtime.evolution.trial(selection['id'])
@@ -300,6 +314,7 @@ def improvement_status(runtime, identity=None):
                       'source_objective': runtime.store.get(row['source_episode_id'])['task']['objective'],
                       'status': row['status'], 'reason': reason,
                       'proposal': deepcopy(detail), 'promotion': deepcopy(evolution.get('promotion')),
+                      'organization_change': organization,
                       'selection': selection_report,
                       'reuse_episode_ids': [r['episode_id'] for r in row.get('reuse_observed', [])]})
     # Include already admitted roots even if the process stopped before storing a phase result.

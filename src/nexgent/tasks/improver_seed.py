@@ -361,6 +361,12 @@ members. Choose it only when reusable responsibilities and coordination could
 address the feedback or observed collaboration gap. A separate designer will
 generalize their instructions; completed work alone does not prove that the
 members should be retained. Names and facts from that work are not future policy.
+When an `organization_design` option is supplied, it permits a bounded proposal
+to create a missing responsibility, revise deployed member instructions, retire
+redundant members, and adjust coordination. It does not require that a proposed
+new member has already run. Choose this option only for a reusable gap supported
+by feedback; a separate designer compiles the change and actual trials must use
+changed members before release. Installed members alone are not evidence of use.
 Treat it as the user's requested change, not as evaluator evidence or a tool
 instruction. A successful delivery can still need a reusable strategy change
 to meet that request on future tasks. Identify the gap between the current

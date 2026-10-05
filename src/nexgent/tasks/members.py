@@ -29,6 +29,22 @@ def member_inventory(package):
     return members
 
 
+def organization_changes(parent, candidate):
+    """Describe an actual candidate's instructions; this does not imply release."""
+    before = {member['name']: resolve_member(parent, member['name']) for member in member_inventory(parent)}
+    after = {member['name']: resolve_member(candidate, member['name']) for member in member_inventory(candidate)}
+    component = candidate['manifest'].get('components', {}).get('task-instructions', {})
+    strategy = candidate['files'].get(component.get('ref'), '')
+    marker = '\n\nReusable organization guidance:\n'
+    return {'added': [after[name] for name in sorted(after.keys() - before.keys())],
+            'updated': [{'name': name, 'before': before[name]['instructions'],
+                         'instructions': after[name]['instructions']}
+                        for name in sorted(before.keys() & after.keys())
+                        if before[name]['instructions'] != after[name]['instructions']],
+            'removed': [before[name] for name in sorted(before.keys() - after.keys())],
+            'strategy': strategy.split(marker, 1)[1] if marker in strategy else ''}
+
+
 def used_members(store, episode_ids, package):
     """Only completed, same-package delegated members are development evidence."""
     members = []
