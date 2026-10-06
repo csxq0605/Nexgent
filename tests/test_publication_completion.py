@@ -26,7 +26,7 @@ def test_main_finishes_after_declared_publication_without_repeated_model_publica
     result = app.run(app.create('Deliver the complete answer')['id'])
     assert result['status'] == 'completed' and result['evaluation']['accepted']
     assert len(calls) == 1
-    assert [item['role'] for item in gateway.calls] == ['task_agent', 'task_reviewer']
+    assert [item['role'] for item in gateway.calls] == ['task_agent']
     assert len([a for a in app.store.artifacts(result['id']) if a['name'] == 'result']) == 1
 
 

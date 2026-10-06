@@ -845,7 +845,6 @@ class EvolutionService:
         execution = episode.get("execution") or {}
         improver = self.store.package(generation.get("improver_package_id"))
         child = self.store.package(candidate["package_id"])
-        provenance = child.get("provenance") or {}
         improve_path = (generation.get("improver_entry") or "").split(":", 1)[0]
         component_targeted = candidate.get("targeting") == "manifest_component_v2"
         component_set_targeted = candidate.get("targeting") == "manifest_component_set_v3"
@@ -889,26 +888,22 @@ class EvolutionService:
                          or artifact_content.get("schema") != "nexgent.behavior-patch.v1"))
                 or digest(artifact_content) != generation["patch_digest"]
                 or artifact.get("producer", {}).get("package_digest")
-                != generation.get("improver_package_digest")
-                or provenance.get("origin") != "generated"
-                or provenance.get("generation_id") != generation.get("id")
-                or provenance.get("feedback_bundle_id") != feedback.get("id")
-                or provenance.get("feedback_digest") != feedback.get("digest")
-                or provenance.get("improver_package_id") != improver.get("id")
-                or provenance.get("improver_package_digest") != improver.get("digest")
-                or provenance.get("behavior_patch_digest") != generation["patch_digest"]):
+                != generation.get("improver_package_digest")):
             raise ContractError("Candidate improver execution closure is invalid")
-        if component_set_targeted:
-            from .package_patch_v3 import apply_package_patch
-            parent = self.store.package(candidate["parent_package_id"])
-            source_provenance = deepcopy(provenance)
-            source_provenance.pop("package_patch_digest", None)
-            replay = apply_package_patch(
-                parent, artifact_content,
-                (generation.get("mutation_policy") or {}).get("package_patch_policy"),
-                provenance=source_provenance)
-            if replay != child:
-                raise ContractError("Candidate PackagePatch replay differs from generation")
+        # Content-addressed packages retain the first writer's informational
+        # provenance. A later complete generation can rediscover identical
+        # content; its authority comes from its own immutable generation and
+        # actual improve receipt, never that first writer's metadata. Replay
+        # every patch against its frozen parent/policy and compare the complete
+        # executable content and lineage, leaving stored provenance unchanged.
+        from .generation import GenerationService
+        parent = self.store.package(candidate["parent_package_id"])
+        replay, _ = GenerationService._apply_patch(
+            parent, artifact_content, generation.get("mutation_policy") or {},
+            generation["id"], feedback, improver)
+        comparable = lambda value: {key: item for key, item in value.items() if key != "provenance"}
+        if comparable(replay) != comparable(child):
+            raise ContractError("Candidate package replay differs from generation")
         return generation
 
     @staticmethod

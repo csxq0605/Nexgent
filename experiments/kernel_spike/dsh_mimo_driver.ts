@@ -8,7 +8,11 @@ import { fileURLToPath } from 'node:url'
 
 const EXPECTED_UPSTREAM = '46a7f68b0922371ce7144b668b90e377d8e799f4'
 const PROVIDER = 'nexgent-mimo-local'
-const MODEL = 'mimo-v2.6-flash'
+const MODEL = process.argv.find(value => value.startsWith('--model='))?.slice('--model='.length)
+  ?? 'mimo-v2.6-flash'
+if (!['mimo-v2.6-flash', 'mimo-v2.6-pro'].includes(MODEL)) {
+  throw new Error('Use a supported MiMo v2.6 model for this bounded connectivity test')
+}
 const TOOL = 'spike.multiply'
 const CREDENTIAL_REF = 'NEXGENT_API_KEY'
 const TASK = 'Use the available multiply tool exactly once with left=6 and right=7. After the tool result, reply with exactly the JSON object {"answer":42} and no other text.'
@@ -126,7 +130,7 @@ async function loadProfile(): Promise<Profile> {
     ? models.flatMap((item: unknown) => typeof item === 'string' ? [item]
       : item !== null && typeof item === 'object' && !Array.isArray(item) ? Object.keys(item) : [])
     : models !== null && typeof models === 'object' && !Array.isArray(models) ? Object.keys(models) : []
-  expect(configuredModels.includes('mimo-v2.5'), 'config_preflight', 'config_schema', 'source MiMo catalog is missing v2.5')
+  expect(configuredModels.length > 0, 'config_preflight', 'config_schema', 'source MiMo catalog is empty')
   const apiKey = dotenvValue(dotenvText, CREDENTIAL_REF)
   const identity: Record<string, Json> = {
     provider: 'mimo',
@@ -281,6 +285,7 @@ if (preflightOnly) {
       DSH_MIMO_SESSION_ROOT: sessionRoot,
       DSH_MIMO_RECEIPT_PATH: sideReceiptPath,
       DSH_MIMO_MODEL_PROJECT: modelProject,
+      DSH_MIMO_MODEL: MODEL,
       DSH_MIMO_LLM_ENTRY: llmEntry,
       DSH_PERMISSION_MODE: 'danger-full-access',
       DSH_TELEMETRY_DISABLED: '1',
@@ -377,9 +382,18 @@ if (preflightOnly) {
     const calls = session.filter(row => row.type === 'tool/call')
     const results = session.filter(row => row.type === 'tool/result')
     const assistants = session.filter(row => row.type === 'assistant/message')
-    expect(headers.length === 2 && calls.length === 1 && results.length === 1 && assistants.length === 2,
+    // Request headers are emitted only when their identity changes. Two model
+    // steps can legitimately share one unchanged persisted request header.
+    const steps = session.filter(row => row.type === 'step/start')
+    expect(headers.length >= 1 && steps.length === 2
+      && calls.length === 1 && results.length === 1 && assistants.length === 2,
       'evidence_persistence', 'session_counts', 'persisted Session does not contain the two-call/one-tool flow')
-    expect(calls[0]?.data?.name === TOOL && calls[0]?.data?.arguments === '{"left":6,"right":7}',
+    let persistedArguments: unknown
+    try { persistedArguments = JSON.parse(String(calls[0]?.data?.arguments)) } catch {
+      throw new DriverFailure('tool_contract', 'session_tool_call', 'persisted tool arguments are not JSON')
+    }
+    expect(calls[0]?.data?.name === TOOL
+      && canonical(persistedArguments as Json) === '{"left":6,"right":7}',
       'tool_contract', 'session_tool_call', 'persisted tool call differs from the fixed contract')
     expect(resultCallId(results[0]!) === calls[0]?.data?.callId
       && JSON.stringify(results[0]?.data).includes('{\\"value\\":42}'),

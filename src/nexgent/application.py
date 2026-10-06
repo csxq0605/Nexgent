@@ -27,13 +27,15 @@ MAIN_CAPABILITY_AUTHORITY = make_episode_authority(
     max_definitions=32, max_invocations=128, version=2)
 
 
-def framework_package(*, members=None):
+def framework_package(*, members=None, kernel=None):
     """Use the existing Python seed with the existing component/release SDK.
 
     Naming the loop and instructions permits ordinary tool/service adoption
     and execution-strategy patches without replacing the task runner.
     """
-    seed = default_package(review_on_publication=True)
+    # Main has a separate host-owned evaluator. A mutable package reviewer
+    # duplicates that check and spends the same delivery budget.
+    seed = default_package(review_on_publication=True, review_before_completion=False)
     manifest = deepcopy(seed['manifest'])
     manifest.update(manifest_version=2, roles={}, workflows={}, orchestrator='task-loop',
                     components={
@@ -50,6 +52,34 @@ def framework_package(*, members=None):
                         **{'skill-' + name: {'class': 'S', 'kind': 'skill', 'ref': name}
                            for name in manifest['skills']}})
     files = deepcopy(seed['files'])
+    if kernel not in {None, 'dsh'}:
+        raise ValueError('Unsupported framework kernel')
+    if kernel == 'dsh':
+        files['agent/main.py'] = '''def execute(task, context):
+    return context.native_agent('dsh', context.resource('prompts/dsh.md'), task)
+'''
+        files['prompts/dsh.md'] = (
+            'You execute general user tasks using the host-authorized MCP capabilities. '
+            'Read the actual input artifacts, use installed tools, develop capabilities when needed, '
+            'and publish actual deliverables. Never invent artifact references or tool outcomes. '
+            'Use native MCP tool calls rather than the JSON request envelope described in legacy guides. '
+            'Use the MCP tool whose description names the installed capability; its parameters are the actual input schema. '
+            'After developing a tool, refreshed MCP tools expose its actual schema. invoke_tool is a fallback for object arguments. '
+            'Pass arguments as native JSON objects, never stringify them. Publish JSON as a native object or array, not a serialized string. '
+            'This also applies to run_python.payload: pass actual objects or arrays, not JSON-encoded strings. '
+            'On a tool failure, inspect its error and input types before changing the computation. '
+            'Do not repeat an identical failed call. A successful tool result is execution evidence; '
+            'perform further checks when uncertainty warrants them, then publish within the task budget. '
+            'Required deliverables must satisfy their host schemas. '
+            'Prefer the MCP tool described as Publish required deliverable for each required output. '
+            'When finished, summarize the work and any limitations in ordinary text. '
+            'The host uses actual successful publication receipts as deliverables and independently evaluates them. '
+            'Final text cannot substitute for publishing a required output.\n\n'
+            + files['prompts/task.md'] + '\n\n'
+            + files['prompts/capability_development.md'] + '\n\n'
+            + files['prompts/service_development.md'])
+        manifest['components']['native-kernel-instructions'] = {
+            'class': 'S', 'kind': 'resource', 'ref': 'prompts/dsh.md'}
     if members is not None:
         if (not isinstance(members, dict) or len(members) > 16
                 or any(not isinstance(instructions, str) or not instructions.strip()
@@ -74,15 +104,18 @@ class Nexgent(TaskService):
     are used by ordinary tasks, not a separate demo or test execution path.
     """
     def __init__(self, root, *, tools=None, package=None, channel=None,
-                 evaluator=None, benchmarks=None, model_root=None, gateway_factory=None):
+                 evaluator=None, benchmarks=None, model_root=None, gateway_factory=None,
+                 kernel=None):
+        from .kernel.dsh import configured_kernel
+        kernel_name, native_kernels = configured_kernel(root, kernel)
         self.model_root = Path(model_root or root).resolve()
         self.benchmark_adapters = dict(benchmarks or {})
         if gateway_factory is None:
             gateway_factory = lambda reserve, stop: ModelGateway(
                 self.model_root, reserve=reserve, stop_event=stop,
-                timeout=90, max_completion_tokens=12000)
+                timeout=180, max_completion_tokens=12000)
         super().__init__(root, tools=tools if tools is not None else workspace_registry(root),
-                         gateway_factory=gateway_factory)
+                         gateway_factory=gateway_factory, native_kernels=native_kernels)
         self.default_capabilities = [t['name'] for t in self.tools.describe()
                                      if t['effect_class'] != 'external_compute'
                                      and (tools is not None or self.tools.get(t['name']).provider_id == 'nexgent.workspace')]
@@ -96,7 +129,7 @@ class Nexgent(TaskService):
         try:
             self.evolution.active(self.main_channel)
         except KeyError:
-            self.evolution.register(self.main_channel, package or framework_package())
+            self.evolution.register(self.main_channel, package or framework_package(kernel=kernel_name))
         else:
             if package is not None and self.evolution.active(self.main_channel)['package_digest'] != package['digest']:
                 raise ValueError('The channel already owns another package; use a new channel or gated evolution')
@@ -160,9 +193,8 @@ class Nexgent(TaskService):
                     and options.get('benchmark_registration') is None
                     and not (context or {}).get('rsi_role'))
         if ordinary:
-            # Portable package tools charge their actual worker instructions.
-            # The legacy task API defaults to zero work units, which would
-            # prevent a newly adopted tool from running in the next task.
+            # Task-local and adopted tools use the same bounded worker meter.
+            # Explicit caller limits still take precedence over Main defaults.
             budget = deepcopy(budget or {})
             for name, value in MAIN_TASK_BUDGET.items():
                 budget.setdefault(name, value)
@@ -196,6 +228,13 @@ class Nexgent(TaskService):
             options.setdefault('capability_authority', deepcopy(MAIN_CAPABILITY_AUTHORITY))
             if capabilities is None:
                 capabilities = list(self.default_capabilities)
+                # The registry refuses unusable leases. Explicit low/zero
+                # budgets may still create a task with affordable capabilities.
+                calls, work = budget.get('max_tool_calls'), budget.get('max_tool_work_units')
+                if type(calls) is int and type(work) is int:
+                    capabilities = ([name for name in capabilities
+                                     if self.tools.get(name).work_units_per_call <= work]
+                                    if calls > 0 else [])
             if all(self.tools.get(n).provider_id for n in capabilities):
                 options.setdefault('initially_active_capabilities', list(capabilities))
         return super().create(objective, inputs, deliverables, budget, capabilities,

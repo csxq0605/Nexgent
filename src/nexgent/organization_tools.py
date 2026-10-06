@@ -10,7 +10,7 @@ import threading
 from urllib.parse import urlparse, urljoin
 
 from .tasks.tools import ToolRegistry, ToolSpec, validate
-from .tasks.packages import make_package
+from .tasks.packages import make_package, PackageError
 from .tasks.package_runner import run_package
 
 
@@ -64,10 +64,12 @@ def computation_skills(value):
 
 
 class WorkspaceTools:
-    def __init__(self, root, output, *, shared_artifacts=(), allow_artifact_writes=True, stop_event=None, skills=()):
+    def __init__(self, root, output, *, shared_artifacts=(), allow_artifact_writes=True, stop_event=None, skills=(),
+                 compute_executor=None):
         self.root, self.output = Path(root).resolve(), Path(output).resolve()
         self.artifacts = []
         self.stop_event = stop_event if stop_event is not None else threading.Event()
+        self.compute_executor = compute_executor
         self.shared_paths = {Path(a["path"]).resolve() for a in shared_artifacts}
         self.registry = ToolRegistry()
         for name, handler, properties, description, effect in (
@@ -83,7 +85,7 @@ class WorkspaceTools:
              "Independently calculate and query an Excel worksheet using SQLite SQL. Select the exact worksheet with sheet; empty sheet selects the first worksheet. SQL table data (also available under the selected worksheet name) uses row 1 as unique headers, remaining rows as data. Example: SELECT * FROM data. CAST numeric columns as appropriate. Returns up to 200 rows. Unsupported/error formulas fail rather than invent values.", "local_compute"),
             ("write_spreadsheet", self.write_spreadsheet, {"name": {"type": "string"}, "sheets": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "rows": {"type": "array", "items": {"type": "array", "items": {"type": ["string", "number", "boolean", "null"]}}}}, "required": ["name", "rows"], "additionalProperties": False}}},
              "Create an editable .xlsx deliverable from sheets [{name,rows:[[header,...],[typed value,...],...]}]. Strings starting '=' are Excel formulas, calculated before saving with actual cached results. Use bounded local scalar formulas such as SUM, SUMIF, IF, COUNTIF, arithmetic and cross-sheet references; no external workbooks, array formulas or macros. Create source/input sheets and formulas linking outputs to them so edits recalculate in Excel. At most 8 sheets and 20000 cells. Use the requested filename; this writes an actual binary workbook, unlike write_artifact.", "artifact_write"),
-            ("run_python", self.run_python, {"code": {"type": "string", "maxLength": 30000}, "payload": {}},
+            ("run_python", self.run_python, {"code": {"type": "string", "maxLength": 30000}, "payload": {"description": "Actual JSON input value. Pass objects and arrays directly, not as JSON-encoded strings. The worker does not parse strings into objects."}},
              "Compute with Python in the existing isolated worker. Send Python statements ending with return of a JSON value; input data is in payload. A full def execute(payload, context) function is also accepted. Lists, dicts, sets, tuples, comprehensions, loops, sorted, sum, min, max, range, enumerate, zip and preloaded math are available. Use named variables (no underscore/private names). math is already supplied; redundant import math (with an optional alias) is accepted. No other imports (including itertools), files, network, print or context calls. Pass observed input values in payload. Does not write files; save results with write_artifact if requested.", "local_compute"),
             ("write_artifact", self.write_artifact, {"name": {"type": "string"}, "content": {"type": "string", "maxLength": 30000}},
              "Save a UTF-8 deliverable in your isolated output directory. Use the filename required by the user, not a project path. Other members and earlier attempts have separate directories, so the same filename is allowed there.", "artifact_write"),
@@ -267,8 +269,14 @@ class WorkspaceTools:
 
     def run_python(self, code, payload):
         package = compute_package(code)
-        result = run_package(package, "execute", payload, stop_event=self.stop_event,
-                             timeout=30, max_rpc=0)
+        try:
+            result = (self.compute_executor(package, payload) if self.compute_executor is not None
+                      else run_package(package, "execute", payload, stop_event=self.stop_event,
+                                       timeout=30, max_rpc=0))
+        except PackageError as exc:
+            if isinstance(payload, str):
+                exc.args = (str(exc) + "; payload was a string. If code expects a dict or list, pass a native JSON object or array instead of serialized JSON.",)
+            raise
         return {"value": result["value"], "execution": result["execution"]}
 
     def call(self, name, arguments):

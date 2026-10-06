@@ -175,9 +175,13 @@ class ProjectEvolution(AutoEvolutionService):
                 result = self._services()[0].decision(decision['id'])
                 measures = result['measurements']
                 item['selection'] = {
+                    'evidence_status': ('measured' if result['gates'].get('measurement_complete') is True
+                                        else 'inconclusive'),
                     'failed_gates': [key for key, passed in result['gates'].items() if not passed],
-                    'parent': {key: measures['parent'][key] for key in ('quality', 'success_rate', 'cost')},
-                    'candidate': {key: measures['candidate'][key] for key in ('quality', 'success_rate', 'cost')},
+                    'parent': {key: measures['parent'][key] for key in (
+                        'quality', 'success_rate', 'cost', 'score_complete', 'acceptance_complete', 'usage_complete')},
+                    'candidate': {key: measures['candidate'][key] for key in (
+                        'quality', 'success_rate', 'cost', 'score_complete', 'acceptance_complete', 'usage_complete')},
                     'regressions': measures['regressions']}
                 if result.get('improvement_basis'):
                     item['selection']['improvement_basis'] = result['improvement_basis']
@@ -405,7 +409,8 @@ def improvement_status(runtime, identity=None):
             'mode': 'project_regression' if isinstance(runtime.auto_evolution, ProjectEvolution) else 'configured',
             'active_revision': runtime.evolution.active(runtime.main_channel)['revision'],
             'items': items, 'usage': usage, 'root_episode_ids': sorted(roots),
-            'phase_budget': deepcopy(PHASE_BUDGET) if isinstance(runtime.auto_evolution, ProjectEvolution) else None}
+            'phase_budget': (deepcopy(runtime.auto_evolution.policies[runtime.main_channel]['budget'])
+                             if isinstance(runtime.auto_evolution, ProjectEvolution) else None)}
 
 
 def load_enabled(runtime):

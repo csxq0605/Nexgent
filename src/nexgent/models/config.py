@@ -35,7 +35,7 @@ def load_profiles(project_root):
     env.update(os.environ)
     path = next((p for p in (root / "models.json", root / ".nexgent" / "models.json") if p.is_file()), None)
     if path is None:
-        model = env.get("NEXGENT_MODEL", "mimo-v2.5")
+        model = env.get("NEXGENT_MODEL", "mimo-v2.6-pro")
         profile = Profile("configured/" + model, model,
                           env.get("NEXGENT_BASE_URL", "https://token-plan-cn.xiaomimimo.com/v1"),
                           env.get("NEXGENT_API_KEY", ""))

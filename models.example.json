@@ -3,8 +3,8 @@
     "research": {
       "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
       "api_key": "${NEXGENT_API_KEY}",
-      "models": {"mimo-v2.5": {}}
+      "models": {"mimo-v2.6-pro": {}}
     }
   },
-  "defaults": {"main": "research/mimo-v2.5", "subagent": "research/mimo-v2.5"}
+  "defaults": {"main": "research/mimo-v2.6-pro", "subagent": "research/mimo-v2.6-pro", "evaluator": "research/mimo-v2.6-pro", "rsi_improver": "research/mimo-v2.6-pro"}
 }

@@ -1,0 +1,393 @@
+{
+  "schema": "nexgent.metered-default-entry.v1",
+  "base_commit": "2663a1a7b1154305908f439ecb4b75c34ca453e0",
+  "scope": "one bounded development delivery, not adoption or RSI",
+  "limits": {
+    "model_calls": 12,
+    "completion_tokens": 48000
+  },
+  "result": {
+    "episode_id": "episode-881c232ba5324ff7",
+    "status": "completed",
+    "accepted": null,
+    "oracle_passed": false,
+    "delivery": "{\"products\": {\"alpha\": {\"quantity\": 9, \"net_cents\": 1188}, \"gamma\": {\"quantity\": 0, \"net_cents\": 0}}, \"total_cents\": 1188, \"kept_orders\": 4}",
+    "expected": {
+      "products": {
+        "alpha": {
+          "quantity": 9,
+          "net_cents": 1188
+        },
+        "gamma": {
+          "quantity": 0,
+          "net_cents": 0
+        }
+      },
+      "total_cents": 1188,
+      "kept_orders": 4
+    },
+    "usage": {
+      "model_calls": 12,
+      "reserved_completion_tokens": 30200,
+      "charged_completion_tokens": 30200,
+      "completion_tokens": 4576,
+      "known_usage": {
+        "prompt_tokens": 70632,
+        "completion_tokens": 4576,
+        "total_tokens": 75208
+      },
+      "usage_missing_call_ids": [],
+      "tool_usage_missing_call_ids": [],
+      "reserved_tool_work_units": 2,
+      "charged_tool_work_units": 266,
+      "tool_work_units": 266,
+      "usage_complete": true,
+      "billing_unknown_call_ids": [],
+      "tool_calls": 4,
+      "service_applications": 0,
+      "nodes": 31
+    },
+    "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+    "models": [
+      "mimo-v2.6-pro"
+    ]
+  },
+  "evaluation": {
+    "accepted": null,
+    "evaluation_episode_id": "episode-92795a052b52499f",
+    "execution_status": "completed",
+    "feedback": "独立验收未完成，成果已保留。可以继续验收；预算用尽时需重新执行任务。",
+    "score_available": false,
+    "status": "evaluator_unavailable"
+  },
+  "semantic_json_matches_oracle": true,
+  "artifact_contract_passed": false,
+  "tool_receipts": [
+    {
+      "call_id": "episode-881c232ba5324ff7/rpc.9",
+      "dynamic_capability": {
+        "authority_digest": "f37bd4fc73ef5106c52b9e3cadf6d6262dd197452e9a2ffab048b0b83c6c3317",
+        "definition_digest": "a94d019e8e13c4173890e00b7473aa480e05274e5346993038f521c3d8882569",
+        "definition_id": "definition-a94d019e8e13c4173890e00b",
+        "instance_revision": 1,
+        "name": "task.aggregate_order_revisions"
+      },
+      "elapsed_seconds": 0.375,
+      "entry_digest": "b1ac8a41b6380c75b7323c9db4fda70c647bebc71c6f817f23a592f38330e0de",
+      "episode_id": "episode-881c232ba5324ff7",
+      "execution": {
+        "elapsed_seconds": 0.0,
+        "entry": "execute",
+        "instructions": 118,
+        "isolation": {
+          "audit_hook": true,
+          "language": "capability_python",
+          "memory_limit": {
+            "bytes": 536870912,
+            "kind": "process_commit"
+          },
+          "os_filesystem_container": false
+        },
+        "loaded_modules": [
+          "tool.py"
+        ],
+        "local_calls": [],
+        "package_digest": "2a33cbc2e35dc77523df81202f9e5413c15253dcf79fe5f37e9680c8f6c373a5",
+        "package_id": "package-b1c5dad7f40cd167787d5424",
+        "pid": 1808,
+        "rpc_count": 0
+      },
+      "finished_at": 1791209244.807484,
+      "name": "task.aggregate_order_revisions",
+      "package_digest": "2a33cbc2e35dc77523df81202f9e5413c15253dcf79fe5f37e9680c8f6c373a5",
+      "package_id": "package-b1c5dad7f40cd167787d5424",
+      "started_at": 1791209244.4221172,
+      "status": "completed",
+      "work_accounting": {
+        "charged_work_units": 118,
+        "measured_work_units": 118,
+        "reserved_work_units": 1,
+        "schema": "nexgent.tool-work.v1",
+        "usage_complete": true
+      },
+      "work_reservation": {
+        "reserved_work_units": 1,
+        "schema": "nexgent.tool-work.v1"
+      },
+      "worker_instruction_limit": 200000,
+      "worker_instructions": 118
+    },
+    {
+      "call_id": "episode-881c232ba5324ff7/rpc.19",
+      "dynamic_capability": {
+        "authority_digest": "f37bd4fc73ef5106c52b9e3cadf6d6262dd197452e9a2ffab048b0b83c6c3317",
+        "definition_digest": "3b338da614881241a86063760f58c9a56449b90cc2c839ddb8cda791da74375c",
+        "definition_id": "definition-3b338da614881241a8606376",
+        "instance_revision": 1,
+        "name": "task.aggregate_order_revisions_v2"
+      },
+      "elapsed_seconds": 0.43800000000192085,
+      "entry_digest": "1c11edef7c8f69ad294708d7b0ebc24e5075bb8a71c2048d804a302bfe004ae6",
+      "episode_id": "episode-881c232ba5324ff7",
+      "execution": {
+        "elapsed_seconds": 0.0,
+        "entry": "execute",
+        "instructions": 148,
+        "isolation": {
+          "audit_hook": true,
+          "language": "capability_python",
+          "memory_limit": {
+            "bytes": 536870912,
+            "kind": "process_commit"
+          },
+          "os_filesystem_container": false
+        },
+        "loaded_modules": [
+          "tool.py"
+        ],
+        "local_calls": [],
+        "package_digest": "fa0568e6376fdc975eab2f5941bec9576fc0a5204793ef56d9c1d695bae0d1c0",
+        "package_id": "package-1912bce23faba2ccf76a61c8",
+        "pid": 6208,
+        "rpc_count": 0
+      },
+      "finished_at": 1791209300.8846858,
+      "name": "task.aggregate_order_revisions_v2",
+      "package_digest": "fa0568e6376fdc975eab2f5941bec9576fc0a5204793ef56d9c1d695bae0d1c0",
+      "package_id": "package-1912bce23faba2ccf76a61c8",
+      "started_at": 1791209300.4391844,
+      "status": "completed",
+      "work_accounting": {
+        "charged_work_units": 148,
+        "measured_work_units": 148,
+        "reserved_work_units": 1,
+        "schema": "nexgent.tool-work.v1",
+        "usage_complete": true
+      },
+      "work_reservation": {
+        "reserved_work_units": 1,
+        "schema": "nexgent.tool-work.v1"
+      },
+      "worker_instruction_limit": 199882,
+      "worker_instructions": 148
+    }
+  ],
+  "model_calls": [
+    {
+      "call_id": "model-286e8c4e75c04471a29c7747f1ae3489",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 677,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 5076,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "total_tokens": 5753
+      }
+    },
+    {
+      "call_id": "model-bcf6b5d806034093967b5c443a2c5707",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 345,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 5636,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "total_tokens": 5981
+      }
+    },
+    {
+      "call_id": "model-07652b058918497ab5c304c6a5ab2e7b",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 142,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 6036,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "total_tokens": 6178
+      }
+    },
+    {
+      "call_id": "model-7cd6242bf02144c7bdab8962729c49cd",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 297,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 5298,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 5595
+      }
+    },
+    {
+      "call_id": "model-c720cb4858f74f5cb7b664c346418f99",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 660,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 6510,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "total_tokens": 7170
+      }
+    },
+    {
+      "call_id": "model-ee348e481c464760a394e42a6dcad126",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 363,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 6522,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 6885
+      }
+    },
+    {
+      "call_id": "model-8e86e7beca39454a9a3221ba4200e560",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 126,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 6565,
+        "prompt_tokens_details": {
+          "cached_tokens": 2048
+        },
+        "total_tokens": 6691
+      }
+    },
+    {
+      "call_id": "model-432f9bc261d44d2eadf7c377ac04d55a",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 354,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 2561,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 2915
+      }
+    },
+    {
+      "call_id": "model-3dbf61170db040099f639c36c17f6dde",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 140,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 6364,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 6504
+      }
+    },
+    {
+      "call_id": "model-277569992dbb4fee8ae0f1454c4f39d2",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 17,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 5599,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 5616
+      }
+    },
+    {
+      "call_id": "model-d32945249af04dfb88b8fe43b1cdbb35",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 678,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 6744,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 7422
+      }
+    },
+    {
+      "call_id": "model-825b9203e5164d49aeffbacc046dd43f",
+      "status": "received",
+      "configured_provider_model": "mimo-v2.6-pro",
+      "observed_provider_model": "mimo-v2.6-pro",
+      "billing_status": "usage_reported",
+      "usage": {
+        "completion_tokens": 777,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "prompt_tokens": 7721,
+        "prompt_tokens_details": {
+          "cached_tokens": 4096
+        },
+        "total_tokens": 8498
+      }
+    }
+  ]
+}

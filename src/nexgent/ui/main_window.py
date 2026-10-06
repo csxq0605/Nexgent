@@ -433,6 +433,8 @@ class MainWindow(QMainWindow):
         if isinstance(self.service, Nexgent) and state.get('status') == 'completed':
             accepted = (state.get('evaluation') or {}).get('accepted')
             if accepted is True:
+                if (state.get('evaluation') or {}).get('verification_method') == 'model_review':
+                    return '已完成 · 模型审核通过'
                 return '已完成 · 验收通过'
             if accepted is False:
                 return '已有成果 · 需修正'
@@ -769,7 +771,9 @@ class MainWindow(QMainWindow):
             for a in final_artifacts)
         self.delivery_view.setPlainText("\n".join([
             f"交付：{outcome.get('delivery_status', '未记录')}",
-            f"验收：{ACCEPTANCE.get(acceptance, acceptance)}", "",
+            ("验收：模型审核通过" if acceptance == 'passed'
+             and (state.get('evaluation') or {}).get('verification_method') == 'model_review'
+             else f"验收：{ACCEPTANCE.get(acceptance, acceptance)}"), "",
             "摘要", _brief(outcome.get("summary")), "",
             "成果", final_content or "暂无成果", "",
             "限制", _list_summary(outcome.get("limitations"), "未记录限制"),

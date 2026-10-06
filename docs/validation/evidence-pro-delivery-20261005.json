@@ -1,0 +1,604 @@
+{
+  "schema": "nexgent.pro-delivery-evidence.v1",
+  "roots": [
+    {
+      "workspace": "validation-workspace/pro-delivery-20261005",
+      "episode_id": "episode-bf77124ca5ee4376",
+      "status": "failed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": null,
+      "model_calls": 1,
+      "tool_calls": 0,
+      "known_tokens": 8037,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v2-20261005",
+      "episode_id": "episode-cb2a7dda5fd64578",
+      "status": "completed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": null,
+      "model_calls": 9,
+      "tool_calls": 5,
+      "known_tokens": 58455,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v3-20261005",
+      "episode_id": "episode-a3b3842534ff4b20",
+      "status": "completed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": null,
+      "model_calls": 9,
+      "tool_calls": 5,
+      "known_tokens": 61615,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v4-20261005",
+      "episode_id": "episode-8751aab2648e44ea",
+      "status": "completed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": null,
+      "model_calls": 16,
+      "tool_calls": 5,
+      "known_tokens": 94130,
+      "billing_unknown_call_ids": [
+        "model-a0c81b8ba2ce47ac9dc9ec74672e5476"
+      ],
+      "usage_complete": false,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v5-20261005",
+      "episode_id": "episode-2f7380b188044eb5",
+      "status": "completed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": true,
+      "model_calls": 7,
+      "tool_calls": 3,
+      "known_tokens": 44189,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v5-20261005",
+      "episode_id": "episode-eb2e7b2f59de4636",
+      "status": "failed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": null,
+      "model_calls": 4,
+      "tool_calls": 1,
+      "known_tokens": 17787,
+      "billing_unknown_call_ids": [
+        "model-996a6571dc5e47feb59bed04d3242e89"
+      ],
+      "usage_complete": false,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v5-20261005",
+      "episode_id": "episode-16c9dd034b9547b5",
+      "status": "completed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": true,
+      "model_calls": 6,
+      "tool_calls": 2,
+      "known_tokens": 36496,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v5-20261005",
+      "episode_id": "episode-421226b1d2bf4dfd",
+      "status": "failed",
+      "package_digest": "568e07a44e2aa035f5833e19d2941d245d94049f10fc08e5b258bcb9db4d3dea",
+      "accepted": null,
+      "model_calls": 1,
+      "tool_calls": 0,
+      "known_tokens": 12407,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v5-20261005",
+      "episode_id": "episode-91f90d24298a4434",
+      "status": "failed",
+      "package_digest": "568e07a44e2aa035f5833e19d2941d245d94049f10fc08e5b258bcb9db4d3dea",
+      "accepted": null,
+      "model_calls": 1,
+      "tool_calls": 0,
+      "known_tokens": 12881,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v5-20261005",
+      "episode_id": "episode-0251442f36fe4540",
+      "status": "completed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": true,
+      "model_calls": 16,
+      "tool_calls": 8,
+      "known_tokens": 125361,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v6-20261005",
+      "episode_id": "episode-3cf5d77c9f97428f",
+      "status": "completed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": null,
+      "model_calls": 8,
+      "tool_calls": 4,
+      "known_tokens": 54347,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v6-20261005",
+      "episode_id": "episode-d507be90b7264798",
+      "status": "completed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": true,
+      "model_calls": 9,
+      "tool_calls": 5,
+      "known_tokens": 65323,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v6-20261005",
+      "episode_id": "episode-2339a698acf34812",
+      "status": "waiting_input",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": null,
+      "model_calls": 4,
+      "tool_calls": 1,
+      "known_tokens": 17939,
+      "billing_unknown_call_ids": [
+        "model-4212ed74267c4c43ba6a168de5fc59b2"
+      ],
+      "usage_complete": false,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v6-20261005",
+      "episode_id": "episode-8b1f7e4bf4874d70",
+      "status": "completed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": true,
+      "model_calls": 29,
+      "tool_calls": 11,
+      "known_tokens": 213412,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v6-20261005",
+      "episode_id": "episode-6d543435e6874d68",
+      "status": "completed",
+      "package_digest": "07cdf05a3646e9864fc9f618680ce9aff17d4305bf968a427da424365f5e5900",
+      "accepted": null,
+      "model_calls": 1,
+      "tool_calls": 0,
+      "known_tokens": 12192,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v6-20261005",
+      "episode_id": "episode-1d7a3ee72fbe4a59",
+      "status": "completed",
+      "package_digest": "07cdf05a3646e9864fc9f618680ce9aff17d4305bf968a427da424365f5e5900",
+      "accepted": null,
+      "model_calls": 1,
+      "tool_calls": 0,
+      "known_tokens": 13358,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v6-20261005",
+      "episode_id": "episode-28a25e88d1e04671",
+      "status": "completed",
+      "package_digest": "07cdf05a3646e9864fc9f618680ce9aff17d4305bf968a427da424365f5e5900",
+      "accepted": null,
+      "model_calls": 1,
+      "tool_calls": 0,
+      "known_tokens": 35787,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v6-20261005",
+      "episode_id": "episode-d01bdfed0d75400f",
+      "status": "completed",
+      "package_digest": "2ba2b4145d6bc360ae5d2c4b7a96694eaf0c017a033897fd1b50794806938e43",
+      "accepted": null,
+      "model_calls": 0,
+      "tool_calls": 0,
+      "known_tokens": 0,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": []
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v6-20261005",
+      "episode_id": "episode-befae44478184343",
+      "status": "completed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": true,
+      "model_calls": 6,
+      "tool_calls": 2,
+      "known_tokens": 33943,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v6-20261005",
+      "episode_id": "episode-aafcd62d66b247e7",
+      "status": "completed",
+      "package_digest": "2936399f403cfc949ef88dd9f917b196db03f362f47b4bbb8858680418ff5d92",
+      "accepted": true,
+      "model_calls": 6,
+      "tool_calls": 3,
+      "known_tokens": 33674,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    },
+    {
+      "workspace": "validation-workspace/pro-delivery-v6-20261005",
+      "episode_id": "episode-a0d3ecc212104d71",
+      "status": "completed",
+      "package_digest": "e6db4d49ff79f667ac90465c138a1cd6004a2c765c033cf7976e35ccbb12fde5",
+      "accepted": true,
+      "model_calls": 17,
+      "tool_calls": 6,
+      "known_tokens": 121133,
+      "billing_unknown_call_ids": [],
+      "usage_complete": true,
+      "observed_models": [
+        "mimo-v2.6-pro"
+      ]
+    }
+  ],
+  "model_calls": 152,
+  "known_total_tokens": 1072466,
+  "billing_unknown_call_ids": [
+    "model-4212ed74267c4c43ba6a168de5fc59b2",
+    "model-996a6571dc5e47feb59bed04d3242e89",
+    "model-a0c81b8ba2ce47ac9dc9ec74672e5476"
+  ],
+  "usage_complete": false,
+  "learning": {
+    "validation-workspace/pro-delivery-v5-20261005": {
+      "enabled": true,
+      "configured": true,
+      "mode": "project_regression",
+      "active_revision": 0,
+      "items": [
+        {
+          "id": "feedback-work-a231509ab069fb1a1890f556",
+          "source_episode_id": "episode-eb2e7b2f59de4636",
+          "source_objective": "处理 inputs.orders 中的订单修订记录，交付名为 result 的 JSON 工件。\n每个 id 只保留 revision 最大的记录，去掉 status 为 cancelled 的订单。\n负 quantity 表示退款，保留其符号。每个 product 汇总 quantity 和\nquantity * unit_price_cents，金额使用整数分，不用浮点数。\nresult 严格为 {\"products\": {产品名: {\"quantity\":整数,\"net_cents\":整数}},\n\"total_cents\":整数,\"kept_orders\":整数}，产品名升序，保留合计为零的产品。\n今后会反复处理不同订单数据，需要参数化的可复用订单工具。\n优先使用当前已安装且满足上述规则的订单工具；若不存在，开发一个通用\nlocal_compute 工具，真实调用并检查结果。不要把本题记录或答案写进工具源码。\n不需要成员招募、联网、文件或额外文字工件。",
+          "status": "deferred",
+          "reason": "source_infrastructure_failure",
+          "proposal": null,
+          "promotion": null,
+          "organization_change": null,
+          "learning_from": [],
+          "selection": null,
+          "reuse_episode_ids": []
+        },
+        {
+          "id": "feedback-work-c7a96a80d33e6bafa36fe3bc",
+          "source_episode_id": "episode-2f7380b188044eb5",
+          "source_objective": "处理 inputs.orders 中的订单修订记录，交付名为 result 的 JSON 工件。\n每个 id 只保留 revision 最大的记录，去掉 status 为 cancelled 的订单。\n负 quantity 表示退款，保留其符号。每个 product 汇总 quantity 和\nquantity * unit_price_cents，金额使用整数分，不用浮点数。\nresult 严格为 {\"products\": {产品名: {\"quantity\":整数,\"net_cents\":整数}},\n\"total_cents\":整数,\"kept_orders\":整数}，产品名升序，保留合计为零的产品。\n今后会反复处理不同订单数据，需要参数化的可复用订单工具。\n优先使用当前已安装且满足上述规则的订单工具；若不存在，开发一个通用\nlocal_compute 工具，真实调用并检查结果。不要把本题记录或答案写进工具源码。\n不需要成员招募、联网、文件或额外文字工件。",
+          "status": "rejected",
+          "reason": "development_episode_incomplete",
+          "proposal": null,
+          "promotion": null,
+          "organization_change": null,
+          "learning_from": [],
+          "selection": null,
+          "reuse_episode_ids": []
+        },
+        {
+          "id": "feedback-work-d626edbdf7487aa3b851edc9",
+          "source_episode_id": "episode-16c9dd034b9547b5",
+          "source_objective": "处理 inputs.orders 中的订单修订记录，交付名为 result 的 JSON 工件。\n每个 id 只保留 revision 最大的记录，去掉 status 为 cancelled 的订单。\n负 quantity 表示退款，保留其符号。每个 product 汇总 quantity 和\nquantity * unit_price_cents，金额使用整数分，不用浮点数。\nresult 严格为 {\"products\": {产品名: {\"quantity\":整数,\"net_cents\":整数}},\n\"total_cents\":整数,\"kept_orders\":整数}，产品名升序，保留合计为零的产品。\n今后会反复处理不同订单数据，需要参数化的可复用订单工具。\n优先使用当前已安装且满足上述规则的订单工具；若不存在，开发一个通用\nlocal_compute 工具，真实调用并检查结果。不要把本题记录或答案写进工具源码。\n不需要成员招募、联网、文件或额外文字工件。",
+          "status": "rejected",
+          "reason": "development_episode_incomplete",
+          "proposal": null,
+          "promotion": null,
+          "organization_change": null,
+          "learning_from": [
+            "feedback-work-c7a96a80d33e6bafa36fe3bc"
+          ],
+          "selection": null,
+          "reuse_episode_ids": []
+        }
+      ],
+      "usage": {
+        "model_calls": 2,
+        "tool_calls": 0,
+        "charged_completion_tokens": 6000,
+        "known_total_tokens": 25288,
+        "usage_complete": true
+      },
+      "root_episode_ids": [
+        "episode-421226b1d2bf4dfd",
+        "episode-91f90d24298a4434"
+      ],
+      "phase_budget": {
+        "max_model_calls": 40,
+        "max_completion_tokens": 160000,
+        "max_tool_calls": 20,
+        "max_tool_work_units": 200000,
+        "max_nodes": 100
+      }
+    },
+    "validation-workspace/pro-delivery-v6-20261005": {
+      "enabled": true,
+      "configured": true,
+      "mode": "project_regression",
+      "active_revision": 0,
+      "items": [
+        {
+          "id": "feedback-work-a3c4aee323135fb3db394571",
+          "source_episode_id": "episode-3cf5d77c9f97428f",
+          "source_objective": "处理 inputs.orders 中的订单修订记录，交付名为 result 的 JSON 工件。\n每个 id 只保留 revision 最大的记录，去掉 status 为 cancelled 的订单。\n负 quantity 表示退款，保留其符号。每个 product 汇总 quantity 和\nquantity * unit_price_cents，金额使用整数分，不用浮点数。\nresult 严格为 {\"products\": {产品名: {\"quantity\":整数,\"net_cents\":整数}},\n\"total_cents\":整数,\"kept_orders\":整数}，产品名升序，保留合计为零的产品。\n今后会反复处理不同订单数据，需要参数化的可复用订单工具。\n优先使用当前已安装且满足上述规则的订单工具；若不存在，开发一个通用\nlocal_compute 工具，真实调用并检查结果。不要把本题记录或答案写进工具源码。\n不需要成员招募、联网、文件或额外文字工件。",
+          "status": "no_change",
+          "reason": "唯一公开反馈是 episode-3cf5d77c9f97428f 的任务目标文本（要求开发参数化订单工具），不是用户后续反馈，也没有指出任何可复用的失败机制。该 episode 的执行状态为 completed、delivery_status 为 delivered、schema_validation 为 passed，工具 task.orders.aggregate_revisions 已成功调",
+          "proposal": {
+            "candidate_type": "no_change",
+            "hypothesis": null,
+            "reason": "唯一公开反馈是 episode-3cf5d77c9f97428f 的任务目标文本（要求开发参数化订单工具），不是用户后续反馈，也没有指出任何可复用的失败机制。该 episode 的执行状态为 completed、delivery_status 为 delivered、schema_validation 为 passed，工具 task.orders.aggregate_revisions 已成功调用（successful_use=true），且评估结果为 evaluator_unavailable、score_available=false，public_feedback 与 user_feedback 均为空，无法得知分数高低。development_experience 为空，缺少跨任务的重复失败模式或协调缺口证据。选择 tool 收据会把仅在创建 episode 内验证过的工具推行为持久能力，而指令明确指出成功使用不能证明部署收益；选择 orchestration 需要反馈中可复用的协调缺口，此处也没有。现有证据既不能区分出一个可复用的失败机制，也不含显式的行为变更请求，因此维持现状。",
+            "schema": "nexgent.ordinary-development-plan.v1",
+            "source_ref": null
+          },
+          "promotion": null,
+          "organization_change": null,
+          "learning_from": [],
+          "selection": null,
+          "reuse_episode_ids": []
+        },
+        {
+          "id": "feedback-work-b358d626ed280b4ac736d63f",
+          "source_episode_id": "episode-d507be90b7264798",
+          "source_objective": "处理 inputs.orders 中的订单修订记录，交付名为 result 的 JSON 工件。\n每个 id 只保留 revision 最大的记录，去掉 status 为 cancelled 的订单。\n负 quantity 表示退款，保留其符号。每个 product 汇总 quantity 和\nquantity * unit_price_cents，金额使用整数分，不用浮点数。\nresult 严格为 {\"products\": {产品名: {\"quantity\":整数,\"net_cents\":整数}},\n\"total_cents\":整数,\"kept_orders\":整数}，产品名升序，保留合计为零的产品。\n产品组只从去重且剔除 cancelled 后的保留订单产生；仅取消订单出现的产品不建组。\n今后会反复处理不同订单数据，需要参数化的可复用订单工具。\n优先使用当前已安装且满足上述规则的订单工具；若不存在，开发一个通用\nlocal_compute 工具，真实调用并检查结果。不要把本题记录或答案写进工具源码。\n不需要成员招募、联网、文件或额外文字工件。",
+          "status": "no_change",
+          "reason": "episode-d507be90b7264798 的交付评估已全部通过（score=9，accepted=true，delivery_status=delivered，schema_validation=passed），public_feedback 与 user_feedback 均为空，不存在用户提出的可复用行为变更请求，也没有 workflow_diagnostic 或跨任务重复失败的证据。",
+          "proposal": {
+            "candidate_type": "no_change",
+            "hypothesis": null,
+            "reason": "episode-d507be90b7264798 的交付评估已全部通过（score=9，accepted=true，delivery_status=delivered，schema_validation=passed），public_feedback 与 user_feedback 均为空，不存在用户提出的可复用行为变更请求，也没有 workflow_diagnostic 或跨任务重复失败的证据。工具 task.order_summary 的 successful_use 仅为其创建 episode 内的使用证明，不能据此推断后续部署收益；orchestration 也没有对应的协调缺口证据支持。development_experience 中唯一的 no_change 记录同样缺少失败机制。现有公开证据既不能区分出一个可复用的失败机制，也没有显式的行为变更请求，因此维持不变。",
+            "schema": "nexgent.ordinary-development-plan.v1",
+            "source_ref": null
+          },
+          "promotion": null,
+          "organization_change": null,
+          "learning_from": [
+            "feedback-work-a3c4aee323135fb3db394571"
+          ],
+          "selection": null,
+          "reuse_episode_ids": []
+        },
+        {
+          "id": "feedback-work-9f555463a3d95dca419e2b61",
+          "source_episode_id": "episode-8b1f7e4bf4874d70",
+          "source_objective": "处理 inputs.orders 中的订单修订记录，交付名为 result 的 JSON 工件。\n每个 id 只保留 revision 最大的记录，去掉 status 为 cancelled 的订单。\n负 quantity 表示退款，保留其符号。每个 product 汇总 quantity 和\nquantity * unit_price_cents，金额使用整数分，不用浮点数。\nresult 严格为 {\"products\": {产品名: {\"quantity\":整数,\"net_cents\":整数}},\n\"total_cents\":整数,\"kept_orders\":整数}，产品名升序，保留合计为零的产品。\n产品组只从去重且剔除 cancelled 后的保留订单产生；仅取消订单出现的产品不建组。\n今后会反复处理不同订单数据，需要参数化的可复用订单工具。\n优先使用当前已安装且满足上述规则的订单工具；若不存在，开发一个通用\nlocal_compute 工具，真实调用并检查结果。不要把本题记录或答案写进工具源码。\n不需要成员招募、联网、文件或额外文字工件。",
+          "status": "rejected",
+          "reason": "independent_selection_rejected",
+          "proposal": {
+            "candidate_type": "tool",
+            "hypothesis": {
+              "applicability": "适用于今后出现 inputs.orders 订单修订记录、需要去重/剔除 cancelled/汇总整数分的相似任务；不适用于输入语义不同或需要不同输出结构的任务。",
+              "expected_behavior": "将 definition-fa520a57d421e8cc2e7a62a9（task.order_revisions_aggregate_v3）持久化为已安装的参数化订单工具，后续处理不同订单数据的任务优先调用并核对结果，而不重新 develop_tool；规则、交付结构与校验强度保持不变。",
+              "failure_mechanism": "episode-8b1f7e4bf4874d70 与 episode-c543fbc1856d4d48 反复从头开发同一套订单聚合算法，导致 rpc.18 出现 DefinitionError、task.order_revisions_aggregate 系列被分叉出三个版本（v1/v2/v3），与用户反馈中「避免每次重新开发同一算法」的请求相对应。",
+              "falsifier": "在后续独立任务中，若执行轨迹再次出现 develop_tool 节点重新实现同一订单聚合算法（出现新的 task.order_revisions_aggregate 定义），或输出出现 DefinitionError/结构校验失败/保留规则（最高 revision、去 cancelled、零合计保留、产品名升序）与整数分不符，则该改进被证伪。"
+            },
+            "reason": "两个 episode 的 user_feedback 明确要求今后复用已实际成功调用的参数化订单工具以避免重复开发同一算法。episode-8b1f7e4bf4874d70 的执行轨迹显示 develop_tool 共 3 次（1 次失败 DefinitionError，2 次完成），随后 capability_definition_staged/tool_admitted 多次挂载同一算法的不同版本（task.order_revisions_aggregate、_v2、_v3），episode-c543fbc1856d4d48 又再次 develop_tool 并挂载第三版（对应 definition-fa520a57d421e8cc2e7a62a9，rpc.7 起真实调用一次且 delivery 通过 schema_validation）。这是可复用的「重复开发同一算法」失败机制，且候选收据与反馈要求的能力一致：持久化该已成功调用的参数化工具，使未来任务在首步 capability_inventory 中就能发现并复用，减少重复的 develop_tool 开销（符合 min_cost_reduction 的节约方向），同时保持同一交付规则与质量门槛。三个同名工具版本在证据中并存，选取最新（v3，来自第二个独立 episode 的真实调用与交付）以避免继续分叉；不选 orchestration，因为公开证据未显示成员间协调缺口（deployed_members 为空，未提供 task_members 收据），也不选 package_patch，因为不存在指向组件注册表的 workflow_diagnostic。",
+            "schema": "nexgent.ordinary-development-plan.v1",
+            "source_ref": "definition-fa520a57d421e8cc2e7a62a9"
+          },
+          "promotion": null,
+          "organization_change": null,
+          "learning_from": [
+            "feedback-work-a3c4aee323135fb3db394571",
+            "feedback-work-b358d626ed280b4ac736d63f"
+          ],
+          "selection": {
+            "gates": {
+              "behavior_activated": true,
+              "candidate_completed": true,
+              "cost": false,
+              "improvement": false,
+              "measurement_complete": true,
+              "quality": false,
+              "regressions": false,
+              "selection_role": true,
+              "success_rate": true
+            },
+            "measurements": {
+              "candidate": {
+                "acceptance_complete": true,
+                "all_accepted": true,
+                "cost": 143.8,
+                "quality": 8.0,
+                "reported_token_work": 162.674,
+                "score_complete": true,
+                "success_rate": 1.0,
+                "usage_complete": true
+              },
+              "failure_reasons": [],
+              "paired_task_deltas": [
+                {
+                  "arm_order": [
+                    "parent",
+                    "candidate"
+                  ],
+                  "candidate": {
+                    "accepted": true,
+                    "cost": 143.8,
+                    "cost_projection": {
+                      "charged_completion_tokens": 14800,
+                      "conservative_token_basis": "charged_completion_tokens",
+                      "conservative_work": 143.8,
+                      "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+                      "reported_token_work": 162.674,
+                      "reported_tokens": {
+                        "completion_tokens": 2142,
+                        "prompt_tokens": 31532,
+                        "total_tokens": 33674
+                      },
+                      "schema": "nexgent.normalized-work-projection.v1",
+                      "weights": {
+                        "charged_completion_tokens": 0.001,
+                        "charged_tool_work_units": 1.0,
+                        "model_calls": 1.0,
+                        "nodes": 1.0,
+                        "tool_calls": 1.0
+                      }
+                    },
+                    "episode_id": "episode-aafcd62d66b247e7",
+                    "failure_class": null,
+                    "failure_reasons": [],
+                    "score": 8.0,
+                    "usage_complete": true
+                  },
+                  "failure_reasons": [],
+                  "parent": {
+                    "accepted": true,
+                    "cost": 41.4,
+                    "cost_projection": {
+                      "charged_completion_tokens": 15400,
+                      "conservative_token_basis": "charged_completion_tokens",
+                      "conservative_work": 41.4,
+                      "reported_token_basis": "prompt_tokens_plus_completion_tokens",
+                      "reported_token_work": 59.943,
+                      "reported_tokens": {
+                        "completion_tokens": 2101,
+                        "prompt_tokens": 31842,
+                        "total_tokens": 33943
+                      },
+                      "schema": "nexgent.normalized-work-projection.v1",
+                      "weights": {
+                        "charged_completion_tokens": 0.001,
+                        "charged_tool_work_units": 1.0,
+                        "model_calls": 1.0,
+                        "nodes": 1.0,
+                        "tool_calls": 1.0
+                      }
+                    },
+                    "episode_id": "episode-befae44478184343",
+                    "failure_class": null,
+                    "failure_reasons": [],
+                    "score": 9.0,
+                    "usage_complete": true
+                  },
+                  "score_delta": -1.0,
+                  "task_ref_digest": "baaf8efeb59bc718ca4e8fedef52d5cb564a80a7392edb14027f8a49c4d19d1a"
+                }
+              ],
+              "parent": {
+                "acceptance_complete": true,
+                "all_accepted": true,
+                "cost": 41.4,
+                "quality": 9.0,
+                "reported_token_work": 59.943,
+                "score_complete": true,
+                "success_rate": 1.0,
+                "usage_complete": true
+              },
+              "regressions": 1
+            },
+            "improvement_basis": null
+          },
+          "reuse_episode_ids": []
+        }
+      ],
+      "usage": {
+        "model_calls": 15,
+        "tool_calls": 5,
+        "charged_completion_tokens": 39200,
+        "known_total_tokens": 128954,
+        "usage_complete": true
+      },
+      "root_episode_ids": [
+        "episode-1d7a3ee72fbe4a59",
+        "episode-28a25e88d1e04671",
+        "episode-6d543435e6874d68",
+        "episode-aafcd62d66b247e7",
+        "episode-befae44478184343",
+        "episode-d01bdfed0d75400f"
+      ],
+      "phase_budget": {
+        "max_model_calls": 40,
+        "max_completion_tokens": 160000,
+        "max_tool_calls": 20,
+        "max_tool_work_units": 200000,
+        "max_nodes": 100
+      }
+    }
+  }
+}

@@ -239,6 +239,13 @@ def host_runtime_fingerprint():
         path = directory / name
         if path.is_file():
             files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    # Native delegation and its model/verification boundaries are also host
+    # code. A frozen trial may not silently switch these between arms.
+    for name in ('kernel/dsh.py', 'kernel/dsh_adapter.mjs', 'models/gateway.py',
+                 'models/worker.py', 'delivery.py', 'workspace.py', 'organization_tools.py'):
+        path = directory.parent / name
+        if path.is_file():
+            files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
     return {"schema": "nexgent.task-benchmark-host-runtime.v1", "files": files}
 
 

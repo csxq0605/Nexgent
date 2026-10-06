@@ -2,7 +2,7 @@
 - id: agent-default-model
   config:
     provider: nexgent-mimo-local
-    model: mimo-v2.6-flash
+    model: !!js process.env.DSH_MIMO_MODEL || 'mimo-v2.6-flash'
 
 - id: llm-deepseek
   disabled: true

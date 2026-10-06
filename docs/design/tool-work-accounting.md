@@ -39,6 +39,28 @@ budget opts into sufficient `max_tool_work_units`.
 
 ## Trust boundary and limitation
 
+Task-authored and adopted controlled Python tools use a host worker meter
+instead of a trusted handler's `charge_work` calls. Both paths count the same
+CPython trace events (`call`, `line`, `return`, `exception`), reserve at least
+one unit and cap each worker at the root's remaining work allowance, up to
+200000 events. A portable tool's larger declared reservation remains a floor.
+The default task API work budget is 200000; an explicit zero remains zero.
+Existing frozen task and research budgets retain their original limits.
+
+The host charges measured worker work before checking the output contract.
+Worker exceptions and instruction exhaustion carry the measured count; the
+event that triggers hard termination is included. `add_tool_work(consumed=True)`
+commits that already consumed work even when it exceeds the budget, then
+raises `BudgetExhausted`. It does not authorize more work or change the gate.
+Other trusted-handler increments retain their admission-before-work behavior.
+
+Timeout, cancellation or worker communication failure without a measurement
+settles with `usage_complete=false`; its unknown work cannot become a complete
+zero cost. Parallel workers use the remaining allowance observed at their own
+start. They do not share an advance allocation of instruction quotas; if their
+combined consumption exceeds the root budget, settlement preserves the actual
+consumption and raises exhaustion. Trace work is not a CPU instruction count.
+
 The framework controls validation, atomic accounting, aggregation, and replay.
 Installed handlers are trusted host code. Nexgent cannot infer the FLOPs,
 solver iterations, remote CPU time, or vendor billing of an arbitrary native
@@ -69,3 +91,18 @@ Provider-reported token work does not refund a reservation or alter a gate.
 Both values are normalized estimates for comparisons under one frozen protocol.
 They are not vendor prices, invoices, or monetary cost. Pricing requires a
 separate provider/model price schedule and billing receipt.
+
+## Native Main and workspace computation (2026-10-06)
+
+Native DSH completions enter the same host model admission and receipt chain.
+The workspace `run_python` handler now calls the shared metered worker through
+its admitted ToolContext receipt, so a numerical verification is no longer
+reported as zero worker work. A failed computation retains its measured count;
+a missing timeout measurement remains unknown. Historical records are retained
+as recorded and are not backfilled with inferred work.
+
+Main's host evaluator limits verification actions to the remaining resources
+and leaves a model admission slot for its verdict. Numerical/file requirements
+still need actual verification receipts; a smaller action allowance does not
+turn missing evidence into acceptance. The host can inspect immutable sources
+of actually used candidate tools as data, without granting their execution.

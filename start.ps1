@@ -1,4 +1,4 @@
-param([string]$Project = $PSScriptRoot, [string]$ModelRoot)
+param([string]$Project = $PSScriptRoot, [string]$ModelRoot, [ValidateSet('dsh')][string]$Kernel)
 $ErrorActionPreference = 'Stop'
 $projectPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Project)
 $modelPath = if ($ModelRoot) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ModelRoot) } else { $null }
@@ -13,6 +13,9 @@ Set-Location -LiteralPath $PSScriptRoot
 $appArgs = @('--project', $projectPath)
 if ($modelPath) {
     $appArgs += @('--model-root', $modelPath)
+}
+if ($Kernel) {
+    $appArgs += @('--kernel', $Kernel)
 }
 & $pythonPath -X utf8 -m nexgent.ui.app @appArgs
 exit $LASTEXITCODE

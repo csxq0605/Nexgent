@@ -365,6 +365,10 @@ def execute(payload, context):
                 history.append({'kind': 'completion_error', 'decision': decision, 'error': str(error)})
                 continue
 
+            if not REVIEW_BEFORE_COMPLETION:
+                return {'deliverables': checked['deliverables'],
+                        'summary': checked['summary'], 'limitations': checked['limitations']}
+
             review = context.ask(
                 'task_reviewer',
                 review_prompt,
@@ -716,6 +720,7 @@ When task.context.organization contains a member directory, reuse relevant membe
 Use task.context.delegation_scope to see your assignment and remaining delegation depth. An assigned member should perform its own scope directly; an independent checker is already that checker and must not delegate the same check again merely to make it independent. Further delegation needs genuinely distinct work and available depth. When the scope is complete, publish findings and return them to the lead; do not keep republishing the same result or create more members to perfect a completed assignment.
 
 Completion requires real artifact IDs returned by successful `publish` actions (or other host actions that return accessible artifact IDs). When publishing a named deliverable already declared in the task contract, omit `schema` or use the short `\"application/json\"` value; the host applies the declared schema, so do not repeat that schema in model output. Never place inline content where an artifact ID is required and never claim that an unexecuted action succeeded.
+Publish structured deliverables as native JSON values in params.content: an object or array stays an object or array. Do not stringify JSON, wrap it in Markdown, or put it inside a text field unless the user requested a textual document. The application/json schema label does not require serialization to a string.
 """
 
 
@@ -795,12 +800,15 @@ Return a compact JSON object with `diagnosis`, `repairs`, and `next_action`. `re
 """
 
 
-def default_package(*, review_on_publication=False):
+def default_package(*, review_on_publication=False, review_before_completion=True):
     """Return the immutable general-purpose task package shipped by the core."""
     if type(review_on_publication) is not bool:
         raise ValueError('review_on_publication must be boolean')
+    if type(review_before_completion) is not bool:
+        raise ValueError('review_before_completion must be boolean')
     files = {
-        "agent/main.py": 'REVIEW_ON_PUBLICATION = ' + repr(review_on_publication) + '\n' + MAIN_SOURCE,
+        "agent/main.py": ('REVIEW_ON_PUBLICATION = ' + repr(review_on_publication) + '\n'
+                          + 'REVIEW_BEFORE_COMPLETION = ' + repr(review_before_completion) + '\n' + MAIN_SOURCE),
         "agent/protocol.py": PROTOCOL_SOURCE,
         "agent/actions.py": ACTIONS_SOURCE,
         "prompts/task.md": TASK_PROMPT,

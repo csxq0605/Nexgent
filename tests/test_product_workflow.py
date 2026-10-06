@@ -18,7 +18,32 @@ def passed():
             'checks': [{'requirement': 'The supplied task is fulfilled', 'passed': True}]}
 
 
-def test_evaluation_shares_original_task_budget_and_reports_all_calls(tmp_path):
+def test_default_main_publishes_json_and_uses_only_host_independent_evaluation(tmp_path):
+    def policy(number, payload):
+        if number == 1:
+            assert payload['task']['deliverables'][0]['schema'] == {'type': 'object'}
+            return {'request': {'method': 'publish', 'params': {
+                'name': 'result', 'content': {'value': 42}}}}
+        if number == 2:
+            assert payload['evidence']['deliverables'] == {'result': {'value': 42}}
+            return {'tool': 'run_python', 'arguments': {
+                'code': "return {'value': payload['left'] * payload['right']}",
+                'payload': {'left': 6, 'right': 7}}}
+        assert number == 3 and payload['verification_results'][0]['result']['value'] == {'value': 42}
+        return passed()
+    runtime = Nexgent(tmp_path, gateway_factory=ScriptedGatewayFactory(policy))
+    runtime.set_auto_improve(False)
+    result = runtime.run(runtime.create('Publish six times seven as a JSON object',
+                         deliverables=[{'name': 'result', 'schema': {'type': 'object'}}],
+                         budget={'max_model_calls': 3})['id'])
+    assert result['status'] == 'completed', result.get('last_error')
+    assert runtime.store.read(result['output_refs']['result'], result['id'])['content'] == {'value': 42}
+    assert result['evaluation']['accepted'] is True
+    assert [call['role'] for call in result['calls']] == ['task_agent', 'evaluator', 'evaluator']
+    assert result['usage']['model_calls'] == 3
+
+
+def test_evaluation_shares_original_task_budget_and_reports_all_calls(qtbot, tmp_path):
     gateway = ScriptedGatewayFactory(lambda *_: passed())
     runtime = Nexgent(tmp_path, package=ANSWER, gateway_factory=gateway)
     zero = runtime.run(runtime.create('Deliver answer', budget={'max_model_calls': 0})['id'])
@@ -26,12 +51,18 @@ def test_evaluation_shares_original_task_budget_and_reports_all_calls(tmp_path):
     assert zero['usage']['model_calls'] == 0
     task = runtime.run(runtime.create('Deliver answer', budget={'max_model_calls': 1})['id'])
     assert task['evaluation']['accepted'] is True
+    assert task['evaluation']['verification_method'] == 'model_review'
     assert task['usage']['model_calls'] == 1
     evaluator = runtime.get(task['evaluation']['evaluation_episode_id'])
     assert evaluator['parent_episode_id'] == task['id']
     assert evaluator['root_episode_id'] == task['id']
     assert task['calls'] == evaluator['calls']
     assert len(runtime.list()) == 2
+    window = MainWindow(tmp_path, runtime)
+    qtbot.addWidget(window)
+    window.show_task(task['id'])
+    assert '模型审核通过' in window.status_label.text()
+    assert '验收：模型审核通过' in window.delivery_view.toPlainText()
 
 
 def test_numerical_verdict_without_verification_is_missing_evidence(tmp_path):
@@ -45,6 +76,30 @@ def test_numerical_verdict_without_verification_is_missing_evidence(tmp_path):
     assert result['usage']['model_calls'] == 5
     assert result['usage']['tool_calls'] == 1
     assert 'delivery_revision_id' not in result  # A reviewer failure is not agent rejection.
+
+
+def test_developed_tool_does_not_break_independent_workspace_verification(tmp_path):
+    strategy = package('''def execute(payload, context):
+    context.develop_tool({
+        'name': 'task.double', 'description': 'Double an integer',
+        'source': 'def execute(payload, context):\\n    return {"value": payload["value"] * 2}\\n',
+        'input_schema': {'type': 'object', 'properties': {'value': {'type': 'integer'}}, 'required': ['value']},
+        'output_schema': {'type': 'object'}
+    })
+    value = context.tool('task.double', {'value': 6})
+    ref = context.publish(value, name='result')
+    return {'deliverables': {'result': ref['id']}}
+''')
+    def policy(number, payload):
+        if number == 1:
+            return {'tool': 'run_python', 'arguments': {
+                'code': 'return {"value": payload["value"] * 2}', 'payload': {'value': 6}}}
+        assert payload['verification_results'][0]['result']['value'] == {'value': 12}
+        return passed()
+    runtime = Nexgent(tmp_path, package=strategy, gateway_factory=ScriptedGatewayFactory(policy))
+    result = runtime.run(runtime.create('Double 6 with a reusable tool')['id'])
+    assert result['evaluation']['accepted'] is True
+    assert result['usage']['tool_calls'] == 2
 
 
 def test_evaluator_must_open_actual_file_before_accepting(tmp_path):
@@ -236,15 +291,10 @@ def test_stopped_correction_resumes_its_persisted_child_after_restart(tmp_path):
     assert len(final['children']) == 1
 
 
-@pytest.mark.parametrize('action_envelope', [False, True])
-def test_main_default_strategy_finishes_published_work_in_both_completion_forms(qtbot, tmp_path, action_envelope):
-    from test_task_seed import published_id
+def test_main_auto_completes_published_work_without_package_review(qtbot, tmp_path):
     def policy(number, payload):
-        if number == 1:
-            return {'request': {'method': 'publish', 'params': {'name': 'result', 'content': 'answer'}}}
-        done = {'deliverables': {'result': published_id(payload)}, 'summary': 'Actual published answer',
-                'limitations': []}
-        return {'request': {'method': 'done', 'params': done}} if action_envelope else {'done': done}
+        assert number == 1
+        return {'request': {'method': 'publish', 'params': {'name': 'result', 'content': 'answer'}}}
     runtime = Nexgent(tmp_path, evaluator=CheckResult('answer'), gateway_factory=ScriptedGatewayFactory(policy))
     window = MainWindow(tmp_path, runtime)
     qtbot.addWidget(window)
@@ -254,5 +304,7 @@ def test_main_default_strategy_finishes_published_work_in_both_completion_forms(
     final = runtime.get(window.selected_id)
     assert final['status'] == 'completed', final.get('last_error')
     assert final['evaluation']['accepted'] is True
-    assert final['usage']['model_calls'] == 3
+    assert final['usage']['model_calls'] == 1
+    assert len(final['calls']) == 1
+    assert all(call['status'] in {'received', 'completed'} for call in final['calls'])
     assert len(runtime.list()) == 1
