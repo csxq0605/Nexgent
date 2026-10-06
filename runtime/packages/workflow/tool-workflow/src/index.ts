@@ -13,6 +13,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { isAbsolute } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
@@ -26,6 +27,7 @@ import type {
 } from '@deepseek-ai/dsh-workflow'
 import { createWorkflowRecordMirror } from './record.ts'
 import { resolveWorkflowBody } from './architecture.ts'
+import { loadArchitecture, saveArchitecture } from './architecture-store.ts'
 import type { WorkflowRecordMirror } from './record.ts'
 import type {
   ToolWorkflowAgentEndData, ToolWorkflowAgentStartData,
@@ -43,6 +45,8 @@ export const inject = ['tools', 'workflowEngine', 'systemPrompt']
 
 /** Config: the model-facing tool name plus result rendering caps. */
 export interface Config {
+  /** Absolute application-owned directory for saved graph definitions; enables execution by architectureVersion (default disabled). */
+  architectureDirectory?: string
   /** The model-facing tool name to register (default `workflow`). */
   toolName?: string
   /** Rendered-result ceiling, in characters: a longer JSON value is truncated with a notice (default 50000). */
@@ -58,12 +62,13 @@ export interface Config {
 }
 
 export const Config: z<Config> = z.object({
+  architectureDirectory: z.string(),
   toolName: z.string().default('workflow'),
   maxResultChars: z.natural().min(1).default(50_000),
   enableRunInBackground: z.boolean().default(true),
 })
 
-type ResolvedConfig = Required<Config>
+type ResolvedConfig = Required<Omit<Config, 'architectureDirectory'>> & Pick<Config, 'architectureDirectory'>
 
 interface WorkflowRecorder {
   start(session: Session, run: WorkflowRun): void
@@ -188,11 +193,11 @@ type WorkflowCallArgs = {
 }
 
 /** The pending-state card: a generic card titled by the workflow's meta name. */
-function presentWorkflowCall(args: Pick<WorkflowCallArgs, 'meta'> & { script?: string; architecture?: unknown }): ToolCallView {
+function presentWorkflowCall(args: Pick<WorkflowCallArgs, 'meta'> & { script?: string; architecture?: unknown; architectureVersion?: string }): ToolCallView {
   return {
     card: 'generic',
     title: `workflow: ${args.meta.name}`,
-    rawInput: args.script ?? JSON.stringify(args.architecture ?? {}),
+    rawInput: args.script ?? args.architectureVersion ?? JSON.stringify(args.architecture ?? {}),
   }
 }
 
@@ -325,7 +330,8 @@ function startBackgroundRun(
 export function apply(ctx: Context, config: Config): void {
   // schemastery (the exported Config schema) has already filled the defaulted
   // fields; the assertion records that resolution, not a hidden fallback.
-  const { toolName, maxResultChars, enableRunInBackground } = config as ResolvedConfig
+  const { toolName, maxResultChars, enableRunInBackground, architectureDirectory } = config as ResolvedConfig
+  if (architectureDirectory !== undefined && !isAbsolute(architectureDirectory)) throw new Error('architectureDirectory must be absolute')
   const recorder = createWorkflowRecorder(ctx)
   const mirror = createWorkflowRecordMirror(ctx)
   // Usage policy ships with the tool (the master convention: tool guidance
@@ -337,8 +343,14 @@ export function apply(ctx: Context, config: Config): void {
   })
   ctx.tools.register(defineTool({
     name: toolName,
-    description: DESCRIPTION + (enableRunInBackground ? BACKGROUND_CLOSING : FOREGROUND_ONLY_CLOSING),
+    description: (architectureDirectory === undefined ? DESCRIPTION : DESCRIPTION.replace('Supply exactly one of script or architecture.', 'Supply exactly one of script, architecture or architectureVersion.') + ' Graph definitions are saved independently of the Session. To reuse a saved graph, supply architectureVersion instead of script or architecture. Saving or executing a graph does not approve, adopt or activate it for future tasks.') + (enableRunInBackground ? BACKGROUND_CLOSING : FOREGROUND_ONLY_CLOSING),
     parameters: {
+      ...architectureDirectory === undefined ? {} : {
+        architectureVersion: {
+          type: 'string' as const,
+          description: 'Alternative to script or architecture: the saved graph SHA-256 digest. Exactly one representation is required; unknown or damaged definitions fail before execution.',
+        },
+      },
       script: {
         type: 'string',
         description: 'The plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`).',
@@ -417,7 +429,14 @@ export function apply(ctx: Context, config: Config): void {
       }],
     },
     async execute(input, exec) {
-      const args = { ...input, script: resolveWorkflowBody(input.script, input.architecture) }
+      let script: string
+      if (input.architectureVersion !== undefined) {
+        if (architectureDirectory === undefined) throw new Error('saved architecture execution is disabled')
+        if (input.script !== undefined || input.architecture !== undefined) throw new Error('Provide exactly one of script, architecture or architectureVersion')
+        script = (await loadArchitecture(architectureDirectory, input.architectureVersion)).script
+      } else {
+        script = resolveWorkflowBody(input.script, input.architecture)
+      }
       const parent = exec.agent
       if (!parent) {
         // The loop sets `exec.agent` for every model-driven call; its absence
@@ -425,15 +444,16 @@ export function apply(ctx: Context, config: Config): void {
         // parent to attribute the children to. Fail loud rather than guess.
         throw new Error('workflow tool requires a calling agent (exec.agent was undefined)')
       }
+      if (architectureDirectory !== undefined && input.architecture !== undefined) {
+        await saveArchitecture(architectureDirectory, input.architecture)
+      }
+      const args = { ...input, script }
+      // Saved-definition IO can yield after ToolRuntime's dispatch abort check.
+      exec.signal.throwIfAborted()
       if (args.run_in_background === true) {
         if (!enableRunInBackground) {
           throw new Error('run_in_background is disabled for this tool')
         }
-        // No pre-abort check here, unlike bash/pwsh: ToolRuntime re-reads the
-        // caller signal right before execute(), and this branch reaches
-        // jobs.start synchronously from there. The shell tools await a
-        // sandbox escalation approval before registering, which is the window
-        // their check covers.
         return startBackgroundRun(ctx, args, parent, exec.parent === undefined, {
           recorder,
           mirror,

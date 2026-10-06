@@ -21,7 +21,7 @@ const server = createServer(async (request, response) => {
   for await (const chunk of request) body += chunk
   const parsed = JSON.parse(body)
   requests.push(parsed)
-  if (requests.length > 40) {
+  if (requests.length > 90) {
     response.writeHead(500, { 'content-type': 'application/json' })
     response.end(JSON.stringify({ error: { message: 'Unexpected repeated request in graph fixture' } }))
     return
@@ -51,7 +51,9 @@ const server = createServer(async (request, response) => {
     }
   }
   else if (last?.role === 'user') delta = { tool_calls: [{ index: 0, id: `graph_${requests.length}`, type: 'function', function: {
-    name: 'workflow', arguments: JSON.stringify({ architecture, meta: { name: 'architecture-proof', description: 'Combine independent evidence through a reviewer' }, args: { material: 'fixture' } }),
+    name: 'workflow', arguments: JSON.stringify({ ...(text.includes('GRAPH_TASK_USE_SAVED')
+      ? { architectureVersion: text.match(/[a-f0-9]{64}/)?.[0] } : { architecture }),
+      meta: { name: 'architecture-proof', description: 'Combine independent evidence through a reviewer' }, args: { material: 'fixture' } }),
   } }] }
   else delta = { content: 'GRAPH_TASK_COMPLETE' }
   response.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -72,10 +74,10 @@ const endpoint = `http://127.0.0.1:${server.address().port}/v1`
 const patchPath = resolve(project, 'provider-fixture.patch.yml')
 await writeFile(patchPath, (await readFile(resolve(root, 'runtime/packages/bundle/nexgent-app/cordis.patch.yml'), 'utf8'))
   .replace('https://token-plan-cn.xiaomimimo.com/v1', endpoint))
-async function run(label, sessionId, denied = false) {
+async function run(label, sessionId, denied = false, savedVersion, loadError) {
   const args = [resolve(root, 'runtime/apps/cli/lib/bin.js'), '--profile', 'nexgent-run', '--patch', patchPath, '--json']
   if (sessionId) args.push('--session-id', sessionId)
-  args.push('--', 'GRAPH_TASK: use the architecture workflow to combine two independent members and a reviewer.')
+  args.push('--', savedVersion ? `GRAPH_TASK_USE_SAVED: ${savedVersion}` : 'GRAPH_TASK: use the architecture workflow to combine two independent members and a reviewer.')
   const child = spawn(process.execPath, args, { cwd: project, env: { ...process.env,
     DSH_HOME: resolve(project, '.nexgent/native'), DSH_TELEMETRY_MODE: 'OFF', NEXGENT_API_KEY: 'keyless-fixture',
     ...denied ? { DSH_PERMISSION_MODE: 'read-only' } : {},
@@ -93,6 +95,11 @@ async function run(label, sessionId, denied = false) {
   const records = stdout.trim().split('\n').map(line => JSON.parse(line))
   const results = records.filter(record => record.type === 'tool_result').map(record => record.result).join('\n')
   const version = results.match(/"architectureVersion"\s*:\s*"([a-f0-9]{64})"/)?.[1]
+  if (loadError) {
+    assert.equal(version, undefined)
+    assert.ok(results.includes(loadError), `Expected ${loadError}; inspect ${project}`)
+    return { pid: child.pid, rejected: true }
+  }
   if (denied) {
     assert.equal(version, undefined)
     assert.ok(results.includes('architecture dependency failed'))
@@ -108,6 +115,17 @@ try {
   const resumed = await run('resumed', first.sessionId)
   assert.equal(first.version, resumed.version)
   assert.notEqual(first.pid, resumed.pid)
+  const reused = await run('new-session', undefined, false, first.version)
+  assert.equal(reused.version, first.version)
+  assert.notEqual(reused.sessionId, first.sessionId)
+  assert.notEqual(reused.pid, resumed.pid)
+  const savedPath = resolve(project, '.nexgent/native/architectures', `${first.version}.json`)
+  const saved = JSON.parse(await readFile(savedPath, 'utf8'))
+  assert.deepEqual(Object.keys(saved).sort(), ['architecture', 'format'])
+  assert.equal(saved.format, 1)
+  const missingStart = requests.length
+  const missing = await run('missing-version', undefined, false, '0'.repeat(64), 'ENOENT')
+  assert.ok(!requests.slice(missingStart).some(request => JSON.stringify(request.messages).includes('GRAPH_MEMBER_A')))
   assert.deepEqual(JSON.parse(await readFile(resolve(project, 'a.json'), 'utf8')), { value: 'RESULT_A' })
   assert.deepEqual(JSON.parse(await readFile(resolve(project, 'b.json'), 'utf8')), { value: 'RESULT_B' })
   await writeFile(resolve(project, 'a.json'), 'READ_ONLY_CANARY_A')
@@ -122,8 +140,15 @@ try {
   const system = primary.messages.find(message => message.role === 'system').content
   assert.ok(system.includes('You are Nexgent'))
   assert.ok(!system.includes('You are an AI agent powered by DeepSeek Harness.'))
+  assert.ok(primary.tools.find(tool => tool.function?.name === 'workflow').function.parameters.properties.architectureVersion)
+  const damaged = structuredClone(saved)
+  damaged.architecture.nodes[0].prompt = 'damaged definition'
+  await writeFile(savedPath, JSON.stringify(damaged))
+  const damagedStart = requests.length
+  const corrupted = await run('damaged-version', undefined, false, first.version, 'digest mismatch')
+  assert.ok(!requests.slice(damagedStart).some(request => JSON.stringify(request.messages).includes('GRAPH_MEMBER_A')))
   const evidence = { passed: true, scope: 'built application, actual member file effects and restart; only external HTTP model mocked',
-    policy: 'workspace-write task; read-only coordinator; read-only child denial also verified', architecture, first, resumed, denied, requestCount: requests.length }
+    policy: 'workspace-write task; read-only coordinator; read-only child denial also verified', architecture, first, resumed, reused, missing, corrupted, denied, requestCount: requests.length }
   await writeFile(resolve(project, 'evidence.json'), JSON.stringify(evidence, null, 2) + '\n')
   console.log(JSON.stringify(evidence))
 } finally {

@@ -22,7 +22,7 @@ kind: "package-bundle"
 <a id="use-this-package"></a>
 ## 使用本包
 
-应用自带的 profile 在继承的 base 与浏览器或 headless 配置之后包含本层。仓库根目录的 `start.ps1` 与 `run.ps1` 选择这些 profile。密钥由原生凭证服务从 `NEXGENT_API_KEY` 读取。接口覆盖通过原生模型配置完成。
+应用自带的 profile 在继承的 base 与浏览器或 headless 配置之后包含本层。仓库根目录的 `start.ps1` 与 `run.ps1` 选择这些 profile。密钥由原生凭证服务从 `NEXGENT_API_KEY` 读取。接口覆盖通过原生模型配置完成。架构图由原生 workflow 工具执行，定义保存在项目数据目录中。新 Session 可显式执行保存的 `architectureVersion`；这不会自动选择或采用该版本。
 
 <a id="understand-the-implementation"></a>
 ## 理解实现
@@ -47,7 +47,7 @@ kind: "package-bundle"
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- Python 评价器、selection、guard 和版本采用尚未保护原生会话。可版本化架构执行与候选采用仍待迁移。
+- Python 评价器、selection、guard 和版本采用尚未保护原生会话。独立试用与候选采用仍待迁移。
 - 应用保留平台隔离要求；Windows ACL 错误仍返回工具失败，不授予不受限执行。
 
 <a id="dev-note"></a>

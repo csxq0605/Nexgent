@@ -25,9 +25,9 @@ function text(value: unknown, field: string): string {
 /**
  * Compile a model-authored architecture into the existing workflow runtime.
  * @param value - JSON graph with role, prompt, dependency and model choices.
- * @returns a workflow body carrying its immutable content version and outputs.
+ * @returns the normalized definition, content digest and compiled workflow body.
  */
-export function compileArchitecture(value: unknown): string {
+export function prepareArchitecture(value: unknown): { version: string; architecture: { nodes: ArchitectureNode[] }; script: string } {
   const graph = object(value)
   if (Object.keys(graph).some(key => key !== 'nodes')) throw new Error('architecture accepts only nodes')
   if (!Array.isArray(graph.nodes) || graph.nodes.length === 0) throw new Error('architecture requires at least one node')
@@ -55,31 +55,46 @@ export function compileArchitecture(value: unknown): string {
   }
   const remaining = new Map(nodes.map(node => [node.id, node]))
   const completed = new Set<string>()
-  const waves: ArchitectureNode[][] = []
   while (remaining.size > 0) {
     const ready = [...remaining.values()].filter(node => node.dependencies.every(id => completed.has(id)))
     if (ready.length === 0) throw new Error('architecture contains a dependency cycle')
-    waves.push(ready)
     for (const node of ready) { remaining.delete(node.id); completed.add(node.id) }
   }
   const version = createHash('sha256').update(JSON.stringify({ format: 1, nodes })).digest('hex')
   // Data stays JSON-quoted; prompts never become executable source.
-  return `const waves = ${JSON.stringify(waves)};
+  const script = `const nodes = ${JSON.stringify(nodes)};
+const byId = new Map(nodes.map(node => [node.id, node]));
+const pending = new Map();
 const outputs = Object.create(null);
-for (const wave of waves) {
-  await Promise.all(wave.map(async node => {
-    const context = node.dependencies.map(id => ({ id, output: outputs[id] }));
+function run(id) {
+  if (pending.has(id)) return pending.get(id);
+  const node = byId.get(id);
+  const result = (async () => {
+    const context = await Promise.all(node.dependencies.map(async id => ({ id, output: await run(id) })));
     if (context.some(item => item.output === null)) throw new Error('architecture dependency failed: ' + node.id);
     const prompt = JSON.stringify({ role: node.role, task: node.prompt, input: args, dependencies: context });
     const options = { label: node.id };
     if (node.provider !== undefined) options.provider = node.provider;
     if (node.model !== undefined) options.model = node.model;
     if (node.schema !== undefined) options.schema = node.schema;
-    outputs[node.id] = await agent(prompt, options);
-  }));
+    return outputs[node.id] = await agent(prompt, options);
+  })();
+  pending.set(id, result);
+  return result;
 }
+await Promise.all(nodes.map(node => run(node.id)));
 if (Object.values(outputs).some(value => value === null)) throw new Error('architecture member failed');
 return { architectureVersion: ${JSON.stringify(version)}, outputs };`
+  return { version, architecture: { nodes }, script }
+}
+
+/**
+ * Compile a graph into the existing workflow runtime.
+ * @param value - Model-authored JSON graph.
+ * @returns the plain JavaScript workflow body.
+ */
+export function compileArchitecture(value: unknown): string {
+  return prepareArchitecture(value).script
 }
 
 /**

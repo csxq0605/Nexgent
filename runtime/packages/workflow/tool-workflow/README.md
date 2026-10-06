@@ -25,13 +25,13 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-The tool accepts exactly one of `script` or `architecture`. An architecture is `{nodes:[{id,role,prompt,dependencies,provider?,model?,schema?}]}`; dependencies name other nodes and must be acyclic. The compiler sends actual dependency outputs to each child and returns a content-derived `architectureVersion` with node outputs. This digest identifies the executed definition; it does not record independent approval or adoption. An optional node `schema` requires a validated object through the native structured-output mechanism; it accepts the same subset as `agent()` schemas. The original graph is retained in the calling Session's tool history.
+The tool accepts exactly one of `script` or `architecture`; with `architectureDirectory` configured it also accepts `architectureVersion` instead of either. Publishing saved definitions requires filesystem hard-link support; unsupported filesystems fail explicitly. An architecture is `{nodes:[{id,role,prompt,dependencies,provider?,model?,schema?}]}`; dependencies name other nodes and must be acyclic. The compiler sends actual dependency outputs to each child and returns a content-derived `architectureVersion` with node outputs. This digest identifies the executed definition; it does not record independent approval or adoption. An optional node `schema` requires a validated object through the native structured-output mechanism; it accepts the same subset as `agent()` schemas. Each node starts when its own dependencies finish; unrelated slow nodes do not create a barrier, and shared dependencies execute once. The original graph is retained in the calling Session's tool history. With `architectureDirectory` configured, normalized definitions are also published as complete, immutable records outside Session history. A new Session can execute one by its returned `architectureVersion`; unknown versions, invalid records and content mismatches fail before any member starts. Saved records are definitions, without approval or adoption status.
 
 The `workflow` tool runs model-authored graphs or scripts and returns their final JSON value. Choose it when dependencies or repeated coordination help the task; otherwise use direct work or ordinary delegation.
 
 ### Calling the tool
 
-The model submits metadata, one execution representation, optional input, and a flag: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` or `architecture` (exactly one; script is a plain JavaScript body — no `export const meta` statement; the tool description carries the complete authoring contract), `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest), and `run_in_background` (optional; present only while `enableRunInBackground` holds).
+The model submits metadata, one execution representation, optional input, and a flag: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` or `architecture` (or `architectureVersion` when storage is configured; exactly one; script is a plain JavaScript body — no `export const meta` statement; the tool description carries the complete authoring contract), `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest), and `run_in_background` (optional; present only while `enableRunInBackground` holds).
 
 A foreground success returns the envelope `{ kind: 'foreground', runId, agentsStarted, result }`, rendered to the model as `workflow "<name>" completed (<count> agent<optional-s>).` followed by `Return value:` and the pretty-printed JSON. A workflow that cannot start — a script parse or meta validation failure — returns an error the model can correct from. Cancellation and execution failures return `Error: workflow run was cancelled` or `Error: workflow run failed: <error>`; partial output is never reported as success.
 
@@ -47,6 +47,7 @@ While the script runs, the parent turn waits: the tool starts the run, awaits it
 
 | Field | Default | Meaning |
 |---|---|---|
+| `architectureDirectory` | disabled | Absolute application-owned directory for saved graph definitions and version reuse. |
 | `toolName` | `workflow` | The model-facing tool name to register. |
 | `maxResultChars` | `50000` | Rendered-result ceiling; longer JSON is truncated with a notice. |
 | `enableRunInBackground` | `true` | Expose `run_in_background`; disabled calls are also rejected. |

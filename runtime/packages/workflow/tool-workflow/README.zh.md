@@ -25,13 +25,13 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-工具接受 `script` 或 `architecture` 中的一个。架构格式为 `{nodes:[{id,role,prompt,dependencies,provider?,model?,schema?}]}`；依赖指向其他节点且必须无环。编译器把依赖节点的实际输出交给成员，返回由内容计算的 `architectureVersion` 和节点输出。摘要标识执行的定义，不代表独立批准或采用。节点的可选 `schema` 通过原生结构化输出机制要求校验后的对象，接受与 `agent()` 相同的 schema 子集。原图保存在调用 Session 的工具历史中。
+工具接受 `script` 或 `architecture` 中的一个；配置 `architectureDirectory` 后，也可用 `architectureVersion` 替代两者。保存定义要求文件系统支持硬链接；不支持时明确报错。架构格式为 `{nodes:[{id,role,prompt,dependencies,provider?,model?,schema?}]}`；依赖指向其他节点且必须无环。编译器把依赖节点的实际输出交给成员，返回由内容计算的 `architectureVersion` 和节点输出。摘要标识执行的定义，不代表独立批准或采用。节点的可选 `schema` 通过原生结构化输出机制要求校验后的对象，接受与 `agent()` 相同的 schema 子集。节点在自己的依赖完成后即可开始，不等待无关的慢节点，共享依赖只执行一次。原图保存在调用 Session 的工具历史中。配置 `architectureDirectory` 后，规范化定义还会作为完整且不可覆盖的记录保存到 Session 历史之外。新 Session 可按返回的 `architectureVersion` 执行；未知版本、无效记录或内容不匹配会在成员启动前报错。保存记录只有定义，没有批准或采用状态。
 
 `workflow` 工具执行模型编写的图或脚本，并返回最终 JSON 值。当依赖关系或反复协调有助于任务时选择它；否则直接执行或普通委派。
 
 ### 调用工具
 
-模型提交元数据、一种执行表示、可选输入和开关：`meta`（必需的身份数据：`name`、`description`，以及可选的 `whenToUse` 与 `phases`）、`script` 或 `architecture`（二选一；脚本是纯 JavaScript 脚本体——不含 `export const meta` 语句；工具描述携带完整的编写约定）、`args`（可选 JSON 对象，作为全局变量 `args` 向脚本公开；裸列表应包装到字段中，使协议 schema 如实表达形态），以及 `run_in_background`（可选；仅在 `enableRunInBackground` 生效时存在）。
+模型提交元数据、一种执行表示、可选输入和开关：`meta`（必需的身份数据：`name`、`description`，以及可选的 `whenToUse` 与 `phases`）、`script` 或 `architecture`（配置存储后也可选 `architectureVersion`；必须只选一种；脚本是纯 JavaScript 脚本体——不含 `export const meta` 语句；工具描述携带完整的编写约定）、`args`（可选 JSON 对象，作为全局变量 `args` 向脚本公开；裸列表应包装到字段中，使协议 schema 如实表达形态），以及 `run_in_background`（可选；仅在 `enableRunInBackground` 生效时存在）。
 
 前台成功返回包络 `{ kind: 'foreground', runId, agentsStarted, result }`，向模型渲染为 `workflow "<name>" completed (<count> agent<optional-s>).`，后接 `Return value:` 与美化打印的 JSON。无法启动的工作流——脚本解析或 meta 校验失败——返回模型可以修正的错误。取消与执行失败返回 `Error: workflow run was cancelled` 或 `Error: workflow run failed: <error>`；部分输出绝不会被报告为成功。
 
@@ -47,6 +47,7 @@ kind: "package-reference"
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
+| `architectureDirectory` | 禁用 | 应用自有的绝对目录，用于保存图定义并按版本复用。 |
 | `toolName` | `workflow` | 要注册的面向模型工具名称。 |
 | `maxResultChars` | `50000` | 渲染结果上限；更长的 JSON 会被截断并附上提示。 |
 | `enableRunInBackground` | `true` | 公开 `run_in_background`；关闭后调用同样会被拒绝。 |

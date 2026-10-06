@@ -3763,6 +3763,8 @@ Requires: `tools` · `workflowEngine` · `systemPrompt`
 ```ts config-catalog
 /** Config: the model-facing tool name plus result rendering caps. */
 export interface Config {
+  /** Absolute application-owned directory for saved graph definitions; enables execution by architectureVersion (default disabled). */
+  architectureDirectory?: string
   /** The model-facing tool name to register (default `workflow`). */
   toolName?: string
   /** Rendered-result ceiling, in characters: a longer JSON value is truncated with a notice (default 50000). */
@@ -3778,7 +3780,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/workflow/tool-workflow/src/index.ts:45`](../packages/workflow/tool-workflow/src/index.ts)
+Source: [`packages/workflow/tool-workflow/src/index.ts:47`](../packages/workflow/tool-workflow/src/index.ts)
 
 <a id="deepseek-aidsh-tool-workspace-dependencies"></a>
 

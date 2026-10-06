@@ -1,0 +1,175 @@
+{
+  "date": "2026-10-07",
+  "application": "Repository-owned Nexgent native application; explicit saved-definition reuse, no adoption claim",
+  "frozen_model_probe": {
+    "passed": true,
+    "scope": "built application, actual member file effects and restart; only external HTTP model mocked",
+    "policy": "workspace-write task; read-only coordinator; read-only child denial also verified",
+    "architecture": {
+      "nodes": [
+        {
+          "id": "a",
+          "role": "researcher",
+          "prompt": "GRAPH_MEMBER_A",
+          "dependencies": [],
+          "provider": "mimo",
+          "model": "mimo-v2.6-pro",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value"
+            ]
+          }
+        },
+        {
+          "id": "b",
+          "role": "researcher",
+          "prompt": "GRAPH_MEMBER_B",
+          "dependencies": [],
+          "provider": "mimo",
+          "model": "mimo-v2.6-pro",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value"
+            ]
+          }
+        },
+        {
+          "id": "review",
+          "role": "reviewer",
+          "prompt": "GRAPH_MEMBER_REVIEW",
+          "dependencies": [
+            "a",
+            "b"
+          ],
+          "provider": "mimo",
+          "model": "mimo-v2.6-pro",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value"
+            ]
+          }
+        }
+      ]
+    },
+    "first": {
+      "pid": 58224,
+      "version": "0dc38a2e1b26703aef3ed1f04e96e9e71a5e04389a0b9223970117b276deb3ff",
+      "sessionId": "session-3da4aef7-e35b-4bae-823b-06ab44ba8465"
+    },
+    "resumed": {
+      "pid": 73900,
+      "version": "0dc38a2e1b26703aef3ed1f04e96e9e71a5e04389a0b9223970117b276deb3ff",
+      "sessionId": "session-3da4aef7-e35b-4bae-823b-06ab44ba8465"
+    },
+    "reused": {
+      "pid": 84616,
+      "version": "0dc38a2e1b26703aef3ed1f04e96e9e71a5e04389a0b9223970117b276deb3ff",
+      "sessionId": "session-65152a6d-6db1-40f3-b2c0-354a702e1dbb"
+    },
+    "missing": {
+      "pid": 59692,
+      "rejected": true
+    },
+    "corrupted": {
+      "pid": 81104,
+      "rejected": true
+    },
+    "denied": {
+      "pid": 56984,
+      "rejected": true
+    },
+    "requestCount": 50
+  },
+  "actual_model_probe": {
+    "passed": true,
+    "scope": "actual MiMo graph execution and independently checked member outputs; no adoption or RSI claim",
+    "provider": "mimo",
+    "model": "mimo-v2.6-pro",
+    "policy": "workspace-write task; read-only coordinator",
+    "pid": 51692,
+    "sessionId": "session-5a938c24-5418-40d3-80c3-d6351b710dd7",
+    "architectureVersion": "0ac17672c9b5d263be22098db0e6e68cb63ae956fa433c41b7d8ea1cbe728409",
+    "outputs": {
+      "range": {
+        "mean": 7,
+        "min": 3,
+        "max": 11
+      },
+      "totals": {
+        "count": 3,
+        "sum": 21
+      },
+      "review": {
+        "count": 3,
+        "sum": 21,
+        "mean": 7,
+        "min": 3,
+        "max": 11
+      }
+    },
+    "mainUsage": [
+      {
+        "inputTokens": 3927,
+        "outputTokens": 527,
+        "totalTokens": 8550,
+        "cacheReadTokens": 4096
+      },
+      {
+        "inputTokens": 803,
+        "outputTokens": 19,
+        "totalTokens": 8758,
+        "cacheReadTokens": 7936
+      },
+      {
+        "inputTokens": 353,
+        "outputTokens": 164,
+        "totalTokens": 9221,
+        "cacheReadTokens": 8704
+      },
+      {
+        "inputTokens": 550,
+        "outputTokens": 378,
+        "totalTokens": 9888,
+        "cacheReadTokens": 8960
+      }
+    ]
+  },
+  "checks": {
+    "compiler_storage_tool_tests": 62,
+    "compiler_coverage": "100% statements, branches, functions, lines",
+    "changed_documentation_tests": 92
+  },
+  "limitations": [
+    "Saved definitions do not contain approval or adoption status.",
+    "Version reuse is explicitly requested; automatic selection and adoption are not implemented.",
+    "Native independent trials, selection, guard and improver evolution remain pending.",
+    "The external model is mocked only in the frozen process probe; actual-model evidence separately verifies file delivery.",
+    "Main-step usage excludes member and title usage; no complete cost or RSI benefit claim.",
+    "Browser visual interaction, general Windows workspace-write shell/code execution, all SDK cross-entry recovery and installer acceptance remain unverified."
+  ],
+  "artifacts": {
+    "frozen_model": "validation-workspace/native-architecture-tMU2Tg",
+    "actual_model": "validation-workspace/native-architecture-pro-b0w9dk"
+  }
+}

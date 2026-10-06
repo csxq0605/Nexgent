@@ -1,4 +1,7 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -20,6 +23,7 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import PtcWorkflowEngine from '@deepseek-ai/dsh-workflow-ptc'
 import { mountWorkflowRuntime } from '../../workflow-ptc/tests/setup.ts'
 import * as toolWorkflow from '../src/index.ts'
+import { saveArchitecture } from '../src/architecture-store.ts'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 
@@ -97,7 +101,7 @@ class StubEngine extends WorkflowEngine {
   }
 }
 
-async function setup(config?: { toolName?: string; maxResultChars?: number }) {
+async function setup(config?: toolWorkflow.Config) {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
@@ -129,6 +133,20 @@ function execute(ctx: Context, args: unknown, extra?: {
 }
 
 describe('dsh-tool-workflow', () => {
+  it('loads a saved graph at the tool boundary and rejects a mixed reference before starting', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'nexgent-tool-architecture-'))
+    onTestFinished(() => rm(directory, { recursive: true, force: true }))
+    const saved = await saveArchitecture(directory, { nodes: [{ id: 'reader', role: 'reader', prompt: 'Read', dependencies: [] }] })
+    const { ctx, engine, parent } = await setup({ architectureDirectory: directory })
+    const pending = execute(ctx, { architectureVersion: saved.version, meta: META }, { agent: parent })
+    await vi.waitFor(() => { expect(engine.requests).toHaveLength(1) })
+    expect(engine.requests[0]?.script).toBe(saved.script)
+    engine.settle({ value: {}, stopReason: 'completed', agentsStarted: 1 })
+    expect((await pending).isError).toBe(false)
+    expect((await execute(ctx, { architectureVersion: saved.version, script: SCRIPT, meta: META }, { agent: parent })).isError).toBe(true)
+    expect(engine.requests).toHaveLength(1)
+    expect(ctx.tools.get('workflow')!.presentCall!({ architectureVersion: saved.version, meta: META })).toMatchObject({ rawInput: saved.version })
+  })
   it('compiles a graph at the actual tool boundary and rejects mixed representations', async () => {
     const { ctx, engine, parent } = await setup()
     const architecture = { nodes: [{ id: 'reader', role: 'researcher', prompt: 'Read evidence', dependencies: [] }] }

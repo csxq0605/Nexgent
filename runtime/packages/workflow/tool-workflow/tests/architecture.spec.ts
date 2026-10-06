@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { compileArchitecture, resolveWorkflowBody } from '../src/architecture.ts'
 
 const worker = { id: 'worker', role: 'researcher', prompt: 'Find evidence', dependencies: [] }
@@ -18,6 +18,28 @@ function parsePrompt(prompt: string): { task: string; dependencies: unknown[] } 
 }
 
 describe('native workflow architecture', () => {
+  it('starts a dependant when its own input is ready while unrelated work remains active', async () => {
+    const slow = Promise.withResolvers<string>()
+    const calls: string[] = []
+    const nodes = [
+      { ...worker, id: 'slow', prompt: 'slow' },
+      { ...worker, id: 'fast', prompt: 'fast' },
+      { ...reviewer, id: 'next', prompt: 'next', dependencies: ['fast'] },
+      { ...reviewer, id: 'other', prompt: 'other', dependencies: ['fast'] },
+    ]
+    const pending = new AsyncFunction('agent', 'args', compileArchitecture({ nodes }))(async (prompt) => {
+      const task = parsePrompt(prompt).task
+      calls.push(task)
+      return task === 'slow' ? slow.promise : task
+    }, {})
+    try {
+      await vi.waitFor(() => { expect(calls).toContain('next'); expect(calls).toContain('other') })
+      expect(calls.filter(task => task === 'fast')).toHaveLength(1)
+    } finally {
+      slow.resolve('slow')
+      await pending
+    }
+  })
   it('passes actual dependency outputs and preserves a content version across input order', async () => {
     const calls: { task: string; dependencies: unknown[] }[] = []
     const script = compileArchitecture({ nodes: [reviewer, worker] })

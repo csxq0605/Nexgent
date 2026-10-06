@@ -58,6 +58,10 @@
     personaSuffix: Your project working directory is {{cwd}}.
 
 # Coordination needs no workspace writes; delegated tools use the task policy.
+- id: tool-workflow
+  config:
+    architectureDirectory: !!js dshHomePath('architectures')
+
 - id: workflow-ptc
   config:
     scriptFileMode: read-only

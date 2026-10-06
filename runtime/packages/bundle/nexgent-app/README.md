@@ -22,7 +22,7 @@ The shipped `nexgent` and `nexgent-run` profiles complete general tasks using Mi
 <a id="use-this-package"></a>
 ## Use this package
 
-The application's shipped profiles include this layer after the inherited base and browser or headless layer. The application's root `start.ps1` and `run.ps1` select those profiles. Credentials come from `NEXGENT_API_KEY` through the native credential service. Endpoint overrides belong in the native model configuration.
+The application's shipped profiles include this layer after the inherited base and browser or headless layer. The application's root `start.ps1` and `run.ps1` select those profiles. Credentials come from `NEXGENT_API_KEY` through the native credential service. Endpoint overrides belong in the native model configuration. Architecture graphs run through the native workflow tool and are saved under the project data directory. New Sessions can explicitly execute a saved `architectureVersion`; this does not select or adopt it automatically.
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
@@ -47,7 +47,7 @@ The application persona changes the system prefix. Inherited prompt and provider
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- The Python evaluator, selection, guard and version adoption do not yet protect native sessions. Versioned architecture execution and candidate adoption remain migration work.
+- The Python evaluator, selection, guard and version adoption do not yet protect native sessions. Independent trials and candidate adoption remain migration work.
 - The application retains platform confinement requirements; Windows ACL errors remain tool failures rather than granting unrestricted execution.
 
 <a id="dev-note"></a>
