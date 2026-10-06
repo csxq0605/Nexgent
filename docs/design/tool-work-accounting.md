@@ -91,3 +91,18 @@ Provider-reported token work does not refund a reservation or alter a gate.
 Both values are normalized estimates for comparisons under one frozen protocol.
 They are not vendor prices, invoices, or monetary cost. Pricing requires a
 separate provider/model price schedule and billing receipt.
+
+## Native Main and workspace computation (2026-10-06)
+
+Native DSH completions enter the same host model admission and receipt chain.
+The workspace `run_python` handler now calls the shared metered worker through
+its admitted ToolContext receipt, so a numerical verification is no longer
+reported as zero worker work. A failed computation retains its measured count;
+a missing timeout measurement remains unknown. Historical records are retained
+as recorded and are not backfilled with inferred work.
+
+Main's host evaluator limits verification actions to the remaining resources
+and leaves a model admission slot for its verdict. Numerical/file requirements
+still need actual verification receipts; a smaller action allowance does not
+turn missing evidence into acceptance. The host can inspect immutable sources
+of actually used candidate tools as data, without granting their execution.

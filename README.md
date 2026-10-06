@@ -68,6 +68,12 @@ result = agent.run(task["id"])
 自身的修改也未完成。下一步集中推进这些框架能力，不继续围绕组织 demo 调优。
 实际接口与限制见[通用框架入口](docs/framework-runtime.md)。
 
+Main 也可选用成熟 DSH/Cordis 的原生模型与 MCP 工具循环：
+`nexgent --root ./my-dsh-project run "完成任务" --kernel dsh --model-root .`。
+已部署项目保持原版本，新项目采用所选内核。官方 SDK/runtime 安装、Windows
+开发启动器和当前限制见 [DSH Main](docs/dsh-main.md)。真实 Pro 原生交付已经通过
+宿主审核和外置结果核对；跨任务发布、重启复用与 RSI 收益另行验证。
+
 ## PR #1 的历史资产与缺口
 
 下列记录描述旧内核路径。旧 `task` / `rsi-*` 命令和高级控制台保留，

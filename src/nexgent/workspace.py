@@ -97,12 +97,14 @@ def workspace_provider(root):
                           if Path(ref['path']).resolve().is_relative_to(output_root))
             directory = output_root / context.episode_id
             toolkit = WorkspaceTools(root, directory, shared_artifacts=shared,
-                                     stop_event=context.stop_event)
+                                     stop_event=context.stop_event, compute_executor=context.run_compute)
             return toolkit.call(name, arguments)
         return invoke
 
     tools = tuple(replace(prototype.registry.get(d['name']),
                           handler=handler(d['name']), provider_id='nexgent.workspace',
+                          work_units_per_call=(max(1, prototype.registry.get(d['name']).work_units_per_call)
+                                               if d['name'] == 'run_python' else prototype.registry.get(d['name']).work_units_per_call),
                           provider_version='1', handler_digest=fingerprint)
                   for d in prototype.registry.describe())
     return ToolProvider('nexgent.workspace', '1', tools)

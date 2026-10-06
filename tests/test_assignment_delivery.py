@@ -34,25 +34,19 @@ def test_main_member_receives_facts_and_review_can_check_the_assignment(qtbot, t
         assert previous['request']['method'] == 'read_artifact'
         return {'request': {'method': 'publish', 'params': {'name': 'result', 'content': previous['result']['content']}}}
 
-    def review(payload):
-        task = payload['task']
-        reviewed.append(task)
-        assert payload['candidate']['artifacts']['result']['content'] == facts
-        if task['context'].get('agent'):
-            assert facts in task['context']['assignment']['parent_objective']
-        else:
-            assert facts in task['objective']
-        return {'approved': True, 'findings': [], 'repairs': []}
-
     class Evaluate:
         id = 'assignment-delivery-check'
         def snapshot(self):
             return {'version': 1}
         def evaluate(self, task, delivery, execution):
+            reviewed.append(task)
             assert delivery == {'result': facts}
+            assert facts in task['objective']
+            assert len(execution['members']) == 1
+            assert execution['members'][0]['status'] == 'completed'
             return {'status': 'passed', 'score_available': True, 'score': 9, 'accepted': True}
 
-    runtime = Nexgent(tmp_path, gateway_factory=ScriptedGatewayFactory(policy, reviewer_policy=review), evaluator=Evaluate())
+    runtime = Nexgent(tmp_path, gateway_factory=ScriptedGatewayFactory(policy), evaluator=Evaluate())
     runtime.set_auto_improve(False)
     window = MainWindow(tmp_path, service=runtime)
     qtbot.addWidget(window)
@@ -64,7 +58,7 @@ def test_main_member_receives_facts_and_review_can_check_the_assignment(qtbot, t
     assert result['status'] == 'completed' and result['evaluation']['accepted'] is True
     [member] = runtime.team(result['id'])['assignments']
     assert member['status'] == 'completed'
-    assert len(reviewed) == 2
+    assert len(reviewed) == 1
     assert runtime.store.read(result['output_refs']['result'], result['id'])['content'] == facts
     child = runtime.store.get(member['episode_id'])
     assert child['capabilities'] == []

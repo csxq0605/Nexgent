@@ -23,6 +23,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Nexgent 通用任务智能体工作区")
     parser.add_argument("--project", type=Path, help="任务工作区目录")
     parser.add_argument("--model-root", type=Path, help="读取已有模型配置的目录")
+    parser.add_argument('--kernel', choices=['dsh'], help='为新项目选择 DSH 原生代理循环')
     parser.add_argument("--task-console", action="store_true", help="打开高级任务与证据控制台")
     parser.add_argument("--organization-demo", action="store_true", help="打开可选的组织提案应用")
     parser.add_argument("--legacy-research", action="store_true", help="打开保留的 0.8 研究窗口")
@@ -49,7 +50,7 @@ def main(argv=None):
         from .main_window import MainWindow
         from ..application import Nexgent
         root = project_root(args.project)
-        window = MainWindow(root, Nexgent(root, model_root=args.model_root))
+        window = MainWindow(root, Nexgent(root, model_root=args.model_root, kernel=args.kernel))
     window.show()
     return app.exec()
 

@@ -17,7 +17,7 @@ from ..kernel.programs import canonical, digest, validate_source, ProgramError
 
 SCHEMA = "nexgent.agent-package.v1"
 MANIFEST_VERSION = 2
-CAPABILITIES = frozenset({"ask", "tool", "parallel", "skill", "delegate", "develop_skill",
+CAPABILITIES = frozenset({"ask", "native_agent", "tool", "parallel", "skill", "delegate", "develop_skill",
                           "develop_tool", "release_tool", "develop_service",
                           "activate_service", "release_service", "capability_inventory", "read_artifact",
                           "publish", "memory_search", "remember", "plan", "feedback"})

@@ -230,12 +230,13 @@ def _terminal_failure_domain(exc, observed_domains):
 class ToolContext:
     """Narrow host interface passed to an installed, trusted tool handler."""
 
-    def __init__(self, service, episode_id, node_id, stop_event):
+    def __init__(self, service, episode_id, node_id, stop_event, receipt=None):
         self.service, self.episode_id, self.node_id = service, episode_id, node_id
         self.stop_event = stop_event
         self.task = deepcopy(service.store.get(episode_id)["task"])
         self.idempotency_key = episode_id + "/" + node_id
         self._input_refs = set()
+        self._receipt = receipt
 
     def check_stop(self):
         self.service._remaining_wall_seconds(self.episode_id)
@@ -262,6 +263,15 @@ class ToolContext:
         self.check_stop()
         return self.service.store.add_tool_work(
             self.episode_id, self.node_id, units)
+
+    def run_compute(self, package, payload):
+        """Run trusted-tool computations with the adopted-tool worker meter."""
+        self.check_stop()
+        if self._receipt is None:
+            raise ContractError('Compute execution requires an admitted tool receipt')
+        return self.service._run_metered_tool(
+            self.episode_id, package, 'execute', payload, self.node_id,
+            self.stop_event, self._receipt, timeout=30)
 
     def workspace(self, namespace):
         """Return a durable, root-episode-scoped directory for a trusted tool.
@@ -298,11 +308,12 @@ class ToolContext:
 
 
 class TaskService:
-    def __init__(self, project_root, *, tools=None, gateway_factory=None):
+    def __init__(self, project_root, *, tools=None, gateway_factory=None, native_kernels=None):
         self.project_root = Path(project_root).resolve()
         self.store = EpisodeStore(self.project_root / ".nexgent")
         self.tools = tools if tools is not None else ToolRegistry.discover()
         self.gateway_factory = gateway_factory
+        self.native_kernels = dict(native_kernels or {})
         self._projection_lock = threading.RLock()
         self._parallel_context = threading.local()
         self._feedback_trigger = None
@@ -3595,7 +3606,7 @@ class TaskService:
             raise CapabilityAbort(exc) from exc
 
     def _run_metered_tool(self, identity, package, entry, arguments, path,
-                          stop_event, receipt):
+                          stop_event, receipt, *, timeout=120):
         """Use the same worker meter before and after capability adoption."""
         root = self.store.get(self.store.get(identity)["root_episode_id"])
         remaining = (root["budget"]["max_tool_work_units"]
@@ -3611,7 +3622,7 @@ class TaskService:
         try:
             execution = run_package(
                 package, entry, arguments, handle=None, stop_event=stop_event,
-                timeout=self._package_timeout(identity, 120), max_rpc=0,
+                timeout=self._package_timeout(identity, timeout), max_rpc=0,
                 max_instructions=limit)
             measured = execution["execution"]
             return execution
@@ -3754,6 +3765,37 @@ class TaskService:
         return result
 
     def _invoke(self, identity, package, method, params, path, stop_event, notify):
+        if method == 'native_agent':
+            if (set(params) != {'engine', 'instructions', 'task'}
+                    or not isinstance(params['engine'], str)
+                    or not isinstance(params['instructions'], str)
+                    or not 1 <= len(params['instructions']) <= 20000
+                    or not isinstance(params['task'], dict)):
+                raise ContractError('Native agent requires engine, bounded instructions and task')
+            kernel = self.native_kernels.get(params['engine'])
+            if kernel is None:
+                raise ContractError('The host has not configured this native agent kernel')
+            state = self.store.get(identity)
+            if params['task'].get('episode_id') != identity:
+                raise ContractError('Native agent task must belong to the current Episode')
+            counter, serial = [0], threading.RLock()
+            def invoke(native_method, native_params):
+                # The native loop has exactly the same durable host boundary
+                # as controlled code. It cannot create nested native loops.
+                if native_method not in CAPABILITIES - {'native_agent', 'parallel'}:
+                    raise PermissionError('Unsupported native agent capability')
+                with serial:
+                    counter[0] += 1
+                    return self._dispatch(identity, package, native_method, native_params,
+                                          f'{path}/native.{counter[0]}', stop_event, notify)
+            self.store.event(identity, 'native_kernel_entered', {
+                'node_id': path, 'engine': params['engine'],
+                'package_digest': package['digest'], 'kernel': kernel.identity()})
+            return kernel.run(params['instructions'], params['task'], invoke,
+                              stop_event=stop_event,
+                              root=self.project_root / '.nexgent' / 'dsh' / identity,
+                              on_event=lambda event: self.store.event(identity, 'native_kernel_event',
+                                                                     {'node_id': path, 'event': event}))
         if method == "ask":
             return self._ask(identity, package, path, params, stop_event, notify)
         if method == "capability_inventory":
@@ -3892,7 +3934,7 @@ class TaskService:
             started = time.monotonic()
             result, failure = None, None
             try:
-                result = tool.handler(arguments, ToolContext(self, identity, path, stop_event))
+                result = tool.handler(arguments, ToolContext(self, identity, path, stop_event, receipt))
                 validate(result, tool.output_schema, label=name + " output",
                          allow_artifact_refs=False)
                 receipt.update(status="completed", result=deepcopy(result))
@@ -3901,7 +3943,8 @@ class TaskService:
                 receipt.update(status="failed", error=f"{type(exc).__name__}: {str(exc)[:1000]}")
             finally:
                 accounting = self.store.settle_tool(
-                    identity, path, status="completed" if failure is None else "failed")
+                    identity, path, status="completed" if failure is None else "failed",
+                    usage_complete=receipt.get('work_usage_complete', True))
                 receipt["work_accounting"] = accounting
                 receipt.update(finished_at=time.time(), elapsed_seconds=time.monotonic() - started)
                 self.store.event(identity, "tool", receipt)

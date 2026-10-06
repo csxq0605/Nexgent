@@ -17,6 +17,11 @@ parser.add_argument('--max-model-calls', type=int, default=32)
 parser.add_argument('--max-completion-tokens', type=int, default=160000)
 parser.add_argument('--single-task', action='store_true',
                     help='Check one default-entry delivery; does not claim adoption or RSI')
+parser.add_argument('--phase-model-calls', type=int)
+parser.add_argument('--phase-completion-tokens', type=int)
+parser.add_argument('--learning-rounds', type=int, default=16)
+parser.add_argument('--learning-limit', type=int, default=4)
+parser.add_argument('--kernel', choices=['dsh'])
 ARGS = parser.parse_args()
 ROOT = ARGS.root.resolve()
 MODEL_ROOT = Path(__file__).resolve().parents[1]
@@ -122,8 +127,23 @@ def run_task(runtime, label, offset):
 
 def main():
     start = time.time()
-    runtime = Nexgent(ROOT, model_root=MODEL_ROOT)
+    runtime = Nexgent(ROOT, model_root=MODEL_ROOT, kernel=ARGS.kernel)
     runtime.set_auto_improve(False)
+    # Only resource limits change; candidate choice, evaluators and promotion
+    # thresholds remain the actual application's defaults. Work freezes them
+    # when the ordinary task's terminal hook creates its durable record.
+    phase_budget = runtime.auto_evolution.policies[runtime.main_channel]['budget']
+    for name, value in (('max_model_calls', ARGS.phase_model_calls),
+                        ('max_completion_tokens', ARGS.phase_completion_tokens)):
+        if value is not None:
+            if value < 0:
+                raise ValueError('Phase resource limits must be nonnegative')
+            phase_budget[name] = value
+    save('resource-limits', {'ordinary_task': {'max_model_calls': ARGS.max_model_calls,
+                                            'max_completion_tokens': ARGS.max_completion_tokens},
+                             'learning_phase': phase_budget,
+                             'learning_rounds': ARGS.learning_rounds,
+                             'learning_limit': ARGS.learning_limit})
     if ARGS.single_task:
         result = run_task(runtime, 'bounded-delivery', 7)
         save('bounded-summary', {'scope': 'one task delivery, not persistent improvement',
@@ -134,7 +154,11 @@ def main():
     runtime.feedback(source['episode_id'], '今后复用已经实际成功调用的参数化订单工具，避免每次重新开发同一算法；保持相同规则和交付质量。')
     runtime.set_auto_improve(True)
     emit({'phase': 'learning', 'status': 'started'})
-    runtime.advance(source['episode_id'])
+    from nexgent.tasks.auto_runtime import advance_auto_evolution
+    driven = advance_auto_evolution(runtime.auto_evolution,
+                                   source_episode_id=source['episode_id'],
+                                   rounds=ARGS.learning_rounds, limit=ARGS.learning_limit)
+    save('learning-driver', driven)
     learning = runtime.improvement_status()
     save('learning', learning)
     emit({'phase': 'learning', 'summary': learning})

@@ -1,0 +1,1114 @@
+{
+  "scope": "Development evidence, no statistically established RSI benefit",
+  "model": "mimo-v2.6-pro",
+  "thinking": "disabled",
+  "sdk_source_commit": "46a7f68b0922371ce7144b668b90e377d8e799f4",
+  "runtime_carrier": "official explicitly selected source-node development carrier",
+  "records": [
+    {
+      "workspace": "validation-workspace/dsh-main-budget-pro-20261006",
+      "summary_file": "bounded-delivery-summary.json",
+      "episode_id": "episode-87e4e05511da4272",
+      "status": "completed",
+      "accepted": true,
+      "oracle_passed": true,
+      "delivery": {
+        "kept_orders": 4,
+        "products": {
+          "alpha": {
+            "net_cents": 1188,
+            "quantity": 9
+          },
+          "gamma": {
+            "net_cents": 0,
+            "quantity": 0
+          }
+        },
+        "total_cents": 1188
+      },
+      "expected": {
+        "products": {
+          "alpha": {
+            "quantity": 9,
+            "net_cents": 1188
+          },
+          "gamma": {
+            "quantity": 0,
+            "net_cents": 0
+          }
+        },
+        "total_cents": 1188,
+        "kept_orders": 4
+      },
+      "usage": {
+        "model_calls": 10,
+        "reserved_completion_tokens": 33600,
+        "charged_completion_tokens": 33600,
+        "completion_tokens": 3868,
+        "known_usage": {
+          "prompt_tokens": 83716,
+          "completion_tokens": 3868,
+          "total_tokens": 87584
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 4,
+        "charged_tool_work_units": 418,
+        "tool_work_units": 418,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 4,
+        "service_applications": 0,
+        "nodes": 23
+      },
+      "package_digest": "d60af3696711b93c3280c069971e8ba4b17f93a3650b2e1e444cbe94f81a04fa",
+      "models": [
+        "mimo-v2.6-pro"
+      ],
+      "last_error": null,
+      "evaluation": {
+        "accepted": true,
+        "checks": [
+          {
+            "passed": true,
+            "requirement": "result JSON strictly matches the required shape with integer cents and integer quantities"
+          },
+          {
+            "passed": true,
+            "requirement": "keep only highest-revision record per id and drop cancelled orders (kept_orders = 4)"
+          },
+          {
+            "passed": true,
+            "requirement": "negative quantities retain sign; per-product quantity and net_cents computed as integer quantity*unit_price_cents"
+          },
+          {
+            "passed": true,
+            "requirement": "products keys ascending and zero-total products retained (gamma present with 0/0)"
+          },
+          {
+            "passed": true,
+            "requirement": "total_cents equals sum of product net_cents (1188)"
+          },
+          {
+            "passed": true,
+            "requirement": "product groups only from deduped non-cancelled kept orders (beta absent)"
+          },
+          {
+            "passed": true,
+            "requirement": "a parameterized reusable order tool exists, was actually invoked, and its result checked without hardcoding this dataset's answer"
+          }
+        ],
+        "evaluation_episode_id": "episode-01ab6c3f21fb4326",
+        "execution_status": "completed",
+        "feedback": "Independent recomputation matches the delivered result exactly: keeping max revision per id yields a7(9×132), c7(-1×132), d7(2×392), e7(-2×392); b7 drops as cancelled (its product beta never creates a group). Products aggregate to alpha qty 9 / net 1188 and gamma qty 0 / net 0 (kept as a zero-total product), total_cents 1188, kept_orders 4. Product keys are ascending, all amounts are integer cents, and the result schema matches the required shape. A generic parameterized local_compute order tool was actually invoked on the input records and its output verified, satisfying the reusability requirement.",
+        "score": 10,
+        "score_available": true,
+        "status": "passed",
+        "verification_method": "model_review"
+      },
+      "native_kernel": [
+        {
+          "engine": "dsh",
+          "kernel": {
+            "adapter_sha256": "f4350a433203d0e1f896ac2273f970e7872a95a9d4481154f7297ae080b7d241",
+            "capabilities": "MCP Streamable HTTP",
+            "engine": "dsh",
+            "launcher_sha256": [
+              "3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5",
+              "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854"
+            ],
+            "profile": "sdk-minimal",
+            "runtime_carrier": "source-node",
+            "transport": "official-python-sdk"
+          },
+          "node_id": "rpc.1",
+          "package_digest": "d60af3696711b93c3280c069971e8ba4b17f93a3650b2e1e444cbe94f81a04fa"
+        }
+      ]
+    },
+    {
+      "workspace": "validation-workspace/dsh-main-learning-native-payload-pro-20261006",
+      "summary_file": "guard-development-summary.json",
+      "episode_id": "episode-414b64ee28e4463f",
+      "status": "completed",
+      "accepted": false,
+      "oracle_passed": true,
+      "delivery": {
+        "kept_orders": 4,
+        "products": {
+          "alpha": {
+            "net_cents": 378,
+            "quantity": 3
+          },
+          "gamma": {
+            "net_cents": 0,
+            "quantity": 0
+          }
+        },
+        "total_cents": 378
+      },
+      "expected": {
+        "products": {
+          "alpha": {
+            "quantity": 3,
+            "net_cents": 378
+          },
+          "gamma": {
+            "quantity": 0,
+            "net_cents": 0
+          }
+        },
+        "total_cents": 378,
+        "kept_orders": 4
+      },
+      "usage": {
+        "model_calls": 12,
+        "reserved_completion_tokens": 43200,
+        "charged_completion_tokens": 43200,
+        "completion_tokens": 3433,
+        "known_usage": {
+          "prompt_tokens": 127753,
+          "completion_tokens": 3433,
+          "total_tokens": 131186
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 3,
+        "charged_tool_work_units": 215,
+        "tool_work_units": 215,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 3,
+        "service_applications": 0,
+        "nodes": 31
+      },
+      "package_digest": "e2fa647741724253fc8e1a05706aa7034fa057642a02319df086e9c0823bb205",
+      "models": [
+        "mimo-v2.6-pro"
+      ],
+      "last_error": null,
+      "evaluation": {
+        "accepted": false,
+        "checks": [
+          {
+            "passed": true,
+            "requirement": "每个 id 只保留 revision 最大的记录"
+          },
+          {
+            "passed": true,
+            "requirement": "剔除 status 为 cancelled 的订单，且仅取消订单出现的产品不建组"
+          },
+          {
+            "passed": true,
+            "requirement": "负 quantity 保留符号，按 quantity*unit_price_cents 用整数分汇总"
+          },
+          {
+            "passed": true,
+            "requirement": "result 结构严格、产品名升序、保留合计为零的产品"
+          },
+          {
+            "passed": true,
+            "requirement": "数值与独立重算完全一致 (alpha 3/378, gamma 0/0, total 378, kept_orders 4)"
+          },
+          {
+            "passed": false,
+            "requirement": "参数化可复用订单工具并真实调用检查"
+          },
+          {
+            "passed": true,
+            "requirement": "不写入额外工件、不招募成员、不联网"
+          }
+        ],
+        "evaluation_episode_id": "episode-889839d447da4952",
+        "execution_status": "completed",
+        "feedback": "Recomputation confirms the delivered result exactly matches the required aggregation: latest revision per id (a1 rev2 qty4, b1 rev2 cancelled dropped, c1/d1/e1 kept), leaving 4 kept orders; alpha quantity 3 / net 378, gamma quantity 0 / net 0 preserved as zero-total product, total_cents 378, all integer-typed with products keys in ascending order. However, the objective also required a parameterized reusable order tool (prefer an installed one, else develop a generic local_compute tool) that is actually invoked and checked; the only executed call was task.aggregate_orders with this specific orders payload and drop_status, which is not visibly a general reusable tool, so that requirement is only partially evidenced.",
+        "score": 8,
+        "score_available": true,
+        "status": "failed",
+        "verification_method": "model_review"
+      },
+      "native_kernel": [
+        {
+          "engine": "dsh",
+          "kernel": {
+            "adapter_sha256": "f4350a433203d0e1f896ac2273f970e7872a95a9d4481154f7297ae080b7d241",
+            "capabilities": "MCP Streamable HTTP",
+            "engine": "dsh",
+            "launcher_sha256": [
+              "3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5",
+              "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854"
+            ],
+            "profile": "sdk-minimal",
+            "runtime_carrier": "source-node",
+            "transport": "official-python-sdk"
+          },
+          "node_id": "rpc.1",
+          "package_digest": "e2fa647741724253fc8e1a05706aa7034fa057642a02319df086e9c0823bb205"
+        }
+      ]
+    },
+    {
+      "workspace": "validation-workspace/dsh-main-learning-pro-20261006",
+      "summary_file": "guard-development-summary.json",
+      "episode_id": "episode-a9db89173a9a4f15",
+      "status": "completed",
+      "accepted": true,
+      "oracle_passed": true,
+      "delivery": {
+        "kept_orders": 4,
+        "products": {
+          "alpha": {
+            "net_cents": 378,
+            "quantity": 3
+          },
+          "gamma": {
+            "net_cents": 0,
+            "quantity": 0
+          }
+        },
+        "total_cents": 378
+      },
+      "expected": {
+        "products": {
+          "alpha": {
+            "quantity": 3,
+            "net_cents": 378
+          },
+          "gamma": {
+            "quantity": 0,
+            "net_cents": 0
+          }
+        },
+        "total_cents": 378,
+        "kept_orders": 4
+      },
+      "usage": {
+        "model_calls": 11,
+        "reserved_completion_tokens": 39200,
+        "charged_completion_tokens": 39200,
+        "completion_tokens": 3338,
+        "known_usage": {
+          "prompt_tokens": 103128,
+          "completion_tokens": 3338,
+          "total_tokens": 106466
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 2,
+        "charged_tool_work_units": 186,
+        "tool_work_units": 186,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 2,
+        "service_applications": 0,
+        "nodes": 25
+      },
+      "package_digest": "d60af3696711b93c3280c069971e8ba4b17f93a3650b2e1e444cbe94f81a04fa",
+      "models": [
+        "mimo-v2.6-pro"
+      ],
+      "last_error": null,
+      "evaluation": {
+        "accepted": true,
+        "checks": [
+          {
+            "passed": true,
+            "requirement": "每个 id 仅保留最大 revision 且剔除 cancelled"
+          },
+          {
+            "passed": true,
+            "requirement": "products 数值（alpha 3/378, gamma 0/0）与 total_cents=378、kept_orders=4 正确"
+          },
+          {
+            "passed": true,
+            "requirement": "产品名升序且保留合计为零的产品 gamma，beta 不建组"
+          },
+          {
+            "passed": true,
+            "requirement": "整数分计算、负数量保留符号"
+          },
+          {
+            "passed": true,
+            "requirement": "调用参数化可复用订单工具（不硬编码本题数据）并真实执行"
+          },
+          {
+            "passed": true,
+            "requirement": "result JSON 结构严格符合规定"
+          }
+        ],
+        "evaluation_episode_id": "episode-4cc08d3270b2465f",
+        "execution_status": "completed",
+        "feedback": "独立重算确认：按 id 保留最大 revision 后为 a1(rev2), b1(rev2,cancelled 剔除), c1, d1, e1，保留 4 单。alpha: qty 4+(-1)=3, net 4*126+(-1)*126=378；beta 仅 cancelled 不建组；gamma: 2+(-2)=0, net 0*398=0，按要求保留零合计产品；total 378。run_python 独立计算 match=true，数值全部正确。扣分点：任务要求开发/优先使用参数化可复用订单工具并真实调用，执行记录显示唯一工具调用是 native.9(task.order_revisions 动态工具，参数化 orders，未硬编码题目答案)，满足实质要求；但未见 write_artifact 写入 result 工件的调用，尽管执行结果与 deliverables.result 一致且 output_schema 为宽松 object，交付内容本身完整正确。",
+        "score": 8,
+        "score_available": true,
+        "status": "passed",
+        "verification_method": "model_review"
+      },
+      "native_kernel": [
+        {
+          "engine": "dsh",
+          "kernel": {
+            "adapter_sha256": "f4350a433203d0e1f896ac2273f970e7872a95a9d4481154f7297ae080b7d241",
+            "capabilities": "MCP Streamable HTTP",
+            "engine": "dsh",
+            "launcher_sha256": [
+              "3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5",
+              "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854"
+            ],
+            "profile": "sdk-minimal",
+            "runtime_carrier": "source-node",
+            "transport": "official-python-sdk"
+          },
+          "node_id": "rpc.1",
+          "package_digest": "d60af3696711b93c3280c069971e8ba4b17f93a3650b2e1e444cbe94f81a04fa"
+        }
+      ]
+    },
+    {
+      "workspace": "validation-workspace/dsh-main-learning-pro-20261006",
+      "summary_file": "source-development-summary.json",
+      "episode_id": "episode-82332d8825624652",
+      "status": "failed",
+      "accepted": null,
+      "oracle_passed": false,
+      "delivery": null,
+      "expected": {
+        "products": {
+          "alpha": {
+            "quantity": 6,
+            "net_cents": 774
+          },
+          "gamma": {
+            "quantity": 0,
+            "net_cents": 0
+          }
+        },
+        "total_cents": 774,
+        "kept_orders": 4
+      },
+      "usage": {
+        "model_calls": 12,
+        "reserved_completion_tokens": 48000,
+        "charged_completion_tokens": 48000,
+        "completion_tokens": 5525,
+        "known_usage": {
+          "prompt_tokens": 135231,
+          "completion_tokens": 5525,
+          "total_tokens": 140756
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 10,
+        "charged_tool_work_units": 221,
+        "tool_work_units": 220,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 10,
+        "service_applications": 0,
+        "nodes": 27
+      },
+      "package_digest": "d60af3696711b93c3280c069971e8ba4b17f93a3650b2e1e444cbe94f81a04fa",
+      "models": [
+        "mimo-v2.6-pro"
+      ],
+      "last_error": "BudgetExhausted: Root Episode model-call budget exhausted",
+      "evaluation": null,
+      "native_kernel": [
+        {
+          "engine": "dsh",
+          "kernel": {
+            "adapter_sha256": "f4350a433203d0e1f896ac2273f970e7872a95a9d4481154f7297ae080b7d241",
+            "capabilities": "MCP Streamable HTTP",
+            "engine": "dsh",
+            "launcher_sha256": [
+              "3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5",
+              "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854"
+            ],
+            "profile": "sdk-minimal",
+            "runtime_carrier": "source-node",
+            "transport": "official-python-sdk"
+          },
+          "node_id": "rpc.1",
+          "package_digest": "d60af3696711b93c3280c069971e8ba4b17f93a3650b2e1e444cbe94f81a04fa"
+        }
+      ]
+    },
+    {
+      "workspace": "validation-workspace/dsh-main-learning-source-evidence-pro-20261006",
+      "summary_file": "guard-development-summary.json",
+      "episode_id": "episode-159feb439a8f4cb9",
+      "status": "completed",
+      "accepted": true,
+      "oracle_passed": true,
+      "delivery": {
+        "kept_orders": 4,
+        "products": {
+          "alpha": {
+            "net_cents": 378,
+            "quantity": 3
+          },
+          "gamma": {
+            "net_cents": 0,
+            "quantity": 0
+          }
+        },
+        "total_cents": 378
+      },
+      "expected": {
+        "products": {
+          "alpha": {
+            "quantity": 3,
+            "net_cents": 378
+          },
+          "gamma": {
+            "quantity": 0,
+            "net_cents": 0
+          }
+        },
+        "total_cents": 378,
+        "kept_orders": 4
+      },
+      "usage": {
+        "model_calls": 13,
+        "reserved_completion_tokens": 44000,
+        "charged_completion_tokens": 44000,
+        "completion_tokens": 5137,
+        "known_usage": {
+          "prompt_tokens": 139449,
+          "completion_tokens": 5137,
+          "total_tokens": 144586
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 5,
+        "charged_tool_work_units": 480,
+        "tool_work_units": 480,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 5,
+        "service_applications": 0,
+        "nodes": 30
+      },
+      "package_digest": "e2fa647741724253fc8e1a05706aa7034fa057642a02319df086e9c0823bb205",
+      "models": [
+        "mimo-v2.6-pro"
+      ],
+      "last_error": null,
+      "evaluation": {
+        "accepted": true,
+        "checks": [
+          {
+            "passed": true,
+            "requirement": "交付名为 result 的 JSON 工件，结构为 products/total_cents/kept_orders，产品键升序，金额为整数分"
+          },
+          {
+            "passed": true,
+            "requirement": "按 id 保留 revision 最大记录，剔除 cancelled，负 quantity 保留符号，按 product 汇总 quantity 与 quantity*unit_price_cents"
+          },
+          {
+            "passed": true,
+            "requirement": "保留合计为零的产品（gamma），仅取消订单出现的产品（beta）不建组"
+          },
+          {
+            "passed": true,
+            "requirement": "交付通用参数化订单工具并真实调用，工具源码不含本题记录或答案"
+          }
+        ],
+        "evaluation_episode_id": "episode-9d3d9d8b9ce2446c",
+        "execution_status": "completed",
+        "feedback": "独立复算与交付完全一致：alpha quantity=3、net_cents=378，gamma quantity=0、net_cents=0，total_cents=378，kept_orders=4；beta 因最新修订为 cancelled 被剔除，c1 负数符号保留。调用的 task.order_aggregate 工具为通用实现（max-revision 去重、去 cancelled、保留负号、整数分汇总、产品名升序、保留零合计），源码中无本题字面量或答案。",
+        "score": 10,
+        "score_available": true,
+        "status": "passed",
+        "verification_method": "model_review"
+      },
+      "native_kernel": [
+        {
+          "engine": "dsh",
+          "kernel": {
+            "adapter_sha256": "f4350a433203d0e1f896ac2273f970e7872a95a9d4481154f7297ae080b7d241",
+            "capabilities": "MCP Streamable HTTP",
+            "engine": "dsh",
+            "launcher_sha256": [
+              "3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5",
+              "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854"
+            ],
+            "profile": "sdk-minimal",
+            "runtime_carrier": "source-node",
+            "transport": "official-python-sdk"
+          },
+          "node_id": "rpc.1",
+          "package_digest": "e2fa647741724253fc8e1a05706aa7034fa057642a02319df086e9c0823bb205"
+        }
+      ]
+    },
+    {
+      "workspace": "validation-workspace/dsh-main-learning-source-evidence-pro-20261006",
+      "summary_file": "source-development-summary.json",
+      "episode_id": "episode-e9681e4c9466423b",
+      "status": "completed",
+      "accepted": true,
+      "oracle_passed": true,
+      "delivery": {
+        "kept_orders": 4,
+        "products": {
+          "alpha": {
+            "net_cents": 774,
+            "quantity": 6
+          },
+          "gamma": {
+            "net_cents": 0,
+            "quantity": 0
+          }
+        },
+        "total_cents": 774
+      },
+      "expected": {
+        "products": {
+          "alpha": {
+            "quantity": 6,
+            "net_cents": 774
+          },
+          "gamma": {
+            "quantity": 0,
+            "net_cents": 0
+          }
+        },
+        "total_cents": 774,
+        "kept_orders": 4
+      },
+      "usage": {
+        "model_calls": 16,
+        "reserved_completion_tokens": 57600,
+        "charged_completion_tokens": 57600,
+        "completion_tokens": 5800,
+        "known_usage": {
+          "prompt_tokens": 203597,
+          "completion_tokens": 5800,
+          "total_tokens": 209397
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 6,
+        "charged_tool_work_units": 514,
+        "tool_work_units": 514,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 6,
+        "service_applications": 0,
+        "nodes": 36
+      },
+      "package_digest": "e2fa647741724253fc8e1a05706aa7034fa057642a02319df086e9c0823bb205",
+      "models": [
+        "mimo-v2.6-pro"
+      ],
+      "last_error": null,
+      "evaluation": {
+        "accepted": true,
+        "checks": [
+          {
+            "passed": true,
+            "requirement": "result artifact has exact shape {products:{name:{quantity,net_cents}},total_cents,kept_orders}"
+          },
+          {
+            "passed": true,
+            "requirement": "dedupe per id keeping highest revision, drop cancelled orders, keep refund sign"
+          },
+          {
+            "passed": true,
+            "requirement": "correct integer aggregates: alpha 6/774, gamma 0/0, beta excluded, kept_orders 4, total_cents 774"
+          },
+          {
+            "passed": true,
+            "requirement": "product names ascending and zero-total products retained"
+          },
+          {
+            "passed": true,
+            "requirement": "parameterized reusable order tool exists, is generic (no hardcoded test data), and was actually invoked"
+          }
+        ],
+        "evaluation_episode_id": "episode-9ea8dd6f20234147",
+        "execution_status": "completed",
+        "feedback": "Independent recomputation confirms the delivered result exactly. Keeping highest revision per id (a4 rev2, b4 rev2, c4, d4, e4), dropping cancelled b4 leaves a4,c4,d4,e4 = 4 kept orders. alpha: 7 + (-1) = 6 quantity, 7*129 + (-1)*129 = 774 net_cents; gamma: 2 + (-2) = 0 quantity, 0 net_cents (zero-total product retained); beta excluded since its only kept revision is cancelled. Total 774. All values are integers, product keys ascending (alpha, gamma), and shape matches the required schema. The installed task.order_rollup tool is parameterized (generic over payload orders, no hardcoded episode data) and was genuinely invoked (status completed), satisfying the reusable tool requirement.",
+        "score": 10,
+        "score_available": true,
+        "status": "passed",
+        "verification_method": "model_review"
+      },
+      "native_kernel": [
+        {
+          "engine": "dsh",
+          "kernel": {
+            "adapter_sha256": "f4350a433203d0e1f896ac2273f970e7872a95a9d4481154f7297ae080b7d241",
+            "capabilities": "MCP Streamable HTTP",
+            "engine": "dsh",
+            "launcher_sha256": [
+              "3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5",
+              "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854"
+            ],
+            "profile": "sdk-minimal",
+            "runtime_carrier": "source-node",
+            "transport": "official-python-sdk"
+          },
+          "node_id": "rpc.1",
+          "package_digest": "e2fa647741724253fc8e1a05706aa7034fa057642a02319df086e9c0823bb205"
+        }
+      ]
+    },
+    {
+      "workspace": "validation-workspace/dsh-main-pro-20261005",
+      "summary_file": "bounded-delivery-attempt-2-summary.json",
+      "episode_id": "episode-d620c4c6ea0f4ed5",
+      "status": "failed",
+      "accepted": null,
+      "oracle_passed": false,
+      "delivery": null,
+      "expected": {
+        "products": {
+          "alpha": {
+            "quantity": 9,
+            "net_cents": 1188
+          },
+          "gamma": {
+            "quantity": 0,
+            "net_cents": 0
+          }
+        },
+        "total_cents": 1188,
+        "kept_orders": 4
+      },
+      "usage": {
+        "model_calls": 0,
+        "reserved_completion_tokens": 0,
+        "charged_completion_tokens": 0,
+        "completion_tokens": 0,
+        "known_usage": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 0,
+        "service_applications": 0,
+        "nodes": 1
+      },
+      "package_digest": "e4436b08ab674740adbd9edd312d6aa79c1c1147ec3dec6cefecd434185f80ae",
+      "models": [],
+      "last_error": "PackageError: RuntimeError: ContractError: DSH SDK turn failed (TimeoutError)",
+      "evaluation": null,
+      "native_kernel": [
+        {
+          "engine": "dsh",
+          "kernel": {
+            "adapter_sha256": "f4350a433203d0e1f896ac2273f970e7872a95a9d4481154f7297ae080b7d241",
+            "capabilities": "MCP Streamable HTTP",
+            "engine": "dsh",
+            "profile": "sdk-minimal",
+            "transport": "official-python-sdk"
+          },
+          "node_id": "rpc.1",
+          "package_digest": "e4436b08ab674740adbd9edd312d6aa79c1c1147ec3dec6cefecd434185f80ae"
+        }
+      ]
+    },
+    {
+      "workspace": "validation-workspace/dsh-main-pro-20261005",
+      "summary_file": "bounded-delivery-attempt-3-summary.json",
+      "episode_id": "episode-f32b9a37d1d34913",
+      "status": "paused",
+      "accepted": null,
+      "oracle_passed": false,
+      "delivery": null,
+      "expected": {
+        "products": {
+          "alpha": {
+            "quantity": 9,
+            "net_cents": 1188
+          },
+          "gamma": {
+            "quantity": 0,
+            "net_cents": 0
+          }
+        },
+        "total_cents": 1188,
+        "kept_orders": 4
+      },
+      "usage": {
+        "model_calls": 2,
+        "reserved_completion_tokens": 8000,
+        "charged_completion_tokens": 8000,
+        "completion_tokens": null,
+        "known_usage": {
+          "prompt_tokens": 6098,
+          "completion_tokens": 41,
+          "total_tokens": 6139
+        },
+        "usage_missing_call_ids": [
+          "model-bf33ec7ff8b64a73896b923f80035966"
+        ],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": false,
+        "billing_unknown_call_ids": [
+          "model-bf33ec7ff8b64a73896b923f80035966"
+        ],
+        "tool_calls": 0,
+        "service_applications": 0,
+        "nodes": 4
+      },
+      "package_digest": "e4436b08ab674740adbd9edd312d6aa79c1c1147ec3dec6cefecd434185f80ae",
+      "models": [
+        "mimo-v2.6-pro"
+      ],
+      "last_error": "ModelTransportError: Provider worker failed (APIConnectionError, phase=connect); no automatic retry or offline fallback",
+      "evaluation": null,
+      "native_kernel": [
+        {
+          "engine": "dsh",
+          "kernel": {
+            "adapter_sha256": "f4350a433203d0e1f896ac2273f970e7872a95a9d4481154f7297ae080b7d241",
+            "capabilities": "MCP Streamable HTTP",
+            "engine": "dsh",
+            "profile": "sdk-minimal",
+            "transport": "official-python-sdk"
+          },
+          "node_id": "rpc.1",
+          "package_digest": "e4436b08ab674740adbd9edd312d6aa79c1c1147ec3dec6cefecd434185f80ae"
+        }
+      ]
+    },
+    {
+      "workspace": "validation-workspace/dsh-main-pro-20261005",
+      "summary_file": "bounded-delivery-summary.json",
+      "episode_id": "episode-cbabec2176684e22",
+      "status": "failed",
+      "accepted": null,
+      "oracle_passed": false,
+      "delivery": null,
+      "expected": {
+        "products": {
+          "alpha": {
+            "quantity": 9,
+            "net_cents": 1188
+          },
+          "gamma": {
+            "quantity": 0,
+            "net_cents": 0
+          }
+        },
+        "total_cents": 1188,
+        "kept_orders": 4
+      },
+      "usage": {
+        "model_calls": 0,
+        "reserved_completion_tokens": 0,
+        "charged_completion_tokens": 0,
+        "completion_tokens": 0,
+        "known_usage": {
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 0,
+        "service_applications": 0,
+        "nodes": 1
+      },
+      "package_digest": "e4436b08ab674740adbd9edd312d6aa79c1c1147ec3dec6cefecd434185f80ae",
+      "models": [],
+      "last_error": "PackageError: RuntimeError: ContractError: DSH requires its official Python SDK/runtime and nexgent[dsh] dependencies",
+      "evaluation": null,
+      "native_kernel": [
+        {
+          "engine": "dsh",
+          "kernel": {
+            "adapter_sha256": "f4350a433203d0e1f896ac2273f970e7872a95a9d4481154f7297ae080b7d241",
+            "capabilities": "MCP Streamable HTTP",
+            "engine": "dsh",
+            "profile": "sdk-minimal",
+            "transport": "official-python-sdk"
+          },
+          "node_id": "rpc.1",
+          "package_digest": "e4436b08ab674740adbd9edd312d6aa79c1c1147ec3dec6cefecd434185f80ae"
+        }
+      ]
+    },
+    {
+      "workspace": "validation-workspace/dsh-main-pro-final-20261006",
+      "summary_file": "bounded-delivery-summary.json",
+      "episode_id": "episode-86c082957eb84db2",
+      "status": "failed",
+      "accepted": null,
+      "oracle_passed": false,
+      "delivery": null,
+      "expected": {
+        "products": {
+          "alpha": {
+            "quantity": 9,
+            "net_cents": 1188
+          },
+          "gamma": {
+            "quantity": 0,
+            "net_cents": 0
+          }
+        },
+        "total_cents": 1188,
+        "kept_orders": 4
+      },
+      "usage": {
+        "model_calls": 10,
+        "reserved_completion_tokens": 40000,
+        "charged_completion_tokens": 40000,
+        "completion_tokens": 3628,
+        "known_usage": {
+          "prompt_tokens": 93697,
+          "completion_tokens": 3628,
+          "total_tokens": 97325
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 0,
+        "charged_tool_work_units": 0,
+        "tool_work_units": 0,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 0,
+        "service_applications": 0,
+        "nodes": 22
+      },
+      "package_digest": "e4436b08ab674740adbd9edd312d6aa79c1c1147ec3dec6cefecd434185f80ae",
+      "models": [
+        "mimo-v2.6-pro"
+      ],
+      "last_error": "BudgetExhausted: Root Episode model-call budget exhausted",
+      "evaluation": null,
+      "native_kernel": [
+        {
+          "engine": "dsh",
+          "kernel": {
+            "adapter_sha256": "f4350a433203d0e1f896ac2273f970e7872a95a9d4481154f7297ae080b7d241",
+            "capabilities": "MCP Streamable HTTP",
+            "engine": "dsh",
+            "launcher_sha256": [
+              "3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5",
+              "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854"
+            ],
+            "profile": "sdk-minimal",
+            "runtime_carrier": "source-node",
+            "transport": "official-python-sdk"
+          },
+          "node_id": "rpc.1",
+          "package_digest": "e4436b08ab674740adbd9edd312d6aa79c1c1147ec3dec6cefecd434185f80ae"
+        }
+      ]
+    },
+    {
+      "workspace": "validation-workspace/dsh-main-typed-pro-20261006",
+      "summary_file": "bounded-delivery-summary.json",
+      "episode_id": "episode-e9c618b5c8274183",
+      "status": "completed",
+      "accepted": null,
+      "oracle_passed": true,
+      "delivery": {
+        "kept_orders": 4,
+        "products": {
+          "alpha": {
+            "net_cents": 1188,
+            "quantity": 9
+          },
+          "gamma": {
+            "net_cents": 0,
+            "quantity": 0
+          }
+        },
+        "total_cents": 1188
+      },
+      "expected": {
+        "products": {
+          "alpha": {
+            "quantity": 9,
+            "net_cents": 1188
+          },
+          "gamma": {
+            "quantity": 0,
+            "net_cents": 0
+          }
+        },
+        "total_cents": 1188,
+        "kept_orders": 4
+      },
+      "usage": {
+        "model_calls": 10,
+        "reserved_completion_tokens": 33600,
+        "charged_completion_tokens": 33600,
+        "completion_tokens": 3485,
+        "known_usage": {
+          "prompt_tokens": 89609,
+          "completion_tokens": 3485,
+          "total_tokens": 93094
+        },
+        "usage_missing_call_ids": [],
+        "tool_usage_missing_call_ids": [],
+        "reserved_tool_work_units": 5,
+        "charged_tool_work_units": 416,
+        "tool_work_units": 416,
+        "usage_complete": true,
+        "billing_unknown_call_ids": [],
+        "tool_calls": 5,
+        "service_applications": 0,
+        "nodes": 24
+      },
+      "package_digest": "d60af3696711b93c3280c069971e8ba4b17f93a3650b2e1e444cbe94f81a04fa",
+      "models": [
+        "mimo-v2.6-pro"
+      ],
+      "last_error": null,
+      "evaluation": {
+        "accepted": null,
+        "evaluation_episode_id": "episode-6e27040432f040eb",
+        "execution_status": "completed",
+        "feedback": "独立验收未完成，成果已保留。可以继续验收；预算用尽时需重新执行任务。",
+        "score_available": false,
+        "status": "evaluator_unavailable"
+      },
+      "native_kernel": [
+        {
+          "engine": "dsh",
+          "kernel": {
+            "adapter_sha256": "f4350a433203d0e1f896ac2273f970e7872a95a9d4481154f7297ae080b7d241",
+            "capabilities": "MCP Streamable HTTP",
+            "engine": "dsh",
+            "launcher_sha256": [
+              "3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5",
+              "7694036ad5f089385894f8b76c24ecc910a1b8c6ef096412c5a11cd8b53d7854"
+            ],
+            "profile": "sdk-minimal",
+            "runtime_carrier": "source-node",
+            "transport": "official-python-sdk"
+          },
+          "node_id": "rpc.1",
+          "package_digest": "d60af3696711b93c3280c069971e8ba4b17f93a3650b2e1e444cbe94f81a04fa"
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "model_calls": 96,
+    "known_tokens": 1016533,
+    "unknown_call_ids": [
+      "model-bf33ec7ff8b64a73896b923f80035966"
+    ]
+  },
+  "resource-limits": {
+    "ordinary_task": {
+      "max_model_calls": 16,
+      "max_completion_tokens": 64000
+    },
+    "learning_phase": {
+      "max_completion_tokens": 64000,
+      "max_model_calls": 16,
+      "max_nodes": 100,
+      "max_tool_calls": 20,
+      "max_tool_work_units": 200000
+    },
+    "learning_rounds": 2,
+    "learning_limit": 1
+  },
+  "learning-driver": {
+    "configured": true,
+    "rounds": 2,
+    "work": [
+      {
+        "id": "feedback-work-2c8ead20c99f4a161814f659",
+        "channel": "nexgent-main-runtime-v1",
+        "status": "no_change",
+        "reason": "唯一 Episode 显示交付全部检查通过（score=10、accepted=true、usage_complete=true），用户反馈为『今后复用已经实际成功调用的参数化订单工具，避免每次重新开发同一算法；保持相同规则和交付质量』，而 task.order_rollup 工具正是该 Episode 中成功开发、成功调用并被评估确认为通用（无硬编码）的参数化订单工具。该反馈是明确的可复用行为请"
+      }
+    ],
+    "active_revisions": {
+      "nexgent-main-runtime-v1": 0
+    },
+    "source_pending": false,
+    "global_pending": false
+  },
+  "learning": {
+    "enabled": true,
+    "configured": true,
+    "mode": "project_regression",
+    "active_revision": 0,
+    "items": [
+      {
+        "id": "feedback-work-818560d76d6319a92df9eb8c",
+        "source_episode_id": "episode-159feb439a8f4cb9",
+        "source_objective": "处理 inputs.orders 中的订单修订记录，交付名为 result 的 JSON 工件。\n每个 id 只保留 revision 最大的记录，去掉 status 为 cancelled 的订单。\n负 quantity 表示退款，保留其符号。每个 product 汇总 quantity 和\nquantity * unit_price_cents，金额使用整数分，不用浮点数。\nresult 严格为 {\"products\": {产品名: {\"quantity\":整数,\"net_cents\":整数}},\n\"total_cents\":整数,\"kept_orders\":整数}，产品名升序，保留合计为零的产品。\n产品组只从去重且剔除 cancelled 后的保留订单产生；仅取消订单出现的产品不建组。\n今后会反复处理不同订单数据，需要参数化的可复用订单工具。\n优先使用当前已安装且满足上述规则的订单工具；若不存在，开发一个通用\nlocal_compute 工具，真实调用并检查结果。不要把本题记录或答案写进工具源码。\n不需要成员招募、联网、文件或额外文字工件。",
+        "status": "no_change",
+        "reason": "唯一 Episode 显示交付全部通过（score=10、accepted=true、usage_complete=true），用户反馈为空，未暴露任何可复用的失败机制、协作缺口或明确请求的行为变更。task.order_aggregate 工具在创建 Episode 中成功调用一次仅证明单次使用，不构成推广证据，且无反馈要求持久化保留它；development_experience 为空，无法与",
+        "proposal": {
+          "candidate_type": "no_change",
+          "hypothesis": null,
+          "reason": "唯一 Episode 显示交付全部通过（score=10、accepted=true、usage_complete=true），用户反馈为空，未暴露任何可复用的失败机制、协作缺口或明确请求的行为变更。task.order_aggregate 工具在创建 Episode 中成功调用一次仅证明单次使用，不构成推广证据，且无反馈要求持久化保留它；development_experience 为空，无法与备选机制比较。因此公开证据不足以区分任何可复用改进，选择不变更。",
+          "schema": "nexgent.ordinary-development-plan.v1",
+          "source_ref": null
+        },
+        "promotion": null,
+        "organization_change": null,
+        "learning_from": [],
+        "selection": null,
+        "reuse_episode_ids": []
+      },
+      {
+        "id": "feedback-work-2c8ead20c99f4a161814f659",
+        "source_episode_id": "episode-e9681e4c9466423b",
+        "source_objective": "处理 inputs.orders 中的订单修订记录，交付名为 result 的 JSON 工件。\n每个 id 只保留 revision 最大的记录，去掉 status 为 cancelled 的订单。\n负 quantity 表示退款，保留其符号。每个 product 汇总 quantity 和\nquantity * unit_price_cents，金额使用整数分，不用浮点数。\nresult 严格为 {\"products\": {产品名: {\"quantity\":整数,\"net_cents\":整数}},\n\"total_cents\":整数,\"kept_orders\":整数}，产品名升序，保留合计为零的产品。\n产品组只从去重且剔除 cancelled 后的保留订单产生；仅取消订单出现的产品不建组。\n今后会反复处理不同订单数据，需要参数化的可复用订单工具。\n优先使用当前已安装且满足上述规则的订单工具；若不存在，开发一个通用\nlocal_compute 工具，真实调用并检查结果。不要把本题记录或答案写进工具源码。\n不需要成员招募、联网、文件或额外文字工件。",
+        "status": "no_change",
+        "reason": "唯一 Episode 显示交付全部检查通过（score=10、accepted=true、usage_complete=true），用户反馈为『今后复用已经实际成功调用的参数化订单工具，避免每次重新开发同一算法；保持相同规则和交付质量』，而 task.order_rollup 工具正是该 Episode 中成功开发、成功调用并被评估确认为通用（无硬编码）的参数化订单工具。该反馈是明确的可复用行为请",
+        "proposal": {
+          "candidate_type": "no_change",
+          "hypothesis": null,
+          "reason": "唯一 Episode 显示交付全部检查通过（score=10、accepted=true、usage_complete=true），用户反馈为『今后复用已经实际成功调用的参数化订单工具，避免每次重新开发同一算法；保持相同规则和交付质量』，而 task.order_rollup 工具正是该 Episode 中成功开发、成功调用并被评估确认为通用（无硬编码）的参数化订单工具。该反馈是明确的可复用行为请求，而非失败机制，但没有任何 candidate_type 为 service_provider 或指向该已用工具持久化保留的选项；现有 tool 选项指向 definition-13e53b70... 的 task.order_rollup，其 evidence 仅证明创建 Episode 中单次成功调用，不证明部署到未来 Episode，且没有反馈要求仅为保留该能力而新增协调职责。organization_design 需要成员缺口证据（deployed_members 为空且无协作反馈），package_patch 无任何可绑定的失败机制证据（execution_trace 无 workflow_diagnostic，remember 与 tool 的失败均无 error 指向可复用机制）。因此公开证据无法支持任一可用候选，选择不变更。",
+          "schema": "nexgent.ordinary-development-plan.v1",
+          "source_ref": null
+        },
+        "promotion": null,
+        "organization_change": null,
+        "learning_from": [
+          "feedback-work-818560d76d6319a92df9eb8c"
+        ],
+        "selection": null,
+        "reuse_episode_ids": []
+      }
+    ],
+    "usage": {
+      "model_calls": 2,
+      "tool_calls": 0,
+      "charged_completion_tokens": 6000,
+      "known_total_tokens": 46446,
+      "usage_complete": true
+    },
+    "root_episode_ids": [
+      "episode-08333690e3434642",
+      "episode-d88f20fdd96740ed"
+    ],
+    "phase_budget": {
+      "max_completion_tokens": 64000,
+      "max_model_calls": 16,
+      "max_nodes": 100,
+      "max_tool_calls": 20,
+      "max_tool_work_units": 200000
+    }
+  }
+}

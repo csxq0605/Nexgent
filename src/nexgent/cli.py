@@ -525,6 +525,7 @@ def main(argv=None):
     run.add_argument("--attach", type=Path, action="append", help="Attach a local Excel/CSV/text file (repeat for multiple files)")
     run.add_argument("--conversation", help="Continue a conversation ID from an earlier run")
     run.add_argument("--model-root", type=Path, help="Read existing model settings from another workspace")
+    run.add_argument('--kernel', choices=['dsh'], help='Use the DSH native loop for a new project')
     run.add_argument("--organization-demo", action="store_true", help="Use the optional organization proposal application")
     feedback = sub.add_parser("feedback", help="Record user feedback on a delivered Main task for subsequent work and gated improvement")
     feedback.add_argument("run_id")
@@ -921,7 +922,7 @@ def main(argv=None):
     if args.command == "run":
         if not args.organization_demo:
             from .application import Nexgent
-            service = Nexgent(args.root, model_root=args.model_root)
+            service = Nexgent(args.root, model_root=args.model_root, kernel=args.kernel)
             inputs = _object_argument(args.input, label='input') if args.input else {}
             if args.attach:
                 inputs['attachments'] = service.attach_files(args.attach)

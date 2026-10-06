@@ -1,6 +1,8 @@
 # ADR 001：以 Python Episode 内核作为 Nexgent 的生产执行边界
 
-日期：2026-09-24；复核：2026-10-05。状态：**当前生产保留 Python；DSH/Cordis 路线重新开放评估，RSI 效果仍待验证。** 关联[重构计划](../../REFACTOR_PLAN.md)、[固定源码对照](../research/kernel-reference-audit-20260923.md)、[两路线实验与失败记录](../../experiments/kernel_spike/RESULTS.md)及[任务中能力授权合同](task-time-capability-authority.md)。
+日期：2026-09-24；复核：2026-10-06。状态：**Python 保留宿主控制边界；DSH/Cordis 已作为可选 Main 原生循环接入，完整 RSI 效果仍待验证。** 关联[重构计划](../../REFACTOR_PLAN.md)、[固定源码对照](../research/kernel-reference-audit-20260923.md)、[两路线实验与失败记录](../../experiments/kernel_spike/RESULTS.md)及[任务中能力授权合同](task-time-capability-authority.md)。
+
+2026-10-06 更新：DSH 官方 SDK、`sdk-minimal` profile 和 MCP 已接入 Main/CLI/SDK 的同一宿主模型与工具账本。真实 Pro 自主开发、执行计算工具并交付结构化成果，宿主审核与外置 oracle 同时通过。已有版本保持原样，新项目可选择该循环。使用的是显式开发 node carrier，尚未提供生产 runtime wheel；完整原生中断续跑、跨任务发布复用及 RSI 净收益仍需验证。下文是历史决策依据，当前行为以 [DSH Main](../dsh-main.md) 和 [本轮实测](../validation/dsh-main-20261006.md) 为准。
 
 2026-10-05 补充：使用 `mimo-v2.6-pro`，固定 DSH headless 路线已完整通过两次原生模型请求、一次工具执行和最终 JSON 交付（1332 tokens）。适配器必须处理 MiMo 暴露的终止标记；请求头是配置变化事件，不能错误要求每次模型请求都有新 header。下文保留当时的负结果，不再将其作为“DSH 不能完整交付”的当前依据。该实验尚未接入 Nexgent 生产预算与发布链，不能声称生产迁移完成。
 
@@ -8,7 +10,7 @@
 
 保留 Python `TaskService`／`EpisodeStore` 为唯一生产任务执行与控制边界，在其上抽取有版本的服务、provider、能力实例、执行循环和上下文策略接口。`TaskService` 的既有入口作为兼容 facade，Episode 持有权限、模型和工具调用前准入、预算、结果、恢复与独立评价的权威身份。工具／服务插件与执行程序通过作用域和版本合同接入，不另建第二套任务账本。
 
-[DeepSeek Harness 固定提交](https://github.com/deepseek-ai/deepseek-harness/tree/46a7f68b0922371ce7144b668b90e377d8e799f4)及 Cordis 保留为服务／provider／模型工具分层、Agent 作用域、disposer、session 事件及可替换 loop 的源码参考和对照实验后端，**不**作为当前 Nexgent 生产执行后端。此选择不是断言 Python 现有插件体系更完整，也不是断言 DeepSeek 的真实模型路线永远不可用。
+[DeepSeek Harness 固定提交](https://github.com/deepseek-ai/deepseek-harness/tree/46a7f68b0922371ce7144b668b90e377d8e799f4)及 Cordis 的原生循环现在可作为宿主内的可选后端。宿主权威身份、账本与发布门控继续由 TaskService 持有，DSH 负责成熟的原生 agent/tool 迭代。历史“仅供参考”的决定已由上述实际接入修订。
 
 ## 实测依据
 

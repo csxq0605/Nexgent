@@ -18,6 +18,31 @@ def passed():
             'checks': [{'requirement': 'The supplied task is fulfilled', 'passed': True}]}
 
 
+def test_default_main_publishes_json_and_uses_only_host_independent_evaluation(tmp_path):
+    def policy(number, payload):
+        if number == 1:
+            assert payload['task']['deliverables'][0]['schema'] == {'type': 'object'}
+            return {'request': {'method': 'publish', 'params': {
+                'name': 'result', 'content': {'value': 42}}}}
+        if number == 2:
+            assert payload['evidence']['deliverables'] == {'result': {'value': 42}}
+            return {'tool': 'run_python', 'arguments': {
+                'code': "return {'value': payload['left'] * payload['right']}",
+                'payload': {'left': 6, 'right': 7}}}
+        assert number == 3 and payload['verification_results'][0]['result']['value'] == {'value': 42}
+        return passed()
+    runtime = Nexgent(tmp_path, gateway_factory=ScriptedGatewayFactory(policy))
+    runtime.set_auto_improve(False)
+    result = runtime.run(runtime.create('Publish six times seven as a JSON object',
+                         deliverables=[{'name': 'result', 'schema': {'type': 'object'}}],
+                         budget={'max_model_calls': 3})['id'])
+    assert result['status'] == 'completed', result.get('last_error')
+    assert runtime.store.read(result['output_refs']['result'], result['id'])['content'] == {'value': 42}
+    assert result['evaluation']['accepted'] is True
+    assert [call['role'] for call in result['calls']] == ['task_agent', 'evaluator', 'evaluator']
+    assert result['usage']['model_calls'] == 3
+
+
 def test_evaluation_shares_original_task_budget_and_reports_all_calls(qtbot, tmp_path):
     gateway = ScriptedGatewayFactory(lambda *_: passed())
     runtime = Nexgent(tmp_path, package=ANSWER, gateway_factory=gateway)
@@ -266,15 +291,10 @@ def test_stopped_correction_resumes_its_persisted_child_after_restart(tmp_path):
     assert len(final['children']) == 1
 
 
-@pytest.mark.parametrize('action_envelope', [False, True])
-def test_main_default_strategy_finishes_published_work_in_both_completion_forms(qtbot, tmp_path, action_envelope):
-    from test_task_seed import published_id
+def test_main_auto_completes_published_work_without_package_review(qtbot, tmp_path):
     def policy(number, payload):
-        if number == 1:
-            return {'request': {'method': 'publish', 'params': {'name': 'result', 'content': 'answer'}}}
-        done = {'deliverables': {'result': published_id(payload)}, 'summary': 'Actual published answer',
-                'limitations': []}
-        return {'request': {'method': 'done', 'params': done}} if action_envelope else {'done': done}
+        assert number == 1
+        return {'request': {'method': 'publish', 'params': {'name': 'result', 'content': 'answer'}}}
     runtime = Nexgent(tmp_path, evaluator=CheckResult('answer'), gateway_factory=ScriptedGatewayFactory(policy))
     window = MainWindow(tmp_path, runtime)
     qtbot.addWidget(window)
@@ -284,7 +304,7 @@ def test_main_default_strategy_finishes_published_work_in_both_completion_forms(
     final = runtime.get(window.selected_id)
     assert final['status'] == 'completed', final.get('last_error')
     assert final['evaluation']['accepted'] is True
-    assert final['usage']['model_calls'] == 2
-    assert len(final['calls']) == 2
+    assert final['usage']['model_calls'] == 1
+    assert len(final['calls']) == 1
     assert all(call['status'] in {'received', 'completed'} for call in final['calls'])
     assert len(runtime.list()) == 1

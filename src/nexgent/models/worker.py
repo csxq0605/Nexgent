@@ -5,11 +5,15 @@ import sys
 from urllib.parse import urlsplit
 
 
-def request_params(base_url, model, messages, max_tokens):
+def request_params(base_url, model, messages, max_tokens, *, native=False, tools=None):
     if type(max_tokens) is not int or not 1 <= max_tokens <= 12000:
         raise ValueError("Completion limit must be an integer in 1..12000")
-    result = {"model": model, "messages": messages, "response_format": {"type": "json_object"},
-              "max_completion_tokens": max_tokens}
+    result = {"model": model, "messages": messages, "max_completion_tokens": max_tokens}
+    if native:
+        if tools:
+            result['tools'] = tools
+    else:
+        result['response_format'] = {'type': 'json_object'}
     if (urlsplit(base_url).hostname in {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com"}
             and (model.lower().startswith("mimo-v2.5")
                  or model.lower() in {"mimo-v2.6-flash", "mimo-v2.6-pro"})):
@@ -40,7 +44,7 @@ def usage_snapshot(usage):
     return result
 
 
-def response_payload(response):
+def response_payload(response, *, native=False):
     choice = response.choices[0] if response.choices else None
     content = getattr(getattr(choice, "message", None), "content", None)
     reason, identity = getattr(choice, "finish_reason", None), getattr(response, "id", None)
@@ -53,13 +57,21 @@ def response_payload(response):
         content = content.rstrip()
         while content.endswith("<|im_end|>"):
             content = content[:-len("<|im_end|>")].rstrip()
-    return {"content": content[:240001] if isinstance(content, str) else None,
+    result = {"content": content[:240001] if isinstance(content, str) else None,
             "finish_reason": reason[:100] if isinstance(reason, str) else None,
             "response_id": identity[:500] if isinstance(identity, str) else None,
             "observed_model": observed_model[:500] if isinstance(observed_model, str) else None,
             "system_fingerprint": (system_fingerprint[:500]
                                    if isinstance(system_fingerprint, str) else None),
             "usage": usage_snapshot(getattr(response, "usage", None))}
+    if native:
+        calls = getattr(getattr(choice, 'message', None), 'tool_calls', None) or []
+        result['tool_calls'] = [
+            {'id': getattr(call, 'id', None), 'type': getattr(call, 'type', None),
+             'function': {'name': getattr(getattr(call, 'function', None), 'name', None),
+                          'arguments': getattr(getattr(call, 'function', None), 'arguments', None)}}
+            for call in calls]
+    return result
 
 
 def error_payload(exc, stage):
@@ -108,8 +120,9 @@ def main():
         if type(request["timeout"]) not in (int, float) or not 0 < request["timeout"] <= 180:
             raise ValueError("Invalid timeout")
         params = request["request_params"]
+        native = 'response_format' not in params
         if params != request_params(request["base_url"], params.get("model"), params.get("messages"),
-                                    params.get("max_completion_tokens")):
+                                    params.get("max_completion_tokens"), native=native, tools=params.get('tools')):
             raise ValueError("Invalid bounded request parameters")
         stage = "client_setup"
         from openai import OpenAI
@@ -118,7 +131,7 @@ def main():
         stage = "request"
         response = client.chat.completions.create(**params)
         stage = "response_decode"
-        result = response_payload(response)
+        result = response_payload(response, native=native)
         print(json.dumps(result, ensure_ascii=False, allow_nan=False), flush=True)
         return 0
     except Exception as exc:

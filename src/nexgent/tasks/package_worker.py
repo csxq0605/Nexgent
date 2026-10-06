@@ -84,6 +84,9 @@ class Context:
     def tool(self, name, arguments=None):
         return self.request("tool", {"name": name, "arguments": arguments})
 
+    def native_agent(self, engine, instructions, task):
+        return self.request('native_agent', {'engine': engine, 'instructions': instructions, 'task': task})
+
     def parallel(self, requests):
         return self.request("parallel", {"requests": requests})
 

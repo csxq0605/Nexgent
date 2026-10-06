@@ -6,6 +6,11 @@
 
 ## 已接通的结构
 
+2026-10-06 补充：新项目可通过 `kernel="dsh"` 或 `run --kernel dsh` 使用 DSH/Cordis
+原生模型与 MCP 工具循环，仍进入同一个 TaskService 宿主边界。已有包版本不会被
+构造函数覆盖。安装、启动和恢复限制见 [DSH Main](dsh-main.md)。默认 Main 初始包
+由固定宿主单独审核交付，不再重复调用包内 reviewer；核验要求保留。
+
 | 部分 | 复用的实现 | 普通入口中的行为 |
 | --- | --- | --- |
 | 任务执行 | TaskService / Episode | 工具、子任务、成果、预算和恢复使用同一运行时 |

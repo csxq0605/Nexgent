@@ -376,6 +376,12 @@ mechanism or abstain when the evidence still does not justify a useful change.
 Do not infer hidden tasks or answers, weaken gates, or treat a prior promotion
 as proof of generalization. Current feedback and the installed parent remain
 the basis of this proposal.
+When selection.evidence_status is inconclusive, the release was refused with
+incomplete measurements. That does not establish a relative quality or cost
+regression. Use each arm's score/acceptance/usage completeness to distinguish
+measured behavior from infrastructure or evaluator failure. Do not interpret
+missing baseline measurements as evidence that a reusable capability is bad,
+and do not retry an unknown external outcome or weaken its release gates.
 `release_criteria` is the host's frozen public policy, not something to modify.
 When it includes `min_cost_reduction`, a change may preserve quality while
 strictly reducing conservative execution work by that fraction. Other gates

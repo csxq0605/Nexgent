@@ -13,6 +13,7 @@ dependencies = ["openai>=1.0", "requests>=2.31", "beautifulsoup4>=4.12,<5", "pyt
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-qt>=4.5"]
+dsh = ["mcp>=1.28,<2", "uvicorn>=0.30,<1"]
 
 [project.scripts]
 nexgent = "nexgent.cli:main"
@@ -22,7 +23,7 @@ nexgent-gui = "nexgent.ui.app:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-nexgent = ["agents/seeds/*.py", "agents/seeds/*.json", "ui/assets/*.svg", "ui/assets/*.png"]
+nexgent = ["agents/seeds/*.py", "agents/seeds/*.json", "ui/assets/*.svg", "ui/assets/*.png", "kernel/*.mjs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
