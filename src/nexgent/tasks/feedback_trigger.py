@@ -418,9 +418,12 @@ class AutoEvolutionService:
                     "candidate_type": kind,
                     "source_ref": definition_id,
                     "evidence": {
-                        "definition_digest": definition["digest"],
                         "creator_episode_id": creator["id"],
                         "name": definition["name"],
+                        "description": definition["description"][:1000],
+                        "effect_class": definition["effect_class"],
+                        "current_scope": "creator_episode",
+                        "proposed_change": "Persist this definition in the AgentPackage for future authorized tasks, subject to selection and guard gates",
                         "successful_use": True,
                     },
                 })

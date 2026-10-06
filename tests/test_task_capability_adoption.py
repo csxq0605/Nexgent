@@ -1,6 +1,7 @@
 """Task-created tools and services must earn portable package reuse."""
 
 from copy import deepcopy
+import json
 import threading
 
 import pytest
@@ -8,6 +9,7 @@ import pytest
 from nexgent.tasks.capability_authority import make_episode_authority
 from nexgent.tasks.evolution import EvolutionService, PromotionPolicy
 from nexgent.tasks.generation import GenerationService
+from nexgent.tasks.packages import digest, make_package
 from nexgent.tasks.runtime import TaskService
 from nexgent.tasks.self_orchestration_seed import self_orchestration_package
 from nexgent.tasks.task_capability_adoption import TaskCapabilityAdoptionService
@@ -290,11 +292,18 @@ def _creator(tasks, kind, *, use=True):
 
 
 @pytest.mark.parametrize("kind", ["tool", "service_provider"])
-def test_task_capability_passes_selection_guard_and_fresh_episode_reuse(tmp_path, kind):
+@pytest.mark.parametrize("rediscovered", [False, True])
+def test_task_capability_passes_selection_guard_and_fresh_episode_reuse(tmp_path, kind, rediscovered):
     gateway, tasks, evolution, generation, adoption, parent = _system(tmp_path)
     creator, definition_id = _creator(tasks, kind)
     feedback = generation.capture_feedback(
         "portable", [creator["id"]], expected_revision=0)
+    if rediscovered:
+        first = adoption.adopt(
+            "portable", definition_id, creator["id"], feedback["id"], 0,
+            {**HYPOTHESIS, 'failure_mechanism': 'Earlier attempt to persist this capability'},
+            budget={"max_model_calls": 0, "max_tool_calls": 0, "max_nodes": 12})['generation']
+        assert first['status'] == 'generated'
     adopted = adoption.adopt(
         "portable", definition_id, creator["id"], feedback["id"], 0,
         deepcopy(HYPOTHESIS),
@@ -306,6 +315,12 @@ def test_task_capability_passes_selection_guard_and_fresh_episode_reuse(tmp_path
     component_id = adopted["adoption"]["component_id"]
     source_path = adopted["adoption"]["source_path"]
     child = tasks.store.package(candidate["package_id"])
+    if rediscovered:
+        assert first['id'] != generated['id']
+        assert first['candidate_id'] != generated['candidate_id']
+        assert first['candidate_package_id'] == generated['candidate_package_id']
+        assert child['provenance']['generation_id'] == first['id']
+        assert evolution._verify_generated_candidate(candidate)['id'] == generated['id']
     assert child["manifest"]["components"][component_id]["class"] == "S"
     assert source_path in child["files"]
     assert child["files"][source_path] not in parent["files"].values()
@@ -361,6 +376,41 @@ def test_task_capability_passes_selection_guard_and_fresh_episode_reuse(tmp_path
     assert source_path in reuse["execution"]["loaded_modules"]
     assert {row["component_id"] for row in reuse["execution"][
         "activated_components"]} == {component_id}
+
+
+def test_rediscovered_generation_cannot_authorize_different_executable_content(tmp_path):
+    _, tasks, evolution, generation, adoption, parent = _system(tmp_path)
+    creator, definition_id = _creator(tasks, 'tool')
+    feedback = generation.capture_feedback('portable', [creator['id']], expected_revision=0)
+    arguments = ('portable', definition_id, creator['id'], feedback['id'], 0, deepcopy(HYPOTHESIS))
+    first = adoption.adopt(*arguments)['generation']
+    second = adoption.adopt(*arguments)['generation']
+    candidate = evolution.candidate(second['candidate_id'])
+    assert evolution._verify_generated_candidate(candidate)['id'] == second['id']
+    child = tasks.store.package(candidate['package_id'])
+    files = deepcopy(child['files'])
+    source_path = candidate['component_target']['members'][
+        candidate['component_target']['component_ids'][0]]['child']['files'][0]
+    files[source_path] += '\n# This code was not produced by the recorded improve execution.\n'
+    forged = make_package(files, child['manifest'], parent=parent, provenance=child['provenance'])
+    tasks.store.put_package(forged)
+    # Even mutually consistent, rehashed control records cannot substitute
+    # different executable content for the actual immutable patch artifact.
+    with tasks.store.connect() as db:
+        for table, identifier, updates in (
+            ('task_candidate_generations', second['id'],
+             {'candidate_package_id': forged['id'], 'candidate_package_digest': forged['digest']}),
+            ('task_evolution_candidates', candidate['id'],
+             {'package_id': forged['id'], 'package_digest': forged['digest']}),
+        ):
+            record = json.loads(db.execute(f'SELECT data FROM {table} WHERE id=?', (identifier,)).fetchone()[0])
+            record.update(updates)
+            db.execute(f'UPDATE {table} SET data=?,digest=? WHERE id=?',
+                       (json.dumps(record, ensure_ascii=False), digest(record), identifier))
+    with pytest.raises(ContractError, match='package replay differs'):
+        evolution._verify_generated_candidate(evolution.candidate(candidate['id']))
+    assert tasks.store.package(child['id'])['provenance']['generation_id'] == first['id']
+    assert evolution.active('portable')['revision'] == 0
 
 
 def test_adoption_rejects_a_definition_that_was_never_successfully_used(tmp_path):

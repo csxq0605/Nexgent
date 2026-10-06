@@ -39,6 +39,18 @@ verification calls; then report the assessment and any missing evidence.
 """
 
 
+FINAL_REVIEW_PROMPT = REVIEW_PROMPT.split('\nReturn {', 1)[0] + """
+This is the final assessment turn. Verification actions are closed. Use the
+actual verification_results already supplied to judge every mandatory requirement.
+Return only {"status":"passed|failed","score_available":true,"score":0..10,
+"accepted":boolean,"feedback":"concise evidence-grounded explanation",
+"checks":[{"requirement":"mandatory requirement","passed":boolean}]}.
+Do not return a tool or arguments field. Mark unresolved requirements failed;
+never invent evidence, substitute agent observations for independent checks,
+or accept a delivery whose mandatory requirements have not all passed.
+"""
+
+
 REVIEW_SOURCE = '''def execute(payload, context):
     evidence = context.read_artifact(payload['input_refs']['evidence'])['content']
     trace = []
@@ -50,7 +62,7 @@ REVIEW_SOURCE = '''def execute(payload, context):
     for step in range(limit + 1):
         prompt = context.resource('review.md')
         if step == limit:
-            prompt += '\\nVerification action budget is exhausted. Return the final assessment JSON now. Do not request another tool. Mark unmet requirements failed or unavailable; never invent checks.'
+            prompt = context.resource('final-review.md')
         result = context.ask('evaluator', prompt, {
             'evidence': evidence, 'tools': tools if step < limit else [],
             'verification_results': trace, 'remaining_tool_calls': limit - step,
@@ -175,11 +187,12 @@ class ModelDeliveryEvaluator:
         self.on_update = on_update
 
     def snapshot(self):
-        return {'id': self.id, 'package_digest': self.package()['digest'], 'requirements_version': 5}
+        return {'id': self.id, 'package_digest': self.package()['digest'], 'requirements_version': 6}
 
     @staticmethod
     def package():
-        return make_package({'review.py': REVIEW_SOURCE, 'review.md': REVIEW_PROMPT},
+        return make_package({'review.py': REVIEW_SOURCE, 'review.md': REVIEW_PROMPT,
+                             'final-review.md': FINAL_REVIEW_PROMPT},
                             {'entries': {'execute': 'review.py:execute'}},
                             provenance={'origin': 'nexgent.host-delivery-evaluator'})
 

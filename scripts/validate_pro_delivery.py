@@ -5,6 +5,7 @@ This is a development validation, not a statistical RSI study.
 """
 import json
 import argparse
+import os
 from pathlib import Path
 import time
 
@@ -22,6 +23,10 @@ parser.add_argument('--phase-completion-tokens', type=int)
 parser.add_argument('--learning-rounds', type=int, default=16)
 parser.add_argument('--learning-limit', type=int, default=4)
 parser.add_argument('--kernel', choices=['dsh'])
+parser.add_argument('--future-only', action='store_true',
+                    help='In a separately launched process, check a new task against an already gated deployment')
+parser.add_argument('--future-offset', type=int, default=8,
+                    help='Synthetic input variant for --future-only (0..100)')
 ARGS = parser.parse_args()
 ROOT = ARGS.root.resolve()
 MODEL_ROOT = Path(__file__).resolve().parents[1]
@@ -82,10 +87,10 @@ def emit(value):
     print(json.dumps(value, ensure_ascii=False), flush=True)
 
 
-def run_task(runtime, label, offset):
+def run_task(runtime, label, offset, *, reuse_completed=True):
     rows = orders(offset)
     previous = sorted(ROOT.glob(label+'*-summary.json'))
-    for path in reversed(previous):
+    for path in (reversed(previous) if reuse_completed else ()):
         saved = json.loads(path.read_text(encoding='utf-8'))
         if saved.get('accepted') is True and saved.get('oracle_passed') is True:
             state = runtime.get(saved['episode_id'])
@@ -129,6 +134,28 @@ def main():
     start = time.time()
     runtime = Nexgent(ROOT, model_root=MODEL_ROOT, kernel=ARGS.kernel)
     runtime.set_auto_improve(False)
+    if ARGS.future_only:
+        if not 0 <= ARGS.future_offset <= 100:
+            raise ValueError('Future input offset must be within 0..100')
+        active = runtime.evolution.active(runtime.main_channel)
+        completed = [item for item in runtime.improvement_status()['items']
+                     if item['status'] == 'completed' and item.get('promotion')
+                     and item['promotion']['revision'] == active['revision']
+                     and item['promotion']['package_id'] == active['package_id']]
+        if not completed:
+            raise RuntimeError('No completed selection/guard work matches the active deployment')
+        future = run_task(runtime, 'future-process-'+str(ARGS.future_offset), ARGS.future_offset,
+                          reuse_completed=False)
+        status = runtime.improvement_status()
+        if not any(future['episode_id'] in item['reuse_episode_ids'] for item in status['items']):
+            raise RuntimeError('Actual use of the published capability was not observed')
+        save('verified-process-reuse', {'scope': 'Separate-process persistence and actual use; not a held-out RSI study',
+             'process_pid': os.getpid(), 'input_offset': ARGS.future_offset,
+             'active_revision': active['revision'], 'package_digest': active['package_digest'],
+             'future': future, 'learning': status, 'elapsed_seconds': time.time()-start})
+        emit({'phase': 'process-reuse-complete', 'episode_id': future['episode_id'],
+              'active_revision': active['revision'], 'oracle_passed': future['oracle_passed']})
+        return
     # Only resource limits change; candidate choice, evaluators and promotion
     # thresholds remain the actual application's defaults. Work freezes them
     # when the ordinary task's terminal hook creates its durable record.

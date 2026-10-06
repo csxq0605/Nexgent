@@ -16,7 +16,6 @@ import socket
 import threading
 import time
 
-from ..models.gateway import json_object
 from ..tasks.package_runner import CapabilityAbort
 from ..tasks.tools import ContractError
 
@@ -132,6 +131,8 @@ class DshKernel:
         mcp = Server('Nexgent authorized task capabilities')
         direct_tools = {}
         publish_targets = {}
+        published = {}
+        publication_lock = threading.Lock()
 
         def dispatch(method, arguments):
             from ..tasks.runtime import RecoveryRequired
@@ -141,6 +142,15 @@ class DshKernel:
                     raise fatal[0]
                 if stop_event.is_set():
                     raise InterruptedError('Native agent was stopped')
+                if method == 'publish':
+                    # Bind completion to successful host receipts, including
+                    # the most recent publication of each name. Serialize this
+                    # update with publication so parallel MCP replies cannot
+                    # replace a newer artifact with an earlier one.
+                    with publication_lock:
+                        value = invoke(method, arguments)
+                        published[arguments['name']] = value['id']
+                        return value
                 return invoke(method, arguments)
             except CapabilityAbort as exc:
                 fatal.append(exc)
@@ -321,7 +331,13 @@ class DshKernel:
             turn = result[0]
             if turn.finish_reason != 'completed':
                 raise ContractError('Native agent did not finish a complete turn')
-            return json_object(turn.final_response)
+            missing = [spec['name'] for spec in task['deliverables'] if spec['name'] not in published]
+            if missing:
+                raise ContractError('Native agent completed without publishing required deliverables: '+', '.join(missing))
+            # Native turns can end with prose, Markdown or structured text.
+            # None of it grants artifact authority. TaskService still reads
+            # and validates these actual receipts and evaluates the delivery.
+            return {'deliverables': dict(published), 'summary': turn.final_response, 'limitations': []}
         finally:
             harness.close()
             if runner.ident is not None:

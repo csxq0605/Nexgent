@@ -59,7 +59,8 @@ def runtime_for(tmp_path, transport):
 
 
 @live
-def test_real_native_loop_reads_computes_and_publishes_on_one_host_ledger(tmp_path):
+@pytest.mark.parametrize('final_style', ['structured', 'prose', 'invented_reference'])
+def test_real_native_loop_reads_computes_and_publishes_on_one_host_ledger(tmp_path, final_style):
     requests = []
     def transport(profile, params):
         requests.append(params)
@@ -81,6 +82,11 @@ def test_real_native_loop_reads_computes_and_publishes_on_one_host_ledger(tmp_pa
             assert schema['properties']['content'] == {'type': 'object'}
             return reply(tool=(alias, {'content': observed['value']}))
         assert number == 4
+        if final_style == 'prose':
+            return reply('Computed and published the result.\n\n```json\n{"value":42}\n```')
+        if final_style == 'invented_reference':
+            return reply(json.dumps({'deliverables': {'result': 'artifact-0000000000000000'},
+                                      'summary': 'A final declaration has no artifact authority.'}))
         return reply(json.dumps({'deliverables': {'result': observed['id']},
                                   'summary': 'Computed and published', 'limitations': []}))
     runtime = runtime_for(tmp_path, transport)
@@ -105,6 +111,32 @@ def test_real_native_loop_reads_computes_and_publishes_on_one_host_ledger(tmp_pa
     restored = Nexgent(tmp_path).run(task['id'])
     assert restored['output_refs'] == result['output_refs']
     assert len(requests) == 4
+    assert not [t for t in threading.enumerate() if t.name.startswith('nexgent-dsh-')]
+    assert not list((tmp_path/'.nexgent'/'dsh').rglob('host.patch.yml'))
+
+
+@live
+@pytest.mark.parametrize('rejected_publication', [False, True])
+def test_native_final_claim_cannot_replace_a_successful_publication(tmp_path, rejected_publication):
+    requests = []
+    def transport(profile, params):
+        requests.append(params)
+        if rejected_publication and len(requests) == 1:
+            alias = 'deliver_'+hashlib.sha256(b'result').hexdigest()[:16]
+            return reply(tool=(alias, {'content': 'An object deliverable cannot be encoded text.'}))
+        return reply(json.dumps({'deliverables': {'result': state['input_refs']['numbers']},
+                                  'summary': 'Claiming an existing input as the completed output.'}))
+    runtime = runtime_for(tmp_path, transport)
+    task = runtime.create('Publish a JSON object result', inputs={'numbers': {'value': 42}},
+                          deliverables=[{'name': 'result', 'schema': {'type': 'object'}}],
+                          budget={'max_model_calls': 2})
+    state = runtime.store.get(task['id'])
+    result = runtime.run(task['id'])
+    assert result['status'] == 'failed'
+    assert 'without publishing required deliverables: result' in result['last_error']
+    assert result['output_refs'] == {}
+    assert len(requests) == (2 if rejected_publication else 1)
+    assert result['usage']['usage_complete'] is True
     assert not [t for t in threading.enumerate() if t.name.startswith('nexgent-dsh-')]
     assert not list((tmp_path/'.nexgent'/'dsh').rglob('host.patch.yml'))
 
