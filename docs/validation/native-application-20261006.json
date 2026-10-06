@@ -1,0 +1,111 @@
+{
+  "date": "2026-10-06",
+  "source": "deepseek-ai/deepseek-harness@46a7f68b0922371ce7144b668b90e377d8e799f4",
+  "nativeBuild": "passed: host, client, web; Node 24.15.0, pnpm 11.7.0",
+  "unitChecks": {
+    "application": 50,
+    "archive": 14
+  },
+  "live": {
+    "passed": true,
+    "scope": "native task delivery and separate-process continuation; no RSI claim",
+    "provider": "mimo",
+    "model": "mimo-v2.6-pro",
+    "sessionId": "session-e5fbf3c9-3cf9-442a-a96b-63e3acc88d2c",
+    "firstPid": 36792,
+    "resumedPid": 30080,
+    "project": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-pro-1791292914108",
+    "verifiedOutput": {
+      "count": 3,
+      "sum": 21,
+      "mean": 7,
+      "min": 3,
+      "max": 11
+    },
+    "usage": [
+      {
+        "inputTokens": 7437,
+        "outputTokens": 47,
+        "totalTokens": 7484
+      },
+      {
+        "inputTokens": 282,
+        "outputTokens": 18,
+        "totalTokens": 7724,
+        "cacheReadTokens": 7424
+      },
+      {
+        "inputTokens": 148,
+        "outputTokens": 142,
+        "totalTokens": 7970,
+        "cacheReadTokens": 7680
+      },
+      {
+        "inputTokens": 656,
+        "outputTokens": 88,
+        "totalTokens": 8168,
+        "cacheReadTokens": 7424
+      },
+      {
+        "inputTokens": 436,
+        "outputTokens": 53,
+        "totalTokens": 8297,
+        "cacheReadTokens": 7808
+      },
+      {
+        "inputTokens": 244,
+        "outputTokens": 210,
+        "totalTokens": 8646,
+        "cacheReadTokens": 8192
+      },
+      {
+        "inputTokens": 373,
+        "outputTokens": 46,
+        "totalTokens": 8739,
+        "cacheReadTokens": 8320
+      },
+      {
+        "inputTokens": 366,
+        "outputTokens": 125,
+        "totalTokens": 9067,
+        "cacheReadTokens": 8576
+      },
+      {
+        "inputTokens": 298,
+        "outputTokens": 47,
+        "totalTokens": 9177,
+        "cacheReadTokens": 8832
+      },
+      {
+        "inputTokens": 254,
+        "outputTokens": 208,
+        "totalTokens": 9550,
+        "cacheReadTokens": 9088
+      }
+    ]
+  },
+  "mock": {
+    "passed": true,
+    "externalProvider": "mock HTTP only",
+    "model": "mimo-v2.6-pro",
+    "sessionId": "session-7fd4cc66-dce7-4d32-9dc1-ab15fe461952",
+    "firstPid": 26852,
+    "resumedPid": 36748,
+    "requestCount": 7,
+    "forbiddenRequests": 1
+  },
+  "web": {
+    "passed": true,
+    "scope": "HTTP startup, authentication fence and built page only; UI interaction unverified",
+    "anonymousStatus": 401,
+    "authenticatedStatus": 200,
+    "title": "Nexgent",
+    "pendingActivationWarnings": false
+  },
+  "limits": [
+    "No architecture graph or native RSI adoption yet",
+    "Windows PowerShell tool failed once with SetNamedSecurityInfoW Win32 5; native filesystem tools completed delivery",
+    "Automated browser access to localhost blocked; visual and interactive acceptance pending",
+    "Foreground usage records exclude separate title-generation calls; no dollar or net-benefit claim"
+  ]
+}

@@ -2,7 +2,7 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
-import { OfficialBrandMark, OfficialBrandName } from './Brand.tsx'
+import { NexgentBrandMark, NexgentBrandName, OfficialBrandMark, OfficialBrandName } from './Brand.tsx'
 
 /** Required service: the UI slot registry. */
 export const inject = ['slots']
@@ -14,10 +14,13 @@ export const inject = ['slots']
  * @param ctx - Client root context.
  */
 export function apply(ctx: ClientContext): void {
-  if (process.env.DSH_CLIENT_BUILD_PROFILE !== 'official') return
+  const nexgent = process.env.DSH_CLIENT_BUILD_PROFILE === 'nexgent'
+  if (!nexgent && process.env.DSH_CLIENT_BUILD_PROFILE !== 'official') return
+  const mark = nexgent ? NexgentBrandMark : OfficialBrandMark
+  const name = nexgent ? NexgentBrandName : OfficialBrandName
   ctx.slots.inject('sidebar.brand.mark', () =>
     ctx.slots.inject('sidebar.brand.name', function* () {
-      yield ctx.slots.register({ name: 'sidebar.brand.mark' }, OfficialBrandMark)
-      yield ctx.slots.register({ name: 'sidebar.brand.name' }, OfficialBrandName)
+      yield ctx.slots.register({ name: 'sidebar.brand.mark' }, mark)
+      yield ctx.slots.register({ name: 'sidebar.brand.name' }, name)
     }))
 }

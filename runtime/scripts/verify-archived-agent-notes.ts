@@ -69,7 +69,8 @@ function readBaselineManifest(ref: string): ArchiveManifest {
   runGit(['cat-file', '-e', `${ref}^{commit}`])
   const manifestEntry = runGit(['ls-tree', '--name-only', ref, '--', manifestRepoPath]).trim()
   if (manifestEntry === '') return { version: 1, files: {} }
-  return parseArchiveManifest(runGit(['show', `${ref}:${manifestRepoPath}`]))
+  // Git's :./ path follows repoRoot even when this runtime is a subtree.
+  return parseArchiveManifest(runGit(['show', `${ref}:./${manifestRepoPath}`]))
 }
 
 let manifest: ArchiveManifest = { version: 1, files: {} }

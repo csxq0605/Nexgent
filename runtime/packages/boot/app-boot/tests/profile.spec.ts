@@ -344,6 +344,12 @@ describe('loadProfile', () => {
     expect(() => loadProfile('t', 'custom', anchor, home))
       .toThrow('profile "custom" does not exist')
     expect(PROFILE_TEMPLATES.web?.bundles).toContain('@deepseek-ai/dsh-base')
+    for (const profileName of ['nexgent', 'nexgent-run']) {
+      loadProfile('t', profileName, anchor, home)
+      expect(readProfileManifest('t', resolveProfileDir(profileName, home)).dsh?.profile?.bundles)
+        .toEqual([...PROFILE_TEMPLATES[profileName]?.bundles ?? []])
+      expect(PROFILE_TEMPLATES[profileName]?.bundles.at(-1)).toBe('@nexgent/application')
+    }
     expect(PROFILE_TEMPLATES.acp).toEqual({
       bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-acp-app'],
     })

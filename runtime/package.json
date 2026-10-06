@@ -1,5 +1,5 @@
 {
-  "name": "@deepseek-ai/dsh-root",
+  "name": "@nexgent/runtime",
   "version": "0.1.7-rc.1",
   "license": "MIT",
   "private": true,
@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "prepare:primary-runtime": "tsx scripts/primary-runtime/prepare.ts",
-    "build": "tsx scripts/build.ts",
+    "build": "tsx scripts/build.ts --profile nexgent",
     "build:bench": "npm run build:native-system && npm run build:lib && tsdown --config benchmarks/tsdown.config.ts",
     "build:official": "tsx scripts/build.ts --profile official",
     "build:lib": "pnpm run build:lib:host && pnpm run build:lib:client",

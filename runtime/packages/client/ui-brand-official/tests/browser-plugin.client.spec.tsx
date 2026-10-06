@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { apply, inject } from '../src/client/index.ts'
-import { OfficialBrandMark, OfficialBrandName } from '../src/client/Brand.tsx'
+import { NexgentBrandMark, NexgentBrandName, OfficialBrandMark, OfficialBrandName } from '../src/client/Brand.tsx'
 import { apply as hostApply } from '../src/index.ts'
 
 afterEach(() => {
@@ -32,6 +32,20 @@ async function bench(declare = true) {
 }
 
 describe('official browser-brand plugin', () => {
+  it('uses Nexgent application branding and disposes its native slot registrations', async () => {
+    vi.stubEnv('DSH_CLIENT_BUILD_PROFILE', 'nexgent')
+    const subject = await bench()
+    const fiber = subject.ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    for (const hole of HOLES) expect(subject.slots.entries(hole)).toHaveLength(1)
+    const name = render(<NexgentBrandName />)
+    expect(name.getByText('Nexgent')).toBeTruthy()
+    name.unmount()
+    const mark = render(<NexgentBrandMark size={34} />)
+    expect(mark.getByRole('img', { name: 'Nexgent' }).getAttribute('width')).toBe('34')
+    await fiber.dispose()
+    for (const hole of HOLES) expect(subject.slots.entries(hole)).toHaveLength(0)
+  })
   it('keeps the host Loader entry inert', () => {
     expect(hostApply).not.toThrow()
   })

@@ -78,6 +78,19 @@ function repositoryFixture(version = '1.2.3-rc.4'): string {
 }
 
 describe('client build environment', () => {
+  it('builds Nexgent identity without exposing provider credentials', () => {
+    const environment = resolveClientBuildEnvironment({
+      DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
+      DSH_CLIENT_VERSION: '1.2.3',
+      NEXGENT_API_KEY: 'must-not-reach-client',
+    }, 'nexgent')
+    expect(environment).toEqual({
+      DSH_CLIENT_BUILD_PROFILE: 'nexgent',
+      DSH_CLIENT_TITLE: 'Nexgent',
+      DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
+      DSH_CLIENT_VERSION: '1.2.3',
+    })
+  })
   it('requires an exact public environment for a named artifact profile', () => {
     const expected = {
       DSH_CLIENT_BUILD_PROFILE: 'official',

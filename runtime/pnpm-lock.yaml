@@ -184,6 +184,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@nexgent/application':
+        specifier: workspace:*
+        version: link:../../packages/bundle/nexgent-app
       '@deepseek-ai/cordis':
         specifier: workspace:~
         version: link:../../vendor/cordis
@@ -2165,6 +2168,18 @@ importers:
       '@deepseek-ai/dsh-session-query':
         specifier: workspace:*
         version: link:../../session-query/session-query
+
+  packages/bundle/nexgent-app:
+    dependencies:
+      '@deepseek-ai/dsh-base':
+        specifier: workspace:*
+        version: link:../base
+      '@deepseek-ai/dsh-headless':
+        specifier: workspace:*
+        version: link:../headless
+      '@deepseek-ai/dsh-web-app':
+        specifier: workspace:*
+        version: link:../web-app
 
   packages/bundle/sdk-app:
     dependencies:
@@ -13465,6 +13480,9 @@ importers:
 
   python/sdk-runtime:
     dependencies:
+      '@nexgent/application':
+        specifier: workspace:*
+        version: link:../../packages/bundle/nexgent-app
       '@deepseek-ai/cordis':
         specifier: workspace:~
         version: link:../../vendor/cordis

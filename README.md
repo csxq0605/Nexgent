@@ -1,4 +1,27 @@
-# Nexgent 0.9
+# Nexgent
+
+Nexgent 是从 DSH 源码改造的独立通用任务应用。用户通过 Main 对话提交目标、资料和反馈；应用按任务选择直接执行、成员协作或工作流，交付可检查的成果。后续主线是在同一运行时中引入可版本化的智能体编排图，以及经过独立检验的架构与能力进化。
+
+## 当前应用入口
+
+`runtime/` 保存完整 DSH 源码，固定来源为 `deepseek-ai/deepseek-harness@46a7f68b0922371ce7144b668b90e377d8e799f4`。Nexgent 自己拥有源码、构建、默认配置和启动入口，直接复用并改造其中的会话、模型、文件工具、上下文、成员和界面实现。Cordis 是内部模块与生命周期框架。
+
+Windows 上先安装并构建原生运行时，再启动应用：
+
+```powershell
+cd runtime
+pnpm install --frozen-lockfile
+pnpm run build
+cd ..
+./start.ps1 -Project ./my-project
+./run.ps1 -Project ./my-project -Task "完成任务"
+```
+
+项目目录需要预先存在。默认使用 `mimo-v2.6-pro`，密钥由原生凭证服务读取 `NEXGENT_API_KEY`；模型请求与文件操作由原生 Agent 直接执行。项目数据位于 `.nexgent/native/`。运行要求、已验证行为和限制见[原生应用](docs/native-application.md)。
+
+源码构建、原生文件工具与跨进程续聊已通过验证；真实 MiMo 文件交付和新进程续聊也已通过外部文件内容检查。图结构版本、独立选择/guard 与改进器自身进化尚未迁入原生主路径，不因此宣称 RSI 已完成。以下 Python 实现及历史实测保留为迁移资产，其 `nexgent`/Python SDK 命令不代表新的默认应用入口。
+
+## 历史 Python 路径与迁移资产
 
 **通用 RSI Agent 框架：完成任务、组织协作、获取独立反馈，并让经过门控的能力和执行策略变化作用于后续任务。**
 

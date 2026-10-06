@@ -1,0 +1,28 @@
+{
+  "name": "@nexgent/application",
+  "version": "0.1.7-rc.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Nexgent application defaults over the inherited native runtime",
+  "exports": {
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-base": "workspace:*",
+    "@deepseek-ai/dsh-web-app": "workspace:*",
+    "@deepseek-ai/dsh-headless": "workspace:*"
+  },
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts"
+}
