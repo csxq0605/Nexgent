@@ -129,6 +129,20 @@ function execute(ctx: Context, args: unknown, extra?: {
 }
 
 describe('dsh-tool-workflow', () => {
+  it('compiles a graph at the actual tool boundary and rejects mixed representations', async () => {
+    const { ctx, engine, parent } = await setup()
+    const architecture = { nodes: [{ id: 'reader', role: 'researcher', prompt: 'Read evidence', dependencies: [] }] }
+    const pending = execute(ctx, { architecture, meta: META }, { agent: parent })
+    await vi.waitFor(() => { expect(engine.requests).toHaveLength(1) })
+    expect(engine.requests[0]?.script).toContain('architectureVersion')
+    expect(engine.requests[0]?.script).toContain('Read evidence')
+    engine.settle({ value: { checked: true }, stopReason: 'completed', agentsStarted: 1 })
+    expect((await pending).isError).toBe(false)
+    expect(engine.disposed).toBe(1)
+    const rejected = await execute(ctx, { architecture, script: SCRIPT, meta: META }, { agent: parent })
+    expect(rejected.isError).toBe(true)
+    expect(engine.requests).toHaveLength(1)
+  })
   it('starts a run with the script/args/parent/signal and renders the completed value', async () => {
     const { ctx, engine, parent } = await setup()
     const controller = new AbortController()
@@ -635,12 +649,16 @@ describe('dsh-tool-workflow', () => {
       const parent = { id: session.id, options: {}, session } as unknown as Agent
       const controller = new AbortController()
       const ready = Promise.withResolvers<undefined>()
+      onTestFinished(() => { controller.abort('fixture cleanup') })
       ctx.on('workflow/log', () => { ready.resolve(undefined) })
       const pending = execute(ctx, {
         script: 'log("ready"); await new Promise(() => {})\nreturn 1',
         meta: { name: 'stuck', description: 'parks forever' },
       }, { agent: parent, signal: controller.signal })
-      await ready.promise
+      await Promise.race([
+        ready.promise,
+        pending.then((result) => { throw new Error(`workflow settled before readiness: ${JSON.stringify(result)}`) }),
+      ])
       controller.abort('user abort')
       const result = await pending
       expect(result.isError).toBe(true)

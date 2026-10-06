@@ -2371,7 +2371,7 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 
 ### `workflow`
 
-运行用于大规模编排 subagent 的 JavaScript 工作流脚本。当工作会分散到许多相互独立的部分时，请使用此工具，例如审查大量文件、执行迁移、开展多角度研究或对发现进行对抗式验证；此时应将编排写成脚本，而不是逐轮委派。
+运行编排 subagent 的工作流。只提供 script 或 architecture 中的一个。architecture 包含节点，每个节点有唯一 id、role、prompt、dependencies（节点 id），以及可选 provider/model/schema。节点 schema 使用与 agent() 相同、以对象为根的 JSON Schema 子集，并要求经校验的结构化结果。依赖必须无环。独立节点并发执行；每个子级收到输入和依赖节点的实际输出。任一成员失败都会阻止成功交付。结果包含由内容计算的 architectureVersion 和节点输出。原始架构保存在工具调用历史中，后续会话可以复用；版本不代表采用或批准。适用于跨独立部分的文件审查、迁移、多角度研究和对抗式验证。
 
 工作流的身份通过 `meta` 参数以 JSON 形式传入：必填的 `name`（简短 kebab-case）和 `description` 字符串，以及可选的 `whenToUse` 字符串和 `phases` 数组（`{title, detail?, provider?, model?}`）。`script` 参数只能是纯 JavaScript **函数体**，不能是 TypeScript，也不能包含 `export const meta` 语句；meta 是参数而非代码。脚本支持顶层 await；请以 `return <value>` 结尾，该值必须可以 JSON 序列化，并作为此工具的结果。
 
@@ -2393,6 +2393,11 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
     "script": {
       "type": "string",
       "description": "The plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`)."
+    },
+    "architecture": {
+      "type": "object",
+      "description": "Alternative to script: {nodes:[{id,role,prompt,dependencies:[node ids],provider?,model?,schema?}]}. Roles and dependencies define execution; the returned content digest identifies this graph version.",
+      "additionalProperties": true
     },
     "meta": {
       "type": "object",
@@ -2457,7 +2462,6 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
     }
   },
   "required": [
-    "script",
     "meta"
   ]
 }

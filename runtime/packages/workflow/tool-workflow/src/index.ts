@@ -1,5 +1,5 @@
 /**
- * The model-facing `workflow` tool: run a JavaScript orchestration script that fans out
+ * The model-facing `workflow` tool: run a declarative graph or JavaScript script that fans out
  * subagents, and return the script's final value. It owns the model-facing schema and run lifecycle; script
  * parsing, execution, caps, and cancellation live behind `ctx.workflowEngine`
  * (`@deepseek-ai/dsh-workflow`), so a hardened engine swaps in without touching what the model
@@ -7,7 +7,7 @@
  * become tool errors. `run_in_background: true` instead registers the run as an owned `ctx.jobs` job
  * and returns its id immediately — the job's output ring streams live progress, and the run's value
  * arrives with the job's completion notice. Presentation is an args-only generic card
- * titled from `meta.name`. Explicit-ask usage guidance is registered as the tool's own prompt
+ * titled from `meta.name`. Dependency-based usage guidance is registered as the tool's own prompt
  * section rather than deployment persona prose.
  * @module @deepseek-ai/dsh-tool-workflow
  */
@@ -25,6 +25,7 @@ import type {
   WorkflowResult, WorkflowRun, WorkflowRunId, WorkflowStopReason,
 } from '@deepseek-ai/dsh-workflow'
 import { createWorkflowRecordMirror } from './record.ts'
+import { resolveWorkflowBody } from './architecture.ts'
 import type { WorkflowRecordMirror } from './record.ts'
 import type {
   ToolWorkflowAgentEndData, ToolWorkflowAgentStartData,
@@ -151,12 +152,12 @@ function createWorkflowRecorder(ctx: Context): WorkflowRecorder {
 }
 
 /**
- * The script-authoring contract, embedded in the tool description. This IS the
+ * The graph and script contract, embedded in the tool description. This IS the
  * model-facing spec: the meta block, the hooks and their exact semantics, and
  * the supported schema subset. The closing execution sentence follows the
  * composition: only a background-enabled tool describes `run_in_background`.
  */
-const DESCRIPTION = `Run a JavaScript workflow script that orchestrates subagents at scale. Use this for work that fans out across many independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings — where you write the orchestration as a script instead of delegating turn by turn.
+const DESCRIPTION = `Run a workflow that orchestrates subagents. Supply exactly one of script or architecture. An architecture contains nodes with unique id, role, prompt, dependencies (node ids), and optional provider/model/schema. A node schema uses the same object-rooted JSON Schema subset as agent() and requires a validated structured result. Dependencies must form an acyclic graph. Independent nodes run together; each child receives the input and its dependencies' actual outputs. A failed member prevents successful graph delivery. The result includes the content-derived architectureVersion and node outputs. The original architecture stays in the tool call history and can be reused in later sessions; its version is not an adoption or approval receipt. Use this for work that fans out across independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings.
 
 The workflow's identity rides the \`meta\` parameter as JSON: required \`name\` (short kebab-case) and \`description\` strings, optional \`whenToUse\` string and \`phases\` array (\`{title, detail?, provider?, model?}\`). The \`script\` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO \`export const meta\` statement — meta is a parameter, not code), running with top-level await; end with \`return <value>\` — the value must be JSON-serializable and is this tool's result.
 
@@ -187,16 +188,16 @@ type WorkflowCallArgs = {
 }
 
 /** The pending-state card: a generic card titled by the workflow's meta name. */
-function presentWorkflowCall(args: WorkflowCallArgs): ToolCallView {
+function presentWorkflowCall(args: Pick<WorkflowCallArgs, 'meta'> & { script?: string; architecture?: unknown }): ToolCallView {
   return {
     card: 'generic',
     title: `workflow: ${args.meta.name}`,
-    rawInput: args.script,
+    rawInput: args.script ?? JSON.stringify(args.architecture ?? {}),
   }
 }
 
 /** The completed-state card: keep the pending title; render the result content as-is. */
-function presentWorkflowResult(args: WorkflowCallArgs, result: { content: ContentBlock[]; isError: boolean }): ToolResultView {
+function presentWorkflowResult(args: Pick<WorkflowCallArgs, 'meta'>, result: { content: ContentBlock[]; isError: boolean }): ToolResultView {
   void args
   void result
   return { card: 'generic' }
@@ -332,7 +333,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.systemPrompt.section({
     name: `tool:${toolName}`,
     order: ctx.systemPrompt.getSectionOrder('TOOL_WORKFLOW'),
-    text: `Use the ${toolName} tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.`,
+    text: `Choose the ${toolName} tool when work benefits from explicit dependencies or repeated multi-agent coordination. Supply a declarative architecture graph or a JavaScript script using the tool description's contract. Use direct work or plain subagent calls when those are sufficient.`,
   })
   ctx.tools.register(defineTool({
     name: toolName,
@@ -340,8 +341,12 @@ export function apply(ctx: Context, config: Config): void {
     parameters: {
       script: {
         type: 'string',
-        required: true,
         description: 'The plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`).',
+      },
+      architecture: {
+        type: 'object',
+        additionalProperties: true,
+        description: 'Alternative to script: {nodes:[{id,role,prompt,dependencies:[node ids],provider?,model?,schema?}]}. Roles and dependencies define execution; the returned content digest identifies this graph version.',
       },
       meta: {
         type: 'object',
@@ -411,7 +416,8 @@ export function apply(ctx: Context, config: Config): void {
           : renderResult(args.meta.name, value.agentsStarted, value.result, maxResultChars),
       }],
     },
-    async execute(args, exec) {
+    async execute(input, exec) {
+      const args = { ...input, script: resolveWorkflowBody(input.script, input.architecture) }
       const parent = exec.agent
       if (!parent) {
         // The loop sets `exec.agent` for every model-driven call; its absence

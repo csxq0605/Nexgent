@@ -8,6 +8,8 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import PtcWorkflowEngine from '../src/index.ts'
+import type { Config } from '../src/index.ts'
+import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { fakeParent } from './setup.ts'
 
 const completed: PtcRunResult = { logs: [], value: { value: null, stopReason: 'completed', agentsStarted: 0 } }
@@ -25,12 +27,17 @@ class ControlledRuntime extends PtcRuntime {
   run(spec: PtcRunSpec): Promise<PtcRunResult> { return this.execute(spec) }
 }
 
-async function setup(execute?: (bindings: HostBindings, spec: PtcRunSpec) => Promise<PtcRunResult>, language = 'typescript') {
+async function setup(
+  execute?: (bindings: HostBindings, spec: PtcRunSpec) => Promise<PtcRunResult>,
+  language = 'typescript',
+  config: Config = {},
+  mode: SandboxMode = 'read-only',
+) {
   const ctx = new Context()
   onTestFinished(async () => { await ctx.fiber.dispose() })
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjections)
-  await ctx.plugin(SandboxPolicy, { mode: 'read-only' })
+  await ctx.plugin(SandboxPolicy, { mode })
   await ctx.plugin(SubagentRuntime)
   ctx.subagents.registerProvider({
     name: 'stub',
@@ -47,7 +54,7 @@ async function setup(execute?: (bindings: HostBindings, spec: PtcRunSpec) => Pro
   const runtime = ctx.ptcRuntime as ControlledRuntime
   runtime.language = language
   if (execute !== undefined) runtime.execute = spec => execute(spec.bindings[0]!.functions, spec)
-  await ctx.plugin(PtcWorkflowEngine, { provider: 'stub' })
+  await ctx.plugin(PtcWorkflowEngine, { provider: 'stub', ...config })
   const parent = fakeParent(ctx)
   const start = () => ctx.workflowEngine.start({
     script: 'return null', meta: { name: 'host-test', description: 'workflow callbacks' }, parent,
@@ -56,6 +63,16 @@ async function setup(execute?: (bindings: HostBindings, spec: PtcRunSpec) => Pro
 }
 
 describe('workflow host callback validation', () => {
+  it.each(['session', 'read-only'] as const)('keeps the parent policy while resolving coordinator mode %s', async (scriptFileMode) => {
+    const { ctx, start, parent } = await setup(async (_bindings, spec) => {
+      expect(spec.sandboxPolicy?.mode).toBe(scriptFileMode === 'session' ? 'workspace-write' : 'read-only')
+      return completed
+    }, 'typescript', { scriptFileMode }, 'workspace-write')
+    const handle = start()
+    try { expect((await handle.result).stopReason).toBe('completed') }
+    finally { await handle.dispose() }
+    expect(ctx.sandboxPolicy.resolve({ session: parent.session }).mode).toBe('workspace-write')
+  })
   it.each([
     ['startChild', null, 'requires an object'],
     ['startChild', [], 'requires an object'],

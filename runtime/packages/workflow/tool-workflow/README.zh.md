@@ -1,5 +1,5 @@
 ---
-description: "面向模型的工作流工具：运行扇出 subagent 的 JavaScript 编排脚本，供选择或配置模型驱动编排的用户与维护者阅读。"
+description: "面向模型的工作流工具：通过原生 subagent 执行声明式图或 JavaScript 编排。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-tool-workflow` 让模型运行 JavaScript 编排，将工作委派给多个 subagent，并返回最终 JSON 值。仅当用户明确要求工作流或大型多 agent（智能体）编排时使用；一两项委派应优先使用普通 subagent 调用。前台执行等待所有工作结束；取消或异常完成返回错误，而不是部分成功。`run_in_background: true` 立即返回自有任务 id，并提供实时输出。部署方可以用 `toolName` 重命名工具，用 `maxResultChars` 限制渲染结果。
+`dsh-tool-workflow` 通过原生 subagent 执行声明式图或 JavaScript 编排，并返回最终 JSON 值。根据任务选择执行方式。前台执行等待所有工作结束；取消或异常完成返回错误，而不是部分成功。`run_in_background: true` 立即返回自有任务 id，并提供实时输出。部署方可以用 `toolName` 重命名工具，用 `maxResultChars` 限制渲染结果。
 
 ## 目录
 
@@ -25,11 +25,13 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-`workflow` 工具运行由模型编写的编排脚本，把工作扇出到多个 subagent，并返回脚本的最终 JSON 值。仅当用户明确要求工作流或大型多 agent 编排时使用——例如跨多个文件的审计、一次迁移、多角度研究；一两项委派时优先使用普通 subagent 调用。
+工具接受 `script` 或 `architecture` 中的一个。架构格式为 `{nodes:[{id,role,prompt,dependencies,provider?,model?,schema?}]}`；依赖指向其他节点且必须无环。编译器把依赖节点的实际输出交给成员，返回由内容计算的 `architectureVersion` 和节点输出。摘要标识执行的定义，不代表独立批准或采用。节点的可选 `schema` 通过原生结构化输出机制要求校验后的对象，接受与 `agent()` 相同的 schema 子集。原图保存在调用 Session 的工具历史中。
+
+`workflow` 工具执行模型编写的图或脚本，并返回最终 JSON 值。当依赖关系或反复协调有助于任务时选择它；否则直接执行或普通委派。
 
 ### 调用工具
 
-模型提交三个参数外加一个开关：`meta`（必需的身份数据：`name`、`description`，以及可选的 `whenToUse` 与 `phases`）、`script`（必需的纯 JavaScript 脚本体——不含 `export const meta` 语句；工具描述携带完整的编写约定）、`args`（可选 JSON 对象，作为全局变量 `args` 向脚本公开；裸列表应包装到字段中，使协议 schema 如实表达形态），以及 `run_in_background`（可选；仅在 `enableRunInBackground` 生效时存在）。
+模型提交元数据、一种执行表示、可选输入和开关：`meta`（必需的身份数据：`name`、`description`，以及可选的 `whenToUse` 与 `phases`）、`script` 或 `architecture`（二选一；脚本是纯 JavaScript 脚本体——不含 `export const meta` 语句；工具描述携带完整的编写约定）、`args`（可选 JSON 对象，作为全局变量 `args` 向脚本公开；裸列表应包装到字段中，使协议 schema 如实表达形态），以及 `run_in_background`（可选；仅在 `enableRunInBackground` 生效时存在）。
 
 前台成功返回包络 `{ kind: 'foreground', runId, agentsStarted, result }`，向模型渲染为 `workflow "<name>" completed (<count> agent<optional-s>).`，后接 `Return value:` 与美化打印的 JSON。无法启动的工作流——脚本解析或 meta 校验失败——返回模型可以修正的错误。取消与执行失败返回 `Error: workflow run was cancelled` 或 `Error: workflow run failed: <error>`；部分输出绝不会被报告为成功。
 
@@ -122,7 +124,7 @@ kind: "package-reference"
 ##### 工作流指导
 
 ```markdown
-Use the <toolName> tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.
+Choose the <toolName> tool when work benefits from explicit dependencies or repeated multi-agent coordination. Supply a declarative architecture graph or a JavaScript script using the tool description's contract. Use direct work or plain subagent calls when those are sufficient.
 ```
 
 #### Token 影响
@@ -137,7 +139,7 @@ Use the <toolName> tool ONLY when the user explicitly asks for a workflow or for
 
 #### 模型看到什么
 
-工具可见时，已生成的默认 [`workflow` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-workflow) 包含完整的 JavaScript 钩子与元数据约定；`toolName` 可以重命名该定义，模型会提交脚本、元数据与可选 args。
+工具可见时，已生成的默认 [`workflow` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-workflow) 包含图、JavaScript 钩子与元数据约定；`toolName` 可以重命名该定义，模型会提交图或脚本、元数据与可选 args。
 
 #### Token 影响
 
@@ -151,7 +153,7 @@ Use the <toolName> tool ONLY when the user explicitly asks for a workflow or for
 
 #### 模型看到什么
 
-由模型编写的完整脚本、元数据与 args 会保留在 assistant 工具调用中。前台成功结果精确为 `workflow "<name>" completed (<count> agent<optional-s>).`、换行、`Return value:`、换行，以及美化打印且依赖数据的 JSON；达到上限时，会在新行添加 `… [truncated: <omitted> more characters]`。后台受理结果精确为 `workflow "<name>" started in the background as job <jobId>. Its return value arrives with the completion notice; check on it with job_output, stop it with job_kill.`，同样渲染的值稍后经任务完成播报与 `job_output` 抵达模型。失败结果精确为 `Error: workflow run was cancelled`（可以追加后缀 ` (<error>)`）、`Error: workflow run failed: <error-or-unknown error>` 或防御性的 `Error: workflow run ended abnormally (<reason>)`；没有所属 agent 的调用变为 `Error: workflow tool requires a calling agent (exec.agent was undefined)`。中间子 agent 消息会被省略。
+由模型编写的完整图或脚本、元数据与 args 会保留在 assistant 工具调用中。前台成功结果精确为 `workflow "<name>" completed (<count> agent<optional-s>).`、换行、`Return value:`、换行，以及美化打印且依赖数据的 JSON；达到上限时，会在新行添加 `… [truncated: <omitted> more characters]`。后台受理结果精确为 `workflow "<name>" started in the background as job <jobId>. Its return value arrives with the completion notice; check on it with job_output, stop it with job_kill.`，同样渲染的值稍后经任务完成播报与 `job_output` 抵达模型。失败结果精确为 `Error: workflow run was cancelled`（可以追加后缀 ` (<error>)`）、`Error: workflow run failed: <error-or-unknown error>` 或防御性的 `Error: workflow run ended abnormally (<reason>)`；没有所属 agent 的调用变为 `Error: workflow tool requires a calling agent (exec.agent was undefined)`。中间子 agent 消息会被省略。
 
 #### Token 影响
 

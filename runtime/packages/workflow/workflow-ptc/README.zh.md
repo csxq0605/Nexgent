@@ -38,6 +38,7 @@ kind: "package-reference"
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
+| `scriptFileMode` | `session` | 继承 Session 文件策略，或只把协调进程收紧到 `read-only`；成员工具保留父级策略。 |
 | `provider` | `spawn` | `agent()` 调用使用的宿主侧 subagent 提供方。 |
 | `maxConcurrentAgents` | `0` | 并发 `agent()` 上限；`0` 根据可用 CPU 并行度解析。 |
 | `maxTotalAgents` | `1000` | 一次运行最多启动的 `agent()` 调用数。 |
@@ -56,7 +57,7 @@ Node PTC 提供方的 `maxPendingCalls` 也限制工作流并发：子 agent 启
 
 ### 文件策略与取消
 
-引擎为 PTC 执行解析调用 Session 的常设文件策略与 cwd。VM 保留文档说明的辅助 API，但它不是安全边界：触达 Node 的代码仍受所选 OS 文件策略约束。程序可见的环境为空。文件策略不限制网络访问。
+引擎为 PTC 执行解析调用 Session 的 cwd 与文件策略。`scriptFileMode: read-only` 收紧协调进程，不改变父级 Session 或成员工具权限。VM 保留文档说明的辅助 API，但它不是安全边界：触达 Node 的代码仍受所选 OS 文件策略约束。程序可见的环境为空。文件策略不限制网络访问。
 
 工作流向 PTC 请求 `timeoutMs: null`。最初的 VM 片段仍受 `syncTimeoutMs` 限制，调用方的中止信号仍然生效，包括外层工具的截止。取消立即中止 PTC 进程及待启动或活跃的 subagent。调用方必须释放每次运行并等待子 agent 清理；不另设工作流清理定时器。
 

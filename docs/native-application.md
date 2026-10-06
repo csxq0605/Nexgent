@@ -39,10 +39,16 @@ cd ..
 
 `node scripts/verify-native-live.mjs` 使用本地已配置密钥调用真实 MiMo-V2.6-Pro，从原生 `run.ps1` 读取 CSV、写出 count/sum/mean，然后在另一个进程恢复同一 Session 并添加 min/max。验收脚本独立读取 JSON 校验结果，保留实际工具事件与每步用量。数据与完整日志在 `validation-workspace/native-pro-*/`；此验证只支持文件交付与续聊，不支持 RSI 收益结论。
 
-原生浏览器服务可以启动；未授权访问返回 401，本地访问凭证可以取得标题为 Nexgent 的页面，且没有配置行等待激活。自动化浏览器策略拦截了 localhost 页面，视觉与交互验收尚未完成。真实任务中 PowerShell 工具曾被本机 Windows ACL 限制拒绝，原生文件工具完成了交付；不能据此声称 shell 和受隔离的代码工作流已在本机可用。
+原生浏览器服务可以启动；未授权访问返回 401，本地访问凭证可以取得标题为 Nexgent 的页面，且没有配置行等待激活。自动化浏览器策略拦截了 localhost 页面，视觉与交互验收尚未完成。真实任务中 PowerShell 工具曾被本机 Windows ACL 限制拒绝；只读工作流协调进程和原生文件工具现已通过验收，一般 workspace-write shell 与代码执行仍未完成本机验收。
 
 已执行验收的来源、会话身份、独立进程、输出、原生每步用量和限制记录在[验证摘要](validation/native-application-20261006.json)。标题请求与前台步骤分别执行，摘要中的前台用量不代表全部账户费用。
 
 ## 后续主线
 
-可版本化架构图、原生候选试用与发布、独立 selection/guard 和改进器自身进化尚未接入。旧 Python 中有效的门控、账本和反馈逻辑需要迁入原生服务；它们当前不保护原生会话。下一步应在已有 Agent/subagent/workflow 机制上实现图结构执行和版本采用，随后验证跨任务进化，避免重新造任务循环或围绕领域 demo 固定架构。
+原生 `workflow` 已接受声明式 `architecture`：节点包含角色、任务、依赖、模型选择及可选对象输出 schema，编译后复用原生工作流执行、取消和持久记录，并返回内容版本。编译与工具的 53 项检查、原生引擎的 65 项检查和会话快照语料的 3 项检查通过。角色目前作为成员任务说明传递；工具范围、独立角色配置和上下文策略尚未成为图节点配置。
+
+`node scripts/test-native-architecture.mjs` 已验证构建后的应用执行三个真实成员、实际文件写入与读回、依赖输出传递及另一个 OS 进程中的同一会话恢复，仅替换外部 HTTP 模型。应用的协调脚本使用 read-only，成员仍继承任务的 workspace-write；额外只读任务验证写入被拒绝、文件保持原样且依赖成员不启动。收紧协调脚本权限不会扩大成员权限。
+
+`node scripts/verify-native-architecture-live.mjs` 已用真实 MiMo v2.6 Pro 验证同一路径：两个成员分别交付 totals.json 和 range.json，review 成员使用两者实际输出并交付 review.json。外部验收脚本独立读取三个文件，确认 count=3、sum=21、mean=7、min=3、max=11。进程身份、版本与输出记录在[架构执行验证摘要](validation/native-architecture-20261006.json)；其中前台用量不包含所有成员与标题请求，不能用于整体费用或 RSI 收益结论。
+
+图定义已有内容版本；原生候选试用与发布、独立 selection/guard、后续任务自动复用采用版本和改进器自身进化尚未接入。旧 Python 中有效的门控、账本和反馈逻辑需要迁入原生服务；它们当前不保护原生会话。下一步在已有 Agent/subagent/workflow 机制上实现版本持久化、候选试用与版本采用，随后验证跨任务进化。

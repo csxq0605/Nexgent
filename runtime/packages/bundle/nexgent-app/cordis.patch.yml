@@ -49,12 +49,18 @@
 
 - id: system-prompt
   config:
+    includeHarnessIdentity: false
     personaPrefix: >-
       You are Nexgent, a general task agent using the {{model}} model.
       Complete the user's task with the available materials and tools.
       Choose direct work, delegation or a workflow according to the task.
       Verify actual deliverables, explain unresolved requirements, and preserve useful work for subsequent turns.
     personaSuffix: Your project working directory is {{cwd}}.
+
+# Coordination needs no workspace writes; delegated tools use the task policy.
+- id: workflow-ptc
+  config:
+    scriptFileMode: read-only
 
 # Product data remains local unless the user configures an exporter.
 - id: session-telemetry-otel

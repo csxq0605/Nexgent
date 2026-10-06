@@ -1,5 +1,5 @@
 ---
-description: "The model-facing workflow tool: run a JavaScript orchestration script that fans out subagents, for users and maintainers choosing or configuring model-driven orchestration."
+description: "The model-facing workflow tool: run declarative graphs or JavaScript orchestration through native subagents."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-tool-workflow` lets a model run JavaScript orchestration that delegates to many subagents and returns a final JSON value. Use it only when the user explicitly requests a workflow or large multi-agent orchestration; prefer plain subagent calls for one or two delegations. Foreground execution waits for all work; cancellation or abnormal completion returns an error rather than partial success. `run_in_background: true` returns an owned job id immediately and exposes live output. Deployments can rename the tool with `toolName` and cap rendered results with `maxResultChars`.
+`dsh-tool-workflow` runs graphs or scripts through native subagents and returns their final JSON value. Choose the execution form according to the task. Foreground execution waits for all work; cancellation or abnormal completion returns an error rather than partial success. `run_in_background: true` returns an owned job id immediately and exposes live output. Deployments can rename the tool with `toolName` and cap rendered results with `maxResultChars`.
 
 ## Table of Contents
 
@@ -25,11 +25,13 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-The `workflow` tool runs a model-authored orchestration script that fans work out across many subagents and returns the script's final JSON value. Use it only when the user explicitly asks for a workflow or for large multi-agent orchestration — an audit over many files, a migration, multi-angle research; for one or two delegations, prefer plain subagent calls.
+The tool accepts exactly one of `script` or `architecture`. An architecture is `{nodes:[{id,role,prompt,dependencies,provider?,model?,schema?}]}`; dependencies name other nodes and must be acyclic. The compiler sends actual dependency outputs to each child and returns a content-derived `architectureVersion` with node outputs. This digest identifies the executed definition; it does not record independent approval or adoption. An optional node `schema` requires a validated object through the native structured-output mechanism; it accepts the same subset as `agent()` schemas. The original graph is retained in the calling Session's tool history.
+
+The `workflow` tool runs model-authored graphs or scripts and returns their final JSON value. Choose it when dependencies or repeated coordination help the task; otherwise use direct work or ordinary delegation.
 
 ### Calling the tool
 
-The model submits three parameters plus one flag: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` (required plain JavaScript body — no `export const meta` statement; the tool description carries the complete authoring contract), `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest), and `run_in_background` (optional; present only while `enableRunInBackground` holds).
+The model submits metadata, one execution representation, optional input, and a flag: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` or `architecture` (exactly one; script is a plain JavaScript body — no `export const meta` statement; the tool description carries the complete authoring contract), `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest), and `run_in_background` (optional; present only while `enableRunInBackground` holds).
 
 A foreground success returns the envelope `{ kind: 'foreground', runId, agentsStarted, result }`, rendered to the model as `workflow "<name>" completed (<count> agent<optional-s>).` followed by `Return value:` and the pretty-printed JSON. A workflow that cannot start — a script parse or meta validation failure — returns an error the model can correct from. Cancellation and execution failures return `Error: workflow run was cancelled` or `Error: workflow run failed: <error>`; partial output is never reported as success.
 
@@ -122,7 +124,7 @@ Every parent request in this plugin's registration scope receives the workflow g
 ##### Workflow guidance
 
 ```markdown
-Use the <toolName> tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.
+Choose the <toolName> tool when work benefits from explicit dependencies or repeated multi-agent coordination. Supply a declarative architecture graph or a JavaScript script using the tool description's contract. Use direct work or plain subagent calls when those are sufficient.
 ```
 
 #### Token effect
@@ -137,7 +139,7 @@ Prefix-stable while the plugin scope and guidance text are unchanged. Activation
 
 #### What the model sees
 
-When visible, the generated default [`workflow` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow) carries the complete JavaScript hook and metadata contract; `toolName` can rename the definition, and the model submits script, metadata, and optional args.
+When visible, the generated default [`workflow` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow) carries the graph, JavaScript hook, and metadata contracts; `toolName` can rename the definition, and the model submits a graph or script, metadata, and optional args.
 
 #### Token effect
 
@@ -151,7 +153,7 @@ Prefix-stable while `toolName`, definition, and visibility are unchanged. Renami
 
 #### What the model sees
 
-The full model-written script, metadata, and args remain in the assistant tool call. A foreground success is exactly `workflow "<name>" completed (<count> agent<optional-s>).`, newline, `Return value:`, newline, and pretty-printed data-dependent JSON; a cap adds `… [truncated: <omitted> more characters]` on a new line. A background acceptance is exactly `workflow "<name>" started in the background as job <jobId>. Its return value arrives with the completion notice; check on it with job_output, stop it with job_kill.`, and the same rendered value later reaches the model through the job's completion notice and `job_output`. Failures are exactly `Error: workflow run was cancelled`, optionally suffixed ` (<error>)`, `Error: workflow run failed: <error-or-unknown error>`, or defensively `Error: workflow run ended abnormally (<reason>)`; a call without an owning agent becomes `Error: workflow tool requires a calling agent (exec.agent was undefined)`. Intermediate child messages are omitted.
+The full model-written graph or script, metadata, and args remain in the assistant tool call. A foreground success is exactly `workflow "<name>" completed (<count> agent<optional-s>).`, newline, `Return value:`, newline, and pretty-printed data-dependent JSON; a cap adds `… [truncated: <omitted> more characters]` on a new line. A background acceptance is exactly `workflow "<name>" started in the background as job <jobId>. Its return value arrives with the completion notice; check on it with job_output, stop it with job_kill.`, and the same rendered value later reaches the model through the job's completion notice and `job_output`. Failures are exactly `Error: workflow run was cancelled`, optionally suffixed ` (<error>)`, `Error: workflow run failed: <error-or-unknown error>`, or defensively `Error: workflow run ended abnormally (<reason>)`; a call without an owning agent becomes `Error: workflow tool requires a calling agent (exec.agent was undefined)`. Intermediate child messages are omitted.
 
 #### Token effect
 

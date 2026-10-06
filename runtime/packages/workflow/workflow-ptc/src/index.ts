@@ -1,6 +1,6 @@
 /**
  * Workflow orchestration through the shared sandboxed Node PTC executor.
- * The VM supplies script helpers; the process applies the calling Session's file policy.
+ * The VM supplies script helpers; the process inherits or tightens the calling Session's file policy.
  * @module @deepseek-ai/dsh-workflow-ptc
  */
 
@@ -30,6 +30,8 @@ export type {
 
 /** Plugin config (all optional — `static Config` supplies the defaults). */
 export interface Config {
+  /** Coordinator file policy: inherit the Session, or tighten to read-only; children retain the parent's policy (default `session`). */
+  scriptFileMode?: 'session' | 'read-only'
   /** The `ctx.subagents` provider children run on (default `spawn`). */
   provider?: string
   /** Concurrent `agent()` ceiling; `0` (the default) auto-resolves to `min(16, max(1, cores - 2))`. */
@@ -103,6 +105,7 @@ class PtcWorkflowEngine extends WorkflowEngine {
   static inject = ['subagents', 'ptcRuntime', 'sandboxPolicy']
 
   static Config: z<Config> = z.object({
+    scriptFileMode: z.union(['session', 'read-only'] as const).default('session'),
     provider: z.string().default('spawn'),
     maxConcurrentAgents: z.natural().default(0),
     maxTotalAgents: z.natural().min(1).default(1000),
@@ -163,7 +166,10 @@ class PtcWorkflowEngine extends WorkflowEngine {
       request.parent,
       init,
       subagentProvider,
-      runCtx.sandboxPolicy.resolve({ session: request.parent.session }),
+      runCtx.sandboxPolicy.resolve({
+        session: request.parent.session,
+        ...this.config.scriptFileMode === 'read-only' ? { mode: 'read-only' as const } : {},
+      }),
       {
         phase: (title) => { this.emitWorkflowEvent('workflow/phase', info, title) },
         log: (message) => { this.emitWorkflowEvent('workflow/log', info, message) },

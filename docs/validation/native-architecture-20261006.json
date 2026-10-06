@@ -1,0 +1,164 @@
+{
+  "date": "2026-10-06",
+  "application": "Nexgent, repository-owned DSH-derived native source application",
+  "frozen_model_probe": {
+    "passed": true,
+    "scope": "built application, actual member file effects and restart; only external HTTP model mocked",
+    "policy": "workspace-write task; read-only coordinator; read-only child denial also verified",
+    "architecture": {
+      "nodes": [
+        {
+          "id": "a",
+          "role": "researcher",
+          "prompt": "GRAPH_MEMBER_A",
+          "dependencies": [],
+          "provider": "mimo",
+          "model": "mimo-v2.6-pro",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value"
+            ]
+          }
+        },
+        {
+          "id": "b",
+          "role": "researcher",
+          "prompt": "GRAPH_MEMBER_B",
+          "dependencies": [],
+          "provider": "mimo",
+          "model": "mimo-v2.6-pro",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value"
+            ]
+          }
+        },
+        {
+          "id": "review",
+          "role": "reviewer",
+          "prompt": "GRAPH_MEMBER_REVIEW",
+          "dependencies": [
+            "a",
+            "b"
+          ],
+          "provider": "mimo",
+          "model": "mimo-v2.6-pro",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value"
+            ]
+          }
+        }
+      ]
+    },
+    "first": {
+      "pid": 56140,
+      "version": "0dc38a2e1b26703aef3ed1f04e96e9e71a5e04389a0b9223970117b276deb3ff",
+      "sessionId": "session-c7cd8e87-4a0d-4aea-a77c-b1b249ce595a"
+    },
+    "resumed": {
+      "pid": 83180,
+      "version": "0dc38a2e1b26703aef3ed1f04e96e9e71a5e04389a0b9223970117b276deb3ff",
+      "sessionId": "session-c7cd8e87-4a0d-4aea-a77c-b1b249ce595a"
+    },
+    "denied": {
+      "pid": 49632,
+      "rejected": true
+    },
+    "requestCount": 32
+  },
+  "actual_model_probe": {
+    "passed": true,
+    "scope": "actual MiMo graph execution and independently checked member outputs; no adoption or RSI claim",
+    "provider": "mimo",
+    "model": "mimo-v2.6-pro",
+    "policy": "workspace-write task; read-only coordinator",
+    "pid": 13800,
+    "sessionId": "session-f4e32dd2-a100-4d48-9571-dd4c7857c37f",
+    "architectureVersion": "0ac17672c9b5d263be22098db0e6e68cb63ae956fa433c41b7d8ea1cbe728409",
+    "outputs": {
+      "totals": {
+        "count": 3,
+        "sum": 21
+      },
+      "range": {
+        "mean": 7,
+        "min": 3,
+        "max": 11
+      },
+      "review": {
+        "count": 3,
+        "sum": 21,
+        "mean": 7,
+        "min": 3,
+        "max": 11
+      }
+    },
+    "mainUsage": [
+      {
+        "inputTokens": 1788,
+        "outputTokens": 508,
+        "totalTokens": 8440,
+        "cacheReadTokens": 6144
+      },
+      {
+        "inputTokens": 824,
+        "outputTokens": 19,
+        "totalTokens": 8651,
+        "cacheReadTokens": 7808
+      },
+      {
+        "inputTokens": 302,
+        "outputTokens": 161,
+        "totalTokens": 9039,
+        "cacheReadTokens": 8576
+      },
+      {
+        "inputTokens": 507,
+        "outputTokens": 325,
+        "totalTokens": 9664,
+        "cacheReadTokens": 8832
+      }
+    ]
+  },
+  "checks": {
+    "compiler_and_tool_tests": 53,
+    "native_workflow_engine_tests": 65,
+    "session_corpus_checks": 3,
+    "documentation_tests": 173,
+    "architecture_compiler_coverage": "100% statements, branches, functions, lines"
+  },
+  "limitations": [
+    "Content hashes are not approved or adopted architecture versions.",
+    "Native candidate trials, independent selection/guard, version adoption, future-task reuse and improver evolution are not implemented.",
+    "Node role is task prompt data; node tool and context policies are not implemented.",
+    "Main usage excludes member and title requests; no complete cost or RSI benefit claim.",
+    "Visual browser acceptance, general workspace-write shell/code execution, all SDK cross-entry recovery and installer acceptance remain unverified.",
+    "Imported POSIX prompt snapshots retain their shell headers; full Windows replay differs in the pwsh header."
+  ],
+  "artifacts": {
+    "frozen_model": "validation-workspace/native-architecture-r8WaDN",
+    "actual_model": "validation-workspace/native-architecture-pro-nNSve5"
+  }
+}

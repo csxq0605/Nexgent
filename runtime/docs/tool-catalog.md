@@ -2364,7 +2364,7 @@ todo_write is session-owned state; UIs render the latest todo/write event as a c
 
 ### `workflow`
 
-Run a JavaScript workflow script that orchestrates subagents at scale. Use this for work that fans out across many independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings — where you write the orchestration as a script instead of delegating turn by turn.
+Run a workflow that orchestrates subagents. Supply exactly one of script or architecture. An architecture contains nodes with unique id, role, prompt, dependencies (node ids), and optional provider/model/schema. A node schema uses the same object-rooted JSON Schema subset as agent() and requires a validated structured result. Dependencies must form an acyclic graph. Independent nodes run together; each child receives the input and its dependencies' actual outputs. A failed member prevents successful graph delivery. The result includes the content-derived architectureVersion and node outputs. The original architecture stays in the tool call history and can be reused in later sessions; its version is not an adoption or approval receipt. Use this for work that fans out across independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings.
 
 The workflow's identity rides the `meta` parameter as JSON: required `name` (short kebab-case) and `description` strings, optional `whenToUse` string and `phases` array (`{title, detail?, provider?, model?}`). The `script` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO `export const meta` statement — meta is a parameter, not code), running with top-level await; end with `return <value>` — the value must be JSON-serializable and is this tool's result.
 
@@ -2385,6 +2385,11 @@ Constraints: concurrency and total-agent caps apply; no filesystem, network, tim
     "script": {
       "type": "string",
       "description": "The plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`)."
+    },
+    "architecture": {
+      "type": "object",
+      "description": "Alternative to script: {nodes:[{id,role,prompt,dependencies:[node ids],provider?,model?,schema?}]}. Roles and dependencies define execution; the returned content digest identifies this graph version.",
+      "additionalProperties": true
     },
     "meta": {
       "type": "object",
@@ -2449,7 +2454,6 @@ Constraints: concurrency and total-agent caps apply; no filesystem, network, tim
     }
   },
   "required": [
-    "script",
     "meta"
   ]
 }

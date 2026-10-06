@@ -3780,7 +3780,7 @@ export interface Config {
 }
 ```
 
-来源： [`packages/workflow/tool-workflow/src/index.ts:44`](../packages/workflow/tool-workflow/src/index.ts)
+来源： [`packages/workflow/tool-workflow/src/index.ts:45`](../packages/workflow/tool-workflow/src/index.ts)
 
 <a id="deepseek-aidsh-tool-workspace-dependencies"></a>
 
@@ -4068,6 +4068,8 @@ export interface Config {
 ```ts config-catalog
 /** Plugin config (all optional — `static Config` supplies the defaults). */
 export interface Config {
+  /** Coordinator file policy: inherit the Session, or tighten to read-only; children retain the parent's policy (default `session`). */
+  scriptFileMode?: 'session' | 'read-only'
   /** The `ctx.subagents` provider children run on (default `spawn`). */
   provider?: string
   /** Concurrent `agent()` ceiling; `0` (the default) auto-resolves to `min(16, max(1, cores - 2))`. */

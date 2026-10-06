@@ -38,6 +38,7 @@ With those dependencies available, mount the engine and its model-facing consume
 
 | Field | Default | Meaning |
 |---|---|---|
+| `scriptFileMode` | `session` | Inherit the Session file policy, or tighten only the coordinating process to `read-only`; child tools retain the parent policy. |
 | `provider` | `spawn` | Host-side subagent provider used by `agent()` calls. |
 | `maxConcurrentAgents` | `0` | Concurrent `agent()` ceiling; `0` resolves from available CPU parallelism. |
 | `maxTotalAgents` | `1000` | Total `agent()` calls one run may start. |
@@ -56,7 +57,7 @@ Invalid metadata, an unparseable body, an unavailable provider route or a per-ru
 
 ### File policy and cancellation
 
-The engine resolves the calling Session's standing file policy and cwd for PTC execution. The VM retains the documented helper API, but it is not a security boundary: code that reaches Node remains subject to the selected OS file policy. The program-visible environment is empty. Network access is not restricted by the file policy.
+The engine resolves the calling Session's cwd and file policy for PTC execution. `scriptFileMode: read-only` tightens the coordinating process without changing the parent Session or delegated tool permissions. The VM retains the documented helper API, but it is not a security boundary: code that reaches Node remains subject to the selected OS file policy. The program-visible environment is empty. Network access is not restricted by the file policy.
 
 The workflow requests `timeoutMs: null` from PTC. Its initial VM slice still has `syncTimeoutMs`, and a caller's abort signal still applies, including an enclosing tool deadline. Cancellation immediately aborts the PTC process and pending or active subagents. The caller must dispose every run and await child cleanup; there is no separate workflow cleanup timer.
 
