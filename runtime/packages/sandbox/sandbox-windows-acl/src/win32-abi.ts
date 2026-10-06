@@ -91,6 +91,8 @@ export const CONTAINER_INHERIT_ACE = 0x2
 export const MAX_PATH = 260
 /** Successful Win32 status code. */
 export const ERROR_SUCCESS = 0
+/** Win32 access-denied status code. */
+export const ERROR_ACCESS_DENIED = 5
 /** Win32 error reported when an immediate byte-range lock cannot be obtained. */
 export const ERROR_LOCK_VIOLATION = 33
 /** Generic read access bit. */

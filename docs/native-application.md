@@ -4,7 +4,7 @@ Nexgent 的默认应用直接运行本仓库 `runtime/` 中的 DSH 派生源码�
 
 ## 构建与运行
 
-需要 Windows、PowerShell 7、Node.js 22.19 或 Node.js 24+，以及 pnpm 11.7。当前验收环境为 Node.js 24.15、pnpm 11.7。项目目录需先创建；在项目 `.env` 中配置 `NEXGENT_API_KEY`，或在启动进程的环境中提供它。不要将密钥写入源码或 profile。
+需要 Windows、PowerShell 7、Node.js 22.19 或 Node.js 24+，以及 pnpm 11.7。当前验收环境为 Node.js 24.15、pnpm 11.7。项目目录需先创建；Windows 进程隔离要求目录由调用者拥有并授予 WRITE_OWNER，仅有 Modify 不足以设置完整性标签。在项目 `.env` 中配置 `NEXGENT_API_KEY`，或在启动进程的环境中提供它。不要将密钥写入源码或 profile。
 
 ```powershell
 cd runtime
@@ -39,7 +39,9 @@ cd ..
 
 `node scripts/verify-native-live.mjs` 使用本地已配置密钥调用真实 MiMo-V2.6-Pro，从原生 `run.ps1` 读取 CSV、写出 count/sum/mean，然后在另一个进程恢复同一 Session 并添加 min/max。验收脚本独立读取 JSON 校验结果，保留实际工具事件与每步用量。数据与完整日志在 `validation-workspace/native-pro-*/`；此验证只支持文件交付与续聊，不支持 RSI 收益结论。
 
-原生浏览器服务可以启动；未授权访问返回 401，本地访问凭证可以取得标题为 Nexgent 的页面，且没有配置行等待激活。自动化浏览器策略拦截了 localhost 页面，视觉与交互验收尚未完成。真实任务中 PowerShell 工具曾被本机 Windows ACL 限制拒绝；只读工作流协调进程和原生文件工具现已通过验收，一般 workspace-write shell 与代码执行仍未完成本机验收。
+原生浏览器服务可以启动；未授权访问返回 401，本地访问凭证可以取得标题为 Nexgent 的页面，且没有配置行等待激活。自动化浏览器策略拦截了 localhost 页面，视觉与交互验收尚未完成。真实任务中 PowerShell 工具曾被本机 Windows ACL 限制拒绝；只读工作流协调进程和原生文件工具现已通过验收，仅有 Modify 权限的 E 盘目录仍无法执行 workspace-write 进程；普通调用者自有、具备 FullControl 的临时项目已经验证受限 PowerShell 与同进程 Node 测试执行，通用子进程与构建兼容性仍未完成验收。
+
+`node scripts/test-native-code.mjs` 已验证原生 write 交付源码与测试、受限 PowerShell 启动 Node、四项实际检查及执行产生的文件。`node scripts/verify-native-code-live.mjs` 已用真实 MiMo 编写 JSONL 处理模块，执行宿主提供且保持原样的五项公开检查，并独立核对产物。测试使用 `--test-isolation=none`，仍在原生受限进程内运行；默认 Node 测试派生进程曾返回 EPERM，不能据此承诺所有构建流程。`--modify-project` 负例确认当前 E 盘 Modify-only 目录会拒绝执行，保留 Win32 API、错误码与 WRITE_OWNER 提示。结果见[代码交付验证摘要](validation/native-code-20261007.json)。
 
 已执行验收的来源、会话身份、独立进程、输出、原生每步用量和限制记录在[验证摘要](validation/native-application-20261006.json)。标题请求与前台步骤分别执行，摘要中的前台用量不代表全部账户费用。
 

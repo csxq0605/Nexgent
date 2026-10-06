@@ -259,7 +259,12 @@ function mergeAndApply(
   )
   const freedNew = api.localFree(newAcl)
   const freedLabel = labelEdit.kind === 'apply' ? api.localFree(labelEdit.acl) : null
-  if (applyResult !== abi.ERROR_SUCCESS) throwWin32(api, 'SetNamedSecurityInfoW', applyResult, `${label}(${path})`)
+  if (applyResult !== abi.ERROR_SUCCESS) {
+    const hint = applyResult === abi.ERROR_ACCESS_DENIED && labelEdit.kind === 'apply'
+      ? '; check directory ownership and WRITE_OWNER: Modify alone cannot apply the integrity label'
+      : ''
+    throwWin32(api, 'SetNamedSecurityInfoW', applyResult, `${label}(${path})${hint}`)
+  }
   if (freedDescriptor !== null && !isNullPtr(freedDescriptor)) throwLastError(api, 'LocalFree', `${label}(${path}) descriptor`)
   if (!isNullPtr(freedNew)) throwLastError(api, 'LocalFree', `${label}(${path}) new ACL`)
   if (freedLabel !== null && !isNullPtr(freedLabel)) throwLastError(api, 'LocalFree', `${label}(${path}) label ACL`)

@@ -1,0 +1,107 @@
+{
+  "date": "2026-10-07",
+  "frozen_model_probe": {
+    "passed": true,
+    "scope": "built app, actual source writes and confined Node tests; only external model frozen",
+    "policy": "default workspace-write; ordinary caller-owned temporary project; no ACL edits by probe",
+    "pid": 80312,
+    "project": "C:\\Users\\Lenovo\\AppData\\Local\\Temp\\nexgent-native-code-3MudaU",
+    "sessionId": "session-148220ba-7aea-4d57-99f2-488fdacea5c0",
+    "testsPassed": 4,
+    "output": [
+      {
+        "id": "verified",
+        "value": 42
+      }
+    ]
+  },
+  "actual_model_probe": {
+    "passed": true,
+    "scope": "actual MiMo source delivery, host-authored public acceptance checks and confined execution; no RSI claim",
+    "provider": "mimo",
+    "model": "mimo-v2.6-pro",
+    "policy": "default workspace-write, normal caller-owned temporary project, tests execute in one confined Node process",
+    "pid": 61768,
+    "project": "C:\\Users\\Lenovo\\AppData\\Local\\Temp\\nexgent-native-code-pro-lMGbto",
+    "sessionId": "session-d3f86656-4de6-41a8-9a30-edfbc57992b6",
+    "testsPassed": 5,
+    "output": [
+      {
+        "id": "verified",
+        "value": 42
+      }
+    ],
+    "mainUsage": [
+      {
+        "inputTokens": 1602,
+        "outputTokens": 125,
+        "totalTokens": 7871,
+        "cacheReadTokens": 6144
+      },
+      {
+        "inputTokens": 226,
+        "outputTokens": 42,
+        "totalTokens": 7948,
+        "cacheReadTokens": 7680
+      },
+      {
+        "inputTokens": 448,
+        "outputTokens": 721,
+        "totalTokens": 8977,
+        "cacheReadTokens": 7808
+      },
+      {
+        "inputTokens": 839,
+        "outputTokens": 179,
+        "totalTokens": 9210,
+        "cacheReadTokens": 8192
+      },
+      {
+        "inputTokens": 431,
+        "outputTokens": 175,
+        "totalTokens": 9566,
+        "cacheReadTokens": 8960
+      },
+      {
+        "inputTokens": 353,
+        "outputTokens": 138,
+        "totalTokens": 9835,
+        "cacheReadTokens": 9344
+      },
+      {
+        "inputTokens": 268,
+        "outputTokens": 81,
+        "totalTokens": 9949,
+        "cacheReadTokens": 9600
+      },
+      {
+        "inputTokens": 470,
+        "outputTokens": 447,
+        "totalTokens": 10773,
+        "cacheReadTokens": 9856
+      }
+    ]
+  },
+  "modify_only_negative_probe": {
+    "passed": true,
+    "scope": "Modify-only workspace fails with actionable ACL diagnostics, without accepting code delivery",
+    "pid": 79288,
+    "project": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-code-DcMpVj\\nexgent-native-code-4mFwBn",
+    "executionRejected": true
+  },
+  "checks": {
+    "acl_failure_path_tests": 44
+  },
+  "limitations": [
+    "Full-control caller-owned temporary projects were accepted; Modify-only E-drive directories remain unsupported for workspace-write process confinement.",
+    "The native restriction token and ACL policy remained enabled. Tests ran within one confined Node process.",
+    "The default Node test runner attempting to spawn another process returned EPERM; general nested subprocess/build compatibility remains unverified.",
+    "Public acceptance checks verify this code task; no hidden evaluator, candidate selection, adoption or RSI benefit is claimed.",
+    "The first actual-model capture passed its code tests but the probe incorrectly required a rendered zero-exit marker. The checker was corrected using the native renderer, and a new actual-model run passed."
+  ],
+  "artifacts": {
+    "actual_model": "validation-workspace/native-code-pro-2Gcrv8",
+    "negative": "validation-workspace\\native-code-DcMpVj",
+    "frozen_model": "validation-workspace/native-code-aDTpKz"
+  }
+}

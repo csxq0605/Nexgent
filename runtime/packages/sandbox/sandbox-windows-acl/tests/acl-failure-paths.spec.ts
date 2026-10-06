@@ -357,6 +357,9 @@ describe('mergeAndApply failure paths', () => {
     }
     expect(caught).toBeInstanceOf(Win32Error)
     expect((caught as Win32Error).api).toBe('SetNamedSecurityInfoW')
+    expect((caught as Win32Error).win32Code).toBe(abi.ERROR_ACCESS_DENIED)
+    expect((caught as Win32Error).message).toContain('WRITE_OWNER')
+    expect((caught as Win32Error).message).toContain('Modify alone')
     expect(localFree).toHaveBeenCalledWith(9n) // merged DACL
     expect(localFree).toHaveBeenCalledWith(11n) // label ACL
   })
