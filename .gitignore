@@ -21,3 +21,9 @@ coverage.json
 .nexgent/exports/
 **/.nexgent/runs/
 **/.nexgent/exports/
+
+# Node / pnpm workspace (TypeScript monorepo)
+node_modules/
+dist/
+*.tsbuildinfo
+.pnpm-store/

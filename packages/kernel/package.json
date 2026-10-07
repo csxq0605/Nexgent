@@ -1,0 +1,24 @@
+{
+  "name": "@nexgent/kernel",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Nexgent runtime kernel: Cordis application context, plugin and service conventions",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/schemastery": "3.18.4"
+  }
+}
