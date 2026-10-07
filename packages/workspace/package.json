@@ -1,0 +1,23 @@
+{
+  "name": "@nexgent/workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "工作目录与 .nexgent/ 数据目录、文件与 shell 工具、子进程与沙箱策略。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*"
+  }
+}

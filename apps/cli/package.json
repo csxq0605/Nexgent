@@ -15,9 +15,18 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["bin", "dist"],
+  "files": [
+    "bin",
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -b tsconfig.json",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/llm": "workspace:*",
+    "@nexgent/session": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
   }
 }

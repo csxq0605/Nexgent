@@ -1,0 +1,23 @@
+{
+  "name": "@nexgent/session",
+  "version": "0.0.0",
+  "private": true,
+  "description": "会话 JSONL v1 的追加写、checkpoint 与按会话 ID 恢复。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*"
+  }
+}

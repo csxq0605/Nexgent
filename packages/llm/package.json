@@ -1,0 +1,23 @@
+{
+  "name": "@nexgent/llm",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MiMo 单路由：OpenAI 兼容流式请求、工具调用解析、用量计量与请求账本。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*"
+  }
+}

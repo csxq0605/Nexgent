@@ -1,8 +1,23 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/kernel" },
-    { "path": "packages/test-support" },
-    { "path": "apps/cli" }
+    {
+      "path": "packages/kernel"
+    },
+    {
+      "path": "packages/test-support"
+    },
+    {
+      "path": "apps/cli"
+    },
+    {
+      "path": "packages/llm"
+    },
+    {
+      "path": "packages/session"
+    },
+    {
+      "path": "packages/workspace"
+    }
   ]
 }
