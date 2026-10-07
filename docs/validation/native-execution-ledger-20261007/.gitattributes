@@ -1,0 +1,2 @@
+# Keep archived native records byte-identical to their recorded SHA-256 digests.
+*.jsonl text eol=lf

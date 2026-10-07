@@ -1,0 +1,1 @@
+{"format":1,"architecture":{"nodes":[{"id":"answer","role":"solver","prompt":"ADOPTION_MEMBER_RACE_FIRST: Double input.number and report the value.","dependencies":[],"provider":"mimo","model":"mimo-v2.6-pro","schema":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"integer"}},"required":["value"]},"toolFilter":{"allow":["write"]}}]}}

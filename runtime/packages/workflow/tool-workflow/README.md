@@ -1,0 +1,194 @@
+---
+description: "The model-facing workflow tool: run declarative graphs or JavaScript orchestration through native subagents."
+kind: "package-reference"
+---
+
+# @deepseek-ai/dsh-tool-workflow
+
+English | [中文](README.zh.md)
+
+## Summary
+
+`dsh-tool-workflow` runs graphs or scripts through native subagents and returns their final JSON value. Choose the execution form according to the task. Foreground execution waits for all work; cancellation or abnormal completion returns an error rather than partial success. `run_in_background: true` returns an owned job id immediately and exposes live output. Deployments can rename the tool with `toolName` and cap rendered results with `maxResultChars`.
+
+## Table of Contents
+
+- [Use this package](#use-this-package)
+- [Understand the implementation](#understand-the-implementation)
+- [Further Exploration](#further-exploration)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
+-----
+
+<a id="use-this-package"></a>
+## Use this package
+
+The tool accepts exactly one of `script` or `architecture`; with `architectureDirectory` configured it also accepts `architectureVersion` instead of either. Publishing saved definitions requires filesystem hard-link support; unsupported filesystems fail explicitly. An architecture is `{nodes:[{id,role,prompt,dependencies,provider?,model?,schema?,persona?,toolFilter?}]}`; dependencies name other nodes and must be acyclic. The compiler sends actual dependency outputs to each child and returns a content-derived `architectureVersion` with node outputs. This digest identifies the executed definition; it does not record independent approval or adoption. An optional node `schema` requires a validated object through the native structured-output mechanism; it accepts the same subset as `agent()` schemas. Each node starts when its own dependencies finish; unrelated slow nodes do not create a barrier, and shared dependencies execute once. The original graph is retained in the calling Session's tool history. With `architectureDirectory` configured, normalized definitions are also published as complete, immutable records outside Session history. A new Session can execute one by its returned `architectureVersion`; unknown versions, invalid records and content mismatches fail before any member starts. Saved records are definitions, without approval or adoption status.
+
+`role` is task data in the child prompt. Optional `persona` replaces the child's deployment persona using native template variables such as `{{cwd}}`. Optional `toolFilter` contains `allow` and/or `deny` arrays of global tool names. These masks intersect inherited restrictions and affect both visibility and execution; scoped registrations, including `structured_output`, stay visible. Unsupported provider capabilities and unknown global names fail at child startup. The definition digest includes these choices; saved-version reuse applies them again. Script `agent()` options support the same composition fields.
+
+Host consumers can import `prepareArchitecture`, `prepareOutputTrialArchitecture`, `saveArchitecture` and `loadArchitecture` from this package. The output-trial compiler retains the definition digest and replaces all member global-tool masks with `{allow: []}`. This execution mode must be recorded separately; it is not a change to the stored graph or an approval. Scoped native structured output remains available.
+
+The `workflow` tool runs model-authored graphs or scripts and returns their final JSON value. Choose it when dependencies or repeated coordination help the task; otherwise use direct work or ordinary delegation.
+
+### Calling the tool
+
+The model submits metadata, one execution representation, optional input, and a flag: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` or `architecture` (or `architectureVersion` when storage is configured; exactly one; script is a plain JavaScript body — no `export const meta` statement; the tool description carries the complete authoring contract), `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest), and `run_in_background` (optional; present only while `enableRunInBackground` holds).
+
+A foreground success returns the envelope `{ kind: 'foreground', runId, agentsStarted, result }`, rendered to the model as `workflow "<name>" completed (<count> agent<optional-s>).` followed by `Return value:` and the pretty-printed JSON. A workflow that cannot start — a script parse or meta validation failure — returns an error the model can correct from. Cancellation and execution failures return `Error: workflow run was cancelled` or `Error: workflow run failed: <error>`; partial output is never reported as success.
+
+### What to expect during a run
+
+While the script runs, the parent turn waits: the tool starts the run, awaits its result, and always disposes it, so the script and its children reach quiescence on every path — including cancellation, which is bridged from the parent step's abort signal. The model sees one final outcome, never intermediate child messages; the children's own work stays out of the parent conversation.
+
+### Background runs
+
+`run_in_background: true` returns `{ kind: 'background', jobId, runId }` immediately: the run is registered on `ctx.jobs` as an owned `workflow` job, so the session-header job list streams its `phase()`, `log()`, and member lifecycle lines live from the job's output ring, and the row's progress line tracks the current phase. No tool-step signal reaches the run — `job_kill`, the list's stop control, and owner teardown are what cancel it. Settlement is the job's settlement: a completed run carries the same rendered return value as the job's result (the completion notice announces it, the model's first `job_output` after settlement carries it once), a cancelled run settles `killed` with the kill reason, and a failed run settles `failed` with the script's failure message. Without a live job registry and a controller serving the caller the call fails, naming the missing composition pieces.
+
+### Config
+
+| Field | Default | Meaning |
+|---|---|---|
+| `architectureDirectory` | disabled | Absolute application-owned directory for saved graph definitions and version reuse. |
+| `toolName` | `workflow` | The model-facing tool name to register. |
+| `maxResultChars` | `50000` | Rendered-result ceiling; longer JSON is truncated with a notice. |
+| `enableRunInBackground` | `true` | Expose `run_in_background`; disabled calls are also rejected. |
+
+The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-workflow) is the exhaustive source for every accepted field.
+
+-----
+
+<a id="understand-the-implementation"></a>
+## Understand the implementation
+
+<details>
+<summary>Implementation internals — click to expand</summary>
+
+This section explains how the consumer is split from the engine and how the run lifecycle and records work; observable behavior is fully covered in [Use this package](#use-this-package).
+
+### Design concept
+
+The consumer owns the model-facing schema, the `tool:<toolName>` system-prompt guidance, and the result envelope; script parsing, execution, caps, and cancellation live behind `ctx.workflowEngine`, while the PTC engine shares Node process confinement with `run_code`. Usage guidance ships with the tool plugin as a prompt section, never in the deployment persona.
+
+### Run lifecycle
+
+`execute` starts the run and awaits `run.result` inside a `try/finally` that always disposes the run. `exec.signal` is bridged to `run.cancel()`, including the already-aborted-before-start case. A non-`completed` stop reason maps to an `isError` result reporting the reason; completion renders `{ kind, runId, agentsStarted, result }`, with the Native renderer truncating only that projection at `maxResultChars`.
+
+### Background lifecycle
+
+A background call registers the run through `jobs.start` inside the job starter, so a synchronous engine rejection registers nothing and admission preflight runs before the engine spawns. The job's `done` chains from `run.result`: dispose (a disposal failure is warned, never rejected into the registry), stop the mirrors, then map the stop reason onto the job outcome. The ring mirror (`src/record.ts`) subscribes `workflow/phase`, `workflow/log`, and member events once per plugin and routes them into the tracked runs' `JobHandle` faces (`append` for lines, `updateProgress` for the phase); a straggling event after settlement finds no tracked run, and an append against a settled job drops inside the registry.
+
+### Durable session records
+
+For a root transport execution (`exec.parent` absent), the tool projects the run into the calling Agent's Session with four log-only events: run-start after `start()` returns, member starts and endings filtered by `run.id`, then run-end only after the result is available and disposal reaches quiescence. Nested transport calls execute normally but write no record. The first failed Session append disables later recording for that run with one warning, leaving either no record or a legal continuous prefix without changing the tool result or cleanup. The package invariant rejects duplicate starts, unpaired members, terminal events with open members, and updates after run-end on both cold load and live append, while accepting missing terminal suffixes.
+
+The engine's `workflow/phase` and `workflow/log` events have no per-line durable surface from this tool: the session log deliberately records run and member lifecycle only, and the Web transcript derives from those records. A background run's lines reach a human through the job observation record instead, which is transient by design.
+
+### Render intent
+
+Decided up front per the [render-intent Agent Note](../../../.agents/notes/implemented/architecture/2026-07-02-tool-render-intent-union.md): a `generic` card titled `workflow: <meta.name>`, read directly from `args.meta.name` — presentation is a pure function of args — with the script text carried as `rawInput`. The result keeps the generic card.
+
+### Source map
+
+| File | Role |
+|---|---|
+| [`src/index.ts`](src/index.ts) | Plugin entry: tool registration, run lifecycle, background job registration, recorder wiring |
+| [`src/record.ts`](src/record.ts) | Background runs' live-progress mirror into the job's output ring |
+| [`src/types.ts`](src/types.ts) | The four log-only record event payloads and their `SessionEventMap` declaration |
+| [`src/invariant.ts`](src/invariant.ts) | Invariant companion: durable workflow-record protocol validation |
+
+</details>
+
+-----
+
+<a id="further-exploration"></a>
+## Further Exploration
+
+Read these pages when the tool-level contract is not enough. They move from the shared workflow model to the engine and the comparable delegation tool.
+
+- [Workflow subsystem](../../../docs/subsystems/workflow.md) — the seam contract, start request, and event payloads.
+- [Workflow seam](../workflow/README.md) — the run and result vocabulary behind the tool.
+- [PTC workflow engine](../workflow-ptc/README.md) — the engine that executes the scripts.
+- [subagent tool](../../subagent/tool-subagent/README.md) — the plain-delegation alternative for one or two children.
+- [Group map](../README.md) — the workflow capability family and its packages.
+- [Dynamic workflows Agent Note](../../../.agents/notes/implemented/feature/2026-07-05-dynamic-workflows.md) — the seam design and its decisions.
+
+-----
+
+<a id="model-experience"></a>
+## Model Experience
+
+### System prompt
+
+#### What the model sees
+
+Every parent request in this plugin's registration scope receives the workflow guidance below. A scoped tool restriction can hide the schema without removing this independently registered guidance.
+
+##### Workflow guidance
+
+```markdown
+Choose the <toolName> tool when work benefits from explicit dependencies or repeated multi-agent coordination. Supply a declarative architecture graph or a JavaScript script using the tool description's contract. Use direct work or plain subagent calls when those are sufficient.
+```
+
+#### Token effect
+
+Small fixed guidance cost per request while the plugin is active.
+
+#### KV Cache effect
+
+Prefix-stable while the plugin scope and guidance text are unchanged. Activation or disposal may invalidate reuse from this prompt section.
+
+### Tool schema
+
+#### What the model sees
+
+When visible, the generated default [`workflow` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow) carries the graph, JavaScript hook, and metadata contracts; `toolName` can rename the definition, and the model submits a graph or script, metadata, and optional args.
+
+#### Token effect
+
+Substantial fixed schema cost on each request where the tool is visible.
+
+#### KV Cache effect
+
+Prefix-stable while `toolName`, definition, and visibility are unchanged. Renaming, plugin lifecycle, or scoped restrictions may invalidate reuse from this schema.
+
+### Tool-call history and result
+
+#### What the model sees
+
+The full model-written graph or script, metadata, and args remain in the assistant tool call. A foreground success is exactly `workflow "<name>" completed (<count> agent<optional-s>).`, newline, `Return value:`, newline, and pretty-printed data-dependent JSON; a cap adds `… [truncated: <omitted> more characters]` on a new line. A background acceptance is exactly `workflow "<name>" started in the background as job <jobId>. Its return value arrives with the completion notice; check on it with job_output, stop it with job_kill.`, and the same rendered value later reaches the model through the job's completion notice and `job_output`. Failures are exactly `Error: workflow run was cancelled`, optionally suffixed ` (<error>)`, `Error: workflow run failed: <error-or-unknown error>`, or defensively `Error: workflow run ended abnormally (<reason>)`; a call without an owning agent becomes `Error: workflow tool requires a calling agent (exec.agent was undefined)`. Intermediate child messages are omitted.
+
+#### Token effect
+
+Call tokens can be large and remain until compaction. Result rendering is capped by `maxResultChars`; child-model tokens are separate from the parent's retained context.
+
+#### KV Cache effect
+
+Append-only; newly visible content follows the reusable request prefix and does not invalidate existing KV-cache entries.
+
+## Known Limitations and Deferred Work
+
+<a id="known-limitations-and-deferred-work"></a>
+
+
+These limits define what the tool does not yet support. They are current constraints, not a task backlog.
+
+- **A background run reports no intermediate value to the model** — `job_output` before settlement returns status only; the return value arrives whole at completion, and cancellation still discards partial output.
+- **`args` must be an object and Native result text is bounded** — callers wrap top-level arrays and scalars in a field; the canonical workflow result stays complete, while JSON beyond `maxResultChars` is truncated in the model-facing projection rather than stored behind a retrieval handle.
+- **Workflow policy is fixed per tool registration** — provider selection, caps, and tool name are deployment config, not model-call arguments.
+- **Durable records are top-level and observational** — nested PTC mode dispatches are not recorded, and a recording failure intentionally degrades to an incomplete prefix rather than changing execution.
+- **No recorded-session scenario replays a background run yet** — unit and real-engine composition suites cover the path; the snapshot tree pins only the schema and prompt text.
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+This Dev Note is working context for maintainers: open directions that are not decided. It is explicitly non-authoritative — shipped behavior, limits, and accepted rationale live in the sections above, the package code, and the linked Agent Notes.
+
+Open directions: storing truncated JSON behind a retrieval handle instead of clipping the projection; recording nested dispatches beyond the top level; a recorded-session scenario for the background path.
+
+</details>

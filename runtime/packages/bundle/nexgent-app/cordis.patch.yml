@@ -1,0 +1,83 @@
+# Application-owned defaults. Credentials stay in the native credential service.
+- insert:
+    - id: nexgent-execution-ledger
+      name: '@nexgent/application'
+      config:
+        directory: !!js dshHomePath('execution-ledgers')
+    - id: nexgent-architecture-trials
+      name: '@nexgent/application/trials'
+      config:
+        architectureDirectory: !!js dshHomePath('architectures')
+        receiptDirectory: !!js dshHomePath('architecture-trials')
+        plans: []
+
+- id: agent-default-model
+  config:
+    provider: mimo
+    model: mimo-v2.6-pro
+    reasoningEffort: off
+
+- id: llm-deepseek
+  disabled: true
+
+- id: deepseek-account
+  disabled: true
+
+- id: account-controller
+  disabled: true
+
+- id: ui-settings-account
+  disabled: true
+
+- id: llm-pi-ai
+  config:
+    providers:
+      mimo:
+        displayName: MiMo
+        apiKeyEnv: NEXGENT_API_KEY
+        api: openai-completions
+        baseURL: https://token-plan-cn.xiaomimimo.com/v1
+        reasoning: off
+        timeoutMs: 180000
+        streamIdleTimeoutMs: 180000
+        retryPolicy:
+          mode: normal
+          maxRetries: 0
+        compat:
+          thinkingFormat: deepseek
+          supportsReasoningEffort: false
+          supportsDeveloperRole: false
+          supportsStore: false
+          maxTokensField: max_tokens
+        models:
+          - id: mimo-v2.6-pro
+            name: MiMo-V2.6-Pro
+            contextWindow: 128000
+            maxTokens: 4096
+            input: [text]
+            reasoningEfforts:
+              off: off
+              high: high
+
+- id: system-prompt
+  config:
+    includeHarnessIdentity: false
+    personaPrefix: >-
+      You are Nexgent, a general task agent using the {{model}} model.
+      Complete the user's task with the available materials and tools.
+      Choose direct work, delegation or a workflow according to the task.
+      Verify actual deliverables, explain unresolved requirements, and preserve useful work for subsequent turns.
+    personaSuffix: Your project working directory is {{cwd}}.
+
+# Coordination needs no workspace writes; delegated tools use the task policy.
+- id: tool-workflow
+  config:
+    architectureDirectory: !!js dshHomePath('architectures')
+
+- id: workflow-ptc
+  config:
+    scriptFileMode: read-only
+
+# Product data remains local unless the user configures an exporter.
+- id: session-telemetry-otel
+  disabled: true

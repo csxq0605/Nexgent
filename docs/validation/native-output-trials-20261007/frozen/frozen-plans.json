@@ -1,0 +1,57 @@
+[
+  {
+    "id": "double",
+    "description": "Frozen structured-output cases",
+    "baseline": {
+      "nodes": [
+        {
+          "id": "answer",
+          "role": "solver",
+          "prompt": "TRIAL_MEMBER_BASELINE: Double input.number and report the value.",
+          "dependencies": [],
+          "provider": "mimo",
+          "model": "mimo-v2.6-pro",
+          "toolFilter": {
+            "allow": [
+              "write"
+            ]
+          },
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "value"
+            ]
+          }
+        }
+      ]
+    },
+    "cases": [
+      {
+        "id": "first",
+        "input": {
+          "number": 3
+        },
+        "outputNode": "answer",
+        "expected": {
+          "value": 6
+        }
+      },
+      {
+        "id": "unseen",
+        "input": {
+          "number": 7
+        },
+        "outputNode": "answer",
+        "expected": {
+          "value": 14
+        }
+      }
+    ]
+  }
+]
