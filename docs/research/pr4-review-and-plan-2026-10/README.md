@@ -287,6 +287,22 @@ PR #4 可移植：`architecture-activation.ts`（预留槽位、独占发布、�
 5. 改进器与审核使用的模型：仍是 `mimo-v2.6-pro` 关闭 thinking，还是允许开启 thinking 或用更强模型。
 6. 步骤 6 的任务族与真实模型预算上限。
 
+### 4.10 计划尚未展开、需在步骤 0–1 补齐的事项
+
+| 事项 | 归属步骤 | 落地形式 |
+| --- | --- | --- |
+| 数据与文件格式规范：`.nexgent/` 各目录、会话 JSONL v1、账本记录、`CapabilityBundle` 清单、材料与成果元数据 | 0–1 | `docs/spec/data-formats.md` + 每种格式的 schema 与读写测试 |
+| 权限与审批模型：沙箱模式（只读 / 工作区写 / 完全访问）、工具审批、插件安装审批、每任务与每项目费用上限 | 1–4 | `docs/spec/permissions.md`，审批在 CLI 与 Web 共用一套交互 |
+| 测试策略：脚本化 provider 的仿真规范、故障注入（断网、超时、kill）、跨进程验收脚本的公共框架、真实模型手动验收的记录模板 | 0 | `packages/test-support`、`docs/validation/TEMPLATE.md` |
+| 安装与发布：`npx nexgent` / 全局安装、Node 版本范围、三平台安装说明、升级时的数据兼容 | 2 | `apps/cli` 的打包与发布流程、`docs/install.md` |
+| 日志与诊断：日志级别、账本与会话的查看命令、问题复现所需的最小导出包 | 1–2 | `nexgent export <session>`，日志文件约定 |
+| 模型与预算配置：模型切换、thinking 开关、重试策略、费用上限的产品设置 | 1–2 | 设置视图 + 项目配置文件 |
+| 文档体系：README、架构文档、`reference-map.md`、各步验收记录、ADR 目录 | 0 | `docs/` 结构在步骤 0 定下，README 只描述已验收能力 |
+| 并行与分工：各包的依赖顺序、哪些可并行开发、子智能体分工边界与文件归属 | 0 | 步骤 1 开工前的任务拆分表 |
+| 回退方案：若 kernel 重写超期，是否临时以 DSH npm 包作为后端先打通步骤 2 | 1 | 在步骤 1 中期检查点决定 |
+| 旧数据：旧 Python Episode、组织 SQLite、PR #4 的 `.nexgent/native/` 不迁移，只保留只读导出 | 3 | 删除 Python 时附说明 |
+| 安全：密钥存放、远程层本地访问令牌、沙箱绕过的已知边界、插件包进程内执行的提示 | 1–4 | 并入 `permissions.md` 与 `SAFETY.md` |
+
 ## 来源与局限
 
 - 读取了 PR #1–#4 的描述与提交、`main` 与六个远端分支、PR #4 顶端的 `README.md`、`REFACTOR_PLAN.md`、`docs/native-application.md`、`docs/dsh-main.md`、`docs/validation/dsh-main-20261006.md`、`docs/organization-loop.md`、`docs/framework-runtime.md`，以及 `runtime/packages/bundle/nexgent-app`、`tool-workflow`、`workflow-ptc`、`experimental/agent-team`、`goal` 的源码与 README；用 `npm view` 核对了 DSH 与 Cordis 库的发布状态；按包组统计了 DSH 的 TypeScript 源码规模作为重写工作量的依据。
