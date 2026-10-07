@@ -2,7 +2,7 @@
   "name": "@nexgent/workspace",
   "version": "0.0.0",
   "private": true,
-  "description": "工作目录与 .nexgent/ 数据目录、文件与 shell 工具、子进程与沙箱策略。",
+  "description": "\u5de5\u4f5c\u76ee\u5f55\u4e0e .nexgent/ \u6570\u636e\u76ee\u5f55\u3001\u6587\u4ef6\u4e0e shell \u5de5\u5177\u3001\u5b50\u8fdb\u7a0b\u4e0e\u6c99\u7bb1\u7b56\u7565\u3002",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,12 +12,17 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -b tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
     "@nexgent/kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/test-support": "workspace:*"
   }
 }

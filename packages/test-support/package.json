@@ -12,9 +12,14 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -b tsconfig.json",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*"
   }
 }

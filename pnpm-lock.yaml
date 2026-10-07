@@ -35,6 +35,10 @@ importers:
       '@nexgent/workspace':
         specifier: workspace:*
         version: link:../../packages/workspace
+    devDependencies:
+      '@nexgent/test-support':
+        specifier: workspace:*
+        version: link:../../packages/test-support
 
   packages/kernel:
     dependencies:
@@ -47,26 +51,46 @@ importers:
       yaml:
         specifier: ^2.8.1
         version: 2.9.1
+    devDependencies:
+      '@nexgent/test-support':
+        specifier: workspace:*
+        version: link:../test-support
 
   packages/llm:
     dependencies:
       '@nexgent/kernel':
         specifier: workspace:*
         version: link:../kernel
+    devDependencies:
+      '@nexgent/test-support':
+        specifier: workspace:*
+        version: link:../test-support
 
   packages/session:
     dependencies:
       '@nexgent/kernel':
         specifier: workspace:*
         version: link:../kernel
+    devDependencies:
+      '@nexgent/test-support':
+        specifier: workspace:*
+        version: link:../test-support
 
-  packages/test-support: {}
+  packages/test-support:
+    dependencies:
+      '@nexgent/kernel':
+        specifier: workspace:*
+        version: link:../kernel
 
   packages/workspace:
     dependencies:
       '@nexgent/kernel':
         specifier: workspace:*
         version: link:../kernel
+    devDependencies:
+      '@nexgent/test-support':
+        specifier: workspace:*
+        version: link:../test-support
 
 packages:
 
