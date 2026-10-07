@@ -28,5 +28,8 @@
     "@nexgent/llm": "workspace:*",
     "@nexgent/session": "workspace:*",
     "@nexgent/workspace": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/test-support": "workspace:*"
   }
 }
