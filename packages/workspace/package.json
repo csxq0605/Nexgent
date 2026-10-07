@@ -1,8 +1,8 @@
 {
-  "name": "@nexgent/kernel",
+  "name": "@nexgent/workspace",
   "version": "0.0.0",
   "private": true,
-  "description": "Nexgent runtime kernel: Cordis application context, plugin and service conventions",
+  "description": "工作目录与 .nexgent/ 数据目录、文件与 shell 工具、子进程与沙箱策略。",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,16 +12,12 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -b tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "4.0.4",
-    "@deepseek-ai/schemastery": "3.18.4",
-    "yaml": "^2.8.1"
+    "@nexgent/kernel": "workspace:*"
   }
 }

@@ -1,8 +1,8 @@
 {
-  "name": "@nexgent/kernel",
+  "name": "@nexgent/llm",
   "version": "0.0.0",
   "private": true,
-  "description": "Nexgent runtime kernel: Cordis application context, plugin and service conventions",
+  "description": "MiMo 单路由：OpenAI 兼容流式请求、工具调用解析、用量计量与请求账本。",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,16 +12,12 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -b tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "4.0.4",
-    "@deepseek-ai/schemastery": "3.18.4",
-    "yaml": "^2.8.1"
+    "@nexgent/kernel": "workspace:*"
   }
 }

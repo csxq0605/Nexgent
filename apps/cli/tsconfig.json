@@ -5,5 +5,21 @@
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../../packages/kernel"
+    },
+    {
+      "path": "../../packages/llm"
+    },
+    {
+      "path": "../../packages/session"
+    },
+    {
+      "path": "../../packages/workspace"
+    }
+  ]
 }
