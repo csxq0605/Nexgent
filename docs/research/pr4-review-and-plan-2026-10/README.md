@@ -137,9 +137,9 @@ DSH 的接入方式按用户决定为**参考重写**：DSH 源码只作阅读�
 | 处理 | DSH 包组（源码 KB） | Nexgent 对应 |
 | --- | --- | --- |
 | **改写进 Nexgent（步骤 1）** | boot（383）、core（632）、llm（564）、session（749）、credentials（130）、storage（95）、workspace（58）、fs（254）、shell（208）、subprocess（245）、sandbox（161）、util（154） | `@nexgent/kernel`（profile 装载、agent loop、scope、tools、system prompt）、`@nexgent/llm`、`@nexgent/session`、`@nexgent/workspace`（fs、shell、sandbox、subprocess）。目标约为 DSH 对应代码的三分之一 |
-| **改写进 Nexgent（步骤 2）** | context（170）、compaction（128）、deliverables（62）、goal（103）、jobs（94）、skill（111）、attachment（87）、feedback（27）、interaction（90）、hooks（77）、api（787）、host（165）、sdk（79）、client 中的 chat / conversation / session / deliverables / approval / workspace / settings-models（client 组共 5,108，只取这些） | `@nexgent/context`、`@nexgent/tasking`（goal、jobs、deliverables、feedback）、`@nexgent/skill`、`@nexgent/remote`（host ↔ client 协议）、`apps/web`（精简界面） |
+| **改写进 Nexgent（步骤 2）** | context（170）、compaction（128）、deliverables（62）、goal（103）、jobs（94）、skill（111）、attachment（87）、feedback（27）、interaction（90）、hooks（77）、sdk（79，只取进程内 API 形状） | `@nexgent/context`、`@nexgent/tasking`（goal、jobs、deliverables、feedback）、`@nexgent/skill`、`@nexgent/sdk`（进程内 TS API）、`apps/cli` 的交互式终端会话 |
 | **改写进 Nexgent（步骤 3）** | subagent（438，只要 fresh / fork）、workflow（187）、ptc-runtime（97）、preset（51）、experimental/agent-team + tool-agent-team、mcp（60）、web（132） | `@nexgent/subagent`、`@nexgent/workflow`（含 PR #4 的 architecture 编译器）、`@nexgent/ptc`、`@nexgent/team`、`@nexgent/preset`、`@nexgent/mcp` |
-| **不要** | desktop、acp、computer-use、browser-use、voice、deepseek-account、identity、telemetry-otel、lsp、ssh、terminal、tmux、spill、webhook、document、typert、test-support、website、snapshots、`.agents` 笔记、i18n 文档、Claude Code / Codex subagent provider | 需要时再从参考库改写 |
+| **不要** | client（整个 Web 界面）、api、host、desktop、acp、computer-use、browser-use、voice、deepseek-account、identity、telemetry-otel、lsp、ssh、terminal、tmux、spill、webhook、document、typert、test-support、website、snapshots、`.agents` 笔记、i18n 文档、Claude Code / Codex subagent provider | 需要时再从参考库改写；不做 Web 界面 |
 
 **分支与合并。** 新建集成分支 `nexgent-app`（从 `main` 起）；PR #4 分支保留为参考与移植来源，不再提交。每一步以小 PR 合入集成分支；步骤 2 验收通过后合入 `main`，旧 PyQt 产品归档为 `archive/harness-gui`；Python 宿主在步骤 3 删除并归档为 `archive/python-host`。
 
@@ -151,7 +151,7 @@ DSH 的接入方式按用户决定为**参考重写**：DSH 源码只作阅读�
 
 ### 4.1 步骤 1：建立基于 DSH 的 Nexgent 主应用
 
-参考实现：`app-boot`（profile 组合与 patch）、`agent-loop`、`scope`、`tools`、`system-prompt`、`llm-pi-ai` + `token-meter`、`session-persistence-jsonl` + `session-checkpoint-policy` + `session-projection`、`credentials-local`、`fs` / `shell` / `subprocess` / `sandbox`、`bundle/headless` 与 `bundle/web-app`。
+参考实现：`app-boot`（profile 组合与 patch）、`agent-loop`、`scope`、`tools`、`system-prompt`、`llm-pi-ai` + `token-meter`、`session-persistence-jsonl` + `session-checkpoint-policy` + `session-projection`、`credentials-local`、`fs` / `shell` / `subprocess` / `sandbox`、`bundle/headless`。
 
 PR #4 可移植：`cordis.patch.yml` 的产品默认值（MiMo 路由、thinking 关闭、系统提示）、`execution-ledger.ts`（旁路请求账本）、`architecture-activation.ts`（激活记录）；PowerShell 启动器的参数设计。
 
@@ -160,7 +160,7 @@ PR #4 可移植：`cordis.patch.yml` 的产品默认值（MiMo 路由、thinking
 2. `@nexgent/llm`：单一 OpenAI 兼容路由（MiMo），流式与工具调用，用量计量，`maxRetries: 0` 并把每次请求写入账本；思考关闭。
 3. `@nexgent/session`：JSONL 追加写 + checkpoint，启动时按会话 ID 恢复；只定义一种格式（v1），不做历史迁移。
 4. `@nexgent/workspace`：工作目录、文件读写与搜索、`str_replace` 编辑、bash / pwsh 工具、子进程与沙箱策略（路径白名单、写入限制）。
-5. `apps/cli`：`nexgent web --project <dir>`、`nexgent run --project <dir> --task "..."`、`nexgent resume <session>`；项目数据目录 `.nexgent/`（`sessions/ materials/ outputs/ capabilities/ ledgers/`），密钥从 `NEXGENT_API_KEY` 或本机凭证文件读取。
+5. `apps/cli`：`nexgent --project <dir>`（交互式终端会话）、`nexgent run --project <dir> --task "..."`（一次性执行）、`nexgent resume <session>`；项目数据目录 `.nexgent/`（`sessions/ materials/ outputs/ capabilities/ ledgers/`），密钥从 `NEXGENT_API_KEY` 或本机凭证文件读取。
 6. 验收脚本 `scripts/accept-step1.mjs`：脚本化 provider 下启动 → 完成一次写文件任务 → 杀进程 → 新进程 `resume` 续聊；Linux 与 Windows CI 各跑一次。真实 MiMo 手动各跑一次并留摘要。
 
 验收：通过 Nexgent 入口启动，完成真实任务并保存原生会话；不存在 Python 执行路径；两种操作系统通过。
@@ -169,7 +169,7 @@ PR #4 可移植：`cordis.patch.yml` 的产品默认值（MiMo 路由、thinking
 
 ### 4.2 步骤 2：接通完整的日常任务体验
 
-参考实现：`workspace`、`context/file-reference` 与 `agent-instructions`、`compaction-basic`、`deliverables`（`present` 工具 + 每轮文件变更）、`feedback`、`goal`、`jobs`、`skill` + `skill-office`、`api/remotes` + `gateway`、`host`、`sdk`、client 中的 `ui-chat / ui-conversation / ui-session / ui-deliverables / ui-approval / ui-workspace`。DSH 的 `attachment` 包只支持图片，不作为资料流程的参考。
+参考实现：`workspace`、`context/file-reference` 与 `agent-instructions`、`compaction-basic`、`deliverables`（`present` 工具 + 每轮文件变更）、`feedback`、`goal`、`jobs`、`skill` + `skill-office`、`sdk`（进程内 API 形状）。不做 Web 界面，DSH 的 client / api / host 组不作参考；`attachment` 包只支持图片，不作为资料流程的参考。
 
 要做的工作：
 1. 项目模型：项目 = 工作目录 + `.nexgent/`；最近项目、新建、切换。
@@ -178,11 +178,11 @@ PR #4 可移植：`cordis.patch.yml` 的产品默认值（MiMo 路由、thinking
 4. 反馈修改：对成果提出修改即新一轮；评分与评语记录到会话并关联成果版本（步骤 5 的输入）。
 5. 停止与继续：取消当前轮保留已流出文本；跨重启用持久目标（参考 `goal`）+ 会话恢复；验收包含轮中 `kill -9` 后恢复。
 6. 上下文：工作区说明文件注入、长对话压缩（参考 `compaction-basic`，只做基本摘要）。
-7. 远程层与界面：`@nexgent/remote` 定义 host ↔ client 的类型化调用与事件流（参考 `api` + `sdk`，去掉与 Nexgent 无关的能力）；`apps/web` 用 Vite + React 实现六个视图：项目、对话、资料、成果、改进（步骤 5 填充）、设置（模型与密钥）。CLI 与 SDK 走同一远程层。
+7. 界面与 SDK：主界面是 `apps/cli` 的交互式终端会话（流式输出、审批提示、`/materials`、`/deliverables`、`/improve`、`/settings` 等命令），不做 Web 界面；`@nexgent/sdk` 是进程内 TS API，CLI 直接调用它，不引入 host ↔ client 远程协议。
 
 验收脚本 `scripts/accept-step2.mjs`：提交资料 → 执行 → 成果文件存在且被 `present` → 提出修改 → 成果更新 → 杀进程 → 重启继续 → 会话、资料、成果全部可见；CI 两平台通过，真实 MiMo 手动一次。
 
-决策与风险：界面是第二大工作量。DSH client 组 5.1 MB 里 Nexgent 只需要约六个视图，但 DSH 的 UI 与其 remote 协议耦合紧，复制收益小，建议从空白 React 工程开始，只参考交互设计。工期 3–4 周。
+决策与风险：不做 Web 界面后，这一步的工作量集中在资料、成果、反馈与恢复的流程本身，工期 2–3 周。终端会话只需保证审批提示与成果展示可用；若以后需要图形界面，再在 `@nexgent/sdk` 之上加远程层。
 
 ### 4.3 步骤 3：迁移已有能力，补齐灵活协作
 
@@ -239,7 +239,7 @@ PR #4 可移植：`architecture-activation.ts`（预留槽位、独占发布、�
 2. 诊断：独立会话读取原会话、账本与反馈，输出结构化诊断——失败类型（沿用 MAST 的三类标签）、涉及的成员 / 工具 / 技能、按成员的成本与贡献。
 3. 提案：一次只提一个类型化候选（新增或修改技能、工具、上下文策略、协作方式之一），schema 校验，不写自由代码。
 4. 比较与采用：`capability_trial` 在回放集（反馈任务 + 若干不同的历史任务）上比较，走步骤 4 的门控。
-5. 界面：“改进”视图展示每个候选改了什么、验证结果、费用、是否采用、何时被后续任务使用；失败候选可查看原因。
+5. 界面：`nexgent improve list / show <id>` 与会话内 `/improve` 展示每个候选改了什么、验证结果、费用、是否采用、何时被后续任务使用；失败候选可查看原因。
 6. 用户不写评测配置：回放集与检查由宿主从项目历史自动构造；项目级只有“自动改进开 / 关”和预算上限两个设置。
 
 验收：从 Main 提出反馈 → 看到候选 → 看到门控结果 → 下一次任务使用新版本（或看到拒绝原因）；全程不改配置文件。
@@ -263,13 +263,13 @@ PR #4 可移植：`architecture-activation.ts`（预留槽位、独占发布、�
 | --- | --- | --- |
 | 0 横切（仓库骨架、CI、证据、reference 子模块） | 1 周 | 两平台 CI 绿；`reference-map.md` 建立 |
 | 1 主应用（kernel / llm / session / workspace 重写） | 4–6 周 | `accept-step1` 两平台通过；真实 MiMo 一次 |
-| 2 日常体验（remote 层 + 精简 Web UI） | 3–4 周 | `accept-step2` 通过；合入 `main` |
+| 2 日常体验（资料、成果、反馈、恢复、终端会话） | 2–3 周 | `accept-step2` 通过；合入 `main` |
 | 3 迁移与协作 | 3 周 | 四种形态各完成一次；Python 与 `runtime/` 删除；CI 绿 |
 | 4 能力版本 | 3 周 | 跨任务、跨进程实际调用 + 回滚 |
 | 5 反馈改进 | 2–3 周 | Main 内闭环，无手写配置 |
 | 6 递归与检验 | 3–4 周 | 可复现报告 |
 
-与 fork 方案相比，步骤 1–2 多出约 6–8 周，换来的是 Nexgent 对运行时的完整所有权、仓库体积与可评审性，以及不再受上游 preview 版本变动牵制。周数是范围估计；步骤 4–6 的真实模型实验需要提前约定预算与停止条件。
+与 fork 方案相比，步骤 1 多出约 4–5 周，换来的是 Nexgent 对运行时的完整所有权、仓库体积与可评审性，以及不再受上游 preview 版本变动牵制。周数是范围估计；步骤 4–6 的真实模型实验按族约定预算上限。
 
 ### 4.8 对 PR #4 的处置
 
@@ -280,19 +280,19 @@ PR #4 可移植：`architecture-activation.ts`（预留槽位、独占发布、�
 
 ### 4.9 仍需拍板
 
-已定：DSH 作为参考重写；六步顺序；默认模型 `mimo-v2.6-pro`。下列各项按建议执行即可，除非另有指示。
+已定：DSH 作为参考重写；六步顺序；默认模型 `mimo-v2.6-pro`；不做 Web 界面；真实模型实验只设预算上限、不设停止条件。下列各项按建议执行即可，除非另有指示。
 
 | # | 事项 | 建议 | 影响 |
 | --- | --- | --- | --- |
 | 1 | 集成分支与 `main`：步骤 2 验收后用集成分支替换 `main`，现有 PyQt Harness 归档 | 替换 | 仓库只描述一个产品 |
 | 2 | Windows 沙箱：步骤 1 先用路径策略，ACL 隔离后补 | 先路径策略 | 省 1–2 周，Windows 隔离强度暂弱于 DSH |
-| 3 | Web 界面：从空白 React 工程开始，只参考 DSH 交互 | 空白开始 | 步骤 2 约 3–4 周 |
+| 3 | 界面：已定不做 Web 界面；主界面为交互式终端会话 | 已定 | 步骤 2 约 2–3 周 |
 | 4 | 步骤 1 中期检查点的回退：kernel 超期时是否临时用 DSH npm 包做后端先打通步骤 2 | 允许作为备选，默认不用 | 保住步骤 2 进度 |
 | 5 | 插件包类候选：人审批一次后自动采用，还是每次审批 | 每次审批；技能与 PTC 函数自动采用 | 安全边界 |
 | 6 | 改进器与审核模型：仍用 `mimo-v2.6-pro` 关闭 thinking，还是允许开启 thinking 或更强模型 | 执行关闭 thinking；改进与审核允许开启 thinking | 步骤 5–6 的候选质量与费用 |
 | 7 | 自动改进触发：每累计 N 条反馈运行一次（N 默认 3），还是即时 | 累计触发，可切即时 | 步骤 5 费用 |
 | 8 | 步骤 6 的任务族：表格 / 数据 + 多文件代码，OpenFOAM 可选 | 前两族 | 评价协议 |
-| 9 | 真实模型预算：步骤 4–6 每轮实验的调用与 token 上限、停止条件 | 开工前按族约定 | 费用 |
+| 9 | 真实模型预算：步骤 4–6 每轮实验的调用与 token 上限（已定不设额外停止条件） | 开工前按族约定上限 | 费用 |
 | 10 | 旧数据：Python Episode、组织 SQLite、`.nexgent/native/` 不迁移 | 不迁移，只读导出 | 步骤 3 |
 | 11 | 多模型：步骤 1 只接 MiMo 一条路由，其他 OpenAI 兼容端点作为配置项 | 单路由 + 可配置端点 | `@nexgent/llm` 范围 |
 | 12 | Python SDK：步骤 2 只做 TS 远程层，Python 客户端延后 | 延后 | 范围 |
@@ -302,11 +302,11 @@ PR #4 可移植：`architecture-activation.ts`（预留槽位、独占发布、�
 | 事项 | 归属步骤 | 落地形式 |
 | --- | --- | --- |
 | 数据与文件格式规范：`.nexgent/` 各目录、会话 JSONL v1、账本记录、`CapabilityBundle` 清单、材料与成果元数据 | 0–1 | `docs/spec/data-formats.md` + 每种格式的 schema 与读写测试 |
-| 权限与审批模型：沙箱模式（只读 / 工作区写 / 完全访问）、工具审批、插件安装审批、每任务与每项目费用上限 | 1–4 | `docs/spec/permissions.md`，审批在 CLI 与 Web 共用一套交互 |
+| 权限与审批模型：沙箱模式（只读 / 工作区写 / 完全访问）、工具审批、插件安装审批、每任务与每项目费用上限 | 1–4 | `docs/spec/permissions.md`，审批在终端会话与一次性命令中共用一套交互 |
 | 测试策略：脚本化 provider 的仿真规范、故障注入（断网、超时、kill）、跨进程验收脚本的公共框架、真实模型手动验收的记录模板 | 0 | `packages/test-support`、`docs/validation/TEMPLATE.md` |
 | 安装与发布：`npx nexgent` / 全局安装、Node 版本范围、三平台安装说明、升级时的数据兼容 | 2 | `apps/cli` 的打包与发布流程、`docs/install.md` |
 | 日志与诊断：日志级别、账本与会话的查看命令、问题复现所需的最小导出包 | 1–2 | `nexgent export <session>`，日志文件约定 |
-| 模型与预算配置：模型切换、thinking 开关、重试策略、费用上限的产品设置 | 1–2 | 设置视图 + 项目配置文件 |
+| 模型与预算配置：模型切换、thinking 开关、重试策略、费用上限的产品设置 | 1–2 | `/settings` 命令 + 项目配置文件 |
 | 文档体系：README、架构文档、`reference-map.md`、各步验收记录、ADR 目录 | 0 | `docs/` 结构在步骤 0 定下，README 只描述已验收能力 |
 | 并行与分工：各包的依赖顺序、哪些可并行开发、子智能体分工边界与文件归属 | 0 | 步骤 1 开工前的任务拆分表 |
 | 回退方案：若 kernel 重写超期，是否临时以 DSH npm 包作为后端先打通步骤 2 | 1 | 在步骤 1 中期检查点决定 |
