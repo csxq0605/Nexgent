@@ -1,3 +1,10 @@
+## Nexgent 下一代（开发中）
+
+Nexgent 正在以 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 为只读参考、以 Cordis 为运行架构，重写为一个 TypeScript 独立应用（Electron 桌面应用 + CLI）；DSH 源码不进入仓库，只以固定提交的子模块供对照。
+计划与六步顺序见 [docs/research/pr4-review-and-plan-2026-10/README.md](docs/research/pr4-review-and-plan-2026-10/README.md)，文档索引见 [docs/README.md](docs/README.md)。
+接入方式、默认模型、界面形态等决策记录在 [docs/adr/0001-reference-rewrite.md](docs/adr/0001-reference-rewrite.md)；DSH 包的改写 / 重写 / 不要对照见 [docs/reference-map.md](docs/reference-map.md)。
+下文描述的 Python / PyQt 产品仍是当前发布版本，直到计划步骤 2 验收通过；此后它归档为 `archive/harness-gui`，本 README 只描述已验收的新应用能力。
+
 ![Nexgent — Agents in motion](nexgent/assets/brand/nexgent-title.png)
 
 Nexgent 是面向长周期科研代码与模拟任务的可追踪、自排查、自进化 Coding Harness。
