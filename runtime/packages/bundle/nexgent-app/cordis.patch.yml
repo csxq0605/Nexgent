@@ -1,4 +1,10 @@
 # Application-owned defaults. Credentials stay in the native credential service.
+- insert:
+    - id: nexgent-execution-ledger
+      name: '@nexgent/application'
+      config:
+        directory: !!js dshHomePath('execution-ledgers')
+
 - id: agent-default-model
   config:
     provider: mimo

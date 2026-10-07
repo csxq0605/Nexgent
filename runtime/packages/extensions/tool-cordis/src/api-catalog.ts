@@ -961,6 +961,23 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'executionLedger',
+    summary: 'Observe native streams without changing requests, responses, cancellation or tool permissions.',
+    description: 'Observe native streams without changing requests, responses, cancellation or tool permissions.',
+    methods: [
+      {
+        signature: 'readonly file: string',
+        description: 'One exclusive file per application composition, including restarts and reloads.',
+        parameters: [],
+      },
+      {
+        signature: 'writeFailures: number = 0',
+        description: 'Failed storage operations; any nonzero count invalidates complete-accounting claims.',
+        parameters: [],
+      },
+    ],
+  },
+  {
     key: 'fileReferences',
     summary: 'Host capability for cancellable file-reference discovery.',
     description: 'Host capability for cancellable file-reference discovery.',

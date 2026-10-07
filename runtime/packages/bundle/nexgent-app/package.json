@@ -21,8 +21,18 @@
   "dependencies": {
     "@deepseek-ai/dsh-base": "workspace:*",
     "@deepseek-ai/dsh-web-app": "workspace:*",
-    "@deepseek-ai/dsh-headless": "workspace:*"
+    "@deepseek-ai/dsh-headless": "workspace:*",
+    "@deepseek-ai/dsh-llm": "workspace:*",
+    "@deepseek-ai/schemastery": "workspace:~",
+    "@deepseek-ai/dsh-brand": "workspace:*"
   },
   "main": "lib/index.js",
-  "types": "lib/types/index.d.ts"
+  "types": "lib/types/index.d.ts",
+  "devDependencies": {
+    "@deepseek-ai/dsh-session": "workspace:*",
+    "@deepseek-ai/cordis": "workspace:~"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:~"
+  }
 }

@@ -56,3 +56,5 @@ cd ..
 图定义已保存在项目的 `.nexgent/native/architectures/`，新 Session 可通过 `architectureVersion` 复用。保存记录不代表采用；原生候选试用与发布、独立 selection/guard、后续任务自动复用采用版本和改进器自身进化尚未接入。旧 Python 中有效的门控、账本和反馈逻辑需要迁入原生服务；它们当前不保护原生会话。下一步在已有 Agent/subagent/workflow 机制和保存定义上实现候选试用、独立评估与版本采用，随后验证跨任务进化。
 
 2026-10-07 的[节点配置验证](validation/native-node-composition-20261007.json)进一步验证了实际人设模板、成员工具列表、被隐藏写工具的执行拒绝，以及新进程、新会话中的配置复用。`node scripts/verify-native-code-live.mjs --architecture` 使用真实 MiMo，通过带工具范围的实现成员生成 records.mjs、运行未改动的五项公开验收，再由只能读取的复核成员读取源代码、验收文件和实际产物。宿主验收读取原生压缩会话，关联成员身份、PowerShell 调用和真实测试结果；这不代表独立 selection/guard 或自动采用已经完成。
+
+2026-10-07 的原生请求记录随 Nexgent profile 启用，覆盖主智能体、图成员与标题等辅助调用。六进程验收将 56 条请求观察与 HTTP 端点收到的 56 次请求核对一致；真实 MiMo 代码图完成五项公开检查，18 次调用全部结算并留下关闭记录。三分钟预算的失败反例保留 8 次调用、7 次结算、1 次未知结束和缺失关闭记录，不计为成功。记录保留上报用量与缺失分桶，包含失败与提前结束；本地未签名观察不是账单或独立 guard。详情见[原生请求记录验证](validation/native-execution-ledger-20261007.json)。

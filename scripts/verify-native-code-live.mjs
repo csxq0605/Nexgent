@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
+import { readNativeExecutionLedgers } from './read-native-execution-ledger.mjs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -51,7 +52,8 @@ const child = spawn(process.execPath, [resolve(root, 'runtime/apps/cli/lib/bin.j
 let stdout = '', stderr = '', timedOut = false
 child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk })
 child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })
-const timer = setTimeout(() => { timedOut = true; child.kill() }, 180_000)
+const deadlineMs = graphMode ? 600_000 : 180_000
+const timer = setTimeout(() => { timedOut = true; child.kill() }, deadlineMs)
 const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve) }).finally(() => clearTimeout(timer))
 await writeFile(resolve(evidenceRoot, 'stdout.jsonl'), stdout)
 await writeFile(resolve(evidenceRoot, 'stderr.txt'), stderr)
@@ -109,10 +111,16 @@ assert.ok(source.includes('normalizeRecords'))
 await writeFile(resolve(evidenceRoot, 'records.mjs'), source)
 await writeFile(resolve(evidenceRoot, 'acceptance.test.mjs'), acceptance)
 await writeFile(resolve(evidenceRoot, 'tested-output.json'), await readFile(resolve(project, 'tested-output.json')))
+const executionLedgers = await readNativeExecutionLedgers(resolve(evidenceRoot, '.nexgent/native/execution-ledgers'))
+assert.ok(executionLedgers.every(ledger => ledger.observationsComplete), 'Native request observation is incomplete')
+assert.ok(!stderr.includes('execution ledger write failed'), 'Native request recording failed')
+for (const id of [sessionId, ...graphMode ? members.map(member => member.childId) : []]) {
+  assert.ok(executionLedgers.some(ledger => ledger.groups.some(group => group.sessionId === id)), `Missing native request observations for ${id}`)
+}
 const evidence = { passed: true, scope: graphMode ? 'actual MiMo graph code delivery, native per-child composition and persisted execution, public acceptance; no adoption or RSI claim' : 'actual MiMo source delivery, host-authored public acceptance checks and confined execution; no RSI claim',
   provider: 'mimo', model: 'mimo-v2.6-pro', policy: 'default workspace-write, normal caller-owned temporary project, tests execute in one confined Node process',
-  pid: child.pid, project, sessionId, testsPassed: 5,
+  pid: child.pid, project, sessionId, testsPassed: 5, deadlineMs,
   ...graphMode ? { architecture, architectureVersion: graphResult.architectureVersion, outputs: graphResult.outputs, members } : {},
-  output: [{ id: 'verified', value: 42 }], mainUsage: records.filter(record => record.phase === 'step_end').map(record => record.usage) }
+  output: [{ id: 'verified', value: 42 }], executionLedgers, mainUsage: records.filter(record => record.phase === 'step_end').map(record => record.usage) }
 await writeFile(resolve(evidenceRoot, 'evidence.json'), JSON.stringify(evidence, null, 2) + '\n')
 console.log(JSON.stringify(evidence))

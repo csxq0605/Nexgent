@@ -913,6 +913,14 @@ async prepare(request: DeepSeekLlmApiExtensionRequest): Promise<PreparedDeepSeek
 
 Source: [`packages/llm/deepseek-llm-api-extensions/src/index.ts`](../../packages/llm/deepseek-llm-api-extensions/src/index.ts)
 
+<a id="ctxexecutionledger--executionledger"></a>
+
+### `ctx.executionLedger` — `ExecutionLedger`
+
+Observe native streams without changing requests, responses, cancellation or tool permissions.
+
+Source: [`packages/bundle/nexgent-app/src/execution-ledger.ts`](../../packages/bundle/nexgent-app/src/execution-ledger.ts)
+
 <a id="ctxllm--llmruntime"></a>
 
 ### `ctx.llm` — `LlmRuntime`

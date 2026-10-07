@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { readNativeExecutionLedgers } from './read-native-execution-ledger.mjs'
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -177,8 +178,11 @@ try {
   const corrupted = await run('damaged-version', undefined, false, first.version, 'digest mismatch')
   assert.ok(!requests.slice(damagedStart).some(request => JSON.stringify(request.messages).includes('GRAPH_MEMBER_A')))
   assert.equal(fixtureFailure, undefined)
+  const executionLedgers = await readNativeExecutionLedgers(resolve(project, '.nexgent/native/execution-ledgers'))
+  assert.ok(executionLedgers.every(ledger => ledger.observationsComplete))
+  assert.equal(executionLedgers.reduce((sum, ledger) => sum + ledger.observedRequests, 0), requests.length)
   const evidence = { passed: true, scope: 'built application, actual member file effects and restart; only external HTTP model mocked',
-    policy: 'workspace-write task; read-only coordinator; per-child persona and tool scopes; forged hidden write denied; read-only task denial also verified', architecture, first, resumed, reused, missing, corrupted, denied, requestCount: requests.length }
+    policy: 'workspace-write task; read-only coordinator; per-child persona and tool scopes; forged hidden write denied; read-only task denial also verified', architecture, first, resumed, reused, missing, corrupted, denied, requestCount: requests.length, executionLedgers }
   await writeFile(resolve(project, 'evidence.json'), JSON.stringify(evidence, null, 2) + '\n')
   console.log(JSON.stringify(evidence))
 } finally {

@@ -100,6 +100,13 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'executionLedger',
+    pkg: 'nexgent-app',
+    title: 'Native application request observations',
+    mode: 'service',
+    note: 'The Nexgent application observes native LLM streams and owns request records and shutdown accounting. It records member and auxiliary requests, missing usage and storage failures; local unsigned observations are not independent acceptance or billing evidence.',
+  },
+  {
     key: 'hmr',
     pkg: 'hmr',
     title: 'Serialized module and configuration reloads',
