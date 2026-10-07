@@ -1,0 +1,9 @@
+{"format":1,"type":"request-start","id":"bab473a2-fcf9-499e-8b1e-2e469ba8c28d","provider":"mimo","model":"mimo-v2.6-pro","startedAt":1791383189037,"sessionId":"session-ec9b12a5-a6b5-4ce4-b483-4d1ec77885e3"}
+{"format":1,"type":"request-start","id":"779a3969-e96f-4ef2-bd0d-7bc8008ca801","provider":"mimo","model":"mimo-v2.6-pro","startedAt":1791383189043,"sessionId":"session-ec9b12a5-a6b5-4ce4-b483-4d1ec77885e3","purpose":"session-title"}
+{"format":1,"type":"request-end","id":"bab473a2-fcf9-499e-8b1e-2e469ba8c28d","endedAt":1791383189500,"durationMs":462.4144000000001,"termination":"exhausted","usageState":"reported","finishReason":"tool-calls","usage":{"inputTokens":11,"outputTokens":3,"totalTokens":14}}
+{"format":1,"type":"request-end","id":"779a3969-e96f-4ef2-bd0d-7bc8008ca801","endedAt":1791383189508,"durationMs":465.8200999999999,"termination":"exhausted","usageState":"reported","finishReason":"stop","usage":{"inputTokens":11,"outputTokens":3,"totalTokens":14}}
+{"format":1,"type":"request-start","id":"bb278e62-d285-4bf9-9ce0-28f574f24d1e","provider":"mimo","model":"mimo-v2.6-pro","startedAt":1791383190190,"sessionId":"d0c436b4-0f1c-4e9f-8ebc-2ffa64a83d16"}
+{"format":1,"type":"request-end","id":"bb278e62-d285-4bf9-9ce0-28f574f24d1e","endedAt":1791383190205,"durationMs":14.70299999999952,"termination":"exhausted","usageState":"reported","finishReason":"error","usage":{"inputTokens":0,"outputTokens":0,"totalTokens":0}}
+{"format":1,"type":"request-start","id":"de0e3643-1c34-478f-8959-909fe5eecbd3","provider":"mimo","model":"mimo-v2.6-pro","startedAt":1791383190360,"sessionId":"session-ec9b12a5-a6b5-4ce4-b483-4d1ec77885e3"}
+{"format":1,"type":"request-end","id":"de0e3643-1c34-478f-8959-909fe5eecbd3","endedAt":1791383190373,"durationMs":12.59940000000006,"termination":"exhausted","usageState":"reported","finishReason":"stop","usage":{"inputTokens":11,"outputTokens":3,"totalTokens":14}}
+{"format":1,"type":"ledger-close","writeFailures":0}

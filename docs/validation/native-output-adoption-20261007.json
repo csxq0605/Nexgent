@@ -1,0 +1,1386 @@
+{
+  "format": 1,
+  "date": "2026-10-07",
+  "mode": "native-output-only-keyless-adoption",
+  "sourceParentCommit": "841686a4d800c2d254a7d791251e92410aaeffe2",
+  "sources": [
+    {
+      "path": "runtime/packages/bundle/nexgent-app/src/architecture-trials.ts",
+      "sha256OfLfText": "e345355b5c832ed72117e0fb1db352fac688bd85e83687d6cdbf9bd734ac057d"
+    },
+    {
+      "path": "runtime/packages/bundle/nexgent-app/src/architecture-activation.ts",
+      "sha256OfLfText": "d294be79e526e42f1104a358886d0c2ceff9d99bf968b4e011ce5bd925218f48"
+    },
+    {
+      "path": "scripts/test-native-architecture-adoption.mjs",
+      "sha256OfLfText": "1543e4265dbd2c856fb09c30c565d47ac1cbbdf398b128fd161bdc328848662e"
+    }
+  ],
+  "behavior": {
+    "strictSelectionImprovement": true,
+    "disjointFrozenGuard": true,
+    "reservedCasesExcludedFromExploratoryTool": true,
+    "exclusiveCandidateReservation": true,
+    "persistentCandidateBudget": 3,
+    "parallelAdoptionsCommitted": 1,
+    "automaticVersionResolutionInFreshProcesses": true,
+    "compiledApprovalChecked": true,
+    "globalToolsDisabledAfterAdoption": true,
+    "executionFailureRolledBack": true,
+    "failedTaskReplayed": false,
+    "repeatedCandidateResampled": false,
+    "ordinaryFeedbackCandidateGeneration": false,
+    "normalTaskQualityScoring": false,
+    "generalRsiClaimed": false
+  },
+  "frozen": {
+    "selection": {
+      "id": "selection",
+      "description": "Frozen output selection",
+      "baseline": {
+        "nodes": [
+          {
+            "id": "answer",
+            "role": "solver",
+            "prompt": "ADOPTION_MEMBER_BASELINE: Double input.number and report the value.",
+            "dependencies": [],
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "toolFilter": {
+              "allow": [
+                "write"
+              ]
+            },
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            }
+          }
+        ]
+      },
+      "cases": [
+        {
+          "id": "select-3",
+          "input": {
+            "number": 3
+          },
+          "outputNode": "answer",
+          "expected": {
+            "value": 6
+          }
+        },
+        {
+          "id": "select-5",
+          "input": {
+            "number": 5
+          },
+          "outputNode": "answer",
+          "expected": {
+            "value": 10
+          }
+        }
+      ]
+    },
+    "guard": {
+      "id": "guard",
+      "description": "Independent output guard",
+      "baseline": {
+        "nodes": [
+          {
+            "id": "answer",
+            "role": "solver",
+            "prompt": "ADOPTION_MEMBER_BASELINE: Double input.number and report the value.",
+            "dependencies": [],
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "toolFilter": {
+              "allow": [
+                "write"
+              ]
+            },
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "value": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            }
+          }
+        ]
+      },
+      "cases": [
+        {
+          "id": "guard-7",
+          "input": {
+            "number": 7
+          },
+          "outputNode": "answer",
+          "expected": {
+            "value": 14
+          }
+        }
+      ]
+    },
+    "policy": {
+      "id": "double",
+      "description": "Double structured numbers",
+      "selectionPlanId": "selection",
+      "guardPlanId": "guard",
+      "maxCandidates": 3
+    }
+  },
+  "fixture": {
+    "caseDeadlineMs": 15000,
+    "processDeadlineMs": 180000,
+    "maxEndpointRequests": 100,
+    "mockScope": "External HTTP model responses only. Native app profile, PTC workers, subagents, tools, Sessions and storage are actual."
+  },
+  "native": {
+    "project": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-w1NYaG",
+    "processes": 7,
+    "endpointRequests": 52,
+    "observedRequests": 52,
+    "trialMembersMappedToLedgers": 18,
+    "normalTaskMembersMappedToLedgers": 3,
+    "runs": [
+      {
+        "mode": "GUARD_BAD",
+        "pid": 18100,
+        "sessionId": "session-ec450dbf-b884-4d33-9cfa-9a72055cd272",
+        "result": {
+          "format": 1,
+          "policyId": "double",
+          "policyDigest": "cf272c162b4ac66506650f412b91ca15a558ace7cc2f362ec56d074973dc6155",
+          "candidateVersion": "339a6b31a61f04dcb9a7c3e9ccee51bc83ff758a133263525c71f841629e5ff5",
+          "selection": {
+            "trialId": "152e436c-644a-4cb6-b69b-fc1ed2a7231d",
+            "mode": "output-only",
+            "planId": "selection",
+            "planDigest": "33bc0ac59099ca00d02c1fff147fdb9c81df20cdd3386d77221a0c1fd79f9d9c",
+            "baselineVersion": "03316bee5a98f9d3fd3b3abc07b211f54130f966cf1bc4f61677dcde754b2ecc",
+            "candidateVersion": "339a6b31a61f04dcb9a7c3e9ccee51bc83ff758a133263525c71f841629e5ff5",
+            "status": "pass",
+            "baselinePassed": 0,
+            "candidatePassed": 2,
+            "casesPerArm": 2,
+            "adopted": false,
+            "results": [
+              {
+                "arm": "baseline",
+                "caseId": "select-3",
+                "status": "fail",
+                "runId": "25f06b95-58ce-4dab-adf6-e151083d148a",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "candidate",
+                "caseId": "select-3",
+                "status": "pass",
+                "runId": "b105c10d-b99e-4e64-9b49-3f86d21d5214",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "baseline",
+                "caseId": "select-5",
+                "status": "fail",
+                "runId": "86b3b8fb-d5dd-402c-b8f5-ab56c42df4bf",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "candidate",
+                "caseId": "select-5",
+                "status": "pass",
+                "runId": "aff1f613-41b1-410e-a504-b72909a362a2",
+                "agentsStarted": 1
+              }
+            ]
+          },
+          "guard": {
+            "trialId": "085e11ce-6363-4af3-ab8e-4208a557d0ea",
+            "mode": "output-only",
+            "planId": "guard",
+            "planDigest": "ea52e82bd169fbe390d9d144f7f26eb65154ec328d05840d43b7bde2aaade81d",
+            "baselineVersion": "03316bee5a98f9d3fd3b3abc07b211f54130f966cf1bc4f61677dcde754b2ecc",
+            "candidateVersion": "339a6b31a61f04dcb9a7c3e9ccee51bc83ff758a133263525c71f841629e5ff5",
+            "status": "fail",
+            "baselinePassed": 0,
+            "candidatePassed": 0,
+            "casesPerArm": 1,
+            "adopted": false,
+            "results": [
+              {
+                "arm": "baseline",
+                "caseId": "guard-7",
+                "status": "fail",
+                "runId": "5906498f-d503-45f5-a995-0ea71afde014",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "candidate",
+                "caseId": "guard-7",
+                "status": "fail",
+                "runId": "bffecd7c-ec59-4612-b0ce-21174c3880ae",
+                "agentsStarted": 1
+              }
+            ]
+          },
+          "adopted": false,
+          "activation": null,
+          "reason": "guard-not-passed"
+        },
+        "home": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-w1NYaG\\homes\\GUARD_BAD"
+      },
+      {
+        "mode": "RACE_SECOND",
+        "pid": 19740,
+        "sessionId": "session-d90ae8fb-0a46-4c94-86da-983bbe6e4646",
+        "result": {
+          "format": 1,
+          "policyId": "double",
+          "policyDigest": "cf272c162b4ac66506650f412b91ca15a558ace7cc2f362ec56d074973dc6155",
+          "candidateVersion": "2b4b274b9689106af022f307b7809dd901e1a29fb05aed08e0912dcc920bd073",
+          "selection": {
+            "trialId": "4cb64875-70b5-42fc-ad6e-513737330504",
+            "mode": "output-only",
+            "planId": "selection",
+            "planDigest": "33bc0ac59099ca00d02c1fff147fdb9c81df20cdd3386d77221a0c1fd79f9d9c",
+            "baselineVersion": "03316bee5a98f9d3fd3b3abc07b211f54130f966cf1bc4f61677dcde754b2ecc",
+            "candidateVersion": "2b4b274b9689106af022f307b7809dd901e1a29fb05aed08e0912dcc920bd073",
+            "status": "pass",
+            "baselinePassed": 0,
+            "candidatePassed": 2,
+            "casesPerArm": 2,
+            "adopted": false,
+            "results": [
+              {
+                "arm": "baseline",
+                "caseId": "select-3",
+                "status": "fail",
+                "runId": "1f6567e3-43ce-4f48-95d5-2e9de3787c93",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "candidate",
+                "caseId": "select-3",
+                "status": "pass",
+                "runId": "95ce9276-7409-4c62-8b2f-a99d46ef2358",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "baseline",
+                "caseId": "select-5",
+                "status": "fail",
+                "runId": "b62f0b4b-148b-4321-86b2-39028ccf8b0a",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "candidate",
+                "caseId": "select-5",
+                "status": "pass",
+                "runId": "cc770f17-02e9-4bc2-973d-b0001dcffa2f",
+                "agentsStarted": 1
+              }
+            ]
+          },
+          "guard": {
+            "trialId": "faae4e64-d3a9-43b3-bd52-8b9d3d8b908a",
+            "mode": "output-only",
+            "planId": "guard",
+            "planDigest": "ea52e82bd169fbe390d9d144f7f26eb65154ec328d05840d43b7bde2aaade81d",
+            "baselineVersion": "03316bee5a98f9d3fd3b3abc07b211f54130f966cf1bc4f61677dcde754b2ecc",
+            "candidateVersion": "2b4b274b9689106af022f307b7809dd901e1a29fb05aed08e0912dcc920bd073",
+            "status": "pass",
+            "baselinePassed": 0,
+            "candidatePassed": 1,
+            "casesPerArm": 1,
+            "adopted": false,
+            "results": [
+              {
+                "arm": "baseline",
+                "caseId": "guard-7",
+                "status": "fail",
+                "runId": "35ba6fd4-6baa-4e02-8761-47be9ca13ca4",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "candidate",
+                "caseId": "guard-7",
+                "status": "pass",
+                "runId": "6200a942-80ce-45f3-a90a-63a5f55321e6",
+                "agentsStarted": 1
+              }
+            ]
+          },
+          "adopted": true,
+          "activation": {
+            "revision": 1,
+            "version": "2b4b274b9689106af022f307b7809dd901e1a29fb05aed08e0912dcc920bd073",
+            "digest": "b4af85e1beadc8e317bb97e306fcf9153911809c9156e184fcea5a1084d1b16a",
+            "compiledDigest": "0e477470a021394a75a632e7850fd27854a36540fda0554b979ba97a900b7690"
+          },
+          "reason": "accepted"
+        },
+        "home": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-w1NYaG\\homes\\RACE_SECOND"
+      },
+      {
+        "mode": "RACE_FIRST",
+        "pid": 35080,
+        "sessionId": "session-ed25a719-a2c2-418a-831f-beae3b193894",
+        "result": {
+          "format": 1,
+          "policyId": "double",
+          "policyDigest": "cf272c162b4ac66506650f412b91ca15a558ace7cc2f362ec56d074973dc6155",
+          "candidateVersion": "2a8f2086c52ce8166f4b2c596288790ac5729d16afcf41445588ce8def1625f8",
+          "selection": {
+            "trialId": "58e9645f-6fb8-411c-87eb-6530386d2199",
+            "mode": "output-only",
+            "planId": "selection",
+            "planDigest": "33bc0ac59099ca00d02c1fff147fdb9c81df20cdd3386d77221a0c1fd79f9d9c",
+            "baselineVersion": "03316bee5a98f9d3fd3b3abc07b211f54130f966cf1bc4f61677dcde754b2ecc",
+            "candidateVersion": "2a8f2086c52ce8166f4b2c596288790ac5729d16afcf41445588ce8def1625f8",
+            "status": "pass",
+            "baselinePassed": 0,
+            "candidatePassed": 2,
+            "casesPerArm": 2,
+            "adopted": false,
+            "results": [
+              {
+                "arm": "baseline",
+                "caseId": "select-3",
+                "status": "fail",
+                "runId": "8fe4395d-8e75-4534-b01c-9169bb4b09b0",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "candidate",
+                "caseId": "select-3",
+                "status": "pass",
+                "runId": "8bdebadc-6059-451a-ad96-6ca130558005",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "baseline",
+                "caseId": "select-5",
+                "status": "fail",
+                "runId": "6f5b6337-177c-429d-b4eb-baba520c2023",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "candidate",
+                "caseId": "select-5",
+                "status": "pass",
+                "runId": "893acc30-26e5-4fe0-8cdd-43e786828ad1",
+                "agentsStarted": 1
+              }
+            ]
+          },
+          "guard": {
+            "trialId": "57895f17-a459-462e-b09d-3042e33dc554",
+            "mode": "output-only",
+            "planId": "guard",
+            "planDigest": "ea52e82bd169fbe390d9d144f7f26eb65154ec328d05840d43b7bde2aaade81d",
+            "baselineVersion": "03316bee5a98f9d3fd3b3abc07b211f54130f966cf1bc4f61677dcde754b2ecc",
+            "candidateVersion": "2a8f2086c52ce8166f4b2c596288790ac5729d16afcf41445588ce8def1625f8",
+            "status": "pass",
+            "baselinePassed": 0,
+            "candidatePassed": 1,
+            "casesPerArm": 1,
+            "adopted": false,
+            "results": [
+              {
+                "arm": "baseline",
+                "caseId": "guard-7",
+                "status": "fail",
+                "runId": "81374787-859b-4a09-aeab-af6e4ab981ac",
+                "agentsStarted": 1
+              },
+              {
+                "arm": "candidate",
+                "caseId": "guard-7",
+                "status": "pass",
+                "runId": "90c4956b-0050-4186-860a-7bee31900300",
+                "agentsStarted": 1
+              }
+            ]
+          },
+          "adopted": false,
+          "activation": null,
+          "reason": "activation-conflict"
+        },
+        "home": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-w1NYaG\\homes\\RACE_FIRST"
+      },
+      {
+        "mode": "REUSE",
+        "pid": 47148,
+        "sessionId": "session-9414e077-e554-493b-befa-6336149baf6f",
+        "result": {
+          "policyId": "double",
+          "policyDigest": "cf272c162b4ac66506650f412b91ca15a558ace7cc2f362ec56d074973dc6155",
+          "mode": "output-only",
+          "architectureVersion": "2b4b274b9689106af022f307b7809dd901e1a29fb05aed08e0912dcc920bd073",
+          "activationRevision": 1,
+          "compiledDigest": "0e477470a021394a75a632e7850fd27854a36540fda0554b979ba97a900b7690",
+          "parentSession": "session-9414e077-e554-493b-befa-6336149baf6f",
+          "executionLedger": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-w1NYaG\\homes\\REUSE\\execution-ledgers\\b1b8ce25-3d07-40b7-9455-e70791396680.jsonl",
+          "runId": "8b6d84b5-a61d-4677-bb1c-224a0d27894a",
+          "members": [
+            {
+              "childId": "0ef2a2e4-624e-4a68-a499-94a1b5923e10",
+              "label": "answer"
+            }
+          ],
+          "status": "completed",
+          "output": {
+            "value": 22
+          },
+          "rolledBack": false,
+          "rollback": null
+        },
+        "home": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-w1NYaG\\homes\\REUSE"
+      },
+      {
+        "mode": "FAILURE",
+        "pid": 41844,
+        "sessionId": "session-ec9b12a5-a6b5-4ce4-b483-4d1ec77885e3",
+        "result": {
+          "policyId": "double",
+          "policyDigest": "cf272c162b4ac66506650f412b91ca15a558ace7cc2f362ec56d074973dc6155",
+          "mode": "output-only",
+          "architectureVersion": "2b4b274b9689106af022f307b7809dd901e1a29fb05aed08e0912dcc920bd073",
+          "activationRevision": 1,
+          "compiledDigest": "0e477470a021394a75a632e7850fd27854a36540fda0554b979ba97a900b7690",
+          "parentSession": "session-ec9b12a5-a6b5-4ce4-b483-4d1ec77885e3",
+          "executionLedger": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-w1NYaG\\homes\\FAILURE\\execution-ledgers\\439cf3d3-a076-4c48-981d-ebbb8e12028a.jsonl",
+          "runId": "36eab3f0-88c4-45cc-bb5a-6438723e4e0e",
+          "members": [
+            {
+              "childId": "d0c436b4-0f1c-4e9f-8ebc-2ffa64a83d16",
+              "label": "answer"
+            }
+          ],
+          "status": "unknown",
+          "output": null,
+          "rolledBack": true,
+          "rollback": {
+            "revision": 2,
+            "version": "03316bee5a98f9d3fd3b3abc07b211f54130f966cf1bc4f61677dcde754b2ecc",
+            "digest": "70692f693fb81b544eb2fc8351c8a0352cbad197ff138403e116997f0858f664",
+            "compiledDigest": "8f6425b144933e95094e504f85386f5948207b972d338bc7c7beea12f62c170a"
+          }
+        },
+        "home": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-w1NYaG\\homes\\FAILURE"
+      },
+      {
+        "mode": "AFTER_ROLLBACK",
+        "pid": 40864,
+        "sessionId": "session-d99b0c0b-dc3e-47b1-b628-4afa1538e58a",
+        "result": {
+          "policyId": "double",
+          "policyDigest": "cf272c162b4ac66506650f412b91ca15a558ace7cc2f362ec56d074973dc6155",
+          "mode": "output-only",
+          "architectureVersion": "03316bee5a98f9d3fd3b3abc07b211f54130f966cf1bc4f61677dcde754b2ecc",
+          "activationRevision": 2,
+          "compiledDigest": "8f6425b144933e95094e504f85386f5948207b972d338bc7c7beea12f62c170a",
+          "parentSession": "session-d99b0c0b-dc3e-47b1-b628-4afa1538e58a",
+          "executionLedger": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-w1NYaG\\homes\\AFTER_ROLLBACK\\execution-ledgers\\2982e83d-10c5-4e2d-af2f-cab22b61aa41.jsonl",
+          "runId": "086cf95f-587f-4aaf-9274-915aa87ac012",
+          "members": [
+            {
+              "childId": "e88a7249-2c8e-49d4-803a-f335d0281668",
+              "label": "answer"
+            }
+          ],
+          "status": "completed",
+          "output": {
+            "value": 0
+          },
+          "rolledBack": false,
+          "rollback": null
+        },
+        "home": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-w1NYaG\\homes\\AFTER_ROLLBACK"
+      },
+      {
+        "mode": "REPLAY",
+        "pid": 21084,
+        "sessionId": "session-5777e9ec-0951-495f-9d86-710c50d31f49",
+        "home": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-w1NYaG\\homes\\REPLAY"
+      }
+    ],
+    "revisions": [
+      {
+        "format": 1,
+        "revision": 1,
+        "previous": null,
+        "from": "03316bee5a98f9d3fd3b3abc07b211f54130f966cf1bc4f61677dcde754b2ecc",
+        "version": "2b4b274b9689106af022f307b7809dd901e1a29fb05aed08e0912dcc920bd073",
+        "type": "adopt",
+        "evidence": {
+          "policyId": "double",
+          "policyDigest": "cf272c162b4ac66506650f412b91ca15a558ace7cc2f362ec56d074973dc6155",
+          "mode": "output-only",
+          "selectionTrial": "4cb64875-70b5-42fc-ad6e-513737330504",
+          "guardTrial": "faae4e64-d3a9-43b3-bd52-8b9d3d8b908a"
+        },
+        "compiledDigest": "0e477470a021394a75a632e7850fd27854a36540fda0554b979ba97a900b7690",
+        "committedAt": 1791383178808
+      },
+      {
+        "format": 1,
+        "revision": 2,
+        "previous": "b4af85e1beadc8e317bb97e306fcf9153911809c9156e184fcea5a1084d1b16a",
+        "from": "2b4b274b9689106af022f307b7809dd901e1a29fb05aed08e0912dcc920bd073",
+        "version": "03316bee5a98f9d3fd3b3abc07b211f54130f966cf1bc4f61677dcde754b2ecc",
+        "type": "rollback",
+        "evidence": {
+          "policyId": "double",
+          "mode": "output-only",
+          "parentSession": "session-ec9b12a5-a6b5-4ce4-b483-4d1ec77885e3",
+          "runId": "36eab3f0-88c4-45cc-bb5a-6438723e4e0e",
+          "reason": "execution-unknown"
+        },
+        "compiledDigest": "8f6425b144933e95094e504f85386f5948207b972d338bc7c7beea12f62c170a",
+        "committedAt": 1791383190320
+      }
+    ],
+    "ledgers": [
+      {
+        "file": "76d236d5-3608-4449-b901-d43f629d845f.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 12,
+        "settledRequests": 12,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 12,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 10,
+          "stop": 2
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 132,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 36,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 168,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 0,
+            "missingReports": 12
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 12
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 12
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-ec450dbf-b884-4d33-9cfa-9a72055cd272",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-ec450dbf-b884-4d33-9cfa-9a72055cd272",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "eb86c3fd-debd-443e-b14c-f7429782904a",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "a6e0a92d-ccba-4ccf-9853-0018489aec00",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "9710c663-f04d-4241-be6f-d4222993af2b",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "14061b25-3faa-4053-89ac-7bc5e1712c7a",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "1b2ddaca-2c53-4d33-9bc5-9fb3ccf84ca8",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "6253d8df-af66-470d-8e7c-5cf5a935c4e9",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          }
+        ]
+      },
+      {
+        "file": "faaa6787-d786-43ae-be5b-fb16877c428d.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 12,
+        "settledRequests": 12,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 12,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 10,
+          "stop": 2
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 132,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 36,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 168,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 0,
+            "missingReports": 12
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 12
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 12
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-d90ae8fb-0a46-4c94-86da-983bbe6e4646",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-d90ae8fb-0a46-4c94-86da-983bbe6e4646",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "80e66f49-6ac9-4720-8db1-2d4839293724",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "0fcd8df0-e4b5-40fa-b5ed-a2b405377496",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "464afae0-7f05-4c93-8aa1-7aa00e758d0b",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "6d4a62d9-2a24-40ba-b41a-70c3b3cd49b2",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "56de28f5-49c6-4f7d-b168-6168f5fc9ec2",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "315c2d10-1d80-469c-acf4-a34a2fb76b75",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          }
+        ]
+      },
+      {
+        "file": "07e54e83-8671-47d6-907a-23fd3ba5da43.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 12,
+        "settledRequests": 12,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 12,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 10,
+          "stop": 2
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 132,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 36,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 168,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 0,
+            "missingReports": 12
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 12
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 12
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-ed25a719-a2c2-418a-831f-beae3b193894",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-ed25a719-a2c2-418a-831f-beae3b193894",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "b8c35016-8db0-4bc6-87f2-68faea7fac8e",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "0c3ebbeb-cb62-486c-b935-5d974b7d8840",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "6a6d42f6-bd4a-4ebf-b41e-96c8f3f18e07",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "fc07028d-a006-4322-9ccd-5f0e1eb52ba5",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "1424169a-2088-4204-9b25-b5b7af98b37d",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "5f11c9b9-c75e-4867-a345-940927fd8653",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          }
+        ]
+      },
+      {
+        "file": "b1b8ce25-3d07-40b7-9455-e70791396680.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 5,
+        "settledRequests": 5,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 5,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 3,
+          "stop": 2
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 55,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 15,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 70,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 0,
+            "missingReports": 5
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 5
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 5
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-9414e077-e554-493b-befa-6336149baf6f",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-9414e077-e554-493b-befa-6336149baf6f",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "0ef2a2e4-624e-4a68-a499-94a1b5923e10",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          }
+        ]
+      },
+      {
+        "file": "439cf3d3-a076-4c48-981d-ebbb8e12028a.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 4,
+        "settledRequests": 4,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 4,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 1,
+          "stop": 2,
+          "error": 1
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 33,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 9,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 42,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 0,
+            "missingReports": 4
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 4
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 4
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-ec9b12a5-a6b5-4ce4-b483-4d1ec77885e3",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-ec9b12a5-a6b5-4ce4-b483-4d1ec77885e3",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "d0c436b4-0f1c-4e9f-8ebc-2ffa64a83d16",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          }
+        ]
+      },
+      {
+        "file": "2982e83d-10c5-4e2d-af2f-cab22b61aa41.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 4,
+        "settledRequests": 4,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 4,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 2,
+          "stop": 2
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 44,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 12,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 56,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 0,
+            "missingReports": 4
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 4
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 4
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-d99b0c0b-dc3e-47b1-b628-4afa1538e58a",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-d99b0c0b-dc3e-47b1-b628-4afa1538e58a",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "e88a7249-2c8e-49d4-803a-f335d0281668",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          }
+        ]
+      },
+      {
+        "file": "7bed4054-6dbb-4ce0-ab52-c6bff7f8ce55.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 3,
+        "settledRequests": 3,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 3,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 1,
+          "stop": 2
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 33,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 9,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 42,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 0,
+            "missingReports": 3
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 3
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 3
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-5777e9ec-0951-495f-9d86-710c50d31f49",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-5777e9ec-0951-495f-9d86-710c50d31f49",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          }
+        ]
+      }
+    ]
+  },
+  "checks": [
+    {
+      "command": "vitest run architecture-trials.spec.ts architecture-activation.spec.ts --coverage (both affected sources)",
+      "tests": 32,
+      "files": 2,
+      "statements": "320/320",
+      "branches": "219/219",
+      "functions": "57/57",
+      "lines": "258/258",
+      "passed": true
+    },
+    {
+      "command": "tsc --build packages/bundle/nexgent-app/tsconfig.json; package-local tsdown",
+      "passed": true
+    },
+    {
+      "command": "tsc --project tsconfig.host.json --pretty false",
+      "passed": true
+    },
+    {
+      "command": "run-oxlint.ts --type-aware --deny-warnings (whole runtime)",
+      "passed": true
+    },
+    {
+      "command": "pnpm run test:docs",
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "command": "pnpm run doc-sync",
+      "passed": 42,
+      "failed": 0,
+      "skipped": 0,
+      "durationSeconds": 299.17
+    }
+  ],
+  "earlierNegativeRuns": [
+    {
+      "project": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-6lzBEq",
+      "outcome": "outer-fixture-timeout",
+      "processDeadlineMs": 90000,
+      "configuredCaseDeadlineMs": 180000,
+      "terminalDecisionPresent": false,
+      "note": "Native selection had three completed arms and an unfinished fourth start. The outer deadline was shorter than a case deadline. No adoption or success is claimed; the incomplete local receipts and reservation remain."
+    },
+    {
+      "project": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-adoption-PAg2ow",
+      "outcome": "artifact-writer-overlapped-running-probe",
+      "failingProcess": "AFTER_ROLLBACK",
+      "exitCode": 1,
+      "errorCode": "MODULE_NOT_FOUND",
+      "note": "doc-sync rebuilt and temporarily removed apps/cli/lib/bin.js during the probe. The verified run started only after both build-writing gates finished. This incomplete probe is not accepted evidence."
+    }
+  ],
+  "limitations": [
+    "Controlled responses establish mechanics, not real MiMo improvement or paid costs.",
+    "The earlier real MiMo output candidate remains unknown and was not adopted or retried.",
+    "Selection and guard are host-readable regression cases, reused within a frozen attempt budget, not sealed final holdout evidence.",
+    "Default profiles still have no task policies; ordinary-feedback generation and task routing are not delivered.",
+    "Output-only execution does not approve code/tool/file-writing capabilities or normal-task quality.",
+    "Further evolution against an active version requires a newly frozen comparison policy.",
+    "Local unsigned revisions cannot resist a host with write authority; directory-entry crash durability and clean installation are unverified.",
+    "Full real Sessions and verbose production logs remain local; captures here contain only synthetic definitions, trial/activation decisions and prompt-free native request records."
+  ],
+  "rawCaptures": [
+    {
+      "path": "docs/validation/native-output-adoption-20261007/activation/1.json",
+      "bytes": 564,
+      "sha256": "b4af85e1beadc8e317bb97e306fcf9153911809c9156e184fcea5a1084d1b16a"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/activation/2.json",
+      "bytes": 578,
+      "sha256": "70692f693fb81b544eb2fc8351c8a0352cbad197ff138403e116997f0858f664"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/attempts/2a8f2086c52ce8166f4b2c596288790ac5729d16afcf41445588ce8def1625f8.json",
+      "bytes": 118,
+      "sha256": "731e873147a97f764c8e4e95a46f59ecb87e64602e53fd3a960b24b5d176d09a"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/attempts/2a8f2086c52ce8166f4b2c596288790ac5729d16afcf41445588ce8def1625f8.result.json",
+      "bytes": 1889,
+      "sha256": "374aae257d372895997249bc35c5347a401f8a920ea0a964fd0ae1d0f500a55e"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/attempts/2b4b274b9689106af022f307b7809dd901e1a29fb05aed08e0912dcc920bd073.json",
+      "bytes": 118,
+      "sha256": "75db366661177dd98cb0e91d70c2159a43ca788fd18d15e3a1339c6027a4de7e"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/attempts/2b4b274b9689106af022f307b7809dd901e1a29fb05aed08e0912dcc920bd073.result.json",
+      "bytes": 2124,
+      "sha256": "9d5f3e835a625f479a7189d077bcee53008a8e5903a31505a407f0d3e5e0ecb5"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/attempts/339a6b31a61f04dcb9a7c3e9ccee51bc83ff758a133263525c71f841629e5ff5.json",
+      "bytes": 118,
+      "sha256": "646e736785e525488c676809ea0bc36d0fb153c31c51020b50ecf3bfb0b60af6"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/attempts/339a6b31a61f04dcb9a7c3e9ccee51bc83ff758a133263525c71f841629e5ff5.result.json",
+      "bytes": 1886,
+      "sha256": "245b9e428f6c3ac98511a919cac320b3b5ac40d31179fe34aed45e14697ba584"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/attempts/slots/1.json",
+      "bytes": 92,
+      "sha256": "d504300cceca8ee1855016ef2d74829abffbf5897ff4095080e5d5f3f7be7533"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/attempts/slots/2.json",
+      "bytes": 92,
+      "sha256": "c074f6f14a1212bebc1084b9610ed3d6859838e0c4559c9f103c77d14d952871"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/attempts/slots/3.json",
+      "bytes": 92,
+      "sha256": "35a38b29c442f6e70750b3e5d7584efc460bab4d4af3355b6d936d2766434e67"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/definitions/03316bee5a98f9d3fd3b3abc07b211f54130f966cf1bc4f61677dcde754b2ecc.json",
+      "bytes": 363,
+      "sha256": "64d390644e81495b0c0885bdfa91780d663efe8f8afac4566b5462b4267864d9"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/definitions/2a8f2086c52ce8166f4b2c596288790ac5729d16afcf41445588ce8def1625f8.json",
+      "bytes": 365,
+      "sha256": "239a39e91fcb3952bb42d02af74b0d15be1c4444e566daa5d6fa78ec8edb862e"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/definitions/2b4b274b9689106af022f307b7809dd901e1a29fb05aed08e0912dcc920bd073.json",
+      "bytes": 366,
+      "sha256": "6a75ca644130e37102ccad12c6e522f2d7f843995d3353c9dc421f78d6f468e1"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/definitions/339a6b31a61f04dcb9a7c3e9ccee51bc83ff758a133263525c71f841629e5ff5.json",
+      "bytes": 364,
+      "sha256": "e1c01df3a49a1dd8de5ac6ccbb7790754333d3c34a85af1ffc6252ebcc903618"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/ledgers/AFTER_ROLLBACK/2982e83d-10c5-4e2d-af2f-cab22b61aa41.jsonl",
+      "bytes": 1978,
+      "sha256": "db7ad3170618ab8777f2282a9eccffa619042ddf316817315bebc397a1920446"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/ledgers/FAILURE/439cf3d3-a076-4c48-981d-ebbb8e12028a.jsonl",
+      "bytes": 1968,
+      "sha256": "1c5c5d050a334709466b6533f017e70ce09900ddf6ffa2e57f88cd411aac66f9"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/ledgers/GUARD_BAD/76d236d5-3608-4449-b901-d43f629d845f.jsonl",
+      "bytes": 5747,
+      "sha256": "242678cb5c032524f384c907af60b6ae47aeb131554a1eb7b0402e7eabfa7bd4"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/ledgers/RACE_FIRST/07e54e83-8671-47d6-907a-23fd3ba5da43.jsonl",
+      "bytes": 5748,
+      "sha256": "520aea915f7c2a529a035fdd3f0abc374180b76faa1caafa710540d9d30b1fb0"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/ledgers/RACE_SECOND/faaa6787-d786-43ae-be5b-fb16877c428d.jsonl",
+      "bytes": 5736,
+      "sha256": "d390cd121289d3528386e264b017d23c69fbf06052eac57a38d7d7ca94d291b7"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/ledgers/REPLAY/7bed4054-6dbb-4ce0-ab52-c6bff7f8ce55.jsonl",
+      "bytes": 1496,
+      "sha256": "1ef4355d7287e64096616ffa0665d17b811b0ffed36b126b424918e608194195"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/ledgers/REUSE/b1b8ce25-3d07-40b7-9455-e70791396680.jsonl",
+      "bytes": 2446,
+      "sha256": "7e031d8ee13db9f9195ddf01f9b0326fe1b0a6dd5195a08257000167daded3a7"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/trials/GUARD_BAD/085e11ce-6363-4af3-ab8e-4208a557d0ea.jsonl",
+      "bytes": 3344,
+      "sha256": "8e05b98fcbbcd351f801b9482e66c3854de5afccedaa95ecb700b691254f743a"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/trials/GUARD_BAD/152e436c-644a-4cb6-b69b-fc1ed2a7231d.jsonl",
+      "bytes": 5518,
+      "sha256": "8e711b26970df192e5cabefd5859bb762c9513bbfdbe5c51ace6e1c34de4a6a6"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/trials/RACE_FIRST/57895f17-a459-462e-b09d-3042e33dc554.jsonl",
+      "bytes": 3346,
+      "sha256": "a1f0cad86a2f5ff72be0b13fc173c69162236e7d45404fed17ca68099e8efdf3"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/trials/RACE_FIRST/58e9645f-6fb8-411c-87eb-6530386d2199.jsonl",
+      "bytes": 5519,
+      "sha256": "ef8f8686fdea1264ca0f683e9c3dbc2474d51f3ac6e45eec5be064118b5ff118"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/trials/RACE_SECOND/4cb64875-70b5-42fc-ad6e-513737330504.jsonl",
+      "bytes": 5520,
+      "sha256": "a03f6d0058ee001a3dd86746caa05d0c4de2de09119ec481297ccf8b3147f636"
+    },
+    {
+      "path": "docs/validation/native-output-adoption-20261007/trials/RACE_SECOND/faae4e64-d3a9-43b3-bd52-8b9d3d8b908a.jsonl",
+      "bytes": 3347,
+      "sha256": "6c149a054e90012c44e95ac988bc90ecac8f7fea411c2cafacf14835699e2d71"
+    }
+  ]
+}
