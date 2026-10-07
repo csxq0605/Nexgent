@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { compileArchitecture, resolveWorkflowBody } from '../src/architecture.ts'
+import { compileArchitecture, prepareArchitecture, prepareOutputTrialArchitecture, resolveWorkflowBody } from '../src/architecture.ts'
 
 const worker = { id: 'worker', role: 'researcher', prompt: 'Find evidence', dependencies: [] }
 const reviewer = { id: 'reviewer', role: 'reviewer', prompt: 'Check evidence', dependencies: ['worker'] }
@@ -18,6 +18,20 @@ function parsePrompt(prompt: string): { task: string; dependencies: unknown[] } 
 }
 
 describe('native workflow architecture', () => {
+  it('retains the definition identity while a host output trial disables member global tools', async () => {
+    const graph = { nodes: [{ ...worker, toolFilter: { allow: ['write'] } }, reviewer] }
+    const ordinary = prepareArchitecture(graph)
+    const trial = prepareOutputTrialArchitecture(graph)
+    expect(trial.version).toBe(ordinary.version)
+    expect(trial.architecture).toEqual(ordinary.architecture)
+    const masks: unknown[] = []
+    await new AsyncFunction('agent', 'args', trial.script)(async (_prompt, options) => {
+      masks.push(options?.toolFilter)
+      return 'actual output'
+    }, {})
+    expect(masks).toEqual([{ allow: [] }, { allow: [] }])
+    expect(ordinary.script).not.toBe(trial.script)
+  })
   it('starts a dependant when its own input is ready while unrelated work remains active', async () => {
     const slow = Promise.withResolvers<string>()
     const calls: string[] = []

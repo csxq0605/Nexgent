@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/bundle/nexgent-app/README.md
-README.md: 022a141d0b794ec14fb39411517149c4e233812c
-README.zh.md: b301cfe68bf70b2162890a759d06fed62f817c24
+README.md: 50299c54ac6f9e8f29e2049da8fc19c3c1f3ff79
+README.zh.md: 9ceb5c03105e11ca745281585ebfa510781b8013

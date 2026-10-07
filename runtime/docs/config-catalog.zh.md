@@ -3782,7 +3782,7 @@ export interface Config {
 }
 ```
 
-来源： [`packages/workflow/tool-workflow/src/index.ts:47`](../packages/workflow/tool-workflow/src/index.ts)
+来源： [`packages/workflow/tool-workflow/src/index.ts:49`](../packages/workflow/tool-workflow/src/index.ts)
 
 <a id="deepseek-aidsh-tool-workspace-dependencies"></a>
 

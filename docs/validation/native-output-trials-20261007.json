@@ -1,0 +1,777 @@
+{
+  "format": 1,
+  "date": "2026-10-07",
+  "scope": "Native host-frozen paired output trials; no adoption, hidden holdout or RSI gain.",
+  "implementation": {
+    "application": "runtime/packages/bundle/nexgent-app/src/architecture-trials.ts",
+    "compiler": "runtime/packages/workflow/tool-workflow/src/architecture.ts",
+    "entry": "nexgent and nexgent-run profiles, @nexgent/application/trials",
+    "defaultPlans": "empty; host configuration required",
+    "executionMode": "output-only: replaces each member global-tool mask with empty allow list",
+    "criteria": "composition-time detached host JSON; exact actual-output comparison",
+    "unknowns": "execution, missing output, cancellation and cleanup never count as accepted output",
+    "journal": "exclusive synchronized per-trial JSONL; failed sync fails closed; incomplete suffix is not complete evidence",
+    "definitionIdentity": "definition digest plus separate execution mode and compiled-script digest; not approval",
+    "lifecycle": "each run disposed before case-end; unload cancels and drains active operations"
+  },
+  "validation": {
+    "owningTests": {
+      "files": 4,
+      "passed": 63,
+      "coverage": {
+        "statements": "214/214",
+        "branches": "137/137",
+        "functions": "45/45",
+        "lines": "158/158"
+      },
+      "log": "validation-workspace/native-output-trial-owning-verified.log"
+    },
+    "strictLint": "Owning scope and full strict lint passed; final type-only workflow-ID branding scoped lint passed.",
+    "hostTypes": "passed",
+    "build": "affected application and workflow artifacts built; new application subpath loaded in actual built profile",
+    "docSync": {
+      "initial": "39 passed / 3 failed / 0 skipped in 319.05s",
+      "initialLog": "validation-workspace/native-output-trial-doc-sync.log",
+      "repairs": [
+        "Regenerated event consumer table with nexgent-app workflow/agent-start listener; synchronized Chinese table.",
+        "Regenerated config catalog for source line 49; synchronized Chinese reference.",
+        "Restored bundle Model Experience structure and moved native trial details to implementation section."
+      ],
+      "formalLeaves": "verify-doc-graphs, verify-config-catalog and verify-package-readme-model-experience passed after repair.",
+      "translationPairing": "1103 pairs passed after repair.",
+      "aggregateRerun": false
+    },
+    "finalTypes": "Application type check passed after retaining the branded native WorkflowRun identity; emitted runtime behavior is unchanged."
+  },
+  "frozen": {
+    "source": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-trial-CWGjFW",
+    "runs": [
+      {
+        "mode": "GOOD",
+        "pid": 43480,
+        "status": "pass",
+        "version": "8116c866ce8b8a2cc271239a987b8b18a811322e513f74f5c4f88feca870ef89",
+        "sessionId": "session-8d085ed8-f099-47c3-9a71-dd6d7fdf3cdd"
+      },
+      {
+        "mode": "BAD",
+        "pid": 16196,
+        "status": "fail",
+        "version": "d4814dbdf92316ceeef584e9f13a7e6714727d8d28468537d22e9d0a514829e3",
+        "sessionId": "session-a44a1c44-0a4f-41bc-99f6-1aca704d4af1"
+      },
+      {
+        "mode": "ERROR",
+        "pid": 5448,
+        "status": "unknown",
+        "version": "a35a3aae9a9d95b4bd63a504ce6d105f466bc9a077c5aa17bcad9bd6b48fab01",
+        "sessionId": "session-27e12358-8836-4534-8c8a-5df78aa50749"
+      },
+      {
+        "mode": "SAVED",
+        "pid": 49032,
+        "status": "pass",
+        "version": "8116c866ce8b8a2cc271239a987b8b18a811322e513f74f5c4f88feca870ef89",
+        "sessionId": "session-5bca084d-4256-4d76-9a6f-a0a674356f4e"
+      }
+    ],
+    "verdicts": [
+      "pass",
+      "fail",
+      "unknown",
+      "pass"
+    ],
+    "requestsAtEndpoint": 30,
+    "nativeStreamObservations": 30,
+    "criteriaWriteDenied": true,
+    "savedVersionReuse": "new OS process and new Session",
+    "executionLedgers": [
+      {
+        "file": "1a03f203-59fa-4878-91e3-a276dbecac92.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 7,
+        "settledRequests": 7,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 7,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 5,
+          "stop": 2
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 77,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 21,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 98,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 0,
+            "missingReports": 7
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 7
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 7
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-8d085ed8-f099-47c3-9a71-dd6d7fdf3cdd",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-8d085ed8-f099-47c3-9a71-dd6d7fdf3cdd",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "96db4b43-310f-4741-b4b9-9bdb4a695e06",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "17071df0-6d38-4a52-adee-c19ec5235df3",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "dd0b6b56-78e5-42cd-a9b1-680019422ffa",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "f4c560c8-2082-42bd-828c-a425e65e3650",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          }
+        ]
+      },
+      {
+        "file": "1aa6ee6e-9b5e-4e5b-b633-0685e6d14262.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 9,
+        "settledRequests": 9,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 9,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 7,
+          "stop": 2
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 99,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 27,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 126,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 0,
+            "missingReports": 9
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 9
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 9
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-a44a1c44-0a4f-41bc-99f6-1aca704d4af1",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-a44a1c44-0a4f-41bc-99f6-1aca704d4af1",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "208a6063-7002-4a64-ab44-f4ac76d6719c",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "1034b697-d751-4a6e-b9e2-2daf17b3d15d",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "8ccbf8f6-3e32-4d62-940e-c4dbf589aba7",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "e7e1ba23-2cb4-4453-925d-fa09111d8683",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          }
+        ]
+      },
+      {
+        "file": "2befec52-8e9b-42f0-ae74-efddf0b6874a.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 7,
+        "settledRequests": 7,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 7,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 5,
+          "stop": 2
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 77,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 21,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 98,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 0,
+            "missingReports": 7
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 7
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 7
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-5bca084d-4256-4d76-9a6f-a0a674356f4e",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-5bca084d-4256-4d76-9a6f-a0a674356f4e",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "0e717d38-4fa0-42de-8e5d-7872f6b61d22",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "831c26a3-82b8-4b37-8cfc-e718ff3043d6",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "96cdd378-7da5-46e7-afcd-5d0f9cbec3d5",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "caf362ce-fcfe-4d37-8255-b19d350c1e43",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          }
+        ]
+      },
+      {
+        "file": "a0ec5bbd-3c35-4c71-bcbc-522574a781c0.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 7,
+        "settledRequests": 7,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 7,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 3,
+          "stop": 2,
+          "error": 2
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 55,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 15,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 70,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 0,
+            "missingReports": 7
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 7
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 7
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-27e12358-8836-4534-8c8a-5df78aa50749",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-27e12358-8836-4534-8c8a-5df78aa50749",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "00646f54-8ca9-4f8b-9639-7910b683ffe5",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "f068f2ab-80df-40e4-bea6-f1a00635f10d",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "92817473-ed5b-42e5-a038-6c06a7ab6ef0",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "ec901d25-268f-41fc-8cee-3c3df9b89afe",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          }
+        ]
+      }
+    ]
+  },
+  "live": {
+    "source": "E:\\PKU\\program\\2026\\Aug\\te\\NExgent-kernel-impl\\validation-workspace\\native-output-trial-pro-jXgtx3",
+    "provider": "mimo",
+    "model": "mimo-v2.6-pro",
+    "pidObservedInStderr": 28440,
+    "trial": {
+      "trialId": "5b5107da-6a55-4ddc-9803-dd6a731192fe",
+      "mode": "output-only",
+      "planId": "ordered-identities",
+      "planDigest": "adc2ad6359b7e4eec911ba969ca9b5795d062682e4239e43ebdb1d3ee73ab75a",
+      "baselineVersion": "1b170cdf2001678e226ed859d8484e64db3077bc328c7f70a7c17e8e56cbc755",
+      "candidateVersion": "6c7a0f71834b051eb397891386fdf73d36c51bc7473fd7c76ebc143f32211d0b",
+      "status": "unknown",
+      "baselinePassed": 2,
+      "candidatePassed": 1,
+      "casesPerArm": 2,
+      "adopted": false,
+      "results": [
+        {
+          "arm": "baseline",
+          "caseId": "duplicates",
+          "status": "pass",
+          "runId": "419445ae-1992-4fe8-a3d1-cb9dd20d1ff9",
+          "agentsStarted": 1
+        },
+        {
+          "arm": "candidate",
+          "caseId": "duplicates",
+          "status": "unknown",
+          "reason": "execution-error",
+          "runId": "2fa4a45f-e0bf-47aa-a15a-5e17e9e1d554",
+          "agentsStarted": 1
+        },
+        {
+          "arm": "baseline",
+          "caseId": "unicode",
+          "status": "pass",
+          "runId": "c4328960-c81f-4b17-afe5-757f79b0411f",
+          "agentsStarted": 1
+        },
+        {
+          "arm": "candidate",
+          "caseId": "unicode",
+          "status": "pass",
+          "runId": "a49534ec-5753-40c4-ae1c-d6ef28bd312b",
+          "agentsStarted": 1
+        }
+      ]
+    },
+    "nativeStreamObservations": 7,
+    "executionLedgers": [
+      {
+        "file": "5b08e774-0027-4310-ab21-c9187fed2a92.jsonl",
+        "scope": "native stream observations; no invoice, transport retry, evaluation, adoption or RSI claim",
+        "observedRequests": 7,
+        "settledRequests": 7,
+        "openRequests": 0,
+        "closed": true,
+        "writeFailures": 0,
+        "observationsComplete": true,
+        "inputOutputUsageComplete": true,
+        "coverage": {
+          "reported": 7,
+          "missing": 0,
+          "invalid": 0
+        },
+        "outcomes": {
+          "tool-calls": 4,
+          "stop": 3
+        },
+        "reportedTokens": {
+          "inputTokens": {
+            "reported": 11959,
+            "missingReports": 0
+          },
+          "outputTokens": {
+            "reported": 723,
+            "missingReports": 0
+          },
+          "totalTokens": {
+            "reported": 21258,
+            "missingReports": 0
+          },
+          "cacheReadTokens": {
+            "reported": 8576,
+            "missingReports": 5
+          },
+          "cacheWriteTokens": {
+            "reported": 0,
+            "missingReports": 7
+          },
+          "reasoningTokens": {
+            "reported": 0,
+            "missingReports": 7
+          }
+        },
+        "groups": [
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-efd04da6-8a18-4d9c-9377-c2210f28186a",
+            "purpose": "conversation",
+            "requests": 2,
+            "settled": 2
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "session-efd04da6-8a18-4d9c-9377-c2210f28186a",
+            "purpose": "session-title",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "95fc1535-f3ef-4fe3-a37b-e17a13019aed",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "7bd97f72-f8dd-4e30-a1af-e7c520ff379a",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "f5e0074f-8fea-4959-91b0-d92ef9af270a",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          },
+          {
+            "provider": "mimo",
+            "model": "mimo-v2.6-pro",
+            "sessionId": "f1ed8729-54d4-4778-9803-773197ba4c19",
+            "purpose": "conversation",
+            "requests": 1,
+            "settled": 1
+          }
+        ]
+      }
+    ],
+    "members": [
+      {
+        "format": 1,
+        "trialId": "5b5107da-6a55-4ddc-9803-dd6a731192fe",
+        "type": "member-start",
+        "arm": "baseline",
+        "caseId": "duplicates",
+        "runId": "419445ae-1992-4fe8-a3d1-cb9dd20d1ff9",
+        "childId": "95fc1535-f3ef-4fe3-a37b-e17a13019aed",
+        "label": "answer"
+      },
+      {
+        "format": 1,
+        "trialId": "5b5107da-6a55-4ddc-9803-dd6a731192fe",
+        "type": "member-start",
+        "arm": "candidate",
+        "caseId": "duplicates",
+        "runId": "2fa4a45f-e0bf-47aa-a15a-5e17e9e1d554",
+        "childId": "7bd97f72-f8dd-4e30-a1af-e7c520ff379a",
+        "label": "answer"
+      },
+      {
+        "format": 1,
+        "trialId": "5b5107da-6a55-4ddc-9803-dd6a731192fe",
+        "type": "member-start",
+        "arm": "baseline",
+        "caseId": "unicode",
+        "runId": "c4328960-c81f-4b17-afe5-757f79b0411f",
+        "childId": "f5e0074f-8fea-4959-91b0-d92ef9af270a",
+        "label": "answer"
+      },
+      {
+        "format": 1,
+        "trialId": "5b5107da-6a55-4ddc-9803-dd6a731192fe",
+        "type": "member-start",
+        "arm": "candidate",
+        "caseId": "unicode",
+        "runId": "a49534ec-5753-40c4-ae1c-d6ef28bd312b",
+        "childId": "f1ed8729-54d4-4778-9803-773197ba4c19",
+        "label": "answer"
+      }
+    ],
+    "failedCandidate": {
+      "childId": "7bd97f72-f8dd-4e30-a1af-e7c520ff379a",
+      "nativeTurnStopReason": "completed",
+      "structuredOutputCalls": 0,
+      "text": "{\"ids\": [\"b\", \"a\"], \"count\": 2}",
+      "hostStatus": "unknown",
+      "reason": "Native structured result absent; text was not parsed into an accepted output."
+    },
+    "validationHistory": "Initial live verifier expected all-pass and failed. Offline inspection verified the unknown outcome without another model run, modified answer, relaxed criterion or replacement sampling."
+  },
+  "captures": [
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/architecture-trials/2c7fa091-0fbc-419e-9195-91111aa08551.jsonl",
+      "sha256": "7579f5328d9cfe4b4bb8b64afda94fb2bc68e145c1341cc4a2e37f6929a81c13",
+      "bytes": 5461
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/architecture-trials/6cd6db02-57fb-4e0b-8b55-5fd4f5f1750b.jsonl",
+      "sha256": "2efe01f1ba494133c207addc34504226072a325c3fa183f3123de427701a90e6",
+      "bytes": 5460
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/architecture-trials/93932d56-57b4-444a-8fb4-ac91d913606c.jsonl",
+      "sha256": "5301695f43eec1d3d49efdd4f8d0cc7f8ee58e0bfa3a831b047c1f8d32a60755",
+      "bytes": 5166
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/architecture-trials/a83dde1a-2125-483e-b5e8-ec16dfeb2100.jsonl",
+      "sha256": "5476f7d4e70ccd7b1135a537abfcb8c7901b3fd77bcfdd042f657aa0f5b33ea7",
+      "bytes": 5461
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/execution-ledgers/1a03f203-59fa-4878-91e3-a276dbecac92.jsonl",
+      "sha256": "f73948706b110abc5312eb6bb4bf07fb67e0da47e3a308c9b5409f9e066c5e13",
+      "bytes": 3392
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/execution-ledgers/1aa6ee6e-9b5e-4e5b-b633-0685e6d14262.jsonl",
+      "sha256": "d63dbdf38728aac24407c87efb7b0f7f92bb88ada08e35bc070808bf00e111b6",
+      "bytes": 4332
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/execution-ledgers/2befec52-8e9b-42f0-ae74-efddf0b6874a.jsonl",
+      "sha256": "1e388c6ca4fe9e729063ece2b05b56722ee5bfecbcd2453c0759a553e8f226cd",
+      "bytes": 3392
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/execution-ledgers/a0ec5bbd-3c35-4c71-bcbc-522574a781c0.jsonl",
+      "sha256": "e95455bf8c50bba308a4d0f8dc57d691b1d045e6b7a05246738b31bc42d51190",
+      "bytes": 3378
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/architectures/8116c866ce8b8a2cc271239a987b8b18a811322e513f74f5c4f88feca870ef89.json",
+      "sha256": "f5f23e3a7c2a89f9d90dd9d52c34df46b45c6de8b66e72a3ba43bd4f6c66d273",
+      "bytes": 356
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/architectures/a35a3aae9a9d95b4bd63a504ce6d105f466bc9a077c5aa17bcad9bd6b48fab01.json",
+      "sha256": "70970b72bbd96f89704f01fdc0288b8d2393e6703a8e34a59e0e3d0294831c78",
+      "bytes": 357
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/architectures/d06a45fd5a088c0b5daf5ddda932cbb28cfac6be76a5771791cb153069aa5b39.json",
+      "sha256": "fea9396a80f353ccc19ee8ab1aaafca96e212843e629b7ad4ca9737dfd6411ec",
+      "bytes": 360
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/architectures/d4814dbdf92316ceeef584e9f13a7e6714727d8d28468537d22e9d0a514829e3.json",
+      "sha256": "db8a35a2156b09e00a85fc79a8e0ac87eff275851c7689b79627fbd76b1cfb2e",
+      "bytes": 355
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/frozen/frozen-plans.json",
+      "sha256": "e05317c35fdd170e1409e9e090dcbcab6fbf6ccfd4a47a87a6add6ec24bef25c",
+      "bytes": 1154
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/live/architecture-trials/5b5107da-6a55-4ddc-9803-dd6a731192fe.jsonl",
+      "sha256": "298495623e5bc4a3a6c2a8decd049ab3fecb7d1bf881e1d1497894e017c92956",
+      "bytes": 5639
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/live/execution-ledgers/5b08e774-0027-4310-ab21-c9187fed2a92.jsonl",
+      "sha256": "1da59e6227d2b0be591b246b4c464cb152a770ca74547bcc6dd8f55212d88e75",
+      "bytes": 3449
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/live/architectures/1b170cdf2001678e226ed859d8484e64db3077bc328c7f70a7c17e8e56cbc755.json",
+      "sha256": "90dc96184300dd87d37f9fdf92595cbfa3594ae41d51bd553cc488a33422f915",
+      "bytes": 389
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/live/architectures/6c7a0f71834b051eb397891386fdf73d36c51bc7473fd7c76ebc143f32211d0b.json",
+      "sha256": "f5d162b19d5095924f7d3205d5e33dac9588aea485b91f4243ad006155dbef0c",
+      "bytes": 544
+    },
+    {
+      "path": "docs/validation/native-output-trials-20261007/live/frozen-plans.json",
+      "sha256": "6c03a74c5db5834b641c10b79c1c75efebe063d37097cbfe5582014e49d33b63",
+      "bytes": 1799
+    }
+  ],
+  "limitations": [
+    "Host configured output trials only; default plans empty.",
+    "No code/tool-artifact candidate trial, independent selection or regression guard, automatic adoption, rollback or later-task automatic consumption.",
+    "No hidden held-out corpus; deployment plans and unsigned local receipts remain accessible to the host.",
+    "Native stream observations are not paid-request counts or invoices, and optional usage buckets remain unknown when absent.",
+    "Fresh install not validated; declared local workspace junctions were restored without purging dependencies.",
+    "No additional real model trial run was used to manufacture a pass.",
+    "Full native sessions and verbose process logs remain local. The PR archives only frozen synthetic plans, graph definitions, trial receipts and prompt-free native usage records."
+  ]
+}

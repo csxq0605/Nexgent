@@ -1,0 +1,89 @@
+[
+  {
+    "id": "ordered-identities",
+    "description": "Host-frozen output-only identity processing",
+    "baseline": {
+      "nodes": [
+        {
+          "id": "answer",
+          "role": "processor",
+          "prompt": "From input.records, return the distinct string ids in first-seen order and their count. Use structured_output.",
+          "dependencies": [],
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "count": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "ids",
+              "count"
+            ]
+          }
+        }
+      ]
+    },
+    "cases": [
+      {
+        "id": "duplicates",
+        "input": {
+          "records": [
+            {
+              "id": "b"
+            },
+            {
+              "id": "a"
+            },
+            {
+              "id": "b"
+            }
+          ]
+        },
+        "outputNode": "answer",
+        "expected": {
+          "ids": [
+            "b",
+            "a"
+          ],
+          "count": 2
+        }
+      },
+      {
+        "id": "unicode",
+        "input": {
+          "records": [
+            {
+              "id": "北"
+            },
+            {
+              "id": "南"
+            },
+            {
+              "id": "北"
+            },
+            {
+              "id": "东"
+            }
+          ]
+        },
+        "outputNode": "answer",
+        "expected": {
+          "ids": [
+            "北",
+            "南",
+            "东"
+          ],
+          "count": 3
+        }
+      }
+    ]
+  }
+]

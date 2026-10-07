@@ -29,6 +29,8 @@ kind: "package-reference"
 
 `role` 是子 agent 提示词中的任务数据。可选 `persona` 使用 `{{cwd}}` 等原生模板变量，替换子 agent 的部署人设。可选 `toolFilter` 包含全局工具名称的 `allow` 和／或 `deny` 数组。这些掩码与继承的限制取交集，同时约束工具可见性和执行；`structured_output` 等作用域注册仍然可见。提供方不支持所需能力、或名称不属于已知全局工具时，成员启动会报错。定义摘要包含这些选择，按保存版本复用时会再次应用。脚本的 `agent()` 选项也支持相同的组成字段。
 
+宿主调用方可从本包导入 `prepareArchitecture`、`prepareOutputTrialArchitecture`、`saveArchitecture` 和 `loadArchitecture`。输出试用编译器保留定义摘要，并将所有成员全局工具范围替换为 `{allow: []}`。该执行模式必须单独记录；它不改变保存的图，也不代表批准。原生作用域内的结构化输出仍可用。
+
 `workflow` 工具执行模型编写的图或脚本，并返回最终 JSON 值。当依赖关系或反复协调有助于任务时选择它；否则直接执行或普通委派。
 
 ### 调用工具

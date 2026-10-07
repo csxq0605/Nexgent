@@ -19,6 +19,24 @@
     },
     {
       "path": "../../util/brand"
+    },
+    {
+      "path": "../../core/agent"
+    },
+    {
+      "path": "../../core/tools"
+    },
+    {
+      "path": "../../core/system-prompt"
+    },
+    {
+      "path": "../../workflow/workflow"
+    },
+    {
+      "path": "../../workflow/tool-workflow"
+    },
+    {
+      "path": "../../util/values"
     }
   ]
 }

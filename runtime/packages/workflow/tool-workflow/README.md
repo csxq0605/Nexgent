@@ -29,6 +29,8 @@ The tool accepts exactly one of `script` or `architecture`; with `architectureDi
 
 `role` is task data in the child prompt. Optional `persona` replaces the child's deployment persona using native template variables such as `{{cwd}}`. Optional `toolFilter` contains `allow` and/or `deny` arrays of global tool names. These masks intersect inherited restrictions and affect both visibility and execution; scoped registrations, including `structured_output`, stay visible. Unsupported provider capabilities and unknown global names fail at child startup. The definition digest includes these choices; saved-version reuse applies them again. Script `agent()` options support the same composition fields.
 
+Host consumers can import `prepareArchitecture`, `prepareOutputTrialArchitecture`, `saveArchitecture` and `loadArchitecture` from this package. The output-trial compiler retains the definition digest and replaces all member global-tool masks with `{allow: []}`. This execution mode must be recorded separately; it is not a change to the stored graph or an approval. Scoped native structured output remains available.
+
 The `workflow` tool runs model-authored graphs or scripts and returns their final JSON value. Choose it when dependencies or repeated coordination help the task; otherwise use direct work or ordinary delegation.
 
 ### Calling the tool

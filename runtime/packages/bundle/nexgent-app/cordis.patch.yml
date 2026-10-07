@@ -4,6 +4,12 @@
       name: '@nexgent/application'
       config:
         directory: !!js dshHomePath('execution-ledgers')
+    - id: nexgent-architecture-trials
+      name: '@nexgent/application/trials'
+      config:
+        architectureDirectory: !!js dshHomePath('architectures')
+        receiptDirectory: !!js dshHomePath('architecture-trials')
+        plans: []
 
 - id: agent-default-model
   config:

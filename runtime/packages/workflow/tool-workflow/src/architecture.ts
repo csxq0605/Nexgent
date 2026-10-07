@@ -24,12 +24,7 @@ function text(value: unknown, field: string): string {
   return value
 }
 
-/**
- * Compile a model-authored architecture into the existing workflow runtime.
- * @param value - JSON graph with role, prompt, dependency and model choices.
- * @returns the normalized definition, content digest and compiled workflow body.
- */
-export function prepareArchitecture(value: unknown): { version: string; architecture: { nodes: ArchitectureNode[] }; script: string } {
+function prepare(value: unknown, outputOnly: boolean): { version: string; architecture: { nodes: ArchitectureNode[] }; script: string } {
   const graph = object(value)
   if (Object.keys(graph).some(key => key !== 'nodes')) throw new Error('architecture accepts only nodes')
   if (!Array.isArray(graph.nodes) || graph.nodes.length === 0) throw new Error('architecture requires at least one node')
@@ -86,7 +81,7 @@ function run(id) {
     if (node.model !== undefined) options.model = node.model;
     if (node.schema !== undefined) options.schema = node.schema;
     if (node.persona !== undefined) options.persona = node.persona;
-    if (node.toolFilter !== undefined) options.toolFilter = node.toolFilter;
+    ${outputOnly ? 'options.toolFilter = { allow: [] };' : 'if (node.toolFilter !== undefined) options.toolFilter = node.toolFilter;'}
     return outputs[node.id] = await agent(prompt, options);
   })();
   pending.set(id, result);
@@ -96,6 +91,26 @@ await Promise.all(nodes.map(node => run(node.id)));
 if (Object.values(outputs).some(value => value === null)) throw new Error('architecture member failed');
 return { architectureVersion: ${JSON.stringify(version)}, outputs };`
   return { version, architecture: { nodes }, script }
+}
+
+/**
+ * Compile a model-authored architecture into the existing workflow runtime.
+ * @param value - JSON graph with role, prompt, dependency and model choices.
+ * @returns the normalized definition, content digest and compiled workflow body.
+ */
+export function prepareArchitecture(value: unknown): ReturnType<typeof prepare> {
+  return prepare(value, false)
+}
+
+/**
+ * Compile a graph for a host-owned output trial, replacing every member's
+ * global-tool mask with an empty allow list. Native scoped output tools remain.
+ * The definition digest is unchanged; the execution mode belongs in the trial receipt.
+ * @param value - JSON graph to evaluate without workspace or global-tool effects.
+ * @returns the definition and a script applying the host's output-only restriction.
+ */
+export function prepareOutputTrialArchitecture(value: unknown): ReturnType<typeof prepare> {
+  return prepare(value, true)
 }
 
 /**

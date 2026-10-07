@@ -28,6 +28,8 @@ import type {
 import { createWorkflowRecordMirror } from './record.ts'
 import { resolveWorkflowBody } from './architecture.ts'
 import { loadArchitecture, saveArchitecture } from './architecture-store.ts'
+export { prepareArchitecture, prepareOutputTrialArchitecture } from './architecture.ts'
+export { loadArchitecture, saveArchitecture } from './architecture-store.ts'
 import type { WorkflowRecordMirror } from './record.ts'
 import type {
   ToolWorkflowAgentEndData, ToolWorkflowAgentStartData,
