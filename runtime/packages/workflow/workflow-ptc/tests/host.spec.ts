@@ -79,6 +79,9 @@ describe('workflow host callback validation', () => {
     ['startChild', { prompt: 7 }, 'prompt must be a string'],
     ['startChild', { prompt: 'p', provider: 7 }, 'provider must be a string'],
     ['startChild', { prompt: 'p', model: false }, 'model must be a string'],
+    ['startChild', { prompt: 'p', persona: false }, 'persona must be a string'],
+    ['startChild', { prompt: 'p', toolFilter: {} }, 'declare allow and/or deny'],
+    ['startChild', { prompt: 'p', toolFilter: { allow: 'read' } }, 'array of strings'],
     ['progress', {}, 'requires an array of events'],
     ['progress', [{ type: 'phase', title: null }], 'phase must be a string'],
     ['progress', [{ type: 'agent-start', info: { seq: 0 } }], 'sequence must be a positive integer'],
@@ -94,6 +97,19 @@ describe('workflow host callback validation', () => {
     const handle = start()
     try { expect((await handle.result).stopReason).toBe('completed') }
     finally { await handle.dispose() }
+  })
+
+  it.each([{ persona: 'Reviewer' }, { toolFilter: { allow: ['read'] } }])('rejects unsupported child composition %j before provider startup', async (options) => {
+    const { ctx, start } = await setup(async (bindings) => {
+      await expect(bindings.startChild!({ prompt: 'child', ...options })).rejects.toThrow('does not support')
+      return completed
+    })
+    const dispatch = vi.spyOn(ctx.subagents.getProvider('stub')!, 'start')
+    const handle = start()
+    try {
+      expect((await handle.result).stopReason).toBe('completed')
+      expect(dispatch).not.toHaveBeenCalled()
+    } finally { await handle.dispose() }
   })
 
   it('does not emit duplicate agent-end notifications', async () => {

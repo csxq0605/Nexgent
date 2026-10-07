@@ -36,10 +36,10 @@ describe('workflow guest callbacks', () => {
     const test = fixture(`
       phase('Read')
       log('starting')
-      return await agent(args.prompt, { label: 'Answer', provider: 'openai', model: 'small', schema: { type: 'object' } })
+      return await agent(args.prompt, { label: 'Answer', provider: 'openai', model: 'small', schema: { type: 'object' }, persona: 'Reviewer in {{cwd}}', toolFilter: { allow: ['read'], deny: ['write'] } })
     `, { childResult: async () => ({ output: [], structured: { answer: 42 }, stopReason: 'completed' }) })
     await expect(runWorkflowGuest(test.host)).resolves.toEqual({ value: { answer: 42 }, stopReason: 'completed', agentsStarted: 1 })
-    expect(test.requests).toEqual([{ prompt: 'answer this', provider: 'openai', model: 'small', schema: { type: 'object' } }])
+    expect(test.requests).toEqual([{ prompt: 'answer this', provider: 'openai', model: 'small', schema: { type: 'object' }, persona: 'Reviewer in {{cwd}}', toolFilter: { allow: ['read'], deny: ['write'] } }])
     expect(test.events).toEqual([
       { type: 'phase', title: 'Read' },
       { type: 'log', message: 'starting' },
@@ -325,6 +325,9 @@ describe('workflow script validation', () => {
     ['return await agent("x", {effort: "high"})', 'deferred and not supported'],
     ['return await agent("x", {unknown: true})', 'not recognized'],
     ['return await agent("x", {label: 1})', 'must be a string'],
+    ['return await agent("x", {persona: 7})', 'must be a string'],
+    ['return await agent("x", {toolFilter: {}})', 'toolFilter is invalid'],
+    ['return await agent("x", {toolFilter: {deny: [7]}})', 'array of strings'],
     ['return await agent("x", {schema: {type: "object", pattern: "x"}})', 'outside the supported subset'],
     ['return await parallel(1)', 'requires an array'],
     ['return await parallel([1])', 'not a function'],

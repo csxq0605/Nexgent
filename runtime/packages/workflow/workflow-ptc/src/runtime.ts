@@ -9,8 +9,8 @@ import * as vm from 'node:vm'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { assertObjectJsonSchema, JsonSchemaError } from '@deepseek-ai/dsh-tools'
-import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import { assertObjectJsonSchema, assertToolRestriction, JsonSchemaError } from '@deepseek-ai/dsh-tools'
+import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
 import { isFatalWorkflowError, WorkflowError } from '@deepseek-ai/dsh-workflow'
 import type {
   WorkflowAgentEndInfo,
@@ -30,7 +30,7 @@ export interface ExecutionObserver {
 }
 
 /** The `agent()` options the script may pass; everything else rejects loud. */
-const SUPPORTED_AGENT_OPTIONS = new Set(['label', 'phase', 'schema', 'provider', 'model'])
+const SUPPORTED_AGENT_OPTIONS = new Set(['label', 'phase', 'schema', 'provider', 'model', 'persona', 'toolFilter'])
 /** Deferred Claude Code options we name explicitly in the rejection message. */
 const DEFERRED_AGENT_OPTIONS = new Set(['effort', 'isolation', 'agentType'])
 
@@ -185,6 +185,8 @@ export class WorkflowExecution {
           ...opts.schema !== undefined ? { schema: opts.schema } : {},
           ...opts.provider !== undefined ? { provider: opts.provider } : {},
           ...opts.model !== undefined ? { model: opts.model } : {},
+          ...opts.persona !== undefined ? { persona: opts.persona } : {},
+          ...opts.toolFilter !== undefined ? { toolFilter: opts.toolFilter } : {},
         })
       } catch (error: unknown) {
         throw new WorkflowError(`agent() could not start a child: ${renderThrown(error)}`, 'AGENT_START', { cause: error })
@@ -235,6 +237,8 @@ export class WorkflowExecution {
     provider?: string
     model?: string
     schema?: ObjectJsonSchema
+    persona?: string
+    toolFilter?: ToolRestriction
   } {
     if (rawOpts === undefined) return {}
     let opts: unknown
@@ -252,13 +256,22 @@ export class WorkflowExecution {
     for (const key of Object.keys(record)) {
       if (SUPPORTED_AGENT_OPTIONS.has(key)) continue
       if (DEFERRED_AGENT_OPTIONS.has(key)) {
-        throw new WorkflowError(`agent() option "${key}" is deferred and not supported by this engine (supported: label, phase, schema, provider, model)`, 'UNSUPPORTED_OPTION')
+        throw new WorkflowError(`agent() option "${key}" is deferred and not supported by this engine (supported: label, phase, schema, provider, model, persona, toolFilter)`, 'UNSUPPORTED_OPTION')
       }
-      throw new WorkflowError(`agent() option "${key}" is not recognized (supported: label, phase, schema, provider, model)`, 'UNSUPPORTED_OPTION')
+      throw new WorkflowError(`agent() option "${key}" is not recognized (supported: label, phase, schema, provider, model, persona, toolFilter)`, 'UNSUPPORTED_OPTION')
     }
-    for (const key of ['label', 'phase', 'provider', 'model'] as const) {
+    for (const key of ['label', 'phase', 'provider', 'model', 'persona'] as const) {
       if (record[key] !== undefined && typeof record[key] !== 'string') {
         throw new WorkflowError(`agent() option "${key}" must be a string`, 'INVALID_ARGUMENT')
+      }
+    }
+    let toolFilter: ToolRestriction | undefined
+    if (record.toolFilter !== undefined) {
+      try {
+        assertToolRestriction(record.toolFilter)
+        toolFilter = record.toolFilter
+      } catch (error: unknown) {
+        throw new WorkflowError(`agent() toolFilter is invalid — ${renderThrown(error)}`, 'INVALID_ARGUMENT', { cause: error })
       }
     }
     let schema: ObjectJsonSchema | undefined
@@ -278,6 +291,8 @@ export class WorkflowExecution {
       ...record.provider !== undefined ? { provider: record.provider as string } : {},
       ...record.model !== undefined ? { model: record.model as string } : {},
       ...schema !== undefined ? { schema } : {},
+      ...record.persona !== undefined ? { persona: record.persona as string } : {},
+      ...toolFilter !== undefined ? { toolFilter } : {},
     }
   }
 

@@ -17,7 +17,11 @@ const system = request.messages.find(message => message.role === 'system').conte
 const guidance = system.split('\n').find(line => line.startsWith('Choose the workflow tool '))
 assert.ok(guidance)
 const closing = ' The run executes in the foreground'
+// Imported default profiles do not enable the application's definition store.
+const storeGuidance = ' Graph definitions are saved independently of the Session. To reuse a saved graph, supply architectureVersion instead of script or architecture. Saving or executing a graph does not approve, adopt or activate it for future tasks.'
 const body = current.description.split(closing)[0]
+  .replace('Supply exactly one of script, architecture or architectureVersion.', 'Supply exactly one of script or architecture.')
+  .replace(storeGuidance, '')
 const snapshots = resolve(root, 'runtime/snapshots/session')
 const advanced = await readFile(process.argv[3] ?? resolve(snapshots, 'cordis-inspect-jsdoc/system-prompt.expected.md'), 'utf8')
 const inputPattern = /  workflow: \{\n(?=\s*\/\*\* The plain-JS)[\s\S]*?\n  \} & Record<string, JsonValue>;/g

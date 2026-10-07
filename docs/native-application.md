@@ -47,10 +47,12 @@ cd ..
 
 ## 后续主线
 
-原生 `workflow` 已接受声明式 `architecture`：节点包含角色、任务、依赖、模型选择及可选对象输出 schema，编译后复用原生工作流执行、取消和持久记录，并返回内容版本。编译、存储与工具的 62 项检查、原生引擎的 65 项检查和会话快照语料的 3 项检查通过。角色目前作为成员任务说明传递；工具范围、独立角色配置和上下文策略尚未成为图节点配置。
+原生 `workflow` 已接受声明式 `architecture`：节点包含角色、任务、依赖、模型选择及可选对象输出 schema，编译后复用原生工作流执行、取消和持久记录，并返回内容版本。可选 `persona` 使用原生模板替换成员人设；`toolFilter` 对成员的全局工具施加 allow/deny 掩码，继承限制取交集，结构化提交等作用域工具保持可用。角色字段本身仍是任务数据。674 项所属检查通过，所选六个源文件的语句、分支、函数和行覆盖率均为 100%。上下文策略和执行器变化尚未成为图节点配置。
 
 `node scripts/test-native-architecture.mjs` 已验证构建后的应用执行三个真实成员、实际文件写入与读回、依赖输出传递及另一个 OS 进程中的同一会话恢复，以及新会话按保存版本执行，仅替换外部 HTTP 模型。应用的协调脚本使用 read-only，成员仍继承任务的 workspace-write；额外只读任务验证写入被拒绝、文件保持原样且依赖成员不启动。收紧协调脚本权限不会扩大成员权限。额外进程验证未知与损坏的版本不启动成员。保存与新会话复用的身份和结果见[版本存储验证摘要](validation/native-architecture-store-20261007.json)。
 
 `node scripts/verify-native-architecture-live.mjs` 已用真实 MiMo v2.6 Pro 验证同一路径：两个成员分别交付 totals.json 和 range.json，review 成员使用两者实际输出并交付 review.json。外部验收脚本独立读取三个文件，确认 count=3、sum=21、mean=7、min=3、max=11。进程身份、版本与输出记录在[架构执行验证摘要](validation/native-architecture-20261006.json)；其中前台用量不包含所有成员与标题请求，不能用于整体费用或 RSI 收益结论。
 
 图定义已保存在项目的 `.nexgent/native/architectures/`，新 Session 可通过 `architectureVersion` 复用。保存记录不代表采用；原生候选试用与发布、独立 selection/guard、后续任务自动复用采用版本和改进器自身进化尚未接入。旧 Python 中有效的门控、账本和反馈逻辑需要迁入原生服务；它们当前不保护原生会话。下一步在已有 Agent/subagent/workflow 机制和保存定义上实现候选试用、独立评估与版本采用，随后验证跨任务进化。
+
+2026-10-07 的[节点配置验证](validation/native-node-composition-20261007.json)进一步验证了实际人设模板、成员工具列表、被隐藏写工具的执行拒绝，以及新进程、新会话中的配置复用。`node scripts/verify-native-code-live.mjs --architecture` 使用真实 MiMo，通过带工具范围的实现成员生成 records.mjs、运行未改动的五项公开验收，再由只能读取的复核成员读取源代码、验收文件和实际产物。宿主验收读取原生压缩会话，关联成员身份、PowerShell 调用和真实测试结果；这不代表独立 selection/guard 或自动采用已经完成。

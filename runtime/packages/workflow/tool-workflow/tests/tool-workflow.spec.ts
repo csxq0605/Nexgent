@@ -23,7 +23,7 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import PtcWorkflowEngine from '@deepseek-ai/dsh-workflow-ptc'
 import { mountWorkflowRuntime } from '../../workflow-ptc/tests/setup.ts'
 import * as toolWorkflow from '../src/index.ts'
-import { saveArchitecture } from '../src/architecture-store.ts'
+import { loadArchitecture, saveArchitecture } from '../src/architecture-store.ts'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 
@@ -133,6 +133,45 @@ function execute(ctx: Context, args: unknown, extra?: {
 }
 
 describe('dsh-tool-workflow', () => {
+  it('saves the composed graph before engine startup and keeps presentation replayable', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'nexgent-tool-composition-'))
+    onTestFinished(() => rm(directory, { recursive: true, force: true }))
+    const { ctx, engine, parent } = await setup({ architectureDirectory: directory })
+    onTestFinished(() => ctx.fiber.dispose())
+    const architecture = { nodes: [{ id: 'reader', role: 'reviewer', prompt: 'Inspect', dependencies: [],
+      persona: 'Reviewer in {{cwd}}', toolFilter: { allow: ['read'] } }] }
+    const pending = execute(ctx, { architecture, meta: META }, { agent: parent })
+    await vi.waitFor(() => { expect(engine.requests).toHaveLength(1) })
+    const saved = await saveArchitecture(directory, architecture)
+    expect((await loadArchitecture(directory, saved.version)).architecture).toEqual(architecture)
+    expect(engine.requests[0]?.script).toBe(saved.script)
+    engine.settle({ value: {}, stopReason: 'completed', agentsStarted: 1 })
+    expect((await pending).isError).toBe(false)
+    expect(ctx.tools.get('workflow')!.presentCall!({ architecture, meta: META })).toMatchObject({ rawInput: JSON.stringify(architecture) })
+    expect(ctx.tools.get('workflow')!.presentCall!({ meta: META })).toMatchObject({ rawInput: '{}' })
+  })
+
+  it('refuses saved-version execution without an application-owned directory', async () => {
+    const { ctx, engine, parent } = await setup()
+    onTestFinished(() => ctx.fiber.dispose())
+    const result = await execute(ctx, { architectureVersion: '0'.repeat(64), meta: META }, { agent: parent })
+    expect(result.isError).toBe(true)
+    const block = result.content[0]
+    expect(block?.type).toBe('text')
+    if (block?.type !== 'text') throw new Error('Expected saved-version refusal text')
+    expect(block.text).toContain('saved architecture execution is disabled')
+    expect(engine.requests).toHaveLength(0)
+  })
+
+  it('rejects a relative definition directory before registering the tool', async () => {
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(StubEngine)
+    await expect(ctx.plugin(toolWorkflow, { architectureDirectory: 'relative' })).rejects.toThrow('must be absolute')
+    expect(ctx.tools.get('workflow')).toBeUndefined()
+  })
   it('loads a saved graph at the tool boundary and rejects a mixed reference before starting', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'nexgent-tool-architecture-'))
     onTestFinished(() => rm(directory, { recursive: true, force: true }))

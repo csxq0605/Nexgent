@@ -70,6 +70,8 @@ describe('native workflow architecture', () => {
     { nodes: [{ ...worker, dependencies: null }] }, { nodes: [{ ...reviewer, dependencies: ['worker', 'worker'] }] },
     { nodes: [{ ...worker, provider: '' }] }, { nodes: [{ ...worker, model: 2 }] },
     { nodes: [{ ...worker, schema: { type: 'string' } }] },
+    { nodes: [{ ...worker, persona: ' ' }] }, { nodes: [{ ...worker, persona: 7 }] },
+    { nodes: [{ ...worker, toolFilter: {} }] }, { nodes: [{ ...worker, toolFilter: { allow: ['read', 7] } }] },
     { nodes: [{ ...worker, schema: { type: 'object', properties: { count: { type: 'number', minimum: 0 } } } }] },
   ])('rejects malformed graph data %j at compilation', (input) => {
     expect(() => compileArchitecture(input)).toThrow()
@@ -77,13 +79,18 @@ describe('native workflow architecture', () => {
 
   it('passes structured outputs, routes and hostile text as data through the existing agent hook', async () => {
     const schema = { type: 'object', properties: { count: { type: 'number' } }, required: ['count'] }
-    const first = { ...worker, id: '__proto__', prompt: '"; throw new Error("injected"); //', provider: 'mimo', model: 'mimo-v2.6-pro', schema }
+    const first = { ...worker, id: '__proto__', prompt: '"; throw new Error("injected"); //', provider: 'mimo', model: 'mimo-v2.6-pro', schema,
+      persona: 'You are the independent reviewer in {{cwd}}.', toolFilter: { allow: ['write', 'read', 'read'], deny: ['edit'] } }
     const second = { ...reviewer, dependencies: [first.id] }
     const calls: { prompt: string; options: unknown }[] = []
     const result = await new AsyncFunction('agent', 'args', compileArchitecture({ nodes: [second, first] }))(
       async (prompt: string, options: unknown) => { calls.push({ prompt, options }); return { count: 3 } }, {},
     )
-    expect(calls[0]?.options).toMatchObject({ label: first.id, provider: first.provider, model: first.model, schema })
+    expect(calls[0]?.options).toMatchObject({ label: first.id, provider: first.provider, model: first.model, schema,
+      persona: first.persona, toolFilter: { allow: ['read', 'write'], deny: ['edit'] } })
+    expect(compileArchitecture({ nodes: [first] })).toBe(compileArchitecture({ nodes: [{ ...first, toolFilter: { deny: ['edit'], allow: ['read', 'write'] } }] }))
+    expect(compileArchitecture({ nodes: [first] })).not.toBe(compileArchitecture({ nodes: [{ ...first, persona: 'Changed persona' }] }))
+    expect(compileArchitecture({ nodes: [first] })).not.toBe(compileArchitecture({ nodes: [{ ...first, toolFilter: { allow: [] } }] }))
     expect(parsePrompt(calls[0]!.prompt).task).toBe(first.prompt)
     expect(parsePrompt(calls[1]!.prompt).dependencies).toEqual([{ id: first.id, output: { count: 3 } }])
     expect(Object.hasOwn(result.outputs, '__proto__')).toBe(true)
@@ -95,6 +102,10 @@ describe('native workflow architecture', () => {
       async () => { calls += 1; return null }, {},
     )).rejects.toThrow('dependency failed')
     expect(calls).toBe(1)
+  })
+
+  it.each([{ allow: [] }, { deny: ['write'] }])('preserves single-list masks %j', (toolFilter) => {
+    expect(compileArchitecture({ nodes: [{ ...worker, toolFilter }] })).toContain(JSON.stringify(toolFilter))
   })
 
   it('fails delivery when an independent member fails even without dependants', async () => {

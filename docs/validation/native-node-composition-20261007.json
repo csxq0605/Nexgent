@@ -1,0 +1,304 @@
+{
+  "date": "2026-10-07",
+  "passed": true,
+  "scope": "Native graph node persona and tool scoping, process restart and saved-version reuse; real MiMo graph code delivery with public acceptance checks.",
+  "processCapture": "validation-workspace/native-architecture-FOskrE",
+  "nativeProcess": {
+    "passed": true,
+    "scope": "built application, actual member file effects and restart; only external HTTP model mocked",
+    "policy": "workspace-write task; read-only coordinator; per-child persona and tool scopes; forged hidden write denied; read-only task denial also verified",
+    "architecture": {
+      "nodes": [
+        {
+          "id": "a",
+          "role": "researcher",
+          "prompt": "GRAPH_MEMBER_A",
+          "dependencies": [],
+          "provider": "mimo",
+          "model": "mimo-v2.6-pro",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value"
+            ]
+          },
+          "persona": "NATIVE_A_PREFIX: collect evidence in {{cwd}}.",
+          "toolFilter": {
+            "allow": [
+              "read",
+              "write"
+            ]
+          }
+        },
+        {
+          "id": "b",
+          "role": "researcher",
+          "prompt": "GRAPH_MEMBER_B",
+          "dependencies": [],
+          "provider": "mimo",
+          "model": "mimo-v2.6-pro",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value"
+            ]
+          },
+          "persona": "NATIVE_B_PREFIX: collect evidence in {{cwd}}.",
+          "toolFilter": {
+            "allow": [
+              "read",
+              "write"
+            ]
+          }
+        },
+        {
+          "id": "review",
+          "role": "reviewer",
+          "prompt": "GRAPH_MEMBER_REVIEW",
+          "dependencies": [
+            "a",
+            "b"
+          ],
+          "provider": "mimo",
+          "model": "mimo-v2.6-pro",
+          "schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "value"
+            ]
+          },
+          "persona": "NATIVE_REVIEW_PREFIX: inspect evidence in {{cwd}}.",
+          "toolFilter": {
+            "allow": [
+              "read"
+            ]
+          }
+        }
+      ]
+    },
+    "first": {
+      "pid": 17844,
+      "version": "efe90926d17e0cfa52d8302c4922105d895246433490d052ce0b392b1b45cb13",
+      "sessionId": "session-f9eeca57-26f4-4cc2-b8e6-0a440930f054"
+    },
+    "resumed": {
+      "pid": 22984,
+      "version": "efe90926d17e0cfa52d8302c4922105d895246433490d052ce0b392b1b45cb13",
+      "sessionId": "session-f9eeca57-26f4-4cc2-b8e6-0a440930f054"
+    },
+    "reused": {
+      "pid": 38096,
+      "version": "efe90926d17e0cfa52d8302c4922105d895246433490d052ce0b392b1b45cb13",
+      "sessionId": "session-d0cf3134-4bbf-4169-977e-86d52b4d07f0"
+    },
+    "missing": {
+      "pid": 35260,
+      "rejected": true
+    },
+    "corrupted": {
+      "pid": 48024,
+      "rejected": true
+    },
+    "denied": {
+      "pid": 7336,
+      "rejected": true
+    },
+    "requestCount": 56
+  },
+  "actualModelCapture": "validation-workspace/native-graph-code-pro-mGOgsv",
+  "actualModel": {
+    "passed": true,
+    "scope": "actual MiMo graph code delivery, native per-child composition and persisted execution, public acceptance; no adoption or RSI claim",
+    "provider": "mimo",
+    "model": "mimo-v2.6-pro",
+    "policy": "default workspace-write, normal caller-owned temporary project, tests execute in one confined Node process",
+    "pid": 43032,
+    "project": "C:\\Users\\Lenovo\\AppData\\Local\\Temp\\nexgent-native-code-pro-yFLegk",
+    "sessionId": "session-67a99fb1-9d98-4cc3-beb7-a1c187315cb5",
+    "testsPassed": 5,
+    "architecture": {
+      "nodes": [
+        {
+          "id": "builder",
+          "role": "implementer",
+          "prompt": "Create records.mjs exporting normalizeRecords(text). It accepts JSONL, ignores blank lines, accepts CRLF, and keeps only the last record for each string id. Preserve first-seen id order. Invalid JSON must throw an Error containing \"Invalid JSON at line N\" (physical 1-based line); absent or non-string id must throw \"Missing id at line N\". Empty input returns []. Read the existing host-authored acceptance.test.mjs but preserve it byte for byte. Implement the general function using native filesystem tools, then run the exact PowerShell command \"& 'C:/Program Files/nodejs/node.exe' --test --test-isolation=none acceptance.test.mjs\" with the native pwsh tool. Resolve actual failures and verify tested-output.json before reporting completion. Report testsPassed through structured_output after the actual test run.",
+          "dependencies": [],
+          "persona": "You are Nexgent. Implement and test the requested program in {{cwd}}.",
+          "toolFilter": {
+            "allow": [
+              "pwsh",
+              "read",
+              "write"
+            ]
+          },
+          "schema": {
+            "type": "object",
+            "properties": {
+              "testsPassed": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "testsPassed"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "id": "review",
+          "role": "reviewer",
+          "prompt": "Read acceptance.test.mjs, records.mjs and tested-output.json. Check the code against the actual public requirements and the output against [{\"id\":\"verified\",\"value\":42}]. The dependency must report five passing tests. You have read access only. Report verified true through structured_output only when all checks agree; otherwise false.",
+          "dependencies": [
+            "builder"
+          ],
+          "persona": "You are Nexgent. Review the delivered code and files in {{cwd}}.",
+          "toolFilter": {
+            "allow": [
+              "read"
+            ]
+          },
+          "schema": {
+            "type": "object",
+            "properties": {
+              "verified": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "verified"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    "architectureVersion": "234903b2dd097a2669e5138c7e0dd2ebf8a48e8b712ca42459080a84d47d4c3e",
+    "outputs": {
+      "builder": {
+        "testsPassed": 5
+      },
+      "review": {
+        "verified": true
+      }
+    },
+    "members": [
+      {
+        "runId": "0d352ae7-2b96-4a81-9aa4-fa63479b8608",
+        "seq": 1,
+        "label": "builder",
+        "childId": "fb067805-e4bf-4a02-8e17-9d561c46aaef"
+      },
+      {
+        "runId": "0d352ae7-2b96-4a81-9aa4-fa63479b8608",
+        "seq": 2,
+        "label": "review",
+        "childId": "11249e23-c68a-4680-bfc6-602904b29f6c"
+      }
+    ],
+    "output": [
+      {
+        "id": "verified",
+        "value": 42
+      }
+    ],
+    "mainUsage": [
+      {
+        "inputTokens": 1969,
+        "outputTokens": 472,
+        "totalTokens": 8585,
+        "cacheReadTokens": 6144
+      },
+      {
+        "inputTokens": 648,
+        "outputTokens": 19,
+        "totalTokens": 8731,
+        "cacheReadTokens": 8064
+      },
+      {
+        "inputTokens": 689,
+        "outputTokens": 92,
+        "totalTokens": 8845,
+        "cacheReadTokens": 8064
+      },
+      {
+        "inputTokens": 461,
+        "outputTokens": 80,
+        "totalTokens": 9245,
+        "cacheReadTokens": 8704
+      },
+      {
+        "inputTokens": 669,
+        "outputTokens": 344,
+        "totalTokens": 9717,
+        "cacheReadTokens": 8704
+      }
+    ]
+  },
+  "checks": {
+    "owningTests": 674,
+    "owningTestFiles": 24,
+    "coverage": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "coveredSource": [
+      "packages/core/tools/src/index.ts",
+      "packages/core/tools/src/tool-restriction.ts",
+      "packages/workflow/workflow-ptc/src/runtime.ts",
+      "packages/workflow/workflow-ptc/src/host.ts",
+      "packages/workflow/tool-workflow/src/architecture.ts",
+      "packages/workflow/tool-workflow/src/index.ts"
+    ],
+    "snapshotCorpusTests": 3,
+    "changedPackageBuild": "passed; tools, tool-workflow and workflow-ptc; final boundary rebuild passed",
+    "clientTypecheck": "passed with host access; default sandbox transitive export resolution failure retained",
+    "lint": "affected production and tests passed after the full lint run identified only the pure-validator spread",
+    "pureValidatorAfterLintRepair": {
+      "tests": 38,
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "documentation": {
+      "aggregatePassed": 41,
+      "aggregateFailed": 1,
+      "aggregateSkipped": 0,
+      "failedGate": "workflow guest source was checked during a source repair; regenerated and its final freshness check passed",
+      "artifact": "validation-workspace/native-node-composition-doc-sync-final.log"
+    }
+  },
+  "limits": [
+    "Role remains task data unless an explicit persona is supplied.",
+    "Tool masks govern global tools and intersect inherited restrictions; scoped tools including structured_output remain available.",
+    "Workflow members are one-shot children; graph reuse creates fresh children, not cold resumption of completed children.",
+    "Public acceptance and model review do not establish independent selection, automatic adoption, RSI or recursive improvement.",
+    "Main usage excludes member and title requests and is not an aggregate cost receipt.",
+    "Windows code execution here requires a normal caller-owned FullControl temporary project; Modify-only workspace and general nested subprocess support remain unresolved.",
+    "An initial actual-model attempt altered nested path escaping and was rejected by exact graph identity checks; its logs are retained.",
+    "The first broad test attempt had a worker startup timeout; the final two-worker run passed.",
+    "The broad host bundle attempt was stopped after stalling. The changed three packages were built successfully; no full host bundle success is claimed.",
+    "Default-sandbox client typecheck could not resolve existing TanStack transitive exports; the same check passed with host access.",
+    "Native HTTP schemas and the original PTC SDK renderer updated only workflow blocks of imported request pins; the complete POSIX snapshot lane is not a Windows acceptance claim."
+  ]
+}

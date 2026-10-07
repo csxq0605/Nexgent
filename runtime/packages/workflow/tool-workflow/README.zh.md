@@ -25,7 +25,9 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-工具接受 `script` 或 `architecture` 中的一个；配置 `architectureDirectory` 后，也可用 `architectureVersion` 替代两者。保存定义要求文件系统支持硬链接；不支持时明确报错。架构格式为 `{nodes:[{id,role,prompt,dependencies,provider?,model?,schema?}]}`；依赖指向其他节点且必须无环。编译器把依赖节点的实际输出交给成员，返回由内容计算的 `architectureVersion` 和节点输出。摘要标识执行的定义，不代表独立批准或采用。节点的可选 `schema` 通过原生结构化输出机制要求校验后的对象，接受与 `agent()` 相同的 schema 子集。节点在自己的依赖完成后即可开始，不等待无关的慢节点，共享依赖只执行一次。原图保存在调用 Session 的工具历史中。配置 `architectureDirectory` 后，规范化定义还会作为完整且不可覆盖的记录保存到 Session 历史之外。新 Session 可按返回的 `architectureVersion` 执行；未知版本、无效记录或内容不匹配会在成员启动前报错。保存记录只有定义，没有批准或采用状态。
+工具接受 `script` 或 `architecture` 中的一个；配置 `architectureDirectory` 后，也可用 `architectureVersion` 替代两者。保存定义要求文件系统支持硬链接；不支持时明确报错。架构格式为 `{nodes:[{id,role,prompt,dependencies,provider?,model?,schema?,persona?,toolFilter?}]}`；依赖指向其他节点且必须无环。编译器把依赖节点的实际输出交给成员，返回由内容计算的 `architectureVersion` 和节点输出。摘要标识执行的定义，不代表独立批准或采用。节点的可选 `schema` 通过原生结构化输出机制要求校验后的对象，接受与 `agent()` 相同的 schema 子集。节点在自己的依赖完成后即可开始，不等待无关的慢节点，共享依赖只执行一次。原图保存在调用 Session 的工具历史中。配置 `architectureDirectory` 后，规范化定义还会作为完整且不可覆盖的记录保存到 Session 历史之外。新 Session 可按返回的 `architectureVersion` 执行；未知版本、无效记录或内容不匹配会在成员启动前报错。保存记录只有定义，没有批准或采用状态。
+
+`role` 是子 agent 提示词中的任务数据。可选 `persona` 使用 `{{cwd}}` 等原生模板变量，替换子 agent 的部署人设。可选 `toolFilter` 包含全局工具名称的 `allow` 和／或 `deny` 数组。这些掩码与继承的限制取交集，同时约束工具可见性和执行；`structured_output` 等作用域注册仍然可见。提供方不支持所需能力、或名称不属于已知全局工具时，成员启动会报错。定义摘要包含这些选择，按保存版本复用时会再次应用。脚本的 `agent()` 选项也支持相同的组成字段。
 
 `workflow` 工具执行模型编写的图或脚本，并返回最终 JSON 值。当依赖关系或反复协调有助于任务时选择它；否则直接执行或普通委派。
 

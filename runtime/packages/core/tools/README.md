@@ -78,6 +78,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Restrict tools per agent
 
+`assertToolRestriction(value)` validates JSON allow/deny list structure at an execution boundary; the scoped registry separately validates registered tool names.
+
 `ctx.tools.restrict(filter)` applies an allow or deny mask to the global tools one agent inherits; masks intersect, scoped registrations stay visible, and the restriction lifts when disposed. `ctx.tools.get(name, scope)` resolves a tool as one scope sees it. A Host-local presenter consumer passes the calling agent when it must match the definition that executed. `ctx.tools.schemas(scope)` returns the visible schemas without the `execute` functions.
 
 ### Enforce policy on calls

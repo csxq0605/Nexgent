@@ -11,12 +11,27 @@ await mkdir(parent, { recursive: true })
 const project = await mkdtemp(resolve(parent, 'native-architecture-'))
 const schema = { type: 'object', additionalProperties: false, properties: { value: { type: 'string' } }, required: ['value'] }
 const architecture = { nodes: [
-  { id: 'a', role: 'researcher', prompt: 'GRAPH_MEMBER_A', dependencies: [], provider: 'mimo', model: 'mimo-v2.6-pro', schema },
-  { id: 'b', role: 'researcher', prompt: 'GRAPH_MEMBER_B', dependencies: [], provider: 'mimo', model: 'mimo-v2.6-pro', schema },
-  { id: 'review', role: 'reviewer', prompt: 'GRAPH_MEMBER_REVIEW', dependencies: ['a', 'b'], provider: 'mimo', model: 'mimo-v2.6-pro', schema },
+  { id: 'a', role: 'researcher', prompt: 'GRAPH_MEMBER_A', dependencies: [], provider: 'mimo', model: 'mimo-v2.6-pro', schema,
+    persona: 'NATIVE_A_PREFIX: collect evidence in {{cwd}}.', toolFilter: { allow: ['read', 'write'] } },
+  { id: 'b', role: 'researcher', prompt: 'GRAPH_MEMBER_B', dependencies: [], provider: 'mimo', model: 'mimo-v2.6-pro', schema,
+    persona: 'NATIVE_B_PREFIX: collect evidence in {{cwd}}.', toolFilter: { allow: ['read', 'write'] } },
+  { id: 'review', role: 'reviewer', prompt: 'GRAPH_MEMBER_REVIEW', dependencies: ['a', 'b'], provider: 'mimo', model: 'mimo-v2.6-pro', schema,
+    persona: 'NATIVE_REVIEW_PREFIX: inspect evidence in {{cwd}}.', toolFilter: { allow: ['read'] } },
 ] }
 const requests = []
-const server = createServer(async (request, response) => {
+const activeReplies = new Set()
+let fixtureFailure
+const server = createServer((request, response) => {
+  const pending = reply(request, response).catch(error => {
+    fixtureFailure ??= error
+    if (response.destroyed) return
+    if (!response.headersSent) response.writeHead(500, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ error: { message: String(error) } }))
+  })
+  activeReplies.add(pending)
+  void pending.then(() => activeReplies.delete(pending))
+})
+async function reply(request, response) {
   let body = ''
   for await (const chunk of request) body += chunk
   const parsed = JSON.parse(body)
@@ -36,9 +51,22 @@ const server = createServer(async (request, response) => {
   if (isTitle) delta = { content: 'Architecture proof' }
   else if (text.includes('GRAPH_MEMBER_REVIEW')) {
     assert.ok(text.includes('RESULT_A') && text.includes('RESULT_B'), 'Reviewer must receive actual predecessor outputs')
-    delta = structured('RESULT_REVIEW')
+    const tools = parsed.tools.map(tool => tool.function.name).sort()
+    assert.deepEqual(tools, ['read', 'structured_output'], 'Reviewer scope must preserve structured output and exclude write')
+    assert.ok(parsed.messages.find(message => message.role === 'system').content.includes(`NATIVE_REVIEW_PREFIX: inspect evidence in ${project}.`))
+    const calls = parsed.messages.filter(message => message.role === 'assistant').flatMap(message => message.tool_calls ?? [])
+    if (calls.length === 0) delta = tool('review_forbidden_write', 'write', { file_path: 'review-forbidden.json', content: 'must not be written' })
+    else if (calls.length === 1) {
+      assert.ok(/not (?:available|found|registered)|unknown tool/i.test(JSON.stringify(last?.content)), 'Hidden tool execution must refuse')
+      delta = tool('review_read', 'read', { file_path: 'a.json' })
+    } else {
+      assert.ok(JSON.stringify(last?.content).includes('RESULT_A'), 'Reviewer must read the actual file')
+      delta = structured('RESULT_REVIEW')
+    }
   } else if (text.includes('GRAPH_MEMBER_A') || text.includes('GRAPH_MEMBER_B')) {
     const member = text.includes('GRAPH_MEMBER_A') ? 'a' : 'b'
+    assert.deepEqual(parsed.tools.map(tool => tool.function.name).sort(), ['read', 'structured_output', 'write'])
+    assert.ok(parsed.messages.find(message => message.role === 'system').content.includes(`NATIVE_${member.toUpperCase()}_PREFIX: collect evidence in ${project}.`))
     const value = `RESULT_${member.toUpperCase()}`
     const calls = parsed.messages.filter(message => message.role === 'assistant').flatMap(message => message.tool_calls ?? [])
     if (calls.length === 0) delta = tool(`read_${member}_before`, 'read', { file_path: `${member}.json` })
@@ -62,7 +90,7 @@ const server = createServer(async (request, response) => {
     { ...value, choices: [{ index: 0, delta, finish_reason: null }] },
     { ...value, choices: [{ index: 0, delta: {}, finish_reason: delta.tool_calls ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 17, completion_tokens: 5, total_tokens: 22 } },
   ].map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n')
-})
+}
 function structured(value) {
   return tool(`structured_${requests.length}`, 'structured_output', { value })
 }
@@ -128,6 +156,7 @@ try {
   assert.ok(!requests.slice(missingStart).some(request => JSON.stringify(request.messages).includes('GRAPH_MEMBER_A')))
   assert.deepEqual(JSON.parse(await readFile(resolve(project, 'a.json'), 'utf8')), { value: 'RESULT_A' })
   assert.deepEqual(JSON.parse(await readFile(resolve(project, 'b.json'), 'utf8')), { value: 'RESULT_B' })
+  await assert.rejects(readFile(resolve(project, 'review-forbidden.json')), { code: 'ENOENT' })
   await writeFile(resolve(project, 'a.json'), 'READ_ONLY_CANARY_A')
   await writeFile(resolve(project, 'b.json'), 'READ_ONLY_CANARY_B')
   const deniedStart = requests.length
@@ -147,12 +176,14 @@ try {
   const damagedStart = requests.length
   const corrupted = await run('damaged-version', undefined, false, first.version, 'digest mismatch')
   assert.ok(!requests.slice(damagedStart).some(request => JSON.stringify(request.messages).includes('GRAPH_MEMBER_A')))
+  assert.equal(fixtureFailure, undefined)
   const evidence = { passed: true, scope: 'built application, actual member file effects and restart; only external HTTP model mocked',
-    policy: 'workspace-write task; read-only coordinator; read-only child denial also verified', architecture, first, resumed, reused, missing, corrupted, denied, requestCount: requests.length }
+    policy: 'workspace-write task; read-only coordinator; per-child persona and tool scopes; forged hidden write denied; read-only task denial also verified', architecture, first, resumed, reused, missing, corrupted, denied, requestCount: requests.length }
   await writeFile(resolve(project, 'evidence.json'), JSON.stringify(evidence, null, 2) + '\n')
   console.log(JSON.stringify(evidence))
 } finally {
   server.closeAllConnections()
   await new Promise(resolve => server.close(resolve))
+  await Promise.allSettled(activeReplies)
   await writeFile(resolve(project, 'requests.json'), JSON.stringify(requests, null, 2) + '\n')
 }

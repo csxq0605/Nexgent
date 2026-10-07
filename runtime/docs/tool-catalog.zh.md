@@ -2371,13 +2371,13 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 
 ### `workflow`
 
-运行编排 subagent 的工作流。只提供 script 或 architecture 中的一个。architecture 包含节点，每个节点有唯一 id、role、prompt、dependencies（节点 id），以及可选 provider/model/schema。节点 schema 使用与 agent() 相同、以对象为根的 JSON Schema 子集，并要求经校验的结构化结果。依赖必须无环。独立节点并发执行；每个子级收到输入和依赖节点的实际输出。任一成员失败都会阻止成功交付。结果包含由内容计算的 architectureVersion 和节点输出。原始架构保存在工具调用历史中，后续会话可以复用；版本不代表采用或批准。适用于跨独立部分的文件审查、迁移、多角度研究和对抗式验证。
+运行编排 subagent 的工作流。只提供 script 或 architecture 中的一个。architecture 包含节点，每个节点有唯一 id、role、prompt、dependencies（节点 id），以及可选 provider/model/schema/persona/toolFilter。role 是任务数据；persona 使用原生模板语义覆盖子级的部署人设。toolFilter 为 {allow?:[全局工具名称],deny?:[全局工具名称]}，至少包含一个列表；掩码与继承的限制取交集，同时隐藏并拒绝被排除的全局工具，保留 structured_output 等作用域工具。工具名称未知、或提供方不支持所需能力时，成员启动失败。节点 schema 使用与 agent() 相同、以对象为根的 JSON Schema 子集，并要求经校验的结构化结果。依赖必须无环。独立节点并发执行；每个子级收到输入和依赖节点的实际输出。任一成员失败都会阻止成功交付。结果包含由内容计算的 architectureVersion 和节点输出。原始架构保存在工具调用历史中，后续会话可以复用；版本不代表采用或批准。适用于跨独立部分的文件审查、迁移、多角度研究和对抗式验证。
 
 工作流的身份通过 `meta` 参数以 JSON 形式传入：必填的 `name`（简短 kebab-case）和 `description` 字符串，以及可选的 `whenToUse` 字符串和 `phases` 数组（`{title, detail?, provider?, model?}`）。`script` 参数只能是纯 JavaScript **函数体**，不能是 TypeScript，也不能包含 `export const meta` 语句；meta 是参数而非代码。脚本支持顶层 await；请以 `return <value>` 结尾，该值必须可以 JSON 序列化，并作为此工具的结果。
 
 脚本函数体提供以下钩子：
 
-- `agent(prompt, opts?): Promise<any>`：运行一个 subagent 直至完成。不提供 `opts.schema` 时，解析为子级最终文本；提供 `opts.schema` 时，它必须是以对象为根、且**只能**使用 type/properties/required/additionalProperties/items/enum/const/oneOf 的 JSON Schema，不支持 pattern/format/数值边界，此时解析为通过校验的对象。子级失败时解析为 `null`，可使用 `.filter(Boolean)` 过滤。其他选项包括 `label`（显示名称）、`phase`（进度组），以及相互独立的 `provider`／`model` LLM（大语言模型）目标覆盖项，两者可单独提供。其他任何选项（`effort`／`isolation`／`agentType`）都会明确报错。
+- `agent(prompt, opts?): Promise<any>`：运行一个 subagent 直至完成。不提供 `opts.schema` 时，解析为子级最终文本；提供 `opts.schema` 时，它必须是以对象为根、且**只能**使用 type/properties/required/additionalProperties/items/enum/const/oneOf 的 JSON Schema，不支持 pattern/format/数值边界，此时解析为通过校验的对象。子级失败时解析为 `null`，可使用 `.filter(Boolean)` 过滤。其他选项包括 `label`（显示名称）、`phase`（进度组），以及相互独立的 `provider`／`model` LLM（大语言模型）目标覆盖项，两者可单独提供；还有 `persona`（原生子级人设覆盖）与 `toolFilter`（上述全局工具 allow/deny 掩码）。其他任何选项（`effort`／`isolation`／`agentType`）都会明确报错。
 - `pipeline(items, ...stages): Promise<any[]>`：让每个条目分别经过各阶段，阶段之间**没有**屏障；多阶段工作优先使用它。每个阶段接收 `(prev, item, index)`。普通的阶段异常会将该**条目**变为 `null`，并跳过它的剩余阶段。
 - `parallel(thunks): Promise<any[]>`：并发运行零参数函数并等待**全部**完成。它会形成屏障，仅当某个阶段确实需要汇总全部先前结果时使用。抛出异常的 thunk 解析为 `null`。
 - `phase(title)`：开始一个进度阶段；`log(message)`：说明进度；`args`：工具调用的 `args` 输入，原样提供。
@@ -2396,7 +2396,7 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
     },
     "architecture": {
       "type": "object",
-      "description": "Alternative to script: {nodes:[{id,role,prompt,dependencies:[node ids],provider?,model?,schema?}]}. Roles and dependencies define execution; the returned content digest identifies this graph version.",
+      "description": "Alternative to script: {nodes:[{id,role,prompt,dependencies:[node ids],provider?,model?,schema?,persona?,toolFilter?}]}. Role is task data; persona and toolFilter configure native child composition. The returned content digest identifies this graph version.",
       "additionalProperties": true
     },
     "meta": {

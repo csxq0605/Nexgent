@@ -6,7 +6,7 @@ import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentRun } from '@deepseek-ai/dsh-subagent'
-import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import { assertObjectJsonSchema, assertToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { assertNever, snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
 import type { WorkflowAgentEndInfo, WorkflowAgentInfo, WorkflowMeta, WorkflowResult, WorkflowRun, WorkflowRunId } from '@deepseek-ai/dsh-workflow'
@@ -46,6 +46,8 @@ function childRequest(value: unknown): ChildStartRequest {
   const prompt = text(request.prompt, 'prompt')
   const provider = request.provider === undefined ? undefined : text(request.provider, 'provider')
   const model = request.model === undefined ? undefined : text(request.model, 'model')
+  const persona = request.persona === undefined ? undefined : text(request.persona, 'persona')
+  if (request.toolFilter !== undefined) assertToolRestriction(request.toolFilter)
   let schema: ObjectJsonSchema | undefined
   if (request.schema !== undefined) {
     const candidate = object(request.schema)
@@ -57,6 +59,8 @@ function childRequest(value: unknown): ChildStartRequest {
     ...provider === undefined ? {} : { provider },
     ...model === undefined ? {} : { model },
     ...schema === undefined ? {} : { schema },
+    ...persona === undefined ? {} : { persona },
+    ...request.toolFilter === undefined ? {} : { toolFilter: request.toolFilter },
   }
 }
 
@@ -202,6 +206,8 @@ export class PtcWorkflowRun implements WorkflowRun {
       parent: this.parent,
       signal: this.controller.signal,
       ...request.schema === undefined ? {} : { outputSchema: request.schema },
+      ...request.persona === undefined ? {} : { persona: request.persona },
+      ...request.toolFilter === undefined ? {} : { toolFilter: request.toolFilter },
       ...request.provider === undefined && request.model === undefined ? {} : {
         agentOptions: {
           ...request.provider === undefined ? {} : { provider: request.provider },

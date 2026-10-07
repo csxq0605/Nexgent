@@ -123,7 +123,7 @@ Use these references for the shared execution guarantees and workflow contracts.
 
 #### What the model sees
 
-Every script `agent()` call sends its prompt verbatim and optional model or structured-output schema to a subagent provider. Each child sees that provider's own context; phase and log narration stays on observer events.
+Every script `agent()` call sends its prompt verbatim and optional model, structured-output schema, persona and global-tool mask to a subagent provider. Native persona templates are resolved in the child scope; tool masks intersect inherited restrictions and preserve scoped registrations. Unsupported capabilities and unknown global names fail at startup. Each child sees that provider's own context; phase and log narration stays on observer events.
 
 #### Token effect
 

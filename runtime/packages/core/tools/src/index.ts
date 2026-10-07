@@ -703,6 +703,8 @@ export interface ToolRestriction {
   readonly deny?: readonly string[]
 }
 
+export { assertToolRestriction } from './tool-restriction.ts'
+
 /** One restriction compiled at registration for repeated live-global lookup. */
 interface CompiledToolRestriction {
   readonly allow?: ReadonlySet<string>

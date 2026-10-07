@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
-import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import { assertObjectJsonSchema, assertToolRestriction } from '@deepseek-ai/dsh-tools'
+import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
 
 interface ArchitectureNode {
   id: string
@@ -10,6 +10,8 @@ interface ArchitectureNode {
   provider?: string
   model?: string
   schema?: ObjectJsonSchema
+  persona?: string
+  toolFilter?: ToolRestriction
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -33,19 +35,25 @@ export function prepareArchitecture(value: unknown): { version: string; architec
   if (!Array.isArray(graph.nodes) || graph.nodes.length === 0) throw new Error('architecture requires at least one node')
   const nodes: ArchitectureNode[] = graph.nodes.map((value: unknown) => {
     const row = object(value)
-    if (Object.keys(row).some(key => !['id', 'role', 'prompt', 'dependencies', 'provider', 'model', 'schema'].includes(key))) {
+    if (Object.keys(row).some(key => !['id', 'role', 'prompt', 'dependencies', 'provider', 'model', 'schema', 'persona', 'toolFilter'].includes(key))) {
       throw new Error('architecture node contains an unsupported field')
     }
     if (!Array.isArray(row.dependencies)) throw new Error('architecture dependencies must be an array')
     const dependencies = row.dependencies.map((dependency: unknown) => text(dependency, 'dependency'))
     if (new Set(dependencies).size !== dependencies.length) throw new Error('architecture dependencies must be unique')
     if (row.schema !== undefined) assertObjectJsonSchema(row.schema)
+    if (row.toolFilter !== undefined) assertToolRestriction(row.toolFilter)
     return {
       id: text(row.id, 'id'), role: text(row.role, 'role'), prompt: text(row.prompt, 'prompt'),
       dependencies: dependencies.sort(),
       ...row.provider === undefined ? {} : { provider: text(row.provider, 'provider') },
       ...row.model === undefined ? {} : { model: text(row.model, 'model') },
       ...row.schema === undefined ? {} : { schema: row.schema },
+      ...row.persona === undefined ? {} : { persona: text(row.persona, 'persona') },
+      ...row.toolFilter === undefined ? {} : { toolFilter: {
+        ...row.toolFilter.allow === undefined ? {} : { allow: [...new Set(row.toolFilter.allow)].sort() },
+        ...row.toolFilter.deny === undefined ? {} : { deny: [...new Set(row.toolFilter.deny)].sort() },
+      } },
     }
   }).sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
   const ids = new Set(nodes.map(node => node.id))
@@ -77,6 +85,8 @@ function run(id) {
     if (node.provider !== undefined) options.provider = node.provider;
     if (node.model !== undefined) options.model = node.model;
     if (node.schema !== undefined) options.schema = node.schema;
+    if (node.persona !== undefined) options.persona = node.persona;
+    if (node.toolFilter !== undefined) options.toolFilter = node.toolFilter;
     return outputs[node.id] = await agent(prompt, options);
   })();
   pending.set(id, result);
