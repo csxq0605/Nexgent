@@ -14,6 +14,8 @@ export type { Fiber, Plugin } from '@deepseek-ai/cordis'
 export { Greeter } from './greeter.js'
 export type { GreeterConfig } from './greeter.js'
 export * from './contracts/index.js'
+export { CONTRACT_SERVICES } from './services.js'
+export type { ContractServiceName } from './services.js'
 
 /** A running Nexgent application: a root Cordis context plus its disposer. */
 export interface NexgentApp {
