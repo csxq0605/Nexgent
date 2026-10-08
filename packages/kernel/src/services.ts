@@ -2,7 +2,7 @@
  * Context property names of the step-1 contract services.
  *
  * Every runtime package registers its implementation with
- * `ctx.set('<name>', impl)` (or a `Service` subclass of the same name) from
+ * `ctx.provide('<name>', impl)` (or a `Service` subclass of the same name) from
  * its Cordis plugin, and consumers reach it as `ctx.<name>` typed by the
  * contract only. `ctx.agents` is declared next to its implementation.
  */
