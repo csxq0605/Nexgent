@@ -96,7 +96,7 @@ describe('contracts: type-level shape', () => {
 
   it('session: the v1 record set, common fields and the store surface', () => {
     expectTypeOf<SessionRecordType>().toEqualTypeOf<
-      'session.start' | 'user.message' | 'assistant.message' | 'tool.result' | 'turn.start' | 'turn.end' | 'checkpoint' | 'error'
+      'session.start' | 'user.message' | 'assistant.message' | 'tool.result' | 'turn.start' | 'turn.end' | 'checkpoint' | 'error' | 'approval.request' | 'approval.decision' | 'approval.grant'
     >()
     expectTypeOf<SessionRecord['seq']>().toBeNumber()
     expectTypeOf<SessionRecord['ts']>().toBeString()
@@ -241,7 +241,7 @@ describe('contracts: pure helpers', () => {
     expect(isNexgentError(error, 'tool/failed')).toBe(true)
     expect(isNexgentError(error, 'internal')).toBe(false)
     expect(isNexgentError(inner)).toBe(false)
-    expect(toErrorInfo(error)).toEqual({ name: 'NexgentError', code: 'tool/failed', message: 'tool blew up' })
+    expect(toErrorInfo(error)).toEqual({ name: 'NexgentError', code: 'tool/failed', message: 'tool blew up', details: { name: 'bash' } })
     expect(toErrorInfo(inner)).toEqual({ name: 'Error', code: 'internal', message: 'boom' })
     expect(toErrorInfo('plain string')).toEqual({ name: 'Error', code: 'internal', message: 'plain string' })
     expect(isJsonValue(toErrorInfo(error))).toBe(true)
@@ -291,7 +291,7 @@ describe('contracts: pure helpers', () => {
 
   it('record type lists are complete and in sync with the unions', () => {
     const sessionTypes: readonly SessionRecordType[] = SESSION_RECORD_TYPES
-    expect(new Set(sessionTypes).size).toBe(8)
+    expect(new Set(sessionTypes).size).toBe(11)
     const ledgerTypes: readonly LedgerRecordType[] = LEDGER_RECORD_TYPES
     expect(new Set(ledgerTypes).size).toBe(4)
   })

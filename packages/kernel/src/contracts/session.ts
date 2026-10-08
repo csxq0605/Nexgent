@@ -9,7 +9,9 @@
  */
 import type { ErrorInfo } from './errors.js'
 import type { JsonValue } from './json.js'
+import type { ApprovalDecision, ApprovalGrant, ApprovalRequest } from './approvals.js'
 import type { FinishReason, LLMMessage, LLMUsage, ToolCall } from './llm.js'
+import type { SandboxMode } from './workspace.js'
 
 /** The only session format version. */
 export const SESSION_FORMAT_VERSION = 1
@@ -35,6 +37,8 @@ export interface SessionStartRecord extends SessionRecordBase {
   readonly projectRoot: string
   /** Model id the session was started with. */
   readonly model: string
+  /** Sandbox mode in effect; `resume` keeps it unless the host passes `--sandbox` again. */
+  readonly sandboxMode: SandboxMode
   /** Session this one continues from (step 3 fork); absent for a root session. */
   readonly parentSessionId?: string
   /** Human-readable title when one was given. */
@@ -137,6 +141,26 @@ export interface ErrorRecord extends SessionRecordBase {
   readonly fatal: boolean
 }
 
+/** An approval question was raised for a tool call (mirrors the ledger's `tool.call.approval`). */
+export interface ApprovalRequestRecord extends SessionRecordBase {
+  readonly type: 'approval.request'
+  readonly turn: number
+  readonly request: ApprovalRequest
+}
+
+/** The answer to an {@link ApprovalRequestRecord}. */
+export interface ApprovalDecisionRecord extends SessionRecordBase {
+  readonly type: 'approval.decision'
+  readonly turn: number
+  readonly decision: ApprovalDecision
+}
+
+/** A `session`-scope grant; survives `resume`. Written right after the deciding `approval.decision`. */
+export interface ApprovalGrantRecord extends SessionRecordBase {
+  readonly type: 'approval.grant'
+  readonly grant: ApprovalGrant
+}
+
 /** Every v1 record kind. */
 export type SessionRecord =
   | SessionStartRecord
@@ -147,6 +171,9 @@ export type SessionRecord =
   | TurnEndRecord
   | CheckpointRecord
   | ErrorRecord
+  | ApprovalRequestRecord
+  | ApprovalDecisionRecord
+  | ApprovalGrantRecord
 
 /** The `type` tag vocabulary. */
 export type SessionRecordType = SessionRecord['type']
@@ -161,6 +188,9 @@ export const SESSION_RECORD_TYPES: readonly SessionRecordType[] = [
   'turn.end',
   'checkpoint',
   'error',
+  'approval.request',
+  'approval.decision',
+  'approval.grant',
 ]
 
 /** Distributive omit over a union. */
@@ -177,6 +207,10 @@ export interface SessionMetadata {
   readonly projectRoot: string
   /** From `session.start`. */
   readonly model: string
+  /** From `session.start`. */
+  readonly sandboxMode: SandboxMode
+  /** `session`-scope approval grants from `approval.grant` records, in order. */
+  readonly grants: readonly ApprovalGrant[]
   /** Title when set. */
   readonly title?: string
   /** Number of the last turn opened; 0 before the first. */
@@ -204,6 +238,7 @@ export interface SessionInit {
   readonly sessionId: string
   readonly projectRoot: string
   readonly model: string
+  readonly sandboxMode: SandboxMode
   readonly parentSessionId?: string
   readonly title?: string
 }

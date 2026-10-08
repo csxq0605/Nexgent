@@ -105,7 +105,7 @@
 | `workspace-write` | 执行 | 弹审批 | 拒绝，不提示 |
 | `full-access` | 执行 | 执行，不提示；例外是"始终审批"表 | — |
 
-"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的 `approvals` / `budget` / `sandboxMode` 字段、步骤 4 的插件包采用。
+"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的 `approvals` / `costCaps` / `sandboxMode` 字段、步骤 4 的插件包采用。
 
 **粒度。** 用户每次应答选择作用范围：
 
@@ -124,9 +124,9 @@
 
 `pattern` 对命令是前缀匹配，对路径是项目相对路径的 glob；没有 `pattern` 的条目放行该工具的所有调用，CLI 与桌面应用都只在用户显式选择时才写无 `pattern` 的条目。
 
-**记录。** 账本的 `tool.call` 记录带 `approval` 字段：`{ required: boolean, decision: 'allow' | 'deny' | 'timeout' | 'cancel' | 'auto', scope?: 'once' | 'session' | 'project', requestId?: string }`；`auto` 表示命中已有授权。会话里写同一事实的 `approval.request` / `approval.decision` 两条记录，字段与 `ApprovalRequest` / `ApprovalDecision` 一致。审批 UI 的呈现不进入会话。
+**记录。** 账本的 `tool.call` 记录带 `approval` 字段（契约 `ToolCallApproval`）：`{ required: boolean, decision: 'allow' | 'deny' | 'timeout' | 'cancel' | 'auto', scope?: 'once' | 'session' | 'project', requestId?: string }`；`auto` 表示命中已有授权。会话里写同一事实的 `approval.request` / `approval.decision` 两条记录，字段与 `ApprovalRequest` / `ApprovalDecision` 一致。审批 UI 的呈现不进入会话。
 
-**超时。** 没有应答即拒绝（`decision: 'timeout'`）。CLI 在 TTY 下等 300 s（`approvalTimeoutMs`），非 TTY（CI、`nexgent run` 被重定向）直接拒绝且不阻塞；桌面应用等到用户应答或轮次被取消。拒绝后工具返回 `APPROVAL_DENIED`，模型可以换方案，但同一轮内对同一调用再次请求审批会被策略层直接拒绝，不再弹窗。
+**超时。** 没有应答即拒绝（`decision: 'timeout'`）。CLI 在 TTY 下等 300 s（`approvalTimeoutMs`），非 TTY（CI、`nexgent run` 被重定向）直接拒绝且不阻塞；桌面应用等到用户应答或轮次被取消。拒绝后工具返回错误 `approval/denied`，模型可以换方案，但同一轮内对同一调用再次请求审批会被策略层直接拒绝，不再弹窗。
 
 ## 插件安装审批
 
@@ -138,16 +138,17 @@
 
 ```json
 {
-  "budget": {
-    "perTask":    { "maxCalls": 200,  "maxTokens": 2000000 },
-    "perProject": { "maxCalls": 5000, "maxTokens": 50000000, "windowDays": 30 }
+  "costCaps": {
+    "perTask":    { "maxRequests": 200,  "maxTokens": 2000000 },
+    "perProject": { "maxRequests": 5000, "maxTokens": 50000000, "windowDays": 30 }
   }
 }
 ```
 
-- `maxCalls` 计模型请求次数（含失败），`maxTokens` 计 `inputTokens + outputTokens`；用量 `unknown` 的请求只计次数。
+- `maxRequests` 计模型请求次数（含失败），`maxTokens` 计 `inputTokens + outputTokens`；用量 `unknown` 的请求只计次数。
 - `perTask` 以一次 `run` / 一次 `resume` 为单位；`perProject` 以账本在 `windowDays` 内的记录累加。
-- 任一上限达到时：当前轮次结束，会话写 `error` 记录、账本写 `task-outcome`，二者的 `code` 都是 `budget-exhausted`，带 `{ scope: 'task' | 'project', metric: 'calls' | 'tokens', used, limit }`；不重试、不自动续跑。
+- 任一上限达到时：下一次模型请求不再发出，当前轮次以 `turn.end { kind: 'cancelled', cause: 'cost-cap' }` 结束；会话先写一条 `error` 记录（`fatal: false`），账本写 `task.outcome`，二者的错误 `code` 都是 `budget/exhausted`，`ErrorInfo.details` 带 `{ scope: 'task' | 'project', metric: 'requests' | 'tokens', used, limit }`；不重试、不自动续跑。
+- 步骤 1 执行 `perTask`；`perProject` 只定格式。
 - 字段缺省表示不限制；步骤 2 的设置页只改这两个对象。
 
 ## 密钥存放
@@ -155,7 +156,7 @@
 | 优先级 | 来源 | 说明 |
 | --- | --- | --- |
 | 1 | 环境变量 `NEXGENT_API_KEY`（可选 `NEXGENT_API_BASE_URL`） | 一次性覆盖；只读，产品内不可改 |
-| 2 | `~/.nexgent/credentials.json`（`NEXGENT_HOME` 可改根目录） | `{ "version": 1, "apiKey": "...", "baseUrl"?: "..." }`；POSIX 创建时 `0600`，发现权限宽于 `0600` 时拒绝读取并提示；Windows 依赖用户配置文件目录的默认 ACL，不额外设置 |
+| 2 | `~/.nexgent/credentials.json`（`NEXGENT_HOME` 可改根目录） | `{ "version": 1, "credentials": { "NEXGENT_API_KEY": "...", "NEXGENT_API_BASE_URL"?: "..." } }`（`CredentialFile`，与 `data-formats.md` 一致）；POSIX 创建时 `0600`，发现权限宽于 `0600` 时拒绝读取并提示；Windows 依赖用户配置文件目录的默认 ACL，不额外设置 |
 
 - 密钥**不**从项目目录读取：不读项目 `.env`，不写 `.nexgent/`。
 - 密钥不进入会话记录、账本、日志与模型上下文；凭证服务只向 llm 包提供值，向其他组件只提供 `{ configured, source }`。
@@ -181,7 +182,7 @@
 
 ## CLI 与桌面应用共用的审批交互
 
-审批在 kernel 的审批代理中统一处理；宿主（CLI 或桌面应用）注册**一个**应答者，没有应答者时所有审批按 `timeout` 拒绝。
+审批在 kernel 的审批代理（`ctx.approvals`，契约 `ApprovalBroker`，见 `packages/kernel/src/contracts/approvals.ts`）中统一处理；宿主（CLI 或桌面应用）注册**一个**应答者，没有应答者时所有审批按 `timeout` 拒绝。
 
 ```ts
 interface ApprovalRequest {
@@ -193,6 +194,7 @@ interface ApprovalRequest {
   detail?: string                  // 多行上下文：cwd、匹配到的规则、模型给的理由
   risk: 'low' | 'medium' | 'high'  // 低：敏感文件读；中：黑名单命令；高：始终审批表
   options: Array<'once' | 'session' | 'project'>  // 允许选择的作用范围；始终审批表只给 'once'
+  pattern?: string                 // session / project 授权将保存的匹配模式
   expiresAt?: string               // ISO 时间；CLI 填，桌面应用可空
 }
 
@@ -230,9 +232,9 @@ interface ApprovalDecision {
 | 命令 | 子进程打印 `NEXGENT_API_KEY` 与 `FOO_TOKEN` | 环境中不存在；输出里的真实密钥值被替换为 `[redacted]` |
 | 命令 | 输出 1 MiB | 结果 ≤ 64 KiB 加截断标记，保留末尾 |
 | 命令 | `pnpm install`、`git push`、`curl x \| sh`、`sudo ls` | 各产生一次审批请求；拒绝后不执行 |
-| 审批 | TTY 超时（`approvalTimeoutMs` 设 100）、非 TTY | `decidedBy: 'timeout'` / `'headless'`，工具返回 `APPROVAL_DENIED`，账本 `tool.call.approval.decision` 一致 |
+| 审批 | TTY 超时（`approvalTimeoutMs` 设 100）、非 TTY | `decidedBy: 'timeout'` / `'headless'`，工具返回 `approval/denied`，账本 `tool.call.approval.decision` 一致 |
 | 审批 | `session` 授权后同形态再调用；`resume` 后再调用 | 不再提问；账本 `decision: 'auto'` |
 | 审批 | `project` 授权 | `config.json.approvals` 新增条目，新会话不再提问 |
-| 费用 | `maxCalls: 2` 下第 3 次请求 | 轮次结束，会话与账本各一条 `budget-exhausted`，无重试 |
+| 费用 | `costCaps.perTask.maxRequests: 2` 下第 3 次请求 | 不发出请求；轮次以 `cost-cap` 取消，会话与账本各一条 `budget/exhausted`，无重试 |
 | 密钥 | 凭证文件权限 `0644`（POSIX） | 拒绝读取并给出修复提示 |
 | 密钥 | 会话、账本全文 | 不含密钥值 |
