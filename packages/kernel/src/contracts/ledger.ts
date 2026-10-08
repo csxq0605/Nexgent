@@ -8,6 +8,8 @@
  * model request produces exactly one `llm.request.start` and one
  * `llm.request.end`, failed and aborted ones included (`maxRetries: 0`).
  */
+import type { ToolCallApproval } from './approvals.js'
+import type { ErrorInfo } from './errors.js'
 import type { FinishReason, LLMRequestPurpose, LLMUsage } from './llm.js'
 import type { ToolEffect } from './tools.js'
 
@@ -73,9 +75,6 @@ export interface LLMRequestEndRecord extends LedgerRecordBase {
   readonly errorCode?: string
 }
 
-/** How a tool call was authorized. */
-export type ToolCallAuthorization = 'auto' | 'approved' | 'denied'
-
 /** A tool call ran (or was denied). No arguments and no output are recorded. */
 export interface ToolCallRecord extends LedgerRecordBase {
   readonly type: 'tool.call'
@@ -84,7 +83,8 @@ export interface ToolCallRecord extends LedgerRecordBase {
   readonly callId: string
   readonly name: string
   readonly effects: readonly ToolEffect[]
-  readonly authorization: ToolCallAuthorization
+  /** How the call was authorized; `permissions.md` §工具审批. */
+  readonly approval: ToolCallApproval
   readonly isError: boolean
   readonly durationMs: number
 }
@@ -106,6 +106,8 @@ export interface TaskOutcomeRecord extends LedgerRecordBase {
   readonly type: 'task.outcome'
   readonly sessionId: string
   readonly status: TaskOutcomeStatus
+  /** Why the task did not complete (e.g. `budget/exhausted`); absent when `completed`. */
+  readonly error?: ErrorInfo
   /** Sum of every request's usage in the task. */
   readonly totalUsage: LLMUsage
   readonly requestCount: number

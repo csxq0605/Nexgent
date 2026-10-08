@@ -40,6 +40,9 @@ export type NexgentErrorCode =
   | 'credentials/missing'
   | 'config/invalid'
   | 'config/profile-patch'
+  // approvals and cost caps
+  | 'approval/denied'
+  | 'budget/exhausted'
   // catch-all for programmer errors and wrapped unknowns
   | 'internal'
 
@@ -87,6 +90,8 @@ export interface ErrorInfo {
   readonly code: NexgentErrorCode
   /** The human-readable message. */
   readonly message: string
+  /** The thrower's structured `details`, when given (e.g. `budget/exhausted` carries scope, metric, used, limit). */
+  readonly details?: Readonly<Record<string, unknown>>
 }
 
 /**
@@ -95,7 +100,9 @@ export interface ErrorInfo {
  */
 export function toErrorInfo(error: unknown): ErrorInfo {
   if (error instanceof NexgentError) {
-    return { name: error.name, code: error.code, message: error.message }
+    return error.details === undefined
+      ? { name: error.name, code: error.code, message: error.message }
+      : { name: error.name, code: error.code, message: error.message, details: error.details }
   }
   if (error instanceof Error) {
     return { name: error.name, code: 'internal', message: error.message }

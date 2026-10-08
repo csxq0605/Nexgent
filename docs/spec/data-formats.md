@@ -74,6 +74,7 @@
 | `sandboxMode` | `"read-only" \| "workspace-write" \| "full-access"` | `"workspace-write"` | 新会话的默认沙箱模式；语义见 `permissions.md` |
 | `costCaps.perTask` | `CostCap` | 无 | 每任务上限 |
 | `costCaps.perProject` | `CostCap` | 无 | 每项目上限 |
+| `approvals` | `ApprovalGrant[]` | `[]` | `project` 范围的审批授权；语义见 `permissions.md` |
 | `autoImprove` | boolean | `false` | 反馈触发的自动改进（步骤 5）开关 |
 
 `CostCap`：
@@ -81,9 +82,10 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `maxTokens` | number | 输入 + 输出 token 上限；超过时当前轮以 `cost-cap` 取消 |
-| `maxRequests` | number | 模型请求次数上限 |
+| `maxRequests` | number | 模型请求次数上限（含失败的请求） |
+| `windowDays` | number | 仅 `perProject`：按账本累加的时间窗，默认 30 |
 
-步骤 1 只定格式，不执行上限（计划 4.10：费用上限“步骤 1 只定格式”）；执行它的计量器在后续步骤接入。
+计数方式与达到上限的行为见 `permissions.md` §费用上限。步骤 1 执行 `perTask`；`perProject` 只定格式，产品设置页在步骤 2。
 
 示例：
 
@@ -138,14 +140,17 @@
 
 | `type` | 何时写 | 专有字段 |
 | --- | --- | --- |
-| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`parentSessionId?`、`title?` |
+| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?` |
 | `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn` |
 | `user.message` | 用户消息进入会话，或注入的合成上下文 | `turn`、`content`、`source: "user" \| "inject"` |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?` |
 | `tool.result` | 一次工具调用返回 | `turn`、`step`、`toolCallId`、`name`、`content`、`isError`、`error?`、`meta?`、`durationMs` |
 | `turn.end` | 一轮结束 | `turn`、`reason` |
 | `checkpoint` | 见“checkpoint” | `coversSeq`、`state` |
-| `error` | 不属于某条 `turn.end` / `tool.result` 的失败（如账本写失败、恢复时的截断） | `turn?`、`error`、`fatal` |
+| `error` | 不属于某条 `turn.end` / `tool.result` 的失败（如账本写失败、恢复时的截断、费用上限） | `turn?`、`error`、`fatal` |
+| `approval.request` | 一次工具调用需要审批 | `turn`、`request: ApprovalRequest` |
+| `approval.decision` | 审批得到应答（含超时、取消、非 TTY 拒绝） | `turn`、`decision: ApprovalDecision` |
+| `approval.grant` | 用户选择 `session` 范围放行，紧跟对应的 `approval.decision` | `grant: { tool, pattern?, grantedAt }` |
 
 字段细则：
 
@@ -153,18 +158,18 @@
 - `assistant.message.usage`：`LLMUsage`，五个字段 `inputTokens / outputTokens / totalTokens / cacheReadTokens / reasoningTokens` 每个都是非负整数或字符串 `"unknown"`；provider 没报用量时全为 `"unknown"`，不写 0。
 - `assistant.message.finishReason`：`stop | tool-calls | max-tokens | aborted | error`。
 - `assistant.message.interrupted: true`：该轮在流中被取消，`content` 是已流出的前缀，`toolCalls` 不写（未派发的调用不进入历史）。
-- `tool.result.error`：`ErrorInfo = { name, code, message }`，仅当 `isError` 为真；`meta` 是工具私有的 JSON 值（如 diff），原样持久化。
+- `tool.result.error`：`ErrorInfo = { name, code, message, details? }`，仅当 `isError` 为真；`meta` 是工具私有的 JSON 值（如 diff），原样持久化。
 - `turn.end.reason`：`{ kind: "completed" }`、`{ kind: "cancelled", cause: "user" | "timeout" | "shutdown" | "cost-cap" }`、`{ kind: "error", error: ErrorInfo }`、`{ kind: "max-tokens" }`、`{ kind: "interrupted" }`。最后一种只由恢复过程写出，用来关闭上一个进程没来得及关闭的轮次。
 - `error.fatal`：为真表示会话不能继续；恢复时遇到最后一条是 fatal 的 `error`，`resume` 仍返回状态，由调用方决定是否继续。
 
-一轮的记录顺序固定为：`turn.start` → `user.message` → （`assistant.message` → `tool.result`×n）×steps → `turn.end`。`step` 从 1 起，在轮内递增。
+一轮的记录顺序固定为：`turn.start` → `user.message` → （`assistant.message` → `tool.result`×n）×steps → `turn.end`。需要审批的调用在其 `tool.result` 之前插入 `approval.request` → `approval.decision`（→ `approval.grant`）。`ApprovalRequest` / `ApprovalDecision` 的字段见 `permissions.md`。`step` 从 1 起，在轮内递增。
 
 ### 示例
 
 一次“写文件”任务的完整会话（为可读省略了部分 `ts`）：
 
 ```jsonl
-{"type":"session.start","seq":1,"ts":"2026-10-07T08:00:00.000Z","sessionId":"6f1c…","version":1,"projectRoot":"/home/u/proj","model":"mimo-v2.6-pro"}
+{"type":"session.start","seq":1,"ts":"2026-10-07T08:00:00.000Z","sessionId":"6f1c…","version":1,"projectRoot":"/home/u/proj","model":"mimo-v2.6-pro","sandboxMode":"workspace-write"}
 {"type":"turn.start","seq":2,"ts":"…","sessionId":"6f1c…","turn":1}
 {"type":"user.message","seq":3,"ts":"…","sessionId":"6f1c…","turn":1,"content":"把 README 第一行改成 Hello","source":"user"}
 {"type":"assistant.message","seq":4,"ts":"…","sessionId":"6f1c…","turn":1,"step":1,"requestId":"a0b1…","content":"","toolCalls":[{"id":"call_1","name":"str_replace","arguments":"{\"path\":\"README.md\",\"old\":\"# Hi\",\"new\":\"# Hello\"}"}],"usage":{"inputTokens":812,"outputTokens":37,"totalTokens":849,"cacheReadTokens":0,"reasoningTokens":0},"finishReason":"tool-calls"}
@@ -226,7 +231,7 @@
 
 | 记录 | 对 `messages` | 对 `metadata` |
 | --- | --- | --- |
-| `session.start` | 无 | `createdAt`、`projectRoot`、`model`、`title`；`lastTurn = 0`；`totalUsage` 置为全 0（`ZERO_USAGE`，加法单位元） |
+| `session.start` | 无 | `createdAt`、`projectRoot`、`model`、`sandboxMode`、`title`；`lastTurn = 0`；`grants = []`；`totalUsage` 置为全 0（`ZERO_USAGE`，加法单位元） |
 | `turn.start` | 无 | `lastTurn = turn`，`openTurn = turn` |
 | `user.message` | 追加 `{ role: "user", content }` | 无 |
 | `assistant.message` | 追加 `{ role: "assistant", content, toolCalls? }`；`interrupted` 且 `content` 为空时不追加 | `totalUsage = addUsage(totalUsage, usage)`（任一字段 `"unknown"` 则和为 `"unknown"`） |
@@ -302,7 +307,7 @@
 | `callId` | string | 模型给出的调用 ID |
 | `name` | string | 工具名 |
 | `effects` | `("read" \| "write" \| "execute" \| "network")[]` | 工具声明的效果 |
-| `authorization` | `"auto" \| "approved" \| "denied"` | 自动放行、人工批准、被拒 |
+| `approval` | `ToolCallApproval` | `{ required, decision: "allow" \| "deny" \| "timeout" \| "cancel" \| "auto", scope?, requestId? }`；`auto` 表示无需提问（工具 `never` 或命中已有授权） |
 | `isError` | boolean | 调用是否失败（被拒也算失败） |
 | `durationMs` | number | 处理器耗时；被拒为 0 |
 
@@ -326,7 +331,7 @@
 ```jsonl
 {"type":"llm.request.start","ts":"2026-10-07T08:00:01.000Z","sessionId":"6f1c…","requestId":"a0b1…","provider":"mimo","endpoint":"https://token-plan-cn.xiaomimimo.com/v1","model":"mimo-v2.6-pro","purpose":"task","thinking":"off"}
 {"type":"llm.request.end","ts":"2026-10-07T08:00:03.200Z","sessionId":"6f1c…","requestId":"a0b1…","provider":"mimo","endpoint":"https://token-plan-cn.xiaomimimo.com/v1","model":"mimo-v2.6-pro","status":"ok","usage":{"inputTokens":812,"outputTokens":37,"totalTokens":849,"cacheReadTokens":0,"reasoningTokens":0},"latencyMs":2200,"httpStatus":200,"finishReason":"tool-calls"}
-{"type":"tool.call","ts":"2026-10-07T08:00:03.210Z","sessionId":"6f1c…","turn":1,"callId":"call_1","name":"str_replace","effects":["write"],"authorization":"auto","isError":false,"durationMs":4}
+{"type":"tool.call","ts":"2026-10-07T08:00:03.210Z","sessionId":"6f1c…","turn":1,"callId":"call_1","name":"str_replace","effects":["write"],"approval":{"required":false,"decision":"auto"},"isError":false,"durationMs":4}
 {"type":"llm.request.start","ts":"2026-10-07T08:00:03.300Z","sessionId":"6f1c…","requestId":"c2d3…","provider":"mimo","endpoint":"https://token-plan-cn.xiaomimimo.com/v1","model":"mimo-v2.6-pro","purpose":"task","thinking":"off"}
 {"type":"llm.request.end","ts":"2026-10-07T08:00:04.100Z","sessionId":"6f1c…","requestId":"c2d3…","provider":"mimo","endpoint":"https://token-plan-cn.xiaomimimo.com/v1","model":"mimo-v2.6-pro","status":"error","usage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","reasoningTokens":"unknown"},"latencyMs":800,"httpStatus":503,"errorCode":"llm/request-failed"}
 {"type":"task.outcome","ts":"2026-10-07T08:00:04.200Z","sessionId":"6f1c…","status":"failed","totalUsage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","reasoningTokens":"unknown"},"requestCount":2,"toolCallCount":1,"turns":1,"toolsUsed":["str_replace"]}

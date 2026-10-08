@@ -4,15 +4,18 @@
  */
 import { NexgentError } from './errors.js'
 import type { JsonObject, JsonValue } from './json.js'
+import type { ApprovalGrant } from './approvals.js'
 import type { ThinkingMode } from './llm.js'
 import type { SandboxMode } from './workspace.js'
 
-/** A spending ceiling. Step 1 only fixes the shape; enforcement lands with the cost meter. */
+/** A spending ceiling; `permissions.md` §费用上限 defines counting and what happens on reaching it. */
 export interface CostCap {
   /** Max tokens (input + output) before the turn is cancelled with cause `cost-cap`. */
   readonly maxTokens?: number
-  /** Max model requests. */
+  /** Max model requests, failed ones included. */
   readonly maxRequests?: number
+  /** `perProject` only: the ledger window the totals are summed over; default 30. */
+  readonly windowDays?: number
 }
 
 /** `.nexgent/config.json`. Every field has a default; a missing file equals `{}`. */
@@ -32,6 +35,8 @@ export interface ProjectConfig {
     readonly perTask?: CostCap
     readonly perProject?: CostCap
   }
+  /** `project`-scope approval grants; default `[]`. Changing it always needs approval. */
+  readonly approvals: readonly ApprovalGrant[]
   /** Whether feedback-triggered improvement runs (step 5); default `false`. */
   readonly autoImprove: boolean
 }
@@ -44,6 +49,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
   thinking: 'off',
   sandboxMode: 'workspace-write',
   costCaps: Object.freeze({}),
+  approvals: Object.freeze([]),
   autoImprove: false,
 }) as ProjectConfig
 
@@ -62,6 +68,7 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
     thinking: input.thinking ?? DEFAULT_PROJECT_CONFIG.thinking,
     sandboxMode: input.sandboxMode ?? DEFAULT_PROJECT_CONFIG.sandboxMode,
     costCaps: input.costCaps ?? DEFAULT_PROJECT_CONFIG.costCaps,
+    approvals: input.approvals ?? DEFAULT_PROJECT_CONFIG.approvals,
     autoImprove: input.autoImprove ?? DEFAULT_PROJECT_CONFIG.autoImprove,
   }
 }
