@@ -1,0 +1,16 @@
+data: {"id":"chatcmpl-3","object":"chat.completion.chunk","model":"mimo-v2.6-pro","choices":[{"index":0,"delta":{"role":"assistant","content":"Writing the file."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3","object":"chat.completion.chunk","model":"mimo-v2.6-pro","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"write_file","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3","object":"chat.completion.chunk","model":"mimo-v2.6-pro","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\": \"notes"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3","object":"chat.completion.chunk","model":"mimo-v2.6-pro","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":".md\", \"content\": "}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3","object":"chat.completion.chunk","model":"mimo-v2.6-pro","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"hi\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-3","object":"chat.completion.chunk","model":"mimo-v2.6-pro","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"id":"chatcmpl-3","object":"chat.completion.chunk","model":"mimo-v2.6-pro","choices":[],"usage":{"prompt_tokens":120,"completion_tokens":30,"total_tokens":150,"prompt_tokens_details":{"cached_tokens":0}}}
+
+data: [DONE]
+

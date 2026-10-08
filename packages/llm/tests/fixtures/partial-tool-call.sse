@@ -1,0 +1,4 @@
+data: {"id":"chatcmpl-6","object":"chat.completion.chunk","model":"mimo-v2.6-pro","choices":[{"index":0,"delta":{"content":"Thinking about it. "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-6","object":"chat.completion.chunk","model":"mimo-v2.6-pro","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"write_file","arguments":"{\"path\""}}]},"finish_reason":null}]}
+
