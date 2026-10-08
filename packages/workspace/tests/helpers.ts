@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import * as nodePath from 'node:path'
@@ -14,7 +14,8 @@ afterEach(async () => {
 
 /** A fresh temp directory removed after the test. Never named `nexgent-*`. */
 export async function tempDir(prefix = 'nxws-'): Promise<string> {
-  const dir = await mkdtemp(nodePath.join(tmpdir(), prefix))
+  // Native realpath expands Windows 8.3 short names (RUNNER~1) the sandbox reports in full.
+  const dir = realpathSync.native(await mkdtemp(nodePath.join(tmpdir(), prefix)))
   cleanups.push(dir)
   return dir
 }
