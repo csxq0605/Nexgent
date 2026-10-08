@@ -6,8 +6,8 @@ try {
 } catch (error) {
   if (error && error.code === 'ERR_MODULE_NOT_FOUND') {
     process.stderr.write('nexgent: build output not found; run `pnpm build` first\n')
-    process.exit(1)
+    process.exit(4)
   }
   throw error
 }
-process.exitCode = main(process.argv.slice(2))
+process.exitCode = await main(process.argv.slice(2))
