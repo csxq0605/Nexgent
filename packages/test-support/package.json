@@ -2,7 +2,7 @@
   "name": "@nexgent/test-support",
   "version": "0.0.0",
   "private": true,
-  "description": "Test helpers shared by Nexgent packages: scripted model server, fixtures, fault injection",
+  "description": "Test helpers shared by Nexgent packages: scripted provider and model server, fault injection, cross-process acceptance harness",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./acceptance": {
+      "types": "./dist/acceptance.d.ts",
+      "import": "./dist/acceptance.js"
     }
   },
   "files": [
