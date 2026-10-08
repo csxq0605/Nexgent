@@ -1,43 +1,69 @@
 /**
- * `@nexgent/kernel` — the Nexgent runtime kernel.
- *
- * Step 0 scope: prove the Cordis dependency choice. This module creates the
- * root Cordis `Context` for a Nexgent application and ships one example
- * plugin (`Greeter`) whose config is validated with schemastery and which
- * registers a service on `ctx`. Step 1 of the plan replaces the example with
- * the real `ctx.agents` / `ctx.tools` / `ctx.session` services.
+ * `@nexgent/kernel` — the Nexgent runtime kernel: profile boot, the frozen
+ * service contracts, `ctx.tools`, `ctx.approvals`, `ctx.credentials`,
+ * `ctx.agents` and the agent loop, system-prompt assembly, and atomic-write
+ * / JSON storage primitives.
  */
-import { Context } from '@deepseek-ai/cordis'
-
 export { Context, Service, ValidationError } from '@deepseek-ai/cordis'
 export type { Fiber, Plugin } from '@deepseek-ai/cordis'
-export { Greeter } from './greeter.js'
-export type { GreeterConfig } from './greeter.js'
 export * from './contracts/index.js'
 export { CONTRACT_SERVICES } from './services.js'
 export type { ContractServiceName } from './services.js'
 
-/** A running Nexgent application: a root Cordis context plus its disposer. */
-export interface NexgentApp {
-  /** The root dependency container every plugin and service hangs off. */
-  readonly ctx: Context
-  /** Unload every plugin and service started under the root context. */
-  dispose(): Promise<void>
-}
+export { createApp, KERNEL_PLUGIN_NAMES, KERNEL_PLUGINS } from './app.js'
+export type { CreateAppOptions, NexgentApp } from './app.js'
+export {
+  bootProfile,
+  DEFAULT_PROFILE_FILE,
+  defaultProfile,
+  loadPatchFile,
+  loadProfileFile,
+  parsePatches,
+  parseProfile,
+  resolvePlugin,
+} from './profile.js'
+export type { LoadedRow, PluginRegistry } from './profile.js'
 
-/** Options accepted by {@link createApp}. Empty for now; step 1 adds profile loading. */
-export interface CreateAppOptions {}
+export { AgentsService } from './agents.js'
+export type { AgentsConfig, CreateAgentOptions, ResumeAgentOptions } from './agents.js'
+export { Agent, MODEL_IDLE_TIMEOUT, MODEL_TIMEOUT, repairHistory, TOOL_TIMEOUT, TurnAbort } from './agent.js'
+export type {
+  AgentSettings,
+  CloseOptions,
+  KernelToolContext,
+  ProjectGrantWriter,
+  RunOptions,
+  TaskStats,
+  ToolApprovalAsk,
+  TurnResult,
+} from './agent.js'
+export { AgentEventHub } from './agent-events.js'
+export type { AgentEvent, AgentEventListener, AgentEventType } from './agent-events.js'
 
-/**
- * Create a Nexgent application context.
- *
- * Plugins are started with `app.ctx.plugin(plugin, config)`; the config is
- * validated against the plugin's `Config` schema before it runs.
- */
-export function createApp(_options: CreateAppOptions = {}): NexgentApp {
-  const ctx = new Context()
-  return {
-    ctx,
-    dispose: () => ctx.fiber.dispose(),
-  }
-}
+export { TOOL_NAME_PATTERN, TOOL_SCOPE, ToolRegistryService } from './tools.js'
+export type { ToolScope } from './tools.js'
+export { ApprovalBrokerService } from './approvals.js'
+export type { ApprovalsConfig } from './approvals.js'
+export { approvalSubject, decideToolPolicy, derivePattern, globMatch, grantMatches } from './approval-policy.js'
+export type { ApprovalSubject, ToolPolicyVerdict } from './approval-policy.js'
+export {
+  CREDENTIAL_FILE_NAME,
+  credentialFilePath,
+  CredentialsService,
+  LocalCredentials,
+  NEXGENT_HOME,
+  nexgentHome,
+  readCredentialFile,
+  saveCredential,
+} from './credentials.js'
+export type { CredentialsConfig, CredentialSourceOptions } from './credentials.js'
+export { appendProjectGrant, parseProjectConfig, readProjectConfig } from './project-config.js'
+export type { LoadedProjectConfig } from './project-config.js'
+export { DEFAULT_PERSONA, DEFAULT_PERSONA_SUFFIX, renderSystemPrompt } from './system-prompt.js'
+export type { SystemPromptInput, SystemPromptTemplate } from './system-prompt.js'
+export { validateJsonSchema } from './json-schema.js'
+export { JsonStore, readJsonFile, writeJsonFile } from './storage/json-file.js'
+export { fsyncDirectory, writeFileAtomic } from './util/atomic-write.js'
+export type { WriteFileAtomicOptions } from './util/atomic-write.js'
+export { abortPromise, deadline, MAX_TIMER_DELAY_MS, timeoutOf, TimeoutReason } from './util/timeout.js'
+export type { Deadline } from './util/timeout.js'

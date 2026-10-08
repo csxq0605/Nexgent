@@ -2,7 +2,7 @@
   "name": "@nexgent/kernel",
   "version": "0.0.0",
   "private": true,
-  "description": "Nexgent runtime kernel: Cordis application context, plugin and service conventions",
+  "description": "Nexgent runtime kernel: profile boot, service contracts, agents and the agent loop, tools, approvals, credentials and storage primitives",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,10 +10,12 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./profiles/*": "./profiles/*"
   },
   "files": [
-    "dist"
+    "dist",
+    "profiles"
   ],
   "scripts": {
     "build": "tsc -b tsconfig.json",
