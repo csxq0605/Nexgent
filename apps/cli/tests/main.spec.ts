@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NexgentError } from '@nexgent/kernel'
 import { EXIT, main, RESUME_DEFAULT_TASK, RUNTIME_NOT_WIRED_MESSAGE } from '../src/index.js'
 import { FakeRuntime, SID, testIo, writeFileTurn } from './helpers.js'
@@ -110,8 +110,7 @@ describe('main', () => {
       credentials: { ...noKeyProbe, env: { NEXGENT_API_KEY: 'k' } },
       loadRuntime: async () => runtime,
     })
-    await new Promise(resolve => setTimeout(resolve, 20))
-    expect(t.stdout.text).toBe('Created ')
+    await vi.waitFor(() => expect(t.stdout.text).toBe('Created '), { timeout: 5000 })
     t.raise('SIGINT')
     expect(await running).toBe(EXIT.CANCELLED)
     expect(t.exits).toEqual([])
@@ -127,7 +126,7 @@ describe('main', () => {
       credentials: { ...noKeyProbe, env: { NEXGENT_API_KEY: 'k' } },
       loadRuntime: async () => stuck,
     })
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await vi.waitFor(() => expect(stuck.tasks).toHaveLength(1), { timeout: 5000 })
     t2.raise('SIGINT')
     t2.raise('SIGINT')
     expect(t2.exits).toEqual([130])
