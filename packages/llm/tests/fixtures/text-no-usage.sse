@@ -1,0 +1,6 @@
+data: {"id":"chatcmpl-2","object":"chat.completion.chunk","model":"mimo-v2.6-pro","choices":[{"index":0,"delta":{"role":"assistant","content":"No usage here."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-2","object":"chat.completion.chunk","model":"mimo-v2.6-pro","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}
+
+data: [DONE]
+
