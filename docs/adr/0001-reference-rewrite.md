@@ -21,8 +21,8 @@ Draft PR #4（`refactor/dsh-application`）把 DeepSeek Harness（DSH）13,321 �
 
 ### 模型
 
-5. **默认模型 `mimo-v2.6-pro`。** 执行（主智能体、成员）关闭 thinking；改进与审核（步骤 5–6 的诊断、提案、审核模型）允许开启 thinking 或换更强模型，费用计入改进本身。
-6. **单路由 + 可配置端点。** 步骤 1 只接 MiMo 一条 OpenAI 兼容路由；其他 OpenAI 兼容端点作为配置项，不做多 provider 抽象。
+5. **默认模型 `mimo-v2.6-pro`。**（模型部分已由 [ADR 0002](0002-claude-platform-route.md) 替代为 Claude Sonnet 5.5。） 执行（主智能体、成员）关闭 thinking；改进与审核（步骤 5–6 的诊断、提案、审核模型）允许开启 thinking 或换更强模型，费用计入改进本身。
+6. **单路由 + 可配置端点。**（路由已由 [ADR 0002](0002-claude-platform-route.md) 改为 Claude Platform。） 步骤 1 只接 MiMo 一条 OpenAI 兼容路由；其他 OpenAI 兼容端点作为配置项，不做多 provider 抽象。
 7. **真实模型实验只设预算上限、不设停止条件。** 步骤 4–6 每轮实验的调用与 token 上限在开工前按任务族约定；达到上限即停，不以降低门槛换取正例。
 
 ### 界面与平台

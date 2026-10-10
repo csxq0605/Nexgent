@@ -7,7 +7,7 @@
 | 包 | 职责一句话 | 依赖 | 可并行 |
 | --- | --- | --- | --- |
 | `@nexgent/kernel` | Cordis 应用装载、`ctx.agents` 与 agent loop、`ctx.tools`、系统提示、凭证与存储原语、服务契约 | Cordis 库；契约冻结后依赖 llm / session / workspace 的实现 | 契约冻结后与其余四包并行 |
-| `@nexgent/llm` | MiMo 单路由、流式与工具调用、用量计量、请求账本 | kernel 契约 | session、workspace、test-support |
+| `@nexgent/llm` | Claude Platform 单路由（ADR 0002）、流式与工具调用、用量计量、请求账本 | kernel 契约 | session、workspace、test-support |
 | `@nexgent/session` | JSONL v1 追加写、checkpoint、按会话 ID 恢复 | kernel 契约、`docs/spec/data-formats.md` | llm、workspace、test-support |
 | `@nexgent/workspace` | 工作目录与 `.nexgent/`、文件工具、shell 工具、子进程、沙箱策略 | kernel 契约、`docs/spec/permissions.md` | llm、session、test-support |
 | `apps/cli` | `nexgent run / resume / app`、项目数据目录、密钥读取、验收脚本 | 全部四包 | 第 1 周可先写参数解析与骨架 |
@@ -26,7 +26,7 @@ apps/cli ──► kernel ──► llm
 
 1. **第 1 周：契约与规范先行。** kernel 负责人冻结 `packages/kernel/src/contracts/` 下的服务接口（`LLMProvider`、`SessionStore`、`Workspace`、`Sandbox`、`Credentials`、`Ledger`），并写完 `docs/spec/data-formats.md` 与 `docs/spec/permissions.md` 的步骤 1 部分；test-support 同步提供脚本化 provider 的最小实现。契约文件在冻结后只能通过修改 PR 变更，并通知依赖方。
 2. **第 2–3 周：四包并行。** llm、session、workspace 各自对契约实现并用 test-support 的仿真测试；kernel 做 agent loop 与 profile 装载；cli 接骨架。第 2–3 周末过中期检查点。
-3. **第 4–6 周：接通与验收。** cli 串联四包，`scripts/accept-step1.mjs` 两平台通过，故障注入补边界，真实 MiMo 手动一次，写验收记录。
+3. **第 4–6 周：接通与验收。** cli 串联四包，`scripts/accept-step1.mjs` 两平台通过，故障注入补边界，真实模型（Claude Sonnet 5.5，ADR 0002）手动一次，写验收记录。
 
 ## 共享文件与根目录的归属
 
@@ -67,7 +67,7 @@ apps/cli ──► kernel ──► llm
   - 对一个本地 OpenAI 兼容假服务（test-support 提供）完成流式文本、流式工具调用、多工具并行调用的解析，有录制回放测试；
   - 断网、超时、HTTP 4xx / 5xx 各产生一条账本记录，用量字段为 unknown 而不是 0；
   - 账本记录格式与 `docs/spec/data-formats.md` 的账本章节一致，有 schema 测试；
-  - 真实 MiMo 手动一次：一次带工具调用的请求成功，用量非 unknown。
+  - 真实模型（Claude Sonnet 5.5，ADR 0002）手动一次：一次带工具调用的请求成功，用量非 unknown。
 
 ### `@nexgent/session`
 
@@ -97,7 +97,7 @@ apps/cli ──► kernel ──► llm
 
 ### `apps/cli`
 
-- **职责**：`nexgent run --project <dir> --task "..."`（一次性执行）、`nexgent resume <session>`、`nexgent app --project <dir>`（步骤 2 的桌面应用入口，步骤 1 只占位）；项目数据目录初始化；密钥来源；`scripts/accept-step1.mjs`：脚本化 provider 下启动 → 完成一次写文件任务 → 杀进程 → 新进程 `resume` 续聊；两平台 CI 各跑一次；真实 MiMo 手动一次并留摘要。PowerShell 启动器的参数设计从 PR #4 移植。
+- **职责**：`nexgent run --project <dir> --task "..."`（一次性执行）、`nexgent resume <session>`、`nexgent app --project <dir>`（步骤 2 的桌面应用入口，步骤 1 只占位）；项目数据目录初始化；密钥来源；`scripts/accept-step1.mjs`：脚本化 provider 下启动 → 完成一次写文件任务 → 杀进程 → 新进程 `resume` 续聊；两平台 CI 各跑一次；真实模型（Claude Sonnet 5.5，ADR 0002）手动一次并留摘要。PowerShell 启动器的参数设计从 PR #4 移植。
 - **DSH 参考包**：`boot/cmdline`、`bundle/base`、`bundle/headless`、`apps/cli`。
 - **依赖**：kernel、llm、session、workspace、test-support。
 - **可并行**：第 1 周可写参数解析、项目目录初始化与验收脚本骨架；串联在第 4 周起。
@@ -105,7 +105,7 @@ apps/cli ──► kernel ──► llm
 - **完成定义**：
   - `accept-step1` 在 Linux 与 Windows CI 通过，输出摘要 JSON 符合 `docs/validation/TEMPLATE.md` 的字段；
   - 不存在 Python 执行路径；
-  - 真实 MiMo 手动一次：完成真实写文件任务并保存原生会话，摘要进入 `docs/validation/step-1/`。
+  - 真实模型（Claude Sonnet 5.5，ADR 0002）手动一次：完成真实写文件任务并保存原生会话，摘要进入 `docs/validation/step-1/`。
 
 ### `packages/test-support`
 

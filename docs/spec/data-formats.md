@@ -68,9 +68,10 @@
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `version` | `1` | `1` | 格式版本；只有 1 |
-| `model` | string | `"mimo-v2.6-pro"` | 传给端点的模型 ID |
-| `endpoint` | string | `"https://token-plan-cn.xiaomimimo.com/v1"` | OpenAI 兼容端点的 base URL，不含凭证 |
-| `thinking` | `"off" \| "on"` | `"off"` | 执行时是否开启 reasoning（ADR 0001 决策 5） |
+| `model` | string | `"claude-sonnet-5-5"` | 传给端点的模型 ID（ADR 0002） |
+| `endpoint` | string | `"https://api.anthropic.com"` | Claude API 的 base URL，不含路径与凭证；环境变量 `NEXGENT_API_BASE_URL` 可覆盖 |
+| `thinking` | `"off" \| "on"` | `"off"` | 执行时是否开启 reasoning；`off` 是 provider 的最低 thinking 设置（ADR 0002 决策 3） |
+| `effort` | `"low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"medium"` | 推理深度（`output_config.effort`） |
 | `sandboxMode` | `"read-only" \| "workspace-write" \| "full-access"` | `"workspace-write"` | 新会话的默认沙箱模式；语义见 `permissions.md` |
 | `costCaps.perTask` | `CostCap` | 无 | 每任务上限 |
 | `costCaps.perProject` | `CostCap` | 无 | 每项目上限 |
@@ -93,9 +94,10 @@
 ```json
 {
   "version": 1,
-  "model": "mimo-v2.6-pro",
-  "endpoint": "https://token-plan-cn.xiaomimimo.com/v1",
+  "model": "claude-sonnet-5-5",
+  "endpoint": "https://api.anthropic.com",
   "thinking": "off",
+  "effort": "medium",
   "sandboxMode": "workspace-write",
   "costCaps": { "perTask": { "maxRequests": 50 } },
   "autoImprove": false
@@ -144,7 +146,7 @@
 | `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?` |
 | `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn` |
 | `user.message` | 用户消息进入会话，或注入的合成上下文 | `turn`、`content`、`source: "user" \| "inject"` |
-| `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?` |
+| `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
 | `tool.result` | 一次工具调用返回 | `turn`、`step`、`toolCallId`、`name`、`content`、`isError`、`error?`、`meta?`、`durationMs` |
 | `turn.end` | 一轮结束 | `turn`、`reason` |
 | `checkpoint` | 见“checkpoint” | `coversSeq`、`state` |
@@ -157,7 +159,8 @@
 
 - `assistant.message.toolCalls[]`：`{ id, name, arguments }`，`arguments` 是模型产出的原始 JSON 文本，不在此处解析。
 - `assistant.message.usage`：`LLMUsage`，五个字段 `inputTokens / outputTokens / totalTokens / cacheReadTokens / reasoningTokens` 每个都是非负整数或字符串 `"unknown"`；provider 没报用量时全为 `"unknown"`，不写 0。
-- `assistant.message.finishReason`：`stop | tool-calls | max-tokens | aborted | error`。
+- `assistant.message.finishReason`：`stop | tool-calls | max-tokens | aborted | refusal | error`。`refusal` 时附 `refusal: { category?, explanation? }`，该回复的工具调用不执行。
+- `assistant.message.providerContent`：provider 返回的内容块原样（JSON），用于回放时保留 thinking 块（ADR 0002 决策 4）；provider 没给则不写。
 - `assistant.message.interrupted: true`：该轮在流中被取消，`content` 是已流出的前缀，`toolCalls` 不写（未派发的调用不进入历史）。
 - `tool.result.error`：`ErrorInfo = { name, code, message, details? }`，仅当 `isError` 为真；`meta` 是工具私有的 JSON 值（如 diff），原样持久化。
 - `turn.end.reason`：`{ kind: "completed" }`、`{ kind: "cancelled", cause: "user" | "timeout" | "shutdown" | "cost-cap" }`、`{ kind: "error", error: ErrorInfo }`、`{ kind: "max-tokens" }`、`{ kind: "interrupted" }`。最后一种只由恢复过程写出，用来关闭上一个进程没来得及关闭的轮次。
@@ -170,14 +173,14 @@
 一次“写文件”任务的完整会话（为可读省略了部分 `ts`）：
 
 ```jsonl
-{"type":"session.start","seq":1,"ts":"2026-10-07T08:00:00.000Z","sessionId":"6f1c…","version":1,"projectRoot":"/home/u/proj","model":"mimo-v2.6-pro","sandboxMode":"workspace-write"}
+{"type":"session.start","seq":1,"ts":"2026-10-07T08:00:00.000Z","sessionId":"6f1c…","version":1,"projectRoot":"/home/u/proj","model":"claude-sonnet-5-5","sandboxMode":"workspace-write"}
 {"type":"turn.start","seq":2,"ts":"…","sessionId":"6f1c…","turn":1}
 {"type":"user.message","seq":3,"ts":"…","sessionId":"6f1c…","turn":1,"content":"把 README 第一行改成 Hello","source":"user"}
 {"type":"assistant.message","seq":4,"ts":"…","sessionId":"6f1c…","turn":1,"step":1,"requestId":"a0b1…","content":"","toolCalls":[{"id":"call_1","name":"str_replace","arguments":"{\"path\":\"README.md\",\"old\":\"# Hi\",\"new\":\"# Hello\"}"}],"usage":{"inputTokens":812,"outputTokens":37,"totalTokens":849,"cacheReadTokens":0,"reasoningTokens":0},"finishReason":"tool-calls"}
 {"type":"tool.result","seq":5,"ts":"…","sessionId":"6f1c…","turn":1,"step":1,"toolCallId":"call_1","name":"str_replace","content":"replaced 1 occurrence","isError":false,"durationMs":4}
 {"type":"assistant.message","seq":6,"ts":"…","sessionId":"6f1c…","turn":1,"step":2,"requestId":"c2d3…","content":"已改好。","usage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","reasoningTokens":"unknown"},"finishReason":"stop"}
 {"type":"turn.end","seq":7,"ts":"…","sessionId":"6f1c…","turn":1,"reason":{"kind":"completed"}}
-{"type":"checkpoint","seq":8,"ts":"…","sessionId":"6f1c…","coversSeq":7,"state":{"sessionId":"6f1c…","version":1,"messages":[{"role":"user","content":"把 README 第一行改成 Hello"},{"role":"assistant","content":"","toolCalls":[{"id":"call_1","name":"str_replace","arguments":"{…}"}]},{"role":"tool","toolCallId":"call_1","name":"str_replace","content":"replaced 1 occurrence","isError":false},{"role":"assistant","content":"已改好。"}],"metadata":{"createdAt":"2026-10-07T08:00:00.000Z","projectRoot":"/home/u/proj","model":"mimo-v2.6-pro","sandboxMode":"workspace-write","grants":[],"lastTurn":1,"totalUsage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","reasoningTokens":"unknown"},"lastSeq":7}}}
+{"type":"checkpoint","seq":8,"ts":"…","sessionId":"6f1c…","coversSeq":7,"state":{"sessionId":"6f1c…","version":1,"messages":[{"role":"user","content":"把 README 第一行改成 Hello"},{"role":"assistant","content":"","toolCalls":[{"id":"call_1","name":"str_replace","arguments":"{…}"}]},{"role":"tool","toolCallId":"call_1","name":"str_replace","content":"replaced 1 occurrence","isError":false},{"role":"assistant","content":"已改好。"}],"metadata":{"createdAt":"2026-10-07T08:00:00.000Z","projectRoot":"/home/u/proj","model":"claude-sonnet-5-5","sandboxMode":"workspace-write","grants":[],"lastTurn":1,"totalUsage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","reasoningTokens":"unknown"},"lastSeq":7}}}
 ```
 
 被取消的一轮：
@@ -235,7 +238,7 @@
 | `session.start` | 无 | `createdAt`、`projectRoot`、`model`、`sandboxMode`、`title`；`lastTurn = 0`；`grants = []`；`totalUsage` 置为全 0（`ZERO_USAGE`，加法单位元） |
 | `turn.start` | 无 | `lastTurn = turn`，`openTurn = turn` |
 | `user.message` | 追加 `{ role: "user", content }` | 无 |
-| `assistant.message` | 追加 `{ role: "assistant", content, toolCalls? }`；`interrupted` 且 `content` 为空时不追加 | `totalUsage = addUsage(totalUsage, usage)`（任一字段 `"unknown"` 则和为 `"unknown"`） |
+| `assistant.message` | 追加 `{ role: "assistant", content, toolCalls?, providerContent? }`；`interrupted` 且 `content` 为空时不追加 | `totalUsage = addUsage(totalUsage, usage)`（任一字段 `"unknown"` 则和为 `"unknown"`） |
 | `tool.result` | 追加 `{ role: "tool", toolCallId, name, content, isError }` | 无 |
 | `turn.end` | 无 | 清除 `openTurn` |
 | `checkpoint` | 从头重放时整体替换 `state` | 同左 |
@@ -279,7 +282,7 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `requestId` | string | 与 `llm.request.end`、会话的 `assistant.message.requestId` 相关联 |
-| `provider` | string | 路由键，如 `mimo` |
+| `provider` | string | 路由键，如 `anthropic` |
 | `endpoint` | string | base URL，不含凭证 |
 | `model` | string | 模型 ID |
 | `purpose` | `"task" \| "auxiliary"` | 任务请求或辅助请求 |
@@ -330,11 +333,11 @@
 ### 示例
 
 ```jsonl
-{"type":"llm.request.start","ts":"2026-10-07T08:00:01.000Z","sessionId":"6f1c…","requestId":"a0b1…","provider":"mimo","endpoint":"https://token-plan-cn.xiaomimimo.com/v1","model":"mimo-v2.6-pro","purpose":"task","thinking":"off"}
-{"type":"llm.request.end","ts":"2026-10-07T08:00:03.200Z","sessionId":"6f1c…","requestId":"a0b1…","provider":"mimo","endpoint":"https://token-plan-cn.xiaomimimo.com/v1","model":"mimo-v2.6-pro","status":"ok","usage":{"inputTokens":812,"outputTokens":37,"totalTokens":849,"cacheReadTokens":0,"reasoningTokens":0},"latencyMs":2200,"httpStatus":200,"finishReason":"tool-calls"}
+{"type":"llm.request.start","ts":"2026-10-07T08:00:01.000Z","sessionId":"6f1c…","requestId":"a0b1…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","purpose":"task","thinking":"off"}
+{"type":"llm.request.end","ts":"2026-10-07T08:00:03.200Z","sessionId":"6f1c…","requestId":"a0b1…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","status":"ok","usage":{"inputTokens":812,"outputTokens":37,"totalTokens":849,"cacheReadTokens":0,"reasoningTokens":0},"latencyMs":2200,"httpStatus":200,"finishReason":"tool-calls"}
 {"type":"tool.call","ts":"2026-10-07T08:00:03.210Z","sessionId":"6f1c…","turn":1,"callId":"call_1","name":"str_replace","effects":["write"],"approval":{"required":false,"decision":"auto"},"isError":false,"durationMs":4}
-{"type":"llm.request.start","ts":"2026-10-07T08:00:03.300Z","sessionId":"6f1c…","requestId":"c2d3…","provider":"mimo","endpoint":"https://token-plan-cn.xiaomimimo.com/v1","model":"mimo-v2.6-pro","purpose":"task","thinking":"off"}
-{"type":"llm.request.end","ts":"2026-10-07T08:00:04.100Z","sessionId":"6f1c…","requestId":"c2d3…","provider":"mimo","endpoint":"https://token-plan-cn.xiaomimimo.com/v1","model":"mimo-v2.6-pro","status":"error","usage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","reasoningTokens":"unknown"},"latencyMs":800,"httpStatus":503,"errorCode":"llm/request-failed"}
+{"type":"llm.request.start","ts":"2026-10-07T08:00:03.300Z","sessionId":"6f1c…","requestId":"c2d3…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","purpose":"task","thinking":"off"}
+{"type":"llm.request.end","ts":"2026-10-07T08:00:04.100Z","sessionId":"6f1c…","requestId":"c2d3…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","status":"error","usage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","reasoningTokens":"unknown"},"latencyMs":800,"httpStatus":503,"errorCode":"llm/request-failed"}
 {"type":"task.outcome","ts":"2026-10-07T08:00:04.200Z","sessionId":"6f1c…","status":"failed","totalUsage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","reasoningTokens":"unknown"},"requestCount":2,"toolCallCount":1,"turns":1,"toolsUsed":["str_replace"]}
 ```
 

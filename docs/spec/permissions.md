@@ -156,6 +156,7 @@
 | 优先级 | 来源 | 说明 |
 | --- | --- | --- |
 | 1 | 环境变量 `NEXGENT_API_KEY`（可选 `NEXGENT_API_BASE_URL`） | 一次性覆盖；只读，产品内不可改 |
+| 1′ | 环境变量 `ANTHROPIC_API_KEY` | 前两者都没有时的回退（ADR 0002 决策 7） |
 | 2 | `~/.nexgent/credentials.json`（`NEXGENT_HOME` 可改根目录） | `{ "version": 1, "credentials": { "NEXGENT_API_KEY": "...", "NEXGENT_API_BASE_URL"?: "..." } }`（`CredentialFile`，与 `data-formats.md` 一致）；POSIX 创建时 `0600`，发现权限宽于 `0600` 时拒绝读取并提示；Windows 依赖用户配置文件目录的默认 ACL，不额外设置 |
 
 - 密钥**不**从项目目录读取：不读项目 `.env`，不写 `.nexgent/`。
