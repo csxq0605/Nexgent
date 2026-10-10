@@ -52,7 +52,7 @@ export async function loadHarness() {
 }
 
 /**
- * Start the scripted OpenAI-compatible server, or report that the scripted
+ * Start the scripted Claude Messages API server, or report that the scripted
  * provider is not available yet.
  * @returns `{ ok: true, server }` or `{ ok: false, reason }`.
  */

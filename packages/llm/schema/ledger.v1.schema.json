@@ -80,7 +80,7 @@
             "usage": { "$ref": "#/$defs/usage" },
             "latencyMs": { "type": "number", "minimum": 0 },
             "httpStatus": { "type": "integer", "minimum": 100, "maximum": 599 },
-            "finishReason": { "enum": ["stop", "tool-calls", "max-tokens", "aborted", "error"] },
+            "finishReason": { "enum": ["stop", "tool-calls", "max-tokens", "aborted", "refusal", "error"] },
             "errorCode": { "type": "string", "pattern": "^[a-z]+(/[a-z-]+)?$" }
           }
         }

@@ -1,7 +1,7 @@
 /**
  * `@nexgent/test-support` — helpers shared by Nexgent test suites and the
  * step acceptance scripts: a scripted in-process `LLMProvider`, a scripted
- * OpenAI-compatible model server, fault injection, and the cross-process
+ * Anthropic Messages API model server, fault injection, and the cross-process
  * acceptance harness. The README is the reference ("仿真规范").
  */
 export {
@@ -9,6 +9,8 @@ export {
   type ScriptEntry,
   type ScriptedFault,
   type ScriptedFaultShorthand,
+  type ScriptedFinishReason,
+  type ScriptedStopDetails,
   type ScriptedToolCall,
   type ScriptedTurn,
   type ScriptedUsage,
@@ -23,8 +25,7 @@ export {
   toContractUsage,
 } from './provider.js'
 export {
-  type ChatCompletionBody,
-  type ChatWireMessage,
+  type MessagesRequestBody,
   type ModelRequestOutcome,
   type RecordedModelRequest,
   type ScriptedModelServer,

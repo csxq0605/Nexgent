@@ -194,7 +194,8 @@ export function scriptedProvider(
       yield aborted()
       return
     }
-    yield emit({ type: 'done', finishReason: finishReasonOf(turn) })
+    const finishReason = finishReasonOf(turn)
+    yield emit({ type: 'done', finishReason, ...finishReason === 'refusal' ? { refusal: turn.stopDetails ?? {} } : {} })
   }
 
   return {

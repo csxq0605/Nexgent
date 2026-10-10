@@ -1,6 +1,6 @@
 /**
  * The script format shared by {@link scriptedProvider} (in-process) and
- * {@link scriptedModelServer} (OpenAI-compatible HTTP). One script entry
+ * {@link scriptedModelServer} (Anthropic Messages API over HTTP). One script entry
  * answers exactly one model request, in order. The README section
  * "仿真规范" is the normative description of this format.
  */
@@ -34,7 +34,7 @@ export type ScriptedFault =
   | { readonly kind: 'timeout'; readonly afterChunks?: number }
   /** Drop the connection after `afterChunks` chunks (default 1; 0 = before any response). */
   | { readonly kind: 'disconnect'; readonly afterChunks?: number }
-  /** Answer with an HTTP error status and an OpenAI-style error body. */
+  /** Answer with an HTTP error status and an Anthropic-style error body. */
   | {
     readonly kind: 'http-error'
     readonly status: number
@@ -46,6 +46,15 @@ export type ScriptedFault =
 
 /** String shorthands accepted wherever a {@link ScriptedFault} is. */
 export type ScriptedFaultShorthand = 'timeout' | 'disconnect' | 'http-500' | 'malformed-json'
+
+/** Finish reasons a turn may end with. */
+export type ScriptedFinishReason = 'stop' | 'tool-calls' | 'max-tokens' | 'refusal'
+
+/** Why the scripted model refused. */
+export interface ScriptedStopDetails {
+  readonly category?: string
+  readonly explanation?: string
+}
 
 /** One scripted model reply. */
 export interface ScriptedTurn {
@@ -60,7 +69,9 @@ export interface ScriptedTurn {
   /** Usage to report; absent means "no usage reported" (→ `'unknown'`). */
   readonly usage?: ScriptedUsage
   /** Finish reason; defaults to `tool-calls` when there are tool calls, else `stop`. */
-  readonly finishReason?: 'stop' | 'tool-calls' | 'max-tokens'
+  readonly finishReason?: ScriptedFinishReason
+  /** Refusal details sent with `finishReason: 'refusal'` (`stop_details` on the wire, `refusal` on the provider's `done`). */
+  readonly stopDetails?: ScriptedStopDetails
   /** Delay before each chunk in ms (overrides the factory option). */
   readonly chunkDelayMs?: number
   /** Inject a fault instead of (or part-way through) the reply. */
@@ -126,7 +137,7 @@ export function contentChunks(turn: ScriptedTurn): string[] {
 }
 
 /** The finish reason a turn ends with. */
-export function finishReasonOf(turn: ScriptedTurn): 'stop' | 'tool-calls' | 'max-tokens' {
+export function finishReasonOf(turn: ScriptedTurn): ScriptedFinishReason {
   return turn.finishReason ?? ((turn.toolCalls?.length ?? 0) > 0 ? 'tool-calls' : 'stop')
 }
 

@@ -1,16 +1,15 @@
 /**
- * A small OpenAI-compatible fake for `@nexgent/llm` tests: a node:http (or
- * https) server that answers `POST <base>/chat/completions` by replaying a
- * scripted response — usually a recorded SSE fixture from `tests/fixtures/`
- * — and records every request it received.
+ * A small Anthropic Messages API fake for `@nexgent/llm` tests: a node:http
+ * server that answers `POST /v1/messages` by replaying a scripted response —
+ * usually a recorded SSE fixture from `tests/fixtures/` — and records every
+ * request it received.
  *
- * Kept local to this package until `@nexgent/test-support` ships its shared
- * fake; the replay format (raw SSE text, one event per blank-line block) is
- * the same one {@link recordSse} writes.
+ * Kept local to this package so `@nexgent/llm` and `@nexgent/test-support`
+ * stay independent; the replay format (raw SSE text, one event per
+ * blank-line block) is the one {@link recordSse} writes.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
-import https from 'node:https'
 import type { AddressInfo, Socket } from 'node:net'
 import { fileURLToPath } from 'node:url'
 
@@ -35,8 +34,8 @@ export interface FakeReply {
   readonly hangAfter?: number
   /** After this many SSE pieces, destroy the socket (network drop). */
   readonly destroyAfter?: number
-  /** Echo the request's Authorization header into an error body (redaction tests). */
-  readonly echoAuthorization?: boolean
+  /** Echo the request's `x-api-key` header into an error body (redaction tests). */
+  readonly echoApiKey?: boolean
 }
 
 /** One request the fake received. */
@@ -48,20 +47,14 @@ export interface CapturedRequest {
 }
 
 /** A running fake. */
-export interface FakeOpenAI {
-  /** Base URL including `/v1`, e.g. `http://127.0.0.1:1234/v1`. */
+export interface FakeAnthropic {
+  /** Bare origin, e.g. `http://127.0.0.1:1234` (the SDK appends `/v1/messages`). */
   readonly baseUrl: string
   readonly port: number
   readonly requests: CapturedRequest[]
   /** Resolves when the client side of the connection closes for request `n` (0-based). */
   closed(n: number): Promise<void>
   close(): Promise<void>
-}
-
-/** TLS material to serve HTTPS. */
-export interface FakeTls {
-  readonly key: string
-  readonly cert: string
 }
 
 /**
@@ -81,9 +74,9 @@ export function loadSseFixture(name: string): string[] {
   return splitSse(readFileSync(`${FIXTURES_DIR}${name}.sse`, 'utf8'))
 }
 
-/** Read a text fixture (e.g. TLS material). */
-export function readFixture(path: string): string {
-  return readFileSync(`${FIXTURES_DIR}${path}`, 'utf8')
+/** Serialize one SSE event the way the API writes it. */
+export function sseEvent(data: Record<string, unknown>): string {
+  return `event: ${String(data['type'])}\ndata: ${JSON.stringify(data)}\n\n`
 }
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
@@ -91,12 +84,10 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 /**
  * Start the fake.
  * @param replies - one reply per request in order (the last one repeats), or a function of the request index.
- * @param tlsMaterial - serve HTTPS with this key/cert instead of HTTP.
  */
-export async function startFakeOpenAI(
+export async function startFakeAnthropic(
   replies: readonly FakeReply[] | ((index: number, request: CapturedRequest) => FakeReply),
-  tlsMaterial?: FakeTls,
-): Promise<FakeOpenAI> {
+): Promise<FakeAnthropic> {
   const requests: CapturedRequest[] = []
   const closedWaiters = new Map<number, { promise: Promise<void>; resolve: () => void }>()
   const sockets = new Set<Socket>()
@@ -128,15 +119,16 @@ export async function startFakeOpenAI(
         requests.push(captured)
         res.on('close', () => waiter(index).resolve())
         const reply = typeof replies === 'function' ? replies(index, captured) : replies[Math.min(index, replies.length - 1)]
-        if (reply === undefined || !(req.url ?? '').endsWith('/chat/completions')) {
-          res.writeHead(404, { 'content-type': 'application/json' }).end('{"error":{"message":"not found"}}')
+        const path = (req.url ?? '').split('?')[0]
+        if (reply === undefined || req.method !== 'POST' || path !== '/v1/messages') {
+          res.writeHead(404, { 'content-type': 'application/json' }).end('{"type":"error","error":{"type":"not_found_error","message":"not found"}}')
           return
         }
         if (reply.hangBeforeHeaders === true) return
         const status = reply.status ?? 200
         if (reply.sse === undefined) {
-          const errorBody = reply.echoAuthorization === true
-            ? JSON.stringify({ error: { message: `invalid api key: ${req.headers.authorization ?? ''}` } })
+          const errorBody = reply.echoApiKey === true
+            ? JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: `invalid x-api-key: ${String(req.headers['x-api-key'] ?? '')}` } })
             : reply.body ?? ''
           res.writeHead(status, { 'content-type': 'application/json', ...reply.headers }).end(errorBody)
           return
@@ -165,9 +157,7 @@ export async function startFakeOpenAI(
     })
   }
 
-  const server = tlsMaterial === undefined
-    ? http.createServer(handler)
-    : https.createServer({ key: tlsMaterial.key, cert: tlsMaterial.cert }, handler)
+  const server = http.createServer(handler)
   server.on('connection', socket => {
     sockets.add(socket)
     socket.on('close', () => sockets.delete(socket))
@@ -175,7 +165,7 @@ export async function startFakeOpenAI(
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const port = (server.address() as AddressInfo).port
   return {
-    baseUrl: `${tlsMaterial === undefined ? 'http' : 'https'}://127.0.0.1:${port}/v1`,
+    baseUrl: `http://127.0.0.1:${port}`,
     port,
     requests,
     closed: n => waiter(n).promise,
@@ -186,9 +176,7 @@ export async function startFakeOpenAI(
   }
 }
 
-/**
- * A port nothing listens on (bound then released), for connection-refused tests.
- */
+/** A port nothing listens on (bound then released), for connection-refused tests. */
 export async function closedPort(): Promise<number> {
   const server = http.createServer()
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -201,15 +189,15 @@ export async function closedPort(): Promise<number> {
  * Record a real streaming response into a fixture file (manual use only; the
  * test suite never calls a real endpoint). The request body is not written,
  * so the key cannot end up in the fixture.
- * @param url - full `/chat/completions` URL.
- * @param apiKey - bearer key.
+ * @param baseUrl - API origin, e.g. `https://api.anthropic.com`.
+ * @param apiKey - the API key.
  * @param body - request body (must have `stream: true`).
  * @param file - destination path.
  */
-export async function recordSse(url: string, apiKey: string, body: Record<string, unknown>, file: string): Promise<void> {
-  const response = await fetch(url, {
+export async function recordSse(baseUrl: string, apiKey: string, body: Record<string, unknown>, file: string): Promise<void> {
+  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/v1/messages`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+    headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify(body),
   })
   writeFileSync(file, await response.text(), 'utf8')

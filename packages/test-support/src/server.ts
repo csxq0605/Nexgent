@@ -1,11 +1,11 @@
 /**
- * `scriptedModelServer` — a local HTTP server that speaks the
- * OpenAI-compatible `POST …/chat/completions` API (SSE streaming and plain
- * JSON) and replays a script, one entry per request, with fault injection.
+ * `scriptedModelServer` — a local HTTP server that speaks the Anthropic
+ * Messages API (`POST /v1/messages`, SSE streaming and plain JSON) and
+ * replays a script, one entry per request, with fault injection.
  *
  * Design follows deepseek-harness `test-support/llm-mock-server`
  * (request-scoped behaviors, captured wire requests, chunk counting); the
- * code is a rewrite for the OpenAI chat-completions wire format.
+ * code is a rewrite for the Messages API wire format.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
@@ -21,26 +21,16 @@ import {
   type ScriptedUsage,
 } from './script.js'
 
-/** A chat message as it appears on the wire (loosely typed: tests assert on it). */
-export interface ChatWireMessage {
-  readonly role: string
-  readonly content?: unknown
-  readonly tool_calls?: ReadonlyArray<{
-    readonly id?: string
-    readonly type?: string
-    readonly function?: { readonly name?: string; readonly arguments?: string }
-  }>
-  readonly tool_call_id?: string
-  readonly [key: string]: unknown
-}
-
-/** The parsed JSON body of a chat-completions request. */
-export interface ChatCompletionBody {
+/** The parsed JSON body of a Messages API request (loosely typed: tests assert on it). */
+export interface MessagesRequestBody {
   readonly model?: string
-  readonly messages?: readonly ChatWireMessage[]
+  readonly max_tokens?: number
+  readonly system?: unknown
+  readonly messages?: ReadonlyArray<{ readonly role: string; readonly content?: unknown; readonly [key: string]: unknown }>
   readonly tools?: readonly unknown[]
+  readonly thinking?: unknown
+  readonly output_config?: unknown
   readonly stream?: boolean
-  readonly stream_options?: { readonly include_usage?: boolean }
   readonly [key: string]: unknown
 }
 
@@ -55,22 +45,22 @@ export type ModelRequestOutcome =
   | 'exhausted'
   | 'client-closed'
 
-/** One captured chat-completions request. */
+/** One captured Messages API request. */
 export interface RecordedModelRequest {
-  /** 0-based request number (only chat-completions requests count). */
+  /** 0-based request number (only `/v1/messages` requests count). */
   readonly index: number
   readonly method: string
-  /** Request path including any `/v1` prefix. */
+  /** Request path without the query string. */
   readonly path: string
-  /** Lower-cased headers; the `authorization` value is replaced by `<scheme> [redacted]`. */
+  /** Lower-cased headers; `x-api-key` is replaced by `[redacted]` and `authorization` by `<scheme> [redacted]`. */
   readonly headers: Readonly<Record<string, string>>
-  /** Whether an `Authorization` header was present. */
-  readonly hasAuthorization: boolean
+  /** Whether an `x-api-key` (or `Authorization`) header was present. */
+  readonly hasApiKey: boolean
   /** Parsed JSON body (`undefined` when the body was not JSON). */
-  readonly body: ChatCompletionBody | undefined
+  readonly body: MessagesRequestBody | undefined
   /** Raw body text. */
   readonly rawBody: string
-  /** SSE `data:` events written so far. */
+  /** SSE events written so far. */
   chunksSent: number
   /** Server-side outcome; `pending` while the response is still open. */
   outcome: ModelRequestOutcome
@@ -78,28 +68,28 @@ export interface RecordedModelRequest {
 
 /** Options for {@link scriptedModelServer}. */
 export interface ScriptedModelServerOptions {
-  /** Replies in order, one per chat-completions request. */
-  readonly script?: readonly ScriptEntry<ChatCompletionBody>[]
+  /** Replies in order, one per `/v1/messages` request. */
+  readonly script?: readonly ScriptEntry<MessagesRequestBody>[]
   /** Port to listen on; `0` (default) picks a free port. */
   readonly port?: number
   /** Host to bind (default `127.0.0.1`). */
   readonly host?: string
-  /** Delay before each SSE chunk in ms (default 0); a turn's `chunkDelayMs` wins. */
+  /** Delay before each SSE event in ms (default 0); a turn's `chunkDelayMs` wins. */
   readonly chunkDelayMs?: number
 }
 
 /** A running scripted server. */
 export interface ScriptedModelServer {
-  /** Base URL for an OpenAI-compatible client, e.g. `http://127.0.0.1:43123/v1`. */
+  /** Origin for the SDK's `baseURL` / `NEXGENT_API_BASE_URL`, e.g. `http://127.0.0.1:43123` (no path). */
   readonly baseUrl: string
   /** Bound port. */
   readonly port: number
-  /** Chat-completions requests received so far, in order. */
+  /** `/v1/messages` requests received so far, in order. */
   readonly requests: readonly RecordedModelRequest[]
   /** Script entries not yet consumed. */
   readonly remaining: number
   /** Append entries to the script. */
-  push(...entries: ScriptEntry<ChatCompletionBody>[]): void
+  push(...entries: ScriptEntry<MessagesRequestBody>[]): void
   /** Resolve once at least `count` requests have arrived (rejects after `timeoutMs`, default 5000). */
   waitForRequests(count: number, timeoutMs?: number): Promise<readonly RecordedModelRequest[]>
   /** Throw if any script entry is still unconsumed. */
@@ -108,82 +98,132 @@ export interface ScriptedModelServer {
   close(): Promise<void>
 }
 
-/** OpenAI wire usage from contract-term scripted usage. Fields without a value are omitted. */
-export function toWireUsage(usage: ScriptedUsage): Record<string, unknown> {
-  const wire: Record<string, unknown> = {}
-  if (usage.inputTokens !== undefined) wire['prompt_tokens'] = usage.inputTokens + (usage.cacheReadTokens ?? 0)
-  if (usage.outputTokens !== undefined) wire['completion_tokens'] = usage.outputTokens
-  if (usage.totalTokens !== undefined) wire['total_tokens'] = usage.totalTokens
-  if (usage.cacheReadTokens !== undefined) wire['prompt_tokens_details'] = { cached_tokens: usage.cacheReadTokens }
-  if (usage.reasoningTokens !== undefined) wire['completion_tokens_details'] = { reasoning_tokens: usage.reasoningTokens }
-  return wire
+/** Messages API usage split into the `message_start` and `message_delta` parts. */
+export interface WireUsageParts {
+  /** `message_start.message.usage`: input and cache counts. */
+  readonly start: Record<string, unknown>
+  /** `message_delta.usage`: output count. */
+  readonly delta: Record<string, unknown>
 }
 
-const WIRE_FINISH = { 'stop': 'stop', 'tool-calls': 'tool_calls', 'max-tokens': 'length' } as const
+/**
+ * Messages API usage from contract-term scripted usage. Fields without a
+ * value are omitted (`totalTokens` and `reasoningTokens` have no wire field).
+ */
+export function toWireUsage(usage: ScriptedUsage): WireUsageParts {
+  const start: Record<string, unknown> = {}
+  const delta: Record<string, unknown> = {}
+  if (usage.inputTokens !== undefined) start['input_tokens'] = usage.inputTokens
+  if (usage.cacheReadTokens !== undefined) start['cache_read_input_tokens'] = usage.cacheReadTokens
+  if (usage.outputTokens !== undefined) delta['output_tokens'] = usage.outputTokens
+  return { start, delta }
+}
 
-/** Build the SSE chunk objects (without `[DONE]`) for one turn. */
-function streamChunks(turn: ScriptedTurn, requestNumber: number, model: string): Record<string, unknown>[] {
-  const id = `chatcmpl-scripted-${requestNumber}`
-  const created = Math.floor(Date.now() / 1000)
-  const chunk = (delta: Record<string, unknown>, finish: string | null = null): Record<string, unknown> => ({
-    id,
-    object: 'chat.completion.chunk',
-    created,
-    model,
-    choices: [{ index: 0, delta, finish_reason: finish }],
-  })
-  const deltas: Record<string, unknown>[] = []
-  if (turn.reasoning !== undefined && turn.reasoning !== '') deltas.push({ reasoning_content: turn.reasoning })
-  for (const text of contentChunks(turn)) deltas.push({ content: text })
-  const calls = resolveToolCalls(turn, requestNumber)
-  const starts = calls.map((call, index) => ({
-    tool_calls: [{ index, id: call.id, type: 'function', function: { name: call.name, arguments: '' } }],
-  }))
-  const argDelta = (index: number, text: string): Record<string, unknown> => ({
-    tool_calls: [{ index, function: { arguments: text } }],
-  })
-  if (turn.interleaveToolCalls === true) {
-    deltas.push(...starts)
-    const rounds = Math.max(0, ...calls.map((c) => c.chunks.length))
-    for (let r = 0; r < rounds; r++) {
-      calls.forEach((call, index) => {
-        const text = call.chunks[r]
-        if (text !== undefined) deltas.push(argDelta(index, text))
-      })
-    }
-  } else {
-    calls.forEach((call, index) => {
-      deltas.push(starts[index]!)
-      for (const text of call.chunks) deltas.push(argDelta(index, text))
+const WIRE_STOP = { 'stop': 'end_turn', 'tool-calls': 'tool_use', 'max-tokens': 'max_tokens', 'refusal': 'refusal' } as const
+
+type Block = { readonly start: Record<string, unknown>; readonly deltas: readonly Record<string, unknown>[] }
+
+/** The content blocks of a turn as (start block, deltas) pairs. */
+function blocksOf(turn: ScriptedTurn, requestNumber: number): Block[] {
+  const blocks: Block[] = []
+  if (turn.reasoning !== undefined && turn.reasoning !== '') {
+    blocks.push({
+      start: { type: 'thinking', thinking: '', signature: '' },
+      deltas: [{ type: 'thinking_delta', thinking: turn.reasoning }, { type: 'signature_delta', signature: `scripted-signature-${requestNumber}` }],
     })
   }
-  if (deltas.length === 0) deltas.push({ content: '' })
-  deltas[0] = { role: 'assistant', ...deltas[0] }
-  const out = deltas.map((d) => chunk(d))
-  out.push(chunk({}, WIRE_FINISH[finishReasonOf(turn)]))
-  if (turn.usage !== undefined) {
-    out.push({ id, object: 'chat.completion.chunk', created, model, choices: [], usage: toWireUsage(turn.usage) })
+  const text = contentChunks(turn)
+  if (text.length > 0) blocks.push({ start: { type: 'text', text: '' }, deltas: text.map((t) => ({ type: 'text_delta', text: t })) })
+  for (const call of resolveToolCalls(turn, requestNumber)) {
+    blocks.push({
+      start: { type: 'tool_use', id: call.id, name: call.name, input: {} },
+      deltas: call.chunks.map((partial_json) => ({ type: 'input_json_delta', partial_json })),
+    })
   }
+  return blocks
+}
+
+/** The `message_delta` event of a turn. */
+function messageDelta(turn: ScriptedTurn, usage: WireUsageParts | undefined): Record<string, unknown> {
+  const stop = finishReasonOf(turn)
+  const delta: Record<string, unknown> = { stop_reason: WIRE_STOP[stop], stop_sequence: null }
+  if (stop === 'refusal') {
+    delta['stop_details'] = {
+      type: 'refusal',
+      category: turn.stopDetails?.category ?? null,
+      explanation: turn.stopDetails?.explanation ?? null,
+    }
+  }
+  return { type: 'message_delta', delta, usage: usage?.delta ?? {} }
+}
+
+/** Build the SSE event objects for one turn, in API order. */
+function streamEvents(turn: ScriptedTurn, requestNumber: number, model: string): Record<string, unknown>[] {
+  const usage = turn.usage === undefined ? undefined : toWireUsage(turn.usage)
+  const out: Record<string, unknown>[] = [{
+    type: 'message_start',
+    message: {
+      id: `msg_scripted_${requestNumber}`, type: 'message', role: 'assistant', model, content: [],
+      stop_reason: null, stop_sequence: null, usage: usage?.start ?? {},
+    },
+  }]
+  const blocks = blocksOf(turn, requestNumber)
+  const tools = blocks.flatMap((block, index) => block.start['type'] === 'tool_use' ? [index] : [])
+  const plain = blocks.flatMap((block, index) => block.start['type'] === 'tool_use' ? [] : [index])
+  const emitBlock = (index: number): void => {
+    const block = blocks[index]!
+    out.push({ type: 'content_block_start', index, content_block: block.start })
+    for (const delta of block.deltas) out.push({ type: 'content_block_delta', index, delta })
+    out.push({ type: 'content_block_stop', index })
+  }
+  for (const index of plain) emitBlock(index)
+  if (turn.interleaveToolCalls === true && tools.length > 1) {
+    // Parallel calls with their argument fragments round-robined across open blocks.
+    for (const index of tools) out.push({ type: 'content_block_start', index, content_block: blocks[index]!.start })
+    const rounds = Math.max(0, ...tools.map((index) => blocks[index]!.deltas.length))
+    for (let r = 0; r < rounds; r++) {
+      for (const index of tools) {
+        const delta = blocks[index]!.deltas[r]
+        if (delta !== undefined) out.push({ type: 'content_block_delta', index, delta })
+      }
+    }
+    for (const index of tools) out.push({ type: 'content_block_stop', index })
+  } else {
+    for (const index of tools) emitBlock(index)
+  }
+  out.push(messageDelta(turn, usage))
+  out.push({ type: 'message_stop' })
   return out
 }
 
-/** Build a non-streaming `chat.completion` body for one turn. */
-function completionBody(turn: ScriptedTurn, requestNumber: number, model: string): Record<string, unknown> {
-  const calls = resolveToolCalls(turn, requestNumber)
-  const message: Record<string, unknown> = { role: 'assistant', content: contentChunks(turn).join('') }
-  if (turn.reasoning !== undefined) message['reasoning_content'] = turn.reasoning
-  if (calls.length > 0) {
-    message['tool_calls'] = calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments } }))
+/** Build a non-streaming `message` body for one turn. */
+function messageBody(turn: ScriptedTurn, requestNumber: number, model: string): Record<string, unknown> {
+  const content: Record<string, unknown>[] = []
+  if (turn.reasoning !== undefined && turn.reasoning !== '') {
+    content.push({ type: 'thinking', thinking: turn.reasoning, signature: `scripted-signature-${requestNumber}` })
   }
-  const body: Record<string, unknown> = {
-    id: `chatcmpl-scripted-${requestNumber}`,
-    object: 'chat.completion',
-    created: Math.floor(Date.now() / 1000),
+  const text = contentChunks(turn).join('')
+  if (text !== '') content.push({ type: 'text', text })
+  for (const call of resolveToolCalls(turn, requestNumber)) {
+    let input: unknown
+    try {
+      input = JSON.parse(call.arguments)
+    } catch {
+      input = { _raw: call.arguments }
+    }
+    content.push({ type: 'tool_use', id: call.id, name: call.name, input })
+  }
+  const delta = messageDelta(turn, turn.usage === undefined ? undefined : toWireUsage(turn.usage))
+  const usage = turn.usage === undefined ? {} : { ...toWireUsage(turn.usage).start, ...toWireUsage(turn.usage).delta }
+  return {
+    id: `msg_scripted_${requestNumber}`,
+    type: 'message',
+    role: 'assistant',
     model,
-    choices: [{ index: 0, message, finish_reason: WIRE_FINISH[finishReasonOf(turn)] }],
+    content,
+    ...delta['delta'] as Record<string, unknown>,
+    usage,
   }
-  if (turn.usage !== undefined) body['usage'] = toWireUsage(turn.usage)
-  return body
 }
 
 function redactHeaders(req: IncomingMessage): Record<string, string> {
@@ -191,7 +231,9 @@ function redactHeaders(req: IncomingMessage): Record<string, string> {
   for (const [key, value] of Object.entries(req.headers)) {
     if (value === undefined) continue
     const text = Array.isArray(value) ? value.join(', ') : value
-    headers[key] = key === 'authorization' ? `${text.split(' ')[0] ?? ''} [redacted]`.trim() : text
+    if (key === 'x-api-key') headers[key] = '[redacted]'
+    else if (key === 'authorization') headers[key] = `${text.split(' ')[0] ?? ''} [redacted]`.trim()
+    else headers[key] = text
   }
   return headers
 }
@@ -211,13 +253,19 @@ function sendJson(res: ServerResponse, status: number, body: unknown, headers: R
   res.end(text)
 }
 
+function errorBody(type: string, message: string): Record<string, unknown> {
+  return { type: 'error', error: { type, message } }
+}
+
 /**
- * Start a scripted OpenAI-compatible model server on loopback.
+ * Start a scripted Anthropic Messages API server on loopback.
  *
- * Every `POST` whose path ends in `/chat/completions` consumes one script
- * entry. With `"stream": true` the reply is SSE (`data: {chunk}\n\n` … then
- * `data: [DONE]\n\n`); otherwise one `chat.completion` JSON body. Other
- * paths get 404 and consume nothing. An exhausted script answers 500.
+ * Every `POST /v1/messages` (any query string) consumes one script entry.
+ * With `"stream": true` the reply is SSE (`event: <type>\ndata: {json}\n\n`
+ * per event, in API order: `message_start`, per block `content_block_start`
+ * / `content_block_delta`* / `content_block_stop`, `message_delta`,
+ * `message_stop`); otherwise one `message` JSON body. Other paths get 404
+ * and consume nothing. An exhausted script answers 500.
  * @param options - script, port and pacing.
  */
 export async function scriptedModelServer(options: ScriptedModelServerOptions = {}): Promise<ScriptedModelServer> {
@@ -230,14 +278,14 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const path = (req.url ?? '/').split('?')[0] ?? '/'
     const rawBody = await readBody(req)
-    if (req.method !== 'POST' || !path.endsWith('/chat/completions')) {
-      sendJson(res, 404, { error: { message: `no route for ${req.method} ${path}`, type: 'not_found' } })
+    if (req.method !== 'POST' || path !== '/v1/messages') {
+      sendJson(res, 404, errorBody('not_found_error', `no route for ${req.method} ${path}`))
       return
     }
-    let body: ChatCompletionBody | undefined
+    let body: MessagesRequestBody | undefined
     try {
       const parsed: unknown = JSON.parse(rawBody)
-      body = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed as ChatCompletionBody : undefined
+      body = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed as MessagesRequestBody : undefined
     } catch {
       body = undefined
     }
@@ -246,7 +294,7 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
       method: req.method,
       path,
       headers: redactHeaders(req),
-      hasAuthorization: req.headers.authorization !== undefined,
+      hasApiKey: req.headers['x-api-key'] !== undefined || req.headers.authorization !== undefined,
       body,
       rawBody,
       chunksSent: 0,
@@ -264,7 +312,7 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
     const entry = queue.shift()
     if (entry === undefined) {
       record.outcome = 'exhausted'
-      sendJson(res, 500, { error: { message: `scriptedModelServer: script exhausted at request #${record.index + 1}`, type: 'script_exhausted' } })
+      sendJson(res, 500, errorBody('script_exhausted', `scriptedModelServer: script exhausted at request #${record.index + 1}`))
       return
     }
     const turn = resolveEntry(entry, body ?? {}, record.index)
@@ -275,9 +323,7 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
 
     if (fault?.kind === 'http-error') {
       record.outcome = 'http-error'
-      sendJson(res, fault.status, {
-        error: { message: fault.message ?? `scripted HTTP ${fault.status}`, type: 'scripted_error', code: String(fault.status) },
-      }, fault.headers)
+      sendJson(res, fault.status, errorBody('scripted_error', fault.message ?? `scripted HTTP ${fault.status}`), fault.headers)
       return
     }
     if (fault?.kind === 'disconnect' && (fault.afterChunks ?? 1) === 0) {
@@ -299,18 +345,18 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
       if (fault?.kind === 'malformed-json') {
         record.outcome = 'malformed'
         res.writeHead(200, { 'content-type': 'application/json' })
-        res.end('{"id":"chatcmpl-broken","choices":[{')
+        res.end('{"id":"msg_broken","type":"message","content":[{')
         return
       }
       record.outcome = 'completed'
-      sendJson(res, 200, completionBody(turn, requestNumber, model))
+      sendJson(res, 200, messageBody(turn, requestNumber, model))
       return
     }
 
-    const chunks = streamChunks(turn, requestNumber, model)
+    const events = streamEvents(turn, requestNumber, model)
     const cut = fault === undefined
-      ? chunks.length
-      : Math.min(chunks.length, fault.afterChunks ?? (fault.kind === 'disconnect' ? 1 : 0))
+      ? events.length
+      : Math.min(events.length, fault.afterChunks ?? (fault.kind === 'disconnect' ? 1 : 0))
     if (fault?.kind === 'timeout' && cut === 0) {
       // Never respond at all: not even headers.
       record.outcome = 'stalled'
@@ -318,10 +364,10 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
     }
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'connection': 'keep-alive' })
     res.flushHeaders()
-    for (const chunk of chunks.slice(0, cut)) {
+    for (const event of events.slice(0, cut)) {
       await sleep(delay)
       if (closed) return
-      res.write(`data: ${JSON.stringify(chunk)}\n\n`)
+      res.write(`event: ${String(event['type'])}\ndata: ${JSON.stringify(event)}\n\n`)
       record.chunksSent++
     }
     if (closed) return
@@ -335,19 +381,19 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
         return
       case 'malformed-json':
         record.outcome = 'malformed'
-        res.write('data: {"id":"chatcmpl-broken","choices":[{"delta":{"content":\n\n')
+        res.write('event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":\n\n')
         record.chunksSent++
         res.end()
         return
       default:
         record.outcome = 'completed'
-        res.end('data: [DONE]\n\n')
+        res.end()
     }
   }
 
   const server = createServer((req, res) => {
     handle(req, res).catch((error: unknown) => {
-      if (!res.headersSent) sendJson(res, 500, { error: { message: String(error), type: 'server_bug' } })
+      if (!res.headersSent) sendJson(res, 500, errorBody('server_bug', String(error)))
       else res.destroy()
     })
   })
@@ -366,7 +412,7 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
   const urlHost = host.includes(':') ? `[${host}]` : host
 
   return {
-    baseUrl: `http://${urlHost}:${port}/v1`,
+    baseUrl: `http://${urlHost}:${port}`,
     port,
     get requests() { return requests },
     get remaining() { return queue.length },

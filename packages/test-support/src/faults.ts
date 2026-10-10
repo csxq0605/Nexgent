@@ -192,7 +192,7 @@ export async function waitFor<T>(
  * another process binding it is possible but unlikely.
  * @param path - path suffix (default `/v1`).
  */
-export async function closedPortUrl(path = '/v1'): Promise<string> {
+export async function closedPortUrl(path = ''): Promise<string> {
   const server = createServer()
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
