@@ -2,7 +2,7 @@
   "name": "@nexgent/llm",
   "version": "0.0.0",
   "private": true,
-  "description": "MiMo \u5355\u8def\u7531\uff1aOpenAI \u517c\u5bb9\u6d41\u5f0f\u8bf7\u6c42\u3001\u5de5\u5177\u8c03\u7528\u89e3\u6790\u3001\u7528\u91cf\u8ba1\u91cf\u4e0e\u8bf7\u6c42\u8d26\u672c\u3002",
+  "description": "MiMo 单路由：OpenAI 兼容流式请求、工具调用解析、用量计量与请求账本。",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -22,6 +22,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
     "@nexgent/kernel": "workspace:*"
   },
   "devDependencies": {

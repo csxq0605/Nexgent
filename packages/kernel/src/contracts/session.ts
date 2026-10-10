@@ -10,7 +10,7 @@
 import type { ErrorInfo } from './errors.js'
 import type { JsonValue } from './json.js'
 import type { ApprovalDecision, ApprovalGrant, ApprovalRequest } from './approvals.js'
-import type { FinishReason, LLMMessage, LLMUsage, ToolCall } from './llm.js'
+import type { FinishReason, LLMMessage, LLMUsage, RefusalInfo, ToolCall } from './llm.js'
 import type { SandboxMode } from './workspace.js'
 
 /** The only session format version. */
@@ -74,6 +74,10 @@ export interface AssistantMessageRecord extends SessionRecordBase {
   readonly finishReason: FinishReason
   /** Set when the turn was cancelled mid-stream; `content` is then a prefix and `toolCalls` is absent. */
   readonly interrupted?: true
+  /** Verbatim provider blocks replayed on resume; see `AssistantMessage.providerContent`. */
+  readonly providerContent?: JsonValue
+  /** Present when `finishReason` is `'refusal'`. */
+  readonly refusal?: RefusalInfo
 }
 
 /** The outcome of one tool call, as returned to the model. */

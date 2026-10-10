@@ -14,6 +14,7 @@ export type NexgentErrorCode =
   | 'llm/timeout'
   | 'llm/aborted'
   | 'llm/invalid-response'
+  | 'llm/refused'
   // tools
   | 'tool/not-found'
   | 'tool/invalid-input'

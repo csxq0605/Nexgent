@@ -8,6 +8,7 @@
  * is 0 by decision — every attempt, including a failed one, is one request
  * and one ledger record).
  */
+import type { JsonValue } from './json.js'
 import type { ErrorInfo } from './errors.js'
 import type { JsonSchema } from './json.js'
 
@@ -49,6 +50,13 @@ export interface AssistantMessage {
   readonly content: string
   /** Tool calls in the order the model emitted them; absent when there are none. */
   readonly toolCalls?: readonly ToolCall[]
+  /**
+   * The provider's own content blocks for this reply, verbatim (e.g. Claude
+   * `thinking` blocks with their signatures). Opaque to the kernel; a provider
+   * that set it on {@link DoneEvent} gets it back here so the reply can be
+   * replayed exactly (preserved thinking). Absent when the provider sent none.
+   */
+  readonly providerContent?: JsonValue
 }
 
 /** The outcome of one tool call, returned to the model as a `tool` message. */
@@ -85,14 +93,24 @@ export interface LLMToolDefinition {
   readonly parameters: JsonSchema
 }
 
-/** Whether the provider should produce reasoning tokens. Execution uses `'off'` (ADR 0001 decision 5). */
+/**
+ * Whether the provider should produce extended reasoning. `'off'` is the
+ * provider's lowest thinking setting (on Claude Sonnet 5.5: `between_tools`,
+ * ADR 0002); `'on'` is adaptive thinking.
+ */
 export type ThinkingMode = 'off' | 'on'
+
+/** Reasoning depth / output-token spend (`output_config.effort`); the provider default applies when absent. */
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** All effort levels, for config validation. */
+export const EFFORT_LEVELS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 /** One fully assembled model request. */
 export interface LLMRequest {
   /** Caller-generated id (uuid) that correlates stream, session and ledger records. */
   readonly requestId: string
-  /** Model id passed to the endpoint, e.g. `mimo-v2.6-pro`. */
+  /** Model id passed to the endpoint, e.g. `claude-sonnet-5-5`. */
   readonly model: string
   /** Ordered conversation exactly as the provider should see it. */
   readonly messages: readonly LLMMessage[]
@@ -104,6 +122,8 @@ export interface LLMRequest {
   readonly temperature?: number
   /** Reasoning on or off. */
   readonly thinking: ThinkingMode
+  /** Effort level; the provider's configured default applies when absent. */
+  readonly effort?: Effort
   /** Caller cancellation; the stream ends with `done`/`aborted` promptly after it fires. */
   readonly signal?: AbortSignal
 }
@@ -218,7 +238,13 @@ export function toUsageCount(value: unknown): UsageCount {
 // ---------------------------------------------------------------------------
 
 /** Why generation stopped. `'error'` only appears on ledger records; the stream signals it with an `error` event. */
-export type FinishReason = 'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'error'
+export type FinishReason = 'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'refusal' | 'error'
+
+/** Why a provider's safety classifier declined (`stop_reason: 'refusal'`); fields are provider-defined. */
+export interface RefusalInfo {
+  readonly category?: string
+  readonly explanation?: string
+}
 
 /** A chunk of visible text. */
 export interface TextDeltaEvent {
@@ -267,6 +293,10 @@ export interface DoneEvent {
   readonly type: 'done'
   /** Why the model stopped; `'aborted'` when the caller's signal fired mid-stream. */
   readonly finishReason: Exclude<FinishReason, 'error'>
+  /** The provider's content blocks for the reply, verbatim; see {@link AssistantMessage.providerContent}. */
+  readonly providerContent?: JsonValue
+  /** Set with `finishReason: 'refusal'`; the caller must not run this reply's tool calls. */
+  readonly refusal?: RefusalInfo
 }
 
 /** Terminal failure event. Nothing follows it; the provider does not also throw. */
