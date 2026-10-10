@@ -68,7 +68,12 @@ export const sessionRecordSchema: JsonObject = {
     ]),
     userMessage: closedObject({ role: { const: 'user' }, content: { type: 'string' } }, ['role', 'content']),
     assistantMessage: closedObject(
-      { role: { const: 'assistant' }, content: { type: 'string' }, toolCalls: { type: 'array', items: ref('toolCall') } },
+      {
+        role: { const: 'assistant' },
+        content: { type: 'string' },
+        toolCalls: { type: 'array', items: ref('toolCall') },
+        providerContent: ref('jsonValue'),
+      },
       ['role', 'content'],
     ),
     toolMessage: closedObject(
@@ -177,6 +182,8 @@ export const sessionRecordSchema: JsonObject = {
         usage: ref('usage'),
         finishReason: ref('finishReason'),
         interrupted: { const: true },
+        providerContent: ref('jsonValue'),
+        refusal: ref('refusalInfo'),
       },
       ['turn', 'step', 'requestId', 'content', 'usage', 'finishReason'],
     ),

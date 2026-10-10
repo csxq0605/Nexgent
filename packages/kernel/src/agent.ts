@@ -32,12 +32,14 @@ import {
   addUsage,
   UNKNOWN_USAGE,
   ZERO_USAGE,
+  type Effort,
   type FinishReason,
   type LLMMessage,
   type LLMProvider,
   type LLMRequest,
   type LLMStreamEvent,
   type LLMUsage,
+  type RefusalInfo,
   type ToolCall,
   type ToolResult,
 } from './contracts/llm.js'
@@ -73,6 +75,8 @@ export const TOOL_TIMEOUT = 'TOOL_TIMEOUT'
 /** Loop settings, from the `agents` profile row. */
 export interface AgentSettings {
   readonly thinking: 'off' | 'on'
+  /** Effort level sent on every request (ADR 0002). */
+  readonly effort: Effort
   readonly maxTokens?: number
   readonly systemPrompt: SystemPromptTemplate
   /** Whole-request model deadline in ms; 0 disables. */
@@ -159,6 +163,7 @@ export interface AgentInit {
   readonly tools: ToolRegistry
   readonly model: string
   readonly thinking: 'off' | 'on'
+  readonly effort: Effort
   readonly sandboxMode: SandboxMode
   readonly settings: AgentSettings
   readonly projectConfig: ProjectConfig
@@ -189,6 +194,17 @@ function errorInfo(code: NexgentErrorCode, message: string, details?: Record<str
   return toErrorInfo(new NexgentError(code, message, details === undefined ? {} : { details }))
 }
 
+/** The `llm/refused` error of a reply the provider's classifier declined. */
+function refusalError(refusal: RefusalInfo | undefined): ErrorInfo {
+  const category = refusal?.category
+  const explanation = refusal?.explanation
+  const message = `the model refused the request${category === undefined ? '' : ` (${category})`}${explanation === undefined ? '' : `: ${explanation}`}`
+  return errorInfo('llm/refused', message, {
+    ...(category === undefined ? {} : { category }),
+    ...(explanation === undefined ? {} : { explanation }),
+  })
+}
+
 function knownTokens(usage: LLMUsage): number {
   return (typeof usage.inputTokens === 'number' ? usage.inputTokens : 0)
     + (typeof usage.outputTokens === 'number' ? usage.outputTokens : 0)
@@ -197,8 +213,9 @@ function knownTokens(usage: LLMUsage): number {
 /**
  * Make history safe to send: every assistant tool call gets a tool message
  * (a crash between `assistant.message` and its `tool.result`s leaves calls
- * unanswered, which OpenAI-compatible endpoints reject). Request-only; the
- * session is not changed.
+ * unanswered, which endpoints reject). Request-only; the session is not
+ * changed, and assistant entries (including their `providerContent`) are
+ * passed through untouched.
  */
 export function repairHistory(messages: readonly Exclude<LLMMessage, { role: 'system' }>[]): Exclude<LLMMessage, { role: 'system' }>[] {
   const out: Exclude<LLMMessage, { role: 'system' }>[] = []
@@ -230,6 +247,10 @@ interface StreamOutcome {
   readonly usage: LLMUsage
   readonly finish: Exclude<FinishReason, 'error'> | 'error'
   readonly error?: ErrorInfo
+  /** Verbatim provider blocks from `done`, replayed on later requests. */
+  readonly providerContent?: JsonValue
+  /** Set with `finish: 'refusal'`. */
+  readonly refusal?: RefusalInfo
 }
 
 interface Authorization {
@@ -532,19 +553,24 @@ export class Agent {
       const interrupted = outcome.finish === 'aborted'
       const toolCalls = interrupted || outcome.finish === 'error' ? [] : outcome.toolCalls
       if (!(outcome.finish === 'error' && outcome.content === '')) {
+        const extras = {
+          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+          ...(outcome.providerContent === undefined ? {} : { providerContent: outcome.providerContent }),
+        }
         await this.append({
           type: 'assistant.message',
           turn,
           step,
           requestId: outcome.requestId,
           content: outcome.content,
-          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+          ...extras,
           usage: outcome.usage,
           finishReason: outcome.finish,
           ...(interrupted ? { interrupted: true as const } : {}),
+          ...(outcome.refusal === undefined ? {} : { refusal: outcome.refusal }),
         })
         if (!(interrupted && outcome.content === '')) {
-          this.messages.push({ role: 'assistant', content: outcome.content, ...(toolCalls.length > 0 ? { toolCalls } : {}) })
+          this.messages.push({ role: 'assistant', content: outcome.content, ...extras })
         }
         this.emit({
           type: 'assistant.message',
@@ -557,16 +583,20 @@ export class Agent {
           usage: outcome.usage,
           finishReason: outcome.finish,
           ...(interrupted ? { interrupted: true as const } : {}),
+          ...(outcome.refusal === undefined ? {} : { refusal: outcome.refusal }),
         })
       }
 
       if (interrupted) return { kind: 'cancelled', cause: signal.aborted ? causeOf(signal) : 'user' }
       if (outcome.finish === 'error') return { kind: 'error', error: outcome.error ?? errorInfo('llm/request-failed', 'model request failed') }
+      // A refused reply ends the turn; its tool calls are never run (ADR 0002).
+      if (outcome.finish === 'refusal') return { kind: 'error', error: refusalError(outcome.refusal) }
+      // A reply cut by the output cap may carry truncated tool input; do not run it.
+      if (outcome.finish === 'max-tokens') return { kind: 'max-tokens' }
       if (toolCalls.length > 0) {
         await this.runTools(turn, step, toolCalls, signal)
         continue
       }
-      if (outcome.finish === 'max-tokens') return { kind: 'max-tokens' }
       return { kind: 'completed' }
     }
   }
@@ -591,6 +621,7 @@ export class Agent {
         : {}),
       ...(settings.maxTokens === undefined ? {} : { maxTokens: settings.maxTokens }),
       thinking: this.init.thinking,
+      effort: this.init.effort,
       signal: requestSignal,
     }
     this.stats.requestCount += 1
@@ -601,6 +632,8 @@ export class Agent {
     let usage: LLMUsage | undefined
     let finish: StreamOutcome['finish'] | undefined
     let error: ErrorInfo | undefined
+    let providerContent: JsonValue | undefined
+    let refusal: RefusalInfo | undefined
     let idleTimedOut = false
     let iterator: AsyncIterator<unknown> | undefined
     const stopped = abortPromise(requestSignal).then(() => ({ kind: 'stopped' as const }))
@@ -660,6 +693,8 @@ export class Agent {
             break
           case 'done':
             finish = event.finishReason
+            providerContent = event.providerContent
+            refusal = event.refusal
             break
           case 'error':
             finish = 'error'
@@ -694,7 +729,15 @@ export class Agent {
     }
     if (finish === 'error') return { ...base, toolCalls: [], finish, error: error ?? errorInfo('llm/request-failed', 'model request failed') }
     if (finish === 'aborted') return { ...base, toolCalls: [], finish: 'aborted' }
-    return { ...base, toolCalls: ordered, finish: ordered.length > 0 ? 'tool-calls' : finish === 'tool-calls' ? 'stop' : finish }
+    // `stop`/`tool-calls` follow the assembled calls; `max-tokens` and `refusal` are kept as reported.
+    const reported = finish === 'stop' || finish === 'tool-calls' ? (ordered.length > 0 ? 'tool-calls' : 'stop') : finish
+    return {
+      ...base,
+      toolCalls: ordered,
+      finish: reported,
+      ...(providerContent === undefined ? {} : { providerContent }),
+      ...(refusal === undefined ? {} : { refusal }),
+    }
   }
 
   // -------------------------------------------------------------------------

@@ -64,8 +64,8 @@ describe('contracts: type-level shape', () => {
     expectTypeOf<LLMStreamEventType>().toEqualTypeOf<
       'text.delta' | 'reasoning.delta' | 'tool-call.start' | 'tool-call.delta' | 'tool-call.end' | 'usage' | 'done' | 'error'
     >()
-    expectTypeOf<DoneEvent['finishReason']>().toEqualTypeOf<'stop' | 'tool-calls' | 'max-tokens' | 'aborted'>()
-    expectTypeOf<FinishReason>().toEqualTypeOf<'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'error'>()
+    expectTypeOf<DoneEvent['finishReason']>().toEqualTypeOf<'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'refusal'>()
+    expectTypeOf<FinishReason>().toEqualTypeOf<'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'refusal' | 'error'>()
     expectTypeOf<Extract<LLMStreamEvent, { type: 'error' }>['error']['code']>().toBeString()
   })
 

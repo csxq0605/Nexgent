@@ -100,9 +100,23 @@
         "tool-calls",
         "max-tokens",
         "aborted",
+        "refusal",
         "error"
       ]
     },
+    "refusalInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "explanation": {
+          "type": "string"
+        }
+      }
+    },
+    "jsonValue": {},
     "errorInfo": {
       "type": "object",
       "additionalProperties": false,
@@ -195,6 +209,9 @@
           "items": {
             "$ref": "#/$defs/toolCall"
           }
+        },
+        "providerContent": {
+          "$ref": "#/$defs/jsonValue"
         }
       }
     },
@@ -635,6 +652,12 @@
         },
         "interrupted": {
           "const": true
+        },
+        "providerContent": {
+          "$ref": "#/$defs/jsonValue"
+        },
+        "refusal": {
+          "$ref": "#/$defs/refusalInfo"
         }
       }
     },

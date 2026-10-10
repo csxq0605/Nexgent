@@ -30,53 +30,64 @@ afterEach(async () => {
 })
 
 describe('default product profile', () => {
-  // Values of PR #4 runtime/packages/bundle/nexgent-app/cordis.patch.yml.
-  const PR4 = {
-    model: 'mimo-v2.6-pro',
-    baseURL: 'https://token-plan-cn.xiaomimimo.com/v1',
+  // The Claude Platform route of ADR 0002, plus the PR #4 persona
+  // (runtime/packages/bundle/nexgent-app/cordis.patch.yml system-prompt row).
+  const ROUTE = {
+    provider: 'anthropic',
+    model: 'claude-sonnet-5-5',
+    endpoint: 'https://api.anthropic.com',
     apiKeyEnv: 'NEXGENT_API_KEY',
-    reasoning: 'off',
-    timeoutMs: 180000,
+    thinking: 'off',
+    effort: 'medium',
+    maxTokens: 16000,
+    timeoutMs: 600000,
     streamIdleTimeoutMs: 180000,
     maxRetries: 0,
-    maxTokens: 4096,
-    contextWindow: 128000,
-    personaPrefix: 'You are Nexgent, a general task agent using the {{model}} model. '
+    fallbacks: 'default',
+    personaPrefix: 'You are Nexgent, a general task agent running on the {{model}} model. '
       + 'Complete the user\'s task with the available materials and tools. '
       + 'Choose direct work, delegation or a workflow according to the task. '
       + 'Verify actual deliverables, explain unresolved requirements, and preserve useful work for subsequent turns.',
     personaSuffix: 'Your project working directory is {{cwd}}.',
   }
 
-  it('ships the PR #4 MiMo route, thinking off and system prompt', () => {
+  it('ships the ADR 0002 Claude route, thinking off, effort medium and the PR #4 persona', () => {
     const profile = defaultProfile()
     expect(profile.map(row => row.id)).toEqual(['credentials', 'workspace', 'session', 'llm', 'tools', 'approvals', 'agents'])
     const llm = profile.find(row => row.id === 'llm')!
     expect(llm.name).toBe('@nexgent/llm')
-    expect(llm.config).toMatchObject({
-      provider: 'mimo',
-      endpoint: PR4.baseURL,
-      model: PR4.model,
-      apiKeyCredential: PR4.apiKeyEnv,
-      thinking: PR4.reasoning,
-      timeoutMs: PR4.timeoutMs,
-      streamIdleTimeoutMs: PR4.streamIdleTimeoutMs,
-      maxRetries: PR4.maxRetries,
-      maxTokens: PR4.maxTokens,
-      contextWindow: PR4.contextWindow,
+    expect(llm.config).toEqual({
+      provider: ROUTE.provider,
+      endpoint: ROUTE.endpoint,
+      model: ROUTE.model,
+      apiKeyCredential: ROUTE.apiKeyEnv,
+      thinking: ROUTE.thinking,
+      effort: ROUTE.effort,
+      maxTokens: ROUTE.maxTokens,
+      timeoutMs: ROUTE.timeoutMs,
+      streamIdleTimeoutMs: ROUTE.streamIdleTimeoutMs,
+      maxRetries: ROUTE.maxRetries,
+      fallbacks: ROUTE.fallbacks,
     })
     const agents = profile.find(row => row.id === 'agents')!
     expect(agents.config).toMatchObject({
-      model: PR4.model,
+      model: ROUTE.model,
       thinking: 'off',
-      systemPrompt: { persona: PR4.personaPrefix, suffix: PR4.personaSuffix },
+      effort: 'medium',
+      maxTokens: ROUTE.maxTokens,
+      modelTimeoutMs: ROUTE.timeoutMs,
+      streamIdleTimeoutMs: ROUTE.streamIdleTimeoutMs,
+      systemPrompt: { persona: ROUTE.personaPrefix, suffix: ROUTE.personaSuffix },
     })
-    expect(DEFAULT_PERSONA).toBe(PR4.personaPrefix)
-    expect(DEFAULT_PERSONA_SUFFIX).toBe(PR4.personaSuffix)
+    expect(DEFAULT_PERSONA).toBe(ROUTE.personaPrefix)
+    expect(DEFAULT_PERSONA_SUFFIX).toBe(ROUTE.personaSuffix)
     // agrees with the project-config defaults of the contract
     expect(llm.config!.model).toBe(DEFAULT_PROJECT_CONFIG.model)
     expect(llm.config!.endpoint).toBe(DEFAULT_PROJECT_CONFIG.endpoint)
     expect(agents.config!.thinking).toBe(DEFAULT_PROJECT_CONFIG.thinking)
+    expect(agents.config!.effort).toBe(DEFAULT_PROJECT_CONFIG.effort)
+    expect(llm.config!.thinking).toBe(DEFAULT_PROJECT_CONFIG.thinking)
+    expect(llm.config!.effort).toBe(DEFAULT_PROJECT_CONFIG.effort)
     // no secret value in the profile
     expect(JSON.stringify(profile)).not.toMatch(/sk-/)
   })
@@ -109,7 +120,7 @@ describe('profile parsing', () => {
     const profile = applyProfilePatches(defaultProfile(), patches)
     expect(profile.at(-1)).toEqual({ id: 'extra', name: 'extra-plugin' })
     const llm = profile.find(row => row.id === 'llm')!
-    expect(llm.config).toMatchObject({ model: 'other', endpoint: 'https://token-plan-cn.xiaomimimo.com/v1', compat: { maxTokensField: 'max_tokens' } })
+    expect(llm.config).toMatchObject({ model: 'other', endpoint: 'https://api.anthropic.com', fallbacks: 'default' })
     expect(profile.find(row => row.id === 'session')!.disabled).toBe(true)
     expect(() => parsePatches('- insert: {}')).toThrow(/sequence/)
     expect(() => applyProfilePatches(defaultProfile(), parsePatches('- id: nope\n  disabled: true'))).toThrow(/unknown row id/)
@@ -176,6 +187,11 @@ describe('createApp', () => {
 
   it('passes patched agents config through schema defaults', async () => {
     harness = await bootHarness({ patches: [{ id: 'agents', config: { maxSteps: 1 } as JsonObject }] })
-    expect(harness.app.profile.find(row => row.id === 'agents')!.config).toMatchObject({ maxSteps: 1, toolAbortGraceMs: 200 })
+    expect(harness.app.profile.find(row => row.id === 'agents')!.config).toMatchObject({ maxSteps: 1, toolAbortGraceMs: 200, effort: 'medium' })
+  })
+
+  it('rejects an unknown effort level in the agents row', async () => {
+    await expect(bootHarness({ patches: [{ id: 'agents', config: { effort: 'extreme' } as JsonObject }] }))
+      .rejects.toMatchObject({ code: 'config/invalid', message: expect.stringContaining('profile row "agents"') })
   })
 })

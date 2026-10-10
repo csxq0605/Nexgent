@@ -1,6 +1,6 @@
 import { rmSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AgentEvent, Tool, ToolContext } from '../src/index.js'
+import { parseProjectConfig, type AgentEvent, type Tool, type ToolContext } from '../src/index.js'
 import { conversation, sleep, textReply, toolCallReply, usage, type ScriptStep } from './helpers/fakes.js'
 import { bootHarness, type Harness } from './helpers/harness.js'
 
@@ -57,18 +57,19 @@ describe('agent loop', () => {
     // request shape: system prompt first, tools, thinking off, model from the profile
     const request = llm.requests[1]!
     expect(request.messages[0]!.role).toBe('system')
-    expect(request.messages[0]!.content).toContain('mimo-v2.6-pro')
+    expect(request.messages[0]!.content).toContain('claude-sonnet-5-5')
     expect(request.messages[0]!.content).toContain(harness.workspace.root)
     expect(request.messages[0]!.content).toContain('- echo: Echo the text back.')
     expect(request.thinking).toBe('off')
-    expect(request.model).toBe('mimo-v2.6-pro')
+    expect(request.effort).toBe('medium')
+    expect(request.model).toBe('claude-sonnet-5-5')
     expect(request.tools?.map(tool => tool.name)).toEqual(['echo'])
     expect(conversation(request)).toEqual([
       { role: 'user', content: 'please echo hi' },
       { role: 'assistant', content: 'Let me check.', toolCalls: [{ id: 'call_1', name: 'echo', arguments: '{"text":"hi"}' }] },
       { role: 'tool', toolCallId: 'call_1', name: 'echo', content: 'echo: hi', isError: false },
     ])
-    expect(llm.options[0]).toMatchObject({ sessionId: agent.sessionId, purpose: 'task', timeoutMs: 180000, streamIdleTimeoutMs: 180000 })
+    expect(llm.options[0]).toMatchObject({ sessionId: agent.sessionId, purpose: 'task', timeoutMs: 600000, streamIdleTimeoutMs: 180000 })
 
     expect(ledger.of('tool.call')).toEqual([expect.objectContaining({
       sessionId: agent.sessionId, turn: 1, callId: 'call_1', name: 'echo', effects: ['read'],
@@ -292,5 +293,109 @@ describe('agent loop', () => {
     expect(store.locks.size).toBe(0)
     rmSync(harness.root, { recursive: true, force: true })
     harness = undefined
+  })
+
+  it('sends effort from .nexgent/config.json over the agents row over the contract default', async () => {
+    harness = await bootHarness({ script: [textReply('a'), textReply('b'), textReply('c')] })
+    const { app, llm } = harness
+    const base = parseProjectConfig({})
+    const row = await app.agents.create({ projectConfig: base })
+    await row.run('x')
+    expect(llm.requests[0]!.effort).toBe('medium')
+    await row.close()
+    const file = await app.agents.create({ projectConfig: parseProjectConfig({ effort: 'xhigh' }) })
+    await file.run('y')
+    expect(llm.requests[1]!.effort).toBe('xhigh')
+    await file.close()
+    const resumed = await app.agents.resume(file.sessionId, { projectConfig: parseProjectConfig({ effort: 'low' }) })
+    await resumed.run('z')
+    expect(llm.requests[2]!.effort).toBe('low')
+    await resumed.close()
+    await harness.dispose()
+    harness = await bootHarness({ script: [textReply('d')], patches: [{ id: 'agents', config: { effort: 'high' } }] })
+    const patched = await harness.app.agents.create({ projectConfig: base })
+    await patched.run('w')
+    expect(harness.llm.requests[0]!.effort).toBe('high')
+  })
+
+  it('round-trips providerContent: record, replay on the next request, and survive resume', async () => {
+    const blocks = [{ type: 'thinking', thinking: 'hmm', signature: 'sig1' }, { type: 'text', text: 'Let me check.' }, { type: 'tool_use', id: 'call_1' }]
+    const final = [{ type: 'thinking', thinking: 'done', signature: 'sig2' }, { type: 'text', text: 'Done: hi' }]
+    harness = await bootHarness({
+      script: [
+        [...toolCallReply('call_1', 'echo', { text: 'hi' }, 'Let me check.').slice(0, -1), { type: 'done', finishReason: 'tool-calls', providerContent: blocks }],
+        [...textReply('Done: hi').slice(0, -1), { type: 'done', finishReason: 'stop', providerContent: final }],
+        textReply('plain'),
+        textReply('after resume'),
+      ],
+    })
+    const { app, llm, store } = harness
+    app.ctx.tools.register(echo)
+    const agent = await app.agents.create()
+    await agent.run('please echo hi')
+    const [first, second] = store.of(agent.sessionId, 'assistant.message')
+    expect(first!.providerContent).toEqual(blocks)
+    expect(second!.providerContent).toEqual(final)
+    expect(conversation(llm.requests[1]!)[1]).toEqual({
+      role: 'assistant', content: 'Let me check.', toolCalls: [{ id: 'call_1', name: 'echo', arguments: '{"text":"hi"}' }], providerContent: blocks,
+    })
+    // a reply without providerContent carries none
+    await agent.run('again')
+    expect(store.of(agent.sessionId, 'assistant.message')[2]).not.toHaveProperty('providerContent')
+    expect(conversation(llm.requests[2]!)[3]).toEqual({ role: 'assistant', content: 'Done: hi', providerContent: final })
+    await agent.close()
+    const resumed = await app.agents.resume(agent.sessionId)
+    await resumed.run('more')
+    const replayed = conversation(llm.requests[3]!)
+    expect(replayed[1]).toMatchObject({ role: 'assistant', providerContent: blocks })
+    expect(replayed[3]).toMatchObject({ role: 'assistant', providerContent: final })
+    expect(replayed[5]).toEqual({ role: 'assistant', content: 'plain' })
+  })
+
+  it('ends the turn with llm/refused on a refusal and runs no tool call', async () => {
+    const refusal = { category: 'cbrn', explanation: 'declined by the safety classifier' }
+    harness = await bootHarness({
+      script: [[
+        ...toolCallReply('c1', 'echo', { text: 'x' }, 'I cannot').slice(0, -1),
+        { type: 'done', finishReason: 'refusal', refusal, providerContent: [{ type: 'text', text: 'I cannot' }] },
+      ]],
+    })
+    const { app, store, ledger } = harness
+    let ran = false
+    app.ctx.tools.register({ ...echo, handler: async () => { ran = true; return { content: 'ran' } } })
+    const agent = await app.agents.create()
+    const events: AgentEvent[] = []
+    agent.subscribe(event => events.push(event))
+    const result = await agent.run('go')
+    expect(ran).toBe(false)
+    expect(result.reason).toEqual({
+      kind: 'error',
+      error: { name: 'NexgentError', code: 'llm/refused', message: 'the model refused the request (cbrn): declined by the safety classifier', details: refusal },
+    })
+    expect(store.types(agent.sessionId)).toEqual(['session.start', 'turn.start', 'user.message', 'assistant.message', 'turn.end'])
+    expect(store.of(agent.sessionId, 'assistant.message')[0]).toMatchObject({ content: 'I cannot', finishReason: 'refusal', refusal })
+    expect(events.find(event => event.type === 'assistant.message')).toMatchObject({ finishReason: 'refusal', refusal })
+    expect(events.map(event => event.type)).not.toContain('tool.start')
+    await agent.close()
+    expect(ledger.of('tool.call')).toEqual([])
+    expect(ledger.of('task.outcome')[0]).toMatchObject({ status: 'failed', error: { code: 'llm/refused' } })
+  })
+
+  it('does not run tool calls of a reply cut by max-tokens', async () => {
+    harness = await bootHarness({
+      script: [[...toolCallReply('c1', 'echo', { text: 'x' }, 'partial').slice(0, -1), { type: 'done', finishReason: 'max-tokens' }]],
+    })
+    const { app, store, ledger } = harness
+    let ran = false
+    app.ctx.tools.register({ ...echo, handler: async () => { ran = true; return { content: 'ran' } } })
+    const agent = await app.agents.create()
+    const result = await agent.run('go')
+    expect(ran).toBe(false)
+    expect(result.reason).toEqual({ kind: 'max-tokens' })
+    expect(store.types(agent.sessionId)).toEqual(['session.start', 'turn.start', 'user.message', 'assistant.message', 'turn.end'])
+    expect(store.of(agent.sessionId, 'assistant.message')[0]).toMatchObject({ content: 'partial', finishReason: 'max-tokens' })
+    expect(ledger.of('tool.call')).toEqual([])
+    await agent.close()
+    expect(ledger.of('task.outcome')[0]).toMatchObject({ status: 'completed' })
   })
 })

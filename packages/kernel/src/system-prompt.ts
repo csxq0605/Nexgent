@@ -14,8 +14,8 @@ export interface SystemPromptTemplate {
   readonly suffix: string
 }
 
-/** PR #4 `cordis.patch.yml` `system-prompt.personaPrefix`. */
-export const DEFAULT_PERSONA = 'You are Nexgent, a general task agent using the {{model}} model. '
+/** PR #4 `cordis.patch.yml` `system-prompt.personaPrefix` (wording of the model mention adjusted for the Claude route). */
+export const DEFAULT_PERSONA = 'You are Nexgent, a general task agent running on the {{model}} model. '
   + 'Complete the user\'s task with the available materials and tools. '
   + 'Choose direct work, delegation or a workflow according to the task. '
   + 'Verify actual deliverables, explain unresolved requirements, and preserve useful work for subsequent turns.'

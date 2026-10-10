@@ -49,11 +49,15 @@ describe('project config', () => {
     const workspace = await openWorkspace(await tempDir(), { ensureLayout: true })
     expect(await loadProjectConfig(workspace.layout)).toMatchObject({ version: 1, sandboxMode: 'workspace-write', approvals: [], extraReadRoots: [] })
     await writeFile(workspace.layout.configFile, JSON.stringify({ version: 1, sandboxMode: 'read-only', costCaps: { perTask: { maxRequests: 2 } } }))
-    expect(await loadProjectConfig(workspace.layout)).toMatchObject({ sandboxMode: 'read-only', costCaps: { perTask: { maxRequests: 2 } }, model: 'mimo-v2.6-pro' })
+    expect(await loadProjectConfig(workspace.layout)).toMatchObject({
+      sandboxMode: 'read-only', costCaps: { perTask: { maxRequests: 2 } }, model: 'claude-sonnet-5-5', thinking: 'off', effort: 'medium',
+    })
+    await writeFile(workspace.layout.configFile, JSON.stringify({ effort: 'xhigh', thinking: 'on' }))
+    expect(await loadProjectConfig(workspace.layout)).toMatchObject({ effort: 'xhigh', thinking: 'on' })
   })
 
   it('rejects unknown fields, wrong types, bad version and malformed JSON with config/invalid', async () => {
-    for (const bad of [{ modle: 'x' }, { sandboxMode: 'yolo' }, { version: 2 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 'bash' }] }, { extraReadRoots: ['relative'] }, []]) {
+    for (const bad of [{ modle: 'x' }, { sandboxMode: 'yolo' }, { version: 2 }, { thinking: 'maybe' }, { effort: 'extreme' }, { effort: 1 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 'bash' }] }, { extraReadRoots: ['relative'] }, []]) {
       expect(() => validateProjectConfig(bad)).toThrow(expect.objectContaining({ code: 'config/invalid' }))
     }
     const workspace = await openWorkspace(await tempDir(), { ensureLayout: true })

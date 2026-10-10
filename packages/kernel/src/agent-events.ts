@@ -5,7 +5,7 @@
  */
 import type { ApprovalDecision, ApprovalRequest } from './contracts/approvals.js'
 import type { ErrorInfo } from './contracts/errors.js'
-import type { FinishReason, LLMUsage, ToolCall, ToolResult } from './contracts/llm.js'
+import type { FinishReason, LLMUsage, RefusalInfo, ToolCall, ToolResult } from './contracts/llm.js'
 import type { SessionRecord, TurnEndReason } from './contracts/session.js'
 
 interface Base {
@@ -30,6 +30,8 @@ export type AgentEvent =
     readonly usage: LLMUsage
     readonly finishReason: FinishReason
     readonly interrupted?: true
+    /** Set with `finishReason: 'refusal'`; the reply's tool calls were not run. */
+    readonly refusal?: RefusalInfo
   }
   | Base & { readonly type: 'tool.start'; readonly turn: number; readonly step: number; readonly call: ToolCall }
   | Base & { readonly type: 'approval.request'; readonly turn: number; readonly request: ApprovalRequest }

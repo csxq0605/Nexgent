@@ -25,7 +25,14 @@ export const COMMON_DEFS: Record<string, JsonObject> = {
       reasoningTokens: { $ref: '#/$defs/usageCount' },
     },
   },
-  finishReason: { enum: ['stop', 'tool-calls', 'max-tokens', 'aborted', 'error'] },
+  finishReason: { enum: ['stop', 'tool-calls', 'max-tokens', 'aborted', 'refusal', 'error'] },
+  refusalInfo: {
+    type: 'object',
+    additionalProperties: false,
+    properties: { category: { type: 'string' }, explanation: { type: 'string' } },
+  },
+  /** Any JSON value: the provider's verbatim content blocks. */
+  jsonValue: {},
   errorInfo: {
     type: 'object',
     additionalProperties: false,
