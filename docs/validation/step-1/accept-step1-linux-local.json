@@ -1,0 +1,200 @@
+{
+  "kind": "nexgent.acceptance-summary",
+  "schemaVersion": 1,
+  "result": "pass",
+  "step": {
+    "number": 1,
+    "name": "主应用（kernel / llm / session / workspace 重写）",
+    "exitCriteria": [
+      "`accept-step1` 两平台通过",
+      "真实 MiMo 一次（手动，另行记录）"
+    ],
+    "script": "scripts/accept-step1.mjs"
+  },
+  "date": {
+    "acceptedAt": "2026-10-10T10:22:17.028Z",
+    "commitRange": null
+  },
+  "source": {
+    "branch": "claude/sleepy-pascal-v0ujqm",
+    "commit": "e20743a5ab42656b55196d63ef83640c11c251c7",
+    "pullRequests": []
+  },
+  "environment": {
+    "platform": "linux",
+    "os": "Linux 6.18.44-fc-v114",
+    "node": "v22.22.0",
+    "pnpm": "unknown",
+    "other": {}
+  },
+  "scripted": {
+    "command": "node scripts/accept-step1.mjs",
+    "ciRunUrl": null,
+    "result": "pass",
+    "summaryFile": null,
+    "simulated": "scripted Claude Messages API model server; run → write-file task; resume → long turn killed mid-stream; resume in a new process → continue and write another file",
+    "faultsInjected": [
+      "kill"
+    ]
+  },
+  "realModel": null,
+  "ledger": {
+    "requestCount": 5,
+    "statusCounts": {
+      "ok": 4,
+      "error": 0,
+      "aborted": 0,
+      "unknown": 1
+    },
+    "unknownUsageCount": 5,
+    "knownInputTokens": 400,
+    "knownOutputTokens": 80,
+    "toolCallCount": 2,
+    "taskOutcomes": 2,
+    "writeFailures": "unknown"
+  },
+  "failures": {
+    "failedCases": [],
+    "untested": [
+      "real MiMo run (manual, recorded separately under docs/validation/step-1/)",
+      "approval prompts (stdin is not a TTY here, so approvals resolve as headless denies)"
+    ],
+    "knownIssues": []
+  },
+  "conclusion": {
+    "proves": [
+      "nexgent run completes a write-file task and persists session + ledger",
+      "a hard-killed process leaves a session that a new process resumes with its history"
+    ],
+    "doesNotProve": [
+      "anything about real-model behaviour, cost or latency"
+    ],
+    "meetsExitCriteria": true,
+    "missing": []
+  },
+  "raw": {
+    "location": "/tmp/nexgent-accept-step1-vCIadN",
+    "sha256": null,
+    "summaryDir": null,
+    "manifest": [
+      {
+        "sha256": "c4f299c27aa5ac4909fa3dfb30ce40b3ce20151ad436465e65a800207a238286",
+        "file": "project/.nexgent/sessions/120e9a09-f77b-465d-9174-398e01fb8bf7/session.jsonl"
+      },
+      {
+        "sha256": "c822133f7ac4df4f4e53fc724577cc132b528cff9ef1aef2a46f17527d711457",
+        "file": "project/.nexgent/ledgers/2026-10/requests.jsonl"
+      }
+    ]
+  },
+  "checks": [
+    {
+      "name": "A: run exits 0",
+      "passed": true,
+      "detail": "code 0; stderr: "
+    },
+    {
+      "name": "A: run announces a session id",
+      "passed": true,
+      "detail": "events: session,turn.start,step.start,tool-call.start,tool-call.end,usage,tool.start,tool.end,step.start,text.delta,usage,turn.end,final"
+    },
+    {
+      "name": "A: task file written",
+      "passed": true
+    },
+    {
+      "name": "A: session file starts with session.start",
+      "passed": true
+    },
+    {
+      "name": "A: turn 1 completed",
+      "passed": true,
+      "detail": "[[1,\"completed\"]]"
+    },
+    {
+      "name": "A: tool result recorded",
+      "passed": true
+    },
+    {
+      "name": "A: session lock released",
+      "passed": true
+    },
+    {
+      "name": "A: ledger has paired request records",
+      "passed": true,
+      "detail": "{\"withoutEnd\":[],\"withoutStart\":[]}"
+    },
+    {
+      "name": "A: ledger task.outcome completed",
+      "passed": true
+    },
+    {
+      "name": "B: long turn started streaming",
+      "passed": true
+    },
+    {
+      "name": "B: process killed before finishing",
+      "passed": true,
+      "detail": "code null signal SIGKILL"
+    },
+    {
+      "name": "B: turn 2 left open by the crash",
+      "passed": true,
+      "detail": "[2]"
+    },
+    {
+      "name": "C: resume exits 0",
+      "passed": true,
+      "detail": "code 0; stderr: "
+    },
+    {
+      "name": "C: same session resumed",
+      "passed": true
+    },
+    {
+      "name": "C: second file written",
+      "passed": true
+    },
+    {
+      "name": "C: interrupted turn 2 closed as interrupted",
+      "passed": true,
+      "detail": "[[1,\"completed\"],[2,\"interrupted\"],[3,\"completed\"]]"
+    },
+    {
+      "name": "C: turn 3 completed",
+      "passed": true,
+      "detail": "[[1,\"completed\"],[2,\"interrupted\"],[3,\"completed\"]]"
+    },
+    {
+      "name": "C: no turn left open",
+      "passed": true
+    },
+    {
+      "name": "C: seq contiguous",
+      "passed": true
+    },
+    {
+      "name": "C: session lock released",
+      "passed": true
+    },
+    {
+      "name": "C: resumed request carries the turn-1 history",
+      "passed": true
+    },
+    {
+      "name": "scripted server consumed every entry",
+      "passed": true,
+      "detail": "remaining 0"
+    },
+    {
+      "name": "C: ledger task.outcome per finished process",
+      "passed": true,
+      "detail": "[\"completed\",\"completed\"]"
+    },
+    {
+      "name": "C: only the killed request lacks an end record",
+      "passed": true,
+      "detail": "{\"withoutEnd\":[\"d7aa2d6a-31e2-461c-88f6-86417cc735bb\"],\"withoutStart\":[]}"
+    }
+  ]
+}
