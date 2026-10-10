@@ -3,6 +3,7 @@
  * in a sandbox mode, what an approval request shows, and whether a standing
  * grant admits a call.
  */
+import type { ApprovalSubject } from './contracts/approvals.js'
 import type { ApprovalGrant, ApprovalRisk, ApprovalScope } from './contracts/approvals.js'
 import type { ToolDefinition } from './contracts/tools.js'
 import type { SandboxMode } from './contracts/workspace.js'
@@ -43,11 +44,7 @@ export function decideToolPolicy(definition: ToolDefinition, mode: SandboxMode):
 }
 
 /** The thing a call acts on, as far as approval is concerned. */
-export interface ApprovalSubject {
-  readonly kind: 'command' | 'path' | 'other'
-  /** Full command, project path, or a compact rendering of the arguments. */
-  readonly value: string
-}
+export type { ApprovalSubject } from './contracts/approvals.js'
 
 const MAX_SUMMARY = 500
 

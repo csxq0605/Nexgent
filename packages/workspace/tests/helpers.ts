@@ -35,7 +35,7 @@ export async function project(mode: SandboxMode = 'workspace-write'): Promise<{
 }
 
 /** A minimal tool context. */
-export function toolContext(workspace: LocalWorkspace, sandboxMode: SandboxMode = 'workspace-write', extra: Partial<ToolContext> & { approved?: boolean } = {}): ToolContext {
+export function toolContext(workspace: LocalWorkspace, sandboxMode: SandboxMode = 'workspace-write', extra: Partial<ToolContext> = {}): ToolContext {
   return {
     sessionId: 'test-session',
     callId: 'call-1',
@@ -43,6 +43,9 @@ export function toolContext(workspace: LocalWorkspace, sandboxMode: SandboxMode 
     workspace,
     sandboxMode,
     signal: new AbortController().signal,
+    approved: false,
+    // no host responder: every ask is denied (permissions.md §工具审批)
+    requestApproval: async () => false,
     ...extra,
   }
 }

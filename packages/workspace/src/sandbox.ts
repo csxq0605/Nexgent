@@ -77,7 +77,7 @@ export type SandboxAssessment =
     /** Command rule hits, for command assessments. */
     readonly matches?: readonly CommandMatch[]
   }
-  | { readonly kind: 'deny'; readonly path: string; readonly code: SandboxDenyCode; readonly reason: string }
+  | { readonly kind: 'deny'; readonly path: string; readonly code: Exclude<SandboxDenyCode, 'approval-required'>; readonly reason: string }
 
 /** The resolved policy plus the workspace-only facts the contract cannot express. */
 export interface LocalSandboxPolicy extends SandboxPolicy {
@@ -327,7 +327,7 @@ export class LocalSandbox implements Sandbox {
   }
 }
 
-/** Map a three-way assessment onto the contract's binary decision (ask → denied, fail closed). */
+/** Map a three-way assessment onto the contract's decision: `ask` is `approval-required` carrying what to ask. */
 export function toDecision(assessment: SandboxAssessment): SandboxDecision {
   switch (assessment.kind) {
     case 'allow':
@@ -337,8 +337,16 @@ export function toDecision(assessment: SandboxAssessment): SandboxDecision {
     case 'ask':
       return {
         allowed: false,
-        code: assessment.matches === undefined ? 'denied-pattern' : 'command-denied',
+        code: 'approval-required',
         reason: `approval required: ${assessment.reason}`,
+        ask: {
+          summary: assessment.path,
+          detail: assessment.reason,
+          risk: assessment.risk,
+          options: assessment.options,
+          ...(assessment.pattern === undefined ? {} : { pattern: assessment.pattern }),
+          subject: { kind: assessment.matches === undefined ? 'path' : 'command', value: assessment.path },
+        },
       }
   }
 }

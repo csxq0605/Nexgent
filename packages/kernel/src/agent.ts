@@ -21,6 +21,7 @@ import type {
   ApprovalRequest,
   ApprovalRisk,
   ApprovalScope,
+  ToolApprovalAsk,
   ToolCallApproval,
 } from './contracts/approvals.js'
 import type { ProjectConfig } from './contracts/config.js'
@@ -90,20 +91,7 @@ export interface AgentSettings {
 export type ProjectGrantWriter = (grant: ApprovalGrant, context: { readonly sessionId: string; readonly projectRoot: string }) => Promise<void>
 
 /** A per-call approval request a tool may raise through its context (see {@link KernelToolContext}). */
-export interface ToolApprovalAsk {
-  /** One line: what is about to happen (full command or path). */
-  readonly summary: string
-  /** Multi-line context (matched rule, cwd). */
-  readonly detail?: string
-  /** Default `medium`. */
-  readonly risk?: ApprovalRisk
-  /** Grant pattern (command prefix or path glob); absent derives one from `subject`. */
-  readonly pattern?: string
-  /** What the call acts on, for matching standing grants; default `{ kind: 'other', value: summary }`. */
-  readonly subject?: ApprovalSubject
-  /** Scopes to offer; default all (minus `project` without a writer); `high` risk offers only `once`. */
-  readonly options?: readonly ApprovalScope[]
-}
+export type { ToolApprovalAsk } from './contracts/approvals.js'
 
 /**
  * The context the kernel passes to tool handlers: the contract's

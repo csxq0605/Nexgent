@@ -24,6 +24,7 @@ import {
   type ErrorInfo,
   type JsonObject,
   type Tool,
+  type ToolApprovalAsk,
   type ToolContext,
 } from '@nexgent/kernel'
 import { matchGlob } from '../glob.js'
@@ -48,24 +49,8 @@ export interface WorkspaceTool extends Tool {
   readonly preflight: ToolPreflight
 }
 
-/** What a tool hands to `requestApproval` (structurally the kernel's `ToolApprovalAsk`). */
-export interface ApprovalAsk {
-  readonly summary: string
-  readonly detail?: string
-  readonly risk?: ApprovalRisk
-  readonly pattern?: string
-  /** What standing grants are matched against. */
-  readonly subject?: { readonly kind: 'command' | 'path' | 'other'; readonly value: string }
-  readonly options?: readonly ApprovalScope[]
-}
-
-/** A {@link ToolContext} as tools may receive it: pre-approved, or able to request approval. */
-export interface ApprovingToolContext extends ToolContext {
-  /** Set by a caller that already obtained approval for this call. */
-  readonly approved?: boolean
-  /** Raise an approval request; resolves `true` when the call may proceed. */
-  readonly requestApproval?: (ask: ApprovalAsk) => Promise<boolean>
-}
+/** The ask a tool raises through {@link ToolContext.requestApproval}. */
+export type ApprovalAsk = ToolApprovalAsk
 
 /** What every workspace tool needs. */
 export interface ToolDeps {
@@ -170,11 +155,10 @@ export async function enforce(
 ): Promise<string> {
   if (assessment.kind === 'deny') throw deniedError(assessment, context.sandboxMode, command)
   if (assessment.kind === 'allow') return assessment.path
-  const approving = context as ApprovingToolContext
-  if (approving.approved === true) return assessment.path
-  if (typeof approving.requestApproval === 'function') {
+  if (context.approved) return assessment.path
+  {
     const detail = [presentation.detail, `rule: ${assessment.reason}`].filter(Boolean).join('\n')
-    const allowed = await approving.requestApproval({
+    const allowed = await context.requestApproval({
       summary: presentation.summary,
       detail,
       risk: assessment.risk,
@@ -185,7 +169,6 @@ export async function enforce(
     if (allowed) return assessment.path
     throw new NexgentError('approval/denied', `not approved: ${presentation.summary} (${assessment.reason})`)
   }
-  throw approvalRequiredError(assessment.reason)
 }
 
 /** Read a string field from an untrusted input object. */
