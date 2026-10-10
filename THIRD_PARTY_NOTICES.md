@@ -19,7 +19,19 @@ Nexgent 以 [MIT](LICENSE) 许可发布。本文件列出 Nexgent 使用、参�
 
 | Nexgent 路径 | 来源（参考库内路径） |
 | --- | --- |
-| （尚无；步骤 1 开始登记） | |
+| `packages/kernel/src/util/atomic-write.ts` | `packages/util/atomic-write/src/index.ts`、`packages/storage/storage-json/src/atomic.ts` |
+| `packages/kernel/src/util/timeout.ts` | `packages/util/timeout/src/index.ts` |
+| `packages/kernel/src/storage/json-file.ts` | `packages/storage/storage-json/src/index.ts` |
+| `packages/kernel/src/profile.ts` | `packages/boot/app-boot/src/profile.ts`、`packages/boot/app-boot/src/profile-plugins.ts` |
+| `packages/kernel/src/app.ts` | `packages/boot/app-boot/src/index.ts` |
+| `packages/kernel/src/agents.ts` | `packages/core/agent/src/index.ts`、`packages/core/agent-default-model/src/index.ts` |
+| `packages/kernel/src/tools.ts` | `packages/core/tools/src`（作用域注册表设计）、`packages/core/scope/src/index.ts` |
+| `packages/llm/src/proxy/policy.ts` | `packages/util/http-proxy/src/policy.ts` |
+| `packages/workspace/src/paths.ts` | `packages/fs/fs-sandbox/src/containment.ts` |
+| `packages/workspace/src/process.ts` | `packages/subprocess/subprocess-local/src/spawn.ts` |
+| `apps/cli/src/json-lines.ts` | `packages/bundle/headless/src/json-stream.ts` |
+
+`@nexgent/session` 与 `packages/test-support` 没有复制件（只参考设计）。`apps/cli/bin/nexgent.ps1` 移植自 Nexgent 自己的 PR #4 `run.ps1`，不是 DeepSeek Harness 代码。按包划分的“复制 / 只参考设计”清单见 `docs/reference-map.md` §步骤 1 复制件登记。
 
 ## MIT License
 

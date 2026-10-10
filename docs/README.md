@@ -15,6 +15,8 @@
 
 仓库根目录另有 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)（第三方软件声明）；从参考库复制并改写的每个文件都要在其中登记。
 
+代码的说明在各包自己的 README 里：[`packages/kernel`](../packages/kernel/README.md)、[`packages/llm`](../packages/llm/README.md)、[`packages/session`](../packages/session/README.md)、[`packages/workspace`](../packages/workspace/README.md)、[`packages/test-support`](../packages/test-support/README.md)、[`apps/cli`](../apps/cli/README.md)。每份写明用途、公开 API、对应的 DSH 参考与未完成项。它们实现的格式与策略以两份规范为准：[`spec/data-formats.md`](spec/data-formats.md)（`.nexgent/` 下的文件格式、项目配置、会话 JSONL、账本）与 [`spec/permissions.md`](spec/permissions.md)（沙箱模式、路径与命令策略、工具审批、费用上限、密钥存放）。
+
 ## 根 README 只描述已验收能力
 
 仓库根目录的 `README.md` 只描述**通过了验收记录**的能力。一项功能在 `docs/validation/` 里有对应步骤的验收记录（两平台 CI 通过、真实模型手动验收留有摘要）之前，只能出现在本目录的计划、规范与研究文档里，不进入根 README。这条规则来自计划 4.10“文档体系”一行，目的是让 README 的每句话都有证据可查，不再出现五代入口并存的描述。
@@ -40,7 +42,7 @@
 | [`adr/0001-reference-rewrite.md`](adr/0001-reference-rewrite.md) | 已接受：参考重写与计划 4.9 的全部决策 |
 | [`reference-map.md`](reference-map.md) | 步骤 0 建立，随各步更新 |
 | [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
-| [`spec/data-formats.md`](spec/data-formats.md) | 桩：只有章节标题与一句意图，步骤 1 开工前写完 |
-| [`spec/permissions.md`](spec/permissions.md) | 桩：同上 |
+| [`spec/data-formats.md`](spec/data-formats.md) | 步骤 1 章节已写定；能力清单、材料与成果元数据留标题 |
+| [`spec/permissions.md`](spec/permissions.md) | 步骤 1 章节已写定；插件安装审批（步骤 4）、本地 IPC（步骤 2）留标题 |
 | [`validation/README.md`](validation/README.md) | 证据政策 |
 | [`validation/TEMPLATE.md`](validation/TEMPLATE.md) | 验收记录模板 |

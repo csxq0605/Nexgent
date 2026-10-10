@@ -97,7 +97,7 @@
 
 ## 工具审批
 
-每个工具注册时声明 `approval: 'never' | 'ask'`；策略层可把单次调用提升为 `ask`（命中形态黑名单、敏感文件模式）或 `deny`（模式不允许）。三种模式下的行为：
+每个工具注册时声明 `approval: 'never' | 'ask' | 'always'`（`always` 每次都问，对应“始终审批”表）；策略层可把单次调用提升为 `ask`（命中形态黑名单、敏感文件模式）或 `deny`（模式不允许）。三种模式下的行为：
 
 | 模式 | `approval: 'never'` 工具 | `approval: 'ask'` 工具 / 被提升的调用 | 被模式禁止的调用 |
 | --- | --- | --- | --- |
@@ -211,6 +211,21 @@ interface ApprovalDecision {
 - 桌面应用（步骤 2）：主进程经 IPC 把 `ApprovalRequest` 推给渲染进程弹对话框，应答以 `ApprovalDecision` 回传；令牌与边界在"本地 IPC"章节。
 - 两者记录完全相同：会话 `approval.request` / `approval.decision`，账本 `tool.call.approval`；呈现方式不入记录。
 - 轮次取消时所有未决请求以 `decidedBy: 'cancel'` 关闭；一个请求只能被应答一次，迟到的应答丢弃。
+
+**工具在运行中发现的审批。** 沙箱契约（`packages/kernel/src/contracts/workspace.ts`）的 `SandboxDecision` 除 `{ allowed: true }` 与 `{ allowed: false, code, reason }` 外，还有第三种情形 `{ allowed: false, code: 'approval-required', reason, ask: ToolApprovalAsk }`：策略没有直接拒绝，调用在宿主批准 `ask` 后可以继续。工具不自己弹窗，而是把 `ask` 交给 `ToolContext.requestApproval(ask)`（契约 `packages/kernel/src/contracts/tools.ts`），它经 `ctx.approvals` 走上面同一套 `ApprovalRequest` / `ApprovalDecision` 流程，解析为 `true` 表示可以继续，没有应答者时为拒绝。`ToolContext.approved` 为 `true` 表示循环在调用工具前已经为该调用取得审批（`approval: 'ask' | 'always'` 的工具），工具不必再问。`ToolApprovalAsk`（`packages/kernel/src/contracts/approvals.ts`）的字段：
+
+```ts
+interface ToolApprovalAsk {
+  summary: string                  // 一行：将要发生什么（命令全文或路径）
+  detail?: string                  // 多行上下文：命中的规则、cwd
+  risk?: 'low' | 'medium' | 'high' // 默认 'medium'
+  pattern?: string                 // session / project 授权保存的匹配模式；缺省从 subject 推导
+  subject?: { kind: 'command' | 'path' | 'other', value: string }  // 用于匹配已有授权；默认 { kind: 'other', value: summary }
+  options?: Array<'once' | 'session' | 'project'>  // 可选作用范围；默认宿主支持的全部，risk 为 'high' 时只给 'once'
+}
+```
+
+`extraReadRoots`（读根的扩展）是项目配置 `.nexgent/config.json` 的字段（`ProjectConfig.extraReadRoots: string[]`，默认 `[]`），见 `data-formats.md` §项目配置文件。
 
 ## 测试
 

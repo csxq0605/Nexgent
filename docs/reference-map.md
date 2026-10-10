@@ -15,50 +15,64 @@
 
 | DSH 包组 / 具体包 | Nexgent 包 | 处理 | 归属步骤 | 备注 |
 | --- | --- | --- | --- | --- |
-| `boot/app-boot` | `@nexgent/kernel` | 改写 | 1 | YAML profile 组合与 patch 行的装载；PR #4 `cordis.patch.yml` 的产品默认值移植到此 |
-| `boot/cmdline` | `apps/cli` | 改写 | 1 | 命令行参数解析；只保留 `run / resume / app` |
+| `boot/app-boot` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/profile.ts`、`profile-plugins.ts`（→ `profile.ts`）、`src/index.ts`（→ `app.ts`）；PR #4 `cordis.patch.yml` 的产品默认值移植到此 |
+| `boot/cmdline` | `apps/cli` | 重写 | 1 | 命令行参数解析；只保留 `run / resume / app`；步骤 1 只参考约定，基于 `util.parseArgs` 自写（`args.ts`） |
 | `boot/config-editor`、`boot/hmr` | — | 不要 | — | 配置编辑与热重载不在范围 |
-| `bundle/base`、`bundle/headless` | `apps/cli` | 改写 | 1 | profile 组合方式的参考；`nexgent run` 即 headless 入口 |
+| `bundle/base`、`bundle/headless` | `apps/cli` | 改写 | 1 | 已复制 `headless/src/json-stream.ts`（→ `json-lines.ts`）；headless 的入口形态与 `base` 只参考设计；`nexgent run` 即 headless 入口 |
 | `bundle/sdk-app`、`bundle/sdk-minimal`、`bundle/acp-app`、`bundle/web-app` | — | 不要 | — | `web-app` 见“不要”一节 |
-| `core/agent`、`core/agent-loop` | `@nexgent/kernel` | 改写 | 1 | `ctx.agents` 创建 / 恢复；请求模型、执行工具、写入会话的循环；取消与超时边界用故障注入测试补回 |
-| `core/scope` | `@nexgent/kernel` | 改写 | 1 | 会话作用域；步骤 4 的会话级试用依赖它 |
-| `core/tools` | `@nexgent/kernel` | 改写 | 1 | `ctx.tools` 注册与作用域；PR #4 `tool-restriction.ts` 在步骤 3 并入 |
-| `core/system-prompt` | `@nexgent/kernel` | 改写 | 1 | 系统提示组装；提示正文由 Nexgent 自写 |
-| `core/session` | `@nexgent/kernel` | 改写 | 1 | `ctx.session` 服务接口；持久化在 `@nexgent/session` |
-| `core/agent-default-model` | `@nexgent/kernel` | 改写 | 1 | 默认模型 `mimo-v2.6-pro` 的配置位置 |
+| `core/agent` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（→ `agents.ts`）：`ctx.agents` 创建 / 恢复 |
+| `core/agent-loop` | `@nexgent/kernel` | 重写 | 1 | 请求模型、执行工具、写入会话的循环只参考设计；取消与超时边界用故障注入测试补回 |
+| `core/scope` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（并入 `tools.ts`）：会话作用域；步骤 4 的会话级试用依赖它 |
+| `core/tools` | `@nexgent/kernel` | 改写 | 1 | 已改写 `src`（作用域注册表设计，→ `tools.ts`）：`ctx.tools` 注册与作用域；PR #4 `tool-restriction.ts` 在步骤 3 并入 |
+| `core/system-prompt` | `@nexgent/kernel` | 重写 | 1 | 系统提示组装只参考设计；提示正文由 Nexgent 自写 |
+| `core/session` | `@nexgent/kernel` | 重写 | 1 | `ctx.session` 服务接口；步骤 1 未复制文件；持久化在 `@nexgent/session` |
+| `core/agent-default-model` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（并入 `agents.ts`）：默认模型 `mimo-v2.6-pro` 的配置位置 |
 | `core/agent-tool-presentation` | — | 不要 | — | 面向 UI 的工具展示，步骤 2 由桌面应用自定 |
-| `llm/llm` | `@nexgent/llm` | 改写 | 1 | 模型服务接口、流式与工具调用消息类型 |
-| `llm/llm-pi-ai` | `@nexgent/llm` | 改写 | 1 | 单一 OpenAI 兼容路由（MiMo）；其他端点作为配置项 |
-| `llm/token-meter` | `@nexgent/llm` | 改写 | 1 | 用量计量；缺失用量显式标 unknown |
+| `llm/llm` | `@nexgent/llm` | 重写 | 1 | 模型服务接口、流式与工具调用消息类型只参考设计 |
+| `llm/llm-pi-ai` | `@nexgent/llm` | 重写 | 1 | 单一 OpenAI 兼容路由（MiMo），只参考设计；其他端点作为配置项 |
+| `llm/token-meter` | `@nexgent/llm` | 重写 | 1 | 用量计量只参考设计；缺失用量显式标 unknown |
 | `llm/llm-retry` | — | 不要 | — | 步骤 1 定 `maxRetries: 0`，每次请求进账本 |
 | `llm/llm-deepseek`、`llm/deepseek-llm-api-extensions`、`llm/plugin-package-inventory-deepseek` | — | 不要 | — | DeepSeek 专有路由与扩展 |
-| `session/session-persistence`、`session/session-persistence-jsonl` | `@nexgent/session` | 改写 | 1 | JSONL 追加写 |
-| `session/session-checkpoint-policy` | `@nexgent/session` | 改写 | 1 | checkpoint 规则 |
-| `session/session-projection` | `@nexgent/session` | 改写 | 1 | 从记录投影出会话状态；按会话 ID 恢复 |
+| `session/session-persistence`、`session/session-persistence-jsonl` | `@nexgent/session` | 重写 | 1 | JSONL 追加写；只参考 `jsonl/src/storage.ts`（串行写链、撕裂尾截断）与 `lease.ts`（写租约）的设计 |
+| `session/session-checkpoint-policy` | `@nexgent/session` | 重写 | 1 | checkpoint 规则只参考设计 |
+| `session/session-projection` | `@nexgent/session` | 重写 | 1 | 从记录投影出会话状态；按会话 ID 恢复；只参考设计 |
 | `session/session-format` | `@nexgent/session` | 重写 | 1 | 只定义 Nexgent 的 v1 格式，见 `docs/spec/data-formats.md` |
 | `session/session-format-catalog`、`session-format-v0-to-v1` … `v3-to-v4` | — | 不要 | — | 不做历史迁移 |
 | `session/session-projection-cache`、`session-stats`、`session-turn-outline`、`session-telemetry`、`session-telemetry-otel`、`session-log-deepseek` | — | 不要 | — | |
 | `session/session-title`、`session-title-llm`、`session-title-*-prompt-llm` | — | 不要 | — | 步骤 2 若需要会话标题，再从此改写并更新本表 |
-| `credentials/credentials`、`credentials/credentials-local` | `@nexgent/kernel` | 改写 | 1 | 本机凭证文件读取；`NEXGENT_API_KEY` 优先 |
+| `credentials/credentials`、`credentials/credentials-local` | `@nexgent/kernel` | 重写 | 1 | 本机凭证文件读取只参考设计；`NEXGENT_API_KEY` 优先 |
 | `credentials/authorization`、`credentials/deepseek-account`、`credentials/deepseek-account-platform` | — | 不要 | — | 账户体系不在范围 |
-| `storage/storage`、`storage/storage-domain`、`storage/storage-json` | `@nexgent/kernel` | 改写 | 1 | 原子写与 JSON 存储原语 |
+| `storage/storage`、`storage/storage-domain`、`storage/storage-json` | `@nexgent/kernel` | 改写 | 1 | 已复制 `storage-json/src/atomic.ts`（并入 `util/atomic-write.ts`）、`storage-json/src/index.ts`（→ `storage/json-file.ts`）；`storage`、`storage-domain` 未复制 |
 | `storage/storage-sqlite` | — | 不要 | — | 步骤 1 无 SQLite 需求；步骤 5 `session-query-sqlite` 再议 |
-| `workspace/workspace` | `@nexgent/workspace` | 改写 | 1 | 工作目录与 `.nexgent/` 数据目录；步骤 2 的项目模型建于此 |
-| `fs/fs`、`fs/fs-local` | `@nexgent/workspace` | 改写 | 1 | 文件读写抽象 |
-| `fs/fs-sandbox`、`fs/fs-observation-policy` | `@nexgent/workspace` | 改写 | 1 | 路径白名单与写入限制 |
-| `fs/tool-fs`、`fs/tool-fs-search`、`fs/tool-str-replace-editor` | `@nexgent/workspace` | 改写 | 1 | 读写、搜索、`str_replace` 工具 |
-| `shell/shell`、`shell/shell-env` | `@nexgent/workspace` | 改写 | 1 | |
-| `shell/bash-local`、`shell/bash-sandbox`、`shell/tool-bash` | `@nexgent/workspace` | 改写 | 1 | Linux / macOS |
-| `shell/pwsh-local`、`shell/pwsh-sandbox`、`shell/tool-pwsh` | `@nexgent/workspace` | 改写 | 1 | Windows |
+| `workspace/workspace` | `@nexgent/workspace` | 重写 | 1 | 工作目录与 `.nexgent/` 数据目录，只参考设计；步骤 2 的项目模型建于此 |
+| `fs/fs`、`fs/fs-local` | `@nexgent/workspace` | 重写 | 1 | 文件读写抽象；步骤 1 未复制文件 |
+| `fs/fs-sandbox`、`fs/fs-observation-policy` | `@nexgent/workspace` | 改写 | 1 | 已复制 `fs-sandbox/src/containment.ts`（→ `paths.ts`）：路径白名单与写入限制；`fs-observation-policy` 未复制 |
+| `fs/tool-fs`、`fs/tool-fs-search`、`fs/tool-str-replace-editor` | `@nexgent/workspace` | 重写 | 1 | 读写、搜索、`str_replace` 工具，只参考设计 |
+| `shell/shell`、`shell/shell-env` | `@nexgent/workspace` | 重写 | 1 | 只参考设计 |
+| `shell/bash-local`、`shell/bash-sandbox`、`shell/tool-bash` | `@nexgent/workspace` | 重写 | 1 | Linux / macOS；只参考 `tool-bash` 的设计 |
+| `shell/pwsh-local`、`shell/pwsh-sandbox`、`shell/tool-pwsh` | `@nexgent/workspace` | 重写 | 1 | Windows；只参考 `tool-pwsh` 的设计 |
 | `shell/tool-bash-persistent`、`shell/tool-pwsh-persistent` | — | 不要 | — | 持久 shell 会话暂不做 |
-| `subprocess/subprocess`、`subprocess/subprocess-local`、`subprocess/win32-process` | `@nexgent/workspace` | 改写 | 1 | 子进程与 Windows 进程树终止 |
-| `sandbox/sandbox`、`sandbox/sandbox-policy`、`sandbox/sandbox-local` | `@nexgent/workspace` | 改写 | 1 | 路径与命令策略，两平台先用这一层 |
+| `subprocess/subprocess`、`subprocess/subprocess-local`、`subprocess/win32-process` | `@nexgent/workspace` | 改写 | 1 | 已复制 `subprocess-local/src/spawn.ts`（→ `process.ts`）：子进程与进程组 / `taskkill` 终止；`win32-process` 的 Job Object 未复制（后补） |
+| `sandbox/sandbox`、`sandbox/sandbox-policy`、`sandbox/sandbox-local` | `@nexgent/workspace` | 重写 | 1 | 路径与命令策略，两平台先用这一层；只参考 `sandbox-policy` 的设计 |
 | `sandbox/sandbox-windows-acl` | `@nexgent/workspace` | 改写 | 1（可选） | 先路径策略，ACL 后补（ADR 0001 决策 2）；PR #4 修过其错误路径 |
-| `util/atomic-write`、`util/timeout`、`util/workspace-path`、`util/home-paths`、`util/output-retention`、`util/launch-environment`、`util/native-command`、`util/values`、`util/deque`、`util/chunked-list`、`util/crypto`、`util/time` | 各使用包内部 | 改写 | 1 | 按需复制到使用它的包内，不单独成包 |
-| `util/http-proxy` | `@nexgent/llm` | 改写 | 1 | 代理设置 |
+| `util/atomic-write`、`util/timeout`、`util/workspace-path`、`util/home-paths`、`util/output-retention`、`util/launch-environment`、`util/native-command`、`util/values`、`util/deque`、`util/chunked-list`、`util/crypto`、`util/time` | 各使用包内部 | 改写 | 1 | 按需复制到使用它的包内，不单独成包；步骤 1 已复制 `atomic-write/src/index.ts`、`timeout/src/index.ts`（→ `@nexgent/kernel` `util/`），其余未复制 |
+| `util/http-proxy` | `@nexgent/llm` | 改写 | 1 | 已复制 `src/policy.ts`（→ `proxy/policy.ts`）；`install.ts` 的 undici dispatcher 换成自写隧道 `proxy/transport.ts` |
 | `util/brand`、`util/lazy-require`、`util/package-manifest` | — | 不要 | — | |
-| `test-support/agent-loop-testkit`、`test-support/llm-replay`、`test-support/llm-mock-server` | `packages/test-support` | 重写 | 1 | 只参考脚本化 provider 的设计；Nexgent 自写仿真规范与故障注入 |
+| `test-support/agent-loop-testkit`、`test-support/llm-replay`、`test-support/llm-mock-server` | `packages/test-support` | 重写 | 1 | 只参考脚本化 provider 的设计（另参考 `session-snapshot/src/launcher.ts` 的 spawn / wait / kill）；Nexgent 自写仿真规范与故障注入，无复制件 |
 | `test-support/session-snapshot`、`test-support/loader-smoke`、`test-support/remote-mock`、`test-support/client-runtime` | — | 不要 | — | 不复制 snapshot 测试体系 |
+
+**步骤 1 复制件登记（按 Nexgent 包）。** 与各文件首行的 `Adapted from` 头和 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) 一致；未列出的参考只用于设计，代码为 Nexgent 自写。
+
+| Nexgent 包 | 复制并改写（Nexgent 文件 ← DSH 文件） | 只参考设计 |
+| --- | --- | --- |
+| `@nexgent/kernel` | `src/util/atomic-write.ts` ← `util/atomic-write/src/index.ts` + `storage/storage-json/src/atomic.ts`；`src/util/timeout.ts` ← `util/timeout/src/index.ts`；`src/storage/json-file.ts` ← `storage/storage-json/src/index.ts`；`src/profile.ts` ← `boot/app-boot/src/profile.ts` + `profile-plugins.ts`；`src/app.ts` ← `boot/app-boot/src/index.ts`；`src/agents.ts` ← `core/agent/src/index.ts` + `core/agent-default-model/src/index.ts`；`src/tools.ts` ← `core/tools/src`（作用域注册表）+ `core/scope/src/index.ts` | `core/agent-loop`、`core/system-prompt`、`credentials/credentials`、`credentials/credentials-local`、`guard/timeout-policy` |
+| `@nexgent/llm` | `src/proxy/policy.ts` ← `util/http-proxy/src/policy.ts` | `llm/llm`、`llm/llm-pi-ai`、`llm/token-meter` |
+| `@nexgent/session` | （无） | `session/session-persistence-jsonl`（`src/storage.ts`、`src/lease.ts`）、`session/session-checkpoint-policy`、`session/session-projection`、`session/session-format` |
+| `@nexgent/workspace` | `src/paths.ts` ← `fs/fs-sandbox/src/containment.ts`；`src/process.ts` ← `subprocess/subprocess-local/src/spawn.ts` | `workspace/workspace`、`fs/tool-fs`、`fs/tool-fs-search`、`fs/tool-str-replace-editor`、`shell/shell-env`、`shell/tool-bash`、`shell/tool-pwsh`、`sandbox/sandbox-policy` |
+| `packages/test-support` | （无） | `test-support/agent-loop-testkit`、`test-support/llm-replay`、`test-support/llm-mock-server`、`test-support/session-snapshot/src/launcher.ts` |
+| `apps/cli` | `src/json-lines.ts` ← `bundle/headless/src/json-stream.ts` | `boot/cmdline`、`bundle/headless`（入口形态）、`bundle/base`、`apps/cli/src/process-shutdown.ts`（→ 自写 `signals.ts`）。`bin/nexgent.ps1` 移植自 PR #4 的 `run.ps1`（Nexgent 自己的代码，见下文“来源为 PR #4 的移植文件”），不是 DSH 代码 |
+
+上表的 DSH 路径省略 `packages/` 前缀（`apps/cli/src/process-shutdown.ts` 除外）。
 
 ### 步骤 2：日常任务体验
 
@@ -145,7 +159,7 @@
 | `test-support/*`（DSH 自己的） | 不要 | Nexgent 自写 `packages/test-support` |
 | `website/`、`snapshots/`、`.agents/`、`*.i18n.yaml` 与 `*.zh.md` 文档 | 不要 | |
 | `subagent/subagent-claude-code`、`subagent-codex`、`hooks/hooks-claude-code`、`hooks/hooks-codex` | 不要 | Claude Code / Codex provider |
-| `experimental/inspector`、`webworker-*`、`extensions/*`、`guard/*`、`plan/*`、`todo/*`、`schedule/*`、`runtime-diagnostics/*`、`native/`、`python/`、`patches/` | 不要 | 计划未提及，默认不要；`guard/timeout-policy` 在步骤 1 做超时边界时可参考 |
+| `experimental/inspector`、`webworker-*`、`extensions/*`、`guard/*`、`plan/*`、`todo/*`、`schedule/*`、`runtime-diagnostics/*`、`native/`、`python/`、`patches/` | 不要 | 计划未提及，默认不要；`guard/timeout-policy` 在步骤 1 做超时边界时作过设计参考（`@nexgent/kernel`），未复制 |
 
 ### 来源为 PR #4 的移植文件
 
@@ -158,6 +172,7 @@
 | `architecture-activation.ts` | `@nexgent/capabilities` | 4 |
 | `architecture.ts`、`architecture-store.ts`、`tool-restriction.ts`、persona / toolFilter 透传 | `@nexgent/workflow`、`@nexgent/kernel` | 3 |
 | `architecture-trials.ts` 的成对执行框架 | `@nexgent/capabilities` | 4（比较规则替换） |
+| `run.ps1` 的参数设计 | `apps/cli/bin/nexgent.ps1` | 1 |
 | 13 个验收脚本的流程设计 | `scripts/accept-step*.mjs` | 1–4 |
 
 ## 参考库的获取
