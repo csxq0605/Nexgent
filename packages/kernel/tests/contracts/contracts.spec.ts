@@ -304,7 +304,8 @@ describe('contracts: pure helpers', () => {
       costCaps: { perTask: { maxRequests: 3 } },
     })
     expect(DEFAULT_PROJECT_CONFIG.thinking).toBe('off')
-    expect(DEFAULT_PROJECT_CONFIG.model).toBe('mimo-v2.6-pro')
+    expect(DEFAULT_PROJECT_CONFIG.model).toBe('claude-sonnet-5-5')
+    expect(DEFAULT_PROJECT_CONFIG.effort).toBe('medium')
   })
 
   it('profile patches: insert appends, patch deep-merges config, unknown or duplicate ids throw', () => {

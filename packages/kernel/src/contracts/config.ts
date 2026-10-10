@@ -5,7 +5,7 @@
 import { NexgentError } from './errors.js'
 import type { JsonObject, JsonValue } from './json.js'
 import type { ApprovalGrant } from './approvals.js'
-import type { ThinkingMode } from './llm.js'
+import type { Effort, ThinkingMode } from './llm.js'
 import type { SandboxMode } from './workspace.js'
 
 /** A spending ceiling; `permissions.md` §费用上限 defines counting and what happens on reaching it. */
@@ -22,12 +22,14 @@ export interface CostCap {
 export interface ProjectConfig {
   /** Format version; only 1 exists. */
   readonly version: 1
-  /** Model id; default `mimo-v2.6-pro`. */
+  /** Model id; default `claude-sonnet-5-5` (ADR 0002). */
   readonly model: string
-  /** OpenAI-compatible base URL; default is the MiMo route. */
+  /** Claude API base URL (no path, no credentials); default `https://api.anthropic.com`. */
   readonly endpoint: string
-  /** Reasoning mode for execution; default `'off'`. */
+  /** Reasoning mode for execution; default `'off'` (the provider's lowest setting). */
   readonly thinking: ThinkingMode
+  /** Effort level; default `'medium'` (agentic coding and multistep tool use). */
+  readonly effort: Effort
   /** Default sandbox mode for new sessions; default `'workspace-write'`. */
   readonly sandboxMode: SandboxMode
   /** Cost ceilings. */
@@ -46,9 +48,10 @@ export interface ProjectConfig {
 /** The defaults applied over a missing or partial config file. */
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
   version: 1,
-  model: 'mimo-v2.6-pro',
-  endpoint: 'https://token-plan-cn.xiaomimimo.com/v1',
+  model: 'claude-sonnet-5-5',
+  endpoint: 'https://api.anthropic.com',
   thinking: 'off',
+  effort: 'medium',
   sandboxMode: 'workspace-write',
   costCaps: Object.freeze({}),
   approvals: Object.freeze([]),
@@ -69,6 +72,7 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
     model: input.model ?? DEFAULT_PROJECT_CONFIG.model,
     endpoint: input.endpoint ?? DEFAULT_PROJECT_CONFIG.endpoint,
     thinking: input.thinking ?? DEFAULT_PROJECT_CONFIG.thinking,
+    effort: input.effort ?? DEFAULT_PROJECT_CONFIG.effort,
     sandboxMode: input.sandboxMode ?? DEFAULT_PROJECT_CONFIG.sandboxMode,
     costCaps: input.costCaps ?? DEFAULT_PROJECT_CONFIG.costCaps,
     approvals: input.approvals ?? DEFAULT_PROJECT_CONFIG.approvals,
