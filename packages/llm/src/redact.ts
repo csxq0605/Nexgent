@@ -1,16 +1,17 @@
 /**
  * Secret hygiene for everything the provider may surface: error messages,
- * error details and ledger endpoints. The API key is only ever placed in the
- * `Authorization` header; every string that leaves the provider passes
- * through {@link redactSecrets} first.
+ * error details and ledger endpoints. The API key only ever goes to the SDK
+ * (`x-api-key` header); every string that leaves the provider passes through
+ * {@link redactSecrets} first.
  */
 
 /** Replacement text for a removed secret. */
 export const REDACTED = '[REDACTED]'
 
-/** Bearer tokens and common API-key shapes, in case a server echoes a header back. */
+/** Bearer tokens, `x-api-key` values and `sk-…` shaped keys, in case a server echoes a header back. */
 const SECRET_PATTERNS: readonly RegExp[] = [
   /(Bearer\s+)[^\s"',;]+/gi,
+  /(x-api-key["']?\s*[:=]\s*["']?)[^\s"',;]+/gi,
   /\bsk-[A-Za-z0-9_-]{8,}/g,
 ]
 

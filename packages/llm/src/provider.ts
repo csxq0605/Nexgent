@@ -1,18 +1,20 @@
 /**
- * `OpenAICompatibleProvider`: the single OpenAI-compatible route (MiMo by
- * default) behind the {@link LLMProvider} contract. One `complete` call is one
- * HTTP request (`maxRetries: 0`) and exactly one `llm.request.start` /
- * `llm.request.end` ledger pair, whatever the outcome.
+ * `AnthropicProvider`: the Claude Platform (Anthropic Messages API) route
+ * behind the {@link LLMProvider} contract, via `@anthropic-ai/sdk`. One
+ * `complete` call is one streaming request (`maxRetries: 0`) and exactly one
+ * `llm.request.start` / `llm.request.end` ledger pair, whatever the outcome.
  */
+import Anthropic, { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError } from '@anthropic-ai/sdk'
 import {
   DEFAULT_PROJECT_CONFIG,
+  EFFORT_LEVELS,
   NEXGENT_API_KEY,
   NexgentError,
   toErrorInfo,
   UNKNOWN_USAGE,
   type Credentials,
+  type Effort,
   type FinishReason,
-  type JsonObject,
   type Ledger,
   type LedgerAttribution,
   type LedgerRecordInput,
@@ -24,70 +26,68 @@ import {
   type LLMStreamEvent,
   type LLMUsage,
   type NexgentErrorCode,
+  type RefusalInfo,
   type StreamErrorEvent,
-  type ThinkingMode,
+  type ToolCall,
 } from '@nexgent/kernel'
-import { ChunkAssembler } from './assembler.js'
-import { resolveProxyPolicy, type ProxyEnv, type ProxyPolicy } from './proxy/policy.js'
-import { createTransport, ProxyTunnelError, type Transport, type TunnelTlsOptions } from './proxy/transport.js'
 import { redactSecrets, sanitizeUrl } from './redact.js'
-import { readSseData } from './sse.js'
-import { buildRequestBody, DEFAULT_WIRE_OPTIONS, type WireOptions } from './wire.js'
+import { normalizeUsage, type WireUsage } from './usage.js'
+import { buildMessageParams, DEFAULT_WIRE_OPTIONS, FALLBACK_BETA, toJson, type WireOptions } from './wire.js'
 
 /** Environment variable that overrides the endpoint base URL. */
 export const NEXGENT_API_BASE_URL = 'NEXGENT_API_BASE_URL'
+/** Environment variable the API key falls back to when the credential is unset. */
+export const ANTHROPIC_API_KEY = 'ANTHROPIC_API_KEY'
+/** Host of the Claude API; server-side fallbacks are only sent to it. */
+export const CLAUDE_API_HOST = 'api.anthropic.com'
 
-/** Default whole-request deadline (ms), as in the PR #4 MiMo route. */
+/** Default whole-request deadline (ms). */
 export const DEFAULT_TIMEOUT_MS = 180_000
-/** Default max silence between stream chunks (ms). */
+/** Default max silence between stream events (ms). */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 180_000
 
-/** Max bytes of an HTTP error body kept for the error message. */
-const ERROR_BODY_LIMIT = 4096
+/** Server-side refusal fallback setting. */
+export type FallbacksMode = 'default' | 'off'
 
-/** Construction options for {@link OpenAICompatibleProvider}. */
-export interface OpenAICompatibleProviderOptions {
+/** Construction options for {@link AnthropicProvider}. */
+export interface AnthropicProviderOptions {
   /** Where the API key comes from (`ctx.credentials`). */
   readonly credentials: Credentials
   /** Where request records go (`ctx.ledger`). */
   readonly ledger: Ledger
-  /** Route key stamped on ledger records; default `mimo`. */
+  /** Route key stamped on ledger records; default `anthropic`. */
   readonly id?: string
   /**
-   * Base URL; default {@link DEFAULT_PROJECT_CONFIG}`.endpoint`. The
-   * `NEXGENT_API_BASE_URL` environment variable overrides it.
+   * Base URL (SDK `baseURL`); default {@link DEFAULT_PROJECT_CONFIG}`.endpoint`.
+   * The `NEXGENT_API_BASE_URL` environment variable overrides it.
    */
   readonly endpoint?: string
   /** Model used when a request names none; default {@link DEFAULT_PROJECT_CONFIG}`.model`. */
   readonly defaultModel?: string
-  /** Credential name of the API key; default {@link NEXGENT_API_KEY}. */
+  /** Credential name of the API key; default {@link NEXGENT_API_KEY}. `ANTHROPIC_API_KEY` in `env` is the fallback. */
   readonly apiKeyName?: string
+  /** `output_config.effort` when a request names none; default `medium`. */
+  readonly effort?: Effort
+  /** `max_tokens` when a request names none; default 16000. */
+  readonly maxTokens?: number
   /** Default whole-request deadline (ms); per-call `timeoutMs` wins. */
   readonly timeoutMs?: number
   /** Default stream idle deadline (ms); per-call `streamIdleTimeoutMs` wins. */
   readonly streamIdleTimeoutMs?: number
   /** Retries are fixed at 0 by decision; any other value is rejected. */
   readonly maxRetries?: 0
-  /** Output cap sent when a request sets no `maxTokens`; default none (the route's own default). */
-  readonly defaultMaxTokens?: number
-  /** Body fields sent per thinking mode; default disables MiMo reasoning with `thinking: { type: 'disabled' }`. */
-  readonly thinkingParams?: Readonly<Record<ThinkingMode, JsonObject>>
-  /** Output cap field name; default `max_tokens`. */
-  readonly maxTokensField?: WireOptions['maxTokensField']
-  /** Repeat the tool name on `tool` messages; default false. */
-  readonly toolMessageName?: boolean
-  /** Extra request headers (never the key; that goes in `Authorization`). */
-  readonly headers?: Readonly<Record<string, string>>
-  /** Proxy handling: `'env'` (default) reads `HTTP(S)_PROXY` / `NO_PROXY`; `'none'` always connects directly; or an explicit policy. */
-  readonly proxy?: 'env' | 'none' | ProxyPolicy
-  /** TLS trust for proxied requests. */
-  readonly proxyTls?: TunnelTlsOptions
-  /** Environment for `NEXGENT_API_BASE_URL` and proxy variables; default `process.env`. */
-  readonly env?: ProxyEnv
+  /**
+   * Server-side refusal fallbacks (`fallbacks: 'default'` + beta
+   * `server-side-fallback-2026-07-01`); default `'default'`. Only sent when
+   * the endpoint host is the Claude API (never to the fake server or a proxy).
+   */
+  readonly fallbacks?: FallbacksMode
+  /** Environment for `NEXGENT_API_BASE_URL` and `ANTHROPIC_API_KEY`; default `process.env`. */
+  readonly env?: Readonly<Record<string, string | undefined>>
   /** Ledger attribution stamped on every record (step 4; absent in step 1). */
   readonly attribution?: LedgerAttribution
-  /** Replace the HTTP transport (tests, custom dispatch). */
-  readonly transport?: Transport
+  /** Replace the SDK's `fetch` (custom proxy dispatch, tests). */
+  readonly fetch?: typeof fetch
 }
 
 /**
@@ -129,64 +129,36 @@ class AbortReason extends Error {
   }
 }
 
+type StreamFinishReason = Exclude<FinishReason, 'error' | 'aborted'>
+
+/**
+ * Map a wire `stop_reason` to the contract vocabulary. `stop_sequence` and
+ * `pause_turn` map to `stop` (the turn ended; there is no contract value for
+ * "paused"), `model_context_window_exceeded` to `max-tokens`, unknown values
+ * to `stop`.
+ * @param reason - the wire value.
+ */
+export function mapStopReason(reason: string): StreamFinishReason {
+  switch (reason) {
+    case 'tool_use':
+      return 'tool-calls'
+    case 'max_tokens':
+    case 'model_context_window_exceeded':
+      return 'max-tokens'
+    case 'refusal':
+      return 'refusal'
+    default:
+      return 'stop'
+  }
+}
+
 function positive(value: number | undefined, fallback: number): number {
   return value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback
 }
 
-/** Iterate a web body stream without relying on `ReadableStream` async iteration typings. */
-async function* bodyChunks(body: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
-  const reader = body.getReader()
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) return
-      if (value !== undefined) yield value
-    }
-  } finally {
-    reader.releaseLock()
-  }
-}
-
-async function readLimited(response: Response): Promise<string> {
-  if (response.body === null) return ''
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let text = ''
-  try {
-    while (text.length < ERROR_BODY_LIMIT) {
-      const { done, value } = await reader.read()
-      if (done) break
-      text += decoder.decode(value, { stream: true })
-    }
-  } catch {
-    // A truncated error body still yields what arrived.
-  } finally {
-    void reader.cancel().catch(() => undefined)
-  }
-  return text.slice(0, ERROR_BODY_LIMIT)
-}
-
-function errorBodyMessage(text: string): string {
-  try {
-    const parsed: unknown = JSON.parse(text)
-    if (typeof parsed === 'object' && parsed !== null) {
-      const error = (parsed as Record<string, unknown>)['error']
-      if (typeof error === 'object' && error !== null && typeof (error as Record<string, unknown>)['message'] === 'string') {
-        return (error as Record<string, unknown>)['message'] as string
-      }
-      if (typeof error === 'string') return error
-      const message = (parsed as Record<string, unknown>)['message']
-      if (typeof message === 'string') return message
-    }
-  } catch {
-    // not JSON
-  }
-  return text.trim().slice(0, 500)
-}
-
 function causeCode(error: unknown): string | undefined {
   let current: unknown = error
-  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
+  for (let depth = 0; depth < 6 && typeof current === 'object' && current !== null; depth++) {
     const code = (current as { code?: unknown }).code
     if (typeof code === 'string' && code !== '') return code
     current = (current as { cause?: unknown }).cause
@@ -194,24 +166,71 @@ function causeCode(error: unknown): string | undefined {
   return undefined
 }
 
-/** The single OpenAI-compatible route. */
-export class OpenAICompatibleProvider implements LLMProvider {
+/** A connection that died mid-stream surfaces as a non-API error wrapping a socket failure. */
+function looksLikeTransport(error: unknown): boolean {
+  if (causeCode(error) !== undefined) return true
+  const message = error instanceof Error ? error.message : ''
+  return /terminated|fetch failed|socket|ECONN|network/i.test(message)
+}
+
+/** The stream events the provider reads, structurally (shared by the plain and the beta route). */
+interface ContentBlockStart {
+  readonly type: 'content_block_start'
+  readonly index: number
+  readonly content_block: { readonly type: string; readonly id?: string; readonly name?: string }
+}
+interface ContentBlockDelta {
+  readonly type: 'content_block_delta'
+  readonly index: number
+  readonly delta: { readonly type: string; readonly text?: string; readonly thinking?: string; readonly partial_json?: string }
+}
+interface MessageDelta {
+  readonly type: 'message_delta'
+  readonly delta: { readonly stop_reason: string | null; readonly stop_details?: { readonly category?: string | null; readonly explanation?: string | null } | null }
+  readonly usage: WireUsage
+}
+type WireEvent =
+  | { readonly type: 'message_start'; readonly message: { readonly usage: WireUsage } }
+  | ContentBlockStart
+  | ContentBlockDelta
+  | { readonly type: 'content_block_stop'; readonly index: number }
+  | MessageDelta
+  | { readonly type: 'message_stop' }
+
+interface WireStream extends AsyncIterable<WireEvent> {
+  readonly response: Response | null | undefined
+  readonly request_id: string | null | undefined
+  finalMessage(): Promise<{ readonly content: unknown; readonly model: string }>
+}
+
+interface PendingCall {
+  readonly index: number
+  readonly id: string
+  readonly name: string
+  args: string
+}
+
+/** The Claude Platform route. */
+export class AnthropicProvider implements LLMProvider {
   readonly info: LLMProviderInfo
-  private readonly baseUrl: string
+  private readonly baseURL: string
+  private readonly fetch: typeof fetch | undefined
   private readonly credentials: Credentials
   private readonly ledger: Ledger
   private readonly apiKeyName: string
+  private readonly env: Readonly<Record<string, string | undefined>>
   private readonly timeoutMs: number
   private readonly streamIdleTimeoutMs: number
   private readonly wire: WireOptions
-  private readonly defaultMaxTokens: number | undefined
-  private readonly headers: Readonly<Record<string, string>>
+  private readonly fallbacks: boolean
   private readonly attribution: LedgerAttribution
-  private readonly transport: Transport
 
-  constructor(options: OpenAICompatibleProviderOptions) {
+  constructor(options: AnthropicProviderOptions) {
     if (options.maxRetries !== undefined && options.maxRetries !== 0) {
-      throw new NexgentError('config/invalid', 'maxRetries is fixed at 0 for the step-1 provider')
+      throw new NexgentError('config/invalid', 'maxRetries is fixed at 0 for this provider')
+    }
+    if (options.effort !== undefined && !EFFORT_LEVELS.includes(options.effort)) {
+      throw new NexgentError('config/invalid', `effort must be one of ${EFFORT_LEVELS.join(', ')}`)
     }
     const env = options.env ?? process.env
     const override = env[NEXGENT_API_BASE_URL]?.trim()
@@ -220,32 +239,55 @@ export class OpenAICompatibleProvider implements LLMProvider {
     if (parsed === null || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
       throw new NexgentError('config/invalid', `endpoint is not an http(s) URL: ${sanitizeUrl(endpoint)}`)
     }
-    this.baseUrl = endpoint.replace(/\/+$/, '')
     this.info = Object.freeze({
-      id: options.id ?? 'mimo',
+      id: options.id ?? 'anthropic',
       endpoint: sanitizeUrl(endpoint),
       defaultModel: options.defaultModel ?? DEFAULT_PROJECT_CONFIG.model,
     })
+    this.env = env
     this.credentials = options.credentials
     this.ledger = options.ledger
     this.apiKeyName = options.apiKeyName ?? NEXGENT_API_KEY
     this.timeoutMs = positive(options.timeoutMs, DEFAULT_TIMEOUT_MS)
     this.streamIdleTimeoutMs = positive(options.streamIdleTimeoutMs, DEFAULT_STREAM_IDLE_TIMEOUT_MS)
     this.wire = {
-      thinkingParams: options.thinkingParams ?? DEFAULT_WIRE_OPTIONS.thinkingParams,
-      maxTokensField: options.maxTokensField ?? DEFAULT_WIRE_OPTIONS.maxTokensField,
-      toolMessageName: options.toolMessageName ?? DEFAULT_WIRE_OPTIONS.toolMessageName,
+      effort: options.effort ?? DEFAULT_WIRE_OPTIONS.effort,
+      maxTokens: positive(options.maxTokens, DEFAULT_WIRE_OPTIONS.maxTokens),
     }
-    this.headers = options.headers ?? {}
-    this.defaultMaxTokens = options.defaultMaxTokens
+    this.fallbacks = (options.fallbacks ?? 'default') === 'default' && parsed.hostname === CLAUDE_API_HOST
     this.attribution = pickAttribution(options.attribution)
-    if (options.transport !== undefined) {
-      this.transport = options.transport
-    } else {
-      const proxy = options.proxy ?? 'env'
-      const policy = proxy === 'none' ? { noProxy: '' } : proxy === 'env' ? resolveProxyPolicy(env).policy : proxy
-      this.transport = createTransport({ policy, env, ...options.proxyTls === undefined ? {} : { tls: options.proxyTls } })
+    this.baseURL = endpoint.replace(/\/+$/, '')
+    this.fetch = options.fetch
+  }
+
+  /**
+   * One SDK client per request: the key is read from `Credentials` each time
+   * and never kept in provider state. `maxRetries: 0` by decision.
+   */
+  private makeClient(apiKey: string, timeout: number): Anthropic {
+    return new Anthropic({
+      apiKey,
+      baseURL: this.baseURL,
+      maxRetries: 0,
+      timeout,
+      logLevel: 'off',
+      ...this.fetch === undefined ? {} : { fetch: this.fetch },
+    })
+  }
+
+  /** Read the key: the configured credential first, then `ANTHROPIC_API_KEY` from the environment. */
+  private async readApiKey(): Promise<string> {
+    let key: string | undefined
+    try {
+      key = await this.credentials.get(this.apiKeyName)
+    } catch (error) {
+      throw new NexgentError('credentials/missing', `could not read credential ${this.apiKeyName}: ${error instanceof Error ? error.message : String(error)}`)
     }
+    if (key === undefined || key === '') key = this.env[ANTHROPIC_API_KEY]?.trim()
+    if (key === undefined || key === '') {
+      throw new NexgentError('credentials/missing', `credential ${this.apiKeyName} is not set (environment variable or ~/.nexgent/credentials.json), nor is ${ANTHROPIC_API_KEY}`)
+    }
+    return key
   }
 
   /**
@@ -304,6 +346,24 @@ export class OpenAICompatibleProvider implements LLMProvider {
     }
   }
 
+  /** Open the stream on the plain or the beta route (the latter carries the fallback parameters). */
+  private open(request: LLMRequest, model: string, apiKey: string, signal: AbortSignal, timeout: number): WireStream {
+    const params = buildMessageParams(request, model, this.wire)
+    const client = this.makeClient(apiKey, timeout)
+    const options = { signal, timeout }
+    if (this.fallbacks) {
+      const { output_config, stream: _stream, ...rest } = params
+      const beta: Anthropic.Beta.Messages.MessageCreateParams = {
+        ...rest,
+        ...output_config === undefined || output_config === null ? {} : { output_config },
+        betas: [FALLBACK_BETA],
+        fallbacks: 'default',
+      }
+      return client.beta.messages.stream(beta, options) as unknown as WireStream
+    }
+    return client.messages.stream(params, options) as unknown as WireStream
+  }
+
   private async *stream(
     request: LLMRequest,
     model: string,
@@ -314,11 +374,16 @@ export class OpenAICompatibleProvider implements LLMProvider {
     let apiKey: string | undefined
     let providerRequestId: string | undefined
 
-    const done = (finishReason: Exclude<FinishReason, 'error'>): LLMStreamEvent => {
+    const done = (finishReason: Exclude<FinishReason, 'error'>, extra: { providerContent?: unknown; refusal?: RefusalInfo } = {}): LLMStreamEvent => {
       outcome.status = finishReason === 'aborted' ? 'aborted' : 'ok'
       outcome.finishReason = finishReason
       if (finishReason === 'aborted') outcome.usage = UNKNOWN_USAGE
-      return { type: 'done', finishReason }
+      return {
+        type: 'done',
+        finishReason,
+        ...extra.providerContent === undefined ? {} : { providerContent: toJson(extra.providerContent) },
+        ...extra.refusal === undefined ? {} : { refusal: extra.refusal },
+      }
     }
     const fail = (code: NexgentErrorCode, message: string, details: Record<string, unknown> = {}): StreamErrorEvent => {
       outcome.status = 'error'
@@ -338,7 +403,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         ...providerRequestId === undefined ? {} : { providerRequestId },
       }
     }
-    /** Classify a thrown transport / body error by why the controller aborted. */
+    /** Classify a thrown SDK error by why the controller aborted, then by error class. */
     const classify = (error: unknown): LLMStreamEvent => {
       const reason: unknown = controller.signal.reason
       if (controller.signal.aborted && reason instanceof AbortReason) {
@@ -346,17 +411,27 @@ export class OpenAICompatibleProvider implements LLMProvider {
         if (reason.kind === 'timeout') return fail('llm/timeout', `request exceeded the ${timeoutMs} ms deadline`, { timeout: 'request', timeoutMs })
         return fail('llm/timeout', `stream was idle for ${idleMs} ms`, { timeout: 'idle', timeoutMs: idleMs })
       }
-      if (error instanceof ProxyTunnelError) {
-        return fail('llm/request-failed', error.message, error.proxyStatus === undefined ? {} : { proxyStatus: error.proxyStatus })
-      }
       if (error instanceof NexgentError) return fail(error.code, error.message, { ...error.details })
-      const code = causeCode(error)
-      const message = error instanceof Error ? error.message : String(error)
-      return fail(
-        'llm/request-failed',
-        `network error contacting ${this.info.endpoint}: ${code ?? message}`,
-        code === undefined ? {} : { cause: code },
-      )
+      if (error instanceof APIUserAbortError) return done('aborted')
+      if (error instanceof APIConnectionTimeoutError) {
+        return fail('llm/timeout', `request exceeded the ${timeoutMs} ms deadline`, { timeout: 'request', timeoutMs })
+      }
+      if (error instanceof APIConnectionError) {
+        const code = causeCode(error.cause ?? error)
+        return fail('llm/request-failed', `network error contacting ${this.info.endpoint}: ${code ?? error.message}`, code === undefined ? {} : { cause: code })
+      }
+      if (error instanceof APIError) {
+        if (error.status !== undefined) outcome.httpStatus = error.status
+        providerRequestId ??= error.requestID ?? error.headers?.get('request-id') ?? undefined
+        const detail = apiErrorMessage(error)
+        return fail('llm/request-failed', error.status === undefined ? detail : `HTTP ${error.status}: ${detail}`, error.type === null || error.type === undefined ? {} : { providerType: error.type })
+      }
+      if (looksLikeTransport(error)) {
+        const code = causeCode(error)
+        return fail('llm/request-failed', `connection lost: ${code ?? (error instanceof Error ? error.message : String(error))}`, code === undefined ? {} : { cause: code })
+      }
+      // Anything else came out of the SDK's stream parsing (malformed event, bad tool input JSON).
+      return fail('llm/invalid-response', error instanceof Error ? error.message : String(error))
     }
 
     const timeoutMs = positive(options.timeoutMs, this.timeoutMs)
@@ -377,13 +452,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     try {
       try {
-        apiKey = await this.credentials.get(this.apiKeyName)
+        apiKey = await this.readApiKey()
       } catch (error) {
-        yield fail('credentials/missing', `could not read credential ${this.apiKeyName}: ${error instanceof Error ? error.message : String(error)}`)
-        return
-      }
-      if (apiKey === undefined || apiKey === '') {
-        yield fail('credentials/missing', `credential ${this.apiKeyName} is not set (environment variable or ~/.nexgent/credentials.json)`)
+        yield classify(error)
         return
       }
       if (controller.signal.aborted) {
@@ -391,84 +462,89 @@ export class OpenAICompatibleProvider implements LLMProvider {
         return
       }
 
-      const sized = request.maxTokens === undefined && this.defaultMaxTokens !== undefined
-        ? { ...request, maxTokens: this.defaultMaxTokens }
-        : request
-      const body = JSON.stringify(buildRequestBody(sized, model, this.wire))
-      let response: Response
+      const calls = new Map<number, PendingCall>()
+      let toolCount = 0
+      let startUsage: WireUsage | undefined
+      let deltaUsage: WireUsage | undefined
+      let stopReason: string | undefined
+      let refusal: RefusalInfo | undefined
+      let content: unknown
+      let stream: WireStream | undefined
       touch()
       try {
-        response = await this.transport({
-          url: new URL(`${this.baseUrl}/chat/completions`),
-          method: 'POST',
-          headers: {
-            ...this.headers,
-            'content-type': 'application/json',
-            accept: 'text/event-stream',
-            authorization: `Bearer ${apiKey}`,
-          },
-          body,
-          signal: controller.signal,
-        })
-      } catch (error) {
-        yield classify(error)
-        return
-      }
-      outcome.httpStatus = response.status
-      providerRequestId = response.headers.get('x-request-id') ?? response.headers.get('request-id') ?? undefined
-
-      if (!response.ok) {
-        const text = await readLimited(response)
-        const detail = errorBodyMessage(text)
-        yield fail('llm/request-failed', `HTTP ${response.status}${detail === '' ? '' : `: ${detail}`}`)
-        return
-      }
-      if (response.body === null) {
-        yield fail('llm/invalid-response', 'response has no body')
-        return
-      }
-
-      const assembler = new ChunkAssembler()
-      let sawDone = false
-      try {
-        touch()
-        for await (const data of readSseData(bodyChunks(response.body))) {
+        stream = this.open(request, model, apiKey, controller.signal, timeoutMs)
+        for await (const event of stream) {
           touch()
-          if (data.trim() === '[DONE]') {
-            sawDone = true
-            break
+          switch (event.type) {
+            case 'message_start':
+              startUsage = event.message.usage
+              outcome.httpStatus = stream.response?.status ?? 200
+              providerRequestId = stream.request_id ?? stream.response?.headers.get('request-id') ?? undefined
+              break
+            case 'content_block_start':
+              if (event.content_block.type === 'tool_use') {
+                const call: PendingCall = { index: toolCount++, id: event.content_block.id ?? '', name: event.content_block.name ?? '', args: '' }
+                calls.set(event.index, call)
+                yield { type: 'tool-call.start', index: call.index, id: call.id, name: call.name }
+              }
+              break
+            case 'content_block_delta': {
+              const delta = event.delta
+              if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text !== '') {
+                yield { type: 'text.delta', text: delta.text }
+              } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking !== '') {
+                yield { type: 'reasoning.delta', text: delta.thinking }
+              } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string' && delta.partial_json !== '') {
+                const call = calls.get(event.index)
+                if (call !== undefined) {
+                  call.args += delta.partial_json
+                  yield { type: 'tool-call.delta', index: call.index, argumentsDelta: delta.partial_json }
+                }
+              }
+              break
+            }
+            case 'content_block_stop': {
+              const call = calls.get(event.index)
+              if (call !== undefined) {
+                calls.delete(event.index)
+                const toolCall: ToolCall = { id: call.id, name: call.name, arguments: call.args === '' ? '{}' : call.args }
+                yield { type: 'tool-call.end', index: call.index, call: toolCall }
+              }
+              break
+            }
+            case 'message_delta':
+              deltaUsage = event.usage
+              if (typeof event.delta.stop_reason === 'string') stopReason = event.delta.stop_reason
+              if (event.delta.stop_reason === 'refusal') {
+                const details = event.delta.stop_details
+                refusal = {
+                  ...typeof details?.category === 'string' ? { category: details.category } : {},
+                  ...typeof details?.explanation === 'string' ? { explanation: details.explanation } : {},
+                }
+              }
+              break
+            case 'message_stop':
+              break
           }
-          let chunk: unknown
-          try {
-            chunk = JSON.parse(data)
-          } catch {
-            yield fail('llm/invalid-response', 'stream chunk is not valid JSON')
-            return
-          }
-          for (const event of assembler.accept(chunk)) yield event
         }
+        if (stopReason === undefined) {
+          yield fail('llm/request-failed', 'stream ended before a stop reason')
+          return
+        }
+        content = (await stream.finalMessage()).content
       } catch (error) {
+        if (outcome.httpStatus === undefined && stream?.response?.status !== undefined) outcome.httpStatus = stream.response.status
         yield classify(error)
         return
       }
-      if (!sawDone && assembler.finish === undefined) {
-        yield fail('llm/request-failed', 'stream ended before a finish reason or [DONE]')
-        return
-      }
-      let tail: LLMStreamEvent[]
-      try {
-        tail = assembler.closeCalls()
-      } catch (error) {
-        yield classify(error)
-        return
-      }
-      for (const event of tail) yield event
-      const usage = assembler.reportedUsage
-      if (usage !== undefined) {
+      const usage = normalizeUsage(startUsage, deltaUsage)
+      if (Object.values(usage).some(count => count !== 'unknown')) {
         outcome.usage = usage
         yield { type: 'usage', usage }
       }
-      yield done(assembler.finish ?? (assembler.hasToolCalls ? 'tool-calls' : 'stop'))
+      // `stopReason` is set here (the try above returned otherwise); the fallback only satisfies narrowing.
+      const finishReason = mapStopReason(stopReason ?? 'end_turn')
+      yield done(finishReason, { providerContent: content, ...finishReason === 'refusal' ? { refusal: refusal ?? {} } : {} })
     } finally {
       clearTimeout(deadline)
       if (idle !== undefined) clearTimeout(idle)
@@ -477,13 +553,20 @@ export class OpenAICompatibleProvider implements LLMProvider {
   }
 }
 
+/** The API's own error message (`error.message` of the body) or the SDK message. */
+function apiErrorMessage(error: APIError): string {
+  const body = error.error as { error?: { message?: unknown } } | undefined
+  const message = body?.error?.message
+  return typeof message === 'string' && message !== '' ? message : error.message
+}
+
 /** Options for {@link createProvider}; identical to the class options. */
-export type CreateProviderOptions = OpenAICompatibleProviderOptions
+export type CreateProviderOptions = AnthropicProviderOptions
 
 /**
  * Plain factory for callers outside Cordis (CLI wiring, tests).
  * @param options - credentials, ledger and route settings.
  */
-export function createProvider(options: CreateProviderOptions): OpenAICompatibleProvider {
-  return new OpenAICompatibleProvider(options)
+export function createProvider(options: CreateProviderOptions): AnthropicProvider {
+  return new AnthropicProvider(options)
 }

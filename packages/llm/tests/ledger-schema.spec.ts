@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { LEDGER_RECORD_TYPES, UNKNOWN_USAGE, type LedgerRecord, type LLMRequestEndRecord } from '@nexgent/kernel'
-import { closedPort, loadSseFixture, startFakeOpenAI, type FakeOpenAI, type FakeReply } from './helpers/fake-openai.js'
+import { closedPort, loadSseFixture, startFakeAnthropic, type FakeAnthropic, type FakeReply } from './helpers/fake-anthropic.js'
 import { validate } from './helpers/json-schema.js'
 import { collect, makeProvider, makeRequest } from './helpers/stream.js'
 import type { MemoryLedger } from './helpers/fakes.js'
@@ -18,7 +18,7 @@ function specExampleLines(): unknown[] {
   return (block ?? '').split('\n').filter(line => line.trim() !== '').map(line => JSON.parse(line) as unknown)
 }
 
-let fake: FakeOpenAI | undefined
+let fake: FakeAnthropic | undefined
 afterEach(async () => {
   await fake?.close()
   fake = undefined
@@ -27,9 +27,9 @@ afterEach(async () => {
 async function recordsFor(reply: FakeReply | 'refused' | 'abort', options: { timeoutMs?: number } = {}): Promise<LedgerRecord[]> {
   let endpoint: string
   if (reply === 'refused') {
-    endpoint = `http://127.0.0.1:${await closedPort()}/v1`
+    endpoint = `http://127.0.0.1:${await closedPort()}`
   } else {
-    fake = await startFakeOpenAI([reply === 'abort' ? { sse: loadSseFixture('text'), hangAfter: 2 } : reply])
+    fake = await startFakeAnthropic([reply === 'abort' ? { sse: loadSseFixture('text'), hangAfter: 3 } : reply])
     endpoint = fake.baseUrl
   }
   const { provider, ledger } = makeProvider(endpoint, options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs })
@@ -82,6 +82,7 @@ describe('records written by the provider (必产生记录的失败路径)', { t
     ['HTTP 4xx', { status: 404, body: '{}' }, { status: 'error', httpStatus: 404, errorCode: 'llm/request-failed', usage: UNKNOWN_USAGE }, {}],
     ['HTTP 5xx', { status: 500, body: '{}' }, { status: 'error', httpStatus: 500, errorCode: 'llm/request-failed', usage: UNKNOWN_USAGE }, {}],
     ['abort', 'abort', { status: 'aborted', finishReason: 'aborted', usage: UNKNOWN_USAGE }, {}],
+    ['refusal', { sse: loadSseFixture('refusal') }, { status: 'ok', httpStatus: 200, finishReason: 'refusal' }, {}],
   ]
 
   it.each(cases)('%s → exactly one valid start/end pair', async (_name, reply, expected, options) => {

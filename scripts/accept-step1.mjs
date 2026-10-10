@@ -50,7 +50,7 @@ const STEP = {
   name: '主应用（kernel / llm / session / workspace 重写）',
   exitCriteria: ['`accept-step1` 两平台通过', '真实 MiMo 一次（手动，另行记录）'],
   script: 'scripts/accept-step1.mjs',
-  simulated: 'scripted OpenAI-compatible model server; run → write-file task; resume → long turn killed mid-stream; resume in a new process → continue and write another file',
+  simulated: 'scripted Claude Messages API model server; run → write-file task; resume → long turn killed mid-stream; resume in a new process → continue and write another file',
   repoRoot: REPO_ROOT,
 }
 

@@ -29,7 +29,7 @@
 | `core/agent-default-model` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（并入 `agents.ts`）：默认模型 `mimo-v2.6-pro` 的配置位置 |
 | `core/agent-tool-presentation` | — | 不要 | — | 面向 UI 的工具展示，步骤 2 由桌面应用自定 |
 | `llm/llm` | `@nexgent/llm` | 重写 | 1 | 模型服务接口、流式与工具调用消息类型只参考设计 |
-| `llm/llm-pi-ai` | `@nexgent/llm` | 重写 | 1 | 单一 OpenAI 兼容路由（MiMo），只参考设计；其他端点作为配置项 |
+| `llm/llm-pi-ai` | `@nexgent/llm` | 重写 | 1 | 单一 Claude Platform 路由（ADR 0002），只参考设计；端点作为配置项 |
 | `llm/token-meter` | `@nexgent/llm` | 重写 | 1 | 用量计量只参考设计；缺失用量显式标 unknown |
 | `llm/llm-retry` | — | 不要 | — | 步骤 1 定 `maxRetries: 0`，每次请求进账本 |
 | `llm/llm-deepseek`、`llm/deepseek-llm-api-extensions`、`llm/plugin-package-inventory-deepseek` | — | 不要 | — | DeepSeek 专有路由与扩展 |
@@ -56,7 +56,7 @@
 | `sandbox/sandbox`、`sandbox/sandbox-policy`、`sandbox/sandbox-local` | `@nexgent/workspace` | 重写 | 1 | 路径与命令策略，两平台先用这一层；只参考 `sandbox-policy` 的设计 |
 | `sandbox/sandbox-windows-acl` | `@nexgent/workspace` | 改写 | 1（可选） | 先路径策略，ACL 后补（ADR 0001 决策 2）；PR #4 修过其错误路径 |
 | `util/atomic-write`、`util/timeout`、`util/workspace-path`、`util/home-paths`、`util/output-retention`、`util/launch-environment`、`util/native-command`、`util/values`、`util/deque`、`util/chunked-list`、`util/crypto`、`util/time` | 各使用包内部 | 改写 | 1 | 按需复制到使用它的包内，不单独成包；步骤 1 已复制 `atomic-write/src/index.ts`、`timeout/src/index.ts`（→ `@nexgent/kernel` `util/`），其余未复制 |
-| `util/http-proxy` | `@nexgent/llm` | 改写 | 1 | 已复制 `src/policy.ts`（→ `proxy/policy.ts`）；`install.ts` 的 undici dispatcher 换成自写隧道 `proxy/transport.ts` |
+| `util/http-proxy` | — | 不要 | — | 曾在步骤 1 复制 `policy.ts`，ADR 0002 切换到官方 SDK 后删除；代理用 `NODE_USE_ENV_PROXY=1` 或 SDK 的 `fetch` 选项 |
 | `util/brand`、`util/lazy-require`、`util/package-manifest` | — | 不要 | — | |
 | `test-support/agent-loop-testkit`、`test-support/llm-replay`、`test-support/llm-mock-server` | `packages/test-support` | 重写 | 1 | 只参考脚本化 provider 的设计（另参考 `session-snapshot/src/launcher.ts` 的 spawn / wait / kill）；Nexgent 自写仿真规范与故障注入，无复制件 |
 | `test-support/session-snapshot`、`test-support/loader-smoke`、`test-support/remote-mock`、`test-support/client-runtime` | — | 不要 | — | 不复制 snapshot 测试体系 |
@@ -66,7 +66,7 @@
 | Nexgent 包 | 复制并改写（Nexgent 文件 ← DSH 文件） | 只参考设计 |
 | --- | --- | --- |
 | `@nexgent/kernel` | `src/util/atomic-write.ts` ← `util/atomic-write/src/index.ts` + `storage/storage-json/src/atomic.ts`；`src/util/timeout.ts` ← `util/timeout/src/index.ts`；`src/storage/json-file.ts` ← `storage/storage-json/src/index.ts`；`src/profile.ts` ← `boot/app-boot/src/profile.ts` + `profile-plugins.ts`；`src/app.ts` ← `boot/app-boot/src/index.ts`；`src/agents.ts` ← `core/agent/src/index.ts` + `core/agent-default-model/src/index.ts`；`src/tools.ts` ← `core/tools/src`（作用域注册表）+ `core/scope/src/index.ts` | `core/agent-loop`、`core/system-prompt`、`credentials/credentials`、`credentials/credentials-local`、`guard/timeout-policy` |
-| `@nexgent/llm` | `src/proxy/policy.ts` ← `util/http-proxy/src/policy.ts` | `llm/llm`、`llm/llm-pi-ai`、`llm/token-meter` |
+| `@nexgent/llm` | （无；ADR 0002 后用官方 `@anthropic-ai/sdk`） | `llm/llm`、`llm/llm-pi-ai`、`llm/token-meter` |
 | `@nexgent/session` | （无） | `session/session-persistence-jsonl`（`src/storage.ts`、`src/lease.ts`）、`session/session-checkpoint-policy`、`session/session-projection`、`session/session-format` |
 | `@nexgent/workspace` | `src/paths.ts` ← `fs/fs-sandbox/src/containment.ts`；`src/process.ts` ← `subprocess/subprocess-local/src/spawn.ts` | `workspace/workspace`、`fs/tool-fs`、`fs/tool-fs-search`、`fs/tool-str-replace-editor`、`shell/shell-env`、`shell/tool-bash`、`shell/tool-pwsh`、`sandbox/sandbox-policy` |
 | `packages/test-support` | （无） | `test-support/agent-loop-testkit`、`test-support/llm-replay`、`test-support/llm-mock-server`、`test-support/session-snapshot/src/launcher.ts` |

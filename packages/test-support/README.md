@@ -3,7 +3,7 @@
 Test helpers shared by the Nexgent packages and the step acceptance scripts:
 
 - `scriptedProvider` — an in-process `LLMProvider` (kernel contract `packages/kernel/src/contracts/llm.ts`) that replays a script as contract stream events and records every request;
-- `scriptedModelServer` — a loopback HTTP server speaking the OpenAI-compatible `POST …/chat/completions` API (SSE and plain JSON), driven by the same script format, with wire-level faults;
+- `scriptedModelServer` — a loopback HTTP server speaking the Anthropic Messages API (`POST /v1/messages`, SSE and plain JSON), driven by the same script format, with wire-level faults;
 - fault injection — file truncation (`kill -9` mid-write), process-tree kill, deadlines, an unreachable endpoint (network down);
 - the cross-process acceptance harness — `spawnNode`, output / file waits, session and ledger readers, and the acceptance summary builder + schema + validator.
 
@@ -31,7 +31,8 @@ interface ScriptedTurn {
   toolCalls?: ScriptedToolCall[]       // after the text, in order
   interleaveToolCalls?: boolean        // server only: round-robin argument chunks across calls
   usage?: Partial<LLMUsage-as-numbers> // omitted → no usage reported (see "unknown usage")
-  finishReason?: 'stop' | 'tool-calls' | 'max-tokens' // default: tool-calls if toolCalls, else stop
+  finishReason?: 'stop' | 'tool-calls' | 'max-tokens' | 'refusal' // default: tool-calls if toolCalls, else stop
+  stopDetails?: { category?: string; explanation?: string }       // with finishReason 'refusal'
   chunkDelayMs?: number                // delay before each chunk
   fault?: ScriptedFault | 'timeout' | 'disconnect' | 'http-500' | 'malformed-json'
 }
@@ -47,7 +48,7 @@ const provider = scriptedProvider([
 ])
 ```
 
-An exhausted script is a test bug: the provider yields an `error` event with code `internal`; the server answers HTTP 500 (`type: script_exhausted`). `assertConsumed()` on either throws if entries remain.
+An exhausted script is a test bug: the provider yields an `error` event with code `internal`; the server answers HTTP 500 (`error.type: script_exhausted`). `assertConsumed()` on either throws if entries remain.
 
 ### Tool-call representation
 
@@ -60,14 +61,14 @@ interface ScriptedToolCall {
 }
 ```
 
-- **Provider events** (per call, sequentially): `tool-call.start { index, id, name }` → `tool-call.delta { index, argumentsDelta }` × chunks → `tool-call.end { index, call: { id, name, arguments } }`, where `arguments` is the concatenated raw text. Event order of a whole turn: `reasoning.delta` → `text.delta`* → tool calls → `usage`? → `done`.
-- **Server wire** (OpenAI streaming): the first chunk of a call carries `delta.tool_calls[{ index, id, type: 'function', function: { name, arguments: '' } }]`; each following chunk carries `delta.tool_calls[{ index, function: { arguments: '<piece>' } }]`. Several calls in one turn are "parallel" tool calls; with `interleaveToolCalls` all starts come first and argument chunks alternate by index. Reasoning goes in `delta.reasoning_content`. The first chunk also carries `role: 'assistant'`. Finish chunk: `delta: {}` with `finish_reason` `stop` / `tool_calls` / `length`. Then `data: [DONE]`.
+- **Provider events** (per call, sequentially): `tool-call.start { index, id, name }` → `tool-call.delta { index, argumentsDelta }` × chunks → `tool-call.end { index, call: { id, name, arguments } }`, where `arguments` is the concatenated raw text. Event order of a whole turn: `reasoning.delta` → `text.delta`* → tool calls → `usage`? → `done` (`done` carries `refusal: stopDetails` when `finishReason` is `refusal`).
+- **Server wire** (Messages API streaming, `event: <type>\ndata: <json>\n\n` per event): `message_start` (with `message.usage` = input / cache counts), then per content block `content_block_start` / `content_block_delta`* / `content_block_stop`, then `message_delta` (`delta.stop_reason`, `delta.stop_details` on refusal, `usage.output_tokens`) and `message_stop`. Block order: `thinking` (one `thinking_delta` with the reasoning text, then a `signature_delta`), `text` (one `text_delta` per content chunk), then one `tool_use` block per call (`content_block` = `{ type: 'tool_use', id, name, input: {} }`, each argument chunk an `input_json_delta { partial_json }`). Several calls in one turn are "parallel" tool calls; with `interleaveToolCalls` all tool blocks start first and argument fragments alternate by block index (unlike the real API, which closes one block before opening the next). `stop_reason`: `end_turn` / `tool_use` / `max_tokens` / `refusal`.
 
 ### Unknown usage representation
 
 - Turn has **no `usage`**: the provider emits **no** `usage` event (contract invariant 2: the consumer then records `UNKNOWN_USAGE`); the server sends **no** usage chunk / field.
 - Turn has a **partial `usage`**: the provider emits one `usage` event where every missing field is the string `'unknown'` (never 0); the server sends only the wire fields it can derive.
-- Wire mapping (contract → OpenAI): `prompt_tokens = inputTokens + (cacheReadTokens ?? 0)` (contract input excludes cache), `completion_tokens = outputTokens`, `total_tokens = totalTokens`, `prompt_tokens_details.cached_tokens = cacheReadTokens`, `completion_tokens_details.reasoning_tokens = reasoningTokens`. The usage chunk is a final chunk with `choices: []` and `usage`, sent whenever the turn has `usage` (regardless of `stream_options.include_usage`).
+- Wire mapping (contract → Messages API): `message_start.message.usage.input_tokens = inputTokens`, `…cache_read_input_tokens = cacheReadTokens`, `message_delta.usage.output_tokens = outputTokens`; `totalTokens` and `reasoningTokens` have no wire field. Both usage objects are `{}` when the turn has no `usage` (the client then sees every count as unknown).
 
 ### Faults
 
@@ -75,8 +76,8 @@ interface ScriptedToolCall {
 | --- | --- | --- |
 | `{ kind: 'timeout', afterChunks = 0 }` | emits `afterChunks` body events, then hangs until `request.signal` aborts (→ `done/aborted`) or `min(options.timeoutMs, options.streamIdleTimeoutMs)` elapses (→ `error` `llm/timeout`); with neither it hangs forever | `afterChunks = 0`: never sends anything (not even headers); otherwise sends headers + chunks and stalls the open stream |
 | `{ kind: 'disconnect', afterChunks = 1 }` | emits `afterChunks` body events, then `error` `llm/request-failed` | sends `afterChunks` SSE events then destroys the socket; `0` resets before any response |
-| `{ kind: 'http-error', status, message?, headers? }` / `'http-500'` | `error` `llm/request-failed` with `httpStatus` | responds `status` with `{ error: { message, type: 'scripted_error', code } }` and the extra headers |
-| `{ kind: 'malformed-json', afterChunks = 0 }` | `error` `llm/invalid-response` (after `afterChunks` events) | `afterChunks` good events, then `data: {"id":…` (unparseable), then ends without `[DONE]` |
+| `{ kind: 'http-error', status, message?, headers? }` / `'http-500'` | `error` `llm/request-failed` with `httpStatus` | responds `status` with `{ type: 'error', error: { type: 'scripted_error', message } }` and the extra headers |
+| `{ kind: 'malformed-json', afterChunks = 0 }` | `error` `llm/invalid-response` (after `afterChunks` events) | `afterChunks` good events, then a `content_block_delta` whose `data:` does not parse, then ends without `message_stop` |
 
 "Body events" / "SSE events" count everything before the terminal event (reasoning, text, tool-call start / delta / end for the provider; every `data:` line for the server). Network down: point the client at `await closedPortUrl()` (connection refused).
 
@@ -96,14 +97,15 @@ scriptedProvider(script?: ScriptEntry<LLMRequest>[], options?: { info?: Partial<
 //   calls: { index, request, options, events }[]; requests: LLMRequest[]; remaining: number
 //   push(...entries); assertConsumed()
 
-scriptedModelServer(options?: { script?: ScriptEntry<ChatCompletionBody>[]; port?: number; host?: string; chunkDelayMs?: number }): Promise<ScriptedModelServer>
-// ScriptedModelServer: baseUrl ('http://127.0.0.1:<port>/v1'), port, requests: RecordedModelRequest[], remaining,
-//   push(...), waitForRequests(count, timeoutMs?), assertConsumed(), close()
-// RecordedModelRequest: { index, method, path, headers (authorization → '<scheme> [redacted]'), hasAuthorization,
-//   body (parsed JSON | undefined), rawBody, chunksSent, outcome }
+scriptedModelServer(options?: { script?: ScriptEntry<MessagesRequestBody>[]; port?: number; host?: string; chunkDelayMs?: number }): Promise<ScriptedModelServer>
+// ScriptedModelServer: baseUrl ('http://127.0.0.1:<port>', the bare origin for the SDK baseURL / NEXGENT_API_BASE_URL),
+//   port, requests: RecordedModelRequest[], remaining, push(...), waitForRequests(count, timeoutMs?), assertConsumed(), close()
+// RecordedModelRequest: { index, method, path ('/v1/messages', query stripped), headers (x-api-key → '[redacted]',
+//   authorization → '<scheme> [redacted]'), hasApiKey, body (parsed JSON | undefined), rawBody, chunksSent, outcome }
+// MessagesRequestBody: { model?, max_tokens?, system?, messages?, tools?, thinking?, output_config?, stream?, ... }
 ```
 
-Non-chat paths get 404 and consume nothing. `"stream": true` → SSE; otherwise a `chat.completion` JSON body.
+Only `POST /v1/messages` (any query string, e.g. `?beta=true`) consumes the script; other paths get 404. `"stream": true` → SSE; otherwise one `message` JSON body (`content` blocks, `stop_reason`, `stop_details`, `usage`). The `anthropic-version` and `x-api-key` headers are recorded (key redacted) but not required.
 
 ### Fault injection
 
@@ -115,7 +117,7 @@ descendantPids(pid): Promise<number[]>; isProcessAlive(pid): boolean
 withTimeout(promise, ms, label?): Promise<T>        // rejects with TimeoutError
 deadline(ms): { signal, remainingMs(), expired(), race(promise, label?), clear() }
 waitFor(predicate, { timeoutMs?, intervalMs?, label? }): Promise<T>
-closedPortUrl(path = '/v1'): Promise<string>       // network down
+closedPortUrl(path = '/v1'): Promise<string>       // network down (pass '' for a bare origin)
 ```
 
 ### Cross-process harness
@@ -156,7 +158,7 @@ The summary's sections mirror `docs/validation/TEMPLATE.md`: `step` (步骤), `d
 | Nexgent | DSH (`reference/deepseek-harness`, 46a7f68b) |
 | --- | --- |
 | `src/provider.ts` | `packages/test-support/agent-loop-testkit`, `packages/test-support/llm-replay` (scripted turns, recorded requests) |
-| `src/server.ts` | `packages/test-support/llm-mock-server` (request-scoped behaviours, captured requests, chunk counting); rewritten for the OpenAI chat-completions wire instead of Messages |
+| `src/server.ts` | `packages/test-support/llm-mock-server` (request-scoped behaviours, captured requests, chunk counting); rewritten for the Anthropic Messages API SSE wire |
 | `src/process.ts` | `packages/test-support/session-snapshot/src/launcher.ts` (spawn / wait / kill idea) |
 
 No file is a substantial adaptation, so none carries an `Adapted from` header.

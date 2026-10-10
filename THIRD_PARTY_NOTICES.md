@@ -26,7 +26,6 @@ Nexgent 以 [MIT](LICENSE) 许可发布。本文件列出 Nexgent 使用、参�
 | `packages/kernel/src/app.ts` | `packages/boot/app-boot/src/index.ts` |
 | `packages/kernel/src/agents.ts` | `packages/core/agent/src/index.ts`、`packages/core/agent-default-model/src/index.ts` |
 | `packages/kernel/src/tools.ts` | `packages/core/tools/src`（作用域注册表设计）、`packages/core/scope/src/index.ts` |
-| `packages/llm/src/proxy/policy.ts` | `packages/util/http-proxy/src/policy.ts` |
 | `packages/workspace/src/paths.ts` | `packages/fs/fs-sandbox/src/containment.ts` |
 | `packages/workspace/src/process.ts` | `packages/subprocess/subprocess-local/src/spawn.ts` |
 | `apps/cli/src/json-lines.ts` | `packages/bundle/headless/src/json-stream.ts` |

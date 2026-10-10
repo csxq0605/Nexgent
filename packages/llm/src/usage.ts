@@ -1,43 +1,40 @@
 /**
- * Normalize an OpenAI-compatible `usage` object into the contract's
- * {@link LLMUsage}. A count the provider did not report is `'unknown'`,
- * never 0.
+ * Normalize Messages API usage into the contract's {@link LLMUsage}. A count
+ * the API did not report is `'unknown'`, never 0.
  */
-import { toUsageCount, UNKNOWN_USAGE, type LLMUsage, type UsageCount } from '@nexgent/kernel'
+import { toUsageCount, type LLMUsage, type UsageCount } from '@nexgent/kernel'
 
-function record(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+/** The usage fields the stream reports, in `message_start` and `message_delta`. */
+export interface WireUsage {
+  readonly input_tokens?: number | null
+  readonly output_tokens?: number | null
+  readonly cache_read_input_tokens?: number | null
+  readonly cache_creation_input_tokens?: number | null
 }
 
 /**
- * Convert a wire usage object.
+ * Merge the usage of `message_start` (input and cache counts) with that of
+ * `message_delta` (output count; its cumulative input counts win when given).
  *
- * - `prompt_tokens` includes cached input on OpenAI-compatible routes; the
- *   cached share comes from `prompt_tokens_details.cached_tokens` (OpenAI) or
- *   `prompt_cache_hit_tokens` (DeepSeek-style routes) and is subtracted so
- *   `inputTokens` is uncached input as the contract defines it.
- * - When the route reports no cache split at all, `cacheReadTokens` is
- *   `'unknown'` and `inputTokens` is `prompt_tokens` as reported (the route
- *   does not distinguish a cached share).
- * - `reasoningTokens` comes from `completion_tokens_details.reasoning_tokens`
- *   and is `'unknown'` when absent.
- * @param wire - the `usage` value of a chunk; anything that is not an object yields {@link UNKNOWN_USAGE}.
+ * - `input_tokens` → `inputTokens` (the API's count already excludes cached input);
+ * - `output_tokens` → `outputTokens`;
+ * - `cache_read_input_tokens` → `cacheReadTokens`;
+ * - `cache_creation_input_tokens` is ignored (the contract has no field for it);
+ * - `reasoningTokens` is always `'unknown'` (not reported separately);
+ * - `totalTokens` = input + output + cacheRead when all three are known.
+ * @param start - usage of `message_start`, if seen.
+ * @param delta - usage of `message_delta`, if seen.
  */
-export function normalizeUsage(wire: unknown): LLMUsage {
-  const usage = record(wire)
-  if (usage === undefined) return UNKNOWN_USAGE
-  const prompt = toUsageCount(usage['prompt_tokens'])
-  const cachedRaw = record(usage['prompt_tokens_details'])?.['cached_tokens'] ?? usage['prompt_cache_hit_tokens']
-  const cacheRead = toUsageCount(cachedRaw)
-  let inputTokens: UsageCount = prompt
-  if (prompt !== 'unknown' && cacheRead !== 'unknown') {
-    inputTokens = prompt >= cacheRead ? prompt - cacheRead : 'unknown'
+export function normalizeUsage(start: WireUsage | undefined, delta: WireUsage | undefined): LLMUsage {
+  const pick = (key: keyof WireUsage): UsageCount => {
+    const value = delta?.[key] ?? start?.[key]
+    return toUsageCount(value)
   }
-  return {
-    inputTokens,
-    outputTokens: toUsageCount(usage['completion_tokens']),
-    totalTokens: toUsageCount(usage['total_tokens']),
-    cacheReadTokens: cacheRead,
-    reasoningTokens: toUsageCount(record(usage['completion_tokens_details'])?.['reasoning_tokens']),
-  }
+  const inputTokens = pick('input_tokens')
+  const outputTokens = pick('output_tokens')
+  const cacheReadTokens = pick('cache_read_input_tokens')
+  const totalTokens: UsageCount = inputTokens !== 'unknown' && outputTokens !== 'unknown' && cacheReadTokens !== 'unknown'
+    ? inputTokens + outputTokens + cacheReadTokens
+    : 'unknown'
+  return { inputTokens, outputTokens, totalTokens, cacheReadTokens, reasoningTokens: 'unknown' }
 }
