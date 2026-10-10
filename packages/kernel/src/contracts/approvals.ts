@@ -67,6 +67,29 @@ export interface ToolCallApproval {
   readonly requestId?: string
 }
 
+/** What a call acts on, for matching standing grants. */
+export interface ApprovalSubject {
+  readonly kind: 'command' | 'path' | 'other'
+  /** Full command, project-relative path, or a compact rendering of the arguments. */
+  readonly value: string
+}
+
+/** What a tool hands to {@link ToolContext.requestApproval} when policy says `ask`. */
+export interface ToolApprovalAsk {
+  /** One line: what is about to happen (full command or path). */
+  readonly summary: string
+  /** Multi-line context (matched rule, cwd). */
+  readonly detail?: string
+  /** Default `medium`. */
+  readonly risk?: ApprovalRisk
+  /** Grant pattern (command prefix or path glob); absent derives one from `subject`. */
+  readonly pattern?: string
+  /** Default `{ kind: 'other', value: summary }`. */
+  readonly subject?: ApprovalSubject
+  /** Scopes to offer; default all the host supports; `high` risk offers only `once`. */
+  readonly options?: readonly ApprovalScope[]
+}
+
 /** The single host-side responder; without one every request is denied with `decidedBy: 'timeout'`. */
 export type ApprovalResponder = (request: ApprovalRequest, signal: AbortSignal) => Promise<ApprovalDecision>
 

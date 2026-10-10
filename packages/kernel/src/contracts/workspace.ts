@@ -6,6 +6,7 @@
  * Policy semantics (what each mode allows, how approvals interact) are
  * normative in `docs/spec/permissions.md`; this file fixes the shapes.
  */
+import type { ToolApprovalAsk } from './approvals.js'
 import * as nodePath from 'node:path'
 
 /** Name of the data directory inside a project root. */
@@ -137,11 +138,14 @@ export type SandboxDenyCode =
   | 'read-only-mode'
   | 'command-denied'
   | 'command-not-allowed'
+  /** Not denied outright: the call may proceed once a host approves `ask`. */
+  | 'approval-required'
 
 /** The answer to a sandbox check. */
 export type SandboxDecision =
   | { readonly allowed: true }
-  | { readonly allowed: false; readonly code: SandboxDenyCode; readonly reason: string }
+  | { readonly allowed: false; readonly code: Exclude<SandboxDenyCode, 'approval-required'>; readonly reason: string }
+  | { readonly allowed: false; readonly code: 'approval-required'; readonly reason: string; readonly ask: ToolApprovalAsk }
 
 /** A command about to run. */
 export interface CommandRequest {

@@ -37,6 +37,8 @@ export interface ProjectConfig {
   }
   /** `project`-scope approval grants; default `[]`. Changing it always needs approval. */
   readonly approvals: readonly ApprovalGrant[]
+  /** Absolute directories readable besides the project root (`permissions.md` §路径策略); default `[]`. */
+  readonly extraReadRoots: readonly string[]
   /** Whether feedback-triggered improvement runs (step 5); default `false`. */
   readonly autoImprove: boolean
 }
@@ -50,6 +52,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
   sandboxMode: 'workspace-write',
   costCaps: Object.freeze({}),
   approvals: Object.freeze([]),
+  extraReadRoots: Object.freeze([]),
   autoImprove: false,
 }) as ProjectConfig
 
@@ -69,6 +72,7 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
     sandboxMode: input.sandboxMode ?? DEFAULT_PROJECT_CONFIG.sandboxMode,
     costCaps: input.costCaps ?? DEFAULT_PROJECT_CONFIG.costCaps,
     approvals: input.approvals ?? DEFAULT_PROJECT_CONFIG.approvals,
+    extraReadRoots: input.extraReadRoots ?? DEFAULT_PROJECT_CONFIG.extraReadRoots,
     autoImprove: input.autoImprove ?? DEFAULT_PROJECT_CONFIG.autoImprove,
   }
 }

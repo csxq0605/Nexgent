@@ -9,6 +9,7 @@
  * agent is disposed, and a tool registered from an agent's context is visible
  * only to that agent. Global registrations come from the root context.
  */
+import type { ToolApprovalAsk } from './approvals.js'
 import { NexgentError } from './errors.js'
 import type { JsonSchema, JsonValue } from './json.js'
 import type { SandboxMode, Workspace } from './workspace.js'
@@ -49,6 +50,14 @@ export interface ToolContext {
   readonly sandboxMode: SandboxMode
   /** Fires on user cancel, timeout or shutdown; the handler must settle promptly after. */
   readonly signal: AbortSignal
+  /** `true` when the loop already obtained approval for this call (an `ask` / `always` tool). */
+  readonly approved: boolean
+  /**
+   * Raise an approval question for this one call (a sandbox `ask` the tool
+   * discovers while running); resolves `true` when the call may proceed.
+   * Tools never prompt by themselves; without a host responder this denies.
+   */
+  requestApproval(ask: ToolApprovalAsk): Promise<boolean>
 }
 
 /** What a handler returns; the loop wraps it into a `tool.result` record and a `tool` message. */
