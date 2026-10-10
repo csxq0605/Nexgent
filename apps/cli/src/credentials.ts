@@ -2,73 +2,51 @@
  * API-key presence check before a run starts.
  *
  * The CLI only asks "is a key configured, and where": the value is read by
- * `ctx.credentials` (kernel) and handed to the LLM provider only. Until the
- * runtime is wired, {@link describeApiKey} mirrors the contract's resolution
- * order (`credentials.ts`: env first, then the local credential file) so a
- * missing key fails fast with instructions; it discards the value at once.
- * The integrator replaces it with `ctx.credentials.describe(NEXGENT_API_KEY)`.
+ * `ctx.credentials` (kernel) and handed to the LLM provider only. The check
+ * runs on the kernel's `LocalCredentials` (same resolution order and `0600`
+ * rule as the runtime: `NEXGENT_API_KEY` in the environment, then
+ * `credentials.json` under `NEXGENT_HOME` / `~/.nexgent`) plus the llm
+ * route's `ANTHROPIC_API_KEY` environment fallback, so a missing key fails
+ * fast with instructions and the runtime never sees a half-configured run.
  */
-import * as fs from 'node:fs/promises'
-import * as os from 'node:os'
-import * as path from 'node:path'
-import { NEXGENT_API_KEY, type CredentialInfo } from '@nexgent/kernel'
+import { credentialFilePath as kernelCredentialFilePath, LocalCredentials, NEXGENT_API_KEY, NEXGENT_HOME, type CredentialInfo } from '@nexgent/kernel'
+import { ANTHROPIC_API_KEY } from '@nexgent/llm'
 import { CliError, EXIT } from './exit-codes.js'
 
 /** Environment variable that relocates the per-user `~/.nexgent` directory (`permissions.md` §密钥存放). */
-export const NEXGENT_HOME_ENV = 'NEXGENT_HOME'
+export const NEXGENT_HOME_ENV = NEXGENT_HOME
 
 /** Inputs of the check, injectable for tests. */
 export interface CredentialProbe {
   readonly env: Readonly<Record<string, string | undefined>>
-  /** User home directory. */
-  readonly homedir: string
-  /** Read a file as UTF-8; rejects when missing. */
-  readFile(file: string): Promise<string>
+  /** Nexgent home directory; default `$NEXGENT_HOME`, then `~/.nexgent`. */
+  readonly home?: string
 }
 
-const defaultProbe: CredentialProbe = {
-  env: process.env,
-  homedir: os.homedir(),
-  readFile: file => fs.readFile(file, 'utf8'),
-}
+const defaultProbe: CredentialProbe = { env: process.env }
 
-/** `~/.nexgent/credentials.json`, or `$NEXGENT_HOME/credentials.json` when set. */
-export function credentialFilePath(env: CredentialProbe['env'], homedir: string): string {
-  const home = env[NEXGENT_HOME_ENV]
-  return path.join(home !== undefined && home !== '' ? home : path.join(homedir, '.nexgent'), 'credentials.json')
+/** `~/.nexgent/credentials.json`, or `$NEXGENT_HOME/credentials.json` when set (or `probe.home`). */
+export function credentialFilePath(probe: CredentialProbe = defaultProbe): string {
+  return kernelCredentialFilePath({ env: probe.env as NodeJS.ProcessEnv, ...(probe.home === undefined ? {} : { home: probe.home }) })
 }
 
 /**
  * Describe the model API key without returning it: `{ configured, source }`.
- * A malformed credential file counts as "not configured from the file".
+ * A malformed or insecure credential file counts as "not configured from the file".
  */
 export async function describeApiKey(probe: CredentialProbe = defaultProbe): Promise<CredentialInfo> {
-  const fromEnv = probe.env[NEXGENT_API_KEY]
-  if (fromEnv !== undefined && fromEnv !== '') return { configured: true, source: 'env' }
-  let text: string
-  try {
-    text = await probe.readFile(credentialFilePath(probe.env, probe.homedir))
-  } catch {
-    return { configured: false }
-  }
-  try {
-    const file = JSON.parse(text) as { version?: unknown; credentials?: Record<string, unknown> }
-    const present = file.version === 1
-      && typeof file.credentials === 'object'
-      && file.credentials !== null
-      && typeof file.credentials[NEXGENT_API_KEY] === 'string'
-      && file.credentials[NEXGENT_API_KEY] !== ''
-    return present ? { configured: true, source: 'file' } : { configured: false }
-  } catch {
-    return { configured: false }
-  }
+  const credentials = new LocalCredentials({ env: probe.env as NodeJS.ProcessEnv, ...(probe.home === undefined ? {} : { home: probe.home }) })
+  const info = await credentials.describe(NEXGENT_API_KEY).catch((): CredentialInfo => ({ configured: false }))
+  if (info.configured) return info
+  const fallback = probe.env[ANTHROPIC_API_KEY]
+  return fallback !== undefined && fallback.trim() !== '' ? { configured: true, source: 'env' } : { configured: false }
 }
 
 /** The message shown when no key is configured. */
 export function missingKeyMessage(file: string): string {
   return [
     'no model API key configured.',
-    `Set the ${NEXGENT_API_KEY} environment variable, or create ${file} containing:`,
+    `Set the ${NEXGENT_API_KEY} environment variable (or ${ANTHROPIC_API_KEY}), or create ${file} containing:`,
     `  { "version": 1, "credentials": { "${NEXGENT_API_KEY}": "<your key>" } }`,
     process.platform === 'win32' ? '' : '(on Linux / macOS make it private: chmod 600)',
   ].filter(line => line !== '').join('\n')
@@ -80,6 +58,6 @@ export function missingKeyMessage(file: string): string {
  */
 export async function requireApiKey(probe: CredentialProbe = defaultProbe): Promise<CredentialInfo> {
   const info = await describeApiKey(probe)
-  if (!info.configured) throw new CliError(EXIT.ENVIRONMENT, missingKeyMessage(credentialFilePath(probe.env, probe.homedir)))
+  if (!info.configured) throw new CliError(EXIT.ENVIRONMENT, missingKeyMessage(credentialFilePath(probe)))
   return info
 }

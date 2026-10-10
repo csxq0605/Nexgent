@@ -37,7 +37,7 @@ describe('accept-step1 scenario helpers', () => {
     const entries = buildScript()
     expect(entries).toHaveLength(5)
     expect((entries[0]?.toolCalls as Array<{ name: string }>)[0]?.name).toBe(WRITE_TOOL)
-    expect(entries[2]?.fault).toEqual({ kind: 'timeout', afterChunks: 1 })
+    expect(entries[2]?.fault).toEqual({ kind: 'timeout', afterChunks: 3 })
   })
 
   it('parses JSON lines leniently and finds the session id', () => {
@@ -72,11 +72,20 @@ describe('accept-step1 scenario helpers', () => {
     expect(taskOutcomes(ledger, 's')).toHaveLength(1)
   })
 
-  it('detects history in a resumed request body', () => {
+  it('detects history in a resumed request body (string content and Messages API text blocks)', () => {
     const body = { messages: [{ role: 'system', content: 'x' }, { role: 'user', content: TASKS.write }] }
     expect(requestMentions(body, TASKS.write)).toBe(true)
     expect(requestMentions(body, TASKS.resume)).toBe(false)
     expect(requestMentions(undefined, 'x')).toBe(false)
+    const blocks = {
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: TASKS.write }] },
+        { role: 'assistant', content: [{ type: 'text', text: TASKS.resume }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }] },
+      ],
+    }
+    expect(requestMentions(blocks, TASKS.write)).toBe(true)
+    expect(requestMentions(blocks, TASKS.resume)).toBe(false)
   })
 })
 

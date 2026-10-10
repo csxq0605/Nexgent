@@ -37,7 +37,8 @@ export function buildScript() {
   return [
     { toolCalls: [{ name: WRITE_TOOL, arguments: FILES.first }], usage },
     { content: [`Created ${FILES.first.path}.`], usage },
-    { content: ['Working on the long note'], fault: { kind: 'timeout', afterChunks: 1 } },
+    // message_start, content_block_start, then the one text_delta reaches the client before the stall.
+    { content: ['Working on the long note'], fault: { kind: 'timeout', afterChunks: 3 } },
     { toolCalls: [{ name: WRITE_TOOL, arguments: FILES.resumed }], usage },
     { content: [`Created ${FILES.resumed.path}.`], usage },
   ]
@@ -110,7 +111,14 @@ export function unpairedRequests(ledger) {
   }
 }
 
-/** Whether a chat request body carries a user message containing `text` (history survived resume). */
+/** Visible text of one Messages API `content` value: a string, or the `text` blocks of an array. */
+export function messageText(content) {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content.map(block => (block !== null && typeof block === 'object' && typeof block.text === 'string' ? block.text : '')).join('\n')
+}
+
+/** Whether a Messages API request body carries a user message containing `text` (history survived resume). */
 export function requestMentions(body, text) {
-  return (body?.messages ?? []).some(message => message.role === 'user' && typeof message.content === 'string' && message.content.includes(text))
+  return (body?.messages ?? []).some(message => message.role === 'user' && messageText(message.content).includes(text))
 }

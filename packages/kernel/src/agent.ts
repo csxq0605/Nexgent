@@ -709,6 +709,10 @@ export class Agent {
         // Stop a provider that is still streaming; never wait on a hung one.
         local.abort()
         void Promise.resolve(iterator?.return?.()).catch(() => undefined)
+      } else {
+        // Close the generator after its terminal event so the provider's own
+        // cleanup (its `llm.request.end` record, the response stream) runs now.
+        await Promise.resolve(iterator?.return?.()).catch(() => undefined)
       }
     }
 

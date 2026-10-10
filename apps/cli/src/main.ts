@@ -33,7 +33,7 @@ export interface CliIo {
 export interface CliDeps {
   /** Default: `runtime.ts` `loadRuntime`. */
   readonly loadRuntime?: () => Promise<CliRuntime | undefined>
-  /** Default: the real env and home directory. */
+  /** Default: `{ env: io.env }` (home from `NEXGENT_HOME`, then `~/.nexgent`). */
   readonly credentials?: CredentialProbe
   /** Approval prompt wait; default 300 s. */
   readonly approvalTimeoutMs?: number
@@ -124,7 +124,7 @@ async function runTask(
   deps: CliDeps,
 ): Promise<ExitCode> {
   const { layout } = await initProjectLayout(invocation.project, io.cwd)
-  await requireApiKey(deps.credentials)
+  await requireApiKey(deps.credentials ?? { env: io.env })
   const runtime = await (deps.loadRuntime ?? loadRuntime)()
   if (runtime === undefined) throw new CliError(EXIT.USAGE, RUNTIME_NOT_WIRED_MESSAGE, { code: RUNTIME_NOT_WIRED_CODE })
 

@@ -14,7 +14,7 @@ afterEach(async () => {
   await fs.rm(tmp, { recursive: true, force: true })
 })
 
-const noKeyProbe = { env: {}, homedir: '/nowhere', readFile: async () => { throw new Error('ENOENT') } }
+const noKeyProbe = { env: {}, home: path.join(os.tmpdir(), 'nexgent-cli-main-no-home') }
 
 describe('main', () => {
   it('prints usage for no arguments and help / version on stdout', async () => {
@@ -50,9 +50,12 @@ describe('main', () => {
     await fs.access(path.join(tmp, '.nexgent', 'sessions'))
   })
 
-  it('exits 2 with a clear message while the runtime is not wired', async () => {
+  it('exits 2 with a clear message when the runtime is not wired', async () => {
     const t = testIo(tmp)
-    const code = await main(['run', '--project', tmp, '--task', 't', '--json'], t.io, { credentials: { ...noKeyProbe, env: { NEXGENT_API_KEY: 'k' } } })
+    const code = await main(['run', '--project', tmp, '--task', 't', '--json'], t.io, {
+      credentials: { ...noKeyProbe, env: { NEXGENT_API_KEY: 'k' } },
+      loadRuntime: async () => undefined,
+    })
     expect(code).toBe(EXIT.USAGE)
     expect(t.stderr.text).toContain(RUNTIME_NOT_WIRED_MESSAGE)
     expect(JSON.parse(t.stdout.text)).toMatchObject({ type: 'error', error: { code: 'cli/runtime-not-wired' } })
