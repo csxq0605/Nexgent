@@ -7,6 +7,7 @@
 import { NexgentError } from './contracts/errors.js'
 import { resolveProjectConfig, type CostCap, type ProjectConfig, type ProjectConfigInput } from './contracts/config.js'
 import type { ApprovalGrant } from './contracts/approvals.js'
+import { EFFORT_LEVELS, type Effort } from './contracts/llm.js'
 import { SANDBOX_MODES, type SandboxMode } from './contracts/workspace.js'
 import { readJsonFile, writeJsonFile } from './storage/json-file.js'
 
@@ -21,7 +22,7 @@ export interface LoadedProjectConfig {
 }
 
 const KNOWN_FIELDS = new Set([
-  'version', 'model', 'endpoint', 'thinking', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots',
+  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots',
 ])
 
 function fail(path: string, message: string): never {
@@ -87,6 +88,10 @@ export function parseProjectConfig(value: unknown, path = 'config.json'): Loaded
   if (value.thinking !== undefined) {
     if (value.thinking !== 'off' && value.thinking !== 'on') fail(path, 'thinking must be "off" or "on"')
     input.thinking = value.thinking
+  }
+  if (value.effort !== undefined) {
+    if (!EFFORT_LEVELS.includes(value.effort as Effort)) fail(path, `effort must be one of ${EFFORT_LEVELS.join(', ')}`)
+    input.effort = value.effort as Effort
   }
   if (value.sandboxMode !== undefined) {
     if (!SANDBOX_MODES.includes(value.sandboxMode as SandboxMode)) {

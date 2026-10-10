@@ -150,10 +150,12 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
       break
     case 'assistant.message': {
       if (!(record.interrupted === true && record.content === '')) {
-        const message: AssistantMessage =
-          record.toolCalls === undefined
-            ? { role: 'assistant', content: record.content }
-            : { role: 'assistant', content: record.content, toolCalls: record.toolCalls }
+        const message: AssistantMessage = {
+          role: 'assistant',
+          content: record.content,
+          ...(record.toolCalls === undefined ? {} : { toolCalls: record.toolCalls }),
+          ...(record.providerContent === undefined ? {} : { providerContent: record.providerContent }),
+        }
         draft.messages.push(message)
       }
       meta.totalUsage = addUsage(meta.totalUsage, record.usage)

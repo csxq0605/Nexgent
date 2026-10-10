@@ -149,10 +149,11 @@ describe('project config', () => {
   it('fills defaults, validates fields and reports unknown ones', async () => {
     expect((await readProjectConfig(join(dir, 'missing.json'))).config.sandboxMode).toBe('workspace-write')
     const loaded = parseProjectConfig({ model: 'm', costCaps: { perTask: { maxRequests: 2 } }, extraReadRoots: ['/data'] })
-    expect(loaded.config).toMatchObject({ model: 'm', thinking: 'off', costCaps: { perTask: { maxRequests: 2 } } })
+    expect(loaded.config).toMatchObject({ model: 'm', thinking: 'off', effort: 'medium', costCaps: { perTask: { maxRequests: 2 } } })
+    expect(parseProjectConfig({ effort: 'xhigh' }).input).toEqual({ effort: 'xhigh' })
     expect(loaded.input).toEqual({ model: 'm', costCaps: { perTask: { maxRequests: 2 } } })
     expect(loaded.extraReadRoots).toEqual(['/data'])
-    for (const bad of [{ modle: 'x' }, { version: 2 }, { thinking: 'maybe' }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 1 }] }, []]) {
+    for (const bad of [{ modle: 'x' }, { version: 2 }, { thinking: 'maybe' }, { effort: 'extreme' }, { effort: 2 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 1 }] }, []]) {
       expect(() => parseProjectConfig(bad)).toThrow(expect.objectContaining({ code: 'config/invalid' }))
     }
   })
@@ -201,14 +202,14 @@ describe('system prompt, schema check, timeouts, history repair', () => {
   it('renders persona, environment facts and tools deterministically', () => {
     const input = {
       template: { persona: 'You are Nexgent using {{model}}.', suffix: 'Your project working directory is {{cwd}}.' },
-      model: 'mimo-v2.6-pro',
+      model: 'claude-sonnet-5-5',
       cwd: '/p',
       sandboxMode: 'full-access' as const,
       platform: 'win32' as const,
       tools: [{ name: 'pwsh', description: 'Run PowerShell.\nMore.', inputSchema: {}, effects: ['execute' as const], approval: 'ask' as const }],
     }
     const text = renderSystemPrompt(input)
-    expect(text.startsWith('You are Nexgent using mimo-v2.6-pro.')).toBe(true)
+    expect(text.startsWith('You are Nexgent using claude-sonnet-5-5.')).toBe(true)
     expect(text).toContain('PowerShell')
     expect(text).toContain('WARNING')
     expect(text).toContain('- pwsh: Run PowerShell.')
@@ -240,13 +241,16 @@ describe('system prompt, schema check, timeouts, history repair', () => {
   })
 
   it('answers dangling tool calls in requests only', () => {
+    const providerContent = [{ type: 'thinking', thinking: 't', signature: 'sig' }, { type: 'tool_use', id: 'a' }]
     const repaired = repairHistory([
       { role: 'user', content: 'u' },
-      { role: 'assistant', content: '', toolCalls: [{ id: 'a', name: 't', arguments: '{}' }, { id: 'b', name: 't', arguments: '{}' }] },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'a', name: 't', arguments: '{}' }, { id: 'b', name: 't', arguments: '{}' }], providerContent },
       { role: 'tool', toolCallId: 'a', name: 't', content: 'ok', isError: false },
       { role: 'user', content: 'next' },
     ])
     expect(repaired.map(message => message.role)).toEqual(['user', 'assistant', 'tool', 'tool', 'user'])
     expect(repaired[3]).toMatchObject({ toolCallId: 'b', isError: true })
+    // assistant entries pass through untouched, provider blocks included
+    expect(repaired[1]).toMatchObject({ role: 'assistant', providerContent })
   })
 })

@@ -78,7 +78,7 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 /** A provider that answers request N with `script[N]` and records every request. */
 export class ScriptedLLM implements LLMProvider {
-  readonly info = { id: 'mimo', endpoint: 'https://example.invalid/v1', defaultModel: 'scripted-model' }
+  readonly info = { id: 'anthropic', endpoint: 'https://example.invalid', defaultModel: 'scripted-model' }
   readonly requests: LLMRequest[] = []
   readonly options: (LLMCompleteOptions | undefined)[] = []
   private index = 0
@@ -152,7 +152,12 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
         break
       case 'assistant.message':
         if (!(record.interrupted === true && record.content === '')) {
-          messages.push({ role: 'assistant', content: record.content, ...(record.toolCalls === undefined ? {} : { toolCalls: record.toolCalls }) })
+          messages.push({
+            role: 'assistant',
+            content: record.content,
+            ...(record.toolCalls === undefined ? {} : { toolCalls: record.toolCalls }),
+            ...(record.providerContent === undefined ? {} : { providerContent: record.providerContent }),
+          })
         }
         meta = { ...meta!, totalUsage: addUsage(meta!.totalUsage, record.usage) }
         break

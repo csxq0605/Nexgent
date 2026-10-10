@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import {
+  EFFORT_LEVELS,
   NexgentError,
   SANDBOX_MODES,
   resolveProjectConfig,
@@ -33,7 +34,7 @@ export interface LoadedProjectConfig extends ProjectConfig {
 }
 
 const TOP_LEVEL_KEYS = new Set([
-  'version', 'model', 'endpoint', 'thinking', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots',
+  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots',
 ])
 
 function invalid(message: string, field?: string): NexgentError {
@@ -82,6 +83,9 @@ export function validateProjectConfig(raw: unknown): ProjectConfigFile {
     if (raw[key] !== undefined && (typeof raw[key] !== 'string' || raw[key] === '')) throw invalid(`${key} must be a non-empty string`, key)
   }
   if (raw.thinking !== undefined && raw.thinking !== 'off' && raw.thinking !== 'on') throw invalid('thinking must be "off" or "on"', 'thinking')
+  if (raw.effort !== undefined && !(EFFORT_LEVELS as readonly unknown[]).includes(raw.effort)) {
+    throw invalid(`effort must be one of ${EFFORT_LEVELS.join(', ')}`, 'effort')
+  }
   if (raw.sandboxMode !== undefined && !(SANDBOX_MODES as readonly unknown[]).includes(raw.sandboxMode)) {
     throw invalid(`sandboxMode must be one of ${SANDBOX_MODES.join(', ')}`, 'sandboxMode')
   }

@@ -129,7 +129,7 @@ export async function loadPatchFile(path: string): Promise<AppProfilePatchEntry[
   return parsePatches(await readFile(path, 'utf8'), path)
 }
 
-/** The shipped default product profile (MiMo route, thinking off, PR #4 persona). */
+/** The shipped default product profile (Claude route per ADR 0002, thinking off, effort medium, PR #4 persona). */
 export function defaultProfile(): AppProfile {
   return parseProfile(readFileSync(DEFAULT_PROFILE_FILE, 'utf8'), DEFAULT_PROFILE_FILE)
 }

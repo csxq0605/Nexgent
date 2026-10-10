@@ -13,6 +13,7 @@ import { Context, Service, type Fiber } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import type { ProjectConfig } from './contracts/config.js'
 import { NexgentError } from './contracts/errors.js'
+import { EFFORT_LEVELS, type Effort } from './contracts/llm.js'
 import type { SessionLock } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
 import { SANDBOX_MODES } from './contracts/workspace.js'
@@ -35,6 +36,8 @@ export interface AgentsConfig {
   model?: string
   /** Reasoning mode; `.nexgent/config.json` `thinking` overrides it. */
   thinking: 'off' | 'on'
+  /** Effort level (ADR 0002); `.nexgent/config.json` `effort` overrides it. */
+  effort: Effort
   /** Output token cap per request. */
   maxTokens?: number
   /** Persona text (PR #4 `system-prompt` row). */
@@ -84,6 +87,7 @@ export class AgentsService extends Service {
   static readonly Config: Schema<AgentsConfig> = Schema.object({
     model: Schema.string().description('Default model id.'),
     thinking: Schema.union(['off', 'on'] as const).default('off').description('Reasoning mode; execution uses off.'),
+    effort: Schema.union(EFFORT_LEVELS as readonly Effort[]).default('medium').description('Effort level (output_config.effort).'),
     maxTokens: Schema.natural().description('Output token cap per request.'),
     systemPrompt: Schema.object({
       persona: Schema.string().default(DEFAULT_PERSONA),
@@ -136,6 +140,7 @@ export class AgentsService extends Service {
     const c = this.config
     return {
       thinking: c.thinking,
+      effort: c.effort,
       ...(c.maxTokens === undefined ? {} : { maxTokens: c.maxTokens }),
       systemPrompt: { persona: c.systemPrompt.persona, suffix: c.systemPrompt.suffix },
       modelTimeoutMs: c.modelTimeoutMs,
@@ -176,6 +181,7 @@ export class AgentsService extends Service {
     scope: { ctx: Context; fiber: Fiber }
     model: string
     thinking: 'off' | 'on'
+    effort: Effort
     sandboxMode: SandboxMode
     projectConfig: ProjectConfig
     history: AgentInit['history']
@@ -197,6 +203,7 @@ export class AgentsService extends Service {
       tools: args.scope.ctx.tools,
       model: args.model,
       thinking: args.thinking,
+      effort: args.effort,
       sandboxMode: args.sandboxMode,
       settings: this.settings(),
       projectConfig: args.projectConfig,
@@ -225,6 +232,7 @@ export class AgentsService extends Service {
     const model = options.model ?? loaded.input.model ?? this.config.model ?? this.home.llm.info.defaultModel
     const sandboxMode = this.assertMode(options.sandboxMode ?? loaded.config.sandboxMode)
     const thinking = loaded.input.thinking ?? this.config.thinking
+    const effort = loaded.input.effort ?? this.config.effort
     await this.home.workspace.ensureLayout()
     const lock = await this.home.session.create({
       sessionId,
@@ -241,6 +249,7 @@ export class AgentsService extends Service {
         scope,
         model,
         thinking,
+        effort,
         sandboxMode,
         projectConfig: loaded.config,
         history: [],
@@ -279,6 +288,7 @@ export class AgentsService extends Service {
         scope,
         model: options.model ?? state.metadata.model,
         thinking: loaded.input.thinking ?? this.config.thinking,
+        effort: loaded.input.effort ?? this.config.effort,
         sandboxMode: this.assertMode(options.sandboxMode ?? state.metadata.sandboxMode),
         projectConfig: loaded.config,
         history: state.messages,

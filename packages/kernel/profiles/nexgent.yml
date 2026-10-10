@@ -1,11 +1,13 @@
 # Nexgent default product profile (step 1).
 #
 # Ordered plugin rows; patches (cordis.patch.yml form) address rows by `id`.
-# Product defaults migrated from PR #4
-# runtime/packages/bundle/nexgent-app/cordis.patch.yml:
-#   agent-default-model -> agents.model / agents.thinking
-#   llm-pi-ai.providers.mimo -> llm.config
-#   system-prompt.personaPrefix / personaSuffix -> agents.systemPrompt
+# The model route is the Claude Platform (Claude Sonnet 5.5) per ADR 0002:
+#   llm.config -> @nexgent/llm (Messages API, thinking off = between_tools,
+#   effort medium, server-side fallbacks on for the official host)
+#   agents.model / agents.thinking / agents.effort -> the loop's request defaults
+# The persona is migrated from PR #4
+# runtime/packages/bundle/nexgent-app/cordis.patch.yml
+# (system-prompt.personaPrefix / personaSuffix -> agents.systemPrompt).
 # Credentials stay in the credential service (NEXGENT_API_KEY); no secret
 # ever appears in a profile. PR #4 rows for DSH-only features (execution
 # ledger sidecar, architecture trials, workflow tools, DeepSeek account,
@@ -23,23 +25,17 @@
 - id: llm
   name: '@nexgent/llm'
   config:
-    provider: mimo
-    displayName: MiMo
-    endpoint: https://token-plan-cn.xiaomimimo.com/v1
-    model: mimo-v2.6-pro
+    provider: anthropic
+    endpoint: https://api.anthropic.com
+    model: claude-sonnet-5-5
     apiKeyCredential: NEXGENT_API_KEY
     thinking: 'off'
-    timeoutMs: 180000
+    effort: medium
+    maxTokens: 16000
+    timeoutMs: 600000
     streamIdleTimeoutMs: 180000
     maxRetries: 0
-    maxTokens: 4096
-    contextWindow: 128000
-    compat:
-      thinkingFormat: deepseek
-      supportsReasoningEffort: false
-      supportsDeveloperRole: false
-      supportsStore: false
-      maxTokensField: max_tokens
+    fallbacks: default
 
 - id: tools
   name: '@nexgent/kernel/tools'
@@ -50,14 +46,15 @@
 - id: agents
   name: '@nexgent/kernel/agents'
   config:
-    model: mimo-v2.6-pro
+    model: claude-sonnet-5-5
     thinking: 'off'
-    maxTokens: 4096
-    modelTimeoutMs: 180000
+    effort: medium
+    maxTokens: 16000
+    modelTimeoutMs: 600000
     streamIdleTimeoutMs: 180000
     systemPrompt:
       persona: >-
-        You are Nexgent, a general task agent using the {{model}} model.
+        You are Nexgent, a general task agent running on the {{model}} model.
         Complete the user's task with the available materials and tools.
         Choose direct work, delegation or a workflow according to the task.
         Verify actual deliverables, explain unresolved requirements, and preserve useful work for subsequent turns.
