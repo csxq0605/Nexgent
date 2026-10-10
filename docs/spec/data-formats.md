@@ -56,7 +56,7 @@
 
 规则：
 
-- `.nexgent/**` 对模型可见的文件工具是拒绝模式（`SandboxPolicy.deniedPatterns` 默认包含它），模型不能通过 `read_file` / `write_file` / `bash` 直接读写这些文件；需要暴露给模型的内容由专门的工具提供。
+- `.nexgent/` 内部对模型可见的文件工具按子目录区分：`sessions/`、`ledgers/`、`capabilities/` 读写都拒绝，`materials/` 与 `config.json` 只读，`outputs/` 可读写；规则以 `permissions.md` §路径策略与写入限制为准。
 - 所有路径在服务内部以绝对路径处理（`WorkspaceLayout`）；记录里出现的路径（如 `session.start.projectRoot`）也是绝对路径。
 - 是否纳入版本控制由项目自己决定；建议忽略 `sessions/`、`ledgers/`、`outputs/`，保留 `config.json`。
 - 本机凭证文件不在项目内：`~/.nexgent/credentials.json`（Windows 为 `%USERPROFILE%\.nexgent\credentials.json`），形状见“项目配置文件”末尾。
@@ -75,6 +75,7 @@
 | `costCaps.perTask` | `CostCap` | 无 | 每任务上限 |
 | `costCaps.perProject` | `CostCap` | 无 | 每项目上限 |
 | `approvals` | `ApprovalGrant[]` | `[]` | `project` 范围的审批授权；语义见 `permissions.md` |
+| `extraReadRoots` | `string[]` | `[]` | 额外可读的绝对目录；语义见 `permissions.md` |
 | `autoImprove` | boolean | `false` | 反馈触发的自动改进（步骤 5）开关 |
 
 `CostCap`：
