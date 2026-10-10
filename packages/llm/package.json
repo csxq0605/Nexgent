@@ -1,0 +1,31 @@
+{
+  "name": "@nexgent/llm",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Claude Platform 单路由：Anthropic Messages API 流式请求、工具调用解析、用量计量与请求账本。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schema/ledger.v1.schema.json": "./schema/ledger.v1.schema.json"
+  },
+  "files": [
+    "dist",
+    "schema"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
+    "@nexgent/kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/test-support": "workspace:*"
+  }
+}

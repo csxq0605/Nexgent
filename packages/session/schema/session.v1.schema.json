@@ -1,0 +1,940 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexgent.dev/schema/session.v1.schema.json",
+  "title": "Nexgent session JSONL v1 record",
+  "description": "One line of .nexgent/sessions/<sessionId>/session.jsonl. See docs/spec/data-formats.md.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/sessionStartRecord"
+    },
+    {
+      "$ref": "#/$defs/userMessageRecord"
+    },
+    {
+      "$ref": "#/$defs/assistantMessageRecord"
+    },
+    {
+      "$ref": "#/$defs/toolResultRecord"
+    },
+    {
+      "$ref": "#/$defs/turnStartRecord"
+    },
+    {
+      "$ref": "#/$defs/turnEndRecord"
+    },
+    {
+      "$ref": "#/$defs/checkpointRecord"
+    },
+    {
+      "$ref": "#/$defs/errorRecord"
+    },
+    {
+      "$ref": "#/$defs/approvalRequestRecord"
+    },
+    {
+      "$ref": "#/$defs/approvalDecisionRecord"
+    },
+    {
+      "$ref": "#/$defs/approvalGrantRecord"
+    }
+  ],
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0
+    },
+    "usageCount": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "const": "unknown"
+        }
+      ]
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputTokens",
+        "outputTokens",
+        "totalTokens",
+        "cacheReadTokens",
+        "reasoningTokens"
+      ],
+      "properties": {
+        "inputTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "outputTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "totalTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "cacheReadTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "reasoningTokens": {
+          "$ref": "#/$defs/usageCount"
+        }
+      }
+    },
+    "finishReason": {
+      "enum": [
+        "stop",
+        "tool-calls",
+        "max-tokens",
+        "aborted",
+        "refusal",
+        "error"
+      ]
+    },
+    "refusalInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "explanation": {
+          "type": "string"
+        }
+      }
+    },
+    "jsonValue": {},
+    "errorInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "code": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "object"
+        }
+      }
+    },
+    "approvalScope": {
+      "enum": [
+        "once",
+        "session",
+        "project"
+      ]
+    },
+    "sandboxMode": {
+      "enum": [
+        "read-only",
+        "workspace-write",
+        "full-access"
+      ]
+    },
+    "toolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "arguments"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "string"
+        }
+      }
+    },
+    "userMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "content"
+      ],
+      "properties": {
+        "role": {
+          "const": "user"
+        },
+        "content": {
+          "type": "string"
+        }
+      }
+    },
+    "assistantMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "content"
+      ],
+      "properties": {
+        "role": {
+          "const": "assistant"
+        },
+        "content": {
+          "type": "string"
+        },
+        "toolCalls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/toolCall"
+          }
+        },
+        "providerContent": {
+          "$ref": "#/$defs/jsonValue"
+        }
+      }
+    },
+    "toolMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "toolCallId",
+        "name",
+        "content",
+        "isError"
+      ],
+      "properties": {
+        "role": {
+          "const": "tool"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "isError": {
+          "type": "boolean"
+        }
+      }
+    },
+    "approvalRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sessionId",
+        "callId",
+        "tool",
+        "summary",
+        "risk",
+        "options"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "callId": {
+          "type": "string"
+        },
+        "tool": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "risk": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/approvalScope"
+          }
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        }
+      }
+    },
+    "approvalDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "decision",
+        "scope",
+        "decidedBy"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "decision": {
+          "enum": [
+            "allow",
+            "deny"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/approvalScope"
+        },
+        "decidedBy": {
+          "enum": [
+            "user",
+            "timeout",
+            "cancel",
+            "headless"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "approvalGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "grantedAt"
+      ],
+      "properties": {
+        "tool": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "grantedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "turnEndReason": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "completed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "cause"
+          ],
+          "properties": {
+            "kind": {
+              "const": "cancelled"
+            },
+            "cause": {
+              "enum": [
+                "user",
+                "timeout",
+                "shutdown",
+                "cost-cap"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "error"
+          ],
+          "properties": {
+            "kind": {
+              "const": "error"
+            },
+            "error": {
+              "$ref": "#/$defs/errorInfo"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "max-tokens"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "interrupted"
+            }
+          }
+        }
+      ]
+    },
+    "sessionMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "createdAt",
+        "projectRoot",
+        "model",
+        "sandboxMode",
+        "grants",
+        "lastTurn",
+        "totalUsage",
+        "lastSeq"
+      ],
+      "properties": {
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "projectRoot": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "sandboxMode": {
+          "$ref": "#/$defs/sandboxMode"
+        },
+        "grants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/approvalGrant"
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "lastTurn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "openTurn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "totalUsage": {
+          "$ref": "#/$defs/usage"
+        },
+        "lastSeq": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "sessionState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "version",
+        "messages",
+        "metadata"
+      ],
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "version": {
+          "const": 1
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/userMessage"
+              },
+              {
+                "$ref": "#/$defs/assistantMessage"
+              },
+              {
+                "$ref": "#/$defs/toolMessage"
+              }
+            ]
+          }
+        },
+        "metadata": {
+          "$ref": "#/$defs/sessionMetadata"
+        }
+      }
+    },
+    "sessionStartRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "version",
+        "projectRoot",
+        "model",
+        "sandboxMode"
+      ],
+      "properties": {
+        "type": {
+          "const": "session.start"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "version": {
+          "const": 1
+        },
+        "projectRoot": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "model": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sandboxMode": {
+          "$ref": "#/$defs/sandboxMode"
+        },
+        "parentSessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "userMessageRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "content",
+        "source"
+      ],
+      "properties": {
+        "type": {
+          "const": "user.message"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "content": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "user",
+            "inject"
+          ]
+        }
+      }
+    },
+    "assistantMessageRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "step",
+        "requestId",
+        "content",
+        "usage",
+        "finishReason"
+      ],
+      "properties": {
+        "type": {
+          "const": "assistant.message"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "step": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "requestId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "content": {
+          "type": "string"
+        },
+        "toolCalls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/toolCall"
+          }
+        },
+        "usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "finishReason": {
+          "$ref": "#/$defs/finishReason"
+        },
+        "interrupted": {
+          "const": true
+        },
+        "providerContent": {
+          "$ref": "#/$defs/jsonValue"
+        },
+        "refusal": {
+          "$ref": "#/$defs/refusalInfo"
+        }
+      }
+    },
+    "toolResultRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "step",
+        "toolCallId",
+        "name",
+        "content",
+        "isError",
+        "durationMs"
+      ],
+      "properties": {
+        "type": {
+          "const": "tool.result"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "step": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "error": {
+          "$ref": "#/$defs/errorInfo"
+        },
+        "meta": {},
+        "durationMs": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        }
+      }
+    },
+    "turnStartRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn"
+      ],
+      "properties": {
+        "type": {
+          "const": "turn.start"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "turnEndRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "reason"
+      ],
+      "properties": {
+        "type": {
+          "const": "turn.end"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "reason": {
+          "$ref": "#/$defs/turnEndReason"
+        }
+      }
+    },
+    "checkpointRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "coversSeq",
+        "state"
+      ],
+      "properties": {
+        "type": {
+          "const": "checkpoint"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "coversSeq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "state": {
+          "$ref": "#/$defs/sessionState"
+        }
+      }
+    },
+    "errorRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "error",
+        "fatal"
+      ],
+      "properties": {
+        "type": {
+          "const": "error"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "error": {
+          "$ref": "#/$defs/errorInfo"
+        },
+        "fatal": {
+          "type": "boolean"
+        }
+      }
+    },
+    "approvalRequestRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "request"
+      ],
+      "properties": {
+        "type": {
+          "const": "approval.request"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "request": {
+          "$ref": "#/$defs/approvalRequest"
+        }
+      }
+    },
+    "approvalDecisionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "decision"
+      ],
+      "properties": {
+        "type": {
+          "const": "approval.decision"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "decision": {
+          "$ref": "#/$defs/approvalDecision"
+        }
+      }
+    },
+    "approvalGrantRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "grant"
+      ],
+      "properties": {
+        "type": {
+          "const": "approval.grant"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "grant": {
+          "$ref": "#/$defs/approvalGrant"
+        }
+      }
+    }
+  }
+}

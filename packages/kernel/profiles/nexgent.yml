@@ -1,0 +1,61 @@
+# Nexgent default product profile (step 1).
+#
+# Ordered plugin rows; patches (cordis.patch.yml form) address rows by `id`.
+# The model route is the Claude Platform (Claude Sonnet 5.5) per ADR 0002:
+#   llm.config -> @nexgent/llm (Messages API, thinking off = between_tools,
+#   effort medium, server-side fallbacks on for the official host)
+#   agents.model / agents.thinking / agents.effort -> the loop's request defaults
+# The persona is migrated from PR #4
+# runtime/packages/bundle/nexgent-app/cordis.patch.yml
+# (system-prompt.personaPrefix / personaSuffix -> agents.systemPrompt).
+# Credentials stay in the credential service (NEXGENT_API_KEY); no secret
+# ever appears in a profile. PR #4 rows for DSH-only features (execution
+# ledger sidecar, architecture trials, workflow tools, DeepSeek account,
+# telemetry) have no step-1 equivalent and are not carried over.
+
+- id: credentials
+  name: '@nexgent/kernel/credentials'
+
+- id: workspace
+  name: '@nexgent/workspace'
+
+- id: session
+  name: '@nexgent/session'
+
+- id: llm
+  name: '@nexgent/llm'
+  config:
+    provider: anthropic
+    endpoint: https://api.anthropic.com
+    model: claude-sonnet-5-5
+    apiKeyCredential: NEXGENT_API_KEY
+    thinking: 'off'
+    effort: medium
+    maxTokens: 16000
+    timeoutMs: 600000
+    streamIdleTimeoutMs: 180000
+    maxRetries: 0
+    fallbacks: default
+
+- id: tools
+  name: '@nexgent/kernel/tools'
+
+- id: approvals
+  name: '@nexgent/kernel/approvals'
+
+- id: agents
+  name: '@nexgent/kernel/agents'
+  config:
+    model: claude-sonnet-5-5
+    thinking: 'off'
+    effort: medium
+    maxTokens: 16000
+    modelTimeoutMs: 600000
+    streamIdleTimeoutMs: 180000
+    systemPrompt:
+      persona: >-
+        You are Nexgent, a general task agent running on the {{model}} model.
+        Complete the user's task with the available materials and tools.
+        Choose direct work, delegation or a workflow according to the task.
+        Verify actual deliverables, explain unresolved requirements, and preserve useful work for subsequent turns.
+      suffix: Your project working directory is {{cwd}}.
