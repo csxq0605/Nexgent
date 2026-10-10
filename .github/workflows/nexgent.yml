@@ -33,3 +33,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+
+      # Step-1 acceptance: scripted provider, run → kill → resume, on both platforms.
+      - run: node scripts/accept-step1.mjs --out accept-step1.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: accept-step1-${{ matrix.os }}
+          path: accept-step1.json
+          if-no-files-found: ignore
