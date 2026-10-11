@@ -108,7 +108,10 @@ describe('H10 attribution', () => {
   it('fails on a wrong attribution as soon as any record carries one', () => {
     expect(judge('H10', broken(d => { attribute(d); ledgerOf(d)[2]!['memberId'] = 'someone' }), tools).status).toBe('failed')
     // A partially written attribution (one record only) is a defect, not "not built yet".
-    expect(judge('H10', broken(d => { ledgerOf(d)[0]!['taskId'] = TASK_ID }), tools).status).toBe('failed')
+    const partlyAttributed = unattributed()
+    ;(partlyAttributed.direct!.ledger as Record<string, unknown>[])[0]!['taskId'] = TASK_ID
+    expect(judge('H10', partlyAttributed, tools).status).toBe('failed')
+    expect(judge('H01', partlyAttributed, tools).status).toBe('failed')
   })
 })
 
