@@ -275,7 +275,7 @@ export class AppStore {
     if (projectId === undefined || trimmed.length === 0) return false
     const summary = await this.guard(c => c.call('sessions.rename', { projectId, sessionId, title: trimmed }))
     if (summary === undefined || this.projectId !== projectId) return false
-    this.set(state => ({ sessions: state.sessions.map(s => (s.sessionId === sessionId ? summary : s)) }))
+    this.set(state => ({ sessions: state.sessions.map(s => (s.sessionId === sessionId ? keepChildCount(summary, s) : s)) }))
     return true
   }
 
@@ -297,7 +297,7 @@ export class AppStore {
       running: view.summary.running,
       pendingApprovals: pending,
       goal: view.summary.goal ?? null,
-      sessions: state.sessions.map(s => (s.sessionId === sessionId ? view.summary : s)),
+      sessions: state.sessions.map(s => (s.sessionId === sessionId ? keepChildCount(view.summary, s) : s)),
     }))
   }
 
@@ -537,6 +537,10 @@ export class AppStore {
         break
       case 'member.start':
       case 'workflow.phase': {
+        // A member's first turn is a new member session of this conversation.
+        if (event.type === 'member.start' && event.run.childTurn === 1) {
+          this.set(state => ({ sessions: state.sessions.map(s => (s.sessionId === event.sessionId ? { ...s, childCount: (s.childCount ?? 0) + 1 } : s)) }))
+        }
         const workflowId = event.type === 'workflow.phase' ? event.workflowId : event.run.workflowId
         if (current && workflowId !== undefined && !this.state.timeline.some(entry => entry.key === workflowKey(workflowId))) void this.refreshWorkflows(event.sessionId, event.turn)
         break
@@ -555,4 +559,9 @@ export class AppStore {
     }
     if (current) this.set(state => ({ timeline: applyEvent(state.timeline, event) }))
   }
+}
+
+/** `sessions.open` / `sessions.rename` answer without the member count `sessions.list` gave; keep it. */
+function keepChildCount(summary: SessionSummary, previous: SessionSummary): SessionSummary {
+  return summary.childCount === undefined && previous.childCount !== undefined ? { ...summary, childCount: previous.childCount } : summary
 }

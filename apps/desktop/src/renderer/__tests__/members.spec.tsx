@@ -118,8 +118,17 @@ describe('member blocks', () => {
   it('shows the member count of a conversation in the list', async () => {
     const bridge = new FakeBridge()
     bridge.sessions = [{ ...SESSION, childCount: 2 }]
+    bridge.handlers['sessions.open'] = () => bridge.view
     await renderApp(bridge)
+    await waitFor(() => expect(bridge.callsOf('sessions.open')).toHaveLength(1))
+    // sessions.open answers without the count; the list keeps it
     expect(screen.getByTestId('session-item').textContent).toContain('2 个成员')
+    emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
+    emit(bridge, { type: 'member.start', turn: 1, run: memberRun({ childSessionId: 'c3' }) })
+    expect(screen.getByTestId('session-item').textContent).toContain('3 个成员')
+    // a teammate's later turn is not a new member
+    emit(bridge, { type: 'member.start', turn: 1, run: memberRun({ childSessionId: 'c3', childTurn: 2, executionForm: 'team' }) })
+    expect(screen.getByTestId('session-item').textContent).toContain('3 个成员')
   })
 })
 
