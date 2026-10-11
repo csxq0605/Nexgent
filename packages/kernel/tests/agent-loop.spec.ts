@@ -318,6 +318,36 @@ describe('agent loop', () => {
     expect(harness.llm.requests[0]!.effort).toBe('high')
   })
 
+  it('continues a paused reply (pause_turn) by sending it back, without a new user message', async () => {
+    const paused = [{ type: 'text', text: 'Searching.' }]
+    const pause = [...textReply('Searching.').slice(0, -1), { type: 'done', finishReason: 'pause', providerContent: paused }] as ScriptStep
+    harness = await bootHarness({ script: [pause, pause, textReply(' Found it.')] })
+    const { app, llm, store } = harness
+    const agent = await app.agents.create()
+    const result = await agent.run('find it')
+    expect(result.reason).toEqual({ kind: 'completed' })
+    expect(llm.requests).toHaveLength(3)
+    expect(conversation(llm.requests[2]!)).toEqual([
+      { role: 'user', content: 'find it' },
+      { role: 'assistant', content: 'Searching.', providerContent: paused },
+      { role: 'assistant', content: 'Searching.', providerContent: paused },
+    ])
+    expect(store.of(agent.sessionId, 'assistant.message').map(record => record.finishReason)).toEqual(['pause', 'pause', 'stop'])
+    expect(store.of(agent.sessionId, 'user.message')).toHaveLength(1)
+  })
+
+  it('ends the turn with a readable error after maxPauseContinuations consecutive pauses', async () => {
+    const pause = [...textReply('Still working.').slice(0, -1), { type: 'done', finishReason: 'pause' }] as ScriptStep
+    harness = await bootHarness({ script: [pause, pause, pause, textReply('never sent')], patches: [{ id: 'agents', config: { maxPauseContinuations: 2 } }] })
+    const agent = await harness.app.agents.create()
+    const result = await agent.run('go')
+    expect(harness.llm.requests).toHaveLength(3)
+    expect(result.reason).toMatchObject({
+      kind: 'error',
+      error: { code: 'llm/invalid-response', message: expect.stringContaining('paused the turn 3 times in a row'), details: { pauses: 3, limit: 2 } },
+    })
+  })
+
   it('sends thinking on by default and off when .nexgent/config.json says so, resume included', async () => {
     harness = await bootHarness({ script: [textReply('a'), textReply('b'), textReply('c')] })
     const { app, llm } = harness

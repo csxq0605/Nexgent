@@ -48,6 +48,8 @@ export interface AgentsConfig {
   streamIdleTimeoutMs: number
   /** Max model calls per turn. */
   maxSteps: number
+  /** Max consecutive paused replies (`pause_turn`) continued automatically. */
+  maxPauseContinuations: number
   /**
    * Kernel-side checkpoint at `turn.end` once N records accumulated; 0
    * (default) because `@nexgent/session` applies the spec policy inside
@@ -96,6 +98,7 @@ export class AgentsService extends Service {
     modelTimeoutMs: Schema.natural().default(180_000),
     streamIdleTimeoutMs: Schema.natural().default(180_000),
     maxSteps: Schema.natural().min(1).default(64),
+    maxPauseContinuations: Schema.natural().default(8).description('Consecutive pause_turn replies continued automatically before the turn ends with an error.'),
     checkpointEvery: Schema.natural().default(0)
       .description('Kernel-side checkpoint threshold; 0 (default) leaves the data-formats.md policy to the session store.'),
     toolAbortGraceMs: Schema.natural().default(5_000),
@@ -146,6 +149,7 @@ export class AgentsService extends Service {
       modelTimeoutMs: c.modelTimeoutMs,
       streamIdleTimeoutMs: c.streamIdleTimeoutMs,
       maxSteps: c.maxSteps,
+      maxPauseContinuations: c.maxPauseContinuations,
       checkpointEvery: c.checkpointEvery,
       toolAbortGraceMs: c.toolAbortGraceMs,
     }

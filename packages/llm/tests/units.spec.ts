@@ -29,7 +29,7 @@ describe('stop reasons and thinking', () => {
     expect(mapStopReason('model_context_window_exceeded')).toBe('max-tokens')
     expect(mapStopReason('refusal')).toBe('refusal')
     expect(mapStopReason('stop_sequence')).toBe('stop')
-    expect(mapStopReason('pause_turn')).toBe('stop')
+    expect(mapStopReason('pause_turn')).toBe('pause')
     expect(mapStopReason('whatever')).toBe('stop')
   })
 

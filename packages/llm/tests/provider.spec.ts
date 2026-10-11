@@ -246,6 +246,25 @@ describe('AnthropicProvider — streaming', () => {
     expect(pair(ledger).end).toMatchObject({ status: 'ok', finishReason: 'refusal' })
   })
 
+  it('maps pause_turn to done/pause and sends the paused reply back verbatim to continue', async () => {
+    fake = await startFakeAnthropic([{ sse: loadSseFixture('pause-turn') }, { sse: loadSseFixture('text') }])
+    const { provider, ledger } = makeProvider(fake.baseUrl)
+    const first = makeRequest()
+    const events = await collect(provider.complete(first))
+    expectStreamInvariants(events)
+    const done = doneOf(events)
+    expect(done.finishReason).toBe('pause')
+    expect(done.providerContent).toEqual([{ type: 'text', text: 'Searching the web.' }])
+    expect(pair(ledger).end).toMatchObject({ status: 'ok', finishReason: 'pause' })
+    await collect(provider.complete(makeRequest({
+      messages: [...first.messages, { role: 'assistant', content: textOf(events), providerContent: done.providerContent! }],
+    })))
+    expect(fake.requests[1]?.body['messages']).toEqual([
+      { role: 'user', content: 'Say hello.' },
+      { role: 'assistant', content: [{ type: 'text', text: 'Searching the web.' }] },
+    ])
+  })
+
   it('is lazy: nothing is sent or recorded until iteration starts', async () => {
     fake = await startFakeAnthropic([{ sse: loadSseFixture('text') }])
     const { provider, ledger } = makeProvider(fake.baseUrl)
