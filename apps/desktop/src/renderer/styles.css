@@ -1341,3 +1341,62 @@ h3 {
 .markdown a {
   color: var(--relay);
 }
+
+/* Step 3: members, workflows, team mail */
+.member .tool-name {
+  max-width: 14em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-body .file-list {
+  margin: 4px 0;
+}
+
+.member-body .file-list li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.workflow-note,
+.team-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  font-size: 12.5px;
+  border-left: 3px solid var(--line);
+  padding: 4px 10px;
+}
+
+.workflow-note > *,
+.team-note > * {
+  min-width: 0;
+}
+
+.team-text {
+  flex: 1 1 12em;
+  overflow-wrap: anywhere;
+}
+
+.approval-member {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.member-readonly {
+  margin: 0;
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.panel-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 8px 0 4px;
+}

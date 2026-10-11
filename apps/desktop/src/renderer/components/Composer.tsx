@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { MaterialMetadata } from '@nexgent/kernel'
 import { useAppState, useAppStore } from '../hooks.js'
 import { T } from '../strings.js'
@@ -25,6 +25,16 @@ export function Composer(): JSX.Element {
   const [highlight, setHighlight] = useState(0)
   const [picked, setPicked] = useState<ReadonlyMap<string, string>>(new Map())
   const ref = useRef<HTMLTextAreaElement>(null)
+  // Caret to restore after a mention is inserted: set right after that render commits,
+  // before any further keystroke (a later frame could move the caret under the user's typing).
+  const pendingCaret = useRef<number | undefined>(undefined)
+  useLayoutEffect(() => {
+    const position = pendingCaret.current
+    if (position === undefined) return
+    pendingCaret.current = undefined
+    ref.current?.focus()
+    ref.current?.setSelectionRange(position, position)
+  })
 
   const mention = mentionAt(text, caret)
   const options = useMemo<readonly MaterialMetadata[]>(() => {
@@ -45,10 +55,7 @@ export function Composer(): JSX.Element {
     setCaret(position)
     setPicked(new Map(picked).set(material.originalName, material.id))
     setHighlight(0)
-    requestAnimationFrame(() => {
-      ref.current?.focus()
-      ref.current?.setSelectionRange(position, position)
-    })
+    pendingCaret.current = position
   }
 
   const send = async (): Promise<void> => {

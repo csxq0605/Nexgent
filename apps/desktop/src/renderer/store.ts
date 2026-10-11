@@ -9,7 +9,7 @@
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
 import type { ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
-import { applyEvent, feedbackEntry, fromHistory, userEntry, type TimelineEntry } from './timeline.js'
+import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
 export interface Notice {
   readonly id: number
@@ -20,6 +20,16 @@ export interface SessionMeta {
   readonly model: string
   readonly sandboxMode: SandboxMode
   readonly totalUsage: LLMUsage
+}
+
+/** Step 3: a member's session shown read-only in the middle column. */
+export interface MemberView {
+  readonly sessionId: string
+  readonly parentSessionId: string
+  readonly name: string
+  readonly loading: boolean
+  readonly summary?: SessionSummary | undefined
+  readonly timeline: readonly TimelineEntry[]
 }
 
 export interface AppState {
@@ -47,6 +57,8 @@ export interface AppState {
   readonly notices: readonly Notice[]
   /** Materials added in the selected session since its last message; sent with the next one. */
   readonly freshMaterialIds: readonly string[]
+  /** Step 3: the member session opened from a member block (read-only); absent shows the conversation. */
+  readonly memberView?: MemberView | undefined
 }
 
 const INITIAL: AppState = {
@@ -168,6 +180,7 @@ export class AppStore {
       goal: null,
       settings: undefined,
       freshMaterialIds: [],
+      memberView: undefined,
     })
     await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent()])
     const first = this.state.sessions[0]
@@ -189,7 +202,7 @@ export class AppStore {
 
   /** Back to the start screen; the project stays open in the backend (running turns go on). */
   leaveProject(): void {
-    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [] })
+    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined })
     void this.refreshRecent()
   }
 
@@ -269,7 +282,7 @@ export class AppStore {
   async openSession(sessionId: string): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
-    this.set({ sessionId, sessionLoading: true, timeline: [], pendingApprovals: [], running: false, stopping: false, goal: null, freshMaterialIds: [] })
+    this.set({ sessionId, sessionLoading: true, timeline: [], pendingApprovals: [], running: false, stopping: false, goal: null, freshMaterialIds: [], memberView: undefined })
     const view = await this.guard(c => c.call('sessions.open', { projectId, sessionId }))
     if (this.state.sessionId !== sessionId) return
     if (view === undefined) {
@@ -286,6 +299,37 @@ export class AppStore {
       goal: view.summary.goal ?? null,
       sessions: state.sessions.map(s => (s.sessionId === sessionId ? view.summary : s)),
     }))
+  }
+
+  // --- members (step 3) -----------------------------------------------------
+
+  /** Show a member's session read-only (`sessions.view`: no lock, no turns). */
+  async openMember(childSessionId: string, name: string): Promise<void> {
+    const projectId = this.projectId
+    const parentSessionId = this.state.sessionId
+    if (projectId === undefined || parentSessionId === undefined) return
+    this.set({ memberView: { sessionId: childSessionId, parentSessionId, name, loading: true, timeline: [] } })
+    const view = await this.guard(c => c.call('sessions.view', { projectId, sessionId: childSessionId }))
+    if (this.state.memberView?.sessionId !== childSessionId) return
+    if (view === undefined) {
+      this.set({ memberView: undefined })
+      return
+    }
+    this.set({ memberView: { sessionId: childSessionId, parentSessionId, name, loading: false, summary: view.summary, timeline: fromHistory(view.items) } })
+  }
+
+  /** Back from a member's session to its conversation. */
+  closeMember(): void {
+    this.set({ memberView: undefined })
+  }
+
+  /** Fill in workflows the timeline only knows from their phases or members. */
+  private async refreshWorkflows(sessionId: string, turn: number): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    const collaboration = await this.guard(c => c.call('sessions.collaboration', { projectId, sessionId }))
+    if (collaboration === undefined || this.state.sessionId !== sessionId) return
+    this.set(state => ({ timeline: withWorkflows(state.timeline, collaboration.workflows, turn) }))
   }
 
   // --- turns ----------------------------------------------------------------
@@ -435,6 +479,34 @@ export class AppStore {
   private applySdkEvent(event: SdkEvent): void {
     if (event.projectId !== this.projectId) return
     const current = event.sessionId === this.state.sessionId
+    // A member of the open conversation: its approvals are asked here, its stream feeds an open member view.
+    const ofCurrent = event.parentSessionId !== undefined && event.parentSessionId === this.state.sessionId
+    if (event.parentSessionId !== undefined) {
+      if (this.state.memberView?.sessionId === event.sessionId) {
+        this.set(state => (state.memberView === undefined ? {} : { memberView: { ...state.memberView, timeline: applyEvent(state.memberView.timeline, event) } }))
+      }
+      if (!ofCurrent) return
+      switch (event.type) {
+        case 'approval.request':
+          this.set(state => ({
+            pendingApprovals: state.pendingApprovals.some(r => r.id === event.request.id) ? state.pendingApprovals : [...state.pendingApprovals, event.request],
+            timeline: applyEvent(state.timeline, event),
+          }))
+          break
+        case 'approval.decision':
+          this.set(state => ({ pendingApprovals: state.pendingApprovals.filter(r => r.id !== event.decision.id), timeline: applyEvent(state.timeline, event) }))
+          break
+        case 'turn.end':
+          this.set(state => ({ pendingApprovals: state.pendingApprovals.filter(r => r.sessionId !== event.sessionId) }))
+          break
+        case 'deliverable.presented':
+          void this.refreshDeliverables()
+          break
+        default:
+          break
+      }
+      return
+    }
     switch (event.type) {
       case 'turn.start':
         this.set(state => ({
@@ -450,6 +522,8 @@ export class AppStore {
         void this.refreshSessions()
         void this.refreshDeliverables()
         if (this.state.projectFiles !== undefined) void this.refreshFiles()
+        // A workflow's end has no event of its own.
+        if (current && this.state.timeline.some(entry => entry.kind === 'workflow')) void this.refreshWorkflows(event.sessionId, event.turn)
         break
       case 'approval.request':
         if (current) this.set(state => ({ pendingApprovals: state.pendingApprovals.some(r => r.id === event.request.id) ? state.pendingApprovals : [...state.pendingApprovals, event.request] }))
@@ -458,8 +532,15 @@ export class AppStore {
         if (current) this.set(state => ({ pendingApprovals: state.pendingApprovals.filter(r => r.id !== event.decision.id) }))
         break
       case 'deliverable.presented':
+      case 'member.end':
         void this.refreshDeliverables()
         break
+      case 'member.start':
+      case 'workflow.phase': {
+        const workflowId = event.type === 'workflow.phase' ? event.workflowId : event.run.workflowId
+        if (current && workflowId !== undefined && !this.state.timeline.some(entry => entry.key === workflowKey(workflowId))) void this.refreshWorkflows(event.sessionId, event.turn)
+        break
+      }
       case 'material.added':
         this.set(state => ({ materials: state.materials.some(m => m.id === event.material.id) ? state.materials : [...state.materials, event.material] }))
         break

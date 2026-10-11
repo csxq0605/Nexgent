@@ -1,6 +1,6 @@
 import type { ApprovalRequest } from '@nexgent/kernel'
 import { useAppStore } from '../hooks.js'
-import { T, riskText } from '../strings.js'
+import { T, memberFormText, riskText } from '../strings.js'
 import { Modal } from './Modal.js'
 
 const SCOPE_LABEL = { once: T.allowOnce, session: T.allowSession, project: T.allowProject } as const
@@ -10,6 +10,11 @@ export function ApprovalDialog({ request }: { readonly request: ApprovalRequest 
   const store = useAppStore()
   return (
     <Modal title={T.approvalTitle} testId="approval-dialog">
+      {request.member !== undefined && (
+        <p className="approval-member" data-testid="approval-member">
+          {T.approvalByMember(request.member.name, memberFormText(request.member.executionForm))}
+        </p>
+      )}
       <p className="approval-summary">
         <span className={`badge risk-${request.risk}`}>
           {T.approvalRisk} {riskText(request.risk)}

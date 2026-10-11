@@ -77,6 +77,7 @@ export function Sidebar(): JSX.Element {
             <span className="session-meta">
               {session.running && <span className="badge live">{T.running}</span>}
               {!session.running && session.interrupted && <span className="badge warn">{T.interrupted}</span>}
+              {session.childCount !== undefined && session.childCount > 0 && <span className="muted small">{T.memberCount(session.childCount)}</span>}
               <span className="muted small">{formatTime(session.updatedAt)}</span>
             </span>
           </button>

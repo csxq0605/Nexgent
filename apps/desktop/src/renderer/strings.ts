@@ -3,7 +3,7 @@
  * wording stays consistent. Components import from here instead of writing
  * literals.
  */
-import type { ApprovalRequest, CredentialInfo, ErrorInfo, FileChange, GoalStatus, TurnEndReason } from '@nexgent/kernel'
+import type { ApprovalRequest, CredentialInfo, ErrorInfo, FileChange, GoalStatus, LLMUsage, MemberExecutionForm, TurnEndReason } from '@nexgent/kernel'
 
 export const T = {
   appName: 'Nexgent',
@@ -149,7 +149,62 @@ export const T = {
   apiKeySave: '保存密钥',
   apiKeyRemove: '移除本机保存的密钥',
   settingsSaved: '设置已保存',
+
+  memberRunning: '进行中',
+  memberCompleted: '完成',
+  memberFailed: '失败',
+  memberCancelled: '已取消',
+  memberBudget: '超出额度',
+  memberInterrupted: '已中断',
+  memberDeliverables: (n: number) => `成果 ${n}`,
+  memberNoDeliverables: '这次没有交出成果。',
+  openMember: '查看成员会话',
+  memberSessionTitle: (name: string) => `成员 ${name} 的会话`,
+  memberReadOnly: '只读：成员由主对话安排工作，这里不能发消息。',
+  backToConversation: '← 返回主对话',
+  workflow: '工作流',
+  workflowPhases: '阶段',
+  workflowMembers: (n: number) => `${n} 个成员`,
+  teamMessage: '团队消息',
+  teamQueued: '待投递',
+  teamDelivered: '已投递',
+  approvalByMember: (name: string, form: string) => `成员 ${name}（${form}）请求这一操作`,
+  finalDeliverables: '最终成果',
+  memberDeliverablesTitle: '成员成果',
+  byMember: (name: string) => `来自成员 ${name}`,
+  memberCount: (n: number) => `${n} 个成员`,
 } as const
+
+/** How a member was started, in words. */
+export function memberFormText(form: MemberExecutionForm): string {
+  return form === 'delegated' ? '委派' : form === 'team' ? '队友' : '工作流成员'
+}
+
+/** A member run's (or workflow's) status in words. */
+export function memberStatusText(status: string): string {
+  switch (status) {
+    case 'running':
+      return T.memberRunning
+    case 'completed':
+      return T.memberCompleted
+    case 'failed':
+      return T.memberFailed
+    case 'cancelled':
+      return T.memberCancelled
+    case 'budget':
+      return T.memberBudget
+    case 'interrupted':
+      return T.memberInterrupted
+    default:
+      return status
+  }
+}
+
+/** Token usage on one line (`?` where unknown); there is no price table, so cost shows as tokens. */
+export function usageText(usage: LLMUsage): string {
+  const n = (value: number | 'unknown'): string => (value === 'unknown' ? '?' : String(value))
+  return `输入 ${n(usage.inputTokens)} / 输出 ${n(usage.outputTokens)} tokens`
+}
 
 /** A conversation's display name: its title, else its goal, else the first thing the user said. */
 export function sessionTitle(session: { readonly title?: string; readonly goal?: { readonly text: string } } | undefined, firstMessage?: string): string {

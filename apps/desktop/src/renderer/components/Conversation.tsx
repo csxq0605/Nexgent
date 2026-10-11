@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAppState, useAppStore } from '../hooks.js'
-import { T, goalStatusText, sessionTitle } from '../strings.js'
+import { T, goalStatusText, memberFormText, sessionTitle } from '../strings.js'
 import { Composer } from './Composer.js'
 import { Timeline } from './Timeline.js'
 
@@ -48,8 +48,46 @@ function Title({ sessionId, title, initial }: { readonly sessionId: string; read
   )
 }
 
-/** Middle column: header, timeline, composer (or an empty state). */
+/** A member's session, read-only, with the way back to the conversation. */
+function MemberConversation(): JSX.Element {
+  const state = useAppState()
+  const store = useAppStore()
+  const view = state.memberView!
+  return (
+    <section className="conversation member-conversation" data-testid="member-view" data-session={view.sessionId}>
+      <header className="conversation-head">
+        <button type="button" className="link small" onClick={() => store.closeMember()} data-testid="member-back">
+          {T.backToConversation}
+        </button>
+        <h2 className="ellipsis" data-testid="member-view-title">
+          {T.memberSessionTitle(view.name)}
+        </h2>
+        {view.summary?.member !== undefined && <span className="badge accent">{memberFormText(view.summary.member.executionForm)}</span>}
+        <span className="grow" />
+        {view.summary?.running === true && <span className="badge live">{T.running}</span>}
+      </header>
+      {view.loading ? (
+        <div className="empty">
+          <p className="muted">{T.loading}</p>
+        </div>
+      ) : (
+        <Timeline entries={view.timeline} deliverables={state.deliverables} readOnly />
+      )}
+      <p className="member-readonly muted small" data-testid="member-readonly">
+        {T.memberReadOnly}
+      </p>
+    </section>
+  )
+}
+
+/** Middle column: header, timeline, composer (or an empty state); a member's session when one is open. */
 export function Conversation(): JSX.Element {
+  const state = useAppState()
+  if (state.memberView !== undefined && state.memberView.parentSessionId === state.sessionId) return <MemberConversation />
+  return <MainConversation />
+}
+
+function MainConversation(): JSX.Element {
   const state = useAppState()
   const session = state.sessions.find(s => s.sessionId === state.sessionId)
   const first = state.timeline.find(entry => entry.kind === 'user')
