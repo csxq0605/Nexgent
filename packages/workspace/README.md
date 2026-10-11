@@ -36,7 +36,7 @@
   `.git/`、`node_modules/`、`.pnpm-store/` 任意深度写拒绝；`.env* *.pem *.key id_rsa* .npmrc .netrc` 读写需审批。
 - **命令**：`bash -c` / `pwsh -NoProfile -NonInteractive -Command`；超时默认 120 000，上限 600 000；POSIX 独立进程组，
   `SIGTERM` → `graceMs`（默认 5 000）→ `SIGKILL`，等进程组为空（Linux 读 `/proc` 排除僵尸）后才返回，正常退出后残留的
-  后台成员同样被清理；Windows `taskkill /PID <pid> /T /F`。环境删除 `NEXGENT_*`、`*_API_KEY|_TOKEN|_SECRET|_PASSWORD`、
+  后台成员同样被清理；Windows 每个命令经一个 `pwsh` 启动器运行在 `KILL_ON_JOB_CLOSE` 的 Job Object 里（`windows-job.ts`；P/Invoke 辅助程序首次使用时编译到系统临时目录 `nexgent-job-<hash>.dll`），终止时 `taskkill /PID <pid> /T /F` 结束启动器、作业关闭，父进程已退出的后代也一并结束，正常退出后的残留同样被结束；建不起作业时退回只用 `taskkill /T`（`windowsJob: false` 可关闭）。环境删除 `NEXGENT_*`、`*_API_KEY|_TOKEN|_SECRET|_PASSWORD`、
   `AWS_*`、`AZURE_*`、`GOOGLE_APPLICATION_CREDENTIALS`，`TMP/TEMP/TMPDIR` 指向会话临时目录，显式 `env` 最后合并；
   被删变量的值加入脱敏表。stdout / stderr 各保留末尾 64 KiB，开头加 `[nexgent: output truncated, dropped N bytes]`。
 
@@ -57,8 +57,7 @@ pattern / subject`（命令取命中的分段，路径取项目相对路径）�
 
 ## Not done yet
 
-- Windows Job Object（`KILL_ON_JOB_CLOSE`）与 ACL 隔离：步骤 1 只用 `taskkill /T /F`；根进程已退出后脱离进程树的
-  Windows 后代无法追踪。
+- Windows ACL 隔离未接。Job Object 由启动器建立，每次命令多一次 `pwsh` 启动（约数百毫秒）。
 - 命令执行没有文件边界（bwrap / Landlock / ACL 未接）；黑名单可被绕过，见 permissions.md §已知边界。
 - 凭证文件中的密钥值不会自动进入脱敏表（只有被清洗的环境变量值与插件配置 `secrets`）。
 - `list_files` / `search_text` 不读 `.gitignore`。
