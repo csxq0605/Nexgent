@@ -1,22 +1,24 @@
 name: Windows acceptance
 
-# Step-2 acceptance on Windows (user 2026-10-11: run Windows before merging
-# into main): accept-step2 headless and desktop layers, the desktop package's
-# tests (UI e2e included), and the real-model layer (R06: R01–R05 on Windows
-# with pwsh as the shell tool). Never runs on its own: by hand from the Actions
-# tab once this file is on the default branch, or, before that, by a push to
-# the test-and-CI branch that changes this file or .github/windows-accept.run.
-# The real-model step runs only while .github/windows-accept.real exists; it reads the repository secret NEXGENT_API_KEY; without it
-# the script exits 2 and the step fails rather than reporting a pass. Uploads
-# summaries and the real run's records (no key: the script reads it from the
-# environment only).
+# Step-2 acceptance on Windows (user 2026-10-11: CI must not run on its own;
+# run Windows before merging into main): accept-step2 headless and desktop
+# layers, the desktop package's tests (UI e2e included) and, when asked, the
+# real-model layer (R06: R01–R05 on Windows with pwsh as the shell tool).
+# Manual only, from the Actions tab. The real-model step reads the repository
+# secret NEXGENT_API_KEY; without it the script exits 2 and the step fails
+# rather than reporting a pass. Uploads the summaries and the real run's
+# records (no key: the script reads it from the environment only).
 on:
-  push:
-    branches: [claude/test-ci-ns3s7s]
-    paths:
-      - .github/workflows/windows-accept.yml
-      - .github/windows-accept.run
   workflow_dispatch:
+    inputs:
+      real:
+        description: Also run the real-model layer (costs about 0.2 USD)
+        type: boolean
+        default: false
+      spent_usd:
+        description: Estimated cost of earlier real runs in this series, comma-separated USD
+        type: string
+        default: ''
 
 concurrency:
   group: windows-accept
@@ -67,11 +69,12 @@ jobs:
       - name: accept-step2 real (R01–R07, R06 on Windows)
         id: real
         timeout-minutes: 15
-        if: always() && steps.hd.conclusion != 'skipped' && hashFiles('.github/windows-accept.real') != ''
+        if: always() && steps.hd.conclusion != 'skipped' && inputs.real
         env:
           NEXGENT_API_KEY: ${{ secrets.NEXGENT_API_KEY }}
+          SPENT_USD: ${{ inputs.spent_usd }}
         run: |
-          echo '[0.1526, 0.2125, 0.1409, 0.1842]' > spent.json
+          node -e "const v=(process.env.SPENT_USD||'').split(',').map(s=>s.trim()).filter(Boolean).map(Number); if(v.some(n=>!(n>=0))) throw new Error('spent_usd must be comma-separated numbers'); require('fs').writeFileSync('spent.json', JSON.stringify(v))"
           node scripts/accept-step2.mjs --layer real --budget-usd 15 --spent spent.json --work-dir "$RUNNER_TEMP/real" --out accept-step2-real.json
 
       - name: print summaries

@@ -1,6 +1,6 @@
 # 安装与运行 Nexgent 桌面应用
 
-> 桌面应用在 Linux 上已通过步骤 2 验收（[`step-2-20261011.md`](validation/step-2-20261011.md)，等待用户认可）；Windows 与 macOS 尚未验证。安装包未签名，没有自动更新，没有应用图标；签名与自动更新放在步骤 2 之后。
+> 桌面应用在 Linux 和 Windows 上从源码运行已通过步骤 2 验收（[`step-2-20261011.md`](validation/step-2-20261011.md)）；Windows 安装包与 macOS 尚未验证。安装包未签名，没有自动更新，没有应用图标；签名与自动更新放在步骤 2 之后。
 
 ## 从源码运行
 
@@ -60,4 +60,5 @@ chmod +x Nexgent-0.0.0-linux-x86_64.AppImage
 
 - Linux（云端会话，2026-10-11）：`package:linux` 产出 AppImage；解包目录与 AppImage（`APPIMAGE_EXTRACT_AND_RUN=1`）都能启动，`app.info` 的 IPC 往返成功，打包后的应用忽略开发用环境变量。
 - Linux，从源码运行（2026-10-11，提交 `f7077a4`）：`accept-step2` 桌面层 D01–D10 全部通过，见 [`step-2-20261011.md`](validation/step-2-20261011.md)。验收没有覆盖安装包本身。
-- Windows：未验证。`package:win`、桌面层和真实模型运行都没有在 Windows 上跑过，CI 停用期间也没有 Windows 自动检查。
+- Windows，从源码运行（2026-10-11，GitHub `windows-latest`，手动触发的 `windows-accept.yml`）：`accept-step2` 桌面层 D01–D10 与 desktop 包测试（含 UI e2e）全部通过，见 [`step-2-20261011.md`](validation/step-2-20261011.md)。
+- Windows 安装包：未验证，`package:win` 没有打过。

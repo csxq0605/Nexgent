@@ -6,8 +6,8 @@ name: Nexgent
 # spends quota); start it from the Actions tab once this file is on the
 # default branch. Tests otherwise run locally in each session.
 # Not here: the desktop layer of accept-step2 (run locally, or on Windows by
-# windows-accept.yml), the real-model layer (nexgent-real-model.yml), the old
-# Python tests (test.yml).
+# windows-accept.yml), the real-model layer (nexgent-real-model.yml or
+# windows-accept.yml).
 on:
   workflow_dispatch:
 
