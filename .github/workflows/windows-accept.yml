@@ -66,7 +66,9 @@ jobs:
         if: always() && steps.hd.conclusion != 'skipped'
         env:
           DEBUG: pw:browser
-        run: pnpm --filter @nexgent/desktop exec vitest run --testTimeout=60000
+        # One file at a time: e2e.spec.ts and members-e2e.spec.ts each launch Electron, and on
+        # Windows two instances at once collide on the single-instance lock.
+        run: pnpm --filter @nexgent/desktop exec vitest run --testTimeout=60000 --no-file-parallelism
       - name: accept-step3 real (R01–R07 on Windows, i.e. R08)
         id: real
         timeout-minutes: 30
@@ -82,7 +84,8 @@ jobs:
         if: always()
         run: |
           for f in accept-step3-hd.json accept-step3-real.json; do
-            [ -f "$f" ] && node -e "const s=require('./'+process.argv[1]); console.log(process.argv[1], s.result); for (const c of s.checks) console.log(c.id, c.status, String(c.detail ?? '').slice(0, 300)); console.log(JSON.stringify({realModel: s.realModel, failures: s.failures}))" "$f"
+            [ -f "$f" ] || continue
+            node -e "const s=require('./'+process.argv[1]); console.log(process.argv[1], s.result); for (const c of s.checks) console.log(c.id, c.status, String(c.detail ?? '').slice(0, 300)); console.log(JSON.stringify({realModel: s.realModel, failures: s.failures}))" "$f"
           done
       - uses: actions/upload-artifact@v4
         if: always()
