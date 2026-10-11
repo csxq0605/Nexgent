@@ -8,6 +8,7 @@ import type { Context, Plugin } from '@deepseek-ai/cordis'
 import {
   addUsage,
   NexgentError,
+  renderCompactionSummary,
   resolveWorkspaceLayout,
   ZERO_USAGE,
   type CheckpointRecord,
@@ -167,6 +168,9 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
         break
       case 'approval.grant':
         meta = { ...meta!, grants: [...meta!.grants, record.grant] }
+        break
+      case 'compaction':
+        messages.splice(0, messages.length, { role: 'user', content: renderCompactionSummary(record.summary) }, ...messages.slice(messages.length - record.keepMessages))
         break
       default:
         break

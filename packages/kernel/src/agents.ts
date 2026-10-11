@@ -196,6 +196,8 @@ export class AgentsService extends Service {
   }): Agent {
     return this.newAgent({
       sessionId: args.sessionId,
+      // Optional step-2 services, looked up per turn without an inject requirement.
+      services: () => ({ context: this.home.get('context'), tasking: this.home.get('tasking') }),
       lock: args.lock,
       ctx: args.scope.ctx,
       fiber: args.scope.fiber,

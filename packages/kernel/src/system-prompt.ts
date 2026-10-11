@@ -3,6 +3,7 @@
  * workspace facts and the visible tool list, rendered fresh for every
  * request and never stored in the session.
  */
+import type { SystemPromptSection } from './contracts/context.js'
 import type { ToolDefinition } from './contracts/tools.js'
 import type { SandboxMode } from './contracts/workspace.js'
 
@@ -33,6 +34,12 @@ export interface SystemPromptInput {
   readonly platform: NodeJS.Platform
   /** Tools the model may call this request. */
   readonly tools: readonly ToolDefinition[]
+  /**
+   * Context-provider sections of the current turn (`agent-hooks.md`
+   * §系统提示的组装), already in order; each renders as `# <title>` + body
+   * after `# Working with files` and before the suffix.
+   */
+  readonly sections?: readonly SystemPromptSection[]
 }
 
 const SANDBOX_TEXT: Record<SandboxMode, string> = {
@@ -79,6 +86,7 @@ export function renderSystemPrompt(input: SystemPromptInput): string {
   }
   const guidance = fileGuidance(new Set(input.tools.map(tool => tool.name)))
   if (guidance.length > 0) sections.push(['# Working with files', ...guidance].join('\n'))
+  for (const section of input.sections ?? []) sections.push(`# ${section.title}\n${section.body}`)
   const suffix = fill(input.template.suffix, values).trim()
   if (suffix !== '') sections.push(suffix)
   return sections.join('\n\n')

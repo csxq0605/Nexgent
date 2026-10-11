@@ -25,6 +25,7 @@ import type {
   ToolCallApproval,
 } from './contracts/approvals.js'
 import type { ProjectConfig } from './contracts/config.js'
+import type { CompactionCheckInput, ContextService, SystemPromptSection } from './contracts/context.js'
 import { NexgentError, toErrorInfo, type ErrorInfo, type NexgentErrorCode } from './contracts/errors.js'
 import { isJsonValue, type JsonValue } from './contracts/json.js'
 import type { Ledger, LedgerRecordInput, TaskCheck, TaskOutcomeStatus } from './contracts/ledger.js'
@@ -43,14 +44,21 @@ import {
   type ToolCall,
   type ToolResult,
 } from './contracts/llm.js'
-import type {
-  SessionLock,
-  SessionRecord,
-  SessionRecordInput,
-  SessionStore,
-  TurnCancelCause,
-  TurnEndReason,
+import {
+  renderCompactionSummary,
+  TURN_FILES_LIMIT,
+  type HostRecordInput,
+  type HostRecordType,
+  type SessionLock,
+  type SessionRecord,
+  type SessionRecordInput,
+  type SessionState,
+  type SessionStore,
+  type ToolRecordInput,
+  type TurnCancelCause,
+  type TurnEndReason,
 } from './contracts/session.js'
+import { renderFeedbackPrompt, type FeedbackEntry, type TaskingService, type TurnFileTracker } from './contracts/tasking.js'
 import type { Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry } from './contracts/tools.js'
 import type { SandboxMode, Workspace } from './contracts/workspace.js'
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
@@ -71,6 +79,10 @@ export const MODEL_TIMEOUT = 'MODEL_TIMEOUT'
 export const MODEL_IDLE_TIMEOUT = 'MODEL_IDLE_TIMEOUT'
 /** Timeout code of a tool's declared `timeoutMs`. */
 export const TOOL_TIMEOUT = 'TOOL_TIMEOUT'
+/** Upper bound on `TurnFileTracker.endTurn` after a cancelled turn (`agent-hooks.md` §失败语义). */
+export const FILES_END_CANCEL_MS = 5_000
+/** Record types {@link Agent.appendHostRecord} accepts. */
+export const HOST_RECORD_TYPES: readonly HostRecordType[] = ['material.added', 'goal.set', 'goal.update']
 /** `costCaps.perProject.windowDays` when the config leaves it out (`data-formats.md` §项目配置). */
 export const DEFAULT_PROJECT_WINDOW_DAYS = 30
 
@@ -111,8 +123,36 @@ export type { ToolApprovalAsk } from './contracts/approvals.js'
 export interface KernelToolContext extends ToolContext {
   /** `true` when the loop already obtained approval for this call (an `ask` / `always` tool). */
   readonly approved: boolean
+  /** Step (model call) of the turn whose reply made this call; records appended through `appendRecord` carry it. */
+  readonly step: number
   requestApproval(ask: ToolApprovalAsk): Promise<boolean>
+  /**
+   * Append a tool record (`deliverable.presented`) before this call's
+   * `tool.result`. Rejects with `session/invalid-record` when the type is not
+   * a tool record type, when `turn` / `step` / `toolCallId` are not this
+   * call's, or after the call settled; a rejected or failed append ends the
+   * call as `tool/failed` even if the handler catches it.
+   */
+  appendRecord(record: ToolRecordInput): Promise<void>
 }
+
+/**
+ * The input of one turn (`agent-hooks.md` §宿主接口). A plain string is a
+ * user turn without materials.
+ */
+export type TurnInput =
+  | {
+    readonly source?: 'user'
+    readonly text: string
+    /** Material ids attached to the message (`user.message.materials`). */
+    readonly materialIds?: readonly string[]
+  }
+  | {
+    /** A feedback turn: `feedback` is recorded after `turn.start`; the message text is `renderFeedbackPrompt(feedback)`. */
+    readonly source: 'feedback'
+    readonly feedback: FeedbackEntry
+    readonly materialIds?: readonly string[]
+  }
 
 /** What one `run` returns. */
 export interface TurnResult {
@@ -155,6 +195,12 @@ export interface TaskStats {
 /** Everything an agent needs, resolved by `ctx.agents`. */
 export interface AgentInit {
   readonly sessionId: string
+  /**
+   * Optional step-2 services, read at each turn start (so a service that
+   * appears or goes away between turns is picked up). Absent: the turn runs
+   * exactly as in step 1.
+   */
+  readonly services?: () => { readonly context?: ContextService | undefined; readonly tasking?: TaskingService | undefined }
   readonly lock: SessionLock
   /** The agent's scoped context (tools registered through it are agent-private). */
   readonly ctx: Context
@@ -290,6 +336,14 @@ export class Agent {
   /** `perProject` usage read from the ledger at turn start, and this task's totals at that moment. */
   private projectUsage: { requests: number; tokens: number; ownRequests: number; ownTokens: number } | undefined
   private turnDenials = new Set<string>()
+  /** Provider sections of the running turn, in render order; empty between turns. */
+  private turnSections: readonly SystemPromptSection[] = []
+  /** Usage of the latest model request of this agent (the compaction trigger reads it). */
+  private lastUsage: LLMUsage | undefined
+  /** Turn in progress, for host records. */
+  private openTurn: number | undefined
+  /** The running turn's file tracker, once `beginTurn` succeeded. */
+  private turnFiles: TurnFileTracker | undefined
   private stats = {
     requestCount: 0,
     toolCallCount: 0,
@@ -359,6 +413,7 @@ export class Agent {
       sandboxMode: this.sandboxMode,
       platform: process.platform,
       tools: this.init.tools.list(),
+      sections: this.turnSections,
     })
   }
 
@@ -377,14 +432,14 @@ export class Agent {
    * once `turn.end` is written; rejects only when the agent is closed or busy,
    * or the session store fails.
    */
-  async run(input: string, options: RunOptions = {}): Promise<TurnResult> {
+  async run(input: string | TurnInput, options: RunOptions = {}): Promise<TurnResult> {
     if (this.closed) throw new NexgentError('internal', `agent ${this.sessionId} is closed`)
     if (this.running !== undefined) throw new NexgentError('internal', `agent ${this.sessionId} is already running a turn`)
     const controller = new AbortController()
     const onExternal = () => controller.abort(new TurnAbort('user'))
     if (options.signal?.aborted === true) onExternal()
     options.signal?.addEventListener('abort', onExternal, { once: true })
-    const done = this.runTurn(input, controller.signal)
+    const done = this.runTurn(typeof input === 'string' ? { text: input } : input, controller.signal)
     this.running = { controller, done }
     try {
       return await done
@@ -392,6 +447,28 @@ export class Agent {
       this.running = undefined
       options.signal?.removeEventListener('abort', onExternal)
     }
+  }
+
+  /**
+   * Append a host record (`material.added`, `goal.set`, `goal.update`;
+   * {@link HostRecordSink}). While a turn runs the record gets that turn's
+   * number; between turns it carries none. Rejects with
+   * `session/invalid-record` for any other type or a `turn` that is not the
+   * running one, and with `internal` once the agent is closed.
+   */
+  readonly appendHostRecord = async (record: HostRecordInput): Promise<SessionRecord> => {
+    if (this.closed) throw new NexgentError('internal', `agent ${this.sessionId} is closed`)
+    const type = (record as { type?: unknown }).type
+    if (!(HOST_RECORD_TYPES as readonly unknown[]).includes(type)) {
+      throw new NexgentError('session/invalid-record', `host records are ${HOST_RECORD_TYPES.join(', ')}; got ${String(type)}`)
+    }
+    const turn = this.openTurn
+    if (record.turn !== undefined && record.turn !== turn) {
+      throw new NexgentError('session/invalid-record', turn === undefined
+        ? `${record.type} carries turn ${record.turn} but no turn is running`
+        : `${record.type} carries turn ${record.turn} but turn ${turn} is running`)
+    }
+    return this.append({ ...record, ...(turn === undefined ? {} : { turn }) } as HostRecordInput)
   }
 
   /** Cancel the running turn, if any. Streamed text is kept; running tools are aborted. */
@@ -437,7 +514,7 @@ export class Agent {
 
   private async append(record: SessionRecordInput): Promise<SessionRecord> {
     const written = await this.init.session.append(this.sessionId, record)
-    this.lastSeq = written.seq
+    this.lastSeq = Math.max(this.lastSeq, written.seq)
     if (written.type === 'checkpoint') this.lastCheckpointSeq = written.seq
     this.emit({ type: 'record', sessionId: this.sessionId, record: written })
     return written
@@ -493,31 +570,203 @@ export class Agent {
   // turn
   // -------------------------------------------------------------------------
 
-  private async runTurn(input: string, signal: AbortSignal): Promise<TurnResult> {
+  private async runTurn(input: TurnInput, signal: AbortSignal): Promise<TurnResult> {
+    const source = input.source ?? 'user'
+    if (source !== 'user' && source !== 'feedback') throw new NexgentError('internal', `invalid turn source "${String(source)}"`)
+    const text = input.source === 'feedback' ? renderFeedbackPrompt(input.feedback) : input.text
+    const materialIds = [...(input.materialIds ?? [])]
+    const services = this.init.services?.() ?? {}
     const turn = ++this.lastTurn
     this.turnDenials = new Set()
+    this.turnSections = []
+    this.turnFiles = undefined
     this.stats.turns += 1
-    await this.append({ type: 'turn.start', turn })
-    this.emit({ type: 'turn.start', sessionId: this.sessionId, turn })
-    await this.append({ type: 'user.message', turn, content: input, source: 'user' })
-    this.messages.push({ role: 'user', content: input })
-
-    const tracker = { text: '', usage: ZERO_USAGE as LLMUsage }
-    let reason: TurnEndReason
+    this.openTurn = turn
     try {
-      const unreadable = await this.readProjectUsage()
-      reason = unreadable === undefined ? await this.loop(turn, signal, tracker) : { kind: 'error', error: unreadable }
+      await this.append({ type: 'turn.start', turn })
+      this.emit({ type: 'turn.start', sessionId: this.sessionId, turn })
+      if (input.source === 'feedback') await this.append({ type: 'feedback', turn, feedback: input.feedback })
+      if (services.tasking !== undefined) await this.beginFiles(services.tasking, turn)
+      if (services.context !== undefined) await this.beginContext(services.context, { turn, text, source, materialIds, signal })
+      await this.append({ type: 'user.message', turn, content: text, source, ...(materialIds.length > 0 ? { materials: materialIds } : {}) })
+      this.messages.push({ role: 'user', content: text })
+
+      const tracker = { text: '', usage: ZERO_USAGE as LLMUsage }
+      let reason: TurnEndReason
+      try {
+        const unreadable = await this.readProjectUsage()
+        reason = unreadable === undefined ? await this.loop(turn, signal, tracker, services.context) : { kind: 'error', error: unreadable }
+      } catch (error) {
+        reason = { kind: 'error', error: toErrorInfo(error) }
+      }
+      await this.endFiles(turn, signal)
+      await this.append({ type: 'turn.end', turn, reason })
+      this.lastReason = reason
+      this.emit({ type: 'turn.end', sessionId: this.sessionId, turn, reason })
+      await this.maybeCheckpoint()
+      if (reason.kind === 'cancelled' && reason.cause === 'cost-cap' && !this.outcomeWritten) {
+        await this.writeOutcome('cancelled')
+      }
+      return { sessionId: this.sessionId, turn, reason, text: tracker.text, usage: tracker.usage }
+    } finally {
+      this.openTurn = undefined
+      this.turnSections = []
+      this.turnFiles = undefined
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // step-2 hooks (docs/spec/agent-hooks.md)
+  // -------------------------------------------------------------------------
+
+  /**
+   * `files.beginTurn`. On failure an `error` record is written and the turn
+   * runs untracked: no `observe` calls and no `turn.files` (there is no
+   * baseline to compare against).
+   */
+  private async beginFiles(tasking: TaskingService, turn: number): Promise<void> {
+    const files = tasking.files
+    try {
+      await files.beginTurn(this.sessionId, turn)
+      this.turnFiles = files
     } catch (error) {
-      reason = { kind: 'error', error: toErrorInfo(error) }
+      await this.appendError(toErrorInfo(error), false, turn)
     }
-    await this.append({ type: 'turn.end', turn, reason })
-    this.lastReason = reason
-    this.emit({ type: 'turn.end', sessionId: this.sessionId, turn, reason })
-    await this.maybeCheckpoint()
-    if (reason.kind === 'cancelled' && reason.cause === 'cost-cap' && !this.outcomeWritten) {
-      await this.writeOutcome('cancelled')
+  }
+
+  /**
+   * Call each provider's `beginTurn` in order: keep its system sections for
+   * the turn's requests (sorted by id within the provider) and record its
+   * injected texts as `user.message { source: 'inject' }`. A provider that
+   * throws is skipped with a non-fatal `error` record.
+   */
+  private async beginContext(
+    context: ContextService,
+    args: { turn: number; text: string; source: 'user' | 'feedback'; materialIds: readonly string[]; signal: AbortSignal },
+  ): Promise<void> {
+    const providers = [...context.providers]
+    if (providers.length === 0) return
+    const { turn } = args
+    let state: SessionState
+    try {
+      state = await this.init.session.resume(this.sessionId)
+    } catch (error) {
+      await this.appendError(toErrorInfo(error), false, turn)
+      return
     }
-    return { sessionId: this.sessionId, turn, reason, text: tracker.text, usage: tracker.usage }
+    const sections: SystemPromptSection[] = []
+    for (const provider of providers) {
+      if (args.signal.aborted) break
+      let contribution
+      try {
+        contribution = await provider.beginTurn({
+          sessionId: this.sessionId,
+          turn,
+          projectRoot: this.init.workspace.root,
+          text: args.text,
+          source: args.source,
+          materialIds: args.materialIds,
+          state,
+          signal: args.signal,
+        })
+      } catch (error) {
+        const info = toErrorInfo(error)
+        await this.appendError({ ...info, message: `context provider "${provider.id}" failed: ${info.message}` }, false, turn)
+        continue
+      }
+      const own = [...(contribution?.systemSections ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      sections.push(...own)
+      for (const inject of contribution?.inject ?? []) {
+        await this.append({ type: 'user.message', turn, content: inject, source: 'inject' })
+        this.messages.push({ role: 'user', content: inject })
+      }
+    }
+    this.turnSections = sections
+  }
+
+  /**
+   * Ask the compactor before a model call. Returns `false` when a compaction
+   * failed (the caller stops trying for the rest of the turn); the history is
+   * then unchanged and a non-fatal `error` record says why.
+   */
+  private async maybeCompact(context: ContextService, turn: number, step: number, signal: AbortSignal): Promise<boolean> {
+    const compactor = context.compactor
+    if (compactor === undefined) return true
+    const input: CompactionCheckInput = {
+      sessionId: this.sessionId,
+      turn,
+      step,
+      model: this.model,
+      messages: [...this.messages],
+      ...(this.lastUsage === undefined ? {} : { lastUsage: this.lastUsage }),
+      failedThisTurn: false,
+    }
+    try {
+      if (!compactor.shouldCompact(input)) return true
+      const result = await compactor.compact(input, signal)
+      const kept = result.keepMessages
+      if (!Number.isInteger(kept) || kept < 1 || kept > this.messages.length) {
+        throw new NexgentError('session/invalid-record', `compaction keeps ${String(kept)} of ${this.messages.length} messages`)
+      }
+      const tail = this.messages.slice(this.messages.length - kept)
+      if (tail[0]!.role !== 'user') throw new NexgentError('session/invalid-record', 'the messages a compaction keeps must start with a user message')
+      // The summary request is a model request of this task (`requestCount` counts every request).
+      this.stats.requestCount += 1
+      this.stats.totalUsage = addUsage(this.stats.totalUsage, result.usage)
+      this.stats.tokens += knownTokens(result.usage)
+      await this.append({
+        type: 'compaction',
+        turn,
+        step,
+        summary: result.summary,
+        keepMessages: kept,
+        compactedMessages: result.compactedMessages,
+        requestId: result.requestId,
+        usage: result.usage,
+        trigger: result.trigger,
+      })
+      this.messages.splice(0, this.messages.length, { role: 'user', content: renderCompactionSummary(result.summary) }, ...tail)
+      this.lastUsage = undefined
+      return true
+    } catch (error) {
+      const info = toErrorInfo(error)
+      await this.appendError({ ...info, message: `compaction failed: ${info.message}` }, false, turn)
+      return false
+    }
+  }
+
+  /**
+   * `files.endTurn` and the `turn.files` record. The tracker's signal fires
+   * {@link FILES_END_CANCEL_MS} after the turn is cancelled (also when it
+   * already was). A failure writes an `error` record instead of `turn.files`.
+   */
+  private async endFiles(turn: number, signal: AbortSignal): Promise<void> {
+    const files = this.turnFiles
+    if (files === undefined) return
+    this.turnFiles = undefined
+    const bound = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const arm = () => {
+      timer = setTimeout(() => bound.abort(new TimeoutReason('FILES_END_TIMEOUT', FILES_END_CANCEL_MS)), FILES_END_CANCEL_MS)
+    }
+    if (signal.aborted) arm()
+    else signal.addEventListener('abort', arm, { once: true })
+    try {
+      const changes = [...await files.endTurn(this.sessionId, turn, bound.signal)]
+        .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+      const listed = changes.slice(0, TURN_FILES_LIMIT)
+      await this.append({
+        type: 'turn.files',
+        turn,
+        changes: listed,
+        ...(changes.length > listed.length ? { omitted: changes.length - listed.length } : {}),
+      })
+    } catch (error) {
+      await this.appendError(toErrorInfo(error), false, turn).catch(() => undefined)
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+      signal.removeEventListener('abort', arm)
+    }
   }
 
   private async maybeCheckpoint(): Promise<void> {
@@ -580,8 +829,9 @@ export class Agent {
     return check('project', 'requests', requests, project.maxRequests) ?? check('project', 'tokens', tokens, project.maxTokens)
   }
 
-  private async loop(turn: number, signal: AbortSignal, tracker: { text: string; usage: LLMUsage }): Promise<TurnEndReason> {
+  private async loop(turn: number, signal: AbortSignal, tracker: { text: string; usage: LLMUsage }, context: ContextService | undefined): Promise<TurnEndReason> {
     let pauses = 0
+    let compactionFailed = false
     for (let step = 1; ; step += 1) {
       if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
       const exhausted = this.budgetExhausted()
@@ -592,6 +842,10 @@ export class Agent {
       }
       if (step > this.init.settings.maxSteps) {
         return { kind: 'error', error: errorInfo('internal', `turn exceeded ${this.init.settings.maxSteps} model calls`) }
+      }
+      if (context !== undefined && !compactionFailed) {
+        compactionFailed = !(await this.maybeCompact(context, turn, step, signal))
+        if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
       }
 
       const outcome = await this.requestModel(turn, step, signal)
@@ -778,6 +1032,7 @@ export class Agent {
     }
 
     const reportedUsage = usage ?? UNKNOWN_USAGE
+    if (usage !== undefined) this.lastUsage = usage
     this.stats.totalUsage = addUsage(this.stats.totalUsage, reportedUsage)
     this.stats.tokens += knownTokens(reportedUsage)
     const ordered = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => call)
@@ -844,6 +1099,18 @@ export class Agent {
       durationMs,
     })
     this.messages.push({ role: 'tool', ...result })
+    try {
+      this.turnFiles?.observe({
+        sessionId: this.sessionId,
+        turn,
+        callId: call.id,
+        name: call.name,
+        isError: output.isError,
+        ...(output.meta === undefined ? {} : { meta: output.meta }),
+      })
+    } catch {
+      // `observe` failures never change the tool result (agent-hooks.md §失败语义).
+    }
     this.emit({
       type: 'tool.result',
       sessionId: this.sessionId,
@@ -930,10 +1197,13 @@ export class Agent {
     }
 
     const toolDeadline = deadline(signal, definition.timeoutMs, TOOL_TIMEOUT)
+    let recordsOpen = true
+    let recordFailure: ErrorInfo | undefined
     const context: KernelToolContext = {
       sessionId: this.sessionId,
       callId: call.id,
       turn,
+      step,
       workspace: this.init.workspace,
       sandboxMode: this.sandboxMode,
       signal: toolDeadline.signal,
@@ -942,6 +1212,20 @@ export class Agent {
         const auth = await this.authorize(turn, call, definition, ask, signal)
         setApproval(auth.approval)
         return auth.allowed
+      },
+      appendRecord: async record => {
+        try {
+          const type = (record as { type?: unknown }).type
+          if (!recordsOpen) throw new NexgentError('session/invalid-record', `${definition.name} appended ${String(type)} after its call settled`)
+          if (type !== 'deliverable.presented') throw new NexgentError('session/invalid-record', `tools may append only deliverable.presented records; got ${String(type)}`)
+          if (record.turn !== turn || record.step !== step || record.toolCallId !== call.id) {
+            throw new NexgentError('session/invalid-record', `${type} must carry this call's turn ${turn}, step ${step} and toolCallId ${call.id}`)
+          }
+          await this.append(record)
+        } catch (error) {
+          recordFailure ??= toErrorInfo(error)
+          throw error
+        }
       },
     }
     const started = performance.now()
@@ -955,6 +1239,7 @@ export class Agent {
       }))
       settled = await Promise.race([running, gave])
     } finally {
+      recordsOpen = false
       toolDeadline.dispose()
       setDuration(Math.max(0, Math.round(performance.now() - started)))
     }
@@ -965,6 +1250,11 @@ export class Agent {
     }
     if (signal.aborted) return failure('tool/aborted', `${definition.name} was cancelled`)
     if (settled === undefined) return failure('tool/aborted', `${definition.name} did not settle`)
+    // A record the tool could not append ends the call as failed, even when the handler caught the rejection.
+    const lostRecord = recordFailure as ErrorInfo | undefined
+    if (lostRecord !== undefined) {
+      return failure('tool/failed', `${definition.name} could not record its result: ${lostRecord.message}`, { cause: lostRecord.code })
+    }
     if (!settled.ok) {
       const info = toErrorInfo(settled.error)
       const error = info.code === 'internal' ? { ...info, code: 'tool/failed' as const } : info
