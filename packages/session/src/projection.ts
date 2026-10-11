@@ -15,6 +15,7 @@
 import {
   addUsage,
   NexgentError,
+  renderCompactionSummary,
   ZERO_USAGE,
   type AssistantMessage,
   type SessionMetadata,
@@ -182,9 +183,44 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
     case 'approval.grant':
       meta.grants = [...meta.grants, record.grant]
       break
+    case 'goal.set':
+      meta.goal = record.goal
+      break
+    case 'goal.update': {
+      const goal = meta.goal
+      if (goal === undefined || goal.id !== record.goalId) {
+        throw new NexgentError('session/invalid-record', `goal.update names goal ${record.goalId}, which is not the current goal`)
+      }
+      const { note: _previousNote, ...rest } = goal
+      const note = record.note ?? goal.note
+      meta.goal = {
+        ...rest,
+        status: record.status,
+        text: record.text ?? goal.text,
+        updatedAt: record.ts,
+        ...(note === undefined ? {} : { note }),
+      }
+      break
+    }
+    case 'compaction': {
+      if (record.keepMessages > draft.messages.length) {
+        throw new NexgentError('session/invalid-record', `compaction keeps ${record.keepMessages} of ${draft.messages.length} messages`)
+      }
+      const tail = draft.messages.slice(draft.messages.length - record.keepMessages)
+      if (tail[0]?.role !== 'user') {
+        throw new NexgentError('session/invalid-record', 'compaction tail must start with a user message')
+      }
+      draft.messages = [{ role: 'user', content: renderCompactionSummary(record.summary) }, ...tail]
+      meta.lastCompactionSeq = record.seq
+      break
+    }
     case 'error':
     case 'approval.request':
     case 'approval.decision':
+    case 'material.added':
+    case 'deliverable.presented':
+    case 'turn.files':
+    case 'feedback':
       break
   }
   draft.metadata.lastSeq = record.seq

@@ -1,6 +1,6 @@
 # 数据与文件格式规范
 
-> 步骤 1 章节（目的与范围、目录布局、项目配置、会话 JSONL v1、账本记录、版本与兼容、schema 与测试）已写定；`CapabilityBundle` 清单、材料元数据、成果元数据留标题，在对应步骤填写。每种格式配 JSON schema 与读写测试，二者与本文同步改。本文的类型镜像在 `packages/kernel/src/contracts/`（`session.ts`、`ledger.ts`、`config.ts`、`workspace.ts`、`credentials.ts`），两处不一致时以本文为准并提契约修改 PR。来源：计划 4.10 第 1 行；分工见 `docs/plan/step-1-work-partition.md`。
+> 步骤 1 章节（目的与范围、目录布局、项目配置、会话 JSONL v1、账本记录、版本与兼容、schema 与测试）已写定；步骤 2 第 1 轮补上会话的七种新记录、材料元数据、成果元数据，并新增反馈、持久目标、压缩三节；`CapabilityBundle` 清单留标题，在步骤 4 填写。每种格式配 JSON schema 与读写测试，二者与本文同步改。本文的类型镜像在 `packages/kernel/src/contracts/`（`session.ts`、`ledger.ts`、`config.ts`、`workspace.ts`、`credentials.ts`、`tasking.ts`、`context.ts`），两处不一致时以本文为准并提契约修改 PR。来源：计划 4.10 第 1 行；分工见 `docs/plan/step-1-work-partition.md` 与 `docs/plan/step-2-work-partition.md`；loop 中各记录的写入时机见 `agent-hooks.md`。
 
 ## 目的与范围
 
@@ -38,8 +38,17 @@
     ├── ledgers/
     │   └── <yyyy-mm>/
     │       └── requests.jsonl            账本（本文“账本记录”）
-    ├── materials/                        资料（步骤 2 填）
-    ├── outputs/                          成果快照（步骤 2 填）
+    ├── materials/
+    │   └── <materialId>/
+    │       ├── material.json             材料元数据（本文“材料元数据”）
+    │       └── <storedName>              资料副本
+    ├── outputs/
+    │   └── <deliverableId>/
+    │       └── v<n>/
+    │           ├── deliverable.json      成果版本元数据（本文“成果元数据”）
+    │           └── files/<path>          第 n 版的快照副本，保持项目内相对路径
+    ├── skills/                           项目技能（用户创建，可选；agent-hooks.md §技能）
+    │   └── <name>/SKILL.md
     └── capabilities/                     能力版本（步骤 4 填）
 ```
 
@@ -50,13 +59,14 @@
 | `sessions/<sessionId>/session.jsonl` | 会话记录 | 固定 | 同上 | 同上 |
 | `sessions/<sessionId>/.lock` | 锁文件 | 固定 | `SessionStore.create` / `lock` | 同上 |
 | `ledgers/<yyyy-mm>/requests.jsonl` | 该月（UTC）的全部账本记录 | 月份取记录 `ts` 的 UTC 年月 | 第一次追加时 | `@nexgent/llm`（请求与工具记录）、`apps/cli`（`task.outcome`） |
-| `materials/` | 资料 | 步骤 2 | `ensureLayout` | 步骤 2 |
-| `outputs/` | 成果快照 | 步骤 2 | `ensureLayout` | 步骤 2 |
+| `materials/<materialId>/` | 一份资料：元数据与副本 | `materialId` 为小写 UUID v4 | `MaterialStore.add` | `@nexgent/tasking`（宿主），模型只读 |
+| `outputs/<deliverableId>/v<n>/` | 一个成果的第 n 版：元数据与快照 | `deliverableId` 为小写 UUID v4，`n` 从 1 起 | `DeliverableStore.present` | `@nexgent/tasking`（宿主），模型只读 |
+| `skills/<name>/SKILL.md` | 项目技能 | `name` 见 `agent-hooks.md` §技能 | 用户 | 用户；模型只读 |
 | `capabilities/` | 能力版本 | 步骤 4 | `ensureLayout` | 步骤 4 |
 
 规则：
 
-- `.nexgent/` 内部对模型可见的文件工具按子目录区分：`sessions/`、`ledgers/`、`capabilities/` 读写都拒绝，`materials/` 与 `config.json` 只读，`outputs/` 可读写；规则以 `permissions.md` §路径策略与写入限制为准。
+- `.nexgent/` 内部对模型可见的文件工具按子目录区分：`sessions/`、`ledgers/`、`capabilities/` 读写都拒绝，`materials/`、`outputs/`、`skills/` 与 `config.json` 只读（`outputs/` 自步骤 2 起改为只读，快照只由宿主写）；规则以 `permissions.md` §路径策略与写入限制为准。
 - 所有路径在服务内部以绝对路径处理（`WorkspaceLayout`）；记录里出现的路径（如 `session.start.projectRoot`）也是绝对路径。
 - 是否纳入版本控制由项目自己决定；建议忽略 `sessions/`、`ledgers/`、`outputs/`，保留 `config.json`。
 - 本机凭证文件不在项目内：`~/.nexgent/credentials.json`（Windows 为 `%USERPROFILE%\.nexgent\credentials.json`），形状见“项目配置文件”末尾。
@@ -70,7 +80,7 @@
 | `version` | `1` | `1` | 格式版本；只有 1 |
 | `model` | string | `"claude-sonnet-5-5"` | 传给端点的模型 ID（ADR 0002） |
 | `endpoint` | string | `"https://api.anthropic.com"` | Claude API 的 base URL，不含路径与凭证；环境变量 `NEXGENT_API_BASE_URL` 可覆盖 |
-| `thinking` | `"off" \| "on"` | `"off"` | 执行时是否开启 reasoning；`off` 是 provider 的最低 thinking 设置（ADR 0002 决策 3） |
+| `thinking` | `"off" \| "on"` | `"on"` | 执行时是否开启 reasoning；`on` 是自适应 thinking，`off` 是 provider 的最低 thinking 设置（ADR 0002 决策 3 的映射；默认值按 ADR 0003 为 `on`） |
 | `effort` | `"low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"medium"` | 推理深度（`output_config.effort`） |
 | `sandboxMode` | `"read-only" \| "workspace-write" \| "full-access"` | `"workspace-write"` | 新会话的默认沙箱模式；语义见 `permissions.md` |
 | `costCaps.perTask` | `CostCap` | 无 | 每任务上限 |
@@ -96,7 +106,7 @@
   "version": 1,
   "model": "claude-sonnet-5-5",
   "endpoint": "https://api.anthropic.com",
-  "thinking": "off",
+  "thinking": "on",
   "effort": "medium",
   "sandboxMode": "workspace-write",
   "costCaps": { "perTask": { "maxRequests": 50 } },
@@ -145,7 +155,7 @@
 | --- | --- | --- |
 | `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?` |
 | `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn` |
-| `user.message` | 用户消息进入会话，或注入的合成上下文 | `turn`、`content`、`source: "user" \| "inject"` |
+| `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示 | `turn`、`content`、`source: "user" \| "inject" \| "feedback"`、`materials?`（步骤 2） |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
 | `tool.result` | 一次工具调用返回 | `turn`、`step`、`toolCallId`、`name`、`content`、`isError`、`error?`、`meta?`、`durationMs` |
 | `turn.end` | 一轮结束 | `turn`、`reason` |
@@ -154,20 +164,41 @@
 | `approval.request` | 一次工具调用需要审批 | `turn`、`request: ApprovalRequest` |
 | `approval.decision` | 审批得到应答（含超时、取消、非 TTY 拒绝） | `turn`、`decision: ApprovalDecision` |
 | `approval.grant` | 用户选择 `session` 范围放行，紧跟对应的 `approval.decision` | `grant: { tool, pattern?, grantedAt }` |
+| `material.added`（步骤 2） | 宿主把一份资料复制进 `materials/` 后 | `turn?`、`material: MaterialRef` |
+| `deliverable.presented`（步骤 2） | `present` 生成一个成果版本后，在该调用的 `tool.result` 之前 | `turn`、`step`、`toolCallId`、`deliverable: DeliverableVersionRef` |
+| `turn.files`（步骤 2） | 每轮 `turn.end` 之前（装了文件追踪时，空列表也写） | `turn`、`changes: FileChange[]`、`omitted?` |
+| `feedback`（步骤 2） | 反馈轮的 `turn.start` 之后 | `turn`、`feedback: FeedbackEntry` |
+| `goal.set`（步骤 2） | 宿主设定持久目标 | `turn?`、`goal: Goal` |
+| `goal.update`（步骤 2） | 宿主更新目标状态或文本 | `turn?`、`goalId`、`status`、`text?`、`note?` |
+| `compaction`（步骤 2） | 压缩成功后、使用压缩历史的那次模型请求之前 | `turn`、`step`、`summary`、`keepMessages`、`compactedMessages`、`requestId`、`usage`、`trigger: { inputTokens, threshold }` |
 
 字段细则：
 
 - `assistant.message.toolCalls[]`：`{ id, name, arguments }`，`arguments` 是模型产出的原始 JSON 文本，不在此处解析。
 - `assistant.message.usage`：`LLMUsage`，六个字段 `inputTokens / outputTokens / totalTokens / cacheReadTokens / cacheWriteTokens / reasoningTokens` 每个都是非负整数或字符串 `"unknown"`；provider 没报用量时全为 `"unknown"`，不写 0。`inputTokens` 只是未命中缓存的输入，计费输入 = `inputTokens + cacheReadTokens + cacheWriteTokens`；`totalTokens` = 输入 + 输出 + 缓存读 + 缓存写。`cacheWriteTokens` 是后加的字段，schema 中为可选：没有它的旧记录读出时按 `"unknown"` 补上，新写入的记录总是带它。
-- `assistant.message.finishReason`：`stop | tool-calls | max-tokens | aborted | refusal | error`。`refusal` 时附 `refusal: { category?, explanation? }`，该回复的工具调用不执行。
+- `assistant.message.finishReason`：`stop | tool-calls | max-tokens | aborted | refusal | pause | error`。`refusal` 时附 `refusal: { category?, explanation? }`，该回复的工具调用不执行。`pause`（步骤 2）对应 Claude 的 `stop_reason: "pause_turn"`：回复照常记录（含 `providerContent`），loop 把它原样带回、再发一次请求让模型接着做，同一轮内的续跑次数有上限，超过时以可读错误结束轮次；账本 `llm.request.end` 的 `status` 为 `ok`、`finishReason` 为 `pause`。
 - `assistant.message.providerContent`：provider 返回的内容块原样（JSON），用于回放时保留 thinking 块（ADR 0002 决策 4）；provider 没给则不写。
 - `assistant.message.interrupted: true`：该轮在流中被取消，`content` 是已流出的前缀，`toolCalls` 不写（未派发的调用不进入历史）。
 - `tool.result.error`：`ErrorInfo = { name, code, message, details? }`，仅当 `isError` 为真；`meta` 是工具私有的 JSON 值（如 diff），原样持久化。
 - `max-tokens` 且回复含工具调用时：工具调用记录在案但不执行，轮次以 `{ kind: "max-tokens" }` 结束；下一次请求由历史修复以合成的错误结果答复这些调用。
 - `turn.end.reason`：`{ kind: "completed" }`、`{ kind: "cancelled", cause: "user" | "timeout" | "shutdown" | "cost-cap" }`、`{ kind: "error", error: ErrorInfo }`、`{ kind: "max-tokens" }`、`{ kind: "interrupted" }`。最后一种只由恢复过程写出，用来关闭上一个进程没来得及关闭的轮次。
 - `error.fatal`：为真表示会话不能继续；恢复时遇到最后一条是 fatal 的 `error`，`resume` 仍返回状态，由调用方决定是否继续。
+- `user.message.source`（步骤 2 增加 `feedback`）：`user` 是用户输入；`inject` 是合成上下文（资料引用、提供者注入），界面不显示；`feedback` 是反馈轮的提示，正文为 `renderFeedbackPrompt(feedback)`。`materials` 是本条消息引用的资料 ID（仅 `user` / `feedback` 消息），界面据此显示资料标签。
+- 步骤 2 记录里的路径一律是项目相对路径、`/` 分隔（`MaterialRef.path`、`DeliverableFile.path`、`FileChange.path`），schema 拒绝含 `\` 的路径；两平台写出的记录可以直接比较。SHA-256 一律小写十六进制 64 位。
+- `turn.files.changes`：按 `path` 排序，`change` 为 `added | modified | deleted`；最多 1000 条（`TURN_FILES_LIMIT`），超出部分只计数在 `omitted`。比较范围是项目根下除 `.nexgent/`、`node_modules/`、`.git/` 外的全部文件；同一路径先增后删不列出。
+- `goal.update.goalId` 必须是当前目标的 ID；`compaction.keepMessages` 不能超过当时的消息数，且保留段必须以 `user` 消息开始。这两条单条 schema 表达不了，`SessionStore.append` 在写入前用投影检查，不合格的记录抛 `session/invalid-record`、不落盘。
 
 一轮的记录顺序固定为：`turn.start` → `user.message` → （`assistant.message` → `tool.result`×n）×steps → `turn.end`。需要审批的调用在其 `tool.result` 之前插入 `approval.request` → `approval.decision`（→ `approval.grant`）。`ApprovalRequest` / `ApprovalDecision` 的字段见 `permissions.md`。`step` 从 1 起，在轮内递增。
+
+步骤 2 在这条顺序里插入（详见 `agent-hooks.md` §一轮的顺序）：
+
+```text
+turn.start → [feedback] → user.message(inject)* → user.message(user|feedback)
+  → ( [compaction] → assistant.message → ( [approval.*] → [deliverable.presented] → tool.result )* )*
+  → turn.files → turn.end → [checkpoint]
+```
+
+`material.added`、`goal.set`、`goal.update` 由宿主写，可以出现在两轮之间，也可以出现在一轮之中（此时带 `turn`）。
 
 ### 示例
 
@@ -244,9 +275,13 @@
 | `turn.end` | 无 | 清除 `openTurn` |
 | `checkpoint` | 从头重放时整体替换 `state` | 同左 |
 | `error` | 无 | 无 |
+| `goal.set`（步骤 2） | 无 | `goal = record.goal`（替换旧目标） |
+| `goal.update`（步骤 2） | 无 | `goal.status = status`；给了 `text` 则替换；给了 `note` 则替换；`goal.updatedAt = record.ts` |
+| `compaction`（步骤 2） | `messages = [{ role: "user", content: renderCompactionSummary(summary) }, ...messages 的最后 keepMessages 条]` | `lastCompactionSeq = seq` |
+| `material.added`、`deliverable.presented`、`turn.files`、`feedback`（步骤 2） | 无 | 无 |
 | 任意记录 | — | `lastSeq = seq` |
 
-`SessionMetadata` 字段：`createdAt`、`projectRoot`、`model`、`sandboxMode`、`grants`、`title?`、`lastTurn`、`openTurn?`、`totalUsage`、`lastSeq`。
+`SessionMetadata` 字段：`createdAt`、`projectRoot`、`model`、`sandboxMode`、`grants`、`title?`、`lastTurn`、`openTurn?`、`totalUsage`、`lastSeq`；步骤 2 增加可选的 `goal?`（`Goal`）与 `lastCompactionSeq?`。步骤 1 写出的 checkpoint 没有这两个字段，读出时视为未设置。
 
 ### 并发写保护
 
@@ -352,11 +387,173 @@
 
 ## 材料元数据
 
-一句话（步骤 2 填）：`materials/<id>/` 的来源、类型、添加时间与引用方式。
+资料是用户交给任务的文件。`MaterialStore.add` 把源文件**复制**到 `.nexgent/materials/<materialId>/`，源文件不移动、不修改；复制完成后写元数据，并由 SDK 在会话里写一条 `material.added`。类型镜像：`MaterialMetadata`、`MaterialRef`（`packages/kernel/src/contracts/tasking.ts`）。
+
+目录：
+
+```text
+.nexgent/materials/<materialId>/
+├── material.json      元数据
+└── <storedName>       副本
+```
+
+- `materialId`：小写 UUID v4。
+- `storedName`：原文件名去掉路径、把 `/ \ : * ? " < > |` 与控制字符换成 `_`、去掉结尾的点和空格；为空或是 Windows 设备名（`CON`、`NUL` 等）时用 `material` 加原扩展名。一个目录只放一份资料，所以不会重名。
+- 写入顺序：先在 `materials/.tmp-<uuid>/` 里复制并计算 SHA-256、写 `material.json`，再把目录整体改名为 `materials/<materialId>/`。半途中断留下的 `.tmp-*` 目录不被列出，下次启动时删除。
+
+`material.json`（schema：`packages/session/schema/material.v1.schema.json`）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `formatVersion` | `1` | 格式版本 |
+| `id` | string | 即 `materialId` |
+| `originalName` | string | 用户选择的文件名（只含基名，原样，供显示） |
+| `path` | string | 副本的项目相对路径，`/` 分隔：`.nexgent/materials/<id>/<storedName>` |
+| `size` | integer | 副本字节数 |
+| `sha256` | string | 副本的 SHA-256（小写十六进制）；复制时与源文件相同 |
+| `mediaType` | string | 按扩展名推断的 IANA 媒体类型，未知为 `application/octet-stream` |
+| `text` | boolean | 是否按文本处理：能按 UTF-8 解码且不是已知二进制类型 |
+| `addedAt` | string | 复制完成的时刻 |
+| `sessionId` | string? | 从哪个会话添加；会话外添加时没有 |
+| `status` | `"active" \| "removed"` | 移除只改这个字段 |
+| `removedAt` | string? | `status` 为 `removed` 时的移除时刻 |
+
+```json
+{
+  "formatVersion": 1,
+  "id": "0f0e0d0c-0b0a-4908-8706-050403020100",
+  "originalName": "orders.csv",
+  "path": ".nexgent/materials/0f0e0d0c-0b0a-4908-8706-050403020100/orders.csv",
+  "size": 18234,
+  "sha256": "9f2c…（64 位）",
+  "mediaType": "text/csv",
+  "text": true,
+  "addedAt": "2026-10-11T08:00:00.000Z",
+  "sessionId": "6f1c…",
+  "status": "active"
+}
+```
+
+规则：
+
+- `material.json` 是资料状态的唯一来源；`material.added` 只记录“这个会话添加过它”，移除不写会话记录。改 `status` 用原子写（临时文件 + fsync + rename），这是 `material.json` 唯一允许的改写。
+- 移除不删文件。删除副本需要用户在界面上确认，由 SDK 删除整个目录；删除后会话里的 `material.added` 仍在，列资料时按目录是否存在判断。
+- 引用方式：用户在消息里引用资料（`SendMessageInput.materialIds`）时，`materials` 提供者写一条 `inject` 消息列出每份资料的 `originalName`、`path`、`size`、`mediaType`；`text` 为真且不超过内联上限（`@nexgent/context` 的配置，默认 32 KiB）的资料把全文附在后面，其他资料只给路径，由模型用 `read_file` / `read_document` 读取。
+- 模型对 `materials/` 只读（`permissions.md` §路径策略与写入限制）。
 
 ## 成果元数据
 
-一句话（步骤 2 填）：`outputs/` 每轮快照与 `present` 声明的对应关系、版本号与反馈关联。
+成果是 `present` 工具声明交付的一组文件。每次 `present` 生成该成果的一个新版本：把文件**快照**复制进 `.nexgent/outputs/<deliverableId>/v<n>/files/`，写 `deliverable.json`，并在会话里写 `deliverable.presented`。快照一经写出不再改变；工作区里的文件之后怎么改都不影响旧版本。类型镜像：`DeliverableVersion`、`DeliverableVersionRef`、`DeliverableFile`、`DeliverableDiff`。
+
+目录：
+
+```text
+.nexgent/outputs/<deliverableId>/
+├── v1/
+│   ├── deliverable.json
+│   └── files/report/summary.csv     快照，保持项目内相对路径
+└── v2/
+    ├── deliverable.json
+    └── files/…
+```
+
+- `deliverableId`：小写 UUID v4，跨版本不变。`n` 从 1 起，每次 `present` 加 1，没有空号。
+- 写入顺序：先在 `outputs/<deliverableId>/.tmp-<uuid>/` 写快照与 `deliverable.json`，再改名为 `v<n>/`；改名时发现 `v<n>` 已存在（并发）则重取 `n`。中断留下的 `.tmp-*` 不被列出。
+- 同一成果的判定见 `agent-hooks.md` §步骤 2 工具。
+
+`deliverable.json`（schema：`packages/session/schema/deliverable.v1.schema.json`）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `formatVersion` | `1` | 格式版本 |
+| `deliverableId` | string | 成果 ID |
+| `version` | integer | 版本号 n |
+| `title` | string | 显示名；`present` 没给时取主文件的基名 |
+| `summary` | string | `present` 的一句话说明 |
+| `files` | `DeliverableFile[]` | 至少一项，按 `present` 的顺序，第一项是主文件；每项 `{ path, size, sha256, mediaType }`，`path` 是该文件在项目中的相对路径（`/` 分隔），`sha256` 是快照的哈希 |
+| `presentedAt` | string | 快照完成的时刻 |
+| `sessionId` | string | 产生它的会话 |
+| `turn` | integer | 产生它的轮次 |
+| `toolCallId` | string | 产生它的 `present` 调用 |
+
+规则：
+
+- `deliverable.json` 只写一次，不改写。会话里的 `deliverable.presented` 带同样的 `deliverableId`、`version`、`title`、`summary`、`files`（`DeliverableVersionRef`），二者可以互相核对；列成果以 `outputs/` 下的 `deliverable.json` 为准（工具在写会话记录前失败时，可能有快照而没有会话记录）。
+- 版本差异（`DeliverableStore.diff`）：按 `path` 对齐两版的文件，`change` 为 `added | removed | modified | unchanged`（按 `sha256` 判断）；两边都是文本时给出按行的统一差异块（`DiffHunk`，上下文 3 行），否则只报 `change`，`binary: true`。
+- 反馈与成果的关联：`feedback` 记录带 `deliverableId` 与 `version`（见下节）；成果文件本身不记录反馈。
+- 模型对 `outputs/` 只读；快照只由 `@nexgent/tasking` 写。
+
+## 反馈
+
+用户对一个成果版本给出评分与评语，即开始一个**反馈轮**。反馈只存在会话里，不另建文件；它是步骤 5 改进流程的输入。类型镜像：`FeedbackEntry`、`FeedbackListing`。
+
+记录（`feedback`）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `turn` | integer | 反馈开启的轮次 |
+| `feedback.id` | string | 小写 UUID v4 |
+| `feedback.deliverableId` | string | 被评价的成果 |
+| `feedback.version` | integer | 被评价的版本 |
+| `feedback.rating` | `1`–`5`? | 评分，可不给 |
+| `feedback.comment` | string | 评语，可为空串 |
+
+顺序：`turn.start` → `feedback` → （注入）→ `user.message { source: "feedback", content: renderFeedbackPrompt(feedback) }` → 正常的步骤。`renderFeedbackPrompt` 的文本是契约的一部分（`Feedback on deliverable <id> version <n>. Rating: <r>/5.` 加空行加评语；没有评分时省略评分句）。
+
+```jsonl
+{"type":"turn.start","seq":40,"ts":"…","sessionId":"6f1c…","turn":2}
+{"type":"feedback","seq":41,"ts":"…","sessionId":"6f1c…","turn":2,"feedback":{"id":"5b1e…","deliverableId":"aa0e…","version":1,"rating":3,"comment":"地区要用对照表里的中文名"}}
+{"type":"user.message","seq":42,"ts":"…","sessionId":"6f1c…","turn":2,"content":"Feedback on deliverable aa0e… version 1. Rating: 3/5.\n\n地区要用对照表里的中文名","source":"feedback"}
+```
+
+恢复语义：`feedback` 不改变投影；`FeedbackStore.list` 扫描项目内各会话的 `feedback` 记录得到列表（`submittedAt` 取记录的 `ts`）。强杀发生在 `feedback` 之后、轮次结束之前时，恢复按步骤 1 规则补 `turn.end { kind: "interrupted" }`，反馈记录保留，界面仍能列出。
+
+## 持久目标
+
+一个会话至多有一个当前目标，跨重启保持；目标文本在每轮开始由目标提供者放进系统提示（`agent-hooks.md`）。类型镜像：`Goal`、`GoalStatus`。
+
+记录：
+
+| 记录 | 字段 | 说明 |
+| --- | --- | --- |
+| `goal.set` | `turn?`、`goal: { id, text, status, setAt, updatedAt, note? }` | 设定新目标，替换旧目标；新目标 `status` 一般为 `active`，`updatedAt` 等于 `setAt` |
+| `goal.update` | `turn?`、`goalId`、`status: "active" \| "completed" \| "abandoned"`、`text?`、`note?` | 改状态（完成、放弃、重新激活）或改文本；`goalId` 必须是当前目标 |
+
+两种记录都由宿主（SDK）写，可在轮外或轮中。投影把当前目标放在 `SessionMetadata.goal`（见“恢复算法”的投影表），因此恢复后不必再扫描记录就能显示目标；`goal.update` 把 `updatedAt` 设为该记录的 `ts`。目标提供者只在 `status` 为 `active` 时注入。
+
+## 压缩
+
+长对话的输入超过阈值时，较早的历史被替换为摘要。何时触发、保留多少由 `@nexgent/context` 决定（`agent-hooks.md` §压缩）；本节固定记录格式与恢复语义。类型镜像：`CompactionRecord`、`renderCompactionSummary`。
+
+记录（`compaction`）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `turn` / `step` | integer | 压缩发生在第 `turn` 轮第 `step` 次模型请求之前 |
+| `summary` | string | 摘要正文（非空） |
+| `keepMessages` | integer ≥ 1 | 摘要之后原样保留的末尾消息条数 |
+| `compactedMessages` | integer ≥ 1 | 被并入摘要的消息条数（上一次的摘要算一条） |
+| `requestId` | string | 产生摘要的辅助请求，与账本 `purpose: "auxiliary"` 的记录相关联 |
+| `usage` | `LLMUsage` | 该请求的用量 |
+| `trigger` | `{ inputTokens, threshold }` | 触发时的计费输入与阈值 |
+
+投影：`messages` 变为 `[{ role: "user", content: renderCompactionSummary(summary) }]` 加压缩前 `messages` 的最后 `keepMessages` 条；`metadata.lastCompactionSeq` 记下该记录的 `seq`。`renderCompactionSummary` 的文本是契约的一部分：
+
+```text
+<conversation-summary>
+The earlier part of this conversation was compacted. Summary:
+
+<summary>
+</conversation-summary>
+```
+
+规则：
+
+- 保留段必须以 `user` 消息开始（一轮或一次注入的边界），工具调用与其结果不会被拆开；不满足时 `SessionStore.append` 拒绝写入（见“字段细则”）。
+- **thinking 块**：被压进摘要的助手回复连同其 `providerContent`（thinking 块）一起丢弃，之后的请求不再回放；保留段里的助手回复照常带 `providerContent` 回放（ADR 0002 决策 4、ADR 0003）。
+- 恢复：恢复算法从最后一个 checkpoint 起按顺序投影，遇到 `compaction` 就按上式替换，所以重建的历史与强杀前一致；不需要另外“找最后一条 compaction”。多次压缩时，后一次的摘要请求输入里包含前一次的摘要，`compactedMessages` 把它算作一条。
+- `compaction` 不改变 `totalUsage`（辅助请求的用量只在账本与该记录的 `usage` 里）。
+- 摘要请求失败不写 `compaction`，只写 `error`（`fatal: false`），历史保持原样。
 
 ## 版本与兼容
 
@@ -367,6 +564,8 @@
 | 账本 | 无记录级字段；文件名 `requests.jsonl` 即 v1 | 1 | 新版本写新文件名（`requests.v2.jsonl`） |
 | 项目配置 | `version` | 1 | 读取方拒绝未知版本 |
 | 凭证文件 | `version` | 1 | 同上 |
+| 材料元数据（步骤 2） | `formatVersion` | 1 | 同上 |
+| 成果版本元数据（步骤 2） | `formatVersion` | 1 | 同上 |
 
 兼容规则：
 
@@ -375,6 +574,7 @@
 - **会话读取方拒绝未知的 `type`**：未知记录类型意味着投影不再可靠，按无效行处理（截断并报告），不静默跳过。账本读取方对未知 `type` 跳过并计数。
 - **不兼容旧 Python 数据**：Python 时代的 Episode、组织 SQLite、PR #4 的 `.nexgent/native/` 不读、不迁移（ADR 0001 决策 15）。
 - 步骤 4 的四个预留字段已经在 v1 中是可选字段，启用它们不升版本。
+- **步骤 2 的新记录类型在 v1 内追加**（计划已定：旧文件仍可读）。代价是：只认识步骤 1 记录集的读取方会把第一条步骤 2 记录当作无效行，持锁追加时还会截断其后的内容。步骤 1 没有对外发布的构建，`nexgent-app` 上的读取方与写入方同步升级，所以接受这一点；步骤 2 之后再加记录类型时，先评估是否已有对外发布的读取方，有则升版本。
 
 ## schema 与读写测试
 
@@ -385,6 +585,7 @@
 | 会话记录（含 checkpoint 状态） | `packages/session/schema/session.v1.schema.json` | `@nexgent/session` |
 | 账本记录 | `packages/llm/schema/ledger.v1.schema.json` | `@nexgent/llm` |
 | 项目配置、凭证文件、锁文件 | `packages/kernel/schema/config.v1.schema.json`、`credentials.v1.schema.json`、`session-lock.v1.schema.json` | `@nexgent/kernel` |
+| 材料元数据、成果版本元数据（步骤 2） | `packages/session/schema/material.v1.schema.json`、`deliverable.v1.schema.json` | 与会话 schema 共用 `@nexgent/session` 的求值器；写入方是 `@nexgent/tasking` |
 
 schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`（账本记录除外：它允许未知可选字段以便跨版本读取）。会话 schema 的严格校验只用于写入方的追加；读取方按上面的兼容规则放过未知的可选字段，不因此截断。
 
@@ -411,5 +612,12 @@ schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`
 1. 缺文件得默认值；部分字段得补全；未知字段、错误类型、错误版本报 `config/invalid`。
 2. profile 补丁的插入、深合并、未知 id、重复 id 四种情形。
 3. 凭证读取顺序：环境变量优先于文件；空字符串视为未设置。
+
+步骤 2 新增（`@nexgent/session`）：
+
+1. 七种新记录各一条写入后 `readAll` 逐字段相等，并通过 schema；投影出的 `goal`、`lastCompactionSeq` 与压缩后的 `messages` 符合上面的投影表。
+2. 不合格的 `compaction`（保留段越界或不以 `user` 开始）与 `goal.update`（目标 ID 不符）在写入前被拒，文件不变。
+3. 步骤 1 写出的真实会话（夹具 `packages/session/tests/fixtures/step1-real-session.jsonl`，取自步骤 1 真实模型验收的第一轮及其 checkpoint）能被读出、恢复，并能在其后追加步骤 2 记录。
+4. `material.json` 与 `deliverable.json` 读写往返并通过 schema；含 `\` 的路径、大写或长度不对的 SHA-256 被拒。
 
 契约层（`packages/kernel/tests/contracts/`）：类型级断言固定记录集合与公共字段，纯函数（`addUsage`、工具限制交集、布局解析、profile 补丁）有运行时测试。

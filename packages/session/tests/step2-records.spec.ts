@@ -1,0 +1,156 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import {
+  isNexgentError,
+  renderCompactionSummary,
+  resolveWorkspaceLayout,
+  type SessionRecordInput,
+} from '@nexgent/kernel'
+import { JsonlSessionStore, projectSession, validateSessionRecord } from '../src/index.js'
+import { KNOWN_USAGE, SESSION_ID, sessionInit, tempDir, turnRecords } from './helpers.js'
+
+/** Session id of the step-1 real-model run kept as a fixture (first turn and its checkpoint). */
+const STEP1_SESSION = '1814c7d2-b395-4ab9-8e8d-ffdd5d7ed9f4'
+const SHA = 'b'.repeat(64)
+
+async function setup() {
+  const root = await tempDir()
+  const store = new JsonlSessionStore({ layout: resolveWorkspaceLayout(root) })
+  return { root, store }
+}
+
+/** One record of each step-2 type, in an order the projection accepts (after one complete turn). */
+function step2Records(): SessionRecordInput[] {
+  return [
+    {
+      type: 'material.added',
+      material: { id: 'm1', originalName: 'orders.csv', path: '.nexgent/materials/m1/orders.csv', size: 3, sha256: SHA, mediaType: 'text/csv' },
+    },
+    { type: 'goal.set', goal: { id: 'g1', text: 'Summarize sales', status: 'active', setAt: '2026-10-11T00:00:00.000Z', updatedAt: '2026-10-11T00:00:00.000Z' } },
+    { type: 'turn.start', turn: 2 },
+    { type: 'feedback', turn: 2, feedback: { id: 'f1', deliverableId: 'd1', version: 1, rating: 3, comment: 'Add growth' } },
+    { type: 'user.message', turn: 2, content: 'Add growth', source: 'feedback' },
+    {
+      type: 'compaction',
+      turn: 2,
+      step: 1,
+      summary: 'Turn 1 read the README.',
+      keepMessages: 1,
+      compactedMessages: 4,
+      requestId: 'req-compact',
+      usage: KNOWN_USAGE,
+      trigger: { inputTokens: 5000, threshold: 4000 },
+    },
+    {
+      type: 'deliverable.presented',
+      turn: 2,
+      step: 1,
+      toolCallId: 'call_p',
+      deliverable: {
+        deliverableId: 'd1',
+        version: 2,
+        title: 'summary.csv',
+        summary: 'Adds growth',
+        files: [{ path: 'report/summary.csv', size: 3, sha256: SHA, mediaType: 'text/csv' }],
+      },
+    },
+    { type: 'goal.update', turn: 2, goalId: 'g1', status: 'completed', note: 'presented v2' },
+    { type: 'turn.files', turn: 2, changes: [{ path: 'report/summary.csv', change: 'modified' }] },
+    { type: 'turn.end', turn: 2, reason: { kind: 'completed' } },
+  ]
+}
+
+describe('step-2 session records', () => {
+  it('round-trip through the store and project goal and compaction', async () => {
+    const { root, store } = await setup()
+    const lock = await store.create(sessionInit(root))
+    for (const record of [...turnRecords(1), ...step2Records()]) await store.append(SESSION_ID, record)
+    await store.release(lock)
+
+    const { records, truncation } = await store.readAll(SESSION_ID)
+    expect(truncation).toBeUndefined()
+    for (const record of records) expect(validateSessionRecord(record), record.type).toEqual([])
+    expect(records.map(record => record.type).slice(7).filter(type => type !== 'checkpoint')).toEqual(step2Records().map(record => record.type))
+
+    const state = await store.resume(SESSION_ID)
+    expect(state).toEqual(projectSession(records))
+    expect(state.messages).toEqual([
+      { role: 'user', content: renderCompactionSummary('Turn 1 read the README.') },
+      { role: 'user', content: 'Add growth' },
+    ])
+    expect(state.metadata.goal).toMatchObject({ id: 'g1', status: 'completed', text: 'Summarize sales', note: 'presented v2' })
+    expect(state.metadata.goal?.updatedAt).toBe(records.find(record => record.type === 'goal.update')?.ts)
+    expect(state.metadata.lastCompactionSeq).toBe(records.find(record => record.type === 'compaction')?.seq)
+    expect(state.metadata.openTurn).toBeUndefined()
+  })
+
+  it('refuses a compaction whose tail does not start at a user message, and a goal.update for another goal', async () => {
+    const { root, store } = await setup()
+    const lock = await store.create(sessionInit(root))
+    for (const record of turnRecords(1)) await store.append(SESSION_ID, record)
+    const before = (await store.readAll(SESSION_ID)).records.length
+    const bad: SessionRecordInput[] = [
+      { type: 'compaction', turn: 1, step: 3, summary: 's', keepMessages: 2, compactedMessages: 2, requestId: 'r', usage: KNOWN_USAGE, trigger: { inputTokens: 2, threshold: 1 } },
+      { type: 'compaction', turn: 1, step: 3, summary: 's', keepMessages: 99, compactedMessages: 1, requestId: 'r', usage: KNOWN_USAGE, trigger: { inputTokens: 2, threshold: 1 } },
+      { type: 'goal.update', goalId: 'nope', status: 'completed' },
+    ]
+    for (const record of bad) {
+      await expect(store.append(SESSION_ID, record)).rejects.toSatisfy(error => isNexgentError(error, 'session/invalid-record'))
+    }
+    expect((await store.readAll(SESSION_ID)).records).toHaveLength(before)
+    await store.release(lock)
+  })
+
+  it('rejects malformed step-2 records', () => {
+    const base = { seq: 2, ts: '2026-10-11T00:00:00.000Z', sessionId: SESSION_ID }
+    const presented = step2Records().find(record => record.type === 'deliverable.presented')
+    expect(validateSessionRecord({ ...base, ...presented })).toEqual([])
+    // Windows separators are not portable paths.
+    expect(validateSessionRecord({
+      ...base,
+      type: 'turn.files',
+      turn: 1,
+      changes: [{ path: 'report\\summary.csv', change: 'modified' }],
+    })).not.toEqual([])
+    expect(validateSessionRecord({ ...base, type: 'feedback', turn: 1, feedback: { id: 'f', deliverableId: 'd', version: 1, rating: 6, comment: '' } })).not.toEqual([])
+    expect(validateSessionRecord({ ...base, type: 'goal.update', goalId: 'g', status: 'paused' })).not.toEqual([])
+    expect(validateSessionRecord({ ...base, type: 'user.message', turn: 1, content: 'x', source: 'robot' })).not.toEqual([])
+    expect(validateSessionRecord({
+      ...base,
+      type: 'material.added',
+      material: { id: 'm', originalName: 'a', path: 'a', size: 1, sha256: 'XYZ', mediaType: 'text/plain' },
+    })).not.toEqual([])
+  })
+})
+
+describe('a session written by step 1 stays readable', () => {
+  it('reads, resumes and continues the step-1 real-model session with step-2 records', async () => {
+    const { root, store } = await setup()
+    const dir = join(root, '.nexgent', 'sessions', STEP1_SESSION)
+    await mkdir(dir, { recursive: true })
+    // Normalize line endings in case a Windows checkout converted the fixture to CRLF.
+    const text = await readFile(new URL('./fixtures/step1-real-session.jsonl', import.meta.url), 'utf8')
+    await writeFile(join(dir, 'session.jsonl'), text.replace(/\r\n/g, '\n'), 'utf8')
+
+    const { records, truncation } = await store.readAll(STEP1_SESSION)
+    expect(truncation).toBeUndefined()
+    expect(records).toHaveLength(12)
+    const checkpoint = records[11]
+    if (checkpoint?.type !== 'checkpoint') throw new Error('expected the fixture to end with a checkpoint')
+    expect(checkpoint.state).toEqual(projectSession(records.slice(0, 11)))
+    const resumed = await store.resume(STEP1_SESSION)
+    expect(resumed).toEqual({ ...checkpoint.state, metadata: { ...checkpoint.state.metadata, lastSeq: 12 } })
+
+    const lock = await store.lock(STEP1_SESSION)
+    await store.append(STEP1_SESSION, { type: 'goal.set', goal: { id: 'g', text: 'Fix the bugs', status: 'active', setAt: '2026-10-11T00:00:00.000Z', updatedAt: '2026-10-11T00:00:00.000Z' } })
+    await store.append(STEP1_SESSION, { type: 'turn.start', turn: 2 })
+    await store.append(STEP1_SESSION, { type: 'turn.files', turn: 2, changes: [] })
+    await store.append(STEP1_SESSION, { type: 'turn.end', turn: 2, reason: { kind: 'completed' } })
+    await store.release(lock)
+    const after = await store.resume(STEP1_SESSION)
+    expect(after.messages).toEqual(checkpoint.state.messages)
+    expect(after.metadata.goal?.text).toBe('Fix the bugs')
+    expect(after.metadata.lastTurn).toBe(2)
+  })
+})

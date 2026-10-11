@@ -65,7 +65,7 @@ describe('contracts: type-level shape', () => {
       'text.delta' | 'reasoning.delta' | 'tool-call.start' | 'tool-call.delta' | 'tool-call.end' | 'usage' | 'done' | 'error'
     >()
     expectTypeOf<DoneEvent['finishReason']>().toEqualTypeOf<'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'refusal'>()
-    expectTypeOf<FinishReason>().toEqualTypeOf<'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'refusal' | 'error'>()
+    expectTypeOf<FinishReason>().toEqualTypeOf<'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'refusal' | 'pause' | 'error'>()
     expectTypeOf<Extract<LLMStreamEvent, { type: 'error' }>['error']['code']>().toBeString()
   })
 
@@ -97,6 +97,8 @@ describe('contracts: type-level shape', () => {
   it('session: the v1 record set, common fields and the store surface', () => {
     expectTypeOf<SessionRecordType>().toEqualTypeOf<
       'session.start' | 'user.message' | 'assistant.message' | 'tool.result' | 'turn.start' | 'turn.end' | 'checkpoint' | 'error' | 'approval.request' | 'approval.decision' | 'approval.grant'
+      // step 2
+      | 'material.added' | 'deliverable.presented' | 'turn.files' | 'feedback' | 'goal.set' | 'goal.update' | 'compaction'
     >()
     expectTypeOf<SessionRecord['seq']>().toBeNumber()
     expectTypeOf<SessionRecord['ts']>().toBeString()
@@ -291,7 +293,7 @@ describe('contracts: pure helpers', () => {
 
   it('record type lists are complete and in sync with the unions', () => {
     const sessionTypes: readonly SessionRecordType[] = SESSION_RECORD_TYPES
-    expect(new Set(sessionTypes).size).toBe(11)
+    expect(new Set(sessionTypes).size).toBe(18)
     const ledgerTypes: readonly LedgerRecordType[] = LEDGER_RECORD_TYPES
     expect(new Set(ledgerTypes).size).toBe(4)
   })

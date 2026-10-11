@@ -1,6 +1,6 @@
 # 权限与审批模型
 
-> 步骤 1 章节（沙箱模式、路径与命令策略、工具审批、费用上限格式、密钥存放、已知边界、共用审批交互、测试）已定稿；"插件安装审批"在步骤 4 填，"本地 IPC 与访问令牌"在步骤 2 填。字段名以 `packages/kernel/src/contracts/` 为准，二者冲突时改契约 PR 并同步本文。来源：计划 4.10 第 2 行与"安全"一行；ADR 0001 决策 9、12。
+> 步骤 1 章节（沙箱模式、路径与命令策略、工具审批、费用上限格式、密钥存放、已知边界、共用审批交互、测试）已定稿；步骤 2 第 1 轮填写"本地 IPC 与访问令牌"，并把 `.nexgent/outputs/` 改为对模型只读、补上 `.nexgent/skills/`；"插件安装审批"在步骤 4 填。字段名以 `packages/kernel/src/contracts/` 为准，二者冲突时改契约 PR 并同步本文。来源：计划 4.10 第 2 行与"安全"一行；ADR 0001 决策 9、12。
 
 ## 目的与范围
 
@@ -40,8 +40,9 @@
 | 子目录 | 工具读 | 工具写 | 说明 |
 | --- | --- | --- | --- |
 | `sessions/`、`ledgers/`、`capabilities/` | 拒绝 | 拒绝 | 只有宿主写；模型不能改自己的历史、账本与能力版本 |
-| `materials/` | 允许 | 拒绝 | 用户提供的资料，由宿主写入（步骤 2） |
-| `outputs/` | 允许 | 允许 | 任务成果；步骤 2 的快照由宿主另存 |
+| `materials/` | 允许 | 拒绝 | 用户提供的资料，由宿主（`@nexgent/tasking`）复制写入；模型只读，原文件与副本都不被模型修改 |
+| `outputs/` | 允许 | 拒绝 | 成果快照，只由宿主（`@nexgent/tasking`）在 `present` 时写；模型不能改任何版本的快照（步骤 2 起，步骤 1 曾允许写）。模型把成果写在项目里，再用 `present` 交付 |
+| `skills/` | 允许 | 拒绝 | 项目技能，由用户维护（步骤 2）；`load_skill` 经宿主读取 |
 | `config.json` | 允许 | 拒绝 | 配置改动必须经用户或审批流 |
 
 **拒绝与审批模式**（在写根内也生效）：
@@ -165,7 +166,57 @@
 
 ## 本地 IPC 与访问令牌
 
-一句话（步骤 2 填）：Electron 渲染进程与主进程之间的调用边界与令牌。
+桌面应用（`apps/desktop`，Electron）里，主进程持有 `@nexgent/sdk` 的实例（因此持有 kernel、会话锁、密钥读取能力）；渲染进程只是界面，经 preload 暴露的一个窄接口调用 SDK。本节定这条边界：渲染进程能做什么、调用怎样被验证、窗口怎样配置。接口的类型镜像是 `packages/sdk/src/api.ts`（`SdkMethods`、`SDK_METHOD_NAMES`、`SdkEvent`）。不做浏览器访问的 Web 服务，因此没有网络监听端口；IPC 是唯一的入口。
+
+**窗口配置**（每个 `BrowserWindow` 都必须满足，W5 有测试检查实际的 `webPreferences`）：
+
+| 项 | 值 | 目的 |
+| --- | --- | --- |
+| `contextIsolation` | `true` | preload 与页面脚本隔离，页面拿不到 preload 的变量（令牌就在其中） |
+| `sandbox` | `true` | 渲染进程在 Chromium 沙箱里，没有 Node |
+| `nodeIntegration` / `nodeIntegrationInWorker` / `nodeIntegrationInSubFrames` | `false` | 页面与 worker 没有 `require` |
+| `webSecurity` | `true`；`allowRunningInsecureContent: false` | 不放宽同源与混合内容 |
+| `webviewTag` | `false` | 不允许嵌入其他页面 |
+| `spellcheck` | `false` | 不向外部词典服务发送输入 |
+| `devTools` | 仅开发构建为 `true` | 打包后的应用不能打开开发者工具 |
+
+**页面来源与导航。**
+
+- 打包后的界面由自定义协议 `app://nexgent/` 从应用包内提供（`protocol.handle`，只映射包内 `renderer/` 目录，拒绝 `..` 与绝对路径）；开发模式只额外允许 `http://localhost:<vite 端口>`。界面不用 `file://` 加载。
+- `will-navigate`、`will-redirect`、`will-frame-navigate` 一律 `preventDefault()`，除非目标与当前页面同源；`setWindowOpenHandler` 一律返回 `{ action: 'deny' }`。外部 `http(s)` 链接由主进程在用户点击后用 `shell.openExternal` 打开；`file://`、`javascript:`、`data:` 及其他协议的导航与打开一律拒绝并写日志。
+- `session.setPermissionRequestHandler` 与 `setPermissionCheckHandler` 对所有权限（摄像头、麦克风、通知、地理位置等）返回拒绝。
+- 页面带 CSP：`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`（开发模式为 vite 的热更新放宽 `connect-src` 到本机端口）。
+
+**访问令牌。**
+
+1. 主进程每创建一个窗口生成一个令牌：`crypto.randomBytes(32)` 的 base64url 文本，只存在内存里，窗口关闭即作废；不写磁盘、日志、会话或账本。
+2. 令牌经 `webPreferences.additionalArguments`（`--nexgent-ipc-token=<token>`）交给该窗口的 preload；preload 从 `process.argv` 读出后保存在闭包里，**不**放到 `window` 或 `contextBridge` 暴露的对象上。
+3. preload 用 `contextBridge.exposeInMainWorld('nexgent', api)` 暴露且只暴露：
+   - `invoke(method, input)`：内部调用 `ipcRenderer.invoke('nexgent:call', { token, method, input })`；
+   - `onEvent(listener)`：订阅 `nexgent:event` 通道上的 `SdkEvent`，返回取消订阅函数；
+   - `platform`：`process.platform` 的字符串。
+   页面拿不到 `ipcRenderer` 本身，也拿不到令牌。
+4. 主进程只在 `nexgent:call` 一个通道上 `ipcMain.handle`，每次调用按顺序检查：
+   1. `event.senderFrame` 是该窗口的顶层框架，且其 URL 的来源是 `app://nexgent`（开发模式另加 vite 来源）；
+   2. 令牌与该窗口的令牌相等（`crypto.timingSafeEqual`，长度不等直接拒绝）；
+   3. `method` 在白名单 `SDK_METHOD_NAMES` 内；
+   4. `input` 是普通 JSON 对象，并通过该方法的参数校验（必填字段、类型、路径参数是绝对路径）。
+   任一检查失败：不调用 SDK，返回 `{ ok: false, error: { code: 'approval/denied', … } }`，并在日志里写一行（时间、窗口 ID、方法名、失败的检查项；**不**写令牌与参数内容）。通过则调用 `sdk.call(method, input)`，返回 `{ ok: true, result }` 或 `{ ok: false, error: toErrorInfo(error) }`。
+5. 事件只从主进程推向渲染进程（`webContents.send('nexgent:event', event)`），渲染进程不能经事件通道调用任何东西。
+
+**方法白名单**：`SDK_METHOD_NAMES` 的全部方法，即 `app.info`；`projects.recent / open / close / forget`；`sessions.list / create / open / close / export`；`turns.send / cancel`；`approvals.respond`；`materials.add / list / remove`；`deliverables.list / get / diff / readText / reveal`；`feedback.submit / list`；`goals.get / set / update`；`settings.get / update / setApiKey`。没有通用的文件读写、命令执行或任意路径打开方法：
+
+- 文件选择对话框由主进程打开（`dialog.showOpenDialog`），渲染进程只发起“添加资料”“打开项目”的意图，主进程拿到用户选的路径后自己调用 `materials.add` / `projects.open`；渲染进程直接传路径给这两个方法也允许，但路径必须是绝对路径，且 `materials.add` 只复制，不改源文件。
+- `deliverables.readText` 只读快照目录里属于该版本的文件，`deliverables.reveal` 只对快照目录内的路径调用 `shell.showItemInFolder`，二者都拒绝 `..` 与绝对路径参数。
+- `sessions.export` 的 `outDir` 来自主进程的保存对话框。
+
+**密钥。** `settings.setApiKey` 是唯一把密钥值从渲染进程送进主进程的方法；值只在这一次调用里经过 IPC，主进程写入 `~/.nexgent/credentials.json`（`0600`）后只返回 `{ configured, source }`。没有任何方法或事件把密钥值送回渲染进程；设置页的输入框写入后清空，只显示“已配置 / 来源”。IPC 日志不记录 `settings.setApiKey` 的参数。
+
+**审批。** 主进程把 `ApprovalRequest` 作为 `approval.request` 事件推给渲染进程；渲染进程用 `approvals.respond` 回答，主进程补上 `decidedBy: 'user'` 后交给 `ctx.approvals`。窗口关闭或渲染进程崩溃时，未决的审批按 `decidedBy: 'cancel'` 关闭（“CLI 与桌面应用共用的审批交互”）。
+
+**边界（如实列出）。** 令牌防的是“页面以外的东西”调用 SDK：被注入的子框架、意外导航到的外部页面、同一会话里的其他 `webContents`。它不防主进程或 preload 本身被篡改，也不防与用户同权限的本机进程直接读写 `.nexgent/` 或调试 Electron 进程；这些不在桌面应用的威胁模型内。
+
+**测试**（W5、W8）：窗口的 `webPreferences` 与上表一致；无令牌、错令牌、白名单外方法、非顶层框架的调用各被拒并有日志行；`will-navigate` 到外部 URL 与 `file://` 被阻止；`settings.setApiKey` 后 `settings.get` 与所有事件里搜不到密钥值；桌面层 D10。
 
 ## 已知边界与绕过
 
@@ -238,7 +289,8 @@ interface ToolApprovalAsk {
 | 沙箱模式 | `--sandbox` 覆盖 `config.json`；非法值 | 会话头记录 CLI 值；非法值启动失败 |
 | 路径 | 写 `../outside.txt`、绝对路径根外 | 拒绝，错误含解析后绝对路径 |
 | 路径 | 项目内符号链接指向根外文件 / 目录后写入（Windows 用 junction 与 symlink 各一） | 拒绝 |
-| 路径 | 写 `.nexgent/sessions/x`、`.nexgent/materials/x`、`.git/HEAD`、`node_modules/a.js` | 拒绝；写 `.nexgent/outputs/x` 允许 |
+| 路径 | 写 `.nexgent/sessions/x`、`.nexgent/materials/x`、`.nexgent/outputs/x`（步骤 2 起）、`.nexgent/skills/x/SKILL.md`、`.git/HEAD`、`node_modules/a.js` | 拒绝；读 `.nexgent/materials/x`、`.nexgent/outputs/x` 允许 |
+| 宿主写入（步骤 2） | `read-only` 模式下调用 `present`、添加资料 | 快照与资料照常写入（宿主写，不受工具策略约束） |
 | 路径 | 写 `.env` | 产生审批请求；拒绝后不写入 |
 | 路径（Windows） | 大小写不同的根拼法、`\\?\` 前缀、不同盘符、UNC、`NUL` 文件名 | 前两者允许，后三者拒绝 |
 | 路径 | `extraReadRoots` 内读、外读 | 允许 / 拒绝 |

@@ -34,7 +34,7 @@ import {
 } from '@nexgent/kernel'
 import { checkSequence, encodeLine, scanSessionLog } from './jsonl.js'
 import { acquireLockFile, LOCK_FILE_NAME, releaseLockFile, type LockIdentity } from './lock.js'
-import { DEFAULT_CHECKPOINT_EVERY, initialState, replay, SessionProjector, shouldCheckpoint } from './projection.js'
+import { DEFAULT_CHECKPOINT_EVERY, foldRecord, initialState, replay, SessionProjector, shouldCheckpoint } from './projection.js'
 import { jsonEqual } from './schema/evaluator.js'
 import { assertSessionRecord } from './schema/session-schema.js'
 
@@ -419,6 +419,8 @@ export class JsonlSessionStore implements SessionStore {
     if (record.type === 'checkpoint' && !jsonEqual(record.state, writer.projector.snapshot())) {
       throw invalidRecord('checkpoint.state does not equal the projection of the records it covers')
     }
+    // Records whose projection can fail are folded into a copy first, so a bad one never reaches the file.
+    if (record.type === 'goal.update' || record.type === 'compaction') foldRecord(writer.projector.snapshot(), record)
     const bytes = Buffer.from(encodeLine(record), 'utf8')
     try {
       await writeFully(writer.handle, bytes, writer.size)

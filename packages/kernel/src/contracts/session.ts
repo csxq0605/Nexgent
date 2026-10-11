@@ -11,6 +11,7 @@ import type { ErrorInfo } from './errors.js'
 import type { JsonValue } from './json.js'
 import type { ApprovalDecision, ApprovalGrant, ApprovalRequest } from './approvals.js'
 import type { FinishReason, LLMMessage, LLMUsage, RefusalInfo, ToolCall } from './llm.js'
+import type { DeliverableVersionRef, FeedbackEntry, FileChange, Goal, GoalStatus, MaterialRef } from './tasking.js'
 import type { SandboxMode } from './workspace.js'
 
 /** The only session format version. */
@@ -52,9 +53,18 @@ export interface UserMessageRecord extends SessionRecordBase {
   readonly turn: number
   /** Plain text. */
   readonly content: string
-  /** `'user'` for a human prompt; `'inject'` for synthetic context presented as the user. */
-  readonly source: 'user' | 'inject'
+  /**
+   * `'user'` for a human prompt; `'inject'` for synthetic context presented as
+   * the user (hidden in the UI); `'feedback'` for the prompt a feedback turn
+   * opens with (step 2: it follows that turn's `feedback` record).
+   */
+  readonly source: UserMessageSource
+  /** Ids of the materials the user attached to this message (step 2, optional); the reference text itself is an `inject` message. */
+  readonly materials?: readonly string[]
 }
+
+/** Who produced a {@link UserMessageRecord}. */
+export type UserMessageSource = 'user' | 'inject' | 'feedback'
 
 /** The assistant's reply for one step: text plus tool calls plus the request's accounting. */
 export interface AssistantMessageRecord extends SessionRecordBase {
@@ -165,6 +175,118 @@ export interface ApprovalGrantRecord extends SessionRecordBase {
   readonly grant: ApprovalGrant
 }
 
+// ---------------------------------------------------------------------------
+// Step 2 records (appended within v1; files written by step 1 stay readable)
+// ---------------------------------------------------------------------------
+
+/**
+ * A material was copied into `.nexgent/materials/<id>/` on behalf of this
+ * session. Written by the host (SDK) when it adds the material, outside a
+ * turn or inside one; `materials/<id>/material.json` stays the source of
+ * truth for the material's state (removal changes only that file).
+ */
+export interface MaterialAddedRecord extends SessionRecordBase {
+  readonly type: 'material.added'
+  /** Turn in progress when it was added; absent between turns. */
+  readonly turn?: number
+  readonly material: MaterialRef
+}
+
+/**
+ * A `present` tool call produced a deliverable version. Appended by the tool
+ * through {@link ToolContext.appendRecord} before that call's `tool.result`.
+ */
+export interface DeliverablePresentedRecord extends SessionRecordBase {
+  readonly type: 'deliverable.presented'
+  readonly turn: number
+  readonly step: number
+  /** The `present` call that produced it. */
+  readonly toolCallId: string
+  readonly deliverable: DeliverableVersionRef
+}
+
+/**
+ * Files the turn added, modified or deleted (tool `meta` plus a before/after
+ * scan of the project, `.nexgent/` and `node_modules/` excluded). Written
+ * right before `turn.end` whenever a file tracker is installed, also when the
+ * list is empty; never written for a turn the process died in.
+ */
+export interface TurnFilesRecord extends SessionRecordBase {
+  readonly type: 'turn.files'
+  readonly turn: number
+  /** Sorted by `path`; at most {@link TURN_FILES_LIMIT} entries. */
+  readonly changes: readonly FileChange[]
+  /** How many further changes were dropped beyond the limit. */
+  readonly omitted?: number
+}
+
+/** Max entries one `turn.files` record lists. */
+export const TURN_FILES_LIMIT = 1000
+
+/**
+ * The user rated / commented on a deliverable version. Opens a feedback turn:
+ * the order is `turn.start` → `feedback` → `user.message { source: 'feedback' }`.
+ */
+export interface FeedbackRecord extends SessionRecordBase {
+  readonly type: 'feedback'
+  readonly turn: number
+  readonly feedback: FeedbackEntry
+}
+
+/** A persistent goal was set for the session; it replaces any previous goal. */
+export interface GoalSetRecord extends SessionRecordBase {
+  readonly type: 'goal.set'
+  /** Turn in progress, if any. */
+  readonly turn?: number
+  readonly goal: Goal
+}
+
+/** The current goal changed status (or its text was edited). */
+export interface GoalUpdateRecord extends SessionRecordBase {
+  readonly type: 'goal.update'
+  readonly turn?: number
+  /** Must equal the current goal's id; otherwise the record is invalid for projection. */
+  readonly goalId: string
+  readonly status: GoalStatus
+  /** New text, when edited. */
+  readonly text?: string
+  /** Why (e.g. the model's or user's note on completion). */
+  readonly note?: string
+}
+
+/**
+ * Older history was replaced by a summary. Projection: `messages` becomes
+ * `[{ role: 'user', content: renderCompactionSummary(summary) }]` followed by
+ * the last `keepMessages` messages as they were. The kept tail always starts
+ * with a `user` message (a turn or injection boundary), so no tool call is
+ * separated from its result; summarized assistant replies lose their
+ * `providerContent` (thinking blocks are not replayed), kept ones keep it.
+ */
+export interface CompactionRecord extends SessionRecordBase {
+  readonly type: 'compaction'
+  /** Turn in progress when the compaction ran (it runs before a model call). */
+  readonly turn: number
+  /** The step whose request will be the first to use the compacted history. */
+  readonly step: number
+  /** Summary text produced by the compaction request. */
+  readonly summary: string
+  /** Messages kept verbatim after the summary (≥ 1). */
+  readonly keepMessages: number
+  /** Messages folded into the summary (the previous summary counts as one). */
+  readonly compactedMessages: number
+  /** The auxiliary model request that produced the summary; joins to the ledger. */
+  readonly requestId: string
+  /** Usage of that request. */
+  readonly usage: LLMUsage
+  /** What triggered it: the last reported input size and the threshold it crossed. */
+  readonly trigger: { readonly inputTokens: number; readonly threshold: number }
+}
+
+/** Wrapper the projection puts around a compaction summary. Pure; the exact text is part of the contract. */
+export function renderCompactionSummary(summary: string): string {
+  return `<conversation-summary>\nThe earlier part of this conversation was compacted. Summary:\n\n${summary}\n</conversation-summary>`
+}
+
 /** Every v1 record kind. */
 export type SessionRecord =
   | SessionStartRecord
@@ -178,6 +300,13 @@ export type SessionRecord =
   | ApprovalRequestRecord
   | ApprovalDecisionRecord
   | ApprovalGrantRecord
+  | MaterialAddedRecord
+  | DeliverablePresentedRecord
+  | TurnFilesRecord
+  | FeedbackRecord
+  | GoalSetRecord
+  | GoalUpdateRecord
+  | CompactionRecord
 
 /** The `type` tag vocabulary. */
 export type SessionRecordType = SessionRecord['type']
@@ -195,13 +324,32 @@ export const SESSION_RECORD_TYPES: readonly SessionRecordType[] = [
   'approval.request',
   'approval.decision',
   'approval.grant',
+  'material.added',
+  'deliverable.presented',
+  'turn.files',
+  'feedback',
+  'goal.set',
+  'goal.update',
+  'compaction',
 ]
+
+/** Record types a host (SDK) may append outside the agent loop, through the agent that holds the lock. */
+export type HostRecordType = 'material.added' | 'goal.set' | 'goal.update'
+
+/** Record types a tool may append through {@link ToolContext.appendRecord}. */
+export type ToolRecordType = 'deliverable.presented'
 
 /** Distributive omit over a union. */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
 /** What a caller passes to `append`: a record minus the fields the store assigns. */
 export type SessionRecordInput = DistributiveOmit<SessionRecord, 'seq' | 'ts' | 'sessionId'>
+
+/** A record a host may append between or during turns. */
+export type HostRecordInput = Extract<SessionRecordInput, { readonly type: HostRecordType }>
+
+/** A record a tool may append during its call. */
+export type ToolRecordInput = Extract<SessionRecordInput, { readonly type: ToolRecordType }>
 
 /** Session facts that are not conversation messages. */
 export interface SessionMetadata {
@@ -225,6 +373,10 @@ export interface SessionMetadata {
   readonly totalUsage: LLMUsage
   /** Last record `seq` folded into this state. */
   readonly lastSeq: number
+  /** The session's current goal, from the latest `goal.set` and later `goal.update`s (step 2). */
+  readonly goal?: Goal
+  /** `seq` of the latest `compaction` folded in (step 2). */
+  readonly lastCompactionSeq?: number
 }
 
 /** What a session projects to: the LLM-visible history plus metadata. The system prompt is not stored. */

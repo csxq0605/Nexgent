@@ -25,6 +25,15 @@ import { KNOWN_USAGE } from './helpers.js'
 
 const ID = '6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f'
 const TS = '2026-10-07T08:00:00.000Z'
+const SHA = 'a'.repeat(64)
+const MATERIAL = {
+  id: '9d3c1f0e-1111-4222-8333-444455556666',
+  originalName: 'orders.csv',
+  path: '.nexgent/materials/9d3c1f0e-1111-4222-8333-444455556666/orders.csv',
+  size: 1234,
+  sha256: SHA,
+  mediaType: 'text/csv',
+}
 
 /** One input per record type (the checkpoint is filled in below). */
 const inputs: SessionRecordInput[] = [
@@ -81,6 +90,39 @@ const inputs: SessionRecordInput[] = [
   },
   { type: 'error', turn: 1, error: { name: 'NexgentError', code: 'ledger/write-failed', message: 'disk' }, fatal: false },
   { type: 'turn.end', turn: 1, reason: { kind: 'error', error: { name: 'Error', code: 'internal', message: 'x' } } },
+  // step 2 records
+  { type: 'material.added', material: MATERIAL },
+  { type: 'goal.set', goal: { id: 'g1', text: 'Clean the orders', status: 'active', setAt: TS, updatedAt: TS } },
+  { type: 'turn.start', turn: 2 },
+  { type: 'feedback', turn: 2, feedback: { id: 'f1', deliverableId: 'd1', version: 1, rating: 3, comment: 'Use Chinese names' } },
+  { type: 'user.message', turn: 2, content: 'Use Chinese names', source: 'feedback', materials: [MATERIAL.id] },
+  {
+    type: 'compaction',
+    turn: 2,
+    step: 1,
+    summary: 'Earlier: listed files.',
+    keepMessages: 1,
+    compactedMessages: 3,
+    requestId: 'r-compact',
+    usage: KNOWN_USAGE,
+    trigger: { inputTokens: 1200, threshold: 1000 },
+  },
+  {
+    type: 'deliverable.presented',
+    turn: 2,
+    step: 1,
+    toolCallId: 'c2',
+    deliverable: {
+      deliverableId: 'd1',
+      version: 2,
+      title: 'summary.csv',
+      summary: 'Summary by region',
+      files: [{ path: 'report/summary.csv', size: 10, sha256: SHA, mediaType: 'text/csv' }],
+    },
+  },
+  { type: 'goal.update', turn: 2, goalId: 'g1', status: 'completed', note: 'done' },
+  { type: 'turn.files', turn: 2, changes: [{ path: 'report/summary.csv', change: 'modified' }], omitted: 2 },
+  { type: 'turn.end', turn: 2, reason: { kind: 'completed' } },
 ]
 
 function sampleRecords(): SessionRecord[] {

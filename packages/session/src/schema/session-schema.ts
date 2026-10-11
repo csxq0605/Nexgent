@@ -31,6 +31,13 @@ export const SESSION_RECORD_DEFS: Readonly<Record<SessionRecordType, string>> = 
   'approval.request': 'approvalRequestRecord',
   'approval.decision': 'approvalDecisionRecord',
   'approval.grant': 'approvalGrantRecord',
+  'material.added': 'materialAddedRecord',
+  'deliverable.presented': 'deliverablePresentedRecord',
+  'turn.files': 'turnFilesRecord',
+  feedback: 'feedbackRecord',
+  'goal.set': 'goalSetRecord',
+  'goal.update': 'goalUpdateRecord',
+  compaction: 'compactionRecord',
 }
 
 const BASE_REQUIRED = ['type', 'seq', 'ts', 'sessionId'] as const
@@ -115,6 +122,59 @@ export const sessionRecordSchema: JsonObject = {
       { tool: ref('nonEmptyString'), pattern: { type: 'string' }, grantedAt: ref('timestamp') },
       ['tool', 'grantedAt'],
     ),
+    sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+    portablePath: { type: 'string', minLength: 1, pattern: '^[^\\\\]+$' },
+    materialRef: closedObject(
+      {
+        id: ref('nonEmptyString'),
+        originalName: ref('nonEmptyString'),
+        path: ref('portablePath'),
+        size: { type: 'integer', minimum: 0 },
+        sha256: ref('sha256'),
+        mediaType: ref('nonEmptyString'),
+      },
+      ['id', 'originalName', 'path', 'size', 'sha256', 'mediaType'],
+    ),
+    deliverableFile: closedObject(
+      { path: ref('portablePath'), size: { type: 'integer', minimum: 0 }, sha256: ref('sha256'), mediaType: ref('nonEmptyString') },
+      ['path', 'size', 'sha256', 'mediaType'],
+    ),
+    deliverableVersionRef: closedObject(
+      {
+        deliverableId: ref('nonEmptyString'),
+        version: ref('positiveInteger'),
+        title: ref('nonEmptyString'),
+        summary: { type: 'string' },
+        files: { type: 'array', minItems: 1, items: ref('deliverableFile') },
+      },
+      ['deliverableId', 'version', 'title', 'summary', 'files'],
+    ),
+    fileChange: closedObject(
+      { path: ref('portablePath'), change: { enum: ['added', 'modified', 'deleted'] } },
+      ['path', 'change'],
+    ),
+    feedbackEntry: closedObject(
+      {
+        id: ref('nonEmptyString'),
+        deliverableId: ref('nonEmptyString'),
+        version: ref('positiveInteger'),
+        rating: { enum: [1, 2, 3, 4, 5] },
+        comment: { type: 'string' },
+      },
+      ['id', 'deliverableId', 'version', 'comment'],
+    ),
+    goalStatus: { enum: ['active', 'completed', 'abandoned'] },
+    goal: closedObject(
+      {
+        id: ref('nonEmptyString'),
+        text: { type: 'string' },
+        status: ref('goalStatus'),
+        setAt: ref('timestamp'),
+        updatedAt: ref('timestamp'),
+        note: { type: 'string' },
+      },
+      ['id', 'text', 'status', 'setAt', 'updatedAt'],
+    ),
     turnEndReason: {
       oneOf: [
         closedObject({ kind: { const: 'completed' } }, ['kind']),
@@ -139,6 +199,8 @@ export const sessionRecordSchema: JsonObject = {
         openTurn: ref('positiveInteger'),
         totalUsage: ref('usage'),
         lastSeq: ref('positiveInteger'),
+        goal: ref('goal'),
+        lastCompactionSeq: ref('positiveInteger'),
       },
       ['createdAt', 'projectRoot', 'model', 'sandboxMode', 'grants', 'lastTurn', 'totalUsage', 'lastSeq'],
     ),
@@ -168,7 +230,12 @@ export const sessionRecordSchema: JsonObject = {
     ),
     userMessageRecord: record(
       'user.message',
-      { turn, content: { type: 'string' }, source: { enum: ['user', 'inject'] } },
+      {
+        turn,
+        content: { type: 'string' },
+        source: { enum: ['user', 'inject', 'feedback'] },
+        materials: { type: 'array', items: ref('nonEmptyString') },
+      },
       ['turn', 'content', 'source'],
     ),
     assistantMessageRecord: record(
@@ -216,6 +283,41 @@ export const sessionRecordSchema: JsonObject = {
       'decision',
     ]),
     approvalGrantRecord: record('approval.grant', { grant: ref('approvalGrant') }, ['grant']),
+    materialAddedRecord: record('material.added', { turn, material: ref('materialRef') }, ['material']),
+    deliverablePresentedRecord: record(
+      'deliverable.presented',
+      { turn, step, toolCallId: ref('nonEmptyString'), deliverable: ref('deliverableVersionRef') },
+      ['turn', 'step', 'toolCallId', 'deliverable'],
+    ),
+    turnFilesRecord: record(
+      'turn.files',
+      { turn, changes: { type: 'array', items: ref('fileChange') }, omitted: ref('positiveInteger') },
+      ['turn', 'changes'],
+    ),
+    feedbackRecord: record('feedback', { turn, feedback: ref('feedbackEntry') }, ['turn', 'feedback']),
+    goalSetRecord: record('goal.set', { turn, goal: ref('goal') }, ['goal']),
+    goalUpdateRecord: record(
+      'goal.update',
+      { turn, goalId: ref('nonEmptyString'), status: ref('goalStatus'), text: { type: 'string' }, note: { type: 'string' } },
+      ['goalId', 'status'],
+    ),
+    compactionRecord: record(
+      'compaction',
+      {
+        turn,
+        step,
+        summary: ref('nonEmptyString'),
+        keepMessages: ref('positiveInteger'),
+        compactedMessages: ref('positiveInteger'),
+        requestId: ref('nonEmptyString'),
+        usage: ref('usage'),
+        trigger: closedObject(
+          { inputTokens: { type: 'integer', minimum: 0 }, threshold: { type: 'integer', minimum: 1 } },
+          ['inputTokens', 'threshold'],
+        ),
+      },
+      ['turn', 'step', 'summary', 'keepMessages', 'compactedMessages', 'requestId', 'usage', 'trigger'],
+    ),
   },
 }
 

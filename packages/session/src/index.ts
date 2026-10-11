@@ -52,6 +52,12 @@ export {
   validateLedgerRecord,
 } from './schema/ledger-schema.js'
 export {
+  deliverableVersionSchema,
+  materialMetadataSchema,
+  validateDeliverableVersion,
+  validateMaterialMetadata,
+} from './schema/tasking-schema.js'
+export {
   checkSessionPluginConfig,
   createSessionServices,
   SessionPlugin,

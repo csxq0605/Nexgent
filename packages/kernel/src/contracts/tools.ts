@@ -12,6 +12,7 @@
 import type { ToolApprovalAsk } from './approvals.js'
 import { NexgentError } from './errors.js'
 import type { JsonSchema, JsonValue } from './json.js'
+import type { ToolRecordInput } from './session.js'
 import type { SandboxMode, Workspace } from './workspace.js'
 
 /** What a tool may do to the world; drives sandbox checks and approval defaults. */
@@ -58,6 +59,13 @@ export interface ToolContext {
    * Tools never prompt by themselves; without a host responder this denies.
    */
   requestApproval(ask: ToolApprovalAsk): Promise<boolean>
+  /**
+   * Append a session record on behalf of this call (step 2: the `present`
+   * tool's `deliverable.presented`). The record lands before this call's
+   * `tool.result`; `turn` / `step` / `toolCallId` must be this call's.
+   * Absent on hosts that do not support it (step-1 kernels, test fakes).
+   */
+  readonly appendRecord?: (record: ToolRecordInput) => Promise<void>
 }
 
 /** What a handler returns; the loop wraps it into a `tool.result` record and a `tool` message. */

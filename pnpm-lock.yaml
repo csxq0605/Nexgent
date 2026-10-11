@@ -69,6 +69,12 @@ importers:
         specifier: workspace:*
         version: link:../test-support
 
+  packages/sdk:
+    dependencies:
+      '@nexgent/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+
   packages/session:
     dependencies:
       '@nexgent/kernel':
