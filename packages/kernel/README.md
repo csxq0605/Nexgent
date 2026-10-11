@@ -47,9 +47,30 @@ The loop calls the optional services `ctx.context` (`ContextService`) and `ctx.t
 - Turn input: `agent.run(text)` or `agent.run({ text, materialIds? })` for a user turn, `agent.run({ source: 'feedback', feedback })` for a feedback turn (`feedback` record after `turn.start`, message text `renderFeedbackPrompt(feedback)`). `materialIds` go on the user message as `materials`.
 - Turn start: `files.beginTurn`, then each provider's `beginTurn` with the session state read just before `turn.start` (never mid-turn: a lock-holding `JsonlSessionStore.resume` closes an open turn as interrupted). Sections are rendered for every request of the turn (provider order, then `id`) after "Working with files"; `inject` texts are written as `user.message { source: 'inject' }` before the user message. A throwing provider is skipped with a non-fatal `error` record. A failed `beginTurn` writes an `error` record and the turn runs untracked (no `turn.files`).
 - Before each model call: `compactor.shouldCompact` with the agent's last reported usage (unknown after resume until the first request); on `compact` the kernel checks `keepMessages` (1..history length, tail starts with `user`), writes `compaction`, replaces the in-memory history with the summary plus the tail and counts the summary request in the task's totals. A failure writes a non-fatal `error`, keeps the history and skips compaction for the rest of the turn.
-- Tools: `KernelToolContext.step` and `appendRecord(record)`, which accepts only `deliverable.presented` with this call's `turn` / `step` / `toolCallId`, before the call settles; a refused or failed append ends the call as `tool/failed` even if the handler caught it. `files.observe` runs after every `tool.result`; its errors are ignored.
+- Tools: `KernelToolContext.step` and `appendRecord(record)`, which accepts the tool record types (`TOOL_RECORD_TYPES`: `deliverable.presented` with this call's `turn` / `step` / `toolCallId`; the step-3 `subagent.*`, `team.*`, `workflow.*` with this call's `turn`, stamped when an optional one is left out, and this call's `toolCallId` where the record has one) before the call settles; a refused or failed append ends the call as `tool/failed` even if the handler caught it. `files.observe` runs after every `tool.result`; its errors are ignored.
 - Turn end: `files.endTurn` (its signal fires `FILES_END_CANCEL_MS` = 5 s after the turn is cancelled), then `turn.files` sorted by path, at most `TURN_FILES_LIMIT` entries plus `omitted`; a failure writes an `error` record instead. Then `turn.end`.
-- Host records: `agent.appendHostRecord(record)` (a `HostRecordSink`) accepts `material.added`, `goal.set`, `goal.update`; during a turn it adds the running turn's number, between turns the record has none; any other type or another turn number is refused with `session/invalid-record`.
+- Host records: `agent.appendHostRecord(record)` (a `HostRecordSink`) accepts `HOST_RECORD_TYPES` (`material.added`, `goal.set`, `goal.update`, `session.title`, and for step 3 `subagent.end`, `team.*`, `workflow.phase`, `workflow.end`); during a turn it adds the running turn's number, between turns the record has none; any other type or another turn number is refused with `session/invalid-record`.
+
+### Step-3 members
+
+ADR 0004, `permissions.md` §子会话继承, `agent-hooks.md` §宿主接口 (step 3).
+
+```ts
+const member = await app.agents.create({ child: { parentSessionId: root.sessionId, member: { name: 'helper', executionForm: 'delegated' }, preset, sandboxMode, mode: 'fork', budget } })
+await member.run(task, { signal })                                       // one member run = one turn of the child session
+await member.close()                                                      // the member's own task.outcome
+await app.agents.resume(id, { child: { parentSessionId: root.sessionId }, preset })   // a teammate in a later Lead turn
+root.holdTurn(work)                                                       // keep the turn open until work (e.g. writing subagent.end) settles
+```
+
+- Parent: a root agent open in this process (`session/not-found` otherwise); a member as parent is `tool/denied` (depth 1), as is the 17th member of one task (`COLLABORATION_LIMITS.maxMembersPerTask`). A child session is resumed only with `child`, under its open parent.
+- Header and history: `session.start` carries `parentSessionId` and `member` (the preset's name added when the identity leaves it out). `mode: 'fork'` writes `fork.seed` at seq 2: the parent's history as of the end of its last completed turn (`agent.forkSeed()`), `throughSeq` that turn's `turn.end`.
+- Narrowing: sandbox `childSandboxMode(parent, preset, request)` (wider is `sandbox/denied`); tools: the member scope inherits the parent scope's restrictions (`ToolRegistryService.inherit`), then denies `MEMBER_DENIED_TOOLS`, then applies the preset's `tools`; the preset's `persona` replaces the default persona, its `model`, `effort`, `thinking`, `maxSteps` apply (else the parent's). `resume` re-checks the sandbox against the parent and takes the preset again from `ResumeAgentOptions.preset` (the header keeps only its name).
+- Prompt: a member's system prompt has `renderMemberPromptLine(member)` (`Member: <name> (<form>)`) on its own line after the persona, then one sentence on its role. A prompt that offers `delegate`, `spawn_teammate` or `workflow` gets `# Working with others` (do it yourself by default; delegate / team / workflow principles; members write to their own subdirectory, the root reads their results and presents).
+- Attribution: every agent has `attribution` (`taskId` minted when a root opens, `memberId` `main` or the member's session id, `executionForm`). It is on the agent's `tool.call` and `task.outcome` records, in the `complete` options of its requests (`@nexgent/llm` writes it on `llm.request.*`) and on `ToolContext.attribution` / `member`. A root's `task.outcome` adds `formsUsed` (`agent.formsUsed()`). The `@nexgent/session` ledger stamps the same fields on records a host writes outside the loop with the `sessionId` of an open agent (an SDK's `task.outcome`, a compactor's request).
+- Cost: `costCaps.perTask` counts the whole tree (root and members share one total); a member's `budget` (`BudgetShare`) caps its own requests / tokens. The member that hits a cap ends `cancelled / cost-cap`; the parent's next request is refused the same way.
+- Cancel: a cancelled parent turn cancels its running members at once with cause `parent`; when a parent turn's loop ends for any reason, running members are cancelled with `parent` and the turn waits for them and for `holdTurn` work at most `toolAbortGraceMs` before `turn.end`. Closing a parent closes its members (`closeAs('parent')`).
+- Approvals: a member's requests go through the same broker and rules; `ApprovalRequest.member` names it (`name`, `executionForm`, `parentSessionId`). `session` grants stay per session; `project` grants obtained by any session of the tree apply to the whole tree at once.
 
 ## Other services and primitives
 
@@ -68,4 +89,5 @@ Adapted (file headers say so): `util/atomic-write`, `storage/storage-json` (atom
 
 - No JSON Schema files for config / credentials / lock yet (`data-formats.md` lists them under this package).
 - Tools run sequentially; no parallel tool execution.
+- The kernel enforces the member total per task, not `maxConcurrentMembers`: the workflow and team packages limit concurrency.
 - Secret redaction of tool output is the workspace package's job; the kernel does not redact.

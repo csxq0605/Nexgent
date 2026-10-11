@@ -8,7 +8,7 @@ export const packageName = '@nexgent/session'
 export { JsonlSessionStore, SESSION_FILE_NAME } from './store.js'
 export type { JsonlSessionStoreOptions, ResumeResult, SessionFsyncPolicy } from './store.js'
 export { JsonlLedger } from './ledger.js'
-export type { JsonlLedgerOptions } from './ledger.js'
+export type { JsonlLedgerOptions, LedgerStamp } from './ledger.js'
 export {
   DEFAULT_CHECKPOINT_EVERY,
   foldRecord,

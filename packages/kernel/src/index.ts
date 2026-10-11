@@ -26,7 +26,7 @@ export type { LoadedRow, PluginRegistry } from './profile.js'
 
 export { AgentsService } from './agents.js'
 export type { AgentsConfig, CreateAgentOptions, ResumeAgentOptions } from './agents.js'
-export { Agent, FILES_END_CANCEL_MS, HOST_RECORD_TYPES, MODEL_IDLE_TIMEOUT, MODEL_TIMEOUT, repairHistory, TOOL_TIMEOUT, TurnAbort } from './agent.js'
+export { Agent, FILES_END_CANCEL_MS, HOST_RECORD_TYPES, MODEL_IDLE_TIMEOUT, MODEL_TIMEOUT, repairHistory, TOOL_RECORD_TYPES, TOOL_TIMEOUT, TurnAbort } from './agent.js'
 export type {
   AgentSettings,
   CloseOptions,

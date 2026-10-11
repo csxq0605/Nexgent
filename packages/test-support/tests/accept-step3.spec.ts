@@ -140,14 +140,14 @@ describe('scripts/accept-step3.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  it('headless layer: H23 passes, every other item is not-implemented, exit 2, valid summary', async () => {
+  it('headless layer: H01 and H23 pass, every other item is not-implemented, exit 2, valid summary', async () => {
     const { result, summary } = await runScript(['--layer', 'headless'])
     expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
     expect(summary?.result).toBe('fail')
     expect(summary?.checks.map(check => check.id)).toEqual(range('H', 1, 23))
     for (const check of summary?.checks ?? []) {
-      expect(check, check.id).toMatchObject(check.id === 'H23' ? { status: 'passed', passed: true } : { status: 'not-implemented', passed: false })
+      expect(check, check.id).toMatchObject(check.id === 'H01' || check.id === 'H23' ? { status: 'passed', passed: true } : { status: 'not-implemented', passed: false })
     }
   }, 90_000)
 

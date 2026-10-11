@@ -48,6 +48,8 @@ interface Entry {
 export class ToolRegistryService extends Service implements ToolRegistry {
   private readonly entries: Entry[] = []
   private readonly restrictions = new Map<ToolScope, ToolRestriction[]>()
+  /** Step 3: a member scope also obeys the restrictions of the scope that started it. */
+  private readonly parents = new Map<ToolScope, ToolScope>()
   private seq = 0
 
   constructor(ctx: Context) {
@@ -88,7 +90,7 @@ export class ToolRegistryService extends Service implements ToolRegistry {
 
   /** Visible entries for a scope: its own tools shadow inherited ones of the same name. */
   private visible(scope: ToolScope | undefined): Entry[] {
-    const masks = scope === undefined ? [] : (this.restrictions.get(scope) ?? [])
+    const masks = this.masks(scope)
     const own = new Set(this.entries.filter(entry => scope !== undefined && entry.scope === scope).map(entry => entry.tool.definition.name))
     return this.entries
       .filter(entry => {
@@ -97,6 +99,36 @@ export class ToolRegistryService extends Service implements ToolRegistry {
         return !own.has(entry.tool.definition.name) && isToolAdmitted(entry.tool.definition.name, masks)
       })
       .sort((a, b) => a.seq - b.seq)
+  }
+
+  /** Restrictions in force for a scope: its own and those of the scopes it inherits from. */
+  private masks(scope: ToolScope | undefined): ToolRestriction[] {
+    const masks: ToolRestriction[] = []
+    const seen = new Set<ToolScope>()
+    for (let current = scope; current !== undefined && !seen.has(current); current = this.parents.get(current)) {
+      seen.add(current)
+      masks.push(...(this.restrictions.get(current) ?? []))
+    }
+    return masks
+  }
+
+  /**
+   * Step 3 (not part of the `ToolRegistry` contract): make the calling
+   * (member) scope obey every restriction of `parent`, now and later, so a
+   * member sees at most what its parent sees among inherited tools. Agent
+   * scopes' own tools stay private either way.
+   * @returns the disposer that unlinks the scopes.
+   */
+  inherit(parent: ToolScope): () => void {
+    const scope = this.scope
+    if (scope === undefined) throw new NexgentError('config/invalid', 'only a scoped (agent) context can inherit restrictions')
+    if (scope === parent) throw new NexgentError('config/invalid', 'a scope cannot inherit from itself')
+    return this.ctx.fiber.effect(() => {
+      this.parents.set(scope, parent)
+      return () => {
+        if (this.parents.get(scope) === parent) this.parents.delete(scope)
+      }
+    }, 'ctx.tools.inherit()')
   }
 
   list(): readonly ToolDefinition[] {
