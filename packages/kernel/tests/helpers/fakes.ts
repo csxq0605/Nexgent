@@ -227,10 +227,17 @@ export class MemorySessionStore implements SessionStore {
     return [...records].reverse().find((record): record is CheckpointRecord => record.type === 'checkpoint')
   }
 
+  /**
+   * Like `JsonlSessionStore.resume`: when this store holds the lock and a turn
+   * is open, the turn is treated as left by a dead process and closed with
+   * `turn.end { kind: 'interrupted' }` (so a mid-turn call is visible in tests).
+   */
   async resume(sessionId: string): Promise<SessionState> {
-    const { records } = await this.readAll(sessionId)
     const checkpoint = await this.latestCheckpoint(sessionId)
-    return project(records, checkpoint)
+    const state = project((await this.readAll(sessionId)).records, checkpoint)
+    if (state.metadata.openTurn === undefined || !this.locks.has(sessionId)) return state
+    await this.append(sessionId, { type: 'turn.end', turn: state.metadata.openTurn, reason: { kind: 'interrupted' } })
+    return project((await this.readAll(sessionId)).records, checkpoint)
   }
 
   async lock(sessionId: string): Promise<SessionLock> {

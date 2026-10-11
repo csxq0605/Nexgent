@@ -113,7 +113,10 @@ describe('context providers', () => {
     expect(messages.map(record => [record.source, record.content])).toEqual([['inject', 'note A'], ['inject', 'note B'], ['user', 'hello']])
     expect(messages[2]!.materials).toEqual(['m1'])
     expect(seen[0]).toMatchObject({ sessionId: agent.sessionId, turn: 1, text: 'hello', source: 'user', materialIds: ['m1'], projectRoot: harness.workspace.root })
-    expect(seen[0]!.state.metadata.openTurn).toBe(1)
+    // state as of before the turn: read while no turn was open, so no turn was closed as interrupted
+    expect(seen[0]!.state.metadata.openTurn).toBeUndefined()
+    expect(seen[0]!.state.metadata.lastTurn).toBe(0)
+    expect(store.of(agent.sessionId, 'turn.end').map(record => record.reason.kind)).toEqual(['completed'])
 
     const prompt = llm.requests[0]!.messages[0]!.content as string
     expect(llm.requests[1]!.messages[0]!.content).toBe(prompt)
