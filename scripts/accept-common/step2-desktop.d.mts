@@ -9,3 +9,7 @@ export declare const SETTINGS: { readonly model: string; readonly thinking: stri
 export declare function desktopScript(): unknown[]
 export declare function desktopPrerequisites(): Promise<{ ok: true } | { ok: false; reason: string }>
 export declare function runDesktopScenario(harness: unknown, work: string, options?: { log?: (line: string) => void }): Promise<Observations>
+export declare const VITE_BIN: string
+export declare function run(command: string, args: string[], options?: object): Promise<{ code: number | null; stderr: string }>
+export declare function ensureDisplay(): Promise<{ display: string | undefined; stop: () => void }>
+export declare function poll<T>(read: () => Promise<T> | T, ok: (value: T) => boolean, what: string, ms?: number): Promise<T>

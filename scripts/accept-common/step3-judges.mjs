@@ -13,7 +13,7 @@
  */
 import { partial, verdict } from './step2-judges.mjs'
 import { readWorkbook } from '../real-task/step3-restock/xlsx.mjs'
-import { CANCEL_MEMBERS, FILES, HISTORY_MARKER, MATERIAL, PAGE, SHEET, TASKS, TEAM_TEXT, TOOL_FILES, WF_CYCLE, WF_GRAPH, WF_MAX_CONCURRENT, WF_PARTS } from './step3-scenario.mjs'
+import { BUDGET, CANCEL_MEMBERS, FILES, MEMBER_ENV, SKILLS, HISTORY_MARKER, MATERIAL, PAGE, SHEET, TASKS, TEAM_TEXT, TOOL_FILES, WF_CYCLE, WF_GRAPH, WF_MAX_CONCURRENT, WF_PARTS } from './step3-scenario.mjs'
 
 /** Step-3 session record types (data-formats.md §会话 JSONL, ADR 0004). */
 export const STEP3_RECORD_TYPES = ['fork.seed', 'subagent.start', 'subagent.end', 'team.member', 'team.task', 'team.message', 'workflow.start', 'workflow.phase', 'workflow.end']
@@ -73,7 +73,7 @@ function h01(obs) {
 }
 
 /** The scenario's projects, in run order; each has `sessions` and `ledger`. */
-export const PROJECTS = ['direct', 'delegation', 'readonly', 'tools', 'workflow', 'team', 'teamKill', 'cancel']
+export const PROJECTS = ['direct', 'delegation', 'readonly', 'tools', 'workflow', 'team', 'teamKill', 'cancel', 'budget', 'memberApproval', 'skills']
 /** Execution forms in `formsUsed` order (data-formats.md §账本). */
 const FORM_ORDER = ['direct', 'delegated', 'team', 'workflow']
 
@@ -639,6 +639,121 @@ function h13(obs) {
   ], 'root cancelled while members ran slow commands: the delegated member, both teammates and both workflow members ended cancelled with cause parent; workflow cancelled; teammates still active; no process left')
 }
 
+const childIdsOf = project => (project?.sessionFiles ?? []).filter(id => id !== project?.sessionId)
+const memberSession = (project, name) => childIdsOf(project).find(id => recordsOf(project, id)[0]?.member?.name === name)
+
+/** H11: the perTask cap counts the whole tree; the member's spending blocks the root, recorded as budget/exhausted. */
+function h11(obs) {
+  const b = obs.budget
+  if (b === undefined) return { status: 'failed', evidence: 'the budget project did not run' }
+  const root = recordsOf(b, b.sessionId)
+  const spenderId = memberSession(b, 'spender')
+  const spender = recordsOf(b, spenderId)
+  const rootRequests = (b.requests ?? []).filter(r => r.route === null)
+  const memberRequests = (b.requests ?? []).filter(r => r.route === 'spender')
+  const errors = root.filter(r => r.type === 'error' && r.error?.code === 'budget/exhausted')
+  const end = root.find(r => r.type === 'subagent.end')
+  const outcome = (b.ledger ?? []).find(r => r.type === 'task.outcome' && r.sessionId === b.sessionId)
+  const memberOutcome = (b.ledger ?? []).find(r => r.type === 'task.outcome' && r.sessionId === spenderId)
+  const limit = b.cap?.maxRequests
+  return verdict([
+    [limit === BUDGET.perTask.maxRequests, `costCaps.perTask maxRequests ${BUDGET.perTask.maxRequests} set through settings.update (got ${limit})`],
+    [rootRequests.length === 1 && rootRequests[0].outcome === 'completed', `the root sent one request and was then stopped: alone it used 1 of ${limit} (got ${rootRequests.length})`],
+    [memberRequests.length === 1 && spender.some(r => r.type === 'turn.end' && r.reason?.kind === 'completed'), "the member's one request used the last of the cap and it completed (the member itself was not blocked)"],
+    [errors.length === 1 && errors[0].error.details?.scope === 'task' && errors[0].error.details?.used === limit && errors[0].error.details?.limit === limit, `the root records one budget/exhausted error, scope task, ${limit} of ${limit} (got ${JSON.stringify(errors.map(e => e.error.details))})`],
+    [end !== undefined && errors.length === 1 && errors[0].seq > end.seq, 'the error comes after the member ended: its spending is what blocked the root'],
+    [b.phases?.budget?.reason?.kind === 'cancelled' && b.phases.budget.reason.cause === 'cost-cap', `the root turn ended cancelled, cause cost-cap (got ${JSON.stringify(b.phases?.budget?.reason)})`],
+    [outcome?.error?.code === 'budget/exhausted' && outcome?.status === 'cancelled', `the root task.outcome is cancelled with budget/exhausted (got ${outcome?.status} ${outcome?.error?.code})`],
+    [memberOutcome !== undefined && memberOutcome.taskId === outcome?.taskId, 'the member counted in the same task tree (same taskId)'],
+    [Object.values(b.phases?.budget?.unconsumed ?? { x: 1 }).every(n => n === 0), 'no scripted request left over or added'],
+  ], `perTask maxRequests ${limit}: root 1 request + member 1 request; the root's next request was blocked with budget/exhausted (scope task) and the turn cancelled by cost-cap`)
+}
+
+/** H14: a member's .env edit asks with the member's name and child session id; denied, the file is unchanged. */
+function h14(obs) {
+  const m = obs.memberApproval
+  if (m === undefined) return { status: 'failed', evidence: 'the member-approval project did not run' }
+  const keeperId = memberSession(m, 'keeper')
+  const asked = m.approvals ?? []
+  const request = asked[0]?.request
+  const keeper = recordsOf(m, keeperId)
+  const decision = keeper.find(r => r.type === 'approval.decision')
+  const result = (m.phases?.memberApproval?.toolResults ?? []).find(r => r.callId === 'call-keeper-env')
+  return verdict([
+    [keeperId !== undefined, 'the member keeper has its own child session'],
+    [asked.length === 1, `exactly one approval request reached the host (got ${asked.length})`],
+    [request?.member?.name === 'keeper' && request.member.executionForm === 'delegated' && request.member.parentSessionId === m.sessionId, `the request names the member: keeper, delegated, parent = the root (got ${JSON.stringify(request?.member)})`],
+    [request?.sessionId === keeperId && keeperId !== m.sessionId, `the request carries the child session id (got ${request?.sessionId})`],
+    [request?.tool === 'str_replace' && request?.pattern === MEMBER_ENV.path, `it asks for the .env edit (got ${request?.tool} ${request?.pattern})`],
+    [asked[0]?.answered === true, `approvals.respond with the member's session id was accepted (got ${JSON.stringify(asked[0]?.answered)})`],
+    [keeper.some(r => r.type === 'approval.request') && decision?.decision?.decision === 'deny' && decision.decision.decidedBy === 'user', "the child session records the request and the user's deny"],
+    [result?.isError === true && result.code === 'approval/denied' && result.sessionId === keeperId, `the member's edit failed with approval/denied (got ${result?.code})`],
+    [m.envContent === MEMBER_ENV.original, `.env is unchanged (got ${JSON.stringify(m.envContent)})`],
+    [m.phases?.memberApproval?.reason?.kind === 'completed', 'the member and the root turn went on to complete'],
+  ], 'member keeper edited .env: one approval request naming keeper (delegated) with its child session id, denied through approvals.respond; .env unchanged')
+}
+
+/** H20: a user-level skill is discovered; on a name clash the project skill wins. */
+function h20(obs) {
+  const k = obs.skills
+  if (k === undefined) return { status: 'failed', evidence: 'the skills project did not run' }
+  const listed = (k.requests?.[0]?.sessionText ?? '').split('# Skills')[1] ?? ''
+  const result = id => (k.phases?.skills?.toolResults ?? []).find(r => r.callId === id)
+  const user = result('call-skill-user')
+  const shared = result('call-skill-shared')
+  return verdict([
+    [listed.includes(`- ${SKILLS.user.name}: ${SKILLS.user.description}`), 'the system prompt lists the user-level skill with its description'],
+    [listed.includes(`- ${SKILLS.shared.name}: ${SKILLS.shared.project.description}`) && !listed.includes(SKILLS.shared.user.description), 'the clashing name is listed once, with the project description'],
+    [user?.isError === false && user.content.includes(SKILLS.user.body), 'load_skill returns the user-level skill body'],
+    [shared?.isError === false && shared.content.includes(SKILLS.shared.project.body) && !shared.content.includes(SKILLS.shared.user.body), 'load_skill of the clashing name returns the project body, not the user one'],
+    [k.phases?.skills?.reason?.kind === 'completed', 'the turn completed'],
+  ], "skills in the SDK home's user directory are listed and load; on a name clash the project skill wins")
+}
+
+/** H21: after the kills and resumes a fresh SDK shows parents, children, member deliverables, team and workflow state. */
+function h21(obs) {
+  const q = obs.queries
+  if (q === undefined) return { status: 'failed', evidence: 'the queries did not run' }
+  const conditions = [[q.requests === 0, `the queries sent no model request (got ${q.requests})`]]
+  for (const key of ['delegation', 'workflow', 'teamKill']) {
+    const v = q[key]
+    const project = obs[key]
+    if (v === undefined || project === undefined) {
+      conditions.push([false, `${key}: not queried`])
+      continue
+    }
+    const onDisk = childIdsOf(project).sort()
+    const childIds = v.children.map(c => c.sessionId).sort()
+    // A member's deliverables, as its collaboration run and its own view show them.
+    const disagree = v.collaboration.runs.filter(run => run.deliverables.length > 0 && (v.views[run.childSessionId]?.deliverables ?? []).length === 0)
+    conditions.push(
+      [v.list.length === 1 && v.list[0].sessionId === v.sessionId && v.list[0].parentSessionId === undefined && v.list[0].childCount === onDisk.length, `${key}: sessions.list shows the parent only, childCount ${onDisk.length} (got ${JSON.stringify(v.list)})`],
+      [onDisk.length > 0 && JSON.stringify(childIds) === JSON.stringify(onDisk) && v.children.every(c => c.parentSessionId === v.sessionId && c.member !== undefined), `${key}: sessions.children lists every child session with its parent and member`],
+      [v.root?.summary?.parentSessionId === undefined && (v.root?.kinds ?? []).includes('member'), `${key}: the parent's view shows its member runs`],
+      [Object.keys(v.views).length === onDisk.length && Object.values(v.views).every(view => view.summary.parentSessionId === v.sessionId), `${key}: every child session opens with sessions.view`],
+      [disagree.length === 0, `${key}: member deliverables show in both the collaboration runs and the child views`],
+    )
+  }
+  const run = (key, name) => (q[key]?.collaboration?.runs ?? []).find(r => r.name === name)
+  const files = (key, name) => (q[key]?.views?.[run(key, name)?.childSessionId]?.deliverables ?? []).flatMap(d => (d.files ?? []).map(f => f.path))
+  const workflows = q.workflow?.collaboration?.workflows ?? []
+  const team = q.teamKill?.collaboration?.team
+  conditions.push(
+    [run('delegation', 'analyst')?.status === 'completed' && files('delegation', 'analyst').includes(FILES.summary.path), `delegation: analyst completed with its deliverable ${FILES.summary.path}`],
+    [run('delegation', 'forker-two')?.status === 'interrupted', `delegation: the killed fork member reads interrupted (got ${run('delegation', 'forker-two')?.status})`],
+    [JSON.stringify(workflows.map(w => [w.kind, w.status])) === JSON.stringify([['script', 'completed'], ['graph', 'completed'], ['script', 'interrupted']]), `workflow: three workflows, the killed one interrupted (got ${JSON.stringify(workflows.map(w => [w.kind, w.title, w.status]))})`],
+    [run('workflow', 'late')?.status === 'interrupted' && run('workflow', 'early')?.status === 'completed' && files('workflow', 'summariser').includes('final/summary.md'), "workflow: early completed, late interrupted, the summariser's deliverable visible"],
+    [
+      team !== undefined
+        && JSON.stringify(team.members.map(m => m.name).sort()) === '["alice","bob"]'
+        && JSON.stringify(team.tasks.map(t => t.id)) === '["t1","t2"]'
+        && team.messages.length === 2 && team.messages.every(m => m.state === 'delivered'),
+      `team: roster alice and bob, board t1 t2, both messages delivered (got ${JSON.stringify(team && { members: team.members.map(m => m.name), tasks: team.tasks.map(t => t.id), messages: team.messages.map(m => m.state) })})`,
+    ],
+  )
+  return verdict(conditions, 'a fresh SDK lists the parent sessions with their child counts, every child session and its view, member deliverables, the team roster/board/mail and the workflow states (interrupted ones included)')
+}
+
 /** Top-level paths the old Python products used (plan W7, check H23). */
 export const FORBIDDEN_TOP_LEVEL = ['nexgent', 'tests', 'config.py', 'runtime']
 const isForbidden = path => {
@@ -659,7 +774,7 @@ function h23(obs) {
 }
 
 /** Judges by checklist id. */
-export const JUDGES = { H01: h01, H02: h02, H03: h03, H04: h04, H05: h05, H06: h06, H07: h07, H08: h08, H09: h09, H10: h10, H12: h12, H13: h13, H15: h15, H16: h16, H17: h17, H18: h18, H19: h19, H22: h22, H23: h23 }
+export const JUDGES = { H01: h01, H02: h02, H03: h03, H04: h04, H05: h05, H06: h06, H07: h07, H08: h08, H09: h09, H10: h10, H11: h11, H12: h12, H13: h13, H14: h14, H15: h15, H16: h16, H17: h17, H18: h18, H19: h19, H20: h20, H21: h21, H22: h22, H23: h23 }
 
 /** Run one judge; a throw is a failure, a missing judge is not-implemented. */
 export function judge(id, obs, tools) {

@@ -11,10 +11,12 @@
  * Headless items run the judge of the same id (step3-judges.mjs) over the
  * observations the headless layer collected (`ctx.obs`). D01–D10 are the
  * step-2 desktop items, run again as a regression with step 2's scenario and
- * judges; D11–D14 are step 3's own.
+ * judges; D11–D14 are step 3's own (step3-desktop.mjs, step3-desktop-judges.mjs), judged
+ * from the members scenario's observations (`ctx.members`).
  */
 import { CHECKS as STEP2_CHECKS } from './step2-checks.mjs'
 import { judgeDesktop } from './step2-desktop-judges.mjs'
+import { MEMBER_JUDGES, judgeMembers } from './step3-desktop-judges.mjs'
 import { JUDGES, judge } from './step3-judges.mjs'
 
 export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_PASS } from './step2-checks.mjs'
@@ -50,8 +52,13 @@ const desktopRegressionRun = id => (ctx) => {
   if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `desktop scenario failed: ${ctx.scenarioError}` }
   return judgeDesktop(id, ctx.obs)
 }
+const membersRun = id => (ctx) => {
+  if (ctx?.membersError !== undefined) return { status: 'failed', evidence: `desktop members scenario failed: ${ctx.membersError}` }
+  return judgeMembers(id, ctx?.members)
+}
 const item = (id, layer, title) => {
   if (layer === 'headless' && JUDGES[id] !== undefined) return { id, layer, title, run: headlessRun(id) }
+  if (layer === 'desktop' && MEMBER_JUDGES[id] !== undefined) return { id, layer, title, run: membersRun(id) }
   return { id, layer, title }
 }
 
