@@ -176,9 +176,11 @@ describe('approval policy', () => {
   it('follows the permissions.md mode table', () => {
     expect(decideToolPolicy(def('never', ['read']), 'read-only').kind).toBe('run')
     expect(decideToolPolicy(def('never', ['write']), 'read-only').kind).toBe('deny')
-    // run_code checks each write itself (permissions.md §代码执行进程 (PTC)).
-    expect(decideToolPolicy({ ...def('never', ['read', 'write', 'execute']), name: 'run_code' }, 'read-only').kind).toBe('run')
-    expect(decideToolPolicy({ ...def('ask', ['read', 'write', 'execute']), name: 'run_code' }, 'read-only').kind).toBe('ask')
+    // A self-sandboxed tool (run_code) checks each write itself; the field decides, not the name.
+    expect(decideToolPolicy({ ...def('never', ['read', 'write', 'execute']), selfSandboxed: true }, 'read-only').kind).toBe('run')
+    expect(decideToolPolicy({ ...def('ask', ['read', 'write', 'execute']), selfSandboxed: true }, 'read-only').kind).toBe('ask')
+    expect(decideToolPolicy({ ...def('never', ['read', 'write', 'execute']), name: 'run_code' }, 'read-only').kind).toBe('deny')
+    expect(decideToolPolicy({ ...def('never', ['write']), selfSandboxed: false }, 'read-only').kind).toBe('deny')
     expect(decideToolPolicy(def('ask', ['write']), 'workspace-write')).toMatchObject({ kind: 'ask', risk: 'low' })
     expect(decideToolPolicy(def('ask', ['execute']), 'workspace-write')).toMatchObject({ kind: 'ask', risk: 'medium' })
     expect(decideToolPolicy(def('ask', ['execute']), 'full-access').kind).toBe('run')
@@ -243,6 +245,15 @@ describe('system prompt, schema check, timeouts, history repair', () => {
     expect(full).not.toContain('.nexgent/materials/')
     const withMaterials = renderSystemPrompt({ ...base, tools: ['read_file'].map(tool), materials: true })
     expect(withMaterials).toContain('# Working with files\n- Materials the user attached are under `.nexgent/materials/` and are read-only')
+  })
+
+  it('says in read-only that run_code still runs, only when run_code is offered', () => {
+    const tool = (name: string) => ({ name, description: `${name} tool`, inputSchema: {}, effects: ['read' as const], approval: 'never' as const })
+    const base = { template: { persona: 'P', suffix: '' }, model: 'm', cwd: '/p', platform: 'linux' as const }
+    const readOnly = renderSystemPrompt({ ...base, sandboxMode: 'read-only', tools: ['read_file', 'run_code'].map(tool) })
+    expect(readOnly).toContain('- Sandbox mode: read-only: you may read files inside the project; writes and commands are refused. `run_code` still runs, but its writes are refused.\n')
+    expect(renderSystemPrompt({ ...base, sandboxMode: 'read-only', tools: ['read_file'].map(tool) })).not.toContain('run_code')
+    expect(renderSystemPrompt({ ...base, sandboxMode: 'workspace-write', tools: ['run_code'].map(tool) })).not.toContain('still runs')
   })
 
   it('checks the common JSON Schema keywords', () => {

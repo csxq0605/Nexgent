@@ -44,7 +44,7 @@ async function setup(mode: SandboxMode = 'workspace-write') {
 describe('run_code', () => {
   it('uses the contract name, schema, effects and approval', async () => {
     const { tool } = await setup()
-    expect(tool.definition).toMatchObject({ name: 'run_code', inputSchema: RUN_CODE_TOOL.inputSchema, effects: ['read', 'write', 'execute'], approval: 'never' })
+    expect(tool.definition).toMatchObject({ name: 'run_code', inputSchema: RUN_CODE_TOOL.inputSchema, effects: ['read', 'write', 'execute'], approval: 'never', selfSandboxed: true })
     expect(tool.definition.description).toContain('readSpreadsheet')
   })
 

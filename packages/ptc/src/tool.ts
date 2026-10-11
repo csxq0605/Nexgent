@@ -1,8 +1,8 @@
 /**
  * The `run_code` tool (`step3-tools.ts` `RUN_CODE_TOOL`): run a JavaScript
  * async function body in a new Node process with the project host functions
- * (`functions.ts`). Name, schema, effects and approval come from the
- * contract; the description is this package's.
+ * (`functions.ts`). Name, schema, effects, approval and `selfSandboxed`
+ * come from the contract; the description is this package's.
  */
 import { NexgentError, RUN_CODE_TOOL, type Sandbox, type Tool, type ToolOutput } from '@nexgent/kernel'
 import { projectFunctions } from './functions.js'
@@ -59,6 +59,7 @@ export function runCodeTool(sandbox: Sandbox, options: RunCodeToolOptions = {}):
       inputSchema: RUN_CODE_TOOL.inputSchema,
       effects: RUN_CODE_TOOL.effects,
       approval: RUN_CODE_TOOL.approval,
+      ...(RUN_CODE_TOOL.selfSandboxed === undefined ? {} : { selfSandboxed: RUN_CODE_TOOL.selfSandboxed }),
     },
     handler: async (input, context) => {
       const record = input as Record<string, unknown>
