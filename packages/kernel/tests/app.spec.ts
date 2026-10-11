@@ -37,7 +37,7 @@ describe('default product profile', () => {
     model: 'claude-sonnet-5-5',
     endpoint: 'https://api.anthropic.com',
     apiKeyEnv: 'NEXGENT_API_KEY',
-    thinking: 'off',
+    thinking: 'on',
     effort: 'medium',
     maxTokens: 16000,
     timeoutMs: 600000,
@@ -50,7 +50,7 @@ describe('default product profile', () => {
     personaSuffix: 'Your project working directory is {{cwd}}.',
   }
 
-  it('ships the ADR 0002 Claude route, thinking off, effort medium and the PR #4 persona', () => {
+  it('ships the ADR 0002 Claude route, thinking on, effort medium and the PR #4 persona', () => {
     const profile = defaultProfile()
     expect(profile.map(row => row.id)).toEqual(['credentials', 'workspace', 'session', 'llm', 'tools', 'approvals', 'agents'])
     const llm = profile.find(row => row.id === 'llm')!
@@ -71,7 +71,7 @@ describe('default product profile', () => {
     const agents = profile.find(row => row.id === 'agents')!
     expect(agents.config).toMatchObject({
       model: ROUTE.model,
-      thinking: 'off',
+      thinking: 'on',
       effort: 'medium',
       maxTokens: ROUTE.maxTokens,
       modelTimeoutMs: ROUTE.timeoutMs,

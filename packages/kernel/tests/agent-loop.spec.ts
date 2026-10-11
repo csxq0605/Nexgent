@@ -54,13 +54,13 @@ describe('agent loop', () => {
       toolCallId: 'call_1', name: 'echo', content: 'echo: hi', isError: false, meta: { length: 1 }, step: 1,
     })
 
-    // request shape: system prompt first, tools, thinking off, model from the profile
+    // request shape: system prompt first, tools, thinking on (default), model from the profile
     const request = llm.requests[1]!
     expect(request.messages[0]!.role).toBe('system')
     expect(request.messages[0]!.content).toContain('claude-sonnet-5-5')
     expect(request.messages[0]!.content).toContain(harness.workspace.root)
     expect(request.messages[0]!.content).toContain('- echo: Echo the text back.')
-    expect(request.thinking).toBe('off')
+    expect(request.thinking).toBe('on')
     expect(request.effort).toBe('medium')
     expect(request.model).toBe('claude-sonnet-5-5')
     expect(request.tools?.map(tool => tool.name)).toEqual(['echo'])
@@ -316,6 +316,23 @@ describe('agent loop', () => {
     const patched = await harness.app.agents.create({ projectConfig: base })
     await patched.run('w')
     expect(harness.llm.requests[0]!.effort).toBe('high')
+  })
+
+  it('sends thinking on by default and off when .nexgent/config.json says so, resume included', async () => {
+    harness = await bootHarness({ script: [textReply('a'), textReply('b'), textReply('c')] })
+    const { app, llm } = harness
+    const plain = await app.agents.create({ projectConfig: parseProjectConfig({}) })
+    await plain.run('x')
+    expect(llm.requests[0]!.thinking).toBe('on')
+    await plain.close()
+    const off = await app.agents.create({ projectConfig: parseProjectConfig({ thinking: 'off' }) })
+    await off.run('y')
+    expect(llm.requests[1]!.thinking).toBe('off')
+    await off.close()
+    const resumed = await app.agents.resume(off.sessionId, { projectConfig: parseProjectConfig({ thinking: 'off' }) })
+    await resumed.run('z')
+    expect(llm.requests[2]!.thinking).toBe('off')
+    await resumed.close()
   })
 
   it('round-trips providerContent: record, replay on the next request, and survive resume', async () => {

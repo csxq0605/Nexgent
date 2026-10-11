@@ -2,7 +2,7 @@
 #
 # Ordered plugin rows; patches (cordis.patch.yml form) address rows by `id`.
 # The model route is the Claude Platform (Claude Sonnet 5.5) per ADR 0002:
-#   llm.config -> @nexgent/llm (Messages API, thinking off = between_tools,
+#   llm.config -> @nexgent/llm (Messages API, thinking on = adaptive per ADR 0003,
 #   effort medium, server-side fallbacks on for the official host)
 #   agents.model / agents.thinking / agents.effort -> the loop's request defaults
 # The persona is migrated from PR #4
@@ -29,7 +29,7 @@
     endpoint: https://api.anthropic.com
     model: claude-sonnet-5-5
     apiKeyCredential: NEXGENT_API_KEY
-    thinking: 'off'
+    thinking: 'on'
     effort: medium
     maxTokens: 16000
     timeoutMs: 600000
@@ -47,7 +47,7 @@
   name: '@nexgent/kernel/agents'
   config:
     model: claude-sonnet-5-5
-    thinking: 'off'
+    thinking: 'on'
     effort: medium
     maxTokens: 16000
     modelTimeoutMs: 600000

@@ -71,6 +71,8 @@ export const MODEL_TIMEOUT = 'MODEL_TIMEOUT'
 export const MODEL_IDLE_TIMEOUT = 'MODEL_IDLE_TIMEOUT'
 /** Timeout code of a tool's declared `timeoutMs`. */
 export const TOOL_TIMEOUT = 'TOOL_TIMEOUT'
+/** `costCaps.perProject.windowDays` when the config leaves it out (`data-formats.md` §项目配置). */
+export const DEFAULT_PROJECT_WINDOW_DAYS = 30
 
 /** Loop settings, from the `agents` profile row. */
 export interface AgentSettings {
@@ -283,6 +285,8 @@ export class Agent {
   private outcomeWritten = false
   private lastReason: TurnEndReason | undefined
   private budgetError: ErrorInfo | undefined
+  /** `perProject` usage read from the ledger at turn start, and this task's totals at that moment. */
+  private projectUsage: { requests: number; tokens: number; ownRequests: number; ownTokens: number } | undefined
   private turnDenials = new Set<string>()
   private stats = {
     requestCount: 0,
@@ -499,6 +503,7 @@ export class Agent {
     const tracker = { text: '', usage: ZERO_USAGE as LLMUsage }
     let reason: TurnEndReason
     try {
+      await this.readProjectUsage(turn)
       reason = await this.loop(turn, signal, tracker)
     } catch (error) {
       reason = { kind: 'error', error: toErrorInfo(error) }
@@ -524,14 +529,52 @@ export class Agent {
     }
   }
 
-  /** The cost-cap error when the next request would exceed `costCaps.perTask`. */
+  /**
+   * Sum the project's usage inside `costCaps.perProject.windowDays` from the
+   * ledger (`permissions.md` §费用上限): every `llm.request.start` counts as a
+   * request, `llm.request.end` usage adds its known `inputTokens +
+   * outputTokens`. Read once per turn; requests this task sends later in the
+   * turn are added from its own totals. A failed read is recorded as a
+   * non-fatal `error` and leaves the project cap unchecked for that turn.
+   */
+  private async readProjectUsage(turn: number): Promise<void> {
+    this.projectUsage = undefined
+    const cap = this.init.projectConfig.costCaps.perProject
+    if (cap === undefined || (cap.maxRequests === undefined && cap.maxTokens === undefined)) return
+    const windowDays = cap.windowDays ?? DEFAULT_PROJECT_WINDOW_DAYS
+    const from = Date.now() - windowDays * 86_400_000
+    let requests = 0
+    let tokens = 0
+    try {
+      for await (const record of this.init.ledger.read({ from: new Date(from).toISOString(), types: ['llm.request.start', 'llm.request.end'] })) {
+        if (Date.parse(record.ts) < from) continue
+        if (record.type === 'llm.request.start') requests += 1
+        else if (record.type === 'llm.request.end') tokens += knownTokens(record.usage)
+      }
+    } catch (error) {
+      const info = toErrorInfo(error)
+      await this.appendError({ ...info, message: `per-project cost cap not checked: ledger read failed: ${info.message}` }, false, turn)
+      return
+    }
+    this.projectUsage = { requests, tokens, ownRequests: this.stats.requestCount, ownTokens: this.stats.tokens }
+  }
+
+  /** The cost-cap error when the next request would exceed `costCaps.perTask` or `costCaps.perProject`. */
   private budgetExhausted(): ErrorInfo | undefined {
-    const cap = this.init.projectConfig.costCaps.perTask
-    if (cap === undefined) return undefined
-    const check = (metric: 'requests' | 'tokens', used: number, limit: number | undefined) => limit !== undefined && used >= limit
-      ? errorInfo('budget/exhausted', `per-task ${metric} cap reached (${used} of ${limit})`, { scope: 'task', metric, used, limit })
+    const check = (scope: 'task' | 'project', metric: 'requests' | 'tokens', used: number, limit: number | undefined) => limit !== undefined && used >= limit
+      ? errorInfo('budget/exhausted', `per-${scope} ${metric} cap reached (${used} of ${limit})`, { scope, metric, used, limit })
       : undefined
-    return check('requests', this.stats.requestCount, cap.maxRequests) ?? check('tokens', this.stats.tokens, cap.maxTokens)
+    const task = this.init.projectConfig.costCaps.perTask
+    if (task !== undefined) {
+      const hit = check('task', 'requests', this.stats.requestCount, task.maxRequests) ?? check('task', 'tokens', this.stats.tokens, task.maxTokens)
+      if (hit !== undefined) return hit
+    }
+    const project = this.init.projectConfig.costCaps.perProject
+    const base = this.projectUsage
+    if (project === undefined || base === undefined) return undefined
+    const requests = base.requests + this.stats.requestCount - base.ownRequests
+    const tokens = base.tokens + this.stats.tokens - base.ownTokens
+    return check('project', 'requests', requests, project.maxRequests) ?? check('project', 'tokens', tokens, project.maxTokens)
   }
 
   private async loop(turn: number, signal: AbortSignal, tracker: { text: string; usage: LLMUsage }): Promise<TurnEndReason> {
