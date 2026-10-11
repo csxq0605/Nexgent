@@ -132,10 +132,10 @@ class AbortReason extends Error {
 type StreamFinishReason = Exclude<FinishReason, 'error' | 'aborted'>
 
 /**
- * Map a wire `stop_reason` to the contract vocabulary. `stop_sequence` and
- * `pause_turn` map to `stop` (the turn ended; there is no contract value for
- * "paused"), `model_context_window_exceeded` to `max-tokens`, unknown values
- * to `stop`.
+ * Map a wire `stop_reason` to the contract vocabulary. `stop_sequence` maps
+ * to `stop`, `pause_turn` to `pause` (the caller continues the turn by
+ * sending the reply back), `model_context_window_exceeded` to `max-tokens`,
+ * unknown values to `stop`.
  * @param reason - the wire value.
  */
 export function mapStopReason(reason: string): StreamFinishReason {
@@ -147,6 +147,8 @@ export function mapStopReason(reason: string): StreamFinishReason {
       return 'max-tokens'
     case 'refusal':
       return 'refusal'
+    case 'pause_turn':
+      return 'pause'
     default:
       return 'stop'
   }

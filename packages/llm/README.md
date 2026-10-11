@@ -90,7 +90,7 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 | `content_block_delta` / `input_json_delta` | `tool-call.delta { index, argumentsDelta: partial_json }` |
 | `content_block_stop`（tool_use 块） | `tool-call.end { index, call }`；`arguments` = 拼接的原始 `partial_json`（未收到任何片段时为 `{}`），由 kernel 校验解析 |
 | `message_start.usage` + `message_delta.usage` | `usage`（合并；见下） |
-| `message_delta.stop_reason` | `done{finishReason}`：`end_turn`→`stop`，`tool_use`→`tool-calls`，`max_tokens` / `model_context_window_exceeded`→`max-tokens`，`refusal`→`refusal` 并附 `refusal: { category?, explanation? }`（取 `stop_details`；kernel 不执行该回复的工具调用），`stop_sequence`→`stop`，`pause_turn`→`stop`（当作结束，不自动续跑） |
+| `message_delta.stop_reason` | `done{finishReason}`：`end_turn`→`stop`，`tool_use`→`tool-calls`，`max_tokens` / `model_context_window_exceeded`→`max-tokens`，`refusal`→`refusal` 并附 `refusal: { category?, explanation? }`（取 `stop_details`；kernel 不执行该回复的工具调用），`stop_sequence`→`stop`，`pause_turn`→`pause`（kernel 把这条回复原样带回下一次请求以续跑，次数有上限） |
 | 最终 `message.content` | `done.providerContent`（整个内容块数组的 JSON，供下一次请求原样回放） |
 | `signature_delta`、`ping` | 忽略（签名进入 `providerContent`） |
 
@@ -136,5 +136,5 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 ## 尚未完成
 
 - 真实 Claude Sonnet 5.5 调用由集成方按上节执行并记入 `docs/validation/`。
-- `pause_turn` 当作 `stop`，不自动续跑；服务端回退后实际服务的模型不入账本（契约无字段）。
+- 服务端回退后实际服务的模型不入账本（契约无字段）。
 - 图片 / 文件输入、结构化输出、服务端工具不在步骤 1 范围。

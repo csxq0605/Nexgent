@@ -87,6 +87,8 @@ export interface AgentSettings {
   readonly streamIdleTimeoutMs: number
   /** Max model calls in one turn. */
   readonly maxSteps: number
+  /** Max consecutive `pause` replies the loop continues before ending the turn with an error. */
+  readonly maxPauseContinuations: number
   /** Write a checkpoint at `turn.end` once this many records accumulated since the last one; 0 disables. */
   readonly checkpointEvery: number
   /** How long to wait for a cancelled tool handler to settle before moving on, in ms. */
@@ -579,6 +581,7 @@ export class Agent {
   }
 
   private async loop(turn: number, signal: AbortSignal, tracker: { text: string; usage: LLMUsage }): Promise<TurnEndReason> {
+    let pauses = 0
     for (let step = 1; ; step += 1) {
       if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
       const exhausted = this.budgetExhausted()
@@ -637,6 +640,20 @@ export class Agent {
       if (outcome.finish === 'refusal') return { kind: 'error', error: refusalError(outcome.refusal) }
       // A reply cut by the output cap may carry truncated tool input; do not run it.
       if (outcome.finish === 'max-tokens') return { kind: 'max-tokens' }
+      // A paused reply (Claude `pause_turn`) is already in history; the next request sends it back to continue.
+      if (outcome.finish === 'pause') {
+        pauses += 1
+        const limit = this.init.settings.maxPauseContinuations
+        if (pauses > limit) {
+          return {
+            kind: 'error',
+            error: errorInfo('llm/invalid-response', `the model paused the turn ${pauses} times in a row; stopped after ${limit} automatic continuations`, { pauses, limit }),
+          }
+        }
+        if (toolCalls.length > 0) await this.runTools(turn, step, toolCalls, signal)
+        continue
+      }
+      pauses = 0
       if (toolCalls.length > 0) {
         await this.runTools(turn, step, toolCalls, signal)
         continue
