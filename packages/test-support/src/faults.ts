@@ -242,7 +242,9 @@ export interface CrashableProcess {
  * event, give the tool `settleMs` to start its own processes, then kill only
  * the main process (a crash: no cleanup runs, children are not signalled).
  * Reports which of its descendants outlived it, so a check can decide
- * whether the platform's process containment (Windows Job Object) held.
+ * whether process containment held. On Windows libuv already places every
+ * non-detached child of a Node process in a kill-on-close job, so children a
+ * Node CLI spawns die with it unless spawned `detached`.
  * @param handle - the running `nexgent ... --json` process.
  * @param options - `timeoutMs` to wait for the tool (default 30000); `settleMs` after it (default 500).
  */

@@ -81,9 +81,12 @@ describe('spawnNode', () => {
       expect(crash.tool).toBe('bash')
       expect(crash.exit.code === null || crash.exit.code !== 0).toBe(true)
       expect(isProcessAlive(pids.child)).toBe(false)
-      // Nothing contains this fixture's grandchild, so the crash orphans it.
       expect(crash.descendantsBefore).toContain(pids.grandchild)
-      expect(crash.survivors).toContain(pids.grandchild)
+      // POSIX: nothing contains the fixture's grandchild, so the crash orphans it.
+      // Windows: libuv puts every non-detached child in a kill-on-close job
+      // owned by its parent, so the grandchild dies with the killed child.
+      if (process.platform === 'win32') expect(crash.survivors).not.toContain(pids.grandchild)
+      else expect(crash.survivors).toContain(pids.grandchild)
     } finally {
       await killProcessTree(pids.grandchild)
     }
