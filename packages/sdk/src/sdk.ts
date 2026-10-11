@@ -152,6 +152,11 @@ function tallyStatus(tally: TurnTally): TaskOutcomeStatus {
   }
 }
 
+/** A step-3 method whose contract is frozen but whose implementation has not landed yet. */
+function notImplemented(method: string): NexgentError {
+  return new NexgentError('internal', `${method} is not implemented yet (step 3)`)
+}
+
 function invalid(message: string): NexgentError {
   return new NexgentError('tool/invalid-input', message)
 }
@@ -722,6 +727,10 @@ export class LocalNexgentSdk implements NexgentSdk {
       },
 
       'sessions.list': input => this.listSessions(this.project(input.projectId)),
+      // Step 3 contract (api.ts); implemented by the SDK and desktop work package.
+      'sessions.children': async () => { throw notImplemented('sessions.children') },
+      'sessions.view': async () => { throw notImplemented('sessions.view') },
+      'sessions.collaboration': async () => { throw notImplemented('sessions.collaboration') },
       'sessions.create': input => this.createSession(input),
       'sessions.open': input => this.openSession(input),
       'sessions.close': async input => this.closeSession(this.project(input.projectId), input.sessionId),

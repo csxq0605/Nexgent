@@ -141,6 +141,10 @@ export interface DeliverableVersion {
   readonly turn: number
   /** The `present` call. */
   readonly toolCallId: string
+  /** Step 3: set when a member (child session) presented it; the child's session id. */
+  readonly memberId?: string
+  /** Step 3: the member's name, for display ("成员成果"). */
+  readonly memberName?: string
 }
 
 /** The part of a version a `deliverable.presented` record carries. */
@@ -150,6 +154,8 @@ export interface DeliverableVersionRef {
   readonly title: string
   readonly summary: string
   readonly files: readonly DeliverableFile[]
+  /** Step 3: as on {@link DeliverableVersion}. */
+  readonly memberName?: string
 }
 
 /** What the `present` tool hands to the store. */
@@ -163,10 +169,14 @@ export interface PresentInput {
   readonly title?: string
   /**
    * The deliverable to add a version to. When absent, a deliverable whose
-   * latest version has the same primary (first) path gets the new version;
-   * otherwise a new deliverable is created.
+   * latest version has the same primary (first) path **and was presented by
+   * the same session** gets the new version; otherwise a new deliverable is
+   * created (step 3: two members presenting one path never append to each
+   * other). An explicit id always appends, across sessions too.
    */
   readonly deliverableId?: string
+  /** Step 3: the presenting member, copied into the version metadata. */
+  readonly member?: { readonly memberId: string; readonly memberName: string }
 }
 
 /** One deliverable with its versions, for listing. */

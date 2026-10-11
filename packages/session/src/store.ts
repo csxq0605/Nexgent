@@ -142,6 +142,9 @@ export class JsonlSessionStore implements SessionStore {
 
   async create(init: SessionInit): Promise<SessionLock> {
     const { sessionId } = init
+    if ((init.member === undefined) !== (init.parentSessionId === undefined)) {
+      throw new NexgentError('session/invalid-record', 'a child session needs both parentSessionId and member')
+    }
     const dir = this.sessionDir(sessionId)
     const file = this.sessionFile(sessionId)
     this.beginOpening(sessionId)
@@ -168,6 +171,7 @@ export class JsonlSessionStore implements SessionStore {
           sandboxMode: init.sandboxMode,
           ...(init.parentSessionId === undefined ? {} : { parentSessionId: init.parentSessionId }),
           ...(init.title === undefined ? {} : { title: init.title }),
+          ...(init.member === undefined ? {} : { member: init.member }),
         }
         assertSessionRecord(start)
         const bytes = Buffer.from(encodeLine(start), 'utf8')

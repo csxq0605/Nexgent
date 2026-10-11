@@ -89,7 +89,7 @@ export class FakeBridge implements NexgentBridge {
   filesTruncated = false
   turn = 0
   readonly handlers: Record<string, Handler> = {
-    'app.info': () => ({ sdkVersion: 2, appVersion: '0.0.0-test', platform: 'linux' }),
+    'app.info': () => ({ sdkVersion: 3, appVersion: '0.0.0-test', platform: 'linux' }),
     'projects.recent': () => this.recent,
     'projects.open': () => PROJECT,
     'projects.forget': () => undefined,

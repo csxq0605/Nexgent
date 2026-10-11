@@ -4,6 +4,8 @@
  * `docs/spec/permissions.md` §工具审批 and §CLI 与桌面应用共用的审批交互.
  */
 
+import type { MemberExecutionForm } from './collaboration.js'
+
 /** How far a granted approval reaches. */
 export type ApprovalScope = 'once' | 'session' | 'project'
 
@@ -33,6 +35,21 @@ export interface ApprovalRequest {
   readonly pattern?: string
   /** ISO-8601 deadline; the CLI fills it, the desktop app may leave it empty. */
   readonly expiresAt?: string
+  /**
+   * Set when a member (child session, step 3) raised the request; `sessionId`
+   * is then the child's. Members use the main conversation's rules
+   * unchanged: the host asks the user exactly as for the main conversation
+   * and names the member in the prompt (`permissions.md` §子会话继承).
+   */
+  readonly member?: ApprovalMember
+}
+
+/** The member behind an {@link ApprovalRequest}. */
+export interface ApprovalMember {
+  readonly name: string
+  readonly executionForm: MemberExecutionForm
+  /** The root session whose conversation the prompt belongs to. */
+  readonly parentSessionId: string
 }
 
 /** The host's answer. A request is answered at most once; late answers are dropped. */

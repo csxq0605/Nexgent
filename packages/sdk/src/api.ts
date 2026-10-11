@@ -15,12 +15,17 @@
  *   `CredentialInfo` (`configured`, `source`).
  * - Every turn's event stream ends with exactly one `turn.end`, also on
  *   cancel, approval timeout and crash recovery.
+ * - Step 3: child sessions (members) started by tools are tracked like any
+ *   other session: their events carry `parentSessionId`, `turns.cancel` on
+ *   the parent cancels them (cause `parent`), and their approvals arrive as
+ *   ordinary `approval.request` events whose request names the member.
  */
 import type {
   ApprovalDecision,
   ApprovalRequest,
   CostCap,
   CredentialInfo,
+  DelegationMode,
   DeliverableDiff,
   DeliverableSummary,
   DeliverableVersion,
@@ -34,16 +39,23 @@ import type {
   GoalStatus,
   LLMUsage,
   MaterialMetadata,
+  MemberExecutionForm,
+  MemberIdentity,
+  MemberResultStatus,
   SandboxMode,
   SubmitFeedbackInput,
+  TeamMember,
+  TeamMessage,
+  TeamTask,
   ThinkingMode,
   ToolCall,
   TurnEndReason,
   UserMessageSource,
+  WorkflowStatus,
 } from '@nexgent/kernel'
 
 /** API version; bumped only by a contract-change PR. */
-export const SDK_API_VERSION = 2
+export const SDK_API_VERSION = 3
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -87,6 +99,50 @@ export interface SessionSummary {
   /** The last turn was closed by crash recovery (`interrupted`) and nothing ran since. */
   readonly interrupted: boolean
   readonly goal?: Goal
+  /** Step 3: set for a child session (member). */
+  readonly parentSessionId?: string
+  /** Step 3: set for a child session (member). */
+  readonly member?: MemberIdentity
+  /** Step 3: child sessions this session started (absent until the SDK counts them). */
+  readonly childCount?: number
+}
+
+/** A member run as the parent's history shows it (from `subagent.start` / `subagent.end`). */
+export interface MemberRunView {
+  readonly childSessionId: string
+  readonly childTurn: number
+  readonly name: string
+  readonly executionForm: MemberExecutionForm
+  readonly mode?: DelegationMode
+  readonly preset?: string
+  readonly workflowId?: string
+  /** `running` until `subagent.end` (a run left open by a crash reads `interrupted` after recovery). */
+  readonly status: 'running' | MemberResultStatus
+  readonly deliverables: readonly DeliverableVersionRef[]
+  readonly usage?: LLMUsage
+  readonly error?: ErrorInfo
+}
+
+/** A workflow as the parent's history shows it (from `workflow.*`). */
+export interface WorkflowView {
+  readonly workflowId: string
+  readonly kind: 'script' | 'graph'
+  readonly title?: string
+  readonly architecture?: string
+  readonly phases: readonly string[]
+  readonly status: 'running' | WorkflowStatus
+  readonly members: number
+  readonly error?: ErrorInfo
+}
+
+/** Who worked on a root session's task tree (`sessions.collaboration`). */
+export interface CollaborationView {
+  readonly sessionId: string
+  /** Every member run, in start order. */
+  readonly runs: readonly MemberRunView[]
+  readonly workflows: readonly WorkflowView[]
+  /** Present once a teammate was spawned: latest roster, board and every message (latest state per id). */
+  readonly team?: { readonly members: readonly TeamMember[]; readonly tasks: readonly TeamTask[]; readonly messages: readonly TeamMessage[] }
 }
 
 /** One item of a session's display history, derived from the records (not from the compacted model history). */
@@ -99,6 +155,9 @@ export type HistoryItem =
   | { readonly kind: 'files'; readonly turn: number; readonly changes: readonly FileChange[] }
   | { readonly kind: 'feedback'; readonly turn: number; readonly deliverableId: string; readonly version: number; readonly rating?: number; readonly comment: string }
   | { readonly kind: 'compaction'; readonly turn: number }
+  | { readonly kind: 'member'; readonly turn: number; readonly run: MemberRunView }
+  | { readonly kind: 'workflow'; readonly turn: number; readonly workflow: WorkflowView }
+  | { readonly kind: 'team.message'; readonly turn?: number; readonly message: TeamMessage }
   | { readonly kind: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason }
   | { readonly kind: 'error'; readonly turn?: number; readonly error: ErrorInfo }
 
@@ -144,6 +203,8 @@ interface EventBase {
   readonly sessionId: string
   /** Per-session counter starting at 1, so a reconnecting renderer can detect gaps. */
   readonly eventSeq: number
+  /** Step 3: set on every event of a child session. */
+  readonly parentSessionId?: string
 }
 
 /** Everything the SDK pushes to a subscriber (desktop: over the `nexgent:event` channel). */
@@ -163,6 +224,13 @@ export type SdkEvent =
   | EventBase & { readonly type: 'material.added'; readonly material: MaterialMetadata }
   | EventBase & { readonly type: 'error'; readonly turn?: number; readonly error: ErrorInfo; readonly fatal: boolean }
   | EventBase & { readonly type: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly usage: LLMUsage }
+  /** Step 3, emitted on the parent session: a member run started / settled. */
+  | EventBase & { readonly type: 'member.start'; readonly turn: number; readonly run: MemberRunView }
+  | EventBase & { readonly type: 'member.end'; readonly turn: number; readonly run: MemberRunView }
+  /** Step 3, emitted on the parent session. */
+  | EventBase & { readonly type: 'workflow.phase'; readonly turn: number; readonly workflowId: string; readonly phase: string }
+  /** Step 3, emitted on the Lead session for both the queued and the delivered state. */
+  | EventBase & { readonly type: 'team.message'; readonly turn?: number; readonly message: TeamMessage }
 
 /** The `type` vocabulary of {@link SdkEvent}. */
 export type SdkEventType = SdkEvent['type']
@@ -243,7 +311,14 @@ export interface SdkMethods {
   'projects.close': (input: { readonly projectId: string }) => Promise<void>
   'projects.forget': (input: { readonly root: string }) => Promise<void>
 
-  'sessions.list': (input: { readonly projectId: string }) => Promise<readonly SessionSummary[]>
+  /** Root sessions only, unless `includeChildren` (step 3). */
+  'sessions.list': (input: { readonly projectId: string; readonly includeChildren?: boolean }) => Promise<readonly SessionSummary[]>
+  /** Step 3: child sessions of one session, in creation order. */
+  'sessions.children': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<readonly SessionSummary[]>
+  /** Step 3: read-only view of any session (a child included) without taking its lock. */
+  'sessions.view': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<SessionView>
+  /** Step 3: member runs, workflows and team state recorded in a session. */
+  'sessions.collaboration': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<CollaborationView>
   'sessions.create': (input: CreateSessionInput) => Promise<SessionSummary>
   /** Takes the session lock (resuming and closing an interrupted turn when needed) and returns the view. */
   'sessions.open': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<SessionView>
@@ -315,6 +390,9 @@ export const SDK_METHOD_NAMES = [
   'projects.close',
   'projects.forget',
   'sessions.list',
+  'sessions.children',
+  'sessions.view',
+  'sessions.collaboration',
   'sessions.create',
   'sessions.open',
   'sessions.close',

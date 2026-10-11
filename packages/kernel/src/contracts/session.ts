@@ -11,6 +11,7 @@ import type { ErrorInfo } from './errors.js'
 import type { JsonValue } from './json.js'
 import type { ApprovalDecision, ApprovalGrant, ApprovalRequest } from './approvals.js'
 import type { FinishReason, LLMMessage, LLMUsage, RefusalInfo, ToolCall } from './llm.js'
+import type { MemberExecutionForm, MemberIdentity, MemberResult, DelegationMode, TeamMember, TeamMessage, TeamTask, WorkflowStatus } from './collaboration.js'
 import type { DeliverableVersionRef, FeedbackEntry, FileChange, Goal, GoalStatus, MaterialRef } from './tasking.js'
 import type { SandboxMode } from './workspace.js'
 
@@ -40,10 +41,12 @@ export interface SessionStartRecord extends SessionRecordBase {
   readonly model: string
   /** Sandbox mode in effect; `resume` keeps it unless the host passes `--sandbox` again. */
   readonly sandboxMode: SandboxMode
-  /** Session this one continues from (step 3 fork); absent for a root session. */
+  /** The session that started this one as a member (step 3 child session); absent for a root session. */
   readonly parentSessionId?: string
   /** Human-readable title when one was given. */
   readonly title?: string
+  /** Who this child session is (step 3); present exactly when `parentSessionId` is. */
+  readonly member?: MemberIdentity
 }
 
 /** A user-role message entering the conversation. */
@@ -118,7 +121,10 @@ export interface TurnStartRecord extends SessionRecordBase {
 }
 
 /** Who or what cancelled a turn. */
-export type TurnCancelCause = 'user' | 'timeout' | 'shutdown' | 'cost-cap'
+export type TurnCancelCause = 'user' | 'timeout' | 'shutdown' | 'cost-cap' | 'parent'
+
+/** Every {@link TurnCancelCause}; `parent` (step 3): the parent session's turn was cancelled or ended. */
+export const TURN_CANCEL_CAUSES: readonly TurnCancelCause[] = ['user', 'timeout', 'shutdown', 'cost-cap', 'parent']
 
 /** Why a turn ended. */
 export type TurnEndReason =
@@ -296,6 +302,112 @@ export function renderCompactionSummary(summary: string): string {
   return `<conversation-summary>\nThe earlier part of this conversation was compacted. Summary:\n\n${summary}\n</conversation-summary>`
 }
 
+// ---------------------------------------------------------------------------
+// Step 3 records (appended within v1): child sessions, team, workflow
+// ---------------------------------------------------------------------------
+
+/**
+ * A forked child's starting history: the parent's projected messages up to
+ * the end of its last completed turn (from its latest compaction on). Written
+ * by the kernel as seq 2 of the child file, right after `session.start`;
+ * projection replaces the (empty) message list with `messages`.
+ */
+export interface ForkSeedRecord extends SessionRecordBase {
+  readonly type: 'fork.seed'
+  readonly fromSessionId: string
+  /** Last parent `seq` the copied history covers. */
+  readonly throughSeq: number
+  readonly messages: readonly Exclude<LLMMessage, { role: 'system' }>[]
+}
+
+/**
+ * In the parent: a member run began (a delegate call, a teammate activation,
+ * a workflow `agent()`). A run is one turn of the child session; a teammate
+ * has one run per Lead turn it works in.
+ */
+export interface SubagentStartRecord extends SessionRecordBase {
+  readonly type: 'subagent.start'
+  /** Parent turn. */
+  readonly turn: number
+  /** The parent tool call that started it (delegate / spawn_teammate / workflow). */
+  readonly toolCallId?: string
+  readonly childSessionId: string
+  /** The child turn this run is. */
+  readonly childTurn: number
+  readonly name: string
+  readonly executionForm: MemberExecutionForm
+  /** Delegation only. */
+  readonly mode?: DelegationMode
+  readonly preset?: string
+  /** Workflow member: the workflow it belongs to. */
+  readonly workflowId?: string
+  /** First 500 characters of the task text the member was given. */
+  readonly task: string
+  readonly materialIds?: readonly string[]
+}
+
+/** In the parent: the member run settled (also written on recovery with status `interrupted`). */
+export interface SubagentEndRecord extends SessionRecordBase {
+  readonly type: 'subagent.end'
+  readonly turn: number
+  readonly childSessionId: string
+  readonly childTurn: number
+  readonly result: MemberResult
+}
+
+/** In the Lead: a roster change (spawned, idle, stopped); the latest per `member.name` wins. */
+export interface TeamMemberRecord extends SessionRecordBase {
+  readonly type: 'team.member'
+  readonly turn?: number
+  readonly member: TeamMember
+}
+
+/** In the Lead: a task board entry was created or changed; the latest per `task.id` wins. */
+export interface TeamTaskRecord extends SessionRecordBase {
+  readonly type: 'team.task'
+  readonly turn?: number
+  readonly task: TeamTask
+}
+
+/** In the Lead: a mailbox message was queued or delivered. */
+export interface TeamMessageRecord extends SessionRecordBase {
+  readonly type: 'team.message'
+  readonly turn?: number
+  readonly message: TeamMessage
+}
+
+/** In the parent: a `workflow` tool call started a script or a graph. */
+export interface WorkflowStartRecord extends SessionRecordBase {
+  readonly type: 'workflow.start'
+  readonly turn: number
+  readonly toolCallId: string
+  /** Lowercase uuid v4. */
+  readonly workflowId: string
+  readonly kind: 'script' | 'graph'
+  /** Graph runs: the saved graph's SHA-256 (`.nexgent/architectures/<hash>.json`). */
+  readonly architecture?: string
+  readonly title?: string
+}
+
+/** In the parent: the script called `phase(name)`. */
+export interface WorkflowPhaseRecord extends SessionRecordBase {
+  readonly type: 'workflow.phase'
+  readonly turn: number
+  readonly workflowId: string
+  readonly phase: string
+}
+
+/** In the parent: the workflow settled (also written on recovery with status `interrupted`). */
+export interface WorkflowEndRecord extends SessionRecordBase {
+  readonly type: 'workflow.end'
+  readonly turn: number
+  readonly workflowId: string
+  readonly status: WorkflowStatus
+  /** Child sessions it started. */
+  readonly members: number
+  readonly error?: ErrorInfo
+}
+
 /** Every v1 record kind. */
 export type SessionRecord =
   | SessionStartRecord
@@ -317,6 +429,15 @@ export type SessionRecord =
   | GoalUpdateRecord
   | SessionTitleRecord
   | CompactionRecord
+  | ForkSeedRecord
+  | SubagentStartRecord
+  | SubagentEndRecord
+  | TeamMemberRecord
+  | TeamTaskRecord
+  | TeamMessageRecord
+  | WorkflowStartRecord
+  | WorkflowPhaseRecord
+  | WorkflowEndRecord
 
 /** The `type` tag vocabulary. */
 export type SessionRecordType = SessionRecord['type']
@@ -342,13 +463,45 @@ export const SESSION_RECORD_TYPES: readonly SessionRecordType[] = [
   'goal.update',
   'session.title',
   'compaction',
+  'fork.seed',
+  'subagent.start',
+  'subagent.end',
+  'team.member',
+  'team.task',
+  'team.message',
+  'workflow.start',
+  'workflow.phase',
+  'workflow.end',
 ]
 
-/** Record types a host (SDK) may append outside the agent loop, through the agent that holds the lock. */
-export type HostRecordType = 'material.added' | 'goal.set' | 'goal.update' | 'session.title'
+/**
+ * Record types a host (SDK, or a collaboration package acting for the
+ * parent outside one of its tool calls, e.g. recovery or teammate mail) may
+ * append through the agent that holds the lock.
+ */
+export type HostRecordType =
+  | 'material.added'
+  | 'goal.set'
+  | 'goal.update'
+  | 'session.title'
+  | 'subagent.end'
+  | 'team.member'
+  | 'team.task'
+  | 'team.message'
+  | 'workflow.phase'
+  | 'workflow.end'
 
 /** Record types a tool may append through {@link ToolContext.appendRecord}. */
-export type ToolRecordType = 'deliverable.presented'
+export type ToolRecordType =
+  | 'deliverable.presented'
+  | 'subagent.start'
+  | 'subagent.end'
+  | 'team.member'
+  | 'team.task'
+  | 'team.message'
+  | 'workflow.start'
+  | 'workflow.phase'
+  | 'workflow.end'
 
 /** Distributive omit over a union. */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
@@ -388,6 +541,10 @@ export interface SessionMetadata {
   readonly goal?: Goal
   /** `seq` of the latest `compaction` folded in (step 2). */
   readonly lastCompactionSeq?: number
+  /** From `session.start` (step 3 child session). */
+  readonly parentSessionId?: string
+  /** From `session.start` (step 3 child session). */
+  readonly member?: MemberIdentity
 }
 
 /** What a session projects to: the LLM-visible history plus metadata. The system prompt is not stored. */
@@ -408,6 +565,8 @@ export interface SessionInit {
   readonly sandboxMode: SandboxMode
   readonly parentSessionId?: string
   readonly title?: string
+  /** Required with `parentSessionId` (step 3). */
+  readonly member?: MemberIdentity
 }
 
 /** Where recovery stopped, when the file had a bad tail. */

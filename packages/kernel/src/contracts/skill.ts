@@ -5,8 +5,11 @@
  * §技能.
  */
 
-/** Where a skill came from; a project skill overrides a built-in one of the same name. */
-export type SkillSource = 'builtin' | 'project'
+/**
+ * Where a skill came from. Precedence for one name: project over user over
+ * built-in (step 3 adds `user`: `~/.nexgent/skills/*\/SKILL.md`).
+ */
+export type SkillSource = 'builtin' | 'user' | 'project'
 
 /** A skill's front matter plus where it lives. */
 export interface SkillManifest {
@@ -47,7 +50,7 @@ export interface LoadedSkill {
 /** The `ctx.skills` service. */
 export interface SkillRegistry {
   /**
-   * Scan the built-in directory and `<project>/.nexgent/skills/*\/SKILL.md`.
+   * Scan the built-in directory, the user directory (step 3) and `<project>/.nexgent/skills/*\/SKILL.md`.
    * Never throws for a bad file; it lands in `problems`.
    */
   catalog(): Promise<SkillCatalog>
@@ -60,6 +63,9 @@ export const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 /** Directory, relative to the project root, that holds project skills. */
 export const PROJECT_SKILLS_DIR = '.nexgent/skills'
+
+/** Directory, relative to the Nexgent home (`~/.nexgent`, or `NEXGENT_HOME`), that holds user skills (step 3). */
+export const USER_SKILLS_DIR = 'skills'
 
 /** File name of a skill. */
 export const SKILL_FILE = 'SKILL.md'

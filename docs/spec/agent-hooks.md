@@ -1,6 +1,6 @@
 # agent loop 挂点、步骤 2 工具与系统提示增量
 
-> 步骤 2 第 1 轮由 W0（「步骤二契约」）冻结。类型镜像：`packages/kernel/src/contracts/context.ts`、`tasking.ts`、`skill.ts`、`step2-tools.ts`（工具名与参数），以及 `session.ts` 的步骤 2 记录与 `tools.ts` 的 `ToolContext.appendRecord`。挂点的实现归「kernel 维护」（W7）；提供者与工具的实现归 W1（`@nexgent/context`）、W2（`@nexgent/tasking`）、W3（`@nexgent/skill`）。冻结后的修改走契约修改 PR，并在 PR 描述里点名受影响的包。记录格式以 `data-formats.md` 为准，权限以 `permissions.md` 为准。
+> 步骤 2 第 1 轮由 W0（「步骤二契约」）冻结。类型镜像：`packages/kernel/src/contracts/context.ts`、`tasking.ts`、`skill.ts`、`step2-tools.ts`（工具名与参数），以及 `session.ts` 的步骤 2 记录与 `tools.ts` 的 `ToolContext.appendRecord`。挂点的实现归「kernel 维护」（W7）；提供者与工具的实现归 W1（`@nexgent/context`）、W2（`@nexgent/tasking`）、W3（`@nexgent/skill`）。冻结后的修改走契约修改 PR，并在 PR 描述里点名受影响的包。步骤 3 第 1 轮（「步骤三契约」）加上步骤 3 工具、步骤 3 系统提示增量与子会话的宿主接口，类型镜像 `collaboration.ts`、`step3-tools.ts`（决策见 ADR 0004）。记录格式以 `data-formats.md` 为准，权限以 `permissions.md` 为准。
 
 ## 目的与范围
 
@@ -95,12 +95,36 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `load_skill` | skill | `name: string` | `['read']` / `never` | 返回技能正文；未知名字返回工具错误 `tool/not-found` |
 | `read_document` | skill | `path: string`、`sheet?`、`maxRows?`（默认 500）、`pages?` | `['read']` / `never` | `.docx` 转文本，`.xlsx` 转表格（逐 sheet，CSV 式文本），`.pdf` 转文本；损坏文件返回工具错误而不是崩溃；路径按读策略检查（`materials/` 可读）；不写任何文件 |
 
-`present` 的路径匹配规则（同一成果的后续版本）：给了 `deliverableId` 就追加到它（不存在则报错）；没给时，若某个成果最新版本的主文件路径与本次 `paths[0]` 相同，则追加为它的新版本；否则新建成果。
+`present` 的路径匹配规则（同一成果的后续版本）：给了 `deliverableId` 就追加到它（不存在则报错，跨会话也可以）；没给时，若某个成果最新版本的主文件路径与本次 `paths[0]` 相同、**且该版本由同一会话交付**（步骤 3 补充），则追加为它的新版本；否则新建成果。成员（子会话）交付时，`PresentInput.member` 把成员 id 与成员名写进版本元数据。
+
+## 步骤 3 工具
+
+协作与 PTC 工具的名字、参数 schema、`effects` 与 `approval` 冻结在 `step3-tools.ts`；`web_fetch`、`read_spreadsheet`、`write_spreadsheet` 只冻结名字、`effects` 与 `approval`（`STEP3_MIGRATED_TOOLS`），参数归实现包。描述文字由实现包写。启动成员的工具只声明 `['read']`：成员自己的每次工具调用按成员的沙箱与审批规则逐一检查。
+
+| 工具 | 实现包 | 参数 | effects / approval | 行为要点 |
+| --- | --- | --- | --- | --- |
+| `delegate` | subagent | `name`、`task`、`mode?: fresh \| fork`、`preset?`、`persona?`、`materialIds?`、`files?`、`expectedOutput?` | `['read']` / `never` | 建子会话（`executionForm: delegated`），把 `task`、要读的文件与期望产出拼成成员首轮的用户消息，`materialIds` 作为该轮的资料；前台等成员这一轮结束；写 `subagent.start` / `subagent.end`；工具结果是 `MemberResult` 的文本形式（状态、最后回复、成果 id / 版本 / 文件、费用） |
+| `spawn_teammate` | team | `name`、`task`、`preset?`、`persona?`、`materialIds?`、`files?` | `['read']` / `never` | 建队友子会话（`team`），写 `team.member` 与 `subagent.start`，队友开始运行；不等待 |
+| `send_message` | team | `to`、`text` | `['read']` / `never` | 写 `team.message { state: queued }`；在收件人下一步请求前注入并写 `delivered` |
+| `wait_teammates` | team | `names?` | `['read']` / `never` | 等指定（默认全部活跃）队友本轮停下；返回各自的 `MemberResult` 与发给 `lead` 的邮件 |
+| `team_task_create` / `team_task_list` / `team_task_update` | team | 见契约 | `['read']` / `never` | 任务板；依赖未完成的任务不能开始 |
+| `workflow` | workflow | `script` 与 `graph` 恰给一个；`title?`、`args?` | `['read']` / `never` | 写 `workflow.start` / `phase` / `end`；每个 `agent()` 是一个 `workflow` 成员；图先保存到 `.nexgent/architectures/` 再编译执行 |
+| `run_code` | ptc | `code`、`timeoutMs?`（1–300 s，默认 60 s） | `['read','write','execute']` / `never` | 独立 Node 进程、空环境变量；文件经宿主函数按调用方沙箱检查（`permissions.md` §代码执行进程） |
+
+成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow`（`MEMBER_DENIED_TOOLS`）。
+
+## 步骤 3 系统提示增量
+
+由「kernel 维护」落进 `system-prompt.ts`；措辞以代码为准，必须表达的内容：
+
+1. **形态选择原则**（只在 `delegate`、`spawn_teammate` 或 `workflow` 之一可见时出现，节名 `# Working with others`）：默认自己直接做；子任务能独立完成、有可检查的产出时再委派（fresh 写清目标、输入、产出与位置；需要当前对话上下文时用 fork）；多个子任务可以并行且需要互相沟通时组队；步骤固定、可批量时用工作流；成员各自写到自己的子目录，最终由自己读成员成果并用 `present` 交付。不写固定角色与阶段。
+2. **成员标识**（只在子会话出现）：系统提示的人设段之后单独一行，正文为 `renderMemberPromptLine(member)`，即 `Member: <name> (<executionForm>)`，逐字节固定（脚本化测试按它把请求路由到成员；fork 子会话首轮的用户消息与父会话相同，只能靠这一行区分）。随后一句说明：你是一个更大任务里的成员，只做交给你的部分，完成后用 `present` 交付文件并简要回复结果。
+3. 成员的人设段来自预设的 `persona`（没有则用默认人设）；父会话的系统提示不整体给成员。根会话没有成员标识行。
 
 ## 技能
 
-- 发现：内置目录（`@nexgent/skill` 包内）与项目 `.nexgent/skills/<name>/SKILL.md`。`SKILL.md` 以 YAML front matter 开头，字段 `name`（`^[a-z0-9][a-z0-9-]{0,63}$`）、`description`（必填，一行）、`when_to_use`（可选）、`tools`（可选，字符串数组）。
-- 同名时项目技能覆盖内置技能；front matter 错误的文件进 `SkillCatalog.problems`，不影响其他技能。
+- 发现：内置目录（`@nexgent/skill` 包内）、用户目录 `~/.nexgent/skills/<name>/SKILL.md`（步骤 3；`NEXGENT_HOME` 可改 `~/.nexgent`，契约 `USER_SKILLS_DIR`、`SkillSource: 'user'`）与项目 `.nexgent/skills/<name>/SKILL.md`。`SKILL.md` 以 YAML front matter 开头，字段 `name`（`^[a-z0-9][a-z0-9-]{0,63}$`）、`description`（必填，一行）、`when_to_use`（可选）、`tools`（可选，字符串数组）。
+- 同名时项目技能覆盖用户技能，用户技能覆盖内置技能；front matter 错误的文件进 `SkillCatalog.problems`，不影响其他技能。
 - 技能清单在每轮开始由技能提供者生成；轮中新增的技能下一轮可见。
 - 内置的 Office 读取技能说明何时用 `read_document`、各格式的限制；它只读，不执行宏。
 
@@ -120,6 +144,13 @@ kernel 的 `Agent` 在步骤 2 增加（形状由 W7 定，语义在此固定）
 - `KernelToolContext.appendRecord` 只接受 `ToolRecordInput`，并校验 `turn`、`step`、`toolCallId` 与当前调用一致。
 
 线路层（`@nexgent/llm`）：注入消息与用户消息、摘要与其后的用户消息会形成相邻的 `user` 消息；`toWireMessages` 应把相邻的 `user` 消息合并为一个 `user` 轮（文本块依次排列），而不是依赖 API 自动合并。这一条由 W7 实现并加测试。
+
+步骤 3 增加（「kernel 维护」实现，形状在契约固定）：
+
+- `ctx.agents.create({ child: ChildAgentOptions })` 建子会话：父会话必须是本进程里打开的根会话；沙箱用 `childSandboxMode` 收窄；`mode: 'fork'` 时在 `session.start` 之后写 `fork.seed`；成员作用域上 `restrict()` 预设的 `tools` 与 `MEMBER_DENIED_TOOLS`；系统提示加成员标识行。`ctx.agents.resume(id, { child: ResumeChildOptions })` 在父会话仍打开时重开成员（队友的后续轮次）。实现落地前，传 `child` 报 `internal`。
+- 每个会话的 `AgentAttribution`（`taskId`、`memberId`、`executionForm`）写进它的每条账本记录，并经 `ToolContext.attribution` / `member` 交给工具；协作工具用 `ctx.agents.get(context.sessionId)` 找到父 Agent。
+- 父会话的轮次取消或结束时以 `parent` 取消仍在运行的成员；成员的审批请求带 `ApprovalRequest.member`。
+- `KernelToolContext.appendRecord` 与宿主写记录的方法按步骤 3 的 `ToolRecordType` / `HostRecordType` 放宽（实现落地前仍只接受步骤 2 的类型）。
 
 ## 测试
 

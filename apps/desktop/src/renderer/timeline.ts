@@ -229,6 +229,11 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
     case 'turn.start':
     case 'goal':
     case 'material.added':
+    // Step 3 member / workflow / team events: shown once the desktop renders member blocks.
+    case 'member.start':
+    case 'member.end':
+    case 'workflow.phase':
+    case 'team.message':
       return [...list]
   }
 }

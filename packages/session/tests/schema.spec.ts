@@ -45,7 +45,10 @@ const inputs: SessionRecordInput[] = [
     sandboxMode: 'read-only',
     parentSessionId: 'parent-1',
     title: 'Title',
+    member: { name: 'analyst', executionForm: 'delegated', preset: 'read-only-analyst' },
   },
+  // step 3: a forked child's history comes right after session.start
+  { type: 'fork.seed', fromSessionId: 'parent-1', throughSeq: 12, messages: [{ role: 'user', content: 'earlier' }] },
   { type: 'turn.start', turn: 1 },
   { type: 'user.message', turn: 1, content: 'hi', source: 'inject' },
   {
@@ -123,6 +126,15 @@ const inputs: SessionRecordInput[] = [
   { type: 'goal.update', turn: 2, goalId: 'g1', status: 'completed', note: 'done' },
   { type: 'session.title', turn: 2, title: '月报整理' },
   { type: 'turn.files', turn: 2, changes: [{ path: 'report/summary.csv', change: 'modified' }], omitted: 2 },
+  // step 3 records (shapes only; a real child would not start members itself)
+  { type: 'subagent.start', turn: 2, toolCallId: 'c9', childSessionId: 'child-1', childTurn: 1, name: 'checker', executionForm: 'workflow', workflowId: 'w1', task: 'check' },
+  { type: 'subagent.end', turn: 2, childSessionId: 'child-1', childTurn: 1, result: { status: 'interrupted', text: '', deliverables: [], usage: UNKNOWN_USAGE, requestCount: 1 } },
+  { type: 'team.member', member: { name: 'checker', sessionId: 'child-2', status: 'idle' } },
+  { type: 'team.task', turn: 2, task: { id: 't1', title: 'Check', status: 'completed', dependsOn: [], result: 'ok' } },
+  { type: 'team.message', message: { id: 'm1', from: 'checker', to: 'lead', text: 'done', state: 'queued' } },
+  { type: 'workflow.start', turn: 2, toolCallId: 'c9', workflowId: 'w1', kind: 'script' },
+  { type: 'workflow.phase', turn: 2, workflowId: 'w1', phase: 'check' },
+  { type: 'workflow.end', turn: 2, workflowId: 'w1', status: 'interrupted', members: 1 },
   { type: 'turn.end', turn: 2, reason: { kind: 'completed' } },
 ]
 
@@ -158,6 +170,7 @@ describe('session record schema', () => {
     for (const reason of [
       { kind: 'completed' },
       { kind: 'cancelled', cause: 'cost-cap' },
+      { kind: 'cancelled', cause: 'parent' },
       { kind: 'max-tokens' },
       { kind: 'interrupted' },
     ]) {

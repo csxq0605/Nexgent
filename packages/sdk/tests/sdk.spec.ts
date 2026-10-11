@@ -222,7 +222,7 @@ describe('method table', () => {
   it('implements every whitelisted method and rejects others', async () => {
     const t = await testSdk([])
     const info = await t.sdk.call('app.info', {})
-    expect(info).toEqual({ sdkVersion: 2, appVersion: '0.0.0-test', platform: process.platform })
+    expect(info).toEqual({ sdkVersion: 3, appVersion: '0.0.0-test', platform: process.platform })
     await expect(t.sdk.call('nope' as never, {} as never)).rejects.toMatchObject({ code: 'internal' })
     for (const method of SDK_METHOD_NAMES) expect(typeof (t.sdk as unknown as { methods: Record<string, unknown> }).methods[method]).toBe('function')
   })
@@ -318,7 +318,7 @@ describe('export', () => {
     for (const file of bundle.files) expect(await readFile(nodePath.join(out, file), 'utf8')).not.toContain(TEST_KEY)
     expect(await readFile(nodePath.join(out, 'session.jsonl'), 'utf8')).toContain('the key is [REDACTED]')
     const manifest = JSON.parse(await readFile(nodePath.join(out, 'manifest.json'), 'utf8')) as Record<string, unknown>
-    expect(manifest).toMatchObject({ formatVersion: 1, sessionId: session.sessionId, appVersion: '0.0.0-test', sdkVersion: 2, redactions: 1, counts: { ledgerRecords: 1 } })
+    expect(manifest).toMatchObject({ formatVersion: 1, sessionId: session.sessionId, appVersion: '0.0.0-test', sdkVersion: 3, redactions: 1, counts: { ledgerRecords: 1 } })
     await expect(t.sdk.call('sessions.export', { projectId: project.projectId, sessionId: session.sessionId, outDir: out })).rejects.toMatchObject({ code: 'tool/invalid-input' })
   })
 })

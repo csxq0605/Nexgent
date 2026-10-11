@@ -42,6 +42,7 @@
 | [`adr/0001-reference-rewrite.md`](adr/0001-reference-rewrite.md) | 已接受：参考重写与计划 4.9 的全部决策 |
 | [`adr/0002-claude-platform-route.md`](adr/0002-claude-platform-route.md) | 已接受：模型路由改为 Claude Platform，默认 Claude Sonnet 5.5（决策 3 的默认值被 ADR 0003 替代） |
 | [`adr/0003-thinking-on-by-default.md`](adr/0003-thinking-on-by-default.md) | 已接受：执行默认开启 thinking |
+| [`adr/0004-execution-forms.md`](adr/0004-execution-forms.md) | 已接受：四种执行形态、子会话、深度 1、成员审批与费用树（步骤 3） |
 | [`reference-map.md`](reference-map.md) | 步骤 0 建立，随各步更新 |
 | [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
 | [`plan/step-2-work-partition.md`](plan/step-2-work-partition.md) | 步骤 2 分工与验收设计，用户 2026-10-11 已定 |
