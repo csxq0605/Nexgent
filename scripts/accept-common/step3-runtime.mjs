@@ -1,9 +1,9 @@
 /**
  * SEAM: how the step-3 acceptance script reaches the product — through
- * `@nexgent/sdk` against the scripted model server, with the step-3 plugins
- * the SDK does not load yet mounted as extra profile rows (registry +
- * insert patch). When the SDK loads them itself (W6), drop them here (keep
- * the test web row).
+ * `@nexgent/sdk` against the scripted model server. The SDK loads the
+ * step-3 plugins itself (spreadsheet, web, ptc, subagent, workflow, team)
+ * and runs the recovery steps when a root session reopens; the only row
+ * this script adds is a test `web_fetch` (H19), on request.
  *
  * Packages load from their built `dist/` by file URL (scripts/ is not a
  * workspace package).
@@ -14,11 +14,7 @@ import { isLoopbackUrl } from './step2-runtime.mjs'
 const PACKAGES = {
   sdk: 'packages/sdk',
   session: 'packages/session',
-  subagent: 'packages/subagent',
   team: 'packages/team',
-  workflow: 'packages/workflow',
-  ptc: 'packages/ptc',
-  spreadsheet: 'packages/tool-spreadsheet',
   web: 'packages/web',
 }
 
@@ -34,7 +30,7 @@ function entry(dir) {
 
 /**
  * Load the built packages.
- * @returns `{ ok: true, pkgs }` (`sdk`, `session`, `subagent`, `team`, `workflow`, `ptc`, `spreadsheet`, `web`) or `{ ok: false, reason }`.
+ * @returns `{ ok: true, pkgs }` (`sdk`, `session`, `team`, `web`) or `{ ok: false, reason }`.
  */
 export async function loadStep3Packages() {
   const pkgs = {}
@@ -52,11 +48,11 @@ export async function loadStep3Packages() {
 /**
  * A `web_fetch` row for the scripted layers only: the shipped tool with one extra allowed
  * address ({@link TEST_WEB_ADDRESS}); every other loopback and private address stays refused.
+ * It carries the shipped row's id and name, so the SDK leaves its own web row out.
  */
 function testWebPlugin(pkgs) {
   const allowAddress = address => address === TEST_WEB_ADDRESS || pkgs.web.isPublicAddress(address)
   return {
-    // The shipped row's name, so a host that loads @nexgent/web itself skips it for this one.
     name: pkgs.web.WebPlugin.name,
     apply(ctx) {
       ctx.inject(['tools'], (scope) => {
@@ -68,28 +64,17 @@ function testWebPlugin(pkgs) {
 }
 
 /**
- * Profile rows the acceptance script adds to every SDK app, after the SDK's step-2 rows:
- * `@nexgent/subagent` (`delegate`), `@nexgent/team` (the six lead tools), `@nexgent/workflow` (`workflow`), `@nexgent/ptc`
- * (`run_code`), `@nexgent/tool-spreadsheet` and `@nexgent/web` — or, with `web: 'test'`,
- * the test `web_fetch` row instead of the shipped one.
+ * Extra profile rows: none by default; with `web: 'test'` the test `web_fetch` row in place
+ * of the SDK's shipped one.
  */
 export function step3Rows(pkgs, { web = 'shipped' } = {}) {
-  const plugins = [
-    ['subagent', pkgs.subagent.SubagentPlugin],
-    ['team', pkgs.team.TeamPlugin],
-    ['workflow', pkgs.workflow.WorkflowPlugin],
-    ['ptc', pkgs.ptc.PtcPlugin],
-    ['spreadsheet', pkgs.spreadsheet.SpreadsheetPlugin],
-    ['web', web === 'test' ? testWebPlugin(pkgs) : pkgs.web.WebPlugin],
-  ]
-  return {
-    registry: Object.fromEntries(plugins.map(([, plugin]) => [plugin.name, plugin])),
-    patches: [{ insert: plugins.map(([id, plugin]) => ({ id, name: plugin.name })) }],
-  }
+  if (web !== 'test') return { registry: {}, patches: [] }
+  const plugin = testWebPlugin(pkgs)
+  return { registry: { [plugin.name]: plugin }, patches: [{ insert: [{ id: 'web', name: plugin.name }] }] }
 }
 
 /**
- * Create an SDK instance for the scripted layers, with the step-3 rows.
+ * Create an SDK instance for the scripted layers.
  * @param pkgs - from {@link loadStep3Packages}.
  * @param options - `env` (loopback API base URL, key, `NEXGENT_HOME`; never `process.env`), `home`, `approvals`,
  *   `web` (`'shipped'` default, or `'test'`: see {@link step3Rows}).

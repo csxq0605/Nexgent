@@ -30,9 +30,9 @@ const range = (prefix: string, from: number, to: number) =>
 const WIRED = new Set(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H09', 'H10', 'H12', 'H13', 'H15', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23', ...range('D', 1, 10)])
 /**
  * Items the headless layer passes today. Failing: H10 (a resumed team turn's formsUsed omits team),
- * H15 (delegated and workflow members still see team tools). H09 waits for the host's recoverWorkflows (W6).
+ * H15 (delegated and workflow members still see team tools).
  */
-const PASSING = new Set<string>(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H12', 'H13', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23'])
+const PASSING = new Set<string>(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H09', 'H12', 'H13', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23'])
 const FAILING = new Set<string>(['H10', 'H15'])
 
 describe('accept-step3 checklist', () => {

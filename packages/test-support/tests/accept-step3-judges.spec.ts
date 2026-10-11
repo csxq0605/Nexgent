@@ -245,8 +245,12 @@ describe('H02 fresh delegation', () => {
 })
 
 describe('H03 fork delegation', () => {
-  it('passes without a subagent.end for the killed member (closeInterruptedRuns is the host\'s, W6) and says so', () => {
-    expect(judge('H03', real, tools).evidence).toMatch(/closeInterruptedRuns/)
+  it('the host marks the killed member interrupted on resume (SDK closeInterruptedRuns, W6)', () => {
+    expect(judge('H03', real, tools).evidence).toMatch(/subagent\.end interrupted written/)
+  })
+  it('still passes when no subagent.end was written for the killed member (not part of H03)', () => {
+    const obs = brokenPhases(d => { const id = subStart(d, 'forker-two')['childSessionId']; d['sessions'][d['sessionId']].records = rootRecords(d).filter(r => !(r['type'] === 'subagent.end' && r['childSessionId'] === id)) })
+    expect(judge('H03', obs, tools)).toMatchObject({ status: 'passed', evidence: expect.stringMatching(/closeInterruptedRuns/) })
   })
   it.each<[string, (d: Phase) => void]>([
     ['the forker has no fork.seed', d => { childRecords(d, 'forker').splice(1, 1) }],
@@ -257,7 +261,7 @@ describe('H03 fork delegation', () => {
     ['the killed member lost its seed after resume', d => { childRecords(d, 'forker-two').splice(1, 1) }],
     ['the seed changed between the kill and the resume', d => { childRecords(d, 'forker-two')[1]!['throughSeq'] = 1 }],
     ['the root did not close the killed turn as interrupted', d => { const t = rootRecords(d).find(r => r['type'] === 'turn.end' && r['turn'] === subStart(d, 'forker-two')['turn'])!; t['reason'] = { kind: 'completed' } }],
-    ['a subagent.end for the killed member says completed', d => { rootRecords(d).push({ type: 'subagent.end', childSessionId: subStart(d, 'forker-two')['childSessionId'], result: { status: 'completed' } }) }],
+    ['the subagent.end for the killed member says completed', d => { subEnd(d, 'forker-two')['result'].status = 'completed' }],
     ['the resume turn failed', d => { d['phases'].resume.reason = { kind: 'failed' } }],
   ])('fails when %s', (_label, edit) => {
     expect(judge('H03', brokenPhases(edit), tools).status).toBe('failed')
@@ -445,14 +449,20 @@ describe('H09 workflow recovery', () => {
     )
   }
 
-  it('is not-implemented until the host marks unfinished members and the workflow interrupted (W6)', () => {
-    expect(judge('H09', real, tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/recoverWorkflows/) })
+  /** The real run without the records recoverWorkflows wrote (a host that does not call it). */
+  const unrecovered = (w: Phase) => {
+    const id = killWf(w)['workflowId']
+    w['sessions'][w['sessionId']].records = rootRecords(w).filter(r => !(r['type'] === 'workflow.end' && r['workflowId'] === id) && !(r['type'] === 'subagent.end' && r['childSessionId'] === lateStart(w)['childSessionId']))
+  }
+  it('passes on the real run: the SDK marks late and the workflow interrupted on resume (W6)', () => {
+    expect(judge('H09', real, tools)).toMatchObject({ status: 'passed', evidence: expect.stringMatching(/late and the workflow marked interrupted/) })
   })
-  it('passes once both are marked interrupted', () => {
-    expect(judge('H09', brokenObs(o => recover(o['workflow']!)), tools)).toMatchObject({ status: 'passed' })
+  it('is not-implemented for a host that does not call recoverWorkflows', () => {
+    expect(judge('H09', brokenObs(o => unrecovered(o['workflow']!)), tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/recoverWorkflows/) })
+    expect(judge('H09', brokenObs(o => { unrecovered(o['workflow']!); recover(o['workflow']!) }), tools)).toMatchObject({ status: 'passed' })
   })
   it.each<[string, (w: Phase) => void]>([
-    ['the recovery says completed', w => recover(w, 'completed')],
+    ['the recovery says completed', w => { unrecovered(w); recover(w, 'completed') }],
     ['early ran again after resume', w => { w['requests'].push({ phase: 'wfResume', route: 'early', tools: [] }) }],
     ['a process survived the kill', w => { w['phases'].wfKill.survivors = [4242] }],
     ['the kill came before late streamed', w => { w['phases'].wfKill.streaming = false }],

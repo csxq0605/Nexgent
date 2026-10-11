@@ -5,7 +5,7 @@
  * session records, ledger lines and process state.
  *
  *   headless  H01–H23  scripted model server with per-session routing (member line), through
- *                      @nexgent/sdk (step-3 plugins mounted by step3-runtime.mjs until the SDK loads them)
+ *                      @nexgent/sdk (which loads the step-3 plugins; a test web_fetch row for H19)
  *                      and `nexgent export` (accept-common/step3-headless.mjs, step3-scenario.mjs)
  *   desktop   D01–D14  D01–D10: step 2's desktop scenario and judges, as a regression;
  *                      D11–D14: member blocks, sub-session view, member approval, restart
