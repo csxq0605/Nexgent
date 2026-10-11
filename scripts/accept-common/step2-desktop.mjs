@@ -19,11 +19,12 @@
 import { spawn } from 'node:child_process'
 import { access, copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isLoopbackUrl } from './step2-runtime.mjs'
 
-export const DESKTOP_DIR = fileURLToPath(new URL('../../apps/desktop/', import.meta.url))
+// No trailing separator: on Windows a trailing backslash escapes the closing quote of the argument.
+export const DESKTOP_DIR = resolve(fileURLToPath(new URL('../../apps/desktop/', import.meta.url)))
 const MAIN_ENTRY = join(DESKTOP_DIR, 'dist', 'main', 'index.js')
 const VITE_BIN = join(DESKTOP_DIR, 'node_modules', 'vite', 'bin', 'vite.js')
 const XLSX_SOURCE = fileURLToPath(new URL('../../packages/skill/tests/fixtures/orders.xlsx', import.meta.url))

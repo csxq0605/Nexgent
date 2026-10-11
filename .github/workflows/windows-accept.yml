@@ -51,10 +51,14 @@ jobs:
 
       - name: accept-step2 headless + desktop
         id: hd
+        env:
+          DEBUG: pw:browser
         run: node scripts/accept-step2.mjs --out accept-step2-hd.json
       - name: desktop package tests (UI e2e)
         id: desktop
         if: always() && steps.hd.conclusion != 'skipped'
+        env:
+          DEBUG: pw:browser
         run: pnpm --filter @nexgent/desktop exec vitest run --testTimeout=60000
       - name: accept-step2 real (R01–R07, R06 on Windows)
         id: real

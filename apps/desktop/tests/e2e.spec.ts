@@ -8,7 +8,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -16,7 +16,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
 
-const APP_DIR = fileURLToPath(new URL('..', import.meta.url))
+// No trailing separator: on Windows a trailing backslash escapes the closing quote of the argument.
+const APP_DIR = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const RENDERER = fileURLToPath(new URL('./fixtures/renderer', import.meta.url))
 const SCRIPTED_SDK = fileURLToPath(new URL('./fixtures/scripted-sdk.mjs', import.meta.url))
 const ELECTRON_BIN = createRequire(import.meta.url)('electron') as unknown as string
