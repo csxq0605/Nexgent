@@ -1,0 +1,33 @@
+# Unsigned packages of the Nexgent desktop app (step 2, W5). Signing and
+# auto-update come after step 2. Build with `node scripts/package.mjs linux`
+# or `node scripts/package.mjs win`; see docs/install.md.
+appId: dev.nexgent.desktop
+productName: Nexgent
+copyright: Copyright © 2026 csxq0605
+electronVersion: 44.4.5
+# scripts/package.mjs passes --projectDir build/app and the output directory (release/).
+asar: true
+npmRebuild: false
+nodeGypRebuild: false
+publish: null
+files:
+  - package.json
+  - dist/**
+  - '!dist/**/*.map'
+  - '!dist/**/*.d.ts'
+  - '!dist/**/*.d.cts'
+  - '!dist/**/.tsbuildinfo'
+  - '!**/*.tsbuildinfo'
+artifactName: Nexgent-${version}-${os}-${arch}.${ext}
+linux:
+  target: AppImage
+  category: Development
+  executableName: nexgent-desktop
+  synopsis: Nexgent desktop app
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
