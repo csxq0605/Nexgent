@@ -279,6 +279,8 @@ export interface TeamMember {
   readonly sessionId: string
   readonly status: TeamMemberStatus
   readonly preset?: string
+  /** The `spawn_teammate` persona that replaced the preset's, kept so a restart restores it. */
+  readonly persona?: string
 }
 
 /** Task board status. A task may start only when every `dependsOn` task is `completed`. */

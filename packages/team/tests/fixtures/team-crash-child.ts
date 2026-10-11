@@ -2,7 +2,8 @@
 // spawns bob (who finishes), then alice; alice claims t1, mails bob and the
 // Lead, and the process kills itself on alice's next model request, while
 // both messages are queued and not yet delivered. The Lead is meanwhile in a
-// model request, so nothing wakes bob first. Prints `ids <lead>` before the kill.
+// model request, so nothing wakes bob first. Alice has her own persona.
+// Prints `ids <lead>` before the kill.
 import { writeSync } from 'node:fs'
 import { ContextPlugin } from '@nexgent/context'
 import { createApp, type Context, type LLMRequest } from '@nexgent/kernel'
@@ -29,7 +30,7 @@ const llm = scriptedProvider([
     { id: 's1', name: 'spawn_teammate', arguments: { name: 'bob', task: 'Say you are ready.' } },
   ] },
   { toolCalls: [{ id: 'w1', name: 'wait_teammates', arguments: {} }] },
-  { toolCalls: [{ id: 's2', name: 'spawn_teammate', arguments: { name: 'alice', task: 'Collect, then tell bob and the lead.' } }] },
+  { toolCalls: [{ id: 's2', name: 'spawn_teammate', arguments: { name: 'alice', task: 'Collect, then tell bob and the lead.', persona: 'You are a meticulous collector who double-checks every row.' } }] },
   { content: 'thinking', chunkDelayMs: 60_000 },
 ], {
   routeKey: memberOf,

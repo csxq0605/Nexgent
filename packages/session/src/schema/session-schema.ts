@@ -165,6 +165,7 @@ export const sessionRecordSchema: JsonObject = {
         sessionId: ref('nonEmptyString'),
         status: { enum: ['active', 'idle', 'stopped'] },
         preset: ref('nonEmptyString'),
+        persona: ref('nonEmptyString'),
       },
       ['name', 'sessionId', 'status'],
     ),
