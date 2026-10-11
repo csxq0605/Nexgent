@@ -40,6 +40,17 @@ Policy (`permissions.md`): `decideToolPolicy` maps tool `approval` × sandbox mo
 
 `agent.ctx` is the agent's scoped context: `agent.ctx.tools.register()` / `restrict()` affect only that agent and vanish on `close`.
 
+### Step-2 hooks
+
+The loop calls the optional services `ctx.context` (`ContextService`) and `ctx.tasking` (`TaskingService`) at the points `docs/spec/agent-hooks.md` fixes; both are looked up at each turn start without an inject requirement, and without them a turn runs exactly as in step 1. Both are declared on `Context` in `services.ts` with the contract types; another package may repeat the declaration with the same type.
+
+- Turn input: `agent.run(text)` or `agent.run({ text, materialIds? })` for a user turn, `agent.run({ source: 'feedback', feedback })` for a feedback turn (`feedback` record after `turn.start`, message text `renderFeedbackPrompt(feedback)`). `materialIds` go on the user message as `materials`.
+- Turn start: `files.beginTurn`, then each provider's `beginTurn` with the state read at turn start. Sections are rendered for every request of the turn (provider order, then `id`) after "Working with files"; `inject` texts are written as `user.message { source: 'inject' }` before the user message. A throwing provider is skipped with a non-fatal `error` record. A failed `beginTurn` writes an `error` record and the turn runs untracked (no `turn.files`).
+- Before each model call: `compactor.shouldCompact` with the agent's last reported usage (unknown after resume until the first request); on `compact` the kernel checks `keepMessages` (1..history length, tail starts with `user`), writes `compaction`, replaces the in-memory history with the summary plus the tail and counts the summary request in the task's totals. A failure writes a non-fatal `error`, keeps the history and skips compaction for the rest of the turn.
+- Tools: `KernelToolContext.step` and `appendRecord(record)`, which accepts only `deliverable.presented` with this call's `turn` / `step` / `toolCallId`, before the call settles; a refused or failed append ends the call as `tool/failed` even if the handler caught it. `files.observe` runs after every `tool.result`; its errors are ignored.
+- Turn end: `files.endTurn` (its signal fires `FILES_END_CANCEL_MS` = 5 s after the turn is cancelled), then `turn.files` sorted by path, at most `TURN_FILES_LIMIT` entries plus `omitted`; a failure writes an `error` record instead. Then `turn.end`.
+- Host records: `agent.appendHostRecord(record)` (a `HostRecordSink`) accepts `material.added`, `goal.set`, `goal.update`; during a turn it adds the running turn's number, between turns the record has none; any other type or another turn number is refused with `session/invalid-record`.
+
 ## Other services and primitives
 
 - `ctx.tools` (`ToolRegistryService`): contract `ToolRegistry`; global registrations from non-agent contexts, fiber-scoped disposal.
@@ -55,7 +66,6 @@ Adapted (file headers say so): `util/atomic-write`, `storage/storage-json` (atom
 
 ## Not done yet
 
-- `costCaps.perProject` is parsed but not enforced (step 1 defines the format only).
 - No JSON Schema files for config / credentials / lock yet (`data-formats.md` lists them under this package).
 - Tools run sequentially; no parallel tool execution.
 - Secret redaction of tool output is the workspace package's job; the kernel does not redact.
