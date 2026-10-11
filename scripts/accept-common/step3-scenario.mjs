@@ -45,7 +45,15 @@
  *     cancelDelegate  a delegated member
  *     cancelTeam      two teammates
  *     cancelWorkflow  two workflow members in parallel
+ *   budget project (costCaps.perTask maxRequests 2):
+ *     budget     the root delegates `spender`, whose one request uses the last of the cap;
+ *                the root's next request is blocked (H11)
+ *   member-approval project (.env exists):
+ *     memberApproval  delegate `keeper`, who edits .env (approval asked, denied) (H14)
+ *   skills project (own home: one user-only skill, one name in user and project dirs):
+ *     skills     load_skill of both names (H20)
  *   H15 reads the tool lists of every member request against the root's.
+ *   H21 queries the delegation, workflow and team-kill projects through a fresh SDK.
  */
 
 import { SLOW_COMMAND, shellCall } from './scenario-step2.mjs'
@@ -131,6 +139,20 @@ export const TEAM_STALL_TEXT = 'Lead is thinking about the team'
 /** Members of the cancel project, by turn. */
 export const CANCEL_MEMBERS = { cancelDelegate: ['sleeper'], cancelTeam: ['mate-a', 'mate-b'], cancelWorkflow: ['flow-a', 'flow-b'] }
 
+/** The budget project's cap (H11): the root's one request plus the member's one use it up. */
+export const BUDGET = { perTask: { maxRequests: 2 } }
+/** The `.env` of the member-approval project (H14) and the edit the member asks for. */
+export const MEMBER_ENV = { path: '.env', original: 'TOKEN=keep-me\n', from: 'TOKEN=keep-me', to: 'TOKEN=member-wrote' }
+/** Skill files of the skills project (H20): `user` only in the user directory, `shared` in both. */
+export const SKILLS = {
+  user: { name: 'restock-user', description: 'User-level restock checklist.', body: 'USER-ONLY-SKILL-BODY' },
+  shared: {
+    name: 'stock-format',
+    user: { description: 'User copy of the stock format.', body: 'USER-SHARED-SKILL-BODY' },
+    project: { description: 'Project copy of the stock format.', body: 'PROJECT-SHARED-SKILL-BODY' },
+  },
+}
+
 /** Turn texts, used both as the user's message and to recognise requests. */
 export const TASKS = {
   direct: 'Write a short restock plan into plan/restock.md and present it.',
@@ -154,6 +176,9 @@ export const TASKS = {
   cancelDelegate: 'Delegate a slow check.',
   cancelTeam: 'Have two teammates run slow checks.',
   cancelWorkflow: 'Run two slow checks in a workflow.',
+  budget: 'Delegate the spending check.',
+  memberApproval: 'Have a member store the token in .env.',
+  skills: 'Load the restock skills.',
 }
 
 /** Member tasks (what the root passes to `delegate`). */
@@ -165,6 +190,8 @@ export const MEMBER_TASKS = {
   writerB: 'Add your notes to shared/notes.md and present it.',
   wide: 'This member should never start.',
   quiet: 'Say which tools you have.',
+  spender: 'Report the stock in one line.',
+  keeper: 'Store the new token in .env.',
 }
 
 const usage = { inputTokens: 300, outputTokens: 30, totalTokens: 330, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }
@@ -433,6 +460,33 @@ export function buildStep3Script(h, state = {}) {
         'flow-a': [{ content: 'Starting.', toolCalls: [shellCall(SLOW_COMMAND)], usage }],
         'flow-b': [{ content: 'Starting.', toolCalls: [shellCall(SLOW_COMMAND)], usage }],
       },
+    },
+    budget: {
+      // One root entry only: the request after the member's must never be sent.
+      lead: [h.expectRequest('budget turn', turnOf(TASKS.budget), calls(call('delegate', { name: 'spender', task: MEMBER_TASKS.spender }, 'call-spender')))],
+      routes: { spender: [h.expectRequest('spender request', member('spender'), answer('Stock: 6 SKUs.'))] },
+    },
+    memberApproval: {
+      lead: [
+        h.expectRequest('member approval turn', turnOf(TASKS.memberApproval), calls(call('delegate', { name: 'keeper', task: MEMBER_TASKS.keeper }, 'call-keeper'))),
+        h.expectRequest('keeper result', mentions(TASKS.memberApproval), answer('The member was not allowed to change .env.')),
+      ],
+      routes: {
+        keeper: [
+          h.expectRequest('keeper edit', member('keeper'), calls(call('str_replace', { path: MEMBER_ENV.path, old_str: MEMBER_ENV.from, new_str: MEMBER_ENV.to }, 'call-keeper-env'))),
+          h.expectRequest('keeper denied', member('keeper'), answer('The edit was not approved.')),
+        ],
+      },
+    },
+    skills: {
+      lead: [
+        h.expectRequest('skills turn', turnOf(TASKS.skills), calls(
+          call('load_skill', { name: SKILLS.user.name }, 'call-skill-user'),
+          call('load_skill', { name: SKILLS.shared.name }, 'call-skill-shared'),
+        )),
+        h.expectRequest('skills loaded', mentions(TASKS.skills), answer('Both skills loaded.')),
+      ],
+      routes: {},
     },
   }
 }

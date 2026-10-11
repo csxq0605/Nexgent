@@ -26,7 +26,7 @@ import { isLoopbackUrl } from './step2-runtime.mjs'
 // No trailing separator: on Windows a trailing backslash escapes the closing quote of the argument.
 export const DESKTOP_DIR = resolve(fileURLToPath(new URL('../../apps/desktop/', import.meta.url)))
 const MAIN_ENTRY = join(DESKTOP_DIR, 'dist', 'main', 'index.js')
-const VITE_BIN = join(DESKTOP_DIR, 'node_modules', 'vite', 'bin', 'vite.js')
+export const VITE_BIN = join(DESKTOP_DIR, 'node_modules', 'vite', 'bin', 'vite.js')
 const XLSX_SOURCE = fileURLToPath(new URL('../../packages/skill/tests/fixtures/orders.xlsx', import.meta.url))
 const TIMEOUT = 60_000
 const WAIT = 20_000
@@ -103,7 +103,7 @@ export async function desktopPrerequisites() {
   return { ok: true }
 }
 
-function run(command, args, options) {
+export function run(command, args, options) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { ...options, stdio: ['ignore', 'ignore', 'pipe'] })
     let stderr = ''
@@ -114,7 +114,7 @@ function run(command, args, options) {
 }
 
 /** Linux without a display: start Xvfb. Returns `{ display, stop }`. */
-async function ensureDisplay() {
+export async function ensureDisplay() {
   const current = process.env['DISPLAY']
   if (process.platform !== 'linux' || (current !== undefined && current !== '')) return { display: current, stop() {} }
   const child = spawn('Xvfb', ['-displayfd', '1', '-screen', '0', '1440x1000x24', '-nolisten', 'tcp'], { stdio: ['ignore', 'pipe', 'ignore'] })
@@ -136,7 +136,7 @@ async function ensureDisplay() {
   return { display, stop: () => child.kill() }
 }
 
-async function poll(read, ok, what, ms = WAIT) {
+export async function poll(read, ok, what, ms = WAIT) {
   const deadline = Date.now() + ms
   let last
   for (;;) {

@@ -14,7 +14,7 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { REPO_ROOT } from './harness.mjs'
-import { CANCEL_MEMBERS, MATERIAL, PAGE, SCRIPTED_API_KEY, STALL_TEXT, TASKS, TOOL_FILES, WF_STALL_TEXT, buildStep3Script, readonlyPresets } from './step3-scenario.mjs'
+import { BUDGET, CANCEL_MEMBERS, MATERIAL, MEMBER_ENV, PAGE, SKILLS, SCRIPTED_API_KEY, STALL_TEXT, TASKS, TOOL_FILES, WF_STALL_TEXT, buildStep3Script, readonlyPresets } from './step3-scenario.mjs'
 import { filesContaining } from './step2-headless.mjs'
 import { CLI_BIN, runTurn } from './step2-runtime.mjs'
 import { TEST_WEB_ADDRESS, createStep3Sdk, loadStep3Packages } from './step3-runtime.mjs'
@@ -577,6 +577,133 @@ async function runCancel(h, pkgs, work, servers, log) {
   return obs
 }
 
+/** One turn's result as the judges read it. */
+const turnObs = ({ result, error, events }) => ({ reason: result?.reason, error: error === undefined ? undefined : String(error), toolResults: toolResultsOf(events) })
+
+/** The budget project (H11): perTask maxRequests 2; the member's request uses the cap up. */
+async function runBudget(h, pkgs, work, servers, log) {
+  const obs = { root: join(work, 'budget-project'), phases: {}, requests: [], cap: BUDGET.perTask }
+  await mkdir(obs.root, { recursive: true })
+  const kit = projectKit(h, pkgs, work, servers, buildStep3Script(h), obs, join(work, 'home'))
+  const server = await kit.serverFor('budget')
+  const sdk = kit.sdkFor(server)
+  try {
+    const { projectId } = await sdk.call('projects.open', { root: obs.root, create: true })
+    await sdk.call('settings.update', { projectId, patch: { costCaps: { perTask: BUDGET.perTask } } })
+    obs.sessionId = (await sdk.call('sessions.create', { projectId, title: 'step-3 budget' })).sessionId
+    log('phase budget')
+    obs.phases.budget = turnObs(await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS.budget }))
+  } finally {
+    await sdk.dispose()
+  }
+  kit.collect('budget', server)
+  await kit.finish()
+  return obs
+}
+
+/** The member-approval project (H14): a member edits .env; the caller denies through `approvals.respond`. */
+async function runMemberApproval(h, pkgs, work, servers, log) {
+  const obs = { root: join(work, 'member-approval-project'), phases: {}, requests: [], approvals: [] }
+  await mkdir(obs.root, { recursive: true })
+  await writeFile(join(obs.root, MEMBER_ENV.path), MEMBER_ENV.original)
+  const kit = projectKit(h, pkgs, work, servers, buildStep3Script(h), obs, join(work, 'home'))
+  const server = await kit.serverFor('memberApproval')
+  const sdk = kit.sdkFor(server)
+  try {
+    const { projectId } = await sdk.call('projects.open', { root: obs.root, create: true })
+    obs.sessionId = (await sdk.call('sessions.create', { projectId, title: 'step-3 member approval' })).sessionId
+    log('phase memberApproval')
+    const onEvent = (event) => {
+      if (event.type !== 'approval.request') return
+      const entry = { sessionId: event.sessionId, parentSessionId: event.parentSessionId ?? null, request: event.request }
+      obs.approvals.push(entry)
+      // Answer on a later task, as a UI would: the SDK registers the pending request only after
+      // the event listeners return, so an answer given inside the listener is dropped.
+      entry.answered = new Promise(resolve => setImmediate(resolve))
+        .then(() => sdk.call('approvals.respond', { projectId, sessionId: event.request.sessionId, decision: { id: event.request.id, decision: 'deny', scope: 'once' } }))
+        .then(ok => ok, error => `error: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    obs.phases.memberApproval = turnObs(await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS.memberApproval }, { onEvent }))
+    for (const entry of obs.approvals) entry.answered = await entry.answered
+  } finally {
+    await sdk.dispose()
+  }
+  kit.collect('memberApproval', server)
+  obs.envContent = await readFile(join(obs.root, MEMBER_ENV.path), 'utf8').catch(() => null)
+  await kit.finish()
+  return obs
+}
+
+const skillFile = (name, { description, body }) => `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`
+
+/** The skills project (H20): its own home with two user skills; one name also in the project. */
+async function runSkills(h, pkgs, work, servers, log) {
+  const obs = { root: join(work, 'skills-project'), phases: {}, requests: [] }
+  const home = join(work, 'skills-home')
+  const userDir = join(home, 'skills')
+  const projectDir = join(obs.root, '.nexgent', 'skills')
+  for (const [dir, name, skill] of [
+    [userDir, SKILLS.user.name, SKILLS.user],
+    [userDir, SKILLS.shared.name, SKILLS.shared.user],
+    [projectDir, SKILLS.shared.name, SKILLS.shared.project],
+  ]) {
+    await mkdir(join(dir, name), { recursive: true })
+    await writeFile(join(dir, name, 'SKILL.md'), skillFile(name, skill))
+  }
+  const kit = projectKit(h, pkgs, work, servers, buildStep3Script(h), obs, home)
+  const server = await kit.serverFor('skills')
+  const sdk = kit.sdkFor(server)
+  try {
+    const { projectId } = await sdk.call('projects.open', { root: obs.root, create: true })
+    obs.sessionId = (await sdk.call('sessions.create', { projectId, title: 'step-3 skills' })).sessionId
+    log('phase skills')
+    obs.phases.skills = turnObs(await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS.skills }))
+  } finally {
+    await sdk.dispose()
+  }
+  kit.collect('skills', server)
+  await kit.finish()
+  return obs
+}
+
+/**
+ * H21: after the kills and resumes, a fresh SDK (no model request expected) opens the delegation,
+ * workflow and team-kill projects and reads them through the session queries only.
+ */
+async function runQueries(h, pkgs, work, servers, log, projects) {
+  const server = await h.scriptedModelServer({ script: [] })
+  servers.push({ phase: 'queries', server })
+  const sdk = createStep3Sdk(pkgs, { env: { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: join(work, 'home') }, home: join(work, 'home') })
+  const out = {}
+  try {
+    for (const [key, project] of Object.entries(projects)) {
+      log(`queries ${key}`)
+      const { projectId } = await sdk.call('projects.open', { root: project.root })
+      const input = { projectId, sessionId: project.sessionId }
+      const list = await sdk.call('sessions.list', { projectId })
+      const children = await sdk.call('sessions.children', input)
+      const root = await sdk.call('sessions.view', input)
+      const views = {}
+      for (const child of children) {
+        const view = await sdk.call('sessions.view', { projectId, sessionId: child.sessionId })
+        views[child.sessionId] = { summary: view.summary, deliverables: view.items.filter(i => i.kind === 'deliverable').map(i => i.deliverable) }
+      }
+      out[key] = {
+        sessionId: project.sessionId,
+        list: list.map(x => ({ sessionId: x.sessionId, parentSessionId: x.parentSessionId, childCount: x.childCount })),
+        children: children.map(x => ({ sessionId: x.sessionId, parentSessionId: x.parentSessionId, member: x.member })),
+        root: { summary: root.summary, kinds: root.items.map(i => i.kind) },
+        views,
+        collaboration: await sdk.call('sessions.collaboration', input),
+      }
+    }
+  } finally {
+    await sdk.dispose()
+  }
+  out.requests = server.requests.length
+  return out
+}
+
 /**
  * Run the headless scenario and return its observations.
  * @param harness - the loaded test-support module; `undefined` collects only the repository inventory.
@@ -602,7 +729,11 @@ export async function runHeadlessScenario(harness, work, { log = () => {}, root 
     const team = await runTeam(harness, loaded.pkgs, work, servers, log)
     const teamKill = await runTeamKill(harness, loaded.pkgs, work, servers, log)
     const cancel = await runCancel(harness, loaded.pkgs, work, servers, log)
-    return { repo, direct, delegation, readonly, tools, workflow, team, teamKill, cancel }
+    const budget = await runBudget(harness, loaded.pkgs, work, servers, log)
+    const memberApproval = await runMemberApproval(harness, loaded.pkgs, work, servers, log)
+    const skills = await runSkills(harness, loaded.pkgs, work, servers, log)
+    const queries = await runQueries(harness, loaded.pkgs, work, servers, log, { delegation, workflow, teamKill })
+    return { repo, direct, delegation, readonly, tools, workflow, team, teamKill, cancel, budget, memberApproval, skills, queries }
   } finally {
     await Promise.all(servers.map(s => (s.server ?? s).close().catch(() => undefined)))
     await harness.killAllSpawned().catch(() => undefined)

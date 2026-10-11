@@ -66,6 +66,13 @@ export interface Step3Observations {
   readonly tools?: ProjectObservations
   readonly workflow?: ProjectObservations
   readonly team?: ProjectObservations
+  readonly teamKill?: ProjectObservations
+  readonly cancel?: ProjectObservations
+  readonly budget?: ProjectObservations
+  readonly memberApproval?: ProjectObservations
+  readonly skills?: ProjectObservations
+  /** H21: what a fresh SDK's session queries return, per project, plus the model requests they caused. */
+  readonly queries?: Readonly<Record<string, any>>
 }
 /** The tools, workflow and team projects' observations. */
 export interface ProjectObservations {

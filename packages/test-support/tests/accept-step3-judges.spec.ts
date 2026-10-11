@@ -109,24 +109,20 @@ describe('H01 direct execution', () => {
 })
 
 describe('H10 attribution', () => {
-  /** The real run with the one known defect repaired: the resumed team turn's formsUsed. */
-  const repairForms = (o: Record<string, Phase>) => {
-    const k = o['teamKill']!
-    const outcomes = ledgerRecords(k).filter(r => r['type'] === 'task.outcome' && r['sessionId'] === k['sessionId'])
-    for (const r of outcomes) r['formsUsed'] = ['direct', 'team']
-  }
-
-  it('fails today: after a resume the root task.outcome omits the team form its resumed teammates used', () => {
+  it('passes on the real run: every form attributed across all projects, resumed members included', () => {
     const result = judge('H10', real, tools)
+    expect(result.status, result.evidence).toBe('passed')
+    expect(result.evidence).toMatch(/across 11 projects.*\(direct, delegated, team, workflow\)/)
+    expect(judge('H10', unattributed(), tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/does not write taskId/) })
+  })
+
+  it('fails when a resumed team turn omits the team form (the defect fixed in #71)', () => {
+    const result = judge('H10', brokenObs(o => {
+      const k = o['teamKill']!
+      for (const r of ledgerRecords(k)) if (r['type'] === 'task.outcome' && r['sessionId'] === k['sessionId']) r['formsUsed'] = ['direct']
+    }), tools)
     expect(result.status).toBe('failed')
     expect(result.evidence).toMatch(/teamKill task\.outcome [0-9a-f]{8}: formsUsed \["direct"\], expected \["direct","team"\]/)
-    expect(result.evidence).toMatch(/\(1 problems/)
-  })
-  it('passes with that defect repaired: every form attributed across all projects', () => {
-    const result = judge('H10', brokenObs(repairForms), tools)
-    expect(result.status, result.evidence).toBe('passed')
-    expect(result.evidence).toMatch(/across 8 projects.*\(direct, delegated, team, workflow\)/)
-    expect(judge('H10', unattributed(), tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/does not write taskId/) })
   })
 
   it.each<[string, (o: Record<string, Phase>) => void]>([
@@ -137,8 +133,8 @@ describe('H10 attribution', () => {
     ['a root outcome omits a form it used', o => { const r = ledgerRecords(o['workflow']!).find(x => x['type'] === 'task.outcome' && JSON.stringify(x['formsUsed']) === '["direct","workflow"]')!; r['formsUsed'] = ['direct'] }],
     ['a record names a session with no file', o => { ledgerRecords(o['tools']!)[0]!['sessionId'] = 'no-such-session' }],
     ['no workflow member ran anywhere', o => { delete o['workflow']; delete o['cancel'] }],
-  ])('fails (with the known defect repaired) when %s', (_label, edit) => {
-    expect(judge('H10', brokenObs(o => { repairForms(o); edit(o) }), tools).status).toBe('failed')
+  ])('fails when %s', (_label, edit) => {
+    expect(judge('H10', brokenObs(edit), tools).status).toBe('failed')
   })
   it('fails on a wrong attribution as soon as any record carries one', () => {
     expect(judge('H10', broken(d => { attribute(d); ledgerOf(d)[2]!['memberId'] = 'someone' }), tools).status).toBe('failed')
@@ -151,10 +147,10 @@ describe('H10 attribution', () => {
 })
 
 describe('H22 records, schema, secrets', () => {
-  it('passes on the real run: all eight projects, all nine step-3 record types', () => {
+  it('passes on the real run: all eleven projects, all nine step-3 record types', () => {
     const result = judge('H22', real, tools)
     expect(result.status, result.evidence).toBe('passed')
-    expect(result.evidence).toMatch(/8 projects, .*seq continuous, schema ok.*types seen: fork\.seed, subagent\.start, subagent\.end, team\.member, team\.task, team\.message, workflow\.start, workflow\.phase, workflow\.end; all nine/)
+    expect(result.evidence).toMatch(/11 projects, .*seq continuous, schema ok.*types seen: fork\.seed, subagent\.start, subagent\.end, team\.member, team\.task, team\.message, workflow\.start, workflow\.phase, workflow\.end; all nine/)
   })
 
   it('is not-implemented when a step-3 record type never appears', () => {
@@ -530,5 +526,74 @@ describe('H13 cancel propagation', () => {
     ['a cancelled teammate was stopped', c => { rootRecords(c).push({ type: 'team.member', seq: 999, member: { name: 'mate-a', status: 'stopped' } }) }],
   ])('fails when %s', (_label, edit) => {
     expect(judge('H13', brokenObs(o => edit(o['cancel']!)), tools).status).toBe('failed')
+  })
+})
+
+describe.each(['H11', 'H14', 'H20', 'H21'])('%s on the real run', (id) => {
+  it('passes', () => {
+    const result = judge(id, real, tools)
+    expect(result.status, result.evidence).toBe('passed')
+  })
+  it('fails when its project did not run', () => {
+    expect(judge(id, brokenObs(o => { for (const key of ['budget', 'memberApproval', 'skills', 'queries']) delete o[key] }), tools).status).toBe('failed')
+  })
+})
+
+describe('H11 cost tree', () => {
+  const errorOf = (b: Phase) => rootRecords(b).find(r => r['type'] === 'error')!
+  it.each<[string, (b: Phase) => void]>([
+    ['the root was not blocked (it sent a second request)', b => { b['requests'].push({ ...b['requests'].find((r: Phase) => r['route'] === null), phase: 'budget' }) }],
+    ['the member was blocked instead', b => { const r = childRecordsAll(b).find(x => x['type'] === 'turn.end')!; r['reason'] = { kind: 'cancelled', cause: 'cost-cap' } }],
+    ['the error is not budget/exhausted', b => { errorOf(b)['error'].code = 'internal' }],
+    ['the cap counted only the root (used 1)', b => { errorOf(b)['error'].details.used = 1 }],
+    ['the error came before the member ended', b => { errorOf(b)['seq'] = 1 }],
+    ['the turn ended for another reason', b => { b['phases'].budget.reason = { kind: 'completed' } }],
+    ['the root outcome does not record the cap', b => { delete ledgerRecords(b).find(r => r['type'] === 'task.outcome' && r['sessionId'] === b['sessionId'])!['error'] }],
+    ['the member is in another task tree', b => { ledgerRecords(b).find(r => r['type'] === 'task.outcome' && r['sessionId'] !== b['sessionId'])!['taskId'] = TASK_ID }],
+  ])('fails when %s', (_label, edit) => {
+    expect(judge('H11', brokenObs(o => edit(o['budget']!)), tools).status).toBe('failed')
+  })
+})
+
+describe('H14 member approval', () => {
+  it.each<[string, (m: Phase) => void]>([
+    ['no approval was asked', m => { m['approvals'] = [] }],
+    ['the request does not name the member', m => { delete m['approvals'][0].request.member }],
+    ['the request carries the root session id', m => { m['approvals'][0].request.sessionId = m['sessionId'] }],
+    ['the answer by member session id was refused', m => { m['approvals'][0].answered = false }],
+    ['the deny was not recorded in the child session', m => { const r = childRecordsAll(m).find(x => x['type'] === 'approval.decision')!; r['decision'].decision = 'allow' }],
+    ['.env changed', m => { m['envContent'] = 'TOKEN=member-wrote\n' }],
+    ['the edit did not fail', m => { m['phases'].memberApproval.toolResults.find((r: Phase) => r['callId'] === 'call-keeper-env').isError = false }],
+  ])('fails when %s', (_label, edit) => {
+    expect(judge('H14', brokenObs(o => edit(o['memberApproval']!)), tools).status).toBe('failed')
+  })
+})
+
+describe('H20 skills', () => {
+  const resultOf = (k: Phase, id: string) => k['phases'].skills.toolResults.find((r: Phase) => r['callId'] === id)
+  it.each<[string, (k: Phase) => void]>([
+    ['the user skill is not listed', k => { k['requests'][0].sessionText = k['requests'][0].sessionText.replace('- restock-user:', '- other:') }],
+    ['the user copy of the clashing name is listed', k => { k['requests'][0].sessionText = k['requests'][0].sessionText.replace('Project copy', 'User copy') }],
+    ['the user skill does not load', k => { Object.assign(resultOf(k, 'call-skill-user'), { isError: true, content: 'unknown skill' }) }],
+    ['the user body wins the clash', k => { resultOf(k, 'call-skill-shared').content = '# Skill: stock-format\nUSER-SHARED-SKILL-BODY' }],
+  ])('fails when %s', (_label, edit) => {
+    expect(judge('H20', brokenObs(o => edit(o['skills']!)), tools).status).toBe('failed')
+  })
+})
+
+describe('H21 queries after resume', () => {
+  it.each<[string, (q: Phase) => void]>([
+    ['a query called the model', q => { q['requests'] = 1 }],
+    ['sessions.list shows a child at the top level', q => { q['delegation'].list.push({ sessionId: q['delegation'].children[0].sessionId, parentSessionId: q['delegation'].sessionId }) }],
+    ['childCount is wrong', q => { q['workflow'].list[0].childCount = 1 }],
+    ['sessions.children misses a child', q => { q['teamKill'].children.pop() }],
+    ['a child view does not open', q => { const views = q['delegation'].views; delete views[Object.keys(views)[0]!] }],
+    ["a member's deliverable is missing from its view", q => { const run = q['delegation'].collaboration.runs.find((r: Phase) => r['name'] === 'analyst'); q['delegation'].views[run.childSessionId].deliverables = [] }],
+    ['the killed fork member reads completed', q => { q['delegation'].collaboration.runs.find((r: Phase) => r['name'] === 'forker-two').status = 'completed' }],
+    ['the killed workflow reads running', q => { q['workflow'].collaboration.workflows[2].status = 'running' }],
+    ['the team state is missing', q => { delete q['teamKill'].collaboration.team }],
+    ['a team message is still queued', q => { q['teamKill'].collaboration.team.messages[0].state = 'queued' }],
+  ])('fails when %s', (_label, edit) => {
+    expect(judge('H21', brokenObs(o => edit(o['queries']!)), tools).status).toBe('failed')
   })
 })

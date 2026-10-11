@@ -33,6 +33,7 @@ import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { loadHarness, REPO_ROOT } from './accept-common/harness.mjs'
 import { desktopPrerequisites, runDesktopScenario } from './accept-common/step2-desktop.mjs'
+import { runMembersDesktopScenario } from './accept-common/step3-desktop.mjs'
 import { runHeadlessScenario } from './accept-common/step3-headless.mjs'
 import { realPrerequisites } from './accept-common/step3-real.mjs'
 import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
@@ -97,13 +98,21 @@ async function prepareLayer(layer, harness, options) {
     const ready = await desktopPrerequisites()
     if (!ready.ok) return { ok: false, reason: ready.reason }
     await mkdir(options.work, { recursive: true })
-    // D01–D10 regression: step 2's scenario (real Electron, real renderer and SDK, scripted model).
+    // D01–D10 regression: step 2's scenario (real Electron, real renderer and SDK, scripted model);
+    // D11–D14: the members scenario, in its own work directory. Each failure fails only its own items.
+    const ctx = { work: options.work }
     try {
-      const obs = await runDesktopScenario(harness, options.work, { log: line => log(`desktop: ${line}`) })
-      return { ok: true, ctx: { work: options.work, obs } }
+      await mkdir(join(options.work, 'step2'), { recursive: true })
+      ctx.obs = await runDesktopScenario(harness, join(options.work, 'step2'), { log: line => log(`desktop: ${line}`) })
     } catch (error) {
-      return { ok: true, ctx: { work: options.work, scenarioError: errorText(error) } }
+      ctx.scenarioError = errorText(error)
     }
+    try {
+      ctx.members = await runMembersDesktopScenario(harness, join(options.work, 'members'), { log: line => log(`desktop members: ${line}`) })
+    } catch (error) {
+      ctx.membersError = errorText(error)
+    }
+    return { ok: true, ctx }
   }
   // real
   return realPrerequisites(process.env, options.budgetUsd, options.spent)

@@ -13,3 +13,10 @@ export declare function readonlyPresets(): { readonly shell: string; readonly fi
 export declare const TASKS: Readonly<Record<string, string>>
 export declare const MEMBER_TASKS: Readonly<Record<string, string>>
 export declare function buildStep3Script(h: unknown, state?: { materialId?: string }): Readonly<Record<string, { readonly lead: readonly unknown[]; readonly routes: Readonly<Record<string, readonly unknown[]>> }>>
+export declare const BUDGET: { readonly perTask: { readonly maxRequests: number } }
+export declare const MEMBER_ENV: { readonly path: string; readonly original: string; readonly from: string; readonly to: string }
+interface SkillText { readonly description: string; readonly body: string }
+export declare const SKILLS: {
+  readonly user: SkillText & { readonly name: string }
+  readonly shared: { readonly name: string; readonly user: SkillText; readonly project: SkillText }
+}

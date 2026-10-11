@@ -9,6 +9,7 @@ import {
   evaluateItem,
   EXIT_FAIL,
   EXIT_NOT_READY,
+  EXIT_PASS,
   LAYERS,
   OPTIONAL_CHECKS,
   parseLayers,
@@ -27,12 +28,7 @@ const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
 /** The judges and step-2 regression items wired so far; everything else must report not-implemented. */
-const WIRED = new Set(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H09', 'H10', 'H12', 'H13', 'H15', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23', ...range('D', 1, 10)])
-/**
- * Items the headless layer passes today. Failing: H10 (a resumed team turn's formsUsed omits team).
- */
-const PASSING = new Set<string>(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H09', 'H12', 'H13', 'H15', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23'])
-const FAILING = new Set<string>(['H10'])
+const WIRED = new Set([...range('H', 1, 23), ...range('D', 1, 14)])
 
 describe('accept-step3 checklist', () => {
   it('has every item of the step-3 plan in order, plus the D01–D10 regression', async () => {
@@ -45,7 +41,7 @@ describe('accept-step3 checklist', () => {
     expect(planIds).toEqual(ids.filter(id => !range('D', 1, 10).includes(id)))
     expect([...OPTIONAL_CHECKS]).toEqual(['R08'])
     // The regression runs step 2's own desktop items, not copies that could drift.
-    expect(CHECKS.filter(c => WIRED.has(c.id) && c.id.startsWith('D')).map(c => c.id)).toEqual(STEP2_CHECKS.filter(c => c.layer === 'desktop').map(c => c.id))
+    expect(CHECKS.filter(c => c.id.startsWith('D') && range('D', 1, 10).includes(c.id)).map(c => c.id)).toEqual(STEP2_CHECKS.filter(c => c.layer === 'desktop').map(c => c.id))
   })
 
   it('selects layers: default headless + desktop; real only when asked; unknown rejected', () => {
@@ -56,7 +52,7 @@ describe('accept-step3 checklist', () => {
   })
 
   it('nothing fakes a pass: unwired items are not-implemented, wired ones fail without observations', async () => {
-    expect(Object.keys(JUDGES)).toEqual(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H09', 'H10', 'H12', 'H13', 'H15', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23'])
+    expect(Object.keys(JUDGES)).toEqual(range('H', 1, 23))
     for (const check of CHECKS) {
       const result = await evaluateItem(check, { obs: {} })
       if (WIRED.has(check.id)) expect(result.status, check.id).not.toBe('passed')
@@ -145,16 +141,13 @@ describe('scripts/accept-step3.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  it('headless layer: the wired items pass except H10 (a known kernel defect), the rest not-implemented, exit 1, valid summary', async () => {
+  it('headless layer: every item passes, exit 0, valid summary', async () => {
     const { result, summary } = await runScript(['--layer', 'headless'])
-    expect(result.status, result.stderr).toBe(EXIT_FAIL)
+    expect(result.status, result.stderr).toBe(EXIT_PASS)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
-    expect(summary?.result).toBe('fail')
+    expect(summary?.result).toBe('pass')
     expect(summary?.checks.map(check => check.id)).toEqual(range('H', 1, 23))
-    for (const check of summary?.checks ?? []) {
-      const id = check.id ?? ''
-      expect(check, id).toMatchObject(PASSING.has(id) ? { status: 'passed', passed: true } : FAILING.has(id) ? { status: 'failed', passed: false } : { status: 'not-implemented', passed: false })
-    }
+    for (const check of summary?.checks ?? []) expect(check, check.id ?? '').toMatchObject({ status: 'passed', passed: true })
   }, 180_000)
 
   it('real layer: without a key it is not runnable (exit 2), calls no model, lists R01–R07', async () => {
