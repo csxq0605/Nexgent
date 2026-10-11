@@ -8,7 +8,7 @@ Nexgent 正在被重写为一个 TypeScript 独立应用（Electron 桌面应用
 
 模型路由是 Claude Platform（Anthropic Messages API，`@anthropic-ai/sdk`），默认 `claude-sonnet-5-5`，执行时默认开 thinking（ADR 0003 取代 ADR 0002 的默认值）、effort `medium`。
 
-仓库里同时存在旧产品：`nexgent/`、`stage-*`、`tests/`、`config.py` 是 Python / PyQt 科研 Coding Harness，根 README 主体仍描述它。它在步骤 2 验收后归档为 `archive/harness-gui`，Python 宿主在步骤 3 删除。新工作不改这些目录。
+仓库里同时存在旧产品：`nexgent/`、`stage-*`、`tests/`、`config.py` 是 Python / PyQt 科研 Coding Harness，已归档为分支 `archive/harness-gui`（根 README 不再描述它），Python 宿主在步骤 3 删除。新工作不改这些目录。
 
 ## 六步计划与当前进度
 
@@ -18,7 +18,7 @@ Nexgent 正在被重写为一个 TypeScript 独立应用（Electron 桌面应用
 | --- | --- | --- |
 | 0 | 横切：仓库骨架、两平台 CI、证据政策、reference 子模块 | 已验收（[`step-0-20261007.md`](docs/validation/step-0-20261007.md)） |
 | 1 | 主应用：kernel / llm / session / workspace 重写，CLI 接通 | 已验收（[`step-1-20261011.md`](docs/validation/step-1-20261011.md)：`accept-step1` 两平台通过；真实 Claude Sonnet 5.5 经 `nexgent run` / `resume` 完成两轮多文件代码任务，独立检查通过） |
-| 2 | 日常任务体验：项目、资料、成果（`present`）、反馈修改、停止与恢复、上下文压缩、Electron 桌面应用与进程内 SDK | Linux 上通过，待用户认可（[`step-2-20261011.md`](docs/validation/step-2-20261011.md)：无界面层 23/23、桌面层 10/10、真实模型 run-4 通过；Windows 未运行。认可后集成分支替换 `main`） |
+| 2 | 日常任务体验：项目、资料、成果（`present`）、反馈修改、停止与恢复、上下文压缩、Electron 桌面应用与进程内 SDK | 已验收（[`step-2-20261011.md`](docs/validation/step-2-20261011.md)：Linux 与 Windows 上无界面层 23/23、桌面层 10/10、真实模型层通过） |
 | 3 | 迁移已有能力与灵活协作（subagent、team、workflow、ptc），删除 Python | 未开始 |
 | 4 | 能力版本（`CapabilityBundle`）进入真实运行系统，门控采用与回滚 | 未开始 |
 | 5 | 默认的反馈改进流程（`@nexgent/evolve`） | 未开始 |
@@ -51,7 +51,7 @@ node scripts/accept-step2.mjs --out accept-step2.json   # 无界面层 + 桌面�
 node apps/cli/bin/nexgent.mjs run --project <dir> --task "..."   # 真实模型，需 NEXGENT_API_KEY 在环境中
 ```
 
-CI（`.github/workflows/nexgent.yml`）在 push / pull_request 时于 Linux 与 Windows 跑 build、test 与验收脚本；真实模型验收是手动的。
+CI 只能手动触发（用户 2026-10-11）：`.github/workflows/nexgent.yml` 在 Linux 与 Windows 跑 build、test 与 accept-step2 无界面层；`windows-accept.yml` 在 Windows 跑无界面层、桌面层、desktop 包测试，可选真实模型层。平时在各自会话里本地测试改动的包及其依赖方。
 
 ## 文档在哪
 
