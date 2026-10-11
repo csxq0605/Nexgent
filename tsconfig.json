@@ -24,6 +24,9 @@
     },
     {
       "path": "packages/context"
+    },
+    {
+      "path": "packages/skill"
     }
   ]
 }
