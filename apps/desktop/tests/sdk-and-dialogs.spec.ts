@@ -6,17 +6,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { isNexgentError } from '@nexgent/kernel'
 import { SDK_API_VERSION } from '@nexgent/sdk'
 import { exportInterceptor, pickExportDirectory, pickMaterialFiles, pickProjectDirectory } from '../src/main/dialogs.js'
-import { createUnavailableSdk, loadSdk } from '../src/main/sdk-loader.js'
+import { parseLaunchArgs } from '../src/main/launch-args.js'
+import { loadSdk } from '../src/main/sdk-loader.js'
 
 const FIXTURE_SDK = fileURLToPath(new URL('./fixtures/scripted-sdk.mjs', import.meta.url))
 
 describe('sdk loader', () => {
-  it('answers app.info and refuses the rest while the SDK is not implemented', async () => {
-    const sdk = createUnavailableSdk({ appVersion: '1.2.3' })
-    expect(await sdk.call('app.info', {})).toEqual({ sdkVersion: SDK_API_VERSION, appVersion: '1.2.3', platform: process.platform })
-    await expect(sdk.call('projects.recent', {})).rejects.toSatisfy((error) => isNexgentError(error, 'internal'))
-  })
-
   it('loads an override module exporting createSdk', async () => {
     const home = mkdtempSync(join(tmpdir(), 'nexgent-desktop-sdk-'))
     const { sdk, source } = await loadSdk({ home, appVersion: '0.0.1' }, FIXTURE_SDK)
@@ -29,9 +24,16 @@ describe('sdk loader', () => {
   })
 
   it('uses @nexgent/sdk when nothing overrides it', async () => {
-    const { sdk, source } = await loadSdk({ appVersion: '0' })
-    expect(['sdk', 'unavailable']).toContain(source)
-    expect(sdk.apiVersion).toBe(SDK_API_VERSION)
+    const home = mkdtempSync(join(tmpdir(), 'nexgent-desktop-sdk-'))
+    const { sdk, source } = await loadSdk({ home, appVersion: '0.0.2' })
+    try {
+      expect(source).toBe('sdk')
+      expect(sdk.apiVersion).toBe(SDK_API_VERSION)
+      expect(await sdk.call('app.info', {})).toEqual({ sdkVersion: SDK_API_VERSION, appVersion: '0.0.2', platform: process.platform })
+      expect(await sdk.call('projects.recent', {})).toEqual([])
+    } finally {
+      await sdk.dispose()
+    }
   })
 })
 
@@ -65,5 +67,20 @@ describe('dialogs', () => {
     const intercept = exportInterceptor(show({ canceled: true, filePaths: [] }), exportTo)
     await expect(intercept({ projectId: 'p', sessionId: 's', outDir: '/x' })).rejects.toSatisfy((error) => isNexgentError(error, 'approval/denied'))
     expect(exportTo).not.toHaveBeenCalled()
+  })
+})
+
+describe('launch arguments', () => {
+  const abs = process.platform === 'win32' ? 'C:\\work\\proj' : '/work/proj'
+
+  it('reads --project <abs> and --project=<abs> after the app directory and Chromium switches', () => {
+    expect(parseLaunchArgs(['/electron', '/repo/apps/desktop', '--project', abs])).toEqual({ project: abs })
+    expect(parseLaunchArgs(['/opt/Nexgent/nexgent-desktop', '--no-sandbox', `--project=${abs}`])).toEqual({ project: abs })
+    expect(parseLaunchArgs(['/electron', '/repo/apps/desktop'])).toEqual({})
+  })
+
+  it('reports relative or empty projects instead of opening them', () => {
+    expect(parseLaunchArgs(['/electron', '.', '--project', 'relative/dir'])).toEqual({ invalidProject: 'relative/dir' })
+    expect(parseLaunchArgs(['/electron', '.', '--project'])).toEqual({ invalidProject: '' })
   })
 })

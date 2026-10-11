@@ -16,7 +16,8 @@ Nexgent 桌面应用（Electron）。主进程持有 `@nexgent/sdk` 的实例；
 | `src/main/shutdown.ts` | 关闭协议：有进行中的轮次先确认，确认后取消、等 `turn.end`、释放 SDK，再退出 |
 | `src/main/dialogs.ts` | 文件对话框（打开项目、添加资料、导出目录）；`sessions.export` 的目录由主进程对话框决定 |
 | `src/main/logger.ts` | 日志：`<NEXGENT_HOME>/logs/desktop-YYYY-MM-DD.log`，按本地日期滚动，保留 14 天 |
-| `src/main/sdk-loader.ts` | 取得 SDK：`@nexgent/sdk` 的 `createSdk`；它还没有实现时用只回答 `app.info` 的替身 |
+| `src/main/sdk-loader.ts` | 取得 SDK：`@nexgent/sdk` 的 `createSdk`（开发构建可用 `NEXGENT_DESKTOP_SDK_MODULE` 换成脚本化 SDK） |
+| `src/main/launch-args.ts` | 启动参数 `--project <绝对路径>`（`nexgent app` 的约定）：启动时经 `projects.open` 打开并初始化，排在 `projects.recent` 第一位；第二次启动把项目交给已运行的实例 |
 | `src/main/ipc-types.ts` | 通道名、令牌参数、调用的请求与应答类型、页面看到的 `NexgentBridge` 类型 |
 | `src/preload/index.cts` | 沙箱 preload（单个 CommonJS 文件，只 `require('electron')`） |
 | `scripts/package.mjs` | 打包：`pnpm deploy` 暂存到 `build/app`，再用 electron-builder 产出到 `release/` |
@@ -24,7 +25,7 @@ Nexgent 桌面应用（Electron）。主进程持有 `@nexgent/sdk` 的实例；
 ## 渲染进程怎么用
 
 ```ts
-import type { NexgentBridge } from '@nexgent/desktop/src/main/ipc-types'   // 只取类型
+import type { NexgentBridge } from '../main/ipc-types.js'   // 同一个包内，只取类型
 declare global { interface Window { nexgent: NexgentBridge } }
 
 const info = await window.nexgent.invoke('app.info', {})

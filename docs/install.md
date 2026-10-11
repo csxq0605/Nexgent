@@ -1,6 +1,6 @@
 # 安装与运行 Nexgent 桌面应用
 
-> 步骤 2 的桌面应用尚在开发：主进程与打包已就绪，界面（W6）和 SDK 实现（W4）接入前，窗口里是占位页。安装包未签名，没有自动更新；签名与自动更新放在步骤 2 之后。
+> 步骤 2 的桌面应用尚在开发：主进程（已接 SDK）与打包已就绪，界面（W6）接入前，窗口里是占位页。安装包未签名，没有自动更新；签名与自动更新放在步骤 2 之后。
 
 ## 从源码运行
 
@@ -13,6 +13,8 @@ git checkout nexgent-app
 pnpm install --frozen-lockfile
 pnpm build
 pnpm --filter @nexgent/desktop start
+# 或者经 CLI，直接打开一个项目（目录必须已存在）：
+node apps/cli/bin/nexgent.mjs app --project /path/to/project
 ```
 
 - 第一次启动 Electron 时会下载 Electron 运行时（约 100 MB）。

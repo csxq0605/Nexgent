@@ -3,6 +3,11 @@
  * UI from `app://nexgent/`, and answers the page only through the guarded
  * `nexgent:call` channel (`docs/spec/permissions.md` §本地 IPC 与访问令牌).
  *
+ * Command line: `electron <appDir> [--project <abs>]` (packaged: `Nexgent [--project <abs>]`),
+ * the `nexgent app` contract. The project is opened (and initialised) through
+ * `projects.open` before the window loads, so it heads `projects.recent`; a
+ * second launch hands its project to the running instance and exits.
+ *
  * Environment (unpackaged builds only, except `NEXGENT_HOME` and `NEXGENT_LOG_LEVEL`):
  * - `NEXGENT_HOME`: overrides `~/.nexgent` (logs, Chromium profile, SDK home).
  * - `NEXGENT_LOG_LEVEL`: `debug` | `info` (default) | `warn` | `error`.
@@ -17,6 +22,7 @@ import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import type { NexgentSdk } from '@nexgent/sdk'
 import { exportInterceptor } from './dialogs.js'
+import { parseLaunchArgs } from './launch-args.js'
 import { createCallHandler, TokenRegistry, type CallerInfo } from './ipc-guard.js'
 import { CALL_CHANNEL, EVENT_CHANNEL } from './ipc-types.js'
 import { createFileLogger, parseLogLevel } from './logger.js'
@@ -43,10 +49,12 @@ const home = process.env['NEXGENT_HOME'] || join(homedir(), '.nexgent')
 const log = createFileLogger({ dir: join(home, 'logs'), level: parseLogLevel(process.env['NEXGENT_LOG_LEVEL']) ?? 'info', echo: dev })
 
 const devUrl = devEnv('NEXGENT_DESKTOP_DEV_URL')
-const dev_origin = devOrigin(devUrl)
-const isAllowedOrigin = originChecker(dev_origin)
+const allowedDevOrigin = devOrigin(devUrl)
+const isAllowedOrigin = originChecker(allowedDevOrigin)
 const rendererDir = devEnv('NEXGENT_DESKTOP_RENDERER_DIR') ?? fileURLToPath(new URL('../renderer/', import.meta.url))
 const preloadPath = fileURLToPath(new URL('../preload/index.cjs', import.meta.url))
+
+const launchArgs = parseLaunchArgs(process.argv)
 
 const FALLBACK_PAGE = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Nexgent</title></head>
 <body style="font-family:sans-serif;padding:2rem"><h1>Nexgent</h1><p id="nexgent-fallback">界面尚未构建（缺少 dist/renderer/index.html）。</p></body></html>`
@@ -61,7 +69,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: APP_SCHEME, privileges: { standa
 app.setName('Nexgent')
 app.setPath('userData', join(home, 'desktop-data'))
 
-if (!app.requestSingleInstanceLock()) {
+if (!app.requestSingleInstanceLock(launchArgs.project === undefined ? {} : { project: launchArgs.project })) {
   log.info('another instance is running; handing over and exiting')
   app.exit(0)
 } else {
@@ -106,9 +114,9 @@ function hardenSession(): void {
   })
   ses.setPermissionCheckHandler(() => false)
   ses.setSpellCheckerEnabled(false)
-  if (dev_origin !== undefined) {
-    const csp = contentSecurityPolicy(dev_origin)
-    ses.webRequest.onHeadersReceived({ urls: [`${dev_origin}/*`] }, (details, callback) => {
+  if (allowedDevOrigin !== undefined) {
+    const csp = contentSecurityPolicy(allowedDevOrigin)
+    ses.webRequest.onHeadersReceived({ urls: [`${allowedDevOrigin}/*`] }, (details, callback) => {
       callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } })
     })
   }
@@ -187,8 +195,18 @@ function createWindow(tokens: TokenRegistry): BrowserWindow {
     const violations = preferenceViolations(contents.getLastWebPreferences?.() ?? {}, dev)
     if (violations.length > 0) log.error(`window ${windowId} webPreferences violate the spec: ${violations.join(', ')}`)
   })
-  void window.loadURL(devUrl !== undefined && dev_origin !== undefined ? devUrl : APP_ENTRY_URL)
+  void window.loadURL(devUrl !== undefined && allowedDevOrigin !== undefined ? devUrl : APP_ENTRY_URL)
   return window
+}
+
+/** Open (creating `.nexgent/` when needed) a project named on a command line; failures are logged, not fatal. */
+async function openProjectFromCommandLine(sdk: NexgentSdk, root: string): Promise<void> {
+  try {
+    const project = await sdk.call('projects.open', { root, create: true })
+    log.info(`opened project from the command line: ${project.root}`)
+  } catch (error) {
+    log.error(`could not open project ${root}: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 async function start(): Promise<void> {
@@ -204,6 +222,8 @@ async function start(): Promise<void> {
   )
   const sdk: NexgentSdk = loaded.sdk
   log.info(`sdk source=${loaded.source} apiVersion=${sdk.apiVersion}`)
+  if (launchArgs.invalidProject !== undefined) log.warn(`ignored --project (not an absolute path): ${launchArgs.invalidProject.slice(0, 200)}`)
+  if (launchArgs.project !== undefined) await openProjectFromCommandLine(sdk, launchArgs.project)
 
   const tokens = new TokenRegistry()
   const shutdown = new ShutdownCoordinator({ sdk, confirm: confirmQuit, log })
@@ -241,7 +261,10 @@ async function start(): Promise<void> {
   }
   app.on('before-quit', quit)
   app.on('window-all-closed', () => app.quit())
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, _argv, _cwd, additionalData) => {
+    // The second instance passes its parsed `--project` as lock data (argv order is not reliable there).
+    const project = (additionalData as { project?: unknown } | null)?.project
+    if (typeof project === 'string' && isAbsolute(project)) void openProjectFromCommandLine(sdk, project)
     const window = BrowserWindow.getAllWindows()[0]
     if (window === undefined) return
     if (window.isMinimized()) window.restore()

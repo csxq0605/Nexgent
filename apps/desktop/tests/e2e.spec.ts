@@ -5,7 +5,7 @@
  * and a restart after a hard kill. Linux without a display gets its own Xvfb.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -40,7 +40,7 @@ async function ensureDisplay(): Promise<void> {
   })
 }
 
-function appEnv(home: string): Record<string, string> {
+function appEnv(home: string, realSdk = false): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined && !key.startsWith('NEXGENT_')) env[key] = value
   return {
@@ -49,14 +49,21 @@ function appEnv(home: string): Record<string, string> {
     NEXGENT_HOME: home,
     NEXGENT_LOG_LEVEL: 'debug',
     NEXGENT_DESKTOP_RENDERER_DIR: RENDERER,
-    NEXGENT_DESKTOP_SDK_MODULE: SCRIPTED_SDK,
+    ...(realSdk ? {} : { NEXGENT_DESKTOP_SDK_MODULE: SCRIPTED_SDK }),
   }
 }
 
 const appArgs = (): string[] => (ROOT ? [APP_DIR, '--no-sandbox'] : [APP_DIR])
 
-async function launch(home: string): Promise<{ app: ElectronApplication; page: Page; consoleErrors: string[] }> {
-  const app = await electron.launch({ args: appArgs(), env: appEnv(home), timeout: TIMEOUT })
+interface LaunchOptions {
+  /** Use the real `@nexgent/sdk` instead of the scripted one. */
+  readonly realSdk?: boolean
+  /** Extra command-line arguments after the app directory. */
+  readonly args?: readonly string[]
+}
+
+async function launch(home: string, options: LaunchOptions = {}): Promise<{ app: ElectronApplication; page: Page; consoleErrors: string[] }> {
+  const app = await electron.launch({ args: [...appArgs(), ...(options.args ?? [])], env: appEnv(home, options.realSdk), timeout: TIMEOUT })
   const page = await app.firstWindow({ timeout: TIMEOUT })
   const consoleErrors: string[] = []
   page.on('console', (message) => {
@@ -94,6 +101,14 @@ async function rawCall(app: ElectronApplication, payload: unknown): Promise<unkn
     const handler = handlers.get('nexgent:call')!
     return handler({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, body)
   }, payload)
+}
+
+/** `window.nexgent.invoke` from the page; a rejection comes back as `{ rejected: ErrorInfo }`. */
+async function invoke<T = any>(page: Page, method: string, input: unknown): Promise<T> {
+  return page.evaluate(
+    ([m, i]) => window.nexgent.invoke(m, i).catch((error: unknown) => ({ rejected: error })),
+    [method, input] as const,
+  ) as Promise<T>
 }
 
 async function waitFor(predicate: () => boolean | Promise<boolean>, what: string, ms = 10_000): Promise<void> {
@@ -361,6 +376,49 @@ describe('desktop app (Electron)', () => {
         expect(code).toBe(0)
         expect(await second.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1)
         expect(readLog(home)).toContain('another instance is running')
+      } finally {
+        await second.app.close()
+      }
+    },
+    TIMEOUT * 3,
+  )
+
+  it(
+    'opens --project through the real SDK, and reopens a session after the main process is killed',
+    async () => {
+      const home = newHome()
+      const project = join(home, 'project')
+      mkdirSync(project)
+      const first = await launch(home, { realSdk: true, args: ['--project', project] })
+      let sessionId: string
+      try {
+        const recent = await invoke(first.page, 'projects.recent', {})
+        expect(recent[0]).toMatchObject({ root: project, exists: true })
+        expect(existsSync(join(project, '.nexgent', 'config.json'))).toBe(true)
+        const { projectId } = await invoke(first.page, 'projects.open', { root: project })
+        const summary = await invoke(first.page, 'sessions.create', { projectId, title: '桌面测试' })
+        sessionId = summary.sessionId
+        expect(await invoke(first.page, 'sessions.open', { projectId, sessionId })).toMatchObject({ summary: { sessionId, title: '桌面测试' } })
+        expect(readLog(home)).toContain(`opened project from the command line: ${project}`)
+      } catch (error) {
+        await first.app.close()
+        throw error
+      }
+      // Hard kill while the session is open (its lock file names the dead process).
+      const killed = new Promise<void>((resolve) => first.app.process().once('exit', () => resolve()))
+      process.kill(first.app.process().pid!, 'SIGKILL')
+      await killed
+
+      const second = await launch(home, { realSdk: true })
+      try {
+        const recent = await invoke(second.page, 'projects.recent', {})
+        expect(recent[0]).toMatchObject({ root: project })
+        const { projectId } = await invoke(second.page, 'projects.open', { root: project })
+        const sessions = await invoke<Array<{ sessionId: string }>>(second.page, 'sessions.list', { projectId })
+        expect(sessions.map((entry) => entry.sessionId)).toContain(sessionId)
+        const view = await invoke(second.page, 'sessions.open', { projectId, sessionId })
+        expect(view).toMatchObject({ summary: { sessionId, title: '桌面测试' } })
+        expect(view).not.toHaveProperty('rejected')
       } finally {
         await second.app.close()
       }
