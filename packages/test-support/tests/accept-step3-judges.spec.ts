@@ -44,6 +44,13 @@ function attribute(direct: Mutable): void {
   }
 }
 
+/** The real run with every attribution field removed (a kernel before W1). */
+function unattributed(): Step3Observations {
+  return broken(d => {
+    for (const record of ledgerOf(d)) for (const key of ['taskId', 'memberId', 'executionForm', 'formsUsed']) delete record[key]
+  })
+}
+
 describe('the real direct run', () => {
   it('runs one root session to completion through the SDK (routing: every request on the default script)', () => {
     expect(real.direct?.reason).toEqual({ kind: 'completed' })
@@ -53,8 +60,13 @@ describe('the real direct run', () => {
 })
 
 describe('H01 direct execution', () => {
-  it('is not-implemented today: everything checkable holds, the ledger carries no attribution yet', () => {
+  it('passes on the real run: the kernel attributes the ledger (step 3 W1)', () => {
     const result = judge('H01', real, tools)
+    expect(result.status, result.evidence).toBe('passed')
+  })
+
+  it('is not-implemented when the ledger carries no attribution', () => {
+    const result = judge('H01', unattributed(), tools)
     expect(result.status, result.evidence).toBe('not-implemented')
     expect(result.evidence).toMatch(/does not write executionForm/)
   })
@@ -87,8 +99,9 @@ describe('H01 direct execution', () => {
 })
 
 describe('H10 attribution', () => {
-  it('is not-implemented today, and still not-implemented when only the direct form is attributed', () => {
-    expect(judge('H10', real, tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/does not write taskId/) })
+  it('is not-implemented while only the direct form is exercised (the real run is attributed)', () => {
+    expect(judge('H10', real, tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/only the direct form/) })
+    expect(judge('H10', unattributed(), tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/does not write taskId/) })
     expect(judge('H10', broken(attribute), tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/only the direct form/) })
   })
 

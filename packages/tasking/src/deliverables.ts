@@ -108,7 +108,7 @@ export class LocalDeliverableStore implements DeliverableStore {
       }
       deliverableId = input.deliverableId
     } else {
-      previous = await this.latestWithPrimary(primary)
+      previous = await this.latestWithPrimary(primary, input.sessionId)
       deliverableId = previous?.deliverableId ?? newId()
     }
 
@@ -137,6 +137,7 @@ export class LocalDeliverableStore implements DeliverableStore {
           sessionId: input.sessionId,
           turn: input.turn,
           toolCallId: input.toolCallId,
+          ...(input.member === undefined ? {} : { memberId: input.member.memberId, memberName: input.member.memberName }),
         }
         const issues = validateDeliverableVersion(metadata)
         if (issues.length > 0) throw new NexgentError('tool/invalid-input', `invalid deliverable metadata: ${formatIssues(issues)}`)
@@ -259,12 +260,16 @@ export class LocalDeliverableStore implements DeliverableStore {
     return metadata.deliverableId === deliverableId && metadata.version === version ? metadata : undefined
   }
 
-  /** The most recently presented deliverable whose latest version has `primary` as its first file. */
-  private async latestWithPrimary(primary: string): Promise<DeliverableVersion | undefined> {
+  /**
+   * The most recently presented deliverable whose latest version has
+   * `primary` as its first file and was presented by `sessionId` (step 3: two
+   * sessions, e.g. two members, presenting one path never append to each other).
+   */
+  private async latestWithPrimary(primary: string, sessionId: string): Promise<DeliverableVersion | undefined> {
     let best: DeliverableVersion | undefined
     for (const summary of await this.list()) {
       const latest = summary.versions[summary.versions.length - 1]!
-      if (latest.files[0]?.path !== primary) continue
+      if (latest.files[0]?.path !== primary || latest.sessionId !== sessionId) continue
       if (best === undefined || latest.presentedAt >= best.presentedAt) best = latest
     }
     return best

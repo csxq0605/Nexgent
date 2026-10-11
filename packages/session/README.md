@@ -28,6 +28,7 @@ packages/session/schema/session.v1.schema.json          会话记录 JSON Schema
 | `acquireLockFile`、`releaseLockFile`、`isProcessAlive`、`parseLockFile` | 锁文件原语。 |
 | `SessionPlugin` | Cordis 插件（profile 行 `@nexgent/session`）：`inject: ['workspace']`，在 `ctx.workspace.layout` 下（或 config 的 `root / sessionsDir / ledgersDir` 下）`ctx.provide('session')`、`ctx.provide('ledger')`；fiber 卸载时释放全部锁。Config 为手写 Standard Schema 校验器（本包不依赖 schemastery）。 |
 | `createSessionServices(config)` | 不经 Cordis 的工厂，返回 `{ store, ledger }`。 |
+| `JsonlLedger.setStamp(stamp)` | 步骤 3：校验前给带 `sessionId` 的记录补上缺少的字段。`SessionPlugin` 用它补本进程里打开的 agent 的归属（`taskId`、`memberId`、`executionForm`），根会话的 `task.outcome` 另补 `formsUsed`，使宿主在 loop 外写的记录（SDK 的 `task.outcome`、压缩请求）也有归属。 |
 
 ## 实现要点
 

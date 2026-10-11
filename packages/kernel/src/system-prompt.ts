@@ -3,6 +3,7 @@
  * workspace facts and the visible tool list, rendered fresh for every
  * request and never stored in the session.
  */
+import { renderMemberPromptLine, type MemberIdentity } from './contracts/collaboration.js'
 import type { SystemPromptSection } from './contracts/context.js'
 import type { ToolDefinition } from './contracts/tools.js'
 import type { SandboxMode } from './contracts/workspace.js'
@@ -15,7 +16,7 @@ export interface SystemPromptTemplate {
   readonly suffix: string
 }
 
-/** PR #4 `cordis.patch.yml` `system-prompt.personaPrefix` (wording of the model mention adjusted for the Claude route; the delegation/workflow sentence is left out until step 3 adds those capabilities). */
+/** PR #4 `cordis.patch.yml` `system-prompt.personaPrefix` (wording of the model mention adjusted for the Claude route; the delegation/workflow guidance is the separate `# Working with others` section, shown only when those tools are offered). */
 export const DEFAULT_PERSONA = 'You are Nexgent, a general task agent running on the {{model}} model. '
   + 'Complete the user\'s task with the available materials and tools. '
   + 'Verify actual deliverables, explain unresolved requirements, and preserve useful work for subsequent turns.'
@@ -42,6 +43,12 @@ export interface SystemPromptInput {
   readonly sections?: readonly SystemPromptSection[]
   /** Whether the project has materials (`.nexgent/materials/`); adds the read-only line to "Working with files". */
   readonly materials?: boolean
+  /**
+   * Step 3: set for a child session. Its identity line
+   * (`renderMemberPromptLine`) follows the persona paragraph; root sessions
+   * have none.
+   */
+  readonly member?: Pick<MemberIdentity, 'name' | 'executionForm'>
 }
 
 const SANDBOX_TEXT: Record<SandboxMode, string> = {
@@ -86,10 +93,42 @@ function fileGuidance(tools: ReadonlySet<string>, materials: boolean): string[] 
   return lines
 }
 
+/**
+ * Step-3 form-choice principles (`agent-hooks.md` §步骤 3 系统提示增量 1):
+ * only when a tool that starts members is offered, and naming only the
+ * offered ones. Principles, not fixed roles or phases.
+ */
+function collaborationGuidance(tools: ReadonlySet<string>): string[] {
+  const delegate = tools.has('delegate')
+  const team = tools.has('spawn_teammate')
+  const workflow = tools.has('workflow')
+  if (!delegate && !team && !workflow) return []
+  const lines = ['- By default, do the work yourself. Bring in members only when it clearly helps.']
+  if (delegate) {
+    lines.push('- Delegate a sub-task with `delegate` when it can be done on its own and has an output you can check. '
+      + 'With `fresh` (default), write a self-contained task: the goal, the inputs, what to produce and where; use `fork` when the member needs this conversation so far.')
+  }
+  if (team) lines.push('- Form a team with `spawn_teammate` when several sub-tasks can run in parallel and need to talk to each other.')
+  if (workflow) lines.push('- Use `workflow` when the steps are fixed and can be batched.')
+  lines.push('- Members share the project directory: give each its own subdirectory to write into. Read their results yourself'
+    + `${tools.has('present') ? ' and deliver the final result to the user with `present`' : ''}.`)
+  return lines
+}
+
+/** The member identity block of a child session: the fixed line, then what a member is for. */
+function memberBlock(member: Pick<MemberIdentity, 'name' | 'executionForm'>, tools: ReadonlySet<string>): string {
+  return `${renderMemberPromptLine(member)}
+`
+    + 'You are a member of a larger task: do only the part you were given. '
+    + `When you are done, ${tools.has('present') ? 'deliver your files with `present` and ' : ''}reply briefly with the result.`
+}
+
 /** Render the system prompt. Deterministic for equal input (no clock), so the prefix stays cacheable. */
 export function renderSystemPrompt(input: SystemPromptInput): string {
   const values = { model: input.model, cwd: input.cwd }
+  const names = new Set(input.tools.map(tool => tool.name))
   const sections = [fill(input.template.persona, values).trim()]
+  if (input.member !== undefined) sections.push(memberBlock(input.member, names))
   const shell = input.platform === 'win32' ? 'PowerShell (pwsh)' : 'bash'
   sections.push([
     '# Environment',
@@ -101,8 +140,10 @@ export function renderSystemPrompt(input: SystemPromptInput): string {
   if (input.tools.length > 0) {
     sections.push(['# Tools', ...input.tools.map(tool => `- ${tool.name}: ${tool.description.split('\n')[0]}`)].join('\n'))
   }
-  const guidance = fileGuidance(new Set(input.tools.map(tool => tool.name)), input.materials === true)
+  const guidance = fileGuidance(names, input.materials === true)
   if (guidance.length > 0) sections.push(['# Working with files', ...guidance].join('\n'))
+  const others = collaborationGuidance(names)
+  if (others.length > 0) sections.push(['# Working with others', ...others].join('\n'))
   for (const section of input.sections ?? []) sections.push(`# ${section.title}\n${section.body}`)
   const suffix = fill(input.template.suffix, values).trim()
   if (suffix !== '') sections.push(suffix)

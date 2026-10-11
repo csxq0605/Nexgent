@@ -31,8 +31,10 @@
   `present` 依次拒绝：词法上在项目外（`workspace/outside-root`）、在 `.nexgent/` 下（`sandbox/denied`，Windows / macOS
   不分大小写）、不存在或是悬空链接（`workspace/not-found`）、链接到项目外、不是文件（`workspace/not-found`）。错误消息
   告诉模型该怎么做；拒绝时什么都不写。同一次 `present` 里重复的路径只取一次。
-- **同一成果**：给了 `deliverableId` 就追加（不存在则 `tool/invalid-input`）；否则找最新版本主文件相同的成果（多个时取最近
-  present 的）；否则新建。追加版本时没给 `title` 沿用上一版的标题。
+- **同一成果**：给了 `deliverableId` 就追加（不存在则 `tool/invalid-input`，跨会话也可以）；否则找最新版本主文件相同、
+  且由同一会话交付的成果（多个时取最近 present 的；步骤 3：两个成员交同一路径各成一份）；否则新建。追加版本时没给
+  `title` 沿用上一版的标题。成员（`ToolContext.member`）交付时，版本元数据与 `deliverable.presented` 带 `memberId`
+  （成员会话 id）与 `memberName`。
 - **差异**：按 `sha256` 判 `added / removed / modified / unchanged`；两边都能按 UTF-8 解码、不含 NUL、不是已知二进制类型、
   不超过 2 MiB（`DIFF_TEXT_LIMIT`）时给出按行差异块（新增与删除的文件也给，另一边视为空），否则 `binary: true` 只报变化。
   差异算法的回溯内存超过约 1600 万格时退化为“删除整段 + 新增整段”。

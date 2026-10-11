@@ -136,6 +136,8 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
           sandboxMode: record.sandboxMode,
           grants: [],
           ...(record.title === undefined ? {} : { title: record.title }),
+          ...(record.parentSessionId === undefined ? {} : { parentSessionId: record.parentSessionId }),
+          ...(record.member === undefined ? {} : { member: record.member }),
           lastTurn: 0,
           totalUsage: ZERO_USAGE,
           lastSeq: record.seq,
@@ -169,6 +171,9 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
       case 'approval.grant':
         meta = { ...meta!, grants: [...meta!.grants, record.grant] }
         break
+      case 'fork.seed':
+        messages.splice(0, messages.length, ...record.messages)
+        break
       case 'compaction':
         messages.splice(0, messages.length, { role: 'user', content: renderCompactionSummary(record.summary) }, ...messages.slice(messages.length - record.keepMessages))
         break
@@ -198,7 +203,9 @@ export class MemorySessionStore implements SessionStore {
       projectRoot: init.projectRoot,
       model: init.model,
       sandboxMode: init.sandboxMode,
+      ...(init.parentSessionId === undefined ? {} : { parentSessionId: init.parentSessionId }),
       ...(init.title === undefined ? {} : { title: init.title }),
+      ...(init.member === undefined ? {} : { member: init.member }),
     })
     return lock
   }

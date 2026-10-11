@@ -129,6 +129,13 @@ export const SessionPlugin = {
       sessionsDir: config.sessionsDir ?? own?.sessions ?? layout.sessions,
       ledgersDir: config.ledgersDir ?? own?.ledgers ?? layout.ledgers,
     })
+    // Step 3: records written outside an agent's loop carry the attribution of the agent open on their session.
+    ledger.setStamp(record => {
+      const agent = record.sessionId === undefined ? undefined : ctx.get('agents')?.get(record.sessionId)
+      if (agent === undefined) return undefined
+      const rootOutcome = record.type === 'task.outcome' && agent.member === undefined
+      return rootOutcome ? { ...agent.attribution, formsUsed: [...agent.formsUsed()] } : agent.attribution
+    })
     ctx.provide('ledger', ledger)
     ctx.provide('session', store)
     ctx.effect(() => () => store.close())
