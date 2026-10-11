@@ -27,10 +27,13 @@ const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
 /** The judges and step-2 regression items wired so far; everything else must report not-implemented. */
-const WIRED = new Set(['H01', 'H02', 'H03', 'H04', 'H07', 'H08', 'H09', 'H10', 'H12', 'H15', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23', ...range('D', 1, 10)])
-/** Items the headless layer passes today; H15 fails (members still see team tools); H09, H10, H22 wait for the team phase and W6. */
-const PASSING = new Set<string>(['H01', 'H02', 'H03', 'H04', 'H07', 'H08', 'H12', 'H16', 'H17', 'H18', 'H19', 'H23'])
-const FAILING = new Set<string>(['H15'])
+const WIRED = new Set(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H09', 'H10', 'H12', 'H13', 'H15', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23', ...range('D', 1, 10)])
+/**
+ * Items the headless layer passes today. Failing: H10 (a resumed team turn's formsUsed omits team),
+ * H15 (delegated and workflow members still see team tools). H09 waits for the host's recoverWorkflows (W6).
+ */
+const PASSING = new Set<string>(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H12', 'H13', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23'])
+const FAILING = new Set<string>(['H10', 'H15'])
 
 describe('accept-step3 checklist', () => {
   it('has every item of the step-3 plan in order, plus the D01–D10 regression', async () => {
@@ -54,7 +57,7 @@ describe('accept-step3 checklist', () => {
   })
 
   it('nothing fakes a pass: unwired items are not-implemented, wired ones fail without observations', async () => {
-    expect(Object.keys(JUDGES)).toEqual(['H01', 'H02', 'H03', 'H04', 'H07', 'H08', 'H09', 'H10', 'H12', 'H15', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23'])
+    expect(Object.keys(JUDGES)).toEqual(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H09', 'H10', 'H12', 'H13', 'H15', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23'])
     for (const check of CHECKS) {
       const result = await evaluateItem(check, { obs: {} })
       if (WIRED.has(check.id)) expect(result.status, check.id).not.toBe('passed')
@@ -143,7 +146,7 @@ describe('scripts/accept-step3.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  it('headless layer: the wired items pass except H15 (fails until members stop seeing team tools), the rest not-implemented, exit 1, valid summary', async () => {
+  it('headless layer: the wired items pass except H10 and H15 (known defects), the rest not-implemented, exit 1, valid summary', async () => {
     const { result, summary } = await runScript(['--layer', 'headless'])
     expect(result.status, result.stderr).toBe(EXIT_FAIL)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })

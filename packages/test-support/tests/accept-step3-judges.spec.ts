@@ -109,25 +109,37 @@ describe('H01 direct execution', () => {
 })
 
 describe('H10 attribution', () => {
-  it('is not-implemented while the team form is not exercised (direct, delegated and workflow are checked)', () => {
+  /** The real run with the one known defect repaired: the resumed team turn's formsUsed. */
+  const repairForms = (o: Record<string, Phase>) => {
+    const k = o['teamKill']!
+    const outcomes = ledgerRecords(k).filter(r => r['type'] === 'task.outcome' && r['sessionId'] === k['sessionId'])
+    for (const r of outcomes) r['formsUsed'] = ['direct', 'team']
+  }
+
+  it('fails today: after a resume the root task.outcome omits the team form its resumed teammates used', () => {
     const result = judge('H10', real, tools)
-    expect(result.status, result.evidence).toBe('not-implemented')
-    expect(result.evidence).toMatch(/team form is not exercised yet; checked so far: \d+ records across 5 projects.*\(direct, delegated, workflow\)/)
+    expect(result.status).toBe('failed')
+    expect(result.evidence).toMatch(/teamKill task\.outcome [0-9a-f]{8}: formsUsed \["direct"\], expected \["direct","team"\]/)
+    expect(result.evidence).toMatch(/\(1 problems/)
+  })
+  it('passes with that defect repaired: every form attributed across all projects', () => {
+    const result = judge('H10', brokenObs(repairForms), tools)
+    expect(result.status, result.evidence).toBe('passed')
+    expect(result.evidence).toMatch(/across 8 projects.*\(direct, delegated, team, workflow\)/)
     expect(judge('H10', unattributed(), tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/does not write taskId/) })
-    expect(judge('H10', broken(attribute), tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/team form is not exercised/) })
   })
 
   it.each<[string, (o: Record<string, Phase>) => void]>([
     ['a member record says main', o => { const r = ledgerRecords(o['delegation']!).find(x => x['executionForm'] === 'delegated')!; r['memberId'] = 'main' }],
     ['a workflow member record says delegated', o => { ledgerRecords(o['workflow']!).find(x => x['executionForm'] === 'workflow')!['executionForm'] = 'delegated' }],
-    ['a member record has another tree\'s taskId', o => { const roots = ledgerRecords(o['delegation']!); const member = roots.find(x => x['executionForm'] === 'delegated')!; member['taskId'] = TASK_ID }],
+    ['a teammate record says delegated', o => { ledgerRecords(o['team']!).find(x => x['executionForm'] === 'team')!['executionForm'] = 'delegated' }],
+    ['a member record has another tree\'s taskId', o => { const member = ledgerRecords(o['delegation']!).find(x => x['executionForm'] === 'delegated')!; member['taskId'] = TASK_ID }],
     ['a root outcome omits a form it used', o => { const r = ledgerRecords(o['workflow']!).find(x => x['type'] === 'task.outcome' && JSON.stringify(x['formsUsed']) === '["direct","workflow"]')!; r['formsUsed'] = ['direct'] }],
     ['a record names a session with no file', o => { ledgerRecords(o['tools']!)[0]!['sessionId'] = 'no-such-session' }],
-    ['the workflow project did not run', o => { delete o['workflow'] }],
-  ])('fails when %s', (_label, edit) => {
-    expect(judge('H10', brokenObs(edit), tools).status).toBe('failed')
+    ['no workflow member ran anywhere', o => { delete o['workflow']; delete o['cancel'] }],
+  ])('fails (with the known defect repaired) when %s', (_label, edit) => {
+    expect(judge('H10', brokenObs(o => { repairForms(o); edit(o) }), tools).status).toBe('failed')
   })
-
   it('fails on a wrong attribution as soon as any record carries one', () => {
     expect(judge('H10', broken(d => { attribute(d); ledgerOf(d)[2]!['memberId'] = 'someone' }), tools).status).toBe('failed')
     // A partially written attribution (one record only) is a defect, not "not built yet".
@@ -139,11 +151,15 @@ describe('H10 attribution', () => {
 })
 
 describe('H22 records, schema, secrets', () => {
-  it('is not-implemented today only because no step-3 record type is exercised; the rest is checked', () => {
+  it('passes on the real run: all eight projects, all nine step-3 record types', () => {
     const result = judge('H22', real, tools)
-    expect(result.status, result.evidence).toBe('not-implemented')
-    expect(result.evidence).toMatch(/not exercised yet: team\.member, team\.task, team\.message;/)
-    expect(result.evidence).toMatch(/5 projects, .*seq continuous, schema ok.*types seen: fork\.seed, subagent\.start, subagent\.end, workflow\.start, workflow\.phase, workflow\.end/)
+    expect(result.status, result.evidence).toBe('passed')
+    expect(result.evidence).toMatch(/8 projects, .*seq continuous, schema ok.*types seen: fork\.seed, subagent\.start, subagent\.end, team\.member, team\.task, team\.message, workflow\.start, workflow\.phase, workflow\.end; all nine/)
+  })
+
+  it('is not-implemented when a step-3 record type never appears', () => {
+    const result = judge('H22', brokenObs(o => { for (const key of ['team', 'teamKill', 'cancel']) for (const s of Object.values(o[key]!['sessions'] as Record<string, { records: Record<string, unknown>[] }>)) s.records = s.records.filter(r => r['type'] !== 'team.task').map((r, i) => ({ ...r, seq: i + 1 })) }), tools)
+    expect(result).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/not exercised yet: team\.task;/) })
   })
 
   it.each<[string, (d: Mutable) => void]>([
@@ -275,32 +291,35 @@ describe('H12 sandbox inheritance', () => {
 })
 
 describe('H15 members cannot delegate', () => {
+  const MEMBER_KEYS = ['delegation', 'readonly', 'workflow', 'team', 'teamKill', 'cancel']
+  const formOfRequest = (q: Phase) => /^Member: [a-z][a-z0-9-]* \((delegated|team|workflow)\)$/m.exec(q['sessionText'])?.[1]
   /** Remove every forbidden tool from member requests (what the fixed contract will give). */
   const fixMembers = (o: Record<string, Phase>) => {
-    for (const key of ['delegation', 'readonly', 'workflow']) for (const q of o[key]!['requests']) if (q['route'] !== null) q['tools'] = q['tools'].filter((t: string) => !COLLABORATION_TOOLS.includes(t))
+    for (const key of MEMBER_KEYS) for (const q of o[key]!['requests']) if (q['route'] !== null) q['tools'] = q['tools'].filter((t: string) => !forbiddenFor(formOfRequest(q)).includes(t))
   }
-  /** Add one teammate request with its own three team tools. */
-  const addTeammate = (o: Record<string, Phase>) => {
-    o['team'] = { requests: [{ phase: 'team', route: 'mate', outcome: 'completed', chunksSent: 1, sessionText: 'Member: mate (team)', text: '', tools: ['read_file', ...TEAMMATE_TOOLS] }] }
-  }
+  const teammateRequest = (o: Record<string, Phase>) => (o['team']!['requests'] as Phase[]).find(q => q['route'] === 'bob')!
 
-  it('fails today: delegated and workflow members see send_message and the team task tools', () => {
+  it('fails today: delegated and workflow members see send_message and the team task tools; teammates are fine', () => {
     const result = judge('H15', real, tools)
     expect(result.status).toBe('failed')
     expect(result.evidence).toMatch(/delegated analyst: send_message\/team_task_create\/team_task_list\/team_task_update/)
+    expect(result.evidence).not.toMatch(/team (alice|bob):/)
   })
-  it('is not-implemented once members are clean but no teammate ran; passes with a clean teammate', () => {
-    expect(judge('H15', brokenObs(fixMembers), tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/no teammate request/) })
-    expect(judge('H15', brokenObs(o => { fixMembers(o); addTeammate(o) }), tools)).toMatchObject({ status: 'passed' })
+  it('passes once members see no forbidden tool (teammates keep their three)', () => {
+    expect(judge('H15', brokenObs(fixMembers), tools)).toMatchObject({ status: 'passed' })
+    expect(TEAMMATE_TOOLS.every(t => teammateRequest(structuredClone(real) as unknown as Record<string, Phase>)['tools'].includes(t))).toBe(true)
   })
   it.each(COLLABORATION_TOOLS.map(t => [t]))('fails when a delegated member is offered %s', (tool) => {
-    expect(judge('H15', brokenObs(o => { fixMembers(o); addTeammate(o); firstRequest(o['delegation']!, 'writer-b')['tools'].push(tool) }), tools).status).toBe('failed')
+    expect(judge('H15', brokenObs(o => { fixMembers(o); firstRequest(o['delegation']!, 'writer-b')['tools'].push(tool) }), tools).status).toBe('failed')
   })
   it.each(COLLABORATION_TOOLS.filter(t => !TEAMMATE_TOOLS.includes(t)).map(t => [t]))('fails when a teammate is offered %s', (tool) => {
-    expect(judge('H15', brokenObs(o => { fixMembers(o); addTeammate(o); o['team']!['requests'][0].tools.push(tool) }), tools).status).toBe('failed')
+    expect(judge('H15', brokenObs(o => { fixMembers(o); teammateRequest(o)['tools'].push(tool) }), tools).status).toBe('failed')
   })
-  it('fails when the root lacks a collaboration tool, or a phase is missing', () => {
-    expect(judge('H15', brokenObs(o => { fixMembers(o); addTeammate(o); for (const q of o['workflow']!['requests']) if (q['route'] === null) q['tools'] = q['tools'].filter((t: string) => t !== 'wait_teammates') }), tools).status).toBe('failed')
+  it('is not-implemented without any teammate request', () => {
+    expect(judge('H15', brokenObs(o => { fixMembers(o); for (const key of MEMBER_KEYS) o[key]!['requests'] = o[key]!['requests'].filter((q: Phase) => formOfRequest(q) !== 'team') }), tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/no teammate request/) })
+  })
+  it('fails when the root lacks a collaboration tool, or a project is missing', () => {
+    expect(judge('H15', brokenObs(o => { fixMembers(o); for (const q of o['workflow']!['requests']) if (q['route'] === null) q['tools'] = q['tools'].filter((t: string) => t !== 'wait_teammates') }), tools).status).toBe('failed')
     const { readonly: _dropped, ...withoutReadonly } = real
     expect(judge('H15', withoutReadonly, tools).status).toBe('failed')
   })
@@ -441,5 +460,63 @@ describe('H09 workflow recovery', () => {
     ['the killed turn is not closed as interrupted', w => { rootRecords(w).find(r => r['type'] === 'turn.end' && r['turn'] === killWf(w)['turn'])!['reason'] = { kind: 'completed' } }],
   ])('fails when %s', (_label, edit) => {
     expect(judge('H09', brokenObs(o => edit(o['workflow']!)), tools).status).toBe('failed')
+  })
+})
+
+// ---- team (H05, H06) and cancel (H13) -------------------------------------------------------------
+
+describe.each(['H05', 'H06', 'H13'])('%s on the real run', (id) => {
+  it('passes', () => {
+    const result = judge(id, real, tools)
+    expect(result.status, result.evidence).toBe('passed')
+  })
+  it('fails when its project did not run', () => {
+    expect(judge(id, { repo: real.repo! }, tools).status).toBe('failed')
+  })
+})
+
+const messagesOf = (p: Phase) => rootRecords(p).filter(r => r['type'] === 'team.message')
+
+describe('H05 team', () => {
+  it.each<[string, (t: Phase) => void]>([
+    ['a message was delivered twice', t => { const d = messagesOf(t).find(r => r['message'].state === 'delivered')!; rootRecords(t).push({ ...d, seq: 999 }) }],
+    ['a message was never delivered', t => { t['sessions'][t['sessionId']].records = rootRecords(t).filter(r => !(r['type'] === 'team.message' && r['message'].to === 'bob' && r['message'].state === 'delivered')) }],
+    ['bob got his mail twice', t => { const bob = childRecords(t, 'bob'); bob.push({ ...bob.find(r => r['type'] === 'user.message' && r['source'] === 'inject')!, seq: 999 }) }],
+    ['the lead got its mail twice', t => { const r = rootResult(t, 'w1'); r['content'] += r['content'] }],
+    ['bob started t3 early', t => { const r = childRecords(t, 'bob').find(x => x['toolCallId'] === 'b0')!; r['isError'] = false }],
+    ['the teammates ran one after the other', t => { t['requests'] = [...t['requests'].filter((q: Phase) => q['route'] !== 'bob'), ...t['requests'].filter((q: Phase) => q['route'] === 'bob')] }],
+    ['bob presented nothing', t => { t['deliverables'] = t['deliverables'].filter((d: Phase) => !d['versions'].some((v: Phase) => v['files'].includes('bob/b.md'))) }],
+    ['a teammate is marked delegated', t => { childRecords(t, 'alice')[0]!['member'].executionForm = 'delegated' }],
+  ])('fails when %s', (_label, edit) => {
+    expect(judge('H05', brokenObs(o => edit(o['team']!)), tools).status).toBe('failed')
+  })
+})
+
+describe('H06 team recovery', () => {
+  it.each<[string, (t: Phase) => void]>([
+    ['a message was already delivered at the kill', t => { t['atKill'].messages[0].state = 'delivered' }],
+    ['a message is delivered twice after resume', t => { const d = messagesOf(t).find(r => r['message'].state === 'delivered')!; rootRecords(t).push({ ...d, seq: 999 }) }],
+    ['the lead\'s mail is handed over again by wait_teammates', t => { const lead = t['atKill'].messages.find((m: Phase) => m['to'] === 'lead'); rootResult(t, 'r2')['content'] += `id="${lead['id']}"` }],
+    ['bob got his mail twice', t => { const bob = childRecords(t, 'bob'); bob.push({ ...bob.find(r => r['type'] === 'user.message' && r['source'] === 'inject')!, seq: 999 }) }],
+    ['the board changed', t => { rootResult(t, 'r1')['meta'].tasks[0].status = 'completed' }],
+    ['alice did not continue', t => { for (const r of rootRecords(t)) if (r['type'] === 'subagent.start' && r['name'] === 'alice' && r['task'] === t['prompts'].continue) r['task'] = 'start over' }],
+    ['a process survived', t => { t['phases'].teamKill.settled = false }],
+  ])('fails when %s', (_label, edit) => {
+    expect(judge('H06', brokenObs(o => edit(o['teamKill']!)), tools).status).toBe('failed')
+  })
+})
+
+describe('H13 cancel propagation', () => {
+  const endOf = (c: Phase, name: string) => rootRecords(c).find(r => r['type'] === 'subagent.end' && r['childSessionId'] === subStart(c, name)['childSessionId'])!
+  it.each<[string, (c: Phase) => void]>([
+    ['a delegated member ended with cause user', c => { endOf(c, 'sleeper')['result'].error.details.cause = 'user' }],
+    ['a teammate completed', c => { endOf(c, 'mate-b')['result'].status = 'completed' }],
+    ['a workflow member\'s own turn says completed', c => { const r = childRecords(c, 'flow-a').filter(x => x['type'] === 'turn.end').at(-1)!; r['reason'] = { kind: 'completed' } }],
+    ['a slow command survived', c => { c['phases'].cancelTeam.survivors = [4242] }],
+    ['the members were not running yet', c => { c['phases'].cancelWorkflow.running = false }],
+    ['the workflow ended failed', c => { rootRecords(c).find(r => r['type'] === 'workflow.end')!['status'] = 'failed' }],
+    ['a cancelled teammate was stopped', c => { rootRecords(c).push({ type: 'team.member', seq: 999, member: { name: 'mate-a', status: 'stopped' } }) }],
+  ])('fails when %s', (_label, edit) => {
+    expect(judge('H13', brokenObs(o => edit(o['cancel']!)), tools).status).toBe('failed')
   })
 })
