@@ -21,6 +21,17 @@ async function expectCode(promise: Promise<unknown>, code: NexgentErrorCode): Pr
   expect.unreachable(`expected ${code}`)
 }
 
+/**
+ * Stores for the checkpoint and recovery tests: only `turn.end`, `checkpoint`
+ * and `error` records are fsynced. Durability is not what those tests check,
+ * and an fsync per append (FlushFileBuffers) costs ~20 ms on Windows CI, which
+ * pushed record-heavy tests toward the 5 s timeout. The default policy
+ * (`'always'`) is covered by the layout and basic-write tests.
+ */
+function setupFewSyncs(options: Partial<JsonlSessionStoreOptions> = {}) {
+  return setup({ fsync: 'boundaries', ...options })
+}
+
 async function setup(options: Partial<JsonlSessionStoreOptions> = {}) {
   const root = await tempDir()
   const layout = resolveWorkspaceLayout(root)
@@ -144,7 +155,7 @@ describe('JsonlSessionStore: layout and basic writes', () => {
 
 describe('JsonlSessionStore: checkpoints', () => {
   it('writes a checkpoint right after the turn.end that reaches N records', async () => {
-    const { root, store } = await setup({ checkpointEvery: 10, checkpointOnRelease: false })
+    const { root, store } = await setupFewSyncs({ checkpointEvery: 10, checkpointOnRelease: false })
     await writeSession(store, root, 4)
     const { records } = await store.readAll(SESSION_ID)
     const checkpoints = records.filter(record => record.type === 'checkpoint')
@@ -160,14 +171,14 @@ describe('JsonlSessionStore: checkpoints', () => {
   })
 
   it('uses N = 50 by default', async () => {
-    const { root, store } = await setup({ checkpointOnRelease: false })
+    const { root, store } = await setupFewSyncs({ checkpointOnRelease: false })
     await writeSession(store, root, 9) // turn.end at 7, 13, ..., 49, 55
     const { records } = await store.readAll(SESSION_ID)
     expect(records.filter(record => record.type === 'checkpoint').map(record => record.seq)).toEqual([56])
   })
 
   it('writes a closing checkpoint on release only when there are new records', async () => {
-    const { root, store } = await setup()
+    const { root, store } = await setupFewSyncs()
     await writeSession(store, root, 1)
     let { records } = await store.readAll(SESSION_ID)
     expect(records.at(-1)).toMatchObject({ type: 'checkpoint', seq: 8, coversSeq: 7 })
@@ -178,7 +189,7 @@ describe('JsonlSessionStore: checkpoints', () => {
   })
 
   it('checkpoint() forces one; a caller checkpoint must carry the projected state', async () => {
-    const { root, store } = await setup({ checkpointOnRelease: false })
+    const { root, store } = await setupFewSyncs({ checkpointOnRelease: false })
     const lock = await store.create(sessionInit(root))
     for (const record of turnRecords(1)) await store.append(SESSION_ID, record)
     const forced = await store.checkpoint(SESSION_ID)
@@ -197,7 +208,7 @@ describe('JsonlSessionStore: checkpoints', () => {
   })
 
   it('resume starts from the latest checkpoint and folds only the records after it', async () => {
-    const { root, store } = await setup({ checkpointEvery: 10, checkpointOnRelease: false })
+    const { root, store } = await setupFewSyncs({ checkpointEvery: 10, checkpointOnRelease: false })
     await writeSession(store, root, 5) // checkpoints at 14 and 27, then turn 5 = seq 28..33
     const result = await store.resumeDetailed(SESSION_ID)
     expect(result.checkpointSeq).toBe(27)
@@ -208,7 +219,7 @@ describe('JsonlSessionStore: checkpoints', () => {
   })
 
   it('resume with a checkpoint stays fast on a 10k-record session', async () => {
-    const { root, store } = await setup()
+    const { root, store } = await setupFewSyncs()
     const sessionId = SESSION_ID
     const stamp = (input: SessionRecordInput, seq: number) =>
       ({ ...input, seq, ts: '2026-10-07T08:00:00.000Z', sessionId }) as SessionRecord
@@ -248,7 +259,7 @@ describe('JsonlSessionStore: recovery', () => {
   // ~3,300 file-system round trips, which took 3.4 s on Windows CI and
   // exceeded the 5 s timeout when the runner was busy.
   it('truncation at every byte offset of the last lines recovers the last complete record', async () => {
-    const { root, store } = await setup({ checkpointOnRelease: false })
+    const { root, store } = await setupFewSyncs({ checkpointOnRelease: false })
     const file = await writeSession(store, root, 3)
     const full = await readFile(file)
     const { records } = await store.readAll(SESSION_ID)
@@ -296,7 +307,7 @@ describe('JsonlSessionStore: recovery', () => {
   })
 
   it('a corrupt middle line stops recovery there and discards everything after it', async () => {
-    const { root, store } = await setup({ checkpointOnRelease: false })
+    const { root, store } = await setupFewSyncs({ checkpointOnRelease: false })
     const file = await writeSession(store, root, 2)
     const lines = (await readFile(file, 'utf8')).split('\n')
     lines[4] = '{"type":"tool.result", not json'
@@ -308,7 +319,7 @@ describe('JsonlSessionStore: recovery', () => {
   })
 
   it('a seq gap, a foreign session id or an unknown type is an invalid line', async () => {
-    const { root, store } = await setup({ checkpointOnRelease: false })
+    const { root, store } = await setupFewSyncs({ checkpointOnRelease: false })
     const file = await writeSession(store, root, 1)
     const original = await readFile(file, 'utf8')
     const lines = original.split('\n')
@@ -329,7 +340,7 @@ describe('JsonlSessionStore: recovery', () => {
   })
 
   it('the next append truncates the bad tail, records an error, and continues seq', async () => {
-    const { root, store } = await setup({ checkpointOnRelease: false })
+    const { root, store } = await setupFewSyncs({ checkpointOnRelease: false })
     const file = await writeSession(store, root, 1)
     const full = await readFile(file)
     await writeFile(file, Buffer.concat([full, Buffer.from('{"type":"turn.start","seq":8,"ts":"2026-')]))
@@ -347,7 +358,7 @@ describe('JsonlSessionStore: recovery', () => {
   })
 
   it('throws session/corrupt only when session.start itself is unreadable', async () => {
-    const { root, store } = await setup()
+    const { root, store } = await setupFewSyncs()
     const file = await writeSession(store, root, 0)
     await writeFile(file, '{"type":"session.st')
     await expectCode(store.readAll(SESSION_ID), 'session/corrupt')
@@ -357,7 +368,7 @@ describe('JsonlSessionStore: recovery', () => {
   })
 
   it('resume closes a dangling turn as interrupted only for the lock holder', async () => {
-    const { root, store } = await setup({ checkpointOnRelease: false })
+    const { root, store } = await setupFewSyncs({ checkpointOnRelease: false })
     const lock = await store.create(sessionInit(root))
     for (const record of turnRecords(1)) await store.append(SESSION_ID, record)
     await store.append(SESSION_ID, { type: 'turn.start', turn: 2 })
