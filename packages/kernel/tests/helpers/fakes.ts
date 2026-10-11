@@ -44,6 +44,7 @@ export const usage = (input: number, output: number): LLMUsage => ({
   outputTokens: output,
   totalTokens: input + output,
   cacheReadTokens: 0,
+  cacheWriteTokens: 0,
   reasoningTokens: 0,
 })
 

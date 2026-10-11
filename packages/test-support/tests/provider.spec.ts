@@ -42,7 +42,7 @@ describe('scriptedProvider', () => {
       { type: 'text.delta', text: 'lo' },
       {
         type: 'usage',
-        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 'unknown', cacheReadTokens: 'unknown', reasoningTokens: 'unknown' },
+        usage: { inputTokens: 10, outputTokens: 2, totalTokens: 'unknown', cacheReadTokens: 'unknown', cacheWriteTokens: 'unknown', reasoningTokens: 'unknown' },
       },
       { type: 'done', finishReason: 'stop' },
     ])

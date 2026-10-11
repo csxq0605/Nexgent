@@ -158,9 +158,9 @@ describe('contracts: pure helpers', () => {
     expect(addUsageCount(1, 2)).toBe(3)
     expect(addUsageCount(1, 'unknown')).toBe('unknown')
     expect(addUsageCount('unknown', 0)).toBe('unknown')
-    const known: LLMUsage = { inputTokens: 10, outputTokens: 5, totalTokens: 15, cacheReadTokens: 0, reasoningTokens: 0 }
+    const known: LLMUsage = { inputTokens: 10, outputTokens: 5, totalTokens: 15, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }
     expect(addUsage()).toEqual(ZERO_USAGE)
-    expect(addUsage(known, known)).toEqual({ inputTokens: 20, outputTokens: 10, totalTokens: 30, cacheReadTokens: 0, reasoningTokens: 0 })
+    expect(addUsage(known, known)).toEqual({ inputTokens: 20, outputTokens: 10, totalTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 })
     const partial: LLMUsage = { ...known, totalTokens: 'unknown' }
     expect(addUsage(known, partial)).toEqual({ ...addUsage(known, known), totalTokens: 'unknown' })
     expect(addUsage(known, UNKNOWN_USAGE)).toEqual(UNKNOWN_USAGE)

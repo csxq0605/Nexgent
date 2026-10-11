@@ -10,7 +10,7 @@
  * per event, closed by an unbounded `final` line; stderr keeps human
  * diagnostics only (warnings, errors).
  */
-import type { LLMUsage, TaskOutcomeStatus, UsageCount } from '@nexgent/kernel'
+import { addUsageCount, type LLMUsage, type TaskOutcomeStatus, type UsageCount } from '@nexgent/kernel'
 import type { CliEvent } from './events.js'
 import { boundJsonLine } from './json-lines.js'
 
@@ -59,9 +59,16 @@ function count(value: UsageCount): string {
   return value === 'unknown' ? '?' : String(value)
 }
 
-/** One-line usage text, `?` for unknown counts. */
+/**
+ * One-line usage text, `?` for unknown counts. `in` is all prompt tokens
+ * (uncached + cache read + cache write); the cache split follows when known
+ * and non-zero.
+ */
 export function formatUsage(usage: LLMUsage): string {
-  return `tokens in ${count(usage.inputTokens)} / out ${count(usage.outputTokens)}`
+  const input = addUsageCount(addUsageCount(usage.inputTokens, usage.cacheReadTokens), usage.cacheWriteTokens)
+  const { cacheReadTokens: read, cacheWriteTokens: write } = usage
+  const cache = read !== 'unknown' && write !== 'unknown' && read + write > 0 ? ` (cache read ${read}, write ${write})` : ''
+  return `tokens in ${count(input)}${cache} / out ${count(usage.outputTokens)}`
 }
 
 /** Create a renderer. */

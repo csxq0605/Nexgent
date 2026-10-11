@@ -16,12 +16,15 @@ export const COMMON_DEFS: Record<string, JsonObject> = {
   usage: {
     type: 'object',
     additionalProperties: false,
+    // `cacheWriteTokens` is optional: records written before it existed lack it
+    // and are read back with it as `'unknown'` (see `upgradeLegacyUsage`).
     required: ['inputTokens', 'outputTokens', 'totalTokens', 'cacheReadTokens', 'reasoningTokens'],
     properties: {
       inputTokens: { $ref: '#/$defs/usageCount' },
       outputTokens: { $ref: '#/$defs/usageCount' },
       totalTokens: { $ref: '#/$defs/usageCount' },
       cacheReadTokens: { $ref: '#/$defs/usageCount' },
+      cacheWriteTokens: { $ref: '#/$defs/usageCount' },
       reasoningTokens: { $ref: '#/$defs/usageCount' },
     },
   },
@@ -55,4 +58,25 @@ export function closedObject(properties: Record<string, JsonObject>, required: r
 /** `{ $ref: '#/$defs/<name>' }`. */
 export function ref(name: string): JsonObject {
   return { $ref: `#/$defs/${name}` }
+}
+
+function fillCacheWrite(usage: unknown): void {
+  if (typeof usage === 'object' && usage !== null && !('cacheWriteTokens' in usage)) {
+    (usage as Record<string, unknown>)['cacheWriteTokens'] = 'unknown'
+  }
+}
+
+/**
+ * Fill `cacheWriteTokens: 'unknown'` into the usage objects of a validated
+ * record written before the field existed (`usage`, `totalUsage` and a
+ * checkpoint's `state.metadata.totalUsage`), so readers always see a full
+ * `LLMUsage`. Mutates and returns `record`.
+ */
+export function upgradeLegacyUsage<T extends object>(record: T): T {
+  const fields = record as Record<string, unknown>
+  fillCacheWrite(fields['usage'])
+  fillCacheWrite(fields['totalUsage'])
+  const state = fields['state'] as { metadata?: { totalUsage?: unknown } } | undefined
+  if (typeof state === 'object' && state !== null) fillCacheWrite(state.metadata?.totalUsage)
+  return record
 }

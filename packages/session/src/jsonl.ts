@@ -5,6 +5,7 @@
  * Normative rules: `docs/spec/data-formats.md` §追加与截断规则.
  */
 import type { SessionReadResult, SessionRecord, SessionTruncation } from '@nexgent/kernel'
+import { upgradeLegacyUsage } from './schema/common.js'
 import { formatIssues, validateSessionRecord } from './schema/session-schema.js'
 
 const NEWLINE = 0x0a
@@ -69,7 +70,8 @@ function checkLine(bytes: Uint8Array, previous: readonly SessionRecord[], sessio
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'not a JSON object'
   const issues = validateSessionRecord(value, { allowAdditionalProperties: true })
   if (issues.length > 0) return `schema: ${formatIssues(issues)}`
-  return checkSequence(value as SessionRecord, previous.length, sessionId) ?? (value as SessionRecord)
+  const record = upgradeLegacyUsage(value) as SessionRecord
+  return checkSequence(record, previous.length, sessionId) ?? record
 }
 
 /**

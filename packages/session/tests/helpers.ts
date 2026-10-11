@@ -33,6 +33,7 @@ export const KNOWN_USAGE: LLMUsage = {
   outputTokens: 5,
   totalTokens: 15,
   cacheReadTokens: 0,
+  cacheWriteTokens: 0,
   reasoningTokens: 0,
 }
 

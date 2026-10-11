@@ -29,7 +29,7 @@ describe('projection', () => {
         grants: [],
         title: 'T',
         lastTurn: 0,
-        totalUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0, reasoningTokens: 0 },
+        totalUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
         lastSeq: 1,
       },
     })

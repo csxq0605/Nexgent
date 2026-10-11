@@ -3,8 +3,16 @@
   "schemaVersion": 1,
   "step": 1,
   "date": "2026-10-11",
-  "source": { "branch": "claude/sleepy-pascal-v0ujqm", "commit": "69da2726" },
-  "environment": { "platform": "linux", "os": "Linux 6.18.44-fc-v114", "node": "v22.22.0", "pnpm": "10.28.0" },
+  "source": {
+    "branch": "claude/sleepy-pascal-v0ujqm",
+    "commit": "69da2726"
+  },
+  "environment": {
+    "platform": "linux",
+    "os": "Linux 6.18.44-fc-v114",
+    "node": "v22.22.0",
+    "pnpm": "10.28.0"
+  },
   "endpoint": "https://api.anthropic.com",
   "model": "claude-sonnet-5-5",
   "thinking": "off",
@@ -14,8 +22,16 @@
     "result": "pass",
     "requests": 1,
     "finishReason": "tool-calls",
-    "toolCalls": ["write_file({\"path\": \"notes.md\", \"content\": \"hi\"})"],
-    "usage": { "inputTokens": 423, "outputTokens": 72, "totalTokens": 495, "cacheReadTokens": 0, "reasoningTokens": "unknown" },
+    "toolCalls": [
+      "write_file({\"path\": \"notes.md\", \"content\": \"hi\"})"
+    ],
+    "usage": {
+      "inputTokens": 423,
+      "outputTokens": 72,
+      "totalTokens": 495,
+      "cacheReadTokens": 0,
+      "reasoningTokens": "unknown"
+    },
     "latencyMs": 1681,
     "httpStatus": 200,
     "log": "real-model-smoke.txt"
@@ -27,17 +43,85 @@
     "wallClockSeconds": 6.0,
     "outcome": "completed",
     "requests": 4,
-    "requestStatus": { "ok": 4, "unknown": 0, "error": 0 },
-    "toolCalls": ["list_files", "write_file", "read_file"],
-    "fileWritten": { "path": "hello.md", "bytes": 125, "copy": "real-model-run-hello.md" },
-    "usageTotals": { "inputTokens": 10, "outputTokens": 385, "cacheReadTokens": 7392, "totalTokens": 7787, "cacheCreationTokens": "not recorded" },
+    "requestStatus": {
+      "ok": 4,
+      "unknown": 0,
+      "error": 0
+    },
+    "toolCalls": [
+      "list_files",
+      "write_file",
+      "read_file"
+    ],
+    "fileWritten": {
+      "path": "hello.md",
+      "bytes": 125,
+      "copy": "real-model-run-hello.md"
+    },
+    "usageTotals": {
+      "inputTokens": 10,
+      "outputTokens": 385,
+      "cacheReadTokens": 7392,
+      "totalTokens": 7787,
+      "cacheCreationTokens": "not recorded"
+    },
     "unknownUsageCount": 0,
-    "latencyMs": [1342, 1482, 1116, 1711],
+    "latencyMs": [
+      1342,
+      1482,
+      1116,
+      1711
+    ],
     "log": "real-model-run.txt",
     "ledger": "real-model-run-ledger.jsonl"
   },
   "notes": [
     "reasoningTokens is 'unknown' on every request by design: the Messages API does not report thinking tokens separately (and thinking was off).",
-    "inputTokens excludes cache reads and cache writes; cache_creation_input_tokens is dropped by packages/llm/src/usage.ts, so request 1 of the run shows inputTokens 4 although the prompt was about 2.35k tokens. Cost cannot be computed exactly from the ledger."
-  ]
+    "At the time of this run, cache_creation_input_tokens was dropped by packages/llm/src/usage.ts, so request 1 shows inputTokens 4 although the prompt was about 2.35k tokens. Fixed afterwards (LLMUsage.cacheWriteTokens); see rerun."
+  ],
+  "rerun": {
+    "reason": "after adding LLMUsage.cacheWriteTokens",
+    "smoke": {
+      "result": "pass",
+      "usage": {
+        "inputTokens": 423,
+        "outputTokens": 76,
+        "totalTokens": 499,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "reasoningTokens": "unknown"
+      }
+    },
+    "run": {
+      "result": "pass",
+      "exitCode": 0,
+      "outcome": "completed",
+      "requests": 4,
+      "requestStatus": {
+        "ok": 4,
+        "unknown": 0,
+        "error": 0
+      },
+      "toolCalls": [
+        "list_files",
+        "write_file",
+        "read_file"
+      ],
+      "fileWritten": {
+        "path": "hello.md",
+        "bytes": 136
+      },
+      "usageTotals": {
+        "inputTokens": 10,
+        "outputTokens": 356,
+        "cacheReadTokens": 7402,
+        "cacheWriteTokens": 2701,
+        "totalTokens": 10469
+      },
+      "cliSummary": "tokens in 10113 (cache read 7402, write 2701) / out 356",
+      "unknownUsageCount": 0,
+      "log": "real-model-rerun.txt",
+      "ledger": "real-model-rerun-ledger.jsonl"
+    }
+  }
 }

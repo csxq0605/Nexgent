@@ -169,6 +169,20 @@ describe('session record schema', () => {
     expect(checkpoint.state).toEqual(projectSession(scan.records.slice(0, 7)))
   })
 
+  it('reads records written before cacheWriteTokens existed with it as unknown', async () => {
+    const text = await readFile(new URL('./fixtures/spec-example.jsonl', import.meta.url), 'utf8')
+    const legacy = text.replace(/"cacheWriteTokens":(?:"unknown"|\d+),/g, '')
+    expect(legacy).not.toContain('cacheWriteTokens')
+    const scan = scanSessionLog(Buffer.from(legacy, 'utf8'), ID)
+    expect(scan.truncation).toBeUndefined()
+    const message = scan.records[3]
+    const checkpoint = scan.records[7]
+    if (message?.type !== 'assistant.message' || checkpoint?.type !== 'checkpoint') throw new Error('unexpected fixture')
+    expect(message.usage.cacheWriteTokens).toBe('unknown')
+    expect(checkpoint.state.metadata.totalUsage.cacheWriteTokens).toBe('unknown')
+    expect(checkpoint.state).toEqual(projectSession(scan.records.slice(0, 7)))
+  })
+
   it('is published verbatim as schema/session.v1.schema.json', async () => {
     const text = await readFile(new URL('../schema/session.v1.schema.json', import.meta.url), 'utf8')
     expect(JSON.parse(text)).toEqual(sessionRecordSchema)

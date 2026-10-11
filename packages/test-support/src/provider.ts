@@ -74,6 +74,7 @@ export function toContractUsage(usage: ScriptedUsage): LLMUsage {
     outputTokens: pick(usage.outputTokens),
     totalTokens: pick(usage.totalTokens),
     cacheReadTokens: pick(usage.cacheReadTokens),
+    cacheWriteTokens: pick(usage.cacheWriteTokens),
     reasoningTokens: pick(usage.reasoningTokens),
   }
 }

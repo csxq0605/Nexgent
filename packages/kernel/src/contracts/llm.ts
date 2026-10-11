@@ -153,7 +153,7 @@ export type UsageCount = number | 'unknown'
 /**
  * Token accounting for one request. Every field is required so that a
  * missing provider value must be written down as `'unknown'` explicitly.
- * `inputTokens` excludes cached input; billed input = input + cacheRead.
+ * `inputTokens` excludes cached input; billed input = input + cacheRead + cacheWrite.
  */
 export interface LLMUsage {
   /** Uncached prompt tokens. */
@@ -164,6 +164,8 @@ export interface LLMUsage {
   readonly totalTokens: UsageCount
   /** Prompt tokens served from the provider's cache. */
   readonly cacheReadTokens: UsageCount
+  /** Prompt tokens written to the provider's cache (billed as input, usually at a premium). */
+  readonly cacheWriteTokens: UsageCount
   /** Reasoning tokens when reported separately. */
   readonly reasoningTokens: UsageCount
 }
@@ -174,6 +176,7 @@ export const UNKNOWN_USAGE: LLMUsage = Object.freeze({
   outputTokens: 'unknown',
   totalTokens: 'unknown',
   cacheReadTokens: 'unknown',
+  cacheWriteTokens: 'unknown',
   reasoningTokens: 'unknown',
 }) as LLMUsage
 
@@ -183,6 +186,7 @@ export const ZERO_USAGE: LLMUsage = Object.freeze({
   outputTokens: 0,
   totalTokens: 0,
   cacheReadTokens: 0,
+  cacheWriteTokens: 0,
   reasoningTokens: 0,
 }) as LLMUsage
 
@@ -208,6 +212,7 @@ export function addUsage(...usages: readonly LLMUsage[]): LLMUsage {
       outputTokens: addUsageCount(total.outputTokens, usage.outputTokens),
       totalTokens: addUsageCount(total.totalTokens, usage.totalTokens),
       cacheReadTokens: addUsageCount(total.cacheReadTokens, usage.cacheReadTokens),
+      cacheWriteTokens: addUsageCount(total.cacheWriteTokens, usage.cacheWriteTokens),
       reasoningTokens: addUsageCount(total.reasoningTokens, usage.reasoningTokens),
     }
   }
@@ -221,6 +226,7 @@ export function isUsageKnown(usage: LLMUsage): usage is LLMUsage & Record<keyof 
     && usage.outputTokens !== 'unknown'
     && usage.totalTokens !== 'unknown'
     && usage.cacheReadTokens !== 'unknown'
+    && usage.cacheWriteTokens !== 'unknown'
     && usage.reasoningTokens !== 'unknown'
   )
 }

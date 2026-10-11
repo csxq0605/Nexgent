@@ -8,12 +8,12 @@ describe('normalizeUsage', () => {
     expect(normalizeUsage(
       { input_tokens: 100, cache_read_input_tokens: 40, cache_creation_input_tokens: 7, output_tokens: 1 },
       { output_tokens: 20 },
-    )).toEqual({ inputTokens: 100, outputTokens: 20, totalTokens: 160, cacheReadTokens: 40, reasoningTokens: 'unknown' })
+    )).toEqual({ inputTokens: 100, outputTokens: 20, totalTokens: 167, cacheReadTokens: 40, cacheWriteTokens: 7, reasoningTokens: 'unknown' })
   })
 
   it('marks every unreported count unknown, never 0', () => {
     expect(normalizeUsage({ input_tokens: 10 }, undefined)).toEqual({
-      inputTokens: 10, outputTokens: 'unknown', totalTokens: 'unknown', cacheReadTokens: 'unknown', reasoningTokens: 'unknown',
+      inputTokens: 10, outputTokens: 'unknown', totalTokens: 'unknown', cacheReadTokens: 'unknown', cacheWriteTokens: 'unknown', reasoningTokens: 'unknown',
     })
     expect(normalizeUsage(undefined, undefined)).toEqual(UNKNOWN_USAGE)
     expect(normalizeUsage({ input_tokens: -1, output_tokens: 1.5, cache_read_input_tokens: null }, undefined))

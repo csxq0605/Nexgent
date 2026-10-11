@@ -19,9 +19,9 @@ export interface WireUsage {
  * - `input_tokens` → `inputTokens` (the API's count already excludes cached input);
  * - `output_tokens` → `outputTokens`;
  * - `cache_read_input_tokens` → `cacheReadTokens`;
- * - `cache_creation_input_tokens` is ignored (the contract has no field for it);
+ * - `cache_creation_input_tokens` → `cacheWriteTokens`;
  * - `reasoningTokens` is always `'unknown'` (not reported separately);
- * - `totalTokens` = input + output + cacheRead when all three are known.
+ * - `totalTokens` = input + output + cacheRead + cacheWrite when all four are known.
  * @param start - usage of `message_start`, if seen.
  * @param delta - usage of `message_delta`, if seen.
  */
@@ -33,8 +33,10 @@ export function normalizeUsage(start: WireUsage | undefined, delta: WireUsage | 
   const inputTokens = pick('input_tokens')
   const outputTokens = pick('output_tokens')
   const cacheReadTokens = pick('cache_read_input_tokens')
-  const totalTokens: UsageCount = inputTokens !== 'unknown' && outputTokens !== 'unknown' && cacheReadTokens !== 'unknown'
-    ? inputTokens + outputTokens + cacheReadTokens
+  const cacheWriteTokens = pick('cache_creation_input_tokens')
+  const totalTokens: UsageCount = inputTokens !== 'unknown' && outputTokens !== 'unknown'
+    && cacheReadTokens !== 'unknown' && cacheWriteTokens !== 'unknown'
+    ? inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens
     : 'unknown'
-  return { inputTokens, outputTokens, totalTokens, cacheReadTokens, reasoningTokens: 'unknown' }
+  return { inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens: 'unknown' }
 }

@@ -15,7 +15,7 @@ import {
 } from '../src/index.js'
 
 const SID = '6f1c0000-0000-4000-8000-000000000001'
-const unknown = { inputTokens: 'unknown', outputTokens: 'unknown', totalTokens: 'unknown', cacheReadTokens: 'unknown', reasoningTokens: 'unknown' }
+const unknown = { inputTokens: 'unknown', outputTokens: 'unknown', totalTokens: 'unknown', cacheReadTokens: 'unknown', cacheWriteTokens: 'unknown', reasoningTokens: 'unknown' }
 const sessionLines = [
   { type: 'session.start', seq: 1, ts: '2026-10-07T08:00:00.000Z', sessionId: SID, version: 1, projectRoot: '/p', model: 'm', sandboxMode: 'workspace-write' },
   { type: 'turn.start', seq: 2, ts: '2026-10-07T08:00:01.000Z', sessionId: SID, turn: 1 },
@@ -80,7 +80,7 @@ describe('readLedgerRecords / ledgerStats', () => {
   const records: LedgerRecord[] = [
     { type: 'llm.request.start', ts: '2026-09-30T23:59:59.000Z', requestId: 'a', provider: 'p', endpoint: 'e', model: 'm', purpose: 'task', thinking: 'off' },
     { type: 'llm.request.end', ts: '2026-10-01T00:00:01.000Z', requestId: 'a', provider: 'p', endpoint: 'e', model: 'm', status: 'ok', latencyMs: 5,
-      usage: { inputTokens: 10, outputTokens: 3, totalTokens: 15, cacheReadTokens: 2, reasoningTokens: 0 }, finishReason: 'stop' },
+      usage: { inputTokens: 10, outputTokens: 3, totalTokens: 15, cacheReadTokens: 2, cacheWriteTokens: 0, reasoningTokens: 0 }, finishReason: 'stop' },
     { type: 'llm.request.start', ts: '2026-10-01T00:00:02.000Z', requestId: 'b', provider: 'p', endpoint: 'e', model: 'm', purpose: 'task', thinking: 'off' },
     { type: 'llm.request.end', ts: '2026-10-01T00:00:03.000Z', requestId: 'b', provider: 'p', endpoint: 'e', model: 'm', status: 'error', latencyMs: 5,
       usage: unknown as never, httpStatus: 503, errorCode: 'llm/request-failed' },

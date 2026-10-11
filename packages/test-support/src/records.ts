@@ -183,9 +183,13 @@ export function ledgerStats(records: readonly LedgerRecord[]): LedgerStats {
     }
     statusCounts[end.status]++
     const u = end.usage
-    const fields = [u.inputTokens, u.outputTokens, u.totalTokens, u.cacheReadTokens, u.reasoningTokens]
+    const fields = [u.inputTokens, u.outputTokens, u.totalTokens, u.cacheReadTokens, u.cacheWriteTokens, u.reasoningTokens]
     if (fields.some((f) => f === 'unknown')) unknownUsageCount++
-    if (typeof u.inputTokens === 'number') knownInputTokens += u.inputTokens + (typeof u.cacheReadTokens === 'number' ? u.cacheReadTokens : 0)
+    if (typeof u.inputTokens === 'number') {
+      knownInputTokens += u.inputTokens
+        + (typeof u.cacheReadTokens === 'number' ? u.cacheReadTokens : 0)
+        + (typeof u.cacheWriteTokens === 'number' ? u.cacheWriteTokens : 0)
+    }
     if (typeof u.outputTokens === 'number') knownOutputTokens += u.outputTokens
   }
   return { requestCount: ids.size, statusCounts, unknownUsageCount, knownInputTokens, knownOutputTokens, toolCallCount, taskOutcomes }

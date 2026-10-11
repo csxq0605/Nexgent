@@ -54,7 +54,7 @@ describe('AnthropicProvider — streaming', () => {
     expect(textOf(events)).toBe('Hello, world.')
     expect(events.filter(event => event.type === 'usage')).toEqual([{
       type: 'usage',
-      usage: { inputTokens: 300, outputTokens: 37, totalTokens: 849, cacheReadTokens: 512, reasoningTokens: 'unknown' },
+      usage: { inputTokens: 300, outputTokens: 37, totalTokens: 849, cacheReadTokens: 512, cacheWriteTokens: 0, reasoningTokens: 'unknown' },
     }])
     const done = doneOf(events)
     expect(done.finishReason).toBe('stop')
@@ -84,7 +84,7 @@ describe('AnthropicProvider — streaming', () => {
     })
     expect(end).toMatchObject({
       requestId: request.requestId, status: 'ok', httpStatus: 200, finishReason: 'stop',
-      usage: { inputTokens: 300, outputTokens: 37, totalTokens: 849, cacheReadTokens: 512, reasoningTokens: 'unknown' },
+      usage: { inputTokens: 300, outputTokens: 37, totalTokens: 849, cacheReadTokens: 512, cacheWriteTokens: 0, reasoningTokens: 'unknown' },
     })
     expect(end).not.toHaveProperty('errorCode')
   })
@@ -187,7 +187,7 @@ describe('AnthropicProvider — streaming', () => {
     ])
     expect(textOf(events)).toBe('')
     expect(doneOf(events).finishReason).toBe('tool-calls')
-    expect(pair(ledger).end.usage).toEqual({ inputTokens: 200, outputTokens: 42, totalTokens: 342, cacheReadTokens: 100, reasoningTokens: 'unknown' })
+    expect(pair(ledger).end.usage).toEqual({ inputTokens: 200, outputTokens: 42, totalTokens: 342, cacheReadTokens: 100, cacheWriteTokens: 0, reasoningTokens: 'unknown' })
   })
 
   it('merges consecutive tool results into one user message, in order, with is_error', async () => {

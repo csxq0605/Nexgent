@@ -45,7 +45,7 @@ describe('ctx.agents.resume', () => {
     await store.append(sessionId, {
       type: 'assistant.message', turn: 1, step: 1, requestId: 'r1', content: '',
       toolCalls: [{ id: 'c0', name: 'echo', arguments: '{}' }],
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, reasoningTokens: 0 },
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
       finishReason: 'tool-calls',
     })
     await crashed.close({ skipOutcome: true })

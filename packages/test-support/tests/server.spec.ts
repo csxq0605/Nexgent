@@ -85,11 +85,11 @@ describe('scriptedModelServer', () => {
           { name: 'read_file', arguments: { path: 'b.txt' }, argumentChunks: 2 },
         ],
         interleaveToolCalls: true,
-        usage: { inputTokens: 100, cacheReadTokens: 20, outputTokens: 7, totalTokens: 127 },
+        usage: { inputTokens: 100, cacheReadTokens: 20, cacheWriteTokens: 3, outputTokens: 7, totalTokens: 130 },
       }],
     })
     const events = await streamed({ model: 'm', stream: true, messages: [] })
-    expect(events[0]!.message!.usage).toEqual({ input_tokens: 100, cache_read_input_tokens: 20 })
+    expect(events[0]!.message!.usage).toEqual({ input_tokens: 100, cache_read_input_tokens: 20, cache_creation_input_tokens: 3 })
     const thinking = events.filter((e) => e.index === 0)
     expect(thinking[0]!.content_block).toEqual({ type: 'thinking', thinking: '', signature: '' })
     expect(thinking.map((e) => e.delta?.['type'])).toEqual([undefined, 'thinking_delta', 'signature_delta', undefined])

@@ -115,6 +115,7 @@ export function toWireUsage(usage: ScriptedUsage): WireUsageParts {
   const delta: Record<string, unknown> = {}
   if (usage.inputTokens !== undefined) start['input_tokens'] = usage.inputTokens
   if (usage.cacheReadTokens !== undefined) start['cache_read_input_tokens'] = usage.cacheReadTokens
+  if (usage.cacheWriteTokens !== undefined) start['cache_creation_input_tokens'] = usage.cacheWriteTokens
   if (usage.outputTokens !== undefined) delta['output_tokens'] = usage.outputTokens
   return { start, delta }
 }

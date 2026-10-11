@@ -59,6 +59,12 @@ describe('text renderer', () => {
     expect(preview('x'.repeat(200), 10)).toBe('xxxxxxx...')
     expect(formatUsage(UNKNOWN_USAGE)).toBe('tokens in ? / out ?')
   })
+
+  it('counts cache reads and writes as input and shows the split', () => {
+    expect(formatUsage({ ...USAGE, inputTokens: 2, cacheReadTokens: 2359, cacheWriteTokens: 82, outputTokens: 133 }))
+      .toBe('tokens in 2443 (cache read 2359, write 82) / out 133')
+    expect(formatUsage({ ...USAGE, cacheWriteTokens: 'unknown' })).toBe('tokens in ? / out 37')
+  })
 })
 
 describe('json renderer', () => {

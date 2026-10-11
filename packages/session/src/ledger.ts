@@ -21,6 +21,7 @@ import {
   type WorkspaceLayout,
 } from '@nexgent/kernel'
 import { encodeLine } from './jsonl.js'
+import { upgradeLegacyUsage } from './schema/common.js'
 import { formatIssues } from './schema/session-schema.js'
 import { isLedgerRecordType, validateLedgerRecord } from './schema/ledger-schema.js'
 
@@ -134,7 +135,7 @@ export class JsonlLedger implements Ledger {
       this.skipped += 1
       return undefined
     }
-    return value as LedgerRecord
+    return upgradeLegacyUsage(value as LedgerRecord)
   }
 
   private async months(): Promise<string[]> {

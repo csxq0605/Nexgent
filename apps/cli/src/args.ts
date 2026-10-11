@@ -14,7 +14,7 @@
  * {@link CliError}s with exit code {@link EXIT.USAGE}.
  */
 import { parseArgs } from 'node:util'
-import { SANDBOX_MODES, type SandboxMode } from '@nexgent/kernel'
+import { DEFAULT_PROJECT_CONFIG, SANDBOX_MODES, type SandboxMode } from '@nexgent/kernel'
 import { CliError, EXIT } from './exit-codes.js'
 
 /** Subcommands, in help order. */
@@ -217,7 +217,7 @@ export function commandUsage(command: Command): string {
         '  --project <dir>    project directory (its .nexgent/ data dir is created if missing)',
         '  --task "<text>"    what to do',
         `${sandbox} (default: config, then workspace-write)`,
-        '  --model <id>       model id (default: config, then mimo-v2.6-pro)',
+        `  --model <id>       model id (default: config, then ${DEFAULT_PROJECT_CONFIG.model})`,
         '  --json             JSON lines on stdout instead of text',
         '',
         'Ctrl+C cancels the running turn; a second Ctrl+C exits.',

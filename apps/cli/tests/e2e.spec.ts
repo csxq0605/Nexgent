@@ -13,7 +13,7 @@ import { readLedgerRecords, readSessionRecords, scriptedModelServer, type Script
 import { EXIT, main } from '../src/index.js'
 import { testIo } from './helpers.js'
 
-const usage = { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 0, reasoningTokens: 0 }
+const usage = { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }
 const FILE = { path: 'hello.txt', content: 'Hello from the CLI e2e test\n' }
 
 let work: string

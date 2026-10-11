@@ -89,6 +89,9 @@
         "cacheReadTokens": {
           "$ref": "#/$defs/usageCount"
         },
+        "cacheWriteTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
         "reasoningTokens": {
           "$ref": "#/$defs/usageCount"
         }

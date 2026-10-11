@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_PROJECT_CONFIG } from '@nexgent/kernel'
 import { CliError, EXIT, commandUsage, isSessionId, parseCliArgs, usage } from '../src/index.js'
 
 const SID = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b'
@@ -75,6 +76,8 @@ describe('parseCliArgs', () => {
     expect(usage()).toMatch(/run[\s\S]*resume[\s\S]*app/)
     expect(usage()).toContain('130 cancelled')
     expect(commandUsage('run')).toContain('--sandbox <mode>')
+    expect(commandUsage('run')).toContain(`then ${DEFAULT_PROJECT_CONFIG.model})`)
+    expect(commandUsage('run')).not.toContain('mimo')
     expect(commandUsage('resume')).toContain('<sessionId>')
     expect(commandUsage('app')).toContain('step 2')
   })

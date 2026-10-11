@@ -26,7 +26,7 @@ export const TASKS = {
   resume: `Continue: also create ${FILES.resumed.path}`,
 }
 
-const usage = { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 0, reasoningTokens: 0 }
+const usage = { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }
 
 /**
  * Script for the scripted model server, one entry per model request:
