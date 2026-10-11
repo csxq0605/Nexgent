@@ -22,6 +22,21 @@ Nexgent 桌面应用（Electron）。主进程持有 `@nexgent/sdk` 的实例；
 | `src/preload/index.cts` | 沙箱 preload（单个 CommonJS 文件，只 `require('electron')`） |
 | `scripts/package.mjs` | 打包：`pnpm deploy` 暂存到 `build/app`，再用 electron-builder 产出到 `release/` |
 
+## 界面（`src/renderer/`）
+
+React 18 + Vite。`index.html` 与 `vite.config.ts` 在包根，`pnpm --filter @nexgent/desktop build`（或 `build:renderer`）产出 `dist/renderer/`；开发时 `pnpm --filter @nexgent/desktop dev:renderer` 起 `http://127.0.0.1:5173`，再用 `NEXGENT_DESKTOP_DEV_URL` 启动 Electron。仓库根的 `pnpm build` 只做 `tsc` 类型检查（含 `src/renderer/tsconfig.json`），不产出界面。
+
+| 文件 | 内容 |
+| --- | --- |
+| `bridge.ts` | `window.nexgent` 的类型与 `SdkClient`：把 preload 的 reject（普通 `ErrorInfo`）和 IPC 断开都变成 `SdkCallError` |
+| `store.ts` | 界面状态与全部用户操作（打开项目、会话、发送、停止、审批、资料、反馈、目标、设置、密钥）；失败一律变成顶部错误条，不抛出 |
+| `timeline.ts` | 会话历史 + 实时事件 → 对话条目（流式文本追加、`assistant.message` 定稿、中断保留已流出文本、工具块配对） |
+| `strings.ts` | 全部中文文案 |
+| `components/` | 开始页、左栏（项目切换、对话列表）、中栏（时间线、工具块、成果卡片、Composer 的 `@` 资料引用、停止）、右栏（资料、成果、文件、目标）、审批对话框、成果查看与 v(n-1)→vn 差异、反馈表单、设置页、错误边界 |
+| `testing/fake-bridge.ts` | 组件测试用的假 `window.nexgent`（不进打包产物） |
+
+测试：`src/renderer/__tests__/`（vitest + Testing Library，jsdom）；`tests/ui-e2e.spec.ts` 用 Playwright 拉起真实 Electron + 真实 SDK + 脚本化模型服务端，按用户操作跑完整条链（设 `NEXGENT_UI_SCREENSHOTS=<目录>` 保存截图）。
+
 ## 渲染进程怎么用
 
 ```ts
