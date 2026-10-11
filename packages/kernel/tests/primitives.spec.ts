@@ -149,7 +149,7 @@ describe('project config', () => {
   it('fills defaults, validates fields and reports unknown ones', async () => {
     expect((await readProjectConfig(join(dir, 'missing.json'))).config.sandboxMode).toBe('workspace-write')
     const loaded = parseProjectConfig({ model: 'm', costCaps: { perTask: { maxRequests: 2 } }, extraReadRoots: ['/data'] })
-    expect(loaded.config).toMatchObject({ model: 'm', thinking: 'off', effort: 'medium', costCaps: { perTask: { maxRequests: 2 } } })
+    expect(loaded.config).toMatchObject({ model: 'm', thinking: 'on', effort: 'medium', costCaps: { perTask: { maxRequests: 2 } } })
     expect(parseProjectConfig({ effort: 'xhigh' }).input).toEqual({ effort: 'xhigh' })
     expect(loaded.input).toEqual({ model: 'm', costCaps: { perTask: { maxRequests: 2 } } })
     expect(loaded.extraReadRoots).toEqual(['/data'])
@@ -215,6 +215,21 @@ describe('system prompt, schema check, timeouts, history repair', () => {
     expect(text).toContain('- pwsh: Run PowerShell.')
     expect(text.endsWith('Your project working directory is /p.')).toBe(true)
     expect(renderSystemPrompt(input)).toBe(text)
+    expect(text).not.toContain('# Working with files')
+  })
+
+  it('adds file-tool guidance only for the tools offered', () => {
+    const tool = (name: string) => ({ name, description: `${name} tool`, inputSchema: {}, effects: ['read' as const], approval: 'never' as const })
+    const base = { template: { persona: 'P', suffix: '' }, model: 'm', cwd: '/p', sandboxMode: 'workspace-write' as const, platform: 'linux' as const }
+    const full = renderSystemPrompt({ ...base, tools: ['read_file', 'write_file', 'str_replace', 'bash', 'present'].map(tool) })
+    const section = full.slice(full.indexOf('# Working with files'))
+    expect(section).toContain('use `str_replace` (read the file with `read_file` first); do not rewrite files through shell commands')
+    expect(section).toContain('use `write_file`')
+    expect(section).toContain('declare it with `present`')
+    const noPresent = renderSystemPrompt({ ...base, tools: ['write_file', 'str_replace'].map(tool) })
+    expect(noPresent).toContain('use `str_replace`.')
+    expect(noPresent).not.toContain('present')
+    expect(renderSystemPrompt({ ...base, tools: ['bash'].map(tool) })).not.toContain('# Working with files')
   })
 
   it('checks the common JSON Schema keywords', () => {

@@ -305,7 +305,7 @@ describe('contracts: pure helpers', () => {
       sandboxMode: 'read-only',
       costCaps: { perTask: { maxRequests: 3 } },
     })
-    expect(DEFAULT_PROJECT_CONFIG.thinking).toBe('off')
+    expect(DEFAULT_PROJECT_CONFIG.thinking).toBe('on')
     expect(DEFAULT_PROJECT_CONFIG.model).toBe('claude-sonnet-5-5')
     expect(DEFAULT_PROJECT_CONFIG.effort).toBe('medium')
   })

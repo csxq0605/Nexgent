@@ -8,9 +8,11 @@ import {
   type ApprovalGrant,
   type ApprovalRequest,
   type KernelToolContext,
+  type LLMUsage,
   type Tool,
+  UNKNOWN_USAGE,
 } from '../src/index.js'
-import { MemoryLedger, MemorySessionStore, sleep, textReply, toolCallReply } from './helpers/fakes.js'
+import { MemoryLedger, MemorySessionStore, sleep, textReply, toolCallReply, usage } from './helpers/fakes.js'
 import { bootHarness, type Harness } from './helpers/harness.js'
 
 const writeTool: Tool = {
@@ -353,6 +355,82 @@ describe('cost caps', () => {
     expect((await agent.run('two')).reason).toEqual({ kind: 'cancelled', cause: 'cost-cap' })
     expect(harness.llm.requests).toHaveLength(1)
     expect(harness.store.of(agent.sessionId, 'error')[0]!.error.details).toEqual({ scope: 'task', metric: 'tokens', used: 15, limit: 15 })
+  })
+
+  /** Ledger records of one model request by another task, `daysAgo` days back. */
+  function seedRequest(ledger: MemoryLedger, daysAgo: number, used: LLMUsage | 'unknown' = usage(10, 5)): void {
+    const ts = new Date(Date.now() - daysAgo * 86_400_000).toISOString()
+    const common = { ts, sessionId: 'other', requestId: `r-${ledger.records.length}`, provider: 'anthropic', endpoint: 'https://example.invalid', model: 'm' }
+    ledger.records.push(
+      { ...common, type: 'llm.request.start', purpose: 'task', thinking: 'on' },
+      { ...common, type: 'llm.request.end', status: 'ok', usage: used === 'unknown' ? UNKNOWN_USAGE : used, latencyMs: 1 },
+    )
+  }
+
+  it('stops before the request that would exceed perProject.maxRequests, counting the ledger window', async () => {
+    const ledger = new MemoryLedger()
+    seedRequest(ledger, 1)
+    seedRequest(ledger, 29, 'unknown')
+    seedRequest(ledger, 31) // outside the default 30-day window
+    harness = await bootHarness({ ledger, script: [toolCallReply('c1', 'echo', {}), textReply('never sent')] })
+    writeConfig(harness.root, { costCaps: { perProject: { maxRequests: 3 } } })
+    harness.app.ctx.tools.register({
+      definition: { name: 'echo', description: 'e', inputSchema: { type: 'object' }, effects: ['read'], approval: 'never' },
+      handler: async () => ({ content: 'ok' }),
+    })
+    const agent = await harness.app.agents.create()
+    const result = await agent.run('loop')
+    expect(harness.llm.requests).toHaveLength(1)
+    expect(result.reason).toEqual({ kind: 'cancelled', cause: 'cost-cap' })
+    expect(harness.store.of(agent.sessionId, 'error')[0]).toMatchObject({
+      turn: 1,
+      fatal: false,
+      error: { code: 'budget/exhausted', details: { scope: 'project', metric: 'requests', used: 3, limit: 3 } },
+    })
+    expect(harness.store.types(agent.sessionId).slice(-2)).toEqual(['error', 'turn.end'])
+    expect(ledger.of('task.outcome')).toEqual([expect.objectContaining({
+      status: 'cancelled',
+      requestCount: 1,
+      error: expect.objectContaining({ code: 'budget/exhausted', details: { scope: 'project', metric: 'requests', used: 3, limit: 3 } }),
+    })])
+  })
+
+  it('counts known ledger tokens against perProject.maxTokens within windowDays', async () => {
+    const ledger = new MemoryLedger()
+    seedRequest(ledger, 2, usage(10, 5))
+    seedRequest(ledger, 2, 'unknown')
+    seedRequest(ledger, 6, usage(100, 100)) // outside windowDays: 5
+    harness = await bootHarness({ ledger, script: [textReply('never sent')] })
+    writeConfig(harness.root, { costCaps: { perProject: { maxTokens: 15, windowDays: 5 } } })
+    const agent = await harness.app.agents.create()
+    expect((await agent.run('one')).reason).toEqual({ kind: 'cancelled', cause: 'cost-cap' })
+    expect(harness.llm.requests).toHaveLength(0)
+    expect(harness.store.of(agent.sessionId, 'error')[0]!.error.details).toEqual({ scope: 'project', metric: 'tokens', used: 15, limit: 15 })
+  })
+
+  it('re-reads the ledger each turn, so other sessions\' requests count', async () => {
+    const ledger = new MemoryLedger()
+    harness = await bootHarness({ ledger, script: [textReply('a'), textReply('never sent')] })
+    writeConfig(harness.root, { costCaps: { perProject: { maxRequests: 2 } } })
+    const agent = await harness.app.agents.create()
+    expect((await agent.run('one')).reason).toEqual({ kind: 'completed' })
+    seedRequest(ledger, 0)
+    seedRequest(ledger, 0)
+    expect((await agent.run('two')).reason).toEqual({ kind: 'cancelled', cause: 'cost-cap' })
+    expect(harness.llm.requests).toHaveLength(1)
+    expect(harness.store.of(agent.sessionId, 'error')[0]!.error.details).toEqual({ scope: 'project', metric: 'requests', used: 2, limit: 2 })
+  })
+
+  it('records a failed ledger read and leaves the project cap unchecked for the turn', async () => {
+    const ledger = new MemoryLedger()
+    ledger.read = async function* () {
+      throw new Error('disk gone')
+    }
+    harness = await bootHarness({ ledger, script: [textReply('a')] })
+    writeConfig(harness.root, { costCaps: { perProject: { maxRequests: 1 } } })
+    const agent = await harness.app.agents.create()
+    expect((await agent.run('one')).reason).toEqual({ kind: 'completed' })
+    expect(harness.store.of(agent.sessionId, 'error')[0]).toMatchObject({ turn: 1, fatal: false, error: { message: expect.stringContaining('per-project cost cap not checked') } })
   })
 
   it('rejects an invalid config.json at agent creation', async () => {

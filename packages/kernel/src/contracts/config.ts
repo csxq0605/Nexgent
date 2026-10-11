@@ -26,7 +26,7 @@ export interface ProjectConfig {
   readonly model: string
   /** Claude API base URL (no path, no credentials); default `https://api.anthropic.com`. */
   readonly endpoint: string
-  /** Reasoning mode for execution; default `'off'` (the provider's lowest setting). */
+  /** Reasoning mode for execution; default `'on'` (adaptive thinking, ADR 0003); `'off'` is the provider's lowest setting. */
   readonly thinking: ThinkingMode
   /** Effort level; default `'medium'` (agentic coding and multistep tool use). */
   readonly effort: Effort
@@ -50,7 +50,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
   version: 1,
   model: 'claude-sonnet-5-5',
   endpoint: 'https://api.anthropic.com',
-  thinking: 'off',
+  thinking: 'on',
   effort: 'medium',
   sandboxMode: 'workspace-write',
   costCaps: Object.freeze({}),

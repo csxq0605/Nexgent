@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { spawnSync } from 'node:child_process'
+import { beforeAll, describe, expect, it } from 'vitest'
 import {
   DEFAULT_MAX_OUTPUT_BYTES,
   isSecretEnvName,
@@ -93,15 +94,80 @@ describe.runIf(posix)('process tree termination (POSIX)', () => {
 })
 
 describe.runIf(process.platform === 'win32')('process tree termination (Windows)', () => {
+  // The first launcher on a machine compiles the Job Object helper, so deadlines leave room for it.
+  const pwsh = (script: string, cwd: string, extra: { timeoutMs?: number; signal?: AbortSignal } = {}) =>
+    ({ command: 'pwsh', args: ['-NoProfile', '-NonInteractive', '-Command', script], cwd, timeoutMs: extra.timeoutMs ?? 30_000, ...(extra.signal === undefined ? {} : { signal: extra.signal }) })
+  /** A sleeper whose command line carries `marker`. */
+  const sleeper = (marker: string) => `Start-Process -PassThru -NoNewWindow pwsh -ArgumentList '-NoProfile','-Command','Start-Sleep 600 # ${marker}'`
+  /** PIDs of live processes whose command line contains `marker` (the query itself excluded by splitting the marker). */
+  function marked(marker: string): number[] {
+    const half = Math.floor(marker.length / 2)
+    const query = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like ('*' + '${marker.slice(0, half)}' + '${marker.slice(half)}' + '*') } | ForEach-Object { $_.ProcessId }`
+    const out = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', query], { encoding: 'utf8', windowsHide: true })
+    return out.stdout.split(/\s+/).filter(Boolean).map(Number)
+  }
+  const newMarker = () => `nxleak${Math.random().toString(36).slice(2, 10)}`
+
+  beforeAll(async () => {
+    // Warm the helper so the deadlines below measure the commands, not the one-time compile.
+    await new LocalProcessRunner().run(pwsh('exit 0', await tempDir(), { timeoutMs: 120_000 }))
+  }, 180_000)
+
   it('kills a nested Start-Process tree on timeout', async () => {
     const cwd = await tempDir()
+    const marker = newMarker()
     const runner = new LocalProcessRunner({ graceMs: 500 })
-    const script = '$p = Start-Process -PassThru -NoNewWindow pwsh -ArgumentList "-NoProfile","-Command","Start-Sleep 600"; Write-Output $p.Id; Start-Sleep 600'
-    const result = await runner.run({ command: 'pwsh', args: ['-NoProfile', '-NonInteractive', '-Command', script], cwd, timeoutMs: 3_000 })
+    const result = await runner.run(pwsh(`$p = ${sleeper(marker)}; Write-Output $p.Id; Start-Sleep 600`, cwd, { timeoutMs: 8_000 }))
     expect(result.timedOut).toBe(true)
-    const pid = firstPid(result.stdout)
-    expect(pidAlive(pid)).toBe(false)
-  })
+    expect(pidAlive(firstPid(result.stdout))).toBe(false)
+    expect(marked(marker)).toEqual([])
+  }, 60_000)
+
+  it('kills a grandchild whose parent already exited, on timeout and on cancel', async () => {
+    const cwd = await tempDir()
+    for (const mode of ['timeout', 'abort'] as const) {
+      const marker = newMarker()
+      // The middle pwsh starts the sleeper and exits, so the sleeper has no live parent in the tree.
+      const middle = `$p = ${sleeper(marker)}; Write-Output $p.Id`
+      const script = `pwsh -NoProfile -EncodedCommand ${Buffer.from(middle, 'utf16le').toString('base64')}; Start-Sleep 600`
+      const controller = new AbortController()
+      if (mode === 'abort') setTimeout(() => controller.abort(), 8_000)
+      const result = await new LocalProcessRunner({ graceMs: 500 }).run(pwsh(script, cwd, mode === 'abort' ? { signal: controller.signal } : { timeoutMs: 8_000 }))
+      expect(mode === 'abort' ? result.aborted : result.timedOut).toBe(true)
+      expect(pidAlive(firstPid(result.stdout))).toBe(false)
+      expect(marked(marker)).toEqual([])
+    }
+  }, 120_000)
+
+  it('reaps background processes left after a normal exit', async () => {
+    const cwd = await tempDir()
+    const marker = newMarker()
+    const result = await new LocalProcessRunner({ graceMs: 500 }).run(pwsh(`$p = ${sleeper(marker)}; Write-Output $p.Id`, cwd))
+    expect(result.exitCode).toBe(0)
+    expect(pidAlive(firstPid(result.stdout))).toBe(false)
+    expect(marked(marker)).toEqual([])
+  }, 60_000)
+
+  it('passes arguments, stdin, exit code and stderr through the launcher', async () => {
+    const cwd = await tempDir()
+    const script = '$in = [Console]::In.ReadToEnd(); Write-Output ("arg=" + $args[0] + " in=" + $in); [Console]::Error.WriteLine("err"); exit 3'
+    const result = await new LocalProcessRunner().run({
+      command: 'pwsh',
+      args: ['-NoProfile', '-NonInteractive', '-Command', `& { ${script} } 'a "quoted" arg'`],
+      cwd,
+      timeoutMs: 30_000,
+      stdin: 'in',
+    })
+    expect(result).toMatchObject({ exitCode: 3, timedOut: false })
+    expect(result.stdout.trim()).toBe('arg=a "quoted" arg in=in')
+    expect(result.stderr.trim()).toBe('err')
+  }, 60_000)
+
+  it('reports a command that cannot be started as process/failed', async () => {
+    const cwd = await tempDir()
+    await expect(new LocalProcessRunner().run({ command: 'nexgent-no-such-program', args: [], cwd, timeoutMs: 30_000 }))
+      .rejects.toMatchObject({ code: 'process/failed' })
+  }, 60_000)
 })
 
 describe('env scrub and redaction units', () => {

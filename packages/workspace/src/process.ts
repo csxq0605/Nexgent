@@ -3,9 +3,12 @@
  * The `ctx.processes` implementation. One rule from the contract: when `run`
  * resolves, no process it started is still alive. POSIX children start in
  * their own process group (`detached`) and the whole group is signalled
- * (`SIGTERM`, then `SIGKILL` after `graceMs`); on Windows the tree is
- * terminated with `taskkill /PID <pid> /T /F`. Leftover background members of
- * the group are also reaped after a normal exit.
+ * (`SIGTERM`, then `SIGKILL` after `graceMs`). On Windows each command runs
+ * inside a kill-on-close Job Object (see `windows-job.ts`), so terminating the
+ * launcher with `taskkill /PID <pid> /T /F` ends every process of the job,
+ * descendants whose parent already exited included. Leftover background
+ * members are also reaped after a normal exit (the process group on POSIX,
+ * the job on Windows).
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -15,6 +18,7 @@ import { NexgentError, type ProcessResult, type ProcessRunner, type ProcessSpec 
 import { scrubEnv } from './env.js'
 import { DEFAULT_MAX_OUTPUT_BYTES, TailBuffer } from './output.js'
 import { Redactor } from './redact.js'
+import { JOB_SPEC_ENV, JOB_START_FAILED_EXIT, JOB_START_FAILED_MARKER, jobLaunchSpec, jobLauncherArgs } from './windows-job.js'
 
 /** Default wait between the polite and the forced kill (ms). */
 export const DEFAULT_GRACE_MS = 5_000
@@ -33,6 +37,10 @@ export interface ProcessRunnerOptions {
   readonly scrubEnv?: boolean
   /** Host environment to inherit; default `process.env`. */
   readonly hostEnv?: Readonly<Record<string, string | undefined>>
+  /** Windows only: run commands inside a kill-on-close Job Object (default `true`); `false` leaves only `taskkill /T`. */
+  readonly windowsJob?: boolean
+  /** Windows only: the `pwsh` executable that launches the job (default `pwsh`). */
+  readonly pwshPath?: string
 }
 
 /** Whether a POSIX process group still has a live (non-zombie) member. */
@@ -118,9 +126,13 @@ export class LocalProcessRunner implements ProcessRunner {
       : scrubEnv(host, spec.env)
     const redactor = this.redactor.with(scrubbed.removedValues)
 
-    const child = spawn(spec.command, [...spec.args], {
+    const useJob = process.platform === 'win32' && this.options.windowsJob !== false
+    const env = useJob
+      ? { ...scrubbed.env, [JOB_SPEC_ENV]: JSON.stringify(jobLaunchSpec(spec.command, spec.args, scrubbed.env)) }
+      : scrubbed.env
+    const child = spawn(useJob ? (this.options.pwshPath ?? 'pwsh') : spec.command, useJob ? jobLauncherArgs() : [...spec.args], {
       cwd: spec.cwd,
-      env: scrubbed.env,
+      env,
       detached: process.platform !== 'win32',
       windowsHide: true,
       stdio: [spec.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
@@ -196,6 +208,13 @@ export class LocalProcessRunner implements ProcessRunner {
     if (!drained) {
       child.stdout?.destroy()
       child.stderr?.destroy()
+    }
+
+    if (useJob && outcome.code === JOB_START_FAILED_EXIT) {
+      const line = buffers.stderr.text().split(/\r?\n/).find(text => text.startsWith(JOB_START_FAILED_MARKER))
+      if (line !== undefined) {
+        throw new NexgentError('process/failed', `failed to start ${spec.command}: ${line.slice(JOB_START_FAILED_MARKER.length)}`)
+      }
     }
 
     return {
