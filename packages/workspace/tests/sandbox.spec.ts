@@ -137,12 +137,34 @@ describe('.nexgent/ and protected patterns (workspace-write)', () => {
     expect((await sandbox.checkWrite(nodePath.join(extra, 'a.txt'))).allowed).toBe(false)
   })
 
-  it('allows the session temp directory', async () => {
+  it('allows only the calling session\'s temp directory', async () => {
     const { workspace } = await project()
     const base = await tempDir()
     const sandbox = await createSandbox({ root: workspace.root, tempBase: base })
-    expect((await sandbox.checkWrite(nodePath.join(base, 'nexgent-s1', 'x'))).allowed).toBe(true)
-    expect((await sandbox.checkWrite(nodePath.join(base, 'other', 'x'))).allowed).toBe(false)
+    const s1 = sandbox.forSession('s1')
+    expect((await s1.checkWrite(nodePath.join(base, 'nexgent-s1', 'x'))).allowed).toBe(true)
+    expect((await s1.checkRead(nodePath.join(base, 'nexgent-s1', 'x'))).allowed).toBe(true)
+    // Another session's temp dir, or any other nexgent-* directory, is outside the roots.
+    expect((await s1.checkWrite(nodePath.join(base, 'nexgent-other', 'x'))).allowed).toBe(false)
+    expect((await s1.checkRead(nodePath.join(base, 'nexgent-other', 'x'))).allowed).toBe(false)
+    expect((await s1.checkWrite(nodePath.join(base, 'nexgent-s1-not-mine', 'x'))).allowed).toBe(false)
+    expect((await s1.checkWrite(nodePath.join(base, 'other', 'x'))).allowed).toBe(false)
+    // Without a session no temp dir is admitted.
+    expect((await sandbox.checkWrite(nodePath.join(base, 'nexgent-s1', 'x'))).allowed).toBe(false)
+    expect((await s1.forSession(undefined).checkWrite(nodePath.join(base, 'nexgent-s1', 'x'))).allowed).toBe(false)
+    // The session binding survives a mode change, and is cached.
+    expect((await s1.withMode('read-only').checkRead(nodePath.join(base, 'nexgent-s1', 'x'))).allowed).toBe(true)
+    expect(sandbox.forSession('s1')).toBe(s1)
+  })
+
+  it('denies writes outside a project that lives under a nexgent-* temp directory', async () => {
+    const base = await tempDir()
+    const parent = nodePath.join(base, 'nexgent-accept-step2-x')
+    const root = nodePath.join(parent, 'project')
+    await mkdir(root, { recursive: true })
+    const sandbox = (await createSandbox({ root, tempBase: base })).forSession('s1')
+    expect(await sandbox.checkWrite(nodePath.join(parent, 'outside-the-project.txt'))).toMatchObject({ allowed: false })
+    expect((await sandbox.checkWrite(nodePath.join(root, 'inside.txt'))).allowed).toBe(true)
   })
 
   it('exposes the resolved policy', async () => {

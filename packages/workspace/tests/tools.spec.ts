@@ -4,6 +4,7 @@ import { isNexgentError, type SandboxMode } from '@nexgent/kernel'
 import { describe, expect, it } from 'vitest'
 import {
   applyStrReplace,
+  createSandbox,
   createWorkspaceTools,
   LocalProcessRunner,
   Redactor,
@@ -31,6 +32,24 @@ describe('tool definitions', () => {
       expect(t.definition.inputSchema).toMatchObject({ type: 'object' })
     }
     expect(tools.find(t => t.definition.name === 'read_file')!.definition.effects).toEqual(['read'])
+  })
+})
+
+describe('session temp directory', () => {
+  it('write_file reaches only this session\'s nexgent-<sessionId>/ under the temp base', async () => {
+    const p = await project()
+    const base = await tempDir()
+    const redactor = new Redactor()
+    const sandbox = await createSandbox({ root: p.workspace.root, tempBase: base })
+    const tools = createWorkspaceTools({ sandbox, redactor, processes: new LocalProcessRunner({ redactor, graceMs: 200 }), tempBase: base })
+    const write = tools.find(t => t.definition.name === 'write_file')!
+    const ctx = toolContext(p.workspace)
+    const own = nodePath.join(base, `nexgent-${ctx.sessionId}`, 'scratch.txt')
+    await write.handler({ path: own, content: 'mine' }, ctx)
+    expect(await readFile(own, 'utf8')).toBe('mine')
+    const other = nodePath.join(base, 'nexgent-other', 'x.txt')
+    await expect(write.handler({ path: other, content: 'not mine' }, ctx)).rejects.toMatchObject({ code: 'sandbox/denied' })
+    await expect(readFile(other, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
