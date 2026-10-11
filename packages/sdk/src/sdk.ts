@@ -12,6 +12,18 @@
  * record of that turn alone (a turn = a task; `accept-step2` H19). The agent
  * is closed with `skipOutcome`, except that the kernel's own record for a
  * cost-cap stop stands and the SDK adds none for that turn.
+ *
+ * Members (step 3): a child session started by a tool (`delegate`, a
+ * workflow's `agent()`, a teammate) is tracked from its parent's
+ * `subagent.start` record on, so its events reach subscribers with
+ * `parentSessionId`, its approvals go through `approvals.respond`, and it
+ * is cancelled with its parent (the kernel's `parent` cause). The parent's
+ * collaboration records become `member.start` / `member.end` /
+ * `workflow.phase` / `team.message` events. Members are run and closed by
+ * their parent's tools, never by the SDK: they get no SDK `task.outcome`
+ * (the kernel writes theirs), cannot be sent turns, and `sessions.open` on
+ * one returns the read-only view. Reopening a root session runs
+ * {@link ROOT_SESSION_RECOVERIES} before anything else.
  */
 import { randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
@@ -39,6 +51,7 @@ import {
   type Plugin,
   type SandboxMode,
   type SessionRecord,
+  type SubagentStartRecord,
   type TaskOutcomeStatus,
   type TurnCancelCause,
   type TurnEndReason,
@@ -65,10 +78,10 @@ import {
   type TurnHandle,
   type Unsubscribe,
 } from './api.js'
-import { bootProjectApp } from './boot.js'
+import { bootProjectApp, ROOT_SESSION_RECOVERIES } from './boot.js'
 import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
-import { historyItems, sessionSummary, turnUsage } from './history.js'
+import { collaborationView, historyItems, memberRunView, runKey, sessionSummary, turnUsage } from './history.js'
 import { RecentProjects } from './recent.js'
 import { describeApiKey, readSettings, secretValues, setApiKey, updateSettings, type CredentialEnv } from './settings.js'
 
@@ -129,6 +142,10 @@ interface SessionEntry {
   running?: { readonly tally: TurnTally; readonly done: Promise<TurnResult> } | undefined
   /** Source of the turn about to start (read by the `turn.start` mapping). */
   pending?: TurnTally | undefined
+  /** Step 3, a member: the turn its parent's tool is running (for the `turn.end` usage). */
+  memberTally?: TurnTally | undefined
+  /** Step 3, a parent: its `subagent.start` records by {@link runKey}, to describe a run when it ends. */
+  readonly runStarts: Map<string, SubagentStartRecord>
 }
 
 interface ProjectEntry {
@@ -138,7 +155,8 @@ interface ProjectEntry {
   readonly tasking: LocalTaskingService
   readonly sessions: Map<string, SessionEntry>
   readonly opening: Map<string, Promise<SessionEntry>>
-  readonly pendingApprovals: Map<string, { readonly sessionId: string; readonly resolve: (decision: ApprovalDecision) => void }>
+  /** By request id; a member's request may be answered under its own or its parent's session id. */
+  readonly pendingApprovals: Map<string, { readonly sessionId: string; readonly parentSessionId?: string; readonly resolve: (decision: ApprovalDecision) => void }>
 }
 
 function tallyStatus(tally: TurnTally): TaskOutcomeStatus {
@@ -152,13 +170,21 @@ function tallyStatus(tally: TurnTally): TaskOutcomeStatus {
   }
 }
 
-/** A step-3 method whose contract is frozen but whose implementation has not landed yet. */
-function notImplemented(method: string): NexgentError {
-  return new NexgentError('internal', `${method} is not implemented yet (step 3)`)
-}
-
 function invalid(message: string): NexgentError {
   return new NexgentError('tool/invalid-input', message)
+}
+
+function memberReadOnly(sessionId: string, parentSessionId: string): NexgentError {
+  return new NexgentError('tool/denied', `session ${sessionId} is a member of ${parentSessionId}; members are run by their parent and are read-only here (sessions.view)`, {
+    details: { parentSessionId },
+  })
+}
+
+/** The `subagent.start` records of a session by run key. */
+function runStartsOf(records: readonly SessionRecord[]): Map<string, SubagentStartRecord> {
+  const starts = new Map<string, SubagentStartRecord>()
+  for (const record of records) if (record.type === 'subagent.start') starts.set(runKey(record.childSessionId, record.childTurn), record)
+  return starts
 }
 
 /** The in-process SDK. */
@@ -249,7 +275,7 @@ export class LocalNexgentSdk implements NexgentSdk {
   /** `sessions.open` with a sandbox override (CLI `resume --sandbox`). */
   async openSession(input: { readonly projectId: string; readonly sessionId: string; readonly sandboxMode?: SandboxMode }): Promise<SessionView> {
     const project = this.project(input.projectId)
-    await this.ensureSession(project, input.sessionId, input.sandboxMode)
+    await this.rootSession(project, input.sessionId, input.sandboxMode)
     return this.view(project, input.sessionId)
   }
 
@@ -257,6 +283,13 @@ export class LocalNexgentSdk implements NexgentSdk {
   async cancelTurn(input: { readonly projectId: string; readonly sessionId: string; readonly cause?: Extract<TurnCancelCause, 'user' | 'shutdown'> }): Promise<void> {
     const project = this.project(input.projectId)
     const entry = project.sessions.get(input.sessionId)
+    if (entry !== undefined && entry.agent.parentSessionId !== undefined) {
+      // A member's turn belongs to its parent's tool, which reports the run as cancelled.
+      if (!entry.agent.busy) return
+      entry.agent.cancel(input.cause ?? 'user')
+      await entry.agent.idle().catch(() => undefined)
+      return
+    }
     const running = entry?.running
     if (entry === undefined || running === undefined) return
     entry.agent.cancel(input.cause ?? 'user')
@@ -266,7 +299,7 @@ export class LocalNexgentSdk implements NexgentSdk {
   /** Start a user or feedback turn; see {@link StartedTurn}. */
   async startTurn(input: StartTurnInput): Promise<StartedTurn> {
     const project = this.project(input.projectId)
-    const entry = await this.ensureSession(project, input.sessionId)
+    const entry = await this.rootSession(project, input.sessionId)
     // A turn whose `turn.end` was already emitted is only finishing its
     // bookkeeping (checkpoint, task.outcome): wait for it instead of refusing.
     while (entry.running?.tally.ended === true) await entry.running.done.catch(() => undefined)
@@ -305,9 +338,11 @@ export class LocalNexgentSdk implements NexgentSdk {
     return { sessionId: entry.agent.sessionId, turn, done }
   }
 
-  /** Whether the session has a running turn in this instance. */
+  /** Whether the session has a running turn in this instance (a member: its parent's tool is running one). */
   isRunning(projectId: string, sessionId: string): boolean {
-    return this.projects.get(projectId)?.sessions.get(sessionId)?.running !== undefined
+    const entry = this.projects.get(projectId)?.sessions.get(sessionId)
+    if (entry === undefined) return false
+    return entry.running !== undefined || (entry.agent.parentSessionId !== undefined && entry.agent.busy)
   }
 
   // -------------------------------------------------------------------------
@@ -407,6 +442,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     const project = this.projects.get(projectId)
     if (project === undefined) return
     await Promise.allSettled([...project.opening.values()])
+    // Root sessions close their members (cause `parent`); the members untrack themselves on `closed`.
     await Promise.allSettled([...project.sessions.keys()].map(sessionId => this.closeSession(project, sessionId)))
     this.projects.delete(projectId)
     await project.app.dispose()
@@ -424,13 +460,42 @@ export class LocalNexgentSdk implements NexgentSdk {
   // sessions
   // -------------------------------------------------------------------------
 
-  private track(project: ProjectEntry, agent: Agent): SessionEntry {
+  private track(project: ProjectEntry, agent: Agent, runStarts: Map<string, SubagentStartRecord> = new Map()): SessionEntry {
     const entry: SessionEntry = {
       agent,
+      runStarts,
       unsubscribe: agent.subscribe(event => this.onEvent(project, entry, event)),
     }
     project.sessions.set(agent.sessionId, entry)
     return entry
+  }
+
+  /** Start tracking a member its parent just announced (`subagent.start`): it is open in the kernel by then. */
+  private trackMember(project: ProjectEntry, childSessionId: string): void {
+    const agent = project.app.agents.get(childSessionId)
+    if (agent === undefined || agent.isClosed) return
+    const existing = project.sessions.get(childSessionId)
+    if (existing?.agent === agent) return
+    existing?.unsubscribe()
+    this.track(project, agent)
+  }
+
+  /** {@link ensureSession} for work that only a root session takes (turns, renames, goals, materials). */
+  private async rootSession(project: ProjectEntry, sessionId: string, sandboxMode?: SandboxMode): Promise<SessionEntry> {
+    const entry = await this.ensureSession(project, sessionId, sandboxMode)
+    const parent = entry.agent.parentSessionId
+    if (parent !== undefined) throw memberReadOnly(sessionId, parent)
+    return entry
+  }
+
+  /** Whether a session is a member (live, or by its header). */
+  private async isMember(project: ProjectEntry, sessionId: string): Promise<boolean> {
+    if (typeof sessionId !== 'string' || sessionId === '') throw invalid('sessionId must be a string')
+    const live = project.sessions.get(sessionId)
+    if (live !== undefined) return live.agent.parentSessionId !== undefined
+    const records = await this.records(project, sessionId)
+    const start = records[0]
+    return start?.type === 'session.start' && start.parentSessionId !== undefined
   }
 
   private ensureSession(project: ProjectEntry, sessionId: string, sandboxMode?: SandboxMode): Promise<SessionEntry> {
@@ -453,9 +518,19 @@ export class LocalNexgentSdk implements NexgentSdk {
     const before = await store.readAll(sessionId)
     const openTurn = before.records.length === 0 ? undefined : projectSession(before.records).metadata.openTurn
     const agent = await project.app.agents.resume(sessionId, sandboxMode === undefined ? {} : { sandboxMode })
-    const entry = this.track(project, agent)
+    const entry = this.track(project, agent, runStartsOf(before.records))
     if (openTurn !== undefined) {
       this.emit(project.projectId, sessionId, { type: 'turn.end', turn: openTurn, reason: { kind: 'interrupted' }, usage: turnUsage(before.records, openTurn) })
+    }
+    if (agent.parentSessionId === undefined) {
+      for (const recover of ROOT_SESSION_RECOVERIES) {
+        try {
+          await recover(agent, store)
+        } catch (error) {
+          // The session stays usable; what could not be closed is reported, not hidden.
+          this.emit(project.projectId, sessionId, { type: 'error', error: toErrorInfo(error), fatal: false })
+        }
+      }
     }
     return entry
   }
@@ -463,6 +538,8 @@ export class LocalNexgentSdk implements NexgentSdk {
   private async closeSession(project: ProjectEntry, sessionId: string): Promise<void> {
     const entry = project.sessions.get(sessionId)
     if (entry === undefined) return
+    // A member is closed by its parent's tool or with its parent.
+    if (entry.agent.parentSessionId !== undefined) return
     const running = entry.running
     if (running !== undefined) {
       entry.agent.cancel('shutdown')
@@ -502,12 +579,18 @@ export class LocalNexgentSdk implements NexgentSdk {
     return sessionSummary(records, projectSession(records), this.isRunning(project.projectId, sessionId))
   }
 
+  private async collaboration(project: ProjectEntry, sessionId: string) {
+    if (typeof sessionId !== 'string' || sessionId === '') throw invalid('sessionId must be a string')
+    return collaborationView(sessionId, await this.records(project, sessionId))
+  }
+
   private async view(project: ProjectEntry, sessionId: string): Promise<SessionView> {
+    if (typeof sessionId !== 'string' || sessionId === '') throw invalid('sessionId must be a string')
     const records = await this.records(project, sessionId)
     const state = projectSession(records)
     const entry = project.sessions.get(sessionId)
     return {
-      summary: sessionSummary(records, state, entry?.running !== undefined),
+      summary: sessionSummary(records, state, this.isRunning(project.projectId, sessionId)),
       sandboxMode: entry?.agent.sandboxMode ?? state.metadata.sandboxMode,
       model: entry?.agent.model ?? state.metadata.model,
       items: historyItems(records),
@@ -515,7 +598,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     }
   }
 
-  private async listSessions(project: ProjectEntry): Promise<SessionSummary[]> {
+  private async allSessions(project: ProjectEntry): Promise<SessionSummary[]> {
     const summaries: SessionSummary[] = []
     for (const sessionId of await this.sessionIds(project)) {
       try {
@@ -525,7 +608,28 @@ export class LocalNexgentSdk implements NexgentSdk {
         // an unreadable session is skipped in the list; opening it reports why
       }
     }
-    return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    return summaries
+  }
+
+  /** Newest first; root sessions only (with their member count) unless `includeChildren`. */
+  private async listSessions(project: ProjectEntry, includeChildren: boolean): Promise<SessionSummary[]> {
+    const all = await this.allSessions(project)
+    const counts = new Map<string, number>()
+    for (const summary of all) {
+      if (summary.parentSessionId !== undefined) counts.set(summary.parentSessionId, (counts.get(summary.parentSessionId) ?? 0) + 1)
+    }
+    return all
+      .filter(summary => includeChildren || summary.parentSessionId === undefined)
+      .map(summary => summary.parentSessionId === undefined ? { ...summary, childCount: counts.get(summary.sessionId) ?? 0 } : summary)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  }
+
+  /** A session's members, in creation order. */
+  private async childSessions(project: ProjectEntry, sessionId: string): Promise<SessionSummary[]> {
+    if (typeof sessionId !== 'string' || sessionId === '') throw invalid('sessionId must be a string')
+    return (await this.allSessions(project))
+      .filter(summary => summary.parentSessionId === sessionId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   }
 
   // -------------------------------------------------------------------------
@@ -538,7 +642,11 @@ export class LocalNexgentSdk implements NexgentSdk {
         project.pendingApprovals.delete(request.id)
         resolveDecision(decision)
       }
-      project.pendingApprovals.set(request.id, { sessionId: request.sessionId, resolve: finish })
+      project.pendingApprovals.set(request.id, {
+        sessionId: request.sessionId,
+        ...(request.member === undefined ? {} : { parentSessionId: request.member.parentSessionId }),
+        resolve: finish,
+      })
       signal.addEventListener('abort', () => finish({ id: request.id, decision: 'deny', scope: 'once', decidedBy: 'cancel' }), { once: true })
     })
   }
@@ -549,7 +657,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     if (decision === null || typeof decision !== 'object' || typeof decision.id !== 'string') throw invalid('decision.id must be a string')
     if (decision.decision !== 'allow' && decision.decision !== 'deny') throw invalid('decision.decision must be allow or deny')
     const pending = project.pendingApprovals.get(decision.id)
-    if (pending === undefined || pending.sessionId !== input.sessionId) return false
+    if (pending === undefined || (pending.sessionId !== input.sessionId && pending.parentSessionId !== input.sessionId)) return false
     pending.resolve({
       id: decision.id,
       decision: decision.decision,
@@ -564,11 +672,11 @@ export class LocalNexgentSdk implements NexgentSdk {
   // events and accounting
   // -------------------------------------------------------------------------
 
-  private emit(projectId: string, sessionId: string, event: DistributiveOmitBase<SdkEvent>): void {
+  private emit(projectId: string, sessionId: string, event: DistributiveOmitBase<SdkEvent>, parentSessionId?: string): void {
     const key = `${projectId}\u0000${sessionId}`
     const eventSeq = (this.eventSeq.get(key) ?? 0) + 1
     this.eventSeq.set(key, eventSeq)
-    const full = { ...event, projectId, sessionId, eventSeq } as SdkEvent
+    const full = { ...event, projectId, sessionId, eventSeq, ...(parentSessionId === undefined ? {} : { parentSessionId }) } as SdkEvent
     for (const listener of [...this.listeners]) {
       try {
         listener(full)
@@ -587,31 +695,36 @@ export class LocalNexgentSdk implements NexgentSdk {
         // as above
       }
     }
-    const tally = entry.running?.tally ?? entry.pending
     const { projectId } = project
     const sessionId = event.sessionId
+    const parentSessionId = entry.agent.parentSessionId
+    const send = (mapped: DistributiveOmitBase<SdkEvent>) => this.emit(projectId, sessionId, mapped, parentSessionId)
+    if (event.type === 'turn.start' && parentSessionId !== undefined) {
+      entry.memberTally = { turn: event.turn, source: 'user', steps: [], toolCalls: 0, tools: new Set(), ended: false }
+    }
+    const tally = entry.running?.tally ?? entry.pending ?? entry.memberTally
     switch (event.type) {
       case 'turn.start':
-        this.emit(projectId, sessionId, { type: 'turn.start', turn: event.turn, source: tally?.turn === event.turn ? tally.source : 'user' })
+        send({ type: 'turn.start', turn: event.turn, source: tally?.turn === event.turn ? tally.source : 'user' })
         return
       case 'request.start':
         tally?.steps.push(UNKNOWN_USAGE)
         return
       case 'text.delta':
-        this.emit(projectId, sessionId, { type: 'text.delta', turn: event.turn, step: event.step, text: event.text })
+        send({ type: 'text.delta', turn: event.turn, step: event.step, text: event.text })
         return
       case 'reasoning.delta':
-        this.emit(projectId, sessionId, { type: 'reasoning.delta', turn: event.turn, step: event.step, text: event.text })
+        send({ type: 'reasoning.delta', turn: event.turn, step: event.step, text: event.text })
         return
       case 'tool.start':
-        this.emit(projectId, sessionId, { type: 'tool.start', turn: event.turn, step: event.step, call: event.call })
+        send({ type: 'tool.start', turn: event.turn, step: event.step, call: event.call })
         return
       case 'tool.result':
         if (tally !== undefined) {
           tally.toolCalls += 1
           tally.tools.add(event.result.name)
         }
-        this.emit(projectId, sessionId, {
+        send({
           type: 'tool.result',
           turn: event.turn,
           step: event.step,
@@ -623,17 +736,17 @@ export class LocalNexgentSdk implements NexgentSdk {
         })
         return
       case 'approval.request':
-        this.emit(projectId, sessionId, { type: 'approval.request', turn: event.turn, request: event.request })
+        send({ type: 'approval.request', turn: event.turn, request: event.request })
         return
       case 'approval.decision':
-        this.emit(projectId, sessionId, { type: 'approval.decision', turn: event.turn, decision: event.decision })
+        send({ type: 'approval.decision', turn: event.turn, decision: event.decision })
         return
       case 'assistant.message':
         if (tally !== undefined) {
           if (tally.steps.length === 0) tally.steps.push(event.usage)
           else tally.steps[tally.steps.length - 1] = event.usage
         }
-        this.emit(projectId, sessionId, {
+        send({
           type: 'assistant.message',
           turn: event.turn,
           step: event.step,
@@ -645,7 +758,7 @@ export class LocalNexgentSdk implements NexgentSdk {
         return
       case 'error':
         if (tally !== undefined && event.fatal) tally.error = event.error
-        this.emit(projectId, sessionId, { type: 'error', ...(event.turn === undefined ? {} : { turn: event.turn }), error: event.error, fatal: event.fatal })
+        send({ type: 'error', ...(event.turn === undefined ? {} : { turn: event.turn }), error: event.error, fatal: event.fatal })
         return
       case 'turn.end':
         if (tally !== undefined && tally.turn === event.turn) {
@@ -653,7 +766,7 @@ export class LocalNexgentSdk implements NexgentSdk {
           if (event.reason.kind === 'error') tally.error = event.reason.error
           tally.ended = true
         }
-        this.emit(projectId, sessionId, {
+        send({
           type: 'turn.end',
           turn: event.turn,
           reason: event.reason,
@@ -661,24 +774,45 @@ export class LocalNexgentSdk implements NexgentSdk {
         })
         return
       case 'record':
-        this.onRecord(project, sessionId, event.record)
+        this.onRecord(project, entry, event.record, send)
+        return
+      case 'closed':
+        if (parentSessionId !== undefined && project.sessions.get(sessionId) === entry) {
+          entry.unsubscribe()
+          project.sessions.delete(sessionId)
+        }
         return
       case 'tool-call.start':
-      case 'closed':
         return
     }
   }
 
-  private onRecord(project: ProjectEntry, sessionId: string, record: SessionRecord): void {
+  private onRecord(project: ProjectEntry, entry: SessionEntry, record: SessionRecord, send: (mapped: DistributiveOmitBase<SdkEvent>) => void): void {
     switch (record.type) {
       case 'deliverable.presented':
-        this.emit(project.projectId, sessionId, { type: 'deliverable.presented', turn: record.turn, deliverable: record.deliverable })
+        send({ type: 'deliverable.presented', turn: record.turn, deliverable: record.deliverable })
         return
       case 'turn.files':
-        this.emit(project.projectId, sessionId, { type: 'turn.files', turn: record.turn, changes: record.changes })
+        send({ type: 'turn.files', turn: record.turn, changes: record.changes })
         return
       case 'compaction':
-        this.emit(project.projectId, sessionId, { type: 'compaction', turn: record.turn, compactedMessages: record.compactedMessages })
+        send({ type: 'compaction', turn: record.turn, compactedMessages: record.compactedMessages })
+        return
+      case 'subagent.start':
+        entry.runStarts.set(runKey(record.childSessionId, record.childTurn), record)
+        this.trackMember(project, record.childSessionId)
+        send({ type: 'member.start', turn: record.turn, run: memberRunView(record) })
+        return
+      case 'subagent.end': {
+        const start = entry.runStarts.get(runKey(record.childSessionId, record.childTurn))
+        if (start !== undefined) send({ type: 'member.end', turn: record.turn, run: memberRunView(start, record) })
+        return
+      }
+      case 'workflow.phase':
+        send({ type: 'workflow.phase', turn: record.turn, workflowId: record.workflowId, phase: record.phase })
+        return
+      case 'team.message':
+        send({ type: 'team.message', ...(record.turn === undefined ? {} : { turn: record.turn }), message: record.message })
         return
       default:
         // material.added and goal records are reported by the SDK methods that write them (with the full metadata / goal)
@@ -726,13 +860,17 @@ export class LocalNexgentSdk implements NexgentSdk {
         await this.recent.forget(resolve(input.root))
       },
 
-      'sessions.list': input => this.listSessions(this.project(input.projectId)),
-      // Step 3 contract (api.ts); implemented by the SDK and desktop work package.
-      'sessions.children': async () => { throw notImplemented('sessions.children') },
-      'sessions.view': async () => { throw notImplemented('sessions.view') },
-      'sessions.collaboration': async () => { throw notImplemented('sessions.collaboration') },
+      'sessions.list': input => this.listSessions(this.project(input.projectId), input.includeChildren === true),
+      'sessions.children': input => this.childSessions(this.project(input.projectId), input.sessionId),
+      'sessions.view': input => this.view(this.project(input.projectId), input.sessionId),
+      'sessions.collaboration': input => this.collaboration(this.project(input.projectId), input.sessionId),
       'sessions.create': input => this.createSession(input),
-      'sessions.open': input => this.openSession(input),
+      'sessions.open': async input => {
+        const project = this.project(input.projectId)
+        // A member is never locked by the SDK: opening one shows it read-only.
+        if (await this.isMember(project, input.sessionId)) return this.view(project, input.sessionId)
+        return this.openSession(input)
+      },
       'sessions.close': async input => this.closeSession(this.project(input.projectId), input.sessionId),
       'sessions.export': async input => {
         const project = this.project(input.projectId)
@@ -759,7 +897,7 @@ export class LocalNexgentSdk implements NexgentSdk {
         const project = this.project(input.projectId)
         const title = typeof input.title === 'string' ? input.title.trim() : ''
         if (title === '') throw invalid('title must be a non-empty string')
-        const entry = await this.ensureSession(project, input.sessionId)
+        const entry = await this.rootSession(project, input.sessionId)
         await entry.agent.appendHostRecord({ type: 'session.title', title })
         return this.summary(project, input.sessionId)
       },
@@ -787,7 +925,7 @@ export class LocalNexgentSdk implements NexgentSdk {
       'materials.add': async input => {
         const project = this.project(input.projectId)
         if (typeof input.sourcePath !== 'string' || input.sourcePath === '') throw invalid('sourcePath must be a path')
-        const entry = input.sessionId === undefined ? undefined : await this.ensureSession(project, input.sessionId)
+        const entry = input.sessionId === undefined ? undefined : await this.rootSession(project, input.sessionId)
         const material = await project.tasking.materials.add({ sourcePath: input.sourcePath, ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }) })
         if (entry !== undefined) {
           await entry.agent.appendHostRecord(materialAddedRecord(material))
@@ -833,14 +971,14 @@ export class LocalNexgentSdk implements NexgentSdk {
       'goals.set': async input => {
         const project = this.project(input.projectId)
         if (typeof input.text !== 'string' || input.text.trim() === '') throw invalid('goal text must be a non-empty string')
-        const entry = await this.ensureSession(project, input.sessionId)
+        const entry = await this.rootSession(project, input.sessionId)
         const goal = await project.tasking.goals.set(entry.agent.appendHostRecord, input.text)
         this.emit(project.projectId, input.sessionId, { type: 'goal', goal })
         return goal
       },
       'goals.update': async input => {
         const project = this.project(input.projectId)
-        const entry = await this.ensureSession(project, input.sessionId)
+        const entry = await this.rootSession(project, input.sessionId)
         const goal = await project.tasking.goals.update(entry.agent.appendHostRecord, input.sessionId, {
           status: input.status,
           ...(input.text === undefined ? {} : { text: input.text }),

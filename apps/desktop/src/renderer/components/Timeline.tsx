@@ -4,6 +4,7 @@ import type { TimelineEntry } from '../timeline.js'
 import { T, errorText, fileChangeText, riskText, turnEndText } from '../strings.js'
 import { DeliverableCard } from './DeliverableCard.js'
 import { Markdown } from './Markdown.js'
+import { MemberBlock, TeamMessageNote, WorkflowBlock } from './MemberBlock.js'
 import { ToolBlock } from './ToolBlock.js'
 
 function latestVersion(deliverables: readonly DeliverableSummary[], deliverableId: string, fallback: number): number {
@@ -11,7 +12,7 @@ function latestVersion(deliverables: readonly DeliverableSummary[], deliverableI
   return found === undefined ? fallback : Math.max(fallback, ...found.versions.map(v => v.version))
 }
 
-function Entry({ entry, deliverables }: { readonly entry: TimelineEntry; readonly deliverables: readonly DeliverableSummary[] }): JSX.Element | null {
+function Entry({ entry, deliverables, readOnly }: { readonly entry: TimelineEntry; readonly deliverables: readonly DeliverableSummary[]; readonly readOnly: boolean }): JSX.Element | null {
   switch (entry.kind) {
     case 'user':
       return (
@@ -53,6 +54,7 @@ function Entry({ entry, deliverables }: { readonly entry: TimelineEntry; readonl
           <span className={`badge risk-${entry.request.risk}`}>
             {T.approvalRisk} {riskText(entry.request.risk)}
           </span>
+          {entry.request.member !== undefined && <span className="badge">{entry.request.member.name}</span>}
           <code>{entry.request.summary}</code>
           <span className="muted small">
             {entry.decision === undefined ? T.approvalTitle : entry.decision.decision === 'allow' ? T.approvalAllowed : T.approvalDenied}
@@ -60,7 +62,12 @@ function Entry({ entry, deliverables }: { readonly entry: TimelineEntry; readonl
         </div>
       )
     case 'deliverable':
-      return <DeliverableCard deliverable={entry.deliverable} latest={latestVersion(deliverables, entry.deliverable.deliverableId, entry.deliverable.version) === entry.deliverable.version} />
+      return (
+        <DeliverableCard
+          deliverable={entry.deliverable}
+          latest={!readOnly && latestVersion(deliverables, entry.deliverable.deliverableId, entry.deliverable.version) === entry.deliverable.version}
+        />
+      )
     case 'files':
       return (
         <div className="files-note">
@@ -102,11 +109,26 @@ function Entry({ entry, deliverables }: { readonly entry: TimelineEntry; readonl
           {errorText(entry.error)}
         </div>
       )
+    case 'member':
+      return <MemberBlock entry={entry} readOnly={readOnly} />
+    case 'workflow':
+      return <WorkflowBlock entry={entry} />
+    case 'team.message':
+      return <TeamMessageNote entry={entry} />
   }
 }
 
 /** The conversation itself; follows the bottom while new content streams in. */
-export function Timeline({ entries, deliverables }: { readonly entries: readonly TimelineEntry[]; readonly deliverables: readonly DeliverableSummary[] }): JSX.Element {
+export function Timeline({
+  entries,
+  deliverables,
+  readOnly = false,
+}: {
+  readonly entries: readonly TimelineEntry[]
+  readonly deliverables: readonly DeliverableSummary[]
+  /** A member's session: no feedback buttons, no nested member views. */
+  readonly readOnly?: boolean
+}): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   useEffect(() => {
@@ -125,7 +147,7 @@ export function Timeline({ entries, deliverables }: { readonly entries: readonly
     >
       <div className="timeline-inner">
         {entries.map(entry => (
-          <Entry key={entry.key} entry={entry} deliverables={deliverables} />
+          <Entry key={entry.key} entry={entry} deliverables={deliverables} readOnly={readOnly} />
         ))}
       </div>
     </div>

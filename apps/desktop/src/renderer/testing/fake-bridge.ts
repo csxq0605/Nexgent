@@ -5,7 +5,7 @@
  * Never bundled into the app (only tests import it).
  */
 import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, MaterialMetadata } from '@nexgent/kernel'
-import type { ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView } from '@nexgent/sdk'
+import type { MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -74,6 +74,11 @@ export function approvalRequest(options: ApprovalRequest['options'], id = 'ap1')
   return { id, sessionId: 's1', callId: 'c9', tool: 'write_file', summary: 'write .env', detail: 'cwd: /work/sales', risk: 'medium', options, ...(options.length > 1 ? { pattern: '.env' } : {}) }
 }
 
+/** A member run as the SDK reports it (step 3). */
+export function memberRun(overrides: Partial<MemberRunView> = {}): MemberRunView {
+  return { childSessionId: 'c1', childTurn: 1, name: 'analyst', executionForm: 'delegated', status: 'running', deliverables: [], ...overrides }
+}
+
 export class FakeBridge implements NexgentBridge {
   readonly platform = 'linux'
   readonly calls: FakeCall[] = []
@@ -88,6 +93,10 @@ export class FakeBridge implements NexgentBridge {
   files: ProjectFileEntry[] = [{ path: 'orders.csv', size: 2048, modifiedAt: '2026-10-11T08:00:00.000Z' }]
   filesTruncated = false
   turn = 0
+  /** Step 3: `sessions.view` answers per member session. */
+  memberViews: Record<string, SessionView> = {}
+  /** Step 3: workflows `sessions.collaboration` reports. */
+  workflows: WorkflowView[] = []
   readonly handlers: Record<string, Handler> = {
     'app.info': () => ({ sdkVersion: 3, appVersion: '0.0.0-test', platform: 'linux' }),
     'projects.recent': () => this.recent,
@@ -101,6 +110,8 @@ export class FakeBridge implements NexgentBridge {
       return summary
     },
     'files.list': () => ({ files: this.files, truncated: this.filesTruncated }),
+    'sessions.view': input => this.memberViews[input.sessionId] ?? { ...this.view, summary: this.sessions.find(s => s.sessionId === input.sessionId) ?? this.view.summary },
+    'sessions.collaboration': input => ({ sessionId: input.sessionId, runs: [], workflows: this.workflows }),
     'sessions.open': input => ({ ...this.view, summary: this.sessions.find(s => s.sessionId === input.sessionId) ?? this.view.summary }),
     'turns.send': input => {
       this.turn += 1

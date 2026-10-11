@@ -184,6 +184,18 @@ function textRenderer(stdout: TextSink, stderr: TextSink): Renderer {
         case 'run.error':
           note(`nexgent: ${event.fatal ? 'fatal ' : ''}error: ${event.error.code}: ${event.error.message}`)
           return
+        case 'member.start':
+          note(`> member ${event.name} (${event.executionForm}${event.preset === undefined ? '' : `, ${event.preset}`}) started: session ${event.childSessionId}`)
+          return
+        case 'member.end': {
+          const usage = event.usage === undefined ? '' : `; ${formatUsage(event.usage)}`
+          const error = event.error === undefined ? '' : `: ${event.error.code}: ${preview(event.error.message)}`
+          note(`  member ${event.name} ${event.status}${error}${usage}`)
+          for (const version of event.deliverables) {
+            note(`  member deliverable: ${version.title} v${version.version} (${version.files.join(', ')})`)
+          }
+          return
+        }
         default:
           // turn.start, step.start, tool-call.*, usage, approval.request: no text output
           // (the approval prompt is printed by the responder).

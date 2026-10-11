@@ -11,9 +11,10 @@ import type {
   DeliverableVersionRef,
   ErrorInfo,
   FileChange,
+  TeamMessage,
   TurnEndReason,
 } from '@nexgent/kernel'
-import type { HistoryItem, SdkEvent } from '@nexgent/sdk'
+import type { HistoryItem, MemberRunView, SdkEvent, WorkflowView } from '@nexgent/sdk'
 
 export type TimelineEntry =
   | { readonly kind: 'user'; readonly key: string; readonly turn: number; readonly text: string; readonly feedback: boolean; readonly materials: readonly string[] }
@@ -39,10 +40,21 @@ export type TimelineEntry =
   | { readonly kind: 'compaction'; readonly key: string; readonly turn: number }
   | { readonly kind: 'turn.end'; readonly key: string; readonly turn: number; readonly reason: TurnEndReason }
   | { readonly kind: 'error'; readonly key: string; readonly turn?: number; readonly error: ErrorInfo }
+  /** Step 3: one member run (delegate, teammate, workflow member), updated in place until it ends. */
+  | { readonly kind: 'member'; readonly key: string; readonly turn: number; readonly run: MemberRunView }
+  /** Step 3: a workflow; live events only bring its phases, `sessions.collaboration` the rest. */
+  | { readonly kind: 'workflow'; readonly key: string; readonly turn: number; readonly workflow: WorkflowView }
+  /** Step 3: a team mailbox message (latest state). */
+  | { readonly kind: 'team.message'; readonly key: string; readonly turn?: number; readonly message: TeamMessage }
 
 const assistantKey = (turn: number, step: number): string => `a:${turn}:${step}`
 const reasoningKey = (turn: number, step: number): string => `r:${turn}:${step}`
 const toolKey = (callId: string): string => `t:${callId}`
+/** Key of a member run's entry. */
+export const memberKey = (run: Pick<MemberRunView, 'childSessionId' | 'childTurn'>): string => `m:${run.childSessionId}:${run.childTurn}`
+/** Key of a workflow's entry. */
+export const workflowKey = (workflowId: string): string => `w:${workflowId}`
+const teamMessageKey = (id: string): string => `tm:${id}`
 
 /**
  * Convert a session's display history into timeline entries.
@@ -117,6 +129,15 @@ export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
         break
       case 'error':
         out.push({ kind: 'error', key: `x:${index}`, ...(item.turn === undefined ? {} : { turn: item.turn }), error: item.error })
+        break
+      case 'member':
+        out.push({ kind: 'member', key: memberKey(item.run), turn: item.turn, run: item.run })
+        break
+      case 'workflow':
+        out.push({ kind: 'workflow', key: workflowKey(item.workflow.workflowId), turn: item.turn, workflow: item.workflow })
+        break
+      case 'team.message':
+        out.push({ kind: 'team.message', key: teamMessageKey(item.message.id), ...(item.turn === undefined ? {} : { turn: item.turn }), message: item.message })
         break
     }
   })
@@ -226,14 +247,49 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
       return [...list, { kind: 'error', key: `x:${event.eventSeq}`, ...(event.turn === undefined ? {} : { turn: event.turn }), error: event.error }]
     case 'turn.end':
       return upsert(settle(list, event.turn), `e:${event.turn}`, () => ({ kind: 'turn.end', key: `e:${event.turn}`, turn: event.turn, reason: event.reason }))
+    case 'member.start':
+    case 'member.end':
+      return upsert(list, memberKey(event.run), () => ({ kind: 'member', key: memberKey(event.run), turn: event.turn, run: event.run }))
+    case 'workflow.phase':
+      return upsert(list, workflowKey(event.workflowId), prev =>
+        prev?.kind === 'workflow'
+          ? { ...prev, workflow: { ...prev.workflow, phases: [...prev.workflow.phases, event.phase] } }
+          : {
+              kind: 'workflow',
+              key: workflowKey(event.workflowId),
+              turn: event.turn,
+              workflow: { workflowId: event.workflowId, kind: 'script', phases: [event.phase], status: 'running', members: 0 },
+            },
+      )
+    case 'team.message':
+      return upsert(list, teamMessageKey(event.message.id), prev => ({
+        kind: 'team.message',
+        key: teamMessageKey(event.message.id),
+        ...(prev?.turn !== undefined ? { turn: prev.turn } : event.turn === undefined ? {} : { turn: event.turn }),
+        message: event.message,
+      }))
     case 'turn.start':
     case 'goal':
     case 'material.added':
-    // Step 3 member / workflow / team events: shown once the desktop renders member blocks.
-    case 'member.start':
-    case 'member.end':
-    case 'workflow.phase':
-    case 'team.message':
       return [...list]
   }
+}
+
+/** Put the workflows of `sessions.collaboration` into the timeline (a live workflow starts without its own event). */
+export function withWorkflows(list: readonly TimelineEntry[], workflows: readonly WorkflowView[], turn: number): TimelineEntry[] {
+  let out = [...list]
+  for (const workflow of workflows) {
+    const key = workflowKey(workflow.workflowId)
+    const at = out.findIndex(entry => entry.key === key)
+    if (at !== -1) {
+      const prev = out[at]!
+      out[at] = { kind: 'workflow', key, turn: prev.turn ?? turn, workflow }
+      continue
+    }
+    // Before its first member, else at the end.
+    const first = out.findIndex(entry => entry.kind === 'member' && entry.run.workflowId === workflow.workflowId)
+    const entry: TimelineEntry = { kind: 'workflow', key, turn: first === -1 ? turn : out[first]!.turn ?? turn, workflow }
+    out = first === -1 ? [...out, entry] : [...out.slice(0, first), entry, ...out.slice(first)]
+  }
+  return out
 }

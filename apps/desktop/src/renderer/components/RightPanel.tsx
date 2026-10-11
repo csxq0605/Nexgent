@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { FileChange } from '@nexgent/kernel'
+import type { DeliverableSummary, FileChange } from '@nexgent/kernel'
 import { useAppState, useAppStore } from '../hooks.js'
 import { T, fileChangeText, formatBytes, formatTime, goalStatusText, isAbsolutePath } from '../strings.js'
 import { useUi, type PanelTab } from '../ui.js'
@@ -67,18 +67,17 @@ function Materials(): JSX.Element {
   )
 }
 
-function Deliverables(): JSX.Element {
-  const state = useAppState()
+function DeliverableItems({ items, testId }: { readonly items: readonly DeliverableSummary[]; readonly testId: string }): JSX.Element {
   const ui = useUi()
-  if (state.deliverables.length === 0) return <p className="muted small panel-section">{T.noDeliverables}</p>
   return (
-    <ul className="item-list panel-section" data-testid="deliverable-list">
-      {[...state.deliverables].reverse().map(d => {
+    <ul className="item-list" data-testid={testId}>
+      {[...items].reverse().map(d => {
         const latest = d.versions[d.versions.length - 1]
         return (
           <li key={d.deliverableId} className="item column" data-testid="deliverable-item">
             <button type="button" className="item-button" onClick={() => latest && ui.openDeliverable({ deliverableId: d.deliverableId, version: latest.version, mode: 'preview' })}>
               <span className="item-title ellipsis">{d.title}</span>
+              {latest?.memberName !== undefined && <span className="muted small">{T.byMember(latest.memberName)}</span>}
               <span className="muted small">{latest?.summary}</span>
             </button>
             <div className="versions">
@@ -92,6 +91,27 @@ function Deliverables(): JSX.Element {
         )
       })}
     </ul>
+  )
+}
+
+/** The project's deliverables: the main conversations' first, then what members presented. */
+function Deliverables(): JSX.Element {
+  const state = useAppState()
+  if (state.deliverables.length === 0) return <p className="muted small panel-section">{T.noDeliverables}</p>
+  const byMember = (d: DeliverableSummary): boolean => d.versions[d.versions.length - 1]?.memberName !== undefined
+  const finals = state.deliverables.filter(d => !byMember(d))
+  const members = state.deliverables.filter(byMember)
+  return (
+    <div className="panel-section" data-testid="deliverable-list">
+      {members.length > 0 && <div className="panel-label">{T.finalDeliverables}</div>}
+      {finals.length > 0 && <DeliverableItems items={finals} testId="final-deliverables" />}
+      {members.length > 0 && (
+        <>
+          <div className="panel-label">{T.memberDeliverablesTitle}</div>
+          <DeliverableItems items={members} testId="member-deliverables" />
+        </>
+      )}
+    </div>
   )
 }
 
