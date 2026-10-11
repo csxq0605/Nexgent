@@ -10,9 +10,11 @@
  * checkable yet). Entries without `run` are reported as `not-implemented`:
  * never a pass, and the script exits 2.
  *
- * Headless items run the judge of the same id (step2-judges.mjs) over the
- * observations the headless layer collected (`ctx.obs`, `ctx.tools`).
+ * Headless and desktop items run the judge of the same id (step2-judges.mjs,
+ * step2-desktop-judges.mjs) over the observations their layer collected
+ * (`ctx.obs`, `ctx.tools`).
  */
+import { DESKTOP_JUDGES, judgeDesktop } from './step2-desktop-judges.mjs'
 import { JUDGES, judge } from './step2-judges.mjs'
 
 export const EXIT_PASS = 0
@@ -42,7 +44,15 @@ const headlessRun = id => (ctx) => {
   if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `headless scenario failed: ${ctx.scenarioError}` }
   return judge(id, ctx.obs, ctx.tools)
 }
-const item = (id, layer, title) => (layer === 'headless' && JUDGES[id] !== undefined ? { id, layer, title, run: headlessRun(id) } : { id, layer, title })
+const desktopRun = id => (ctx) => {
+  if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `desktop scenario failed: ${ctx.scenarioError}` }
+  return judgeDesktop(id, ctx.obs)
+}
+const item = (id, layer, title) => {
+  if (layer === 'headless' && JUDGES[id] !== undefined) return { id, layer, title, run: headlessRun(id) }
+  if (layer === 'desktop' && DESKTOP_JUDGES[id] !== undefined) return { id, layer, title, run: desktopRun(id) }
+  return { id, layer, title }
+}
 
 /** All 40 checklist items, in plan order. Add `run` to implement one. */
 export const CHECKS = [
