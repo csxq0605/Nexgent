@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto'
 import { Context, Service, type Fiber } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
+import type { ChildAgentOptions, ResumeChildOptions } from './contracts/collaboration.js'
 import type { ProjectConfig } from './contracts/config.js'
 import { NexgentError } from './contracts/errors.js'
 import { EFFORT_LEVELS, type Effort } from './contracts/llm.js'
@@ -71,6 +72,12 @@ export interface CreateAgentOptions {
   readonly sandboxMode?: SandboxMode
   /** Use this config instead of reading `.nexgent/config.json`. */
   readonly projectConfig?: LoadedProjectConfig
+  /**
+   * Start a child session (step 3 contract; `permissions.md` §子会话继承).
+   * Not implemented yet: until the kernel-maintenance work lands, passing it
+   * rejects with `internal`.
+   */
+  readonly child?: ChildAgentOptions
 }
 
 /** Options of {@link AgentsService.resume}. */
@@ -80,7 +87,11 @@ export interface ResumeAgentOptions {
   /** Model override; else the session header's model. */
   readonly model?: string
   readonly projectConfig?: LoadedProjectConfig
+  /** Reopen a child under its live parent (step 3 contract; rejects with `internal` until implemented). */
+  readonly child?: ResumeChildOptions
 }
+
+const CHILD_NOT_IMPLEMENTED = 'child sessions are not implemented yet (step 3 kernel maintenance)'
 
 /** The `ctx.agents` service. */
 export class AgentsService extends Service {
@@ -233,6 +244,7 @@ export class AgentsService extends Service {
 
   /** Create a session (`session.start`) and an agent on it. */
   async create(options: CreateAgentOptions = {}): Promise<Agent> {
+    if (options.child !== undefined) throw new NexgentError('internal', CHILD_NOT_IMPLEMENTED)
     const loaded = await this.projectConfig(options.projectConfig)
     const sessionId = options.sessionId ?? randomUUID()
     const model = options.model ?? loaded.input.model ?? this.config.model ?? this.home.llm.info.defaultModel
@@ -276,6 +288,7 @@ export class AgentsService extends Service {
    * already closed it) before returning the agent.
    */
   async resume(sessionId: string, options: ResumeAgentOptions = {}): Promise<Agent> {
+    if (options.child !== undefined) throw new NexgentError('internal', CHILD_NOT_IMPLEMENTED)
     if (this.live.has(sessionId)) throw new NexgentError('session/locked', `session ${sessionId} is already open in this process`)
     const loaded = await this.projectConfig(options.projectConfig)
     const session = this.home.session

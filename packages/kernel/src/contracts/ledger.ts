@@ -9,22 +9,24 @@
  * `llm.request.end`, failed and aborted ones included (`maxRetries: 0`).
  */
 import type { ToolCallApproval } from './approvals.js'
+import type { ExecutionForm } from './collaboration.js'
 import type { ErrorInfo } from './errors.js'
 import type { FinishReason, LLMRequestPurpose, LLMUsage } from './llm.js'
 import type { ToolEffect } from './tools.js'
 
 /**
- * Attribution fields reserved for step 4 (capability versions). All optional
- * in step 1; step 1 writers leave them absent.
+ * Attribution fields. All optional in the schema. Step 3 kernels stamp
+ * `taskId`, `memberId` and `executionForm` on every record a session writes
+ * (`AgentAttribution`); `capabilityVersion` stays reserved for step 4.
  */
 export interface LedgerAttribution {
   /** Content hash of the adopted capability bundle in force. */
   readonly capabilityVersion?: string
-  /** Team member (step 3) that issued the request. */
+  /** Member that issued the record: `main` for the root session, else the child's session id. */
   readonly memberId?: string
-  /** How the work was executed: directly, delegated, or as a workflow. */
-  readonly executionForm?: 'direct' | 'delegated' | 'workflow'
-  /** Task the record contributes to; one `task.outcome` closes it. */
+  /** How the issuing member executes: directly, delegated, as a teammate (step 3), or in a workflow. */
+  readonly executionForm?: ExecutionForm
+  /** Task tree the record contributes to; each member session closes with its own `task.outcome`. */
   readonly taskId?: string
 }
 
@@ -118,6 +120,8 @@ export interface TaskOutcomeRecord extends LedgerRecordBase {
   readonly checks?: readonly TaskCheck[]
   /** Tool names actually called, deduplicated (step 4 proves component use from this). */
   readonly toolsUsed: readonly string[]
+  /** Root session only (step 3): forms its tree actually used, deduplicated in {@link EXECUTION_FORMS} order. */
+  readonly formsUsed?: readonly ExecutionForm[]
 }
 
 /** Every ledger record kind. */

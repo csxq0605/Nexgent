@@ -39,6 +39,15 @@ export const SESSION_RECORD_DEFS: Readonly<Record<SessionRecordType, string>> = 
   'goal.update': 'goalUpdateRecord',
   'session.title': 'sessionTitleRecord',
   compaction: 'compactionRecord',
+  'fork.seed': 'forkSeedRecord',
+  'subagent.start': 'subagentStartRecord',
+  'subagent.end': 'subagentEndRecord',
+  'team.member': 'teamMemberRecord',
+  'team.task': 'teamTaskRecord',
+  'team.message': 'teamMessageRecord',
+  'workflow.start': 'workflowStartRecord',
+  'workflow.phase': 'workflowPhaseRecord',
+  'workflow.end': 'workflowEndRecord',
 }
 
 const BASE_REQUIRED = ['type', 'seq', 'ts', 'sessionId'] as const
@@ -124,6 +133,58 @@ export const sessionRecordSchema: JsonObject = {
       ['tool', 'grantedAt'],
     ),
     sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+    memberName: { type: 'string', pattern: '^[a-z][a-z0-9-]{0,31}$' },
+    memberExecutionForm: { enum: ['delegated', 'team', 'workflow'] },
+    memberIdentity: closedObject(
+      { name: ref('memberName'), executionForm: ref('memberExecutionForm'), preset: ref('nonEmptyString') },
+      ['name', 'executionForm'],
+    ),
+    conversationMessages: {
+      type: 'array',
+      items: { oneOf: [ref('userMessage'), ref('assistantMessage'), ref('toolMessage')] },
+    },
+    memberResult: closedObject(
+      {
+        status: { enum: ['completed', 'failed', 'cancelled', 'budget', 'interrupted'] },
+        text: { type: 'string' },
+        deliverables: { type: 'array', items: ref('deliverableVersionRef') },
+        usage: ref('usage'),
+        requestCount: { type: 'integer', minimum: 0 },
+        error: ref('errorInfo'),
+      },
+      ['status', 'text', 'deliverables', 'usage', 'requestCount'],
+    ),
+    teamMember: closedObject(
+      {
+        name: ref('memberName'),
+        sessionId: ref('nonEmptyString'),
+        status: { enum: ['active', 'idle', 'stopped'] },
+        preset: ref('nonEmptyString'),
+      },
+      ['name', 'sessionId', 'status'],
+    ),
+    teamTask: closedObject(
+      {
+        id: ref('nonEmptyString'),
+        title: ref('nonEmptyString'),
+        description: { type: 'string' },
+        status: { enum: ['pending', 'in_progress', 'completed', 'cancelled'] },
+        owner: ref('nonEmptyString'),
+        dependsOn: { type: 'array', items: ref('nonEmptyString') },
+        result: { type: 'string' },
+      },
+      ['id', 'title', 'status', 'dependsOn'],
+    ),
+    teamMessage: closedObject(
+      {
+        id: ref('nonEmptyString'),
+        from: ref('nonEmptyString'),
+        to: ref('nonEmptyString'),
+        text: { type: 'string', minLength: 1 },
+        state: { enum: ['queued', 'delivered'] },
+      },
+      ['id', 'from', 'to', 'text', 'state'],
+    ),
     portablePath: { type: 'string', minLength: 1, pattern: '^[^\\\\]+$' },
     materialRef: closedObject(
       {
@@ -147,6 +208,7 @@ export const sessionRecordSchema: JsonObject = {
         title: ref('nonEmptyString'),
         summary: { type: 'string' },
         files: { type: 'array', minItems: 1, items: ref('deliverableFile') },
+        memberName: ref('memberName'),
       },
       ['deliverableId', 'version', 'title', 'summary', 'files'],
     ),
@@ -179,7 +241,7 @@ export const sessionRecordSchema: JsonObject = {
     turnEndReason: {
       oneOf: [
         closedObject({ kind: { const: 'completed' } }, ['kind']),
-        closedObject({ kind: { const: 'cancelled' }, cause: { enum: ['user', 'timeout', 'shutdown', 'cost-cap'] } }, [
+        closedObject({ kind: { const: 'cancelled' }, cause: { enum: ['user', 'timeout', 'shutdown', 'cost-cap', 'parent'] } }, [
           'kind',
           'cause',
         ]),
@@ -202,6 +264,8 @@ export const sessionRecordSchema: JsonObject = {
         lastSeq: ref('positiveInteger'),
         goal: ref('goal'),
         lastCompactionSeq: ref('positiveInteger'),
+        parentSessionId: ref('nonEmptyString'),
+        member: ref('memberIdentity'),
       },
       ['createdAt', 'projectRoot', 'model', 'sandboxMode', 'grants', 'lastTurn', 'totalUsage', 'lastSeq'],
     ),
@@ -209,10 +273,7 @@ export const sessionRecordSchema: JsonObject = {
       {
         sessionId: ref('nonEmptyString'),
         version: { const: 1 },
-        messages: {
-          type: 'array',
-          items: { oneOf: [ref('userMessage'), ref('assistantMessage'), ref('toolMessage')] },
-        },
+        messages: ref('conversationMessages'),
         metadata: ref('sessionMetadata'),
       },
       ['sessionId', 'version', 'messages', 'metadata'],
@@ -226,6 +287,7 @@ export const sessionRecordSchema: JsonObject = {
         sandboxMode: ref('sandboxMode'),
         parentSessionId: ref('nonEmptyString'),
         title: { type: 'string' },
+        member: ref('memberIdentity'),
       },
       ['version', 'projectRoot', 'model', 'sandboxMode'],
     ),
@@ -319,6 +381,64 @@ export const sessionRecordSchema: JsonObject = {
         ),
       },
       ['turn', 'step', 'summary', 'keepMessages', 'compactedMessages', 'requestId', 'usage', 'trigger'],
+    ),
+    forkSeedRecord: record(
+      'fork.seed',
+      { fromSessionId: ref('nonEmptyString'), throughSeq: ref('positiveInteger'), messages: ref('conversationMessages') },
+      ['fromSessionId', 'throughSeq', 'messages'],
+    ),
+    subagentStartRecord: record(
+      'subagent.start',
+      {
+        turn,
+        toolCallId: ref('nonEmptyString'),
+        childSessionId: ref('nonEmptyString'),
+        childTurn: ref('positiveInteger'),
+        name: ref('memberName'),
+        executionForm: ref('memberExecutionForm'),
+        mode: { enum: ['fresh', 'fork'] },
+        preset: ref('nonEmptyString'),
+        workflowId: ref('nonEmptyString'),
+        task: { type: 'string', pattern: '^[\\s\\S]{0,500}$' },
+        materialIds: { type: 'array', items: ref('nonEmptyString') },
+      },
+      ['turn', 'childSessionId', 'childTurn', 'name', 'executionForm', 'task'],
+    ),
+    subagentEndRecord: record(
+      'subagent.end',
+      { turn, childSessionId: ref('nonEmptyString'), childTurn: ref('positiveInteger'), result: ref('memberResult') },
+      ['turn', 'childSessionId', 'childTurn', 'result'],
+    ),
+    teamMemberRecord: record('team.member', { turn, member: ref('teamMember') }, ['member']),
+    teamTaskRecord: record('team.task', { turn, task: ref('teamTask') }, ['task']),
+    teamMessageRecord: record('team.message', { turn, message: ref('teamMessage') }, ['message']),
+    workflowStartRecord: record(
+      'workflow.start',
+      {
+        turn,
+        toolCallId: ref('nonEmptyString'),
+        workflowId: ref('nonEmptyString'),
+        kind: { enum: ['script', 'graph'] },
+        architecture: ref('sha256'),
+        title: { type: 'string' },
+      },
+      ['turn', 'toolCallId', 'workflowId', 'kind'],
+    ),
+    workflowPhaseRecord: record(
+      'workflow.phase',
+      { turn, workflowId: ref('nonEmptyString'), phase: ref('nonEmptyString') },
+      ['turn', 'workflowId', 'phase'],
+    ),
+    workflowEndRecord: record(
+      'workflow.end',
+      {
+        turn,
+        workflowId: ref('nonEmptyString'),
+        status: { enum: ['completed', 'failed', 'cancelled', 'interrupted'] },
+        members: { type: 'integer', minimum: 0 },
+        error: ref('errorInfo'),
+      },
+      ['turn', 'workflowId', 'status', 'members'],
     ),
   },
 }

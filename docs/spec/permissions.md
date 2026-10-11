@@ -1,6 +1,6 @@
 # 权限与审批模型
 
-> 步骤 1 章节（沙箱模式、路径与命令策略、工具审批、费用上限格式、密钥存放、已知边界、共用审批交互、测试）已定稿；步骤 2 第 1 轮填写"本地 IPC 与访问令牌"，并把 `.nexgent/outputs/` 改为对模型只读、补上 `.nexgent/skills/`；"插件安装审批"在步骤 4 填。字段名以 `packages/kernel/src/contracts/` 为准，二者冲突时改契约 PR 并同步本文。来源：计划 4.10 第 2 行与"安全"一行；ADR 0001 决策 9、12。
+> 步骤 1 章节（沙箱模式、路径与命令策略、工具审批、费用上限格式、密钥存放、已知边界、共用审批交互、测试）已定稿；步骤 2 第 1 轮填写"本地 IPC 与访问令牌"，并把 `.nexgent/outputs/` 改为对模型只读、补上 `.nexgent/skills/`；步骤 3 第 1 轮新增"子会话继承""网页获取（`web_fetch`）""代码执行进程（PTC）"三节，并补充费用上限与审批交互里的成员规则（决策见 ADR 0004）；"插件安装审批"在步骤 4 填。字段名以 `packages/kernel/src/contracts/` 为准，二者冲突时改契约 PR 并同步本文。来源：计划 4.10 第 2 行与"安全"一行；ADR 0001 决策 9、12。
 
 ## 目的与范围
 
@@ -150,7 +150,43 @@
 - `perTask` 以一次 `run` / 一次 `resume` 为单位；`perProject` 以账本在 `windowDays` 内的记录累加。
 - 任一上限达到时：下一次模型请求不再发出，当前轮次以 `turn.end { kind: 'cancelled', cause: 'cost-cap' }` 结束；会话先写一条 `error` 记录（`fatal: false`），账本写 `task.outcome`，二者的错误 `code` 都是 `budget/exhausted`，`ErrorInfo.details` 带 `{ scope: 'task' | 'project', metric: 'requests' | 'tokens', used, limit }`；不重试、不自动续跑。
 - 步骤 1 执行 `perTask`；`perProject` 只定格式。
+- 步骤 3：`perTask` 按整棵任务树计（根会话与它的全部成员共享同一 `taskId` 与同一份累计），成员花的请求与 token 算进根会话的额度；成员的下一次请求被挡下时，成员以 `budget` 结束，父会话下一次请求同样被挡下。`ErrorInfo.details.scope` 仍为 `task`。见下节。
 - 字段缺省表示不限制；步骤 2 的设置页只改这两个对象。
+
+## 子会话继承
+
+步骤 3 的成员（委派对象、队友、工作流节点）各是一个子会话，由根会话经工具建出（ADR 0004）。成员相对父会话只能收窄，不能放宽：
+
+| 项 | 规则 |
+| --- | --- |
+| 深度 | 只有根会话能启动成员；成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow`（契约 `MEMBER_DENIED_TOOLS`），kernel 拒绝以子会话为父会话创建子会话 |
+| 沙箱 | 成员的模式取父会话、预设、显式请求三者中最窄的；任何一项宽于父会话时创建失败，错误码 `sandbox/denied`，不悄悄降级（`childSandboxMode`）。顺序：`read-only` < `workspace-write` < `full-access` |
+| 工具范围 | 预设的 `tools`（`allow` / `deny`）用成员作用域上的 `restrict()` 实现，与父会话可见的集合求交；`MEMBER_DENIED_TOOLS` 总是叠加在上面；队友另由团队包在自己的作用域注册 `send_message`、`team_task_list`、`team_task_update` |
+| 路径与命令 | 与父会话相同的路径策略、命令策略和 `extraReadRoots`；所有成员共用同一个项目根，不建副本 |
+| 审批 | 与主对话同一套规则（用户 2026-10-11 决定）：主对话会问的，成员也问；成员的请求进同一个审批代理，`ApprovalRequest.sessionId` 为成员会话，`member` 带成员名、形态与根会话 id，宿主据此在根会话的界面里询问并写明是哪个成员；`session` 授权只对授予它的那个会话生效，`project` 授权对所有会话（含成员）生效；项目审批设置放宽时主对话与成员一起生效；成员不单独自动批准，也不单独自动拒绝；没有应答者或非 TTY 时与主对话一样按 `timeout` / `headless` 拒绝 |
+| 费用 | `perTask` 按任务树计（上节）；`BudgetShare` 只能再压低某个成员的份额；`perProject` 照旧按账本 |
+| 取消 | 父会话的轮次被取消或结束时，仍在运行的成员以 `parent` 原因取消，在 `toolAbortGraceMs` 内收尾；成员的子进程与主对话的一样按进程树终止，不得残留 |
+| 并发 | 同一任务树同时运行的成员至多 4 个，总数至多 16 个（`COLLABORATION_LIMITS`） |
+| 账本 | 成员的每条记录带同一 `taskId`、自己的 `memberId`（会话 id）与 `executionForm` |
+
+成员在 `read-only` 父会话下调用 `present` 照常可用（快照由宿主写）。
+
+## 网页获取（`web_fetch`）
+
+步骤 3 由 `@nexgent/web` 提供，名字、`effects: ['network']` 与 `approval: 'never'` 冻结在契约 `STEP3_MIGRATED_TOOLS`，参数 schema 归实现包。
+
+- 只做 HTTP / HTTPS GET；响应体有大小上限，HTML 转 Markdown 后分页返回；不带 Cookie，不带任何凭证，不读环境变量里的代理凭证。
+- **SSRF 防护**：先解析主机名，再按解析出的**每个 IP** 判定；拒绝回环（`127.0.0.0/8`、`::1`）、私网（`10/8`、`172.16/12`、`192.168/16`、`fc00::/7`）、链路本地（`169.254/16`，含云元数据 `169.254.169.254`、`fe80::/10`）、未指定地址（`0.0.0.0`、`::`）与 IPv4 映射的上述地址；连接时使用已判定的 IP，防止 DNS 重绑定。每一跳重定向重新判定，跳数有上限。被拒时返回工具错误，说明是哪条规则，不发出请求。
+- 三种沙箱模式下都可用（不写文件、不执行命令）；它是步骤 3 唯一一个由工具层主动联网的入口，`bash` 的网络规则不变。
+
+## 代码执行进程（PTC）
+
+步骤 3 的 `run_code`（`@nexgent/ptc`）与 `workflow` 的脚本在独立的 Node 子进程里执行，限制照搬旧 `run_python` 的语义：
+
+- 每次调用一个新进程；环境变量为空（不继承宿主环境，因此读不到 `NEXGENT_API_KEY` 等任何变量）；cwd 为项目根。
+- 文件访问只经宿主函数（IPC 绑定），每次读写按**调用方会话的沙箱模式与路径策略**检查，与文件工具同一套规则；`read-only` 下写类宿主函数被拒，`run_code` 本身仍可运行只读代码。进程不直接拿到文件系统以外的宿主能力。
+- 输出与时长有上限（默认 60 s，最长 300 s）；超时或取消时终止整个进程树（Windows 纳入 Job Object），不得残留。
+- 工作流脚本里的 `agent()` 经宿主函数建成员，成员受上节“子会话继承”约束；脚本本身不能绕过并发与总数上限。
 
 ## 密钥存放
 
@@ -234,6 +270,8 @@
 7. **读根不隔离读取。** `extraReadRoots` 之外的读取被文件工具拒绝，但命令可以读任何东西；密钥脱敏只覆盖已知形态。
 8. **网络不受限。** 三种模式都不限制子进程网络；只有 `read-only` 因不执行命令而没有网络。
 9. **审批依赖宿主在场。** 非 TTY 的 CLI 把所有审批视为拒绝，任务可能因此失败而不是等待。
+10. **成员共用工作目录（步骤 3）。** 多个成员可以同时写同一项目；`write_file` 只新建、提示要求成员写各自子目录，但两个成员用 `str_replace` 改同一文件时仍会交错。同名成果不会互相追加版本，文件本身不受保护。
+11. **PTC 进程不是安全沙箱（步骤 3）。** 空环境变量与宿主函数的路径检查限制了常见的越界，但 Node 进程仍以用户身份运行；在接入操作系统级隔离之前，`workspace-write` 下的 `run_code` 与 `bash` 处于同一信任级别。
 
 ## CLI 与桌面应用共用的审批交互
 
@@ -251,6 +289,11 @@ interface ApprovalRequest {
   options: Array<'once' | 'session' | 'project'>  // 允许选择的作用范围；始终审批表只给 'once'
   pattern?: string                 // session / project 授权将保存的匹配模式
   expiresAt?: string               // ISO 时间；CLI 填，桌面应用可空
+  member?: {                       // 步骤 3：成员（子会话）发起时才有；sessionId 此时是成员会话
+    name: string
+    executionForm: 'delegated' | 'team' | 'workflow'
+    parentSessionId: string        // 根会话：提示属于哪个对话
+  }
 }
 
 interface ApprovalDecision {
@@ -266,6 +309,7 @@ interface ApprovalDecision {
 - 桌面应用（步骤 2）：主进程经 IPC 把 `ApprovalRequest` 推给渲染进程弹对话框，应答以 `ApprovalDecision` 回传；令牌与边界在"本地 IPC"章节。
 - 两者记录完全相同：会话 `approval.request` / `approval.decision`，账本 `tool.call.approval`；呈现方式不入记录。
 - 轮次取消时所有未决请求以 `decidedBy: 'cancel'` 关闭；一个请求只能被应答一次，迟到的应答丢弃。
+- 成员的请求（步骤 3，带 `member`）：CLI 在提示首行写“成员 <name>（<形态>）请求：”，桌面应用在根会话的对话里弹同一个对话框并显示成员名；应答方式、作用范围与记录与主对话完全相同。父会话取消导致成员取消时，成员的未决请求同样以 `cancel` 关闭。
 
 **工具在运行中发现的审批。** 沙箱契约（`packages/kernel/src/contracts/workspace.ts`）的 `SandboxDecision` 除 `{ allowed: true }` 与 `{ allowed: false, code, reason }` 外，还有第三种情形 `{ allowed: false, code: 'approval-required', reason, ask: ToolApprovalAsk }`：策略没有直接拒绝，调用在宿主批准 `ask` 后可以继续。工具不自己弹窗，而是把 `ask` 交给 `ToolContext.requestApproval(ask)`（契约 `packages/kernel/src/contracts/tools.ts`），它经 `ctx.approvals` 走上面同一套 `ApprovalRequest` / `ApprovalDecision` 流程，解析为 `true` 表示可以继续，没有应答者时为拒绝。`ToolContext.approved` 为 `true` 表示循环在调用工具前已经为该调用取得审批（`approval: 'ask' | 'always'` 的工具），工具不必再问。`ToolApprovalAsk`（`packages/kernel/src/contracts/approvals.ts`）的字段：
 
@@ -309,3 +353,10 @@ interface ToolApprovalAsk {
 | 费用 | `costCaps.perTask.maxRequests: 2` 下第 3 次请求 | 不发出请求；轮次以 `cost-cap` 取消，会话与账本各一条 `budget/exhausted`，无重试 |
 | 密钥 | 凭证文件权限 `0644`（POSIX） | 拒绝读取并给出修复提示 |
 | 密钥 | 会话、账本全文 | 不含密钥值 |
+| 子会话（步骤 3） | `read-only` 父会话下以 `workspace-write` 请求成员；预设 `deny: ['bash']` | 创建失败 `sandbox/denied`；成员工具列表里没有 `bash` |
+| 子会话（步骤 3） | 成员工具列表 | 不含 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow` |
+| 子会话（步骤 3） | 成员写 `.env` | 审批请求带 `member`（成员名、根会话 id）；拒绝后文件不变 |
+| 子会话（步骤 3） | `perTask.maxRequests` 下成员用掉额度后父会话再请求 | 父会话请求不发出，记录 `budget/exhausted` |
+| 子会话（步骤 3） | 父会话取消 | 成员轮次以 `parent` 结束，无残留子孙进程 |
+| 网页（步骤 3） | `web_fetch` 访问 `127.0.0.1`、`169.254.169.254`、`[::1]`、解析到私网的域名、重定向到私网 | 全部拒绝，不发出请求 |
+| PTC（步骤 3） | `run_code` 读环境变量、读根外文件、`read-only` 下写文件、超时 | 环境为空；读写被拒；超时后进程树为空 |

@@ -1252,7 +1252,8 @@ export class Agent {
         try {
           const type = (record as { type?: unknown }).type
           if (!recordsOpen) throw new NexgentError('session/invalid-record', `${definition.name} appended ${String(type)} after its call settled`)
-          if (type !== 'deliverable.presented') throw new NexgentError('session/invalid-record', `tools may append only deliverable.presented records; got ${String(type)}`)
+          // Step 3 widened ToolRecordType; until the kernel implements those records, only deliverable.presented is accepted.
+          if (record.type !== 'deliverable.presented') throw new NexgentError('session/invalid-record', `tools may append only deliverable.presented records; got ${String(type)}`)
           if (record.turn !== turn || record.step !== step || record.toolCallId !== call.id) {
             throw new NexgentError('session/invalid-record', `${type} must carry this call's turn ${turn}, step ${step} and toolCallId ${call.id}`)
           }

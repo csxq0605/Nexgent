@@ -38,7 +38,7 @@
         "sessionId": { "$ref": "#/$defs/nonEmptyString" },
         "capabilityVersion": { "type": "string" },
         "memberId": { "type": "string" },
-        "executionForm": { "enum": ["direct", "delegated", "workflow"] },
+        "executionForm": { "enum": ["direct", "delegated", "team", "workflow"] },
         "taskId": { "type": "string" }
       }
     },
@@ -149,7 +149,8 @@
                 }
               }
             },
-            "toolsUsed": { "type": "array", "items": { "type": "string" } }
+            "toolsUsed": { "type": "array", "items": { "type": "string" } },
+            "formsUsed": { "type": "array", "items": { "enum": ["direct", "delegated", "team", "workflow"] } }
           }
         }
       ]

@@ -61,6 +61,8 @@ const SESSION_TYPES = [
   'session.start', 'user.message', 'assistant.message', 'tool.result', 'turn.start', 'turn.end', 'checkpoint', 'error', 'approval.request', 'approval.decision', 'approval.grant',
   // step 2
   'material.added', 'deliverable.presented', 'turn.files', 'feedback', 'goal.set', 'goal.update', 'session.title', 'compaction',
+  // step 3
+  'fork.seed', 'subagent.start', 'subagent.end', 'team.member', 'team.task', 'team.message', 'workflow.start', 'workflow.phase', 'workflow.end',
 ] as const
 const LEDGER_TYPES = ['llm.request.start', 'llm.request.end', 'tool.call', 'task.outcome'] as const
 describe('contracts: type-level shape', () => {
@@ -125,7 +127,7 @@ describe('contracts: type-level shape', () => {
     type Outcome = Extract<LedgerRecord, { type: 'task.outcome' }>
     expectTypeOf<Outcome['capabilityVersion']>().toEqualTypeOf<string | undefined>()
     expectTypeOf<Outcome['memberId']>().toEqualTypeOf<string | undefined>()
-    expectTypeOf<Outcome['executionForm']>().toEqualTypeOf<'direct' | 'delegated' | 'workflow' | undefined>()
+    expectTypeOf<Outcome['executionForm']>().toEqualTypeOf<'direct' | 'delegated' | 'team' | 'workflow' | undefined>()
     expectTypeOf<Outcome['taskId']>().toEqualTypeOf<string | undefined>()
     expectTypeOf<LedgerRecordInput>().not.toHaveProperty('ts')
   })

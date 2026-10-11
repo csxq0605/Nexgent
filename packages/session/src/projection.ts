@@ -52,6 +52,8 @@ export function initialState(start: SessionStartRecord): SessionState {
     lastSeq: start.seq,
   }
   if (start.title !== undefined) metadata.title = start.title
+  if (start.parentSessionId !== undefined) metadata.parentSessionId = start.parentSessionId
+  if (start.member !== undefined) metadata.member = start.member
   return { sessionId: start.sessionId, version: 1, messages: [], metadata: { ...metadata } }
 }
 
@@ -217,6 +219,12 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
       meta.lastCompactionSeq = record.seq
       break
     }
+    case 'fork.seed':
+      if (draft.messages.length > 0 || meta.lastTurn !== 0) {
+        throw new NexgentError('session/invalid-record', 'fork.seed must come before any message or turn')
+      }
+      draft.messages = [...record.messages]
+      break
     case 'error':
     case 'approval.request':
     case 'approval.decision':
@@ -224,6 +232,14 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
     case 'deliverable.presented':
     case 'turn.files':
     case 'feedback':
+    case 'subagent.start':
+    case 'subagent.end':
+    case 'team.member':
+    case 'team.task':
+    case 'team.message':
+    case 'workflow.start':
+    case 'workflow.phase':
+    case 'workflow.end':
       break
   }
   draft.metadata.lastSeq = record.seq

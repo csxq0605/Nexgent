@@ -23,7 +23,7 @@
 | `core/agent` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（→ `agents.ts`）：`ctx.agents` 创建 / 恢复 |
 | `core/agent-loop` | `@nexgent/kernel` | 重写 | 1 | 请求模型、执行工具、写入会话的循环只参考设计；取消与超时边界用故障注入测试补回 |
 | `core/scope` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（并入 `tools.ts`）：会话作用域；步骤 4 的会话级试用依赖它 |
-| `core/tools` | `@nexgent/kernel` | 改写 | 1 | 已改写 `src`（作用域注册表设计，→ `tools.ts`）：`ctx.tools` 注册与作用域；PR #4 `tool-restriction.ts` 在步骤 3 并入 |
+| `core/tools` | `@nexgent/kernel` | 改写 | 1 | 已改写 `src`（作用域注册表设计，→ `tools.ts`）：`ctx.tools` 注册与作用域；PR #4 `tool-restriction.ts` 已并入契约 `contracts/tools.ts`（`assertToolRestriction`、`isToolAdmitted`）；步骤 3 的成员工具范围在其上实现（`contracts/collaboration.ts`） |
 | `core/system-prompt` | `@nexgent/kernel` | 重写 | 1 | 系统提示组装只参考设计；提示正文由 Nexgent 自写 |
 | `core/session` | `@nexgent/kernel` | 重写 | 1 | `ctx.session` 服务接口；步骤 1 未复制文件；持久化在 `@nexgent/session` |
 | `core/agent-default-model` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（并入 `agents.ts`）：默认模型的配置位置（现为 `claude-sonnet-5-5`，见 ADR 0002） |

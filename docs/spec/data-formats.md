@@ -1,6 +1,6 @@
 # 数据与文件格式规范
 
-> 步骤 1 章节（目的与范围、目录布局、项目配置、会话 JSONL v1、账本记录、版本与兼容、schema 与测试）已写定；步骤 2 第 1 轮补上会话的七种新记录、材料元数据、成果元数据，并新增反馈、持久目标、压缩三节；`CapabilityBundle` 清单留标题，在步骤 4 填写。每种格式配 JSON schema 与读写测试，二者与本文同步改。本文的类型镜像在 `packages/kernel/src/contracts/`（`session.ts`、`ledger.ts`、`config.ts`、`workspace.ts`、`credentials.ts`、`tasking.ts`、`context.ts`），两处不一致时以本文为准并提契约修改 PR。来源：计划 4.10 第 1 行；分工见 `docs/plan/step-1-work-partition.md` 与 `docs/plan/step-2-work-partition.md`；loop 中各记录的写入时机见 `agent-hooks.md`。
+> 步骤 1 章节（目的与范围、目录布局、项目配置、会话 JSONL v1、账本记录、版本与兼容、schema 与测试）已写定；步骤 2 第 1 轮补上会话的七种新记录、材料元数据、成果元数据，并新增反馈、持久目标、压缩三节；`CapabilityBundle` 清单留标题，在步骤 4 填写。步骤 3 第 1 轮补上子会话、团队、工作流的九种新记录与 `session.start.member`、账本的 `team` 形态与 `formsUsed`、成果的成员字段，并新增子会话与成员、团队、工作流、预设、架构图存储五节（决策见 ADR 0004；类型镜像 `collaboration.ts`）。每种格式配 JSON schema 与读写测试，二者与本文同步改。本文的类型镜像在 `packages/kernel/src/contracts/`（`session.ts`、`ledger.ts`、`config.ts`、`workspace.ts`、`credentials.ts`、`tasking.ts`、`context.ts`），两处不一致时以本文为准并提契约修改 PR。来源：计划 4.10 第 1 行；分工见 `docs/plan/step-1-work-partition.md` 与 `docs/plan/step-2-work-partition.md`；loop 中各记录的写入时机见 `agent-hooks.md`。
 
 ## 目的与范围
 
@@ -49,6 +49,10 @@
     │           └── files/<path>          第 n 版的快照副本，保持项目内相对路径
     ├── skills/                           项目技能（用户创建，可选；agent-hooks.md §技能）
     │   └── <name>/SKILL.md
+    ├── presets/                          项目预设（用户创建，可选；本文“预设”，步骤 3）
+    │   └── <name>.json
+    ├── architectures/                    保存的工作流图（本文“架构图存储”，步骤 3）
+    │   └── <sha256>.json
     └── capabilities/                     能力版本（步骤 4 填）
 ```
 
@@ -62,11 +66,13 @@
 | `materials/<materialId>/` | 一份资料：元数据与副本 | `materialId` 为小写 UUID v4 | `MaterialStore.add` | `@nexgent/tasking`（宿主），模型只读 |
 | `outputs/<deliverableId>/v<n>/` | 一个成果的第 n 版：元数据与快照 | `deliverableId` 为小写 UUID v4，`n` 从 1 起 | `DeliverableStore.present` | `@nexgent/tasking`（宿主），模型只读 |
 | `skills/<name>/SKILL.md` | 项目技能 | `name` 见 `agent-hooks.md` §技能 | 用户 | 用户；模型只读 |
+| `presets/<name>.json` | 项目预设（步骤 3） | `name` 见“预设” | 用户 | 用户；模型只读 |
+| `architectures/<sha256>.json` | 工作流图（步骤 3） | 规范化图的 SHA-256 | 第一次保存时 | `@nexgent/workflow`（宿主）；模型只读 |
 | `capabilities/` | 能力版本 | 步骤 4 | `ensureLayout` | 步骤 4 |
 
 规则：
 
-- `.nexgent/` 内部对模型可见的文件工具按子目录区分：`sessions/`、`ledgers/`、`capabilities/` 读写都拒绝，`materials/`、`outputs/`、`skills/` 与 `config.json` 只读（`outputs/` 自步骤 2 起改为只读，快照只由宿主写）；规则以 `permissions.md` §路径策略与写入限制为准。
+- `.nexgent/` 内部对模型可见的文件工具按子目录区分：`sessions/`、`ledgers/`、`capabilities/` 读写都拒绝，`materials/`、`outputs/`、`skills/`、`presets/`、`architectures/` 与 `config.json` 只读（`outputs/` 自步骤 2 起改为只读，快照只由宿主写）；规则以 `permissions.md` §路径策略与写入限制为准。
 - 所有路径在服务内部以绝对路径处理（`WorkspaceLayout`）；记录里出现的路径（如 `session.start.projectRoot`）也是绝对路径。
 - 是否纳入版本控制由项目自己决定；建议忽略 `sessions/`、`ledgers/`、`outputs/`，保留 `config.json`。
 - 本机凭证文件不在项目内：`~/.nexgent/credentials.json`（Windows 为 `%USERPROFILE%\.nexgent\credentials.json`），形状见“项目配置文件”末尾。
@@ -153,7 +159,7 @@
 
 | `type` | 何时写 | 专有字段 |
 | --- | --- | --- |
-| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?` |
+| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现） |
 | `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn` |
 | `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示 | `turn`、`content`、`source: "user" \| "inject" \| "feedback"`、`materials?`（步骤 2） |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
@@ -172,6 +178,15 @@
 | `goal.update`（步骤 2） | 宿主更新目标状态或文本 | `turn?`、`goalId`、`status`、`text?`、`note?` |
 | `session.title`（步骤 2） | 用户给对话改名（`sessions.rename`） | `turn?`、`title`（非空，宿主已去掉首尾空白） |
 | `compaction`（步骤 2） | 压缩成功后、使用压缩历史的那次模型请求之前 | `turn`、`step`、`summary`、`keepMessages`、`compactedMessages`、`requestId`、`usage`、`trigger: { inputTokens, threshold }` |
+| `fork.seed`（步骤 3） | fork 子会话创建后，必为 `seq: 2` | `fromSessionId`、`throughSeq`、`messages` |
+| `subagent.start`（步骤 3） | 父会话里一次成员运行开始 | `turn`、`toolCallId?`、`childSessionId`、`childTurn`、`name`、`executionForm`、`mode?`、`preset?`、`workflowId?`、`task`（≤500 字符）、`materialIds?` |
+| `subagent.end`（步骤 3） | 父会话里一次成员运行结束（恢复时补 `interrupted`） | `turn`、`childSessionId`、`childTurn`、`result: MemberResult` |
+| `team.member`（步骤 3） | Lead 会话里队友加入或状态变化 | `turn?`、`member: TeamMember` |
+| `team.task`（步骤 3） | Lead 会话里任务板新建或更新一项 | `turn?`、`task: TeamTask` |
+| `team.message`（步骤 3） | Lead 会话里一条邮箱消息排队或投递 | `turn?`、`message: TeamMessage` |
+| `workflow.start`（步骤 3） | 父会话里 `workflow` 调用开始 | `turn`、`toolCallId`、`workflowId`、`kind: "script" \| "graph"`、`architecture?`、`title?` |
+| `workflow.phase`（步骤 3） | 脚本调用 `phase(name)` | `turn`、`workflowId`、`phase` |
+| `workflow.end`（步骤 3） | 工作流结束（恢复时补 `interrupted`） | `turn`、`workflowId`、`status`、`members`、`error?` |
 
 字段细则：
 
@@ -182,7 +197,7 @@
 - `assistant.message.interrupted: true`：该轮在流中被取消，`content` 是已流出的前缀，`toolCalls` 不写（未派发的调用不进入历史）。
 - `tool.result.error`：`ErrorInfo = { name, code, message, details? }`，仅当 `isError` 为真；`meta` 是工具私有的 JSON 值（如 diff），原样持久化。
 - `max-tokens` 且回复含工具调用时：工具调用记录在案但不执行，轮次以 `{ kind: "max-tokens" }` 结束；下一次请求由历史修复以合成的错误结果答复这些调用。
-- `turn.end.reason`：`{ kind: "completed" }`、`{ kind: "cancelled", cause: "user" | "timeout" | "shutdown" | "cost-cap" }`、`{ kind: "error", error: ErrorInfo }`、`{ kind: "max-tokens" }`、`{ kind: "interrupted" }`。最后一种只由恢复过程写出，用来关闭上一个进程没来得及关闭的轮次。
+- `turn.end.reason`：`{ kind: "completed" }`、`{ kind: "cancelled", cause: "user" | "timeout" | "shutdown" | "cost-cap" | "parent" }`（`parent` 是步骤 3 新增：父会话的轮次取消或结束，成员随之取消）、`{ kind: "error", error: ErrorInfo }`、`{ kind: "max-tokens" }`、`{ kind: "interrupted" }`。最后一种只由恢复过程写出，用来关闭上一个进程没来得及关闭的轮次。
 - `error.fatal`：为真表示会话不能继续；恢复时遇到最后一条是 fatal 的 `error`，`resume` 仍返回状态，由调用方决定是否继续。
 - `user.message.source`（步骤 2 增加 `feedback`）：`user` 是用户输入；`inject` 是合成上下文（资料引用、提供者注入），界面不显示；`feedback` 是反馈轮的提示，正文为 `renderFeedbackPrompt(feedback)`。`materials` 是本条消息引用的资料 ID（仅 `user` / `feedback` 消息），界面据此显示资料标签。
 - 步骤 2 记录里的路径一律是项目相对路径、`/` 分隔（`MaterialRef.path`、`DeliverableFile.path`、`FileChange.path`），schema 拒绝含 `\` 的路径；两平台写出的记录可以直接比较。SHA-256 一律小写十六进制 64 位。
@@ -200,6 +215,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 ```
 
 `material.added`、`goal.set`、`goal.update`、`session.title` 由宿主写，可以出现在两轮之间，也可以出现在一轮之中（此时带 `turn`）。
+
+步骤 3 的记录归属：`fork.seed` 只由 kernel 在建子会话时写；`subagent.start`、`workflow.start` 由发起它们的工具经 `ToolContext.appendRecord` 写在该调用的 `tool.result` 之前；`subagent.end`、`team.*`、`workflow.phase`、`workflow.end` 既可由工具写，也可由协作包以宿主身份写（队友之间的邮件、恢复时的补记发生在 Lead 的工具调用之外），宿主写时带当时的 `turn`。白名单见契约 `ToolRecordType` / `HostRecordType`。
 
 ### 示例
 
@@ -307,11 +324,11 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `ts` | string | 事件时刻，ISO-8601 UTC；由 `Ledger.append` 赋值 |
 | `sessionId` | string? | 所属会话；辅助调用可无 |
 | `capabilityVersion` | string? | 预留（步骤 4）：采用中的能力版本的内容哈希 |
-| `memberId` | string? | 预留（步骤 3/4）：发出请求的团队成员 |
-| `executionForm` | `"direct" \| "delegated" \| "workflow"`? | 预留（步骤 4）：执行形态 |
-| `taskId` | string? | 预留（步骤 4）：所属任务，一条 `task.outcome` 收尾 |
+| `memberId` | string? | 发出记录的成员：根会话为 `main`，子会话为子会话 id（步骤 3） |
+| `executionForm` | `"direct" \| "delegated" \| "team" \| "workflow"`? | 发出记录的成员的执行形态（步骤 3 加 `team`） |
+| `taskId` | string? | 所属任务树：根会话打开（create / resume）时生成的小写 UUID v4，成员继承 |
 
-四个预留字段在所有记录类型上都是可选的；步骤 1 的写入方不写它们，读取方忽略它们。
+四个字段在所有记录类型上都是可选的（schema 层面）；步骤 1、2 的写入方不写它们。步骤 3 起 kernel 给一个会话写出的每条 `llm.request.*`、`tool.call`、`task.outcome` 都带 `taskId`、`memberId`、`executionForm`（契约 `AgentAttribution`）；`capabilityVersion` 仍留给步骤 4。
 
 ### 记录类型
 
@@ -367,6 +384,9 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `turns` | number | 跨越的轮数 |
 | `checks` | `TaskCheck[]`? | 宿主做的确定性检查 `{ name, passed, detail? }`；步骤 1 可无 |
 | `toolsUsed` | string[] | 实际调用过的工具名，去重；步骤 4 用它证明组件被实际调用 |
+| `formsUsed` | `ExecutionForm[]`? | 步骤 3，只在根会话的记录上：整棵任务树实际用到的形态，去重，按 `direct, delegated, team, workflow` 排序 |
+
+步骤 3：每个成员会话关闭时也写一条自己的 `task.outcome`（`memberId` 为成员会话 id），各条只计本会话的请求与工具调用；整棵树的合计是同一 `taskId` 下全部记录之和，根会话那条不重复计入成员的用量。
 
 ### 示例
 
@@ -477,6 +497,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `sessionId` | string | 产生它的会话 |
 | `turn` | integer | 产生它的轮次 |
 | `toolCallId` | string | 产生它的 `present` 调用 |
+| `memberId` | string? | 步骤 3：成员交付时为成员的子会话 id |
+| `memberName` | string? | 步骤 3：成员名，界面据此区分“最终成果”与“成员成果” |
 
 规则：
 
@@ -484,6 +506,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 - 版本差异（`DeliverableStore.diff`）：按 `path` 对齐两版的文件，`change` 为 `added | removed | modified | unchanged`（按 `sha256` 判断）；两边都是文本时给出按行的统一差异块（`DiffHunk`，上下文 3 行），否则只报 `change`，`binary: true`。
 - 反馈与成果的关联：`feedback` 记录带 `deliverableId` 与 `version`（见下节）；成果文件本身不记录反馈。
 - 模型对 `outputs/` 只读；快照只由 `@nexgent/tasking` 写。
+- 步骤 3：成员交付的版本带 `memberId`、`memberName`，`deliverable.presented` 的 `DeliverableVersionRef` 带 `memberName`。不给 `deliverableId` 时只在**同一会话**内按主文件路径追加版本，两个会话交同一路径各成一份成果；显式给 `deliverableId` 时照常追加，跨会话也可以（`agent-hooks.md` §步骤 2 工具）。
 
 ## 反馈
 
@@ -557,6 +580,49 @@ The earlier part of this conversation was compacted. Summary:
 - `compaction` 不改变 `totalUsage`（辅助请求的用量只在账本与该记录的 `usage` 里）。
 - 摘要请求失败不写 `compaction`，只写 `error`（`fatal: false`），历史保持原样。
 
+## 子会话与成员
+
+步骤 3 的每个成员（委派对象、队友、工作流节点）都是一个子会话：独立的 `sessions/<id>/session.jsonl` 与锁，可以单独恢复与只读查看。决策见 ADR 0004；类型镜像 `collaboration.ts` 与 `session.ts`。
+
+- **会话头。** 子会话的 `session.start` 带 `parentSessionId`（发起它的会话，深度 1，所以总是根会话）与 `member: { name, executionForm, preset? }`。两者必须同时出现，`SessionStore.create` 拒绝只给一个的输入（`session/invalid-record`）。`name` 匹配 `^[a-z][a-z0-9-]{0,31}$`，`executionForm` 为 `delegated | team | workflow`。投影把二者放进 `SessionMetadata.parentSessionId` / `member`。
+- **fork 种子。** fork 模式的子会话在 `session.start` 之后紧接一条 `fork.seed`（`seq: 2`）：`messages` 是父会话投影出的消息，截至父会话上一轮结束（`throughSeq` 为该轮 `turn.end` 的 `seq`），从父会话最近一次压缩之后开始（摘要消息本身保留）；保留的 `providerContent` 原样复制，thinking 块的回放规则与父会话相同。投影时 `messages` 直接成为子会话的初始历史；`fork.seed` 出现在任何消息或轮次之后时写入被拒。fresh 模式没有 `fork.seed`。
+- **一次运行。** 成员的一次运行是子会话的一轮。父会话在运行开始时写 `subagent.start`（`childTurn` 为这一轮的编号，`task` 截取任务说明前 500 个字符），结束时写 `subagent.end`（`result: MemberResult`）。委派与工作流成员各只有一次运行；队友在它参与的每个 Lead 轮次里各有一次运行，`childSessionId` 不变。
+- **`MemberResult`。** `{ status, text, deliverables, usage, requestCount, error? }`；`status` 为 `completed | failed | cancelled | budget | interrupted`，`text` 是成员最后一段回复（中断时为已流出的前缀），`deliverables` 是本次运行里 `present` 产出的版本（`DeliverableVersionRef[]`），`error` 只在非 `completed` 时出现。`budget` 表示任务树或成员份额的费用上限挡下了成员的下一次请求。
+- **恢复。** 进程在成员运行中死亡时：子会话按步骤 1 规则补 `turn.end { kind: "interrupted" }`；父会话恢复时，对没有 `subagent.end` 的 `subagent.start` 补一条 `status: "interrupted"` 的 `subagent.end`（由协作包以宿主身份写），对没有 `workflow.end` 的 `workflow.start` 补 `status: "interrupted"`。已有 `subagent.end` 的成员不重跑。
+
+## 团队
+
+团队状态全部以记录写在 **Lead 会话**里，强杀后从记录重建；队友各自的会话只记它们自己的对话。类型镜像：`TeamMember`、`TeamTask`、`TeamMessage`。
+
+- **花名册**（`team.member`）：`{ name, sessionId, status: active | idle | stopped, preset? }`，同名以最新一条为准。名字在一个 Lead 会话的在册队友中唯一；`lead` 保留给主对话。
+- **任务板**（`team.task`）：`{ id, title, description?, status: pending | in_progress | completed | cancelled, owner?, dependsOn, result? }`，同 `id` 以最新一条为准；`id` 由任务板按 `t1`、`t2`… 分配。`dependsOn` 中任一任务未 `completed` 时，该任务不能进入 `in_progress`。上限 256 项。
+- **邮箱**（`team.message`）：一条消息写两次，`id` 相同：发送时 `state: "queued"`，在收件人下一步模型请求之前注入时 `state: "delivered"`。恢复时，只有 `queued` 而没有对应 `delivered` 的消息投递一次，投递后补写 `delivered`；已 `delivered` 的不再投递。每个收件人待投递至多 64 条，单条正文至多 64 KiB（UTF-8）。
+- 注入的形式是收件人会话里的一条 `user.message { source: "inject" }`，正文含发件人名；它不出现在 Lead 的消息历史里。
+
+## 工作流
+
+`workflow` 工具在父会话的一次调用里运行一段脚本或一张图（前台）。类型镜像：`WorkflowStartRecord` 等与 `ArchitectureGraph`。
+
+- `workflow.start` 带新生成的 `workflowId`（小写 UUID v4）与 `kind`；图运行另带 `architecture`（保存的图的 SHA-256）。脚本每次调用 `phase(name)` 写一条 `workflow.phase`。每个 `agent()` 成员在父会话里有一对 `subagent.start` / `subagent.end`，`executionForm: "workflow"`，带 `workflowId`。
+- `workflow.end.status` 为 `completed | failed | cancelled | interrupted`，`members` 为它建出的子会话数。某个成员失败时整体以 `failed` 结束并带 `error`，已完成成员的成果保留。
+- 同时运行的成员至多 4 个，一棵任务树的成员总数至多 16 个，一张图至多 16 个节点（`COLLABORATION_LIMITS`）。
+
+## 预设
+
+预设决定成员的人设、工具范围与模型参数，只填字段、不含代码。类型镜像：`AgentPreset`、`PresetFile`；校验：`assertPresetFile`（schema `PRESET_FILE_SCHEMA`）。
+
+- 文件：`.nexgent/presets/<name>.json`，`name` 字段必须等于文件基名，匹配 `^[a-z][a-z0-9-]{0,63}$`。字段：`formatVersion: 1`、`name`、`description`（一行，给选预设的模型看）、`persona?`（替换系统提示的默认人设段）、`tools?: { allow?, deny? }`、`sandboxMode?`、`model?`、`effort?`、`thinking?`、`maxSteps?`。未知字段与错误类型报 `config/invalid`。
+- 内置三份：`read-only-analyst`（只读分析）、`read-only-checker`（只读检查）、`general-executor`（通用执行者，继承父会话的模式）。同名时项目预设覆盖内置预设。
+- 预设只能收窄：`tools` 与父会话可见集合求交，`sandboxMode` 宽于父会话时报错（`permissions.md` §子会话继承）。
+
+## 架构图存储
+
+模型交给 `workflow` 的声明式图在执行前规范化并保存，供重放与步骤 4 的采用引用。移植自 PR #4 的 `architecture.ts` / `architecture-store.ts`。
+
+- 文件：`.nexgent/architectures/<sha256>.json`，内容 `{ "format": 1, "architecture": { "nodes": [...] } }`；`<sha256>` 是 `JSON.stringify({ format: 1, nodes })` 的小写十六进制哈希，`nodes` 先规范化（按 `id` 排序，`dependencies` 排序去重，`tools.allow` / `deny` 排序去重）。
+- 节点：`{ id, prompt, dependencies, preset?, tools?, model? }`；`id` 是成员名，图内唯一；依赖必须指向已有节点、不得成环，违者在保存前报可读错误，不写文件。
+- 写入：先写临时文件，再以硬链接发布到目标名（目标已存在则读回校验哈希）；文件一经写出不改。Windows 上硬链接需在验收中补测。
+
 ## 版本与兼容
 
 | 格式 | 版本字段 | 当前 | 升级方式 |
@@ -577,6 +643,7 @@ The earlier part of this conversation was compacted. Summary:
 - **不兼容旧 Python 数据**：Python 时代的 Episode、组织 SQLite、PR #4 的 `.nexgent/native/` 不读、不迁移（ADR 0001 决策 15）。
 - 步骤 4 的四个预留字段已经在 v1 中是可选字段，启用它们不升版本。
 - **步骤 2 的新记录类型在 v1 内追加**（计划已定：旧文件仍可读）。代价是：只认识步骤 1 记录集的读取方会把第一条步骤 2 记录当作无效行，持锁追加时还会截断其后的内容。步骤 1 没有对外发布的构建，`nexgent-app` 上的读取方与写入方同步升级，所以接受这一点；步骤 2 之后再加记录类型时，先评估是否已有对外发布的读取方，有则升版本。
+- **步骤 3 的九种新记录、`session.start.member` 与成果的成员字段也在 v1 内追加。** 评估结果：仍没有对外发布的构建（`main` 上的步骤 2 只供本仓库验收），读取方与写入方同步升级，所以不升版本；步骤 2 写出的会话照常读出、恢复与续写。
 
 ## schema 与读写测试
 
@@ -621,5 +688,12 @@ schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`
 2. 不合格的 `compaction`（保留段越界或不以 `user` 开始）与 `goal.update`（目标 ID 不符）在写入前被拒，文件不变。
 3. 步骤 1 写出的真实会话（夹具 `packages/session/tests/fixtures/step1-real-session.jsonl`，取自步骤 1 真实模型验收的第一轮及其 checkpoint）能被读出、恢复，并能在其后追加步骤 2 记录。
 4. `material.json` 与 `deliverable.json` 读写往返并通过 schema；含 `\` 的路径、大写或长度不对的 SHA-256 被拒。
+
+步骤 3 新增（`@nexgent/session`）：
+
+1. 九种新记录各一条写入后 `readAll` 逐字段相等并通过 schema；父会话里的这些记录不改变投影出的消息。
+2. 子会话的 `session.start.member` 与 `fork.seed` 往返，恢复后 `parentSessionId`、`member` 与 fork 历史一致；`fork.seed` 出现在消息之后、只给 `parentSessionId` 不给 `member` 时写入被拒。
+3. 成员名、`executionForm`、`MemberResult.status`、`TeamMessage.state`、`architecture` 哈希的非法值被 schema 拒绝。
+4. 步骤 2 写出的真实会话照常读出与恢复（在本地对 Library `validation-raw/step-2-20261011/` 的会话核对；原始 JSONL 不进仓库）。
 
 契约层（`packages/kernel/tests/contracts/`）：类型级断言固定记录集合与公共字段，纯函数（`addUsage`、工具限制交集、布局解析、profile 补丁）有运行时测试。

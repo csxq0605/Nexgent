@@ -10,6 +10,7 @@
  * only to that agent. Global registrations come from the root context.
  */
 import type { ToolApprovalAsk } from './approvals.js'
+import type { AgentAttribution, MemberIdentity } from './collaboration.js'
 import { NexgentError } from './errors.js'
 import type { JsonSchema, JsonValue } from './json.js'
 import type { ToolRecordInput } from './session.js'
@@ -66,6 +67,14 @@ export interface ToolContext {
    * Absent on hosts that do not support it (step-1 kernels, test fakes).
    */
   readonly appendRecord?: (record: ToolRecordInput) => Promise<void>
+  /**
+   * Step 3: the calling session's task tree attribution. A collaboration tool
+   * finds its parent agent with `ctx.agents.get(sessionId)`. Absent on hosts
+   * that do not support it.
+   */
+  readonly attribution?: AgentAttribution
+  /** Step 3: set when the calling session is a member (child session). */
+  readonly member?: MemberIdentity
 }
 
 /** What a handler returns; the loop wraps it into a `tool.result` record and a `tool` message. */
