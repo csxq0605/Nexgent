@@ -40,4 +40,8 @@ export interface NexgentBridge {
   invoke<M extends SdkMethodName>(method: M, input: SdkInput<M>): Promise<SdkResult<M>>
   onEvent(listener: (event: SdkEvent) => void): () => void
   readonly platform: string
+  /** `invoke('dialogs.pickDirectory', {})`: the native folder picker; `null` when cancelled. */
+  pickDirectory(): Promise<string | null>
+  /** `invoke('dialogs.pickFiles', {})`: the native multi-file picker; empty when cancelled. */
+  pickFiles(): Promise<readonly string[]>
 }

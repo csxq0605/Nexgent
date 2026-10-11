@@ -186,6 +186,9 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
     case 'goal.set':
       meta.goal = record.goal
       break
+    case 'session.title':
+      meta.title = record.title
+      break
     case 'goal.update': {
       const goal = meta.goal
       if (goal === undefined || goal.id !== record.goalId) {

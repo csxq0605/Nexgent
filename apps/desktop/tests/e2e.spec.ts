@@ -161,7 +161,7 @@ describe('desktop app (Electron)', () => {
           const api = (window as unknown as { nexgent: Record<string, unknown> }).nexgent
           return { keys: Object.keys(api).sort(), platform: api['platform'] }
         })
-        expect(bridge).toEqual({ keys: ['invoke', 'onEvent', 'platform'], platform: process.platform })
+        expect(bridge).toEqual({ keys: ['invoke', 'onEvent', 'pickDirectory', 'pickFiles', 'platform'], platform: process.platform })
 
         // Round trip.
         const info = await page.evaluate(() => (window as unknown as { nexgent: { invoke(m: string, i: unknown): Promise<unknown> } }).nexgent.invoke('app.info', {}))
@@ -282,6 +282,40 @@ describe('desktop app (Electron)', () => {
         expect(log).toContain('navigation refused: https://example.com/')
         // Chromium itself blocks app:// → file:// and top-level data: (navigation and window.open) before our handlers run;
         // the URL, window-count and openExternal checks above cover them.
+      } finally {
+        await app.close()
+      }
+    },
+    TIMEOUT * 2,
+  )
+
+  it(
+    'opens the native pickers for the page through the real SDK',
+    async () => {
+      const home = newHome()
+      const { app, page } = await launch(home, { realSdk: true })
+      try {
+        const asked: string[] = []
+        await app.evaluate(({ dialog }, dir) => {
+          const seen: string[] = []
+          ;(globalThis as { pickerCalls?: string[] }).pickerCalls = seen
+          dialog.showOpenDialog = (async (...args: unknown[]) => {
+            const options = args.at(-1) as { properties: string[] }
+            seen.push(options.properties.join(','))
+            return options.properties.includes('openDirectory')
+              ? { canceled: false, filePaths: [dir] }
+              : { canceled: false, filePaths: [`${dir}/a.csv`, `${dir}/b.csv`] }
+          }) as typeof dialog.showOpenDialog
+        }, join(home, 'chosen'))
+        expect(await page.evaluate(() => window.nexgent.pickDirectory())).toBe(join(home, 'chosen'))
+        expect(await page.evaluate(() => window.nexgent.pickFiles())).toEqual([join(home, 'chosen', 'a.csv'), join(home, 'chosen', 'b.csv')])
+        asked.push(...(await app.evaluate(() => (globalThis as { pickerCalls?: string[] }).pickerCalls!)))
+        expect(asked).toEqual(['openDirectory,createDirectory', 'openFile,multiSelections'])
+        await app.evaluate(({ dialog }) => {
+          dialog.showOpenDialog = (async () => ({ canceled: true, filePaths: [] })) as typeof dialog.showOpenDialog
+        })
+        expect(await page.evaluate(() => window.nexgent.pickDirectory())).toBeNull()
+        expect(await page.evaluate(() => window.nexgent.pickFiles())).toEqual([])
       } finally {
         await app.close()
       }

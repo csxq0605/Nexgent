@@ -82,7 +82,7 @@ export const TOOL_TIMEOUT = 'TOOL_TIMEOUT'
 /** Upper bound on `TurnFileTracker.endTurn` after a cancelled turn (`agent-hooks.md` §失败语义). */
 export const FILES_END_CANCEL_MS = 5_000
 /** Record types {@link Agent.appendHostRecord} accepts. */
-export const HOST_RECORD_TYPES: readonly HostRecordType[] = ['material.added', 'goal.set', 'goal.update']
+export const HOST_RECORD_TYPES: readonly HostRecordType[] = ['material.added', 'goal.set', 'goal.update', 'session.title']
 /** `costCaps.perProject.windowDays` when the config leaves it out (`data-formats.md` §项目配置). */
 export const DEFAULT_PROJECT_WINDOW_DAYS = 30
 
@@ -453,7 +453,7 @@ export class Agent {
   }
 
   /**
-   * Append a host record (`material.added`, `goal.set`, `goal.update`;
+   * Append a host record (`material.added`, `goal.set`, `goal.update`, `session.title`;
    * {@link HostRecordSink}). While a turn runs the record gets that turn's
    * number; between turns it carries none. Rejects with
    * `session/invalid-record` for any other type or a `turn` that is not the

@@ -4,8 +4,9 @@
  * Runs sandboxed, so it is one CommonJS file that requires nothing but
  * `electron`. It reads the window's IPC token from its own `process.argv`,
  * keeps it in this closure, and exposes exactly `window.nexgent =
- * { invoke, onEvent, platform }`; the page never sees `ipcRenderer` or the
- * token.
+ * { invoke, onEvent, platform, pickDirectory, pickFiles }` (the last two are
+ * shorthands for `invoke('dialogs.*', {})`); the page never sees
+ * `ipcRenderer` or the token.
  */
 import electron = require('electron')
 import type { SdkEvent, SdkInput, SdkMethodName, SdkResult } from '@nexgent/sdk'
@@ -34,8 +35,14 @@ function onEvent(listener: (event: SdkEvent) => void): () => void {
   }
 }
 
+// Native pickers: shorthands for the whitelisted `dialogs.*` methods, through the same guarded call.
+const pickDirectory = (): Promise<string | null> => invoke('dialogs.pickDirectory', {})
+const pickFiles = (): Promise<readonly string[]> => invoke('dialogs.pickFiles', {})
+
 electron.contextBridge.exposeInMainWorld('nexgent', {
   invoke,
   onEvent,
   platform: process.platform,
+  pickDirectory,
+  pickFiles,
 })

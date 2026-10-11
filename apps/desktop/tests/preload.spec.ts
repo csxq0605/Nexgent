@@ -48,6 +48,8 @@ function loadPreload(argv: string[]) {
       invoke: (method: string, input: unknown) => Promise<unknown>
       onEvent: (listener: (event: unknown) => void) => () => void
       platform: string
+      pickDirectory: () => Promise<unknown>
+      pickFiles: () => Promise<unknown>
     },
     exposedKeys: Object.keys(exposed),
     sent,
@@ -71,7 +73,7 @@ describe('preload', () => {
   it('exposes exactly invoke, onEvent and platform under window.nexgent', () => {
     const { bridge, exposedKeys } = loadPreload(argv)
     expect(exposedKeys).toEqual(['nexgent'])
-    expect(Object.keys(bridge).sort()).toEqual(['invoke', 'onEvent', 'platform'])
+    expect(Object.keys(bridge).sort()).toEqual(['invoke', 'onEvent', 'pickDirectory', 'pickFiles', 'platform'])
     expect(bridge.platform).toBe('linux')
     expect(JSON.stringify(bridge)).not.toContain('the-token')
   })
@@ -80,6 +82,16 @@ describe('preload', () => {
     const { bridge, sent } = loadPreload(argv)
     expect(await bridge.invoke('app.info', {})).toBe('r')
     expect(sent).toEqual([{ channel: CALL_CHANNEL, payload: { token: 'the-token', method: 'app.info', input: {} } }])
+  })
+
+  it('sends the pickers through the guarded call as dialogs.* methods', async () => {
+    const { bridge, sent } = loadPreload(argv)
+    await bridge.pickDirectory()
+    await bridge.pickFiles()
+    expect(sent).toEqual([
+      { channel: CALL_CHANNEL, payload: { token: 'the-token', method: 'dialogs.pickDirectory', input: {} } },
+      { channel: CALL_CHANNEL, payload: { token: 'the-token', method: 'dialogs.pickFiles', input: {} } },
+    ])
   })
 
   it('sends an empty token when argv carries none (the main process then denies)', async () => {

@@ -67,6 +67,7 @@ import {
 } from './api.js'
 import { bootProjectApp } from './boot.js'
 import { writeExportBundle } from './export.js'
+import { listProjectFiles } from './files.js'
 import { historyItems, sessionSummary, turnUsage } from './history.js'
 import { RecentProjects } from './recent.js'
 import { describeApiKey, readSettings, secretValues, setApiKey, updateSettings, type CredentialEnv } from './settings.js'
@@ -743,6 +744,28 @@ export class LocalNexgentSdk implements NexgentSdk {
           sdkVersion: SDK_API_VERSION,
           now: () => this.now(),
         })
+      },
+
+      'sessions.rename': async input => {
+        const project = this.project(input.projectId)
+        const title = typeof input.title === 'string' ? input.title.trim() : ''
+        if (title === '') throw invalid('title must be a non-empty string')
+        const entry = await this.ensureSession(project, input.sessionId)
+        await entry.agent.appendHostRecord({ type: 'session.title', title })
+        return this.summary(project, input.sessionId)
+      },
+
+      'files.list': input => listProjectFiles(this.project(input.projectId).root),
+
+      'dialogs.pickDirectory': async () => {
+        const pick = this.options.pickDirectory
+        if (pick === undefined) throw new NexgentError('internal', 'file dialogs are only available in the desktop app')
+        return pick()
+      },
+      'dialogs.pickFiles': async () => {
+        const pick = this.options.pickFiles
+        if (pick === undefined) throw new NexgentError('internal', 'file dialogs are only available in the desktop app')
+        return pick()
       },
 
       'turns.send': async input => {

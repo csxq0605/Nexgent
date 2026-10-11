@@ -170,6 +170,7 @@
 | `feedback`（步骤 2） | 反馈轮的 `turn.start` 之后 | `turn`、`feedback: FeedbackEntry` |
 | `goal.set`（步骤 2） | 宿主设定持久目标 | `turn?`、`goal: Goal` |
 | `goal.update`（步骤 2） | 宿主更新目标状态或文本 | `turn?`、`goalId`、`status`、`text?`、`note?` |
+| `session.title`（步骤 2） | 用户给对话改名（`sessions.rename`） | `turn?`、`title`（非空，宿主已去掉首尾空白） |
 | `compaction`（步骤 2） | 压缩成功后、使用压缩历史的那次模型请求之前 | `turn`、`step`、`summary`、`keepMessages`、`compactedMessages`、`requestId`、`usage`、`trigger: { inputTokens, threshold }` |
 
 字段细则：
@@ -198,7 +199,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
   → turn.files → turn.end → [checkpoint]
 ```
 
-`material.added`、`goal.set`、`goal.update` 由宿主写，可以出现在两轮之间，也可以出现在一轮之中（此时带 `turn`）。
+`material.added`、`goal.set`、`goal.update`、`session.title` 由宿主写，可以出现在两轮之间，也可以出现在一轮之中（此时带 `turn`）。
 
 ### 示例
 
@@ -277,6 +278,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `error` | 无 | 无 |
 | `goal.set`（步骤 2） | 无 | `goal = record.goal`（替换旧目标） |
 | `goal.update`（步骤 2） | 无 | `goal.status = status`；给了 `text` 则替换；给了 `note` 则替换；`goal.updatedAt = record.ts` |
+| `session.title`（步骤 2） | 无 | `title = record.title`（覆盖 `session.start` 的标题） |
 | `compaction`（步骤 2） | `messages = [{ role: "user", content: renderCompactionSummary(summary) }, ...messages 的最后 keepMessages 条]` | `lastCompactionSeq = seq` |
 | `material.added`、`deliverable.presented`、`turn.files`、`feedback`（步骤 2） | 无 | 无 |
 | 任意记录 | — | `lastSeq = seq` |

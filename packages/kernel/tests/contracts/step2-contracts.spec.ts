@@ -47,7 +47,7 @@ describe('step-2 contracts', () => {
   })
 
   it('limit which records hosts and tools may append', () => {
-    expectTypeOf<HostRecordInput['type']>().toEqualTypeOf<'material.added' | 'goal.set' | 'goal.update'>()
+    expectTypeOf<HostRecordInput['type']>().toEqualTypeOf<'material.added' | 'goal.set' | 'goal.update' | 'session.title'>()
     expectTypeOf<ToolRecordInput['type']>().toEqualTypeOf<'deliverable.presented'>()
     expectTypeOf<'compaction'>().toExtend<SessionRecordType>()
   })
