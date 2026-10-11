@@ -40,11 +40,13 @@
 | --- | --- |
 | [`research/pr4-review-and-plan-2026-10/README.md`](research/pr4-review-and-plan-2026-10/README.md) | 计划，2026-10-07 |
 | [`adr/0001-reference-rewrite.md`](adr/0001-reference-rewrite.md) | 已接受：参考重写与计划 4.9 的全部决策 |
-| [`adr/0002-claude-platform-route.md`](adr/0002-claude-platform-route.md) | 已接受：模型路由改为 Claude Platform，默认 Claude Sonnet 5.5 |
+| [`adr/0002-claude-platform-route.md`](adr/0002-claude-platform-route.md) | 已接受：模型路由改为 Claude Platform，默认 Claude Sonnet 5.5（决策 3 的默认值被 ADR 0003 替代） |
+| [`adr/0003-thinking-on-by-default.md`](adr/0003-thinking-on-by-default.md) | 已接受：执行默认开启 thinking |
 | [`reference-map.md`](reference-map.md) | 步骤 0 建立，随各步更新 |
 | [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
 | [`plan/step-2-work-partition.md`](plan/step-2-work-partition.md) | 步骤 2 分工与验收设计，用户 2026-10-11 已定 |
-| [`spec/data-formats.md`](spec/data-formats.md) | 步骤 1 章节已写定；能力清单、材料与成果元数据留标题 |
-| [`spec/permissions.md`](spec/permissions.md) | 步骤 1 章节已写定；插件安装审批（步骤 4）、本地 IPC（步骤 2）留标题 |
+| [`spec/data-formats.md`](spec/data-formats.md) | 步骤 1、步骤 2 章节已写定（材料、成果、反馈、持久目标、压缩）；能力清单留标题 |
+| [`spec/permissions.md`](spec/permissions.md) | 步骤 1、步骤 2 章节已写定（本地 IPC 与访问令牌）；插件安装审批（步骤 4）留标题 |
+| [`spec/agent-hooks.md`](spec/agent-hooks.md) | 步骤 2：agent loop 挂点、步骤 2 工具、系统提示增量、技能 |
 | [`validation/README.md`](validation/README.md) | 证据政策 |
 | [`validation/TEMPLATE.md`](validation/TEMPLATE.md) | 验收记录模板 |

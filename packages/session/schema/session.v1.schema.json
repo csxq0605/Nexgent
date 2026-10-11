@@ -36,6 +36,27 @@
     },
     {
       "$ref": "#/$defs/approvalGrantRecord"
+    },
+    {
+      "$ref": "#/$defs/materialAddedRecord"
+    },
+    {
+      "$ref": "#/$defs/deliverablePresentedRecord"
+    },
+    {
+      "$ref": "#/$defs/turnFilesRecord"
+    },
+    {
+      "$ref": "#/$defs/feedbackRecord"
+    },
+    {
+      "$ref": "#/$defs/goalSetRecord"
+    },
+    {
+      "$ref": "#/$defs/goalUpdateRecord"
+    },
+    {
+      "$ref": "#/$defs/compactionRecord"
     }
   ],
   "$defs": {
@@ -352,6 +373,196 @@
         }
       }
     },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "portablePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\\\]+$"
+    },
+    "materialRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "originalName",
+        "path",
+        "size",
+        "sha256",
+        "mediaType"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "originalName": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "path": {
+          "$ref": "#/$defs/portablePath"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "mediaType": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "deliverableFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size",
+        "sha256",
+        "mediaType"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/portablePath"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "mediaType": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "deliverableVersionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deliverableId",
+        "version",
+        "title",
+        "summary",
+        "files"
+      ],
+      "properties": {
+        "deliverableId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "version": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "title": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/deliverableFile"
+          }
+        }
+      }
+    },
+    "fileChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "change"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/portablePath"
+        },
+        "change": {
+          "enum": [
+            "added",
+            "modified",
+            "deleted"
+          ]
+        }
+      }
+    },
+    "feedbackEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "deliverableId",
+        "version",
+        "comment"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "deliverableId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "version": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "rating": {
+          "enum": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        "comment": {
+          "type": "string"
+        }
+      }
+    },
+    "goalStatus": {
+      "enum": [
+        "active",
+        "completed",
+        "abandoned"
+      ]
+    },
+    "goal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "text",
+        "status",
+        "setAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "text": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/goalStatus"
+        },
+        "setAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
     "turnEndReason": {
       "oneOf": [
         {
@@ -476,6 +687,12 @@
         },
         "lastSeq": {
           "$ref": "#/$defs/positiveInteger"
+        },
+        "goal": {
+          "$ref": "#/$defs/goal"
+        },
+        "lastCompactionSeq": {
+          "$ref": "#/$defs/positiveInteger"
         }
       }
     },
@@ -596,8 +813,15 @@
         "source": {
           "enum": [
             "user",
-            "inject"
+            "inject",
+            "feedback"
           ]
+        },
+        "materials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
         }
       }
     },
@@ -936,6 +1160,290 @@
         },
         "grant": {
           "$ref": "#/$defs/approvalGrant"
+        }
+      }
+    },
+    "materialAddedRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "material"
+      ],
+      "properties": {
+        "type": {
+          "const": "material.added"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "material": {
+          "$ref": "#/$defs/materialRef"
+        }
+      }
+    },
+    "deliverablePresentedRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "step",
+        "toolCallId",
+        "deliverable"
+      ],
+      "properties": {
+        "type": {
+          "const": "deliverable.presented"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "step": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "toolCallId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "deliverable": {
+          "$ref": "#/$defs/deliverableVersionRef"
+        }
+      }
+    },
+    "turnFilesRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "changes"
+      ],
+      "properties": {
+        "type": {
+          "const": "turn.files"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fileChange"
+          }
+        },
+        "omitted": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "feedbackRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "feedback"
+      ],
+      "properties": {
+        "type": {
+          "const": "feedback"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "feedback": {
+          "$ref": "#/$defs/feedbackEntry"
+        }
+      }
+    },
+    "goalSetRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "goal"
+      ],
+      "properties": {
+        "type": {
+          "const": "goal.set"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "goal": {
+          "$ref": "#/$defs/goal"
+        }
+      }
+    },
+    "goalUpdateRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "goalId",
+        "status"
+      ],
+      "properties": {
+        "type": {
+          "const": "goal.update"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "goalId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "$ref": "#/$defs/goalStatus"
+        },
+        "text": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "compactionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "step",
+        "summary",
+        "keepMessages",
+        "compactedMessages",
+        "requestId",
+        "usage",
+        "trigger"
+      ],
+      "properties": {
+        "type": {
+          "const": "compaction"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "step": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "keepMessages": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "compactedMessages": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "requestId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "trigger": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "inputTokens",
+            "threshold"
+          ],
+          "properties": {
+            "inputTokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "threshold": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       }
     }

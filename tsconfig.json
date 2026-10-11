@@ -18,6 +18,9 @@
     },
     {
       "path": "packages/workspace"
+    },
+    {
+      "path": "packages/sdk"
     }
   ]
 }

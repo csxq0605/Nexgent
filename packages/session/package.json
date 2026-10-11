@@ -11,7 +11,9 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./schema/session.v1.schema.json": "./schema/session.v1.schema.json"
+    "./schema/session.v1.schema.json": "./schema/session.v1.schema.json",
+    "./schema/material.v1.schema.json": "./schema/material.v1.schema.json",
+    "./schema/deliverable.v1.schema.json": "./schema/deliverable.v1.schema.json"
   },
   "files": [
     "dist",
