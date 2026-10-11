@@ -27,9 +27,10 @@ import {
   type ScriptedTurn,
   type ScriptedUsage,
 } from './script.js'
+import { RoutedQueues, type ScriptRouting } from './routing.js'
 
 /** Options for {@link scriptedProvider}. */
-export interface ScriptedProviderOptions {
+export interface ScriptedProviderOptions extends ScriptRouting<LLMRequest> {
   /** Route facts; defaults to `{ id: 'scripted', endpoint: 'scripted://local', defaultModel: 'scripted-model' }`. */
   readonly info?: Partial<LLMProviderInfo>
   /** Delay before each emitted chunk in ms (default 0); a turn's `chunkDelayMs` wins. */
@@ -44,6 +45,8 @@ export interface ScriptedProviderCall {
   readonly request: LLMRequest
   /** The options as received. */
   readonly options: LLMCompleteOptions | undefined
+  /** Route key that answered this call; absent for the default script. */
+  readonly route?: string
   /** Events yielded so far, in order. */
   readonly events: LLMStreamEvent[]
 }
@@ -54,11 +57,15 @@ export interface ScriptedProvider extends LLMProvider {
   readonly calls: readonly ScriptedProviderCall[]
   /** Shorthand for `calls.map((c) => c.request)`. */
   readonly requests: readonly LLMRequest[]
-  /** Script entries not yet consumed. */
+  /** Script entries not yet consumed, over all queues. */
   readonly remaining: number
-  /** Append entries to the script. */
+  /** Entries left per queue; the default script is under `''`. */
+  remainingByRoute(): Record<string, number>
+  /** Append entries to the default script. */
   push(...entries: ScriptEntry<LLMRequest>[]): void
-  /** Throw if any script entry is still unconsumed. */
+  /** Append entries to a route's queue (requires `routeKey`). */
+  pushTo(route: string, ...entries: ScriptEntry<LLMRequest>[]): void
+  /** Throw if any script entry is still unconsumed (names the queues). */
   assertConsumed(): void
 }
 
@@ -102,6 +109,10 @@ function bodyEvents(turn: ScriptedTurn, requestNumber: number): LLMStreamEvent[]
  * A `timeout` fault hangs until abort, or until `options.timeoutMs` /
  * `options.streamIdleTimeoutMs` elapse (then `error` with `llm/timeout`).
  * An exhausted script yields `error` with code `internal`.
+ *
+ * With `options.routes` and `options.routeKey`, each call is answered from
+ * the queue of its route key (the default script when the key is unknown or
+ * absent), so concurrent sessions each replay their own script in order.
  * @param script - entries consumed in order, one per request.
  * @param options - route facts and pacing.
  */
@@ -109,7 +120,7 @@ export function scriptedProvider(
   script: readonly ScriptEntry<LLMRequest>[] = [],
   options: ScriptedProviderOptions = {},
 ): ScriptedProvider {
-  const queue = [...script]
+  const queues = new RoutedQueues<LLMRequest>('scriptedProvider', script, options)
   const calls: ScriptedProviderCall[] = []
   const info: LLMProviderInfo = {
     id: options.info?.id ?? 'scripted',
@@ -119,7 +130,9 @@ export function scriptedProvider(
 
   async function* run(request: LLMRequest, completeOptions: LLMCompleteOptions | undefined): AsyncGenerator<LLMStreamEvent> {
     const index = calls.length
+    const route = queues.routeOf(request)
     const call: ScriptedProviderCall = {
+      ...route === undefined ? {} : { route },
       index,
       request: { ...request, messages: [...request.messages] },
       options: completeOptions,
@@ -133,9 +146,10 @@ export function scriptedProvider(
     const signal = request.signal
     const aborted = (): LLMStreamEvent => emit({ type: 'done', finishReason: 'aborted' })
 
-    const entry = queue.shift()
+    const entry = queues.shift(route)
     if (entry === undefined) {
-      yield emit({ type: 'error', error: errorInfo('internal', `scriptedProvider: script exhausted at request #${index + 1}`) })
+      const where = route === undefined ? 'script' : `script for route "${route}"`
+      yield emit({ type: 'error', error: errorInfo('internal', `scriptedProvider: ${where} exhausted at request #${index + 1}`) })
       return
     }
     const turn = resolveEntry(entry, request, index)
@@ -203,11 +217,11 @@ export function scriptedProvider(
     info,
     get calls() { return calls },
     get requests() { return calls.map((c) => c.request) },
-    get remaining() { return queue.length },
-    push(...entries) { queue.push(...entries) },
-    assertConsumed() {
-      if (queue.length > 0) throw new Error(`scriptedProvider: ${queue.length} script entr${queue.length === 1 ? 'y' : 'ies'} not consumed`)
-    },
+    get remaining() { return queues.remaining },
+    remainingByRoute() { return queues.remainingByRoute() },
+    push(...entries) { queues.push(entries) },
+    pushTo(route, ...entries) { queues.pushTo(route, entries) },
+    assertConsumed() { queues.assertConsumed() },
     complete(request, completeOptions) {
       let started = false
       return {
