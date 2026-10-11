@@ -9,14 +9,15 @@
  * Never calls a real model: every SDK is created against a loopback server.
  */
 import { spawnSync } from 'node:child_process'
+import { createServer } from 'node:http'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { REPO_ROOT } from './harness.mjs'
-import { MATERIAL, SCRIPTED_API_KEY, STALL_TEXT, TASKS, buildStep3Script, readonlyPresets } from './step3-scenario.mjs'
+import { MATERIAL, PAGE, SCRIPTED_API_KEY, STALL_TEXT, TASKS, TOOL_FILES, WF_STALL_TEXT, buildStep3Script, readonlyPresets } from './step3-scenario.mjs'
 import { filesContaining } from './step2-headless.mjs'
 import { CLI_BIN, runTurn } from './step2-runtime.mjs'
-import { createStep3Sdk, loadStep3Packages } from './step3-runtime.mjs'
+import { TEST_WEB_ADDRESS, createStep3Sdk, loadStep3Packages } from './step3-runtime.mjs'
 
 /** The kill driver: one SDK turn in a child process (step3-driver.mjs). */
 export const DRIVER = fileURLToPath(new URL('./step3-driver.mjs', import.meta.url))
@@ -106,6 +107,47 @@ async function runDirect(h, pkgs, work, script, servers, log) {
   return obs
 }
 
+/** Tool results of a turn's events (the root's and its members'). */
+const toolResultsOf = events => events.filter(e => e.type === 'tool.result').map(e => ({
+  sessionId: e.sessionId,
+  name: e.result.name,
+  callId: e.result.toolCallId ?? e.result.callId ?? e.result.id,
+  isError: e.result.isError,
+  code: e.error?.code ?? e.result.error?.code,
+  content: typeof e.result.content === 'string' ? e.result.content : JSON.stringify(e.result.content),
+}))
+
+/**
+ * The local page server of H19, on {@link TEST_WEB_ADDRESS}: `/stock.html` is the page,
+ * `/redirect` sends a 302 to the same page on 127.0.0.1. Counts requests per path.
+ */
+async function pageServer() {
+  const hits = {}
+  let port
+  const server = createServer((req, res) => {
+    hits[req.url] = (hits[req.url] ?? 0) + 1
+    if (req.url === '/stock.html') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(PAGE.html)
+    } else if (req.url === '/redirect') {
+      res.writeHead(302, { location: `http://127.0.0.1:${port}/stock.html` })
+      res.end()
+    } else {
+      res.writeHead(404)
+      res.end()
+    }
+  })
+  await new Promise((resolve, reject) => server.once('error', reject).listen(0, TEST_WEB_ADDRESS, resolve))
+  port = server.address().port
+  return {
+    hits,
+    pageUrl: `http://${TEST_WEB_ADDRESS}:${port}/stock.html`,
+    loopbackUrl: `http://127.0.0.1:${port}/stock.html`,
+    redirectUrl: `http://${TEST_WEB_ADDRESS}:${port}/redirect`,
+    close: () => new Promise(resolve => server.close(() => resolve())),
+  }
+}
+
 /** Tool names a request offered the model. */
 const toolNames = body => (Array.isArray(body?.tools) ? body.tools.map(t => t?.name).filter(n => typeof n === 'string') : [])
 
@@ -167,7 +209,7 @@ async function runDelegation(h, pkgs, work, servers, log) {
     return {
       reason: result?.reason,
       error: error === undefined ? undefined : String(error),
-      toolResults: events.filter(e => e.type === 'tool.result').map(e => ({ sessionId: e.sessionId, name: e.result.name, callId: e.result.callId, isError: e.result.isError, content: typeof e.result.content === 'string' ? e.result.content : JSON.stringify(e.result.content) })),
+      toolResults: toolResultsOf(events),
     }
   }
 
@@ -228,11 +270,11 @@ async function runDelegation(h, pkgs, work, servers, log) {
  * The read-only project (H12): sandbox read-only, two project presets; one turn that delegates
  * with a wider preset (refused) and with a preset that denies the shell.
  */
-async function runReadonly(h, pkgs, work, servers, log) {
+async function runReadonly(h, pkgs, work, servers, log, web) {
   const root = join(work, 'readonly-project')
   const home = join(work, 'home')
   await mkdir(root, { recursive: true })
-  const script = buildStep3Script(h)
+  const script = buildStep3Script(h, { pageUrl: web.pageUrl })
   const presets = readonlyPresets()
   const obs = { root, shell: presets.shell, requests: [] }
   const server = await h.scriptedModelServer({ script: script.readonly.lead, routes: script.readonly.routes, routeKey: h.routeByMember(h.sessionText) })
@@ -260,13 +302,140 @@ async function runReadonly(h, pkgs, work, servers, log) {
     const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS.readonly })
     obs.reason = result?.reason
     obs.error = error === undefined ? undefined : String(error)
-    obs.toolResults = events.filter(e => e.type === 'tool.result').map(e => ({ sessionId: e.sessionId, name: e.result.name, callId: e.result.callId, isError: e.result.isError, content: typeof e.result.content === 'string' ? e.result.content : JSON.stringify(e.result.content) }))
+    obs.toolResults = toolResultsOf(events)
   } finally {
     await sdk.dispose()
   }
   obs.requests = server.requests.map(r => slimRequest(h, 'readonly', r))
   obs.unconsumed = server.remainingByRoute()
   Object.assign(obs, await readSessions(h, root))
+  obs.ledger = (await h.readLedgerRecords(root)).records
+  obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+  return obs
+}
+
+/**
+ * The tools project (H17, H18, H19): one root session, direct turns using run_code,
+ * write_spreadsheet and the test web_fetch row.
+ */
+async function runTools(h, pkgs, work, servers, log, web) {
+  const root = join(work, 'tools-project')
+  const home = join(work, 'home')
+  await mkdir(join(root, 'data'), { recursive: true })
+  await writeFile(join(root, TOOL_FILES.input.path), TOOL_FILES.input.content)
+  const outsidePath = join(work, TOOL_FILES.outside)
+  await writeFile(outsidePath, 'OUTSIDE-SECRET\n')
+  const script = buildStep3Script(h, { pageUrl: web.pageUrl, loopbackUrl: web.loopbackUrl, redirectUrl: web.redirectUrl, outsidePath })
+  const server = await h.scriptedModelServer({ script: script.tools.lead, routes: script.tools.routes, routeKey: h.routeByMember(h.sessionText) })
+  servers.push({ phase: 'tools', server })
+  const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
+  const obs = { root, outsidePath, phases: {} }
+  const sdk = createStep3Sdk(pkgs, { env, home, web: 'test' })
+  try {
+    const { projectId } = await sdk.call('projects.open', { root, create: true })
+    obs.sessionId = (await sdk.call('sessions.create', { projectId, title: 'step-3 tools' })).sessionId
+    for (const phase of ['ptc', 'sheet', 'web']) {
+      log(`phase ${phase}`)
+      const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS[phase] })
+      obs.phases[phase] = { reason: result?.reason, error: error === undefined ? undefined : String(error), toolResults: toolResultsOf(events) }
+      if (phase === 'ptc') {
+        // The timed-out program printed its pid; it must be gone once the tool returned.
+        const pid = Number(/PTC-PID=(\d+)/.exec(obs.phases.ptc.toolResults.find(t => t.callId === 'call-ptc-timeout')?.content ?? '')?.[1])
+        obs.phases.ptc.timeoutPid = Number.isInteger(pid) ? pid : null
+        obs.phases.ptc.timeoutPidAlive = Number.isInteger(pid) ? h.isProcessAlive(pid) : null
+        obs.phases.ptc.descendants = await h.descendantPids(process.pid)
+      }
+    }
+  } finally {
+    await sdk.dispose()
+  }
+  obs.requests = server.requests.map(r => slimRequest(h, 'tools', r))
+  obs.unconsumed = server.remainingByRoute()
+  obs.files = {}
+  for (const path of [TOOL_FILES.output, TOOL_FILES.sheet, ...TOOL_FILES.rejected]) {
+    obs.files[path] = await readFile(join(root, path)).then(bytes => bytes.toString('base64'), () => null)
+  }
+  obs.webHits = { ...web.hits }
+  Object.assign(obs, await readSessions(h, root))
+  obs.ledger = (await h.readLedgerRecords(root)).records
+  obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+  return obs
+}
+
+/**
+ * The workflow project (H07, H08, H09): a script workflow and graphs in process; a workflow
+ * killed in a child process while its second member streams; a resume turn after it.
+ */
+async function runWorkflowProject(h, pkgs, work, servers, log) {
+  const root = join(work, 'workflow-project')
+  const home = join(work, 'home')
+  await mkdir(root, { recursive: true })
+  const script = buildStep3Script(h)
+  const obs = { root, phases: {}, requests: [] }
+  const serverFor = async (phase) => {
+    const server = await h.scriptedModelServer({ script: script[phase].lead, routes: script[phase].routes, routeKey: h.routeByMember(h.sessionText) })
+    servers.push({ phase, server })
+    return server
+  }
+  const envFor = server => ({ NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home })
+  const collect = (phase, server, extra = {}) => {
+    obs.requests.push(...server.requests.map(r => slimRequest(h, phase, r)))
+    obs.phases[phase] = { ...(obs.phases[phase] ?? {}), ...extra, unconsumed: server.remainingByRoute() }
+  }
+  const turn = async (sdk, projectId, phase) => {
+    log(`phase ${phase}`)
+    const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS[phase] })
+    obs.phases[phase] = { reason: result?.reason, error: error === undefined ? undefined : String(error), toolResults: toolResultsOf(events) }
+  }
+
+  const server = await serverFor('workflow')
+  let sdk = createStep3Sdk(pkgs, { env: envFor(server), home })
+  let projectId
+  try {
+    projectId = (await sdk.call('projects.open', { root, create: true })).projectId
+    obs.sessionId = (await sdk.call('sessions.create', { projectId, title: 'step-3 workflow' })).sessionId
+    await turn(sdk, projectId, 'wfScript')
+    await turn(sdk, projectId, 'wfGraph')
+  } finally {
+    await sdk.dispose()
+  }
+  collect('workflow', server)
+  obs.architectures = await readdir(join(root, '.nexgent', 'architectures')).catch(() => [])
+
+  {
+    log('phase wfKill')
+    const s = await serverFor('wfKill')
+    const spec = { root, home, sessionId: obs.sessionId, text: TASKS.wfKill, env: envFor(s) }
+    const handle = h.spawnNode([DRIVER, JSON.stringify(spec)], { cwd: work })
+    const ready = await handle.waitForOutput(/"type":"driver\.ready"[^\n]*/, 60_000, 'stdout').then(() => true, () => false)
+    const streaming = await h.waitFor(() => s.requests.find(r => r.route === 'late' && r.chunksSent >= 1), { timeoutMs: 60_000, label: 'late member streaming' }).then(() => true, () => false)
+    const descendantsBefore = await h.descendantPids(handle.pid)
+    const exit = await handle.kill('SIGKILL', { tree: true })
+    // The workflow script runs in its own process group (@nexgent/ptc); it must notice the host is gone.
+    const survivorsAt = async () => descendantsBefore.filter(h.isProcessAlive)
+    const settled = await h.waitFor(async () => (await survivorsAt()).length === 0, { timeoutMs: 5_000, label: 'workflow processes gone' }).then(() => true, () => false)
+    const survivors = await survivorsAt()
+    for (const pid of survivors) await h.killProcessTree(pid).catch(() => undefined)
+    collect('wfKill', s, { ready, streaming, stallText: WF_STALL_TEXT, exit: { code: exit.code, signal: exit.signal }, mainAlive: h.isProcessAlive(handle.pid), descendantsBefore, survivors, settled })
+  }
+  obs.afterKill = await readSessions(h, root)
+
+  {
+    const s = await serverFor('wfResume')
+    sdk = createStep3Sdk(pkgs, { env: envFor(s), home })
+    try {
+      projectId = (await sdk.call('projects.open', { root })).projectId
+      await sdk.openSession({ projectId, sessionId: obs.sessionId })
+      await turn(sdk, projectId, 'wfResume')
+      obs.deliverables = await slimDeliverables(sdk, projectId)
+    } finally {
+      await sdk.dispose()
+    }
+    collect('wfResume', s)
+  }
+  Object.assign(obs, await readSessions(h, root))
+  obs.ledger = (await h.readLedgerRecords(root)).records
+  obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
   return obs
 }
 
@@ -287,8 +456,12 @@ export async function runHeadlessScenario(harness, work, { log = () => {}, root 
   try {
     const direct = await runDirect(harness, loaded.pkgs, work, script, servers, log)
     const delegation = await runDelegation(harness, loaded.pkgs, work, servers, log)
-    const readonly = await runReadonly(harness, loaded.pkgs, work, servers, log)
-    return { repo, direct, delegation, readonly }
+    const web = await pageServer()
+    servers.push({ server: web })
+    const readonly = await runReadonly(harness, loaded.pkgs, work, servers, log, web)
+    const tools = await runTools(harness, loaded.pkgs, work, servers, log, web)
+    const workflow = await runWorkflowProject(harness, loaded.pkgs, work, servers, log)
+    return { repo, direct, delegation, readonly, tools, workflow }
   } finally {
     await Promise.all(servers.map(s => (s.server ?? s).close().catch(() => undefined)))
     await harness.killAllSpawned().catch(() => undefined)

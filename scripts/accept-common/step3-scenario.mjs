@@ -20,6 +20,20 @@
  *   read-only project (sandbox read-only, two project presets):
  *     readonly   delegate with preset `wide` (workspace-write: refused, no member),
  *                then `quiet` with preset `noshell` (denies the shell tool) (H12)
+ *              then fetches the test page with the shipped `web_fetch` (loopback: refused) (H19)
+ *   tools project (direct, workspace-write, test `web_fetch` row):
+ *     ptc        run_code reads and writes project files and returns process.env; reads a
+ *                file outside the project (refused); loops past its timeout (H17)
+ *     sheet      write_spreadsheet with formulas, then external reference, unknown function,
+ *                division by zero and too many sheets (each refused, nothing written) (H18)
+ *     web        web_fetch of the local page (Markdown), of 127.0.0.1, of a private address
+ *                and of a redirect to 127.0.0.1 (refused) (H19)
+ *   workflow project:
+ *     wfScript   five parallel members (cap 4 at a time) then a pipeline summariser that
+ *                writes and presents final/summary.md (H07)
+ *     wfGraph    a three-node graph, then a graph with a cycle (refused) (H08)
+ *     wfKill     in a child process: `early` completes, `late` stalls; killed there (H09)
+ *     wfResume   after the kill: a plain turn (no member may run again)
  *   H15 reads the tool lists of every member request against the root's.
  */
 
@@ -55,6 +69,48 @@ export function readonlyPresets() {
   }
 }
 
+/** Files of the tools project. */
+export const TOOL_FILES = {
+  input: { path: 'data/input.txt', content: 'restock p01 and p02\n' },
+  output: 'data/output.txt',
+  outside: 'outside-secret.txt',
+  sheet: 'sheets/plan.xlsx',
+  rejected: ['sheets/external.xlsx', 'sheets/unknown.xlsx', 'sheets/divzero.xlsx', 'sheets/too-many.xlsx'],
+}
+
+/** The spreadsheet the sheet phase writes: values plus formulas, and the cached values a correct writer computes. */
+export const SHEET = {
+  rows: [['SKU', 'Weekly', 'Weeks', 'Target'], ['P01', 8, 3, '=B2*C2'], ['P02', 5.5, 4, '=B3*C3'], ['Total', null, null, '=SUM(D2:D3)']],
+  formulas: { D2: 'B2*C2', D3: 'B3*C3', D4: 'SUM(D2:D3)' },
+  values: { D2: 24, D3: 22, D4: 46 },
+}
+
+/** Text of the local page (H19): a heading, a table and a hidden paragraph that must not survive. */
+export const PAGE = {
+  html: '<!doctype html><html><head><title>Stock page</title><style>p{}</style><script>var STOCK_SCRIPT=1</script></head><body><h1>Stock levels</h1><p>PAGE-BODY-MARKER</p><table><tr><th>SKU</th><th>On hand</th></tr><tr><td>P01</td><td>14</td></tr></table><p hidden>HIDDEN-MARKER</p></body></html>',
+  heading: '# Stock levels',
+  marker: 'PAGE-BODY-MARKER',
+  hidden: ['HIDDEN-MARKER', 'STOCK_SCRIPT'],
+}
+
+/** Workflow members of the script phase. */
+export const WF_PARTS = ['part-1', 'part-2', 'part-3', 'part-4', 'part-5']
+/** The workflow member cap (README of @nexgent/workflow: at most 4 members run at once). */
+export const WF_MAX_CONCURRENT = 4
+/** Nodes of the three-node graph. */
+export const WF_GRAPH = { nodes: [
+  { id: 'gather', prompt: 'List the SKUs in one line.', dependencies: [] },
+  { id: 'check', prompt: 'Check the list for duplicates.', dependencies: ['gather'] },
+  { id: 'report', prompt: 'Report the result in one line.', dependencies: ['gather', 'check'] },
+] }
+/** A graph with a cycle (a → b → a). */
+export const WF_CYCLE = { nodes: [
+  { id: 'loop-a', prompt: 'A.', dependencies: ['loop-b'] },
+  { id: 'loop-b', prompt: 'B.', dependencies: ['loop-a'] },
+] }
+/** Text the `late` member streams before it stalls (the workflow kill point). */
+export const WF_STALL_TEXT = 'Late member is still counting'
+
 /** Turn texts, used both as the user's message and to recognise requests. */
 export const TASKS = {
   direct: 'Write a short restock plan into plan/restock.md and present it.',
@@ -65,6 +121,13 @@ export const TASKS = {
   resume: 'Continue after the crash: say where we are.',
   sameName: 'Have two writers each produce shared/notes.md.',
   readonly: 'Try a member with the wide preset, then one with the noshell preset.',
+  ptc: 'Use run_code to upper-case data/input.txt, then try the limits.',
+  sheet: 'Write the plan spreadsheet, then try the bad formulas.',
+  web: 'Fetch the stock page and try the blocked addresses.',
+  wfScript: 'Run a workflow: count the five parts in parallel, then summarise.',
+  wfGraph: 'Run the three-step graph, then the looping one.',
+  wfKill: 'Run the early-then-late workflow.',
+  wfResume: 'Continue after the crash: where is the workflow?',
 }
 
 /** Member tasks (what the root passes to `delegate`). */
@@ -83,7 +146,8 @@ const usage = { inputTokens: 300, outputTokens: 30, totalTokens: 330, cacheReadT
 /**
  * Script entries per phase: `{ lead, routes }` for `scriptedModelServer`.
  * @param h - the loaded test-support harness.
- * @param state - filled by the scenario before the phases run: `materialId`.
+ * @param state - filled by the scenario before the phases run: `materialId`, `pageUrl`,
+ *   `loopbackUrl`, `redirectUrl`, `outsidePath`.
  */
 export function buildStep3Script(h, state = {}) {
   const mentions = needle => body => h.requestText(body).includes(needle)
@@ -169,11 +233,90 @@ export function buildStep3Script(h, state = {}) {
       lead: [
         h.expectRequest('read-only turn', turnOf(TASKS.readonly), { toolCalls: [delegate('call-wide', { name: 'wide-one', task: MEMBER_TASKS.wide, preset: 'wide' })], usage }),
         h.expectRequest('wide refused', mentions(TASKS.readonly), { toolCalls: [delegate('call-quiet', { name: 'quiet', task: MEMBER_TASKS.quiet, preset: 'noshell' })], usage }),
-        h.expectRequest('quiet result', mentions(TASKS.readonly), answer('Done.')),
+        h.expectRequest('quiet result', mentions(TASKS.readonly), () => ({ toolCalls: [{ id: 'call-web-shipped', name: 'web_fetch', arguments: { url: state.pageUrl } }], usage })),
+        h.expectRequest('shipped web_fetch result', mentions(TASKS.readonly), answer('Done.')),
       ],
       routes: {
         quiet: [h.expectRequest('quiet first request', member('quiet'), answer('I have read-only tools and no shell.'))],
       },
+    },
+    tools: {
+      lead: [
+        // ptc
+        h.expectRequest('ptc turn', turnOf(TASKS.ptc), {
+          toolCalls: [{ id: 'call-ptc-files', name: 'run_code', arguments: { code: `const text = await readFile(${JSON.stringify(TOOL_FILES.input.path)}); await writeFile(${JSON.stringify(TOOL_FILES.output)}, text.toUpperCase()); return { read: text, envKeys: Object.keys(process.env) }` } }],
+          usage,
+        }),
+        h.expectRequest('ptc files result', mentions(TASKS.ptc), () => ({
+          toolCalls: [{ id: 'call-ptc-outside', name: 'run_code', arguments: { code: `return await readFile(${JSON.stringify(state.outsidePath ?? '../outside')})` } }],
+          usage,
+        })),
+        h.expectRequest('ptc outside result', mentions(TASKS.ptc), {
+          toolCalls: [{ id: 'call-ptc-timeout', name: 'run_code', arguments: { code: "console.log('PTC-PID=' + process.pid); for (;;) {}", timeoutMs: 1000 } }],
+          usage,
+        }),
+        h.expectRequest('ptc timeout result', mentions(TASKS.ptc), answer('run_code checks done.')),
+        // sheet
+        h.expectRequest('sheet turn', turnOf(TASKS.sheet), { toolCalls: [{ id: 'call-sheet-ok', name: 'write_spreadsheet', arguments: { path: TOOL_FILES.sheet, sheets: [{ name: 'Plan', rows: SHEET.rows }] } }], usage }),
+        h.expectRequest('sheet written', mentions(TASKS.sheet), { toolCalls: [{ id: 'call-sheet-external', name: 'write_spreadsheet', arguments: { path: TOOL_FILES.rejected[0], sheets: [{ name: 'S', rows: [[1, '=[Book2.xlsx]Sheet1!A1']] }] } }], usage }),
+        h.expectRequest('external refused', mentions(TASKS.sheet), { toolCalls: [{ id: 'call-sheet-unknown', name: 'write_spreadsheet', arguments: { path: TOOL_FILES.rejected[1], sheets: [{ name: 'S', rows: [[1, '=NOSUCHFN(A1)']] }] } }], usage }),
+        h.expectRequest('unknown refused', mentions(TASKS.sheet), { toolCalls: [{ id: 'call-sheet-divzero', name: 'write_spreadsheet', arguments: { path: TOOL_FILES.rejected[2], sheets: [{ name: 'S', rows: [[0, '=1/A1']] }] } }], usage }),
+        h.expectRequest('divzero refused', mentions(TASKS.sheet), { toolCalls: [{ id: 'call-sheet-limit', name: 'write_spreadsheet', arguments: { path: TOOL_FILES.rejected[3], sheets: Array.from({ length: 33 }, (_, i) => ({ name: `S${i + 1}`, rows: [[i]] })) } }], usage }),
+        h.expectRequest('limit refused', mentions(TASKS.sheet), answer('Spreadsheet checks done.')),
+        // web
+        h.expectRequest('web turn', turnOf(TASKS.web), () => ({ toolCalls: [{ id: 'call-web-page', name: 'web_fetch', arguments: { url: state.pageUrl } }], usage })),
+        h.expectRequest('page fetched', mentions(TASKS.web), () => ({ toolCalls: [{ id: 'call-web-loopback', name: 'web_fetch', arguments: { url: state.loopbackUrl } }], usage })),
+        h.expectRequest('loopback refused', mentions(TASKS.web), { toolCalls: [{ id: 'call-web-private', name: 'web_fetch', arguments: { url: 'http://10.0.0.1/stock.html' } }], usage }),
+        h.expectRequest('private refused', mentions(TASKS.web), () => ({ toolCalls: [{ id: 'call-web-redirect', name: 'web_fetch', arguments: { url: state.redirectUrl } }], usage })),
+        h.expectRequest('redirect refused', mentions(TASKS.web), answer('Web checks done.')),
+      ],
+      routes: {},
+    },
+    workflow: {
+      lead: [
+        h.expectRequest('workflow script turn', turnOf(TASKS.wfScript), {
+          toolCalls: [{ id: 'call-wf-script', name: 'workflow', arguments: {
+            title: 'Count and summarise',
+            script: [
+              "phase('count')",
+              `const parts = await parallel(${JSON.stringify(WF_PARTS)}.map(name => () => agent('Count ' + name + ' of the stock.', { name })))`,
+              "phase('summarise')",
+              "const [summary] = await pipeline([parts.map(p => p.text).join('\\n')], text => agent('Summarise these counts into final/summary.md and present it:\\n' + text, { name: 'summariser' }))",
+              'return { parts: parts.length, summary: summary.status }',
+            ].join('\n'),
+          } }],
+          usage,
+        }),
+        h.expectRequest('workflow script result', mentions(TASKS.wfScript), answer('The workflow finished.')),
+        h.expectRequest('graph turn', turnOf(TASKS.wfGraph), { toolCalls: [{ id: 'call-wf-graph', name: 'workflow', arguments: { title: 'Three steps', graph: WF_GRAPH } }], usage }),
+        h.expectRequest('graph result', mentions(TASKS.wfGraph), { toolCalls: [{ id: 'call-wf-cycle', name: 'workflow', arguments: { title: 'Loop', graph: WF_CYCLE } }], usage }),
+        h.expectRequest('cycle refused', mentions(TASKS.wfGraph), answer('The loop was refused.')),
+      ],
+      routes: {
+        ...Object.fromEntries(WF_PARTS.map(name => [name, [h.expectRequest(`${name} request`, member(name), { content: [`${name}: `, 'counted ', '3 SKUs.'], chunkDelayMs: 120, usage })]])),
+        summariser: [
+          h.expectRequest('summariser first request', member('summariser'), { toolCalls: [{ name: 'write_file', arguments: { path: 'final/summary.md', content: '# Summary\n\n15 SKUs counted.\n' } }], usage }),
+          h.expectRequest('summariser write result', member('summariser'), { toolCalls: [{ name: 'present', arguments: { paths: ['final/summary.md'], summary: 'Workflow summary.' } }], usage }),
+          h.expectRequest('summariser present result', member('summariser'), answer('Summary presented.')),
+        ],
+        gather: [h.expectRequest('gather request', member('gather'), answer('P01, P02, P03.'))],
+        check: [h.expectRequest('check request', member('check'), answer('No duplicates.'))],
+        report: [h.expectRequest('report request', member('report'), answer('Three SKUs, no duplicates.'))],
+      },
+    },
+    wfKill: {
+      lead: [h.expectRequest('workflow kill turn', turnOf(TASKS.wfKill), {
+        toolCalls: [{ id: 'call-wf-kill', name: 'workflow', arguments: { title: 'Early then late', script: "const early = await agent('Count early.', { name: 'early' })\nconst late = await agent('Count late.', { name: 'late' })\nreturn [early.status, late.status]" } }],
+        usage,
+      })],
+      routes: {
+        early: [h.expectRequest('early request', member('early'), answer('Early: 4 SKUs.'))],
+        late: [h.expectRequest('late request', member('late'), { content: [WF_STALL_TEXT, ' and more'], fault: { kind: 'timeout', afterChunks: 3 }, usage })],
+      },
+    },
+    wfResume: {
+      lead: [h.expectRequest('workflow resume turn', turnOf(TASKS.wfResume), answer('The workflow was interrupted; early had finished.'))],
+      routes: {},
     },
   }
 }
