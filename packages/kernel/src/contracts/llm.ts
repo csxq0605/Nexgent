@@ -3,7 +3,7 @@
  * vocabulary the loop and the session log share, and token accounting that
  * can say "unknown" instead of inventing zeros.
  *
- * Step 1 wires exactly one OpenAI-compatible route (MiMo) behind this
+ * Step 1 wires exactly one route (Claude Platform, ADR 0002) behind this
  * interface; there is no provider registry and no retry layer (`maxRetries`
  * is 0 by decision — every attempt, including a failed one, is one request
  * and one ledger record).
@@ -354,9 +354,9 @@ export function isTerminalEvent(event: LLMStreamEvent): event is DoneEvent | Str
 
 /** Static facts about the route a provider instance talks to; stamped on ledger records. */
 export interface LLMProviderInfo {
-  /** Route key, e.g. `mimo`. */
+  /** Route key, e.g. `anthropic`. */
   readonly id: string
-  /** Endpoint base URL without credentials, e.g. `https://token-plan-cn.xiaomimimo.com/v1`. */
+  /** Endpoint base URL without credentials, e.g. `https://api.anthropic.com`. */
   readonly endpoint: string
   /** Model id used when a request does not override it. */
   readonly defaultModel: string

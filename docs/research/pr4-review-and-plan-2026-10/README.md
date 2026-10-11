@@ -119,7 +119,7 @@ PR 描述里的 32 项测试、100% 覆盖、七进程验收等数字只对应�
 
 ## 4. 工程实现计划（按六步，DSH 作为参考重写）
 
-目标与顺序以 2026-10-07 的产品定义为准：以 DSH 源码为基础、使用并改造其 Cordis 运行架构，做成能完成真实任务、持续积累能力并改进自身的 Nexgent 独立应用；用户面对项目、对话、资料和成果；默认模型 `mimo-v2.6-pro`。订单、Excel、科研、OpenFOAM 是应用案例，benchmark 只用于测量。
+目标与顺序以 2026-10-07 的产品定义为准：以 DSH 源码为基础、使用并改造其 Cordis 运行架构，做成能完成真实任务、持续积累能力并改进自身的 Nexgent 独立应用；用户面对项目、对话、资料和成果；默认模型 `mimo-v2.6-pro`（已由 [ADR 0002](../../adr/0002-claude-platform-route.md) 改为 Claude Platform `claude-sonnet-5-5`）。订单、Excel、科研、OpenFOAM 是应用案例，benchmark 只用于测量。
 
 DSH 的接入方式按用户决定为**参考重写**：DSH 源码只作阅读参考，不以 subtree 进入仓库，也不作为运行时 npm 依赖；Nexgent 在自己的 TypeScript monorepo 里按需重写所需的运行时，Cordis 及其配套库作为普通 npm 依赖使用。下面每一步给出：DSH 中的参考实现、PR #4 可移植的部分、要做的工作、验收、决策与风险。
 
@@ -157,11 +157,11 @@ PR #4 可移植：`cordis.patch.yml` 的产品默认值（MiMo 路由、thinking
 
 要做的工作：
 1. `@nexgent/kernel`：Cordis 应用装载（YAML profile + patch 行，参考 `app-boot`），`ctx.agents` 创建 / 恢复，agent loop（请求模型、执行工具、写入会话），`ctx.tools` 注册与作用域，系统提示组装。
-2. `@nexgent/llm`：单一 OpenAI 兼容路由（MiMo），流式与工具调用，用量计量，`maxRetries: 0` 并把每次请求写入账本；思考关闭。
+2. `@nexgent/llm`：单一路由（原为 OpenAI 兼容的 MiMo，已按 ADR 0002 改为 Claude Platform Messages API），流式与工具调用，用量计量，`maxRetries: 0` 并把每次请求写入账本；思考关闭。
 3. `@nexgent/session`：JSONL 追加写 + checkpoint，启动时按会话 ID 恢复；只定义一种格式（v1），不做历史迁移。
 4. `@nexgent/workspace`：工作目录、文件读写与搜索、`str_replace` 编辑、bash / pwsh 工具、子进程与沙箱策略（路径白名单、写入限制）。
 5. `apps/cli`：`nexgent run --project <dir> --task "..."`（一次性执行）、`nexgent resume <session>`、`nexgent app --project <dir>`（步骤 2 的桌面应用入口）；项目数据目录 `.nexgent/`（`sessions/ materials/ outputs/ capabilities/ ledgers/`），密钥从 `NEXGENT_API_KEY` 或本机凭证文件读取。
-6. 验收脚本 `scripts/accept-step1.mjs`：脚本化 provider 下启动 → 完成一次写文件任务 → 杀进程 → 新进程 `resume` 续聊；Linux 与 Windows CI 各跑一次。真实 MiMo 手动各跑一次并留摘要。
+6. 验收脚本 `scripts/accept-step1.mjs`：脚本化 provider 下启动 → 完成一次写文件任务 → 杀进程 → 新进程 `resume` 续聊；Linux 与 Windows CI 各跑一次。真实 Claude 模型（`claude-sonnet-5-5`，见 ADR 0002） 手动各跑一次并留摘要。
 
 验收：通过 Nexgent 入口启动，完成真实任务并保存原生会话；不存在 Python 执行路径；两种操作系统通过。
 
@@ -180,7 +180,7 @@ PR #4 可移植：`cordis.patch.yml` 的产品默认值（MiMo 路由、thinking
 6. 上下文：工作区说明文件注入、长对话压缩（参考 `compaction-basic`，只做基本摘要）。
 7. 桌面应用与 SDK：`apps/desktop` 是 Electron + React 的桌面应用，布局参考 Codex 桌面应用——左栏项目与对话列表，中栏对话（流式输出、工具活动、审批提示、成果卡片与文件差异），右栏项目文件、资料、成果与改进状态，设置页管理模型与密钥。`@nexgent/sdk` 是进程内 TS API，Electron 主进程持有 kernel，渲染进程经 IPC 调用；不做浏览器访问的 Web 服务。CLI 的 `nexgent run` 与桌面应用共用同一 SDK。
 
-验收脚本 `scripts/accept-step2.mjs`：提交资料 → 执行 → 成果文件存在且被 `present` → 提出修改 → 成果更新 → 杀进程 → 重启继续 → 会话、资料、成果全部可见；CI 两平台通过，真实 MiMo 手动一次。
+验收脚本 `scripts/accept-step2.mjs`：提交资料 → 执行 → 成果文件存在且被 `present` → 提出修改 → 成果更新 → 杀进程 → 重启继续 → 会话、资料、成果全部可见；CI 两平台通过，真实 Claude 模型 手动一次。
 
 决策与风险：桌面应用是这一步的主要工作量。外壳（窗口、打包、更新）参考 DSH `apps/desktop`，组件划分参考 DSH client 包，信息架构与品牌沿用 Nexgent 现有 PyQt 设计；从空白 React 工程写，不复制 DSH client 的 remote 协议耦合代码。工期 3–4 周；打包与签名放在 4.10 的安装发布项里。
 
@@ -226,7 +226,7 @@ PR #4 可移植：`architecture-activation.ts`（预留槽位、独占发布、�
 4. 门控 `capability_trial`：候选与基线在回放集上各跑 r 次；回放集来自项目历史任务，带宿主可做的确定性检查（文件存在、schema、用户曾运行的测试命令）加审核模型判断；selection 与 guard 不重叠；成本进入接受条件（质量不降且成本下降，或质量上升且成本在上限内）；通过后写入新采用版本，退化回滚。候选不能修改门控配置、权限与预算。
 5. 账本扩展：请求记录加上 `capabilityVersion / memberId / executionForm / taskId`，任务结束写 `task-outcome`（检查结果、总成本、每成员成本、实际调用的组件）。
 
-验收：任务 A 开发并使用工具或技能 → 候选 → 门控通过 → 新 OS 进程中的任务 B 自动加载并实际调用（账本可证）→ 人为注入退化后自动回滚；被拒候选保留记录，原版本继续可用。两平台 CI 脚本化 provider 覆盖；真实 MiMo 手动一次。
+验收：任务 A 开发并使用工具或技能 → 候选 → 门控通过 → 新 OS 进程中的任务 B 自动加载并实际调用（账本可证）→ 人为注入退化后自动回滚；被拒候选保留记录，原版本继续可用。两平台 CI 脚本化 provider 覆盖；真实 Claude 模型 手动一次。
 
 决策与风险：日常任务多数没有 oracle，审核模型的判断在证据里与确定性检查分开标记；插件包在宿主进程内执行、不受沙箱约束，采用前必须经人审批，技能与 PTC 函数可自动采用。
 
@@ -262,7 +262,7 @@ PR #4 可移植：`architecture-activation.ts`（预留槽位、独占发布、�
 | 步骤 | 估计 | 退出门槛 |
 | --- | --- | --- |
 | 0 横切（仓库骨架、CI、证据、reference 子模块） | 1 周 | 两平台 CI 绿；`reference-map.md` 建立 |
-| 1 主应用（kernel / llm / session / workspace 重写） | 4–6 周 | `accept-step1` 两平台通过；真实 MiMo 一次 |
+| 1 主应用（kernel / llm / session / workspace 重写） | 4–6 周 | `accept-step1` 两平台通过；真实 Claude 模型 一次 |
 | 2 日常体验（资料、成果、反馈、恢复、桌面应用） | 3–4 周 | `accept-step2` 通过；合入 `main` |
 | 3 迁移与协作 | 3 周 | 四种形态各完成一次；Python 与 `runtime/` 删除；CI 绿 |
 | 4 能力版本 | 3 周 | 跨任务、跨进程实际调用 + 回滚 |
@@ -280,7 +280,7 @@ PR #4 可移植：`architecture-activation.ts`（预留槽位、独占发布、�
 
 ### 4.9 仍需拍板
 
-已定：DSH 作为参考重写；六步顺序；默认模型 `mimo-v2.6-pro`；界面为 Codex 式桌面应用而非浏览器 Web 界面；真实模型实验只设预算上限、不设停止条件。下列各项按建议执行即可，除非另有指示。
+已定：DSH 作为参考重写；六步顺序；默认模型 `mimo-v2.6-pro`（已由 ADR 0002 改为 `claude-sonnet-5-5`）；界面为 Codex 式桌面应用而非浏览器 Web 界面；真实模型实验只设预算上限、不设停止条件。下列各项按建议执行即可，除非另有指示。
 
 | # | 事项 | 建议 | 影响 |
 | --- | --- | --- | --- |
@@ -289,12 +289,12 @@ PR #4 可移植：`architecture-activation.ts`（预留槽位、独占发布、�
 | 3 | 界面：已定做 Electron + React 桌面应用，参考 Codex 桌面应用布局、DSH `apps/desktop` 外壳与 Nexgent 现有 PyQt 设计；不做浏览器 Web 服务 | 已定 | 步骤 2 约 3–4 周 |
 | 4 | 步骤 1 中期检查点的回退：kernel 超期时是否临时用 DSH npm 包做后端先打通步骤 2 | 允许作为备选，默认不用 | 保住步骤 2 进度 |
 | 5 | 插件包类候选：人审批一次后自动采用，还是每次审批 | 每次审批；技能与 PTC 函数自动采用 | 安全边界 |
-| 6 | 改进器与审核模型：仍用 `mimo-v2.6-pro` 关闭 thinking，还是允许开启 thinking 或更强模型 | 执行关闭 thinking；改进与审核允许开启 thinking | 步骤 5–6 的候选质量与费用 |
+| 6 | 改进器与审核模型：仍用执行模型（原为 `mimo-v2.6-pro`，现为 `claude-sonnet-5-5`）关闭 thinking，还是允许开启 thinking 或更强模型 | 执行关闭 thinking；改进与审核允许开启 thinking | 步骤 5–6 的候选质量与费用 |
 | 7 | 自动改进触发：每累计 N 条反馈运行一次（N 默认 3），还是即时 | 累计触发，可切即时 | 步骤 5 费用 |
 | 8 | 步骤 6 的任务族：表格 / 数据 + 多文件代码，OpenFOAM 可选 | 前两族 | 评价协议 |
 | 9 | 真实模型预算：步骤 4–6 每轮实验的调用与 token 上限（已定不设额外停止条件） | 开工前按族约定上限 | 费用 |
 | 10 | 旧数据：Python Episode、组织 SQLite、`.nexgent/native/` 不迁移 | 不迁移，只读导出 | 步骤 3 |
-| 11 | 多模型：步骤 1 只接 MiMo 一条路由，其他 OpenAI 兼容端点作为配置项 | 单路由 + 可配置端点 | `@nexgent/llm` 范围 |
+| 11 | 多模型：步骤 1 只接一条路由（原为 MiMo，已按 ADR 0002 改为 Claude Platform），其他端点作为配置项 | 单路由 + 可配置端点 | `@nexgent/llm` 范围 |
 | 12 | Python SDK：步骤 2 只做 TS 远程层，Python 客户端延后 | 延后 | 范围 |
 
 ### 4.10 计划尚未展开、需在步骤 0–1 补齐的事项

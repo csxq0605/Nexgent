@@ -17,7 +17,7 @@ describe('text renderer', () => {
     const { stdout, stderr } = renderAll('text')
     expect(stdout).toBe('Created hello.txt.\n')
     expect(stderr).toBe([
-      `nexgent: new session ${SID} (model mimo-v2.6-pro, sandbox workspace-write)`,
+      `nexgent: new session ${SID} (model claude-sonnet-5-5, sandbox workspace-write)`,
       '> write_file {"path":"hello.txt","content":"Hello"}',
       '  ok 4 ms: wrote 5 bytes to hello.txt',
       `nexgent: completed; session ${SID}; requests 2; tool calls 1; tokens in 812 / out 37`,
@@ -40,7 +40,7 @@ describe('text renderer', () => {
     r.finish({ sessionId: SID, status: 'cancelled', exitCode: 130, totalUsage: UNKNOWN_USAGE, requestCount: 1, toolCallCount: 0, finalText: 'Partial' })
     expect(stdout.text).toBe('Partial\n')
     expect(stderr.text).toBe([
-      `nexgent: resumed session ${SID} (model mimo-v2.6-pro, sandbox full-access)`,
+      `nexgent: resumed session ${SID} (model claude-sonnet-5-5, sandbox full-access)`,
       'nexgent: warning: full-access sandbox: tools may read, write and run anything you can',
       'thinking: hmm',
       '  approval: denied (timeout)',

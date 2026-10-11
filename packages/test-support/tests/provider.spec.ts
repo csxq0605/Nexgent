@@ -167,7 +167,7 @@ describe('scriptedProvider', () => {
 
   it('exposes info with defaults and overrides', () => {
     expect(scriptedProvider().info).toEqual({ id: 'scripted', endpoint: 'scripted://local', defaultModel: 'scripted-model' })
-    expect(scriptedProvider([], { info: { id: 'mimo' } }).info.id).toBe('mimo')
+    expect(scriptedProvider([], { info: { id: 'anthropic' } }).info.id).toBe('anthropic')
     expect(() => scriptedProvider([{ content: 'x' }]).assertConsumed()).toThrow(/not consumed/)
   })
 })

@@ -25,7 +25,7 @@ afterEach(async () => {
 export const SESSION_ID = '0b9a1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d'
 
 export function sessionInit(projectRoot: string, overrides: Partial<SessionInit> = {}): SessionInit {
-  return { sessionId: SESSION_ID, projectRoot, model: 'mimo-v2.6-pro', sandboxMode: 'workspace-write', ...overrides }
+  return { sessionId: SESSION_ID, projectRoot, model: 'claude-sonnet-5-5', sandboxMode: 'workspace-write', ...overrides }
 }
 
 export const KNOWN_USAGE: LLMUsage = {

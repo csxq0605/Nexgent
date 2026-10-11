@@ -315,11 +315,11 @@ describe('contracts: pure helpers', () => {
     ]
     const result = applyProfilePatches(base, [
       { insert: [{ id: 'ledger', name: '@nexgent/llm/ledger', config: { dir: 'ledgers' } }] },
-      { id: 'llm', config: { models: { default: 'mimo-v2.6-pro' }, list: [2, 3] } },
+      { id: 'llm', config: { models: { default: 'claude-sonnet-5-5' }, list: [2, 3] } },
       { id: 'session', disabled: true },
     ])
     expect(result).toEqual([
-      { id: 'llm', name: '@nexgent/llm', config: { endpoint: 'https://a', models: { default: 'mimo-v2.6-pro' }, list: [2, 3] } },
+      { id: 'llm', name: '@nexgent/llm', config: { endpoint: 'https://a', models: { default: 'claude-sonnet-5-5' }, list: [2, 3] } },
       { id: 'session', name: '@nexgent/session', disabled: true },
       { id: 'ledger', name: '@nexgent/llm/ledger', config: { dir: 'ledgers' } },
     ])

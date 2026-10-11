@@ -17,7 +17,7 @@ export const SID = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b'
 export const USAGE: LLMUsage = { inputTokens: 812, outputTokens: 37, totalTokens: 849, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }
 
 export function sessionEvent(overrides: Partial<SessionOpenEvent> = {}): SessionOpenEvent {
-  return { type: 'session', sessionId: SID, projectRoot: '/proj', model: 'mimo-v2.6-pro', sandboxMode: 'workspace-write', resumed: false, ...overrides }
+  return { type: 'session', sessionId: SID, projectRoot: '/proj', model: 'claude-sonnet-5-5', sandboxMode: 'workspace-write', resumed: false, ...overrides }
 }
 
 /** A complete write-file turn: one tool call, then a final answer. */

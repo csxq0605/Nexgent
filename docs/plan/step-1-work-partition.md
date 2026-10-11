@@ -52,13 +52,13 @@ apps/cli ──► kernel ──► llm
 - **完成定义**：
   - 从 YAML profile 装载一个应用，注入脚本化 provider 后完成“用户消息 → 模型请求 → 一次工具调用 → 工具结果回传 → 最终回复”的闭环，且每轮写入 session；
   - 取消正在进行的轮次后，已流出的文本保留，进程无悬挂子进程；模型请求超时、工具抛错各有测试；
-  - profile 装载的默认值与 PR #4 `cordis.patch.yml` 一致（MiMo 路由、thinking 关闭、系统提示）；
+  - profile 装载的默认值与 PR #4 `cordis.patch.yml` 一致（路由已按 ADR 0002 改为 Claude Platform；thinking 关闭；系统提示）；
   - 不 import 任何 `reference/` 下的代码；复制件均有 `Adapted from` 头并已登记；
   - 包内测试在 Linux 与 Windows 通过。
 
 ### `@nexgent/llm`
 
-- **职责**：单一 OpenAI 兼容路由（默认 MiMo，端点与模型名可配置）；流式输出与工具调用解析；用量计量，缺失标 unknown；`maxRetries: 0`，每次请求（含失败）写入账本（PR #4 `execution-ledger.ts` 的请求记录部分）；thinking 关闭；代理设置。
+- **职责**：单一路由（原为 OpenAI 兼容的 MiMo，已按 ADR 0002 改为 Claude Platform Messages API，端点与模型名可配置）；流式输出与工具调用解析；用量计量，缺失标 unknown；`maxRetries: 0`，每次请求（含失败）写入账本（PR #4 `execution-ledger.ts` 的请求记录部分）；thinking 关闭；代理设置。
 - **DSH 参考包**：`llm/llm`、`llm/llm-pi-ai`、`llm/token-meter`、`util/http-proxy`。不要 `llm-retry`、`llm-deepseek`。
 - **依赖**：kernel 契约（`LLMProvider`、`Ledger`）。
 - **可并行**：session、workspace、test-support。

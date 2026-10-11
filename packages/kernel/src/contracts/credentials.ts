@@ -3,7 +3,7 @@
  * passing through config files, session records or the ledger.
  *
  * Resolution order for `get(name)`:
- * 1. the process environment variable `name` (for the MiMo key that is
+ * 1. the process environment variable `name` (for the model API key that is
  *    {@link NEXGENT_API_KEY});
  * 2. the local credential file, `~/.nexgent/credentials.json`
  *    (`%USERPROFILE%\.nexgent\credentials.json` on Windows), a

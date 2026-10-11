@@ -48,7 +48,7 @@ const PROCESS_TIMEOUT_MS = 60_000
 const STEP = {
   step: 1,
   name: '主应用（kernel / llm / session / workspace 重写）',
-  exitCriteria: ['`accept-step1` 两平台通过', '真实 MiMo 一次（手动，另行记录）'],
+  exitCriteria: ['`accept-step1` 两平台通过', '真实 Claude 模型一次（手动，另行记录）'],
   script: 'scripts/accept-step1.mjs',
   simulated: 'scripted Claude Messages API model server; run → write-file task; resume → long turn killed mid-stream; resume in a new process → continue and write another file',
   repoRoot: REPO_ROOT,
@@ -119,7 +119,7 @@ async function main() {
 
   const s = h.acceptanceSummary(STEP)
   s.fault('kill')
-  s.untested('real MiMo run (manual, recorded separately under docs/validation/step-1/)')
+  s.untested('real Claude model run (manual, recorded separately under docs/validation/)')
   s.untested('approval prompts (stdin is not a TTY here, so approvals resolve as headless denies)')
   s.doesNotProve('anything about real-model behaviour, cost or latency')
 

@@ -26,7 +26,7 @@
 | `core/tools` | `@nexgent/kernel` | 改写 | 1 | 已改写 `src`（作用域注册表设计，→ `tools.ts`）：`ctx.tools` 注册与作用域；PR #4 `tool-restriction.ts` 在步骤 3 并入 |
 | `core/system-prompt` | `@nexgent/kernel` | 重写 | 1 | 系统提示组装只参考设计；提示正文由 Nexgent 自写 |
 | `core/session` | `@nexgent/kernel` | 重写 | 1 | `ctx.session` 服务接口；步骤 1 未复制文件；持久化在 `@nexgent/session` |
-| `core/agent-default-model` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（并入 `agents.ts`）：默认模型 `mimo-v2.6-pro` 的配置位置 |
+| `core/agent-default-model` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（并入 `agents.ts`）：默认模型的配置位置（现为 `claude-sonnet-5-5`，见 ADR 0002） |
 | `core/agent-tool-presentation` | — | 不要 | — | 面向 UI 的工具展示，步骤 2 由桌面应用自定 |
 | `llm/llm` | `@nexgent/llm` | 重写 | 1 | 模型服务接口、流式与工具调用消息类型只参考设计 |
 | `llm/llm-pi-ai` | `@nexgent/llm` | 重写 | 1 | 单一 Claude Platform 路由（ADR 0002），只参考设计；端点作为配置项 |

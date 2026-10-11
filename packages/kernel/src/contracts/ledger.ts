@@ -42,7 +42,7 @@ export interface LLMRequestStartRecord extends LedgerRecordBase {
   readonly type: 'llm.request.start'
   /** Joins to `llm.request.end` and to the session's `assistant.message`. */
   readonly requestId: string
-  /** Route key, e.g. `mimo`. */
+  /** Route key, e.g. `anthropic`. */
   readonly provider: string
   /** Endpoint base URL without credentials. */
   readonly endpoint: string

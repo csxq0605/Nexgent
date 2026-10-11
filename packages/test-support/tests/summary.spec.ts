@@ -64,7 +64,7 @@ describe('acceptanceSummary', () => {
       .check('real write task', true)
       .set({
         realModel: {
-          model: 'mimo-v2.6-pro', thinking: 'off', task: 'write README', callCount: 3,
+          model: 'claude-sonnet-5-5', thinking: 'off', task: 'write README', callCount: 3,
           knownTokens: { input: 900, output: 'unknown' }, unknownCount: 1, cost: 'unknown', result: 'pass',
           summaryFile: null, runNote: 'manual run', unknownSources: ['usage missing on one response'],
         },

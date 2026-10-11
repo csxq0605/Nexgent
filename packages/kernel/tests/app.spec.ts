@@ -46,7 +46,6 @@ describe('default product profile', () => {
     fallbacks: 'default',
     personaPrefix: 'You are Nexgent, a general task agent running on the {{model}} model. '
       + 'Complete the user\'s task with the available materials and tools. '
-      + 'Choose direct work, delegation or a workflow according to the task. '
       + 'Verify actual deliverables, explain unresolved requirements, and preserve useful work for subsequent turns.',
     personaSuffix: 'Your project working directory is {{cwd}}.',
   }

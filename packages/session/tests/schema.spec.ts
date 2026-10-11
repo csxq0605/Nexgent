@@ -32,7 +32,7 @@ const inputs: SessionRecordInput[] = [
     type: 'session.start',
     version: 1,
     projectRoot: '/p',
-    model: 'mimo-v2.6-pro',
+    model: 'claude-sonnet-5-5',
     sandboxMode: 'read-only',
     parentSessionId: 'parent-1',
     title: 'Title',
