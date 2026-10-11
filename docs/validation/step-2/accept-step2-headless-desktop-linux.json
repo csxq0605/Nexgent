@@ -1,0 +1,295 @@
+{
+  "kind": "nexgent.acceptance-summary",
+  "schemaVersion": 1,
+  "result": "pass",
+  "step": {
+    "number": 2,
+    "name": "接通完整的日常任务体验",
+    "exitCriteria": [
+      "`accept-step2` 的无界面层与桌面层在 Linux、Windows CI 上都通过（脚本化 provider）",
+      "真实 Claude 模型完成一个真实任务的全链，脚本独立判定，Linux 云端开 thinking 跑一次",
+      "验收记录 docs/validation/step-2-<日期>.md 经用户认可"
+    ],
+    "script": "scripts/accept-step2.mjs"
+  },
+  "date": {
+    "acceptedAt": "2026-10-11T12:54:03.008Z",
+    "commitRange": null
+  },
+  "source": {
+    "branch": "claude/test-ci-ns3s7s",
+    "commit": "f7077a44fb664dc21929759af11a69c750da2b25",
+    "pullRequests": []
+  },
+  "environment": {
+    "platform": "linux",
+    "os": "Linux 6.18.44-fc-v114",
+    "node": "v22.22.0",
+    "pnpm": "unknown",
+    "other": {}
+  },
+  "scripted": {
+    "command": "node scripts/accept-step2.mjs --layer headless,desktop",
+    "ciRunUrl": null,
+    "result": "pass",
+    "summaryFile": null,
+    "simulated": "scripted Claude Messages API model server; per-layer checklist H01–H23 / D01–D10",
+    "faultsInjected": []
+  },
+  "realModel": null,
+  "ledger": null,
+  "failures": {
+    "failedCases": [],
+    "untested": [
+      "real-model layer (R01–R07): run with --layer real"
+    ],
+    "knownIssues": []
+  },
+  "conclusion": {
+    "proves": [],
+    "doesNotProve": [
+      "anything for an item whose status is not-implemented"
+    ],
+    "meetsExitCriteria": true,
+    "missing": []
+  },
+  "raw": {
+    "location": "not kept (scripted run; work dir deleted)",
+    "sha256": null,
+    "summaryDir": null,
+    "manifest": []
+  },
+  "checks": [
+    {
+      "id": "H01",
+      "name": "新目录初始化：.nexgent/ 布局与 config.json 存在；最近项目列表含该项目",
+      "passed": true,
+      "status": "passed",
+      "detail": "layout and config.json present; projects.recent lists /tmp/nexgent-accept-step2-RjHFPO/headless/project"
+    },
+    {
+      "id": "H02",
+      "name": "添加 .csv 与 .xlsx 两份资料：复制到 materials/<id>/，元数据通过 schema，SHA-256 一致，原文件未改",
+      "passed": true,
+      "status": "passed",
+      "detail": "orders.csv → .nexgent/materials/3f12d2a1-49c0-4df4-a831-2c065f1a6cef/orders.csv (sha256 46245f40224a…); regions.xlsx → .nexgent/materials/f032f01e-944a-4fbe-b452-1265e3fe2da3/regions.xlsx (sha256 1387140fac71…)"
+    },
+    {
+      "id": "H03",
+      "name": "首轮请求含两份资料的引用；模型写 materials/ 被拒",
+      "passed": true,
+      "status": "passed",
+      "detail": "first request carries 2 material paths; materials/ write refused: Error: SANDBOX_DENIED: path /tmp/nexgent-accept-step2-RjHFPO/headless/project/.n"
+    },
+    {
+      "id": "H04",
+      "name": ".xlsx 资料经 Office 技能工具读出（load_skill 与读取工具的调用和结果）",
+      "passed": true,
+      "status": "passed",
+      "detail": "load_skill(office-documents) and read_document(regions.xlsx) → ## Sheet: Orders (range A1:H4, 4 rows × 8 columns)"
+    },
+    {
+      "id": "H05",
+      "name": "工作区说明文件 AGENTS.md 的内容出现在系统提示",
+      "passed": true,
+      "status": "passed",
+      "detail": "AGENTS.md marker found in the system prompt"
+    },
+    {
+      "id": "H06",
+      "name": "首轮 turn.end 为 completed；有 write_file 与 str_replace 的成功调用",
+      "passed": true,
+      "status": "passed",
+      "detail": "completed; write_file ×2, str_replace ×1"
+    },
+    {
+      "id": "H07",
+      "name": "present 后有 deliverable.presented；outputs/<id>/v1/ 快照哈希一致；成果元数据通过 schema",
+      "passed": true,
+      "status": "passed",
+      "detail": "v1 of 533aef40-8070-4844-a2bf-eaab9c70247c with 2 file(s); snapshot hashes match"
+    },
+    {
+      "id": "H08",
+      "name": "turn.files 与实际改动一致（含一处经 bash / pwsh 修改的文件）",
+      "passed": true,
+      "status": "passed",
+      "detail": "turn.files = actual changes: report/README.md:added, report/notes.txt:added, report/summary.csv:added"
+    },
+    {
+      "id": "H09",
+      "name": "反馈（评分 + 评语，关联 v1）：有 feedback 记录与 source: feedback 的用户消息",
+      "passed": true,
+      "status": "passed",
+      "detail": "feedback d45ce382-8ee0-4ad1-b2de-04f8e1737993 on v1 (rating 3) and its source: feedback user message"
+    },
+    {
+      "id": "H10",
+      "name": "修改轮后有 v2；v1 快照哈希不变；v1→v2 差异非空且只涉及预期文件",
+      "passed": true,
+      "status": "passed",
+      "detail": "v1 → v2 diff touches report/summary.csv; v1 snapshots unchanged"
+    },
+    {
+      "id": "H11",
+      "name": "持久目标：设定后写入；完成时状态更新",
+      "passed": true,
+      "status": "passed",
+      "detail": "goal fbf4500f-e1a4-478a-8cbf-f177ade42db0 set, shown to the model, then completed"
+    },
+    {
+      "id": "H12",
+      "name": "进程内取消：已流出文本保留，turn.end 为 cancelled；长 shell 命令被终止，无残留子孙进程",
+      "passed": true,
+      "status": "passed",
+      "detail": "stream cancel keeps \"Release notes, part one\"; tool cancel killed 1 process(es), none left"
+    },
+    {
+      "id": "H13",
+      "name": "工作区外写入：workspace-write 下被沙箱直接拒绝，不产生审批请求，项目外没有文件",
+      "passed": true,
+      "status": "passed",
+      "detail": "outside write refused by the sandbox without an approval request: Error: SANDBOX_DENIED: path /tmp/nexgent-accept-step2-RjHFPO/headless/outside-th"
+    },
+    {
+      "id": "H14",
+      "name": "压缩：越过测试阈值后写出 compaction 记录，下一次请求只带摘要与近期轮次",
+      "passed": true,
+      "status": "passed",
+      "detail": "compaction recorded, next request = summary + recent turns; a failed summary request leaves the history whole and the turn completes"
+    },
+    {
+      "id": "H15",
+      "name": "强杀一：模型流到一半强杀进程（Windows 结束整个进程树）",
+      "passed": true,
+      "status": "passed",
+      "detail": "killed mid-stream ({\"code\":null,\"signal\":\"SIGKILL\"}), no process left"
+    },
+    {
+      "id": "H16",
+      "name": "强杀二：工具执行到一半强杀进程",
+      "passed": true,
+      "status": "passed",
+      "detail": "killed during bash; orphans [8581] (POSIX: reported, then removed)"
+    },
+    {
+      "id": "H17",
+      "name": "强杀后恢复：中断轮写成 interrupted；续聊请求含完整历史并回放 providerContent",
+      "passed": true,
+      "status": "passed",
+      "detail": "turns 10 and 12 interrupted; resumed requests carry history and replay thinking blocks"
+    },
+    {
+      "id": "H18",
+      "name": "恢复后经 SDK 查询：历史、两份资料、v1 / v2、反馈、目标全部可见且与强杀前一致",
+      "passed": true,
+      "status": "passed",
+      "detail": "through the SDK after two kills: 86 history items (73 before, kept), 2 materials, v1/v2, 1 feedback, goal completed"
+    },
+    {
+      "id": "H19",
+      "name": "会话 seq 连续、记录通过 schema；账本请求开始 / 结束配对，每轮一条 task.outcome",
+      "passed": true,
+      "status": "passed",
+      "detail": "118 records, seq continuous, schema ok; 29 requests paired except 1 killed; 11 task.outcome for 11 finished turns"
+    },
+    {
+      "id": "H20",
+      "name": ".nexgent/ 与 export 产物中搜不到测试密钥值",
+      "passed": true,
+      "status": "passed",
+      "detail": "test key found in none of .nexgent/ and the 5 export files"
+    },
+    {
+      "id": "H21",
+      "name": "perProject 上限达到时以 budget/exhausted 结束，记录符合 permissions.md",
+      "passed": true,
+      "status": "passed",
+      "detail": "perProject cap of 1 request: second session stopped before any request, budget/exhausted in session and ledger"
+    },
+    {
+      "id": "H22",
+      "name": "nexgent export <session> 产物包含会话、相关账本行与元数据",
+      "passed": true,
+      "status": "passed",
+      "detail": "export: 118 session records, 84 ledger lines, 2 materials, 2 versions, manifest"
+    },
+    {
+      "id": "H23",
+      "name": "审批：写敏感文件（.env）触发审批；once 批准只生效一次，再写再问，拒绝后工具结果为拒绝、文件不变",
+      "passed": true,
+      "status": "passed",
+      "detail": ".env: approval asked, allowed once, asked again, denied; file unchanged"
+    },
+    {
+      "id": "D01",
+      "name": "应用启动，窗口加载，渲染进程控制台无错误；窗口配置满足隔离要求",
+      "passed": true,
+      "status": "passed",
+      "detail": "window app://nexgent/index.html, isolated webPreferences, no Node in the page, bridge without token or ipcRenderer, no console errors in either launch"
+    },
+    {
+      "id": "D02",
+      "name": "新建项目、从最近项目重新打开",
+      "passed": true,
+      "status": "passed",
+      "detail": "new project created in the UI; reopened from the recent list after restart"
+    },
+    {
+      "id": "D03",
+      "name": "添加资料（对话框打桩）后右栏资料列表出现两项",
+      "passed": true,
+      "status": "passed",
+      "detail": "two materials (.csv, .xlsx) added through the stubbed file dialog; right column and .nexgent/materials both show two"
+    },
+    {
+      "id": "D04",
+      "name": "发送消息后中栏出现流式文本与工具活动块",
+      "passed": true,
+      "status": "passed",
+      "detail": "streaming text seen (\"我先\") then completed; 2 tool block(s)"
+    },
+    {
+      "id": "D05",
+      "name": "审批对话框出现，选择后轮次继续",
+      "passed": true,
+      "status": "passed",
+      "detail": "approval dialog for .env; allowed once; the turn continued to present and completed"
+    },
+    {
+      "id": "D06",
+      "name": "成果卡片出现；反馈后出现 v2，差异视图显示 v1→v2 的变化",
+      "passed": true,
+      "status": "passed",
+      "detail": "deliverable card; feedback from the card produced v2; diff v1 → v2 shows -north,1200 / +华北,1200"
+    },
+    {
+      "id": "D07",
+      "name": "停止按钮取消当前轮，已流出文本保留在界面和会话里",
+      "passed": true,
+      "status": "passed",
+      "detail": "stop cancelled the turn; streamed text kept in the UI and in session.jsonl"
+    },
+    {
+      "id": "D08",
+      "name": "强杀主进程后重启：对话、资料与成果都在，继续对话成功",
+      "passed": true,
+      "status": "passed",
+      "detail": "killed mid-stream; restart shows conversation, two materials, two deliverable cards; the next turn completed"
+    },
+    {
+      "id": "D09",
+      "name": "设置页修改模型、thinking 与费用上限后写入 config.json；密钥只显示是否配置与来源",
+      "passed": true,
+      "status": "passed",
+      "detail": "settings saved to config.json (model claude-opus-5-5, thinking off, caps); key shown as source only"
+    },
+    {
+      "id": "D10",
+      "name": "无令牌或错令牌的 IPC 调用被拒",
+      "passed": true,
+      "status": "passed",
+      "detail": "missing / wrong / empty token denied and logged without the token; unlisted method denied; valid call answered"
+    }
+  ]
+}

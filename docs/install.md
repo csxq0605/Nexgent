@@ -1,6 +1,6 @@
 # 安装与运行 Nexgent 桌面应用
 
-> 步骤 2 的桌面应用尚在开发（主进程、界面、打包已接通，等待步骤 2 验收）。安装包未签名，没有自动更新，没有应用图标；签名与自动更新放在步骤 2 之后。
+> 桌面应用在 Linux 上已通过步骤 2 验收（[`step-2-20261011.md`](validation/step-2-20261011.md)，等待用户认可）；Windows 与 macOS 尚未验证。安装包未签名，没有自动更新，没有应用图标；签名与自动更新放在步骤 2 之后。
 
 ## 从源码运行
 
@@ -19,7 +19,7 @@ node apps/cli/bin/nexgent.mjs app --project /path/to/project
 
 - 第一次启动 Electron 时会下载 Electron 运行时（约 100 MB）。
 - 数据目录默认是 `~/.nexgent`（Windows 为 `%USERPROFILE%\.nexgent`），可用环境变量 `NEXGENT_HOME` 改到别处。日志在其中的 `logs/desktop-YYYY-MM-DD.log`，`NEXGENT_LOG_LEVEL=debug` 可看到更多。
-- 模型密钥从环境变量 `NEXGENT_API_KEY`（其次 `ANTHROPIC_API_KEY`）读取，或在设置页填写（写入 `~/.nexgent/credentials.json`，权限 0600）。
+- 模型密钥从环境变量 `NEXGENT_API_KEY`（其次 `ANTHROPIC_API_KEY`）读取，例如 `export NEXGENT_API_KEY=<key>`；也可以在设置页填写（写入 `~/.nexgent/credentials.json`，权限 0600）。不要把密钥写进项目目录或仓库。
 - Linux 以 root 运行时需要加 `--no-sandbox`（Chromium 不允许 root 开沙箱）：`pnpm --filter @nexgent/desktop exec electron . --no-sandbox`。普通用户不需要。
 - 同一个 `NEXGENT_HOME` 只允许一个实例；再次启动会把已打开的窗口切到前台。主进程被强杀后可以直接再启动，不需要手动清理锁文件。
 
@@ -58,5 +58,6 @@ chmod +x Nexgent-0.0.0-linux-x86_64.AppImage
 
 ## 验证记录
 
-- Linux（云端会话，2026-10-11）：`package:linux` 产出 AppImage；解包目录与 AppImage（`APPIMAGE_EXTRACT_AND_RUN=1`）都能启动，窗口加载占位页，`app.info` 的 IPC 往返成功，打包后的应用忽略开发用环境变量。
-- Windows：未验证（当前没有 Windows 自动检查）。
+- Linux（云端会话，2026-10-11）：`package:linux` 产出 AppImage；解包目录与 AppImage（`APPIMAGE_EXTRACT_AND_RUN=1`）都能启动，`app.info` 的 IPC 往返成功，打包后的应用忽略开发用环境变量。
+- Linux，从源码运行（2026-10-11，提交 `f7077a4`）：`accept-step2` 桌面层 D01–D10 全部通过，见 [`step-2-20261011.md`](validation/step-2-20261011.md)。验收没有覆盖安装包本身。
+- Windows：未验证。`package:win`、桌面层和真实模型运行都没有在 Windows 上跑过，CI 停用期间也没有 Windows 自动检查。
