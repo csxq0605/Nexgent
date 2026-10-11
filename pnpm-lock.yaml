@@ -46,6 +46,25 @@ importers:
         specifier: workspace:*
         version: link:../../packages/test-support
 
+  packages/context:
+    dependencies:
+      '@nexgent/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@nexgent/session':
+        specifier: workspace:*
+        version: link:../session
+    devDependencies:
+      '@nexgent/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@nexgent/test-support':
+        specifier: workspace:*
+        version: link:../test-support
+      '@nexgent/workspace':
+        specifier: workspace:*
+        version: link:../workspace
+
   packages/kernel:
     dependencies:
       '@deepseek-ai/cordis':
