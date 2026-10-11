@@ -2,7 +2,7 @@ import { renderFeedbackPrompt, type TurnContextInput } from '@nexgent/kernel'
 import { validateSessionRecord } from '@nexgent/session'
 import { describe, expect, it } from 'vitest'
 import { createFeedbackEntry, createTaskingService, goalContextProvider } from '../src/index.js'
-import { openSession, project, SESSION_A, SESSION_B } from './helpers.js'
+import { newStore, openSession, project, SESSION_A, SESSION_B } from './helpers.js'
 
 describe('feedback', () => {
   it('validates a submission against the deliverable and builds the entry', async () => {
@@ -24,8 +24,11 @@ describe('feedback', () => {
 
   it('lists feedback records across sessions, filtered and in order, after a restart', async () => {
     const p = await project()
-    const appendA = await openSession(p.sessions, p.root, SESSION_A)
-    const appendB = await openSession(p.sessions, p.root, SESSION_B)
+    // One millisecond per record, so the order by `ts` is the append order (same-ms records sort by session id).
+    let tick = 0
+    const sessions = newStore(p.workspace.layout.sessions, () => new Date(Date.UTC(2026, 9, 11, 9, 0, 0, tick++)))
+    const appendA = await openSession(sessions, p.root, SESSION_A)
+    const appendB = await openSession(sessions, p.root, SESSION_B)
     const d1 = '55555555-5555-4555-8555-555555555555'
     const d2 = '66666666-6666-4666-8666-666666666666'
     const feedback = (id: string, deliverableId: string, comment: string) => ({ id, deliverableId, version: 1, rating: 4 as const, comment })

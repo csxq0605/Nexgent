@@ -66,8 +66,8 @@ export async function project(): Promise<TestProject> {
 }
 
 /** A session store closed after the test. */
-export function newStore(sessionsDir: string): JsonlSessionStore {
-  const store = new JsonlSessionStore({ sessionsDir, fsync: 'boundaries' })
+export function newStore(sessionsDir: string, now?: () => Date): JsonlSessionStore {
+  const store = new JsonlSessionStore({ sessionsDir, fsync: 'boundaries', ...(now === undefined ? {} : { now }) })
   stores.push(store)
   return store
 }

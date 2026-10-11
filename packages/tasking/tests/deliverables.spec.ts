@@ -94,11 +94,12 @@ describe('present', () => {
     expect(await p.tasking.deliverables.get(v1.deliverableId, 1)).toEqual(v1)
     expect(v2.files[0]!.sha256).not.toBe(v1.files[0]!.sha256)
 
+    // Order between deliverables follows the first presentedAt (ms); both may fall in the same ms here.
     const list = await p.tasking.deliverables.list()
-    expect(list.map(entry => [entry.deliverableId, entry.versions.map(version => version.version)])).toEqual([
+    expect(new Map(list.map(entry => [entry.deliverableId, entry.versions.map(version => version.version)]))).toEqual(new Map([
       [v1.deliverableId, [1, 2, 3]],
       [other.deliverableId, [1]],
-    ])
+    ]))
     await expect(p.tasking.deliverables.present(presentInput(['report/summary.csv'], { deliverableId: '00000000-0000-4000-8000-000000000000' }))).rejects.toThrow(/no deliverable with id/)
     await expect(p.tasking.deliverables.present(presentInput(['report/summary.csv'], { deliverableId: '../x' }))).rejects.toMatchObject({ code: 'tool/invalid-input' })
   })
