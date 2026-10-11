@@ -338,6 +338,8 @@ export class Agent {
   private turnDenials = new Set<string>()
   /** Provider sections of the running turn, in render order; empty between turns. */
   private turnSections: readonly SystemPromptSection[] = []
+  /** Whether the project had materials at the running turn's start (the "Working with files" materials line). */
+  private turnMaterials = false
   /** Usage of the latest model request of this agent (the compaction trigger reads it). */
   private lastUsage: LLMUsage | undefined
   /** Turn in progress, for host records. */
@@ -414,6 +416,7 @@ export class Agent {
       platform: process.platform,
       tools: this.init.tools.list(),
       sections: this.turnSections,
+      materials: this.turnMaterials,
     })
   }
 
@@ -576,18 +579,28 @@ export class Agent {
     const text = input.source === 'feedback' ? renderFeedbackPrompt(input.feedback) : input.text
     const materialIds = [...(input.materialIds ?? [])]
     const services = this.init.services?.() ?? {}
+    // Providers get the state before this turn. It is read before `turn.start`:
+    // a lock-holding store's `resume` treats an open turn as interrupted
+    // and closes it (data-formats.md §恢复), so it must never run mid-turn.
+    const before = services.context !== undefined && services.context.providers.length > 0 ? await this.readState() : undefined
     const turn = ++this.lastTurn
     this.turnDenials = new Set()
     this.turnSections = []
     this.turnFiles = undefined
+    this.turnMaterials = false
     this.stats.turns += 1
     this.openTurn = turn
     try {
       await this.append({ type: 'turn.start', turn })
       this.emit({ type: 'turn.start', sessionId: this.sessionId, turn })
       if (input.source === 'feedback') await this.append({ type: 'feedback', turn, feedback: input.feedback })
-      if (services.tasking !== undefined) await this.beginFiles(services.tasking, turn)
-      if (services.context !== undefined) await this.beginContext(services.context, { turn, text, source, materialIds, signal })
+      if (services.tasking !== undefined) {
+        await this.beginFiles(services.tasking, turn)
+        this.turnMaterials = await this.hasMaterials(services.tasking)
+      }
+      if (services.context !== undefined && before !== undefined) {
+        await this.beginContext(services.context, before, { turn, text, source, materialIds, signal })
+      }
       await this.append({ type: 'user.message', turn, content: text, source, ...(materialIds.length > 0 ? { materials: materialIds } : {}) })
       this.messages.push({ role: 'user', content: text })
 
@@ -612,6 +625,7 @@ export class Agent {
       this.openTurn = undefined
       this.turnSections = []
       this.turnFiles = undefined
+      this.turnMaterials = false
     }
   }
 
@@ -635,6 +649,27 @@ export class Agent {
   }
 
   /**
+   * The session state between turns, for context providers. Only called while
+   * no turn is open (see `runTurn`); a failure is reported after `turn.start`.
+   */
+  private async readState(): Promise<{ readonly state: SessionState } | { readonly error: ErrorInfo }> {
+    try {
+      return { state: await this.init.session.resume(this.sessionId) }
+    } catch (error) {
+      return { error: toErrorInfo(error) }
+    }
+  }
+
+  /** Whether the project lists any active material; a failed listing counts as none (it only drops one prompt line). */
+  private async hasMaterials(tasking: TaskingService): Promise<boolean> {
+    try {
+      return (await tasking.materials.list()).length > 0
+    } catch {
+      return false
+    }
+  }
+
+  /**
    * Call each provider's `beginTurn` in order: keep its system sections for
    * the turn's requests (sorted by id within the provider) and record its
    * injected texts as `user.message { source: 'inject' }`. A provider that
@@ -642,18 +677,17 @@ export class Agent {
    */
   private async beginContext(
     context: ContextService,
+    before: { readonly state: SessionState } | { readonly error: ErrorInfo },
     args: { turn: number; text: string; source: 'user' | 'feedback'; materialIds: readonly string[]; signal: AbortSignal },
   ): Promise<void> {
     const providers = [...context.providers]
     if (providers.length === 0) return
     const { turn } = args
-    let state: SessionState
-    try {
-      state = await this.init.session.resume(this.sessionId)
-    } catch (error) {
-      await this.appendError(toErrorInfo(error), false, turn)
+    if ('error' in before) {
+      await this.appendError({ ...before.error, message: `context providers skipped: the session state could not be read (${before.error.message})` }, false, turn)
       return
     }
+    const { state } = before
     const sections: SystemPromptSection[] = []
     for (const provider of providers) {
       if (args.signal.aborted) break
@@ -769,6 +803,7 @@ export class Agent {
     }
   }
 
+  /** Runs after `turn.end` only: `resume` on a lock-holding store must not see an open turn. */
   private async maybeCheckpoint(): Promise<void> {
     const every = this.init.settings.checkpointEvery
     if (every <= 0 || this.lastSeq - this.lastCheckpointSeq < every) return

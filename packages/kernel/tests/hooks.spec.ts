@@ -67,8 +67,8 @@ class FakeTracker implements TurnFileTracker {
   }
 }
 
-function tasking(files: TurnFileTracker): TaskingService {
-  return { files } as unknown as TaskingService
+function tasking(files: TurnFileTracker, materials: unknown[] = []): TaskingService {
+  return { files, materials: { list: async () => materials } } as unknown as TaskingService
 }
 
 const echo: Tool = {
@@ -113,7 +113,10 @@ describe('context providers', () => {
     expect(messages.map(record => [record.source, record.content])).toEqual([['inject', 'note A'], ['inject', 'note B'], ['user', 'hello']])
     expect(messages[2]!.materials).toEqual(['m1'])
     expect(seen[0]).toMatchObject({ sessionId: agent.sessionId, turn: 1, text: 'hello', source: 'user', materialIds: ['m1'], projectRoot: harness.workspace.root })
-    expect(seen[0]!.state.metadata.openTurn).toBe(1)
+    // state as of before the turn: read while no turn was open, so no turn was closed as interrupted
+    expect(seen[0]!.state.metadata.openTurn).toBeUndefined()
+    expect(seen[0]!.state.metadata.lastTurn).toBe(0)
+    expect(store.of(agent.sessionId, 'turn.end').map(record => record.reason.kind)).toEqual(['completed'])
 
     const prompt = llm.requests[0]!.messages[0]!.content as string
     expect(llm.requests[1]!.messages[0]!.content).toBe(prompt)
@@ -275,6 +278,7 @@ describe('turn file tracker', () => {
     expect(types.slice(-2)).toEqual(['turn.files', 'turn.end'])
     expect(store.of(agent.sessionId, 'turn.files')[0]).toMatchObject({ turn: 1, changes: [{ path: 'a.txt', change: 'modified' }, { path: 'b.txt', change: 'added' }] })
     expect(store.of(agent.sessionId, 'turn.files')[0]!.omitted).toBeUndefined()
+    expect(harness.llm.requests[0]!.messages[0]!.content).not.toContain('.nexgent/materials/')
     await agent.close()
   })
 
@@ -422,7 +426,7 @@ describe('host records and turn input', () => {
     const providers: ContextProvider[] = [{ id: 'p', beginTurn: async () => ({ inject: ['context'] }) }]
     await app.ctx.plugin(servicePlugin('context', contextService(providers)))
     const tracker = new FakeTracker()
-    await app.ctx.plugin(servicePlugin('tasking', tasking(tracker)))
+    await app.ctx.plugin(servicePlugin('tasking', tasking(tracker, [{ id: 'm1' }])))
     const agent = await app.agents.create()
     const feedback = { id: 'f1', deliverableId: 'd1', version: 2, rating: 3 as const, comment: 'Use two decimals.' }
     await agent.run({ source: 'feedback', feedback })
@@ -433,6 +437,8 @@ describe('host records and turn input', () => {
     const message = store.of(agent.sessionId, 'user.message')[1]!
     expect(message).toMatchObject({ source: 'feedback', content: renderFeedbackPrompt(feedback) })
     expect(conversation(llm.requests[0]!).at(-1)).toEqual({ role: 'user', content: renderFeedbackPrompt(feedback) })
+    // the project has a material: the read-only line is in the prompt
+    expect(llm.requests[0]!.messages[0]!.content).toContain('`.nexgent/materials/` and are read-only')
     await agent.close()
   })
 })
