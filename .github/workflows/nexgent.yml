@@ -1,23 +1,19 @@
 name: Nexgent
 
 # Lean CI for the TypeScript app (user 2026-10-11): build (which type-checks the
-# tests), the vitest suite and the accept-step2 headless layer. Linux on every
-# pull request and push; Windows only after a merge into nexgent-app (or by hand),
-# because the Windows runners are several times slower and were the source of
-# most red runs (5 s test timeouts), while Windows behaviour (pwsh, process
-# trees, paths) still needs a check somewhere: cloud sessions are Linux only.
-# Not here: the desktop layer of accept-step2 (run locally), the real-model
-# layer (manual, nexgent-real-model.yml), the old Python tests (test.yml).
+# tests), the vitest suite and the accept-step2 headless layer, on Linux and
+# Windows. Manual only (user 2026-10-11: CI must not run on every push, it
+# spends quota); start it from the Actions tab once this file is on the
+# default branch. Tests otherwise run locally in each session.
+# Not here: the desktop layer of accept-step2 (run locally, or on Windows by
+# windows-accept.yml), the real-model layer (nexgent-real-model.yml), the old
+# Python tests (test.yml).
 on:
-  pull_request:
-    branches: [nexgent-app, main]
-  push:
-    branches: [nexgent-app]
   workflow_dispatch:
 
 concurrency:
   group: nexgent-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   linux:
@@ -62,7 +58,6 @@ jobs:
 
   windows:
     name: windows-latest
-    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
