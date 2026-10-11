@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { isProcessAlive, killAllSpawned, spawnNode, TimeoutError, waitFor, waitForFile } from '../src/index.js'
+import { crashDuringTool, descendantPids, isProcessAlive, killAllSpawned, killProcessTree, spawnNode, TimeoutError, waitFor, waitForFile } from '../src/index.js'
 
 const child = fileURLToPath(new URL('./fixtures/child.mjs', import.meta.url))
 const dirs: string[] = []
@@ -63,4 +63,29 @@ describe('spawnNode', () => {
     await waitFor(() => !isProcessAlive(pids.grandchild), { timeoutMs: 5000, label: 'grandchild gone' })
     expect(isProcessAlive(pids.child)).toBe(false)
   })
+
+  it('descendantPids lists a live grandchild (ps on POSIX, Win32_Process on Windows)', async () => {
+    const dir = await tempDir()
+    const handle = spawnNode([child, 'hang', dir])
+    await handle.waitForOutput(/ready/)
+    const pids = JSON.parse(await readFile(join(dir, 'pids.json'), 'utf8')) as { child: number; grandchild: number }
+    expect(await descendantPids(pids.child)).toContain(pids.grandchild)
+  }, 30_000)
+
+  it('crashDuringTool kills only the main process once a tool starts and reports the orphans', async () => {
+    const dir = await tempDir()
+    const handle = spawnNode([child, 'tool', dir])
+    const crash = await crashDuringTool(handle, { settleMs: 100 })
+    const pids = JSON.parse(await readFile(join(dir, 'pids.json'), 'utf8')) as { child: number; grandchild: number }
+    try {
+      expect(crash.tool).toBe('bash')
+      expect(crash.exit.code === null || crash.exit.code !== 0).toBe(true)
+      expect(isProcessAlive(pids.child)).toBe(false)
+      // Nothing contains this fixture's grandchild, so the crash orphans it.
+      expect(crash.descendantsBefore).toContain(pids.grandchild)
+      expect(crash.survivors).toContain(pids.grandchild)
+    } finally {
+      await killProcessTree(pids.grandchild)
+    }
+  }, 30_000)
 })
