@@ -6,31 +6,32 @@
  *
  *   headless  H01–H23  scripted provider, through @nexgent/sdk (accept-common/step2-runtime.mjs),
  *                      the kill checks in a child process (step2-driver.mjs) and `nexgent export`
- *   desktop   D01–D10  scripted provider, Playwright driving Electron (CI, both platforms)
+ *   desktop   D01–D10  scripted provider, Playwright driving the built Electron app with the real
+ *                      renderer and SDK (accept-common/step2-desktop.mjs; Linux without DISPLAY starts Xvfb)
  *   real      R01–R07  real Claude model (manual: Linux cloud session, thinking on;
  *                      Windows optional via .github/workflows/nexgent-real-model.yml)
  *
  * Usage:
  *   node scripts/accept-step2.mjs [--layer headless,desktop|real|all] [--out <summary.json>]
- *     [--work-dir <empty dir>] [--budget-usd 15] [--spent <earlier-runs.json>] [--allow-not-ready]
+ *     [--work-dir <empty dir>] [--budget-usd 15] [--spent <earlier-runs.json>]
  *
  * Writes a summary JSON (test-support schema, fields of docs/validation/TEMPLATE.md);
  * every checklist item appears with its id and status passed / failed / not-implemented.
  *
  * Exit codes: 0 every selected item passed; 1 an item failed; 2 not runnable
  * yet (an item not implemented, or a layer's prerequisites missing) — never a
- * fake pass. `--allow-not-ready` turns 2 into 0 for CI while the checks are
- * being built (the summary still says `fail`); it never hides a 1.
+ * fake pass.
  *
  * The real layer reads the key from NEXGENT_API_KEY (fallback ANTHROPIC_API_KEY)
  * and only ever records which variable was set, never the value.
  * Linux, macOS and Windows; no shell, no Python.
  */
-import { access, mkdir, mkdtemp, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { loadHarness, REPO_ROOT } from './accept-common/harness.mjs'
+import { desktopPrerequisites, runDesktopScenario } from './accept-common/step2-desktop.mjs'
 import { runHeadlessScenario } from './accept-common/step2-headless.mjs'
 import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
 import {
@@ -40,7 +41,6 @@ import {
   evaluateItem,
   EXIT_FAIL,
   EXIT_NOT_READY,
-  EXIT_PASS,
   LAYERS,
   OPTIONAL_CHECKS,
   parseLayers,
@@ -62,15 +62,6 @@ const STEP = {
 
 function log(line) {
   process.stderr.write(`accept-step2: ${line}\n`)
-}
-
-async function exists(path) {
-  try {
-    await access(path)
-    return true
-  } catch {
-    return false
-  }
 }
 
 /** Earlier real-model runs' estimated costs: a JSON array of numbers or of `{ costUsd }`. */
@@ -103,9 +94,18 @@ async function prepareLayer(layer, options) {
     }
   }
   if (layer === 'desktop') {
-    const desktop = join(REPO_ROOT, 'apps', 'desktop', 'package.json')
-    if (!(await exists(desktop))) return { ok: false, reason: 'apps/desktop does not exist yet' }
-    return { ok: true, ctx: { work: options.work } }
+    const loaded = await loadHarness()
+    if (!loaded.ok) return { ok: false, reason: loaded.reason }
+    const ready = await desktopPrerequisites()
+    if (!ready.ok) return { ok: false, reason: ready.reason }
+    await mkdir(options.work, { recursive: true })
+    // One scenario run (real Electron, real renderer and SDK, scripted model); every D judge reads it.
+    try {
+      const obs = await runDesktopScenario(loaded.harness, options.work, { log: line => log(`desktop: ${line}`) })
+      return { ok: true, ctx: { work: options.work, obs } }
+    } catch (error) {
+      return { ok: true, ctx: { work: options.work, scenarioError: error instanceof Error ? (error.stack ?? error.message) : String(error) } }
+    }
   }
   // real
   const keySource = realModelKeySource(process.env)
@@ -123,7 +123,6 @@ async function main() {
       'work-dir': { type: 'string' },
       'budget-usd': { type: 'string' },
       spent: { type: 'string' },
-      'allow-not-ready': { type: 'boolean', default: false },
     },
     strict: true,
   })
@@ -211,12 +210,6 @@ async function main() {
   const summary = await s.write(out)
   const count = status => statuses.filter(value => value === status).length
   log(`summary ${out} (result ${summary.result}; passed ${count('passed')}, failed ${count('failed')}, not implemented ${count('not-implemented')})`)
-  if (code === EXIT_NOT_READY && values['allow-not-ready']) {
-    const note = `accept-step2 is not fully wired: ${count('not-implemented')} item(s) not implemented, ${notReady} layer(s) not runnable; summary result is fail`
-    if (process.env['GITHUB_ACTIONS'] === 'true') process.stdout.write(`::warning title=accept-step2 not ready::${note}\n`)
-    log(`${note} (--allow-not-ready: exit 0)`)
-    return EXIT_PASS
-  }
   return code
 }
 

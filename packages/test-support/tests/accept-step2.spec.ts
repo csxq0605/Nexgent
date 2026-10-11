@@ -54,6 +54,11 @@ describe('accept-step2 checklist', () => {
     // Headless items judge the scenario's observations; a crashed scenario fails them all.
     const h02 = CHECKS.find(check => check.id === 'H02')!
     expect(await evaluateItem(h02, { scenarioError: 'boom' })).toMatchObject({ status: 'failed' })
+    const d05 = CHECKS.find(check => check.id === 'D05')!
+    expect(await evaluateItem(d05, { scenarioError: 'boom' })).toMatchObject({ status: 'failed' })
+    expect(await evaluateItem(d05, { obs: {} })).toMatchObject({ status: 'failed' })
+    // Only the real-model items are still without a check.
+    expect(CHECKS.filter(check => typeof check.run !== 'function').map(check => check.id)).toEqual(CHECKS.filter(check => check.layer === 'real').map(check => check.id))
   })
 
   it('exit code: any failure is 1, anything not implemented or not runnable is 2, never 0 without checks', () => {
@@ -81,13 +86,13 @@ describe('accept-step2 checklist', () => {
 })
 
 describe('scripts/accept-step2.mjs (requires `pnpm build`)', () => {
-  async function runScript(args: string[], env: NodeJS.ProcessEnv = {}) {
+  async function runScript(args: string[], env: NodeJS.ProcessEnv = {}, timeout = 60_000) {
     const dir = await mkdtemp(join(tmpdir(), 'nexgent-accept2-test-'))
     try {
       const out = join(dir, 'summary.json')
       const childEnv = { ...process.env, ...env }
       for (const [key, value] of Object.entries(env)) if (value === undefined) delete childEnv[key]
-      const result = spawnSync(process.execPath, [script, '--out', out, '--work-dir', join(dir, 'work'), ...args], { encoding: 'utf8', env: childEnv, timeout: 60_000 })
+      const result = spawnSync(process.execPath, [script, '--out', out, '--work-dir', join(dir, 'work'), ...args], { encoding: 'utf8', env: childEnv, timeout })
       const summary = await readFile(out, 'utf8').then(text => JSON.parse(text) as AcceptanceSummary).catch(() => undefined)
       const raw = await readFile(out, 'utf8').catch(() => '')
       return { result, summary, raw }
@@ -96,24 +101,19 @@ describe('scripts/accept-step2.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  // The desktop layer is not runnable yet, so all its items must come out not-implemented.
-  // (The headless layer runs the full scenario; its judges are tested in accept-step2-judges.spec.ts.)
-  it('never reports a fake pass: unimplemented items are listed as such, the summary fails, exit 2', async () => {
-    const { result, summary } = await runScript(['--layer', 'desktop'])
-    expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
-    expect(summary).toBeDefined()
-    expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
-    expect(summary?.result).toBe('fail')
-    expect(summary?.conclusion.meetsExitCriteria).toBe(false)
-    expect(summary?.checks.map(check => check.id)).toEqual(CHECKS.filter(check => check.layer === 'desktop').map(check => check.id))
-    for (const check of summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'not-implemented' })
-  }, 90_000)
-
-  it('--allow-not-ready exits 0 but keeps the summary failed', async () => {
-    const { result, summary } = await runScript(['--layer', 'desktop', '--allow-not-ready'])
+  // The desktop layer runs the full Electron scenario; its judges are tested in accept-step2-desktop.spec.ts.
+  it('desktop layer: all ten items pass, the summary is valid, exit 0', async () => {
+    const { result, summary } = await runScript(['--layer', 'desktop'], {}, 240_000)
     expect(result.status, result.stderr).toBe(EXIT_PASS)
-    expect(summary?.result).toBe('fail')
-    expect(result.stderr).toContain('not fully wired')
+    expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
+    expect(summary?.checks.map(check => check.id)).toEqual(CHECKS.filter(check => check.layer === 'desktop').map(check => check.id))
+    for (const check of summary?.checks ?? []) expect(check, check.detail).toMatchObject({ passed: true, status: 'passed' })
+  }, 300_000)
+
+  it('rejects the retired --allow-not-ready flag', async () => {
+    const { result } = await runScript(['--layer', 'real', '--allow-not-ready'], { NEXGENT_API_KEY: undefined, ANTHROPIC_API_KEY: undefined })
+    expect(result.status).toBe(EXIT_FAIL)
+    expect(result.stderr).toContain('allow-not-ready')
   }, 90_000)
 
   it('real layer: without a key it is not runnable (exit 2) and calls no model', async () => {
@@ -121,6 +121,11 @@ describe('scripts/accept-step2.mjs (requires `pnpm build`)', () => {
     expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
     expect(result.stderr).toContain('no API key')
     expect(summary?.scripted).toBeNull()
+    // Never a fake pass: every item of a layer that cannot run is listed as not implemented, and the summary fails.
+    expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
+    expect(summary?.result).toBe('fail')
+    expect(summary?.checks.map(check => check.id)).toEqual(CHECKS.filter(check => check.layer === 'real').map(check => check.id))
+    for (const check of summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'not-implemented' })
     expect(summary?.realModel).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', callCount: 0, result: 'fail' })
   }, 90_000)
 
