@@ -617,10 +617,8 @@ async function runMemberApproval(h, pkgs, work, servers, log) {
       if (event.type !== 'approval.request') return
       const entry = { sessionId: event.sessionId, parentSessionId: event.parentSessionId ?? null, request: event.request }
       obs.approvals.push(entry)
-      // Answer on a later task, as a UI would: the SDK registers the pending request only after
-      // the event listeners return, so an answer given inside the listener is dropped.
-      entry.answered = new Promise(resolve => setImmediate(resolve))
-        .then(() => sdk.call('approvals.respond', { projectId, sessionId: event.request.sessionId, decision: { id: event.request.id, decision: 'deny', scope: 'once' } }))
+      // Answered inside the listener on purpose: the request must already be pending when the event fires (#73).
+      entry.answered = sdk.call('approvals.respond', { projectId, sessionId: event.request.sessionId, decision: { id: event.request.id, decision: 'deny', scope: 'once' } })
         .then(ok => ok, error => `error: ${error instanceof Error ? error.message : String(error)}`)
     }
     obs.phases.memberApproval = turnObs(await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS.memberApproval }, { onEvent }))
