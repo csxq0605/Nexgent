@@ -15,7 +15,7 @@
 退出门槛（计划 4.7，按步骤 1 的口径加严）：
 
 1. `scripts/accept-step2.mjs` 的无界面层与桌面层在 Linux、Windows CI 上都通过（脚本化 provider）。
-2. 真实 Claude 模型（`claude-sonnet-5-5`，ADR 0002）完成一个**真实任务**的全链，结果由脚本独立判定，在 Linux 上 thinking 开、关各一次；并补上步骤 1 没测到的三项：文件编辑工具在真实模型下被使用、thinking 开启、中断后恢复。Windows 上的真实运行按用户 2026-10-11 的决定改为可选，不进门槛；Windows 的脚本化 CI 仍必须全绿。
+2. 真实 Claude 模型（`claude-sonnet-5-5`，ADR 0002）完成一个**真实任务**的全链，结果由脚本独立判定，在 Linux 云端开 thinking 跑一次；并补上步骤 1 没测到的三项：文件编辑工具在真实模型下被使用、thinking 开启、中断后恢复。Windows 上的真实运行按用户 2026-10-11 的决定改为可选，不进门槛；Windows 的脚本化 CI 仍必须全绿。
 3. 验收记录 `docs/validation/step-2-<日期>.md` 经用户认可。之后合入 `main`、旧 PyQt 归档为 `archive/harness-gui`（计划 4.0），这两步需要用户另行同意。
 
 ## 范围
@@ -45,7 +45,7 @@
 | W4 `@nexgent/sdk` 与 CLI 改接 | 进程内 TS API；CLI 改走 SDK；`nexgent export`、`nexgent app` | W0；集成时依赖 W1–W3 | 接口先行时与 W5、W6 并行 |
 | W5 `apps/desktop` 主进程与打包 | Electron 外壳、主进程持有 SDK、preload 与 IPC 令牌、窗口与对话框、未签名打包 | W0（IPC 规范）、W4 | W6（对接 IPC 契约） |
 | W6 `apps/desktop` 界面 | React 渲染进程：三栏、对话流、审批、成果卡片与差异、设置页 | W0（SDK 接口）；接真实后端时依赖 W5 | W5（用假 SDK 先写） |
-| W7 kernel 维护（步骤 1 遗留） | Job Object、`perProject`、`pause_turn`、system prompt 的文件工具指引 | 步骤 1 代码 | 全部 |
+| W7 kernel 维护（步骤 1 遗留） | thinking 默认改为开启、Job Object、`perProject`、`pause_turn`、system prompt 的文件工具指引 | 步骤 1 代码 | 全部 |
 | W8 测试与 CI（固定讨论串） | test-support 扩展、`accept-step2.mjs`、桌面 E2E、CI 改动、真实模型手动 workflow 与判定脚本 | 各包按需 | 全部；贯穿五轮 |
 
 依赖顺序（箭头指向被依赖方）：
@@ -67,7 +67,7 @@ apps/desktop(W5,W6) ──► sdk(W4) ──► context(W1) ──┐
 | 1 | 「步骤二契约」(W0)；「kernel 维护」(W7)；「测试与 CI」(W8) | 契约与两份规范的步骤 2 章节冻结、SDK 接口文件；Job Object、`perProject`、`pause_turn`；测试文件纳入类型检查、session 截断恢复测试在 Windows 上的偶发超时、`accept-step2.mjs` 骨架（未接通时退出码 2）、桌面 E2E 在 CI 上能拉起一个空 Electron 窗口 | 契约 PR 合入 `nexgent-app`；CI 两平台绿 |
 | 2 | 「上下文与技能」(W1 + W3)；「任务与成果」(W2)；「测试与 CI」(W8) | context、skill、tasking 三包按契约实现并有包内测试；脚本化 provider 的步骤 2 剧本（present、反馈、压缩、目标） | 三包合入；中期检查点（见下）第 1–3 项满足 |
 | 3 | 「SDK 与 CLI」(W4)；「桌面主进程」(W5)；「桌面界面」(W6) | SDK 接通三包，CLI 改走 SDK；桌面主进程持有 SDK、IPC 令牌；界面对假 SDK 完成三栏与全部交互 | 中期检查点第 4–5 项满足；`accept-step2` 无界面层两平台绿 |
-| 4 | 「桌面主进程」或「桌面界面」（二者择一收尾）；「测试与 CI」(W8)；「真实模型验收」 | 界面接真实后端；桌面层 E2E 两平台绿；真实模型补验 Linux 两次（见下；Windows 一次可选），失败的回原包修 | `accept-step2` 全部层两平台绿；真实模型判定全部通过 |
+| 4 | 「桌面主进程」或「桌面界面」（二者择一收尾）；「测试与 CI」(W8)；「真实模型验收」 | 界面接真实后端；桌面层 E2E 两平台绿；真实模型补验 Linux 一次（见下；Windows 一次可选），失败的回原包修 | `accept-step2` 全部层两平台绿；真实模型判定全部通过 |
 | 5 | 「测试与 CI」(W8)（写验收记录与 README 的检查）；其余按缺口开 | `docs/validation/step-2-<日期>.md`、README 只加已验收的能力、`docs/install.md` | 用户认可验收记录；问用户是否合入 `main` |
 
 第 3 轮暂停「测试与 CI」是为了守住 3 个上限：这一轮的测试改动由各讨论串在自己包内写，`accept-step2.mjs` 的接线留到第 4 轮。若用户放宽上限，第 3 轮应同时开「测试与 CI」。
@@ -97,9 +97,10 @@ apps/desktop(W5,W6) ──► sdk(W4) ──► context(W1) ──┐
   - 会话 JSONL v1 的新增记录类型（v1 内追加，旧文件仍可读）：`material.added`、`deliverable.presented`、`turn.files`（每轮文件变更）、`feedback`、`goal.set` / `goal.update`、`compaction`；`user.message.source` 增加 `feedback`。逐个写明字段、写入时机和恢复语义。
   - `data-formats.md` 填“材料元数据”“成果元数据”两章，并新增“反馈”“持久目标”“压缩”三节；`permissions.md` 填“本地 IPC 与访问令牌”，并说明 `materials/` 对模型只读、`outputs/` 快照由 tasking 写而模型不可直接改快照目录。
   - `packages/sdk/src/api.ts`：SDK 的公开类型与方法签名（只有类型，没有实现），供 W5、W6 先行。
+  - 新写 ADR 0003：执行默认开启 thinking（用户 2026-10-11 决定），替代 ADR 0002 决策 3 的默认值和计划 4.9 #6 的“执行关闭 thinking”；`thinking: 'off'` 仍作为配置项保留。
   - 系统提示的步骤 2 增量文本（成果要用 `present` 声明、修改已有文件优先用 `str_replace`），由 W7 落进 `system-prompt.ts`。
 - **DSH 参考包**：`deliverables`、`feedback`、`goal`、`context/file-reference`、`context/agent-instructions`、`compaction-basic`、`skill`、`sdk` 的接口部分；`interaction`、`hooks` 只参考事件划分。
-- **文件归属**：`packages/kernel/src/contracts/**`、`packages/sdk/src/api.ts`（冻结后交给 W4）、两份 spec 的上述章节、根目录配置文件。
+- **文件归属**：`packages/kernel/src/contracts/**`、`docs/adr/0003-*.md`、`packages/sdk/src/api.ts`（冻结后交给 W4）、两份 spec 的上述章节、根目录配置文件。
 - **完成标准**：
   - 契约与 SDK 接口通过 `tsc -b`；每种新记录和元数据都有 JSON schema 与读写往返测试；
   - 新记录类型加入后，步骤 1 写出的会话文件仍能被读出并恢复（用 Library 里 `validation-raw/step-1-20261011/` 的会话做夹具，复制进测试夹具目录时只保留需要的行）；
@@ -190,7 +191,7 @@ apps/desktop(W5,W6) ──► sdk(W4) ──► context(W1) ──┐
 
 ### W7 kernel 维护（「kernel 维护」）
 
-- **职责**：Windows 进程树终止改用 Job Object 或等效方式，Linux 保持进程组；`perProject` 费用上限按账本窗口执行；`pause_turn` 自动续跑（有次数上限）；系统提示加入 W0 定的步骤 2 增量；实现 W0 定义的 agent loop 挂点与 session 新记录类型的读写；`nexgent.ps1` 在 Windows CI 上实跑一次。
+- **职责**：按 W0 的 ADR 把 `DEFAULT_PROJECT_CONFIG.thinking` 改为 `'on'`（自适应 thinking），CLI `--help`、包 README 与测试夹具随之更新；Windows 进程树终止改用 Job Object 或等效方式，Linux 保持进程组；`perProject` 费用上限按账本窗口执行；`pause_turn` 自动续跑（有次数上限）；系统提示加入 W0 定的步骤 2 增量；实现 W0 定义的 agent loop 挂点与 session 新记录类型的读写；`nexgent.ps1` 在 Windows CI 上实跑一次。
 - **文件归属**：`packages/kernel/src/**`（契约除外）、`packages/workspace/**`、`packages/llm/**`、`packages/session/**`、`apps/cli/bin/nexgent.ps1`。
 - **完成标准**：
   - Windows 上 `pwsh` 工具超时与取消后，用进程列表检查没有残留子孙进程（测试在 Windows CI 上跑）；
@@ -297,14 +298,13 @@ apps/desktop(W5,W6) ──► sdk(W4) ──► context(W1) ──┐
 
 | 次 | 平台 | thinking | 用途 |
 | --- | --- | --- | --- |
-| 1 | Linux | 开 | 主验收：R01–R05、R07；同时设较低的压缩阈值，让压缩在真实模型下触发一次 |
-| 2 | Linux | 关（默认） | 对照：默认设置下文件编辑工具是否被使用（R02） |
-| 3（可选） | Windows | 开 | R06，不进门槛 |
+| 1 | Linux 云端 | 开（默认） | 门槛内唯一一次：R01–R05、R07；同时设较低的压缩阈值，让压缩在真实模型下触发一次 |
+| 2（可选） | Windows | 开 | R06，不进门槛 |
 
 运行位置（用户 2026-10-11 决定）：
 
-- **Linux 两次**（第 1、2 次）：在云端会话里跑，密钥用云端环境已有的 `NEXGENT_API_KEY`，原始记录放项目资料库 `validation-raw/step-2-<日期>/`。
-- **Windows 一次**（第 3 次，可选）：「测试与 CI」新增手动触发的真实模型 workflow，在 `windows-latest` 上跑。用户已在仓库里加好 `NEXGENT_API_KEY` secret，想跑时手动触发即可；它不进退出门槛。workflow 在没有 secret 时以退出码 2 结束。
+- **Linux 一次**（第 1 次）：在云端会话里跑，密钥用云端环境已有的 `NEXGENT_API_KEY`，原始记录放项目资料库 `validation-raw/step-2-<日期>/`。
+- **Windows 一次**（第 2 次，可选）：「测试与 CI」新增手动触发的真实模型 workflow，在 `windows-latest` 上跑。用户已在仓库里加好 `NEXGENT_API_KEY` secret，想跑时手动触发即可；它不进退出门槛。workflow 在没有 secret 时以退出码 2 结束。
 
 ### 预估费用
 
@@ -319,7 +319,7 @@ apps/desktop(W5,W6) ──► sdk(W4) ──► context(W1) ──┐
 | 未缓存输入 | 可忽略 |
 | **合计** | **约 1–1.5 美元** |
 
-门槛内的两次 Linux 运行约 2–3 美元；修复后重跑按每种设置最多再两次计，可选的 Windows 一次另计约 1–1.5 美元。建议预算上限 **15 美元**，由脚本在每次运行时设置 `costCaps.perTask`，并在累计估算超过上限时拒绝开始新运行。这是估算，不是账单；实际金额以账单为准。用户 2026-10-11 已同意 15 美元的上限。
+门槛内只有一次 Linux 运行，约 1–1.5 美元；修复后重跑最多再两次计，可选的 Windows 一次另计约 1–1.5 美元，全部加起来不超过约 6 美元。建议预算上限 **15 美元**，由脚本在每次运行时设置 `costCaps.perTask`，并在累计估算超过上限时拒绝开始新运行。这是估算，不是账单；实际金额以账单为准。用户 2026-10-11 已同意 15 美元的上限。
 
 ## 风险
 
@@ -339,7 +339,8 @@ apps/desktop(W5,W6) ──► sdk(W4) ──► context(W1) ──┐
 
 ## 已定的决定（用户 2026-10-11）
 
-1. 真实模型运行：门槛只要求 Linux 两次（thinking 开、关），在云端会话里跑，用云端环境的 `NEXGENT_API_KEY`。Windows 真实运行改为可选：仓库 secret 已由用户加好，想跑时手动触发 workflow。Windows 的脚本化 CI 照常保持全绿。
-2. 真实模型补验预算上限 15 美元（门槛内预估 2–3 美元）。
-3. 步骤 2 的小 PR 合入 `nexgent-app`：CI 两平台绿后由负责的讨论串直接用普通合并合入，署名 csxq0605，分支不删；合入 `main` 仍要先问用户。
-4. 安装包签名与自动更新放到步骤 2 之后。
+1. 真实模型运行：门槛只要求一次，在 Linux 云端会话里、开 thinking 跑，用云端环境的 `NEXGENT_API_KEY`。Windows 真实运行改为可选：仓库 secret 已由用户加好，想跑时手动触发 workflow。Windows 的脚本化 CI 照常保持全绿。
+2. 执行默认开启 thinking，由 W0 写 ADR 0003、W7 改默认值；`thinking: 'off'` 只作为配置项保留。
+3. 真实模型补验预算上限 15 美元（门槛内预估 1–1.5 美元）。
+4. 步骤 2 的小 PR 合入 `nexgent-app`：CI 两平台绿后由负责的讨论串直接用普通合并合入，署名 csxq0605，分支不删；合入 `main` 仍要先问用户。
+5. 安装包签名与自动更新放到步骤 2 之后。
