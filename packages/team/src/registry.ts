@@ -66,7 +66,7 @@ export class TeamRegistry {
     return team
   }
 
-  /** Injects a recipient's undelivered mail at its turn start (teammates and the Lead). */
+  /** Injects a recipient's undelivered mail at its turn start (teammates and the Lead); a running teammate's comes before each request too (`Team.bind`). */
   provider(): ContextProvider {
     return {
       id: TEAM_MAIL_PROVIDER_ID,
