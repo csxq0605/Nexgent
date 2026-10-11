@@ -1,0 +1,75 @@
+name: Nexgent real model
+
+# Manual only. Step-2 real-model layer (accept-step2 R01–R07) against Claude
+# with thinking on. The gating run is the Linux cloud-session run; this
+# workflow is the optional Windows run (R06), with ubuntu-latest selectable.
+# Reads the repository secret NEXGENT_API_KEY; without it the script exits 2
+# (not runnable) and the job fails rather than reporting a pass.
+# Only the summary JSON is uploaded, never session or ledger contents.
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: Runner
+        required: true
+        default: windows-latest
+        type: choice
+        options:
+          - windows-latest
+          - ubuntu-latest
+      budget_usd:
+        description: Budget cap for this run series (USD)
+        required: true
+        default: '15'
+        type: string
+      spent_usd:
+        description: Estimated cost of earlier runs, comma-separated USD (e.g. 1.2,0.9)
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: nexgent-real-model
+  cancel-in-progress: false
+
+jobs:
+  real-model:
+    name: real model (${{ inputs.os }})
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Write earlier spend
+        env:
+          SPENT_USD: ${{ inputs.spent_usd }}
+        run: node -e "const v=(process.env.SPENT_USD||'').split(',').map(s=>s.trim()).filter(Boolean).map(Number); if(v.some(n=>!(n>=0))) throw new Error('spent_usd must be comma-separated numbers'); require('fs').writeFileSync('spent.json', JSON.stringify(v))"
+
+      - name: accept-step2 --layer real
+        env:
+          NEXGENT_API_KEY: ${{ secrets.NEXGENT_API_KEY }}
+          BUDGET_USD: ${{ inputs.budget_usd }}
+        shell: bash
+        run: node scripts/accept-step2.mjs --layer real --budget-usd "$BUDGET_USD" --spent spent.json --out accept-step2-real.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: accept-step2-real-${{ inputs.os }}
+          path: accept-step2-real.json
+          if-no-files-found: ignore

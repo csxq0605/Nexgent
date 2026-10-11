@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexgent.dev/schema/material.v1.schema.json",
+  "title": "Nexgent material metadata v1",
+  "description": ".nexgent/materials/<id>/material.json. See docs/spec/data-formats.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "formatVersion",
+    "id",
+    "originalName",
+    "path",
+    "size",
+    "sha256",
+    "mediaType",
+    "text",
+    "addedAt",
+    "status"
+  ],
+  "properties": {
+    "formatVersion": {
+      "const": 1
+    },
+    "id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "originalName": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "path": {
+      "$ref": "#/$defs/portablePath"
+    },
+    "size": {
+      "$ref": "#/$defs/size"
+    },
+    "sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "mediaType": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "text": {
+      "type": "boolean"
+    },
+    "addedAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "sessionId": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "status": {
+      "enum": [
+        "active",
+        "removed"
+      ]
+    },
+    "removedAt": {
+      "$ref": "#/$defs/timestamp"
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "portablePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\\\]+$"
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

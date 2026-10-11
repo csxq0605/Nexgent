@@ -1,0 +1,32 @@
+{
+  "name": "@nexgent/kernel",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Nexgent runtime kernel: profile boot, service contracts, agents and the agent loop, tools, approvals, credentials and storage primitives",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./profiles/*": "./profiles/*"
+  },
+  "files": [
+    "dist",
+    "profiles"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/schemastery": "3.18.4",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@nexgent/test-support": "workspace:*"
+  }
+}

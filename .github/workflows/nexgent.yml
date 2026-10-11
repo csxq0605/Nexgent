@@ -1,0 +1,92 @@
+name: Nexgent
+
+# Lean CI for the TypeScript app (user 2026-10-11): build (which type-checks the
+# tests), the vitest suite and the accept-step2 headless layer, on Linux and
+# Windows. Manual only (user 2026-10-11: CI must not run on every push, it
+# spends quota); start it from the Actions tab once this file is on the
+# default branch. Tests otherwise run locally in each session.
+# Not here: the desktop layer of accept-step2 (run locally, or on Windows by
+# windows-accept.yml), the real-model layer (nexgent-real-model.yml or
+# windows-accept.yml).
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: nexgent-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    name: ubuntu-latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The desktop tests in `pnpm test` start Electron (under their own Xvfb).
+      # pnpm skips electron's postinstall, so fetch the binary; Electron's SUID
+      # sandbox helper needs root ownership on Ubuntu.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: |
+          node node_modules/electron/install.js
+          sandbox="$(node -p "require('path').join(require('path').dirname(require.resolve('electron/package.json')), 'dist', 'chrome-sandbox')")"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+
+      - run: pnpm build
+      - run: pnpm test
+      - run: node scripts/accept-step2.mjs --layer headless --out accept-step2.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: accept-step2-ubuntu-latest
+          path: accept-step2.json
+          if-no-files-found: ignore
+
+  windows:
+    name: windows-latest
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: node node_modules/electron/install.js
+      - run: pnpm build
+      # Same tests; the per-test timeout is raised for the slower runner (I/O and
+      # process start-up are 3–20× slower than Linux), not to hide hangs.
+      - run: pnpm exec vitest run --testTimeout=30000
+      - run: node scripts/accept-step2.mjs --layer headless --out accept-step2.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: accept-step2-windows-latest
+          path: accept-step2.json
+          if-no-files-found: ignore
+      # The PowerShell launcher runs a write-file task against the scripted model server.
+      - run: node scripts/accept-common/ps1-smoke.mjs
