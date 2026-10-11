@@ -81,6 +81,15 @@ describe('step-2 real task materials and hidden check', () => {
 })
 
 describe('accept-step2 R judges', () => {
+  it('R02 accepts an absolute path inside the project for the feedback-round str_replace', () => {
+    const obs = broken((o) => {
+      for (const e of o.phases.feedback.events) {
+        if (e.type === 'tool.start' && e.name === 'str_replace') e.arguments = JSON.stringify({ ...JSON.parse(e.arguments), path: `/somewhere/project/${JSON.parse(e.arguments).path}` })
+      }
+    })
+    expect(judgeReal('R02', obs).status).toBe('passed')
+  })
+
   it('R01–R05 pass on the scripted run; R07 says it is not a real run; R06 only on Windows', () => {
     expect(good.error, String(good.error)).toBeUndefined()
     for (const id of ['R01', 'R02', 'R03', 'R04', 'R05']) {
@@ -103,6 +112,9 @@ describe('accept-step2 R judges', () => {
     }],
     ['R02', 'the feedback round rewrote files with write_file', obs => {
       for (const e of obs.phases.feedback.events) if (e.type === 'tool.start' && e.name === 'str_replace') e.name = 'write_file'
+    }],
+    ['R02', 'the feedback round only str_replaced a file that did not exist before', obs => {
+      for (const e of obs.phases.feedback.events) if (e.type === 'tool.start' && e.name === 'str_replace') e.arguments = JSON.stringify({ ...JSON.parse(e.arguments), path: 'report/new-file.md' })
     }],
     ['R02', 'write_file failed', obs => { toolEvent(obs, 'first', 'write_file').isError = true; for (const e of obs.phases.first.events) if (e.type === 'tool.start' && e.name === 'write_file') e.name = 'write_file_x' }],
     ['R03', 'no thinking blocks in the session', obs => { for (const r of obs.records) delete r.providerContent }],
