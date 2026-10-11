@@ -594,7 +594,7 @@ The earlier part of this conversation was compacted. Summary:
 
 团队状态全部以记录写在 **Lead 会话**里，强杀后从记录重建；队友各自的会话只记它们自己的对话。类型镜像：`TeamMember`、`TeamTask`、`TeamMessage`。
 
-- **花名册**（`team.member`）：`{ name, sessionId, status: active | idle | stopped, preset? }`，同名以最新一条为准。名字在一个 Lead 会话的在册队友中唯一；`lead` 保留给主对话。
+- **花名册**（`team.member`）：`{ name, sessionId, status: active | idle | stopped, preset?, persona? }`，同名以最新一条为准。`persona` 是 `spawn_teammate` 传入、替换预设人设的那段文字，恢复时据此还原队友的人设。名字在一个 Lead 会话的在册队友中唯一；`lead` 保留给主对话。
 - **任务板**（`team.task`）：`{ id, title, description?, status: pending | in_progress | completed | cancelled, owner?, dependsOn, result? }`，同 `id` 以最新一条为准；`id` 由任务板按 `t1`、`t2`… 分配。`dependsOn` 中任一任务未 `completed` 时，该任务不能进入 `in_progress`。上限 256 项。
 - **邮箱**（`team.message`）：一条消息写两次，`id` 相同：发送时 `state: "queued"`，注入收件人会话后 `state: "delivered"`。收件人正在运行时，邮件在它下一次模型请求之前经 kernel 的 `Agent.beforeRequest` 注入；收件人空闲时先被唤醒，邮件在新一轮开始时注入；发给 `lead` 的邮件由 `wait_teammates` 的结果交给 Lead（`delivered` 写在该调用里），或在 Lead 下一轮开始时注入。恢复时，只有 `queued` 而没有对应 `delivered` 的消息投递一次，投递后补写 `delivered`；已 `delivered` 的不再投递。每个收件人待投递至多 64 条，单条正文至多 64 KiB（UTF-8）。
 - 注入的形式是收件人会话里的一条 `user.message { source: "inject" }`，正文含发件人名；它不出现在 Lead 的消息历史里。

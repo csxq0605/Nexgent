@@ -131,7 +131,7 @@ const inputs: SessionRecordInput[] = [
   // step 3 records (shapes only; a real child would not start members itself)
   { type: 'subagent.start', turn: 2, toolCallId: 'c9', childSessionId: 'child-1', childTurn: 1, name: 'checker', executionForm: 'workflow', workflowId: 'w1', task: 'check' },
   { type: 'subagent.end', turn: 2, childSessionId: 'child-1', childTurn: 1, result: { status: 'interrupted', text: '', deliverables: [], usage: UNKNOWN_USAGE, requestCount: 1 } },
-  { type: 'team.member', member: { name: 'checker', sessionId: 'child-2', status: 'idle' } },
+  { type: 'team.member', member: { name: 'checker', sessionId: 'child-2', status: 'idle', preset: 'read-only-checker', persona: 'You check twice.' } },
   { type: 'team.task', turn: 2, task: { id: 't1', title: 'Check', status: 'completed', dependsOn: [], result: 'ok' } },
   { type: 'team.message', message: { id: 'm1', from: 'checker', to: 'lead', text: 'done', state: 'queued' } },
   { type: 'workflow.start', turn: 2, toolCallId: 'c9', workflowId: 'w1', kind: 'script' },

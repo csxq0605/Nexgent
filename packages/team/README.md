@@ -18,7 +18,7 @@
 ## 行为
 
 - **工具。** Lead 有 `spawn_teammate`、`send_message`、`wait_teammates`、`team_task_create`、`team_task_list`、`team_task_update`（全局注册）。队友在自己的 agent 作用域里另有 `send_message`、`team_task_list`、`team_task_update`（遮住全局的同名工具），看不到 `spawn_teammate`、`wait_teammates`、`delegate`、`workflow`（kernel 的 `MEMBER_DENIED_TOOLS`）。全局的六个工具被任何成员调用时都报 `tool/denied`。
-- **队友与运行。** `spawn_teammate` 建子会话（预设默认 `general-executor`，`persona` 只替换人设），写 `team.member { active }` 与 `subagent.start`，立即在后台开始第一轮，不等待。一次运行 = 队友会话的一轮，在 Lead 里对应一对 `subagent.start` / `subagent.end`；运行用 `lead.holdTurn` 挂在 Lead 的轮次上。`subagent.start` 是工具记录，所以运行只在 Lead 的团队工具调用里开始：`spawn_teammate`（首轮）、`send_message`（唤醒空闲的收件人）、`wait_teammates`（等待期间持续启动到期的运行）。
+- **队友与运行。** `spawn_teammate` 建子会话（预设默认 `general-executor`，`persona` 只替换人设，并记在 `team.member.persona` 里，重启后恢复时还原），写 `team.member { active }` 与 `subagent.start`，立即在后台开始第一轮，不等待。一次运行 = 队友会话的一轮，在 Lead 里对应一对 `subagent.start` / `subagent.end`；运行用 `lead.holdTurn` 挂在 Lead 的轮次上。`subagent.start` 是工具记录，所以运行只在 Lead 的团队工具调用里开始：`spawn_teammate`（首轮）、`send_message`（唤醒空闲的收件人）、`wait_teammates`（等待期间持续启动到期的运行）。
 - **花名册状态。** 运行完成或被费用上限挡下 → `idle`；以 `parent` 等原因取消 → 仍为 `active`（下一轮继续）；失败 → `stopped`（名字可以再用来建新队友）。名字匹配 `^[a-z][a-z0-9-]{0,31}$`，`lead` 保留，在册（非 stopped）唯一，花名册至多 16 项。
 - **并发。** 同时运行的队友至多 4 个（`COLLABORATION_LIMITS.maxConcurrentMembers`，本包自己限）：第 5 个 `spawn_teammate` 报 `tool/denied`，到期的唤醒 / 继续运行排队，有空位时由 `wait_teammates` 启动。
 - **邮箱。** `send_message` 先写 `team.message { state: queued }`（都写在 Lead 会话）。正在运行的队友在下一次模型请求之前收到：本包在每个队友的 agent 上登记 kernel 的 `beforeRequest` 注入钩子（`Team.bind`）；没在运行的收件人在下一轮开始时由 `team-mail` 提供者注入。两条路都写 `user.message { source: inject }`（正文 `<team-message id="…" from="…">…</team-message>`），kernel 写下注入记录后本包写 `delivered`。空闲队友收到邮件后由 Lead 的下一次团队工具调用唤醒（`WAKE_PROMPT`）。给 Lead 的邮件由 `wait_teammates` 在结果里交出并写 `delivered`；Lead 没等就结束轮次时，在 Lead 下一轮开始时注入。每个收件人待投递至多 64 条，单条至多 64 KiB（UTF-8），不能发给自己或不在册的名字。
@@ -35,5 +35,4 @@
 
 - **非团队成员仍看得到 `send_message` 与 `team_task_*`。** 契约的 `MEMBER_DENIED_TOOLS` 只有四个名字，全局注册的 `send_message`、`team_task_create`、`team_task_list`、`team_task_update` 对委派与工作流成员可见（调用会被拒绝）。H15 要求成员看不到团队工具，需要契约把这四个也列入（队友的同名工具在自己作用域里，不受影响）。
 - 一个队友在一个 Lead 轮次里至多运行 8 次（`MAX_RUNS_PER_LEAD_TURN`），防止两名队友互相回信无休止；之后的邮件留到下一轮。
-- `spawn_teammate` 的 `persona` 只保存在内存里：进程重启后队友按预设名重开，人设回到预设的。
 - 插件需要宿主的注册表加载，`recoverTeam` 需要宿主在恢复后调用（SDK 接入归 W6）。

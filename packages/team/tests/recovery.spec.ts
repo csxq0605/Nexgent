@@ -87,6 +87,8 @@ describe('team recovery after a hard kill', () => {
     expect([...before.tasks.values()].map(t => [t.id, t.status, t.owner ?? null])).toEqual([['t1', 'in_progress', 'alice'], ['t2', 'pending', null]])
     const roster = Object.fromEntries([...before.members.values()].map(m => [m.name, m]))
     expect(roster.alice!.status).toBe('active')
+    // The spawn persona is on the roster, so the restart below restores it.
+    expect(roster.alice!).toMatchObject({ preset: 'general-executor', persona: 'You are a meticulous collector who double-checks every row.' })
     expect(roster.bob!.status).toBe('idle')
 
     const lead = await app.agents.resume(leadId)
@@ -116,6 +118,11 @@ describe('team recovery after a hard kill', () => {
     const runs = of(leadRecords, 'subagent.start').filter(r => r.turn === 2).map(r => [r.name, r.task])
     expect(runs).toEqual(expect.arrayContaining([['alice', CONTINUE_PROMPT], ['bob', WAKE_PROMPT]]))
     expect(runs).toHaveLength(2)
+    // Alice's continued run is prompted with her own persona, not the preset's.
+    const aliceSystem = llm.calls.filter(c => c.route === 'alice').map(c => String(c.request.messages[0]!.content))
+    expect(aliceSystem).toHaveLength(1)
+    expect(aliceSystem[0]).toContain('You are a meticulous collector who double-checks every row.')
+    expect(of(leadRecords, 'team.member').filter(r => r.member.name === 'alice').every(r => r.member.persona !== undefined)).toBe(true)
     await lead.close()
   })
 })

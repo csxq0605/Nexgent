@@ -156,7 +156,21 @@ interface ProjectEntry {
   readonly sessions: Map<string, SessionEntry>
   readonly opening: Map<string, Promise<SessionEntry>>
   /** By request id; a member's request may be answered under its own or its parent's session id. */
-  readonly pendingApprovals: Map<string, { readonly sessionId: string; readonly parentSessionId?: string; readonly resolve: (decision: ApprovalDecision) => void }>
+  readonly pendingApprovals: Map<string, PendingApproval>
+}
+
+/**
+ * A request waiting for `approvals.respond`. Registered when the
+ * `approval.request` event arrives, before any listener sees it, so a host
+ * may answer synchronously from its event callback; the responder then
+ * waits on `decision`.
+ */
+interface PendingApproval {
+  readonly sessionId: string
+  readonly parentSessionId?: string
+  readonly decision: Promise<ApprovalDecision>
+  /** Answer it; `false` when it was already answered. */
+  readonly resolve: (decision: ApprovalDecision) => boolean
 }
 
 function tallyStatus(tally: TurnTally): TaskOutcomeStatus {
@@ -636,18 +650,40 @@ export class LocalNexgentSdk implements NexgentSdk {
   // approvals
   // -------------------------------------------------------------------------
 
+  /**
+   * The pending entry of `request`, registered on first sight (its event, or
+   * the responder). The first answer wins; the entry stays until the
+   * responder has taken the answer.
+   */
+  private registerApproval(project: ProjectEntry, request: ApprovalRequest): PendingApproval {
+    const known = project.pendingApprovals.get(request.id)
+    if (known !== undefined) return known
+    let resolveDecision!: (decision: ApprovalDecision) => void
+    const decision = new Promise<ApprovalDecision>(resolve => (resolveDecision = resolve))
+    let settled = false
+    const pending: PendingApproval = {
+      sessionId: request.sessionId,
+      ...(request.member === undefined ? {} : { parentSessionId: request.member.parentSessionId }),
+      decision,
+      resolve: answer => {
+        if (settled) return false
+        settled = true
+        resolveDecision(answer)
+        return true
+      },
+    }
+    project.pendingApprovals.set(request.id, pending)
+    return pending
+  }
+
   private awaitApproval(project: ProjectEntry, request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalDecision> {
-    return new Promise<ApprovalDecision>(resolveDecision => {
-      const finish = (decision: ApprovalDecision) => {
-        project.pendingApprovals.delete(request.id)
-        resolveDecision(decision)
-      }
-      project.pendingApprovals.set(request.id, {
-        sessionId: request.sessionId,
-        ...(request.member === undefined ? {} : { parentSessionId: request.member.parentSessionId }),
-        resolve: finish,
-      })
-      signal.addEventListener('abort', () => finish({ id: request.id, decision: 'deny', scope: 'once', decidedBy: 'cancel' }), { once: true })
+    const pending = this.registerApproval(project, request)
+    const cancel = () => pending.resolve({ id: request.id, decision: 'deny', scope: 'once', decidedBy: 'cancel' })
+    if (signal.aborted) cancel()
+    else signal.addEventListener('abort', cancel, { once: true })
+    return pending.decision.finally(() => {
+      signal.removeEventListener('abort', cancel)
+      if (project.pendingApprovals.get(request.id) === pending) project.pendingApprovals.delete(request.id)
     })
   }
 
@@ -658,14 +694,13 @@ export class LocalNexgentSdk implements NexgentSdk {
     if (decision.decision !== 'allow' && decision.decision !== 'deny') throw invalid('decision.decision must be allow or deny')
     const pending = project.pendingApprovals.get(decision.id)
     if (pending === undefined || (pending.sessionId !== input.sessionId && pending.parentSessionId !== input.sessionId)) return false
-    pending.resolve({
+    return pending.resolve({
       id: decision.id,
       decision: decision.decision,
       scope: decision.decision === 'deny' ? 'once' : decision.scope,
       decidedBy: 'user',
       ...(decision.reason === undefined ? {} : { reason: decision.reason }),
     })
-    return true
   }
 
   // -------------------------------------------------------------------------
@@ -687,6 +722,8 @@ export class LocalNexgentSdk implements NexgentSdk {
   }
 
   private onEvent(project: ProjectEntry, entry: SessionEntry, event: AgentEvent): void {
+    // Register before any listener runs, so `approvals.respond` from the callback finds the request.
+    if (event.type === 'approval.request' && this.options.approvalResponder === undefined) this.registerApproval(project, event.request)
     const raw = { ...event, projectId: project.projectId } as ProjectAgentEvent
     for (const listener of [...this.rawListeners]) {
       try {

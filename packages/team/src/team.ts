@@ -285,8 +285,10 @@ export class Team {
       preset = await new PresetRegistry(this.deps.projectRoot()).resolve(member.preset)
       mate.preset = preset
     }
-    if (preset === undefined || mate.persona === undefined) return preset
-    return { ...preset, persona: mate.persona }
+    // The spawn persona: in memory, or from the roster after a restart.
+    const persona = mate.persona ?? member.persona
+    if (preset === undefined || persona === undefined) return preset
+    return { ...preset, persona }
   }
 
   /** Give a teammate's agent its team tools and its mail before each model request, and remember it. */
@@ -407,7 +409,7 @@ export class Team {
       mate.preset = input.preset
       if (input.persona !== undefined) mate.persona = input.persona
       this.bind(input.name, agent)
-      await this.write(call.append, { type: 'team.member', member: { name: input.name, sessionId: agent.sessionId, status: 'active', preset: input.preset.name } })
+      await this.write(call.append, { type: 'team.member', member: { name: input.name, sessionId: agent.sessionId, status: 'active', preset: input.preset.name, ...(input.persona === undefined ? {} : { persona: input.persona }) } })
       await this.startRun(call, input.name, agent, { text: input.prompt, task: input.task, materialIds: input.materialIds })
       return agent
     })
