@@ -1,0 +1,31 @@
+{
+  "name": "@nexgent/ptc",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PTC 的 Node 后端：每次调用一个独立 Node 进程，空环境变量，文件经宿主函数按调用方沙箱访问；模型工具 run_code。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/skill": "workspace:*",
+    "@nexgent/tool-spreadsheet": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/test-support": "workspace:*"
+  }
+}
