@@ -1,49 +1,40 @@
 /**
- * THE ADAPTER SEAM between the CLI and the runtime packages.
+ * THE ADAPTER SEAM between the CLI and the runtime: since step 2 the CLI goes
+ * through `@nexgent/sdk`, the same in-process API the desktop app uses.
  *
- * Everything the CLI needs from kernel / llm / session / workspace goes
- * through {@link CliRuntime}; nothing else in the CLI imports those
- * packages' runtime code. {@link loadRuntime} wires it:
+ * Everything the CLI needs at run time goes through {@link CliRuntime};
+ * {@link loadRuntime} wires it over one SDK instance per `open`:
  *
- * 1. `createApp()` on the kernel's default profile with `@nexgent/llm`
- *    (endpoint from the profile, overridable by `NEXGENT_API_BASE_URL` in the
- *    CLI's `env`), `@nexgent/session` and `@nexgent/workspace` registered;
- *    patches point the workspace row at the project root and the credentials
- *    row at `NEXGENT_HOME`;
- * 2. `open()`: `ctx.credentials.describe(NEXGENT_API_KEY)` (with the llm
- *    route's `ANTHROPIC_API_KEY` fallback), `ctx.approvals.setResponder`,
- *    the project grant writer (`appendProjectGrant` on `config.json`), then
- *    `agents.create` (new uuid v4) or `agents.resume` (which takes the lock
- *    and closes a turn the dead process left open);
- * 3. `runTurn()`: `agent.run()` for one user message, `AgentEvent` mapped
- *    onto {@link CliEvent} (table in {@link mapAgentEvent}); the CLI's abort
- *    signal becomes `agent.cancel(reason)` so `shutdown` keeps its cause;
- * 4. `recordOutcome()`: the kernel's `agent.close()` writes the one
- *    `task.outcome` per run; the CLI passes its status through
- *    `close({ status })` instead of appending a second record;
- * 5. `close()`: close the agent (releases the lock) and dispose the app.
+ * 1. `createSdk({ env, home, approvalResponder })`: the SDK boots the
+ *    project's application (kernel default profile + llm, session,
+ *    workspace, context, skill, tasking) with the CLI's `env` (API base URL
+ *    override, `NEXGENT_HOME`) and registers the CLI's TTY approval prompt
+ *    as the responder;
+ * 2. `open()`: `projects.open`, the API-key facts (`settings.get`: no key →
+ *    `credentials/missing`), then `createSession` (model / sandbox
+ *    overrides) or `openSession` (takes the lock and closes a turn the dead
+ *    process left open; the SDK reports it as a `turn.end { interrupted }`
+ *    event, which `runTurn` replays first);
+ * 3. `runTurn()`: `startTurn` for one user message; the SDK's raw kernel
+ *    events (`onAgentEvent`) are mapped onto {@link CliEvent} (table in
+ *    {@link mapAgentEvent}); the CLI's abort signal becomes
+ *    `cancelTurn({ cause })` so `shutdown` keeps its cause;
+ * 4. `recordOutcome()`: nothing to write — the SDK appends one
+ *    `task.outcome` per turn (a `run` / `resume` is one turn) with the same
+ *    status mapping as the CLI's tally;
+ * 5. `close()`: close the session (releases the lock) and dispose the SDK.
  */
-import { randomUUID } from 'node:crypto'
 import {
-  appendProjectGrant,
-  createApp,
-  KERNEL_PLUGIN_NAMES,
-  LocalCredentials,
-  NEXGENT_API_KEY,
   NexgentError,
-  nexgentHome,
   toErrorInfo,
   type AgentEvent,
   type ApprovalResponder,
-  type Context,
-  type NexgentApp,
   type SandboxMode,
   type TurnCancelCause,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { ANTHROPIC_API_KEY, AnthropicProvider, LLMPlugin, providerOptionsFromConfig, type LLMPluginConfig } from '@nexgent/llm'
-import { SessionPlugin } from '@nexgent/session'
-import { WorkspacePlugin } from '@nexgent/workspace'
+import { createSdk, type LocalNexgentSdk, type ProjectAgentEvent } from '@nexgent/sdk'
+import { packageVersion } from './version.js'
 import type { CliEvent, SessionOpenEvent } from './events.js'
 import type { TaskOutcomeInput } from './outcome.js'
 
@@ -196,85 +187,62 @@ class EventQueue<T> {
 }
 
 // ---------------------------------------------------------------------------
-// boot and open
+// open
 // ---------------------------------------------------------------------------
 
-/** Boot the app for one project: default profile, host plugins, root and home patches. */
-async function bootApp(options: RuntimeOpenOptions): Promise<NexgentApp> {
-  const env = options.env
-  // The llm plugin reads `NEXGENT_API_BASE_URL` / `ANTHROPIC_API_KEY` from `process.env` by
-  // default; the CLI hands it its own `env` so tests and the acceptance script stay hermetic.
-  const llm = {
-    ...LLMPlugin,
-    apply(ctx: Context, config: LLMPluginConfig = {}): void {
-      ctx.provide('llm', new AnthropicProvider({
-        credentials: ctx.credentials,
-        ledger: ctx.ledger,
-        ...providerOptionsFromConfig(config),
-        env,
-      }))
-    },
-  }
-  // Likewise the kernel's credentials service reads `process.env`; the CLI's `env`
-  // (and its `NEXGENT_HOME`) is handed to the same `LocalCredentials` implementation.
-  const credentials = {
-    name: KERNEL_PLUGIN_NAMES.credentials,
-    provide: 'credentials',
-    apply(ctx: Context): void {
-      ctx.provide('credentials', new LocalCredentials({ env: env as NodeJS.ProcessEnv, home: nexgentHome(env as NodeJS.ProcessEnv) }))
-    },
-  }
-  return createApp({
-    patches: [{ id: 'workspace', config: { root: options.layout.root } }],
-    registry: {
-      [KERNEL_PLUGIN_NAMES.credentials]: credentials,
-      '@nexgent/llm': llm,
-      '@nexgent/session': SessionPlugin,
-      '@nexgent/workspace': WorkspacePlugin,
-    },
-  })
-}
-
 async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession> {
-  const app = await bootApp(options)
+  const sdk: LocalNexgentSdk = createSdk({
+    appVersion: packageVersion(),
+    env: options.env,
+    approvalResponder: options.approvals,
+  })
   try {
-    const { ctx } = app
-    const key = await ctx.credentials.describe(NEXGENT_API_KEY)
-    const fallback = options.env[ANTHROPIC_API_KEY]
-    if (!key.configured && (fallback === undefined || fallback.trim() === '')) {
-      throw new NexgentError('credentials/missing', `credential ${NEXGENT_API_KEY} is not set (environment variable or credentials.json), nor is ${ANTHROPIC_API_KEY}`)
+    const project = await sdk.call('projects.open', { root: options.layout.root })
+    const { projectId } = project
+    const settings = await sdk.call('settings.get', { projectId })
+    if (!settings.apiKey.configured) {
+      throw new NexgentError('credentials/missing', 'credential NEXGENT_API_KEY is not set (environment variable or credentials.json), nor is ANTHROPIC_API_KEY')
     }
-    ctx.approvals.setResponder(options.approvals)
-    app.agents.setProjectGrantWriter(grant => appendProjectGrant(ctx.workspace.layout.configFile, grant))
 
-    // A turn the previous process left open is closed by `agents.resume`
-    // before the agent exists, so look first to report it as an event.
+    // A turn the previous process left open is closed while the session
+    // opens; the SDK reports it as an event, replayed before the new turn.
     let interruptedTurn: number | undefined
     const resumeId = options.resumeSessionId
-    if (resumeId !== undefined) {
-      const before = await ctx.session.resume(resumeId)
-      interruptedTurn = before.metadata.openTurn
+    const stopWatching = sdk.subscribe(event => {
+      if (event.type === 'turn.end' && event.reason.kind === 'interrupted' && event.sessionId === resumeId) interruptedTurn = event.turn
+    })
+    let view
+    try {
+      view = resumeId === undefined
+        ? await sdk.openSession({
+          projectId,
+          sessionId: (await sdk.createSession({
+            projectId,
+            ...(options.sandboxMode === undefined ? {} : { sandboxMode: options.sandboxMode }),
+            ...(options.model === undefined ? {} : { model: options.model }),
+          })).sessionId,
+        })
+        : await sdk.openSession({ projectId, sessionId: resumeId, ...(options.sandboxMode === undefined ? {} : { sandboxMode: options.sandboxMode }) })
+    } finally {
+      stopWatching()
     }
-    const sandbox = options.sandboxMode === undefined ? {} : { sandboxMode: options.sandboxMode }
-    const agent = resumeId === undefined
-      ? await app.agents.create({ sessionId: randomUUID(), ...sandbox, ...(options.model === undefined ? {} : { model: options.model }) })
-      : await app.agents.resume(resumeId, sandbox)
+    const sessionId = view.summary.sessionId
 
     const info: SessionOpenEvent = {
       type: 'session',
-      sessionId: agent.sessionId,
-      projectRoot: ctx.workspace.root,
-      model: agent.model,
-      sandboxMode: agent.sandboxMode,
+      sessionId,
+      projectRoot: project.root,
+      model: view.model,
+      sandboxMode: view.sandboxMode,
       resumed: resumeId !== undefined,
     }
     let closing: Promise<void> | undefined
-    const close = (status?: TaskOutcomeInput['status']): Promise<void> => {
+    const close = (): Promise<void> => {
       closing ??= (async () => {
         try {
-          await agent.close(status === undefined ? {} : { status })
+          await sdk.call('sessions.close', { projectId, sessionId })
         } finally {
-          await app.dispose()
+          await sdk.dispose()
         }
       })()
       return closing
@@ -287,27 +255,31 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
           yield { type: 'turn.end', turn: interruptedTurn, reason: { kind: 'interrupted' } }
           interruptedTurn = undefined
         }
-        const queue = new EventQueue<AgentEvent | { type: 'run.settled'; error?: unknown }>()
-        const unsubscribe = agent.subscribe(event => queue.push(event))
-        const onAbort = () => agent.cancel(cancelCause(signal))
-        signal.addEventListener('abort', onAbort, { once: true })
+        const queue = new EventQueue<ProjectAgentEvent | { type: 'run.settled'; error?: unknown }>()
+        const unsubscribe = sdk.onAgentEvent(event => {
+          if (event.projectId === projectId && event.sessionId === sessionId) queue.push(event)
+        })
+        const onAbort = () => void sdk.cancelTurn({ projectId, sessionId, cause: cancelCause(signal) })
+        let turn: number | undefined
         try {
+          const started = await sdk.startTurn({ projectId, sessionId, text: task })
+          turn = started.turn
+          started.done.then(() => queue.push({ type: 'run.settled' }), (error: unknown) => queue.push({ type: 'run.settled', error }))
+          signal.addEventListener('abort', onAbort, { once: true })
           if (signal.aborted) onAbort()
-          const run = agent.run(task).then(() => queue.push({ type: 'run.settled' }), (error: unknown) => queue.push({ type: 'run.settled', error }))
-          let turn: number | undefined
           for (;;) {
             const event = await queue.next()
             if (event.type === 'run.settled') {
-              // `run` resolves only after `turn.end` was emitted; a rejection means no turn.end.
+              // `done` settles only after `turn.end` was emitted; a rejection means no turn.end.
               if (event.error !== undefined) {
-                yield { type: 'turn.end', turn: turn ?? agent.turn, reason: { kind: 'error', error: toErrorInfo(event.error) } }
+                yield { type: 'turn.end', turn, reason: { kind: 'error', error: toErrorInfo(event.error) } }
               }
               break
             }
-            if (event.type === 'turn.start') turn = event.turn
             for (const mapped of mapAgentEvent(event)) yield mapped
-            if (event.type === 'turn.end') {
-              await run
+            if (event.type === 'turn.end' && event.turn === turn) {
+              // let the SDK finish the turn's bookkeeping (task.outcome) before the caller closes
+              await started.done.catch(() => undefined)
               break
             }
           }
@@ -316,15 +288,13 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
           unsubscribe()
         }
       },
-      async recordOutcome(outcome) {
-        // The kernel writes the record on close with its own tallies (they
-        // match the CLI's); only the CLI's status is passed through.
-        await close(outcome.status)
+      async recordOutcome() {
+        // The SDK wrote the turn's `task.outcome` when the turn ended.
       },
-      close: () => close(),
+      close,
     }
   } catch (error) {
-    await app.dispose().catch(() => undefined)
+    await sdk.dispose().catch(() => undefined)
     throw error
   }
 }

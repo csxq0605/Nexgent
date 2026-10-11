@@ -10,3 +10,22 @@
 - 所有参数与结果都是 JSON 安全的，原样跨 IPC；错误以 `NexgentError` 拒绝，跨 IPC 时传 `toErrorInfo` 的投影；
 - 任何方法都不返回密钥值，只返回 `CredentialInfo`（`configured`、`source`）；
 - 每个轮次的事件流以且仅以一个 `turn.end` 收尾，取消、审批超时、强杀恢复时也一样。
+
+## 实现（W4，步骤 2 第 3 轮）
+
+入口：`createSdk(options)` 返回 `LocalNexgentSdk`，实现 `NexgentSdk`（`call` / `subscribe` / `dispose`）。
+
+- **装载**：每个打开的项目一个 Cordis 应用（`src/boot.ts`）：kernel 默认 profile，加 `@nexgent/context`、`@nexgent/skill`、`@nexgent/tasking` 三行（profile 的 `insert` 补丁，不改 `packages/kernel/profiles/nexgent.yml`）。`env` 交给 llm provider 和凭证服务；`NEXGENT_COMPACTION_THRESHOLD` 写进 context 行的 `compaction.thresholdTokens`。
+- **项目**：`projects.open` 不存在且 `create: true` 时建目录；总会建好 `.nexgent/` 并在缺失时写默认 `config.json`。最近项目存在 `<home>/recent-projects.json`（`{ version: 1, projects: [{ root, lastOpenedAt }] }`，新到旧，最多 20 条；文件坏了按空处理）。`projectId` 在一个 SDK 实例内对同一根目录不变。
+- **会话**：每个打开的会话一个 kernel agent，持有会话锁。`turns.send`、`materials.add`（带 `sessionId`）、`goals.set/update` 遇到未打开的会话会自动打开。`sessions.open` 发现上个进程在轮中死掉时，由 kernel 写 `turn.end { interrupted }`，SDK 同时发一个 `turn.end` 事件。`sessions.list` 扫描 `.nexgent/sessions/*/session.jsonl`，读不出的会话跳过。
+- **事件**：kernel 事件映射成 `SdkEvent`，`eventSeq` 按会话从 1 递增（同一 SDK 实例内关了再开也接着数）。`deliverable.presented`、`turn.files`、`compaction` 来自会话记录；`material.added` 和 `goal` 由写它们的 SDK 方法发（带完整元数据和目标）。每轮恰好一个 `turn.end`：正常结束、取消、审批超时、强杀恢复都是；agent 根本跑不起来时 SDK 自己补一个 `turn.end { error }`。
+- **轮次结束后的收尾**：`turn.end` 事件发出后，SDK 还要写 checkpoint 和账本；这期间再 `turns.send` 会等收尾完成，而不是拒绝。轮次真正在跑时再发才拒绝（`session/locked`）。
+- **账本**：每轮一条 `task.outcome`（`turns: 1`，本轮的请求数、用量、工具调用），状态映射与 CLI 相同；费用上限停下的轮由 kernel 写，SDK 不重复写。关闭 agent 时用 `skipOutcome`。
+- **审批**：默认由 `approval.request` 事件 + `approvals.respond` 应答（`decidedBy: 'user'`；迟到或重复的应答返回 `false`）。`approvalTimeoutMs` 设了就超时拒绝（`decidedBy: 'timeout'`）。宿主可传 `approvalResponder` 自己问（CLI 的 TTY 提示）。
+- **资料、成果、反馈、目标**：直接调用 `ctx.tasking`。`deliverables.readText` 只读该版本列出的文件，上限 1 MiB，含 NUL 或不是 UTF-8 的拒绝（`tool/invalid-input`）。`deliverables.reveal` 需要宿主传 `reveal`，否则 `internal`。
+- **设置**：`settings.update` 只接受 `model`、`thinking`、`effort`、`sandboxMode`、`costCaps`；把补丁合进磁盘上的 `config.json`（保留 `approvals`、`extraReadRoots` 等），整份校验通过后才原子写入。`settings.setApiKey` 写 `<home>/credentials.json`（0600），空字符串删除该项；只返回 `{ configured, source }`。密钥判断顺序：`NEXGENT_API_KEY`（环境变量，再文件），再 `ANTHROPIC_API_KEY` 环境变量。
+- **导出**：`sessions.export` 写到 `outDir`（必须不存在或为空）：`session.jsonl`（原样）、`ledger.jsonl`（该会话的账本行）、`materials.json`、`deliverables.json`（该会话加过或引用的资料、该会话 present 的版本）、`manifest.json`（格式版本、会话 id、项目名、时间、版本、计数、`redactions`）。写之前在每个文件里搜当前生效的全部密钥值（及其 JSON 转义形式），命中替换为 `[REDACTED]`。
+
+进程内扩展（不经 IPC，CLI 用）：`onAgentEvent`（原始 kernel 事件）、`createSession({ model })`、`openSession({ sandboxMode })`、`cancelTurn({ cause })`、`startTurn`（返回 `done`，在 `task.outcome` 写完后 settle）、`isRunning`、`apiKeyInfo`。
+
+测试：`tests/sdk.spec.ts`（项目、两个项目同时各跑一轮、事件、取消、关闭、审批的拒绝 / 批准 / 超时、设置、密钥、导出脱敏、不依赖 Electron）；`tests/checkpoint.spec.ts` 是中期检查点第 4 项：子进程只用 SDK 跑“资料（csv + xlsx）→ 读表技能 → 写文件 → present v1 → 反馈 → str_replace → v2 → 第 3 轮流式输出到一半 SIGKILL”，本进程新建 SDK 恢复会话、核对资料 / 成果 / 反馈 / 目标都在、续聊（请求里带完整历史），最后导出。
