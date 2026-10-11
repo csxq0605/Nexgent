@@ -78,6 +78,7 @@ export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
         out.push({ kind: 'deliverable', key: `d:${item.deliverable.deliverableId}:${item.deliverable.version}`, turn: item.turn, deliverable: item.deliverable })
         break
       case 'files':
+        if (item.changes.length === 0) break
         out.push({ kind: 'files', key: `f:${item.turn}:${index}`, turn: item.turn, changes: item.changes })
         break
       case 'feedback':
