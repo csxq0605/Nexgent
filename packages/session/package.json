@@ -1,0 +1,30 @@
+{
+  "name": "@nexgent/session",
+  "version": "0.0.0",
+  "private": true,
+  "description": "\u4f1a\u8bdd JSONL v1 \u7684\u8ffd\u52a0\u5199\u3001checkpoint \u4e0e\u6309\u4f1a\u8bdd ID \u6062\u590d\u3002",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schema/session.v1.schema.json": "./schema/session.v1.schema.json"
+  },
+  "files": [
+    "dist",
+    "schema"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/test-support": "workspace:*"
+  }
+}

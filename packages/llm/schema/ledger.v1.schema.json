@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexgent.dev/schema/ledger.v1.schema.json",
+  "title": "Nexgent ledger record v1 (.nexgent/ledgers/<yyyy-mm>/requests.jsonl)",
+  "description": "One line of requests.jsonl. Mirrors packages/kernel/src/contracts/ledger.ts and docs/spec/data-formats.md §账本记录. Unknown optional fields are allowed for cross-version reading.",
+  "oneOf": [
+    { "$ref": "#/$defs/llmRequestStart" },
+    { "$ref": "#/$defs/llmRequestEnd" },
+    { "$ref": "#/$defs/toolCall" },
+    { "$ref": "#/$defs/taskOutcome" }
+  ],
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+    "usageCount": {
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "const": "unknown" }
+      ]
+    },
+    "usage": {
+      "type": "object",
+      "required": ["inputTokens", "outputTokens", "totalTokens", "cacheReadTokens", "reasoningTokens"],
+      "properties": {
+        "inputTokens": { "$ref": "#/$defs/usageCount" },
+        "outputTokens": { "$ref": "#/$defs/usageCount" },
+        "totalTokens": { "$ref": "#/$defs/usageCount" },
+        "cacheReadTokens": { "$ref": "#/$defs/usageCount" },
+        "reasoningTokens": { "$ref": "#/$defs/usageCount" }
+      }
+    },
+    "base": {
+      "type": "object",
+      "required": ["type", "ts"],
+      "properties": {
+        "type": { "type": "string" },
+        "ts": { "$ref": "#/$defs/timestamp" },
+        "sessionId": { "$ref": "#/$defs/nonEmptyString" },
+        "capabilityVersion": { "type": "string" },
+        "memberId": { "type": "string" },
+        "executionForm": { "enum": ["direct", "delegated", "workflow"] },
+        "taskId": { "type": "string" }
+      }
+    },
+    "requestIdentity": {
+      "type": "object",
+      "required": ["requestId", "provider", "endpoint", "model"],
+      "properties": {
+        "requestId": { "$ref": "#/$defs/nonEmptyString" },
+        "provider": { "$ref": "#/$defs/nonEmptyString" },
+        "endpoint": { "type": "string", "pattern": "^https?://[^@/?#]+(/[^?#]*)?$" },
+        "model": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "llmRequestStart": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "$ref": "#/$defs/requestIdentity" },
+        {
+          "type": "object",
+          "required": ["type", "purpose", "thinking"],
+          "properties": {
+            "type": { "const": "llm.request.start" },
+            "purpose": { "enum": ["task", "auxiliary"] },
+            "thinking": { "enum": ["off", "on"] }
+          }
+        }
+      ]
+    },
+    "llmRequestEnd": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "$ref": "#/$defs/requestIdentity" },
+        {
+          "type": "object",
+          "required": ["type", "status", "usage", "latencyMs"],
+          "properties": {
+            "type": { "const": "llm.request.end" },
+            "status": { "enum": ["ok", "error", "aborted", "unknown"] },
+            "usage": { "$ref": "#/$defs/usage" },
+            "latencyMs": { "type": "number", "minimum": 0 },
+            "httpStatus": { "type": "integer", "minimum": 100, "maximum": 599 },
+            "finishReason": { "enum": ["stop", "tool-calls", "max-tokens", "aborted", "refusal", "error"] },
+            "errorCode": { "type": "string", "pattern": "^[a-z]+(/[a-z-]+)?$" }
+          }
+        }
+      ]
+    },
+    "toolCall": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["type", "sessionId", "turn", "callId", "name", "effects", "approval", "isError", "durationMs"],
+          "properties": {
+            "type": { "const": "tool.call" },
+            "turn": { "type": "integer", "minimum": 0 },
+            "callId": { "$ref": "#/$defs/nonEmptyString" },
+            "name": { "$ref": "#/$defs/nonEmptyString" },
+            "effects": { "type": "array", "items": { "enum": ["read", "write", "execute", "network"] } },
+            "approval": {
+              "type": "object",
+              "required": ["required", "decision"],
+              "properties": {
+                "required": { "type": "boolean" },
+                "decision": { "enum": ["allow", "deny", "timeout", "cancel", "auto"] },
+                "scope": { "type": "string" },
+                "requestId": { "type": "string" }
+              }
+            },
+            "isError": { "type": "boolean" },
+            "durationMs": { "type": "number", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "taskOutcome": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["type", "sessionId", "status", "totalUsage", "requestCount", "toolCallCount", "turns", "toolsUsed"],
+          "properties": {
+            "type": { "const": "task.outcome" },
+            "status": { "enum": ["completed", "cancelled", "failed"] },
+            "error": {
+              "type": "object",
+              "required": ["name", "code", "message"],
+              "properties": {
+                "name": { "type": "string" },
+                "code": { "type": "string" },
+                "message": { "type": "string" },
+                "details": { "type": "object" }
+              }
+            },
+            "totalUsage": { "$ref": "#/$defs/usage" },
+            "requestCount": { "type": "integer", "minimum": 0 },
+            "toolCallCount": { "type": "integer", "minimum": 0 },
+            "turns": { "type": "integer", "minimum": 0 },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "passed"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "passed": { "type": "boolean" },
+                  "detail": { "type": "string" }
+                }
+              }
+            },
+            "toolsUsed": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ]
+    }
+  }
+}
