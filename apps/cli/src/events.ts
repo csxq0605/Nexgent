@@ -12,6 +12,7 @@ import type {
   ApprovalRequest,
   ErrorInfo,
   LLMUsage,
+  MemberExecutionForm,
   ReasoningDeltaEvent,
   SandboxMode,
   TextDeltaEvent,
@@ -93,6 +94,36 @@ export interface RunErrorEvent {
   readonly fatal: boolean
 }
 
+/** One deliverable version a member presented (the parts the terminal shows). */
+export interface MemberDeliverable {
+  readonly deliverableId: string
+  readonly version: number
+  readonly title: string
+  readonly files: readonly string[]
+}
+
+/** Step 3: a member (delegate, teammate, workflow member) began a run in this session's turn. */
+export interface MemberStartEvent {
+  readonly type: 'member.start'
+  readonly childSessionId: string
+  readonly name: string
+  readonly executionForm: MemberExecutionForm
+  readonly preset?: string
+}
+
+/** Step 3: a member run settled, with what it presented. */
+export interface MemberEndEvent {
+  readonly type: 'member.end'
+  readonly childSessionId: string
+  readonly name: string
+  readonly executionForm: MemberExecutionForm
+  /** `completed`, `failed`, `cancelled`, `budget` or `interrupted`. */
+  readonly status: string
+  readonly deliverables: readonly MemberDeliverable[]
+  readonly usage?: LLMUsage
+  readonly error?: ErrorInfo
+}
+
 /** LLM stream events forwarded as-is; terminal `done` / `error` are folded into `turn.end` / `run.error` by the mapper. */
 export type ForwardedLLMEvent =
   | TextDeltaEvent
@@ -112,6 +143,8 @@ export type CliEvent =
   | ToolEndEvent
   | ApprovalRequestEvent
   | ApprovalDecisionEvent
+  | MemberStartEvent
+  | MemberEndEvent
   | TurnEndEvent
   | RunErrorEvent
 

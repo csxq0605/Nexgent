@@ -23,9 +23,15 @@
     "@nexgent/context": "workspace:*",
     "@nexgent/kernel": "workspace:*",
     "@nexgent/llm": "workspace:*",
+    "@nexgent/ptc": "workspace:*",
     "@nexgent/session": "workspace:*",
     "@nexgent/skill": "workspace:*",
+    "@nexgent/subagent": "workspace:*",
     "@nexgent/tasking": "workspace:*",
+    "@nexgent/team": "workspace:*",
+    "@nexgent/tool-spreadsheet": "workspace:*",
+    "@nexgent/web": "workspace:*",
+    "@nexgent/workflow": "workspace:*",
     "@nexgent/workspace": "workspace:*"
   },
   "devDependencies": {
