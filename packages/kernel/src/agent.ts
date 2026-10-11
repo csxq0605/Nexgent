@@ -338,6 +338,8 @@ export class Agent {
   private turnDenials = new Set<string>()
   /** Provider sections of the running turn, in render order; empty between turns. */
   private turnSections: readonly SystemPromptSection[] = []
+  /** Whether the project had materials at the running turn's start (the "Working with files" materials line). */
+  private turnMaterials = false
   /** Usage of the latest model request of this agent (the compaction trigger reads it). */
   private lastUsage: LLMUsage | undefined
   /** Turn in progress, for host records. */
@@ -414,6 +416,7 @@ export class Agent {
       platform: process.platform,
       tools: this.init.tools.list(),
       sections: this.turnSections,
+      materials: this.turnMaterials,
     })
   }
 
@@ -580,13 +583,17 @@ export class Agent {
     this.turnDenials = new Set()
     this.turnSections = []
     this.turnFiles = undefined
+    this.turnMaterials = false
     this.stats.turns += 1
     this.openTurn = turn
     try {
       await this.append({ type: 'turn.start', turn })
       this.emit({ type: 'turn.start', sessionId: this.sessionId, turn })
       if (input.source === 'feedback') await this.append({ type: 'feedback', turn, feedback: input.feedback })
-      if (services.tasking !== undefined) await this.beginFiles(services.tasking, turn)
+      if (services.tasking !== undefined) {
+        await this.beginFiles(services.tasking, turn)
+        this.turnMaterials = await this.hasMaterials(services.tasking)
+      }
       if (services.context !== undefined) await this.beginContext(services.context, { turn, text, source, materialIds, signal })
       await this.append({ type: 'user.message', turn, content: text, source, ...(materialIds.length > 0 ? { materials: materialIds } : {}) })
       this.messages.push({ role: 'user', content: text })
@@ -612,6 +619,7 @@ export class Agent {
       this.openTurn = undefined
       this.turnSections = []
       this.turnFiles = undefined
+      this.turnMaterials = false
     }
   }
 
@@ -631,6 +639,15 @@ export class Agent {
       this.turnFiles = files
     } catch (error) {
       await this.appendError(toErrorInfo(error), false, turn)
+    }
+  }
+
+  /** Whether the project lists any active material; a failed listing counts as none (it only drops one prompt line). */
+  private async hasMaterials(tasking: TaskingService): Promise<boolean> {
+    try {
+      return (await tasking.materials.list()).length > 0
+    } catch {
+      return false
     }
   }
 

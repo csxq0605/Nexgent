@@ -32,7 +32,7 @@
 - **路径**：`path.resolve` → 最长已存在祖先 `realpath` + 字面尾段（悬空符号链接按链接目标解析）→ 包含检查；
   词法在根内但真实位置在根外 = `symlink-escape`。处理器在操作前再解析一次并使用第二次结果。Windows：小写、
   `/`→`\`、去 `\\?\`、设备名 / ADS / 非 UNC 项目下的 UNC 拒绝、长度 > 4096 拒绝。
-- **`.nexgent/`**：`sessions/ ledgers/ capabilities/` 读写拒绝；`materials/` 只读；`outputs/` 读写；`config.json` 只读。
+- **`.nexgent/`**：`sessions/ ledgers/ capabilities/` 读写拒绝；`materials/`、`outputs/`、`skills/` 只读（成果快照只由宿主在 `present` 时写，步骤 2 起模型不能写改；技能由用户维护）；`config.json` 只读；其余 `.nexgent/` 路径读写都拒绝。
   `.git/`、`node_modules/`、`.pnpm-store/` 任意深度写拒绝；`.env* *.pem *.key id_rsa* .npmrc .netrc` 读写需审批。
 - **命令**：`bash -c` / `pwsh -NoProfile -NonInteractive -Command`；超时默认 120 000，上限 600 000；POSIX 独立进程组，
   `SIGTERM` → `graceMs`（默认 5 000）→ `SIGKILL`，等进程组为空（Linux 读 `/proc` 排除僵尸）后才返回，正常退出后残留的

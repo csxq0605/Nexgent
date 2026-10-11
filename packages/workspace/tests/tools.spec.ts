@@ -167,6 +167,22 @@ describe('str_replace', () => {
     expect(await tool('str_replace').preflight({ path: '.git/HEAD', old_str: 'x', new_str: 'y' }, toolContext(workspace)))
       .toMatchObject({ action: 'deny', error: { code: 'sandbox/denied' } })
   })
+
+  it('cannot write or edit deliverable snapshots or skills but can read them', async () => {
+    const { tool, workspace } = await setup()
+    const snapshot = nodePath.join(workspace.root, '.nexgent', 'outputs', 'd1', 'v1', 'files')
+    await mkdir(snapshot, { recursive: true })
+    await writeFile(nodePath.join(snapshot, 'report.md'), 'v1')
+    await mkdir(nodePath.join(workspace.root, '.nexgent', 'skills', 'csv'), { recursive: true })
+    await writeFile(nodePath.join(workspace.root, '.nexgent', 'skills', 'csv', 'SKILL.md'), 'skill')
+    const ctx = toolContext(workspace)
+    const deny = { action: 'deny', error: { code: 'sandbox/denied' } }
+    expect(await tool('str_replace').preflight({ path: '.nexgent/outputs/d1/v1/files/report.md', old_str: 'v1', new_str: 'v2' }, ctx)).toMatchObject(deny)
+    expect(await tool('write_file').preflight({ path: '.nexgent/outputs/d1/v2/files/report.md', content: 'x' }, ctx)).toMatchObject(deny)
+    expect(await tool('write_file').preflight({ path: '.nexgent/skills/csv/SKILL.md', content: 'x' }, ctx)).toMatchObject(deny)
+    expect((await tool('read_file').handler({ path: '.nexgent/skills/csv/SKILL.md' }, ctx)).content).toContain('skill')
+    expect((await tool('read_file').handler({ path: '.nexgent/outputs/d1/v1/files/report.md' }, ctx)).content).toContain('v1')
+  })
 })
 
 describe('search tools ignore rules', () => {

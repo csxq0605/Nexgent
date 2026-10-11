@@ -230,6 +230,10 @@ describe('system prompt, schema check, timeouts, history repair', () => {
     expect(noPresent).toContain('use `str_replace`.')
     expect(noPresent).not.toContain('present')
     expect(renderSystemPrompt({ ...base, tools: ['bash'].map(tool) })).not.toContain('# Working with files')
+    expect(section).toContain('pass the `deliverableId` that `present` returned')
+    expect(full).not.toContain('.nexgent/materials/')
+    const withMaterials = renderSystemPrompt({ ...base, tools: ['read_file'].map(tool), materials: true })
+    expect(withMaterials).toContain('# Working with files\n- Materials the user attached are under `.nexgent/materials/` and are read-only')
   })
 
   it('checks the common JSON Schema keywords', () => {
