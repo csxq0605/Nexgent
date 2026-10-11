@@ -37,6 +37,8 @@ Nexgent 以 [MIT](LICENSE) 许可发布。本文件列出 Nexgent 使用、参�
 | `apps/cli/src/json-lines.ts` | `packages/bundle/headless/src/json-stream.ts` |
 | `packages/web/src/markdown.ts` | `packages/web/tool-web/src/fetch.ts`（turndown 规则与嵌套深度保护） |
 | `packages/web/src/turndown-plugin-gfm.d.ts` | `packages/web/tool-web/src/turndown-plugin-gfm.d.ts` |
+| `packages/workflow/src/architecture.ts` | `packages/workflow/tool-workflow`（经 Nexgent PR #4 `runtime/packages/workflow/tool-workflow/src/architecture.ts`，`refactor/dsh-application` `fd0b2f42`） |
+| `packages/workflow/src/architecture-store.ts` | `packages/workflow/tool-workflow`（经 Nexgent PR #4 `runtime/packages/workflow/tool-workflow/src/architecture-store.ts`，`refactor/dsh-application` `fd0b2f42`） |
 
 `@nexgent/session` 与 `packages/test-support` 没有复制件（只参考设计）。`apps/cli/bin/nexgent.ps1` 移植自 Nexgent 自己的 PR #4 `run.ps1`，不是 DeepSeek Harness 代码。按包划分的“复制 / 只参考设计”清单见 `docs/reference-map.md` §步骤 1 复制件登记。
 

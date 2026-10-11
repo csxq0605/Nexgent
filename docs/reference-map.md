@@ -110,10 +110,10 @@
 | `experimental/agent-team`、`experimental/agent-team-profile` | `@nexgent/team` | 改写 | 3 | Lead + 具名队友 + 持久邮箱 + 任务板；去掉 experimental 兼容层，持久化语义用 Nexgent 测试固定 |
 | `experimental/tool-agent-team` | `@nexgent/team` | 改写 | 3 | 九个团队工具 |
 | `experimental/client-ui-agent-team` | `apps/desktop` | 重写 | 3 | |
-| `workflow/workflow` | `@nexgent/workflow` | 改写 | 3 | 脚本工作流 `agent() / parallel() / pipeline()` |
-| `workflow/workflow-ptc`、`workflow/tool-workflow` | `@nexgent/workflow` | 改写 | 3 | PR #4 的 `architecture.ts`、`architecture-store.ts`、persona / toolFilter 透传并入 |
+| `workflow/workflow` | `@nexgent/workflow` | 改写 | 3 | 脚本工作流 `agent() / parallel() / pipeline()`；步骤 3 未复制文件，只参考设计（运行时 `src/runtime.ts` 自写：脚本在 `@nexgent/ptc` 进程里跑，`agent()` 接 `@nexgent/subagent` 的 `runMember`） |
+| `workflow/workflow-ptc`、`workflow/tool-workflow` | `@nexgent/workflow` | 改写 | 3 | 只取前台；PR #4 的 `architecture.ts`、`architecture-store.ts` 移植为 `src/architecture.ts`、`src/architecture-store.ts`（带头注，见 `THIRD_PARTY_NOTICES.md`）；persona / toolFilter 透传改为 `agent()` 的 `preset` / `tools` 选项 |
 | `workflow/tool-ralph` | — | 不要 | — | |
-| `ptc-runtime/ptc-runtime`、`ptc-runtime/ptc-runtime-node` | `@nexgent/ptc` | 改写 | 3 | 模型写程序调用宿主函数；Node 后端 |
+| `ptc-runtime/ptc-runtime`、`ptc-runtime/ptc-runtime-node` | `@nexgent/ptc` | 改写 | 3 | 模型写程序调用宿主函数；Node 后端；步骤 3 未复制文件，只参考设计（stdio 行协议、宿主函数绑定、空环境；另加 Node 权限模型与 Job Object） |
 | `experimental/ptc-runtime-python` | — | 不要 | — | 需要 CPython 时再参考 |
 | `preset/agent-preset`、`preset/persona` | `@nexgent/preset` | 改写 | 3 | 预设与人设；组织角色、团队模板（JSON）迁入；步骤 3 未复制文件，只参考设计（内置三份与项目 `.nexgent/presets/*.json`） |
 | `preset/agent-preset-registry` | `@nexgent/preset` | 改写 | 3、4 | 步骤 4 的能力版本把预设注入 profile |
@@ -170,7 +170,7 @@
 | `cordis.patch.yml` 的产品默认值 | `@nexgent/kernel` | 1 |
 | `execution-ledger.ts` | `@nexgent/llm`（请求记录）、`@nexgent/capabilities`（扩展字段） | 1、4 |
 | `architecture-activation.ts` | `@nexgent/capabilities` | 4 |
-| `architecture.ts`、`architecture-store.ts`、`tool-restriction.ts`、persona / toolFilter 透传 | `@nexgent/workflow`、`@nexgent/kernel` | 3 |
+| `architecture.ts`、`architecture-store.ts`、`tool-restriction.ts`、persona / toolFilter 透传 | `@nexgent/workflow`、`@nexgent/kernel` | 3（前两个按步骤 3 分工表仍加了 `Adapted from` 头注并登记，因为所在包改写自 DSH 的 `tool-workflow`） |
 | `architecture-trials.ts` 的成对执行框架 | `@nexgent/capabilities` | 4（比较规则替换） |
 | `run.ps1` 的参数设计 | `apps/cli/bin/nexgent.ps1` | 1 |
 | 13 个验收脚本的流程设计 | `scripts/accept-step*.mjs` | 1–4 |
