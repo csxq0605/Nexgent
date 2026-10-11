@@ -7,7 +7,11 @@
  * process part-way through.
  *
  * Usage: node step2-driver.mjs '<json spec>'
- *   spec: { root, home, sessionId, text, env }
+ *   spec: { root, home, sessionId, text, env, keyFromEnv?, realModel?, approvals? }
+ *   keyFromEnv: name of an env var of this process whose value becomes
+ *     `env.NEXGENT_API_KEY` (the real layer: the key never goes through argv).
+ *   realModel: allow a non-loopback API (the real layer only).
+ *   approvals: 'allow-once' answers every approval request with allow / once.
  */
 import { createStep2Sdk, eventLine, loadStep2Packages, runTurn } from './step2-runtime.mjs'
 
@@ -19,7 +23,15 @@ if (!loaded.ok) {
   write(JSON.stringify({ type: 'driver.error', message: loaded.reason }))
   process.exit(2)
 }
-const sdk = createStep2Sdk(loaded.pkgs, { env: spec.env, home: spec.home })
+const env = { ...spec.env }
+if (typeof spec.keyFromEnv === 'string') env.NEXGENT_API_KEY = process.env[spec.keyFromEnv] ?? ''
+const approvals = spec.approvals === 'allow-once'
+  ? async (request) => {
+    write(JSON.stringify({ type: 'driver.approval', summary: String(request.summary ?? '').slice(0, 200) }))
+    return { id: request.id, decision: 'allow', scope: 'once', decidedBy: 'user' }
+  }
+  : undefined
+const sdk = createStep2Sdk(loaded.pkgs, { env, home: spec.home, approvals, realModel: spec.realModel === true })
 const project = await sdk.call('projects.open', { root: spec.root })
 await sdk.openSession({ projectId: project.projectId, sessionId: spec.sessionId })
 write(JSON.stringify({ type: 'driver.ready', pid: process.pid, sessionId: spec.sessionId }))

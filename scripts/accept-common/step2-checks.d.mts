@@ -19,6 +19,8 @@ export declare const REAL_MODEL: {
   readonly model: string
   readonly thinking: 'on' | 'off'
   readonly budgetUsd: number
+  readonly runCapUsd: number
+  readonly compactionThreshold: number
   readonly keyEnv: readonly string[]
   readonly task: string
 }
