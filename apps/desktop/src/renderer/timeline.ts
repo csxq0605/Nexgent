@@ -44,10 +44,29 @@ const assistantKey = (turn: number, step: number): string => `a:${turn}:${step}`
 const reasoningKey = (turn: number, step: number): string => `r:${turn}:${step}`
 const toolKey = (callId: string): string => `t:${callId}`
 
-/** Convert a session's display history into timeline entries. */
+/**
+ * Convert a session's display history into timeline entries.
+ *
+ * The session records a `present` call's deliverable before the call's tool
+ * result, so in history the card would sit above its own tool block. Cards
+ * wait until the next successful `present` block of their turn and follow it
+ * (in order, one per block); any still waiting when the turn moves on are
+ * placed there.
+ */
 export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
   const out: TimelineEntry[] = []
+  let waiting: TimelineEntry[] = []
+  const flush = (): void => {
+    out.push(...waiting)
+    waiting = []
+  }
   items.forEach((item, index) => {
+    if (waiting.length > 0 && item.turn !== waiting[0]!.turn) flush()
+    if (item.kind === 'deliverable') {
+      waiting.push({ kind: 'deliverable', key: `d:${item.deliverable.deliverableId}:${item.deliverable.version}`, turn: item.turn, deliverable: item.deliverable })
+      return
+    }
+    if (item.kind === 'turn.end') flush()
     switch (item.kind) {
       case 'user':
         out.push({ kind: 'user', key: `u:${item.turn}:${index}`, turn: item.turn, text: item.text, feedback: item.source === 'feedback', materials: item.materials })
@@ -70,12 +89,10 @@ export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
           isError: item.isError,
           durationMs: item.durationMs,
         })
+        if (item.call.name === 'present' && !item.isError && waiting.length > 0) out.push(waiting.shift()!)
         break
       case 'approval':
         out.push({ kind: 'approval', key: `ap:${item.request.id}`, turn: item.turn, request: item.request, ...(item.decision === undefined ? {} : { decision: item.decision }) })
-        break
-      case 'deliverable':
-        out.push({ kind: 'deliverable', key: `d:${item.deliverable.deliverableId}:${item.deliverable.version}`, turn: item.turn, deliverable: item.deliverable })
         break
       case 'files':
         if (item.changes.length === 0) break
@@ -103,6 +120,7 @@ export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
         break
     }
   })
+  flush()
   return out
 }
 

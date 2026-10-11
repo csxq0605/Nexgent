@@ -3,6 +3,7 @@ import type { DeliverableSummary } from '@nexgent/kernel'
 import type { TimelineEntry } from '../timeline.js'
 import { T, errorText, fileChangeText, riskText, turnEndText } from '../strings.js'
 import { DeliverableCard } from './DeliverableCard.js'
+import { Markdown } from './Markdown.js'
 import { ToolBlock } from './ToolBlock.js'
 
 function latestVersion(deliverables: readonly DeliverableSummary[], deliverableId: string, fallback: number): number {
@@ -32,10 +33,8 @@ function Entry({ entry, deliverables }: { readonly entry: TimelineEntry; readonl
     case 'assistant':
       return (
         <div className="msg assistant" data-testid="assistant-message" data-streaming={entry.streaming ? 'true' : 'false'}>
-          <p className="text">
-            {entry.text}
-            {entry.streaming && <span className="caret" aria-hidden="true" />}
-          </p>
+          <Markdown text={entry.text} />
+          {entry.streaming && <span className="caret" aria-hidden="true" />}
           {entry.interrupted && <p className="muted small">{T.interruptedText}</p>}
         </div>
       )

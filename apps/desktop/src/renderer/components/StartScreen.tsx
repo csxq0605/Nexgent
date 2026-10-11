@@ -40,7 +40,7 @@ export function StartScreen(): JSX.Element {
         <h2>{T.startTitle}</h2>
         <p className="muted">{T.startHint}</p>
         {store.client?.canPickDirectory === true && (
-          <button type="button" className="primary" onClick={() => void store.pickAndOpenProject(false)}>
+          <button type="button" className="primary" onClick={() => void store.pickAndOpenProject(false)} data-testid="pick-directory">
             {T.chooseFolder}
           </button>
         )}

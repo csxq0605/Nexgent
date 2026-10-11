@@ -5,7 +5,7 @@
  * Never bundled into the app (only tests import it).
  */
 import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, MaterialMetadata } from '@nexgent/kernel'
-import type { ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView } from '@nexgent/sdk'
+import type { ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -85,14 +85,22 @@ export class FakeBridge implements NexgentBridge {
   recent: ProjectInfo[] = [PROJECT]
   sessions: SessionSummary[] = [SESSION]
   settings: ProjectSettings = SETTINGS
+  files: ProjectFileEntry[] = [{ path: 'orders.csv', size: 2048, modifiedAt: '2026-10-11T08:00:00.000Z' }]
+  filesTruncated = false
   turn = 0
   readonly handlers: Record<string, Handler> = {
-    'app.info': () => ({ sdkVersion: 1, appVersion: '0.0.0-test', platform: 'linux' }),
+    'app.info': () => ({ sdkVersion: 2, appVersion: '0.0.0-test', platform: 'linux' }),
     'projects.recent': () => this.recent,
     'projects.open': () => PROJECT,
     'projects.forget': () => undefined,
     'sessions.list': () => this.sessions,
     'sessions.create': () => ({ ...SESSION, sessionId: 's2', title: undefined }),
+    'sessions.rename': input => {
+      const summary = { ...(this.sessions.find(s => s.sessionId === input.sessionId) ?? SESSION), title: input.title }
+      this.sessions = this.sessions.map(s => (s.sessionId === input.sessionId ? summary : s))
+      return summary
+    },
+    'files.list': () => ({ files: this.files, truncated: this.filesTruncated }),
     'sessions.open': input => ({ ...this.view, summary: this.sessions.find(s => s.sessionId === input.sessionId) ?? this.view.summary }),
     'turns.send': input => {
       this.turn += 1

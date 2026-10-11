@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { FakeBridge, MATERIAL, ZERO_USAGE, approvalRequest, version } from '../testing/fake-bridge.js'
@@ -300,5 +300,95 @@ describe('project and materials', () => {
     await screen.findByTestId('workspace')
     expect(screen.getByTestId('session-item').textContent).toContain('上次中断')
     expect(bridge.callsOf('sessions.open')).toEqual([{ projectId: 'p1', sessionId: 's1' }])
+  })
+
+  it('shows the native picker buttons only when the bridge has pickers, and uses them', async () => {
+    const plain = await renderApp(new FakeBridge(), { open: false })
+    expect(screen.queryByTestId('pick-directory')).toBeNull()
+    plain.store.dispose()
+    cleanup()
+
+    const bridge = Object.assign(new FakeBridge(), {
+      pickDirectory: vi.fn(async () => '/work/sales'),
+      pickFiles: vi.fn(async () => ['/data/orders.csv', '/data/regions.xlsx']),
+    })
+    await renderApp(bridge, { open: false })
+    fireEvent.click(screen.getByTestId('pick-directory'))
+    await screen.findByTestId('workspace')
+    expect(bridge.callsOf('projects.open')).toEqual([{ root: '/work/sales' }])
+    expect(screen.getByTestId('attach-files')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('pick-files'))
+    await waitFor(() => expect(screen.getAllByTestId('material-item')).toHaveLength(2))
+    expect(bridge.pickFiles).toHaveBeenCalledTimes(1)
+    expect(bridge.callsOf('materials.add').map(input => input.sourcePath)).toEqual(['/data/orders.csv', '/data/regions.xlsx'])
+  })
+
+  it('lists the project folder in the 文件 tab, marks this conversation\'s changes and refreshes after a turn', async () => {
+    const bridge = new FakeBridge()
+    await renderApp(bridge)
+    fireEvent.click(screen.getByTestId('tab-files'))
+    await waitFor(() => expect(screen.getAllByTestId('file-item')).toHaveLength(1))
+    expect(screen.getByTestId('file-list').textContent).toContain('orders.csv')
+    expect(bridge.callsOf('files.list')).toEqual([{ projectId: 'p1' }])
+
+    bridge.files = [...bridge.files, { path: 'report/summary.csv', size: 40, modifiedAt: '2026-10-11T08:10:00.000Z' }]
+    bridge.filesTruncated = true
+    emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
+    emit(bridge, { type: 'turn.files', turn: 1, changes: [{ path: 'report/summary.csv', change: 'added' }, { path: 'old.txt', change: 'deleted' }] })
+    emit(bridge, { type: 'turn.end', turn: 1, reason: { kind: 'completed' }, usage })
+    await waitFor(() => expect(screen.getAllByTestId('file-item')).toHaveLength(3))
+    const items = screen.getAllByTestId('file-item').map(item => item.textContent)
+    expect(items[1]).toContain('report/summary.csv')
+    expect(items[1]).toContain('新增')
+    expect(items[2]).toContain('old.txt')
+    expect(items[2]).toContain('删除')
+    expect(screen.getByTestId('files-panel').textContent).toContain('只列出前 2 个')
+  })
+})
+
+describe('session rename', () => {
+  it('renames from the header; Enter saves, Escape cancels, empty is ignored', async () => {
+    const bridge = new FakeBridge()
+    await renderApp(bridge)
+    expect(screen.getByTestId('session-title').textContent).toBe('销售汇总')
+    fireEvent.click(screen.getByTestId('rename-session'))
+    const input = screen.getByTestId('rename-input') as HTMLInputElement
+    expect(input.value).toBe('销售汇总')
+    fireEvent.change(input, { target: { value: '  六月订单  ' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(screen.getByTestId('session-title').textContent).toBe('六月订单'))
+    expect(bridge.callsOf('sessions.rename')).toEqual([{ projectId: 'p1', sessionId: 's1', title: '六月订单' }])
+    expect(screen.getByTestId('session-item').textContent).toContain('六月订单')
+
+    fireEvent.click(screen.getByTestId('rename-session'))
+    fireEvent.change(screen.getByTestId('rename-input'), { target: { value: '不要' } })
+    fireEvent.keyDown(screen.getByTestId('rename-input'), { key: 'Escape' })
+    fireEvent.click(screen.getByTestId('rename-session'))
+    fireEvent.change(screen.getByTestId('rename-input'), { target: { value: '   ' } })
+    fireEvent.keyDown(screen.getByTestId('rename-input'), { key: 'Enter' })
+    expect(screen.getByTestId('session-title').textContent).toBe('六月订单')
+    expect(bridge.callsOf('sessions.rename')).toHaveLength(1)
+  })
+})
+
+describe('markdown replies', () => {
+  it('renders Markdown (GFM tables, code, lists) and never raw HTML', async () => {
+    const { bridge } = await renderApp()
+    const text = ['## 汇总', '', '**华北**最高，见 `report/summary.csv`：', '', '| 地区 | 金额 |', '| --- | --- |', '| 华北 | 1200 |', '', '- 去重', '- 换算', '', '<img src=x onerror="alert(1)"><script>alert(2)</script>', '', '[来源](https://example.com/a)'].join('\n')
+    emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
+    emit(bridge, { type: 'assistant.message', turn: 1, step: 1, text, finishReason: 'stop', interrupted: false, usage })
+    const message = screen.getByTestId('assistant-message')
+    expect(message.querySelector('h2')?.textContent).toBe('汇总')
+    expect(message.querySelector('strong')?.textContent).toBe('华北')
+    expect(message.querySelector('code')?.textContent).toBe('report/summary.csv')
+    expect([...message.querySelectorAll('td')].map(td => td.textContent)).toEqual(['华北', '1200'])
+    expect(message.querySelectorAll('li')).toHaveLength(2)
+    expect(message.querySelector('script')).toBeNull()
+    expect(message.querySelector('img')).toBeNull()
+    const link = message.querySelector('a')!
+    expect(link.getAttribute('title')).toBe('https://example.com/a')
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    link.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
   })
 })
