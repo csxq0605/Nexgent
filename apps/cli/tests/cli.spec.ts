@@ -14,10 +14,11 @@ describe('nexgent bin (requires `pnpm build`)', () => {
     expect(out.trim()).toBe(pkg.version)
   })
 
-  it('reports app as a step-2 placeholder with exit 2', () => {
-    const result = spawnSync(process.execPath, [bin, 'app', '--project', '.'], { encoding: 'utf8' })
+  it('reports a missing desktop app with exit 2', () => {
+    const missing = fileURLToPath(new URL('./no-such-desktop-app', import.meta.url))
+    const result = spawnSync(process.execPath, [bin, 'app', '--project', '.'], { encoding: 'utf8', env: { ...process.env, NEXGENT_DESKTOP_DIR: missing } })
     expect(result.status).toBe(2)
-    expect(result.stderr).toContain('step 2')
+    expect(result.stderr).toContain('desktop app not found')
   })
 
   it('reports usage errors with exit 2 and no stack', () => {

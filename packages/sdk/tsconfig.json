@@ -5,6 +5,30 @@
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"],
-  "references": [{ "path": "../kernel" }]
+  "include": [
+    "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../kernel"
+    },
+    {
+      "path": "../llm"
+    },
+    {
+      "path": "../session"
+    },
+    {
+      "path": "../workspace"
+    },
+    {
+      "path": "../context"
+    },
+    {
+      "path": "../skill"
+    },
+    {
+      "path": "../tasking"
+    }
+  ]
 }

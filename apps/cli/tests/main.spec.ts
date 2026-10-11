@@ -35,10 +35,19 @@ describe('main', () => {
     expect(d.stderr.text).toContain('at parseCliArgs')
   })
 
-  it('app is a step-2 placeholder with exit 2', async () => {
-    const t = testIo(tmp)
+  it('app exits 2 when the desktop app is not there', async () => {
+    const t = testIo(tmp, { NEXGENT_DESKTOP_DIR: path.join(tmp, 'no-desktop') })
     expect(await main(['app', '--project', tmp], t.io)).toBe(2)
-    expect(t.stderr.text).toContain('step 2')
+    expect(t.stderr.text).toContain('desktop app not found')
+  })
+
+  it('app starts the desktop app detached, with the project', async () => {
+    const launched: unknown[] = []
+    const t = testIo(tmp)
+    expect(await main(['app', '--project', tmp], t.io, { launchDesktop: async options => void launched.push(options) })).toBe(EXIT.OK)
+    expect(launched).toEqual([{ env: t.io.env, project: path.resolve(tmp) }])
+    expect(await main(['app'], testIo(tmp).io, { launchDesktop: async options => void launched.push(options) })).toBe(EXIT.OK)
+    expect(launched[1]).not.toHaveProperty('project')
   })
 
   it('stops with exit 3 when no API key is configured, after creating the layout', async () => {

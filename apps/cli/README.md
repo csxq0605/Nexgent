@@ -1,15 +1,16 @@
 # @nexgent/cli
 
-The `nexgent` command: `nexgent run` (new session, one task), `nexgent resume <sessionId>` (continue one) and `nexgent app` (desktop app; step 2). Owner of `scripts/accept-step1.mjs`.
+The `nexgent` command: `nexgent run` (new session, one task), `nexgent resume <sessionId>` (continue one), `nexgent export <sessionId>` (minimal export bundle) and `nexgent app` (launch the desktop app). Owner of `scripts/accept-step1.mjs`.
 
-**Status (step 1, week 4):** wired. `run` / `resume` boot the kernel's default profile (`packages/kernel/profiles/nexgent.yml`) with `@nexgent/llm` (Claude Platform, ADR 0002), `@nexgent/session` and `@nexgent/workspace` through one seam, [`src/runtime.ts`](src/runtime.ts). `scripts/accept-step1.mjs` passes on Linux against the scripted Claude Messages API server.
+**Status (step 2, W4):** the CLI goes through `@nexgent/sdk`, the in-process API the desktop app shares. `run` / `resume` open the project and the session through the SDK (kernel default profile + `@nexgent/llm`, `@nexgent/session`, `@nexgent/workspace`, `@nexgent/context`, `@nexgent/skill`, `@nexgent/tasking`) behind one seam, [`src/runtime.ts`](src/runtime.ts); their behavior is unchanged except that each turn now also records its file changes (`turn.files`) and gets the step-2 context (instructions file, materials, skills). `scripts/accept-step1.mjs` passes unmodified on Linux against the scripted Claude Messages API server.
 
 ## Usage
 
 ```text
 nexgent run --project <dir> --task "<text>" [--sandbox <mode>] [--model <id>] [--json]
 nexgent resume <sessionId> --project <dir> [--task "<text>"] [--sandbox <mode>] [--json]
-nexgent app --project <dir>
+nexgent export <sessionId> --project <dir> [--out <dir>] [--json]
+nexgent app [--project <dir>]
 nexgent --version | --help | <command> --help
 ```
 
@@ -27,6 +28,8 @@ nexgent resume 6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b --project ./my-project      
 - Session ids are lowercase uuid v4; `resume` rejects anything else before touching the disk.
 - `resume` without `--task` sends `RESUME_DEFAULT_TASK` ("Continue the previous task from where it stopped."). A turn the previous process never closed (crash, `kill -9`) is ended as `turn.end { kind: 'interrupted' }` first; the model sees the earlier history and the delivered prefix of the interrupted reply.
 - Text mode: stdout carries only the assistant's streamed text. Progress goes to stderr: the session line, `> tool args`, `ok|error N ms: result`, approvals, turn status and a closing summary (status, requests, tool calls, tokens, with `?` for unknown).
+- `export`: writes `session.jsonl`, the session's ledger lines (`ledger.jsonl`), `materials.json`, `deliverables.json` and `manifest.json` into `--out` (default `./nexgent-export-<sessionId>`; must be missing or empty, else exit 1). API key values in force are searched for in every file and replaced by `[REDACTED]`. No model request is made. `--json` prints one line `{ type: 'export', sessionId, path, files }`.
+- `app`: starts the desktop app detached and returns 0: the app directory is `NEXGENT_DESKTOP_DIR`, else the monorepo's `apps/desktop`; Electron is `NEXGENT_ELECTRON`, else the `electron` package resolved from the app. The app gets `<appDir> [--project <abs>]`. Exit 2 (`cli/app-not-found`) when the app or Electron is missing.
 - `--json`: stdout carries one bounded JSON object per event. Strings are capped at 8 KiB and lines at 32 KiB; the bounding is adapted from DSH headless `json-stream`. Events are the `CliEvent` union in `src/events.ts`, and the stream ends with an unbounded `final` line `{ sessionId, status, exitCode, text, totalUsage, requestCount, toolCallCount }`. A failure outside the stream writes `{ "type": "error", "error": { code, message } }`.
 - Errors print as `nexgent: <message>`, or `nexgent: <code>: <message>` for `NexgentError`s, with no stack. Set `NEXGENT_DEBUG=1` to get the stack.
 
@@ -48,7 +51,7 @@ The CLI hands its own `env` to the credentials and llm services (not `process.en
 | --- | --- |
 | 0 | task completed (also `--version`, `--help`) |
 | 1 | task did not complete: model / tool error, cost cap, turn timeout, max tokens, interrupted |
-| 2 | usage error, or not available in this build (`app`; a build whose runtime is not wired) |
+| 2 | usage error, or not available in this build (`app` without a built desktop app; a build whose runtime is not wired) |
 | 3 | environment: project dir missing, no API key, bad config, session missing / locked |
 | 4 | internal error (bug) |
 | 130 | the user cancelled the turn (Ctrl+C) |
@@ -56,7 +59,7 @@ The CLI hands its own `env` to the credentials and llm services (not `process.en
 
 ### Ctrl+C
 
-The first Ctrl+C aborts the running turn: the runtime calls `agent.cancel('user')`, the model stream is aborted, the delivered prefix is written as `assistant.message { interrupted: true }`, the turn ends `cancelled`, the task outcome is written as `cancelled`, and the process exits 130. A second Ctrl+C, or a Ctrl+C with no turn running, exits at once. The lock left behind is reclaimed by the session store's stale-lock rule. SIGTERM, SIGHUP and (on Windows) SIGBREAK do the same with cause `shutdown` and exit 143. The logic is the pure `nextInterruptAction` plus `InterruptController`.
+The first Ctrl+C aborts the running turn: the runtime calls the SDK's `cancelTurn({ cause: 'user' })` (the agent's `cancel('user')`), the model stream is aborted, the delivered prefix is written as `assistant.message { interrupted: true }`, the turn ends `cancelled`, the task outcome is written as `cancelled`, and the process exits 130. A second Ctrl+C, or a Ctrl+C with no turn running, exits at once. The lock left behind is reclaimed by the session store's stale-lock rule. SIGTERM, SIGHUP and (on Windows) SIGBREAK do the same with cause `shutdown` and exit 143. The logic is the pure `nextInterruptAction` plus `InterruptController`.
 
 ### Approvals
 
@@ -78,13 +81,13 @@ The first Ctrl+C aborts the running turn: the runtime calls `agent.cancel('user'
 
 ## The runtime seam (`src/runtime.ts`)
 
-`loadRuntime()` returns the wired `CliRuntime`; `open(options)` boots one app per run and returns a `RuntimeSession`:
+`loadRuntime()` returns the wired `CliRuntime`; `open(options)` creates one SDK instance per run and returns a `RuntimeSession`:
 
-- Boot: `createApp()` on the default profile with the registry `{ '@nexgent/kernel/credentials' (LocalCredentials over the CLI's env + NEXGENT_HOME), '@nexgent/llm' (AnthropicProvider over the CLI's env), '@nexgent/session', '@nexgent/workspace' }` and the patch `{ id: 'workspace', config: { root } }`.
-- `open()`: `ctx.credentials.describe(NEXGENT_API_KEY)` (with the `ANTHROPIC_API_KEY` fallback) → `credentials/missing`; `ctx.approvals.setResponder(approvals)`; `agents.setProjectGrantWriter(appendProjectGrant)`; then `agents.create({ sessionId: uuid v4, model?, sandboxMode? })` or `agents.resume(id, { sandboxMode? })` (takes the lock, closes an open turn as `interrupted`). `info` is the opening `session` event.
-- `runTurn(task, signal)`: `agent.run(task)` with `agent.subscribe` feeding an async queue; the CLI's abort signal becomes `agent.cancel(signal.reason)` so `shutdown` keeps its cause. On resume, the interrupted turn's `turn.end` is yielded first. If `run` rejects (store failure), a synthetic `turn.end { kind: 'error' }` closes the stream; the iterator never throws for request-level failures.
-- `recordOutcome(outcome)`: the kernel writes the one `task.outcome` per run on `agent.close()` with its own tallies (they match the CLI's `TaskTally`); the CLI only passes its `status` through `close({ status })`, so the ledger holds exactly one outcome per finished process and the CLI's status (`max-tokens` → `failed`) wins over the kernel's derivation.
-- `close()`: closes the agent (releases the lock) and disposes the app; idempotent, shared with `recordOutcome`.
+- Boot: `createSdk({ appVersion, env, approvalResponder })`. The SDK boots the project's application with the CLI's `env` (`NEXGENT_API_BASE_URL`, `NEXGENT_HOME`, `NEXGENT_COMPACTION_THRESHOLD`) and registers the CLI's TTY prompt as the approval responder; `project`-scope grants go to `.nexgent/config.json` through `appendProjectGrant`.
+- `open()`: `projects.open`; `settings.get` → no key → `credentials/missing`; then `createSession({ model?, sandboxMode? })` + `openSession`, or `openSession({ sessionId, sandboxMode? })` (takes the lock; a turn the dead process left open is closed as `interrupted` and reported as an SDK `turn.end` event, which `runTurn` replays first). `info` is the opening `session` event. Opening also adds the project to `~/.nexgent/recent-projects.json`.
+- `runTurn(task, signal)`: `startTurn` with the SDK's raw kernel events (`onAgentEvent`, in-process only) feeding an async queue; the CLI's abort signal becomes `cancelTurn({ cause })` so `shutdown` keeps its cause. If the turn cannot run at all, a synthetic `turn.end { kind: 'error' }` closes the stream; the iterator never throws for request-level failures.
+- `recordOutcome(outcome)`: no-op. The SDK appends one `task.outcome` per turn when it ends (a `run` / `resume` is one turn), with the same status mapping as the CLI's `TaskTally` (`completed` / `cancelled` / anything else `failed`); a cost-cap stop keeps the kernel's own record.
+- `close()`: `sessions.close` (releases the lock) and `sdk.dispose()`; idempotent.
 
 Event mapping (`mapAgentEvent`):
 
@@ -113,7 +116,7 @@ It writes test-support's acceptance summary (the fields of `docs/validation/TEMP
 
 ## Tests
 
-`pnpm exec vitest run --project @nexgent/cli`. Unit tests cover parsing, layout, credentials, rendering, approvals, signals, the tally and `main()` over a fake runtime; `tests/e2e.spec.ts` drives `main()` in process against `scriptedModelServer` on a temp project (run → `write_file` → session + ledger; resume with an interrupted turn and the history; Ctrl+C mid-stream; missing session); `tests/accept-common.spec.ts` runs `scripts/accept-step1.mjs` itself.
+`pnpm exec vitest run --project @nexgent/cli`. Unit tests cover parsing, layout, credentials, rendering, approvals, signals, the tally and `main()` over a fake runtime; `tests/e2e.spec.ts` drives `main()` in process against `scriptedModelServer` on a temp project (run → `write_file` → session + ledger; resume with an interrupted turn and the history; Ctrl+C mid-stream; export; missing session); `tests/app-launch.spec.ts` starts a stand-in desktop app with Node playing Electron; `tests/accept-common.spec.ts` runs `scripts/accept-step1.mjs` itself.
 
 ## DSH references
 
@@ -131,4 +134,4 @@ It writes test-support's acceptance summary (the fields of `docs/validation/TEMP
 - `nexgent.ps1` has not been executed (no PowerShell in the authoring environment).
 - Real Claude Platform manual run and its summary under `docs/validation/step-1/`.
 - Approval prompts are not exercised end to end (no TTY in tests; headless denies).
-- `nexgent app` (step 2).
+- `nexgent app` has only been run against a stand-in app; the real `apps/desktop` (W5) must accept `<appDir> [--project <abs>]`.

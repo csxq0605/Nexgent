@@ -4,12 +4,15 @@
  * `.mjs` scripts such as `scripts/accept-step1.mjs`.
  */
 export {
+  type CrashableProcess,
   type Deadline,
+  type ToolCrash,
   type TruncateAt,
   type TruncateResult,
   TimeoutError,
   appendPartialLine,
   closedPortUrl,
+  crashDuringTool,
   deadline,
   descendantPids,
   isProcessAlive,

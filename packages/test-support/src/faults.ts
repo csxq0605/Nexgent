@@ -59,12 +59,23 @@ function exec(file: string, args: readonly string[]): Promise<{ stdout: string; 
   })
 }
 
-/** All descendant pids of `pid` (POSIX, via `ps`), deepest first. */
+/** `pid ppid` lines for every process: `ps` on POSIX, `Win32_Process` (via `pwsh`) on Windows. */
+async function processTable(): Promise<string> {
+  if (process.platform !== 'win32') return (await exec('ps', ['-A', '-o', 'pid=,ppid='])).stdout
+  const script = 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }'
+  return (await exec('pwsh', ['-NoProfile', '-NonInteractive', '-Command', script])).stdout
+}
+
+/**
+ * All descendant pids of `pid`, deepest first. POSIX reads `ps`; Windows
+ * reads `Win32_Process` through `pwsh` (empty when `pwsh` is unavailable).
+ * Windows reuses pids and keeps a dead parent's id on its children, so treat
+ * the result as a snapshot taken while `pid` is alive.
+ */
 export async function descendantPids(pid: number): Promise<number[]> {
-  if (process.platform === 'win32') return []
-  const { stdout } = await exec('ps', ['-A', '-o', 'pid=,ppid='])
+  const table = await processTable()
   const children = new Map<number, number[]>()
-  for (const line of stdout.split('\n')) {
+  for (const line of table.split(/\r?\n/)) {
     const [child, parent] = line.trim().split(/\s+/).map(Number)
     if (child === undefined || parent === undefined || Number.isNaN(child) || Number.isNaN(parent)) continue
     const list = children.get(parent) ?? []
@@ -72,8 +83,11 @@ export async function descendantPids(pid: number): Promise<number[]> {
     children.set(parent, list)
   }
   const out: number[] = []
+  const seen = new Set<number>([pid])
   const walk = (p: number): void => {
     for (const c of children.get(p) ?? []) {
+      if (seen.has(c)) continue // Windows pid reuse can make a cycle
+      seen.add(c)
       walk(c)
       out.push(c)
     }
@@ -202,4 +216,55 @@ export async function closedPortUrl(path = ''): Promise<string> {
   const port = typeof address === 'object' && address !== null ? address.port : 0
   await new Promise<void>((resolve) => server.close(() => resolve()))
   return `http://127.0.0.1:${port}${path}`
+}
+
+/** Result of {@link crashDuringTool}. */
+export interface ToolCrash {
+  /** Name of the tool that was running (from the `tool.start` event), when known. */
+  readonly tool: string | undefined
+  /** Descendants of the killed process just before the kill (the tool's processes among them). */
+  readonly descendantsBefore: readonly number[]
+  /** Those descendants still alive after the kill (orphans of the crash). */
+  readonly survivors: readonly number[]
+  /** Exit of the killed process. */
+  readonly exit: { readonly code: number | null; readonly signal: NodeJS.Signals | null }
+}
+
+/** The process handle {@link crashDuringTool} needs (structurally a test-support `NodeProcessHandle`). */
+export interface CrashableProcess {
+  readonly pid: number
+  waitForOutput(matcher: RegExp, timeoutMs?: number, stream?: 'stdout' | 'stderr' | 'both'): Promise<{ readonly match: RegExpExecArray | undefined }>
+  kill(signal?: NodeJS.Signals, options?: { readonly tree?: boolean }): Promise<{ readonly code: number | null; readonly signal: NodeJS.Signals | null }>
+}
+
+/**
+ * Fault "工具执行中强杀": wait until a `--json` run prints a `tool.start`
+ * event, give the tool `settleMs` to start its own processes, then kill only
+ * the main process (a crash: no cleanup runs, children are not signalled).
+ * Reports which of its descendants outlived it, so a check can decide
+ * whether process containment held. On Windows libuv already places every
+ * non-detached child of a Node process in a kill-on-close job, so children a
+ * Node CLI spawns die with it unless spawned `detached`.
+ * @param handle - the running `nexgent ... --json` process.
+ * @param options - `timeoutMs` to wait for the tool (default 30000); `settleMs` after it (default 500).
+ */
+export async function crashDuringTool(
+  handle: CrashableProcess,
+  options: { readonly timeoutMs?: number; readonly settleMs?: number } = {},
+): Promise<ToolCrash> {
+  const { match } = await handle.waitForOutput(/\{"type":"tool\.start"[^\n]*/, options.timeoutMs ?? 30_000, 'stdout')
+  let tool: string | undefined
+  try {
+    const event = JSON.parse(match?.[0] ?? '') as { name?: unknown }
+    tool = typeof event.name === 'string' ? event.name : undefined
+  } catch {
+    tool = undefined
+  }
+  await new Promise(resolve => setTimeout(resolve, options.settleMs ?? 500))
+  const descendantsBefore = await descendantPids(handle.pid)
+  const exit = await handle.kill('SIGKILL', { tree: false })
+  // Give the OS a moment to tear down a kill-on-close job before probing.
+  await new Promise(resolve => setTimeout(resolve, 500))
+  const survivors = descendantsBefore.filter(isProcessAlive)
+  return { tool, descendantsBefore, survivors, exit }
 }

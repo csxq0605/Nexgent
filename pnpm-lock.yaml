@@ -35,9 +35,9 @@ importers:
       '@nexgent/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@nexgent/session':
+      '@nexgent/sdk':
         specifier: workspace:*
-        version: link:../../packages/session
+        version: link:../../packages/sdk
       '@nexgent/workspace':
         specifier: workspace:*
         version: link:../../packages/workspace
@@ -115,9 +115,31 @@ importers:
 
   packages/sdk:
     dependencies:
+      '@nexgent/context':
+        specifier: workspace:*
+        version: link:../context
       '@nexgent/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@nexgent/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@nexgent/session':
+        specifier: workspace:*
+        version: link:../session
+      '@nexgent/skill':
+        specifier: workspace:*
+        version: link:../skill
+      '@nexgent/tasking':
+        specifier: workspace:*
+        version: link:../tasking
+      '@nexgent/workspace':
+        specifier: workspace:*
+        version: link:../workspace
+    devDependencies:
+      '@nexgent/test-support':
+        specifier: workspace:*
+        version: link:../test-support
 
   packages/session:
     dependencies:

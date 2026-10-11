@@ -16,7 +16,7 @@
       "path": "../../packages/llm"
     },
     {
-      "path": "../../packages/session"
+      "path": "../../packages/sdk"
     },
     {
       "path": "../../packages/workspace"

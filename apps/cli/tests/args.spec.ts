@@ -35,8 +35,14 @@ describe('parseCliArgs', () => {
     })
   })
 
+  it('parses export with and without --out', () => {
+    expect(parseCliArgs(['export', SID, '--project', 'p'])).toEqual({ command: 'export', sessionId: SID, project: 'p', json: false })
+    expect(parseCliArgs(['export', SID, '--project', 'p', '--out', 'bundle', '--json'])).toEqual({ command: 'export', sessionId: SID, project: 'p', out: 'bundle', json: true })
+  })
+
   it('parses app, help and version', () => {
     expect(parseCliArgs(['app', '--project', 'p'])).toEqual({ command: 'app', project: 'p' })
+    expect(parseCliArgs(['app'])).toEqual({ command: 'app' })
     expect(parseCliArgs(['--help'])).toEqual({ command: 'help' })
     expect(parseCliArgs(['-h'])).toEqual({ command: 'help' })
     expect(parseCliArgs(['run', '--help'])).toEqual({ command: 'help', topic: 'run' })
@@ -61,7 +67,11 @@ describe('parseCliArgs', () => {
     [['resume', SID, SID, '--project', 'p'], 'got extra'],
     [['resume', SID, '--project', 'p', '--model', 'm'], 'does not accept --model'],
     [['app', '--project', 'p', '--task', 't'], 'does not accept --task'],
-    [['app'], '--project is required'],
+    [['app', 'p'], 'takes no positional arguments'],
+    [['export', '--project', 'p'], 'needs a <sessionId>'],
+    [['export', 'abc', '--project', 'p'], 'is not a session id'],
+    [['export', SID], '--project is required'],
+    [['export', SID, '--project', 'p', '--task', 't'], 'does not accept --task'],
   ])('rejects %j', (argv, message) => {
     expect(usageError(argv).message).toContain(message)
   })
@@ -73,12 +83,13 @@ describe('parseCliArgs', () => {
   })
 
   it('documents every command and the exit codes in help', () => {
-    expect(usage()).toMatch(/run[\s\S]*resume[\s\S]*app/)
+    expect(usage()).toMatch(/run[\s\S]*resume[\s\S]*export[\s\S]*app/)
     expect(usage()).toContain('130 cancelled')
     expect(commandUsage('run')).toContain('--sandbox <mode>')
     expect(commandUsage('run')).toContain(`then ${DEFAULT_PROJECT_CONFIG.model})`)
     expect(commandUsage('run')).not.toContain('mimo')
     expect(commandUsage('resume')).toContain('<sessionId>')
-    expect(commandUsage('app')).toContain('step 2')
+    expect(commandUsage('export')).toContain('--out <dir>')
+    expect(commandUsage('app')).toContain('NEXGENT_DESKTOP_DIR')
   })
 })
