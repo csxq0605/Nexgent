@@ -48,8 +48,13 @@ export const REAL_JUDGES = {
 
   R02(obs) {
     const all = calls(obs, ALL)
-    const existing = new Set(Object.keys(obs.phases?.feedback?.treeBefore ?? {}))
-    const feedbackEdits = calls(obs, ['feedback']).filter(call => call.name === 'str_replace' && call.ok && existing.has(call.path))
+    const existing = Object.keys(obs.phases?.feedback?.treeBefore ?? {})
+    // The model may pass a path relative to the project or an absolute one inside it.
+    const isExisting = (path) => {
+      const p = String(path ?? '').replaceAll('\\', '/')
+      return existing.some(file => p === file || p === `./${file}` || p.endsWith(`/${file}`))
+    }
+    const feedbackEdits = calls(obs, ['feedback']).filter(call => call.name === 'str_replace' && call.ok && isExisting(call.path))
     const shellEdits = calls(obs, ['feedback']).filter(call => (call.name === 'bash' || call.name === 'pwsh')).length
     return verdict([
       [all.some(call => call.name === 'write_file' && call.ok), 'at least one successful write_file'],

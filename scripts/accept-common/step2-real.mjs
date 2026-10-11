@@ -265,6 +265,8 @@ export async function runRealScenario(h, work, options) {
       obs.usage = ledgerUsage(obs.ledger, obs.sessionId)
     }
     obs.projectRoot = relative(work, root).split(sep).join('/')
+    // Kept with the raw records so the run can be judged again offline.
+    await writeFile(join(work, 'observations.json'), `${JSON.stringify(obs, null, 1)}\n`).catch(() => undefined)
   }
   return obs
 }
