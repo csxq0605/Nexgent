@@ -1,0 +1,34 @@
+{
+  "name": "@nexgent/team",
+  "version": "0.0.0",
+  "private": true,
+  "description": "团队：Lead 与具名队友、持久邮箱、共享任务板；状态以 team.* 记录写在 Lead 会话里，强杀后从记录重建。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/preset": "workspace:*",
+    "@nexgent/subagent": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/context": "workspace:*",
+    "@nexgent/session": "workspace:*",
+    "@nexgent/tasking": "workspace:*",
+    "@nexgent/test-support": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
+  }
+}
