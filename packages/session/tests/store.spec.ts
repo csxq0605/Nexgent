@@ -8,7 +8,7 @@ import {
   type SessionRecord,
   type SessionRecordInput,
 } from '@nexgent/kernel'
-import { encodeLine, JsonlSessionStore, projectSession, type JsonlSessionStoreOptions } from '../src/index.js'
+import { encodeLine, JsonlSessionStore, projectSession, scanSessionLog, type JsonlSessionStoreOptions } from '../src/index.js'
 import { SESSION_ID, sessionInit, tempDir, turnRecords } from './helpers.js'
 
 async function expectCode(promise: Promise<unknown>, code: NexgentErrorCode): Promise<void> {
@@ -241,6 +241,12 @@ describe('JsonlSessionStore: checkpoints', () => {
 })
 
 describe('JsonlSessionStore: recovery', () => {
+  // Every byte offset of the last four lines is checked against the scanner the
+  // store reads with (pure, in memory); the store itself is then exercised on
+  // disk at every line end and at the first, middle and last byte of each of
+  // those lines. Writing and re-reading the file at all ~1,100 offsets made
+  // ~3,300 file-system round trips, which took 3.4 s on Windows CI and
+  // exceeded the 5 s timeout when the runner was busy.
   it('truncation at every byte offset of the last lines recovers the last complete record', async () => {
     const { root, store } = await setup({ checkpointOnRelease: false })
     const file = await writeSession(store, root, 3)
@@ -250,27 +256,42 @@ describe('JsonlSessionStore: recovery', () => {
     for (let index = 0; index < full.length; index += 1) if (full[index] === 0x0a) lineEnds.push(index + 1)
     expect(lineEnds).toHaveLength(records.length)
     const firstOffset = lineEnds[lineEnds.length - 5] as number // the last four lines, byte by byte
-    const offsets = new Set<number>(lineEnds)
-    for (let offset = firstOffset; offset < full.length; offset += 1) offsets.add(offset)
 
-    const reader = new JsonlSessionStore({ sessionsDir: store.sessionsDir })
-    for (const offset of [...offsets].sort((a, b) => a - b)) {
-      await writeFile(file, full.subarray(0, offset))
+    const expected = (offset: number) => {
       const complete = lineEnds.filter(end => end <= offset).length
       const lineStart = complete === 0 ? 0 : (lineEnds[complete - 1] as number)
-      const read = await reader.readAll(SESSION_ID)
-      expect(read.records, `offset ${offset}`).toEqual(records.slice(0, complete))
-      if (offset === lineStart) {
-        expect(read.truncation, `offset ${offset}`).toBeUndefined()
-      } else {
-        expect(read.truncation, `offset ${offset}`).toEqual({
-          line: complete + 1,
-          byteOffset: lineStart,
-          reason: 'incomplete line (no trailing newline)',
-        })
+      return {
+        records: records.slice(0, complete),
+        truncation: offset === lineStart
+          ? undefined
+          : { line: complete + 1, byteOffset: lineStart, reason: 'incomplete line (no trailing newline)' },
+        validBytes: lineStart,
       }
+    }
+
+    for (let offset = firstOffset; offset <= full.length; offset += 1) {
+      const want = expected(offset)
+      const scan = scanSessionLog(full.subarray(0, offset), SESSION_ID)
+      expect(scan.records, `offset ${offset}`).toEqual(want.records)
+      expect(scan.truncation, `offset ${offset}`).toEqual(want.truncation)
+      expect(scan.validBytes, `offset ${offset}`).toBe(want.validBytes)
+    }
+
+    const onDisk = new Set<number>(lineEnds)
+    for (let line = lineEnds.length - 4; line < lineEnds.length; line += 1) {
+      const start = lineEnds[line - 1] as number
+      const end = lineEnds[line] as number
+      for (const offset of [start + 1, Math.floor((start + end) / 2), end - 1]) onDisk.add(offset)
+    }
+    const reader = new JsonlSessionStore({ sessionsDir: store.sessionsDir })
+    for (const offset of [...onDisk].sort((a, b) => a - b)) {
+      const want = expected(offset)
+      await writeFile(file, full.subarray(0, offset))
+      const read = await reader.readAll(SESSION_ID)
+      expect(read.records, `offset ${offset}`).toEqual(want.records)
+      expect(read.truncation, `offset ${offset}`).toEqual(want.truncation)
       const state = await reader.resume(SESSION_ID)
-      expect(state, `offset ${offset}`).toEqual(projectSession(records.slice(0, complete)))
+      expect(state, `offset ${offset}`).toEqual(projectSession(want.records))
     }
   })
 
