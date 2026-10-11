@@ -33,9 +33,12 @@ React 18 + Vite。`index.html` 与 `vite.config.ts` 在包根，`pnpm --filter @
 | `timeline.ts` | 会话历史 + 实时事件 → 对话条目（流式文本追加、`assistant.message` 定稿、中断保留已流出文本、工具块配对；回放时成果卡片排在它的 `present` 工具块之后） |
 | `strings.ts` | 全部中文文案 |
 | `components/` | 开始页、左栏（项目切换、对话列表）、中栏（对话改名、时间线、模型回复按 Markdown 显示（GFM，不渲染原始 HTML，链接不跳转）、工具块、成果卡片、Composer 的 `@` 资料引用、停止）、右栏（资料、成果、项目文件夹的文件（`files.list`，标出本对话改动的）、目标）、审批对话框、成果查看与 v(n-1)→vn 差异、反馈表单、设置页、错误边界 |
+| `components/MemberBlock.tsx` | 步骤 3：成员块（委派、队友、工作流成员；名字、状态、tokens、成果链接，可展开）、工作流说明、团队消息；点成员块经 `sessions.view` 只读打开成员会话（中栏换成成员视图，无输入框、无反馈，可返回） |
 | `testing/fake-bridge.ts` | 组件测试用的假 `window.nexgent`（不进打包产物） |
 
-测试：`src/renderer/__tests__/`（vitest + Testing Library，jsdom）；`tests/ui-e2e.spec.ts` 用 Playwright 拉起真实 Electron + 真实 SDK + 脚本化模型服务端，按用户操作跑完整条链（设 `NEXGENT_UI_SCREENSHOTS=<目录>` 保存截图）。
+步骤 3 另有：右栏成果分“最终成果”与“成员成果”（按 `memberName`），对话列表显示成员数（`childCount`），审批对话框写明哪个成员在请求（`request.member`）。成员会话的事件带 `parentSessionId`，只进打开的成员视图或当前对话的成员块与审批，不混入主对话的流。
+
+测试：`src/renderer/__tests__/`（vitest + Testing Library，jsdom）；`tests/ui-e2e.spec.ts` 用 Playwright 拉起真实 Electron + 真实 SDK + 脚本化模型服务端，按用户操作跑完整条链（设 `NEXGENT_UI_SCREENSHOTS=<目录>` 保存截图）；`tests/members-e2e.spec.ts` 同样方式跑步骤 3 的成员：委派、成员审批、成员块与成果、只读成员会话、1024 px 不溢出、成员流式时强杀主进程后重启（成员块显示已中断，成员会话仍可打开）。
 
 ## 渲染进程怎么用
 

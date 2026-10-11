@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import * as nodePath from 'node:path'
 import type { Context, LLMRequest } from '@nexgent/kernel'
-import { scriptedProvider, type ScriptedProvider, type ScriptEntry } from '@nexgent/test-support'
+import { llmSessionText, routeByMember, scriptedProvider, type ScriptedProvider, type ScriptEntry } from '@nexgent/test-support'
 import { afterEach } from 'vitest'
 import { createSdk, type LocalNexgentSdk, type LocalSdkOptions, type SdkEvent } from '../src/index.js'
 
@@ -34,8 +34,12 @@ export interface TestSdk {
   eventsOf(sessionId: string): SdkEvent[]
 }
 
+/** Per-member scripts (step 3): requests of a member named `<key>` are answered from `routes[key]`. */
+export type MemberRoutes = Readonly<Record<string, ScriptEntry<LLMRequest>[]>>
+
 /** An SDK over a scripted model with a hermetic env and home. */
-export async function testSdk(script: ScriptFor | ScriptEntry<LLMRequest>[], options: Partial<LocalSdkOptions> = {}): Promise<TestSdk> {
+export async function testSdk(script: ScriptFor | ScriptEntry<LLMRequest>[], options: Partial<LocalSdkOptions> & { readonly routes?: MemberRoutes } = {}): Promise<TestSdk> {
+  const { routes, ...sdkOptions } = options
   const base = await tempDir()
   const home = nodePath.join(base, 'home')
   await mkdir(home)
@@ -51,13 +55,13 @@ export async function testSdk(script: ScriptFor | ScriptEntry<LLMRequest>[], opt
         inject: ['workspace'],
         apply(ctx: Context) {
           const root = ctx.workspace.root
-          const llm = scriptedProvider(scriptFor(root))
+          const llm = scriptedProvider(scriptFor(root), routes === undefined ? {} : { routeKey: routeByMember(llmSessionText), routes })
           providers.push({ root, llm })
           ctx.provide('llm', llm)
         },
       },
     },
-    ...options,
+    ...sdkOptions,
   })
   cleanups.push(() => sdk.dispose())
   const events: SdkEvent[] = []

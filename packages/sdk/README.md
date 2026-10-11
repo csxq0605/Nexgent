@@ -26,6 +26,16 @@
 - **设置**：`settings.update` 只接受 `model`、`thinking`、`effort`、`sandboxMode`、`costCaps`；把补丁合进磁盘上的 `config.json`（保留 `approvals`、`extraReadRoots` 等），整份校验通过后才原子写入。`settings.setApiKey` 写 `<home>/credentials.json`（0600），空字符串删除该项；只返回 `{ configured, source }`。密钥判断顺序：`NEXGENT_API_KEY`（环境变量，再文件），再 `ANTHROPIC_API_KEY` 环境变量。
 - **导出**：`sessions.export` 写到 `outDir`（必须不存在或为空）：`session.jsonl`（原样）、`ledger.jsonl`（该会话的账本行）、`materials.json`、`deliverables.json`（该会话加过或引用的资料、该会话 present 的版本）、`manifest.json`（格式版本、会话 id、项目名、时间、版本、计数、`redactions`）。写之前在每个文件里搜当前生效的全部密钥值（及其 JSON 转义形式），命中替换为 `[REDACTED]`。
 
+### 步骤 3（W6）：成员与协作
+
+- **装载**：`step3ProfileRows()` 在步骤 2 的三行之后加 `@nexgent/tool-spreadsheet`、`@nexgent/web`、`@nexgent/ptc`、`@nexgent/subagent`、`@nexgent/workflow`、`@nexgent/team` 六行（团队的邮件注入要 `@nexgent/context`，所以排在它后面）。技能行传 `userDir: <home>/skills`，用户技能目录跟着 SDK 的 `home` 走。
+- **恢复**：打开根会话（`agents.resume`）后、第一轮之前依次跑 `ROOT_SESSION_RECOVERIES`：`recoverWorkflows`（内部先 `closeInterruptedRuns`，把没有 `subagent.end` 的成员运行补成 `interrupted`，再补工作流的 `workflow.end`），再 `recoverTeam`（收件人已看到的邮件补 `delivered`）。某一步失败只发一个非致命 `error` 事件，会话照常可用。
+- **跟踪成员**：父会话写 `subagent.start` 时成员已在 kernel 里打开，SDK 当即订阅它，此后成员的全部事件带 `parentSessionId` 发出（`eventSeq` 按成员会话自己计）。成员关闭（`closed`）后取消订阅。成员不由 SDK 打开或关闭，也不写 SDK 的 `task.outcome`（kernel 在成员关闭时写它自己的）。
+- **成员进度事件**（发在父会话上）：`subagent.start` → `member.start`（`status: running`）；`subagent.end` → `member.end`（结局、成果、用量、错误）；`workflow.phase` → `workflow.phase`；`team.message` 的 queued / delivered 两次都发 `team.message`。
+- **只读**：`turns.send`、`sessions.rename`、`goals.*`、`materials.add` 遇到成员会话报 `tool/denied`；`sessions.open` 打开成员时返回只读视图（不加锁）；`sessions.close` 对成员不做任何事。`turns.cancel` 对成员会取消它正在跑的那一轮（父会话的工具按 `cancelled` 收尾）；取消父会话时 kernel 以 `parent` 取消成员。
+- **列表与视图**：`sessions.list` 默认只列根会话并带 `childCount`，`includeChildren: true` 时成员也列出（带 `parentSessionId`、`member`）；`sessions.children` 按创建时间列某会话的成员；`sessions.view` 不加锁读任何会话；`sessions.collaboration` 从父会话记录折叠出成员运行、工作流和团队（花名册按名字、任务按 id、邮件按 id 取最新）。历史里 `member`、`workflow`、`team.message` 项放在开始的位置，显示最新状态。
+- **审批**：成员的 `approval.request` 事件发在成员会话上（带 `parentSessionId`，请求带 `member`）；`approvals.respond` 用成员会话 id 或父会话 id 都能应答。
+
 进程内扩展（不经 IPC，CLI 用）：`onAgentEvent`（原始 kernel 事件）、`createSession({ model })`、`openSession({ sandboxMode })`、`cancelTurn({ cause })`、`startTurn`（返回 `done`，在 `task.outcome` 写完后 settle）、`isRunning`、`apiKeyInfo`。
 
-测试：`tests/sdk.spec.ts`（项目、两个项目同时各跑一轮、事件、取消、关闭、审批的拒绝 / 批准 / 超时、设置、密钥、导出脱敏、不依赖 Electron）；`tests/checkpoint.spec.ts` 是中期检查点第 4 项：子进程只用 SDK 跑“资料（csv + xlsx）→ 读表技能 → 写文件 → present v1 → 反馈 → str_replace → v2 → 第 3 轮流式输出到一半 SIGKILL”，本进程新建 SDK 恢复会话、核对资料 / 成果 / 反馈 / 目标都在、续聊（请求里带完整历史），最后导出。
+测试：`tests/members.spec.ts`（步骤 3：插件装载后工具齐全、委派成员从开始到成果的事件与列表 / 视图 / 协作视图、成员只读、取消父会话传到成员、团队的成员运行与邮件事件、子进程强杀后打开父会话补 `interrupted`、工作流历史折叠、成员审批由成员会话发出、可用父会话 id 应答）；`tests/sdk.spec.ts`（项目、两个项目同时各跑一轮、事件、取消、关闭、审批的拒绝 / 批准 / 超时、设置、密钥、导出脱敏、不依赖 Electron）；`tests/checkpoint.spec.ts` 是中期检查点第 4 项：子进程只用 SDK 跑“资料（csv + xlsx）→ 读表技能 → 写文件 → present v1 → 反馈 → str_replace → v2 → 第 3 轮流式输出到一半 SIGKILL”，本进程新建 SDK 恢复会话、核对资料 / 成果 / 反馈 / 目标都在、续聊（请求里带完整历史），最后导出。

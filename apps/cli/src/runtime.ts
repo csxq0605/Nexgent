@@ -18,7 +18,10 @@
  * 3. `runTurn()`: `startTurn` for one user message; the SDK's raw kernel
  *    events (`onAgentEvent`) are mapped onto {@link CliEvent} (table in
  *    {@link mapAgentEvent}); the CLI's abort signal becomes
- *    `cancelTurn({ cause })` so `shutdown` keeps its cause;
+ *    `cancelTurn({ cause })` so `shutdown` keeps its cause; the session's
+ *    `member.start` / `member.end` SDK events (step 3: delegates, teammates,
+ *    workflow members) become {@link MemberStartEvent} / {@link MemberEndEvent}
+ *    (the members' own streams are not shown);
  * 4. `recordOutcome()`: nothing to write — the SDK appends one
  *    `task.outcome` per turn (a `run` / `resume` is one turn) with the same
  *    status mapping as the CLI's tally;
@@ -33,9 +36,9 @@ import {
   type TurnCancelCause,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { createSdk, type LocalNexgentSdk, type ProjectAgentEvent } from '@nexgent/sdk'
+import { createSdk, type LocalNexgentSdk, type MemberRunView, type ProjectAgentEvent, type SdkEvent } from '@nexgent/sdk'
 import { packageVersion } from './version.js'
-import type { CliEvent, SessionOpenEvent } from './events.js'
+import type { CliEvent, MemberEndEvent, MemberStartEvent, SessionOpenEvent } from './events.js'
 import type { TaskOutcomeInput } from './outcome.js'
 
 /** What the CLI hands the runtime when opening a session. */
@@ -158,6 +161,30 @@ export function mapAgentEvent(event: AgentEvent): CliEvent[] {
   }
 }
 
+/** Map a `member.start` / `member.end` SDK event onto the CLI's member events. */
+export function mapMemberEvent(event: Extract<SdkEvent, { type: 'member.start' | 'member.end' }>): MemberStartEvent | MemberEndEvent {
+  const run: MemberRunView = event.run
+  const who = {
+    childSessionId: run.childSessionId,
+    name: run.name,
+    executionForm: run.executionForm,
+  }
+  if (event.type === 'member.start') return { type: 'member.start', ...who, ...(run.preset === undefined ? {} : { preset: run.preset }) }
+  return {
+    type: 'member.end',
+    ...who,
+    status: run.status,
+    deliverables: run.deliverables.map(version => ({
+      deliverableId: version.deliverableId,
+      version: version.version,
+      title: version.title,
+      files: version.files.map(file => file.path),
+    })),
+    ...(run.usage === undefined ? {} : { usage: run.usage }),
+    ...(run.error === undefined ? {} : { error: run.error }),
+  }
+}
+
 /** The cancel cause carried by the CLI's abort signal; anything else counts as `user`. */
 function cancelCause(signal: AbortSignal): Extract<TurnCancelCause, 'user' | 'shutdown'> {
   return signal.reason === 'shutdown' ? 'shutdown' : 'user'
@@ -249,10 +276,18 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
           yield { type: 'turn.end', turn: interruptedTurn, reason: { kind: 'interrupted' } }
           interruptedTurn = undefined
         }
-        const queue = new EventQueue<ProjectAgentEvent | { type: 'run.settled'; error?: unknown }>()
-        const unsubscribe = sdk.onAgentEvent(event => {
+        const queue = new EventQueue<ProjectAgentEvent | { type: 'member'; event: MemberStartEvent | MemberEndEvent } | { type: 'run.settled'; error?: unknown }>()
+        const unsubscribeAgent = sdk.onAgentEvent(event => {
           if (event.projectId === projectId && event.sessionId === sessionId) queue.push(event)
         })
+        const unsubscribeMembers = sdk.subscribe(event => {
+          if (event.projectId !== projectId || event.sessionId !== sessionId) return
+          if (event.type === 'member.start' || event.type === 'member.end') queue.push({ type: 'member', event: mapMemberEvent(event) })
+        })
+        const unsubscribe = () => {
+          unsubscribeAgent()
+          unsubscribeMembers()
+        }
         const onAbort = () => void sdk.cancelTurn({ projectId, sessionId, cause: cancelCause(signal) })
         let turn: number | undefined
         try {
@@ -269,6 +304,10 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
                 yield { type: 'turn.end', turn, reason: { kind: 'error', error: toErrorInfo(event.error) } }
               }
               break
+            }
+            if (event.type === 'member') {
+              yield event.event
+              continue
             }
             for (const mapped of mapAgentEvent(event)) yield mapped
             if (event.type === 'turn.end' && event.turn === turn) {

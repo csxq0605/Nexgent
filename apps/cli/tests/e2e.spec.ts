@@ -9,7 +9,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LedgerRecord, SessionRecord } from '@nexgent/kernel'
-import { readLedgerRecords, readSessionRecords, scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
+import { readLedgerRecords, readSessionRecords, routeByMember, scriptedModelServer, type MessagesRequestBody, type ScriptedModelServer } from '@nexgent/test-support'
 import { EXIT, main } from '../src/index.js'
 import { testIo } from './helpers.js'
 
@@ -97,6 +97,39 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     expect(server.requests).toHaveLength(2)
     expect(server.requests[0]?.hasApiKey).toBe(true)
     expect(JSON.stringify(server.requests[1]?.body)).toContain('tool_result')
+    server.assertConsumed()
+  })
+
+  it('shows a delegated member starting and ending with its deliverable (step 3)', async () => {
+    const systemText = (body: MessagesRequestBody) => {
+      const system = (body as { system?: unknown }).system
+      return typeof system === 'string' ? system : Array.isArray(system) ? system.map(block => (block as { text?: string }).text ?? '').join('\n') : ''
+    }
+    server = await scriptedModelServer({
+      script: [
+        { toolCalls: [{ name: 'delegate', arguments: { name: 'analyst', task: 'Write notes.md' } }], usage },
+        { content: 'The analyst wrote notes.md.', usage },
+      ],
+      routeKey: routeByMember(systemText),
+      routes: {
+        analyst: [
+          { toolCalls: [{ name: 'write_file', arguments: { path: 'notes.md', content: '# Notes\n' } }], usage },
+          { toolCalls: [{ name: 'present', arguments: { paths: ['notes.md'], summary: 'notes' } }], usage },
+          { content: 'done', usage },
+        ],
+      },
+    })
+    const json = testIo(work, env(server))
+    expect(await main(['run', '--project', project, '--task', 'Delegate the notes', '--json'], json.io), json.stderr.text).toBe(EXIT.OK)
+    const events = jsonLines(json.stdout.text)
+    const start = events.find(e => e.type === 'member.start')
+    const end = events.find(e => e.type === 'member.end')
+    expect(start).toMatchObject({ name: 'analyst', executionForm: 'delegated' })
+    expect(end).toMatchObject({ name: 'analyst', status: 'completed', deliverables: [{ version: 1, title: 'notes.md', files: ['notes.md'] }] })
+    expect(events.indexOf(start!)).toBeLessThan(events.indexOf(end!))
+    // The member's own stream is not mixed into the main conversation's events.
+    expect(events.filter(e => e.type === 'tool.end').map(e => e.name)).toEqual(['delegate'])
+    expect(events.at(-1)).toMatchObject({ type: 'final', status: 'completed', text: 'The analyst wrote notes.md.' })
     server.assertConsumed()
   })
 
