@@ -1,0 +1,28 @@
+{
+  "name": "@nexgent/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Nexgent 桌面应用（Electron）：主进程持有 SDK，渲染进程经 preload 白名单与访问令牌调用。",
+  "type": "module",
+  "main": "./dist/main/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run",
+    "start": "electron .",
+    "package:stage": "node scripts/package.mjs stage",
+    "package:linux": "node scripts/package.mjs linux",
+    "package:win": "node scripts/package.mjs win"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3",
+    "playwright-core": "1.63.0"
+  }
+}
