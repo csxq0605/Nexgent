@@ -338,7 +338,7 @@ export interface AcceptanceSummaryInit {
   /** Step name, e.g. `本地执行内核`. */
   readonly name: string
   readonly exitCriteria?: readonly string[]
-  /** Acceptance script path, e.g. `scripts/accept-step1.mjs`. */
+  /** Acceptance script path, e.g. `scripts/accept-step2.mjs`. */
   readonly script?: string | null
   /** Command line that ran the script (scripted runs). */
   readonly command?: string

@@ -73,14 +73,14 @@ describe('AnthropicProvider — streaming', () => {
       stream: true,
       system: 'You are a test.',
       messages: [{ role: 'user', content: 'Say hello.' }],
-      thinking: { type: 'between_tools' },
+      thinking: { type: 'adaptive', display: 'summarized' },
       output_config: { effort: 'medium' },
       cache_control: { type: 'ephemeral' },
     })
 
     const { start, end } = pair(ledger)
     expect(start).toMatchObject({
-      requestId: request.requestId, sessionId: 'sess-1', provider: 'anthropic', model: 'claude-sonnet-5-5', purpose: 'task', thinking: 'off',
+      requestId: request.requestId, sessionId: 'sess-1', provider: 'anthropic', model: 'claude-sonnet-5-5', purpose: 'task', thinking: 'on',
     })
     expect(end).toMatchObject({
       requestId: request.requestId, status: 'ok', httpStatus: 200, finishReason: 'stop',
@@ -279,8 +279,8 @@ describe('AnthropicProvider — streaming', () => {
   it('maps thinking and effort: between_tools up to high, omitted at xhigh/max, adaptive when on', async () => {
     fake = await startFakeAnthropic([{ sse: loadSseFixture('text') }])
     const { provider } = makeProvider(fake.baseUrl, { effort: 'high' })
-    await collect(provider.complete(makeRequest()))
-    await collect(provider.complete(makeRequest({ effort: 'xhigh' })))
+    await collect(provider.complete(makeRequest({ thinking: 'off' })))
+    await collect(provider.complete(makeRequest({ effort: 'xhigh', thinking: 'off' })))
     await collect(provider.complete(makeRequest({ effort: 'max', thinking: 'on' })))
     await collect(provider.complete(makeRequest({ effort: 'low', thinking: 'on' })))
     const bodies = fake.requests.map(request => request.body)
@@ -521,7 +521,7 @@ describe('AnthropicProvider — configuration and secrets', () => {
     const [, withFallback, without] = fake.requests
     expect(withFallback?.body['fallbacks']).toBe('default')
     expect(withFallback?.headers['anthropic-beta']).toContain(FALLBACK_BETA)
-    expect(withFallback?.body).toMatchObject({ thinking: { type: 'between_tools' }, output_config: { effort: 'medium' }, cache_control: { type: 'ephemeral' } })
+    expect(withFallback?.body).toMatchObject({ thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: 'medium' }, cache_control: { type: 'ephemeral' } })
     expect(without?.body).not.toHaveProperty('fallbacks')
     expect(without?.headers['anthropic-beta']).toBeUndefined()
   })

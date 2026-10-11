@@ -128,7 +128,7 @@ describe('scripts/accept-step2.mjs (requires `pnpm build`)', () => {
     // Never a fake pass: every item of a layer that cannot run is listed as not implemented, and the summary fails.
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
     expect(summary?.result).toBe('fail')
-    expect(summary?.checks.map(check => check.id)).toEqual(CHECKS.filter(check => check.layer === 'real').map(check => check.id))
+    expect(summary?.checks.map(check => check.id)).toEqual(CHECKS.filter(check => check.layer === 'real' && !OPTIONAL_CHECKS.has(check.id)).map(check => check.id))
     for (const check of summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'not-implemented' })
     expect(summary?.realModel).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', callCount: 0, result: 'fail' })
   }, 90_000)
@@ -152,6 +152,11 @@ describe('scripts/accept-step2.mjs (requires `pnpm build`)', () => {
       expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
       const status = Object.fromEntries(summary.checks.map(check => [check.id, check.status]))
       expect(status, output).toMatchObject({ R01: 'passed', R02: 'passed', R03: 'passed', R04: 'passed', R05: 'passed', R07: 'not-implemented' })
+      // R06 (optional, Windows only) did not run: listed as untested, not as a check.
+      if (process.platform !== 'win32') {
+        expect(status).not.toHaveProperty('R06')
+        expect(summary.failures.untested.join(' ')).toContain('R06')
+      }
       // R07 (not a real run) keeps the exit code at 2: a stand-in can never pass the real layer.
       expect(code, output).toBe(EXIT_NOT_READY)
       expect(summary.result).toBe('fail')

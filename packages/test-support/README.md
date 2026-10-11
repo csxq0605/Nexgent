@@ -14,7 +14,7 @@ Entry points:
 | Import | Contents |
 | --- | --- |
 | `@nexgent/test-support` | everything |
-| `@nexgent/test-support/acceptance` | the harness, records, summary and fault helpers only (no model fakes); intended for `scripts/accept-step1.mjs` |
+| `@nexgent/test-support/acceptance` | the harness, records, summary and fault helpers only (no model fakes); intended for the acceptance scripts (`scripts/accept-step2.mjs`) |
 
 Both are ESM and need the package built (`tsc -b packages/test-support`) before plain `.mjs` scripts import them.
 
@@ -156,7 +156,7 @@ The readers follow the layout of `docs/spec/data-formats.md` (`.nexgent/sessions
 ### Acceptance summary
 
 ```ts
-const summary = acceptanceSummary({ step: 1, name: '…', exitCriteria: [...], script: 'scripts/accept-step1.mjs', simulated: '…' })
+const summary = acceptanceSummary({ step: 1, name: '…', exitCriteria: [...], script: 'scripts/accept-step2.mjs', simulated: '…' })
 await summary.run('run writes the file', async () => { … })   // timed check; throw = failed check (rethrown)
 summary.check('resume continues', true).fault('kill').fault('truncate').ledger(records, ledger.writeFailures)
 summary.proves('…').doesNotProve('…').untested('…').knownIssue('…').set({ realModel: {…}, raw: {…} })

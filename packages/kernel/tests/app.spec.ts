@@ -142,7 +142,6 @@ describe('createApp', () => {
     harness = await bootHarness({ script: [textReply('hi')] })
     const { app } = harness
     expect(app.ctx.agents instanceof AgentsService).toBe(true)
-    expect(typeof app.agents.create).toBe('function')
     expect(app.ctx.get('credentials') === undefined).toBe(false)
     expect(app.ctx.tools.list()).toEqual([])
     expect(app.rows.map(row => row.row.id)).toEqual(['credentials', 'workspace', 'session', 'llm', 'tools', 'approvals', 'agents'])

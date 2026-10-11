@@ -90,13 +90,13 @@ describe('@nexgent/llm Cordis plugin', () => {
     expect(fake.requests.map(request => request.body['max_tokens'])).toEqual([4096, 7])
   })
 
-  it('validates config fields and rejects unknown and legacy keys', () => {
+  it('validates config fields and rejects unknown keys', () => {
     expect(validateLLMPluginConfig(undefined)).toEqual([])
     expect(validateLLMPluginConfig({ model: 'claude-sonnet-5-5', effort: 'xhigh', fallbacks: 'off' })).toEqual([])
     expect(validateLLMPluginConfig({ timeoutMs: -1, effort: 'ultra', extra: 1, fallbacks: 'maybe' }).map(issue => issue.path?.[0]))
       .toEqual(['extra', 'timeoutMs', 'effort', 'fallbacks'])
-    expect(validateLLMPluginConfig({ compat: { thinkingFormat: 'deepseek' }, contextWindow: 1, displayName: 'x' }).map(issue => issue.path?.[0]))
-      .toEqual(['compat', 'contextWindow', 'displayName'])
+    expect(validateLLMPluginConfig({ routing: { mode: 'x' }, contextWindow: 1, displayName: 'x' }).map(issue => issue.path?.[0]))
+      .toEqual(['routing', 'contextWindow', 'displayName'])
     expect(validateLLMPluginConfig({ thinking: 'maybe' })).toHaveLength(1)
   })
 })

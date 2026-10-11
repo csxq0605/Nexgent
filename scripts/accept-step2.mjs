@@ -196,11 +196,15 @@ async function main() {
       const { status, evidence } = ready.ok
         ? await evaluateItem(entry, ready.ctx)
         : { status: 'not-implemented', evidence: `layer not runnable yet: ${ready.reason}` }
-      const name = OPTIONAL_CHECKS.has(entry.id) ? `${entry.title}（可选）` : entry.title
-      s.item(entry.id, name, status, evidence)
       itemStatus.set(entry.id, status)
-      // Optional items are reported but do not decide the exit code.
-      if (!OPTIONAL_CHECKS.has(entry.id)) statuses.push(status)
+      if (OPTIONAL_CHECKS.has(entry.id)) {
+        // Optional items never decide the exit code; one that did not run is untested, not a failed check.
+        if (status === 'not-implemented') s.untested(`${entry.id} ${entry.title}（可选）: ${evidence}`)
+        else s.item(entry.id, `${entry.title}（可选）`, status, evidence)
+        continue
+      }
+      s.item(entry.id, entry.title, status, evidence)
+      statuses.push(status)
     }
   }
 

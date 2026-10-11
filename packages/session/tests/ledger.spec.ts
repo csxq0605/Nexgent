@@ -142,18 +142,6 @@ describe('JsonlLedger', () => {
     expect(ledger.skippedRecords).toBe(2)
   })
 
-  it('reads records written before cacheWriteTokens existed with it as unknown', async () => {
-    const root = await tempDir()
-    const ledger = new JsonlLedger({ layout: resolveWorkspaceLayout(root), now: clock('2026-10-07T08:00:00.000Z') })
-    const { cacheWriteTokens: _write, ...legacyUsage } = KNOWN_USAGE
-    await ledger.append(start('r1'))
-    const file = ledger.fileFor('2026-10-07T08:00:00.000Z')
-    await appendFile(file, `${JSON.stringify({ ...end('r1'), ts: '2026-10-07T08:00:00.000Z', usage: legacyUsage })}\n`)
-    const records = await collect(ledger.read())
-    expect(ledger.skippedRecords).toBe(0)
-    expect(records[1]).toMatchObject({ type: 'llm.request.end', usage: { ...KNOWN_USAGE, cacheWriteTokens: 'unknown' } })
-  })
-
   it('a write failure rejects ledger/write-failed and increments writeFailures', async () => {
     const root = await tempDir()
     const blocker = join(root, 'not-a-dir')

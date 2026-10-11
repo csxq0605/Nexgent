@@ -1,7 +1,7 @@
 /**
  * `@nexgent/test-support/acceptance` — the cross-process acceptance
  * harness and fault helpers, without the model fakes. Importable from plain
- * `.mjs` scripts such as `scripts/accept-step1.mjs`.
+ * `.mjs` scripts such as `scripts/accept-step2.mjs`.
  */
 export {
   type CrashableProcess,

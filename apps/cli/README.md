@@ -1,8 +1,8 @@
 # @nexgent/cli
 
-The `nexgent` command: `nexgent run` (new session, one task), `nexgent resume <sessionId>` (continue one), `nexgent export <sessionId>` (minimal export bundle) and `nexgent app` (launch the desktop app). Owner of `scripts/accept-step1.mjs`.
+The `nexgent` command: `nexgent run` (new session, one task), `nexgent resume <sessionId>` (continue one), `nexgent export <sessionId>` (minimal export bundle) and `nexgent app` (launch the desktop app).
 
-**Status (step 2, W4):** the CLI goes through `@nexgent/sdk`, the in-process API the desktop app shares. `run` / `resume` open the project and the session through the SDK (kernel default profile + `@nexgent/llm`, `@nexgent/session`, `@nexgent/workspace`, `@nexgent/context`, `@nexgent/skill`, `@nexgent/tasking`) behind one seam, [`src/runtime.ts`](src/runtime.ts); their behavior is unchanged except that each turn now also records its file changes (`turn.files`) and gets the step-2 context (instructions file, materials, skills). `scripts/accept-step1.mjs` passes unmodified on Linux against the scripted Claude Messages API server.
+**Status (step 2, W4):** the CLI goes through `@nexgent/sdk`, the in-process API the desktop app shares. `run` / `resume` open the project and the session through the SDK (kernel default profile + `@nexgent/llm`, `@nexgent/session`, `@nexgent/workspace`, `@nexgent/context`, `@nexgent/skill`, `@nexgent/tasking`) behind one seam, [`src/runtime.ts`](src/runtime.ts); their behavior is unchanged except that each turn now also records its file changes (`turn.files`) and gets the step-2 context (instructions file, materials, skills).
 
 ## Usage
 
@@ -106,17 +106,11 @@ Event mapping (`mapAgentEvent`):
 
 ## Acceptance script
 
-`node scripts/accept-step1.mjs [--out summary.json] [--work-dir dir]` runs these steps on a temp project, using the scripted Claude Messages API server from `@nexgent/test-support` (loaded from its built `dist/`; run `pnpm build` first). The child processes get `NEXGENT_API_KEY=<fake>`, `NEXGENT_API_BASE_URL=<server origin>` and `NEXGENT_HOME=<temp>`:
-
-1. `nexgent run` performs a write-file task. The script checks the file, the session JSONL (turn 1 completed, lock released) and the ledger (paired requests, `task.outcome`).
-2. `nexgent resume` starts a long turn (the server stalls after the first text chunk), which is killed hard mid-stream.
-3. A new process runs `nexgent resume`. The script checks that turn 2 is `interrupted`, turn 3 is completed, `seq` is contiguous, the turn-1 history reached the model (Messages API `messages[]` with text blocks), the second file exists, each finished process has exactly one outcome, and exactly one unpaired (killed) request remains.
-
-It writes test-support's acceptance summary (the fields of `docs/validation/TEMPLATE.md`) and exits 0 on pass, 1 on fail, and 2 when it cannot run (build missing). It never fakes a pass. All test-support access goes through `scripts/accept-common/harness.mjs`; the scenario data and pure checks are in `scripts/accept-common/scenario.mjs`.
+`scripts/accept-step1.mjs` (run → kill mid-stream → resume through the CLI) was retired on 2026-10-11. The step-2 acceptance script `scripts/accept-step2.mjs` covers that chain in its headless layer (through `@nexgent/sdk`, with the kills in child processes) and uses `nexgent export`; `scripts/accept-common/scenario.mjs` remains as the scenario data of the PowerShell launcher smoke (`ps1-smoke.mjs`).
 
 ## Tests
 
-`pnpm exec vitest run --project @nexgent/cli`. Unit tests cover parsing, layout, credentials, rendering, approvals, signals, the tally and `main()` over a fake runtime; `tests/e2e.spec.ts` drives `main()` in process against `scriptedModelServer` on a temp project (run → `write_file` → session + ledger; resume with an interrupted turn and the history; Ctrl+C mid-stream; export; missing session); `tests/app-launch.spec.ts` starts a stand-in desktop app with Node playing Electron; `tests/accept-common.spec.ts` runs `scripts/accept-step1.mjs` itself.
+`pnpm exec vitest run --project @nexgent/cli`. Unit tests cover parsing, layout, credentials, rendering, approvals, signals, the tally and `main()` over a fake runtime; `tests/e2e.spec.ts` drives `main()` in process against `scriptedModelServer` on a temp project (run → `write_file` → session + ledger; resume with an interrupted turn and the history; Ctrl+C mid-stream; export; missing session); `tests/app-launch.spec.ts` starts a stand-in desktop app with Node playing Electron; `tests/accept-common.spec.ts` checks the scenario data of the PowerShell launcher smoke.
 
 ## DSH references
 
@@ -130,7 +124,6 @@ It writes test-support's acceptance summary (the fields of `docs/validation/TEMP
 
 ## Not done yet
 
-- `accept-step1` has passed on Linux only; Windows (CI `windows-latest`) and macOS runs are pending.
 - `nexgent.ps1` has not been executed (no PowerShell in the authoring environment).
 - Real Claude Platform manual run and its summary under `docs/validation/step-1/`.
 - Approval prompts are not exercised end to end (no TTY in tests; headless denies).

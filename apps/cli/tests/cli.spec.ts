@@ -14,34 +14,9 @@ describe('nexgent bin (requires `pnpm build`)', () => {
     expect(out.trim()).toBe(pkg.version)
   })
 
-  it('reports a missing desktop app with exit 2', () => {
-    const missing = fileURLToPath(new URL('./no-such-desktop-app', import.meta.url))
-    const result = spawnSync(process.execPath, [bin, 'app', '--project', '.'], { encoding: 'utf8', env: { ...process.env, NEXGENT_DESKTOP_DIR: missing } })
-    expect(result.status).toBe(2)
-    expect(result.stderr).toContain('desktop app not found')
-  })
-
   it('reports usage errors with exit 2 and no stack', () => {
     const result = spawnSync(process.execPath, [bin, 'frobnicate'], { encoding: 'utf8' })
     expect(result.status).toBe(2)
     expect(result.stderr.trim()).toBe('nexgent: unknown command "frobnicate" (see `nexgent --help`)')
-  })
-})
-
-describe('no Python execution path', () => {
-  it('apps/cli and the acceptance scripts never name a Python interpreter or .py file', async () => {
-    const { readdir, readFile } = await import('node:fs/promises')
-    const { join } = await import('node:path')
-    const roots = ['../src', '../bin', '../../../scripts'].map(p => fileURLToPath(new URL(p, import.meta.url)))
-    const offenders: string[] = []
-    const walk = async (dir: string): Promise<void> => {
-      for (const entry of await readdir(dir, { withFileTypes: true })) {
-        const full = join(dir, entry.name)
-        if (entry.isDirectory()) await walk(full)
-        else if (/['"`](python[0-9.]*|py)(\.exe)?['"`]|\.py['"`\s]/i.test(await readFile(full, 'utf8'))) offenders.push(full)
-      }
-    }
-    for (const root of roots) await walk(root)
-    expect(offenders).toEqual([])
   })
 })

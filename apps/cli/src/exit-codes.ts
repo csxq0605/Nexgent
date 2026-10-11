@@ -1,6 +1,6 @@
 /**
  * Process exit codes of the `nexgent` command. Scripts (CI, the PowerShell
- * launcher, `scripts/accept-step1.mjs`) switch on these numbers, so they are
+ * launcher, the acceptance scripts) switch on these numbers, so they are
  * part of the CLI's public surface; the README table mirrors this file.
  */
 
@@ -29,7 +29,7 @@ export type ExitCode = (typeof EXIT)[keyof typeof EXIT]
 export class CliError extends Error {
   /** The process exit code this failure maps to. */
   readonly exitCode: ExitCode
-  /** Machine-readable tag for `--json` error lines, e.g. `cli/usage`, `cli/runtime-not-wired`. */
+  /** Machine-readable tag for `--json` error lines, e.g. `cli/usage`, `credentials/missing`. */
   readonly code: string
 
   constructor(exitCode: ExitCode, message: string, options?: { cause?: unknown; code?: string }) {

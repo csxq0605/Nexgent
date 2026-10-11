@@ -91,14 +91,8 @@ export interface CliRuntime {
   open(options: RuntimeOpenOptions): Promise<RuntimeSession>
 }
 
-/** `--json` error code of a build whose runtime is not wired; `scripts/accept-step1.mjs` keys on it. */
-export const RUNTIME_NOT_WIRED_CODE = 'cli/runtime-not-wired'
-
-/** Printed (exit 2) when {@link loadRuntime} returns `undefined`. */
-export const RUNTIME_NOT_WIRED_MESSAGE = 'runtime not wired yet: this build has the CLI skeleton only (step 1 integration pending)'
-
-/** Load the runtime, or `undefined` while it is not wired. */
-export async function loadRuntime(): Promise<CliRuntime | undefined> {
+/** Load the runtime. */
+export async function loadRuntime(): Promise<CliRuntime> {
   return { open: openSession }
 }
 

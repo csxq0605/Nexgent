@@ -50,7 +50,7 @@ describe('buildMessageParams', () => {
       max_tokens: 16000,
       system: 'You are a test.',
       messages: [{ role: 'user', content: 'Say hello.' }],
-      thinking: { type: 'between_tools' },
+      thinking: { type: 'adaptive', display: 'summarized' },
       output_config: { effort: 'medium' },
       cache_control: { type: 'ephemeral' },
     })

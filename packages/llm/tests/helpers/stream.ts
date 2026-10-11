@@ -29,7 +29,7 @@ export function makeRequest(overrides: Partial<LLMRequest> = {}): LLMRequest {
       { role: 'system', content: 'You are a test.' },
       { role: 'user', content: 'Say hello.' },
     ],
-    thinking: 'off',
+    thinking: 'on',
     ...overrides,
   }
 }

@@ -28,5 +28,5 @@ export { InterruptController, installSignalHandlers, nextInterruptAction, signal
 export type { HandledSignal, InterruptAction, InterruptPhase, SignalSource } from './signals.js'
 export { exitCodeFor, TaskTally, taskStatus } from './outcome.js'
 export type { TaskOutcomeInput } from './outcome.js'
-export { loadRuntime, RUNTIME_NOT_WIRED_CODE, RUNTIME_NOT_WIRED_MESSAGE } from './runtime.js'
+export { loadRuntime } from './runtime.js'
 export type { CliRuntime, RuntimeOpenOptions, RuntimeSession } from './runtime.js'
