@@ -115,8 +115,13 @@ export const sessionRecordSchema: JsonObject = {
         options: { type: 'array', items: ref('approvalScope') },
         pattern: { type: 'string' },
         expiresAt: { type: 'string' },
+        member: ref('approvalMember'),
       },
       ['id', 'sessionId', 'callId', 'tool', 'summary', 'risk', 'options'],
+    ),
+    approvalMember: closedObject(
+      { name: ref('memberName'), executionForm: ref('memberExecutionForm'), parentSessionId: ref('nonEmptyString') },
+      ['name', 'executionForm', 'parentSessionId'],
     ),
     approvalDecision: closedObject(
       {

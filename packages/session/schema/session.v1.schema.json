@@ -347,6 +347,29 @@
         },
         "expiresAt": {
           "type": "string"
+        },
+        "member": {
+          "$ref": "#/$defs/approvalMember"
+        }
+      }
+    },
+    "approvalMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "executionForm",
+        "parentSessionId"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/memberName"
+        },
+        "executionForm": {
+          "$ref": "#/$defs/memberExecutionForm"
+        },
+        "parentSessionId": {
+          "$ref": "#/$defs/nonEmptyString"
         }
       }
     },
