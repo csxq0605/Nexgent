@@ -1,0 +1,16 @@
+{
+  // Type-checks every package's and app's tests (vitest runs them without
+  // checking types). Runs after `tsc -b`, so `@nexgent/*` imports resolve to
+  // the built declarations; nothing is emitted.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "incremental": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "allowJs": false
+  },
+  "include": ["packages/*/tests/**/*.ts", "apps/*/tests/**/*.ts"]
+}

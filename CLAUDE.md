@@ -45,7 +45,7 @@ Nexgent 正在被重写为一个 TypeScript 独立应用（Electron 桌面应用
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm build            # tsc -b
+pnpm build            # tsc -b, then type-checks the tests (tsconfig.tests.json)
 pnpm test             # vitest，脚本化 provider，不需要密钥
 node scripts/accept-step1.mjs --out accept-step1.json
 node apps/cli/bin/nexgent.mjs run --project <dir> --task "..."   # 真实模型，需 NEXGENT_API_KEY 在环境中
