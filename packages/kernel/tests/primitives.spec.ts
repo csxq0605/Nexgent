@@ -223,7 +223,7 @@ describe('system prompt, schema check, timeouts, history repair', () => {
     const base = { template: { persona: 'P', suffix: '' }, model: 'm', cwd: '/p', sandboxMode: 'workspace-write' as const, platform: 'linux' as const }
     const full = renderSystemPrompt({ ...base, tools: ['read_file', 'write_file', 'str_replace', 'bash', 'present'].map(tool) })
     const section = full.slice(full.indexOf('# Working with files'))
-    expect(section).toContain("- To create a new file, or to replace a file's whole content, use `write_file`.")
+    expect(section).toContain('- To create a new file, use `write_file`; it refuses a file that already exists, so change existing files with `str_replace`.')
     expect(section).toContain('- To change an existing file, use `str_replace` (read the file with `read_file` first); for several changes, call it once per change.')
     expect(section).toContain('- Write and edit file contents only with `write_file` and `str_replace`. Do not create or modify files through `bash`: ')
     expect(section).toContain('no heredocs (`cat > file <<EOF`), `echo >`, `tee`, `sed -i`, and no Python, Node or other scripts that write or rewrite a file.')

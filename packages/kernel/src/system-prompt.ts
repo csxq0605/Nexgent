@@ -56,7 +56,7 @@ function fill(text: string, values: Readonly<Record<string, string>>): string {
 
 /**
  * Step-2 file-tool guidance (step-2 work partition, W0 → W7): create files
- * with `write_file`, edit them with `str_replace`, keep the shell for running
+ * with `write_file` (which refuses existing files), edit them with `str_replace`, keep the shell for running
  * things, and declare deliverables with `present`. Each line appears only
  * when its tools are offered, so the prompt never names a tool the model
  * cannot call. The shell line exists because a real run (step 2, R02) wrote
@@ -67,7 +67,7 @@ function fileGuidance(tools: ReadonlySet<string>, materials: boolean): string[] 
   const shells = ['bash', 'pwsh'].filter(name => tools.has(name)).map(name => `\`${name}\``)
   const write = tools.has('write_file')
   const edit = tools.has('str_replace')
-  if (write) lines.push("- To create a new file, or to replace a file's whole content, use `write_file`.")
+  if (write) lines.push(`- To create a new file, use \`write_file\`; it refuses a file that already exists${edit ? ', so change existing files with `str_replace`' : ''}.`)
   if (edit) {
     lines.push(`- To change an existing file, use \`str_replace\`${tools.has('read_file') ? ' (read the file with `read_file` first)' : ''}; `
       + 'for several changes, call it once per change.')

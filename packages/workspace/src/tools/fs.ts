@@ -42,6 +42,17 @@ export function guardedConfigChange(before: string | undefined, after: string): 
   }
 }
 
+/** Whether anything (file, directory, link target) exists at `path`. */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
 async function readIfExists(path: string): Promise<string | undefined> {
   try {
     return await readFile(path, 'utf8')
@@ -147,7 +158,13 @@ function subjectsFor(deps: ToolDeps, _context: ToolContext, real: string): { kin
   return rel === undefined ? [] : [{ kind: 'path', value: rel }]
 }
 
-/** `write_file`: create or overwrite a file (parents are created). */
+/**
+ * `write_file`: create a new file (parents are created). An existing path is
+ * refused with `tool/failed` and a hint to use `str_replace`: real runs
+ * rewrote whole files instead of editing them (step 2, R02), so the product
+ * keeps whole-file writes to new files only. The create is exclusive (`wx`),
+ * so a file that appears between the check and the write is not overwritten.
+ */
 export function writeFileTool(deps: ToolDeps): WorkspaceTool {
   const name = 'write_file'
   const assess = async (args: Record<string, unknown>, context: ToolContext) => {
@@ -158,10 +175,10 @@ export function writeFileTool(deps: ToolDeps): WorkspaceTool {
   return {
     definition: {
       name,
-      description: 'Create a new UTF-8 text file in the project, or replace a file\'s whole content. Use this, not shell heredocs, echo or scripts, whenever you write file content yourself. Parent directories are created.',
+      description: 'Create a new UTF-8 text file in the project. Use this, not shell heredocs, echo or scripts, whenever you create a file yourself. It only creates files: an existing file is refused; change it with str_replace instead. Parent directories are created.',
       inputSchema: objectSchema({
         path: { type: 'string', description: 'File path, relative to the project root.' },
-        content: { type: 'string', description: 'Complete new file content.' },
+        content: { type: 'string', description: 'Complete content of the new file.' },
       }, ['path', 'content']),
       effects: ['write'],
       approval: 'never',
@@ -178,13 +195,21 @@ export function writeFileTool(deps: ToolDeps): WorkspaceTool {
       const args = inputObject(input)
       const content = stringField(args, 'content', true)
       const real = await enforcePath(deps, await assess(args, context), context, 'write')
-      const existed = (await readIfExists(real).catch(() => undefined)) !== undefined
+      const refuse = () => new NexgentError('tool/failed',
+        `${context.workspace.relative(real)} already exists; write_file only creates new files. Change it with str_replace (read it with read_file first).`,
+        { details: { reason: 'exists' } })
+      if (await pathExists(real)) throw refuse()
       await mkdir(nodePath.dirname(real), { recursive: true })
-      await writeFile(real, content, 'utf8')
+      try {
+        await writeFile(real, content, { encoding: 'utf8', flag: 'wx' })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw refuse()
+        throw error
+      }
       const bytes = Buffer.byteLength(content, 'utf8')
       return {
-        content: `${existed ? 'Overwrote' : 'Created'} ${context.workspace.relative(real)} (${bytes} bytes)`,
-        meta: { path: real, bytes, created: !existed },
+        content: `Created ${context.workspace.relative(real)} (${bytes} bytes)`,
+        meta: { path: real, bytes, created: true },
       }
     },
   }

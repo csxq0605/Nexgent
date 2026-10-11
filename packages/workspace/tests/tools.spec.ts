@@ -37,7 +37,7 @@ describe('tool definitions', () => {
   it('steers file writes to write_file / str_replace and the shell to running commands', async () => {
     const { tools } = await setup()
     const description = (name: string) => tools.find(t => t.definition.name === name)!.definition.description
-    expect(description('write_file')).toContain('Use this, not shell heredocs, echo or scripts, whenever you write file content yourself.')
+    expect(description('write_file')).toContain('Use this, not shell heredocs, echo or scripts, whenever you create a file yourself. It only creates files: an existing file is refused; change it with str_replace instead.')
     expect(description('str_replace')).toContain('Use this, not sed, Python or other scripts, for every edit; call it once per change.')
     const shell = description(process.platform === 'win32' ? 'pwsh' : 'bash')
     expect(shell).toContain('to run programs, scripts and tests. Do not use it to write or edit files: create files with write_file and change them with str_replace.')
@@ -70,6 +70,23 @@ describe('write_file / read_file across modes', () => {
     await tool('write_file').handler({ path: 'src/a.txt', content: 'hello' }, ctx)
     expect(await readFile(nodePath.join(workspace.root, 'src', 'a.txt'), 'utf8')).toBe('hello')
     expect((await tool('read_file').handler({ path: 'src/a.txt' }, ctx)).content).toBe('hello')
+  })
+
+  it('refuses to overwrite an existing file and points to str_replace', async () => {
+    const { tool, workspace } = await setup()
+    const ctx = toolContext(workspace)
+    const file = nodePath.join(workspace.root, 'scripts', 'build.mjs')
+    const shown = nodePath.join('scripts', 'build.mjs')
+    expect((await tool('write_file').handler({ path: 'scripts/build.mjs', content: 'v1' }, ctx)).content).toBe(`Created ${shown} (2 bytes)`)
+    const error = await tool('write_file').handler({ path: 'scripts/build.mjs', content: 'v2' }, ctx).catch((e: unknown) => e)
+    expect(isNexgentError(error, 'tool/failed')).toBe(true)
+    expect((error as Error).message).toBe(`${shown} already exists; write_file only creates new files. Change it with str_replace (read it with read_file first).`)
+    expect(await readFile(file, 'utf8')).toBe('v1')
+    // an existing directory is refused the same way
+    await expect(tool('write_file').handler({ path: 'scripts', content: 'x' }, ctx)).rejects.toMatchObject({ code: 'tool/failed' })
+    // the edit path still works
+    await tool('str_replace').handler({ path: 'scripts/build.mjs', old_str: 'v1', new_str: 'v2' }, ctx)
+    expect(await readFile(file, 'utf8')).toBe('v2')
   })
 
   it('denies an out-of-whitelist write with SANDBOX_DENIED and the resolved path', async () => {
