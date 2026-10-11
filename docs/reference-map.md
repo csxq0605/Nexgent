@@ -52,7 +52,7 @@
 | `shell/bash-local`、`shell/bash-sandbox`、`shell/tool-bash` | `@nexgent/workspace` | 重写 | 1 | Linux / macOS；只参考 `tool-bash` 的设计 |
 | `shell/pwsh-local`、`shell/pwsh-sandbox`、`shell/tool-pwsh` | `@nexgent/workspace` | 重写 | 1 | Windows；只参考 `tool-pwsh` 的设计 |
 | `shell/tool-bash-persistent`、`shell/tool-pwsh-persistent` | — | 不要 | — | 持久 shell 会话暂不做 |
-| `subprocess/subprocess`、`subprocess/subprocess-local`、`subprocess/win32-process` | `@nexgent/workspace` | 改写 | 1 | 已复制 `subprocess-local/src/spawn.ts`（→ `process.ts`）：子进程与进程组 / `taskkill` 终止；`win32-process` 的 Job Object 未复制（后补） |
+| `subprocess/subprocess`、`subprocess/subprocess-local`、`subprocess/win32-process` | `@nexgent/workspace` | 改写 | 1 | 已复制 `subprocess-local/src/spawn.ts`（→ `process.ts`）：子进程与进程组 / `taskkill` 终止；`win32-process` 未复制；Windows Job Object 由 `windows-job.ts` 重写（步骤 2） |
 | `sandbox/sandbox`、`sandbox/sandbox-policy`、`sandbox/sandbox-local` | `@nexgent/workspace` | 重写 | 1 | 路径与命令策略，两平台先用这一层；只参考 `sandbox-policy` 的设计 |
 | `sandbox/sandbox-windows-acl` | `@nexgent/workspace` | 改写 | 1（可选） | 先路径策略，ACL 后补（ADR 0001 决策 2）；PR #4 修过其错误路径 |
 | `util/atomic-write`、`util/timeout`、`util/workspace-path`、`util/home-paths`、`util/output-retention`、`util/launch-environment`、`util/native-command`、`util/values`、`util/deque`、`util/chunked-list`、`util/crypto`、`util/time` | 各使用包内部 | 改写 | 1 | 按需复制到使用它的包内，不单独成包；步骤 1 已复制 `atomic-write/src/index.ts`、`timeout/src/index.ts`（→ `@nexgent/kernel` `util/`），其余未复制 |
@@ -163,7 +163,7 @@
 
 ### 来源为 PR #4 的移植文件
 
-这些文件是 Nexgent 在 PR #4 分支（`refactor/dsh-application`）上自己写的，不是 DSH 代码，按计划 4.8 直接移植，不需要 `Adapted from` 头：
+这些文件是 Nexgent 在 PR #4 分支（`refactor/dsh-application`，顶端 `fd0b2f42` 已归档为 `archive/python-host`）上自己写的，不是 DSH 代码，按计划 4.8 直接移植，不需要 `Adapted from` 头。旧 PyQt 代码在 `archive/harness-gui`，两者都不在主干上：
 
 | PR #4 文件 | Nexgent 包 | 归属步骤 |
 | --- | --- | --- |

@@ -55,7 +55,10 @@ node apps/cli/bin/nexgent.mjs export <sessionId> --project <dir>
 
 ## 旧产品
 
-旧的 Python / PyQt 科研 Coding Harness 归档在分支 [`archive/harness-gui`](https://github.com/csxq0605/Nexgent/tree/archive/harness-gui)，说明见该分支的 README。它的代码（`nexgent/`、`stage-*`、`tests/`、`config.py`）在步骤 3 删除之前仍留在仓库里，但不再维护。
+旧的 Python 代码已从主干删除，归档在两个分支，说明见各分支的 README：
+
+- [`archive/harness-gui`](https://github.com/csxq0605/Nexgent/tree/archive/harness-gui)：Python / PyQt 科研 Coding Harness（原 `nexgent/`、`stage-*`、`tests/`、`config.py`）。
+- [`archive/python-host`](https://github.com/csxq0605/Nexgent/tree/archive/python-host)：Python 宿主与 benchmark 插件（PR #4 分支 `refactor/dsh-application` 的顶端 `fd0b2f42`）。
 
 ## License
 

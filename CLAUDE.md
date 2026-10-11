@@ -8,7 +8,7 @@ Nexgent 正在被重写为一个 TypeScript 独立应用（Electron 桌面应用
 
 模型路由是 Claude Platform（Anthropic Messages API，`@anthropic-ai/sdk`），默认 `claude-sonnet-5-5`，执行时默认开 thinking（ADR 0003 取代 ADR 0002 的默认值）、effort `medium`。
 
-仓库里同时存在旧产品：`nexgent/`、`stage-*`、`tests/`、`config.py` 是 Python / PyQt 科研 Coding Harness，已归档为分支 `archive/harness-gui`（根 README 不再描述它），Python 宿主在步骤 3 删除。新工作不改这些目录。
+旧的 Python 代码已从主干删除（步骤 3 第 1 轮）：Python / PyQt 科研 Coding Harness 在分支 `archive/harness-gui`，Python 宿主与 benchmark 插件在分支 `archive/python-host`（`fd0b2f42`）。主干上不再有 Python 文件，新工作不往主干加 Python。
 
 ## 六步计划与当前进度
 
@@ -24,7 +24,7 @@ Nexgent 正在被重写为一个 TypeScript 独立应用（Electron 桌面应用
 | 5 | 默认的反馈改进流程（`@nexgent/evolve`） | 未开始 |
 | 6 | 递归改进并检验收益，可复现报告 | 未开始 |
 
-步骤 0–1 的代码已合入集成分支 `nexgent-app`（PR #5）。步骤 1 记录里列出的缺测与已知问题（真实模型下 thinking 开、拒答、中断恢复、Windows 真实运行、文件编辑工具未测；Windows 进程树终止无 Job Object；`perProject` 费用上限未执行；`pause_turn` 不自动续跑）是步骤 2 开工前要知道的。
+步骤 0–1 的代码已合入集成分支 `nexgent-app`（PR #5）。步骤 1 记录里列出的 Windows Job Object、`perProject` 费用上限与 `pause_turn` 续跑已在步骤 2 补上（`packages/workspace/src/windows-job.ts`、`packages/kernel/src/project-config.ts`、`packages/kernel/src/agent.ts`）。
 
 ## 工作约定
 

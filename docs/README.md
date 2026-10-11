@@ -21,7 +21,7 @@
 
 仓库根目录的 `README.md` 只描述**通过了验收记录**的能力。能力写进 README 需本地测试通过且有验收记录：一项功能在 `docs/validation/` 里有对应步骤的验收记录（本地运行的测试与验收脚本通过；真实模型验收留有摘要）之前，只能出现在本目录的计划、规范与研究文档里，不进入根 README。这条规则来自计划 4.10“文档体系”一行，目的是让 README 的每句话都有证据可查，不再出现五代入口并存的描述。
 
-在步骤 2 验收通过、集成分支替换 `main` 之前，根 README 的主体仍描述现有 Python / PyQt 产品；顶部只保留一段指向本目录的“开发中”说明。
+旧的 Python 代码不在主干上：Python / PyQt 科研 Coding Harness 在分支 `archive/harness-gui`，Python 宿主与 benchmark 插件在分支 `archive/python-host`（`fd0b2f42`）。根 README 只用一节指向这两个分支。
 
 ## 验收记录的归属
 
