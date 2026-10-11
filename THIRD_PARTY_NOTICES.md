@@ -10,6 +10,9 @@ Nexgent 以 [MIT](LICENSE) 许可发布。本文件列出 Nexgent 使用、参�
 | [`@deepseek-ai/cordis`](https://www.npmjs.com/package/@deepseek-ai/cordis)（上游 `cordis`） | 4.0.4 | 运行架构（npm 依赖） | MIT | Copyright (c) 2021-present Shigma |
 | [`@deepseek-ai/schemastery`](https://www.npmjs.com/package/@deepseek-ai/schemastery)（上游 `schemastery`） | 3.18.4 | 配置 schema（npm 依赖） | MIT | Copyright (c) 2021-present Shigma |
 | [`@cordisjs/loader`](https://www.npmjs.com/package/@cordisjs/loader) | 以 `pnpm-lock.yaml` 为准 | YAML profile 装载（npm 依赖） | MIT | Shigma |
+| [`fflate`](https://www.npmjs.com/package/fflate) | 0.8.3 | `@nexgent/skill`：解压 `.docx` / `.xlsx`（npm 依赖） | MIT | Copyright (c) 2026 Arjun Barrett |
+| [`unpdf`](https://www.npmjs.com/package/unpdf) | 1.8.1 | `@nexgent/skill`：读取 `.pdf` 文本（npm 依赖） | MIT | Copyright (c) 2023-PRESENT Johann Schopplich |
+| [PDF.js](https://github.com/mozilla/pdf.js)（打包在 `unpdf` 内） | 6.1.x（随 `unpdf` 1.8.1） | `.pdf` 解析 | Apache-2.0 | Copyright Mozilla Foundation |
 
 `@deepseek-ai/cordis` 与 `@deepseek-ai/schemastery` 是 DeepSeek 对上游 `cordis` / `schemastery` 的再发布，包内保留上游 LICENSE。
 
@@ -57,3 +60,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Apache License 2.0
+
+上表中标为 Apache-2.0 的组件（PDF.js）按 Apache License, Version 2.0 授权，全文见 <https://www.apache.org/licenses/LICENSE-2.0>。Nexgent 未修改其代码，只经 `unpdf` 的打包版本调用。

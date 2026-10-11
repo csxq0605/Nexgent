@@ -21,6 +21,12 @@
     },
     {
       "path": "packages/sdk"
+    },
+    {
+      "path": "packages/context"
+    },
+    {
+      "path": "packages/skill"
     }
   ]
 }

@@ -1,0 +1,31 @@
+{
+  "name": "@nexgent/context",
+  "version": "0.0.0",
+  "private": true,
+  "description": "每轮上下文：工作区说明文件注入、资料的文件引用注入、长对话的基本压缩。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/session": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/llm": "workspace:*",
+    "@nexgent/test-support": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
+  }
+}
