@@ -13,7 +13,7 @@
  */
 import { partial, verdict } from './step2-judges.mjs'
 import { readWorkbook } from '../real-task/step3-restock/xlsx.mjs'
-import { FILES, HISTORY_MARKER, MATERIAL, PAGE, SHEET, TASKS, TOOL_FILES, WF_CYCLE, WF_GRAPH, WF_MAX_CONCURRENT, WF_PARTS } from './step3-scenario.mjs'
+import { CANCEL_MEMBERS, FILES, HISTORY_MARKER, MATERIAL, PAGE, SHEET, TASKS, TEAM_TEXT, TOOL_FILES, WF_CYCLE, WF_GRAPH, WF_MAX_CONCURRENT, WF_PARTS } from './step3-scenario.mjs'
 
 /** Step-3 session record types (data-formats.md §会话 JSONL, ADR 0004). */
 export const STEP3_RECORD_TYPES = ['fork.seed', 'subagent.start', 'subagent.end', 'team.member', 'team.task', 'team.message', 'workflow.start', 'workflow.phase', 'workflow.end']
@@ -73,7 +73,7 @@ function h01(obs) {
 }
 
 /** The scenario's projects, in run order; each has `sessions` and `ledger`. */
-export const PROJECTS = ['direct', 'delegation', 'readonly', 'tools', 'workflow']
+export const PROJECTS = ['direct', 'delegation', 'readonly', 'tools', 'workflow', 'team', 'teamKill', 'cancel']
 /** Execution forms in `formsUsed` order (data-formats.md §账本). */
 const FORM_ORDER = ['direct', 'delegated', 'team', 'workflow']
 
@@ -311,8 +311,8 @@ const formOf = request => /^Member: [a-z][a-z0-9-]{0,31} \((delegated|team|workf
 
 /** H15: no member sees delegate, team or workflow tools (a teammate: only its own three team tools). */
 function h15(obs) {
-  const keys = ['delegation', 'readonly', 'workflow', 'team']
-  const missing = keys.filter(key => key !== 'team' && obs[key] === undefined)
+  const keys = ['delegation', 'readonly', 'workflow', 'team', 'teamKill', 'cancel']
+  const missing = keys.filter(key => obs[key] === undefined)
   if (missing.length > 0) return missingPhase(missing[0])
   const requests = keys.flatMap(key => obs[key]?.requests ?? [])
   const members = requests.filter(q => q.route !== null)
@@ -542,6 +542,103 @@ function h09(obs) {
   return verdict(conditions, `${checked}; late and the workflow marked interrupted`)
 }
 
+// ---- team (H05, H06) and cancel (H13) -----------------------------------------------------------
+
+const messageRecords = (project, id) => rootOf(project).filter(r => r.type === 'team.message' && r.message?.id === id).map(r => r.message.state)
+const idMarker = id => `id="${id}"`
+const count = (haystack, needle) => haystack.split(needle).length - 1
+const injectsOf = (project, sessionId, id) => recordsOf(project, sessionId).filter(r => r.type === 'user.message' && r.source === 'inject' && String(r.content).includes(idMarker(id)))
+const taskRow = task => [task.id, task.status, task.owner ?? null]
+
+/** H05: two teammates at once; each message queued then delivered exactly once; the board's dependencies hold; each presents. */
+function h05(obs) {
+  const t = obs.team
+  if (t === undefined) return missingPhase('team')
+  const routes = (t.requests ?? []).map(q => q.route).filter(route => route !== null)
+  const messages = t.teamState?.messages ?? []
+  const toBob = messages.find(m => m.to === 'bob')
+  const toLead = messages.find(m => m.to === 'lead')
+  const bobId = childOf(t, 'bob')
+  const aliceId = childOf(t, 'alice')
+  const waited = resultOf(t, 'w1')
+  const leadMessages = JSON.stringify(rootOf(t).filter(r => r.type === 'user.message'))
+  const b0 = toolResult(recordsOf(t, bobId), 'b0')
+  const board = (t.teamState?.tasks ?? []).map(taskRow)
+  const delivered = path => (t.deliverables ?? []).filter(d => d.versions.some(v => v.files.includes(path)))
+  const children = ['alice', 'bob'].map(name => {
+    const start = recordsOf(t, childOf(t, name))[0]
+    return [start?.parentSessionId === t.sessionId && start?.member?.executionForm === 'team', `${name}: a child session of the lead with member form team`]
+  })
+  return verdict([
+    [t.phases?.teamWork?.reason?.kind === 'completed', `the team turn completed (got ${JSON.stringify(t.phases?.teamWork?.reason)})`],
+    ...children,
+    [routes.indexOf('bob') > -1 && routes.lastIndexOf('alice') > routes.indexOf('bob'), 'alice and bob worked at the same time (their requests interleave)'],
+    [messages.length === 2 && messages.every(m => JSON.stringify(messageRecords(t, m.id)) === '["queued","delivered"]'), `each of the two messages has exactly one queued and one delivered record (got ${JSON.stringify(messages.map(m => messageRecords(t, m.id)))})`],
+    [toBob !== undefined && injectsOf(t, bobId, toBob.id).length === 1 && !leadMessages.includes(toBob.id), "bob's message is injected into bob's session exactly once, and never into the lead's"],
+    [toLead !== undefined && count(textOf(waited), idMarker(toLead.id)) === 1 && textOf(waited).includes(TEAM_TEXT.toLead), "the lead's message comes back exactly once, in wait_teammates"],
+    [b0?.isError === true && /t3 cannot start/.test(textOf(b0)), `bob cannot start t3 before t1 and t2 are done (got ${JSON.stringify(textOf(b0).slice(0, 80))})`],
+    [JSON.stringify(board) === JSON.stringify([['t1', 'completed', 'alice'], ['t2', 'completed', 'bob'], ['t3', 'in_progress', 'lead']]) || JSON.stringify(board) === JSON.stringify([['t1', 'completed', 'alice'], ['t2', 'completed', 'bob'], ['t3', 'in_progress', null]]), `the board ends with t1, t2 completed by their owners and t3 started once they were (got ${JSON.stringify(board)})`],
+    [t.files?.['alice/a.md'] === 'part a\n' && t.files?.['bob/b.md'] === 'part b\n', 'both files were written'],
+    [delivered('alice/a.md').length === 1 && delivered('alice/a.md')[0].versions.every(v => v.sessionId === aliceId) && delivered('bob/b.md').length === 1 && delivered('bob/b.md')[0].versions.every(v => v.sessionId === bobId), 'alice and bob each presented their file as their own deliverable'],
+  ], 'alice and bob worked at once; two messages, each queued and delivered exactly once (bob: injected once; lead: in wait_teammates once); t3 refused until t1, t2 completed; two deliverables, one per teammate')
+}
+
+/** H06: the lead killed between queued and delivered; after resume nothing is lost or doubled and the board is as before. */
+function h06(obs) {
+  const t = obs.teamKill
+  if (t === undefined) return missingPhase('team-kill')
+  const kill = t.phases?.teamKill ?? {}
+  const atKill = t.atKill ?? {}
+  const messages = atKill.messages ?? []
+  const toBob = messages.find(m => m.to === 'bob')
+  const toLead = messages.find(m => m.to === 'lead')
+  const listed = resultOf(t, 'r1')
+  const leadInjects = toLead === undefined ? [] : injectsOf(t, t.sessionId, toLead.id)
+  const resumeTurn = rootOf(t).find(r => r.type === 'user.message' && r.source === 'user' && r.content === TASKS.teamResume)?.turn
+  const runs = rootOf(t).filter(r => r.type === 'subagent.start' && r.turn === resumeTurn).map(r => [r.name, r.task])
+  return verdict([
+    [kill.ready === true && kill.stalled === true && kill.mainAlive === false && kill.settled === true, `the lead's process was killed with alice mid-request and nothing survived (ready ${kill.ready}, stalled ${kill.stalled}, alive ${kill.mainAlive}, settled ${kill.settled})`],
+    [JSON.stringify(messages.map(m => [m.from, m.to, m.state])) === '[["alice","bob","queued"],["alice","lead","queued"]]', `at the kill both messages were queued and none delivered (got ${JSON.stringify(messages.map(m => [m.from, m.to, m.state]))})`],
+    [JSON.stringify((atKill.tasks ?? []).map(taskRow)) === '[["t1","in_progress","alice"],["t2","pending",null]]', `at the kill t1 was claimed by alice (got ${JSON.stringify((atKill.tasks ?? []).map(taskRow))})`],
+    [t.phases?.teamResume?.reason?.kind === 'completed', `the resumed turn completed (got ${JSON.stringify(t.phases?.teamResume?.reason)})`],
+    [messages.length === 2 && messages.every(m => JSON.stringify(messageRecords(t, m.id)) === '["queued","delivered"]'), `after resume each message has exactly one queued and one delivered record (got ${JSON.stringify(messages.map(m => messageRecords(t, m.id)))})`],
+    [leadInjects.length === 1 && leadInjects[0].turn === resumeTurn && !rootOf(t).some(r => r.type === 'tool.result' && String(r.content).includes(idMarker(toLead.id))), "the lead's message is injected once at the resumed turn's start, and not handed over again"],
+    [toBob !== undefined && injectsOf(t, childOf(t, 'bob'), toBob.id).length === 1, "bob's message is injected into bob's session exactly once"],
+    [JSON.stringify(listed?.meta?.tasks) === JSON.stringify(atKill.tasks), 'the board the resumed lead lists equals the board at the kill'],
+    [runs.length === 2 && runs.some(([name, task]) => name === 'alice' && task === t.prompts?.continue) && runs.some(([name, task]) => name === 'bob' && task === t.prompts?.wake), `after resume alice continues and bob is woken by his mail, once each (got ${JSON.stringify(runs.map(([name, task]) => [name, String(task).slice(0, 30)]))})`],
+  ], 'killed with two messages queued; after resume each delivered exactly once (lead: injected at turn start; bob: injected once), the board unchanged, alice continued, bob woken')
+}
+
+/** H13: the caller cancels the root; delegated, team and workflow members all end with cause parent; no process is left. */
+function h13(obs) {
+  const c = obs.cancel
+  if (c === undefined) return missingPhase('cancel')
+  const root = rootOf(c)
+  const conditions = Object.entries(CANCEL_MEMBERS).flatMap(([phase, names]) => {
+    const p = c.phases?.[phase] ?? {}
+    const memberChecks = names.map(name => {
+      const start = root.find(r => r.type === 'subagent.start' && r.name === name)
+      const end = root.find(r => r.type === 'subagent.end' && r.childSessionId === start?.childSessionId)
+      const childEnd = recordsOf(c, start?.childSessionId).filter(r => r.type === 'turn.end').at(-1)
+      return [end?.result?.status === 'cancelled' && end.result.error?.details?.cause === 'parent' && childEnd?.reason?.kind === 'cancelled' && childEnd.reason.cause === 'parent', `${phase}: ${name} ended cancelled with cause parent (subagent.end ${String(end?.result?.status)}/${String(end?.result?.error?.details?.cause)}, child turn.end ${JSON.stringify(childEnd?.reason)})`]
+    })
+    return [
+      [p.running === true && (p.descendantsBefore ?? []).length >= names.length, `${phase}: every member was running its slow command when the turn was cancelled (${(p.descendantsBefore ?? []).length} processes)`],
+      [p.reason?.kind === 'cancelled', `${phase}: the root turn ended cancelled (got ${JSON.stringify(p.reason)})`],
+      ...memberChecks,
+      [(p.survivors ?? ['?']).length === 0, `${phase}: no process left (survivors ${JSON.stringify(p.survivors)})`],
+    ]
+  })
+  const wfEnd = root.find(r => r.type === 'workflow.end')
+  const roster = rootOf(c).filter(r => r.type === 'team.member')
+  const lastStatus = name => roster.filter(r => r.member.name === name).at(-1)?.member.status
+  return verdict([
+    ...conditions,
+    [wfEnd?.status === 'cancelled', `the workflow ended cancelled (got ${String(wfEnd?.status)})`],
+    [CANCEL_MEMBERS.cancelTeam.every(name => lastStatus(name) === 'active'), 'cancelled teammates stay active in the roster (they continue next turn)'],
+  ], 'root cancelled while members ran slow commands: the delegated member, both teammates and both workflow members ended cancelled with cause parent; workflow cancelled; teammates still active; no process left')
+}
+
 /** Top-level paths the old Python products used (plan W7, check H23). */
 export const FORBIDDEN_TOP_LEVEL = ['nexgent', 'tests', 'config.py', 'runtime']
 const isForbidden = path => {
@@ -562,7 +659,7 @@ function h23(obs) {
 }
 
 /** Judges by checklist id. */
-export const JUDGES = { H01: h01, H02: h02, H03: h03, H04: h04, H07: h07, H08: h08, H09: h09, H10: h10, H12: h12, H15: h15, H16: h16, H17: h17, H18: h18, H19: h19, H22: h22, H23: h23 }
+export const JUDGES = { H01: h01, H02: h02, H03: h03, H04: h04, H05: h05, H06: h06, H07: h07, H08: h08, H09: h09, H10: h10, H12: h12, H13: h13, H15: h15, H16: h16, H17: h17, H18: h18, H19: h19, H22: h22, H23: h23 }
 
 /** Run one judge; a throw is a failure, a missing judge is not-implemented. */
 export function judge(id, obs, tools) {

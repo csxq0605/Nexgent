@@ -34,8 +34,21 @@
  *     wfGraph    a three-node graph, then a graph with a cycle (refused) (H08)
  *     wfKill     in a child process: `early` completes, `late` stalls; killed there (H09)
  *     wfResume   after the kill: a plain turn (no member may run again)
+ *   team project:
+ *     teamWork   three tasks (t3 depends on t1, t2); alice and bob work at once, each writes
+ *                and presents a file; alice mails bob and the lead; bob tries t3 early (H05)
+ *   team-kill project:
+ *     teamKill   in a child process: bob finishes, alice claims t1 and mails bob and the lead;
+ *                killed on alice's next request with both messages queued (H06)
+ *     teamResume a fresh SDK: the lead lists the board and waits for the teammates
+ *   cancel project (each turn cancelled by the caller while members run a slow command) (H13):
+ *     cancelDelegate  a delegated member
+ *     cancelTeam      two teammates
+ *     cancelWorkflow  two workflow members in parallel
  *   H15 reads the tool lists of every member request against the root's.
  */
+
+import { SLOW_COMMAND, shellCall } from './scenario-step2.mjs'
 
 /** Fixed test key; the scripted server never checks it. */
 export const SCRIPTED_API_KEY = 'nexgent-accept-step3-scripted-key'
@@ -111,6 +124,13 @@ export const WF_CYCLE = { nodes: [
 /** Text the `late` member streams before it stalls (the workflow kill point). */
 export const WF_STALL_TEXT = 'Late member is still counting'
 
+/** Team messages (H05, H06). */
+export const TEAM_TEXT = { toBob: 'a is ready', toLead: 'alice finished t1', killToBob: 'collected for bob', killToLead: 'collected for lead' }
+/** Text the lead streams in the team kill phase before it stalls. */
+export const TEAM_STALL_TEXT = 'Lead is thinking about the team'
+/** Members of the cancel project, by turn. */
+export const CANCEL_MEMBERS = { cancelDelegate: ['sleeper'], cancelTeam: ['mate-a', 'mate-b'], cancelWorkflow: ['flow-a', 'flow-b'] }
+
 /** Turn texts, used both as the user's message and to recognise requests. */
 export const TASKS = {
   direct: 'Write a short restock plan into plan/restock.md and present it.',
@@ -128,6 +148,12 @@ export const TASKS = {
   wfGraph: 'Run the three-step graph, then the looping one.',
   wfKill: 'Run the early-then-late workflow.',
   wfResume: 'Continue after the crash: where is the workflow?',
+  teamWork: 'Write both parts with a team.',
+  teamKill: 'Run the team.',
+  teamResume: 'Carry on with the team.',
+  cancelDelegate: 'Delegate a slow check.',
+  cancelTeam: 'Have two teammates run slow checks.',
+  cancelWorkflow: 'Run two slow checks in a workflow.',
 }
 
 /** Member tasks (what the root passes to `delegate`). */
@@ -160,6 +186,9 @@ export function buildStep3Script(h, state = {}) {
   const member = name => body => h.sessionText(body).includes(`Member: ${name} (`)
   const delegate = (id, args) => ({ id, name: 'delegate', arguments: args })
   const answer = text => ({ content: text, usage })
+  const call = (name, args, id) => ({ id, name, arguments: args })
+  const calls = (...list) => ({ toolCalls: list, usage })
+  const slow = turn => ({ ...turn, chunkDelayMs: 15 })
   return {
     direct: {
       lead: [
@@ -317,6 +346,93 @@ export function buildStep3Script(h, state = {}) {
     wfResume: {
       lead: [h.expectRequest('workflow resume turn', turnOf(TASKS.wfResume), answer('The workflow was interrupted; early had finished.'))],
       routes: {},
+    },
+    teamWork: {
+      lead: [
+        h.expectRequest('team turn', turnOf(TASKS.teamWork), calls(
+          call('team_task_create', { title: 'Write a' }, 'c1'),
+          call('team_task_create', { title: 'Write b' }, 'c2'),
+          call('team_task_create', { title: 'Merge a and b', dependsOn: ['t1', 't2'] }, 'c3'),
+        )),
+        h.expectRequest('tasks created', mentions(TASKS.teamWork), calls(
+          call('spawn_teammate', { name: 'alice', task: 'Do task t1: write alice/a.md.' }, 's1'),
+          call('spawn_teammate', { name: 'bob', task: 'Do task t2: write bob/b.md.' }, 's2'),
+        )),
+        h.expectRequest('teammates spawned', mentions(TASKS.teamWork), calls(call('wait_teammates', {}, 'w1'))),
+        h.expectRequest('teammates waited', mentions(TASKS.teamWork), calls(call('team_task_update', { id: 't3', status: 'in_progress' }, 'u3'), call('team_task_list', {}, 'l1'))),
+        h.expectRequest('board listed', mentions(TASKS.teamWork), answer('Both parts are written.')),
+      ],
+      routes: {
+        alice: [
+          slow(calls(call('team_task_update', { id: 't1', status: 'in_progress' }, 'a1'))),
+          slow(calls(call('write_file', { path: 'alice/a.md', content: 'part a\n' }, 'a2'))),
+          slow(calls(call('present', { paths: ['alice/a.md'], summary: 'Part a.' }, 'a3'))),
+          slow(calls(call('send_message', { to: 'bob', text: TEAM_TEXT.toBob }, 'a4'), call('send_message', { to: 'lead', text: TEAM_TEXT.toLead }, 'a5'))),
+          slow(calls(call('team_task_update', { id: 't1', status: 'completed', result: 'alice/a.md written' }, 'a6'))),
+          answer('alice done'),
+        ],
+        bob: [
+          slow(calls(call('team_task_update', { id: 't3', status: 'in_progress' }, 'b0'))),
+          slow(calls(call('team_task_update', { id: 't2', status: 'in_progress' }, 'b1'))),
+          slow(calls(call('write_file', { path: 'bob/b.md', content: 'part b\n' }, 'b2'))),
+          slow(calls(call('present', { paths: ['bob/b.md'], summary: 'Part b.' }, 'b3'))),
+          slow(calls(call('team_task_update', { id: 't2', status: 'completed', result: 'bob/b.md written' }, 'b4'))),
+          answer('bob done'),
+          answer('bob read the message'),
+        ],
+      },
+    },
+    teamKill: {
+      lead: [
+        h.expectRequest('team kill turn', turnOf(TASKS.teamKill), calls(
+          call('team_task_create', { title: 'Collect' }, 'k1'),
+          call('team_task_create', { title: 'Report', dependsOn: ['t1'] }, 'k2'),
+          call('spawn_teammate', { name: 'bob', task: 'Say you are ready.' }, 'k3'),
+        )),
+        h.expectRequest('bob spawned', mentions(TASKS.teamKill), calls(call('wait_teammates', {}, 'k4'))),
+        h.expectRequest('bob waited', mentions(TASKS.teamKill), calls(call('spawn_teammate', { name: 'alice', task: 'Collect, then tell bob and the lead.' }, 'k5'))),
+        h.expectRequest('alice spawned', mentions(TASKS.teamKill), { content: [TEAM_STALL_TEXT, ' more'], fault: { kind: 'timeout', afterChunks: 1 }, usage }),
+      ],
+      routes: {
+        bob: [answer('bob ready')],
+        alice: [
+          calls(call('team_task_update', { id: 't1', status: 'in_progress' }, 'ka1')),
+          calls(call('send_message', { to: 'bob', text: TEAM_TEXT.killToBob }, 'ka2'), call('send_message', { to: 'lead', text: TEAM_TEXT.killToLead }, 'ka3')),
+          { content: ['collecting', ' more'], fault: { kind: 'timeout', afterChunks: 1 }, usage },
+        ],
+      },
+    },
+    teamResume: {
+      lead: [
+        h.expectRequest('team resume turn', turnOf(TASKS.teamResume), calls(call('team_task_list', {}, 'r1'))),
+        h.expectRequest('board after resume', mentions(TASKS.teamResume), calls(call('wait_teammates', {}, 'r2'))),
+        h.expectRequest('teammates after resume', mentions(TASKS.teamResume), answer('recovered')),
+      ],
+      routes: { alice: [answer('alice continued')], bob: [answer('bob read it')] },
+    },
+    cancelDelegate: {
+      lead: [h.expectRequest('cancel delegate turn', turnOf(TASKS.cancelDelegate), calls(call('delegate', { name: 'sleeper', task: 'Run the slow check.' }, 'x1')))],
+      routes: { sleeper: [{ content: 'Starting.', toolCalls: [shellCall(SLOW_COMMAND)], usage }] },
+    },
+    cancelTeam: {
+      lead: [
+        h.expectRequest('cancel team turn', turnOf(TASKS.cancelTeam), calls(
+          call('spawn_teammate', { name: 'mate-a', task: 'Run the slow check.' }, 'x2'),
+          call('spawn_teammate', { name: 'mate-b', task: 'Run the slow check.' }, 'x3'),
+        )),
+        h.expectRequest('mates spawned', mentions(TASKS.cancelTeam), calls(call('wait_teammates', {}, 'x4'))),
+      ],
+      routes: {
+        'mate-a': [{ content: 'Starting.', toolCalls: [shellCall(SLOW_COMMAND)], usage }],
+        'mate-b': [{ content: 'Starting.', toolCalls: [shellCall(SLOW_COMMAND)], usage }],
+      },
+    },
+    cancelWorkflow: {
+      lead: [h.expectRequest('cancel workflow turn', turnOf(TASKS.cancelWorkflow), calls(call('workflow', { title: 'Slow checks', script: "await parallel([() => agent('Run the slow check.', { name: 'flow-a' }), () => agent('Run the slow check.', { name: 'flow-b' })])" }, 'x5')))],
+      routes: {
+        'flow-a': [{ content: 'Starting.', toolCalls: [shellCall(SLOW_COMMAND)], usage }],
+        'flow-b': [{ content: 'Starting.', toolCalls: [shellCall(SLOW_COMMAND)], usage }],
+      },
     },
   }
 }
