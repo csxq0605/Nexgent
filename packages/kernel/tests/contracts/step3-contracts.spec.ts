@@ -102,8 +102,13 @@ describe('step-3 contracts: helpers', () => {
       'delegate', 'spawn_teammate', 'send_message', 'wait_teammates', 'team_task_create', 'team_task_list', 'team_task_update', 'workflow', 'run_code',
     ])
     expect(STEP3_MIGRATED_TOOLS.map(tool => tool.name)).toEqual(['web_fetch', 'read_spreadsheet', 'write_spreadsheet'])
-    expect(MEMBER_DENIED_TOOLS).toEqual(['delegate', 'spawn_teammate', 'wait_teammates', 'workflow'])
-    for (const name of TEAMMATE_TOOLS) expect(MEMBER_DENIED_TOOLS).not.toContain(name)
+    expect(MEMBER_DENIED_TOOLS).toEqual([
+      'delegate', 'spawn_teammate', 'wait_teammates', 'workflow', 'send_message', 'team_task_create', 'team_task_list', 'team_task_update',
+    ])
+    // every collaboration tool except run_code is hidden from members
+    expect(STEP3_TOOLS.map(tool => tool.name).filter(name => name !== 'run_code').sort()).toEqual([...MEMBER_DENIED_TOOLS].sort())
+    expect(STEP3_TOOLS.filter(tool => tool.selfSandboxed === true).map(tool => tool.name)).toEqual(['run_code'])
+    for (const name of TEAMMATE_TOOLS) expect(MEMBER_DENIED_TOOLS).toContain(name)
     expect(COLLABORATION_LIMITS).toMatchObject({ maxConcurrentMembers: 4, maxMembersPerTask: 16 })
     expect(MEMBER_NAME_PATTERN.test('analyst-2')).toBe(true)
     expect(MEMBER_NAME_PATTERN.test('2analyst')).toBe(false)

@@ -26,6 +26,13 @@
 
 计划 4.3 第 4 项列出的 `src/`、Python `tests/`、benchmark Python 插件、`scripts/*.py`、`pyproject.toml`、`requirements-*.txt`、`runtime/` 从未在 `nexgent-app` / `main` 上，它们只在 `refactor/dsh-application`（PR #4 分支）及其祖先上。步骤 3 的“删除 Python”因此是：在 `nexgent-app` 上删掉旧 PyQt 的 `nexgent/`、`stage-*`、`tests/`、`config.py`（与 `archive/harness-gui` 相同），并把 `refactor/dsh-application` 顶端归档为 `archive/python-host`。这两件事已由「测试与 CI」在 PR #54 完成。
 
+以下两条按步骤 3 的实现勘误（2026-10-11，契约修改随 PR 同步），不改上面的决策编号与原文：
+
+- **第 3 项的成员禁用工具。** `MEMBER_DENIED_TOOLS` 应为除 `run_code` 外的全部协作工具：`delegate`、`spawn_teammate`、`wait_teammates`、`workflow`、`send_message`、`team_task_create`、`team_task_list`、`team_task_update`。原文只列了前四个，委派对象与工作流节点因此能看到团队工具。队友保留 `send_message`、`team_task_list`、`team_task_update` 的方式不变：团队包在队友自己的作用域注册它们，作用域遮罩不隐藏同一作用域自己注册的工具。
+- **第 2、8 项的“每次成员运行”。** 队友不是每个 Lead 轮次一次运行：首次启动、空闲时被新邮件唤醒、下一轮续做被 `parent` 取消的工作，各是子会话的一轮，各有一对 `subagent.start` / `subagent.end`，同一 Lead 轮次里可以有多对（团队包限制每轮至多 8 次）。运行中的队友经 kernel 的 `Agent.beforeRequest` 在下一次模型请求前收到邮件。第 8 项“队友只在 Lead 的轮次内工作”不变。
+
+同时，审批策略对 `read-only` 下 `run_code` 的豁免改为契约字段 `ToolDefinition.selfSandboxed`（`permissions.md` §工具审批），不再按工具名判断。
+
 ## 后果
 
 - **契约**：`packages/kernel/src/contracts/collaboration.ts`、`step3-tools.ts` 为新增；`session.ts`（九种记录、`session.start.member`、取消原因 `parent`）、`approvals.ts`（`member`）、`ledger.ts`（`team`、`formsUsed`）、`tasking.ts`（成员成果、`present` 同会话规则）、`tools.ts`（`attribution`、`member`）、`skill.ts`（`user` 来源）、`agents.ts`（`CreateAgentOptions.child`、`ResumeAgentOptions.child`）与 `packages/sdk/src/api.ts`（API 版本 3）同步修改。kernel 在实现落地前对 `child` 选项报 `internal`。

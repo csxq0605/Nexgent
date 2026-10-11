@@ -102,9 +102,11 @@
 
 | 模式 | `approval: 'never'` 工具 | `approval: 'ask'` 工具 / 被提升的调用 | 被模式禁止的调用 |
 | --- | --- | --- | --- |
-| `read-only` | 执行 | 写 / 执行类直接拒绝，不提示 | 拒绝，不提示 |
+| `read-only` | 读类执行；写 / 执行类（`effects` 含 `write` 或 `execute`）直接拒绝，不提示。例外：声明 `selfSandboxed: true` 的工具（步骤 3 只有 `run_code`）照常执行，由工具对每次读写按会话模式自行检查 | 写 / 执行类直接拒绝，不提示；读类弹审批 | 拒绝，不提示 |
 | `workspace-write` | 执行 | 弹审批 | 拒绝，不提示 |
 | `full-access` | 执行 | 执行，不提示；例外是"始终审批"表 | — |
+
+`read-only` 下“始终审批”表里的写 / 执行类调用同样直接拒绝。`selfSandboxed` 是 `ToolDefinition` 的契约字段（`contracts/tools.ts`），只有确实对每次读写调用做沙箱与路径检查的宿主包才能声明；策略层按字段判断，不按工具名豁免（步骤 3 勘误，取代按名豁免 `run_code`）。
 
 "始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的 `approvals` / `costCaps` / `sandboxMode` 字段、步骤 4 的插件包采用。
 
@@ -159,9 +161,9 @@
 
 | 项 | 规则 |
 | --- | --- |
-| 深度 | 只有根会话能启动成员；成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow`（契约 `MEMBER_DENIED_TOOLS`），kernel 拒绝以子会话为父会话创建子会话 |
+| 深度 | 只有根会话能启动成员；成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow` 与团队工具 `send_message`、`team_task_create`、`team_task_list`、`team_task_update`（契约 `MEMBER_DENIED_TOOLS`，即除 `run_code` 外的全部步骤 3 协作工具），kernel 拒绝以子会话为父会话创建子会话 |
 | 沙箱 | 成员的模式取父会话、预设、显式请求三者中最窄的；任何一项宽于父会话时创建失败，错误码 `sandbox/denied`，不悄悄降级（`childSandboxMode`）。顺序：`read-only` < `workspace-write` < `full-access` |
-| 工具范围 | 预设的 `tools`（`allow` / `deny`）用成员作用域上的 `restrict()` 实现，与父会话可见的集合求交；`MEMBER_DENIED_TOOLS` 总是叠加在上面；队友另由团队包在自己的作用域注册 `send_message`、`team_task_list`、`team_task_update` |
+| 工具范围 | 预设的 `tools`（`allow` / `deny`）用成员作用域上的 `restrict()` 实现，与父会话可见的集合求交；`MEMBER_DENIED_TOOLS` 总是叠加在上面，所以委派对象与工作流节点看不到任何团队工具。队友是唯一例外：团队包在队友自己的作用域注册 `send_message`、`team_task_list`、`team_task_update`（`TEAMMATE_TOOLS`）；作用域的遮罩不隐藏同一作用域自己注册的工具，所以队友能看到这三个，看不到 `team_task_create` |
 | 路径与命令 | 与父会话相同的路径策略、命令策略和 `extraReadRoots`；所有成员共用同一个项目根，不建副本 |
 | 审批 | 与主对话同一套规则（用户 2026-10-11 决定）：主对话会问的，成员也问；成员的请求进同一个审批代理，`ApprovalRequest.sessionId` 为成员会话，`member` 带成员名、形态与根会话 id，宿主据此在根会话的界面里询问并写明是哪个成员；`session` 授权只对授予它的那个会话生效，`project` 授权对所有会话（含成员）生效；项目审批设置放宽时主对话与成员一起生效；成员不单独自动批准，也不单独自动拒绝；没有应答者或非 TTY 时与主对话一样按 `timeout` / `headless` 拒绝 |
 | 费用 | `perTask` 按任务树计（上节）；`BudgetShare` 只能再压低某个成员的份额；`perProject` 照旧按账本 |
@@ -184,7 +186,7 @@
 步骤 3 的 `run_code`（`@nexgent/ptc`）与 `workflow` 的脚本在独立的 Node 子进程里执行，限制照搬旧 `run_python` 的语义：
 
 - 每次调用一个新进程；环境变量为空（不继承宿主环境，因此读不到 `NEXGENT_API_KEY` 等任何变量）；cwd 为项目根。
-- 文件访问只经宿主函数（IPC 绑定），每次读写按**调用方会话的沙箱模式与路径策略**检查，与文件工具同一套规则；`read-only` 下写类宿主函数被拒，`run_code` 本身仍可运行只读代码。进程不直接拿到文件系统以外的宿主能力。
+- 文件访问只经宿主函数（IPC 绑定），每次读写按**调用方会话的沙箱模式与路径策略**检查，与文件工具同一套规则；`read-only` 下写类宿主函数被拒，`run_code` 本身仍可运行只读代码（它在契约里声明 `selfSandboxed: true`，审批策略因此不在调用前整体拒绝它，见 §工具审批）。进程不直接拿到文件系统以外的宿主能力。
 - 输出与时长有上限（默认 60 s，最长 300 s）；超时或取消时终止整个进程树（Windows 纳入 Job Object），不得残留。
 - 工作流脚本里的 `agent()` 经宿主函数建成员，成员受上节“子会话继承”约束；脚本本身不能绕过并发与总数上限。
 
