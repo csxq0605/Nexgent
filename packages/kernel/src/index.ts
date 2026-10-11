@@ -33,6 +33,8 @@ export type {
   KernelToolContext,
   ProjectGrantWriter,
   RunOptions,
+  StepInjectionInput,
+  StepInjector,
   TaskStats,
   ToolApprovalAsk,
   TurnInput,

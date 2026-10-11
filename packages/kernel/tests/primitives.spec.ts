@@ -176,6 +176,9 @@ describe('approval policy', () => {
   it('follows the permissions.md mode table', () => {
     expect(decideToolPolicy(def('never', ['read']), 'read-only').kind).toBe('run')
     expect(decideToolPolicy(def('never', ['write']), 'read-only').kind).toBe('deny')
+    // run_code checks each write itself (permissions.md §代码执行进程 (PTC)).
+    expect(decideToolPolicy({ ...def('never', ['read', 'write', 'execute']), name: 'run_code' }, 'read-only').kind).toBe('run')
+    expect(decideToolPolicy({ ...def('ask', ['read', 'write', 'execute']), name: 'run_code' }, 'read-only').kind).toBe('ask')
     expect(decideToolPolicy(def('ask', ['write']), 'workspace-write')).toMatchObject({ kind: 'ask', risk: 'low' })
     expect(decideToolPolicy(def('ask', ['execute']), 'workspace-write')).toMatchObject({ kind: 'ask', risk: 'medium' })
     expect(decideToolPolicy(def('ask', ['execute']), 'full-access').kind).toBe('run')

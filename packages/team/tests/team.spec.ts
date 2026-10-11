@@ -114,7 +114,7 @@ async function until(check: () => boolean | Promise<boolean>, label: string, tim
 }
 
 describe('team: two teammates', () => {
-  it('work at once on separate files, mail is delivered exactly once, and the board enforces dependencies', async () => {
+  it('work at once on separate files, mail reaches a working teammate before its next step and wakes an idle one, and the board enforces dependencies', async () => {
     const root = await tempRoot()
     const booted = await boot(root, [
       calls(
@@ -127,6 +127,8 @@ describe('team: two teammates', () => {
         call('spawn_teammate', { name: 'bob', task: 'Do task t2: write bob/b.md.', preset: 'general-executor' }, 's2'),
       ),
       calls(call('wait_teammates', {}, 'w1')),
+      calls(call('send_message', { to: 'bob', text: 'check part b once more' }, 'm1')),
+      calls(call('wait_teammates', {}, 'w2')),
       calls(call('team_task_update', { id: 't3', status: 'in_progress' }, 'u3'), call('team_task_list', {}, 'l1')),
       { content: 'Both parts are written.' },
     ], {
@@ -135,20 +137,30 @@ describe('team: two teammates', () => {
         slow(calls(call('write_file', { path: 'alice/a.md', content: 'part a\n' }, 'a2'))),
         slow(calls(call('present', { paths: ['alice/a.md'], summary: 'Part a.' }, 'a3'))),
         slow(calls(call('send_message', { to: 'bob', text: 'a is ready' }, 'a4'), call('send_message', { to: 'lead', text: 'alice finished t1' }, 'a5'))),
-        slow(calls(call('team_task_update', { id: 't1', status: 'completed', result: 'alice/a.md written' }, 'a6'))),
+        slow(calls(call('write_file', { path: 'alice/sent.txt', content: 'sent\n' }, 'a6'))),
+        slow(calls(call('team_task_update', { id: 't1', status: 'completed', result: 'alice/a.md written' }, 'a7'))),
         { content: 'alice done' },
       ],
       bob: [
         slow(calls(call('team_task_update', { id: 't3', status: 'in_progress' }, 'b0'))),
         slow(calls(call('team_task_update', { id: 't2', status: 'in_progress' }, 'b1'))),
         slow(calls(call('write_file', { path: 'bob/b.md', content: 'part b\n' }, 'b2'))),
+        // Holds bob mid-run until alice's mail to him is queued.
+        slow(calls(call('wait_for_file', { path: 'alice/sent.txt' }, 'bw'))),
         slow(calls(call('present', { paths: ['bob/b.md'], summary: 'Part b.' }, 'b3'))),
         slow(calls(call('team_task_update', { id: 't2', status: 'completed', result: 'bob/b.md written' }, 'b4'))),
         { content: 'bob done' },
-        { content: 'bob read the message' },
+        { content: 'bob checked part b' },
       ],
     })
     const { app, llm, records, tasking } = booted
+    app.ctx.tools.register({
+      definition: { name: 'wait_for_file', description: 'Wait until a project file exists.', inputSchema: { type: 'object', properties: { path: { type: 'string' } } }, effects: ['read'], approval: 'never' },
+      handler: async input => {
+        await until(() => existsSync(nodePath.join(root, (input as { path: string }).path)), 'the file')
+        return { content: 'there' }
+      },
+    })
     const lead = await app.agents.create()
     const ended = await lead.run('Write both parts with a team.')
     expect(ended.reason).toEqual({ kind: 'completed' })
@@ -174,22 +186,31 @@ describe('team: two teammates', () => {
     // Every message: one queued, one delivered record, same id.
     const messages = of(leadRecords, 'team.message')
     const ids = [...new Set(messages.map(r => r.message.id))]
-    expect(ids).toHaveLength(2)
+    expect(ids).toHaveLength(3)
     for (const id of ids) {
       expect(messages.filter(r => r.message.id === id).map(r => r.message.state)).toEqual(['queued', 'delivered'])
     }
-    const toBob = messages.find(r => r.message.to === 'bob')!.message
+    const aliceToBob = messages.find(r => r.message.to === 'bob' && r.message.from === 'alice')!.message
+    const leadToBob = messages.find(r => r.message.to === 'bob' && r.message.from === 'lead')!.message
     const toLead = messages.find(r => r.message.to === 'lead')!.message
-    // Bob's copy is injected once, in his second run, before that run's prompt; the Lead's comes back in wait_teammates.
     const bobRecords = await records(bob.sessionId)
     const injected = of(bobRecords, 'user.message').filter(r => r.source === 'inject')
-    expect(injected.filter(r => r.content.includes(messageMarker(toBob.id)))).toHaveLength(1)
-    expect(injected.find(r => r.content.includes(messageMarker(toBob.id)))).toMatchObject({ turn: 2 })
+    // Alice's mail reaches bob while he works: injected once in his first run, right after the step that waited for it.
+    const midRun = injected.filter(r => r.content.includes(messageMarker(aliceToBob.id)))
+    expect(midRun).toHaveLength(1)
+    expect(midRun[0]).toMatchObject({ turn: 1 })
+    expect(bobRecords.find(r => r.seq === midRun[0]!.seq - 1)).toMatchObject({ type: 'tool.result', toolCallId: 'bw' })
+    const carried = llm.calls.filter(c => c.route === 'bob' && String(c.request.messages.at(-1)?.content).includes(messageMarker(aliceToBob.id)))
+    expect(carried).toHaveLength(1)
+    // The Lead's mail to idle bob wakes him: injected at the start of his second run, before the wake prompt.
+    const woken = injected.filter(r => r.content.includes(messageMarker(leadToBob.id)))
+    expect(woken).toHaveLength(1)
+    expect(woken[0]).toMatchObject({ turn: 2 })
     expect(of(bobRecords, 'user.message').filter(r => r.source === 'user').map(r => r.content)[1]).toBe(WAKE_PROMPT)
     const waited = resultOf(leadRecords, 'w1')
     expect(count(waited.content, messageMarker(toLead.id))).toBe(1)
     expect(waited.content).toContain('alice finished t1')
-    expect(JSON.stringify(of(leadRecords, 'user.message'))).not.toContain(toBob.id)
+    expect(JSON.stringify(of(leadRecords, 'user.message'))).not.toContain(aliceToBob.id)
 
     // The board: a task with open dependencies cannot start.
     const bobT3 = resultOf(bobRecords, 'b0')
@@ -208,7 +229,7 @@ describe('team: two teammates', () => {
     expect(starts.map(r => [r.name, r.childTurn, r.executionForm, r.toolCallId])).toEqual([
       ['alice', 1, 'team', 's1'],
       ['bob', 1, 'team', 's2'],
-      ['bob', 2, 'team', 'w1'],
+      ['bob', 2, 'team', 'm1'],
     ])
     expect(of(leadRecords, 'subagent.end').map(r => [r.childSessionId, r.childTurn, r.result.status]).sort()).toEqual([
       [alice.sessionId, 1, 'completed'],

@@ -12,10 +12,12 @@
  *   the next Lead turn continues it.
  * - At most {@link COLLABORATION_LIMITS.maxConcurrentMembers} teammates run
  *   at once (the kernel does not limit this).
- * - Mail is queued in the Lead and delivered once: injected at the start of
- *   the recipient's next turn (a `user.message { source: 'inject' }` carrying
- *   the message id), then recorded `delivered`. Mail for the Lead is handed
- *   over by `wait_teammates` or injected at the Lead's next turn.
+ * - Mail is queued in the Lead and delivered once: injected (a
+ *   `user.message { source: 'inject' }` carrying the message id) before the
+ *   recipient's next model request when a teammate is running (the kernel's
+ *   `Agent.beforeRequest`), else at the start of its next turn, then recorded
+ *   `delivered`. Mail for the Lead is handed over by `wait_teammates` or
+ *   injected at the Lead's next turn.
  */
 import {
   COLLABORATION_LIMITS,
@@ -92,7 +94,7 @@ export function renderTeammatePrompt(input: { readonly name: string; readonly ta
   if (input.files.length > 0) parts.push(`Read these project files first:\n${input.files.map(file => `- ${file}`).join('\n')}`)
   parts.push(
     `The team: ${[TEAM_LEAD_NAME, ...input.team].join(', ')} ("${TEAM_LEAD_NAME}" is the main conversation). `
-    + 'Use send_message to reach anyone by name; messages to you arrive at the start of your next turn. '
+    + 'Use send_message to reach anyone by name; messages to you arrive before your next step. '
     + 'team_task_list shows the shared task board and the team; team_task_update claims a task (in_progress), completes it with a one-line result, or cancels it. '
     + `Write files under your own subdirectory (${input.name}/) unless told otherwise, and hand them back with present. `
     + 'End with a short reply: what you did, where, and what is left.',
@@ -184,7 +186,7 @@ export class Team {
   private readonly waiters = new Set<() => void>()
   /** Lead turn whose end already cancelled teammates (no new runs start in it). */
   private settling: number | undefined
-  /** Message ids handed to a recipient's turn start and not yet recorded delivered. */
+  /** Message ids handed to a recipient's turn start or next request and not yet recorded delivered. */
   private readonly inflight = new Set<string>()
 
   constructor(deps: TeamDeps, leadId: string, state: TeamState) {
@@ -287,9 +289,10 @@ export class Team {
     return { ...preset, persona: mate.persona }
   }
 
-  /** Give a teammate's agent its team tools and remember it. */
+  /** Give a teammate's agent its team tools and its mail before each model request, and remember it. */
   private bind(name: string, agent: Agent): Agent {
     for (const tool of this.deps.teammateTools(this, name)) agent.ctx.tools.register(tool)
+    agent.beforeRequest(() => this.takeInjections(agent.sessionId))
     this.mate(name).agent = agent
     return agent
   }
@@ -439,10 +442,11 @@ export class Team {
   }
 
   /**
-   * For a recipient's turn start: the injected texts of its undelivered mail.
-   * Each message is recorded `delivered` once the recipient's session holds
-   * it (the kernel appends injected texts right after the providers ran);
-   * one that never landed is offered again at the next turn.
+   * For a recipient's turn start or, for a running teammate, its next model
+   * request: the injected texts of its undelivered mail. Each message is
+   * recorded `delivered` once the recipient's session holds it (the kernel
+   * appends injected texts before that request starts); one that never
+   * landed is offered again at the next request or turn.
    */
   takeInjections(sessionId: string): string[] {
     const recipient = this.nameOf(sessionId)
@@ -475,7 +479,7 @@ export class Team {
         }
         if (waiting.size === 0) unsubscribe()
       } else if (event.type === 'request.start' || event.type === 'turn.end' || event.type === 'closed') {
-        // Injections are written before the turn's first request; whatever has not landed by then did not.
+        // Injections are written before the request they precede; whatever has not landed by then did not.
         release()
       }
     })
