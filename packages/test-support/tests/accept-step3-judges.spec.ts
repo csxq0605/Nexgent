@@ -214,7 +214,7 @@ describe('the real delegation run', () => {
 
   it('the judges copy the kernel collaboration tools; a teammate keeps only its three team tools', () => {
     expect([...COLLABORATION_TOOLS]).toEqual(STEP3_TOOLS.map(t => t.name).filter(name => name !== 'run_code'))
-    for (const tool of MEMBER_DENIED_TOOLS) expect(forbiddenFor('delegated')).toContain(tool)
+    expect([...forbiddenFor('delegated')].sort()).toEqual([...MEMBER_DENIED_TOOLS].sort())
     expect(forbiddenFor('workflow')).toEqual([...COLLABORATION_TOOLS])
     expect(forbiddenFor('team')).toEqual(COLLABORATION_TOOLS.filter(t => !TEAMMATE_TOOLS.includes(t)))
   })
@@ -303,15 +303,17 @@ describe('H15 members cannot delegate', () => {
   }
   const teammateRequest = (o: Record<string, Phase>) => (o['team']!['requests'] as Phase[]).find(q => q['route'] === 'bob')!
 
-  it('fails today: delegated and workflow members see send_message and the team task tools; teammates are fine', () => {
+  it('passes on the real run: delegated members, workflow members and teammates (contract erratum #69)', () => {
     const result = judge('H15', real, tools)
-    expect(result.status).toBe('failed')
-    expect(result.evidence).toMatch(/delegated analyst: send_message\/team_task_create\/team_task_list\/team_task_update/)
-    expect(result.evidence).not.toMatch(/team (alice|bob):/)
-  })
-  it('passes once members see no forbidden tool (teammates keep their three)', () => {
-    expect(judge('H15', brokenObs(fixMembers), tools)).toMatchObject({ status: 'passed' })
+    expect(result.status, result.evidence).toBe('passed')
+    expect(result.evidence).toMatch(/requests from members \((?=[^)]*delegated)(?=[^)]*workflow)(?=[^)]*team)[^)]*\); none sees a forbidden collaboration tool/)
+    // Teammates keep their own three team tools.
     expect(TEAMMATE_TOOLS.every(t => teammateRequest(structuredClone(real) as unknown as Record<string, Phase>)['tools'].includes(t))).toBe(true)
+  })
+  it('fails when delegated members see the team tools (as before the contract erratum)', () => {
+    const result = judge('H15', brokenObs(o => { for (const q of o['delegation']!['requests']) if (q['route'] === 'analyst') q['tools'].push('send_message', 'team_task_create') }), tools)
+    expect(result.status).toBe('failed')
+    expect(result.evidence).toMatch(/delegated analyst: send_message\/team_task_create/)
   })
   it.each(COLLABORATION_TOOLS.map(t => [t]))('fails when a delegated member is offered %s', (tool) => {
     expect(judge('H15', brokenObs(o => { fixMembers(o); firstRequest(o['delegation']!, 'writer-b')['tools'].push(tool) }), tools).status).toBe('failed')

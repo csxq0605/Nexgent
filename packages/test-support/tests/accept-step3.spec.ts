@@ -29,11 +29,10 @@ const range = (prefix: string, from: number, to: number) =>
 /** The judges and step-2 regression items wired so far; everything else must report not-implemented. */
 const WIRED = new Set(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H09', 'H10', 'H12', 'H13', 'H15', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23', ...range('D', 1, 10)])
 /**
- * Items the headless layer passes today. Failing: H10 (a resumed team turn's formsUsed omits team),
- * H15 (delegated and workflow members still see team tools).
+ * Items the headless layer passes today. Failing: H10 (a resumed team turn's formsUsed omits team).
  */
-const PASSING = new Set<string>(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H09', 'H12', 'H13', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23'])
-const FAILING = new Set<string>(['H10', 'H15'])
+const PASSING = new Set<string>(['H01', 'H02', 'H03', 'H04', 'H05', 'H06', 'H07', 'H08', 'H09', 'H12', 'H13', 'H15', 'H16', 'H17', 'H18', 'H19', 'H22', 'H23'])
+const FAILING = new Set<string>(['H10'])
 
 describe('accept-step3 checklist', () => {
   it('has every item of the step-3 plan in order, plus the D01–D10 regression', async () => {
@@ -146,7 +145,7 @@ describe('scripts/accept-step3.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  it('headless layer: the wired items pass except H10 and H15 (known defects), the rest not-implemented, exit 1, valid summary', async () => {
+  it('headless layer: the wired items pass except H10 (a known kernel defect), the rest not-implemented, exit 1, valid summary', async () => {
     const { result, summary } = await runScript(['--layer', 'headless'])
     expect(result.status, result.stderr).toBe(EXIT_FAIL)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })

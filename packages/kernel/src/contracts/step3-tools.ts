@@ -249,6 +249,7 @@ export const RUN_CODE_TOOL: Step3ToolSpec = {
   name: 'run_code',
   effects: ['read', 'write', 'execute'],
   approval: 'never',
+  selfSandboxed: true,
   inputSchema: {
     type: 'object',
     additionalProperties: false,

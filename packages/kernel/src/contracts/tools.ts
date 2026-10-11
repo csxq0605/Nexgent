@@ -36,6 +36,14 @@ export interface ToolDefinition {
   readonly approval: ToolApproval
   /** Cooperative deadline in ms; the registry aborts `context.signal` when it passes. Absent means none. */
   readonly timeoutMs?: number
+  /**
+   * `true` when the tool itself checks every write and execution against the
+   * calling session's sandbox (e.g. `run_code`, whose host functions apply
+   * the path policy per call). The loop then does not refuse it up front in
+   * `read-only`; approval rules are unchanged. Only host packages that
+   * enforce such per-call checks may set it (`permissions.md` §工具审批).
+   */
+  readonly selfSandboxed?: boolean
 }
 
 /** What a tool receives besides its parsed arguments. */

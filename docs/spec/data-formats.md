@@ -586,7 +586,7 @@ The earlier part of this conversation was compacted. Summary:
 
 - **会话头。** 子会话的 `session.start` 带 `parentSessionId`（发起它的会话，深度 1，所以总是根会话）与 `member: { name, executionForm, preset? }`。两者必须同时出现，`SessionStore.create` 拒绝只给一个的输入（`session/invalid-record`）。`name` 匹配 `^[a-z][a-z0-9-]{0,31}$`，`executionForm` 为 `delegated | team | workflow`。投影把二者放进 `SessionMetadata.parentSessionId` / `member`。
 - **fork 种子。** fork 模式的子会话在 `session.start` 之后紧接一条 `fork.seed`（`seq: 2`）：`messages` 是父会话投影出的消息，截至父会话上一轮结束（`throughSeq` 为该轮 `turn.end` 的 `seq`），从父会话最近一次压缩之后开始（摘要消息本身保留）；保留的 `providerContent` 原样复制，thinking 块的回放规则与父会话相同。投影时 `messages` 直接成为子会话的初始历史；`fork.seed` 出现在任何消息或轮次之后时写入被拒。fresh 模式没有 `fork.seed`。
-- **一次运行。** 成员的一次运行是子会话的一轮。父会话在运行开始时写 `subagent.start`（`childTurn` 为这一轮的编号，`task` 截取任务说明前 500 个字符），结束时写 `subagent.end`（`result: MemberResult`）。委派与工作流成员各只有一次运行；队友在它参与的每个 Lead 轮次里各有一次运行，`childSessionId` 不变。
+- **一次运行。** 成员的一次运行是子会话的一轮。父会话在运行开始时写 `subagent.start`（`childTurn` 为这一轮的编号，`task` 截取任务说明前 500 个字符），结束时写 `subagent.end`（`result: MemberResult`）。委派与工作流成员各只有一次运行。队友每被启动或唤醒一次就是一次运行：首次启动、被邮件唤醒（空闲时收到新邮件）、在下一个 Lead 轮次里续做被 `parent` 取消的工作，各是子会话的一轮，各有一对 `subagent.start` / `subagent.end`，`childSessionId` 不变。所以一个 Lead 轮次里同一队友可以有多对记录（团队包限制每个 Lead 轮次至多 8 次运行）。
 - **`MemberResult`。** `{ status, text, deliverables, usage, requestCount, error? }`；`status` 为 `completed | failed | cancelled | budget | interrupted`，`text` 是成员最后一段回复（中断时为已流出的前缀），`deliverables` 是本次运行里 `present` 产出的版本（`DeliverableVersionRef[]`），`error` 只在非 `completed` 时出现。`budget` 表示任务树或成员份额的费用上限挡下了成员的下一次请求。
 - **恢复。** 进程在成员运行中死亡时：子会话按步骤 1 规则补 `turn.end { kind: "interrupted" }`；父会话恢复时，对没有 `subagent.end` 的 `subagent.start` 补一条 `status: "interrupted"` 的 `subagent.end`（由协作包以宿主身份写），对没有 `workflow.end` 的 `workflow.start` 补 `status: "interrupted"`。已有 `subagent.end` 的成员不重跑。
 
@@ -596,7 +596,7 @@ The earlier part of this conversation was compacted. Summary:
 
 - **花名册**（`team.member`）：`{ name, sessionId, status: active | idle | stopped, preset? }`，同名以最新一条为准。名字在一个 Lead 会话的在册队友中唯一；`lead` 保留给主对话。
 - **任务板**（`team.task`）：`{ id, title, description?, status: pending | in_progress | completed | cancelled, owner?, dependsOn, result? }`，同 `id` 以最新一条为准；`id` 由任务板按 `t1`、`t2`… 分配。`dependsOn` 中任一任务未 `completed` 时，该任务不能进入 `in_progress`。上限 256 项。
-- **邮箱**（`team.message`）：一条消息写两次，`id` 相同：发送时 `state: "queued"`，在收件人下一步模型请求之前注入时 `state: "delivered"`。恢复时，只有 `queued` 而没有对应 `delivered` 的消息投递一次，投递后补写 `delivered`；已 `delivered` 的不再投递。每个收件人待投递至多 64 条，单条正文至多 64 KiB（UTF-8）。
+- **邮箱**（`team.message`）：一条消息写两次，`id` 相同：发送时 `state: "queued"`，注入收件人会话后 `state: "delivered"`。收件人正在运行时，邮件在它下一次模型请求之前经 kernel 的 `Agent.beforeRequest` 注入；收件人空闲时先被唤醒，邮件在新一轮开始时注入；发给 `lead` 的邮件由 `wait_teammates` 的结果交给 Lead（`delivered` 写在该调用里），或在 Lead 下一轮开始时注入。恢复时，只有 `queued` 而没有对应 `delivered` 的消息投递一次，投递后补写 `delivered`；已 `delivered` 的不再投递。每个收件人待投递至多 64 条，单条正文至多 64 KiB（UTF-8）。
 - 注入的形式是收件人会话里的一条 `user.message { source: "inject" }`，正文含发件人名；它不出现在 Lead 的消息历史里。
 
 ## 工作流
