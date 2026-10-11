@@ -4,6 +4,7 @@
  * outcome, and map everything to an exit code (see `exit-codes.ts`).
  */
 import { existsSync } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import * as path from 'node:path'
 import { isNexgentError, NexgentError } from '@nexgent/kernel'
 import { createSdk } from '@nexgent/sdk'
@@ -99,7 +100,8 @@ export async function main(argv: readonly string[], io: CliIo = processIo(), dep
         io.stdout.write(`${packageVersion()}\n`)
         return EXIT.OK
       case 'app': {
-        const project = invocation.project === undefined ? undefined : (await initProjectLayout(invocation.project, io.cwd)).layout.root
+        // The desktop app opens (and initializes) the project itself; only check it is a directory.
+        const project = invocation.project === undefined ? undefined : await existingDirectory(path.resolve(io.cwd, invocation.project))
         await (deps.launchDesktop ?? launchDesktop)({ env: io.env, ...(project === undefined ? {} : { project }) })
         io.stderr.write(`nexgent: desktop app started${project === undefined ? '' : ` on ${project}`}\n`)
         return EXIT.OK
@@ -215,4 +217,10 @@ async function runExport(invocation: Extract<Invocation, { command: 'export' }>,
   } finally {
     await sdk.dispose()
   }
+}
+
+async function existingDirectory(dir: string): Promise<string> {
+  const isDir = await stat(dir).then(s => s.isDirectory(), () => false)
+  if (!isDir) throw new CliError(EXIT.ENVIRONMENT, `project directory not found: ${dir}`)
+  return dir
 }
