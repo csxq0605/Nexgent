@@ -2,7 +2,7 @@
   "name": "@nexgent/cli",
   "version": "0.0.0",
   "private": true,
-  "description": "Nexgent command-line entry point (nexgent run / resume / app)",
+  "description": "Nexgent command-line entry point (nexgent run / resume / export / app)",
   "type": "module",
   "bin": {
     "nexgent": "./bin/nexgent.mjs"
@@ -26,7 +26,7 @@
   "dependencies": {
     "@nexgent/kernel": "workspace:*",
     "@nexgent/llm": "workspace:*",
-    "@nexgent/session": "workspace:*",
+    "@nexgent/sdk": "workspace:*",
     "@nexgent/workspace": "workspace:*"
   },
   "devDependencies": {

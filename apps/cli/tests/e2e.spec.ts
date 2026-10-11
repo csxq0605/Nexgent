@@ -78,8 +78,10 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     const records = (await readSessionRecords(project, session.sessionId)).records as SessionRecord[]
     // The store may append a `checkpoint` after `turn.end` (data-formats.md policy).
     expect(records.map(r => r.type).filter(type => type !== 'checkpoint')).toEqual([
-      'session.start', 'turn.start', 'user.message', 'assistant.message', 'tool.result', 'assistant.message', 'turn.end',
+      'session.start', 'turn.start', 'user.message', 'assistant.message', 'tool.result', 'assistant.message', 'turn.files', 'turn.end',
     ])
+    // step 2: the turn's file changes are recorded (`@nexgent/tasking` through the SDK)
+    expect(records.find(r => r.type === 'turn.files')).toMatchObject({ changes: [{ path: FILE.path, change: 'added' }] })
     expect(records.every((r, i) => r.seq === i + 1)).toBe(true)
     expect(records.filter(r => r.type === 'turn.end')).toEqual([expect.objectContaining({ turn: 1, reason: { kind: 'completed' } })])
     expect(await lockExists(session.sessionId)).toBe(false)
@@ -159,6 +161,32 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     expect(outcomes).toEqual([expect.objectContaining({ status: 'cancelled' })])
     expect(await lockExists(sessionId)).toBe(false)
   }, 30_000)
+
+  it('exports a session: bundle files, its ledger lines, never the key', async () => {
+    server = await scriptedModelServer({ script: [{ toolCalls: [{ name: 'write_file', arguments: FILE }], usage }, { content: 'Done.', usage }] })
+    const run = testIo(work, env(server))
+    expect(await main(['run', '--project', project, '--task', 'write it', '--json'], run.io)).toBe(EXIT.OK)
+    const sessionId = (jsonLines(run.stdout.text)[0] as { sessionId: string }).sessionId
+
+    const t = testIo(work, env(server))
+    expect(await main(['export', sessionId, '--project', project, '--json'], t.io), t.stderr.text).toBe(EXIT.OK)
+    const [line] = jsonLines(t.stdout.text)
+    const out = path.join(work, `nexgent-export-${sessionId}`)
+    expect(line).toEqual({ type: 'export', sessionId, path: out, files: ['session.jsonl', 'ledger.jsonl', 'materials.json', 'deliverables.json', 'manifest.json'] })
+    for (const file of line!.files as string[]) expect(await fs.readFile(path.join(out, file), 'utf8')).not.toContain('e2e-test-key')
+    const ledger = (await fs.readFile(path.join(out, 'ledger.jsonl'), 'utf8')).trim().split('\n').map(l => JSON.parse(l) as { type: string; sessionId: string })
+    expect(ledger.map(r => r.type).sort()).toEqual(['llm.request.end', 'llm.request.end', 'llm.request.start', 'llm.request.start', 'task.outcome', 'tool.call'])
+    expect(ledger.every(r => r.sessionId === sessionId)).toBe(true)
+    expect(await fs.readFile(path.join(out, 'session.jsonl'), 'utf8')).toBe(await fs.readFile(path.join(project, '.nexgent', 'sessions', sessionId, 'session.jsonl'), 'utf8'))
+
+    // a second export into the same (now non-empty) directory is refused
+    const again = testIo(work, env(server))
+    expect(await main(['export', sessionId, '--project', project], again.io)).toBe(EXIT.TASK_FAILED)
+    expect(again.stderr.text).toContain('not empty')
+    // an unknown session is an environment error
+    const missing = testIo(work, env(server))
+    expect(await main(['export', '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', '--project', project, '--out', path.join(work, 'x')], missing.io)).toBe(EXIT.ENVIRONMENT)
+  })
 
   it('exits 3 without touching the model when the session does not exist', async () => {
     server = await scriptedModelServer({ script: [] })

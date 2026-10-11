@@ -3,9 +3,11 @@
  * session through the runtime seam, run one turn, render it, write the task
  * outcome, and map everything to an exit code (see `exit-codes.ts`).
  */
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { isNexgentError } from '@nexgent/kernel'
+import { existsSync } from 'node:fs'
+import * as path from 'node:path'
+import { isNexgentError, NexgentError } from '@nexgent/kernel'
+import { createSdk } from '@nexgent/sdk'
+import { launchDesktop, type AppLaunchOptions } from './app-launch.js'
 import { createApprovalResponder, type AnswerSource } from './approval.js'
 import { commandUsage, parseCliArgs, RESUME_DEFAULT_TASK, usage, type Invocation } from './args.js'
 import { requireApiKey, type CredentialProbe } from './credentials.js'
@@ -15,6 +17,9 @@ import { TaskTally } from './outcome.js'
 import { createRenderer, type Renderer, type TextSink } from './render.js'
 import { loadRuntime, RUNTIME_NOT_WIRED_CODE, RUNTIME_NOT_WIRED_MESSAGE, type CliRuntime } from './runtime.js'
 import { installSignalHandlers, InterruptController, type SignalSource } from './signals.js'
+import { packageVersion } from './version.js'
+
+export { packageVersion }
 
 /** Process-facing effects, injectable for tests. */
 export interface CliIo {
@@ -37,6 +42,8 @@ export interface CliDeps {
   readonly credentials?: CredentialProbe
   /** Approval prompt wait; default 300 s. */
   readonly approvalTimeoutMs?: number
+  /** Default: `app-launch.ts` `launchDesktop`. */
+  readonly launchDesktop?: (options: AppLaunchOptions) => Promise<unknown>
 }
 
 /** The real process. */
@@ -50,13 +57,6 @@ export function processIo(): CliIo {
     signals: process,
     exit: code => process.exit(code),
   }
-}
-
-/** Read the package version from `dist/../package.json`. */
-export function packageVersion(): string {
-  const url = new URL('../package.json', import.meta.url)
-  const pkg = JSON.parse(readFileSync(fileURLToPath(url), 'utf8')) as { version: string }
-  return pkg.version
 }
 
 /** Exit code for a thrown value. */
@@ -98,9 +98,15 @@ export async function main(argv: readonly string[], io: CliIo = processIo(), dep
       case 'version':
         io.stdout.write(`${packageVersion()}\n`)
         return EXIT.OK
-      case 'app':
-        io.stderr.write('nexgent app: the desktop app arrives in step 2; use `nexgent run` for now\n')
-        return EXIT.USAGE
+      case 'app': {
+        const project = invocation.project === undefined ? undefined : (await initProjectLayout(invocation.project, io.cwd)).layout.root
+        await (deps.launchDesktop ?? launchDesktop)({ env: io.env, ...(project === undefined ? {} : { project }) })
+        io.stderr.write(`nexgent: desktop app started${project === undefined ? '' : ` on ${project}`}\n`)
+        return EXIT.OK
+      }
+      case 'export':
+        renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
+        return await runExport(invocation, io)
       case 'run':
       case 'resume':
         renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
@@ -190,5 +196,23 @@ async function runTask(
   } finally {
     uninstall()
     await session.close()
+  }
+}
+
+async function runExport(invocation: Extract<Invocation, { command: 'export' }>, io: CliIo): Promise<ExitCode> {
+  const { layout } = await initProjectLayout(invocation.project, io.cwd)
+  if (!existsSync(path.join(layout.sessions, invocation.sessionId, 'session.jsonl'))) {
+    throw new NexgentError('session/not-found', `session ${invocation.sessionId} not found in ${layout.root}`)
+  }
+  const outDir = path.resolve(io.cwd, invocation.out ?? `nexgent-export-${invocation.sessionId}`)
+  const sdk = createSdk({ appVersion: packageVersion(), env: io.env })
+  try {
+    const { projectId } = await sdk.call('projects.open', { root: layout.root })
+    const result = await sdk.call('sessions.export', { projectId, sessionId: invocation.sessionId, outDir })
+    if (invocation.json) io.stdout.write(`${JSON.stringify({ type: 'export', sessionId: invocation.sessionId, path: result.path, files: result.files })}\n`)
+    else io.stdout.write(`exported session ${invocation.sessionId} to ${result.path}\n${result.files.map(file => `  ${file}`).join('\n')}\n`)
+    return EXIT.OK
+  } finally {
+    await sdk.dispose()
   }
 }

@@ -1,8 +1,10 @@
 /** `@nexgent/cli` — the `nexgent` command; the exports serve tests and the acceptance script. */
 export { main, processIo, packageVersion, exitCodeForError, errorMessage } from './main.js'
+export { APP_NOT_FOUND_CODE, desktopCommand, launchDesktop, NEXGENT_DESKTOP_DIR, NEXGENT_ELECTRON } from './app-launch.js'
+export type { AppCommand, AppLaunchOptions } from './app-launch.js'
 export type { CliIo, CliDeps } from './main.js'
 export { COMMANDS, RESUME_DEFAULT_TASK, commandUsage, isSessionId, parseCliArgs, usage } from './args.js'
-export type { AppInvocation, Command, HelpInvocation, Invocation, ResumeInvocation, RunInvocation, VersionInvocation } from './args.js'
+export type { AppInvocation, Command, ExportInvocation, HelpInvocation, Invocation, ResumeInvocation, RunInvocation, VersionInvocation } from './args.js'
 export { CliError, EXIT } from './exit-codes.js'
 export type { ExitCode } from './exit-codes.js'
 export { initProjectLayout } from './layout.js'

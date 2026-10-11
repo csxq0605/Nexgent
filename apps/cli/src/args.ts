@@ -6,7 +6,8 @@
  * ```text
  * nexgent run --project <dir> --task "<text>" [--sandbox <mode>] [--model <id>] [--json]
  * nexgent resume <sessionId> --project <dir> [--task "<text>"] [--sandbox <mode>] [--json]
- * nexgent app --project <dir>
+ * nexgent export <sessionId> --project <dir> [--out <dir>] [--json]
+ * nexgent app [--project <dir>]
  * nexgent --version | --help | <command> --help
  * ```
  *
@@ -18,7 +19,7 @@ import { DEFAULT_PROJECT_CONFIG, SANDBOX_MODES, type SandboxMode } from '@nexgen
 import { CliError, EXIT } from './exit-codes.js'
 
 /** Subcommands, in help order. */
-export const COMMANDS = ['run', 'resume', 'app'] as const
+export const COMMANDS = ['run', 'resume', 'export', 'app'] as const
 
 /** One of {@link COMMANDS}. */
 export type Command = (typeof COMMANDS)[number]
@@ -49,10 +50,20 @@ export interface ResumeInvocation {
   readonly json: boolean
 }
 
-/** `nexgent app`: the desktop app entry (step 2 placeholder). */
+/** `nexgent export`: write the minimal export bundle of one session. */
+export interface ExportInvocation {
+  readonly command: 'export'
+  readonly sessionId: string
+  readonly project: string
+  /** Bundle directory (must be missing or empty); absent means `./nexgent-export-<sessionId>`. */
+  readonly out?: string
+  readonly json: boolean
+}
+
+/** `nexgent app`: launch the desktop app, optionally on a project. */
 export interface AppInvocation {
   readonly command: 'app'
-  readonly project: string
+  readonly project?: string
 }
 
 /** `--help`, globally or for one command. */
@@ -67,7 +78,7 @@ export interface VersionInvocation {
 }
 
 /** Everything {@link parseCliArgs} can return. */
-export type Invocation = RunInvocation | ResumeInvocation | AppInvocation | HelpInvocation | VersionInvocation
+export type Invocation = RunInvocation | ResumeInvocation | ExportInvocation | AppInvocation | HelpInvocation | VersionInvocation
 
 /** The task `resume` sends when `--task` is omitted. */
 export const RESUME_DEFAULT_TASK = 'Continue the previous task from where it stopped.'
@@ -85,6 +96,7 @@ const OPTIONS = {
   task: { type: 'string' },
   sandbox: { type: 'string' },
   model: { type: 'string' },
+  out: { type: 'string' },
   json: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' },
@@ -96,6 +108,7 @@ type OptionName = keyof typeof OPTIONS
 const ACCEPTED: Readonly<Record<Command, readonly OptionName[]>> = {
   run: ['project', 'task', 'sandbox', 'model', 'json'],
   resume: ['project', 'task', 'sandbox', 'json'],
+  export: ['project', 'out', 'json'],
   app: ['project'],
 }
 
@@ -148,6 +161,11 @@ export function parseCliArgs(argv: readonly string[]): Invocation {
     if (!ACCEPTED[command].includes(name)) throw usageError(`nexgent ${command} does not accept --${name}`)
   }
 
+  if (command === 'app') {
+    if (positionals.length > 0) throw usageError(`nexgent app takes no positional arguments, got "${positionals[0]}"`)
+    const project = optionalText('project', values.project)
+    return project === undefined ? { command } : { command, project }
+  }
   const project = requireText('project', values.project)
   const sandbox = parseSandbox(values.sandbox)
   const json = values.json === true
@@ -177,9 +195,14 @@ export function parseCliArgs(argv: readonly string[]): Invocation {
         ...(sandbox === undefined ? {} : { sandbox }),
       }
     }
-    case 'app':
-      if (positionals.length > 0) throw usageError(`nexgent app takes no positional arguments, got "${positionals[0]}"`)
-      return { command, project }
+    case 'export': {
+      const [sessionId, extra] = positionals
+      if (sessionId === undefined) throw usageError('nexgent export needs a <sessionId>')
+      if (extra !== undefined) throw usageError(`nexgent export takes one <sessionId>, got extra "${extra}"`)
+      if (!isSessionId(sessionId)) throw usageError(`"${sessionId}" is not a session id (lowercase UUID v4)`)
+      const out = optionalText('out', values.out)
+      return { command, sessionId, project, json, ...(out === undefined ? {} : { out }) }
+    }
   }
 }
 
@@ -191,7 +214,8 @@ export function usage(): string {
     'Commands:',
     '  run      start a new session and run one task',
     '  resume   continue a saved session',
-    '  app      launch the desktop app (step 2; not available yet)',
+    '  export   write the minimal export bundle of a session',
+    '  app      launch the desktop app',
     '',
     'Options:',
     '  -v, --version  print the version',
@@ -234,11 +258,24 @@ export function commandUsage(command: Command): string {
         `${sandbox} (default: the mode recorded in the session)`,
         '  --json             JSON lines on stdout instead of text',
       ].join('\n')
+    case 'export':
+      return [
+        'Usage: nexgent export <sessionId> --project <dir> [--out <dir>] [--json]',
+        '',
+        'Write the minimal export bundle of a session: session.jsonl, the ledger lines',
+        'of the session, materials.json, deliverables.json and manifest.json. API key',
+        'values never appear in it (a leaked value is replaced by [REDACTED]).',
+        '',
+        '  --project <dir>    project directory holding .nexgent/sessions/<sessionId>',
+        '  --out <dir>        bundle directory, missing or empty (default: ./nexgent-export-<sessionId>)',
+        '  --json             print the result as one JSON line',
+      ].join('\n')
     case 'app':
       return [
-        'Usage: nexgent app --project <dir>',
+        'Usage: nexgent app [--project <dir>]',
         '',
-        'Launch the desktop app on a project. Arrives in step 2; this build exits with 2.',
+        'Launch the desktop app (apps/desktop, or NEXGENT_DESKTOP_DIR), optionally on a',
+        'project. Exits with 2 when the desktop app is not built or installed.',
       ].join('\n')
   }
 }

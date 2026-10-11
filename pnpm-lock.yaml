@@ -35,9 +35,9 @@ importers:
       '@nexgent/llm':
         specifier: workspace:*
         version: link:../../packages/llm
-      '@nexgent/session':
+      '@nexgent/sdk':
         specifier: workspace:*
-        version: link:../../packages/session
+        version: link:../../packages/sdk
       '@nexgent/workspace':
         specifier: workspace:*
         version: link:../../packages/workspace
