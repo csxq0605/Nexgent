@@ -55,18 +55,29 @@ function fill(text: string, values: Readonly<Record<string, string>>): string {
 }
 
 /**
- * Step-2 file-tool guidance (step-2 work partition, W0 → W7): edit existing
- * files with `str_replace`, create them with `write_file`, and declare
- * deliverables with `present`. Each line appears only when its tools are
- * offered, so the prompt never names a tool the model cannot call.
+ * Step-2 file-tool guidance (step-2 work partition, W0 → W7): create files
+ * with `write_file`, edit them with `str_replace`, keep the shell for running
+ * things, and declare deliverables with `present`. Each line appears only
+ * when its tools are offered, so the prompt never names a tool the model
+ * cannot call. The shell line exists because a real run (step 2, R02) wrote
+ * every file through heredocs and Python string replacement.
  */
 function fileGuidance(tools: ReadonlySet<string>, materials: boolean): string[] {
   const lines: string[] = []
-  const shell = tools.has('bash') || tools.has('pwsh')
-  if (tools.has('str_replace')) {
-    lines.push(`- To change an existing file, use \`str_replace\`${tools.has('read_file') ? ' (read the file with `read_file` first)' : ''}${shell ? '; do not rewrite files through shell commands (heredocs, sed, inline scripts)' : ''}.`)
+  const shells = ['bash', 'pwsh'].filter(name => tools.has(name)).map(name => `\`${name}\``)
+  const write = tools.has('write_file')
+  const edit = tools.has('str_replace')
+  if (write) lines.push("- To create a new file, or to replace a file's whole content, use `write_file`.")
+  if (edit) {
+    lines.push(`- To change an existing file, use \`str_replace\`${tools.has('read_file') ? ' (read the file with `read_file` first)' : ''}; `
+      + 'for several changes, call it once per change.')
   }
-  if (tools.has('write_file')) lines.push('- To create a new file or replace a file completely, use `write_file`.')
+  if (shells.length > 0 && (write || edit)) {
+    const own = [write ? '`write_file`' : undefined, edit ? '`str_replace`' : undefined].filter(Boolean).join(' and ')
+    lines.push(`- Write and edit file contents only with ${own}. Do not create or modify files through ${shells.join(' or ')}: `
+      + 'no heredocs (`cat > file <<EOF`), `echo >`, `tee`, `sed -i`, and no Python, Node or other scripts that write or rewrite a file. '
+      + `Use ${shells.join(' or ')} to run programs, scripts and tests; files those programs produce (for example a report your script generates), and copying or moving files, are fine.`)
+  }
   if (tools.has('present')) {
     lines.push('- When a file is a result for the user, declare it with `present` once it is ready, and again after each revision; '
       + 'when presenting a revision, pass the `deliverableId` that `present` returned so it becomes a new version of the same deliverable.')

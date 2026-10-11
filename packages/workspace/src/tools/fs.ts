@@ -158,7 +158,7 @@ export function writeFileTool(deps: ToolDeps): WorkspaceTool {
   return {
     definition: {
       name,
-      description: 'Create or overwrite a UTF-8 text file in the project with the given content. Parent directories are created.',
+      description: 'Create a new UTF-8 text file in the project, or replace a file\'s whole content. Use this, not shell heredocs, echo or scripts, whenever you write file content yourself. Parent directories are created.',
       inputSchema: objectSchema({
         path: { type: 'string', description: 'File path, relative to the project root.' },
         content: { type: 'string', description: 'Complete new file content.' },
@@ -230,7 +230,7 @@ export function strReplaceTool(deps: ToolDeps): WorkspaceTool {
   return {
     definition: {
       name,
-      description: 'Edit a text file by replacing old_str with new_str. old_str must match exactly one location (include surrounding lines to make it unique). Line endings of the file are preserved.',
+      description: 'Change an existing text file by replacing old_str with new_str. Use this, not sed, Python or other scripts, for every edit; call it once per change. old_str must match exactly one location (include surrounding lines to make it unique). Line endings of the file are preserved.',
       inputSchema: objectSchema({
         path: { type: 'string', description: 'File path, relative to the project root.' },
         old_str: { type: 'string', description: 'Exact text to replace; must occur exactly once.' },
