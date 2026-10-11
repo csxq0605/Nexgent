@@ -1,0 +1,22 @@
+endpoint https://api.anthropic.com model claude-sonnet-5-5 thinking off
+
+[tool-call.start] {"type":"tool-call.start","index":0,"id":"toolu_017jxdELbsiLn9hq8BBvoXC1","name":"write_file"}
+
+[tool-call.delta] {"type":"tool-call.delta","index":0,"argumentsDelta":"{\"path\": \"notes.md"}
+
+[tool-call.delta] {"type":"tool-call.delta","index":0,"argumentsDelta":"\", \"content\": \"hi"}
+
+[tool-call.delta] {"type":"tool-call.delta","index":0,"argumentsDelta":"\"}"}
+
+[tool-call.end] {"type":"tool-call.end","index":0,"call":{"id":"toolu_017jxdELbsiLn9hq8BBvoXC1","name":"write_file","arguments":"{\"path\": \"notes.md\", \"content\": \"hi\"}"}}
+
+[usage] {"type":"usage","usage":{"inputTokens":423,"outputTokens":72,"totalTokens":495,"cacheReadTokens":0,"reasoningTokens":"unknown"}}
+
+[done] {"type":"done","finishReason":"tool-calls","providerContent":[{"type":"tool_use","id":"toolu_017jxdELbsiLn9hq8BBvoXC1","name":"write_file","caller":{"type":"direct"},"input":{"path":"notes.md","content":"hi"}}]}
+
+--- summary
+terminal: {"type":"done","finishReason":"tool-calls","providerContent":[{"type":"tool_use","id":"toolu_017jxdELbsiLn9hq8BBvoXC1","name":"write_file","caller":{"type":"direct"},"input":{"path":"notes.md","content":"hi"}}]}
+tool calls: 1 write_file({"path": "notes.md", "content": "hi"})
+usage: {"inputTokens":423,"outputTokens":72,"totalTokens":495,"cacheReadTokens":0,"reasoningTokens":"unknown"}
+ledger: [{"type":"llm.request.start","requestId":"035fbc44-f5ca-4941-9fd0-9e877932ef49","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","purpose":"auxiliary","thinking":"off","ts":"2026-10-11T04:07:48.040Z"},{"type":"llm.request.end","requestId":"035fbc44-f5ca-4941-9fd0-9e877932ef49","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","status":"ok","usage":{"inputTokens":423,"outputTokens":72,"totalTokens":495,"cacheReadTokens":0,"reasoningTokens":"unknown"},"latencyMs":1681,"httpStatus":200,"finishReason":"tool-calls","ts":"2026-10-11T04:07:49.722Z"}]
+PASS
