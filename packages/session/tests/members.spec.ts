@@ -14,6 +14,7 @@ import {
   type Context,
   type LLMProvider,
   type LLMStreamEvent,
+  type ApprovalRequest,
   type NexgentApp,
   type Plugin,
   type Workspace,
@@ -47,9 +48,9 @@ const llm: LLMProvider = {
   })(),
 }
 
-function boot(root: string): Promise<NexgentApp> {
+function boot(root: string, provider: LLMProvider = llm): Promise<NexgentApp> {
   const registry: Record<string, Plugin> = {
-    '@nexgent/llm': { name: 'test-llm', apply: (ctx: Context) => { ctx.provide('llm', llm) } },
+    '@nexgent/llm': { name: 'test-llm', apply: (ctx: Context) => { ctx.provide('llm', provider) } },
     '@nexgent/session': SessionPlugin as unknown as Plugin,
     '@nexgent/workspace': { name: 'test-workspace', apply: (ctx: Context) => { ctx.provide('workspace', workspace(root)) } },
   }
@@ -104,6 +105,57 @@ describe('members with JsonlSessionStore', () => {
     expect(ends.map(record => record.type === 'turn.end' && record.reason)).toEqual([{ kind: 'interrupted' }])
     const state = await store.resume(memberId!)
     expect(state.metadata).toMatchObject({ parentSessionId: parentId, member: { name: 'helper', executionForm: 'delegated' } })
+  })
+
+  it('writes a member approval request through the validating store', async () => {
+    const root = await tempDir()
+    // First request: a write_env call; after its result: a text answer.
+    const writer: LLMProvider = {
+      info: llm.info,
+      complete: request => (async function* (): AsyncGenerator<LLMStreamEvent> {
+        if (request.messages.at(-1)?.role === 'tool') {
+          yield { type: 'text.delta', text: 'done' }
+          yield { type: 'usage', usage: KNOWN_USAGE }
+          yield { type: 'done', finishReason: 'stop' }
+          return
+        }
+        yield { type: 'tool-call.start', index: 0, id: 'w1', name: 'write_env' }
+        yield { type: 'tool-call.delta', index: 0, argumentsDelta: '{"path":".env"}' }
+        yield { type: 'tool-call.end', index: 0, call: { id: 'w1', name: 'write_env', arguments: '{"path":".env"}' } }
+        yield { type: 'usage', usage: KNOWN_USAGE }
+        yield { type: 'done', finishReason: 'tool-calls' }
+      })(),
+    }
+    const app = await boot(root, writer)
+    const seen: ApprovalRequest[] = []
+    let parentId = ''
+    let memberId = ''
+    try {
+      app.ctx.tools.register({
+        definition: { name: 'write_env', description: 'Writes .env.', inputSchema: { type: 'object', properties: {} }, effects: ['write'], approval: 'ask' },
+        handler: async () => ({ content: 'written' }),
+      })
+      app.ctx.approvals.setResponder(async request => {
+        seen.push(request)
+        return { id: request.id, decision: 'deny', scope: 'once', decidedBy: 'user' }
+      })
+      const parent = await app.agents.create()
+      const member = await app.agents.create({ child: { parentSessionId: parent.sessionId, member: { name: 'helper', executionForm: 'delegated' } } })
+      parentId = parent.sessionId
+      memberId = member.sessionId
+      const result = await member.run('write the env file')
+      expect(result.reason).toEqual({ kind: 'completed' })
+      await member.close()
+      await parent.close()
+    } finally {
+      await app.dispose()
+    }
+    expect(seen.map(request => request.member)).toEqual([{ name: 'helper', executionForm: 'delegated', parentSessionId: parentId }])
+    const { records } = await new JsonlSessionStore({ layout: resolveWorkspaceLayout(root) }).readAll(memberId)
+    const request = records.find(record => record.type === 'approval.request')
+    expect(request?.type === 'approval.request' && request.request).toMatchObject({ sessionId: memberId, tool: 'write_env', member: seen[0]!.member })
+    const result = records.find(record => record.type === 'tool.result')
+    expect(result).toMatchObject({ name: 'write_env', isError: true })
   })
 
   it('stamps the open agent attribution on ledger records written outside its loop', async () => {

@@ -75,6 +75,8 @@ const inputs: SessionRecordInput[] = [
       options: ['once', 'session'],
       pattern: 'ls',
       expiresAt: TS,
+      // step 3: a member raised it
+      member: { name: 'analyst', executionForm: 'delegated', parentSessionId: 'parent-1' },
     },
   },
   { type: 'approval.decision', turn: 1, decision: { id: 'ap1', decision: 'allow', scope: 'session', decidedBy: 'user', reason: 'ok' } },
@@ -201,6 +203,16 @@ describe('session record schema', () => {
       }),
     ).not.toEqual([])
     expect(isSessionRecord(start)).toBe(true)
+  })
+
+  it('checks the member of an approval request field by field', () => {
+    const request = sampleRecords().find(record => record.type === 'approval.request')!
+    const withMember = (member: unknown) => ({ ...request, request: { ...(request as { request: object }).request, member } })
+    expect(validateSessionRecord(withMember({ name: 'writer', executionForm: 'team', parentSessionId: 'p' }))).toEqual([])
+    expect(validateSessionRecord(withMember({ name: 'writer', executionForm: 'team' }))[0]?.message).toMatch(/parentSessionId/)
+    expect(validateSessionRecord(withMember({ name: 'writer', executionForm: 'direct', parentSessionId: 'p' }))[0]?.path).toBe('/request/member/executionForm')
+    expect(validateSessionRecord(withMember({ name: 'Writer', executionForm: 'team', parentSessionId: 'p' }))[0]?.path).toBe('/request/member/name')
+    expect(validateSessionRecord(withMember({ name: 'writer', executionForm: 'team', parentSessionId: 'p', preset: 'x' }))[0]).toEqual({ path: '/request/member/preset', message: 'unknown property' })
   })
 
   it('validates checkpoint states', () => {
