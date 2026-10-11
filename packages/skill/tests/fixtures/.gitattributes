@@ -1,0 +1,2 @@
+# Test documents are byte-exact (PDF xref offsets, ZIP CRCs); never convert line endings.
+* binary

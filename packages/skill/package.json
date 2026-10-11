@@ -1,0 +1,35 @@
+{
+  "name": "@nexgent/skill",
+  "version": "0.0.0",
+  "private": true,
+  "description": "\u6280\u80fd\u53d1\u73b0\u4e0e\u6309\u9700\u52a0\u8f7d\uff08SKILL.md\uff09\u3001\u5185\u7f6e Office \u8bfb\u53d6\u6280\u80fd\u4e0e read_document \u5de5\u5177\uff08.docx/.xlsx/.pdf\uff09\u3002",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*",
+    "fflate": "0.8.3",
+    "unpdf": "1.8.1",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@nexgent/context": "workspace:*",
+    "@nexgent/session": "workspace:*",
+    "@nexgent/test-support": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
+  }
+}
