@@ -39,6 +39,7 @@
 | 文档 | 状态 |
 | --- | --- |
 | [`research/pr4-review-and-plan-2026-10/README.md`](research/pr4-review-and-plan-2026-10/README.md) | 计划，2026-10-07 |
+| [`research/frontier-survey-2026-10/README.md`](research/frontier-survey-2026-10/README.md) | 调研，2026-10-11：旧 RSI 分支复核（快照 10-05）与截至 2026-08-31 的前沿进展，对应步骤 3–6 |
 | [`adr/0001-reference-rewrite.md`](adr/0001-reference-rewrite.md) | 已接受：参考重写与计划 4.9 的全部决策 |
 | [`adr/0002-claude-platform-route.md`](adr/0002-claude-platform-route.md) | 已接受：模型路由改为 Claude Platform，默认 Claude Sonnet 5.5（决策 3 的默认值被 ADR 0003 替代） |
 | [`adr/0003-thinking-on-by-default.md`](adr/0003-thinking-on-by-default.md) | 已接受：执行默认开启 thinking |
