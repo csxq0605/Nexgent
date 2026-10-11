@@ -47,8 +47,8 @@ const DESCRIPTIONS = {
     + 'Teammates only work while your turn lasts: collect their results with wait_teammates before you finish. '
     + `At most 4 run at once. Presets: ${BUILTIN_PRESET_NAMES.join(', ')} (default ${DEFAULT_PRESET_NAME}), or .nexgent/presets/<name>.json; `
     + 'persona replaces the preset\'s persona but never widens its tools or sandbox.',
-  send_message: 'Send a message to a teammate by name, or to "lead". It is delivered once, at the start of the recipient\'s next turn; '
-    + 'an idle teammate is woken by it.',
+  send_message: 'Send a message to a teammate by name, or to "lead". It is delivered once: before a working teammate\'s next step, '
+    + 'otherwise at the start of the recipient\'s next turn; an idle teammate is woken by it.',
   wait_teammates: 'Wait until the named teammates (default: every active one) have stopped working, then return each one\'s last result '
     + '(status, deliverables, final reply) and the messages sent to you.',
   team_task_create: 'Add a task to the shared task board. dependsOn lists task ids that must be completed before this one can start.',
@@ -181,7 +181,7 @@ export function leadTools(options: LeadToolOptions): Tool[] {
       const args = (raw ?? {}) as Record<string, unknown>
       const team = await options.team(context.sessionId)
       const message = await team.sendFromLead(leadCall(context), text(args.to, 'to').trim(), text(args.text, 'text'))
-      return { content: `Message ${message.id} queued for ${message.to}; it is delivered at the start of its next turn.`, meta: meta({ id: message.id, to: message.to }) }
+      return { content: `Message ${message.id} queued for ${message.to}; it is delivered before its next step, or at the start of its next turn when it is not working.`, meta: meta({ id: message.id, to: message.to }) }
     },
   }
 
@@ -259,7 +259,7 @@ export function teammateTools(team: Team, name: string): Tool[] {
     handler: async raw => {
       const args = (raw ?? {}) as Record<string, unknown>
       const message = await team.sendFromTeammate(name, text(args.to, 'to').trim(), text(args.text, 'text'))
-      return { content: `Message ${message.id} queued for ${message.to}; it is delivered at the start of its next turn.`, meta: meta({ id: message.id, to: message.to }) }
+      return { content: `Message ${message.id} queued for ${message.to}; it is delivered before its next step, or at the start of its next turn when it is not working.`, meta: meta({ id: message.id, to: message.to }) }
     },
   }
   const list: Tool = {

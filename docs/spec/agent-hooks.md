@@ -32,8 +32,9 @@
 6. 步骤循环，每一步：
    1. 取消检查、费用上限检查（步骤 1 不变）；
    2. \* 压缩检查：有 `compactor` 且本轮还没有失败过压缩时调用 `shouldCompact(input)`；为真则 `compact(input, signal)`，成功后写 `compaction` 并按投影规则替换内存中的历史；
-   3. 模型请求，写 `assistant.message`（步骤 1 不变）；
-   4. 执行工具：每个调用写（`approval.*`）→ \*（工具通过 `appendRecord` 追加的记录，如 `deliverable.presented`）→ `tool.result`；\* 每个 `tool.result` 之后调用 `files.observe(...)`。
+   3. 步骤 3：逐次注入：调用 agent 上登记的 `beforeRequest` 注入器（kernel 接口，不是契约；`@nexgent/team` 用它在运行中的队友下一步之前投递邮件），返回的每段写一条 `user.message { source: 'inject' }` 并随本次请求发出；续接 `pause` 回复的那次请求之前不调用；注入器抛错时跳过它，写 `error`（`fatal: false`）；
+   4. 模型请求，写 `assistant.message`（步骤 1 不变）；
+   5. 执行工具：每个调用写（`approval.*`）→ \*（工具通过 `appendRecord` 追加的记录，如 `deliverable.presented`）→ `tool.result`；\* 每个 `tool.result` 之后调用 `files.observe(...)`。
 7. \* `ctx.tasking.files.endTurn(sessionId, turn, signal)`，写 `turn.files`（列表为空也写）。
 8. 写 `turn.end`；按步骤 1 规则写 `checkpoint`。
 
@@ -41,7 +42,7 @@
 
 ```text
 turn.start → [feedback] → user.message(inject)* → user.message(user|feedback)
-  → ( [compaction] → assistant.message → ( [approval.*] → [deliverable.presented] → tool.result )* )*
+  → ( [compaction] → user.message(inject)* → assistant.message → ( [approval.*] → [deliverable.presented] → tool.result )* )*
   → turn.files → turn.end → [checkpoint]
 ```
 
