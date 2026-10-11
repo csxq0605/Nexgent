@@ -3,6 +3,7 @@
 //   hang <dir>      spawn a grandchild, write pids to <dir>/pids.json, print "ready", hang
 //   exit <code>     print to stderr and exit with <code>
 //   file <path>     write <path> after a short delay, then hang
+//   tool <dir>      like hang, but prints a nexgent --json tool.start event instead of "ready"
 import { spawn } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -21,6 +22,11 @@ if (mode === 'echo') {
   const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
   writeFileSync(join(arg, 'pids.json'), JSON.stringify({ child: process.pid, grandchild: grandchild.pid }))
   process.stdout.write('ready\n')
+  hang()
+} else if (mode === 'tool') {
+  const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+  writeFileSync(join(arg, 'pids.json'), JSON.stringify({ child: process.pid, grandchild: grandchild.pid }))
+  process.stdout.write('{"type":"tool.start","callId":"c1","name":"bash","arguments":"{}"}\n')
   hang()
 } else if (mode === 'exit') {
   process.stderr.write('bye\n')

@@ -34,3 +34,11 @@ export {
   toWireUsage,
 } from './server.js'
 export * from './acceptance.js'
+export {
+  type RequestEntry,
+  compactionSummary,
+  expectRequest,
+  failCompaction,
+  isAuxiliaryRequest,
+  requestText,
+} from './requests.js'
