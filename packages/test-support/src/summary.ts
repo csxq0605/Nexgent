@@ -17,10 +17,18 @@ export const ACCEPTANCE_SUMMARY_KIND = 'nexgent.acceptance-summary'
 /** Current summary schema version. */
 export const ACCEPTANCE_SUMMARY_VERSION = 1
 
+/** How a check ended; `not-implemented` never counts as passed. */
+export type AcceptanceCheckStatus = 'passed' | 'failed' | 'not-implemented'
+
 /** One check an acceptance script made. */
 export interface AcceptanceCheck {
+  /** Stable check id from the step's checklist (e.g. `H01`), when it has one. */
+  readonly id?: string
   readonly name: string
   readonly passed: boolean
+  /** Set by {@link AcceptanceSummaryBuilder.item}; must agree with `passed`. */
+  readonly status?: AcceptanceCheckStatus
+  /** Evidence for the verdict (or why the check could not run). */
   readonly detail?: string
   readonly durationMs?: number
 }
@@ -183,8 +191,10 @@ export const ACCEPTANCE_SUMMARY_SCHEMA: Readonly<Record<string, unknown>> = {
     checks: {
       type: 'array',
       items: obj({
+        id: { type: 'string', pattern: '^[A-Z][0-9]{2}$' },
         name: { type: 'string', minLength: 1 },
         passed: { type: 'boolean' },
+        status: { enum: ['passed', 'failed', 'not-implemented'] },
         detail: str,
         durationMs: { type: 'number', minimum: 0 },
       }, ['name', 'passed']),
@@ -308,6 +318,11 @@ export function validateAcceptanceSummary(value: unknown): ValidationResult {
     const summary = value as AcceptanceSummary
     const expected = summary.checks.length > 0 && summary.checks.every((c) => c.passed) ? 'pass' : 'fail'
     if (summary.result !== expected) errors.push(`/result: must be "${expected}" given checks`)
+    summary.checks.forEach((c, i) => {
+      if (c.status !== undefined && (c.status === 'passed') !== c.passed) {
+        errors.push(`/checks/${i}/status: "${c.status}" disagrees with passed: ${c.passed}`)
+      }
+    })
   }
   return { valid: errors.length === 0, errors }
 }
@@ -341,6 +356,11 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] }
 export interface AcceptanceSummaryBuilder {
   /** Record a check. */
   check(name: string, passed: boolean, detail?: string): AcceptanceSummaryBuilder
+  /**
+   * Record a checklist item by id. `not-implemented` is recorded as not
+   * passed (so the summary fails) and also listed under `failures.untested`.
+   */
+  item(id: string, name: string, status: AcceptanceCheckStatus, detail?: string): AcceptanceSummaryBuilder
   /**
    * Run `fn` as a named check, timing it. A throw records a failed check
    * (detail = error message) and is rethrown.
@@ -431,6 +451,12 @@ export function acceptanceSummary(init: AcceptanceSummaryInit): AcceptanceSummar
       checks.push(detail === undefined ? { name, passed } : { name, passed, detail })
       return builder
     },
+    item(id, name, status, detail) {
+      const base = { id, name, passed: status === 'passed', status }
+      checks.push(detail === undefined ? base : { ...base, detail })
+      if (status === 'not-implemented') lists.untested.push(`${id} ${name} (not implemented)`)
+      return builder
+    },
     async run(name, fn) {
       const started = Date.now()
       try {
@@ -476,7 +502,9 @@ export function acceptanceSummary(init: AcceptanceSummaryInit): AcceptanceSummar
     doesNotProve(text) { lists.doesNotProve.push(text); return builder },
     build() {
       const result = checks.length > 0 && checks.every((c) => c.passed) ? 'pass' : 'fail'
-      const failed = checks.filter((c) => !c.passed).map((c) => (c.detail === undefined ? c.name : `${c.name}: ${c.detail}`))
+      const failed = checks
+        .filter((c) => !c.passed && c.status !== 'not-implemented')
+        .map((c) => (c.detail === undefined ? c.name : `${c.name}: ${c.detail}`))
       return {
         kind: ACCEPTANCE_SUMMARY_KIND,
         schemaVersion: ACCEPTANCE_SUMMARY_VERSION,
