@@ -4,7 +4,9 @@
  * 检查项清单): three layers of checks, all judged by this script from files,
  * session records, ledger lines and process state.
  *
- *   headless  H01–H22  scripted provider, through the SDK and the CLI (CI, both platforms)
+ *   headless  H01–H22  scripted provider; until @nexgent/sdk exists (round 3) the
+ *                      runtime is composed in-process (accept-common/step2-runtime.mjs)
+ *                      and the kill checks run it in a child (step2-driver.mjs)
  *   desktop   D01–D10  scripted provider, Playwright driving Electron (CI, both platforms)
  *   real      R01–R07  real Claude model (manual: Linux cloud session, thinking on;
  *                      Windows optional via .github/workflows/nexgent-real-model.yml)
@@ -30,6 +32,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { loadHarness, REPO_ROOT } from './accept-common/harness.mjs'
+import { runHeadlessScenario } from './accept-common/step2-headless.mjs'
+import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
 import {
   budgetGate,
   CHECKS,
@@ -86,7 +90,18 @@ async function prepareLayer(layer, options) {
   if (layer === 'headless') {
     const loaded = await loadHarness()
     if (!loaded.ok) return { ok: false, reason: loaded.reason }
-    return { ok: true, ctx: { harness: loaded.harness, work: options.work } }
+    const packages = await loadStep2Packages()
+    if (!packages.ok) return { ok: false, reason: packages.reason }
+    const h = loaded.harness
+    const tools = { ...packages.pkgs.session, requestText: h.requestText, isAuxiliaryRequest: h.isAuxiliaryRequest }
+    await mkdir(options.work, { recursive: true })
+    // One scenario run; every H judge reads its observations. A crash fails every H item.
+    try {
+      const obs = await runHeadlessScenario(h, options.work, { log: line => log(`headless: ${line}`) })
+      return { ok: true, ctx: { harness: h, work: options.work, obs, tools } }
+    } catch (error) {
+      return { ok: true, ctx: { harness: h, work: options.work, tools, scenarioError: error instanceof Error ? (error.stack ?? error.message) : String(error) } }
+    }
   }
   if (layer === 'desktop') {
     const desktop = join(REPO_ROOT, 'apps', 'desktop', 'package.json')

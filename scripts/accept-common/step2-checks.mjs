@@ -5,9 +5,15 @@
  * they can be unit-tested (`packages/test-support/tests/accept-step2.spec.ts`).
  *
  * A check is implemented when its entry has a `run(ctx)` function returning
- * `{ pass: boolean, evidence: string }`. Entries without `run` are reported
- * as `not-implemented`: never a pass, and the script exits 2.
+ * `{ pass: boolean, evidence: string }` or `{ status, evidence }` (status
+ * `passed` / `failed` / `not-implemented`, for an item that is only partly
+ * checkable yet). Entries without `run` are reported as `not-implemented`:
+ * never a pass, and the script exits 2.
+ *
+ * Headless items run the judge of the same id (step2-judges.mjs) over the
+ * observations the headless layer collected (`ctx.obs`, `ctx.tools`).
  */
+import { JUDGES, judge } from './step2-judges.mjs'
 
 export const EXIT_PASS = 0
 export const EXIT_FAIL = 1
@@ -32,7 +38,11 @@ export const REAL_MODEL = {
   task: 'scripts/real-task/step2-sales: orders.csv + regions.xlsx; generate → feedback revision → kill mid-stream and resume',
 }
 
-const item = (id, layer, title) => ({ id, layer, title })
+const headlessRun = id => (ctx) => {
+  if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `headless scenario failed: ${ctx.scenarioError}` }
+  return judge(id, ctx.obs, ctx.tools)
+}
+const item = (id, layer, title) => (layer === 'headless' && JUDGES[id] !== undefined ? { id, layer, title, run: headlessRun(id) } : { id, layer, title })
 
 /** All 39 checklist items, in plan order. Add `run` to implement one. */
 export const CHECKS = [
@@ -93,6 +103,8 @@ export function parseLayers(value) {
   return { ok: true, layers: Object.keys(LAYERS).filter(layer => expanded.includes(layer)) }
 }
 
+const ITEM_STATUSES = new Set(['passed', 'failed', 'not-implemented'])
+
 /**
  * Evaluate one checklist item. A missing `run` is `not-implemented`; a
  * throw or a malformed result is `failed`.
@@ -102,6 +114,9 @@ export async function evaluateItem(entry, ctx) {
   if (typeof entry.run !== 'function') return { status: 'not-implemented', evidence: 'not implemented yet' }
   try {
     const result = await entry.run(ctx)
+    if (result !== null && typeof result === 'object' && ITEM_STATUSES.has(result.status)) {
+      return { status: result.status, evidence: String(result.evidence ?? '') }
+    }
     if (result === null || typeof result !== 'object' || typeof result.pass !== 'boolean') {
       return { status: 'failed', evidence: `check returned ${JSON.stringify(result)} instead of { pass, evidence }` }
     }

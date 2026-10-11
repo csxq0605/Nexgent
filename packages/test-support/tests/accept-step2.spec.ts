@@ -49,6 +49,11 @@ describe('accept-step2 checklist', () => {
     expect(await evaluateItem({ run: async () => ({ pass: false, evidence: 'no v2' }) }, {})).toEqual({ status: 'failed', evidence: 'no v2' })
     expect((await evaluateItem({ run: () => { throw new Error('boom') } }, {})).status).toBe('failed')
     expect((await evaluateItem({ run: () => ({ pass: 'yes' }) as never }, {})).status).toBe('failed')
+    expect(await evaluateItem({ run: () => ({ status: 'not-implemented', evidence: 'needs the SDK' }) }, {})).toEqual({ status: 'not-implemented', evidence: 'needs the SDK' })
+    expect((await evaluateItem({ run: () => ({ status: 'passed?' }) as never }, {})).status).toBe('failed')
+    // Headless items judge the scenario's observations; a crashed scenario fails them all.
+    const h02 = CHECKS.find(check => check.id === 'H02')!
+    expect(await evaluateItem(h02, { scenarioError: 'boom' })).toMatchObject({ status: 'failed' })
   })
 
   it('exit code: any failure is 1, anything not implemented or not runnable is 2, never 0 without checks', () => {
@@ -91,19 +96,21 @@ describe('scripts/accept-step2.mjs (requires `pnpm build`)', () => {
     }
   }
 
+  // The desktop layer is not runnable yet, so all its items must come out not-implemented.
+  // (The headless layer runs the full scenario; its judges are tested in accept-step2-judges.spec.ts.)
   it('never reports a fake pass: unimplemented items are listed as such, the summary fails, exit 2', async () => {
-    const { result, summary } = await runScript([])
+    const { result, summary } = await runScript(['--layer', 'desktop'])
     expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
     expect(summary).toBeDefined()
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
     expect(summary?.result).toBe('fail')
     expect(summary?.conclusion.meetsExitCriteria).toBe(false)
-    expect(summary?.checks.map(check => check.id)).toEqual(CHECKS.filter(check => check.layer !== 'real').map(check => check.id))
+    expect(summary?.checks.map(check => check.id)).toEqual(CHECKS.filter(check => check.layer === 'desktop').map(check => check.id))
     for (const check of summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'not-implemented' })
   }, 90_000)
 
   it('--allow-not-ready exits 0 but keeps the summary failed', async () => {
-    const { result, summary } = await runScript(['--allow-not-ready'])
+    const { result, summary } = await runScript(['--layer', 'desktop', '--allow-not-ready'])
     expect(result.status, result.stderr).toBe(EXIT_PASS)
     expect(summary?.result).toBe('fail')
     expect(result.stderr).toContain('not fully wired')
