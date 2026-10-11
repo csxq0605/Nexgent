@@ -17,7 +17,7 @@
  * ANTHROPIC_API_KEY from this process's environment are never passed on.
  */
 import { spawn } from 'node:child_process'
-import { access, copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -173,6 +173,8 @@ async function readLogs(home) {
  */
 export async function runDesktopScenario(harness, work, { log = () => {} } = {}) {
   const { _electron: electron } = await import('playwright-core')
+  // The long path: on Windows tmpdir() can be an 8.3 short path, and the app reports canonical ones.
+  work = await realpath(work)
   const obs = { consoleErrors: { first: [], second: [] } }
   const rendererDir = join(work, 'renderer')
   const home = join(work, 'home')
@@ -217,7 +219,10 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     const descendants = await harness.descendantPids(child.pid).catch(() => [])
     for (const pid of descendants) orphans.add(pid)
     const exited = new Promise(resolve => child.once('exit', resolve).once('error', resolve))
-    child.kill('SIGKILL')
+    // Windows: the whole tree, as a crash would; killing electron.exe alone left its
+    // children running and the restart was refused as a second instance.
+    if (process.platform === 'win32') await harness.killProcessTree(child.pid)
+    else child.kill('SIGKILL')
     await exited
     return descendants
   }
