@@ -120,7 +120,7 @@ export function toWireUsage(usage: ScriptedUsage): WireUsageParts {
   return { start, delta }
 }
 
-const WIRE_STOP = { 'stop': 'end_turn', 'tool-calls': 'tool_use', 'max-tokens': 'max_tokens', 'refusal': 'refusal' } as const
+const WIRE_STOP = { 'stop': 'end_turn', 'tool-calls': 'tool_use', 'max-tokens': 'max_tokens', 'refusal': 'refusal', 'pause': 'pause_turn' } as const
 
 type Block = { readonly start: Record<string, unknown>; readonly deltas: readonly Record<string, unknown>[] }
 
