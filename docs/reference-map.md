@@ -117,9 +117,9 @@
 | `experimental/ptc-runtime-python` | — | 不要 | — | 需要 CPython 时再参考 |
 | `preset/agent-preset`、`preset/persona` | `@nexgent/preset` | 改写 | 3 | 预设与人设；组织角色、团队模板（JSON）迁入 |
 | `preset/agent-preset-registry` | `@nexgent/preset` | 改写 | 3、4 | 步骤 4 的能力版本把预设注入 profile |
-| `skill/skill-filesystem` | `@nexgent/skill` | 改写 | 3 | SKILL.md 目录发现，替代 Python 技能编译器 |
+| `skill/skill-filesystem` | `@nexgent/skill` | 改写 | 3 | SKILL.md 目录发现，替代 Python 技能编译器；步骤 3 只补用户目录 `~/.nexgent/skills/`（只参考设计，无复制件） |
 | `mcp/mcp-client`、`mcp/mcp-resources` | `@nexgent/mcp` | 改写 | 3（按需） | 只在有真实需求时实现 |
-| `web/web`、`web/tool-web`、`web/web-fetch-http` | `@nexgent/web` | 改写 | 3 | 公开网页读取，替代 Python 实现 |
+| `web/web`、`web/tool-web`、`web/web-fetch-http` | `@nexgent/web` | 改写 | 3 | 公开网页读取，替代 Python 实现。复制件：`src/markdown.ts` ← `web/tool-web/src/fetch.ts`（turndown 规则、嵌套深度保护），`src/turndown-plugin-gfm.d.ts` ← 同包同名文件；`web-fetch-http/src/policy.ts` 只参考设计（URL 与内容类型规则），地址检查、连接固定与重定向逐跳检查为 Nexgent 自写 |
 | `web/web-search-deepseek`、`web-search-exa`、`web-search-perplexity` | — | 不要 | — | 搜索 provider 需要时作为配置项 |
 
 ### 步骤 4：能力版本
