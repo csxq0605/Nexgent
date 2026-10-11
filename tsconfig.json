@@ -47,6 +47,12 @@
       "path": "packages/subagent"
     },
     {
+      "path": "packages/ptc"
+    },
+    {
+      "path": "packages/workflow"
+    },
+    {
       "path": "apps/desktop/src/renderer"
     }
   ]
