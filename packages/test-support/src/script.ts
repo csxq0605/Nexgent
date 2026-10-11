@@ -48,7 +48,7 @@ export type ScriptedFault =
 export type ScriptedFaultShorthand = 'timeout' | 'disconnect' | 'http-500' | 'malformed-json'
 
 /** Finish reasons a turn may end with. */
-export type ScriptedFinishReason = 'stop' | 'tool-calls' | 'max-tokens' | 'refusal'
+export type ScriptedFinishReason = 'stop' | 'tool-calls' | 'max-tokens' | 'refusal' | 'pause'
 
 /** Why the scripted model refused. */
 export interface ScriptedStopDetails {

@@ -126,6 +126,12 @@ describe('scriptedModelServer', () => {
     })
   })
 
+  it('streams a scripted pause as stop_reason pause_turn', async () => {
+    server = await scriptedModelServer({ script: [{ content: 'searching', finishReason: 'pause' }] })
+    const events = await streamed({ stream: true })
+    expect(events.find((e) => e['type'] === 'message_delta')!.delta).toEqual({ stop_reason: 'pause_turn', stop_sequence: null })
+  })
+
   it('answers non-streaming requests with a message body', async () => {
     server = await scriptedModelServer({ script: [{ content: 'ok', toolCalls: [{ id: 'c1', name: 't', arguments: '{}' }], usage: { inputTokens: 3, outputTokens: 4 } }] })
     const json = await (await post({ model: 'm', messages: [] })).json() as {
