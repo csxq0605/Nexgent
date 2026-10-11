@@ -1,7 +1,9 @@
 // Types for step2-checks.mjs (consumed by packages/test-support/tests/accept-step2.spec.ts).
 export type LayerId = 'headless' | 'desktop' | 'real'
 export type ItemStatus = 'passed' | 'failed' | 'not-implemented'
-export interface CheckResult { readonly pass: boolean; readonly evidence?: string }
+export type CheckResult =
+  | { readonly pass: boolean; readonly evidence?: string }
+  | { readonly status: ItemStatus; readonly evidence?: string }
 export interface CheckEntry {
   readonly id: string
   readonly layer: LayerId
