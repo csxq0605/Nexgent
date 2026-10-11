@@ -54,6 +54,8 @@ export const DENIED_PATTERNS: readonly string[] = ['.nexgent/sessions/**', '.nex
 export const WRITE_DENIED_PATTERNS: readonly string[] = [
   '.nexgent',
   '.nexgent/materials/**',
+  '.nexgent/outputs/**',
+  '.nexgent/skills/**',
   '.nexgent/config.json',
   '**/.git/**',
   '**/node_modules/**',
@@ -239,7 +241,7 @@ export class LocalSandbox implements Sandbox {
       const rel = this.relative(real)
       if (rel !== undefined) {
         const denied = this.policy.deniedPatterns.find(pattern => matchGlob(pattern, rel))
-          ?? (rel.startsWith('.nexgent/') && !/^\.nexgent\/(materials|outputs)(\/|$)|^\.nexgent\/config\.json$/.test(rel) ? '.nexgent/**' : undefined)
+          ?? (rel.startsWith('.nexgent/') && !/^\.nexgent\/(materials|outputs|skills)(\/|$)|^\.nexgent\/config\.json$/.test(rel) ? '.nexgent/**' : undefined)
         if (denied !== undefined) {
           return { kind: 'deny', path: real, code: 'denied-pattern', reason: `${rel} is reserved for the host (${denied})` }
         }
@@ -268,7 +270,7 @@ export class LocalSandbox implements Sandbox {
       }
       const denied = this.policy.deniedPatterns.find(pattern => matchGlob(pattern, rel))
         ?? this.policy.writeDeniedPatterns.find(pattern => matchGlob(pattern, rel))
-        ?? (rel.startsWith('.nexgent/') && !/^\.nexgent\/outputs\//.test(rel) ? '.nexgent/**' : undefined)
+        ?? (rel.startsWith('.nexgent/') ? '.nexgent/**' : undefined)
       if (denied !== undefined) {
         return { kind: 'deny', path: real, code: 'denied-pattern', reason: `${rel} is write-protected (${denied})` }
       }

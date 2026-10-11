@@ -74,7 +74,7 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 }
 ```
 
-- **消息**：`system` → 顶层 `system`；`user` → 文本；`assistant` 带 `providerContent` 时原样发送该数组（保留 thinking：含 `signature` 的 `thinking` 块、`text`、`tool_use` 一字不改），否则由 `content` / `toolCalls` 组成 `[text?, tool_use*]`（`arguments` 解析为 `input`，解析失败发 `{}`）；连续的 `tool` 消息合并为**一条** `user` 消息的 `tool_result` 块（API 要求同一轮的每个 `tool_use` 在下一条 user 消息里一并回答）。顺序只追加不重排。
+- **消息**：`system` → 顶层 `system`；`user` → 文本；`assistant` 带 `providerContent` 时原样发送该数组（保留 thinking：含 `signature` 的 `thinking` 块、`text`、`tool_use` 一字不改），否则由 `content` / `toolCalls` 组成 `[text?, tool_use*]`（`arguments` 解析为 `input`，解析失败发 `{}`）；连续的 `tool` 消息合并为**一条** `user` 消息的 `tool_result` 块（API 要求同一轮的每个 `tool_use` 在下一条 user 消息里一并回答）；相邻的 `user` 消息（注入的上下文、压缩摘要、本轮用户消息、紧跟在工具结果后的用户消息）合并为一条 `user` 消息，文本块按原顺序排列，不依赖 API 自动合并。顺序只追加不重排。
 - **thinking / effort**：`thinking: 'off'` → `{ type: 'between_tools' }`（Sonnet 5.5 的最低设置；只在 effort ≤ `high` 时有效，`xhigh` / `max` 时省略 `thinking`，即自适应）；`thinking: 'on'` → `{ type: 'adaptive', display: 'summarized' }`。从不发送 `disabled` 或 `budget_tokens`。`effort` 取请求的 `effort`，否则插件默认 `medium`。
 - **不发送**：`temperature` / `top_p`（该模型拒绝非默认值；忽略 `request.temperature`）、强制 `tool_choice`。
 - **缓存**：顶层 `cache_control: { type: 'ephemeral' }`，自动缓存最后一个可缓存块。

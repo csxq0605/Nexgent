@@ -79,8 +79,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 1. 修改已有文件用 `str_replace`（有 `read_file` 时先读）；有 shell 工具时不要用 shell 命令（heredoc、sed、内联脚本）改文件。——已实现。
 2. 新建或整体替换文件用 `write_file`。——已实现。
-3. 结果就绪时用 `present` 声明交付，每次修订后再次声明。——已实现；**待补**（W7，随 W2 的 `present` 落地）：再次声明时带上 `deliverableId`，使之成为同一成果的新版本。
-4. **待补**（W7，随 W1 的资料注入落地）：`.nexgent/materials/` 下的资料只读，结果写进项目。
+3. 结果就绪时用 `present` 声明交付，每次修订后再次声明；再次声明时带上 `present` 返回的 `deliverableId`，使之成为同一成果的新版本。——已实现。
+4. `.nexgent/materials/` 下的资料只读，结果写进项目。只在项目有资料（`ctx.tasking.materials.list()` 非空，轮次开始时检查）时出现。——已实现。
 
 前三条对应真实模型补验的 R02（修改轮里对已有文件的修改走 `str_replace`）与链路里的 present / v2。
 

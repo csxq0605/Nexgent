@@ -65,7 +65,11 @@ function assistantContent(message: Extract<LLMMessage, { role: 'assistant' }>): 
  * system prompt (the last one wins; the loop sends exactly one). Consecutive
  * `tool` messages merge into one `user` turn of `tool_result` blocks, as the
  * API requires every `tool_use` of a turn to be answered in the next single
- * user message. Order is kept as given; nothing is reordered.
+ * user message. Adjacent `user` turns (injected context, a compaction
+ * summary, the turn's own message, or a message right after tool results)
+ * merge into one `user` turn whose blocks keep their order, instead of
+ * relying on the API to merge them. Order is kept as given; nothing is
+ * reordered.
  * @param messages - the request's messages.
  */
 export function toWireMessages(messages: readonly LLMMessage[]): { system: string | undefined; messages: Anthropic.MessageParam[] } {
@@ -93,9 +97,19 @@ export function toWireMessages(messages: readonly LLMMessage[]): { system: strin
       case 'system':
         system = message.content
         break
-      case 'user':
-        out.push({ role: 'user', content: message.content })
+      case 'user': {
+        const previous = out.at(-1)
+        if (previous?.role === 'user') {
+          const blocks: Anthropic.ContentBlockParam[] = typeof previous.content === 'string'
+            ? [{ type: 'text', text: previous.content }]
+            : [...previous.content]
+          blocks.push({ type: 'text', text: message.content })
+          out[out.length - 1] = { role: 'user', content: blocks }
+        } else {
+          out.push({ role: 'user', content: message.content })
+        }
         break
+      }
       case 'assistant': {
         const content = assistantContent(message)
         // The API rejects an empty assistant turn; keep the turn with an empty text block.
