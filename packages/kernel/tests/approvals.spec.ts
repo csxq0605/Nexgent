@@ -9,6 +9,7 @@ import {
   type ApprovalRequest,
   type KernelToolContext,
   type LLMUsage,
+  RUN_CODE_TOOL,
   type Tool,
   UNKNOWN_USAGE,
 } from '../src/index.js'
@@ -203,6 +204,28 @@ describe('tool approval in the loop', () => {
     expect(harness.store.of(agent.sessionId, 'tool.result')[0]).toMatchObject({ isError: true, error: { code: 'sandbox/denied' } })
     expect(harness.ledger.of('tool.call')[0]!.approval).toEqual({ required: false, decision: 'deny' })
     expect(harness.llm.requests[0]!.messages[0]!.content).toContain('read-only')
+  })
+
+  it('runs run_code in read-only mode and leaves its writes to the tool\'s own sandbox check', async () => {
+    harness = await bootHarness({ script: [toolCallReply('c1', 'run_code', { code: 'return 1' }), textReply('ok')] })
+    const modes: string[] = []
+    harness.app.ctx.tools.register({
+      definition: { ...RUN_CODE_TOOL, description: 'Runs code.' },
+      handler: async (_input, context) => {
+        modes.push(context.sandboxMode)
+        // As @nexgent/ptc's host functions do: reads pass, a write is refused per call.
+        return { content: context.sandboxMode === 'read-only' ? 'read ok; write refused: sandbox/denied' : 'read ok; wrote' }
+      },
+    })
+    harness.app.ctx.approvals.setResponder(async () => {
+      throw new Error('should not be asked')
+    })
+    const agent = await harness.app.agents.create({ sandboxMode: 'read-only' })
+    await agent.run('compute')
+    expect(modes).toEqual(['read-only'])
+    expect(harness.store.types(agent.sessionId)).not.toContain('approval.request')
+    expect(harness.store.of(agent.sessionId, 'tool.result')[0]).toMatchObject({ isError: false, content: 'read ok; write refused: sandbox/denied' })
+    expect(harness.ledger.of('tool.call')[0]!.approval).toEqual({ required: false, decision: 'auto' })
   })
 
   it('runs ask tools without asking in full-access, but still asks for always tools', async () => {

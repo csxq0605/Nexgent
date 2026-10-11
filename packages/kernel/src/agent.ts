@@ -351,6 +351,22 @@ interface StreamOutcome {
   readonly refusal?: RefusalInfo
 }
 
+/** What a {@link StepInjector} is told about the request about to be made. */
+export interface StepInjectionInput {
+  readonly sessionId: string
+  readonly turn: number
+  /** The step whose model request follows (1 = the turn's first request). */
+  readonly step: number
+  readonly signal: AbortSignal
+}
+
+/**
+ * Called before each model request of a running turn (see
+ * {@link Agent.beforeRequest}); each returned text is written as
+ * `user.message { source: 'inject' }` and sent with that request.
+ */
+export type StepInjector = (input: StepInjectionInput) => readonly string[] | Promise<readonly string[]>
+
 interface Authorization {
   readonly allowed: boolean
   readonly approval: ToolCallApproval
@@ -399,6 +415,8 @@ export class Agent {
   private openTurn: number | undefined
   /** The running turn's file tracker, once `beginTurn` succeeded. */
   private turnFiles: TurnFileTracker | undefined
+  /** Per-request injectors (see {@link beforeRequest}). */
+  private readonly injectors = new Set<StepInjector>()
   /** Work that keeps the running turn open (see {@link holdTurn}). */
   private readonly holds = new Set<Promise<unknown>>()
   /** The history as of the end of the last completed turn, for a fork (see {@link forkSeed}). */
@@ -497,6 +515,24 @@ export class Agent {
     const held = work.then(() => undefined, () => undefined)
     this.holds.add(held)
     void held.then(() => this.holds.delete(held))
+  }
+
+  /**
+   * Register a per-request injector: before each model request of a turn
+   * (after the compaction check), the agent calls it and writes each text it
+   * returns as `user.message { source: 'inject' }`, so the request carries
+   * it. This lets a package hand a running agent something before its next
+   * step instead of at its next turn start (`@nexgent/team` delivers mail
+   * this way). Not called before the request that continues a paused reply
+   * (that request must send the paused reply back as is). An injector that
+   * throws is skipped for that request with a non-fatal `error` record.
+   * @returns a function that removes the injector.
+   */
+  beforeRequest(injector: StepInjector): () => void {
+    this.injectors.add(injector)
+    return () => {
+      this.injectors.delete(injector)
+    }
   }
 
   /** Settles when the running turn (if any) has ended. */
@@ -881,6 +917,25 @@ export class Agent {
     this.turnSections = sections
   }
 
+  /** Run the {@link beforeRequest} injectors in registration order and record their texts. */
+  private async injectStep(turn: number, step: number, signal: AbortSignal): Promise<void> {
+    for (const injector of [...this.injectors]) {
+      if (signal.aborted) return
+      let texts: readonly string[]
+      try {
+        texts = await injector({ sessionId: this.sessionId, turn, step, signal })
+      } catch (error) {
+        const info = toErrorInfo(error)
+        await this.appendError({ ...info, message: `step injector failed: ${info.message}` }, false, turn)
+        continue
+      }
+      for (const content of texts) {
+        await this.append({ type: 'user.message', turn, content, source: 'inject' })
+        this.messages.push({ role: 'user', content })
+      }
+    }
+  }
+
   /**
    * Ask the compactor before a model call. Returns `false` when a compaction
    * failed (the caller stops trying for the rest of the turn); the history is
@@ -1048,6 +1103,11 @@ export class Agent {
       }
       if (context !== undefined && !compactionFailed) {
         compactionFailed = !(await this.maybeCompact(context, turn, step, signal))
+        if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
+      }
+      // A paused reply ends the history; its continuation request goes out unchanged.
+      if (this.injectors.size > 0 && this.messages.at(-1)?.role !== 'assistant') {
+        await this.injectStep(turn, step, signal)
         if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
       }
 

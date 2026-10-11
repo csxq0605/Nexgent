@@ -63,9 +63,26 @@ export interface Step3Observations {
   readonly direct?: DirectObservations
   readonly delegation?: DelegationObservations
   readonly readonly?: ReadonlyObservations
+  readonly tools?: ProjectObservations
+  readonly workflow?: ProjectObservations
+  readonly team?: ProjectObservations
+}
+/** The tools, workflow and team projects' observations. */
+export interface ProjectObservations {
+  readonly root?: string
+  readonly sessionId?: string
+  readonly phases?: Readonly<Record<string, Readonly<Record<string, unknown>>>>
+  readonly requests?: readonly RequestObservation[]
+  readonly sessionFiles?: readonly string[]
+  readonly sessions?: Sessions
+  readonly ledger?: ReadonlyArray<Record<string, unknown>>
+  readonly [key: string]: unknown
 }
 export declare const STEP3_RECORD_TYPES: readonly string[]
 export declare const FORBIDDEN_TOP_LEVEL: readonly string[]
-export declare const MEMBER_DENIED_TOOLS: readonly string[]
+export declare const COLLABORATION_TOOLS: readonly string[]
+export declare const TEAMMATE_TOOLS: readonly string[]
+export declare function forbiddenFor(form: string | undefined): string[]
+export declare const PROJECTS: readonly string[]
 export declare const JUDGES: Readonly<Record<string, (obs: Step3Observations) => { status: ItemStatus; evidence: string }>>
 export declare function judge(id: string, obs: Step3Observations | undefined, tools?: unknown): { status: ItemStatus; evidence: string }
