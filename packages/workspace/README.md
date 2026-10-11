@@ -22,6 +22,7 @@
 
 工具名：`read_file`、`write_file`、`str_replace`、`list_files`、`search_text`、`bash` / `pwsh`。全部声明
 `approval: 'never'`；按调用的升级（形态黑名单、敏感文件、始终审批表）由沙箱判定。
+`write_file` 只新建文件：路径已存在时返回 `tool/failed`，并提示改用 `str_replace`（`docs/spec/agent-hooks.md` §系统提示增量第 2 条）。
 
 ## Policy summary
 
