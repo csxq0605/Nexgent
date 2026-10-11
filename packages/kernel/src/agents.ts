@@ -509,7 +509,7 @@ export class AgentsService extends Service {
         }
       }
       const projectConfig = parent?.projectConfig ?? loaded!.config
-      return this.build({
+      const agent = await this.build({
         sessionId,
         lock,
         scope,
@@ -527,6 +527,9 @@ export class AgentsService extends Service {
         settings: this.settings(preset),
         ...(parent === undefined || member === undefined ? {} : { member: { identity: member, parent, budget: options.child?.budget } }),
       })
+      // A reopened member works in this tree too: its form counts in the root's `formsUsed`.
+      if (parent !== undefined && member !== undefined) parent.tree.use(member.executionForm)
+      return agent
     } catch (error) {
       await session.release(lock).catch(() => undefined)
       throw error

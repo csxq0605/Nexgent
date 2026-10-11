@@ -133,7 +133,7 @@ export function renderSystemPrompt(input: SystemPromptInput): string {
   sections.push([
     '# Environment',
     `- Platform: ${input.platform}; shell: ${shell}.`,
-    `- Sandbox mode: ${SANDBOX_TEXT[input.sandboxMode]}`,
+    `- Sandbox mode: ${SANDBOX_TEXT[input.sandboxMode]}${input.sandboxMode === 'read-only' && names.has('run_code') ? ' `run_code` still runs, but its writes are refused.' : ''}`,
     '- Relative paths resolve against the project directory. `.nexgent/` holds Nexgent\'s own data; do not edit it.',
     '- If a tool call is denied, choose another approach or explain what permission is needed.',
   ].join('\n'))

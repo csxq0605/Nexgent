@@ -5,7 +5,6 @@
  */
 import type { ApprovalSubject } from './contracts/approvals.js'
 import type { ApprovalGrant, ApprovalRisk, ApprovalScope } from './contracts/approvals.js'
-import { RUN_CODE_TOOL } from './contracts/step3-tools.js'
 import type { ToolDefinition } from './contracts/tools.js'
 import type { SandboxMode } from './contracts/workspace.js'
 
@@ -16,14 +15,6 @@ export type ToolPolicyVerdict =
   | { readonly kind: 'deny'; readonly reason: string }
 
 const ALL_SCOPES: readonly ApprovalScope[] = ['once', 'session', 'project']
-
-/**
- * Tools that check every write against the calling session's sandbox
- * themselves, so `read-only` does not refuse them up front
- * (`permissions.md` §代码执行进程 (PTC): `run_code` still runs read-only code
- * in `read-only`; its write host functions are refused per call).
- */
-const SELF_SANDBOXED_TOOLS: ReadonlySet<string> = new Set([RUN_CODE_TOOL.name])
 
 function mutates(definition: ToolDefinition): boolean {
   return definition.effects.includes('write') || definition.effects.includes('execute')
@@ -38,11 +29,12 @@ function mutates(definition: ToolDefinition): boolean {
  * | `workspace-write` | run | ask | ask (once) |
  * | `full-access` | run | run | ask (once) |
  *
- * `run_code` is exempt from the `read-only` refusal: its process has no file
- * system of its own and each host function checks the session's mode.
+ * A tool that declares `selfSandboxed: true` (step 3: `run_code`) is exempt
+ * from the `read-only` refusal: it checks each read and write against the
+ * session's mode itself (`permissions.md` §工具审批).
  */
 export function decideToolPolicy(definition: ToolDefinition, mode: SandboxMode): ToolPolicyVerdict {
-  if (mode === 'read-only' && mutates(definition) && !SELF_SANDBOXED_TOOLS.has(definition.name)) {
+  if (mode === 'read-only' && mutates(definition) && definition.selfSandboxed !== true) {
     return { kind: 'deny', reason: `SANDBOX_DENIED: ${definition.name} needs ${definition.effects.join('/')} access, but the session is read-only` }
   }
   if (definition.approval === 'always') return { kind: 'ask', risk: 'high', options: ['once'] }

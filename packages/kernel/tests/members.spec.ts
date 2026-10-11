@@ -197,6 +197,26 @@ describe('child sessions', () => {
     expect(again.isClosed).toBe(true)
   })
 
+  it('counts a member reopened under a reopened root in that tree\'s formsUsed', async () => {
+    harness = await bootHarness({ script: [textReply('hi'), textReply('again'), textReply('lead done')] })
+    const { app, ledger } = harness
+    const root = await app.agents.create()
+    const child = await app.agents.create({ child: { parentSessionId: root.sessionId, member: { name: 'mate', executionForm: 'team' } } })
+    await child.run('first')
+    await root.close({ skipOutcome: true })
+    // After a restart: a new tree for the root; the teammate is resumed, not created.
+    const reopened = await app.agents.resume(root.sessionId)
+    expect(reopened.formsUsed()).toEqual(['direct'])
+    const again = await app.agents.resume(child.sessionId, { child: { parentSessionId: root.sessionId } })
+    expect(reopened.formsUsed()).toEqual(['direct', 'team'])
+    await again.run('second')
+    await reopened.run('wrap up')
+    await reopened.close()
+    const outcomes = ledger.of('task.outcome').filter(outcome => outcome.memberId === 'main')
+    expect(outcomes.map(outcome => [outcome.taskId, outcome.formsUsed])).toEqual([[reopened.attribution.taskId, ['direct', 'team']]])
+    expect(reopened.attribution.taskId).not.toBe(root.attribution.taskId)
+  })
+
   it('counts members against the root perTask cap and a member against its share', async () => {
     harness = await bootHarness({
       script: [
