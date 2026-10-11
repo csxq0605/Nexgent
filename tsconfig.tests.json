@@ -1,7 +1,11 @@
 {
   // Type-checks every package's and app's tests (vitest runs them without
   // checking types). Runs after `tsc -b`, so `@nexgent/*` imports resolve to
-  // the built declarations; nothing is emitted.
+  // the built declarations; nothing is emitted. Kernel tests come first: they
+  // compile the kernel from source, and a package sorting before `kernel`
+  // (e.g. `context`) would otherwise load `kernel/dist` first, so the
+  // duplicate Cordis augmentations (`ctx.agents`, ...) are reported against
+  // `kernel/src` instead of being skipped in the `.d.ts` (`skipLibCheck`).
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
@@ -12,5 +16,5 @@
     "sourceMap": false,
     "allowJs": false
   },
-  "include": ["packages/*/tests/**/*.ts", "apps/*/tests/**/*.ts"]
+  "include": ["packages/kernel/tests/**/*.ts", "packages/*/tests/**/*.ts", "apps/*/tests/**/*.ts"]
 }
