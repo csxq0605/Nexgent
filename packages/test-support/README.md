@@ -121,6 +121,8 @@ scriptedModelServer({
 })
 scriptedProvider(leadScript, { routeKey: routeByText(llmSessionText, { ... }), routes: { ... } })
 // routeByText(text, { key: substring | RegExp }) — first matching key in insertion order
+// routeByMember(text) — the member name from the kernel's `Member: <name> (<form>)` system-prompt line
+//   (root sessions have none and use the default script)
 // sessionText(body) / llmSessionText(request) — system prompt + first user message only, so a lead
 //   whose later turns quote a member's name is not routed to that member
 // extra members: remainingByRoute() ({ '': default, key: n }), pushTo(route, ...entries);

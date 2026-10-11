@@ -37,6 +37,7 @@ export {
   type RouteKey,
   type ScriptRouting,
   llmSessionText,
+  routeByMember,
   routeByText,
 } from './routing.js'
 export * from './acceptance.js'

@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { LLMRequest, LLMStreamEvent } from '@nexgent/kernel'
+import { EXECUTION_FORMS, renderMemberPromptLine, type MemberExecutionForm } from '@nexgent/kernel'
 import {
   llmSessionText,
+  routeByMember,
   routeByText,
   scriptedModelServer,
   scriptedProvider,
@@ -109,6 +111,25 @@ describe('routeByText', () => {
     expect(key('member-2')).toBe('first')
     expect(key('member')).toBe('second')
     expect(key('nobody')).toBeUndefined()
+  })
+})
+
+describe('routeByMember', () => {
+  it('reads the kernel member line for every execution form; root sessions have none', async () => {
+    const key = routeByMember<LLMRequest>(llmSessionText)
+    for (const form of EXECUTION_FORMS.filter((f): f is MemberExecutionForm => f !== 'direct')) {
+      const system = `You are Nexgent.\n${renderMemberPromptLine({ name: 'checker-2', executionForm: form })}\nRules follow.`
+      expect(key(request(system, 'task')), form).toBe('checker-2')
+    }
+    expect(key(request('You are Nexgent.', 'task'))).toBeUndefined()
+    // A lead quoting a member line in a later turn stays on the default script.
+    expect(key(request('You are Nexgent.', 'go', [{ role: 'user', content: renderMemberPromptLine({ name: 'alpha', executionForm: 'delegated' }) }]))).toBeUndefined()
+    // The line must stand alone, not be embedded in prose.
+    expect(key(request('see Member: alpha (delegated) below', 'task'))).toBeUndefined()
+
+    const provider = scriptedProvider([{ content: 'lead' }], { routeKey: key, routes: { alpha: [{ content: 'alpha' }] } })
+    expect(await text(provider.complete(request(renderMemberPromptLine({ name: 'alpha', executionForm: 'delegated' }), 'task')))).toBe('alpha')
+    expect(await text(provider.complete(request('root', 'task')))).toBe('lead')
   })
 })
 

@@ -44,7 +44,7 @@ export const REAL_MODEL = {
 
 const headlessRun = id => (ctx) => {
   if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `headless scenario failed: ${ctx.scenarioError}` }
-  return judge(id, ctx.obs)
+  return judge(id, ctx.obs, ctx.tools)
 }
 const desktopRegressionRun = id => (ctx) => {
   if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `desktop scenario failed: ${ctx.scenarioError}` }
