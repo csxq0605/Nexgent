@@ -79,6 +79,8 @@ interface ScriptedToolCall {
 | `{ kind: 'http-error', status, message?, headers? }` / `'http-500'` | `error` `llm/request-failed` with `httpStatus` | responds `status` with `{ type: 'error', error: { type: 'scripted_error', message } }` and the extra headers |
 | `{ kind: 'malformed-json', afterChunks = 0 }` | `error` `llm/invalid-response` (after `afterChunks` events) | `afterChunks` good events, then a `content_block_delta` whose `data:` does not parse, then ends without `message_stop` |
 
+Step-2 faults built on these: **compaction request fails** — `failCompaction(status = 500)` is a server entry that expects the compaction summary request (a request with no tools) and answers it with an HTTP error; **crash mid-tool** — `crashDuringTool(handle)` waits for a `--json` `tool.start` event, kills only the main process and reports which of its descendants survived (see Fault injection).
+
 "Body events" / "SSE events" count everything before the terminal event (reasoning, text, tool-call start / delta / end for the provider; every `data:` line for the server). Network down: point the client at `await closedPortUrl()` (connection refused).
 
 ### Abort and other contract behaviour (provider)
@@ -113,11 +115,22 @@ Only `POST /v1/messages` (any query string, e.g. `?beta=true`) consumes the scri
 truncateFile(path, { atByte } | { dropLastBytes }): Promise<{ originalSize, newSize }>
 appendPartialLine(path, text): Promise<void>       // unterminated tail line
 killProcessTree(pid, signal = 'SIGKILL'): Promise<void> // win32: taskkill /PID /T /F; POSIX: ps-walk, children first
-descendantPids(pid): Promise<number[]>; isProcessAlive(pid): boolean
+descendantPids(pid): Promise<number[]>; isProcessAlive(pid): boolean // descendants: ps on POSIX, Win32_Process via pwsh on Windows
+crashDuringTool(handle, { timeoutMs?, settleMs? }): Promise<{ tool, descendantsBefore, survivors, exit }> // kill main process once a tool runs
 withTimeout(promise, ms, label?): Promise<T>        // rejects with TimeoutError
 deadline(ms): { signal, remainingMs(), expired(), race(promise, label?), clear() }
 waitFor(predicate, { timeoutMs?, intervalMs?, label? }): Promise<T>
 closedPortUrl(path = '/v1'): Promise<string>       // network down (pass '' for a bare origin)
+```
+
+### Request-aware server entries
+
+```ts
+requestText(body): string                // system + text blocks + tool results, newline-joined
+isAuxiliaryRequest(body): boolean        // no tools: the compaction summary request
+expectRequest(label, predicate, turn): RequestEntry   // HTTP 418 naming `label` when the request is not the expected one
+failCompaction(status = 500): RequestEntry            // fault: the summary request fails
+compactionSummary(summary, usage?): RequestEntry      // answer the summary request
 ```
 
 ### Cross-process harness
