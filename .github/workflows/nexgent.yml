@@ -81,3 +81,7 @@ jobs:
           xvfb-run -a node scripts/accept-common/desktop-smoke.mjs
       - if: runner.os == 'Windows'
         run: node scripts/accept-common/desktop-smoke.mjs
+
+      # The PowerShell launcher runs a write-file task against the scripted model server.
+      - if: runner.os == 'Windows'
+        run: node scripts/accept-common/ps1-smoke.mjs
