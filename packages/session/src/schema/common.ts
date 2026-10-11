@@ -28,7 +28,7 @@ export const COMMON_DEFS: Record<string, JsonObject> = {
       reasoningTokens: { $ref: '#/$defs/usageCount' },
     },
   },
-  finishReason: { enum: ['stop', 'tool-calls', 'max-tokens', 'aborted', 'refusal', 'error'] },
+  finishReason: { enum: ['stop', 'tool-calls', 'max-tokens', 'aborted', 'refusal', 'pause', 'error'] },
   refusalInfo: {
     type: 'object',
     additionalProperties: false,

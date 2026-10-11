@@ -125,6 +125,7 @@
         "max-tokens",
         "aborted",
         "refusal",
+        "pause",
         "error"
       ]
     },

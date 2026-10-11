@@ -243,8 +243,13 @@ export function toUsageCount(value: unknown): UsageCount {
 // Stream
 // ---------------------------------------------------------------------------
 
-/** Why generation stopped. `'error'` only appears on ledger records; the stream signals it with an `error` event. */
-export type FinishReason = 'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'refusal' | 'error'
+/**
+ * Why generation stopped. `'error'` only appears on ledger records; the stream
+ * signals it with an `error` event. `'pause'` is the provider pausing a long
+ * turn (Claude `stop_reason: 'pause_turn'`): the reply is kept and the loop
+ * sends it back unchanged to let the model continue (step 2, bounded retries).
+ */
+export type FinishReason = 'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'refusal' | 'pause' | 'error'
 
 /** Why a provider's safety classifier declined (`stop_reason: 'refusal'`); fields are provider-defined. */
 export interface RefusalInfo {
