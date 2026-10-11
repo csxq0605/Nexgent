@@ -1,7 +1,7 @@
 /**
  * Cross-process harness: start a Node child, watch its output, wait for
  * files, kill its process tree, and await its exit. Used by package tests
- * and by `scripts/accept-step1.mjs`.
+ * and by the acceptance scripts (`scripts/accept-step2.mjs`).
  *
  * Design follows deepseek-harness `test-support/session-snapshot`
  * (`launcher.ts`: spawn, capture, wait-for-state, kill); rewritten.

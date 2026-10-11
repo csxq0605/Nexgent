@@ -92,7 +92,7 @@ describe('json renderer', () => {
 
   it('writes an error line for failures outside the stream', () => {
     const stdout = new Capture()
-    createRenderer('json', stdout, new Capture()).fail({ code: 'cli/runtime-not-wired', message: 'later' })
-    expect(JSON.parse(stdout.text)).toEqual({ type: 'error', error: { code: 'cli/runtime-not-wired', message: 'later' } })
+    createRenderer('json', stdout, new Capture()).fail({ code: 'credentials/missing', message: 'later' })
+    expect(JSON.parse(stdout.text)).toEqual({ type: 'error', error: { code: 'credentials/missing', message: 'later' } })
   })
 })

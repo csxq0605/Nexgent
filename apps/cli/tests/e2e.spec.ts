@@ -111,7 +111,7 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     expect(await main(['run', '--project', project, '--task', 'first task', '--sandbox', 'read-only', '--json'], first.io)).toBe(EXIT.OK)
     const sessionId = (jsonLines(first.stdout.text)[0] as { sessionId: string }).sessionId
 
-    // Simulate a crash inside turn 2: a `turn.start` with no `turn.end` (as the kill in accept-step1 leaves behind).
+    // Simulate a crash inside turn 2: a `turn.start` with no `turn.end` (as a killed process leaves behind).
     const file = path.join(project, '.nexgent', 'sessions', sessionId, 'session.jsonl')
     const lines = (await fs.readFile(file, 'utf8')).split(/\r?\n/).filter(line => line !== '')
     const last = JSON.parse(lines.at(-1) ?? '{}') as { seq: number }

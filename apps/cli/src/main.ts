@@ -16,7 +16,7 @@ import { CliError, EXIT, type ExitCode } from './exit-codes.js'
 import { initProjectLayout } from './layout.js'
 import { TaskTally } from './outcome.js'
 import { createRenderer, type Renderer, type TextSink } from './render.js'
-import { loadRuntime, RUNTIME_NOT_WIRED_CODE, RUNTIME_NOT_WIRED_MESSAGE, type CliRuntime } from './runtime.js'
+import { loadRuntime, type CliRuntime } from './runtime.js'
 import { installSignalHandlers, InterruptController, type SignalSource } from './signals.js'
 import { packageVersion } from './version.js'
 
@@ -38,7 +38,7 @@ export interface CliIo {
 /** Replaceable collaborators. */
 export interface CliDeps {
   /** Default: `runtime.ts` `loadRuntime`. */
-  readonly loadRuntime?: () => Promise<CliRuntime | undefined>
+  readonly loadRuntime?: () => Promise<CliRuntime>
   /** Default: `{ env: io.env }` (home from `NEXGENT_HOME`, then `~/.nexgent`). */
   readonly credentials?: CredentialProbe
   /** Approval prompt wait; default 300 s. */
@@ -134,7 +134,6 @@ async function runTask(
   const { layout } = await initProjectLayout(invocation.project, io.cwd)
   await requireApiKey(deps.credentials ?? { env: io.env })
   const runtime = await (deps.loadRuntime ?? loadRuntime)()
-  if (runtime === undefined) throw new CliError(EXIT.USAGE, RUNTIME_NOT_WIRED_MESSAGE, { code: RUNTIME_NOT_WIRED_CODE })
 
   const approvals = createApprovalResponder({
     input: io.stdin,

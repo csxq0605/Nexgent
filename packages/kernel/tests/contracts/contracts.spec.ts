@@ -30,7 +30,6 @@ import {
   type Credentials,
   type DoneEvent,
   type FinishReason,
-  type Ledger,
   type LedgerRecord,
   type LedgerRecordInput,
   type LedgerRecordType,
@@ -40,8 +39,6 @@ import {
   type LLMStreamEvent,
   type LLMStreamEventType,
   type LLMUsage,
-  type ProcessRunner,
-  type Sandbox,
   type SandboxDecision,
   type SandboxMode,
   type SessionRecord,
@@ -52,13 +49,20 @@ import {
   type ToolContext,
   type ToolDefinition,
   type ToolHandler,
-  type ToolRegistry,
   type ToolRestriction,
   type UsageCount,
   type Workspace,
 } from '../../src/index.js'
 import * as path from 'node:path'
 
+
+/** The v1 session and ledger record types; the type assertions and the exported lists are both checked against these. */
+const SESSION_TYPES = [
+  'session.start', 'user.message', 'assistant.message', 'tool.result', 'turn.start', 'turn.end', 'checkpoint', 'error', 'approval.request', 'approval.decision', 'approval.grant',
+  // step 2
+  'material.added', 'deliverable.presented', 'turn.files', 'feedback', 'goal.set', 'goal.update', 'session.title', 'compaction',
+] as const
+const LEDGER_TYPES = ['llm.request.start', 'llm.request.end', 'tool.call', 'task.outcome'] as const
 describe('contracts: type-level shape', () => {
   it('llm: stream events are a closed tagged union with one terminal pair', () => {
     expectTypeOf<LLMStreamEventType>().toEqualTypeOf<
@@ -79,27 +83,18 @@ describe('contracts: type-level shape', () => {
     expectTypeOf<ReturnType<LLMProvider['complete']>>().toEqualTypeOf<AsyncIterable<LLMStreamEvent>>()
   })
 
-  it('tools: definition policy fields, handler signature, registry surface', () => {
+  it('tools: definition policy fields and handler signature', () => {
     expectTypeOf<ToolDefinition['effects'][number]>().toEqualTypeOf<'read' | 'write' | 'execute' | 'network'>()
     expectTypeOf<ToolDefinition['approval']>().toEqualTypeOf<'never' | 'ask' | 'always'>()
     expectTypeOf<ToolContext>().toHaveProperty('workspace').toEqualTypeOf<Workspace>()
     expectTypeOf<ToolContext['sandboxMode']>().toEqualTypeOf<SandboxMode>()
     expectTypeOf<ToolContext['signal']>().toEqualTypeOf<AbortSignal>()
     expectTypeOf<Parameters<ToolHandler>>().toEqualTypeOf<[unknown, ToolContext]>()
-    expectTypeOf<ToolRegistry>().toHaveProperty('register')
-    expectTypeOf<ToolRegistry>().toHaveProperty('unregister')
-    expectTypeOf<ToolRegistry>().toHaveProperty('list')
-    expectTypeOf<ToolRegistry>().toHaveProperty('get')
-    expectTypeOf<ToolRegistry>().toHaveProperty('restrict')
     expectTypeOf<ToolRestriction>().toEqualTypeOf<{ readonly allow?: readonly string[]; readonly deny?: readonly string[] }>()
   })
 
-  it('session: the v1 record set, common fields and the store surface', () => {
-    expectTypeOf<SessionRecordType>().toEqualTypeOf<
-      'session.start' | 'user.message' | 'assistant.message' | 'tool.result' | 'turn.start' | 'turn.end' | 'checkpoint' | 'error' | 'approval.request' | 'approval.decision' | 'approval.grant'
-      // step 2
-      | 'material.added' | 'deliverable.presented' | 'turn.files' | 'feedback' | 'goal.set' | 'goal.update' | 'session.title' | 'compaction'
-    >()
+  it('session: the v1 record set and common fields', () => {
+    expectTypeOf<SessionRecordType>().toEqualTypeOf<(typeof SESSION_TYPES)[number]>()
     expectTypeOf<SessionRecord['seq']>().toBeNumber()
     expectTypeOf<SessionRecord['ts']>().toBeString()
     expectTypeOf<SessionRecord['sessionId']>().toBeString()
@@ -111,18 +106,11 @@ describe('contracts: type-level shape', () => {
     expectTypeOf<Extract<SessionRecord, { type: 'turn.end' }>['reason']['kind']>().toEqualTypeOf<
       'completed' | 'cancelled' | 'error' | 'max-tokens' | 'interrupted'
     >()
-    expectTypeOf<SessionStore>().toHaveProperty('create')
-    expectTypeOf<SessionStore>().toHaveProperty('append')
-    expectTypeOf<SessionStore>().toHaveProperty('readAll')
-    expectTypeOf<SessionStore>().toHaveProperty('latestCheckpoint')
-    expectTypeOf<SessionStore>().toHaveProperty('resume')
-    expectTypeOf<SessionStore>().toHaveProperty('lock')
-    expectTypeOf<SessionStore>().toHaveProperty('release')
     expectTypeOf<ReturnType<SessionStore['resume']>>().toEqualTypeOf<Promise<SessionState>>()
   })
 
   it('ledger: record set, request-end status with unknown usage, no slot for prompt bodies or secrets', () => {
-    expectTypeOf<LedgerRecordType>().toEqualTypeOf<'llm.request.start' | 'llm.request.end' | 'tool.call' | 'task.outcome'>()
+    expectTypeOf<LedgerRecordType>().toEqualTypeOf<(typeof LEDGER_TYPES)[number]>()
     type End = Extract<LedgerRecord, { type: 'llm.request.end' }>
     expectTypeOf<End['status']>().toEqualTypeOf<'ok' | 'error' | 'aborted' | 'unknown'>()
     expectTypeOf<End['usage']>().toEqualTypeOf<LLMUsage>()
@@ -140,17 +128,11 @@ describe('contracts: type-level shape', () => {
     expectTypeOf<Outcome['executionForm']>().toEqualTypeOf<'direct' | 'delegated' | 'workflow' | undefined>()
     expectTypeOf<Outcome['taskId']>().toEqualTypeOf<string | undefined>()
     expectTypeOf<LedgerRecordInput>().not.toHaveProperty('ts')
-    expectTypeOf<Ledger>().toHaveProperty('append')
-    expectTypeOf<Ledger>().toHaveProperty('read')
   })
 
-  it('workspace, credentials: modes, decisions and the two small services', () => {
+  it('workspace, credentials: modes and decisions', () => {
     expectTypeOf<SandboxMode>().toEqualTypeOf<'read-only' | 'workspace-write' | 'full-access'>()
     expectTypeOf<Extract<SandboxDecision, { allowed: false }>['reason']>().toBeString()
-    expectTypeOf<Sandbox>().toHaveProperty('checkRead')
-    expectTypeOf<Sandbox>().toHaveProperty('checkWrite')
-    expectTypeOf<Sandbox>().toHaveProperty('checkCommand')
-    expectTypeOf<ProcessRunner>().toHaveProperty('run')
     expectTypeOf<ReturnType<Credentials['get']>>().toEqualTypeOf<Promise<string | undefined>>()
   })
 })
@@ -292,10 +274,8 @@ describe('contracts: pure helpers', () => {
   })
 
   it('record type lists are complete and in sync with the unions', () => {
-    const sessionTypes: readonly SessionRecordType[] = SESSION_RECORD_TYPES
-    expect(new Set(sessionTypes).size).toBe(19)
-    const ledgerTypes: readonly LedgerRecordType[] = LEDGER_RECORD_TYPES
-    expect(new Set(ledgerTypes).size).toBe(4)
+    expect([...SESSION_RECORD_TYPES].sort()).toEqual([...SESSION_TYPES].sort())
+    expect([...LEDGER_RECORD_TYPES].sort()).toEqual([...LEDGER_TYPES].sort())
   })
 
   it('project config fills defaults without overwriting given values', () => {

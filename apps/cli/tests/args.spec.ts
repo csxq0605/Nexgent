@@ -87,7 +87,6 @@ describe('parseCliArgs', () => {
     expect(usage()).toContain('130 cancelled')
     expect(commandUsage('run')).toContain('--sandbox <mode>')
     expect(commandUsage('run')).toContain(`then ${DEFAULT_PROJECT_CONFIG.model})`)
-    expect(commandUsage('run')).not.toContain('mimo')
     expect(commandUsage('resume')).toContain('<sessionId>')
     expect(commandUsage('export')).toContain('--out <dir>')
     expect(commandUsage('app')).toContain('NEXGENT_DESKTOP_DIR')

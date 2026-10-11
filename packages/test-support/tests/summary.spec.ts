@@ -12,8 +12,8 @@ function builder() {
   return acceptanceSummary({
     step: 1,
     name: '本地执行内核',
-    exitCriteria: ['accept-step1 passes on Linux and Windows'],
-    script: 'scripts/accept-step1.mjs',
+    exitCriteria: ['the acceptance script passes on Linux and Windows'],
+    script: 'scripts/accept-example.mjs',
     simulated: 'run → write file → kill → resume',
   })
 }
@@ -35,7 +35,7 @@ describe('acceptanceSummary', () => {
     expect(summary.kind).toBe('nexgent.acceptance-summary')
     expect(summary.environment.platform).toBe(process.platform)
     expect(summary.environment.node).toBe(process.version)
-    expect(summary.scripted).toMatchObject({ result: 'pass', command: 'node scripts/accept-step1.mjs', faultsInjected: ['kill', 'truncate'] })
+    expect(summary.scripted).toMatchObject({ result: 'pass', command: 'node scripts/accept-example.mjs', faultsInjected: ['kill', 'truncate'] })
     expect(summary.checks).toHaveLength(2)
     expect(summary.checks[1]!.durationMs).toBeGreaterThanOrEqual(0)
     expect(summary.ledger).toMatchObject({ requestCount: 0, writeFailures: 0 })
