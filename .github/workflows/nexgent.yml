@@ -1,12 +1,19 @@
 name: Nexgent
 
+# Pushes to the integration branches, and every pull request. A pushed PR
+# branch used to run twice (push + pull_request) for the same commit.
 on:
   push:
+    branches: [nexgent-app, main]
   pull_request:
+  workflow_dispatch:
 
+# A newer push to a PR supersedes the older run. Runs on the integration
+# branches are never cancelled, so every merge commit gets a result (two
+# merges in a row used to leave the first one "cancelled").
 concurrency:
   group: nexgent-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-and-test:
