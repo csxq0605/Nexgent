@@ -41,6 +41,12 @@
       "path": "packages/web"
     },
     {
+      "path": "packages/preset"
+    },
+    {
+      "path": "packages/subagent"
+    },
+    {
       "path": "apps/desktop/src/renderer"
     }
   ]
