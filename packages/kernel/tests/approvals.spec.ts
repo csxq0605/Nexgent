@@ -421,16 +421,22 @@ describe('cost caps', () => {
     expect(harness.store.of(agent.sessionId, 'error')[0]!.error.details).toEqual({ scope: 'project', metric: 'requests', used: 2, limit: 2 })
   })
 
-  it('records a failed ledger read and leaves the project cap unchecked for the turn', async () => {
+  it('sends no request and ends the turn with a readable error when the ledger cannot be read', async () => {
     const ledger = new MemoryLedger()
     ledger.read = async function* () {
       throw new Error('disk gone')
     }
-    harness = await bootHarness({ ledger, script: [textReply('a')] })
+    harness = await bootHarness({ ledger, script: [textReply('never sent')] })
     writeConfig(harness.root, { costCaps: { perProject: { maxRequests: 1 } } })
     const agent = await harness.app.agents.create()
-    expect((await agent.run('one')).reason).toEqual({ kind: 'completed' })
-    expect(harness.store.of(agent.sessionId, 'error')[0]).toMatchObject({ turn: 1, fatal: false, error: { message: expect.stringContaining('per-project cost cap not checked') } })
+    const result = await agent.run('one')
+    expect(harness.llm.requests).toHaveLength(0)
+    expect(result.reason).toMatchObject({
+      kind: 'error',
+      error: { message: expect.stringMatching(/per-project cost cap cannot be checked.*disk gone.*no model request was sent/) },
+    })
+    await agent.close()
+    expect(ledger.records.filter(record => record.type === 'task.outcome')).toEqual([expect.objectContaining({ status: 'failed' })])
   })
 
   it('rejects an invalid config.json at agent creation', async () => {

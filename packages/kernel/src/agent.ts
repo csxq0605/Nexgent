@@ -503,8 +503,8 @@ export class Agent {
     const tracker = { text: '', usage: ZERO_USAGE as LLMUsage }
     let reason: TurnEndReason
     try {
-      await this.readProjectUsage(turn)
-      reason = await this.loop(turn, signal, tracker)
+      const unreadable = await this.readProjectUsage()
+      reason = unreadable === undefined ? await this.loop(turn, signal, tracker) : { kind: 'error', error: unreadable }
     } catch (error) {
       reason = { kind: 'error', error: toErrorInfo(error) }
     }
@@ -534,13 +534,14 @@ export class Agent {
    * ledger (`permissions.md` §费用上限): every `llm.request.start` counts as a
    * request, `llm.request.end` usage adds its known `inputTokens +
    * outputTokens`. Read once per turn; requests this task sends later in the
-   * turn are added from its own totals. A failed read is recorded as a
-   * non-fatal `error` and leaves the project cap unchecked for that turn.
+   * turn are added from its own totals. An unknown total is not under the
+   * cap: a failed read returns the error that ends the turn before any
+   * request is sent.
    */
-  private async readProjectUsage(turn: number): Promise<void> {
+  private async readProjectUsage(): Promise<ErrorInfo | undefined> {
     this.projectUsage = undefined
     const cap = this.init.projectConfig.costCaps.perProject
-    if (cap === undefined || (cap.maxRequests === undefined && cap.maxTokens === undefined)) return
+    if (cap === undefined || (cap.maxRequests === undefined && cap.maxTokens === undefined)) return undefined
     const windowDays = cap.windowDays ?? DEFAULT_PROJECT_WINDOW_DAYS
     const from = Date.now() - windowDays * 86_400_000
     let requests = 0
@@ -553,10 +554,10 @@ export class Agent {
       }
     } catch (error) {
       const info = toErrorInfo(error)
-      await this.appendError({ ...info, message: `per-project cost cap not checked: ledger read failed: ${info.message}` }, false, turn)
-      return
+      return { ...info, message: `the per-project cost cap cannot be checked because the ledger could not be read (${info.message}); no model request was sent` }
     }
     this.projectUsage = { requests, tokens, ownRequests: this.stats.requestCount, ownTokens: this.stats.tokens }
+    return undefined
   }
 
   /** The cost-cap error when the next request would exceed `costCaps.perTask` or `costCaps.perProject`. */
