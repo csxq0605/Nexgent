@@ -91,6 +91,22 @@ importers:
         specifier: workspace:*
         version: link:../test-support
 
+  packages/tasking:
+    dependencies:
+      '@nexgent/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@nexgent/session':
+        specifier: workspace:*
+        version: link:../session
+    devDependencies:
+      '@nexgent/test-support':
+        specifier: workspace:*
+        version: link:../test-support
+      '@nexgent/workspace':
+        specifier: workspace:*
+        version: link:../workspace
+
   packages/test-support:
     dependencies:
       '@nexgent/kernel':
