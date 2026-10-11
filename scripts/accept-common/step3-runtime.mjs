@@ -77,10 +77,11 @@ export function step3Rows(pkgs, { web = 'shipped' } = {}) {
  * Create an SDK instance for the scripted layers.
  * @param pkgs - from {@link loadStep3Packages}.
  * @param options - `env` (loopback API base URL, key, `NEXGENT_HOME`; never `process.env`), `home`, `approvals`,
- *   `web` (`'shipped'` default, or `'test'`: see {@link step3Rows}).
+ *   `web` (`'shipped'` default, or `'test'`: see {@link step3Rows}); `realModel` (the real layer only:
+ *   allow a non-loopback API).
  */
-export function createStep3Sdk(pkgs, { env, home, approvals, web }) {
-  if (!isLoopbackUrl(env.NEXGENT_API_BASE_URL)) {
+export function createStep3Sdk(pkgs, { env, home, approvals, web, realModel = false }) {
+  if (!realModel && !isLoopbackUrl(env.NEXGENT_API_BASE_URL)) {
     throw new Error(`createStep3Sdk: NEXGENT_API_BASE_URL must point at the local scripted server (got ${String(env.NEXGENT_API_BASE_URL)})`)
   }
   const { registry, patches } = step3Rows(pkgs, { web })

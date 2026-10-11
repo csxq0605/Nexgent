@@ -17,6 +17,7 @@
 import { CHECKS as STEP2_CHECKS } from './step2-checks.mjs'
 import { judgeDesktop } from './step2-desktop-judges.mjs'
 import { MEMBER_JUDGES, judgeMembers } from './step3-desktop-judges.mjs'
+import { REAL_JUDGES, judgeReal } from './step3-real-judges.mjs'
 import { JUDGES, judge } from './step3-judges.mjs'
 
 export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_PASS } from './step2-checks.mjs'
@@ -52,6 +53,10 @@ const desktopRegressionRun = id => (ctx) => {
   if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `desktop scenario failed: ${ctx.scenarioError}` }
   return judgeDesktop(id, ctx.obs)
 }
+const realRun = id => (ctx) => {
+  if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `real scenario failed: ${ctx.scenarioError}` }
+  return judgeReal(id, ctx?.obs)
+}
 const membersRun = id => (ctx) => {
   if (ctx?.membersError !== undefined) return { status: 'failed', evidence: `desktop members scenario failed: ${ctx.membersError}` }
   return judgeMembers(id, ctx?.members)
@@ -59,6 +64,7 @@ const membersRun = id => (ctx) => {
 const item = (id, layer, title) => {
   if (layer === 'headless' && JUDGES[id] !== undefined) return { id, layer, title, run: headlessRun(id) }
   if (layer === 'desktop' && MEMBER_JUDGES[id] !== undefined) return { id, layer, title, run: membersRun(id) }
+  if (layer === 'real' && REAL_JUDGES[id] !== undefined) return { id, layer, title, run: realRun(id) }
   return { id, layer, title }
 }
 
