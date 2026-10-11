@@ -61,3 +61,23 @@ jobs:
           name: accept-step2-${{ matrix.os }}
           path: accept-step2.json
           if-no-files-found: ignore
+
+      # Desktop smoke (step-2 round 1): Playwright's Electron driver opens an
+      # empty Electron window. Linux runs it under xvfb; Electron's SUID
+      # sandbox helper needs root ownership there (Ubuntu restricts
+      # unprivileged user namespaces), as Electron's docs prescribe.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: node node_modules/electron/install.js
+      - if: runner.os == 'Linux'
+        run: |
+          sandbox="$(node -p "require('path').join(require('path').dirname(require.resolve('electron/package.json')), 'dist', 'chrome-sandbox')")"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          xvfb-run -a node scripts/accept-common/desktop-smoke.mjs
+      - if: runner.os == 'Windows'
+        run: node scripts/accept-common/desktop-smoke.mjs
