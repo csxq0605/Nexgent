@@ -15,6 +15,7 @@
  * (`ctx.obs`, `ctx.tools`).
  */
 import { DESKTOP_JUDGES, judgeDesktop } from './step2-desktop-judges.mjs'
+import { judgeReal, REAL_JUDGES } from './step2-real-judges.mjs'
 import { JUDGES, judge } from './step2-judges.mjs'
 
 export const EXIT_PASS = 0
@@ -36,8 +37,12 @@ export const REAL_MODEL = {
   model: 'claude-sonnet-5-5',
   thinking: 'on',
   budgetUsd: 15,
+  /** Estimated-cost cap of one run (the plan estimates 1–1.5 USD per run). */
+  runCapUsd: 5,
+  /** Low compaction threshold so compaction happens once under the real model (plan §运行方案). */
+  compactionThreshold: 40_000,
   keyEnv: ['NEXGENT_API_KEY', 'ANTHROPIC_API_KEY'],
-  task: 'scripts/real-task/step2-sales: orders.csv + regions.xlsx; generate → feedback revision → kill mid-stream and resume',
+  task: 'scripts/real-task/step2-sales: orders.csv + regions.xlsx; generate (v1) → feedback revision (v2) → kill mid-stream, resume (v3); judged by step2-sales-hidden.mjs',
 }
 
 const headlessRun = id => (ctx) => {
@@ -48,7 +53,12 @@ const desktopRun = id => (ctx) => {
   if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `desktop scenario failed: ${ctx.scenarioError}` }
   return judgeDesktop(id, ctx.obs)
 }
+const realRun = id => (ctx) => {
+  if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `real-model scenario failed: ${ctx.scenarioError}` }
+  return judgeReal(id, ctx.obs)
+}
 const item = (id, layer, title) => {
+  if (layer === 'real' && REAL_JUDGES[id] !== undefined) return { id, layer, title, run: realRun(id) }
   if (layer === 'headless' && JUDGES[id] !== undefined) return { id, layer, title, run: headlessRun(id) }
   if (layer === 'desktop' && DESKTOP_JUDGES[id] !== undefined) return { id, layer, title, run: desktopRun(id) }
   return { id, layer, title }

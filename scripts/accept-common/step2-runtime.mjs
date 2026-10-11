@@ -91,6 +91,8 @@ export async function runTurn(sdk, input, { onEvent } = {}) {
 export function eventLine(event) {
   if (event.type === 'tool.start') return JSON.stringify({ type: 'tool.start', callId: event.call.id, name: event.call.name, arguments: event.call.arguments })
   if (event.type === 'text.delta') return JSON.stringify({ type: 'text.delta', text: event.text })
+  // Reasoning text stays out of the output; its arrival is what the real layer's kill waits for.
+  if (event.type === 'reasoning.delta') return JSON.stringify({ type: 'reasoning.delta', length: event.text.length })
   if (event.type === 'request.start') return JSON.stringify({ type: 'request.start', requestId: event.requestId })
   if (event.type === 'turn.start' || event.type === 'turn.end') return JSON.stringify({ type: event.type, turn: event.turn, ...(event.reason === undefined ? {} : { reason: event.reason }) })
   return undefined

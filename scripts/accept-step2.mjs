@@ -8,8 +8,9 @@
  *                      the kill checks in a child process (step2-driver.mjs) and `nexgent export`
  *   desktop   D01–D10  scripted provider, Playwright driving the built Electron app with the real
  *                      renderer and SDK (accept-common/step2-desktop.mjs; Linux without DISPLAY starts Xvfb)
- *   real      R01–R07  real Claude model (manual: Linux cloud session, thinking on;
- *                      Windows optional via .github/workflows/nexgent-real-model.yml)
+ *   real      R01–R07  real Claude model on the step-2 real task (accept-common/step2-real.mjs;
+ *                      manual: Linux cloud session, thinking on; Windows optional via
+ *                      .github/workflows/nexgent-real-model.yml). Raw records stay in --work-dir.
  *
  * Usage:
  *   node scripts/accept-step2.mjs [--layer headless,desktop|real|all] [--out <summary.json>]
@@ -33,7 +34,8 @@ import { parseArgs } from 'node:util'
 import { loadHarness, REPO_ROOT } from './accept-common/harness.mjs'
 import { desktopPrerequisites, runDesktopScenario } from './accept-common/step2-desktop.mjs'
 import { runHeadlessScenario } from './accept-common/step2-headless.mjs'
-import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
+import { runRealScenario } from './accept-common/step2-real.mjs'
+import { isLoopbackUrl, loadStep2Packages } from './accept-common/step2-runtime.mjs'
 import {
   budgetGate,
   CHECKS,
@@ -112,7 +114,25 @@ async function prepareLayer(layer, options) {
   if (keySource === undefined) return { ok: false, reason: `no API key (${REAL_MODEL.keyEnv.join(' or ')} is not set)` }
   const gate = budgetGate(options.budgetUsd, options.spent)
   if (!gate.ok) return { ok: false, reason: gate.reason }
-  return { ok: true, ctx: { work: options.work, keySource, remainingUsd: gate.remainingUsd, thinking: REAL_MODEL.thinking } }
+  const loaded = await loadHarness()
+  if (!loaded.ok) return { ok: false, reason: loaded.reason }
+  // NEXGENT_API_BASE_URL may point the layer at a loopback stand-in (tests); then nothing here is real-model evidence.
+  const baseUrl = process.env['NEXGENT_API_BASE_URL']
+  const realModel = baseUrl === undefined || baseUrl === '' || !isLoopbackUrl(baseUrl)
+  const runCapUsd = Math.min(REAL_MODEL.runCapUsd, gate.remainingUsd)
+  const env = {
+    NEXGENT_API_KEY: process.env[keySource],
+    NEXGENT_COMPACTION_THRESHOLD: String(REAL_MODEL.compactionThreshold),
+    ...(baseUrl === undefined || baseUrl === '' ? {} : { NEXGENT_API_BASE_URL: baseUrl }),
+  }
+  await mkdir(options.work, { recursive: true })
+  const ctx = { work: options.work, keySource, remainingUsd: gate.remainingUsd, runCapUsd, realModel, thinking: REAL_MODEL.thinking }
+  try {
+    ctx.obs = await runRealScenario(loaded.harness, options.work, { env, keyFromEnv: keySource, realModel, runCapUsd, log: line => log(`real: ${line}`) })
+  } catch (error) {
+    ctx.scenarioError = error instanceof Error ? (error.stack ?? error.message) : String(error)
+  }
+  return { ok: true, ctx }
 }
 
 async function main() {
@@ -152,13 +172,14 @@ async function main() {
   const realOnly = !layers.includes('headless') && !layers.includes('desktop')
   const s = h.acceptanceSummary({
     ...STEP,
-    provider: realOnly ? 'real' : 'scripted',
+    provider: realOnly && !isLoopbackUrl(process.env['NEXGENT_API_BASE_URL'] ?? 'https://api.anthropic.com') ? 'real' : 'scripted',
     command: `node scripts/accept-step2.mjs --layer ${layers.join(',')}`,
     simulated: 'scripted Claude Messages API model server; per-layer checklist H01–H23 / D01–D10',
   })
 
   const spent = await readSpent(values.spent)
   const statuses = []
+  const itemStatus = new Map()
   let notReady = 0
   let realCtx
   for (const layer of layers) {
@@ -177,28 +198,36 @@ async function main() {
         : { status: 'not-implemented', evidence: `layer not runnable yet: ${ready.reason}` }
       const name = OPTIONAL_CHECKS.has(entry.id) ? `${entry.title}（可选）` : entry.title
       s.item(entry.id, name, status, evidence)
+      itemStatus.set(entry.id, status)
       // Optional items are reported but do not decide the exit code.
       if (!OPTIONAL_CHECKS.has(entry.id)) statuses.push(status)
     }
   }
 
   if (layers.includes('real')) {
+    const usage = realCtx?.obs?.usage
+    const realStatuses = CHECKS.filter(check => check.layer === 'real' && !OPTIONAL_CHECKS.has(check.id)).map(check => itemStatus.get(check.id))
+    let runNote = 'real layer not runnable; no model call made'
+    if (realCtx !== undefined) {
+      runNote = `key from ${realCtx.keySource}; budget left before this run ${realCtx.remainingUsd.toFixed(2)} USD; run cap ${realCtx.runCapUsd.toFixed(2)} USD; raw records in ${realCtx.work}`
+      if (!realCtx.realModel) {
+        runNote += '; NEXGENT_API_BASE_URL is a loopback server: NOT a real-model run'
+        s.knownIssue('real layer ran against a loopback stand-in (NEXGENT_API_BASE_URL); its results are not real-model evidence')
+      }
+    }
     s.set({
       realModel: {
         model: REAL_MODEL.model,
         thinking: REAL_MODEL.thinking,
         task: REAL_MODEL.task,
-        // Counted from the run's ledger once the R checks drive a run; nothing has called the model yet.
-        callCount: 0,
-        knownTokens: { input: 0, output: 0 },
-        unknownCount: 0,
-        cost: 0,
-        result: 'fail',
+        callCount: usage?.callCount ?? 0,
+        knownTokens: { input: usage?.known.input ?? 0, output: usage?.known.output ?? 0 },
+        unknownCount: usage?.unknownCount ?? 0,
+        cost: usage?.costUsd ?? 0,
+        result: realCtx?.realModel === true && realStatuses.every(status => status === 'passed') ? 'pass' : 'fail',
         summaryFile: null,
-        runNote: realCtx === undefined
-          ? 'real layer not runnable; no model call made'
-          : `key from ${realCtx.keySource}; budget left ${realCtx.remainingUsd.toFixed(2)} USD; R checks not implemented, no model call made`,
-        unknownSources: [],
+        runNote,
+        unknownSources: (usage?.unknownRequestIds ?? []).map(id => `llm request ${id}: process killed mid-stream (R04)`),
       },
     })
   }

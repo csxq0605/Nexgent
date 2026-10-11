@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,7 +17,9 @@ import {
   parseLayers,
   realModelKeySource,
 } from '../../../scripts/accept-common/step2-checks.mjs'
-import { validateAcceptanceSummary, type AcceptanceSummary } from '../src/index.js'
+import { realLikeScript } from '../../../scripts/accept-common/step2-real-scripted.mjs'
+import { filesContaining } from '../../../scripts/accept-common/step2-headless.mjs'
+import { scriptedModelServer, validateAcceptanceSummary, type AcceptanceSummary } from '../src/index.js'
 
 const script = fileURLToPath(new URL('../../../scripts/accept-step2.mjs', import.meta.url))
 const plan = fileURLToPath(new URL('../../../docs/plan/step-2-work-partition.md', import.meta.url))
@@ -57,8 +59,10 @@ describe('accept-step2 checklist', () => {
     const d05 = CHECKS.find(check => check.id === 'D05')!
     expect(await evaluateItem(d05, { scenarioError: 'boom' })).toMatchObject({ status: 'failed' })
     expect(await evaluateItem(d05, { obs: {} })).toMatchObject({ status: 'failed' })
-    // Only the real-model items are still without a check.
-    expect(CHECKS.filter(check => typeof check.run !== 'function').map(check => check.id)).toEqual(CHECKS.filter(check => check.layer === 'real').map(check => check.id))
+    // Every item has a check.
+    expect(CHECKS.filter(check => typeof check.run !== 'function').map(check => check.id)).toEqual([])
+    const r01 = CHECKS.find(check => check.id === 'R01')!
+    expect(await evaluateItem(r01, { scenarioError: 'boom' })).toMatchObject({ status: 'failed' })
   })
 
   it('exit code: any failure is 1, anything not implemented or not runnable is 2, never 0 without checks', () => {
@@ -129,12 +133,38 @@ describe('scripts/accept-step2.mjs (requires `pnpm build`)', () => {
     expect(summary?.realModel).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', callCount: 0, result: 'fail' })
   }, 90_000)
 
-  it('real layer: with a key it records only the variable name, never the value', async () => {
+  it('real layer against a loopback stand-in: R01–R05 pass, nothing claims a real run, the key value is never written', async () => {
     const key = 'nexgent-accept2-test-key-value'
-    const { result, summary, raw } = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: key })
-    expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
-    expect(summary?.realModel?.runNote).toContain('NEXGENT_API_KEY')
-    expect(raw).not.toContain(key)
-    expect(result.stderr + result.stdout).not.toContain(key)
-  }, 90_000)
+    const server = await scriptedModelServer({ script: realLikeScript() as never })
+    const dir = await mkdtemp(join(tmpdir(), 'nexgent-accept2-real-'))
+    try {
+      const out = join(dir, 'summary.json')
+      const env: Record<string, string> = {}
+      for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith('NEXGENT_') && k !== 'ANTHROPIC_API_KEY') env[k] = v
+      Object.assign(env, { NEXGENT_API_KEY: key, NEXGENT_API_BASE_URL: server.baseUrl })
+      const child = spawn(process.execPath, [script, '--layer', 'real', '--out', out, '--work-dir', join(dir, 'work')], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+      let output = ''
+      child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()))
+      child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString()))
+      const code = await new Promise<number | null>(resolve => child.once('exit', resolve))
+      const raw = await readFile(out, 'utf8')
+      const summary = JSON.parse(raw) as AcceptanceSummary
+      expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
+      const status = Object.fromEntries(summary.checks.map(check => [check.id, check.status]))
+      expect(status, output).toMatchObject({ R01: 'passed', R02: 'passed', R03: 'passed', R04: 'passed', R05: 'passed', R07: 'not-implemented' })
+      // R07 (not a real run) keeps the exit code at 2: a stand-in can never pass the real layer.
+      expect(code, output).toBe(EXIT_NOT_READY)
+      expect(summary.result).toBe('fail')
+      expect(summary.realModel).toMatchObject({ result: 'fail', thinking: 'on' })
+      expect(summary.realModel?.runNote).toContain('NOT a real-model run')
+      expect(summary.realModel?.unknownCount).toBe(1)
+      expect(summary.failures.knownIssues.join(' ')).toContain('loopback stand-in')
+      expect(raw).not.toContain(key)
+      expect(output).not.toContain(key)
+      for (const file of await filesContaining(join(dir, 'work'), key)) expect.fail(`key value written to ${file}`)
+    } finally {
+      await server.close()
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 240_000)
 })
