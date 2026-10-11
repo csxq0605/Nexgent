@@ -4,8 +4,8 @@
  * 检查项清单): three layers of checks, all judged by this script from files,
  * session records, ledger lines and process state.
  *
- *   headless  H01–H23  scripted provider with per-session routing, through @nexgent/sdk
- *                      (accept-common/step3-headless.mjs)
+ *   headless  H01–H23  scripted model server with per-session routing (member line), through
+ *                      @nexgent/sdk and `nexgent export` (accept-common/step3-headless.mjs, step3-scenario.mjs)
  *   desktop   D01–D14  D01–D10: step 2's desktop scenario and judges, as a regression;
  *                      D11–D14: member blocks, sub-session view, member approval, restart
  *   real      R01–R08  real Claude model on the restock task, five runs (accept-common/step3-real.mjs;
@@ -34,6 +34,7 @@ import { loadHarness, REPO_ROOT } from './accept-common/harness.mjs'
 import { desktopPrerequisites, runDesktopScenario } from './accept-common/step2-desktop.mjs'
 import { runHeadlessScenario } from './accept-common/step3-headless.mjs'
 import { realPrerequisites } from './accept-common/step3-real.mjs'
+import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
 import {
   CHECKS,
   decideExit,
@@ -78,12 +79,17 @@ const errorText = error => (error instanceof Error ? (error.stack ?? error.messa
  */
 async function prepareLayer(layer, harness, options) {
   if (layer === 'headless') {
+    const packages = await loadStep2Packages()
+    if (!packages.ok) return { ok: false, reason: packages.reason }
+    const { validateSessionRecord, validateLedgerRecord } = packages.pkgs.session
+    const tools = { validateSessionRecord, validateLedgerRecord }
     await mkdir(options.work, { recursive: true })
+    // One scenario run; every H judge reads its observations. A crash fails every judged H item.
     try {
       const obs = await runHeadlessScenario(harness, options.work, { log: line => log(`headless: ${line}`) })
-      return { ok: true, ctx: { work: options.work, obs } }
+      return { ok: true, ctx: { work: options.work, obs, tools } }
     } catch (error) {
-      return { ok: true, ctx: { work: options.work, scenarioError: errorText(error) } }
+      return { ok: true, ctx: { work: options.work, tools, scenarioError: errorText(error) } }
     }
   }
   if (layer === 'desktop') {

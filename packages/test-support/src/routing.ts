@@ -123,3 +123,16 @@ export function llmSessionText(request: { readonly messages: readonly { readonly
   const firstUser = request.messages.find((m) => m.role === 'user')
   return [...system, ...firstUser === undefined ? [] : [firstUser.content]].join('\n')
 }
+
+/** The member identity line of a child session's system prompt (`renderMemberPromptLine` in `@nexgent/kernel`). */
+const MEMBER_LINE = /^Member: ([a-z][a-z0-9-]{0,31}) \((delegated|team|workflow)\)$/m
+
+/**
+ * A `routeKey` that returns the member name from the `Member: <name> (<form>)`
+ * line of the session-identifying text; root sessions (no such line) go to
+ * the default script.
+ * @param text - `sessionText` for the server, `llmSessionText` for the provider.
+ */
+export function routeByMember<Req>(text: (request: Req) => string): RouteKey<Req> {
+  return (request) => MEMBER_LINE.exec(text(request))?.[1]
+}

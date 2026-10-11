@@ -27,7 +27,7 @@ const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
 /** The judges and step-2 regression items that exist in round 1; everything else must report not-implemented. */
-const WIRED = new Set(['H23', ...range('D', 1, 10)])
+const WIRED = new Set(['H01', 'H10', 'H22', 'H23', ...range('D', 1, 10)])
 
 describe('accept-step3 checklist', () => {
   it('has every item of the step-3 plan in order, plus the D01–D10 regression', async () => {
@@ -51,7 +51,7 @@ describe('accept-step3 checklist', () => {
   })
 
   it('nothing fakes a pass: unwired items are not-implemented, wired ones fail without observations', async () => {
-    expect(Object.keys(JUDGES)).toEqual(['H23'])
+    expect(Object.keys(JUDGES)).toEqual(['H01', 'H10', 'H22', 'H23'])
     for (const check of CHECKS) {
       const result = await evaluateItem(check, { obs: {} })
       if (WIRED.has(check.id)) expect(result.status, check.id).not.toBe('passed')

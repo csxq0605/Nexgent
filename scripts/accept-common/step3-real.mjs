@@ -1,7 +1,8 @@
 /**
  * The real-model layer of accept-step3 (R01–R08, plan §真实模型验收). Not
- * wired yet: the restock task (scripts/real-task/step3-restock/), its
- * hidden judge and the per-form runs land in round 5. Until then the layer
+ * wired yet: the restock material (scripts/real-task/step3-restock/) and its
+ * hidden check (scripts/real-task/step3-restock-hidden.mjs) exist; the
+ * per-form runs land in round 5. Until then the layer
  * reports itself not runnable after the key and budget checks, so the script
  * exits 2 and never calls a model.
  */
