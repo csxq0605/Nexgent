@@ -455,6 +455,6 @@ describe('system prompt sections', () => {
       tools: [tool('write_file')],
       sections: [{ id: 'a', title: 'Project instructions', body: 'Be brief.' }],
     })
-    expect(prompt.endsWith('# Working with files\n- To create a new file or replace a file completely, use `write_file`.\n\n# Project instructions\nBe brief.\n\nS')).toBe(true)
+    expect(prompt.endsWith("# Working with files\n- To create a new file, or to replace a file's whole content, use `write_file`.\n\n# Project instructions\nBe brief.\n\nS")).toBe(true)
   })
 })

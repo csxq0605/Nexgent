@@ -33,6 +33,15 @@ describe('tool definitions', () => {
     }
     expect(tools.find(t => t.definition.name === 'read_file')!.definition.effects).toEqual(['read'])
   })
+
+  it('steers file writes to write_file / str_replace and the shell to running commands', async () => {
+    const { tools } = await setup()
+    const description = (name: string) => tools.find(t => t.definition.name === name)!.definition.description
+    expect(description('write_file')).toContain('Use this, not shell heredocs, echo or scripts, whenever you write file content yourself.')
+    expect(description('str_replace')).toContain('Use this, not sed, Python or other scripts, for every edit; call it once per change.')
+    const shell = description(process.platform === 'win32' ? 'pwsh' : 'bash')
+    expect(shell).toContain('to run programs, scripts and tests. Do not use it to write or edit files: create files with write_file and change them with str_replace.')
+  })
 })
 
 describe('session temp directory', () => {

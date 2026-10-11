@@ -77,12 +77,13 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 `# Working with files` 一节由 `packages/kernel/src/system-prompt.ts` 的 `fileGuidance` 生成（PR #8，W7），每一条只在对应工具可见时出现，所以提示里不会出现模型调不了的工具。必须表达的内容（措辞以代码为准，改动需同时更新本节）：
 
-1. 修改已有文件用 `str_replace`（有 `read_file` 时先读）；有 shell 工具时不要用 shell 命令（heredoc、sed、内联脚本）改文件。——已实现。
+1. 修改已有文件用 `str_replace`（有 `read_file` 时先读），多处修改就分多次调用。——已实现。
 2. 新建或整体替换文件用 `write_file`。——已实现。
+2a. 有 shell 工具时：文件内容只用 `write_file` / `str_replace` 写改，不经 shell 新建或修改文件（heredoc、`echo >`、`tee`、`sed -i`，以及写文件的 Python / Node 脚本都不行）；shell 用来运行程序、脚本和测试，程序自己产出的文件以及复制、移动文件不受限。`write_file`、`str_replace`、`bash` / `pwsh` 的工具描述里也写了同样的分工。——已实现（第 1 次真实模型补验 R02 里，模型全程用 heredoc 和 Python 替换写改文件，因此加强了这一条）。
 3. 结果就绪时用 `present` 声明交付，每次修订后再次声明；再次声明时带上 `present` 返回的 `deliverableId`，使之成为同一成果的新版本。——已实现。
 4. `.nexgent/materials/` 下的资料只读，结果写进项目。只在项目有资料（`ctx.tasking.materials.list()` 非空，轮次开始时检查）时出现。——已实现。
 
-前三条对应真实模型补验的 R02（修改轮里对已有文件的修改走 `str_replace`）与链路里的 present / v2。
+第 1、2、2a、3 条对应真实模型补验的 R02（修改轮里对已有文件的修改走 `str_replace`）与链路里的 present / v2。
 
 ## 步骤 2 工具
 
