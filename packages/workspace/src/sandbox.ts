@@ -91,6 +91,12 @@ export interface LocalSandboxPolicy extends SandboxPolicy {
   readonly sensitivePatterns: readonly string[]
   /** Real directory under which `nexgent-<sessionId>/` temp dirs live. */
   readonly tempBase: string
+  /**
+   * The session whose temp dir (`<tempBase>/nexgent-<sessionId>/`) is readable
+   * and writable; absent admits no temp dir. Set per call with
+   * {@link LocalSandbox.forSession}.
+   */
+  readonly tempSessionId?: string
 }
 
 /** Construction options for {@link createSandbox}. */
@@ -144,9 +150,15 @@ export async function createSandbox(options: SandboxOptions): Promise<LocalSandb
   }, extra)
 }
 
+function withoutTempSession(policy: LocalSandboxPolicy): LocalSandboxPolicy {
+  const { tempSessionId: _omit, ...rest } = policy
+  return rest
+}
+
 /** The local sandbox. Construct with {@link createSandbox}. */
 export class LocalSandbox implements Sandbox {
   private readonly derived = new Map<SandboxMode, LocalSandbox>()
+  private readonly sessions = new Map<string, LocalSandbox>()
 
   constructor(
     readonly policy: LocalSandboxPolicy,
@@ -171,6 +183,21 @@ export class LocalSandbox implements Sandbox {
     return sandbox
   }
 
+  /**
+   * The same sandbox admitting only `sessionId`'s temp dir (cached). Other
+   * `nexgent-*` directories under the temp base stay outside the roots.
+   */
+  forSession(sessionId: string | undefined): LocalSandbox {
+    if (sessionId === this.policy.tempSessionId) return this
+    if (sessionId === undefined) return new LocalSandbox(withoutTempSession(this.policy), this.extraReadRoots, this.flavor)
+    let sandbox = this.sessions.get(sessionId)
+    if (sandbox === undefined) {
+      sandbox = new LocalSandbox({ ...this.policy, tempSessionId: sessionId }, this.extraReadRoots, this.flavor)
+      this.sessions.set(sessionId, sandbox)
+    }
+    return sandbox
+  }
+
   async checkRead(path: string): Promise<SandboxDecision> {
     return toDecision(await this.assessRead(path))
   }
@@ -189,8 +216,12 @@ export class LocalSandbox implements Sandbox {
   }
 
   private inTemp(real: string): boolean {
+    const session = this.policy.tempSessionId
+    if (session === undefined) return false
     const rel = relativeWithin(this.policy.tempBase, real, this.flavor)
-    return rel !== undefined && rel.split('/')[0]!.startsWith(SESSION_TEMP_PREFIX)
+    if (rel === undefined) return false
+    const own = `${SESSION_TEMP_PREFIX}${session}`
+    return rel.split('/')[0] === (this.flavor === 'win32' ? own.toLowerCase() : own)
   }
 
   private sensitive(real: string): boolean {

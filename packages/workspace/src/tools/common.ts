@@ -75,9 +75,9 @@ export function grantAdmits(grant: ApprovalGrant, tool: string, subject: PolicyS
     : matchGlob(grant.pattern, subject.value, process.platform === 'win32')
 }
 
-/** The sandbox for this call's mode. */
+/** The sandbox for this call's mode, admitting only this call's session temp dir. */
 export function sandboxFor(deps: ToolDeps, context: ToolContext): LocalSandbox {
-  return deps.sandbox.withMode(context.sandboxMode)
+  return deps.sandbox.withMode(context.sandboxMode).forSession(context.sessionId)
 }
 
 /** The `sandbox/denied` error for a denial (`SANDBOX_DENIED { mode, path | command }`). */
