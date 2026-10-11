@@ -164,6 +164,23 @@ describe('approvals', () => {
     expect(turnEnds(t.events)).toHaveLength(1)
   })
 
+  it('accepts an answer given synchronously from the approval.request callback', async () => {
+    const t = await testSdk(sensitiveWrite)
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
+    const session = await t.sdk.call('sessions.create', { projectId: project.projectId })
+    const answers: Promise<boolean>[] = []
+    t.sdk.subscribe(event => {
+      if (event.type !== 'approval.request') return
+      answers.push(t.sdk.call('approvals.respond', { projectId: project.projectId, sessionId: event.sessionId, decision: { id: event.request.id, decision: 'allow', scope: 'once' } }))
+    })
+    await t.sdk.call('turns.send', { projectId: project.projectId, sessionId: session.sessionId, text: 'write .env' })
+    await waitForEvent(t, event => event.type === 'turn.end')
+    expect(await Promise.all(answers)).toEqual([true])
+    expect(t.events.find(event => event.type === 'approval.decision')).toMatchObject({ decision: { decision: 'allow', decidedBy: 'user' } })
+    expect(t.events.find(event => event.type === 'tool.result')).toMatchObject({ name: 'write_file', isError: false })
+    expect(existsSync(nodePath.join(project.root, '.env'))).toBe(true)
+  })
+
   it('an allow-once lets the call run', async () => {
     const t = await testSdk(sensitiveWrite)
     const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
