@@ -65,6 +65,31 @@ describe('buildMessageParams', () => {
     expect(system).toBeUndefined()
     expect(messages.map(message => message.role)).toEqual(['user', 'assistant', 'user'])
   })
+
+  it('merges adjacent user messages into one user turn with text blocks in order', () => {
+    const { messages } = toWireMessages([
+      { role: 'user', content: 'summary' },
+      { role: 'user', content: 'injected' },
+      { role: 'user', content: 'question' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 't1', name: 'echo', arguments: '{}' }] },
+      { role: 'tool', toolCallId: 't1', name: 'echo', content: 'out', isError: false },
+      { role: 'user', content: 'next turn' },
+    ])
+    expect(messages.map(message => message.role)).toEqual(['user', 'assistant', 'user'])
+    expect(messages[0]!.content).toEqual([
+      { type: 'text', text: 'summary' },
+      { type: 'text', text: 'injected' },
+      { type: 'text', text: 'question' },
+    ])
+    expect(messages[2]!.content).toEqual([
+      { type: 'tool_result', tool_use_id: 't1', content: 'out' },
+      { type: 'text', text: 'next turn' },
+    ])
+  })
+
+  it('leaves a single user message as plain text', () => {
+    expect(toWireMessages([{ role: 'user', content: 'only' }]).messages).toEqual([{ role: 'user', content: 'only' }])
+  })
 })
 
 describe('redaction', () => {
