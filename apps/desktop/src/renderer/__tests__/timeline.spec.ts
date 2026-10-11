@@ -61,4 +61,23 @@ describe('timeline', () => {
     ])
     expect(list.map(e => e.kind)).toEqual(['user', 'tool', 'turn.end'])
   })
+
+  it('puts a replayed deliverable card after its present block, one card per successful present', () => {
+    const d = (id: string) => ({ deliverableId: id, version: 1, title: id, summary: '', files: [] })
+    const present = (id: string, isError = false) => ({ kind: 'tool' as const, turn: 1, step: 2, call: { id, name: 'present', arguments: '{}' }, content: 'ok', isError, durationMs: 1 })
+    const list = fromHistory([
+      { kind: 'user', turn: 1, text: 'go', source: 'user', materials: [] },
+      { kind: 'tool', turn: 1, step: 1, call: { id: 'w', name: 'write_file', arguments: '{}' }, content: 'ok', isError: false, durationMs: 1 },
+      { kind: 'deliverable', turn: 1, deliverable: d('a') },
+      { kind: 'deliverable', turn: 1, deliverable: d('b') },
+      present('p0', true),
+      present('p1'),
+      present('p2'),
+      { kind: 'assistant', turn: 1, step: 3, text: '好了', finishReason: 'stop', interrupted: false },
+      { kind: 'deliverable', turn: 1, deliverable: d('orphan') },
+      { kind: 'turn.end', turn: 1, reason: { kind: 'completed' } },
+      { kind: 'deliverable', turn: 2, deliverable: d('next') },
+    ])
+    expect(list.map(e => e.key)).toEqual(['u:1:0', 't:w', 't:p0', 't:p1', 'd:a:1', 't:p2', 'd:b:1', 'a:1:3', 'd:orphan:1', 'e:1', 'd:next:1'])
+  })
 })

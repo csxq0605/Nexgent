@@ -151,6 +151,8 @@ describe('desktop UI over the real SDK (scripted model)', () => {
       let { app, page, consoleErrors } = await launch(home)
       try {
         await page.getByTestId('start-screen').waitFor()
+        // the real preload has the native pickers, so their buttons show
+        await page.getByTestId('pick-directory').waitFor()
         await shot(page, '01-start')
         // D02: create the project by path
         await page.getByTestId('project-path').fill(root)
@@ -288,6 +290,32 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         expect(await page.getByTestId('deliverable-card').count()).toBe(2)
         expect(await page.getByTestId('tab-deliverables').textContent()).toContain('1')
         await shot(page, '08-after-restart')
+
+        // replayed deliverable cards come right after their present blocks
+        const order = await page.evaluate(() =>
+          [...document.querySelectorAll('[data-testid="tool-block"], [data-testid="deliverable-card"]')].map((el: any) =>
+            el.dataset.testid === 'deliverable-card' ? 'card' : String(el.textContent).includes('present') ? 'present' : 'tool',
+          ),
+        )
+        expect(order).toEqual(['tool', 'tool', 'present', 'card', 'tool', 'present', 'card'])
+        expect(await page.getByTestId('pick-files').count()).toBe(1)
+        expect(await page.getByTestId('attach-files').count()).toBe(1)
+
+        // the 文件 tab lists the project folder (not .nexgent) and marks this conversation's changes
+        await page.getByTestId('tab-files').click()
+        await expect.poll(() => page.getByTestId('file-item').count()).toBe(2)
+        const files = await page.getByTestId('file-item').allTextContents()
+        expect(files[0]).toContain('.env')
+        expect(files[1]).toContain('report/summary.csv')
+        expect(files[1]).toContain('修改')
+        await page.getByTestId('tab-materials').click()
+
+        // rename the conversation; the title survives in the session file
+        await page.getByTestId('rename-session').click()
+        await page.getByTestId('rename-input').fill('订单汇总')
+        await page.keyboard.press('Enter')
+        await expect.poll(() => page.getByTestId('session-item').textContent()).toContain('订单汇总')
+        expect(sessionRecords(root).filter(r => r['type'] === 'session.title').map(r => r['title'])).toEqual(['订单汇总'])
 
         await page.getByTestId('composer-input').click()
         await page.keyboard.type('继续')

@@ -22,7 +22,9 @@
     "@nexgent/kernel": "workspace:*",
     "@nexgent/sdk": "workspace:*",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@nexgent/test-support": "workspace:*",

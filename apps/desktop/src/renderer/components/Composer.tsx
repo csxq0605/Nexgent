@@ -127,7 +127,7 @@ export function Composer(): JSX.Element {
       />
       <div className="composer-bar">
         {store.client?.canPickFiles === true && (
-          <button type="button" className="ghost" onClick={() => void store.pickAndAddMaterials()} disabled={disabled}>
+          <button type="button" className="ghost" onClick={() => void store.pickAndAddMaterials()} disabled={disabled} data-testid="attach-files">
             📎 {T.attach}
           </button>
         )}

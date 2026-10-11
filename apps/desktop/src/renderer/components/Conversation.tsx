@@ -1,7 +1,52 @@
-import { useAppState } from '../hooks.js'
+import { useState } from 'react'
+import { useAppState, useAppStore } from '../hooks.js'
 import { T, goalStatusText, sessionTitle } from '../strings.js'
 import { Composer } from './Composer.js'
 import { Timeline } from './Timeline.js'
+
+/** The conversation's title; 改名 turns it into a field (Enter saves, Esc cancels). */
+function Title({ sessionId, title, initial }: { readonly sessionId: string; readonly title: string; readonly initial: string }): JSX.Element {
+  const store = useAppStore()
+  const [draft, setDraft] = useState<string | undefined>(undefined)
+  if (draft === undefined) {
+    return (
+      <>
+        <h2 className="ellipsis" data-testid="session-title">
+          {title}
+        </h2>
+        <button type="button" className="link small" onClick={() => setDraft(initial)} data-testid="rename-session">
+          {T.rename}
+        </button>
+      </>
+    )
+  }
+  const save = (): void => {
+    const value = draft.trim()
+    setDraft(undefined)
+    if (value !== '' && value !== initial) void store.renameSession(sessionId, value)
+  }
+  return (
+    <input
+      className="title-input"
+      value={draft}
+      autoFocus
+      maxLength={200}
+      aria-label={T.renameLabel}
+      data-testid="rename-input"
+      onChange={event => setDraft(event.target.value)}
+      onBlur={save}
+      onKeyDown={event => {
+        if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+          event.preventDefault()
+          save()
+        } else if (event.key === 'Escape') {
+          event.preventDefault()
+          setDraft(undefined)
+        }
+      }}
+    />
+  )
+}
 
 /** Middle column: header, timeline, composer (or an empty state). */
 export function Conversation(): JSX.Element {
@@ -21,7 +66,12 @@ export function Conversation(): JSX.Element {
   return (
     <section className="conversation" data-testid="conversation">
       <header className="conversation-head">
-        <h2 className="ellipsis">{sessionTitle(session === undefined ? undefined : { ...session, ...(state.goal === null ? {} : { goal: state.goal }) }, first?.kind === 'user' ? first.text : undefined)}</h2>
+        <Title
+          key={state.sessionId}
+          sessionId={state.sessionId}
+          initial={session?.title ?? ''}
+          title={sessionTitle(session === undefined ? undefined : { ...session, ...(state.goal === null ? {} : { goal: state.goal }) }, first?.kind === 'user' ? first.text : undefined)}
+        />
         {state.goal !== null && (
           <span className={`badge goal-${state.goal.status}`} title={state.goal.text}>
             {T.panelGoal}·{goalStatusText(state.goal.status)}

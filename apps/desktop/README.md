@@ -14,12 +14,12 @@ Nexgent 桌面应用（Electron）。主进程持有 `@nexgent/sdk` 的实例；
 | `src/main/origin.ts` | 页面来源、导航判定、`app://` 到 `dist/renderer/` 的文件映射、CSP |
 | `src/main/window-config.ts` | 窗口 `webPreferences`（隔离、沙箱、无 Node）及其核对 |
 | `src/main/shutdown.ts` | 关闭协议：有进行中的轮次先确认，确认后取消、等 `turn.end`、释放 SDK，再退出 |
-| `src/main/dialogs.ts` | 文件对话框（打开项目、添加资料、导出目录）；`sessions.export` 的目录由主进程对话框决定 |
+| `src/main/dialogs.ts` | 文件对话框（打开项目、添加资料、导出目录）：前两个经 SDK 的 `dialogs.pickDirectory` / `dialogs.pickFiles` 弹出；`sessions.export` 的目录由主进程对话框决定 |
 | `src/main/logger.ts` | 日志：`<NEXGENT_HOME>/logs/desktop-YYYY-MM-DD.log`，按本地日期滚动，保留 14 天 |
 | `src/main/sdk-loader.ts` | 取得 SDK：`@nexgent/sdk` 的 `createSdk`（开发构建可用 `NEXGENT_DESKTOP_SDK_MODULE` 换成脚本化 SDK） |
 | `src/main/launch-args.ts` | 启动参数 `--project <绝对路径>`（`nexgent app` 的约定）：启动时经 `projects.open` 打开并初始化，排在 `projects.recent` 第一位；第二次启动把项目交给已运行的实例 |
 | `src/main/ipc-types.ts` | 通道名、令牌参数、调用的请求与应答类型、页面看到的 `NexgentBridge` 类型 |
-| `src/preload/index.cts` | 沙箱 preload（单个 CommonJS 文件，只 `require('electron')`） |
+| `src/preload/index.cts` | 沙箱 preload（单个 CommonJS 文件，只 `require('electron')`），暴露 `window.nexgent = { invoke, onEvent, platform, pickDirectory, pickFiles }` |
 | `scripts/package.mjs` | 打包：`pnpm deploy` 暂存到 `build/app`，再用 electron-builder 产出到 `release/` |
 
 ## 界面（`src/renderer/`）
@@ -29,10 +29,10 @@ React 18 + Vite。`index.html` 与 `vite.config.ts` 在包根，`pnpm --filter @
 | 文件 | 内容 |
 | --- | --- |
 | `bridge.ts` | `window.nexgent` 的类型与 `SdkClient`：把 preload 的 reject（普通 `ErrorInfo`）和 IPC 断开都变成 `SdkCallError` |
-| `store.ts` | 界面状态与全部用户操作（打开项目、会话、发送、停止、审批、资料、反馈、目标、设置、密钥）；失败一律变成顶部错误条，不抛出 |
-| `timeline.ts` | 会话历史 + 实时事件 → 对话条目（流式文本追加、`assistant.message` 定稿、中断保留已流出文本、工具块配对） |
+| `store.ts` | 界面状态与全部用户操作（打开项目、会话与改名、发送、停止、审批、资料、项目文件、反馈、目标、设置、密钥）；失败一律变成顶部错误条，不抛出 |
+| `timeline.ts` | 会话历史 + 实时事件 → 对话条目（流式文本追加、`assistant.message` 定稿、中断保留已流出文本、工具块配对；回放时成果卡片排在它的 `present` 工具块之后） |
 | `strings.ts` | 全部中文文案 |
-| `components/` | 开始页、左栏（项目切换、对话列表）、中栏（时间线、工具块、成果卡片、Composer 的 `@` 资料引用、停止）、右栏（资料、成果、文件、目标）、审批对话框、成果查看与 v(n-1)→vn 差异、反馈表单、设置页、错误边界 |
+| `components/` | 开始页、左栏（项目切换、对话列表）、中栏（对话改名、时间线、模型回复按 Markdown 显示（GFM，不渲染原始 HTML，链接不跳转）、工具块、成果卡片、Composer 的 `@` 资料引用、停止）、右栏（资料、成果、项目文件夹的文件（`files.list`，标出本对话改动的）、目标）、审批对话框、成果查看与 v(n-1)→vn 差异、反馈表单、设置页、错误边界 |
 | `testing/fake-bridge.ts` | 组件测试用的假 `window.nexgent`（不进打包产物） |
 
 测试：`src/renderer/__tests__/`（vitest + Testing Library，jsdom）；`tests/ui-e2e.spec.ts` 用 Playwright 拉起真实 Electron + 真实 SDK + 脚本化模型服务端，按用户操作跑完整条链（设 `NEXGENT_UI_SCREENSHOTS=<目录>` 保存截图）。
@@ -45,6 +45,7 @@ declare global { interface Window { nexgent: NexgentBridge } }
 
 const info = await window.nexgent.invoke('app.info', {})
 const off = window.nexgent.onEvent((event) => { /* SdkEvent */ })
+const root = await window.nexgent.pickDirectory()   // 主进程弹系统对话框；取消为 null（pickFiles 取消为 []）
 ```
 
 - `invoke` 失败时 reject 的是普通对象 `ErrorInfo`（`{ name, code, message, details? }`），不是 `Error`：`contextBridge` 会把 `Error` 削成只剩 message。被主进程拦下的调用 `code` 为 `approval/denied`，`details.check` 是 `sender` / `token` / `method` / `input` 之一。

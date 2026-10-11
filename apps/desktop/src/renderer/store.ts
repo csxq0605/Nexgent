@@ -7,7 +7,7 @@
  * broken backend shows an error instead of a blank window.
  */
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
-import type { ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch } from '@nexgent/sdk'
+import type { ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, type TimelineEntry } from './timeline.js'
 
@@ -40,6 +40,8 @@ export interface AppState {
   readonly pendingApprovals: readonly ApprovalRequest[]
   readonly materials: readonly MaterialMetadata[]
   readonly deliverables: readonly DeliverableSummary[]
+  /** The project folder's files (`files.list`); loaded when the 文件 tab first shows. */
+  readonly projectFiles?: ProjectFileListing | undefined
   readonly goal: Goal | null
   readonly settings?: ProjectSettings | undefined
   readonly notices: readonly Notice[]
@@ -162,6 +164,7 @@ export class AppStore {
       pendingApprovals: [],
       materials: [],
       deliverables: [],
+      projectFiles: undefined,
       goal: null,
       settings: undefined,
       freshMaterialIds: [],
@@ -223,6 +226,15 @@ export class AppStore {
     })
   }
 
+  async refreshFiles(): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    await this.guard(async c => {
+      const projectFiles = await c.call('files.list', { projectId })
+      if (this.projectId === projectId) this.set({ projectFiles })
+    })
+  }
+
   async refreshSettings(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
@@ -241,6 +253,17 @@ export class AppStore {
     if (summary === undefined) return
     this.set(state => ({ sessions: [summary, ...state.sessions.filter(s => s.sessionId !== summary.sessionId)] }))
     await this.openSession(summary.sessionId)
+  }
+
+  /** Rename a conversation; an empty title is ignored. */
+  async renameSession(sessionId: string, title: string): Promise<boolean> {
+    const projectId = this.projectId
+    const trimmed = title.trim()
+    if (projectId === undefined || trimmed.length === 0) return false
+    const summary = await this.guard(c => c.call('sessions.rename', { projectId, sessionId, title: trimmed }))
+    if (summary === undefined || this.projectId !== projectId) return false
+    this.set(state => ({ sessions: state.sessions.map(s => (s.sessionId === sessionId ? summary : s)) }))
+    return true
   }
 
   async openSession(sessionId: string): Promise<void> {
@@ -426,6 +449,7 @@ export class AppStore {
         }))
         void this.refreshSessions()
         void this.refreshDeliverables()
+        if (this.state.projectFiles !== undefined) void this.refreshFiles()
         break
       case 'approval.request':
         if (current) this.set(state => ({ pendingApprovals: state.pendingApprovals.some(r => r.id === event.request.id) ? state.pendingApprovals : [...state.pendingApprovals, event.request] }))

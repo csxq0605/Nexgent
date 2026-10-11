@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { FileChange } from '@nexgent/kernel'
 import { useAppState, useAppStore } from '../hooks.js'
 import { T, fileChangeText, formatBytes, formatTime, goalStatusText, isAbsolutePath } from '../strings.js'
@@ -31,7 +31,7 @@ function Materials(): JSX.Element {
   return (
     <div className="panel-section" data-testid="materials-panel">
       {store.client?.canPickFiles === true && (
-        <button type="button" className="primary full" onClick={() => void store.pickAndAddMaterials()}>
+        <button type="button" className="primary full" onClick={() => void store.pickAndAddMaterials()} data-testid="pick-files">
           ＋ {T.attach}
         </button>
       )}
@@ -95,25 +95,69 @@ function Deliverables(): JSX.Element {
   )
 }
 
+/** The project folder's files (`files.list`), marking the ones this conversation changed. */
 function Files(): JSX.Element {
   const state = useAppState()
-  const files = useMemo(() => {
+  const store = useAppStore()
+  useEffect(() => {
+    void store.refreshFiles()
+  }, [store, state.project?.projectId])
+  const changed = useMemo(() => {
     const latest = new Map<string, FileChange['change']>()
     for (const entry of state.timeline) if (entry.kind === 'files') for (const change of entry.changes) latest.set(change.path, change.change)
-    return [...latest.entries()].sort(([a], [b]) => a.localeCompare(b))
+    return latest
   }, [state.timeline])
-  if (files.length === 0) return <p className="muted small panel-section">{T.noFiles}</p>
+  const listing = state.projectFiles
+  const present = new Set(listing?.files.map(f => f.path))
+  const deleted = [...changed.entries()].filter(([path, change]) => change === 'deleted' && !present.has(path)).map(([path]) => path)
   return (
-    <ul className="item-list panel-section" data-testid="file-list">
-      {files.map(([path, change]) => (
-        <li key={path} className="item">
-          <code className="ellipsis" title={path}>
-            {path}
-          </code>
-          <span className={`badge change-${change}`}>{fileChangeText(change)}</span>
-        </li>
-      ))}
-    </ul>
+    <div className="panel-section" data-testid="files-panel">
+      <div className="row between">
+        <span className="muted small ellipsis" title={state.project?.root}>{state.project?.root}</span>
+        <button type="button" className="link small" onClick={() => void store.refreshFiles()} data-testid="refresh-files">
+          {T.filesRefresh}
+        </button>
+      </div>
+      {listing === undefined ? (
+        <p className="muted small">{T.loading}</p>
+      ) : listing.files.length === 0 && deleted.length === 0 ? (
+        <p className="muted small">{T.noFiles}</p>
+      ) : (
+        <ul className="item-list" data-testid="file-list">
+          {listing.files.map(file => {
+            const change = changed.get(file.path)
+            return (
+              <li key={file.path} className="item" data-testid="file-item">
+                <div className="item-main">
+                  <code className="ellipsis" title={file.path}>
+                    {file.path}
+                  </code>
+                  <span className="muted small">
+                    {formatBytes(file.size)} · {formatTime(file.modifiedAt)}
+                  </span>
+                </div>
+                {change !== undefined && (
+                  <span className={`badge change-${change}`} title={T.filesChangedHere}>
+                    {fileChangeText(change)}
+                  </span>
+                )}
+              </li>
+            )
+          })}
+          {deleted.map(path => (
+            <li key={path} className="item" data-testid="file-item">
+              <code className="ellipsis muted" title={path}>
+                {path}
+              </code>
+              <span className="badge change-deleted" title={T.filesChangedHere}>
+                {fileChangeText('deleted')}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {listing?.truncated === true && <p className="muted small">{T.filesTruncated(listing.files.length)}</p>}
+    </div>
   )
 }
 
@@ -168,7 +212,7 @@ function GoalPanel(): JSX.Element {
   )
 }
 
-/** Right column: the project's materials, deliverables, changed files and the conversation's goal. */
+/** Right column: the project's materials, deliverables, files and the conversation's goal. */
 export function RightPanel({ tab, onTab }: { readonly tab: PanelTab; readonly onTab: (tab: PanelTab) => void }): JSX.Element {
   const state = useAppState()
   const counts: Partial<Record<PanelTab, number>> = {
