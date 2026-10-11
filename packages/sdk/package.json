@@ -20,6 +20,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nexgent/kernel": "workspace:*"
+    "@nexgent/context": "workspace:*",
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/llm": "workspace:*",
+    "@nexgent/session": "workspace:*",
+    "@nexgent/skill": "workspace:*",
+    "@nexgent/tasking": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/test-support": "workspace:*"
   }
 }
