@@ -51,11 +51,12 @@ describe('timeline', () => {
     expect(list[0]).toMatchObject({ decision: { decision: 'allow' } })
   })
 
-  it('maps display history, skipping empty assistant steps', () => {
+  it('maps display history, skipping empty assistant steps and empty file lists', () => {
     const list = fromHistory([
       { kind: 'user', turn: 1, text: 'hi', source: 'user', materials: ['orders.csv'] },
       { kind: 'assistant', turn: 1, step: 1, text: '', finishReason: 'tool-calls', interrupted: false },
       { kind: 'tool', turn: 1, step: 1, call: { id: 'c', name: 'write_file', arguments: '{}' }, content: 'ok', isError: false, durationMs: 3 },
+      { kind: 'files', turn: 1, changes: [] },
       { kind: 'turn.end', turn: 1, reason: { kind: 'interrupted' } },
     ])
     expect(list.map(e => e.kind)).toEqual(['user', 'tool', 'turn.end'])
