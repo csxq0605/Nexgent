@@ -44,7 +44,7 @@ const headlessRun = id => (ctx) => {
 }
 const item = (id, layer, title) => (layer === 'headless' && JUDGES[id] !== undefined ? { id, layer, title, run: headlessRun(id) } : { id, layer, title })
 
-/** All 39 checklist items, in plan order. Add `run` to implement one. */
+/** All 40 checklist items, in plan order. Add `run` to implement one. */
 export const CHECKS = [
   item('H01', 'headless', '新目录初始化：.nexgent/ 布局与 config.json 存在；最近项目列表含该项目'),
   item('H02', 'headless', '添加 .csv 与 .xlsx 两份资料：复制到 materials/<id>/，元数据通过 schema，SHA-256 一致，原文件未改'),
@@ -58,7 +58,7 @@ export const CHECKS = [
   item('H10', 'headless', '修改轮后有 v2；v1 快照哈希不变；v1→v2 差异非空且只涉及预期文件'),
   item('H11', 'headless', '持久目标：设定后写入；完成时状态更新'),
   item('H12', 'headless', '进程内取消：已流出文本保留，turn.end 为 cancelled；长 shell 命令被终止，无残留子孙进程'),
-  item('H13', 'headless', '审批：工作区外写入触发审批，拒绝后工具结果为拒绝；once 批准只生效一次'),
+  item('H13', 'headless', '工作区外写入：workspace-write 下被沙箱直接拒绝，不产生审批请求，项目外没有文件'),
   item('H14', 'headless', '压缩：越过测试阈值后写出 compaction 记录，下一次请求只带摘要与近期轮次'),
   item('H15', 'headless', '强杀一：模型流到一半强杀进程（Windows 结束整个进程树）'),
   item('H16', 'headless', '强杀二：工具执行到一半强杀进程'),
@@ -68,6 +68,7 @@ export const CHECKS = [
   item('H20', 'headless', '.nexgent/ 与 export 产物中搜不到测试密钥值'),
   item('H21', 'headless', 'perProject 上限达到时以 budget/exhausted 结束，记录符合 permissions.md'),
   item('H22', 'headless', 'nexgent export <session> 产物包含会话、相关账本行与元数据'),
+  item('H23', 'headless', '审批：写敏感文件（.env）触发审批；once 批准只生效一次，再写再问，拒绝后工具结果为拒绝、文件不变'),
   item('D01', 'desktop', '应用启动，窗口加载，渲染进程控制台无错误；窗口配置满足隔离要求'),
   item('D02', 'desktop', '新建项目、从最近项目重新打开'),
   item('D03', 'desktop', '添加资料（对话框打桩）后右栏资料列表出现两项'),

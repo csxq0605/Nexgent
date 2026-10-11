@@ -244,7 +244,7 @@ apps/desktop(W5,W6) ──► sdk(W4) ──► context(W1) ──┐
 | H10 | 修改轮后有 v2；v1 快照哈希不变；v1→v2 差异非空且只涉及预期文件 |
 | H11 | 持久目标：设定后写入；完成时状态更新 |
 | H12 | 进程内取消：长流式轮中取消后，已流出文本在 `assistant.message.interrupted` 中保留，`turn.end` 为 cancelled；运行中的长 shell 命令被终止，无残留子孙进程 |
-| H13 | 审批：工作区外写入触发审批，拒绝后工具结果为拒绝；`once` 批准只生效一次 |
+| H13 | 工作区外写入：`workspace-write` 下被沙箱直接拒绝（`SANDBOX_DENIED`），不产生审批请求，项目外没有文件（`permissions.md` 路径策略；2026-10-11 按实际规则改写，原文“触发审批”与规范不符） |
 | H14 | 压缩：输入 token 越过测试阈值后写出 `compaction` 记录，下一次请求只带摘要与近期轮次 |
 | H15 | 强杀一：模型流到一半强杀进程（Windows 结束整个进程树） |
 | H16 | 强杀二：工具执行到一半强杀进程 |
@@ -254,6 +254,7 @@ apps/desktop(W5,W6) ──► sdk(W4) ──► context(W1) ──┐
 | H20 | `.nexgent/` 全部文件与 `export` 产物中搜不到测试密钥值 |
 | H21 | `perProject` 上限达到时以 `budget/exhausted` 结束，记录符合 `permissions.md` |
 | H22 | `nexgent export <session>` 产物包含会话、相关账本行与元数据 |
+| H23 | 审批：写敏感文件（`.env`）触发审批；`once` 批准只生效一次，再写再问，拒绝后工具结果为拒绝、文件不变（2026-10-11 从 H13 拆出） |
 
 ### 桌面层（脚本化 provider，Playwright 驱动 Electron，两平台 CI）
 

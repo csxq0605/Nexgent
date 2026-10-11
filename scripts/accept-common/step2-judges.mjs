@@ -11,9 +11,9 @@
  * (@nexgent/test-support).
  *
  * A judge returns `{ status, evidence }`: `passed` only when every condition
- * holds; `not-implemented` when the item depends on something that does not
- * exist yet (its evidence still reports what could be checked, and a defect
- * found there is `failed`, never hidden).
+ * holds; `not-implemented` (via {@link partial}) when the item depends on
+ * something that does not exist yet (its evidence still reports what could
+ * be checked, and a defect found there is `failed`, never hidden).
  */
 import { COMPACTION, FILES, MATERIALS, OFFICE_SKILL, STALL_TEXT, TASKS } from './scenario-step2.mjs'
 
@@ -60,10 +60,11 @@ const systemText = (tools, body) => tools.requestText({ system: body?.system })
 export const JUDGES = {
   H01(obs) {
     const layout = obs.init?.layout ?? {}
-    return partial([
+    return verdict([
       [obs.init?.configExists === true, '.nexgent/config.json exists'],
       [['sessions', 'materials', 'outputs', 'ledgers'].every(name => layout[name] === true), `.nexgent/ layout directories (${JSON.stringify(layout)})`],
-    ], 'the recent-projects list belongs to @nexgent/sdk (W4, round 3)', 'layout and config.json present')
+      [(obs.init?.recent ?? []).includes(obs.init?.realRoot), `projects.recent lists the project (${JSON.stringify(obs.init?.recent)})`],
+    ], `layout and config.json present; projects.recent lists ${obs.init?.realRoot}`)
   },
 
   H02(obs, tools) {
@@ -214,18 +215,13 @@ export const JUDGES = {
   H13(obs) {
     const calls = toolCalls(obs, 'approvals')
     const outside = calls.filter(call => call.name === 'write_file' && call.arguments.path === FILES.outside.path)
-    const log = obs.approvals?.log ?? []
-    const turn = turnOf(obs, 'approvals')
+    const asked = (obs.approvals?.log ?? []).filter(entry => entry.summary.includes('outside-the-project'))
     return verdict([
-      [outside.length === 1 && outside[0].isError === true && /SANDBOX_DENIED/.test(outside[0].content), 'the write outside the project is refused by the sandbox (permissions.md: denied, no approval)'],
+      [outside.length === 1, 'the model tried one write outside the project'],
+      [outside.every(call => call.isError === true && /SANDBOX_DENIED/.test(call.content)), 'the sandbox refused it (SANDBOX_DENIED)'],
+      [asked.length === 0, 'no approval was requested for it'],
       [obs.approvals?.outsideExists === false, 'nothing was written outside the project'],
-      [log.length === 2 && log.every(entry => entry.summary.includes(FILES.env.path)), `exactly two approval requests, both for ${FILES.env.path} (got ${log.length})`],
-      [log[0]?.decision === 'allow' && log[0]?.scope === 'once', 'the first is allowed once'],
-      [log[1]?.decision === 'deny', 'the second write asks again (once is spent) and is denied'],
-      [obs.approvals?.envContent === FILES.env.allowed, `${FILES.env.path} holds only the allowed write`],
-      [calls.filter(call => call.name === 'write_file' && call.arguments.path === FILES.env.path).map(call => call.isError).join(',') === 'false,true', 'the denied write returns an error result'],
-      [recordsOf(obs, turn, 'approval.request').length === 2 && recordsOf(obs, turn, 'approval.decision').length === 2, 'two approval.request and two approval.decision records'],
-    ], `outside write refused without approval; ${FILES.env.path}: allowed once, asked again, denied`)
+    ], `outside write refused by the sandbox without an approval request: ${outside[0]?.content.slice(0, 80)}`)
   },
 
   H14(obs, tools) {
@@ -290,8 +286,21 @@ export const JUDGES = {
     return verdict(conditions, `turns ${phase(obs, 'resumeAfterStream').openTurnBefore} and ${phase(obs, 'resumeAfterTool').openTurnBefore} interrupted; resumed requests carry history and replay thinking blocks`)
   },
 
-  H18() {
-    return { status: 'not-implemented', evidence: 'querying history, materials, versions, feedback and goal goes through @nexgent/sdk (W4, round 3)' }
+  H18(obs) {
+    const before = obs.viewBeforeKills
+    const after = obs.viewAfterKills
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+    const prefix = before !== undefined && after !== undefined && same(after.items.slice(0, before.items.length), before.items)
+    const userTexts = (after?.items ?? []).filter(item => item.kind === 'user').map(item => item.text)
+    return verdict([
+      [before !== undefined && after !== undefined, 'SDK views before and after the kills'],
+      [prefix, 'the history after the kills starts with the whole history before them'],
+      [userTexts.includes(TASKS.resumeAfterStream) && userTexts.includes(TASKS.resumeAfterTool), 'the resumed turns are in the history'],
+      [(after?.materials ?? []).length === 2 && same(after?.materials, before?.materials), 'both materials, unchanged'],
+      [same(after?.deliverables, before?.deliverables) && after?.deliverables?.[0]?.versions?.length === 2, 'v1 and v2, unchanged'],
+      [(after?.feedback ?? []).length === 1 && same(after?.feedback, before?.feedback), 'the feedback, unchanged'],
+      [after?.goal?.status === 'completed' && same(after?.goal, before?.goal), 'the goal, unchanged'],
+    ], `through the SDK after two kills: ${after?.items?.length} history items (${before?.items?.length} before, kept), 2 materials, v1/v2, 1 feedback, goal completed`)
   },
 
   H19(obs, tools) {
@@ -306,6 +315,8 @@ export const JUDGES = {
     const openStarts = [...starts].filter(id => !ends.has(id))
     const orphanEnds = [...ends].filter(id => !starts.has(id))
     const outcomes = ledger.filter(r => r.type === 'task.outcome' && r.sessionId === obs.sessionId).length
+    // One task.outcome per turn that ended in a live process; a killed turn (closed as interrupted on resume) has none.
+    const finished = records.filter(r => r.type === 'turn.end' && r.reason?.kind !== 'interrupted').length
     const describe = list => list.slice(0, 3).map(([record, issues]) => `${record.type}#${record.seq ?? ''}: ${issues.map(i => `${i.path} ${i.message}`).join(', ')}`).join('; ')
     return verdict([
       [records.length > 0 && seqOk, 'session seq is 1..n without gaps'],
@@ -314,15 +325,18 @@ export const JUDGES = {
       [badLedger.length === 0, `every ledger record passes the schema (${describe(badLedger)})`],
       [openStarts.every(id => killed.has(id)), `every request start has an end, except the one killed mid-stream (open: ${openStarts.join(', ')})`],
       [orphanEnds.length === 0, 'no request end without a start'],
-      [outcomes === obs.closes, `one task.outcome per closed run (${outcomes} outcomes, ${obs.closes} runs)`],
-    ], `${records.length} records, seq continuous, schema ok; ${starts.size} requests paired except ${openStarts.length} killed; ${outcomes} task.outcome for ${obs.closes} runs`)
+      [outcomes === finished && finished > 0, `one task.outcome per finished turn (${outcomes} outcomes, ${finished} turns)`],
+    ], `${records.length} records, seq continuous, schema ok; ${starts.size} requests paired except ${openStarts.length} killed; ${outcomes} task.outcome for ${finished} finished turns`)
   },
 
   H20(obs) {
     const hits = obs.secretHits ?? ['?']
-    return partial([
-      [hits.length === 0, `the test key appears in .nexgent/ (${hits.join(', ')})`],
-    ], '`nexgent export` does not exist yet (W4, round 3); its output is not searched', 'no file under .nexgent/ contains the test key')
+    const exportHits = obs.exportSecretHits ?? ['?']
+    return verdict([
+      [hits.length === 0, `no file under .nexgent/ contains the test key (${hits.join(', ')})`],
+      [Object.keys(obs.export?.files ?? {}).length > 0, 'there is an export to search'],
+      [exportHits.length === 0, `no export file contains the test key (${exportHits.join(', ')})`],
+    ], `test key found in none of .nexgent/ and the ${Object.keys(obs.export?.files ?? {}).length} export files`)
   },
 
   H21(obs) {
@@ -339,8 +353,39 @@ export const JUDGES = {
     ], 'perProject cap of 1 request: second session stopped before any request, budget/exhausted in session and ledger')
   },
 
-  H22() {
-    return { status: 'not-implemented', evidence: '`nexgent export <session>` does not exist yet (W4, round 3)' }
+  H22(obs) {
+    const exp = obs.export ?? {}
+    const files = exp.files ?? {}
+    const lines = text => String(text ?? '').split('\n').filter(line => line.trim() !== '')
+    const parse = text => { try { return JSON.parse(text) } catch { return undefined } }
+    const sessionLines = lines(files['session.jsonl']).map(parse)
+    const ledgerLines = lines(files['ledger.jsonl']).map(parse)
+    const ownLedger = (obs.ledger ?? []).filter(record => record.sessionId === obs.sessionId)
+    const materials = parse(files['materials.json'] ?? '')
+    const versions = parse(files['deliverables.json'] ?? '')
+    const manifest = parse(files['manifest.json'] ?? '')
+    return verdict([
+      [exp.code === 0, `nexgent export exited 0 (got ${exp.code}; ${String(exp.stderr ?? '').slice(0, 120)})`],
+      [sessionLines.length === (obs.records ?? []).length && sessionLines.every((record, index) => record?.seq === obs.records[index].seq), `session.jsonl holds the session (${sessionLines.length} of ${(obs.records ?? []).length} records)`],
+      [ledgerLines.length === ownLedger.length && ledgerLines.length > 0 && ledgerLines.every(record => record?.sessionId === obs.sessionId), `ledger.jsonl holds this session's ledger lines only (${ledgerLines.length} of ${ownLedger.length})`],
+      [Array.isArray(materials) && materials.length === (obs.materials ?? []).length, 'materials.json lists the materials'],
+      [Array.isArray(versions) && versions.map(v => v.version).sort().join(',') === '1,2', 'deliverables.json lists v1 and v2'],
+      [manifest?.sessionId === obs.sessionId, 'manifest.json names the session'],
+    ], `export: ${sessionLines.length} session records, ${ledgerLines.length} ledger lines, ${materials?.length} materials, ${versions?.length} versions, manifest`)
+  },
+
+  H23(obs) {
+    const calls = toolCalls(obs, 'approvals')
+    const log = (obs.approvals?.log ?? []).filter(entry => entry.summary.includes(FILES.env.path))
+    const turn = turnOf(obs, 'approvals')
+    return verdict([
+      [log.length === 2 && (obs.approvals?.log ?? []).length === 2, `exactly two approval requests, both for ${FILES.env.path} (got ${(obs.approvals?.log ?? []).length})`],
+      [log[0]?.decision === 'allow' && log[0]?.scope === 'once', 'the first is allowed once'],
+      [log[1]?.decision === 'deny', 'the second write asks again (once is spent) and is denied'],
+      [obs.approvals?.envContent === FILES.env.allowed, `${FILES.env.path} holds only the allowed write`],
+      [calls.filter(call => call.name === 'write_file' && call.arguments.path === FILES.env.path).map(call => call.isError).join(',') === 'false,true', 'the denied write returns an error result'],
+      [recordsOf(obs, turn, 'approval.request').length === 2 && recordsOf(obs, turn, 'approval.decision').length === 2, 'two approval.request and two approval.decision records'],
+    ], `${FILES.env.path}: approval asked, allowed once, asked again, denied; file unchanged`)
   },
 }
 

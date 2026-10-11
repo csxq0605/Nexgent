@@ -4,9 +4,8 @@
  * 检查项清单): three layers of checks, all judged by this script from files,
  * session records, ledger lines and process state.
  *
- *   headless  H01–H22  scripted provider; until @nexgent/sdk exists (round 3) the
- *                      runtime is composed in-process (accept-common/step2-runtime.mjs)
- *                      and the kill checks run it in a child (step2-driver.mjs)
+ *   headless  H01–H23  scripted provider, through @nexgent/sdk (accept-common/step2-runtime.mjs),
+ *                      the kill checks in a child process (step2-driver.mjs) and `nexgent export`
  *   desktop   D01–D10  scripted provider, Playwright driving Electron (CI, both platforms)
  *   real      R01–R07  real Claude model (manual: Linux cloud session, thinking on;
  *                      Windows optional via .github/workflows/nexgent-real-model.yml)
@@ -156,7 +155,7 @@ async function main() {
     ...STEP,
     provider: realOnly ? 'real' : 'scripted',
     command: `node scripts/accept-step2.mjs --layer ${layers.join(',')}`,
-    simulated: 'scripted Claude Messages API model server; per-layer checklist H01–H22 / D01–D10',
+    simulated: 'scripted Claude Messages API model server; per-layer checklist H01–H23 / D01–D10',
   })
 
   const spent = await readSpent(values.spent)

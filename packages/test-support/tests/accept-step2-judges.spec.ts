@@ -16,8 +16,6 @@ import { isLoopbackUrl, loadStep2Packages } from '../../../scripts/accept-common
 import * as h from '../src/index.js'
 
 let tools: JudgeTools
-/** Items that cannot fully pass before @nexgent/sdk exists (round 3). */
-const PARTIAL = new Set(['H01', 'H18', 'H20', 'H22'])
 
 let work: string
 let good: Observations
@@ -54,15 +52,16 @@ const toolResult = (obs: Observations, phase: string, name: string, match: (args
 }
 
 describe('accept-step2 H judges', () => {
-  it('pass on a real run (items that need the SDK are not-implemented, never passed)', () => {
+  it('all pass on a real run', () => {
     for (const id of Object.keys(JUDGES)) {
       const result = judge(id, good, tools)
-      expect(result.status, `${id}: ${result.evidence}`).toBe(PARTIAL.has(id) ? 'not-implemented' : 'passed')
+      expect(result.status, `${id}: ${result.evidence}`).toBe('passed')
     }
   })
 
   const cases: Array<[string, string, (obs: Observations) => void]> = [
     ['H01', 'config.json missing', obs => { obs.init.configExists = false }],
+    ['H01', 'the project is not in the recent list', obs => { obs.init.recent = [] }],
     ['H02', 'the original file changed', obs => { obs.materials[1].sourceShaAfter = '0'.repeat(64) }],
     ['H02', 'metadata fails the schema', obs => { delete obs.materials[0].meta.sha256 }],
     ['H03', 'the first request lacks the material references', obs => { obs.phases.first.requests[0].messages = [{ role: 'user', content: TASKS.first }] }],
@@ -93,8 +92,11 @@ describe('accept-step2 H judges', () => {
       obs.records = obs.records.filter((r: { type: string; turn?: number }) => !(r.type === 'assistant.message' && r.turn === turnOf(obs, 'cancelStream')))
     }],
     ['H13', 'the outside write went through', obs => { obs.approvals.outsideExists = true }],
-    ['H13', 'once was not spent (no second approval)', obs => { obs.approvals.log = obs.approvals.log.slice(0, 1) }],
-    ['H13', 'the denied write landed', obs => { obs.approvals.envContent = FILES.env.denied }],
+    ['H13', 'the outside write asked for approval instead of being refused', obs => { obs.approvals.log.unshift({ tool: 'write_file', summary: 'write ../outside-the-project.txt', decision: 'deny', scope: 'once' }) }],
+    ['H13', 'the outside write was not refused by the sandbox', obs => { toolResult(obs, 'approvals', 'write_file', a => a.path === FILES.outside.path).content = 'Created ../outside-the-project.txt' }],
+    ['H23', 'once was not spent (no second approval)', obs => { obs.approvals.log = obs.approvals.log.slice(0, 1) }],
+    ['H23', 'the denied write landed', obs => { obs.approvals.envContent = FILES.env.denied }],
+    ['H23', 'the first approval was not once', obs => { obs.approvals.log[0].scope = 'session' }],
     ['H14', 'no compaction record', obs => { obs.records = obs.records.filter((r: { type: string }) => r.type !== 'compaction') }],
     ['H14', 'the request after compaction still carries the early turns', obs => {
       obs.phases.compact.requests[2].messages.unshift({ role: 'user', content: TASKS.first })
@@ -121,8 +123,18 @@ describe('accept-step2 H judges', () => {
       const index = obs.ledger.findIndex((r: { type: string; requestId?: string }) => r.type === 'llm.request.end' && !killed.has(r.requestId))
       obs.ledger.splice(index, 1)
     }],
-    ['H19', 'a task.outcome too many', obs => { obs.closes -= 1 }],
+    ['H18', 'a material vanished after the kills', obs => { obs.viewAfterKills.materials.pop() }],
+    ['H18', 'the history before the kills was rewritten', obs => { obs.viewAfterKills.items[0].text = 'something else' }],
+    ['H18', 'the goal changed after the kills', obs => { obs.viewAfterKills.goal.status = 'active' }],
+    ['H19', 'a task.outcome missing', obs => {
+      const index = obs.ledger.findIndex((r: { type: string }) => r.type === 'task.outcome')
+      obs.ledger.splice(index, 1)
+    }],
     ['H20', 'the test key was written to disk', obs => { obs.secretHits = ['.nexgent/sessions/x/session.jsonl'] }],
+    ['H20', 'the test key is in the export', obs => { obs.exportSecretHits = ['export/session.jsonl'] }],
+    ['H22', 'the export failed', obs => { obs.export.code = 1 }],
+    ['H22', 'the export misses ledger lines', obs => { obs.export.files['ledger.jsonl'] = obs.export.files['ledger.jsonl'].split('\n').slice(1).join('\n') }],
+    ['H22', 'the export lacks the deliverables', obs => { delete obs.export.files['deliverables.json'] }],
     ['H21', 'a request went out after the cap', obs => { obs.budget.requests.push({}) }],
     ['H21', 'the second session was not stopped', obs => { obs.budget.turns[1].reason = { kind: 'completed' } }],
   ]
@@ -133,10 +145,9 @@ describe('accept-step2 H judges', () => {
     expect(result.evidence).not.toMatch(/^judge threw/)
   })
 
-  it('every implemented judge has at least one counterexample', () => {
+  it('every judge has at least one counterexample', () => {
     const covered = new Set(cases.map(([id]) => id))
-    const needing = Object.keys(JUDGES).filter(id => !['H18', 'H22'].includes(id))
-    expect(needing.filter(id => !covered.has(id))).toEqual([])
+    expect(Object.keys(JUDGES).filter(id => !covered.has(id))).toEqual([])
   })
 
   it('the runtime refuses any API base URL but the loopback scripted server', () => {

@@ -1,16 +1,19 @@
 /**
- * The step-2 headless scenario (H checks): drives the in-process runtime
- * (step2-runtime.mjs) and the kill driver (step2-driver.mjs) through the
- * phases of scenario-step2.mjs against the scripted model server, and
- * collects raw observations — request bodies, agent events, session and
- * ledger records, file hashes, process ids. It judges nothing: the H judges
- * (step2-judges.mjs) decide each item from these observations, so a judge
- * can be tested against a deliberately broken copy.
+ * The step-2 headless scenario (H checks): drives `@nexgent/sdk`
+ * (step2-runtime.mjs), the kill driver (step2-driver.mjs) and
+ * `nexgent export` through the phases of scenario-step2.mjs against the
+ * scripted model server, and collects raw observations — request bodies,
+ * agent events, session and ledger records, SDK query results, file hashes,
+ * process ids. It judges nothing: the H judges (step2-judges.mjs) decide each
+ * item from these observations, so a judge can be tested against a
+ * deliberately broken copy.
  *
- * Never calls a real model: every app boots against a loopback server.
+ * Each phase gets its own scripted server and a fresh SDK instance (every
+ * phase is also a restart). Never calls a real model: every SDK is created
+ * against a loopback server.
  */
 import { createHash } from 'node:crypto'
-import { copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -21,7 +24,7 @@ import {
   TASKS,
   buildStep2Script,
 } from './scenario-step2.mjs'
-import { bootStep2, loadStep2Packages, runTurn } from './step2-runtime.mjs'
+import { CLI_BIN, createStep2Sdk, loadStep2Packages, runTurn } from './step2-runtime.mjs'
 
 export const DRIVER = fileURLToPath(new URL('./step2-driver.mjs', import.meta.url))
 
@@ -82,6 +85,12 @@ export async function filesContaining(dir, needle, base = dir) {
   return hits
 }
 
+/** The turn a session file leaves open (a `turn.start` without its `turn.end`), if any. */
+export function openTurn(records) {
+  const ended = new Set(records.filter(r => r.type === 'turn.end').map(r => r.turn))
+  return records.filter(r => r.type === 'turn.start' && !ended.has(r.turn)).at(-1)?.turn
+}
+
 /** Keep the parts of an agent event the judges read (no big payloads). */
 function slimEvent(event) {
   switch (event.type) {
@@ -95,6 +104,19 @@ function slimEvent(event) {
     case 'approval.decision': return { type: event.type, decision: event.decision }
     case 'error': return { type: event.type, error: event.error, fatal: event.fatal }
     default: return { type: event.type }
+  }
+}
+
+/** What the SDK shows of a session (H18): history, materials, deliverables, feedback, goal. */
+async function sdkView(sdk, projectId, sessionId) {
+  const view = await sdk.call('sessions.open', { projectId, sessionId })
+  const deliverables = await sdk.call('deliverables.list', { projectId })
+  return {
+    items: view.items.map(item => ({ kind: item.kind, turn: item.turn, text: item.text ?? item.comment ?? undefined })),
+    materials: (await sdk.call('materials.list', { projectId })).map(m => ({ id: m.id, sha256: m.sha256, originalName: m.originalName })),
+    deliverables: deliverables.map(d => ({ deliverableId: d.deliverableId, versions: d.versions.map(v => ({ version: v.version, files: v.files.map(f => [f.path, f.sha256]) })) })),
+    feedback: (await sdk.call('feedback.list', { projectId, sessionId })).map(f => ({ id: f.feedback?.id ?? f.id, deliverableId: f.feedback?.deliverableId ?? f.deliverableId, version: f.feedback?.version ?? f.version })),
+    goal: await sdk.call('goals.get', { projectId, sessionId }),
   }
 }
 
@@ -121,18 +143,14 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
   await copyFile(XLSX_SOURCE, sources.xlsx)
   const sourceShaBefore = { csv: await fileSha(sources.csv), xlsx: await fileSha(sources.xlsx) }
 
-  const obs = {
-    platform: process.platform,
-    root,
-    key: SCRIPTED_API_KEY,
-    phases: {},
-    closes: 0,
-  }
+  const obs = { platform: process.platform, root, key: SCRIPTED_API_KEY, phases: {} }
   const servers = []
-  const context = { compaction: { thresholdTokens: COMPACTION.threshold } }
-  const envFor = server => ({ NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home })
-
-  /** One scripted server per phase, so each phase's requests are its own. */
+  const envFor = server => ({
+    NEXGENT_API_BASE_URL: server.baseUrl,
+    NEXGENT_API_KEY: SCRIPTED_API_KEY,
+    NEXGENT_HOME: home,
+    NEXGENT_COMPACTION_THRESHOLD: String(COMPACTION.threshold),
+  })
   const serverFor = async (phase) => {
     const server = await h.scriptedModelServer({ script: script[phase] })
     servers.push(server)
@@ -143,158 +161,156 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
   }
 
   const approvalLog = []
-  let approvalCount = 0
   const responder = async (request) => {
-    approvalCount += 1
     // The first approval is granted once; every later one is denied.
-    const decision = approvalCount === 1
+    const decision = approvalLog.length === 0
       ? { id: request.id, decision: 'allow', scope: 'once', decidedBy: 'user' }
       : { id: request.id, decision: 'deny', scope: 'once', decidedBy: 'user' }
     approvalLog.push({ request, decision })
     return decision
   }
 
+  let sdk
+  let projectId
   try {
-    // ---- in-process phases, one app per server ------------------------------------------
-    let booted
-    let agent
+    /** A fresh SDK against this phase's server, with the project and the session open. */
     const open = async (phase) => {
       const server = await serverFor(phase)
-      booted = await bootStep2(pkgs, { root, env: envFor(server), context, approvals: responder })
-      agent = obs.sessionId === undefined ? await booted.app.agents.create({ title: 'step-2 acceptance' }) : await booted.app.agents.resume(obs.sessionId)
-      obs.sessionId ??= agent.sessionId
+      sdk = createStep2Sdk(pkgs, { env: envFor(server), home, approvals: responder })
+      projectId = (await sdk.call('projects.open', { root, create: true })).projectId
+      if (obs.sessionId === undefined) obs.sessionId = (await sdk.call('sessions.create', { projectId, title: 'step-2 acceptance' })).sessionId
+      else await sdk.openSession({ projectId, sessionId: obs.sessionId })
       return server
     }
     const close = async () => {
-      await agent.close()
-      obs.closes += 1
-      await booted.app.dispose()
+      await sdk.dispose()
+      sdk = undefined
     }
     const turn = async (phase, input, server, options) => {
       log(`phase ${phase}`)
-      const { result, error, events } = await runTurn(agent, input, options)
+      const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, ...input }, options)
       record(phase, server, { reason: result?.reason, error: error === undefined ? undefined : String(error), events: events.map(slimEvent) })
       return result
     }
 
-    // init + materials
+    // ---- init + materials -------------------------------------------------------------------
     let server = await open('first')
+    const configFile = join(root, '.nexgent', 'config.json')
     obs.init = {
-      configFile: booted.ctx.workspace.layout.configFile,
-      configExists: (await fileSha(booted.ctx.workspace.layout.configFile)) !== null,
-      layout: Object.fromEntries(await Promise.all(['sessions', 'materials', 'outputs', 'ledgers'].map(async name => [name, await readdir(booted.ctx.workspace.layout[name]).then(() => true, () => false)]))),
+      configExists: (await fileSha(configFile)) !== null,
+      layout: Object.fromEntries(await Promise.all(['sessions', 'materials', 'outputs', 'ledgers'].map(async name => [name, await readdir(join(root, '.nexgent', name)).then(() => true, () => false)]))),
+      realRoot: await realpath(root),
+      recent: (await sdk.call('projects.recent', {})).map(p => p.root),
     }
     const materials = []
     for (const kind of ['csv', 'xlsx']) {
-      const meta = await booted.tasking.materials.add({ sourcePath: sources[kind], sessionId: obs.sessionId })
-      await agent.appendHostRecord(pkgs.tasking.materialAddedRecord(meta))
-      materials.push(meta)
+      materials.push(await sdk.call('materials.add', { projectId, sourcePath: sources[kind], sessionId: obs.sessionId }))
     }
     obs.materials = materials.map((meta, index) => ({ meta, kind: index === 0 ? 'csv' : 'xlsx' }))
 
-    // first
+    // ---- first: materials → skill → writes → present v1 ---------------------------------------
     const beforeFirst = await treeHashes(root)
     await turn('first', { text: TASKS.first, materialIds: materials.map(m => m.id) }, server)
     obs.phases.first.treeBefore = beforeFirst
     obs.phases.first.treeAfter = await treeHashes(root)
-
-    // feedback
-    const [deliverable] = await booted.tasking.deliverables.list()
+    const [deliverable] = await sdk.call('deliverables.list', { projectId })
     obs.deliverableAfterFirst = deliverable
-    const v1Files = deliverable === undefined ? [] : deliverable.versions[0].files.map(file => ({
-      path: file.path,
-      recorded: file.sha256,
-      snapshot: booted.tasking.deliverables.snapshotPath(deliverable.id ?? deliverable.versions[0].deliverableId, 1, file.path),
-    }))
-    for (const file of v1Files) file.afterV1 = await fileSha(file.snapshot)
+    const v1 = deliverable?.versions[0]
+    // data-formats.md: `.nexgent/outputs/<deliverableId>/v<n>/files/<path>`
+    const snapshot = file => join(root, '.nexgent', 'outputs', v1.deliverableId, 'v1', 'files', ...file.path.split('/'))
+    const v1Files = v1 === undefined ? [] : await Promise.all(v1.files.map(async file => ({ path: file.path, recorded: file.sha256, snapshot: snapshot(file), afterV1: await fileSha(snapshot(file)) })))
     await close()
+
+    // ---- feedback → v2 ------------------------------------------------------------------------
     server = await open('feedback')
-    if (deliverable !== undefined) {
-      const feedback = await pkgs.tasking.createFeedbackEntry({ deliverableId: deliverable.versions[0].deliverableId, version: 1, rating: 3, comment: TASKS.feedback }, booted.tasking.deliverables)
-      obs.feedbackEntry = feedback
-      await turn('feedback', { source: 'feedback', feedback }, server)
-      const [after] = await booted.tasking.deliverables.list()
+    if (v1 !== undefined) {
+      log('phase feedback')
+      const events = []
+      const unsubscribe = sdk.onAgentEvent(event => { if (event.projectId === projectId) events.push(event) })
+      try {
+        await sdk.call('feedback.submit', { projectId, sessionId: obs.sessionId, deliverableId: v1.deliverableId, version: 1, rating: 3, comment: TASKS.feedback })
+        await h.waitFor(() => events.some(e => e.type === 'turn.end') && !sdk.isRunning(projectId, obs.sessionId), { timeoutMs: 60_000, intervalMs: 20, label: 'the feedback turn' })
+      } finally {
+        unsubscribe()
+      }
+      record('feedback', server, { reason: events.find(e => e.type === 'turn.end')?.reason, events: events.map(slimEvent) })
+      const [after] = await sdk.call('deliverables.list', { projectId })
       obs.deliverableAfterFeedback = after
       for (const file of v1Files) file.atEnd = await fileSha(file.snapshot)
-      obs.v1Files = v1Files.map(({ snapshot, ...rest }) => ({ ...rest, snapshot: relative(root, snapshot).split(sep).join('/') }))
       try {
-        obs.diff = await booted.tasking.deliverables.diff(deliverable.versions[0].deliverableId, 1, 2)
+        obs.diff = await sdk.call('deliverables.diff', { projectId, deliverableId: v1.deliverableId, from: 1, to: 2 })
       } catch (error) {
         obs.diffError = String(error)
       }
     } else {
       obs.phases.feedback = { skipped: 'no deliverable after the first turn' }
     }
+    obs.v1Files = v1Files.map(({ snapshot: path, ...rest }) => ({ ...rest, snapshot: relative(root, path).split(sep).join('/') }))
     await close()
 
-    // goal
+    // ---- goal ---------------------------------------------------------------------------------
     server = await open('goal')
-    obs.goalSet = await booted.tasking.goals.set(agent.appendHostRecord, TASKS.goalText)
+    obs.goalSet = await sdk.call('goals.set', { projectId, sessionId: obs.sessionId, text: TASKS.goalText })
     await turn('goal', { text: TASKS.goal }, server)
-    obs.goalUpdated = await booted.tasking.goals.update(agent.appendHostRecord, obs.sessionId, { status: 'completed', note: 'report delivered' })
-    obs.goalAtEnd = await booted.tasking.goals.get(obs.sessionId)
+    obs.goalUpdated = await sdk.call('goals.update', { projectId, sessionId: obs.sessionId, status: 'completed', note: 'report delivered' })
+    obs.goalAtEnd = await sdk.call('goals.get', { projectId, sessionId: obs.sessionId })
     await close()
 
-    // pause, compaction (failing first, then succeeding), approvals
+    // ---- pause, compaction (failing first, then succeeding), approvals ------------------------
     for (const [phase, text] of [['pause', TASKS.pause], ['compactFail', TASKS.compactFail], ['compact', TASKS.compact], ['approvals', TASKS.approvals]]) {
       server = await open(phase)
       await turn(phase, { text }, server)
       await close()
     }
     obs.approvals = {
-      log: approvalLog.map(({ request, decision }) => ({ tool: request.tool, summary: request.summary, options: request.options, decision: decision.decision, scope: decision.scope })),
+      log: approvalLog.map(({ request, decision }) => ({ tool: request.tool, summary: request.summary, risk: request.risk, options: request.options, decision: decision.decision, scope: decision.scope })),
       envContent: await readFile(join(root, '.env'), 'utf8').catch(() => null),
       outsideExists: (await fileSha(join(root, '..', 'outside-the-project.txt'))) !== null,
     }
 
-    // in-process cancel: mid-stream, then mid-tool (H12)
+    // ---- in-process cancel: mid-stream, then mid-tool (H12) -----------------------------------
     server = await open('cancelStream')
     let streamed = ''
+    let cancelling
     await turn('cancelStream', { text: TASKS.cancelStream }, server, {
-      onEvent(event, a) {
-        if (event.type === 'text.delta') {
-          streamed += event.text
-          if (streamed.includes(STALL_TEXT.cancel)) a.cancel('user')
-        }
+      onEvent(event) {
+        if (event.type !== 'text.delta') return
+        streamed += event.text
+        if (cancelling === undefined && streamed.includes(STALL_TEXT.cancel)) cancelling = sdk.cancelTurn({ projectId, sessionId: obs.sessionId, cause: 'user' })
       },
     })
+    await cancelling
     obs.phases.cancelStream.streamed = streamed
     await close()
+
     server = await open('cancelTool')
-    let cancelled
-    const toolStarted = new Promise(resolve => { cancelled = resolve })
-    const turnDone = turn('cancelTool', { text: TASKS.cancelTool }, server, {
-      onEvent(event) {
-        if (event.type === 'tool.start') cancelled()
-      },
-    })
-    await toolStarted
+    let toolStarted
+    const started = new Promise(resolve => { toolStarted = resolve })
+    const turnDone = turn('cancelTool', { text: TASKS.cancelTool }, server, { onEvent(event) { if (event.type === 'tool.start') toolStarted() } })
+    await started
     // Let the shell start its command, then look at our own descendants (the tool's processes).
     let before = []
     await h.waitFor(async () => (before = await h.descendantPids(process.pid)).length > 0, { timeoutMs: 15_000, intervalMs: 100, label: 'the slow command to start' }).catch(() => undefined)
-    agent.cancel('user')
+    await sdk.cancelTurn({ projectId, sessionId: obs.sessionId, cause: 'user' })
     await turnDone
     await new Promise(resolve => setTimeout(resolve, 500))
     obs.phases.cancelTool.descendantsBefore = before
     obs.phases.cancelTool.survivors = before.filter(h.isProcessAlive)
+    obs.viewBeforeKills = await sdkView(sdk, projectId, obs.sessionId)
     await close()
 
-    // ---- kills, each in a child process, then resume in-process --------------------------
+    // ---- kills, each in a child process, then resume through a fresh SDK ----------------------
     const driverRun = async (phase, text) => {
       const s = await serverFor(phase)
-      const spec = { root, sessionId: obs.sessionId, text, env: envFor(s), context }
+      const spec = { root, home, sessionId: obs.sessionId, text, env: envFor(s) }
       return { server: s, handle: h.spawnNode([DRIVER, JSON.stringify(spec)], { cwd: work }) }
     }
     const resumeTurn = async (phase, text) => {
-      const s = await serverFor(phase)
-      booted = await bootStep2(pkgs, { root, env: envFor(s), context, approvals: responder })
-      const metaBefore = await booted.ctx.session.resume(obs.sessionId)
-      const openTurn = metaBefore.metadata.openTurn
-      agent = await booted.app.agents.resume(obs.sessionId)
+      const openTurnBefore = openTurn((await h.readSessionRecords(root, obs.sessionId)).records)
+      const s = await open(phase)
       log(`phase ${phase}`)
-      const { result, error, events } = await runTurn(agent, { text })
-      record(phase, s, { openTurnBefore: openTurn, reason: result?.reason, error: error === undefined ? undefined : String(error), events: events.map(slimEvent) })
-      await close()
+      const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, text })
+      record(phase, s, { openTurnBefore, reason: result?.reason, error: error === undefined ? undefined : String(error), events: events.map(slimEvent) })
     }
 
     // H15: kill the whole tree while the model is streaming
@@ -318,6 +334,7 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
       })
     }
     await resumeTurn('resumeAfterStream', TASKS.resumeAfterStream)
+    await close()
 
     // H16: kill only the main process while a shell command runs
     {
@@ -329,13 +346,26 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
       for (const pid of crash.survivors) await h.killProcessTree(pid).catch(() => undefined)
     }
     await resumeTurn('resumeAfterTool', TASKS.resumeAfterTool)
+    // H18: the same queries after two kills and restarts.
+    obs.viewAfterKills = await sdkView(sdk, projectId, obs.sessionId)
+    await close()
 
-    // ---- records, ledger, secret scan --------------------------------------------------------
+    // ---- H22: nexgent export, through the CLI -------------------------------------------------
+    const exportDir = join(work, 'export')
+    log('phase export')
+    const cli = h.spawnNode([CLI_BIN, 'export', obs.sessionId, '--project', root, '--out', exportDir, '--json'], { cwd: work, env: { NEXGENT_HOME: home, NEXGENT_API_KEY: SCRIPTED_API_KEY } })
+    const cliExit = await cli.exit
+    const exported = {}
+    for (const name of await readdir(exportDir).catch(() => [])) exported[name] = await readFile(join(exportDir, name), 'utf8')
+    obs.export = { code: cliExit.code, stderr: cliExit.stderr.slice(0, 2000), files: exported }
+
+    // ---- records, ledger, secret scan ---------------------------------------------------------
     const session = await h.readSessionRecords(root, obs.sessionId)
     obs.records = session.records
     obs.recordsTruncated = session.truncated ?? null
     obs.ledger = (await h.readLedgerRecords(root)).records
     obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+    obs.exportSecretHits = await filesContaining(exportDir, SCRIPTED_API_KEY, work)
     obs.materials = await Promise.all(obs.materials.map(async m => ({
       ...m,
       copySha: await fileSha(join(root, ...m.meta.path.split('/'))),
@@ -343,35 +373,38 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
       sourceShaAfter: await fileSha(sources[m.kind]),
     })))
 
-    // ---- H21: a second project whose perProject cap is one request -------------------------
-    obs.budget = await runBudgetProject(h, pkgs, script, join(work, 'budget-project'), home, log, servers)
+    // ---- H21: a second project whose perProject cap is one request ----------------------------
+    obs.budget = await runBudgetProject(h, pkgs, script, join(work, 'budget-project'), home, envFor, log, servers)
     return obs
   } finally {
+    await sdk?.dispose().catch(() => undefined)
     await Promise.all(servers.map(s => s.close().catch(() => undefined)))
     await h.killAllSpawned().catch(() => undefined)
   }
 }
 
-async function runBudgetProject(h, pkgs, script, root, home, log, servers) {
+async function runBudgetProject(h, pkgs, script, root, home, envFor, log, servers) {
   log('phase budget')
   const server = await h.scriptedModelServer({ script: script.budget })
   servers.push(server)
-  const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
-  await mkdir(root, { recursive: true })
-  await pkgs.cli.initProjectLayout(root)
-  const configFile = join(root, '.nexgent', 'config.json')
-  const config = JSON.parse(await readFile(configFile, 'utf8').catch(() => '{}'))
-  await writeFile(configFile, `${JSON.stringify({ ...config, costCaps: { ...config.costCaps, perProject: { maxRequests: 1 } } }, null, 2)}\n`)
   const out = { turns: [] }
   // Two sessions: the cap is per project, so the second session must be stopped by the first one's usage.
   for (let index = 0; index < 2; index += 1) {
-    const booted = await bootStep2(pkgs, { root, env })
-    const agent = await booted.app.agents.create({ title: `budget ${index + 1}` })
-    const { result, error, events } = await runTurn(agent, { text: TASKS.budget })
-    await agent.close()
-    await booted.app.dispose()
-    const records = (await h.readSessionRecords(root, agent.sessionId)).records
-    out.turns.push({ sessionId: agent.sessionId, reason: result?.reason, error: error === undefined ? undefined : String(error), events: events.map(slimEvent), records })
+    const sdk = createStep2Sdk(pkgs, { env: envFor(server), home })
+    try {
+      const { projectId } = await sdk.call('projects.open', { root, create: true })
+      if (index === 0) {
+        const configFile = join(root, '.nexgent', 'config.json')
+        const config = JSON.parse(await readFile(configFile, 'utf8'))
+        await writeFile(configFile, `${JSON.stringify({ ...config, costCaps: { ...config.costCaps, perProject: { maxRequests: 1 } } }, null, 2)}\n`)
+      }
+      const { sessionId } = await sdk.call('sessions.create', { projectId, title: `budget ${index + 1}` })
+      const { result, error, events } = await runTurn(sdk, { projectId, sessionId, text: TASKS.budget })
+      const records = (await h.readSessionRecords(root, sessionId)).records
+      out.turns.push({ sessionId, reason: result?.reason, error: error === undefined ? undefined : String(error), events: events.map(slimEvent), records })
+    } finally {
+      await sdk.dispose()
+    }
   }
   out.requests = server.requests.map(r => r.body)
   out.ledger = (await h.readLedgerRecords(root)).records

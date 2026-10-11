@@ -23,11 +23,11 @@ const script = fileURLToPath(new URL('../../../scripts/accept-step2.mjs', import
 const plan = fileURLToPath(new URL('../../../docs/plan/step-2-work-partition.md', import.meta.url))
 
 describe('accept-step2 checklist', () => {
-  it('has the 39 items of the step-2 plan, in order, each once', async () => {
+  it('has the 40 items of the step-2 plan, in order, each once', async () => {
     const ids = CHECKS.map(check => check.id)
     expect(new Set(ids).size).toBe(ids.length)
     const range = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix}${String(i + 1).padStart(2, '0')}`)
-    expect(ids).toEqual([...range('H', 22), ...range('D', 10), ...range('R', 7)])
+    expect(ids).toEqual([...range('H', 23), ...range('D', 10), ...range('R', 7)])
     for (const check of CHECKS) expect(LAYERS[check.layer].prefix).toBe(check.id[0])
     // The plan's tables are the source of truth: every `| H01 |` row there is here and vice versa.
     const planIds = [...(await readFile(plan, 'utf8')).matchAll(/^\| ([HDR]\d\d) \|/gm)].map(match => match[1])
