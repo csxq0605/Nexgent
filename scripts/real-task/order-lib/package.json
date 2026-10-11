@@ -1,0 +1,10 @@
+{
+  "name": "order-lib",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Order pricing for a small shop: line items, discount codes, stock reservation.",
+  "scripts": {
+    "test": "node --test"
+  }
+}
