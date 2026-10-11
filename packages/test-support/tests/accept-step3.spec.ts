@@ -26,8 +26,10 @@ const plan = fileURLToPath(new URL('../../../docs/plan/step-3-work-partition.md'
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
-/** The judges and step-2 regression items that exist in round 1; everything else must report not-implemented. */
-const WIRED = new Set(['H01', 'H10', 'H22', 'H23', ...range('D', 1, 10)])
+/** The judges and step-2 regression items wired so far; everything else must report not-implemented. */
+const WIRED = new Set(['H01', 'H02', 'H03', 'H04', 'H10', 'H12', 'H15', 'H16', 'H22', 'H23', ...range('D', 1, 10)])
+/** Items the headless layer passes today (H10, H15, H22 wait for team and workflow). */
+const PASSING = new Set<string>(['H01', 'H02', 'H03', 'H04', 'H12', 'H16', 'H23'])
 
 describe('accept-step3 checklist', () => {
   it('has every item of the step-3 plan in order, plus the D01–D10 regression', async () => {
@@ -51,7 +53,7 @@ describe('accept-step3 checklist', () => {
   })
 
   it('nothing fakes a pass: unwired items are not-implemented, wired ones fail without observations', async () => {
-    expect(Object.keys(JUDGES)).toEqual(['H01', 'H10', 'H22', 'H23'])
+    expect(Object.keys(JUDGES)).toEqual(['H01', 'H02', 'H03', 'H04', 'H10', 'H12', 'H15', 'H16', 'H22', 'H23'])
     for (const check of CHECKS) {
       const result = await evaluateItem(check, { obs: {} })
       if (WIRED.has(check.id)) expect(result.status, check.id).not.toBe('passed')
@@ -131,7 +133,7 @@ describe('scripts/accept-step3.mjs (requires `pnpm build`)', () => {
       const out = join(dir, 'summary.json')
       const childEnv = { ...process.env, ...env }
       for (const [key, value] of Object.entries(env)) if (value === undefined) delete childEnv[key]
-      const result = spawnSync(process.execPath, [script, '--out', out, '--work-dir', join(dir, 'work'), ...args], { encoding: 'utf8', env: childEnv, timeout: 60_000 })
+      const result = spawnSync(process.execPath, [script, '--out', out, '--work-dir', join(dir, 'work'), ...args], { encoding: 'utf8', env: childEnv, timeout: 150_000 })
       const raw = await readFile(out, 'utf8').catch(() => '')
       const summary = raw === '' ? undefined : JSON.parse(raw) as AcceptanceSummary
       return { result, summary, raw }
@@ -140,16 +142,16 @@ describe('scripts/accept-step3.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  it('headless layer: H01 and H23 pass, every other item is not-implemented, exit 2, valid summary', async () => {
+  it('headless layer: the delegation items, H01 and H23 pass, every other item is not-implemented, exit 2, valid summary', async () => {
     const { result, summary } = await runScript(['--layer', 'headless'])
     expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
     expect(summary?.result).toBe('fail')
     expect(summary?.checks.map(check => check.id)).toEqual(range('H', 1, 23))
     for (const check of summary?.checks ?? []) {
-      expect(check, check.id).toMatchObject(check.id === 'H01' || check.id === 'H23' ? { status: 'passed', passed: true } : { status: 'not-implemented', passed: false })
+      expect(check, check.id).toMatchObject(PASSING.has(check.id ?? '') ? { status: 'passed', passed: true } : { status: 'not-implemented', passed: false })
     }
-  }, 90_000)
+  }, 180_000)
 
   it('real layer: without a key it is not runnable (exit 2), calls no model, lists R01–R07', async () => {
     const { result, summary } = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: undefined, ANTHROPIC_API_KEY: undefined })

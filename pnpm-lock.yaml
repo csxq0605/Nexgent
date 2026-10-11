@@ -158,6 +158,25 @@ importers:
         specifier: workspace:*
         version: link:../kernel
 
+  packages/ptc:
+    dependencies:
+      '@nexgent/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@nexgent/skill':
+        specifier: workspace:*
+        version: link:../skill
+      '@nexgent/tool-spreadsheet':
+        specifier: workspace:*
+        version: link:../tool-spreadsheet
+      '@nexgent/workspace':
+        specifier: workspace:*
+        version: link:../workspace
+    devDependencies:
+      '@nexgent/test-support':
+        specifier: workspace:*
+        version: link:../test-support
+
   packages/sdk:
     dependencies:
       '@nexgent/context':
@@ -345,6 +364,34 @@ importers:
       '@types/turndown':
         specifier: 5.0.6
         version: 5.0.6
+
+  packages/workflow:
+    dependencies:
+      '@nexgent/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@nexgent/preset':
+        specifier: workspace:*
+        version: link:../preset
+      '@nexgent/ptc':
+        specifier: workspace:*
+        version: link:../ptc
+      '@nexgent/subagent':
+        specifier: workspace:*
+        version: link:../subagent
+    devDependencies:
+      '@nexgent/session':
+        specifier: workspace:*
+        version: link:../session
+      '@nexgent/tasking':
+        specifier: workspace:*
+        version: link:../tasking
+      '@nexgent/test-support':
+        specifier: workspace:*
+        version: link:../test-support
+      '@nexgent/workspace':
+        specifier: workspace:*
+        version: link:../workspace
 
   packages/workspace:
     dependencies:

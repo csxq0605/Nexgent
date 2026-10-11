@@ -9,12 +9,17 @@
  * Never calls a real model: every SDK is created against a loopback server.
  */
 import { spawnSync } from 'node:child_process'
-import { mkdir, readdir, readFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { REPO_ROOT } from './harness.mjs'
-import { SCRIPTED_API_KEY, TASKS, buildStep3Script } from './step3-scenario.mjs'
+import { MATERIAL, SCRIPTED_API_KEY, STALL_TEXT, TASKS, buildStep3Script, readonlyPresets } from './step3-scenario.mjs'
 import { filesContaining } from './step2-headless.mjs'
-import { CLI_BIN, createStep2Sdk, loadStep2Packages, runTurn } from './step2-runtime.mjs'
+import { CLI_BIN, runTurn } from './step2-runtime.mjs'
+import { createStep3Sdk, loadStep3Packages } from './step3-runtime.mjs'
+
+/** The kill driver: one SDK turn in a child process (step3-driver.mjs). */
+export const DRIVER = fileURLToPath(new URL('./step3-driver.mjs', import.meta.url))
 
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'reference'])
 
@@ -64,7 +69,7 @@ async function runDirect(h, pkgs, work, script, servers, log) {
   const server = await h.scriptedModelServer({ script: script.direct.lead, routes: script.direct.routes, routeKey: h.routeByMember(h.sessionText) })
   servers.push(server)
   const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
-  const sdk = createStep2Sdk(pkgs, { env, home })
+  const sdk = createStep3Sdk(pkgs, { env, home })
   const obs = { root, key: SCRIPTED_API_KEY }
   try {
     const { projectId } = await sdk.call('projects.open', { root, create: true })
@@ -101,6 +106,170 @@ async function runDirect(h, pkgs, work, script, servers, log) {
   return obs
 }
 
+/** Tool names a request offered the model. */
+const toolNames = body => (Array.isArray(body?.tools) ? body.tools.map(t => t?.name).filter(n => typeof n === 'string') : [])
+
+/** One server request, slimmed: its route, the session text (system prompt + first user message), full text, tools. */
+function slimRequest(h, phase, r) {
+  return {
+    phase,
+    route: r.route ?? null,
+    outcome: r.outcome,
+    chunksSent: r.chunksSent,
+    sessionText: h.sessionText(r.body ?? {}),
+    text: h.requestText(r.body ?? {}),
+    tools: toolNames(r.body),
+  }
+}
+
+/** Every session file of a project, its records and torn tail. */
+async function readSessions(h, root) {
+  const files = await sessionFiles(root)
+  const sessions = {}
+  for (const id of files) {
+    const read = await h.readSessionRecords(root, id)
+    sessions[id] = { records: read.records, truncated: read.truncated ?? null }
+  }
+  return { sessionFiles: files, sessions }
+}
+
+const slimDeliverables = async (sdk, projectId) => (await sdk.call('deliverables.list', { projectId })).map(d => ({
+  deliverableId: d.deliverableId,
+  versions: d.versions.map(v => ({ version: v.version, sessionId: v.sessionId, memberId: v.memberId, files: v.files.map(f => f.path) })),
+}))
+
+/**
+ * The delegation project (H02, H03, H04, H15, H16): one root session; setup, fresh, fork and
+ * same-name turns in process; a fork member killed in a child process; a resume turn after it.
+ */
+async function runDelegation(h, pkgs, work, servers, log) {
+  const root = join(work, 'delegation-project')
+  const home = join(work, 'home')
+  await mkdir(root, { recursive: true })
+  const source = join(work, MATERIAL.name)
+  await writeFile(source, MATERIAL.content)
+  const state = {}
+  const script = buildStep3Script(h, state)
+  const obs = { root, phases: {}, requests: [] }
+  const serverFor = async (phase) => {
+    const server = await h.scriptedModelServer({ script: script[phase].lead, routes: script[phase].routes, routeKey: h.routeByMember(h.sessionText) })
+    servers.push({ phase, server })
+    return server
+  }
+  const envFor = server => ({ NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home })
+  const collect = (phase, server, extra = {}) => {
+    obs.requests.push(...server.requests.map(r => slimRequest(h, phase, r)))
+    obs.phases[phase] = { ...(obs.phases[phase] ?? {}), ...extra, unconsumed: server.remainingByRoute() }
+  }
+  const turn = async (sdk, projectId, phase, text, materialIds) => {
+    log(`phase ${phase}`)
+    const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, text, ...(materialIds === undefined ? {} : { materialIds }) })
+    return {
+      reason: result?.reason,
+      error: error === undefined ? undefined : String(error),
+      toolResults: events.filter(e => e.type === 'tool.result').map(e => ({ sessionId: e.sessionId, name: e.result.name, callId: e.result.callId, isError: e.result.isError, content: typeof e.result.content === 'string' ? e.result.content : JSON.stringify(e.result.content) })),
+    }
+  }
+
+  // ---- in process: setup, fresh, fork, sameName (one server for the delegation phase) ------------
+  const server = await serverFor('delegation')
+  let sdk = createStep3Sdk(pkgs, { env: envFor(server), home })
+  let projectId
+  try {
+    projectId = (await sdk.call('projects.open', { root, create: true })).projectId
+    obs.sessionId = (await sdk.call('sessions.create', { projectId, title: 'step-3 delegation' })).sessionId
+    const material = await sdk.call('materials.add', { projectId, sourcePath: source, sessionId: obs.sessionId })
+    state.materialId = material.id
+    obs.materialId = material.id
+    for (const phase of ['setup', 'fresh', 'fork', 'sameName']) {
+      obs.phases[phase] = await turn(sdk, projectId, phase, TASKS[phase])
+    }
+  } finally {
+    await sdk.dispose()
+  }
+  collect('delegation', server)
+
+  // ---- forkKill: a fork member stalls mid-stream in a child process; kill the whole tree ---------
+  {
+    log('phase forkKill')
+    const s = await serverFor('forkKill')
+    const spec = { root, home, sessionId: obs.sessionId, text: TASKS.forkKill, env: envFor(s) }
+    const handle = h.spawnNode([DRIVER, JSON.stringify(spec)], { cwd: work })
+    const ready = await handle.waitForOutput(/"type":"driver\.ready"[^\n]*/, 60_000, 'stdout').then(() => true, () => false)
+    const streaming = await h.waitFor(() => s.requests.find(r => r.route === 'forker-two' && r.chunksSent >= 1), { timeoutMs: 60_000, label: 'forker-two streaming' }).then(() => true, () => false)
+    const exit = await handle.kill('SIGKILL', { tree: true })
+    await new Promise(resolve => setTimeout(resolve, 300))
+    collect('forkKill', s, { ready, streaming, stallText: STALL_TEXT, exit: { code: exit.code, signal: exit.signal }, mainAlive: h.isProcessAlive(handle.pid) })
+  }
+  obs.afterKill = await readSessions(h, root)
+
+  // ---- resume: a fresh SDK reopens the root session and runs a plain turn ------------------------
+  {
+    const s = await serverFor('resume')
+    sdk = createStep3Sdk(pkgs, { env: envFor(s), home })
+    try {
+      projectId = (await sdk.call('projects.open', { root })).projectId
+      await sdk.openSession({ projectId, sessionId: obs.sessionId })
+      obs.phases.resume = await turn(sdk, projectId, 'resume', TASKS.resume)
+      obs.listed = (await sdk.call('sessions.list', { projectId })).map(x => ({ sessionId: x.sessionId, parentSessionId: x.parentSessionId, childCount: x.childCount }))
+      obs.deliverables = await slimDeliverables(sdk, projectId)
+    } finally {
+      await sdk.dispose()
+    }
+    collect('resume', s)
+  }
+  Object.assign(obs, await readSessions(h, root))
+  obs.ledger = (await h.readLedgerRecords(root)).records
+  obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+  return obs
+}
+
+/**
+ * The read-only project (H12): sandbox read-only, two project presets; one turn that delegates
+ * with a wider preset (refused) and with a preset that denies the shell.
+ */
+async function runReadonly(h, pkgs, work, servers, log) {
+  const root = join(work, 'readonly-project')
+  const home = join(work, 'home')
+  await mkdir(root, { recursive: true })
+  const script = buildStep3Script(h)
+  const presets = readonlyPresets()
+  const obs = { root, shell: presets.shell, requests: [] }
+  const server = await h.scriptedModelServer({ script: script.readonly.lead, routes: script.readonly.routes, routeKey: h.routeByMember(h.sessionText) })
+  servers.push({ phase: 'readonly', server })
+  const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
+  // Create the project, then make it read-only and add the presets before a fresh SDK opens it.
+  let sdk = createStep3Sdk(pkgs, { env, home })
+  try {
+    await sdk.call('projects.open', { root, create: true })
+  } finally {
+    await sdk.dispose()
+  }
+  const configFile = join(root, '.nexgent', 'config.json')
+  const config = JSON.parse(await readFile(configFile, 'utf8'))
+  await writeFile(configFile, `${JSON.stringify({ ...config, sandboxMode: 'read-only' }, null, 2)}\n`)
+  await mkdir(join(root, '.nexgent', 'presets'), { recursive: true })
+  for (const [name, preset] of Object.entries(presets.files)) {
+    await writeFile(join(root, '.nexgent', 'presets', `${name}.json`), `${JSON.stringify(preset, null, 2)}\n`)
+  }
+  sdk = createStep3Sdk(pkgs, { env, home })
+  try {
+    const { projectId } = await sdk.call('projects.open', { root })
+    obs.sessionId = (await sdk.call('sessions.create', { projectId, title: 'step-3 read-only' })).sessionId
+    log('phase readonly')
+    const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS.readonly })
+    obs.reason = result?.reason
+    obs.error = error === undefined ? undefined : String(error)
+    obs.toolResults = events.filter(e => e.type === 'tool.result').map(e => ({ sessionId: e.sessionId, name: e.result.name, callId: e.result.callId, isError: e.result.isError, content: typeof e.result.content === 'string' ? e.result.content : JSON.stringify(e.result.content) }))
+  } finally {
+    await sdk.dispose()
+  }
+  obs.requests = server.requests.map(r => slimRequest(h, 'readonly', r))
+  obs.unconsumed = server.remainingByRoute()
+  Object.assign(obs, await readSessions(h, root))
+  return obs
+}
+
 /**
  * Run the headless scenario and return its observations.
  * @param harness - the loaded test-support module; `undefined` collects only the repository inventory.
@@ -111,15 +280,17 @@ export async function runHeadlessScenario(harness, work, { log = () => {}, root 
   const repo = await repoInventory(root)
   log(`repository inventory: ${repo.files.length} files (${repo.source})`)
   if (harness === undefined) return { repo }
-  const loaded = await loadStep2Packages()
+  const loaded = await loadStep3Packages()
   if (!loaded.ok) throw new Error(loaded.reason)
   const script = buildStep3Script(harness)
   const servers = []
   try {
     const direct = await runDirect(harness, loaded.pkgs, work, script, servers, log)
-    return { repo, direct }
+    const delegation = await runDelegation(harness, loaded.pkgs, work, servers, log)
+    const readonly = await runReadonly(harness, loaded.pkgs, work, servers, log)
+    return { repo, direct, delegation, readonly }
   } finally {
-    await Promise.all(servers.map(s => s.close().catch(() => undefined)))
+    await Promise.all(servers.map(s => (s.server ?? s).close().catch(() => undefined)))
     await harness.killAllSpawned().catch(() => undefined)
   }
 }

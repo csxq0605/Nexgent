@@ -50,6 +50,12 @@
       "path": "packages/team"
     },
     {
+      "path": "packages/ptc"
+    },
+    {
+      "path": "packages/workflow"
+    },
+    {
       "path": "apps/desktop/src/renderer"
     }
   ]

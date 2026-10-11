@@ -12,6 +12,7 @@
  * is checked, and a defect found there is `failed`, never hidden.
  */
 import { partial, verdict } from './step2-judges.mjs'
+import { FILES, HISTORY_MARKER, MATERIAL, TASKS } from './step3-scenario.mjs'
 
 /** Step-3 session record types (data-formats.md §会话 JSONL, ADR 0004). */
 export const STEP3_RECORD_TYPES = ['fork.seed', 'subagent.start', 'subagent.end', 'team.member', 'team.task', 'team.message', 'workflow.start', 'workflow.phase', 'workflow.end']
@@ -109,6 +110,177 @@ function h22(obs, tools) {
   return verdict(conditions, `${checked}; all nine step-3 record types present`)
 }
 
+// ---- delegation (H02–H04, H12, H15, H16) ------------------------------------------------------
+
+/** Tools a member must never see (kernel contracts/collaboration.ts `MEMBER_DENIED_TOOLS`; a test pins the copy). */
+export const MEMBER_DENIED_TOOLS = ['delegate', 'spawn_teammate', 'wait_teammates', 'workflow']
+
+const recordsOf = (phase, id) => phase?.sessions?.[id]?.records ?? []
+/** The session id whose `session.start` names member `name`. */
+const childOf = (phase, name) => Object.keys(phase?.sessions ?? {}).find(id => recordsOf(phase, id)[0]?.member?.name === name)
+const rootOf = phase => recordsOf(phase, phase?.sessionId)
+const subStart = (phase, name) => rootOf(phase).find(r => r.type === 'subagent.start' && r.name === name)
+const subEnd = (phase, start) => start === undefined ? undefined : rootOf(phase).find(r => r.type === 'subagent.end' && r.childSessionId === start.childSessionId)
+const toolResult = (records, callId) => records.find(r => r.type === 'tool.result' && r.toolCallId === callId)
+const memberRequests = (phase, name) => (phase?.requests ?? []).filter(r => r.route === name)
+const seedText = seed => JSON.stringify(seed?.messages ?? [])
+const continuous = records => records.length > 0 && records.every((record, index) => record.seq === index + 1)
+const missingPhase = name => ({ status: 'failed', evidence: `the ${name} phase did not run` })
+
+/** Conditions shared by every delegated child: it exists, its parent is the root, its member line says delegated. */
+function childConditions(phase, name, mode) {
+  const id = childOf(phase, name)
+  const start = recordsOf(phase, id)[0]
+  const sub = subStart(phase, name)
+  return [
+    [id !== undefined, `a child session for member ${name} exists`],
+    [start?.parentSessionId === phase?.sessionId, `${name}: session.start.parentSessionId is the root session (got ${String(start?.parentSessionId)})`],
+    [start?.member?.executionForm === 'delegated', `${name}: session.start.member.executionForm is delegated (got ${String(start?.member?.executionForm)})`],
+    [sub !== undefined && sub.childSessionId === id && sub.executionForm === 'delegated' && sub.mode === mode, `the root has subagent.start for ${name} with mode ${mode} and that child id (got ${JSON.stringify(sub && { mode: sub.mode, childSessionId: sub.childSessionId })})`],
+  ]
+}
+
+/** H02: fresh delegation — parent id right; first member request carries the material, not the parent's history. */
+function h02(obs) {
+  const d = obs.delegation
+  if (d === undefined) return missingPhase('delegation')
+  const sub = subStart(d, 'analyst')
+  const first = memberRequests(d, 'analyst')[0]
+  const text = first?.text ?? ''
+  const materialPath = `.nexgent/materials/${d.materialId}/${MATERIAL.name}`
+  const leaked = [HISTORY_MARKER, TASKS.setup, TASKS.fresh].filter(needle => text.includes(needle))
+  return verdict([
+    [d.phases?.fresh?.reason?.kind === 'completed', `the fresh turn completed (got ${JSON.stringify(d.phases?.fresh?.reason)})`],
+    ...childConditions(d, 'analyst', 'fresh'),
+    [JSON.stringify(sub?.materialIds) === JSON.stringify([d.materialId]), `subagent.start.materialIds is [the stock.csv material] (got ${JSON.stringify(sub?.materialIds)})`],
+    [recordsOf(d, childOf(d, 'analyst')).every(r => r.type !== 'fork.seed'), 'the fresh child has no fork.seed'],
+    [first !== undefined, 'the analyst sent at least one model request'],
+    [text.includes(materialPath), `the analyst's first request references the material (${materialPath})`],
+    [leaked.length === 0, `the analyst's first request carries none of the parent's history (found: ${leaked.map(l => JSON.stringify(l.slice(0, 40))).join(', ')})`],
+  ], `analyst child of the root (delegated, fresh); first request references ${MATERIAL.name} by its material path and carries no parent history`)
+}
+
+/** H03: fork delegation — the member's request has the parent history up to the previous turn; after a kill and resume the seed is still there. */
+function h03(obs) {
+  const d = obs.delegation
+  if (d === undefined) return missingPhase('delegation')
+  const forker = childOf(d, 'forker')
+  const seed = recordsOf(d, forker)[1]
+  const first = memberRequests(d, 'forker')[0]?.text ?? ''
+  const kill = d.phases?.forkKill ?? {}
+  const two = childOf(d.afterKill, 'forker-two')
+  const seedAtKill = recordsOf(d.afterKill, two)[1]
+  const seedAfter = recordsOf(d, two)[1]
+  const twoStart = subStart(d, 'forker-two')
+  const root = rootOf(d)
+  const killTurnEnd = twoStart === undefined ? undefined : root.find(r => r.type === 'turn.end' && r.turn === twoStart.turn)
+  const twoEnd = subEnd(d, twoStart)
+  const conditions = [
+    [d.phases?.fork?.reason?.kind === 'completed', `the fork turn completed (got ${JSON.stringify(d.phases?.fork?.reason)})`],
+    ...childConditions(d, 'forker', 'fork'),
+    [seed?.type === 'fork.seed' && seed.fromSessionId === d.sessionId, `forker: seq 2 is fork.seed from the root (got ${String(seed?.type)})`],
+    [seedText(seed).includes(HISTORY_MARKER) && seedText(seed).includes(TASKS.fresh) && !seedText(seed).includes(TASKS.fork), 'forker: the seed holds the earlier turns (setup, fresh) and not the current turn'],
+    [first.includes(HISTORY_MARKER) && first.includes(TASKS.fresh) && !first.includes(TASKS.fork), "forker: its first model request carries the parent's history up to the previous turn, not the current one"],
+    [kill.ready === true && kill.streaming === true && kill.mainAlive === false, `the driver was killed while forker-two was streaming (ready ${kill.ready}, streaming ${kill.streaming}, alive after kill ${kill.mainAlive})`],
+    ...childConditions(d, 'forker-two', 'fork'),
+    [seedAtKill?.type === 'fork.seed' && seedText(seedAtKill).includes(HISTORY_MARKER) && !seedText(seedAtKill).includes(TASKS.forkKill), 'forker-two: right after the kill its file has the fork.seed with the parent history'],
+    [JSON.stringify(seedAfter) === JSON.stringify(seedAtKill) && continuous(recordsOf(d, two)), 'forker-two: after resume the same fork.seed is still there and seq is continuous'],
+    [killTurnEnd?.reason?.kind === 'interrupted', `the root closes the killed turn as interrupted on resume (got ${JSON.stringify(killTurnEnd?.reason)})`],
+    [twoEnd === undefined || twoEnd.result?.status === 'interrupted', `a subagent.end for forker-two, if written, says interrupted (got ${String(twoEnd?.result?.status)})`],
+    [d.phases?.resume?.reason?.kind === 'completed', `the resume turn completed (got ${JSON.stringify(d.phases?.resume?.reason)})`],
+  ]
+  const closing = twoEnd === undefined ? '; subagent.end interrupted not written yet (the host does not call closeInterruptedRuns, W6; not part of H03)' : '; subagent.end interrupted written'
+  return verdict(conditions, `forker: fork.seed from the root through the previous turn, its request carries that history; forker-two killed mid-stream, its fork.seed survives the resume, root turn closed interrupted${closing}`)
+}
+
+/** H04: what the member presented comes back in the tool result and subagent.end; the parent's final deliverable includes the member's file. */
+function h04(obs) {
+  const d = obs.delegation
+  if (d === undefined) return missingPhase('delegation')
+  const start = subStart(d, 'analyst')
+  const end = subEnd(d, start)
+  const delivered = (end?.result?.deliverables ?? []).find(ref => (ref.files ?? []).some(f => f.path === FILES.summary.path))
+  const memberFile = delivered?.files?.find(f => f.path === FILES.summary.path)
+  const result = start === undefined ? undefined : toolResult(rootOf(d), start.toolCallId)
+  const content = typeof result?.content === 'string' ? result.content : JSON.stringify(result?.content ?? '')
+  const final = rootOf(d).find(r => r.type === 'deliverable.presented' && r.seq > (result?.seq ?? Infinity) && (r.deliverable?.files ?? []).some(f => f.path === FILES.summary.path))
+  const finalFile = final?.deliverable?.files?.find(f => f.path === FILES.summary.path)
+  const memberDeliverable = (d.deliverables ?? []).find(x => x.deliverableId === delivered?.deliverableId)
+  return verdict([
+    [end?.result?.status === 'completed', `subagent.end for the analyst is completed (got ${String(end?.result?.status)})`],
+    [delivered !== undefined && delivered.memberName === 'analyst', `subagent.end lists the analyst's deliverable with ${FILES.summary.path} (got ${JSON.stringify(end?.result?.deliverables?.map(x => x.files?.map(f => f.path)))})`],
+    [memberDeliverable !== undefined && memberDeliverable.versions.every(v => v.sessionId === start?.childSessionId), 'deliverables.list has that deliverable, presented from the analyst session'],
+    [result !== undefined && result.isError === false && content.includes(String(delivered?.deliverableId)) && content.includes(FILES.summary.path), "the root's delegate tool.result succeeded and names the deliverable id and its file"],
+    [final !== undefined, `a later root deliverable.presented includes ${FILES.summary.path}`],
+    [finalFile !== undefined && finalFile.sha256 === memberFile?.sha256, "the root's final deliverable has the analyst's file as presented (same SHA-256)"],
+  ], `analyst presented ${FILES.summary.path}; it is in subagent.end and the delegate tool result; the root's final deliverable carries the same file`)
+}
+
+/** H12: a read-only parent refuses a wider member; a preset's denied tool is invisible to the member. */
+function h12(obs) {
+  const r = obs.readonly
+  if (r === undefined) return missingPhase('read-only')
+  const root = rootOf(r)
+  const wide = toolResult(root, 'call-wide')
+  const quietId = childOf(r, 'quiet')
+  const quietStart = recordsOf(r, quietId)[0]
+  const quiet = memberRequests(r, 'quiet')
+  const lead = (r.requests ?? []).filter(q => q.route === null)
+  return verdict([
+    [r.reason?.kind === 'completed', `the read-only turn completed (got ${JSON.stringify(r.reason)})`],
+    [root[0]?.sandboxMode === 'read-only', `the root session runs read-only (got ${String(root[0]?.sandboxMode)})`],
+    [wide?.isError === true && wide.error?.code === 'sandbox/denied', `delegating with the wider preset fails with sandbox/denied (got ${JSON.stringify(wide && { isError: wide.isError, code: wide.error?.code })})`],
+    [childOf(r, 'wide-one') === undefined && subStart(r, 'wide-one') === undefined && memberRequests(r, 'wide-one').length === 0, 'the refused member has no session, no subagent.start and no request'],
+    ...childConditions(r, 'quiet', 'fresh'),
+    [quietStart?.sandboxMode === 'read-only' && quietStart?.member?.preset === 'noshell', `quiet runs read-only with preset noshell (got ${String(quietStart?.sandboxMode)}, ${String(quietStart?.member?.preset)})`],
+    [lead.length > 0 && lead.every(q => q.tools.includes(r.shell)), `the root's requests offer ${r.shell}`],
+    [quiet.length > 0 && quiet.every(q => !q.tools.includes(r.shell)), `quiet's requests do not offer ${r.shell} (got ${JSON.stringify(quiet.map(q => q.tools))})`],
+  ], `read-only root: the workspace-write preset is refused (sandbox/denied, no member); the noshell member runs read-only without ${r.shell}`)
+}
+
+/** H15: no member ever sees delegate, team or workflow tools. */
+function h15(obs) {
+  const phases = [obs.delegation, obs.readonly].filter(Boolean)
+  if (phases.length < 2) return missingPhase(obs.delegation === undefined ? 'delegation' : 'read-only')
+  const requests = phases.flatMap(p => p.requests ?? [])
+  const members = requests.filter(q => q.route !== null)
+  const lead = requests.filter(q => q.route === null)
+  const leaks = members.filter(q => q.tools.some(t => MEMBER_DENIED_TOOLS.includes(t)))
+  const names = [...new Set(members.map(q => q.route))]
+  const conditions = [
+    [members.length > 0 && names.length >= 5, `requests from several members were seen (${names.join(', ')})`],
+    [members.every(q => q.tools.length > 0), 'every member request offers tools'],
+    [leaks.length === 0, `no member request offers ${MEMBER_DENIED_TOOLS.join(', ')} (leaks: ${leaks.map(q => `${q.route}: ${q.tools.filter(t => MEMBER_DENIED_TOOLS.includes(t)).join('/')}`).join('; ')})`],
+    [lead.length > 0 && lead.every(q => q.tools.includes('delegate')), 'every root request offers delegate'],
+  ]
+  const checked = `${members.length} requests from ${names.length} members, none offers ${MEMBER_DENIED_TOOLS.join(', ')}; the root offers delegate`
+  const absent = MEMBER_DENIED_TOOLS.filter(t => t !== 'delegate' && !lead.some(q => q.tools.includes(t)))
+  if (absent.length > 0) return partial(conditions, `the root does not offer ${absent.join(', ')} yet (team and workflow tools come with their packages)`, checked)
+  return verdict(conditions, `${checked}, ${MEMBER_DENIED_TOOLS.slice(1).join(', ')}`)
+}
+
+/** H16: two members presenting the same path get one deliverable each, one version each. */
+function h16(obs) {
+  const d = obs.delegation
+  if (d === undefined) return missingPhase('delegation')
+  const a = childOf(d, 'writer-a')
+  const b = childOf(d, 'writer-b')
+  const shared = (d.deliverables ?? []).filter(x => x.versions.some(v => (v.files ?? []).includes(FILES.shared.path)))
+  const bySession = id => shared.filter(x => x.versions.some(v => v.sessionId === id))
+  const ends = ['writer-a', 'writer-b'].map(name => subEnd(d, subStart(d, name)))
+  const refs = ends.map(end => (end?.result?.deliverables ?? []).find(ref => (ref.files ?? []).some(f => f.path === FILES.shared.path)))
+  return verdict([
+    [d.phases?.sameName?.reason?.kind === 'completed', `the same-name turn completed (got ${JSON.stringify(d.phases?.sameName?.reason)})`],
+    ...childConditions(d, 'writer-a', 'fresh'),
+    ...childConditions(d, 'writer-b', 'fresh'),
+    [ends.every(end => end?.result?.status === 'completed'), 'both members completed'],
+    [shared.length === 2, `two deliverables contain ${FILES.shared.path} (got ${shared.length})`],
+    [shared.every(x => x.versions.length === 1), `each has exactly one version (got ${shared.map(x => x.versions.length).join(', ')})`],
+    [bySession(a).length === 1 && bySession(b).length === 1 && bySession(a)[0] !== bySession(b)[0], 'one belongs to writer-a, the other to writer-b'],
+    [refs.every(ref => ref?.version === 1) && refs[0]?.deliverableId !== refs[1]?.deliverableId, `the two subagent.end results name different deliverables, each v1 (got ${JSON.stringify(refs.map(ref => ref && [ref.deliverableId, ref.version]))})`],
+  ], `writer-a and writer-b both presented ${FILES.shared.path}: two deliverables, one version each, one per member`)
+}
+
 /** Top-level paths the old Python products used (plan W7, check H23). */
 export const FORBIDDEN_TOP_LEVEL = ['nexgent', 'tests', 'config.py', 'runtime']
 const isForbidden = path => {
@@ -129,7 +301,7 @@ function h23(obs) {
 }
 
 /** Judges by checklist id. */
-export const JUDGES = { H01: h01, H10: h10, H22: h22, H23: h23 }
+export const JUDGES = { H01: h01, H02: h02, H03: h03, H04: h04, H10: h10, H12: h12, H15: h15, H16: h16, H22: h22, H23: h23 }
 
 /** Run one judge; a throw is a failure, a missing judge is not-implemented. */
 export function judge(id, obs, tools) {
