@@ -50,10 +50,10 @@ describe('project config', () => {
     expect(await loadProjectConfig(workspace.layout)).toMatchObject({ version: 1, sandboxMode: 'workspace-write', approvals: [], extraReadRoots: [] })
     await writeFile(workspace.layout.configFile, JSON.stringify({ version: 1, sandboxMode: 'read-only', costCaps: { perTask: { maxRequests: 2 } } }))
     expect(await loadProjectConfig(workspace.layout)).toMatchObject({
-      sandboxMode: 'read-only', costCaps: { perTask: { maxRequests: 2 } }, model: 'claude-sonnet-5-5', thinking: 'off', effort: 'medium',
+      sandboxMode: 'read-only', costCaps: { perTask: { maxRequests: 2 } }, model: 'claude-sonnet-5-5', thinking: 'on', effort: 'medium',
     })
-    await writeFile(workspace.layout.configFile, JSON.stringify({ effort: 'xhigh', thinking: 'on' }))
-    expect(await loadProjectConfig(workspace.layout)).toMatchObject({ effort: 'xhigh', thinking: 'on' })
+    await writeFile(workspace.layout.configFile, JSON.stringify({ effort: 'xhigh', thinking: 'off' }))
+    expect(await loadProjectConfig(workspace.layout)).toMatchObject({ effort: 'xhigh', thinking: 'off' })
   })
 
   it('rejects unknown fields, wrong types, bad version and malformed JSON with config/invalid', async () => {

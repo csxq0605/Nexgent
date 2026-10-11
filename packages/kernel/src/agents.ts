@@ -86,7 +86,7 @@ export class AgentsService extends Service {
 
   static readonly Config: Schema<AgentsConfig> = Schema.object({
     model: Schema.string().description('Default model id.'),
-    thinking: Schema.union(['off', 'on'] as const).default('off').description('Reasoning mode; execution uses off.'),
+    thinking: Schema.union(['off', 'on'] as const).default('on').description('Reasoning mode; execution uses on (adaptive thinking, ADR 0003).'),
     effort: Schema.union(EFFORT_LEVELS as readonly Effort[]).default('medium').description('Effort level (output_config.effort).'),
     maxTokens: Schema.natural().description('Output token cap per request.'),
     systemPrompt: Schema.object({

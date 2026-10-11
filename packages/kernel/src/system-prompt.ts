@@ -45,6 +45,23 @@ function fill(text: string, values: Readonly<Record<string, string>>): string {
   return text.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match)
 }
 
+/**
+ * Step-2 file-tool guidance (step-2 work partition, W0 → W7): edit existing
+ * files with `str_replace`, create them with `write_file`, and declare
+ * deliverables with `present`. Each line appears only when its tools are
+ * offered, so the prompt never names a tool the model cannot call.
+ */
+function fileGuidance(tools: ReadonlySet<string>): string[] {
+  const lines: string[] = []
+  const shell = tools.has('bash') || tools.has('pwsh')
+  if (tools.has('str_replace')) {
+    lines.push(`- To change an existing file, use \`str_replace\`${tools.has('read_file') ? ' (read the file with `read_file` first)' : ''}${shell ? '; do not rewrite files through shell commands (heredocs, sed, inline scripts)' : ''}.`)
+  }
+  if (tools.has('write_file')) lines.push('- To create a new file or replace a file completely, use `write_file`.')
+  if (tools.has('present')) lines.push('- When a file is a result for the user, declare it with `present` once it is ready, and again after each revision.')
+  return lines
+}
+
 /** Render the system prompt. Deterministic for equal input (no clock), so the prefix stays cacheable. */
 export function renderSystemPrompt(input: SystemPromptInput): string {
   const values = { model: input.model, cwd: input.cwd }
@@ -60,6 +77,8 @@ export function renderSystemPrompt(input: SystemPromptInput): string {
   if (input.tools.length > 0) {
     sections.push(['# Tools', ...input.tools.map(tool => `- ${tool.name}: ${tool.description.split('\n')[0]}`)].join('\n'))
   }
+  const guidance = fileGuidance(new Set(input.tools.map(tool => tool.name)))
+  if (guidance.length > 0) sections.push(['# Working with files', ...guidance].join('\n'))
   const suffix = fill(input.template.suffix, values).trim()
   if (suffix !== '') sections.push(suffix)
   return sections.join('\n\n')

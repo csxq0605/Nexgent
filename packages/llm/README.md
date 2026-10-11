@@ -25,7 +25,7 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
     endpoint: https://api.anthropic.com
     model: claude-sonnet-5-5
     apiKeyCredential: NEXGENT_API_KEY
-    thinking: 'off'
+    thinking: 'on'
     effort: medium
     maxTokens: 16000
     timeoutMs: 180000
