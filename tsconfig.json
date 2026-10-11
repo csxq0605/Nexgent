@@ -47,6 +47,9 @@
       "path": "packages/subagent"
     },
     {
+      "path": "packages/team"
+    },
+    {
       "path": "apps/desktop/src/renderer"
     }
   ]
