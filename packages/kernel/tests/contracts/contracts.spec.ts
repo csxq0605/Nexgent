@@ -98,7 +98,7 @@ describe('contracts: type-level shape', () => {
     expectTypeOf<SessionRecordType>().toEqualTypeOf<
       'session.start' | 'user.message' | 'assistant.message' | 'tool.result' | 'turn.start' | 'turn.end' | 'checkpoint' | 'error' | 'approval.request' | 'approval.decision' | 'approval.grant'
       // step 2
-      | 'material.added' | 'deliverable.presented' | 'turn.files' | 'feedback' | 'goal.set' | 'goal.update' | 'compaction'
+      | 'material.added' | 'deliverable.presented' | 'turn.files' | 'feedback' | 'goal.set' | 'goal.update' | 'session.title' | 'compaction'
     >()
     expectTypeOf<SessionRecord['seq']>().toBeNumber()
     expectTypeOf<SessionRecord['ts']>().toBeString()
@@ -293,7 +293,7 @@ describe('contracts: pure helpers', () => {
 
   it('record type lists are complete and in sync with the unions', () => {
     const sessionTypes: readonly SessionRecordType[] = SESSION_RECORD_TYPES
-    expect(new Set(sessionTypes).size).toBe(18)
+    expect(new Set(sessionTypes).size).toBe(19)
     const ledgerTypes: readonly LedgerRecordType[] = LEDGER_RECORD_TYPES
     expect(new Set(ledgerTypes).size).toBe(4)
   })

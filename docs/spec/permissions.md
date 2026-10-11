@@ -194,7 +194,8 @@
 3. preload 用 `contextBridge.exposeInMainWorld('nexgent', api)` 暴露且只暴露：
    - `invoke(method, input)`：内部调用 `ipcRenderer.invoke('nexgent:call', { token, method, input })`；
    - `onEvent(listener)`：订阅 `nexgent:event` 通道上的 `SdkEvent`，返回取消订阅函数；
-   - `platform`：`process.platform` 的字符串。
+   - `platform`：`process.platform` 的字符串；
+   - `pickDirectory()`、`pickFiles()`：分别等于 `invoke('dialogs.pickDirectory', {})`、`invoke('dialogs.pickFiles', {})` 的简写，走同一条受检的调用。
    页面拿不到 `ipcRenderer` 本身，也拿不到令牌。
 4. 主进程只在 `nexgent:call` 一个通道上 `ipcMain.handle`，每次调用按顺序检查：
    1. `event.senderFrame` 是该窗口的顶层框架，且其 URL 的来源是 `app://nexgent`（开发模式另加 vite 来源）；
@@ -204,9 +205,11 @@
    任一检查失败：不调用 SDK，返回 `{ ok: false, error: { code: 'approval/denied', … } }`，并在日志里写一行（时间、窗口 ID、方法名、失败的检查项；**不**写令牌与参数内容）。通过则调用 `sdk.call(method, input)`，返回 `{ ok: true, result }` 或 `{ ok: false, error: toErrorInfo(error) }`。
 5. 事件只从主进程推向渲染进程（`webContents.send('nexgent:event', event)`），渲染进程不能经事件通道调用任何东西。
 
-**方法白名单**：`SDK_METHOD_NAMES` 的全部方法，即 `app.info`；`projects.recent / open / close / forget`；`sessions.list / create / open / close / export`；`turns.send / cancel`；`approvals.respond`；`materials.add / list / remove`；`deliverables.list / get / diff / readText / reveal`；`feedback.submit / list`；`goals.get / set / update`；`settings.get / update / setApiKey`。没有通用的文件读写、命令执行或任意路径打开方法：
+**方法白名单**：`SDK_METHOD_NAMES` 的全部方法，即 `app.info`；`projects.recent / open / close / forget`；`sessions.list / create / open / close / export / rename`；`files.list`；`dialogs.pickDirectory / pickFiles`；`turns.send / cancel`；`approvals.respond`；`materials.add / list / remove`；`deliverables.list / get / diff / readText / reveal`；`feedback.submit / list`；`goals.get / set / update`；`settings.get / update / setApiKey`。没有通用的文件读写、命令执行或任意路径打开方法：
 
-- 文件选择对话框由主进程打开（`dialog.showOpenDialog`），渲染进程只发起“添加资料”“打开项目”的意图，主进程拿到用户选的路径后自己调用 `materials.add` / `projects.open`；渲染进程直接传路径给这两个方法也允许，但路径必须是绝对路径，且 `materials.add` 只复制，不改源文件。
+- 文件选择对话框由主进程打开（`dialog.showOpenDialog`）：渲染进程调用 `dialogs.pickDirectory`（打开项目）或 `dialogs.pickFiles`（添加资料）发起意图，得到用户选的绝对路径（取消时为 `null` / 空数组），再调用 `projects.open` / `materials.add`。渲染进程直接传路径给这两个方法也允许，但路径必须是绝对路径，且 `materials.add` 只复制，不改源文件。CLI 与没有对话框的宿主对 `dialogs.*` 返回 `internal`。
+- `files.list` 只列项目根下的普通文件（项目相对路径、大小、修改时间），不跟随符号链接，跳过根下的 `.nexgent/` 和任意层的 `.git/`、`node_modules/`，最多 5000 项；不返回文件内容。
+- `sessions.rename` 写一条 `session.title` 记录（`data-formats.md`），只改显示名。
 - `deliverables.readText` 只读快照目录里属于该版本的文件，`deliverables.reveal` 只对快照目录内的路径调用 `shell.showItemInFolder`，二者都拒绝 `..` 与绝对路径参数。
 - `sessions.export` 的 `outDir` 来自主进程的保存对话框。
 

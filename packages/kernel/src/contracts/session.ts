@@ -254,6 +254,15 @@ export interface GoalUpdateRecord extends SessionRecordBase {
   readonly note?: string
 }
 
+/** The session was renamed by the user (step 2); the latest one wins over `session.start.title`. */
+export interface SessionTitleRecord extends SessionRecordBase {
+  readonly type: 'session.title'
+  /** Turn in progress, if any. */
+  readonly turn?: number
+  /** New title; non-empty, already trimmed by the host. */
+  readonly title: string
+}
+
 /**
  * Older history was replaced by a summary. Projection: `messages` becomes
  * `[{ role: 'user', content: renderCompactionSummary(summary) }]` followed by
@@ -306,6 +315,7 @@ export type SessionRecord =
   | FeedbackRecord
   | GoalSetRecord
   | GoalUpdateRecord
+  | SessionTitleRecord
   | CompactionRecord
 
 /** The `type` tag vocabulary. */
@@ -330,11 +340,12 @@ export const SESSION_RECORD_TYPES: readonly SessionRecordType[] = [
   'feedback',
   'goal.set',
   'goal.update',
+  'session.title',
   'compaction',
 ]
 
 /** Record types a host (SDK) may append outside the agent loop, through the agent that holds the lock. */
-export type HostRecordType = 'material.added' | 'goal.set' | 'goal.update'
+export type HostRecordType = 'material.added' | 'goal.set' | 'goal.update' | 'session.title'
 
 /** Record types a tool may append through {@link ToolContext.appendRecord}. */
 export type ToolRecordType = 'deliverable.presented'

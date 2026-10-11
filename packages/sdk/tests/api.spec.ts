@@ -14,7 +14,7 @@ describe('@nexgent/sdk interface', () => {
   it('lists every method exactly once, and nothing else', () => {
     expect(new Set(SDK_METHOD_NAMES).size).toBe(SDK_METHOD_NAMES.length)
     expectTypeOf<(typeof SDK_METHOD_NAMES)[number]>().toEqualTypeOf<SdkMethodName>()
-    expect(SDK_API_VERSION).toBe(1)
+    expect(SDK_API_VERSION).toBe(2)
   })
 
   it('types inputs and results by method name', () => {

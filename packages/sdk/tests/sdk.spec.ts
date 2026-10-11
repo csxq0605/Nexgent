@@ -222,7 +222,7 @@ describe('method table', () => {
   it('implements every whitelisted method and rejects others', async () => {
     const t = await testSdk([])
     const info = await t.sdk.call('app.info', {})
-    expect(info).toEqual({ sdkVersion: 1, appVersion: '0.0.0-test', platform: process.platform })
+    expect(info).toEqual({ sdkVersion: 2, appVersion: '0.0.0-test', platform: process.platform })
     await expect(t.sdk.call('nope' as never, {} as never)).rejects.toMatchObject({ code: 'internal' })
     for (const method of SDK_METHOD_NAMES) expect(typeof (t.sdk as unknown as { methods: Record<string, unknown> }).methods[method]).toBe('function')
   })
@@ -231,6 +231,58 @@ describe('method table', () => {
     const t = await testSdk([])
     const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
     await expect(t.sdk.call('deliverables.reveal', { projectId: project.projectId, deliverableId: 'x', version: 1, path: 'a' })).rejects.toMatchObject({ code: 'internal' })
+  })
+})
+
+describe('rename, project files and dialogs', () => {
+  it('renames a session with a session.title record that survives a restart', async () => {
+    const t = await testSdk([])
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
+    const created = await t.sdk.call('sessions.create', { projectId: project.projectId, title: '草稿' })
+    const renamed = await t.sdk.call('sessions.rename', { projectId: project.projectId, sessionId: created.sessionId, title: '  六月订单汇总  ' })
+    expect(renamed).toMatchObject({ sessionId: created.sessionId, title: '六月订单汇总' })
+    await expect(t.sdk.call('sessions.rename', { projectId: project.projectId, sessionId: created.sessionId, title: '   ' })).rejects.toMatchObject({ code: 'tool/invalid-input' })
+    expect((await t.sdk.call('sessions.list', { projectId: project.projectId }))[0]).toMatchObject({ title: '六月订单汇总' })
+    const { records } = await readSessionRecords(project.root, created.sessionId)
+    expect(records.filter(record => record.type === 'session.title')).toEqual([expect.objectContaining({ title: '六月订单汇总' })])
+
+    await t.sdk.dispose()
+    const again = await testSdk([], { home: t.home, env: { NEXGENT_API_KEY: TEST_KEY, NEXGENT_HOME: t.home } })
+    const reopened = await again.sdk.call('projects.open', { root: project.root })
+    expect((await again.sdk.call('sessions.open', { projectId: reopened.projectId, sessionId: created.sessionId })).summary.title).toBe('六月订单汇总')
+  })
+
+  it('lists project files without host data, VCS, dependencies or symlinked directories', async () => {
+    const t = await testSdk([])
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
+    const root = project.root
+    for (const dir of ['src/lib', '.git/objects', 'node_modules/x', 'pkg/node_modules/y', 'docs/.nexgent']) await mkdir(nodePath.join(root, dir), { recursive: true })
+    for (const file of ['README.md', 'src/main.ts', 'src/lib/util.ts', '.git/objects/a', 'node_modules/x/i.js', 'pkg/node_modules/y/i.js', 'docs/.nexgent/kept.md', '.env']) {
+      await writeFile(nodePath.join(root, file), 'x')
+    }
+    if (process.platform !== 'win32') await (await import('node:fs/promises')).symlink(nodePath.join(root, 'src'), nodePath.join(root, 'linked'))
+    const listing = await t.sdk.call('files.list', { projectId: project.projectId })
+    expect(listing.truncated).toBe(false)
+    expect(listing.files.map(file => file.path)).toEqual(['.env', 'README.md', 'docs/.nexgent/kept.md', 'src/lib/util.ts', 'src/main.ts'])
+    expect(listing.files[1]).toMatchObject({ size: 1, modifiedAt: expect.stringMatching(/^\d{4}-/) })
+  })
+
+  it('stops listing at the limit and says so', async () => {
+    const { listProjectFiles } = await import('../src/index.js')
+    const t = await testSdk([])
+    for (const name of ['a', 'b', 'c']) await writeFile(nodePath.join(t.base, `${name}.txt`), name)
+    const listing = await listProjectFiles(t.base, 2)
+    expect(listing).toMatchObject({ truncated: true })
+    expect(listing.files).toHaveLength(2)
+  })
+
+  it('dialogs go to the host pickers, and reject without them', async () => {
+    const bare = await testSdk([])
+    await expect(bare.sdk.call('dialogs.pickDirectory', {})).rejects.toMatchObject({ code: 'internal' })
+    await expect(bare.sdk.call('dialogs.pickFiles', {})).rejects.toMatchObject({ code: 'internal' })
+    const desk = await testSdk([], { pickDirectory: async () => '/picked', pickFiles: async () => ['/a.csv', '/b.csv'] })
+    expect(await desk.sdk.call('dialogs.pickDirectory', {})).toBe('/picked')
+    expect(await desk.sdk.call('dialogs.pickFiles', {})).toEqual(['/a.csv', '/b.csv'])
   })
 })
 
@@ -266,7 +318,7 @@ describe('export', () => {
     for (const file of bundle.files) expect(await readFile(nodePath.join(out, file), 'utf8')).not.toContain(TEST_KEY)
     expect(await readFile(nodePath.join(out, 'session.jsonl'), 'utf8')).toContain('the key is [REDACTED]')
     const manifest = JSON.parse(await readFile(nodePath.join(out, 'manifest.json'), 'utf8')) as Record<string, unknown>
-    expect(manifest).toMatchObject({ formatVersion: 1, sessionId: session.sessionId, appVersion: '0.0.0-test', sdkVersion: 1, redactions: 1, counts: { ledgerRecords: 1 } })
+    expect(manifest).toMatchObject({ formatVersion: 1, sessionId: session.sessionId, appVersion: '0.0.0-test', sdkVersion: 2, redactions: 1, counts: { ledgerRecords: 1 } })
     await expect(t.sdk.call('sessions.export', { projectId: project.projectId, sessionId: session.sessionId, outDir: out })).rejects.toMatchObject({ code: 'tool/invalid-input' })
   })
 })

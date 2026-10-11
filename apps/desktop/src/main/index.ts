@@ -21,7 +21,7 @@ import { join, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import type { NexgentSdk } from '@nexgent/sdk'
-import { exportInterceptor } from './dialogs.js'
+import { exportInterceptor, pickMaterialFiles, pickProjectDirectory, type ShowOpenDialog } from './dialogs.js'
 import { parseLaunchArgs } from './launch-args.js'
 import { createCallHandler, TokenRegistry, type CallerInfo } from './ipc-guard.js'
 import { CALL_CHANNEL, EVENT_CHANNEL } from './ipc-types.js'
@@ -216,8 +216,19 @@ async function start(): Promise<void> {
   hardenSession()
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate({ dev, platform: process.platform })))
 
+  // Dialogs open over the focused window; `dialog.showOpenDialog` is looked up per call (E2E tests stub it).
+  const showOpenDialog: ShowOpenDialog = (options) => {
+    const parent = BrowserWindow.getFocusedWindow()
+    return parent === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(parent, options)
+  }
   const loaded = await loadSdk(
-    { home, appVersion: app.getVersion(), reveal: async (absolutePath) => shell.showItemInFolder(absolutePath) },
+    {
+      home,
+      appVersion: app.getVersion(),
+      reveal: async (absolutePath) => shell.showItemInFolder(absolutePath),
+      pickDirectory: async () => (await pickProjectDirectory(showOpenDialog)) ?? null,
+      pickFiles: () => pickMaterialFiles(showOpenDialog),
+    },
     devEnv('NEXGENT_DESKTOP_SDK_MODULE'),
   )
   const sdk: NexgentSdk = loaded.sdk
@@ -233,13 +244,7 @@ async function start(): Promise<void> {
     isAllowedOrigin,
     log,
     interceptors: {
-      'sessions.export': exportInterceptor(
-        (options) => {
-          const parent = BrowserWindow.getFocusedWindow()
-          return parent === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(parent, options)
-        },
-        (input) => sdk.call('sessions.export', input),
-      ),
+      'sessions.export': exportInterceptor(showOpenDialog, (input) => sdk.call('sessions.export', input)),
     },
   })
   ipcMain.handle(CALL_CHANNEL, (event, payload: unknown) => handle(callerOf(event), payload))

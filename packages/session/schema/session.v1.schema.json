@@ -56,6 +56,9 @@
       "$ref": "#/$defs/goalUpdateRecord"
     },
     {
+      "$ref": "#/$defs/sessionTitleRecord"
+    },
+    {
       "$ref": "#/$defs/compactionRecord"
     }
   ],
@@ -1374,6 +1377,37 @@
         },
         "note": {
           "type": "string"
+        }
+      }
+    },
+    "sessionTitleRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "title"
+      ],
+      "properties": {
+        "type": {
+          "const": "session.title"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "title": {
+          "$ref": "#/$defs/nonEmptyString"
         }
       }
     },

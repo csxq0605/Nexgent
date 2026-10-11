@@ -37,6 +37,7 @@ export const SESSION_RECORD_DEFS: Readonly<Record<SessionRecordType, string>> = 
   feedback: 'feedbackRecord',
   'goal.set': 'goalSetRecord',
   'goal.update': 'goalUpdateRecord',
+  'session.title': 'sessionTitleRecord',
   compaction: 'compactionRecord',
 }
 
@@ -301,6 +302,7 @@ export const sessionRecordSchema: JsonObject = {
       { turn, goalId: ref('nonEmptyString'), status: ref('goalStatus'), text: { type: 'string' }, note: { type: 'string' } },
       ['goalId', 'status'],
     ),
+    sessionTitleRecord: record('session.title', { turn, title: ref('nonEmptyString') }, ['title']),
     compactionRecord: record(
       'compaction',
       {

@@ -9,6 +9,7 @@ export { bootProjectApp, COMPACTION_THRESHOLD_ENV, step2ProfileRows } from './bo
 export type { BootOptions } from './boot.js'
 export { EXPORT_FILES, EXPORT_FORMAT_VERSION, REDACTED, redactSecrets, writeExportBundle } from './export.js'
 export type { ExportInput } from './export.js'
+export { listProjectFiles } from './files.js'
 export { historyItems, sessionSummary, turnUsage } from './history.js'
 export { RECENT_PROJECTS_FILE, RECENT_PROJECTS_LIMIT, RecentProjects } from './recent.js'
 export type { RecentProjectEntry } from './recent.js'

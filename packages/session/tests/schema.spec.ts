@@ -121,6 +121,7 @@ const inputs: SessionRecordInput[] = [
     },
   },
   { type: 'goal.update', turn: 2, goalId: 'g1', status: 'completed', note: 'done' },
+  { type: 'session.title', turn: 2, title: '月报整理' },
   { type: 'turn.files', turn: 2, changes: [{ path: 'report/summary.csv', change: 'modified' }], omitted: 2 },
   { type: 'turn.end', turn: 2, reason: { kind: 'completed' } },
 ]

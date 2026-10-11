@@ -43,7 +43,7 @@ import type {
 } from '@nexgent/kernel'
 
 /** API version; bumped only by a contract-change PR. */
-export const SDK_API_VERSION = 1
+export const SDK_API_VERSION = 2
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -189,6 +189,32 @@ export interface ProjectSettings {
 export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey'>>
 
 // ---------------------------------------------------------------------------
+// Project files
+// ---------------------------------------------------------------------------
+
+/** One file of the project tree (`files.list`). */
+export interface ProjectFileEntry {
+  /** Project-relative path, `/`-separated. */
+  readonly path: string
+  readonly size: number
+  /** ISO-8601 instant of the last modification. */
+  readonly modifiedAt: string
+}
+
+/** What `files.list` returns: regular files under the project root, sorted by path. */
+export interface ProjectFileListing {
+  readonly files: readonly ProjectFileEntry[]
+  /** More than {@link PROJECT_FILES_LIMIT} files: the list stops there. */
+  readonly truncated: boolean
+}
+
+/** Most files `files.list` returns. */
+export const PROJECT_FILES_LIMIT = 5000
+
+/** Directories `files.list` never enters (host data, VCS, dependencies). */
+export const PROJECT_FILES_SKIPPED_DIRS = ['.nexgent', '.git', 'node_modules'] as const
+
+// ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
 
@@ -224,6 +250,16 @@ export interface SdkMethods {
   /** Releases the lock; a running turn is cancelled first (cause `shutdown`). */
   'sessions.close': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<void>
   'sessions.export': (input: { readonly projectId: string; readonly sessionId: string; readonly outDir: string }) => Promise<ExportResult>
+  /** Writes `session.title` (the title is trimmed; empty rejects `tool/invalid-input`) and returns the updated summary. */
+  'sessions.rename': (input: { readonly projectId: string; readonly sessionId: string; readonly title: string }) => Promise<SessionSummary>
+
+  /** Lists the project's regular files (symbolic links are not followed; {@link PROJECT_FILES_SKIPPED_DIRS} are skipped). */
+  'files.list': (input: { readonly projectId: string }) => Promise<ProjectFileListing>
+
+  /** Desktop only: the native folder picker (opening a project). `null` when cancelled; the CLI rejects with `internal`. */
+  'dialogs.pickDirectory': (input: Record<string, never>) => Promise<string | null>
+  /** Desktop only: the native multi-file picker (adding materials). Empty when cancelled; the CLI rejects with `internal`. */
+  'dialogs.pickFiles': (input: Record<string, never>) => Promise<readonly string[]>
 
   /** Starts a turn; rejects `session/locked` when one is already running in that session. */
   'turns.send': (input: SendMessageInput) => Promise<TurnHandle>
@@ -283,6 +319,10 @@ export const SDK_METHOD_NAMES = [
   'sessions.open',
   'sessions.close',
   'sessions.export',
+  'sessions.rename',
+  'files.list',
+  'dialogs.pickDirectory',
+  'dialogs.pickFiles',
   'turns.send',
   'turns.cancel',
   'approvals.respond',
@@ -323,4 +363,8 @@ export interface CreateSdkOptions {
   readonly appVersion: string
   /** Desktop only: reveal a file in the OS file manager. */
   readonly reveal?: (absolutePath: string) => Promise<void>
+  /** Desktop only: the native folder picker behind `dialogs.pickDirectory` (`null` when cancelled). */
+  readonly pickDirectory?: () => Promise<string | null>
+  /** Desktop only: the native multi-file picker behind `dialogs.pickFiles` (empty when cancelled). */
+  readonly pickFiles?: () => Promise<readonly string[]>
 }
