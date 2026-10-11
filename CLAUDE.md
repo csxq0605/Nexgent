@@ -17,8 +17,8 @@ Nexgent 正在被重写为一个 TypeScript 独立应用（Electron 桌面应用
 | 步骤 | 内容 | 状态 |
 | --- | --- | --- |
 | 0 | 横切：仓库骨架、两平台 CI、证据政策、reference 子模块 | 已验收（[`step-0-20261007.md`](docs/validation/step-0-20261007.md)） |
-| 1 | 主应用：kernel / llm / session / workspace 重写，CLI 接通 | 已验收（[`step-1-20261010.md`](docs/validation/step-1-20261010.md)：`accept-step1` 两平台通过，真实 Claude Sonnet 5.5 一次） |
-| 2 | 日常任务体验：项目、资料、成果（`present`）、反馈修改、停止与恢复、上下文压缩、Electron 桌面应用与进程内 SDK | **下一步**（计划 4.2；验收脚本 `scripts/accept-step2.mjs`；通过后集成分支替换 `main`） |
+| 1 | 主应用：kernel / llm / session / workspace 重写，CLI 接通 | **收尾中**：`accept-step1` 两平台通过；[`step-1-20261010.md`](docs/validation/step-1-20261010.md) 的真实模型运行只是冒烟测试，不算验收，待真实多步任务补验 |
+| 2 | 日常任务体验：项目、资料、成果（`present`）、反馈修改、停止与恢复、上下文压缩、Electron 桌面应用与进程内 SDK | 步骤 1 验收后开始（计划 4.2；验收脚本 `scripts/accept-step2.mjs`；通过后集成分支替换 `main`） |
 | 3 | 迁移已有能力与灵活协作（subagent、team、workflow、ptc），删除 Python | 未开始 |
 | 4 | 能力版本（`CapabilityBundle`）进入真实运行系统，门控采用与回滚 | 未开始 |
 | 5 | 默认的反馈改进流程（`@nexgent/evolve`） | 未开始 |
