@@ -17,13 +17,14 @@
  * ANTHROPIC_API_KEY from this process's environment are never passed on.
  */
 import { spawn } from 'node:child_process'
-import { access, copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isLoopbackUrl } from './step2-runtime.mjs'
 
-export const DESKTOP_DIR = fileURLToPath(new URL('../../apps/desktop/', import.meta.url))
+// No trailing separator: on Windows a trailing backslash escapes the closing quote of the argument.
+export const DESKTOP_DIR = resolve(fileURLToPath(new URL('../../apps/desktop/', import.meta.url)))
 const MAIN_ENTRY = join(DESKTOP_DIR, 'dist', 'main', 'index.js')
 const VITE_BIN = join(DESKTOP_DIR, 'node_modules', 'vite', 'bin', 'vite.js')
 const XLSX_SOURCE = fileURLToPath(new URL('../../packages/skill/tests/fixtures/orders.xlsx', import.meta.url))
@@ -172,6 +173,8 @@ async function readLogs(home) {
  */
 export async function runDesktopScenario(harness, work, { log = () => {} } = {}) {
   const { _electron: electron } = await import('playwright-core')
+  // The long path: on Windows tmpdir() can be an 8.3 short path, and the app reports canonical ones.
+  work = await realpath(work)
   const obs = { consoleErrors: { first: [], second: [] } }
   const rendererDir = join(work, 'renderer')
   const home = join(work, 'home')
@@ -206,13 +209,32 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     await page.waitForLoadState('load')
     return { app: launched, page }
   }
+  // Descendants of every killed main process, so none outlives the run (on
+  // Windows they kept the stdio pipes open and the script never exited).
+  const orphans = new Set()
   const kill = async (target) => {
     if (target === undefined) return
     const child = target.process()
     if (child.exitCode !== null || child.signalCode !== null) return
+    const descendants = await harness.descendantPids(child.pid).catch(() => [])
+    for (const pid of descendants) orphans.add(pid)
     const exited = new Promise(resolve => child.once('exit', resolve).once('error', resolve))
-    child.kill('SIGKILL')
+    // Windows: the whole tree, as a crash would; killing electron.exe alone left its
+    // children running and the restart was refused as a second instance.
+    if (process.platform === 'win32') await harness.killProcessTree(child.pid)
+    else child.kill('SIGKILL')
     await exited
+    return descendants
+  }
+  // Wait for the killed main process's children to go away by themselves; returns those still alive.
+  const lingering = async (pids, ms) => {
+    const until = Date.now() + ms
+    let alive = pids.filter(pid => harness.isProcessAlive(pid))
+    while (alive.length > 0 && Date.now() < until) {
+      await new Promise(resolve => setTimeout(resolve, 250))
+      alive = alive.filter(pid => harness.isProcessAlive(pid))
+    }
+    return alive
   }
 
   try {
@@ -390,7 +412,10 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     await page.keyboard.press('Enter')
     obs.kill = { streamedBeforeKill: await poll(() => page.getByTestId('assistant-message').last().textContent(), text => (text ?? '').includes(TEXTS.killStream), 'the turn-4 stream') }
     obs.kill.runningBeforeKill = (await page.getByTestId('stop').count()) > 0
-    await kill(app)
+    const descendants = (await kill(app)) ?? []
+    obs.kill.descendants = descendants.length
+    obs.kill.lingering = (await lingering(descendants, 15_000)).length
+    if (obs.kill.lingering > 0) log(`hard kill: ${obs.kill.lingering} of ${descendants.length} child process(es) still alive 15 s after the main process died`)
     app = undefined
 
     // ---- restart -------------------------------------------------------------
@@ -430,6 +455,7 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     log(`scenario stopped at ${step}: ${error instanceof Error ? error.message : String(error)}`)
   } finally {
     await kill(app).catch(() => undefined)
+    for (const pid of orphans) if (harness.isProcessAlive(pid)) await harness.killProcessTree(pid).catch(() => undefined)
     await server?.close().catch(() => undefined)
     display?.stop()
   }

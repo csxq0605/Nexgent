@@ -4,11 +4,11 @@
  * the window, the IPC round trip, the guard, navigation, the close protocol
  * and a restart after a hard kill. Linux without a display gets its own Xvfb.
  */
-import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -16,7 +16,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
 
-const APP_DIR = fileURLToPath(new URL('..', import.meta.url))
+// No trailing separator: on Windows a trailing backslash escapes the closing quote of the argument.
+const APP_DIR = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const RENDERER = fileURLToPath(new URL('./fixtures/renderer', import.meta.url))
 const SCRIPTED_SDK = fileURLToPath(new URL('./fixtures/scripted-sdk.mjs', import.meta.url))
 const ELECTRON_BIN = createRequire(import.meta.url)('electron') as unknown as string
@@ -73,8 +74,15 @@ async function launch(home: string, options: LaunchOptions = {}): Promise<{ app:
   return { app, page, consoleErrors }
 }
 
+// The long path: on Windows tmpdir() can be an 8.3 short path, and the app reports canonical ones.
 function newHome(): string {
-  return mkdtempSync(join(tmpdir(), 'nexgent-desktop-e2e-'))
+  return realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-desktop-e2e-')))
+}
+
+/** Hard-kill the app as a crash would. Windows: the whole tree (`taskkill /T /F`); the app's child processes otherwise outlive it and the restart is refused as a second instance. */
+function hardKill(pid: number): void {
+  if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true })
+  else process.kill(pid, 'SIGKILL')
 }
 
 function readLog(home: string): string {
@@ -296,7 +304,7 @@ describe('desktop app (Electron)', () => {
       const { app, page } = await launch(home, { realSdk: true })
       try {
         const asked: string[] = []
-        await app.evaluate(({ dialog }, dir) => {
+        await app.evaluate(({ dialog }, { dir, files }) => {
           const seen: string[] = []
           ;(globalThis as { pickerCalls?: string[] }).pickerCalls = seen
           dialog.showOpenDialog = (async (...args: unknown[]) => {
@@ -304,9 +312,9 @@ describe('desktop app (Electron)', () => {
             seen.push(options.properties.join(','))
             return options.properties.includes('openDirectory')
               ? { canceled: false, filePaths: [dir] }
-              : { canceled: false, filePaths: [`${dir}/a.csv`, `${dir}/b.csv`] }
+              : { canceled: false, filePaths: files }
           }) as typeof dialog.showOpenDialog
-        }, join(home, 'chosen'))
+        }, { dir: join(home, 'chosen'), files: [join(home, 'chosen', 'a.csv'), join(home, 'chosen', 'b.csv')] })
         expect(await page.evaluate(() => window.nexgent.pickDirectory())).toBe(join(home, 'chosen'))
         expect(await page.evaluate(() => window.nexgent.pickFiles())).toEqual([join(home, 'chosen', 'a.csv'), join(home, 'chosen', 'b.csv')])
         asked.push(...(await app.evaluate(() => (globalThis as { pickerCalls?: string[] }).pickerCalls!)))
@@ -394,7 +402,7 @@ describe('desktop app (Electron)', () => {
       const first = await launch(home)
       const pid = first.app.process().pid!
       const killed = new Promise<void>((resolve) => first.app.process().once('exit', () => resolve()))
-      process.kill(pid, 'SIGKILL')
+      hardKill(pid)
       await killed
 
       const second = await launch(home)
@@ -440,7 +448,7 @@ describe('desktop app (Electron)', () => {
       }
       // Hard kill while the session is open (its lock file names the dead process).
       const killed = new Promise<void>((resolve) => first.app.process().once('exit', () => resolve()))
-      process.kill(first.app.process().pid!, 'SIGKILL')
+      hardKill(first.app.process().pid!)
       await killed
 
       const second = await launch(home, { realSdk: true })

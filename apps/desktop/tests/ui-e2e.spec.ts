@@ -10,11 +10,11 @@
  *
  * Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots of the main views.
  */
-import { spawn, type ChildProcess } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { scriptedModelServer, type MessagesRequestBody, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
@@ -25,8 +25,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 declare const window: any
 declare const document: any
 
-const APP_DIR = fileURLToPath(new URL('..', import.meta.url))
+// No trailing separator: on Windows a trailing backslash escapes the closing quote of the argument.
+const APP_DIR = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const XLSX = fileURLToPath(new URL('../../../packages/skill/tests/fixtures/orders.xlsx', import.meta.url))
+/** Hard-kill the app as a crash would. Windows: the whole tree (`taskkill /T /F`); the app's child processes otherwise outlive it and the restart is refused as a second instance. */
+function hardKill(pid: number): void {
+  if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true })
+  else process.kill(pid, 'SIGKILL')
+}
 const TIMEOUT = 60_000
 const ROOT = typeof process.getuid === 'function' && process.getuid() === 0
 const KEY = 'sk-desktop-ui-e2e-7f3a9c1d'
@@ -117,7 +123,7 @@ describe('desktop UI over the real SDK (scripted model)', () => {
   it(
     'runs materials → execute → approve → present → feedback → v2 → stop → settings → kill → restart → continue',
     async () => {
-      const base = mkdtempSync(join(tmpdir(), 'nexgent-ui-e2e-'))
+      const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-ui-e2e-')))
       const home = join(base, 'home')
       const root = join(base, 'sales')
       mkdirSync(home)
@@ -275,8 +281,9 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         await expect.poll(() => page.getByTestId('assistant-message').last().textContent(), { timeout: 20_000 }).toContain('重复订单的处理')
         expect(consoleErrors).toEqual([])
       } finally {
-        app.process().kill('SIGKILL')
-        await new Promise(resolve => app.process().once('exit', resolve).once('error', resolve))
+        const exited = new Promise(resolve => app.process().once('exit', resolve).once('error', resolve))
+        hardKill(app.process().pid!)
+        await exited
       }
 
       // ---- restart ------------------------------------------------------------
