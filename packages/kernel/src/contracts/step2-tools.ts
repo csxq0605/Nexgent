@@ -14,6 +14,8 @@ export interface Step2ToolSpec {
   readonly inputSchema: JsonSchema
   readonly effects: readonly ToolEffect[]
   readonly approval: ToolApproval
+  /** Step 3: copied into {@link ToolDefinition.selfSandboxed}. */
+  readonly selfSandboxed?: boolean
 }
 
 /** `present`: declare files as a deliverable; the host snapshots them into `.nexgent/outputs/`. */

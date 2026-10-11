@@ -284,10 +284,10 @@ describe('H15 members cannot delegate', () => {
     o['team'] = { requests: [{ phase: 'team', route: 'mate', outcome: 'completed', chunksSent: 1, sessionText: 'Member: mate (team)', text: '', tools: ['read_file', ...TEAMMATE_TOOLS] }] }
   }
 
-  it('fails today: delegated and workflow members see send_message and the team task tools', () => {
+  it('is not-implemented on the real run: no member sees a forbidden tool, but no teammate request ran', () => {
     const result = judge('H15', real, tools)
-    expect(result.status).toBe('failed')
-    expect(result.evidence).toMatch(/delegated analyst: send_message\/team_task_create\/team_task_list\/team_task_update/)
+    expect(result).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/no teammate request/) })
+    expect(result.evidence).toMatch(/requests from members \(delegated, workflow\); none sees a forbidden collaboration tool/)
   })
   it('is not-implemented once members are clean but no teammate ran; passes with a clean teammate', () => {
     expect(judge('H15', brokenObs(fixMembers), tools)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/no teammate request/) })

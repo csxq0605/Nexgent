@@ -32,7 +32,7 @@
 6. 步骤循环，每一步：
    1. 取消检查、费用上限检查（步骤 1 不变）；
    2. \* 压缩检查：有 `compactor` 且本轮还没有失败过压缩时调用 `shouldCompact(input)`；为真则 `compact(input, signal)`，成功后写 `compaction` 并按投影规则替换内存中的历史；
-   3. 步骤 3：逐次注入：调用 agent 上登记的 `beforeRequest` 注入器（kernel 接口，不是契约；`@nexgent/team` 用它在运行中的队友下一步之前投递邮件），返回的每段写一条 `user.message { source: 'inject' }` 并随本次请求发出；续接 `pause` 回复的那次请求之前不调用；注入器抛错时跳过它，写 `error`（`fatal: false`）；
+   3. 步骤 3：逐次注入：在压缩检查之后、模型请求之前，按登记顺序调用 agent 上的 `beforeRequest` 注入器（kernel 接口 `Agent.beforeRequest`，不是契约，见 §宿主接口；`@nexgent/team` 用它在运行中的队友下一步之前投递邮件），返回的每段写一条 `user.message { source: 'inject' }` 并随本次请求发出（每一步都调用，包括第 1 步，此时注入记录在用户消息之后）；续接 `pause_turn` 回复的那次请求之前不调用；注入器抛错时本次请求跳过它，写 `error`（`fatal: false`）；
    4. 模型请求，写 `assistant.message`（步骤 1 不变）；
    5. 执行工具：每个调用写（`approval.*`）→ \*（工具通过 `appendRecord` 追加的记录，如 `deliverable.presented`）→ `tool.result`；\* 每个 `tool.result` 之后调用 `files.observe(...)`。
 7. \* `ctx.tasking.files.endTurn(sessionId, turn, signal)`，写 `turn.files`（列表为空也写）。
@@ -106,13 +106,13 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | --- | --- | --- | --- | --- |
 | `delegate` | subagent | `name`、`task`、`mode?: fresh \| fork`、`preset?`、`persona?`、`materialIds?`、`files?`、`expectedOutput?` | `['read']` / `never` | 建子会话（`executionForm: delegated`），把 `task`、要读的文件与期望产出拼成成员首轮的用户消息，`materialIds` 作为该轮的资料；前台等成员这一轮结束；写 `subagent.start` / `subagent.end`；工具结果是 `MemberResult` 的文本形式（状态、最后回复、成果 id / 版本 / 文件、费用） |
 | `spawn_teammate` | team | `name`、`task`、`preset?`、`persona?`、`materialIds?`、`files?` | `['read']` / `never` | 建队友子会话（`team`），写 `team.member` 与 `subagent.start`，队友开始运行；不等待 |
-| `send_message` | team | `to`、`text` | `['read']` / `never` | 写 `team.message { state: queued }`；在收件人下一步请求前注入并写 `delivered` |
+| `send_message` | team | `to`、`text` | `['read']` / `never` | 写 `team.message { state: queued }`；收件人正在运行时，在它下一次模型请求前经 `beforeRequest` 注入并写 `delivered`；收件人空闲时唤醒它跑一轮（新的一对 `subagent.start` / `end`），邮件在那一轮开始时注入；Lead 发的邮件立即唤醒，队友之间的邮件在 Lead 下一次调用团队工具或 `wait_teammates` 时唤醒。一个队友在一个 Lead 轮次里至多运行 8 次（`MAX_RUNS_PER_LEAD_TURN`，团队包内常量），更多的邮件留到下一轮。发给 `lead` 的邮件由 `wait_teammates` 交给 Lead，或在 Lead 下一轮开始时注入 |
 | `wait_teammates` | team | `names?` | `['read']` / `never` | 等指定（默认全部活跃）队友本轮停下；返回各自的 `MemberResult` 与发给 `lead` 的邮件 |
 | `team_task_create` / `team_task_list` / `team_task_update` | team | 见契约 | `['read']` / `never` | 任务板；依赖未完成的任务不能开始 |
 | `workflow` | workflow | `script` 与 `graph` 恰给一个；`title?`、`args?` | `['read']` / `never` | 写 `workflow.start` / `phase` / `end`；每个 `agent()` 是一个 `workflow` 成员；图先保存到 `.nexgent/architectures/` 再编译执行 |
 | `run_code` | ptc | `code`、`timeoutMs?`（1–300 s，默认 60 s） | `['read','write','execute']` / `never` | 独立 Node 进程、空环境变量；文件经宿主函数按调用方沙箱检查（`permissions.md` §代码执行进程） |
 
-成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow`（`MEMBER_DENIED_TOOLS`）。
+成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow`、`send_message`、`team_task_create`、`team_task_list`、`team_task_update`（`MEMBER_DENIED_TOOLS`，即除 `run_code` 外的全部协作工具）。队友另由团队包在自己的作用域注册 `send_message`、`team_task_list`、`team_task_update`（`TEAMMATE_TOOLS`）；作用域的遮罩不隐藏同一作用域自己注册的工具，所以只有队友能看到这三个，委派对象与工作流节点看不到任何团队工具。
 
 ## 步骤 3 系统提示增量
 
@@ -148,10 +148,16 @@ kernel 的 `Agent` 在步骤 2 增加（形状由 W7 定，语义在此固定）
 
 步骤 3 增加（「kernel 维护」实现，形状在契约固定）：
 
-- `ctx.agents.create({ child: ChildAgentOptions })` 建子会话：父会话必须是本进程里打开的根会话；沙箱用 `childSandboxMode` 收窄；`mode: 'fork'` 时在 `session.start` 之后写 `fork.seed`；成员作用域上 `restrict()` 预设的 `tools` 与 `MEMBER_DENIED_TOOLS`；系统提示加成员标识行。`ctx.agents.resume(id, { child: ResumeChildOptions })` 在父会话仍打开时重开成员（队友的后续轮次）。实现落地前，传 `child` 报 `internal`。
+- `ctx.agents.create({ child: ChildAgentOptions })` 建子会话：父会话必须是本进程里打开的根会话；沙箱用 `childSandboxMode` 收窄；`mode: 'fork'` 时在 `session.start` 之后写 `fork.seed`；成员作用域上 `restrict()` 预设的 `tools` 与 `MEMBER_DENIED_TOOLS`；系统提示加成员标识行。`ctx.agents.resume(id, { child: ResumeChildOptions, preset? })` 在父会话仍打开时重开成员（队友的后续轮次）；会话头只存预设名，调用方再传一次 `preset`，成员才得到同样的人设、工具范围、effort、thinking 与 `maxSteps`，沙箱重新与父会话比较。
+- 错误：父会话不在本进程打开报 `session/not-found`；父会话本身是成员（深度 1）或一棵任务树超过 16 个成员报 `tool/denied`；不带 `child` 恢复成员会话、或 `child.parentSessionId` 不是它的父会话报 `tool/denied`；对根会话传 `child` 报 `tool/denied`。
 - 每个会话的 `AgentAttribution`（`taskId`、`memberId`、`executionForm`）写进它的每条账本记录，并经 `ToolContext.attribution` / `member` 交给工具；协作工具用 `ctx.agents.get(context.sessionId)` 找到父 Agent。
 - 父会话的轮次取消或结束时以 `parent` 取消仍在运行的成员；成员的审批请求带 `ApprovalRequest.member`。
-- `KernelToolContext.appendRecord` 与宿主写记录的方法按步骤 3 的 `ToolRecordType` / `HostRecordType` 放宽（实现落地前仍只接受步骤 2 的类型）。
+- `KernelToolContext.appendRecord` 与宿主写记录的方法按步骤 3 的 `ToolRecordType` / `HostRecordType` 放宽，只接受契约白名单里的类型。轮次之间写的 `subagent.end` / `workflow.end`（例如成员在父会话轮次结束的宽限期之后才收尾）带它所属的那一轮的 `turn`，可能小于父会话当前的轮号。
+- `project` 范围的审批授权由整棵任务树共享：用户在成员的提示里选 `project`，主对话与其他成员此后也按它放行；`session` 范围只属于提出请求的那个会话。
+- `Agent.beforeRequest(injector: StepInjector): () => void` 登记逐请求注入器，返回值用来注销。`StepInjector` 收到 `StepInjectionInput { sessionId, turn, step, signal }`（`step` 从 1 起，是紧接着要发的那次请求），返回字符串数组（可为 Promise）；每段写一条 `user.message { source: 'inject' }`。调用时机与出错规则见 §轮次流程第 6.3 步。注入器不跨进程，宿主在恢复会话后要重新登记。
+- `Agent.holdTurn(work: Promise<unknown>)` 让正在运行的轮次等 `work` 落定再结束，协作包借此把成员运行的 `subagent.end` 写在它所属的轮次里。轮次的循环结束后，agent 以 `parent` 取消仍在运行的成员，并最多等 `toolAbortGraceMs` 再写 `turn.end`。没有运行中的轮次时调用报 `internal`。
+- `ToolRegistryService.inherit(parent: ToolScope): () => void`：成员作用域此后服从 `parent` 作用域现在与以后的全部 `restrict()`，所以成员在继承来的工具里最多看到父会话看得到的；各作用域自己注册的工具仍然私有。只能在有作用域的（agent）上下文调用，不能继承自己，否则报 `config/invalid`。
+- `JsonlLedger.setStamp(stamp | undefined)`（`@nexgent/session`）：设置或清除写入前加上的归属戳，让 agent 循环以外的写入方（SDK 写的 `task.outcome`、压缩器的辅助请求）也带上该会话打开的 agent 的 `taskId`、`memberId`、`executionForm`。
 
 ## 测试
 

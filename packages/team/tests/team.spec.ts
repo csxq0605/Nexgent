@@ -328,12 +328,14 @@ describe('team: what members see', () => {
     const mateTools = toolsOf('mate')
     expect(mateTools).toEqual(expect.arrayContaining(['send_message', 'team_task_list', 'team_task_update']))
     for (const denied of ['spawn_teammate', 'wait_teammates', 'delegate']) expect(mateTools).not.toContain(denied)
-    expect(toolsOf('helper')).not.toContain('spawn_teammate')
+    // MEMBER_DENIED_TOOLS hides every team tool from a delegated member; only a teammate's own scope registers them
+    const helperTools = toolsOf('helper')
+    for (const denied of ['spawn_teammate', 'send_message', 'team_task_create', 'team_task_list', 'team_task_update']) expect(helperTools).not.toContain(denied)
     const leadRecords = await records(lead.sessionId)
     const helperId = of(leadRecords, 'subagent.start').find(r => r.name === 'helper')!.childSessionId
     const refused = resultOf(await records(helperId), 'h1')
     expect(refused).toMatchObject({ isError: true })
-    expect(refused.content).toMatch(/delegated member is not on a team/)
+    expect(refused.content).toMatch(/unknown tool "send_message"/)
     expect(of(leadRecords, 'team.message')).toEqual([])
     await lead.close()
   })

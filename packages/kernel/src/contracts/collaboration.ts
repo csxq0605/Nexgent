@@ -368,8 +368,24 @@ export const COLLABORATION_LIMITS = {
   maxGraphNodes: 16,
 } as const
 
-/** Tools that start members; hidden from every child session (depth 1). */
-export const MEMBER_DENIED_TOOLS = ['delegate', 'spawn_teammate', 'wait_teammates', 'workflow'] as const
+/**
+ * Collaboration tools hidden from every child session: the tools that start
+ * members (depth 1) and the Lead's globally registered team tools. A
+ * teammate still sees its own `send_message`, `team_task_list` and
+ * `team_task_update`, because the team package registers those in the
+ * teammate's own scope and a scope's mask never hides tools that scope
+ * registered itself (`ToolRegistry`).
+ */
+export const MEMBER_DENIED_TOOLS = [
+  'delegate',
+  'spawn_teammate',
+  'wait_teammates',
+  'workflow',
+  'send_message',
+  'team_task_create',
+  'team_task_list',
+  'team_task_update',
+] as const
 
-/** Team tools a teammate keeps (the Lead has them too). */
+/** Team tools a teammate gets in its own scope (the Lead has them too, registered globally). */
 export const TEAMMATE_TOOLS = ['send_message', 'team_task_list', 'team_task_update'] as const
