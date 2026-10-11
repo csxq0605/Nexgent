@@ -104,8 +104,8 @@
 
 | DSH 包组 / 具体包 | Nexgent 包 | 处理 | 归属步骤 | 备注 |
 | --- | --- | --- | --- | --- |
-| `subagent/subagent`、`subagent-spawn-in-process`、`subagent-fork-in-process`、`subagent-in-process-driver` | `@nexgent/subagent` | 改写 | 3 | 只要 fresh / fork 两种 |
-| `subagent/tool-subagent`、`subagent/tool-subagent-control` | `@nexgent/subagent` | 改写 | 3 | 委派形态的工具 |
+| `subagent/subagent`、`subagent-spawn-in-process`、`subagent-fork-in-process`、`subagent-in-process-driver` | `@nexgent/subagent` | 改写 | 3 | 只要 fresh / fork 两种；步骤 3 未复制文件，只参考设计（子会话由 kernel `ctx.agents.create({ child })` 建，运行器在 `src/runner.ts`） |
+| `subagent/tool-subagent`、`subagent/tool-subagent-control` | `@nexgent/subagent` | 改写 | 3 | 委派形态的工具；步骤 3 只取前台一次性部分，未复制文件（`src/delegate-tool.ts` 自写） |
 | `subagent/subagent-claude-code`、`subagent-codex`、`subagent-acp`、`subagent-dsh-sdk` | — | 不要 | — | 外部 provider |
 | `experimental/agent-team`、`experimental/agent-team-profile` | `@nexgent/team` | 改写 | 3 | Lead + 具名队友 + 持久邮箱 + 任务板；去掉 experimental 兼容层，持久化语义用 Nexgent 测试固定 |
 | `experimental/tool-agent-team` | `@nexgent/team` | 改写 | 3 | 九个团队工具 |
@@ -115,7 +115,7 @@
 | `workflow/tool-ralph` | — | 不要 | — | |
 | `ptc-runtime/ptc-runtime`、`ptc-runtime/ptc-runtime-node` | `@nexgent/ptc` | 改写 | 3 | 模型写程序调用宿主函数；Node 后端 |
 | `experimental/ptc-runtime-python` | — | 不要 | — | 需要 CPython 时再参考 |
-| `preset/agent-preset`、`preset/persona` | `@nexgent/preset` | 改写 | 3 | 预设与人设；组织角色、团队模板（JSON）迁入 |
+| `preset/agent-preset`、`preset/persona` | `@nexgent/preset` | 改写 | 3 | 预设与人设；组织角色、团队模板（JSON）迁入；步骤 3 未复制文件，只参考设计（内置三份与项目 `.nexgent/presets/*.json`） |
 | `preset/agent-preset-registry` | `@nexgent/preset` | 改写 | 3、4 | 步骤 4 的能力版本把预设注入 profile |
 | `skill/skill-filesystem` | `@nexgent/skill` | 改写 | 3 | SKILL.md 目录发现，替代 Python 技能编译器；步骤 3 只补用户目录 `~/.nexgent/skills/`（只参考设计，无复制件） |
 | `mcp/mcp-client`、`mcp/mcp-resources` | `@nexgent/mcp` | 改写 | 3（按需） | 只在有真实需求时实现 |
