@@ -33,6 +33,12 @@ export {
   scriptedModelServer,
   toWireUsage,
 } from './server.js'
+export {
+  type RouteKey,
+  type ScriptRouting,
+  llmSessionText,
+  routeByText,
+} from './routing.js'
 export * from './acceptance.js'
 export {
   type RequestEntry,
@@ -41,4 +47,5 @@ export {
   failCompaction,
   isAuxiliaryRequest,
   requestText,
+  sessionText,
 } from './requests.js'

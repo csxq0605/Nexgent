@@ -31,6 +31,18 @@ export function requestText(body: MessagesRequestBody | undefined): string {
 }
 
 /**
+ * The part of a request that identifies its session: the system prompt and
+ * the first user message (text blocks only). Use it as the `text` of
+ * `routeByText` so a lead whose later turns quote a member's name is not
+ * routed to that member.
+ */
+export function sessionText(body: MessagesRequestBody | undefined): string {
+  if (body === undefined) return ''
+  const firstUser = body.messages?.find((m) => m.role === 'user')
+  return requestText({ system: body.system, messages: firstUser === undefined ? [] : [firstUser] })
+}
+
+/**
  * Whether this is an auxiliary request (the compaction summary request): it
  * carries no tools (docs/spec/agent-hooks.md §压缩: “不带工具”).
  */

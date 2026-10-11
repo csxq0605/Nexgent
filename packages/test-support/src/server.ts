@@ -20,6 +20,7 @@ import {
   type ScriptedTurn,
   type ScriptedUsage,
 } from './script.js'
+import { RoutedQueues, type ScriptRouting } from './routing.js'
 
 /** The parsed JSON body of a Messages API request (loosely typed: tests assert on it). */
 export interface MessagesRequestBody {
@@ -60,6 +61,8 @@ export interface RecordedModelRequest {
   readonly body: MessagesRequestBody | undefined
   /** Raw body text. */
   readonly rawBody: string
+  /** Route key that answered this request; absent for the default script. */
+  readonly route?: string
   /** SSE events written so far. */
   chunksSent: number
   /** Server-side outcome; `pending` while the response is still open. */
@@ -67,8 +70,8 @@ export interface RecordedModelRequest {
 }
 
 /** Options for {@link scriptedModelServer}. */
-export interface ScriptedModelServerOptions {
-  /** Replies in order, one per `/v1/messages` request. */
+export interface ScriptedModelServerOptions extends ScriptRouting<MessagesRequestBody> {
+  /** Replies in order, one per `/v1/messages` request (the default queue when `routes` is set). */
   readonly script?: readonly ScriptEntry<MessagesRequestBody>[]
   /** Port to listen on; `0` (default) picks a free port. */
   readonly port?: number
@@ -86,13 +89,17 @@ export interface ScriptedModelServer {
   readonly port: number
   /** `/v1/messages` requests received so far, in order. */
   readonly requests: readonly RecordedModelRequest[]
-  /** Script entries not yet consumed. */
+  /** Script entries not yet consumed, over all queues. */
   readonly remaining: number
-  /** Append entries to the script. */
+  /** Entries left per queue; the default script is under `''`. */
+  remainingByRoute(): Record<string, number>
+  /** Append entries to the default script. */
   push(...entries: ScriptEntry<MessagesRequestBody>[]): void
+  /** Append entries to a route's queue (requires `routeKey`). */
+  pushTo(route: string, ...entries: ScriptEntry<MessagesRequestBody>[]): void
   /** Resolve once at least `count` requests have arrived (rejects after `timeoutMs`, default 5000). */
   waitForRequests(count: number, timeoutMs?: number): Promise<readonly RecordedModelRequest[]>
-  /** Throw if any script entry is still unconsumed. */
+  /** Throw if any script entry is still unconsumed (names the queues). */
   assertConsumed(): void
   /** Destroy open connections (including stalled ones) and stop listening. */
   close(): Promise<void>
@@ -267,10 +274,14 @@ function errorBody(type: string, message: string): Record<string, unknown> {
  * / `content_block_delta`* / `content_block_stop`, `message_delta`,
  * `message_stop`); otherwise one `message` JSON body. Other paths get 404
  * and consume nothing. An exhausted script answers 500.
+ *
+ * With `routes` and `routeKey`, each request is answered from the queue of
+ * its route key (the default script when the key is unknown or absent), so
+ * concurrent sessions each replay their own script in order.
  * @param options - script, port and pacing.
  */
 export async function scriptedModelServer(options: ScriptedModelServerOptions = {}): Promise<ScriptedModelServer> {
-  const queue = [...(options.script ?? [])]
+  const queues = new RoutedQueues<MessagesRequestBody>('scriptedModelServer', options.script ?? [], options)
   const requests: RecordedModelRequest[] = []
   const sockets = new Set<Socket>()
   const waiters = new Set<() => void>()
@@ -290,7 +301,9 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
     } catch {
       body = undefined
     }
+    const route = queues.routeOf(body ?? {})
     const record: RecordedModelRequest = {
+      ...route === undefined ? {} : { route },
       index: requests.length,
       method: req.method,
       path,
@@ -310,10 +323,11 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
       if (record.outcome === 'pending') record.outcome = 'client-closed'
     })
 
-    const entry = queue.shift()
+    const entry = queues.shift(route)
     if (entry === undefined) {
       record.outcome = 'exhausted'
-      sendJson(res, 500, errorBody('script_exhausted', `scriptedModelServer: script exhausted at request #${record.index + 1}`))
+      const where = route === undefined ? 'script' : `script for route "${route}"`
+      sendJson(res, 500, errorBody('script_exhausted', `scriptedModelServer: ${where} exhausted at request #${record.index + 1}`))
       return
     }
     const turn = resolveEntry(entry, body ?? {}, record.index)
@@ -416,11 +430,11 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
     baseUrl: `http://${urlHost}:${port}`,
     port,
     get requests() { return requests },
-    get remaining() { return queue.length },
-    push(...entries) { queue.push(...entries) },
-    assertConsumed() {
-      if (queue.length > 0) throw new Error(`scriptedModelServer: ${queue.length} script entr${queue.length === 1 ? 'y' : 'ies'} not consumed`)
-    },
+    get remaining() { return queues.remaining },
+    remainingByRoute() { return queues.remainingByRoute() },
+    push(...entries) { queues.push(entries) },
+    pushTo(route, ...entries) { queues.pushTo(route, entries) },
+    assertConsumed() { queues.assertConsumed() },
     waitForRequests(count, timeoutMs = 5000) {
       if (requests.length >= count) return Promise.resolve(requests)
       return new Promise((resolve, reject) => {
