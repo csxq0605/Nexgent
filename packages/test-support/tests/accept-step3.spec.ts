@@ -27,8 +27,8 @@ const plan = fileURLToPath(new URL('../../../docs/plan/step-3-work-partition.md'
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
-/** The judges and step-2 regression items wired so far; everything else must report not-implemented. */
-const WIRED = new Set([...range('H', 1, 23), ...range('D', 1, 14)])
+/** Every judged item; R08 (optional, Windows) has no judge and must report not-implemented. */
+const WIRED = new Set([...range('H', 1, 23), ...range('D', 1, 14), ...range('R', 1, 7)])
 
 describe('accept-step3 checklist', () => {
   it('has every item of the step-3 plan in order, plus the D01–D10 regression', async () => {
@@ -115,13 +115,13 @@ describe('H23 judge (no Python on trunk)', () => {
 })
 
 describe('real-layer prerequisites', () => {
-  it('without a key, over budget, or (for now) unwired: never runnable, never returns the key', () => {
+  it('without a key or over budget: not runnable; with both: runnable, never returns the key', () => {
     expect(realPrerequisites({}, 15, [])).toEqual({ ok: false, reason: 'no API key (NEXGENT_API_KEY or ANTHROPIC_API_KEY is not set)' })
     expect(realPrerequisites({ NEXGENT_API_KEY: 'sk-secret-xyz' }, 15, [10, 5])).toMatchObject({ ok: false, reason: expect.stringMatching(/reached the 15 USD cap/) })
     expect(realPrerequisites({ NEXGENT_API_KEY: 'sk-secret-xyz' }, 15, ['unknown'])).toMatchObject({ ok: false, reason: expect.stringMatching(/unknown cost/) })
-    const unwired = realPrerequisites({ NEXGENT_API_KEY: 'sk-secret-xyz' }, 15, [1.26])
-    expect(unwired).toMatchObject({ ok: false, reason: expect.stringMatching(/NEXGENT_API_KEY, 13\.74 USD left, .*not wired yet/) })
-    expect(JSON.stringify(unwired)).not.toContain('sk-secret-xyz')
+    const ready = realPrerequisites({ NEXGENT_API_KEY: 'sk-secret-xyz' }, 15, [1.26])
+    expect(ready).toEqual({ ok: true, keySource: 'NEXGENT_API_KEY', remainingUsd: 13.74 })
+    expect(JSON.stringify(ready)).not.toContain('sk-secret-xyz')
   })
 })
 
@@ -160,12 +160,14 @@ describe('scripts/accept-step3.mjs (requires `pnpm build`)', () => {
     expect(summary?.realModel).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', callCount: 0, result: 'fail' })
   }, 90_000)
 
-  it('real layer with a key: still exit 2 until wired, and the key value is never written', async () => {
+  it('real layer against a loopback stand-in: runs, is never real-model evidence (exit 1), and the key value is never written', async () => {
     const key = 'sk-ant-accept3-test-value'
-    const { result, raw } = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: key, NEXGENT_API_BASE_URL: 'http://127.0.0.1:9' })
-    expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
-    expect(result.stderr).toContain('not wired yet')
-    expect(raw).not.toBe('')
+    const { result, summary, raw } = await runScript(['--layer', 'real', '--only', 'R01'], { NEXGENT_API_KEY: key, NEXGENT_API_BASE_URL: 'http://127.0.0.1:9' })
+    expect(result.status, result.stderr).toBe(EXIT_FAIL)
+    expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
+    expect(summary?.checks.map(check => check.id)).toEqual(range('R', 1, 7))
+    for (const check of summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'failed' })
+    expect(summary?.realModel).toMatchObject({ result: 'fail', runNote: expect.stringContaining('NOT a real-model run') })
     expect(raw + result.stderr + result.stdout).not.toContain(key)
   }, 90_000)
 

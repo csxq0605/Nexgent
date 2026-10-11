@@ -1,9 +1,10 @@
 name: Windows acceptance
 
-# Step-2 acceptance on Windows (user 2026-10-11: CI must not run on its own;
-# run Windows before merging into main): accept-step2 headless and desktop
-# layers, the desktop package's tests (UI e2e included) and, when asked, the
-# real-model layer (R06: R01–R05 on Windows with pwsh as the shell tool).
+# Step-3 acceptance on Windows (user 2026-10-11: CI must not run on its own;
+# run Windows before merging into main): accept-step3 headless and desktop
+# layers (D01–D10 are step 2's desktop items as a regression), the desktop
+# package's tests (UI e2e included) and, when asked, the real-model layer
+# (R08: the step-3 real runs on Windows with pwsh as the shell tool).
 # Manual only, from the Actions tab. The real-model step reads the repository
 # secret NEXGENT_API_KEY; without it the script exits 2 and the step fails
 # rather than reporting a pass. Uploads the summaries and the real run's
@@ -12,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       real:
-        description: Also run the real-model layer (costs about 0.2 USD)
+        description: Also run the real-model layer (five runs, about 0.7 USD)
         type: boolean
         default: false
       spent_usd:
@@ -28,7 +29,7 @@ jobs:
   windows:
     name: windows-latest
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     defaults:
       run:
         shell: bash
@@ -53,12 +54,12 @@ jobs:
       - run: pnpm build
         timeout-minutes: 10
 
-      - name: accept-step2 headless + desktop
+      - name: accept-step3 headless + desktop
         id: hd
-        timeout-minutes: 15
+        timeout-minutes: 25
         env:
           DEBUG: pw:browser
-        run: node scripts/accept-step2.mjs --out accept-step2-hd.json
+        run: node scripts/accept-step3.mjs --out accept-step3-hd.json
       - name: desktop package tests (UI e2e)
         id: desktop
         timeout-minutes: 15
@@ -66,21 +67,21 @@ jobs:
         env:
           DEBUG: pw:browser
         run: pnpm --filter @nexgent/desktop exec vitest run --testTimeout=60000
-      - name: accept-step2 real (R01–R07, R06 on Windows)
+      - name: accept-step3 real (R01–R07 on Windows, i.e. R08)
         id: real
-        timeout-minutes: 15
+        timeout-minutes: 30
         if: always() && steps.hd.conclusion != 'skipped' && inputs.real
         env:
           NEXGENT_API_KEY: ${{ secrets.NEXGENT_API_KEY }}
           SPENT_USD: ${{ inputs.spent_usd }}
         run: |
           node -e "const v=(process.env.SPENT_USD||'').split(',').map(s=>s.trim()).filter(Boolean).map(Number); if(v.some(n=>!(n>=0))) throw new Error('spent_usd must be comma-separated numbers'); require('fs').writeFileSync('spent.json', JSON.stringify(v))"
-          node scripts/accept-step2.mjs --layer real --budget-usd 15 --spent spent.json --work-dir "$RUNNER_TEMP/real" --out accept-step2-real.json
+          node scripts/accept-step3.mjs --layer real --budget-usd 15 --spent spent.json --work-dir "$RUNNER_TEMP/real" --out accept-step3-real.json
 
       - name: print summaries
         if: always()
         run: |
-          for f in accept-step2-hd.json accept-step2-real.json; do
+          for f in accept-step3-hd.json accept-step3-real.json; do
             [ -f "$f" ] && node -e "const s=require('./'+process.argv[1]); console.log(process.argv[1], s.result); for (const c of s.checks) console.log(c.id, c.status, String(c.detail ?? '').slice(0, 300)); console.log(JSON.stringify({realModel: s.realModel, failures: s.failures}))" "$f"
           done
       - uses: actions/upload-artifact@v4
@@ -88,7 +89,7 @@ jobs:
         with:
           name: windows-accept
           path: |
-            accept-step2-hd.json
-            accept-step2-real.json
+            accept-step3-hd.json
+            accept-step3-real.json
             ${{ runner.temp }}/real/real
           if-no-files-found: ignore
