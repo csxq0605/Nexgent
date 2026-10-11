@@ -262,11 +262,18 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     obs.project = { created: true, config: JSON.parse(await readFile(join(root, '.nexgent', 'config.json'), 'utf8')) }
 
     step = 'D03 add materials'
-    for (const file of [csv, xlsx]) {
-      await page.getByTestId('material-path').fill(file)
-      await page.getByTestId('add-material').click()
-    }
+    // The native file dialog is stubbed in the main process: it returns both files at once.
+    await app.evaluate(({ dialog }, files) => {
+      const calls = []
+      globalThis.acceptDialogCalls = calls
+      dialog.showOpenDialog = async (...args) => {
+        calls.push(args.at(-1)?.properties ?? [])
+        return { canceled: false, filePaths: files }
+      }
+    }, [csv, xlsx])
+    await page.getByTestId('materials-panel').locator('button.primary.full').click()
     obs.materials = {
+      dialogCalls: await poll(() => app.evaluate(() => globalThis.acceptDialogCalls), calls => calls.length >= 1, 'the file dialog'),
       count: await poll(() => page.getByTestId('material-item').count(), n => n === 2, 'two material items'),
       listText: await page.getByTestId('material-list').textContent(),
       onDisk: (await readdir(join(root, '.nexgent', 'materials'))).length,

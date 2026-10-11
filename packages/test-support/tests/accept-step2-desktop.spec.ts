@@ -52,6 +52,7 @@ describe('accept-step2 D judges', () => {
     ['D02', 'the project does not reopen after restart', obs => { delete obs.restart }],
     ['D02', 'the project is missing from the recent list', obs => { obs.restart.recent = [] }],
     ['D03', 'only one material shows', obs => { obs.materials.count = 1 }],
+    ['D03', 'the file dialog was never opened', obs => { obs.materials.dialogCalls = [] }],
     ['D04', 'the text only appeared when complete', obs => { obs.stream.partialText = '我先写一份按地区的汇总。' }],
     ['D04', 'no tool blocks', obs => { obs.stream.toolBlocksDuringTurn = 0 }],
     ['D05', 'no approval dialog', obs => { delete obs.approval.dialogShown }],

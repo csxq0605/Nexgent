@@ -17,6 +17,8 @@ const ISOLATION = {
   allowRunningInsecureContent: false,
   webviewTag: false,
 }
+/** `window.nexgent` members (apps/desktop/src/preload/index.cts); no token, no ipcRenderer. */
+const BRIDGE_KEYS = ['invoke', 'onEvent', 'pickDirectory', 'pickFiles', 'platform']
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const denied = (result, check) => result?.ok === false && result?.error?.code === 'approval/denied' && result?.error?.details?.check === check
 
@@ -37,10 +39,10 @@ export const DESKTOP_JUDGES = {
       [w.prefs !== undefined && wrongPrefs.length === 0, `webPreferences isolated (${wrongPrefs.join(', ') || 'not read'})`],
       [w.spellcheck === false, 'spellchecker off'],
       [same(w.pageGlobals, ['undefined', 'undefined']), `page has no require / process (got ${JSON.stringify(w.pageGlobals)})`],
-      [same(w.bridgeKeys, ['invoke', 'onEvent', 'platform']), `bridge exposes only invoke, onEvent, platform (got ${JSON.stringify(w.bridgeKeys)})`],
+      [same(w.bridgeKeys, BRIDGE_KEYS), `bridge exposes only ${BRIDGE_KEYS.join(', ')} (got ${JSON.stringify(w.bridgeKeys)})`],
       [obs.restart?.reopened === true, 'the scenario reached the second launch (console watched in both runs)'],
       [errors.length === 0, `no renderer console errors (got ${errors.slice(0, 3).join(' | ')})`],
-    ], 'window app://nexgent/index.html, isolated webPreferences, no Node in the page, bridge of three members, no console errors in either launch')
+    ], 'window app://nexgent/index.html, isolated webPreferences, no Node in the page, bridge without token or ipcRenderer, no console errors in either launch')
   },
 
   D02(obs) {
@@ -54,10 +56,11 @@ export const DESKTOP_JUDGES = {
   D03(obs) {
     const m = obs.materials ?? {}
     return verdict([
+      [m.dialogCalls?.length === 1 && (m.dialogCalls[0] ?? []).includes('multiSelections'), `added through one (stubbed) multi-select file dialog (got ${JSON.stringify(m.dialogCalls)})`],
       [m.count === 2, `two material items in the right column (got ${m.count})`],
       [String(m.listText ?? '').includes('orders.csv') && String(m.listText ?? '').includes('regions.xlsx'), 'the list names orders.csv and regions.xlsx'],
       [m.onDisk === 2, `two material directories under .nexgent/materials (got ${m.onDisk})`],
-    ], 'two materials (.csv, .xlsx) added; right column and .nexgent/materials both show two (added by path: the app has no file dialog yet)')
+    ], 'two materials (.csv, .xlsx) added through the stubbed file dialog; right column and .nexgent/materials both show two')
   },
 
   D04(obs) {
