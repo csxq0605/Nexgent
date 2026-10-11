@@ -21,7 +21,7 @@ ADR 0002 把执行时的默认值定为 `thinking: 'off'`，即发送 Claude Son
 
 ## 后果
 
-- **代码改动由「kernel 维护」（W7）完成**：`packages/kernel/src/contracts/config.ts` 的 `DEFAULT_PROJECT_CONFIG.thinking`、CLI `--help` 文本、包 README、写死了 `'off'` 的测试与夹具（例如 `packages/kernel/tests/contracts/contracts.spec.ts` 对默认值的断言）。本 ADR 与 `data-formats.md` 先写定，代码在 W7 的 PR 合入后与之一致；两者之间的短暂不一致以规范为准（`data-formats.md` 开头的约定）。
+- **代码改动**：`DEFAULT_PROJECT_CONFIG.thinking`、CLI `--help`、包 README 与相关测试已由「kernel 维护」（W7）在 PR #8 中改为 `'on'`；本 ADR 与 `data-formats.md` 记录这一决定。
 - **费用**：thinking 开启后输出 token 增加（含思考内容）。步骤 2 的真实模型预算按开启估算（分工表“预估费用”：一次运行约 1–1.5 美元，上限 15 美元）。
 - **验收**：步骤 2 真实模型层的 R03 检查 thinking 开启时会话含 thinking 块、恢复后的续聊请求被 API 接受（无 400）。
 - **不做**：不新增 thinking 预算（`budget_tokens`）配置；不对辅助请求（压缩摘要）单独设 thinking，辅助请求沿用项目配置。

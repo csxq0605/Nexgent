@@ -1,6 +1,5 @@
 /**
- * Model-facing definitions of the step-2 tools and the step-2 additions to
- * the system prompt. Names and input schemas are frozen here so that the
+ * Model-facing definitions of the step-2 tools. Names and input schemas are frozen here so that the
  * packages implementing them (`@nexgent/tasking` for `present`,
  * `@nexgent/skill` for `load_skill` and `read_document`), the scripted
  * provider scenarios and `accept-step2` agree. Descriptions may be reworded by
@@ -99,19 +98,3 @@ export interface ReadDocumentToolInput {
 
 /** Every step-2 tool spec. */
 export const STEP2_TOOLS: readonly Step2ToolSpec[] = [PRESENT_TOOL, LOAD_SKILL_TOOL, READ_DOCUMENT_TOOL]
-
-/**
- * The step-2 system-prompt section (`docs/spec/agent-hooks.md` §系统提示增量).
- * The kernel renders it as its own `# Working with files and deliverables`
- * section after `# Environment`; the bullet about `present` is included only
- * when the `present` tool is visible.
- */
-export const STEP2_PROMPT_GUIDANCE = {
-  title: 'Working with files and deliverables',
-  editing: [
-    '- To change an existing file, use `str_replace` with a unique snippet of the current text; rewrite a whole file with `write_file` only when most of it changes. Do not edit files through shell commands (sed, echo >, Set-Content) when a file tool can do it.',
-    '- Read a file before editing it, and re-read the part you changed when the result matters.',
-    '- Materials the user attached are under `.nexgent/materials/` and are read-only: read them, never modify them; write results into the project.',
-  ],
-  present: '- When a result is ready for the user, call `present` with the files that make it up and a one-sentence summary. After feedback on a deliverable, update the same files and call `present` again with its `deliverableId` so a new version is recorded. Do not claim a deliverable is ready without presenting it.',
-} as const

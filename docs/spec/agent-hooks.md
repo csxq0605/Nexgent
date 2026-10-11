@@ -1,6 +1,6 @@
 # agent loop 挂点、步骤 2 工具与系统提示增量
 
-> 步骤 2 第 1 轮由 W0（「步骤二契约」）冻结。类型镜像：`packages/kernel/src/contracts/context.ts`、`tasking.ts`、`skill.ts`、`step2-tools.ts`，以及 `session.ts` 的步骤 2 记录与 `tools.ts` 的 `ToolContext.appendRecord`。挂点的实现归「kernel 维护」（W7）；提供者与工具的实现归 W1（`@nexgent/context`）、W2（`@nexgent/tasking`）、W3（`@nexgent/skill`）。冻结后的修改走契约修改 PR，并在 PR 描述里点名受影响的包。记录格式以 `data-formats.md` 为准，权限以 `permissions.md` 为准。
+> 步骤 2 第 1 轮由 W0（「步骤二契约」）冻结。类型镜像：`packages/kernel/src/contracts/context.ts`、`tasking.ts`、`skill.ts`、`step2-tools.ts`（工具名与参数），以及 `session.ts` 的步骤 2 记录与 `tools.ts` 的 `ToolContext.appendRecord`。挂点的实现归「kernel 维护」（W7）；提供者与工具的实现归 W1（`@nexgent/context`）、W2（`@nexgent/tasking`）、W3（`@nexgent/skill`）。冻结后的修改走契约修改 PR，并在 PR 描述里点名受影响的包。记录格式以 `data-formats.md` 为准，权限以 `permissions.md` 为准。
 
 ## 目的与范围
 
@@ -66,21 +66,23 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 每次请求的系统提示按以下顺序拼接，节之间空一行；同一轮内各次请求的系统提示逐字节相同（缓存前缀稳定）：
 
 1. 步骤 1 的人格段与 `# Environment`（`renderSystemPrompt`，不变）；
-2. \* `# Working with files and deliverables`（见下节）；
-3. 步骤 1 的 `# Tools` 列表（不变）；
-4. \* 本轮各提供者的 `systemSections`，每节渲染为 `# <title>` + 空行 + `body`，按提供者顺序、同一提供者内按 `id` 排序；
+2. 步骤 1 的 `# Tools` 列表（不变）；
+3. \* `# Working with files`（见下节，已由 PR #8 落进 `system-prompt.ts`）；
+4. \* 本轮各提供者的 `systemSections`，每节渲染为 `# <title>` + 换行 + `body`，按提供者顺序、同一提供者内按 `id` 排序；
 5. 步骤 1 的结尾行（`suffix`）。
 
 提供者的建议内容（由各包实现，不是契约）：说明文件提供者输出 `# Project instructions`（项目根 `AGENTS.md`，没有则 `NEXGENT.md`，大小上限与截断规则写在 `@nexgent/context` 的 README）；目标提供者在有 `active` 目标时输出 `# Current goal`；技能提供者在有技能时输出 `# Skills`（名称、一行描述、触发说明，并说明用 `load_skill` 读全文）。
 
 ## 系统提示增量
 
-文本冻结在 `STEP2_PROMPT_GUIDANCE`（`packages/kernel/src/contracts/step2-tools.ts`），由 W7 渲染进 `system-prompt.ts`。标题 `# Working with files and deliverables`，内容：
+`# Working with files` 一节由 `packages/kernel/src/system-prompt.ts` 的 `fileGuidance` 生成（PR #8，W7），每一条只在对应工具可见时出现，所以提示里不会出现模型调不了的工具。必须表达的内容（措辞以代码为准，改动需同时更新本节）：
 
-- `editing` 的三条始终出现：修改已有文件优先用 `str_replace`，整体重写才用 `write_file`，不要用 shell 命令改文件；改之前先读；`.nexgent/materials/` 下的资料只读，结果写进项目。
-- `present` 一条只在 `present` 工具可见时出现：结果就绪时调用 `present` 交付，收到反馈后改同一批文件并带 `deliverableId` 再次 `present`；没有 present 的成果不能说已交付。
+1. 修改已有文件用 `str_replace`（有 `read_file` 时先读）；有 shell 工具时不要用 shell 命令（heredoc、sed、内联脚本）改文件。——已实现。
+2. 新建或整体替换文件用 `write_file`。——已实现。
+3. 结果就绪时用 `present` 声明交付，每次修订后再次声明。——已实现；**待补**（W7，随 W2 的 `present` 落地）：再次声明时带上 `deliverableId`，使之成为同一成果的新版本。
+4. **待补**（W7，随 W1 的资料注入落地）：`.nexgent/materials/` 下的资料只读，结果写进项目。
 
-这两部分对应真实模型补验的 R02（修改轮里对已有文件的修改走 `str_replace`）与链路里的 present / v2。措辞只能经契约修改 PR 改。
+前三条对应真实模型补验的 R02（修改轮里对已有文件的修改走 `str_replace`）与链路里的 present / v2。
 
 ## 步骤 2 工具
 
