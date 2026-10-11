@@ -6,7 +6,7 @@ name: Windows acceptance
 # with pwsh as the shell tool). Never runs on its own: by hand from the Actions
 # tab once this file is on the default branch, or, before that, by a push to
 # the test-and-CI branch that changes this file or .github/windows-accept.run.
-# The real-model step reads the repository secret NEXGENT_API_KEY; without it
+# The real-model step runs only while .github/windows-accept.real exists; it reads the repository secret NEXGENT_API_KEY; without it
 # the script exits 2 and the step fails rather than reporting a pass. Uploads
 # summaries and the real run's records (no key: the script reads it from the
 # environment only).
@@ -26,7 +26,7 @@ jobs:
   windows:
     name: windows-latest
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -42,27 +42,32 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        timeout-minutes: 10
       - uses: actions/cache@v4
         with:
           path: ~/AppData/Local/electron/Cache
           key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: node node_modules/electron/install.js
       - run: pnpm build
+        timeout-minutes: 10
 
       - name: accept-step2 headless + desktop
         id: hd
+        timeout-minutes: 15
         env:
           DEBUG: pw:browser
         run: node scripts/accept-step2.mjs --out accept-step2-hd.json
       - name: desktop package tests (UI e2e)
         id: desktop
+        timeout-minutes: 15
         if: always() && steps.hd.conclusion != 'skipped'
         env:
           DEBUG: pw:browser
         run: pnpm --filter @nexgent/desktop exec vitest run --testTimeout=60000
       - name: accept-step2 real (R01–R07, R06 on Windows)
         id: real
-        if: always() && steps.hd.conclusion != 'skipped'
+        timeout-minutes: 15
+        if: always() && steps.hd.conclusion != 'skipped' && hashFiles('.github/windows-accept.real') != ''
         env:
           NEXGENT_API_KEY: ${{ secrets.NEXGENT_API_KEY }}
         run: |
