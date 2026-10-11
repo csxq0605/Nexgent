@@ -323,3 +323,178 @@ export function renderSheets(sheets: readonly SheetTable[]): string {
 export function extractXlsx(data: Uint8Array, options: XlsxOptions = {}): string {
   return renderSheets(readXlsx(data, options))
 }
+
+/** How a cell's formula is stored (`<f t="…">`). */
+export type XlsxFormulaKind = 'normal' | 'shared' | 'array' | 'dataTable'
+
+/** One cell with its type, cached value and formula, as stored. */
+export interface XlsxCell {
+  /** 1-based row and column. */
+  readonly row: number
+  readonly column: number
+  /**
+   * Cached value: `number` for numeric cells (dates stay serial numbers, see
+   * `date`), `string` for shared / inline / formula strings and error codes
+   * (`#DIV/0!`, see `error`), `boolean`, or `null` when the cell has no value.
+   */
+  readonly value: number | string | boolean | null
+  /** The cached value is an error code. */
+  readonly error?: true
+  /** The cell's number format shows a date or time. */
+  readonly date?: true
+  /**
+   * Formula as stored, without the leading `=`. A shared formula's
+   * dependent cells carry `kind: 'shared'`, the group's `sharedIndex` and no
+   * `text`; the group's master cell carries the text and `ref`.
+   */
+  readonly formula?: {
+    readonly kind: XlsxFormulaKind
+    readonly text?: string
+    readonly sharedIndex?: string
+    readonly ref?: string
+  }
+}
+
+/** One worksheet as typed cells, in document order. */
+export interface XlsxSheetCells {
+  readonly name: string
+  readonly cells: readonly XlsxCell[]
+}
+
+/** A workbook as typed cells. */
+export interface XlsxWorkbookCells {
+  readonly sheets: readonly XlsxSheetCells[]
+  readonly date1904: boolean
+}
+
+function typedValue(type: string, raw: string, inline: string | undefined, context: CellContext): Pick<XlsxCell, 'value' | 'error'> {
+  switch (type) {
+    case 's': {
+      const index = Number(raw)
+      return { value: Number.isInteger(index) ? context.shared[index] ?? '' : '' }
+    }
+    case 'inlineStr':
+      return { value: inline ?? '' }
+    case 'str':
+    case 'd':
+      return { value: raw }
+    case 'e':
+      return { value: raw, error: true }
+    case 'b':
+      return { value: raw === '1' || raw.toLowerCase() === 'true' }
+    default: {
+      if (raw === '') return { value: null }
+      const number = Number(raw)
+      return { value: Number.isFinite(number) ? number : raw }
+    }
+  }
+}
+
+function readSheetCells(name: string, xml: string, context: CellContext, budget: { used: number; readonly limit: number }): XlsxSheetCells {
+  const cells: XlsxCell[] = []
+  let rowNumber = 0
+  let columnCursor = 0
+  let cell: { column: number; row: number; type: string; style: number } | undefined
+  let raw = ''
+  let inline: string | undefined
+  let formula: { kind: XlsxFormulaKind; text: string; sharedIndex?: string; ref?: string } | undefined
+  let capture: 'v' | 't' | 'f' | undefined
+
+  for (const event of scanXml(xml)) {
+    if (event.kind === 'text') {
+      if (capture === 'v') raw += event.text
+      else if (capture === 't' && inline !== undefined) inline += event.text
+      else if (capture === 'f' && formula !== undefined) formula.text += event.text
+      continue
+    }
+    const local = localName(event.name)
+    if (event.kind === 'open') {
+      if (local === 'row') {
+        const r = Number(event.attrs['r'])
+        rowNumber = Number.isInteger(r) && r > 0 ? r : rowNumber + 1
+        columnCursor = 0
+      } else if (local === 'c') {
+        const ref = event.attrs['r'] === undefined ? undefined : parseCellRef(event.attrs['r'])
+        const column = ref?.column ?? columnCursor + 1
+        columnCursor = column
+        cell = { column, row: ref?.row ?? rowNumber, type: event.attrs['t'] ?? 'n', style: Number(event.attrs['s'] ?? '0') }
+        raw = ''
+        inline = undefined
+        formula = undefined
+        if (event.selfClosing) cell = undefined
+      } else if (local === 'v' && cell !== undefined) {
+        capture = event.selfClosing ? undefined : 'v'
+      } else if (local === 'f' && cell !== undefined) {
+        const t = event.attrs['t']
+        const kind: XlsxFormulaKind = t === 'shared' ? 'shared' : t === 'array' ? 'array' : t === 'dataTable' ? 'dataTable' : 'normal'
+        formula = {
+          kind,
+          text: '',
+          ...(event.attrs['si'] === undefined ? {} : { sharedIndex: event.attrs['si'] }),
+          ...(event.attrs['ref'] === undefined ? {} : { ref: event.attrs['ref'] }),
+        }
+        capture = event.selfClosing ? undefined : 'f'
+      } else if (local === 'is' && cell !== undefined) {
+        inline = ''
+      } else if (local === 't' && inline !== undefined) {
+        capture = event.selfClosing ? undefined : 't'
+      }
+      continue
+    }
+    if (local === 'v' || local === 't' || local === 'f') capture = undefined
+    if (local === 'c' && cell !== undefined) {
+      const typed = typedValue(cell.type, raw, inline, context)
+      const date = typeof typed.value === 'number' && context.dateStyles[cell.style] === true
+      if (typed.value !== null || formula !== undefined) {
+        if (++budget.used > budget.limit) throw new DocumentError(`workbook has more than ${budget.limit} used cells`)
+        cells.push({
+          row: cell.row,
+          column: cell.column,
+          value: typed.value,
+          ...(typed.error === true ? { error: true as const } : {}),
+          ...(date ? { date: true as const } : {}),
+          ...(formula === undefined
+            ? {}
+            : {
+                formula: {
+                  kind: formula.kind,
+                  ...(formula.text === '' ? {} : { text: formula.text }),
+                  ...(formula.sharedIndex === undefined ? {} : { sharedIndex: formula.sharedIndex }),
+                  ...(formula.ref === undefined ? {} : { ref: formula.ref }),
+                },
+              }),
+        })
+      }
+      cell = undefined
+    }
+  }
+  return { name, cells }
+}
+
+/**
+ * Read an `.xlsx` package as typed cells with formulas (nothing is
+ * evaluated). `maxCells` bounds the used cells of the whole workbook.
+ * @throws {@link DocumentError}.
+ */
+export function readXlsxCells(data: Uint8Array, options: { readonly maxCells?: number } = {}): XlsxWorkbookCells {
+  const maxCells = options.maxCells ?? Number.POSITIVE_INFINITY
+  const parts = readZipParts(data, path => path.startsWith('xl/') && (path.endsWith('.xml') || path.endsWith('.rels')), '.xlsx')
+  try {
+    const { sheets, date1904 } = readWorkbook(parts)
+    const context: CellContext = {
+      shared: readSharedStrings(partText(parts, 'xl/sharedStrings.xml')),
+      dateStyles: readDateStyles(partText(parts, 'xl/styles.xml')),
+      date1904,
+    }
+    const budget = { used: 0, limit: maxCells }
+    const result = sheets.map(sheet => {
+      const xml = partText(parts, sheet.path)
+      if (xml === undefined) throw new DocumentError(`not a valid .xlsx file (sheet ${JSON.stringify(sheet.name)} has no part ${sheet.path})`)
+      return readSheetCells(sheet.name, xml, context, budget)
+    })
+    return { sheets: result, date1904 }
+  } catch (error) {
+    if (error instanceof DocumentError) throw error
+    throw new DocumentError(`not a valid .xlsx file (${(error as Error).message})`)
+  }
+}

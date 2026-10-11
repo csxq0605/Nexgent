@@ -35,6 +35,12 @@
       "path": "packages/tasking"
     },
     {
+      "path": "packages/tool-spreadsheet"
+    },
+    {
+      "path": "packages/web"
+    },
+    {
       "path": "apps/desktop/src/renderer"
     }
   ]

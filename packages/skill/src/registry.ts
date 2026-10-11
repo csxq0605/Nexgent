@@ -1,8 +1,10 @@
 /**
- * `SkillRegistry` over two directories: the built-in skills shipped in this
- * package (`skills/<name>/SKILL.md`) and the project's
- * `.nexgent/skills/<name>/SKILL.md`. Every call rescans, so a skill added
- * mid-session shows up at the next turn.
+ * `SkillRegistry` over three directories: the built-in skills shipped in
+ * this package (`skills/<name>/SKILL.md`), the user's
+ * `~/.nexgent/skills/<name>/SKILL.md` (step 3) and the project's
+ * `.nexgent/skills/<name>/SKILL.md`; for one name project overrides user
+ * overrides built-in. Every call rescans, so a skill added mid-session
+ * shows up at the next turn.
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
@@ -32,6 +34,8 @@ export interface FileSkillRegistryOptions {
   readonly projectRoot: string
   /** Built-in skills directory; default {@link BUILTIN_SKILLS_DIR}. */
   readonly builtinDir?: string
+  /** User skills directory (absolute; normally `<Nexgent home>/skills`); absent: no user skills. */
+  readonly userDir?: string
 }
 
 interface Found {
@@ -96,10 +100,12 @@ async function scanDirectory(dir: string, source: SkillSource, problems: SkillPr
 export class FileSkillRegistry implements SkillRegistry {
   readonly projectRoot: string
   readonly builtinDir: string
+  readonly userDir: string | undefined
 
   constructor(options: FileSkillRegistryOptions) {
     this.projectRoot = options.projectRoot
     this.builtinDir = options.builtinDir ?? BUILTIN_SKILLS_DIR
+    this.userDir = options.userDir
   }
 
   /** Absolute directory of project skills. */
@@ -110,11 +116,11 @@ export class FileSkillRegistry implements SkillRegistry {
   private async scan(): Promise<{ skills: Found[]; problems: SkillProblem[] }> {
     const problems: SkillProblem[] = []
     const builtin = await scanDirectory(this.builtinDir, 'builtin', problems)
+    const user = this.userDir === undefined ? [] : await scanDirectory(this.userDir, 'user', problems)
     const project = await scanDirectory(this.projectDir, 'project', problems)
     const byName = new Map<string, Found>()
-    for (const skill of builtin) byName.set(skill.manifest.name, skill)
-    // A project skill overrides a built-in one of the same name.
-    for (const skill of project) byName.set(skill.manifest.name, skill)
+    // Later sources override earlier ones of the same name: project > user > built-in.
+    for (const skill of [...builtin, ...user, ...project]) byName.set(skill.manifest.name, skill)
     const skills = [...byName.values()].sort((a, b) => (a.manifest.name < b.manifest.name ? -1 : 1))
     return { skills, problems }
   }

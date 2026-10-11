@@ -36,6 +36,36 @@ describe('skill discovery', () => {
     expect((await registry.load('shared')).body).toBe('Project body.\n')
   })
 
+  it('adds user skills between built-in and project skills (project > user > built-in)', async () => {
+    const root = await tempDir()
+    const builtin = await tempDir('nexgent-builtin-')
+    const user = await tempDir('nexgent-user-')
+    for (const name of ['all', 'bu']) {
+      await mkdir(join(builtin, name))
+      await writeFile(join(builtin, name, 'SKILL.md'), skillText(name, 'Built-in version.'))
+    }
+    for (const name of ['all', 'bu', 'mine']) {
+      await mkdir(join(user, name))
+      await writeFile(join(user, name, 'SKILL.md'), skillText(name, 'User version.', 'User body.'))
+    }
+    await mkdir(join(user, 'broken'))
+    await writeFile(join(user, 'broken', 'SKILL.md'), '---\nname: broken\n---\n')
+    await writeProjectSkill(root, 'all', skillText('all', 'Project version.'))
+    const registry = new FileSkillRegistry({ projectRoot: root, builtinDir: builtin, userDir: user })
+    const catalog = await registry.catalog()
+    expect(catalog.skills.map(skill => [skill.name, skill.source, skill.description])).toEqual([
+      ['all', 'project', 'Project version.'],
+      ['bu', 'user', 'User version.'],
+      ['mine', 'user', 'User version.'],
+    ])
+    expect(catalog.problems.map(problem => problem.path)).toEqual([join(user, 'broken', 'SKILL.md')])
+    expect((await registry.load('mine')).body).toBe('User body.\n')
+    expect((await new FileSkillRegistry({ projectRoot: root, builtinDir: builtin, userDir: join(user, 'missing') }).catalog()).skills.map(skill => skill.source))
+      .toEqual(['project', 'builtin'])
+    expect((await new FileSkillRegistry({ projectRoot: root, builtinDir: builtin }).catalog()).skills.map(skill => skill.source))
+      .toEqual(['project', 'builtin'])
+  })
+
   it('reports bad files as problems without hiding the good ones', async () => {
     const root = await tempDir()
     const builtin = await tempDir('nexgent-builtin-')
