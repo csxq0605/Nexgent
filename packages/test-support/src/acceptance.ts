@@ -44,6 +44,7 @@ export {
 } from './records.js'
 export {
   type AcceptanceCheck,
+  type AcceptanceCheckStatus,
   type AcceptanceSummary,
   type AcceptanceSummaryBuilder,
   type AcceptanceSummaryInit,

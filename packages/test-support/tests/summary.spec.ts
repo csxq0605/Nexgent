@@ -55,6 +55,23 @@ describe('acceptanceSummary', () => {
     expect(validateAcceptanceSummary(summary).valid).toBe(true)
   })
 
+  it('item(): a not-implemented checklist item never passes and is listed as untested, not as a failed case', () => {
+    const summary = builder()
+      .item('H01', 'project init', 'passed', 'layout ok')
+      .item('H02', 'materials', 'not-implemented')
+      .build()
+    expect(summary.result).toBe('fail')
+    expect(summary.checks).toEqual([
+      { id: 'H01', name: 'project init', passed: true, status: 'passed', detail: 'layout ok' },
+      { id: 'H02', name: 'materials', passed: false, status: 'not-implemented' },
+    ])
+    expect(summary.failures.untested).toEqual(['H02 materials (not implemented)'])
+    expect(summary.failures.failedCases).toEqual([])
+    expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
+    const forged = { ...summary, result: 'pass', checks: [{ ...summary.checks[1]!, passed: true }] }
+    expect(validateAcceptanceSummary(forged).errors).toContain('/checks/0/status: "not-implemented" disagrees with passed: true')
+  })
+
   it('an empty summary fails (no checks)', () => {
     expect(builder().build().result).toBe('fail')
   })

@@ -42,3 +42,15 @@ jobs:
           name: accept-step1-${{ matrix.os }}
           path: accept-step1.json
           if-no-files-found: ignore
+
+      # Step-2 acceptance, headless + desktop layers (scripted provider). Items not
+      # implemented yet are reported as not-implemented and the summary says fail;
+      # --allow-not-ready keeps that from failing the job (exit 2 → 0) until the
+      # checks land. Remove the flag when step 2 is accepted (round 4).
+      - run: node scripts/accept-step2.mjs --layer headless,desktop --allow-not-ready --out accept-step2.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: accept-step2-${{ matrix.os }}
+          path: accept-step2.json
+          if-no-files-found: ignore
