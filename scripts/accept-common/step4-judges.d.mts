@@ -21,3 +21,12 @@ export declare const EXTRAS: {
   readonly plugin: string
   readonly pluginTool: string
 }
+export declare const GATE: Readonly<{
+  budgetMaxRequests: number
+  plugin: string
+  pluginTool: string
+  selectionCases: number
+  guardCases: number
+  windowTasks: number
+  consecutiveErrors: number
+}>

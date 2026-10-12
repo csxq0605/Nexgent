@@ -75,6 +75,7 @@ export function summarizerSource({ applyDiscount }) {
   return `// Monthly order summary: month, orders, units, revenue (cents), revenue by region, top product by units.
 ${summarizeFunction({ applyDiscount })}
 export function summarizeOrders(input) {
+  if (typeof input?.csvText !== 'string' || !input.csvText.startsWith('order_id,')) throw new Error('summarizeOrders: csvText must be the order CSV with its header (order_id,date,region,product,quantity,unit_price,discount)')
   return summarize(input.csvText)
 }
 `
@@ -220,8 +221,11 @@ test(${JSON.stringify(taskEntry.id)}, () => {
 `
 }
 
-/** One task of the family: what the user asks, the file it writes and the test command it runs. */
-function task(id, kind, month, { set, extra = '' } = {}) {
+/**
+ * One task of the family: what the user asks, the file it writes and the test command it runs.
+ * @param options - `set` (selection / guard, for the replay tasks), `extra` (text appended to the ask).
+ */
+export function familyTask(id, kind, month, { set, extra = '' } = {}) {
   const output = kind === 'summary' ? `out/summary-${month}.json` : `out/regions-${month}.csv`
   const checkCommand = `node --test ${checkPath(id)}`
   const what = kind === 'summary'
@@ -232,14 +236,14 @@ function task(id, kind, month, { set, extra = '' } = {}) {
 
 /** History tasks of the replay project: selection = the candidate's own kind, guard = another kind; never overlapping. */
 export const REPLAY_TASKS = [
-  task('summary-2026-06', 'summary', MONTHS.history[0], { set: 'selection' }),
-  task('summary-2026-07', 'summary', MONTHS.history[1], { set: 'selection' }),
-  task('regions-2026-08', 'regions', MONTHS.history[2], { set: 'guard' }),
+  familyTask('summary-2026-06', 'summary', MONTHS.history[0], { set: 'selection' }),
+  familyTask('summary-2026-07', 'summary', MONTHS.history[1], { set: 'selection' }),
+  familyTask('regions-2026-08', 'regions', MONTHS.history[2], { set: 'guard' }),
 ]
 
 /** Task A asks for a reusable component (user decision 8, 2026-10-12); task B does not mention one. */
-export const TASK_A = task('summary-2026-09', 'summary', MONTHS.taskA, { extra: ' Also make the summary step a reusable function or skill for later months.' })
-export const TASK_B = task('summary-2026-10', 'summary', MONTHS.taskB)
+export const TASK_A = familyTask('summary-2026-09', 'summary', MONTHS.taskA, { extra: ' Also make the summary step a reusable function or skill for later months.' })
+export const TASK_B = familyTask('summary-2026-10', 'summary', MONTHS.taskB)
 
 /** Write the project's own files: order CSVs of every month the family uses and the test command. */
 export async function writeReplayProject(root) {

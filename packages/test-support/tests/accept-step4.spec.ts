@@ -9,6 +9,7 @@ import {
   evaluateItem,
   EXIT_FAIL,
   EXIT_NOT_READY,
+  EXIT_PASS,
   LAYERS,
   OPTIONAL_CHECKS,
   parseLayers,
@@ -29,8 +30,8 @@ const range = (prefix: string, from: number, to: number) =>
 
 /** Step-4 headless items judged from the step-4 scenario (rounds 2–3). */
 const STEP4 = range('H', 1, 18)
-/** Of those, the ones that pass on today's product (W1, W2 and the SDK row landed; no gate yet). */
-const PASSING = ['H01', 'H02', 'H03', 'H04', 'H05', 'H07', 'H10', 'H13', 'H17', 'H18']
+/** Of those, the ones that pass on today's product: all of them since the gate (W3) and its scenario landed. */
+const PASSING = STEP4
 /** Wired so far: the regressions (round 1), STEP4 and D15–D18. Everything else must report not-implemented. */
 const WIRED = new Set(['H19', ...range('D', 1, 18), ...STEP4])
 
@@ -125,7 +126,7 @@ describe('scripts/accept-step4.mjs (requires `pnpm build`)', () => {
       const out = join(dir, 'summary.json')
       const childEnv = { ...process.env, ...env }
       for (const [key, value] of Object.entries(env)) if (value === undefined) delete childEnv[key]
-      const result = spawnSync(process.execPath, [script, '--out', out, '--work-dir', join(dir, 'work'), ...args], { encoding: 'utf8', env: childEnv, timeout: 150_000 })
+      const result = spawnSync(process.execPath, [script, '--out', out, '--work-dir', join(dir, 'work'), ...args], { encoding: 'utf8', env: childEnv, timeout: 540_000 })
       const raw = await readFile(out, 'utf8').catch(() => '')
       const summary = raw === '' ? undefined : JSON.parse(raw) as AcceptanceSummary
       return { result, summary, raw }
@@ -134,24 +135,24 @@ describe('scripts/accept-step4.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  // The gate (W3) has not landed: its items, and H14's adoption half, say so; nothing fails.
-  it('headless layer: the landed items pass, the gate items name the missing part, exit 2, valid summary', async () => {
+  // With the gate (W3) and its scenario every headless item passes.
+  it('headless layer: every item passes, exit 0, valid summary', async () => {
     const { result, summary } = await runScript(['--layer', 'headless'])
-    expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
+    expect(result.status, result.stderr).toBe(EXIT_PASS)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
-    expect(summary?.result).toBe('fail')
+    expect(summary?.result).toBe('pass')
     const items = (summary?.checks ?? []).filter(check => check.id !== undefined)
     expect(items.map(check => check.id)).toEqual(range('H', 1, 19))
     for (const check of items) {
       if (check.id === 'H19') expect(check).toMatchObject({ status: 'passed', passed: true, detail: 'step 3 H01–H23: all 23 passed' })
       else if (PASSING.includes(check.id!)) expect(check, `${check.id}: ${check.detail}`).toMatchObject({ status: 'passed', passed: true })
-      else expect(check, `${check.id}: ${check.detail}`).toMatchObject({ status: 'not-implemented', passed: false, detail: expect.stringMatching(/the gate \(W3\)|the gate is present, but this item's scenario is not written yet/) })
+      else expect.unreachable(`${check.id} is not in PASSING`)
     }
     // The midterm checkpoint: four named checks outside the checklist, all met.
     const points = (summary?.checks ?? []).filter(check => check.id === undefined)
     expect(points.map(check => check.name.slice(0, 7))).toEqual(['中期检查点 1', '中期检查点 2', '中期检查点 3', '中期检查点 4'])
     for (const point of points) expect(point, `${point.name}: ${point.detail}`).toMatchObject({ passed: true, detail: expect.stringMatching(/^passed: /) })
-  }, 240_000)
+  }, 600_000)
 
   it('real layer: not runnable without a key, and with a key still calls no model (nothing wired); exit 2 both ways', async () => {
     const keyless = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: undefined, ANTHROPIC_API_KEY: undefined })

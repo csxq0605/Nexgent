@@ -27,13 +27,13 @@ const sha256 = data => createHash('sha256').update(data).digest('hex')
 const errorText = error => (error instanceof Error ? error.message : String(error))
 const toolsOf = body => (body?.tools ?? []).map(tool => tool?.name).filter(Boolean)
 
-async function jsonl(path) {
+export async function jsonl(path) {
   const text = await readFile(path, 'utf8').catch(() => '')
   return text.split('\n').filter(Boolean).map(line => JSON.parse(line))
 }
 
 /** Every session file of the project: `{ <sessionId>: records[] }`. */
-async function sessionsOf(root) {
+export async function sessionsOf(root) {
   const dir = join(root, '.nexgent', 'sessions')
   const out = {}
   for (const id of await readdir(dir).catch(() => [])) out[id] = await jsonl(join(dir, id, 'session.jsonl'))
@@ -41,7 +41,7 @@ async function sessionsOf(root) {
 }
 
 /** Every ledger record of the project, in file order per month. */
-async function ledgerOf(root) {
+export async function ledgerOf(root) {
   const dir = join(root, '.nexgent', 'ledgers')
   const out = []
   for (const month of (await readdir(dir).catch(() => [])).sort()) out.push(...await jsonl(join(dir, month, 'requests.jsonl')))
@@ -49,7 +49,7 @@ async function ledgerOf(root) {
 }
 
 /** `activation/<n>.json` revisions in order (an unreadable one is recorded as `{ error }`). */
-async function activationOf(root) {
+export async function activationOf(root) {
   const dir = join(root, '.nexgent', 'capabilities', 'activation')
   const names = (await readdir(dir).catch(() => [])).filter(name => /^\d+\.json$/.test(name)).sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
   const out = []
@@ -58,7 +58,7 @@ async function activationOf(root) {
 }
 
 /** Files under a directory, relative with `/`. */
-async function filesUnder(dir, base = dir) {
+export async function filesUnder(dir, base = dir) {
   const out = []
   for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
     const path = join(dir, entry.name)
@@ -69,7 +69,7 @@ async function filesUnder(dir, base = dir) {
 }
 
 /** `candidates/<id>/candidate.json` of every candidate. */
-async function candidatesOf(root) {
+export async function candidatesOf(root) {
   const dir = join(root, '.nexgent', 'capabilities', 'candidates')
   const out = []
   for (const id of await readdir(dir).catch(() => [])) {

@@ -6,9 +6,10 @@
  *
  *   headless  H01–H19  scripted model server, through @nexgent/sdk: H19 (step 3's H01–H23 over a
  *                      fresh run of step 3's headless scenario); H01–H18 from the step-4 scenario
- *                      (accept-common/step4-headless.mjs, step4-scenario.mjs), each not-implemented
- *                      until its product part lands (the gate items until W3); the midterm
- *                      checkpoint's four items are recorded as named checks
+ *                      (accept-common/step4-headless.mjs, step4-scenario.mjs) and, for the gate items
+ *                      (H06, H08, H09, H11, H12, H14–H16), the gate scenario in its own project
+ *                      (accept-common/step4-gate.mjs); the midterm checkpoint's four items are
+ *                      recorded as named checks
  *   desktop   D01–D18  D01–D14: steps 2 and 3's desktop scenarios and judges, as a regression;
  *                      D15–D18 (capability version, candidates, plugin approval, rollback) from the
  *                      capabilities scenario (accept-common/step4-desktop.mjs)
@@ -106,6 +107,16 @@ async function prepareLayer(layer, harness, options) {
       ctx.step4 = await runStep4Headless(harness, join(options.work, 'step4'), { log: line => log(`headless step4: ${line}`) })
     } catch (error) {
       ctx.step4Error = errorText(error)
+    }
+    // The gate scenario (its own project), once the gate is there; its crash fails the gate items only.
+    if (ctx.step4?.features?.gate === true) {
+      try {
+        await mkdir(join(options.work, 'gate'), { recursive: true })
+        const { runStep4Gate } = await import('./accept-common/step4-gate.mjs')
+        ctx.step4.gate = await runStep4Gate(harness, join(options.work, 'gate'), { log: line => log(`headless gate: ${line}`) })
+      } catch (error) {
+        ctx.step4.gate = { error: { step: 'setup', message: errorText(error) } }
+      }
     }
     return { ok: true, ctx }
   }

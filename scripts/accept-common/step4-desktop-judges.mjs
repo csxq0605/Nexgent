@@ -5,7 +5,7 @@
  * (packages/test-support/tests/accept-step4-desktop.spec.ts).
  */
 import { verdict } from './step2-judges.mjs'
-import { CAPABILITY_TEXTS, PLUGIN_NAME } from './step4-desktop.mjs'
+import { CAPABILITY_TEXTS, PLUGIN_NAME, PLUGIN_SPEC } from './step4-desktop.mjs'
 
 /** Candidate status labels of the 能力 tab (apps/desktop strings.ts `candidateStatusText`). */
 export const STATUS_LABELS = { adopted: '已采用', rejected: '未采用', trialing: '门控试验中', 'rolled-back': '已回滚' }
@@ -67,13 +67,17 @@ export const CAPABILITY_JUDGES = {
       [d.names === PLUGIN_NAME, `the approval dialog names the plugin (got ${JSON.stringify(d.names)})`],
       [P !== undefined && d.hash === P.version, `and shows the candidate bundle's hash (got ${JSON.stringify(d.hash)})`],
       [typeof d.files === 'string' && d.files.includes(`${PLUGIN_NAME}/plugin.json`), 'and its files'],
+      [typeof d.description === 'string' && d.description.includes(PLUGIN_SPEC.description), `and plugin.json's description (got ${JSON.stringify(d.description)})`],
+      [typeof d.permissions === 'string' && d.permissions.includes(PLUGIN_SPEC.permissions), `and its permissions text (got ${JSON.stringify(d.permissions)})`],
+      [typeof d.tools === 'string' && PLUGIN_SPEC.tools.every(t => d.tools.includes(t)), `and its tools (got ${JSON.stringify(d.tools)})`],
+      [d.unreadable === 0 && d.allowEnabled === true, `the plugin.json was readable, so 允许 is enabled (unreadable banners ${d.unreadable}, enabled ${d.allowEnabled})`],
       [d.detached === true, 'denying closes the dialog'],
       [status?.status === 'rejected' && status?.label === STATUS_LABELS.rejected, `after the denial the candidate reads 未采用 (got ${JSON.stringify(status && [status.status, status.label])})`],
       [decisions.some(x => x.outcome === 'rejected' && x.reason === 'approval-denied'), `a rejected / approval-denied decision was recorded (got ${JSON.stringify(decisions)})`],
       [(obs.afterDeny?.history ?? []).length === (obs.seededHistory ?? []).length && obs.after?.version === A?.version, 'the adopted version did not change'],
       [obs.pluginRan === false, 'the plugin code never ran'],
       [obs.restart?.dialogs === 0, `the dialog does not come back after a restart (got ${obs.restart?.dialogs})`],
-    ], `the plugin approval dialog showed ${PLUGIN_NAME} and its hash; denying left it not adopted and nothing ran`)
+    ], `the plugin approval dialog showed ${PLUGIN_NAME}, its hash and permissions; denying left it not adopted and nothing ran`)
   },
 
   D18(obs) {
