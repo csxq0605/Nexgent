@@ -31,8 +31,8 @@ const range = (prefix: string, from: number, to: number) =>
 const STEP4 = range('H', 1, 18)
 /** Of those, the ones that pass on today's product (W1, W2 and the SDK row landed; no gate yet). */
 const PASSING = ['H01', 'H02', 'H03', 'H04', 'H05', 'H07', 'H10', 'H13', 'H17', 'H18']
-/** Wired so far: the regressions (round 1) and STEP4. Everything else must report not-implemented. */
-const WIRED = new Set(['H19', ...range('D', 1, 14), ...STEP4])
+/** Wired so far: the regressions (round 1), STEP4 and D15–D18. Everything else must report not-implemented. */
+const WIRED = new Set(['H19', ...range('D', 1, 18), ...STEP4])
 
 describe('accept-step4 checklist', () => {
   it('has every item of the step-4 plan in order, plus the D01–D14 regression', async () => {
@@ -70,6 +70,11 @@ describe('accept-step4 checklist', () => {
       const check = CHECKS.find(c => c.id === id)!
       expect(await evaluateItem(check, { step4Error: 'boom' }), id).toEqual({ status: 'failed', evidence: 'step 4 headless scenario failed: boom' })
       expect(await evaluateItem(check, {}), id).toEqual({ status: 'failed', evidence: 'step 4 headless scenario did not run' })
+    }
+    for (const id of range('D', 15, 18)) {
+      const check = CHECKS.find(c => c.id === id)!
+      expect(await evaluateItem(check, { capabilitiesError: 'boom' }), id).toEqual({ status: 'failed', evidence: 'capabilities desktop scenario failed: boom' })
+      expect(await evaluateItem(check, {}), id).toEqual({ status: 'failed', evidence: 'capabilities desktop scenario did not run' })
     }
   })
 
