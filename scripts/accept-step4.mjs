@@ -1,0 +1,211 @@
+#!/usr/bin/env node
+/**
+ * Step 4 acceptance (docs/plan/step-4-work-partition.md §`accept-step4`
+ * 检查项清单): three layers of checks, all judged by this script from files,
+ * session records, ledger lines, the activation history and process state.
+ *
+ *   headless  H01–H19  scripted model server, through @nexgent/sdk. Round 1: H19 (step 3's
+ *                      H01–H23 over a fresh run of step 3's headless scenario); the rest wait
+ *                      for the capability store, loader and gate
+ *   desktop   D01–D18  D01–D14: steps 2 and 3's desktop scenarios and judges, as a regression;
+ *                      D15–D18 (capability version, candidates, plugin approval, rollback) later
+ *   real      R01–R07  real Claude model on the order-summary family (scripts/real-task/step4-orders.mjs;
+ *                      manual: Linux cloud session, thinking on; R07 Windows optional). Not wired
+ *                      yet: the layer checks its prerequisites and calls no model
+ *
+ * Usage:
+ *   node scripts/accept-step4.mjs [--layer headless,desktop|real|all] [--out <summary.json>]
+ *     [--work-dir <empty dir>] [--budget-usd 15] [--spent <earlier-runs.json>]
+ *
+ * Writes a summary JSON (test-support schema, fields of docs/validation/TEMPLATE.md);
+ * every checklist item appears with its id and status passed / failed / not-implemented.
+ *
+ * Exit codes: 0 every selected item passed; 1 an item failed; 2 not runnable
+ * yet (an item not implemented, or a layer's prerequisites missing) — never a
+ * fake pass.
+ *
+ * The real layer reads which of NEXGENT_API_KEY / ANTHROPIC_API_KEY is set,
+ * never the value. Linux, macOS and Windows; no shell, no Python.
+ */
+import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { parseArgs } from 'node:util'
+import { loadHarness, REPO_ROOT } from './accept-common/harness.mjs'
+import { desktopPrerequisites, runDesktopScenario } from './accept-common/step2-desktop.mjs'
+import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
+import { runMembersDesktopScenario } from './accept-common/step3-desktop.mjs'
+import { runHeadlessScenario as runStep3Headless } from './accept-common/step3-headless.mjs'
+import { realPrerequisites } from './accept-common/step4-real.mjs'
+import {
+  CHECKS,
+  decideExit,
+  evaluateItem,
+  EXIT_FAIL,
+  EXIT_NOT_READY,
+  LAYERS,
+  OPTIONAL_CHECKS,
+  parseLayers,
+  REAL_MODEL,
+} from './accept-common/step4-checks.mjs'
+
+const STEP = {
+  step: 4,
+  name: '能力变化进入真实运行',
+  exitCriteria: [
+    '跨任务、跨进程实际调用：任务 A 开发并使用的组件经门控采用后，新 OS 进程里的任务 B 自动加载并调用它，账本可证',
+    '自动回滚：注入一次退化后，宿主自动退回上一版本，之后的任务用回旧版本，账本与采用历史可证',
+    '被拒候选留档：门控判定变差的候选保留组件、回放结果、费用与拒绝原因，原版本照常可用',
+    '`accept-step4` 无界面层与桌面层在 Linux 本地通过（脚本化 provider）；验收前 Windows 手动运行一次',
+    '真实模型一次（Linux，thinking 开）主链跑通；验收记录 docs/validation/step-4-<日期>.md 经用户认可；工作留在 nexgent-app',
+  ],
+  script: 'scripts/accept-step4.mjs',
+  repoRoot: REPO_ROOT,
+}
+
+function log(line) {
+  process.stderr.write(`accept-step4: ${line}\n`)
+}
+
+/** Earlier real-model runs' estimated costs: a JSON array of numbers or of `{ costUsd }`. */
+async function readSpent(path) {
+  if (path === undefined) return []
+  const parsed = JSON.parse(await readFile(path, 'utf8'))
+  if (!Array.isArray(parsed)) throw new Error(`${path}: expected a JSON array`)
+  return parsed.map(entry => (typeof entry === 'number' ? entry : entry?.costUsd ?? 'unknown'))
+}
+
+const errorText = error => (error instanceof Error ? (error.stack ?? error.message) : String(error))
+
+/**
+ * Prerequisites per layer. Returns `{ ok: true, ctx }` or `{ ok: false, reason }`.
+ * Nothing here calls a model.
+ */
+async function prepareLayer(layer, harness, options) {
+  if (layer === 'headless') {
+    const packages = await loadStep2Packages()
+    if (!packages.ok) return { ok: false, reason: packages.reason }
+    const { validateSessionRecord, validateLedgerRecord } = packages.pkgs.session
+    const ctx = { work: options.work, tools: { validateSessionRecord, validateLedgerRecord } }
+    await mkdir(join(options.work, 'step3'), { recursive: true })
+    // H19: one run of step 3's headless scenario; its crash fails H19 only.
+    try {
+      ctx.step3 = await runStep3Headless(harness, join(options.work, 'step3'), { log: line => log(`headless step3: ${line}`) })
+    } catch (error) {
+      ctx.step3Error = errorText(error)
+    }
+    return { ok: true, ctx }
+  }
+  if (layer === 'desktop') {
+    const ready = await desktopPrerequisites()
+    if (!ready.ok) return { ok: false, reason: ready.reason }
+    await mkdir(options.work, { recursive: true })
+    // D01–D14 regression: step 2's scenario, then step 3's members scenario; each failure fails only its own items.
+    const ctx = { work: options.work }
+    try {
+      await mkdir(join(options.work, 'step2'), { recursive: true })
+      ctx.obs = await runDesktopScenario(harness, join(options.work, 'step2'), { log: line => log(`desktop: ${line}`) })
+    } catch (error) {
+      ctx.scenarioError = errorText(error)
+    }
+    try {
+      ctx.members = await runMembersDesktopScenario(harness, join(options.work, 'members'), { log: line => log(`desktop members: ${line}`) })
+    } catch (error) {
+      ctx.membersError = errorText(error)
+    }
+    return { ok: true, ctx }
+  }
+  // real: only the gate in round 1; no item is wired, so no model is called.
+  const ready = realPrerequisites(process.env, options.budgetUsd, options.spent)
+  if (!ready.ok) return ready
+  return { ok: true, ctx: { work: options.work, keySource: ready.keySource, remainingUsd: ready.remainingUsd } }
+}
+
+async function main() {
+  const { values } = parseArgs({
+    options: {
+      layer: { type: 'string' },
+      out: { type: 'string' },
+      'work-dir': { type: 'string' },
+      'budget-usd': { type: 'string' },
+      spent: { type: 'string' },
+    },
+    strict: true,
+  })
+  const parsed = parseLayers(values.layer)
+  if (!parsed.ok) {
+    log(parsed.reason)
+    return EXIT_FAIL
+  }
+  const layers = parsed.layers
+  const budgetUsd = values['budget-usd'] === undefined ? REAL_MODEL.budgetUsd : Number(values['budget-usd'])
+
+  const loaded = await loadHarness()
+  if (!loaded.ok) {
+    // The summary builder itself lives in test-support; without a build there is nothing to write with.
+    log(`not runnable yet: ${loaded.reason}`)
+    return EXIT_NOT_READY
+  }
+  const h = loaded.harness
+
+  const work = values['work-dir'] === undefined
+    ? await mkdtemp(join(tmpdir(), 'nexgent-accept-step4-'))
+    : resolve(values['work-dir'])
+  await mkdir(work, { recursive: true })
+  const out = values.out === undefined ? join(work, 'summary.json') : resolve(values.out)
+  log(`layers ${layers.join(', ')}; work dir ${work}`)
+
+  const realOnly = !layers.includes('headless') && !layers.includes('desktop')
+  const s = h.acceptanceSummary({
+    ...STEP,
+    provider: realOnly ? 'real' : 'scripted',
+    command: `node scripts/accept-step4.mjs --layer ${layers.join(',')}`,
+    simulated: 'scripted Claude Messages API model server with per-session routing; checklist H01–H19 / D01–D18',
+  })
+
+  const spent = await readSpent(values.spent)
+  const statuses = []
+  let notReady = 0
+  for (const layer of layers) {
+    const ready = await prepareLayer(layer, h, { work: join(work, layer), budgetUsd, spent })
+    if (!ready.ok) {
+      notReady += 1
+      s.knownIssue(`${LAYERS[layer].title} not runnable yet: ${ready.reason}`)
+      log(`${layer}: not runnable yet: ${ready.reason}`)
+    }
+    for (const entry of CHECKS.filter(check => check.layer === layer)) {
+      const { status, evidence } = ready.ok
+        ? await evaluateItem(entry, ready.ctx)
+        : { status: 'not-implemented', evidence: `layer not runnable yet: ${ready.reason}` }
+      if (OPTIONAL_CHECKS.has(entry.id)) {
+        // Optional items never decide the exit code; one that did not run is untested, not a failed check.
+        if (status === 'not-implemented') s.untested(`${entry.id} ${entry.title}: ${evidence}`)
+        else s.item(entry.id, entry.title, status, evidence)
+        continue
+      }
+      s.item(entry.id, entry.title, status, evidence)
+      statuses.push(status)
+    }
+  }
+
+  s.doesNotProve('anything for an item whose status is not-implemented')
+  if (layers.includes('real')) s.knownIssue('real-model layer: R01–R06 are not wired yet (round 4); no model was called')
+  else s.untested('real-model layer (R01–R07): run with --layer real')
+  s.set({ raw: { location: work, sha256: null, summaryDir: null, manifest: [] } })
+
+  const code = decideExit(statuses, notReady)
+  const summary = await s.write(out)
+  const count = status => statuses.filter(value => value === status).length
+  log(`summary ${out} (result ${summary.result}; passed ${count('passed')}, failed ${count('failed')}, not implemented ${count('not-implemented')})`)
+  return code
+}
+
+main().then(
+  (code) => {
+    process.exitCode = code
+  },
+  (error) => {
+    process.stderr.write(`accept-step4: internal error: ${errorText(error)}\n`)
+    process.exitCode = EXIT_FAIL
+  },
+)
