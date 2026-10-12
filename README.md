@@ -23,7 +23,19 @@ Nexgent 正在重写为一个 TypeScript 独立应用（Electron 桌面应用 + 
   - 桌面应用：主进程、界面、设置页，IPC 令牌守卫。
   - 真实 Claude Sonnet 5.5（thinking 开）在 Linux 和 Windows（shell 工具为 `pwsh`）上各完成了一个三轮表格数据任务，结果由脚本独立检查。三轮是：生成、按反馈修改、模型流到一半强杀后恢复。
 
-**尚未验证：** macOS；Windows 安装包（Windows 上只验证了从源码运行）；真实模型下的上下文压缩；在桌面应用里接真实模型。
+- **步骤 3**（[`step-3-20261011.md`](docs/validation/step-3-20261011.md)，脚本化验收在 Linux 与 Windows 都通过），经脚本化验收证明：
+  - 委派：主对话把子任务交给成员，fresh（带资料）与 fork（带父历史）两种；成员可以交付成果；只读父会话下成员继承预设与沙箱；
+  - 团队：队友并发工作，经邮箱通信，任务板按依赖推进；
+  - 工作流：脚本与图两种写法，含环的图被拒绝；
+  - 工具：PTC（`run_code`，超时会被终止）、表格（.xlsx 读写，公式用纯 JS 计算）、网页；用户级与项目级技能；
+  - 委派与团队只有一层；成员的审批规则与主对话相同，审批提示写明是哪个成员请求的；
+  - 取消会传到成员；费用按会话树汇总，单任务上限生效；
+  - 进程在成员流到一半时被强杀后可以恢复，恢复后能查询子会话与协作记录；
+  - 桌面应用：显示成员块、子会话只读视图、成员审批，成员流式时强杀主进程后重启可恢复；
+  - 主干上没有 Python 文件。
+  - 真实 Claude Sonnet 5.5（thinking 开）在 Linux 上用直接、委派、团队、工作流四种形态，以及不指定形态，各完成了一次两轮补货表格任务（生成，再按反馈修改），结果由脚本独立检查。这不说明协作形态比直接执行更好或更省。
+
+**尚未验证：** macOS；Windows 安装包（Windows 上只验证了从源码运行）；真实模型下的上下文压缩；在桌面应用里接真实模型；Windows 上的真实模型协作任务；协作形态的成功率与收益。
 
 ## 启动
 
@@ -51,7 +63,7 @@ node apps/cli/bin/nexgent.mjs export <sessionId> --project <dir>
 - 安装、打包与数据目录见 [docs/install.md](docs/install.md)；CLI 的参数与退出码见 [apps/cli/README.md](apps/cli/README.md)。
 - 桌面应用的设置页也能填写密钥，写入 `~/.nexgent/credentials.json`（权限 0600）。
 - Linux 以 root 运行桌面应用时要加 `--no-sandbox`。
-- 测试与验收：`pnpm test`（脚本化 provider，不需要密钥）；`node scripts/accept-step2.mjs`（无界面层与桌面层）；`node scripts/accept-step2.mjs --layer real`（真实模型，需要密钥）。
+- 测试与验收：`pnpm test`（脚本化 provider，不需要密钥）；`node scripts/accept-step2.mjs`（无界面层与桌面层）；`node scripts/accept-step2.mjs --layer real`（真实模型，需要密钥）；步骤 3 同理用 `scripts/accept-step3.mjs`。
 
 ## 旧产品
 
