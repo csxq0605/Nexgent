@@ -1,9 +1,14 @@
 // Types for step4-fixtures.mjs (consumed by packages/test-support/tests/step4-fixtures.spec.ts).
 export type Quality = 'good' | 'bad'
+export interface ComponentFile {
+  readonly path: string
+  readonly content: string
+}
 export interface Component {
+  readonly kind: 'function-module' | 'skill'
   readonly name: string
-  readonly file: string
   readonly source: string
+  readonly files: readonly ComponentFile[]
 }
 export interface FamilyTask {
   readonly id: string
@@ -37,10 +42,23 @@ export declare const SCRIPTED_API_KEY: string
 export declare const VERIFY_PATH: string
 export declare const VERIFY_SOURCE: string
 export declare function summarizerSource(options: { applyDiscount: boolean }): string
+export declare const FUNCTION_SPEC: {
+  readonly formatVersion: 1
+  readonly name: string
+  readonly description: string
+  readonly entry: string
+  readonly functions: readonly {
+    readonly name: string
+    readonly description: string
+    readonly inputSchema: Record<string, unknown>
+    readonly effects: readonly string[]
+  }[]
+}
 export declare const COMPONENTS: Readonly<Record<Quality, {
-  readonly functionModule: Component & { readonly exports: readonly string[] }
-  readonly skill: Component
+  readonly functionModule: Component & { readonly kind: 'function-module'; readonly function: string }
+  readonly skill: Component & { readonly kind: 'skill' }
 }>>
+export declare const UNUSED_SKILL: { readonly kind: 'skill'; readonly name: string; readonly files: readonly ComponentFile[] }
 export declare const REPLAY_TASKS: readonly FamilyTask[]
 export declare const TASK_A: FamilyTask
 export declare const TASK_B: FamilyTask

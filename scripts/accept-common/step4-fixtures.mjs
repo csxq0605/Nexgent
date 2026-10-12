@@ -37,13 +37,12 @@ export const SCRIPTED_API_KEY = 'sk-step4-scripted-test-key'
 export const VERIFY_PATH = 'checks/verify.mjs'
 
 /**
- * Source of the summary function module. `applyDiscount: false` is the bad candidate:
- * revenue = quantity × unit price, ignoring the discount column.
+ * `function summarize(csvText)`: the monthly summary. `applyDiscount: false` is the bad
+ * candidate: revenue = quantity × unit price, ignoring the discount column.
  */
-export function summarizerSource({ applyDiscount }) {
+function summarizeFunction({ applyDiscount }) {
   const factor = applyDiscount ? ' * (1 - Number(cells[6]))' : ''
-  return `// Monthly order summary: month, orders, units, revenue (cents), revenue by region, top product by units.
-export function summarizeOrders(csvText) {
+  return `function summarize(csvText) {
   const rows = String(csvText).split(/\\r?\\n/).filter(line => line.trim() !== '').slice(1).map(line => line.split(','))
   const byRegion = {}
   const units = {}
@@ -68,6 +67,33 @@ export function summarizeOrders(csvText) {
 `
 }
 
+/**
+ * `index.mjs` of the function module: one exported function taking one argument object
+ * (`FunctionModuleSpec`: each function's single argument is `{ csvText }`).
+ */
+export function summarizerSource({ applyDiscount }) {
+  return `// Monthly order summary: month, orders, units, revenue (cents), revenue by region, top product by units.
+${summarizeFunction({ applyDiscount })}
+export function summarizeOrders(input) {
+  return summarize(input.csvText)
+}
+`
+}
+
+/** `functions.json` of the function module (`FunctionModuleSpec`, contracts/capabilities.ts). */
+export const FUNCTION_SPEC = {
+  formatVersion: 1,
+  name: 'order-summary',
+  description: 'Monthly summary of the shop\'s order CSV.',
+  entry: 'index.mjs',
+  functions: [{
+    name: 'summarizeOrders',
+    description: 'Summarise one month of orders: month, orders, units, revenue, byRegion, topProduct. Pass the CSV text.',
+    inputSchema: { type: 'object', additionalProperties: false, required: ['csvText'], properties: { csvText: { type: 'string', description: 'The whole order CSV, header included.' } } },
+    effects: [],
+  }],
+}
+
 const skillSource = ({ applyDiscount }) => `---
 name: monthly-order-summary
 description: Summarise one month of the shop's order CSV into a JSON summary.
@@ -79,16 +105,36 @@ description: Summarise one month of the shop's order CSV into a JSON summary.
 4. Run the project's check command on the result before presenting it.
 `
 
-/** The two candidates: the same components, right (`good`) and wrong (`bad`). */
-export const COMPONENTS = {
-  good: {
-    functionModule: { name: 'order-summary', file: 'order-summary.mjs', exports: ['summarizeOrders'], source: summarizerSource({ applyDiscount: true }) },
-    skill: { name: 'monthly-order-summary', file: 'SKILL.md', source: skillSource({ applyDiscount: true }) },
+const candidate = applyDiscount => ({
+  functionModule: {
+    kind: 'function-module',
+    name: FUNCTION_SPEC.name,
+    function: FUNCTION_SPEC.functions[0].name,
+    source: summarizerSource({ applyDiscount }),
+    files: [
+      { path: 'functions.json', content: `${JSON.stringify(FUNCTION_SPEC, null, 2)}\n` },
+      { path: 'index.mjs', content: summarizerSource({ applyDiscount }) },
+    ],
   },
-  bad: {
-    functionModule: { name: 'order-summary', file: 'order-summary.mjs', exports: ['summarizeOrders'], source: summarizerSource({ applyDiscount: false }) },
-    skill: { name: 'monthly-order-summary', file: 'SKILL.md', source: skillSource({ applyDiscount: false }) },
+  skill: {
+    kind: 'skill',
+    name: 'monthly-order-summary',
+    source: skillSource({ applyDiscount }),
+    files: [{ path: 'SKILL.md', content: skillSource({ applyDiscount }) }],
   },
+})
+
+/**
+ * The two candidates: the same components (contract kinds, names and entry files), right
+ * (`good`) and wrong (`bad`). `files` are what `capability_draft` writes.
+ */
+export const COMPONENTS = { good: candidate(true), bad: candidate(false) }
+
+/** A skill task A drafts and tries but never uses: proposing it must be refused (H04). */
+export const UNUSED_SKILL = {
+  kind: 'skill',
+  name: 'unused-notes',
+  files: [{ path: 'SKILL.md', content: '---\nname: unused-notes\ndescription: Notes nobody loads.\n---\n\nNever loaded in the scenario.\n' }],
 }
 
 /**
@@ -99,7 +145,7 @@ export const COMPONENTS = {
  */
 export const VERIFY_SOURCE = `// Test command of the step-4 replay project. Usage: node checks/verify.mjs summary|regions <orders.csv> <output>
 import { readFileSync } from 'node:fs'
-${summarizerSource({ applyDiscount: true }).replace(/^\/\/.*\n/, '')}
+${summarizeFunction({ applyDiscount: true })}
 function regionsCsv(csvText) {
   const rows = String(csvText).split(/\\r?\\n/).filter(line => line.trim() !== '').slice(1).map(line => line.split(','))
   const table = {}
@@ -136,7 +182,7 @@ if (mode === 'regions') {
     problems.push('summary is not JSON')
   }
   if (got !== undefined) {
-    const want = summarizeOrders(orders)
+    const want = summarize(orders)
     for (const key of ['month', 'orders', 'units', 'topProduct']) if (got[key] !== want[key]) problems.push(key + ' ' + JSON.stringify(got[key]) + ', expected ' + JSON.stringify(want[key]))
     const near = (a, b) => typeof a === 'number' && Math.abs(a - b) < 0.005
     if (!near(got.revenue, want.revenue)) problems.push('revenue ' + JSON.stringify(got.revenue) + ', expected ' + want.revenue)
@@ -192,7 +238,7 @@ const loaded = new Map()
 async function summarizer(quality) {
   if (!loaded.has(quality)) {
     const source = COMPONENTS[quality].functionModule.source
-    loaded.set(quality, import(`data:text/javascript,${encodeURIComponent(source)}`).then(module => module.summarizeOrders))
+    loaded.set(quality, import(`data:text/javascript,${encodeURIComponent(source)}`).then(module => csvText => module.summarizeOrders({ csvText })))
   }
   return loaded.get(quality)
 }

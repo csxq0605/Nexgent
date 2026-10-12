@@ -4,9 +4,11 @@
  * 检查项清单): three layers of checks, all judged by this script from files,
  * session records, ledger lines, the activation history and process state.
  *
- *   headless  H01–H19  scripted model server, through @nexgent/sdk. Round 1: H19 (step 3's
- *                      H01–H23 over a fresh run of step 3's headless scenario); the rest wait
- *                      for the capability store, loader and gate
+ *   headless  H01–H19  scripted model server, through @nexgent/sdk: H19 (step 3's H01–H23 over a
+ *                      fresh run of step 3's headless scenario); H01–H05, H07, H10, H17 from the
+ *                      step-4 scenario (accept-common/step4-headless.mjs, step4-scenario.mjs), each
+ *                      not-implemented until its product part lands; the midterm checkpoint's four
+ *                      items are recorded as named checks. The rest wait for the gate
  *   desktop   D01–D18  D01–D14: steps 2 and 3's desktop scenarios and judges, as a regression;
  *                      D15–D18 (capability version, candidates, plugin approval, rollback) later
  *   real      R01–R07  real Claude model on the order-summary family (scripts/real-task/step4-orders.mjs;
@@ -36,6 +38,7 @@ import { desktopPrerequisites, runDesktopScenario } from './accept-common/step2-
 import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
 import { runMembersDesktopScenario } from './accept-common/step3-desktop.mjs'
 import { runHeadlessScenario as runStep3Headless } from './accept-common/step3-headless.mjs'
+import { judgeCheckpoint } from './accept-common/step4-judges.mjs'
 import { realPrerequisites } from './accept-common/step4-real.mjs'
 import {
   CHECKS,
@@ -93,6 +96,14 @@ async function prepareLayer(layer, harness, options) {
       ctx.step3 = await runStep3Headless(harness, join(options.work, 'step3'), { log: line => log(`headless step3: ${line}`) })
     } catch (error) {
       ctx.step3Error = errorText(error)
+    }
+    // The step-4 scenario (loaded here: it needs the built kernel); its crash fails its items only.
+    try {
+      await mkdir(join(options.work, 'step4'), { recursive: true })
+      const { runStep4Headless } = await import('./accept-common/step4-headless.mjs')
+      ctx.step4 = await runStep4Headless(harness, join(options.work, 'step4'), { log: line => log(`headless step4: ${line}`) })
+    } catch (error) {
+      ctx.step4Error = errorText(error)
     }
     return { ok: true, ctx }
   }
@@ -185,6 +196,16 @@ async function main() {
       }
       s.item(entry.id, entry.title, status, evidence)
       statuses.push(status)
+    }
+    if (layer === 'headless' && ready.ok) {
+      // The midterm checkpoint (partition §中期检查点): recorded, not part of the exit code.
+      const points = ready.ctx.step4 === undefined
+        ? [{ title: '中期检查点', status: 'failed', evidence: `step 4 headless scenario failed: ${ready.ctx.step4Error}` }]
+        : judgeCheckpoint(ready.ctx.step4)
+      for (const point of points) {
+        s.check(point.title, point.status === 'passed', `${point.status}: ${point.evidence}`)
+        log(`${point.id ?? 'checkpoint'} ${point.status}`)
+      }
     }
   }
 
