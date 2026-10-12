@@ -10,7 +10,8 @@
  *                      until its product part lands (the gate items until W3); the midterm
  *                      checkpoint's four items are recorded as named checks
  *   desktop   D01–D18  D01–D14: steps 2 and 3's desktop scenarios and judges, as a regression;
- *                      D15–D18 (capability version, candidates, plugin approval, rollback) later
+ *                      D15–D18 (capability version, candidates, plugin approval, rollback) from the
+ *                      capabilities scenario (accept-common/step4-desktop.mjs)
  *   real      R01–R07  real Claude model on the order-summary family (scripts/real-task/step4-orders.mjs;
  *                      manual: Linux cloud session, thinking on; R07 Windows optional). Not wired
  *                      yet: the layer checks its prerequisites and calls no model
@@ -37,6 +38,7 @@ import { loadHarness, REPO_ROOT } from './accept-common/harness.mjs'
 import { desktopPrerequisites, runDesktopScenario } from './accept-common/step2-desktop.mjs'
 import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
 import { runMembersDesktopScenario } from './accept-common/step3-desktop.mjs'
+import { runCapabilitiesDesktopScenario } from './accept-common/step4-desktop.mjs'
 import { runHeadlessScenario as runStep3Headless } from './accept-common/step3-headless.mjs'
 import { judgeCheckpoint } from './accept-common/step4-judges.mjs'
 import { realPrerequisites } from './accept-common/step4-real.mjs'
@@ -111,7 +113,7 @@ async function prepareLayer(layer, harness, options) {
     const ready = await desktopPrerequisites()
     if (!ready.ok) return { ok: false, reason: ready.reason }
     await mkdir(options.work, { recursive: true })
-    // D01–D14 regression: step 2's scenario, then step 3's members scenario; each failure fails only its own items.
+    // D01–D14 regression (step 2's scenario, step 3's members scenario), then D15–D18; each failure fails only its own items.
     const ctx = { work: options.work }
     try {
       await mkdir(join(options.work, 'step2'), { recursive: true })
@@ -123,6 +125,12 @@ async function prepareLayer(layer, harness, options) {
       ctx.members = await runMembersDesktopScenario(harness, join(options.work, 'members'), { log: line => log(`desktop members: ${line}`) })
     } catch (error) {
       ctx.membersError = errorText(error)
+    }
+    // D15–D18: the capability-version views.
+    try {
+      ctx.capabilities = await runCapabilitiesDesktopScenario(harness, join(options.work, 'capabilities'), { log: line => log(`desktop capabilities: ${line}`) })
+    } catch (error) {
+      ctx.capabilitiesError = errorText(error)
     }
     return { ok: true, ctx }
   }

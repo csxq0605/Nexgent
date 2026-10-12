@@ -15,10 +15,13 @@
  * 2, H13, H14 and H18 since round 3; each reports not-implemented until the
  * product part it needs has landed, and the gate items (H06, H08, H09, H11,
  * H12, H15, H16, H14's adoption half) say the gate (W3) is missing.
- * D15–D18 wait for the desktop's capability views (W4), R01–R07 for round 4.
+ * D15–D18 are judged (step4-desktop-judges.mjs) from the capabilities
+ * desktop scenario (`ctx.capabilities`, step4-desktop.mjs); R01–R07 wait for
+ * round 4.
  */
 import { CHECKS as STEP3_CHECKS } from './step3-checks.mjs'
 import { JUDGES as STEP3_JUDGES, judge as judgeStep3 } from './step3-judges.mjs'
+import { CAPABILITY_JUDGES, judgeCapabilities } from './step4-desktop-judges.mjs'
 import { JUDGES, judge } from './step4-judges.mjs'
 
 export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_PASS } from './step2-checks.mjs'
@@ -26,7 +29,7 @@ export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_P
 /** Layers in run order. `real` is only run when asked for explicitly. */
 export const LAYERS = /** @type {const} */ ({
   headless: { title: '无界面层（脚本化 provider，经 SDK）', prefix: 'H' },
-  desktop: { title: '桌面层（脚本化 provider，Playwright 驱动 Electron；D01–D14 为步骤 2、3 回归）', prefix: 'D' },
+  desktop: { title: '桌面层（脚本化 provider，Playwright 驱动 Electron；D01–D14 为步骤 2、3 回归，D15–D18 能力版本）', prefix: 'D' },
   real: { title: '真实模型层（手动）', prefix: 'R' },
 })
 
@@ -74,8 +77,17 @@ const step4Run = id => (ctx) => {
   return judge(id, ctx.step4)
 }
 
+/** A D15–D18 item: its judge over the capabilities desktop scenario's observations. */
+const capabilitiesRun = id => (ctx) => {
+  if (ctx?.capabilitiesError !== undefined) return { status: 'failed', evidence: `capabilities desktop scenario failed: ${ctx.capabilitiesError}` }
+  if (ctx?.capabilities === undefined) return { status: 'failed', evidence: 'capabilities desktop scenario did not run' }
+  return judgeCapabilities(id, ctx.capabilities)
+}
+
 const item = (id, layer, title, run) => {
-  const wired = run ?? (layer === 'headless' && JUDGES[id] !== undefined ? step4Run(id) : undefined)
+  const wired = run
+    ?? (layer === 'headless' && JUDGES[id] !== undefined ? step4Run(id) : undefined)
+    ?? (layer === 'desktop' && CAPABILITY_JUDGES[id] !== undefined ? capabilitiesRun(id) : undefined)
   return wired === undefined ? { id, layer, title } : { id, layer, title, run: wired }
 }
 
