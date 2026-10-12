@@ -49,8 +49,8 @@
 
 ## 三个工具
 
-- `capability_draft`：校验全部输入（路径、上限、种类）后才写；返回修订号 = 本会话该组件的第几次草稿。
-- `capability_try`：校验草稿（契约 schema、名字一致、入口文件存在、已注册的种类校验），冻结为该修订，加载进本会话。插件先问用户（`risk: high`，只有“本次允许”），拒绝时不导入、不执行任何代码；加载失败时本会话保留试用前的状态。
+- `capability_draft`：校验全部输入（路径、上限、种类）后才写；返回修订号 = 本会话该组件的第几次草稿。工具说明里写明每种组件入口文件的格式与一个最小示例（`src/formats.ts`，测试保证示例能通过校验）。
+- `capability_try`：校验草稿（契约 schema、名字一致、入口文件存在、已注册的种类校验；格式不合时一次列出所有问题并附上期望格式），冻结为该修订，加载进本会话。插件先问用户（`risk: high`，只有“本次允许”），拒绝时不导入、不执行任何代码；加载失败时本会话保留试用前的状态。
 - `capability_propose`：每个组件在最近一次试用之后必须有一次成功使用（函数或插件的工具调用、`load_skill`、带该预设的 `delegate` / `spawn_teammate` / 工作流节点、`spawn_teammate`、带图的 `workflow`；上下文策略要求试用之后有一轮正常结束），否则拒绝并列出缺什么。通过后写候选包与 `candidates/<id>/`。
 - 三个工具都拒绝成员调用。
 
@@ -73,7 +73,6 @@
 - `trials/` 下的 `.attempt`、`.lock`、`.log` 三种旁路文件还没写进 `data-formats.md`。
 - `test-command` 检查只认 `TEST_COMMAND_PATTERN` 里的测试命令（`@nexgent/tasking`），`node checks/verify.mjs` 这类脚本不会成为检查。
 - 回放只发用户消息，反馈轮的成果修改与审批不重放；`estimatedUsd` 恒为 `unknown`。
-- 契约 `functionToolName` 允许带横线与大写的名字（如 `cap_order-summary_summarizeOrders`），而 kernel 的工具名规则是 `^[a-z][a-z0-9_]*$`，这种函数模块现在会在注册时被拒；等契约或 kernel 统一。
 - 契约 `SkillSource` 没有能力包来源，能力包技能标为 `project`；`workflow` 工具不能按名字引用已采用的图；`personaSuffix` 输出在 `# Learned practices` 节，没有接到人设段落。
 - 恢复的会话不会自动重新加载试用过的插件（重新加载要再问一次用户），需要再次 `capability_try`。
 - 能力包目录不设只读属性，完整性只靠加载时校验；Windows 上的硬链接发布与目录改名竞争还没有实跑。
