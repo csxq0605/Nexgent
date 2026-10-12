@@ -8,13 +8,17 @@
  * script exits 2. Item evaluation, the exit rule and the budget gate are
  * step 2's, re-exported unchanged.
  *
- * Round 1 wires the regressions only: H19 runs step 3's H01–H23 judges over
- * a fresh run of step 3's headless scenario (`ctx.step3`); D01–D14 are step
- * 3's desktop items with their own scenarios and judges. H01–H18, D15–D18
- * and R01–R07 wait for the capability store, loader and gate (rounds 2–4).
+ * H19 runs step 3's H01–H23 judges over a fresh run of step 3's headless
+ * scenario (`ctx.step3`); D01–D14 are step 3's desktop items with their own
+ * scenarios and judges. Round 2 adds H01–H05, H07, H10 and H17, judged
+ * (step4-judges.mjs) from the step-4 headless scenario (`ctx.step4`); each
+ * reports not-implemented until the product part it needs has landed.
+ * H06, H08, H09, H11–H16, H18, D15–D18 and R01–R07 wait for the gate and
+ * the desktop (rounds 3–4).
  */
 import { CHECKS as STEP3_CHECKS } from './step3-checks.mjs'
 import { JUDGES as STEP3_JUDGES, judge as judgeStep3 } from './step3-judges.mjs'
+import { JUDGES, judge } from './step4-judges.mjs'
 
 export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_PASS } from './step2-checks.mjs'
 
@@ -62,7 +66,17 @@ function step3Regression(ctx) {
   return regressionVerdict(Object.keys(STEP3_JUDGES).map(id => [id, judgeStep3(id, ctx.step3, ctx.tools)]))
 }
 
-const item = (id, layer, title, run) => (run === undefined ? { id, layer, title } : { id, layer, title, run })
+/** A round-2 headless item: its judge over the step-4 scenario's observations. */
+const step4Run = id => (ctx) => {
+  if (ctx?.step4Error !== undefined) return { status: 'failed', evidence: `step 4 headless scenario failed: ${ctx.step4Error}` }
+  if (ctx?.step4 === undefined) return { status: 'failed', evidence: 'step 4 headless scenario did not run' }
+  return judge(id, ctx.step4)
+}
+
+const item = (id, layer, title, run) => {
+  const wired = run ?? (layer === 'headless' && JUDGES[id] !== undefined ? step4Run(id) : undefined)
+  return wired === undefined ? { id, layer, title } : { id, layer, title, run: wired }
+}
 
 /** D01–D14 from step 3 (D01–D10 are step 2's), judged by their own judges; the desktop ctx has step 3's shape. */
 const desktopRegression = STEP3_CHECKS

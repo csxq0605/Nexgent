@@ -27,8 +27,10 @@ const plan = fileURLToPath(new URL('../../../docs/plan/step-4-work-partition.md'
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
-/** Wired in round 1: the regressions. Everything else must report not-implemented. */
-const WIRED = new Set(['H19', ...range('D', 1, 14)])
+/** Round 2's step-4 items, judged from the step-4 headless scenario. */
+const STEP4 = ['H01', 'H02', 'H03', 'H04', 'H05', 'H07', 'H10', 'H17']
+/** Wired so far: the regressions (round 1) and STEP4 (round 2). Everything else must report not-implemented. */
+const WIRED = new Set(['H19', ...range('D', 1, 14), ...STEP4])
 
 describe('accept-step4 checklist', () => {
   it('has every item of the step-4 plan in order, plus the D01–D14 regression', async () => {
@@ -62,6 +64,11 @@ describe('accept-step4 checklist', () => {
     const h19 = CHECKS.find(c => c.id === 'H19')!
     expect(await evaluateItem(h19, { step3Error: 'boom' })).toEqual({ status: 'failed', evidence: 'step 3 headless scenario failed: boom' })
     expect(await evaluateItem(h19, { step3: {} })).toMatchObject({ status: 'failed', evidence: expect.stringMatching(/23 of 23 did not pass/) })
+    for (const id of STEP4) {
+      const check = CHECKS.find(c => c.id === id)!
+      expect(await evaluateItem(check, { step4Error: 'boom' }), id).toEqual({ status: 'failed', evidence: 'step 4 headless scenario failed: boom' })
+      expect(await evaluateItem(check, {}), id).toEqual({ status: 'failed', evidence: 'step 4 headless scenario did not run' })
+    }
   })
 
   it('real-model facts follow the user decisions: thinking on, 15 USD', () => {
@@ -120,17 +127,24 @@ describe('scripts/accept-step4.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  it('headless layer: H19 passes on a real step-3 run, H01–H18 not implemented, exit 2, valid summary', async () => {
+  // While W1 and W2 part 2 have not landed, the step-4 items say so; none may fail or pass.
+  it('headless layer: H19 passes on a real step-3 run, the step-4 items name the missing part, exit 2, valid summary', async () => {
     const { result, summary } = await runScript(['--layer', 'headless'])
     expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
     expect(summary?.result).toBe('fail')
-    expect(summary?.checks.map(check => check.id)).toEqual(range('H', 1, 19))
-    for (const check of summary?.checks ?? []) {
+    const items = (summary?.checks ?? []).filter(check => check.id !== undefined)
+    expect(items.map(check => check.id)).toEqual(range('H', 1, 19))
+    for (const check of items) {
       if (check.id === 'H19') expect(check).toMatchObject({ status: 'passed', passed: true, detail: 'step 3 H01–H23: all 23 passed' })
+      else if (STEP4.includes(check.id!)) expect(check, check.id).toMatchObject({ status: 'not-implemented', passed: false, detail: expect.stringMatching(/\((W1|W2 part 2)\)/) })
       else expect(check, check.id ?? '').toMatchObject({ status: 'not-implemented', passed: false })
     }
-  }, 180_000)
+    // The midterm checkpoint: four named checks outside the checklist, none passed.
+    const points = (summary?.checks ?? []).filter(check => check.id === undefined)
+    expect(points.map(check => check.name.slice(0, 7))).toEqual(['中期检查点 1', '中期检查点 2', '中期检查点 3', '中期检查点 4'])
+    for (const point of points) expect(point, point.name).toMatchObject({ passed: false, detail: expect.stringMatching(/^not-implemented: /) })
+  }, 240_000)
 
   it('real layer: not runnable without a key, and with a key still calls no model (nothing wired); exit 2 both ways', async () => {
     const keyless = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: undefined, ANTHROPIC_API_KEY: undefined })
