@@ -47,7 +47,7 @@
 | [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
 | [`plan/step-2-work-partition.md`](plan/step-2-work-partition.md) | 步骤 2 分工与验收设计，用户 2026-10-11 已定 |
 | [`plan/step-3-work-partition.md`](plan/step-3-work-partition.md) | 步骤 3 分工与验收设计，用户 2026-10-11 已定 |
-| [`plan/step-4-work-partition.md`](plan/step-4-work-partition.md) | 步骤 4 分工与验收设计，草稿，待用户认可 |
+| [`plan/step-4-work-partition.md`](plan/step-4-work-partition.md) | 步骤 4 分工与验收设计，用户 2026-10-12 已定 |
 | [`spec/data-formats.md`](spec/data-formats.md) | 步骤 1、步骤 2 章节已写定（材料、成果、反馈、持久目标、压缩）；能力清单留标题 |
 | [`spec/permissions.md`](spec/permissions.md) | 步骤 1、步骤 2 章节已写定（本地 IPC 与访问令牌）；插件安装审批（步骤 4）留标题 |
 | [`spec/agent-hooks.md`](spec/agent-hooks.md) | 步骤 2：agent loop 挂点、步骤 2 工具、系统提示增量、技能 |
