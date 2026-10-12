@@ -1,9 +1,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+// The host's own rule (not a dependency of this package: read from the built tasking package).
+import { TEST_COMMAND_PATTERN } from '../../tasking/dist/task-records.js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { loadStep3Packages } from '../../../scripts/accept-common/step3-runtime.mjs'
 import {
+  checkSource,
   COMPONENTS,
   outputFor,
   REPLAY_TASKS,
@@ -107,9 +110,14 @@ describe('candidates and the replay project (scripts/accept-common/step4-fixture
   })
 
   it('the test command fails on a missing output and exits 2 on bad usage', async () => {
-    const missing = { ...TASK_B, output: 'out/nothing.json', checkCommand: TASK_B.checkCommand.replace(TASK_B.output, 'out/nothing.json') }
+    const missing = { ...TASK_B, id: 'missing', output: 'out/nothing.json', checkCommand: 'node --test checks/missing.test.mjs' }
+    await writeFile(join(root, 'checks/missing.test.mjs'), checkSource(missing))
     expect(runCheck(root, missing)).toMatchObject({ exitCode: 1, stdout: expect.stringMatching(/does not exist/) })
     expect(runCheck(root, { ...TASK_B, checkCommand: 'node checks/verify.mjs' }).exitCode).toBe(2)
+  })
+
+  it('every test command is one the host re-runs as the task\'s test-command check', () => {
+    for (const entry of ALL_TASKS) expect(TEST_COMMAND_PATTERN.test(entry.checkCommand), entry.checkCommand).toBe(true)
   })
 })
 

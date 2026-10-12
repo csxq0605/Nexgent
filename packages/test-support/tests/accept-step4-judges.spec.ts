@@ -6,7 +6,8 @@
  */
 import { functionToolName, MEMBER_DENIED_TOOLS } from '@nexgent/kernel'
 import { describe, expect, it } from 'vitest'
-import { checkpoint4, FUNCTION_TOOL, judge, judgeCheckpoint, JUDGES, versionWritten } from '../../../scripts/accept-common/step4-judges.mjs'
+import { checkpoint4, EXTRAS, FUNCTION_TOOL, judge, judgeCheckpoint, JUDGES, versionWritten } from '../../../scripts/accept-common/step4-judges.mjs'
+import { PLUGIN, pluginFiles, POLICIES } from '../../../scripts/accept-common/step4-scenario.mjs'
 import { COMPONENTS, TASK_B } from '../../../scripts/accept-common/step4-fixtures.mjs'
 import { expectedSummary, ordersCsv } from '../../../scripts/real-task/step4-orders.mjs'
 
@@ -24,7 +25,7 @@ const start = (capabilityVersion?: string) => ({ type: 'session.start', ...(capa
 /** Observations that satisfy every round-2 judge. */
 function good(): Obs {
   return {
-    features: { capabilityTools: true },
+    features: { capabilityTools: true, gate: false },
     phases: {
       baseline: { sessionId: 'S-base', reason: { kind: 'completed' } },
       taskA: { sessionId: 'S-A', reason: { kind: 'completed' } },
@@ -32,6 +33,11 @@ function good(): Obs {
       adopt: { version: V, published: true },
       taskB: { sessionId: 'S-B', parentPid: 100, child: { pid: 200, exitCode: 0, done: { type: 'driver.done', reason: { kind: 'completed' } } } },
       tamper: { sessionId: 'S-T', reason: { kind: 'completed' } },
+      extras: {
+        sessionId: 'S-X',
+        reason: { kind: 'completed' },
+        approvals: [{ sessionId: 'S-X', request: { id: 'a1', risk: 'high', summary: 'Load plugin "probe-plugin" into Nexgent' }, answered: true }],
+      },
     },
     sessions: {
       'S-base': [start('baseline')],
@@ -53,13 +59,24 @@ function good(): Obs {
       'S-help': [start('baseline')],
       'S-B': [start(V), result('use-fm-b'), result('probe-bundle', true, 'denied')],
       'S-T': [start('baseline')],
+      'S-X': [
+        start('baseline'),
+        result('draft-policy-short-summaries'), result('try-policy-short-summaries'),
+        { type: 'capability.try', component: { kind: 'context-policy', name: 'short-summaries' }, revision: 1 },
+        ...EXTRAS.badPolicies.flatMap(([name, field]) => [result(`draft-policy-${name}`, true, `policy.json: /${field} is not allowed`), result(`try-policy-${name}`, true, 'no draft')]),
+        result('draft-plugin'), result('try-plugin', true, 'the user did not allow loading plugin probe-plugin'),
+      ],
     },
     ledger: [
       { type: 'llm.request.start', sessionId: 'S-base', capabilityVersion: 'baseline' },
-      { type: 'task.outcome', sessionId: 'S-base', capabilityVersion: 'baseline', taskId: 'T1', checks: [{ name: 'file-exists', passed: true, target: 'c1' }, { name: 'test-command', passed: true, target: 'c2' }] },
+      { type: 'task.outcome', sessionId: 'S-base', memberId: 'main', capabilityVersion: 'baseline', taskId: 'T1', componentsUsed: [], checks: [{ name: 'file-exists', passed: true, target: 'c1' }, { name: 'test-command', passed: true, target: 'c2' }] },
+      { type: 'task.outcome', sessionId: 'S-A', memberId: 'main', capabilityVersion: 'baseline', taskId: 'T3', componentsUsed: [{ ...fm, version: 'draft', calls: 1, errors: 0 }], checks: [] },
+      { type: 'task.outcome', sessionId: 'S-help', memberId: 'S-help', capabilityVersion: 'baseline', taskId: 'T4', componentsUsed: [] },
+      { type: 'task.outcome', sessionId: 'S-peer', memberId: 'main', capabilityVersion: 'baseline', taskId: 'T4', componentsUsed: [], checks: [], memberCosts: [{ memberId: 'S-help', name: 'helper' }] },
+      { type: 'task.outcome', sessionId: 'S-X', memberId: 'main', capabilityVersion: 'baseline', taskId: 'T5', componentsUsed: [], checks: [] },
       { type: 'llm.request.start', sessionId: 'S-B', capabilityVersion: V },
       { type: 'tool.call', sessionId: 'S-B', capabilityVersion: V },
-      { type: 'task.outcome', sessionId: 'S-B', capabilityVersion: V, taskId: 'T2', componentsUsed: [{ ...fm, version: V, calls: 1, errors: 0 }] },
+      { type: 'task.outcome', sessionId: 'S-B', memberId: 'main', capabilityVersion: V, taskId: 'T2', componentsUsed: [{ ...fm, version: V, calls: 1, errors: 0 }], checks: [] },
     ],
     requests: [
       ...Array.from({ length: 8 }, (_, i) => ({ route: 'taskA', tools: [...CAP, ...(i >= 2 ? [F] : [])], system: 'root' })),
@@ -67,7 +84,13 @@ function good(): Obs {
       { route: 'peer', tools: [...CAP], system: 'root' },
       { route: 'helper', tools: ['read_file', 'write_file'], system: 'persona\nMember: helper (delegated)\n' },
       ...Array.from({ length: 4 }, () => ({ route: 'taskB', tools: [...CAP, F], system: 'root' })),
+      ...Array.from({ length: 3 }, () => ({ route: 'extras', tools: [...CAP], system: 'root' })),
     ],
+    pluginRan: false,
+    schemaIssues: [],
+    export: { code: 0, files: ['session.md'] },
+    secretHits: [],
+    exportSecretHits: [],
     bundle: {
       version: V,
       recomputedVersion: V,
@@ -97,7 +120,12 @@ function withAfter(obs: Obs): Obs {
   return obs
 }
 const base = () => withAfter(good())
+const lineOfB = (obs: Obs, type: string) => obs['ledger'].find((r: any) => r.sessionId === 'S-B' && r.type === type)
 const ROUND2 = ['H01', 'H02', 'H03', 'H04', 'H05', 'H07', 'H10', 'H17']
+/** Round 3: judged now. */
+const ROUND3 = ['H13', 'H18']
+/** Need the gate: not-implemented in every observation until W3 lands and their scenario is written. */
+const GATE = ['H06', 'H08', 'H09', 'H11', 'H12', 'H15', 'H16']
 
 /** Expect `id` to fail on `obs`, with evidence matching `pattern`. */
 function fails(id: string, obs: Obs, pattern: RegExp) {
@@ -111,11 +139,25 @@ describe('round-2 judges: the pass case', () => {
     expect(FUNCTION_TOOL).toBe(functionToolName(COMPONENTS.good.functionModule.name, COMPONENTS.good.functionModule.function))
     expect(FUNCTION_TOOL).toBe(F)
     for (const tool of CAP) expect(MEMBER_DENIED_TOOLS).toContain(tool)
-    expect(Object.keys(JUDGES)).toEqual(ROUND2)
+    expect(Object.keys(JUDGES).sort()).toEqual([...ROUND2, ...ROUND3, 'H14', ...GATE].sort())
+  })
+
+  it('pins the extras phase the judges read against the scenario', () => {
+    expect(EXTRAS.goodPolicy).toBe(POLICIES.good.name)
+    expect(EXTRAS.badPolicies).toEqual(POLICIES.bad.map(p => [p.name, p.field]))
+    for (const p of POLICIES.bad) expect(p.files[0]!.content).toContain(`"${p.field}"`)
+    expect([EXTRAS.plugin, EXTRAS.pluginTool]).toEqual([PLUGIN.name, PLUGIN.tool])
+    expect(pluginFiles('/m').map(f => f.path)).toEqual(['plugin.json', 'index.mjs'])
   })
 
   it('every round-2 judge passes the good observations; the checkpoint passes too', () => {
-    for (const id of ROUND2) expect(judge(id, base()), id).toMatchObject({ status: 'passed' })
+    for (const id of [...ROUND2, ...ROUND3]) expect(judge(id, base()), id).toMatchObject({ status: 'passed' })
+    // H14's try half passes; adoption approval needs the gate.
+    expect(judge('H14', base())).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/gate \(W3\).*checked so far: trying the plugin asked once/) })
+    for (const id of GATE) expect(judge(id, base()), id).toEqual({ status: 'not-implemented', evidence: expect.stringMatching(/the gate \(W3\) has not landed/) })
+    const gate = base()
+    gate['features'].gate = true
+    for (const id of GATE) expect(judge(id, gate), id).toEqual({ status: 'not-implemented', evidence: expect.stringMatching(/scenario is not written yet/) })
     expect(judgeCheckpoint(base()).map(p => [p.id, p.status])).toEqual([['CP1', 'passed'], ['CP2', 'passed'], ['CP3', 'passed'], ['CP4', 'passed']])
   })
 })
@@ -124,7 +166,7 @@ describe('round-2 judges: not-implemented until the product part lands', () => {
   it('without the capability tools every tool-dependent item is not-implemented, never passed', () => {
     const obs = base()
     obs['features'].capabilityTools = false
-    for (const id of ['H02', 'H03', 'H04', 'H05', 'H07', 'H10', 'H17']) expect(judge(id, obs), id).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/W2 part 2/) })
+    for (const id of ['H02', 'H03', 'H04', 'H05', 'H07', 'H10', 'H13', 'H14', 'H17']) expect(judge(id, obs), id).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/W2 part 2/) })
     expect(judge('H01', obs)).toMatchObject({ status: 'passed' })
   })
 
@@ -224,9 +266,9 @@ describe('round-2 judges: counter-examples', () => {
       ['old version in start', o => { o['sessions']['S-B'][0].capabilityVersion = 'baseline' }, /session\.start of B/],
       ['tool not offered', o => { o['requests'].find((r: any) => r.route === 'taskB').tools = CAP }, /without a try/],
       ['call failed', o => { o['sessions']['S-B'][1].isError = true }, /call succeeded/],
-      ['ledger line without version', o => { o['ledger'][3].capabilityVersion = 'baseline' }, /1 of 3 do not/],
-      ['componentsUsed missing', o => { delete o['ledger'][4].componentsUsed }, /componentsUsed/],
-      ['componentsUsed from a draft', o => { o['ledger'][4].componentsUsed[0].version = 'draft' }, /componentsUsed/],
+      ['ledger line without version', o => { lineOfB(o, 'tool.call').capabilityVersion = 'baseline' }, /1 of 3 do not/],
+      ['componentsUsed missing', o => { delete lineOfB(o, 'task.outcome').componentsUsed }, /componentsUsed/],
+      ['componentsUsed from a draft', o => { lineOfB(o, 'task.outcome').componentsUsed[0].version = 'draft' }, /componentsUsed/],
       ['wrong summary', o => { o['outputs'][TASK_B.id] = '{"month":"2026-10"}' }, /hidden check/],
     ]
     for (const [label, mutate, pattern] of cases) {
@@ -274,5 +316,65 @@ describe('round-2 judges: counter-examples', () => {
   it('checkpoints 1–3 follow their items: a failed item fails the point', () => {
     const obs = base(); obs['sessions']['S-A'].find((r: any) => r.toolCallId === 'probe-read').isError = false
     expect(judgeCheckpoint(obs).find(p => p.id === 'CP1')).toMatchObject({ status: 'failed', evidence: expect.stringMatching(/^H02/) })
+  })
+})
+
+describe('round-3 judges: counter-examples', () => {
+  const xRecords = (obs: Obs) => obs['sessions']['S-X'] as Record<string, any>[]
+  const xResult = (obs: Obs, id: string) => xRecords(obs).find(r => r.toolCallId === id)!
+
+  it('H13 fails when a policy reaching a gate field loads, is refused for another reason, or the control fails', () => {
+    let obs = base()
+    xResult(obs, 'draft-policy-open-sandbox').isError = false
+    xResult(obs, 'try-policy-open-sandbox').isError = false
+    fails('H13', obs, /open-sandbox \(with sandbox\) was refused/)
+    obs = base()
+    xRecords(obs).push({ type: 'capability.try', component: { kind: 'context-policy', name: 'skip-gate' }, revision: 1 })
+    fails('H13', obs, /skip-gate was never loaded/)
+    obs = base()
+    xResult(obs, 'draft-policy-more-budget').content = 'invalid JSON'
+    fails('H13', obs, /names costCapUsd/)
+    obs = base()
+    xResult(obs, 'try-policy-short-summaries').isError = true
+    fails('H13', obs, /the control/)
+  })
+
+  it('H14 fails when the plugin loaded, ran, asked twice or was not asked as high risk', () => {
+    let obs = base()
+    obs['pluginRan'] = true
+    fails('H14', obs, /never ran/)
+    obs = base()
+    xResult(obs, 'try-plugin').isError = false
+    fails('H14', obs, /failed after the denial/)
+    obs = base()
+    obs['phases'].extras.approvals.push(structuredClone(obs['phases'].extras.approvals[0]))
+    fails('H14', obs, /exactly once/)
+    obs = base()
+    obs['phases'].extras.approvals[0].request.risk = 'medium'
+    fails('H14', obs, /high risk/)
+    obs = base()
+    obs['requests'].find((r: any) => r.route === 'extras').tools.push('probe_plugin_ping')
+    fails('H14', obs, /no request offers/)
+  })
+
+  it('H18 fails on a missing outcome field, member cost, schema issue, failed export or leaked key', () => {
+    const cases: [(o: Obs) => void, RegExp][] = [
+      [o => { delete o['ledger'].find((r: any) => r.sessionId === 'S-X').checks }, /lack them/],
+      [o => { o['ledger'].find((r: any) => r.sessionId === 'S-peer').memberCosts = [] }, /missing in S-peer/],
+      [o => { lineOfB(o, 'task.outcome').componentsUsed = [] }, /adopted module/],
+      [o => { o['schemaIssues'] = ['ledger#3 tool.call: /x bad'] }, /passes the schema \(ledger#3/],
+      [o => { o['export'] = { code: 1, files: [] } }, /export of task B/],
+      [o => { o['secretHits'] = ['.nexgent/config.json'] }, /config\.json/],
+      [o => { o['exportSecretHits'] = undefined }, /not scanned/],
+    ]
+    for (const [mutate, pattern] of cases) {
+      const obs = base()
+      mutate(obs)
+      fails('H18', obs, pattern)
+    }
+    const old = base()
+    for (const r of old['ledger']) delete r.capabilityVersion
+    for (const records of Object.values(old['sessions']) as any[]) for (const r of records) delete r.capabilityVersion
+    expect(judge('H18', old)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/W1/) })
   })
 })

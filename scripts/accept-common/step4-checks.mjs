@@ -10,11 +10,12 @@
  *
  * H19 runs step 3's H01–H23 judges over a fresh run of step 3's headless
  * scenario (`ctx.step3`); D01–D14 are step 3's desktop items with their own
- * scenarios and judges. Round 2 adds H01–H05, H07, H10 and H17, judged
- * (step4-judges.mjs) from the step-4 headless scenario (`ctx.step4`); each
- * reports not-implemented until the product part it needs has landed.
- * H06, H08, H09, H11–H16, H18, D15–D18 and R01–R07 wait for the gate and
- * the desktop (rounds 3–4).
+ * scenarios and judges. H01–H18 are judged (step4-judges.mjs) from the
+ * step-4 headless scenario (`ctx.step4`): H01–H05, H07, H10, H17 since round
+ * 2, H13, H14 and H18 since round 3; each reports not-implemented until the
+ * product part it needs has landed, and the gate items (H06, H08, H09, H11,
+ * H12, H15, H16, H14's adoption half) say the gate (W3) is missing.
+ * D15–D18 wait for the desktop's capability views (W4), R01–R07 for round 4.
  */
 import { CHECKS as STEP3_CHECKS } from './step3-checks.mjs'
 import { JUDGES as STEP3_JUDGES, judge as judgeStep3 } from './step3-judges.mjs'

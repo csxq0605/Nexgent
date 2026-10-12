@@ -1,6 +1,7 @@
 /**
  * Judges of accept-step4 (round 2: H01–H05, H07, H10, H17 and the four items
- * of the midterm checkpoint), each a pure function of the observations
+ * of the midterm checkpoint; round 3: H13, H14, H18, and the gate items, which
+ * report not-implemented until the gate lands), each a pure function of the observations
  * step4-headless.mjs collected. Each is tested against observations made
  * wrong on purpose (packages/test-support/tests/accept-step4-judges.spec.ts).
  *
@@ -12,6 +13,14 @@
 import { judgeSummary, ordersCsv } from '../real-task/step4-orders.mjs'
 import { verdict, partial } from './step2-judges.mjs'
 import { COMPONENTS, TASK_B, UNUSED_SKILL } from './step4-fixtures.mjs'
+
+/** Context policies and the plugin of the extras phase (copies of step4-scenario.mjs; a test pins them). */
+export const EXTRAS = {
+  goodPolicy: 'short-summaries',
+  badPolicies: [['auto-approve', 'approvals'], ['more-budget', 'costCapUsd'], ['open-sandbox', 'sandbox'], ['skip-gate', 'capabilities'], ['nested-budget', 'budgetUsd']],
+  plugin: 'probe-plugin',
+  pluginTool: 'probe_plugin_ping',
+}
 
 /** `functionToolName('order-summary', 'summarizeOrders')` (contract; pinned by the judges' tests). */
 export const FUNCTION_TOOL = 'cap_order-summary_summarizeOrders'
@@ -37,7 +46,18 @@ export function versionWritten(obs) {
 
 const NO_TOOLS = 'the product does not offer capability_draft / try / propose yet (W2 part 2)'
 const NO_VERSION = 'the kernel does not write capabilityVersion into sessions or the ledger yet (W1)'
+const NO_GATE = 'the gate (W3) has not landed: SDK capabilities.trial is not implemented'
+const GATE_SCENARIO = 'the gate is present, but this item\'s scenario is not written yet (W5, after W3 lands)'
 const pending = evidence => ({ status: 'not-implemented', evidence })
+
+/** Items that need the gate: not-implemented, naming why, until W3 lands and their scenario is written. */
+const gateItem = () => obs => pending(obs?.features?.gate === true ? GATE_SCENARIO : NO_GATE)
+
+/** Root `task.outcome` lines (memberId main) and the members' lines, per taskId. */
+function outcomes(obs) {
+  const all = (obs?.ledger ?? []).filter(r => r.type === 'task.outcome')
+  return { roots: all.filter(r => r.memberId === 'main'), members: all.filter(r => r.memberId !== 'main') }
+}
 
 /** Draft and component records of task A. */
 function taskAFacts(obs) {
@@ -179,6 +199,55 @@ export const JUDGES = {
     return verdict(conditions, `tampering with ${version} made the next load roll back to ${rollback?.version}; the session ran on it`)
   },
 
+  H06: gateItem(),
+  H08: gateItem(),
+  H09: gateItem(),
+  H11: gateItem(),
+  H12: gateItem(),
+
+  H13(obs) {
+    if (obs?.features?.capabilityTools !== true) return pending(NO_TOOLS)
+    const sessionId = sessionOf(obs, 'extras')
+    const records = recordsOf(obs, sessionId)
+    const tried = name => records.some(r => r.type === 'capability.try' && r.component?.kind === 'context-policy' && r.component?.name === name)
+    const conditions = [
+      [completed(obs.phases?.extras), `the extras session completed (got ${obs.phases?.extras?.reason?.kind})`],
+      [ok(resultOf(obs, sessionId, `draft-policy-${EXTRAS.goodPolicy}`)) && ok(resultOf(obs, sessionId, `try-policy-${EXTRAS.goodPolicy}`)) && tried(EXTRAS.goodPolicy), `the valid policy ${EXTRAS.goodPolicy} drafted and loaded (the control)`],
+    ]
+    for (const [name, field] of EXTRAS.badPolicies) {
+      const draft = resultOf(obs, sessionId, `draft-policy-${name}`)
+      const attempt = resultOf(obs, sessionId, `try-policy-${name}`)
+      const refusal = refused(draft) ? draft : attempt
+      conditions.push(
+        [refused(draft) || refused(attempt), `${name} (with ${field}) was refused at draft or try`],
+        [String(refusal?.content ?? '').includes(field), `the refusal of ${name} names ${field} (got ${JSON.stringify(String(refusal?.content ?? '').slice(0, 160))})`],
+        [!tried(name), `${name} was never loaded (no capability.try record)`],
+      )
+    }
+    return verdict(conditions, `the schema refused ${EXTRAS.badPolicies.length} context policies reaching ${EXTRAS.badPolicies.map(([, f]) => f).join(', ')}; the valid one loaded`)
+  },
+
+  H14(obs) {
+    if (obs?.features?.capabilityTools !== true) return pending(NO_TOOLS)
+    const sessionId = sessionOf(obs, 'extras')
+    const approvals = (obs.phases?.extras?.approvals ?? []).filter(a => String(a.request?.summary ?? '').includes(EXTRAS.plugin))
+    const records = recordsOf(obs, sessionId)
+    const conditions = [
+      [ok(resultOf(obs, sessionId, 'draft-plugin')), `the plugin ${EXTRAS.plugin} drafted`],
+      [approvals.length === 1, `trying it asked for approval exactly once (got ${approvals.length})`],
+      [approvals[0]?.request?.risk === 'high', `the approval is high risk (got ${approvals[0]?.request?.risk})`],
+      [approvals[0]?.answered === true, `the denial was accepted (got ${JSON.stringify(approvals[0]?.answered)})`],
+      [refused(resultOf(obs, sessionId, 'try-plugin')), 'capability_try of the plugin failed after the denial'],
+      [!records.some(r => r.type === 'capability.try' && r.component?.name === EXTRAS.plugin), 'no capability.try record for the plugin'],
+      [obs.pluginRan === false, 'its module never ran (no marker file)'],
+      [requestsOn(obs, 'extras').every(r => !r.tools.includes(EXTRAS.pluginTool)), `no request offers ${EXTRAS.pluginTool}`],
+    ]
+    return partial(conditions, 'approval of adoption and stopping at awaiting-approval after the gate need the gate (W3)', 'trying the plugin asked once; denied, nothing was imported or registered')
+  },
+
+  H15: gateItem(),
+  H16: gateItem(),
+
   H17(obs) {
     if (obs?.features?.capabilityTools !== true) return pending(NO_TOOLS)
     const root = requestsOn(obs, 'peer')
@@ -190,6 +259,26 @@ export const JUDGES = {
       [member.every(r => /^Member: helper \(/m.test(r.system)), 'its requests carry the member line'],
       [leaked.length === 0, `the member sees none of them (got ${[...new Set(leaked)].join(', ')})`],
     ], `the root session has ${CAPABILITY_TOOLS.join(', ')}; the member's ${member.length} requests have none`)
+  },
+
+  H18(obs) {
+    if (!versionWritten(obs)) return pending(NO_VERSION)
+    const { roots, members } = outcomes(obs)
+    const noFields = roots.filter(r => !Array.isArray(r.checks) || !Array.isArray(r.componentsUsed))
+    const trees = roots.map(r => [r, members.filter(m => m.taskId === r.taskId)])
+    const costless = trees.filter(([r, ms]) => ms.length > 0 && ms.some(m => !(r.memberCosts ?? []).some(c => c.memberId === m.memberId))).map(([r]) => r.sessionId.slice(0, 8))
+    const outcomeB = roots.filter(r => r.sessionId === sessionOf(obs, 'taskB')).at(-1)
+    const issues = obs.schemaIssues ?? ['not collected']
+    return verdict([
+      [roots.length >= 4 && noFields.length === 0, `every root task.outcome has checks and componentsUsed (${noFields.length} of ${roots.length} lack them)`],
+      [roots.some(r => (r.checks ?? []).length > 0), 'at least one task has host-run checks'],
+      [trees.some(([, ms]) => ms.length > 0) && costless.length === 0, `each root with members lists every member in memberCosts (missing in ${costless.join(', ') || 'none'})`],
+      [(outcomeB?.componentsUsed ?? []).some(c => c.kind === FM.kind && c.name === FM.name), 'task B\'s outcome lists the adopted module'],
+      [issues.length === 0, `every session record and ledger line passes the schema (${issues.slice(0, 3).join('; ')})`],
+      [obs.export?.code === 0 && (obs.export?.files ?? []).length > 0, `nexgent export of task B ran and wrote files (exit ${obs.export?.code})`],
+      [(obs.secretHits ?? ['?']).length === 0, `no file under .nexgent/ contains the test key (${(obs.secretHits ?? ['not scanned']).join(', ')})`],
+      [(obs.exportSecretHits ?? ['?']).length === 0, `no export file contains the test key (${(obs.exportSecretHits ?? ['not scanned']).join(', ')})`],
+    ], `${roots.length} root outcomes with checks, componentsUsed and memberCosts; all records pass the schema; the test key is in neither .nexgent/ nor the export`)
   },
 }
 

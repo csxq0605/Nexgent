@@ -10,10 +10,11 @@
  */
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { appendFile, mkdir, readdir, readFile } from 'node:fs/promises'
+import { appendFile, mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { runTurn } from './step2-runtime.mjs'
+import { filesContaining } from './step2-headless.mjs'
+import { CLI_BIN, runTurn } from './step2-runtime.mjs'
 import { createStep3Sdk, loadStep3Packages } from './step3-runtime.mjs'
 import { SCRIPTED_API_KEY, TASK_A, TASK_B, writeReplayProject } from './step4-fixtures.mjs'
 import { canonicalManifestText, componentDir } from './step4-kernel.mjs'
@@ -153,7 +154,7 @@ export async function runStep4Headless(h, work, { log = () => {} } = {}) {
   const home = join(work, 'home')
   await mkdir(root, { recursive: true })
   await writeReplayProject(root)
-  const state = {}
+  const state = { pluginMarker: join(work, 'plugin-ran.txt') }
   const script = await buildStep4Script(h, state)
   const server = await h.scriptedModelServer({ script: script.lead, routes: script.routes, routeKey: routeOf(h) })
   const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
@@ -164,6 +165,9 @@ export async function runStep4Headless(h, work, { log = () => {} } = {}) {
     const sdk = createStep3Sdk(pkgs, { env, home })
     try {
       projectId = (await sdk.call('projects.open', { root, create: true })).projectId
+      // Whether the gate is there: the SDK's capabilities.trial answers "not implemented yet" until W3/W4 land.
+      obs.features.gate = await sdk.call('capabilities.trial', { projectId, candidateId: '00000000-0000-4000-8000-000000000000' })
+        .then(() => true, error => !/not implemented yet/.test(errorText(error)))
       log('phase baseline')
       const baseline = (await sdk.call('sessions.create', { projectId, title: 'step-4 baseline' })).sessionId
       obs.phases.baseline = { sessionId: baseline, ...turnObs(await runTurn(sdk, { projectId, sessionId: baseline, text: BASELINE_TASK.ask })) }
@@ -175,6 +179,20 @@ export async function runStep4Headless(h, work, { log = () => {} } = {}) {
         log('phase peer (task A still open)')
         const peer = (await sdk.call('sessions.create', { projectId, title: 'step-4 peer' })).sessionId
         obs.phases.peer = { sessionId: peer, ...turnObs(await runTurn(sdk, { projectId, sessionId: peer, text: ASKS.peer })) }
+        log('phase extras (context policies, plugin approval denied)')
+        const extras = (await sdk.call('sessions.create', { projectId, title: 'step-4 extras' })).sessionId
+        const approvals = []
+        const onEvent = (event) => {
+          if (event.type !== 'approval.request') return
+          const entry = { sessionId: event.sessionId, request: event.request }
+          approvals.push(entry)
+          // Answered inside the listener: the request is pending when the event fires.
+          entry.answered = sdk.call('approvals.respond', { projectId, sessionId: event.request.sessionId, decision: { id: event.request.id, decision: 'deny', scope: 'once' } })
+            .then(ok => ok, error => `error: ${errorText(error)}`)
+        }
+        obs.phases.extras = { sessionId: extras, ...turnObs(await runTurn(sdk, { projectId, sessionId: extras, text: ASKS.extras }, { onEvent })) }
+        for (const entry of approvals) entry.answered = await entry.answered
+        obs.phases.extras.approvals = approvals
       }
     } finally {
       await sdk.dispose()
@@ -204,6 +222,12 @@ export async function runStep4Headless(h, work, { log = () => {} } = {}) {
       }
       obs.phases.taskB = { sessionId: sessionB, parentPid: process.pid, child: await turnInChild({ root, home, env, sessionId: sessionB, text: TASK_B.ask }) }
       obs.bundleAfterB = await bundleFacts(root, state.adoptedVersion)
+      log('phase export (task B)')
+      const exportDir = join(work, 'export-b')
+      const cli = h.spawnNode([CLI_BIN, 'export', sessionB, '--project', root, '--out', exportDir, '--json'], { cwd: work, env: { NEXGENT_HOME: home, NEXGENT_API_KEY: SCRIPTED_API_KEY } })
+      const cliExit = await cli.exit
+      obs.export = { code: cliExit.code, stderr: cliExit.stderr.slice(0, 2000), files: (await readdir(exportDir).catch(() => [])).sort() }
+      obs.exportSecretHits = await filesContaining(exportDir, SCRIPTED_API_KEY, work)
 
       log('phase tamper')
       const target = join(root, '.nexgent', 'capabilities', state.adoptedVersion, componentDir(CANDIDATE.functionModule.kind, CANDIDATE.functionModule.name), 'index.mjs')
@@ -221,7 +245,7 @@ export async function runStep4Headless(h, work, { log = () => {} } = {}) {
     }
   } finally {
     const route = routeOf(h)
-    obs.requests = server.requests.map(request => ({ route: route(request.body) ?? 'baseline', tools: toolsOf(request.body), system: h.sessionText(request.body) }))
+    obs.requests = server.requests.map(request => ({ route: route(request.body) ?? 'baseline', tools: toolsOf(request.body), system: h.requestText({ system: request.body?.system, messages: [] }) }))
     await server.close()
   }
   obs.sessions = await sessionsOf(root)
@@ -230,6 +254,15 @@ export async function runStep4Headless(h, work, { log = () => {} } = {}) {
   obs.candidates = await candidatesOf(root)
   obs.drafts = await filesUnder(join(root, '.nexgent', 'capabilities', 'drafts'))
   obs.snapshots = await filesUnder(join(root, '.nexgent', 'snapshots'))
+  obs.pluginRan = await stat(state.pluginMarker).then(() => true, () => false)
+  obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+  // Schema of every record (H18), with the session package's own validators.
+  const { validateSessionRecord, validateLedgerRecord } = pkgs.session
+  const issuesOf = (records, validate, where) => records.flatMap((record, index) => validate(record).map(issue => `${where}#${index + 1} ${record.type}: ${issue.path ?? ''} ${issue.message ?? JSON.stringify(issue)}`))
+  obs.schemaIssues = [
+    ...Object.entries(obs.sessions).flatMap(([id, records]) => issuesOf(records, validateSessionRecord, `session ${id.slice(0, 8)}`)),
+    ...issuesOf(obs.ledger, validateLedgerRecord, 'ledger'),
+  ]
   obs.outputs = {}
   for (const task of [BASELINE_TASK, TASK_A, TASK_B]) obs.outputs[task.id] = await readFile(join(root, task.output), 'utf8').catch(() => null)
   return obs

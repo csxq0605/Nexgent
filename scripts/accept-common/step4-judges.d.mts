@@ -15,3 +15,9 @@ export declare const CHECKPOINT: readonly CheckpointEntry[]
 export declare function checkpoint4(obs: Step4Observations): CheckResult
 export declare function judgeCheckpoint(obs: Step4Observations): (CheckpointEntry & CheckResult)[]
 export declare function judge(id: string, obs: Step4Observations | undefined): CheckResult
+export declare const EXTRAS: {
+  readonly goodPolicy: string
+  readonly badPolicies: readonly (readonly [string, string])[]
+  readonly plugin: string
+  readonly pluginTool: string
+}

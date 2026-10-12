@@ -41,6 +41,7 @@ export interface ReplayObservations {
 export declare const SCRIPTED_API_KEY: string
 export declare const VERIFY_PATH: string
 export declare const VERIFY_SOURCE: string
+export declare function checkSource(task: FamilyTask): string
 export declare function summarizerSource(options: { applyDiscount: boolean }): string
 export declare const FUNCTION_SPEC: {
   readonly formatVersion: 1

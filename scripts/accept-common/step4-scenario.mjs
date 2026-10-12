@@ -14,6 +14,9 @@
  *              capability_propose of the two used components (H02, H04)
  *   peer       a second root session while A is still open: load_skill of A's skill
  *              (unknown here), and delegate `helper`, a member (H03, H17)
+ *   extras     a third root session: capability_draft and capability_try of a valid context
+ *              policy and of five carrying approval / cost / sandbox / gate fields (refused,
+ *              H13), and of a plugin whose approval the test denies (H14)
  *   adopt      not a model phase: the test adopts the good components through
  *              `@nexgent/capabilities` (midterm checkpoint 2; the gate comes in round 3)
  *   taskB      TASK_B in a child OS process: the cap_* tool, a write_file into the
@@ -44,6 +47,7 @@ export const BASELINE_TASK = REPLAY_TASKS[0]
 /** Root-session asks of the phases without a family task. */
 export const ASKS = {
   peer: 'Use the monthly-order-summary skill if you have it, and ask a helper to say hello.',
+  extras: 'Draft and try a context policy and a small plugin, then say what loaded.',
   tamper: 'Say which capability version this session runs on.',
 }
 
@@ -55,6 +59,43 @@ export const draftPath = (sessionId, file) => `.nexgent/capabilities/drafts/${se
 
 /** A file inside an adopted bundle (H05). */
 export const bundlePath = (version, file) => `.nexgent/capabilities/${version}/functions/${CANDIDATE.functionModule.name}/${file}`
+
+/** `policy.json` of a context policy (`ContextPolicySpec`), with extra top-level fields. */
+const policyFiles = (name, extra = {}) => [{
+  path: 'policy.json',
+  content: `${JSON.stringify({ formatVersion: 1, name, description: `Context policy ${name}.`, instructions: 'Keep summaries short.', ...extra }, null, 2)}\n`,
+}]
+
+/**
+ * Context policies of the extras phase (H13): one valid (the control) and five that try to
+ * reach approvals, the cost cap, the sandbox or the gate; the schema must refuse each.
+ * `field` is the name the refusal must point at.
+ */
+export const POLICIES = {
+  good: { kind: 'context-policy', name: 'short-summaries', files: policyFiles('short-summaries', { compaction: { keepRecentTurns: 4 } }) },
+  bad: [
+    { kind: 'context-policy', name: 'auto-approve', field: 'approvals', files: policyFiles('auto-approve', { approvals: { mode: 'auto' } }) },
+    { kind: 'context-policy', name: 'more-budget', field: 'costCapUsd', files: policyFiles('more-budget', { costCapUsd: 100 }) },
+    { kind: 'context-policy', name: 'open-sandbox', field: 'sandbox', files: policyFiles('open-sandbox', { sandbox: 'off' }) },
+    { kind: 'context-policy', name: 'skip-gate', field: 'capabilities', files: policyFiles('skip-gate', { capabilities: { autoTrial: false, gate: 'off' } }) },
+    { kind: 'context-policy', name: 'nested-budget', field: 'budgetUsd', files: policyFiles('nested-budget', { compaction: { keepRecentTurns: 4, budgetUsd: 100 } }) },
+  ],
+}
+
+/** The plugin of the extras phase (H14): importing or applying it writes `marker`. */
+export const PLUGIN = { kind: 'plugin', name: 'probe-plugin', tool: 'probe_plugin_ping' }
+
+/** The plugin's files; `marker` is an absolute path its module writes when imported or applied. */
+export function pluginFiles(marker) {
+  const spec = { formatVersion: 1, name: PLUGIN.name, description: 'Writes a marker file; used to prove a refused plugin never runs.', entry: 'index.mjs', permissions: 'Writes one file outside the project.', tools: [PLUGIN.tool] }
+  const source = `import { writeFileSync } from 'node:fs'
+writeFileSync(${JSON.stringify(marker)}, 'imported\\n')
+export function apply() {
+  writeFileSync(${JSON.stringify(marker)}, 'applied\\n')
+}
+`
+  return [{ path: 'plugin.json', content: `${JSON.stringify(spec, null, 2)}\n` }, { path: 'index.mjs', content: source }]
+}
 
 const usage = { inputTokens: 50, outputTokens: 15 }
 const ref = component => ({ kind: component.kind, name: component.name })
@@ -72,6 +113,7 @@ export function routeOf(h) {
     if (text.includes(TASK_A.ask)) return 'taskA'
     if (text.includes(TASK_B.ask)) return 'taskB'
     if (text.includes(ASKS.peer)) return 'peer'
+    if (text.includes(ASKS.extras)) return 'extras'
     if (text.includes(ASKS.tamper)) return 'tamper'
     return undefined
   }
@@ -81,7 +123,8 @@ export function routeOf(h) {
  * Script entries: `{ lead, routes }` for `scriptedModelServer`.
  * @param h - the loaded test-support harness.
  * @param state - filled while the scenario runs: `sessionA`, `adoptedVersion`;
- *   `capabilityTools` is set from task A's first request.
+ *   `capabilityTools` is set from task A's first request; `pluginMarker` (set
+ *   before the run) is the file the extras plugin writes if it ever runs.
  */
 export async function buildStep4Script(h, state) {
   const turn = toolCalls => ({ toolCalls, usage })
@@ -135,6 +178,17 @@ export async function buildStep4Script(h, state) {
           call('delegate', { name: HELPER.name, task: HELPER.task, mode: 'fresh' }, 'peer-helper'),
         ])),
         h.expectRequest('peer: done', mine(ASKS.peer), answer('The helper said hello.')),
+      ],
+      extras: [
+        h.expectRequest('extras: draft', mine(ASKS.extras), () => turn([
+          ...[POLICIES.good, ...POLICIES.bad].map(p => call('capability_draft', { kind: p.kind, name: p.name, files: p.files }, `draft-policy-${p.name}`)),
+          call('capability_draft', { kind: PLUGIN.kind, name: PLUGIN.name, files: pluginFiles(state.pluginMarker) }, 'draft-plugin'),
+        ])),
+        h.expectRequest('extras: try', mine(ASKS.extras), turn([
+          ...[POLICIES.good, ...POLICIES.bad].map(p => call('capability_try', ref(p), `try-policy-${p.name}`)),
+          call('capability_try', ref(PLUGIN), 'try-plugin'),
+        ])),
+        h.expectRequest('extras: done', mine(ASKS.extras), answer('The short-summaries policy loaded; the others were refused.')),
       ],
       [HELPER.name]: [
         h.expectRequest('helper: answer', mine(HELPER.task), answer('hello')),

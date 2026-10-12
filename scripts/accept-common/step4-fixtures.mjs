@@ -8,8 +8,8 @@
  *                on every month: each month has a discounted order)
  *   replay       history tasks of one project: two monthly summaries (selection set, the
  *                candidate's own kind) and one region table (guard set); each task writes
- *                one file and runs `node checks/verify.mjs …`, the test command a replay
- *                re-runs (deterministic check `test-command`)
+ *                one file and runs `node --test checks/<task>.test.mjs`, a test command
+ *                the host recognises and re-runs (deterministic check `test-command`)
  *   tasks A, B   task A asks for a reusable function or skill (user decision 8); task B is
  *                the same kind of task on new data and does not mention a component
  *
@@ -143,8 +143,10 @@ export const UNUSED_SKILL = {
  * matches the orders, 1 when it does not (problems on stdout), 2 on a usage error.
  * Self-contained: replays copy the project, not this repository.
  */
-export const VERIFY_SOURCE = `// Test command of the step-4 replay project. Usage: node checks/verify.mjs summary|regions <orders.csv> <output>
+export const VERIFY_SOURCE = `// Checker of the step-4 replay project: verify(mode, orders, output) for the per-task tests,
+// or from the command line: node checks/verify.mjs summary|regions <orders.csv> <output>
 import { readFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 ${summarizeFunction({ applyDiscount: true })}
 function regionsCsv(csvText) {
   const rows = String(csvText).split(/\\r?\\n/).filter(line => line.trim() !== '').slice(1).map(line => line.split(','))
@@ -157,53 +159,71 @@ function regionsCsv(csvText) {
   return ['region,orders,revenue', ...Object.keys(table).sort().map(region => region + ',' + table[region].orders + ',' + (Math.round(table[region].revenue * 100) / 100).toFixed(2))].join('\\n') + '\\n'
 }
 
-const [mode, ordersPath, outputPath] = process.argv.slice(2)
-if (!['summary', 'regions'].includes(mode) || !ordersPath || !outputPath) {
-  console.log('usage: node checks/verify.mjs summary|regions <orders.csv> <output>')
-  process.exit(2)
-}
-const orders = readFileSync(ordersPath, 'utf8')
-let output
-try {
-  output = readFileSync(outputPath, 'utf8')
-} catch {
-  console.log('FAIL ' + outputPath + ' does not exist')
-  process.exit(1)
-}
-const problems = []
-if (mode === 'regions') {
-  if (output.replace(/\\r\\n/g, '\\n') !== regionsCsv(orders)) problems.push('region table does not match the orders')
-} else {
-  let got
+/** { code, message }: 0 the output matches the orders, 1 it does not, 2 usage error. */
+export function verify(mode, ordersPath, outputPath) {
+  if (!['summary', 'regions'].includes(mode) || !ordersPath || !outputPath) return { code: 2, message: 'usage: node checks/verify.mjs summary|regions <orders.csv> <output>' }
+  const orders = readFileSync(ordersPath, 'utf8')
+  let output
   try {
-    got = JSON.parse(output)
+    output = readFileSync(outputPath, 'utf8')
   } catch {
-    got = undefined
-    problems.push('summary is not JSON')
+    return { code: 1, message: 'FAIL ' + outputPath + ' does not exist' }
   }
-  if (got !== undefined) {
-    const want = summarize(orders)
-    for (const key of ['month', 'orders', 'units', 'topProduct']) if (got[key] !== want[key]) problems.push(key + ' ' + JSON.stringify(got[key]) + ', expected ' + JSON.stringify(want[key]))
-    const near = (a, b) => typeof a === 'number' && Math.abs(a - b) < 0.005
-    if (!near(got.revenue, want.revenue)) problems.push('revenue ' + JSON.stringify(got.revenue) + ', expected ' + want.revenue)
-    const regions = Object.keys(want.byRegion)
-    if (Object.keys(got.byRegion ?? {}).sort().join() !== regions.join()) problems.push('byRegion keys differ')
-    for (const region of regions) if (!near(got.byRegion?.[region], want.byRegion[region])) problems.push(region + ' revenue ' + JSON.stringify(got.byRegion?.[region]) + ', expected ' + want.byRegion[region])
+  const problems = []
+  if (mode === 'regions') {
+    if (output.replace(/\\r\\n/g, '\\n') !== regionsCsv(orders)) problems.push('region table does not match the orders')
+  } else {
+    let got
+    try {
+      got = JSON.parse(output)
+    } catch {
+      got = undefined
+      problems.push('summary is not JSON')
+    }
+    if (got !== undefined) {
+      const want = summarize(orders)
+      for (const key of ['month', 'orders', 'units', 'topProduct']) if (got[key] !== want[key]) problems.push(key + ' ' + JSON.stringify(got[key]) + ', expected ' + JSON.stringify(want[key]))
+      const near = (a, b) => typeof a === 'number' && Math.abs(a - b) < 0.005
+      if (!near(got.revenue, want.revenue)) problems.push('revenue ' + JSON.stringify(got.revenue) + ', expected ' + want.revenue)
+      const regions = Object.keys(want.byRegion)
+      if (Object.keys(got.byRegion ?? {}).sort().join() !== regions.join()) problems.push('byRegion keys differ')
+      for (const region of regions) if (!near(got.byRegion?.[region], want.byRegion[region])) problems.push(region + ' revenue ' + JSON.stringify(got.byRegion?.[region]) + ', expected ' + want.byRegion[region])
+    }
   }
+  return problems.length > 0 ? { code: 1, message: 'FAIL ' + problems.join('; ') } : { code: 0, message: 'PASS ' + outputPath }
 }
-if (problems.length > 0) {
-  console.log('FAIL ' + problems.join('; '))
-  process.exit(1)
+
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const result = verify(...process.argv.slice(2))
+  console.log(result.message)
+  process.exit(result.code)
 }
-console.log('PASS ' + outputPath)
 `
 
 const ordersPath = month => `data/orders-${month}.csv`
+const checkPath = id => `checks/${id}.test.mjs`
+
+/**
+ * A task's test file: `node --test checks/<id>.test.mjs` is a test command the host
+ * recognises (`TEST_COMMAND_PATTERN`, packages/tasking), so the host re-runs it as the
+ * task's `test-command` check and replays compare it between the two arms.
+ */
+export function checkSource(taskEntry) {
+  return `import assert from 'node:assert/strict'
+import test from 'node:test'
+import { verify } from './verify.mjs'
+
+test(${JSON.stringify(taskEntry.id)}, () => {
+  const result = verify(${JSON.stringify(taskEntry.kind)}, ${JSON.stringify(taskEntry.input)}, ${JSON.stringify(taskEntry.output)})
+  assert.equal(result.code, 0, result.message)
+})
+`
+}
 
 /** One task of the family: what the user asks, the file it writes and the test command it runs. */
 function task(id, kind, month, { set, extra = '' } = {}) {
   const output = kind === 'summary' ? `out/summary-${month}.json` : `out/regions-${month}.csv`
-  const checkCommand = `node ${VERIFY_PATH} ${kind} ${ordersPath(month)} ${output}`
+  const checkCommand = `node --test ${checkPath(id)}`
   const what = kind === 'summary'
     ? `Summarise the orders in ${ordersPath(month)} into ${output} (JSON: month, orders, units, revenue, byRegion, topProduct; amounts are quantity × unit_price × (1 − discount), rounded to cents)`
     : `Write the region table of ${ordersPath(month)} to ${output} (CSV region,orders,revenue sorted by region; revenue rounded to cents)`
@@ -230,7 +250,9 @@ export async function writeReplayProject(root) {
   }
   await mkdir(join(root, dirname(VERIFY_PATH)), { recursive: true })
   await writeFile(join(root, VERIFY_PATH), VERIFY_SOURCE)
-  return { root, months, files: [...months.map(ordersPath), VERIFY_PATH] }
+  const tests = [...REPLAY_TASKS, TASK_A, TASK_B]
+  for (const entry of tests) await writeFile(join(root, checkPath(entry.id)), checkSource(entry))
+  return { root, months, files: [...months.map(ordersPath), VERIFY_PATH, ...tests.map(entry => checkPath(entry.id))] }
 }
 
 const loaded = new Map()
@@ -276,8 +298,8 @@ export async function replayScript(h, tasks, quality) {
 
 /** Run a task's test command in `root` the way a replay re-runs it. */
 export function runCheck(root, taskEntry) {
-  const [, script, ...args] = taskEntry.checkCommand.split(' ')
-  const run = spawnSync(process.execPath, [script, ...args], { cwd: root, encoding: 'utf8', timeout: 30_000 })
+  const [, ...args] = taskEntry.checkCommand.split(' ')
+  const run = spawnSync(process.execPath, args, { cwd: root, encoding: 'utf8', timeout: 30_000 })
   return { exitCode: run.status, passed: run.status === 0, stdout: run.stdout.trim() }
 }
 
