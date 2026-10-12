@@ -1,0 +1,25 @@
+{
+  "name": "@nexgent/capabilities",
+  "version": "0.0.0",
+  "private": true,
+  "description": "能力版本：按内容寻址的不可变能力包存储、加载前校验、采用历史（采用与回滚修订链）。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*"
+  }
+}

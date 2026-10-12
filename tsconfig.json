@@ -56,6 +56,9 @@
       "path": "packages/workflow"
     },
     {
+      "path": "packages/capabilities"
+    },
+    {
       "path": "apps/desktop/src/renderer"
     }
   ]
