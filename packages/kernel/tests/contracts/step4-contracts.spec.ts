@@ -27,6 +27,7 @@ import {
   LEDGER_RECORD_TYPES,
   MEMBER_DENIED_TOOLS,
   normalizeManifest,
+  pluginApprovalInfo,
   resolveCapabilitiesConfig,
   STEP3_TOOLS,
   STEP4_TOOLS,
@@ -37,6 +38,8 @@ import {
   type CapabilityManifest,
   type HostRecordType,
   type LedgerRecordType,
+  type PluginApprovalInfo,
+  type PluginSpec,
   type SessionRecordType,
   type ToolRecordType,
   type TrialTally,
@@ -259,6 +262,15 @@ describe('the capabilities config section', () => {
     bad({ trialBudget: { maxUsd: 3 } }, 'capabilities.trialBudget.maxUsd')
     bad({ sandboxMode: 'full-access' }, 'capabilities.sandboxMode')
     expect(() => assertCapabilitiesConfig([])).toThrow(/capabilities must be an object/)
+  })
+})
+
+describe('plugin approval info', () => {
+  it('carries the plugin.json description, permissions and tools verbatim', () => {
+    const spec: PluginSpec = { formatVersion: 1, name: 'git-notes', description: 'Adds git notes', entry: 'main.mjs', permissions: 'Reads .git; runs git notes', tools: ['git_note'] }
+    expect(pluginApprovalInfo(spec)).toEqual({ name: 'git-notes', description: 'Adds git notes', permissions: 'Reads .git; runs git notes', tools: ['git_note'] })
+    expect(pluginApprovalInfo({ formatVersion: 1, name: 'x', description: 'd', permissions: 'p' }).tools).toEqual([])
+    expectTypeOf(pluginApprovalInfo).returns.toEqualTypeOf<PluginApprovalInfo>()
   })
 })
 

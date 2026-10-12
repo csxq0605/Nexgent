@@ -11,4 +11,8 @@ describe('@nexgent/sdk interface', () => {
     expectTypeOf<SdkResult<'settings.get'>['apiKey']>().toEqualTypeOf<import('@nexgent/kernel').CredentialInfo>()
     expectTypeOf<SdkResult<'settings.setApiKey'>>().toEqualTypeOf<import('@nexgent/kernel').CredentialInfo>()
   })
+
+  it('gives the plugin approval dialog each plugin\'s permissions text', () => {
+    expectTypeOf<SdkResult<'capabilities.show'>['plugins']>().toEqualTypeOf<readonly import('@nexgent/kernel').PluginApprovalInfo[] | undefined>()
+  })
 })

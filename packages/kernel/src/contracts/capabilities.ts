@@ -356,6 +356,28 @@ export interface PluginSpec {
 }
 
 /**
+ * What the plugin approval dialog shows for one plugin component of a
+ * candidate (`permissions.md` §插件安装审批): the plugin's own
+ * `description` and `permissions` text and the tools it will register, read
+ * from the candidate's copy of `plugin.json`. Combined with the component's
+ * file hashes from the candidate record.
+ */
+export interface PluginApprovalInfo {
+  /** Component name (equals `plugin.json` `name`). */
+  readonly name: string
+  readonly description: string
+  /** `plugin.json` `permissions`, verbatim. */
+  readonly permissions: string
+  /** `plugin.json` `tools`, `[]` when absent. */
+  readonly tools: readonly string[]
+}
+
+/** The {@link PluginApprovalInfo} of a validated `plugin.json` (pure). */
+export function pluginApprovalInfo(spec: PluginSpec): PluginApprovalInfo {
+  return { name: spec.name, description: spec.description, permissions: spec.permissions, tools: [...(spec.tools ?? [])] }
+}
+
+/**
  * `context/<name>/policy.json`: the whitelisted context-strategy fields. The
  * schema has no place for approvals, cost caps, sandbox mode, capability or
  * gate settings, so a candidate cannot change them (H13).
