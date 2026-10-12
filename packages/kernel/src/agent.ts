@@ -24,12 +24,13 @@ import type {
   ToolApprovalAsk,
   ToolCallApproval,
 } from './contracts/approvals.js'
+import { BASELINE_VERSION, CAPABILITY_COMPONENT_KINDS, type CapabilityComponentKind, type CapabilityVersion, type ComponentUsage } from './contracts/capabilities.js'
 import type { AgentAttribution, BudgetShare, ExecutionForm, MemberIdentity } from './contracts/collaboration.js'
 import type { ProjectConfig } from './contracts/config.js'
 import type { CompactionCheckInput, ContextService, SystemPromptSection } from './contracts/context.js'
 import { NexgentError, toErrorInfo, type ErrorInfo, type NexgentErrorCode } from './contracts/errors.js'
 import { isJsonValue, type JsonValue } from './contracts/json.js'
-import type { Ledger, LedgerRecordInput, TaskCheck, TaskOutcomeStatus } from './contracts/ledger.js'
+import type { Ledger, LedgerAttribution, LedgerRecordInput, TaskCheck, TaskOutcomeStatus } from './contracts/ledger.js'
 import {
   addUsage,
   UNKNOWN_USAGE,
@@ -65,6 +66,7 @@ import { renderFeedbackPrompt, type FeedbackEntry, type TaskingService, type Tur
 import type { Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry } from './contracts/tools.js'
 import type { SandboxMode, Workspace } from './contracts/workspace.js'
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
+import type { AttachedComponent, CapabilityHost, ComponentUseRef, TaskRecorder } from './capability-hooks.js'
 import {
   approvalSubject,
   decideToolPolicy,
@@ -97,6 +99,7 @@ export const HOST_RECORD_TYPES: readonly HostRecordType[] = [
   'team.message',
   'workflow.phase',
   'workflow.end',
+  'capability.version',
 ]
 /** Record types a tool may append through {@link KernelToolContext.appendRecord} (the contract's `ToolRecordType`). */
 export const TOOL_RECORD_TYPES: readonly ToolRecordType[] = [
@@ -109,9 +112,14 @@ export const TOOL_RECORD_TYPES: readonly ToolRecordType[] = [
   'workflow.start',
   'workflow.phase',
   'workflow.end',
+  'capability.draft',
+  'capability.try',
+  'capability.propose',
 ]
 /** Host record types that may carry an earlier turn between turns (closing a run a dead process left open, `data-formats.md` §子会话与成员). */
 const RECOVERY_RECORD_TYPES: readonly HostRecordType[] = ['subagent.end', 'workflow.end']
+/** Upper bound on the task checks run at the end of a root turn (step 4). */
+export const CHECKS_TIMEOUT_MS = 300_000
 /** `costCaps.perProject.windowDays` when the config leaves it out (`data-formats.md` §项目配置). */
 export const DEFAULT_PROJECT_WINDOW_DAYS = 30
 
@@ -233,7 +241,14 @@ export interface AgentInit {
    * appears or goes away between turns is picked up). Absent: the turn runs
    * exactly as in step 1.
    */
-  readonly services?: () => { readonly context?: ContextService | undefined; readonly tasking?: TaskingService | undefined }
+  readonly services?: () => {
+    readonly context?: ContextService | undefined
+    readonly tasking?: TaskingService | undefined
+    /** Step 4: component lookup for `componentsUsed` (`componentOf`). */
+    readonly capabilityHost?: CapabilityHost | undefined
+    /** Step 4: root-task snapshot and checks. */
+    readonly taskRecorder?: TaskRecorder | undefined
+  }
   readonly lock: SessionLock
   /** The agent's scoped context (tools registered through it are agent-private). */
   readonly ctx: Context
@@ -272,6 +287,20 @@ export interface AgentInit {
   readonly budget?: BudgetShare
   /** Step 3: the open members this agent started (cancelled with `parent` when its turn ends). */
   readonly children?: () => readonly Agent[]
+  /**
+   * Step 4: the capability version the session runs on (stamped on every
+   * ledger record); absent when no capability host is installed.
+   */
+  readonly capabilityVersion?: CapabilityVersion
+  /** Step 4: components the capability host loaded into this session's scope. */
+  readonly attached?: readonly AttachedComponent[]
+}
+
+/** `componentsUsed` order: manifest kind order, then name, then version. */
+function sortUsage(usage: Iterable<ComponentUsage>): ComponentUsage[] {
+  const rank = (kind: CapabilityComponentKind) => CAPABILITY_COMPONENT_KINDS.indexOf(kind)
+  return [...usage].sort((a, b) =>
+    rank(a.kind) - rank(b.kind) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || (a.version < b.version ? -1 : a.version > b.version ? 1 : 0))
 }
 
 /** Abort reason carrying who cancelled the turn. */
@@ -389,6 +418,8 @@ export class Agent {
   readonly member: MemberIdentity | undefined
   /** Step 3: the root session that started this member; absent for a root session. */
   readonly parentSessionId: string | undefined
+  /** Step 4: the capability version this session runs on; absent without a capability host. */
+  readonly capabilityVersion: CapabilityVersion | undefined
 
   private readonly init: AgentInit
   private readonly hub = new AgentEventHub()
@@ -421,6 +452,16 @@ export class Agent {
   private readonly holds = new Set<Promise<unknown>>()
   /** The history as of the end of the last completed turn, for a fork (see {@link forkSeed}). */
   private settledHistory: { readonly messages: readonly Exclude<LLMMessage, { role: 'system' }>[]; readonly throughSeq: number }
+  /** Step 4: components loaded into this session (adopted, then tried drafts), by how their use is recognised. */
+  private readonly components = {
+    tools: new Map<string, ComponentUseRef>(),
+    skills: new Map<string, ComponentUseRef>(),
+    presets: new Map<string, ComponentUseRef>(),
+  }
+  /** Step 4: `componentsUsed` tallies keyed by kind, name and version, since the agent opened and in the current turn. */
+  private readonly componentUse = { task: new Map<string, ComponentUsage>(), turn: new Map<string, ComponentUsage>() }
+  /** Step 4: results of the root task's checks, run at the end of each root turn. */
+  private lastChecks: readonly TaskCheck[] | undefined
   private stats = {
     requestCount: 0,
     toolCallCount: 0,
@@ -439,6 +480,10 @@ export class Agent {
     this.attribution = init.attribution
     this.member = init.member
     this.parentSessionId = init.parentSessionId
+    this.capabilityVersion = init.capabilityVersion
+    if (init.capabilityVersion !== undefined) {
+      for (const component of init.attached ?? []) this.loadComponent(component, init.capabilityVersion)
+    }
     this.messages = [...init.history]
     this.sessionGrants = [...init.sessionGrants]
     this.settledHistory = { messages: [...init.history], throughSeq: init.lastSeq }
@@ -708,6 +753,7 @@ export class Agent {
     if (usage !== undefined) this.stats.totalUsage = addUsage(this.stats.totalUsage, usage)
     this.init.tree.requests += requests
     this.init.tree.tokens += tokens
+    if (this.member !== undefined) this.init.tree.chargeMember(this.sessionId, requests, usage)
   }
 
   private async append(record: SessionRecordInput): Promise<SessionRecord> {
@@ -745,11 +791,13 @@ export class Agent {
     }
   }
 
-  private async writeOutcome(status: TaskOutcomeStatus, checks?: readonly TaskCheck[]): Promise<void> {
+  private async writeOutcome(status: TaskOutcomeStatus, hostChecks?: readonly TaskCheck[]): Promise<void> {
     this.outcomeWritten = true
     const error = status === 'completed'
       ? undefined
       : this.budgetError ?? (this.lastReason?.kind === 'error' ? this.lastReason.error : undefined)
+    const checks = hostChecks ?? (this.member === undefined ? this.lastChecks : undefined)
+    const root = this.member === undefined
     await this.ledger({
       type: 'task.outcome',
       sessionId: this.sessionId,
@@ -761,9 +809,140 @@ export class Agent {
       turns: this.stats.turns,
       ...(checks === undefined ? {} : { checks }),
       toolsUsed: [...this.stats.toolsUsed],
-      ...this.attribution,
-      ...(this.member === undefined ? { formsUsed: [...this.formsUsed()] } : {}),
+      ...this.ledgerAttribution(),
+      ...(root ? { formsUsed: [...this.formsUsed()] } : {}),
+      ...(this.capabilityVersion === undefined ? {} : { componentsUsed: this.componentsUsed() }),
+      ...(root && this.init.tree.members > 0 ? { memberCosts: this.memberCosts() } : {}),
     })
+  }
+
+  // -------------------------------------------------------------------------
+  // capabilities (step 4)
+  // -------------------------------------------------------------------------
+
+  /** Attribution plus the capability version, for every ledger record this agent writes. */
+  ledgerAttribution(): LedgerAttribution {
+    return { ...this.attribution, ...(this.capabilityVersion === undefined ? {} : { capabilityVersion: this.capabilityVersion }) }
+  }
+
+  /** Step 4: components this session used since it opened (`task.outcome.componentsUsed`), in manifest kind order, then name. */
+  componentsUsed(): ComponentUsage[] {
+    return sortUsage(this.componentUse.task.values())
+  }
+
+  /** Step 4: each member's usage in this agent's task tree (root only). */
+  memberCosts(): ReturnType<TaskTree['memberCosts']> {
+    return this.init.tree.memberCosts('task')
+  }
+
+  /**
+   * Step 4: the `task.outcome` fields of the last (or running) turn, for a
+   * host that counts a turn as a task (the SDK). The session package's
+   * ledger stamp adds them to a root `task.outcome` that leaves them out.
+   */
+  turnOutcome(): { componentsUsed?: ComponentUsage[]; memberCosts?: ReturnType<TaskTree['memberCosts']>; checks?: TaskCheck[] } {
+    const root = this.member === undefined
+    return {
+      ...(this.capabilityVersion === undefined ? {} : { componentsUsed: sortUsage(this.componentUse.turn.values()) }),
+      ...(root && this.init.tree.members > 0 ? { memberCosts: this.init.tree.memberCosts('turn') } : {}),
+      ...(root && this.lastChecks !== undefined ? { checks: [...this.lastChecks] } : {}),
+    }
+  }
+
+  /** Make a loaded component's use recognisable (a tried draft replaces an adopted component of the same name). */
+  private loadComponent(component: AttachedComponent, version: CapabilityVersion | 'draft'): void {
+    const ref: ComponentUseRef = { kind: component.kind, name: component.name, version: component.draft === true ? 'draft' : version }
+    for (const tool of component.tools ?? []) this.components.tools.set(tool, ref)
+    if (component.kind === 'skill') this.components.skills.set(component.name, ref)
+    if (component.kind === 'preset') this.components.presets.set(component.name, ref)
+  }
+
+  /** The component a finished call used, if any (`agent-hooks.md` §步骤 4). */
+  private componentOfCall(name: string, input: unknown, isError: boolean, host: CapabilityHost | undefined): ComponentUseRef | undefined {
+    const byTool = this.components.tools.get(name)
+    if (byTool !== undefined) return byTool
+    const field = (key: string): string | undefined => {
+      const value = input !== null && typeof input === 'object' ? (input as Record<string, unknown>)[key] : undefined
+      return typeof value === 'string' ? value : undefined
+    }
+    if (name === 'load_skill') {
+      const skill = field('name')
+      const ref = skill === undefined ? undefined : this.components.skills.get(skill)
+      if (ref !== undefined) return ref
+    }
+    if (name === 'delegate' || name === 'spawn_teammate') {
+      const preset = field('preset')
+      const ref = preset === undefined ? undefined : this.components.presets.get(preset)
+      if (ref !== undefined) return ref
+    }
+    if (host?.componentOf === undefined || !isJsonValue(input)) return undefined
+    try {
+      return host.componentOf({ sessionId: this.sessionId, name, input, isError })
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Count one finished call against the component it used, and note a successful shell command for the task checks. */
+  private noteCall(call: ToolCall, isError: boolean, meta: JsonValue | undefined, host: CapabilityHost | undefined): void {
+    let input: unknown
+    try {
+      input = call.arguments.trim() === '' ? {} : JSON.parse(call.arguments)
+    } catch {
+      return
+    }
+    if (this.capabilityVersion !== undefined) {
+      const ref = this.componentOfCall(call.name, input, isError, host)
+      if (ref !== undefined) {
+        const key = `${ref.kind}\u0000${ref.name}\u0000${ref.version}`
+        for (const tallies of [this.componentUse.task, this.componentUse.turn]) {
+          const tally = tallies.get(key) ?? { kind: ref.kind, name: ref.name, version: ref.version, calls: 0, errors: 0 }
+          tallies.set(key, { ...tally, calls: tally.calls + 1, errors: tally.errors + (isError ? 1 : 0) })
+        }
+      }
+    }
+    if ((call.name === 'bash' || call.name === 'pwsh') && !isError && input !== null && typeof input === 'object') {
+      const { command, cwd } = input as { command?: unknown; cwd?: unknown }
+      const exitCode = meta !== null && typeof meta === 'object' && !Array.isArray(meta) ? (meta as Record<string, JsonValue>).exitCode : undefined
+      if (typeof command === 'string' && exitCode === 0 && (cwd === undefined || cwd === '.' || cwd === '')) {
+        this.init.tree.commands.push({ command, shell: call.name })
+      }
+    }
+  }
+
+  /** Root task, first turn: snapshot the workspace (`snapshots/tasks/<taskId>.json`). Failures are non-fatal errors. */
+  private async beginTaskRecord(recorder: TaskRecorder | undefined, turn: number): Promise<void> {
+    const tree = this.init.tree
+    if (recorder === undefined || this.member !== undefined || tree.snapshotTaken) return
+    tree.snapshotTaken = true
+    try {
+      await recorder.begin({ taskId: tree.taskId, sessionId: this.sessionId, capabilityVersion: this.capabilityVersion ?? BASELINE_VERSION })
+    } catch (error) {
+      await this.appendError(errorInfo('internal', `task snapshot failed: ${toErrorInfo(error).message}`), false, turn)
+    }
+  }
+
+  /**
+   * Root turn end, before `turn.end`: run the deterministic checks of the
+   * task so far (when its snapshot was taken) and keep the results for
+   * `task.outcome.checks`. Failures are non-fatal errors and leave `checks` out.
+   */
+  private async runTaskChecks(recorder: TaskRecorder | undefined, turn: number, signal: AbortSignal): Promise<void> {
+    const tree = this.init.tree
+    if (recorder === undefined || this.member !== undefined || !tree.snapshotTaken) return
+    this.lastChecks = undefined
+    try {
+      const { results } = await recorder.end({
+        taskId: tree.taskId,
+        sessionId: this.sessionId,
+        deliverableFiles: tree.deliverableFiles(),
+        commands: [...tree.commands],
+        signal,
+      })
+      this.lastChecks = results
+    } catch (error) {
+      await this.appendError(errorInfo('internal', `task checks failed: ${toErrorInfo(error).message}`), false, turn)
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -790,6 +969,9 @@ export class Agent {
     try {
       await this.append({ type: 'turn.start', turn })
       this.emit({ type: 'turn.start', sessionId: this.sessionId, turn })
+      this.componentUse.turn.clear()
+      if (this.member === undefined) this.init.tree.beginRootTurn()
+      await this.beginTaskRecord(services.taskRecorder, turn)
       if (input.source === 'feedback') await this.append({ type: 'feedback', turn, feedback: input.feedback })
       if (services.tasking !== undefined) {
         await this.beginFiles(services.tasking, turn)
@@ -811,6 +993,10 @@ export class Agent {
       }
       await this.settleMembers()
       await this.endFiles(turn, signal)
+      // A cancelled turn still gets its checks, bounded like `endTurn`.
+      await this.runTaskChecks(services.taskRecorder, turn, signal.aborted
+        ? AbortSignal.timeout(FILES_END_CANCEL_MS)
+        : AbortSignal.any([signal, AbortSignal.timeout(CHECKS_TIMEOUT_MS)]))
       const end = await this.append({ type: 'turn.end', turn, reason })
       this.settledHistory = { messages: [...this.messages], throughSeq: end.seq }
       this.lastReason = reason
@@ -1218,12 +1404,12 @@ export class Agent {
 
     try {
       // The attribution rides along for providers that stamp it on their ledger records (`@nexgent/llm` does).
-      const completeOptions: LLMCompleteOptions & AgentAttribution = {
+      const completeOptions: LLMCompleteOptions & LedgerAttribution = {
         sessionId: this.sessionId,
         purpose: 'task',
         ...(settings.modelTimeoutMs > 0 ? { timeoutMs: settings.modelTimeoutMs } : {}),
         ...(settings.streamIdleTimeoutMs > 0 ? { streamIdleTimeoutMs: settings.streamIdleTimeoutMs } : {}),
-        ...this.attribution,
+        ...this.ledgerAttribution(),
       }
       iterator = llm.complete(request, completeOptions)[Symbol.asyncIterator]()
       for (;;) {
@@ -1408,6 +1594,8 @@ export class Agent {
     await this.writeToolResult(turn, step, call, output, durationMs)
     this.stats.toolCallCount += 1
     this.stats.toolsUsed.add(call.name)
+    if (this.member !== undefined) this.init.tree.countMemberToolCall(this.sessionId)
+    if (tool !== undefined) this.noteCall(call, output.isError, output.meta, this.init.services?.().capabilityHost)
     await this.ledger({
       type: 'tool.call',
       sessionId: this.sessionId,
@@ -1418,7 +1606,7 @@ export class Agent {
       approval,
       isError: output.isError,
       durationMs,
-      ...this.attribution,
+      ...this.ledgerAttribution(),
     }, turn)
   }
 
@@ -1488,7 +1676,8 @@ export class Agent {
           if (!(TOOL_RECORD_TYPES as readonly unknown[]).includes(type)) {
             throw new NexgentError('session/invalid-record', `tools may append only ${TOOL_RECORD_TYPES.join(', ')} records; got ${String(type)}`)
           }
-          await this.append(this.toolRecord(record, { turn, step, toolCallId: call.id }))
+          const written = await this.append(this.toolRecord(record, { turn, step, toolCallId: call.id }))
+          this.noteToolRecord(written)
         } catch (error) {
           recordFailure ??= toErrorInfo(error)
           throw error
@@ -1546,6 +1735,12 @@ export class Agent {
    * type has them, must be the call's (`deliverable.presented` must carry
    * all three).
    */
+  /** Step 4: what a tool record tells the task (a tried draft's use, a presented deliverable's files). */
+  private noteToolRecord(record: SessionRecord): void {
+    if (record.type === 'capability.try') this.loadComponent({ ...record.component, ...(record.tools === undefined ? {} : { tools: record.tools }) }, 'draft')
+    if (record.type === 'deliverable.presented') this.init.tree.present(record.deliverable.deliverableId, record.deliverable.files.map(file => file.path))
+  }
+
   private toolRecord(record: ToolRecordInput, call: { turn: number; step: number; toolCallId: string }): ToolRecordInput {
     const fields = record as { turn?: unknown; step?: unknown; toolCallId?: unknown }
     const strict = record.type === 'deliverable.presented'

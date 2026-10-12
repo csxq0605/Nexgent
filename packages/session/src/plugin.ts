@@ -129,12 +129,17 @@ export const SessionPlugin = {
       sessionsDir: config.sessionsDir ?? own?.sessions ?? layout.sessions,
       ledgersDir: config.ledgersDir ?? own?.ledgers ?? layout.ledgers,
     })
-    // Step 3: records written outside an agent's loop carry the attribution of the agent open on their session.
+    // Step 3: records written outside an agent's loop carry the attribution of the agent open on their session;
+    // step 4 adds its capability version, and to a `task.outcome` (the SDK writes one per turn) the turn's
+    // `componentsUsed`, and for a root session `memberCosts` and `checks`.
     ledger.setStamp(record => {
       const agent = record.sessionId === undefined ? undefined : ctx.get('agents')?.get(record.sessionId)
       if (agent === undefined) return undefined
-      const rootOutcome = record.type === 'task.outcome' && agent.member === undefined
-      return rootOutcome ? { ...agent.attribution, formsUsed: [...agent.formsUsed()] } : agent.attribution
+      if (record.type !== 'task.outcome') return agent.ledgerAttribution()
+      const extras = agent.turnOutcome()
+      return agent.member === undefined
+        ? { ...agent.ledgerAttribution(), formsUsed: [...agent.formsUsed()], ...extras }
+        : { ...agent.ledgerAttribution(), ...extras }
     })
     ctx.provide('ledger', ledger)
     ctx.provide('session', store)
