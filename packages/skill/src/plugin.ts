@@ -3,6 +3,7 @@
  */
 import { join } from 'node:path'
 import { nexgentHome, USER_SKILLS_DIR, type Context, type SkillRegistry } from '@nexgent/kernel'
+import { capabilitySkillLookup, validateCapabilitySkill, type CapabilitySkillService } from './capability-skills.js'
 import { skillsProvider } from './provider.js'
 import { FileSkillRegistry } from './registry.js'
 import { loadSkillTool, readDocumentTool } from './tools.js'
@@ -21,7 +22,10 @@ export interface SkillPluginConfig {
  * `<project>/.nexgent/skills`); whenever `ctx.tools`
  * is available registers `load_skill` and `read_document`; whenever
  * `ctx.context` is available registers the `skills` provider. Each
- * registration is undone when either side is disposed.
+ * registration is undone when either side is disposed. When
+ * `ctx.capabilities` is loaded (step 4), each session also sees the skills
+ * of its capability version and the ones it tried, and the plugin registers
+ * the `skill` component check with it.
  */
 export const SkillPlugin = {
   name: '@nexgent/skill',
@@ -33,15 +37,24 @@ export const SkillPlugin = {
       ...(config?.builtinDir === undefined ? {} : { builtinDir: config.builtinDir }),
       userDir: config?.userDir ?? join(nexgentHome(), USER_SKILLS_DIR),
     })
+    const layered = registry as FileSkillRegistry
     ctx.provide('skills', registry)
     const sandbox = ctx.sandbox
+    const capabilities = (): CapabilitySkillService | undefined => (ctx as unknown as { get(name: string): unknown }).get('capabilities') as CapabilitySkillService | undefined
+    const lookup = capabilitySkillLookup(capabilities)
+    ctx.inject(['capabilities' as never], scope => {
+      const service = (scope as unknown as { get(name: string): unknown }).get('capabilities') as CapabilitySkillService | undefined
+      if (service !== undefined && typeof service.registerValidator === 'function') {
+        scope.effect(() => service.registerValidator('skill', validateCapabilitySkill), 'capabilities.registerValidator(skill)')
+      }
+    })
     ctx.inject(['tools'], scope => {
-      for (const tool of [loadSkillTool(registry), readDocumentTool(sandbox)]) {
+      for (const tool of [loadSkillTool(layered, lookup), readDocumentTool(sandbox)]) {
         scope.effect(() => scope.tools.register(tool), `tools.register(${tool.definition.name})`)
       }
     })
     ctx.inject(['context'], scope => {
-      scope.effect(() => scope.context.register(skillsProvider(registry)), 'context.register(skills)')
+      scope.effect(() => scope.context.register(skillsProvider(layered, lookup)), 'context.register(skills)')
     })
   },
 }

@@ -1,14 +1,13 @@
 import { appendFile, chmod, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { isNexgentError, MANIFEST_FILE } from '@nexgent/kernel'
 import { describe, expect, it } from 'vitest'
 import {
   BASELINE_BUNDLE,
   CapabilityIntegrityError,
-  CapabilityManifestError,
   componentDirectory,
   listBundleVersions,
   loadBundle,
-  MANIFEST_FILE,
   writeBundle,
   type CapabilityIntegrityReason,
 } from '../src/index.js'
@@ -17,6 +16,7 @@ import { sampleComponents, tempDir } from './helpers.js'
 async function expectIntegrity(promise: Promise<unknown>, reason: CapabilityIntegrityReason): Promise<CapabilityIntegrityError> {
   const error = await promise.then(() => undefined, (caught: unknown) => caught)
   expect(error).toBeInstanceOf(CapabilityIntegrityError)
+  expect(isNexgentError(error, 'session/corrupt')).toBe(true)
   expect((error as CapabilityIntegrityError).reason).toBe(reason)
   return error as CapabilityIntegrityError
 }
@@ -29,7 +29,7 @@ describe('bundle store', () => {
     expect(await readdir(dir)).toEqual([stored.version])
     const loaded = await loadBundle(dir, stored.version)
     expect(loaded).toEqual(stored)
-    const skill = loaded.manifest.components.find(component => component.type === 'skill')!
+    const skill = loaded.manifest.components.find(component => component.kind === 'skill')!
     expect(await readFile(join(componentDirectory(loaded, skill), 'SKILL.md'), 'utf8')).toContain('summarize-orders')
     expect((await readFile(join(stored.directory!, MANIFEST_FILE), 'utf8')).endsWith('\n')).toBe(true)
     expect(await listBundleVersions(dir)).toEqual([stored.version])
@@ -49,13 +49,14 @@ describe('bundle store', () => {
   it('refuses to reuse a damaged existing version', async () => {
     const dir = await tempDir()
     const stored = await writeBundle(dir, sampleComponents())
-    await appendFile(join(stored.directory!, 'skill', 'summarize-orders', 'SKILL.md'), 'x')
+    await appendFile(join(stored.directory!, 'skills', 'summarize-orders', 'SKILL.md'), 'x')
     await expectIntegrity(writeBundle(dir, sampleComponents()), 'file-mismatch')
   })
 
   it('writes nothing for invalid input', async () => {
     const dir = await tempDir()
-    await expect(writeBundle(dir, [{ type: 'skill', name: 'x', files: [{ path: '../out', content: '' }] }])).rejects.toBeInstanceOf(CapabilityManifestError)
+    const error = await writeBundle(dir, [{ kind: 'skill', name: 'x', files: [{ path: 'SKILL.md', content: '' }, { path: '../out', content: '' }] }]).catch((caught: unknown) => caught)
+    expect(isNexgentError(error, 'config/invalid')).toBe(true)
     expect(await listBundleVersions(dir)).toEqual([])
   })
 
@@ -68,34 +69,34 @@ describe('bundle store', () => {
     it('one changed byte', async () => {
       const dir = await tempDir()
       const stored = await writeBundle(dir, sampleComponents())
-      const file = join(stored.directory!, 'function-module', 'order-tools', 'index.mjs')
+      const file = join(stored.directory!, 'functions', 'order-tools', 'index.mjs')
       const bytes = await readFile(file)
       bytes[0] = bytes[0]! ^ 1
       await writeFile(file, bytes)
       const error = await expectIntegrity(loadBundle(dir, stored.version), 'file-mismatch')
-      expect(error.path).toBe('function-module/order-tools/index.mjs')
+      expect(error.path).toBe('functions/order-tools/index.mjs')
     })
 
     it('a missing file', async () => {
       const dir = await tempDir()
       const stored = await writeBundle(dir, sampleComponents())
-      await rm(join(stored.directory!, 'skill', 'summarize-orders', 'reference', 'columns.md'))
+      await rm(join(stored.directory!, 'skills', 'summarize-orders', 'reference', 'columns.md'))
       await expectIntegrity(loadBundle(dir, stored.version), 'file-missing')
     })
 
     it('an added file', async () => {
       const dir = await tempDir()
       const stored = await writeBundle(dir, sampleComponents())
-      await writeFile(join(stored.directory!, 'skill', 'summarize-orders', 'extra.md'), 'sneaky')
+      await writeFile(join(stored.directory!, 'skills', 'summarize-orders', 'extra.md'), 'sneaky')
       const error = await expectIntegrity(loadBundle(dir, stored.version), 'unexpected-entry')
-      expect(error.path).toBe('skill/summarize-orders/extra.md')
+      expect(error.path).toBe('skills/summarize-orders/extra.md')
     })
 
     it.skipIf(process.platform === 'win32')('a symlink in place of a file', async () => {
       const dir = await tempDir()
       const stored = await writeBundle(dir, sampleComponents())
       await writeFile(join(dir, 'outside.md'), 'region, amount\n')
-      const target = join(stored.directory!, 'skill', 'summarize-orders', 'reference', 'columns.md')
+      const target = join(stored.directory!, 'skills', 'summarize-orders', 'reference', 'columns.md')
       await rm(target)
       await symlink(join(dir, 'outside.md'), target)
       await expectIntegrity(loadBundle(dir, stored.version), 'unexpected-entry')
@@ -105,8 +106,8 @@ describe('bundle store', () => {
       const dir = await tempDir()
       const stored = await writeBundle(dir, sampleComponents())
       const manifestFile = join(stored.directory!, MANIFEST_FILE)
-      const manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as { components: { files: { size: number }[] }[] }
-      manifest.components[0]!.files[0]!.size += 1
+      const manifest = JSON.parse(await readFile(manifestFile, 'utf8')) as { components: { files: { bytes: number }[] }[] }
+      manifest.components[0]!.files[0]!.bytes += 1
       await writeFile(manifestFile, JSON.stringify(manifest))
       await expectIntegrity(loadBundle(dir, stored.version), 'version-mismatch')
     })

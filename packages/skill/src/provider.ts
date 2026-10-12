@@ -3,7 +3,8 @@
  * section naming each usable skill, so the model knows when to call
  * `load_skill`. Absent when there are no skills.
  */
-import type { ContextContribution, ContextProvider, SkillManifest, SkillRegistry } from '@nexgent/kernel'
+import type { ContextContribution, ContextProvider, SkillManifest, TurnContextInput } from '@nexgent/kernel'
+import type { CapabilitySkillLookup, LayeredSkillRegistry } from './capability-skills.js'
 
 /** Provider id (fixed call order: after `goal`, before `materials`). */
 export const SKILLS_PROVIDER_ID = 'skills'
@@ -21,11 +22,12 @@ export function renderSkillList(skills: readonly SkillManifest[]): string {
 }
 
 /** The skills {@link ContextProvider} over a registry. */
-export function skillsProvider(registry: SkillRegistry): ContextProvider {
+export function skillsProvider(registry: LayeredSkillRegistry, capabilitySkills?: CapabilitySkillLookup): ContextProvider {
   return {
     id: SKILLS_PROVIDER_ID,
-    async beginTurn(): Promise<ContextContribution> {
-      const { skills } = await registry.catalog()
+    async beginTurn(input: TurnContextInput): Promise<ContextContribution> {
+      const layers = capabilitySkills === undefined ? undefined : await capabilitySkills(input.sessionId)
+      const { skills } = await registry.catalog(layers)
       if (skills.length === 0) return {}
       return { systemSections: [{ id: 'skills', title: 'Skills', body: renderSkillList(skills) }] }
     },

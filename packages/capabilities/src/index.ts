@@ -1,35 +1,29 @@
 /**
- * `@nexgent/capabilities`: capability versions of a project. Step 4 round 1
- * covers the content-addressed bundle store, load-time verification and the
- * activation chain (adopt / rollback revisions); drafts, the capability
- * tools, the loader and plugin packs follow in round 2.
+ * `@nexgent/capabilities`: capability versions of a project — the
+ * content-addressed bundle store, load-time verification, the activation
+ * chain and decision records, the session draft area, the three capability
+ * tools and the loader that hands a bundle's components to the other
+ * plugins.
  */
 export {
   BASELINE_VERSION,
-  BUNDLE_LIMITS,
-  CAPABILITY_COMPONENT_TYPES,
-  CapabilityManifestError,
-  checkRelativePath,
+  checkComponentPath,
+  checkManifest,
+  EMPTY_MANIFEST,
   isBundleVersion,
   isCapabilityVersion,
-  MANIFEST_FILE,
-  MANIFEST_FORMAT,
   manifestVersion,
-  normalizeManifest,
-  serializeManifest,
   sha256,
-  type CapabilityComponent,
-  type CapabilityComponentType,
-  type CapabilityFileEntry,
-  type CapabilityManifest,
 } from './manifest.js'
 export {
   BASELINE_BUNDLE,
   buildManifest,
   CapabilityIntegrityError,
   componentDirectory,
+  componentPath,
   listBundleVersions,
   loadBundle,
+  readComponentFiles,
   writeBundle,
   type BundleComponentInput,
   type BundleFileInput,
@@ -38,20 +32,42 @@ export {
 } from './store.js'
 export {
   ACTIVATION_DIR,
-  ACTIVATION_FORMAT,
   BASELINE_ACTIVATION,
   CapabilityActivationError,
   commitActivation,
+  publishExclusive,
   readActivation,
   readActivationChain,
+  targetVersion,
   type Activation,
+  type ActivationChain,
   type ActivationChange,
-  type ActivationRevision,
-  type ActivationType,
+  type ActivationProblem,
 } from './activation.js'
+export { DECISIONS_DIR, listDecisions, readDecision, writeDecision, type DecisionInput } from './decisions.js'
 export {
   CapabilityStore,
+  type AdoptInput,
   type CapabilityStoreOptions,
+  type CommittedChange,
   type LoadRollback,
   type ResolvedCapabilities,
+  type RollbackInput,
 } from './capability-store.js'
+export { validateComponent, type ComponentFiles, type ComponentSpec, type ComponentValidationInput, type ComponentValidator } from './components.js'
+export { applyDraft, draftDirectory, draftRoot, fileEntries, freezeDraft, readComponentDirectory, triedDirectory, type DraftChange } from './drafts.js'
+export { CANDIDATE_FILE, CANDIDATES_DIR, listCandidates, readCandidate, writeCandidate, type CandidateInput, type ProposedComponent } from './candidates.js'
+export { findUseProof, latestTry } from './proofs.js'
+export { functionModuleTools, type FunctionModuleTools } from './function-tools.js'
+export {
+  capabilitiesOf,
+  CapabilityService,
+  type ActiveComponent,
+  type CapabilitiesConfig,
+  type CapabilityStatus,
+  type ToolComponent,
+  type VersionResolution,
+} from './service.js'
+export { capabilityDraftTool, capabilityProposeTool, capabilityTools, capabilityTryTool, type RecordReader } from './tools.js'
+export { capabilitiesProvider } from './provider.js'
+export { apply, CapabilitiesPlugin, name } from './plugin.js'

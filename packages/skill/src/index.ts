@@ -8,6 +8,7 @@
 export * from './documents/index.js'
 export * from './frontmatter.js'
 export * from './registry.js'
+export * from './capability-skills.js'
 export * from './provider.js'
 export * from './tools.js'
 export { apply, name, SkillPlugin } from './plugin.js'

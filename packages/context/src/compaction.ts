@@ -203,11 +203,18 @@ export interface BasicCompactorOptions {
   readonly env?: NodeJS.ProcessEnv
 }
 
+/** Per-session compaction settings from a capability context policy (step 4, `ContextPolicySpec.compaction`). */
+export interface CompactionOverride {
+  readonly thresholdTokens?: number
+  readonly keepRecentTurns?: number
+}
+
 /** The {@link Compactor} of `@nexgent/context`. */
 export class BasicCompactor implements Compactor {
   readonly thresholdTokens: number
   readonly keepRecentTurns: number
   private readonly options: BasicCompactorOptions
+  private readonly overrides = new Map<string, CompactionOverride>()
 
   constructor(options: BasicCompactorOptions) {
     this.options = options
@@ -218,6 +225,30 @@ export class BasicCompactor implements Compactor {
     }
   }
 
+  /**
+   * Replace the threshold / kept turns for one session (`@nexgent/capabilities`
+   * sets it at each turn from the session's context policy); `undefined` clears it.
+   * Values outside the contract ranges are ignored.
+   */
+  setSessionOverride(sessionId: string, override: CompactionOverride | undefined): void {
+    const threshold = override?.thresholdTokens
+    const keep = override?.keepRecentTurns
+    const valid: CompactionOverride = {
+      ...(Number.isSafeInteger(threshold) && threshold! >= 10_000 && threshold! <= 1_000_000 ? { thresholdTokens: threshold! } : {}),
+      ...(Number.isSafeInteger(keep) && keep! >= 1 && keep! <= 10 ? { keepRecentTurns: keep! } : {}),
+    }
+    if (Object.keys(valid).length === 0) this.overrides.delete(sessionId)
+    else this.overrides.set(sessionId, valid)
+  }
+
+  private threshold(sessionId: string): number {
+    return this.overrides.get(sessionId)?.thresholdTokens ?? this.thresholdTokens
+  }
+
+  private keep(sessionId: string): number {
+    return this.overrides.get(sessionId)?.keepRecentTurns ?? this.keepRecentTurns
+  }
+
   /** Billed input of the latest request, when fully known. */
   private inputTokens(input: CompactionCheckInput): number | undefined {
     return input.lastUsage === undefined ? undefined : billedInputTokens(input.lastUsage)
@@ -226,12 +257,12 @@ export class BasicCompactor implements Compactor {
   shouldCompact(input: CompactionCheckInput): boolean {
     if (input.failedThisTurn) return false
     const tokens = this.inputTokens(input)
-    if (tokens === undefined || tokens < this.thresholdTokens) return false
-    return planCompaction(input.messages, this.keepRecentTurns) !== undefined
+    if (tokens === undefined || tokens < this.threshold(input.sessionId)) return false
+    return planCompaction(input.messages, this.keep(input.sessionId)) !== undefined
   }
 
   async compact(input: CompactionCheckInput, signal: AbortSignal): Promise<CompactionResult> {
-    const plan = planCompaction(input.messages, this.keepRecentTurns)
+    const plan = planCompaction(input.messages, this.keep(input.sessionId))
     if (plan === undefined) throw new NexgentError('internal', 'nothing to compact: the history is the current turn only')
     const inputTokens = this.inputTokens(input) ?? 0
     const settings = typeof this.options.settings === 'function'
@@ -281,7 +312,7 @@ export class BasicCompactor implements Compactor {
       compactedMessages: plan.compactedMessages,
       requestId,
       usage,
-      trigger: { inputTokens, threshold: this.thresholdTokens },
+      trigger: { inputTokens, threshold: this.threshold(input.sessionId) },
     }
   }
 }

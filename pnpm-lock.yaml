@@ -109,6 +109,28 @@ importers:
       '@nexgent/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@nexgent/preset':
+        specifier: workspace:*
+        version: link:../preset
+      '@nexgent/ptc':
+        specifier: workspace:*
+        version: link:../ptc
+      '@nexgent/session':
+        specifier: workspace:*
+        version: link:../session
+    devDependencies:
+      '@nexgent/context':
+        specifier: workspace:*
+        version: link:../context
+      '@nexgent/skill':
+        specifier: workspace:*
+        version: link:../skill
+      '@nexgent/test-support':
+        specifier: workspace:*
+        version: link:../test-support
+      '@nexgent/workspace':
+        specifier: workspace:*
+        version: link:../workspace
 
   packages/context:
     dependencies:
