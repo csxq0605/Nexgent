@@ -110,6 +110,7 @@ export const T = {
   panelDeliverables: '成果',
   panelFiles: '文件',
   panelGoal: '目标',
+  panelCapabilities: '能力',
   noMaterials: '还没有资料。添加的文件会复制到项目里，原文件不会被修改。',
   removeMaterial: '移除',
   addByPath: '按路径添加',
@@ -173,7 +174,118 @@ export const T = {
   memberDeliverablesTitle: '成员成果',
   byMember: (name: string) => `来自成员 ${name}`,
   memberCount: (n: number) => `${n} 个成员`,
+
+  capabilityCurrent: '当前能力版本',
+  capabilityBaseline: '基线（未采用任何能力包）',
+  capabilityRevision: (n: number) => `第 ${n} 次变更`,
+  capabilityComponents: '组件',
+  capabilityNoComponents: '没有组件。',
+  capabilityNewSessions: '新开的对话使用这个版本；已有对话保持开始时的版本。',
+  capabilityProblem: '能力版本有问题',
+  capabilityRollback: '回滚到上一版本',
+  capabilityRollbackConfirm: '确认回滚',
+  capabilityRollbackReason: '回滚原因（可不填）',
+  capabilityCandidates: '候选',
+  capabilityNoCandidates: '还没有候选。任务里做出可复用的技能或函数并提交后，会出现在这里。',
+  capabilityHistory: '采用记录',
+  capabilityNoHistory: '还没有采用或回滚。',
+  candidateReason: '原因',
+  candidateTrial: '门控试验',
+  candidateTrialRuns: (n: number) => `${n} 次运行`,
+  candidateNoTrial: '还没有门控试验。',
+  candidateStartTrial: '开始门控',
+  candidateApprove: '审批',
+  candidateNeedsApproval: '含插件，需要审批',
+  pluginApprovalTitle: '插件包需要你的批准',
+  pluginApprovalBody: '这个候选通过了门控，其中含有插件。插件在 Nexgent 应用进程内运行，拥有应用的全部权限，可以读写文件、联网、执行程序。只有在你信任它时才允许。',
+  pluginApprovalPackages: '插件',
+  pluginApprovalVersion: '能力包哈希',
+  pluginApprovalFiles: '文件',
+  pluginAllow: '允许并采用',
+  pluginDeny: '拒绝',
 } as const
+
+/** A capability version for people: the baseline in words, a bundle by its short hash. */
+export function versionText(version: string): string {
+  return version === 'baseline' ? T.capabilityBaseline : version.slice(0, 12)
+}
+
+/** A candidate's status in words. */
+export function candidateStatusText(status: string): string {
+  switch (status) {
+    case 'drafted':
+      return '草稿'
+    case 'proposed':
+      return '已提交，等待门控'
+    case 'trialing':
+      return '门控试验中'
+    case 'awaiting-approval':
+      return '等待审批'
+    case 'adopted':
+      return '已采用'
+    case 'rejected':
+      return '未采用'
+    case 'rolled-back':
+      return '已回滚'
+    default:
+      return status
+  }
+}
+
+/** Why a revision or decision happened, in words. */
+export function triggerText(trigger: string): string {
+  switch (trigger) {
+    case 'gate':
+      return '门控通过'
+    case 'approval':
+      return '审批通过'
+    case 'load-failure':
+      return '加载失败自动回滚'
+    case 'usage-regression':
+      return '使用退化自动回滚'
+    case 'manual':
+      return '手动'
+    default:
+      return trigger
+  }
+}
+
+/** A decision reason in words. */
+export function decisionReasonText(reason: string): string {
+  const words: Record<string, string> = {
+    'quality-up': '检查通过率高于基线',
+    'cost-down': '质量持平且更省',
+    'review-preferred': '质量持平，审核模型更倾向候选',
+    'quality-down': '检查通过率低于基线',
+    'guard-regressed': '守护任务退步',
+    'cost-over-cap': '成本超过上限',
+    'no-improvement': '没有改进',
+    'unknown-runs': '有运行结果未知',
+    'budget-exhausted': '试验额度用尽',
+    interrupted: '试验中断',
+    approved: '用户批准',
+    'approval-denied': '用户拒绝',
+    'load-failure': '加载校验失败',
+    'usage-regression': '采用后检查通过率下降',
+    'component-errors': '新组件连续出错',
+    manual: '手动',
+  }
+  return words[reason] ?? reason
+}
+
+/** A component kind in words. */
+export function componentKindText(kind: string): string {
+  const words: Record<string, string> = {
+    skill: '技能',
+    'function-module': '函数模块',
+    plugin: '插件',
+    'context-policy': '上下文策略',
+    preset: '预设',
+    'team-template': '团队模板',
+    architecture: '工作流图',
+  }
+  return words[kind] ?? kind
+}
 
 /** How a member was started, in words. */
 export function memberFormText(form: MemberExecutionForm): string {

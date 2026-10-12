@@ -1400,3 +1400,37 @@ h3 {
   color: var(--muted);
   padding: 8px 0 4px;
 }
+
+/* --- step 4: capability versions ------------------------------------------ */
+
+.tabs {
+  flex-wrap: wrap;
+}
+
+.wrap {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.error-banner {
+  background: #fff4f4;
+  border: 1px solid #f0c4c8;
+  color: var(--bad);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.candidate .item-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.candidate-detail {
+  border-left: 2px solid var(--line);
+  padding-left: 8px;
+  margin-top: 4px;
+}

@@ -58,6 +58,7 @@ import {
   type TurnResult,
   type UserMessageSource,
 } from '@nexgent/kernel'
+import { capabilitiesOf, type CapabilityService } from '@nexgent/capabilities'
 import { projectSession, SESSION_FILE_NAME } from '@nexgent/session'
 import { createFeedbackEntry, materialAddedRecord, type LocalTaskingService } from '@nexgent/tasking'
 import {
@@ -79,6 +80,7 @@ import {
   type Unsubscribe,
 } from './api.js'
 import { bootProjectApp, ROOT_SESSION_RECOVERIES } from './boot.js'
+import * as capabilities from './capabilities.js'
 import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
 import { collaborationView, historyItems, memberRunView, runKey, sessionSummary, turnUsage } from './history.js'
@@ -182,11 +184,6 @@ function tallyStatus(tally: TurnTally): TaskOutcomeStatus {
     default:
       return 'failed'
   }
-}
-
-/** A step-4 method whose shape is frozen but not implemented yet. */
-function notYet(method: string): Promise<never> {
-  return Promise.reject(new NexgentError('internal', `${method} is not implemented yet (step 4)`))
 }
 
 function invalid(message: string): NexgentError {
@@ -726,6 +723,28 @@ export class LocalNexgentSdk implements NexgentSdk {
     }
   }
 
+  /** A project-level (step 4 capability) event: its own per-project counter, no session. */
+  private emitProject(projectId: string, event: DistributiveOmitBase<SdkEvent>): void {
+    const key = `${projectId}\u0000`
+    const eventSeq = (this.eventSeq.get(key) ?? 0) + 1
+    this.eventSeq.set(key, eventSeq)
+    const full = { ...event, projectId, eventSeq } as SdkEvent
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(full)
+      } catch {
+        // a subscriber failure must not affect the caller
+      }
+    }
+  }
+
+  /** The project's capability service (`@nexgent/capabilities` is a default row). */
+  private capabilities(project: ProjectEntry): CapabilityService {
+    const service = capabilitiesOf(project.app.ctx)
+    if (service === undefined) throw new NexgentError('internal', `project ${project.projectId} runs without @nexgent/capabilities`)
+    return service
+  }
+
   private onEvent(project: ProjectEntry, entry: SessionEntry, event: AgentEvent): void {
     // Register before any listener runs, so `approvals.respond` from the callback finds the request.
     if (event.type === 'approval.request' && this.options.approvalResponder === undefined) this.registerApproval(project, event.request)
@@ -856,6 +875,15 @@ export class LocalNexgentSdk implements NexgentSdk {
       case 'team.message':
         send({ type: 'team.message', ...(record.turn === undefined ? {} : { turn: record.turn }), message: record.message })
         return
+      case 'capability.propose': {
+        const service = capabilitiesOf(project.app.ctx)
+        if (service !== undefined) {
+          capabilities.candidateView(service, record.candidateId)
+            .then(candidate => this.emitProject(project.projectId, { type: 'capability.candidate', candidate }))
+            .catch(() => undefined)
+        }
+        return
+      }
       default:
         // material.added and goal records are reported by the SDK methods that write them (with the full metadata / goal)
         return
@@ -1034,13 +1062,36 @@ export class LocalNexgentSdk implements NexgentSdk {
       'settings.update': input => updateSettings(this.project(input.projectId).app.ctx.workspace.layout.configFile, input.patch, this.credentialEnv),
       'settings.setApiKey': input => setApiKey(this.credentialEnv, input?.value),
 
-      // Step 4 (W0 freezes the shapes; 「SDK 与桌面」 implements them in round 3).
-      'capabilities.current': () => notYet('capabilities.current'),
-      'capabilities.list': () => notYet('capabilities.list'),
-      'capabilities.show': () => notYet('capabilities.show'),
-      'capabilities.trial': () => notYet('capabilities.trial'),
-      'capabilities.approve': () => notYet('capabilities.approve'),
-      'capabilities.rollback': () => notYet('capabilities.rollback'),
+      // Step 4: project-level, over `@nexgent/capabilities` (events carry no session).
+      'capabilities.current': async input => {
+        const project = this.project(input.projectId)
+        const before = await this.capabilities(project).store.activation()
+        const current = await capabilities.currentView(this.capabilities(project))
+        if (current.revision !== before.revision) this.emitProject(project.projectId, { type: 'capability.version', current })
+        return current
+      },
+      'capabilities.list': input => capabilities.listing(this.capabilities(this.project(input.projectId))),
+      'capabilities.show': input => capabilities.show(this.capabilities(this.project(input.projectId)), input.candidateId),
+      'capabilities.trial': async input => {
+        const project = this.project(input.projectId)
+        const candidate = await capabilities.trial(this.capabilities(project), input.candidateId)
+        this.emitProject(project.projectId, { type: 'capability.candidate', candidate })
+        return candidate
+      },
+      'capabilities.approve': async input => {
+        const project = this.project(input.projectId)
+        const service = this.capabilities(project)
+        const candidate = await capabilities.approve(service, input.candidateId, input.decision)
+        this.emitProject(project.projectId, { type: 'capability.candidate', candidate })
+        if (candidate.status === 'adopted') this.emitProject(project.projectId, { type: 'capability.version', current: await capabilities.currentView(service) })
+        return candidate
+      },
+      'capabilities.rollback': async input => {
+        const project = this.project(input.projectId)
+        const current = await capabilities.rollback(this.capabilities(project), input.toVersion, input.reason)
+        this.emitProject(project.projectId, { type: 'capability.version', current })
+        return current
+      },
     }
   }
 

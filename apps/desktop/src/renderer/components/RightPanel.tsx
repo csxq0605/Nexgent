@@ -3,12 +3,14 @@ import type { DeliverableSummary, FileChange } from '@nexgent/kernel'
 import { useAppState, useAppStore } from '../hooks.js'
 import { T, fileChangeText, formatBytes, formatTime, goalStatusText, isAbsolutePath } from '../strings.js'
 import { useUi, type PanelTab } from '../ui.js'
+import { CapabilitiesPanel } from './Capabilities.js'
 
 const TABS: ReadonlyArray<{ readonly id: PanelTab; readonly label: string }> = [
   { id: 'materials', label: T.panelMaterials },
   { id: 'deliverables', label: T.panelDeliverables },
   { id: 'files', label: T.panelFiles },
   { id: 'goal', label: T.panelGoal },
+  { id: 'capabilities', label: T.panelCapabilities },
 ]
 
 function Materials(): JSX.Element {
@@ -254,6 +256,7 @@ export function RightPanel({ tab, onTab }: { readonly tab: PanelTab; readonly on
         {tab === 'deliverables' && <Deliverables />}
         {tab === 'files' && <Files />}
         {tab === 'goal' && <GoalPanel />}
+        {tab === 'capabilities' && <CapabilitiesPanel />}
       </div>
     </aside>
   )

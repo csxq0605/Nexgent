@@ -7,7 +7,7 @@ export interface DeliverableTarget {
   readonly mode: 'preview' | 'diff' | 'feedback'
 }
 
-export type PanelTab = 'materials' | 'deliverables' | 'files' | 'goal'
+export type PanelTab = 'materials' | 'deliverables' | 'files' | 'goal' | 'capabilities'
 
 export interface UiActions {
   openDeliverable(target: DeliverableTarget): void

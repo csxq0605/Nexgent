@@ -5,7 +5,7 @@
  * Never bundled into the app (only tests import it).
  */
 import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, MaterialMetadata } from '@nexgent/kernel'
-import type { MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, WorkflowView } from '@nexgent/sdk'
+import type { CandidateDetail, CandidateView, CapabilityListing, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -79,6 +79,36 @@ export function memberRun(overrides: Partial<MemberRunView> = {}): MemberRunView
   return { childSessionId: 'c1', childTurn: 1, name: 'analyst', executionForm: 'delegated', status: 'running', deliverables: [], ...overrides }
 }
 
+export const BUNDLE = 'b'.repeat(64)
+
+/** A candidate as `capabilities.list` shows it (step 4). */
+export function candidate(overrides: Partial<CandidateView> = {}): CandidateView {
+  return { id: 'c-1', status: 'proposed', proposedAt: '2026-10-12T08:00:00.000Z', sessionId: 's1', components: [{ kind: 'skill', name: 'order-summary' }], requiresApproval: false, summary: '按地区汇总订单', ...overrides }
+}
+
+/** `capabilities.show` of {@link candidate}. */
+export function candidateDetail(view: CandidateView, version = BUNDLE): CandidateDetail {
+  return {
+    view,
+    record: {
+      formatVersion: 1,
+      id: view.id,
+      proposedAt: view.proposedAt,
+      sessionId: view.sessionId,
+      taskId: 't1',
+      turn: 1,
+      base: 'baseline',
+      version,
+      components: view.components.map(c => ({ ...c, files: [{ path: c.kind === 'plugin' ? 'plugin.json' : 'SKILL.md', sha256: 'e'.repeat(64), bytes: 120 }] })),
+      proofs: view.components.map(c => ({ ...c, turn: 1, toolCallId: 'call-1' })),
+      requiresApproval: view.requiresApproval,
+      ...(view.summary === undefined ? {} : { summary: view.summary }),
+    },
+    receipts: [],
+    decisions: [],
+  }
+}
+
 export class FakeBridge implements NexgentBridge {
   readonly platform = 'linux'
   readonly calls: FakeCall[] = []
@@ -97,6 +127,8 @@ export class FakeBridge implements NexgentBridge {
   memberViews: Record<string, SessionView> = {}
   /** Step 3: workflows `sessions.collaboration` reports. */
   workflows: WorkflowView[] = []
+  /** Step 4: what `capabilities.list` answers (`approve` / `rollback` / `trial` change it like the SDK would). */
+  capabilities: CapabilityListing = { current: { version: 'baseline', revision: 0, components: [] }, history: [], candidates: [] }
   readonly handlers: Record<string, Handler> = {
     'app.info': () => ({ sdkVersion: 4, appVersion: '0.0.0-test', platform: 'linux' }),
     'projects.recent': () => this.recent,
@@ -142,7 +174,43 @@ export class FakeBridge implements NexgentBridge {
       this.settings = { ...this.settings, ...input.patch }
       return this.settings
     },
+    'capabilities.list': () => this.capabilities,
+    'capabilities.current': () => this.capabilities.current,
+    'capabilities.show': input => {
+      const view = this.capabilities.candidates.find(c => c.id === input.candidateId)
+      if (view === undefined) throw { name: 'NexgentError', code: 'tool/invalid-input', message: `no candidate ${input.candidateId}` }
+      return candidateDetail(view)
+    },
+    'capabilities.trial': input => this.setCandidate(input.candidateId, { status: 'trialing', trialId: 'trial-1' }),
+    'capabilities.approve': input => {
+      if (input.decision === 'deny') return this.setCandidate(input.candidateId, { status: 'rejected', decision: { id: 'dec-2', outcome: 'rejected', reason: 'approval-denied', detail: '用户拒绝了插件包。' } })
+      const adopted = this.setCandidate(input.candidateId, { status: 'adopted', decision: { id: 'dec-2', outcome: 'adopted', reason: 'approved', detail: '用户批准。' } })
+      const revision = this.capabilities.current.revision + 1
+      this.capabilities = {
+        ...this.capabilities,
+        current: { version: BUNDLE, revision, since: '2026-10-12T09:00:00.000Z', trigger: 'approval', components: adopted.components },
+        history: [...this.capabilities.history, { format: 1, revision, previous: null, from: this.capabilities.current.version, version: BUNDLE, type: 'adopt', trigger: 'approval', decisionId: 'dec-2', committedAt: '2026-10-12T09:00:00.000Z' }],
+      }
+      return adopted
+    },
+    'capabilities.rollback': () => {
+      const { current, history } = this.capabilities
+      const revision = current.revision + 1
+      this.capabilities = {
+        ...this.capabilities,
+        current: { version: 'baseline', revision, since: '2026-10-12T10:00:00.000Z', trigger: 'manual', components: [] },
+        history: [...history, { format: 1, revision, previous: null, from: current.version, version: 'baseline', type: 'rollback', trigger: 'manual', decisionId: 'dec-3', committedAt: '2026-10-12T10:00:00.000Z' }],
+        candidates: this.capabilities.candidates.map(c => (c.status === 'adopted' ? { ...c, status: 'rolled-back' } : c)),
+      }
+      return this.capabilities.current
+    },
     'settings.setApiKey': input => (input.value === '' ? { configured: false } : { configured: true, source: 'file' }),
+  }
+
+  private setCandidate(id: string, patch: Partial<CandidateView>): CandidateView {
+    const updated = { ...this.capabilities.candidates.find(c => c.id === id)!, ...patch }
+    this.capabilities = { ...this.capabilities, candidates: this.capabilities.candidates.map(c => (c.id === id ? updated : c)) }
+    return updated
   }
 
   invoke = async (method: string, input: unknown): Promise<unknown> => {
