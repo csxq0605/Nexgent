@@ -59,9 +59,20 @@
 - 函数模块：工具名 `cap_<module>_<function>`，effects `['execute', ...声明]`，`selfSandboxed`。每次调用起一个 PTC 进程（空环境变量、Node 权限模型、时限与输出上限），模块源码由宿主读出后以 `data:` URL 导入；函数收到 `(input, host)`，`host` 是 `run_code` 的项目函数，按调用会话的沙箱检查，声明 `write` 才给写函数。模块须是单个自包含 `.mjs`。
 - 插件：在宿主进程内以 Cordis 插件加载到该会话的作用域，卸载即释放；声明的工具名不能与会话已有工具重名。
 
+## 门控 `capability_trial`（`src/trial/`）
+
+- 触发：根会话一轮结束后，插件先跑用量退化检查，再为该会话提出、未试过、未决定的候选启动门控进程（`capabilities.autoTrial` 开且行配置有 `trial.entry` 时；SDK 填的是 `@nexgent/sdk` 的 `trial-entry.js`）。进程分离运行，CLI 退出后继续；日志在 `trials/<candidateId>.log`。
+- 回放集：有快照树、检查记录（至少一条）与根会话用户消息的历史任务，一个根任务一个用例，回放它的全部用户消息。selection 先放提出候选的任务，再按与它首条消息的词重合度从高到低；guard 取最不相似的，两边不重叠。不够时返回 `waiting`，什么都不写。
+- 运行：每个用例每侧 `repeats` 次，候选在前；每次在快照的临时副本里（`autoTrial` 关、`perTask` 上限取剩余试验额度），由宿主的 `TrialRunner` 执行（产品里每次一个 `trial-entry.js replay` 子进程，审批一律 `headless` 拒绝），之后门控自己在副本上跑记录的检查。没跑完的记 `unknown`，不算失败。每次运行前查额度，用尽即停，结论 `budget-exhausted`。
+- 判定：`decideTrial`。只有检查打平且费用比不超上限时才问评审模型（`TrialReviewer`，SDK 里是 Claude Platform 上的 `capabilities.reviewer` 模型，A/B 位置按轮次交换），评审意见单独记 `trial.review`。通过写 `trigger: gate` 的采用修订；含插件的写 `awaiting-approval`；其余写 `rejected`。候选、回执、决定都保留。门控参数只读 `.nexgent/config.json`。
+- 一次性与中断：候选首次试验前独占创建 `trials/<candidateId>.attempt`，之后不再试；运行中有 `trials/<trialId>.lock`（进程号）。启动时 `recoverInterruptedTrials` 把没有 `trial.end`、锁对应进程已不在的试验记为 `rejected / interrupted`，不重跑。
+- 用量退化：`checkUsageRegression` 在根会话解析版本前和每轮结束后执行，只看 `gate` / `approval` 采用之后、该版本上的非试验记录：新组件工具的 `tool.call` 错误序列与根任务 `task.outcome.checks`（刚结束那一轮用 `turnOutcome()` 补上），交给 `decideUsageRollback`，触发即写 `usage-regression` 回滚。
+
 ## Known Limitations and Deferred Work
 
-- SDK profile 还没有 `@nexgent/capabilities` 一行（归 W4），所以 SDK、CLI、桌面里还看不到三个工具。
+- `trials/` 下的 `.attempt`、`.lock`、`.log` 三种旁路文件还没写进 `data-formats.md`。
+- `test-command` 检查只认 `TEST_COMMAND_PATTERN` 里的测试命令（`@nexgent/tasking`），`node checks/verify.mjs` 这类脚本不会成为检查。
+- 回放只发用户消息，反馈轮的成果修改与审批不重放；`estimatedUsd` 恒为 `unknown`。
 - 契约 `functionToolName` 允许带横线与大写的名字（如 `cap_order-summary_summarizeOrders`），而 kernel 的工具名规则是 `^[a-z][a-z0-9_]*$`，这种函数模块现在会在注册时被拒；等契约或 kernel 统一。
 - 契约 `SkillSource` 没有能力包来源，能力包技能标为 `project`；`workflow` 工具不能按名字引用已采用的图；`personaSuffix` 输出在 `# Learned practices` 节，没有接到人设段落。
 - 恢复的会话不会自动重新加载试用过的插件（重新加载要再问一次用户），需要再次 `capability_try`。

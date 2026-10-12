@@ -23,7 +23,8 @@
     "@nexgent/kernel": "workspace:*",
     "@nexgent/session": "workspace:*",
     "@nexgent/preset": "workspace:*",
-    "@nexgent/ptc": "workspace:*"
+    "@nexgent/ptc": "workspace:*",
+    "@nexgent/tasking": "workspace:*"
   },
   "devDependencies": {
     "@nexgent/context": "workspace:*",

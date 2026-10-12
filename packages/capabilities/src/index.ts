@@ -70,4 +70,5 @@ export {
 } from './service.js'
 export { capabilityDraftTool, capabilityProposeTool, capabilityTools, capabilityTryTool, type RecordReader } from './tools.js'
 export { capabilitiesProvider } from './provider.js'
-export { apply, CapabilitiesPlugin, name } from './plugin.js'
+export { apply, CapabilitiesPlugin, name, type CapabilitiesPluginConfig } from './plugin.js'
+export * from './trial/index.js'

@@ -163,10 +163,11 @@ describe('capabilities.* (step 4, W4)', () => {
       .toEqual(['capability.candidate:rejected', 'capability.candidate:adopted', 'capability.version'])
   })
 
-  it('says when no gate is available for capabilities.trial', async () => {
+  it('says when the gate cannot run a capabilities.trial yet (too little replayable history)', async () => {
     const { t, root, projectId } = await openProject()
     const candidate = await propose(root, [skill('north-summary')])
-    await expect(t.sdk.call('capabilities.trial', { projectId, candidateId: candidate.id })).rejects.toMatchObject({ code: 'internal', message: expect.stringContaining('not implemented yet') })
+    await expect(t.sdk.call('capabilities.trial', { projectId, candidateId: candidate.id })).rejects.toMatchObject({ code: 'tool/invalid-input', message: expect.stringContaining('the gate cannot run yet') })
+    expect((await t.sdk.call('capabilities.show', { projectId, candidateId: candidate.id })).view.status).toBe('proposed')
   })
 
   it('hands a proposed candidate to the gate entry of the capability service', async () => {

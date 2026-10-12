@@ -132,6 +132,7 @@ export class CapabilityService {
   /** Components in force per session, for the synchronous `componentOf`. */
   readonly #known = new Map<string, readonly ActiveComponent[]>()
   #last: { resolved?: ResolvedCapabilities; failure?: string } = {}
+  #trialStarter: ((candidateId: string) => Promise<unknown>) | undefined
 
   constructor(ctx: Context, capabilitiesDir: string, sandbox: Sandbox, config: CapabilitiesConfig = {}) {
     this.#ctx = ctx
@@ -152,6 +153,21 @@ export class CapabilityService {
         }).catch(() => {})
       },
     })
+  }
+
+  /** Set by the plugin: how {@link startTrial} starts the gate (`GateHost.trial`). */
+  setTrialStarter(starter: ((candidateId: string) => Promise<unknown>) | undefined): void {
+    this.#trialStarter = starter
+  }
+
+  /**
+   * Start the gate for a proposed candidate (the SDK's `capabilities.trial`);
+   * resolves once its trial is under way or decided.
+   * @throws `internal` when this app has no gate.
+   */
+  async startTrial(candidateId: string): Promise<unknown> {
+    if (this.#trialStarter === undefined) throw new NexgentError('internal', 'capabilities.trial is not implemented yet: this app has no gate')
+    return this.#trialStarter(candidateId)
   }
 
   /** Register an extra content check for one kind (the skill and workflow plugins do); returns the unregister function. */

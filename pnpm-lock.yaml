@@ -121,6 +121,9 @@ importers:
       '@nexgent/session':
         specifier: workspace:*
         version: link:../session
+      '@nexgent/tasking':
+        specifier: workspace:*
+        version: link:../tasking
     devDependencies:
       '@nexgent/context':
         specifier: workspace:*

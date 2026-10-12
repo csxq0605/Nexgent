@@ -140,7 +140,7 @@ describe('scripts/accept-step4.mjs (requires `pnpm build`)', () => {
     for (const check of items) {
       if (check.id === 'H19') expect(check).toMatchObject({ status: 'passed', passed: true, detail: 'step 3 H01–H23: all 23 passed' })
       else if (PASSING.includes(check.id!)) expect(check, `${check.id}: ${check.detail}`).toMatchObject({ status: 'passed', passed: true })
-      else expect(check, `${check.id}: ${check.detail}`).toMatchObject({ status: 'not-implemented', passed: false, detail: expect.stringMatching(/the gate \(W3\)/) })
+      else expect(check, `${check.id}: ${check.detail}`).toMatchObject({ status: 'not-implemented', passed: false, detail: expect.stringMatching(/the gate \(W3\)|the gate is present, but this item's scenario is not written yet/) })
     }
     // The midterm checkpoint: four named checks outside the checklist, all met.
     const points = (summary?.checks ?? []).filter(check => check.id === undefined)
