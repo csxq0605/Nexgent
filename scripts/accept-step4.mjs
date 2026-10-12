@@ -5,10 +5,10 @@
  * session records, ledger lines, the activation history and process state.
  *
  *   headless  H01–H19  scripted model server, through @nexgent/sdk: H19 (step 3's H01–H23 over a
- *                      fresh run of step 3's headless scenario); H01–H05, H07, H10, H17 from the
- *                      step-4 scenario (accept-common/step4-headless.mjs, step4-scenario.mjs), each
- *                      not-implemented until its product part lands; the midterm checkpoint's four
- *                      items are recorded as named checks. The rest wait for the gate
+ *                      fresh run of step 3's headless scenario); H01–H18 from the step-4 scenario
+ *                      (accept-common/step4-headless.mjs, step4-scenario.mjs), each not-implemented
+ *                      until its product part lands (the gate items until W3); the midterm
+ *                      checkpoint's four items are recorded as named checks
  *   desktop   D01–D18  D01–D14: steps 2 and 3's desktop scenarios and judges, as a regression;
  *                      D15–D18 (capability version, candidates, plugin approval, rollback) later
  *   real      R01–R07  real Claude model on the order-summary family (scripts/real-task/step4-orders.mjs;
