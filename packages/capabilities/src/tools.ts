@@ -23,10 +23,11 @@ import {
   type ToolRecordInput,
 } from '@nexgent/kernel'
 import { writeCandidate, type ProposedComponent } from './candidates.js'
-import { applyDraft, readComponentDirectory } from './drafts.js'
+import { applyDraft, draftDirectory, readComponentDirectory } from './drafts.js'
 import { componentFormat } from './formats.js'
 import { findUseProof } from './proofs.js'
 import type { CapabilityService } from './service.js'
+import { readComponentFiles } from './store.js'
 
 const DRAFT_DESCRIPTION = [
   'Create or change one reusable capability component in this session\'s private draft area (not the project). '
@@ -42,9 +43,11 @@ const DRAFT_DESCRIPTION = [
   `plugin (runs in the host, the user must approve it): ${componentFormat('plugin')}`,
 ].join('\n')
 const TRY_DESCRIPTION = 'Load the current draft of one component into this session only: a skill joins your skill list, a function module\'s functions become tools named cap_<module>_<function>, a preset or team template becomes usable by delegate / spawn_teammate, a context policy applies from the next turn. '
-  + 'Other sessions do not see it. Trying a plugin asks the user first.'
+  + 'Other sessions do not see it. Trying a plugin asks the user first. '
+  + 'When the capability version this session runs on already has this component with the same content, nothing is loaded and the call succeeds: use the component as it is.'
 const PROPOSE_DESCRIPTION = 'Submit tried components as one candidate for future tasks. Each component must have been used successfully in this session after it was last tried (e.g. a call of its tool, load_skill of the skill). '
-  + 'After the task ends the candidate is compared against the current version on past tasks and adopted only if it is better.'
+  + 'After the task ends the candidate is compared against the current version on past tasks and adopted only if it is better. '
+  + 'A component the current capability version already has with the same content is not proposed again; the call succeeds and says so.'
 
 /** Step of the call (kernel contexts carry it). */
 function stepOf(context: ToolContext): number {
@@ -74,6 +77,37 @@ function componentRef(input: { readonly kind?: unknown; readonly name?: unknown 
 
 function definition(spec: Step4ToolSpec, description: string): Tool['definition'] {
   return { name: spec.name, description, inputSchema: spec.inputSchema, effects: [...spec.effects], approval: spec.approval }
+}
+
+function sameFiles(left: ReadonlyMap<string, Uint8Array>, right: ReadonlyMap<string, Uint8Array>): boolean {
+  if (left.size !== right.size) return false
+  for (const [path, bytes] of left) {
+    const other = right.get(path)
+    if (other === undefined || !Buffer.from(bytes).equals(Buffer.from(other))) return false
+  }
+  return true
+}
+
+/**
+ * The capability version the session runs on, when it already holds this
+ * component with exactly the content the session would try or propose
+ * (`content`; absent: the session has no copy of its own). A replayed task
+ * that drafts, tries and proposes a component its version already carries
+ * (the gate's candidate side) then succeeds without a new draft or candidate.
+ */
+async function alreadyInVersion(service: CapabilityService, sessionId: string, component: CapabilityComponentRef,
+  content: ReadonlyMap<string, Uint8Array> | undefined): Promise<string | undefined> {
+  const version = await service.sessionVersion(sessionId)
+  if (version === 'baseline') return undefined
+  const bundle = await service.sessionBundle(sessionId)
+  if (!bundle.manifest.components.some(item => item.kind === component.kind && item.name === component.name)) return undefined
+  if (content === undefined || content.size === 0) return version
+  const adopted = new Map((await readComponentFiles(bundle, component)).map(file => [file.path, typeof file.content === 'string' ? new Uint8Array(Buffer.from(file.content)) : file.content] as const))
+  return sameFiles(content, adopted) ? version : undefined
+}
+
+function inVersionText(component: CapabilityComponentRef, version: string): string {
+  return `${componentDir(component.kind, component.name)} is already in the capability version this session runs on (${version}) with the same content; nothing to load or propose, use it as it is.`
 }
 
 /** Read a session's records through the host's session store. */
@@ -116,6 +150,18 @@ export function capabilityTryTool(service: CapabilityService, readRecords: Recor
       const step = stepOf(context)
       const revision = (await readRecords(context.sessionId))
         .filter(item => item.type === 'capability.draft' && item.component.kind === component.kind && item.component.name === component.name).length
+      const tried = (await service.components(context.sessionId, component.kind)).some(item => item.name === component.name && item.version === 'draft')
+      if (!tried) {
+        const draft = revision === 0 ? undefined : await readComponentDirectory(draftDirectory(service.store.directory, context.sessionId, component))
+        const version = await alreadyInVersion(service, context.sessionId, component, draft)
+        if (version !== undefined) {
+          const tools = await service.toolsOf(context.sessionId, component)
+          return {
+            content: `${inVersionText(component, version)}${tools.length === 0 ? '' : ` Its tools: ${tools.join(', ')}.`}`,
+            meta: { component: { ...component }, alreadyInVersion: version, tools: [...tools] },
+          }
+        }
+      }
       if (revision === 0) throw new NexgentError('tool/invalid-input', `no draft of ${componentDir(component.kind, component.name)} in this session; write it with capability_draft first`)
       const active = await service.tryDraft(context, component, revision)
       const tools = await service.toolsOf(context.sessionId, component)
@@ -150,9 +196,28 @@ export function capabilityProposeTool(service: CapabilityService, readRecords: R
       const append = record(context)
       const step = stepOf(context)
       const records = await readRecords(context.sessionId)
+      const triedNow = new Map((await service.components(context.sessionId)).filter(item => item.version === 'draft').map(item => [`${item.kind}/${item.name}`, item]))
+      const inVersion: { readonly ref: CapabilityComponentRef; readonly version: string }[] = []
+      const pending: CapabilityComponentRef[] = []
+      for (const ref of refs) {
+        const tried = triedNow.get(`${ref.kind}/${ref.name}`)
+        const drafted = records.some(item => item.type === 'capability.draft' && item.component.kind === ref.kind && item.component.name === ref.name)
+        const content = tried !== undefined
+          ? await readComponentDirectory(tried.directory)
+          : drafted ? await readComponentDirectory(draftDirectory(service.store.directory, context.sessionId, ref)) : undefined
+        const version = await alreadyInVersion(service, context.sessionId, ref, content)
+        if (version === undefined) pending.push(ref)
+        else inVersion.push({ ref, version })
+      }
+      if (pending.length === 0) {
+        return {
+          content: inVersion.map(item => inVersionText(item.ref, item.version)).join(' '),
+          meta: { alreadyInVersion: inVersion.map(item => ({ ...item.ref, version: item.version })) },
+        }
+      }
       const proofs: ComponentUseProof[] = []
       const missing: string[] = []
-      for (const ref of refs) {
+      for (const ref of pending) {
         const proof = findUseProof(records, ref)
         if (typeof proof === 'string') missing.push(`${componentDir(ref.kind, ref.name)}: ${proof}`)
         else proofs.push(proof)
@@ -160,7 +225,7 @@ export function capabilityProposeTool(service: CapabilityService, readRecords: R
       if (missing.length > 0) throw new NexgentError('tool/failed', `not proposed; a component needs a successful use after it was tried. ${missing.join('; ')}`, { details: { missing } })
       const tried = new Map((await service.components(context.sessionId)).filter(item => item.version === 'draft').map(item => [`${item.kind}/${item.name}`, item]))
       const components: ProposedComponent[] = []
-      for (const ref of refs) {
+      for (const ref of pending) {
         const active = tried.get(`${ref.kind}/${ref.name}`)
         if (active === undefined) throw new NexgentError('tool/failed', `${componentDir(ref.kind, ref.name)} is not loaded in this session any more; try it again`)
         components.push({ ...ref, files: await readComponentDirectory(active.directory) })
@@ -178,7 +243,8 @@ export function capabilityProposeTool(service: CapabilityService, readRecords: R
       })
       await append({ type: 'capability.propose', turn: context.turn, step, toolCallId: context.callId, candidateId: candidate.id, proofs })
       return {
-        content: `Proposed candidate ${candidate.id} with ${refs.map(ref => componentDir(ref.kind, ref.name)).join(', ')}. `
+        content: `Proposed candidate ${candidate.id} with ${pending.map(ref => componentDir(ref.kind, ref.name)).join(', ')}. `
+          + inVersion.map(item => `${inVersionText(item.ref, item.version)} `).join('')
           + (candidate.requiresApproval ? 'It contains a plugin: after the gate it waits for the user\'s approval.' : 'It is compared against the current version on past tasks after this task ends.'),
         meta: { candidateId: candidate.id, version: candidate.version, requiresApproval: candidate.requiresApproval },
       }
