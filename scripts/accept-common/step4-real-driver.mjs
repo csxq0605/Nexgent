@@ -38,7 +38,7 @@ const timer = setTimeout(() => {
 const { result, error } = await runTurn(sdk, { projectId: project.projectId, sessionId: spec.sessionId, text: spec.text }, {
   onEvent(event) {
     if (event.type === 'tool.start') write({ type: 'tool.start', name: event.call.name, arguments: String(JSON.stringify(event.call.arguments)).slice(0, 600) })
-    else if (event.type === 'tool.result') write({ type: 'tool.result', name: event.name, isError: event.isError, content: String(event.content).slice(0, 300) })
+    else if (event.type === 'tool.result') write({ type: 'tool.result', name: event.result.name, isError: event.result.isError, content: String(event.result.content).slice(0, 300) })
   },
 })
 clearTimeout(timer)

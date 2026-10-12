@@ -17,3 +17,4 @@ export declare function realPrerequisites(
 ):
   | { readonly ok: true; readonly keySource: string; readonly remainingUsd: number }
   | { readonly ok: false; readonly reason: string }
+export declare const TASK_A_REAL: { readonly id: string; readonly kind: string; readonly month: string; readonly input: string; readonly output: string; readonly ask: string }

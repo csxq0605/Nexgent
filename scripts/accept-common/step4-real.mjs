@@ -55,6 +55,15 @@ export const HISTORY = [REPLAY_TASKS[0], REPLAY_TASKS[2]]
 /** R05: tasks on the injected version (at most the rule's window), then one after the rollback. */
 export const REGRESSION_TASKS = ['2026-11', '2026-12', '2027-01'].map(month => familyTask(`summary-${month}`, 'summary', month))
 export const AFTER_ROLLBACK = familyTask('summary-2027-02', 'summary', '2027-02')
+/**
+ * R02's ask names the capability tools: in the first real run (2026-10-12) the fixture's
+ * wording alone ("a reusable function or skill") led the model to write a project script
+ * with write_file, so no candidate reached the gate.
+ */
+export const TASK_A_REAL = {
+  ...TASK_A,
+  ask: `${TASK_A.ask} Make it a Nexgent capability (a function module or a skill): draft it with capability_draft, try it with capability_try, use it for this month, and propose it with capability_propose.`,
+}
 
 const errorText = error => (error instanceof Error ? error.message : String(error))
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -64,7 +73,7 @@ class StopScenario extends Error {}
 function slim(event) {
   switch (event.type) {
     case 'tool.start': return { type: event.type, turn: event.turn, name: event.call.name, arguments: String(JSON.stringify(event.call.arguments)).slice(0, 600) }
-    case 'tool.result': return { type: event.type, turn: event.turn, name: event.name, isError: event.isError, content: String(event.content).slice(0, 300) }
+    case 'tool.result': return { type: event.type, turn: event.turn, name: event.result.name, isError: event.result.isError, content: String(event.result.content).slice(0, 300) }
     case 'turn.end': return { type: event.type, turn: event.turn, reason: event.reason }
     case 'error': return { type: event.type, error: event.error }
     default: return undefined
@@ -229,7 +238,7 @@ export async function runRealScenario(h, work, { env, realModel, budgetUsd = REA
     for (const [index, entry] of HISTORY.entries()) await task(`history${index + 1}`, entry)
 
     // R02, and the gate it starts (R03): the task's reserve includes the gate's.
-    const sessionA = await task('A', TASK_A, RESERVE.task + RESERVE.gate)
+    const sessionA = await task('A', TASK_A_REAL, RESERVE.task + RESERVE.gate)
     const proposed = (await candidatesOf(root)).filter(c => c.record?.sessionId === sessionA)
     obs.candidates = proposed.map(c => ({ id: c.id, version: c.record.version, base: c.record.base, taskId: c.record.taskId, components: (c.record.components ?? []).map(x => ({ kind: x.kind, name: x.name })), summary: c.record.summary }))
     obs.proposals = ((await sessionsOf(root))[sessionA] ?? []).filter(r => r.type === 'capability.propose').map(r => ({ candidateId: r.candidateId, proofs: r.proofs }))
