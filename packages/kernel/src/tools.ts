@@ -38,6 +38,18 @@ declare module '@deepseek-ai/cordis' {
 /** Tool name rule from the contract. */
 export const TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]*$/
 
+/**
+ * Step 4: the names `functionToolName` gives a function module's functions
+ * (`cap_<module>_<function>`; the module name may hold `-`, the function
+ * name capitals), which the general rule would refuse. At most 64 characters.
+ */
+export const FUNCTION_TOOL_NAME_PATTERN = /^cap_[a-z][a-z0-9-]{0,63}_[a-zA-Z][a-zA-Z0-9_]{0,31}$/
+
+/** Whether `name` may be registered: the contract rule, or a function module's tool name. */
+export function isValidToolName(name: string): boolean {
+  return TOOL_NAME_PATTERN.test(name) || (name.length <= 64 && FUNCTION_TOOL_NAME_PATTERN.test(name))
+}
+
 interface Entry {
   readonly tool: Tool
   readonly scope: ToolScope | undefined
@@ -63,7 +75,7 @@ export class ToolRegistryService extends Service implements ToolRegistry {
 
   register(tool: Tool): () => void {
     const definition = tool.definition
-    if (!TOOL_NAME_PATTERN.test(definition.name)) {
+    if (!isValidToolName(definition.name)) {
       throw new NexgentError('tool/invalid-input', `invalid tool name "${definition.name}"`)
     }
     const scope = this.scope
