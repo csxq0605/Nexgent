@@ -23,6 +23,11 @@ describe('capability versions through the SDK', () => {
     expect((await started.done).reason).toEqual({ kind: 'completed' })
     const tools = t.providers[0]!.llm.calls[0]!.request.tools?.map(tool => tool.name) ?? []
     expect(tools).toEqual(expect.arrayContaining(['capability_draft', 'capability_try', 'capability_propose']))
+    // The plugin is the capability host: a project with nothing adopted runs on baseline.
+    const records = (await readSessionRecords(project.root, session.sessionId)).records as SessionRecord[]
+    expect(records.find(record => record.type === 'session.start')).toMatchObject({ capabilityVersion: 'baseline' })
+    const outcome = (await readLedgerRecords(project.root)).records.find(record => record.type === 'task.outcome')
+    expect(outcome).toMatchObject({ capabilityVersion: 'baseline' })
   })
 
   it('runs a task on the version ctx.capabilityHost reports (session start, ledger, attach)', async () => {
