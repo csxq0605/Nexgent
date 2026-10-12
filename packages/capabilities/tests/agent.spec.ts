@@ -207,7 +207,8 @@ export default {
     expect(resolved.version).toBe(bundle.version)
 
     const agent = await agents.create({ sandboxMode: 'workspace-write' })
-    service().bindSession(agent.sessionId, resolved.version)
+    expect(agent.capabilityVersion).toBe(bundle.version)
+    expect(await service().sessionVersion(agent.sessionId)).toBe(bundle.version)
     llm.push({ toolCalls: [{ name: 'cap_probe_total', arguments: { values: [2, 2] } }] }, { content: 'four' })
     expect((await agent.run({ text: 'Add.' })).reason).toEqual({ kind: 'completed' })
     expect(llm.requests[0]!.messages[0]!.content).toContain('Always cite the file.')
@@ -223,6 +224,59 @@ export default {
     const status = await service().status()
     expect(status.version).toBe('baseline')
     expect(status.trigger).toBe('load-failure')
+  })
+
+  it('the model drafts, tries, uses and proposes through the kernel; a resumed session gets its tried skill back', async () => {
+    const root = await tempDir()
+    const llm = scriptedProvider([])
+    const { agents } = await boot(root, llm)
+    const skill = { kind: 'skill', name: 'order-notes' }
+    const fm = { kind: 'function-module', name: 'probe' }
+    llm.push(
+      { toolCalls: [
+        { name: 'capability_draft', arguments: { ...skill, files: [{ path: 'SKILL.md', content: '---\nname: order-notes\ndescription: How we sum orders.\n---\n\nAdd the discount first.\n' }] } },
+        { name: 'capability_draft', arguments: { ...fm, files: [{ path: 'functions.json', content: JSON.stringify(SPEC) }, { path: 'index.mjs', content: SOURCE }] } },
+      ] },
+      { toolCalls: [{ name: 'capability_try', arguments: skill }, { name: 'capability_try', arguments: fm }] },
+      { toolCalls: [{ name: 'load_skill', arguments: { name: 'order-notes' } }, { name: 'cap_probe_total', arguments: { values: [1, 2] } }] },
+      { toolCalls: [{ name: 'capability_propose', arguments: { components: [skill, fm], summary: 'Order notes and a sum.' } }] },
+      { content: 'proposed' },
+    )
+    const agent = await agents.create({ sandboxMode: 'workspace-write' })
+    expect((await agent.run({ text: 'Make it reusable.' })).reason).toEqual({ kind: 'completed' })
+    const toolResults = llm.requests.slice(1).flatMap(request => request.messages.filter(message => message.role === 'tool').slice(-2))
+    expect(toolResults.every(message => !message.isError)).toBe(true)
+    const log = (await readFile(join(root, '.nexgent', 'sessions', agent.sessionId, 'session.jsonl'), 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line) as { type: string })
+    expect(log.map(record => record.type).filter(type => type.startsWith('capability.'))).toEqual(['capability.draft', 'capability.draft', 'capability.try', 'capability.try', 'capability.propose'])
+    const [candidate] = await (await import('../src/index.js')).listCandidates(service().store.directory)
+    expect(candidate?.components.map(component => component.name)).toEqual(['order-notes', 'probe'])
+
+    await agent.close()
+    const resumed = await agents.resume(agent.sessionId)
+    expect((await service().components(resumed.sessionId, 'skill')).map(component => [component.name, component.version])).toEqual([['order-notes', 'draft']])
+    llm.push({ toolCalls: [{ name: 'load_skill', arguments: { name: 'order-notes' } }] }, { content: 'again' })
+    expect((await resumed.run({ text: 'Load it again.' })).reason).toEqual({ kind: 'completed' })
+    expect(llm.requests.at(-1)!.messages.filter(message => message.role === 'tool').at(-1)).toMatchObject({ isError: false })
+    llm.assertConsumed()
+  })
+
+  it('names the workflow graph and team template a call used', async () => {
+    const root = await tempDir()
+    await boot(root, scriptedProvider([]))
+    const store = service().store
+    const graph = { nodes: [{ id: 'draft', prompt: 'Write it.', dependencies: [] }] }
+    const bundle = await store.write([
+      { kind: 'architecture', name: 'one-step', files: [{ path: 'architecture.json', content: JSON.stringify({ format: 1, architecture: graph }) }] },
+      { kind: 'team-template', name: 'pair', files: [{ path: 'team.json', content: JSON.stringify({ formatVersion: 1, name: 'pair', description: 'Two.', members: [{ name: 'writer', task: 'Write.' }, { name: 'checker', task: 'Check.' }] }) }] },
+    ])
+    await store.adopt(bundle.version, { trigger: 'manual' })
+    const agent = await app!.ctx.agents.create({})
+    const host = app!.ctx.get('capabilityHost')!
+    expect(host.componentOf!({ sessionId: agent.sessionId, name: 'workflow', input: { graph: { nodes: [{ dependencies: [], prompt: 'Write it.', id: 'draft' }] } }, isError: false }))
+      .toEqual({ kind: 'architecture', name: 'one-step', version: bundle.version })
+    expect(host.componentOf!({ sessionId: agent.sessionId, name: 'spawn_teammate', input: { name: 'checker', task: 'x' }, isError: false }))
+      .toEqual({ kind: 'team-template', name: 'pair', version: bundle.version })
+    expect(host.componentOf!({ sessionId: agent.sessionId, name: 'spawn_teammate', input: { name: 'stranger', task: 'x' }, isError: false })).toBeUndefined()
   })
 
   it('reports a damaged activation chain to the user instead of guessing', async () => {

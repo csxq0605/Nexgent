@@ -14,10 +14,18 @@
  * comes from its records (`session.start.capabilityVersion`, then the latest
  * `capability.version`), or from {@link CapabilityService.bindSession}; a
  * session without one runs on the baseline.
+ *
+ * The kernel reaches the loader through `ctx.capabilityHost`
+ * ({@link CapabilityService.host}): `current` and `verify` when a session
+ * opens or resumes, `attach` with the agent's scoped context (tools land in
+ * that scope and leave with it), `componentOf` for uses its own rules do not
+ * name (team templates, workflow graphs).
  */
+import { access } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 import {
+  canonicalJson,
   COMPONENT_ENTRY_FILES,
   componentDir,
   NexgentError,
@@ -26,6 +34,12 @@ import {
   type CapabilityDecision,
   type CapabilityVersion,
   type CapabilityVersionSwitchReason,
+  type AttachedComponent,
+  type CapabilityAttachInput,
+  type CapabilityAttachment,
+  type CapabilityHost,
+  type ComponentCallInput,
+  type ComponentUseRef,
   type Context,
   type Sandbox,
   type SessionRecord,
@@ -35,7 +49,7 @@ import type { RunCodeToolOptions } from '@nexgent/ptc'
 import type { ActivationProblem } from './activation.js'
 import { CapabilityStore, type ResolvedCapabilities } from './capability-store.js'
 import { validateComponent, type ComponentSpec, type ComponentValidator } from './components.js'
-import { draftDirectory, freezeDraft, readComponentDirectory } from './drafts.js'
+import { draftDirectory, freezeDraft, readComponentDirectory, triedDirectory } from './drafts.js'
 import { functionModuleTools } from './function-tools.js'
 import { CapabilityIntegrityError, componentDirectory, type StoredBundle } from './store.js'
 
@@ -91,6 +105,8 @@ interface SessionState {
   readonly adopted: readonly ActiveComponent[]
   readonly tried: Map<string, ActiveComponent>
   readonly attached: Map<string, Attachment>
+  /** The agent's scoped context the kernel handed over (`capabilityHost.attach`). */
+  scope?: Context
   /** Serializes attach / try for the session. */
   queue: Promise<unknown>
 }
@@ -113,6 +129,8 @@ export class CapabilityService {
   readonly #sessions = new Map<string, Promise<SessionState>>()
   readonly #bound = new Map<string, CapabilityVersion>()
   readonly #bundles = new Map<string, Promise<readonly ActiveComponent[]>>()
+  /** Components in force per session, for the synchronous `componentOf`. */
+  readonly #known = new Map<string, readonly ActiveComponent[]>()
   #last: { resolved?: ResolvedCapabilities; failure?: string } = {}
 
   constructor(ctx: Context, capabilitiesDir: string, sandbox: Sandbox, config: CapabilitiesConfig = {}) {
@@ -249,6 +267,7 @@ export class CapabilityService {
 
   /** Tell the loader which version a session runs on (the kernel calls it when the session opens). */
   bindSession(sessionId: string, version: CapabilityVersion): void {
+    if (this.#bound.get(sessionId) === version) return
     this.#bound.set(sessionId, version)
     this.#sessions.delete(sessionId)
   }
@@ -257,6 +276,117 @@ export class CapabilityService {
   releaseSession(sessionId: string): void {
     this.#bound.delete(sessionId)
     this.#sessions.delete(sessionId)
+    this.#known.delete(sessionId)
+  }
+
+  /** Whether a version can still be loaded (bundle and every component verify). */
+  async verify(version: CapabilityVersion): Promise<{ readonly ok: true } | { readonly ok: false; readonly detail: string }> {
+    try {
+      await this.#usable(version)
+      return { ok: true }
+    } catch (error) {
+      if (!(error instanceof CapabilityIntegrityError)) throw error
+      return { ok: false, detail: error.message }
+    }
+  }
+
+  /**
+   * `capabilityHost.attach`: load `version` into one agent's scope. A
+   * resumed root session gets back the drafts it had tried (not plugins:
+   * loading one again needs a new approval, so the model has to try it
+   * again). Throws when the version does not verify; the kernel then runs
+   * the session on the baseline.
+   */
+  async attachAgent(input: CapabilityAttachInput): Promise<CapabilityAttachment> {
+    const { sessionId } = input
+    const adopted = await this.#usable(input.version)
+    const state: SessionState = { version: input.version, adopted, tried: new Map(), attached: new Map(), scope: input.ctx, queue: Promise.resolve() }
+    const promise = Promise.resolve(state)
+    this.#bound.set(sessionId, input.version)
+    this.#sessions.set(sessionId, promise)
+    input.ctx.effect(() => () => {
+      if (this.#sessions.get(sessionId) === promise) this.releaseSession(sessionId)
+    }, 'capabilities.session')
+    if (input.resumed && input.member === undefined) await this.#restoreTried(sessionId, state)
+    const run = state.queue.then(() => this.#attach(sessionId, state))
+    state.queue = run.catch(() => {})
+    await run
+    return {
+      components: (await this.components(sessionId)).map((component): AttachedComponent => {
+        const tools = component.spec.kind === 'function-module' || component.spec.kind === 'plugin' ? component.spec.tools : undefined
+        return {
+          kind: component.kind,
+          name: component.name,
+          ...(tools === undefined || tools.length === 0 ? {} : { tools: [...tools] }),
+          ...(component.version === 'draft' ? { draft: true as const } : {}),
+        }
+      }),
+    }
+  }
+
+  async #restoreTried(sessionId: string, state: SessionState): Promise<void> {
+    const store = this.#ctx.get('session')
+    if (store === undefined) return
+    let records: readonly SessionRecord[]
+    try {
+      records = (await store.readAll(sessionId)).records
+    } catch {
+      return
+    }
+    const latest = new Map<string, { readonly ref: CapabilityComponentRef; readonly revision: number }>()
+    for (const record of records) {
+      if (record.type === 'capability.try') latest.set(key(record.component), { ref: record.component, revision: record.revision })
+    }
+    for (const [name, { ref, revision }] of latest) {
+      if (ref.kind === 'plugin') continue
+      const directory = triedDirectory(this.store.directory, sessionId, ref, revision)
+      try {
+        await access(directory)
+        const spec = await validateComponent(ref, await readComponentDirectory(directory), directory, this.#validators)
+        state.tried.set(name, { kind: ref.kind, name: ref.name, version: 'draft', directory, entryPath: join(directory, COMPONENT_ENTRY_FILES[ref.kind]), revision, spec })
+      } catch {
+        // A tried copy that is gone or no longer valid is not restored; the model can try the draft again.
+      }
+    }
+  }
+
+  /** `capabilityHost.componentOf`: team templates (a teammate it names) and workflow graphs (the same graph). */
+  componentOf(call: ComponentCallInput): ComponentUseRef | undefined {
+    const known = this.#known.get(call.sessionId)
+    if (known === undefined) return undefined
+    const input = call.input !== null && typeof call.input === 'object' && !Array.isArray(call.input) ? call.input as Record<string, unknown> : {}
+    if (call.name === 'spawn_teammate' && typeof input.name === 'string') {
+      const template = known.find(component => component.spec.kind === 'team-template' && component.spec.spec.members.some(member => member.name === input.name))
+      if (template !== undefined) return { kind: template.kind, name: template.name, version: template.version }
+    }
+    if (call.name === 'workflow' && input.graph !== undefined) {
+      let wanted: string
+      try {
+        wanted = canonicalJson(input.graph as never)
+      } catch {
+        return undefined
+      }
+      const graph = known.find(component => {
+        if (component.spec.kind !== 'architecture' || component.spec.graph === undefined) return false
+        try {
+          return canonicalJson(component.spec.graph as never) === wanted
+        } catch {
+          return false
+        }
+      })
+      if (graph !== undefined) return { kind: graph.kind, name: graph.name, version: graph.version }
+    }
+    return undefined
+  }
+
+  /** The `ctx.capabilityHost` the kernel calls. */
+  host(): CapabilityHost {
+    return {
+      current: async () => (await this.resolveVersion()).version,
+      verify: version => this.verify(version),
+      attach: input => this.attachAgent(input),
+      componentOf: call => this.componentOf(call),
+    }
   }
 
   async #recordedVersion(sessionId: string): Promise<CapabilityVersion | undefined> {
@@ -335,9 +465,12 @@ export class CapabilityService {
   }
 
   async #attach(sessionId: string, state: SessionState): Promise<void> {
-    const agent = this.#ctx.get('agents')?.get(sessionId)
-    if (agent === undefined) return
-    for (const component of await this.components(sessionId)) {
+    const components = await this.components(sessionId)
+    this.#known.set(sessionId, components)
+    const target = state.scope ?? this.#ctx.get('agents')?.get(sessionId)?.ctx
+    if (target === undefined) return
+    const agent = { ctx: target }
+    for (const component of components) {
       if (component.spec.kind !== 'function-module' && component.spec.kind !== 'plugin') continue
       const name = key(component)
       const signature = `${component.version}:${component.revision ?? 0}`
