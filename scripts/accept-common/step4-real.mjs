@@ -268,6 +268,8 @@ export async function runRealScenario(h, work, { env, realModel, budgetUsd = REA
     step = 'B'
     await guard(RESERVE.task, 'B')
     const sessionB = (await sdk.call('sessions.create', { projectId, title: 'step-4 real B' })).sessionId
+    // Release this process's lock on B so the child can open it.
+    await sdk.call('sessions.close', { projectId, sessionId: sessionB })
     const child = await turnInChild({ root, home, sessionId: sessionB, text: TASK_B.ask, keySource: realModelKeySource(process.env) ?? 'NEXGENT_API_KEY', baseUrl: env.NEXGENT_API_BASE_URL, realModel, timeoutMs: turnTimeoutMs })
     await finishTask('B', TASK_B, sessionB, { reason: child.done?.reason, ...(child.done?.error === undefined ? {} : { error: child.done.error }), events: child.events, child: { pid: child.pid, parentPid: process.pid, exitCode: child.exitCode, stderr: child.stderr } })
 
