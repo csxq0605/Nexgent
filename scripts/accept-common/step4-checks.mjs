@@ -12,9 +12,10 @@
  * scenario (`ctx.step3`); D01–D14 are step 3's desktop items with their own
  * scenarios and judges. H01–H18 are judged (step4-judges.mjs) from the
  * step-4 headless scenario (`ctx.step4`): H01–H05, H07, H10, H17 since round
- * 2, H13, H14 and H18 since round 3; each reports not-implemented until the
- * product part it needs has landed, and the gate items (H06, H08, H09, H11,
- * H12, H15, H16, H14's adoption half) say the gate (W3) is missing.
+ * 2, H13, H14 and H18 since round 3; the gate items (H06, H08, H09, H11, H12,
+ * H15, H16, H14's adoption half) from the gate scenario (`ctx.step4.gate`,
+ * step4-gate.mjs). Each reports not-implemented until the product part it
+ * needs has landed.
  * D15–D18 are judged (step4-desktop-judges.mjs) from the capabilities
  * desktop scenario (`ctx.capabilities`, step4-desktop.mjs); R01–R07 wait for
  * round 4.

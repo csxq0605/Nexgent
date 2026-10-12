@@ -4,9 +4,10 @@
  * The product parts these items need (W1, W2 part 2) have not landed, so a
  * live run reports them not-implemented; these tests pin what a pass means.
  */
-import { functionToolName, MEMBER_DENIED_TOOLS } from '@nexgent/kernel'
+import { DEFAULT_CAPABILITIES_CONFIG, functionToolName, MEMBER_DENIED_TOOLS } from '@nexgent/kernel'
 import { describe, expect, it } from 'vitest'
-import { checkpoint4, EXTRAS, FUNCTION_TOOL, judge, judgeCheckpoint, JUDGES, versionWritten } from '../../../scripts/accept-common/step4-judges.mjs'
+import { checkpoint4, EXTRAS, FUNCTION_TOOL, GATE as GATE_FACTS, judge, judgeCheckpoint, JUDGES, versionWritten } from '../../../scripts/accept-common/step4-judges.mjs'
+import { BUDGET, GATE_PLUGIN } from '../../../scripts/accept-common/step4-gate.mjs'
 import { PLUGIN, pluginFiles, POLICIES } from '../../../scripts/accept-common/step4-scenario.mjs'
 import { COMPONENTS, TASK_B } from '../../../scripts/accept-common/step4-fixtures.mjs'
 import { expectedSummary, ordersCsv } from '../../../scripts/real-task/step4-orders.mjs'
@@ -124,7 +125,7 @@ const lineOfB = (obs: Obs, type: string) => obs['ledger'].find((r: any) => r.ses
 const ROUND2 = ['H01', 'H02', 'H03', 'H04', 'H05', 'H07', 'H10', 'H17']
 /** Round 3: judged now. */
 const ROUND3 = ['H13', 'H18']
-/** Need the gate: not-implemented in every observation until W3 lands and their scenario is written. */
+/** Judged from the gate scenario (`obs.gate`, step4-gate.mjs); not-implemented while the gate is missing. */
 const GATE = ['H06', 'H08', 'H09', 'H11', 'H12', 'H15', 'H16']
 
 /** Expect `id` to fail on `obs`, with evidence matching `pattern`. */
@@ -155,9 +156,10 @@ describe('round-2 judges: the pass case', () => {
     // H14's try half passes; adoption approval needs the gate.
     expect(judge('H14', base())).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/gate \(W3\).*checked so far: trying the plugin asked once/) })
     for (const id of GATE) expect(judge(id, base()), id).toEqual({ status: 'not-implemented', evidence: expect.stringMatching(/the gate \(W3\) has not landed/) })
+    // The gate is there but its scenario did not run: a failure, not a pass.
     const gate = base()
     gate['features'].gate = true
-    for (const id of GATE) expect(judge(id, gate), id).toEqual({ status: 'not-implemented', evidence: expect.stringMatching(/scenario is not written yet/) })
+    for (const id of [...GATE, 'H14']) expect(judge(id, gate), id).toEqual({ status: 'failed', evidence: 'the gate is present, but the gate scenario did not run' })
     expect(judgeCheckpoint(base()).map(p => [p.id, p.status])).toEqual([['CP1', 'passed'], ['CP2', 'passed'], ['CP3', 'passed'], ['CP4', 'passed']])
   })
 })
@@ -376,5 +378,241 @@ describe('round-3 judges: counter-examples', () => {
     for (const r of old['ledger']) delete r.capabilityVersion
     for (const records of Object.values(old['sessions']) as any[]) for (const r of records) delete r.capabilityVersion
     expect(judge('H18', old)).toMatchObject({ status: 'not-implemented', evidence: expect.stringMatching(/W1/) })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The gate items (H06, H08, H09, H11, H12, H14's adoption half, H15, H16) over
+// hand-made gate-scenario observations shaped like step4-gate.mjs's.
+// ---------------------------------------------------------------------------
+
+const VA = 'a1'.repeat(32)
+const VC = 'c1'.repeat(32)
+const VD = 'd1'.repeat(32)
+const VE = 'e1'.repeat(32)
+const VF = 'f1'.repeat(32)
+const PLUGIN_TOOL = 'greet_user'
+const cost = (requestCount: number) => ({ usage: { inputTokens: 40 * requestCount, outputTokens: 12 * requestCount }, requestCount, estimatedUsd: 'unknown' })
+const named = (name: string, isError = false) => ({ type: 'tool.result', toolCallId: `c-${name}`, name, isError, content: isError ? 'Failed' : 'ok' })
+const passedChecks = [{ name: 'test-command', passed: true, target: 'test-1' }]
+
+/** A full trial: selection [origin, similar] and guard [far], `repeats` runs per arm; `status(arm, set)` per run. */
+function trialReceipts(trialId: string, candidateId: string, cases: { selection: string[]; guard: string[] }, status: (arm: string, set: string) => string, extra: Obs = {}) {
+  const runs: Obs[] = []
+  for (const [set, list] of [['selection', cases.selection], ['guard', cases.guard]] as const) {
+    for (const caseId of list) {
+      for (const repeat of [1, 2]) {
+        for (const arm of ['candidate', 'baseline']) {
+          const s = status(arm, set)
+          runs.push({ type: 'trial.run', trialId, set, caseId, arm, repeat, status: s, checks: [{ name: 'test-command', passed: s === 'pass', target: 'test-1' }], cost: cost(3) })
+        }
+      }
+    }
+  }
+  const plan = { selection: cases.selection.map(caseId => ({ caseId })), guard: cases.guard.map(caseId => ({ caseId })), repeats: 2, budget: { maxRequests: 400, maxTokens: 8_000_000 }, ...extra['plan'] }
+  return [{ type: 'trial.start', trialId, candidateId, plan }, ...runs, ...(extra['reviews'] ?? []), ...(extra['end'] === null ? [] : [extra['end']])]
+}
+
+/** Ledger request lines of a trial: three per run, with the run's arm. */
+function trialRequests(trialId: string, receipts: Obs[]) {
+  return receipts.filter(r => r.type === 'trial.run').flatMap(r => Array.from({ length: r.cost.requestCount }, () => ({ type: 'llm.request.end', trialId, arm: r.arm, sessionId: `trial-${r.arm}-${r.caseId}-${r.repeat}` })))
+}
+
+/** Gate observations that satisfy every gate judge. */
+function goodGate(): Obs {
+  const cases = { selection: ['T-A0', 'T-H1'], guard: ['T-H3'] }
+  const tA = trialReceipts('tA', 'cA', cases, arm => (arm === 'candidate' ? 'pass' : 'fail'), { end: { type: 'trial.end', status: 'pass', verdict: { outcome: 'adopt', reason: 'quality-up', passRate: { candidate: 1, baseline: 0 }, costRatio: 1, decidedByReview: false } } })
+  const tC = trialReceipts('tC', 'cC', { selection: ['T-C', 'T-H1'], guard: ['T-H3'] }, (arm, set) => (set === 'guard' || arm === 'baseline' ? 'pass' : 'fail'), { end: { type: 'trial.end', status: 'fail', verdict: { outcome: 'reject', reason: 'quality-down', passRate: { candidate: 0, baseline: 1 }, costRatio: 1, decidedByReview: false } } })
+  const reviews = [1, 2].flatMap(repeat => ['T-E', 'T-H1'].map(caseId => ({ type: 'trial.review', trialId: 'tE', set: 'selection', caseId, repeat, preference: 'candidate', reason: 'It also greets.', model: 'claude-sonnet-5-5', cost: cost(1) })))
+  const tE = trialReceipts('tE', 'cE', { selection: ['T-E', 'T-H1'], guard: ['T-H3'] }, (_arm, set) => (set === 'guard' ? 'pass' : 'fail'), { reviews, end: { type: 'trial.end', status: 'pass', verdict: { outcome: 'await-approval', reason: 'review-preferred', passRate: { candidate: 0, baseline: 0 }, costRatio: 1, decidedByReview: true } } })
+  const tD = [
+    { type: 'trial.start', trialId: 'tD', candidateId: 'cD', plan: { selection: [{ caseId: 'T-D' }, { caseId: 'T-H1' }], guard: [{ caseId: 'T-H3' }], repeats: 2, budget: { maxRequests: 3, maxTokens: 8_000_000 } } },
+    { type: 'trial.run', trialId: 'tD', set: 'selection', caseId: 'T-D', arm: 'candidate', repeat: 1, status: 'fail', checks: [{ name: 'test-command', passed: false, target: 'test-1' }], cost: cost(3) },
+    { type: 'trial.run', trialId: 'tD', set: 'selection', caseId: 'T-D', arm: 'baseline', repeat: 1, status: 'unknown', reason: 'budget', checks: [], cost: cost(0) },
+    { type: 'trial.end', status: 'unknown', verdict: { outcome: 'reject', reason: 'budget-exhausted', passRate: { candidate: 0, baseline: 0 }, costRatio: 'unknown', decidedByReview: false } },
+  ]
+  const tF = [{ type: 'trial.start', trialId: 'tF', candidateId: 'cF', plan: { selection: [], guard: [], repeats: 2 } }]
+  const gateCost = (c: number, b: number, r: number) => ({ candidate: cost(c), baseline: cost(b), review: cost(r) })
+  const decisions = [
+    { id: 'dA', outcome: 'adopted', reason: 'quality-up', trigger: 'gate', candidateId: 'cA', trialId: 'tA', fromVersion: 'baseline', toVersion: VA, revision: 1, verdict: tA.at(-1)!['verdict'], cost: gateCost(18, 18, 0), detail: 'adopt (quality-up). No reviewer opinion was needed.' },
+    { id: 'dC', outcome: 'rejected', reason: 'quality-down', trigger: 'gate', candidateId: 'cC', trialId: 'tC', fromVersion: VA, toVersion: VA, verdict: tC.at(-1)!['verdict'], cost: gateCost(18, 18, 0), detail: 'reject (quality-down).' },
+    { id: 'dR', outcome: 'rolled-back', reason: 'component-errors', trigger: 'usage-regression', candidateId: 'cA', fromVersion: VA, toVersion: 'baseline', revision: 2, regression: { consecutiveErrors: 3, observations: [{ taskId: 'T-C' }, { taskId: 'T-B2' }, { taskId: 'T-R' }] }, detail: 'rolled back' },
+    { id: 'dD', outcome: 'rejected', reason: 'budget-exhausted', trigger: 'gate', candidateId: 'cD', trialId: 'tD', fromVersion: 'baseline', toVersion: 'baseline', detail: 'reject (budget-exhausted).' },
+    { id: 'dE1', outcome: 'awaiting-approval', reason: 'review-preferred', trigger: 'gate', candidateId: 'cE', trialId: 'tE', fromVersion: 'baseline', toVersion: 'baseline', verdict: tE.at(-1)!['verdict'], cost: gateCost(18, 18, 4), detail: 'await approval' },
+    { id: 'dE2', outcome: 'adopted', reason: 'approved', trigger: 'approval', candidateId: 'cE', trialId: 'tE', fromVersion: 'baseline', toVersion: VE, revision: 3, detail: 'approved' },
+    { id: 'dF', outcome: 'rejected', reason: 'interrupted', trigger: 'gate', candidateId: 'cF', trialId: 'tF', fromVersion: VE, toVersion: VE, detail: 'interrupted' },
+  ]
+  const tasks: Obs = {}
+  const sessions: Obs = {}
+  const versions: Obs = { A0: 'baseline', H1: 'baseline', H2: 'baseline', H3: 'baseline', C: VA, B2: VA, R: VA, D: 'baseline', E: 'baseline', F: VE, G: VE }
+  for (const [key, version] of Object.entries(versions)) {
+    tasks[key] = { sessionId: `G-${key}`, reason: { kind: 'completed' }, taskId: `T-${key}` }
+    sessions[`G-${key}`] = [{ type: 'session.start', capabilityVersion: version }]
+  }
+  sessions['G-B2'].push(named(F))
+  sessions['G-R'].push(named(F, true), named(F, true), named(F, true))
+  sessions['G-E'].push(named(PLUGIN_TOOL))
+  return {
+    tasks,
+    sessions,
+    candidates: { A0: { id: 'cA', version: VA }, C: { id: 'cC', version: VC }, D: { id: 'cD', version: VD }, E: { id: 'cE', version: VE }, F: { id: 'cF', version: VF } },
+    candidateDirs: ['cA', 'cC', 'cD', 'cE', 'cF'],
+    waiting: { line: { status: 'waiting', detail: 'the project has 1' }, trial: { code: 'tool/invalid-input', error: 'the gate cannot run yet: the project has 1' }, status: 'proposed', trials: 0, decisions: 0, files: { 'cA.log': { size: 120 } } },
+    isolation: { before: { files: { 'data/orders.csv': 'h1', 'out/summary.json': 'h2' }, sessions: { 'G-A0/session.jsonl': 'h3' } }, after: { files: { 'data/orders.csv': 'h1', 'out/summary.json': 'h2' }, sessions: { 'G-A0/session.jsonl': 'h3' } } },
+    plugin: { awaiting: 'awaiting-approval', versionAwaiting: 'baseline', approved: 'adopted' },
+    approvals: [{ sessionId: 'G-E', summary: 'Load plugin "greeter" into Nexgent (runs in the host process, not sandboxed)', risk: 'high', decision: 'allow' }],
+    requests: [{ kind: 'main', task: 'F', tools: [PLUGIN_TOOL] }, { kind: 'main', task: 'F', tools: [PLUGIN_TOOL] }],
+    kill: { trialId: 'tF', pid: 4242, aliveBefore: true, receiptsBefore: ['trial.start'], deadAfter: true, versionBefore: VE },
+    recovered: { decision: decisions.at(-1), status: 'rejected', trial: { code: 'tool/invalid-input', error: 'candidate cF is rejected' }, trialsOfF: 1 },
+    trials: { tA, tC, tD, tE, tF },
+    trialFiles: Object.fromEntries(['cA', 'cC', 'cD', 'cE', 'cF'].flatMap(id => [[`${id}.attempt`, { size: 0, text: '' }], [`${id}.log`, { size: 200 }]])),
+    logs: { A0: [{ status: 'waiting' }, { status: 'decided', trialId: 'tA' }], C: [{ status: 'decided', trialId: 'tC' }], D: [{ status: 'decided', trialId: 'tD' }], E: [{ status: 'decided', trialId: 'tE' }], F: [] },
+    decisions,
+    activation: [
+      { revision: 1, type: 'adopt', trigger: 'gate', from: 'baseline', version: VA, decisionId: 'dA' },
+      { revision: 2, type: 'rollback', trigger: 'usage-regression', from: VA, version: 'baseline', decisionId: 'dR' },
+      { revision: 3, type: 'adopt', trigger: 'approval', from: 'baseline', version: VE, decisionId: 'dE2' },
+    ],
+    ledger: [
+      ...trialRequests('tA', tA),
+      ...trialRequests('tE', tE),
+      ...Array.from({ length: 4 }, () => ({ type: 'llm.request.end', trialId: 'tE', sessionId: 'review' })),
+      ...trialRequests('tD', tD),
+      { type: 'task.outcome', sessionId: 'G-B2', memberId: 'main', taskId: 'T-B2', componentsUsed: [{ kind: 'function-module', name: 'order-summary', version: VA, calls: 1, errors: 0 }], checks: passedChecks },
+      { type: 'task.outcome', sessionId: 'G-G', memberId: 'main', taskId: 'T-G', componentsUsed: [], checks: passedChecks },
+    ],
+  }
+}
+
+const gateBase = () => {
+  const obs = base()
+  obs['features'].gate = true
+  obs['gate'] = goodGate()
+  return obs
+}
+const gateOf = (obs: Obs) => obs['gate'] as Obs
+const decisionOf = (obs: Obs, id: string) => gateOf(obs)['decisions'].find((d: any) => d.id === id)
+
+/** Each case breaks one thing; the item must fail naming it. */
+function gateFails(id: string, cases: [string, (g: Obs) => void, RegExp][]) {
+  for (const [what, mutate, pattern] of cases) {
+    const obs = gateBase()
+    mutate(gateOf(obs))
+    const r = judge(id, obs)
+    expect(r.status, `${id} / ${what}: ${r.evidence}`).toBe('failed')
+    expect(r.evidence, `${id} / ${what}`).toMatch(pattern)
+  }
+}
+
+describe('gate judges', () => {
+  it('pins the scenario facts the judges read: the budget, the plugin and the product defaults', () => {
+    expect(GATE_FACTS.budgetMaxRequests).toBe(BUDGET.maxRequests)
+    expect([GATE_FACTS.plugin, GATE_FACTS.pluginTool]).toEqual([GATE_PLUGIN.name, GATE_PLUGIN.tool])
+    expect([GATE_FACTS.selectionCases, GATE_FACTS.guardCases]).toEqual([DEFAULT_CAPABILITIES_CONFIG.selectionCases, DEFAULT_CAPABILITIES_CONFIG.guardCases])
+    expect([GATE_FACTS.windowTasks, GATE_FACTS.consecutiveErrors]).toEqual([DEFAULT_CAPABILITIES_CONFIG.rollback.windowTasks, DEFAULT_CAPABILITIES_CONFIG.rollback.consecutiveErrors])
+    expect(PLUGIN_TOOL).toBe(GATE_PLUGIN.tool)
+  })
+
+  it('every gate item passes the good observations, H14 with both halves', () => {
+    for (const id of [...GATE, 'H14']) expect(judge(id, gateBase()), id).toMatchObject({ status: 'passed' })
+  })
+
+  it('a scenario that stopped half way fails its items and says where', () => {
+    const obs = gateBase()
+    delete gateOf(obs)['recovered']
+    gateOf(obs)['error'] = { step: 'restart after the kill', message: 'timed out' }
+    expect(judge('H16', obs)).toMatchObject({ status: 'failed', evidence: expect.stringMatching(/stopped at restart after the kill: timed out/) })
+    expect(judge('H06', obs)).toMatchObject({ status: 'passed' })
+  })
+
+  it('H06 fails on a missing run, the wrong order, no adoption revision, a missing cost or an unmarked reviewer', () => {
+    gateFails('H06', [
+      ['a run is missing', g => { g['trials'].tA.splice(3, 1) }, /missing guard|missing selection|runs; missing/],
+      ['baseline before candidate', g => { const runs = g['trials'].tA; [runs[1], runs[2]] = [runs[2], runs[1]] }, /candidate arm ran before/],
+      ['one repeat only', g => { g['trials'].tA[0].plan.repeats = 1 }, /r = 1/],
+      ['no adoption revision', g => { g['activation'].shift() }, /adopt revision with trigger gate/],
+      ['the review cost is missing', g => { delete g['decisions'][0].cost.review }, /cost of each arm and of the reviewer/],
+      ['the reviewer was asked although the checks decided', g => { g['trials'].tA.push({ type: 'trial.review', preference: 'candidate', reason: 'x', model: 'm' }) }, /reviewer was not asked/],
+      ['the tie is not marked decided by review', g => { g['decisions'][4].verdict = { ...g['decisions'][4].verdict, decidedByReview: false } }, /decided by review/],
+      ['a review line without a reason', g => { g['trials'].tE.find((r: any) => r.type === 'trial.review').reason = '' }, /preference, reason and model/],
+      ['reviewer requests carry an arm', g => { g['ledger'].find((r: any) => r.sessionId === 'review').arm = 'candidate' }, /trial id and no arm/],
+    ])
+  })
+
+  it('H08 fails when the bad candidate is adopted, deleted, loses its receipts, or the next task leaves the adopted version', () => {
+    gateFails('H08', [
+      ['adopted', g => { g['trials'].tC.at(-1).verdict = { outcome: 'adopt', reason: 'quality-up' } }, /verdict is reject/],
+      ['candidate deleted', g => { g['candidateDirs'] = ['cA'] }, /stays on disk/],
+      ['receipts lost', g => { g['trials'].tC = [] }, /receipts stay|verdict is reject/],
+      ['a revision for it', g => { g['activation'].push({ revision: 9, type: 'adopt', version: VC, decisionId: 'dC' }) }, /no revision/],
+      ['next task on another version', g => { g['sessions']['G-B2'][0].capabilityVersion = 'baseline' }, /next task runs on the adopted version/],
+      ['the module failed in the next task', g => { g['sessions']['G-B2'][1].isError = true }, /call worked/],
+      ['its checks failed', g => { g['ledger'].find((r: any) => r.sessionId === 'G-B2').checks = [{ name: 'test-command', passed: false }] }, /checks passed/],
+    ])
+  })
+
+  it('H09 fails without the rollback, outside the window, on the wrong trigger, or when the next task keeps the bad version', () => {
+    gateFails('H09', [
+      ['no rollback', g => { g['decisions'] = g['decisions'].filter((d: any) => d.id !== 'dR'); g['activation'].splice(1, 1) }, /usage-regression decision/],
+      ['too few errors', g => { g['sessions']['G-R'].pop() }, /failed 2 calls/],
+      ['outside the window', g => { decisionOf({ gate: g }, 'dR').regression.observations.push({ taskId: 'T-X' }) }, /within K = 3 tasks/],
+      ['rollback by hand', g => { g['activation'][1].trigger = 'manual' }, /rollback revision from/],
+      ['next task still on it', g => { g['sessions']['G-D'][0].capabilityVersion = VA }, /next task runs on the previous version/],
+    ])
+  })
+
+  it('H11 fails when the trial touched the project or a request lacks its arm', () => {
+    gateFails('H11', [
+      ['an output changed', g => { g['isolation'].after.files['out/summary.json'] = 'h9' }, /changed: out\/summary\.json/],
+      ['a session added', g => { g['isolation'].after.sessions['G-new/session.jsonl'] = 'h' }, /changed: G-new/],
+      ['a request without its arm', g => { delete g['ledger'].find((r: any) => r.trialId === 'tA').arm }, /carries trialId and an arm/],
+      ['receipts and ledger disagree', g => { g['ledger'] = g['ledger'].filter((r: any, i: number) => !(r.trialId === 'tA' && i === 0)) }, /match the receipts/],
+      ['a trial record in a real session', g => { g['ledger'].find((r: any) => r.trialId === 'tA').sessionId = 'G-A0' }, /belongs to a session of the project/],
+    ])
+  })
+
+  it('H12 fails when the trial ignored the budget, finished, or something was adopted', () => {
+    gateFails('H12', [
+      ['budget not frozen', g => { g['trials'].tD[0].plan.budget = { maxRequests: 400 } }, /froze the configured budget/],
+      ['no budget stop', g => { g['trials'].tD[2].reason = 'error' }, /stopped on the budget/],
+      ['too many requests', g => { g['ledger'].push(...Array.from({ length: 2 }, () => ({ type: 'llm.request.end', trialId: 'tD', arm: 'baseline' }))) }, /at most the budget's requests \(got 5\)/],
+      ['concluded pass', g => { g['trials'].tD.at(-1).status = 'pass' }, /unknown \/ budget-exhausted/],
+      ['adopted', g => { g['activation'].push({ revision: 9, type: 'adopt', version: VD, decisionId: 'dD' }) }, /nothing was adopted|no revision names/],
+    ])
+  })
+
+  it('H14 fails when the plugin skipped awaiting approval, was adopted without approve, or asks again', () => {
+    gateFails('H14', [
+      ['adopted by the gate', g => { decisionOf({ gate: g }, 'dE1').outcome = 'adopted' }, /waits for approval/],
+      ['version moved while waiting', g => { g['plugin'].versionAwaiting = VE }, /adopted version is unchanged/],
+      ['no approval revision', g => { g['activation'].pop() }, /trigger approval/],
+      ['the try was not asked', g => { g['approvals'] = [] }, /asked once and was allowed/],
+      ['asks again in the next session', g => { g['approvals'].push({ sessionId: 'G-F', summary: 'Load plugin "greeter"', decision: 'allow' }) }, /without asking again/],
+      ['tool missing in the next session', g => { g['requests'][0].tools = [] }, /offers greet_user/],
+    ])
+  })
+
+  it('H15 fails when the gate started without history or the sets overlap', () => {
+    gateFails('H15', [
+      ['started anyway', g => { g['waiting'].line = { status: 'decided' } }, /gate process waited/],
+      ['an attempt marker while waiting', g => { g['waiting'].files['cA.attempt'] = { size: 0 } }, /no receipt, attempt marker/],
+      ['manual start accepted', g => { g['waiting'].trial = { status: 'trialing' } }, /refused to start/],
+      ['overlap', g => { g['trials'].tA[0].plan.guard = [{ caseId: 'T-H1' }] }, /do not overlap/],
+      ['origin not first', g => { g['trials'].tA[0].plan.selection.reverse() }, /starts with the task that proposed/],
+      ['guard not the least similar', g => { g['trials'].tA[0].plan.guard = [{ caseId: 'T-H2' }] }, /least similar/],
+    ])
+  })
+
+  it('H16 fails when the killed trial is rerun, left open, moves the version, or side files are wrong', () => {
+    gateFails('H16', [
+      ['not recorded', g => { g['recovered'].decision = undefined }, /recorded as interrupted/],
+      ['rerun', g => { g['recovered'].trialsOfF = 2 }, /not tried again/],
+      ['version moved', g => { g['recovered'].decision = { ...g['recovered'].decision, toVersion: 'baseline' } }, /adopted version stays/],
+      ['lock left behind', g => { g['trialFiles']['tF.lock'] = { size: 5, text: '4242\n' } }, /lock file is gone/],
+      ['attempt marker missing', g => { delete g['trialFiles']['cF.attempt'] }, /attempt marker stays/],
+      ['next task broken', g => { g['tasks'].G.reason = { kind: 'error' } }, /next task ran on/],
+      ['a log without its result', g => { g['logs'].C = [] }, /last line of trials/],
+      ['the trial had ended', g => { g['trials'].tF.push({ type: 'trial.end' }) }, /killed before its trial ended/],
+    ])
   })
 })

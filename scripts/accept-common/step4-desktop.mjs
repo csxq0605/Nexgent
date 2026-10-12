@@ -52,9 +52,12 @@ export function capabilityScript() {
   return { script: [{ content: CAPABILITY_TEXTS.firstDone, usage }, { content: CAPABILITY_TEXTS.secondDone, usage }] }
 }
 
+/** The plugin's plugin.json; the approval dialog shows its description, permissions and tools. */
+export const PLUGIN_SPEC = { formatVersion: 1, name: PLUGIN_NAME, description: 'Greets.', permissions: 'Runs inside the app with its full rights.', tools: ['greet'] }
+
 /** The plugin's files; importing or applying it writes `marker`. */
 function pluginComponent(marker) {
-  const spec = { formatVersion: 1, name: PLUGIN_NAME, description: 'Greets.', permissions: 'Runs inside the app with its full rights.', tools: ['greet'] }
+  const spec = PLUGIN_SPEC
   const source = `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(marker)}, 'imported\\n')\nexport function apply() {}\n`
   return { kind: 'plugin', name: PLUGIN_NAME, files: [{ path: 'plugin.json', content: JSON.stringify(spec) }, { path: 'index.mjs', content: source }] }
 }
@@ -118,6 +121,8 @@ async function seedCapabilities(cap, root, marker) {
 }
 
 /** The 能力 tab as shown: current version, revision, label, components, candidates and history. */
+const textOrNull = async locator => ((await locator.count()) === 0 ? null : locator.first().textContent())
+
 const panelOf = page => page.evaluate(() => {
   const q = id => document.querySelector(`[data-testid="${id}"]`)
   const current = q('capability-current')
@@ -243,6 +248,11 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
       names: await dialog.getByTestId('plugin-approval-names').textContent(),
       hash: await dialog.getByTestId('plugin-approval-hash').textContent(),
       files: await dialog.getByTestId('plugin-approval-files').textContent(),
+      description: await textOrNull(dialog.getByTestId('plugin-approval-description')),
+      permissions: await textOrNull(dialog.getByTestId('plugin-approval-permissions')),
+      tools: await textOrNull(dialog.getByTestId('plugin-approval-tools')),
+      unreadable: await dialog.getByTestId('plugin-approval-unreadable').count(),
+      allowEnabled: await dialog.getByTestId('plugin-allow').isEnabled(),
     }
     await dialog.getByTestId('plugin-deny').click()
     await dialog.waitFor({ state: 'detached', timeout: WAIT })
@@ -263,8 +273,10 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
     await page.getByTestId('capability-rollback').click()
     await page.getByTestId('capability-rollback-reason').fill(CAPABILITY_TEXTS.rollbackReason)
     await page.getByTestId('capability-rollback-confirm').click()
-    obs.rolledBack = await poll(() => panelOf(page), p => p.version !== obs.seed.A.version, 'the version after the rollback', WAIT)
-    obs.rolledBack.history = await history()
+    // The version and the revision list may render in separate updates: wait until the list has caught up with the history.
+    const settled = async () => ({ ...(await panelOf(page)), history: await history() })
+    const caughtUp = p => p.version !== obs.seed.A.version && p.revisions.length === p.history.length
+    obs.rolledBack = await poll(settled, caughtUp, 'the version and revision list after the rollback', WAIT)
 
     step = 'close'
     await app.close()
@@ -275,8 +287,7 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
     page = await launch('second')
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
     await page.getByTestId('tab-capabilities').click()
-    obs.restart = await poll(() => panelOf(page), p => p.version !== null && p.candidates.length > 0, 'the 能力 tab after the restart', WAIT)
-    obs.restart.history = await history()
+    obs.restart = await poll(settled, p => p.version !== null && p.candidates.length > 0 && p.revisions.length === p.history.length, 'the 能力 tab after the restart', WAIT)
     obs.restart.dialogs = await page.getByTestId('plugin-approval-dialog').count()
 
     step = 'close'

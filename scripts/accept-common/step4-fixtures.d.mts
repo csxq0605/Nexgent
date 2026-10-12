@@ -60,6 +60,7 @@ export declare const COMPONENTS: Readonly<Record<Quality, {
   readonly skill: Component & { readonly kind: 'skill' }
 }>>
 export declare const UNUSED_SKILL: { readonly kind: 'skill'; readonly name: string; readonly files: readonly ComponentFile[] }
+export declare function familyTask(id: string, kind: 'summary' | 'regions', month: string, options?: { set?: 'selection' | 'guard'; extra?: string }): FamilyTask
 export declare const REPLAY_TASKS: readonly FamilyTask[]
 export declare const TASK_A: FamilyTask
 export declare const TASK_B: FamilyTask
