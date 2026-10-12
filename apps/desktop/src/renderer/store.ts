@@ -7,7 +7,7 @@
  * broken backend shows an error instead of a blank window.
  */
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
-import type { ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch } from '@nexgent/sdk'
+import type { CandidateDetail, CapabilityListing, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
@@ -59,6 +59,12 @@ export interface AppState {
   readonly freshMaterialIds: readonly string[]
   /** Step 3: the member session opened from a member block (read-only); absent shows the conversation. */
   readonly memberView?: MemberView | undefined
+  /** Step 4: the project's adopted capability version, history and candidates. */
+  readonly capabilities?: CapabilityListing | undefined
+  /** Step 4: the candidate opened in the 能力 tab. */
+  readonly candidateDetail?: CandidateDetail | undefined
+  /** Step 4: a plugin candidate awaiting the user's approval, shown in its dialog. */
+  readonly pluginApproval?: CandidateDetail | undefined
 }
 
 const INITIAL: AppState = {
@@ -181,8 +187,11 @@ export class AppStore {
       settings: undefined,
       freshMaterialIds: [],
       memberView: undefined,
+      capabilities: undefined,
+      candidateDetail: undefined,
+      pluginApproval: undefined,
     })
-    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent()])
+    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities()])
     const first = this.state.sessions[0]
     if (first !== undefined) await this.openSession(first.sessionId)
     return true
@@ -202,7 +211,7 @@ export class AppStore {
 
   /** Back to the start screen; the project stays open in the backend (running turns go on). */
   leaveProject(): void {
-    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined })
+    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined })
     void this.refreshRecent()
   }
 
@@ -248,6 +257,82 @@ export class AppStore {
     })
   }
 
+  // --- capability versions (step 4) ------------------------------------------
+
+  async refreshCapabilities(): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    await this.guard(async c => {
+      const capabilities = await c.call('capabilities.list', { projectId })
+      if (this.projectId !== projectId) return
+      this.set({ capabilities })
+      // A plugin that passed its gate waits for the user: ask once per candidate.
+      const waiting = capabilities.candidates.find(candidate => candidate.status === 'awaiting-approval' && !this.askedApproval.has(candidate.id))
+      if (waiting !== undefined && this.state.pluginApproval === undefined) await this.askPluginApproval(waiting.id)
+      const open = this.state.candidateDetail
+      if (open !== undefined) {
+        const now = capabilities.candidates.find(candidate => candidate.id === open.view.id)
+        if (now !== undefined && now.status !== open.view.status) await this.showCandidate(open.view.id)
+      }
+    })
+  }
+
+  /** Candidates whose approval dialog was already shown (closing it without answering does not reopen it). */
+  private readonly askedApproval = new Set<string>()
+
+  /** Open (or close, when it is open) a candidate's details. */
+  async toggleCandidate(candidateId: string): Promise<void> {
+    if (this.state.candidateDetail?.view.id === candidateId) {
+      this.set({ candidateDetail: undefined })
+      return
+    }
+    await this.showCandidate(candidateId)
+  }
+
+  private async showCandidate(candidateId: string): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    const candidateDetail = await this.guard(c => c.call('capabilities.show', { projectId, candidateId }))
+    if (candidateDetail !== undefined && this.projectId === projectId) this.set({ candidateDetail })
+  }
+
+  async askPluginApproval(candidateId: string): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    this.askedApproval.add(candidateId)
+    const pluginApproval = await this.guard(c => c.call('capabilities.show', { projectId, candidateId }))
+    if (pluginApproval !== undefined && this.projectId === projectId && pluginApproval.view.status === 'awaiting-approval') this.set({ pluginApproval })
+  }
+
+  closePluginApproval(): void {
+    this.set({ pluginApproval: undefined })
+  }
+
+  async answerPluginApproval(decision: 'allow' | 'deny'): Promise<void> {
+    const projectId = this.projectId
+    const candidate = this.state.pluginApproval
+    if (projectId === undefined || candidate === undefined) return
+    this.set({ pluginApproval: undefined })
+    await this.guard(c => c.call('capabilities.approve', { projectId, candidateId: candidate.view.id, decision }))
+    await this.refreshCapabilities()
+  }
+
+  async startTrial(candidateId: string): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    await this.guard(c => c.call('capabilities.trial', { projectId, candidateId }))
+    await this.refreshCapabilities()
+  }
+
+  async rollbackCapability(reason?: string): Promise<boolean> {
+    const projectId = this.projectId
+    if (projectId === undefined) return false
+    const text = reason?.trim()
+    const current = await this.guard(c => c.call('capabilities.rollback', { projectId, ...(text === undefined || text === '' ? {} : { reason: text }) }))
+    await this.refreshCapabilities()
+    return current !== undefined
+  }
+
   async refreshSettings(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
@@ -265,7 +350,8 @@ export class AppStore {
     const summary = await this.guard(c => c.call('sessions.create', { projectId }))
     if (summary === undefined) return
     this.set(state => ({ sessions: [summary, ...state.sessions.filter(s => s.sessionId !== summary.sessionId)] }))
-    await this.openSession(summary.sessionId)
+    // A new conversation runs on the version adopted now (the gate may have adopted one in its own process).
+    await Promise.all([this.openSession(summary.sessionId), this.refreshCapabilities()])
   }
 
   /** Rename a conversation; an empty title is ignored. */
@@ -478,6 +564,12 @@ export class AppStore {
 
   private applySdkEvent(event: SdkEvent): void {
     if (event.projectId !== this.projectId) return
+    // Step 4: project-level capability events (no session).
+    if (event.type === 'capability.version' || event.type === 'capability.candidate' || event.type === 'capability.trial') {
+      if (event.type === 'capability.version') this.set(state => (state.capabilities === undefined ? {} : { capabilities: { ...state.capabilities, current: event.current } }))
+      void this.refreshCapabilities()
+      return
+    }
     const current = event.sessionId === this.state.sessionId
     // A member of the open conversation: its approvals are asked here, its stream feeds an open member view.
     const ofCurrent = event.parentSessionId !== undefined && event.parentSessionId === this.state.sessionId
@@ -521,6 +613,8 @@ export class AppStore {
         }))
         void this.refreshSessions()
         void this.refreshDeliverables()
+        // A proposal, the gate or a load-failure rollback may have changed the project's capabilities.
+        void this.refreshCapabilities()
         if (this.state.projectFiles !== undefined) void this.refreshFiles()
         // A workflow's end has no event of its own.
         if (current && this.state.timeline.some(entry => entry.kind === 'workflow')) void this.refreshWorkflows(event.sessionId, event.turn)

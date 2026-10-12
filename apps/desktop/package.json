@@ -27,6 +27,7 @@
     "remark-gfm": "4.0.1"
   },
   "devDependencies": {
+    "@nexgent/capabilities": "workspace:*",
     "@nexgent/test-support": "workspace:*",
     "@testing-library/dom": "10.4.2",
     "@testing-library/react": "16.3.3",

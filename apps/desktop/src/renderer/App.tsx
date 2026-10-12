@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ApprovalDialog } from './components/ApprovalDialog.js'
+import { PluginApprovalDialog } from './components/Capabilities.js'
 import { Conversation } from './components/Conversation.js'
 import { DeliverableView } from './components/DeliverableView.js'
 import { ErrorBoundary } from './components/ErrorBoundary.js'
@@ -75,6 +76,7 @@ export function App(): JSX.Element {
         </ErrorBoundary>
       )}
       {approval !== undefined && <ApprovalDialog key={approval.id} request={approval} />}
+      {approval === undefined && state.project !== undefined && <PluginApprovalDialog />}
     </UiContext.Provider>
   )
 }

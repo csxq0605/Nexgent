@@ -67,6 +67,9 @@ importers:
         specifier: 4.0.1
         version: 4.0.1
     devDependencies:
+      '@nexgent/capabilities':
+        specifier: workspace:*
+        version: link:../../packages/capabilities
       '@nexgent/test-support':
         specifier: workspace:*
         version: link:../../packages/test-support
