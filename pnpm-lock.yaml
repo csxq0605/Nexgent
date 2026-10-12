@@ -134,6 +134,9 @@ importers:
       '@nexgent/test-support':
         specifier: workspace:*
         version: link:../test-support
+      '@nexgent/workflow':
+        specifier: workspace:*
+        version: link:../workflow
       '@nexgent/workspace':
         specifier: workspace:*
         version: link:../workspace

@@ -24,12 +24,23 @@ import {
 } from '@nexgent/kernel'
 import { writeCandidate, type ProposedComponent } from './candidates.js'
 import { applyDraft, readComponentDirectory } from './drafts.js'
+import { componentFormat } from './formats.js'
 import { findUseProof } from './proofs.js'
 import type { CapabilityService } from './service.js'
 
-const DRAFT_DESCRIPTION = 'Create or change one reusable capability component in this session\'s private draft area (not the project): a skill (SKILL.md), a function module (functions.json + index.mjs), a context policy (policy.json), a preset, a team template or a workflow graph. '
-  + '`files` are written relative to the component directory; `remove` deletes files. The kind\'s entry file must exist afterwards. '
-  + 'Drafts do nothing until you call capability_try.'
+const DRAFT_DESCRIPTION = [
+  'Create or change one reusable capability component in this session\'s private draft area (not the project). '
+    + '`files` are written relative to the component directory; `remove` deletes files. The kind\'s entry file must exist afterwards. '
+    + 'Drafts do nothing until you call capability_try, which checks the format below.',
+  '',
+  `function-module: ${componentFormat('function-module')}`,
+  `skill: ${componentFormat('skill')}`,
+  `context-policy: ${componentFormat('context-policy')}`,
+  `preset: ${componentFormat('preset')}`,
+  `team-template: ${componentFormat('team-template')}`,
+  `architecture: ${componentFormat('architecture')}`,
+  `plugin (runs in the host, the user must approve it): ${componentFormat('plugin')}`,
+].join('\n')
 const TRY_DESCRIPTION = 'Load the current draft of one component into this session only: a skill joins your skill list, a function module\'s functions become tools named cap_<module>_<function>, a preset or team template becomes usable by delegate / spawn_teammate, a context policy applies from the next turn. '
   + 'Other sessions do not see it. Trying a plugin asks the user first.'
 const PROPOSE_DESCRIPTION = 'Submit tried components as one candidate for future tasks. Each component must have been used successfully in this session after it was last tried (e.g. a call of its tool, load_skill of the skill). '
