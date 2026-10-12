@@ -271,6 +271,10 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
     case 'turn.start':
     case 'goal':
     case 'material.added':
+    // Step 4: project-level capability events have no place in a session timeline.
+    case 'capability.version':
+    case 'capability.candidate':
+    case 'capability.trial':
       return [...list]
   }
 }

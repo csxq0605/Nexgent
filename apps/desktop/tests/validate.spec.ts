@@ -44,6 +44,12 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'settings.get': p,
   'settings.update': { ...p, patch: { model: 'claude-sonnet-5-5' } },
   'settings.setApiKey': { value: 'not-a-real-key' },
+  'capabilities.current': p,
+  'capabilities.list': p,
+  'capabilities.show': { ...p, candidateId: 'c1' },
+  'capabilities.trial': { ...p, candidateId: 'c1' },
+  'capabilities.approve': { ...p, candidateId: 'c1', decision: 'deny' },
+  'capabilities.rollback': { ...p, toVersion: 'baseline', reason: '变差了' },
 }
 
 describe('method whitelist', () => {

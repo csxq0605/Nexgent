@@ -137,6 +137,11 @@ const inputs: SessionRecordInput[] = [
   { type: 'workflow.start', turn: 2, toolCallId: 'c9', workflowId: 'w1', kind: 'script' },
   { type: 'workflow.phase', turn: 2, workflowId: 'w1', phase: 'check' },
   { type: 'workflow.end', turn: 2, workflowId: 'w1', status: 'interrupted', members: 1 },
+  // step 4 records
+  { type: 'capability.draft', turn: 2, step: 2, toolCallId: 'c10', component: { kind: 'skill', name: 'csv-summary' }, files: [{ path: 'SKILL.md', sha256: SHA, bytes: 120 }], revision: 1 },
+  { type: 'capability.try', turn: 2, step: 3, toolCallId: 'c11', component: { kind: 'function-module', name: 'csv-tools' }, revision: 1, tools: ['cap_csv-tools_sum'] },
+  { type: 'capability.propose', turn: 2, step: 4, toolCallId: 'c12', candidateId: 'cand-1', proofs: [{ kind: 'function-module', name: 'csv-tools', turn: 2, toolCallId: 'c13' }] },
+  { type: 'capability.version', turn: 2, version: 'baseline', previous: SHA, reason: 'load-failure', detail: 'functions/csv-tools/index.mjs hash mismatch' },
   { type: 'turn.end', turn: 2, reason: { kind: 'completed' } },
 ]
 

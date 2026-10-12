@@ -9,6 +9,7 @@
  * `llm.request.end`, failed and aborted ones included (`maxRetries: 0`).
  */
 import type { ToolCallApproval } from './approvals.js'
+import type { ActivationTrigger, CapabilityVersion, ComponentUsage, DecisionOutcome, DecisionReason, TrialArm } from './capabilities.js'
 import type { ExecutionForm } from './collaboration.js'
 import type { ErrorInfo } from './errors.js'
 import type { FinishReason, LLMRequestPurpose, LLMUsage } from './llm.js'
@@ -17,11 +18,16 @@ import type { ToolEffect } from './tools.js'
 /**
  * Attribution fields. All optional in the schema. Step 3 kernels stamp
  * `taskId`, `memberId` and `executionForm` on every record a session writes
- * (`AgentAttribution`); `capabilityVersion` stays reserved for step 4.
+ * (`AgentAttribution`); step 4 adds `capabilityVersion` on every record a
+ * session writes, and `trialId` / `arm` on the records of gate-trial runs.
  */
 export interface LedgerAttribution {
-  /** Content hash of the adopted capability bundle in force. */
-  readonly capabilityVersion?: string
+  /** Version of the capability bundle the session runs on (`baseline` or its content hash). */
+  readonly capabilityVersion?: CapabilityVersion
+  /** Step 4: the gate trial this record belongs to (trial runs and reviews); normal tasks have none. */
+  readonly trialId?: string
+  /** Step 4: which side of the trial the run is (reviewer requests carry `trialId` without `arm`). */
+  readonly arm?: TrialArm
   /** Member that issued the record: `main` for the root session, else the child's session id. */
   readonly memberId?: string
   /** How the issuing member executes: directly, delegated, as a teammate (step 3), or in a workflow. */
@@ -93,11 +99,13 @@ export interface ToolCallRecord extends LedgerRecordBase {
 
 /** One deterministic check the host ran at task end (step 4 fills the set; step 1 fixes the shape). */
 export interface TaskCheck {
-  /** Check identity, e.g. `file-exists`, `schema`, `test-command`. */
+  /** Check identity; step 4 writes the names in `TASK_CHECK_NAMES` (`file-exists`, `parses`, `test-command`). */
   readonly name: string
   readonly passed: boolean
   /** Short diagnostic; never file contents. */
   readonly detail?: string
+  /** Step 4: the check spec's id (`TaskCheckSpec.id`); paths and commands stay in `.nexgent/snapshots/checks/`. */
+  readonly target?: string
 }
 
 /** How a task ended. */
@@ -122,10 +130,43 @@ export interface TaskOutcomeRecord extends LedgerRecordBase {
   readonly toolsUsed: readonly string[]
   /** Root session only (step 3): forms its tree actually used, deduplicated in {@link EXECUTION_FORMS} order. */
   readonly formsUsed?: readonly ExecutionForm[]
+  /** Step 4: capability components this session actually used (calls of cap_* tools, skill loads, presets, templates, graphs, plugin tools). */
+  readonly componentsUsed?: readonly ComponentUsage[]
+  /** Step 4, root session only: usage of each member of the tree (the root's own totals stay in `totalUsage`). */
+  readonly memberCosts?: readonly MemberCost[]
+}
+
+/** One member's share of a task tree (`task.outcome.memberCosts`). */
+export interface MemberCost {
+  /** The member's session id. */
+  readonly memberId: string
+  readonly name: string
+  readonly executionForm: ExecutionForm
+  readonly usage: LLMUsage
+  readonly requestCount: number
+  readonly toolCallCount: number
+}
+
+/**
+ * Step 4: a capability decision was written (gate verdict, approval, or
+ * rollback). The decision record holds the evidence; this line makes it
+ * visible next to the costs it concerns.
+ */
+export interface CapabilityDecisionRecord extends LedgerRecordBase {
+  readonly type: 'capability.decision'
+  readonly decisionId: string
+  readonly outcome: DecisionOutcome
+  readonly reason: DecisionReason
+  readonly trigger: ActivationTrigger
+  readonly fromVersion: CapabilityVersion
+  readonly toVersion: CapabilityVersion
+  readonly candidateId?: string
+  /** Activation revision written for it, when one was. */
+  readonly revision?: number
 }
 
 /** Every ledger record kind. */
-export type LedgerRecord = LLMRequestStartRecord | LLMRequestEndRecord | ToolCallRecord | TaskOutcomeRecord
+export type LedgerRecord = LLMRequestStartRecord | LLMRequestEndRecord | ToolCallRecord | TaskOutcomeRecord | CapabilityDecisionRecord
 
 /** The `type` tag vocabulary. */
 export type LedgerRecordType = LedgerRecord['type']
@@ -136,6 +177,7 @@ export const LEDGER_RECORD_TYPES: readonly LedgerRecordType[] = [
   'llm.request.end',
   'tool.call',
   'task.outcome',
+  'capability.decision',
 ]
 
 /** Distributive omit over a union. */

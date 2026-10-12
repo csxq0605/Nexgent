@@ -53,7 +53,18 @@
     │   └── <name>.json
     ├── architectures/                    保存的工作流图（本文“架构图存储”，步骤 3）
     │   └── <sha256>.json
-    └── capabilities/                     能力版本（步骤 4 填）
+    ├── capabilities/                     能力版本（本文“CapabilityBundle 清单”起四节，步骤 4）
+    │   ├── <version>/                    一个能力包：manifest.json 与各组件目录
+    │   ├── activation/<n>.json           采用历史链
+    │   ├── candidates/<candidateId>/     候选：candidate.json 与提出的组件文件
+    │   ├── trials/<trialId>.jsonl        门控试验收据
+    │   ├── decisions/<decisionId>.json   采用、拒绝、待批准、回滚的结论
+    │   └── drafts/<sessionId>/           会话的草稿组件
+    └── snapshots/                        任务快照与检查（本文“任务快照与检查”，步骤 4）
+        ├── objects/<sha256>              文件内容，每份一次
+        ├── trees/<sha256>.json           快照树
+        ├── tasks/<taskId>.json           根任务开始时的快照记录
+        └── checks/<taskId>.json          根任务结束时的检查记录
 ```
 
 | 路径 | 内容 | 命名 | 创建者 | 写入者 |
@@ -68,13 +79,14 @@
 | `skills/<name>/SKILL.md` | 项目技能 | `name` 见 `agent-hooks.md` §技能 | 用户 | 用户；模型只读 |
 | `presets/<name>.json` | 项目预设（步骤 3） | `name` 见“预设” | 用户 | 用户；模型只读 |
 | `architectures/<sha256>.json` | 工作流图（步骤 3） | 规范化图的 SHA-256 | 第一次保存时 | `@nexgent/workflow`（宿主）；模型只读 |
-| `capabilities/` | 能力版本 | 步骤 4 | `ensureLayout` | 步骤 4 |
+| `capabilities/` | 能力包、采用历史、候选、试验、决定、草稿（步骤 4） | 见“CapabilityBundle 清单”起四节 | `ensureLayout` | `@nexgent/capabilities`（宿主）；模型的文件工具读写都拒绝 |
+| `snapshots/` | 任务快照与检查（步骤 4） | 内容寻址，见“任务快照与检查” | `ensureLayout` | `@nexgent/capabilities`（宿主）；模型的文件工具读写都拒绝 |
 
 规则：
 
-- `.nexgent/` 内部对模型可见的文件工具按子目录区分：`sessions/`、`ledgers/`、`capabilities/` 读写都拒绝，`materials/`、`outputs/`、`skills/`、`presets/`、`architectures/` 与 `config.json` 只读（`outputs/` 自步骤 2 起改为只读，快照只由宿主写）；规则以 `permissions.md` §路径策略与写入限制为准。
+- `.nexgent/` 内部对模型可见的文件工具按子目录区分：`sessions/`、`ledgers/`、`capabilities/`、`snapshots/` 读写都拒绝，`materials/`、`outputs/`、`skills/`、`presets/`、`architectures/` 与 `config.json` 只读（`outputs/` 自步骤 2 起改为只读，快照只由宿主写）；规则以 `permissions.md` §路径策略与写入限制为准。
 - 所有路径在服务内部以绝对路径处理（`WorkspaceLayout`）；记录里出现的路径（如 `session.start.projectRoot`）也是绝对路径。
-- 是否纳入版本控制由项目自己决定；建议忽略 `sessions/`、`ledgers/`、`outputs/`，保留 `config.json`。
+- 是否纳入版本控制由项目自己决定；建议忽略 `sessions/`、`ledgers/`、`outputs/`、`snapshots/`，保留 `config.json`；`capabilities/` 是否入库由项目决定（入库后换机器也能用同一能力版本）。
 - 本机凭证文件不在项目内：`~/.nexgent/credentials.json`（Windows 为 `%USERPROFILE%\.nexgent\credentials.json`），形状见“项目配置文件”末尾。
 
 ## 项目配置文件
@@ -94,6 +106,23 @@
 | `approvals` | `ApprovalGrant[]` | `[]` | `project` 范围的审批授权；语义见 `permissions.md` |
 | `extraReadRoots` | `string[]` | `[]` | 额外可读的绝对目录；语义见 `permissions.md` |
 | `autoImprove` | boolean | `false` | 反馈触发的自动改进（步骤 5）开关 |
+| `capabilities` | `CapabilitiesConfig` | 见下 | 门控与回滚设置（步骤 4）；改动它总要审批（`permissions.md` §工具审批） |
+
+`CapabilitiesConfig`（步骤 4，契约 `capabilities.ts`，校验 `assertCapabilitiesConfig`）：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `autoTrial` | boolean | `true` | 提出候选的任务结束后自动在独立进程里跑门控（决定 3） |
+| `trialBudget` | `{ maxTokens?, maxRequests? }` | `{ maxRequests: 400, maxTokens: 8000000 }` | 一次试验（全部运行与评审）的预算，计法同 `CostCap` |
+| `selectionCases` | integer ≥ 2 | `2` | 选择集用例数；历史任务不够时门控等待，不降低要求 |
+| `guardCases` | integer ≥ 1 | `1` | 守护集用例数 |
+| `repeats` | 1–5 | `2` | 每个用例每个臂的运行次数 |
+| `costRatioCap` | 1–10 | `1.2` | 质量提高时允许的候选 / 基线 token 比 |
+| `reviewer` | `{ model, thinking }` | `{ "model": "claude-sonnet-5-5", "thinking": "on" }` | 评审模型，可改为 `claude-opus-5-5`（决定 5）；只在检查打平时起作用 |
+| `rollback.windowTasks` | 1–20 | `3` | 采用后观察的根任务数（决定 6） |
+| `rollback.consecutiveErrors` | 1–20 | `3` | 新组件连续出错多少次即回滚 |
+
+下限是硬下限：`selectionCases: 1`、`guardCases: 0` 报 `config/invalid`。
 
 `CostCap`：
 
@@ -159,7 +188,7 @@
 
 | `type` | 何时写 | 专有字段 |
 | --- | --- | --- |
-| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现） |
+| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本） |
 | `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn` |
 | `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示 | `turn`、`content`、`source: "user" \| "inject" \| "feedback"`、`materials?`（步骤 2） |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
@@ -187,6 +216,10 @@
 | `workflow.start`（步骤 3） | 父会话里 `workflow` 调用开始 | `turn`、`toolCallId`、`workflowId`、`kind: "script" \| "graph"`、`architecture?`、`title?` |
 | `workflow.phase`（步骤 3） | 脚本调用 `phase(name)` | `turn`、`workflowId`、`phase` |
 | `workflow.end`（步骤 3） | 工作流结束（恢复时补 `interrupted`） | `turn`、`workflowId`、`status`、`members`、`error?` |
+| `capability.version`（步骤 4） | 会话的能力版本变化：恢复时记录的版本缺失或校验失败（`unavailable`），或打开时装载失败（`load-failure`） | `turn?`、`version`、`previous`、`reason`、`detail?` |
+| `capability.draft`（步骤 4） | `capability_draft` 改动草稿区的一个组件后，在该调用的 `tool.result` 之前 | `turn`、`step`、`toolCallId`、`component: { kind, name }`、`files: CapabilityFile[]`、`revision` |
+| `capability.try`（步骤 4） | `capability_try` 把草稿组件装进本会话后 | `turn`、`step`、`toolCallId`、`component`、`revision`、`tools?` |
+| `capability.propose`（步骤 4） | 宿主接受 `capability_propose` 提出的候选后 | `turn`、`step`、`toolCallId`、`candidateId`、`proofs: ComponentUseProof[]` |
 
 字段细则：
 
@@ -217,6 +250,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 `material.added`、`goal.set`、`goal.update`、`session.title` 由宿主写，可以出现在两轮之间，也可以出现在一轮之中（此时带 `turn`）。
 
 步骤 3 的记录归属：`fork.seed` 只由 kernel 在建子会话时写；`subagent.start`、`workflow.start` 由发起它们的工具经 `ToolContext.appendRecord` 写在该调用的 `tool.result` 之前；`subagent.end`、`team.*`、`workflow.phase`、`workflow.end` 既可由工具写，也可由协作包以宿主身份写（队友之间的邮件、恢复时的补记发生在 Lead 的工具调用之外），宿主写时带当时的 `turn`。白名单见契约 `ToolRecordType` / `HostRecordType`。
+
+步骤 4 的记录归属：`capability.draft` / `try` / `propose` 只由对应工具经 `ToolContext.appendRecord` 写（`ToolRecordType`）；`capability.version` 由宿主写（`HostRecordType`）。这四种记录都不改变投影出的消息；投影把 `session.start.capabilityVersion` 与最新一条 `capability.version.version` 放进 `SessionMetadata.capabilityVersion`。`capabilityVersion` 缺省的会话（步骤 3 及以前写出的）按 `baseline` 理解。
 
 ### 示例
 
@@ -323,12 +358,14 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `type` | string | 记录类型 |
 | `ts` | string | 事件时刻，ISO-8601 UTC；由 `Ledger.append` 赋值 |
 | `sessionId` | string? | 所属会话；辅助调用可无 |
-| `capabilityVersion` | string? | 预留（步骤 4）：采用中的能力版本的内容哈希 |
+| `capabilityVersion` | string? | 步骤 4：会话所用的能力版本，`baseline` 或能力包内容哈希（小写十六进制 SHA-256） |
+| `trialId` | string? | 步骤 4：门控试验的运行与评审记录所属的试验；普通任务没有 |
+| `arm` | `"candidate" \| "baseline"`? | 步骤 4：试验运行的臂；评审请求只带 `trialId`，不带 `arm` |
 | `memberId` | string? | 发出记录的成员：根会话为 `main`，子会话为子会话 id（步骤 3） |
 | `executionForm` | `"direct" \| "delegated" \| "team" \| "workflow"`? | 发出记录的成员的执行形态（步骤 3 加 `team`） |
 | `taskId` | string? | 所属任务树：根会话打开（create / resume）时生成的小写 UUID v4，成员继承 |
 
-四个字段在所有记录类型上都是可选的（schema 层面）；步骤 1、2 的写入方不写它们。步骤 3 起 kernel 给一个会话写出的每条 `llm.request.*`、`tool.call`、`task.outcome` 都带 `taskId`、`memberId`、`executionForm`（契约 `AgentAttribution`）；`capabilityVersion` 仍留给步骤 4。
+这些字段在所有记录类型上都是可选的（schema 层面）；步骤 1、2 的写入方不写它们。步骤 3 起 kernel 给一个会话写出的每条 `llm.request.*`、`tool.call`、`task.outcome` 都带 `taskId`、`memberId`、`executionForm`（契约 `AgentAttribution`）；步骤 4 起再带 `capabilityVersion`。试验运行的会话在项目的临时副本里，但它们的账本记录写进**真实项目**的账本，带 `trialId` 与 `arm`，所以费用汇总能区分试验与普通任务。
 
 ### 记录类型
 
@@ -382,11 +419,25 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `requestCount` | number | 模型请求次数（含失败） |
 | `toolCallCount` | number | 工具调用次数 |
 | `turns` | number | 跨越的轮数 |
-| `checks` | `TaskCheck[]`? | 宿主做的确定性检查 `{ name, passed, detail? }`；步骤 1 可无 |
+| `checks` | `TaskCheck[]`? | 宿主做的确定性检查 `{ name, passed, detail?, target? }`；步骤 4 写 `file-exists`、`parses`、`test-command` 三种，`target` 是检查规格的 `id`（路径与命令只在 `snapshots/checks/` 里）；步骤 1 可无 |
 | `toolsUsed` | string[] | 实际调用过的工具名，去重；步骤 4 用它证明组件被实际调用 |
 | `formsUsed` | `ExecutionForm[]`? | 步骤 3，只在根会话的记录上：整棵任务树实际用到的形态，去重，按 `direct, delegated, team, workflow` 排序 |
+| `componentsUsed` | `ComponentUsage[]`? | 步骤 4：本会话实际用到的能力组件 `{ kind, name, version, calls, errors }`，`version` 为能力版本或 `draft`（本会话试用的草稿） |
+| `memberCosts` | `MemberCost[]`? | 步骤 4，只在根会话的记录上：每个成员的 `{ memberId, name, executionForm, usage, requestCount, toolCallCount }`；根会话自己的用量仍在 `totalUsage` |
 
 步骤 3：每个成员会话关闭时也写一条自己的 `task.outcome`（`memberId` 为成员会话 id），各条只计本会话的请求与工具调用；整棵树的合计是同一 `taskId` 下全部记录之和，根会话那条不重复计入成员的用量。
+
+**`capability.decision`**（步骤 4）—— 写出一个能力决定（门控结论、批准、回滚）之后。决定文件（`capabilities/decisions/<id>.json`）存证据，这一行让它出现在相关费用旁边。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `decisionId` | string | 决定文件的 id |
+| `outcome` | `"adopted" \| "rejected" \| "awaiting-approval" \| "rolled-back"` | 结论 |
+| `reason` | `DecisionReason` | 见“候选与门控” |
+| `trigger` | `"gate" \| "approval" \| "load-failure" \| "usage-regression" \| "manual"` | 起因 |
+| `fromVersion`、`toVersion` | 能力版本 | 决定前后采用中的版本；拒绝与待批准时二者相等 |
+| `candidateId` | string? | 涉及的候选 |
+| `revision` | number? | 为它写出的采用历史序号 |
 
 ### 示例
 
@@ -397,6 +448,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 {"type":"llm.request.start","ts":"2026-10-07T08:00:03.300Z","sessionId":"6f1c…","requestId":"c2d3…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","purpose":"task","thinking":"off"}
 {"type":"llm.request.end","ts":"2026-10-07T08:00:04.100Z","sessionId":"6f1c…","requestId":"c2d3…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","status":"error","usage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","cacheWriteTokens":"unknown","reasoningTokens":"unknown"},"latencyMs":800,"httpStatus":503,"errorCode":"llm/request-failed"}
 {"type":"task.outcome","ts":"2026-10-07T08:00:04.200Z","sessionId":"6f1c…","status":"failed","totalUsage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","cacheWriteTokens":"unknown","reasoningTokens":"unknown"},"requestCount":2,"toolCallCount":1,"turns":1,"toolsUsed":["str_replace"]}
+{"type":"capability.decision","ts":"2026-10-07T09:00:00.000Z","decisionId":"0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e","outcome":"adopted","reason":"quality-up","trigger":"gate","fromVersion":"baseline","toVersion":"3f2a9c0e5b7d14a8c6e2f9b0d3a5c7e1f4b8a2d6c0e9f3b5a7d1c4e8f2b6a0d9","candidateId":"5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b","revision":1}
 ```
 
 ### 必产生记录的失败路径
@@ -405,7 +457,113 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 ## `CapabilityBundle` 清单
 
-一句话（步骤 4 填）：内容寻址的能力集清单，含工具、技能、上下文策略、协作方式四类组件及采用状态。
+步骤 4。能力包是一组组件的完整集合（不是增量），按内容寻址：相同内容只有一个版本。类型镜像 `packages/kernel/src/contracts/capabilities.ts`；schema `packages/session/schema/capabilities.v1.schema.json`。决策见 ADR 0005。
+
+**版本。** 能力版本是字符串 `baseline`（没有任何组件，步骤 3 的行为）或能力包内容哈希：`canonicalManifestText(manifest)` 的 UTF-8 SHA-256，小写十六进制 64 位。`canonicalManifestText` 先 `normalizeManifest`（组件按种类顺序再按名字排序，文件按路径排序），再写成规范 JSON（对象键按 UTF-16 码元排序，无空白）。
+
+**目录。** `.nexgent/capabilities/<version>/`：
+
+```text
+<version>/
+├── manifest.json
+├── functions/<name>/functions.json + 模块文件
+├── plugins/<name>/plugin.json + 模块文件
+├── skills/<name>/SKILL.md + 附带文件
+├── context/<name>/policy.json
+├── presets/<name>/preset.json
+├── teams/<name>/team.json
+└── architectures/<name>/architecture.json
+```
+
+**`manifest.json`：** `{ formatVersion: 1, components: CapabilityComponent[] }`，只含内容，不写来源（来源在候选与决定里）。
+
+| 字段 | 说明 |
+| --- | --- |
+| `components[].kind` | `function-module \| plugin \| skill \| context-policy \| preset \| team-template \| architecture` |
+| `components[].name` | 匹配 `^[a-z][a-z0-9-]{0,63}$`；同种类内唯一 |
+| `components[].files[]` | `{ path, sha256, bytes }`，`path` 相对组件目录、`/` 分隔、不含 `.`/`..` 段与 `\`；必须含该种类的入口文件 |
+
+组件分四类：工具（`function-module`、`plugin`）、技能（`skill`）、上下文策略（`context-policy`，一个包至多一个）、协作方式（`preset`、`team-template`、`architecture`）。
+
+| 种类 | 入口文件 | 内容 | 生效方式 |
+| --- | --- | --- | --- |
+| `function-module` | `functions.json` | `{ formatVersion, name, description, entry?, functions[] }`，每个函数 `{ name, description, inputSchema, effects }`，`effects` 取 `read \| write \| network` | 每个函数成为模型工具 `cap_<module>_<function>`（≤64 字符），在与 `run_code` 同类的隔离 Node 进程里执行 |
+| `plugin` | `plugin.json` | `{ formatVersion, name, description, entry?, permissions, tools? }` | 宿主进程内装载的 Nexgent 插件；试用与采用各需一次审批 |
+| `skill` | `SKILL.md` | 与项目技能同格式（`agent-hooks.md` §技能） | 加入技能列表 |
+| `context-policy` | `policy.json` | 白名单字段 `formatVersion, name, description, instructions?, personaSuffix?, compaction?` | `instructions` 作为系统提示的 `# Learned practices` 段；`personaSuffix` 接在人设尾段后；`compaction` 覆盖压缩阈值（10 000–1 000 000）与保留轮数（1–10） |
+| `preset` | `preset.json` | 步骤 3 的 `PresetFile` | 与项目预设同用；同名时项目预设优先 |
+| `team-template` | `team.json` | `{ formatVersion, name, description, members[] }`，成员 `{ name, task, preset?, persona? }`，1–8 个、不得叫 `lead` | 作为指引进系统提示，由 Lead 自己 `spawn_teammate` |
+| `architecture` | `architecture.json` | 步骤 3 的 `ArchitectureFile` | 供 `workflow` 按名引用 |
+
+`context-policy` 的 schema 是封闭的：`approvals`、`costCaps`、`sandboxMode`、`capabilities` 等权限与门控字段在任何组件里都没有位置（H13）。
+
+**上限**（`CAPABILITY_LIMITS`）：每包 64 个组件，每组件 64 个文件，单文件 1 MiB，每包合计 16 MiB，每模块 16 个函数，`instructions` 16 384 字节，`personaSuffix` 4096 字节。
+
+**写入与装载。** 能力包目录先在临时名下写全，校验每个文件的哈希与清单一致后改名发布；目标已存在则读回校验。装载时再校验一次；任何文件缺失或哈希不符，该版本不可用（见“采用历史”的回滚规则）。`assertCapabilityManifest` 检查结构，哈希比对是装载方的事。
+
+## 采用历史
+
+步骤 4。`.nexgent/capabilities/activation/<n>.json` 是一条修订链，链尾就是采用中的版本；没有任何文件时是 `baseline`。移植自 PR #4 的 `architecture-activation.ts`。
+
+| 字段 | 说明 |
+| --- | --- |
+| `format` | `1` |
+| `revision` | 1、2、…，等于文件基名 |
+| `previous` | 上一个修订文件**原始字节**的 SHA-256；第 1 个为 `null` |
+| `from`、`version` | 修订前后的能力版本，二者不同 |
+| `type` | `adopt \| rollback` |
+| `trigger` | `gate \| approval \| load-failure \| usage-regression \| manual` |
+| `decisionId` | 支撑这次修订的决定 |
+| `committedAt` | ISO-8601 UTC |
+
+读取：从 1 起顺序读，每个文件用 `isNextRevision` 检查它能接在当前状态后（序号、`previous` 摘要、`from`），断链或损坏时停在最后一个有效修订并报告，不猜。写入：写临时文件，再以 `link` 独占发布为 `<n+1>.json`（目标已存在说明有并发写入者，读回后重试或放弃），文件一经写出不改。项目内同时只有一个修订写入者（门控进程与回滚都经同一个函数）。
+
+会话打开时读一次链尾，把版本写进 `session.start.capabilityVersion`，整个会话用这一个版本，运行中的采用不影响已打开的会话。恢复时用记录的版本；它缺失或校验失败时改用当前链尾并写 `capability.version { reason: "unavailable" }`。
+
+## 候选与门控
+
+步骤 4。
+
+**草稿。** `capability_draft` 把组件写进 `.nexgent/capabilities/drafts/<sessionId>/<kind-dir>/<name>/`（宿主代写，模型的文件工具看不见这里），每次改动写一条 `capability.draft`。`capability_try` 把当前草稿装进本会话，写 `capability.try`。
+
+**候选。** `capability_propose` 把试用过的组件提成一个候选：宿主检查每个组件在试用之后至少被成功用过一次（决定 2），把证据写成 `proofs`（`{ kind, name, turn, toolCallId }`），不满足就拒绝调用。接受后写 `.nexgent/capabilities/candidates/<candidateId>/candidate.json` 并复制组件文件到同目录，再写会话记录 `capability.propose`。
+
+`candidate.json`：`formatVersion: 1`、`id`（小写 UUID v4）、`proposedAt`、`sessionId`、`taskId`、`turn`、`base`（会话所用的版本）、`version`（`base` 加上这些组件后的能力包版本）、`components`、`proofs`、`requiresApproval`（含 `plugin` 时为真）、`summary?`（≤500 字符）。
+
+**状态。** 候选的状态由文件推出，不另存：`drafted`（只在草稿区有、尚未提出）→ `proposed`（有 `candidate.json`，没有试验）→ `trialing`（有试验，没有 `trial.end`）→ `awaiting-approval` / `adopted` / `rejected`（看决定）→ `rolled-back`（采用后被回滚）。
+
+**试验收据。** `.nexgent/capabilities/trials/<trialId>.jsonl`，以 `wx` 创建（试验 id 不重用），每行写完 `fsync` 后才开始下一次运行；没有 `trial.end` 的试验是中断的，结论按 `unknown` 处理。
+
+| `type` | 字段 |
+| --- | --- |
+| `trial.start` | `trialId`、`candidateId`、`candidateVersion`、`baselineVersion`、`plan: TrialPlan`（选择集 ≥2、守护集 ≥1 个 `ReplayCaseRef { caseId, sessionId, tree, checks }`，`repeats`、`costRatioCap`、`reviewer`、`budget`） |
+| `trial.run` | `set: selection \| guard`、`caseId`、`arm: candidate \| baseline`、`repeat`、`status: pass \| fail \| unknown`、`reason?`（`unknown` 的原因：`not-run \| cancelled \| error \| timeout \| budget \| interrupted`）、`checks: TaskCheck[]`、`cost`、`durationMs` |
+| `trial.review` | `set`、`caseId`、`repeat`、`preference: candidate \| baseline \| tie \| unknown`、`reason`（≤2000 字符）、`model`、`cost` |
+| `trial.end` | `status`、`verdict: TrialVerdict`、`cost: { candidate, baseline, review }` |
+
+每行都有 `format: 1`、`trialId`、`ts`。`cost` 是 `{ usage, requestCount, estimatedUsd }`，美元只是估算，从不参与判断。
+
+**采用规则**（`decideTrial`，纯函数，决定 4），按顺序：
+
+1. 预算用尽（`budget-exhausted`）、任何一次运行是 `unknown` 或用量未知（`unknown-runs`）：拒绝。
+2. 守护集候选通过次数少于基线：拒绝（`guard-regressed`）。
+3. 选择集质量 = 确定性检查通过率。候选低：拒绝（`quality-down`）。候选高：token 比 ≤ `costRatioCap` 则采用（`quality-up`），否则拒绝（`cost-over-cap`）。
+4. 打平：token 比 < 1 采用（`cost-down`）；否则看评审，候选偏好多于基线且比值在上限内采用（`review-preferred`），其他拒绝（`no-improvement`）。
+5. 含 `plugin` 的候选，采用结论变为 `await-approval`，理由不变。
+
+**决定。** `.nexgent/capabilities/decisions/<id>.json`，以 `wx` 写一次：`formatVersion: 1`、`id`、`outcome: adopted | rejected | awaiting-approval | rolled-back`、`reason`、`trigger`、`decidedAt`、`candidateId?`、`trialId?`、`fromVersion`、`toVersion`、`revision?`、`verdict?`、`cost?`、`regression?`、`detail`（≤2000 字符）。采用与回滚各写一个修订（`revision`）；拒绝与待批准不写修订。每个决定同时在账本写一条 `capability.decision`。
+
+**回滚**（决定 6）。三种：装载校验失败时立即回到上一个版本（`load-failure`）；采用后的前 `rollback.windowTasks` 个根任务检查通过率低于门控测得的基线通过率（`usage-regression`），或新组件的调用连续出错 `rollback.consecutiveErrors` 次（`component-errors`），由 `decideUsageRollback` 判断并自动回滚；用户也可手动回滚（`manual`）。回滚写一个 `type: "rollback"` 的修订和一个 `rolled-back` 决定，证据放在 `regression`。
+
+## 任务快照与检查
+
+步骤 4。门控要重放过去的任务，所以从步骤 4 起每个根任务开始时都给工作区拍快照（决定 7）。
+
+- **对象**：`.nexgent/snapshots/objects/<sha256>`，文件原始字节，每份内容只存一次。
+- **树**：`.nexgent/snapshots/trees/<sha256>.json`，`{ formatVersion: 1, files: [{ path, sha256, bytes, executable? }] }`，按路径排序，范围与 `turn.files` 相同（不含 `.nexgent/`、`.git/`、`node_modules/`）；文件名是该对象规范 JSON 的 SHA-256。
+- **任务快照**：`.nexgent/snapshots/tasks/<taskId>.json`，根任务开始时写：`{ formatVersion: 1, taskId, sessionId, takenAt, tree, omitted?, capabilityVersion }`。工作区超过 200 MiB（`maxSnapshotBytes`）时 `tree: null`、`omitted: { reason: "too-large", bytes }`，这个任务不能作为重放用例。
+- **检查记录**：`.nexgent/snapshots/checks/<taskId>.json`，根任务结束时写：`{ formatVersion: 1, taskId, sessionId, checkedAt, specs, results }`。`specs` 是 `TaskCheckSpec`：`{ id, name: "file-exists", path }`、`{ id, name: "parses", path, format: json | csv | xlsx }`、`{ id, name: "test-command", command, shell: bash | pwsh }`；`results` 与 `specs` 一一对应，`target` 为 spec 的 `id`。同样的结果写进 `task.outcome.checks`。
+- 快照总量上限 200 MiB，超出时按任务时间从旧到新删除不再被任何试验引用的对象。路径一律项目相对、`/` 分隔。
 
 ## 材料元数据
 
@@ -634,6 +792,7 @@ The earlier part of this conversation was compacted. Summary:
 | 凭证文件 | `version` | 1 | 同上 |
 | 材料元数据（步骤 2） | `formatVersion` | 1 | 同上 |
 | 成果版本元数据（步骤 2） | `formatVersion` | 1 | 同上 |
+| 能力包清单、采用修订、候选、试验收据、决定、快照（步骤 4） | `formatVersion` / `format` | 1 | 同上 |
 
 兼容规则：
 
@@ -642,6 +801,7 @@ The earlier part of this conversation was compacted. Summary:
 - **会话读取方拒绝未知的 `type`**：未知记录类型意味着投影不再可靠，按无效行处理（截断并报告），不静默跳过。账本读取方对未知 `type` 跳过并计数。
 - **不兼容旧 Python 数据**：Python 时代的 Episode、组织 SQLite、PR #4 的 `.nexgent/native/` 不读、不迁移（ADR 0001 决策 15）。
 - 步骤 4 的四个预留字段已经在 v1 中是可选字段，启用它们不升版本。
+- **步骤 4 的四种会话记录、`session.start.capabilityVersion`、账本的 `capability.decision` 与新可选字段也在 v1 内追加**，理由同步骤 3；步骤 3 写出的会话与账本照常读出。
 - **步骤 2 的新记录类型在 v1 内追加**（计划已定：旧文件仍可读）。代价是：只认识步骤 1 记录集的读取方会把第一条步骤 2 记录当作无效行，持锁追加时还会截断其后的内容。步骤 1 没有对外发布的构建，`nexgent-app` 上的读取方与写入方同步升级，所以接受这一点；步骤 2 之后再加记录类型时，先评估是否已有对外发布的读取方，有则升版本。
 - **步骤 3 的九种新记录、`session.start.member` 与成果的成员字段也在 v1 内追加。** 评估结果：仍没有对外发布的构建（`main` 上的步骤 2 只供本仓库验收），读取方与写入方同步升级，所以不升版本；步骤 2 写出的会话照常读出、恢复与续写。
 
@@ -655,6 +815,7 @@ The earlier part of this conversation was compacted. Summary:
 | 账本记录 | `packages/llm/schema/ledger.v1.schema.json` | `@nexgent/llm` |
 | 项目配置、凭证文件、锁文件 | `packages/kernel/schema/config.v1.schema.json`、`credentials.v1.schema.json`、`session-lock.v1.schema.json` | `@nexgent/kernel` |
 | 材料元数据、成果版本元数据（步骤 2） | `packages/session/schema/material.v1.schema.json`、`deliverable.v1.schema.json` | 与会话 schema 共用 `@nexgent/session` 的求值器；写入方是 `@nexgent/tasking` |
+| 能力文件与快照（步骤 4） | `packages/session/schema/capabilities.v1.schema.json`（按 `$defs/<name>` 校验，`validateCapabilityFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/capabilities` |
 
 schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`（账本记录除外：它允许未知可选字段以便跨版本读取）。会话 schema 的严格校验只用于写入方的追加；读取方按上面的兼容规则放过未知的可选字段，不因此截断。
 
@@ -695,5 +856,12 @@ schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`
 2. 子会话的 `session.start.member` 与 `fork.seed` 往返，恢复后 `parentSessionId`、`member` 与 fork 历史一致；`fork.seed` 出现在消息之后、只给 `parentSessionId` 不给 `member` 时写入被拒。
 3. 成员名、`executionForm`、`MemberResult.status`、`TeamMessage.state`、`architecture` 哈希的非法值被 schema 拒绝。
 4. 步骤 2 写出的真实会话照常读出与恢复（在本地对 Library `validation-raw/step-2-20261011/` 的会话核对；原始 JSONL 不进仓库）。
+
+步骤 4 新增（`@nexgent/session`、`@nexgent/kernel`）：
+
+1. 四种新会话记录各一条写入后逐字段相等并通过 schema，不改变投影出的消息；`session.start.capabilityVersion` 与 `capability.version` 投影到 `metadata.capabilityVersion`；步骤 3 的会话（没有该字段）照常读出与恢复。
+2. 十二种能力文件各有合格与不合格样例；`context-policy` 带 `approvals`、`costCaps`、`sandboxMode`、`capabilities` 时被拒（H13）；发布的 `capabilities.v1.schema.json` 与源一致。
+3. 账本 `capability.decision` 与 `task.outcome` 的新字段通过 schema；本文账本示例行包含 `capability.decision`。
+4. `canonicalManifestText` 与组件、文件顺序无关；`assertCapabilityManifest`、`isNextRevision`、`decideTrial` 每个分支、`decideUsageRollback`、`assertCapabilitiesConfig` 的下限有运行时测试。
 
 契约层（`packages/kernel/tests/contracts/`）：类型级断言固定记录集合与公共字段，纯函数（`addUsage`、工具限制交集、布局解析、profile 补丁）有运行时测试。

@@ -58,6 +58,13 @@ export {
   validateMaterialMetadata,
 } from './schema/tasking-schema.js'
 export {
+  CAPABILITY_FILE_DEFS,
+  CAPABILITY_VERSION_SCHEMA,
+  capabilitiesSchema,
+  validateCapabilityFile,
+} from './schema/capabilities-schema.js'
+export type { CapabilityFileKind } from './schema/capabilities-schema.js'
+export {
   checkSessionPluginConfig,
   createSessionServices,
   SessionPlugin,

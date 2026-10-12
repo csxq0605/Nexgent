@@ -210,7 +210,8 @@ describe('the real delegation run', () => {
 
   it('the judges copy the kernel collaboration tools; a teammate keeps only its three team tools', () => {
     expect([...COLLABORATION_TOOLS]).toEqual(STEP3_TOOLS.map(t => t.name).filter(name => name !== 'run_code'))
-    expect([...forbiddenFor('delegated')].sort()).toEqual([...MEMBER_DENIED_TOOLS].sort())
+    // The step-3 judges know only step-3 tools; step-4 names are judged by accept-step4.
+    expect([...forbiddenFor('delegated')].sort()).toEqual(MEMBER_DENIED_TOOLS.filter(t => STEP3_TOOLS.some(s => s.name === t)).sort())
     expect(forbiddenFor('workflow')).toEqual([...COLLABORATION_TOOLS])
     expect(forbiddenFor('team')).toEqual(COLLABORATION_TOOLS.filter(t => !TEAMMATE_TOOLS.includes(t)))
   })

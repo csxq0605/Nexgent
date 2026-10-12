@@ -39,7 +39,7 @@
 
 | 子目录 | 工具读 | 工具写 | 说明 |
 | --- | --- | --- | --- |
-| `sessions/`、`ledgers/`、`capabilities/` | 拒绝 | 拒绝 | 只有宿主写；模型不能改自己的历史、账本与能力版本 |
+| `sessions/`、`ledgers/`、`capabilities/`、`snapshots/` | 拒绝 | 拒绝 | 只有宿主写；模型不能改自己的历史、账本、能力版本与任务快照。草稿组件经 `capability_draft` 由宿主代写（步骤 4） |
 | `materials/` | 允许 | 拒绝 | 用户提供的资料，由宿主（`@nexgent/tasking`）复制写入；模型只读，原文件与副本都不被模型修改 |
 | `outputs/` | 允许 | 拒绝 | 成果快照，只由宿主（`@nexgent/tasking`）在 `present` 时写；模型不能改任何版本的快照（步骤 2 起，步骤 1 曾允许写）。模型把成果写在项目里，再用 `present` 交付 |
 | `skills/` | 允许 | 拒绝 | 项目技能，由用户维护（步骤 2）；`load_skill` 经宿主读取 |
@@ -108,7 +108,7 @@
 
 `read-only` 下“始终审批”表里的写 / 执行类调用同样直接拒绝。`selfSandboxed` 是 `ToolDefinition` 的契约字段（`contracts/tools.ts`），只有确实对每次读写调用做沙箱与路径检查的宿主包才能声明；策略层按字段判断，不按工具名豁免（步骤 3 勘误，取代按名豁免 `run_code`）。
 
-"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的 `approvals` / `costCaps` / `sandboxMode` 字段、步骤 4 的插件包采用。
+"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的 `approvals` / `costCaps` / `sandboxMode` / `capabilities` 字段（契约 `GUARDED_PROJECT_CONFIG_FIELDS`，`capabilities` 为步骤 4 新增）、步骤 4 的插件试用与插件采用（下节）。
 
 **粒度。** 用户每次应答选择作用范围：
 
@@ -133,7 +133,37 @@
 
 ## 插件安装审批
 
-一句话（步骤 4 填）：插件包在宿主进程内执行，每次采用都需人审批；技能与 PTC 函数自动采用。
+步骤 4（决定 9）。插件组件（`plugin`）是在宿主进程内装载的代码，不在沙箱里，所以两步各问一次用户，任何沙箱模式下都问（`read-only` 下也问，因为装载本身不写项目）：
+
+1. **试用**：`capability_try` 装载 `plugin` 草稿之前，以“始终审批”类请求询问（`risk: high`，选项只有 `once`），对话框显示 `plugin.json` 的 `description`、`permissions` 与将注册的工具名。拒绝则该调用返回 `approval/denied`，插件不装载。
+2. **采用**：门控对含插件的候选给出 `await-approval` 后，不写修订；用户在桌面应用或 SDK 里 `capabilities.approve(candidateId, allow)` 时才写 `approval` 触发的修订与 `adopted` 决定，拒绝写 `rejected` 决定（`approval-denied`）。
+
+规则：
+
+- **每次都问**：没有 `session` / `project` 范围的插件授权，也不写进 `approvals` 列表；同一插件的新版本再问。
+- 批准插件**不改变**会话的沙箱模式、路径策略、命令策略或任何已有授权；插件注册的工具照常走工具审批。
+- 成员看不到 `capability_*` 工具，不能试用或提出插件。
+- 验收主链只用技能与函数模块；插件的格式、两次审批、装载与卸载用脚本化测试覆盖。
+- 其他组件（技能、函数模块、上下文策略、预设、团队模板、架构图）不需审批：门控通过即采用。
+
+## 能力包组件的执行边界
+
+步骤 4。组件只能在下表的边界内起作用，候选不能借组件放宽权限（H13）：
+
+| 组件 | 在哪执行 | 边界 |
+| --- | --- | --- |
+| `function-module` | 与 `run_code` 同类的隔离 Node 子进程，每次调用一个 | 工具声明 `effects: ['execute', ...函数声明的 effects]`、`approval: 'never'`、`selfSandboxed: true`；文件访问只经宿主函数，每次按调用方会话的沙箱模式与路径策略检查；环境变量为空；时长与输出上限同 PTC；`network` 效果只经宿主提供的 `web_fetch` 等价函数 |
+| `plugin` | 宿主进程内 | 只经上节两次审批装载；注册的工具走正常工具审批；卸载时注销它注册的全部工具与钩子 |
+| `skill` | 不执行代码 | 只作为技能文本进入模型上下文 |
+| `context-policy` | 不执行代码 | 封闭 schema，只有 `instructions`、`personaSuffix`、`compaction`；没有权限、费用、沙箱、门控字段 |
+| `preset` | 不执行代码 | 同步骤 3 预设：只能收窄（§子会话继承） |
+| `team-template`、`architecture` | 不执行代码 | 只给协作工具提供参数；成员仍受 §子会话继承约束 |
+
+其他边界：
+
+- `.nexgent/capabilities/`（含草稿区）与 `.nexgent/snapshots/` 对模型的文件工具、`bash` 写入、`run_code` 与函数模块的宿主函数都拒绝读写；草稿只经 `capability_draft` 写。
+- 门控试验在项目的临时副本里运行，副本的沙箱模式取原任务的模式与 `workspace-write` 中较窄的一个；试验产生的账本记录写进真实项目的账本（带 `trialId`、`arm`），费用受 `capabilities.trialBudget` 约束，不计入任何用户任务的 `perTask`，计入 `perProject`。
+- 试验与评审请求不向用户提问：需要审批的调用在试验里按 `headless` 拒绝，该运行如因此失败照实记为 `fail` 或 `unknown`。
 
 ## 费用上限
 
@@ -161,7 +191,7 @@
 
 | 项 | 规则 |
 | --- | --- |
-| 深度 | 只有根会话能启动成员；成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow` 与团队工具 `send_message`、`team_task_create`、`team_task_list`、`team_task_update`（契约 `MEMBER_DENIED_TOOLS`，即除 `run_code` 外的全部步骤 3 协作工具），kernel 拒绝以子会话为父会话创建子会话 |
+| 深度 | 只有根会话能启动成员；成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow` 与团队工具 `send_message`、`team_task_create`、`team_task_list`、`team_task_update`（契约 `MEMBER_DENIED_TOOLS`，即除 `run_code` 外的全部步骤 3 协作工具；步骤 4 再加 `capability_draft`、`capability_try`、`capability_propose`，成员不能起草、试用或提出能力组件），kernel 拒绝以子会话为父会话创建子会话 |
 | 沙箱 | 成员的模式取父会话、预设、显式请求三者中最窄的；任何一项宽于父会话时创建失败，错误码 `sandbox/denied`，不悄悄降级（`childSandboxMode`）。顺序：`read-only` < `workspace-write` < `full-access` |
 | 工具范围 | 预设的 `tools`（`allow` / `deny`）用成员作用域上的 `restrict()` 实现，与父会话可见的集合求交；`MEMBER_DENIED_TOOLS` 总是叠加在上面，所以委派对象与工作流节点看不到任何团队工具。队友是唯一例外：团队包在队友自己的作用域注册 `send_message`、`team_task_list`、`team_task_update`（`TEAMMATE_TOOLS`）；作用域的遮罩不隐藏同一作用域自己注册的工具，所以队友能看到这三个，看不到 `team_task_create` |
 | 路径与命令 | 与父会话相同的路径策略、命令策略和 `extraReadRoots`；所有成员共用同一个项目根，不建副本 |
@@ -362,3 +392,10 @@ interface ToolApprovalAsk {
 | 子会话（步骤 3） | 父会话取消 | 成员轮次以 `parent` 结束，无残留子孙进程 |
 | 网页（步骤 3） | `web_fetch` 访问 `127.0.0.1`、`169.254.169.254`、`[::1]`、解析到私网的域名、重定向到私网 | 全部拒绝，不发出请求 |
 | PTC（步骤 3） | `run_code` 读环境变量、读根外文件、`read-only` 下写文件、超时 | 环境为空；读写被拒；超时后进程树为空 |
+| 能力（步骤 4） | 文件工具读写 `.nexgent/capabilities/x`、`.nexgent/capabilities/drafts/<id>/x`、`.nexgent/snapshots/x` | 全部拒绝 |
+| 能力（步骤 4） | `full-access` 下写 `config.json` 的 `capabilities` 字段 | 产生“始终审批”请求 |
+| 能力（步骤 4） | `capability_try` 试用插件（含 `read-only`）；拒绝 | 产生 `risk: high`、只有 `once` 的审批；拒绝后插件未装载 |
+| 能力（步骤 4） | 含插件的候选通过门控 | 结论 `await-approval`，无修订；`approve` 后才写修订 |
+| 能力（步骤 4） | 函数模块读环境变量、读根外文件、`read-only` 下写 | 环境为空；读写被拒 |
+| 能力（步骤 4） | `context-policy` 带 `approvals` / `costCaps` / `sandboxMode` / `capabilities` | 清单校验失败，组件不装载 |
+| 能力（步骤 4） | 成员工具列表 | 不含 `capability_draft`、`capability_try`、`capability_propose` |

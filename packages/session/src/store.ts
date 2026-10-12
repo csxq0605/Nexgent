@@ -172,6 +172,7 @@ export class JsonlSessionStore implements SessionStore {
           ...(init.parentSessionId === undefined ? {} : { parentSessionId: init.parentSessionId }),
           ...(init.title === undefined ? {} : { title: init.title }),
           ...(init.member === undefined ? {} : { member: init.member }),
+          ...(init.capabilityVersion === undefined ? {} : { capabilityVersion: init.capabilityVersion }),
         }
         assertSessionRecord(start)
         const bytes = Buffer.from(encodeLine(start), 'utf8')

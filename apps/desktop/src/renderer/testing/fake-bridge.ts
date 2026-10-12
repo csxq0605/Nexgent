@@ -98,7 +98,7 @@ export class FakeBridge implements NexgentBridge {
   /** Step 3: workflows `sessions.collaboration` reports. */
   workflows: WorkflowView[] = []
   readonly handlers: Record<string, Handler> = {
-    'app.info': () => ({ sdkVersion: 3, appVersion: '0.0.0-test', platform: 'linux' }),
+    'app.info': () => ({ sdkVersion: 4, appVersion: '0.0.0-test', platform: 'linux' }),
     'projects.recent': () => this.recent,
     'projects.open': () => PROJECT,
     'projects.forget': () => undefined,

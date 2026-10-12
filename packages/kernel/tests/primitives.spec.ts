@@ -153,7 +153,8 @@ describe('project config', () => {
     expect(parseProjectConfig({ effort: 'xhigh' }).input).toEqual({ effort: 'xhigh' })
     expect(loaded.input).toEqual({ model: 'm', costCaps: { perTask: { maxRequests: 2 } } })
     expect(loaded.extraReadRoots).toEqual(['/data'])
-    for (const bad of [{ modle: 'x' }, { version: 2 }, { thinking: 'maybe' }, { effort: 'extreme' }, { effort: 2 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 1 }] }, []]) {
+    expect(parseProjectConfig({ capabilities: { selectionCases: 3 } }).config.capabilities).toMatchObject({ selectionCases: 3, guardCases: 1, costRatioCap: 1.2 })
+    for (const bad of [{ modle: 'x' }, { version: 2 }, { thinking: 'maybe' }, { effort: 'extreme' }, { effort: 2 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 1 }] }, { capabilities: { selectionCases: 1 } }, []]) {
       expect(() => parseProjectConfig(bad)).toThrow(expect.objectContaining({ code: 'config/invalid' }))
     }
   })

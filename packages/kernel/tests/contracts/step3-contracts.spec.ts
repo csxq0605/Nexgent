@@ -14,6 +14,7 @@ import {
   RUN_CODE_TOOL,
   STEP3_MIGRATED_TOOLS,
   STEP3_TOOLS,
+  STEP4_TOOLS,
   TEAMMATE_TOOLS,
   TURN_CANCEL_CAUSES,
   validateJsonSchema,
@@ -42,14 +43,16 @@ describe('step-3 contracts: types', () => {
     expect(TURN_CANCEL_CAUSES).toEqual(['user', 'timeout', 'shutdown', 'cost-cap', 'parent'])
   })
 
-  it('limit which records hosts and tools may append', () => {
+  it('limit which records hosts and tools may append (step-4 additions included)', () => {
     expectTypeOf<HostRecordInput['type']>().toEqualTypeOf<
       | 'material.added' | 'goal.set' | 'goal.update' | 'session.title'
       | 'subagent.end' | 'team.member' | 'team.task' | 'team.message' | 'workflow.phase' | 'workflow.end'
+      | 'capability.version'
     >()
     expectTypeOf<ToolRecordInput['type']>().toEqualTypeOf<
       | 'deliverable.presented' | 'subagent.start' | 'subagent.end' | 'team.member' | 'team.task' | 'team.message'
       | 'workflow.start' | 'workflow.phase' | 'workflow.end'
+      | 'capability.draft' | 'capability.try' | 'capability.propose'
     >()
   })
 
@@ -104,9 +107,10 @@ describe('step-3 contracts: helpers', () => {
     expect(STEP3_MIGRATED_TOOLS.map(tool => tool.name)).toEqual(['web_fetch', 'read_spreadsheet', 'write_spreadsheet'])
     expect(MEMBER_DENIED_TOOLS).toEqual([
       'delegate', 'spawn_teammate', 'wait_teammates', 'workflow', 'send_message', 'team_task_create', 'team_task_list', 'team_task_update',
+      'capability_draft', 'capability_try', 'capability_propose',
     ])
-    // every collaboration tool except run_code is hidden from members
-    expect(STEP3_TOOLS.map(tool => tool.name).filter(name => name !== 'run_code').sort()).toEqual([...MEMBER_DENIED_TOOLS].sort())
+    // every collaboration tool except run_code, and every step-4 capability tool, is hidden from members
+    expect([...STEP3_TOOLS, ...STEP4_TOOLS].map(tool => tool.name).filter(name => name !== 'run_code').sort()).toEqual([...MEMBER_DENIED_TOOLS].sort())
     expect(STEP3_TOOLS.filter(tool => tool.selfSandboxed === true).map(tool => tool.name)).toEqual(['run_code'])
     for (const name of TEAMMATE_TOOLS) expect(MEMBER_DENIED_TOOLS).toContain(name)
     expect(COLLABORATION_LIMITS).toMatchObject({ maxConcurrentMembers: 4, maxMembersPerTask: 16 })

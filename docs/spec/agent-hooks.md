@@ -1,6 +1,6 @@
 # agent loop 挂点、步骤 2 工具与系统提示增量
 
-> 步骤 2 第 1 轮由 W0（「步骤二契约」）冻结。类型镜像：`packages/kernel/src/contracts/context.ts`、`tasking.ts`、`skill.ts`、`step2-tools.ts`（工具名与参数），以及 `session.ts` 的步骤 2 记录与 `tools.ts` 的 `ToolContext.appendRecord`。挂点的实现归「kernel 维护」（W7）；提供者与工具的实现归 W1（`@nexgent/context`）、W2（`@nexgent/tasking`）、W3（`@nexgent/skill`）。冻结后的修改走契约修改 PR，并在 PR 描述里点名受影响的包。步骤 3 第 1 轮（「步骤三契约」）加上步骤 3 工具、步骤 3 系统提示增量与子会话的宿主接口，类型镜像 `collaboration.ts`、`step3-tools.ts`（决策见 ADR 0004）。记录格式以 `data-formats.md` 为准，权限以 `permissions.md` 为准。
+> 步骤 2 第 1 轮由 W0（「步骤二契约」）冻结。类型镜像：`packages/kernel/src/contracts/context.ts`、`tasking.ts`、`skill.ts`、`step2-tools.ts`（工具名与参数），以及 `session.ts` 的步骤 2 记录与 `tools.ts` 的 `ToolContext.appendRecord`。挂点的实现归「kernel 维护」（W7）；提供者与工具的实现归 W1（`@nexgent/context`）、W2（`@nexgent/tasking`）、W3（`@nexgent/skill`）。冻结后的修改走契约修改 PR，并在 PR 描述里点名受影响的包。步骤 3 第 1 轮（「步骤三契约」）加上步骤 3 工具、步骤 3 系统提示增量与子会话的宿主接口，类型镜像 `collaboration.ts`、`step3-tools.ts`（决策见 ADR 0004）。步骤 4 第 1 轮（「契约」）加上步骤 4 工具与能力版本的宿主接口，类型镜像 `capabilities.ts`、`step4-tools.ts`（决策见 ADR 0005）。记录格式以 `data-formats.md` 为准，权限以 `permissions.md` 为准。
 
 ## 目的与范围
 
@@ -114,6 +114,16 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow`、`send_message`、`team_task_create`、`team_task_list`、`team_task_update`（`MEMBER_DENIED_TOOLS`，即除 `run_code` 外的全部协作工具）。队友另由团队包在自己的作用域注册 `send_message`、`team_task_list`、`team_task_update`（`TEAMMATE_TOOLS`）；作用域的遮罩不隐藏同一作用域自己注册的工具，所以只有队友能看到这三个，委派对象与工作流节点看不到任何团队工具。
 
+## 步骤 4 工具
+
+名字、参数 schema、`effects` 与 `approval` 冻结在 `step4-tools.ts`（`STEP4_TOOLS`），描述文字由 `@nexgent/capabilities` 写。三个工具都只在根会话可见（`MEMBER_DENIED_TOOLS`）。
+
+| 工具 | 参数 | effects / approval | 行为要点 |
+| --- | --- | --- | --- |
+| `capability_draft` | `kind`、`name`、`files?: { path, content }[]`、`remove?: string[]` | `['write']` / `never` | 宿主在 `.nexgent/capabilities/drafts/<sessionId>/<kind-dir>/<name>/` 写入或删除文件（路径相对组件目录，规则同清单 `path`）；改完后入口文件必须存在、单文件与组件上限不超（`CAPABILITY_LIMITS`）；写 `capability.draft`（`files` 为改后全部文件的哈希，`revision` 递增） |
+| `capability_try` | `kind`、`name` | `['read']` / `never` | 校验草稿（清单与对应入口文件的 schema），只在本会话装载：技能进技能列表，函数模块的函数成为本会话工具 `cap_<module>_<fn>`，预设 / 团队模板 / 架构图供本会话的协作工具使用，上下文策略从下一次请求起生效；写 `capability.try`。试用 `plugin` 先问用户（`permissions.md` §插件安装审批） |
+| `capability_propose` | `components: { kind, name }[]`（1–16）、`summary?`（≤500 字符） | `['read']` / `never` | 每个组件必须试用过，且试用之后至少有一次 `isError: false` 的使用（函数模块与插件为其工具调用，技能为 `load_skill`，协作组件为引用它的协作工具调用），否则报 `tool/failed` 说明哪个组件缺证据；接受后写 `candidates/<id>/`、`capability.propose`，任务结束后自动门控 |
+
 ## 步骤 3 系统提示增量
 
 由「kernel 维护」落进 `system-prompt.ts`；措辞以代码为准，必须表达的内容：
@@ -158,6 +168,13 @@ kernel 的 `Agent` 在步骤 2 增加（形状由 W7 定，语义在此固定）
 - `Agent.holdTurn(work: Promise<unknown>)` 让正在运行的轮次等 `work` 落定再结束，协作包借此把成员运行的 `subagent.end` 写在它所属的轮次里。轮次的循环结束后，agent 以 `parent` 取消仍在运行的成员，并最多等 `toolAbortGraceMs` 再写 `turn.end`。没有运行中的轮次时调用报 `internal`。
 - `ToolRegistryService.inherit(parent: ToolScope): () => void`：成员作用域此后服从 `parent` 作用域现在与以后的全部 `restrict()`，所以成员在继承来的工具里最多看到父会话看得到的；各作用域自己注册的工具仍然私有。只能在有作用域的（agent）上下文调用，不能继承自己，否则报 `config/invalid`。
 - `JsonlLedger.setStamp(stamp | undefined)`（`@nexgent/session`）：设置或清除写入前加上的归属戳，让 agent 循环以外的写入方（SDK 写的 `task.outcome`、压缩器的辅助请求）也带上该会话打开的 agent 的 `taskId`、`memberId`、`executionForm`。
+
+步骤 4 增加（实现归步骤 4 分工表里对应的工作包，形状在契约固定）：
+
+- 会话打开时读采用历史链尾，经 `SessionInit.capabilityVersion` 写进 `session.start`；kernel 给该会话的每条账本记录加 `capabilityVersion`（与 `AgentAttribution` 一起，`JsonlLedger.setStamp` 同样带上）。恢复时版本不可用写 `capability.version`（宿主记录）。
+- `ToolRecordType` 增加 `capability.draft` / `try` / `propose`，`HostRecordType` 增加 `capability.version`；kernel 的运行时白名单（`agent.ts` 的 `TOOL_RECORD_TYPES` / `HOST_RECORD_TYPES`）随之放宽。
+- `Workspace.ensureLayout` 创建 `.nexgent/snapshots/`；路径策略把 `.nexgent/snapshots/` 加入读写都拒绝的子目录。
+- 根任务开始时拍快照、结束时写检查记录与 `task.outcome.checks` / `componentsUsed` / `memberCosts`（`data-formats.md` §任务快照与检查）。
 
 ## 测试
 

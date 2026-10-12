@@ -184,6 +184,11 @@ function tallyStatus(tally: TurnTally): TaskOutcomeStatus {
   }
 }
 
+/** A step-4 method whose shape is frozen but not implemented yet. */
+function notYet(method: string): Promise<never> {
+  return Promise.reject(new NexgentError('internal', `${method} is not implemented yet (step 4)`))
+}
+
 function invalid(message: string): NexgentError {
   return new NexgentError('tool/invalid-input', message)
 }
@@ -1028,6 +1033,14 @@ export class LocalNexgentSdk implements NexgentSdk {
       'settings.get': input => readSettings(this.project(input.projectId).app.ctx.workspace.layout.configFile, this.credentialEnv),
       'settings.update': input => updateSettings(this.project(input.projectId).app.ctx.workspace.layout.configFile, input.patch, this.credentialEnv),
       'settings.setApiKey': input => setApiKey(this.credentialEnv, input?.value),
+
+      // Step 4 (W0 freezes the shapes; 「SDK 与桌面」 implements them in round 3).
+      'capabilities.current': () => notYet('capabilities.current'),
+      'capabilities.list': () => notYet('capabilities.list'),
+      'capabilities.show': () => notYet('capabilities.show'),
+      'capabilities.trial': () => notYet('capabilities.trial'),
+      'capabilities.approve': () => notYet('capabilities.approve'),
+      'capabilities.rollback': () => notYet('capabilities.rollback'),
     }
   }
 

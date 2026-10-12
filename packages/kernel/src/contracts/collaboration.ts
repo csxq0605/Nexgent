@@ -376,7 +376,8 @@ export const COLLABORATION_LIMITS = {
  * teammate still sees its own `send_message`, `team_task_list` and
  * `team_task_update`, because the team package registers those in the
  * teammate's own scope and a scope's mask never hides tools that scope
- * registered itself (`ToolRegistry`).
+ * registered itself (`ToolRegistry`). Step 4 adds the capability tools:
+ * members cannot draft, try or propose components (ADR 0005).
  */
 export const MEMBER_DENIED_TOOLS = [
   'delegate',
@@ -387,6 +388,9 @@ export const MEMBER_DENIED_TOOLS = [
   'team_task_create',
   'team_task_list',
   'team_task_update',
+  'capability_draft',
+  'capability_try',
+  'capability_propose',
 ] as const
 
 /** Team tools a teammate gets in its own scope (the Lead has them too, registered globally). */

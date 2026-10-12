@@ -5,6 +5,7 @@
  * {@link DEFAULT_PROJECT_CONFIG} values.
  */
 import { NexgentError } from './contracts/errors.js'
+import { assertCapabilitiesConfig } from './contracts/capabilities.js'
 import { resolveProjectConfig, type CostCap, type ProjectConfig, type ProjectConfigInput } from './contracts/config.js'
 import type { ApprovalGrant } from './contracts/approvals.js'
 import { EFFORT_LEVELS, type Effort } from './contracts/llm.js'
@@ -22,7 +23,7 @@ export interface LoadedProjectConfig {
 }
 
 const KNOWN_FIELDS = new Set([
-  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots',
+  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities',
 ])
 
 function fail(path: string, message: string): never {
@@ -116,6 +117,14 @@ export function parseProjectConfig(value: unknown, path = 'config.json'): Loaded
   if (value.autoImprove !== undefined) {
     if (typeof value.autoImprove !== 'boolean') fail(path, 'autoImprove must be a boolean')
     input.autoImprove = value.autoImprove
+  }
+  if (value.capabilities !== undefined) {
+    try {
+      assertCapabilitiesConfig(value.capabilities)
+    } catch (error) {
+      fail(path, (error as Error).message.replace('.nexgent/config.json: ', ''))
+    }
+    input.capabilities = value.capabilities
   }
   let extraReadRoots: string[] = []
   if (value.extraReadRoots !== undefined) {
