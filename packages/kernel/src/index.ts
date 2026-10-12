@@ -26,7 +26,7 @@ export type { LoadedRow, PluginRegistry } from './profile.js'
 
 export { AgentsService } from './agents.js'
 export type { AgentsConfig, CreateAgentOptions, ResumeAgentOptions } from './agents.js'
-export { Agent, FILES_END_CANCEL_MS, HOST_RECORD_TYPES, MODEL_IDLE_TIMEOUT, MODEL_TIMEOUT, repairHistory, TOOL_RECORD_TYPES, TOOL_TIMEOUT, TurnAbort } from './agent.js'
+export { Agent, CHECKS_TIMEOUT_MS, FILES_END_CANCEL_MS, HOST_RECORD_TYPES, MODEL_IDLE_TIMEOUT, MODEL_TIMEOUT, repairHistory, TOOL_RECORD_TYPES, TOOL_TIMEOUT, TurnAbort } from './agent.js'
 export type {
   AgentSettings,
   CloseOptions,
@@ -70,3 +70,16 @@ export { fsyncDirectory, writeFileAtomic } from './util/atomic-write.js'
 export type { WriteFileAtomicOptions } from './util/atomic-write.js'
 export { abortPromise, deadline, MAX_TIMER_DELAY_MS, timeoutOf, TimeoutReason } from './util/timeout.js'
 export type { Deadline } from './util/timeout.js'
+export type {
+  AttachedComponent,
+  CapabilityAttachInput,
+  CapabilityAttachment,
+  CapabilityHost,
+  CapabilityVerification,
+  ComponentCallInput,
+  ComponentUseRef,
+  TaskBeginInput,
+  TaskEndInput,
+  TaskEndResult,
+  TaskRecorder,
+} from './capability-hooks.js'

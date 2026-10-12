@@ -96,6 +96,8 @@ describe('.nexgent/ and protected patterns (workspace-write)', () => {
     expect(await w('.nexgent/sessions/x')).toBe('deny')
     expect(await r('.nexgent/ledgers/2026-10/requests.jsonl')).toBe('deny')
     expect(await r('.nexgent/capabilities/a')).toBe('deny')
+    expect(await r('.nexgent/snapshots/objects/abc')).toBe('deny')
+    expect(await w('.nexgent/snapshots/tasks/t.json')).toBe('deny')
     expect(await r('.nexgent/materials/a.pdf')).toBe('allow')
     expect(await w('.nexgent/materials/x')).toBe('deny')
     expect(await r('.nexgent/outputs/x')).toBe('allow')

@@ -24,6 +24,7 @@ import {
   type MemberIdentity,
   type ResumeChildOptions,
 } from './contracts/collaboration.js'
+import { BASELINE_VERSION, type CapabilityVersion } from './contracts/capabilities.js'
 import type { ProjectConfig } from './contracts/config.js'
 import { NexgentError } from './contracts/errors.js'
 import { EFFORT_LEVELS, type Effort } from './contracts/llm.js'
@@ -33,6 +34,7 @@ import { SANDBOX_MODES } from './contracts/workspace.js'
 import { Agent, type AgentInit, type AgentSettings, type ProjectGrantWriter } from './agent.js'
 import { readProjectConfig, type LoadedProjectConfig } from './project-config.js'
 import { DEFAULT_PERSONA, DEFAULT_PERSONA_SUFFIX } from './system-prompt.js'
+import type { AttachedComponent, CapabilityHost } from './capability-hooks.js'
 import { TaskTree } from './task-tree.js'
 import { TOOL_SCOPE, type ToolRegistryService, type ToolScope } from './tools.js'
 import type { ApprovalBrokerService } from './approvals.js'
@@ -130,6 +132,14 @@ interface AgentEntry {
   readonly projectConfig: ProjectConfig
   /** Open members this agent started (root agents only). */
   readonly children: Set<Agent>
+}
+
+/** The version a session runs on and what the capability host loaded for it. */
+interface CapabilityLoad {
+  readonly version: CapabilityVersion
+  readonly attached: readonly AttachedComponent[]
+  /** `seq` of a `capability.version` record written while loading, if any. */
+  readonly lastSeq?: number
 }
 
 /** Rejection of a member request that breaks the collaboration rules. */
@@ -294,6 +304,7 @@ export class AgentsService extends Service {
     tree: TaskTree
     settings: AgentSettings
     member?: { identity: MemberIdentity; parent: AgentEntry; budget: BudgetShare | undefined }
+    capabilities?: CapabilityLoad
   }): Agent {
     const { member } = args
     const children = new Set<Agent>()
@@ -303,7 +314,12 @@ export class AgentsService extends Service {
     const agent = new Agent({
       sessionId: args.sessionId,
       // Optional step-2 services, looked up per turn without an inject requirement.
-      services: () => ({ context: this.home.get('context'), tasking: this.home.get('tasking') }),
+      services: () => ({
+        context: this.home.get('context'),
+        tasking: this.home.get('tasking'),
+        capabilityHost: this.home.get('capabilityHost'),
+        taskRecorder: this.home.get('taskRecorder'),
+      }),
       lock: args.lock,
       ctx: args.scope.ctx,
       fiber: args.scope.fiber,
@@ -335,6 +351,7 @@ export class AgentsService extends Service {
           ...(member.budget === undefined ? {} : { budget: member.budget }),
         }),
       children: () => [...children],
+      ...(args.capabilities === undefined ? {} : { capabilityVersion: args.capabilities.version, attached: args.capabilities.attached }),
       onClose: closed => {
         if (this.live.get(closed.sessionId) === closed) this.live.delete(closed.sessionId)
         this.entries.delete(closed)
@@ -352,7 +369,80 @@ export class AgentsService extends Service {
       children,
     })
     member?.parent.children.add(agent)
+    if (member !== undefined) args.tree.addMember(agent.sessionId, member.identity.name, member.identity.executionForm)
     return agent
+  }
+
+  /** The capability host, when `@nexgent/capabilities` is installed (step 4). */
+  private capabilityHost(): CapabilityHost | undefined {
+    return this.home.get('capabilityHost')
+  }
+
+  /**
+   * Load `version` into a new agent scope (step 4, `agent-hooks.md` §步骤 4).
+   * A failed load writes `capability.version { reason: 'load-failure' }` and
+   * the session runs on `baseline`.
+   */
+  private async loadCapabilities(
+    host: CapabilityHost,
+    input: { sessionId: string; scope: Context; version: CapabilityVersion; resumed: boolean; member?: MemberIdentity; parentSessionId?: string },
+  ): Promise<CapabilityLoad> {
+    const attach = (version: CapabilityVersion) => host.attach({
+      ctx: input.scope,
+      sessionId: input.sessionId,
+      version,
+      resumed: input.resumed,
+      ...(input.member === undefined ? {} : { member: input.member }),
+      ...(input.parentSessionId === undefined ? {} : { parentSessionId: input.parentSessionId }),
+    })
+    try {
+      return { version: input.version, attached: (await attach(input.version)).components }
+    } catch (error) {
+      if (input.version === BASELINE_VERSION) throw error
+      const detail = (error instanceof Error ? error.message : String(error)).slice(0, 500)
+      const written = await this.home.session.append(input.sessionId, {
+        type: 'capability.version',
+        version: BASELINE_VERSION,
+        previous: input.version,
+        reason: 'load-failure',
+        ...(detail === '' ? {} : { detail }),
+      })
+      return { version: BASELINE_VERSION, attached: (await attach(BASELINE_VERSION)).components, lastSeq: written.seq }
+    }
+  }
+
+  /** A resumed member runs on its root's version; a different recorded one is switched with `capability.version { reason: 'unavailable' }`. */
+  private async followRoot(sessionId: string, recorded: CapabilityVersion | undefined, rootVersion: CapabilityVersion): Promise<{ version: CapabilityVersion; lastSeq?: number }> {
+    const previous = recorded ?? BASELINE_VERSION
+    if (previous === rootVersion) return { version: rootVersion }
+    const written = await this.home.session.append(sessionId, {
+      type: 'capability.version',
+      version: rootVersion,
+      previous,
+      reason: 'unavailable',
+      detail: 'the member follows its root session\'s version',
+    })
+    return { version: rootVersion, lastSeq: written.seq }
+  }
+
+  /**
+   * On resume (step 4): keep the recorded version when it still verifies
+   * (a session from before step 4 counts as `baseline`); otherwise switch to
+   * the adopted version and write `capability.version { reason: 'unavailable' }`.
+   */
+  private async resumeVersion(host: CapabilityHost, sessionId: string, recorded: CapabilityVersion | undefined): Promise<{ version: CapabilityVersion; lastSeq?: number }> {
+    const previous = recorded ?? BASELINE_VERSION
+    const check = await host.verify(previous)
+    if (check.ok) return { version: previous }
+    const version = await host.current()
+    const written = await this.home.session.append(sessionId, {
+      type: 'capability.version',
+      version,
+      previous,
+      reason: 'unavailable',
+      ...(check.detail === '' ? {} : { detail: check.detail.slice(0, 500) }),
+    })
+    return { version, lastSeq: written.seq }
   }
 
   /** Create a session (`session.start`) and an agent on it; with `child`, a member under an open root agent. */
@@ -365,15 +455,28 @@ export class AgentsService extends Service {
     const thinking = loaded.input.thinking ?? this.config.thinking
     const effort = loaded.input.effort ?? this.config.effort
     await this.home.workspace.ensureLayout()
+    // Step 4: a new root session runs on the adopted version as of now.
+    const host = this.capabilityHost()
+    const version = host === undefined ? undefined : await host.current()
     const lock = await this.home.session.create({
       sessionId,
       projectRoot: this.home.workspace.root,
       model,
       sandboxMode,
       ...(options.title === undefined ? {} : { title: options.title }),
+      ...(version === undefined ? {} : { capabilityVersion: version }),
     })
     try {
       const scope = await this.scope(sessionId)
+      let capabilities: CapabilityLoad | undefined
+      try {
+        capabilities = host === undefined || version === undefined
+          ? undefined
+          : await this.loadCapabilities(host, { sessionId, scope: scope.ctx, version, resumed: false })
+      } catch (error) {
+        await scope.fiber.dispose()
+        throw error
+      }
       return this.build({
         sessionId,
         lock,
@@ -385,11 +488,12 @@ export class AgentsService extends Service {
         projectConfig: loaded.config,
         history: [],
         lastTurn: 0,
-        lastSeq: 1,
+        lastSeq: capabilities?.lastSeq ?? 1,
         lastCheckpointSeq: 0,
         grants: [],
         tree: new TaskTree(sessionId, loaded.config.costCaps.perTask, [...loaded.config.approvals]),
         settings: this.settings(),
+        ...(capabilities === undefined ? {} : { capabilities }),
       })
     } catch (error) {
       await this.home.session.release(lock).catch(() => undefined)
@@ -415,6 +519,9 @@ export class AgentsService extends Service {
     const seed = mode === 'fork' ? parent.agent.forkSeed() : undefined
     const sessionId = options.sessionId ?? randomUUID()
     const model = preset?.model ?? parent.agent.model
+    // Step 4: members run on their root's version.
+    const host = this.capabilityHost()
+    const version = host === undefined ? undefined : parent.agent.capabilityVersion
     const lock = await this.home.session.create({
       sessionId,
       projectRoot: this.home.workspace.root,
@@ -423,6 +530,7 @@ export class AgentsService extends Service {
       parentSessionId: parent.agent.sessionId,
       member: identity,
       ...(options.title === undefined ? {} : { title: options.title }),
+      ...(version === undefined ? {} : { capabilityVersion: version }),
     })
     try {
       let lastSeq = 1
@@ -436,12 +544,17 @@ export class AgentsService extends Service {
         lastSeq = written.seq
       }
       const scope = await this.scope(sessionId)
+      let capabilities: CapabilityLoad | undefined
       try {
         this.scopeMember(scope.ctx, parent.scope, preset)
+        capabilities = host === undefined || version === undefined
+          ? undefined
+          : await this.loadCapabilities(host, { sessionId, scope: scope.ctx, version, resumed: false, member: identity, parentSessionId: parent.agent.sessionId })
       } catch (error) {
         await scope.fiber.dispose()
         throw error
       }
+      if (capabilities?.lastSeq !== undefined) lastSeq = capabilities.lastSeq
       tree.members += 1
       tree.use(identity.executionForm)
       return this.build({
@@ -461,6 +574,7 @@ export class AgentsService extends Service {
         tree,
         settings: this.settings(preset),
         member: { identity, parent, budget: child.budget },
+        ...(capabilities === undefined ? {} : { capabilities }),
       })
     } catch (error) {
       await this.home.session.release(lock).catch(() => undefined)
@@ -498,15 +612,36 @@ export class AgentsService extends Service {
         await session.append(sessionId, { type: 'turn.end', turn: state.metadata.openTurn, reason: { kind: 'interrupted' } })
         state = await session.resume(sessionId)
       }
+      // Step 4: keep the recorded version when it still loads; a member follows its root.
+      const host = this.capabilityHost()
+      let switched: { version: CapabilityVersion; lastSeq?: number } | undefined
+      if (host !== undefined) {
+        const recorded = state.metadata.capabilityVersion
+        const rootVersion = parent?.agent.capabilityVersion
+        switched = parent === undefined || rootVersion === undefined
+          ? await this.resumeVersion(host, sessionId, recorded)
+          : await this.followRoot(sessionId, recorded, rootVersion)
+      }
       const checkpoint = await session.latestCheckpoint(sessionId)
       const scope = await this.scope(sessionId)
-      if (parent !== undefined) {
-        try {
-          this.scopeMember(scope.ctx, parent.scope, preset)
-        } catch (error) {
-          await scope.fiber.dispose()
-          throw error
+      let capabilities: CapabilityLoad | undefined
+      try {
+        if (parent !== undefined) this.scopeMember(scope.ctx, parent.scope, preset)
+        if (host !== undefined && switched !== undefined) {
+          const loadedCaps = await this.loadCapabilities(host, {
+            sessionId,
+            scope: scope.ctx,
+            version: switched.version,
+            resumed: true,
+            ...(member === undefined ? {} : { member }),
+            ...(parentSessionId === undefined ? {} : { parentSessionId }),
+          })
+          const seq = Math.max(state.metadata.lastSeq, switched.lastSeq ?? 0, loadedCaps.lastSeq ?? 0)
+          capabilities = { ...loadedCaps, lastSeq: seq }
         }
+      } catch (error) {
+        await scope.fiber.dispose()
+        throw error
       }
       const projectConfig = parent?.projectConfig ?? loaded!.config
       const agent = await this.build({
@@ -520,12 +655,13 @@ export class AgentsService extends Service {
         projectConfig,
         history: state.messages,
         lastTurn: state.metadata.lastTurn,
-        lastSeq: state.metadata.lastSeq,
+        lastSeq: capabilities?.lastSeq ?? state.metadata.lastSeq,
         lastCheckpointSeq: checkpoint?.seq ?? 0,
         grants: state.metadata.grants,
         tree: parent?.tree ?? new TaskTree(sessionId, projectConfig.costCaps.perTask, [...projectConfig.approvals]),
         settings: this.settings(preset),
         ...(parent === undefined || member === undefined ? {} : { member: { identity: member, parent, budget: options.child?.budget } }),
+        ...(capabilities === undefined ? {} : { capabilities }),
       })
       // A reopened member works in this tree too: its form counts in the root's `formsUsed`.
       if (parent !== undefined && member !== undefined) parent.tree.use(member.executionForm)
