@@ -207,6 +207,9 @@ importers:
 
   packages/sdk:
     dependencies:
+      '@nexgent/capabilities':
+        specifier: workspace:*
+        version: link:../capabilities
       '@nexgent/context':
         specifier: workspace:*
         version: link:../context

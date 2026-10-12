@@ -2,8 +2,8 @@
  * Boot one project's Cordis application: the kernel's default profile plus
  * the step-2 rows (`@nexgent/context`, `@nexgent/skill`, `@nexgent/tasking`)
  * and the step-3 rows (`@nexgent/tool-spreadsheet`, `@nexgent/web`,
- * `@nexgent/ptc`, `@nexgent/subagent`, `@nexgent/workflow`, `@nexgent/team`),
- * with the host plugins the CLI used to wire itself (llm, session,
+ * `@nexgent/ptc`, `@nexgent/subagent`, `@nexgent/workflow`, `@nexgent/team`)
+ * and the step-4 row (`@nexgent/capabilities`), with the host plugins the CLI used to wire itself (llm, session,
  * workspace) and the SDK's `env` handed to the llm provider and the
  * credentials service, so tests and the acceptance scripts stay hermetic.
  */
@@ -23,6 +23,7 @@ import {
   type Plugin,
   type SessionStore,
 } from '@nexgent/kernel'
+import { CapabilitiesPlugin } from '@nexgent/capabilities'
 import { ContextPlugin } from '@nexgent/context'
 import { AnthropicProvider, LLMPlugin, providerOptionsFromConfig, type LLMPluginConfig } from '@nexgent/llm'
 import { PtcPlugin } from '@nexgent/ptc'
@@ -73,6 +74,16 @@ export function step3ProfileRows(): AppProfileRow[] {
 }
 
 /**
+ * The step-4 row, last: `@nexgent/capabilities` provides `ctx.capabilityHost`
+ * (the adopted version and per-session components the kernel loads) and the
+ * three capability tools, so tasks the CLI and the desktop run use the
+ * project's adopted capability version.
+ */
+export function step4ProfileRows(): AppProfileRow[] {
+  return [{ id: 'capabilities', name: CapabilitiesPlugin.name }]
+}
+
+/**
  * Work a reopened root session needs before its first new turn: closing the
  * member runs and workflows a dead process left open (`data-formats.md`
  * §子会话与成员 恢复). Each step writes host records between turns.
@@ -91,7 +102,7 @@ export const ROOT_SESSION_RECOVERIES: readonly SessionRecovery[] = [
 ]
 
 /**
- * The SDK's step-3 rows minus those a caller's patch inserts itself (same id
+ * The SDK's step-3 and step-4 rows minus those a caller's patch inserts itself (same id
  * or plugin name): the caller's row wins, so a host that loaded a step-3
  * plugin before the SDK did keeps booting.
  */
@@ -139,7 +150,7 @@ export async function bootProjectApp(options: BootOptions): Promise<NexgentApp> 
   const patches: AppProfilePatchEntry[] = [
     { id: 'workspace', config: { root: options.root } },
     ...(options.approvalTimeoutMs === undefined ? [] : [{ id: 'approvals', config: { timeoutMs: options.approvalTimeoutMs } }]),
-    { insert: [...step2ProfileRows(env, options.home), ...withoutCallerRows(step3ProfileRows(), options.patches ?? [])] },
+    { insert: [...step2ProfileRows(env, options.home), ...withoutCallerRows([...step3ProfileRows(), ...step4ProfileRows()], options.patches ?? [])] },
     ...(options.patches ?? []),
   ]
   return createApp({
@@ -158,6 +169,7 @@ export async function bootProjectApp(options: BootOptions): Promise<NexgentApp> 
       [SubagentPlugin.name]: SubagentPlugin as Plugin,
       [WorkflowPlugin.name]: WorkflowPlugin as Plugin,
       [TeamPlugin.name]: TeamPlugin as Plugin,
+      [CapabilitiesPlugin.name]: CapabilitiesPlugin as Plugin,
       ...options.registry,
     },
   })
