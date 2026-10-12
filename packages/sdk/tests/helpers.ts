@@ -39,7 +39,7 @@ export type MemberRoutes = Readonly<Record<string, ScriptEntry<LLMRequest>[]>>
 
 /** An SDK over a scripted model with a hermetic env and home. */
 export async function testSdk(script: ScriptFor | ScriptEntry<LLMRequest>[], options: Partial<LocalSdkOptions> & { readonly routes?: MemberRoutes } = {}): Promise<TestSdk> {
-  const { routes, ...sdkOptions } = options
+  const { routes, registry, ...sdkOptions } = options
   const base = await tempDir()
   const home = nodePath.join(base, 'home')
   await mkdir(home)
@@ -60,6 +60,8 @@ export async function testSdk(script: ScriptFor | ScriptEntry<LLMRequest>[], opt
           ctx.provide('llm', llm)
         },
       },
+      // Extra rows of a test; never a real model (the scripted llm row stays unless a test replaces it on purpose).
+      ...registry,
     },
     ...sdkOptions,
   })

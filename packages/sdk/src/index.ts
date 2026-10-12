@@ -5,7 +5,7 @@
 export * from './api.js'
 export { createSdk, LocalNexgentSdk, READ_TEXT_MAX_BYTES, writeDefaultConfig } from './sdk.js'
 export type { LocalSdkOptions, ProjectAgentEvent, StartedTurn, StartTurnInput } from './sdk.js'
-export { bootProjectApp, COMPACTION_THRESHOLD_ENV, ROOT_SESSION_RECOVERIES, step2ProfileRows, step3ProfileRows } from './boot.js'
+export { bootProjectApp, COMPACTION_THRESHOLD_ENV, ROOT_SESSION_RECOVERIES, step2ProfileRows, step3ProfileRows, step4ProfileRows } from './boot.js'
 export type { BootOptions, SessionRecovery } from './boot.js'
 export { EXPORT_FILES, EXPORT_FORMAT_VERSION, REDACTED, redactSecrets, writeExportBundle } from './export.js'
 export type { ExportInput } from './export.js'
