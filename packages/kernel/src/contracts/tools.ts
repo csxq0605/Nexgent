@@ -24,7 +24,12 @@ export type ToolApproval = 'never' | 'ask' | 'always'
 
 /** A tool as registered: model-facing schema plus host-facing policy facts. */
 export interface ToolDefinition {
-  /** Unique name, `^[a-z][a-z0-9_]*$`, as the model calls it. */
+  /**
+   * Unique name, as the model calls it: `^[a-z][a-z0-9_]*$`, or (step 4) a
+   * function module's tool name `cap_<module>_<function>` from
+   * `functionToolName` (the module name may hold `-`, the function name
+   * capitals), at most 64 characters.
+   */
   readonly name: string
   /** What the tool does, for the model. */
   readonly description: string
