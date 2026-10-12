@@ -23,7 +23,9 @@
 | `goalContextProvider()` | `ContextProvider` | `id: 'goal'`；目标为 `active` 时给出 `# Current goal` 系统提示节，不写会话 |
 | `presentTool(deliverables)` | `Tool` | 名字、schema、effects、approval 取自 `PRESENT_TOOL`；经 `ToolContext.appendRecord` 写 `deliverable.presented`；结果文本给出 `deliverableId` 与版本号 |
 | `textHunks` `diffLines` `toHunks` `renderHunks` `splitLines` | — | 按行差异（Myers，先去掉公共首尾），统一差异块，上下文 3 行 |
-| `apply` / `name` / `TaskingPlugin` | Cordis plugin | `inject: ['workspace', 'session']`，`ctx.provide('tasking')`；启动时 `cleanup()`；有 `ctx.tools` 时注册 `present`，有 `ctx.context` 时注册目标提供者（任一方卸载时注销） |
+| `LocalTaskRecorder(layout, { processes?, now?, maxSnapshotBytes? })` | kernel `TaskRecorder`（步骤 4） | `begin` 拍任务快照，`end` 推出检查、运行并写检查记录；见下文“任务快照与检查” |
+| `csvProblem(text)`、`TEST_COMMAND_PATTERN` | — | 检查用的 CSV 结构判断、测试命令识别 |
+| `apply` / `name` / `TaskingPlugin` | Cordis plugin | `inject: ['workspace', 'session']`，`ctx.provide('tasking')` 与 `ctx.provide('taskRecorder')`（测试命令经 `ctx.processes` 运行）；启动时 `cleanup()`；有 `ctx.tools` 时注册 `present`，有 `ctx.context` 时注册目标提供者（任一方卸载时注销） |
 
 ## 规则与取舍
 
@@ -49,6 +51,14 @@
   所以 `goals.get` 用 `readAll` + `projectSession`，轮中调用也安全。
 - **强杀**：资料与成果都是“临时目录写完再改名”，进程在任何时刻死掉，列表里只会出现完整的资料与版本；遗留的 `.tmp-*` 在下次
   装载插件时删除。反馈与目标只在会话记录里，随会话恢复。
+
+- **任务快照与检查（步骤 4）**：快照范围同每轮文件变更（不含 `.nexgent/`、任意深度的 `.git/` 与 `node_modules/`，只取普通文件），
+  文件体按 SHA-256 存一次（`objects/` 先写临时文件再改名），树按规范 JSON 的哈希命名，已存在的树与对象不重写；总量超过
+  `maxSnapshotBytes`（默认 200 MiB）时 `tree: null`。检查从任务树交付过的每个成果的最新版本推出：每个文件一项 `file-exists`
+  （id `file-<n>`），`.json` / `.csv` / `.xlsx` 另加一项 `parses`（`parse-<n>`；CSV 要求引号成对、各行字段数相同，XLSX 只认
+  zip 头和其中的 `[Content_Types].xml` 与 `xl/workbook.xml`）；在项目根目录退出码为 0 的命令里，符合 `TEST_COMMAND_PATTERN`
+  的测试命令取最近 3 条去重（`test-<n>`），经 `ctx.processes` 重跑（120 s），其他命令不重跑。检查记录在每个根轮次结束时重写，
+  `task.outcome.checks` 取最近一次。快照的清理（超过总量时删旧对象）还没有做。
 
 ## 测试
 

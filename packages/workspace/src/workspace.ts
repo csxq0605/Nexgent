@@ -9,6 +9,7 @@ import {
   NEXGENT_DIR,
   NEXGENT_SUBDIRS,
   NexgentError,
+  SNAPSHOTS_DIR,
   normalizeWorkspacePath,
   resolveWorkspaceLayout,
   type Workspace,
@@ -53,6 +54,8 @@ export class LocalWorkspace implements Workspace {
   async ensureLayout(): Promise<void> {
     await mkdir(this.layout.dataDir, { recursive: true })
     for (const sub of NEXGENT_SUBDIRS) await mkdir(this.layout[sub], { recursive: true })
+    // Step 4: task snapshots and checks (host-only, `data-formats.md` §任务快照与检查).
+    await mkdir(nodePath.join(this.layout.dataDir, SNAPSHOTS_DIR), { recursive: true })
   }
 }
 

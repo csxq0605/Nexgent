@@ -13,6 +13,7 @@ import { LocalDeliverableStore } from './deliverables.js'
 import { goalContextProvider, SessionFeedbackStore, SessionGoalStore } from './feedback-goals.js'
 import { LocalMaterialStore } from './materials.js'
 import { presentTool } from './present-tool.js'
+import { LocalTaskRecorder } from './task-records.js'
 import { LocalTurnFileTracker, type LocalTurnFileTrackerOptions } from './turn-files.js'
 
 /** Options of {@link createTaskingService}. */
@@ -67,6 +68,8 @@ export async function apply(ctx: Context): Promise<void> {
   const service = createTaskingService(ctx.workspace.layout, ctx.session)
   await service.cleanup()
   ctx.provide('tasking', service)
+  // Step 4: root-task snapshots and checks; test commands run through `ctx.processes` when it is there.
+  ctx.provide('taskRecorder', new LocalTaskRecorder(ctx.workspace.layout, { processes: () => ctx.get('processes') }))
   ctx.inject(['tools'], scope => {
     const registry = scope.tools as ToolRegistry
     scope.effect(() => registry.register(presentTool(service.deliverables)), 'tools.register(present)')
@@ -78,4 +81,4 @@ export async function apply(ctx: Context): Promise<void> {
 }
 
 /** The plugin as an object, for `ctx.plugin(TaskingPlugin)`. */
-export const TaskingPlugin = { name, inject: ['workspace', 'session'], provide: ['tasking'], apply }
+export const TaskingPlugin = { name, inject: ['workspace', 'session'], provide: ['tasking', 'taskRecorder'], apply }

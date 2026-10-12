@@ -1,6 +1,6 @@
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
-import { Context, NEXGENT_SUBDIRS, type Tool, type ToolRegistry } from '@nexgent/kernel'
+import { Context, NEXGENT_SUBDIRS, SNAPSHOTS_DIR, type Tool, type ToolRegistry } from '@nexgent/kernel'
 import { describe, expect, it } from 'vitest'
 import {
   addProjectApproval,
@@ -21,7 +21,7 @@ describe('workspace layout', () => {
     const base = await tempDir()
     const workspace = await openWorkspace(nodePath.join(base, 'p'), { create: true, ensureLayout: true })
     await workspace.ensureLayout()
-    expect((await readdir(workspace.layout.dataDir)).sort()).toEqual([...NEXGENT_SUBDIRS].sort())
+    expect((await readdir(workspace.layout.dataDir)).sort()).toEqual([...NEXGENT_SUBDIRS, SNAPSHOTS_DIR].sort())
     expect(workspace.sessionDir('abc')).toBe(nodePath.join(workspace.root, '.nexgent', 'sessions', 'abc'))
     expect(() => workspace.sessionDir('../x')).toThrow()
     expect(workspace.resolve('a/b')).toBe(nodePath.join(workspace.root, 'a', 'b'))

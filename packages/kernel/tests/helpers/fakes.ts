@@ -138,6 +138,7 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
           ...(record.title === undefined ? {} : { title: record.title }),
           ...(record.parentSessionId === undefined ? {} : { parentSessionId: record.parentSessionId }),
           ...(record.member === undefined ? {} : { member: record.member }),
+          ...(record.capabilityVersion === undefined ? {} : { capabilityVersion: record.capabilityVersion }),
           lastTurn: 0,
           totalUsage: ZERO_USAGE,
           lastSeq: record.seq,
@@ -170,6 +171,9 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
         break
       case 'approval.grant':
         meta = { ...meta!, grants: [...meta!.grants, record.grant] }
+        break
+      case 'capability.version':
+        meta = { ...meta!, capabilityVersion: record.version }
         break
       case 'fork.seed':
         messages.splice(0, messages.length, ...record.messages)
@@ -206,6 +210,7 @@ export class MemorySessionStore implements SessionStore {
       ...(init.parentSessionId === undefined ? {} : { parentSessionId: init.parentSessionId }),
       ...(init.title === undefined ? {} : { title: init.title }),
       ...(init.member === undefined ? {} : { member: init.member }),
+      ...(init.capabilityVersion === undefined ? {} : { capabilityVersion: init.capabilityVersion }),
     })
     return lock
   }

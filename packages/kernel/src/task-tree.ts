@@ -12,8 +12,18 @@ import { randomUUID } from 'node:crypto'
 import type { ApprovalGrant } from './contracts/approvals.js'
 import { EXECUTION_FORMS, type ExecutionForm } from './contracts/collaboration.js'
 import type { CostCap } from './contracts/config.js'
+import { addUsage, ZERO_USAGE, type LLMUsage } from './contracts/llm.js'
+import type { MemberCost } from './contracts/ledger.js'
 
-/** Shared state of one task tree. */
+/** A member's spend: usage, model requests and tool calls. */
+interface MemberTotals {
+  usage: LLMUsage
+  requestCount: number
+  toolCallCount: number
+}
+
+const emptyTotals = (): MemberTotals => ({ usage: ZERO_USAGE, requestCount: 0, toolCallCount: 0 })
+
 export class TaskTree {
   /** Lowercase uuid v4 shared by every member. */
   readonly taskId = randomUUID()
@@ -24,6 +34,17 @@ export class TaskTree {
   /** Child sessions created in this tree. */
   members = 0
   private readonly forms = new Set<ExecutionForm>(['direct'])
+  /**
+   * Step 4: each member's spend over the whole tree and since the root's
+   * current turn started, in first-start order (`task.outcome.memberCosts`).
+   */
+  private readonly memberTotals = new Map<string, { name: string; executionForm: ExecutionForm; task: MemberTotals; turn: MemberTotals }>()
+  /** Step 4: files of the latest version of each deliverable the tree presented, by deliverable id in first-presentation order. */
+  private readonly presented = new Map<string, readonly string[]>()
+  /** Step 4: shell commands of the tree that exited 0, in call order. */
+  readonly commands: { command: string; shell: 'bash' | 'pwsh' }[] = []
+  /** Step 4: whether the root task's start snapshot was taken. */
+  snapshotTaken = false
 
   constructor(
     /** Session id of the root agent. */
@@ -37,6 +58,52 @@ export class TaskTree {
   /** Record that a member of `form` was started. */
   use(form: ExecutionForm): void {
     this.forms.add(form)
+  }
+
+  /** Step 4: note a member (first start or reopen) so it appears in `memberCosts` even before it spends anything. */
+  addMember(memberId: string, name: string, executionForm: ExecutionForm): void {
+    if (!this.memberTotals.has(memberId)) this.memberTotals.set(memberId, { name, executionForm, task: emptyTotals(), turn: emptyTotals() })
+  }
+
+  /** Step 4: add a member's model requests and usage. */
+  chargeMember(memberId: string, requests: number, usage: LLMUsage | undefined): void {
+    const entry = this.memberTotals.get(memberId)
+    if (entry === undefined) return
+    for (const totals of [entry.task, entry.turn]) {
+      totals.requestCount += requests
+      if (usage !== undefined) totals.usage = addUsage(totals.usage, usage)
+    }
+  }
+
+  /** Step 4: count one tool call of a member. */
+  countMemberToolCall(memberId: string): void {
+    const entry = this.memberTotals.get(memberId)
+    if (entry === undefined) return
+    entry.task.toolCallCount += 1
+    entry.turn.toolCallCount += 1
+  }
+
+  /** Step 4: the root started a turn; per-turn member totals restart (the SDK counts a turn as a task). */
+  beginRootTurn(): void {
+    for (const entry of this.memberTotals.values()) entry.turn = emptyTotals()
+  }
+
+  /** Step 4: each member's spend over the whole tree (`task`) or since the root's current turn started (`turn`). */
+  memberCosts(span: 'task' | 'turn' = 'task'): MemberCost[] {
+    return [...this.memberTotals.entries()].map(([memberId, entry]) => {
+      const totals = entry[span]
+      return { memberId, name: entry.name, executionForm: entry.executionForm, usage: totals.usage, requestCount: totals.requestCount, toolCallCount: totals.toolCallCount }
+    })
+  }
+
+  /** Step 4: note the files of a presented deliverable version (a later version replaces the earlier one's files). */
+  present(deliverableId: string, paths: readonly string[]): void {
+    this.presented.set(deliverableId, [...paths])
+  }
+
+  /** Step 4: files of the latest presented version of each deliverable, deduplicated, first presentation first. */
+  deliverableFiles(): string[] {
+    return [...new Set([...this.presented.values()].flat())]
   }
 
   /** Forms the tree used, deduplicated, in {@link EXECUTION_FORMS} order. */
