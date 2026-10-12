@@ -4,7 +4,7 @@
  * handlers, and `emit` to push `SdkEvent`s as the main process would.
  * Never bundled into the app (only tests import it).
  */
-import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, MaterialMetadata } from '@nexgent/kernel'
+import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, MaterialMetadata, PluginApprovalInfo } from '@nexgent/kernel'
 import type { CandidateDetail, CandidateView, CapabilityListing, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
@@ -86,8 +86,16 @@ export function candidate(overrides: Partial<CandidateView> = {}): CandidateView
   return { id: 'c-1', status: 'proposed', proposedAt: '2026-10-12T08:00:00.000Z', sessionId: 's1', components: [{ kind: 'skill', name: 'order-summary' }], requiresApproval: false, summary: '按地区汇总订单', ...overrides }
 }
 
-/** `capabilities.show` of {@link candidate}. */
-export function candidateDetail(view: CandidateView, version = BUNDLE): CandidateDetail {
+/** What `capabilities.show` reads from a plugin's `plugin.json`. */
+export const pluginInfo = (name: string): PluginApprovalInfo => ({ name, description: `${name} 插件`, permissions: '读取项目文件；联网查询天气', tools: [`${name}_hello`] })
+
+/**
+ * `capabilities.show` of {@link candidate}; `plugins` defaults to one entry
+ * per plugin component (a candidate with none has no `plugins`).
+ */
+export function candidateDetail(view: CandidateView, version = BUNDLE, plugins?: readonly PluginApprovalInfo[]): CandidateDetail {
+  const named = view.components.filter(c => c.kind === 'plugin')
+  const info = plugins ?? (named.length === 0 ? undefined : named.map(c => pluginInfo(c.name)))
   return {
     view,
     record: {
@@ -106,6 +114,7 @@ export function candidateDetail(view: CandidateView, version = BUNDLE): Candidat
     },
     receipts: [],
     decisions: [],
+    ...(info === undefined ? {} : { plugins: info }),
   }
 }
 
@@ -128,6 +137,8 @@ export class FakeBridge implements NexgentBridge {
   /** Step 3: workflows `sessions.collaboration` reports. */
   workflows: WorkflowView[] = []
   /** Step 4: what `capabilities.list` answers (`approve` / `rollback` / `trial` change it like the SDK would). */
+  /** `capabilities.show`'s `plugins` per candidate id, when a test needs other than the default. */
+  pluginInfo: Record<string, readonly PluginApprovalInfo[]> = {}
   capabilities: CapabilityListing = { current: { version: 'baseline', revision: 0, components: [] }, history: [], candidates: [] }
   readonly handlers: Record<string, Handler> = {
     'app.info': () => ({ sdkVersion: 4, appVersion: '0.0.0-test', platform: 'linux' }),
@@ -179,7 +190,7 @@ export class FakeBridge implements NexgentBridge {
     'capabilities.show': input => {
       const view = this.capabilities.candidates.find(c => c.id === input.candidateId)
       if (view === undefined) throw { name: 'NexgentError', code: 'tool/invalid-input', message: `no candidate ${input.candidateId}` }
-      return candidateDetail(view)
+      return candidateDetail(view, BUNDLE, this.pluginInfo[view.id])
     },
     'capabilities.trial': input => this.setCandidate(input.candidateId, { status: 'trialing', trialId: 'trial-1' }),
     'capabilities.approve': input => {

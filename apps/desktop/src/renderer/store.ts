@@ -312,6 +312,9 @@ export class AppStore {
     const projectId = this.projectId
     const candidate = this.state.pluginApproval
     if (projectId === undefined || candidate === undefined) return
+    // Allow only when every plugin's plugin.json could be shown.
+    const plugins = candidate.record.components.filter(component => component.kind === 'plugin')
+    if (decision === 'allow' && !plugins.every(component => candidate.plugins?.some(info => info.name === component.name))) return
     this.set({ pluginApproval: undefined })
     await this.guard(c => c.call('capabilities.approve', { projectId, candidateId: candidate.view.id, decision }))
     await this.refreshCapabilities()

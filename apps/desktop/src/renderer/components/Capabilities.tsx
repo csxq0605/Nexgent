@@ -165,6 +165,8 @@ export function PluginApprovalDialog(): JSX.Element | null {
   const detail = state.pluginApproval
   if (detail === undefined) return null
   const plugins = detail.record.components.filter(component => component.kind === 'plugin')
+  const infoOf = (name: string) => detail.plugins?.find(info => info.name === name)
+  const unreadable = plugins.filter(component => infoOf(component.name) === undefined).map(component => component.name)
   return (
     <Modal title={T.pluginApprovalTitle} testId="plugin-approval-dialog" onClose={() => store.closePluginApproval()}>
       <p className="small wrap">{T.pluginApprovalBody}</p>
@@ -175,21 +177,45 @@ export function PluginApprovalDialog(): JSX.Element | null {
       <p className="small">
         {T.pluginApprovalVersion}：<code className="wrap" data-testid="plugin-approval-hash">{detail.record.version}</code>
       </p>
-      <ul className="file-list small" data-testid="plugin-approval-files">
-        {plugins.flatMap(component =>
-          component.files.map(file => (
-            <li key={`${component.name}/${file.path}`} className="wrap">
-              {component.name}/{file.path} <code>{file.sha256.slice(0, 16)}</code>
-            </li>
-          )),
-        )}
-      </ul>
+      {plugins.map(component => {
+        const info = infoOf(component.name)
+        return (
+          <div key={component.name} className="stack candidate-detail" data-testid="plugin-approval-plugin" data-plugin={component.name}>
+            <strong className="small">{component.name}</strong>
+            {info === undefined ? null : (
+              <>
+                <span className="small wrap" data-testid="plugin-approval-description">
+                  {T.pluginApprovalDescription}：{info.description}
+                </span>
+                <span className="small wrap" data-testid="plugin-approval-permissions">
+                  {T.pluginApprovalPermissions}：{info.permissions}
+                </span>
+                <span className="small wrap" data-testid="plugin-approval-tools">
+                  {info.tools.length === 0 ? T.pluginApprovalNoTools : `${T.pluginApprovalTools}：${info.tools.join('、')}`}
+                </span>
+              </>
+            )}
+            <ul className="file-list small" data-testid="plugin-approval-files">
+              {component.files.map(file => (
+                <li key={file.path} className="wrap">
+                  {component.name}/{file.path} <code>{file.sha256.slice(0, 16)}</code>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      })}
+      {unreadable.length > 0 && (
+        <div className="error-banner small wrap" role="alert" data-testid="plugin-approval-unreadable">
+          {T.pluginApprovalUnreadable(unreadable.join('、'))}
+        </div>
+      )}
       {detail.view.summary !== undefined && <p className="muted small wrap">{detail.view.summary}</p>}
       <div className="row end">
         <button type="button" className="danger" onClick={() => void store.answerPluginApproval('deny')} data-testid="plugin-deny">
           {T.pluginDeny}
         </button>
-        <button type="button" className="primary" onClick={() => void store.answerPluginApproval('allow')} data-testid="plugin-allow">
+        <button type="button" className="primary" disabled={unreadable.length > 0} onClick={() => void store.answerPluginApproval('allow')} data-testid="plugin-allow">
           {T.pluginAllow}
         </button>
       </div>

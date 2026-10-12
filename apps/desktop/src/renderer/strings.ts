@@ -201,6 +201,11 @@ export const T = {
   pluginApprovalPackages: '插件',
   pluginApprovalVersion: '能力包哈希',
   pluginApprovalFiles: '文件',
+  pluginApprovalDescription: '说明',
+  pluginApprovalPermissions: '插件自述的权限',
+  pluginApprovalTools: '注册的工具',
+  pluginApprovalNoTools: '不注册工具',
+  pluginApprovalUnreadable: (names: string) => `读不出 ${names} 的 plugin.json（缺失、被改动或格式不对），无法确认它要做什么，所以不能允许。`,
   pluginAllow: '允许并采用',
   pluginDeny: '拒绝',
 } as const

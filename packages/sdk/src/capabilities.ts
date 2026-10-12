@@ -4,9 +4,23 @@
  * files (`data-formats.md` §候选与门控 “状态”): the candidate record, its
  * trial receipts, its decisions and the activation chain.
  */
+import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { CAPABILITY_DIRS, NexgentError, type ActivationRevision, type CandidateRecord, type CandidateStatus, type CapabilityDecision, type CapabilityVersion, type TrialReceipt } from '@nexgent/kernel'
+import {
+  CAPABILITY_DIRS,
+  NexgentError,
+  componentDir,
+  pluginApprovalInfo,
+  type ActivationRevision,
+  type CandidateRecord,
+  type CandidateStatus,
+  type CapabilityDecision,
+  type CapabilityVersion,
+  type PluginApprovalInfo,
+  type PluginSpec,
+  type TrialReceipt,
+} from '@nexgent/kernel'
 import { listCandidates, readCandidate, type CapabilityService } from '@nexgent/capabilities'
 import { validateCapabilityFile } from '@nexgent/session'
 import type { CandidateDetail, CandidateView, CapabilityListing, CapabilityVersionView } from './api.js'
@@ -165,15 +179,44 @@ export async function listing(service: CapabilityService): Promise<CapabilityLis
   }
 }
 
+const PLUGIN_FILE = 'plugin.json'
+
+/**
+ * What the approval dialog shows for each plugin component, from the
+ * candidate's copy of `plugins/<name>/plugin.json`. A copy that cannot be
+ * read, does not match the record's hash, fails validation or names another
+ * plugin leaves its entry out (the dialog then does not offer `allow`).
+ */
+async function pluginInfo(service: CapabilityService, record: CandidateRecord): Promise<PluginApprovalInfo[] | undefined> {
+  const plugins = record.components.filter(component => component.kind === 'plugin')
+  if (plugins.length === 0) return undefined
+  const dir = join(service.store.directory, CAPABILITY_DIRS.candidates, record.id)
+  const out: PluginApprovalInfo[] = []
+  for (const component of plugins) {
+    try {
+      const bytes = await readFile(join(dir, ...componentDir('plugin', component.name).split('/'), PLUGIN_FILE))
+      const expected = component.files.find(file => file.path === PLUGIN_FILE)?.sha256
+      if (expected === undefined || createHash('sha256').update(bytes).digest('hex') !== expected) continue
+      const spec = JSON.parse(bytes.toString('utf8')) as unknown
+      if (validateCapabilityFile('plugin', spec).length > 0 || (spec as PluginSpec).name !== component.name) continue
+      out.push(pluginApprovalInfo(spec as PluginSpec))
+    } catch {
+      // unreadable or not JSON: the entry is missing
+    }
+  }
+  return out
+}
+
 /** `capabilities.show`. */
 export async function show(service: CapabilityService, candidateId: string): Promise<CandidateDetail> {
   const record = await candidate(service, candidateId)
-  const files = await readFiles(service)
+  const [files, plugins] = await Promise.all([readFiles(service), pluginInfo(service, record)])
   return {
     view: view(record, files),
     record,
     receipts: trialsOf(files, record.id).flat(),
     decisions: decisionsOf(files, record.id),
+    ...(plugins === undefined ? {} : { plugins }),
   }
 }
 

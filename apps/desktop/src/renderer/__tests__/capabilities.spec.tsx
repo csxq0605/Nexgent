@@ -7,7 +7,7 @@
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { BUNDLE, FakeBridge, candidate } from '../testing/fake-bridge.js'
+import { BUNDLE, FakeBridge, candidate, pluginInfo } from '../testing/fake-bridge.js'
 import { emit, renderApp } from './helpers.js'
 
 const capabilityEvent = (type: 'capability.version' | 'capability.candidate', extra: Record<string, unknown>) => ({ type, sessionId: undefined, ...extra })
@@ -119,6 +119,11 @@ describe('plugin package approval', () => {
     expect(within(dialog).getByTestId('plugin-approval-names').textContent).toBe('greeter')
     expect(within(dialog).getByTestId('plugin-approval-hash').textContent).toBe(BUNDLE)
     expect(within(dialog).getByTestId('plugin-approval-files').textContent).toContain('greeter/plugin.json')
+    expect(within(dialog).getByTestId('plugin-approval-description').textContent).toBe('说明：greeter 插件')
+    expect(within(dialog).getByTestId('plugin-approval-permissions').textContent).toBe('插件自述的权限：读取项目文件；联网查询天气')
+    expect(within(dialog).getByTestId('plugin-approval-tools').textContent).toBe('注册的工具：greeter_hello')
+    expect(within(dialog).queryByTestId('plugin-approval-unreadable')).toBeNull()
+    expect((within(dialog).getByTestId('plugin-allow') as HTMLButtonElement).disabled).toBe(false)
     expect(dialog.textContent).toContain('拥有应用的全部权限')
     fireEvent.click(within(dialog).getByTestId('plugin-deny'))
     await waitFor(() => expect(screen.queryByTestId('plugin-approval-dialog')).toBeNull())
@@ -126,6 +131,28 @@ describe('plugin package approval', () => {
     fireEvent.click(screen.getByTestId('tab-capabilities'))
     await waitFor(() => expect(within(screen.getByTestId('capability-candidate')).getByTestId('candidate-status').textContent).toBe('未采用'))
     expect(screen.getByTestId('capability-current').dataset['version']).toBe('baseline')
+  })
+
+  it('a plugin whose plugin.json could not be read has no entry: the dialog says so and allow is disabled', async () => {
+    const bridge = awaiting()
+    bridge.capabilities = {
+      ...bridge.capabilities,
+      candidates: [{ ...bridge.capabilities.candidates[0]!, components: [{ kind: 'plugin', name: 'greeter' }, { kind: 'plugin', name: 'notes' }] }],
+    }
+    bridge.pluginInfo['c-9'] = [pluginInfo('greeter')]
+    await renderApp(bridge)
+    const dialog = await screen.findByTestId('plugin-approval-dialog')
+    const plugins = within(dialog).getAllByTestId('plugin-approval-plugin')
+    expect(plugins.map(item => [item.dataset['plugin'], within(item).queryByTestId('plugin-approval-permissions')?.textContent ?? null])).toEqual([
+      ['greeter', '插件自述的权限：读取项目文件；联网查询天气'],
+      ['notes', null],
+    ])
+    expect(within(dialog).getByTestId('plugin-approval-unreadable').textContent).toContain('notes')
+    const allow = within(dialog).getByTestId('plugin-allow') as HTMLButtonElement
+    expect(allow.disabled).toBe(true)
+    fireEvent.click(allow)
+    expect(bridge.callsOf('capabilities.approve')).toEqual([])
+    expect((within(dialog).getByTestId('plugin-deny') as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('allow adopts the plugin package; closing the dialog asks again only from the candidate', async () => {
