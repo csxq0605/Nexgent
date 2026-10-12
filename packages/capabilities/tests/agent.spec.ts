@@ -7,7 +7,7 @@ import { SessionPlugin } from '@nexgent/session'
 import { SkillPlugin } from '@nexgent/skill'
 import { scriptedProvider, type ScriptedProvider } from '@nexgent/test-support'
 import { WorkspacePlugin } from '@nexgent/workspace'
-import { applyDraft, CapabilitiesPlugin, capabilitiesOf, type CapabilityService } from '../src/index.js'
+import { applyDraft, CapabilitiesPlugin, capabilitiesOf, listCandidates, type CapabilityService } from '../src/index.js'
 import { tempDir } from './helpers.js'
 
 let app: NexgentApp | undefined
@@ -294,5 +294,90 @@ export default {
     const resolved = await service().resolveVersion()
     expect(resolved.version).toBe(bundle.version)
     expect(resolved.problem?.file).toMatch(/2\.json/)
+  })
+})
+
+describe('a component the session\'s version already carries (the gate\'s candidate side)', () => {
+  const fm = { kind: 'function-module', name: 'probe' } as const
+  const fmFiles = [{ path: 'functions.json', content: JSON.stringify(SPEC) }, { path: 'index.mjs', content: SOURCE }]
+
+  async function adopted(root: string, llm: ScriptedProvider) {
+    const { agents } = await boot(root, llm)
+    const store = service().store
+    const bundle = await store.write([{ kind: 'function-module', name: 'probe', files: fmFiles }])
+    await store.adopt(bundle.version, { trigger: 'manual' })
+    return { agents, version: bundle.version }
+  }
+
+  function toolResults(llm: ScriptedProvider) {
+    return llm.requests.slice(1).map(request => request.messages.filter(message => message.role === 'tool').at(-1)!)
+  }
+
+  it('replaying "draft, try, use, propose" with the same content succeeds at every step and writes no candidate', async () => {
+    const root = await tempDir()
+    const llm = scriptedProvider([])
+    const { agents, version } = await adopted(root, llm)
+    llm.push(
+      { toolCalls: [{ name: 'capability_draft', arguments: { ...fm, files: fmFiles } }] },
+      { toolCalls: [{ name: 'capability_try', arguments: fm }] },
+      { toolCalls: [{ name: 'cap_probe_total', arguments: { values: [1, 2] } }] },
+      { toolCalls: [{ name: 'capability_propose', arguments: { components: [fm], summary: 'Same as adopted.' } }] },
+      { content: 'done' },
+    )
+    const agent = await agents.create({ sandboxMode: 'workspace-write' })
+    expect((await agent.run({ text: 'Replay task A.' })).reason).toEqual({ kind: 'completed' })
+    llm.assertConsumed()
+    expect(llm.requests).toHaveLength(5)
+    const results = toolResults(llm)
+    expect(results.map(message => [message.name, message.isError])).toEqual([
+      ['capability_draft', false], ['capability_try', false], ['cap_probe_total', false], ['capability_propose', false],
+    ])
+    expect(results[1]!.content).toContain(`already in the capability version this session runs on (${version})`)
+    expect(results[3]!.content).toContain('already in the capability version')
+    expect(await listCandidates(service().store.directory)).toEqual([])
+    expect((await service().components(agent.sessionId, 'function-module')).map(item => item.version)).toEqual([version])
+  })
+
+  it('try and propose without a draft succeed too', async () => {
+    const root = await tempDir()
+    const llm = scriptedProvider([])
+    const { agents } = await adopted(root, llm)
+    llm.push(
+      { toolCalls: [{ name: 'cap_probe_total', arguments: { values: [3] } }, { name: 'capability_propose', arguments: { components: [fm] } }] },
+      { toolCalls: [{ name: 'capability_try', arguments: fm }] },
+      { content: 'done' },
+    )
+    const agent = await agents.create({ sandboxMode: 'workspace-write' })
+    expect((await agent.run({ text: 'Replay task A.' })).reason).toEqual({ kind: 'completed' })
+    const second = llm.requests[1]!.messages.filter(message => message.role === 'tool')
+    expect(second.map(message => [message.name, message.isError])).toEqual([['cap_probe_total', false], ['capability_propose', false]])
+    expect(toolResults(llm).at(-1)).toMatchObject({ name: 'capability_try', isError: false })
+    expect(await listCandidates(service().store.directory)).toEqual([])
+  })
+
+  it('a same-named component with different content goes through the normal flow', async () => {
+    const root = await tempDir()
+    const llm = scriptedProvider([])
+    const { agents, version } = await adopted(root, llm)
+    const changed = [fmFiles[0]!, { path: 'index.mjs', content: SOURCE.replace('a + b', 'a + b + 0') }]
+    llm.push(
+      { toolCalls: [{ name: 'capability_draft', arguments: { ...fm, files: changed } }] },
+      { toolCalls: [{ name: 'capability_try', arguments: fm }] },
+      { toolCalls: [{ name: 'capability_propose', arguments: { components: [fm] } }] },
+      { toolCalls: [{ name: 'cap_probe_total', arguments: { values: [1] } }] },
+      { toolCalls: [{ name: 'capability_propose', arguments: { components: [fm] } }] },
+      { content: 'done' },
+    )
+    const agent = await agents.create({ sandboxMode: 'workspace-write' })
+    expect((await agent.run({ text: 'Improve the module.' })).reason).toEqual({ kind: 'completed' })
+    const results = toolResults(llm)
+    expect(results.map(message => [message.name, message.isError])).toEqual([
+      ['capability_draft', false], ['capability_try', false], ['capability_propose', true], ['cap_probe_total', false], ['capability_propose', false],
+    ])
+    expect(results[1]!.content).toContain('Loaded draft')
+    expect(results[2]!.content).toContain('needs a successful use')
+    const [candidate] = await listCandidates(service().store.directory)
+    expect(candidate).toMatchObject({ base: version })
+    expect(candidate!.version).not.toBe(version)
   })
 })
