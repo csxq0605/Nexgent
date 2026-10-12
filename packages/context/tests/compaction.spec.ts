@@ -77,6 +77,18 @@ describe('compaction trigger', () => {
     expect(compactor.shouldCompact(check(history(), { lastUsage: usage(400, 600) }))).toBe(true)
   })
 
+  it('a per-session override (capability context policy) replaces the threshold for that session only; out-of-range values are ignored', () => {
+    const own = new BasicCompactor({ llm: scriptedProvider([]), thresholdTokens: 1000, env: {} })
+    own.setSessionOverride(SESSION_ID, { thresholdTokens: 20_000 })
+    expect(own.shouldCompact(check(history(), { lastUsage: usage(5000) }))).toBe(false)
+    expect(own.shouldCompact(check(history(), { sessionId: 'other', lastUsage: usage(5000) }))).toBe(true)
+    own.setSessionOverride(SESSION_ID, { thresholdTokens: 5, keepRecentTurns: 99 })
+    expect(own.shouldCompact(check(history(), { lastUsage: usage(1000) }))).toBe(true)
+    own.setSessionOverride(SESSION_ID, { thresholdTokens: 20_000 })
+    own.setSessionOverride(SESSION_ID, undefined)
+    expect(own.shouldCompact(check(history(), { lastUsage: usage(1000) }))).toBe(true)
+  })
+
   it('never triggers with unknown usage, no usage, after a failure in this turn, or with nothing to summarize', () => {
     expect(compactor.shouldCompact(check(history()))).toBe(false)
     expect(compactor.shouldCompact(check(history(), { lastUsage: { ...usage(5000), cacheWriteTokens: 'unknown' } }))).toBe(false)

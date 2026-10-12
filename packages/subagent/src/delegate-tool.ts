@@ -22,7 +22,7 @@ import {
   type ToolOutput,
   type UsageCount,
 } from '@nexgent/kernel'
-import { DEFAULT_PRESET_NAME, PresetRegistry } from '@nexgent/preset'
+import { DEFAULT_PRESET_NAME, sessionPresetRegistry, type CapabilityPresetLookup } from '@nexgent/preset'
 import { assertFilesExist, normalizeMemberFiles } from './files.js'
 import { runMember, type MemberRun } from './runner.js'
 
@@ -32,6 +32,8 @@ export interface DelegateToolOptions {
   readonly agents: Pick<AgentsService, 'create'>
   /** The tasking service, when loaded: material ids are checked against it before the member starts. */
   readonly tasking?: () => TaskingService | undefined
+  /** `ctx.capabilities`, when loaded: presets of the session's capability version and the ones it tried. */
+  readonly capabilities?: CapabilityPresetLookup
 }
 
 /** Model-facing description. */
@@ -126,8 +128,8 @@ function isFailure(result: MemberResult): boolean {
   return result.status !== 'completed'
 }
 
-async function resolvePreset(root: string, input: DelegateToolInput): Promise<AgentPreset> {
-  const preset = await new PresetRegistry(root).resolve(input.preset ?? DEFAULT_PRESET_NAME)
+async function resolvePreset(root: string, sessionId: string, input: DelegateToolInput, capabilities?: CapabilityPresetLookup): Promise<AgentPreset> {
+  const preset = await (await sessionPresetRegistry(root, sessionId, capabilities)).resolve(input.preset ?? DEFAULT_PRESET_NAME)
   return input.persona === undefined ? preset : { ...preset, persona: input.persona }
 }
 
@@ -164,7 +166,7 @@ export function delegateTool(options: DelegateToolOptions): Tool {
       await assertFilesExist(root, files)
       const materialIds = input.materialIds ?? []
       await checkMaterials(options.tasking?.(), materialIds)
-      const preset = await resolvePreset(root, input)
+      const preset = await resolvePreset(root, context.sessionId, input, options.capabilities)
       const run = await runMember({
         agents: options.agents,
         parentSessionId: context.sessionId,

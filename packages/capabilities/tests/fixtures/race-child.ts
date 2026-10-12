@@ -6,6 +6,7 @@
  * - `commit`: publish revision 1 (adopt `version`) on top of the baseline.
  * - `write`: store the sample bundle.
  */
+import { randomUUID } from 'node:crypto'
 import { access, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { BASELINE_ACTIVATION, CapabilityStore, commitActivation } from '../../src/index.js'
@@ -29,7 +30,7 @@ async function waitForGo(): Promise<void> {
 const store = new CapabilityStore(capabilitiesDir)
 if (mode === 'commit') {
   await waitForGo()
-  const result = await commitActivation(store.activationDirectory, BASELINE_ACTIVATION, { type: 'adopt', version: version! }, { child: id })
+  const result = await commitActivation(store.activationDirectory, BASELINE_ACTIVATION, { type: 'adopt', version: version!, trigger: 'manual', decisionId: randomUUID() })
   process.stdout.write(`${JSON.stringify({ id, committed: result !== null, revision: result?.revision ?? null })}\n`)
 } else if (mode === 'write') {
   await waitForGo()

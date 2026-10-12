@@ -1,65 +1,67 @@
+import { canonicalManifestText, isNexgentError } from '@nexgent/kernel'
 import { describe, expect, it } from 'vitest'
-import {
-  buildManifest,
-  CapabilityManifestError,
-  checkRelativePath,
-  isCapabilityVersion,
-  manifestVersion,
-  normalizeManifest,
-  serializeManifest,
-  sha256,
-} from '../src/index.js'
+import { buildManifest, checkComponentPath, checkManifest, isCapabilityVersion, manifestVersion, sha256 } from '../src/index.js'
 import { sampleComponents } from './helpers.js'
+
+function invalid(run: () => unknown): void {
+  let caught: unknown
+  try {
+    run()
+  } catch (error) {
+    caught = error
+  }
+  expect(isNexgentError(caught, 'config/invalid')).toBe(true)
+}
 
 describe('manifest', () => {
   it('derives the same version regardless of input order', () => {
     const forward = buildManifest(sampleComponents())
     const reversed = buildManifest([...sampleComponents()].reverse().map(component => ({ ...component, files: [...component.files].reverse() })))
-    expect(serializeManifest(reversed)).toBe(serializeManifest(forward))
+    expect(canonicalManifestText(reversed)).toBe(canonicalManifestText(forward))
     expect(manifestVersion(reversed)).toBe(manifestVersion(forward))
-    expect(manifestVersion(forward)).toBe(sha256(serializeManifest(forward)))
+    expect(manifestVersion(forward)).toBe(sha256(canonicalManifestText(forward)))
   })
 
   it('changes the version when one byte of one file changes', () => {
     expect(manifestVersion(buildManifest(sampleComponents('a')))).not.toBe(manifestVersion(buildManifest(sampleComponents('b'))))
   })
 
-  it('sorts components by type then name and files by path, with fixed fields', () => {
+  it('orders components by kind (contract order) then name, files by path, with contract fields', () => {
     const manifest = buildManifest(sampleComponents())
-    expect(manifest.components.map(component => component.path)).toEqual(['function-module/order-tools', 'skill/summarize-orders'])
+    expect(manifest.components.map(component => `${component.kind}/${component.name}`)).toEqual(['function-module/order-tools', 'skill/summarize-orders'])
     expect(manifest.components[1]!.files.map(file => file.path)).toEqual(['SKILL.md', 'reference/columns.md'])
-    expect(Object.keys(manifest.components[0]!)).toEqual(['type', 'name', 'path', 'files'])
-    expect(manifest.components[0]!.files[0]!.size).toBeGreaterThan(0)
+    expect(Object.keys(manifest)).toEqual(['formatVersion', 'components'])
+    expect(Object.keys(manifest.components[0]!.files[0]!)).toEqual(['path', 'sha256', 'bytes'])
   })
 
   it('accepts the empty bundle', () => {
-    expect(normalizeManifest({ format: 1, components: [] })).toEqual({ format: 1, components: [] })
+    expect(checkManifest({ formatVersion: 1, components: [] })).toEqual({ formatVersion: 1, components: [] })
   })
 
   it.each([
-    ['unknown type', [{ type: 'macro', name: 'x', files: [{ path: 'a', content: '' }] }]],
-    ['bad name', [{ type: 'skill', name: 'Bad Name', files: [{ path: 'a', content: '' }] }]],
-    ['no files', [{ type: 'skill', name: 'x', files: [] }]],
-    ['duplicate component', [{ type: 'skill', name: 'x', files: [{ path: 'a', content: '' }] }, { type: 'skill', name: 'x', files: [{ path: 'b', content: '' }] }]],
-    ['case-insensitive clash', [{ type: 'skill', name: 'x', files: [{ path: 'A.md', content: '' }, { path: 'a.md', content: '' }] }]],
-    ['file and directory', [{ type: 'skill', name: 'x', files: [{ path: 'a', content: '' }, { path: 'a/b', content: '' }] }]],
-    ['parent segment', [{ type: 'skill', name: 'x', files: [{ path: '../escape', content: '' }] }]],
+    ['unknown kind', [{ kind: 'macro', name: 'x', files: [{ path: 'a', content: '' }] }]],
+    ['underscore in name', [{ kind: 'skill', name: 'bad_name', files: [{ path: 'SKILL.md', content: '' }] }]],
+    ['name starting with a digit', [{ kind: 'skill', name: '1x', files: [{ path: 'SKILL.md', content: '' }] }]],
+    ['missing entry file', [{ kind: 'skill', name: 'x', files: [{ path: 'README.md', content: '' }] }]],
+    ['duplicate component', [{ kind: 'skill', name: 'x', files: [{ path: 'SKILL.md', content: '' }] }, { kind: 'skill', name: 'x', files: [{ path: 'SKILL.md', content: 'b' }] }]],
+    ['case-insensitive clash', [{ kind: 'skill', name: 'x', files: [{ path: 'SKILL.md', content: '' }, { path: 'skill.md', content: '' }] }]],
+    ['file and directory', [{ kind: 'skill', name: 'x', files: [{ path: 'SKILL.md', content: '' }, { path: 'a', content: '' }, { path: 'a/b', content: '' }] }]],
+    ['parent segment', [{ kind: 'skill', name: 'x', files: [{ path: 'SKILL.md', content: '' }, { path: '../escape', content: '' }] }]],
+    ['two context policies', [{ kind: 'context-policy', name: 'a', files: [{ path: 'policy.json', content: '{}' }] }, { kind: 'context-policy', name: 'b', files: [{ path: 'policy.json', content: '{}' }] }]],
+    ['a file over 1 MiB', [{ kind: 'skill', name: 'x', files: [{ path: 'SKILL.md', content: 'x'.repeat(1_048_577) }] }]],
   ])('rejects %s', (_label, components) => {
-    expect(() => buildManifest(components as never)).toThrow(CapabilityManifestError)
+    invalid(() => buildManifest(components as never))
   })
 
-  it.each(['/abs', 'C:/x', 'a\\b', 'a//b', './a', 'a/./b', 'a/..', 'con:x', 'a?b', 'trailing.', 'a/b ', ''])('rejects the path %j', path => {
-    expect(() => checkRelativePath(path)).toThrow(CapabilityManifestError)
+  it.each(['/abs', 'C:/x', 'a\\b', 'a//b', './a', 'a/./b', 'a/..', 'a?b', 'trailing.', 'a/b ', ''])('rejects the path %j', path => {
+    invalid(() => checkComponentPath(path))
   })
 
-  it('rejects unknown fields, a wrong format and a path that is not <type>/<name>', () => {
-    const good = JSON.parse(serializeManifest(buildManifest(sampleComponents()))) as { components: Record<string, unknown>[] }
-    expect(() => normalizeManifest({ ...good, extra: 1 })).toThrow(/unknown fields/)
-    expect(() => normalizeManifest({ ...good, format: 2 })).toThrow(/format/)
-    const moved = { format: 1, components: [{ ...good.components[0], path: 'elsewhere/x' }] }
-    expect(() => normalizeManifest(moved)).toThrow(/path must be/)
-    const badHash = { format: 1, components: [{ ...good.components[0], files: [{ path: 'a', sha256: 'XYZ', size: 1 }] }] }
-    expect(() => normalizeManifest(badHash)).toThrow(/sha256/)
+  it('rejects unknown fields and the round-1 field names', () => {
+    const good = JSON.parse(canonicalManifestText(buildManifest(sampleComponents()))) as Record<string, unknown>
+    invalid(() => checkManifest({ ...good, extra: 1 }))
+    invalid(() => checkManifest({ format: 1, components: [] }))
+    invalid(() => checkManifest({ formatVersion: 1, components: [{ type: 'skill', name: 'x', path: 'skill/x', files: [] }] }))
   })
 
   it('recognizes versions', () => {

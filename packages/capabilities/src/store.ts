@@ -20,21 +20,17 @@
 import { randomUUID } from 'node:crypto'
 import { lstat, mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { fsyncDirectory } from '@nexgent/kernel'
 import {
-  BASELINE_VERSION,
-  CapabilityManifestError,
-  checkRelativePath,
-  isBundleVersion,
+  canonicalManifestText,
+  componentDir,
+  fsyncDirectory,
   MANIFEST_FILE,
-  MANIFEST_FORMAT,
-  normalizeManifest,
-  serializeManifest,
-  sha256,
-  type CapabilityComponent,
-  type CapabilityComponentType,
+  NexgentError,
+  type CapabilityComponentKind,
+  type CapabilityComponentRef,
   type CapabilityManifest,
-} from './manifest.js'
+} from '@nexgent/kernel'
+import { BASELINE_VERSION, checkManifest, EMPTY_MANIFEST, isBundleVersion, sha256 } from './manifest.js'
 
 /** One file to store. */
 export interface BundleFileInput {
@@ -45,7 +41,7 @@ export interface BundleFileInput {
 
 /** One component to store. */
 export interface BundleComponentInput {
-  readonly type: CapabilityComponentType
+  readonly kind: CapabilityComponentKind
   readonly name: string
   readonly files: readonly BundleFileInput[]
 }
@@ -67,15 +63,18 @@ export type CapabilityIntegrityReason =
   | 'file-mismatch'
   | 'unexpected-entry'
 
-/** A stored bundle that fails verification; never loaded. */
-export class CapabilityIntegrityError extends Error {
+/** A stored bundle that fails verification (`session/corrupt`); never loaded. */
+export class CapabilityIntegrityError extends NexgentError {
   readonly version: string
   readonly reason: CapabilityIntegrityReason
   /** Bundle-relative path of the offending entry, when there is one. */
   readonly path: string | undefined
 
   constructor(version: string, reason: CapabilityIntegrityReason, message: string, path?: string, options?: { cause?: unknown }) {
-    super(`capability bundle ${version}: ${message}`, options)
+    super('session/corrupt', `capability bundle ${version}: ${message}`, {
+      ...(options?.cause === undefined ? {} : { cause: options.cause }),
+      details: { version, reason, ...(path === undefined ? {} : { path }) },
+    })
     this.name = 'CapabilityIntegrityError'
     this.version = version
     this.reason = reason
@@ -86,7 +85,7 @@ export class CapabilityIntegrityError extends Error {
 /** The empty bundle every project starts from. */
 export const BASELINE_BUNDLE: StoredBundle = Object.freeze({
   version: BASELINE_VERSION,
-  manifest: Object.freeze({ format: MANIFEST_FORMAT, components: Object.freeze([]) }) as CapabilityManifest,
+  manifest: EMPTY_MANIFEST,
   directory: null,
 })
 
@@ -102,28 +101,39 @@ function toBytes(content: string | Uint8Array): Uint8Array {
 
 /**
  * Build the normalized manifest for components without touching the disk.
- * @throws {@link CapabilityManifestError} for invalid names, paths or limits.
+ * @throws `config/invalid` for invalid names, paths or limits.
  */
 export function buildManifest(components: readonly BundleComponentInput[]): CapabilityManifest {
-  return normalizeManifest({
-    format: MANIFEST_FORMAT,
+  return checkManifest({
+    formatVersion: 1,
     components: components.map(component => ({
-      type: component.type,
+      kind: component.kind,
       name: component.name,
-      path: `${component.type}/${component.name}`,
       files: component.files.map(file => {
-        if (typeof file.path === 'string') checkRelativePath(file.path)
         const bytes = toBytes(file.content)
-        return { path: file.path, sha256: sha256(bytes), size: bytes.byteLength }
+        return { path: file.path, sha256: sha256(bytes), bytes: bytes.byteLength }
       }),
     })),
   })
 }
 
+/** Absolute directory of one component inside a bundle, candidate or draft root. */
+export function componentPath(root: string, component: CapabilityComponentRef): string {
+  return join(root, ...componentDir(component.kind, component.name).split('/'))
+}
+
 /** Absolute directory of one component of a stored (non-baseline) bundle. */
-export function componentDirectory(bundle: StoredBundle, component: Pick<CapabilityComponent, 'path'>): string {
-  if (bundle.directory === null) throw new Error('the baseline bundle has no component directories')
-  return join(bundle.directory, ...component.path.split('/'))
+export function componentDirectory(bundle: StoredBundle, component: CapabilityComponentRef): string {
+  if (bundle.directory === null) throw new NexgentError('internal', 'the baseline bundle has no component directories')
+  return componentPath(bundle.directory, component)
+}
+
+/** Read every file of one component of a verified bundle, as writer input. */
+export async function readComponentFiles(bundle: StoredBundle, component: CapabilityComponentRef): Promise<BundleFileInput[]> {
+  const entry = bundle.manifest.components.find(item => item.kind === component.kind && item.name === component.name)
+  if (entry === undefined) throw new NexgentError('internal', `bundle ${bundle.version} has no ${componentDir(component.kind, component.name)}`)
+  const directory = componentDirectory(bundle, component)
+  return Promise.all(entry.files.map(async file => ({ path: file.path, content: await readFile(join(directory, ...file.path.split('/'))) })))
 }
 
 async function writeDurably(path: string, bytes: Uint8Array): Promise<void> {
@@ -151,12 +161,12 @@ async function exists(path: string): Promise<boolean> {
  * Store a bundle once. Writing the same components again, from this or
  * another process, returns the existing version after verifying it.
  * @param capabilitiesDir - `.nexgent/capabilities`.
- * @throws {@link CapabilityManifestError} before anything is written when the input is invalid;
+ * @throws `config/invalid` before anything is written when the input is invalid;
  *   {@link CapabilityIntegrityError} when a bundle with this version exists but is damaged.
  */
 export async function writeBundle(capabilitiesDir: string, components: readonly BundleComponentInput[]): Promise<StoredBundle> {
   const manifest = buildManifest(components)
-  const serialized = serializeManifest(manifest)
+  const serialized = canonicalManifestText(manifest)
   const version = sha256(serialized)
   const destination = join(capabilitiesDir, version)
   if (await exists(destination)) return loadBundle(capabilitiesDir, version)
@@ -168,7 +178,7 @@ export async function writeBundle(capabilitiesDir: string, components: readonly 
     const directories = new Set<string>([staging])
     for (const component of components) {
       for (const file of component.files) {
-        const target = join(staging, component.type, component.name, ...file.path.split('/'))
+        const target = join(componentPath(staging, component), ...file.path.split('/'))
         await writeDurably(target, toBytes(file.content))
         directories.add(dirname(target))
       }
@@ -220,18 +230,19 @@ export async function loadBundle(capabilitiesDir: string, version: string): Prom
   }
   let manifest: CapabilityManifest
   try {
-    manifest = normalizeManifest(JSON.parse(raw))
+    manifest = checkManifest(JSON.parse(raw))
   } catch (error) {
-    const detail = error instanceof CapabilityManifestError || error instanceof SyntaxError ? error.message : String(error)
+    const detail = error instanceof Error ? error.message : String(error)
     throw new CapabilityIntegrityError(version, 'manifest', `invalid ${MANIFEST_FILE}: ${detail}`, MANIFEST_FILE, { cause: error })
   }
-  if (sha256(serializeManifest(manifest)) !== version) {
+  if (sha256(canonicalManifestText(manifest)) !== version) {
     throw new CapabilityIntegrityError(version, 'version-mismatch', `${MANIFEST_FILE} does not hash to the bundle version`, MANIFEST_FILE)
   }
 
-  const expected = new Map<string, { sha256: string; size: number }>()
+  const expected = new Map<string, { sha256: string; bytes: number }>()
   for (const component of manifest.components) {
-    for (const file of component.files) expected.set(`${component.path}/${file.path}`, file)
+    const base = componentDir(component.kind, component.name)
+    for (const file of component.files) expected.set(`${base}/${file.path}`, file)
   }
   const present: string[] = []
   await listEntries(directory, '', present)
@@ -247,7 +258,7 @@ export async function loadBundle(capabilitiesDir: string, version: string): Prom
     } catch (error) {
       throw new CapabilityIntegrityError(version, 'file-missing', `cannot read ${path}: ${(error as Error).message}`, path, { cause: error })
     }
-    if (bytes.byteLength !== file.size || sha256(bytes) !== file.sha256) {
+    if (bytes.byteLength !== file.bytes || sha256(bytes) !== file.sha256) {
       throw new CapabilityIntegrityError(version, 'file-mismatch', `${path} does not match the manifest`, path)
     }
   }

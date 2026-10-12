@@ -1,78 +1,68 @@
 # @nexgent/capabilities
 
-能力版本：一个项目的能力包按内容寻址存放、写成即不可变、加载前逐文件校验；采用历史是只追加的修订链（`adopt` / `rollback`），当前采用版本是链尾。
+能力版本：一个项目的能力包按内容寻址存放、写成即不可变、加载前逐文件校验；采用历史是只追加的修订链（`adopt` / `rollback`），当前采用版本是链尾。会话在草稿区写组件、只在本会话试用、用过后提交为候选；加载器把采用版本与本会话试用的组件交给技能、预设、工作流、上下文与 PTC。
 
-归属：步骤 4 W2「能力版本」（`docs/plan/step-4-work-partition.md`）。本包目前是第 1 轮（第一部分）：存储、校验、采用历史。草稿区、`capability_draft / try / propose`、加载器、各插件的来源入口、插件包审批在第 2 轮；门控（W3）与 kernel 注入（W1）不在本包。运行时依赖：Node 内置模块、`@nexgent/kernel`。`src/activation.ts` 移植自 PR #4 的 `runtime/packages/bundle/nexgent-app/src/architecture-activation.ts`（归档分支 `archive/python-host`），改动见文件头注。
-
-清单与修订的字段是本包的第 1 轮实现；步骤 4 契约（W0）合入后以 `packages/kernel/src/contracts/` 与 `docs/spec/data-formats.md` §`CapabilityBundle` 清单为准，本包随之对齐。
+归属：步骤 4 W2「能力版本」（`docs/plan/step-4-work-partition.md`）。格式以契约 `packages/kernel/src/contracts/capabilities.ts`、`step4-tools.ts` 与 `docs/spec/data-formats.md`、`docs/spec/permissions.md` 为准，本文件只说实现。门控（W3）与 kernel 注入（W1）不在本包。运行时依赖：`@nexgent/kernel`、`@nexgent/session`（schema 校验）、`@nexgent/preset`（预设解析）、`@nexgent/ptc`（函数模块的隔离进程）。`src/activation.ts` 移植自 PR #4 的 `runtime/packages/bundle/nexgent-app/src/architecture-activation.ts`（归档分支 `archive/python-host`），改动见文件头注。
 
 ## 目录
 
 ```text
 .nexgent/capabilities/
-├── <version>/                    一个能力包，<version> = 规范化清单的 SHA-256
+├── <version>/                         能力包，<version> = 规范化清单的 SHA-256
 │   ├── manifest.json
-│   └── <type>/<name>/<file>      组件文件，与清单一一对应
-├── activation/<n>.json           采用历史（修订 1, 2, …）
-└── .staging-<uuid>/              写入中的临时目录（崩溃残留会被忽略）
+│   └── <kind-dir>/<name>/<file>       functions、plugins、skills、context、presets、teams、architectures
+├── activation/<n>.json                采用历史
+├── decisions/<uuid>.json              采用、回滚的决定记录
+├── candidates/<uuid>/                 candidate.json 与提交的组件副本
+└── drafts/<sessionId>/                会话草稿区；.tried/<kind-dir>/<name>/<revision>/ 是试用时冻结的副本
 ```
 
-`baseline` 是空能力包（等于步骤 3 的行为），不落盘，始终可加载。
+`baseline` 是空能力包（等于步骤 3 的行为），不落盘，始终可加载。模型的文件工具读写整个 `.nexgent/capabilities/` 都被拒绝（`workspace` 的路径策略），只有本包的工具经宿主写草稿区。
 
-## 清单 `manifest.json`
+## 存储与采用历史
 
-```json
-{
-  "format": 1,
-  "components": [
-    {
-      "type": "skill",
-      "name": "summarize-orders",
-      "path": "skill/summarize-orders",
-      "files": [{ "path": "SKILL.md", "sha256": "<64 hex>", "size": 120 }]
-    }
-  ]
-}
-```
+- `writeBundle` 先在内存里按契约校验清单（`assertCapabilityManifest`、大小写冲突、文件与目录同名），再在 `.staging-<uuid>/` 写全部文件并 fsync，最后整体改名。版本已存在时只校验不重写。
+- `loadBundle` 每次重新校验：清单哈希等于目录名、每个文件大小与 SHA-256 相符、没有清单以外的条目。失败是 `CapabilityIntegrityError`（`session/corrupt`，`reason`：`missing`、`manifest`、`version-mismatch`、`file-missing`、`file-mismatch`、`unexpected-entry`）。
+- 修订按契约 `ActivationRevision` 写：`link` 独占发布、发布前比较链尾；每次采用或回滚先写决定记录，再发布修订（修订带 `decisionId`）。两个进程同时发布同一修订恰好一个成功。
+- 链在某个文件处损坏时停在最后一个有效修订，`problem` 指出文件与原因，不猜、不修复；此时不能再采用或回滚。
 
-- `type`：`function-module`、`plugin`、`skill`、`context-policy`、`preset`、`team-template`、`architecture`（计划 4.4 的四类组件：工具、技能、上下文策略、协作方式）。
-- `name`：`[a-z0-9][a-z0-9_-]*`，最长 64，同类型内唯一；`path` 固定为 `<type>/<name>`。
-- 文件路径相对组件目录，用 `/`，不允许空段、`.`、`..`、绝对路径、盘符、Windows 不能存的字符、以点或空格结尾的段；同一组件内不能有只差大小写的路径，也不能一个路径既是文件又是目录。
-- 规范化：组件按 `type`、`name` 排序，文件按 `path` 排序，字段顺序固定；版本 = 规范化后 `JSON.stringify` 的 SHA-256。来源（哪个会话、哪个候选）不进清单，内容相同的两个候选得到同一版本。
-- 上限：256 个组件、每组件 256 个文件、共 1024 个文件、共 64 MB。
+## 加载（`CapabilityService`，`ctx.capabilities`）
 
-## 写入与校验
+- `resolveVersion(recorded?)`：新会话取链尾；校验失败或组件不合格就写 `load-failure` 回滚（`trigger: 'load-failure'`），退回上一可用版本，直到 `baseline`。恢复会话传入记录的版本，仍可用就沿用，否则返回 `switched: { reason: 'unavailable' }` 供宿主写 `capability.version`。链损坏且链尾不可用时按 `baseline` 运行，不写任何修订。
+- `status()`：当前版本、修订号、组件与 `problem`（链损坏或校验失败时给用户看的一句话，对应 SDK `CapabilityVersionView.problem`）。
+- `bindSession` / `sessionVersion` / `components(sessionId, kind?)`：会话的组件 = 其版本的组件，被本会话试用的同名组件覆盖。其他会话看不到试用的组件。
+- `ctx.capabilityHost`（kernel 的步骤 4 接口，`packages/kernel/src/capability-hooks.ts`）：`current` 取链尾（必要时先回滚），`verify` 检查恢复会话记录的版本，`attach` 把版本的组件装进 kernel 交来的 agent 作用域（恢复的根会话同时装回它试用过的非插件草稿），`componentOf` 认出团队模板（按队友名）与工作流图（同一张图）的使用。
+- `attach(sessionId)`：把函数模块与插件的工具注册进该会话 agent 的作用域（随会话释放）；`capabilities` 上下文提供者在每轮开始调用它，没有 kernel 接入的宿主也能用。
+- `toolComponent(sessionId, tool)`：工具属于哪个组件与版本（供 `componentsUsed`）。
 
-- `writeBundle` 先在内存里建好清单（输入不合法则什么都不写），再在 `.staging-<uuid>/` 里写全部文件与清单并逐个 fsync，最后把整个目录一次改名为 `<version>/`。读者看不到写了一半的包。
-- 版本已存在时不重写，只校验已有的副本；校验不过报 `CapabilityIntegrityError`，不覆盖。多个进程同时写同一内容，只有一个改名成功，其余校验对方的结果后返回同一版本。
-- `loadBundle` 每次都重新校验：清单能解析且合格、清单哈希等于目录名、每个文件大小与 SHA-256 相符、目录里没有清单以外的条目（多出的文件、符号链接都算）。失败原因 `reason`：`missing`、`manifest`、`version-mismatch`、`file-missing`、`file-mismatch`、`unexpected-entry`。
+各包的来源入口（只加入口，不改别的行为）：
 
-## 采用历史 `activation/<n>.json`
+| 包 | 入口 | 次序（同名时） |
+| --- | --- | --- |
+| `@nexgent/skill` | 技能列表与 `load_skill` 按会话合并能力包技能；注册 `skill` 组件校验 | 试用 > 项目 > 采用 > 用户 > 内置 |
+| `@nexgent/preset`（`delegate`、`spawn_teammate`、工作流成员） | `sessionPresetRegistry(root, sessionId, lookup)` | 试用 > 项目 > 采用 > 内置 |
+| `@nexgent/workflow` | 注册 `architecture` 组件校验；图以 `# Learned collaboration` 列给模型，由模型作为 `graph` 传入 | — |
+| `@nexgent/context` | 压缩器 `setSessionOverride`：上下文策略的 `compaction` 只作用于该会话 | — |
+| `@nexgent/ptc` | 函数模块的每次调用在独立 PTC 进程执行 | — |
 
-```json
-{ "format": 1, "revision": 2, "previous": "<sha256 of 1.json>", "from": "<version>", "version": "<version>",
-  "type": "adopt", "evidence": { }, "committedAt": "2026-10-12T03:00:00.000Z" }
-```
+上下文策略的 `instructions` 与 `personaSuffix` 以 `# Learned practices` 输出，团队模板以 `# Team templates` 输出。
 
-- `adopt`：只能采用已存储的包（不能是 `baseline`，不能是当前版本）；`CapabilityStore.adopt` 先校验包再发布。
-- `rollback`：回到最近一次仍有效的采用之前的版本（采用压栈、回滚出栈）；`baseline` 在用时不能再回滚。回滚只追加修订，不删除任何版本。
-- 每次读取都校验整条链：编号连续、`previous` 等于上一修订原始字节的 SHA-256、`from` 等于当时的版本、回滚目标正确。任何一处不符报 `CapabilityActivationError`，不退回到某个“看起来对”的状态。
-- 发布：临时文件写入并 fsync，`link` 到 `<n>.json`（名字已存在则失败），再 fsync 目录；发布前比较调用方观察到的链尾与当前链尾（compare-and-publish）。两个进程同时发布同一修订，恰好一个成功，另一个得到 `null`。
+## 三个工具
 
-## Public API
+- `capability_draft`：校验全部输入（路径、上限、种类）后才写；返回修订号 = 本会话该组件的第几次草稿。
+- `capability_try`：校验草稿（契约 schema、名字一致、入口文件存在、已注册的种类校验），冻结为该修订，加载进本会话。插件先问用户（`risk: high`，只有“本次允许”），拒绝时不导入、不执行任何代码；加载失败时本会话保留试用前的状态。
+- `capability_propose`：每个组件在最近一次试用之后必须有一次成功使用（函数或插件的工具调用、`load_skill`、带该预设的 `delegate` / `spawn_teammate` / 工作流节点、`spawn_teammate`、带图的 `workflow`；上下文策略要求试用之后有一轮正常结束），否则拒绝并列出缺什么。通过后写候选包与 `candidates/<id>/`。
+- 三个工具都拒绝成员调用。
 
-| Export | What it does |
-| --- | --- |
-| `CapabilityStore(capabilitiesDir, { now? })` | 一个项目的能力版本：`write`、`load`、`versions`、`activation`、`history`、`adopt(version, evidence, observed?)`、`rollback(evidence, observed?)`、`resolveAdopted()` |
-| `resolveAdopted()` | 取链尾并校验；校验失败就写 `rollback`（`evidence.trigger: 'load-failure'`，带 `failedVersion`、`reason`、`path`），再试上一版本，直到 `baseline`；返回 `{ activation, bundle, rollbacks }` |
-| `writeBundle`、`loadBundle`、`listBundleVersions`、`buildManifest`、`componentDirectory`、`BASELINE_BUNDLE` | 存储层 |
-| `readActivation`、`readActivationChain`、`commitActivation`、`BASELINE_ACTIVATION` | 采用历史 |
-| `normalizeManifest`、`serializeManifest`、`manifestVersion`、`checkRelativePath`、`isBundleVersion`、`isCapabilityVersion` | 清单 |
-| `CapabilityIntegrityError`、`CapabilityActivationError`、`CapabilityManifestError` | 错误；契约加入 `capability/*` 错误码之前用这三个类区分 |
+## 函数模块与插件的执行边界
+
+- 函数模块：工具名 `cap_<module>_<function>`，effects `['execute', ...声明]`，`selfSandboxed`。每次调用起一个 PTC 进程（空环境变量、Node 权限模型、时限与输出上限），模块源码由宿主读出后以 `data:` URL 导入；函数收到 `(input, host)`，`host` 是 `run_code` 的项目函数，按调用会话的沙箱检查，声明 `write` 才给写函数。模块须是单个自包含 `.mjs`。
+- 插件：在宿主进程内以 Cordis 插件加载到该会话的作用域，卸载即释放；声明的工具名不能与会话已有工具重名。
 
 ## Known Limitations and Deferred Work
 
-- 采用历史链本身损坏时 `resolveAdopted` 抛错，不自动修复；第 2 轮加载器决定怎样提示用户、是否退回 `baseline` 运行。
-- 能力包目录不设只读属性，完整性只靠加载时校验。
-- Windows 上的硬链接发布与目录改名竞争还没有实跑（测试平台无关，等手动 Windows 工作流）；改名失败时以“目标是否已存在”判断是否是并发写入，不依赖具体错误码。
-- 候选、试验回执、决定记录（`candidates/`、`trials/`、`decisions/`）与试验额度属于 W3 与第 2 轮。
+- SDK profile 还没有 `@nexgent/capabilities` 一行（归 W4），所以 SDK、CLI、桌面里还看不到三个工具。
+- 契约 `functionToolName` 允许带横线与大写的名字（如 `cap_order-summary_summarizeOrders`），而 kernel 的工具名规则是 `^[a-z][a-z0-9_]*$`，这种函数模块现在会在注册时被拒；等契约或 kernel 统一。
+- 契约 `SkillSource` 没有能力包来源，能力包技能标为 `project`；`workflow` 工具不能按名字引用已采用的图；`personaSuffix` 输出在 `# Learned practices` 节，没有接到人设段落。
+- 恢复的会话不会自动重新加载试用过的插件（重新加载要再问一次用户），需要再次 `capability_try`。
+- 能力包目录不设只读属性，完整性只靠加载时校验；Windows 上的硬链接发布与目录改名竞争还没有实跑。
