@@ -23,6 +23,7 @@ import {
   type TeamTemplateSpec,
 } from '@nexgent/kernel'
 import { parsePresetFile } from '@nexgent/preset'
+import { componentFormat } from './formats.js'
 import { validateCapabilityFile, type CapabilityFileKind } from '@nexgent/session'
 
 /** A component's files in memory, by component-relative path. */
@@ -58,8 +59,16 @@ const SCHEMA_KIND: Partial<Record<CapabilityComponentKind, CapabilityFileKind>> 
 
 const DEFAULT_ENTRY = 'index.mjs'
 
+/** Schema problems named in one error; the rest are counted. */
+const MAX_LISTED_ISSUES = 10
+
 function invalid(component: CapabilityComponentRef, message: string): never {
   throw new NexgentError('tool/invalid-input', `${componentDir(component.kind, component.name)}: ${message}`)
+}
+
+/** {@link invalid} for a problem with the entry file's format: adds the expected format and a minimal example. */
+function invalidFormat(component: CapabilityComponentRef, message: string): never {
+  return invalid(component, `${message}. Expected: ${componentFormat(component.kind)}`)
 }
 
 function text(files: ComponentFiles, path: string): string | undefined {
@@ -70,11 +79,11 @@ function text(files: ComponentFiles, path: string): string | undefined {
 function parseEntry(component: CapabilityComponentRef, files: ComponentFiles): unknown {
   const entryFile = COMPONENT_ENTRY_FILES[component.kind]
   const raw = text(files, entryFile)
-  if (raw === undefined) invalid(component, `missing entry file ${entryFile}`)
+  if (raw === undefined) invalidFormat(component, `missing entry file ${entryFile}`)
   try {
     return JSON.parse(raw)
   } catch (error) {
-    return invalid(component, `${entryFile} is not valid JSON: ${(error as Error).message}`)
+    return invalidFormat(component, `${entryFile} is not valid JSON: ${(error as Error).message}`)
   }
 }
 
@@ -92,14 +101,18 @@ function moduleEntry(component: CapabilityComponentRef, files: ComponentFiles, e
 export async function validateComponent(component: CapabilityComponentRef, files: ComponentFiles, directory: string,
   validators: ReadonlyMap<CapabilityComponentKind, ComponentValidator> = new Map()): Promise<ComponentSpec> {
   const entryFile = COMPONENT_ENTRY_FILES[component.kind]
-  if (!files.has(entryFile)) invalid(component, `missing entry file ${entryFile}`)
+  if (!files.has(entryFile)) invalidFormat(component, `missing entry file ${entryFile}`)
   if (files.size > CAPABILITY_LIMITS.maxFilesPerComponent) invalid(component, `more than ${CAPABILITY_LIMITS.maxFilesPerComponent} files`)
   let result: ComponentSpec
   const schemaKind = SCHEMA_KIND[component.kind]
   if (schemaKind !== undefined) {
     const value = parseEntry(component, files)
     const issues = validateCapabilityFile(schemaKind, value)
-    if (issues.length > 0) invalid(component, `${entryFile}: ${issues[0]!.path} ${issues[0]!.message}`)
+    if (issues.length > 0) {
+      const listed = issues.slice(0, MAX_LISTED_ISSUES).map(issue => `${issue.path} ${issue.message}`)
+      if (issues.length > MAX_LISTED_ISSUES) listed.push(`and ${issues.length - MAX_LISTED_ISSUES} more`)
+      invalidFormat(component, `${entryFile} does not match the format: ${listed.join('; ')}`)
+    }
     const spec = value as { readonly name: string }
     if (spec.name !== component.name) invalid(component, `${entryFile} name "${spec.name}" must equal the component name`)
     switch (component.kind) {
@@ -145,7 +158,7 @@ export async function validateComponent(component: CapabilityComponentRef, files
     try {
       parsePresetFile(text(files, entryFile)!, component.name)
     } catch (error) {
-      invalid(component, (error as Error).message)
+      invalidFormat(component, (error as Error).message)
     }
     result = { kind: 'preset' }
   } else {

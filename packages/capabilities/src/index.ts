@@ -57,6 +57,7 @@ export {
 export { validateComponent, type ComponentFiles, type ComponentSpec, type ComponentValidationInput, type ComponentValidator } from './components.js'
 export { applyDraft, draftDirectory, draftRoot, fileEntries, freezeDraft, readComponentDirectory, triedDirectory, type DraftChange } from './drafts.js'
 export { CANDIDATE_FILE, CANDIDATES_DIR, listCandidates, readCandidate, writeCandidate, type CandidateInput, type ProposedComponent } from './candidates.js'
+export { COMPONENT_EXAMPLES, componentFormat } from './formats.js'
 export { findUseProof, latestTry } from './proofs.js'
 export { functionModuleTools, type FunctionModuleTools } from './function-tools.js'
 export {

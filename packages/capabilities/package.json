@@ -30,6 +30,7 @@
     "@nexgent/context": "workspace:*",
     "@nexgent/skill": "workspace:*",
     "@nexgent/test-support": "workspace:*",
+    "@nexgent/workflow": "workspace:*",
     "@nexgent/workspace": "workspace:*"
   }
 }
