@@ -58,6 +58,8 @@ export class GateHost {
   readonly #store: CapabilityStore
   readonly #config: GateHostConfig
   readonly #started = new Map<string, StartedGate>()
+  /** Candidates whose gate process has not exited yet. */
+  readonly #running = new Set<string>()
   #watch: Promise<unknown> = Promise.resolve()
 
   constructor(ctx: Context, layout: WorkspaceLayout, store: CapabilityStore, config: GateHostConfig = {}) {
@@ -67,7 +69,7 @@ export class GateHost {
     this.#config = config
   }
 
-  /** Gate processes this host started, by candidate id. */
+  /** Gate processes this host started, by candidate id (the latest per candidate). */
   get started(): ReadonlyMap<string, StartedGate> {
     return this.#started
   }
@@ -131,7 +133,7 @@ export class GateHost {
     const decided = new Set((await this.#store.decisions()).flatMap(decision => (decision.candidateId === undefined ? [] : [decision.candidateId])))
     const started: StartedGate[] = []
     for (const candidate of await listCandidates(this.#store.directory)) {
-      if (candidate.sessionId !== sessionId || decided.has(candidate.id) || this.#started.has(candidate.id)) continue
+      if (candidate.sessionId !== sessionId || decided.has(candidate.id) || this.#running.has(candidate.id)) continue
       if (await wasAttempted(this.#store.directory, candidate.id)) continue
       started.push(this.start(candidate.id))
     }
@@ -140,12 +142,14 @@ export class GateHost {
 
   /**
    * Start the gate process for one candidate (no checks: the gate itself
-   * refuses a candidate that was tried or decided).
+   * refuses a candidate that was tried or decided). While an earlier process
+   * for it still runs, that one is returned; once it has exited (say, it
+   * found too little history and waited) a new one is started.
    * @throws `internal` when no trial entry is configured.
    */
   start(candidateId: string): StartedGate {
     const existing = this.#started.get(candidateId)
-    if (existing !== undefined) return existing
+    if (existing !== undefined && this.#running.has(candidateId)) return existing
     const entry = this.#config.entry
     if (entry === undefined) throw new Error('no trial entry is configured for @nexgent/capabilities')
     const directory = join(this.#store.directory, TRIALS_DIR)
@@ -171,6 +175,10 @@ export class GateHost {
     child.unref()
     const started: StartedGate = { candidateId, pid: child.pid, exited }
     this.#started.set(candidateId, started)
+    this.#running.add(candidateId)
+    void exited.then(() => {
+      if (this.#started.get(candidateId) === started) this.#running.delete(candidateId)
+    })
     return started
   }
 
@@ -187,7 +195,7 @@ export class GateHost {
     const candidate = (await listCandidates(this.#store.directory)).find(item => item.id === candidateId)
     if (candidate === undefined) throw new NexgentError('tool/invalid-input', `no candidate ${candidateId}`)
     if ((await this.#store.decisions()).some(decision => decision.candidateId === candidateId)) throw new NexgentError('tool/invalid-input', `candidate ${candidateId} already has a decision`)
-    if (!this.#started.has(candidateId) && await wasAttempted(this.#store.directory, candidateId)) throw new NexgentError('tool/invalid-input', `candidate ${candidateId} was tried before; a candidate is tried once`)
+    if (!this.#running.has(candidateId) && await wasAttempted(this.#store.directory, candidateId)) throw new NexgentError('tool/invalid-input', `candidate ${candidateId} was tried before; a candidate is tried once`)
     const settings = await this.#settings()
     const set = buildReplaySet(await listReplayCases(this.#layout), candidate.taskId, { selection: settings.selectionCases, guard: settings.guardCases })
     if (set.status === 'waiting') throw new NexgentError('tool/invalid-input', `the gate cannot run yet: ${set.detail}`)

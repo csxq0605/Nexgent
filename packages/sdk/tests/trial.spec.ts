@@ -133,65 +133,74 @@ beforeAll(async () => {
   })
 })
 
+/** A project app over the scripted model server, with the real capabilities plugin and its gate captured. */
+async function gateSdk() {
+  const base = await tempDir('nexgent-trial-')
+  const home = nodePath.join(base, 'home')
+  const root = nodePath.join(base, 'project')
+  await mkdir(home)
+  await mkdir(root)
+  await writeFile(nodePath.join(root, 'orders.csv'), 'region,amount\nnorth,1\nsouth,2\n')
+
+  const model = new Model()
+  const server: ScriptedModelServer = await scriptedModelServer({ script: Array.from({ length: 1_000 }, () => (body: Body) => model.respond(body)) })
+  // The gate and replay processes inherit this process's environment: only the fake key and the local server.
+  const saved = { key: process.env.NEXGENT_API_KEY, anthropic: process.env.ANTHROPIC_API_KEY, url: process.env.NEXGENT_API_BASE_URL }
+  process.env.NEXGENT_API_KEY = KEY
+  delete process.env.ANTHROPIC_API_KEY
+  process.env.NEXGENT_API_BASE_URL = server.baseUrl
+  restoreEnv = () => {
+    for (const [name, value] of [['NEXGENT_API_KEY', saved.key], ['ANTHROPIC_API_KEY', saved.anthropic], ['NEXGENT_API_BASE_URL', saved.url]] as const) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+
+  // The real plugin, with the built entry (vitest runs the SDK from source) and the gate captured.
+  let captured: Context | undefined
+  const gateHost = (): GateHost | undefined => (captured === undefined ? undefined : gateOf(captured))
+  const capabilities = {
+    ...CapabilitiesPlugin,
+    apply(ctx: Context, config: CapabilitiesPluginConfig = {}) {
+      CapabilitiesPlugin.apply(ctx, { ...config, trial: { ...config.trial, entry: DIST_ENTRY } })
+      captured = ctx
+    },
+  } as Plugin
+  const env = { NEXGENT_HOME: home, NEXGENT_API_KEY: KEY, NEXGENT_API_BASE_URL: server.baseUrl }
+  const sdk: LocalNexgentSdk = createSdk({
+    appVersion: '0.0.0-test',
+    env,
+    home,
+    approvalResponder: async request => ({ id: request.id, decision: 'allow', scope: 'once', decidedBy: 'user' }),
+    registry: { '@nexgent/capabilities': capabilities },
+  })
+  const project = await sdk.call('projects.open', { root, create: true })
+  const layout = resolveWorkspaceLayout(project.root)
+  const store = new CapabilityStore(layout.capabilities)
+  const run = async (text: string) => {
+    const session = await sdk.call('sessions.create', { projectId: project.projectId })
+    const started = await sdk.startTurn({ projectId: project.projectId, sessionId: session.sessionId, text })
+    expect((await started.done).reason).toEqual({ kind: 'completed' })
+    return session.sessionId
+  }
+  const settle = async (candidateId: string) => {
+    model.phase = 'trial'
+    // The gate starts right after the turn ends (the plugin follows the agent's turn.end).
+    for (let i = 0; i < 100 && gateHost()?.started.has(candidateId) !== true; i += 1) await new Promise(resolve => setTimeout(resolve, 20))
+    await gateHost()!.settled()
+    model.phase = 'main'
+  }
+  const dispose = async () => {
+    await sdk.dispose()
+    await server.close()
+  }
+  return { sdk, project, layout, store, run, settle, gateHost, model, server, root, dispose }
+}
+
 describe('the capability gate through the SDK', () => {
   it('adopts a better candidate, rejects a worse one, and rolls back a regression', { timeout: 300_000 }, async () => {
-    const base = await tempDir('nexgent-trial-')
-    const home = nodePath.join(base, 'home')
-    const root = nodePath.join(base, 'project')
-    await mkdir(home)
-    await mkdir(root)
-    await writeFile(nodePath.join(root, 'orders.csv'), 'region,amount\nnorth,1\nsouth,2\n')
-
-    const model = new Model()
-    const server: ScriptedModelServer = await scriptedModelServer({ script: Array.from({ length: 1_000 }, () => (body: Body) => model.respond(body)) })
-    // The gate and replay processes inherit this process's environment: only the fake key and the local server.
-    const saved = { key: process.env.NEXGENT_API_KEY, anthropic: process.env.ANTHROPIC_API_KEY, url: process.env.NEXGENT_API_BASE_URL }
-    process.env.NEXGENT_API_KEY = KEY
-    delete process.env.ANTHROPIC_API_KEY
-    process.env.NEXGENT_API_BASE_URL = server.baseUrl
-    restoreEnv = () => {
-      for (const [name, value] of [['NEXGENT_API_KEY', saved.key], ['ANTHROPIC_API_KEY', saved.anthropic], ['NEXGENT_API_BASE_URL', saved.url]] as const) {
-        if (value === undefined) delete process.env[name]
-        else process.env[name] = value
-      }
-    }
-
-    // The real plugin, with the built entry (vitest runs the SDK from source) and the gate captured.
-    let captured: Context | undefined
-    const gateHost = (): GateHost | undefined => (captured === undefined ? undefined : gateOf(captured))
-    const capabilities = {
-      ...CapabilitiesPlugin,
-      apply(ctx: Context, config: CapabilitiesPluginConfig = {}) {
-        CapabilitiesPlugin.apply(ctx, { ...config, trial: { ...config.trial, entry: DIST_ENTRY } })
-        captured = ctx
-      },
-    } as Plugin
-    const env = { NEXGENT_HOME: home, NEXGENT_API_KEY: KEY, NEXGENT_API_BASE_URL: server.baseUrl }
-    const sdk: LocalNexgentSdk = createSdk({
-      appVersion: '0.0.0-test',
-      env,
-      home,
-      approvalResponder: async request => ({ id: request.id, decision: 'allow', scope: 'once', decidedBy: 'user' }),
-      registry: { '@nexgent/capabilities': capabilities },
-    })
+    const { sdk, project, layout, store, run, settle, gateHost, model, server, root, dispose } = await gateSdk()
     try {
-      const project = await sdk.call('projects.open', { root, create: true })
-      const layout = resolveWorkspaceLayout(project.root)
-      const store = new CapabilityStore(layout.capabilities)
-      const run = async (text: string) => {
-        const session = await sdk.call('sessions.create', { projectId: project.projectId })
-        const started = await sdk.startTurn({ projectId: project.projectId, sessionId: session.sessionId, text })
-        expect((await started.done).reason).toEqual({ kind: 'completed' })
-        return session.sessionId
-      }
-      const settle = async (candidateId: string) => {
-        model.phase = 'trial'
-        // The gate starts right after the turn ends (the plugin follows the agent's turn.end).
-        for (let i = 0; i < 100 && gateHost()?.started.has(candidateId) !== true; i += 1) await new Promise(resolve => setTimeout(resolve, 20))
-        await gateHost()!.settled()
-        model.phase = 'main'
-      }
-
       // 1. History, then the proposing task.
       await run(TASKS.june.text)
       await run(TASKS.lookup.text)
@@ -255,8 +264,39 @@ describe('the capability gate through the SDK', () => {
       const files = (await readdir(layout.dataDir, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile())
       for (const file of files) expect(await readFile(nodePath.join(file.parentPath, file.name), 'utf8')).not.toContain(KEY)
     } finally {
-      await sdk.dispose()
-      await server.close()
+      await dispose()
+    }
+  })
+
+  it('starts the gate again on capabilities.trial after an automatic gate waited for history, without a restart', { timeout: 300_000 }, async () => {
+    const { sdk, project, layout, store, run, settle, gateHost, model, dispose } = await gateSdk()
+    try {
+      // The proposing task comes first: the automatic gate finds no history, waits and exits.
+      await run(TASKS.july.text)
+      const [candidate] = await listCandidates(layout.capabilities)
+      await settle(candidate!.id)
+      const waited = gateHost()!.started.get(candidate!.id)!
+      expect(await waited.exited).toBe(0)
+      expect(await listTrials(layout.capabilities, candidate!.id)).toEqual([])
+      expect(await readFile(nodePath.join(layout.capabilities, 'trials', `${candidate!.id}.log`), 'utf8')).toContain('"status":"waiting"')
+      await expect(sdk.call('capabilities.trial', { projectId: project.projectId, candidateId: candidate!.id })).rejects.toMatchObject({ code: 'tool/invalid-input', message: expect.stringContaining('the gate cannot run yet') })
+
+      // History arrives in the same app; capabilities.trial now starts a new gate process.
+      await run(TASKS.june.text)
+      await run(TASKS.lookup.text)
+      model.phase = 'trial'
+      const view = await sdk.call('capabilities.trial', { projectId: project.projectId, candidateId: candidate!.id })
+      expect(['trialing', 'adopted']).toContain(view.status)
+      const restarted = gateHost()!.started.get(candidate!.id)!
+      expect(restarted).not.toBe(waited)
+      await settle(candidate!.id)
+      expect(await restarted.exited).toBe(0)
+      const [trial] = await listTrials(layout.capabilities, candidate!.id)
+      expect(trial!.end!.verdict).toMatchObject({ outcome: 'adopt', reason: 'quality-up' })
+      expect((await sdk.call('capabilities.show', { projectId: project.projectId, candidateId: candidate!.id })).view.status).toBe('adopted')
+      expect((await store.activation()).version).toBe(candidate!.version)
+    } finally {
+      await dispose()
     }
   })
 })
