@@ -15,12 +15,12 @@
     "script": "scripts/accept-step4.mjs"
   },
   "date": {
-    "acceptedAt": "2026-10-12T16:47:39.903Z",
+    "acceptedAt": "2026-10-12T17:54:29.454Z",
     "commitRange": null
   },
   "source": {
     "branch": "claude/test-ci-ns3s7s",
-    "commit": "8899809fb9609f630aaa8e2e31bd76af73459f8c",
+    "commit": "2043e91926a997612ab4ba2a4f37bd5be9de9911",
     "pullRequests": []
   },
   "environment": {
@@ -32,7 +32,7 @@
   },
   "scripted": {
     "command": "node scripts/accept-step4.mjs --layer headless,desktop",
-    "ciRunUrl": "https://github.com/csxq0605/Nexgent/actions/runs/38279781537",
+    "ciRunUrl": "https://github.com/csxq0605/Nexgent/actions/runs/38287245347",
     "result": "pass",
     "summaryFile": null,
     "simulated": "scripted Claude Messages API model server with per-session routing; checklist H01–H19 / D01–D18",
@@ -56,7 +56,7 @@
     "missing": []
   },
   "raw": {
-    "location": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\nexgent-accept-step4-LX6o5O",
+    "location": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\nexgent-accept-step4-IGcRGo",
     "sha256": null,
     "summaryDir": null,
     "manifest": []
@@ -88,7 +88,7 @@
       "name": "候选提交：成功调用过的组件提交成功；从未成功调用的组件提交被拒",
       "passed": true,
       "status": "passed",
-      "detail": "the used components became candidate 4aad2a44-72a4-487f-bb3a-c6f0d8f99717; the unused skill was refused"
+      "detail": "the used components became candidate 10e30564-af44-4e32-b2d6-14beaf512fd1; the unused skill was refused"
     },
     {
       "id": "H05",
@@ -137,7 +137,7 @@
       "name": "隔离运行：试验期间真实项目的文件、会话与成果不变；试验请求带 trialId 与 arm",
       "passed": true,
       "status": "passed",
-      "detail": "the trial left the project's files and sessions untouched; its 36 requests carry trialId e128612b-67c and their arm"
+      "detail": "the trial left the project's files and sessions untouched; its 36 requests carry trialId 9355cf5f-fae and their arm"
     },
     {
       "id": "H12",
@@ -172,7 +172,7 @@
       "name": "恢复：试验进程被强杀后，下次启动标为中断，不重复采用，原版本可用",
       "passed": true,
       "status": "passed",
-      "detail": "killing the gate left trial bfbeab0d-65c open; the next start marked it interrupted, did not rerun it, and 6c77d75a0c1a kept working"
+      "detail": "killing the gate left trial 2cb174b4-67b open; the next start marked it interrupted, did not rerun it, and 6c77d75a0c1a kept working"
     },
     {
       "id": "H17",
@@ -213,7 +213,7 @@
     {
       "name": "中期检查点 4：任务结束时 task.outcome.checks 有宿主跑出的检查，任务开始时有快照",
       "passed": true,
-      "detail": "passed: task 16a3f8b2-aeeb-431d-bc3e-dcab9e49ea9d: snapshot at start, 3 checks at the end"
+      "detail": "passed: task 131ed92d-1ab7-482a-b2e2-5ae3319ad858: snapshot at start, 3 checks at the end"
     },
     {
       "id": "D01",
