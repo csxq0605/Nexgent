@@ -5,6 +5,7 @@
 import { NexgentError } from './errors.js'
 import type { JsonObject, JsonValue } from './json.js'
 import type { ApprovalGrant } from './approvals.js'
+import { resolveCapabilitiesConfig, type CapabilitiesConfig, type CapabilitiesConfigInput } from './capabilities.js'
 import type { Effort, ThinkingMode } from './llm.js'
 import type { SandboxMode } from './workspace.js'
 
@@ -43,7 +44,16 @@ export interface ProjectConfig {
   readonly extraReadRoots: readonly string[]
   /** Whether feedback-triggered improvement runs (step 5); default `false`. */
   readonly autoImprove: boolean
+  /** Step 4: gate and rollback settings (`DEFAULT_CAPABILITIES_CONFIG`). Changing it always needs approval. */
+  readonly capabilities: CapabilitiesConfig
 }
+
+/**
+ * Top-level config fields whose change always needs approval, whatever the
+ * sandbox mode (`permissions.md` "始终审批"): a model must not widen its own
+ * permissions, budgets or gate.
+ */
+export const GUARDED_PROJECT_CONFIG_FIELDS = ['approvals', 'costCaps', 'sandboxMode', 'capabilities'] as const
 
 /** The defaults applied over a missing or partial config file. */
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
@@ -57,10 +67,15 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
   approvals: Object.freeze([]),
   extraReadRoots: Object.freeze([]),
   autoImprove: false,
+  capabilities: resolveCapabilitiesConfig(),
 }) as ProjectConfig
 
 /** A partial config as read from disk, before defaults. */
-export type ProjectConfigInput = Partial<Omit<ProjectConfig, 'version'>> & { readonly version?: 1 }
+export type ProjectConfigInput = Partial<Omit<ProjectConfig, 'version' | 'capabilities'>> & {
+  readonly version?: 1
+  /** Validated with `assertCapabilitiesConfig`; missing fields take their defaults. */
+  readonly capabilities?: CapabilitiesConfigInput
+}
 
 /**
  * Fill a partial config with {@link DEFAULT_PROJECT_CONFIG}. Pure; schema
@@ -78,6 +93,7 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
     approvals: input.approvals ?? DEFAULT_PROJECT_CONFIG.approvals,
     extraReadRoots: input.extraReadRoots ?? DEFAULT_PROJECT_CONFIG.extraReadRoots,
     autoImprove: input.autoImprove ?? DEFAULT_PROJECT_CONFIG.autoImprove,
+    capabilities: resolveCapabilitiesConfig(input.capabilities),
   }
 }
 

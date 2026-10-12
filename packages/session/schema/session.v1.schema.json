@@ -87,6 +87,18 @@
     },
     {
       "$ref": "#/$defs/workflowEndRecord"
+    },
+    {
+      "$ref": "#/$defs/capabilityVersionRecord"
+    },
+    {
+      "$ref": "#/$defs/capabilityDraftRecord"
+    },
+    {
+      "$ref": "#/$defs/capabilityTryRecord"
+    },
+    {
+      "$ref": "#/$defs/capabilityProposeRecord"
     }
   ],
   "$defs": {
@@ -947,6 +959,9 @@
         },
         "member": {
           "$ref": "#/$defs/memberIdentity"
+        },
+        "capabilityVersion": {
+          "$ref": "#/$defs/capabilityVersion"
         }
       }
     },
@@ -1020,6 +1035,9 @@
         },
         "member": {
           "$ref": "#/$defs/memberIdentity"
+        },
+        "capabilityVersion": {
+          "$ref": "#/$defs/capabilityVersion"
         }
       }
     },
@@ -2092,6 +2110,283 @@
         },
         "error": {
           "$ref": "#/$defs/errorInfo"
+        }
+      }
+    },
+    "capabilityVersion": {
+      "type": "string",
+      "pattern": "^(?:baseline|[a-f0-9]{64})$"
+    },
+    "componentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "function-module",
+            "plugin",
+            "skill",
+            "context-policy",
+            "preset",
+            "team-template",
+            "architecture"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        }
+      }
+    },
+    "capabilityFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "bytes"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?![./])(?!.*(?:^|\\/)\\.{1,2}(?:\\/|$))(?!.*\\/\\/)[^\\\\:]+(?<!\\/)$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "capabilityVersionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "version",
+        "previous",
+        "reason"
+      ],
+      "properties": {
+        "type": {
+          "const": "capability.version"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "version": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "previous": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "reason": {
+          "enum": [
+            "unavailable",
+            "load-failure"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    },
+    "capabilityDraftRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "step",
+        "toolCallId",
+        "component",
+        "files",
+        "revision"
+      ],
+      "properties": {
+        "type": {
+          "const": "capability.draft"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "step": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "toolCallId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "component": {
+          "$ref": "#/$defs/componentRef"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/capabilityFile"
+          }
+        },
+        "revision": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "capabilityTryRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "step",
+        "toolCallId",
+        "component",
+        "revision"
+      ],
+      "properties": {
+        "type": {
+          "const": "capability.try"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "step": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "toolCallId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "component": {
+          "$ref": "#/$defs/componentRef"
+        },
+        "revision": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "capabilityProposeRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "step",
+        "toolCallId",
+        "candidateId",
+        "proofs"
+      ],
+      "properties": {
+        "type": {
+          "const": "capability.propose"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "step": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "toolCallId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "candidateId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "proofs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "name",
+              "turn",
+              "toolCallId"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "function-module",
+                  "plugin",
+                  "skill",
+                  "context-policy",
+                  "preset",
+                  "team-template",
+                  "architecture"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              },
+              "turn": {
+                "$ref": "#/$defs/positiveInteger"
+              },
+              "toolCallId": {
+                "$ref": "#/$defs/nonEmptyString"
+              }
+            }
+          }
         }
       }
     }

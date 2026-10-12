@@ -161,6 +161,8 @@ describe('write_file / read_file across modes', () => {
     expect(await tool('write_file').preflight({ path: '.nexgent/config.json', content: '{"model":"b"}' }, ctx)).toEqual({ action: 'allow' })
     expect(await tool('write_file').preflight({ path: '.nexgent/config.json', content: '{"sandboxMode":"read-only"}' }, ctx))
       .toMatchObject({ action: 'ask', approval: { risk: 'high', options: ['once'] } })
+    expect(await tool('write_file').preflight({ path: '.nexgent/config.json', content: '{"capabilities":{"autoTrial":false}}' }, ctx))
+      .toMatchObject({ action: 'ask', approval: { risk: 'high', options: ['once'] } })
   })
 
   it('redacts secrets in read output', async () => {

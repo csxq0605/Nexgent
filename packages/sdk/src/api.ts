@@ -19,9 +19,24 @@
  *   other session: their events carry `parentSessionId`, `turns.cancel` on
  *   the parent cancels them (cause `parent`), and their approvals arrive as
  *   ordinary `approval.request` events whose request names the member.
+ * - Step 4: capability versions, candidates and trials are project-level;
+ *   their events carry no `sessionId` (`capability.version`,
+ *   `capability.candidate`, `capability.trial`), and plugin adoption is
+ *   approved through `capabilities.approve`, not `approvals.respond`.
  */
 import type {
+  ActivationRevision,
+  ActivationTrigger,
   ApprovalDecision,
+  CandidateRecord,
+  CandidateStatus,
+  CapabilityComponentRef,
+  CapabilityDecision,
+  CapabilityVersion,
+  DecisionOutcome,
+  DecisionReason,
+  TrialReceipt,
+  TrialStatus,
   ApprovalRequest,
   CostCap,
   CredentialInfo,
@@ -55,7 +70,7 @@ import type {
 } from '@nexgent/kernel'
 
 /** API version; bumped only by a contract-change PR. */
-export const SDK_API_VERSION = 3
+export const SDK_API_VERSION = 4
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -207,6 +222,15 @@ interface EventBase {
   readonly parentSessionId?: string
 }
 
+/** Fields every step-4 capability event carries (project-level: no session). */
+interface CapabilityEventBase {
+  readonly projectId: string
+  /** Per-project counter of capability events starting at 1. */
+  readonly eventSeq: number
+  readonly sessionId?: undefined
+  readonly parentSessionId?: undefined
+}
+
 /** Everything the SDK pushes to a subscriber (desktop: over the `nexgent:event` channel). */
 export type SdkEvent =
   | EventBase & { readonly type: 'turn.start'; readonly turn: number; readonly source: Exclude<UserMessageSource, 'inject'> }
@@ -231,12 +255,69 @@ export type SdkEvent =
   | EventBase & { readonly type: 'workflow.phase'; readonly turn: number; readonly workflowId: string; readonly phase: string }
   /** Step 3, emitted on the Lead session for both the queued and the delivered state. */
   | EventBase & { readonly type: 'team.message'; readonly turn?: number; readonly message: TeamMessage }
+  /** Step 4: the adopted version changed (adoption, approval, rollback). */
+  | CapabilityEventBase & { readonly type: 'capability.version'; readonly current: CapabilityVersionView }
+  /** Step 4: a candidate was proposed or changed status. */
+  | CapabilityEventBase & { readonly type: 'capability.candidate'; readonly candidate: CandidateView }
+  /** Step 4: a trial made progress (one event per receipt line, without plan details). */
+  | CapabilityEventBase & { readonly type: 'capability.trial'; readonly candidateId: string; readonly trialId: string; readonly receipt: TrialReceipt['type']; readonly runsDone: number; readonly runsTotal: number; readonly status?: TrialStatus }
 
 /** The `type` vocabulary of {@link SdkEvent}. */
 export type SdkEventType = SdkEvent['type']
 
 /** Unsubscribe handle. */
 export type Unsubscribe = () => void
+
+// ---------------------------------------------------------------------------
+// Capabilities (step 4)
+// ---------------------------------------------------------------------------
+
+/** The adopted capability version of a project. */
+export interface CapabilityVersionView {
+  readonly version: CapabilityVersion
+  /** Activation revision (0 = baseline, never adopted). */
+  readonly revision: number
+  /** When the tail revision was committed; absent at revision 0. */
+  readonly since?: string
+  readonly trigger?: ActivationTrigger
+  /** Components of the adopted bundle. */
+  readonly components: readonly CapabilityComponentRef[]
+  /** Set when the adopted bundle failed verification and the host fell back (`load-failure`). */
+  readonly problem?: string
+}
+
+/** One candidate as lists show it. */
+export interface CandidateView {
+  readonly id: string
+  readonly status: CandidateStatus
+  readonly proposedAt: string
+  readonly sessionId: string
+  readonly components: readonly CapabilityComponentRef[]
+  readonly requiresApproval: boolean
+  readonly summary?: string
+  /** Latest trial, when one started. */
+  readonly trialId?: string
+  /** Latest decision, when one was written. */
+  readonly decision?: { readonly id: string; readonly outcome: DecisionOutcome; readonly reason: DecisionReason; readonly detail: string }
+}
+
+/** Everything recorded about one candidate. */
+export interface CandidateDetail {
+  readonly view: CandidateView
+  readonly record: CandidateRecord
+  /** Receipts of every trial of this candidate, in file order. */
+  readonly receipts: readonly TrialReceipt[]
+  readonly decisions: readonly CapabilityDecision[]
+}
+
+/** `capabilities.list`. */
+export interface CapabilityListing {
+  readonly current: CapabilityVersionView
+  /** The activation chain, oldest first. */
+  readonly history: readonly ActivationRevision[]
+  /** Newest first. */
+  readonly candidates: readonly CandidateView[]
+}
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -368,6 +449,19 @@ export interface SdkMethods {
   'settings.update': (input: { readonly projectId: string; readonly patch: SettingsPatch }) => Promise<ProjectSettings>
   /** Stores the key in `~/.nexgent/credentials.json` (mode 0600); returns only the facts, never the value. An empty string removes it. */
   'settings.setApiKey': (input: { readonly value: string }) => Promise<CredentialInfo>
+
+  /** Step 4: the adopted version (verified; falls back like a new session would). */
+  'capabilities.current': (input: { readonly projectId: string }) => Promise<CapabilityVersionView>
+  /** Step 4: adopted version, activation history and candidates. */
+  'capabilities.list': (input: { readonly projectId: string }) => Promise<CapabilityListing>
+  /** Step 4: one candidate with its receipts and decisions; unknown id rejects `tool/invalid-input`. */
+  'capabilities.show': (input: { readonly projectId: string; readonly candidateId: string }) => Promise<CandidateDetail>
+  /** Step 4: start the gate for a `proposed` candidate now (when `autoTrial` is off, or to retry after history grew). */
+  'capabilities.trial': (input: { readonly projectId: string; readonly candidateId: string }) => Promise<CandidateView>
+  /** Step 4: answer an `awaiting-approval` plugin candidate; `allow` writes the adoption revision, `deny` rejects it. */
+  'capabilities.approve': (input: { readonly projectId: string; readonly candidateId: string; readonly decision: 'allow' | 'deny' }) => Promise<CandidateView>
+  /** Step 4: roll back to the previous version (or `toVersion`, which must appear earlier in the chain); writes a `manual` revision. */
+  'capabilities.rollback': (input: { readonly projectId: string; readonly toVersion?: CapabilityVersion; readonly reason?: string }) => Promise<CapabilityVersionView>
 }
 
 /** An IPC method name. */
@@ -420,6 +514,12 @@ export const SDK_METHOD_NAMES = [
   'settings.get',
   'settings.update',
   'settings.setApiKey',
+  'capabilities.current',
+  'capabilities.list',
+  'capabilities.show',
+  'capabilities.trial',
+  'capabilities.approve',
+  'capabilities.rollback',
 ] as const satisfies readonly SdkMethodName[]
 
 /** The in-process SDK object (CLI and desktop main process). */

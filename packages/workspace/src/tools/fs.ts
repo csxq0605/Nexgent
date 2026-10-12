@@ -5,7 +5,7 @@
  */
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
-import { NexgentError, type ApprovalGrant, type ToolContext } from '@nexgent/kernel'
+import { GUARDED_PROJECT_CONFIG_FIELDS, NexgentError, type ApprovalGrant, type ToolContext } from '@nexgent/kernel'
 import { comparablePath } from '../paths.js'
 import type { SandboxAssessment } from '../sandbox.js'
 import {
@@ -25,8 +25,8 @@ import {
 /** Largest file `read_file` returns whole (bytes); larger reads must use a line range. */
 export const MAX_READ_BYTES = 256 * 1024
 
-/** Fields of `config.json` whose change always needs approval. */
-const GUARDED_CONFIG_FIELDS = ['approvals', 'costCaps', 'sandboxMode'] as const
+/** Fields of `config.json` whose change always needs approval (contract list). */
+const GUARDED_CONFIG_FIELDS = GUARDED_PROJECT_CONFIG_FIELDS
 
 /**
  * Whether a config.json rewrite changes an always-ask field. Unparseable
@@ -87,7 +87,7 @@ async function guardConfigWrite(
     path: assessment.path,
     risk: 'high',
     options: ['once'],
-    reason: 'changes approvals, costCaps or sandboxMode in .nexgent/config.json',
+    reason: 'changes approvals, costCaps, sandboxMode or capabilities in .nexgent/config.json',
   }
 }
 

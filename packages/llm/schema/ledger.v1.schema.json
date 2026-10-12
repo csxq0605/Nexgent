@@ -7,7 +7,8 @@
     { "$ref": "#/$defs/llmRequestStart" },
     { "$ref": "#/$defs/llmRequestEnd" },
     { "$ref": "#/$defs/toolCall" },
-    { "$ref": "#/$defs/taskOutcome" }
+    { "$ref": "#/$defs/taskOutcome" },
+    { "$ref": "#/$defs/capabilityDecision" }
   ],
   "$defs": {
     "nonEmptyString": { "type": "string", "minLength": 1 },
@@ -36,12 +37,15 @@
         "type": { "type": "string" },
         "ts": { "$ref": "#/$defs/timestamp" },
         "sessionId": { "$ref": "#/$defs/nonEmptyString" },
-        "capabilityVersion": { "type": "string" },
+        "capabilityVersion": { "$ref": "#/$defs/capabilityVersion" },
         "memberId": { "type": "string" },
         "executionForm": { "enum": ["direct", "delegated", "team", "workflow"] },
-        "taskId": { "type": "string" }
+        "taskId": { "type": "string" },
+        "trialId": { "type": "string" },
+        "arm": { "enum": ["candidate", "baseline"] }
       }
     },
+    "capabilityVersion": { "type": "string", "pattern": "^(?:baseline|[a-f0-9]{64})$" },
     "requestIdentity": {
       "type": "object",
       "required": ["requestId", "provider", "endpoint", "model"],
@@ -145,12 +149,68 @@
                 "properties": {
                   "name": { "type": "string" },
                   "passed": { "type": "boolean" },
-                  "detail": { "type": "string" }
+                  "detail": { "type": "string" },
+                  "target": { "type": "string" }
                 }
               }
             },
             "toolsUsed": { "type": "array", "items": { "type": "string" } },
-            "formsUsed": { "type": "array", "items": { "enum": ["direct", "delegated", "team", "workflow"] } }
+            "formsUsed": { "type": "array", "items": { "enum": ["direct", "delegated", "team", "workflow"] } },
+            "componentsUsed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["kind", "name", "version", "calls", "errors"],
+                "properties": {
+                  "kind": { "enum": ["function-module", "plugin", "skill", "context-policy", "preset", "team-template", "architecture"] },
+                  "name": { "type": "string" },
+                  "version": { "anyOf": [{ "$ref": "#/$defs/capabilityVersion" }, { "const": "draft" }] },
+                  "calls": { "type": "integer", "minimum": 0 },
+                  "errors": { "type": "integer", "minimum": 0 }
+                }
+              }
+            },
+            "memberCosts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["memberId", "name", "executionForm", "usage", "requestCount", "toolCallCount"],
+                "properties": {
+                  "memberId": { "$ref": "#/$defs/nonEmptyString" },
+                  "name": { "type": "string" },
+                  "executionForm": { "enum": ["delegated", "team", "workflow"] },
+                  "usage": { "$ref": "#/$defs/usage" },
+                  "requestCount": { "type": "integer", "minimum": 0 },
+                  "toolCallCount": { "type": "integer", "minimum": 0 }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "capabilityDecision": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["type", "decisionId", "outcome", "reason", "trigger", "fromVersion", "toVersion"],
+          "properties": {
+            "type": { "const": "capability.decision" },
+            "decisionId": { "$ref": "#/$defs/nonEmptyString" },
+            "outcome": { "enum": ["adopted", "rejected", "awaiting-approval", "rolled-back"] },
+            "reason": {
+              "enum": [
+                "quality-up", "cost-down", "review-preferred", "quality-down", "guard-regressed", "cost-over-cap", "no-improvement",
+                "unknown-runs", "budget-exhausted", "interrupted", "approved", "approval-denied", "load-failure", "usage-regression",
+                "component-errors", "manual"
+              ]
+            },
+            "trigger": { "enum": ["gate", "approval", "load-failure", "usage-regression", "manual"] },
+            "fromVersion": { "$ref": "#/$defs/capabilityVersion" },
+            "toVersion": { "$ref": "#/$defs/capabilityVersion" },
+            "candidateId": { "$ref": "#/$defs/nonEmptyString" },
+            "revision": { "type": "integer", "minimum": 1 }
           }
         }
       ]

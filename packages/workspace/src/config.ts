@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import {
+  assertCapabilitiesConfig,
   EFFORT_LEVELS,
   NexgentError,
   SANDBOX_MODES,
@@ -34,7 +35,7 @@ export interface LoadedProjectConfig extends ProjectConfig {
 }
 
 const TOP_LEVEL_KEYS = new Set([
-  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots',
+  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities',
 ])
 
 function invalid(message: string, field?: string): NexgentError {
@@ -101,6 +102,7 @@ export function validateProjectConfig(raw: unknown): ProjectConfigFile {
     if (!Array.isArray(raw.approvals)) throw invalid('approvals must be an array', 'approvals')
     raw.approvals.forEach(checkGrant)
   }
+  if (raw.capabilities !== undefined) assertCapabilitiesConfig(raw.capabilities)
   if (raw.extraReadRoots !== undefined) {
     if (!Array.isArray(raw.extraReadRoots)
       || raw.extraReadRoots.some(root => typeof root !== 'string' || !nodePath.isAbsolute(root))) {

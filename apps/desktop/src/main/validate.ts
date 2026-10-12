@@ -21,6 +21,8 @@ type FieldKind =
   | 'goalStatus'
   | 'rating'
   | 'approvalDecision'
+  | 'allowDeny'
+  | 'capabilityVersion'
 
 interface FieldSpec {
   readonly kind: FieldKind
@@ -78,6 +80,12 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'settings.get': project,
   'settings.update': { projectId: id, patch: { kind: 'object' } },
   'settings.setApiKey': { value: { kind: 'string' } },
+  'capabilities.current': project,
+  'capabilities.list': project,
+  'capabilities.show': { projectId: id, candidateId: id },
+  'capabilities.trial': { projectId: id, candidateId: id },
+  'capabilities.approve': { projectId: id, candidateId: id, decision: { kind: 'allowDeny' } },
+  'capabilities.rollback': { projectId: id, toVersion: { kind: 'capabilityVersion', optional: true }, reason: { kind: 'string', optional: true } },
 }
 
 const SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'full-access'])
@@ -123,6 +131,10 @@ function checkField(kind: FieldKind, value: unknown): boolean {
       return typeof value === 'string' && GOAL_STATUSES.has(value)
     case 'rating':
       return typeof value === 'number' && Number.isFinite(value)
+    case 'allowDeny':
+      return value === 'allow' || value === 'deny'
+    case 'capabilityVersion':
+      return typeof value === 'string' && /^(?:baseline|[a-f0-9]{64})$/.test(value)
     case 'approvalDecision':
       // `decidedBy` is set by the main process side, never by the page.
       return (

@@ -132,12 +132,13 @@ describe('members through the SDK', () => {
     const root = await t.sdk.call('sessions.create', { projectId: project.projectId })
     const started = await t.sdk.startTurn({ projectId: project.projectId, sessionId: root.sessionId, text: 'go' })
     const delta = await waitForEvent(t, event => event.type === 'text.delta' && event.parentSessionId === root.sessionId)
-    expect(t.sdk.isRunning(project.projectId, delta.sessionId)).toBe(true)
+    const memberId = delta.sessionId!
+    expect(t.sdk.isRunning(project.projectId, memberId)).toBe(true)
     await t.sdk.call('turns.cancel', { projectId: project.projectId, sessionId: root.sessionId })
     expect((await started.done).reason).toEqual({ kind: 'cancelled', cause: 'user' })
-    expect(ofType(t.eventsOf(delta.sessionId), 'turn.end')[0]!.reason).toEqual({ kind: 'cancelled', cause: 'parent' })
+    expect(ofType(t.eventsOf(memberId), 'turn.end')[0]!.reason).toEqual({ kind: 'cancelled', cause: 'parent' })
     expect(ofType(t.eventsOf(root.sessionId), 'member.end')[0]!.run).toMatchObject({ name: 'slow', status: 'cancelled' })
-    expect(t.sdk.isRunning(project.projectId, delta.sessionId)).toBe(false)
+    expect(t.sdk.isRunning(project.projectId, memberId)).toBe(false)
   })
 
   it('reports a team: teammate runs, mail as team.message events, the roster in sessions.collaboration', async () => {

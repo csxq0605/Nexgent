@@ -7,6 +7,10 @@
  * `packages/kernel/src/contracts/session.ts`.
  */
 import {
+  CAPABILITY_COMPONENT_KINDS,
+  CAPABILITY_VERSION_SWITCH_REASONS,
+  COMPONENT_FILE_PATTERN,
+  COMPONENT_NAME_PATTERN,
   isJsonValue,
   NexgentError,
   SESSION_RECORD_TYPES,
@@ -17,6 +21,7 @@ import {
 } from '@nexgent/kernel'
 import { closedObject, COMMON_DEFS, ref } from './common.js'
 import { evaluateSchema, type EvaluateOptions, type SchemaIssue } from './evaluator.js'
+import { CAPABILITY_VERSION_SCHEMA } from './capabilities-schema.js'
 
 /** `$defs` key of each record type's schema. */
 export const SESSION_RECORD_DEFS: Readonly<Record<SessionRecordType, string>> = {
@@ -48,6 +53,10 @@ export const SESSION_RECORD_DEFS: Readonly<Record<SessionRecordType, string>> = 
   'workflow.start': 'workflowStartRecord',
   'workflow.phase': 'workflowPhaseRecord',
   'workflow.end': 'workflowEndRecord',
+  'capability.version': 'capabilityVersionRecord',
+  'capability.draft': 'capabilityDraftRecord',
+  'capability.try': 'capabilityTryRecord',
+  'capability.propose': 'capabilityProposeRecord',
 }
 
 const BASE_REQUIRED = ['type', 'seq', 'ts', 'sessionId'] as const
@@ -272,6 +281,7 @@ export const sessionRecordSchema: JsonObject = {
         lastCompactionSeq: ref('positiveInteger'),
         parentSessionId: ref('nonEmptyString'),
         member: ref('memberIdentity'),
+        capabilityVersion: ref('capabilityVersion'),
       },
       ['createdAt', 'projectRoot', 'model', 'sandboxMode', 'grants', 'lastTurn', 'totalUsage', 'lastSeq'],
     ),
@@ -294,6 +304,7 @@ export const sessionRecordSchema: JsonObject = {
         parentSessionId: ref('nonEmptyString'),
         title: { type: 'string' },
         member: ref('memberIdentity'),
+        capabilityVersion: ref('capabilityVersion'),
       },
       ['version', 'projectRoot', 'model', 'sandboxMode'],
     ),
@@ -445,6 +456,77 @@ export const sessionRecordSchema: JsonObject = {
         error: ref('errorInfo'),
       },
       ['turn', 'workflowId', 'status', 'members'],
+    ),
+    capabilityVersion: CAPABILITY_VERSION_SCHEMA,
+    componentRef: closedObject(
+      { kind: { enum: [...CAPABILITY_COMPONENT_KINDS] }, name: { type: 'string', pattern: COMPONENT_NAME_PATTERN.source } },
+      ['kind', 'name'],
+    ),
+    capabilityFile: closedObject(
+      {
+        path: { type: 'string', pattern: COMPONENT_FILE_PATTERN.source },
+        sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+        bytes: { type: 'integer', minimum: 0 },
+      },
+      ['path', 'sha256', 'bytes'],
+    ),
+    capabilityVersionRecord: record(
+      'capability.version',
+      {
+        turn,
+        version: ref('capabilityVersion'),
+        previous: ref('capabilityVersion'),
+        reason: { enum: [...CAPABILITY_VERSION_SWITCH_REASONS] },
+        detail: { type: 'string' },
+      },
+      ['version', 'previous', 'reason'],
+    ),
+    capabilityDraftRecord: record(
+      'capability.draft',
+      {
+        turn,
+        step,
+        toolCallId: ref('nonEmptyString'),
+        component: ref('componentRef'),
+        files: { type: 'array', minItems: 1, items: ref('capabilityFile') },
+        revision: ref('positiveInteger'),
+      },
+      ['turn', 'step', 'toolCallId', 'component', 'files', 'revision'],
+    ),
+    capabilityTryRecord: record(
+      'capability.try',
+      {
+        turn,
+        step,
+        toolCallId: ref('nonEmptyString'),
+        component: ref('componentRef'),
+        revision: ref('positiveInteger'),
+        tools: { type: 'array', items: ref('nonEmptyString') },
+      },
+      ['turn', 'step', 'toolCallId', 'component', 'revision'],
+    ),
+    capabilityProposeRecord: record(
+      'capability.propose',
+      {
+        turn,
+        step,
+        toolCallId: ref('nonEmptyString'),
+        candidateId: ref('nonEmptyString'),
+        proofs: {
+          type: 'array',
+          minItems: 1,
+          items: closedObject(
+            {
+              kind: { enum: [...CAPABILITY_COMPONENT_KINDS] },
+              name: { type: 'string', pattern: COMPONENT_NAME_PATTERN.source },
+              turn,
+              toolCallId: ref('nonEmptyString'),
+            },
+            ['kind', 'name', 'turn', 'toolCallId'],
+          ),
+        },
+      },
+      ['turn', 'step', 'toolCallId', 'candidateId', 'proofs'],
     ),
   },
 }

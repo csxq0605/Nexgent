@@ -2,7 +2,8 @@
  * The frozen service contracts of step 1, plus the step-2 additions
  * (`tasking`, `context`, `skill`, `step2-tools`, new session records) and
  * the step-3 additions (`collaboration`, `step3-tools`, child-session, team
- * and workflow records). Types and small pure helpers only:
+ * and workflow records) and the step-4 additions (`capabilities`,
+ * `step4-tools`, capability session records and ledger fields). Types and small pure helpers only:
  * no I/O, no Cordis services. Implementations live in `@nexgent/llm`,
  * `@nexgent/session`, `@nexgent/workspace` and the kernel itself; changes to
  * anything exported here go through a contract-change PR.
@@ -23,3 +24,5 @@ export * from './skill.js'
 export * from './step2-tools.js'
 export * from './collaboration.js'
 export * from './step3-tools.js'
+export * from './capabilities.js'
+export * from './step4-tools.js'

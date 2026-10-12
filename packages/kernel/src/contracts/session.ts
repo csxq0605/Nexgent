@@ -10,6 +10,7 @@
 import type { ErrorInfo } from './errors.js'
 import type { JsonValue } from './json.js'
 import type { ApprovalDecision, ApprovalGrant, ApprovalRequest } from './approvals.js'
+import type { CapabilityComponentRef, CapabilityFile, CapabilityVersion, CapabilityVersionSwitchReason, ComponentUseProof } from './capabilities.js'
 import type { FinishReason, LLMMessage, LLMUsage, RefusalInfo, ToolCall } from './llm.js'
 import type { MemberExecutionForm, MemberIdentity, MemberResult, DelegationMode, TeamMember, TeamMessage, TeamTask, WorkflowStatus } from './collaboration.js'
 import type { DeliverableVersionRef, FeedbackEntry, FileChange, Goal, GoalStatus, MaterialRef } from './tasking.js'
@@ -47,6 +48,8 @@ export interface SessionStartRecord extends SessionRecordBase {
   readonly title?: string
   /** Who this child session is (step 3); present exactly when `parentSessionId` is. */
   readonly member?: MemberIdentity
+  /** Step 4: capability bundle the session runs on (`baseline` or a content hash); absent in sessions written before step 4. */
+  readonly capabilityVersion?: CapabilityVersion
 }
 
 /** A user-role message entering the conversation. */
@@ -408,6 +411,57 @@ export interface WorkflowEndRecord extends SessionRecordBase {
   readonly error?: ErrorInfo
 }
 
+/**
+ * Step 4, host-written: the session switched capability version (on resume
+ * the recorded version was unavailable, or loading failed at open). The
+ * session runs on `version` from here on.
+ */
+export interface CapabilityVersionRecord extends SessionRecordBase {
+  readonly type: 'capability.version'
+  readonly turn?: number
+  readonly version: CapabilityVersion
+  readonly previous: CapabilityVersion
+  readonly reason: CapabilityVersionSwitchReason
+  /** Short diagnostic (e.g. which file failed verification); never file contents. */
+  readonly detail?: string
+}
+
+/** Step 4, written by `capability_draft`: a draft component was created or changed in the session's draft area. */
+export interface CapabilityDraftRecord extends SessionRecordBase {
+  readonly type: 'capability.draft'
+  readonly turn: number
+  readonly step: number
+  readonly toolCallId: string
+  readonly component: CapabilityComponentRef
+  /** The draft component's files after the change, sorted by path. */
+  readonly files: readonly CapabilityFile[]
+  /** 1 for the first draft of this component in the session, then +1 per change. */
+  readonly revision: number
+}
+
+/** Step 4, written by `capability_try`: a draft component was loaded into this session's scope. */
+export interface CapabilityTryRecord extends SessionRecordBase {
+  readonly type: 'capability.try'
+  readonly turn: number
+  readonly step: number
+  readonly toolCallId: string
+  readonly component: CapabilityComponentRef
+  /** Draft revision that was loaded. */
+  readonly revision: number
+  /** Model tools the component added to the session (function modules, plugins). */
+  readonly tools?: readonly string[]
+}
+
+/** Step 4, written by `capability_propose` when the host accepts a candidate. */
+export interface CapabilityProposeRecord extends SessionRecordBase {
+  readonly type: 'capability.propose'
+  readonly turn: number
+  readonly step: number
+  readonly toolCallId: string
+  readonly candidateId: string
+  readonly proofs: readonly ComponentUseProof[]
+}
+
 /** Every v1 record kind. */
 export type SessionRecord =
   | SessionStartRecord
@@ -438,6 +492,10 @@ export type SessionRecord =
   | WorkflowStartRecord
   | WorkflowPhaseRecord
   | WorkflowEndRecord
+  | CapabilityVersionRecord
+  | CapabilityDraftRecord
+  | CapabilityTryRecord
+  | CapabilityProposeRecord
 
 /** The `type` tag vocabulary. */
 export type SessionRecordType = SessionRecord['type']
@@ -472,6 +530,10 @@ export const SESSION_RECORD_TYPES: readonly SessionRecordType[] = [
   'workflow.start',
   'workflow.phase',
   'workflow.end',
+  'capability.version',
+  'capability.draft',
+  'capability.try',
+  'capability.propose',
 ]
 
 /**
@@ -490,6 +552,7 @@ export type HostRecordType =
   | 'team.message'
   | 'workflow.phase'
   | 'workflow.end'
+  | 'capability.version'
 
 /** Record types a tool may append through {@link ToolContext.appendRecord}. */
 export type ToolRecordType =
@@ -502,6 +565,9 @@ export type ToolRecordType =
   | 'workflow.start'
   | 'workflow.phase'
   | 'workflow.end'
+  | 'capability.draft'
+  | 'capability.try'
+  | 'capability.propose'
 
 /** Distributive omit over a union. */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
@@ -545,6 +611,8 @@ export interface SessionMetadata {
   readonly parentSessionId?: string
   /** From `session.start` (step 3 child session). */
   readonly member?: MemberIdentity
+  /** Step 4: from `session.start`, then the latest `capability.version`. */
+  readonly capabilityVersion?: CapabilityVersion
 }
 
 /** What a session projects to: the LLM-visible history plus metadata. The system prompt is not stored. */
@@ -567,6 +635,8 @@ export interface SessionInit {
   readonly title?: string
   /** Required with `parentSessionId` (step 3). */
   readonly member?: MemberIdentity
+  /** Step 4: written into `session.start.capabilityVersion`. */
+  readonly capabilityVersion?: CapabilityVersion
 }
 
 /** Where recovery stopped, when the file had a bad tail. */

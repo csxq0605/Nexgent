@@ -54,6 +54,7 @@ export function initialState(start: SessionStartRecord): SessionState {
   if (start.title !== undefined) metadata.title = start.title
   if (start.parentSessionId !== undefined) metadata.parentSessionId = start.parentSessionId
   if (start.member !== undefined) metadata.member = start.member
+  if (start.capabilityVersion !== undefined) metadata.capabilityVersion = start.capabilityVersion
   return { sessionId: start.sessionId, version: 1, messages: [], metadata: { ...metadata } }
 }
 
@@ -225,6 +226,9 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
       }
       draft.messages = [...record.messages]
       break
+    case 'capability.version':
+      meta.capabilityVersion = record.version
+      break
     case 'error':
     case 'approval.request':
     case 'approval.decision':
@@ -240,6 +244,9 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
     case 'workflow.start':
     case 'workflow.phase':
     case 'workflow.end':
+    case 'capability.draft':
+    case 'capability.try':
+    case 'capability.propose':
       break
   }
   draft.metadata.lastSeq = record.seq
