@@ -10,7 +10,7 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 | --- | --- |
 | `AnthropicProvider` / `createProvider(options)` | 单路由 provider。`options.credentials`、`options.ledger` 必填；其余见下表 |
 | `LLMPlugin`（默认导出）、`apply`、`validateLLMPluginConfig`、`providerOptionsFromConfig` | Cordis 插件：`inject: ['credentials', 'ledger']`，`ctx.provide('llm', provider)` |
-| `buildMessageParams`、`toWireMessages`、`thinkingParam`、`mapStopReason`、`normalizeUsage` | 组包与映射的纯函数部件 |
+| `buildMessageParams`、`toBetaParams`、`toWireMessages`、`thinkingParam`、`mapStopReason`、`normalizeUsage` | 组包与映射的纯函数部件 |
 | `redactSecrets`、`sanitizeUrl` | 密钥与 URL 脱敏 |
 | `NEXGENT_API_BASE_URL`、`ANTHROPIC_API_KEY`、`CLAUDE_API_HOST`、`FALLBACK_BETA` | 常量 |
 | `schema/ledger.v1.schema.json` | 账本记录 JSON Schema（draft 2020-12，按 `type` 的 `oneOf`，允许未知可选字段；`finishReason` 含 `refusal`） |
@@ -75,10 +75,11 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 ```
 
 - **消息**：`system` → 顶层 `system`；`user` → 文本；`assistant` 带 `providerContent` 时原样发送该数组（保留 thinking：含 `signature` 的 `thinking` 块、`text`、`tool_use` 一字不改），否则由 `content` / `toolCalls` 组成 `[text?, tool_use*]`（`arguments` 解析为 `input`，解析失败发 `{}`）；连续的 `tool` 消息合并为**一条** `user` 消息的 `tool_result` 块（API 要求同一轮的每个 `tool_use` 在下一条 user 消息里一并回答）；相邻的 `user` 消息（注入的上下文、压缩摘要、本轮用户消息、紧跟在工具结果后的用户消息）合并为一条 `user` 消息，文本块按原顺序排列，不依赖 API 自动合并。顺序只追加不重排。
-- **thinking / effort**：`thinking: 'off'` → `{ type: 'between_tools' }`（Sonnet 5.5 的最低设置；只在 effort ≤ `high` 时有效，`xhigh` / `max` 时省略 `thinking`，即自适应）；`thinking: 'on'` → `{ type: 'adaptive', display: 'summarized' }`。从不发送 `disabled` 或 `budget_tokens`。`effort` 取请求的 `effort`，否则插件默认 `medium`。
+- **thinking / effort**：`thinking: 'off'` → `{ type: 'between_tools' }`（Sonnet 5.5 的最低设置；只在 effort ≤ `high` 时有效，`xhigh` / `max` 时省略 `thinking`，即自适应）；`thinking: 'on'` → `{ type: 'adaptive', display: 'summarized', block_binding: { prefix_mismatch_behavior: 'drop_block' } }`（见下“thinking 绑定”）。从不发送 `disabled` 或 `budget_tokens`。`effort` 取请求的 `effort`，否则插件默认 `medium`。
 - **不发送**：`temperature` / `top_p`（该模型拒绝非默认值；忽略 `request.temperature`）、强制 `tool_choice`。
 - **缓存**：顶层 `cache_control: { type: 'ephemeral' }`，自动缓存最后一个可缓存块。
-- **回退**：`fallbacks: 'default'` 时，且端点主机是 `api.anthropic.com`，走 `client.beta.messages.stream`，带 `betas: ['server-side-fallback-2026-07-01']`、`fallbacks: 'default'`；端点是假服务或代理时自动不发（这些主机不认识该参数）。`fallbacks: 'off'` 关闭。
+- **thinking 绑定**：Claude Sonnet 5.5 的 thinking 块绑定创建它时的会话，`system` 或 `tools` 之后变了（例如 `capability_try` 在一轮中途注册了新工具），原样回放这个块会得到 HTTP 400“Invalid `signature` in `thinking` block”。所以 `thinking: 'on'` 的请求一律走 `client.beta.messages.stream`，带 `betas: ['thinking-binding-controls-2026-08-01']` 和上面的 `block_binding`：回放内容不变，由 API 丢掉校验不过的块（只丢这些块，之后新生成的块照常保留），请求继续。`between_tools` 不接受 `block_binding`，`thinking: 'off'` 不带；`xhigh` / `max` 下省略 `thinking` 时也不带。组包见 `toBetaParams`。
+- **回退**：`fallbacks: 'default'` 时，且端点主机是 `api.anthropic.com`，在 beta 路线上再加 `server-side-fallback-2026-07-01` 与 `fallbacks: 'default'`；端点是假服务或代理时自动不发（这些主机不认识该参数）。`fallbacks: 'off'` 关闭。
 
 ## 事件映射
 
@@ -114,7 +115,7 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 
 ## 测试
 
-`pnpm exec vitest run --project @nexgent/llm`。测试对本包内的 node:http 假服务（`tests/helpers/fake-anthropic.ts`，`POST /v1/messages`）回放 `tests/fixtures/*.sse`（Anthropic 事件格式）；覆盖流式文本、thinking 块 → `reasoning.delta` 与 `providerContent` 往返（回放的 assistant 轮含原 `signature`）、单工具调用、并行工具调用、tool 结果合并为一条 user 消息、有 / 无 usage（含 cache_read）、400 / 429 / 529（一对账本、用量 unknown、不重试）、连接被拒、整体超时与空闲超时、开始前 / 流中中止与提前 `break`、坏事件 → `llm/invalid-response`、拒答 → `done{refusal}`、thinking / effort 映射（`between_tools`、`xhigh` 省略、adaptive）、`output_config.effort`、`eager_input_streaming`、`cache_control`、回退参数只对真实主机发送、密钥脱敏与 `NEXGENT_API_BASE_URL` 覆盖、Cordis 插件装载，以及账本记录对 `schema/ledger.v1.schema.json` 和 spec 示例行的校验。
+`pnpm exec vitest run --project @nexgent/llm`。测试对本包内的 node:http 假服务（`tests/helpers/fake-anthropic.ts`，`POST /v1/messages`）回放 `tests/fixtures/*.sse`（Anthropic 事件格式）；覆盖流式文本、thinking 块 → `reasoning.delta` 与 `providerContent` 往返（回放的 assistant 轮含原 `signature`）、单工具调用、并行工具调用、tool 结果合并为一条 user 消息、有 / 无 usage（含 cache_read）、400 / 429 / 529（一对账本、用量 unknown、不重试）、连接被拒、整体超时与空闲超时、开始前 / 流中中止与提前 `break`、坏事件 → `llm/invalid-response`、拒答 → `done{refusal}`、thinking / effort 映射（`between_tools`、`xhigh` 省略、adaptive）、`output_config.effort`、`eager_input_streaming`、`cache_control`、回退参数只对真实主机发送、工具中途变化时回放的 thinking 块与 `drop_block`（`tests/thinking-binding.spec.ts`，假服务按 `system` + `tools` 校验签名）、密钥脱敏与 `NEXGENT_API_BASE_URL` 覆盖、Cordis 插件装载，以及账本记录对 `schema/ledger.v1.schema.json` 和 spec 示例行的校验。
 
 `recordSse(baseUrl, key, body, file)`（`tests/helpers/fake-anthropic.ts`）可把一次真实流式响应录成新 fixture（只写响应，不写请求和密钥）；测试套件本身从不访问真实端点。
 

@@ -32,7 +32,7 @@ import {
 } from '@nexgent/kernel'
 import { redactSecrets, sanitizeUrl } from './redact.js'
 import { normalizeUsage, type WireUsage } from './usage.js'
-import { buildMessageParams, DEFAULT_WIRE_OPTIONS, FALLBACK_BETA, toJson, type WireOptions } from './wire.js'
+import { buildMessageParams, DEFAULT_WIRE_OPTIONS, toBetaParams, toJson, type WireOptions } from './wire.js'
 
 /** Environment variable that overrides the endpoint base URL. */
 export const NEXGENT_API_BASE_URL = 'NEXGENT_API_BASE_URL'
@@ -353,16 +353,8 @@ export class AnthropicProvider implements LLMProvider {
     const params = buildMessageParams(request, model, this.wire)
     const client = this.makeClient(apiKey, timeout)
     const options = { signal, timeout }
-    if (this.fallbacks) {
-      const { output_config, stream: _stream, ...rest } = params
-      const beta: Anthropic.Beta.Messages.MessageCreateParams = {
-        ...rest,
-        ...output_config === undefined || output_config === null ? {} : { output_config },
-        betas: [FALLBACK_BETA],
-        fallbacks: 'default',
-      }
-      return client.beta.messages.stream(beta, options) as unknown as WireStream
-    }
+    const beta = toBetaParams(params, { fallbacks: this.fallbacks })
+    if (beta !== undefined) return client.beta.messages.stream(beta, options) as unknown as WireStream
     return client.messages.stream(params, options) as unknown as WireStream
   }
 

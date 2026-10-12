@@ -9,6 +9,16 @@ import type { Effort, JsonValue, LLMMessage, LLMRequest, ThinkingMode } from '@n
 /** Beta header enabling server-side refusal fallbacks (`fallbacks: 'default'`). */
 export const FALLBACK_BETA = 'server-side-fallback-2026-07-01'
 
+/**
+ * Beta header enabling `thinking.block_binding`. With it the provider sends
+ * `prefix_mismatch_behavior: 'drop_block'`: a replayed thinking block whose
+ * conversation no longer matches the one it was created in (the `tools` list
+ * or `system` prompt changed since, e.g. after `capability_try` registered a
+ * tool mid-turn) is dropped by the API instead of failing the request with
+ * HTTP 400.
+ */
+export const THINKING_BINDING_BETA = 'thinking-binding-controls-2026-08-01'
+
 /** Settings the provider applies to every request. */
 export interface WireOptions {
   /** `output_config.effort` when the request names none. */
@@ -22,6 +32,9 @@ export const DEFAULT_WIRE_OPTIONS: WireOptions = Object.freeze({ effort: 'medium
 
 /** The request body before the SDK adds `stream: true` (and, on the beta route, `betas` / `fallbacks`). */
 export type MessageParams = Anthropic.MessageStreamParams
+
+/** The request body on the beta route. */
+export type BetaMessageParams = Anthropic.Beta.Messages.MessageCreateParams
 
 /**
  * The `thinking` parameter for a mode and effort. `'off'` is `between_tools`
@@ -152,6 +165,35 @@ export function buildMessageParams(request: LLMRequest, model: string, options: 
     }))
   }
   return params
+}
+
+/**
+ * Move a request onto the beta route when it needs a beta. Adaptive thinking
+ * gets `block_binding: { prefix_mismatch_behavior: 'drop_block' }` under
+ * {@link THINKING_BINDING_BETA}, so replayed thinking blocks that fail the
+ * conversation check are dropped rather than rejected (`between_tools` does
+ * not accept `block_binding`, and an omitted `thinking` has nothing to carry
+ * it). Server-side fallbacks add {@link FALLBACK_BETA} and `fallbacks:
+ * 'default'`. Returns `undefined` when no beta applies (the plain route).
+ * @param params - the plain request from {@link buildMessageParams}.
+ * @param options - whether server-side fallbacks are on for this endpoint.
+ */
+export function toBetaParams(params: MessageParams, options: { readonly fallbacks: boolean }): BetaMessageParams | undefined {
+  const binding = params.thinking?.type === 'adaptive'
+  if (!binding && !options.fallbacks) return undefined
+  const { output_config, stream: _stream, thinking, ...rest } = params
+  const betas: string[] = []
+  if (binding) betas.push(THINKING_BINDING_BETA)
+  if (options.fallbacks) betas.push(FALLBACK_BETA)
+  return {
+    ...rest,
+    ...thinking === undefined ? {} : {
+      thinking: binding ? { ...thinking, block_binding: { prefix_mismatch_behavior: 'drop_block' } } : thinking,
+    },
+    ...output_config === undefined || output_config === null ? {} : { output_config },
+    betas,
+    ...options.fallbacks ? { fallbacks: 'default' } : {},
+  } as BetaMessageParams
 }
 
 /** Deep-copy a value into plain JSON (drops `undefined` members and prototypes). */

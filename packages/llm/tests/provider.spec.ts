@@ -10,10 +10,13 @@ import {
   type StreamErrorEvent,
   type ToolCallEndEvent,
 } from '@nexgent/kernel'
-import { AnthropicProvider, createProvider, FALLBACK_BETA, NEXGENT_API_BASE_URL } from '../src/index.js'
+import { AnthropicProvider, createProvider, FALLBACK_BETA, NEXGENT_API_BASE_URL, THINKING_BINDING_BETA } from '../src/index.js'
 import { closedPort, loadSseFixture, sseEvent, startFakeAnthropic, type FakeAnthropic } from './helpers/fake-anthropic.js'
 import { memoryCredentials, MemoryLedger } from './helpers/fakes.js'
 import { collect, expectStreamInvariants, makeProvider, makeRequest, TEST_KEY, textOf } from './helpers/stream.js'
+
+/** `thinking: 'on'` on the wire: adaptive, and failing replayed blocks dropped instead of rejected. */
+const ADAPTIVE = { type: 'adaptive', display: 'summarized', block_binding: { prefix_mismatch_behavior: 'drop_block' } }
 
 let fake: FakeAnthropic | undefined
 afterEach(async () => {
@@ -63,7 +66,7 @@ describe('AnthropicProvider — streaming', () => {
 
     const sent = fake.requests[0]
     expect(fake.requests).toHaveLength(1)
-    expect(sent?.url).toBe('/v1/messages')
+    expect(sent?.url).toBe('/v1/messages?beta=true')
     expect(sent?.headers['x-api-key']).toBe(TEST_KEY)
     expect(sent?.headers['anthropic-version']).toBeDefined()
     expect(sent?.headers).not.toHaveProperty('authorization')
@@ -73,7 +76,7 @@ describe('AnthropicProvider — streaming', () => {
       stream: true,
       system: 'You are a test.',
       messages: [{ role: 'user', content: 'Say hello.' }],
-      thinking: { type: 'adaptive', display: 'summarized' },
+      thinking: ADAPTIVE,
       output_config: { effort: 'medium' },
       cache_control: { type: 'ephemeral' },
     })
@@ -104,7 +107,7 @@ describe('AnthropicProvider — streaming', () => {
       { type: 'thinking', thinking: 'Checking the file first.', signature: 'sig_abc123==' },
       { type: 'text', text: 'Done.' },
     ])
-    expect(fake.requests[0]?.body['thinking']).toEqual({ type: 'adaptive', display: 'summarized' })
+    expect(fake.requests[0]?.body['thinking']).toEqual(ADAPTIVE)
 
     // Round trip: the assistant turn is sent exactly as received, signature included.
     await collect(provider.complete(makeRequest({
@@ -287,8 +290,8 @@ describe('AnthropicProvider — streaming', () => {
     expect(bodies.map(body => body['thinking'])).toEqual([
       { type: 'between_tools' },
       undefined,
-      { type: 'adaptive', display: 'summarized' },
-      { type: 'adaptive', display: 'summarized' },
+      ADAPTIVE,
+      ADAPTIVE,
     ])
     expect(bodies.map(body => body['output_config'])).toEqual([
       { effort: 'high' }, { effort: 'xhigh' }, { effort: 'max' }, { effort: 'low' },
@@ -503,7 +506,7 @@ describe('AnthropicProvider — configuration and secrets', () => {
     const { provider } = makeProvider(fake.baseUrl)
     await collect(provider.complete(makeRequest()))
     expect(fake.requests[0]?.body).not.toHaveProperty('fallbacks')
-    expect(fake.requests[0]?.headers['anthropic-beta']).toBeUndefined()
+    expect(fake.requests[0]?.headers['anthropic-beta']).toBe(THINKING_BINDING_BETA)
 
     // Real host: route the SDK's fetch to the fake while keeping the configured URL.
     const target = fake.baseUrl
@@ -521,9 +524,9 @@ describe('AnthropicProvider — configuration and secrets', () => {
     const [, withFallback, without] = fake.requests
     expect(withFallback?.body['fallbacks']).toBe('default')
     expect(withFallback?.headers['anthropic-beta']).toContain(FALLBACK_BETA)
-    expect(withFallback?.body).toMatchObject({ thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: 'medium' }, cache_control: { type: 'ephemeral' } })
+    expect(withFallback?.body).toMatchObject({ thinking: ADAPTIVE, output_config: { effort: 'medium' }, cache_control: { type: 'ephemeral' } })
     expect(without?.body).not.toHaveProperty('fallbacks')
-    expect(without?.headers['anthropic-beta']).toBeUndefined()
+    expect(without?.headers['anthropic-beta']).toBe(THINKING_BINDING_BETA)
   })
 
   it('stamps purpose and attribution (provider-level, overridden per call) on both records', async () => {

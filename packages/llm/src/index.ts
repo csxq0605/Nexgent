@@ -25,8 +25,8 @@ export { apply, LLMPlugin, providerOptionsFromConfig, validateLLMPluginConfig } 
 export type { LLMPluginConfig, LLMPluginConfigIssue } from './plugin.js'
 export { normalizeUsage } from './usage.js'
 export type { WireUsage } from './usage.js'
-export { buildMessageParams, DEFAULT_WIRE_OPTIONS, FALLBACK_BETA, thinkingParam, toJson, toWireMessages } from './wire.js'
-export type { MessageParams, WireOptions } from './wire.js'
+export { buildMessageParams, DEFAULT_WIRE_OPTIONS, FALLBACK_BETA, THINKING_BINDING_BETA, thinkingParam, toBetaParams, toJson, toWireMessages } from './wire.js'
+export type { BetaMessageParams, MessageParams, WireOptions } from './wire.js'
 export { REDACTED, redactSecrets, sanitizeUrl } from './redact.js'
 
 export default LLMPlugin
