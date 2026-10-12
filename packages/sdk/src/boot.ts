@@ -36,6 +36,7 @@ import { SpreadsheetPlugin } from '@nexgent/tool-spreadsheet'
 import { WebPlugin } from '@nexgent/web'
 import { recoverWorkflows, WorkflowPlugin } from '@nexgent/workflow'
 import { WorkspacePlugin } from '@nexgent/workspace'
+import { TRIAL_ENTRY, TRIAL_ENV_KEYS } from './trial-entry.js'
 
 /** Environment variable that lowers the compaction threshold (read by `@nexgent/context`). */
 export const COMPACTION_THRESHOLD_ENV = 'NEXGENT_COMPACTION_THRESHOLD'
@@ -81,6 +82,21 @@ export function step3ProfileRows(): AppProfileRow[] {
  */
 export function step4ProfileRows(): AppProfileRow[] {
   return [{ id: 'capabilities', name: CapabilitiesPlugin.name }]
+}
+
+/**
+ * The `trial` config of the `@nexgent/capabilities` row (step 4 gate): the
+ * entry the plugin starts the gate process with, and the non-secret settings
+ * of this SDK's environment the process needs (home, API base URL).
+ */
+export function trialRowConfig(env: Readonly<Record<string, string | undefined>>, home?: string): JsonObject {
+  const extra: Record<string, string> = {}
+  for (const key of TRIAL_ENV_KEYS) {
+    const value = env[key]
+    if (value !== undefined && value !== '') extra[key] = value
+  }
+  if (home !== undefined) extra.NEXGENT_HOME = home
+  return { trial: { entry: TRIAL_ENTRY, env: extra } }
 }
 
 /**
@@ -150,7 +166,7 @@ export async function bootProjectApp(options: BootOptions): Promise<NexgentApp> 
   const patches: AppProfilePatchEntry[] = [
     { id: 'workspace', config: { root: options.root } },
     ...(options.approvalTimeoutMs === undefined ? [] : [{ id: 'approvals', config: { timeoutMs: options.approvalTimeoutMs } }]),
-    { insert: [...step2ProfileRows(env, options.home), ...withoutCallerRows([...step3ProfileRows(), ...step4ProfileRows()], options.patches ?? [])] },
+    { insert: [...step2ProfileRows(env, options.home), ...withoutCallerRows([...step3ProfileRows(), ...step4ProfileRows().map(row => ({ ...row, config: trialRowConfig(env, options.home) }))], options.patches ?? [])] },
     ...(options.patches ?? []),
   ]
   return createApp({

@@ -1,0 +1,450 @@
+// Adapted from Nexgent PR #4 runtime/packages/bundle/nexgent-app/src/architecture-trials.ts (archive/python-host): plan summary frozen in the receipt, three-way pass / fail / unknown results, a run that cannot be compared is unknown and never a failure.
+/**
+ * The gate `capability_trial` (`data-formats.md` §候选与门控, ADR 0005,
+ * decisions 3–5). For one proposed candidate:
+ *
+ * 1. Build the replay set from the project's past root tasks (selection: the
+ *    proposing task and the most similar ones; guard: the least similar;
+ *    disjoint). Too little history: the gate waits and writes nothing.
+ * 2. Claim the candidate (tried at most once), freeze the plan from the
+ *    project's `capabilities` settings into `trial.start`.
+ * 3. Run every case `repeats` times per arm, candidate bundle against the
+ *    adopted bundle, each run in its own copy of the task's snapshot through
+ *    the host's {@link TrialRunner} (a separate process in the product);
+ *    the gate runs the recorded checks on the copy itself. A run that does
+ *    not complete is `unknown`. The trial budget is checked before every run
+ *    and passed down as the run's per-task cap; running out stops the trial.
+ * 4. On a check tie that the cost alone does not settle, the reviewer model
+ *    compares the two arms' outputs per selection run (kept apart from the
+ *    checks in the receipts).
+ * 5. `decideTrial` gives the verdict; the gate writes `trial.end`, then the
+ *    decision: an adoption revision (`trigger: gate`), an awaiting-approval
+ *    decision for a plugin, or a rejection. Rejected candidates and their
+ *    receipts stay on disk.
+ *
+ * The gate reads its parameters from `.nexgent/config.json` (a candidate
+ * bundle has no field that could change them).
+ */
+import { createHash, randomUUID } from 'node:crypto'
+import { readdir, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import {
+  addUsage,
+  decideTrial,
+  readProjectConfig,
+  ZERO_USAGE,
+  type ArmTally,
+  type CandidateRecord,
+  type CapabilityDecision,
+  type CapabilityVersion,
+  type LLMUsage,
+  type ReplaySet,
+  type TaskCheck,
+  type TrialArm,
+  type TrialBudget,
+  type TrialCost,
+  type TrialPlan,
+  type TrialReceipt,
+  type TrialStatus,
+  type TrialUnknownReason,
+  type TrialVerdict,
+  type WorkspaceLayout,
+} from '@nexgent/kernel'
+import { readCandidate } from '../candidates.js'
+import type { Activation } from '../activation.js'
+import { CapabilityStore } from '../capability-store.js'
+import { runCheckSpecs } from './checks.js'
+import { claimAttempt, releaseTrialLock, TrialReceiptWriter, wasAttempted, writeTrialLock } from './receipts.js'
+import { prepareReplayProject } from './replay-project.js'
+import { buildReplaySet, listReplayCases, type ReplayCase, type ReplayMessage } from './replay-set.js'
+
+/** One replay run the host executes. */
+export interface ReplayRunRequest {
+  readonly trialId: string
+  readonly arm: TrialArm
+  readonly set: ReplaySet
+  readonly caseId: string
+  readonly repeat: number
+  /** The run's own project copy. */
+  readonly projectRoot: string
+  /** The real project's ledgers directory: the run's records go there, with `trialId` and `arm`. */
+  readonly ledgersDir: string
+  /** User messages to send, in order, in one new session. */
+  readonly messages: readonly ReplayMessage[]
+  /** Deadline of the whole run. */
+  readonly timeoutMs: number
+}
+
+/** How a run ended, as the runner reports it. */
+export interface ReplayRunResult {
+  /** `completed`: every turn ended (the gate then runs the checks). Anything else is `unknown`. */
+  readonly outcome: 'completed' | 'cancelled' | 'budget' | 'error' | 'timeout'
+  readonly detail?: string
+  /** Sum of the run's model requests (members included). */
+  readonly usage: LLMUsage
+  readonly requestCount: number
+}
+
+/** Runs one replay (the product starts a separate process per run). */
+export interface TrialRunner {
+  run(request: ReplayRunRequest, signal: AbortSignal): Promise<ReplayRunResult>
+}
+
+/** What one arm produced, for the reviewer: the files the run created or changed (text only, truncated). */
+export interface RunOutput {
+  readonly files: readonly { readonly path: string; readonly text: string }[]
+}
+
+/** One reviewer question. */
+export interface ReviewInput {
+  readonly trialId: string
+  readonly set: ReplaySet
+  readonly caseId: string
+  readonly repeat: number
+  readonly messages: readonly ReplayMessage[]
+  readonly candidate: RunOutput
+  readonly baseline: RunOutput
+}
+
+/** The reviewer's answer. */
+export interface ReviewResult {
+  readonly preference: 'candidate' | 'baseline' | 'tie' | 'unknown'
+  readonly reason: string
+  readonly usage: LLMUsage
+  readonly requestCount: number
+}
+
+/** The reviewer model (decision 5); its requests carry `trialId` without `arm`. */
+export interface TrialReviewer {
+  review(input: ReviewInput, settings: TrialPlan['reviewer'], signal: AbortSignal): Promise<ReviewResult>
+}
+
+/** Options of {@link runGate}. */
+export interface GateOptions {
+  readonly layout: WorkspaceLayout
+  readonly candidateId: string
+  readonly runner: TrialRunner
+  /** Without one, a tie the cost does not settle rejects (`no-improvement`). */
+  readonly reviewer?: TrialReviewer
+  readonly signal?: AbortSignal
+  /** Deadline of one run (default 30 minutes). */
+  readonly runTimeoutMs?: number
+  /** Parent directory of the run copies (default the OS temporary directory). */
+  readonly tempRoot?: string
+  /** Progress, one call per receipt line. */
+  readonly onReceipt?: (receipt: TrialReceipt, progress: { readonly runsDone: number; readonly runsTotal: number }) => void
+  /** Called after the decision was written (the plugin appends the ledger's `capability.decision`). */
+  readonly onDecision?: (decision: CapabilityDecision) => Promise<void> | void
+  /** Diagnostics a receipt does not carry (why a run ended `unknown`); the product writes them to the gate's log. */
+  readonly log?: (line: string) => void
+  readonly now?: () => Date
+}
+
+/** What {@link runGate} did. */
+export type GateResult =
+  /** Not enough replayable history: nothing was written; the gate can run again later. */
+  | { readonly status: 'waiting'; readonly detail: string }
+  /** The candidate was tried before, or already has a decision: nothing was written. */
+  | { readonly status: 'skipped'; readonly detail: string }
+  | { readonly status: 'decided'; readonly trialId: string; readonly verdict: TrialVerdict; readonly decision: CapabilityDecision }
+
+const RUN_TIMEOUT_MS = 30 * 60_000
+const OUTPUT_FILES = 12
+const OUTPUT_CHARS = 6_000
+
+function tokensOf(usage: LLMUsage): number | 'unknown' {
+  return typeof usage.inputTokens === 'number' && typeof usage.outputTokens === 'number' ? usage.inputTokens + usage.outputTokens : 'unknown'
+}
+
+function knownTokens(usage: LLMUsage): number {
+  return (typeof usage.inputTokens === 'number' ? usage.inputTokens : 0) + (typeof usage.outputTokens === 'number' ? usage.outputTokens : 0)
+}
+
+function cost(usage: LLMUsage, requestCount: number): TrialCost {
+  return { usage, requestCount, estimatedUsd: 'unknown' }
+}
+
+class CostTotal {
+  usage: LLMUsage = ZERO_USAGE
+  requests = 0
+  add(usage: LLMUsage, requests: number): void {
+    this.usage = addUsage(this.usage, usage)
+    this.requests += requests
+  }
+  get cost(): TrialCost {
+    return cost(this.usage, this.requests)
+  }
+}
+
+function emptyTally(): ArmTally {
+  return { passed: 0, failed: 0, unknown: 0 }
+}
+
+function bump(tally: ArmTally, status: TrialStatus): ArmTally {
+  return status === 'pass' ? { ...tally, passed: tally.passed + 1 } : status === 'fail' ? { ...tally, failed: tally.failed + 1 } : { ...tally, unknown: tally.unknown + 1 }
+}
+
+/** Files of the copy the run created or changed (text, truncated), for the reviewer. */
+async function runOutput(root: string, before: ReadonlyMap<string, string>): Promise<RunOutput> {
+  const files: { path: string; text: string }[] = []
+  const visit = async (directory: string, prefix: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
+      if (files.length >= OUTPUT_FILES) return
+      const path = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+      if (entry.isDirectory()) {
+        if (['.nexgent', '.git', 'node_modules'].includes(entry.name)) continue
+        await visit(join(directory, entry.name), path)
+      } else if (entry.isFile()) {
+        const bytes = await readFile(join(directory, entry.name)).catch(() => undefined)
+        if (bytes === undefined) continue
+        if (before.get(path) === createHash('sha256').update(bytes).digest('hex')) continue
+        let text: string
+        try {
+          text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+        } catch {
+          text = `(binary, ${bytes.byteLength} bytes)`
+        }
+        files.push({ path, text: text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n…(truncated)` : text })
+      }
+    }
+  }
+  await visit(root, '')
+  return { files: files.sort((left, right) => (left.path < right.path ? -1 : 1)) }
+}
+
+function remaining(budget: TrialBudget, spent: { tokens: number; requests: number }): TrialBudget | undefined {
+  const tokens = budget.maxTokens === undefined ? undefined : budget.maxTokens - spent.tokens
+  const requests = budget.maxRequests === undefined ? undefined : budget.maxRequests - spent.requests
+  if ((tokens !== undefined && tokens <= 0) || (requests !== undefined && requests <= 0)) return undefined
+  return { ...(tokens === undefined ? {} : { maxTokens: tokens }), ...(requests === undefined ? {} : { maxRequests: requests }) }
+}
+
+function unknownReason(outcome: ReplayRunResult['outcome']): TrialUnknownReason {
+  return outcome === 'completed' ? 'error' : outcome
+}
+
+function explain(verdict: TrialVerdict, tally: { selection: { candidate: ArmTally; baseline: ArmTally }; guard: { candidate: ArmTally; baseline: ArmTally } }, review: { candidate: number; baseline: number; tie: number }, extra?: string): string {
+  const rate = (value: number) => `${Math.round(value * 100)}%`
+  const parts = [
+    `${verdict.outcome} (${verdict.reason}).`,
+    `Selection checks passed: candidate ${rate(verdict.passRate.candidate)}, baseline ${rate(verdict.passRate.baseline)}`
+      + ` (runs pass/fail/unknown ${tally.selection.candidate.passed}/${tally.selection.candidate.failed}/${tally.selection.candidate.unknown}`
+      + ` vs ${tally.selection.baseline.passed}/${tally.selection.baseline.failed}/${tally.selection.baseline.unknown}).`,
+    `Guard runs passed: candidate ${tally.guard.candidate.passed}, baseline ${tally.guard.baseline.passed}.`,
+    `Token ratio candidate/baseline: ${verdict.costRatio === 'unknown' ? 'unknown' : verdict.costRatio.toFixed(3)}.`,
+    review.candidate + review.baseline + review.tie > 0
+      ? `Reviewer model (separate from the checks): candidate ${review.candidate}, baseline ${review.baseline}, tie ${review.tie}${verdict.decidedByReview ? '; it decided this verdict' : ''}.`
+      : 'No reviewer opinion was needed.',
+    ...(extra === undefined ? [] : [extra]),
+  ]
+  return parts.join(' ')
+}
+
+/**
+ * Run the gate for one candidate. Never throws for a run that fails: such a
+ * run is `unknown`. Throws only when the candidate cannot be read or the
+ * project's files cannot be written.
+ */
+export async function runGate(options: GateOptions): Promise<GateResult> {
+  const { layout } = options
+  const now = options.now ?? (() => new Date())
+  const capabilitiesDir = layout.capabilities
+  const store = new CapabilityStore(capabilitiesDir, { now, ...(options.onDecision === undefined ? {} : { onDecision: options.onDecision }) })
+  const candidate: CandidateRecord = await readCandidate(capabilitiesDir, options.candidateId)
+  if ((await store.decisions()).some(decision => decision.candidateId === candidate.id)) {
+    return { status: 'skipped', detail: `candidate ${candidate.id} already has a decision` }
+  }
+  if (await wasAttempted(capabilitiesDir, candidate.id)) return { status: 'skipped', detail: `candidate ${candidate.id} was tried before; a candidate is tried once` }
+
+  const settings = (await readProjectConfig(layout.configFile)).config.capabilities
+  const set = buildReplaySet(await listReplayCases(layout), candidate.taskId, { selection: settings.selectionCases, guard: settings.guardCases })
+  if (set.status === 'waiting') return { status: 'waiting', detail: set.detail }
+
+  if (!(await claimAttempt(capabilitiesDir, candidate.id))) return { status: 'skipped', detail: `candidate ${candidate.id} is being or was tried by another process` }
+  const observed: Activation = await store.activation()
+  const baselineVersion: CapabilityVersion = observed.version
+  const plan: TrialPlan = {
+    selection: set.selection.map(({ caseId, sessionId, tree, checks }) => ({ caseId, sessionId, tree, checks })),
+    guard: set.guard.map(({ caseId, sessionId, tree, checks }) => ({ caseId, sessionId, tree, checks })),
+    repeats: settings.repeats,
+    costRatioCap: settings.costRatioCap,
+    reviewer: settings.reviewer,
+    budget: settings.trialBudget,
+  }
+  const trialId = randomUUID()
+  const receipts = await TrialReceiptWriter.create(capabilitiesDir, trialId, now)
+  await writeTrialLock(capabilitiesDir, trialId)
+  const signal = options.signal ?? new AbortController().signal
+  const runsTotal = (plan.selection.length + plan.guard.length) * plan.repeats * 2
+  let runsDone = 0
+  const emit = (receipt: TrialReceipt) => options.onReceipt?.(receipt, { runsDone, runsTotal })
+  try {
+    emit(await receipts.append({ type: 'trial.start', candidateId: candidate.id, candidateVersion: candidate.version, baselineVersion, plan }))
+
+    const arms: Record<TrialArm, CostTotal> = { candidate: new CostTotal(), baseline: new CostTotal() }
+    const reviewCost = new CostTotal()
+    const tokens: Record<TrialArm, number | 'unknown'> = { candidate: 0, baseline: 0 }
+    const spent = () => ({ tokens: knownTokens(addUsage(arms.candidate.usage, arms.baseline.usage, reviewCost.usage)), requests: arms.candidate.requests + arms.baseline.requests + reviewCost.requests })
+    const tally = { selection: { candidate: emptyTally(), baseline: emptyTally() }, guard: { candidate: emptyTally(), baseline: emptyTally() } }
+    const outputs = new Map<string, RunOutput>()
+    let budgetExhausted = false
+
+    const runOne = async (half: ReplaySet, replay: ReplayCase, repeat: number, arm: TrialArm): Promise<void> => {
+      const started = Date.now()
+      const left = remaining(plan.budget, spent())
+      let status: TrialStatus = 'unknown'
+      let reason: TrialUnknownReason | undefined
+      let checks: TaskCheck[] = []
+      let runCost = cost(ZERO_USAGE, 0)
+      if (left === undefined || signal.aborted) {
+        reason = signal.aborted ? 'cancelled' : 'budget'
+        if (reason === 'budget') budgetExhausted = true
+      } else {
+        let project: Awaited<ReturnType<typeof prepareReplayProject>> | undefined
+        try {
+          project = await prepareReplayProject({
+            layout,
+            replay,
+            version: arm === 'candidate' ? candidate.version : baselineVersion,
+            budget: left,
+            ...(options.tempRoot === undefined ? {} : { tempRoot: options.tempRoot }),
+          })
+          const result = await options.runner.run({
+            trialId,
+            arm,
+            set: half,
+            caseId: replay.caseId,
+            repeat,
+            projectRoot: project.root,
+            ledgersDir: layout.ledgers,
+            messages: replay.messages,
+            timeoutMs: options.runTimeoutMs ?? RUN_TIMEOUT_MS,
+          }, signal)
+          runCost = cost(result.usage, result.requestCount)
+          arms[arm].add(result.usage, result.requestCount)
+          const runTokens = tokensOf(result.usage)
+          tokens[arm] = tokens[arm] === 'unknown' || runTokens === 'unknown' ? 'unknown' : tokens[arm] + runTokens
+          if (result.outcome === 'completed') {
+            checks = await runCheckSpecs(project.root, replay.checks, { signal })
+            status = checks.every(check => check.passed) ? 'pass' : 'fail'
+            if (half === 'selection') outputs.set(`${replay.caseId}#${repeat}#${arm}`, await runOutput(project.root, project.files))
+          } else {
+            reason = unknownReason(result.outcome)
+            if (result.outcome === 'budget') budgetExhausted = true
+            options.log?.(`run ${half} ${replay.caseId}#${repeat} ${arm}: ${result.outcome}${result.detail === undefined ? '' : ` (${result.detail})`}`)
+          }
+        } catch (error) {
+          reason = 'error'
+          options.log?.(`run ${half} ${replay.caseId}#${repeat} ${arm}: ${(error as Error).message}`)
+        } finally {
+          await project?.dispose().catch(() => undefined)
+        }
+      }
+      tally[half][arm] = bump(tally[half][arm], status)
+      runsDone += 1
+      emit(await receipts.append({
+        type: 'trial.run',
+        set: half,
+        caseId: replay.caseId,
+        arm,
+        repeat,
+        status,
+        ...(reason === undefined ? {} : { reason }),
+        checks,
+        cost: runCost,
+        durationMs: Date.now() - started,
+      }))
+    }
+
+    const cases: [ReplaySet, readonly ReplayCase[]][] = [['selection', set.selection], ['guard', set.guard]]
+    outer: for (const [half, list] of cases) {
+      for (const replay of list) {
+        for (let repeat = 1; repeat <= plan.repeats; repeat += 1) {
+          for (const arm of ['candidate', 'baseline'] as const) {
+            await runOne(half, replay, repeat, arm)
+            if (budgetExhausted || signal.aborted) break outer
+          }
+        }
+      }
+    }
+
+    const review = { candidate: 0, baseline: 0, tie: 0 }
+    const verdictOf = () => decideTrial({
+      selection: tally.selection,
+      guard: tally.guard,
+      review,
+      tokens,
+      budgetExhausted,
+      requiresApproval: candidate.requiresApproval,
+    }, plan.costRatioCap)
+    let verdict = verdictOf()
+    // The reviewer is asked only when its opinion can change the verdict: a check tie the cost does not settle.
+    const needsReview = !budgetExhausted && verdict.reason === 'no-improvement' && verdict.costRatio !== 'unknown' && verdict.costRatio <= plan.costRatioCap
+    if (needsReview && options.reviewer !== undefined) {
+      for (const replay of set.selection) {
+        for (let repeat = 1; repeat <= plan.repeats; repeat += 1) {
+          const candidateOutput = outputs.get(`${replay.caseId}#${repeat}#candidate`)
+          const baselineOutput = outputs.get(`${replay.caseId}#${repeat}#baseline`)
+          if (candidateOutput === undefined || baselineOutput === undefined) continue
+          if (remaining(plan.budget, spent()) === undefined) {
+            budgetExhausted = true
+            break
+          }
+          let result: ReviewResult
+          try {
+            result = await options.reviewer.review({ trialId, set: 'selection', caseId: replay.caseId, repeat, messages: replay.messages, candidate: candidateOutput, baseline: baselineOutput }, plan.reviewer, signal)
+          } catch (error) {
+            result = { preference: 'unknown', reason: `the reviewer failed: ${(error as Error).message}`.slice(0, 2_000), usage: ZERO_USAGE, requestCount: 0 }
+          }
+          reviewCost.add(result.usage, result.requestCount)
+          if (result.preference !== 'unknown') review[result.preference] += 1
+          emit(await receipts.append({
+            type: 'trial.review',
+            set: 'selection',
+            caseId: replay.caseId,
+            repeat,
+            preference: result.preference,
+            reason: result.reason.slice(0, 2_000) || '(no reason given)',
+            model: plan.reviewer.model,
+            cost: cost(result.usage, result.requestCount),
+          }))
+        }
+        if (budgetExhausted) break
+      }
+      verdict = verdictOf()
+    }
+
+    const costs = { candidate: arms.candidate.cost, baseline: arms.baseline.cost, review: reviewCost.cost }
+    const status: TrialStatus = verdict.reason === 'unknown-runs' || verdict.reason === 'budget-exhausted' ? 'unknown' : verdict.outcome === 'reject' ? 'fail' : 'pass'
+    emit(await receipts.append({ type: 'trial.end', status, verdict, cost: costs }))
+
+    const common = { candidateId: candidate.id, trialId, verdict, cost: costs }
+    let decision: CapabilityDecision
+    if (verdict.outcome === 'adopt') {
+      const committed = await store.adopt(candidate.version, { trigger: 'gate', reason: verdict.reason, detail: explain(verdict, tally, review), ...common }, observed).catch(() => null)
+      decision = committed?.decision ?? await store.recordDecision({
+        outcome: 'rejected',
+        reason: 'interrupted',
+        trigger: 'gate',
+        fromVersion: baselineVersion,
+        toVersion: baselineVersion,
+        ...common,
+        detail: explain(verdict, tally, review, 'The adopted version changed while the trial ran, so this result was not applied.'),
+      })
+    } else {
+      decision = await store.recordDecision({
+        outcome: verdict.outcome === 'await-approval' ? 'awaiting-approval' : 'rejected',
+        reason: verdict.reason,
+        trigger: 'gate',
+        fromVersion: baselineVersion,
+        toVersion: baselineVersion,
+        ...common,
+        detail: explain(verdict, tally, review, verdict.outcome === 'await-approval' ? 'The candidate contains a plugin: it is adopted only after the user approves it.' : undefined),
+      })
+    }
+    return { status: 'decided', trialId, verdict, decision }
+  } finally {
+    await receipts.close().catch(() => undefined)
+    await releaseTrialLock(capabilitiesDir, trialId).catch(() => undefined)
+  }
+}
