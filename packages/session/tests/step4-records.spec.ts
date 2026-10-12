@@ -2,10 +2,12 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import {
   BASELINE_VERSION,
+  pluginApprovalInfo,
   resolveWorkspaceLayout,
   UNKNOWN_USAGE,
   type CapabilityDecision,
   type CandidateRecord,
+  type PluginSpec,
   type SessionRecordInput,
   type TaskChecksRecord,
   type TaskSnapshotRecord,
@@ -166,6 +168,14 @@ describe('capability file schema', () => {
   it.each(Object.keys(CAPABILITY_FILE_DEFS) as CapabilityFileKind[])('accepts valid and rejects invalid %s files', (kind) => {
     for (const value of VALID[kind]) expect(validateCapabilityFile(kind, JSON.parse(JSON.stringify(value)) as unknown)).toEqual([])
     for (const value of INVALID[kind]) expect(validateCapabilityFile(kind, JSON.parse(JSON.stringify(value)) as unknown), JSON.stringify(value).slice(0, 80)).not.toEqual([])
+  })
+
+  it('a validated plugin.json round-trips into the approval dialog info', () => {
+    const text = JSON.stringify(VALID.plugin[0])
+    const spec = JSON.parse(text) as unknown
+    expect(validateCapabilityFile('plugin', spec)).toEqual([])
+    const info = pluginApprovalInfo(spec as PluginSpec)
+    expect(JSON.parse(JSON.stringify(info))).toEqual({ name: 'git-notes', description: 'Notes', permissions: 'Reads .git', tools: ['git_note'] })
   })
 
   it('is published verbatim as schema/capabilities.v1.schema.json', async () => {

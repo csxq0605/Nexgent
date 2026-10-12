@@ -136,7 +136,7 @@
 步骤 4（决定 9）。插件组件（`plugin`）是在宿主进程内装载的代码，不在沙箱里，所以两步各问一次用户，任何沙箱模式下都问（`read-only` 下也问，因为装载本身不写项目）：
 
 1. **试用**：`capability_try` 装载 `plugin` 草稿之前，以“始终审批”类请求询问（`risk: high`，选项只有 `once`），对话框显示 `plugin.json` 的 `description`、`permissions` 与将注册的工具名。拒绝则该调用返回 `approval/denied`，插件不装载。
-2. **采用**：门控对含插件的候选给出 `await-approval` 后，不写修订；用户在桌面应用或 SDK 里 `capabilities.approve(candidateId, allow)` 时才写 `approval` 触发的修订与 `adopted` 决定，拒绝写 `rejected` 决定（`approval-denied`）。
+2. **采用**：门控对含插件的候选给出 `await-approval` 后，不写修订；对话框显示候选里每个插件的 `description`、`permissions`、工具名（SDK `capabilities.show` 的 `plugins`，契约 `PluginApprovalInfo`）与文件哈希，任一插件的 `plugin.json` 读不出或不合格时不提供“允许”；用户在桌面应用或 SDK 里 `capabilities.approve(candidateId, allow)` 时才写 `approval` 触发的修订与 `adopted` 决定，拒绝写 `rejected` 决定（`approval-denied`）。
 
 规则：
 

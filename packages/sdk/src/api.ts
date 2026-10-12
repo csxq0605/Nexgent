@@ -35,6 +35,7 @@ import type {
   CapabilityVersion,
   DecisionOutcome,
   DecisionReason,
+  PluginApprovalInfo,
   TrialReceipt,
   TrialStatus,
   ApprovalRequest,
@@ -308,6 +309,15 @@ export interface CandidateDetail {
   /** Receipts of every trial of this candidate, in file order. */
   readonly receipts: readonly TrialReceipt[]
   readonly decisions: readonly CapabilityDecision[]
+  /**
+   * One entry per `plugin` component of the record, in component order,
+   * built with `pluginApprovalInfo` from the candidate's copy of
+   * `plugins/<name>/plugin.json`. Present whenever the record has a plugin
+   * component; absent otherwise. When a plugin's `plugin.json` cannot be read
+   * or fails validation, its entry is missing, and the approval dialog must
+   * not offer `allow` for the candidate.
+   */
+  readonly plugins?: readonly PluginApprovalInfo[]
 }
 
 /** `capabilities.list`. */
