@@ -487,7 +487,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 | 种类 | 入口文件 | 内容 | 生效方式 |
 | --- | --- | --- | --- |
-| `function-module` | `functions.json` | `{ formatVersion, name, description, entry?, functions[] }`，每个函数 `{ name, description, inputSchema, effects }`，`effects` 取 `read \| write \| network` | 每个函数成为模型工具 `cap_<module>_<function>`（≤64 字符），在与 `run_code` 同类的隔离 Node 进程里执行 |
+| `function-module` | `functions.json` | `{ formatVersion, name, description, entry?, functions[] }`，每个函数 `{ name, description, inputSchema, effects }`，`effects` 取 `read \| write \| network` | 每个函数成为模型工具 `cap_<module>_<function>`（≤64 字符；是工具名通用规则 `^[a-z][a-z0-9_]*$` 之外唯一允许的形式，kernel `isValidToolName`），在与 `run_code` 同类的隔离 Node 进程里执行 |
 | `plugin` | `plugin.json` | `{ formatVersion, name, description, entry?, permissions, tools? }` | 宿主进程内装载的 Nexgent 插件；试用与采用各需一次审批 |
 | `skill` | `SKILL.md` | 与项目技能同格式（`agent-hooks.md` §技能） | 加入技能列表 |
 | `context-policy` | `policy.json` | 白名单字段 `formatVersion, name, description, instructions?, personaSuffix?, compaction?` | `instructions` 作为系统提示的 `# Learned practices` 段；`personaSuffix` 接在人设尾段后；`compaction` 覆盖压缩阈值（10 000–1 000 000）与保留轮数（1–10） |
