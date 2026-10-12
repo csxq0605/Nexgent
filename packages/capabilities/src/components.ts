@@ -45,7 +45,9 @@ export type ComponentSpec =
   | { readonly kind: 'plugin'; readonly spec: PluginSpec; readonly entry: string; readonly tools: readonly string[] }
   | { readonly kind: 'context-policy'; readonly spec: ContextPolicySpec }
   | { readonly kind: 'team-template'; readonly spec: TeamTemplateSpec }
-  | { readonly kind: 'skill' | 'preset' | 'architecture' }
+  | { readonly kind: 'skill' | 'preset' }
+  /** `graph`: the `architecture` of `architecture.json` when it parses (the workflow plugin's validator checks it). */
+  | { readonly kind: 'architecture'; readonly graph?: unknown }
 
 const SCHEMA_KIND: Partial<Record<CapabilityComponentKind, CapabilityFileKind>> = {
   'function-module': 'functionModule',
@@ -147,7 +149,19 @@ export async function validateComponent(component: CapabilityComponentRef, files
     }
     result = { kind: 'preset' }
   } else {
-    result = { kind: component.kind as 'skill' | 'architecture' }
+    if (component.kind === 'architecture') {
+      const raw = text(files, COMPONENT_ENTRY_FILES.architecture)
+      if (raw === undefined) invalid(component, `missing entry file ${COMPONENT_ENTRY_FILES.architecture}`)
+      let graph: unknown
+      try {
+        graph = (JSON.parse(raw) as { architecture?: unknown } | null)?.architecture
+      } catch {
+        graph = undefined
+      }
+      result = graph === undefined ? { kind: 'architecture' } : { kind: 'architecture', graph }
+    } else {
+      result = { kind: 'skill' }
+    }
   }
   const extra = validators.get(component.kind)
   if (extra !== undefined) {

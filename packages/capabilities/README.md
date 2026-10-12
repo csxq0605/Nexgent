@@ -31,7 +31,8 @@
 - `resolveVersion(recorded?)`：新会话取链尾；校验失败或组件不合格就写 `load-failure` 回滚（`trigger: 'load-failure'`），退回上一可用版本，直到 `baseline`。恢复会话传入记录的版本，仍可用就沿用，否则返回 `switched: { reason: 'unavailable' }` 供宿主写 `capability.version`。链损坏且链尾不可用时按 `baseline` 运行，不写任何修订。
 - `status()`：当前版本、修订号、组件与 `problem`（链损坏或校验失败时给用户看的一句话，对应 SDK `CapabilityVersionView.problem`）。
 - `bindSession` / `sessionVersion` / `components(sessionId, kind?)`：会话的组件 = 其版本的组件，被本会话试用的同名组件覆盖。其他会话看不到试用的组件。
-- `attach(sessionId)`：把函数模块与插件的工具注册进该会话 agent 的作用域（随会话释放）；`capabilities` 上下文提供者在每轮开始调用它。
+- `ctx.capabilityHost`（kernel 的步骤 4 接口，`packages/kernel/src/capability-hooks.ts`）：`current` 取链尾（必要时先回滚），`verify` 检查恢复会话记录的版本，`attach` 把版本的组件装进 kernel 交来的 agent 作用域（恢复的根会话同时装回它试用过的非插件草稿），`componentOf` 认出团队模板（按队友名）与工作流图（同一张图）的使用。
+- `attach(sessionId)`：把函数模块与插件的工具注册进该会话 agent 的作用域（随会话释放）；`capabilities` 上下文提供者在每轮开始调用它，没有 kernel 接入的宿主也能用。
 - `toolComponent(sessionId, tool)`：工具属于哪个组件与版本（供 `componentsUsed`）。
 
 各包的来源入口（只加入口，不改别的行为）：
@@ -60,8 +61,8 @@
 
 ## Known Limitations and Deferred Work
 
-- 本包不改 kernel：`capability.*` 工具记录的白名单、会话打开时取版本并写 `session.start` / `capability.version`、SDK profile 加 `@nexgent/capabilities` 一行，归 W1 / W4。
+- SDK profile 还没有 `@nexgent/capabilities` 一行（归 W4），所以 SDK、CLI、桌面里还看不到三个工具。
 - 契约 `functionToolName` 允许带横线与大写的名字（如 `cap_order-summary_summarizeOrders`），而 kernel 的工具名规则是 `^[a-z][a-z0-9_]*$`，这种函数模块现在会在注册时被拒；等契约或 kernel 统一。
 - 契约 `SkillSource` 没有能力包来源，能力包技能标为 `project`；`workflow` 工具不能按名字引用已采用的图；`personaSuffix` 输出在 `# Learned practices` 节，没有接到人设段落。
-- 进程重启后，试用过的草稿不会自动重新加载（会话需再次 `capability_try`）。
+- 恢复的会话不会自动重新加载试用过的插件（重新加载要再问一次用户），需要再次 `capability_try`。
 - 能力包目录不设只读属性，完整性只靠加载时校验；Windows 上的硬链接发布与目录改名竞争还没有实跑。
