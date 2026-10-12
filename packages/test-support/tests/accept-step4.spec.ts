@@ -33,7 +33,7 @@ const STEP4 = range('H', 1, 18)
 /** Of those, the ones that pass on today's product: all of them since the gate (W3) and its scenario landed. */
 const PASSING = STEP4
 /** Wired so far: the regressions (round 1), STEP4 and D15–D18. Everything else must report not-implemented. */
-const WIRED = new Set(['H19', ...range('D', 1, 18), ...STEP4])
+const WIRED = new Set(['H19', ...range('D', 1, 18), ...STEP4, ...range('R', 1, 6)])
 
 describe('accept-step4 checklist', () => {
   it('has every item of the step-4 plan in order, plus the D01–D14 regression', async () => {
@@ -77,6 +77,12 @@ describe('accept-step4 checklist', () => {
       expect(await evaluateItem(check, { capabilitiesError: 'boom' }), id).toEqual({ status: 'failed', evidence: 'capabilities desktop scenario failed: boom' })
       expect(await evaluateItem(check, {}), id).toEqual({ status: 'failed', evidence: 'capabilities desktop scenario did not run' })
     }
+    for (const id of range('R', 1, 6)) {
+      const check = CHECKS.find(c => c.id === id)!
+      expect(await evaluateItem(check, { scenarioError: 'boom' }), id).toEqual({ status: 'failed', evidence: 'real scenario failed: boom' })
+      expect(await evaluateItem(check, {}), id).toEqual({ status: 'failed', evidence: 'the real scenario did not run' })
+    }
+    expect(await evaluateItem(CHECKS.find(c => c.id === 'R07')!, {})).toEqual({ status: 'not-implemented', evidence: 'not implemented yet' })
   })
 
   it('real-model facts follow the user decisions: thinking on, 15 USD', () => {
@@ -154,7 +160,7 @@ describe('scripts/accept-step4.mjs (requires `pnpm build`)', () => {
     for (const point of points) expect(point, `${point.name}: ${point.detail}`).toMatchObject({ passed: true, detail: expect.stringMatching(/^passed: /) })
   }, 600_000)
 
-  it('real layer: not runnable without a key, and with a key still calls no model (nothing wired); exit 2 both ways', async () => {
+  it('real layer: not runnable without a key (exit 2); with a key on a loopback server it is not real-model evidence (exit 1)', async () => {
     const keyless = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: undefined, ANTHROPIC_API_KEY: undefined })
     expect(keyless.result.status, keyless.result.stderr).toBe(EXIT_NOT_READY)
     expect(keyless.result.stderr).toContain('no API key')
@@ -163,13 +169,16 @@ describe('scripts/accept-step4.mjs (requires `pnpm build`)', () => {
     for (const check of keyless.summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'not-implemented' })
 
     const key = 'sk-ant-accept4-test-value'
-    // A base URL nothing listens on: any model call would fail loudly instead of reaching a real API.
+    // A base URL nothing listens on: any model call fails loudly instead of reaching a real API.
     const keyed = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: key, NEXGENT_API_BASE_URL: 'http://127.0.0.1:9' })
-    expect(keyed.result.status, keyed.result.stderr).toBe(EXIT_NOT_READY)
-    expect(keyed.summary?.realModel).toBeNull()
-    for (const check of keyed.summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'not-implemented' })
+    expect(keyed.result.status, keyed.result.stderr).toBe(EXIT_FAIL)
+    expect(validateAcceptanceSummary(keyed.summary)).toEqual({ valid: true, errors: [] })
+    expect(keyed.summary?.realModel).toMatchObject({ result: 'fail' })
+    expect(keyed.summary?.realModel?.runNote).toContain('NOT a real-model run')
+    expect(keyed.summary?.checks.map(check => check.id)).toEqual(range('R', 1, 6))
+    for (const check of keyed.summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'failed' })
     expect(keyed.raw + keyed.result.stderr + keyed.result.stdout).not.toContain(key)
-  }, 90_000)
+  }, 180_000)
 
   it('rejects an unknown layer with exit 1', async () => {
     const { result } = await runScript(['--layer', 'ui'])

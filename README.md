@@ -35,7 +35,16 @@ Nexgent 正在重写为一个 TypeScript 独立应用（Electron 桌面应用 + 
   - 主干上没有 Python 文件。
   - 真实 Claude Sonnet 5.5（thinking 开）在 Linux 上用直接、委派、团队、工作流四种形态，以及不指定形态，各完成了一次两轮补货表格任务（生成，再按反馈修改），结果由脚本独立检查。这不说明协作形态比直接执行更好或更省。
 
-**尚未验证：** macOS；Windows 安装包（Windows 上只验证了从源码运行）；真实模型下的上下文压缩；在桌面应用里接真实模型；Windows 上的真实模型协作任务；协作形态的成功率与收益。
+- **步骤 4**（[`step-4-20261012.md`](docs/validation/step-4-20261012.md)，脚本化验收在 Linux 与 Windows 都通过；验收记录等待用户认可），经脚本化验收证明：
+  - 能力版本：任务里起草、试用函数模块与技能，只在本会话可用，草稿区文件工具读写都拒绝；只有成功调用过的组件能提交为候选；能力包内容寻址，写成后不可改；
+  - 门控：历史不足时等待；候选与当前版本在回放集上两侧各跑多次，按检查、费用与（打平时）评审模型决定采用或拒绝；被拒候选的组件、回执、费用与原因保留；试验额度用尽时结论为 unknown，不采用；试验不改真实项目；门控进程被强杀后不重复采用；
+  - 新 OS 进程里的任务自动加载已采用版本并调用组件，账本记录版本与 componentsUsed；
+  - 自动回滚：已采用组件连续出错，或能力包被篡改导致加载失败时，退回上一版本；
+  - 上下文策略不能改审批、费用、沙箱与门控；插件试用与采用各审批一次；成员不能开发组件；
+  - 桌面应用：右栏显示当前能力版本，候选状态与拒绝原因可见，插件审批框，手动回滚。
+  - 真实 Claude Sonnet 5.5（thinking 开）在 Linux 上跑通一次主链：任务 A 开发并使用一个函数模块，门控以更省采用，新进程里的任务 B 自动调用它，注入退化后 3 个任务内自动回滚到原版本。所有回放两侧检查都通过，所以这不说明能力版本让任务更准；门控的采用率没有统计。
+
+**尚未验证：** macOS；Windows 安装包（Windows 上只验证了从源码运行）；真实模型下的上下文压缩；在桌面应用里接真实模型；Windows 上的真实模型协作任务；协作形态的成功率与收益；Windows 上真实模型的能力版本与门控；能力版本对任务质量的收益。
 
 ## 启动
 
@@ -63,7 +72,7 @@ node apps/cli/bin/nexgent.mjs export <sessionId> --project <dir>
 - 安装、打包与数据目录见 [docs/install.md](docs/install.md)；CLI 的参数与退出码见 [apps/cli/README.md](apps/cli/README.md)。
 - 桌面应用的设置页也能填写密钥，写入 `~/.nexgent/credentials.json`（权限 0600）。
 - Linux 以 root 运行桌面应用时要加 `--no-sandbox`。
-- 测试与验收：`pnpm test`（脚本化 provider，不需要密钥）；`node scripts/accept-step2.mjs`（无界面层与桌面层）；`node scripts/accept-step2.mjs --layer real`（真实模型，需要密钥）；步骤 3 同理用 `scripts/accept-step3.mjs`。
+- 测试与验收：`pnpm test`（脚本化 provider，不需要密钥）；`node scripts/accept-step2.mjs`（无界面层与桌面层）；`node scripts/accept-step2.mjs --layer real`（真实模型，需要密钥）；步骤 3、4 同理用 `scripts/accept-step3.mjs`、`scripts/accept-step4.mjs`。
 
 ## 旧产品
 

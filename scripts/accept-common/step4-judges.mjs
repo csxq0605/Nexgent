@@ -421,6 +421,7 @@ export const JUDGES = {
       [w.trials === 0 && w.decisions === 0 && !Object.keys(w.files ?? {}).some(name => name.endsWith('.attempt') || name.endsWith('.lock')), 'it wrote no receipt, attempt marker, lock or decision'],
       [w.trial?.code === 'tool/invalid-input' && /cannot run yet/.test(w.trial?.error ?? ''), `capabilities.trial refused to start (got ${JSON.stringify(w.trial)})`],
       [w.status === 'proposed', `the candidate stayed proposed (got ${w.status})`],
+      [['trialing', 'adopted'].includes(g.retry?.sameApp?.status), `with enough history capabilities.trial started the gate in the same app (got ${JSON.stringify(g.retry?.sameApp)})`],
       [selection.length === GATE.selectionCases && guard.length === GATE.guardCases, `with enough history the plan has ${GATE.selectionCases} selection and ${GATE.guardCases} guard cases (got ${selection.length} + ${guard.length})`],
       [!selection.some(id => guard.includes(id)), 'selection and guard do not overlap'],
       [selection[0] === ids('A0'), 'the selection starts with the task that proposed the candidate'],

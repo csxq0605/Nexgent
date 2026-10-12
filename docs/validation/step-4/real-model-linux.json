@@ -1,0 +1,116 @@
+{
+  "kind": "nexgent.acceptance-summary",
+  "schemaVersion": 1,
+  "result": "pass",
+  "step": {
+    "number": 4,
+    "name": "能力变化进入真实运行",
+    "exitCriteria": [
+      "跨任务、跨进程实际调用：任务 A 开发并使用的组件经门控采用后，新 OS 进程里的任务 B 自动加载并调用它，账本可证",
+      "自动回滚：注入一次退化后，宿主自动退回上一版本，之后的任务用回旧版本，账本与采用历史可证",
+      "被拒候选留档：门控判定变差的候选保留组件、回放结果、费用与拒绝原因，原版本照常可用",
+      "`accept-step4` 无界面层与桌面层在 Linux 本地通过（脚本化 provider）；验收前 Windows 手动运行一次",
+      "真实模型一次（Linux，thinking 开）主链跑通；验收记录 docs/validation/step-4-<日期>.md 经用户认可；工作留在 nexgent-app"
+    ],
+    "script": "scripts/accept-step4.mjs"
+  },
+  "date": {
+    "acceptedAt": "2026-10-12T17:43:16.927Z",
+    "commitRange": null
+  },
+  "source": {
+    "branch": "claude/test-ci-ns3s7s",
+    "commit": "8fc2f9f8eae709220ed526dca7f980bb5ab8e955",
+    "pullRequests": []
+  },
+  "environment": {
+    "platform": "linux",
+    "os": "Linux 6.18.44-fc-v114",
+    "node": "v22.22.0",
+    "pnpm": "unknown",
+    "other": {}
+  },
+  "scripted": null,
+  "realModel": {
+    "model": "claude-sonnet-5-5",
+    "thinking": "on",
+    "task": "scripts/real-task/step4-orders: monthly order summaries; history tasks, task A builds a reusable function or skill, gate, task B in a new process, injected regression",
+    "callCount": 102,
+    "knownTokens": {
+      "input": 244,
+      "output": 22683
+    },
+    "unknownCount": 0,
+    "cost": 1.5732,
+    "result": "pass",
+    "summaryFile": null,
+    "runNote": "key from NEXGENT_API_KEY; budget left before this run 10.91 USD; tasks history1, history2, A, B, regress1, regress2, regress3, afterRollback; trial ~0.9195 USD of the total; raw records in validation-raw/step-4-20261012/linux-run6/real (project library)",
+    "unknownSources": []
+  },
+  "ledger": null,
+  "failures": {
+    "failedCases": [],
+    "untested": [
+      "R07 （可选，不进门槛）Windows 上 R02–R04: not implemented yet"
+    ],
+    "knownIssues": []
+  },
+  "conclusion": {
+    "proves": [],
+    "doesNotProve": [
+      "anything for an item whose status is not-implemented"
+    ],
+    "meetsExitCriteria": true,
+    "missing": []
+  },
+  "raw": {
+    "location": "validation-raw/step-4-20261012/linux-run6 (project library)",
+    "sha256": null,
+    "summaryDir": null,
+    "manifest": []
+  },
+  "checks": [
+    {
+      "id": "R01",
+      "name": "历史任务：同一项目先跑 2 个表格 / 数据任务，留下快照与检查（回放集的 guard 部分）",
+      "passed": true,
+      "status": "passed",
+      "detail": "two history tasks (summary-2026-06, regions-2026-08) completed with passing checks and snapshots"
+    },
+    {
+      "id": "R02",
+      "name": "任务 A：模型开发并使用一个函数模块或技能，提交为候选，任务本身通过隐藏判定",
+      "passed": true,
+      "status": "passed",
+      "detail": "task A proposed 9bf4e3f39f65 [function-module orders-summary]"
+    },
+    {
+      "id": "R03",
+      "name": "门控：候选与基线在回放集上各跑 r 次，记录判定、审核意见与费用；结论如实记录",
+      "passed": true,
+      "status": "passed",
+      "detail": "gate verdict adopt (cost-down): pass rate candidate 1 vs baseline 1, cost ratio 0.5553559974342527, decided by review false; decision adopted; trial ~0.9195 USD in 60 requests"
+    },
+    {
+      "id": "R04",
+      "name": "任务 B（新进程）：门控通过时，B 自动加载并实际调用组件，账本可证，任务通过隐藏判定",
+      "passed": true,
+      "status": "passed",
+      "detail": "a new process loaded 9bf4e3f39f65 by itself and used function-module orders-summary (1 calls, 0 errors)"
+    },
+    {
+      "id": "R05",
+      "name": "退化注入：改坏采用的组件，后续任务触发自动回滚，回滚后任务用原版本完成",
+      "passed": true,
+      "status": "passed",
+      "detail": "injected cef03fa2a7ab; rolled back (component-errors) after 3 task(s); the next task ran on 9bf4e3f39f65"
+    },
+    {
+      "id": "R06",
+      "name": "每次运行的请求数、token、unknown 数、估算费用写进摘要，试验费用单列；累计不超过上限",
+      "passed": true,
+      "status": "passed",
+      "detail": "tasks: history1 5 req, ~0.0733 USD, 0 unknown; history2 5 req, ~0.0693 USD, 0 unknown; A 6 req, ~0.1336 USD, 0 unknown; B 3 req, ~0.053 USD, 0 unknown; regress1 6 req, ~0.0836 USD, 0 unknown; regress2 7 req, ~0.0927 USD, 0 unknown; regress3 7 req, ~0.0958 USD, 0 unknown; afterRollback 3 req, ~0.0524 USD, 0 unknown; trial 60 req ~0.9195 USD; total ~1.5732 USD"
+    }
+  ]
+}

@@ -10,7 +10,7 @@
  *   A0       a summary task proposes the good function module before there is any
  *            history: the automatic gate waits; capabilities.trial says it cannot run (H15)
  *   H1–H3    history: two monthly summaries and a region table, each with its test command
- *   trial A0 capabilities.trial (from a restarted SDK, see `retry`): 3 cases × 2 repeats ×
+ *   trial A0 capabilities.trial in the same app (`retry`): 3 cases × 2 repeats ×
  *            2 arms; the candidate's runs call the module and pass, the baseline's do not:
  *            adopted (H06, H11, H15)
  *   C        proposes the bad module (no discount) on A0's version: the automatic gate
@@ -297,7 +297,7 @@ async function writeGateProject(root) {
 }
 
 /** Every receipt file: `{ <trialId>: receipts[] }`. */
-async function trialsOf(root) {
+export async function trialsOf(root) {
   const out = {}
   for (const name of (await readdir(trialsDir(root)).catch(() => [])).filter(n => n.endsWith('.jsonl'))) out[name.slice(0, -6)] = await jsonl(join(trialsDir(root), name))
   return out
@@ -315,12 +315,12 @@ async function trialSideFiles(root) {
 }
 
 /** The JSON status lines a candidate's gate processes printed into `trials/<candidateId>.log`. */
-async function gateLines(root, candidateId) {
+export async function gateLines(root, candidateId) {
   const text = await readFile(join(trialsDir(root), `${candidateId}.log`), 'utf8').catch(() => '')
   return text.split('\n').filter(line => line.startsWith('{')).flatMap(line => { try { return [JSON.parse(line)] } catch { return [] } })
 }
 
-async function decisionsOf(root) {
+export async function decisionsOf(root) {
   const dir = join(capDir(root), 'decisions')
   const out = []
   for (const name of (await readdir(dir).catch(() => [])).filter(n => n.endsWith('.json'))) out.push(await readFile(join(dir, name), 'utf8').then(JSON.parse, error => ({ file: name, error: errorText(error) })))
@@ -385,7 +385,7 @@ function gateEnvironment(baseUrl) {
   }
 }
 
-async function editConfig(root, edit) {
+export async function editConfig(root, edit) {
   const path = join(root, '.nexgent', 'config.json')
   const config = await readFile(path, 'utf8').then(JSON.parse, () => ({}))
   await writeFile(path, `${JSON.stringify(edit(config), null, 2)}\n`)
@@ -478,22 +478,11 @@ export async function runStep4Gate(h, work, { log = () => {} } = {}) {
 
     // H11: the project's files and sessions before the trial.
     obs.isolation = { before: { files: await treeHashes(root, ['.nexgent']), sessions: await treeHashes(join(root, '.nexgent', 'sessions')) } }
-    // The same app asked again: GateHost keeps the waiting process as "started" (observed, reported).
-    step = 'trial A0 in the same app'
+    // Once there is history the same app starts the gate on request (the waiting process has exited).
+    step = 'trial A0'
     model.phase = 'trial'
     obs.retry = { sameApp: await tryTrial('A0') }
-    await sleep(2_000)
-    obs.retry.trialsAfter = Object.keys(await trialsOf(root)).length
-    obs.retry.linesAfter = (await gateLines(root, obs.candidates.A0.id)).length
-    if (obs.retry.trialsAfter === 0) {
-      step = 'trial A0 after a restart'
-      await sdk.dispose()
-      await open()
-      // Closing the app closed its sessions; the trial's "before" is after the restart.
-      obs.isolation.before = { files: await treeHashes(root, ['.nexgent']), sessions: await treeHashes(join(root, '.nexgent', 'sessions')) }
-      obs.retry.restarted = await tryTrial('A0')
-    }
-    obs.adopted = { line: await settle('A0', obs.retry.linesAfter + 1) }
+    obs.adopted = { line: await settle('A0', 2) }
     obs.isolation.after = { files: await treeHashes(root, ['.nexgent']), sessions: await treeHashes(join(root, '.nexgent', 'sessions')) }
     obs.adopted.status = (await show('A0')).status
 

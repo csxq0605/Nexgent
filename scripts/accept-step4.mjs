@@ -13,9 +13,10 @@
  *   desktop   D01–D18  D01–D14: steps 2 and 3's desktop scenarios and judges, as a regression;
  *                      D15–D18 (capability version, candidates, plugin approval, rollback) from the
  *                      capabilities scenario (accept-common/step4-desktop.mjs)
- *   real      R01–R07  real Claude model on the order-summary family (scripts/real-task/step4-orders.mjs;
- *                      manual: Linux cloud session, thinking on; R07 Windows optional). Not wired
- *                      yet: the layer checks its prerequisites and calls no model
+ *   real      R01–R07  real Claude model on the order-summary family (scripts/real-task/step4-orders.mjs,
+ *                      accept-common/step4-real.mjs): history tasks, task A, the gate, task B in a new
+ *                      process, an injected regression; manual: Linux cloud session, thinking on;
+ *                      R07 (Windows) optional
  *
  * Usage:
  *   node scripts/accept-step4.mjs [--layer headless,desktop|real|all] [--out <summary.json>]
@@ -28,8 +29,9 @@
  * yet (an item not implemented, or a layer's prerequisites missing) — never a
  * fake pass.
  *
- * The real layer reads which of NEXGENT_API_KEY / ANTHROPIC_API_KEY is set,
- * never the value. Linux, macOS and Windows; no shell, no Python.
+ * The real layer reads the key from NEXGENT_API_KEY (fallback ANTHROPIC_API_KEY)
+ * into the SDK's env object only; it is never printed or written. With
+ * NEXGENT_API_BASE_URL on a loopback address the run is not real-model evidence. Linux, macOS and Windows; no shell, no Python.
  */
 import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -37,12 +39,12 @@ import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { loadHarness, REPO_ROOT } from './accept-common/harness.mjs'
 import { desktopPrerequisites, runDesktopScenario } from './accept-common/step2-desktop.mjs'
-import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
+import { isLoopbackUrl, loadStep2Packages } from './accept-common/step2-runtime.mjs'
 import { runMembersDesktopScenario } from './accept-common/step3-desktop.mjs'
 import { runCapabilitiesDesktopScenario } from './accept-common/step4-desktop.mjs'
 import { runHeadlessScenario as runStep3Headless } from './accept-common/step3-headless.mjs'
 import { judgeCheckpoint } from './accept-common/step4-judges.mjs'
-import { realPrerequisites } from './accept-common/step4-real.mjs'
+import { realPrerequisites, runRealScenario } from './accept-common/step4-real.mjs'
 import {
   CHECKS,
   decideExit,
@@ -145,10 +147,26 @@ async function prepareLayer(layer, harness, options) {
     }
     return { ok: true, ctx }
   }
-  // real: only the gate in round 1; no item is wired, so no model is called.
+  // real
   const ready = realPrerequisites(process.env, options.budgetUsd, options.spent)
   if (!ready.ok) return ready
-  return { ok: true, ctx: { work: options.work, keySource: ready.keySource, remainingUsd: ready.remainingUsd } }
+  // NEXGENT_API_BASE_URL may point the layer at a loopback stand-in (tests); then nothing here is real-model evidence.
+  const baseUrl = process.env['NEXGENT_API_BASE_URL']
+  const realModel = baseUrl === undefined || baseUrl === '' || !isLoopbackUrl(baseUrl)
+  const env = {
+    NEXGENT_API_KEY: process.env[ready.keySource],
+    ...(baseUrl === undefined || baseUrl === '' ? {} : { NEXGENT_API_BASE_URL: baseUrl }),
+  }
+  await mkdir(options.work, { recursive: true })
+  const ctx = { work: options.work, keySource: ready.keySource, remainingUsd: ready.remainingUsd, realModel }
+  try {
+    ctx.obs = await runRealScenario(harness, options.work, {
+      env, realModel, budgetUsd: options.budgetUsd, spent: options.spent, log: line => log(`real: ${line}`),
+    })
+  } catch (error) {
+    ctx.scenarioError = errorText(error)
+  }
+  return { ok: true, ctx }
 }
 
 async function main() {
@@ -195,6 +213,8 @@ async function main() {
 
   const spent = await readSpent(values.spent)
   const statuses = []
+  const statusOf = new Map()
+  let realCtx
   let notReady = 0
   for (const layer of layers) {
     const ready = await prepareLayer(layer, h, { work: join(work, layer), budgetUsd, spent })
@@ -203,6 +223,7 @@ async function main() {
       s.knownIssue(`${LAYERS[layer].title} not runnable yet: ${ready.reason}`)
       log(`${layer}: not runnable yet: ${ready.reason}`)
     }
+    if (layer === 'real' && ready.ok) realCtx = ready.ctx
     for (const entry of CHECKS.filter(check => check.layer === layer)) {
       const { status, evidence } = ready.ok
         ? await evaluateItem(entry, ready.ctx)
@@ -214,6 +235,7 @@ async function main() {
         continue
       }
       s.item(entry.id, entry.title, status, evidence)
+      statusOf.set(entry.id, status)
       statuses.push(status)
     }
     if (layer === 'headless' && ready.ok) {
@@ -228,9 +250,36 @@ async function main() {
     }
   }
 
+  if (layers.includes('real')) {
+    const obs = realCtx?.obs
+    const usage = obs?.usage?.total
+    const realStatuses = CHECKS.filter(check => check.layer === 'real' && !OPTIONAL_CHECKS.has(check.id)).map(check => statusOf.get(check.id))
+    let runNote = 'real layer not runnable; no model call made'
+    if (realCtx !== undefined) {
+      runNote = `key from ${realCtx.keySource}; budget left before this run ${realCtx.remainingUsd.toFixed(2)} USD; tasks ${Object.keys(obs?.tasks ?? {}).join(', ') || 'none'}; trial ~${obs?.usage?.trial?.costUsd ?? '?'} USD of the total${obs?.stopped ? `; stopped at ${obs.stopped.step}: ${obs.stopped.reason}` : ''}; raw records in ${realCtx.work}`
+      if (!realCtx.realModel) {
+        runNote += '; NEXGENT_API_BASE_URL is a loopback server: NOT a real-model run'
+        s.knownIssue('real layer ran against a loopback stand-in (NEXGENT_API_BASE_URL); its results are not real-model evidence')
+      }
+    }
+    s.set({
+      realModel: {
+        model: REAL_MODEL.model,
+        thinking: REAL_MODEL.thinking,
+        task: REAL_MODEL.task,
+        callCount: usage?.callCount ?? 0,
+        knownTokens: { input: usage?.known?.input ?? 0, output: usage?.known?.output ?? 0 },
+        unknownCount: usage?.unknownCount ?? 0,
+        cost: usage?.costUsd ?? 0,
+        result: realCtx?.realModel === true && realStatuses.every(status => status === 'passed') ? 'pass' : 'fail',
+        summaryFile: null,
+        runNote,
+        unknownSources: (usage?.unknownRequestIds ?? []).map(id => `llm request ${id}: no usage recorded`),
+      },
+    })
+  }
   s.doesNotProve('anything for an item whose status is not-implemented')
-  if (layers.includes('real')) s.knownIssue('real-model layer: R01–R06 are not wired yet (round 4); no model was called')
-  else s.untested('real-model layer (R01–R07): run with --layer real')
+  if (!layers.includes('real')) s.untested('real-model layer (R01–R07): run with --layer real')
   s.set({ raw: { location: work, sha256: null, summaryDir: null, manifest: [] } })
 
   const code = decideExit(statuses, notReady)

@@ -24,6 +24,7 @@ import { CHECKS as STEP3_CHECKS } from './step3-checks.mjs'
 import { JUDGES as STEP3_JUDGES, judge as judgeStep3 } from './step3-judges.mjs'
 import { CAPABILITY_JUDGES, judgeCapabilities } from './step4-desktop-judges.mjs'
 import { JUDGES, judge } from './step4-judges.mjs'
+import { judgeReal, REAL_JUDGES } from './step4-real-judges.mjs'
 
 export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_PASS } from './step2-checks.mjs'
 
@@ -85,8 +86,16 @@ const capabilitiesRun = id => (ctx) => {
   return judgeCapabilities(id, ctx.capabilities)
 }
 
+/** An R item: its judge over the real scenario's observations. */
+const realRun = id => (ctx) => {
+  if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `real scenario failed: ${ctx.scenarioError}` }
+  if (ctx?.obs === undefined) return { status: 'failed', evidence: 'the real scenario did not run' }
+  return judgeReal(id, ctx.obs)
+}
+
 const item = (id, layer, title, run) => {
   const wired = run
+    ?? (layer === 'real' && REAL_JUDGES[id] !== undefined ? realRun(id) : undefined)
     ?? (layer === 'headless' && JUDGES[id] !== undefined ? step4Run(id) : undefined)
     ?? (layer === 'desktop' && CAPABILITY_JUDGES[id] !== undefined ? capabilitiesRun(id) : undefined)
   return wired === undefined ? { id, layer, title } : { id, layer, title, run: wired }
