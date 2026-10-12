@@ -38,7 +38,7 @@ import {
   type TeamTask,
   type Tool,
 } from '@nexgent/kernel'
-import { PresetRegistry } from '@nexgent/preset'
+import { sessionPresetRegistry, type CapabilityPresetLookup } from '@nexgent/preset'
 import { RECORDED_TASK_CHARS, runMemberTurn, startMember } from '@nexgent/subagent'
 import {
   applyRecord,
@@ -79,6 +79,8 @@ export interface TeamDeps {
   readonly projectRoot: () => string
   /** The tools a teammate gets in its own scope (`send_message`, `team_task_list`, `team_task_update`). */
   readonly teammateTools: (team: Team, name: string) => readonly Tool[]
+  /** `ctx.capabilities`, when loaded: presets of the Lead session's capability version and the ones it tried. */
+  readonly capabilities?: CapabilityPresetLookup
 }
 
 /**
@@ -282,7 +284,7 @@ export class Team {
   private async presetOf(member: TeamMember, mate: Mate): Promise<AgentPreset | undefined> {
     let preset = mate.preset
     if (preset === undefined && member.preset !== undefined) {
-      preset = await new PresetRegistry(this.deps.projectRoot()).resolve(member.preset)
+      preset = await (await sessionPresetRegistry(this.deps.projectRoot(), this.leadId, this.deps.capabilities)).resolve(member.preset)
       mate.preset = preset
     }
     // The spawn persona: in memory, or from the roster after a restart.

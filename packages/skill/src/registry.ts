@@ -5,6 +5,12 @@
  * `.nexgent/skills/<name>/SKILL.md`; for one name project overrides user
  * overrides built-in. Every call rescans, so a skill added mid-session
  * shows up at the next turn.
+ *
+ * Step 4: skills of the capability version a session runs on, and skills
+ * that session tried (`capability_try`), join through
+ * {@link CapabilitySkillLayers}: tried > project > adopted > user >
+ * built-in. They carry `source: 'project'` (they live under the project's
+ * `.nexgent/capabilities/`); the contract has no separate source for them.
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
@@ -41,6 +47,45 @@ export interface FileSkillRegistryOptions {
 interface Found {
   readonly manifest: SkillManifest
   readonly body: string
+}
+
+/** One capability skill: its `SKILL.md` path and whether the session only tried it. */
+export interface CapabilitySkillFile {
+  readonly name: string
+  readonly entryPath: string
+  readonly tried: boolean
+}
+
+/** Capability skills in force for one session (see the module comment). */
+export type CapabilitySkillLayers = readonly CapabilitySkillFile[]
+
+async function readCapabilitySkills(layers: CapabilitySkillLayers, problems: SkillProblem[]): Promise<{ adopted: Found[]; tried: Found[] }> {
+  const adopted: Found[] = []
+  const tried: Found[] = []
+  for (const item of layers) {
+    let text: string
+    try {
+      text = await readFile(item.entryPath, 'utf8')
+    } catch (error) {
+      problems.push({ path: item.entryPath, reason: `cannot read: ${(error as NodeJS.ErrnoException).code ?? String(error)}` })
+      continue
+    }
+    if (Buffer.byteLength(text) > MAX_SKILL_FILE_BYTES) {
+      problems.push({ path: item.entryPath, reason: `file is larger than ${MAX_SKILL_FILE_BYTES} bytes` })
+      continue
+    }
+    const parsed = parseSkillFile(text, item.entryPath, 'project')
+    if (!parsed.ok) {
+      problems.push({ path: item.entryPath, reason: parsed.reason })
+      continue
+    }
+    if (parsed.manifest.name !== item.name) {
+      problems.push({ path: item.entryPath, reason: `front matter name ${parsed.manifest.name} differs from the component name ${item.name}` })
+      continue
+    }
+    ;(item.tried ? tried : adopted).push({ manifest: parsed.manifest, body: parsed.body })
+  }
+  return { adopted, tried }
 }
 
 async function scanDirectory(dir: string, source: SkillSource, problems: SkillProblem[]): Promise<Found[]> {
@@ -113,25 +158,26 @@ export class FileSkillRegistry implements SkillRegistry {
     return join(this.projectRoot, ...PROJECT_SKILLS_DIR.split('/'))
   }
 
-  private async scan(): Promise<{ skills: Found[]; problems: SkillProblem[] }> {
+  private async scan(layers: CapabilitySkillLayers = []): Promise<{ skills: Found[]; problems: SkillProblem[] }> {
     const problems: SkillProblem[] = []
     const builtin = await scanDirectory(this.builtinDir, 'builtin', problems)
     const user = this.userDir === undefined ? [] : await scanDirectory(this.userDir, 'user', problems)
     const project = await scanDirectory(this.projectDir, 'project', problems)
+    const { adopted, tried } = await readCapabilitySkills(layers, problems)
     const byName = new Map<string, Found>()
-    // Later sources override earlier ones of the same name: project > user > built-in.
-    for (const skill of [...builtin, ...user, ...project]) byName.set(skill.manifest.name, skill)
+    // Later sources override earlier ones of the same name: tried > project > adopted > user > built-in.
+    for (const skill of [...builtin, ...user, ...adopted, ...project, ...tried]) byName.set(skill.manifest.name, skill)
     const skills = [...byName.values()].sort((a, b) => (a.manifest.name < b.manifest.name ? -1 : 1))
     return { skills, problems }
   }
 
-  async catalog(): Promise<SkillCatalog> {
-    const { skills, problems } = await this.scan()
+  async catalog(layers?: CapabilitySkillLayers): Promise<SkillCatalog> {
+    const { skills, problems } = await this.scan(layers)
     return { skills: skills.map(skill => skill.manifest), problems }
   }
 
-  async load(name: string): Promise<LoadedSkill> {
-    const { skills, problems } = await this.scan()
+  async load(name: string, layers?: CapabilitySkillLayers): Promise<LoadedSkill> {
+    const { skills, problems } = await this.scan(layers)
     const skill = skills.find(candidate => candidate.manifest.name === name)
     if (skill === undefined) {
       const broken = problems.find(problem => basename(dirname(problem.path)) === name)

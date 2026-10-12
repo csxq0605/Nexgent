@@ -2,6 +2,7 @@
  * Cordis plugin of `@nexgent/team` (profile row `@nexgent/team`).
  */
 import type { AgentsService, Context, ContextService, SessionStore, TaskingService, Workspace } from '@nexgent/kernel'
+import { capabilityPresetLookup } from '@nexgent/preset'
 import { TeamRegistry } from './registry.js'
 import { leadTools, teammateTools } from './tools.js'
 
@@ -21,8 +22,9 @@ export const TeamPlugin = {
         store: scope.session as SessionStore,
         projectRoot: () => (ctx.get('workspace') as Workspace).root,
         teammateTools,
+        capabilities: capabilityPresetLookup(ctx),
       })
-      for (const tool of leadTools({ team: id => registry.open(id, true), tasking: () => ctx.get('tasking') as TaskingService | undefined })) {
+      for (const tool of leadTools({ team: id => registry.open(id, true), tasking: () => ctx.get('tasking') as TaskingService | undefined, capabilities: capabilityPresetLookup(ctx) })) {
         scope.effect(() => scope.tools.register(tool), `tools.register(${tool.definition.name})`)
       }
       scope.inject(['context'], inner => {

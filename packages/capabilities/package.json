@@ -2,7 +2,7 @@
   "name": "@nexgent/capabilities",
   "version": "0.0.0",
   "private": true,
-  "description": "能力版本：按内容寻址的不可变能力包存储、加载前校验、采用历史（采用与回滚修订链）。",
+  "description": "能力版本：内容寻址的能力包存储与校验、采用历史与决定、会话草稿区与 capability_draft / try / propose、能力包加载器。",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -20,6 +20,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nexgent/kernel": "workspace:*"
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/session": "workspace:*",
+    "@nexgent/preset": "workspace:*",
+    "@nexgent/ptc": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/context": "workspace:*",
+    "@nexgent/skill": "workspace:*",
+    "@nexgent/test-support": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
   }
 }

@@ -2,6 +2,7 @@
  * Cordis plugin of `@nexgent/subagent` (profile row `@nexgent/subagent`).
  */
 import type { AgentsService, Context, TaskingService } from '@nexgent/kernel'
+import { capabilityPresetLookup } from '@nexgent/preset'
 import { delegateTool } from './delegate-tool.js'
 
 /** The plugin: whenever `ctx.tools` and `ctx.agents` are available registers `delegate`; disposal unregisters it. */
@@ -15,6 +16,7 @@ export const SubagentPlugin = {
       const tool = delegateTool({
         agents: agents as AgentsService,
         tasking: () => ctx.get('tasking') as TaskingService | undefined,
+        capabilities: capabilityPresetLookup(ctx),
       })
       scope.effect(() => scope.tools.register(tool), `tools.register(${tool.definition.name})`)
     })

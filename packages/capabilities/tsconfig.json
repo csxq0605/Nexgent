@@ -11,6 +11,15 @@
   "references": [
     {
       "path": "../kernel"
+    },
+    {
+      "path": "../session"
+    },
+    {
+      "path": "../preset"
+    },
+    {
+      "path": "../ptc"
     }
   ]
 }

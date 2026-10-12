@@ -54,7 +54,7 @@ describe('cross-process', () => {
     const activation = await capabilities.activation()
     expect(revisions).toHaveLength(1)
     expect(activation.revision).toBe(1)
-    expect(revisions[0]!.evidence).toEqual({ child: winner.id })
+    expect(winner.revision).toBe(1)
     expect((await readdir(capabilities.activationDirectory)).filter(name => name.endsWith('.tmp'))).toEqual([])
   }, 60_000)
 

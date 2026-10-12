@@ -11,10 +11,10 @@ import {
   READ_DOCUMENT_TOOL,
   type Sandbox,
   type SandboxMode,
-  type SkillRegistry,
   type Tool,
   type ToolContext,
 } from '@nexgent/kernel'
+import type { CapabilitySkillLookup, LayeredSkillRegistry } from './capability-skills.js'
 import { DocumentError, documentFormat, extractDocument, DEFAULT_MAX_ROWS } from './documents/index.js'
 
 /** Largest file `read_document` opens (50 MiB). */
@@ -24,7 +24,7 @@ export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 export const MAX_DOCUMENT_OUTPUT_CHARS = 100_000
 
 /** `load_skill` over a registry. */
-export function loadSkillTool(registry: SkillRegistry): Tool {
+export function loadSkillTool(registry: LayeredSkillRegistry, capabilitySkills?: CapabilitySkillLookup): Tool {
   return {
     definition: {
       name: LOAD_SKILL_TOOL.name,
@@ -33,10 +33,11 @@ export function loadSkillTool(registry: SkillRegistry): Tool {
       effects: LOAD_SKILL_TOOL.effects,
       approval: LOAD_SKILL_TOOL.approval,
     },
-    handler: async input => {
+    handler: async (input, context) => {
       const name = (input as { name?: unknown } | null)?.name
       if (typeof name !== 'string' || name === '') throw new NexgentError('tool/invalid-input', '"name" must be a non-empty string')
-      const skill = await registry.load(name)
+      const layers = capabilitySkills === undefined ? undefined : await capabilitySkills(context.sessionId)
+      const skill = await registry.load(name, layers)
       const header = `# Skill: ${skill.manifest.name}\n${skill.manifest.description}`
       return {
         content: `${header}\n\n${skill.body.trim()}`,

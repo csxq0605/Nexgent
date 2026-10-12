@@ -10,6 +10,7 @@
  */
 export * from './architecture.js'
 export * from './architecture-store.js'
+export * from './capability-architecture.js'
 export * from './runner.js'
 export * from './runtime.js'
 export * from './recovery.js'

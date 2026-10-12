@@ -30,7 +30,7 @@ import {
   type ToolContext,
   type ToolOutput,
 } from '@nexgent/kernel'
-import { DEFAULT_PRESET_NAME, PresetRegistry } from '@nexgent/preset'
+import { DEFAULT_PRESET_NAME, sessionPresetRegistry, type CapabilityPresetLookup } from '@nexgent/preset'
 import { assertFilesExist, normalizeMemberFiles, renderMemberResult } from '@nexgent/subagent'
 import { renderBoard } from './state.js'
 import { renderTeammatePrompt, type LeadCall, type Team } from './team.js'
@@ -39,6 +39,8 @@ import { renderTeammatePrompt, type LeadCall, type Team } from './team.js'
 export interface LeadToolOptions {
   readonly team: (leadSessionId: string) => Promise<Team>
   readonly tasking?: () => TaskingService | undefined
+  /** `ctx.capabilities`, when loaded: presets of the Lead session's capability version and the ones it tried. */
+  readonly capabilities?: CapabilityPresetLookup
 }
 
 const DESCRIPTIONS = {
@@ -155,7 +157,7 @@ export function leadTools(options: LeadToolOptions): Tool[] {
       const files = normalizeMemberFiles(root, stringList(args.files, 'files'))
       await assertFilesExist(root, files)
       await checkMaterials(options.tasking?.(), materialIds)
-      const preset = await new PresetRegistry(root).resolve(presetName ?? DEFAULT_PRESET_NAME)
+      const preset = await (await sessionPresetRegistry(root, context.sessionId, options.capabilities)).resolve(presetName ?? DEFAULT_PRESET_NAME)
       const team = await options.team(context.sessionId)
       const others = [...team.state.members.values()].filter(member => member.status !== 'stopped' && member.name !== input.name).map(member => member.name)
       const agent = await team.spawn(call, {

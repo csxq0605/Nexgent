@@ -8,7 +8,7 @@
  * their own runner.
  */
 import { intersectToolRestrictions, type AgentPreset, type AgentsService, type ToolRestriction } from '@nexgent/kernel'
-import { DEFAULT_PRESET_NAME, PresetRegistry } from '@nexgent/preset'
+import { DEFAULT_PRESET_NAME, sessionPresetRegistry, type CapabilityPresetLookup } from '@nexgent/preset'
 import { assertFilesExist, normalizeMemberFiles, runMember, type MemberRecordSink, type MemberRun } from '@nexgent/subagent'
 
 /** One member to run. */
@@ -57,18 +57,20 @@ export function renderWorkflowMemberPrompt(task: string, files: readonly string[
 }
 
 /** The preset a member runs with: the named one, narrowed by `tools`, with `model` replaced. */
-export async function memberPreset(projectRoot: string, request: Pick<WorkflowMemberRequest, 'preset' | 'tools' | 'model'>): Promise<AgentPreset> {
-  const base = await new PresetRegistry(projectRoot).resolve(request.preset ?? DEFAULT_PRESET_NAME)
+export async function memberPreset(projectRoot: string, request: Pick<WorkflowMemberRequest, 'preset' | 'tools' | 'model'> & { readonly parentSessionId?: string },
+  capabilities?: CapabilityPresetLookup): Promise<AgentPreset> {
+  const registry = await sessionPresetRegistry(projectRoot, request.parentSessionId ?? '', request.parentSessionId === undefined ? undefined : capabilities)
+  const base = await registry.resolve(request.preset ?? DEFAULT_PRESET_NAME)
   const tools = request.tools === undefined ? base.tools : base.tools === undefined ? request.tools : intersectToolRestrictions([base.tools, request.tools])
   return { ...base, ...(tools === undefined ? {} : { tools }), ...(request.model === undefined ? {} : { model: request.model }) }
 }
 
 /** The runner over `ctx.agents`: real child sessions through `@nexgent/subagent`'s `runMember`. */
-export function agentsMemberRunner(agents: Pick<AgentsService, 'create'>): WorkflowMemberRunner {
+export function agentsMemberRunner(agents: Pick<AgentsService, 'create'>, capabilities?: CapabilityPresetLookup): WorkflowMemberRunner {
   return async request => {
     const files = normalizeMemberFiles(request.projectRoot, request.files ?? [])
     await assertFilesExist(request.projectRoot, files)
-    const preset = await memberPreset(request.projectRoot, request)
+    const preset = await memberPreset(request.projectRoot, request, capabilities)
     return runMember({
       agents,
       parentSessionId: request.parentSessionId,
