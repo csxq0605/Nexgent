@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { Context, ToolRegistryService, type Tool } from '../src/index.js'
+import { Context, functionToolName, ToolRegistryService, type Tool } from '../src/index.js'
 import { textReply, toolCallReply } from './helpers/fakes.js'
 import { bootHarness, type Harness } from './helpers/harness.js'
 
@@ -28,6 +28,13 @@ describe('ctx.tools', () => {
     expect(ctx.tools.list().map(definition => definition.name)).toEqual(['read_file', 'grep'])
     expect(() => ctx.tools.register(tool('grep'))).toThrow(/already registered/)
     expect(() => ctx.tools.register(tool('Bad-Name'))).toThrow(/invalid tool name/)
+    // Step 4: a function module's tools take the names functionToolName gives them.
+    const capName = functionToolName('order-summary', 'summarizeOrders')
+    expect(capName).toBe('cap_order-summary_summarizeOrders')
+    ctx.tools.register(tool(capName))
+    expect(ctx.tools.unregister(capName)).toBe(true)
+    expect(() => ctx.tools.register(tool('cap_Bad_x'))).toThrow(/invalid tool name/)
+    expect(() => ctx.tools.register(tool(`cap_${'m-'.repeat(30)}x_f`))).toThrow(/invalid tool name/)
     expect(ctx.tools.get('grep')?.definition.name).toBe('grep')
     expect(ctx.tools.unregister('grep')).toBe(true)
     expect(ctx.tools.unregister('grep')).toBe(false)

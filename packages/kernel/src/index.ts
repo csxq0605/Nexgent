@@ -43,7 +43,7 @@ export type {
 export { AgentEventHub } from './agent-events.js'
 export type { AgentEvent, AgentEventListener, AgentEventType } from './agent-events.js'
 
-export { TOOL_NAME_PATTERN, TOOL_SCOPE, ToolRegistryService } from './tools.js'
+export { FUNCTION_TOOL_NAME_PATTERN, isValidToolName, TOOL_NAME_PATTERN, TOOL_SCOPE, ToolRegistryService } from './tools.js'
 export type { ToolScope } from './tools.js'
 export { ApprovalBrokerService } from './approvals.js'
 export type { ApprovalsConfig } from './approvals.js'
