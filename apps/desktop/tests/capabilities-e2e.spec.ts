@@ -229,6 +229,9 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         expect(await dialog.getByTestId('plugin-approval-names').textContent()).toBe('greeter')
         expect(await dialog.getByTestId('plugin-approval-hash').textContent()).toBe(seeded.plugin.version)
         expect(await dialog.getByTestId('plugin-approval-files').textContent()).toContain('greeter/plugin.json')
+        expect(await dialog.getByTestId('plugin-approval-permissions').textContent()).toContain('Runs inside the app with its full rights.')
+        expect(await dialog.getByTestId('plugin-approval-tools').textContent()).toContain('greet')
+        expect(await dialog.getByTestId('plugin-allow').isEnabled()).toBe(true)
         await dialog.getByTestId('plugin-deny').click()
         await dialog.waitFor({ state: 'detached' })
 

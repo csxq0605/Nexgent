@@ -5,7 +5,7 @@
  * ledger stamps, and the session's scope handed to `attach`.
  */
 import { randomUUID } from 'node:crypto'
-import { writeFile } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import { CapabilityService, listCandidates } from '@nexgent/capabilities'
 import type { CapabilityAttachInput, CapabilityHost, Context, SessionRecord } from '@nexgent/kernel'
@@ -135,6 +135,23 @@ describe('capabilities.* (step 4, W4)', () => {
     await expect(t.sdk.call('capabilities.rollback', { projectId, toVersion: 'f'.repeat(64) })).rejects.toMatchObject({ code: 'tool/invalid-input' })
     expect(await t.sdk.call('capabilities.rollback', { projectId, toVersion: 'baseline' })).toMatchObject({ version: 'baseline', revision: 4 })
     expect((await store.history()).map(revision => [revision.type, revision.version])).toEqual([['adopt', one.version], ['adopt', two.version], ['rollback', one.version], ['rollback', 'baseline']])
+  })
+
+  it('shows each plugin\'s description, permissions and tools from the candidate copy of plugin.json; a copy that does not check out has no entry', async () => {
+    const { t, root, projectId } = await openProject()
+    const two = await propose(root, [plugin('greeter'), plugin('notes')])
+    expect((await t.sdk.call('capabilities.show', { projectId, candidateId: two.id })).plugins).toEqual([
+      { name: 'greeter', description: 'Greets.', permissions: 'Runs inside the app with its full rights.', tools: ['greet'] },
+      { name: 'notes', description: 'Greets.', permissions: 'Runs inside the app with its full rights.', tools: ['greet'] },
+    ])
+    const skillOnly = await propose(root, [skill('east')])
+    expect(await t.sdk.call('capabilities.show', { projectId, candidateId: skillOnly.id })).not.toHaveProperty('plugins')
+
+    // A changed copy (its hash no longer matches the record) and a missing copy both drop their entry.
+    const copy = (name: string) => nodePath.join(capabilitiesDir(root), 'candidates', two.id, 'plugins', name, 'plugin.json')
+    await writeFile(copy('greeter'), JSON.stringify({ formatVersion: 1, name: 'greeter', description: 'Greets.', permissions: 'Nothing at all.', tools: ['greet'] }))
+    await rm(copy('notes'))
+    expect((await t.sdk.call('capabilities.show', { projectId, candidateId: two.id })).plugins).toEqual([])
   })
 
   it('answers a plugin candidate awaiting approval: deny keeps the version, allow adopts it', async () => {
