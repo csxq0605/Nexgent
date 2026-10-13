@@ -67,13 +67,19 @@
 - 运行：每个用例每侧 `repeats` 次，候选在前；每次在快照的临时副本里（`autoTrial` 关、`perTask` 上限取剩余试验额度），由宿主的 `TrialRunner` 执行（产品里每次一个 `trial-entry.js replay` 子进程，审批一律 `headless` 拒绝），之后门控自己在副本上跑记录的检查。没跑完的记 `unknown`，不算失败。每次运行前查额度，用尽即停，结论 `budget-exhausted`。
 - 判定：`decideTrial`。只有检查打平且费用比不超上限时才问评审模型（`TrialReviewer`，SDK 里是 Claude Platform 上的 `capabilities.reviewer` 模型，A/B 位置按轮次交换），评审意见单独记 `trial.review`。通过写 `trigger: gate` 的采用修订；含插件的写 `awaiting-approval`；其余写 `rejected`。候选、回执、决定都保留。门控参数只读 `.nexgent/config.json`。
 - 一次性与中断：候选首次试验前独占创建 `trials/<candidateId>.attempt`，之后不再试；运行中有 `trials/<trialId>.lock`（进程号）。启动时 `recoverInterruptedTrials` 把没有 `trial.end`、锁对应进程已不在的试验记为 `rejected / interrupted`，不重跑。
+- 步骤 5（ADR 0006 决定 6、7）：
+  - 有逐轮检查记录（`checks/<taskId>.t<turn>.json`）的任务，回放到首次反馈之前最后一个有检查的轮次（`throughTurn`），按那一轮的检查判定；反馈轮和其后的消息都不回放。步骤 4 的任务（没有逐轮记录）照旧。改进会话（`purpose: improvement`）不是用例。
+  - 改进作业的候选（`origin: improvement`）以作业的反馈任务为 selection 首个用例（`selectionAnchor`，读 `improvements/<jobId>/job.json`：首条反馈的会话，否则请求的会话或任务，否则失败检查的任务），不是候选自己的 `taskId`。该任务不能回放时门控返回 `skipped`，手动 `trial` 抛 `tool/invalid-input`。这类候选不由 `startPending` 自动起门控，由作业自己跑（历史不够时作业停在 `waiting-history`，之后再跑）。
+  - 反馈任务的每次 selection 运行之后做一次反馈检查（`TrialReviewer.checkFeedback`，SDK 里一次运行一个请求，只看该次运行的产出与反馈原文，不做 A/B 对比），记 `trial.feedback`，计入该侧质量，另给 `feedbackPassRate`。没有检查器、运行 unknown、额度用尽时检查记 `unknown`，候选不被采用（`unknown-runs`）。
+  - 作业候选的回放运行带 `improvement.jobId`；SDK 的回放进程里 `ctx.agents.create` 加 `improvement: { jobId, phase: 'trial' }`，评审与反馈检查的账本记录也带 `improvementId` 与 `improvementPhase: trial`。
+  - `estimatedUsd` 由运行器与评审给出（SDK 用 `@nexgent/llm` 的 `estimateUsd`，只作显示），有一项 unknown 则合计 unknown。
 - 用量退化：`checkUsageRegression` 在根会话解析版本前和每轮结束后执行，只看 `gate` / `approval` 采用之后、该版本上的非试验记录：新组件工具的 `tool.call` 错误序列与根任务 `task.outcome.checks`（刚结束那一轮用 `turnOutcome()` 补上），交给 `decideUsageRollback`，触发即写 `usage-regression` 回滚。
 
 ## Known Limitations and Deferred Work
 
 - `trials/` 下的 `.attempt`、`.lock`、`.log` 三种旁路文件还没写进 `data-formats.md`。
 - `test-command` 检查只认 `TEST_COMMAND_PATTERN` 里的测试命令（`@nexgent/tasking`），`node checks/verify.mjs` 这类脚本不会成为检查。
-- 回放只发用户消息，反馈轮的成果修改与审批不重放；`estimatedUsd` 恒为 `unknown`。
+- 回放只发用户消息，反馈轮的成果修改与审批不重放；`estimatedUsd` 只在价格表有该模型且用量各项已知时是数字。
 - 契约 `SkillSource` 没有能力包来源，能力包技能标为 `project`；`workflow` 工具不能按名字引用已采用的图；`personaSuffix` 输出在 `# Learned practices` 节，没有接到人设段落。
 - 恢复的会话不会自动重新加载试用过的插件（重新加载要再问一次用户），需要再次 `capability_try`。
 - 能力包目录不设只读属性，完整性只靠加载时校验；Windows 上的硬链接发布与目录改名竞争还没有实跑。

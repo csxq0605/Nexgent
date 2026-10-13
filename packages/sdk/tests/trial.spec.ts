@@ -17,11 +17,13 @@
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CapabilitiesPlugin, CapabilityStore, gateOf, listCandidates, listTrials, type CapabilitiesPluginConfig, type GateHost } from '@nexgent/capabilities'
-import { resolveWorkspaceLayout, type Context, type LedgerRecord, type Plugin } from '@nexgent/kernel'
+import { BASELINE_BUNDLE, CapabilitiesPlugin, CapabilityStore, gateOf, listCandidates, listTrials, writeCandidate, type CapabilitiesPluginConfig, type GateHost } from '@nexgent/capabilities'
+import { IMPROVEMENT_FILES, IMPROVEMENTS_DIR, resolveWorkspaceLayout, type Context, type ImprovementJob, type LedgerRecord, type Plugin } from '@nexgent/kernel'
+import { estimateUsdTotal } from '@nexgent/llm'
 import { readLedgerRecords, scriptedModelServer, type MessagesRequestBody, type ScriptedModelServer, type ScriptedTurn } from '@nexgent/test-support'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createSdk, type LocalNexgentSdk } from '../src/index.js'
+import { parseFeedbackCheck } from '../src/trial-entry.js'
 import { tempDir } from './helpers.js'
 
 const DIST_ENTRY = fileURLToPath(new URL('../dist/trial-entry.js', import.meta.url))
@@ -38,6 +40,7 @@ const TASKS = {
   july: { text: 'summarize the july orders by region', path: 'out/july.json' },
   august: { text: 'summarize the august orders by region', path: 'out/august.json' },
   september: { text: 'summarize the september orders by region', path: 'out/september.json' },
+  october: { text: 'summarize the october orders by region', path: 'out/october.json' },
   regress: { text: 'add up the order totals with the helper', path: '' },
 } as const
 
@@ -94,9 +97,17 @@ function propose(name: string): ScriptedTurn[] {
 class Model {
   phase: 'main' | 'trial' = 'main'
   readonly replays: { tools: string[]; text: string; wrote: string }[] = []
+  readonly feedbackChecks: string[] = []
 
   respond(body: Body): ScriptedTurn {
-    if (JSON.stringify(body.system ?? '').includes('quality gate')) return { content: '{"better": "tie", "reason": "same"}', usage }
+    const system = JSON.stringify(body.system ?? '')
+    if (system.includes('You check one attempt')) {
+      // The feedback check: solved when the attempt wrote the well-formed total.
+      const text = firstUserText(body)
+      this.feedbackChecks.push(text)
+      return { content: JSON.stringify({ solved: text.includes('{"total": 3}'), reason: 'checked the totals' }), usage }
+    }
+    if (system.includes('quality gate')) return { content: '{"better": "tie", "reason": "same"}', usage }
     const task = taskOf(body)
     if (task === undefined) return { content: 'Unknown task.', usage }
     const at = step(body)
@@ -298,5 +309,95 @@ describe('the capability gate through the SDK', () => {
     } finally {
       await dispose()
     }
+  })
+
+  it('judges an improvement job\'s candidate on its feedback task: replays before the feedback, feedback checks, the job\'s trial phase', { timeout: 300_000 }, async () => {
+    const { sdk, project, layout, store, run, settle, model, dispose } = await gateSdk()
+    try {
+      // History; the june task then gets feedback (a second turn that must never be replayed).
+      const june = await run(TASKS.june.text)
+      await run(TASKS.lookup.text)
+      await run(TASKS.october.text)
+      expect(await listCandidates(layout.capabilities)).toEqual([])
+      const deliverable = (await sdk.call('deliverables.list', { projectId: project.projectId })).find(item => item.versions[0]!.files.some(file => file.path === TASKS.june.path))!
+      const comment = 'The totals must be JSON, not prose.'
+      const feedbackTurnEnded = new Promise<void>(resolve => {
+        const off = sdk.subscribe(event => {
+          if (event.type === 'turn.end' && event.sessionId === june && event.turn === 2) {
+            off()
+            resolve()
+          }
+        })
+      })
+      await sdk.call('feedback.submit', { projectId: project.projectId, sessionId: june, deliverableId: deliverable.deliverableId, version: 1, rating: 2, comment })
+      await feedbackTurnEnded
+      const [feedback] = await sdk.call('feedback.list', { projectId: project.projectId, sessionId: june })
+
+      // An improvement job answering that feedback, and its candidate (proposed from the job's own session, not the june task).
+      const at = new Date().toISOString()
+      const job: ImprovementJob = {
+        formatVersion: 1,
+        id: '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b',
+        createdAt: at,
+        updatedAt: at,
+        trigger: 'explicit',
+        status: 'trialing',
+        items: [{ kind: 'feedback', feedbackId: feedback!.id, sessionId: june, deliverableId: deliverable.deliverableId, version: 1, rating: 2, at }],
+        history: [{ status: 'queued', at }, { status: 'trialing', at }],
+        phases: {},
+      }
+      await mkdir(nodePath.join(layout.dataDir, IMPROVEMENTS_DIR, job.id), { recursive: true })
+      await writeFile(nodePath.join(layout.dataDir, IMPROVEMENTS_DIR, job.id, IMPROVEMENT_FILES.job), JSON.stringify(job))
+      const component = { kind: 'function-module' as const, name: 'probe' }
+      const { record: candidate } = await writeCandidate(layout.capabilities, {
+        sessionId: '0a1b2c3d-4e5f-4061-8728-394a5b6c7d8e',
+        taskId: '1b2c3d4e-5f60-4172-8839-4a5b6c7d8e9f',
+        turn: 1,
+        base: BASELINE_BUNDLE,
+        components: [{ ...component, files: new Map([['functions.json', Buffer.from(JSON.stringify(SPEC('probe')))], ['index.mjs', Buffer.from(SOURCE)]]) }],
+        proofs: [{ ...component, turn: 1, toolCallId: 'call-1' }],
+        origin: 'improvement',
+        jobId: job.id,
+      })
+
+      model.replays.length = 0
+      model.phase = 'trial'
+      await sdk.call('capabilities.trial', { projectId: project.projectId, candidateId: candidate.id })
+      await settle(candidate.id)
+      const [trial] = await listTrials(layout.capabilities, candidate.id)
+      expect(trial?.end, await readFile(nodePath.join(layout.capabilities, 'trials', `${candidate.id}.log`), 'utf8').catch(() => '')).toBeDefined()
+      const start = trial!.receipts[0]
+      if (start?.type !== 'trial.start') throw new Error('no start')
+      expect(start.plan.selection[0]).toMatchObject({ sessionId: june, throughTurn: 1, feedbackIds: [feedback!.id] })
+      // The june task replays its first turn only: the feedback text never reaches a replay.
+      const juneReplays = model.replays.filter(item => item.text === TASKS.june.text)
+      expect(juneReplays).toHaveLength(4)
+      expect(trial!.receipts.filter(receipt => receipt.type === 'trial.feedback').map(receipt => receipt.type === 'trial.feedback' && [receipt.arm, receipt.status]))
+        .toEqual([['candidate', 'pass'], ['baseline', 'fail'], ['candidate', 'pass'], ['baseline', 'fail']])
+      expect(model.feedbackChecks.every(text => text.includes(comment))).toBe(true)
+      expect(trial!.end!.verdict).toMatchObject({ outcome: 'adopt', feedbackPassRate: { candidate: 1, baseline: 0 } })
+      expect((await store.activation()).version).toBe(candidate.version)
+      // Every request of the trial (replays and feedback checks) belongs to the job's trial phase.
+      const ledger = (await readLedgerRecords(project.root)).records as LedgerRecord[]
+      const requests = ledger.filter(record => record.type === 'llm.request.end' && record.trialId === trial!.trialId)
+      expect(requests.length).toBeGreaterThan(12)
+      expect(requests.every(record => record.improvementId === job.id && record.improvementPhase === 'trial')).toBe(true)
+      // Display-only USD: the price table over the ledger's own records (unknown when a usage field is).
+      const priced = (arm?: string) => estimateUsdTotal(requests.flatMap(record => (record.type === 'llm.request.end' && record.arm === arm ? [{ model: record.model, usage: record.usage }] : [])))
+      expect(trial!.end!.cost.candidate.estimatedUsd).toEqual(priced('candidate'))
+      expect(trial!.end!.cost.review.estimatedUsd).toEqual(priced(undefined))
+    } finally {
+      await dispose()
+    }
+  })
+})
+
+describe('the feedback check answer', () => {
+  it('reads solved true / false / null, and nothing else', () => {
+    expect(parseFeedbackCheck('{"solved": true, "reason": "fixed"}')).toEqual({ status: 'pass', reason: 'fixed' })
+    expect(parseFeedbackCheck('Here: {"solved": false, "reason": "still prose"} done')).toEqual({ status: 'fail', reason: 'still prose' })
+    expect(parseFeedbackCheck('{"solved": null, "reason": "cannot tell"}')).toEqual({ status: 'unknown', reason: 'cannot tell' })
+    expect(parseFeedbackCheck('{"solved": "yes"}')).toBeUndefined()
+    expect(parseFeedbackCheck('no json')).toBeUndefined()
   })
 })

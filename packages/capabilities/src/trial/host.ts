@@ -29,6 +29,7 @@ import { listCandidates } from '../candidates.js'
 import type { CapabilityStore } from '../capability-store.js'
 import { listTrials, TRIALS_DIR, wasAttempted } from './receipts.js'
 import { recoverInterruptedTrials } from './recover.js'
+import { selectionAnchor } from './feedback.js'
 import { buildReplaySet, listReplayCases } from './replay-set.js'
 import { checkUsageRegression, type PendingOutcome } from './usage.js'
 
@@ -127,13 +128,17 @@ export class GateHost {
     await this.startPending(agent.sessionId)
   }
 
-  /** Start the gate for every untried, undecided candidate a session proposed (when `autoTrial` is on). */
+  /**
+   * Start the gate for every untried, undecided candidate a session proposed
+   * (when `autoTrial` is on). Candidates of an improvement job are left to
+   * the job: it runs their gate itself and parks at `waiting-history`.
+   */
   async startPending(sessionId: string): Promise<StartedGate[]> {
     if (this.#config.entry === undefined || !(await this.#settings()).autoTrial) return []
     const decided = new Set((await this.#store.decisions()).flatMap(decision => (decision.candidateId === undefined ? [] : [decision.candidateId])))
     const started: StartedGate[] = []
     for (const candidate of await listCandidates(this.#store.directory)) {
-      if (candidate.sessionId !== sessionId || decided.has(candidate.id) || this.#running.has(candidate.id)) continue
+      if (candidate.sessionId !== sessionId || candidate.origin === 'improvement' || decided.has(candidate.id) || this.#running.has(candidate.id)) continue
       if (await wasAttempted(this.#store.directory, candidate.id)) continue
       started.push(this.start(candidate.id))
     }
@@ -197,7 +202,10 @@ export class GateHost {
     if ((await this.#store.decisions()).some(decision => decision.candidateId === candidateId)) throw new NexgentError('tool/invalid-input', `candidate ${candidateId} already has a decision`)
     if (!this.#running.has(candidateId) && await wasAttempted(this.#store.directory, candidateId)) throw new NexgentError('tool/invalid-input', `candidate ${candidateId} was tried before; a candidate is tried once`)
     const settings = await this.#settings()
-    const set = buildReplaySet(await listReplayCases(this.#layout), candidate.taskId, { selection: settings.selectionCases, guard: settings.guardCases })
+    const history = await listReplayCases(this.#layout)
+    const anchor = await selectionAnchor(this.#layout, candidate, history)
+    if (anchor.kind === 'missing') throw new NexgentError('tool/invalid-input', `the gate cannot run: ${anchor.detail}`)
+    const set = buildReplaySet(history, anchor.caseId, { selection: settings.selectionCases, guard: settings.guardCases })
     if (set.status === 'waiting') throw new NexgentError('tool/invalid-input', `the gate cannot run yet: ${set.detail}`)
     const started = this.start(candidateId)
     let exited = false

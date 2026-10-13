@@ -14,6 +14,12 @@
  *   `trialId` and `arm`; approvals are answered `deny` (`headless`): a trial
  *   asks nobody anything.
  *
+ * Step 5: a job's candidate's replay sessions belong to the job's `trial`
+ * phase (`improvement: { jobId, phase: 'trial' }`, so the ledger records carry
+ * `improvementId` / `improvementPhase`), the reviewer also answers feedback
+ * checks, and every result carries the display-only `estimatedUsd` from
+ * `@nexgent/llm`'s price table.
+ *
  * The API key comes from the environment or the Nexgent home's credentials
  * file, as for any task; it is never passed on a command line or written.
  */
@@ -22,9 +28,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   decisionLedgerRecord,
   processReplayRunner,
+  readCandidate,
   REPLAY_RESULT_PREFIX,
   runGate,
   type GateResult,
+  type FeedbackCheckInput,
+  type FeedbackCheckResult,
   type ReplayRunRequest,
   type ReplayRunResult,
   type ReviewInput,
@@ -33,6 +42,8 @@ import {
 } from '@nexgent/capabilities'
 import {
   addUsage,
+  AgentsService,
+  KERNEL_PLUGIN_NAMES,
   LocalCredentials,
   nexgentHome,
   readProjectConfig,
@@ -40,6 +51,7 @@ import {
   UNKNOWN_USAGE,
   ZERO_USAGE,
   type Context,
+  type CreateAgentOptions,
   type Ledger,
   type LedgerRecordInput,
   type LLMUsage,
@@ -47,7 +59,7 @@ import {
   type TrialArm,
   type TurnEndReason,
 } from '@nexgent/kernel'
-import { AnthropicProvider } from '@nexgent/llm'
+import { AnthropicProvider, estimateUsd } from '@nexgent/llm'
 import { JsonlLedger, SessionPlugin, type SessionPluginConfig } from '@nexgent/session'
 import { createSdk } from './sdk.js'
 
@@ -59,8 +71,15 @@ export const TRIAL_ENV_KEYS = ['NEXGENT_HOME', 'NEXGENT_API_BASE_URL', 'NEXGENT_
 
 type Env = Readonly<Record<string, string | undefined>>
 
+/** A run's model requests: summed usage, count, and estimated USD (display only). */
+interface RunTally {
+  usage: LLMUsage
+  requests: number
+  usd: number | 'unknown'
+}
+
 /** A ledger that adds the trial's fields to every record (and counts the run's model requests). */
-function trialLedger(ledger: Ledger, fields: { readonly trialId: string; readonly arm?: TrialArm }, tally?: { usage: LLMUsage; requests: number }): Ledger {
+function trialLedger(ledger: Ledger, fields: { readonly trialId: string; readonly arm?: TrialArm }, tally?: RunTally): Ledger {
   return {
     get writeFailures() {
       return ledger.writeFailures
@@ -71,6 +90,8 @@ function trialLedger(ledger: Ledger, fields: { readonly trialId: string; readonl
       if (tally !== undefined && record.type === 'llm.request.end') {
         tally.usage = addUsage(tally.usage, record.usage)
         tally.requests += 1
+        const usd = estimateUsd(record.model, record.usage)
+        tally.usd = tally.usd === 'unknown' || usd === 'unknown' ? 'unknown' : tally.usd + usd
       }
       return record
     },
@@ -78,7 +99,7 @@ function trialLedger(ledger: Ledger, fields: { readonly trialId: string; readonl
 }
 
 /** `@nexgent/session` for a replay run: data in the copy, ledger in the real project, trial fields on every record. */
-function trialSessionPlugin(request: ReplayRunRequest, tally: { usage: LLMUsage; requests: number }): Plugin {
+function trialSessionPlugin(request: ReplayRunRequest, tally: RunTally): Plugin {
   return {
     ...SessionPlugin,
     apply(ctx: Context, config: SessionPluginConfig = {}): void {
@@ -116,14 +137,30 @@ function outcomeOf(reason: TurnEndReason): ReplayRunResult['outcome'] | undefine
   }
 }
 
+/**
+ * The kernel's agents service for a job's replay: every root session it
+ * opens belongs to the job's `trial` phase (members inherit nothing; the
+ * kernel refuses a job on a member).
+ */
+function trialAgents(jobId: string): Plugin {
+  return class TrialAgentsService extends AgentsService {
+    override async create(options: CreateAgentOptions = {}) {
+      return super.create(options.child === undefined ? { ...options, improvement: { jobId, phase: 'trial' } } : options)
+    }
+  } as unknown as Plugin
+}
+
 /** Run one replay in this process (the `replay` mode). */
 export async function runReplay(request: ReplayRunRequest, env: Env = process.env): Promise<ReplayRunResult> {
-  const tally = { usage: ZERO_USAGE as LLMUsage, requests: 0 }
+  const tally: RunTally = { usage: ZERO_USAGE as LLMUsage, requests: 0, usd: 0 }
   const sdk = createSdk({
     appVersion: 'trial',
     env,
     approvalResponder: async request => ({ id: request.id, decision: 'deny', scope: 'once', decidedBy: 'headless', reason: 'gate trials run without anyone to ask' }),
-    registry: { '@nexgent/session': trialSessionPlugin(request, tally) },
+    registry: {
+      '@nexgent/session': trialSessionPlugin(request, tally),
+      ...(request.improvement === undefined ? {} : { [KERNEL_PLUGIN_NAMES.agents]: trialAgents(request.improvement.jobId) }),
+    },
   })
   try {
     const project = await sdk.call('projects.open', { root: request.projectRoot })
@@ -139,12 +176,12 @@ export async function runReplay(request: ReplayRunRequest, env: Env = process.en
       const ended = outcomeOf(result.reason)
       if (ended !== undefined) {
         const detail = result.reason.kind === 'error' ? `${result.reason.error.code}: ${result.reason.error.message}` : result.reason.kind
-        return { outcome: ended, detail: detail.slice(0, 500), usage: tally.usage, requestCount: tally.requests }
+        return { outcome: ended, detail: detail.slice(0, 500), usage: tally.usage, requestCount: tally.requests, estimatedUsd: tally.usd }
       }
     }
-    return { outcome: 'completed', usage: tally.usage, requestCount: tally.requests }
+    return { outcome: 'completed', usage: tally.usage, requestCount: tally.requests, estimatedUsd: tally.usd }
   } catch (error) {
-    return { outcome: 'error', detail: (error instanceof Error ? error.message : String(error)).slice(0, 500), usage: tally.requests === 0 ? UNKNOWN_USAGE : tally.usage, requestCount: tally.requests }
+    return { outcome: 'error', detail: (error instanceof Error ? error.message : String(error)).slice(0, 500), usage: tally.requests === 0 ? UNKNOWN_USAGE : tally.usage, requestCount: tally.requests, estimatedUsd: tally.requests === 0 ? 'unknown' : tally.usd }
   } finally {
     await sdk.dispose().catch(() => undefined)
   }
@@ -176,47 +213,92 @@ export function parseReview(text: string): { readonly better: 'A' | 'B' | 'tie';
   }
 }
 
+const FEEDBACK_SYSTEM = [
+  'You check one attempt at a task for a quality gate.',
+  'You see the task (the user messages), the feedback the user gave on an earlier attempt at the same task, and the files this attempt created or changed.',
+  'Judge only whether this attempt has solved the problem the feedback names; ignore anything the feedback does not mention.',
+  'Answer with one JSON object and nothing else: {"solved": true | false, "reason": "<one or two sentences>"}.',
+  'If the files do not let you tell, answer {"solved": null, "reason": "..."}.',
+].join(' ')
+
+/** Parse the feedback check's JSON answer; `undefined` when it is not one. */
+export function parseFeedbackCheck(text: string): { readonly status: 'pass' | 'fail' | 'unknown'; readonly reason: string } | undefined {
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0 || end <= start) return undefined
+  try {
+    const value = JSON.parse(text.slice(start, end + 1)) as { solved?: unknown; reason?: unknown }
+    if (value.solved !== true && value.solved !== false && value.solved !== null) return undefined
+    return { status: value.solved === true ? 'pass' : value.solved === false ? 'fail' : 'unknown', reason: typeof value.reason === 'string' ? value.reason : '' }
+  } catch {
+    return undefined
+  }
+}
+
+function renderFeedback(feedback: FeedbackCheckInput['feedback']): string {
+  return feedback.map((entry, index) => `Feedback ${index + 1}${entry.rating === undefined ? '' : ` (rating ${entry.rating}/5)`}:\n${entry.comment}`).join('\n\n')
+}
+
 /**
- * The reviewer model over the Claude Platform route: one request per
- * selection run pair, attempts shown as A and B (the candidate is A on odd
- * repeats, B on even ones), records with `trialId` and no `arm`.
+ * The reviewer model over the Claude Platform route, records with `trialId`
+ * and no `arm` (and the job's `trial` phase for a job's candidate):
+ *
+ * - `review`: one request per selection run pair, attempts shown as A and B
+ *   (the candidate is A on odd repeats, B on even ones).
+ * - `checkFeedback`: one request per run of a feedback case, that run's
+ *   output alone with the feedback text (no other attempt to compare, so no
+ *   position to swap).
  */
-export function llmReviewer(options: { readonly ledger: Ledger; readonly home: string; readonly env: Env; readonly endpoint?: string }): TrialReviewer {
+export function llmReviewer(options: { readonly ledger: Ledger; readonly home: string; readonly env: Env; readonly endpoint?: string; readonly improvementId?: string }): TrialReviewer {
+  const ask = async (trialId: string, settings: Parameters<TrialReviewer['review']>[1], system: string, user: string, signal: AbortSignal) => {
+    let usage: LLMUsage = UNKNOWN_USAGE
+    const fields = { trialId, ...(options.improvementId === undefined ? {} : { improvementId: options.improvementId, improvementPhase: 'trial' as const }) }
+    const provider = new AnthropicProvider({
+      credentials: new LocalCredentials({ env: options.env as NodeJS.ProcessEnv, home: options.home }),
+      ledger: trialLedger(options.ledger, fields),
+      env: options.env,
+      defaultModel: settings.model,
+      ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
+    })
+    let text = ''
+    let failure: string | undefined
+    for await (const event of provider.complete({
+      requestId: randomUUID(),
+      model: settings.model,
+      thinking: settings.thinking,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      signal,
+    }, { purpose: 'auxiliary' })) {
+      if (event.type === 'text.delta') text += event.text
+      else if (event.type === 'usage') usage = event.usage
+      else if (event.type === 'error') failure = `${event.error.code}: ${event.error.message}`
+    }
+    return { text, usage, failure, estimatedUsd: estimateUsd(settings.model, usage) }
+  }
+  const taskText = (messages: readonly { readonly text: string }[]) => messages.map((message, index) => `Message ${index + 1}:\n${message.text}`).join('\n\n')
   return {
     async review(input: ReviewInput, settings, signal): Promise<ReviewResult> {
-      let usage: LLMUsage = UNKNOWN_USAGE
-      const provider = new AnthropicProvider({
-        credentials: new LocalCredentials({ env: options.env as NodeJS.ProcessEnv, home: options.home }),
-        ledger: trialLedger(options.ledger, { trialId: input.trialId }),
-        env: options.env,
-        defaultModel: settings.model,
-        ...(options.endpoint === undefined ? {} : { endpoint: options.endpoint }),
-      })
       const candidateFirst = input.repeat % 2 === 1
       const [a, b] = candidateFirst ? [input.candidate, input.baseline] : [input.baseline, input.candidate]
-      const task = input.messages.map((message, index) => `Message ${index + 1}:\n${message.text}`).join('\n\n')
-      let text = ''
-      let failure: string | undefined
-      for await (const event of provider.complete({
-        requestId: randomUUID(),
-        model: settings.model,
-        thinking: settings.thinking,
-        messages: [
-          { role: 'system', content: REVIEW_SYSTEM },
-          { role: 'user', content: `# Task\n${task}\n\n${renderOutput('A', a)}\n\n${renderOutput('B', b)}` },
-        ],
-        signal,
-      }, { purpose: 'auxiliary' })) {
-        if (event.type === 'text.delta') text += event.text
-        else if (event.type === 'usage') usage = event.usage
-        else if (event.type === 'error') failure = `${event.error.code}: ${event.error.message}`
-      }
+      const { text, usage, failure, estimatedUsd } = await ask(input.trialId, settings, REVIEW_SYSTEM, `# Task\n${taskText(input.messages)}\n\n${renderOutput('A', a)}\n\n${renderOutput('B', b)}`, signal)
       const parsed = failure === undefined ? parseReview(text) : undefined
       if (parsed === undefined) {
-        return { preference: 'unknown', reason: (failure ?? `the reviewer did not answer with the JSON object: ${text.slice(0, 300)}`).slice(0, 2_000), usage, requestCount: 1 }
+        return { preference: 'unknown', reason: (failure ?? `the reviewer did not answer with the JSON object: ${text.slice(0, 300)}`).slice(0, 2_000), usage, requestCount: 1, estimatedUsd }
       }
       const preference = parsed.better === 'tie' ? 'tie' : (parsed.better === 'A') === candidateFirst ? 'candidate' : 'baseline'
-      return { preference, reason: parsed.reason.slice(0, 2_000) || '(no reason given)', usage, requestCount: 1 }
+      return { preference, reason: parsed.reason.slice(0, 2_000) || '(no reason given)', usage, requestCount: 1, estimatedUsd }
+    },
+    async checkFeedback(input: FeedbackCheckInput, settings, signal): Promise<FeedbackCheckResult> {
+      const user = `# Task\n${taskText(input.messages)}\n\n# Feedback on an earlier attempt\n${renderFeedback(input.feedback)}\n\n${renderOutput('to check', input.output)}`
+      const { text, usage, failure, estimatedUsd } = await ask(input.trialId, settings, FEEDBACK_SYSTEM, user, signal)
+      const parsed = failure === undefined ? parseFeedbackCheck(text) : undefined
+      if (parsed === undefined) {
+        return { status: 'unknown', reason: (failure ?? `the reviewer did not answer with the JSON object: ${text.slice(0, 300)}`).slice(0, 2_000), usage, requestCount: 1, estimatedUsd }
+      }
+      return { status: parsed.status, reason: parsed.reason.slice(0, 2_000) || '(no reason given)', usage, requestCount: 1, estimatedUsd }
     },
   }
 }
@@ -226,11 +308,12 @@ export async function runGateProcess(root: string, candidateId: string, env: Env
   const layout = resolveWorkspaceLayout(root)
   const ledger = new JsonlLedger({ ledgersDir: layout.ledgers })
   const endpoint = (await readProjectConfig(layout.configFile).catch(() => undefined))?.input.endpoint
+  const jobId = (await readCandidate(layout.capabilities, candidateId).catch(() => undefined))?.jobId
   return runGate({
     layout,
     candidateId,
     runner: processReplayRunner({ args: [TRIAL_ENTRY, 'replay'], env: env as NodeJS.ProcessEnv }),
-    reviewer: llmReviewer({ ledger, home: nexgentHome(env as NodeJS.ProcessEnv), env, ...(endpoint === undefined ? {} : { endpoint }) }),
+    reviewer: llmReviewer({ ledger, home: nexgentHome(env as NodeJS.ProcessEnv), env, ...(endpoint === undefined ? {} : { endpoint }), ...(jobId === undefined ? {} : { improvementId: jobId }) }),
     log: line => process.stderr.write(`${line}\n`),
     onDecision: async decision => {
       await ledger.append(decisionLedgerRecord(decision)).catch(() => undefined)

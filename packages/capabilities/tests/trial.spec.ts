@@ -14,11 +14,12 @@ import {
   releaseTrialLock,
   runGate,
   writeTrialLock,
+  type FeedbackCheckInput,
   type ReviewInput,
   type TrialReviewer,
 } from '../src/index.js'
 import { tempDir } from './helpers.js'
-import { historyProject, pastTask, proposeCandidate, scriptedRunner, usage, type ArmScript } from './trial-fixture.js'
+import { feedbackTask, historyProject, improvementJob, pastTask, proposeCandidate, scriptedRunner, usage, type ArmScript } from './trial-fixture.js'
 
 async function writeConfig(layout: WorkspaceLayout, capabilities: Record<string, unknown>): Promise<void> {
   await writeFile(layout.configFile, JSON.stringify({ version: 1, capabilities }))
@@ -301,5 +302,130 @@ describe('usage-regression rollback', () => {
     await store.adopt(candidate.version, { trigger: 'manual', reason: 'manual', detail: 'by hand' })
     const ledger = ledgerOf(['t1', 't2', 't3'].map(taskId => ({ type: 'task.outcome', taskId, capabilityVersion: candidate.version, checks: failed }) as Partial<LedgerRecord>))
     expect(await checkUsageRegression({ store, ledger, rule })).toBeUndefined()
+  })
+})
+
+describe('step 5: feedback task and feedback checks', { timeout: 60_000 }, () => {
+  /** A project with three step-4 tasks and one task with feedback; a job answering that feedback; its candidate proposed from another session. */
+  async function jobProject() {
+    const { layout, tasks } = await historyProject()
+    const task = await feedbackTask(layout, 'summarize the august orders by region')
+    const job = await improvementJob(layout, [{ kind: 'feedback', feedbackId: task.feedback.id, sessionId: task.sessionId, deliverableId: task.feedback.deliverableId, version: 1, rating: 2, at: new Date().toISOString() }])
+    // The propose session's task is not the feedback task.
+    const candidate = await proposeCandidate(layout, tasks[2]!, 'function-module', job.id)
+    return { layout, tasks, task, job, candidate }
+  }
+
+  /** A reviewer whose feedback check passes runs that wrote `good`. */
+  function feedbackReviewer(checked: FeedbackCheckInput[], status?: 'unknown'): TrialReviewer {
+    return {
+      async review() { throw new Error('not expected') },
+      async checkFeedback(input) {
+        checked.push(input)
+        const good = input.output.files.some(file => file.path === 'out/result.txt' && file.text === 'good')
+        return { status: status ?? (good ? 'pass' : 'fail'), reason: good ? 'solved' : 'still missing', usage: usage(10), requestCount: 1, estimatedUsd: 0.01 }
+      },
+    }
+  }
+
+  it('replays a per-turn task only up to the turn before its first feedback', async () => {
+    const { layout, task } = await jobProject()
+    const replay = (await listReplayCases(layout)).find(item => item.caseId === task.taskId)!
+    expect(replay.throughTurn).toBe(1)
+    expect(replay.messages).toEqual([{ text: 'summarize the august orders by region' }])
+    expect(replay.feedback.map(item => [item.turn, item.entry.id])).toEqual([[2, task.feedback.id]])
+    // Step-4 tasks replay as before.
+    expect((await listReplayCases(layout)).filter(item => item.caseId !== task.taskId).every(item => item.throughTurn === undefined)).toBe(true)
+  })
+
+  it('anchors the selection on the job\'s feedback task and adopts when the candidate solves the feedback', async () => {
+    const { layout, task, job, candidate } = await jobProject()
+    const checked: FeedbackCheckInput[] = []
+    const runner = arms({ output: 'good', estimatedUsd: 0.02 }, { output: 'bad', estimatedUsd: 0.02 })
+    const receipts: TrialReceipt[] = []
+    const result = await runGate({ layout, candidateId: candidate.id, runner, reviewer: feedbackReviewer(checked), tempRoot: await tempDir(), onReceipt: receipt => receipts.push(receipt) })
+    if (result.status !== 'decided') throw new Error(`expected a decision, got ${result.status}`)
+    expect(result.verdict).toMatchObject({ outcome: 'adopt', feedbackPassRate: { candidate: 1, baseline: 0 } })
+    const start = receipts[0]
+    if (start?.type !== 'trial.start') throw new Error('no start')
+    expect(start.plan.selection[0]).toMatchObject({ caseId: task.taskId, throughTurn: 1, feedbackIds: [task.feedback.id] })
+    expect(start.plan.selection.slice(1).every(item => item.feedbackIds === undefined)).toBe(true)
+    // Runs of a job's candidate belong to the job; the feedback text is never replayed.
+    expect(runner.requests.every(request => request.improvement?.jobId === job.id)).toBe(true)
+    const feedbackRuns = runner.requests.filter(request => request.caseId === task.taskId)
+    expect(feedbackRuns).toHaveLength(4)
+    expect(feedbackRuns.every(request => JSON.stringify(request.messages) === JSON.stringify([{ text: 'summarize the august orders by region' }]))).toBe(true)
+    // One feedback check per run of the feedback task, receipts apart from the runs.
+    const checks = receipts.filter(receipt => receipt.type === 'trial.feedback')
+    expect(checks).toHaveLength(4)
+    expect(checks.map(receipt => receipt.type === 'trial.feedback' && [receipt.arm, receipt.status])).toEqual([['candidate', 'pass'], ['baseline', 'fail'], ['candidate', 'pass'], ['baseline', 'fail']])
+    expect(checked[0]!.feedback.map(entry => entry.comment)).toEqual(['the summary misses the south region'])
+    expect(result.decision.detail).toContain('Feedback checks')
+    // Display-only USD sums run and review costs.
+    const end = receipts.at(-1)
+    if (end?.type !== 'trial.end') throw new Error('no end')
+    expect(end.cost.review.estimatedUsd).toBeCloseTo(0.04)
+    expect(end.cost.candidate.estimatedUsd).toBeCloseTo(0.02 * 6)
+  })
+
+  it('rejects when a feedback check is unknown, or there is no feedback checker', async () => {
+    const first = await jobProject()
+    const unknown = await runGate({ layout: first.layout, candidateId: first.candidate.id, runner: arms({ output: 'good' }, { output: 'bad' }), reviewer: feedbackReviewer([], 'unknown'), tempRoot: await tempDir() })
+    if (unknown.status !== 'decided') throw new Error('expected a decision')
+    expect(unknown.verdict).toMatchObject({ outcome: 'reject', reason: 'unknown-runs' })
+    const second = await jobProject()
+    const none = await runGate({ layout: second.layout, candidateId: second.candidate.id, runner: arms({ output: 'good' }, { output: 'bad' }), tempRoot: await tempDir() })
+    if (none.status !== 'decided') throw new Error('expected a decision')
+    expect(none.verdict).toMatchObject({ outcome: 'reject', reason: 'unknown-runs' })
+  })
+
+  it('rejects when the candidate does not solve the feedback even though its checks pass', async () => {
+    const { layout, candidate } = await jobProject()
+    const reviewer: TrialReviewer = {
+      async review() { throw new Error('not expected') },
+      async checkFeedback(input) {
+        return { status: input.arm === 'candidate' ? 'fail' : 'pass', reason: 'r', usage: usage(1), requestCount: 1 }
+      },
+    }
+    const result = await runGate({ layout, candidateId: candidate.id, runner: arms({ output: 'good' }, { output: 'good' }), reviewer, tempRoot: await tempDir() })
+    if (result.status !== 'decided') throw new Error('expected a decision')
+    expect(result.verdict.outcome).toBe('reject')
+    expect(result.verdict.feedbackPassRate).toEqual({ candidate: 0, baseline: 1 })
+  })
+
+  it('waits for history without writing anything, then runs once the history suffices', async () => {
+    const { layout } = await historyProject(['summarize the june orders'])
+    const task = await feedbackTask(layout, 'summarize the august orders by region')
+    const job = await improvementJob(layout, [{ kind: 'feedback', feedbackId: task.feedback.id, sessionId: task.sessionId, deliverableId: task.feedback.deliverableId, version: 1, rating: 2, at: new Date().toISOString() }])
+    const candidate = await proposeCandidate(layout, task, 'function-module', job.id)
+    const runner = arms({ output: 'good' }, { output: 'bad' })
+    expect((await runGate({ layout, candidateId: candidate.id, runner, reviewer: feedbackReviewer([]), tempRoot: await tempDir() })).status).toBe('waiting')
+    expect(await listTrials(layout.capabilities)).toEqual([])
+    await pastTask(layout, 'summarize the july orders')
+    const result = await runGate({ layout, candidateId: candidate.id, runner, reviewer: feedbackReviewer([]), tempRoot: await tempDir() })
+    expect(result.status).toBe('decided')
+  })
+
+  it('anchors a check-failure job on its task, without feedback checks', async () => {
+    const { layout, tasks } = await historyProject()
+    const job = await improvementJob(layout, [{ kind: 'check-failure', taskId: tasks[1]!.taskId, sessionId: tasks[1]!.sessionId, turn: 1, at: new Date().toISOString() }])
+    const candidate = await proposeCandidate(layout, tasks[0]!, 'function-module', job.id)
+    const receipts: TrialReceipt[] = []
+    const result = await runGate({ layout, candidateId: candidate.id, runner: arms({ output: 'good' }, { output: 'bad' }), tempRoot: await tempDir(), onReceipt: receipt => receipts.push(receipt) })
+    if (result.status !== 'decided') throw new Error('expected a decision')
+    expect(result.verdict).toMatchObject({ outcome: 'adopt' })
+    expect(result.verdict.feedbackPassRate).toBeUndefined()
+    const start = receipts[0]
+    if (start?.type !== 'trial.start') throw new Error('no start')
+    expect(start.plan.selection[0]!.caseId).toBe(tasks[1]!.taskId)
+    expect(receipts.some(receipt => receipt.type === 'trial.feedback')).toBe(false)
+  })
+
+  it('skips a job candidate whose task cannot be replayed', async () => {
+    const { layout, tasks } = await historyProject()
+    const job = await improvementJob(layout, [{ kind: 'feedback', feedbackId: '00000000-0000-4000-8000-000000000000', sessionId: '11111111-1111-4111-8111-111111111111', deliverableId: 'd', rating: 1, at: new Date().toISOString() }])
+    const candidate = await proposeCandidate(layout, tasks[0]!, 'function-module', job.id)
+    const result = await runGate({ layout, candidateId: candidate.id, runner: arms({ output: 'good' }, { output: 'bad' }), tempRoot: await tempDir() })
+    expect(result.status).toBe('skipped')
   })
 })

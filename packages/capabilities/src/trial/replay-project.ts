@@ -96,7 +96,8 @@ export async function prepareReplayProject(input: ReplayProjectInput): Promise<R
       ...(input.budget.maxRequests === undefined ? {} : { maxRequests: Math.min(input.budget.maxRequests, caps.perTask?.maxRequests ?? Number.MAX_SAFE_INTEGER) }),
     }
     const capabilities = (config.capabilities ?? {}) as Record<string, unknown>
-    config = { ...config, costCaps: { ...caps, perTask }, capabilities: { ...capabilities, autoTrial: false } }
+    // A replay never starts trials or improvement jobs of its own.
+    config = { ...config, costCaps: { ...caps, perTask }, autoImprove: false, capabilities: { ...capabilities, autoTrial: false } }
     await writeFile(layout.configFile, `${JSON.stringify(config, null, 2)}\n`)
 
     const materials = new Set(input.replay.messages.flatMap(message => message.materialIds ?? []))
