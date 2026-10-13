@@ -15,11 +15,14 @@
  * are judged (step5-judges.mjs) over the step-5 headless scenario (`ctx.step5`,
  * step5-headless.mjs), which runs `@nexgent/sdk` as shipped, evolve included;
  * D19–D23 are judged (step5-desktop-judges.mjs) over the improvements page
- * scenario (`ctx.improvements`, step5-desktop.mjs). R01–R08 are round 4.
+ * scenario (`ctx.improvements`, step5-desktop.mjs). R01–R07 are judged
+ * (step5-real-judges.mjs) over the real scenario (`ctx.obs`, step5-real.mjs); R08
+ * (Windows) has no run here: it is a manual run of the same layer on Windows.
  */
 import { CHECKS as STEP4_CHECKS, evaluateItem } from './step4-checks.mjs'
 import { judgeDesktop } from './step5-desktop-judges.mjs'
 import { JUDGES, judge } from './step5-judges.mjs'
+import { judgeReal } from './step5-real-judges.mjs'
 
 export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_PASS } from './step2-checks.mjs'
 
@@ -79,6 +82,13 @@ const step5Run = id => (ctx) => {
   return judge(id, ctx.step5)
 }
 
+/** A real-model item: over the step-5 real scenario's observations. */
+const realRun = id => (ctx) => {
+  if (ctx?.scenarioError !== undefined) return { status: 'failed', evidence: `real scenario failed: ${ctx.scenarioError}` }
+  if (ctx?.obs === undefined) return { status: 'failed', evidence: 'the real scenario did not run' }
+  return judgeReal(id, ctx.obs)
+}
+
 const item = (id, layer, title, run) => {
   const wired = run ?? (layer === 'headless' && JUDGES[id] !== undefined ? step5Run(id) : undefined)
   return wired === undefined ? { id, layer, title } : { id, layer, title, run: wired }
@@ -116,13 +126,13 @@ export const CHECKS = [
   item('D21', 'desktop', '成果卡片上点“改进”开始作业，进度在“改进”页可见', ctx => judgeDesktop('D21', ctx)),
   item('D22', 'desktop', '设置页“自动改进”开关与改进预算可改，重启后保持；关闭后反馈不再自动开始作业', ctx => judgeDesktop('D22', ctx)),
   item('D23', 'desktop', '采用后的下一次任务完成时，“改进”页显示“已被后续任务使用”及时间', ctx => judgeDesktop('D23', ctx)),
-  item('R01', 'real', '历史任务：同一项目先跑 2–3 个表格 / 数据任务，留下快照与检查（回放集的补足与 guard 部分）；任务提示不提能力工具'),
-  item('R02', 'real', '反馈任务：一个表格任务完成后，用户给 3 条计入的反馈，指出隐藏判定能查到的问题；反馈也不提能力工具'),
-  item('R03', 'real', '自动作业：第 3 条反馈后作业自动开始，诊断合 schema，提案产出一个候选；全程没有人点名能力工具，记录模型选了哪种组件'),
-  item('R04', 'real', '门控：结论如实记录（采用、拒绝或等待都写进摘要），反馈检查与确定性检查分开列出'),
-  item('R05', 'real', '下一次任务（新进程，新数据，同类任务，不提示组件存在）：采用时自动加载并调用组件，账本可证，且隐藏判定确认反馈指出的问题这次没有出现'),
-  item('R06', 'real', '每个任务与作业各阶段的请求数、token、unknown 数、估算费用写进摘要，改进费用单列；累计不超过上限'),
-  item('R07', 'real', '（不进门槛）第二个作业：换一种反馈再走一遍，结论写进摘要，和主链一起给出“作业数 / 采用数”'),
+  item('R01', 'real', '历史任务：同一项目先跑 2–3 个表格 / 数据任务，留下快照与检查（回放集的补足与 guard 部分）；任务提示不提能力工具', realRun('R01')),
+  item('R02', 'real', '反馈任务：一个表格任务完成后，用户给 3 条计入的反馈，指出隐藏判定能查到的问题；反馈也不提能力工具', realRun('R02')),
+  item('R03', 'real', '自动作业：第 3 条反馈后作业自动开始，诊断合 schema，提案产出一个候选；全程没有人点名能力工具，记录模型选了哪种组件', realRun('R03')),
+  item('R04', 'real', '门控：结论如实记录（采用、拒绝或等待都写进摘要），反馈检查与确定性检查分开列出', realRun('R04')),
+  item('R05', 'real', '下一次任务（新进程，新数据，同类任务，不提示组件存在）：采用时自动加载并调用组件，账本可证，且隐藏判定确认反馈指出的问题这次没有出现', realRun('R05')),
+  item('R06', 'real', '每个任务与作业各阶段的请求数、token、unknown 数、估算费用写进摘要，改进费用单列；累计不超过上限', realRun('R06')),
+  item('R07', 'real', '（不进门槛）第二个作业：换一种反馈再走一遍，结论写进摘要，和主链一起给出“作业数 / 采用数”', realRun('R07')),
   item('R08', 'real', '（可选，不进门槛）Windows 上 R02–R05'),
 ]
 

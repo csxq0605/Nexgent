@@ -115,9 +115,16 @@ export const FEEDBACK = [
   { key: 'third', rating: 3, comment: '还是缺 avg_order_value，以后每个月的地区表都要有这一列。' },
 ]
 
-/** A second family of feedback for R07 (a different problem: region rows must be sorted by revenue, highest first). */
+/**
+ * The column the second family of feedback names (R07): each region's share of the month's
+ * revenue, in percent to one decimal. Another column, not a new row order, so the table the
+ * task asks for (sorted by region) and the project's check stay right.
+ */
+export const SECOND_COLUMN = 'revenue_share'
+
+/** A second family of feedback for R07 (a different problem: the revenue share column is missing). */
 export const SECOND_FEEDBACK = [
-  { key: 'first', rating: 2, comment: '地区应该按收入从高到低排，不是按名字。' },
-  { key: 'second', comment: '排序还是不对，收入最高的地区放第一行。' },
-  { key: 'third', rating: 3, comment: '地区表请一直按收入降序排列。' },
+  { key: 'first', rating: 2, comment: '地区表还要一列收入占比：每个地区收入占当月总收入的百分比，保留一位小数。' },
+  { key: 'second', comment: '收入占比那一列还是没有，我们每个月都要看这个。' },
+  { key: 'third', rating: 3, comment: '请以后的地区表都加上 revenue_share 列（百分比，一位小数）。' },
 ]
