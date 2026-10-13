@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // The host's own rules (not dependencies of this package: read from the built packages).
 import * as evolve from '../../evolve/dist/index.js'
-import { FAILURE_CATEGORIES, functionToolName, IMPROVE_REPORT_DIAGNOSIS_TOOL } from '../../kernel/dist/index.js'
+import { FAILURE_CATEGORIES, functionToolName, IMPROVE_REPORT_DIAGNOSIS_TOOL, statusesOfKind } from '../../kernel/dist/index.js'
 import { validateImprovementFile } from '../../session/dist/index.js'
 import { TEST_COMMAND_PATTERN } from '../../tasking/dist/task-records.js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -207,7 +207,8 @@ describe('playbooks', () => {
 
   it('job states match @nexgent/evolve: the plan\'s twelve plus the contract\'s cancelled; terminal and parked sets; the counting rule agrees', () => {
     expect(JOB_STATES).toHaveLength(13)
-    expect(Object.keys(evolve.JOB_TRANSITIONS).sort()).toEqual([...JOB_STATES].sort())
+    // Step 6 adds the meta-job statuses to the shared table; a capability job (step 5's) still has exactly these.
+    expect(Object.keys(evolve.JOB_TRANSITIONS).filter(status => statusesOfKind('capability').includes(status as never)).sort()).toEqual([...JOB_STATES].sort())
     expect([...evolve.TERMINAL_STATUSES].sort()).toEqual([...TERMINAL_STATES].sort())
     expect([...evolve.PARKED_STATUSES].sort()).toEqual([...PARKED_STATES].sort())
     expect(evolve.DEFAULT_THRESHOLD).toBe(THRESHOLD)
