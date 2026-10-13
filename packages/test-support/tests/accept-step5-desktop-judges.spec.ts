@@ -77,7 +77,7 @@ function good(): ImprovementsDesktopObservations {
     },
     firstUse: {
       nextSession: NEXT_SESSION,
-      ui: '首次被任务使用：10-13 09:05',
+      ui: '已被后续任务使用：10-13 09:05',
       nudged: true,
       file: { taskId: 't1', sessionId: NEXT_SESSION, at: FIRST_USE_AT, version: 'v'.repeat(64) },
       adoptedDecidedAt: DECIDED,
@@ -131,7 +131,7 @@ const BREAKS: Array<[string, string, Mutate]> = [
   ['D19', 'the gate result says the wrong outcome', o => { o['details'][IDS.rejected].gateVerdict = gate('已采用', '有运行结果未知') }],
   ['D19', 'the pass rates are not shown', o => { o['details'][IDS.adopted].gateRate = null }],
   ['D19', 'the budget is not shown', o => { o['list'].budget = null }],
-  ['D19', 'the adopted job claims a use before any task', o => { o['details'][IDS.adopted].firstUse = '首次被任务使用：10-13 08:00' }],
+  ['D19', 'the adopted job claims a use before any task', o => { o['details'][IDS.adopted].firstUse = '已被后续任务使用：10-13 08:00' }],
   ['D19', 'console errors in the first launch', o => { o['consoleErrors'].first = ['boom'] }],
   ['D19', 'the prepared jobs are not of the four kinds', o => { o['prepared'].rejected.status = 'adopted' }],
   // D20
@@ -177,14 +177,14 @@ const BREAKS: Array<[string, string, Mutate]> = [
   ['D22', 'automatic improvement was on while submitting', o => { o['autoOff'].config.autoImprove = true }],
   // D23
   ['D23', 'the screen never shows the first use', o => { o['firstUse'].ui = null }],
-  ['D23', 'the screen shows no time', o => { o['firstUse'].ui = '首次被任务使用：' }],
+  ['D23', 'the screen shows no time', o => { o['firstUse'].ui = '已被后续任务使用：' }],
   ['D23', 'the job file records no first use', o => { o['firstUse'].file = null }],
   ['D23', 'the recorded use is not the next task', o => { o['firstUse'].file.sessionId = 'other' }],
   ['D23', 'the recorded use is before the adoption', o => { o['firstUse'].file.at = '2026-10-13T08:00:00.000Z' }],
   ['D23', 'the job claimed a use before the next task', o => { o['files'].jobs[IDS.adopted].firstUse = { at: DECIDED } }],
   ['D23', 'the next task did not run', o => { delete o['firstUse'].nextSession }],
   ['D23', 'the job under test was not adopted', o => { o['prepared'].adopted.status = 'rejected' }],
-  ['D23', 'the rejected job shows a use', o => { o['details'][IDS.rejected].firstUse = '首次被任务使用：10-13 09:05' }],
+  ['D23', 'the rejected job shows a use', o => { o['details'][IDS.rejected].firstUse = '已被后续任务使用：10-13 09:05' }],
 ]
 
 describe('accept-step5 desktop judges (D19–D23)', () => {
@@ -198,7 +198,7 @@ describe('accept-step5 desktop judges (D19–D23)', () => {
 
   it('a pass names what was seen', () => {
     expect(judgeDesktop('D21', { improvements: good() }).evidence).toMatch(/job-new|queued → diagnosing → no-proposal/)
-    expect(judgeDesktop('D23', { improvements: good() }).evidence).toContain('首次被任务使用')
+    expect(judgeDesktop('D23', { improvements: good() }).evidence).toContain('已被后续任务使用')
     expect(judgeDesktop('D22', { improvements: good() }).evidence).toContain('2500000')
   })
 

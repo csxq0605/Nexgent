@@ -11,7 +11,7 @@
  *             then explicit runs: not-capability → no-proposal, two components → failed,
  *             improve with an unknown feedback check → rejected, improve → adopted
  *   launch 1  D19/D20 the 改进 tab: every job card and every job's detail, compared with the
- *             job files; D23 the next task (loads the adopted skill) → 首次被任务使用;
+ *             job files; D23 the next task (loads the adopted skill) → 已被后续任务使用;
  *             D21 "改进" on the feedback deliverable's card → a new explicit job, followed
  *             to its end in the tab; D22 automatic improvement turned on, budget and window changed
  *   launch 2  D22 the values survived the restart; turned off with another budget
@@ -48,7 +48,7 @@ export const SETTINGS_VALUES = {
   off: { budget: 3_000_000, window: 10 },
 }
 /** The desktop labels the scenario compares with (apps/desktop strings.ts). */
-export const LABELS = { firstUse: '首次被任务使用', feedbackRate: '反馈检查（单独记）', passRate: '检查通过率', review: '审核模型的意见决定了结果' }
+export const LABELS = { firstUse: '已被后续任务使用', feedbackRate: '反馈检查（单独记）', passRate: '检查通过率', review: '审核模型的意见决定了结果' }
 
 const errorText = error => (error instanceof Error ? (error.stack ?? error.message) : String(error))
 const readJson = path => readFile(path, 'utf8').then(text => JSON.parse(text), () => undefined)
