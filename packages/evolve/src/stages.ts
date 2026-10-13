@@ -5,14 +5,15 @@
  * Step 6: the prompts, the kinds a diagnosis may lead to and the gate's
  * comparison parameters come from the job's pinned improver.
  */
-import { IMPROVEMENT_LIMITS, NexgentError, readProjectConfig, type CapabilityComponentKind, type FeedbackListing } from '@nexgent/kernel'
+import { IMPROVEMENT_LIMITS, NexgentError, readProjectConfig, type LLMUsage, type CapabilityComponentKind, type FeedbackListing } from '@nexgent/kernel'
 import { listReplayCases } from '@nexgent/capabilities'
 import { JsonlSessionStore } from '@nexgent/session'
 import { SessionFeedbackStore } from '@nexgent/tasking'
 import { diagnosisNudge, diagnosisPrompt, diagnosisTools, sumTurns, type DiagnosisState } from './diagnosis.js'
 import { collectCandidate, contextPolicyCheckText, contextPolicyProposeText, findFeedbackTask, newSessionId, pendingContextPolicies, prepareProposalCopy, proposalBrief, proposeRecords } from './propose.js'
 import { trialComparison } from './improver.js'
-import type { ImprovementStages } from './runner.js'
+import { createMetaStages } from './meta.js'
+import { runImprovementJob, type ImprovementStages } from './runner.js'
 import type { ImprovementSessionRunner, ImprovementTurnResult } from './session-runner.js'
 import { trialSpend, trialStatus, type TrialStarter } from './trial.js'
 import type { ImprovementJob } from './types.js'
@@ -23,6 +24,8 @@ export interface ImprovementStagesOptions {
   readonly startTrial: TrialStarter
   /** Parent directory of the propose copies (default the OS temporary directory). */
   readonly tempRoot?: string
+  /** Step 6: estimated dollars of one model request (`@nexgent/llm` `estimateUsd`), for the comparison arms' costs. */
+  readonly priceUsd?: (model: string, usage: LLMUsage) => number | 'unknown'
 }
 
 function turnFailure(turn: ImprovementTurnResult): string | undefined {
@@ -62,9 +65,17 @@ async function feedbackOf(layout: Parameters<ImprovementStages['diagnose']>[0]['
   return found
 }
 
-/** Build the phases. */
+/** Build the phases, the meta job's included (its comparison arms run these same phases in their copies). */
 export function createImprovementStages(options: ImprovementStagesOptions): ImprovementStages {
+  const meta = createMetaStages({
+    runner: options.runner,
+    startTrial: options.startTrial,
+    ...(options.tempRoot === undefined ? {} : { tempRoot: options.tempRoot }),
+    ...(options.priceUsd === undefined ? {} : { priceUsd: options.priceUsd }),
+    runArm: (layout, jobId, arm) => runImprovementJob(layout, jobId, { stages: createImprovementStages({ ...options, runner: arm.runner }), improvers: arm.improvers, chain: false }),
+  })
   return {
+    meta,
     async diagnose(input) {
       const { layout, job, config } = input
       const sessionId = newSessionId()

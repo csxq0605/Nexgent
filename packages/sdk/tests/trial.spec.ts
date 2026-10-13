@@ -345,6 +345,9 @@ describe('the capability gate through the SDK', () => {
         items: [{ kind: 'feedback', feedbackId: feedback!.id, sessionId: june, deliverableId: deliverable.deliverableId, version: 1, rating: 2, at }],
         history: [{ status: 'queued', at }, { status: 'trialing', at }],
         phases: {},
+        // Step 6: a comparison arm's job pinned on a child improver; the trial records name both.
+        improverVersion: 'a'.repeat(64),
+        arm: { metaJobId: '7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d', arm: 'child' },
       }
       await mkdir(nodePath.join(layout.dataDir, IMPROVEMENTS_DIR, job.id), { recursive: true })
       await writeFile(nodePath.join(layout.dataDir, IMPROVEMENTS_DIR, job.id, IMPROVEMENT_FILES.job), JSON.stringify(job))
@@ -382,6 +385,9 @@ describe('the capability gate through the SDK', () => {
       const requests = ledger.filter(record => record.type === 'llm.request.end' && record.trialId === trial!.trialId)
       expect(requests.length).toBeGreaterThan(12)
       expect(requests.every(record => record.improvementId === job.id && record.improvementPhase === 'trial')).toBe(true)
+      expect(requests.every(record => record.improverVersion === job.improverVersion && record.metaJobId === job.arm!.metaJobId && record.comparisonArm === 'child')).toBe(true)
+      // Replays and reviews both: the replay sessions' records carry an arm, the reviewer's none.
+      expect(new Set(requests.map(record => record.arm))).toEqual(new Set(['candidate', 'baseline', undefined]))
       // Display-only USD: the price table over the ledger's own records (unknown when a usage field is).
       const priced = (arm?: string) => estimateUsdTotal(requests.flatMap(record => (record.type === 'llm.request.end' && record.arm === arm ? [{ model: record.model, usage: record.usage }] : [])))
       expect(trial!.end!.cost.candidate.estimatedUsd).toEqual(priced('candidate'))

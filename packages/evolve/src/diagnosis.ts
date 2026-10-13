@@ -185,8 +185,51 @@ const DESCRIPTIONS: Record<string, string> = {
   [IMPROVE_REPORT_DIAGNOSIS_TOOL.name]: `Submit the diagnosis (once). Cite evidence by session id and record seq. proposalKind is the kind of reusable component that would have prevented the problem, or "none" when it is not a capability problem (e.g. the user changed the requirement). The host checks it and says what to fix; at most ${IMPROVEMENT_LIMITS.maxDiagnosisAttempts} reports in total.`,
 }
 
-function definition(spec: ImprovementToolSpec): Tool['definition'] {
-  return { name: spec.name, description: DESCRIPTIONS[spec.name] ?? spec.name, inputSchema: spec.inputSchema, effects: [...spec.effects], approval: spec.approval }
+/** A tool definition from its contract spec (description from this package, or `description`). */
+export function toolDefinition(spec: ImprovementToolSpec, description?: string): Tool['definition'] {
+  return { name: spec.name, description: description ?? DESCRIPTIONS[spec.name] ?? spec.name, inputSchema: spec.inputSchema, effects: [...spec.effects], approval: spec.approval }
+}
+
+const definition = (spec: ImprovementToolSpec) => toolDefinition(spec)
+
+/** Read a session's records, or `undefined` when there is no such session. */
+export function sessionReader(layout: WorkspaceLayout): (sessionId: string) => Promise<readonly SessionRecord[] | undefined> {
+  const store = new JsonlSessionStore({ sessionsDir: layout.sessions })
+  return async sessionId => {
+    try {
+      return (await store.readAll(sessionId)).records
+    } catch (error) {
+      if (error instanceof NexgentError && (error.code === 'session/not-found' || error.code === 'tool/invalid-input')) return undefined
+      throw error
+    }
+  }
+}
+
+/** `improve_read_session` over a project (shared by the diagnose and meta-diagnose sessions). */
+export function readSessionTool(layout: WorkspaceLayout): Tool {
+  const readRecords = sessionReader(layout)
+  return {
+    definition: definition(IMPROVE_READ_SESSION_TOOL),
+    async handler(raw) {
+      const args = raw as { sessionId: string; fromTurn?: number; toTurn?: number; types?: string[]; maxBytes?: number }
+      const records = await readRecords(args.sessionId).catch(() => undefined)
+      if (records === undefined) return { content: `No session ${args.sessionId} in this project.`, isError: true }
+      const slice = sliceLines(selectRecords(records, args), args.maxBytes)
+      return { content: slice.text === '' ? '(no records match)' : slice.text, meta: { records: slice.count, truncated: slice.truncated } }
+    },
+  }
+}
+
+/** `improve_read_ledger` over a project (shared by the diagnose and meta-diagnose sessions). */
+export function readLedgerTool(layout: WorkspaceLayout): Tool {
+  return {
+    definition: definition(IMPROVE_READ_LEDGER_TOOL),
+    async handler(raw) {
+      const args = raw as { taskId?: string; sessionId?: string; memberId?: string; capabilityVersion?: string; types?: string[]; maxBytes?: number }
+      const slice = sliceLines(await selectLedger(layout, args), args.maxBytes)
+      return { content: slice.text === '' ? '(no ledger records match)' : slice.text, meta: { records: slice.count, truncated: slice.truncated } }
+    },
+  }
 }
 
 /** State of one diagnose session's reports. */
@@ -225,37 +268,13 @@ async function writeDiagnosis(path: string, diagnosis: Diagnosis): Promise<void>
  * anything but `diagnosis.json`.
  */
 export function diagnosisTools(input: DiagnosisToolsInput): Tool[] {
-  const store = new JsonlSessionStore({ sessionsDir: input.layout.sessions })
-  const feedback = new SessionFeedbackStore(input.layout, store)
-  const readRecords = async (sessionId: string): Promise<readonly SessionRecord[] | undefined> => {
-    try {
-      return (await store.readAll(sessionId)).records
-    } catch (error) {
-      if (error instanceof NexgentError && (error.code === 'session/not-found' || error.code === 'tool/invalid-input')) return undefined
-      throw error
-    }
-  }
+  const feedback = new SessionFeedbackStore(input.layout, new JsonlSessionStore({ sessionsDir: input.layout.sessions }))
+  const readRecords = sessionReader(input.layout)
   const now = input.now ?? (() => new Date())
   const max = IMPROVEMENT_LIMITS.maxDiagnosisAttempts
   return [
-    {
-      definition: definition(IMPROVE_READ_SESSION_TOOL),
-      async handler(raw) {
-        const args = raw as { sessionId: string; fromTurn?: number; toTurn?: number; types?: string[]; maxBytes?: number }
-        const records = await readRecords(args.sessionId).catch(() => undefined)
-        if (records === undefined) return { content: `No session ${args.sessionId} in this project.`, isError: true }
-        const slice = sliceLines(selectRecords(records, args), args.maxBytes)
-        return { content: slice.text === '' ? '(no records match)' : slice.text, meta: { records: slice.count, truncated: slice.truncated } }
-      },
-    },
-    {
-      definition: definition(IMPROVE_READ_LEDGER_TOOL),
-      async handler(raw) {
-        const args = raw as { taskId?: string; sessionId?: string; memberId?: string; capabilityVersion?: string; types?: string[]; maxBytes?: number }
-        const slice = sliceLines(await selectLedger(input.layout, args), args.maxBytes)
-        return { content: slice.text === '' ? '(no ledger records match)' : slice.text, meta: { records: slice.count, truncated: slice.truncated } }
-      },
-    },
+    readSessionTool(input.layout),
+    readLedgerTool(input.layout),
     {
       definition: definition(IMPROVE_LIST_FEEDBACK_TOOL),
       async handler(raw) {

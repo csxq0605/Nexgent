@@ -20,6 +20,11 @@
  * checks, and every result carries the display-only `estimatedUsd` from
  * `@nexgent/llm`'s price table.
  *
+ * Step 6: the gate process reads the job's `job.json` and stamps the job's
+ * pinned `improverVersion` (and, for a comparison arm's job, `metaJobId` /
+ * `comparisonArm`) on the replay sessions and the reviewer's records too,
+ * so the trial phase is attributed like the job's other phases.
+ *
  * The API key comes from the environment or the Nexgent home's credentials
  * file, as for any task; it is never passed on a command line or written.
  */
@@ -52,6 +57,7 @@ import {
   ZERO_USAGE,
   type Context,
   type CreateAgentOptions,
+  type ImprovementRun,
   type ImproverComparisonParams,
   type Ledger,
   type LedgerRecordInput,
@@ -60,6 +66,7 @@ import {
   type TrialArm,
   type TurnEndReason,
 } from '@nexgent/kernel'
+import { improvementsDir, readJob } from '@nexgent/evolve'
 import { AnthropicProvider, estimateUsd } from '@nexgent/llm'
 import { JsonlLedger, SessionPlugin, type SessionPluginConfig } from '@nexgent/session'
 import { createSdk } from './sdk.js'
@@ -80,7 +87,7 @@ interface RunTally {
 }
 
 /** A ledger that adds the trial's fields to every record (and counts the run's model requests). */
-function trialLedger(ledger: Ledger, fields: { readonly trialId: string; readonly arm?: TrialArm }, tally?: RunTally): Ledger {
+function trialLedger(ledger: Ledger, fields: { readonly trialId: string; readonly arm?: TrialArm } & Partial<Record<string, unknown>>, tally?: RunTally): Ledger {
   return {
     get writeFailures() {
       return ledger.writeFailures
@@ -138,21 +145,52 @@ function outcomeOf(reason: TurnEndReason): ReplayRunResult['outcome'] | undefine
   }
 }
 
+/** The job a trial works for, as its records name it (the `trial` phase aside). */
+export type TrialImprovement = Omit<ImprovementRun, 'phase'>
+
+/** A replay request; step 6 adds the job's improver and comparison arm to `improvement`. */
+type TrialReplayRequest = Omit<ReplayRunRequest, 'improvement'> & { readonly improvement?: TrialImprovement }
+
+/**
+ * The job a candidate answers, from its `job.json`: its id, pinned improver
+ * and comparison arm. An unreadable job is named by its id alone.
+ */
+export async function trialImprovement(root: string, jobId: string): Promise<TrialImprovement> {
+  const job = await readJob(improvementsDir(resolveWorkspaceLayout(root)), jobId).catch(() => undefined)
+  return {
+    jobId,
+    ...(job?.improverVersion === undefined ? {} : { improverVersion: job.improverVersion }),
+    ...(job?.arm === undefined ? {} : { metaJobId: job.arm.metaJobId, comparisonArm: job.arm.arm }),
+  }
+}
+
+/** The ledger fields of a job's trial phase. */
+function trialImprovementFields(job: TrialImprovement): Partial<LedgerRecordInput> {
+  return {
+    improvementId: job.jobId,
+    improvementPhase: 'trial',
+    ...(job.improverVersion === undefined ? {} : { improverVersion: job.improverVersion }),
+    ...(job.metaJobId === undefined ? {} : { metaJobId: job.metaJobId }),
+    ...(job.comparisonArm === undefined ? {} : { comparisonArm: job.comparisonArm }),
+  } as Partial<LedgerRecordInput>
+}
+
 /**
  * The kernel's agents service for a job's replay: every root session it
  * opens belongs to the job's `trial` phase (members inherit nothing; the
  * kernel refuses a job on a member).
  */
-function trialAgents(jobId: string): Plugin {
+function trialAgents(job: TrialImprovement): Plugin {
+  const improvement: ImprovementRun = { ...job, phase: 'trial' }
   return class TrialAgentsService extends AgentsService {
     override async create(options: CreateAgentOptions = {}) {
-      return super.create(options.child === undefined ? { ...options, improvement: { jobId, phase: 'trial' } } : options)
+      return super.create(options.child === undefined ? { ...options, improvement } : options)
     }
   } as unknown as Plugin
 }
 
 /** Run one replay in this process (the `replay` mode). */
-export async function runReplay(request: ReplayRunRequest, env: Env = process.env): Promise<ReplayRunResult> {
+export async function runReplay(request: TrialReplayRequest, env: Env = process.env): Promise<ReplayRunResult> {
   const tally: RunTally = { usage: ZERO_USAGE as LLMUsage, requests: 0, usd: 0 }
   const sdk = createSdk({
     appVersion: 'trial',
@@ -162,7 +200,7 @@ export async function runReplay(request: ReplayRunRequest, env: Env = process.en
     approvalResponder: async request => ({ id: request.id, decision: 'deny', scope: 'once', decidedBy: 'headless', reason: 'gate trials run without anyone to ask' }),
     registry: {
       '@nexgent/session': trialSessionPlugin(request, tally),
-      ...(request.improvement === undefined ? {} : { [KERNEL_PLUGIN_NAMES.agents]: trialAgents(request.improvement.jobId) }),
+      ...(request.improvement === undefined ? {} : { [KERNEL_PLUGIN_NAMES.agents]: trialAgents(request.improvement) }),
     },
   })
   try {
@@ -252,10 +290,10 @@ function renderFeedback(feedback: FeedbackCheckInput['feedback']): string {
  *   output alone with the feedback text (no other attempt to compare, so no
  *   position to swap).
  */
-export function llmReviewer(options: { readonly ledger: Ledger; readonly home: string; readonly env: Env; readonly endpoint?: string; readonly improvementId?: string }): TrialReviewer {
+export function llmReviewer(options: { readonly ledger: Ledger; readonly home: string; readonly env: Env; readonly endpoint?: string; readonly improvement?: TrialImprovement }): TrialReviewer {
   const ask = async (trialId: string, settings: Parameters<TrialReviewer['review']>[1], system: string, user: string, signal: AbortSignal) => {
     let usage: LLMUsage = UNKNOWN_USAGE
-    const fields = { trialId, ...(options.improvementId === undefined ? {} : { improvementId: options.improvementId, improvementPhase: 'trial' as const }) }
+    const fields = { trialId, ...(options.improvement === undefined ? {} : trialImprovementFields(options.improvement)) }
     const provider = new AnthropicProvider({
       credentials: new LocalCredentials({ env: options.env as NodeJS.ProcessEnv, home: options.home }),
       ledger: trialLedger(options.ledger, fields),
@@ -312,11 +350,14 @@ export async function runGateProcess(root: string, candidateId: string, env: Env
   const ledger = new JsonlLedger({ ledgersDir: layout.ledgers })
   const endpoint = (await readProjectConfig(layout.configFile).catch(() => undefined))?.input.endpoint
   const jobId = (await readCandidate(layout.capabilities, candidateId).catch(() => undefined))?.jobId
+  const improvement = jobId === undefined ? undefined : await trialImprovement(root, jobId)
+  const replays = processReplayRunner({ args: [TRIAL_ENTRY, 'replay'], env: env as NodeJS.ProcessEnv })
   return runGate({
     layout,
     candidateId,
-    runner: processReplayRunner({ args: [TRIAL_ENTRY, 'replay'], env: env as NodeJS.ProcessEnv }),
-    reviewer: llmReviewer({ ledger, home: nexgentHome(env as NodeJS.ProcessEnv), env, ...(endpoint === undefined ? {} : { endpoint }), ...(jobId === undefined ? {} : { improvementId: jobId }) }),
+    // The gate names the job by id; its replays also carry the job's improver and arm.
+    runner: improvement === undefined ? replays : { run: (request, signal) => replays.run(request.improvement === undefined ? request : ({ ...request, improvement: { ...improvement, ...request.improvement } } as ReplayRunRequest), signal) },
+    reviewer: llmReviewer({ ledger, home: nexgentHome(env as NodeJS.ProcessEnv), env, ...(endpoint === undefined ? {} : { endpoint }), ...(improvement === undefined ? {} : { improvement }) }),
     log: line => process.stderr.write(`${line}\n`),
     ...(options.comparison === undefined ? {} : { comparison: options.comparison }),
     onDecision: async decision => {
@@ -336,7 +377,7 @@ async function readStdin(): Promise<string> {
 export async function main(argv: readonly string[]): Promise<number> {
   const [mode, ...rest] = argv
   if (mode === 'replay') {
-    const request = JSON.parse(await readStdin()) as ReplayRunRequest
+    const request = JSON.parse(await readStdin()) as TrialReplayRequest
     const result = await runReplay(request)
     process.stdout.write(`\n${REPLAY_RESULT_PREFIX}${JSON.stringify(result)}\n`)
     return 0
