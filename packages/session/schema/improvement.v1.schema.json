@@ -1410,6 +1410,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "kind",
         "sourceJobId",
         "tree",
         "feedbackIds",
@@ -1417,6 +1418,12 @@
         "epoch"
       ],
       "properties": {
+        "kind": {
+          "enum": [
+            "unresolved",
+            "feedback-version"
+          ]
+        },
         "sourceJobId": {
           "$ref": "#/$defs/uuid"
         },

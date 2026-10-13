@@ -28,13 +28,13 @@ export interface FeedbackTaskFixture {
   readonly replySeq: number
 }
 
-export async function feedbackTask(autoImprove = true, improvement?: Record<string, unknown>): Promise<FeedbackTaskFixture> {
+export async function feedbackTask(autoImprove = true, improvement?: Record<string, unknown>, capabilityVersion = 'baseline'): Promise<FeedbackTaskFixture> {
   const layout = await project(autoImprove, improvement)
   await writeFile(join(layout.root, 'orders.csv'), 'region,amount\nnorth,1\nsouth,2\n')
   const sessionId = randomUUID()
   const taskId = randomUUID()
   const store = new JsonlSessionStore({ sessionsDir: layout.sessions })
-  const lock = await store.create({ sessionId, projectRoot: layout.root, model: 'claude-sonnet-5-5', sandboxMode: 'workspace-write', capabilityVersion: 'baseline' })
+  const lock = await store.create({ sessionId, projectRoot: layout.root, model: 'claude-sonnet-5-5', sandboxMode: 'workspace-write', capabilityVersion })
   await store.append(sessionId, { type: 'turn.start', turn: 1 })
   await store.append(sessionId, { type: 'user.message', turn: 1, content: ASK, source: 'user' })
   const reply = await store.append(sessionId, { type: 'assistant.message', turn: 1, step: 1, requestId: randomUUID(), content: 'Done; wrote out/summary.csv without the region column.', usage: ZERO_USAGE, finishReason: 'stop' })
@@ -45,7 +45,7 @@ export async function feedbackTask(autoImprove = true, improvement?: Record<stri
   await store.append(sessionId, { type: 'user.message', turn: 2, content: feedback.comment, source: 'feedback' })
   await store.append(sessionId, { type: 'turn.end', turn: 2, reason: { kind: 'completed' } })
   await store.release(lock)
-  await new LocalTaskRecorder(layout).begin({ taskId, sessionId, capabilityVersion: 'baseline' })
+  await new LocalTaskRecorder(layout).begin({ taskId, sessionId, capabilityVersion })
   const specs = [{ id: 'file-1', name: 'file-exists', path: 'out/summary.csv' }]
   await mkdir(join(layout.dataDir, 'snapshots', 'checks'), { recursive: true })
   await writeFile(join(layout.dataDir, 'snapshots', 'checks', `${taskId}.json`), JSON.stringify({

@@ -658,13 +658,32 @@ export interface ImproverChangeRecord {
 // ---------------------------------------------------------------------------
 
 /**
- * The common start of both arms (ADR 0008 decision 4): the snapshot tree
- * of the source job's feedback task, its feedback ids (sorted), the
- * capability version it started on and the epoch. Each arm records what it
- * found in its own copy; arms that differ are not compared.
+ * How the origin was chosen (ADR 0009, superseding the origin sentence of
+ * ADR 0008 decision 4), tried in this order:
+ *
+ * - `unresolved`: the latest finished feedback-triggered job the real job
+ *   did not solve (`rejected`, `failed` or `no-proposal`, and not a job
+ *   whose gate found the baseline already passing every feedback check);
+ *   the arms start on the capability version that job started on.
+ * - `feedback-version`: none such; the latest finished feedback-triggered
+ *   job, the arms starting on the capability version its feedback task ran
+ *   on (the problem still present).
+ */
+export type ComparisonOriginKind = 'unresolved' | 'feedback-version'
+
+/** Every origin kind, in the order they are tried. */
+export const COMPARISON_ORIGIN_KINDS: readonly ComparisonOriginKind[] = ['unresolved', 'feedback-version']
+
+/**
+ * The common start of both arms (ADR 0008 decision 4, ADR 0009): how it
+ * was chosen, the snapshot tree of the source job's feedback task, its
+ * feedback ids (sorted), the capability version the arms start on and the
+ * epoch. Each arm records what it found in its own copy; arms that differ
+ * (in any field, `kind` included) are not compared.
  */
 export interface ComparisonOrigin {
-  /** The source job: the last finished feedback-triggered job before the meta job. */
+  readonly kind: ComparisonOriginKind
+  /** The source job (see {@link ComparisonOriginKind}). */
   readonly sourceJobId: string
   /** Snapshot tree id (`snapshots/trees/<sha256>.json`). */
   readonly tree: string

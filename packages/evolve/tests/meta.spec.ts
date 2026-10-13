@@ -27,6 +27,8 @@ import {
   runImprovementJob,
   startExplicitMetaJob,
   transitionJob,
+  updateJob,
+  chooseOrigin,
   type GateOutcome,
   type ImprovementSession,
   type ImprovementSessionRequest,
@@ -221,7 +223,9 @@ describe('a meta job end to end (scripted)', () => {
     expect((await store.load(childVersion!)).comparison.repeats).toBe(3)
     const comparison = JSON.parse(await readFile(paths.comparison, 'utf8')) as ImproverComparison
     expect(validateImprovementFile('comparison', comparison)).toEqual([])
-    expect(comparison.origin).toMatchObject({ sourceJobId: source.id, feedbackIds: [fixture.feedback.id], capabilityVersion: 'baseline' })
+    // The source job was adopted (solved), so the origin is its feedback task on the version that task ran on (ADR 0009).
+    expect(comparison.origin).toMatchObject({ kind: 'feedback-version', sourceJobId: source.id, feedbackIds: [fixture.feedback.id], capabilityVersion: 'baseline' })
+    expect(await readFile(jobPaths(directory, meta.id).log, 'utf8')).toContain('compare: feedback-version origin')
     expect(comparison.parent.origin).toEqual(comparison.origin)
     expect(comparison.child.origin).toEqual(comparison.origin)
     expect(comparison.parent).toMatchObject({ arm: 'parent', improverVersion: 'v0', status: 'rejected' })
@@ -360,5 +364,86 @@ describe('the meta-propose tools', () => {
     const childVersion = fresh.accepted!.childVersion
     expect((await new ImproverStore(improversDir(fixture.layout)).load(childVersion)).proposal.kinds).toEqual(['skill', 'function-module'])
     expect((await new ImproverStore(improversDir(fixture.layout)).activation()).version).toBe('v0')
+  })
+})
+
+describe('the comparison origin (ADR 0009)', () => {
+  const FEEDBACK_TIME = 'c'.repeat(64)
+  const STARTED_ON = 'b'.repeat(64)
+
+  /** A finished feedback job ending `end`, then patched (its start version, its decision). */
+  async function finishedJob(fixture: FeedbackTaskFixture, end: Parameters<typeof stagesTo>[0], patch: Parameters<typeof updateJob>[2] = {}) {
+    const directory = improvementsDir(fixture.layout)
+    const job = await createJob(directory, { trigger: 'feedback-count', items: [signal(fixture)] })
+    await runImprovementJob(fixture.layout, job.id, { stages: stagesTo(end), chain: false })
+    return updateJob(directory, job.id, patch)
+  }
+
+  async function baselinePassedDecision(fixture: FeedbackTaskFixture, baseline: number): Promise<string> {
+    const decision = await new CapabilityStore(fixture.layout.capabilities).recordDecision({
+      outcome: 'rejected', reason: 'no-improvement', trigger: 'gate', candidateId: randomUUID(), trialId: randomUUID(), fromVersion: 'baseline', toVersion: 'baseline', detail: 'no better than the baseline',
+      verdict: { outcome: 'reject', reason: 'no-improvement', passRate: { candidate: 1, baseline }, feedbackPassRate: { candidate: 1, baseline }, costRatio: 1, decidedByReview: false },
+    })
+    return decision.id
+  }
+
+  const metaJob = async (fixture: FeedbackTaskFixture) => startExplicitMetaJob(improvementsDir(fixture.layout), { parentVersion: 'v0' })
+
+  it('takes a job that did not solve its feedback, on the version it started on, over a later solved one', async () => {
+    const fixture = await feedbackTask(true, META, FEEDBACK_TIME)
+    const unresolved = await finishedJob(fixture, 'rejected', { baseVersion: STARTED_ON })
+    await finishedJob(fixture, 'adopted', { baseVersion: STARTED_ON })
+    const choice = await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture))
+    expect(choice).toMatchObject({ kind: 'unresolved', job: { id: unresolved.id }, capabilityVersion: STARTED_ON })
+  })
+
+  it('counts no-proposal and failed jobs as unresolved; without a recorded start version uses the version in force when the job started', async () => {
+    for (const end of ['none', 'diagnose-failed'] as const) {
+      const fixture = await feedbackTask(true, META, FEEDBACK_TIME)
+      const job = await finishedJob(fixture, end)
+      expect(job.baseVersion).toBeUndefined()
+      const choice = await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture))
+      // Nothing was ever adopted in this project: the job started on the baseline (not the feedback task's version).
+      expect(choice).toMatchObject({ kind: 'unresolved', job: { id: job.id }, capabilityVersion: 'baseline' })
+    }
+  })
+
+  it('skips a job rejected because the baseline already passed every feedback check, falling back to the feedback task\'s own version', async () => {
+    const partlyFixture = await feedbackTask(true, META, FEEDBACK_TIME)
+    const partly = await finishedJob(partlyFixture, 'rejected', { baseVersion: STARTED_ON, decisionId: await baselinePassedDecision(partlyFixture, 0.5) })
+    expect(await chooseOrigin(partlyFixture.layout, await listJobs(improvementsDir(partlyFixture.layout)), await metaJob(partlyFixture)))
+      .toMatchObject({ kind: 'unresolved', job: { id: partly.id }, capabilityVersion: STARTED_ON })
+
+    const fixture = await feedbackTask(true, META, FEEDBACK_TIME)
+    const solvedBefore = await finishedJob(fixture, 'rejected', { baseVersion: STARTED_ON, decisionId: await baselinePassedDecision(fixture, 1) })
+    expect(await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture)))
+      .toMatchObject({ kind: 'feedback-version', job: { id: solvedBefore.id }, capabilityVersion: FEEDBACK_TIME })
+  })
+
+  it('with only solved jobs replays the latest on the version its feedback task ran on, not the one the job started on', async () => {
+    const fixture = await feedbackTask(true, META, FEEDBACK_TIME)
+    await finishedJob(fixture, 'adopted', { baseVersion: STARTED_ON })
+    const latest = await finishedJob(fixture, 'adopted', { baseVersion: STARTED_ON })
+    const choice = await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture))
+    expect(choice).toMatchObject({ kind: 'feedback-version', job: { id: latest.id }, capabilityVersion: FEEDBACK_TIME })
+  })
+
+  it('without a finished feedback job there is no origin', async () => {
+    const fixture = await feedbackTask(true, META)
+    expect(await chooseOrigin(fixture.layout, [], await metaJob(fixture))).toBeUndefined()
+  })
+
+  it('a meta job compares on an unresolved origin end to end and records its kind', async () => {
+    const { fixture, directory, source, metaScripts } = await withSource('rejected')
+    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0' })
+    const scripted = runner({ ...metaScripts, 'parent:diagnose': diagnoseKind(fixture), 'parent:propose': proposeInCopy(fixture), 'child:diagnose': diagnoseKind(fixture), 'child:propose': proposeInCopy(fixture) })
+    await runImprovementJob(fixture.layout, meta.id, { stages: createImprovementStages({ runner: scripted, startTrial: gate({ parent: 'rejected', child: 'adopted' }), tempRoot: await tempDir(), priceUsd: PRICE }), chain: false })
+    const comparison = JSON.parse(await readFile(jobPaths(directory, meta.id).comparison, 'utf8')) as ImproverComparison
+    expect(validateImprovementFile('comparison', comparison)).toEqual([])
+    expect(comparison.origin).toMatchObject({ kind: 'unresolved', sourceJobId: source.id, capabilityVersion: 'baseline' })
+    expect(comparison.parent.origin).toEqual(comparison.origin)
+    expect(comparison.child.origin).toEqual(comparison.origin)
+    expect(comparison.verdict).toMatchObject({ outcome: 'adopt', reason: 'gate-passed' })
+    expect(await readFile(jobPaths(directory, meta.id).log, 'utf8')).toContain(`compare: unresolved origin, job ${source.id} (rejected)`)
   })
 })

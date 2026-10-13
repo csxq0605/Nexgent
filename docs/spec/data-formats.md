@@ -782,7 +782,12 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 拒绝的原因（`ImproverChangeRefusal`）：`not-one-change`（一个列表，或多于该算子的字段）、`evaluator-field`（字段名或 `param` 是评价器字段，如 `costRatioCap`、`guardCases`、`reviewer`、`autoImprove`、`improvement`）、`out-of-bounds`、`invalid`（未知算子、缺字段、改完的改进器不合法）、`no-op`（改完和父改进器相同）。拒绝在工具结果里说明，可重交，共最多 3 次，仍不通过以 `failed` 结束（`improver/invalid-change`）。接受后写子改进器到 `improvers/bundles/`，再写 `<jobId>/change.json`：`{ formatVersion, jobId, createdAt, sessionId, attempts, parentVersion, childVersion, change, rationale ≤1000 字符 }`。
 
-**父子比较。** 起点（`ComparisonOrigin`）：元改进作业开始前最近一个结束的、由反馈触发的能力作业（`sourceJobId`），它的反馈任务快照树（`tree`）、反馈 id（排序后比较）、开始时的能力版本与当前纪元。宿主把起点复制成两份项目副本，在副本里各建一个比较臂作业（`trigger: "explicit"`，带 `arm`，`improverVersion` 分别为父、子），各跑一遍诊断 → 提议 → 门控；门控在副本里再建自己的回放副本，规则不变，采用只发生在副本里，后代候选不带回真实项目。两臂的账本记录写进真实项目的账本，`improvementId` 是臂作业 id，`improvementPhase` 是臂作业自己的阶段，另带 `metaJobId` 与 `comparisonArm`；元改进作业的 `phases.compare` 是两臂之和。
+**父子比较。** 起点（`ComparisonOrigin`，ADR 0009 取代 ADR 0008 的起点规则）按顺序选：
+- `kind: "unresolved"`：元改进作业开始前结束的、由反馈触发的能力作业里，最近一个没能解决反馈的作业（结束于 `rejected`、`failed` 或 `no-proposal`；门控结论里基线已通过全部反馈检查，即 `verdict.feedbackPassRate.baseline` 为 1 的不算；反馈任务不能重放的也不算）。`capabilityVersion` 是它开始时的能力版本：有 `baseVersion` 用它，否则取作业离开 `queued` 时（没有则用创建时）采用历史里生效的版本。
+- `kind: "feedback-version"`：没有这样的作业时，取最近一个结束的、由反馈触发的能力作业，`capabilityVersion` 是它的反馈任务在第一次反馈之前运行的版本（`session.start.capabilityVersion`，其后有 `capability.version` 时取最后一条；都没有为 `baseline`）。
+- 两种都没有时元改进作业失败。
+
+起点还记 `sourceJobId`、反馈任务快照树（`tree`）、反馈 id（排序后比较）与当前纪元；`kind` 也是起点的一部分，两臂读到的不同即不比较。宿主把起点复制成两份项目副本，在副本里各建一个比较臂作业（`trigger: "explicit"`，带 `arm`，`improverVersion` 分别为父、子），各跑一遍诊断 → 提议 → 门控；门控在副本里再建自己的回放副本，规则不变，采用只发生在副本里，后代候选不带回真实项目。两臂的账本记录写进真实项目的账本，`improvementId` 是臂作业 id，`improvementPhase` 是臂作业自己的阶段，另带 `metaJobId` 与 `comparisonArm`；元改进作业的 `phases.compare` 是两臂之和。
 
 每个臂记下它在自己副本里见到的起点、终态、错误、候选（后代）、门控结论与总费用（估算美元；`ComparisonArmResult`）。`decideImprover(origin, parent, child)` 按顺序：
 

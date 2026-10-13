@@ -225,7 +225,7 @@ describe('step-6 evaluator epoch', () => {
 })
 
 describe('step-6 parent / child comparison', () => {
-  const origin: ComparisonOrigin = { sourceJobId: '00000000-0000-4000-8000-000000000009', tree: SHA('a'), feedbackIds: ['f1', 'f2'], capabilityVersion: 'baseline', epoch: SHA('e') }
+  const origin: ComparisonOrigin = { kind: 'unresolved', sourceJobId: '00000000-0000-4000-8000-000000000009', tree: SHA('a'), feedbackIds: ['f1', 'f2'], capabilityVersion: 'baseline', epoch: SHA('e') }
   const verdict = (candidate: number): TrialVerdict => ({ outcome: 'adopt', reason: 'quality-up', passRate: { candidate, baseline: 0.5 }, costRatio: 1.1, costBasis: 'usd', decidedByReview: false })
   const arm = (side: 'parent' | 'child', over: Partial<ComparisonArmResult> = {}): ComparisonArmResult => ({
     arm: side,
@@ -244,6 +244,7 @@ describe('step-6 parent / child comparison', () => {
     expect(decideImprover(origin, arm('parent'), arm('child', { origin: { ...origin, epoch: SHA('f') } }))).toMatchObject({ outcome: 'reject', reason: 'epoch-mismatch' })
     expect(decideImprover(origin, arm('parent'), arm('child', { origin: { ...origin, tree: SHA('c') } }))).toMatchObject({ outcome: 'reject', reason: 'origin-mismatch' })
     expect(decideImprover(origin, arm('parent', { origin: { ...origin, feedbackIds: ['f1'] } }), arm('child'))).toMatchObject({ reason: 'origin-mismatch' })
+    expect(decideImprover(origin, arm('parent'), arm('child', { origin: { ...origin, kind: 'feedback-version' } }))).toMatchObject({ reason: 'origin-mismatch' })
   })
 
   it('rejects on any unknown arm, then on a child without offspring', () => {
