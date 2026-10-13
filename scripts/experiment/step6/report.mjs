@@ -12,7 +12,7 @@
  *   {
  *     manifest: { experimentId, epochId, model, thinking, effort?, planVersion?,
  *                 improvers?: { parent?, child? }, capabilities?: { base?, parent?, child? },
- *                 decisions?: { <family>: string } },
+ *                 origins?: { <family>: string }, decisions?: { <family>: string } },
  *     runs:  [{ runId, family, caseId, arm: base|parent|child, repeat, pass: true|false|null,
  *               costUsd?, componentsUsed?: string[] }],          // holdout runs only
  *     costs: [{ kind, family?, usd, ref }],                      // everything else that cost money
@@ -87,6 +87,7 @@ export function buildReport(raw, { iterations = 10_000, seed = 'step6-bootstrap'
     ['用例计划版本', m.planVersion],
     ['改进器（父）', m.improvers?.parent], ['改进器（子）', m.improvers?.child],
     ['能力版本（base）', m.capabilities?.base], ['能力版本（parent）', m.capabilities?.parent], ['能力版本（child）', m.capabilities?.child],
+    ...Object.keys(m.origins ?? {}).sort().map(family => [`父子比较起点（${family}）`, m.origins[family]]),
     ...Object.keys(m.decisions ?? {}).sort().map(family => [`父子比较结论（${family}）`, m.decisions[family]]),
     ['holdout 运行数', runs.length], ['自助法重抽次数', iterations], ['自助法种子', seed],
   ]

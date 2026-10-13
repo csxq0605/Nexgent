@@ -49,7 +49,7 @@ test('rawRecords: arms, improvers, capability versions and decisions reach the m
   const raw = rawRecords([
     family('code', {
       arms: { base: { capabilityVersion: 'baseline' }, parent: { capabilityVersion: 'v-p' }, child: { capabilityVersion: 'v-c' } },
-      meta: { jobId: 'm', status: 'rejected', comparison: { origin: { epoch: 'e1' }, parent: { improverVersion: 'v0' }, child: { improverVersion: 'v1' }, verdict: { outcome: 'reject', reason: 'no-improvement' } } },
+      meta: { jobId: 'm', status: 'rejected', comparison: { origin: { epoch: 'e1', kind: 'unresolved', sourceJobId: 'j1', capabilityVersion: 'v-p' }, parent: { improverVersion: 'v0' }, child: { improverVersion: 'v1' }, verdict: { outcome: 'reject', reason: 'no-improvement' } } },
       runs: [{ runId: 'base#c#1', family: 'code', caseId: 'c', arm: 'base', repeat: 1, pass: false, costUsd: 0.1, componentsUsed: [], extra: 'dropped' }],
     }),
     family('tables', { meta: { jobId: 'n', status: 'failed' }, notes: ['parent arm: no kept comparison copy'] }),
@@ -57,6 +57,7 @@ test('rawRecords: arms, improvers, capability versions and decisions reach the m
   assert.deepEqual(raw.manifest.capabilities, { base: 'code: baseline; tables: baseline', parent: 'code: v-p', child: 'code: v-c' })
   assert.deepEqual(raw.manifest.improvers, { parent: 'code: v0', child: 'code: v1' })
   assert.deepEqual(raw.manifest.decisions, { code: 'reject (no-improvement)', tables: 'no comparison (meta job failed)' })
+  assert.deepEqual(raw.manifest.origins, { code: 'unresolved (job j1, capability version v-p)' })
   assert.equal(raw.manifest.epochId, 'e1')
   assert.deepEqual(Object.keys(raw.runs[0]).sort(), ['arm', 'caseId', 'componentsUsed', 'costUsd', 'family', 'pass', 'repeat', 'runId'])
   assert.ok(raw.notes.includes('tables: parent arm: no kept comparison copy'))

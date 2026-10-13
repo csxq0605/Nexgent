@@ -41,7 +41,7 @@ node scripts/experiment/step6/run.mjs --real --out <dir>       # 正式实验（
 - 元改进作业优先走 SDK `improvements.runMeta`；SDK 还没接通时退回 `ImprovementHost.runMeta`，实验清单的备注写明走了哪条路。
 - 费用闸门：每步开始前按预留额（任务 0.4、反馈 0.2、改进作业 2.5、元改进 6、holdout 每次 0.4 美元）检查累计花费，超过 `--cap`（默认 35 美元）就停在这一步，已完成的部分照常出报告；花费按账本估算美元记入 `spend.json`（`--spend` 可指定跨次共用的文件），费用未知的一步按 2.5 美元计。
 - 真实后端只从环境读 `NEXGENT_API_KEY`（回退 `ANTHROPIC_API_KEY`），不打印、不写文件；没有密钥时以退出码 2 结束，什么都不跑。脚本化后端在运行期间把环境里的密钥换成脚本密钥。
-- 输出：`raw.json`（报告的输入）、`report.md`、`observations.json`（每族的作业、审批、比较、检查）、`manifest.json`（实验清单：后端、模型、用例计划版本、三臂来源与能力版本、闸门与花费、检查结果）；`--dev-trial` 只写 `dev-trial.json`。运行副本默认删掉，`--keep-runs` 保留。
+- 输出：`raw.json`（报告的输入）、`report.md`、`observations.json`（每族的作业、审批、比较、检查）、`manifest.json`（实验清单：后端、模型、用例计划版本、三臂来源与能力版本、父子比较的起点种类（`comparison.origin.kind`）与两臂门控结论、闸门与花费、检查结果）；`--dev-trial` 只写 `dev-trial.json`。运行副本默认删掉，`--keep-runs` 保留。
 - 改进作业停在等待审批时，编排脚本代替用户批准，并在备注里记下。
 - 还没做：反馈检查与隐藏判定的不一致统计（报告里记作缺测，不是 0）。
 
