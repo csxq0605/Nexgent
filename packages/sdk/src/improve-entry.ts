@@ -102,8 +102,7 @@ export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunn
           projectId: project.projectId,
           sessionId: request.sessionId,
           title: request.title,
-          // The pinned improver version reaches session.start and the ledger once the kernel records it (step 6 W3).
-          improvement: { jobId: request.jobId, phase: request.phase, ...{ improverVersion: request.improverVersion } },
+          improvement: { jobId: request.jobId, phase: request.phase, improverVersion: request.improverVersion },
           model: request.model,
           thinking: request.thinking,
           ...(request.sandboxMode === undefined ? {} : { sandboxMode: request.sandboxMode }),
