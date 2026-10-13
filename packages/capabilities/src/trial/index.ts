@@ -34,9 +34,11 @@ export {
   type ReceiptInput,
   type TrialSummary,
 } from './receipts.js'
-export { selectionAnchor, type FeedbackCheckInput, type FeedbackCheckResult, type SelectionAnchor } from './feedback.js'
+export { candidateRunAttribution, jobRunAttribution, selectionAnchor, type FeedbackCheckInput, type FeedbackCheckResult, type JobRunAttribution, type SelectionAnchor } from './feedback.js'
+export { assertSameEpoch, evaluatorEpoch, projectEpoch, trialEpoch } from './epoch.js'
 export { recoverInterruptedTrials } from './recover.js'
-export { prepareReplayProject, type ReplayProject, type ReplayProjectInput } from './replay-project.js'
+export { prepareReplayProject, writeSnapshotTree, type ReplayProject, type ReplayProjectInput } from './replay-project.js'
+export { directoryBytes, KEEP_COPY_MAX_BYTES, prepareProjectCopy, type CopyRelease, type ProjectCopy, type ProjectCopyInput } from './project-copy.js'
 export { assertDisjoint, buildReplaySet, listReplayCases, similarity, type CaseFeedback, type ReplayCase, type ReplayMessage, type ReplaySetResult } from './replay-set.js'
 export { checkUsageRegression, type PendingOutcome, type UsageWatchOptions } from './usage.js'
 
