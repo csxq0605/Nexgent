@@ -10,7 +10,11 @@
  * nexgent improve list --project <dir> [--json]
  * nexgent improve show <jobId> --project <dir> [--json]
  * nexgent improve run --project <dir> [--session <id>] [--deliverable <id>] [--json]
+ * nexgent improve meta --project <dir> [--json]
  * nexgent improve cancel <jobId> --project <dir> [--json]
+ * nexgent improvers list --project <dir> [--json]
+ * nexgent improvers show <version> --project <dir> [--json]
+ * nexgent improvers rollback [--to <version>] [--reason <text>] --project <dir> [--json]
  * nexgent app [--project <dir>]
  * nexgent --version | --help | <command> --help
  * ```
@@ -23,7 +27,7 @@ import { DEFAULT_PROJECT_CONFIG, SANDBOX_MODES, type SandboxMode } from '@nexgen
 import { CliError, EXIT } from './exit-codes.js'
 
 /** Subcommands, in help order. */
-export const COMMANDS = ['run', 'resume', 'export', 'improve', 'app'] as const
+export const COMMANDS = ['run', 'resume', 'export', 'improve', 'improvers', 'app'] as const
 
 /** One of {@link COMMANDS}. */
 export type Command = (typeof COMMANDS)[number]
@@ -65,7 +69,7 @@ export interface ExportInvocation {
 }
 
 /** The `nexgent improve` actions. */
-export const IMPROVE_ACTIONS = ['list', 'show', 'run', 'cancel'] as const
+export const IMPROVE_ACTIONS = ['list', 'show', 'run', 'meta', 'cancel'] as const
 
 /** One of {@link IMPROVE_ACTIONS}. */
 export type ImproveAction = (typeof IMPROVE_ACTIONS)[number]
@@ -81,6 +85,26 @@ export interface ImproveInvocation {
   readonly sessionId?: string
   /** `run`: the deliverable the job should look at. */
   readonly deliverableId?: string
+  readonly json: boolean
+}
+
+/** The `nexgent improvers` actions. */
+export const IMPROVERS_ACTIONS = ['list', 'show', 'rollback'] as const
+
+/** One of {@link IMPROVERS_ACTIONS}. */
+export type ImproversAction = (typeof IMPROVERS_ACTIONS)[number]
+
+/** `nexgent improvers`: list, show or roll back improver versions. */
+export interface ImproversInvocation {
+  readonly command: 'improvers'
+  readonly action: ImproversAction
+  readonly project: string
+  /** `show`: a full version or a unique prefix. */
+  readonly version?: string
+  /** `rollback --to`: a full version or a unique prefix; absent means the previous one. */
+  readonly to?: string
+  /** `rollback --reason`. */
+  readonly reason?: string
   readonly json: boolean
 }
 
@@ -102,7 +126,7 @@ export interface VersionInvocation {
 }
 
 /** Everything {@link parseCliArgs} can return. */
-export type Invocation = RunInvocation | ResumeInvocation | ExportInvocation | ImproveInvocation | AppInvocation | HelpInvocation | VersionInvocation
+export type Invocation = RunInvocation | ResumeInvocation | ExportInvocation | ImproveInvocation | ImproversInvocation | AppInvocation | HelpInvocation | VersionInvocation
 
 /** The task `resume` sends when `--task` is omitted. */
 export const RESUME_DEFAULT_TASK = 'Continue the previous task from where it stopped.'
@@ -123,6 +147,8 @@ const OPTIONS = {
   out: { type: 'string' },
   session: { type: 'string' },
   deliverable: { type: 'string' },
+  to: { type: 'string' },
+  reason: { type: 'string' },
   json: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' },
@@ -136,6 +162,7 @@ const ACCEPTED: Readonly<Record<Command, readonly OptionName[]>> = {
   resume: ['project', 'task', 'sandbox', 'json'],
   export: ['project', 'out', 'json'],
   improve: ['project', 'session', 'deliverable', 'json'],
+  improvers: ['project', 'to', 'reason', 'json'],
   app: ['project'],
 }
 
@@ -195,6 +222,7 @@ export function parseCliArgs(argv: readonly string[]): Invocation {
   }
   const project = requireText('project', values.project)
   if (command === 'improve') return parseImprove(project, positionals, values)
+  if (command === 'improvers') return parseImprovers(project, positionals, values)
   const sandbox = parseSandbox(values.sandbox)
   const json = values.json === true
 
@@ -255,9 +283,9 @@ function parseImprove(
     return { command: 'improve', action: kind, project, jobId, json }
   }
   if (jobId !== undefined) throw usageError(`nexgent improve ${kind} takes no positional arguments, got "${jobId}"`)
-  if (kind === 'list') {
+  if (kind === 'list' || kind === 'meta') {
     for (const name of ['session', 'deliverable'] as const) {
-      if (values[name] !== undefined) throw usageError(`nexgent improve list does not accept --${name}`)
+      if (values[name] !== undefined) throw usageError(`nexgent improve ${kind} does not accept --${name}`)
     }
     return { command: 'improve', action: kind, project, json }
   }
@@ -270,6 +298,39 @@ function parseImprove(
   }
 }
 
+function parseImprovers(
+  project: string,
+  positionals: readonly string[],
+  values: { readonly to?: string; readonly reason?: string; readonly json?: boolean },
+): ImproversInvocation {
+  const [action, version, extra] = positionals
+  if (action === undefined) throw usageError(`nexgent improvers needs an action: ${IMPROVERS_ACTIONS.join(' | ')}`)
+  if (!(IMPROVERS_ACTIONS as readonly string[]).includes(action)) {
+    throw usageError(`unknown improvers action "${action}" (expected ${IMPROVERS_ACTIONS.join(' | ')})`)
+  }
+  const json = values.json === true
+  const kind = action as ImproversAction
+  if (kind !== 'rollback') {
+    for (const name of ['to', 'reason'] as const) {
+      if (values[name] !== undefined) throw usageError(`nexgent improvers ${kind} does not accept --${name}`)
+    }
+  }
+  if (kind === 'show') {
+    if (version === undefined) throw usageError('nexgent improvers show needs a <version>')
+    if (extra !== undefined) throw usageError(`nexgent improvers show takes one <version>, got extra "${extra}"`)
+    return { command: 'improvers', action: kind, project, version, json }
+  }
+  if (version !== undefined) throw usageError(`nexgent improvers ${kind} takes no positional arguments, got "${version}"`)
+  if (kind === 'list') return { command: 'improvers', action: kind, project, json }
+  const to = optionalText('to', values.to)
+  const reason = optionalText('reason', values.reason)
+  return {
+    command: 'improvers', action: kind, project, json,
+    ...(to === undefined ? {} : { to }),
+    ...(reason === undefined ? {} : { reason }),
+  }
+}
+
 /** Top-level help text. */
 export function usage(): string {
   return [
@@ -279,7 +340,8 @@ export function usage(): string {
     '  run      start a new session and run one task',
     '  resume   continue a saved session',
     '  export   write the minimal export bundle of a session',
-    '  improve  list, show, start or cancel improvement jobs',
+    '  improve  list, show, start or cancel improvement jobs (also meta jobs)',
+    '  improvers list, show or roll back improver versions',
     '  app      launch the desktop app',
     '',
     'Options:',
@@ -340,6 +402,7 @@ export function commandUsage(command: Command): string {
         'Usage: nexgent improve list --project <dir> [--json]',
         '       nexgent improve show <jobId> --project <dir> [--json]',
         '       nexgent improve run --project <dir> [--session <id>] [--deliverable <id>] [--json]',
+        '       nexgent improve meta --project <dir> [--json]',
         '       nexgent improve cancel <jobId> --project <dir> [--json]',
         '',
         'Improvement jobs diagnose counted feedback and failed checks and propose a',
@@ -349,9 +412,30 @@ export function commandUsage(command: Command): string {
         '  show      one job in full: history, diagnosis, candidate, gate verdict, spend',
         '  run       start a job now (--session / --deliverable point it at a session or',
         '            a deliverable); it keeps running after this command returns',
+        '  meta      start a meta job now: it diagnoses finished jobs, proposes one change',
+        '            to the improver and compares the old and new improver on a past task',
         '  cancel    cancel a job that has not finished',
         '',
         '<jobId> is a full job id or a unique prefix (see `nexgent improve list`).',
+        '  --project <dir>    project directory',
+        '  --json             print the result as one JSON line',
+      ].join('\n')
+    case 'improvers':
+      return [
+        'Usage: nexgent improvers list --project <dir> [--json]',
+        '       nexgent improvers show <version> --project <dir> [--json]',
+        '       nexgent improvers rollback --project <dir> [--to <version>] [--reason <text>] [--json]',
+        '',
+        'The improver is the data that steers improvement jobs (diagnosis text, proposal',
+        'briefs, comparison parameters). Meta jobs adopt new versions; you can go back.',
+        '',
+        '  list      the version in force, its revision, and the activation history',
+        '  show      one version: diagnosis, proposal kinds, comparison parameters, the change',
+        '            that produced it',
+        '  rollback  return to the previous version, or to --to <version> (any earlier one,',
+        '            v0 included); --reason is recorded',
+        '',
+        '<version> is v0, a full sha256 version or a unique prefix (see `nexgent improvers list`).',
         '  --project <dir>    project directory',
         '  --json             print the result as one JSON line',
       ].join('\n')

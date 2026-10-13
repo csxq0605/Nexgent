@@ -7,7 +7,8 @@
  * broken backend shows an error instead of a blank window.
  */
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
-import type { CandidateDetail, CapabilityListing, ImprovementDetail, ImprovementListing, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch } from '@nexgent/sdk'
+import type { ImproverBundle } from '@nexgent/kernel'
+import type { CandidateDetail, CapabilityListing, ImprovementDetail, ImprovementListing, ImproverListing, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
@@ -69,6 +70,10 @@ export interface AppState {
   readonly improvements?: ImprovementListing | undefined
   /** Step 5: the job opened in the 改进 tab. */
   readonly improvementDetail?: ImprovementDetail | undefined
+  /** Step 6: the improver in force and its activation history. */
+  readonly improver?: ImproverListing | undefined
+  /** Step 6: the parent improver of the open meta job's change (for the before / after view). */
+  readonly improvementParent?: ImproverBundle | undefined
 }
 
 const INITIAL: AppState = {
@@ -196,8 +201,10 @@ export class AppStore {
       pluginApproval: undefined,
       improvements: undefined,
       improvementDetail: undefined,
+      improver: undefined,
+      improvementParent: undefined,
     })
-    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshImprovements()])
+    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshImprovements(), this.refreshImprover()])
     const first = this.state.sessions[0]
     if (first !== undefined) await this.openSession(first.sessionId)
     return true
@@ -217,7 +224,7 @@ export class AppStore {
 
   /** Back to the start screen; the project stays open in the backend (running turns go on). */
   leaveProject(): void {
-    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined, improvements: undefined, improvementDetail: undefined })
+    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined, improvements: undefined, improvementDetail: undefined, improver: undefined, improvementParent: undefined })
     void this.refreshRecent()
   }
 
@@ -347,7 +354,7 @@ export class AppStore {
   /** Open (or close, when it is open) a job's details. */
   async toggleImprovement(jobId: string): Promise<void> {
     if (this.state.improvementDetail?.view.id === jobId) {
-      this.set({ improvementDetail: undefined })
+      this.set({ improvementDetail: undefined, improvementParent: undefined })
       return
     }
     await this.showImprovement(jobId)
@@ -357,7 +364,42 @@ export class AppStore {
     const projectId = this.projectId
     if (projectId === undefined) return
     const improvementDetail = await this.guard(c => c.call('improvements.show', { projectId, jobId }))
-    if (improvementDetail !== undefined && this.projectId === projectId) this.set({ improvementDetail })
+    if (improvementDetail === undefined || this.projectId !== projectId) return
+    this.set({ improvementDetail, ...(improvementDetail.change === undefined ? { improvementParent: undefined } : {}) })
+    // A meta job's change is shown against its parent improver.
+    const parentVersion = improvementDetail.change?.parentVersion
+    if (parentVersion === undefined) return
+    const parent = await this.guard(c => c.call('improvers.show', { projectId, version: parentVersion }))
+    if (parent !== undefined && this.projectId === projectId && this.state.improvementDetail?.view.id === jobId) this.set({ improvementParent: parent.bundle })
+  }
+
+  // --- improver versions and meta jobs (step 6) ------------------------------
+
+  async refreshImprover(): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    await this.guard(async c => {
+      const improver = await c.call('improvers.list', { projectId })
+      if (this.projectId === projectId) this.set({ improver })
+    })
+  }
+
+  /** The explicit "meta-improve now"; busy / budget errors surface as notices like `runImprovement`. */
+  async runMetaImprovement(): Promise<boolean> {
+    const projectId = this.projectId
+    if (projectId === undefined) return false
+    const job = await this.guard(c => c.call('improvements.runMeta', { projectId }))
+    await this.refreshImprovements()
+    return job !== undefined
+  }
+
+  async rollbackImprover(reason?: string): Promise<boolean> {
+    const projectId = this.projectId
+    if (projectId === undefined) return false
+    const text = reason?.trim()
+    const current = await this.guard(c => c.call('improvers.rollback', { projectId, ...(text === undefined || text === '' ? {} : { reason: text }) }))
+    await this.refreshImprover()
+    return current !== undefined
   }
 
   /** The explicit "improve now"; `improvement/busy` and `improvement/budget-exhausted` surface as notices. */
@@ -605,6 +647,8 @@ export class AppStore {
     const settings = await this.guard(c => c.call('settings.update', { projectId, patch }))
     if (settings === undefined) return false
     this.set({ settings })
+    // The 改进 tab shows switches and budgets from the settings.
+    if (patch.autoImprove !== undefined || patch.improvement !== undefined) void this.refreshImprovements()
     return true
   }
 
@@ -638,6 +682,12 @@ export class AppStore {
     // Step 5: improvement jobs are project-level too.
     if (event.type === 'improvement.job') {
       void this.refreshImprovements()
+      return
+    }
+    // Step 6: the improver in force changed (a meta job adopted, a rollback, a load failure).
+    if (event.type === 'improver.version') {
+      this.set(state => (state.improver === undefined ? {} : { improver: { ...state.improver, current: event.current } }))
+      void this.refreshImprover()
       return
     }
     const current = event.sessionId === this.state.sessionId

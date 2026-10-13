@@ -1,3 +1,5 @@
+import { useState, type FormEvent } from 'react'
+import type { ComparisonArmResult, ImproverBundle, ImproverChange, ImproverComparison } from '@nexgent/kernel'
 import type { ImprovementDetail, ImprovementJobView } from '@nexgent/sdk'
 import { useAppState, useAppStore } from '../hooks.js'
 import {
@@ -8,10 +10,14 @@ import {
   decisionReasonText,
   failureCategoryText,
   formatTime,
+  improverReasonText,
+  improverVersionText,
   improvementPhaseText,
   improvementStatusText,
   improvementTriggerText,
+  metaStageText,
   percentText,
+  triggerText,
   tokensText,
 } from '../strings.js'
 
@@ -32,6 +38,139 @@ function totalTokens(view: ImprovementJobView): number | 'unknown' | undefined {
 
 function costText(view: ImprovementJobView): string {
   return view.estimatedUsd === 'unknown' ? T.improvementCostUnknown : `≈ $${view.estimatedUsd.toFixed(2)}`
+}
+
+/** The parent's text the change replaces, and the new text, both as display strings. */
+export function changeSides(change: ImproverChange, parent: ImproverBundle | undefined): { readonly label: string; readonly before: string; readonly after: string } {
+  const unknown = T.improvementChangeUnknown
+  switch (change.op) {
+    case 'set-diagnosis-paragraph':
+      return {
+        label: `改写诊断段落 #${change.index + 1}`,
+        before: parent === undefined ? unknown : (parent.diagnosis.paragraphs[change.index] ?? T.improvementChangeMissing),
+        after: change.text,
+      }
+    case 'set-proposal-kinds':
+      return { label: '设置可提议的组件类型', before: parent === undefined ? unknown : parent.proposal.kinds.map(componentKindText).join('、'), after: change.kinds.map(componentKindText).join('、') }
+    case 'set-proposal-brief':
+      return { label: `设置${componentKindText(change.kind)}的提案模板`, before: parent === undefined ? unknown : (parent.proposal.briefs[change.kind] ?? T.improvementChangeMissing), after: change.template }
+    case 'set-comparison-param':
+      return { label: `设置对比参数 ${change.param}`, before: parent === undefined ? unknown : String(parent.comparison[change.param]), after: String(change.value) }
+  }
+}
+
+function armTokens(arm: ComparisonArmResult): number | 'unknown' {
+  const { totalTokens, inputTokens, outputTokens } = arm.cost.usage
+  if (typeof totalTokens === 'number') return totalTokens
+  return typeof inputTokens === 'number' && typeof outputTokens === 'number' ? inputTokens + outputTokens : 'unknown'
+}
+
+function Arm({ arm }: { readonly arm: ComparisonArmResult }): JSX.Element {
+  const verdict = arm.verdict
+  const usd = arm.cost.estimatedUsd
+  return (
+    <li className="stack arm" data-testid="improvement-arm" data-arm={arm.arm}>
+      <span className="panel-label">{arm.arm === 'parent' ? T.improvementArmParent : T.improvementArmChild}</span>
+      <span className="small wrap" data-testid="improvement-arm-version">
+        {T.improverOfJob(improverVersionText(arm.improverVersion))}
+      </span>
+      <span className="small wrap" data-testid="improvement-arm-offspring">
+        {T.improvementArmOffspring}：{arm.candidateId === undefined ? T.improvementArmNoOffspring : arm.candidateId.slice(0, 8)}
+      </span>
+      <span className="small wrap" data-testid="improvement-arm-gate">
+        {T.improvementArmGate}：
+        {verdict === undefined
+          ? improvementStatusText(arm.status)
+          : `${verdict.outcome === 'adopt' ? T.improvementArmGatePass : verdict.outcome === 'reject' ? T.improvementArmGateFail : T.improvementArmGateAwait}（${decisionReasonText(verdict.reason)}）`}
+      </span>
+      <span className="small" data-testid="improvement-arm-quality">
+        {T.improvementArmQuality}：{verdict === undefined ? '—' : percentText(verdict.passRate.candidate)}
+      </span>
+      <span className="small wrap" data-testid="improvement-arm-cost">
+        {T.improvementArmCost}：{usd === 'unknown' ? T.improvementCostUnknown : `≈ $${usd.toFixed(2)}`} · {T.improvementTokens(tokensText(armTokens(arm)))}
+      </span>
+    </li>
+  )
+}
+
+function Comparison({ comparison }: { readonly comparison: ImproverComparison }): JSX.Element {
+  const { verdict } = comparison
+  return (
+    <div className="stack" data-testid="improvement-comparison">
+      <span className="panel-label">{T.improvementComparison}</span>
+      <ul className="arms">
+        <Arm arm={comparison.parent} />
+        <Arm arm={comparison.child} />
+      </ul>
+      <span className="small wrap" data-testid="improvement-comparison-verdict" data-outcome={verdict.outcome} data-reason={verdict.reason}>
+        {T.improvementDecision}：{verdict.outcome === 'adopt' ? T.improvementDecisionAdopt : T.improvementDecisionReject}（{improverReasonText(verdict.reason)}）
+      </span>
+    </div>
+  )
+}
+
+function MetaDetail({ detail }: { readonly detail: ImprovementDetail }): JSX.Element {
+  const state = useAppState()
+  const { metaDiagnosis, change, comparison, view } = detail
+  const sides = change === undefined ? undefined : changeSides(change.change, state.improvementParent)
+  return (
+    <div className="candidate-detail stack" data-testid="improvement-detail">
+      {metaDiagnosis === undefined ? null : (
+        <div className="stack" data-testid="improvement-meta-diagnosis">
+          <span className="panel-label">{T.improvementMetaDiagnosis}</span>
+          <span className="small wrap">
+            {T.improvementHypothesis}：{metaDiagnosis.hypothesis}
+          </span>
+          <span className="small wrap">
+            {T.improvementMetaProposal}：{metaDiagnosis.proposal === 'change' ? T.improvementMetaProposalChange : T.improvementMetaNoChange}
+          </span>
+          {metaDiagnosis.findings.length > 0 && (
+            <ul className="file-list" aria-label={T.improvementMetaFindings}>
+              {metaDiagnosis.findings.map((finding, index) => (
+                <li key={index} className="small wrap" data-testid="improvement-meta-finding" data-stage={finding.stage}>
+                  {finding.label}（{T.improvementMetaFinding(metaStageText(finding.stage), finding.jobIds.length)}）
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {change === undefined || sides === undefined ? null : (
+        <div className="stack" data-testid="improvement-change" data-op={change.change.op}>
+          <span className="panel-label">{T.improvementChange}</span>
+          <span className="small wrap">
+            {sides.label} · {improverVersionText(change.parentVersion)} → {improverVersionText(change.childVersion)}
+          </span>
+          <span className="muted small">{T.improvementChangeBefore}</span>
+          <pre className="diff-text small wrap" data-testid="improvement-change-before">{sides.before}</pre>
+          <span className="muted small">{T.improvementChangeAfter}</span>
+          <pre className="diff-text small wrap" data-testid="improvement-change-after">{sides.after}</pre>
+          {change.rationale !== '' && (
+            <span className="muted small wrap" data-testid="improvement-change-rationale">
+              {T.improvementChangeRationale}：{change.rationale}
+            </span>
+          )}
+        </div>
+      )}
+
+      {comparison === undefined ? null : <Comparison comparison={comparison} />}
+
+      <span className="small wrap" data-testid="improvement-meta-cost">
+        {T.improvementMetaCost}：{costText(view)}
+        {totalTokens(view) === undefined ? '' : ` · ${T.improvementTokens(tokensText(totalTokens(view)!))}`}
+      </span>
+      {Object.keys(view.tokens).length > 0 && (
+        <ul className="file-list" data-testid="improvement-phases" aria-label={T.improvementPhases}>
+          {Object.entries(view.tokens).map(([phase, tokens]) => (
+            <li key={phase} className="small" data-phase={phase}>
+              {improvementPhaseText(phase)}：{T.improvementTokens(tokensText(tokens as number | 'unknown'))}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 function Detail({ detail }: { readonly detail: ImprovementDetail }): JSX.Element {
@@ -136,35 +275,152 @@ function Job({ view }: { readonly view: ImprovementJobView }): JSX.Element {
   const store = useAppStore()
   const detail = state.improvementDetail?.view.id === view.id ? state.improvementDetail : undefined
   const tokens = totalTokens(view)
+  const meta = view.kind === 'meta'
   return (
-    <li className="item column candidate" data-testid="improvement-job" data-job={view.id} data-status={view.status}>
+    <li className="item column candidate" data-testid="improvement-job" data-job={view.id} data-status={view.status} data-kind={meta ? 'meta' : 'capability'}>
       <button type="button" className="item-button" onClick={() => void store.toggleImprovement(view.id)} aria-expanded={detail !== undefined}>
         <span className="item-title ellipsis" data-testid="improvement-trigger">
-          {improvementTriggerText(view.trigger)} · {T.improvementItems(view.itemCount)}
+          {meta && (
+            <span className="badge accent" data-testid="improvement-meta-badge">
+              {T.improvementMetaBadge}
+            </span>
+          )}{' '}
+          {improvementTriggerText(view.trigger)}{meta ? null : ` · ${T.improvementItems(view.itemCount)}`}
         </span>
         <span className={`badge ${statusClass(view.status)}`} data-testid="improvement-status">
           {improvementStatusText(view.status)}
         </span>
       </button>
       <span className="muted small wrap">
-        {formatTime(view.createdAt)} ·{' '}
+        <span data-testid="improvement-improver" data-version={view.improverVersion ?? 'v0'}>
+          {T.improverOfJob(improverVersionText(view.improverVersion))}
+        </span>{' '}
+        · {formatTime(view.createdAt)} ·{' '}
         <span data-testid="improvement-cost">
           {costText(view)}
           {tokens === undefined ? '' : ` · ${T.improvementTokens(tokensText(tokens))}`}
         </span>
       </span>
+      {view.meta?.childVersion !== undefined && (
+        <span className="small wrap" data-testid="improvement-meta-child">
+          {T.improvementMetaChild(improverVersionText(view.meta.childVersion))}
+          {view.meta.outcome === undefined ? '' : `：${view.meta.outcome === 'adopt' ? T.improvementDecisionAdopt : T.improvementDecisionReject}`}
+          {view.meta.reason === undefined ? '' : `（${improverReasonText(view.meta.reason)}）`}
+        </span>
+      )}
       {view.detail !== undefined && view.detail !== '' && (
         <span className="small wrap" data-testid="improvement-detail-text">
           {view.detail}
         </span>
       )}
-      {detail !== undefined && <Detail detail={detail} />}
+      {detail !== undefined && (meta ? <MetaDetail detail={detail} /> : <Detail detail={detail} />)}
       {IMPROVEMENT_CANCELLABLE.includes(view.status) && (
         <button type="button" className="link small" onClick={() => void store.cancelImprovement(view.id)} data-testid="improvement-cancel">
           {T.improvementCancel}
         </button>
       )}
     </li>
+  )
+}
+
+function Rollback(): JSX.Element {
+  const store = useAppStore()
+  const [confirming, setConfirming] = useState(false)
+  const [reason, setReason] = useState('')
+  if (!confirming) {
+    return (
+      <button type="button" onClick={() => setConfirming(true)} data-testid="improver-rollback">
+        {T.improverRollback}
+      </button>
+    )
+  }
+  const submit = (event: FormEvent): void => {
+    event.preventDefault()
+    void store.rollbackImprover(reason).then(() => {
+      setConfirming(false)
+      setReason('')
+    })
+  }
+  return (
+    <form className="stack" onSubmit={submit}>
+      <input value={reason} onChange={event => setReason(event.target.value)} placeholder={T.improverRollbackReason} aria-label={T.improverRollbackReason} data-testid="improver-rollback-reason" />
+      <div className="row">
+        <button type="submit" className="danger" data-testid="improver-rollback-confirm">
+          {T.improverRollbackConfirm}
+        </button>
+        <button type="button" className="ghost" onClick={() => setConfirming(false)}>
+          {T.cancel}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+/** The improver in force, its history, rollback and the meta-improvement button. */
+function ImproverSection(): JSX.Element | null {
+  const state = useAppState()
+  const store = useAppStore()
+  const listing = state.improver
+  const meta = state.improvements?.meta
+  if (listing === undefined) return null
+  const { current } = listing
+  return (
+    <div className="stack" data-testid="improver-section">
+      <span className="panel-label">{T.improverTitle}</span>
+      {current.problem !== undefined && (
+        <div className="error-banner small wrap" role="alert" data-testid="improver-problem">
+          <strong>{T.improverProblem}：</strong>
+          {current.problem}
+        </div>
+      )}
+      <div className="stack" data-testid="improver-current" data-version={current.version} data-revision={current.revision}>
+        <span className="muted small">{T.improverCurrent}</span>
+        <strong className="wrap" title={current.version} data-testid="improver-version">
+          {improverVersionText(current.version)}
+        </strong>
+        {current.revision > 0 && (
+          <span className="muted small wrap">
+            {T.improverRevision(current.revision)}
+            {current.trigger !== undefined ? ` · ${triggerText(current.trigger)}` : ''}
+            {current.since !== undefined ? ` · ${formatTime(current.since)}` : ''}
+            {current.jobId !== undefined ? ` · ${T.improverAdopter} ${current.jobId}` : ''}
+          </span>
+        )}
+        <span className="muted small">{T.improverNewJobs}</span>
+        {current.revision > 0 && current.version !== 'v0' && <Rollback />}
+      </div>
+      {meta !== undefined && (
+        <div className="stack">
+          <span className="small" data-testid="improvement-meta-status">
+            {T.improvementMetaStatus(meta.enabled, meta.pending, meta.everyJobs)}
+          </span>
+          <span className="muted small wrap" data-testid="improvement-meta-budget">
+            {T.improvementMetaBudget(tokensText(meta.budget.usedTokens), tokensText(meta.budget.maxTokens), meta.budget.windowDays)}
+          </span>
+        </div>
+      )}
+      <button type="button" disabled={state.improvements?.activeJobId !== undefined} onClick={() => void store.runMetaImprovement()} data-testid="improvement-run-meta">
+        {T.improvementRunMeta}
+      </button>
+      <span className="panel-label">{T.improverHistory}</span>
+      {listing.history.length === 0 ? (
+        <p className="muted small">{T.improverNoHistory}</p>
+      ) : (
+        <ol className="item-list" data-testid="improver-history">
+          {[...listing.history].reverse().map(revision => (
+            <li key={revision.revision} className="item column" data-testid="improver-revision" data-type={revision.type} data-version={revision.version}>
+              <span className="small wrap">
+                #{revision.revision} {revision.type === 'adopt' ? T.improverAdopt : T.improverRolledBack} → {improverVersionText(revision.version)}
+              </span>
+              <span className="muted small wrap">
+                {triggerText(revision.trigger)} · {formatTime(revision.committedAt)}
+                {revision.reason !== undefined ? ` · ${revision.reason}` : ''}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   )
 }
 
@@ -188,6 +444,7 @@ export function ImprovementsPanel(): JSX.Element {
           {T.improvementRun}
         </button>
       </div>
+      <ImproverSection />
       <span className="panel-label">{T.improvementJobs}</span>
       {listing.jobs.length === 0 ? (
         <p className="muted small">{T.improvementNone}</p>
