@@ -84,6 +84,16 @@
   - 作业候选的回放运行带 `improvement.jobId`；SDK 的回放进程里 `ctx.agents.create` 加 `improvement: { jobId, phase: 'trial' }`，评审与反馈检查的账本记录也带 `improvementId` 与 `improvementPhase: trial`。
   - `estimatedUsd` 由运行器与评审给出（SDK 用 `@nexgent/llm` 的 `estimateUsd`），有一项 unknown 则合计 unknown。
 - ADR 0007（用户 2026-10-13 选 C）：两臂的美元都已知时，费用比按美元算（含缓存），否则按 token。质量提高时不因费用拒绝，费用比超过 `costApprovalRatio`（默认 2）时改为 `await-approval`，说明文字写明倍数和两臂的美元。打平时规则不变（更省才采用，评审偏好时比值 ≤ `costRatioCap`）。
+- 步骤 6（ADR 0008 决策 4、5）：
+  - **纪元**：`evaluatorEpoch(capabilities)` 是评价器设置（规则 id、`costRatioCap`、`costApprovalRatio`、`guardCases`、`reviewer`）规范化文本的 SHA-256，`selectionCases`、`repeats` 与预算不在内。门控把它冻结进 `TrialPlan.epoch`；`GateOptions.epoch`（`runGateProcess(…, { epoch })`）与项目纪元不同时什么都不写，抛 `improvement/epoch-mismatch`。`trialEpoch(receipts)` 读出试验的纪元，`assertSameEpoch([...])` 在纪元不同或缺纪元（步骤 4–5 的试验）时抛同一错误码。
+  - **项目副本**：`prepareProjectCopy({ layout, origin, version, tempRoot? })` 给比较臂用，内容如下：
+    - 工作树取起点快照；
+    - 复制 `.nexgent/` 历史，不含 `improvements/`、`capabilities/`、`config.json` 和锁文件；
+    - 能力链从起点版本重新开始；
+    - 配置里关掉 autoTrial、autoImprove 和元改进，评价器设置不动，并核对副本纪元与项目一致；
+    - 副本必须放在项目之外。
+    副本里的门控在副本外另建回放副本，采用只发生在副本里。`release({ keep })` 默认删除副本；要求保留时，不超过 `KEEP_COPY_MAX_BYTES`（快照上限）就保留并返回 `{ root, bytes }`，超过则删除并返回 `too-large`。
+  - 作业候选的回放请求带 `improvement: JobRunAttribution`（`jobId`、`improverVersion`，比较臂另带 `metaJobId`、`comparisonArm`），来自作业的 `job.json`；SDK 的回放进程与评审把这些写进账本。
 - 用量退化：`checkUsageRegression` 在根会话解析版本前和每轮结束后执行，只看 `gate` / `approval` 采用之后、该版本上的非试验记录：新组件工具的 `tool.call` 错误序列与根任务 `task.outcome.checks`（刚结束那一轮用 `turnOutcome()` 补上），交给 `decideUsageRollback`，触发即写 `usage-regression` 回滚。
 
 ## Known Limitations and Deferred Work
