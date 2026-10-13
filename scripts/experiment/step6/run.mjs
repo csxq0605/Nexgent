@@ -39,7 +39,7 @@ import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { gate, readSpend, recordSpend, spentUsd, STEP6_CAP_USD } from './budget.mjs'
-import { allCases, checkGatePicks, checkIsolation, familyCases, FAMILIES, judgeCase, PLAN, writeCaseFiles } from './cases.mjs'
+import { allCases, checkGatePicks, checkIsolation, familyCases, FAMILIES, judgeCase, PLAN, PRESENT_REQUEST, writeCaseFiles } from './cases.mjs'
 import { counts, feedbackFor } from './feedback.mjs'
 import { buildReport } from './report.mjs'
 
@@ -290,15 +290,27 @@ async function runFamily(ctx, family) {
       off()
     }
   }
+  /** The latest deliverable version a session presented. @param {string} sessionId */
+  const deliverableOf = async sessionId => (await sdk.call('deliverables.list', { projectId }))
+    .flatMap((/** @type {any} */ d) => d.versions ?? [])
+    .filter((/** @type {any} */ v) => v.sessionId === sessionId)
+    .sort((/** @type {any} */ a, /** @type {any} */ b) => a.presentedAt.localeCompare(b.presentedAt))
+    .at(-1)
   const doTask = async (/** @type {import('./cases.mjs').TaskCase} */ task) => {
     step = task.id
     await guard(RESERVE_USD.task, task.id)
     await writeCaseFiles(task, root)
     const { sessionId } = await sdk.call('sessions.create', { projectId, title: task.id })
     const result = await turn(sdk, projectId, sessionId, task.message)
+    // Feedback attaches to a deliverable: when the turn presented none, the user asks for one.
+    let presentRequest
+    if (result.reason !== 'error' && (await deliverableOf(sessionId)) === undefined) {
+      const asked = await turn(sdk, projectId, sessionId, PRESENT_REQUEST)
+      presentRequest = { turn: asked.reason, presented: (await deliverableOf(sessionId)) !== undefined }
+    }
     const judged = await judgeCase(task, root)
     const usd = await sessionCost(root, sessionId)
-    obs.tasks[task.id] = { set: task.set, sessionId, ...result, judge: judged, costUsd: usd }
+    obs.tasks[task.id] = { set: task.set, sessionId, ...result, ...(presentRequest === undefined ? {} : { presentRequest }), judge: judged, costUsd: usd }
     await spent(task.id, usd)
     log(`${task.id}: ${result.reason}, hidden ${judged.pass === null ? 'unknown' : judged.pass ? 'pass' : `fail (${[...new Set(judged.issues.map(i => i.kind))].join(', ')})`}`)
   }
@@ -338,9 +350,9 @@ async function runFamily(ctx, family) {
         continue
       }
       await guard(RESERVE_USD.feedback * entries.length + RESERVE_USD.job, step)
-      const deliverable = (await sdk.call('deliverables.list', { projectId })).map((/** @type {any} */ d) => d.versions?.[0]).find((/** @type {any} */ v) => v?.sessionId === view.sessionId)
+      const deliverable = await deliverableOf(view.sessionId)
       if (deliverable === undefined) {
-        obs.notes.push(`${task.id}: no deliverable was presented; feedback not given, no job`)
+        obs.notes.push(`${task.id}: no deliverable was presented, even when asked; feedback not given, no job`)
         continue
       }
       const known = (await jobs()).map((/** @type {any} */ j) => j.id)
@@ -398,7 +410,12 @@ async function runFamily(ctx, family) {
     const metaUsd = costOf((await ledgerOf(root)).filter(r => r.improvementId === meta.id && r.comparisonArm === undefined), estimate)
     const armUsd = /** @type {Record<string, number | null>} */ ({ parent: comparison?.parent?.cost?.estimatedUsd ?? null, child: comparison?.child?.cost?.estimatedUsd ?? null })
     obs.meta.costUsd = { meta: metaUsd, ...armUsd }
-    await spent(`meta ${meta.id}`, metaUsd === null || armUsd.parent === null || armUsd.child === null ? null : metaUsd + armUsd.parent + armUsd.child)
+    // Without a comparison file (no proposal, or stopped before it) the gate is charged whatever
+    // the ledger holds for the meta job and any arm it started.
+    const metaTotal = comparison === undefined
+      ? costOf((await ledgerOf(root)).filter(r => r.improvementId === meta.id || r.metaJobId === meta.id), estimate)
+      : metaUsd === null || armUsd.parent === null || armUsd.child === null ? null : metaUsd + armUsd.parent + armUsd.child
+    await spent(`meta ${meta.id}`, metaTotal)
     log(`meta: ${meta.status}${comparison === undefined ? '' : ` (${comparison.origin.kind} origin; ${comparison.verdict.outcome}, ${comparison.verdict.reason})`}`)
     for (const arm of /** @type {const} */ (['parent', 'child'])) {
       const kept = comparison?.kept?.[arm]
