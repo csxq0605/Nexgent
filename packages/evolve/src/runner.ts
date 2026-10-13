@@ -16,6 +16,12 @@
  * builds the real ones from the host entry's session runner and gate;
  * {@link PENDING_STAGES} (no runner configured) ends every job `failed`
  * saying so — an unknown result is not a success.
+ *
+ * Step 6: when a `queued` job starts, the process reads the improver in
+ * force ({@link ImproverSource}) and writes its version into `job.json`
+ * with the move to `diagnosing`; every phase gets that bundle, and a
+ * resumed trial loads the same version again. An improver that cannot be
+ * loaded fails the job.
  */
 import { appendFile, rm } from 'node:fs/promises'
 import {
@@ -30,6 +36,7 @@ import {
 } from '@nexgent/kernel'
 import { JsonlLedger } from '@nexgent/session'
 import { budgetStatus, type BudgetStatus } from './budget.js'
+import { jobImproverVersion, PROJECT_IMPROVERS, type ImproverSource, type PinnedImprover } from './improver.js'
 import { jobPaths, listJobs, readJob, transitionJob, updateJob, type JobPatch } from './jobs.js'
 import { breakStaleLock, readLockPid, tryCreateLock } from './lock.js'
 import { improvementsDir } from './paths.js'
@@ -50,6 +57,8 @@ export interface StageInput {
   readonly config: ImprovementConfig
   /** Budget left when the phase starts. */
   readonly budget: BudgetStatus
+  /** The improver the job pinned when it started. */
+  readonly improver: PinnedImprover
   /** Append a line to the job log. */
   log(line: string): Promise<void>
   /** Write references into `job.json` now (session ids, base version), keeping the status. */
@@ -109,6 +118,8 @@ export const PENDING_STAGES: ImprovementStages = {
 /** Options of {@link runImprovementJob}. */
 export interface RunJobOptions {
   readonly stages?: ImprovementStages
+  /** Where the job reads its improver (default {@link PROJECT_IMPROVERS}: the project's improver store). */
+  readonly improvers?: ImproverSource
   /** Run the next batch's job in this process when it fills up meanwhile (default true). */
   readonly chain?: boolean
   readonly now?: () => Date
@@ -206,8 +217,10 @@ async function runOne(layout: WorkspaceLayout, directory: string, jobId: string,
       job = await updateJob(directory, jobId, current => ({ phases: { ...current.phases, [phase]: mergeCost(current.phases[phase], cost) } }), now())
     }
     const status = async (): Promise<BudgetStatus> => budgetStatus(await listJobs(directory), config.budget, now())
+    const source = options.improvers ?? PROJECT_IMPROVERS
+    let improver: PinnedImprover | undefined
     const input = async (): Promise<StageInput> => ({
-      layout, job, config, budget: await status(), log,
+      layout, job, config, budget: await status(), log, improver: improver!,
       record: async patch => { job = await updateJob(directory, jobId, patch, now()) },
     })
     /** Re-read the job (a cancel lands on disk) and check the budget; `true` = stop here. */
@@ -222,9 +235,18 @@ async function runOne(layout: WorkspaceLayout, directory: string, jobId: string,
 
     try {
       let candidateId = job.candidateId
+      // A job pins the improver in force when it starts; a resumed trial keeps the version it pinned.
+      try {
+        improver = resume ? { version: jobImproverVersion(job), bundle: await source.load(layout, jobImproverVersion(job)) } : await source.current(layout)
+      } catch (error) {
+        if (resume || !(await halt('diagnose'))) await move('failed', `The improver ${resume ? jobImproverVersion(job) : 'in force'} cannot be loaded: ${(error as Error).message}`, undefined, error)
+        return { job }
+      }
+      const version = improver.version
       if (!resume) {
         if (await halt('diagnose')) return { job }
-        await move('diagnosing')
+        await move('diagnosing', undefined, { improverVersion: version })
+        await log(`improver ${version}`)
         const diagnosis = await stages.diagnose(await input())
         await spend('diagnose', diagnosis)
         if (diagnosis.outcome !== 'propose') return { job: await move(diagnosis.outcome === 'none' ? 'no-proposal' : 'failed', diagnosis.detail, diagnosis.patch, diagnosis.error) }

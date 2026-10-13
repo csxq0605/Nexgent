@@ -40,6 +40,7 @@ import {
 import { buildReplaySet, listReplayCases, readCandidate } from '@nexgent/capabilities'
 import { budgetStatus, type BudgetStatus } from './budget.js'
 import { sweepAdoptedJobs } from './first-use.js'
+import { jobImproverVersion, PROJECT_IMPROVERS, trialComparison, type ImproverSource } from './improver.js'
 import { jobAlive, jobPaths, listJobs, readJob, transitionJob } from './jobs.js'
 import { processAlive, readLockPid, tryCreateLock } from './lock.js'
 import { improvementsDir } from './paths.js'
@@ -95,6 +96,8 @@ export interface ImprovementHostConfig {
   readonly env?: Readonly<Record<string, string>>
   /** Start a job some other way than a process of `entry` (tests, embedding hosts). */
   readonly launch?: (layout: WorkspaceLayout, jobId: string) => StartedJob
+  /** Where a waiting job's pinned improver is read (its comparison counts decide when history suffices); default the project's store. */
+  readonly improvers?: ImproverSource
 }
 
 /** The improvement flow of one project. */
@@ -285,7 +288,9 @@ export class ImprovementHost {
     for (const job of waiting) {
       const candidate = await readCandidate(this.layout.capabilities, job.candidateId!).catch(() => undefined)
       if (candidate === undefined) continue
-      if (buildReplaySet(cases, candidate.taskId, { selection: settings.selectionCases, guard: settings.guardCases }).status !== 'ready') continue
+      const improver = await (this.#config.improvers ?? PROJECT_IMPROVERS).load(this.layout, jobImproverVersion(job)).catch(() => undefined)
+      const selection = improver === undefined ? settings.selectionCases : trialComparison(settings, improver).selectionCases
+      if (buildReplaySet(cases, candidate.taskId, { selection, guard: settings.guardCases }).status !== 'ready') continue
       if (!(await retakeSlot(this.directory, job.id, now))) break
       this.#launch(job.id)
       resumed.push(job.id)

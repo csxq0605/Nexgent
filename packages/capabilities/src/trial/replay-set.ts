@@ -18,7 +18,9 @@
  * tasks most similar to it (word overlap of the first user message); the
  * guard set holds the least similar ones. The two never share a task (ported
  * PR #4 check). Too little history makes the gate wait (plan 4.5): no
- * threshold is lowered.
+ * threshold is lowered. Step 6: an improver may pick the selection set by
+ * `recency` instead (the newest past tasks after the proposing one); the
+ * guard set is still the least similar tasks.
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -27,6 +29,7 @@ import {
   perTurnFileName,
   SNAPSHOTS_DIR,
   type FeedbackEntry,
+  type ReplaySelection,
   type ReplayCaseRef,
   type SessionRecord,
   type TaskCheckSpec,
@@ -202,7 +205,7 @@ export function assertDisjoint(selection: readonly ReplayCaseRef[], guard: reado
  * Split the project's replayable tasks for one candidate.
  * @param originTaskId - The task that proposed the candidate (selected first when replayable).
  */
-export function buildReplaySet(cases: readonly ReplayCase[], originTaskId: string, counts: { readonly selection: number; readonly guard: number }): ReplaySetResult {
+export function buildReplaySet(cases: readonly ReplayCase[], originTaskId: string, counts: { readonly selection: number; readonly guard: number; readonly order?: ReplaySelection }): ReplaySetResult {
   const needed = counts.selection + counts.guard
   if (cases.length < needed) {
     return {
@@ -218,8 +221,16 @@ export function buildReplaySet(cases: readonly ReplayCase[], originTaskId: strin
     .map((item, index) => ({ item, index, score: similarity(reference, item.messages[0]?.text ?? '') }))
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .map(entry => entry.item)
-  const selection = [...(origin === undefined ? [] : [origin]), ...ranked].slice(0, counts.selection)
-  const guard = ranked.filter(item => !selection.includes(item)).slice(-counts.guard)
+  let selection: ReplayCase[]
+  let guard: ReplayCase[]
+  if (counts.order === 'recency') {
+    guard = ranked.slice(-counts.guard)
+    const newest = cases.filter(item => item !== origin && !guard.includes(item)).reverse()
+    selection = [...(origin === undefined ? [] : [origin]), ...newest].slice(0, counts.selection)
+  } else {
+    selection = [...(origin === undefined ? [] : [origin]), ...ranked].slice(0, counts.selection)
+    guard = ranked.filter(item => !selection.includes(item)).slice(-counts.guard)
+  }
   assertDisjoint(selection, guard)
   return { status: 'ready', selection, guard }
 }

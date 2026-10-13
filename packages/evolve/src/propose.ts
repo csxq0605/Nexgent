@@ -26,10 +26,14 @@
 import { randomUUID } from 'node:crypto'
 import {
   BASELINE_VERSION,
+  IMPROVER_V0,
   NexgentError,
+  renderImproverText,
   type CandidateRecord,
   type CapabilityComponentRef,
   type CapabilityComponentKind,
+  type ImproverBundle,
+  type ProposableKind,
   type SandboxMode,
   type SessionRecord,
   type WorkspaceLayout,
@@ -99,24 +103,22 @@ export async function findFeedbackTask(layout: WorkspaceLayout, job: Improvement
   return { replay, ...(firstFeedbackTurn === undefined ? {} : { firstFeedbackTurn }), messages, sandboxMode }
 }
 
-/** The brief that precedes the redone task's first message. Pure. */
-export function proposalBrief(diagnosis: Pick<Diagnosis, 'hypothesis' | 'proposalKind' | 'failureTypes'>, job: ImprovementJob): string {
+/**
+ * The brief that precedes the redone task's first message: the pinned
+ * improver's brief template for the diagnosed kind (default `v0`, step 5's
+ * text verbatim). Pure.
+ * @throws `improver/invalid` when the improver has no brief for the kind.
+ */
+export function proposalBrief(diagnosis: Pick<Diagnosis, 'hypothesis' | 'proposalKind' | 'failureTypes'>, job: ImprovementJob, improver: ImproverBundle = IMPROVER_V0): string {
   const kind = diagnosis.proposalKind as CapabilityComponentKind
-  const lines = [
-    '# Improvement job',
-    `You are redoing a past task in a copy of the project, for improvement job ${job.id}. The user was not satisfied with how it was done before.`,
-    `Diagnosis: ${diagnosis.hypothesis}`,
-    ...diagnosis.failureTypes.slice(0, 4).map(failure => `- ${failure.category}: ${failure.label}`),
-    '',
-    `While you do the task, build one reusable ${kind} component that makes tasks like this come out right without the user having to ask again:`,
-    '1. capability_draft it, 2. capability_try it, 3. actually use it in this task (call its tool, load the skill, …) and finish the task with it,',
-    '4. then capability_propose exactly that one component. Propose nothing else and nothing more than one component.',
-    'A context-policy takes effect from the turn after you try it, and counts as used only once such a turn has completed: try it, finish the task, and do not propose it in the same turn; the host then gives you one turn to check the result under the policy and one more to propose it.',
-    'Do not mention the improvement job in the deliverable itself.',
-    '',
-    '# The task',
-  ]
-  return lines.join('\n')
+  const template = improver.proposal.briefs[kind as ProposableKind]
+  if (template === undefined) throw new NexgentError('improver/invalid', `the improver has no proposal brief for ${kind}`)
+  return renderImproverText(template, {
+    jobId: job.id,
+    hypothesis: diagnosis.hypothesis,
+    failures: diagnosis.failureTypes.slice(0, 4).map(failure => `- ${failure.category}: ${failure.label}`).join('\n'),
+    kind,
+  })
 }
 
 /**

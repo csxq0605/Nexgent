@@ -102,7 +102,8 @@ export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunn
           projectId: project.projectId,
           sessionId: request.sessionId,
           title: request.title,
-          improvement: { jobId: request.jobId, phase: request.phase },
+          // The pinned improver version reaches session.start and the ledger once the kernel records it (step 6 W3).
+          improvement: { jobId: request.jobId, phase: request.phase, ...{ improverVersion: request.improverVersion } },
           model: request.model,
           thinking: request.thinking,
           ...(request.sandboxMode === undefined ? {} : { sandboxMode: request.sandboxMode }),
@@ -143,7 +144,7 @@ export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunn
 
 /** The gate for a job's candidate: the step-4 gate process's work, in this process. */
 export function gateTrialStarter(env: Env = process.env): TrialStarter {
-  return ({ layout, candidateId }) => runGateProcess(layout.root, candidateId, env)
+  return ({ layout, candidateId, comparison }) => runGateProcess(layout.root, candidateId, env, { comparison })
 }
 
 /** Run one job (the `improve` mode); returns the jobs this process ran. */

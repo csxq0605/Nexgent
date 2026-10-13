@@ -4,7 +4,7 @@
  * reviewer) and map the gate's answer onto the job. The phase's spend is the
  * ledger's model requests of that trial (`trialId`).
  */
-import { addUsage, ZERO_USAGE, type CapabilityDecision, type LLMUsage, type WorkspaceLayout } from '@nexgent/kernel'
+import { addUsage, ZERO_USAGE, type CapabilityDecision, type ImproverComparisonParams, type LLMUsage, type WorkspaceLayout } from '@nexgent/kernel'
 import { JsonlLedger } from '@nexgent/session'
 import type { ImprovementJob } from './types.js'
 
@@ -15,7 +15,13 @@ export type GateOutcome =
   | { readonly status: 'decided'; readonly trialId: string; readonly decision: CapabilityDecision }
 
 /** Runs the gate for one candidate (provided by the host entry). */
-export type TrialStarter = (input: { readonly layout: WorkspaceLayout; readonly candidateId: string; readonly job: ImprovementJob }) => Promise<GateOutcome>
+export type TrialStarter = (input: {
+  readonly layout: WorkspaceLayout
+  readonly candidateId: string
+  readonly job: ImprovementJob
+  /** Step 6: the gate parameters of the job's pinned improver (`trialComparison`: counts never below the project's). */
+  readonly comparison: ImproverComparisonParams
+}) => Promise<GateOutcome>
 
 /** Summed model requests of one trial in the ledger. */
 export async function trialSpend(layout: WorkspaceLayout, trialId: string): Promise<{ readonly usage: LLMUsage; readonly requestCount: number }> {

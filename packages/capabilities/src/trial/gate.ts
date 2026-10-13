@@ -48,6 +48,7 @@ import {
   type CandidateRecord,
   type CapabilityDecision,
   type CapabilityVersion,
+  type ImproverComparisonParams,
   type LLMUsage,
   type ReplayCaseRef,
   type ReplaySet,
@@ -159,6 +160,12 @@ export interface GateOptions {
   /** Diagnostics a receipt does not carry (why a run ended `unknown`); the product writes them to the gate's log. */
   readonly log?: (line: string) => void
   readonly now?: () => Date
+  /**
+   * Step 6: an improvement job's comparison parameters (its pinned
+   * improver's); the counts never go below the project's
+   * `capabilities.selectionCases` / `repeats`. Absent: the project's, by similarity.
+   */
+  readonly comparison?: ImproverComparisonParams
 }
 
 /** What {@link runGate} did. */
@@ -308,7 +315,14 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
   const anchor = await selectionAnchor(layout, candidate, history)
   if (anchor.kind === 'missing') return { status: 'skipped', detail: anchor.detail }
   const feedbackOf = new Map(anchor.kind === 'job' && anchor.feedback.length > 0 ? [[anchor.caseId, anchor.feedback]] : [])
-  const built = buildReplaySet(history, anchor.caseId, { selection: settings.selectionCases, guard: settings.guardCases })
+  const counts = options.comparison === undefined
+    ? { selectionCases: settings.selectionCases, repeats: settings.repeats, selection: 'similarity' as const }
+    : {
+      selectionCases: Math.max(settings.selectionCases, options.comparison.selectionCases),
+      repeats: Math.max(settings.repeats, options.comparison.repeats),
+      selection: options.comparison.selection,
+    }
+  const built = buildReplaySet(history, anchor.caseId, { selection: counts.selectionCases, guard: settings.guardCases, order: counts.selection })
   if (built.status === 'waiting') return { status: 'waiting', detail: built.detail }
   // The job's feedback task carries its feedback ids (each run of it gets a feedback check).
   const set = {
@@ -325,7 +339,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
   const plan: TrialPlan = {
     selection: set.selection.map(planRef),
     guard: set.guard.map(planRef),
-    repeats: settings.repeats,
+    repeats: counts.repeats,
     costRatioCap: settings.costRatioCap,
     costApprovalRatio: settings.costApprovalRatio,
     reviewer: settings.reviewer,

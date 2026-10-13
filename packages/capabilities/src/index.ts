@@ -84,4 +84,4 @@ export {
   type ImproverLoadRollback,
   type ResolvedImprover,
 } from './improvers.js'
-export { isTransientFsError, renameRetrying, retryTransient, RENAME_RETRY_DELAYS_MS, TRANSIENT_RENAME_CODES, type RenameRetryOptions } from './fs-retry.js'
+export { isTransientFsError, renameRetrying, retryTransient, RENAME_RETRY_DELAYS_MS, TRANSIENT_RENAME_CODES, transientRenameCodes, type RenameRetryOptions } from './fs-retry.js'

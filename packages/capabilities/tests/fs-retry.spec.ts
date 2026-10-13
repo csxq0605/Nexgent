@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, open, readdir, readFile, rename, rm, writeFile } from '
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { releaseTrialLock, renameRetrying, writeTrialLock } from '../src/index.js'
+import { isTransientFsError, releaseTrialLock, renameRetrying, transientRenameCodes, writeTrialLock } from '../src/index.js'
 
 const dirs: string[] = []
 afterEach(async () => { await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true }))) })
@@ -30,12 +30,25 @@ describe('renameRetrying (Windows sharing violations)', () => {
 
   it('stops early when told to (another writer published the same version)', async () => {
     let calls = 0
-    const failing = async () => { calls += 1; throw Object.assign(new Error('EACCES'), { code: 'EACCES' }) }
-    await expect(renameRetrying('a', 'b', { delays: FAST, rename: failing, stop: async () => true })).rejects.toMatchObject({ code: 'EACCES' })
+    const failing = async () => { calls += 1; throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }) }
+    await expect(renameRetrying('a', 'b', { delays: FAST, rename: failing, stop: async () => true })).rejects.toMatchObject({ code: 'EBUSY' })
     expect(calls).toBe(1)
     calls = 0
-    await expect(renameRetrying('a', 'b', { delays: FAST, rename: failing })).rejects.toMatchObject({ code: 'EACCES' })
+    await expect(renameRetrying('a', 'b', { delays: FAST, rename: failing })).rejects.toMatchObject({ code: 'EBUSY' })
     expect(calls).toBe(FAST.length + 1)
+  })
+
+  it('treats EACCES as transient only on Windows', async () => {
+    const eacces = Object.assign(new Error('EACCES'), { code: 'EACCES' })
+    expect([...transientRenameCodes('win32')].sort()).toEqual(['EACCES', 'EBUSY', 'EPERM'])
+    expect([...transientRenameCodes('linux')].sort()).toEqual(['EBUSY', 'EPERM'])
+    expect(isTransientFsError(eacces, 'win32')).toBe(true)
+    expect(isTransientFsError(eacces, 'linux')).toBe(false)
+    if (process.platform !== 'win32') {
+      let calls = 0
+      await expect(renameRetrying('a', 'b', { delays: FAST, rename: async () => { calls += 1; throw eacces } })).rejects.toBe(eacces)
+      expect(calls).toBe(1)
+    }
   })
 })
 

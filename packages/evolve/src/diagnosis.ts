@@ -7,6 +7,8 @@
  * ends without one also uses an attempt) before the job fails with
  * `improvement/invalid-diagnosis`. The accepted report is written once to
  * `<jobId>/diagnosis.json` with the host's `memberCosts` from the ledger.
+ * Step 6: the prompt's `# Policy` is the job's pinned improver's diagnosis
+ * policy (`renderDiagnosisPolicy`; `v0` is step 5's text verbatim).
  *
  * Design references only (no code taken): DSH `session-query` for read-only
  * slices by session, turn and record type with a byte cap; DSH
@@ -21,12 +23,15 @@ import {
   IMPROVE_READ_SESSION_TOOL,
   IMPROVE_REPORT_DIAGNOSIS_TOOL,
   IMPROVEMENT_LIMITS,
+  IMPROVER_V0,
   NexgentError,
+  renderDiagnosisPolicy,
   ZERO_USAGE,
   type Diagnosis,
   type DiagnosisReport,
   type ExecutionForm,
   type FeedbackListing,
+  type ImproverBundle,
   type ImprovementToolSpec,
   type LedgerRecord,
   type LedgerRecordType,
@@ -304,17 +309,9 @@ export interface DiagnosisSubject {
   readonly feedback: readonly FeedbackListing[]
   /** Sessions to examine, with their task ids when known. */
   readonly sessions: readonly { readonly sessionId: string; readonly taskId?: string }[]
+  /** The job's pinned improver, whose diagnosis policy opens the prompt (default `v0`). */
+  readonly improver?: ImproverBundle
 }
-
-const POLICY = [
-  'You are the diagnosis step of Nexgent\'s improvement job. A user worked on tasks in this project and was not satisfied (feedback, failed checks, or an explicit request to improve).',
-  'Find out why, using only the read-only tools: read the sessions, the ledger and the feedback. You cannot change files or run anything.',
-  'Classify each failure with one category: system-design (the specification or the way the work was set up was wrong or incomplete), inter-agent-misalignment (members of the task worked against or past each other), task-verification (the work was not checked, or ended before it was right).',
-  'Cite evidence as {sessionId, seq} of real records (seq is the record\'s position in its session; add turn when you know it).',
-  'Then decide whether a reusable capability component would have prevented the problem in future tasks of this kind: a skill (written practice the model loads), a function-module (tools as code), a context-policy (standing instructions), a preset, a team-template or an architecture. A plugin cannot be proposed by an improvement job.',
-  'Answer proposalKind "none" when it is not a capability problem: the user changed or added a requirement only for this one deliverable, or the feedback is about taste, not about something future tasks should do.',
-  'Report once with improve_report_diagnosis; if the host refuses it, fix exactly what it names and report again.',
-].join('\n')
 
 function describeSignal(job: ImprovementJob, feedback: readonly FeedbackListing[]): string[] {
   const lines: string[] = []
@@ -333,7 +330,7 @@ function describeSignal(job: ImprovementJob, feedback: readonly FeedbackListing[
 /** The diagnose session's first message. Pure. */
 export function diagnosisPrompt(subject: DiagnosisSubject): string {
   const { job } = subject
-  const parts = ['# Policy', POLICY, '', '# Why this job started', `Trigger: ${job.trigger}.`]
+  const parts = ['# Policy', renderDiagnosisPolicy(subject.improver ?? IMPROVER_V0), '', '# Why this job started', `Trigger: ${job.trigger}.`]
   const signals = describeSignal(job, subject.feedback)
   if (signals.length > 0) parts.push(...signals)
   if (job.request !== undefined) {
