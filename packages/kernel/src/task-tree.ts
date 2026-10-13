@@ -41,6 +41,8 @@ export class TaskTree {
   private readonly memberTotals = new Map<string, { name: string; executionForm: ExecutionForm; task: MemberTotals; turn: MemberTotals }>()
   /** Step 4: files of the latest version of each deliverable the tree presented, by deliverable id in first-presentation order. */
   private readonly presented = new Map<string, readonly string[]>()
+  /** Deliverable versions presented in the tree since the root's current turn started (the present note reads it). */
+  presentedThisTurn = 0
   /**
    * Shell commands of the tree run in the project root that exited with a
    * code (any; step 5 keeps failing ones too), in call order. Timed-out and
@@ -90,6 +92,7 @@ export class TaskTree {
   /** Step 4: the root started a turn; per-turn member totals restart (the SDK counts a turn as a task). */
   beginRootTurn(): void {
     for (const entry of this.memberTotals.values()) entry.turn = emptyTotals()
+    this.presentedThisTurn = 0
   }
 
   /** Step 4: each member's spend over the whole tree (`task`) or since the root's current turn started (`turn`). */
@@ -103,6 +106,7 @@ export class TaskTree {
   /** Step 4: note the files of a presented deliverable version (a later version replaces the earlier one's files). */
   present(deliverableId: string, paths: readonly string[]): void {
     this.presented.set(deliverableId, [...paths])
+    this.presentedThisTurn += 1
   }
 
   /** Step 4: files of the latest presented version of each deliverable, deduplicated, first presentation first. */
