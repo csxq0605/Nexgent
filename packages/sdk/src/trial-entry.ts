@@ -52,6 +52,7 @@ import {
   ZERO_USAGE,
   type Context,
   type CreateAgentOptions,
+  type ImproverComparisonParams,
   type Ledger,
   type LedgerRecordInput,
   type LLMUsage,
@@ -306,7 +307,7 @@ export function llmReviewer(options: { readonly ledger: Ledger; readonly home: s
 }
 
 /** Run the gate for one candidate of a project (the `gate` mode). */
-export async function runGateProcess(root: string, candidateId: string, env: Env = process.env): Promise<GateResult> {
+export async function runGateProcess(root: string, candidateId: string, env: Env = process.env, options: { readonly comparison?: ImproverComparisonParams } = {}): Promise<GateResult> {
   const layout = resolveWorkspaceLayout(root)
   const ledger = new JsonlLedger({ ledgersDir: layout.ledgers })
   const endpoint = (await readProjectConfig(layout.configFile).catch(() => undefined))?.input.endpoint
@@ -317,6 +318,7 @@ export async function runGateProcess(root: string, candidateId: string, env: Env
     runner: processReplayRunner({ args: [TRIAL_ENTRY, 'replay'], env: env as NodeJS.ProcessEnv }),
     reviewer: llmReviewer({ ledger, home: nexgentHome(env as NodeJS.ProcessEnv), env, ...(endpoint === undefined ? {} : { endpoint }), ...(jobId === undefined ? {} : { improvementId: jobId }) }),
     log: line => process.stderr.write(`${line}\n`),
+    ...(options.comparison === undefined ? {} : { comparison: options.comparison }),
     onDecision: async decision => {
       await ledger.append(decisionLedgerRecord(decision)).catch(() => undefined)
     },

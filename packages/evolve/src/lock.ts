@@ -7,20 +7,27 @@
  * file being replaced, can fail for a moment with EPERM / EBUSY / EACCES (a
  * sharing violation). Those renames and reads are retried with backoff
  * ({@link retryTransient}); only when the retries run out is the error
- * thrown.
+ * thrown. EACCES counts as transient only on Windows: on POSIX it is a real
+ * permission error and is thrown at once (it used to make a lock wait out
+ * its whole deadline).
  */
 import { randomUUID } from 'node:crypto'
 import { link, open, readFile, rename, rm, stat, type FileHandle } from 'node:fs/promises'
 
-/** Error codes of a transient sharing violation (Windows: another process has the file open). */
-export const TRANSIENT_FS_CODES: ReadonlySet<string> = new Set(['EPERM', 'EBUSY', 'EACCES'])
+/** Error codes of a transient sharing violation on a platform (EACCES only on Windows, where another process has the file open). */
+export function transientFsCodes(platform: NodeJS.Platform = process.platform): ReadonlySet<string> {
+  return new Set(platform === 'win32' ? ['EPERM', 'EBUSY', 'EACCES'] : ['EPERM', 'EBUSY'])
+}
+
+/** {@link transientFsCodes} of this platform. */
+export const TRANSIENT_FS_CODES: ReadonlySet<string> = transientFsCodes()
 
 /** Waits between attempts (about 1.6 s in all, 9 attempts). */
 export const TRANSIENT_RETRY_DELAYS_MS: readonly number[] = [10, 20, 40, 80, 160, 320, 500, 500]
 
 /** Whether an error is a transient sharing violation worth retrying. */
-export function isTransientFsError(error: unknown): boolean {
-  return TRANSIENT_FS_CODES.has((error as NodeJS.ErrnoException | null)?.code ?? '')
+export function isTransientFsError(error: unknown, platform: NodeJS.Platform = process.platform): boolean {
+  return (platform === process.platform ? TRANSIENT_FS_CODES : transientFsCodes(platform)).has((error as NodeJS.ErrnoException | null)?.code ?? '')
 }
 
 /**

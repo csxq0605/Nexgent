@@ -7,11 +7,12 @@
  * copy, one candidate with `origin: improvement`), the hand-off to the gate
  * and the first-use record. The host entry supplies the session runner and
  * the gate ({@link createImprovementStages}); without them
- * {@link PENDING_STAGES} ends every job `failed`.
+ * {@link PENDING_STAGES} ends every job `failed`. Step 6: every job runs on
+ * the improver it pinned when it started ({@link ImproverSource}).
  */
 export * from './types.js'
 export { improvementsDir } from './paths.js'
-export { breakStaleLock, isTransientFsError, lockHeld, processAlive, readLockPid, retryTransient, TRANSIENT_FS_CODES, TRANSIENT_RETRY_DELAYS_MS, tryCreateLock, withFileLock, writeJsonAtomic, type AtomicWriteIo, type FileLockOptions, type LockIo } from './lock.js'
+export { breakStaleLock, isTransientFsError, lockHeld, processAlive, readLockPid, retryTransient, TRANSIENT_FS_CODES, TRANSIENT_RETRY_DELAYS_MS, transientFsCodes, tryCreateLock, withFileLock, writeJsonAtomic, type AtomicWriteIo, type FileLockOptions, type LockIo } from './lock.js'
 export { clip, createJob, jobAlive, jobPaths, listJobs, readJob, START_GRACE_MS, transitionJob, updateJob, type CreateJobInput, type JobPatch, type JobPaths } from './jobs.js'
 export {
   admitItems,
@@ -80,3 +81,4 @@ export {
 export { trialSpend, trialStatus, type GateOutcome, type TrialStarter } from './trial.js'
 export { sweepAdoptedJobs } from './first-use.js'
 export { createImprovementStages, type ImprovementStagesOptions } from './stages.js'
+export { jobImproverVersion, PROJECT_IMPROVERS, trialComparison, type ImproverSource, type PinnedImprover } from './improver.js'

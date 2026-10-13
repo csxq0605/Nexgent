@@ -2,13 +2,16 @@
  * The real phases of an improvement job (step 5 round 2), built from what
  * the host entry supplies: an {@link ImprovementSessionRunner} for the
  * diagnose and propose sessions, and a {@link TrialStarter} for the gate.
+ * Step 6: the prompts, the kinds a diagnosis may lead to and the gate's
+ * comparison parameters come from the job's pinned improver.
  */
-import { IMPROVEMENT_LIMITS, NexgentError, type CapabilityComponentKind, type FeedbackListing } from '@nexgent/kernel'
+import { IMPROVEMENT_LIMITS, NexgentError, readProjectConfig, type CapabilityComponentKind, type FeedbackListing } from '@nexgent/kernel'
 import { listReplayCases } from '@nexgent/capabilities'
 import { JsonlSessionStore } from '@nexgent/session'
 import { SessionFeedbackStore } from '@nexgent/tasking'
 import { diagnosisNudge, diagnosisPrompt, diagnosisTools, sumTurns, type DiagnosisState } from './diagnosis.js'
 import { collectCandidate, contextPolicyCheckText, contextPolicyProposeText, findFeedbackTask, newSessionId, pendingContextPolicies, prepareProposalCopy, proposalBrief, proposeRecords } from './propose.js'
+import { trialComparison } from './improver.js'
 import type { ImprovementStages } from './runner.js'
 import type { ImprovementSessionRunner, ImprovementTurnResult } from './session-runner.js'
 import { trialSpend, trialStatus, type TrialStarter } from './trial.js'
@@ -70,12 +73,12 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
       const tools = diagnosisTools({ layout, job, sessionId, taskIds: subject.taskIds, state })
       await input.record({ sessions: { ...job.sessions, diagnose: sessionId } })
       const session = await options.runner.open({
-        jobId: job.id, phase: 'diagnose', sessionId, projectRoot: layout.root, model: config.model, thinking: config.thinking,
+        jobId: job.id, phase: 'diagnose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version, model: config.model, thinking: config.thinking,
         title: `improvement ${job.id} diagnose`, tools,
       })
       const turns: ImprovementTurnResult[] = []
       try {
-        let text = diagnosisPrompt({ job, feedback: await feedbackOf(layout, job), sessions: subject.sessions })
+        let text = diagnosisPrompt({ job, feedback: await feedbackOf(layout, job), sessions: subject.sessions, improver: input.improver.bundle })
         let nudges = 0
         for (;;) {
           const before = state.attempts
@@ -108,6 +111,10 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
       if (accepted.proposalKind === 'plugin') {
         return { ...spend, outcome: 'failed', detail: 'The diagnosis suggests a plugin; an improvement job cannot propose plugins (their approval cannot be asked headless).', patch: { diagnosed } }
       }
+      const kinds = input.improver.bundle.proposal.kinds
+      if (!(kinds as readonly string[]).includes(accepted.proposalKind)) {
+        return { ...spend, outcome: 'failed', detail: `The diagnosis suggests a ${accepted.proposalKind}, which improver ${input.improver.version} does not propose (it proposes ${kinds.join(', ')}).`, patch: { diagnosed } }
+      }
       return { ...spend, outcome: 'propose', proposalKind: accepted.proposalKind, diagnosis: accepted, patch: { diagnosed } }
     },
 
@@ -127,12 +134,12 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
       const turns: ImprovementTurnResult[] = []
       try {
         const session = await options.runner.open({
-          jobId: job.id, phase: 'propose', sessionId, projectRoot: layout.root, workspaceRoot: copy.root, sandboxMode: task.sandboxMode,
+          jobId: job.id, phase: 'propose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version, workspaceRoot: copy.root, sandboxMode: task.sandboxMode,
           model: config.model, thinking: config.thinking, title: `improvement ${job.id} propose`,
         })
         try {
           for (const [index, message] of task.messages.entries()) {
-            const text = index === 0 ? `${proposalBrief(diagnosis, job)}\n${message.text}` : message.text
+            const text = index === 0 ? `${proposalBrief(diagnosis, job, input.improver.bundle)}\n${message.text}` : message.text
             const turn = await session.send(text)
             turns.push(turn)
             await input.log(`propose turn ${index + 1}/${task.messages.length}: ${turn.outcome}, ${turn.requestCount} requests`)
@@ -168,7 +175,8 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
     },
 
     async trial(input) {
-      const outcome = await options.startTrial({ layout: input.layout, candidateId: input.candidateId, job: input.job })
+      const capabilities = (await readProjectConfig(input.layout.configFile)).config.capabilities
+      const outcome = await options.startTrial({ layout: input.layout, candidateId: input.candidateId, job: input.job, comparison: trialComparison(capabilities, input.improver.bundle) })
       const spend = outcome.status === 'decided' ? await trialSpend(input.layout, outcome.trialId) : sumTurns([])
       const mapped = trialStatus(outcome)
       return {

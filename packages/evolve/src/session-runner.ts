@@ -7,10 +7,11 @@
  * §改进会话与改进预算 say what the runner must do:
  *
  * - `session.start` carries `purpose: 'improvement'` and
- *   `improvement: { jobId, phase }`; the session is written in the real
+ *   `improvement: { jobId, phase, improverVersion }`; the session is written in the real
  *   project's `sessions/` (hidden from the conversation list).
  * - Every ledger record of the session carries `improvementId` = `jobId`
- *   and `improvementPhase` = `phase`, in the real project's ledger.
+ *   and `improvementPhase` = `phase` (step 6: and `improverVersion`), in
+ *   the real project's ledger.
  * - Diagnose: the session's tools are exactly `request.tools` (the four
  *   `improve_*` tools this package builds): no file, command, network,
  *   collaboration or capability tools, no project plugins.
@@ -24,7 +25,7 @@
  * - Model and thinking are `request.model` / `request.thinking`
  *   (`improvement.model`, `improvement.thinking`).
  */
-import type { LLMUsage, SandboxMode, ThinkingMode, Tool } from '@nexgent/kernel'
+import type { ImproverVersion, LLMUsage, SandboxMode, ThinkingMode, Tool } from '@nexgent/kernel'
 
 /** What a job asks the runner to open. */
 export interface ImprovementSessionRequest {
@@ -34,6 +35,8 @@ export interface ImprovementSessionRequest {
   readonly sessionId: string
   /** The real project (sessions, ledger, candidates). */
   readonly projectRoot: string
+  /** Step 6: the improver version the job pinned (for `session.start.improvement` and the ledger). */
+  readonly improverVersion: ImproverVersion
   /** Propose only: the snapshot copy the file tools work in. */
   readonly workspaceRoot?: string
   /** Propose only: the sandbox mode of the session (already the narrower one). */

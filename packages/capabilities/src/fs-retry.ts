@@ -3,12 +3,18 @@
  * process (a reader, an indexer, antivirus) has the source or the target
  * open, `rename` can fail for a moment with EPERM / EBUSY / EACCES. Those
  * failures are retried with backoff; any other error, or the last
- * attempt's, is thrown.
+ * attempt's, is thrown. EACCES counts as transient only on Windows (on POSIX
+ * it is a real permission error).
  */
 import { rename } from 'node:fs/promises'
 
-/** Error codes of a transient sharing violation. */
-export const TRANSIENT_RENAME_CODES: ReadonlySet<string> = new Set(['EPERM', 'EBUSY', 'EACCES'])
+/** Error codes of a transient sharing violation on a platform (EACCES only on Windows). */
+export function transientRenameCodes(platform: NodeJS.Platform = process.platform): ReadonlySet<string> {
+  return new Set(platform === 'win32' ? ['EPERM', 'EBUSY', 'EACCES'] : ['EPERM', 'EBUSY'])
+}
+
+/** {@link transientRenameCodes} of this platform. */
+export const TRANSIENT_RENAME_CODES: ReadonlySet<string> = transientRenameCodes()
 
 /** Waits between attempts (about 1.6 s in all, 9 attempts). */
 export const RENAME_RETRY_DELAYS_MS: readonly number[] = [10, 20, 40, 80, 160, 320, 500, 500]
@@ -22,9 +28,9 @@ export interface RenameRetryOptions {
   readonly rename?: (from: string, to: string) => Promise<void>
 }
 
-/** Whether an error is a transient sharing violation (EPERM / EBUSY / EACCES). */
-export function isTransientFsError(error: unknown): boolean {
-  return TRANSIENT_RENAME_CODES.has((error as NodeJS.ErrnoException | null)?.code ?? '')
+/** Whether an error is a transient sharing violation (EPERM / EBUSY, and EACCES on Windows). */
+export function isTransientFsError(error: unknown, platform: NodeJS.Platform = process.platform): boolean {
+  return (platform === process.platform ? TRANSIENT_RENAME_CODES : transientRenameCodes(platform)).has((error as NodeJS.ErrnoException | null)?.code ?? '')
 }
 
 /** Run a file operation, retrying it with backoff while it fails with a transient sharing violation. */

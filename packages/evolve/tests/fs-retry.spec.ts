@@ -1,7 +1,7 @@
 import { open, readdir, readFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { retryTransient, tryCreateLock, withFileLock, writeJsonAtomic } from '../src/index.js'
+import { isTransientFsError, retryTransient, TRANSIENT_FS_CODES, transientFsCodes, tryCreateLock, withFileLock, writeJsonAtomic } from '../src/index.js'
 import { tempDir } from './helpers.js'
 
 /** A rename that fails like Windows does while another process has the target open, `failures` times. */
@@ -18,8 +18,8 @@ function lockedRename(failures: number, code = 'EPERM') {
 const FAST = [1, 1, 1, 1]
 
 describe('atomic JSON writes over a file another process holds open (Windows)', () => {
-  it('retries a rename that fails with EPERM, EBUSY or EACCES and then lands', async () => {
-    for (const code of ['EPERM', 'EBUSY', 'EACCES']) {
+  it('retries a rename that fails with EPERM, EBUSY (or EACCES on Windows) and then lands', async () => {
+    for (const code of TRANSIENT_FS_CODES) {
       const dir = await tempDir()
       const path = join(dir, 'job.json')
       await writeJsonAtomic(path, { status: 'queued' })
@@ -49,6 +49,27 @@ describe('atomic JSON writes over a file another process holds open (Windows)', 
   })
 })
 
+describe('EACCES is transient only on Windows', () => {
+  it('counts EACCES as a sharing violation on win32 and as a real permission error elsewhere', () => {
+    const eacces = Object.assign(new Error('EACCES'), { code: 'EACCES' })
+    expect([...transientFsCodes('win32')].sort()).toEqual(['EACCES', 'EBUSY', 'EPERM'])
+    expect([...transientFsCodes('linux')].sort()).toEqual(['EBUSY', 'EPERM'])
+    expect(isTransientFsError(eacces, 'win32')).toBe(true)
+    expect(isTransientFsError(eacces, 'linux')).toBe(false)
+    expect(isTransientFsError(eacces, 'darwin')).toBe(false)
+  })
+
+  it.skipIf(process.platform === 'win32')('on POSIX a lock that cannot be created for lack of permission fails at once instead of waiting out its deadline', async () => {
+    const dir = await tempDir()
+    let calls = 0
+    const denied = async () => { calls += 1; throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }) }
+    const started = Date.now()
+    await expect(withFileLock(join(dir, 'queue.lock'), async () => 1, { timeoutMs: 5_000, pollMs: 5, io: { open: denied, delays: FAST } })).rejects.toMatchObject({ code: 'EACCES' })
+    expect(calls).toBe(1)
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+})
+
 describe('taking a lock while the old lock file is being deleted (Windows EPERM)', () => {
   /** An exclusive create that fails like Windows does `failures` times, then creates. */
   function busyOpen(failures: number, code = 'EPERM') {
@@ -68,7 +89,7 @@ describe('taking a lock while the old lock file is being deleted (Windows EPERM)
     expect(await tryCreateLock(path, 4242, { open: busy.fn, delays: FAST })).toBe(true)
     expect(busy.calls.count).toBe(3)
     expect(await readFile(path, 'utf8')).toBe('4242\n')
-    const always = busyOpen(1_000, 'EACCES')
+    const always = busyOpen(1_000, 'EBUSY')
     expect(await tryCreateLock(join(dir, 'other.lock'), 4242, { open: always.fn, delays: FAST })).toBe(false)
   })
 

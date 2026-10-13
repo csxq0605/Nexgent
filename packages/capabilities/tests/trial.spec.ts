@@ -66,6 +66,34 @@ describe('replay set', () => {
     expect(() => assertDisjoint(set.selection, [set.selection[0]!])).toThrow()
   })
 
+  it('by recency (an improver\'s choice) takes the newest tasks after the proposing one; the guard is still the least similar', () => {
+    const at = (minute: number) => `2026-10-13T00:${String(minute).padStart(2, '0')}:00.000Z`
+    const make = (caseId: string, text: string, minute: number) => ({ caseId, sessionId: `s-${caseId}`, tree: 'a'.repeat(64), checks: [], takenAt: at(minute), messages: [{ text }], feedback: [] })
+    const cases = [
+      make('origin', 'summarize the june orders by region', 1),
+      make('similar', 'summarize the july orders by region', 2),
+      make('newer', 'count the open tickets per team', 3),
+      make('far', 'draw a logo', 4),
+      make('newest', 'list the open tickets', 5),
+    ]
+    const similar = buildReplaySet(cases, 'origin', { selection: 2, guard: 1 })
+    const recent = buildReplaySet(cases, 'origin', { selection: 3, guard: 1, order: 'recency' })
+    if (similar.status !== 'ready' || recent.status !== 'ready') throw new Error('expected ready sets')
+    expect(similar.selection.map(item => item.caseId)).toEqual(['origin', 'similar'])
+    expect(recent.selection.map(item => item.caseId)).toEqual(['origin', 'newest', 'newer'])
+    expect(recent.guard.map(item => item.caseId)).toEqual(similar.guard.map(item => item.caseId))
+    expect(buildReplaySet(cases, 'origin', { selection: 2, guard: 1, order: 'similarity' })).toEqual(similar)
+  })
+
+  it('an improvement job\'s comparison counts raise the history the gate needs', async () => {
+    const { layout, tasks } = await historyProject()
+    const candidate = await proposeCandidate(layout, tasks[0]!)
+    const runner = arms({ output: 'good' }, { output: 'bad' })
+    const result = await runGate({ layout, candidateId: candidate.id, runner, tempRoot: await tempDir(), comparison: { selectionCases: 3, repeats: 2, selection: 'similarity' } })
+    expect(result).toMatchObject({ status: 'waiting', detail: expect.stringContaining('3 selection and 1 guard') })
+    expect(runner.requests).toEqual([])
+  })
+
   it('skips tasks without checks', async () => {
     const { layout } = await historyProject()
     await pastTask(layout, 'a task nobody checked', { specs: [] })
