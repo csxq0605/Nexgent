@@ -65,6 +65,10 @@ export {
 } from './diagnosis.js'
 export {
   collectCandidate,
+  contextPolicyCheckText,
+  contextPolicyProposeText,
+  pendingContextPolicies,
+  proposeRecords,
   findFeedbackTask,
   newSessionId,
   prepareProposalCopy,
