@@ -34,9 +34,10 @@ export {
   type ReceiptInput,
   type TrialSummary,
 } from './receipts.js'
+export { selectionAnchor, type FeedbackCheckInput, type FeedbackCheckResult, type SelectionAnchor } from './feedback.js'
 export { recoverInterruptedTrials } from './recover.js'
 export { prepareReplayProject, type ReplayProject, type ReplayProjectInput } from './replay-project.js'
-export { assertDisjoint, buildReplaySet, listReplayCases, similarity, type ReplayCase, type ReplayMessage, type ReplaySetResult } from './replay-set.js'
+export { assertDisjoint, buildReplaySet, listReplayCases, similarity, type CaseFeedback, type ReplayCase, type ReplayMessage, type ReplaySetResult } from './replay-set.js'
 export { checkUsageRegression, type PendingOutcome, type UsageWatchOptions } from './usage.js'
 
 /** The ledger's `capability.decision` line for a decision. */

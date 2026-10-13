@@ -8,9 +8,14 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
+  IMPROVEMENT_FILES,
+  IMPROVEMENTS_DIR,
+  perTurnFileName,
   resolveWorkspaceLayout,
   ZERO_USAGE,
   type CandidateRecord,
+  type FeedbackEntry,
+  type ImprovementJob,
   type LLMUsage,
   type TaskCheckSpec,
   type WorkspaceLayout,
@@ -55,6 +60,69 @@ export async function pastTask(layout: WorkspaceLayout, text: string, options: {
   return { taskId, sessionId }
 }
 
+async function writeChecks(layout: WorkspaceLayout, taskId: string, sessionId: string, turn: number | undefined, list: TaskCheckSpec[]): Promise<void> {
+  await mkdir(join(layout.dataDir, 'snapshots', 'checks'), { recursive: true })
+  const record = {
+    formatVersion: 1,
+    taskId,
+    ...(turn === undefined ? {} : { turn }),
+    sessionId,
+    checkedAt: new Date().toISOString(),
+    specs: list,
+    results: list.map(spec => ({ name: spec.name, passed: true, target: spec.id })),
+  }
+  if (turn !== undefined) await writeFile(join(layout.dataDir, 'snapshots', 'checks', perTurnFileName(taskId, turn)), JSON.stringify(record))
+  await writeFile(join(layout.dataDir, 'snapshots', 'checks', `${taskId}.json`), JSON.stringify(record))
+}
+
+/**
+ * A step-5 root task with per-turn snapshots and checks: turn 1 is the task,
+ * turn 2 is a feedback turn (`feedback` record, then its user message), turn
+ * 3 is a user message after it. Only turn 1 may be replayed.
+ */
+export async function feedbackTask(layout: WorkspaceLayout, text: string, comment = 'the summary misses the south region'): Promise<{ taskId: string; sessionId: string; feedback: FeedbackEntry }> {
+  const sessionId = randomUUID()
+  const taskId = randomUUID()
+  const feedback: FeedbackEntry = { id: randomUUID(), deliverableId: randomUUID(), version: 1, rating: 2, comment }
+  const store = new JsonlSessionStore({ sessionsDir: layout.sessions })
+  const lock = await store.create({ sessionId, projectRoot: layout.root, model: 'claude-sonnet-5-5', sandboxMode: 'workspace-write', capabilityVersion: 'baseline' })
+  const recorder = new LocalTaskRecorder(layout)
+  for (const turn of [1, 2, 3]) {
+    await recorder.begin({ taskId, sessionId, turn, capabilityVersion: 'baseline' })
+    await store.append(sessionId, { type: 'turn.start', turn })
+    if (turn === 1) await store.append(sessionId, { type: 'user.message', turn, content: text, source: 'user' })
+    if (turn === 2) {
+      await store.append(sessionId, { type: 'feedback', turn, feedback })
+      await store.append(sessionId, { type: 'user.message', turn, content: comment, source: 'feedback' })
+    }
+    if (turn === 3) await store.append(sessionId, { type: 'user.message', turn, content: 'now also add a chart', source: 'user' })
+    await store.append(sessionId, { type: 'turn.end', turn, reason: { kind: 'completed' } })
+    await writeChecks(layout, taskId, sessionId, turn, specs())
+  }
+  await store.release(lock)
+  return { taskId, sessionId, feedback }
+}
+
+/** An improvement job answering `feedback` in `sessionId` (`job.json` only). */
+export async function improvementJob(layout: WorkspaceLayout, items: ImprovementJob['items'], request?: ImprovementJob['request']): Promise<ImprovementJob> {
+  const at = new Date().toISOString()
+  const job: ImprovementJob = {
+    formatVersion: 1,
+    id: randomUUID(),
+    createdAt: at,
+    updatedAt: at,
+    trigger: request === undefined ? 'feedback-count' : 'explicit',
+    status: 'trialing',
+    items,
+    ...(request === undefined ? {} : { request }),
+    history: [{ status: 'queued', at }, { status: 'trialing', at }],
+    phases: {},
+  }
+  await mkdir(join(layout.dataDir, IMPROVEMENTS_DIR, job.id), { recursive: true })
+  await writeFile(join(layout.dataDir, IMPROVEMENTS_DIR, job.id, IMPROVEMENT_FILES.job), JSON.stringify(job))
+  return job
+}
+
 /** A project with the checker script and `count` past order-summary / region tasks. */
 export async function historyProject(texts: readonly string[] = [
   'summarize the june orders by region',
@@ -79,7 +147,7 @@ const MODULE = JSON.stringify({
 })
 
 /** Propose a candidate from `taskId` with one function module (or a plugin). */
-export async function proposeCandidate(layout: WorkspaceLayout, origin: { taskId: string; sessionId: string }, kind: 'function-module' | 'plugin' = 'function-module'): Promise<CandidateRecord> {
+export async function proposeCandidate(layout: WorkspaceLayout, origin: { taskId: string; sessionId: string }, kind: 'function-module' | 'plugin' = 'function-module', jobId?: string): Promise<CandidateRecord> {
   const files = kind === 'function-module'
     ? new Map<string, Uint8Array>([['functions.json', Buffer.from(MODULE)], ['index.mjs', Buffer.from('export function summarize() { return 1 }\n')]])
     : new Map<string, Uint8Array>([
@@ -95,6 +163,7 @@ export async function proposeCandidate(layout: WorkspaceLayout, origin: { taskId
     components: [{ kind, name, files }],
     proofs: [{ kind, name, turn: 1, toolCallId: 'call-1' }],
     summary: 'reusable order summary',
+    ...(jobId === undefined ? {} : { origin: 'improvement' as const, jobId }),
   })
   return record
 }
@@ -105,6 +174,7 @@ export interface ArmScript {
   readonly output?: string
   readonly outcome?: ReplayRunResult['outcome']
   readonly tokens?: number
+  readonly estimatedUsd?: number | 'unknown'
   /** Called with the run request (to look at the copy). */
   readonly inspect?: (request: ReplayRunRequest) => Promise<void> | void
 }
@@ -126,7 +196,7 @@ export function scriptedRunner(script: (request: ReplayRunRequest) => ArmScript)
         await mkdir(join(request.projectRoot, 'out'), { recursive: true })
         await writeFile(join(request.projectRoot, 'out', 'result.txt'), arm.output)
       }
-      return { outcome: arm.outcome ?? 'completed', usage: usage(arm.tokens ?? 100), requestCount: 1 }
+      return { outcome: arm.outcome ?? 'completed', usage: usage(arm.tokens ?? 100), requestCount: 1, ...(arm.estimatedUsd === undefined ? {} : { estimatedUsd: arm.estimatedUsd }) }
     },
   }
 }

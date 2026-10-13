@@ -7,6 +7,13 @@
  * session's user messages, replayed in order. The kernel gives a root
  * session one task id for all its turns, so a case is a whole root session.
  *
+ * Step 5 (ADR 0006 decisions 6, 7): when the task has per-turn check records
+ * (`checks/<taskId>.t<turn>.json`) the case replays turns 1 … `throughTurn`
+ * and is judged by that turn's checks. `throughTurn` is the last checked turn
+ * before the session's first feedback, so no feedback turn and nothing said
+ * after it reaches a replay; without feedback it is the last checked turn.
+ * Step-4 tasks (no per-turn records) replay as before.
+ *
  * The selection set holds the task that proposed the candidate, then the past
  * tasks most similar to it (word overlap of the first user message); the
  * guard set holds the least similar ones. The two never share a task (ported
@@ -17,7 +24,9 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   NexgentError,
+  perTurnFileName,
   SNAPSHOTS_DIR,
+  type FeedbackEntry,
   type ReplayCaseRef,
   type SessionRecord,
   type TaskCheckSpec,
@@ -34,11 +43,19 @@ export interface ReplayMessage {
   readonly materialIds?: readonly string[]
 }
 
+/** A feedback entry of a replayable task, with the turn it opened. */
+export interface CaseFeedback {
+  readonly turn: number
+  readonly entry: FeedbackEntry
+}
+
 /** A replayable past task. */
 export interface ReplayCase extends ReplayCaseRef {
   /** When its snapshot was taken (ordering). */
   readonly takenAt: string
   readonly messages: readonly ReplayMessage[]
+  /** Every feedback recorded in the task's session (none of it is replayed). */
+  readonly feedback: readonly CaseFeedback[]
 }
 
 /** What {@link buildReplaySet} settled on. */
@@ -63,13 +80,14 @@ async function names(directory: string): Promise<string[]> {
   }
 }
 
-/** The user messages of a root session (`source: 'user'`), or `undefined` when it is not a readable root session. */
-function replayMessages(records: readonly SessionRecord[]): ReplayMessage[] | undefined {
+/** The user messages of a root session (`source: 'user'`, turns ≤ `throughTurn`), or `undefined` when it is not a readable root task session. */
+function replayMessages(records: readonly SessionRecord[], throughTurn?: number): ReplayMessage[] | undefined {
   const start = records[0]
-  if (start?.type !== 'session.start' || start.parentSessionId !== undefined) return undefined
+  if (start?.type !== 'session.start' || start.parentSessionId !== undefined || start.purpose === 'improvement') return undefined
   const messages: ReplayMessage[] = []
   for (const record of records) {
     if (record.type !== 'user.message' || record.source !== 'user') continue
+    if (throughTurn !== undefined && record.turn > throughTurn) continue
     messages.push({ text: record.content, ...(record.materials === undefined || record.materials.length === 0 ? {} : { materialIds: [...record.materials] }) })
   }
   return messages
@@ -83,26 +101,70 @@ function replayMessages(records: readonly SessionRecord[]): ReplayMessage[] | un
 export async function listReplayCases(layout: WorkspaceLayout): Promise<ReplayCase[]> {
   const snapshots = join(layout.dataDir, SNAPSHOTS_DIR)
   const store = new JsonlSessionStore({ sessionsDir: layout.sessions })
+  const checkNames = new Set(await names(join(snapshots, 'checks')))
   const cases: ReplayCase[] = []
   for (const name of await names(join(snapshots, 'tasks'))) {
+    // Per-turn files (`<taskId>.t<turn>.json`) are read through their task's step-4 file.
+    if (/\.t\d+\.json$/.test(name)) continue
     const snapshot = await readJson(join(snapshots, 'tasks', name))
     if (snapshot === undefined || validateCapabilityFile('taskSnapshot', snapshot).length > 0) continue
-    const task = snapshot as TaskSnapshotRecord
-    if (task.tree === null || `${task.taskId}.json` !== name) continue
-    const checks = await readJson(join(snapshots, 'checks', name))
-    if (checks === undefined || validateCapabilityFile('taskChecks', checks).length > 0) continue
-    const record = checks as TaskChecksRecord
-    if (record.taskId !== task.taskId || record.specs.length === 0) continue
-    let messages: ReplayMessage[] | undefined
+    let task = snapshot as TaskSnapshotRecord
+    if (`${task.taskId}.json` !== name) continue
+    const first = await readJson(join(snapshots, 'tasks', perTurnFileName(task.taskId, 1)))
+    if (first !== undefined && validateCapabilityFile('taskSnapshot', first).length === 0 && (first as TaskSnapshotRecord).taskId === task.taskId) task = first as TaskSnapshotRecord
+    if (task.tree === null) continue
+    let records: readonly SessionRecord[]
     try {
-      messages = replayMessages((await store.readAll(task.sessionId)).records)
+      records = (await store.readAll(task.sessionId)).records
     } catch {
       continue
     }
+    const feedback: CaseFeedback[] = records.flatMap(record => (record.type === 'feedback' ? [{ turn: record.turn, entry: record.feedback }] : []))
+    const firstFeedbackTurn = feedback.length === 0 ? undefined : Math.min(...feedback.map(item => item.turn))
+    const checks = await caseChecks(snapshots, checkNames, task.taskId, firstFeedbackTurn)
+    if (checks === undefined) continue
+    const messages = replayMessages(records, checks.throughTurn)
     if (messages === undefined || messages.length === 0) continue
-    cases.push({ caseId: task.taskId, sessionId: task.sessionId, tree: task.tree, checks: [...record.specs] as TaskCheckSpec[], takenAt: task.takenAt, messages })
+    cases.push({
+      caseId: task.taskId,
+      sessionId: task.sessionId,
+      tree: task.tree,
+      checks: [...checks.record.specs] as TaskCheckSpec[],
+      ...(checks.throughTurn === undefined ? {} : { throughTurn: checks.throughTurn }),
+      takenAt: task.takenAt,
+      messages,
+      feedback,
+    })
   }
   return cases.sort((left, right) => (left.takenAt < right.takenAt ? -1 : left.takenAt > right.takenAt ? 1 : left.caseId < right.caseId ? -1 : 1))
+}
+
+/**
+ * The check record a case is judged by: the last per-turn record with at
+ * least one spec before the first feedback turn, or, for a step-4 task
+ * without per-turn records, `checks/<taskId>.json`.
+ */
+async function caseChecks(snapshots: string, checkNames: ReadonlySet<string>, taskId: string, firstFeedbackTurn: number | undefined): Promise<{ readonly record: TaskChecksRecord; readonly throughTurn?: number } | undefined> {
+  const prefix = `${taskId}.t`
+  const turns = [...checkNames]
+    .filter(name => name.startsWith(prefix) && /^\d+\.json$/.test(name.slice(prefix.length)))
+    .map(name => Number.parseInt(name.slice(prefix.length), 10))
+    .sort((left, right) => right - left)
+  const valid = (value: unknown, turn?: number): value is TaskChecksRecord => value !== undefined
+    && validateCapabilityFile('taskChecks', value).length === 0
+    && (value as TaskChecksRecord).taskId === taskId
+    && (value as TaskChecksRecord).specs.length > 0
+    && (turn === undefined || (value as TaskChecksRecord).turn === undefined || (value as TaskChecksRecord).turn === turn)
+  if (turns.length === 0) {
+    const record = await readJson(join(snapshots, 'checks', `${taskId}.json`))
+    return valid(record) ? { record } : undefined
+  }
+  for (const turn of turns) {
+    if (firstFeedbackTurn !== undefined && turn >= firstFeedbackTurn) continue
+    const record = await readJson(join(snapshots, 'checks', perTurnFileName(taskId, turn)))
+    if (valid(record, turn)) return { record, throughTurn: turn }
+  }
+  return undefined
 }
 
 /** Words of a message: Latin/digit runs lower-cased, and each CJK character. */

@@ -24,6 +24,14 @@
  *
  * The gate reads its parameters from `.nexgent/config.json` (a candidate
  * bundle has no field that could change them).
+ *
+ * Step 5 (ADR 0006 decision 6): a candidate from an improvement job is
+ * anchored on the job's feedback task (`selectionAnchor`); every run of a
+ * case that carries feedback is followed by a feedback check (the reviewer
+ * reads the run's output and the feedback, `trial.feedback`), counted into
+ * that arm's quality by `decideTrial` and reported apart from the checks.
+ * Replay runs of a job's candidate belong to the job's `trial` phase.
+ * Costs carry the display-only `estimatedUsd` the runner and reviewer give.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
@@ -38,6 +46,7 @@ import {
   type CapabilityDecision,
   type CapabilityVersion,
   type LLMUsage,
+  type ReplayCaseRef,
   type ReplaySet,
   type TaskCheck,
   type TrialArm,
@@ -51,6 +60,7 @@ import {
   type WorkspaceLayout,
 } from '@nexgent/kernel'
 import { readCandidate } from '../candidates.js'
+import { selectionAnchor, type FeedbackCheckInput, type FeedbackCheckResult } from './feedback.js'
 import type { Activation } from '../activation.js'
 import { CapabilityStore } from '../capability-store.js'
 import { runCheckSpecs } from './checks.js'
@@ -73,6 +83,8 @@ export interface ReplayRunRequest {
   readonly messages: readonly ReplayMessage[]
   /** Deadline of the whole run. */
   readonly timeoutMs: number
+  /** Step 5: the improvement job whose candidate this is; the run's session belongs to the job's `trial` phase. */
+  readonly improvement?: { readonly jobId: string }
 }
 
 /** How a run ended, as the runner reports it. */
@@ -83,6 +95,8 @@ export interface ReplayRunResult {
   /** Sum of the run's model requests (members included). */
   readonly usage: LLMUsage
   readonly requestCount: number
+  /** Display only (`@nexgent/llm` price table); absent counts as `unknown`. */
+  readonly estimatedUsd?: number | 'unknown'
 }
 
 /** Runs one replay (the product starts a separate process per run). */
@@ -112,11 +126,15 @@ export interface ReviewResult {
   readonly reason: string
   readonly usage: LLMUsage
   readonly requestCount: number
+  /** Display only; absent counts as `unknown`. */
+  readonly estimatedUsd?: number | 'unknown'
 }
 
 /** The reviewer model (decision 5); its requests carry `trialId` without `arm`. */
 export interface TrialReviewer {
   review(input: ReviewInput, settings: TrialPlan['reviewer'], signal: AbortSignal): Promise<ReviewResult>
+  /** Step 5: the feedback check of one run; without it every feedback check is `unknown` (and the candidate is not adopted). */
+  checkFeedback?(input: FeedbackCheckInput, settings: TrialPlan['reviewer'], signal: AbortSignal): Promise<FeedbackCheckResult>
 }
 
 /** Options of {@link runGate}. */
@@ -149,6 +167,18 @@ export type GateResult =
   | { readonly status: 'decided'; readonly trialId: string; readonly verdict: TrialVerdict; readonly decision: CapabilityDecision }
 
 const RUN_TIMEOUT_MS = 30 * 60_000
+
+/** A case as the plan freezes it. */
+function planRef(item: ReplayCase): ReplayCaseRef {
+  return {
+    caseId: item.caseId,
+    sessionId: item.sessionId,
+    tree: item.tree,
+    checks: item.checks,
+    ...(item.throughTurn === undefined ? {} : { throughTurn: item.throughTurn }),
+    ...(item.feedbackIds === undefined ? {} : { feedbackIds: item.feedbackIds }),
+  }
+}
 const OUTPUT_FILES = 12
 const OUTPUT_CHARS = 6_000
 
@@ -160,19 +190,21 @@ function knownTokens(usage: LLMUsage): number {
   return (typeof usage.inputTokens === 'number' ? usage.inputTokens : 0) + (typeof usage.outputTokens === 'number' ? usage.outputTokens : 0)
 }
 
-function cost(usage: LLMUsage, requestCount: number): TrialCost {
-  return { usage, requestCount, estimatedUsd: 'unknown' }
+function cost(usage: LLMUsage, requestCount: number, estimatedUsd: number | 'unknown' = requestCount === 0 ? 0 : 'unknown'): TrialCost {
+  return { usage, requestCount, estimatedUsd }
 }
 
 class CostTotal {
   usage: LLMUsage = ZERO_USAGE
   requests = 0
-  add(usage: LLMUsage, requests: number): void {
+  usd: number | 'unknown' = 0
+  add(usage: LLMUsage, requests: number, usd: number | 'unknown' | undefined): void {
     this.usage = addUsage(this.usage, usage)
     this.requests += requests
+    if (requests > 0) this.usd = this.usd === 'unknown' || usd === undefined || usd === 'unknown' ? 'unknown' : this.usd + usd
   }
   get cost(): TrialCost {
-    return cost(this.usage, this.requests)
+    return cost(this.usage, this.requests, this.usd)
   }
 }
 
@@ -227,10 +259,13 @@ function explain(verdict: TrialVerdict, tally: { selection: { candidate: ArmTall
   const rate = (value: number) => `${Math.round(value * 100)}%`
   const parts = [
     `${verdict.outcome} (${verdict.reason}).`,
-    `Selection checks passed: candidate ${rate(verdict.passRate.candidate)}, baseline ${rate(verdict.passRate.baseline)}`
+    `${verdict.feedbackPassRate === undefined ? 'Selection checks passed' : 'Quality (selection checks and feedback checks) passed'}: candidate ${rate(verdict.passRate.candidate)}, baseline ${rate(verdict.passRate.baseline)}`
       + ` (runs pass/fail/unknown ${tally.selection.candidate.passed}/${tally.selection.candidate.failed}/${tally.selection.candidate.unknown}`
       + ` vs ${tally.selection.baseline.passed}/${tally.selection.baseline.failed}/${tally.selection.baseline.unknown}).`,
     `Guard runs passed: candidate ${tally.guard.candidate.passed}, baseline ${tally.guard.baseline.passed}.`,
+    ...(verdict.feedbackPassRate === undefined
+      ? []
+      : [`Feedback checks (reviewer model, separate from the deterministic checks) passed: candidate ${rate(verdict.feedbackPassRate.candidate)}, baseline ${rate(verdict.feedbackPassRate.baseline)}.`]),
     `Token ratio candidate/baseline: ${verdict.costRatio === 'unknown' ? 'unknown' : verdict.costRatio.toFixed(3)}.`,
     review.candidate + review.baseline + review.tie > 0
       ? `Reviewer model (separate from the checks): candidate ${review.candidate}, baseline ${review.baseline}, tie ${review.tie}${verdict.decidedByReview ? '; it decided this verdict' : ''}.`
@@ -257,15 +292,27 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
   if (await wasAttempted(capabilitiesDir, candidate.id)) return { status: 'skipped', detail: `candidate ${candidate.id} was tried before; a candidate is tried once` }
 
   const settings = (await readProjectConfig(layout.configFile)).config.capabilities
-  const set = buildReplaySet(await listReplayCases(layout), candidate.taskId, { selection: settings.selectionCases, guard: settings.guardCases })
-  if (set.status === 'waiting') return { status: 'waiting', detail: set.detail }
+  const history = await listReplayCases(layout)
+  const anchor = await selectionAnchor(layout, candidate, history)
+  if (anchor.kind === 'missing') return { status: 'skipped', detail: anchor.detail }
+  const feedbackOf = new Map(anchor.kind === 'job' && anchor.feedback.length > 0 ? [[anchor.caseId, anchor.feedback]] : [])
+  const built = buildReplaySet(history, anchor.caseId, { selection: settings.selectionCases, guard: settings.guardCases })
+  if (built.status === 'waiting') return { status: 'waiting', detail: built.detail }
+  // The job's feedback task carries its feedback ids (each run of it gets a feedback check).
+  const set = {
+    ...built,
+    selection: built.selection.map(item => {
+      const entries = feedbackOf.get(item.caseId)
+      return entries === undefined ? item : { ...item, feedbackIds: entries.map(entry => entry.id) }
+    }),
+  }
 
   if (!(await claimAttempt(capabilitiesDir, candidate.id))) return { status: 'skipped', detail: `candidate ${candidate.id} is being or was tried by another process` }
   const observed: Activation = await store.activation()
   const baselineVersion: CapabilityVersion = observed.version
   const plan: TrialPlan = {
-    selection: set.selection.map(({ caseId, sessionId, tree, checks }) => ({ caseId, sessionId, tree, checks })),
-    guard: set.guard.map(({ caseId, sessionId, tree, checks }) => ({ caseId, sessionId, tree, checks })),
+    selection: set.selection.map(planRef),
+    guard: set.guard.map(planRef),
     repeats: settings.repeats,
     costRatioCap: settings.costRatioCap,
     reviewer: settings.reviewer,
@@ -286,6 +333,8 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
     const tokens: Record<TrialArm, number | 'unknown'> = { candidate: 0, baseline: 0 }
     const spent = () => ({ tokens: knownTokens(addUsage(arms.candidate.usage, arms.baseline.usage, reviewCost.usage)), requests: arms.candidate.requests + arms.baseline.requests + reviewCost.requests })
     const tally = { selection: { candidate: emptyTally(), baseline: emptyTally() }, guard: { candidate: emptyTally(), baseline: emptyTally() } }
+    const hasFeedback = set.selection.some(item => item.feedbackIds !== undefined)
+    const feedbackTally = { candidate: emptyTally(), baseline: emptyTally() }
     const outputs = new Map<string, RunOutput>()
     let budgetExhausted = false
 
@@ -319,15 +368,16 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
             ledgersDir: layout.ledgers,
             messages: replay.messages,
             timeoutMs: options.runTimeoutMs ?? RUN_TIMEOUT_MS,
+            ...(candidate.origin === 'improvement' && candidate.jobId !== undefined ? { improvement: { jobId: candidate.jobId } } : {}),
           }, signal)
-          runCost = cost(result.usage, result.requestCount)
-          arms[arm].add(result.usage, result.requestCount)
+          runCost = cost(result.usage, result.requestCount, result.estimatedUsd ?? 'unknown')
+          arms[arm].add(result.usage, result.requestCount, result.estimatedUsd)
           const runTokens = tokensOf(result.usage)
           tokens[arm] = tokens[arm] === 'unknown' || runTokens === 'unknown' ? 'unknown' : tokens[arm] + runTokens
           if (result.outcome === 'completed') {
             checks = await runCheckSpecs(project.root, replay.checks, { signal })
             status = checks.every(check => check.passed) ? 'pass' : 'fail'
-            if (half === 'selection') outputs.set(`${replay.caseId}#${repeat}#${arm}`, await runOutput(project.root, project.files))
+            if (half === 'selection' || replay.feedbackIds !== undefined) outputs.set(`${replay.caseId}#${repeat}#${arm}`, await runOutput(project.root, project.files))
           } else {
             reason = unknownReason(result.outcome)
             if (result.outcome === 'budget') budgetExhausted = true
@@ -354,6 +404,42 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
         cost: runCost,
         durationMs: Date.now() - started,
       }))
+      if (replay.feedbackIds !== undefined && half === 'selection') await feedbackCheck(replay, repeat, arm, status)
+    }
+
+    // ADR 0006: the feedback check of one run, after its checks; an unknown run gives an unknown check.
+    const feedbackCheck = async (replay: ReplayCase, repeat: number, arm: TrialArm, runStatus: TrialStatus): Promise<void> => {
+      const ids = replay.feedbackIds ?? []
+      const entries = (anchor.kind === 'job' ? anchor.feedback : []).filter(entry => ids.includes(entry.id))
+      const output = outputs.get(`${replay.caseId}#${repeat}#${arm}`)
+      let result: FeedbackCheckResult
+      if (runStatus === 'unknown' || output === undefined) {
+        result = { status: 'unknown', reason: 'The run did not complete, so its output was not checked against the feedback.', usage: ZERO_USAGE, requestCount: 0 }
+      } else if (options.reviewer?.checkFeedback === undefined) {
+        result = { status: 'unknown', reason: 'No reviewer model is available for feedback checks.', usage: ZERO_USAGE, requestCount: 0 }
+      } else if (remaining(plan.budget, spent()) === undefined || signal.aborted) {
+        if (!signal.aborted) budgetExhausted = true
+        result = { status: 'unknown', reason: signal.aborted ? 'The trial was cancelled.' : 'The trial budget ran out before this feedback check.', usage: ZERO_USAGE, requestCount: 0 }
+      } else {
+        try {
+          result = await options.reviewer.checkFeedback({ trialId, caseId: replay.caseId, arm, repeat, messages: replay.messages, feedback: entries, output }, plan.reviewer, signal)
+        } catch (error) {
+          result = { status: 'unknown', reason: `the reviewer failed: ${(error as Error).message}`, usage: ZERO_USAGE, requestCount: 0 }
+        }
+      }
+      reviewCost.add(result.usage, result.requestCount, result.estimatedUsd)
+      feedbackTally[arm] = bump(feedbackTally[arm], result.status)
+      emit(await receipts.append({
+        type: 'trial.feedback',
+        caseId: replay.caseId,
+        arm,
+        repeat,
+        feedbackIds: [...ids],
+        status: result.status,
+        reason: result.reason.slice(0, 2_000) || '(no reason given)',
+        model: plan.reviewer.model,
+        cost: cost(result.usage, result.requestCount, result.estimatedUsd ?? 'unknown'),
+      }))
     }
 
     const cases: [ReplaySet, readonly ReplayCase[]][] = [['selection', set.selection], ['guard', set.guard]]
@@ -376,6 +462,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
       tokens,
       budgetExhausted,
       requiresApproval: candidate.requiresApproval,
+      ...(hasFeedback ? { feedback: feedbackTally } : {}),
     }, plan.costRatioCap)
     let verdict = verdictOf()
     // The reviewer is asked only when its opinion can change the verdict: a check tie the cost does not settle.
@@ -396,7 +483,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
           } catch (error) {
             result = { preference: 'unknown', reason: `the reviewer failed: ${(error as Error).message}`.slice(0, 2_000), usage: ZERO_USAGE, requestCount: 0 }
           }
-          reviewCost.add(result.usage, result.requestCount)
+          reviewCost.add(result.usage, result.requestCount, result.estimatedUsd)
           if (result.preference !== 'unknown') review[result.preference] += 1
           emit(await receipts.append({
             type: 'trial.review',
@@ -406,7 +493,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
             preference: result.preference,
             reason: result.reason.slice(0, 2_000) || '(no reason given)',
             model: plan.reviewer.model,
-            cost: cost(result.usage, result.requestCount),
+            cost: cost(result.usage, result.requestCount, result.estimatedUsd ?? 'unknown'),
           }))
         }
         if (budgetExhausted) break
