@@ -3,6 +3,7 @@
 // judge also reads damaged or partial records.
 export type ImproverReason = 'gate-passed' | 'quality-up' | 'cost-down' | 'no-improvement' | 'no-offspring' | 'unknown-arm' | 'origin-mismatch' | 'epoch-mismatch'
 export interface OriginLike {
+  readonly kind?: string
   readonly sourceJobId?: string
   readonly tree?: string
   readonly feedbackIds?: readonly string[]

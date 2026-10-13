@@ -46,7 +46,7 @@ export async function loadCapabilities() {
   return import(new URL('../../packages/capabilities/dist/index.js', import.meta.url).href)
 }
 
-async function settle(probe, done, { timeoutMs = 10_000, intervalMs = 50 } = {}) {
+export async function settle(probe, done, { timeoutMs = 10_000, intervalMs = 50 } = {}) {
   const deadline = Date.now() + timeoutMs
   let value = await probe()
   while (!done(value) && Date.now() < deadline) {
@@ -75,7 +75,7 @@ export async function projectRoots(dir) {
 }
 
 /** What one project's files say about improver versions: jobs, improvement session headers, ledger records of jobs. */
-async function versionFacts(pkgs, root) {
+export async function versionFacts(pkgs, root) {
   const { jobs } = await readImprovements(pkgs, root)
   const sessions = []
   for (const [id, records] of Object.entries(await sessionsOf(root))) {
@@ -223,7 +223,7 @@ const answerOf = entry => (entry.toolCalls === undefined ? { content: entry.cont
  * the 该改进 diagnosis replies (job A), and a note of whether each diagnosis request
  * carries the child improver's paragraph.
  */
-class PinnedModel extends Step5Model {
+export class PinnedModel extends Step5Model {
   constructor(h, options) {
     super(h, options)
     this.childParagraph = options.childParagraph
@@ -240,6 +240,9 @@ class PinnedModel extends Step5Model {
         this.playbooks.shift()
         this.current = 'notes'
         this.diagnoseSessions.push({ playbook: 'notes', tools })
+      } else if (at === 0 && this.current === 'notes') {
+        // A new diagnose session on another playbook: the step-5 model picks it below.
+        this.current = undefined
       }
       if (at === 0) this.diagnoseTexts.push({ playbook: this.current === 'notes' ? 'notes' : this.playbooks[0] ?? 'not-capability', hasChildParagraph: this.h.requestText(body).includes(this.childParagraph) })
       if (this.current === 'notes') {
@@ -259,7 +262,7 @@ class PinnedModel extends Step5Model {
   }
 }
 
-async function waitJob(pkgs, root, jobId, done = status => TERMINAL_STATES.includes(status) || status === 'awaiting-approval' || status === 'waiting-history') {
+export async function waitJob(pkgs, root, jobId, done = status => TERMINAL_STATES.includes(status) || status === 'awaiting-approval' || status === 'waiting-history') {
   const pick = jobs => jobs.find(job => job.id === jobId)
   const state = await settle(() => readImprovements(pkgs, root), ({ jobs }) => pick(jobs) !== undefined && done(pick(jobs).status), { timeoutMs: JOB_WAIT, intervalMs: 200 })
   const job = pick(state.jobs)

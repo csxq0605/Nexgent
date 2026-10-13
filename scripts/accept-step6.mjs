@@ -15,9 +15,11 @@
  *                        R07 and R08 (Windows) never decide the exit
  *
  * Wired: the regressions (H18, D01–D23), the improver-version items H01–H03
- * (step6-headless.mjs) and E01 / E04 (step6-experiment.mjs). Every other item
- * reports not-implemented and the script exits 2 — never a fake pass. The real
- * layer checks its prerequisites (key, budget) and calls no model.
+ * (step6-headless.mjs), the meta-improvement items H04–H17 (step6-meta.mjs),
+ * D24–D27 (step6-desktop.mjs), E01 / E04 (step6-experiment.mjs) and E02 / E03
+ * (a scripted rehearsal of the experiment runner, step6-rehearsal.mjs). The real
+ * layer R01–R08 reports not-implemented and the script exits 2 for it — never a
+ * fake pass; it checks its prerequisites (key, budget) and calls no model.
  *
  * Usage:
  *   node scripts/accept-step6.mjs [--layer headless,desktop,experiment|real|all] [--out <summary.json>]
@@ -42,8 +44,13 @@ import { desktopPrerequisites } from './accept-common/step2-desktop.mjs'
 import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
 import { budgetGate } from './accept-common/step2-checks.mjs'
 import { step5DesktopCtx, step5HeadlessCtx } from './accept-common/step6-regression.mjs'
-import { runStep6Headless } from './accept-common/step6-headless.mjs'
+import { loadCapabilities, runStep6Headless } from './accept-common/step6-headless.mjs'
 import { loadExperiment, reportObservation, setsObservation } from './accept-common/step6-experiment.mjs'
+import { runStep6Meta } from './accept-common/step6-meta.mjs'
+import { runStep6DesktopScenario } from './accept-common/step6-desktop.mjs'
+import { runRehearsal } from './accept-common/step6-rehearsal.mjs'
+import { loadStep5Packages, scriptedEnvironment } from './accept-common/step5-runtime.mjs'
+import { SCRIPTED_API_KEY } from './accept-common/step5-fixtures.mjs'
 import {
   CHECKS,
   decideExit,
@@ -111,13 +118,32 @@ async function prepareLayer(layer, harness, options) {
     } catch (error) {
       ctx.step6Error = errorText(error)
     }
+    // H04–H17: meta-improvement jobs in three scripted projects.
+    try {
+      const step5 = await loadStep5Packages()
+      if (!step5.ok) throw new Error(step5.reason)
+      const restore = scriptedEnvironment(SCRIPTED_API_KEY)
+      try {
+        ctx.step6Meta = await runStep6Meta(harness, step5.pkgs, await loadCapabilities(), join(options.work, 'meta'), { log: line => log(`meta ${line}`) })
+      } finally {
+        restore()
+      }
+    } catch (error) {
+      ctx.step6MetaError = errorText(error)
+    }
     return { ok: true, ctx }
   }
   if (layer === 'desktop') {
     const ready = await desktopPrerequisites()
     if (!ready.ok) return { ok: false, reason: ready.reason }
-    // D01–D23: step 5's desktop ctx; D24–D27 have no scenario yet.
-    return { ok: true, ctx: await step5DesktopCtx(harness, options.work, log) }
+    // D01–D23: step 5's desktop ctx; D24–D27: the improver scenario.
+    const ctx = await step5DesktopCtx(harness, options.work, log)
+    try {
+      ctx.step6Desktop = await runStep6DesktopScenario(harness, join(options.work, 'step6'), { log: line => log(`desktop step6 ${line}`) })
+    } catch (error) {
+      ctx.step6DesktopError = errorText(error)
+    }
+    return { ok: true, ctx }
   }
   if (layer === 'experiment') {
     const present = await access(EXPERIMENT_DIR).then(() => true, () => false)
@@ -138,6 +164,14 @@ async function prepareLayer(layer, harness, options) {
       ctx.report = await reportObservation(experiment, join(options.work, 'report'))
     } catch (error) {
       ctx.experimentErrors.report = errorText(error)
+    }
+    // E02 / E03: the runner end to end on the scripted backend (no model call), its runs kept.
+    try {
+      const rehearsal = await runRehearsal(join(options.work, 'rehearsal'), { log: line => log(`rehearsal ${line}`) })
+      if (rehearsal.error !== undefined) ctx.experimentErrors.rehearsal = rehearsal.error
+      else ctx.rehearsal = rehearsal
+    } catch (error) {
+      ctx.experimentErrors.rehearsal = errorText(error)
     }
     return { ok: true, ctx }
   }
@@ -187,7 +221,7 @@ async function main() {
     ...STEP,
     provider: realOnly ? 'real' : 'scripted',
     command: `node scripts/accept-step6.mjs --layer ${layers.join(',')}`,
-    simulated: 'scripted Claude Messages API model server (step 2–5 scenarios for the regressions, the step-6 improver-version scenario); scripted raw experiment record for E04; checklist H01–H18 / D01–D27 / E01–E04',
+    simulated: 'scripted Claude Messages API model server (step 2–5 scenarios for the regressions, the step-6 improver-version, meta-improvement and desktop improver scenarios); scripted raw experiment record for E04; scripted rehearsal of scripts/experiment/step6 for E02 / E03; checklist H01–H18 / D01–D27 / E01–E04',
   })
 
   const spent = await readSpent(values.spent)
