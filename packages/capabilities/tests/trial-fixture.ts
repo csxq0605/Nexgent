@@ -25,8 +25,8 @@ import { LocalTaskRecorder } from '@nexgent/tasking'
 import { BASELINE_BUNDLE, writeCandidate, type ReplayRunRequest, type ReplayRunResult, type TrialRunner } from '../src/index.js'
 import { tempDir } from './helpers.js'
 
-/** The check every past task recorded: the output exists and says `good`. */
-export const CHECK_COMMAND = 'node check.mjs'
+/** The check every past task recorded: the output exists and says `good` (a shell builtin, so a run does not wait for a Node start). */
+export const CHECK_COMMAND = 'test "$(cat out/result.txt 2>/dev/null)" = good'
 
 export function specs(): TaskCheckSpec[] {
   return [

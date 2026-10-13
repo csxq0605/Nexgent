@@ -1,6 +1,6 @@
 import { access, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { functionToolName, resolveWorkspaceLayout, type LedgerRecord, type TrialReceipt, type WorkspaceLayout } from '@nexgent/kernel'
 import {
   assertDisjoint,
@@ -20,6 +20,10 @@ import {
 } from '../src/index.js'
 import { sampleComponents, tempDir } from './helpers.js'
 import { feedbackTask, historyProject, improvementJob, pastTask, proposeCandidate, scriptedRunner, usage, type ArmScript } from './trial-fixture.js'
+
+// Each gate here runs up to a dozen paired runs, each copying the project and spawning a check command;
+// under a full parallel `pnpm test` that can pass the 5-second default although nothing is wrong.
+vi.setConfig({ testTimeout: 30_000 })
 
 async function writeConfig(layout: WorkspaceLayout, capabilities: Record<string, unknown>): Promise<void> {
   await writeFile(layout.configFile, JSON.stringify({ version: 1, capabilities }))
