@@ -57,14 +57,18 @@
     │   ├── <version>/                    一个能力包：manifest.json 与各组件目录
     │   ├── activation/<n>.json           采用历史链
     │   ├── candidates/<candidateId>/     候选：candidate.json 与提出的组件文件
-    │   ├── trials/<trialId>.jsonl        门控试验收据
+    │   ├── trials/<trialId>.jsonl        门控试验收据（旁路文件 .attempt / .lock / .log 见“候选与门控”）
     │   ├── decisions/<decisionId>.json   采用、拒绝、待批准、回滚的结论
     │   └── drafts/<sessionId>/           会话的草稿组件
-    └── snapshots/                        任务快照与检查（本文“任务快照与检查”，步骤 4）
-        ├── objects/<sha256>              文件内容，每份一次
-        ├── trees/<sha256>.json           快照树
-        ├── tasks/<taskId>.json           根任务开始时的快照记录
-        └── checks/<taskId>.json          根任务结束时的检查记录
+    ├── snapshots/                        任务快照与检查（本文“任务快照与检查”，步骤 4）
+    │   ├── objects/<sha256>              文件内容，每份一次
+    │   ├── trees/<sha256>.json           快照树
+    │   ├── tasks/<taskId>[.t<turn>].json 根任务（步骤 5 起每个根轮）开始时的快照记录
+    │   └── checks/<taskId>[.t<turn>].json 根任务（步骤 5 起每个根轮）结束时的检查记录
+    └── improvements/                     改进作业（本文“改进作业”，步骤 5）
+        ├── queue.json                    触发队列（已计入的信号）
+        ├── queue.lock                    改写队列时的独占锁
+        └── <jobId>/                      一个作业：job.json、diagnosis.json、job.lock、job.json.lock、job.log
 ```
 
 | 路径 | 内容 | 命名 | 创建者 | 写入者 |
@@ -81,10 +85,11 @@
 | `architectures/<sha256>.json` | 工作流图（步骤 3） | 规范化图的 SHA-256 | 第一次保存时 | `@nexgent/workflow`（宿主）；模型只读 |
 | `capabilities/` | 能力包、采用历史、候选、试验、决定、草稿（步骤 4） | 见“CapabilityBundle 清单”起四节 | `ensureLayout` | `@nexgent/capabilities`（宿主）；模型的文件工具读写都拒绝 |
 | `snapshots/` | 任务快照与检查（步骤 4） | 内容寻址，见“任务快照与检查” | `ensureLayout` | `@nexgent/capabilities`（宿主）；模型的文件工具读写都拒绝 |
+| `improvements/` | 改进作业的队列、作业记录与诊断（步骤 5） | `jobId` 为小写 UUID v4，见“改进作业” | 第一次计入信号或开始作业时 | `@nexgent/evolve`（宿主）；模型的文件工具读写都拒绝 |
 
 规则：
 
-- `.nexgent/` 内部对模型可见的文件工具按子目录区分：`sessions/`、`ledgers/`、`capabilities/`、`snapshots/` 读写都拒绝，`materials/`、`outputs/`、`skills/`、`presets/`、`architectures/` 与 `config.json` 只读（`outputs/` 自步骤 2 起改为只读，快照只由宿主写）；规则以 `permissions.md` §路径策略与写入限制为准。
+- `.nexgent/` 内部对模型可见的文件工具按子目录区分：`sessions/`、`ledgers/`、`capabilities/`、`snapshots/`、`improvements/` 读写都拒绝，`materials/`、`outputs/`、`skills/`、`presets/`、`architectures/` 与 `config.json` 只读（`outputs/` 自步骤 2 起改为只读，快照只由宿主写）；规则以 `permissions.md` §路径策略与写入限制为准。
 - 所有路径在服务内部以绝对路径处理（`WorkspaceLayout`）；记录里出现的路径（如 `session.start.projectRoot`）也是绝对路径。
 - 是否纳入版本控制由项目自己决定；建议忽略 `sessions/`、`ledgers/`、`outputs/`、`snapshots/`，保留 `config.json`；`capabilities/` 是否入库由项目决定（入库后换机器也能用同一能力版本）。
 - 本机凭证文件不在项目内：`~/.nexgent/credentials.json`（Windows 为 `%USERPROFILE%\.nexgent\credentials.json`），形状见“项目配置文件”末尾。
@@ -105,8 +110,9 @@
 | `costCaps.perProject` | `CostCap` | 无 | 每项目上限 |
 | `approvals` | `ApprovalGrant[]` | `[]` | `project` 范围的审批授权；语义见 `permissions.md` |
 | `extraReadRoots` | `string[]` | `[]` | 额外可读的绝对目录；语义见 `permissions.md` |
-| `autoImprove` | boolean | `false` | 反馈触发的自动改进（步骤 5）开关 |
+| `autoImprove` | boolean | `true` | 步骤 5：计入的反馈与失败的检查是否自动开始改进作业（ADR 0006；步骤 4 之前默认 `false`，从未生效）；显式“改进”不受它限制；改动它总要审批 |
 | `capabilities` | `CapabilitiesConfig` | 见下 | 门控与回滚设置（步骤 4）；改动它总要审批（`permissions.md` §工具审批） |
+| `improvement` | `ImprovementConfig` | 见下 | 步骤 5：触发阈值、改进预算、诊断与提案的模型；改动它总要审批 |
 
 `CapabilitiesConfig`（步骤 4，契约 `capabilities.ts`，校验 `assertCapabilitiesConfig`）：
 
@@ -123,6 +129,18 @@
 | `rollback.consecutiveErrors` | 1–20 | `3` | 新组件连续出错多少次即回滚 |
 
 下限是硬下限：`selectionCases: 1`、`guardCases: 0` 报 `config/invalid`。
+
+`ImprovementConfig`（步骤 5，契约 `improvement.ts`，校验 `assertImprovementConfig`，未知字段报 `config/invalid` 并在 `details.field` 写出字段路径）：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `feedbackThreshold` | 1–20 | `3` | 计入多少个信号开始一个作业（计划 4.9 #7） |
+| `budget.maxTokens` | integer ≥ 1 | `3000000` | 一个时间窗内全部改进费用的上限，按计费 token 计：`inputTokens + cacheReadTokens + cacheWriteTokens + outputTokens`（改进会话以缓存读为主，所以不同于 `CostCap` 只计输入 + 输出）；按 ADR 0002 价目、以缓存读为主的用量约每百万 token 1 美元，默认值约合 3 美元，只是显示用的估算 |
+| `budget.windowDays` | 1–365 | `30` | 时间窗天数，按账本记录 `ts` 往前滚动 |
+| `model` | string | `"claude-sonnet-5-5"` | 诊断与提案会话的模型，可改为 `claude-opus-5-5`（决定 5）；门控的评审模型仍是 `capabilities.reviewer` |
+| `thinking` | `"off" \| "on"` | `"on"` | 诊断与提案会话是否开 thinking |
+
+预算是时间窗内创建的全部作业的 `phases` 之和（诊断、提议、该作业所发的门控试验；各阶段由带该作业 `improvementId` 的账本记录求和），用量未知的字段按 0 计，总数因而是下限。用尽时进行中的作业以 `budget-exhausted` 结束，新的作业（含显式“改进”）在时间窗滚出足够余量或用户调高之前不开始（`improvement/budget-exhausted`）。
 
 `CostCap`：
 
@@ -145,7 +163,8 @@
   "effort": "medium",
   "sandboxMode": "workspace-write",
   "costCaps": { "perTask": { "maxRequests": 50 } },
-  "autoImprove": false
+  "autoImprove": true,
+  "improvement": { "budget": { "maxTokens": 4000000 } }
 }
 ```
 
@@ -188,7 +207,7 @@
 
 | `type` | 何时写 | 专有字段 |
 | --- | --- | --- |
-| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本） |
+| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本）、`purpose?`（步骤 5，`"task" \| "improvement"`，缺省即 `task`）、`improvement?`（步骤 5，`{ jobId, phase: "diagnose" \| "propose" }`，当且仅当 `purpose` 为 `improvement` 时出现） |
 | `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn` |
 | `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示 | `turn`、`content`、`source: "user" \| "inject" \| "feedback"`、`materials?`（步骤 2） |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
@@ -364,6 +383,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `memberId` | string? | 发出记录的成员：根会话为 `main`，子会话为子会话 id（步骤 3） |
 | `executionForm` | `"direct" \| "delegated" \| "team" \| "workflow"`? | 发出记录的成员的执行形态（步骤 3 加 `team`） |
 | `taskId` | string? | 所属任务树：根会话打开（create / resume）时生成的小写 UUID v4，成员继承 |
+| `improvementId` | string? | 步骤 5：费用所属的改进作业 id（`improvements/<jobId>/`）；改进作业的诊断会话、提议会话、该作业所发试验的运行与评审记录都带 |
+| `improvementPhase` | `"diagnose" \| "propose" \| "trial"`? | 步骤 5：作业阶段；与 `improvementId` 同时出现或同时缺省 |
 
 这些字段在所有记录类型上都是可选的（schema 层面）；步骤 1、2 的写入方不写它们。步骤 3 起 kernel 给一个会话写出的每条 `llm.request.*`、`tool.call`、`task.outcome` 都带 `taskId`、`memberId`、`executionForm`（契约 `AgentAttribution`）；步骤 4 起再带 `capabilityVersion`。试验运行的会话在项目的临时副本里，但它们的账本记录写进**真实项目**的账本，带 `trialId` 与 `arm`，所以费用汇总能区分试验与普通任务。
 
@@ -439,6 +460,17 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `candidateId` | string? | 涉及的候选 |
 | `revision` | number? | 为它写出的采用历史序号 |
 
+**`improvement.end`**（步骤 5）—— 一个改进作业进入终态之后（每个作业一条）。作业文件（`improvements/<jobId>/job.json`）存过程，这一行让作业结局与费用合计出现在账本里。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `jobId` | string | 作业 id（同时写在 `improvementId`） |
+| `trigger` | `"feedback-count" \| "explicit" \| "check-failure"` | 起因，见“改进作业” |
+| `status` | `ImprovementStatus` | 终态 |
+| `phases` | `{ diagnose?, propose?, trial? }` | 每阶段 `{ usage, requestCount }`，同作业记录；没运行过的阶段不写；不写美元 |
+| `candidateId` | string? | 提议阶段产生的候选 |
+| `decisionId` | string? | 门控或批准写出的决定 |
+
 ### 示例
 
 ```jsonl
@@ -449,6 +481,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 {"type":"llm.request.end","ts":"2026-10-07T08:00:04.100Z","sessionId":"6f1c…","requestId":"c2d3…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","status":"error","usage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","cacheWriteTokens":"unknown","reasoningTokens":"unknown"},"latencyMs":800,"httpStatus":503,"errorCode":"llm/request-failed"}
 {"type":"task.outcome","ts":"2026-10-07T08:00:04.200Z","sessionId":"6f1c…","status":"failed","totalUsage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","cacheWriteTokens":"unknown","reasoningTokens":"unknown"},"requestCount":2,"toolCallCount":1,"turns":1,"toolsUsed":["str_replace"]}
 {"type":"capability.decision","ts":"2026-10-07T09:00:00.000Z","decisionId":"0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e","outcome":"adopted","reason":"quality-up","trigger":"gate","fromVersion":"baseline","toVersion":"3f2a9c0e5b7d14a8c6e2f9b0d3a5c7e1f4b8a2d6c0e9f3b5a7d1c4e8f2b6a0d9","candidateId":"5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b","revision":1}
+{"type":"llm.request.start","ts":"2026-10-13T08:00:01.000Z","sessionId":"9a8b…","requestId":"e4f5…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","purpose":"task","thinking":"on","improvementId":"7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f","improvementPhase":"diagnose"}
+{"type":"improvement.end","ts":"2026-10-13T09:30:00.000Z","jobId":"7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f","trigger":"feedback-count","status":"no-proposal","phases":{"diagnose":{"usage":{"inputTokens":40210,"outputTokens":1830,"totalTokens":42040,"cacheReadTokens":36000,"cacheWriteTokens":2100,"reasoningTokens":900},"requestCount":6}},"improvementId":"7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f"}
 ```
 
 ### 必产生记录的失败路径
@@ -528,28 +562,41 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 **候选。** `capability_propose` 把试用过的组件提成一个候选：宿主检查每个组件在试用之后至少被成功用过一次（决定 2），把证据写成 `proofs`（`{ kind, name, turn, toolCallId }`），不满足就拒绝调用。接受后写 `.nexgent/capabilities/candidates/<candidateId>/candidate.json` 并复制组件文件到同目录，再写会话记录 `capability.propose`。
 
-`candidate.json`：`formatVersion: 1`、`id`（小写 UUID v4）、`proposedAt`、`sessionId`、`taskId`、`turn`、`base`（会话所用的版本）、`version`（`base` 加上这些组件后的能力包版本）、`components`、`proofs`、`requiresApproval`（含 `plugin` 时为真）、`summary?`（≤500 字符）。
+`candidate.json`：`formatVersion: 1`、`id`（小写 UUID v4）、`proposedAt`、`sessionId`、`taskId`、`turn`、`base`（会话所用的版本）、`version`（`base` 加上这些组件后的能力包版本）、`components`、`proofs`、`requiresApproval`（含 `plugin` 时为真）、`summary?`（≤500 字符）、`origin?`（步骤 5：`"session" \| "improvement"`，缺省即 `session`，用户任务自己的 `capability_propose`）、`jobId?`（步骤 5：`origin` 为 `improvement` 时的改进作业 id）。改进作业的候选同样由提议会话的 `capability_propose` 写出，规则不变（必须在试用后成功用过一次）。
 
 **状态。** 候选的状态由文件推出，不另存：`drafted`（只在草稿区有、尚未提出）→ `proposed`（有 `candidate.json`，没有试验）→ `trialing`（有试验，没有 `trial.end`）→ `awaiting-approval` / `adopted` / `rejected`（看决定）→ `rolled-back`（采用后被回滚）。
 
 **试验收据。** `.nexgent/capabilities/trials/<trialId>.jsonl`，以 `wx` 创建（试验 id 不重用），每行写完 `fsync` 后才开始下一次运行；没有 `trial.end` 的试验是中断的，结论按 `unknown` 处理。
 
+**`trials/` 下的旁路文件**（步骤 4 起由门控写，步骤 5 补入规范）。三种都是宿主的内部文件，不是数据记录，没有 schema：
+
+| 文件 | 内容与写法 | 读者与规则 |
+| --- | --- | --- |
+| `<candidateId>.attempt` | 空文件，在写第一行收据之前以 `wx` 独占创建 | 存在即“这个候选试过”：一个候选最多试一次（PR #4“试过的候选不再重放”）；两个门控进程同时启动时只有一个创建成功，另一个退出。门控因历史不足等待时不创建 |
+| `<trialId>.lock` | 门控进程的 pid 加换行，以 `wx` 创建，试验结束（写完 `trial.end` 或决定）后删除 | 启动时的中断恢复：收据没有 `trial.end`、且没有锁或锁里的进程已不在，就是被杀的试验，写一个 `rejected`（`interrupted`）决定并删除锁 |
+| `<candidateId>.log` | 门控进程的 stdout / stderr，追加写（`a`），宿主每次起进程时打开 | 只用于诊断，任何代码都不把它当数据读回；可能含路径与错误信息，不含密钥（密钥不进进程参数与环境之外的任何地方） |
+
 | `type` | 字段 |
 | --- | --- |
-| `trial.start` | `trialId`、`candidateId`、`candidateVersion`、`baselineVersion`、`plan: TrialPlan`（选择集 ≥2、守护集 ≥1 个 `ReplayCaseRef { caseId, sessionId, tree, checks }`，`repeats`、`costRatioCap`、`reviewer`、`budget`） |
+| `trial.start` | `trialId`、`candidateId`、`candidateVersion`、`baselineVersion`、`plan: TrialPlan`（选择集 ≥2、守护集 ≥1 个 `ReplayCaseRef { caseId, sessionId, tree, checks, throughTurn?, feedbackIds? }`，`repeats`、`costRatioCap`、`reviewer`、`budget`）。步骤 5：`throughTurn` 表示依次回放第 1 至 `throughTurn` 轮的用户消息（缺省只回放第 1 轮，即步骤 4 的行为）；反馈任务取第一条反馈之前的最后一轮，所以反馈内容不会进入回放。`feedbackIds` 是用例携带的反馈，有它的用例每次运行都做一次反馈检查 |
 | `trial.run` | `set: selection \| guard`、`caseId`、`arm: candidate \| baseline`、`repeat`、`status: pass \| fail \| unknown`、`reason?`（`unknown` 的原因：`not-run \| cancelled \| error \| timeout \| budget \| interrupted`）、`checks: TaskCheck[]`、`cost`、`durationMs` |
 | `trial.review` | `set`、`caseId`、`repeat`、`preference: candidate \| baseline \| tie \| unknown`、`reason`（≤2000 字符）、`model`、`cost` |
-| `trial.end` | `status`、`verdict: TrialVerdict`、`cost: { candidate, baseline, review }` |
+| `trial.feedback` | 步骤 5（ADR 0006）：`caseId`、`arm`、`repeat`、`feedbackIds`（≥1）、`status: pass \| fail \| unknown`、`reason`（≤2000 字符）、`model`、`cost`。评审模型读这次运行的成果与反馈原文，回答“反馈指出的问题是否已经解决”；运行本身是 `unknown`、评审失败或回答无法解析时为 `unknown`。与确定性检查（`trial.run.checks`）和偏好评审（`trial.review`）分开记 |
+| `trial.end` | `status`、`verdict: TrialVerdict`、`cost: { candidate, baseline, review }`（反馈检查的费用计入 `review`） |
 
 每行都有 `format: 1`、`trialId`、`ts`。`cost` 是 `{ usage, requestCount, estimatedUsd }`，美元只是估算，从不参与判断。
 
-**采用规则**（`decideTrial`，纯函数，决定 4），按顺序：
+**采用规则**（`decideTrial`，纯函数，ADR 0005 决策 5，步骤 5 由 ADR 0006 修订第 1、3 条），按顺序：
 
-1. 预算用尽（`budget-exhausted`）、任何一次运行是 `unknown` 或用量未知（`unknown-runs`）：拒绝。
+1. 预算用尽（`budget-exhausted`）、任何一次运行或反馈检查是 `unknown`、或用量未知（`unknown-runs`）：拒绝。
 2. 守护集候选通过次数少于基线：拒绝（`guard-regressed`）。
-3. 选择集质量 = 确定性检查通过率。候选低：拒绝（`quality-down`）。候选高：token 比 ≤ `costRatioCap` 则采用（`quality-up`），否则拒绝（`cost-over-cap`）。
+3. 选择集质量 = 选择集运行的确定性检查结果，加上每臂的反馈检查结果（每个反馈检查算该臂多一次通过或失败）的通过率。候选低：拒绝（`quality-down`）。候选高：token 比 ≤ `costRatioCap` 则采用（`quality-up`），否则拒绝（`cost-over-cap`）。
 4. 打平：token 比 < 1 采用（`cost-down`）；否则看评审，候选偏好多于基线且比值在上限内采用（`review-preferred`），其他拒绝（`no-improvement`）。
 5. 含 `plugin` 的候选，采用结论变为 `await-approval`，理由不变。
+
+`TrialVerdict`：`outcome`、`reason`、`passRate: { candidate, baseline }`（上面第 3 条的质量）、`feedbackPassRate?`（步骤 5：只算反馈检查的通过率，试验有反馈检查时才有，证据里单独显示）、`costRatio`、`decidedByReview`。`TrialTally.feedback` 是反馈检查的每臂计数。
+
+`cost.estimatedUsd` 来自 `@nexgent/llm` 的只读价目表（步骤 5，决定 9），模型不在表里或任何用量未知时为 `"unknown"`；它只用于显示，任何判断只看 token 与请求数。
 
 **决定。** `.nexgent/capabilities/decisions/<id>.json`，以 `wx` 写一次：`formatVersion: 1`、`id`、`outcome: adopted | rejected | awaiting-approval | rolled-back`、`reason`、`trigger`、`decidedAt`、`candidateId?`、`trialId?`、`fromVersion`、`toVersion`、`revision?`、`verdict?`、`cost?`、`regression?`、`detail`（≤2000 字符）。采用与回滚各写一个修订（`revision`）；拒绝与待批准不写修订。每个决定同时在账本写一条 `capability.decision`。
 
@@ -561,9 +608,78 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 - **对象**：`.nexgent/snapshots/objects/<sha256>`，文件原始字节，每份内容只存一次。
 - **树**：`.nexgent/snapshots/trees/<sha256>.json`，`{ formatVersion: 1, files: [{ path, sha256, bytes, executable? }] }`，按路径排序，范围与 `turn.files` 相同（不含 `.nexgent/`、`.git/`、`node_modules/`）；文件名是该对象规范 JSON 的 SHA-256。
-- **任务快照**：`.nexgent/snapshots/tasks/<taskId>.json`，根任务开始时写：`{ formatVersion: 1, taskId, sessionId, takenAt, tree, omitted?, capabilityVersion }`。工作区超过 200 MiB（`maxSnapshotBytes`）时 `tree: null`、`omitted: { reason: "too-large", bytes }`，这个任务不能作为重放用例。
-- **检查记录**：`.nexgent/snapshots/checks/<taskId>.json`，根任务结束时写：`{ formatVersion: 1, taskId, sessionId, checkedAt, specs, results }`。`specs` 是 `TaskCheckSpec`：`{ id, name: "file-exists", path }`、`{ id, name: "parses", path, format: json | csv | xlsx }`、`{ id, name: "test-command", command, shell: bash | pwsh }`；`results` 与 `specs` 一一对应，`target` 为 spec 的 `id`。同样的结果写进 `task.outcome.checks`。
+- **任务快照**：`.nexgent/snapshots/tasks/<taskId>.json`，根任务开始时写：`{ formatVersion: 1, taskId, turn?, sessionId, takenAt, tree, omitted?, capabilityVersion }`。工作区超过 200 MiB（`maxSnapshotBytes`）时 `tree: null`、`omitted: { reason: "too-large", bytes }`，这个任务不能作为重放用例。
+- **检查记录**：`.nexgent/snapshots/checks/<taskId>.json`，根任务结束时写：`{ formatVersion: 1, taskId, turn?, sessionId, checkedAt, specs, results }`。`specs` 是 `TaskCheckSpec`：`{ id, name: "file-exists", path }`、`{ id, name: "parses", path, format: json | csv | xlsx }`、`{ id, name: "test-command", command, shell: bash | pwsh }`；`results` 与 `specs` 一一对应，`target` 为 spec 的 `id`。同样的结果写进 `task.outcome.checks`。
+- **按轮记（步骤 5，决定 7）。** 同一会话的多轮仍是同一个 `taskId`（反馈轮也是），快照与检查改为每个根轮各一份：`tasks/<taskId>.t<turn>.json` 在第 `turn` 个根轮开始时写，`checks/<taskId>.t<turn>.json` 在该轮结束时写一次，两者都带 `turn`（文件名由 `perTurnFileName(taskId, turn)` 给出）。反馈轮不会覆盖它所针对的那一轮的记录。不带轮号的 `<taskId>.json` 是步骤 4 写的：快照即第 1 轮，检查是当时最后一轮（每轮结束都覆盖）；读取方照旧接受，不迁移。步骤 5 起写入方继续同时写不带轮号的文件（第 1 轮快照、最新一轮检查），使步骤 4 的读取方不变。
 - 快照总量上限 200 MiB，超出时按任务时间从旧到新删除不再被任何试验引用的对象。路径一律项目相对、`/` 分隔。
+
+## 改进作业
+
+步骤 5。默认的反馈改进流程：计入的反馈或失败的检查积累到阈值（或用户点“改进”），宿主开始一个改进作业：先诊断，再在快照副本里重做任务产出一个候选，最后交给步骤 4 的门控。决策见 ADR 0006；类型镜像 `packages/kernel/src/contracts/improvement.ts`；schema `packages/session/schema/improvement.v1.schema.json`（`$defs/improvementQueue`、`improvementJob`、`diagnosis`）。`.nexgent/improvements/` 只由宿主（`@nexgent/evolve`）写，模型的文件工具读写都拒绝。
+
+**触发与计数。** 三种触发（`ImprovementTrigger`）：
+
+- `feedback-count`：计入的信号到达 `improvement.feedbackThreshold`。信号有两种：计入的反馈（评分 ≤3，或只有评语没有评分；4–5 分保留在会话里但不计，`isCountedFeedback`），以及根任务一轮结束时 `task.outcome.checks` 有失败项（计 1 个）。一批全是失败检查时触发记为 `check-failure`（`batchTrigger`）。只有 `autoImprove` 为真时才自动开始。
+- `explicit`：用户在成果卡片或“改进”页点“改进”（SDK `improvements.run`），立即开始，不看计数，也不看 `autoImprove`，但受预算限制。
+
+**队列**：`.nexgent/improvements/queue.json`：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `formatVersion` | `1` | |
+| `since` | ISO-8601 UTC | 本项目开始计数的时刻（第一次建队列时）；发生在它之前的反馈与检查不计 |
+| `counted` | string[] | 计入过的全部信号键（`signalKey`：`feedback:<feedbackId>`、`check:<taskId>:<turn>`）；键在这里就不再计入，重启与并发都不会重计 |
+| `pending` | `ImprovementSignal[]` | 已计入、尚未交给作业的信号（下一批），旧的在前，最多 64 个（再多时丢最旧的，`counted` 不丢） |
+| `activeJobId` | string? | 占着作业位的作业（状态为 `queued`、`diagnosing`、`proposing`、`trialing` 之一） |
+
+信号：`{ kind: "feedback", feedbackId, sessionId, deliverableId, version?, rating?, at }` 或 `{ kind: "check-failure", taskId, sessionId, turn, failedChecks?, at }`，`at` 是事情发生的时刻（反馈的 `submittedAt`、检查的时刻）。改写队列时先以 `wx` 创建 `queue.lock`（内容为 pid），读、改、写临时文件再 rename，最后删锁；锁里的进程已不在时可以接管。纯函数：`countSignal` 只计数；`takeBatch(queue, threshold)` 在作业位空闲且够数时取走整批（`autoImprove` 为真时才对 `feedback-count` 调用；显式“改进”用 `threshold` 0 带走当前批次，可以为空）；`releaseJobSlot` 释放作业位。同一项目同时只有一个作业（决定 8）：作业位被占时新信号只进 `pending`；作业进入终态或停靠状态时释放作业位，`pending` 够数就立即作为下一批，在同一次加锁更新里建 `queued` 作业并占位。
+
+**作业**：`.nexgent/improvements/<jobId>/job.json`，每次变化都在 `<jobId>/job.json.lock`（`wx` 创建）下读改写，整体替换（临时文件 + rename）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `formatVersion`、`id` | `1`、小写 UUID v4 | `id` 也是目录名与账本的 `improvementId` |
+| `createdAt`、`updatedAt` | ISO-8601 UTC | |
+| `trigger` | `ImprovementTrigger` | |
+| `status` | `ImprovementStatus` | 见下 |
+| `items` | `ImprovementSignal[]` | 它回应的那批信号，旧的在前；`explicit` 作业带走开始时的待处理批次（可空） |
+| `request` | `{ sessionId?, deliverableId?, version?, taskId?, note? }`? | 仅 `explicit`：用户点“改进”的会话、成果或任务，`note` 是用户的话（≤2000 字符） |
+| `history` | `{ status, at, detail? }[]` | 每次状态变化，至少一条，最后一条等于 `status`；`detail` ≤2000 字符 |
+| `phases` | `{ diagnose?, propose?, trial? }` | 每阶段 `PhaseCost { usage, requestCount }`，由带本作业 `improvementId` 的账本记录求和；没运行过的阶段不写；不写美元（显示时按价目表估算） |
+| `baseVersion` | 能力版本? | 开始诊断时采用中的版本 |
+| `sessions` | `{ diagnose?, propose? }`? | 作业打开的改进会话 id |
+| `diagnosed` | `{ at, proposalKind, attempts }`? | 写出 `diagnosis.json` 后设置 |
+| `candidateId`、`trialId`、`decisionId` | string? | 候选（`origin: improvement`）、试验与决定都照旧在 `capabilities/` 下，作业只存引用 |
+| `firstUse` | `{ taskId, sessionId, at, version }`? | 采用后第一个运行在新版本上、且 `componentsUsed` 出现该组件的根任务 |
+| `rolledBack` | `{ decisionId, at }`? | 采用的版本后来被回滚时设置 |
+| `detail` | string? | 作业停在当前结果的原因（失败、拒绝、无提议、预算），≤2000 字符 |
+| `error` | `ErrorInfo`? | `failed` / `interrupted` 的错误 |
+
+**状态**（`ImprovementStatus`，允许的变化见 `IMPROVEMENT_TRANSITIONS` 与 `canMoveImprovement`）分三组：
+
+- 进行中（占作业位）：`queued → diagnosing → proposing → trialing`；`diagnosing`、`proposing` 可到 `no-proposal`（诊断认为不是能力问题，或提议没有可提的组件）；四者都可到 `budget-exhausted`、`failed`、`interrupted`（作业进程被杀，下次启动时标记，不自动重跑；刚建、还没拿到 `job.lock` 的 `queued` 作业有宽限）、`cancelled`（`improvements.cancel`）。
+- 停靠（释放作业位）：`trialing → waiting-history`，门控历史不足时等待，补足后回到 `trialing` 并重新占位，不降低门槛；也可到 `failed`、`interrupted`、`cancelled`。`trialing → awaiting-approval`，候选含插件，等用户在 `capabilities.approve` 里批准，作业随之变为 `adopted` 或 `rejected`。
+- 终态：`adopted`、`rejected`、`no-proposal`、`budget-exhausted`、`failed`、`interrupted`、`cancelled`。作业进入终态时在账本写一条 `improvement.end`。
+
+`<jobId>/job.lock`：作业进程的 pid（`wx` 创建，结束时删除），用于判断 `interrupted`；`<jobId>/job.json.lock`：改写 `job.json` 时持有，毫秒级；`<jobId>/job.log`：作业进程的 stdout / stderr，追加写，只用于诊断，与 `trials/<candidateId>.log` 相同。
+
+**诊断。** 作业先打开一个诊断会话（`session.start.purpose: "improvement"`、`improvement: { jobId, phase: "diagnose" }`，模型与 thinking 取 `improvement.model` / `improvement.thinking`）。它不出现在对话列表里，只能在“改进”页打开。这个会话只有四个只读工具（`IMPROVEMENT_DIAGNOSIS_TOOLS`）：`improve_read_session`（某个会话按轮与记录类型的切片）、`improve_read_ledger`（按 `taskId` / `sessionId` / `memberId` / `capabilityVersion` 的账本切片）、`improve_list_feedback`、`improve_report_diagnosis`；切片默认 64 KiB、最多 256 KiB，超出截断并标明。模型用 `improve_report_diagnosis` 交结构化诊断，宿主按 schema 校验并核对证据记录存在，不通过就在工具结果里说明并允许重交，共最多 3 次，仍不通过作业以 `failed` 结束（`improvement/invalid-diagnosis`）。
+
+`<jobId>/diagnosis.json`（接受后写一次）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `formatVersion`、`jobId`、`createdAt`、`sessionId` | | `sessionId` 是交诊断的会话 |
+| `attempts` | 1–3 | 第几次提交被接受 |
+| `failureTypes` | `{ category, label, evidence }[]` | MAST 三类：`system-design`（规格与系统设计）、`inter-agent-misalignment`（成员之间不一致）、`task-verification`（任务验证与终止）；`label` ≤200 字符；`evidence` 至少一条 `{ sessionId, seq, turn? }`。宿主另限每份最多 8 类、每类最多 16 条证据 |
+| `involved` | `{ members, tools, skills, components }` | 涉及的成员名（根会话写 `main`）、工具、技能、能力组件 `{ kind, name }` |
+| `hypothesis` | string | 一句话：缺什么能力导致了反馈，≤500 字符 |
+| `proposalKind` | 组件种类或 `"none"` | `none` 时作业以 `no-proposal` 结束 |
+| `memberCosts` | `MemberCost[]` | 被诊断任务每个成员的用量，由宿主从账本汇总；模型只能引用，不能写 |
+
+**提议。** 诊断给出组件种类后，宿主把反馈任务第一个根轮开始时的快照复制成临时项目，打开提议会话（`improvement: { jobId, phase: "propose" }`），在副本里用原任务的用户消息（到第一条反馈之前的轮）重新执行。提议会话有普通任务工具与 `STEP4_TOOLS`（`capability_draft / try / propose`），没有诊断工具；它的会话文件与候选写在**真实项目**的 `sessions/` 与 `capabilities/candidates/` 下（文件工具的工作区是副本）。一个作业只提一个候选，一个候选只含一个组件，规则与步骤 4 相同。没有提出候选就结束的提议记为 `failed`。
+
+**门控。** 作业的候选照步骤 4 的门控试验，区别只有：选择集必含触发作业的反馈任务（`ReplayCaseRef.throughTurn` 为第一条反馈之前的最后一轮，`feedbackIds` 为该任务的反馈），每次运行多一次反馈检查（`trial.feedback`）；试验的账本记录带 `improvementId` 与 `improvementPhase: "trial"`，费用计入改进预算。采用、拒绝、待批准、回滚的写法不变。
 
 ## 材料元数据
 
@@ -793,6 +909,7 @@ The earlier part of this conversation was compacted. Summary:
 | 材料元数据（步骤 2） | `formatVersion` | 1 | 同上 |
 | 成果版本元数据（步骤 2） | `formatVersion` | 1 | 同上 |
 | 能力包清单、采用修订、候选、试验收据、决定、快照（步骤 4） | `formatVersion` / `format` | 1 | 同上 |
+| 改进队列、作业、诊断（步骤 5） | `formatVersion` | 1 | 同上 |
 
 兼容规则：
 
@@ -803,6 +920,7 @@ The earlier part of this conversation was compacted. Summary:
 - 步骤 4 的四个预留字段已经在 v1 中是可选字段，启用它们不升版本。
 - **步骤 4 的四种会话记录、`session.start.capabilityVersion`、账本的 `capability.decision` 与新可选字段也在 v1 内追加**，理由同步骤 3；步骤 3 写出的会话与账本照常读出。
 - **步骤 2 的新记录类型在 v1 内追加**（计划已定：旧文件仍可读）。代价是：只认识步骤 1 记录集的读取方会把第一条步骤 2 记录当作无效行，持锁追加时还会截断其后的内容。步骤 1 没有对外发布的构建，`nexgent-app` 上的读取方与写入方同步升级，所以接受这一点；步骤 2 之后再加记录类型时，先评估是否已有对外发布的读取方，有则升版本。
+- **步骤 5 的 `session.start.purpose` / `improvement`、账本的 `improvementId` / `improvementPhase` 与 `improvement.end`、候选的 `origin` / `jobId`、`ReplayCaseRef.throughTurn` / `feedbackIds`、收据 `trial.feedback`、`TrialVerdict.feedbackPassRate`、快照与检查记录的 `turn` 都在各自的 v1 内追加**；步骤 4 写出的会话、账本与能力文件照常读出。只认识步骤 4 收据类型的读取方会拒绝含 `trial.feedback` 的收据文件，与读写方同步升级（仍没有对外发布的构建）。`autoImprove` 默认值从 `false` 改为 `true`：没写这个字段的项目在步骤 5 起自动改进开启（ADR 0006）。
 - **步骤 3 的九种新记录、`session.start.member` 与成果的成员字段也在 v1 内追加。** 评估结果：仍没有对外发布的构建（`main` 上的步骤 2 只供本仓库验收），读取方与写入方同步升级，所以不升版本；步骤 2 写出的会话照常读出、恢复与续写。
 
 ## schema 与读写测试
@@ -816,6 +934,7 @@ The earlier part of this conversation was compacted. Summary:
 | 项目配置、凭证文件、锁文件 | `packages/kernel/schema/config.v1.schema.json`、`credentials.v1.schema.json`、`session-lock.v1.schema.json` | `@nexgent/kernel` |
 | 材料元数据、成果版本元数据（步骤 2） | `packages/session/schema/material.v1.schema.json`、`deliverable.v1.schema.json` | 与会话 schema 共用 `@nexgent/session` 的求值器；写入方是 `@nexgent/tasking` |
 | 能力文件与快照（步骤 4） | `packages/session/schema/capabilities.v1.schema.json`（按 `$defs/<name>` 校验，`validateCapabilityFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/capabilities` |
+| 改进队列、作业、诊断（步骤 5） | `packages/session/schema/improvement.v1.schema.json`（按 `$defs/<name>` 校验，`validateImprovementFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/evolve` |
 
 schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`（账本记录除外：它允许未知可选字段以便跨版本读取）。会话 schema 的严格校验只用于写入方的追加；读取方按上面的兼容规则放过未知的可选字段，不因此截断。
 
@@ -863,5 +982,13 @@ schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`
 2. 十二种能力文件各有合格与不合格样例；`context-policy` 带 `approvals`、`costCaps`、`sandboxMode`、`capabilities` 时被拒（H13）；发布的 `capabilities.v1.schema.json` 与源一致。
 3. 账本 `capability.decision` 与 `task.outcome` 的新字段通过 schema；本文账本示例行包含 `capability.decision`。
 4. `canonicalManifestText` 与组件、文件顺序无关；`assertCapabilityManifest`、`isNextRevision`、`decideTrial` 每个分支、`decideUsageRollback`、`assertCapabilitiesConfig` 的下限有运行时测试。
+
+步骤 5 新增（`@nexgent/session`、`@nexgent/kernel`、`@nexgent/workspace`、`@nexgent/sdk`）：
+
+1. 三种改进文件各有合格与不合格样例；发布的 `improvement.v1.schema.json` 与源一致。
+2. `session.start.purpose` / `improvement` 往返并投影到 `metadata`；只给其一时 `create` 被拒；步骤 4 的会话（没有这两个字段）照常读出。
+3. 账本 `improvement.end` 与 `improvementId` / `improvementPhase` 以写入方的严格校验通过；本文账本示例行包含它们。
+4. 候选的 `origin` / `jobId`、`trial.feedback`、带 `throughTurn` / `feedbackIds` 的用例、`feedbackPassRate`、带 `turn` 的快照与检查通过 schema，步骤 4 的同类文件不带这些字段也通过。
+5. `countSignal`、`takeBatch`、`releaseJobSlot`、`batchTrigger`、`isCountedFeedback`、`canMoveImprovement`、带反馈检查的 `decideTrial`、`perTurnFileName`、`assertImprovementConfig` 有运行时测试；`autoImprove` 默认 `true`，`autoImprove` 与 `improvement` 在 `GUARDED_PROJECT_CONFIG_FIELDS` 里；两个配置读取方都接受并校验 `improvement`。
 
 契约层（`packages/kernel/tests/contracts/`）：类型级断言固定记录集合与公共字段，纯函数（`addUsage`、工具限制交集、布局解析、profile 补丁）有运行时测试。

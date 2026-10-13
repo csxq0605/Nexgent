@@ -6,6 +6,7 @@ import { NexgentError } from './errors.js'
 import type { JsonObject, JsonValue } from './json.js'
 import type { ApprovalGrant } from './approvals.js'
 import { resolveCapabilitiesConfig, type CapabilitiesConfig, type CapabilitiesConfigInput } from './capabilities.js'
+import { resolveImprovementConfig, type ImprovementConfig, type ImprovementConfigInput } from './improvement.js'
 import type { Effort, ThinkingMode } from './llm.js'
 import type { SandboxMode } from './workspace.js'
 
@@ -42,8 +43,14 @@ export interface ProjectConfig {
   readonly approvals: readonly ApprovalGrant[]
   /** Absolute directories readable besides the project root (`permissions.md` §路径策略); default `[]`. */
   readonly extraReadRoots: readonly string[]
-  /** Whether feedback-triggered improvement runs (step 5); default `false`. */
+  /**
+   * Whether counted feedback and failed checks start improvement jobs on
+   * their own (step 5); default `true` (decision 1). An explicit "improve"
+   * is not limited by it. Changing it always needs approval.
+   */
   readonly autoImprove: boolean
+  /** Step 5: trigger threshold, improvement budget and model (`DEFAULT_IMPROVEMENT_CONFIG`). Changing it always needs approval. */
+  readonly improvement: ImprovementConfig
   /** Step 4: gate and rollback settings (`DEFAULT_CAPABILITIES_CONFIG`). Changing it always needs approval. */
   readonly capabilities: CapabilitiesConfig
 }
@@ -53,7 +60,7 @@ export interface ProjectConfig {
  * sandbox mode (`permissions.md` "始终审批"): a model must not widen its own
  * permissions, budgets or gate.
  */
-export const GUARDED_PROJECT_CONFIG_FIELDS = ['approvals', 'costCaps', 'sandboxMode', 'capabilities'] as const
+export const GUARDED_PROJECT_CONFIG_FIELDS = ['approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement'] as const
 
 /** The defaults applied over a missing or partial config file. */
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
@@ -66,15 +73,18 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
   costCaps: Object.freeze({}),
   approvals: Object.freeze([]),
   extraReadRoots: Object.freeze([]),
-  autoImprove: false,
+  autoImprove: true,
   capabilities: resolveCapabilitiesConfig(),
+  improvement: resolveImprovementConfig(),
 }) as ProjectConfig
 
 /** A partial config as read from disk, before defaults. */
-export type ProjectConfigInput = Partial<Omit<ProjectConfig, 'version' | 'capabilities'>> & {
+export type ProjectConfigInput = Partial<Omit<ProjectConfig, 'version' | 'capabilities' | 'improvement'>> & {
   readonly version?: 1
   /** Validated with `assertCapabilitiesConfig`; missing fields take their defaults. */
   readonly capabilities?: CapabilitiesConfigInput
+  /** Validated with `assertImprovementConfig`; missing fields take their defaults. */
+  readonly improvement?: ImprovementConfigInput
 }
 
 /**
@@ -94,6 +104,7 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
     extraReadRoots: input.extraReadRoots ?? DEFAULT_PROJECT_CONFIG.extraReadRoots,
     autoImprove: input.autoImprove ?? DEFAULT_PROJECT_CONFIG.autoImprove,
     capabilities: resolveCapabilitiesConfig(input.capabilities),
+    improvement: resolveImprovementConfig(input.improvement),
   }
 }
 

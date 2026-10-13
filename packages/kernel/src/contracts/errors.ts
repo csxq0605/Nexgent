@@ -44,6 +44,16 @@ export type NexgentErrorCode =
   // approvals and cost caps
   | 'approval/denied'
   | 'budget/exhausted'
+  // capability bundles (step 4, codes added in step 5)
+  | 'capability/not-found'
+  | 'capability/manifest'
+  | 'capability/integrity'
+  | 'capability/activation'
+  // improvement jobs (step 5)
+  | 'improvement/not-found'
+  | 'improvement/busy'
+  | 'improvement/budget-exhausted'
+  | 'improvement/invalid-diagnosis'
   // catch-all for programmer errors and wrapped unknowns
   | 'internal'
 

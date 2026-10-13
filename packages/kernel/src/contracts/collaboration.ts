@@ -377,7 +377,9 @@ export const COLLABORATION_LIMITS = {
  * `team_task_update`, because the team package registers those in the
  * teammate's own scope and a scope's mask never hides tools that scope
  * registered itself (`ToolRegistry`). Step 4 adds the capability tools:
- * members cannot draft, try or propose components (ADR 0005).
+ * members cannot draft, try or propose components (ADR 0005). Step 5 adds
+ * the improvement tools: only an improvement job's diagnose session gets
+ * them, never a member (ADR 0006).
  */
 export const MEMBER_DENIED_TOOLS = [
   'delegate',
@@ -391,6 +393,10 @@ export const MEMBER_DENIED_TOOLS = [
   'capability_draft',
   'capability_try',
   'capability_propose',
+  'improve_read_session',
+  'improve_read_ledger',
+  'improve_list_feedback',
+  'improve_report_diagnosis',
 ] as const
 
 /** Team tools a teammate gets in its own scope (the Lead has them too, registered globally). */

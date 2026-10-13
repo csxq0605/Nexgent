@@ -186,6 +186,11 @@ function tallyStatus(tally: TurnTally): TaskOutcomeStatus {
   }
 }
 
+/** A method whose contract exists but whose implementation lands in a later work item. */
+function notYet(method: string): Promise<never> {
+  return Promise.reject(new NexgentError('internal', `${method} is not available yet (step 5 improvement jobs)`))
+}
+
 function invalid(message: string): NexgentError {
   return new NexgentError('tool/invalid-input', message)
 }
@@ -1092,6 +1097,11 @@ export class LocalNexgentSdk implements NexgentSdk {
         this.emitProject(project.projectId, { type: 'capability.version', current })
         return current
       },
+      // Step 5 (W0 contract only): the improvement jobs are implemented by `@nexgent/evolve` and wired here later.
+      'improvements.list': () => notYet('improvements.list'),
+      'improvements.show': () => notYet('improvements.show'),
+      'improvements.run': () => notYet('improvements.run'),
+      'improvements.cancel': () => notYet('improvements.cancel'),
     }
   }
 

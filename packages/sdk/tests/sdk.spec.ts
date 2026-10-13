@@ -222,6 +222,12 @@ describe('settings', () => {
     await expect(t.sdk.call('settings.update', { projectId: project.projectId, patch: { effort: 'huge' as 'high' } })).rejects.toMatchObject({ code: 'config/invalid' })
     await expect(t.sdk.call('settings.update', { projectId: project.projectId, patch: { approvals: [] } as never })).rejects.toMatchObject({ code: 'config/invalid' })
     expect(JSON.parse(await readFile(configFile, 'utf8'))).toEqual(written)
+
+    // step 5: the settings page owns autoImprove and the improvement settings (a user action)
+    expect(settings).toMatchObject({ autoImprove: true, improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on' } })
+    const off = await t.sdk.call('settings.update', { projectId: project.projectId, patch: { autoImprove: false, improvement: { budget: { windowDays: 7 } } } })
+    expect(off).toMatchObject({ autoImprove: false, improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 7 } } })
+    await expect(t.sdk.call('settings.update', { projectId: project.projectId, patch: { improvement: { feedbackThreshold: 0 } } })).rejects.toMatchObject({ code: 'config/invalid' })
   })
 
   it('stores the key in credentials.json (0600) and removes it with an empty value; never returns it', async () => {
@@ -239,9 +245,11 @@ describe('method table', () => {
   it('implements every whitelisted method and rejects others', async () => {
     const t = await testSdk([])
     const info = await t.sdk.call('app.info', {})
-    expect(info).toEqual({ sdkVersion: 4, appVersion: '0.0.0-test', platform: process.platform })
+    expect(info).toEqual({ sdkVersion: 5, appVersion: '0.0.0-test', platform: process.platform })
     await expect(t.sdk.call('nope' as never, {} as never)).rejects.toMatchObject({ code: 'internal' })
     for (const method of SDK_METHOD_NAMES) expect(typeof (t.sdk as unknown as { methods: Record<string, unknown> }).methods[method]).toBe('function')
+    // step 5 contract only: the improvement methods exist and reject until @nexgent/evolve is wired in
+    await expect(t.sdk.call('improvements.list', { projectId: 'p' })).rejects.toMatchObject({ code: 'internal' })
   })
 
   it('deliverables.reveal needs the host hook', async () => {
@@ -335,7 +343,7 @@ describe('export', () => {
     for (const file of bundle.files) expect(await readFile(nodePath.join(out, file), 'utf8')).not.toContain(TEST_KEY)
     expect(await readFile(nodePath.join(out, 'session.jsonl'), 'utf8')).toContain('the key is [REDACTED]')
     const manifest = JSON.parse(await readFile(nodePath.join(out, 'manifest.json'), 'utf8')) as Record<string, unknown>
-    expect(manifest).toMatchObject({ formatVersion: 1, sessionId: session.sessionId, appVersion: '0.0.0-test', sdkVersion: 4, redactions: 1, counts: { ledgerRecords: 1 } })
+    expect(manifest).toMatchObject({ formatVersion: 1, sessionId: session.sessionId, appVersion: '0.0.0-test', sdkVersion: 5, redactions: 1, counts: { ledgerRecords: 1 } })
     await expect(t.sdk.call('sessions.export', { projectId: project.projectId, sessionId: session.sessionId, outDir: out })).rejects.toMatchObject({ code: 'tool/invalid-input' })
   })
 })

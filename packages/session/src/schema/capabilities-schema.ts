@@ -15,6 +15,7 @@
  */
 import {
   ACTIVATION_TRIGGERS,
+  CANDIDATE_ORIGINS,
   CAPABILITY_COMPONENT_KINDS,
   CAPABILITY_LIMITS,
   COMPONENT_FILE_PATTERN,
@@ -201,6 +202,8 @@ export const capabilitiesSchema: JsonObject = {
         proofs: { type: 'array', minItems: 1, items: ref('componentUseProof') },
         requiresApproval: { type: 'boolean' },
         summary: bounded(500),
+        origin: { enum: [...CANDIDATE_ORIGINS] },
+        jobId: ref('nonEmptyString'),
       },
       ['formatVersion', 'id', 'proposedAt', 'sessionId', 'taskId', 'turn', 'base', 'version', 'components', 'proofs', 'requiresApproval'],
     ),
@@ -224,7 +227,14 @@ export const capabilitiesSchema: JsonObject = {
     },
     taskCheckName: { enum: [...TASK_CHECK_NAMES] },
     replayCaseRef: closedObject(
-      { caseId: ref('nonEmptyString'), sessionId: ref('nonEmptyString'), tree: ref('sha256'), checks: { type: 'array', items: ref('taskCheckSpec') } },
+      {
+        caseId: ref('nonEmptyString'),
+        sessionId: ref('nonEmptyString'),
+        tree: ref('sha256'),
+        checks: { type: 'array', items: ref('taskCheckSpec') },
+        throughTurn: ref('positiveInteger'),
+        feedbackIds: { type: 'array', minItems: 1, items: ref('nonEmptyString') },
+      },
       ['caseId', 'sessionId', 'tree', 'checks'],
     ),
     trialCost: closedObject(
@@ -255,6 +265,10 @@ export const capabilitiesSchema: JsonObject = {
         outcome: { enum: ['adopt', 'reject', 'await-approval'] },
         reason: { enum: [...DECISION_REASONS] },
         passRate: closedObject(
+          { candidate: { type: 'number', minimum: 0 }, baseline: { type: 'number', minimum: 0 } },
+          ['candidate', 'baseline'],
+        ),
+        feedbackPassRate: closedObject(
           { candidate: { type: 'number', minimum: 0 }, baseline: { type: 'number', minimum: 0 } },
           ['candidate', 'baseline'],
         ),
@@ -315,6 +329,23 @@ export const capabilitiesSchema: JsonObject = {
             cost: ref('trialCost'),
           },
           ['type', 'format', 'trialId', 'ts', 'set', 'caseId', 'repeat', 'preference', 'reason', 'model', 'cost'],
+        ),
+        closedObject(
+          {
+            type: { const: 'trial.feedback' },
+            format: { const: 1 },
+            trialId: ref('uuid'),
+            ts: ref('timestamp'),
+            caseId: ref('nonEmptyString'),
+            arm: { enum: ['candidate', 'baseline'] },
+            repeat: { enum: [1, 2, 3, 4, 5] },
+            feedbackIds: { type: 'array', minItems: 1, items: ref('nonEmptyString') },
+            status: ref('trialStatus'),
+            reason: bounded(CAPABILITY_LIMITS.maxReasonChars),
+            model: ref('nonEmptyString'),
+            cost: ref('trialCost'),
+          },
+          ['type', 'format', 'trialId', 'ts', 'caseId', 'arm', 'repeat', 'feedbackIds', 'status', 'reason', 'model', 'cost'],
         ),
         closedObject(
           {
@@ -380,6 +411,7 @@ export const capabilitiesSchema: JsonObject = {
       {
         formatVersion: { const: 1 },
         taskId: ref('nonEmptyString'),
+        turn: ref('positiveInteger'),
         sessionId: ref('nonEmptyString'),
         takenAt: ref('timestamp'),
         tree: { anyOf: [ref('sha256'), { type: 'null' }] },
@@ -392,6 +424,7 @@ export const capabilitiesSchema: JsonObject = {
       {
         formatVersion: { const: 1 },
         taskId: ref('nonEmptyString'),
+        turn: ref('positiveInteger'),
         sessionId: ref('nonEmptyString'),
         checkedAt: ref('timestamp'),
         specs: { type: 'array', items: ref('taskCheckSpec') },

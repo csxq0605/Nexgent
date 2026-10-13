@@ -50,6 +50,10 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'capabilities.trial': { ...p, candidateId: 'c1' },
   'capabilities.approve': { ...p, candidateId: 'c1', decision: 'deny' },
   'capabilities.rollback': { ...p, toVersion: 'baseline', reason: '变差了' },
+  'improvements.list': p,
+  'improvements.show': { ...p, jobId: 'j1' },
+  'improvements.run': { ...p, sessionId: 's1', deliverableId: 'd1' },
+  'improvements.cancel': { ...p, jobId: 'j1' },
 }
 
 describe('method whitelist', () => {

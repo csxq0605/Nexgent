@@ -11,6 +11,7 @@
 import type { ToolCallApproval } from './approvals.js'
 import type { ActivationTrigger, CapabilityVersion, ComponentUsage, DecisionOutcome, DecisionReason, TrialArm } from './capabilities.js'
 import type { ExecutionForm } from './collaboration.js'
+import type { ImprovementPhase, ImprovementStatus, ImprovementTrigger, PhaseCost } from './improvement.js'
 import type { ErrorInfo } from './errors.js'
 import type { FinishReason, LLMRequestPurpose, LLMUsage } from './llm.js'
 import type { ToolEffect } from './tools.js'
@@ -34,6 +35,10 @@ export interface LedgerAttribution {
   readonly executionForm?: ExecutionForm
   /** Task tree the record contributes to; each member session closes with its own `task.outcome`. */
   readonly taskId?: string
+  /** Step 5: the improvement job the record's cost belongs to (its sessions and its trial's runs and reviews). */
+  readonly improvementId?: string
+  /** Step 5: which phase of that job; present exactly when `improvementId` is. */
+  readonly improvementPhase?: ImprovementPhase
 }
 
 /** Fields every ledger record carries. */
@@ -165,8 +170,20 @@ export interface CapabilityDecisionRecord extends LedgerRecordBase {
   readonly revision?: number
 }
 
+/** Step 5: an improvement job reached a final status (one per job). */
+export interface ImprovementEndRecord extends LedgerRecordBase {
+  readonly type: 'improvement.end'
+  readonly jobId: string
+  readonly trigger: ImprovementTrigger
+  readonly status: ImprovementStatus
+  /** Spend per phase, as in the job record; a phase that never ran is absent. */
+  readonly phases: Readonly<Partial<Record<ImprovementPhase, PhaseCost>>>
+  readonly candidateId?: string
+  readonly decisionId?: string
+}
+
 /** Every ledger record kind. */
-export type LedgerRecord = LLMRequestStartRecord | LLMRequestEndRecord | ToolCallRecord | TaskOutcomeRecord | CapabilityDecisionRecord
+export type LedgerRecord = LLMRequestStartRecord | LLMRequestEndRecord | ToolCallRecord | TaskOutcomeRecord | CapabilityDecisionRecord | ImprovementEndRecord
 
 /** The `type` tag vocabulary. */
 export type LedgerRecordType = LedgerRecord['type']
@@ -178,6 +195,7 @@ export const LEDGER_RECORD_TYPES: readonly LedgerRecordType[] = [
   'tool.call',
   'task.outcome',
   'capability.decision',
+  'improvement.end',
 ]
 
 /** Distributive omit over a union. */

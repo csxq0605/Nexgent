@@ -154,7 +154,10 @@ describe('project config', () => {
     expect(loaded.input).toEqual({ model: 'm', costCaps: { perTask: { maxRequests: 2 } } })
     expect(loaded.extraReadRoots).toEqual(['/data'])
     expect(parseProjectConfig({ capabilities: { selectionCases: 3 } }).config.capabilities).toMatchObject({ selectionCases: 3, guardCases: 1, costRatioCap: 1.2 })
-    for (const bad of [{ modle: 'x' }, { version: 2 }, { thinking: 'maybe' }, { effort: 'extreme' }, { effort: 2 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 1 }] }, { capabilities: { selectionCases: 1 } }, []]) {
+    // step 5: autoImprove defaults on; improvement settings fill defaults
+    expect(parseProjectConfig({}).config.autoImprove).toBe(true)
+    expect(parseProjectConfig({ autoImprove: false, improvement: { feedbackThreshold: 5 } }).config).toMatchObject({ autoImprove: false, improvement: { feedbackThreshold: 5, budget: { windowDays: 30 }, thinking: 'on' } })
+    for (const bad of [{ modle: 'x' }, { version: 2 }, { thinking: 'maybe' }, { effort: 'extreme' }, { effort: 2 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 1 }] }, { capabilities: { selectionCases: 1 } }, { improvement: { feedbackThreshold: 0 } }, { improvement: { budget: { usd: 3 } } }, { autoImprove: 'yes' }, []]) {
       expect(() => parseProjectConfig(bad)).toThrow(expect.objectContaining({ code: 'config/invalid' }))
     }
   })

@@ -98,6 +98,9 @@ describe('.nexgent/ and protected patterns (workspace-write)', () => {
     expect(await r('.nexgent/capabilities/a')).toBe('deny')
     expect(await r('.nexgent/snapshots/objects/abc')).toBe('deny')
     expect(await w('.nexgent/snapshots/tasks/t.json')).toBe('deny')
+    // step 5: improvement jobs are host-only too
+    expect(await r('.nexgent/improvements/queue.json')).toBe('deny')
+    expect(await w('.nexgent/improvements/j1/job.json')).toBe('deny')
     expect(await r('.nexgent/materials/a.pdf')).toBe('allow')
     expect(await w('.nexgent/materials/x')).toBe('deny')
     expect(await r('.nexgent/outputs/x')).toBe('allow')

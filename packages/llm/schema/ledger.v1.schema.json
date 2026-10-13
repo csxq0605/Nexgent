@@ -8,7 +8,8 @@
     { "$ref": "#/$defs/llmRequestEnd" },
     { "$ref": "#/$defs/toolCall" },
     { "$ref": "#/$defs/taskOutcome" },
-    { "$ref": "#/$defs/capabilityDecision" }
+    { "$ref": "#/$defs/capabilityDecision" },
+    { "$ref": "#/$defs/improvementEnd" }
   ],
   "$defs": {
     "nonEmptyString": { "type": "string", "minLength": 1 },
@@ -42,7 +43,9 @@
         "executionForm": { "enum": ["direct", "delegated", "team", "workflow"] },
         "taskId": { "type": "string" },
         "trialId": { "type": "string" },
-        "arm": { "enum": ["candidate", "baseline"] }
+        "arm": { "enum": ["candidate", "baseline"] },
+        "improvementId": { "type": "string" },
+        "improvementPhase": { "enum": ["diagnose", "propose", "trial"] }
       }
     },
     "capabilityVersion": { "type": "string", "pattern": "^(?:baseline|[a-f0-9]{64})$" },
@@ -211,6 +214,41 @@
             "toVersion": { "$ref": "#/$defs/capabilityVersion" },
             "candidateId": { "$ref": "#/$defs/nonEmptyString" },
             "revision": { "type": "integer", "minimum": 1 }
+          }
+        }
+      ]
+    },
+    "phaseCost": {
+      "type": "object",
+      "required": ["usage", "requestCount"],
+      "properties": { "usage": { "$ref": "#/$defs/usage" }, "requestCount": { "type": "integer", "minimum": 0 } }
+    },
+    "improvementEnd": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["type", "jobId", "trigger", "status", "phases"],
+          "properties": {
+            "type": { "const": "improvement.end" },
+            "jobId": { "$ref": "#/$defs/nonEmptyString" },
+            "trigger": { "enum": ["feedback-count", "explicit", "check-failure"] },
+            "status": {
+              "enum": [
+                "queued", "diagnosing", "proposing", "trialing", "waiting-history", "awaiting-approval", "adopted", "rejected",
+                "no-proposal", "budget-exhausted", "failed", "interrupted", "cancelled"
+              ]
+            },
+            "phases": {
+              "type": "object",
+              "properties": {
+                "diagnose": { "$ref": "#/$defs/phaseCost" },
+                "propose": { "$ref": "#/$defs/phaseCost" },
+                "trial": { "$ref": "#/$defs/phaseCost" }
+              }
+            },
+            "candidateId": { "$ref": "#/$defs/nonEmptyString" },
+            "decisionId": { "$ref": "#/$defs/nonEmptyString" }
           }
         }
       ]

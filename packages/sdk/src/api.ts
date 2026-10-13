@@ -23,6 +23,12 @@
  *   their events carry no `sessionId` (`capability.version`,
  *   `capability.candidate`, `capability.trial`), and plugin adoption is
  *   approved through `capabilities.approve`, not `approvals.respond`.
+ * - Step 5: improvement jobs are project-level too; `improvement.job`
+ *   events carry no `sessionId`. Improvement sessions
+ *   (`session.start.purpose: improvement`) never appear in `sessions.list`;
+ *   they are reached through `improvements.show`. The job, the candidate it
+ *   produced and the gate's decision are linked by id, so the desktop can
+ *   show feedback → diagnosis → candidate → trial → decision → first use.
  */
 import type {
   ActivationRevision,
@@ -35,6 +41,13 @@ import type {
   CapabilityVersion,
   DecisionOutcome,
   DecisionReason,
+  Diagnosis,
+  ImprovementConfig,
+  ImprovementConfigInput,
+  ImprovementJob,
+  ImprovementPhase,
+  ImprovementStatus,
+  ImprovementTrigger,
   PluginApprovalInfo,
   TrialReceipt,
   TrialStatus,
@@ -71,7 +84,7 @@ import type {
 } from '@nexgent/kernel'
 
 /** API version; bumped only by a contract-change PR. */
-export const SDK_API_VERSION = 4
+export const SDK_API_VERSION = 5
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -262,6 +275,8 @@ export type SdkEvent =
   | CapabilityEventBase & { readonly type: 'capability.candidate'; readonly candidate: CandidateView }
   /** Step 4: a trial made progress (one event per receipt line, without plan details). */
   | CapabilityEventBase & { readonly type: 'capability.trial'; readonly candidateId: string; readonly trialId: string; readonly receipt: TrialReceipt['type']; readonly runsDone: number; readonly runsTotal: number; readonly status?: TrialStatus }
+  /** Step 5: an improvement job was created or changed status (one event per status change). */
+  | CapabilityEventBase & { readonly type: 'improvement.job'; readonly job: ImprovementJobView }
 
 /** The `type` vocabulary of {@link SdkEvent}. */
 export type SdkEventType = SdkEvent['type']
@@ -330,6 +345,55 @@ export interface CapabilityListing {
 }
 
 // ---------------------------------------------------------------------------
+// Improvement jobs (step 5)
+// ---------------------------------------------------------------------------
+
+/** One improvement job as lists show it. */
+export interface ImprovementJobView {
+  readonly id: string
+  readonly trigger: ImprovementTrigger
+  readonly status: ImprovementStatus
+  readonly createdAt: string
+  readonly updatedAt: string
+  /** Counted signals it answers (feedback entries and failed checks). */
+  readonly itemCount: number
+  /** Present once diagnosed: the suggested component kind, or `none`. */
+  readonly proposalKind?: Diagnosis['proposalKind']
+  readonly candidateId?: string
+  readonly trialId?: string
+  readonly decisionId?: string
+  /** Last status change's detail (why it failed, what history is missing). */
+  readonly detail?: string
+  /** Billed tokens per phase that ran (`unknown` when any request's usage is unknown). */
+  readonly tokens: Readonly<Partial<Record<ImprovementPhase, number | 'unknown'>>>
+  /** Display only, from the `@nexgent/llm` price table. */
+  readonly estimatedUsd: number | 'unknown'
+}
+
+/** Everything recorded about one job: the chain feedback → diagnosis → candidate → trial → decision → first use. */
+export interface ImprovementDetail {
+  readonly view: ImprovementJobView
+  readonly job: ImprovementJob
+  /** Absent until the diagnose phase reported an accepted diagnosis. */
+  readonly diagnosis?: Diagnosis
+  /** The produced candidate, its receipts and decisions (as `capabilities.show`). */
+  readonly candidate?: CandidateDetail
+}
+
+/** `improvements.list`. */
+export interface ImprovementListing {
+  /** Newest first. */
+  readonly jobs: readonly ImprovementJobView[]
+  /** The running job, when one is. */
+  readonly activeJobId?: string
+  /** Counted signals waiting for the next job, and how many start one. */
+  readonly pending: number
+  readonly threshold: number
+  /** Billed tokens spent in the current budget window, and the cap. */
+  readonly budget: { readonly usedTokens: number; readonly maxTokens: number; readonly windowDays: number }
+}
+
+// ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 
@@ -340,12 +404,23 @@ export interface ProjectSettings {
   readonly effort: Effort
   readonly sandboxMode: SandboxMode
   readonly costCaps: { readonly perTask?: CostCap; readonly perProject?: CostCap }
+  /** Step 5: whether counted feedback and failed checks start improvement jobs on their own (default `true`). */
+  readonly autoImprove: boolean
+  /** Step 5: threshold, improvement budget, model and thinking of improvement jobs. */
+  readonly improvement: ImprovementConfig
   /** The model API key: configured or not, and from where. Never the value. */
   readonly apiKey: CredentialInfo
 }
 
-/** A settings change; absent fields stay. `costCaps` replaces both objects as given. Changing `sandboxMode` or `costCaps` counts as a user action (no approval prompt), as it comes from the settings page. */
-export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey'>>
+/**
+ * A settings change; absent fields stay. `costCaps` and `improvement`
+ * replace their objects as given (missing improvement fields take their
+ * defaults). Changing `sandboxMode`, `costCaps`, `autoImprove` or
+ * `improvement` counts as a user action (no approval prompt), as it comes
+ * from the settings page; the model can change none of them without approval
+ * (`GUARDED_PROJECT_CONFIG_FIELDS`).
+ */
+export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey' | 'improvement'>> & { readonly improvement?: ImprovementConfigInput }
 
 // ---------------------------------------------------------------------------
 // Project files
@@ -472,6 +547,20 @@ export interface SdkMethods {
   'capabilities.approve': (input: { readonly projectId: string; readonly candidateId: string; readonly decision: 'allow' | 'deny' }) => Promise<CandidateView>
   /** Step 4: roll back to the previous version (or `toVersion`, which must appear earlier in the chain); writes a `manual` revision. */
   'capabilities.rollback': (input: { readonly projectId: string; readonly toVersion?: CapabilityVersion; readonly reason?: string }) => Promise<CapabilityVersionView>
+
+  /** Step 5: jobs (newest first), the queue and the budget window. */
+  'improvements.list': (input: { readonly projectId: string }) => Promise<ImprovementListing>
+  /** Step 5: one job with its diagnosis and candidate; unknown id rejects `improvement/not-found`. */
+  'improvements.show': (input: { readonly projectId: string; readonly jobId: string }) => Promise<ImprovementDetail>
+  /**
+   * Step 5: the explicit "improve" (trigger `explicit`): starts a job now,
+   * regardless of the count and of `autoImprove`, pointing at a session or a
+   * deliverable when given. Rejects `improvement/busy` while a job runs and
+   * `improvement/budget-exhausted` when the window's budget is spent.
+   */
+  'improvements.run': (input: { readonly projectId: string; readonly sessionId?: string; readonly deliverableId?: string }) => Promise<ImprovementJobView>
+  /** Step 5: cancel a running job (status `cancelled`); a final job is returned unchanged. */
+  'improvements.cancel': (input: { readonly projectId: string; readonly jobId: string }) => Promise<ImprovementJobView>
 }
 
 /** An IPC method name. */
@@ -530,6 +619,10 @@ export const SDK_METHOD_NAMES = [
   'capabilities.trial',
   'capabilities.approve',
   'capabilities.rollback',
+  'improvements.list',
+  'improvements.show',
+  'improvements.run',
+  'improvements.cancel',
 ] as const satisfies readonly SdkMethodName[]
 
 /** The in-process SDK object (CLI and desktop main process). */

@@ -75,11 +75,13 @@ export async function readSettings(configFile: string, where: CredentialEnv): Pr
     effort: config.effort,
     sandboxMode: config.sandboxMode,
     costCaps: config.costCaps,
+    autoImprove: config.autoImprove,
+    improvement: config.improvement,
     apiKey: await describeApiKey(where),
   }
 }
 
-const PATCH_FIELDS = new Set(['model', 'thinking', 'effort', 'sandboxMode', 'costCaps'])
+const PATCH_FIELDS = new Set(['model', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'autoImprove', 'improvement'])
 
 /** Merge a patch into `config.json` (validated as a whole before writing). */
 export async function updateSettings(configFile: string, patch: SettingsPatch, where: CredentialEnv): Promise<ProjectSettings> {

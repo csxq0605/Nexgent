@@ -67,6 +67,8 @@ export const SETTINGS: ProjectSettings = {
   effort: 'medium',
   sandboxMode: 'workspace-write',
   costCaps: {},
+  autoImprove: true,
+  improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on' },
   apiKey: { configured: false },
 }
 
@@ -141,7 +143,7 @@ export class FakeBridge implements NexgentBridge {
   pluginInfo: Record<string, readonly PluginApprovalInfo[]> = {}
   capabilities: CapabilityListing = { current: { version: 'baseline', revision: 0, components: [] }, history: [], candidates: [] }
   readonly handlers: Record<string, Handler> = {
-    'app.info': () => ({ sdkVersion: 4, appVersion: '0.0.0-test', platform: 'linux' }),
+    'app.info': () => ({ sdkVersion: 5, appVersion: '0.0.0-test', platform: 'linux' }),
     'projects.recent': () => this.recent,
     'projects.open': () => PROJECT,
     'projects.forget': () => undefined,

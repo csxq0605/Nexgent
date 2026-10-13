@@ -1,0 +1,662 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexgent.dev/schema/improvement.v1.schema.json",
+  "title": "Nexgent improvement files v1",
+  "description": "Files under .nexgent/improvements/; validate against $defs/<name>. See docs/spec/data-formats.md.",
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "usageCount": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "const": "unknown"
+        }
+      ]
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputTokens",
+        "outputTokens",
+        "totalTokens",
+        "cacheReadTokens",
+        "reasoningTokens"
+      ],
+      "properties": {
+        "inputTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "outputTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "totalTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "cacheReadTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "cacheWriteTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "reasoningTokens": {
+          "$ref": "#/$defs/usageCount"
+        }
+      }
+    },
+    "errorInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "code": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "object"
+        }
+      }
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "capabilityVersion": {
+      "type": "string",
+      "pattern": "^(?:baseline|[a-f0-9]{64})$"
+    },
+    "componentKind": {
+      "enum": [
+        "function-module",
+        "plugin",
+        "skill",
+        "context-policy",
+        "preset",
+        "team-template",
+        "architecture"
+      ]
+    },
+    "proposalKind": {
+      "enum": [
+        "function-module",
+        "plugin",
+        "skill",
+        "context-policy",
+        "preset",
+        "team-template",
+        "architecture",
+        "none"
+      ]
+    },
+    "improvementStatus": {
+      "enum": [
+        "queued",
+        "diagnosing",
+        "proposing",
+        "trialing",
+        "waiting-history",
+        "awaiting-approval",
+        "adopted",
+        "rejected",
+        "no-proposal",
+        "budget-exhausted",
+        "failed",
+        "interrupted",
+        "cancelled"
+      ]
+    },
+    "improvementSignal": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "feedbackId",
+            "sessionId",
+            "deliverableId",
+            "at"
+          ],
+          "properties": {
+            "kind": {
+              "const": "feedback"
+            },
+            "feedbackId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "sessionId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "deliverableId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "version": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "rating": {
+              "enum": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "taskId",
+            "sessionId",
+            "turn",
+            "at"
+          ],
+          "properties": {
+            "kind": {
+              "const": "check-failure"
+            },
+            "taskId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "sessionId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "turn": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "failedChecks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            }
+          }
+        }
+      ]
+    },
+    "improvementQueue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "since",
+        "counted",
+        "pending"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "since": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "counted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/improvementSignal"
+          }
+        },
+        "activeJobId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "phaseCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "usage",
+        "requestCount"
+      ],
+      "properties": {
+        "usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "requestCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "statusChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "at"
+      ],
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/improvementStatus"
+        },
+        "at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "detail": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{0,2000}$"
+        }
+      }
+    },
+    "improvementJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "id",
+        "createdAt",
+        "updatedAt",
+        "trigger",
+        "status",
+        "items",
+        "history",
+        "phases"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "trigger": {
+          "enum": [
+            "feedback-count",
+            "explicit",
+            "check-failure"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/improvementStatus"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/improvementSignal"
+          }
+        },
+        "request": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "sessionId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "deliverableId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "version": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "taskId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "note": {
+              "type": "string",
+              "pattern": "^[\\s\\S]{0,2000}$"
+            }
+          }
+        },
+        "history": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/statusChange"
+          }
+        },
+        "phases": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "diagnose": {
+              "$ref": "#/$defs/phaseCost"
+            },
+            "propose": {
+              "$ref": "#/$defs/phaseCost"
+            },
+            "trial": {
+              "$ref": "#/$defs/phaseCost"
+            }
+          }
+        },
+        "baseVersion": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "sessions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "diagnose": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "propose": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "diagnosed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at",
+            "proposalKind",
+            "attempts"
+          ],
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "proposalKind": {
+              "$ref": "#/$defs/proposalKind"
+            },
+            "attempts": {
+              "$ref": "#/$defs/positiveInteger"
+            }
+          }
+        },
+        "candidateId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "trialId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "decisionId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "firstUse": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "sessionId",
+            "at",
+            "version"
+          ],
+          "properties": {
+            "taskId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "sessionId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "version": {
+              "$ref": "#/$defs/capabilityVersion"
+            }
+          }
+        },
+        "rolledBack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decisionId",
+            "at"
+          ],
+          "properties": {
+            "decisionId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            }
+          }
+        },
+        "detail": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{0,2000}$"
+        },
+        "error": {
+          "$ref": "#/$defs/errorInfo"
+        }
+      }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "seq"
+      ],
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "diagnosedFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "label",
+        "evidence"
+      ],
+      "properties": {
+        "category": {
+          "enum": [
+            "system-design",
+            "inter-agent-misalignment",
+            "task-verification"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,200}$"
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/evidenceRef"
+          }
+        }
+      }
+    },
+    "componentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/componentKind"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        }
+      }
+    },
+    "diagnosisInvolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "members",
+        "tools",
+        "skills",
+        "components"
+      ],
+      "properties": {
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/componentRef"
+          }
+        }
+      }
+    },
+    "memberCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memberId",
+        "name",
+        "executionForm",
+        "usage",
+        "requestCount",
+        "toolCallCount"
+      ],
+      "properties": {
+        "memberId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "name": {
+          "type": "string"
+        },
+        "executionForm": {
+          "enum": [
+            "delegated",
+            "team",
+            "workflow"
+          ]
+        },
+        "usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "requestCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "toolCallCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "diagnosis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "jobId",
+        "createdAt",
+        "sessionId",
+        "attempts",
+        "failureTypes",
+        "involved",
+        "hypothesis",
+        "proposalKind",
+        "memberCosts"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "attempts": {
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "failureTypes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/diagnosedFailure"
+          }
+        },
+        "involved": {
+          "$ref": "#/$defs/diagnosisInvolved"
+        },
+        "hypothesis": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,500}$"
+        },
+        "proposalKind": {
+          "$ref": "#/$defs/proposalKind"
+        },
+        "memberCosts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/memberCost"
+          }
+        }
+      }
+    }
+  }
+}

@@ -39,7 +39,7 @@
 
 | 子目录 | 工具读 | 工具写 | 说明 |
 | --- | --- | --- | --- |
-| `sessions/`、`ledgers/`、`capabilities/`、`snapshots/` | 拒绝 | 拒绝 | 只有宿主写；模型不能改自己的历史、账本、能力版本与任务快照。草稿组件经 `capability_draft` 由宿主代写（步骤 4） |
+| `sessions/`、`ledgers/`、`capabilities/`、`snapshots/`、`improvements/` | 拒绝 | 拒绝 | 只有宿主写；模型不能改自己的历史、账本、能力版本、任务快照与改进作业。草稿组件经 `capability_draft` 由宿主代写（步骤 4）；改进会话只经只读的 `improve_*` 工具读会话与账本（步骤 5） |
 | `materials/` | 允许 | 拒绝 | 用户提供的资料，由宿主（`@nexgent/tasking`）复制写入；模型只读，原文件与副本都不被模型修改 |
 | `outputs/` | 允许 | 拒绝 | 成果快照，只由宿主（`@nexgent/tasking`）在 `present` 时写；模型不能改任何版本的快照（步骤 2 起，步骤 1 曾允许写）。模型把成果写在项目里，再用 `present` 交付 |
 | `skills/` | 允许 | 拒绝 | 项目技能，由用户维护（步骤 2）；`load_skill` 经宿主读取 |
@@ -108,7 +108,7 @@
 
 `read-only` 下“始终审批”表里的写 / 执行类调用同样直接拒绝。`selfSandboxed` 是 `ToolDefinition` 的契约字段（`contracts/tools.ts`），只有确实对每次读写调用做沙箱与路径检查的宿主包才能声明；策略层按字段判断，不按工具名豁免（步骤 3 勘误，取代按名豁免 `run_code`）。
 
-"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的 `approvals` / `costCaps` / `sandboxMode` / `capabilities` 字段（契约 `GUARDED_PROJECT_CONFIG_FIELDS`，`capabilities` 为步骤 4 新增）、步骤 4 的插件试用与插件采用（下节）。
+"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的 `approvals` / `costCaps` / `sandboxMode` / `capabilities` / `autoImprove` / `improvement` 字段（契约 `GUARDED_PROJECT_CONFIG_FIELDS`，`capabilities` 为步骤 4 新增，`autoImprove` 与 `improvement` 为步骤 5 新增：模型不能打开、关闭或放宽自己的改进流程与改进预算）、步骤 4 的插件试用与插件采用（下节）。
 
 **粒度。** 用户每次应答选择作用范围：
 
@@ -164,6 +164,16 @@
 - `.nexgent/capabilities/`（含草稿区）与 `.nexgent/snapshots/` 对模型的文件工具、`bash` 写入、`run_code` 与函数模块的宿主函数都拒绝读写；草稿只经 `capability_draft` 写。
 - 门控试验在项目的临时副本里运行，副本的沙箱模式取原任务的模式与 `workspace-write` 中较窄的一个；试验产生的账本记录写进真实项目的账本（带 `trialId`、`arm`），费用受 `capabilities.trialBudget` 约束，不计入任何用户任务的 `perTask`，计入 `perProject`。
 - 试验与评审请求不向用户提问：需要审批的调用在试验里按 `headless` 拒绝，该运行如因此失败照实记为 `fail` 或 `unknown`。
+
+## 改进会话与改进预算
+
+步骤 5（ADR 0006）。改进作业的会话由宿主打开，不由用户的消息驱动，所以权限比普通任务更窄：
+
+- **诊断会话只读。** 工具只有 `IMPROVEMENT_DIAGNOSIS_TOOLS` 四个（`improve_read_session`、`improve_read_ledger`、`improve_list_feedback`、`improve_report_diagnosis`），全部 `effects: ['read']`、`approval: 'never'`；没有文件、命令、网络、协作与能力工具，也不装载项目的插件。读切片有字节上限（默认 64 KiB、最多 256 KiB）；会话与账本里本来就没有密钥，切片照样经过日志脱敏。
+- **提议会话在快照副本里。** 提议会话的工作区是反馈任务快照的临时副本，沙箱模式取原任务的模式与 `workspace-write` 中较窄的一个（同门控试验），工具是普通任务工具加 `capability_draft / try / propose`，没有 `improve_*` 工具。需要审批的调用按 `headless` 拒绝，不向用户提问；插件草稿的试用审批（§插件安装审批第 1 条）同样不提问而直接拒绝，所以改进作业产不出插件候选（诊断建议 `plugin` 时提议无法完成，作业以 `failed` 结束并写明原因），两次审批不会被绕过。
+- **成员看不到改进工具。** `improve_*` 四个工具在 `MEMBER_DENIED_TOOLS` 里；改进会话自己不派成员（没有协作工具）。
+- **改进预算。** `improvement.budget` 按计费 token（输入 + 缓存读 + 缓存写 + 输出）在 `windowDays` 天的滚动时间窗内计，覆盖窗内创建的全部作业的诊断、提议与门控试验（`data-formats.md` §项目配置文件）。宿主在每个阶段开始前检查，用尽时不再开始，作业以 `budget-exhausted` 结束；新作业（含显式“改进”）报 `improvement/budget-exhausted`。改进费用另外计入 `perProject`，不计入任何用户任务的 `perTask`。
+- **开关与预算只由用户改。** `autoImprove` 与 `improvement` 在“始终审批”表里：模型经文件工具写这两个字段总要审批；用户在设置页（SDK `settings.update`）改是用户操作，不弹审批。上下文策略的封闭 schema 没有这两个字段，能力组件改不到它们。
 
 ## 费用上限
 
@@ -399,3 +409,8 @@ interface ToolApprovalAsk {
 | 能力（步骤 4） | 函数模块读环境变量、读根外文件、`read-only` 下写 | 环境为空；读写被拒 |
 | 能力（步骤 4） | `context-policy` 带 `approvals` / `costCaps` / `sandboxMode` / `capabilities` | 清单校验失败，组件不装载 |
 | 能力（步骤 4） | 成员工具列表 | 不含 `capability_draft`、`capability_try`、`capability_propose` |
+| 改进（步骤 5） | 文件工具读写 `.nexgent/improvements/queue.json`、`.nexgent/improvements/<jobId>/job.json` | 全部拒绝 |
+| 改进（步骤 5） | `full-access` 下写 `config.json` 的 `autoImprove` 或 `improvement` 字段 | 产生“始终审批”请求 |
+| 改进（步骤 5） | 成员工具列表 | 不含 `improve_read_session`、`improve_read_ledger`、`improve_list_feedback`、`improve_report_diagnosis` |
+| 改进（步骤 5） | 诊断会话的工具列表 | 恰为四个 `improve_*` 工具 |
+| 改进（步骤 5） | 改进预算用尽后点“改进” | 报 `improvement/budget-exhausted`，不发出请求 |

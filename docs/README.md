@@ -44,6 +44,7 @@
 | [`adr/0003-thinking-on-by-default.md`](adr/0003-thinking-on-by-default.md) | 已接受：执行默认开启 thinking |
 | [`adr/0004-execution-forms.md`](adr/0004-execution-forms.md) | 已接受：四种执行形态、子会话、深度 1、成员审批与费用树（步骤 3） |
 | [`adr/0005-capability-versions.md`](adr/0005-capability-versions.md) | 已接受：能力包与版本、候选、门控试验、采用规则、回滚与插件审批（步骤 4） |
+| [`adr/0006-improvement-jobs.md`](adr/0006-improvement-jobs.md) | 已接受：改进作业的触发、诊断、提议、门控的反馈检查与改进预算（步骤 5，取代 ADR 0005 决策 5 的质量与 unknown 两句） |
 | [`reference-map.md`](reference-map.md) | 步骤 0 建立，随各步更新 |
 | [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
 | [`plan/step-2-work-partition.md`](plan/step-2-work-partition.md) | 步骤 2 分工与验收设计，用户 2026-10-11 已定 |
