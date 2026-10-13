@@ -41,7 +41,7 @@ const change: ImproverChangeRecord = {
 }
 
 const arm = (which: 'parent' | 'child', version: string, over: Record<string, unknown> = {}) => ({
-  arm: which, improverVersion: version, origin: { sourceJobId: 'eeeeeeee-2222-4222-8222-222222222222', tree: 't', feedbackIds: [], capabilityVersion: 'v0', epoch: 'e' },
+  arm: which, improverVersion: version, origin: { kind: 'unresolved', sourceJobId: 'eeeeeeee-2222-4222-8222-222222222222', tree: 't', feedbackIds: [], capabilityVersion: 'v0', epoch: 'e' },
   jobId: JOB, status: 'adopted', candidateId: 'cand1',
   verdict: { outcome: 'adopt', reason: 'better', passRate: { candidate: 1, baseline: 0.5 }, costRatio: 1, decidedByReview: false },
   cost: { usage: { inputTokens: 100, outputTokens: 20, totalTokens: 'unknown', cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, requestCount: 3, estimatedUsd: 0.5 },
@@ -115,7 +115,7 @@ describe('formatting', () => {
     for (const part of [
       'hypothesis: the trial replays too few cases', 'proposal: change', 'finding (trial): flaky gate [jobs: eeeeeeee]',
       'change: set-comparison-param', 'rationale: more cases',
-      'comparison: origin job eeeeeeee', 'parent: improver v0, status adopted, candidate cand1',
+      'comparison: unresolved origin, job eeeeeeee', 'parent: improver v0, status adopted, candidate cand1',
       'gate: adopt (better); pass rate candidate 100% vs baseline 50%', 'cost: 120 tokens, ≈ $0.50',
       'child: improver aaaaaaaaaaaa', 'cost: unknown tokens, unknown', 'verdict: adopt (quality-up); quality parent 50% child 100%; cost ratio 1.25',
     ]) expect(text).toContain(part)
@@ -141,7 +141,7 @@ describe('formatting', () => {
       metaDiagnosis, change, comparison,
     } as unknown as ImprovementDetail
     const shown = formatDetail(detail)
-    for (const part of [`Improvement job ${JOB} (meta)`, 'improver: v0', 'meta diagnosis:', 'change: set-comparison-param', 'comparison: origin job', 'verdict: adopt (quality-up)']) {
+    for (const part of [`Improvement job ${JOB} (meta)`, 'improver: v0', 'meta diagnosis:', 'change: set-comparison-param', 'origin, job', 'verdict: adopt (quality-up)']) {
       expect(shown).toContain(part)
     }
     expect(formatDetail({ ...detail, comparison: undefined } as unknown as ImprovementDetail)).toContain('meta outcome: adopt (quality-up)')

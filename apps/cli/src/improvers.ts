@@ -93,7 +93,7 @@ function formatArm(arm: ComparisonArmResult, indent: string): string[] {
 
 /** A meta job's parent / child comparison and verdict. */
 export function formatComparison(comparison: ImproverComparison, indent = '  '): string[] {
-  const lines = [`${indent}comparison: origin job ${shortId(comparison.origin.sourceJobId)}`]
+  const lines = [`${indent}comparison: ${comparison.origin.kind} origin, job ${shortId(comparison.origin.sourceJobId)}`]
   lines.push(...formatArm(comparison.parent, `${indent}  `), ...formatArm(comparison.child, `${indent}  `))
   const { verdict } = comparison
   const extras = [

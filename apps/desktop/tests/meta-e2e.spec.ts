@@ -118,7 +118,7 @@ async function seedAdoptedMetaJob(root: string): Promise<{ jobId: string; child:
     proposal: 'change',
   }
   const change: ImproverChangeRecord = { formatVersion: 1, jobId: job.id, createdAt: at, sessionId: randomUUID(), attempts: 1, parentVersion: 'v0', childVersion: child, change: CHANGE, rationale: '让诊断先读失败的检查。' }
-  const origin = { sourceJobId: basis[2]!, tree: 'a'.repeat(64), feedbackIds: [randomUUID()], capabilityVersion: 'baseline', epoch: 'e'.repeat(64) }
+  const origin = { kind: 'unresolved' as const, sourceJobId: basis[2]!, tree: 'a'.repeat(64), feedbackIds: [randomUUID()], capabilityVersion: 'baseline', epoch: 'e'.repeat(64) }
   const arm = (side: 'parent' | 'child'): ComparisonArmResult => side === 'parent'
     ? { arm: 'parent', improverVersion: 'v0', origin, jobId: randomUUID(), status: 'rejected', candidateId: randomUUID(), verdict: { outcome: 'reject', reason: 'quality-down', passRate: { candidate: 0.5, baseline: 0.75 }, costRatio: 1.1, costBasis: 'usd', decidedByReview: false }, cost: { usage: big, requestCount: 7, estimatedUsd: 0.52 } }
     : { arm: 'child', improverVersion: child, origin, jobId: randomUUID(), status: 'adopted', candidateId: randomUUID(), verdict: { outcome: 'adopt', reason: 'quality-up', passRate: { candidate: 1, baseline: 0.75 }, costRatio: 1.2, costBasis: 'usd', decidedByReview: false }, cost: { usage: big, requestCount: 7, estimatedUsd: 0.61 } }
