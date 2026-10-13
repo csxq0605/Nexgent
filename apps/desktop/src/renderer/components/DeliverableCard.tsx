@@ -1,10 +1,13 @@
 import type { DeliverableVersionRef } from '@nexgent/kernel'
+import { useAppState, useAppStore } from '../hooks.js'
 import { T, formatBytes } from '../strings.js'
 import { useUi } from '../ui.js'
 
 /** A presented deliverable in the conversation: what it is, its files, and what to do next. */
 export function DeliverableCard({ deliverable, latest }: { readonly deliverable: DeliverableVersionRef; readonly latest: boolean }): JSX.Element {
   const ui = useUi()
+  const store = useAppStore()
+  const { sessionId } = useAppState()
   const { deliverableId, version } = deliverable
   return (
     <section className="deliverable-card" data-testid="deliverable-card" data-version={version}>
@@ -34,6 +37,11 @@ export function DeliverableCard({ deliverable, latest }: { readonly deliverable:
         {latest && (
           <button type="button" className="primary" onClick={() => ui.openDeliverable({ deliverableId, version, mode: 'feedback' })} data-testid="give-feedback">
             {T.giveFeedback}
+          </button>
+        )}
+        {latest && (
+          <button type="button" onClick={() => void store.runImprovement({ ...(sessionId === undefined ? {} : { sessionId }), deliverableId })} data-testid="deliverable-improve">
+            {T.deliverableImprove}
           </button>
         )}
       </div>

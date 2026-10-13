@@ -22,6 +22,7 @@
   "dependencies": {
     "@nexgent/capabilities": "workspace:*",
     "@nexgent/context": "workspace:*",
+    "@nexgent/evolve": "workspace:*",
     "@nexgent/kernel": "workspace:*",
     "@nexgent/llm": "workspace:*",
     "@nexgent/ptc": "workspace:*",

@@ -5,7 +5,7 @@
  * Never bundled into the app (only tests import it).
  */
 import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, MaterialMetadata, PluginApprovalInfo } from '@nexgent/kernel'
-import type { CandidateDetail, CandidateView, CapabilityListing, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, WorkflowView } from '@nexgent/sdk'
+import type { CandidateDetail, CandidateView, CapabilityListing, ImprovementDetail, ImprovementJobView, ImprovementListing, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -120,6 +120,21 @@ export function candidateDetail(view: CandidateView, version = BUNDLE, plugins?:
   }
 }
 
+/** An improvement job as `improvements.list` shows it (step 5). */
+export function improvementJob(overrides: Partial<ImprovementJobView> = {}): ImprovementJobView {
+  return { id: 'j-1', trigger: 'feedback-count', status: 'diagnosing', createdAt: '2026-10-12T08:00:00.000Z', updatedAt: '2026-10-12T08:05:00.000Z', itemCount: 3, tokens: {}, estimatedUsd: 0, ...overrides }
+}
+
+/** `improvements.show` of {@link improvementJob}: no diagnosis or candidate unless given. */
+export function improvementDetail(view: ImprovementJobView, extra: Partial<Omit<ImprovementDetail, 'view' | 'job'>> & { readonly job?: Partial<ImprovementDetail['job']> } = {}): ImprovementDetail {
+  const { job, ...rest } = extra
+  return {
+    view,
+    job: { formatVersion: 1, id: view.id, createdAt: view.createdAt, updatedAt: view.updatedAt, trigger: view.trigger, status: view.status, items: [], history: [], phases: {}, ...job } as ImprovementDetail['job'],
+    ...rest,
+  }
+}
+
 export class FakeBridge implements NexgentBridge {
   readonly platform = 'linux'
   readonly calls: FakeCall[] = []
@@ -142,6 +157,10 @@ export class FakeBridge implements NexgentBridge {
   /** `capabilities.show`'s `plugins` per candidate id, when a test needs other than the default. */
   pluginInfo: Record<string, readonly PluginApprovalInfo[]> = {}
   capabilities: CapabilityListing = { current: { version: 'baseline', revision: 0, components: [] }, history: [], candidates: [] }
+  /** Step 5: what `improvements.list` answers (`run` / `cancel` change it like the SDK would). */
+  improvements: ImprovementListing = { jobs: [], pending: 0, threshold: 3, budget: { usedTokens: 0, maxTokens: 3_000_000, windowDays: 30 } }
+  /** `improvements.show` per job id; a job without an entry answers a bare detail. */
+  improvementDetails: Record<string, ImprovementDetail> = {}
   readonly handlers: Record<string, Handler> = {
     'app.info': () => ({ sdkVersion: 5, appVersion: '0.0.0-test', platform: 'linux' }),
     'projects.recent': () => this.recent,
@@ -184,7 +203,8 @@ export class FakeBridge implements NexgentBridge {
     'goals.update': input => ({ id: 'g1', text: 'goal', status: input.status, setAt: 'x', updatedAt: 'x' }),
     'settings.get': () => this.settings,
     'settings.update': input => {
-      this.settings = { ...this.settings, ...input.patch }
+      const { improvement, ...rest } = input.patch
+      this.settings = { ...this.settings, ...rest, ...(improvement === undefined ? {} : { improvement: { ...this.settings.improvement, ...improvement, budget: { ...this.settings.improvement.budget, ...improvement.budget } } }) }
       return this.settings
     },
     'capabilities.list': () => this.capabilities,
@@ -216,6 +236,25 @@ export class FakeBridge implements NexgentBridge {
         candidates: this.capabilities.candidates.map(c => (c.status === 'adopted' ? { ...c, status: 'rolled-back' } : c)),
       }
       return this.capabilities.current
+    },
+    'improvements.list': () => this.improvements,
+    'improvements.show': input => {
+      const view = this.improvements.jobs.find(job => job.id === input.jobId)
+      if (view === undefined) throw { name: 'NexgentError', code: 'improvement/not-found', message: `no job ${input.jobId}` }
+      return { ...(this.improvementDetails[view.id] ?? improvementDetail(view)), view }
+    },
+    'improvements.run': () => {
+      if (this.improvements.activeJobId !== undefined) throw { name: 'NexgentError', code: 'improvement/busy', message: 'an improvement job is already running' }
+      const job = improvementJob({ id: `j-${this.improvements.jobs.length + 1}`, trigger: 'explicit', status: 'queued', itemCount: this.improvements.pending })
+      this.improvements = { ...this.improvements, jobs: [job, ...this.improvements.jobs], activeJobId: job.id, pending: 0 }
+      return job
+    },
+    'improvements.cancel': input => {
+      const current = this.improvements.jobs.find(job => job.id === input.jobId)!
+      const job = { ...current, status: 'cancelled' as const }
+      const { activeJobId, ...rest } = this.improvements
+      this.improvements = { ...rest, jobs: this.improvements.jobs.map(j => (j.id === job.id ? job : j)), ...(activeJobId === job.id || activeJobId === undefined ? {} : { activeJobId }) }
+      return job
     },
     'settings.setApiKey': input => (input.value === '' ? { configured: false } : { configured: true, source: 'file' }),
   }

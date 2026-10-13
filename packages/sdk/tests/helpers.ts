@@ -4,6 +4,7 @@ import * as nodePath from 'node:path'
 import type { Context, LLMRequest } from '@nexgent/kernel'
 import { llmSessionText, routeByMember, scriptedProvider, type ScriptedProvider, type ScriptEntry } from '@nexgent/test-support'
 import { afterEach } from 'vitest'
+import { EvolvePlugin, type EvolvePluginConfig, type StartedJob } from '@nexgent/evolve'
 import { createSdk, type LocalNexgentSdk, type LocalSdkOptions, type SdkEvent } from '../src/index.js'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -32,14 +33,23 @@ export interface TestSdk {
   readonly events: SdkEvent[]
   /** Events of one session. */
   eventsOf(sessionId: string): SdkEvent[]
+  /** Improvement jobs the SDK's `@nexgent/evolve` asked to start (no process is started unless the test's `launch` does). */
+  readonly launched: Array<{ root: string; jobId: string }>
 }
+
+/** How a test's improvement jobs start; default: recorded, never run. */
+export type JobLauncher = NonNullable<EvolvePluginConfig['launch']>
 
 /** Per-member scripts (step 3): requests of a member named `<key>` are answered from `routes[key]`. */
 export type MemberRoutes = Readonly<Record<string, ScriptEntry<LLMRequest>[]>>
 
 /** An SDK over a scripted model with a hermetic env and home. */
-export async function testSdk(script: ScriptFor | ScriptEntry<LLMRequest>[], options: Partial<LocalSdkOptions> & { readonly routes?: MemberRoutes } = {}): Promise<TestSdk> {
-  const { routes, registry, ...sdkOptions } = options
+export async function testSdk(
+  script: ScriptFor | ScriptEntry<LLMRequest>[],
+  options: Partial<LocalSdkOptions> & { readonly routes?: MemberRoutes; readonly launch?: JobLauncher } = {},
+): Promise<TestSdk> {
+  const { routes, registry, launch, ...sdkOptions } = options
+  const launched: Array<{ root: string; jobId: string }> = []
   const base = await tempDir()
   const home = nodePath.join(base, 'home')
   await mkdir(home)
@@ -60,6 +70,19 @@ export async function testSdk(script: ScriptFor | ScriptEntry<LLMRequest>[], opt
           ctx.provide('llm', llm)
         },
       },
+      // Improvement jobs never start a process of the real entry here (it would reach the real model API).
+      [EvolvePlugin.name]: {
+        ...EvolvePlugin,
+        apply(ctx: Context, config: EvolvePluginConfig = {}) {
+          EvolvePlugin.apply(ctx, {
+            ...config,
+            launch: (layout, jobId): StartedJob => {
+              launched.push({ root: layout.root, jobId })
+              return launch?.(layout, jobId) ?? { jobId, pid: undefined, exited: Promise.resolve(0) }
+            },
+          })
+        },
+      },
       // Extra rows of a test; never a real model (the scripted llm row stays unless a test replaces it on purpose).
       ...registry,
     },
@@ -68,7 +91,7 @@ export async function testSdk(script: ScriptFor | ScriptEntry<LLMRequest>[], opt
   cleanups.push(() => sdk.dispose())
   const events: SdkEvent[] = []
   sdk.subscribe(event => events.push(event))
-  return { sdk, home, base, providers, events, eventsOf: sessionId => events.filter(event => event.sessionId === sessionId) }
+  return { sdk, home, base, providers, events, eventsOf: sessionId => events.filter(event => event.sessionId === sessionId), launched }
 }
 
 /** Resolve once `predicate` holds for an event (checks already-received ones first). */

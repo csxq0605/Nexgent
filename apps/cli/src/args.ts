@@ -7,6 +7,10 @@
  * nexgent run --project <dir> --task "<text>" [--sandbox <mode>] [--model <id>] [--json]
  * nexgent resume <sessionId> --project <dir> [--task "<text>"] [--sandbox <mode>] [--json]
  * nexgent export <sessionId> --project <dir> [--out <dir>] [--json]
+ * nexgent improve list --project <dir> [--json]
+ * nexgent improve show <jobId> --project <dir> [--json]
+ * nexgent improve run --project <dir> [--session <id>] [--deliverable <id>] [--json]
+ * nexgent improve cancel <jobId> --project <dir> [--json]
  * nexgent app [--project <dir>]
  * nexgent --version | --help | <command> --help
  * ```
@@ -19,7 +23,7 @@ import { DEFAULT_PROJECT_CONFIG, SANDBOX_MODES, type SandboxMode } from '@nexgen
 import { CliError, EXIT } from './exit-codes.js'
 
 /** Subcommands, in help order. */
-export const COMMANDS = ['run', 'resume', 'export', 'app'] as const
+export const COMMANDS = ['run', 'resume', 'export', 'improve', 'app'] as const
 
 /** One of {@link COMMANDS}. */
 export type Command = (typeof COMMANDS)[number]
@@ -60,6 +64,26 @@ export interface ExportInvocation {
   readonly json: boolean
 }
 
+/** The `nexgent improve` actions. */
+export const IMPROVE_ACTIONS = ['list', 'show', 'run', 'cancel'] as const
+
+/** One of {@link IMPROVE_ACTIONS}. */
+export type ImproveAction = (typeof IMPROVE_ACTIONS)[number]
+
+/** `nexgent improve`: list, show, start or cancel improvement jobs. */
+export interface ImproveInvocation {
+  readonly command: 'improve'
+  readonly action: ImproveAction
+  readonly project: string
+  /** `show` / `cancel`: a full job id or a unique prefix. */
+  readonly jobId?: string
+  /** `run`: the session the job should look at. */
+  readonly sessionId?: string
+  /** `run`: the deliverable the job should look at. */
+  readonly deliverableId?: string
+  readonly json: boolean
+}
+
 /** `nexgent app`: launch the desktop app, optionally on a project. */
 export interface AppInvocation {
   readonly command: 'app'
@@ -78,7 +102,7 @@ export interface VersionInvocation {
 }
 
 /** Everything {@link parseCliArgs} can return. */
-export type Invocation = RunInvocation | ResumeInvocation | ExportInvocation | AppInvocation | HelpInvocation | VersionInvocation
+export type Invocation = RunInvocation | ResumeInvocation | ExportInvocation | ImproveInvocation | AppInvocation | HelpInvocation | VersionInvocation
 
 /** The task `resume` sends when `--task` is omitted. */
 export const RESUME_DEFAULT_TASK = 'Continue the previous task from where it stopped.'
@@ -97,6 +121,8 @@ const OPTIONS = {
   sandbox: { type: 'string' },
   model: { type: 'string' },
   out: { type: 'string' },
+  session: { type: 'string' },
+  deliverable: { type: 'string' },
   json: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' },
@@ -109,6 +135,7 @@ const ACCEPTED: Readonly<Record<Command, readonly OptionName[]>> = {
   run: ['project', 'task', 'sandbox', 'model', 'json'],
   resume: ['project', 'task', 'sandbox', 'json'],
   export: ['project', 'out', 'json'],
+  improve: ['project', 'session', 'deliverable', 'json'],
   app: ['project'],
 }
 
@@ -167,6 +194,7 @@ export function parseCliArgs(argv: readonly string[]): Invocation {
     return project === undefined ? { command } : { command, project }
   }
   const project = requireText('project', values.project)
+  if (command === 'improve') return parseImprove(project, positionals, values)
   const sandbox = parseSandbox(values.sandbox)
   const json = values.json === true
 
@@ -206,6 +234,42 @@ export function parseCliArgs(argv: readonly string[]): Invocation {
   }
 }
 
+function parseImprove(
+  project: string,
+  positionals: readonly string[],
+  values: { readonly session?: string; readonly deliverable?: string; readonly json?: boolean },
+): ImproveInvocation {
+  const [action, jobId, extra] = positionals
+  if (action === undefined) throw usageError(`nexgent improve needs an action: ${IMPROVE_ACTIONS.join(' | ')}`)
+  if (!(IMPROVE_ACTIONS as readonly string[]).includes(action)) {
+    throw usageError(`unknown improve action "${action}" (expected ${IMPROVE_ACTIONS.join(' | ')})`)
+  }
+  const json = values.json === true
+  const kind = action as ImproveAction
+  if (kind === 'show' || kind === 'cancel') {
+    if (jobId === undefined) throw usageError(`nexgent improve ${kind} needs a <jobId>`)
+    if (extra !== undefined) throw usageError(`nexgent improve ${kind} takes one <jobId>, got extra "${extra}"`)
+    for (const name of ['session', 'deliverable'] as const) {
+      if (values[name] !== undefined) throw usageError(`nexgent improve ${kind} does not accept --${name}`)
+    }
+    return { command: 'improve', action: kind, project, jobId, json }
+  }
+  if (jobId !== undefined) throw usageError(`nexgent improve ${kind} takes no positional arguments, got "${jobId}"`)
+  if (kind === 'list') {
+    for (const name of ['session', 'deliverable'] as const) {
+      if (values[name] !== undefined) throw usageError(`nexgent improve list does not accept --${name}`)
+    }
+    return { command: 'improve', action: kind, project, json }
+  }
+  const sessionId = optionalText('session', values.session)
+  const deliverableId = optionalText('deliverable', values.deliverable)
+  return {
+    command: 'improve', action: kind, project, json,
+    ...(sessionId === undefined ? {} : { sessionId }),
+    ...(deliverableId === undefined ? {} : { deliverableId }),
+  }
+}
+
 /** Top-level help text. */
 export function usage(): string {
   return [
@@ -215,6 +279,7 @@ export function usage(): string {
     '  run      start a new session and run one task',
     '  resume   continue a saved session',
     '  export   write the minimal export bundle of a session',
+    '  improve  list, show, start or cancel improvement jobs',
     '  app      launch the desktop app',
     '',
     'Options:',
@@ -268,6 +333,26 @@ export function commandUsage(command: Command): string {
         '',
         '  --project <dir>    project directory holding .nexgent/sessions/<sessionId>',
         '  --out <dir>        bundle directory, missing or empty (default: ./nexgent-export-<sessionId>)',
+        '  --json             print the result as one JSON line',
+      ].join('\n')
+    case 'improve':
+      return [
+        'Usage: nexgent improve list --project <dir> [--json]',
+        '       nexgent improve show <jobId> --project <dir> [--json]',
+        '       nexgent improve run --project <dir> [--session <id>] [--deliverable <id>] [--json]',
+        '       nexgent improve cancel <jobId> --project <dir> [--json]',
+        '',
+        'Improvement jobs diagnose counted feedback and failed checks and propose a',
+        'capability candidate that a trial then gates. They run in the background.',
+        '',
+        '  list      the project\'s jobs, newest first, with the queue and budget state',
+        '  show      one job in full: history, diagnosis, candidate, gate verdict, spend',
+        '  run       start a job now (--session / --deliverable point it at a session or',
+        '            a deliverable); it keeps running after this command returns',
+        '  cancel    cancel a job that has not finished',
+        '',
+        '<jobId> is a full job id or a unique prefix (see `nexgent improve list`).',
+        '  --project <dir>    project directory',
         '  --json             print the result as one JSON line',
       ].join('\n')
     case 'app':

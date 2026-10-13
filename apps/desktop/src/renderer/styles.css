@@ -1434,3 +1434,14 @@ h3 {
   padding-left: 8px;
   margin-top: 4px;
 }
+
+/* --- step 5: improvement jobs --------------------------------------------- */
+
+.settings label.row {
+  align-items: center;
+  gap: 8px;
+}
+
+.settings label.row input[type='checkbox'] {
+  width: auto;
+}
