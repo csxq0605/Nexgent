@@ -59,6 +59,9 @@
       "path": "packages/capabilities"
     },
     {
+      "path": "packages/evolve"
+    },
+    {
       "path": "apps/desktop/src/renderer"
     }
   ]
