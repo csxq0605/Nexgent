@@ -17,7 +17,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { CapabilityComponentRef, CapabilityVersion, TaskCheckSpec } from './contracts/capabilities.js'
 import type { MemberIdentity } from './contracts/collaboration.js'
-import type { ImprovementPhase } from './contracts/improvement.js'
+import type { ComparisonArm, ImprovementPhase } from './contracts/improvement.js'
+import type { ImproverVersion } from './contracts/improver.js'
 import type { JsonValue } from './contracts/json.js'
 import type { TaskCheck } from './contracts/ledger.js'
 
@@ -151,10 +152,21 @@ export interface TaskRecorder {
  * improvement`); `trial` marks an ordinary task session the gate runs for
  * the job. Every ledger record of the session carries `improvementId` and
  * `improvementPhase`.
+ *
+ * Step 6 (ADR 0008 decision 6): `meta-diagnose` and `meta-propose` are a
+ * meta job's own improvement sessions (read-only tool sets, no
+ * components). `improverVersion` is the improver the job pinned; a
+ * comparison arm's job also names its `metaJobId` and `comparisonArm`
+ * (both or neither, never on a meta phase). All three are stamped on every
+ * ledger record next to `improvementId` / `improvementPhase` and kept in
+ * the improvement session's header.
  */
 export interface ImprovementRun {
   readonly jobId: string
   readonly phase: ImprovementPhase
+  readonly improverVersion?: ImproverVersion
+  readonly metaJobId?: string
+  readonly comparisonArm?: ComparisonArm
 }
 
 /** A root turn whose checks had a failing item (step 5: counts as one `check-failure` signal). */

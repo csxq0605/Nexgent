@@ -6,9 +6,14 @@
  * (`IMPROVEMENT_LIMITS.defaultSliceBytes`, at most `maxSliceBytes`). The
  * tools themselves (and their redaction) belong to `@nexgent/evolve`; these
  * helpers only read through the `SessionStore` and `Ledger` contracts.
+ * Step 6 (ADR 0008 decision 6) adds the improvement attribution filters and
+ * {@link sumLedgerCost}, so a meta job's whole spend (its own sessions and
+ * both comparison arms) can be read from the ledger by `metaJobId`.
  */
-import { IMPROVEMENT_LIMITS } from './contracts/improvement.js'
+import { IMPROVEMENT_LIMITS, type ComparisonArm, type ImprovementPhase, type PhaseCost } from './contracts/improvement.js'
+import type { ImproverVersion } from './contracts/improver.js'
 import type { Ledger, LedgerRecord, LedgerRecordType } from './contracts/ledger.js'
+import { addUsage, ZERO_USAGE, type LLMUsage } from './contracts/llm.js'
 import type { SessionRecord, SessionStore } from './contracts/session.js'
 
 /** Input of {@link readSessionSlice} (the `improve_read_session` tool input). */
@@ -30,8 +35,26 @@ export interface LedgerSliceQuery {
   readonly sessionId?: string
   readonly memberId?: string
   readonly capabilityVersion?: string
+  /** Step 6: records of this improvement job (`improvementId`). */
+  readonly improvementId?: string
+  readonly improvementPhase?: ImprovementPhase
+  /** Step 6: records of this meta job as a whole: its own sessions (`improvementId`) and both comparison arms (`metaJobId`). */
+  readonly metaJobId?: string
+  readonly comparisonArm?: ComparisonArm
+  /** Step 6: records stamped with this improver version; `v0` also matches records without one (step-5 data). */
+  readonly improverVersion?: ImproverVersion
   readonly types?: readonly string[]
   readonly maxBytes?: number
+}
+
+/** Ledger attribution filters of {@link LedgerSliceQuery} (no byte cap, no types). */
+export type LedgerCostQuery = Omit<LedgerSliceQuery, 'types' | 'maxBytes'>
+
+/** What {@link sumLedgerCost} found: totals of the matching `llm.request.end` records, overall and per improvement phase. */
+export interface LedgerCost {
+  readonly total: PhaseCost
+  /** Per `improvementPhase` of the records; records without one are only in `total`. */
+  readonly phases: Readonly<Partial<Record<ImprovementPhase, PhaseCost>>>
 }
 
 /** A byte-capped slice, oldest record first. */
@@ -120,10 +143,49 @@ export async function readLedgerSlice(ledger: Pick<Ledger, 'read'>, query: Ledge
   for await (const record of ledger.read(range)) {
     if (query.sessionId !== undefined && record.sessionId !== query.sessionId) continue
     if (query.types !== undefined && !query.types.includes(record.type)) continue
-    if (query.taskId !== undefined && record.taskId !== query.taskId) continue
-    if (query.memberId !== undefined && record.memberId !== query.memberId) continue
-    if (query.capabilityVersion !== undefined && record.capabilityVersion !== query.capabilityVersion) continue
+    if (!matchesAttribution(record, query)) continue
     slice.add(record)
   }
   return slice.result()
+}
+
+/** Whether a ledger record carries every attribution the query names. */
+function matchesAttribution(record: LedgerRecord, query: LedgerCostQuery): boolean {
+  if (query.taskId !== undefined && record.taskId !== query.taskId) return false
+  if (query.memberId !== undefined && record.memberId !== query.memberId) return false
+  if (query.capabilityVersion !== undefined && record.capabilityVersion !== query.capabilityVersion) return false
+  if (query.improvementId !== undefined && record.improvementId !== query.improvementId) return false
+  if (query.improvementPhase !== undefined && record.improvementPhase !== query.improvementPhase) return false
+  if (query.metaJobId !== undefined && record.metaJobId !== query.metaJobId && record.improvementId !== query.metaJobId) return false
+  if (query.comparisonArm !== undefined && record.comparisonArm !== query.comparisonArm) return false
+  if (query.improverVersion !== undefined && (record.improverVersion ?? (record.improvementId === undefined ? undefined : 'v0')) !== query.improverVersion) return false
+  return true
+}
+
+function addCost(previous: PhaseCost | undefined, usage: LLMUsage): PhaseCost {
+  return { usage: addUsage(previous?.usage ?? ZERO_USAGE, usage), requestCount: (previous?.requestCount ?? 0) + 1 }
+}
+
+/**
+ * Sum the model requests (`llm.request.end`) of the ledger that match the
+ * attribution, overall and per `improvementPhase` (step 6: e.g. a meta
+ * job's whole spend by `metaJobId`, one arm by `metaJobId` +
+ * `comparisonArm`). A usage field is `'unknown'` once any request did not
+ * report it (`addUsage`).
+ */
+export async function sumLedgerCost(ledger: Pick<Ledger, 'read'>, query: LedgerCostQuery): Promise<LedgerCost> {
+  let total: PhaseCost = { usage: ZERO_USAGE, requestCount: 0 }
+  const phases: Partial<Record<ImprovementPhase, PhaseCost>> = {}
+  const range = {
+    ...(query.sessionId === undefined ? {} : { sessionId: query.sessionId }),
+    types: ['llm.request.end'] as readonly LedgerRecordType[],
+  }
+  for await (const record of ledger.read(range)) {
+    if (record.type !== 'llm.request.end') continue
+    if (query.sessionId !== undefined && record.sessionId !== query.sessionId) continue
+    if (!matchesAttribution(record, query)) continue
+    total = addCost(total, record.usage)
+    if (record.improvementPhase !== undefined) phases[record.improvementPhase] = addCost(phases[record.improvementPhase], record.usage)
+  }
+  return { total, phases }
 }
