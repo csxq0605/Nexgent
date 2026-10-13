@@ -27,7 +27,7 @@ import {
   type ActivationChain,
   type ActivationProblem,
 } from './activation.js'
-import { DECISIONS_DIR, listDecisions, readDecision, writeDecision, type DecisionInput } from './decisions.js'
+import { buildDecision, DECISIONS_DIR, listDecisions, publishDecision, readDecision, writeDecision, type DecisionInput } from './decisions.js'
 import {
   CapabilityIntegrityError,
   listBundleVersions,
@@ -175,10 +175,10 @@ export class CapabilityStore {
   }
 
   /**
-   * Make a stored bundle the adopted version: verify it, write the `adopted`
-   * decision, then the revision.
+   * Make a stored bundle the adopted version: verify it, commit the revision,
+   * then write the `adopted` decision it names.
    * @param observed - Tail the decision was based on; defaults to the tail read now.
-   * @returns the change, or `null` when the tail moved since `observed` (the decision is then orphaned and ignored).
+   * @returns the change, or `null` when the tail moved since `observed` (nothing is written; the caller records what it concludes instead).
    * @throws `session/corrupt` when the bundle does not verify or the chain is damaged; `config/invalid` for a pointless change.
    */
   async adopt(version: string, input: AdoptInput, observed?: Activation): Promise<CommittedChange | null> {
@@ -188,8 +188,8 @@ export class CapabilityStore {
   }
 
   /**
-   * Return to the version in force before the current one: write the
-   * `rolled-back` decision, then the revision.
+   * Return to the version in force before the current one: commit the
+   * revision, then write the `rolled-back` decision it names.
    * @returns the change, or `null` when the tail moved since `observed`.
    * @throws `config/invalid` when the baseline is in force; `session/corrupt` when the chain is damaged.
    */
@@ -201,7 +201,8 @@ export class CapabilityStore {
   async #commit(base: Activation, change: { type: 'adopt'; version: string } | { type: 'rollback' },
     input: (AdoptInput | RollbackInput) & { outcome: 'adopted' | 'rolled-back' }): Promise<CommittedChange | null> {
     const toVersion = targetVersion(base, { ...change, trigger: input.trigger, decisionId: '' })
-    const decision = await writeDecision(this.decisionsDirectory, {
+    // Validate the decision before the revision so a refused one changes nothing; publish it only once the revision is in.
+    const decision = buildDecision({
       ...input,
       reason: input.reason ?? 'manual',
       detail: input.detail ?? `${change.type === 'adopt' ? 'adopted' : 'rolled back'} (${input.trigger})`,
@@ -211,6 +212,7 @@ export class CapabilityStore {
     }, this.#now)
     const activation = await commitActivation(this.activationDirectory, base, { ...change, trigger: input.trigger, decisionId: decision.id }, this.#now)
     if (activation === null) return null
+    await publishDecision(this.decisionsDirectory, decision)
     await this.#onDecision?.(decision)
     return { decision, activation }
   }
