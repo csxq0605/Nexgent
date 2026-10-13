@@ -156,6 +156,8 @@ export class FakeBridge implements NexgentBridge {
   /** Step 4: what `capabilities.list` answers (`approve` / `rollback` / `trial` change it like the SDK would). */
   /** `capabilities.show`'s `plugins` per candidate id, when a test needs other than the default. */
   pluginInfo: Record<string, readonly PluginApprovalInfo[]> = {}
+  /** `capabilities.show`'s gate evidence (`receipts`, `decisions`) per candidate id. */
+  evidence: Record<string, Pick<CandidateDetail, 'receipts' | 'decisions'>> = {}
   capabilities: CapabilityListing = { current: { version: 'baseline', revision: 0, components: [] }, history: [], candidates: [] }
   /** Step 5: what `improvements.list` answers (`run` / `cancel` change it like the SDK would). */
   improvements: ImprovementListing = { jobs: [], pending: 0, threshold: 3, budget: { usedTokens: 0, maxTokens: 3_000_000, windowDays: 30 } }
@@ -212,7 +214,7 @@ export class FakeBridge implements NexgentBridge {
     'capabilities.show': input => {
       const view = this.capabilities.candidates.find(c => c.id === input.candidateId)
       if (view === undefined) throw { name: 'NexgentError', code: 'tool/invalid-input', message: `no candidate ${input.candidateId}` }
-      return candidateDetail(view, BUNDLE, this.pluginInfo[view.id])
+      return { ...candidateDetail(view, BUNDLE, this.pluginInfo[view.id]), ...this.evidence[view.id] }
     },
     'capabilities.trial': input => this.setCandidate(input.candidateId, { status: 'trialing', trialId: 'trial-1' }),
     'capabilities.approve': input => {

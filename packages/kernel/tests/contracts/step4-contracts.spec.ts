@@ -179,10 +179,23 @@ describe('the adoption rule', () => {
   })
   const tie = { selection: { candidate: arm(2, 2), baseline: arm(2, 2) } }
 
-  it('adopts higher quality within the cost cap', () => {
-    expect(decideTrial(tally(), 1.2)).toEqual({ outcome: 'adopt', reason: 'quality-up', passRate: { candidate: 1, baseline: 0.5 }, costRatio: 1, decidedByReview: false })
-    expect(decideTrial(tally({ tokens: { candidate: 1200, baseline: 1000 } }), 1.2).reason).toBe('quality-up')
-    expect(decideTrial(tally({ tokens: { candidate: 1300, baseline: 1000 } }), 1.2)).toMatchObject({ outcome: 'reject', reason: 'cost-over-cap' })
+  it('adopts higher quality whatever it costs up to the approval ratio, then waits for the user (ADR 0007)', () => {
+    expect(decideTrial(tally(), 1.2)).toEqual({ outcome: 'adopt', reason: 'quality-up', passRate: { candidate: 1, baseline: 0.5 }, costRatio: 1, costBasis: 'tokens', decidedByReview: false })
+    expect(decideTrial(tally({ tokens: { candidate: 1500, baseline: 1000 } }), 1.2)).toMatchObject({ outcome: 'adopt', reason: 'quality-up', costRatio: 1.5 })
+    expect(decideTrial(tally({ tokens: { candidate: 2000, baseline: 1000 } }), 1.2)).toMatchObject({ outcome: 'adopt', reason: 'quality-up', costRatio: 2 })
+    expect(decideTrial(tally({ tokens: { candidate: 2100, baseline: 1000 } }), 1.2)).toMatchObject({ outcome: 'await-approval', reason: 'quality-up' })
+    expect(decideTrial(tally({ tokens: { candidate: 1300, baseline: 1000 } }), 1.2, 1.25)).toMatchObject({ outcome: 'await-approval', reason: 'quality-up' })
+  })
+
+  it('compares estimated dollars (cache included) when both arms have them, tokens otherwise', () => {
+    // The step-5 real run: tokens 1.555×, dollars 1.16×.
+    const run = tally({ tokens: { candidate: 8334, baseline: 5359 }, usd: { candidate: 0.47, baseline: 0.41 } })
+    expect(decideTrial(run, 1.2)).toMatchObject({ outcome: 'adopt', reason: 'quality-up', costBasis: 'usd' })
+    expect(decideTrial(run, 1.2).costRatio).toBeCloseTo(0.47 / 0.41)
+    expect(decideTrial(tally({ tokens: { candidate: 1000, baseline: 1000 }, usd: { candidate: 2.5, baseline: 1 } }), 1.2)).toMatchObject({ outcome: 'await-approval', costBasis: 'usd', costRatio: 2.5 })
+    expect(decideTrial(tally({ tokens: { candidate: 1500, baseline: 1000 }, usd: { candidate: 'unknown', baseline: 1 } }), 1.2)).toMatchObject({ costBasis: 'tokens', costRatio: 1.5 })
+    expect(decideTrial(tally({ tokens: { candidate: 1500, baseline: 1000 }, usd: { candidate: 0, baseline: 0 } }), 1.2)).toMatchObject({ costBasis: 'tokens', costRatio: 1.5 })
+    expect(decideTrial(tally({ ...tie, tokens: { candidate: 900, baseline: 1000 }, usd: { candidate: 1.1, baseline: 1 } }), 1.2)).toMatchObject({ outcome: 'reject', reason: 'no-improvement', costBasis: 'usd' })
   })
 
   it('rejects unknown runs, an exhausted budget, guard regressions and lower quality', () => {

@@ -72,7 +72,8 @@
   - 改进作业的候选（`origin: improvement`）以作业的反馈任务为 selection 首个用例（`selectionAnchor`，读 `improvements/<jobId>/job.json`：首条反馈的会话，否则请求的会话或任务，否则失败检查的任务），不是候选自己的 `taskId`。该任务不能回放时门控返回 `skipped`，手动 `trial` 抛 `tool/invalid-input`。这类候选不由 `startPending` 自动起门控，由作业自己跑（历史不够时作业停在 `waiting-history`，之后再跑）。
   - 反馈任务的每次 selection 运行之后做一次反馈检查（`TrialReviewer.checkFeedback`，SDK 里一次运行一个请求，只看该次运行的产出与反馈原文，不做 A/B 对比），记 `trial.feedback`，计入该侧质量，另给 `feedbackPassRate`。没有检查器、运行 unknown、额度用尽时检查记 `unknown`，候选不被采用（`unknown-runs`）。
   - 作业候选的回放运行带 `improvement.jobId`；SDK 的回放进程里 `ctx.agents.create` 加 `improvement: { jobId, phase: 'trial' }`，评审与反馈检查的账本记录也带 `improvementId` 与 `improvementPhase: trial`。
-  - `estimatedUsd` 由运行器与评审给出（SDK 用 `@nexgent/llm` 的 `estimateUsd`，只作显示），有一项 unknown 则合计 unknown。
+  - `estimatedUsd` 由运行器与评审给出（SDK 用 `@nexgent/llm` 的 `estimateUsd`），有一项 unknown 则合计 unknown。
+- ADR 0007（用户 2026-10-13 选 C）：两臂的美元都已知时，费用比按美元算（含缓存），否则按 token。质量提高时不因费用拒绝，费用比超过 `costApprovalRatio`（默认 2）时改为 `await-approval`，说明文字写明倍数和两臂的美元。打平时规则不变（更省才采用，评审偏好时比值 ≤ `costRatioCap`）。
 - 用量退化：`checkUsageRegression` 在根会话解析版本前和每轮结束后执行，只看 `gate` / `approval` 采用之后、该版本上的非试验记录：新组件工具的 `tool.call` 错误序列与根任务 `task.outcome.checks`（刚结束那一轮用 `turnOutcome()` 补上），交给 `decideUsageRollback`，触发即写 `usage-regression` 回滚。
 
 ## Known Limitations and Deferred Work

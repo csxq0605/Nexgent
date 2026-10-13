@@ -2,11 +2,15 @@
 /**
  * Step 4 in the renderer (W4): the 能力 tab shows the adopted version, its
  * problem, candidates with their gate results and the history; a plugin
- * candidate awaiting approval asks in a dialog (allow adopts, deny rejects);
+ * candidate awaiting approval asks in a dialog (allow adopts, deny rejects),
+ * and so does a quality rise above the cost limit (ADR 0007: the ratio, each
+ * arm's cost and the quality comparison, without the plugin wording);
  * manual rollback.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import type { CandidateDetail } from '@nexgent/sdk'
+import type { TrialCost, TrialVerdict } from '@nexgent/kernel'
 import { BUNDLE, FakeBridge, candidate, pluginInfo } from '../testing/fake-bridge.js'
 import { emit, renderApp } from './helpers.js'
 
@@ -125,6 +129,7 @@ describe('plugin package approval', () => {
     expect(within(dialog).queryByTestId('plugin-approval-unreadable')).toBeNull()
     expect((within(dialog).getByTestId('plugin-allow') as HTMLButtonElement).disabled).toBe(false)
     expect(dialog.textContent).toContain('拥有应用的全部权限')
+    expect(within(dialog).queryByTestId('approval-cost')).toBeNull()
     fireEvent.click(within(dialog).getByTestId('plugin-deny'))
     await waitFor(() => expect(screen.queryByTestId('plugin-approval-dialog')).toBeNull())
     expect(bridge.callsOf('capabilities.approve')).toEqual([{ projectId: 'p1', candidateId: 'c-9', decision: 'deny' }])
@@ -172,5 +177,90 @@ describe('plugin package approval', () => {
     expect(bridge.callsOf('capabilities.approve')).toEqual([{ projectId: 'p1', candidateId: 'c-9', decision: 'allow' }])
     expect(within(screen.getByTestId('capability-candidate')).getByTestId('candidate-status').textContent).toBe('已采用')
     expect(screen.getByTestId('capability-current').textContent).toContain('审批通过')
+  })
+
+  /** A gate that found the candidate better but `ratio`× the baseline's cost, waiting for the user (ADR 0007). */
+  const costEvidence = (candidateId: string, options: { readonly ratio: number; readonly basis: 'usd' | 'tokens'; readonly plugin?: boolean; readonly limit?: number }): Pick<CandidateDetail, 'receipts' | 'decisions'> => {
+    const trialId = `trial-${candidateId}`
+    const arm = (usd: number | 'unknown', tokens: number): TrialCost => ({ usage: { inputTokens: tokens - 1000, outputTokens: 1000, totalTokens: tokens, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }, requestCount: 4, estimatedUsd: usd })
+    const cost = options.basis === 'usd'
+      ? { candidate: arm(0.25, 30_000), baseline: arm(0.1, 20_000), review: arm(0.01, 2_000) }
+      : { candidate: arm('unknown', 60_000), baseline: arm('unknown', 20_000), review: arm('unknown', 2_000) }
+    const verdict: TrialVerdict = { outcome: 'await-approval', reason: 'quality-up', passRate: { candidate: 1, baseline: 0.5 }, feedbackPassRate: { candidate: 1, baseline: 0 }, costRatio: options.ratio, costBasis: options.basis, decidedByReview: false }
+    const ts = '2026-10-13T12:00:00.000Z'
+    return {
+      receipts: [
+        { type: 'trial.start', format: 1, trialId, ts, candidateId, candidateVersion: BUNDLE, baselineVersion: 'baseline', plan: { selection: [], guard: [], repeats: 2, costRatioCap: 1.2, ...(options.limit === undefined ? {} : { costApprovalRatio: options.limit }), reviewer: { model: 'claude-sonnet-5-5', thinking: 'on' }, budget: { maxTokens: 100_000 } } },
+        { type: 'trial.end', format: 1, trialId, ts, status: 'pass', verdict, cost },
+      ],
+      decisions: [{ formatVersion: 1, id: `d-${candidateId}`, outcome: 'awaiting-approval', reason: 'quality-up', trigger: 'gate', decidedAt: ts, candidateId, trialId, fromVersion: 'baseline', toVersion: 'baseline', verdict, cost, detail: 'Cost candidate/baseline (estimated USD, cache included): 2.5×' }],
+    } as Pick<CandidateDetail, 'receipts' | 'decisions'>
+  }
+
+  const costAwaiting = (options: { readonly plugin: boolean }) => {
+    const bridge = new FakeBridge()
+    bridge.capabilities = {
+      ...bridge.capabilities,
+      candidates: [candidate({
+        id: 'c-7',
+        status: 'awaiting-approval',
+        requiresApproval: options.plugin,
+        components: options.plugin ? [{ kind: 'plugin', name: 'greeter' }] : [{ kind: 'skill', name: 'region-table' }],
+        summary: '地区表带均价',
+        decision: { id: 'd-c-7', outcome: 'awaiting-approval', reason: 'quality-up', detail: 'costly' },
+      })],
+    }
+    return bridge
+  }
+
+  it('a quality rise above the cost limit asks with the ratio, both arms in dollars and the quality, without plugin wording', async () => {
+    const bridge = costAwaiting({ plugin: false })
+    bridge.evidence['c-7'] = costEvidence('c-7', { ratio: 2.5, basis: 'usd', limit: 2 })
+    await renderApp(bridge)
+    const dialog = await screen.findByTestId('plugin-approval-dialog')
+    expect(dialog.textContent).toContain('候选需要你的批准')
+    expect(within(dialog).getByTestId('approval-cost-ratio').textContent).toBe('费用约为基线的 2.5 倍（超过 2 倍不自动采用）')
+    expect(within(dialog).getByTestId('approval-cost-amounts').textContent).toBe('估算费用（含缓存）：候选约 $0.25，基线约 $0.10')
+    expect(within(dialog).getByTestId('approval-quality').textContent).toBe('检查通过率：候选 100%，基线 50%')
+    expect(within(dialog).getByTestId('approval-feedback').textContent).toBe('其中反馈检查（单独记）：候选 100%，基线 0%')
+    expect(within(dialog).queryByTestId('approval-plugins')).toBeNull()
+    expect(within(dialog).queryByTestId('plugin-approval-names')).toBeNull()
+    expect(dialog.textContent).not.toContain('插件')
+    expect(within(dialog).getByTestId('plugin-approval-hash').textContent).toBe(BUNDLE)
+    fireEvent.click(within(dialog).getByTestId('plugin-allow'))
+    await waitFor(() => expect(screen.queryByTestId('plugin-approval-dialog')).toBeNull())
+    expect(bridge.callsOf('capabilities.approve')).toEqual([{ projectId: 'p1', candidateId: 'c-7', decision: 'allow' }])
+  })
+
+  it('without dollar estimates the cost part compares tokens; a plan before ADR 0007 uses the default limit of 2', async () => {
+    const bridge = costAwaiting({ plugin: false })
+    bridge.evidence['c-7'] = costEvidence('c-7', { ratio: 3, basis: 'tokens' })
+    await renderApp(bridge)
+    const dialog = await screen.findByTestId('plugin-approval-dialog')
+    expect(within(dialog).getByTestId('approval-cost-ratio').textContent).toBe('费用约为基线的 3 倍（超过 2 倍不自动采用）')
+    expect(within(dialog).getByTestId('approval-cost-amounts').textContent).toBe('没有美元估算，按 token（输入 + 输出）比较：候选 60,000，基线 20,000')
+  })
+
+  it('a plugin candidate above the cost limit shows both parts', async () => {
+    const bridge = costAwaiting({ plugin: true })
+    bridge.evidence['c-7'] = costEvidence('c-7', { ratio: 2.5, basis: 'usd', limit: 2 })
+    await renderApp(bridge)
+    const dialog = await screen.findByTestId('plugin-approval-dialog')
+    expect(dialog.textContent).toContain('候选需要你的批准')
+    expect(within(dialog).getByTestId('approval-cost-ratio').textContent).toContain('2.5 倍')
+    expect(within(dialog).getByTestId('approval-plugins').textContent).toContain('拥有应用的全部权限')
+    expect(within(dialog).getByTestId('plugin-approval-names').textContent).toBe('greeter')
+    expect(within(dialog).getByTestId('plugin-approval-permissions').textContent).toBe('插件自述的权限：读取项目文件；联网查询天气')
+    expect(within(dialog).getAllByTestId('plugin-approval-hash')).toHaveLength(1)
+  })
+
+  it('a plugin candidate within the cost limit shows only the plugin part', async () => {
+    const bridge = costAwaiting({ plugin: true })
+    bridge.evidence['c-7'] = costEvidence('c-7', { ratio: 1.5, basis: 'usd', limit: 2 })
+    await renderApp(bridge)
+    const dialog = await screen.findByTestId('plugin-approval-dialog')
+    expect(dialog.textContent).toContain('插件包需要你的批准')
+    expect(within(dialog).queryByTestId('approval-cost')).toBeNull()
+    expect(within(dialog).getByTestId('plugin-approval-names').textContent).toBe('greeter')
   })
 })

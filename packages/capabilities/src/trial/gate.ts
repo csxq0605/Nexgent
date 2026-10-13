@@ -19,7 +19,8 @@
  *    checks in the receipts).
  * 5. `decideTrial` gives the verdict; the gate writes `trial.end`, then the
  *    decision: an adoption revision (`trigger: gate`), an awaiting-approval
- *    decision for a plugin, or a rejection. Rejected candidates and their
+ *    decision for a plugin (or, ADR 0007, a quality rise costing more than
+ *    `costApprovalRatio` times the baseline), or a rejection. Rejected candidates and their
  *    receipts stay on disk.
  *
  * The gate reads its parameters from `.nexgent/config.json` (a candidate
@@ -31,7 +32,9 @@
  * reads the run's output and the feedback, `trial.feedback`), counted into
  * that arm's quality by `decideTrial` and reported apart from the checks.
  * Replay runs of a job's candidate belong to the job's `trial` phase.
- * Costs carry the display-only `estimatedUsd` the runner and reviewer give.
+ * Costs carry the `estimatedUsd` the runner and reviewer give; ADR 0007:
+ * the verdict's cost ratio is in those dollars (cache included) when both
+ * arms have them, in tokens otherwise.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
@@ -255,7 +258,16 @@ function unknownReason(outcome: ReplayRunResult['outcome']): TrialUnknownReason 
   return outcome === 'completed' ? 'error' : outcome
 }
 
-function explain(verdict: TrialVerdict, tally: { selection: { candidate: ArmTally; baseline: ArmTally }; guard: { candidate: ArmTally; baseline: ArmTally } }, review: { candidate: number; baseline: number; tie: number }, extra?: string): string {
+function ratioText(verdict: TrialVerdict): string {
+  return verdict.costRatio === 'unknown' ? 'unknown' : `${verdict.costRatio.toFixed(3)}×`
+}
+
+function usdText(value: number | 'unknown'): string {
+  return value === 'unknown' ? 'unknown' : value.toFixed(4)
+}
+
+function explain(verdict: TrialVerdict, tally: { selection: { candidate: ArmTally; baseline: ArmTally }; guard: { candidate: ArmTally; baseline: ArmTally }; usd?: { candidate: number | 'unknown'; baseline: number | 'unknown' } }, review: { candidate: number; baseline: number; tie: number }, extra?: string): string {
+  const usd = tally.usd
   const rate = (value: number) => `${Math.round(value * 100)}%`
   const parts = [
     `${verdict.outcome} (${verdict.reason}).`,
@@ -266,7 +278,7 @@ function explain(verdict: TrialVerdict, tally: { selection: { candidate: ArmTall
     ...(verdict.feedbackPassRate === undefined
       ? []
       : [`Feedback checks (reviewer model, separate from the deterministic checks) passed: candidate ${rate(verdict.feedbackPassRate.candidate)}, baseline ${rate(verdict.feedbackPassRate.baseline)}.`]),
-    `Token ratio candidate/baseline: ${verdict.costRatio === 'unknown' ? 'unknown' : verdict.costRatio.toFixed(3)}.`,
+    `Cost candidate/baseline (${verdict.costBasis === 'usd' ? 'estimated USD, cache included' : 'tokens'}): ${ratioText(verdict)}${usd === undefined ? '' : ` (about ${usdText(usd.candidate)} vs ${usdText(usd.baseline)} USD)`}.`,
     review.candidate + review.baseline + review.tie > 0
       ? `Reviewer model (separate from the checks): candidate ${review.candidate}, baseline ${review.baseline}, tie ${review.tie}${verdict.decidedByReview ? '; it decided this verdict' : ''}.`
       : 'No reviewer opinion was needed.',
@@ -315,6 +327,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
     guard: set.guard.map(planRef),
     repeats: settings.repeats,
     costRatioCap: settings.costRatioCap,
+    costApprovalRatio: settings.costApprovalRatio,
     reviewer: settings.reviewer,
     budget: settings.trialBudget,
   }
@@ -460,10 +473,11 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
       guard: tally.guard,
       review,
       tokens,
+      usd: { candidate: arms.candidate.usd, baseline: arms.baseline.usd },
       budgetExhausted,
       requiresApproval: candidate.requiresApproval,
       ...(hasFeedback ? { feedback: feedbackTally } : {}),
-    }, plan.costRatioCap)
+    }, plan.costRatioCap, plan.costApprovalRatio)
     let verdict = verdictOf()
     // The reviewer is asked only when its opinion can change the verdict: a check tie the cost does not settle.
     const needsReview = !budgetExhausted && verdict.reason === 'no-improvement' && verdict.costRatio !== 'unknown' && verdict.costRatio <= plan.costRatioCap
@@ -506,9 +520,10 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
     emit(await receipts.append({ type: 'trial.end', status, verdict, cost: costs }))
 
     const common = { candidateId: candidate.id, trialId, verdict, cost: costs }
+    const shown = { ...tally, usd: { candidate: arms.candidate.usd, baseline: arms.baseline.usd } }
     let decision: CapabilityDecision
     if (verdict.outcome === 'adopt') {
-      const committed = await store.adopt(candidate.version, { trigger: 'gate', reason: verdict.reason, detail: explain(verdict, tally, review), ...common }, observed).catch(() => null)
+      const committed = await store.adopt(candidate.version, { trigger: 'gate', reason: verdict.reason, detail: explain(verdict, shown, review), ...common }, observed).catch(() => null)
       decision = committed?.decision ?? await store.recordDecision({
         outcome: 'rejected',
         reason: 'interrupted',
@@ -516,7 +531,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
         fromVersion: baselineVersion,
         toVersion: baselineVersion,
         ...common,
-        detail: explain(verdict, tally, review, 'The adopted version changed while the trial ran, so this result was not applied.'),
+        detail: explain(verdict, shown, review, 'The adopted version changed while the trial ran, so this result was not applied.'),
       })
     } else {
       decision = await store.recordDecision({
@@ -526,7 +541,11 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
         fromVersion: baselineVersion,
         toVersion: baselineVersion,
         ...common,
-        detail: explain(verdict, tally, review, verdict.outcome === 'await-approval' ? 'The candidate contains a plugin: it is adopted only after the user approves it.' : undefined),
+        detail: explain(verdict, shown, review, verdict.outcome !== 'await-approval'
+          ? undefined
+          : candidate.requiresApproval
+            ? 'The candidate contains a plugin: it is adopted only after the user approves it.'
+            : `It checks better but costs ${ratioText(verdict)} the baseline, above the ${plan.costApprovalRatio ?? 2}× that adopts on its own (ADR 0007): it is adopted only after the user approves it.`),
       })
     }
     return { status: 'decided', trialId, verdict, decision }

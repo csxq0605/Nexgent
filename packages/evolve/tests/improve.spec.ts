@@ -8,6 +8,7 @@ import {
   createJob,
   diagnosisTools,
   findFeedbackTask,
+  pendingContextPolicies,
   ImprovementHost,
   improvementsDir,
   jobPaths,
@@ -114,6 +115,16 @@ describe('the four read-only diagnosis tools', () => {
   })
 })
 
+describe('pending context policies', () => {
+  it('lists tried context policies until something is proposed', () => {
+    const tried = { type: 'capability.try', seq: 1, ts: '', turn: 1, step: 1, toolCallId: 'c', component: { kind: 'context-policy', name: 'p' }, revision: 1 }
+    const skill = { ...tried, seq: 2, component: { kind: 'skill', name: 's' } }
+    expect(pendingContextPolicies([tried, skill] as never)).toEqual([{ kind: 'context-policy', name: 'p' }])
+    expect(pendingContextPolicies([tried, { type: 'capability.propose', seq: 3, ts: '', turn: 2, step: 1, toolCallId: 'd', candidateId: 'x', proofs: [] }] as never)).toEqual([])
+    expect(pendingContextPolicies([skill] as never)).toEqual([])
+  })
+})
+
 describe('the feedback task', () => {
   it('replays the user messages before the first feedback, never the feedback itself', async () => {
     const fixture = await feedbackTask()
@@ -215,6 +226,50 @@ describe('an improvement job with a session runner (the three playbooks)', () =>
     await runImprovementJob(fixture.layout, job.id, { stages: createImprovementStages({ runner, startTrial: gate('adopted') }) })
     expect(await readJob(improvementsDir(fixture.layout), job.id)).toMatchObject({ status: 'failed' })
     expect(runner.opened).toHaveLength(1)
+  })
+
+  it('a context policy tried in the task gets one turn to check under it and one to propose it', async () => {
+    const fixture = await feedbackTask()
+    const job = await queuedJob(fixture)
+    const { JsonlSessionStore } = await import('@nexgent/session')
+    const store = new JsonlSessionStore({ sessionsDir: fixture.layout.sessions })
+    const policy = { kind: 'context-policy' as const, name: 'region-table-rules' }
+    let lock: Awaited<ReturnType<typeof store.create>> | undefined
+    const turn = async (sessionId: string, n: number, extra?: () => Promise<unknown>) => {
+      await store.append(sessionId, { type: 'turn.start', turn: n })
+      await extra?.()
+      await store.append(sessionId, { type: 'turn.end', turn: n, reason: { kind: 'completed' } })
+    }
+    const runner = scriptedRunner({
+      diagnose: reportOnce(fixture, 'context-policy'),
+      propose: async (request, _text, index) => {
+        if (index === 0) {
+          // The task turn: the policy is drafted and tried; proposing it now would be refused.
+          lock = await store.create({ sessionId: request.sessionId, projectRoot: fixture.layout.root, model: 'claude-sonnet-5-5', sandboxMode: 'workspace-write', capabilityVersion: 'baseline' })
+          await turn(request.sessionId, 1, () => store.append(request.sessionId, { type: 'capability.try', turn: 1, step: 1, toolCallId: 'call-try', component: policy, revision: 1 }))
+        } else if (index === 1) {
+          await turn(request.sessionId, 2)
+        } else {
+          await turn(request.sessionId, 3, () => proposeIn(fixture.layout.capabilities, request.sessionId, fixture.taskId, { origin: 'improvement', jobId: request.jobId }))
+          await store.release(lock!)
+        }
+      },
+    })
+    await runImprovementJob(fixture.layout, job.id, { stages: createImprovementStages({ runner, startTrial: gate('adopted') }) })
+    const done = await readJob(improvementsDir(fixture.layout), job.id)
+    expect(done.status).toBe('adopted')
+    expect(runner.texts).toHaveLength(4)
+    expect(runner.texts[1]).toMatch(/context-policy takes effect from the turn after you try it/)
+    expect(runner.texts[2]).toMatch(/region-table-rules is in effect now[\s\S]*Do not call capability_try or capability_propose/)
+    expect(runner.texts[3]).toMatch(/call capability_propose with exactly that one component \(kind context-policy\)/)
+  })
+
+  it('a skill proposed in the task turn gets no extra turns', async () => {
+    const fixture = await feedbackTask()
+    const job = await queuedJob(fixture)
+    const runner = scriptedRunner({ diagnose: reportOnce(fixture, 'skill'), propose: proposeInCopy(fixture) })
+    await runImprovementJob(fixture.layout, job.id, { stages: createImprovementStages({ runner, startTrial: gate('adopted') }) })
+    expect(runner.texts).toHaveLength(2)
   })
 
   it('a gate waiting for history parks the job; once resumed only the trial runs', async () => {
