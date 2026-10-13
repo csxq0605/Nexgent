@@ -7,15 +7,18 @@ import { existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import * as path from 'node:path'
 import { isNexgentError, NexgentError } from '@nexgent/kernel'
-import { createSdk, type LocalSdkOptions } from '@nexgent/sdk'
+import { createSdk, type LocalSdkOptions, type NexgentSdk } from '@nexgent/sdk'
 import { launchDesktop, type AppLaunchOptions } from './app-launch.js'
 import { createApprovalResponder, type AnswerSource } from './approval.js'
 import { commandUsage, parseCliArgs, RESUME_DEFAULT_TASK, usage, type Invocation } from './args.js'
 import { requireApiKey, type CredentialProbe } from './credentials.js'
 import { CliError, EXIT, type ExitCode } from './exit-codes.js'
 import {
-  formatCancelled, formatDetail, formatListing, formatRunNote, formatStarted, improveError, resolveJobId,
+  formatCancelled, formatDetail, formatListing, formatMetaStarted, formatRunNote, formatStarted, improveError, resolveJobId,
 } from './improve.js'
+import {
+  formatImproverDetail, formatImproverListing, formatRolledBack, improverError, knownVersions, resolveImproverVersion,
+} from './improvers.js'
 import { initProjectLayout } from './layout.js'
 import { TaskTally } from './outcome.js'
 import { createRenderer, type Renderer, type TextSink } from './render.js'
@@ -50,6 +53,8 @@ export interface CliDeps {
   readonly launchDesktop?: (options: AppLaunchOptions) => Promise<unknown>
   /** Extra options for the SDK of `improve` (tests: a `registry` that keeps jobs from starting a process). */
   readonly sdkOptions?: Partial<LocalSdkOptions>
+  /** Default: the in-process SDK (`createSdk`); tests pass a fake that answers `call` / `dispose`. */
+  readonly createSdk?: () => Pick<NexgentSdk, 'call' | 'dispose'>
 }
 
 /** The real process. */
@@ -117,6 +122,9 @@ export async function main(argv: readonly string[], io: CliIo = processIo(), dep
       case 'improve':
         renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
         return await runImprove(invocation, io, deps)
+      case 'improvers':
+        renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
+        return await runImprovers(invocation, io, deps)
       case 'run':
       case 'resume':
         renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
@@ -231,8 +239,8 @@ async function runExport(invocation: Extract<Invocation, { command: 'export' }>,
 async function runImprove(invocation: Extract<Invocation, { command: 'improve' }>, io: CliIo, deps: CliDeps): Promise<ExitCode> {
   const { layout } = await initProjectLayout(invocation.project, io.cwd)
   // Starting a job needs the key now: the job process reads it from the same sources.
-  if (invocation.action === 'run') await requireApiKey(deps.credentials ?? { env: io.env })
-  const sdk = createSdk({ appVersion: packageVersion(), env: io.env, ...deps.sdkOptions })
+  if (invocation.action === 'run' || invocation.action === 'meta') await requireApiKey(deps.credentials ?? { env: io.env })
+  const sdk = deps.createSdk?.() ?? createSdk({ appVersion: packageVersion(), env: io.env, ...deps.sdkOptions })
   const print = (type: string, text: string, data: Record<string, unknown>): void => {
     io.stdout.write(invocation.json ? `${JSON.stringify({ type, ...data })}\n` : `${text}\n`)
   }
@@ -261,6 +269,11 @@ async function runImprove(invocation: Extract<Invocation, { command: 'improve' }
           print('improve.run', formatStarted(job), { job })
           break
         }
+        case 'meta': {
+          const job = await sdk.call('improvements.runMeta', { projectId })
+          print('improve.meta', formatMetaStarted(job), { job })
+          break
+        }
         case 'cancel': {
           const jobId = await resolve(invocation.jobId ?? '')
           const job = await sdk.call('improvements.cancel', { projectId, jobId })
@@ -270,6 +283,48 @@ async function runImprove(invocation: Extract<Invocation, { command: 'improve' }
       }
     } catch (error) {
       throw improveError(error)
+    }
+    return EXIT.OK
+  } finally {
+    await sdk.dispose()
+  }
+}
+
+async function runImprovers(invocation: Extract<Invocation, { command: 'improvers' }>, io: CliIo, deps: CliDeps): Promise<ExitCode> {
+  const { layout } = await initProjectLayout(invocation.project, io.cwd)
+  const sdk = deps.createSdk?.() ?? createSdk({ appVersion: packageVersion(), env: io.env, ...deps.sdkOptions })
+  const print = (type: string, text: string, data: Record<string, unknown>): void => {
+    io.stdout.write(invocation.json ? `${JSON.stringify({ type, ...data })}\n` : `${text}\n`)
+  }
+  try {
+    const { projectId } = await sdk.call('projects.open', { root: layout.root })
+    const resolve = async (given: string): Promise<string> => resolveImproverVersion(knownVersions(await sdk.call('improvers.list', { projectId })), given)
+    try {
+      switch (invocation.action) {
+        case 'list': {
+          const listing = await sdk.call('improvers.list', { projectId })
+          print('improvers.list', formatImproverListing(listing), { ...listing })
+          break
+        }
+        case 'show': {
+          const version = await resolve(invocation.version ?? '')
+          const detail = await sdk.call('improvers.show', { projectId, version })
+          print('improvers.show', formatImproverDetail(detail), { ...detail })
+          break
+        }
+        case 'rollback': {
+          const toVersion = invocation.to === undefined ? undefined : await resolve(invocation.to)
+          const current = await sdk.call('improvers.rollback', {
+            projectId,
+            ...(toVersion === undefined ? {} : { toVersion }),
+            ...(invocation.reason === undefined ? {} : { reason: invocation.reason }),
+          })
+          print('improvers.rollback', formatRolledBack(current), { current })
+          break
+        }
+      }
+    } catch (error) {
+      throw improverError(error)
     }
     return EXIT.OK
   } finally {

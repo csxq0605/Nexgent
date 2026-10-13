@@ -62,7 +62,7 @@ import {
   type UserMessageSource,
 } from '@nexgent/kernel'
 import { capabilitiesOf, type CapabilityService } from '@nexgent/capabilities'
-import type { ImprovementHost } from '@nexgent/evolve'
+import { improvementsDir, type ImprovementHost } from '@nexgent/evolve'
 import { projectSession, SESSION_FILE_NAME } from '@nexgent/session'
 import { createFeedbackEntry, materialAddedRecord, type LocalTaskingService } from '@nexgent/tasking'
 import {
@@ -86,6 +86,7 @@ import {
 import { bootProjectApp, ROOT_SESSION_RECOVERIES, type BootOptions } from './boot.js'
 import * as capabilities from './capabilities.js'
 import * as improvements from './improvements.js'
+import * as improvers from './improvers.js'
 import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
 import { collaborationView, historyItems, memberRunView, runKey, sessionSummary, turnUsage } from './history.js'
@@ -182,11 +183,6 @@ interface PendingApproval {
   readonly decision: Promise<ApprovalDecision>
   /** Answer it; `false` when it was already answered. */
   readonly resolve: (decision: ApprovalDecision) => boolean
-}
-
-/** A method whose contract exists but whose implementation lands in a later work item. */
-function notYet(method: string): Promise<never> {
-  return Promise.reject(new NexgentError('internal', `${method} is not available yet (step 6 improvers and meta jobs)`))
 }
 
 function tallyStatus(tally: TurnTally): TaskOutcomeStatus {
@@ -502,6 +498,10 @@ export class LocalNexgentSdk implements NexgentSdk {
       if (host !== undefined) {
         project.jobs = new improvements.JobWatch(host, job => {
           void improvements.viewOf(host, job).then(view => this.emitProject(projectId, { type: 'improvement.job', job: view }), () => undefined)
+          // A meta job that adopted its child changed the improver in force.
+          if (job.kind === 'meta' && job.status === 'adopted') {
+            void improvers.current(improvers.storeOf(ctx.workspace.layout)).then(({ view }) => this.emitProject(projectId, { type: 'improver.version', current: view }), () => undefined)
+          }
         })
         await project.jobs.start()
       }
@@ -1181,11 +1181,30 @@ export class LocalNexgentSdk implements NexgentSdk {
         await project.jobs?.check()
         return view
       },
-      // Step 6 (W0 contract only): improver versions and meta jobs are implemented by `@nexgent/capabilities` / `@nexgent/evolve` and wired here later (W5).
-      'improvements.runMeta': () => notYet('improvements.runMeta'),
-      'improvers.list': () => notYet('improvers.list'),
-      'improvers.show': () => notYet('improvers.show'),
-      'improvers.rollback': () => notYet('improvers.rollback'),
+      // Step 6: meta jobs over `@nexgent/evolve`; improver versions over `@nexgent/capabilities` (`.nexgent/improvers/`), project-level `improver.version` events.
+      'improvements.runMeta': async input => {
+        const project = this.project(input.projectId)
+        const view = await improvements.runMeta(this.improve(project), input)
+        await project.jobs?.check()
+        return view
+      },
+      'improvers.list': async input => {
+        const project = this.project(input.projectId)
+        const { listing, changed } = await improvers.list(improvers.storeOf(project.app.ctx.workspace.layout))
+        if (changed) this.emitProject(project.projectId, { type: 'improver.version', current: listing.current })
+        return listing
+      },
+      'improvers.show': input => {
+        const project = this.project(input.projectId)
+        const layout = project.app.ctx.workspace.layout
+        return improvers.show(improvers.storeOf(layout), improvementsDir(layout), input.version)
+      },
+      'improvers.rollback': async input => {
+        const project = this.project(input.projectId)
+        const current = await improvers.rollback(improvers.storeOf(project.app.ctx.workspace.layout), input)
+        this.emitProject(project.projectId, { type: 'improver.version', current })
+        return current
+      },
     }
   }
 

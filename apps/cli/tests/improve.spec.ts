@@ -77,6 +77,7 @@ describe('args', () => {
     expect(parseCliArgs(['improve', 'show', 'abc', '--project', 'p', '--json'])).toMatchObject({ action: 'show', jobId: 'abc', json: true })
     expect(parseCliArgs(['improve', 'run', '--project', 'p', '--session', 's', '--deliverable', 'd'])).toMatchObject({ action: 'run', sessionId: 's', deliverableId: 'd' })
     expect(() => parseCliArgs(['improve', '--project', 'p'])).toThrow(/needs an action/)
+    expect(parseCliArgs(['improve', 'meta', '--project', 'p'])).toMatchObject({ action: 'meta' })
     expect(() => parseCliArgs(['improve', 'nope', '--project', 'p'])).toThrow(/unknown improve action/)
     expect(() => parseCliArgs(['improve', 'show', '--project', 'p'])).toThrow(/needs a <jobId>/)
     expect(() => parseCliArgs(['improve', 'list', '--project', 'p', '--session', 's'])).toThrow(/does not accept --session/)
@@ -143,7 +144,7 @@ describe('nexgent improve', () => {
     await ensureQueue(dir)
     const r = await improve(['list'])
     expect(r.code, r.err).toBe(EXIT.OK)
-    expect(r.out).toMatch(/^Improvement jobs: pending 0\/\d+ \| budget 0\/\d+ tokens in \d+ days\nNo improvement jobs yet\.\n$/)
+    expect(r.out).toMatch(/^Improvement jobs: pending 0\/\d+ \| budget 0\/\d+ tokens in \d+ days\n(meta: (on|off), \d+\/\d+ finished jobs counted, budget \d+\/\d+ tokens \(\d+ days\)\n)?No improvement jobs yet\.\n$/)
   })
 
   it('list: jobs newest first with detail and unknown cost; --json', async () => {
@@ -153,9 +154,9 @@ describe('nexgent improve', () => {
     await makeJob(C, new Date().toISOString())
     const r = await improve(['list'])
     expect(r.code, r.err).toBe(EXIT.OK)
-    const lines = r.out.trimEnd().split('\n').slice(1)
-    expect(lines[0]).toMatch(/^cccccccc {2}queued {2}feedback-count {2}\d{4}-\d{2}-\d{2} \d{2}:\d{2}Z {2}0 tokens/)
-    expect(lines[1]).toMatch(/^aaaaaaaa {2}failed /)
+    const lines = r.out.trimEnd().split('\n').slice(1).filter(line => !line.startsWith('meta: '))
+    expect(lines[0]).toMatch(/^cccccccc {2}job {2}queued {2}feedback-count {2}v0 {2}\d{4}-\d{2}-\d{2} \d{2}:\d{2}Z {2}0 tokens/)
+    expect(lines[1]).toMatch(/^aaaaaaaa {2}job {2}failed /)
     expect(lines[2]).toBe('    the model said no')
     const json = await improve(['list', '--json'])
     const parsed = JSON.parse(json.out) as { type: string; jobs: Array<{ id: string }> }
@@ -171,6 +172,7 @@ describe('nexgent improve', () => {
     expect(ok.code, ok.err).toBe(EXIT.OK)
     expect(ok.out).toContain(`Improvement job ${A}`)
     expect(ok.out).toContain('failed: boom')
+    expect(ok.out).toContain('improver: v0')
     expect(ok.out).toContain('tokens: none yet')
     const ambiguous = await improve(['show', 'aaaa'])
     expect(ambiguous.code).toBe(EXIT.USAGE)

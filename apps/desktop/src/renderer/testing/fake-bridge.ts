@@ -4,8 +4,8 @@
  * handlers, and `emit` to push `SdkEvent`s as the main process would.
  * Never bundled into the app (only tests import it).
  */
-import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, MaterialMetadata, PluginApprovalInfo } from '@nexgent/kernel'
-import type { CandidateDetail, CandidateView, CapabilityListing, ImprovementDetail, ImprovementJobView, ImprovementListing, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, WorkflowView } from '@nexgent/sdk'
+import type { ApprovalRequest, ComparisonArmResult, DeliverableDiff, DeliverableSummary, DeliverableVersion, ImproverBundle, ImproverChangeRecord, ImproverComparison, MaterialMetadata, MetaDiagnosis, PluginApprovalInfo } from '@nexgent/kernel'
+import type { CandidateDetail, CandidateView, CapabilityListing, ImprovementDetail, ImprovementJobView, ImprovementListing, ImproverDetail, ImproverListing, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -135,6 +135,58 @@ export function improvementDetail(view: ImprovementJobView, extra: Partial<Omit<
   }
 }
 
+/** A stand-in for the built-in improver `v0` (the kernel's value is not importable in jsdom). */
+export const V0_BUNDLE: ImproverBundle = {
+  formatVersion: 1,
+  diagnosis: { paragraphs: ['You are the diagnosis step of Nexgent\'s improvement job.', 'Find out why, using only the read-only tools: read the sessions, the ledger and the feedback.'] },
+  proposal: { kinds: ['skill', 'function-module'], briefs: { skill: '# Improvement job {{jobId}}', 'function-module': '# Improvement job {{jobId}}' } },
+  comparison: { selectionCases: 2, repeats: 2, selection: 'similarity' },
+}
+
+export const CHILD_VERSION = 'c'.repeat(64)
+
+/** A meta job as `improvements.list` shows it (step 6). */
+export function metaJob(overrides: Partial<ImprovementJobView> = {}): ImprovementJobView {
+  return improvementJob({ id: 'm-1', kind: 'meta', trigger: 'job-count' as never, status: 'comparing', improverVersion: 'v0', itemCount: 3, ...overrides })
+}
+
+export function metaDiagnosis(overrides: Partial<MetaDiagnosis> = {}): MetaDiagnosis {
+  return {
+    formatVersion: 1, jobId: 'm-1', createdAt: '2026-10-12T08:00:00.000Z', sessionId: 'i1', attempts: 1, improverVersion: 'v0', basis: ['j-1', 'j-2', 'j-3'], statusCounts: { rejected: 2, adopted: 1 },
+    hypothesis: '诊断没有要求引用反馈原文',
+    proposal: 'change',
+    findings: [
+      { stage: 'diagnose', label: '诊断笼统', jobIds: ['j-1', 'j-2'] },
+      { stage: 'trial', label: '试验次数少', jobIds: ['j-3'] },
+    ],
+    ...overrides,
+  }
+}
+
+export function changeRecord(overrides: Partial<ImproverChangeRecord> = {}): ImproverChangeRecord {
+  return {
+    formatVersion: 1, jobId: 'm-1', createdAt: '2026-10-12T08:10:00.000Z', sessionId: 'i2', attempts: 1, parentVersion: 'v0', childVersion: CHILD_VERSION,
+    change: { op: 'set-diagnosis-paragraph', index: 1, text: '先读完反馈原文，再下结论。' },
+    rationale: '让诊断更具体',
+    ...overrides,
+  }
+}
+
+const ORIGIN = { sourceJobId: 'j-3', tree: 't'.repeat(64), feedbackIds: ['f1'], capabilityVersion: 'baseline', epoch: 'e1' }
+
+export function armResult(arm: 'parent' | 'child', overrides: Partial<ComparisonArmResult> = {}): ComparisonArmResult {
+  return {
+    arm, improverVersion: arm === 'parent' ? 'v0' : CHILD_VERSION, origin: ORIGIN, jobId: `${arm}-job`, status: 'adopted', candidateId: `${arm === 'parent' ? 'a' : 'b'}1234567890`,
+    verdict: { outcome: 'adopt', reason: 'quality-up', passRate: { candidate: arm === 'parent' ? 0.5 : 1, baseline: 0 }, costRatio: 1, decidedByReview: false },
+    cost: { usage: { ...ZERO_USAGE, totalTokens: 1000 } as never, requestCount: 3, estimatedUsd: 0.2 },
+    ...overrides,
+  }
+}
+
+export function comparison(overrides: Partial<ImproverComparison> = {}): ImproverComparison {
+  return { formatVersion: 1, jobId: 'm-1', createdAt: '2026-10-12T08:30:00.000Z', origin: ORIGIN, parent: armResult('parent'), child: armResult('child'), verdict: { outcome: 'adopt', reason: 'quality-up', quality: { parent: 0.5, child: 1 } }, ...overrides } as ImproverComparison
+}
+
 export class FakeBridge implements NexgentBridge {
   readonly platform = 'linux'
   readonly calls: FakeCall[] = []
@@ -163,6 +215,10 @@ export class FakeBridge implements NexgentBridge {
   improvements: ImprovementListing = { jobs: [], pending: 0, threshold: 3, budget: { usedTokens: 0, maxTokens: 3_000_000, windowDays: 30 }, autoImprove: true }
   /** `improvements.show` per job id; a job without an entry answers a bare detail. */
   improvementDetails: Record<string, ImprovementDetail> = {}
+  /** Step 6: what `improvers.list` answers (`rollback` changes it like the SDK would). */
+  improver: ImproverListing = { current: { version: 'v0', revision: 0 }, history: [] }
+  /** `improvers.show` per version; `v0` is built in. */
+  improverBundles: Record<string, ImproverBundle> = {}
   readonly handlers: Record<string, Handler> = {
     'app.info': () => ({ sdkVersion: 6, appVersion: '0.0.0-test', platform: 'linux' }),
     'projects.recent': () => this.recent,
@@ -257,6 +313,28 @@ export class FakeBridge implements NexgentBridge {
       const { activeJobId, ...rest } = this.improvements
       this.improvements = { ...rest, jobs: this.improvements.jobs.map(j => (j.id === job.id ? job : j)), ...(activeJobId === job.id || activeJobId === undefined ? {} : { activeJobId }) }
       return job
+    },
+    'improvements.runMeta': () => {
+      if (this.improvements.activeJobId !== undefined) throw { name: 'NexgentError', code: 'improvement/busy', message: 'an improvement job is already running' }
+      const job = metaJob({ id: `m-${this.improvements.jobs.length + 1}`, trigger: 'explicit', status: 'queued' })
+      this.improvements = { ...this.improvements, jobs: [job, ...this.improvements.jobs], activeJobId: job.id }
+      return job
+    },
+    'improvers.list': () => this.improver,
+    'improvers.show': input => {
+      const bundle = input.version === 'v0' ? V0_BUNDLE : this.improverBundles[input.version]
+      if (bundle === undefined) throw { name: 'NexgentError', code: 'improver/not-found', message: `no improver ${input.version}` }
+      return { version: input.version, bundle, current: this.improver.current.version === input.version } satisfies ImproverDetail
+    },
+    'improvers.rollback': input => {
+      const { current, history } = this.improver
+      const revision = current.revision + 1
+      const target = input.toVersion ?? 'v0'
+      this.improver = {
+        current: { version: target, revision, since: '2026-10-12T11:00:00.000Z', trigger: 'manual' },
+        history: [...history, { format: 1, revision, previous: null, from: current.version, version: target, type: 'rollback', trigger: 'manual', committedAt: '2026-10-12T11:00:00.000Z', ...(input.reason === undefined ? {} : { reason: input.reason }) }],
+      }
+      return this.improver.current
     },
     'settings.setApiKey': input => (input.value === '' ? { configured: false } : { configured: true, source: 'file' }),
   }

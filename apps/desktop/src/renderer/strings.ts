@@ -245,6 +245,60 @@ export const T = {
   improvementBudgetTokens: '改进预算（tokens）',
   improvementWindow: '预算窗口（天）',
   improvementSettingsInvalid: '改进预算和窗口必须是正整数。',
+  // Step 6: improver versions and meta jobs.
+  improverTitle: '改进器',
+  improverCurrent: '当前改进器',
+  improverRevision: (n: number) => `第 ${n} 次变更`,
+  improverAdopter: '采用它的元改进作业',
+  improverProblem: '改进器版本有问题',
+  improverHistory: '改进器版本记录',
+  improverNoHistory: '还没有换过改进器。',
+  improverNewJobs: '新开始的改进作业使用这个版本；已在运行的保持原版本。',
+  improverRollback: '回滚改进器',
+  improverRollbackConfirm: '确认回滚',
+  improverRollbackReason: '回滚原因（可不填）',
+  improverAdopt: '采用',
+  improverRolledBack: '回滚',
+  improverOfJob: (version: string) => `改进器 ${version}`,
+  improvementRunMeta: '立即元改进',
+  improvementMetaBadge: '元改进',
+  improvementMetaChild: (version: string) => `提出的新版本 ${version}`,
+  improvementMetaStatus: (enabled: boolean, pending: number, every: number) => `元改进 ${enabled ? '开' : '关'} · 已计入 ${pending} / ${every} 个已结束作业`,
+  improvementMetaBudget: (used: string, cap: string, days: number) => `元改进预算 ${used} / ${cap} tokens（${days} 天内）`,
+  improvementMetaDiagnosis: '元诊断',
+  improvementMetaFindings: '发现',
+  improvementMetaNoChange: '无',
+  improvementMetaProposalChange: '改进器需要一处修改',
+  improvementMetaProposal: '结论',
+  improvementMetaFinding: (stage: string, jobs: number) => `${stage} · ${jobs} 个作业`,
+  improvementChange: '改进器的修改',
+  improvementChangeRationale: '理由',
+  improvementChangeBefore: '修改前',
+  improvementChangeAfter: '修改后',
+  improvementChangeMissing: '（无）',
+  improvementChangeUnknown: '（未取得父版本）',
+  improvementComparison: '父子对比',
+  improvementArmParent: '父（当前）',
+  improvementArmChild: '子（提议）',
+  improvementArmOffspring: '后代',
+  improvementArmNoOffspring: '无后代',
+  improvementArmGate: '门控',
+  improvementArmGatePass: '通过',
+  improvementArmGateFail: '未通过',
+  improvementArmGateAwait: '等待审批',
+  improvementArmQuality: '质量',
+  improvementArmCost: '费用',
+  improvementMetaCost: '元改进作业费用',
+  improvementDecision: '结论',
+  improvementDecisionAdopt: '采用子版本',
+  improvementDecisionReject: '不采用',
+  settingsMeta: '元改进',
+  metaEnabled: '开启元改进',
+  metaEnabledHelp: '每累计若干个已结束的改进作业，自动改进一次“改进器”本身；父子对比通过才会换用。不开启时仍可手动点“立即元改进”。',
+  metaEveryJobs: '每多少个作业触发一次',
+  metaBudgetTokens: '元改进预算（tokens）',
+  metaWindow: '元改进预算窗口（天）',
+  metaSettingsInvalid: '元改进的预算、窗口必须是正整数，触发作业数必须是 1 到 20 的整数。',
   deliverableImprove: '改进',
 } as const
 
@@ -286,6 +340,8 @@ export function triggerText(trigger: string): string {
       return '加载失败自动回滚'
     case 'usage-regression':
       return '使用退化自动回滚'
+    case 'meta-job':
+      return '元改进作业通过'
     case 'manual':
       return '手动'
     default:
@@ -446,6 +502,9 @@ export function improvementStatusText(status: string): string {
     diagnosing: '诊断中',
     proposing: '提出候选中',
     trialing: '门控试验中',
+    'meta-diagnosing': '元诊断中',
+    'meta-proposing': '提出改进器修改中',
+    comparing: '父子对比中',
     'waiting-history': '等待更多历史任务',
     'awaiting-approval': '等待审批',
     adopted: '已采用',
@@ -460,11 +519,11 @@ export function improvementStatusText(status: string): string {
 }
 
 /** Statuses a running or waiting job can be cancelled in. */
-export const IMPROVEMENT_CANCELLABLE: readonly string[] = ['queued', 'diagnosing', 'proposing', 'trialing', 'waiting-history']
+export const IMPROVEMENT_CANCELLABLE: readonly string[] = ['queued', 'diagnosing', 'proposing', 'trialing', 'meta-diagnosing', 'meta-proposing', 'comparing', 'waiting-history']
 
 /** What started an improvement job. */
 export function improvementTriggerText(trigger: string): string {
-  return trigger === 'feedback-count' ? '反馈累计' : trigger === 'explicit' ? '手动' : trigger === 'check-failure' ? '检查失败' : trigger
+  return trigger === 'feedback-count' ? '反馈累计' : trigger === 'explicit' ? '手动' : trigger === 'check-failure' ? '检查失败' : trigger === 'job-count' ? '作业累计' : trigger
 }
 
 export function failureCategoryText(category: string): string {
@@ -473,7 +532,7 @@ export function failureCategoryText(category: string): string {
 }
 
 export function improvementPhaseText(phase: string): string {
-  return phase === 'diagnose' ? '诊断' : phase === 'propose' ? '提出候选' : phase === 'trial' ? '门控试验' : phase
+  return phase === 'diagnose' ? '诊断' : phase === 'propose' ? '提出候选' : phase === 'trial' ? '门控试验' : phase === 'meta-diagnose' ? '元诊断' : phase === 'meta-propose' ? '改进器提案' : phase === 'compare' ? '父子对比' : phase
 }
 
 export function percentText(rate: number): string {
@@ -482,4 +541,30 @@ export function percentText(rate: number): string {
 
 export function tokensText(n: number | 'unknown'): string {
   return n === 'unknown' ? '未知' : n.toLocaleString('en-US')
+}
+
+/** A short improver version: `v0` stays, a hash shows 12 characters. */
+export function improverVersionText(version: string | undefined): string {
+  return version === undefined ? 'v0' : version.slice(0, 12)
+}
+
+/** Why the comparison of a meta job concluded as it did. */
+export function improverReasonText(reason: string): string {
+  const words: Record<string, string> = {
+    'gate-passed': '子的后代通过门控而父的没有',
+    'quality-up': '质量更高',
+    'cost-down': '质量相同且费用低 10% 以上',
+    'no-improvement': '没有改进',
+    'no-offspring': '子没有产出后代',
+    'unknown-arm': '有一臂结果未知',
+    'origin-mismatch': '两臂起点不一致',
+    'epoch-mismatch': '评价纪元不同',
+  }
+  return words[reason] ?? reason
+}
+
+/** A meta-diagnosis finding's stage in words. */
+export function metaStageText(stage: string): string {
+  const words: Record<string, string> = { diagnose: '诊断', propose: '提出候选', trial: '门控试验', other: '其他' }
+  return words[stage] ?? stage
 }
