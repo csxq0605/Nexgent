@@ -11,7 +11,7 @@
  */
 export * from './types.js'
 export { improvementsDir } from './paths.js'
-export { breakStaleLock, isTransientFsError, lockHeld, processAlive, readLockPid, retryTransient, TRANSIENT_FS_CODES, TRANSIENT_RETRY_DELAYS_MS, tryCreateLock, withFileLock, writeJsonAtomic, type AtomicWriteIo, type FileLockOptions } from './lock.js'
+export { breakStaleLock, isTransientFsError, lockHeld, processAlive, readLockPid, retryTransient, TRANSIENT_FS_CODES, TRANSIENT_RETRY_DELAYS_MS, tryCreateLock, withFileLock, writeJsonAtomic, type AtomicWriteIo, type FileLockOptions, type LockIo } from './lock.js'
 export { clip, createJob, jobAlive, jobPaths, listJobs, readJob, START_GRACE_MS, transitionJob, updateJob, type CreateJobInput, type JobPatch, type JobPaths } from './jobs.js'
 export {
   admitItems,

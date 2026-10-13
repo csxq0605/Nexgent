@@ -10,7 +10,7 @@
  * thrown.
  */
 import { randomUUID } from 'node:crypto'
-import { link, open, readFile, rename, rm, stat } from 'node:fs/promises'
+import { link, open, readFile, rename, rm, stat, type FileHandle } from 'node:fs/promises'
 
 /** Error codes of a transient sharing violation (Windows: another process has the file open). */
 export const TRANSIENT_FS_CODES: ReadonlySet<string> = new Set(['EPERM', 'EBUSY', 'EACCES'])
@@ -79,16 +79,30 @@ export async function lockHeld(path: string): Promise<boolean> {
   return pid !== undefined && processAlive(pid)
 }
 
+/** File operations {@link tryCreateLock} uses (tests substitute a failing open). */
+export interface LockIo {
+  readonly open?: (path: string, flags: string, mode: number) => Promise<FileHandle>
+  readonly delays?: readonly number[]
+}
+
 /**
  * Create a lock file holding `pid` (exclusive create).
- * @returns `false` when the file already exists.
+ *
+ * On Windows creating the file while another process is deleting the old
+ * lock (or has it open) fails with EPERM / EACCES / EBUSY instead of
+ * EEXIST; that is retried briefly and, if it persists, treated like a held
+ * lock so a waiting caller ({@link withFileLock}) keeps waiting until its
+ * deadline.
+ * @returns `false` when the file already exists (or stays unavailable).
  */
-export async function tryCreateLock(path: string, pid: number = process.pid): Promise<boolean> {
-  let handle
+export async function tryCreateLock(path: string, pid: number = process.pid, io: LockIo = {}): Promise<boolean> {
+  const create = io.open ?? open
+  let handle: FileHandle
   try {
-    handle = await open(path, 'wx', 0o644)
+    handle = await retryTransient(() => create(path, 'wx', 0o644), io.delays === undefined ? {} : { delays: io.delays })
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'EEXIST' || isTransientFsError(error)) return false
     throw error
   }
   try {
@@ -137,6 +151,8 @@ export interface FileLockOptions {
   readonly timeoutMs?: number
   /** Poll interval while another holder has it (default 10 ms). */
   readonly pollMs?: number
+  /** File operations for taking the lock (tests). */
+  readonly io?: LockIo
 }
 
 /**
@@ -148,7 +164,7 @@ export async function withFileLock<T>(path: string, fn: () => Promise<T>, option
   const deadline = Date.now() + (options.timeoutMs ?? 15_000)
   const poll = options.pollMs ?? 10
   for (;;) {
-    if (await tryCreateLock(path)) break
+    if (await tryCreateLock(path, process.pid, options.io)) break
     if (await breakStaleLock(path)) continue
     if (Date.now() > deadline) throw new Error(`could not take the lock ${path}`)
     await new Promise(resolve => setTimeout(resolve, poll))
@@ -156,7 +172,7 @@ export async function withFileLock<T>(path: string, fn: () => Promise<T>, option
   try {
     return await fn()
   } finally {
-    await rm(path, { force: true })
+    await retryTransient(() => rm(path, { force: true }))
   }
 }
 
