@@ -44,6 +44,12 @@ export const SETS = /** @type {const} */ (['dev', 'selection', 'guard', 'holdout
 export const FAMILIES = /** @type {const} */ (['tables', 'code'])
 
 /** Required size of each set (user decision 6). */
+/**
+ * What the experiment's user says when a history or dev task ended without a deliverable:
+ * feedback attaches to a deliverable, so the user asks for one (same session, one more turn).
+ */
+export const PRESENT_REQUEST = '请把这次改动或生成的文件用 present 提交成成果，我要在成果里看。'
+
 export const SET_SIZES = { dev: 2, selection: 2, guard: 1, holdout: 3 }
 
 /** The case plan: set, variant and seed of every case. Changing it is a new experiment. */

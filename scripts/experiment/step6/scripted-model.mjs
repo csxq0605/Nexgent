@@ -27,6 +27,7 @@
  */
 import { CONVENTION_COLUMN } from './tables.mjs'
 import { codeParams, referenceSolution, renderProject } from './code.mjs'
+import { PRESENT_REQUEST } from './cases.mjs'
 import { referenceTable, expectedSummary } from './tables.mjs'
 
 /** The paragraph the scripted meta proposal appends to the diagnosis policy. */
@@ -51,6 +52,13 @@ const toolNames = (/** @type {any} */ body) => (body?.tools ?? []).map((/** @typ
 const assistantSteps = (/** @type {any} */ body) => (body?.messages ?? []).filter((/** @type {any} */ m) => m.role === 'assistant').length
 const answer = (/** @type {string} */ content) => ({ content, usage: USAGE })
 const calls = (/** @type {any[]} */ toolCalls) => ({ toolCalls, usage: USAGE })
+
+/** Text of the last message when it is the user's (not a tool result). @param {any} body */
+function lastUserText(body) {
+  const last = (body?.messages ?? []).at(-1)
+  if (last?.role !== 'user') return ''
+  return blocks(last.content).filter(b => b.type === 'text').map(b => b.text ?? '').join('\n')
+}
 
 /** Text of the first user message. @param {any} body */
 function firstUserText(body) {
@@ -79,6 +87,31 @@ function skillFile(skill) {
     : 'Every module changed or added under src/ (index.js aside) gets a new or changed test/<module>.test.js that imports it; amounts stay integer cents.'
   const scope = skill.scope.join(', ')
   return `---\nname: ${skill.name}\ndescription: The user's convention for ${skill.family === 'tables' ? 'tables' : 'code changes'} (${scope}).\n---\n\n${what}\n\nApplies to: ${scope}.\n`
+}
+
+/**
+ * Code files the reference solution changes (with the tests when `withTests`).
+ * @param {TaskCase} task
+ * @param {boolean} withTests
+ */
+function changedFiles(task, withTests) {
+  const hidden = /** @type {any} */ (task.hidden)
+  const p = codeParams(hidden.seed)
+  const original = renderProject(p, { bug: hidden.variant === 'bugfix' ? p.bug : null })
+  const solved = referenceSolution(task, { withTests })
+  return Object.keys(solved).filter(path => solved[path] !== original[path]).sort()
+}
+
+/**
+ * The `present` call for a case: the table, or the code files the reference solution changes.
+ * @param {TaskCase} task
+ * @param {string[]} [changed]
+ */
+function presentCall(task, changed) {
+  const hidden = /** @type {any} */ (task.hidden)
+  if (task.family === 'tables') return { name: 'present', arguments: { paths: [hidden.output], summary: `${hidden.variant} ${hidden.month}` } }
+  const files = changed ?? changedFiles(task, false)
+  return { name: 'present', arguments: { paths: files.map(path => `${hidden.dir}/${path}`), summary: `${hidden.variant} in ${hidden.dir}` } }
 }
 
 export class ExperimentModel {
@@ -190,6 +223,7 @@ export class ExperimentModel {
       ? [...this.skills.values()].find(skill => skill.family === task.family && skill.scope.includes(task.variant) && system.includes(skill.name))
       : undefined
     this.requests.push({ kind: 'task', caseId: task.id, step: at, detail: offered?.name })
+    if (lastUserText(body).includes(PRESENT_REQUEST)) return calls([presentCall(task)])
     const script = this.taskSteps(task, offered?.name)
     return at < script.length ? script[at] : answer('Noted.')
   }
@@ -209,7 +243,7 @@ export class ExperimentModel {
         : referenceTable(hidden.variant, hidden.month, { withConvention: skill !== undefined })
       return [
         calls([...load, { name: 'write_file', arguments: { path: hidden.output, content } }]),
-        calls([{ name: 'present', arguments: { paths: [hidden.output], summary: `${hidden.variant} ${hidden.month}` } }]),
+        calls([presentCall(task)]),
         answer(`${hidden.output} presented.`),
       ]
     }
@@ -220,10 +254,11 @@ export class ExperimentModel {
     const edits = changed.map(path => (original[path] === undefined
       ? { name: 'write_file', arguments: { path: `${hidden.dir}/${path}`, content: solved[path] } }
       : { name: 'str_replace', arguments: { path: `${hidden.dir}/${path}`, old_str: original[path], new_str: solved[path] } }))
+    // Like the real model: code edits in place are presented only when a skill says so or the user asks.
     return [
       calls([...load, ...edits]),
       calls([shell(`node --test '${hidden.dir}/test/*.test.js'`)]),
-      calls([{ name: 'present', arguments: { paths: changed.map(path => `${hidden.dir}/${path}`), summary: `${hidden.variant} in ${hidden.dir}` } }]),
+      ...(skill === undefined ? [] : [calls([presentCall(task, changed)])]),
       answer(`Changed ${changed.length} files in ${hidden.dir}.`),
     ]
   }
