@@ -8,8 +8,9 @@
  * same time, so the gate can run it without rebuilding anything.
  */
 import { randomUUID } from 'node:crypto'
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { renameRetrying } from './fs-retry.js'
 import {
   CAPABILITY_DIRS,
   NexgentError,
@@ -100,7 +101,7 @@ export async function writeCandidate(capabilitiesDir: string, input: CandidateIn
     }
     await mkdir(staging, { recursive: true })
     await writeFile(join(staging, CANDIDATE_FILE), `${JSON.stringify(record)}\n`, { flag: 'wx' })
-    await rename(staging, join(root, record.id))
+    await renameRetrying(staging, join(root, record.id))
   } finally {
     await rm(staging, { recursive: true, force: true })
   }

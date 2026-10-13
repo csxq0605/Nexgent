@@ -23,7 +23,7 @@
 
 - `writeBundle` 先在内存里按契约校验清单（`assertCapabilityManifest`、大小写冲突、文件与目录同名），再在 `.staging-<uuid>/` 写全部文件并 fsync，最后整体改名。版本已存在时只校验不重写。
 - `loadBundle` 每次重新校验：清单哈希等于目录名、每个文件大小与 SHA-256 相符、没有清单以外的条目。失败是 `CapabilityIntegrityError`（`session/corrupt`，`reason`：`missing`、`manifest`、`version-mismatch`、`file-missing`、`file-mismatch`、`unexpected-entry`）。
-- 修订按契约 `ActivationRevision` 写：`link` 独占发布、发布前比较链尾；每次采用或回滚先写决定记录，再发布修订（修订带 `decisionId`）。两个进程同时发布同一修订恰好一个成功。
+- 修订按契约 `ActivationRevision` 写：`link` 独占发布、发布前比较链尾；每次采用或回滚先校验决定、发布修订（修订带 `decisionId`），修订发布成功后才写决定记录。两个进程同时发布同一修订恰好一个成功，落败的一方不留决定；门控落败时写 `rejected`（`interrupted`）。
 - 链在某个文件处损坏时停在最后一个有效修订，`problem` 指出文件与原因，不猜、不修复；此时不能再采用或回滚。
 
 ## 加载（`CapabilityService`，`ctx.capabilities`）

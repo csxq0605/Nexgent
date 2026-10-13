@@ -18,7 +18,7 @@ import {
   type ReviewInput,
   type TrialReviewer,
 } from '../src/index.js'
-import { tempDir } from './helpers.js'
+import { sampleComponents, tempDir } from './helpers.js'
 import { feedbackTask, historyProject, improvementJob, pastTask, proposeCandidate, scriptedRunner, usage, type ArmScript } from './trial-fixture.js'
 
 async function writeConfig(layout: WorkspaceLayout, capabilities: Record<string, unknown>): Promise<void> {
@@ -118,6 +118,35 @@ describe('runGate', () => {
     // The real project was never touched by a run, and the copies are gone.
     expect(await exists(join(layout.root, 'out'))).toBe(false)
     expect(await exists(runner.requests[0]!.projectRoot)).toBe(false)
+  })
+
+  it('a candidate beaten to adoption while its trial ran is rejected as interrupted, with no adopted decision left behind', async () => {
+    const { layout, tasks } = await historyProject()
+    const candidate = await proposeCandidate(layout, tasks[0]!)
+    const store = new CapabilityStore(layout.capabilities)
+    let other: Awaited<ReturnType<typeof store.adopt>> = null
+    const runner = scriptedRunner(request => ({
+      output: request.arm === 'candidate' ? 'good' : 'bad',
+      inspect: async () => {
+        if (other !== null) return
+        // Another candidate is adopted while this trial runs.
+        const bundle = await store.write(sampleComponents('rival'))
+        other = await store.adopt(bundle.version, { trigger: 'approval', reason: 'approved', detail: 'another candidate', candidateId: '8b1f2a6e-3c4d-4e5f-9a0b-1c2d3e4f5a6b' })
+      },
+    }))
+    const result = await runGate({ layout, candidateId: candidate.id, runner, tempRoot: await tempDir() })
+    if (result.status !== 'decided') throw new Error(`expected a decision, got ${result.status}`)
+    expect(result.verdict).toMatchObject({ outcome: 'adopt' })
+    expect(result.decision).toMatchObject({ outcome: 'rejected', reason: 'interrupted', candidateId: candidate.id, trialId: result.trialId })
+    expect(other).not.toBeNull()
+    const history = await store.history()
+    expect(history.map(revision => revision.decisionId)).toEqual([other!.decision.id])
+    const decisions = await store.decisions()
+    expect(decisions.filter(decision => decision.candidateId === candidate.id)).toEqual([result.decision])
+    // Every adopted decision is named by a revision.
+    for (const decision of decisions.filter(item => item.outcome === 'adopted')) {
+      expect(history.some(revision => revision.decisionId === decision.id)).toBe(true)
+    }
   })
 
   it('rejects a worse candidate and keeps it and its receipts on record', async () => {

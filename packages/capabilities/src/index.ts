@@ -73,3 +73,4 @@ export { capabilityDraftTool, capabilityProposeTool, capabilityTools, capability
 export { capabilitiesProvider } from './provider.js'
 export { apply, CapabilitiesPlugin, name, type CapabilitiesPluginConfig } from './plugin.js'
 export * from './trial/index.js'
+export { renameRetrying, RENAME_RETRY_DELAYS_MS, TRANSIENT_RENAME_CODES, type RenameRetryOptions } from './fs-retry.js'

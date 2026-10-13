@@ -18,8 +18,9 @@
  * regression (roll back), never as a usable bundle.
  */
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { lstat, mkdir, open, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { renameRetrying } from './fs-retry.js'
 import {
   canonicalManifestText,
   componentDir,
@@ -186,7 +187,8 @@ export async function writeBundle(capabilitiesDir: string, components: readonly 
     await writeDurably(join(staging, MANIFEST_FILE), Buffer.from(`${serialized}\n`, 'utf8'))
     for (const directory of directories) await fsyncDirectory(directory)
     try {
-      await rename(staging, destination)
+      // A transient sharing violation is retried, unless another writer's copy appeared meanwhile.
+      await renameRetrying(staging, destination, { stop: () => exists(destination) })
     } catch (error) {
       // Another writer published the same version first (ENOTEMPTY/EEXIST on
       // POSIX, EPERM/EACCES on Windows): verify theirs instead.
