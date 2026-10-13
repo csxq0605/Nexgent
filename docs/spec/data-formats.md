@@ -90,7 +90,7 @@
 | `capabilities/` | 能力包、采用历史、候选、试验、决定、草稿（步骤 4） | 见“CapabilityBundle 清单”起四节 | `ensureLayout` | `@nexgent/capabilities`（宿主）；模型的文件工具读写都拒绝 |
 | `snapshots/` | 任务快照与检查（步骤 4） | 内容寻址，见“任务快照与检查” | `ensureLayout` | `@nexgent/capabilities`（宿主）；模型的文件工具读写都拒绝 |
 | `improvements/` | 改进作业的队列、作业记录与诊断（步骤 5）；元改进作业的诊断、改动与比较（步骤 6） | `jobId` 为小写 UUID v4，见“改进作业”“元改进作业” | 第一次计入信号或开始作业时 | `@nexgent/evolve`（宿主）；模型的文件工具读写都拒绝 |
-| `improvers/` | 改进器版本与采用历史（步骤 6） | 见“改进器版本” | 第一次写入子改进器时（只用内置 `v0` 的项目没有这个目录） | `@nexgent/evolve`（宿主）；模型的文件工具读写都拒绝 |
+| `improvers/` | 改进器版本与采用历史（步骤 6） | 见“改进器版本” | 第一次写入子改进器时（只用内置 `v0` 的项目没有这个目录） | `@nexgent/capabilities` 的 `ImproverStore`（宿主；由 `@nexgent/evolve` 与 `@nexgent/sdk` 调用）；模型的文件工具读写都拒绝 |
 
 规则：
 
@@ -709,7 +709,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 ## 改进器版本
 
-步骤 6。改进器是改进作业怎样诊断、提什么、门控时比几个用例的那部分，做成有版本的数据，作为项目级的一条独立版本线，与能力包分开采用、分开回滚。决策见 ADR 0008；类型镜像 `packages/kernel/src/contracts/improver.ts`；schema `packages/session/schema/improvement.v1.schema.json`（`$defs/improverBundle`、`improverRevision`）。`.nexgent/improvers/` 只由宿主写，模型的文件工具读写都拒绝。
+步骤 6。改进器是改进作业怎样诊断、提什么、门控时比几个用例的那部分，做成有版本的数据，作为项目级的一条独立版本线，与能力包分开采用、分开回滚。决策见 ADR 0008；类型镜像 `packages/kernel/src/contracts/improver.ts`；schema `packages/session/schema/improvement.v1.schema.json`（`$defs/improverBundle`、`improverRevision`）。`.nexgent/improvers/` 只由宿主写（存储与采用历史在 `@nexgent/capabilities` 的 `ImproverStore`，`@nexgent/evolve` 与 `@nexgent/sdk` 调用它），模型的文件工具读写都拒绝。
 
 **改进器**（`ImproverBundle`）三部分，全是数据，没有代码：
 
@@ -737,6 +737,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `improvers/activation/<n>.json` | 采用历史的第 n 条（`ImproverRevision`） | 同能力包的 `activation/`：先写临时文件，在第 `n-1` 条仍是末尾时以硬链接独占发布（比较后发布），失败即重读末尾 |
 
 `ImproverRevision`：`{ format: 1, revision, previous, from, version, type, trigger, jobId?, reason?, committedAt }`。`previous` 是上一条文件字节的 SHA-256（第 1 条为 `null`）；`from` 是之前生效的版本（第 1 条为 `v0`），`version` 是之后生效的版本，二者不同。`type: "adopt"` 只由元改进作业写（`trigger: "meta-job"`，必带 `jobId`）；`type: "rollback"` 的 `trigger` 是 `manual`（用户经 SDK `improvers.rollback`）或 `load-failure`（生效的改进器文件读不出或校验不过，宿主回退到上一个可用版本，`reason` 写原因），可以回到 `v0`。纯函数 `isNextImproverRevision` 固定这些条件。读者取末尾为生效版本，没有任何一条时为 `v0`。
+
+**回滚按栈。** 读者从头重放采用历史，维护一个“生效栈”：开始时为 `[v0]`；`adopt` 把新版本压栈；`rollback` 的目标若在栈里（不算栈顶），栈截到它为止，否则（更早生效过、但已被回滚掉的版本）把它压栈。不带目标的回滚回到栈顶的下一项，即当前采用之前生效的版本；`v0` 生效且栈里只有它时没有可回滚的，报 `improver/activation`。带目标的回滚只能回到 `v0` 或采用历史里更早出现过的版本，从未生效过的版本报 `improver/activation`；读取时目标不满足这一条的回滚修订视为链损坏。手动回滚先校验目标能读出。`load-failure` 回滚由宿主读生效的改进器失败时写（不带目标，`reason` 为版本与错误），随后再读新的生效版本，直到读出或退回 `v0`；链本身损坏时不写入，用最后一个有效修订的版本，它也读不出时这次用 `v0`。
 
 **作业固定改进器。** 每个改进作业（含元改进作业与比较臂）开始时读一次生效的改进器，把版本写进 `job.json` 的 `improverVersion`，之后整个作业只用它；作业进行中采用新的改进器不影响它。步骤 5 写出的作业没有这个字段，读作 `v0`。作业的诊断会话、提议会话与试验的账本记录都带 `improverVersion`。
 
@@ -1050,7 +1052,7 @@ The earlier part of this conversation was compacted. Summary:
 | 项目配置、凭证文件、锁文件 | `packages/kernel/schema/config.v1.schema.json`、`credentials.v1.schema.json`、`session-lock.v1.schema.json` | `@nexgent/kernel` |
 | 材料元数据、成果版本元数据（步骤 2） | `packages/session/schema/material.v1.schema.json`、`deliverable.v1.schema.json` | 与会话 schema 共用 `@nexgent/session` 的求值器；写入方是 `@nexgent/tasking` |
 | 能力文件与快照（步骤 4） | `packages/session/schema/capabilities.v1.schema.json`（按 `$defs/<name>` 校验，`validateCapabilityFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/capabilities` |
-| 改进队列、作业、诊断（步骤 5）；改进器、采用修订、元诊断、改动、父子比较（步骤 6） | `packages/session/schema/improvement.v1.schema.json`（按 `$defs/<name>` 校验，`validateImprovementFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/evolve`（改进器的存储与采用历史由 `@nexgent/capabilities` 提供） |
+| 改进队列、作业、诊断（步骤 5）；改进器、采用修订、元诊断、改动、父子比较（步骤 6） | `packages/session/schema/improvement.v1.schema.json`（按 `$defs/<name>` 校验，`validateImprovementFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/evolve`；改进器与采用修订由 `@nexgent/capabilities` 的 `ImproverStore` 写 |
 
 schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`（账本记录除外：它允许未知可选字段以便跨版本读取）。会话 schema 的严格校验只用于写入方的追加；读取方按上面的兼容规则放过未知的可选字段，不因此截断。
 
