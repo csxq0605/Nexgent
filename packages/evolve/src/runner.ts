@@ -2,27 +2,39 @@
  * The job process side: run one improvement job through its phases.
  *
  * The process takes `job.lock` (its pid) exclusively; a job already locked
- * by a live process, or no longer `queued`, is left alone. Before each
- * phase the budget is checked; when it is spent the job ends
- * `budget-exhausted`. Each phase reports what it spent, which goes into
- * `job.json` before the next phase starts. When the job is done (finished
- * or parked) the process releases the project's job slot and, if the next
- * batch filled up meanwhile, runs that job too, in the same process.
+ * by a live process is left alone. A `queued` job runs diagnose, propose and
+ * trial; a `waiting-history` job (its slot taken again by the host) runs
+ * only the trial. Before each phase the job is re-read (a `cancelled` job
+ * stops) and the budget is checked; when it is spent the job ends
+ * `budget-exhausted`. Each phase's spend goes into `job.json` before the
+ * next phase starts. On a final status the process writes `improvement.end`
+ * to the ledger. When the job is done (final or parked) the process releases
+ * the project's job slot and, if the next batch filled up meanwhile, runs
+ * that job too, in the same process.
  *
- * Diagnosis, proposal and trial are {@link ImprovementStages}. Step 5 round
- * 1 ships {@link PENDING_STAGES}: the diagnosis is not written yet, so a
- * job ends `failed` saying so (an unknown result is not a success). Round 2
- * supplies the real diagnosis and proposal; the trial hands the candidate
- * to the step-4 gate.
+ * The phases are {@link ImprovementStages}: {@link createImprovementStages}
+ * builds the real ones from the host entry's session runner and gate;
+ * {@link PENDING_STAGES} (no runner configured) ends every job `failed`
+ * saying so — an unknown result is not a success.
  */
 import { appendFile, rm } from 'node:fs/promises'
-import { addUsage, readProjectConfig, ZERO_USAGE, type LLMUsage, type WorkspaceLayout } from '@nexgent/kernel'
+import {
+  addUsage,
+  readProjectConfig,
+  toErrorInfo,
+  ZERO_USAGE,
+  type Diagnosis,
+  type ImprovementConfig,
+  type LLMUsage,
+  type WorkspaceLayout,
+} from '@nexgent/kernel'
+import { JsonlLedger } from '@nexgent/session'
 import { budgetStatus, type BudgetStatus } from './budget.js'
 import { jobPaths, listJobs, readJob, transitionJob, updateJob, type JobPatch } from './jobs.js'
 import { breakStaleLock, readLockPid, tryCreateLock } from './lock.js'
 import { improvementsDir } from './paths.js'
 import { releaseSlot } from './queue.js'
-import { DEFAULT_BUDGET, DEFAULT_THRESHOLD, TERMINAL_STATUSES, type ImprovementBudget, type ImprovementJob, type ImprovementPhase, type PhaseCost } from './types.js'
+import { TERMINAL_STATUSES, type ImprovementJob, type ImprovementJobStatus, type ImprovementPhase, type PhaseCost } from './types.js'
 
 /** What a phase spent. */
 export interface PhaseSpend {
@@ -34,26 +46,38 @@ export interface PhaseSpend {
 export interface StageInput {
   readonly layout: WorkspaceLayout
   readonly job: ImprovementJob
+  /** The project's `improvement` settings (model, thinking, budget). */
+  readonly config: ImprovementConfig
   /** Budget left when the phase starts. */
   readonly budget: BudgetStatus
   /** Append a line to the job log. */
   log(line: string): Promise<void>
+  /** Write references into `job.json` now (session ids, base version), keeping the status. */
+  record(patch: JobPatch): Promise<void>
+}
+
+/** Fields every phase result may carry. */
+interface ResultBase extends PhaseSpend {
+  /** Written with the status change that follows the phase. */
+  readonly patch?: JobPatch
+  /** The error of a `failed` result. */
+  readonly error?: unknown
 }
 
 /** Diagnosis result: propose a component, or none (not a capability problem), or failed. */
-export type DiagnoseResult = PhaseSpend & (
-  | { readonly outcome: 'propose'; readonly proposalKind: string; readonly detail?: string }
+export type DiagnoseResult = ResultBase & (
+  | { readonly outcome: 'propose'; readonly proposalKind: string; readonly diagnosis?: Diagnosis; readonly detail?: string }
   | { readonly outcome: 'none' | 'failed'; readonly detail: string }
 )
 
 /** Proposal result: one candidate, none, or failed. */
-export type ProposeResult = PhaseSpend & (
+export type ProposeResult = ResultBase & (
   | { readonly outcome: 'candidate'; readonly candidateId: string; readonly detail?: string }
   | { readonly outcome: 'none' | 'failed'; readonly detail: string }
 )
 
 /** Trial result: the gate's conclusion. */
-export type TrialResult = PhaseSpend & {
+export type TrialResult = ResultBase & {
   readonly outcome: 'adopted' | 'rejected' | 'awaiting-approval' | 'waiting-history' | 'failed'
   readonly trialId?: string
   readonly decisionId?: string
@@ -63,30 +87,28 @@ export type TrialResult = PhaseSpend & {
 /** The three phases of a job. */
 export interface ImprovementStages {
   diagnose(input: StageInput): Promise<DiagnoseResult>
-  propose(input: StageInput & { readonly proposalKind: string }): Promise<ProposeResult>
+  propose(input: StageInput & { readonly proposalKind: string; readonly diagnosis?: Diagnosis }): Promise<ProposeResult>
   trial(input: StageInput & { readonly candidateId: string }): Promise<TrialResult>
 }
 
 const NOTHING: PhaseSpend = { usage: ZERO_USAGE, requestCount: 0 }
 
-/** Round-1 stages: the diagnosis is not implemented yet, so every job ends `failed` with that reason. */
+/** Stages of a host without a session runner: every job ends `failed` with that reason. */
 export const PENDING_STAGES: ImprovementStages = {
   async diagnose() {
-    return { ...NOTHING, outcome: 'failed', detail: 'The diagnosis is not implemented yet (step 5, round 2); nothing was diagnosed or proposed.' }
+    return { ...NOTHING, outcome: 'failed', detail: 'No improvement session runner is configured in this host; nothing was diagnosed or proposed.' }
   },
   async propose() {
-    return { ...NOTHING, outcome: 'failed', detail: 'The proposal is not implemented yet (step 5, round 2).' }
+    return { ...NOTHING, outcome: 'failed', detail: 'No improvement session runner is configured in this host.' }
   },
   async trial() {
-    return { ...NOTHING, outcome: 'failed', detail: 'Handing candidates to the gate is not implemented yet (step 5, round 2).' }
+    return { ...NOTHING, outcome: 'failed', detail: 'No gate is configured in this host.' }
   },
 }
 
 /** Options of {@link runImprovementJob}. */
 export interface RunJobOptions {
   readonly stages?: ImprovementStages
-  readonly budget?: ImprovementBudget
-  readonly threshold?: number
   /** Run the next batch's job in this process when it fills up meanwhile (default true). */
   readonly chain?: boolean
   readonly now?: () => Date
@@ -96,7 +118,7 @@ export interface RunJobOptions {
 export interface RunJobResult {
   /** Jobs this process ran, in order (the first is the one asked for). */
   readonly jobs: readonly ImprovementJob[]
-  /** Set when the asked-for job was not run (locked by a live process, or not queued). */
+  /** Set when the asked-for job was not run (locked by a live process, or not runnable). */
   readonly skipped?: string
 }
 
@@ -112,6 +134,7 @@ function mergeCost(previous: PhaseCost | undefined, spend: PhaseSpend): PhaseCos
  */
 export async function runImprovementJob(layout: WorkspaceLayout, jobId: string, options: RunJobOptions = {}): Promise<RunJobResult> {
   const directory = improvementsDir(layout)
+  const now = options.now ?? (() => new Date())
   const ran: ImprovementJob[] = []
   let next: string | undefined = jobId
   let skipped: string | undefined
@@ -124,18 +147,33 @@ export async function runImprovementJob(layout: WorkspaceLayout, jobId: string, 
       break
     }
     ran.push(outcome.job)
-    const autoStart = (await readProjectConfig(layout.configFile).catch(() => undefined))?.config.autoImprove === true
-    const started = await releaseSlot(directory, id, { autoStart, threshold: options.threshold ?? DEFAULT_THRESHOLD, now: (options.now ?? (() => new Date()))() })
+    const loaded = await readProjectConfig(layout.configFile).catch(() => undefined)
+    const threshold = loaded?.config.improvement.feedbackThreshold
+    const started = await releaseSlot(directory, id, { autoStart: loaded?.config.autoImprove === true, ...(threshold === undefined ? {} : { threshold }), now: now() })
     if (started !== undefined && options.chain !== false) next = started.id
   }
   return { jobs: ran, ...(skipped === undefined ? {} : { skipped }) }
+}
+
+/** Write `improvement.end` for a job that reached a final status (best effort: accounting never changes the outcome). */
+async function writeEnd(layout: WorkspaceLayout, job: ImprovementJob): Promise<void> {
+  if (!TERMINAL_STATUSES.has(job.status)) return
+  await new JsonlLedger({ ledgersDir: layout.ledgers }).append({
+    type: 'improvement.end',
+    jobId: job.id,
+    trigger: job.trigger,
+    status: job.status,
+    phases: job.phases,
+    improvementId: job.id,
+    ...(job.candidateId === undefined ? {} : { candidateId: job.candidateId }),
+    ...(job.decisionId === undefined ? {} : { decisionId: job.decisionId }),
+  }).catch(() => undefined)
 }
 
 async function runOne(layout: WorkspaceLayout, directory: string, jobId: string, options: RunJobOptions): Promise<{ job: ImprovementJob; skipped?: undefined } | { skipped: string }> {
   const paths = jobPaths(directory, jobId)
   const now = options.now ?? (() => new Date())
   const stages = options.stages ?? PENDING_STAGES
-  const budget = options.budget ?? DEFAULT_BUDGET
   // The host may have written the lock with this process's pid already.
   if (!(await tryCreateLock(paths.lock))) {
     const holder = await readLockPid(paths.lock)
@@ -146,21 +184,36 @@ async function runOne(layout: WorkspaceLayout, directory: string, jobId: string,
   const log = (line: string) => appendFile(paths.log, `${now().toISOString()} ${line}\n`).catch(() => undefined)
   try {
     let job = await readJob(directory, jobId)
-    if (job.status !== 'queued') return { skipped: `job ${jobId} is ${job.status}, not queued` }
-    await log(`start pid=${process.pid} trigger=${job.trigger} items=${job.items.length}`)
+    const resume = job.status === 'waiting-history'
+    if (job.status !== 'queued' && !resume) return { skipped: `job ${jobId} is ${job.status}, not queued or waiting for history` }
+    await log(`start pid=${process.pid} trigger=${job.trigger} items=${job.items.length}${resume ? ' (resuming the trial)' : ''}`)
+    const config = (await readProjectConfig(layout.configFile)).config.improvement
 
-    const move = async (to: ImprovementJob['status'], detail?: string, patch?: JobPatch) => {
-      const written = await transitionJob(directory, jobId, to, { now: now(), ...(detail === undefined ? {} : { detail }), ...(patch === undefined ? {} : { patch }) })
-      if (written !== undefined) job = written
+    const move = async (to: ImprovementJobStatus, detail?: string, patch?: JobPatch, error?: unknown): Promise<ImprovementJob> => {
+      const full: JobPatch = { ...patch, ...(error === undefined ? {} : { error: toErrorInfo(error) }) }
+      const written = await transitionJob(directory, jobId, to, { now: now(), ...(detail === undefined ? {} : { detail }), patch: full, expect: [job.status] })
+      if (written === undefined) {
+        // Someone else moved it (a cancel): keep what is on disk.
+        job = await readJob(directory, jobId)
+        return job
+      }
+      job = written
       await log(`status ${to}${detail === undefined ? '' : `: ${detail}`}`)
+      await writeEnd(layout, job)
       return job
     }
     const spend = async (phase: ImprovementPhase, cost: PhaseSpend) => {
       job = await updateJob(directory, jobId, current => ({ phases: { ...current.phases, [phase]: mergeCost(current.phases[phase], cost) } }), now())
     }
-    const status = async (): Promise<BudgetStatus> => budgetStatus(await listJobs(directory), budget, now())
-    const input = async (): Promise<StageInput> => ({ layout, job, budget: await status(), log })
-    const exhausted = async (phase: ImprovementPhase): Promise<boolean> => {
+    const status = async (): Promise<BudgetStatus> => budgetStatus(await listJobs(directory), config.budget, now())
+    const input = async (): Promise<StageInput> => ({
+      layout, job, config, budget: await status(), log,
+      record: async patch => { job = await updateJob(directory, jobId, patch, now()) },
+    })
+    /** Re-read the job (a cancel lands on disk) and check the budget; `true` = stop here. */
+    const halt = async (phase: ImprovementPhase): Promise<boolean> => {
+      job = await readJob(directory, jobId)
+      if (TERMINAL_STATUSES.has(job.status)) return true
       const current = await status()
       if (!current.exhausted) return false
       await move('budget-exhausted', `The improvement budget is spent (${current.used} of ${current.limit} tokens since ${current.windowStart}); stopped before the ${phase} phase.`)
@@ -168,29 +221,38 @@ async function runOne(layout: WorkspaceLayout, directory: string, jobId: string,
     }
 
     try {
-      if (await exhausted('diagnose')) return { job }
-      await move('diagnosing')
-      const diagnosis = await stages.diagnose(await input())
-      await spend('diagnose', diagnosis)
-      if (diagnosis.outcome !== 'propose') return { job: await move(diagnosis.outcome === 'none' ? 'no-proposal' : 'failed', diagnosis.detail) }
+      let candidateId = job.candidateId
+      if (!resume) {
+        if (await halt('diagnose')) return { job }
+        await move('diagnosing')
+        const diagnosis = await stages.diagnose(await input())
+        await spend('diagnose', diagnosis)
+        if (diagnosis.outcome !== 'propose') return { job: await move(diagnosis.outcome === 'none' ? 'no-proposal' : 'failed', diagnosis.detail, diagnosis.patch, diagnosis.error) }
 
-      if (await exhausted('propose')) return { job }
-      await move('proposing')
-      const proposal = await stages.propose({ ...(await input()), proposalKind: diagnosis.proposalKind })
-      await spend('propose', proposal)
-      if (proposal.outcome !== 'candidate') return { job: await move(proposal.outcome === 'none' ? 'no-proposal' : 'failed', proposal.detail) }
-
-      if (await exhausted('trial')) return { job }
-      await move('trialing', undefined, { candidateId: proposal.candidateId })
-      const trial = await stages.trial({ ...(await input()), candidateId: proposal.candidateId })
+        if (await halt('propose')) return { job }
+        await move('proposing', undefined, diagnosis.patch)
+        const proposal = await stages.propose({
+          ...(await input()),
+          proposalKind: diagnosis.proposalKind,
+          ...(diagnosis.diagnosis === undefined ? {} : { diagnosis: diagnosis.diagnosis }),
+        })
+        await spend('propose', proposal)
+        if (proposal.outcome !== 'candidate') return { job: await move(proposal.outcome === 'none' ? 'no-proposal' : 'failed', proposal.detail, proposal.patch, proposal.error) }
+        candidateId = proposal.candidateId
+        if (await halt('trial')) return { job }
+        await move('trialing', proposal.detail, { ...proposal.patch, candidateId })
+      } else {
+        if (candidateId === undefined) return { job: await move('failed', 'The job waited for history but has no candidate.') }
+        if (await halt('trial')) return { job }
+        await move('trialing', 'Enough past tasks now; running the trial.')
+      }
+      const trial = await stages.trial({ ...(await input()), candidateId })
       await spend('trial', trial)
-      const refs = { ...(trial.trialId === undefined ? {} : { trialId: trial.trialId }), ...(trial.decisionId === undefined ? {} : { decisionId: trial.decisionId }) }
-      return { job: await move(trial.outcome, trial.detail, refs) }
+      const refs: JobPatch = { ...trial.patch, ...(trial.trialId === undefined ? {} : { trialId: trial.trialId }), ...(trial.decisionId === undefined ? {} : { decisionId: trial.decisionId }) }
+      return { job: await move(trial.outcome, trial.detail, refs, trial.error) }
     } catch (error) {
       if (!TERMINAL_STATUSES.has(job.status)) {
-        const detail = `The job stopped on an error: ${(error as Error).message}`
-        await transitionJob(directory, jobId, 'failed', { now: now(), detail, expect: [job.status] }).then(written => { if (written !== undefined) job = written }, () => undefined)
-        await log(`status failed: ${detail}`)
+        await move('failed', `The job stopped on an error: ${(error as Error).message}`, undefined, error).catch(() => undefined)
       }
       return { job }
     }

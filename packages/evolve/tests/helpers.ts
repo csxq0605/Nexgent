@@ -19,11 +19,11 @@ export async function tempDir(): Promise<string> {
   return path
 }
 
-/** A project with `.nexgent/config.json` (autoImprove as given). */
-export async function project(autoImprove: boolean | undefined = true): Promise<WorkspaceLayout> {
+/** A project with `.nexgent/config.json` (autoImprove and `improvement` as given). */
+export async function project(autoImprove: boolean | undefined = true, improvement?: Record<string, unknown>): Promise<WorkspaceLayout> {
   const layout = resolveWorkspaceLayout(await tempDir())
   await mkdir(layout.dataDir, { recursive: true })
-  await writeFile(layout.configFile, `${JSON.stringify({ version: 1, ...(autoImprove === undefined ? {} : { autoImprove }) })}\n`)
+  await writeFile(layout.configFile, `${JSON.stringify({ version: 1, ...(autoImprove === undefined ? {} : { autoImprove }), ...(improvement === undefined ? {} : { improvement }) })}\n`)
   return layout
 }
 

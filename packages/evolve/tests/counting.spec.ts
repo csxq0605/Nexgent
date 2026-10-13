@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { runImprovementJob, ImprovementHost, countsTowardImprovement, readQueue, type ImprovementHostConfig, type ImprovementStages, type StartedJob } from '../src/index.js'
 import { feedback, project, stagesTo } from './helpers.js'
-import type { WorkspaceLayout } from '@nexgent/kernel'
+import { signalKey, type WorkspaceLayout } from '@nexgent/kernel'
 
 /** A host whose jobs run in this process with the given stages. */
 function inProcess(layout: WorkspaceLayout, stages: ImprovementStages = stagesTo('adopted'), extra: ImprovementHostConfig = {}): ImprovementHost {
@@ -54,7 +54,7 @@ describe('counting and the feedback trigger', () => {
     const again = await host.noteFeedback([entry, entry])
     expect(again.added).toHaveLength(0)
     expect(again.pending).toBe(1)
-    expect((await readQueue(host.directory))!.counted).toEqual([entry.id])
+    expect((await readQueue(host.directory))!.counted).toEqual([`feedback:${entry.id}`])
   })
 
   it('feedback from before counting began is not counted', async () => {
@@ -105,10 +105,23 @@ describe('check failures', () => {
     const checks = [{ name: 'file-exists', passed: true }, { name: 'parses', passed: false, target: 'c1' }]
     expect((await host.noteCheckFailure({ taskId: 't1', sessionId: 's', turn: 1, checks: [{ name: 'parses', passed: true }] })).added).toHaveLength(0)
     const first = await host.noteCheckFailure({ taskId: 't1', sessionId: 's', turn: 1, checks })
-    expect(first.added).toEqual([expect.objectContaining({ id: 'check:t1:1', source: 'check-failure', failedChecks: ['c1'] })])
+    expect(first.added).toEqual([expect.objectContaining({ kind: 'check-failure', taskId: 't1', turn: 1, failedChecks: ['c1'] })])
+    expect(first.added.map(signalKey)).toEqual(['check:t1:1'])
     expect((await host.noteCheckFailure({ taskId: 't1', sessionId: 's', turn: 1, checks })).added).toHaveLength(0)
     await host.noteFeedback([feedback()])
     const third = await host.noteCheckFailure({ taskId: 't2', sessionId: 's', turn: 1, checks })
+    // A mixed batch is a feedback-count batch (the contract's batchTrigger).
+    expect(third.started).toMatchObject({ trigger: 'feedback-count' })
+    await host.settled()
+  })
+
+  it('a batch of check failures only is a check-failure batch', async () => {
+    const layout = await project()
+    const host = inProcess(layout)
+    await host.start()
+    const checks = [{ name: 'parses', passed: false, target: 'c1' }]
+    for (const taskId of ['t1', 't2']) await host.noteCheckFailure({ taskId, sessionId: 's', turn: 1, checks })
+    const third = await host.noteCheckFailure({ taskId: 't3', sessionId: 's', turn: 1, checks })
     expect(third.started).toMatchObject({ trigger: 'check-failure' })
     await host.settled()
   })
@@ -136,7 +149,7 @@ describe('explicit 改进', () => {
     const host = inProcess(layout, slow)
     await host.start()
     await host.run()
-    await expect(host.run()).rejects.toMatchObject({ code: 'tool/invalid-input' })
+    await expect(host.run()).rejects.toMatchObject({ code: 'improvement/busy' })
     release()
     await host.settled()
     await expect(host.run()).resolves.toMatchObject({ trigger: 'explicit' })
@@ -170,7 +183,7 @@ describe('one job per project (decision 8)', () => {
     const jobs = await host.list()
     expect(jobs).toHaveLength(2)
     expect(jobs.map(job => job.status)).toEqual(['rejected', 'rejected'])
-    expect(jobs[1]!.items.map(item => item.id)).toEqual(during.added.map(item => item.id))
+    expect(jobs[1]!.items.map(signalKey)).toEqual(during.added.map(signalKey))
     expect((await readQueue(host.directory))!).toMatchObject({ pending: [] })
     expect((await readQueue(host.directory))!.activeJobId).toBeUndefined()
   })
@@ -193,6 +206,6 @@ describe('the feedback counter provider', () => {
       }
       return readQueue(host.directory)
     })()
-    expect(queue!.counted).toEqual([entry.id])
+    expect(queue!.counted).toEqual([`feedback:${entry.id}`])
   })
 })
