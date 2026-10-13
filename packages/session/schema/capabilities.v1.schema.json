@@ -782,6 +782,10 @@
           "type": "number",
           "minimum": 1
         },
+        "costApprovalRatio": {
+          "type": "number",
+          "minimum": 1
+        },
         "reviewer": {
           "$ref": "#/$defs/reviewerSettings"
         },
@@ -886,6 +890,12 @@
             {
               "const": "unknown"
             }
+          ]
+        },
+        "costBasis": {
+          "enum": [
+            "usd",
+            "tokens"
           ]
         },
         "decidedByReview": {

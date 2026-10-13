@@ -123,7 +123,8 @@
 | `selectionCases` | integer ≥ 2 | `2` | 选择集用例数；历史任务不够时门控等待，不降低要求 |
 | `guardCases` | integer ≥ 1 | `1` | 守护集用例数 |
 | `repeats` | 1–5 | `2` | 每个用例每个臂的运行次数 |
-| `costRatioCap` | 1–10 | `1.2` | 质量提高时允许的候选 / 基线 token 比 |
+| `costRatioCap` | 1–10 | `1.2` | 质量打平时，评审偏好候选、且费用比不超过它才采用（ADR 0007：不再限制质量提高） |
+| `costApprovalRatio` | 1–10 | `2` | ADR 0007：质量提高但费用比超过它时不自动采用，改为等用户批准 |
 | `reviewer` | `{ model, thinking }` | `{ "model": "claude-sonnet-5-5", "thinking": "on" }` | 评审模型，可改为 `claude-opus-5-5`（决定 5）；只在检查打平时起作用 |
 | `rollback.windowTasks` | 1–20 | `3` | 采用后观察的根任务数（决定 6） |
 | `rollback.consecutiveErrors` | 1–20 | `3` | 新组件连续出错多少次即回滚 |
@@ -584,19 +585,23 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `trial.feedback` | 步骤 5（ADR 0006）：`caseId`、`arm`、`repeat`、`feedbackIds`（≥1）、`status: pass \| fail \| unknown`、`reason`（≤2000 字符）、`model`、`cost`。评审模型读这次运行的成果与反馈原文，回答“反馈指出的问题是否已经解决”；运行本身是 `unknown`、评审失败或回答无法解析时为 `unknown`。与确定性检查（`trial.run.checks`）和偏好评审（`trial.review`）分开记 |
 | `trial.end` | `status`、`verdict: TrialVerdict`、`cost: { candidate, baseline, review }`（反馈检查的费用计入 `review`） |
 
-每行都有 `format: 1`、`trialId`、`ts`。`cost` 是 `{ usage, requestCount, estimatedUsd }`，美元只是估算，从不参与判断。
+每行都有 `format: 1`、`trialId`、`ts`。`cost` 是 `{ usage, requestCount, estimatedUsd }`；美元是估算，ADR 0007 起用于费用比（见下）。
 
-**采用规则**（`decideTrial`，纯函数，ADR 0005 决策 5，步骤 5 由 ADR 0006 修订第 1、3 条），按顺序：
+**采用规则**（`decideTrial(tally, costRatioCap, costApprovalRatio)`，纯函数，ADR 0005 决策 5；步骤 5 由 ADR 0006 修订第 1、3 条，由 ADR 0007 修订费用比与第 3 条）。
+
+费用比：两臂的估算美元（`TrialTally.usd`，含缓存读写）都已知且基线大于 0 时，为候选美元 / 基线美元；否则为 token 比（输入 + 输出）。`TrialVerdict.costBasis` 写明用的是哪种。
+
+按顺序：
 
 1. 预算用尽（`budget-exhausted`）、任何一次运行或反馈检查是 `unknown`、或用量未知（`unknown-runs`）：拒绝。
 2. 守护集候选通过次数少于基线：拒绝（`guard-regressed`）。
-3. 选择集质量 = 选择集运行的确定性检查结果，加上每臂的反馈检查结果（每个反馈检查算该臂多一次通过或失败）的通过率。候选低：拒绝（`quality-down`）。候选高：token 比 ≤ `costRatioCap` 则采用（`quality-up`），否则拒绝（`cost-over-cap`）。
-4. 打平：token 比 < 1 采用（`cost-down`）；否则看评审，候选偏好多于基线且比值在上限内采用（`review-preferred`），其他拒绝（`no-improvement`）。
+3. 选择集质量 = 选择集运行的确定性检查结果，加上每臂的反馈检查结果（每个反馈检查算该臂多一次通过或失败）的通过率。候选低：拒绝（`quality-down`）。候选高：费用比 ≤ `costApprovalRatio` 则采用（`quality-up`），否则 `await-approval`（理由仍是 `quality-up`，等用户经 `capabilities.approve` 批准）。ADR 0007 起不再产生 `cost-over-cap`，这个值只留给旧记录。
+4. 打平：费用比 < 1 采用（`cost-down`）；否则看评审，候选偏好多于基线且费用比 ≤ `costRatioCap` 采用（`review-preferred`），其他拒绝（`no-improvement`）。
 5. 含 `plugin` 的候选，采用结论变为 `await-approval`，理由不变。
 
-`TrialVerdict`：`outcome`、`reason`、`passRate: { candidate, baseline }`（上面第 3 条的质量）、`feedbackPassRate?`（步骤 5：只算反馈检查的通过率，试验有反馈检查时才有，证据里单独显示）、`costRatio`、`decidedByReview`。`TrialTally.feedback` 是反馈检查的每臂计数。
+`TrialVerdict`：`outcome`、`reason`、`passRate: { candidate, baseline }`（上面第 3 条的质量）、`feedbackPassRate?`（步骤 5：只算反馈检查的通过率，试验有反馈检查时才有，证据里单独显示）、`costRatio`、`costBasis?`（ADR 0007：`usd` 或 `tokens`，之前的记录没有，按 `tokens` 读）、`decidedByReview`。`TrialTally.feedback` 是反馈检查的每臂计数。`TrialPlan.costApprovalRatio?` 是试验开始时冻结的批准倍数（ADR 0007 之前的试验没有）。
 
-`cost.estimatedUsd` 来自 `@nexgent/llm` 的只读价目表（步骤 5，决定 9），模型不在表里或任何用量未知时为 `"unknown"`；它只用于显示，任何判断只看 token 与请求数。
+`cost.estimatedUsd` 来自 `@nexgent/llm` 的只读价目表（步骤 5，决定 9），模型不在表里或任何用量未知时为 `"unknown"`。ADR 0007 起门控的费用比优先用它（两臂都已知时）；预算与费用上限仍只看 token 与请求数。
 
 **决定。** `.nexgent/capabilities/decisions/<id>.json`，以 `wx` 写一次：`formatVersion: 1`、`id`、`outcome: adopted | rejected | awaiting-approval | rolled-back`、`reason`、`trigger`、`decidedAt`、`candidateId?`、`trialId?`、`fromVersion`、`toVersion`、`revision?`、`verdict?`、`cost?`、`regression?`、`detail`（≤2000 字符）。采用与回滚各写一个修订（`revision`）；拒绝与待批准不写修订。每个决定同时在账本写一条 `capability.decision`。
 
@@ -921,7 +926,7 @@ The earlier part of this conversation was compacted. Summary:
 - 步骤 4 的四个预留字段已经在 v1 中是可选字段，启用它们不升版本。
 - **步骤 4 的四种会话记录、`session.start.capabilityVersion`、账本的 `capability.decision` 与新可选字段也在 v1 内追加**，理由同步骤 3；步骤 3 写出的会话与账本照常读出。
 - **步骤 2 的新记录类型在 v1 内追加**（计划已定：旧文件仍可读）。代价是：只认识步骤 1 记录集的读取方会把第一条步骤 2 记录当作无效行，持锁追加时还会截断其后的内容。步骤 1 没有对外发布的构建，`nexgent-app` 上的读取方与写入方同步升级，所以接受这一点；步骤 2 之后再加记录类型时，先评估是否已有对外发布的读取方，有则升版本。
-- **步骤 5 的 `session.start.purpose` / `improvement`、账本的 `improvementId` / `improvementPhase` 与 `improvement.end`、候选的 `origin` / `jobId`、`ReplayCaseRef.throughTurn` / `feedbackIds`、收据 `trial.feedback`、`TrialVerdict.feedbackPassRate`、快照与检查记录的 `turn` 都在各自的 v1 内追加**；步骤 4 写出的会话、账本与能力文件照常读出。只认识步骤 4 收据类型的读取方会拒绝含 `trial.feedback` 的收据文件，与读写方同步升级（仍没有对外发布的构建）。`autoImprove` 默认值从 `false` 改为 `true`：没写这个字段的项目在步骤 5 起自动改进开启（ADR 0006）。
+- **步骤 5 的 `session.start.purpose` / `improvement`、账本的 `improvementId` / `improvementPhase` 与 `improvement.end`、候选的 `origin` / `jobId`、`ReplayCaseRef.throughTurn` / `feedbackIds`、收据 `trial.feedback`、`TrialVerdict.feedbackPassRate`、快照与检查记录的 `turn`，以及 ADR 0007 的 `TrialVerdict.costBasis`、`TrialPlan.costApprovalRatio` 与设置 `capabilities.costApprovalRatio` 都在各自的 v1 内追加**；步骤 4 写出的会话、账本与能力文件照常读出。只认识步骤 4 收据类型的读取方会拒绝含 `trial.feedback` 的收据文件，与读写方同步升级（仍没有对外发布的构建）。`autoImprove` 默认值从 `false` 改为 `true`：没写这个字段的项目在步骤 5 起自动改进开启（ADR 0006）。
 - **步骤 3 的九种新记录、`session.start.member` 与成果的成员字段也在 v1 内追加。** 评估结果：仍没有对外发布的构建（`main` 上的步骤 2 只供本仓库验收），读取方与写入方同步升级，所以不升版本；步骤 2 写出的会话照常读出、恢复与续写。
 
 ## schema 与读写测试
