@@ -1,0 +1,25 @@
+{
+  "name": "@nexgent/evolve",
+  "version": "0.0.0",
+  "private": true,
+  "description": "默认的反馈改进流程：反馈计数与三种触发、改进作业目录与状态机、作业宿主（分离进程、锁、恢复）、改进预算闸门。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*"
+  }
+}
