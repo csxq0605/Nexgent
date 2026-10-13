@@ -260,6 +260,23 @@ describe('after adoption', () => {
     expect(rolled).toMatchObject({ firstUse: { taskId: 'used-task' }, rolledBack: { at: expect.any(String) } })
     expect(await sweepAdoptedJobs(fixture.layout)).toEqual([])
   })
+
+  it('shows the first use as soon as the task outcome is in the ledger, without another turn starting', async () => {
+    const fixture = await feedbackTask()
+    const job = await queuedJob(fixture)
+    const runner = scriptedRunner({ diagnose: reportOnce(fixture), propose: proposeInCopy(fixture) })
+    await runImprovementJob(fixture.layout, job.id, { stages: createImprovementStages({ runner, startTrial: gate('adopted') }) })
+    const host = new ImprovementHost(fixture.layout, {})
+    await host.start()
+    expect((await host.show(job.id)).firstUse).toBeUndefined()
+    // The next task ends: its outcome lands in the ledger; no turn starts and the host does not restart.
+    await new JsonlLedger({ ledgersDir: fixture.layout.ledgers }).append({
+      type: 'task.outcome', sessionId: 's-next', taskId: 'next-task', status: 'completed', totalUsage: ZERO_USAGE, requestCount: 1, toolCallCount: 1, turns: 1, toolsUsed: ['cap_region_summary_summarize'],
+      componentsUsed: [{ kind: 'function-module', name: 'region-summary', version: VERSION, calls: 1, errors: 0 }], capabilityVersion: VERSION, memberId: 'main',
+    } as never)
+    expect((await host.list()).find(item => item.id === job.id)?.firstUse).toMatchObject({ taskId: 'next-task', sessionId: 's-next', version: VERSION })
+    expect((await host.show(job.id)).firstUse).toMatchObject({ taskId: 'next-task' })
+  })
 })
 
 describe('the host', () => {
