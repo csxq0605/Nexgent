@@ -44,7 +44,7 @@ import { jobImproverVersion, PROJECT_IMPROVERS, trialComparison, type ImproverSo
 import { jobAlive, jobPaths, listJobs, readJob, transitionJob } from './jobs.js'
 import { processAlive, readLockPid, tryCreateLock } from './lock.js'
 import { improvementsDir } from './paths.js'
-import { admitItems, ensureQueue, readQueue, reconcileQueue, retakeSlot, startExplicitJob, type AdmitResult } from './queue.js'
+import { admitItems, ensureQueue, readQueue, reconcileQueue, retakeSlot, startExplicitJob, startExplicitMetaJob, type AdmitResult } from './queue.js'
 import { RUNNING_STATUSES, type ImprovementJob, type ImprovementQueue, type ImprovementRequest, type QueueItem } from './types.js'
 
 /**
@@ -173,9 +173,14 @@ export class ImprovementHost {
     }
   }
 
-  /** What the budget window has spent. */
+  /** What the improvement budget's window has spent (capability jobs; meta jobs have their own budget). */
   async budgetStatus(now: Date = new Date()): Promise<BudgetStatus> {
-    return budgetStatus(await listJobs(this.directory), (await this.settings()).improvement.budget, now)
+    return budgetStatus((await listJobs(this.directory)).filter(job => job.kind !== 'meta'), (await this.settings()).improvement.budget, now)
+  }
+
+  /** Step 6: what the meta budget's window has spent (meta jobs, both comparison arms included). */
+  async metaBudgetStatus(now: Date = new Date()): Promise<BudgetStatus> {
+    return budgetStatus((await listJobs(this.directory)).filter(job => job.kind === 'meta'), (await this.settings()).improvement.meta.budget, now)
   }
 
   /** Count signals and start a job when the batch is full. */
@@ -227,6 +232,25 @@ export class ImprovementHost {
       throw new NexgentError('improvement/budget-exhausted', `the improvement budget is spent (${budget.used} of ${budget.limit} tokens since ${budget.windowStart})`, { details: { used: budget.used, limit: budget.limit } })
     }
     const job = await startExplicitJob(this.directory, request, now)
+    this.#launch(job.id)
+    return job
+  }
+
+  /**
+   * Step 6, explicit meta improvement (`improvements.runMeta`): start a meta
+   * job now, whatever `improvement.meta.enabled` and the count; it takes the
+   * pending meta batch. `keepCopies` keeps both comparison copies (experiments).
+   * @throws `improvement/busy` when a job is running; `improvement/budget-exhausted`
+   *   when the meta budget is spent; `internal` when no entry or launcher is configured.
+   */
+  async runMeta(input: { readonly keepCopies?: boolean } = {}, now: Date = new Date()): Promise<ImprovementJob> {
+    if (!this.canLaunch) throw new NexgentError('internal', 'no improvement entry is configured for @nexgent/evolve')
+    const budget = await this.metaBudgetStatus(now)
+    if (budget.exhausted) {
+      throw new NexgentError('improvement/budget-exhausted', `the meta improvement budget is spent (${budget.used} of ${budget.limit} tokens since ${budget.windowStart})`, { details: { used: budget.used, limit: budget.limit } })
+    }
+    const parent = await (this.#config.improvers ?? PROJECT_IMPROVERS).current(this.layout)
+    const job = await startExplicitMetaJob(this.directory, { parentVersion: parent.version, ...(input.keepCopies === undefined ? {} : { keepCopies: input.keepCopies }) }, now)
     this.#launch(job.id)
     return job
   }

@@ -8,7 +8,8 @@
  * and the first-use record. The host entry supplies the session runner and
  * the gate ({@link createImprovementStages}); without them
  * {@link PENDING_STAGES} ends every job `failed`. Step 6: every job runs on
- * the improver it pinned when it started ({@link ImproverSource}).
+ * the improver it pinned when it started ({@link ImproverSource}); meta jobs
+ * ({@link createMetaStages}) improve the improver.
  */
 export * from './types.js'
 export { improvementsDir } from './paths.js'
@@ -24,6 +25,7 @@ export {
   releaseSlot,
   retakeSlot,
   startExplicitJob,
+  startExplicitMetaJob,
   type AdmitOptions,
   type AdmitResult,
 } from './queue.js'
@@ -82,3 +84,19 @@ export { trialSpend, trialStatus, type GateOutcome, type TrialStarter } from './
 export { sweepAdoptedJobs } from './first-use.js'
 export { createImprovementStages, type ImprovementStagesOptions } from './stages.js'
 export { jobImproverVersion, PROJECT_IMPROVERS, trialComparison, type ImproverSource, type PinnedImprover } from './improver.js'
+export {
+  createMetaStages,
+  fixedImprover,
+  metaDiagnosisPrompt,
+  metaProposePrompt,
+  originOf,
+  sourceJob,
+  type ArmJobRunner,
+  type CompareResult,
+  type MetaDiagnoseResult,
+  type MetaProposeResult,
+  type MetaStageInput,
+  type MetaStages,
+  type MetaStagesOptions,
+} from './meta.js'
+export { finishedStatusCounts, metaDiagnosisTools, metaProposeTools, type MetaChangeState, type MetaDiagnosisState } from './meta-tools.js'

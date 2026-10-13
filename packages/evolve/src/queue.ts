@@ -11,17 +11,25 @@
  * Signals counted while a job holds the slot form the next batch
  * (decision 8). The counting itself is the contract's pure `countSignal`,
  * `takeBatch` and `releaseJobSlot`.
+ *
+ * Step 6 (ADR 0008 decision 3): when a job lets go of the slot, the same
+ * locked update counts it toward the next meta job (`countFinishedJob`) and,
+ * with `improvement.meta.enabled` and `everyJobs` counted, starts the meta
+ * job (`takeMetaBatch`) before the next capability batch.
  */
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   batchTrigger,
+  countFinishedJob,
   countSignal,
   emptyImprovementQueue,
   IMPROVEMENT_FILES,
   NexgentError,
   releaseJobSlot,
   takeBatch,
+  takeMetaBatch,
+  type ImproverVersion,
 } from '@nexgent/kernel'
 import { validateImprovementFile } from '@nexgent/session'
 import { createJob, jobAlive, readJob, transitionJob } from './jobs.js'
@@ -106,6 +114,12 @@ export interface AdmitOptions {
   readonly autoStart: boolean
   readonly threshold?: number
   readonly now?: Date
+  /**
+   * Step 6: meta jobs (`improvement.meta`). Finished jobs are counted
+   * whatever `enabled` says; a meta job starts only when it is on.
+   * `parentVersion` is the improver in force (the meta job pins its own when it starts).
+   */
+  readonly meta?: { readonly enabled: boolean; readonly everyJobs: number; readonly parentVersion: ImproverVersion }
 }
 
 /** Result of {@link admitItems}. */
@@ -182,10 +196,37 @@ export async function releaseSlot(improvementsDir: string, jobId: string, option
   const now = options.now ?? new Date()
   const threshold = options.threshold ?? DEFAULT_THRESHOLD
   return updateQueue(improvementsDir, now, async current => {
-    const queue = releaseJobSlot(current, jobId)
+    let queue = releaseJobSlot(current, jobId)
+    const finished = await readJob(improvementsDir, jobId).catch(() => undefined)
+    if (finished !== undefined) queue = countFinishedJob(queue, finished).queue
+    const meta = options.meta
+    if (meta?.enabled === true) {
+      const taken = takeMetaBatch(queue, meta.everyJobs)
+      if (taken.batch !== undefined) {
+        const started = await createJob(improvementsDir, { trigger: 'job-count', items: [], kind: 'meta', meta: { basis: taken.batch, parentVersion: meta.parentVersion }, now })
+        return { queue: { ...taken.queue, activeJobId: started.id }, result: started }
+      }
+    }
     if (!options.autoStart) return { queue, result: undefined }
     const next = await startBatch(improvementsDir, queue, threshold, now)
     return { queue: next.queue, result: next.started }
+  })
+}
+
+/**
+ * Start a meta job on request (`improvements.runMeta`), whatever the switch
+ * and the count: it takes the pending meta batch (possibly empty). The meta
+ * budget is checked by the caller and by the job before each phase.
+ * @throws `improvement/busy` when another job holds the slot.
+ */
+export async function startExplicitMetaJob(improvementsDir: string, input: { readonly parentVersion: ImproverVersion; readonly keepCopies?: boolean }, now: Date = new Date()): Promise<ImprovementJob> {
+  return updateQueue(improvementsDir, now, async current => {
+    const slot = await reconcileSlot(improvementsDir, current, now)
+    if (slot.active !== undefined) throw new NexgentError('improvement/busy', `improvement job ${slot.active.id} is still running in this project; one job runs at a time`, { details: { jobId: slot.active.id } })
+    const taken = takeMetaBatch(slot.queue, 0)
+    const meta = { basis: taken.batch ?? [], parentVersion: input.parentVersion, ...(input.keepCopies === true ? { keepCopies: true } : {}) }
+    const started = await createJob(improvementsDir, { trigger: 'explicit', items: [], kind: 'meta', meta, now })
+    return { queue: { ...taken.queue, activeJobId: started.id }, result: started }
   })
 }
 

@@ -5,14 +5,15 @@
  * Step 6: the prompts, the kinds a diagnosis may lead to and the gate's
  * comparison parameters come from the job's pinned improver.
  */
-import { IMPROVEMENT_LIMITS, NexgentError, readProjectConfig, type CapabilityComponentKind, type FeedbackListing } from '@nexgent/kernel'
+import { IMPROVEMENT_LIMITS, NexgentError, readProjectConfig, type LLMUsage, type CapabilityComponentKind, type FeedbackListing } from '@nexgent/kernel'
 import { listReplayCases } from '@nexgent/capabilities'
 import { JsonlSessionStore } from '@nexgent/session'
 import { SessionFeedbackStore } from '@nexgent/tasking'
 import { diagnosisNudge, diagnosisPrompt, diagnosisTools, sumTurns, type DiagnosisState } from './diagnosis.js'
 import { collectCandidate, contextPolicyCheckText, contextPolicyProposeText, findFeedbackTask, newSessionId, pendingContextPolicies, prepareProposalCopy, proposalBrief, proposeRecords } from './propose.js'
 import { trialComparison } from './improver.js'
-import type { ImprovementStages } from './runner.js'
+import { createMetaStages } from './meta.js'
+import { runImprovementJob, type ImprovementStages } from './runner.js'
 import type { ImprovementSessionRunner, ImprovementTurnResult } from './session-runner.js'
 import { trialSpend, trialStatus, type TrialStarter } from './trial.js'
 import type { ImprovementJob } from './types.js'
@@ -23,6 +24,12 @@ export interface ImprovementStagesOptions {
   readonly startTrial: TrialStarter
   /** Parent directory of the propose copies (default the OS temporary directory). */
   readonly tempRoot?: string
+  /** Step 6: estimated dollars of one model request (`@nexgent/llm` `estimateUsd`), for the comparison arms' costs. */
+  readonly priceUsd?: (model: string, usage: LLMUsage) => number | 'unknown'
+  /** Step 6: largest comparison copy a meta job keeps for `keepCopies` (default the gate's limit). */
+  readonly keepMaxBytes?: number
+  /** Step 6: the evaluator epoch a comparison arm's gate must run in (set by the meta stages for the arm's job). */
+  readonly epoch?: string
 }
 
 function turnFailure(turn: ImprovementTurnResult): string | undefined {
@@ -62,9 +69,18 @@ async function feedbackOf(layout: Parameters<ImprovementStages['diagnose']>[0]['
   return found
 }
 
-/** Build the phases. */
+/** Build the phases, the meta job's included (its comparison arms run these same phases in their copies). */
 export function createImprovementStages(options: ImprovementStagesOptions): ImprovementStages {
+  const meta = createMetaStages({
+    runner: options.runner,
+    startTrial: options.startTrial,
+    ...(options.tempRoot === undefined ? {} : { tempRoot: options.tempRoot }),
+    ...(options.priceUsd === undefined ? {} : { priceUsd: options.priceUsd }),
+    ...(options.keepMaxBytes === undefined ? {} : { keepMaxBytes: options.keepMaxBytes }),
+    runArm: (layout, jobId, arm) => runImprovementJob(layout, jobId, { stages: createImprovementStages({ ...options, runner: arm.runner, epoch: arm.epoch }), improvers: arm.improvers, chain: false }),
+  })
   return {
+    meta,
     async diagnose(input) {
       const { layout, job, config } = input
       const sessionId = newSessionId()
@@ -176,7 +192,7 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
 
     async trial(input) {
       const capabilities = (await readProjectConfig(input.layout.configFile)).config.capabilities
-      const outcome = await options.startTrial({ layout: input.layout, candidateId: input.candidateId, job: input.job, comparison: trialComparison(capabilities, input.improver.bundle) })
+      const outcome = await options.startTrial({ layout: input.layout, candidateId: input.candidateId, job: input.job, comparison: trialComparison(capabilities, input.improver.bundle), ...(options.epoch === undefined ? {} : { epoch: options.epoch }) })
       const spend = outcome.status === 'decided' ? await trialSpend(input.layout, outcome.trialId) : sumTurns([])
       const mapped = trialStatus(outcome)
       return {

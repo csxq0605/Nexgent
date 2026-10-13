@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { canMoveImprovement, IMPROVEMENT_FILES, IMPROVEMENT_LIMITS, IMPROVEMENT_STATUSES, NexgentError } from '@nexgent/kernel'
+import { canMoveJob, IMPROVEMENT_FILES, IMPROVEMENT_LIMITS, IMPROVEMENT_STATUSES, NexgentError, type ComparisonArmRef, type MetaJobState } from '@nexgent/kernel'
 import { validateImprovementFile } from '@nexgent/session'
 import { lockHeld, readJson, readLockPid, withFileLock, writeJsonAtomic } from './lock.js'
 import {
@@ -36,6 +36,10 @@ export interface JobPaths {
   readonly log: string
   /** The accepted diagnosis. */
   readonly diagnosis: string
+  /** Step 6, meta jobs: the accepted meta diagnosis, the change and the comparison. */
+  readonly metaDiagnosis: string
+  readonly change: string
+  readonly comparison: string
 }
 
 /** Paths of job `jobId` under `improvementsDir`. */
@@ -49,6 +53,9 @@ export function jobPaths(improvementsDir: string, jobId: string): JobPaths {
     writeLock: join(directory, IMPROVEMENT_FILES.jobFileLock),
     log: join(directory, IMPROVEMENT_FILES.jobLog),
     diagnosis: join(directory, IMPROVEMENT_FILES.diagnosis),
+    metaDiagnosis: join(directory, IMPROVEMENT_FILES.metaDiagnosis),
+    change: join(directory, IMPROVEMENT_FILES.change),
+    comparison: join(directory, IMPROVEMENT_FILES.comparison),
   }
 }
 
@@ -118,6 +125,11 @@ export interface CreateJobInput {
   readonly request?: ImprovementRequest
   readonly now?: Date
   readonly id?: string
+  /** Step 6: `meta` for a meta job (with its {@link CreateJobInput.meta} state). */
+  readonly kind?: 'meta'
+  readonly meta?: MetaJobState
+  /** Step 6: a comparison arm's job (in the arm's project copy). */
+  readonly arm?: ComparisonArmRef
 }
 
 /** Write a new `queued` job (exclusive: a job id is never reused). */
@@ -130,12 +142,15 @@ export async function createJob(improvementsDir: string, input: CreateJobInput):
   const job: ImprovementJob = {
     formatVersion: 1,
     id,
+    ...(input.kind === undefined ? {} : { kind: input.kind }),
+    ...(input.arm === undefined ? {} : { arm: input.arm }),
     trigger: input.trigger,
     status: 'queued',
     createdAt: at,
     updatedAt: at,
     items: [...input.items],
     ...(input.request === undefined ? {} : { request: input.request }),
+    ...(input.meta === undefined ? {} : { meta: input.meta }),
     phases: {},
     history: [{ status: 'queued', at }],
   }
@@ -177,7 +192,7 @@ export async function transitionJob(
   return withFileLock(paths.writeLock, async () => {
     const job = await readJob(improvementsDir, jobId)
     if (options.expect !== undefined && !options.expect.includes(job.status)) return undefined
-    if (!canMoveImprovement(job.status, to)) throw new NexgentError('internal', `improvement job ${jobId} cannot move from ${job.status} to ${to}`)
+    if (!canMoveJob(job.kind, job.status, to)) throw new NexgentError('internal', `improvement job ${jobId} cannot move from ${job.status} to ${to}`)
     const at = (options.now ?? new Date()).toISOString()
     const detail = options.detail === undefined ? undefined : clip(options.detail)
     const next: ImprovementJob = {

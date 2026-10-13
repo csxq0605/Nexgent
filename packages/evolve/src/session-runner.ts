@@ -14,7 +14,11 @@
  *   the real project's ledger.
  * - Diagnose: the session's tools are exactly `request.tools` (the four
  *   `improve_*` tools this package builds): no file, command, network,
- *   collaboration or capability tools, no project plugins.
+ *   collaboration or capability tools, no project plugins. Step 6: the
+ *   meta-diagnose and meta-propose sessions likewise get exactly their
+ *   five and three tools.
+ * - Step 6, comparison arms: `projectRoot` is the arm's copy; the records
+ *   carry `metaJobId` and `comparisonArm` and go to `ledgerRoot`'s ledger.
  * - Propose: the file tools work in `request.workspaceRoot` (the snapshot
  *   copy), with the ordinary task tools plus `capability_draft / try /
  *   propose`; the sandbox is the narrower of the original task's mode and
@@ -25,18 +29,28 @@
  * - Model and thinking are `request.model` / `request.thinking`
  *   (`improvement.model`, `improvement.thinking`).
  */
-import type { ImproverVersion, LLMUsage, SandboxMode, ThinkingMode, Tool } from '@nexgent/kernel'
+import type { ComparisonArm, ImproverVersion, LLMUsage, SandboxMode, ThinkingMode, Tool } from '@nexgent/kernel'
 
 /** What a job asks the runner to open. */
 export interface ImprovementSessionRequest {
   readonly jobId: string
-  readonly phase: 'diagnose' | 'propose'
+  /** Step 6 adds the meta job's two sessions (their tools are exactly `request.tools`). */
+  readonly phase: 'diagnose' | 'propose' | 'meta-diagnose' | 'meta-propose'
   /** Lowercase uuid v4 the job chose (recorded in `job.json` before the session runs). */
   readonly sessionId: string
   /** The real project (sessions, ledger, candidates). */
   readonly projectRoot: string
   /** Step 6: the improver version the job pinned (for `session.start.improvement` and the ledger). */
   readonly improverVersion: ImproverVersion
+  /** Step 6, comparison arms: the meta job and the arm (on `session.start.improvement` and every ledger record). */
+  readonly metaJobId?: string
+  readonly comparisonArm?: ComparisonArm
+  /**
+   * Step 6, comparison arms: the real project, whose ledger gets the
+   * session's records (`projectRoot` is then the arm's copy, where the
+   * session file is written).
+   */
+  readonly ledgerRoot?: string
   /** Propose only: the snapshot copy the file tools work in. */
   readonly workspaceRoot?: string
   /** Propose only: the sandbox mode of the session (already the narrower one). */
@@ -44,7 +58,7 @@ export interface ImprovementSessionRequest {
   readonly model: string
   readonly thinking: ThinkingMode
   readonly title: string
-  /** Diagnose only: the session's complete tool set. */
+  /** Diagnose, meta-diagnose and meta-propose: the session's complete tool set. */
   readonly tools?: readonly Tool[]
   readonly signal?: AbortSignal
 }

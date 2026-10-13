@@ -30,6 +30,7 @@ import {
   type TrialStarter,
 } from '@nexgent/evolve'
 import { addUsage, resolveWorkspaceLayout, UNKNOWN_USAGE, ZERO_USAGE, type LedgerRecord, type LLMUsage, type TurnEndReason } from '@nexgent/kernel'
+import { estimateUsd } from '@nexgent/llm'
 import { JsonlLedger } from '@nexgent/session'
 import { createSdk } from './sdk.js'
 import { runGateProcess } from './trial-entry.js'
@@ -86,6 +87,8 @@ export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunn
   return {
     async open(request: ImprovementSessionRequest): Promise<ImprovementSession> {
       const real = resolveWorkspaceLayout(request.projectRoot)
+      // A comparison arm's records go to the real project's ledger (its sessions stay in the arm's copy).
+      const ledgers = request.ledgerRoot === undefined ? real.ledgers : resolveWorkspaceLayout(request.ledgerRoot).ledgers
       const propose = request.phase === 'propose'
       if (propose && request.workspaceRoot === undefined) throw new Error('a propose session needs the snapshot copy (workspaceRoot)')
       const sdk = createSdk({
@@ -94,7 +97,7 @@ export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunn
         background: false,
         approvalResponder: async approval => ({ id: approval.id, decision: 'deny', scope: 'once', decidedBy: 'headless', reason: 'improvement jobs run without anyone to ask' }),
         // Propose works in the copy; its session and ledger belong to the real project.
-        ...(propose ? { patches: [{ id: 'session', config: { sessionsDir: real.sessions, ledgersDir: real.ledgers } }] } : {}),
+        ...(propose || request.ledgerRoot !== undefined ? { patches: [{ id: 'session', config: { sessionsDir: real.sessions, ledgersDir: ledgers } }] } : {}),
       })
       try {
         const project = await sdk.call('projects.open', { root: propose ? request.workspaceRoot! : request.projectRoot })
@@ -102,7 +105,12 @@ export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunn
           projectId: project.projectId,
           sessionId: request.sessionId,
           title: request.title,
-          improvement: { jobId: request.jobId, phase: request.phase, improverVersion: request.improverVersion },
+          improvement: {
+            jobId: request.jobId,
+            phase: request.phase,
+            improverVersion: request.improverVersion,
+            ...(request.metaJobId === undefined || request.comparisonArm === undefined ? {} : { metaJobId: request.metaJobId, comparisonArm: request.comparisonArm }),
+          },
           model: request.model,
           thinking: request.thinking,
           ...(request.sandboxMode === undefined ? {} : { sandboxMode: request.sandboxMode }),
@@ -121,7 +129,7 @@ export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunn
             } catch (error) {
               return { outcome: 'error', detail: (error instanceof Error ? error.message : String(error)).slice(0, 500), usage: UNKNOWN_USAGE, requestCount: 0 }
             }
-            const now = await sessionSpend(real.ledgers, request.sessionId).catch(() => undefined)
+            const now = await sessionSpend(ledgers, request.sessionId).catch(() => undefined)
             const turn = now === undefined
               ? { usage: UNKNOWN_USAGE, requests: 0 }
               : { usage: usageSince(now.usage, spent.usage), requests: now.requests - spent.requests }
@@ -143,13 +151,13 @@ export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunn
 
 /** The gate for a job's candidate: the step-4 gate process's work, in this process. */
 export function gateTrialStarter(env: Env = process.env): TrialStarter {
-  return ({ layout, candidateId, comparison }) => runGateProcess(layout.root, candidateId, env, { comparison })
+  return ({ layout, candidateId, comparison, epoch }) => runGateProcess(layout.root, candidateId, env, { comparison, ...(epoch === undefined ? {} : { epoch }) })
 }
 
 /** Run one job (the `improve` mode); returns the jobs this process ran. */
 export async function runImprovementProcess(root: string, jobId: string, env: Env = process.env) {
   return runImprovementJob(resolveWorkspaceLayout(root), jobId, {
-    stages: createImprovementStages({ runner: sdkSessionRunner(env), startTrial: gateTrialStarter(env) }),
+    stages: createImprovementStages({ runner: sdkSessionRunner(env), startTrial: gateTrialStarter(env), priceUsd: estimateUsd }),
   })
 }
 

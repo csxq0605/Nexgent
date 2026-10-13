@@ -31,17 +31,19 @@ import {
   ZERO_USAGE,
   type Diagnosis,
   type ImprovementConfig,
+  type ImprovementCostPhase,
   type LLMUsage,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
 import { JsonlLedger } from '@nexgent/session'
 import { budgetStatus, type BudgetStatus } from './budget.js'
+import type { MetaStageInput, MetaStages } from './meta.js'
 import { jobImproverVersion, PROJECT_IMPROVERS, type ImproverSource, type PinnedImprover } from './improver.js'
 import { jobPaths, listJobs, readJob, transitionJob, updateJob, type JobPatch } from './jobs.js'
 import { breakStaleLock, readLockPid, tryCreateLock } from './lock.js'
 import { improvementsDir } from './paths.js'
 import { releaseSlot } from './queue.js'
-import { TERMINAL_STATUSES, type ImprovementJob, type ImprovementJobStatus, type ImprovementPhase, type PhaseCost } from './types.js'
+import { TERMINAL_STATUSES, type ImprovementJob, type ImprovementJobStatus, type PhaseCost } from './types.js'
 
 /** What a phase spent. */
 export interface PhaseSpend {
@@ -98,6 +100,8 @@ export interface ImprovementStages {
   diagnose(input: StageInput): Promise<DiagnoseResult>
   propose(input: StageInput & { readonly proposalKind: string; readonly diagnosis?: Diagnosis }): Promise<ProposeResult>
   trial(input: StageInput & { readonly candidateId: string }): Promise<TrialResult>
+  /** Step 6: the phases of a meta job (absent: a meta job fails saying so). */
+  readonly meta?: MetaStages
 }
 
 const NOTHING: PhaseSpend = { usage: ZERO_USAGE, requestCount: 0 }
@@ -160,7 +164,14 @@ export async function runImprovementJob(layout: WorkspaceLayout, jobId: string, 
     ran.push(outcome.job)
     const loaded = await readProjectConfig(layout.configFile).catch(() => undefined)
     const threshold = loaded?.config.improvement.feedbackThreshold
-    const started = await releaseSlot(directory, id, { autoStart: loaded?.config.autoImprove === true, ...(threshold === undefined ? {} : { threshold }), now: now() })
+    const metaConfig = loaded?.config.improvement.meta
+    const parentVersion = metaConfig?.enabled === true ? (await (options.improvers ?? PROJECT_IMPROVERS).current(layout).catch(() => undefined))?.version : undefined
+    const started = await releaseSlot(directory, id, {
+      autoStart: loaded?.config.autoImprove === true,
+      ...(threshold === undefined ? {} : { threshold }),
+      ...(metaConfig === undefined || parentVersion === undefined ? {} : { meta: { enabled: true, everyJobs: metaConfig.everyJobs, parentVersion } }),
+      now: now(),
+    })
     if (started !== undefined && options.chain !== false) next = started.id
   }
   return { jobs: ran, ...(skipped === undefined ? {} : { skipped }) }
@@ -172,10 +183,14 @@ async function writeEnd(layout: WorkspaceLayout, job: ImprovementJob): Promise<v
   await new JsonlLedger({ ledgersDir: layout.ledgers }).append({
     type: 'improvement.end',
     jobId: job.id,
+    ...(job.kind === 'meta' ? { kind: 'meta' as const } : {}),
     trigger: job.trigger,
     status: job.status,
     phases: job.phases,
     improvementId: job.id,
+    ...(job.improverVersion === undefined ? {} : { improverVersion: job.improverVersion }),
+    ...(job.meta?.childVersion === undefined ? {} : { childVersion: job.meta.childVersion }),
+    ...(job.arm === undefined ? {} : { metaJobId: job.arm.metaJobId, comparisonArm: job.arm.arm }),
     ...(job.candidateId === undefined ? {} : { candidateId: job.candidateId }),
     ...(job.decisionId === undefined ? {} : { decisionId: job.decisionId }),
   }).catch(() => undefined)
@@ -213,10 +228,12 @@ async function runOne(layout: WorkspaceLayout, directory: string, jobId: string,
       await writeEnd(layout, job)
       return job
     }
-    const spend = async (phase: ImprovementPhase, cost: PhaseSpend) => {
+    const spend = async (phase: ImprovementCostPhase, cost: PhaseSpend) => {
       job = await updateJob(directory, jobId, current => ({ phases: { ...current.phases, [phase]: mergeCost(current.phases[phase], cost) } }), now())
     }
-    const status = async (): Promise<BudgetStatus> => budgetStatus(await listJobs(directory), config.budget, now())
+    // Meta jobs spend the meta budget; capability jobs the improvement budget (ADR 0008 decision 3).
+    const isMeta = job.kind === 'meta'
+    const status = async (): Promise<BudgetStatus> => budgetStatus((await listJobs(directory)).filter(item => (item.kind === 'meta') === isMeta), isMeta ? config.meta.budget : config.budget, now())
     const source = options.improvers ?? PROJECT_IMPROVERS
     let improver: PinnedImprover | undefined
     const input = async (): Promise<StageInput> => ({
@@ -224,13 +241,16 @@ async function runOne(layout: WorkspaceLayout, directory: string, jobId: string,
       record: async patch => { job = await updateJob(directory, jobId, patch, now()) },
     })
     /** Re-read the job (a cancel lands on disk) and check the budget; `true` = stop here. */
-    const halt = async (phase: ImprovementPhase): Promise<boolean> => {
+    const halt = async (phase: ImprovementCostPhase): Promise<boolean> => {
       job = await readJob(directory, jobId)
       if (TERMINAL_STATUSES.has(job.status)) return true
       const current = await status()
       if (!current.exhausted) return false
-      await move('budget-exhausted', `The improvement budget is spent (${current.used} of ${current.limit} tokens since ${current.windowStart}); stopped before the ${phase} phase.`)
+      await move('budget-exhausted', `The ${isMeta ? 'meta improvement' : 'improvement'} budget is spent (${current.used} of ${current.limit} tokens since ${current.windowStart}); stopped before the ${phase} phase.`)
       return true
+    }
+    if (isMeta) {
+      return { job: await runMeta({ layout, config, log, move, spend, halt, status, now, source, stages: stages.meta, get: () => job, set: next => { job = next }, directory }) }
     }
 
     try {
@@ -280,5 +300,71 @@ async function runOne(layout: WorkspaceLayout, directory: string, jobId: string,
     }
   } finally {
     await rm(paths.lock, { force: true })
+  }
+}
+
+/** What {@link runMeta} gets from {@link runOne}. */
+interface MetaRun {
+  readonly layout: WorkspaceLayout
+  readonly directory: string
+  readonly config: ImprovementConfig
+  readonly stages: MetaStages | undefined
+  readonly source: ImproverSource
+  log(line: string): Promise<void>
+  move(to: ImprovementJobStatus, detail?: string, patch?: JobPatch, error?: unknown): Promise<ImprovementJob>
+  spend(phase: ImprovementCostPhase, cost: PhaseSpend): Promise<void>
+  halt(phase: ImprovementCostPhase): Promise<boolean>
+  status(): Promise<BudgetStatus>
+  now(): Date
+  get(): ImprovementJob
+  set(job: ImprovementJob): void
+}
+
+/**
+ * A meta job's phases (`queued → meta-diagnosing → meta-proposing →
+ * comparing → adopted | rejected`): it pins the improver in force as the
+ * parent, then runs the meta stages; before each phase the job is re-read
+ * and the meta budget checked.
+ */
+async function runMeta(run: MetaRun): Promise<ImprovementJob> {
+  const { layout, directory, config, log, move, spend, halt } = run
+  try {
+    if (await halt('meta-diagnose')) return run.get()
+    const stages = run.stages
+    if (stages === undefined) return await move('failed', 'No meta improvement stages are configured in this host; nothing was diagnosed.')
+    let parent: PinnedImprover
+    try {
+      parent = await run.source.current(layout)
+    } catch (error) {
+      return await move('failed', `The improver in force cannot be loaded: ${(error as Error).message}`, undefined, error)
+    }
+    const meta = { ...(run.get().meta ?? { basis: [] }), parentVersion: parent.version }
+    await move('meta-diagnosing', undefined, { improverVersion: parent.version, meta })
+    await log(`parent improver ${parent.version}`)
+    const input = async (): Promise<MetaStageInput> => ({
+      layout, job: run.get(), config, budget: await run.status(), improver: parent, log,
+      record: async patch => { run.set(await updateJob(directory, run.get().id, patch, run.now())) },
+      budgetSpent: async () => (await run.status()).exhausted,
+    })
+    const diagnosis = await stages.diagnose(await input())
+    await spend('meta-diagnose', diagnosis)
+    if (diagnosis.outcome !== 'change') return await move(diagnosis.outcome === 'none' ? 'no-proposal' : 'failed', diagnosis.detail, diagnosis.patch, diagnosis.error)
+
+    if (await halt('meta-propose')) return run.get()
+    await move('meta-proposing', undefined, diagnosis.patch)
+    const proposal = await stages.propose({ ...(await input()), diagnosis: diagnosis.diagnosis })
+    await spend('meta-propose', proposal)
+    if (proposal.outcome !== 'change') return await move('failed', proposal.detail, proposal.patch, proposal.error)
+
+    if (await halt('compare')) return run.get()
+    await move('comparing', proposal.detail, proposal.patch)
+    const compared = await stages.compare({ ...(await input()), childVersion: proposal.childVersion, child: proposal.child })
+    await spend('compare', compared)
+    return await move(compared.outcome, compared.detail, compared.patch, compared.error)
+  } catch (error) {
+    if (!TERMINAL_STATUSES.has(run.get().status)) {
+      await move('failed', `The meta job stopped on an error: ${(error as Error).message}`, undefined, error).catch(() => undefined)
+    }
+    return run.get()
   }
 }
