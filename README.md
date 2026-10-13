@@ -44,7 +44,15 @@ Nexgent 正在重写为一个 TypeScript 独立应用（Electron 桌面应用 + 
   - 桌面应用：右栏显示当前能力版本，候选状态与拒绝原因可见，插件审批框，手动回滚。
   - 真实 Claude Sonnet 5.5（thinking 开）在 Linux 上跑通一次主链：任务 A 开发并使用一个函数模块，门控以更省采用，新进程里的任务 B 自动调用它，注入退化后 3 个任务内自动回滚到原版本。所有回放两侧检查都通过，所以这不说明能力版本让任务更准；门控的采用率没有统计。
 
-**尚未验证：** macOS；Windows 安装包（Windows 上只验证了从源码运行）；真实模型下的上下文压缩；在桌面应用里接真实模型；Windows 上的真实模型协作任务；协作形态的成功率与收益；Windows 上真实模型的能力版本与门控；能力版本对任务质量的收益。
+- **步骤 5**（[`step-5-20261013.md`](docs/validation/step-5-20261013.md)，脚本化验收在 Linux 与 Windows 都通过），经脚本化验收证明：
+  - 反馈计数：对成果的评分 ≤3 或只有评论的反馈计入，交付检查失败计 1，计满 3 条自动开始改进作业；成果卡片上的“改进”按钮立即开始；设置里可以关掉自动改进；
+  - 改进作业：在独立进程里诊断（报告合 schema）、在快照副本里重做任务并提出一个组件，再交给门控；改进预算按项目计，用尽后停止；每个项目同时只有一个作业，作业进程被强杀后标为中断、不重跑；
+  - 门控接反馈：回放集含反馈任务，评审模型的反馈检查与确定性检查分开记录；质量提高不因费用拒绝，费用超过 2 倍时等用户批准（[ADR 0007](docs/adr/0007-gate-cost-rule.md)）；
+  - 采用后，新 OS 进程里的下一次任务自动加载并调用组件，作业记下首次被使用；
+  - 桌面应用：“改进”页显示作业状态、诊断、候选与门控结论，设置保持。
+  - 真实 Claude Sonnet 5.5（thinking 开）在 Linux 上跑通一次主链：任务与反馈都不提能力工具，用户只指出地区表缺一列，3 条计入的反馈后改进作业自动开始，提出一个技能，门控以质量提高采用（检查 100% 对 67%，反馈检查 100% 对 0%），新进程里的下一次任务自动调用它，表里有了那一列。修复后只跑通一次，成功率没有统计；反馈检查由评审模型判定，没有人工复核。
+
+**尚未验证：** macOS；Windows 安装包（Windows 上只验证了从源码运行）；真实模型下的上下文压缩；在桌面应用里接真实模型；Windows 上的真实模型协作任务；协作形态的成功率与收益；Windows 上真实模型的能力版本、门控与改进作业；改进流程的成功率与长期收益。
 
 ## 启动
 
@@ -72,7 +80,7 @@ node apps/cli/bin/nexgent.mjs export <sessionId> --project <dir>
 - 安装、打包与数据目录见 [docs/install.md](docs/install.md)；CLI 的参数与退出码见 [apps/cli/README.md](apps/cli/README.md)。
 - 桌面应用的设置页也能填写密钥，写入 `~/.nexgent/credentials.json`（权限 0600）。
 - Linux 以 root 运行桌面应用时要加 `--no-sandbox`。
-- 测试与验收：`pnpm test`（脚本化 provider，不需要密钥）；`node scripts/accept-step2.mjs`（无界面层与桌面层）；`node scripts/accept-step2.mjs --layer real`（真实模型，需要密钥）；步骤 3、4 同理用 `scripts/accept-step3.mjs`、`scripts/accept-step4.mjs`。
+- 测试与验收：`pnpm test`（脚本化 provider，不需要密钥）；`node scripts/accept-step2.mjs`（无界面层与桌面层）；`node scripts/accept-step2.mjs --layer real`（真实模型，需要密钥）；步骤 3–5 同理用 `scripts/accept-step3.mjs`、`scripts/accept-step4.mjs`、`scripts/accept-step5.mjs`。
 
 ## 旧产品
 

@@ -1,0 +1,365 @@
+{
+  "kind": "nexgent.acceptance-summary",
+  "schemaVersion": 1,
+  "result": "pass",
+  "step": {
+    "number": 5,
+    "name": "默认反馈改进流程",
+    "exitCriteria": [
+      "反馈触发的改进作业自动开始：3 条计入的反馈后作业开始，诊断合 schema，提案产出一个候选，全程不点名能力工具",
+      "门控接反馈：回放集含反馈任务，反馈检查与确定性检查分开记录，结论如实写进作业记录",
+      "采用后被使用：新 OS 进程里的下一次同类任务自动加载并调用组件，账本可证，反馈指出的问题不再出现",
+      "`accept-step5` 无界面层与桌面层在 Linux 本地通过（脚本化 provider）；验收前 Windows 手动运行一次",
+      "真实模型一次（Linux，thinking 开）主链跑通；验收记录 docs/validation/step-5-<日期>.md 经用户认可；工作留在 nexgent-app"
+    ],
+    "script": "scripts/accept-step5.mjs"
+  },
+  "date": {
+    "acceptedAt": "2026-10-13T14:20:33.026Z",
+    "commitRange": null
+  },
+  "source": {
+    "branch": "claude/test-ci-ns3s7s",
+    "commit": "6a769c38c5a9641e8f89bd564d20ecd901503cb9",
+    "pullRequests": []
+  },
+  "environment": {
+    "platform": "win32",
+    "os": "Windows_NT 10.0.26100",
+    "node": "v22.23.3",
+    "pnpm": "unknown",
+    "other": {}
+  },
+  "scripted": {
+    "command": "node scripts/accept-step5.mjs --layer headless,desktop",
+    "ciRunUrl": "https://github.com/csxq0605/Nexgent/actions/runs/38412397510",
+    "result": "pass",
+    "summaryFile": null,
+    "simulated": "scripted Claude Messages API model server with per-session routing; checklist H01–H19 / D01–D23",
+    "faultsInjected": []
+  },
+  "realModel": null,
+  "ledger": null,
+  "failures": {
+    "failedCases": [],
+    "untested": [
+      "real-model layer (R01–R08): run with --layer real"
+    ],
+    "knownIssues": []
+  },
+  "conclusion": {
+    "proves": [],
+    "doesNotProve": [
+      "anything for an item whose status is not-implemented"
+    ],
+    "meetsExitCriteria": true,
+    "missing": []
+  },
+  "raw": {
+    "location": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\nexgent-accept-step5-C99xlR",
+    "sha256": null,
+    "summaryDir": null,
+    "manifest": []
+  },
+  "checks": [
+    {
+      "id": "H01",
+      "name": "计数触发：2 条计入的反馈不开始作业，第 3 条开始；不计入的反馈（按拍板 2）不加计数",
+      "passed": true,
+      "status": "passed",
+      "detail": "3 counted and 2 uncounted feedbacks; no job before the 3rd counted, one job (trigger feedback-count) at it citing exactly the counted ones, batch taken from the queue"
+    },
+    {
+      "id": "H02",
+      "name": "显式触发：“改进”动作在计数为 0 时立即开始作业；autoImprove 关时也能显式触发",
+      "passed": true,
+      "status": "passed",
+      "detail": "with autoImprove off and an empty queue, improvements.run on a deliverable started a job at once (trigger explicit), which ran: queued → diagnosing → proposing → failed"
+    },
+    {
+      "id": "H03",
+      "name": "检查失败触发：根任务检查失败计一次",
+      "passed": true,
+      "status": "passed",
+      "detail": "a test passing then the file broken before present: one count; a failing test presented anyway: one count; failing exploratory commands beside a passing test: no count, not checks; a test failing then fixed: no count (re-run passes)"
+    },
+    {
+      "id": "H04",
+      "name": "开关：autoImprove 关时反馈照常记录，不开始作业",
+      "passed": true,
+      "status": "passed",
+      "detail": "autoImprove off: 5 feedbacks recorded (3 counted), no job started"
+    },
+    {
+      "id": "H05",
+      "name": "诊断：改进会话交出合 schema 的诊断（MAST 标签、证据引用指向真实记录、memberCosts 与账本一致）；不合 schema 3 次后 failed",
+      "passed": true,
+      "status": "passed",
+      "detail": "diagnosis: task-verification, 1 cited record(s) found, memberCosts main = ledger (9 requests, 360 input tokens); three refused reports: failed (No acceptable diagnosis after 3 attempts; last problems: failureTypes[0].evidence[0]: no session 0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d.)"
+    },
+    {
+      "id": "H06",
+      "name": "改进会话只读：写文件、执行命令类工具不在工具列表里；不出现在对话列表里",
+      "passed": true,
+      "status": "passed",
+      "detail": "diagnose offered only improve_read_session, improve_read_ledger, improve_list_feedback, improve_report_diagnosis; the diagnose and propose sessions are not in sessions.list and resuming them is refused (tool/denied)"
+    },
+    {
+      "id": "H07",
+      "name": "提案：恰好一个组件、合 schema；碰受保护字段、多于一个组件被拒；proposalKind: none 时 no-proposal",
+      "passed": true,
+      "status": "passed",
+      "detail": "one component (skill region-table-convention, SKILL.md only), schema-valid, the job's; two components → failed (The candidate has 2 components; an improvement job proposes exactly one.); proposalKind none → no-proposal; a throwing module → failed without a candidate"
+    },
+    {
+      "id": "H08",
+      "name": "提案隔离：提案阶段在快照副本里运行，真实项目的文件、会话与成果不变",
+      "passed": true,
+      "status": "passed",
+      "detail": "the propose session ran 8 steps in the snapshot copy; 16 project files, 4 sessions and 4 deliverables unchanged; only the job's two sessions were added"
+    },
+    {
+      "id": "H09",
+      "name": "门控回放集：selection 含反馈任务，guard 是其他历史任务，不重叠；回放里没有反馈轮的文字",
+      "passed": true,
+      "status": "passed",
+      "detail": "selection regions-2026-09, regions-2026-08 (feedback task first, through turn 1), guard summary-2026-07; 48 replay requests, none with the feedback text"
+    },
+    {
+      "id": "H10",
+      "name": "反馈检查：两侧各有一条反馈检查，证据里与确定性检查分开标记；unknown 时不采用",
+      "passed": true,
+      "status": "passed",
+      "detail": "4 feedback checks (pass on candidate, fail on baseline), feedbackPassRate {\"candidate\":1,\"baseline\":0} beside passRate; the decision lists them on their own line; null answers → rejected (unknown-runs), nothing adopted"
+    },
+    {
+      "id": "H11",
+      "name": "采用与使用：新 OS 进程中的下一次任务自动加载新版本并调用组件，账本可证；作业记录“首次被使用”指向这个任务",
+      "passed": true,
+      "status": "passed",
+      "detail": "adopted cf98a1a4875e; the next task in process 8832 (parent 8988) loaded the skill (1 call, ledger task.outcome), its table has the column; job.firstUse → that task at 2026-10-13T14:24:44.381Z"
+    },
+    {
+      "id": "H12",
+      "name": "拒绝：拒绝原因、候选、回执保留，原版本照常可用",
+      "passed": true,
+      "status": "passed",
+      "detail": "rejected (unknown-runs); candidate, decision and 18 receipts kept; the next task ran on baseline as before"
+    },
+    {
+      "id": "H13",
+      "name": "历史不足：作业停在 waiting-history；补足历史后继续，不降门槛",
+      "passed": true,
+      "status": "passed",
+      "detail": "parked waiting-history (Waiting for more past tasks: the gate needs 2 selection and 1 guard past tasks with snapshots and checks; the project has 1); after two more tasks and a restart it continued at the same size (2 selection, 1 guard): queued → diagnosing → proposing → trialing → waiting-history → trialing → rejected"
+    },
+    {
+      "id": "H14",
+      "name": "预算：改进预算用尽即停，记 budget-exhausted；改进费用带 improvementId 与阶段，与正常任务分开可查",
+      "passed": true,
+      "status": "passed",
+      "detail": "over budget: budget-exhausted before proposing (The improvement budget is spent (1092 of 1038 tokens since 2026-09-13T14:25:24.680Z); stopped before the propose phase.); the next run refused; 62 requests of the job with improvementId and phases diagnose, propose, trial, none on the user's tasks; window 3224 tokens"
+    },
+    {
+      "id": "H15",
+      "name": "并发与恢复：同一项目同时只有一个作业；两进程同时提交反馈不重计；作业进程被强杀后下次启动标为中断，不重跑",
+      "passed": true,
+      "status": "passed",
+      "detail": "2 feedbacks from two processes at once, each counted once; one job, at most one running; killed in diagnosing, interrupted after restart, started once; version baseline kept"
+    },
+    {
+      "id": "H16",
+      "name": "每轮记录：反馈轮的检查与快照不覆盖原轮",
+      "passed": true,
+      "status": "passed",
+      "detail": "turn 1's snapshot and checks unchanged after 5 feedback turns; turns 2–6 each have their own snapshot and checks; the step-4 file keeps the first snapshot"
+    },
+    {
+      "id": "H17",
+      "name": "不改配置：整个流程中 .nexgent/config.json 只在经 SDK 改设置时变化；改进作业与候选改不到开关、预算与门控字段",
+      "passed": true,
+      "status": "passed",
+      "detail": "config.json unchanged through the job, the gate, adoption and the next task, and through three explicit jobs; it changed once, on settings.update (budget 1038); the candidate carries only SKILL.md"
+    },
+    {
+      "id": "H18",
+      "name": "账本完整：新记录与字段全部通过 schema；.nexgent/ 与导出物中搜不到测试密钥",
+      "passed": true,
+      "status": "passed",
+      "detail": "7 sessions, 264 ledger lines and 1 queue, 1 job, 1 diagnosis, 1 candidate, 18 trialReceipt, 1 decision pass the schema; the test key is in neither .nexgent/ nor the export (5 files)"
+    },
+    {
+      "id": "H19",
+      "name": "回归：accept-step4 的 H01–H19（含步骤 3 回归）继续通过",
+      "passed": true,
+      "status": "passed",
+      "detail": "step 4 H01–H19: all 19 passed (H19 there: step 3 H01–H23)"
+    },
+    {
+      "name": "反馈夹具：历史任务、反馈任务与 5 条反馈（3 条计入）经 SDK 写成",
+      "passed": true,
+      "detail": "passed: 4 tasks completed with passing checks; the feedback task's table lacks only the convention column; 5 feedbacks recorded (3 count)"
+    },
+    {
+      "id": "D01",
+      "name": "（回归）应用启动，窗口加载，渲染进程控制台无错误；窗口配置满足隔离要求",
+      "passed": true,
+      "status": "passed",
+      "detail": "window app://nexgent/index.html, isolated webPreferences, no Node in the page, bridge without token or ipcRenderer, no console errors in either launch"
+    },
+    {
+      "id": "D02",
+      "name": "（回归）新建项目、从最近项目重新打开",
+      "passed": true,
+      "status": "passed",
+      "detail": "new project created in the UI; reopened from the recent list after restart"
+    },
+    {
+      "id": "D03",
+      "name": "（回归）添加资料（对话框打桩）后右栏资料列表出现两项",
+      "passed": true,
+      "status": "passed",
+      "detail": "two materials (.csv, .xlsx) added through the stubbed file dialog; right column and .nexgent/materials both show two"
+    },
+    {
+      "id": "D04",
+      "name": "（回归）发送消息后中栏出现流式文本与工具活动块",
+      "passed": true,
+      "status": "passed",
+      "detail": "streaming text seen (\"我先\") then completed; 1 tool block(s)"
+    },
+    {
+      "id": "D05",
+      "name": "（回归）审批对话框出现，选择后轮次继续",
+      "passed": true,
+      "status": "passed",
+      "detail": "approval dialog for .env; allowed once; the turn continued to present and completed"
+    },
+    {
+      "id": "D06",
+      "name": "（回归）成果卡片出现；反馈后出现 v2，差异视图显示 v1→v2 的变化",
+      "passed": true,
+      "status": "passed",
+      "detail": "deliverable card; feedback from the card produced v2; diff v1 → v2 shows -north,1200 / +华北,1200"
+    },
+    {
+      "id": "D07",
+      "name": "（回归）停止按钮取消当前轮，已流出文本保留在界面和会话里",
+      "passed": true,
+      "status": "passed",
+      "detail": "stop cancelled the turn; streamed text kept in the UI and in session.jsonl"
+    },
+    {
+      "id": "D08",
+      "name": "（回归）强杀主进程后重启：对话、资料与成果都在，继续对话成功",
+      "passed": true,
+      "status": "passed",
+      "detail": "killed mid-stream; restart shows conversation, two materials, two deliverable cards; the next turn completed"
+    },
+    {
+      "id": "D09",
+      "name": "（回归）设置页修改模型、thinking 与费用上限后写入 config.json；密钥只显示是否配置与来源",
+      "passed": true,
+      "status": "passed",
+      "detail": "settings saved to config.json (model claude-opus-5-5, thinking off, caps); key shown as source only"
+    },
+    {
+      "id": "D10",
+      "name": "（回归）无令牌或错令牌的 IPC 调用被拒",
+      "passed": true,
+      "status": "passed",
+      "detail": "missing / wrong / empty token denied and logged without the token; unlisted method denied; valid call answered"
+    },
+    {
+      "id": "D11",
+      "name": "（回归）委派时中栏出现成员块（名称、状态），结束后显示成果链接",
+      "passed": true,
+      "status": "passed",
+      "detail": "a member block (name, status) appears in the middle column while the member runs and links its deliverable once it ends"
+    },
+    {
+      "id": "D12",
+      "name": "（回归）点开成员块进入子会话只读视图，可返回",
+      "passed": true,
+      "status": "passed",
+      "detail": "clicking the member block opens the member's session read-only; back returns to the conversation"
+    },
+    {
+      "id": "D13",
+      "name": "（回归）成员发起的审批对话框显示成员名，选择后继续",
+      "passed": true,
+      "status": "passed",
+      "detail": "the member-raised approval dialog shows the member name; after the choice the member and the conversation continue"
+    },
+    {
+      "id": "D14",
+      "name": "（回归）强杀主进程后重启，成员块、子会话与成员成果仍在",
+      "passed": true,
+      "status": "passed",
+      "detail": "after a hard kill and restart the member blocks, member sessions and member deliverables are all still there"
+    },
+    {
+      "id": "D15",
+      "name": "（回归）右栏显示当前能力版本；采用发生后新开对话显示新版本",
+      "passed": true,
+      "status": "passed",
+      "detail": "the right panel showed the baseline, then 96ac2d5d7e95 once it was adopted; the new conversation ran on it"
+    },
+    {
+      "id": "D16",
+      "name": "（回归）候选状态（试验中、采用、拒绝、回滚）可见，拒绝原因可点开",
+      "passed": true,
+      "status": "passed",
+      "detail": "trialing, adopted, rejected and rolled-back candidates each show their status; the rejection reason opens on click"
+    },
+    {
+      "id": "D17",
+      "name": "（回归）插件包审批对话框显示包名与哈希，拒绝后状态为未采用",
+      "passed": true,
+      "status": "passed",
+      "detail": "the plugin approval dialog showed greeter, its hash and permissions; denying left it not adopted and nothing ran"
+    },
+    {
+      "id": "D18",
+      "name": "（回归）手动回滚后版本显示与采用历史一致；重启后仍一致",
+      "passed": true,
+      "status": "passed",
+      "detail": "a manual rollback showed baseline r4, matching the adoption history, and the same after a restart"
+    },
+    {
+      "id": "D19",
+      "name": "“改进”页列出作业：触发原因、状态、候选改了什么、门控结果、费用、是否采用",
+      "passed": true,
+      "status": "passed",
+      "detail": "4 jobs listed with status, trigger, cost and detail matching the job files (noProposal: 不是能力问题 ≈ $0.00 · 104 tokens; failed: 失败 ≈ $0.00 · 624 tokens; rejected: 未采用 ≈ $0.01 · 3,224 tokens; adopted: 已采用 ≈ $0.01 · 3,224 tokens); candidate [\"region-table-convention\"] and gate result shown for the rejected and adopted jobs; 已计入 0 / 3 条反馈; no console errors"
+    },
+    {
+      "id": "D20",
+      "name": "拒绝、失败、no-proposal 的原因可点开；反馈检查与评审意见单独标记",
+      "passed": true,
+      "status": "passed",
+      "detail": "no-proposal reason \"Not a capability problem: The feedback changes what the user\", failure reason \"The candidate has 2 components; an improvement job proposes \" and rejection unknown-runs open on click; the adopted job's feedback check line (反馈检查（单独记）候选 100% / 基线 0%（2/4）) is separate from the pass rate line (review did not decide: no reviewer note)"
+    },
+    {
+      "id": "D21",
+      "name": "成果卡片上点“改进”开始作业，进度在“改进”页可见",
+      "passed": true,
+      "status": "passed",
+      "detail": "改进 on the deliverable card started job 33f9b509 (explicit, request.deliverableId c4dae520); the 改进 tab followed queued → diagnosing → no-proposal, ending as 不是能力问题"
+    },
+    {
+      "id": "D22",
+      "name": "设置页“自动改进”开关与改进预算可改，重启后保持；关闭后反馈不再自动开始作业",
+      "passed": true,
+      "status": "passed",
+      "detail": "automatic improvement and the budget (2500000 tokens / 7 days, then 3000000 / 10) changed on the settings page, written to config.json without approval and shown again after each restart; with it off, 3 counted feedback entries were queued (counted 9 → 12) and the job count stayed 5"
+    },
+    {
+      "id": "D23",
+      "name": "采用后的下一次任务完成时，“改进”页显示“已被后续任务使用”及时间",
+      "passed": true,
+      "status": "passed",
+      "detail": "after the adoption the next task (conversation 6dcbf290) loaded the skill; the adopted job's detail shows \"已被后续任务使用：10-13 14:30\" and the job file records first use at 2026-10-13T14:30:56.141Z"
+    }
+  ]
+}
