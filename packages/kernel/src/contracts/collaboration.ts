@@ -379,7 +379,7 @@ export const COLLABORATION_LIMITS = {
  * registered itself (`ToolRegistry`). Step 4 adds the capability tools:
  * members cannot draft, try or propose components (ADR 0005). Step 5 adds
  * the improvement tools: only an improvement job's diagnose session gets
- * them, never a member (ADR 0006).
+ * them, never a member (ADR 0006). Step 6 adds the meta-job tools (ADR 0008).
  */
 export const MEMBER_DENIED_TOOLS = [
   'delegate',
@@ -397,6 +397,11 @@ export const MEMBER_DENIED_TOOLS = [
   'improve_read_ledger',
   'improve_list_feedback',
   'improve_report_diagnosis',
+  'improve_list_jobs',
+  'improve_read_job',
+  'improve_report_meta_diagnosis',
+  'improve_read_improver',
+  'improve_propose_change',
 ] as const
 
 /** Team tools a teammate gets in its own scope (the Lead has them too, registered globally). */

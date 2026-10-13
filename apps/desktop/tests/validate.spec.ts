@@ -54,6 +54,10 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'improvements.show': { ...p, jobId: 'j1' },
   'improvements.run': { ...p, sessionId: 's1', deliverableId: 'd1' },
   'improvements.cancel': { ...p, jobId: 'j1' },
+  'improvements.runMeta': { ...p, keepCopies: true },
+  'improvers.list': p,
+  'improvers.show': { ...p, version: 'v0' },
+  'improvers.rollback': { ...p, toVersion: 'v0', reason: '子改进器更差' },
 }
 
 describe('method whitelist', () => {

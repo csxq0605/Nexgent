@@ -10,7 +10,7 @@ import { watch, type FSWatcher } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { billedTokens, budgetStatus, jobPaths, type ImprovementHost } from '@nexgent/evolve'
-import { NexgentError, type Diagnosis, type ImprovementJob, type ImprovementPhase, type LedgerRecord, type LLMUsage, type PhaseCost } from '@nexgent/kernel'
+import { jobFeedbackIds, jobPhaseTimes, NexgentError, type Diagnosis, type ImprovementCostPhase, type ImprovementJob, type ImproverDecisionReason, type LedgerRecord, type LLMUsage, type PhaseCost } from '@nexgent/kernel'
 import { estimateUsdTotal } from '@nexgent/llm'
 import { JsonlLedger } from '@nexgent/session'
 import type { CapabilityService } from '@nexgent/capabilities'
@@ -45,8 +45,8 @@ async function jobRequests(host: ImprovementHost, jobs: readonly ImprovementJob[
 
 /** One job as lists show it. */
 export function jobView(job: ImprovementJob, requests: readonly { model: string; usage: LLMUsage }[] | undefined): ImprovementJobView {
-  const tokens: Partial<Record<ImprovementPhase, number | 'unknown'>> = {}
-  for (const [phase, cost] of Object.entries(job.phases) as [ImprovementPhase, PhaseCost][]) {
+  const tokens: Partial<Record<ImprovementCostPhase, number | 'unknown'>> = {}
+  for (const [phase, cost] of Object.entries(job.phases) as [ImprovementCostPhase, PhaseCost][]) {
     const billed = billedTokens(cost.usage)
     tokens[phase] = billed.complete ? billed.tokens : 'unknown'
   }
@@ -57,16 +57,26 @@ export function jobView(job: ImprovementJob, requests: readonly { model: string;
     : estimateUsdTotal(requests)
   return {
     id: job.id,
+    ...(job.kind === undefined ? {} : { kind: job.kind }),
+    ...(job.improverVersion === undefined ? {} : { improverVersion: job.improverVersion }),
     trigger: job.trigger,
     status: job.status,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     itemCount: job.items.length,
+    feedbackIds: jobFeedbackIds(job),
+    phaseTimes: jobPhaseTimes(job),
     ...(job.diagnosed === undefined ? {} : { proposalKind: job.diagnosed.proposalKind }),
     ...(job.candidateId === undefined ? {} : { candidateId: job.candidateId }),
     ...(job.trialId === undefined ? {} : { trialId: job.trialId }),
     ...(job.decisionId === undefined ? {} : { decisionId: job.decisionId }),
     ...(job.detail === undefined ? {} : { detail: job.detail }),
+    ...(job.meta === undefined ? {} : {
+      meta: {
+        ...(job.meta.childVersion === undefined ? {} : { childVersion: job.meta.childVersion }),
+        ...(job.meta.compared === undefined ? {} : { outcome: job.meta.compared.outcome, reason: job.meta.compared.reason as ImproverDecisionReason }),
+      },
+    }),
     tokens,
     estimatedUsd,
   }
@@ -88,6 +98,7 @@ export async function listing(host: ImprovementHost, now: Date = new Date()): Pr
     pending: queue?.pending.length ?? 0,
     threshold: settings.improvement.feedbackThreshold,
     budget: { usedTokens: budget.used, maxTokens: budget.limit, windowDays: settings.improvement.budget.windowDays },
+    autoImprove: settings.autoImprove,
   }
 }
 

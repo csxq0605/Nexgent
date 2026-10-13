@@ -54,6 +54,12 @@ export type NexgentErrorCode =
   | 'improvement/busy'
   | 'improvement/budget-exhausted'
   | 'improvement/invalid-diagnosis'
+  // improvers and meta jobs (step 6)
+  | 'improvement/epoch-mismatch'
+  | 'improver/not-found'
+  | 'improver/invalid'
+  | 'improver/invalid-change'
+  | 'improver/activation'
   // catch-all for programmer errors and wrapped unknowns
   | 'internal'
 

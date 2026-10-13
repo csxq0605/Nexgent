@@ -633,6 +633,12 @@ export interface TrialPlan {
   readonly reviewer: ReviewerSettings
   /** The trial's own budget; exhausting it stops the trial with `unknown` (H12). */
   readonly budget: TrialBudget
+  /**
+   * Step 6 (ADR 0008 decision 5): the evaluator epoch the trial ran in, the
+   * SHA-256 of `canonicalEvaluatorText`; trials of different epochs are never
+   * compared. Absent in trials before step 6.
+   */
+  readonly epoch?: string
 }
 
 /**

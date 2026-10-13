@@ -1,0 +1,109 @@
+{
+  "formatVersion": 1,
+  "id": "091f3c65-5c94-4dbb-8609-a5ddf3915291",
+  "trigger": "feedback-count",
+  "status": "rejected",
+  "createdAt": "2026-10-13T13:26:08.948Z",
+  "updatedAt": "2026-10-13T13:29:30.759Z",
+  "items": [
+    {
+      "kind": "feedback",
+      "feedbackId": "a0519ced-c0e1-4566-8414-81de3db069eb",
+      "sessionId": "7bcbcf21-7e6a-409b-b76e-732691ed297c",
+      "deliverableId": "c9cafb5d-3f70-4f2b-9f1b-1afda40a6f8d",
+      "version": 1,
+      "rating": 2,
+      "at": "2026-10-13T13:25:44.482Z"
+    },
+    {
+      "kind": "feedback",
+      "feedbackId": "8787453b-0b16-46e2-9b1b-abf47a11958f",
+      "sessionId": "7bcbcf21-7e6a-409b-b76e-732691ed297c",
+      "deliverableId": "c9cafb5d-3f70-4f2b-9f1b-1afda40a6f8d",
+      "version": 1,
+      "at": "2026-10-13T13:25:54.307Z"
+    },
+    {
+      "kind": "feedback",
+      "feedbackId": "4f64c1ea-59bc-4080-b0d3-d1e904efd47d",
+      "sessionId": "7bcbcf21-7e6a-409b-b76e-732691ed297c",
+      "deliverableId": "c9cafb5d-3f70-4f2b-9f1b-1afda40a6f8d",
+      "version": 1,
+      "rating": 3,
+      "at": "2026-10-13T13:26:08.943Z"
+    }
+  ],
+  "phases": {
+    "diagnose": {
+      "usage": {
+        "inputTokens": 12,
+        "outputTokens": 2374,
+        "totalTokens": 126233,
+        "cacheReadTokens": 89883,
+        "cacheWriteTokens": 33964,
+        "reasoningTokens": "unknown"
+      },
+      "requestCount": 5
+    },
+    "propose": {
+      "usage": {
+        "inputTokens": 18,
+        "outputTokens": 2514,
+        "totalTokens": 119398,
+        "cacheReadTokens": 100000,
+        "cacheWriteTokens": 16866,
+        "reasoningTokens": "unknown"
+      },
+      "requestCount": 8
+    },
+    "trial": {
+      "usage": {
+        "inputTokens": 156,
+        "outputTokens": 14926,
+        "totalTokens": 1011402,
+        "cacheReadTokens": 776204,
+        "cacheWriteTokens": 220116,
+        "reasoningTokens": "unknown"
+      },
+      "requestCount": 62
+    }
+  },
+  "history": [
+    {
+      "status": "queued",
+      "at": "2026-10-13T13:26:08.948Z"
+    },
+    {
+      "status": "diagnosing",
+      "at": "2026-10-13T13:26:09.373Z"
+    },
+    {
+      "status": "proposing",
+      "at": "2026-10-13T13:26:30.668Z"
+    },
+    {
+      "status": "trialing",
+      "at": "2026-10-13T13:26:56.812Z",
+      "detail": "Proposed skill region-table (imported from the copy)."
+    },
+    {
+      "status": "rejected",
+      "at": "2026-10-13T13:29:30.759Z",
+      "detail": "Rejected (interrupted): adopt (cost-down). Quality (selection checks and feedback checks) passed: candidate 67%, baseline 67% (runs pass/fail/unknown 4/0/0 vs 4/0/0). Guard runs passed: candidate 2, baseline 2. Feedback checks (reviewer model, separate from the deterministic checks) passed: candidate 0%, baseline 0%. Cost candidate/baseline (estimated USD, cache included): 0.907× (about 0.4025 vs 0.4435 USD). No reviewer opinion was needed. The adopted version changed while the trial ran, so this result was not applied."
+    }
+  ],
+  "sessions": {
+    "diagnose": "90389158-a8d3-41a2-8116-378b022ec14c",
+    "propose": "0a91ca39-7d74-4199-a10a-cb55bf24855b"
+  },
+  "diagnosed": {
+    "at": "2026-10-13T13:26:26.420Z",
+    "proposalKind": "skill",
+    "attempts": 1
+  },
+  "baseVersion": "835b4e7555c75d2e05bf7d9f6c951c6c2f00f13fd65e8120a2414a4b834a9b85",
+  "candidateId": "23bb11e9-b123-4d3c-b50f-7c2abd7ecf87",
+  "detail": "Rejected (interrupted): adopt (cost-down). Quality (selection checks and feedback checks) passed: candidate 67%, baseline 67% (runs pass/fail/unknown 4/0/0 vs 4/0/0). Guard runs passed: candidate 2, baseline 2. Feedback checks (reviewer model, separate from the deterministic checks) passed: candidate 0%, baseline 0%. Cost candidate/baseline (estimated USD, cache included): 0.907× (about 0.4025 vs 0.4435 USD). No reviewer opinion was needed. The adopted version changed while the trial ran, so this result was not applied.",
+  "trialId": "d0fbc291-3e86-47d3-96ab-452d9fe9bf82",
+  "decisionId": "5742cf42-31c2-4364-bcea-133a06327ad7"
+}

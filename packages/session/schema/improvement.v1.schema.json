@@ -89,6 +89,110 @@
       "type": "string",
       "pattern": "^(?:baseline|[a-f0-9]{64})$"
     },
+    "improverVersion": {
+      "type": "string",
+      "pattern": "^(?:v0|[a-f0-9]{64})$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "trialVerdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "reason",
+        "passRate",
+        "costRatio",
+        "decidedByReview"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "adopt",
+            "reject",
+            "await-approval"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "quality-up",
+            "cost-down",
+            "review-preferred",
+            "quality-down",
+            "guard-regressed",
+            "cost-over-cap",
+            "no-improvement",
+            "unknown-runs",
+            "budget-exhausted",
+            "interrupted",
+            "approved",
+            "approval-denied",
+            "load-failure",
+            "usage-regression",
+            "component-errors",
+            "manual"
+          ]
+        },
+        "passRate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "candidate",
+            "baseline"
+          ],
+          "properties": {
+            "candidate": {
+              "type": "number",
+              "minimum": 0
+            },
+            "baseline": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "feedbackPassRate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "candidate",
+            "baseline"
+          ],
+          "properties": {
+            "candidate": {
+              "type": "number",
+              "minimum": 0
+            },
+            "baseline": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "costRatio": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "const": "unknown"
+            }
+          ]
+        },
+        "costBasis": {
+          "enum": [
+            "usd",
+            "tokens"
+          ]
+        },
+        "decidedByReview": {
+          "type": "boolean"
+        }
+      }
+    },
     "componentKind": {
       "enum": [
         "function-module",
@@ -118,6 +222,9 @@
         "diagnosing",
         "proposing",
         "trialing",
+        "meta-diagnosing",
+        "meta-proposing",
+        "comparing",
         "waiting-history",
         "awaiting-approval",
         "adopted",
@@ -237,6 +344,18 @@
         },
         "activeJobId": {
           "$ref": "#/$defs/uuid"
+        },
+        "metaCounted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "metaPending": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
         }
       }
     },
@@ -298,6 +417,34 @@
         "id": {
           "$ref": "#/$defs/uuid"
         },
+        "kind": {
+          "enum": [
+            "capability",
+            "meta"
+          ]
+        },
+        "improverVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "arm": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "metaJobId",
+            "arm"
+          ],
+          "properties": {
+            "metaJobId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "arm": {
+              "enum": [
+                "parent",
+                "child"
+              ]
+            }
+          }
+        },
         "createdAt": {
           "$ref": "#/$defs/timestamp"
         },
@@ -308,7 +455,8 @@
           "enum": [
             "feedback-count",
             "explicit",
-            "check-failure"
+            "check-failure",
+            "job-count"
           ]
         },
         "status": {
@@ -363,6 +511,15 @@
             },
             "trial": {
               "$ref": "#/$defs/phaseCost"
+            },
+            "meta-diagnose": {
+              "$ref": "#/$defs/phaseCost"
+            },
+            "meta-propose": {
+              "$ref": "#/$defs/phaseCost"
+            },
+            "compare": {
+              "$ref": "#/$defs/phaseCost"
             }
           }
         },
@@ -378,6 +535,12 @@
               "$ref": "#/$defs/nonEmptyString"
             },
             "propose": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "meta-diagnose": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "meta-propose": {
               "$ref": "#/$defs/nonEmptyString"
             }
           }
@@ -457,6 +620,92 @@
         },
         "error": {
           "$ref": "#/$defs/errorInfo"
+        },
+        "meta": {
+          "$ref": "#/$defs/metaJobState"
+        }
+      }
+    },
+    "metaJobState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "basis",
+        "parentVersion"
+      ],
+      "properties": {
+        "basis": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "parentVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "childVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "keepCopies": {
+          "type": "boolean"
+        },
+        "diagnosed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at",
+            "attempts",
+            "proposal"
+          ],
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "attempts": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "proposal": {
+              "enum": [
+                "change",
+                "none"
+              ]
+            }
+          }
+        },
+        "compared": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at",
+            "outcome",
+            "reason"
+          ],
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "outcome": {
+              "enum": [
+                "adopt",
+                "reject"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "gate-passed",
+                "quality-up",
+                "cost-down",
+                "no-improvement",
+                "no-offspring",
+                "unknown-arm",
+                "origin-mismatch",
+                "epoch-mismatch"
+              ]
+            }
+          }
+        },
+        "revision": {
+          "$ref": "#/$defs/positiveInteger"
         }
       }
     },
@@ -655,6 +904,718 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/memberCost"
+          }
+        }
+      }
+    },
+    "proposableKind": {
+      "enum": [
+        "function-module",
+        "skill",
+        "context-policy",
+        "preset",
+        "team-template",
+        "architecture"
+      ]
+    },
+    "improverBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "diagnosis",
+        "proposal",
+        "comparison"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "diagnosis": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "paragraphs"
+          ],
+          "properties": {
+            "paragraphs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "pattern": "^[^\\n]{1,2000}$"
+              }
+            }
+          }
+        },
+        "proposal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kinds",
+            "briefs"
+          ],
+          "properties": {
+            "kinds": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/proposableKind"
+              }
+            },
+            "briefs": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "function-module": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                },
+                "skill": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                },
+                "context-policy": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                },
+                "preset": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                },
+                "team-template": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                },
+                "architecture": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                }
+              }
+            }
+          }
+        },
+        "comparison": {
+          "$ref": "#/$defs/improverComparisonParams"
+        }
+      }
+    },
+    "improverComparisonParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selectionCases",
+        "repeats",
+        "selection"
+      ],
+      "properties": {
+        "selectionCases": {
+          "enum": [
+            2,
+            3,
+            4
+          ]
+        },
+        "repeats": {
+          "enum": [
+            2,
+            3
+          ]
+        },
+        "selection": {
+          "enum": [
+            "similarity",
+            "recency"
+          ]
+        }
+      }
+    },
+    "improverRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "revision",
+        "previous",
+        "from",
+        "version",
+        "type",
+        "trigger",
+        "committedAt"
+      ],
+      "properties": {
+        "format": {
+          "const": 1
+        },
+        "revision": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "version": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "type": {
+          "enum": [
+            "adopt",
+            "rollback"
+          ]
+        },
+        "trigger": {
+          "enum": [
+            "meta-job",
+            "manual",
+            "load-failure"
+          ]
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{0,2000}$"
+        },
+        "committedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "metaFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "label",
+        "jobIds"
+      ],
+      "properties": {
+        "stage": {
+          "enum": [
+            "diagnose",
+            "propose",
+            "trial",
+            "other"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,200}$"
+        },
+        "jobIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        }
+      }
+    },
+    "metaDiagnosis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "jobId",
+        "createdAt",
+        "sessionId",
+        "attempts",
+        "improverVersion",
+        "basis",
+        "statusCounts",
+        "findings",
+        "hypothesis",
+        "proposal"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "attempts": {
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "improverVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "basis": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "statusCounts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "queued": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "diagnosing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "proposing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "trialing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "meta-diagnosing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "meta-proposing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "comparing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "waiting-history": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "awaiting-approval": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "adopted": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "rejected": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "no-proposal": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "budget-exhausted": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "interrupted": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cancelled": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/metaFinding"
+          }
+        },
+        "hypothesis": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,500}$"
+        },
+        "proposal": {
+          "enum": [
+            "change",
+            "none"
+          ]
+        }
+      }
+    },
+    "improverChange": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "index",
+            "text"
+          ],
+          "properties": {
+            "op": {
+              "const": "set-diagnosis-paragraph"
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "text": {
+              "type": "string",
+              "pattern": "^[^\\n]{1,2000}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "kinds"
+          ],
+          "properties": {
+            "op": {
+              "const": "set-proposal-kinds"
+            },
+            "kinds": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/proposableKind"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "kind",
+            "template"
+          ],
+          "properties": {
+            "op": {
+              "const": "set-proposal-brief"
+            },
+            "kind": {
+              "$ref": "#/$defs/proposableKind"
+            },
+            "template": {
+              "type": "string",
+              "pattern": "^[\\s\\S]{1,4000}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "param",
+            "value"
+          ],
+          "properties": {
+            "op": {
+              "const": "set-comparison-param"
+            },
+            "param": {
+              "enum": [
+                "selectionCases",
+                "repeats",
+                "selection"
+              ]
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "enum": [
+                    "similarity",
+                    "recency"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "improverChangeRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "jobId",
+        "createdAt",
+        "sessionId",
+        "attempts",
+        "parentVersion",
+        "childVersion",
+        "change",
+        "rationale"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "attempts": {
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "parentVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "childVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "change": {
+          "$ref": "#/$defs/improverChange"
+        },
+        "rationale": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,1000}$"
+        }
+      }
+    },
+    "comparisonOrigin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceJobId",
+        "tree",
+        "feedbackIds",
+        "capabilityVersion",
+        "epoch"
+      ],
+      "properties": {
+        "sourceJobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "tree": {
+          "$ref": "#/$defs/sha256"
+        },
+        "feedbackIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "capabilityVersion": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "epoch": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "comparisonArmResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arm",
+        "improverVersion",
+        "origin",
+        "jobId",
+        "status",
+        "cost"
+      ],
+      "properties": {
+        "arm": {
+          "enum": [
+            "parent",
+            "child"
+          ]
+        },
+        "improverVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "origin": {
+          "$ref": "#/$defs/comparisonOrigin"
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/improvementStatus"
+        },
+        "error": {
+          "$ref": "#/$defs/errorInfo"
+        },
+        "candidateId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "verdict": {
+          "$ref": "#/$defs/trialVerdict"
+        },
+        "cost": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "usage",
+            "requestCount",
+            "estimatedUsd"
+          ],
+          "properties": {
+            "usage": {
+              "$ref": "#/$defs/usage"
+            },
+            "requestCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "estimatedUsd": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "const": "unknown"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "keptCopy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "bytes"
+      ],
+      "properties": {
+        "root": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "improverComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "jobId",
+        "createdAt",
+        "origin",
+        "parent",
+        "child",
+        "verdict"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "origin": {
+          "$ref": "#/$defs/comparisonOrigin"
+        },
+        "parent": {
+          "$ref": "#/$defs/comparisonArmResult"
+        },
+        "child": {
+          "$ref": "#/$defs/comparisonArmResult"
+        },
+        "verdict": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "outcome",
+            "reason"
+          ],
+          "properties": {
+            "outcome": {
+              "enum": [
+                "adopt",
+                "reject"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "gate-passed",
+                "quality-up",
+                "cost-down",
+                "no-improvement",
+                "no-offspring",
+                "unknown-arm",
+                "origin-mismatch",
+                "epoch-mismatch"
+              ]
+            },
+            "quality": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "parent",
+                "child"
+              ],
+              "properties": {
+                "parent": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "child": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            },
+            "costRatio": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "kept": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "parent": {
+              "$ref": "#/$defs/keptCopy"
+            },
+            "child": {
+              "$ref": "#/$defs/keptCopy"
+            }
           }
         }
       }

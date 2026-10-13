@@ -108,7 +108,8 @@ describe('step-5 job states', () => {
     expect(isFinalImprovementStatus('waiting-history')).toBe(false)
     expect(isFinalImprovementStatus('awaiting-approval')).toBe(false)
     expect(Object.keys(IMPROVEMENT_TRANSITIONS).sort()).toEqual([...IMPROVEMENT_STATUSES].sort())
-    expect(IMPROVEMENT_PHASES).toEqual(['diagnose', 'propose', 'trial'])
+    // step 6 appends the meta phases
+    expect(IMPROVEMENT_PHASES).toEqual(['diagnose', 'propose', 'trial', 'meta-diagnose', 'meta-propose'])
   })
 
   it('allows the lifecycle moves and the four exits, nothing out of a final status', () => {
@@ -189,8 +190,9 @@ describe('step-5 record and file additions', () => {
     expect(CANDIDATE_ORIGINS).toEqual(['session', 'improvement'])
     expectTypeOf<Extract<TrialReceipt, { type: 'trial.feedback' }>['status']>().toEqualTypeOf<'pass' | 'fail' | 'unknown'>()
     expectTypeOf<NonNullable<ImprovementEndRecord['phases']['trial']>['requestCount']>().toBeNumber()
-    expectTypeOf<LedgerAttribution['improvementPhase']>().toEqualTypeOf<'diagnose' | 'propose' | 'trial' | undefined>()
-    expectTypeOf<NonNullable<SessionStartRecord['improvement']>['phase']>().toEqualTypeOf<'diagnose' | 'propose'>()
+    // step 6 adds the two phases a meta job runs itself
+    expectTypeOf<LedgerAttribution['improvementPhase']>().toEqualTypeOf<'diagnose' | 'propose' | 'trial' | 'meta-diagnose' | 'meta-propose' | undefined>()
+    expectTypeOf<NonNullable<SessionStartRecord['improvement']>['phase']>().toEqualTypeOf<'diagnose' | 'propose' | 'meta-diagnose' | 'meta-propose'>()
     expectTypeOf<CandidateRecord['origin']>().toEqualTypeOf<'session' | 'improvement' | undefined>()
   })
 
@@ -205,7 +207,8 @@ describe('step-5 settings', () => {
   it('turns autoImprove on by default and guards it with the improvement settings', () => {
     expect(DEFAULT_PROJECT_CONFIG.autoImprove).toBe(true)
     expect(DEFAULT_PROJECT_CONFIG.improvement).toEqual(DEFAULT_IMPROVEMENT_CONFIG)
-    expect(DEFAULT_IMPROVEMENT_CONFIG).toEqual({ feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on' })
+    // step 6 adds `meta` (off by default)
+    expect(DEFAULT_IMPROVEMENT_CONFIG).toMatchObject({ feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on' })
     expect(GUARDED_PROJECT_CONFIG_FIELDS).toEqual(expect.arrayContaining(['autoImprove', 'improvement']))
     expect(resolveProjectConfig({ autoImprove: false, improvement: { budget: { windowDays: 7 } } })).toMatchObject({
       autoImprove: false,

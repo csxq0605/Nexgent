@@ -10,7 +10,10 @@ import {
   CAPABILITY_COMPONENT_KINDS,
   CAPABILITY_VERSION_SWITCH_REASONS,
   COMPONENT_FILE_PATTERN,
+  COMPARISON_ARMS,
   COMPONENT_NAME_PATTERN,
+  IMPROVEMENT_PHASES,
+  IMPROVER_VERSION_PATTERN,
   isJsonValue,
   NexgentError,
   SESSION_PURPOSES,
@@ -464,7 +467,13 @@ export const sessionRecordSchema: JsonObject = {
     ),
     capabilityVersion: CAPABILITY_VERSION_SCHEMA,
     sessionImprovement: closedObject(
-      { jobId: ref('nonEmptyString'), phase: { enum: ['diagnose', 'propose'] } },
+      {
+        jobId: ref('nonEmptyString'),
+        phase: { enum: IMPROVEMENT_PHASES.filter(phase => phase !== 'trial') },
+        improverVersion: { type: 'string', pattern: IMPROVER_VERSION_PATTERN.source },
+        metaJobId: ref('nonEmptyString'),
+        comparisonArm: { enum: [...COMPARISON_ARMS] },
+      },
       ['jobId', 'phase'],
     ),
     componentRef: closedObject(

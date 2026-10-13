@@ -13,7 +13,8 @@ import type { ApprovalDecision, ApprovalGrant, ApprovalRequest } from './approva
 import type { CapabilityComponentRef, CapabilityFile, CapabilityVersion, CapabilityVersionSwitchReason, ComponentUseProof } from './capabilities.js'
 import type { FinishReason, LLMMessage, LLMUsage, RefusalInfo, ToolCall } from './llm.js'
 import type { MemberExecutionForm, MemberIdentity, MemberResult, DelegationMode, TeamMember, TeamMessage, TeamTask, WorkflowStatus } from './collaboration.js'
-import type { ImprovementPhase } from './improvement.js'
+import type { ComparisonArm, ImprovementPhase } from './improvement.js'
+import type { ImproverVersion } from './improver.js'
 import type { DeliverableVersionRef, FeedbackEntry, FileChange, Goal, GoalStatus, MaterialRef } from './tasking.js'
 import type { SandboxMode } from './workspace.js'
 
@@ -66,7 +67,14 @@ export const SESSION_PURPOSES: readonly SessionPurpose[] = ['task', 'improvement
 /** The job an improvement session belongs to. The trial phase opens no improvement session (replays are ordinary trial runs). */
 export interface SessionImprovement {
   readonly jobId: string
+  /** Step 6 adds `meta-diagnose` and `meta-propose`. */
   readonly phase: Exclude<ImprovementPhase, 'trial'>
+  /** Step 6: the improver version the job pinned (absent: `v0`). */
+  readonly improverVersion?: ImproverVersion
+  /** Step 6: the meta job, when the session belongs to a comparison arm's job (in the arm's copy). */
+  readonly metaJobId?: string
+  /** Step 6: which arm; present exactly when `metaJobId` is. */
+  readonly comparisonArm?: ComparisonArm
 }
 
 /** A user-role message entering the conversation. */

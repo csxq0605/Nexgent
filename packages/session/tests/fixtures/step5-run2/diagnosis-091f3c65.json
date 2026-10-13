@@ -1,0 +1,99 @@
+{
+  "formatVersion": 1,
+  "jobId": "091f3c65-5c94-4dbb-8609-a5ddf3915291",
+  "createdAt": "2026-10-13T13:26:26.420Z",
+  "sessionId": "90389158-a8d3-41a2-8116-378b022ec14c",
+  "attempts": 1,
+  "memberCosts": [
+    {
+      "memberId": "main",
+      "name": "main",
+      "executionForm": "direct",
+      "usage": {
+        "inputTokens": 50,
+        "outputTokens": 5542,
+        "totalTokens": 445356,
+        "cacheReadTokens": 390886,
+        "cacheWriteTokens": 48878,
+        "reasoningTokens": "unknown"
+      },
+      "requestCount": 21,
+      "toolCallCount": 22
+    }
+  ],
+  "failureTypes": [
+    {
+      "category": "system-design",
+      "label": "region-table skill/checker lacked revenue share column; checker never validates it so passing test proved nothing",
+      "evidence": [
+        {
+          "sessionId": "7bcbcf21-7e6a-409b-b76e-732691ed297c",
+          "seq": 5
+        },
+        {
+          "sessionId": "7bcbcf21-7e6a-409b-b76e-732691ed297c",
+          "seq": 13
+        },
+        {
+          "sessionId": "7bcbcf21-7e6a-409b-b76e-732691ed297c",
+          "seq": 19
+        }
+      ]
+    },
+    {
+      "category": "task-verification",
+      "label": "Agent invented column name revenue_share_pct; user wanted revenue_share; no name confirmation, and feedback was dismissed as being about an old version",
+      "evidence": [
+        {
+          "sessionId": "7bcbcf21-7e6a-409b-b76e-732691ed297c",
+          "seq": 27
+        },
+        {
+          "sessionId": "7bcbcf21-7e6a-409b-b76e-732691ed297c",
+          "seq": 52
+        },
+        {
+          "sessionId": "7bcbcf21-7e6a-409b-b76e-732691ed297c",
+          "seq": 58
+        }
+      ]
+    },
+    {
+      "category": "task-verification",
+      "label": "Test run in parallel with file write, and epsilon rounding disagreed with checker",
+      "evidence": [
+        {
+          "sessionId": "7bcbcf21-7e6a-409b-b76e-732691ed297c",
+          "seq": 8
+        },
+        {
+          "sessionId": "7bcbcf21-7e6a-409b-b76e-732691ed297c",
+          "seq": 11
+        }
+      ]
+    }
+  ],
+  "involved": {
+    "members": [
+      "main"
+    ],
+    "tools": [
+      "load_skill",
+      "run_code",
+      "present",
+      "capability_draft",
+      "capability_propose"
+    ],
+    "skills": [
+      "region-table"
+    ],
+    "components": [
+      {
+        "kind": "skill",
+        "name": "region-table"
+      }
+    ]
+  },
+  "hypothesis": "The region-table skill had no revenue-share column in its standing spec and did not fix the exact column name (revenue_share vs revenue_share_pct), so output missed or misnamed what the user wanted monthly and the checker could not catch it.",
+  "proposalKind": "skill"
+}

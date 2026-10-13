@@ -85,7 +85,10 @@ const diagnosis: Diagnosis = {
   ],
 }
 
-const VALID: Record<ImprovementFileKind, unknown[]> = {
+/** The step-5 file kinds (step 6's: `step6-records.spec.ts`). */
+type Step5Kind = Extract<ImprovementFileKind, 'queue' | 'job' | 'diagnosis'>
+
+const VALID: Record<Step5Kind, unknown[]> = {
   queue: [emptyImprovementQueue(TS), queue, { ...queue, pending: [], activeJobId: UUID(1) }],
   job: [
     job,
@@ -107,7 +110,7 @@ const VALID: Record<ImprovementFileKind, unknown[]> = {
   diagnosis: [diagnosis, { ...diagnosis, proposalKind: 'none', failureTypes: [], involved: { members: [], tools: [], skills: [], components: [] }, memberCosts: [] }],
 }
 
-const INVALID: Record<ImprovementFileKind, unknown[]> = {
+const INVALID: Record<Step5Kind, unknown[]> = {
   queue: [
     { formatVersion: 1, since: TS, counted: [], pending: [{ kind: 'feedback', feedbackId: 'f1', at: TS }] },
     { formatVersion: 1, since: TS, counted: [], pending: [], activeJobId: 'job-1' },
@@ -136,9 +139,10 @@ const INVALID: Record<ImprovementFileKind, unknown[]> = {
 }
 
 describe('improvement file schema', () => {
-  it('covers every file kind with valid and invalid samples', () => {
-    expect(Object.keys(VALID).sort()).toEqual(Object.keys(IMPROVEMENT_FILE_DEFS).sort())
-    for (const kind of Object.keys(IMPROVEMENT_FILE_DEFS) as ImprovementFileKind[]) {
+  it('covers the step-5 file kinds with valid and invalid samples', () => {
+    expect(Object.keys(VALID).sort()).toEqual(['diagnosis', 'job', 'queue'])
+    expect(Object.keys(IMPROVEMENT_FILE_DEFS)).toEqual(expect.arrayContaining(Object.keys(VALID)))
+    for (const kind of Object.keys(VALID) as Step5Kind[]) {
       for (const value of VALID[kind]) expect(validateImprovementFile(kind, JSON.parse(JSON.stringify(value))), kind).toEqual([])
       for (const value of INVALID[kind]) expect(validateImprovementFile(kind, value), kind).not.toEqual([])
     }

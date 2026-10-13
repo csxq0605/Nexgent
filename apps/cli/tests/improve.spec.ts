@@ -87,7 +87,7 @@ describe('args', () => {
 describe('formatting', () => {
   const view = (over: Partial<ImprovementJobView>): ImprovementJobView => ({
     id: A, trigger: 'explicit', status: 'queued', createdAt: '2026-10-13T09:12:00.000Z', updatedAt: '2026-10-13T09:12:00.000Z',
-    itemCount: 0, tokens: {}, estimatedUsd: 0, ...over,
+    itemCount: 0, feedbackIds: [], phaseTimes: {}, tokens: {}, estimatedUsd: 0, ...over,
   })
 
   it('sums tokens and marks unknown', () => {
@@ -134,7 +134,7 @@ describe('formatting', () => {
     expect(resolveJobId(jobs, 'cc')).toBe(C)
     expect(() => resolveJobId(jobs, 'aaaa')).toThrow(/ambiguous/)
     expect(() => resolveJobId(jobs, 'zz')).toThrow(/no improvement job/)
-    expect(formatListing({ jobs: [], pending: 0, threshold: 5, budget: { usedTokens: 0, maxTokens: 1, windowDays: 7 } })).toContain('No improvement jobs yet.')
+    expect(formatListing({ jobs: [], pending: 0, threshold: 5, budget: { usedTokens: 0, maxTokens: 1, windowDays: 7 }, autoImprove: true })).toContain('No improvement jobs yet.')
   })
 })
 

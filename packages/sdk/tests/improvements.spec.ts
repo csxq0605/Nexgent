@@ -42,7 +42,7 @@ describe('improvement jobs through the SDK', () => {
     expect(rows).toEqual([{ id: 'evolve', name: '@nexgent/evolve', config: { entry: expect.stringMatching(/improve-entry\.(js|ts)$/), env: { NEXGENT_API_BASE_URL: 'http://127.0.0.1:1', NEXGENT_HOME: '/home/x' } } }])
     const t = await testSdk([])
     const { projectId } = await openProject(t)
-    expect(await t.sdk.call('improvements.list', { projectId })).toEqual({ jobs: [], pending: 0, threshold: 3, budget: { usedTokens: 0, maxTokens: 3_000_000, windowDays: 30 } })
+    expect(await t.sdk.call('improvements.list', { projectId })).toEqual({ jobs: [], pending: 0, threshold: 3, budget: { usedTokens: 0, maxTokens: 3_000_000, windowDays: 30 }, autoImprove: true })
     await expect(t.sdk.call('improvements.show', { projectId, jobId: randomUUID() })).rejects.toMatchObject({ code: 'improvement/not-found' })
   })
 

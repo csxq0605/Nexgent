@@ -11,7 +11,8 @@
 import type { ToolCallApproval } from './approvals.js'
 import type { ActivationTrigger, CapabilityVersion, ComponentUsage, DecisionOutcome, DecisionReason, TrialArm } from './capabilities.js'
 import type { ExecutionForm } from './collaboration.js'
-import type { ImprovementPhase, ImprovementStatus, ImprovementTrigger, PhaseCost } from './improvement.js'
+import type { ComparisonArm, ImprovementCostPhase, ImprovementJobKind, ImprovementPhase, ImprovementStatus, ImprovementTrigger, PhaseCost } from './improvement.js'
+import type { ImproverVersion } from './improver.js'
 import type { ErrorInfo } from './errors.js'
 import type { FinishReason, LLMRequestPurpose, LLMUsage } from './llm.js'
 import type { ToolEffect } from './tools.js'
@@ -39,6 +40,12 @@ export interface LedgerAttribution {
   readonly improvementId?: string
   /** Step 5: which phase of that job; never without `improvementId`, and on every record carrying it except `improvement.end` (which spans all phases). */
   readonly improvementPhase?: ImprovementPhase
+  /** Step 6: the improver version the job pinned; never without `improvementId`, and on every record of a step-6 job (absent: `v0`). */
+  readonly improverVersion?: ImproverVersion
+  /** Step 6: on the records of a comparison arm's job (whose id is `improvementId`): the meta job that ran it. */
+  readonly metaJobId?: string
+  /** Step 6: which arm; present exactly when `metaJobId` is. */
+  readonly comparisonArm?: ComparisonArm
 }
 
 /** Fields every ledger record carries. */
@@ -174,12 +181,16 @@ export interface CapabilityDecisionRecord extends LedgerRecordBase {
 export interface ImprovementEndRecord extends LedgerRecordBase {
   readonly type: 'improvement.end'
   readonly jobId: string
+  /** Step 6: `meta` for a meta job; absent means `capability`. */
+  readonly kind?: ImprovementJobKind
   readonly trigger: ImprovementTrigger
   readonly status: ImprovementStatus
-  /** Spend per phase, as in the job record; a phase that never ran is absent. */
-  readonly phases: Readonly<Partial<Record<ImprovementPhase, PhaseCost>>>
+  /** Spend per phase, as in the job record (a meta job's `compare` included); a phase that never ran is absent. */
+  readonly phases: Readonly<Partial<Record<ImprovementCostPhase, PhaseCost>>>
   readonly candidateId?: string
   readonly decisionId?: string
+  /** Step 6, meta jobs: the proposed improver (adopted when `status` is `adopted`). */
+  readonly childVersion?: ImproverVersion
 }
 
 /** Every ledger record kind. */

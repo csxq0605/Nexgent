@@ -101,6 +101,9 @@ describe('.nexgent/ and protected patterns (workspace-write)', () => {
     // step 5: improvement jobs are host-only too
     expect(await r('.nexgent/improvements/queue.json')).toBe('deny')
     expect(await w('.nexgent/improvements/j1/job.json')).toBe('deny')
+    // step 6: improver versions are host-only too
+    expect(await r('.nexgent/improvers/activation/1.json')).toBe('deny')
+    expect(await w('.nexgent/improvers/bundles/x.json')).toBe('deny')
     expect(await r('.nexgent/materials/a.pdf')).toBe('allow')
     expect(await w('.nexgent/materials/x')).toBe('deny')
     expect(await r('.nexgent/outputs/x')).toBe('allow')
