@@ -9,12 +9,15 @@
  *   context so the bundle's components (and the session's tried drafts) are
  *   registered there and released when the agent closes.
  * - `ctx.taskRecorder` is provided by `@nexgent/tasking`. The kernel calls it
- *   when a root task runs its first turn (workspace snapshot) and when the
- *   root task ends (deterministic checks).
+ *   when a root turn starts (workspace snapshot) and when it ends
+ *   (deterministic checks); step 5 keeps one record of each per turn.
+ * - `ctx.improve` (step 5) is provided by `@nexgent/evolve`. The kernel
+ *   signals a root turn whose checks failed.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { CapabilityComponentRef, CapabilityVersion, TaskCheckSpec } from './contracts/capabilities.js'
 import type { MemberIdentity } from './contracts/collaboration.js'
+import type { ImprovementPhase } from './contracts/improvement.js'
 import type { JsonValue } from './contracts/json.js'
 import type { TaskCheck } from './contracts/ledger.js'
 
@@ -24,6 +27,8 @@ declare module '@deepseek-ai/cordis' {
     capabilityHost: CapabilityHost
     /** `@nexgent/tasking` (step 4, optional): task-start snapshots and task-end checks. */
     taskRecorder: TaskRecorder
+    /** `@nexgent/evolve` (step 5, optional): the improvement queue the kernel signals failed checks to. */
+    improve: ImprovementSignals
   }
 }
 
@@ -98,17 +103,21 @@ export interface CapabilityHost {
   componentOf?(call: ComponentCallInput): ComponentUseRef | undefined
 }
 
-/** Task start (first turn of a root task). */
+/** A root turn starts (step 4: the task's first turn; step 5: every root turn). */
 export interface TaskBeginInput {
   readonly taskId: string
   readonly sessionId: string
   readonly capabilityVersion: CapabilityVersion
+  /** Step 5: the root turn; the snapshot goes to `tasks/<taskId>.t<turn>.json` too. */
+  readonly turn?: number
 }
 
 /** What the root task did that its checks are derived from. */
 export interface TaskEndInput {
   readonly taskId: string
   readonly sessionId: string
+  /** Step 5: the root turn; the checks go to `checks/<taskId>.t<turn>.json` too. */
+  readonly turn?: number
   /** Project-relative files of the deliverable versions the task tree presented, first presentation first. */
   readonly deliverableFiles: readonly string[]
   /** Shell commands of the task tree that exited 0, in call order. */
@@ -125,8 +134,40 @@ export interface TaskEndResult {
 
 /** `ctx.taskRecorder`. */
 export interface TaskRecorder {
-  /** Write `snapshots/tasks/<taskId>.json` (and the tree and objects). */
+  /** Write `snapshots/tasks/<taskId>.t<turn>.json` (and the tree and objects); `<taskId>.json` keeps the first. */
   begin(input: TaskBeginInput): Promise<void>
-  /** Derive check specs, run them, write `snapshots/checks/<taskId>.json`. */
+  /** Derive check specs, run them, write `snapshots/checks/<taskId>.t<turn>.json` and `<taskId>.json`. */
   end(input: TaskEndInput): Promise<TaskEndResult>
+}
+
+/**
+ * Step 5: the improvement job a session works for. `diagnose` and
+ * `propose` sessions are improvement sessions (`session.start.purpose:
+ * improvement`); `trial` marks an ordinary task session the gate runs for
+ * the job. Every ledger record of the session carries `improvementId` and
+ * `improvementPhase`.
+ */
+export interface ImprovementRun {
+  readonly jobId: string
+  readonly phase: ImprovementPhase
+}
+
+/** A root turn whose checks had a failing item (step 5: counts as one `check-failure` signal). */
+export interface CheckFailureSignal {
+  readonly taskId: string
+  readonly sessionId: string
+  readonly turn: number
+  /** The turn's check results (the host counts the failing ones). */
+  readonly checks: readonly TaskCheck[]
+  readonly at?: Date
+}
+
+/**
+ * `ctx.improve`, as far as the kernel uses it: after a root turn of a task
+ * session whose checks failed, the kernel calls `noteCheckFailure` once.
+ * Counting, the threshold and `autoImprove` are the host's
+ * (`data-formats.md` §改进作业).
+ */
+export interface ImprovementSignals {
+  noteCheckFailure(input: CheckFailureSignal): Promise<unknown>
 }

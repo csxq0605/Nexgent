@@ -66,7 +66,7 @@ import { renderFeedbackPrompt, type FeedbackEntry, type TaskingService, type Tur
 import type { Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry } from './contracts/tools.js'
 import type { SandboxMode, Workspace } from './contracts/workspace.js'
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
-import type { AttachedComponent, CapabilityHost, ComponentUseRef, TaskRecorder } from './capability-hooks.js'
+import type { AttachedComponent, CapabilityHost, ComponentUseRef, ImprovementRun, ImprovementSignals, TaskRecorder } from './capability-hooks.js'
 import {
   approvalSubject,
   decideToolPolicy,
@@ -248,6 +248,8 @@ export interface AgentInit {
     readonly capabilityHost?: CapabilityHost | undefined
     /** Step 4: root-task snapshot and checks. */
     readonly taskRecorder?: TaskRecorder | undefined
+    /** Step 5: the improvement queue failed checks are signalled to. */
+    readonly improve?: ImprovementSignals | undefined
   }
   readonly lock: SessionLock
   /** The agent's scoped context (tools registered through it are agent-private). */
@@ -294,6 +296,8 @@ export interface AgentInit {
   readonly capabilityVersion?: CapabilityVersion
   /** Step 4: components the capability host loaded into this session's scope. */
   readonly attached?: readonly AttachedComponent[]
+  /** Step 5: the improvement job this session works for (stamped on every ledger record). */
+  readonly improvement?: ImprovementRun
 }
 
 /** `componentsUsed` order: manifest kind order, then name, then version. */
@@ -420,6 +424,8 @@ export class Agent {
   readonly parentSessionId: string | undefined
   /** Step 4: the capability version this session runs on; absent without a capability host. */
   readonly capabilityVersion: CapabilityVersion | undefined
+  /** Step 5: the improvement job this session works for; absent for an ordinary task session. */
+  readonly improvement: ImprovementRun | undefined
 
   private readonly init: AgentInit
   private readonly hub = new AgentEventHub()
@@ -481,6 +487,7 @@ export class Agent {
     this.member = init.member
     this.parentSessionId = init.parentSessionId
     this.capabilityVersion = init.capabilityVersion
+    this.improvement = init.improvement
     if (init.capabilityVersion !== undefined) {
       for (const component of init.attached ?? []) this.loadComponent(component, init.capabilityVersion)
     }
@@ -820,9 +827,18 @@ export class Agent {
   // capabilities (step 4)
   // -------------------------------------------------------------------------
 
-  /** Attribution plus the capability version, for every ledger record this agent writes. */
+  /** Attribution plus the capability version (step 4) and improvement job (step 5), for every ledger record this agent writes. */
   ledgerAttribution(): LedgerAttribution {
-    return { ...this.attribution, ...(this.capabilityVersion === undefined ? {} : { capabilityVersion: this.capabilityVersion }) }
+    return {
+      ...this.attribution,
+      ...(this.capabilityVersion === undefined ? {} : { capabilityVersion: this.capabilityVersion }),
+      ...(this.improvement === undefined ? {} : { improvementId: this.improvement.jobId, improvementPhase: this.improvement.phase }),
+    }
+  }
+
+  /** Step 5: whether this is an improvement job's own session (diagnose or propose), not a task. */
+  get isImprovementSession(): boolean {
+    return this.improvement !== undefined && this.improvement.phase !== 'trial'
   }
 
   /** Step 4: components this session used since it opened (`task.outcome.componentsUsed`), in manifest kind order, then name. */
@@ -910,13 +926,17 @@ export class Agent {
     }
   }
 
-  /** Root task, first turn: snapshot the workspace (`snapshots/tasks/<taskId>.json`). Failures are non-fatal errors. */
+  /**
+   * Root turn start: snapshot the workspace (`snapshots/tasks/<taskId>.t<turn>.json`;
+   * step 5 takes one per root turn). Improvement sessions take none.
+   * Failures are non-fatal errors.
+   */
   private async beginTaskRecord(recorder: TaskRecorder | undefined, turn: number): Promise<void> {
     const tree = this.init.tree
-    if (recorder === undefined || this.member !== undefined || tree.snapshotTaken) return
+    if (recorder === undefined || this.member !== undefined || this.isImprovementSession) return
     tree.snapshotTaken = true
     try {
-      await recorder.begin({ taskId: tree.taskId, sessionId: this.sessionId, capabilityVersion: this.capabilityVersion ?? BASELINE_VERSION })
+      await recorder.begin({ taskId: tree.taskId, sessionId: this.sessionId, capabilityVersion: this.capabilityVersion ?? BASELINE_VERSION, turn })
     } catch (error) {
       await this.appendError(errorInfo('internal', `task snapshot failed: ${toErrorInfo(error).message}`), false, turn)
     }
@@ -924,24 +944,36 @@ export class Agent {
 
   /**
    * Root turn end, before `turn.end`: run the deterministic checks of the
-   * task so far (when its snapshot was taken) and keep the results for
-   * `task.outcome.checks`. Failures are non-fatal errors and leave `checks` out.
+   * task so far (when a snapshot was taken) and keep the results for
+   * `task.outcome.checks`. A failing check of a task session (not a gate
+   * trial run) is signalled to `ctx.improve` as one `check-failure`.
+   * Failures are non-fatal errors and leave `checks` out.
    */
-  private async runTaskChecks(recorder: TaskRecorder | undefined, turn: number, signal: AbortSignal): Promise<void> {
+  private async runTaskChecks(recorder: TaskRecorder | undefined, improve: ImprovementSignals | undefined, turn: number, signal: AbortSignal): Promise<void> {
     const tree = this.init.tree
     if (recorder === undefined || this.member !== undefined || !tree.snapshotTaken) return
     this.lastChecks = undefined
+    let checks: readonly TaskCheck[]
     try {
       const { results } = await recorder.end({
         taskId: tree.taskId,
         sessionId: this.sessionId,
+        turn,
         deliverableFiles: tree.deliverableFiles(),
         commands: [...tree.commands],
         signal,
       })
+      checks = results
       this.lastChecks = results
     } catch (error) {
       await this.appendError(errorInfo('internal', `task checks failed: ${toErrorInfo(error).message}`), false, turn)
+      return
+    }
+    if (improve === undefined || this.improvement !== undefined || checks.every(check => check.passed)) return
+    try {
+      await improve.noteCheckFailure({ taskId: tree.taskId, sessionId: this.sessionId, turn, checks })
+    } catch (error) {
+      await this.appendError(errorInfo('internal', `check-failure signal failed: ${toErrorInfo(error).message}`), false, turn)
     }
   }
 
@@ -994,7 +1026,7 @@ export class Agent {
       await this.settleMembers()
       await this.endFiles(turn, signal)
       // A cancelled turn still gets its checks, bounded like `endTurn`.
-      await this.runTaskChecks(services.taskRecorder, turn, signal.aborted
+      await this.runTaskChecks(services.taskRecorder, services.improve, turn, signal.aborted
         ? AbortSignal.timeout(FILES_END_CANCEL_MS)
         : AbortSignal.any([signal, AbortSignal.timeout(CHECKS_TIMEOUT_MS)]))
       const end = await this.append({ type: 'turn.end', turn, reason })

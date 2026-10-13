@@ -7,13 +7,17 @@
  *   `.git/`, `node_modules/`; regular files only) is stored once under
  *   `.nexgent/snapshots/objects/<sha256>`, the sorted list under
  *   `trees/<sha256>.json` (named by the hash of its canonical JSON), and the
- *   task's pointer under `tasks/<taskId>.json`. A workspace over
+ *   pointer under `tasks/<taskId>.t<turn>.json` at the start of every root
+ *   turn (step 5, per turn). A workspace over
  *   `CAPABILITY_LIMITS.maxSnapshotBytes` gets `tree: null`.
  * - Checks: `file-exists` for every file of the deliverables the task tree
  *   presented, `parses` for those that are JSON, CSV or XLSX, and
  *   `test-command` for the last few test-runner commands that exited 0. The
- *   specs and results go to `checks/<taskId>.json` (rewritten at each root
- *   turn end) and the results into `task.outcome.checks`.
+ *   specs and results go to `checks/<taskId>.t<turn>.json` at each root turn
+ *   end and the results into `task.outcome.checks`.
+ * - Step-4 names: `tasks/<taskId>.json` is still written for the task's
+ *   first snapshot (never replaced) and `checks/<taskId>.json` for the latest
+ *   turn's checks, so step-4 readers keep working.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
@@ -22,6 +26,7 @@ import * as nodePath from 'node:path'
 import {
   CAPABILITY_LIMITS,
   canonicalJson,
+  perTurnFileName,
   SNAPSHOTS_DIR,
   writeFileAtomic,
   type JsonValue,
@@ -119,12 +124,16 @@ export class LocalTaskRecorder implements TaskRecorder {
       formatVersion: 1,
       taskId: input.taskId,
       sessionId: input.sessionId,
+      ...(input.turn === undefined ? {} : { turn: input.turn }),
       takenAt: this.now().toISOString(),
       tree,
       ...(tree === null ? { omitted: { reason: 'too-large' as const, bytes } } : {}),
       capabilityVersion: input.capabilityVersion,
     }
-    await this.writeJson(nodePath.join('tasks', `${input.taskId}.json`), record)
+    if (input.turn !== undefined) await this.writeJson(nodePath.join('tasks', perTurnFileName(input.taskId, input.turn)), record)
+    // The step-4 name keeps the task's first snapshot.
+    const legacy = nodePath.join('tasks', `${input.taskId}.json`)
+    if (input.turn === undefined || !(await exists(nodePath.join(this.dir, legacy)))) await this.writeJson(legacy, record)
   }
 
   async end(input: TaskEndInput): Promise<TaskEndResult> {
@@ -134,11 +143,14 @@ export class LocalTaskRecorder implements TaskRecorder {
     const record: TaskChecksRecord = {
       formatVersion: 1,
       taskId: input.taskId,
+      ...(input.turn === undefined ? {} : { turn: input.turn }),
       sessionId: input.sessionId,
       checkedAt: this.now().toISOString(),
       specs,
       results,
     }
+    if (input.turn !== undefined) await this.writeJson(nodePath.join('checks', perTurnFileName(input.taskId, input.turn)), record)
+    // The step-4 name holds the latest turn's checks.
     await this.writeJson(nodePath.join('checks', `${input.taskId}.json`), record)
     return { specs, results }
   }

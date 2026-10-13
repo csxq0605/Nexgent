@@ -27,14 +27,15 @@ import {
 import { BASELINE_VERSION, type CapabilityVersion } from './contracts/capabilities.js'
 import type { ProjectConfig } from './contracts/config.js'
 import { NexgentError } from './contracts/errors.js'
-import { EFFORT_LEVELS, type Effort } from './contracts/llm.js'
-import type { SessionLock } from './contracts/session.js'
+import { IMPROVEMENT_DIAGNOSIS_TOOLS } from './contracts/improvement.js'
+import { EFFORT_LEVELS, type Effort, type ThinkingMode } from './contracts/llm.js'
+import type { SessionImprovement, SessionLock } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
 import { SANDBOX_MODES } from './contracts/workspace.js'
 import { Agent, type AgentInit, type AgentSettings, type ProjectGrantWriter } from './agent.js'
 import { readProjectConfig, type LoadedProjectConfig } from './project-config.js'
 import { DEFAULT_PERSONA, DEFAULT_PERSONA_SUFFIX } from './system-prompt.js'
-import type { AttachedComponent, CapabilityHost } from './capability-hooks.js'
+import type { AttachedComponent, CapabilityHost, ImprovementRun } from './capability-hooks.js'
 import { TaskTree } from './task-tree.js'
 import { TOOL_SCOPE, type ToolRegistryService, type ToolScope } from './tools.js'
 import type { ApprovalBrokerService } from './approvals.js'
@@ -99,6 +100,18 @@ export interface CreateAgentOptions {
    * the parent and the child options.
    */
   readonly child?: ChildAgentOptions
+  /**
+   * Step 5 (`agent-hooks.md` §步骤 5): the improvement job this root session
+   * works for. Phase `diagnose` or `propose` opens an improvement session
+   * (`session.start.purpose: improvement`): no task snapshots, checks or
+   * check-failure signals, no collaboration tools, and in `diagnose` only
+   * the `IMPROVEMENT_DIAGNOSIS_TOOLS` and no capability components. Phase
+   * `trial` is an ordinary task session the gate runs for the job. Every
+   * ledger record carries `improvementId` and `improvementPhase`.
+   */
+  readonly improvement?: ImprovementRun
+  /** Thinking override (an improvement job's `improvement.thinking`); else the project config, then the service default. */
+  readonly thinking?: ThinkingMode
 }
 
 /** Options of {@link AgentsService.resume}. */
@@ -113,6 +126,13 @@ export interface ResumeAgentOptions {
    * Lead turn. Required for a child session; refused for a root session.
    */
   readonly child?: ResumeChildOptions
+  /**
+   * Step 5: a gate trial session's job (`phase: 'trial'`; the session header
+   * does not keep it). An improvement session's job comes from its header.
+   */
+  readonly improvement?: ImprovementRun
+  /** Thinking override; else the project config, then the service default. */
+  readonly thinking?: ThinkingMode
   /**
    * Step 3, with `child`: the member's preset again (the session header
    * keeps only its name), so the resumed member gets the same persona, tool
@@ -259,6 +279,32 @@ export class AgentsService extends Service {
     if (preset?.tools !== undefined) tools.restrict(preset.tools)
   }
 
+  /**
+   * Narrow a root session's tool scope by what it is for (step 5,
+   * `permissions.md` §改进会话与改进预算): a diagnose session sees only the
+   * diagnosis tools, a propose session no collaboration or `improve_*`
+   * tools, and every other root session no `improve_*` tools. Effects of the
+   * agent's fiber.
+   */
+  private scopeRoot(ctx: Context, run: ImprovementRun | undefined): void {
+    const tools = ctx.tools as ToolRegistryService
+    if (run?.phase === 'diagnose') {
+      tools.restrict({ allow: IMPROVEMENT_DIAGNOSIS_TOOLS.map(tool => tool.name) })
+    } else if (run?.phase === 'propose') {
+      tools.restrict({ deny: MEMBER_DENIED_TOOLS.filter(name => !name.startsWith('capability_')) })
+    } else {
+      tools.restrict({ deny: IMPROVEMENT_DIAGNOSIS_TOOLS.map(tool => tool.name) })
+    }
+  }
+
+  private assertImprovement(run: ImprovementRun | undefined): ImprovementRun | undefined {
+    if (run === undefined) return undefined
+    if (typeof run.jobId !== 'string' || run.jobId === '' || !['diagnose', 'propose', 'trial'].includes(run.phase)) {
+      throw new NexgentError('tool/invalid-input', 'improvement must be { jobId, phase: diagnose | propose | trial }')
+    }
+    return { jobId: run.jobId, phase: run.phase }
+  }
+
   /** The open root agent a member is started (or resumed) under. */
   private parentEntry(parentSessionId: string): AgentEntry {
     const parent = this.live.get(parentSessionId)
@@ -305,6 +351,7 @@ export class AgentsService extends Service {
     settings: AgentSettings
     member?: { identity: MemberIdentity; parent: AgentEntry; budget: BudgetShare | undefined }
     capabilities?: CapabilityLoad
+    improvement?: ImprovementRun
   }): Agent {
     const { member } = args
     const children = new Set<Agent>()
@@ -319,6 +366,7 @@ export class AgentsService extends Service {
         tasking: this.home.get('tasking'),
         capabilityHost: this.home.get('capabilityHost'),
         taskRecorder: this.home.get('taskRecorder'),
+        improve: this.home.get('improve'),
       }),
       lock: args.lock,
       ctx: args.scope.ctx,
@@ -352,6 +400,7 @@ export class AgentsService extends Service {
         }),
       children: () => [...children],
       ...(args.capabilities === undefined ? {} : { capabilityVersion: args.capabilities.version, attached: args.capabilities.attached }),
+      ...(args.improvement === undefined ? {} : { improvement: args.improvement }),
       onClose: closed => {
         if (this.live.get(closed.sessionId) === closed) this.live.delete(closed.sessionId)
         this.entries.delete(closed)
@@ -447,16 +496,23 @@ export class AgentsService extends Service {
 
   /** Create a session (`session.start`) and an agent on it; with `child`, a member under an open root agent. */
   async create(options: CreateAgentOptions = {}): Promise<Agent> {
-    if (options.child !== undefined) return this.createChild(options, options.child)
+    if (options.child !== undefined) {
+      if (options.improvement !== undefined) throw new NexgentError('tool/invalid-input', 'a member session cannot belong to an improvement job')
+      return this.createChild(options, options.child)
+    }
+    const improvement = this.assertImprovement(options.improvement)
+    const session: SessionImprovement | undefined = improvement === undefined || improvement.phase === 'trial'
+      ? undefined
+      : { jobId: improvement.jobId, phase: improvement.phase }
     const loaded = await this.projectConfig(options.projectConfig)
     const sessionId = options.sessionId ?? randomUUID()
     const model = options.model ?? loaded.input.model ?? this.config.model ?? this.home.llm.info.defaultModel
     const sandboxMode = this.assertMode(options.sandboxMode ?? loaded.config.sandboxMode)
-    const thinking = loaded.input.thinking ?? this.config.thinking
+    const thinking = options.thinking ?? loaded.input.thinking ?? this.config.thinking
     const effort = loaded.input.effort ?? this.config.effort
     await this.home.workspace.ensureLayout()
-    // Step 4: a new root session runs on the adopted version as of now.
-    const host = this.capabilityHost()
+    // Step 4: a new root session runs on the adopted version as of now; a diagnose session loads no components.
+    const host = improvement?.phase === 'diagnose' ? undefined : this.capabilityHost()
     const version = host === undefined ? undefined : await host.current()
     const lock = await this.home.session.create({
       sessionId,
@@ -465,11 +521,13 @@ export class AgentsService extends Service {
       sandboxMode,
       ...(options.title === undefined ? {} : { title: options.title }),
       ...(version === undefined ? {} : { capabilityVersion: version }),
+      ...(session === undefined ? {} : { purpose: 'improvement' as const, improvement: session }),
     })
     try {
       const scope = await this.scope(sessionId)
       let capabilities: CapabilityLoad | undefined
       try {
+        this.scopeRoot(scope.ctx, improvement)
         capabilities = host === undefined || version === undefined
           ? undefined
           : await this.loadCapabilities(host, { sessionId, scope: scope.ctx, version, resumed: false })
@@ -494,6 +552,7 @@ export class AgentsService extends Service {
         tree: new TaskTree(sessionId, loaded.config.costCaps.perTask, [...loaded.config.approvals]),
         settings: this.settings(),
         ...(capabilities === undefined ? {} : { capabilities }),
+        ...(improvement === undefined ? {} : { improvement }),
       })
     } catch (error) {
       await this.home.session.release(lock).catch(() => undefined)
@@ -597,6 +656,20 @@ export class AgentsService extends Service {
     try {
       let state = await session.resume(sessionId)
       const { member, parentSessionId } = state.metadata
+      // Step 5: an improvement session's job is in its header; a trial session's comes from the caller.
+      const recordedJob = state.metadata.improvement
+      if (recordedJob !== undefined && options.improvement !== undefined) {
+        throw new NexgentError('tool/invalid-input', `session ${sessionId} is an improvement session; its job comes from its header`)
+      }
+      if (parent !== undefined && options.improvement !== undefined) {
+        throw new NexgentError('tool/invalid-input', 'a member session cannot belong to an improvement job')
+      }
+      const improvement = recordedJob !== undefined
+        ? { jobId: recordedJob.jobId, phase: recordedJob.phase }
+        : this.assertImprovement(options.improvement)
+      if (recordedJob === undefined && improvement !== undefined && improvement.phase !== 'trial') {
+        throw new NexgentError('tool/invalid-input', `session ${sessionId} is not an improvement session; only phase trial can be given on resume`)
+      }
       if (parent === undefined && parentSessionId !== undefined) {
         throw denied(`session ${sessionId} is a member of ${parentSessionId}; resume it with child options under its open parent`, { parentSessionId })
       }
@@ -612,8 +685,8 @@ export class AgentsService extends Service {
         await session.append(sessionId, { type: 'turn.end', turn: state.metadata.openTurn, reason: { kind: 'interrupted' } })
         state = await session.resume(sessionId)
       }
-      // Step 4: keep the recorded version when it still loads; a member follows its root.
-      const host = this.capabilityHost()
+      // Step 4: keep the recorded version when it still loads; a member follows its root; a diagnose session loads none.
+      const host = improvement?.phase === 'diagnose' ? undefined : this.capabilityHost()
       let switched: { version: CapabilityVersion; lastSeq?: number } | undefined
       if (host !== undefined) {
         const recorded = state.metadata.capabilityVersion
@@ -627,6 +700,7 @@ export class AgentsService extends Service {
       let capabilities: CapabilityLoad | undefined
       try {
         if (parent !== undefined) this.scopeMember(scope.ctx, parent.scope, preset)
+        else this.scopeRoot(scope.ctx, improvement)
         if (host !== undefined && switched !== undefined) {
           const loadedCaps = await this.loadCapabilities(host, {
             sessionId,
@@ -649,7 +723,7 @@ export class AgentsService extends Service {
         lock,
         scope,
         model: options.model ?? preset?.model ?? state.metadata.model,
-        thinking: parent === undefined ? loaded!.input.thinking ?? this.config.thinking : preset?.thinking ?? parent.thinking,
+        thinking: parent === undefined ? options.thinking ?? loaded!.input.thinking ?? this.config.thinking : preset?.thinking ?? parent.thinking,
         effort: parent === undefined ? loaded!.input.effort ?? this.config.effort : preset?.effort ?? parent.effort,
         sandboxMode,
         projectConfig,
@@ -662,6 +736,7 @@ export class AgentsService extends Service {
         settings: this.settings(preset),
         ...(parent === undefined || member === undefined ? {} : { member: { identity: member, parent, budget: options.child?.budget } }),
         ...(capabilities === undefined ? {} : { capabilities }),
+        ...(improvement === undefined ? {} : { improvement }),
       })
       // A reopened member works in this tree too: its form counts in the root's `formsUsed`.
       if (parent !== undefined && member !== undefined) parent.tree.use(member.executionForm)

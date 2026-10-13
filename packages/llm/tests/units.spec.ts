@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { UNKNOWN_USAGE } from '@nexgent/kernel'
-import { buildMessageParams, mapStopReason, normalizeUsage, redactSecrets, sanitizeUrl, thinkingParam, toWireMessages } from '../src/index.js'
+import { buildMessageParams, estimateUsd, estimateUsdTotal, mapStopReason, MODEL_PRICES, modelPrice, normalizeUsage, redactSecrets, sanitizeUrl, thinkingParam, toWireMessages } from '../src/index.js'
 import { makeRequest } from './helpers/stream.js'
 
 describe('normalizeUsage', () => {
@@ -101,5 +101,32 @@ describe('redaction', () => {
   it('sanitizes URLs', () => {
     expect(sanitizeUrl('https://u:p@example.com/v1/?key=1#x')).toBe('https://example.com/v1')
     expect(sanitizeUrl('not a url')).toBe('[REDACTED]')
+  })
+})
+
+describe('price table (display only)', () => {
+  const usage = { inputTokens: 1_000_000, outputTokens: 100_000, totalTokens: 'unknown' as const, cacheReadTokens: 2_000_000, cacheWriteTokens: 400_000, reasoningTokens: 'unknown' as const }
+
+  it('estimates USD from list prices per million tokens', () => {
+    // 1 × 2 + 0.1 × 10 + 2 × 0.2 + 0.4 × 2.5
+    expect(estimateUsd('claude-sonnet-5-5', usage)).toBeCloseTo(4.4, 10)
+    // 1 × 4 + 0.1 × 20 + 2 × 0.2 + 0.4 × 5
+    expect(estimateUsd('claude-opus-5-5', usage)).toBeCloseTo(8.4, 10)
+    expect(estimateUsdTotal([{ model: 'claude-sonnet-5-5', usage }, { model: 'claude-opus-5-5', usage }])).toBeCloseTo(12.8, 10)
+    expect(estimateUsdTotal([])).toBe(0)
+  })
+
+  it('is unknown for a model not in the table or any unknown priced field', () => {
+    expect(estimateUsd('scripted-model', usage)).toBe('unknown')
+    expect(estimateUsd('toString', usage)).toBe('unknown')
+    expect(modelPrice('constructor')).toBeUndefined()
+    expect(estimateUsd('claude-sonnet-5-5', { ...usage, cacheWriteTokens: 'unknown' })).toBe('unknown')
+    expect(estimateUsd('claude-sonnet-5-5', UNKNOWN_USAGE)).toBe('unknown')
+    expect(estimateUsdTotal([{ model: 'claude-sonnet-5-5', usage }, { model: 'other', usage }])).toBe('unknown')
+  })
+
+  it('is frozen', () => {
+    expect(Object.isFrozen(MODEL_PRICES)).toBe(true)
+    expect(Object.isFrozen(MODEL_PRICES['claude-sonnet-5-5'])).toBe(true)
   })
 })

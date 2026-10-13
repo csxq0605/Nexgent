@@ -541,6 +541,14 @@ describe('AnthropicProvider — configuration and secrets', () => {
     expect(start.purpose).toBe('auxiliary')
   })
 
+  it('stamps an improvement job and phase on both records (step 5)', async () => {
+    fake = await startFakeAnthropic([{ sse: loadSseFixture('text') }])
+    const { provider, ledger } = makeProvider(fake.baseUrl)
+    await collect(provider.complete(makeRequest(), { taskId: 't-1', improvementId: 'job-1', improvementPhase: 'diagnose' }))
+    const { start, end } = pair(ledger)
+    for (const record of [start, end]) expect(record).toMatchObject({ taskId: 't-1', improvementId: 'job-1', improvementPhase: 'diagnose' })
+  })
+
   it('never puts the API key in errors, events or ledger records', async () => {
     fake = await startFakeAnthropic([{ status: 401, echoApiKey: true }])
     const { provider, ledger } = makeProvider(fake.baseUrl)

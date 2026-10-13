@@ -23,6 +23,8 @@ export {
 export type { AnthropicProviderOptions, CompleteOptions, CreateProviderOptions, FallbacksMode } from './provider.js'
 export { apply, LLMPlugin, providerOptionsFromConfig, validateLLMPluginConfig } from './plugin.js'
 export type { LLMPluginConfig, LLMPluginConfigIssue } from './plugin.js'
+export { estimateUsd, estimateUsdTotal, MODEL_PRICES, modelPrice } from './prices.js'
+export type { ModelPrice } from './prices.js'
 export { normalizeUsage } from './usage.js'
 export type { WireUsage } from './usage.js'
 export { buildMessageParams, DEFAULT_WIRE_OPTIONS, FALLBACK_BETA, THINKING_BINDING_BETA, thinkingParam, toBetaParams, toJson, toWireMessages } from './wire.js'

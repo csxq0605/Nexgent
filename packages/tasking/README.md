@@ -57,8 +57,11 @@
   `maxSnapshotBytes`（默认 200 MiB）时 `tree: null`。检查从任务树交付过的每个成果的最新版本推出：每个文件一项 `file-exists`
   （id `file-<n>`），`.json` / `.csv` / `.xlsx` 另加一项 `parses`（`parse-<n>`；CSV 要求引号成对、各行字段数相同，XLSX 只认
   zip 头和其中的 `[Content_Types].xml` 与 `xl/workbook.xml`）；在项目根目录退出码为 0 的命令里，符合 `TEST_COMMAND_PATTERN`
-  的测试命令取最近 3 条去重（`test-<n>`），经 `ctx.processes` 重跑（120 s），其他命令不重跑。检查记录在每个根轮次结束时重写，
-  `task.outcome.checks` 取最近一次。快照的清理（超过总量时删旧对象）还没有做。
+  的测试命令取最近 3 条去重（`test-<n>`），经 `ctx.processes` 重跑（120 s），其他命令不重跑。`task.outcome.checks` 取最近一次。
+  快照的清理（超过总量时删旧对象）还没有做。
+- **按轮记（步骤 5）**：kernel 传入根轮号时，每个根轮开始写 `tasks/<taskId>.t<turn>.json`、结束写 `checks/<taskId>.t<turn>.json`，
+  反馈轮不覆盖原轮；同时照旧写步骤 4 的文件名：`tasks/<taskId>.json` 只在不存在时写（即第一份快照），`checks/<taskId>.json`
+  每轮覆盖为最新一轮。不传轮号时只写步骤 4 的文件名。
 
 ## 测试
 
