@@ -49,7 +49,7 @@ export function clampTimeout(requested: number | undefined, fallback = DEFAULT_C
 }
 
 /** Read-and-write denied below the project root (`.nexgent/` host-only directories). */
-export const DENIED_PATTERNS: readonly string[] = ['.nexgent/sessions/**', '.nexgent/ledgers/**', '.nexgent/capabilities/**', '.nexgent/snapshots/**', '.nexgent/improvements/**']
+export const DENIED_PATTERNS: readonly string[] = ['.nexgent/sessions/**', '.nexgent/ledgers/**', '.nexgent/capabilities/**', '.nexgent/snapshots/**', '.nexgent/improvements/**', '.nexgent/improvers/**']
 /** Write-denied below the project root, at any depth. */
 export const WRITE_DENIED_PATTERNS: readonly string[] = [
   '.nexgent',

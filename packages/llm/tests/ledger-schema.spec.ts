@@ -1,7 +1,19 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { LEDGER_RECORD_TYPES, UNKNOWN_USAGE, type LedgerRecord, type LLMRequestEndRecord } from '@nexgent/kernel'
+import {
+  COMPARISON_ARMS,
+  IMPROVEMENT_COST_PHASES,
+  IMPROVEMENT_JOB_KINDS,
+  IMPROVEMENT_PHASES,
+  IMPROVEMENT_STATUSES,
+  IMPROVEMENT_TRIGGERS,
+  IMPROVER_VERSION_PATTERN,
+  LEDGER_RECORD_TYPES,
+  UNKNOWN_USAGE,
+  type LedgerRecord,
+  type LLMRequestEndRecord,
+} from '@nexgent/kernel'
 import { closedPort, loadSseFixture, startFakeAnthropic, type FakeAnthropic, type FakeReply } from './helpers/fake-anthropic.js'
 import { validate } from './helpers/json-schema.js'
 import { collect, makeProvider, makeRequest } from './helpers/stream.js'
@@ -71,6 +83,21 @@ describe('ledger.v1.schema.json', () => {
     expect(validate(schema, { ...start, type: 'llm.request.middle' })).not.toEqual([])
     const { ts: _ts, ...noTs } = start ?? {}
     expect(validate(schema, noTs)).not.toEqual([])
+  })
+})
+
+describe('ledger.v1.schema.json step-6 enums', () => {
+  it('match the kernel constants (hand-written file, kept in step by this test)', () => {
+    const defs = schema['$defs'] as Record<string, Record<string, unknown>>
+    const base = defs['base']?.['properties'] as Record<string, Record<string, unknown>>
+    expect(base['improvementPhase']?.['enum']).toEqual([...IMPROVEMENT_PHASES])
+    expect(base['comparisonArm']?.['enum']).toEqual([...COMPARISON_ARMS])
+    expect(defs['improverVersion']?.['pattern']).toBe(IMPROVER_VERSION_PATTERN.source)
+    const end = ((defs['improvementEnd']?.['allOf'] as Record<string, unknown>[])[1]?.['properties']) as Record<string, Record<string, unknown>>
+    expect(end['kind']?.['enum']).toEqual([...IMPROVEMENT_JOB_KINDS])
+    expect(end['trigger']?.['enum']).toEqual([...IMPROVEMENT_TRIGGERS])
+    expect(end['status']?.['enum']).toEqual([...IMPROVEMENT_STATUSES])
+    expect(Object.keys(end['phases']?.['properties'] as object)).toEqual([...IMPROVEMENT_COST_PHASES])
   })
 })
 

@@ -791,6 +791,10 @@
         },
         "budget": {
           "$ref": "#/$defs/trialBudget"
+        },
+        "epoch": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
         }
       }
     },

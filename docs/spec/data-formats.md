@@ -65,10 +65,14 @@
     │   ├── trees/<sha256>.json           快照树
     │   ├── tasks/<taskId>[.t<turn>].json 根任务（步骤 5 起每个根轮）开始时的快照记录
     │   └── checks/<taskId>[.t<turn>].json 根任务（步骤 5 起每个根轮）结束时的检查记录
-    └── improvements/                     改进作业（本文“改进作业”，步骤 5）
-        ├── queue.json                    触发队列（已计入的信号）
-        ├── queue.lock                    改写队列时的独占锁
-        └── <jobId>/                      一个作业：job.json、diagnosis.json、job.lock、job.json.lock、job.log
+    ├── improvements/                     改进作业（本文“改进作业”，步骤 5；元改进作业见“元改进作业”，步骤 6）
+    │   ├── queue.json                    触发队列（已计入的信号；步骤 6 起也记计入元改进的作业）
+    │   ├── queue.lock                    改写队列时的独占锁
+    │   └── <jobId>/                      一个作业：job.json、diagnosis.json、job.lock、job.json.lock、job.log；
+    │                                     元改进作业另有 meta-diagnosis.json、change.json、comparison.json
+    └── improvers/                        改进器版本（本文“改进器版本”，步骤 6）
+        ├── bundles/<version>.json        一个改进器（规范化文本，SHA-256 即版本号）
+        └── activation/<n>.json           改进器采用历史链
 ```
 
 | 路径 | 内容 | 命名 | 创建者 | 写入者 |
@@ -85,11 +89,12 @@
 | `architectures/<sha256>.json` | 工作流图（步骤 3） | 规范化图的 SHA-256 | 第一次保存时 | `@nexgent/workflow`（宿主）；模型只读 |
 | `capabilities/` | 能力包、采用历史、候选、试验、决定、草稿（步骤 4） | 见“CapabilityBundle 清单”起四节 | `ensureLayout` | `@nexgent/capabilities`（宿主）；模型的文件工具读写都拒绝 |
 | `snapshots/` | 任务快照与检查（步骤 4） | 内容寻址，见“任务快照与检查” | `ensureLayout` | `@nexgent/capabilities`（宿主）；模型的文件工具读写都拒绝 |
-| `improvements/` | 改进作业的队列、作业记录与诊断（步骤 5） | `jobId` 为小写 UUID v4，见“改进作业” | 第一次计入信号或开始作业时 | `@nexgent/evolve`（宿主）；模型的文件工具读写都拒绝 |
+| `improvements/` | 改进作业的队列、作业记录与诊断（步骤 5）；元改进作业的诊断、改动与比较（步骤 6） | `jobId` 为小写 UUID v4，见“改进作业”“元改进作业” | 第一次计入信号或开始作业时 | `@nexgent/evolve`（宿主）；模型的文件工具读写都拒绝 |
+| `improvers/` | 改进器版本与采用历史（步骤 6） | 见“改进器版本” | 第一次写入子改进器时（只用内置 `v0` 的项目没有这个目录） | `@nexgent/evolve`（宿主）；模型的文件工具读写都拒绝 |
 
 规则：
 
-- `.nexgent/` 内部对模型可见的文件工具按子目录区分：`sessions/`、`ledgers/`、`capabilities/`、`snapshots/`、`improvements/` 读写都拒绝，`materials/`、`outputs/`、`skills/`、`presets/`、`architectures/` 与 `config.json` 只读（`outputs/` 自步骤 2 起改为只读，快照只由宿主写）；规则以 `permissions.md` §路径策略与写入限制为准。
+- `.nexgent/` 内部对模型可见的文件工具按子目录区分：`sessions/`、`ledgers/`、`capabilities/`、`snapshots/`、`improvements/`、`improvers/`（步骤 6）读写都拒绝，`materials/`、`outputs/`、`skills/`、`presets/`、`architectures/` 与 `config.json` 只读（`outputs/` 自步骤 2 起改为只读，快照只由宿主写）；规则以 `permissions.md` §路径策略与写入限制为准。
 - 所有路径在服务内部以绝对路径处理（`WorkspaceLayout`）；记录里出现的路径（如 `session.start.projectRoot`）也是绝对路径。
 - 是否纳入版本控制由项目自己决定；建议忽略 `sessions/`、`ledgers/`、`outputs/`、`snapshots/`，保留 `config.json`；`capabilities/` 是否入库由项目决定（入库后换机器也能用同一能力版本）。
 - 本机凭证文件不在项目内：`~/.nexgent/credentials.json`（Windows 为 `%USERPROFILE%\.nexgent\credentials.json`），形状见“项目配置文件”末尾。
@@ -139,9 +144,16 @@
 | `budget.maxTokens` | integer ≥ 1 | `3000000` | 一个时间窗内全部改进费用的上限，按计费 token 计：`inputTokens + cacheReadTokens + cacheWriteTokens + outputTokens`（改进会话以缓存读为主，所以不同于 `CostCap` 只计输入 + 输出）；按 ADR 0002 价目、以缓存读为主的用量约每百万 token 1 美元，默认值约合 3 美元，只是显示用的估算 |
 | `budget.windowDays` | 1–365 | `30` | 时间窗天数，按账本记录 `ts` 往前滚动 |
 | `model` | string | `"claude-sonnet-5-5"` | 诊断与提案会话的模型，可改为 `claude-opus-5-5`（决定 5）；门控的评审模型仍是 `capabilities.reviewer` |
-| `thinking` | `"off" \| "on"` | `"on"` | 诊断与提案会话是否开 thinking |
+| `thinking` | `"off" \| "on"` | `"on"` | 诊断与提案会话是否开 thinking；步骤 6 起元诊断与元提案会话也按它 |
+| `meta.enabled` | boolean | `false` | 步骤 6：是否每完成 `everyJobs` 个作业自动开始一个元改进作业（ADR 0008 决定 3，产品默认关）；显式元改进（`improvements.runMeta`）不受它限制，但受元改进预算限制 |
+| `meta.everyJobs` | 1–20 | `3` | 多少个结束的作业开始一个元改进作业；计入的结局见“元改进作业” |
+| `meta.budget.maxTokens` | integer ≥ 1 | `6000000` | 元改进预算，计法同 `budget.maxTokens`；默认约合 6 美元，只是显示用的估算 |
+| `meta.budget.windowDays` | 1–365 | `30` | 元改进预算的时间窗 |
+| `meta.model` | string | `"claude-sonnet-5-5"` | 元诊断与元提案会话的模型，可改为 `claude-opus-5-5` |
 
 预算是时间窗内创建的全部作业的 `phases` 之和（诊断、提议、该作业所发的门控试验；各阶段由带该作业 `improvementId` 的账本记录求和），用量未知的字段按 0 计，总数因而是下限。用尽时进行中的作业以 `budget-exhausted` 结束，新的作业（含显式“改进”）在时间窗滚出足够余量或用户调高之前不开始（`improvement/budget-exhausted`）。
+
+步骤 6 起两份预算分开计：`budget` 只算能力改进作业（`kind` 缺省或 `capability`，不含比较臂）；`meta.budget` 算时间窗内创建的元改进作业的 `phases`，其中 `compare` 是父子两臂（各自的诊断、提议、试验）之和。元改进预算用尽时进行中的元改进作业以 `budget-exhausted` 结束，比较中断的臂按“未知”算，不采用子改进器。`improvement` 整个对象（含 `meta`）不能由能力组件、改进器或改进作业改写（`permissions.md` §元改进会话与元改进预算）。
 
 `CostCap`：
 
@@ -385,7 +397,10 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `executionForm` | `"direct" \| "delegated" \| "team" \| "workflow"`? | 发出记录的成员的执行形态（步骤 3 加 `team`） |
 | `taskId` | string? | 所属任务树：根会话打开（create / resume）时生成的小写 UUID v4，成员继承 |
 | `improvementId` | string? | 步骤 5：费用所属的改进作业 id（`improvements/<jobId>/`）；改进作业的诊断会话、提议会话、该作业所发试验的运行与评审记录都带 |
-| `improvementPhase` | `"diagnose" \| "propose" \| "trial"`? | 步骤 5：作业阶段；有它就必有 `improvementId`。`improvement.end` 汇总全部阶段，只带 `improvementId`、不带它，其余带 `improvementId` 的记录都带它 |
+| `improvementPhase` | `"diagnose" \| "propose" \| "trial" \| "meta-diagnose" \| "meta-propose"`? | 步骤 5：作业阶段；有它就必有 `improvementId`。`improvement.end` 汇总全部阶段，只带 `improvementId`、不带它，其余带 `improvementId` 的记录都带它。步骤 6 加元改进作业的两个阶段；`compare` 只是作业 `phases` 的汇总键，不出现在单条记录上 |
+| `improverVersion` | `"v0"` 或 SHA-256? | 步骤 6：发出这条费用的改进器版本；改进作业与元改进作业的记录都带（元改进作业带父改进器） |
+| `metaJobId` | string? | 步骤 6：比较臂的记录上：所属的元改进作业 id。比较臂的 `improvementId` 是臂作业自己的 id、`improvementPhase` 是臂作业自己的阶段，所以元改进费用按 `metaJobId` 查，与普通改进作业、普通任务分开 |
+| `comparisonArm` | `"parent" \| "child"`? | 步骤 6：比较臂；与 `metaJobId` 同时出现 |
 
 这些字段在所有记录类型上都是可选的（schema 层面）；步骤 1、2 的写入方不写它们。步骤 3 起 kernel 给一个会话写出的每条 `llm.request.*`、`tool.call`、`task.outcome` 都带 `taskId`、`memberId`、`executionForm`（契约 `AgentAttribution`）；步骤 4 起再带 `capabilityVersion`。试验运行的会话在项目的临时副本里，但它们的账本记录写进**真实项目**的账本，带 `trialId` 与 `arm`，所以费用汇总能区分试验与普通任务。
 
@@ -466,11 +481,15 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `jobId` | string | 作业 id（同时写在 `improvementId`） |
-| `trigger` | `"feedback-count" \| "explicit" \| "check-failure"` | 起因，见“改进作业” |
+| `kind` | `"capability" \| "meta"`? | 步骤 6：作业种类，缺省为 `capability` |
+| `trigger` | `"feedback-count" \| "explicit" \| "check-failure" \| "job-count"` | 起因，见“改进作业”；`job-count` 是步骤 6 按结束作业数开始的元改进作业 |
 | `status` | `ImprovementStatus` | 终态 |
-| `phases` | `{ diagnose?, propose?, trial? }` | 每阶段 `{ usage, requestCount }`，同作业记录；没运行过的阶段不写；不写美元 |
+| `phases` | `{ diagnose?, propose?, trial?, meta-diagnose?, meta-propose?, compare? }` | 每阶段 `{ usage, requestCount }`，同作业记录；没运行过的阶段不写；不写美元 |
 | `candidateId` | string? | 提议阶段产生的候选 |
 | `decisionId` | string? | 门控或批准写出的决定 |
+| `childVersion` | string? | 步骤 6，元改进作业：提出的子改进器版本 |
+
+比较臂作业（步骤 6）在项目副本里结束，它们的 `improvement.end` 写在副本的账本里；真实项目的账本只有元改进作业那一条，其 `phases.compare` 是两臂之和。比较臂发出的请求记录照常写进真实项目的账本（臂会话的账本指向真实项目），带 `metaJobId` 与 `comparisonArm`。
 
 ### 示例
 
@@ -484,6 +503,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 {"type":"capability.decision","ts":"2026-10-07T09:00:00.000Z","decisionId":"0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e","outcome":"adopted","reason":"quality-up","trigger":"gate","fromVersion":"baseline","toVersion":"3f2a9c0e5b7d14a8c6e2f9b0d3a5c7e1f4b8a2d6c0e9f3b5a7d1c4e8f2b6a0d9","candidateId":"5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b","revision":1}
 {"type":"llm.request.start","ts":"2026-10-13T08:00:01.000Z","sessionId":"9a8b…","requestId":"e4f5…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","purpose":"task","thinking":"on","improvementId":"7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f","improvementPhase":"diagnose"}
 {"type":"improvement.end","ts":"2026-10-13T09:30:00.000Z","jobId":"7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f","trigger":"feedback-count","status":"no-proposal","phases":{"diagnose":{"usage":{"inputTokens":40210,"outputTokens":1830,"totalTokens":42040,"cacheReadTokens":36000,"cacheWriteTokens":2100,"reasoningTokens":900},"requestCount":6}},"improvementId":"7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f"}
+{"type":"llm.request.start","ts":"2026-10-14T08:00:01.000Z","sessionId":"b1c2…","requestId":"f6a7…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","purpose":"task","thinking":"on","improvementId":"2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a","improvementPhase":"propose","improverVersion":"v0","metaJobId":"8e9f0a1b-2c3d-4e5f-8a6b-7c8d9e0f1a2b","comparisonArm":"parent"}
 ```
 
 ### 必产生记录的失败路径
@@ -686,6 +706,94 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 **提议。** 诊断给出组件种类后，宿主把反馈任务第一个根轮开始时的快照复制成临时项目，打开提议会话（`improvement: { jobId, phase: "propose" }`），在副本里用原任务的用户消息（到第一条反馈之前的轮）重新执行。提议会话有普通任务工具与 `STEP4_TOOLS`（`capability_draft / try / propose`），没有诊断工具；它的会话文件与候选写在**真实项目**的 `sessions/` 与 `capabilities/candidates/` 下（文件工具的工作区是副本）。一个作业只提一个候选，一个候选只含一个组件，规则与步骤 4 相同。没有提出候选就结束的提议记为 `failed`。
 
 **门控。** 作业的候选照步骤 4 的门控试验，区别只有：选择集必含触发作业的反馈任务（`ReplayCaseRef.throughTurn` 为第一条反馈之前的最后一轮，`feedbackIds` 为该任务的反馈），每次运行多一次反馈检查（`trial.feedback`）；试验的账本记录带 `improvementId` 与 `improvementPhase: "trial"`，费用计入改进预算。采用、拒绝、待批准、回滚的写法不变。
+
+## 改进器版本
+
+步骤 6。改进器是改进作业怎样诊断、提什么、门控时比几个用例的那部分，做成有版本的数据，作为项目级的一条独立版本线，与能力包分开采用、分开回滚。决策见 ADR 0008；类型镜像 `packages/kernel/src/contracts/improver.ts`；schema `packages/session/schema/improvement.v1.schema.json`（`$defs/improverBundle`、`improverRevision`）。`.nexgent/improvers/` 只由宿主写，模型的文件工具读写都拒绝。
+
+**改进器**（`ImproverBundle`）三部分，全是数据，没有代码：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `formatVersion` | `1` | |
+| `diagnosis.paragraphs` | string[] | 诊断策略：诊断会话第一条消息 `# Policy` 下的段落，按顺序以换行连接；1–16 段，每段一行、非空、≤2000 字符；可用占位符 `{{allowedKinds}}`（`proposal.kinds` 以 `, ` 连接） |
+| `proposal.kinds` | 组件种类[] | 提案算子：诊断可以建议的组件种类及优先顺序，至少一种、不重复；`plugin` 永远不在内。诊断给出不在其中的种类时作业以 `failed` 结束（同步骤 5 对插件的处理） |
+| `proposal.briefs` | `{ <kind>: string }` | 每种组件的提案简报模板，`kinds` 里每种都要有；非空、≤4000 字符；可用占位符 `{{jobId}}`、`{{hypothesis}}`、`{{failures}}`（诊断前 4 个失败类型，每行 `- <category>: <label>`）、`{{kind}}` |
+| `comparison.selectionCases` | 2–4 | 该改进器的作业在门控里用的选择集用例数 |
+| `comparison.repeats` | 2–3 | 每个用例每臂的运行次数 |
+| `comparison.selection` | `"similarity" \| "recency"` | 反馈任务之外的选择用例怎么挑：按与反馈任务的词重合（步骤 4–5 的做法），或取最近的历史任务；守护集始终取最不相似的任务（属于评价器） |
+
+占位符写作 `{{name}}`，一次替换，替换出的文字不再扫描；一行只有一个占位符且它的值为空时整行去掉（没有失败类型时简报不留空行）。用到未列出的占位符、超出上下限、未知字段，都由 `assertImproverBundle` 拒绝（`improver/invalid`）。项目配置的 `capabilities.selectionCases`、`repeats` 仍是下限：作业实际用两者中较大的值（`effectiveTrialCounts`），改进器只能要求更多证据，不能更少。
+
+**v0。** 内置改进器 `IMPROVER_V0` 是步骤 5 的诊断策略（`@nexgent/evolve` `POLICY` 的 7 段）与提案简报的原文、全部六种可提组件、`{ selectionCases: 2, repeats: 2, selection: "similarity" }`。它的版本号是字面量 `v0`，不存文件；没有改进器采用历史的项目用它。测试固定它与步骤 5 代码的文字逐字一致。
+
+**版本号**（`ImproverVersion`）：`v0`，或规范化文本（`canonicalImproverText`：规范化后的清单按键排序的 JSON）的 UTF-8 小写十六进制 SHA-256；内容等于 v0 的清单就是 `v0`。
+
+**存储**：
+
+| 路径 | 内容 | 写法 |
+| --- | --- | --- |
+| `improvers/bundles/<version>.json` | 一个改进器的规范化文本 | 元改进作业写出 `change.json` 时以 `wx` 创建；内容相同的版本已存在则不写；从不改写、从不删除 |
+| `improvers/activation/<n>.json` | 采用历史的第 n 条（`ImproverRevision`） | 同能力包的 `activation/`：先写临时文件，在第 `n-1` 条仍是末尾时以硬链接独占发布（比较后发布），失败即重读末尾 |
+
+`ImproverRevision`：`{ format: 1, revision, previous, from, version, type, trigger, jobId?, reason?, committedAt }`。`previous` 是上一条文件字节的 SHA-256（第 1 条为 `null`）；`from` 是之前生效的版本（第 1 条为 `v0`），`version` 是之后生效的版本，二者不同。`type: "adopt"` 只由元改进作业写（`trigger: "meta-job"`，必带 `jobId`）；`type: "rollback"` 的 `trigger` 是 `manual`（用户经 SDK `improvers.rollback`）或 `load-failure`（生效的改进器文件读不出或校验不过，宿主回退到上一个可用版本，`reason` 写原因），可以回到 `v0`。纯函数 `isNextImproverRevision` 固定这些条件。读者取末尾为生效版本，没有任何一条时为 `v0`。
+
+**作业固定改进器。** 每个改进作业（含元改进作业与比较臂）开始时读一次生效的改进器，把版本写进 `job.json` 的 `improverVersion`，之后整个作业只用它；作业进行中采用新的改进器不影响它。步骤 5 写出的作业没有这个字段，读作 `v0`。作业的诊断会话、提议会话与试验的账本记录都带 `improverVersion`。
+
+**评价器与纪元。** 评价器是决定“好不好”的部分：采用规则（`decideTrial`、门控的评审与反馈检查提示、`decideImprover`，规则 id `EVALUATOR_RULES = "adr-0008"`）以及项目的 `capabilities.costRatioCap`、`costApprovalRatio`、`guardCases`、`reviewer`。它们不在改进器里，改进器的改动也不能写到它们（`EVALUATOR_FIELDS`）。纪元 id 是 `EvaluatorSettings`（`{ formatVersion: 1, rules, costRatioCap, costApprovalRatio, guardCases, reviewer }`）规范化文本的 SHA-256：用户改了其中任何一项，或新 ADR 换了规则 id，就进入新纪元；`selectionCases`、`repeats`、改进预算、`autoImprove` 不进纪元。步骤 6 起门控把纪元写进 `TrialPlan.epoch`（步骤 4–5 的计划没有它，读出时视为未知纪元，不与有纪元的数据比较）；父子比较的起点与报告也写它。
+
+## 元改进作业
+
+步骤 6。元改进作业改进的是改进器：读历次改进作业，提出一个类型化改动得到子改进器，再让父、子改进器从同一起点各跑一次完整作业，按 `decideImprover` 决定是否采用子改进器。它是 `kind: "meta"` 的 `ImprovementJob`，存放在 `improvements/<jobId>/`，与能力改进作业共用“同一项目同时只有一个作业”的作业位。决策见 ADR 0008；类型镜像 `improvement.ts`、`improver.ts`；schema 同上（`$defs/metaJobState`、`metaDiagnosis`、`improverChangeRecord`、`improverComparison`）。
+
+**触发与计数。** `improvement.meta.enabled` 为真时，每结束一个能力改进作业，宿主在改写队列的同一次加锁里调用 `countFinishedJob`：终态为 `adopted`、`rejected`、`no-proposal`、`failed` 的作业计入（`META_COUNTED_STATUSES`），`cancelled`、`interrupted`、`budget-exhausted`、元改进作业本身与比较臂都不计；作业 id 进 `queue.metaCounted`（计过的不再计）与 `queue.metaPending`。作业位空闲且 `metaPending` 达到 `improvement.meta.everyJobs` 时 `takeMetaBatch` 取走整批，建 `trigger: "job-count"` 的元改进作业。显式元改进（SDK `improvements.runMeta`、CLI `nexgent improve meta`）`trigger: "explicit"`，不看开关与计数，带走当前 `metaPending`（可以为空），但受元改进预算限制。作业位被占时计数照常累积。
+
+队列新增字段：`metaCounted?: string[]`（计入过元改进的全部作业 id）、`metaPending?: string[]`（下一批，旧的在前）。步骤 5 的队列没有它们，读作空。
+
+**作业字段**（在“改进作业”的表之外）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `kind` | `"capability" \| "meta"`? | 缺省为 `capability`（步骤 5 的全部作业） |
+| `improverVersion` | `ImproverVersion`? | 作业开始时生效的改进器；元改进作业的即父改进器 |
+| `arm` | `{ metaJobId, arm: "parent" \| "child" }`? | 只在比较臂作业上（臂作业的 `job.json` 在项目副本里） |
+| `meta` | `MetaJobState`? | 只在元改进作业上，见下 |
+| `phases` | 见下 | 元改进作业用 `meta-diagnose`、`meta-propose`、`compare` 三个键 |
+| `sessions` | `{ meta-diagnose?, meta-propose? }`? | 元改进作业打开的两个会话 |
+
+`MetaJobState`：`{ basis, parentVersion, childVersion?, keepCopies?, diagnosed?, compared?, revision? }`。`basis` 是作业开始时取走的那批作业 id（旧的在前）；`parentVersion` 等于 `improverVersion`；`childVersion` 在写出 `change.json` 后设置；`keepCopies` 只由实验经 `runMeta` 设置；`diagnosed: { at, attempts, proposal }`；`compared: { at, outcome, reason }`；`revision` 是采用子改进器时写出的 `improvers/activation/<n>.json` 序号。
+
+**状态。** 元改进作业走 `queued → meta-diagnosing → meta-proposing → comparing → adopted | rejected`；`meta-diagnosing` 可到 `no-proposal`（元诊断认为改进器没有明显问题）；进行中的三个状态都可到 `budget-exhausted`、`failed`、`interrupted`、`cancelled`。它不进入 `diagnosing`、`proposing`、`trialing`、`waiting-history`、`awaiting-approval`，能力作业也不进入这三个元改进状态（`canMoveJob` 按 `kind` 检查）。`adopted` 在这里指子改进器被采用，`rejected` 指没被采用。终态写一条 `improvement.end`（`kind: "meta"`，有子改进器时带 `childVersion`）。
+
+**元诊断。** 一个只读改进会话（`improvement: { jobId, phase: "meta-diagnose", improverVersion }`，模型 `improvement.meta.model`，thinking 按 `improvement.thinking`），工具只有 `META_DIAGNOSIS_TOOLS`：`improve_list_jobs`、`improve_read_job`、`improve_read_session`、`improve_read_ledger`、`improve_report_meta_diagnosis`。模型交一份元诊断：发现（`{ stage: "diagnose" | "propose" | "trial" | "other", label ≤200 字符, jobIds }`，最多 8 条，每条至少 1、最多 16 个作业 id）、一句假设（≤500 字符）与 `proposal: "change" | "none"`。宿主校验 schema 并核对引用的作业都存在，不通过可重交，共最多 3 次，仍不通过以 `failed` 结束（`improvement/invalid-diagnosis`）。`none` 时以 `no-proposal` 结束。
+
+`<jobId>/meta-diagnosis.json`（接受后写一次）：上述报告加 `formatVersion`、`jobId`、`createdAt`、`sessionId`、`attempts`、`improverVersion`（被诊断的父改进器）、`basis`、`statusCounts`（宿主统计的、项目全部已结束能力作业的终态计数，模型不能写）。
+
+**元提案。** 一个改进会话（`phase: "meta-propose"`），工具只有 `META_PROPOSE_TOOLS`：`improve_read_improver`（读本作业的父改进器，不带参数）、`improve_read_job`、`improve_propose_change`。模型一次只交一个改动（`{ change, rationale }`），宿主用 `checkImproverChange` 校验：
+
+| 改动 `op` | 字段 | 含义 |
+| --- | --- | --- |
+| `set-diagnosis-paragraph` | `index`、`text` | 改写第 `index` 段诊断策略；`index` 等于现有段数时追加一段 |
+| `set-proposal-kinds` | `kinds` | 改允许的组件种类及顺序 |
+| `set-proposal-brief` | `kind`、`template` | 改一种组件的简报模板 |
+| `set-comparison-param` | `param`、`value` | 在上下限内改 `selectionCases`、`repeats` 或 `selection` |
+
+拒绝的原因（`ImproverChangeRefusal`）：`not-one-change`（一个列表，或多于该算子的字段）、`evaluator-field`（字段名或 `param` 是评价器字段，如 `costRatioCap`、`guardCases`、`reviewer`、`autoImprove`、`improvement`）、`out-of-bounds`、`invalid`（未知算子、缺字段、改完的改进器不合法）、`no-op`（改完和父改进器相同）。拒绝在工具结果里说明，可重交，共最多 3 次，仍不通过以 `failed` 结束（`improver/invalid-change`）。接受后写子改进器到 `improvers/bundles/`，再写 `<jobId>/change.json`：`{ formatVersion, jobId, createdAt, sessionId, attempts, parentVersion, childVersion, change, rationale ≤1000 字符 }`。
+
+**父子比较。** 起点（`ComparisonOrigin`）：元改进作业开始前最近一个结束的、由反馈触发的能力作业（`sourceJobId`），它的反馈任务快照树（`tree`）、反馈 id（排序后比较）、开始时的能力版本与当前纪元。宿主把起点复制成两份项目副本，在副本里各建一个比较臂作业（`trigger: "explicit"`，带 `arm`，`improverVersion` 分别为父、子），各跑一遍诊断 → 提议 → 门控；门控在副本里再建自己的回放副本，规则不变，采用只发生在副本里，后代候选不带回真实项目。两臂的账本记录写进真实项目的账本，`improvementId` 是臂作业 id，`improvementPhase` 是臂作业自己的阶段，另带 `metaJobId` 与 `comparisonArm`；元改进作业的 `phases.compare` 是两臂之和。
+
+每个臂记下它在自己副本里见到的起点、终态、错误、候选（后代）、门控结论与总费用（估算美元；`ComparisonArmResult`）。`decideImprover(origin, parent, child)` 按顺序：
+
+1. 两臂纪元不同，或与准备的起点纪元不同：不采用（`epoch-mismatch`）；起点其他部分不同：不采用（`origin-mismatch`）。
+2. 任一臂未知（`armOutcome`：作业未到终态，或为 `budget-exhausted` / `interrupted` / `cancelled`，或因 `improvement/invalid-diagnosis` 之外的错误失败，或门控结论为 `unknown-runs` / `budget-exhausted`，或费用未知）：不采用（`unknown-arm`）。没提出候选、诊断三次不合格这类失败是改进器自己的结果，不算未知。
+3. 子臂没有后代：不采用（`no-offspring`；父臂也没有时同样不采用）。
+4. 子臂的后代通过门控（臂作业 `adopted`）而父臂的没有：采用（`gate-passed`）。
+5. 只有两臂的后代都通过门控时，才比质量与费用：子的门控质量（候选通过率）更高，采用（`quality-up`）；质量相同且子的总费用 ≤ 父的 0.9 倍（正好低 10% 也算），采用（`cost-down`）。只有父通过、或两者都没通过时，质量与费用不参与判断。
+6. 其余不采用（`no-improvement`）。
+
+`<jobId>/comparison.json`（结论出来后写一次）：`{ formatVersion, jobId, createdAt, origin, parent, child, verdict: { outcome, reason, quality?, costRatio? }, kept? }`。采用时宿主随即写 `improvers/activation/<n>.json`（`trigger: "meta-job"`），子改进器从下一个真实改进作业起生效。两份副本默认在结论写出后删除；`keepCopies` 时保留，`kept` 记副本根目录与字节数，供实验在副本里跑 holdout。
+
+**费用与预算。** 元诊断、元提案与两臂的全部费用计入 `improvement.meta.budget`，不计入能力改进预算；用尽时进行中的元改进作业以 `budget-exhausted` 结束，比较中被打断的臂按未知算。
 
 ## 材料元数据
 
@@ -916,6 +1024,7 @@ The earlier part of this conversation was compacted. Summary:
 | 成果版本元数据（步骤 2） | `formatVersion` | 1 | 同上 |
 | 能力包清单、采用修订、候选、试验收据、决定、快照（步骤 4） | `formatVersion` / `format` | 1 | 同上 |
 | 改进队列、作业、诊断（步骤 5） | `formatVersion` | 1 | 同上 |
+| 改进器、改进器采用修订、元诊断、改动、父子比较（步骤 6） | `formatVersion` / `format` | 1 | 同上 |
 
 兼容规则：
 
@@ -927,6 +1036,7 @@ The earlier part of this conversation was compacted. Summary:
 - **步骤 4 的四种会话记录、`session.start.capabilityVersion`、账本的 `capability.decision` 与新可选字段也在 v1 内追加**，理由同步骤 3；步骤 3 写出的会话与账本照常读出。
 - **步骤 2 的新记录类型在 v1 内追加**（计划已定：旧文件仍可读）。代价是：只认识步骤 1 记录集的读取方会把第一条步骤 2 记录当作无效行，持锁追加时还会截断其后的内容。步骤 1 没有对外发布的构建，`nexgent-app` 上的读取方与写入方同步升级，所以接受这一点；步骤 2 之后再加记录类型时，先评估是否已有对外发布的读取方，有则升版本。
 - **步骤 5 的 `session.start.purpose` / `improvement`、账本的 `improvementId` / `improvementPhase` 与 `improvement.end`、候选的 `origin` / `jobId`、`ReplayCaseRef.throughTurn` / `feedbackIds`、收据 `trial.feedback`、`TrialVerdict.feedbackPassRate`、快照与检查记录的 `turn`，以及 ADR 0007 的 `TrialVerdict.costBasis`、`TrialPlan.costApprovalRatio` 与设置 `capabilities.costApprovalRatio` 都在各自的 v1 内追加**；步骤 4 写出的会话、账本与能力文件照常读出。只认识步骤 4 收据类型的读取方会拒绝含 `trial.feedback` 的收据文件，与读写方同步升级（仍没有对外发布的构建）。`autoImprove` 默认值从 `false` 改为 `true`：没写这个字段的项目在步骤 5 起自动改进开启（ADR 0006）。
+- **步骤 6 的 `session.start.improvement.improverVersion` / `metaJobId` / `comparisonArm` 与两个新 `phase` 值、账本的 `improverVersion` / `metaJobId` / `comparisonArm` 与新 `improvementPhase` 值、`improvement.end` 的 `kind` / `childVersion` / `trigger: "job-count"` / 新阶段键、作业的 `kind` / `improverVersion` / `arm` / `meta` 与三个元改进状态、队列的 `metaCounted` / `metaPending`、`TrialPlan.epoch` 都在各自的 v1 内追加**；新文件（`improvers/` 下两种、元改进作业目录下三种）归入 `improvement.v1.schema.json`。步骤 5 写出的会话、账本、改进作业与能力文件照常读出（测试用步骤 5 Linux 第 2 次真实运行的行做夹具）；缺 `improverVersion` 的作业读作 `v0`，缺 `kind` 的读作 `capability`。
 - **步骤 3 的九种新记录、`session.start.member` 与成果的成员字段也在 v1 内追加。** 评估结果：仍没有对外发布的构建（`main` 上的步骤 2 只供本仓库验收），读取方与写入方同步升级，所以不升版本；步骤 2 写出的会话照常读出、恢复与续写。
 
 ## schema 与读写测试
@@ -940,7 +1050,7 @@ The earlier part of this conversation was compacted. Summary:
 | 项目配置、凭证文件、锁文件 | `packages/kernel/schema/config.v1.schema.json`、`credentials.v1.schema.json`、`session-lock.v1.schema.json` | `@nexgent/kernel` |
 | 材料元数据、成果版本元数据（步骤 2） | `packages/session/schema/material.v1.schema.json`、`deliverable.v1.schema.json` | 与会话 schema 共用 `@nexgent/session` 的求值器；写入方是 `@nexgent/tasking` |
 | 能力文件与快照（步骤 4） | `packages/session/schema/capabilities.v1.schema.json`（按 `$defs/<name>` 校验，`validateCapabilityFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/capabilities` |
-| 改进队列、作业、诊断（步骤 5） | `packages/session/schema/improvement.v1.schema.json`（按 `$defs/<name>` 校验，`validateImprovementFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/evolve` |
+| 改进队列、作业、诊断（步骤 5）；改进器、采用修订、元诊断、改动、父子比较（步骤 6） | `packages/session/schema/improvement.v1.schema.json`（按 `$defs/<name>` 校验，`validateImprovementFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/evolve`（改进器的存储与采用历史由 `@nexgent/capabilities` 提供） |
 
 schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`（账本记录除外：它允许未知可选字段以便跨版本读取）。会话 schema 的严格校验只用于写入方的追加；读取方按上面的兼容规则放过未知的可选字段，不因此截断。
 
@@ -996,5 +1106,13 @@ schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`
 3. 账本 `improvement.end` 与 `improvementId` / `improvementPhase` 以写入方的严格校验通过；本文账本示例行包含它们。
 4. 候选的 `origin` / `jobId`、`trial.feedback`、带 `throughTurn` / `feedbackIds` 的用例、`feedbackPassRate`、带 `turn` 的快照与检查通过 schema，步骤 4 的同类文件不带这些字段也通过。
 5. `countSignal`、`takeBatch`、`releaseJobSlot`、`batchTrigger`、`isCountedFeedback`、`canMoveImprovement`、带反馈检查的 `decideTrial`、`perTurnFileName`、`assertImprovementConfig` 有运行时测试；`autoImprove` 默认 `true`，`autoImprove` 与 `improvement` 在 `GUARDED_PROJECT_CONFIG_FIELDS` 里；两个配置读取方都接受并校验 `improvement`。
+
+步骤 6 新增（`@nexgent/session`、`@nexgent/kernel`、`@nexgent/llm`、`@nexgent/evolve`）：
+
+1. 五种新改进文件各有合格与不合格样例；元改进作业、比较臂作业、带 `metaCounted` / `metaPending` 的队列通过 schema；`IMPROVEMENT_FILE_DEFS` 的每个种类都有样例。
+2. 账本的元改进阶段、比较臂字段与 `kind: "meta"` 的 `improvement.end` 以写入方的严格校验通过，`compare` 作为单条记录的阶段被拒；手写的 `ledger.v1.schema.json` 的枚举与 kernel 常量逐项相等；本文账本示例行包含比较臂记录。
+3. 步骤 5 Linux 第 2 次真实运行的队列、作业、诊断、账本行、会话开头与试验收据（夹具 `packages/session/tests/fixtures/step5-run2/`）照常通过 schema。
+4. `IMPROVER_V0` 渲染出的诊断策略与提案简报与 `@nexgent/evolve` 当前的文字逐字相等（0、2、5 个失败类型，每种组件）。
+5. `checkImproverChange` 的每种拒绝、`isNextImproverRevision`、`decideImprover` 的每条规则（含“只在两者都通过时比质量与费用”和“正好低 10% 算省”）、`countFinishedJob` / `takeMetaBatch`、`canMoveJob`、`jobPhaseTimes`、纪元随评价器设置变化而与 `selectionCases` / `repeats` 无关、`improvement.meta` 的默认值与校验有运行时测试。
 
 契约层（`packages/kernel/tests/contracts/`）：类型级断言固定记录集合与公共字段，纯函数（`addUsage`、工具限制交集、布局解析、profile 补丁）有运行时测试。

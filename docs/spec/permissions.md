@@ -39,7 +39,7 @@
 
 | 子目录 | 工具读 | 工具写 | 说明 |
 | --- | --- | --- | --- |
-| `sessions/`、`ledgers/`、`capabilities/`、`snapshots/`、`improvements/` | 拒绝 | 拒绝 | 只有宿主写；模型不能改自己的历史、账本、能力版本、任务快照与改进作业。草稿组件经 `capability_draft` 由宿主代写（步骤 4）；改进会话只经只读的 `improve_*` 工具读会话与账本（步骤 5） |
+| `sessions/`、`ledgers/`、`capabilities/`、`snapshots/`、`improvements/`、`improvers/` | 拒绝 | 拒绝 | 只有宿主写；模型不能改自己的历史、账本、能力版本、任务快照、改进作业与改进器（`improvers/` 为步骤 6 新增）。草稿组件经 `capability_draft` 由宿主代写（步骤 4）；改进会话只经只读的 `improve_*` 工具读会话与账本（步骤 5）；元改进会话只经 `improve_read_improver` 读改进器、经 `improve_propose_change` 交改动，由宿主校验后代写（步骤 6） |
 | `materials/` | 允许 | 拒绝 | 用户提供的资料，由宿主（`@nexgent/tasking`）复制写入；模型只读，原文件与副本都不被模型修改 |
 | `outputs/` | 允许 | 拒绝 | 成果快照，只由宿主（`@nexgent/tasking`）在 `present` 时写；模型不能改任何版本的快照（步骤 2 起，步骤 1 曾允许写）。模型把成果写在项目里，再用 `present` 交付 |
 | `skills/` | 允许 | 拒绝 | 项目技能，由用户维护（步骤 2）；`load_skill` 经宿主读取 |
@@ -174,6 +174,17 @@
 - **成员看不到改进工具。** `improve_*` 四个工具在 `MEMBER_DENIED_TOOLS` 里；改进会话自己不派成员（没有协作工具）。
 - **改进预算。** `improvement.budget` 按计费 token（输入 + 缓存读 + 缓存写 + 输出）在 `windowDays` 天的滚动时间窗内计，覆盖窗内创建的全部作业的诊断、提议与门控试验（`data-formats.md` §项目配置文件）。宿主在每个阶段开始前检查，用尽时不再开始，作业以 `budget-exhausted` 结束；新作业（含显式“改进”）报 `improvement/budget-exhausted`。改进费用另外计入 `perProject`，不计入任何用户任务的 `perTask`。
 - **开关与预算只由用户改。** `autoImprove` 与 `improvement` 在“始终审批”表里：模型经文件工具写这两个字段总要审批；用户在设置页（SDK `settings.update`）改是用户操作，不弹审批。上下文策略的封闭 schema 没有这两个字段，能力组件改不到它们。
+
+## 元改进会话与元改进预算
+
+步骤 6（ADR 0008）。元改进作业改进的是改进器，评价器（采用规则、守护集、评审与反馈检查、预算与开关）始终在它够不到的地方：
+
+- **元诊断与元提案会话只读。** 元诊断会话的工具恰为 `META_DIAGNOSIS_TOOLS` 五个（`improve_list_jobs`、`improve_read_job`、`improve_read_session`、`improve_read_ledger`、`improve_report_meta_diagnosis`），元提案会话恰为 `META_PROPOSE_TOOLS` 三个（`improve_read_improver`、`improve_read_job`、`improve_propose_change`），全部 `effects: ['read']`、`approval: 'never'`；没有文件、命令、网络、协作与能力工具，不装载项目插件，切片上限与脱敏同诊断会话。交上来的改动只是数据，宿主用 `checkImproverChange` 校验后自己写 `improvers/bundles/`；一次只接受一个改动，名字是评价器字段（`EVALUATOR_FIELDS`：`costRatioCap`、`costApprovalRatio`、`guardCases`、`reviewer`、`autoImprove`、`improvement` 等）、超出上下限、多于一个改动都拒绝，没有自由代码。
+- **比较臂在副本里。** 两个比较臂作业在项目副本里各跑一遍诊断、提议、门控，权限与步骤 5 的同名会话相同（提议会话 `headless`、插件草稿试用直接拒绝）；门控采用只改副本的能力版本，后代候选不带回真实项目。副本默认在结论写出后删除；只有实验经 SDK `improvements.runMeta` 的 `keepCopies` 才保留，这个选项不在设置页上。
+- **成员看不到元改进工具。** 新的五个 `improve_*` 工具（`improve_list_jobs`、`improve_read_job`、`improve_report_meta_diagnosis`、`improve_read_improver`、`improve_propose_change`）在 `MEMBER_DENIED_TOOLS` 里。
+- **元改进预算。** `improvement.meta.budget` 计法同改进预算，覆盖窗内创建的元改进作业的元诊断、元提案与两个比较臂的全部费用，与能力改进预算分开；宿主在每个阶段（含每个臂的每个阶段）开始前检查，用尽时作业以 `budget-exhausted` 结束，比较不出结论，不采用子改进器。
+- **开关与预算只由用户改。** `improvement.meta`（开关、`everyJobs`、预算、模型）是 `improvement` 的一部分，在“始终审批”表里；评价器设置在 `capabilities` 里，同样受保护。所以改进器、元改进作业与模型都改不到纪元。
+- **采用与回滚。** 子改进器只由元改进作业按 `decideImprover` 采用，不弹审批（改进器只是文字与有上下限的参数）；用户可以随时经 `improvers.rollback` 回滚到任一更早的版本，包括 `v0`。
 
 ## 费用上限
 
@@ -414,3 +425,7 @@ interface ToolApprovalAsk {
 | 改进（步骤 5） | 成员工具列表 | 不含 `improve_read_session`、`improve_read_ledger`、`improve_list_feedback`、`improve_report_diagnosis` |
 | 改进（步骤 5） | 诊断会话的工具列表 | 恰为四个 `improve_*` 工具 |
 | 改进（步骤 5） | 改进预算用尽后点“改进” | 报 `improvement/budget-exhausted`，不发出请求 |
+| 元改进（步骤 6） | 文件工具读写 `.nexgent/improvers/**` | 全部拒绝 |
+| 元改进（步骤 6） | 元诊断、元提案会话的工具列表 | 恰为 `META_DIAGNOSIS_TOOLS` 五个、`META_PROPOSE_TOOLS` 三个；成员工具列表不含其中任何一个 |
+| 元改进（步骤 6） | `improve_propose_change` 交评价器字段、超界的参数或两个改动 | 拒绝并说明原因（`evaluator-field`、`out-of-bounds`、`not-one-change`） |
+| 元改进（步骤 6） | 元改进预算用尽 | 进行中的元改进作业以 `budget-exhausted` 结束；不采用子改进器 |

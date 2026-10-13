@@ -23,6 +23,7 @@ type FieldKind =
   | 'approvalDecision'
   | 'allowDeny'
   | 'capabilityVersion'
+  | 'improverVersion'
 
 interface FieldSpec {
   readonly kind: FieldKind
@@ -90,6 +91,10 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'improvements.show': { projectId: id, jobId: id },
   'improvements.run': { projectId: id, sessionId: { kind: 'nonEmptyString', optional: true }, deliverableId: { kind: 'nonEmptyString', optional: true } },
   'improvements.cancel': { projectId: id, jobId: id },
+  'improvements.runMeta': { projectId: id, keepCopies: { kind: 'boolean', optional: true } },
+  'improvers.list': project,
+  'improvers.show': { projectId: id, version: { kind: 'improverVersion' } },
+  'improvers.rollback': { projectId: id, toVersion: { kind: 'improverVersion', optional: true }, reason: { kind: 'string', optional: true } },
 }
 
 const SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'full-access'])
@@ -139,6 +144,8 @@ function checkField(kind: FieldKind, value: unknown): boolean {
       return value === 'allow' || value === 'deny'
     case 'capabilityVersion':
       return typeof value === 'string' && /^(?:baseline|[a-f0-9]{64})$/.test(value)
+    case 'improverVersion':
+      return typeof value === 'string' && /^(?:v0|[a-f0-9]{64})$/.test(value)
     case 'approvalDecision':
       // `decidedBy` is set by the main process side, never by the page.
       return (

@@ -45,10 +45,14 @@
         "trialId": { "type": "string" },
         "arm": { "enum": ["candidate", "baseline"] },
         "improvementId": { "type": "string" },
-        "improvementPhase": { "enum": ["diagnose", "propose", "trial"] }
+        "improvementPhase": { "enum": ["diagnose", "propose", "trial", "meta-diagnose", "meta-propose"] },
+        "improverVersion": { "$ref": "#/$defs/improverVersion" },
+        "metaJobId": { "type": "string" },
+        "comparisonArm": { "enum": ["parent", "child"] }
       }
     },
     "capabilityVersion": { "type": "string", "pattern": "^(?:baseline|[a-f0-9]{64})$" },
+    "improverVersion": { "type": "string", "pattern": "^(?:v0|[a-f0-9]{64})$" },
     "requestIdentity": {
       "type": "object",
       "required": ["requestId", "provider", "endpoint", "model"],
@@ -232,11 +236,12 @@
           "properties": {
             "type": { "const": "improvement.end" },
             "jobId": { "$ref": "#/$defs/nonEmptyString" },
-            "trigger": { "enum": ["feedback-count", "explicit", "check-failure"] },
+            "kind": { "enum": ["capability", "meta"] },
+            "trigger": { "enum": ["feedback-count", "explicit", "check-failure", "job-count"] },
             "status": {
               "enum": [
-                "queued", "diagnosing", "proposing", "trialing", "waiting-history", "awaiting-approval", "adopted", "rejected",
-                "no-proposal", "budget-exhausted", "failed", "interrupted", "cancelled"
+                "queued", "diagnosing", "proposing", "trialing", "meta-diagnosing", "meta-proposing", "comparing", "waiting-history",
+                "awaiting-approval", "adopted", "rejected", "no-proposal", "budget-exhausted", "failed", "interrupted", "cancelled"
               ]
             },
             "phases": {
@@ -244,11 +249,15 @@
               "properties": {
                 "diagnose": { "$ref": "#/$defs/phaseCost" },
                 "propose": { "$ref": "#/$defs/phaseCost" },
-                "trial": { "$ref": "#/$defs/phaseCost" }
+                "trial": { "$ref": "#/$defs/phaseCost" },
+                "meta-diagnose": { "$ref": "#/$defs/phaseCost" },
+                "meta-propose": { "$ref": "#/$defs/phaseCost" },
+                "compare": { "$ref": "#/$defs/phaseCost" }
               }
             },
             "candidateId": { "$ref": "#/$defs/nonEmptyString" },
-            "decisionId": { "$ref": "#/$defs/nonEmptyString" }
+            "decisionId": { "$ref": "#/$defs/nonEmptyString" },
+            "childVersion": { "$ref": "#/$defs/improverVersion" }
           }
         }
       ]

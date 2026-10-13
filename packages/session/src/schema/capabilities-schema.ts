@@ -256,6 +256,7 @@ export const capabilitiesSchema: JsonObject = {
         costApprovalRatio: { type: 'number', minimum: 1 },
         reviewer: ref('reviewerSettings'),
         budget: ref('trialBudget'),
+        epoch: { type: 'string', pattern: '^[a-f0-9]{64}$' },
       },
       ['selection', 'guard', 'repeats', 'costRatioCap', 'reviewer', 'budget'],
     ),

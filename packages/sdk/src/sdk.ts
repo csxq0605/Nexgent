@@ -184,6 +184,11 @@ interface PendingApproval {
   readonly resolve: (decision: ApprovalDecision) => boolean
 }
 
+/** A method whose contract exists but whose implementation lands in a later work item. */
+function notYet(method: string): Promise<never> {
+  return Promise.reject(new NexgentError('internal', `${method} is not available yet (step 6 improvers and meta jobs)`))
+}
+
 function tallyStatus(tally: TurnTally): TaskOutcomeStatus {
   switch (tally.reason?.kind) {
     case 'completed':
@@ -1176,6 +1181,11 @@ export class LocalNexgentSdk implements NexgentSdk {
         await project.jobs?.check()
         return view
       },
+      // Step 6 (W0 contract only): improver versions and meta jobs are implemented by `@nexgent/capabilities` / `@nexgent/evolve` and wired here later (W5).
+      'improvements.runMeta': () => notYet('improvements.runMeta'),
+      'improvers.list': () => notYet('improvers.list'),
+      'improvers.show': () => notYet('improvers.show'),
+      'improvers.rollback': () => notYet('improvers.rollback'),
     }
   }
 

@@ -2149,7 +2149,22 @@
         "phase": {
           "enum": [
             "diagnose",
-            "propose"
+            "propose",
+            "meta-diagnose",
+            "meta-propose"
+          ]
+        },
+        "improverVersion": {
+          "type": "string",
+          "pattern": "^(?:v0|[a-f0-9]{64})$"
+        },
+        "metaJobId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "comparisonArm": {
+          "enum": [
+            "parent",
+            "child"
           ]
         }
       }

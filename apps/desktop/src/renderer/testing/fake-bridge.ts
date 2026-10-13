@@ -68,7 +68,7 @@ export const SETTINGS: ProjectSettings = {
   sandboxMode: 'workspace-write',
   costCaps: {},
   autoImprove: true,
-  improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on' },
+  improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on', meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } },
   apiKey: { configured: false },
 }
 
@@ -122,7 +122,7 @@ export function candidateDetail(view: CandidateView, version = BUNDLE, plugins?:
 
 /** An improvement job as `improvements.list` shows it (step 5). */
 export function improvementJob(overrides: Partial<ImprovementJobView> = {}): ImprovementJobView {
-  return { id: 'j-1', trigger: 'feedback-count', status: 'diagnosing', createdAt: '2026-10-12T08:00:00.000Z', updatedAt: '2026-10-12T08:05:00.000Z', itemCount: 3, tokens: {}, estimatedUsd: 0, ...overrides }
+  return { id: 'j-1', trigger: 'feedback-count', status: 'diagnosing', createdAt: '2026-10-12T08:00:00.000Z', updatedAt: '2026-10-12T08:05:00.000Z', itemCount: 3, feedbackIds: [], phaseTimes: {}, tokens: {}, estimatedUsd: 0, ...overrides }
 }
 
 /** `improvements.show` of {@link improvementJob}: no diagnosis or candidate unless given. */
@@ -160,11 +160,11 @@ export class FakeBridge implements NexgentBridge {
   evidence: Record<string, Pick<CandidateDetail, 'receipts' | 'decisions'>> = {}
   capabilities: CapabilityListing = { current: { version: 'baseline', revision: 0, components: [] }, history: [], candidates: [] }
   /** Step 5: what `improvements.list` answers (`run` / `cancel` change it like the SDK would). */
-  improvements: ImprovementListing = { jobs: [], pending: 0, threshold: 3, budget: { usedTokens: 0, maxTokens: 3_000_000, windowDays: 30 } }
+  improvements: ImprovementListing = { jobs: [], pending: 0, threshold: 3, budget: { usedTokens: 0, maxTokens: 3_000_000, windowDays: 30 }, autoImprove: true }
   /** `improvements.show` per job id; a job without an entry answers a bare detail. */
   improvementDetails: Record<string, ImprovementDetail> = {}
   readonly handlers: Record<string, Handler> = {
-    'app.info': () => ({ sdkVersion: 5, appVersion: '0.0.0-test', platform: 'linux' }),
+    'app.info': () => ({ sdkVersion: 6, appVersion: '0.0.0-test', platform: 'linux' }),
     'projects.recent': () => this.recent,
     'projects.open': () => PROJECT,
     'projects.forget': () => undefined,
@@ -206,7 +206,7 @@ export class FakeBridge implements NexgentBridge {
     'settings.get': () => this.settings,
     'settings.update': input => {
       const { improvement, ...rest } = input.patch
-      this.settings = { ...this.settings, ...rest, ...(improvement === undefined ? {} : { improvement: { ...this.settings.improvement, ...improvement, budget: { ...this.settings.improvement.budget, ...improvement.budget } } }) }
+      this.settings = { ...this.settings, ...rest, ...(improvement === undefined ? {} : { improvement: { ...this.settings.improvement, ...improvement, budget: { ...this.settings.improvement.budget, ...improvement.budget }, meta: { ...this.settings.improvement.meta, ...improvement.meta, budget: { ...this.settings.improvement.meta.budget, ...improvement.meta?.budget } } } }) }
       return this.settings
     },
     'capabilities.list': () => this.capabilities,
