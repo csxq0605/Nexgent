@@ -17,6 +17,7 @@
 import {
   CAPABILITY_COMPONENT_KINDS,
   COMPARISON_ARMS,
+  COMPARISON_ORIGIN_KINDS,
   COMPONENT_NAME_PATTERN,
   FAILURE_CATEGORIES,
   IMPROVEMENT_COST_PHASES,
@@ -343,13 +344,14 @@ export const improvementSchema: JsonObject = {
     ),
     comparisonOrigin: closedObject(
       {
+        kind: { enum: [...COMPARISON_ORIGIN_KINDS] },
         sourceJobId: ref('uuid'),
         tree: ref('sha256'),
         feedbackIds: names,
         capabilityVersion: ref('capabilityVersion'),
         epoch: ref('sha256'),
       },
-      ['sourceJobId', 'tree', 'feedbackIds', 'capabilityVersion', 'epoch'],
+      ['kind', 'sourceJobId', 'tree', 'feedbackIds', 'capabilityVersion', 'epoch'],
     ),
     comparisonArmResult: closedObject(
       {

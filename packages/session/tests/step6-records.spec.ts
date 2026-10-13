@@ -67,7 +67,7 @@ const change: ImproverChangeRecord = {
   rationale: '重复次数不够，回归看不出来。',
 }
 
-const origin: ComparisonOrigin = { sourceJobId: UUID(3), tree: SHA('a'), feedbackIds: ['f1', 'f2'], capabilityVersion: 'baseline', epoch: SHA('e') }
+const origin: ComparisonOrigin = { kind: 'unresolved', sourceJobId: UUID(3), tree: SHA('a'), feedbackIds: ['f1', 'f2'], capabilityVersion: 'baseline', epoch: SHA('e') }
 const verdict: TrialVerdict = { outcome: 'adopt', reason: 'quality-up', passRate: { candidate: 1, baseline: 0.5 }, costRatio: 1.1, costBasis: 'usd', decidedByReview: false }
 const parentArm: ComparisonArmResult = { arm: 'parent', improverVersion: 'v0', origin, jobId: UUID(10), status: 'rejected', candidateId: UUID(12), verdict: { ...verdict, outcome: 'reject', reason: 'no-improvement' }, cost: { ...phase, estimatedUsd: 0.8 } }
 const childArm: ComparisonArmResult = { arm: 'child', improverVersion: SHA('b'), origin, jobId: UUID(11), status: 'adopted', candidateId: UUID(13), verdict, cost: { ...phase, estimatedUsd: 0.9 } }
@@ -106,7 +106,7 @@ const INVALID: Record<Step6Kind, unknown[]> = {
     { ...change, change: { op: 'set-proposal-kinds', kinds: ['plugin'] } },
     { ...change, rationale: '' },
   ],
-  comparison: [{ ...comparison, verdict: { outcome: 'adopt', reason: 'quality-win' } }, { ...comparison, parent: { ...parentArm, arm: 'sibling' } }, { ...comparison, origin: { ...origin, epoch: 'e' } }],
+  comparison: [{ ...comparison, verdict: { outcome: 'adopt', reason: 'quality-win' } }, { ...comparison, parent: { ...parentArm, arm: 'sibling' } }, { ...comparison, origin: { ...origin, epoch: 'e' } }, { ...comparison, origin: { ...origin, kind: 'latest' } }],
 }
 
 describe('step-6 improvement file schema', () => {

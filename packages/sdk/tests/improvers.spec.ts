@@ -128,7 +128,7 @@ describe('meta jobs through the SDK', () => {
     await mkdir(paths.directory, { recursive: true })
     const metaDiagnosis: MetaDiagnosis = { formatVersion: 1, jobId: id, createdAt: '2026-10-13T10:00:00.000Z', sessionId: randomUUID(), attempts: 1, improverVersion: 'v0', basis, statusCounts: { adopted: 1, failed: 2 }, findings: [{ stage: 'diagnose', label: 'diagnoses skip the failed checks', jobIds: basis.slice(0, 2) }], hypothesis: 'The diagnosis policy never asks for the failed checks.', proposal: 'change' }
     const change: ImproverChangeRecord = { formatVersion: 1, jobId: id, createdAt: '2026-10-13T10:01:00.000Z', sessionId: randomUUID(), attempts: 1, parentVersion: 'v0', childVersion: child, change: CHANGE, rationale: 'more runs' }
-    const origin = { sourceJobId: basis[2]!, tree: 'a'.repeat(64), feedbackIds: ['f1'], capabilityVersion: 'baseline', epoch: 'e'.repeat(64) }
+    const origin = { kind: 'unresolved' as const, sourceJobId: basis[2]!, tree: 'a'.repeat(64), feedbackIds: ['f1'], capabilityVersion: 'baseline', epoch: 'e'.repeat(64) }
     const zero = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }
     const arm = (side: 'parent' | 'child', usd: number): ComparisonArmResult => ({ arm: side, improverVersion: side === 'parent' ? 'v0' : child, origin, jobId: randomUUID(), status: 'no-proposal', cost: { usage: zero, requestCount: 3, estimatedUsd: usd } })
     const comparison: ImproverComparison = { formatVersion: 1, jobId: id, createdAt: '2026-10-13T10:05:00.000Z', origin, parent: arm('parent', 0.4), child: arm('child', 0.35), verdict: { outcome: 'reject', reason: 'no-offspring' } }

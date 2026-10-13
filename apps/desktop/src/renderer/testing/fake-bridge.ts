@@ -172,7 +172,7 @@ export function changeRecord(overrides: Partial<ImproverChangeRecord> = {}): Imp
   }
 }
 
-const ORIGIN = { sourceJobId: 'j-3', tree: 't'.repeat(64), feedbackIds: ['f1'], capabilityVersion: 'baseline', epoch: 'e1' }
+const ORIGIN = { kind: 'unresolved' as const, sourceJobId: 'j-3', tree: 't'.repeat(64), feedbackIds: ['f1'], capabilityVersion: 'baseline', epoch: 'e1' }
 
 export function armResult(arm: 'parent' | 'child', overrides: Partial<ComparisonArmResult> = {}): ComparisonArmResult {
   return {
