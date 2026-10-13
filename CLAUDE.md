@@ -21,7 +21,7 @@ Nexgent 正在被重写为一个 TypeScript 独立应用（Electron 桌面应用
 | 2 | 日常任务体验：项目、资料、成果（`present`）、反馈修改、停止与恢复、上下文压缩、Electron 桌面应用与进程内 SDK | 已验收（[`step-2-20261011.md`](docs/validation/step-2-20261011.md)：Linux 与 Windows 上无界面层 23/23、桌面层 10/10、真实模型层通过） |
 | 3 | 迁移已有能力与灵活协作（subagent、team、workflow、ptc），删除 Python | 已验收（[`step-3-20261011.md`](docs/validation/step-3-20261011.md)：无界面层 23/23、桌面层 14/14 在 Linux 与 Windows 通过；真实 Claude Sonnet 5.5 用五种形态完成补货任务，约 0.79 美元） |
 | 4 | 能力版本（`CapabilityBundle`）进入真实运行系统，门控采用与回滚 | 已验收（[`step-4-20261012.md`](docs/validation/step-4-20261012.md)：无界面层 19/19、桌面层 18/18 在 Linux 与 Windows 通过；真实 Claude Sonnet 5.5 第 6 次运行 R01–R06 通过，6 次累计约 5.67 美元） |
-| 5 | 默认的反馈改进流程（`@nexgent/evolve`） | 未开始 |
+| 5 | 默认的反馈改进流程（`@nexgent/evolve`） | 已验收（[`step-5-20261013.md`](docs/validation/step-5-20261013.md)：无界面层 19/19、桌面层 23/23 在 Linux 与 Windows 通过；真实 Claude Sonnet 5.5 第 2 次运行 R01–R06 通过，2 次累计约 7.17 美元） |
 | 6 | 递归改进并检验收益，可复现报告 | 未开始 |
 
 步骤 0–1 的代码已合入集成分支 `nexgent-app`（PR #5）。步骤 1 记录里列出的 Windows Job Object、`perProject` 费用上限与 `pause_turn` 续跑已在步骤 2 补上（`packages/workspace/src/windows-job.ts`、`packages/kernel/src/project-config.ts`、`packages/kernel/src/agent.ts`）。
@@ -59,7 +59,7 @@ CI 只能手动触发（用户 2026-10-11）：`.github/workflows/nexgent.yml` �
 | --- | --- |
 | 文档索引与目录规则 | [`docs/README.md`](docs/README.md) |
 | 计划（六步、横切安排、里程碑、待定事项） | [`docs/research/pr4-review-and-plan-2026-10/README.md`](docs/research/pr4-review-and-plan-2026-10/README.md) |
-| ADR | [`docs/adr/0001-reference-rewrite.md`](docs/adr/0001-reference-rewrite.md)（参考重写与 16 项决策）、[`docs/adr/0002-claude-platform-route.md`](docs/adr/0002-claude-platform-route.md)（Claude Platform 路由，取代 0001 的模型部分） |
+| ADR | [`docs/adr/0001-reference-rewrite.md`](docs/adr/0001-reference-rewrite.md)（参考重写与 16 项决策）、[`docs/adr/0002-claude-platform-route.md`](docs/adr/0002-claude-platform-route.md)（Claude Platform 路由，取代 0001 的模型部分）；0003–0007 见 [`docs/adr/`](docs/adr/)（thinking 默认开、执行形态、能力版本、改进作业、门控费用规则） |
 | 规范 | [`docs/spec/data-formats.md`](docs/spec/data-formats.md)（`.nexgent/`、会话 JSONL v1、账本）、[`docs/spec/permissions.md`](docs/spec/permissions.md)（沙箱、命令策略、审批、费用上限、密钥） |
 | 分工表 | [`docs/plan/step-1-work-partition.md`](docs/plan/step-1-work-partition.md) |
 | 验收记录与证据政策 | [`docs/validation/`](docs/validation/README.md)（模板 `TEMPLATE.md`，每步 `step-<n>-<yyyymmdd>.md` 与 `step-<n>/` 摘要） |
