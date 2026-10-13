@@ -1,26 +1,16 @@
 /**
- * SEAM: how the step-5 acceptance scripts reach the improvement flow.
- *
- * The SDK's own boot does not install `@nexgent/evolve` yet (W4 wires
- * `EvolvePlugin`, the job entry and `improvements.*`). Until it does, the
- * scripted layer inserts the plugin row itself (`createStep5Sdk({ evolve })`),
- * pointing it at a test job entry (`step5-job-entry.mjs`). Everything else is
- * the shipped product: feedback through `feedback.submit`, check failures from
- * the kernel's signal, the plugin's counting, the job host's processes and
- * recovery. Judges read `features.shipped` and never report a pass for an item
- * that only works with the inserted row (step5-judges.mjs).
+ * How the step-5 acceptance scripts reach the improvement flow: the SDK as
+ * shipped. `@nexgent/sdk` installs `@nexgent/evolve` itself (row `evolve`,
+ * W4, PR #110) and starts each job through its own improve entry
+ * (`improve-entry.js improve <root> <jobId>`, a detached process that runs
+ * the diagnose and propose sessions and the gate). The scripts insert no
+ * plugin row and no test entry; they read the queue and the jobs from the
+ * files the product writes.
  */
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { isLoopbackUrl } from './step2-runtime.mjs'
 import { loadStep3Packages } from './step3-runtime.mjs'
-
-/** The test job entry the inserted row starts jobs with (`improve <root> <jobId>`). */
-export const JOB_ENTRY = fileURLToPath(new URL('./step5-job-entry.mjs', import.meta.url))
-
-/** Stages the test job entry runs: `pending` (evolve's PENDING_STAGES: ends failed) or `hold` (stays diagnosing until killed). */
-export const JOB_STAGES = ['pending', 'hold']
 
 /** `@nexgent/sdk` and friends (step 3's set) plus `@nexgent/evolve` and `@nexgent/kernel`. */
 export async function loadStep5Packages() {
@@ -36,19 +26,12 @@ export async function loadStep5Packages() {
 }
 
 /**
- * An SDK for the scripted layer, optionally with the evolve row inserted.
- * @param options - `env` (loopback base URL, scripted key, home), `home`, `evolve`:
- *   `false` (the SDK as shipped) or `{ stages }` (insert `@nexgent/evolve` with the test entry).
+ * The SDK as shipped, against the local scripted server.
+ * @param options - `env` (loopback base URL, scripted key, home), `home`.
  */
-export function createStep5Sdk(pkgs, { env, home, evolve = false }) {
+export function createStep5Sdk(pkgs, { env, home }) {
   if (!isLoopbackUrl(env.NEXGENT_API_BASE_URL)) throw new Error(`createStep5Sdk: NEXGENT_API_BASE_URL must point at the local scripted server (got ${String(env.NEXGENT_API_BASE_URL)})`)
-  const rows = evolve === false
-    ? {}
-    : {
-        registry: { [pkgs.evolve.EvolvePlugin.name]: pkgs.evolve.EvolvePlugin },
-        patches: [{ insert: [{ id: 'evolve', name: pkgs.evolve.EvolvePlugin.name, config: { entry: JOB_ENTRY, env: { STEP5_JOB_STAGES: evolve.stages ?? 'pending' } } }] }],
-      }
-  return pkgs.sdk.createSdk({ appVersion: 'accept-step5', env, home, ...rows })
+  return pkgs.sdk.createSdk({ appVersion: 'accept-step5', env, home })
 }
 
 /** `.nexgent/improvements/` of a project root. */
@@ -71,6 +54,13 @@ export function jobView(job) {
     feedbackIds: (job.items ?? []).filter(item => item.kind === 'feedback').map(item => item.feedbackId),
     checkItems: (job.items ?? []).filter(item => item.kind === 'check-failure').length,
     history: (job.history ?? []).map(change => change.status),
+    detail: job.history?.at(-1)?.detail,
+    candidateId: job.candidateId,
+    trialId: job.trialId,
+    decisionId: job.decisionId,
+    sessions: job.sessions,
+    phases: job.phases,
+    firstUse: job.firstUse,
   }
 }
 
@@ -83,5 +73,23 @@ export async function readJsonFile(path) {
     return JSON.parse(await readFile(path, 'utf8'))
   } catch {
     return undefined
+  }
+}
+
+/**
+ * Point the processes the SDK starts (improvement jobs, gates, replays) at the scripted key:
+ * they inherit this process's environment, and the real key may be in it. The base URL goes
+ * to them through the SDK's own row config. Returns the restore function.
+ */
+export function scriptedEnvironment(key) {
+  const names = ['NEXGENT_API_KEY', 'ANTHROPIC_API_KEY']
+  const saved = Object.fromEntries(names.map(name => [name, process.env[name]]))
+  process.env.NEXGENT_API_KEY = key
+  delete process.env.ANTHROPIC_API_KEY
+  return () => {
+    for (const name of names) {
+      if (saved[name] === undefined) delete process.env[name]
+      else process.env[name] = saved[name]
+    }
   }
 }

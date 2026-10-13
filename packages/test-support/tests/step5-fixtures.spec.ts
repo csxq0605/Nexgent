@@ -29,6 +29,10 @@ import {
   playbook,
   playbookScript,
   PLAYBOOKS,
+  EXTRA_PLAYBOOKS,
+  PROPOSAL_MARKER,
+  SECOND_SKILL,
+  MISSING_SESSION,
   runCheck,
   TERMINAL_STATES,
   writeFeedbackProject,
@@ -214,12 +218,36 @@ describe('playbooks', () => {
 
   it('scripts route diagnosis steps to requests offering the diagnosis tool and proposal steps to the snapshot redo', () => {
     const diagnose = { tools: [{ name: DIAGNOSIS_TOOL }], messages: [{ role: 'user', content: 'diagnose' }] }
-    const propose = { tools: [{ name: 'capability_draft' }], messages: [{ role: 'user', content: FEEDBACK_TASK.ask }] }
+    const propose = { tools: [{ name: 'capability_draft' }], messages: [{ role: 'user', content: `${PROPOSAL_MARKER}\n…\n# The task\n${FEEDBACK_TASK.ask}` }] }
     const userTask = { tools: [{ name: 'write_file' }], messages: [{ role: 'user', content: FEEDBACK_TASK.ask }] }
     expect(isDiagnosisRequest(diagnose)).toBe(true)
     expect(isDiagnosisRequest(propose)).toBe(false)
     expect(isProposalRequest(harness)(propose)).toBe(true)
     expect(isProposalRequest(harness)(userTask)).toBe(false)
-    for (const name of PLAYBOOKS) expect(playbookScript(harness, name, ctx)).toHaveLength(playbook(name, ctx).steps.length)
+    for (const name of [...PLAYBOOKS, ...EXTRA_PLAYBOOKS]) expect(playbookScript(harness, name, ctx)).toHaveLength(playbook(name, ctx).steps.length)
+  })
+
+  it('诊断不合 schema: a category outside MAST, then evidence the project does not have, then the session gives up', () => {
+    const reports = callsOf('invalid').filter(call => call.name === DIAGNOSIS_TOOL)
+    expect(reports).toHaveLength(3)
+    const full = (args: unknown) => ({ formatVersion: 1, jobId: '0b0b0b0b-0b0b-4b0b-8b0b-0b0b0b0b0b0b', createdAt: '2026-10-13T00:00:00.000Z', sessionId: '1c1c1c1c-1c1c-4c1c-8c1c-1c1c1c1c1c1c', attempts: 1, memberCosts: [], ...(args as object) })
+    const evidence = (call: { arguments: unknown }) => (call.arguments as { failureTypes: { evidence: { sessionId: string; seq: number }[] }[] }).failureTypes[0]!.evidence[0]!
+    expect(validateImprovementFile('diagnosis', full(reports[0]!.arguments)).length).toBeGreaterThan(0)
+    // The other two pass the schema; the host refuses them because the cited records do not exist.
+    expect(validateImprovementFile('diagnosis', full(reports[1]!.arguments))).toEqual([])
+    expect(evidence(reports[1]!)).toEqual({ sessionId: ctx.sessionId, seq: 99_999 })
+    expect(validateImprovementFile('diagnosis', full(reports[2]!.arguments))).toEqual([])
+    expect(evidence(reports[2]!)).toEqual({ sessionId: MISSING_SESSION, seq: 1 })
+    expect(playbook('invalid', ctx).steps.at(-1)).toMatchObject({ phase: 'diagnose', content: expect.any(String) })
+    expect(playbook('invalid', ctx).expect).toEqual({ candidate: false, outcome: 'failed' })
+  })
+
+  it('多于一个组件: two skills drafted, tried and loaded, proposed together', () => {
+    const names = callsOf('two').map(call => call.name)
+    expect(names.filter(name => name === 'capability_try')).toHaveLength(2)
+    expect(names.filter(name => name === 'load_skill')).toHaveLength(2)
+    const propose = callsOf('two').find(call => call.name === 'capability_propose')!
+    expect(propose.arguments.components).toEqual([{ kind: 'skill', name: CONVENTION_SKILL.name }, { kind: 'skill', name: SECOND_SKILL.name }])
+    expect(playbook('two', ctx).expect).toEqual({ candidate: false, outcome: 'failed' })
   })
 })

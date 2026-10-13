@@ -11,14 +11,14 @@
  * H19 runs step 4's own headless items H01–H19 (H19 there is step 3's
  * H01–H23) over fresh runs of their scenarios (`ctx.regression`, the step-4
  * headless ctx); D01–D18 are step 4's desktop items with their own scenarios
- * and judges (the desktop ctx has step 4's shape). Of the new items, H01–H04,
- * H15 and H16 have judges (step5-judges.mjs) over the step-5 headless scenario
- * (`ctx.step5`, step5-headless.mjs, round 2). H16 is judged as is; H01–H04 and
- * H15 report what they checked as not-implemented until the SDK as shipped runs
- * the improvement flow (W4). The other H items, D19–D23 and R01–R08 are not
- * wired yet (rounds 2–4).
+ * and judges (the desktop ctx has step 4's shape). The new headless items H01–H18
+ * are judged (step5-judges.mjs) over the step-5 headless scenario (`ctx.step5`,
+ * step5-headless.mjs), which runs `@nexgent/sdk` as shipped, evolve included;
+ * D19–D23 are judged (step5-desktop-judges.mjs) over the improvements page
+ * scenario (`ctx.improvements`, step5-desktop.mjs). R01–R08 are round 4.
  */
 import { CHECKS as STEP4_CHECKS, evaluateItem } from './step4-checks.mjs'
+import { judgeDesktop } from './step5-desktop-judges.mjs'
 import { JUDGES, judge } from './step5-judges.mjs'
 
 export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_PASS } from './step2-checks.mjs'
@@ -111,11 +111,11 @@ export const CHECKS = [
   item('H18', 'headless', '账本完整：新记录与字段全部通过 schema；.nexgent/ 与导出物中搜不到测试密钥'),
   item('H19', 'headless', '回归：accept-step4 的 H01–H19（含步骤 3 回归）继续通过', step4Regression),
   ...desktopRegression,
-  item('D19', 'desktop', '“改进”页列出作业：触发原因、状态、候选改了什么、门控结果、费用、是否采用'),
-  item('D20', 'desktop', '拒绝、失败、no-proposal 的原因可点开；反馈检查与评审意见单独标记'),
-  item('D21', 'desktop', '成果卡片上点“改进”开始作业，进度在“改进”页可见'),
-  item('D22', 'desktop', '设置页“自动改进”开关与改进预算可改，重启后保持；关闭后反馈不再自动开始作业'),
-  item('D23', 'desktop', '采用后的下一次任务完成时，“改进”页显示“已被后续任务使用”及时间'),
+  item('D19', 'desktop', '“改进”页列出作业：触发原因、状态、候选改了什么、门控结果、费用、是否采用', ctx => judgeDesktop('D19', ctx)),
+  item('D20', 'desktop', '拒绝、失败、no-proposal 的原因可点开；反馈检查与评审意见单独标记', ctx => judgeDesktop('D20', ctx)),
+  item('D21', 'desktop', '成果卡片上点“改进”开始作业，进度在“改进”页可见', ctx => judgeDesktop('D21', ctx)),
+  item('D22', 'desktop', '设置页“自动改进”开关与改进预算可改，重启后保持；关闭后反馈不再自动开始作业', ctx => judgeDesktop('D22', ctx)),
+  item('D23', 'desktop', '采用后的下一次任务完成时，“改进”页显示“已被后续任务使用”及时间', ctx => judgeDesktop('D23', ctx)),
   item('R01', 'real', '历史任务：同一项目先跑 2–3 个表格 / 数据任务，留下快照与检查（回放集的补足与 guard 部分）；任务提示不提能力工具'),
   item('R02', 'real', '反馈任务：一个表格任务完成后，用户给 3 条计入的反馈，指出隐藏判定能查到的问题；反馈也不提能力工具'),
   item('R03', 'real', '自动作业：第 3 条反馈后作业自动开始，诊断合 schema，提案产出一个候选；全程没有人点名能力工具，记录模型选了哪种组件'),

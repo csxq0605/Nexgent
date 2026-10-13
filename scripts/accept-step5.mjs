@@ -4,15 +4,15 @@
  * 检查项清单): three layers of checks, all judged by this script from files,
  * session records, ledger lines, job records and process state.
  *
- *   headless  H01–H19  scripted model server, through @nexgent/sdk: H19 (step 4's H01–H19, with
- *                      step 3's H01–H23 inside, over fresh runs of step 4's headless and gate
+ *   headless  H01–H19  scripted model server, through @nexgent/sdk as shipped: H19 (step 4's H01–H19,
+ *                      with step 3's H01–H23 inside, over fresh runs of step 4's headless and gate
  *                      scenarios); H01–H18 from the step-5 scenario (accept-common/step5-headless.mjs):
- *                      the feedback project and the trigger, switch, concurrency and recovery
- *                      phases (H01–H04, H15: judged, but not-implemented until the SDK as shipped
- *                      runs the flow, W4) and per-turn records (H16); the fixture itself is
- *                      recorded as a named check
+ *                      the feedback project and its improvement job end to end (the SDK's own job
+ *                      entry, the gate, the next task in a new process), the triggers, the switch,
+ *                      explicit runs, the budget, waiting for history, concurrency and recovery;
+ *                      the fixture itself is recorded as a named check
  *   desktop   D01–D23  D01–D18: steps 2–4's desktop scenarios and judges, as a regression;
- *                      D19–D23 (the 改进 page, settings) not wired yet
+ *                      D19–D23: the 改进 page, the deliverable's 改进 button and the settings
  *   real      R01–R08  real Claude model (scripts/real-task/step5-orders.mjs); round 1 checks the
  *                      prerequisites only and makes no model call; R07, R08 never decide the exit
  *
@@ -43,6 +43,7 @@ import { runMembersDesktopScenario } from './accept-common/step3-desktop.mjs'
 import { runHeadlessScenario as runStep3Headless } from './accept-common/step3-headless.mjs'
 import { runCapabilitiesDesktopScenario } from './accept-common/step4-desktop.mjs'
 import { realPrerequisites } from './accept-common/step4-real.mjs'
+import { runImprovementsDesktopScenario } from './accept-common/step5-desktop.mjs'
 import { judgeFeedbackProject } from './accept-common/step5-judges.mjs'
 import {
   CHECKS,
@@ -161,6 +162,12 @@ async function prepareLayer(layer, harness, options) {
     } catch (error) {
       ctx.capabilitiesError = errorText(error)
     }
+    // D19–D23: the improvements page over real explicit jobs.
+    try {
+      ctx.improvements = await runImprovementsDesktopScenario(harness, join(options.work, 'improvements'), { log: line => log(`desktop improvements: ${line}`) })
+    } catch (error) {
+      ctx.improvementsError = errorText(error)
+    }
     return { ok: true, ctx }
   }
   // real: prerequisites only this round; no model call.
@@ -242,7 +249,7 @@ async function main() {
         : judgeFeedbackProject(ready.ctx.step5.project, { judgeTable: judgeRegionTable, csvOf: (await import('./accept-common/step5-headless.mjs')).csvOf })
       s.check('反馈夹具：历史任务、反馈任务与 5 条反馈（3 条计入）经 SDK 写成', fixture.status === 'passed', `${fixture.status}: ${fixture.evidence}`)
       for (const [name, error] of Object.entries(ready.ctx.step5?.errors ?? {})) s.knownIssue(`step 5 headless phase ${name} failed: ${String(error).split('\n')[0]}`)
-      if (ready.ctx.step5 !== undefined && ready.ctx.step5.features?.shipped !== true) s.knownIssue('the SDK as shipped does not run the improvement flow yet (improvements.* refuses); the step-5 scenario inserted the @nexgent/evolve row and a test job entry itself, so H01–H04 and H15 stay not-implemented')
+      if (ready.ctx.step5 !== undefined && ready.ctx.step5.features?.shipped !== true) s.knownIssue(`the SDK as shipped does not answer improvements.list (${ready.ctx.step5.features?.shippedNote ?? 'not probed'}); H01–H18 fail`)
       log(`feedback fixture ${fixture.status}`)
     }
   }

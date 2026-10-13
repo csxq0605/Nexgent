@@ -3,6 +3,8 @@ import type { JudgeResult } from './step2-judges.mjs'
 
 /** Loose on purpose: the scenario maps product files onto it; judges read defensively. */
 export type Step5Observations = Record<string, any>
+/** The four tools of a diagnose session. */
+export declare const DIAGNOSIS_TOOLS: readonly string[]
 export declare const JUDGES: Readonly<Record<string, (obs: Step5Observations) => JudgeResult>>
 export declare function judge(id: string, obs: Step5Observations | undefined): JudgeResult
 export declare function judgeFeedbackProject(

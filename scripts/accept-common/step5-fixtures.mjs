@@ -325,11 +325,64 @@ export function playbook(name, ctx) {
       expect: { candidate: false, outcome: ['no-proposal', 'failed'] },
     }
   }
+  if (name === 'invalid') {
+    // Three reports the host refuses: a category outside MAST (the tool's own schema), evidence citing a
+    // record the session does not have, evidence citing a session the project does not have.
+    const report = failure => ({ ...diagnosis('skill', 'The table lacks a column.', ctx), failureTypes: [{ category: MAST[2], label: 'missing column', ...failure }] })
+    return {
+      name, title: '诊断不合 schema',
+      steps: [
+        { phase: 'diagnose', toolCalls: [{ name: DIAGNOSIS_TOOL, arguments: report({ category: 'not-a-category', evidence: [{ sessionId: ctx.sessionId, seq: ctx.seq, turn: ctx.turn }] }) }] },
+        { phase: 'diagnose', toolCalls: [{ name: DIAGNOSIS_TOOL, arguments: report({ evidence: [{ sessionId: ctx.sessionId, seq: 99_999 }] }) }] },
+        { phase: 'diagnose', toolCalls: [{ name: DIAGNOSIS_TOOL, arguments: report({ evidence: [{ sessionId: MISSING_SESSION, seq: 1 }] }) }] },
+        { phase: 'diagnose', content: 'I could not produce an acceptable diagnosis.' },
+      ],
+      expect: { candidate: false, outcome: 'failed' },
+    }
+  }
+  if (name === 'two') {
+    // Two skills, both tried and loaded, proposed together: an improvement job proposes exactly one.
+    const second = { kind: 'skill', name: SECOND_SKILL.name, files: SECOND_SKILL.files }
+    return {
+      name, title: '多于一个组件',
+      steps: [
+        { phase: 'diagnose', toolCalls: [{ name: DIAGNOSIS_TOOL, arguments: diagnosis('skill', `The region table lacks the ${CONVENTION_COLUMN} column the user expects every month.`, ctx) }] },
+        { phase: 'diagnose', content: 'Diagnosis reported.' },
+        { phase: 'propose', toolCalls: [{ name: 'capability_draft', arguments: { kind: CONVENTION_SKILL.kind, name: CONVENTION_SKILL.name, files: CONVENTION_SKILL.files } }] },
+        { phase: 'propose', toolCalls: [{ name: 'capability_draft', arguments: second }] },
+        { phase: 'propose', toolCalls: [{ name: 'capability_try', arguments: ref(CONVENTION_SKILL) }] },
+        { phase: 'propose', toolCalls: [{ name: 'capability_try', arguments: ref(second) }] },
+        { phase: 'propose', toolCalls: [{ name: 'load_skill', arguments: { name: CONVENTION_SKILL.name } }] },
+        { phase: 'propose', toolCalls: [{ name: 'load_skill', arguments: { name: second.name } }] },
+        { phase: 'propose', toolCalls: [{ name: 'write_file', arguments: { path: FEEDBACK_TASK.output, content: outputFor(FEEDBACK_TASK, { withAverage: true }) } }] },
+        { phase: 'propose', toolCalls: [{ name: 'present', arguments: { paths: [FEEDBACK_TASK.output], summary: 'region table with the average order value' } }] },
+        { phase: 'propose', toolCalls: [{ name: 'capability_propose', arguments: { components: [ref(CONVENTION_SKILL), ref(second)], summary: 'Region table convention and a note.' } }] },
+        { phase: 'propose', content: 'Proposed two skills.' },
+      ],
+      expect: { candidate: false, outcome: 'failed' },
+    }
+  }
   throw new Error(`unknown playbook ${name}`)
 }
 
-/** Playbook names, in the order the plan lists them. */
+/** A session id no project has (the 诊断不合 schema playbook cites it). */
+export const MISSING_SESSION = '0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d'
+
+/** The second skill of the 多于一个组件 playbook. */
+export const SECOND_SKILL = {
+  kind: 'skill',
+  name: 'region-table-notes',
+  files: [{ path: 'SKILL.md', content: '---\nname: region-table-notes\ndescription: Notes on the shop\'s region tables.\n---\n\nRegions are sorted by name.\n' }],
+}
+
+/** The plan's three playbooks, in the order the plan lists them. */
 export const PLAYBOOKS = ['improve', 'not-capability', 'broken']
+
+/** Two more failure cases: a diagnosis refused three times (H05), a proposal of two components (H07). */
+export const EXTRA_PLAYBOOKS = ['invalid', 'two']
+
+/** The first line of evolve's proposal brief (`proposalBrief`); the task's own ask follows `# The task`. */
+export const PROPOSAL_MARKER = '# Improvement job'
 
 const toolsOf = body => (body?.tools ?? []).map(tool => tool?.name).filter(Boolean)
 
@@ -338,9 +391,9 @@ export const isDiagnosisRequest = body => toolsOf(body).includes(DIAGNOSIS_TOOL)
 
 /**
  * A request of the proposal phase: the redo of the feedback task in the snapshot copy
- * (its ask) with the capability tools offered.
+ * (evolve's brief, then the task's ask) with the capability tools offered.
  */
-export const isProposalRequest = h => body => toolsOf(body).includes('capability_draft') && h.requestText(body).includes(FEEDBACK_TASK.ask)
+export const isProposalRequest = h => body => toolsOf(body).includes('capability_draft') && h.requestText(body).includes(PROPOSAL_MARKER) && h.requestText(body).includes(FEEDBACK_TASK.ask)
 
 /** Scripted entries for a playbook: diagnosis steps on diagnosis requests, proposal steps on proposal requests. */
 export function playbookScript(h, name, ctx) {
@@ -359,7 +412,9 @@ export function playbookScript(h, name, ctx) {
  * @param pkgs - from `loadStep3Packages()` (or step 5's).
  * @param options - `feedback` (default FEEDBACK), `log`; `config` (written to
  *   `.nexgent/config.json` before the project opens, as a user would); `createSdk(env, home)`
- *   (default: step 3's SDK); `beforeFeedback(ctx)` and `afterFeedback(entry, ctx)` hooks, whose
+ *   (default: step 3's SDK); `server` (a scripted server the caller owns and closes; default one
+ *   scripted with `taskScript` and `feedbackScript`); `tasks` (default the history tasks, then the
+ *   feedback task; the feedback goes to the last one); `beforeFeedback(ctx)` and `afterFeedback(entry, ctx)` hooks, whose
  *   results are kept as `obs.before` and each feedback entry's `observed`
  *   (`ctx`: `{ sdk, projectId, root, feedbackSession, id? }`).
  * @returns `{ root, home, projectId, tasks, deliverable, deliverables, feedback, listing }`; each
@@ -375,8 +430,9 @@ export async function runFeedbackProject(h, pkgs, work, options = {}) {
     await mkdir(join(root, '.nexgent'), { recursive: true })
     await writeFile(join(root, '.nexgent', 'config.json'), `${JSON.stringify(config, null, 2)}\n`)
   }
-  const tasks = [...HISTORY_TASKS, FEEDBACK_TASK]
-  const server = await h.scriptedModelServer({ script: [...taskScript(h, tasks), ...feedbackScript(h, feedback)] })
+  const tasks = options.tasks ?? [...HISTORY_TASKS, FEEDBACK_TASK]
+  const own = options.server === undefined
+  const server = own ? await h.scriptedModelServer({ script: [...taskScript(h, tasks), ...feedbackScript(h, feedback)] }) : options.server
   const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
   const sdk = options.createSdk === undefined ? createStep3Sdk(pkgs, { env, home }) : options.createSdk(env, home)
   const obs = { root, home, tasks: [], feedback: [] }
@@ -426,7 +482,7 @@ export async function runFeedbackProject(h, pkgs, work, options = {}) {
     obs.listing = await sdk.call('feedback.list', { projectId })
   } finally {
     await sdk.dispose()
-    await server.close()
+    if (own) await server.close()
   }
   return obs
 }
