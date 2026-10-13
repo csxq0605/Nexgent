@@ -260,7 +260,18 @@ export async function runRealScenario(h, work, { env, realModel, budgetUsd = REA
     await feedback('main', 'feedback', FEEDBACK)
     const main = await awaitJob('main', [])
     obs.candidates = (await candidatesOf(root)).map(c => ({ id: c.id, version: c.record?.version, origin: c.record?.origin, jobId: c.record?.jobId, status: c.status, components: (c.record?.components ?? []).map(x => ({ kind: x.kind, name: x.name, files: (x.files ?? []).map(f => f.path) })), summary: c.record?.summary }))
-    obs.adopted = main.status === 'adopted' ? { candidateId: main.candidateId, version: (await sdk.call('capabilities.current', { projectId })).version } : null
+    // ADR 0007: a quality rise above the cost-approval ratio waits for the user. The script answers
+    // "allow" in the user's place (the coordinator's instruction, 2026-10-13) and records it.
+    if (main.status === 'awaiting-approval' && main.candidateId !== undefined) {
+      step = 'approve'
+      const approved = await sdk.call('capabilities.approve', { projectId, candidateId: main.candidateId, decision: 'allow' }).catch(error => ({ error: errorText(error) }))
+      const after = (await readImprovements(pkgs, root)).jobs.find(j => j.id === main.id)
+      obs.approvedByScript = { candidateId: main.candidateId, candidateStatus: approved?.status, error: approved?.error, jobStatusAfter: after?.status }
+      log(`approve: the script allowed ${main.candidateId.slice(0, 8)} in the user's place (candidate ${approved?.status ?? approved?.error}; job ${after?.status})`)
+    }
+    const current = (await sdk.call('capabilities.current', { projectId })).version
+    const candidateVersion = obs.candidates.find(c => c.id === main.candidateId)?.version
+    obs.adopted = main.candidateId !== undefined && current === candidateVersion && (main.status === 'adopted' || obs.approvedByScript?.candidateStatus === 'adopted') ? { candidateId: main.candidateId, version: current } : null
 
     // R05: a new month in a new OS process (only when the gate adopted).
     if (obs.adopted !== null) {
