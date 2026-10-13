@@ -5,8 +5,6 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { CHECKS as STEP4_CHECKS } from '../../../scripts/accept-common/step4-checks.mjs'
-import { evolveInSdk } from '../../../scripts/accept-common/step5-headless.mjs'
-import * as sdkPackage from '../../sdk/dist/index.js'
 import {
   CHECKS,
   evaluateItem,
@@ -28,8 +26,10 @@ const plan = fileURLToPath(new URL('../../../docs/plan/step-5-work-partition.md'
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
-/** Step-5 headless items with a round-1 judge (they wait for @nexgent/evolve). */
-const JUDGED = ['H01', 'H02', 'H03', 'H04', 'H15']
+/** Step-5 headless items with a judge (round 2). */
+const JUDGED = ['H01', 'H02', 'H03', 'H04', 'H15', 'H16']
+/** Of those, the ones that need the SDK to run the improvement flow (W4); until then they report not-implemented. */
+const NEEDS_SHIPPED = ['H01', 'H02', 'H03', 'H04', 'H15']
 /** Wired so far: the regressions and the judged items. Everything else must report not-implemented. */
 const WIRED = new Set(['H19', ...range('D', 1, 18), ...JUDGED])
 
@@ -70,7 +70,10 @@ describe('accept-step5 checklist', () => {
     for (const id of JUDGED) {
       const check = CHECKS.find(c => c.id === id)!
       expect(await evaluateItem(check, { step5Error: 'boom' }), id).toEqual({ status: 'failed', evidence: 'step 5 headless scenario failed: boom' })
-      expect(await evaluateItem(check, { step5: { features: { evolve: false } } }), id).toMatchObject({ status: 'not-implemented' })
+    }
+    for (const id of NEEDS_SHIPPED) {
+      const check = CHECKS.find(c => c.id === id)!
+      expect(await evaluateItem(check, { step5: { features: { evolvePackage: false } } }), id).toMatchObject({ status: 'not-implemented' })
     }
   })
 
@@ -118,10 +121,9 @@ describe('scripts/accept-step5.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  // Round 1: H19 (step 4 regression) and the feedback fixture pass; the rest waits for @nexgent/evolve and the contract.
-  it('headless layer: H19 passes, the feedback fixture is written, every other item is not-implemented (exit 2)', async () => {
-    // When the SDK exposes improvements.* this test must change together with the step-5 scenario.
-    expect(evolveInSdk(sdkPackage)).toBe(false)
+  // Round 2: H19 and H16 pass; H01–H04 and H15 are checked through the inserted evolve row but stay
+  // not-implemented until the SDK runs the flow (W4); the rest is not wired yet.
+  it('headless layer: H19 and H16 pass, H01–H04 and H15 hold but wait for the SDK, the rest is not-implemented (exit 2)', async () => {
     const { result, summary } = await runScript(['--layer', 'headless'])
     expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
@@ -129,6 +131,8 @@ describe('scripts/accept-step5.mjs (requires `pnpm build`)', () => {
     expect(items.map(check => check.id)).toEqual(range('H', 1, 19))
     for (const check of items) {
       if (check.id === 'H19') expect(check, check.detail).toMatchObject({ status: 'passed', passed: true, detail: 'step 4 H01–H19: all 19 passed (H19 there: step 3 H01–H23)' })
+      else if (check.id === 'H16') expect(check, check.detail).toMatchObject({ status: 'passed', passed: true })
+      else if (NEEDS_SHIPPED.includes(check.id!)) expect(check, `${check.id}: ${check.detail}`).toMatchObject({ status: 'not-implemented', passed: false, detail: expect.stringMatching(/W4.*checked so far: /) })
       else expect(check, `${check.id}: ${check.detail}`).toMatchObject({ status: 'not-implemented', passed: false })
     }
     const fixture = (summary?.checks ?? []).filter(check => check.id === undefined)

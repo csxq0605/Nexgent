@@ -64,7 +64,9 @@ export interface FeedbackProjectObservations {
     readonly check: CheckRun
   }[]
   readonly deliverable?: { readonly deliverableId: string; readonly version: number; readonly sessionId: string }
-  readonly feedback: readonly (FeedbackSpec & { readonly id?: string; readonly counted: boolean; readonly reason?: { readonly kind: string } })[]
+  readonly deliverables?: readonly { readonly deliverableId: string; readonly version: number; readonly sessionId: string }[]
+  readonly before?: unknown
+  readonly feedback: readonly (FeedbackSpec & { readonly id?: string; readonly counted: boolean; readonly reason?: { readonly kind: string }; readonly observed?: unknown })[]
   readonly listing?: readonly { readonly id: string; readonly comment: string; readonly rating?: number; readonly sessionId: string; readonly turn: number }[]
 }
 export declare const SCRIPTED_API_KEY: string
@@ -95,5 +97,12 @@ export declare function runFeedbackProject(
   h: unknown,
   pkgs: unknown,
   work: string,
-  options?: { feedback?: readonly FeedbackSpec[]; log?: (line: string) => void },
+  options?: {
+    feedback?: readonly FeedbackSpec[]
+    log?: (line: string) => void
+    config?: Record<string, unknown>
+    createSdk?: (env: Record<string, string>, home: string) => unknown
+    beforeFeedback?: (ctx: { sdk: any; projectId: string; root: string; feedbackSession: string }) => Promise<unknown>
+    afterFeedback?: (entry: FeedbackSpec, ctx: { sdk: any; projectId: string; root: string; feedbackSession: string; id?: string }) => Promise<unknown>
+  },
 ): Promise<FeedbackProjectObservations>

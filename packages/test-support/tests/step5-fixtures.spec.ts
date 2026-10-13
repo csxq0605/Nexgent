@@ -9,7 +9,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // The host's own rules (not dependencies of this package: read from the built packages).
 import * as evolve from '../../evolve/dist/index.js'
-import { functionToolName } from '../../kernel/dist/index.js'
+import { FAILURE_CATEGORIES, functionToolName, IMPROVE_REPORT_DIAGNOSIS_TOOL } from '../../kernel/dist/index.js'
+import { validateImprovementFile } from '../../session/dist/index.js'
 import { TEST_COMMAND_PATTERN } from '../../tasking/dist/task-records.js'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
@@ -142,18 +143,26 @@ describe('feedback project (scripts/accept-common/step5-fixtures.mjs)', () => {
 describe('playbooks', () => {
   const callsOf = (name: (typeof PLAYBOOKS)[number]) => playbook(name, ctx).steps.flatMap(step => step.toolCalls ?? [])
 
+  it('the diagnosis tool and categories are the contract\'s', () => {
+    expect(DIAGNOSIS_TOOL).toBe(IMPROVE_REPORT_DIAGNOSIS_TOOL.name)
+    expect([...MAST]).toEqual([...FAILURE_CATEGORIES])
+  })
+
   it('three playbooks in plan order; each reports one diagnosis with MAST labels citing the feedback record', () => {
     expect(PLAYBOOKS).toEqual(['improve', 'not-capability', 'broken'])
     expect(PLAYBOOKS.map(name => playbook(name, ctx).title)).toEqual(['该改进', '不是能力问题', '提案跑不起来'])
     for (const name of PLAYBOOKS) {
       const diagnoses = callsOf(name).filter(call => call.name === DIAGNOSIS_TOOL)
       expect(diagnoses, name).toHaveLength(1)
-      const args = diagnoses[0]!.arguments as { failureTypes: { type: string; evidence: unknown[] }[]; proposalKind: string; hypothesis: string }
+      const args = diagnoses[0]!.arguments as { failureTypes: { category: string; evidence: unknown[] }[]; proposalKind: string; hypothesis: string }
       expect(args.failureTypes.length).toBeGreaterThan(0)
       for (const f of args.failureTypes) {
-        expect(MAST).toContain(f.type)
+        expect(MAST).toContain(f.category)
         expect(f.evidence).toEqual([ctx])
       }
+      // The report is what the contract's diagnosis file holds, minus the host's fields.
+      const full = { formatVersion: 1, jobId: '0b0b0b0b-0b0b-4b0b-8b0b-0b0b0b0b0b0b', createdAt: '2026-10-13T00:00:00.000Z', sessionId: '1c1c1c1c-1c1c-4c1c-8c1c-1c1c1c1c1c1c', attempts: 1, memberCosts: [], ...args }
+      expect(validateImprovementFile('diagnosis', full), name).toEqual([])
       expect(args.hypothesis.length).toBeGreaterThan(0)
       // Diagnosis comes first; nothing is drafted before it.
       expect(playbook(name, ctx).steps[0]!.phase).toBe('diagnose')

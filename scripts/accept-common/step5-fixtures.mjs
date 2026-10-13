@@ -21,9 +21,10 @@
  *                                module whose only function throws, call it (error), propose it
  *                                (refused: never used successfully) → no candidate
  *
- * The improvement-session side (the diagnosis tool, how the session is recognised,
- * job states) follows the plan's field names; the W0 contract lands in parallel and
- * these shapes are aligned with it when `@nexgent/evolve` and the contract merge.
+ * The improvement-session side follows the W0 contract (PR #104): the diagnosis is a
+ * `DiagnosisReport` (fixtures spec validates it with the session package's schema), job
+ * states are `IMPROVEMENT_STATUSES`; the proposal session's first message is evolve's
+ * brief ending in `# The task` followed by the feedback task's own ask.
  * `capability_draft / try / propose` arguments are step 4's.
  *
  * Never calls a real model. Linux, macOS and Windows; no shell syntax in check
@@ -45,8 +46,8 @@ export const SCRIPTED_API_KEY = 'sk-step5-scripted-test-key'
 /** The diagnosis tool the improvement session reports through (plan §诊断). */
 export const DIAGNOSIS_TOOL = 'improve_report_diagnosis'
 
-/** MAST's three failure categories (plan §诊断: 规格与系统设计、成员之间不一致、任务验证与终止). */
-export const MAST = ['specification-and-system-design', 'inter-agent-misalignment', 'task-verification-and-termination']
+/** MAST's three failure categories (contract `FAILURE_CATEGORIES`: 规格与系统设计、成员之间不一致、任务验证与终止). */
+export const MAST = ['system-design', 'inter-agent-misalignment', 'task-verification']
 
 /**
  * Job states (plan §触发与作业, plus the contract's `cancelled`): terminal ones end a job, parked
@@ -259,13 +260,13 @@ export const BROKEN_MODULE = {
 const ref = component => ({ kind: component.kind, name: component.name })
 
 /**
- * The diagnosis a playbook reports (plan §诊断 fields). `memberCosts` is left to the
- * host (it sums the ledger; the model may only cite it).
+ * The diagnosis a playbook reports (contract `DiagnosisReport`, the input of
+ * `improve_report_diagnosis`). `memberCosts` is left to the host (it sums the ledger).
  * @param ctx - `{ sessionId, turn, seq }` of the feedback record the evidence cites.
  */
-function diagnosis(proposalKind, hypothesis, ctx, failureType = MAST[2]) {
+function diagnosis(proposalKind, hypothesis, ctx, category = MAST[2]) {
   return {
-    failureTypes: [{ type: failureType, evidence: [{ sessionId: ctx.sessionId, turn: ctx.turn, seq: ctx.seq }] }],
+    failureTypes: [{ category, label: category === MAST[2] ? 'output not checked against the user\'s convention' : 'requirement changed after delivery', evidence: [{ sessionId: ctx.sessionId, seq: ctx.seq, turn: ctx.turn }] }],
     involved: { members: ['root'], tools: ['write_file', 'present'], skills: [], components: [] },
     hypothesis,
     proposalKind,
@@ -355,20 +356,29 @@ export function playbookScript(h, name, ctx) {
  * Drive the history tasks, the feedback task and the feedback through `@nexgent/sdk`
  * in a fresh project (scripted model only). What an improvement job starts from.
  * @param h - the loaded test-support harness.
- * @param pkgs - from `loadStep3Packages()`.
- * @param options - `feedback` (default FEEDBACK), `log`.
- * @returns `{ root, home, projectId, tasks, deliverable, feedback, listing }`; each feedback
- *   entry carries the oracle's `counted` and the feedback turn's end reason.
+ * @param pkgs - from `loadStep3Packages()` (or step 5's).
+ * @param options - `feedback` (default FEEDBACK), `log`; `config` (written to
+ *   `.nexgent/config.json` before the project opens, as a user would); `createSdk(env, home)`
+ *   (default: step 3's SDK); `beforeFeedback(ctx)` and `afterFeedback(entry, ctx)` hooks, whose
+ *   results are kept as `obs.before` and each feedback entry's `observed`
+ *   (`ctx`: `{ sdk, projectId, root, feedbackSession, id? }`).
+ * @returns `{ root, home, projectId, tasks, deliverable, deliverables, feedback, listing }`; each
+ *   feedback entry carries the oracle's `counted` and the feedback turn's end reason.
  */
-export async function runFeedbackProject(h, pkgs, work, { feedback = FEEDBACK, log = () => undefined } = {}) {
+export async function runFeedbackProject(h, pkgs, work, options = {}) {
+  const { feedback = FEEDBACK, log = () => undefined, config, beforeFeedback, afterFeedback } = options
   const root = join(work, 'project')
   const home = join(work, 'home')
   await mkdir(root, { recursive: true })
   await writeFeedbackProject(root)
+  if (config !== undefined) {
+    await mkdir(join(root, '.nexgent'), { recursive: true })
+    await writeFile(join(root, '.nexgent', 'config.json'), `${JSON.stringify(config, null, 2)}\n`)
+  }
   const tasks = [...HISTORY_TASKS, FEEDBACK_TASK]
   const server = await h.scriptedModelServer({ script: [...taskScript(h, tasks), ...feedbackScript(h, feedback)] })
   const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
-  const sdk = createStep3Sdk(pkgs, { env, home })
+  const sdk = options.createSdk === undefined ? createStep3Sdk(pkgs, { env, home }) : options.createSdk(env, home)
   const obs = { root, home, tasks: [], feedback: [] }
   try {
     const { projectId } = await sdk.call('projects.open', { root, create: true })
@@ -389,9 +399,10 @@ export async function runFeedbackProject(h, pkgs, work, { feedback = FEEDBACK, l
     }
     const feedbackSession = obs.tasks.at(-1).sessionId
     const deliverables = await sdk.call('deliverables.list', { projectId })
-    const deliverable = deliverables.find(d => d.versions?.some(v => v.sessionId === feedbackSession)) ?? deliverables.at(-1)
-    const version = deliverable?.versions?.at(-1)
-    obs.deliverable = version === undefined ? undefined : { deliverableId: version.deliverableId, version: version.version, sessionId: feedbackSession }
+    obs.deliverables = deliverables.map(d => d.versions?.at(-1)).filter(Boolean).map(v => ({ deliverableId: v.deliverableId, version: v.version, sessionId: v.sessionId }))
+    obs.deliverable = obs.deliverables.find(d => d.sessionId === feedbackSession)
+    const ctx = { sdk, projectId, root, feedbackSession }
+    if (beforeFeedback !== undefined) obs.before = await beforeFeedback(ctx)
     if (obs.deliverable !== undefined) {
       for (const entry of feedback) {
         log(`feedback ${entry.key}`)
@@ -406,11 +417,13 @@ export async function runFeedbackProject(h, pkgs, work, { feedback = FEEDBACK, l
         } finally {
           unsubscribe()
         }
-        obs.feedback.push({ key: entry.key, rating: entry.rating, comment: entry.comment, counted: countsTowardImprovement(entry), reason: events.find(e => e.type === 'turn.end')?.reason })
+        const id = (await sdk.call('feedback.list', { projectId, sessionId: feedbackSession })).find(l => l.comment === entry.comment)?.id
+        const record = { key: entry.key, rating: entry.rating, comment: entry.comment, counted: countsTowardImprovement(entry), reason: events.find(e => e.type === 'turn.end')?.reason, id }
+        if (afterFeedback !== undefined) record.observed = await afterFeedback(entry, { ...ctx, id })
+        obs.feedback.push(record)
       }
     }
     obs.listing = await sdk.call('feedback.list', { projectId })
-    for (const entry of obs.feedback) entry.id = obs.listing.find(l => l.comment === entry.comment)?.id
   } finally {
     await sdk.dispose()
     await server.close()
