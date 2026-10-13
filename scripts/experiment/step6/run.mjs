@@ -399,7 +399,7 @@ async function runFamily(ctx, family) {
     const armUsd = /** @type {Record<string, number | null>} */ ({ parent: comparison?.parent?.cost?.estimatedUsd ?? null, child: comparison?.child?.cost?.estimatedUsd ?? null })
     obs.meta.costUsd = { meta: metaUsd, ...armUsd }
     await spent(`meta ${meta.id}`, metaUsd === null || armUsd.parent === null || armUsd.child === null ? null : metaUsd + armUsd.parent + armUsd.child)
-    log(`meta: ${meta.status}${comparison === undefined ? '' : ` (${comparison.verdict.outcome}, ${comparison.verdict.reason})`}`)
+    log(`meta: ${meta.status}${comparison === undefined ? '' : ` (${comparison.origin.kind} origin; ${comparison.verdict.outcome}, ${comparison.verdict.reason})`}`)
     for (const arm of /** @type {const} */ (['parent', 'child'])) {
       const kept = comparison?.kept?.[arm]
       if (kept?.root !== undefined) obs.arms[arm] = { root: kept.root, from: `the meta job's ${arm} comparison copy`, improverVersion: comparison?.[arm]?.improverVersion }
@@ -503,6 +503,7 @@ function projectLayout(root) {
  */
 export function rawRecords(families, meta) {
   const decisions = /** @type {Record<string, string>} */ ({})
+  const origins = /** @type {Record<string, string>} */ ({})
   const parents = new Set()
   const children = new Set()
   const epochs = new Set()
@@ -513,6 +514,7 @@ export function rawRecords(families, meta) {
     const c = f.meta?.comparison
     decisions[f.family] = c === undefined ? `no comparison (meta job ${f.meta?.status ?? 'not run'})` : `${c.verdict.outcome} (${c.verdict.reason})`
     if (c !== undefined) {
+      origins[f.family] = `${c.origin.kind ?? 'unknown'} (job ${c.origin.sourceJobId}, capability version ${c.origin.capabilityVersion})`
       parents.add(`${f.family}: ${c.parent.improverVersion}`)
       children.add(`${f.family}: ${c.child.improverVersion}`)
       epochs.add(c.origin.epoch)
@@ -535,6 +537,7 @@ export function rawRecords(families, meta) {
       planVersion: planVersion(),
       improvers: { parent: [...parents].sort().join('; ') || undefined, child: [...children].sort().join('; ') || undefined },
       capabilities: Object.fromEntries(ARMS.map(arm => [arm, capabilities[arm].sort().join('; ') || undefined])),
+      origins,
       decisions,
     },
     runs: families.flatMap(f => f.runs.map((/** @type {any} */ r) => ({ runId: r.runId, family: r.family, caseId: r.caseId, arm: r.arm, repeat: r.repeat, pass: r.pass, costUsd: r.costUsd, componentsUsed: r.componentsUsed }))),
@@ -589,7 +592,10 @@ export async function runExperiment(options) {
     await writeFile(join(out, 'manifest.json'), `${JSON.stringify({
       experimentId, backend: backend.name, model: backend.model, startedAt, finishedAt: new Date().toISOString(), platform: process.platform, node: process.version,
       planVersion: planVersion(), plan: PLAN, repeats: ctx.repeats, iterations, capUsd: cap, spendFile: spend, spentUsd: spentUsd(await readSpend(spend, cap)),
-      families: families.map(f => ({ family: f.family, stopped: f.stopped, error: f.error?.message?.split('\n')[0], arms: f.arms, meta: f.meta === null ? null : { jobId: f.meta.jobId, status: f.meta.status }, checks: f.checks })),
+      families: families.map(f => ({ family: f.family, stopped: f.stopped, error: f.error?.message?.split('\n')[0], arms: f.arms, meta: f.meta === null ? null : {
+        jobId: f.meta.jobId, status: f.meta.status, origin: f.meta.comparison?.origin, verdict: f.meta.comparison?.verdict,
+        arms: Object.fromEntries(['parent', 'child'].map(arm => [arm, f.meta.comparison?.[arm] === undefined ? undefined : { status: f.meta.comparison[arm].status, verdict: f.meta.comparison[arm].verdict }])),
+      }, checks: f.checks })),
       scriptedRequests: backend.name === 'scripted' ? summarize(backend.requests()) : undefined,
     }, null, 2)}\n`)
     const failed = families.some(f => f.error !== undefined)
