@@ -61,7 +61,7 @@ test('isolation: history content is fine, a holdout message in a session or its 
     await writeFile(join(root, 'sessions', 's1', 'session.jsonl'), `${JSON.stringify({ type: 'user', text: `请做：\n${code.message}` })}\n`)
     const table = cases.find(c => c.set === 'holdout' && c.family === 'tables')
     await mkdir(join(root, 'snapshots', 'v2'), { recursive: true })
-    await writeFile(join(root, 'snapshots', 'v2', 'orders.csv'), table.materials[0].content)
+    await writeFile(join(root, 'snapshots', 'v2', 'orders.csv'), table.files[`data/orders-${table.seed}.csv`])
     result = await checkIsolation(cases, [root])
     assert.ok(result.leaks.some(l => l.caseId === code.id && l.file.includes('session.jsonl')), JSON.stringify(result.leaks))
     assert.ok(result.leaks.some(l => l.caseId === table.id && l.file.includes('orders.csv')), JSON.stringify(result.leaks))

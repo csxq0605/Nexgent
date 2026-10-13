@@ -145,18 +145,21 @@ export function tableOutput(variant, month) {
  */
 export function tableCase({ id, set, variant, month }) {
   const orders = ordersCsv(month)
-  const materials = [{ name: `orders-${month}.csv`, content: orders }]
-  if (variant === 'returns') materials.push({ name: `returns-${month}.csv`, content: returnsCsv(month) })
+  // The data sits in the project's work tree (`data/`), so the task's snapshot, the gate's
+  // replays and an arm copy all carry it.
+  /** @type {Record<string, string>} */
+  const files = { [`data/orders-${month}.csv`]: orders }
+  if (variant === 'returns') files[`data/returns-${month}.csv`] = returnsCsv(month)
   const output = tableOutput(variant, month)
   let message
   if (variant === 'summary') {
-    message = `请根据资料 orders-${month}.csv 做 ${month} 的月度汇总，保存为 ${output}。JSON 字段：month、orders（订单数）、units（件数）、revenue（收入，数量×单价×(1−折扣)，保留两位小数）、byRegion（各地区收入）、topProduct（件数最多的商品，并列取名字靠前的）。`
+    message = `请根据 data/orders-${month}.csv 做 ${month} 的月度汇总，保存为 ${output}。JSON 字段：month、orders（订单数）、units（件数）、revenue（收入，数量×单价×(1−折扣)，保留两位小数）、byRegion（各地区收入）、topProduct（件数最多的商品，并列取名字靠前的）。`
   } else {
     const text = VARIANT_TEXT[variant]
     const extra = variant === 'returns'
-      ? `退货记录在资料 returns-${month}.csv（一行一个退货的订单）；returned_orders 是退货订单数，return_rate 是退货订单占订单数的百分比，保留一位小数；revenue 不扣退货。`
+      ? `退货记录在 data/returns-${month}.csv（一行一个退货的订单）；returned_orders 是退货订单数，return_rate 是退货订单占订单数的百分比，保留一位小数；revenue 不扣退货。`
       : ''
-    message = `请根据资料 orders-${month}.csv 做 ${month} 的${text.what}，保存为 ${output}：${text.rows}，列为 ${text.columns}，${text.sort}。revenue = 数量×单价×(1−折扣)，保留两位小数。${extra}`
+    message = `请根据 data/orders-${month}.csv 做 ${month} 的${text.what}，保存为 ${output}：${text.rows}，列为 ${text.columns}，${text.sort}。revenue = 数量×单价×(1−折扣)，保留两位小数。${extra}`
   }
   const firstRow = orders.split('\n')[1]
   return {
@@ -166,8 +169,8 @@ export function tableCase({ id, set, variant, month }) {
     variant,
     seed: month,
     message,
-    files: {},
-    materials,
+    files,
+    materials: [],
     outputs: [output],
     fingerprints: [message, firstRow, `${month.replace('-', '')}-001`],
     hidden: { kind: 'table', variant, month, output },
