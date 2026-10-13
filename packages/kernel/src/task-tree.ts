@@ -43,7 +43,7 @@ export class TaskTree {
   private readonly presented = new Map<string, readonly string[]>()
   /** Step 4: shell commands of the tree that exited 0, in call order. */
   readonly commands: { command: string; shell: 'bash' | 'pwsh' }[] = []
-  /** Step 4: whether the root task's start snapshot was taken. */
+  /** Step 4: whether a root-turn snapshot was taken (step 5 takes one every root turn), so checks run. */
   snapshotTaken = false
 
   constructor(

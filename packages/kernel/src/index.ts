@@ -68,6 +68,8 @@ export { validateJsonSchema } from './json-schema.js'
 export { JsonStore, readJsonFile, writeJsonFile } from './storage/json-file.js'
 export { fsyncDirectory, writeFileAtomic } from './util/atomic-write.js'
 export type { WriteFileAtomicOptions } from './util/atomic-write.js'
+export { readLedgerSlice, readSessionSlice, sliceBytes, sliceSessionRecords } from './improvement-reads.js'
+export type { LedgerSliceQuery, RecordSlice, SessionSliceQuery } from './improvement-reads.js'
 export { abortPromise, deadline, MAX_TIMER_DELAY_MS, timeoutOf, TimeoutReason } from './util/timeout.js'
 export type { Deadline } from './util/timeout.js'
 export type {
@@ -76,8 +78,11 @@ export type {
   CapabilityAttachment,
   CapabilityHost,
   CapabilityVerification,
+  CheckFailureSignal,
   ComponentCallInput,
   ComponentUseRef,
+  ImprovementRun,
+  ImprovementSignals,
   TaskBeginInput,
   TaskEndInput,
   TaskEndResult,

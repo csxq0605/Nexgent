@@ -89,6 +89,49 @@ describe('task snapshot', () => {
   })
 })
 
+describe('per-turn records (step 5)', () => {
+  it('writes a snapshot and a checks record per root turn, keeping the step-4 names for turn 1 and the latest checks', async () => {
+    const p = await project()
+    await p.write('out/a.json', '{"n": 1}')
+    let now = new Date('2026-10-13T00:00:00.000Z')
+    const recorder = new LocalTaskRecorder(p.workspace.layout, { now: () => now })
+    const end = (turn: number) => recorder.end({ taskId: TASK, sessionId: SESSION_A, turn, deliverableFiles: ['out/a.json'], commands: [] })
+    await recorder.begin({ taskId: TASK, sessionId: SESSION_A, capabilityVersion: V1, turn: 1 })
+    await end(1)
+    // The feedback turn: the deliverable is now broken.
+    await p.write('out/a.json', '{"n": ')
+    now = new Date('2026-10-13T01:00:00.000Z')
+    await recorder.begin({ taskId: TASK, sessionId: SESSION_A, capabilityVersion: V1, turn: 2 })
+    const second = await end(2)
+    expect(second.results.map(result => result.passed)).toEqual([true, false])
+
+    expect((await readdir(nodePath.join(recorder.dir, 'tasks'))).sort()).toEqual([`${TASK}.json`, `${TASK}.t1.json`, `${TASK}.t2.json`])
+    expect((await readdir(nodePath.join(recorder.dir, 'checks'))).sort()).toEqual([`${TASK}.json`, `${TASK}.t1.json`, `${TASK}.t2.json`])
+    const t1 = await readJson(nodePath.join(recorder.dir, 'tasks', `${TASK}.t1.json`)) as { tree: string; turn: number }
+    const t2 = await readJson(nodePath.join(recorder.dir, 'tasks', `${TASK}.t2.json`)) as { tree: string; turn: number }
+    for (const record of [t1, t2]) expect(validateCapabilityFile('taskSnapshot', record)).toEqual([])
+    expect([t1.turn, t2.turn]).toEqual([1, 2])
+    expect(t2.tree).not.toBe(t1.tree)
+    // The step-4 snapshot name keeps the first turn; the step-4 checks name holds the latest.
+    expect(await readJson(nodePath.join(recorder.dir, 'tasks', `${TASK}.json`))).toEqual(t1)
+    const c1 = await readJson(nodePath.join(recorder.dir, 'checks', `${TASK}.t1.json`)) as { turn: number; results: { passed: boolean }[] }
+    const c2 = await readJson(nodePath.join(recorder.dir, 'checks', `${TASK}.t2.json`))
+    for (const record of [c1, c2]) expect(validateCapabilityFile('taskChecks', record)).toEqual([])
+    expect(c1).toMatchObject({ turn: 1, results: [{ passed: true }, { passed: true }] })
+    expect(c2).toMatchObject({ turn: 2, results: [{ passed: true }, { passed: false }] })
+    expect(await readJson(nodePath.join(recorder.dir, 'checks', `${TASK}.json`))).toEqual(c2)
+  })
+
+  it('writes only the step-4 names when no turn is given', async () => {
+    const p = await project()
+    const recorder = new LocalTaskRecorder(p.workspace.layout, { now: NOW })
+    await recorder.begin({ taskId: TASK, sessionId: SESSION_A, capabilityVersion: V1 })
+    await recorder.end({ taskId: TASK, sessionId: SESSION_A, deliverableFiles: [], commands: [] })
+    expect(await readdir(nodePath.join(recorder.dir, 'tasks'))).toEqual([`${TASK}.json`])
+    expect(await readdir(nodePath.join(recorder.dir, 'checks'))).toEqual([`${TASK}.json`])
+  })
+})
+
 describe('task checks', () => {
   it('derives file, parse and test-command checks, runs them and writes the checks record', async () => {
     const p = await project()
@@ -191,7 +234,7 @@ describe('snapshots and checks in the kernel loop', () => {
     const layout = app.ctx.workspace.layout
     const snapshots = nodePath.join(layout.dataDir, 'snapshots')
     expect((await agent.run('Total the orders.')).reason).toEqual({ kind: 'completed' })
-    expect(snapshotsAtFirstRequest).toEqual([`${taskId}.json`])
+    expect(snapshotsAtFirstRequest.sort()).toEqual([`${taskId}.json`, `${taskId}.t1.json`])
     // The project was empty when the task started.
     const task = await readJson(nodePath.join(snapshots, 'tasks', `${taskId}.json`)) as { tree: string; capabilityVersion: string }
     expect(task.capabilityVersion).toBe('baseline')

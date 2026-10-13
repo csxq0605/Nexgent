@@ -301,7 +301,7 @@ describe('members', () => {
 })
 
 describe('task snapshot and checks', () => {
-  it('snapshots the root task at its first turn and checks it at each root turn end', async () => {
+  it('snapshots and checks the root task at every root turn, with the turn number (step 5)', async () => {
     const booted = await bootWithHost({
       script: [
         toolCallReply('c1', 'present', {}),
@@ -341,18 +341,19 @@ describe('task snapshot and checks', () => {
     app.ctx.tools.register(plainTool('bash', 'ok', { exitCode: 0 }))
     const agent = await app.agents.create()
     await agent.run('make it')
-    expect(begun).toEqual([{ taskId: agent.attribution.taskId, sessionId: agent.sessionId, capabilityVersion: V1 }])
+    expect(begun).toEqual([{ taskId: agent.attribution.taskId, sessionId: agent.sessionId, capabilityVersion: V1, turn: 1 }])
     expect(ended).toEqual([{
       taskId: agent.attribution.taskId,
       sessionId: agent.sessionId,
+      turn: 1,
       deliverableFiles: ['out.csv'],
       commands: [{ command: 'pytest -q', shell: 'bash' }],
     }])
     // Checks ran before turn.end, so a per-turn host outcome can carry them.
     expect(agent.turnOutcome().checks).toEqual([{ name: 'file-exists', passed: true, target: 'file-1' }])
     await agent.run('again')
-    expect(begun).toHaveLength(1)
-    expect(ended).toHaveLength(2)
+    expect(begun.map(input => input.turn)).toEqual([1, 2])
+    expect(ended.map(input => input.turn)).toEqual([1, 2])
     await agent.close()
     expect(ledger.of('task.outcome')[0]).toMatchObject({ checks: [{ name: 'file-exists', passed: true, target: 'file-1' }] })
     expect(store.of(agent.sessionId, 'error')).toEqual([])

@@ -139,6 +139,8 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
           ...(record.parentSessionId === undefined ? {} : { parentSessionId: record.parentSessionId }),
           ...(record.member === undefined ? {} : { member: record.member }),
           ...(record.capabilityVersion === undefined ? {} : { capabilityVersion: record.capabilityVersion }),
+          ...(record.purpose === undefined ? {} : { purpose: record.purpose }),
+          ...(record.improvement === undefined ? {} : { improvement: record.improvement }),
           lastTurn: 0,
           totalUsage: ZERO_USAGE,
           lastSeq: record.seq,
@@ -211,6 +213,8 @@ export class MemorySessionStore implements SessionStore {
       ...(init.title === undefined ? {} : { title: init.title }),
       ...(init.member === undefined ? {} : { member: init.member }),
       ...(init.capabilityVersion === undefined ? {} : { capabilityVersion: init.capabilityVersion }),
+      ...(init.purpose === undefined ? {} : { purpose: init.purpose }),
+      ...(init.improvement === undefined ? {} : { improvement: init.improvement }),
     })
     return lock
   }
