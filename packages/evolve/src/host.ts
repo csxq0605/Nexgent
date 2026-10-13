@@ -142,8 +142,13 @@ export class ImprovementHost {
     return readQueue(this.directory)
   }
 
-  /** Every job, oldest first. */
-  list(): Promise<ImprovementJob[]> {
+  /**
+   * Every job, oldest first. Adopted jobs get their `firstUse` / `rolledBack`
+   * recorded first (best effort), so a reader sees the first use as soon as
+   * that task's `task.outcome` is in the ledger, without waiting for a turn.
+   */
+  async list(): Promise<ImprovementJob[]> {
+    await this.sweepAdopted().catch(() => undefined)
     return listJobs(this.directory)
   }
 
@@ -152,6 +157,11 @@ export class ImprovementHost {
    * @throws `improvement/not-found` when there is no such job.
    */
   async show(jobId: string): Promise<ImprovementJob> {
+    await this.sweepAdopted().catch(() => undefined)
+    return this.#read(jobId)
+  }
+
+  async #read(jobId: string): Promise<ImprovementJob> {
     try {
       return await readJob(this.directory, jobId)
     } catch (error) {
@@ -162,7 +172,7 @@ export class ImprovementHost {
 
   /** What the budget window has spent. */
   async budgetStatus(now: Date = new Date()): Promise<BudgetStatus> {
-    return budgetStatus(await this.list(), (await this.settings()).improvement.budget, now)
+    return budgetStatus(await listJobs(this.directory), (await this.settings()).improvement.budget, now)
   }
 
   /** Count signals and start a job when the batch is full. */
@@ -225,11 +235,11 @@ export class ImprovementHost {
    * @throws `improvement/not-found`; `tool/invalid-input` when the job already ended or awaits approval.
    */
   async cancel(jobId: string, now: Date = new Date()): Promise<ImprovementJob> {
-    const job = await this.show(jobId)
+    const job = await this.#read(jobId)
     const cancellable = [...RUNNING_STATUSES, 'waiting-history' as const]
     if (!cancellable.includes(job.status)) throw new NexgentError('tool/invalid-input', `improvement job ${jobId} is ${job.status}; only running or waiting jobs can be cancelled`)
     const written = await transitionJob(this.directory, jobId, 'cancelled', { expect: cancellable, now, detail: 'Cancelled by the user.' })
-    if (written === undefined) return this.show(jobId)
+    if (written === undefined) return this.#read(jobId)
     const pid = await readLockPid(jobPaths(this.directory, jobId).lock)
     if (pid !== undefined && pid !== process.pid && processAlive(pid)) {
       try {
@@ -245,7 +255,7 @@ export class ImprovementHost {
   /** Mark running jobs whose process is gone `interrupted` (never re-run) and free the slot. */
   async recover(now: Date = new Date()): Promise<ImprovementJob[]> {
     const marked: ImprovementJob[] = []
-    for (const job of await this.list()) {
+    for (const job of await listJobs(this.directory)) {
       if (!RUNNING_STATUSES.has(job.status) || this.#live.has(job.id) || await jobAlive(this.directory, job, now)) continue
       const written = await transitionJob(this.directory, job.id, 'interrupted', {
         expect: [...RUNNING_STATUSES],
@@ -267,7 +277,7 @@ export class ImprovementHost {
    */
   async resumeWaiting(now: Date = new Date()): Promise<string[]> {
     if (!this.canLaunch) return []
-    const waiting = (await this.list()).filter(job => job.status === 'waiting-history' && job.candidateId !== undefined)
+    const waiting = (await listJobs(this.directory)).filter(job => job.status === 'waiting-history' && job.candidateId !== undefined)
     if (waiting.length === 0) return []
     const settings = (await readProjectConfig(this.layout.configFile)).config.capabilities
     const cases = await listReplayCases(this.layout)
