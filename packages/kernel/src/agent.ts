@@ -833,10 +833,14 @@ export class Agent {
       ...this.attribution,
       ...(this.capabilityVersion === undefined ? {} : { capabilityVersion: this.capabilityVersion }),
       ...(this.improvement === undefined ? {} : { improvementId: this.improvement.jobId, improvementPhase: this.improvement.phase }),
+      // Step 6 (ADR 0008 decision 6): the pinned improver and, in a comparison arm, the meta job and arm.
+      ...(this.improvement?.improverVersion === undefined ? {} : { improverVersion: this.improvement.improverVersion }),
+      ...(this.improvement?.metaJobId === undefined ? {} : { metaJobId: this.improvement.metaJobId }),
+      ...(this.improvement?.comparisonArm === undefined ? {} : { comparisonArm: this.improvement.comparisonArm }),
     }
   }
 
-  /** Step 5: whether this is an improvement job's own session (diagnose or propose), not a task. */
+  /** Step 5: whether this is an improvement job's own session (diagnose, propose, step 6 meta-diagnose or meta-propose), not a task. */
   get isImprovementSession(): boolean {
     return this.improvement !== undefined && this.improvement.phase !== 'trial'
   }

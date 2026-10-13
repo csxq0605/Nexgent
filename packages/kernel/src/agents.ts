@@ -27,7 +27,8 @@ import {
 import { BASELINE_VERSION, type CapabilityVersion } from './contracts/capabilities.js'
 import type { ProjectConfig } from './contracts/config.js'
 import { NexgentError } from './contracts/errors.js'
-import { IMPROVEMENT_DIAGNOSIS_TOOLS } from './contracts/improvement.js'
+import { COMPARISON_ARMS, IMPROVEMENT_DIAGNOSIS_TOOLS, IMPROVEMENT_PHASES } from './contracts/improvement.js'
+import { IMPROVER_VERSION_PATTERN, META_DIAGNOSIS_TOOLS, META_PROPOSE_TOOLS } from './contracts/improver.js'
 import { EFFORT_LEVELS, type Effort, type ThinkingMode } from './contracts/llm.js'
 import type { SessionImprovement, SessionLock } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
@@ -108,6 +109,10 @@ export interface CreateAgentOptions {
    * the `IMPROVEMENT_DIAGNOSIS_TOOLS` and no capability components. Phase
    * `trial` is an ordinary task session the gate runs for the job. Every
    * ledger record carries `improvementId` and `improvementPhase`.
+   * Step 6: `meta-diagnose` / `meta-propose` open a meta job's session with
+   * only `META_DIAGNOSIS_TOOLS` / `META_PROPOSE_TOOLS` and no components;
+   * `improverVersion`, `metaJobId` and `comparisonArm` go into the header
+   * and onto every ledger record.
    */
   readonly improvement?: ImprovementRun
   /** Thinking override (an improvement job's `improvement.thinking`); else the project config, then the service default. */
@@ -165,6 +170,29 @@ interface CapabilityLoad {
 /** Rejection of a member request that breaks the collaboration rules. */
 function denied(message: string, details?: Record<string, unknown>): NexgentError {
   return new NexgentError('tool/denied', message, details === undefined ? {} : { details })
+}
+
+/** Every `improve_*` tool name (step 5 diagnosis and step 6 meta tools); ordinary root sessions see none of them. */
+const IMPROVE_TOOL_NAMES = [...new Set([...IMPROVEMENT_DIAGNOSIS_TOOLS, ...META_DIAGNOSIS_TOOLS, ...META_PROPOSE_TOOLS].map(tool => tool.name))]
+
+function isMetaPhase(phase: ImprovementRun['phase']): boolean {
+  return phase === 'meta-diagnose' || phase === 'meta-propose'
+}
+
+/** Diagnose and meta sessions run without capability components (ADR 0006, ADR 0008: no project plugins). */
+function loadsNoComponents(run: ImprovementRun | undefined): boolean {
+  return run !== undefined && (run.phase === 'diagnose' || isMetaPhase(run.phase))
+}
+
+/** Copy only the known fields of a job reference (from the caller or a session header). */
+function improvementRun(run: ImprovementRun): ImprovementRun {
+  return {
+    jobId: run.jobId,
+    phase: run.phase,
+    ...(run.improverVersion === undefined ? {} : { improverVersion: run.improverVersion }),
+    ...(run.metaJobId === undefined ? {} : { metaJobId: run.metaJobId }),
+    ...(run.comparisonArm === undefined ? {} : { comparisonArm: run.comparisonArm }),
+  }
 }
 
 /** The `ctx.agents` service. */
@@ -290,19 +318,35 @@ export class AgentsService extends Service {
     const tools = ctx.tools as ToolRegistryService
     if (run?.phase === 'diagnose') {
       tools.restrict({ allow: IMPROVEMENT_DIAGNOSIS_TOOLS.map(tool => tool.name) })
+    } else if (run?.phase === 'meta-diagnose') {
+      tools.restrict({ allow: META_DIAGNOSIS_TOOLS.map(tool => tool.name) })
+    } else if (run?.phase === 'meta-propose') {
+      tools.restrict({ allow: META_PROPOSE_TOOLS.map(tool => tool.name) })
     } else if (run?.phase === 'propose') {
       tools.restrict({ deny: MEMBER_DENIED_TOOLS.filter(name => !name.startsWith('capability_')) })
     } else {
-      tools.restrict({ deny: IMPROVEMENT_DIAGNOSIS_TOOLS.map(tool => tool.name) })
+      tools.restrict({ deny: IMPROVE_TOOL_NAMES })
     }
   }
 
   private assertImprovement(run: ImprovementRun | undefined): ImprovementRun | undefined {
     if (run === undefined) return undefined
-    if (typeof run.jobId !== 'string' || run.jobId === '' || !['diagnose', 'propose', 'trial'].includes(run.phase)) {
-      throw new NexgentError('tool/invalid-input', 'improvement must be { jobId, phase: diagnose | propose | trial }')
+    if (typeof run.jobId !== 'string' || run.jobId === '' || !IMPROVEMENT_PHASES.includes(run.phase)) {
+      throw new NexgentError('tool/invalid-input', `improvement must be { jobId, phase: ${IMPROVEMENT_PHASES.join(' | ')} }`)
     }
-    return { jobId: run.jobId, phase: run.phase }
+    if (run.improverVersion !== undefined && (typeof run.improverVersion !== 'string' || !IMPROVER_VERSION_PATTERN.test(run.improverVersion))) {
+      throw new NexgentError('tool/invalid-input', 'improvement.improverVersion must be v0 or a 64-hex improver version')
+    }
+    if ((run.metaJobId === undefined) !== (run.comparisonArm === undefined)) {
+      throw new NexgentError('tool/invalid-input', 'improvement.metaJobId and improvement.comparisonArm go together')
+    }
+    if (run.metaJobId !== undefined) {
+      if (typeof run.metaJobId !== 'string' || run.metaJobId === '' || !COMPARISON_ARMS.includes(run.comparisonArm!)) {
+        throw new NexgentError('tool/invalid-input', `improvement.metaJobId must be a job id and comparisonArm one of ${COMPARISON_ARMS.join(' | ')}`)
+      }
+      if (isMetaPhase(run.phase)) throw new NexgentError('tool/invalid-input', 'a meta phase is not part of a comparison arm')
+    }
+    return improvementRun(run)
   }
 
   /** The open root agent a member is started (or resumed) under. */
@@ -503,7 +547,7 @@ export class AgentsService extends Service {
     const improvement = this.assertImprovement(options.improvement)
     const session: SessionImprovement | undefined = improvement === undefined || improvement.phase === 'trial'
       ? undefined
-      : { jobId: improvement.jobId, phase: improvement.phase }
+      : { ...improvement, phase: improvement.phase }
     const loaded = await this.projectConfig(options.projectConfig)
     const sessionId = options.sessionId ?? randomUUID()
     const model = options.model ?? loaded.input.model ?? this.config.model ?? this.home.llm.info.defaultModel
@@ -511,8 +555,8 @@ export class AgentsService extends Service {
     const thinking = options.thinking ?? loaded.input.thinking ?? this.config.thinking
     const effort = loaded.input.effort ?? this.config.effort
     await this.home.workspace.ensureLayout()
-    // Step 4: a new root session runs on the adopted version as of now; a diagnose session loads no components.
-    const host = improvement?.phase === 'diagnose' ? undefined : this.capabilityHost()
+    // Step 4: a new root session runs on the adopted version as of now; a diagnose or meta session loads no components.
+    const host = loadsNoComponents(improvement) ? undefined : this.capabilityHost()
     const version = host === undefined ? undefined : await host.current()
     const lock = await this.home.session.create({
       sessionId,
@@ -665,7 +709,7 @@ export class AgentsService extends Service {
         throw new NexgentError('tool/invalid-input', 'a member session cannot belong to an improvement job')
       }
       const improvement = recordedJob !== undefined
-        ? { jobId: recordedJob.jobId, phase: recordedJob.phase }
+        ? improvementRun(recordedJob)
         : this.assertImprovement(options.improvement)
       if (recordedJob === undefined && improvement !== undefined && improvement.phase !== 'trial') {
         throw new NexgentError('tool/invalid-input', `session ${sessionId} is not an improvement session; only phase trial can be given on resume`)
@@ -685,8 +729,8 @@ export class AgentsService extends Service {
         await session.append(sessionId, { type: 'turn.end', turn: state.metadata.openTurn, reason: { kind: 'interrupted' } })
         state = await session.resume(sessionId)
       }
-      // Step 4: keep the recorded version when it still loads; a member follows its root; a diagnose session loads none.
-      const host = improvement?.phase === 'diagnose' ? undefined : this.capabilityHost()
+      // Step 4: keep the recorded version when it still loads; a member follows its root; a diagnose or meta session loads none.
+      const host = loadsNoComponents(improvement) ? undefined : this.capabilityHost()
       let switched: { version: CapabilityVersion; lastSeq?: number } | undefined
       if (host !== undefined) {
         const recorded = state.metadata.capabilityVersion

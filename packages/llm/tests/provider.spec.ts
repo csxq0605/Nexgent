@@ -549,6 +549,15 @@ describe('AnthropicProvider — configuration and secrets', () => {
     for (const record of [start, end]) expect(record).toMatchObject({ taskId: 't-1', improvementId: 'job-1', improvementPhase: 'diagnose' })
   })
 
+  it('stamps the improver version and comparison arm on both records (step 6)', async () => {
+    fake = await startFakeAnthropic([{ sse: loadSseFixture('text') }])
+    const { provider, ledger } = makeProvider(fake.baseUrl)
+    const step6 = { improvementId: 'arm-1', improvementPhase: 'trial', improverVersion: 'v0', metaJobId: 'meta-1', comparisonArm: 'child' } as const
+    await collect(provider.complete(makeRequest(), step6))
+    const { start, end } = pair(ledger)
+    for (const record of [start, end]) expect(record).toMatchObject(step6)
+  })
+
   it('never puts the API key in errors, events or ledger records', async () => {
     fake = await startFakeAnthropic([{ status: 401, echoApiKey: true }])
     const { provider, ledger } = makeProvider(fake.baseUrl)

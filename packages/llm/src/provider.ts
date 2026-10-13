@@ -96,7 +96,11 @@ export interface AnthropicProviderOptions {
  */
 export interface CompleteOptions extends LLMCompleteOptions, LedgerAttribution {}
 
-const ATTRIBUTION_KEYS = ['capabilityVersion', 'memberId', 'executionForm', 'taskId', 'improvementId', 'improvementPhase'] as const
+const ATTRIBUTION_KEYS = [
+  'capabilityVersion', 'memberId', 'executionForm', 'taskId', 'improvementId', 'improvementPhase',
+  // Step 6 (ADR 0008 decision 6).
+  'improverVersion', 'metaJobId', 'comparisonArm',
+] as const
 
 function pickAttribution(...sources: (LedgerAttribution | undefined)[]): LedgerAttribution {
   const result: Record<string, string> = {}
