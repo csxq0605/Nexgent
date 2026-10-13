@@ -248,8 +248,8 @@ describe('method table', () => {
     expect(info).toEqual({ sdkVersion: 5, appVersion: '0.0.0-test', platform: process.platform })
     await expect(t.sdk.call('nope' as never, {} as never)).rejects.toMatchObject({ code: 'internal' })
     for (const method of SDK_METHOD_NAMES) expect(typeof (t.sdk as unknown as { methods: Record<string, unknown> }).methods[method]).toBe('function')
-    // step 5 contract only: the improvement methods exist and reject until @nexgent/evolve is wired in
-    await expect(t.sdk.call('improvements.list', { projectId: 'p' })).rejects.toMatchObject({ code: 'internal' })
+    // step 5: the improvement methods work on open projects (tests/improvements.spec.ts)
+    await expect(t.sdk.call('improvements.list', { projectId: 'p' })).rejects.toMatchObject({ code: 'workspace/not-found' })
   })
 
   it('deliverables.reveal needs the host hook', async () => {

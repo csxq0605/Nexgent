@@ -50,6 +50,9 @@
     },
     {
       "path": "../capabilities"
+    },
+    {
+      "path": "../evolve"
     }
   ]
 }

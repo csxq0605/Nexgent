@@ -7,7 +7,7 @@
  * broken backend shows an error instead of a blank window.
  */
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
-import type { CandidateDetail, CapabilityListing, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch } from '@nexgent/sdk'
+import type { CandidateDetail, CapabilityListing, ImprovementDetail, ImprovementListing, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
@@ -65,6 +65,10 @@ export interface AppState {
   readonly candidateDetail?: CandidateDetail | undefined
   /** Step 4: a plugin candidate awaiting the user's approval, shown in its dialog. */
   readonly pluginApproval?: CandidateDetail | undefined
+  /** Step 5: improvement jobs, the pending count and the budget window. */
+  readonly improvements?: ImprovementListing | undefined
+  /** Step 5: the job opened in the 改进 tab. */
+  readonly improvementDetail?: ImprovementDetail | undefined
 }
 
 const INITIAL: AppState = {
@@ -190,8 +194,10 @@ export class AppStore {
       capabilities: undefined,
       candidateDetail: undefined,
       pluginApproval: undefined,
+      improvements: undefined,
+      improvementDetail: undefined,
     })
-    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities()])
+    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshImprovements()])
     const first = this.state.sessions[0]
     if (first !== undefined) await this.openSession(first.sessionId)
     return true
@@ -211,7 +217,7 @@ export class AppStore {
 
   /** Back to the start screen; the project stays open in the backend (running turns go on). */
   leaveProject(): void {
-    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined })
+    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined, improvements: undefined, improvementDetail: undefined })
     void this.refreshRecent()
   }
 
@@ -320,6 +326,62 @@ export class AppStore {
     await this.refreshCapabilities()
   }
 
+  // --- improvement jobs (step 5) ---------------------------------------------
+
+  async refreshImprovements(): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    await this.guard(async c => {
+      const improvements = await c.call('improvements.list', { projectId })
+      if (this.projectId !== projectId) return
+      this.set({ improvements })
+      // Keep the open job fresh (its status, candidate and gate move on).
+      const open = this.state.improvementDetail
+      if (open !== undefined) {
+        const now = improvements.jobs.find(job => job.id === open.view.id)
+        if (now !== undefined && (now.updatedAt !== open.view.updatedAt || now.status !== open.view.status)) await this.showImprovement(open.view.id)
+      }
+    })
+  }
+
+  /** Open (or close, when it is open) a job's details. */
+  async toggleImprovement(jobId: string): Promise<void> {
+    if (this.state.improvementDetail?.view.id === jobId) {
+      this.set({ improvementDetail: undefined })
+      return
+    }
+    await this.showImprovement(jobId)
+  }
+
+  private async showImprovement(jobId: string): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    const improvementDetail = await this.guard(c => c.call('improvements.show', { projectId, jobId }))
+    if (improvementDetail !== undefined && this.projectId === projectId) this.set({ improvementDetail })
+  }
+
+  /** The explicit "improve now"; `improvement/busy` and `improvement/budget-exhausted` surface as notices. */
+  async runImprovement(input: { readonly sessionId?: string; readonly deliverableId?: string } = {}): Promise<boolean> {
+    const projectId = this.projectId
+    if (projectId === undefined) return false
+    const job = await this.guard(c =>
+      c.call('improvements.run', {
+        projectId,
+        ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+        ...(input.deliverableId === undefined ? {} : { deliverableId: input.deliverableId }),
+      }),
+    )
+    await this.refreshImprovements()
+    return job !== undefined
+  }
+
+  async cancelImprovement(jobId: string): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    await this.guard(c => c.call('improvements.cancel', { projectId, jobId }))
+    await this.refreshImprovements()
+  }
+
   async startTrial(candidateId: string): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
@@ -354,7 +416,7 @@ export class AppStore {
     if (summary === undefined) return
     this.set(state => ({ sessions: [summary, ...state.sessions.filter(s => s.sessionId !== summary.sessionId)] }))
     // A new conversation runs on the version adopted now (the gate may have adopted one in its own process).
-    await Promise.all([this.openSession(summary.sessionId), this.refreshCapabilities()])
+    await Promise.all([this.openSession(summary.sessionId), this.refreshCapabilities(), this.refreshImprovements()])
   }
 
   /** Rename a conversation; an empty title is ignored. */
@@ -573,6 +635,11 @@ export class AppStore {
       void this.refreshCapabilities()
       return
     }
+    // Step 5: improvement jobs are project-level too.
+    if (event.type === 'improvement.job') {
+      void this.refreshImprovements()
+      return
+    }
     const current = event.sessionId === this.state.sessionId
     // A member of the open conversation: its approvals are asked here, its stream feeds an open member view.
     const ofCurrent = event.parentSessionId !== undefined && event.parentSessionId === this.state.sessionId
@@ -618,6 +685,7 @@ export class AppStore {
         void this.refreshDeliverables()
         // A proposal, the gate or a load-failure rollback may have changed the project's capabilities.
         void this.refreshCapabilities()
+        void this.refreshImprovements()
         if (this.state.projectFiles !== undefined) void this.refreshFiles()
         // A workflow's end has no event of its own.
         if (current && this.state.timeline.some(entry => entry.kind === 'workflow')) void this.refreshWorkflows(event.sessionId, event.turn)

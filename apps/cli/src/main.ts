@@ -7,12 +7,15 @@ import { existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import * as path from 'node:path'
 import { isNexgentError, NexgentError } from '@nexgent/kernel'
-import { createSdk } from '@nexgent/sdk'
+import { createSdk, type LocalSdkOptions } from '@nexgent/sdk'
 import { launchDesktop, type AppLaunchOptions } from './app-launch.js'
 import { createApprovalResponder, type AnswerSource } from './approval.js'
 import { commandUsage, parseCliArgs, RESUME_DEFAULT_TASK, usage, type Invocation } from './args.js'
 import { requireApiKey, type CredentialProbe } from './credentials.js'
 import { CliError, EXIT, type ExitCode } from './exit-codes.js'
+import {
+  formatCancelled, formatDetail, formatListing, formatRunNote, formatStarted, improveError, resolveJobId,
+} from './improve.js'
 import { initProjectLayout } from './layout.js'
 import { TaskTally } from './outcome.js'
 import { createRenderer, type Renderer, type TextSink } from './render.js'
@@ -45,6 +48,8 @@ export interface CliDeps {
   readonly approvalTimeoutMs?: number
   /** Default: `app-launch.ts` `launchDesktop`. */
   readonly launchDesktop?: (options: AppLaunchOptions) => Promise<unknown>
+  /** Extra options for the SDK of `improve` (tests: a `registry` that keeps jobs from starting a process). */
+  readonly sdkOptions?: Partial<LocalSdkOptions>
 }
 
 /** The real process. */
@@ -109,6 +114,9 @@ export async function main(argv: readonly string[], io: CliIo = processIo(), dep
       case 'export':
         renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
         return await runExport(invocation, io)
+      case 'improve':
+        renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
+        return await runImprove(invocation, io, deps)
       case 'run':
       case 'resume':
         renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
@@ -193,6 +201,8 @@ async function runTask(
       toolCallCount: outcome.toolCallCount,
       finalText: tally.finalText,
     })
+    const note = formatRunNote(await session.improvementChanges?.().catch(() => []) ?? [])
+    if (note !== undefined) io.stderr.write(`${note}\n`)
     return exitCode
   } finally {
     uninstall()
@@ -212,6 +222,55 @@ async function runExport(invocation: Extract<Invocation, { command: 'export' }>,
     const result = await sdk.call('sessions.export', { projectId, sessionId: invocation.sessionId, outDir })
     if (invocation.json) io.stdout.write(`${JSON.stringify({ type: 'export', sessionId: invocation.sessionId, path: result.path, files: result.files })}\n`)
     else io.stdout.write(`exported session ${invocation.sessionId} to ${result.path}\n${result.files.map(file => `  ${file}`).join('\n')}\n`)
+    return EXIT.OK
+  } finally {
+    await sdk.dispose()
+  }
+}
+
+async function runImprove(invocation: Extract<Invocation, { command: 'improve' }>, io: CliIo, deps: CliDeps): Promise<ExitCode> {
+  const { layout } = await initProjectLayout(invocation.project, io.cwd)
+  // Starting a job needs the key now: the job process reads it from the same sources.
+  if (invocation.action === 'run') await requireApiKey(deps.credentials ?? { env: io.env })
+  const sdk = createSdk({ appVersion: packageVersion(), env: io.env, ...deps.sdkOptions })
+  const print = (type: string, text: string, data: Record<string, unknown>): void => {
+    io.stdout.write(invocation.json ? `${JSON.stringify({ type, ...data })}\n` : `${text}\n`)
+  }
+  try {
+    const { projectId } = await sdk.call('projects.open', { root: layout.root })
+    const resolve = async (given: string): Promise<string> => resolveJobId((await sdk.call('improvements.list', { projectId })).jobs, given)
+    try {
+      switch (invocation.action) {
+        case 'list': {
+          const listing = await sdk.call('improvements.list', { projectId })
+          print('improve.list', formatListing(listing), { ...listing })
+          break
+        }
+        case 'show': {
+          const jobId = await resolve(invocation.jobId ?? '')
+          const detail = await sdk.call('improvements.show', { projectId, jobId })
+          print('improve.show', formatDetail(detail), { ...detail })
+          break
+        }
+        case 'run': {
+          const job = await sdk.call('improvements.run', {
+            projectId,
+            ...(invocation.sessionId === undefined ? {} : { sessionId: invocation.sessionId }),
+            ...(invocation.deliverableId === undefined ? {} : { deliverableId: invocation.deliverableId }),
+          })
+          print('improve.run', formatStarted(job), { job })
+          break
+        }
+        case 'cancel': {
+          const jobId = await resolve(invocation.jobId ?? '')
+          const job = await sdk.call('improvements.cancel', { projectId, jobId })
+          print('improve.cancel', formatCancelled(job), { job })
+          break
+        }
+      }
+    } catch (error) {
+      throw improveError(error)
+    }
     return EXIT.OK
   } finally {
     await sdk.dispose()

@@ -3,8 +3,11 @@ export { main, processIo, packageVersion, exitCodeForError, errorMessage } from 
 export { APP_NOT_FOUND_CODE, desktopCommand, launchDesktop, NEXGENT_DESKTOP_DIR, NEXGENT_ELECTRON } from './app-launch.js'
 export type { AppCommand, AppLaunchOptions } from './app-launch.js'
 export type { CliIo, CliDeps } from './main.js'
-export { COMMANDS, RESUME_DEFAULT_TASK, commandUsage, isSessionId, parseCliArgs, usage } from './args.js'
-export type { AppInvocation, Command, ExportInvocation, HelpInvocation, Invocation, ResumeInvocation, RunInvocation, VersionInvocation } from './args.js'
+export { COMMANDS, IMPROVE_ACTIONS, RESUME_DEFAULT_TASK, commandUsage, isSessionId, parseCliArgs, usage } from './args.js'
+export type { AppInvocation, Command, ExportInvocation, HelpInvocation, ImproveAction, ImproveInvocation, Invocation, ResumeInvocation, RunInvocation, VersionInvocation } from './args.js'
+export {
+  billedTokensOf, formatCancelled, formatCost, formatDetail, formatListing, formatRunNote, formatStarted, formatTime, improveError, resolveJobId, shortId,
+} from './improve.js'
 export { CliError, EXIT } from './exit-codes.js'
 export type { ExitCode } from './exit-codes.js'
 export { initProjectLayout } from './layout.js'

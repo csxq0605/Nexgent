@@ -46,6 +46,7 @@ import {
   type AppProfilePatchEntry,
   type ErrorInfo,
   type FeedbackEntry,
+  type ImprovementRun,
   type LLMUsage,
   type NexgentApp,
   type Plugin,
@@ -53,12 +54,15 @@ import {
   type SessionRecord,
   type SubagentStartRecord,
   type TaskOutcomeStatus,
+  type ThinkingMode,
+  type Tool,
   type TurnCancelCause,
   type TurnEndReason,
   type TurnResult,
   type UserMessageSource,
 } from '@nexgent/kernel'
 import { capabilitiesOf, type CapabilityService } from '@nexgent/capabilities'
+import type { ImprovementHost } from '@nexgent/evolve'
 import { projectSession, SESSION_FILE_NAME } from '@nexgent/session'
 import { createFeedbackEntry, materialAddedRecord, type LocalTaskingService } from '@nexgent/tasking'
 import {
@@ -79,8 +83,9 @@ import {
   type TurnHandle,
   type Unsubscribe,
 } from './api.js'
-import { bootProjectApp, ROOT_SESSION_RECOVERIES } from './boot.js'
+import { bootProjectApp, ROOT_SESSION_RECOVERIES, type BootOptions } from './boot.js'
 import * as capabilities from './capabilities.js'
+import * as improvements from './improvements.js'
 import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
 import { collaborationView, historyItems, memberRunView, runKey, sessionSummary, turnUsage } from './history.js'
@@ -105,6 +110,8 @@ export interface LocalSdkOptions extends CreateSdkOptions {
   readonly registry?: Readonly<Record<string, Plugin>>
   /** Extra profile patches (applied after the SDK's own). */
   readonly patches?: readonly AppProfilePatchEntry[]
+  /** Start the gate and improvement-job processes (default true); see {@link BootOptions.background}. */
+  readonly background?: boolean
   /** Clock for recent projects and exports. */
   readonly now?: () => Date
 }
@@ -159,6 +166,8 @@ interface ProjectEntry {
   readonly opening: Map<string, Promise<SessionEntry>>
   /** By request id; a member's request may be answered under its own or its parent's session id. */
   readonly pendingApprovals: Map<string, PendingApproval>
+  /** Step 5: follows the project's improvement jobs (absent without `@nexgent/evolve`). */
+  jobs?: improvements.JobWatch
 }
 
 /**
@@ -186,9 +195,10 @@ function tallyStatus(tally: TurnTally): TaskOutcomeStatus {
   }
 }
 
-/** A method whose contract exists but whose implementation lands in a later work item. */
-function notYet(method: string): Promise<never> {
-  return Promise.reject(new NexgentError('internal', `${method} is not available yet (step 5 improvement jobs)`))
+/** Whether a session is an improvement job's (its `session.start.purpose`). */
+function isImprovementSession(records: readonly SessionRecord[]): boolean {
+  const start = records[0]
+  return start?.type === 'session.start' && start.purpose === 'improvement'
 }
 
 function invalid(message: string): NexgentError {
@@ -288,6 +298,36 @@ export class LocalNexgentSdk implements NexgentSdk {
       ...(input.title === undefined ? {} : { title: input.title }),
       ...(input.sandboxMode === undefined ? {} : { sandboxMode: input.sandboxMode }),
       ...(input.model === undefined ? {} : { model: input.model }),
+    })
+    this.track(project, agent)
+    return this.summary(project, agent.sessionId)
+  }
+
+  /**
+   * Open an improvement job's session (step 5, the improve entry's runner):
+   * `session.start.purpose: improvement` with the job and phase, the job's
+   * session id, model and thinking; `tools` (diagnose) are registered in the
+   * project first, and the kernel limits a diagnose session to them.
+   */
+  async createImprovementSession(input: {
+    readonly projectId: string
+    readonly sessionId: string
+    readonly title: string
+    readonly improvement: ImprovementRun
+    readonly model: string
+    readonly thinking: ThinkingMode
+    readonly sandboxMode?: SandboxMode
+    readonly tools?: readonly Tool[]
+  }): Promise<SessionSummary> {
+    const project = this.project(input.projectId)
+    for (const tool of input.tools ?? []) project.app.ctx.tools.register(tool)
+    const agent = await project.app.agents.create({
+      sessionId: input.sessionId,
+      title: input.title,
+      improvement: input.improvement,
+      model: input.model,
+      thinking: input.thinking,
+      ...(input.sandboxMode === undefined ? {} : { sandboxMode: input.sandboxMode }),
     })
     this.track(project, agent)
     return this.summary(project, agent.sessionId)
@@ -430,6 +470,7 @@ export class LocalNexgentSdk implements NexgentSdk {
       ...(this.options.approvalTimeoutMs === undefined ? {} : { approvalTimeoutMs: this.options.approvalTimeoutMs }),
       ...(this.options.patches === undefined ? {} : { patches: this.options.patches }),
       ...(this.options.registry === undefined ? {} : { registry: this.options.registry }),
+      ...(this.options.background === undefined ? {} : { background: this.options.background }),
     })
     try {
       const { ctx } = app
@@ -452,6 +493,13 @@ export class LocalNexgentSdk implements NexgentSdk {
       ctx.approvals.setResponder(this.options.approvalResponder ?? ((request, signal) => this.awaitApproval(project, request, signal)))
       app.agents.setProjectGrantWriter(grant => appendProjectGrant(ctx.workspace.layout.configFile, grant))
       this.projects.set(projectId, project)
+      const host = ctx.get('improve') as ImprovementHost | undefined
+      if (host !== undefined) {
+        project.jobs = new improvements.JobWatch(host, job => {
+          void improvements.viewOf(host, job).then(view => this.emitProject(projectId, { type: 'improvement.job', job: view }), () => undefined)
+        })
+        await project.jobs.start()
+      }
       return project
     } catch (error) {
       await app.dispose().catch(() => undefined)
@@ -466,6 +514,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     // Root sessions close their members (cause `parent`); the members untrack themselves on `closed`.
     await Promise.allSettled([...project.sessions.keys()].map(sessionId => this.closeSession(project, sessionId)))
     this.projects.delete(projectId)
+    project.jobs?.stop()
     await project.app.dispose()
   }
 
@@ -537,6 +586,9 @@ export class LocalNexgentSdk implements NexgentSdk {
     // closes it with `turn.end { interrupted }`; that turn's stream gets its
     // `turn.end` event here.
     const before = await store.readAll(sessionId)
+    if (isImprovementSession(before.records)) {
+      throw new NexgentError('tool/denied', `session ${sessionId} is an improvement job's session; it is read-only here (sessions.view)`)
+    }
     const openTurn = before.records.length === 0 ? undefined : projectSession(before.records).metadata.openTurn
     const agent = await project.app.agents.resume(sessionId, sandboxMode === undefined ? {} : { sandboxMode })
     const entry = this.track(project, agent, runStartsOf(before.records))
@@ -619,11 +671,14 @@ export class LocalNexgentSdk implements NexgentSdk {
     }
   }
 
+  /** Conversations and their members; improvement sessions (`purpose: improvement`) are left out (reached through `improvements.show`). */
   private async allSessions(project: ProjectEntry): Promise<SessionSummary[]> {
     const summaries: SessionSummary[] = []
     for (const sessionId of await this.sessionIds(project)) {
       try {
-        summaries.push(await this.summary(project, sessionId))
+        const records = await this.records(project, sessionId)
+        if (isImprovementSession(records)) continue
+        summaries.push(sessionSummary(records, projectSession(records), this.isRunning(project.projectId, sessionId)))
       } catch (error) {
         if (!isNexgentError(error)) throw error
         // an unreadable session is skipped in the list; opening it reports why
@@ -744,6 +799,12 @@ export class LocalNexgentSdk implements NexgentSdk {
   }
 
   /** The project's capability service (`@nexgent/capabilities` is a default row). */
+  private improve(project: ProjectEntry): ImprovementHost {
+    const host = project.app.ctx.get('improve') as ImprovementHost | undefined
+    if (host === undefined) throw new NexgentError('internal', `project ${project.projectId} runs without @nexgent/evolve`)
+    return host
+  }
+
   private capabilities(project: ProjectEntry): CapabilityService {
     const service = capabilitiesOf(project.app.ctx)
     if (service === undefined) throw new NexgentError('internal', `project ${project.projectId} runs without @nexgent/capabilities`)
@@ -1097,11 +1158,24 @@ export class LocalNexgentSdk implements NexgentSdk {
         this.emitProject(project.projectId, { type: 'capability.version', current })
         return current
       },
-      // Step 5 (W0 contract only): the improvement jobs are implemented by `@nexgent/evolve` and wired here later.
-      'improvements.list': () => notYet('improvements.list'),
-      'improvements.show': () => notYet('improvements.show'),
-      'improvements.run': () => notYet('improvements.run'),
-      'improvements.cancel': () => notYet('improvements.cancel'),
+      // Step 5: project-level, over `@nexgent/evolve` (`ctx.improve`); `improvement.job` events come from the project's job watch.
+      'improvements.list': input => improvements.listing(this.improve(this.project(input.projectId)), this.now()),
+      'improvements.show': input => {
+        const project = this.project(input.projectId)
+        return improvements.show(this.improve(project), capabilitiesOf(project.app.ctx), input.jobId)
+      },
+      'improvements.run': async input => {
+        const project = this.project(input.projectId)
+        const view = await improvements.run(this.improve(project), input)
+        await project.jobs?.check()
+        return view
+      },
+      'improvements.cancel': async input => {
+        const project = this.project(input.projectId)
+        const view = await improvements.cancel(this.improve(project), input.jobId)
+        await project.jobs?.check()
+        return view
+      },
     }
   }
 

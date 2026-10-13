@@ -75,6 +75,9 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
   const [sandboxMode, setSandboxMode] = useState<SandboxMode>('workspace-write')
   const [perTask, setPerTask] = useState<CapFields>(capFields(undefined))
   const [perProject, setPerProject] = useState<CapFields>(capFields(undefined))
+  const [autoImprove, setAutoImprove] = useState(true)
+  const [improveTokens, setImproveTokens] = useState('')
+  const [improveWindow, setImproveWindow] = useState('')
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'invalid'>('idle')
   const [key, setKey] = useState('')
   const [keyStatus, setKeyStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -87,13 +90,19 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
     setSandboxMode(settings.sandboxMode)
     setPerTask(capFields(settings.costCaps.perTask))
     setPerProject(capFields(settings.costCaps.perProject))
+    setAutoImprove(settings.autoImprove)
+    setImproveTokens(String(settings.improvement.budget.maxTokens))
+    setImproveWindow(String(settings.improvement.budget.windowDays))
     // Only when another project's settings arrive; edits in progress are kept otherwise.
   }, [state.project?.projectId, settings === undefined])
 
   const save = async (): Promise<void> => {
     const task = toCap(perTask, false)
     const project = toCap(perProject, true)
-    if (task === 'invalid' || project === 'invalid' || model.trim() === '') {
+    const maxTokens = Number(improveTokens.trim())
+    const windowDays = Number(improveWindow.trim())
+    const improveInvalid = !Number.isInteger(maxTokens) || maxTokens <= 0 || !Number.isInteger(windowDays) || windowDays <= 0
+    if (improveInvalid || task === 'invalid' || project === 'invalid' || model.trim() === '') {
       setStatus('invalid')
       return
     }
@@ -102,6 +111,11 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
       thinking,
       effort,
       sandboxMode,
+      // Only what changed, so an untouched page never rewrites the guarded fields.
+      ...(autoImprove === settings!.autoImprove ? {} : { autoImprove }),
+      ...(maxTokens === settings!.improvement.budget.maxTokens && windowDays === settings!.improvement.budget.windowDays
+        ? {}
+        : { improvement: { ...settings!.improvement, budget: { maxTokens, windowDays } } }),
       costCaps: { ...(task === undefined ? {} : { perTask: task }), ...(project === undefined ? {} : { perProject: project }) },
     }
     setStatus('saving')
@@ -165,9 +179,25 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
             <CapEditor label={T.perTask} fields={perTask} onChange={setPerTask} allowWindow={false} testId="cap-task" />
             <CapEditor label={T.perProject} fields={perProject} onChange={setPerProject} allowWindow testId="cap-project" />
           </div>
+          <h3>{T.panelImprovements}</h3>
+          <label className="row">
+            <input type="checkbox" checked={autoImprove} onChange={e => setAutoImprove(e.target.checked)} data-testid="settings-auto-improve" />
+            {T.autoImprove}
+          </label>
+          <p className="muted small wrap">{T.autoImproveHelp}</p>
+          <div className="caps">
+            <label className="field">
+              {T.improvementBudgetTokens}
+              <input type="number" step={1} value={improveTokens} onChange={e => setImproveTokens(e.target.value)} data-testid="settings-improvement-budget" />
+            </label>
+            <label className="field">
+              {T.improvementWindow}
+              <input type="number" step={1} value={improveWindow} onChange={e => setImproveWindow(e.target.value)} data-testid="settings-improvement-window" />
+            </label>
+          </div>
           <div className="row end">
             {status === 'saved' && <span className="ok-text" data-testid="settings-saved">{T.settingsSaved}</span>}
-            {status === 'invalid' && <span className="field-error">请检查：模型不能为空，上限必须是正整数。</span>}
+            {status === 'invalid' && <span className="field-error">请检查：模型不能为空，上限必须是正整数；改进预算和窗口也必须是正整数。</span>}
             <button type="submit" className="primary" disabled={status === 'saving'} data-testid="settings-save">
               {T.save}
             </button>

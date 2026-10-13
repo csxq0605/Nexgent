@@ -3,7 +3,8 @@
  * the step-2 rows (`@nexgent/context`, `@nexgent/skill`, `@nexgent/tasking`)
  * and the step-3 rows (`@nexgent/tool-spreadsheet`, `@nexgent/web`,
  * `@nexgent/ptc`, `@nexgent/subagent`, `@nexgent/workflow`, `@nexgent/team`)
- * and the step-4 row (`@nexgent/capabilities`), with the host plugins the CLI used to wire itself (llm, session,
+ * and the step-4 row (`@nexgent/capabilities`) and the step-5 row
+ * (`@nexgent/evolve`), with the host plugins the CLI used to wire itself (llm, session,
  * workspace) and the SDK's `env` handed to the llm provider and the
  * credentials service, so tests and the acceptance scripts stay hermetic.
  */
@@ -25,6 +26,7 @@ import {
 } from '@nexgent/kernel'
 import { CapabilitiesPlugin } from '@nexgent/capabilities'
 import { ContextPlugin } from '@nexgent/context'
+import { EvolvePlugin } from '@nexgent/evolve'
 import { AnthropicProvider, LLMPlugin, providerOptionsFromConfig, type LLMPluginConfig } from '@nexgent/llm'
 import { PtcPlugin } from '@nexgent/ptc'
 import { SessionPlugin } from '@nexgent/session'
@@ -36,6 +38,7 @@ import { SpreadsheetPlugin } from '@nexgent/tool-spreadsheet'
 import { WebPlugin } from '@nexgent/web'
 import { recoverWorkflows, WorkflowPlugin } from '@nexgent/workflow'
 import { WorkspacePlugin } from '@nexgent/workspace'
+import { IMPROVE_ENTRY } from './improve-entry.js'
 import { TRIAL_ENTRY, TRIAL_ENV_KEYS } from './trial-entry.js'
 
 /** Environment variable that lowers the compaction threshold (read by `@nexgent/context`). */
@@ -100,6 +103,18 @@ export function trialRowConfig(env: Readonly<Record<string, string | undefined>>
 }
 
 /**
+ * The step-5 row, after the step-4 one: `@nexgent/evolve` provides
+ * `ctx.improve` (feedback and check-failure counting, the three triggers,
+ * the job host), starting each improvement job in its own OS process
+ * through the SDK's improve entry (`improve <projectRoot> <jobId>`), with
+ * the same non-secret settings as the gate process.
+ */
+export function step5ProfileRows(env: Readonly<Record<string, string | undefined>>, home?: string): AppProfileRow[] {
+  const trial = trialRowConfig(env, home).trial as { readonly env: JsonObject }
+  return [{ id: 'evolve', name: EvolvePlugin.name, config: { entry: IMPROVE_ENTRY, env: trial.env } }]
+}
+
+/**
  * Work a reopened root session needs before its first new turn: closing the
  * member runs and workflows a dead process left open (`data-formats.md`
  * §子会话与成员 恢复). Each step writes host records between turns.
@@ -118,13 +133,22 @@ export const ROOT_SESSION_RECOVERIES: readonly SessionRecovery[] = [
 ]
 
 /**
- * The SDK's step-3 and step-4 rows minus those a caller's patch inserts itself (same id
+ * The SDK's step-3, step-4 and step-5 rows minus those a caller's patch inserts itself (same id
  * or plugin name): the caller's row wins, so a host that loaded a step-3
  * plugin before the SDK did keeps booting.
  */
 function withoutCallerRows(rows: readonly AppProfileRow[], patches: readonly AppProfilePatchEntry[]): AppProfileRow[] {
   const inserted = patches.filter(isProfileInsert).flatMap(patch => patch.insert)
   return rows.filter(row => !inserted.some(other => other.id === row.id || other.name === row.name))
+}
+
+/** The SDK's step-3, step-4 and step-5 rows; without background processes the gate has no entry and evolve is left out. */
+function sdkRows(env: Readonly<Record<string, string | undefined>>, home: string, background: boolean): AppProfileRow[] {
+  return [
+    ...step3ProfileRows(),
+    ...step4ProfileRows().map(row => (background ? { ...row, config: trialRowConfig(env, home) } : row)),
+    ...(background ? step5ProfileRows(env, home) : []),
+  ]
 }
 
 /** What {@link bootProjectApp} needs. */
@@ -140,6 +164,14 @@ export interface BootOptions {
   readonly patches?: readonly AppProfilePatchEntry[]
   /** Plugins by row name; an entry replaces the SDK's (tests swap the llm row for a scripted model). */
   readonly registry?: Readonly<Record<string, Plugin>>
+  /**
+   * Whether this app starts background processes: the gate after a task
+   * that proposed a candidate, and improvement jobs (default true). The
+   * processes that run on a project copy (gate replays, an improvement
+   * job's sessions) pass false, so a copy never starts a gate or a job of
+   * its own.
+   */
+  readonly background?: boolean
 }
 
 /** Boot the application of one project. */
@@ -166,7 +198,7 @@ export async function bootProjectApp(options: BootOptions): Promise<NexgentApp> 
   const patches: AppProfilePatchEntry[] = [
     { id: 'workspace', config: { root: options.root } },
     ...(options.approvalTimeoutMs === undefined ? [] : [{ id: 'approvals', config: { timeoutMs: options.approvalTimeoutMs } }]),
-    { insert: [...step2ProfileRows(env, options.home), ...withoutCallerRows([...step3ProfileRows(), ...step4ProfileRows().map(row => ({ ...row, config: trialRowConfig(env, options.home) }))], options.patches ?? [])] },
+    { insert: [...step2ProfileRows(env, options.home), ...withoutCallerRows(sdkRows(env, options.home, options.background !== false), options.patches ?? [])] },
     ...(options.patches ?? []),
   ]
   return createApp({
@@ -186,6 +218,7 @@ export async function bootProjectApp(options: BootOptions): Promise<NexgentApp> 
       [WorkflowPlugin.name]: WorkflowPlugin as Plugin,
       [TeamPlugin.name]: TeamPlugin as Plugin,
       [CapabilitiesPlugin.name]: CapabilitiesPlugin as Plugin,
+      [EvolvePlugin.name]: EvolvePlugin as Plugin,
       ...options.registry,
     },
   })

@@ -4,6 +4,7 @@ import { useAppState, useAppStore } from '../hooks.js'
 import { T, fileChangeText, formatBytes, formatTime, goalStatusText, isAbsolutePath } from '../strings.js'
 import { useUi, type PanelTab } from '../ui.js'
 import { CapabilitiesPanel } from './Capabilities.js'
+import { ImprovementsPanel } from './Improvements.js'
 
 const TABS: ReadonlyArray<{ readonly id: PanelTab; readonly label: string }> = [
   { id: 'materials', label: T.panelMaterials },
@@ -11,6 +12,7 @@ const TABS: ReadonlyArray<{ readonly id: PanelTab; readonly label: string }> = [
   { id: 'files', label: T.panelFiles },
   { id: 'goal', label: T.panelGoal },
   { id: 'capabilities', label: T.panelCapabilities },
+  { id: 'improvements', label: T.panelImprovements },
 ]
 
 function Materials(): JSX.Element {
@@ -257,6 +259,7 @@ export function RightPanel({ tab, onTab }: { readonly tab: PanelTab; readonly on
         {tab === 'files' && <Files />}
         {tab === 'goal' && <GoalPanel />}
         {tab === 'capabilities' && <CapabilitiesPanel />}
+        {tab === 'improvements' && <ImprovementsPanel />}
       </div>
     </aside>
   )

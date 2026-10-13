@@ -42,6 +42,9 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workspace
     devDependencies:
+      '@nexgent/evolve':
+        specifier: workspace:*
+        version: link:../../packages/evolve
       '@nexgent/test-support':
         specifier: workspace:*
         version: link:../../packages/test-support
@@ -70,6 +73,9 @@ importers:
       '@nexgent/capabilities':
         specifier: workspace:*
         version: link:../../packages/capabilities
+      '@nexgent/evolve':
+        specifier: workspace:*
+        version: link:../../packages/evolve
       '@nexgent/test-support':
         specifier: workspace:*
         version: link:../../packages/test-support
@@ -237,6 +243,9 @@ importers:
       '@nexgent/context':
         specifier: workspace:*
         version: link:../context
+      '@nexgent/evolve':
+        specifier: workspace:*
+        version: link:../evolve
       '@nexgent/kernel':
         specifier: workspace:*
         version: link:../kernel

@@ -111,6 +111,7 @@ export const T = {
   panelFiles: '文件',
   panelGoal: '目标',
   panelCapabilities: '能力',
+  panelImprovements: '改进',
   noMaterials: '还没有资料。添加的文件会复制到项目里，原文件不会被修改。',
   removeMaterial: '移除',
   addByPath: '按路径添加',
@@ -208,6 +209,36 @@ export const T = {
   pluginApprovalUnreadable: (names: string) => `读不出 ${names} 的 plugin.json（缺失、被改动或格式不对），无法确认它要做什么，所以不能允许。`,
   pluginAllow: '允许并采用',
   pluginDeny: '拒绝',
+  improvementPending: (pending: number, threshold: number) => `已计入 ${pending} / ${threshold} 条反馈`,
+  improvementBudget: (used: string, cap: string, days: number) => `预算 ${used} / ${cap} tokens（${days} 天内）`,
+  improvementRun: '立即改进',
+  improvementJobs: '改进作业',
+  improvementNone: '还没有改进作业。反馈或检查失败累计到阈值，或点“立即改进”后，会出现在这里。',
+  improvementCancel: '取消',
+  improvementCostUnknown: '费用未知',
+  improvementTokens: (n: string) => `${n} tokens`,
+  improvementItems: (n: number) => `${n} 条信号`,
+  improvementDiagnosis: '诊断',
+  improvementHypothesis: '假设',
+  improvementProposal: '建议的组件',
+  improvementFailures: '失败类型',
+  improvementEvidence: (n: number) => `${n} 条证据`,
+  improvementCandidate: '候选',
+  improvementNoCandidate: '还没有产生候选。',
+  improvementGate: '门控结果',
+  improvementNoGate: '还没有门控结果。',
+  improvementPassRate: (cand: string, base: string) => `检查通过率 候选 ${cand} / 基线 ${base}`,
+  improvementFeedbackRate: (cand: string, base: string) => `反馈检查（单独记）候选 ${cand} / 基线 ${base}`,
+  improvementReviewer: '审核模型的意见决定了结果（仅在检查持平时）。',
+  improvementPhases: '各阶段用量',
+  improvementFirstUse: (time: string) => `首次被任务使用：${time}`,
+  improvementRolledBack: (time: string) => `该版本已于 ${time} 回滚。`,
+  autoImprove: '自动改进',
+  autoImproveHelp: '反馈或检查失败累计到阈值时自动在后台改进；手动“立即改进”不受此开关限制，但受预算限制。',
+  improvementBudgetTokens: '改进预算（tokens）',
+  improvementWindow: '预算窗口（天）',
+  improvementSettingsInvalid: '改进预算和窗口必须是正整数。',
+  deliverableImprove: '改进',
 } as const
 
 /** A capability version for people: the baseline in words, a bundle by its short hash. */
@@ -372,8 +403,15 @@ export function turnEndText(reason: TurnEndReason): string | undefined {
   }
 }
 
+const ERROR_WORDS: Record<string, string> = {
+  'improvement/busy': '已有一个改进作业在运行，请等它结束或先取消。',
+  'improvement/budget-exhausted': '改进预算已用尽，调高预算或等窗口过去后再试。',
+  'improvement/not-found': '找不到这个改进作业。',
+}
+
 export function errorText(error: ErrorInfo): string {
-  return `${error.message}（${error.code}）`
+  const words = ERROR_WORDS[error.code]
+  return words !== undefined ? `${words}（${error.code}）` : `${error.message}（${error.code}）`
 }
 
 export function formatBytes(size: number): string {
@@ -392,4 +430,49 @@ export function formatTime(iso: string): string {
 /** Absolute path on POSIX or Windows. */
 export function isAbsolutePath(value: string): boolean {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
+}
+
+/** An improvement job's status in words. */
+export function improvementStatusText(status: string): string {
+  const words: Record<string, string> = {
+    queued: '排队中',
+    diagnosing: '诊断中',
+    proposing: '提出候选中',
+    trialing: '门控试验中',
+    'waiting-history': '等待更多历史任务',
+    'awaiting-approval': '等待审批',
+    adopted: '已采用',
+    rejected: '未采用',
+    'no-proposal': '不是能力问题',
+    'budget-exhausted': '预算用尽',
+    failed: '失败',
+    interrupted: '已中断',
+    cancelled: '已取消',
+  }
+  return words[status] ?? status
+}
+
+/** Statuses a running or waiting job can be cancelled in. */
+export const IMPROVEMENT_CANCELLABLE: readonly string[] = ['queued', 'diagnosing', 'proposing', 'trialing', 'waiting-history']
+
+/** What started an improvement job. */
+export function improvementTriggerText(trigger: string): string {
+  return trigger === 'feedback-count' ? '反馈累计' : trigger === 'explicit' ? '手动' : trigger === 'check-failure' ? '检查失败' : trigger
+}
+
+export function failureCategoryText(category: string): string {
+  const words: Record<string, string> = { 'system-design': '系统设计', 'inter-agent-misalignment': '成员间不一致', 'task-verification': '任务验证' }
+  return words[category] ?? category
+}
+
+export function improvementPhaseText(phase: string): string {
+  return phase === 'diagnose' ? '诊断' : phase === 'propose' ? '提出候选' : phase === 'trial' ? '门控试验' : phase
+}
+
+export function percentText(rate: number): string {
+  return `${Math.round(rate * 100)}%`
+}
+
+export function tokensText(n: number | 'unknown'): string {
+  return n === 'unknown' ? '未知' : n.toLocaleString('en-US')
 }

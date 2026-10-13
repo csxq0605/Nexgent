@@ -156,6 +156,8 @@ export async function runReplay(request: ReplayRunRequest, env: Env = process.en
   const sdk = createSdk({
     appVersion: 'trial',
     env,
+    // A replay runs on a project copy: it starts no gate and no improvement job of its own.
+    background: false,
     approvalResponder: async request => ({ id: request.id, decision: 'deny', scope: 'once', decidedBy: 'headless', reason: 'gate trials run without anyone to ask' }),
     registry: {
       '@nexgent/session': trialSessionPlugin(request, tally),

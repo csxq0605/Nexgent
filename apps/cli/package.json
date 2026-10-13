@@ -30,6 +30,7 @@
     "@nexgent/workspace": "workspace:*"
   },
   "devDependencies": {
+    "@nexgent/evolve": "workspace:*",
     "@nexgent/test-support": "workspace:*"
   }
 }
