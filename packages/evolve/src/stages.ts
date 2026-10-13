@@ -8,7 +8,7 @@ import { listReplayCases } from '@nexgent/capabilities'
 import { JsonlSessionStore } from '@nexgent/session'
 import { SessionFeedbackStore } from '@nexgent/tasking'
 import { diagnosisNudge, diagnosisPrompt, diagnosisTools, sumTurns, type DiagnosisState } from './diagnosis.js'
-import { collectCandidate, findFeedbackTask, newSessionId, prepareProposalCopy, proposalBrief } from './propose.js'
+import { collectCandidate, contextPolicyCheckText, contextPolicyProposeText, findFeedbackTask, newSessionId, pendingContextPolicies, prepareProposalCopy, proposalBrief, proposeRecords } from './propose.js'
 import type { ImprovementStages } from './runner.js'
 import type { ImprovementSessionRunner, ImprovementTurnResult } from './session-runner.js'
 import { trialSpend, trialStatus, type TrialStarter } from './trial.js'
@@ -138,6 +138,17 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
             await input.log(`propose turn ${index + 1}/${task.messages.length}: ${turn.outcome}, ${turn.requestCount} requests`)
             const failure = turnFailure(turn)
             if (failure !== undefined) return { ...sumTurns(turns), outcome: 'failed', detail: `The propose session stopped: ${failure}.` }
+          }
+          // A context policy counts as used only after a later turn completed: one turn to check under it, one to propose it.
+          const policies = pendingContextPolicies(await proposeRecords(layout, copy, sessionId))
+          if (policies.length > 0) {
+            for (const [label, text] of [['check', contextPolicyCheckText(policies)], ['propose', contextPolicyProposeText(policies)]] as const) {
+              const turn = await session.send(text)
+              turns.push(turn)
+              await input.log(`propose turn (context policy ${label}): ${turn.outcome}, ${turn.requestCount} requests`)
+              const failure = turnFailure(turn)
+              if (failure !== undefined) return { ...sumTurns(turns), outcome: 'failed', detail: `The propose session stopped: ${failure}.` }
+            }
           }
         } finally {
           await session.close().catch(() => undefined)

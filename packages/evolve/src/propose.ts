@@ -17,12 +17,18 @@
  *   the runner routed it there, else imported from the copy, and carries
  *   `origin: improvement` and the job id either way. No candidate means the
  *   proposal failed (spec: "没有提出候选就结束的提议记为 failed").
+ * - A context policy counts as used only after a turn that follows its try
+ *   has completed (step 4's rule, unchanged). When the replayed turns end
+ *   with a context policy tried but nothing proposed, the session gets two
+ *   more turns: one to check the deliverable under the policy, one to
+ *   propose it ({@link pendingContextPolicies}).
  */
 import { randomUUID } from 'node:crypto'
 import {
   BASELINE_VERSION,
   NexgentError,
   type CandidateRecord,
+  type CapabilityComponentRef,
   type CapabilityComponentKind,
   type SandboxMode,
   type SessionRecord,
@@ -105,11 +111,50 @@ export function proposalBrief(diagnosis: Pick<Diagnosis, 'hypothesis' | 'proposa
     `While you do the task, build one reusable ${kind} component that makes tasks like this come out right without the user having to ask again:`,
     '1. capability_draft it, 2. capability_try it, 3. actually use it in this task (call its tool, load the skill, …) and finish the task with it,',
     '4. then capability_propose exactly that one component. Propose nothing else and nothing more than one component.',
+    'A context-policy takes effect from the turn after you try it, and counts as used only once such a turn has completed: try it, finish the task, and do not propose it in the same turn; the host then gives you one turn to check the result under the policy and one more to propose it.',
     'Do not mention the improvement job in the deliverable itself.',
     '',
     '# The task',
   ]
   return lines.join('\n')
+}
+
+/**
+ * Context policies the propose session tried while it proposed nothing yet:
+ * they need a further completed turn before `capability_propose` accepts
+ * them. Pure over the session's records.
+ */
+export function pendingContextPolicies(records: readonly SessionRecord[]): CapabilityComponentRef[] {
+  if (records.some(record => record.type === 'capability.propose')) return []
+  const tried = new Map<string, CapabilityComponentRef>()
+  for (const record of records) {
+    if (record.type === 'capability.try' && record.component.kind === 'context-policy') tried.set(record.component.name, record.component)
+  }
+  return [...tried.values()]
+}
+
+/** The propose session's records, from the real project or else the copy (empty when neither has them). */
+export async function proposeRecords(layout: WorkspaceLayout, copy: ReplayProject | undefined, sessionId: string): Promise<readonly SessionRecord[]> {
+  for (const sessionsDir of [layout.sessions, ...(copy === undefined ? [] : [join(copy.root, '.nexgent', 'sessions')])]) {
+    try {
+      return (await new JsonlSessionStore({ sessionsDir }).readAll(sessionId)).records
+    } catch {
+      // not here
+    }
+  }
+  return []
+}
+
+/** The turn that checks the deliverable under a tried context policy (it must complete before the policy counts as used). */
+export function contextPolicyCheckText(policies: readonly CapabilityComponentRef[]): string {
+  const names = policies.map(policy => policy.name).join(', ')
+  return `The context policy ${names} is in effect now. Check the deliverable of the task against what the task asked, under this policy, and fix anything that is off. Do not call capability_try or capability_propose in this turn (trying it again would restart the wait).`
+}
+
+/** The turn that proposes the tried context policy. */
+export function contextPolicyProposeText(policies: readonly CapabilityComponentRef[]): string {
+  const names = policies.map(policy => policy.name).join(', ')
+  return `A turn under the context policy ${names} has completed, so it counts as used. Now call capability_propose with exactly that one component (kind context-policy) and nothing else.`
 }
 
 /** The candidate a propose session produced, after the job's checks. */
