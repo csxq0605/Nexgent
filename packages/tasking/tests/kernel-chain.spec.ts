@@ -130,13 +130,14 @@ describe('tasking in the kernel loop', () => {
     ])
 
     const { records } = await app.ctx.session.readAll(sessionId)
+    // Turn 1 wrote the file before presenting it, so the present request carried the hidden reminder.
     expect(types(records, 1)).toEqual([
-      'turn.start', 'user.message', 'assistant.message', 'tool.result',
+      'turn.start', 'user.message', 'assistant.message', 'tool.result', 'user.message',
       'assistant.message', 'deliverable.presented', 'tool.result', 'assistant.message',
       'turn.files', 'turn.end',
     ])
     expect(types(records, 2)).toEqual([
-      'turn.start', 'feedback', 'user.message', 'assistant.message', 'tool.result',
+      'turn.start', 'feedback', 'user.message', 'assistant.message', 'tool.result', 'user.message',
       'assistant.message', 'deliverable.presented', 'tool.result', 'assistant.message',
       'turn.files', 'turn.end',
     ])

@@ -406,6 +406,17 @@ interface Authorization {
   readonly cancelled: boolean
 }
 
+/**
+ * Sent before the next request after a file-writing tool call while the turn
+ * has presented nothing (see `Agent.needsPresentReminder`).
+ */
+export const PRESENT_REMINDER = '[Nexgent] Project files may have changed in this turn and nothing has been presented yet. '
+  + 'If this work is a result for the user, call `present` with the files that make up the result (main file first) before your final reply; '
+  + 'otherwise the user has nothing to open or comment on.'
+
+/** Steps of a turn between two present reminders. */
+export const PRESENT_REMINDER_EVERY = 8
+
 /** A live agent bound to one locked session. Created by `ctx.agents.create` / `resume`. */
 export class Agent {
   /** The session id; also the agent id. */
@@ -452,6 +463,10 @@ export class Agent {
   private openTurn: number | undefined
   /** The running turn's file tracker, once `beginTurn` succeeded. */
   private turnFiles: TurnFileTracker | undefined
+  /** A file-writing call ran since the last request and nothing is presented: the next request carries the present reminder. */
+  private presentReminderDue = false
+  /** The step of the turn's latest present reminder. */
+  private presentRemindedAt: number | undefined
   /** Per-request injectors (see {@link beforeRequest}). */
   private readonly injectors = new Set<StepInjector>()
   /** Work that keeps the running turn open (see {@link holdTurn}). */
@@ -999,6 +1014,8 @@ export class Agent {
     this.turnDenials = new Set()
     this.turnSections = []
     this.turnFiles = undefined
+    this.presentReminderDue = false
+    this.presentRemindedAt = undefined
     this.turnMaterials = false
     this.stats.turns += 1
     this.openTurn = turn
@@ -1332,6 +1349,8 @@ export class Agent {
         await this.injectStep(turn, step, signal)
         if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
       }
+      // A paused reply's continuation goes out unchanged; the reminder waits for the next request.
+      if (this.messages.at(-1)?.role !== 'assistant') await this.injectPresentReminder(turn, step)
 
       const outcome = await this.requestModel(turn, step, signal)
       tracker.usage = addUsage(tracker.usage, outcome.usage)
@@ -1625,6 +1644,7 @@ export class Agent {
       output = failure('tool/not-found', `unknown tool "${call.name}"`)
     } else {
       output = await this.executeTool(turn, step, call, tool, signal, failure, value => { approval = value }, ms => { durationMs = ms })
+      if (this.needsPresentReminder(tool, output.isError)) this.presentReminderDue = true
     }
 
     await this.writeToolResult(turn, step, call, output, durationMs)
@@ -1644,6 +1664,35 @@ export class Agent {
       durationMs,
       ...this.ledgerAttribution(),
     }, turn)
+  }
+
+  /**
+   * The present reminder (`agent-hooks.md` §成果提醒): after a successful
+   * call of a tool that may write files (`effects` has `write`), in a root
+   * task session with `present` in scope and no deliverable presented in the
+   * task tree yet this turn, the next request carries {@link PRESENT_REMINDER}
+   * as `user.message { source: 'inject' }` (hidden from the history view).
+   * At most once per {@link PRESENT_REMINDER_EVERY} steps of a turn, so a
+   * long turn is reminded again without repeating it every step. Real runs
+   * (step 6, experiment 1) ended code tasks after editing files without
+   * `present`: the user saw no result and could not leave feedback. The
+   * model still picks the files; nothing is presented for it.
+   */
+  private needsPresentReminder(tool: Tool, isError: boolean): boolean {
+    if (isError || tool.definition.name === 'present' || !tool.definition.effects.includes('write')) return false
+    if (this.member !== undefined || this.isImprovementSession) return false
+    return this.init.tree.presentedThisTurn === 0 && this.init.tools.get('present') !== undefined
+  }
+
+  /** Send the due present reminder with this step's request (see {@link needsPresentReminder}). */
+  private async injectPresentReminder(turn: number, step: number): Promise<void> {
+    if (!this.presentReminderDue) return
+    this.presentReminderDue = false
+    if (this.init.tree.presentedThisTurn > 0) return
+    if (this.presentRemindedAt !== undefined && step - this.presentRemindedAt < PRESENT_REMINDER_EVERY) return
+    this.presentRemindedAt = step
+    await this.append({ type: 'user.message', turn, content: PRESENT_REMINDER, source: 'inject' })
+    this.messages.push({ role: 'user', content: PRESENT_REMINDER })
   }
 
   private async executeTool(

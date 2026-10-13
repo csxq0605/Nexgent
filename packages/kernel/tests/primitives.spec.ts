@@ -237,7 +237,7 @@ describe('system prompt, schema check, timeouts, history repair', () => {
     expect(section).toContain('- Write and edit file contents only with `write_file` and `str_replace`. Do not create or modify files through `bash`: ')
     expect(section).toContain('no heredocs (`cat > file <<EOF`), `echo >`, `tee`, `sed -i`, and no Python, Node or other scripts that write or rewrite a file.')
     expect(section).toContain('Use `bash` to run programs, scripts and tests')
-    expect(section).toContain('declare it with `present`')
+    expect(section).toContain('declare the files that make up the result with `present` before your final reply')
     const noPresent = renderSystemPrompt({ ...base, tools: ['write_file', 'str_replace'].map(tool) })
     expect(noPresent).toContain('use `str_replace`; for several changes')
     expect(noPresent).not.toContain('present')

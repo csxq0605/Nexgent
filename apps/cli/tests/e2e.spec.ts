@@ -78,8 +78,10 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     const records = (await readSessionRecords(project, session.sessionId)).records as SessionRecord[]
     // The store may append a `checkpoint` after `turn.end` (data-formats.md policy).
     expect(records.map(r => r.type).filter(type => type !== 'checkpoint')).toEqual([
-      'session.start', 'turn.start', 'user.message', 'assistant.message', 'tool.result', 'assistant.message', 'turn.files', 'turn.end',
+      'session.start', 'turn.start', 'user.message', 'assistant.message', 'tool.result', 'user.message', 'assistant.message', 'turn.files', 'turn.end',
     ])
+    // The file was written and nothing presented: the next request carried the hidden present reminder.
+    expect(records.filter(r => r.type === 'user.message').map(r => (r as { source: string }).source)).toEqual(['user', 'inject'])
     // step 2: the turn's file changes are recorded (`@nexgent/tasking` through the SDK)
     expect(records.find(r => r.type === 'turn.files')).toMatchObject({ changes: [{ path: FILE.path, change: 'added' }] })
     expect(records.every((r, i) => r.seq === i + 1)).toBe(true)
