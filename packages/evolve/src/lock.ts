@@ -2,9 +2,49 @@
  * Small file helpers shared by the queue and the job files: a pid lock file
  * (exclusive create, broken only when its process is dead), process
  * liveness, and atomic JSON writes (temp file, fsync, rename).
+ *
+ * On Windows a rename over a file another process has open, or a read of a
+ * file being replaced, can fail for a moment with EPERM / EBUSY / EACCES (a
+ * sharing violation). Those renames and reads are retried with backoff
+ * ({@link retryTransient}); only when the retries run out is the error
+ * thrown.
  */
 import { randomUUID } from 'node:crypto'
 import { link, open, readFile, rename, rm, stat } from 'node:fs/promises'
+
+/** Error codes of a transient sharing violation (Windows: another process has the file open). */
+export const TRANSIENT_FS_CODES: ReadonlySet<string> = new Set(['EPERM', 'EBUSY', 'EACCES'])
+
+/** Waits between attempts (about 1.6 s in all, 9 attempts). */
+export const TRANSIENT_RETRY_DELAYS_MS: readonly number[] = [10, 20, 40, 80, 160, 320, 500, 500]
+
+/** Whether an error is a transient sharing violation worth retrying. */
+export function isTransientFsError(error: unknown): boolean {
+  return TRANSIENT_FS_CODES.has((error as NodeJS.ErrnoException | null)?.code ?? '')
+}
+
+/**
+ * Run a file operation, retrying it with backoff while it fails with a
+ * transient sharing violation; any other error, or the last attempt's, is
+ * thrown. `stop` (checked after a transient failure) ends the retries early.
+ */
+export async function retryTransient<T>(op: () => Promise<T>, options: { readonly delays?: readonly number[]; readonly stop?: () => Promise<boolean> } = {}): Promise<T> {
+  const delays = options.delays ?? TRANSIENT_RETRY_DELAYS_MS
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await op()
+    } catch (error) {
+      if (!isTransientFsError(error) || attempt >= delays.length) throw error
+      if (options.stop !== undefined && await options.stop()) throw error
+      await new Promise(resolve => setTimeout(resolve, delays[attempt]))
+    }
+  }
+}
+
+/** Read a UTF-8 file, retrying transient sharing violations. */
+function readText(path: string): Promise<string> {
+  return retryTransient(() => readFile(path, 'utf8'))
+}
 
 /** A lock file without a pid younger than this is still being written, not stale. */
 const EMPTY_LOCK_GRACE_MS = 5_000
@@ -24,7 +64,7 @@ export function processAlive(pid: number): boolean {
 export async function readLockPid(path: string): Promise<number | undefined> {
   let raw: string
   try {
-    raw = await readFile(path, 'utf8')
+    raw = await readText(path)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
@@ -76,7 +116,7 @@ export async function breakStaleLock(path: string): Promise<boolean> {
   }
   const aside = `${path}.stale-${randomUUID()}`
   try {
-    await rename(path, aside)
+    await retryTransient(() => rename(path, aside))
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
     throw error
@@ -120,8 +160,18 @@ export async function withFileLock<T>(path: string, fn: () => Promise<T>, option
   }
 }
 
-/** Write JSON atomically: a sibling temp file, fsync, rename over the target. */
-export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+/** File operations {@link writeJsonAtomic} uses (tests substitute a failing rename). */
+export interface AtomicWriteIo {
+  readonly rename?: (from: string, to: string) => Promise<void>
+  readonly delays?: readonly number[]
+}
+
+/**
+ * Write JSON atomically: a sibling temp file, fsync, rename over the target
+ * (retried while the target is held open by another process, as on Windows).
+ */
+export async function writeJsonAtomic(path: string, value: unknown, io: AtomicWriteIo = {}): Promise<void> {
+  const move = io.rename ?? rename
   const temp = `${path}.${randomUUID()}.tmp`
   const handle = await open(temp, 'wx', 0o644)
   try {
@@ -131,7 +181,7 @@ export async function writeJsonAtomic(path: string, value: unknown): Promise<voi
     await handle.close()
   }
   try {
-    await rename(temp, path)
+    await retryTransient(() => move(temp, path), io.delays === undefined ? {} : { delays: io.delays })
   } catch (error) {
     await rm(temp, { force: true })
     throw error
@@ -142,7 +192,7 @@ export async function writeJsonAtomic(path: string, value: unknown): Promise<voi
 export async function readJson(path: string): Promise<unknown> {
   let raw: string
   try {
-    raw = await readFile(path, 'utf8')
+    raw = await readText(path)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
