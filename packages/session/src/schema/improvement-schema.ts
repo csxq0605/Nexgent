@@ -165,7 +165,7 @@ export const improvementSchema: JsonObject = {
       {
         memberId: ref('nonEmptyString'),
         name: { type: 'string' },
-        executionForm: { enum: ['delegated', 'team', 'workflow'] },
+        executionForm: { enum: ['direct', 'delegated', 'team', 'workflow'] },
         usage: ref('usage'),
         requestCount: nonNegativeInteger,
         toolCallCount: nonNegativeInteger,

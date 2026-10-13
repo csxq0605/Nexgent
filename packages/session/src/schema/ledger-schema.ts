@@ -108,7 +108,7 @@ export const ledgerRecordSchema: JsonObject = {
       properties: {
         memberId: ref('nonEmptyString'),
         name: { type: 'string' },
-        executionForm: { enum: ['delegated', 'team', 'workflow'] },
+        executionForm: { enum: ['direct', 'delegated', 'team', 'workflow'] },
         usage: ref('usage'),
         requestCount: { type: 'integer', minimum: 0 },
         toolCallCount: { type: 'integer', minimum: 0 },

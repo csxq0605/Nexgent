@@ -37,7 +37,7 @@ export interface LedgerAttribution {
   readonly taskId?: string
   /** Step 5: the improvement job the record's cost belongs to (its sessions and its trial's runs and reviews). */
   readonly improvementId?: string
-  /** Step 5: which phase of that job; present exactly when `improvementId` is. */
+  /** Step 5: which phase of that job; never without `improvementId`, and on every record carrying it except `improvement.end` (which spans all phases). */
   readonly improvementPhase?: ImprovementPhase
 }
 

@@ -384,7 +384,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `executionForm` | `"direct" \| "delegated" \| "team" \| "workflow"`? | 发出记录的成员的执行形态（步骤 3 加 `team`） |
 | `taskId` | string? | 所属任务树：根会话打开（create / resume）时生成的小写 UUID v4，成员继承 |
 | `improvementId` | string? | 步骤 5：费用所属的改进作业 id（`improvements/<jobId>/`）；改进作业的诊断会话、提议会话、该作业所发试验的运行与评审记录都带 |
-| `improvementPhase` | `"diagnose" \| "propose" \| "trial"`? | 步骤 5：作业阶段；与 `improvementId` 同时出现或同时缺省 |
+| `improvementPhase` | `"diagnose" \| "propose" \| "trial"`? | 步骤 5：作业阶段；有它就必有 `improvementId`。`improvement.end` 汇总全部阶段，只带 `improvementId`、不带它，其余带 `improvementId` 的记录都带它 |
 
 这些字段在所有记录类型上都是可选的（schema 层面）；步骤 1、2 的写入方不写它们。步骤 3 起 kernel 给一个会话写出的每条 `llm.request.*`、`tool.call`、`task.outcome` 都带 `taskId`、`memberId`、`executionForm`（契约 `AgentAttribution`）；步骤 4 起再带 `capabilityVersion`。试验运行的会话在项目的临时副本里，但它们的账本记录写进**真实项目**的账本，带 `trialId` 与 `arm`，所以费用汇总能区分试验与普通任务。
 
@@ -675,7 +675,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `involved` | `{ members, tools, skills, components }` | 涉及的成员名（根会话写 `main`）、工具、技能、能力组件 `{ kind, name }` |
 | `hypothesis` | string | 一句话：缺什么能力导致了反馈，≤500 字符 |
 | `proposalKind` | 组件种类或 `"none"` | `none` 时作业以 `no-proposal` 结束 |
-| `memberCosts` | `MemberCost[]` | 被诊断任务每个成员的用量，由宿主从账本汇总；模型只能引用，不能写 |
+| `memberCosts` | `MemberCost[]` | 被诊断任务每个成员的用量，由宿主从账本汇总，根会话写 `executionForm: "direct"`；模型只能引用，不能写 |
 
 **提议。** 诊断给出组件种类后，宿主把反馈任务第一个根轮开始时的快照复制成临时项目，打开提议会话（`improvement: { jobId, phase: "propose" }`），在副本里用原任务的用户消息（到第一条反馈之前的轮）重新执行。提议会话有普通任务工具与 `STEP4_TOOLS`（`capability_draft / try / propose`），没有诊断工具；它的会话文件与候选写在**真实项目**的 `sessions/` 与 `capabilities/candidates/` 下（文件工具的工作区是副本）。一个作业只提一个候选，一个候选只含一个组件，规则与步骤 4 相同。没有提出候选就结束的提议记为 `failed`。
 
