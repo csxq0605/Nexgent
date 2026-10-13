@@ -10,6 +10,7 @@ import {
   evaluateItem,
   EXIT_FAIL,
   EXIT_NOT_READY,
+  EXIT_PASS,
   LAYERS,
   OPTIONAL_CHECKS,
   parseLayers,
@@ -26,12 +27,10 @@ const plan = fileURLToPath(new URL('../../../docs/plan/step-5-work-partition.md'
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
-/** Step-5 headless items with a judge (round 2). */
-const JUDGED = ['H01', 'H02', 'H03', 'H04', 'H15', 'H16']
-/** Of those, the ones that need the SDK to run the improvement flow (W4); until then they report not-implemented. */
-const NEEDS_SHIPPED = ['H01', 'H02', 'H03', 'H04', 'H15']
-/** Wired so far: the regressions and the judged items. Everything else must report not-implemented. */
-const WIRED = new Set(['H19', ...range('D', 1, 18), ...JUDGED])
+/** Step-5 headless items with a judge (round 3). */
+const JUDGED = range('H', 1, 18)
+/** Wired so far: every headless and desktop item (round 3). The real layer is round 4 and must report not-implemented. */
+const WIRED = new Set([...range('H', 1, 19), ...range('D', 1, 23)])
 
 describe('accept-step5 checklist', () => {
   it('has every item of the step-5 plan in order, plus the D01–D18 regression', async () => {
@@ -71,9 +70,9 @@ describe('accept-step5 checklist', () => {
       const check = CHECKS.find(c => c.id === id)!
       expect(await evaluateItem(check, { step5Error: 'boom' }), id).toEqual({ status: 'failed', evidence: 'step 5 headless scenario failed: boom' })
     }
-    for (const id of NEEDS_SHIPPED) {
+    for (const id of JUDGED.filter(id => id !== 'H16')) {
       const check = CHECKS.find(c => c.id === id)!
-      expect(await evaluateItem(check, { step5: { features: { evolvePackage: false } } }), id).toMatchObject({ status: 'not-implemented' })
+      expect(await evaluateItem(check, { step5: { features: { shipped: false } } }), id).toMatchObject({ status: 'failed' })
     }
   })
 
@@ -112,7 +111,7 @@ describe('scripts/accept-step5.mjs (requires `pnpm build`)', () => {
       const out = join(dir, 'summary.json')
       const childEnv = { ...process.env, ...env }
       for (const [key, value] of Object.entries(env)) if (value === undefined) delete childEnv[key]
-      const result = spawnSync(process.execPath, [script, '--out', out, '--work-dir', join(dir, 'work'), ...args], { encoding: 'utf8', env: childEnv, timeout: 540_000 })
+      const result = spawnSync(process.execPath, [script, '--out', out, '--work-dir', join(dir, 'work'), ...args], { encoding: 'utf8', env: childEnv, timeout: 780_000 })
       const raw = await readFile(out, 'utf8').catch(() => '')
       const summary = raw === '' ? undefined : JSON.parse(raw) as AcceptanceSummary
       return { result, summary, raw }
@@ -121,24 +120,19 @@ describe('scripts/accept-step5.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  // Round 2: H19 and H16 pass; H01–H04 and H15 are checked through the inserted evolve row but stay
-  // not-implemented until the SDK runs the flow (W4); the rest is not wired yet.
-  it('headless layer: H19 and H16 pass, H01–H04 and H15 hold but wait for the SDK, the rest is not-implemented (exit 2)', async () => {
+  // Round 3: the SDK as shipped runs the improvement flow; every headless item passes.
+  it('headless layer: H01–H19 pass through the SDK as shipped (exit 0)', async () => {
     const { result, summary } = await runScript(['--layer', 'headless'])
-    expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
+    expect(result.status, result.stderr).toBe(EXIT_PASS)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
     const items = (summary?.checks ?? []).filter(check => check.id !== undefined)
     expect(items.map(check => check.id)).toEqual(range('H', 1, 19))
-    for (const check of items) {
-      if (check.id === 'H19') expect(check, check.detail).toMatchObject({ status: 'passed', passed: true, detail: 'step 4 H01–H19: all 19 passed (H19 there: step 3 H01–H23)' })
-      else if (check.id === 'H16') expect(check, check.detail).toMatchObject({ status: 'passed', passed: true })
-      else if (NEEDS_SHIPPED.includes(check.id!)) expect(check, `${check.id}: ${check.detail}`).toMatchObject({ status: 'not-implemented', passed: false, detail: expect.stringMatching(/W4.*checked so far: /) })
-      else expect(check, `${check.id}: ${check.detail}`).toMatchObject({ status: 'not-implemented', passed: false })
-    }
+    for (const check of items) expect(check, `${check.id}: ${check.detail}`).toMatchObject({ status: 'passed', passed: true })
+    expect(items.find(check => check.id === 'H19')?.detail).toBe('step 4 H01–H19: all 19 passed (H19 there: step 3 H01–H23)')
     const fixture = (summary?.checks ?? []).filter(check => check.id === undefined)
     expect(fixture).toHaveLength(1)
     expect(fixture[0], fixture[0]?.detail).toMatchObject({ passed: true, detail: expect.stringMatching(/^passed: .*5 feedbacks recorded \(3 count\)/) })
-  }, 600_000)
+  }, 840_000)
 
   it('real layer: no model call this round; exit 2 with or without a key, the key never appears', async () => {
     const keyless = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: undefined, ANTHROPIC_API_KEY: undefined })

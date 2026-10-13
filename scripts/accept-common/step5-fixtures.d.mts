@@ -33,7 +33,7 @@ export interface PlaybookStep {
   readonly toolCalls?: readonly ToolCall[]
   readonly content?: string
 }
-export type PlaybookName = 'improve' | 'not-capability' | 'broken'
+export type PlaybookName = 'improve' | 'not-capability' | 'broken' | 'invalid' | 'two'
 export interface Playbook {
   readonly name: PlaybookName
   readonly title: string
@@ -90,6 +90,10 @@ export declare const CONVENTION_SKILL: { readonly kind: 'skill'; readonly name: 
 export declare const BROKEN_MODULE: { readonly kind: 'function-module'; readonly name: string; readonly function: string; readonly tool: string; readonly files: readonly ComponentFile[] }
 export declare function playbook(name: PlaybookName, ctx: EvidenceRef): Playbook
 export declare const PLAYBOOKS: readonly PlaybookName[]
+export declare const EXTRA_PLAYBOOKS: readonly PlaybookName[]
+export declare const PROPOSAL_MARKER: string
+export declare const MISSING_SESSION: string
+export declare const SECOND_SKILL: { readonly kind: 'skill'; readonly name: string; readonly files: readonly ComponentFile[] }
 export declare function isDiagnosisRequest(body: unknown): boolean
 export declare function isProposalRequest(h: unknown): (body: unknown) => boolean
 export declare function playbookScript(h: unknown, name: PlaybookName, ctx: EvidenceRef): unknown[]
@@ -102,6 +106,8 @@ export declare function runFeedbackProject(
     log?: (line: string) => void
     config?: Record<string, unknown>
     createSdk?: (env: Record<string, string>, home: string) => unknown
+    server?: { readonly baseUrl: string; close(): Promise<void> }
+    tasks?: readonly FamilyTask[]
     beforeFeedback?: (ctx: { sdk: any; projectId: string; root: string; feedbackSession: string }) => Promise<unknown>
     afterFeedback?: (entry: FeedbackSpec, ctx: { sdk: any; projectId: string; root: string; feedbackSession: string; id?: string }) => Promise<unknown>
   },
