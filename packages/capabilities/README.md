@@ -26,6 +26,16 @@
 - 修订按契约 `ActivationRevision` 写：`link` 独占发布、发布前比较链尾；每次采用或回滚先校验决定、发布修订（修订带 `decisionId`），修订发布成功后才写决定记录。两个进程同时发布同一修订恰好一个成功，落败的一方不留决定；门控落败时写 `rejected`（`interrupted`）。
 - 链在某个文件处损坏时停在最后一个有效修订，`problem` 指出文件与原因，不猜、不修复；此时不能再采用或回滚。
 
+## 改进器版本（`ImproverStore`，步骤 6）
+
+`.nexgent/improvers/`（`improversDir(layout)`）是项目级的另一条版本线，与能力包分开采用、分开回滚（ADR 0008 决策 1，`data-formats.md` §改进器版本）。
+
+- `write(bundle)`：按 `assertImproverBundle` 与 schema 校验后，把规范化文本以独占创建写到 `bundles/<version>.json`。同一内容得到同一版本（`improverVersionOf`），已存在不重写；内容等于 `v0` 的版本号就是 `v0`，不写文件。
+- `load(version)`：`v0` 返回内置 `IMPROVER_V0`；其余每次读都检查 schema、上下限与占位符，并核对内容哈希等于版本号。读不到是 `improver/not-found`，其他问题是 `improver/invalid`。
+- `adopt(version, { jobId }, observed?)` 写 `trigger: meta-job` 的修订。`rollback({ trigger, toVersion?, reason? }, observed?)` 不带目标时回到上一个生效的改进器；带目标时只能回到链里更早生效过的版本，`v0` 总可以。回滚是新修订，不删任何文件。两者都用 `activation.ts` 的 `link` 独占发布，并在发布前比较链尾；链尾已变时返回 `null`。两个进程同时采用，恰好一个成功。
+- `resolve()`：读出生效的改进器。读不出或校验不过时写 `load-failure` 回滚（`reason` 写原因），再试上一个，直到 `v0`。链本身损坏时停在最后一个有效修订并报告 `problem`，不再写入；如果这个修订的改进器也读不出，就用 `v0`（`fallback`）。
+- 读文件与独占发布遇到 Windows 共享冲突时，按 `fs-retry.ts` 重试。
+
 ## 加载（`CapabilityService`，`ctx.capabilities`）
 
 - `resolveVersion(recorded?)`：新会话取链尾；校验失败或组件不合格就写 `load-failure` 回滚（`trigger: 'load-failure'`），退回上一可用版本，直到 `baseline`。恢复会话传入记录的版本，仍可用就沿用，否则返回 `switched: { reason: 'unavailable' }` 供宿主写 `capability.version`。链损坏且链尾不可用时按 `baseline` 运行，不写任何修订。

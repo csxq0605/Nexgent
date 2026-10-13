@@ -73,4 +73,15 @@ export { capabilityDraftTool, capabilityProposeTool, capabilityTools, capability
 export { capabilitiesProvider } from './provider.js'
 export { apply, CapabilitiesPlugin, name, type CapabilitiesPluginConfig } from './plugin.js'
 export * from './trial/index.js'
+export {
+  improversDir,
+  improverVersionOf,
+  ImproverStore,
+  V0_IMPROVER_ACTIVATION,
+  type ImproverActivation,
+  type ImproverChain,
+  type ImproverCommit,
+  type ImproverLoadRollback,
+  type ResolvedImprover,
+} from './improvers.js'
 export { isTransientFsError, renameRetrying, retryTransient, RENAME_RETRY_DELAYS_MS, TRANSIENT_RENAME_CODES, type RenameRetryOptions } from './fs-retry.js'
