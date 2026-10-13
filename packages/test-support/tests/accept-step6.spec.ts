@@ -19,7 +19,11 @@ import {
   STEP5_HEADLESS,
   type CheckResult,
 } from '../../../scripts/accept-common/step6-checks.mjs'
-import { COST_WIN_FRACTION, PLAYBOOKS, referenceImproverDecision, type ArmRecord } from '../../../scripts/accept-common/step6-improver-rule.mjs'
+import { arm, changeFor, COST_DOWN_RATIO, PLAYBOOKS, referenceImproverDecision, type ArmLike, type OriginLike } from '../../../scripts/accept-common/step6-improver-rule.mjs'
+import { judgePinned, judgeReport, judgeSets, judgeStore, judgeV0 } from '../../../scripts/accept-common/step6-judges.mjs'
+import { loadExperiment, reportObservation, setsObservation } from '../../../scripts/accept-common/step6-experiment.mjs'
+import { loadCapabilities, storePhase } from '../../../scripts/accept-common/step6-headless.mjs'
+import * as kernel from '@nexgent/kernel'
 import { validateAcceptanceSummary, type AcceptanceSummary } from '../src/index.js'
 
 const script = fileURLToPath(new URL('../../../scripts/accept-step6.mjs', import.meta.url))
@@ -27,8 +31,9 @@ const plan = fileURLToPath(new URL('../../../docs/plan/step-6-work-partition.md'
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
-/** Round 1: only the regressions are wired (H18 = step 5 H01–H19; D01–D23 = step 5's desktop items). */
-const WIRED = new Set(['H18', ...range('D', 1, 23)])
+/** Wired: the regressions (H18, D01–D23), the improver-version items H01–H03, E01 and E04. */
+const WIRED = new Set(['H01', 'H02', 'H03', 'H18', ...range('D', 1, 23), 'E01', 'E04'])
+const experimentDir = fileURLToPath(new URL('../../../scripts/experiment/step6', import.meta.url))
 
 describe('accept-step6 checklist', () => {
   it('has every item of the step-6 plan in order, plus the D01–D23 regression', async () => {
@@ -96,55 +101,233 @@ describe('H18 verdict (step 5 regression)', () => {
   })
 })
 
-describe('parent / child improver rule (the judge\'s recomputation for H10, user decision 4)', () => {
-  const arm = (over: Partial<ArmRecord> = {}): ArmRecord => ({ descendant: true, gatePassed: true, quality: 1, costUsd: 1, ...over })
-  const decide = (parent: Partial<ArmRecord>, child: Partial<ArmRecord>) => referenceImproverDecision(arm(parent), arm(child))
+describe('parent / child improver rule (the judge\'s recomputation for H10; ADR 0008 decision 4)', () => {
+  const origin: OriginLike = { sourceJobId: 'job-1', tree: 't'.repeat(64), feedbackIds: ['f2', 'f1'], capabilityVersion: 'c'.repeat(64), epoch: 'e'.repeat(64) }
+  const make = (name: 'parent' | 'child', over: Record<string, unknown> = {}): ArmLike & Record<string, unknown> =>
+    ({ ...arm(origin, name, { status: 'adopted', offspring: true, passRate: 1, costUsd: 1 }), ...over })
+  const decide = (parent: Record<string, unknown>, child: Record<string, unknown>) => referenceImproverDecision(origin, make('parent', parent), make('child', child))
+  const verdict = (passRate: number, reason = 'quality-up') => ({ verdict: { outcome: 'adopt', reason, passRate: { candidate: passRate, baseline: 0.67 } } })
 
-  it('any unknown in either arm is never adopted, even when the child looks better', () => {
-    expect(decide({ gatePassed: false }, { costUsd: 'unknown' })).toMatchObject({ adopt: false, reason: 'unknown' })
-    expect(decide({ quality: 'unknown' }, { quality: 2 })).toMatchObject({ adopt: false, reason: 'unknown' })
-    expect(decide({ descendant: 'unknown' }, {})).toMatchObject({ adopt: false, reason: 'unknown' })
-    expect(referenceImproverDecision(undefined, arm())).toMatchObject({ adopt: false, reason: 'unknown' })
-    expect(decide({}, { quality: Number.NaN })).toMatchObject({ adopt: false, reason: 'unknown' })
+  it('origins: a different epoch is epoch-mismatch, any other difference origin-mismatch; feedback order does not matter', () => {
+    expect(decide({}, { origin: { ...origin, epoch: 'f'.repeat(64) } })).toEqual({ outcome: 'reject', reason: 'epoch-mismatch' })
+    expect(decide({ origin: { ...origin, tree: 'u'.repeat(64) } }, {})).toEqual({ outcome: 'reject', reason: 'origin-mismatch' })
+    expect(decide({}, { origin: { ...origin, feedbackIds: ['f1'] } })).toEqual({ outcome: 'reject', reason: 'origin-mismatch' })
+    expect(decide({}, { origin: { ...origin, feedbackIds: ['f1', 'f2'] }, cost: { estimatedUsd: 0.5 } })).toEqual({ outcome: 'adopt', reason: 'cost-down' })
+    expect(referenceImproverDecision(undefined, make('parent'), make('child'))).toEqual({ outcome: 'reject', reason: 'unknown-arm' })
   })
 
-  it('a child without a descendant is not adopted, whatever the parent did', () => {
-    expect(decide({ gatePassed: false }, { descendant: false, gatePassed: 'unknown', quality: 'unknown' })).toMatchObject({ adopt: false, reason: 'no-descendant' })
-    expect(decide({ descendant: false, gatePassed: 'unknown', quality: 'unknown' }, { descendant: false, gatePassed: 'unknown', quality: 'unknown' })).toMatchObject({ adopt: false, reason: 'no-descendant' })
+  it('any unknown arm is never adopted, even when the child looks better', () => {
+    expect(decide({ status: 'rejected' }, { cost: { estimatedUsd: 'unknown' } })).toMatchObject({ outcome: 'reject', reason: 'unknown-arm' })
+    expect(decide({ status: 'interrupted' }, {})).toMatchObject({ reason: 'unknown-arm' })
+    expect(decide({}, { status: 'trialing' })).toMatchObject({ reason: 'unknown-arm' })
+    expect(decide({ status: 'failed', error: { code: 'llm/overloaded' } }, {})).toMatchObject({ reason: 'unknown-arm' })
+    expect(decide({ status: 'rejected', verdict: { reason: 'unknown-runs', passRate: { candidate: 0 } } }, {})).toMatchObject({ reason: 'unknown-arm' })
+    // The improver's own failure (invalid diagnosis) is a result, not unknown.
+    expect(decide({ status: 'failed', error: { code: 'improvement/invalid-diagnosis' } }, {})).toMatchObject({ outcome: 'adopt', reason: 'gate-passed' })
   })
 
-  it('the child wins when its descendant passes the gate and the parent\'s does not (or the parent has none)', () => {
-    expect(decide({ gatePassed: false, quality: 0.67 }, { quality: 0.67, costUsd: 5 })).toMatchObject({ adopt: true, reason: 'gate-win' })
-    expect(decide({ descendant: false, gatePassed: 'unknown', quality: 'unknown' }, {})).toMatchObject({ adopt: true, reason: 'gate-win' })
-    expect(decide({}, { gatePassed: false, quality: 2 })).toMatchObject({ adopt: false, reason: 'no-gain' })
-    expect(decide({ gatePassed: false }, { gatePassed: false, quality: 2, costUsd: 0.1 })).toMatchObject({ adopt: false, reason: 'no-gain' })
+  it('a child without offspring is not adopted; a child whose offspring passes the gate where the parent\'s did not is', () => {
+    expect(decide({ status: 'rejected' }, { status: 'no-proposal', candidateId: undefined, verdict: undefined })).toMatchObject({ outcome: 'reject', reason: 'no-offspring' })
+    expect(decide({ status: 'rejected', ...verdict(0.67, 'no-improvement') }, { cost: { estimatedUsd: 5 } })).toEqual({ outcome: 'adopt', reason: 'gate-passed' })
+    expect(decide({ status: 'no-proposal', candidateId: undefined, verdict: undefined }, {})).toEqual({ outcome: 'adopt', reason: 'gate-passed' })
+    // Quality and cost never decide unless both passed.
+    expect(decide({}, { status: 'rejected', ...verdict(1), cost: { estimatedUsd: 0.1 } })).toMatchObject({ outcome: 'reject', reason: 'no-improvement' })
+    expect(decide({ status: 'rejected' }, { status: 'rejected', cost: { estimatedUsd: 0.1 } })).toMatchObject({ outcome: 'reject', reason: 'no-improvement' })
   })
 
-  it('both passed: higher quality wins; equal quality needs at least 10% lower cost', () => {
-    expect(COST_WIN_FRACTION).toBe(0.1)
-    expect(decide({ quality: 0.67 }, { quality: 1, costUsd: 3 })).toMatchObject({ adopt: true, reason: 'quality-win' })
-    expect(decide({ quality: 1 }, { quality: 0.67, costUsd: 0.1 })).toMatchObject({ adopt: false, reason: 'no-gain' })
-    expect(decide({ costUsd: 1 }, { costUsd: 0.85 })).toMatchObject({ adopt: true, reason: 'cost-win' })
-    expect(decide({ costUsd: 1 }, { costUsd: 0.9 })).toMatchObject({ adopt: true, reason: 'cost-win' })
-    expect(decide({ costUsd: 1 }, { costUsd: 0.95 })).toMatchObject({ adopt: false, reason: 'no-gain' })
-    expect(decide({ costUsd: 1 }, { costUsd: 1 })).toMatchObject({ adopt: false, reason: 'no-gain' })
+  it('both passed: higher quality wins; equal quality needs at least 10% lower cost (exactly 10% counts)', () => {
+    expect(COST_DOWN_RATIO).toBe(kernel.IMPROVER_COST_DOWN_RATIO)
+    expect(decide(verdict(0.67), { ...verdict(1), cost: { estimatedUsd: 3 } })).toEqual({ outcome: 'adopt', reason: 'quality-up' })
+    expect(decide(verdict(1), { ...verdict(0.67), cost: { estimatedUsd: 0.1 } })).toMatchObject({ outcome: 'reject', reason: 'no-improvement' })
+    expect(decide({}, { cost: { estimatedUsd: 0.85 } })).toEqual({ outcome: 'adopt', reason: 'cost-down' })
+    expect(decide({}, { cost: { estimatedUsd: 0.9 } })).toEqual({ outcome: 'adopt', reason: 'cost-down' })
+    expect(decide({}, { cost: { estimatedUsd: 0.95 } })).toMatchObject({ reason: 'no-improvement' })
+    expect(decide({ cost: { estimatedUsd: 0 } }, { cost: { estimatedUsd: 0 } })).toMatchObject({ reason: 'no-improvement' })
   })
 
-  it('the scripted playbooks cover the four plan scenarios and their arms decide as expected', () => {
+  it('agrees with the product\'s decideImprover over a grid of arm records (outcome and reason)', () => {
+    expect([...kernel.IMPROVER_DECISION_REASONS].sort()).toEqual(['cost-down', 'epoch-mismatch', 'gate-passed', 'no-improvement', 'no-offspring', 'origin-mismatch', 'quality-up', 'unknown-arm'])
+    const statuses: Array<[string, Record<string, unknown>]> = [
+      ['adopted', {}], ['rejected', {}], ['no-proposal', {}], ['failed', {}], ['failed', { error: { code: 'improvement/invalid-diagnosis', message: 'x' } }],
+      ['failed', { error: { code: 'llm/overloaded', message: 'x' } }], ['interrupted', {}], ['budget-exhausted', {}], ['trialing', {}],
+    ]
+    const arms: Array<Record<string, unknown>> = []
+    for (const [status, extra] of statuses) {
+      for (const offspring of [true, false]) {
+        for (const passRate of [null, 0.67, 1]) {
+          for (const cost of [1, 0.9, 0.95, 0, 'unknown'] as const) {
+            for (const trialReason of ['quality-up', 'unknown-runs']) {
+              if (passRate === null && trialReason !== 'quality-up') continue
+              arms.push({
+                status, ...extra,
+                ...(offspring ? { candidateId: 'cand' } : {}),
+                ...(passRate === null ? {} : { verdict: { outcome: status === 'adopted' ? 'adopt' : 'reject', reason: trialReason, passRate: { candidate: passRate, baseline: 0.67 } } }),
+                cost: { estimatedUsd: cost },
+              })
+            }
+          }
+        }
+      }
+    }
+    const asArm = (name: 'parent' | 'child', fields: Record<string, unknown>, at: OriginLike = origin) => ({ arm: name, improverVersion: name === 'parent' ? 'v0' : 'a'.repeat(64), origin: at, jobId: `${name}-job`, ...fields })
+    let compared = 0
+    const reasons = new Set<string>()
+    for (const parent of arms) {
+      for (const child of arms) {
+        const p = asArm('parent', parent)
+        const c = asArm('child', child)
+        const product = kernel.decideImprover(origin as never, p as never, c as never)
+        const ours = referenceImproverDecision(origin, p, c)
+        if (product.outcome !== ours.outcome || product.reason !== ours.reason) expect({ parent, child, product, ours }).toBeUndefined()
+        reasons.add(ours.reason)
+        compared += 1
+      }
+    }
+    for (const at of [{ ...origin, epoch: 'f'.repeat(64) }, { ...origin, sourceJobId: 'job-2' }, { ...origin, feedbackIds: ['f1', 'f2'] }]) {
+      const p = asArm('parent', arms[0]!)
+      const c = asArm('child', arms[0]!, at)
+      const product = kernel.decideImprover(origin as never, p as never, c as never)
+      expect(referenceImproverDecision(origin, p, c), JSON.stringify(at)).toMatchObject({ outcome: product.outcome, reason: product.reason })
+      reasons.add(product.reason)
+    }
+    expect(compared).toBeGreaterThan(10_000)
+    expect([...reasons].sort()).toEqual([...kernel.IMPROVER_DECISION_REASONS].sort())
+  })
+
+  it('the scripted playbooks cover the four plan scenarios; their changes and arms decide as the product would', () => {
     expect(PLAYBOOKS.map(p => p.id)).toEqual(['improve-the-improver', 'improver-is-fine', 'child-is-worse', 'out-of-bounds-change'])
+    const checked = PLAYBOOKS.map(p => [p.id, p.change === null ? null : kernel.checkImproverChange(kernel.IMPROVER_V0, changeFor(p, kernel.IMPROVER_V0))] as const)
+    expect(checked.map(([id, check]) => [id, check === null ? null : check.ok ? 'ok' : check.refusal])).toEqual([
+      ['improve-the-improver', 'ok'], ['improver-is-fine', null], ['child-is-worse', 'ok'], ['out-of-bounds-change', 'evaluator-field'],
+    ])
     for (const playbook of PLAYBOOKS) {
       if (playbook.arms === null) {
         expect(playbook.expect.status, playbook.id).not.toBe('adopted')
         continue
       }
-      const decision = referenceImproverDecision(playbook.arms.parent, playbook.arms.child)
-      expect(decision.reason, playbook.id).toBe(playbook.expect.reason)
-      expect(decision.adopt, playbook.id).toBe(playbook.expect.status === 'adopted')
-      expect(playbook.expect.nextJobUsesChild, playbook.id).toBe(decision.adopt)
+      const parent = arm(origin, 'parent', playbook.arms.parent)
+      const child = arm(origin, 'child', playbook.arms.child)
+      const decision = referenceImproverDecision(origin, parent, child)
+      expect(decision, playbook.id).toEqual({ outcome: playbook.expect.status === 'adopted' ? 'adopt' : 'reject', reason: playbook.expect.reason })
+      expect(kernel.decideImprover(origin as never, parent as never, child as never), playbook.id).toMatchObject(decision)
+      expect(playbook.expect.nextJobUsesChild, playbook.id).toBe(decision.outcome === 'adopt')
     }
     expect(PLAYBOOKS.find(p => p.id === 'improver-is-fine')?.metaDiagnosis.proposalKind).toBe('none')
-    expect(PLAYBOOKS.find(p => p.id === 'out-of-bounds-change')?.change?.field).toBe('costApprovalRatio')
   })
+})
+
+describe('step-6 judges (counterexamples)', () => {
+  const C = 'c'.repeat(64)
+  const passedRegression: CheckResult = { status: 'passed', evidence: 'step 5 H01–H19: all 19 passed' }
+
+  it('H01: v0 everywhere passes; a job on another version, an improvers dir, a failed step-5 item or no jobs fail', () => {
+    const project = (over: Record<string, unknown> = {}) => ({
+      root: 'main/project',
+      jobs: [{ jobId: 'job-aaaaaaaa', status: 'adopted', improverVersion: 'v0', history: ['queued', 'diagnosing', 'adopted'] }, { jobId: 'job-bbbbbbbb', status: 'budget-exhausted', history: ['queued', 'budget-exhausted'] }],
+      sessions: [{ id: 'session-1', jobId: 'job-aaaaaaaa', phase: 'diagnose', improverVersion: 'v0' }],
+      ledger: [{ type: 'llm.request.end', improvementId: 'job-aaaaaaaa', improvementPhase: 'diagnose', improverVersion: 'v0' }, { type: 'llm.request.end', improvementId: 'job-aaaaaaaa', improvementPhase: 'trial' }],
+      improversDir: false,
+      ...over,
+    })
+    expect(judgeV0({ projects: [project()] }, passedRegression)).toMatchObject({ status: 'passed' })
+    expect(judgeV0({ projects: [project({ jobs: [{ jobId: 'job-cccccccc', status: 'adopted', improverVersion: C, history: [] }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('pinned') })
+    expect(judgeV0({ projects: [project({ jobs: [{ jobId: 'job-cccccccc', status: 'adopted', history: ['diagnosing'] }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('without improverVersion') })
+    expect(judgeV0({ projects: [project({ improversDir: true })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('.nexgent/improvers/') })
+    expect(judgeV0({ projects: [project({ ledger: [{ type: 'llm.request.end', improvementId: 'x', improvementPhase: 'trial', improverVersion: C }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('not on v0') })
+    expect(judgeV0({ projects: [project()] }, { status: 'failed', evidence: 'H07 failed' })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('H07 failed') })
+    expect(judgeV0({ projects: [] }, passedRegression)).toMatchObject({ status: 'failed' })
+    expect(judgeV0(undefined, passedRegression)).toMatchObject({ status: 'failed' })
+  })
+
+  it('H02: the real improver store passes; a broken chain, a deleted file or a missing load-failure rollback fail (requires `pnpm build`)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'nexgent-accept6-store-'))
+    try {
+      const obs = await storePhase(await loadCapabilities(), kernel, dir) as Record<string, any>
+      expect(judgeStore(obs)).toMatchObject({ status: 'passed' })
+      const broken = structuredClone(obs)
+      broken.chain.revisions[1].previous = '0'.repeat(64)
+      expect(judgeStore(broken)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('names previous') })
+      const deleted = structuredClone(obs)
+      deleted.chain.bundlesKept = deleted.chain.bundlesKept.slice(1)
+      expect(judgeStore(deleted)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('removed an improver file') })
+      const loaded = structuredClone(obs)
+      loaded.damage.resolved = { version: loaded.damage.version, rollbacks: [] }
+      expect(judgeStore(loaded)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('resolve gave') })
+      const versions = structuredClone(obs)
+      versions.content.reordered.version = 'f'.repeat(64)
+      expect(judgeStore(versions)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('reordered') })
+      expect(judgeStore(undefined)).toMatchObject({ status: 'failed' })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  it('H03: a pinned job passes; a child-pinned record without a version, a late adoption or a child paragraph in A fail', () => {
+    const good = () => ({
+      adoptedBy: 'ImproverStore.adopt',
+      child: { version: C },
+      adoption: { inForce: C },
+      jobA: { id: 'a', pinnedBeforeAdoption: 'v0', statusAtAdoption: 'diagnosing', status: 'adopted', improverVersion: 'v0', history: ['queued', 'diagnosing', 'proposing', 'trialing', 'adopted'] },
+      jobB: { id: 'b', status: 'rejected', improverVersion: C, history: ['queued', 'diagnosing', 'proposing', 'trialing', 'rejected'] },
+      facts: {
+        sessions: [
+          { id: 's1', jobId: 'a', phase: 'diagnose', improverVersion: 'v0' }, { id: 's2', jobId: 'a', phase: 'propose', improverVersion: 'v0' },
+          { id: 's3', jobId: 'b', phase: 'diagnose', improverVersion: C },
+        ],
+        ledger: [
+          { type: 'llm.request.end', improvementId: 'a', improvementPhase: 'trial' },
+          { type: 'llm.request.end', improvementId: 'b', improvementPhase: 'diagnose', improverVersion: C },
+          { type: 'llm.request.end', improvementId: 'b', improvementPhase: 'trial', improverVersion: C },
+        ],
+      },
+      diagnoseTexts: [{ playbook: 'improve', hasChildParagraph: false }, { playbook: 'notes', hasChildParagraph: true }],
+    })
+    expect(judgePinned(good())).toMatchObject({ status: 'passed' })
+    const unstamped = good()
+    unstamped.facts.ledger.push({ type: 'improvement.end', improvementId: 'b' } as never)
+    expect(judgePinned(unstamped)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('(absent → v0)') })
+    const late = good()
+    late.jobA.statusAtAdoption = 'adopted'
+    expect(judgePinned(late)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('did not land mid-job') })
+    const leaked = good()
+    leaked.facts.sessions[1]!.improverVersion = C
+    expect(judgePinned(leaked)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('propose session header') })
+    const prompt = good()
+    prompt.diagnoseTexts[0]!.hasChildParagraph = true
+    expect(judgePinned(prompt)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('carried the child') })
+    const bOnV0 = good()
+    bOnV0.jobB.improverVersion = 'v0'
+    expect(judgePinned(bOnV0)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('not the child') })
+    expect(judgePinned(undefined)).toMatchObject({ status: 'failed' })
+  })
+
+  it('E01 / E04 over the measurement scripts pass; a differing generation, a missing run or a different second build fail', async () => {
+    const experiment = await loadExperiment(experimentDir)
+    const sets = setsObservation(experiment) as Record<string, any>
+    expect(judgeSets(sets)).toMatchObject({ status: 'passed' })
+    const drifted = structuredClone(sets)
+    drifted.second[3].hashes.message = '0'.repeat(64)
+    expect(judgeSets(drifted)).toMatchObject({ status: 'failed', evidence: expect.stringContaining(drifted.second[3].id) })
+    const overlapping = structuredClone(sets)
+    overlapping.sets.tables.holdout.push(overlapping.sets.tables.dev[0])
+    expect(judgeSets(overlapping)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('more than one set') })
+    expect(judgeSets({ ...sets, problems: ['tables: seed 1 is used more than once'] })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('checkSets') })
+
+    const dir = await mkdtemp(join(tmpdir(), 'nexgent-accept6-report-'))
+    try {
+      const report = await reportObservation(experiment, dir, { iterations: 200 }) as Record<string, any>
+      expect(judgeReport(report)).toMatchObject({ status: 'passed' })
+      expect(judgeReport({ ...report, second: `${report.first}\n` })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('differ') })
+      const runId = report.raw.runs[5].runId as string
+      expect(judgeReport({ ...report, first: report.first.replaceAll(runId, 'x'), second: report.first.replaceAll(runId, 'x'), cli: { code: 0, sameAsInProcess: true } })).toMatchObject({ status: 'failed', evidence: expect.stringContaining(runId) })
+      const cheaper = structuredClone(report)
+      cheaper.raw.costs[0].usd += 2
+      expect(judgeReport(cheaper)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('total cost') })
+      expect(judgeReport({ ...report, flipped: { runId, report: report.first } })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('left the report unchanged') })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 120_000)
 })
 
 describe('scripts/accept-step6.mjs (requires `pnpm build`)', () => {
@@ -163,12 +346,14 @@ describe('scripts/accept-step6.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  it('experiment layer: not runnable before scripts/experiment/step6 exists, or not wired; exit 2, E01–E04 not-implemented', async () => {
+  it('experiment layer: E01 and E04 pass over the measurement scripts; E02 / E03 not implemented, exit 2', async () => {
     const { result, summary } = await runScript(['--layer', 'experiment'])
     expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
     expect(summary?.checks.map(check => check.id)).toEqual(range('E', 1, 4))
-    for (const check of summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'not-implemented' })
+    for (const check of summary?.checks ?? []) {
+      expect(check, check.id).toMatchObject(['E01', 'E04'].includes(check.id ?? '') ? { passed: true, status: 'passed' } : { passed: false, status: 'not-implemented' })
+    }
   }, 150_000)
 
   it('real layer: no model call; without a key or with one, exit 2 and nothing passes; the key never appears', async () => {

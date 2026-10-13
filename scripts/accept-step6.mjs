@@ -14,9 +14,10 @@
  *   real        R01–R08  real Claude model, thinking on, cap 35 USD (user decision 8);
  *                        R07 and R08 (Windows) never decide the exit
  *
- * Round 1 (skeleton): only the regressions (H18, D01–D23) are wired; every other
- * item reports not-implemented and the script exits 2 — never a fake pass. The
- * real layer checks its prerequisites (key, budget) and calls no model.
+ * Wired: the regressions (H18, D01–D23), the improver-version items H01–H03
+ * (step6-headless.mjs) and E01 / E04 (step6-experiment.mjs). Every other item
+ * reports not-implemented and the script exits 2 — never a fake pass. The real
+ * layer checks its prerequisites (key, budget) and calls no model.
  *
  * Usage:
  *   node scripts/accept-step6.mjs [--layer headless,desktop,experiment|real|all] [--out <summary.json>]
@@ -41,6 +42,8 @@ import { desktopPrerequisites } from './accept-common/step2-desktop.mjs'
 import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
 import { budgetGate } from './accept-common/step2-checks.mjs'
 import { step5DesktopCtx, step5HeadlessCtx } from './accept-common/step6-regression.mjs'
+import { runStep6Headless } from './accept-common/step6-headless.mjs'
+import { loadExperiment, reportObservation, setsObservation } from './accept-common/step6-experiment.mjs'
 import {
   CHECKS,
   decideExit,
@@ -102,6 +105,12 @@ async function prepareLayer(layer, harness, options) {
     } catch (error) {
       ctx.regressionError = errorText(error)
     }
+    // H01–H03: step 6's own scenario; H01 reads the step-5 projects the regression just ran.
+    try {
+      ctx.step6 = await runStep6Headless(harness, join(options.work, 'step6'), { step5Work: join(options.work, 'regression', 'step5'), log: line => log(`step6 ${line}`) })
+    } catch (error) {
+      ctx.step6Error = errorText(error)
+    }
     return { ok: true, ctx }
   }
   if (layer === 'desktop') {
@@ -113,7 +122,24 @@ async function prepareLayer(layer, harness, options) {
   if (layer === 'experiment') {
     const present = await access(EXPERIMENT_DIR).then(() => true, () => false)
     if (!present) return { ok: false, reason: 'scripts/experiment/step6 is not there yet (「收益测量」, W6)' }
-    return { ok: true, ctx: { work: options.work, experimentDir: EXPERIMENT_DIR } }
+    const ctx = { work: options.work, experimentDir: EXPERIMENT_DIR, experimentErrors: {} }
+    let experiment
+    try {
+      experiment = await loadExperiment(EXPERIMENT_DIR)
+    } catch (error) {
+      return { ok: false, reason: `scripts/experiment/step6 does not load: ${errorText(error)}` }
+    }
+    try {
+      ctx.sets = setsObservation(experiment)
+    } catch (error) {
+      ctx.experimentErrors.sets = errorText(error)
+    }
+    try {
+      ctx.report = await reportObservation(experiment, join(options.work, 'report'))
+    } catch (error) {
+      ctx.experimentErrors.report = errorText(error)
+    }
+    return { ok: true, ctx }
   }
   // real: prerequisites only; no item is wired, so no model is called.
   const keySource = realModelKeySource(process.env)
@@ -161,7 +187,7 @@ async function main() {
     ...STEP,
     provider: realOnly ? 'real' : 'scripted',
     command: `node scripts/accept-step6.mjs --layer ${layers.join(',')}`,
-    simulated: 'scripted Claude Messages API model server (step 2–5 scenarios for the regressions); checklist H01–H18 / D01–D27 / E01–E04',
+    simulated: 'scripted Claude Messages API model server (step 2–5 scenarios for the regressions, the step-6 improver-version scenario); scripted raw experiment record for E04; checklist H01–H18 / D01–D27 / E01–E04',
   })
 
   const spent = await readSpent(values.spent)

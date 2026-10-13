@@ -8,16 +8,21 @@
  * script exits 2. Item evaluation, the exit rule and the budget gate are
  * step 2's, re-exported unchanged.
  *
- * Round 1 (skeleton): only the regressions are wired. H18 runs step 5's own
- * headless items H01–H19 (H19 there is step 4's, which re-runs step 3's) over
- * fresh runs of their scenarios (`ctx.regression`, the step-5 headless ctx);
- * D01–D23 are step 5's desktop items with their own scenarios and judges (the
- * desktop ctx has step 5's shape). Everything new — H01–H17 (improver versions,
- * meta-improvement jobs, the parent / child comparison, epochs), D24–D27, the
- * experiment layer E01–E04 and the real layer R01–R08 — waits on W0–W6 and
- * reports not-implemented.
+ * Regressions: H18 runs step 5's own headless items H01–H19 (H19 there is step
+ * 4's, which re-runs step 3's) over fresh runs of their scenarios
+ * (`ctx.regression`, the step-5 headless ctx); D01–D23 are step 5's desktop
+ * items with their own scenarios and judges (the desktop ctx has step 5's shape).
+ *
+ * Round 3: the improver-version items run over step6-headless.mjs
+ * (`ctx.step6`: H01 the step-5 projects on v0, H02 the improver store, H03 a
+ * job pinned across an adoption), and the experiment items E01 / E04 over
+ * step6-experiment.mjs (`ctx.sets`, `ctx.report`), judged by step6-judges.mjs.
+ * Still not implemented: H04–H17 (meta-improvement jobs, comparison, epochs;
+ * W2 part 2), D24–D27, E02 / E03 (the experiment runner, W6 part 2) and the real
+ * layer R01–R08.
  */
 import { CHECKS as STEP5_CHECKS, evaluateItem } from './step5-checks.mjs'
+import { judgePinned, judgeReport, judgeSets, judgeStore, judgeV0 } from './step6-judges.mjs'
 
 export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_PASS } from './step2-checks.mjs'
 
@@ -71,6 +76,21 @@ async function step5Regression(ctx) {
   return regressionVerdict(results)
 }
 
+/** A step-6 headless phase's observations, or the failure that kept them out. */
+const step6Phase = (name, judge) => async (ctx) => {
+  if (ctx?.step6Error !== undefined) return { status: 'failed', evidence: `step 6 headless scenario failed: ${ctx.step6Error}` }
+  const error = ctx?.step6?.errors?.[name]
+  if (error !== undefined) return { status: 'failed', evidence: `step 6 ${name} phase failed: ${error}` }
+  return judge(ctx?.step6?.[name], ctx)
+}
+
+/** An experiment-layer observation, or the failure that kept it out. */
+const experimentItem = (name, judge) => async (ctx) => {
+  const error = ctx?.experimentErrors?.[name]
+  if (error !== undefined) return { status: 'failed', evidence: `experiment ${name} failed: ${error}` }
+  return judge(ctx?.[name])
+}
+
 const item = (id, layer, title, run) => (run === undefined ? { id, layer, title } : { id, layer, title, run })
 
 /** D01–D23 from step 5 (D01–D18 are steps 2–4's), judged by their own judges. */
@@ -80,9 +100,9 @@ const desktopRegression = STEP5_CHECKS
 
 /** All checklist items, in plan order (D01–D23 before D24). Add a run to implement one. */
 export const CHECKS = [
-  item('H01', 'headless', 'v0：没有改进器记录的项目用 IMPROVER_V0，步骤 5 的作业行为不变（accept-step5 H01–H19 在 v0 下继续通过）'),
-  item('H02', 'headless', '改进器版本：同内容同版本；采用历史是摘要链；回滚是新修订、不删文件；坏文件不加载并自动退回'),
-  item('H03', 'headless', '固定版本：作业开始时固定改进器版本，作业中途采用新版本不影响它；job.json、改进会话与账本都写同一版本'),
+  item('H01', 'headless', 'v0：没有改进器记录的项目用 IMPROVER_V0，步骤 5 的作业行为不变（accept-step5 H01–H19 在 v0 下继续通过）', step6Phase('v0', async (obs, ctx) => judgeV0(obs, await step5Regression(ctx)))),
+  item('H02', 'headless', '改进器版本：同内容同版本；采用历史是摘要链；回滚是新修订、不删文件；坏文件不加载并自动退回', step6Phase('store', judgeStore)),
+  item('H03', 'headless', '固定版本：作业开始时固定改进器版本，作业中途采用新版本不影响它；job.json、改进会话与账本都写同一版本', step6Phase('pinned', judgePinned)),
   item('H04', 'headless', '元改进触发：第 K−1 个结束作业后不开始，第 K 个后开始；取消与中断的作业不计；开关关时不自动开始，显式触发照常'),
   item('H05', 'headless', '元诊断：只读，合 schema，证据指向真实的作业记录；不合 schema 3 次后 failed；none 时 no-proposal'),
   item('H06', 'headless', '元提案：恰好一个改动、合 schema、在上下限内；改评价器字段、超出上下限、多于一个改动被拒'),
@@ -103,10 +123,10 @@ export const CHECKS = [
   item('D25', 'desktop', '元改进作业详情：元诊断摘要、改动前后对照、父子两臂的后代、门控结论、质量与费用、决定与原因'),
   item('D26', 'desktop', '设置页“元改进”开关与元改进预算可改，重启后保持；关闭后不再自动开始元改进作业'),
   item('D27', 'desktop', '改进器版本可在界面里回滚，回滚后下一个作业用回滚后的版本'),
-  item('E01', 'experiment', '两个任务族的生成器同一种子产出相同文件；四个集合不重叠'),
+  item('E01', 'experiment', '两个任务族的生成器同一种子产出相同文件；四个集合不重叠', experimentItem('sets', judgeSets)),
   item('E02', 'experiment', '隔离：holdout 的用户消息、种子与素材在实验项目的会话、快照与回执里搜不到；门控挑中的用例都不在 holdout'),
   item('E03', 'experiment', '三臂 holdout：每个用例每臂至少 3 次，每次新副本新会话'),
-  item('E04', 'experiment', '报告生成器对同一份原始记录两次生成的报告相同；报告里每个数字都能追到原始记录'),
+  item('E04', 'experiment', '报告生成器对同一份原始记录两次生成的报告相同；报告里每个数字都能追到原始记录', experimentItem('report', judgeReport)),
   item('R01', 'real', '两个任务族各建一个实验项目，跑完 selection 与 guard 的历史任务，留下快照与检查；任务提示不提能力工具'),
   item('R02', 'real', '每个任务族的 dev 任务收到模拟用户反馈后，改进作业自动开始，用改进器 v0，产出诊断、候选与门控结论（结论如实记录）'),
   item('R03', 'real', '每个任务族触发一次元改进作业：元诊断合 schema，元提案是一个合规改动（或 none，如实记录）'),
