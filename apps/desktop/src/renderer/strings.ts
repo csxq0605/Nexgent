@@ -231,7 +231,7 @@ export const T = {
   improvementFeedbackRate: (cand: string, base: string) => `反馈检查（单独记）候选 ${cand} / 基线 ${base}`,
   improvementReviewer: '审核模型的意见决定了结果（仅在检查持平时）。',
   improvementPhases: '各阶段用量',
-  improvementFirstUse: (time: string) => `首次被任务使用：${time}`,
+  improvementFirstUse: (time: string) => `已被后续任务使用：${time}`,
   improvementRolledBack: (time: string) => `该版本已于 ${time} 回滚。`,
   autoImprove: '自动改进',
   autoImproveHelp: '反馈或检查失败累计到阈值时自动在后台改进；手动“立即改进”不受此开关限制，但受预算限制。',

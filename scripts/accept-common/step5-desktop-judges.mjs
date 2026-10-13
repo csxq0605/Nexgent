@@ -40,7 +40,7 @@ export const REASON_WORDS = {
 }
 /** What the tab shows for what started a job. */
 export const TRIGGER_WORDS = { 'feedback-count': '反馈累计', explicit: '手动', 'check-failure': '检查失败' }
-export const LABELS = { firstUse: '首次被任务使用', feedbackRate: '反馈检查（单独记）', passRate: '检查通过率', review: '审核模型的意见', noCandidate: '还没有产生候选', noProposal: '无' }
+export const LABELS = { firstUse: '已被后续任务使用', feedbackRate: '反馈检查（单独记）', passRate: '检查通过率', review: '审核模型的意见', noCandidate: '还没有产生候选', noProposal: '无' }
 const COST_SHOWN = /^≈ \$\d+\.\d\d/
 const PHASE_WORDS = { diagnose: '诊断', propose: '提出候选', trial: '门控试验' }
 const FINAL = ['adopted', 'rejected', 'no-proposal', 'failed', 'budget-exhausted', 'interrupted', 'cancelled', 'awaiting-approval', 'waiting-history']
@@ -205,7 +205,7 @@ export const DESKTOP_JUDGES = {
       [prepared(obs, 'adopted')?.status === 'adopted' && before?.status === 'adopted', 'the job under test was adopted'],
       [before !== undefined && before.firstUse === undefined && (detailBefore?.firstUse === null || detailBefore?.firstUse === undefined), `before the next task the job does not claim a use (file ${JSON.stringify(before?.firstUse)}, screen ${JSON.stringify(detailBefore?.firstUse)})`],
       [typeof use.nextSession === 'string' && use.nextSession !== '', 'the next task ran in a new conversation'],
-      [typeof use.ui === 'string' && use.ui.startsWith(LABELS.firstUse) && /\d/.test(use.ui.slice(LABELS.firstUse.length)), `the 改进 tab shows 首次被任务使用 with a time (got ${JSON.stringify(use.ui)})`],
+      [typeof use.ui === 'string' && use.ui.startsWith(LABELS.firstUse) && /\d/.test(use.ui.slice(LABELS.firstUse.length)), `the 改进 tab shows 已被后续任务使用 with a time (got ${JSON.stringify(use.ui)})`],
       [file !== null && file !== undefined && typeof file.at === 'string' && !Number.isNaN(Date.parse(file.at)), `the job file records the first use with a time (got ${JSON.stringify(file)})`],
       [file?.sessionId === use.nextSession, `the recorded use is the next task's conversation (got ${JSON.stringify(file?.sessionId)}, expected ${use.nextSession})`],
       [typeof use.adoptedDecidedAt === 'string' && typeof file?.at === 'string' && file.at >= use.adoptedDecidedAt, `and it is after the adoption (${use.adoptedDecidedAt} → ${file?.at})`],

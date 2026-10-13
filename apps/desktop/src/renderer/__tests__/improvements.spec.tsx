@@ -93,7 +93,7 @@ describe('improvement jobs in the right panel', () => {
     expect(screen.getByTestId('improvement-gate-review')).toBeTruthy()
     expect(screen.getByTestId('improvement-phases').textContent).toContain('诊断：1,000 tokens')
     expect(screen.getByTestId('improvement-phases').textContent).toContain('门控试验：5,000 tokens')
-    expect(screen.getByTestId('improvement-first-use').textContent).toContain('首次被任务使用：')
+    expect(screen.getByTestId('improvement-first-use').textContent).toContain('已被后续任务使用：')
     // Second click closes it.
     fireEvent.click(within(screen.getByTestId('improvement-job')).getByTestId('improvement-status'))
     await waitFor(() => expect(screen.queryByTestId('improvement-detail')).toBeNull())
