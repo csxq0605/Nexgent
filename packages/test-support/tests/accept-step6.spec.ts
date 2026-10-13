@@ -10,6 +10,7 @@ import {
   evaluateItem,
   EXIT_FAIL,
   EXIT_NOT_READY,
+  EXIT_PASS,
   LAYERS,
   OPTIONAL_CHECKS,
   parseLayers,
@@ -31,8 +32,8 @@ const plan = fileURLToPath(new URL('../../../docs/plan/step-6-work-partition.md'
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
-/** Wired: the regressions (H18, D01–D23), the improver-version items H01–H03, E01 and E04. */
-const WIRED = new Set(['H01', 'H02', 'H03', 'H18', ...range('D', 1, 23), 'E01', 'E04'])
+/** Wired: every headless, desktop and experiment item; the real layer is not. */
+const WIRED = new Set([...range('H', 1, 18), ...range('D', 1, 27), ...range('E', 1, 4)])
 const experimentDir = fileURLToPath(new URL('../../../scripts/experiment/step6', import.meta.url))
 
 describe('accept-step6 checklist', () => {
@@ -101,15 +102,16 @@ describe('H18 verdict (step 5 regression)', () => {
   })
 })
 
-describe('parent / child improver rule (the judge\'s recomputation for H10; ADR 0008 decision 4)', () => {
-  const origin: OriginLike = { sourceJobId: 'job-1', tree: 't'.repeat(64), feedbackIds: ['f2', 'f1'], capabilityVersion: 'c'.repeat(64), epoch: 'e'.repeat(64) }
+describe('parent / child improver rule (the judge\'s recomputation for H10; ADR 0008 decision 4, ADR 0009 origin kind)', () => {
+  const origin: OriginLike = { kind: 'unresolved', sourceJobId: 'job-1', tree: 't'.repeat(64), feedbackIds: ['f2', 'f1'], capabilityVersion: 'c'.repeat(64), epoch: 'e'.repeat(64) }
   const make = (name: 'parent' | 'child', over: Record<string, unknown> = {}): ArmLike & Record<string, unknown> =>
     ({ ...arm(origin, name, { status: 'adopted', offspring: true, passRate: 1, costUsd: 1 }), ...over })
   const decide = (parent: Record<string, unknown>, child: Record<string, unknown>) => referenceImproverDecision(origin, make('parent', parent), make('child', child))
   const verdict = (passRate: number, reason = 'quality-up') => ({ verdict: { outcome: 'adopt', reason, passRate: { candidate: passRate, baseline: 0.67 } } })
 
-  it('origins: a different epoch is epoch-mismatch, any other difference origin-mismatch; feedback order does not matter', () => {
+  it('origins: a different epoch is epoch-mismatch, any other difference (the kind too) origin-mismatch; feedback order does not matter', () => {
     expect(decide({}, { origin: { ...origin, epoch: 'f'.repeat(64) } })).toEqual({ outcome: 'reject', reason: 'epoch-mismatch' })
+    expect(decide({}, { origin: { ...origin, kind: 'feedback-version' } })).toEqual({ outcome: 'reject', reason: 'origin-mismatch' })
     expect(decide({ origin: { ...origin, tree: 'u'.repeat(64) } }, {})).toEqual({ outcome: 'reject', reason: 'origin-mismatch' })
     expect(decide({}, { origin: { ...origin, feedbackIds: ['f1'] } })).toEqual({ outcome: 'reject', reason: 'origin-mismatch' })
     expect(decide({}, { origin: { ...origin, feedbackIds: ['f1', 'f2'] }, cost: { estimatedUsd: 0.5 } })).toEqual({ outcome: 'adopt', reason: 'cost-down' })
@@ -183,7 +185,7 @@ describe('parent / child improver rule (the judge\'s recomputation for H10; ADR 
         compared += 1
       }
     }
-    for (const at of [{ ...origin, epoch: 'f'.repeat(64) }, { ...origin, sourceJobId: 'job-2' }, { ...origin, feedbackIds: ['f1', 'f2'] }]) {
+    for (const at of [{ ...origin, epoch: 'f'.repeat(64) }, { ...origin, sourceJobId: 'job-2' }, { ...origin, feedbackIds: ['f1', 'f2'] }, { ...origin, kind: 'feedback-version' }]) {
       const p = asArm('parent', arms[0]!)
       const c = asArm('child', arms[0]!, at)
       const product = kernel.decideImprover(origin as never, p as never, c as never)
@@ -331,13 +333,13 @@ describe('step-6 judges (counterexamples)', () => {
 })
 
 describe('scripts/accept-step6.mjs (requires `pnpm build`)', () => {
-  async function runScript(args: string[], env: NodeJS.ProcessEnv = {}) {
+  async function runScript(args: string[], env: NodeJS.ProcessEnv = {}, timeout = 120_000) {
     const dir = await mkdtemp(join(tmpdir(), 'nexgent-accept6-test-'))
     try {
       const out = join(dir, 'summary.json')
       const childEnv = { ...process.env, ...env }
       for (const [key, value] of Object.entries(env)) if (value === undefined) delete childEnv[key]
-      const result = spawnSync(process.execPath, [script, '--out', out, '--work-dir', join(dir, 'work'), ...args], { encoding: 'utf8', env: childEnv, timeout: 120_000 })
+      const result = spawnSync(process.execPath, [script, '--out', out, '--work-dir', join(dir, 'work'), ...args], { encoding: 'utf8', env: childEnv, timeout })
       const raw = await readFile(out, 'utf8').catch(() => '')
       const summary = raw === '' ? undefined : JSON.parse(raw) as AcceptanceSummary
       return { result, summary, raw }
@@ -346,15 +348,13 @@ describe('scripts/accept-step6.mjs (requires `pnpm build`)', () => {
     }
   }
 
-  it('experiment layer: E01 and E04 pass over the measurement scripts; E02 / E03 not implemented, exit 2', async () => {
-    const { result, summary } = await runScript(['--layer', 'experiment'])
-    expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
+  it('experiment layer: E01–E04 pass over the measurement scripts and a scripted rehearsal of the runner, exit 0', async () => {
+    const { result, summary } = await runScript(['--layer', 'experiment'], {}, 900_000)
+    expect(result.status, result.stderr.slice(-4000)).toBe(EXIT_PASS)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
     expect(summary?.checks.map(check => check.id)).toEqual(range('E', 1, 4))
-    for (const check of summary?.checks ?? []) {
-      expect(check, check.id).toMatchObject(['E01', 'E04'].includes(check.id ?? '') ? { passed: true, status: 'passed' } : { passed: false, status: 'not-implemented' })
-    }
-  }, 150_000)
+    for (const check of summary?.checks ?? []) expect(check, `${check.id} ${JSON.stringify(check)}`).toMatchObject({ passed: true, status: 'passed' })
+  }, 960_000)
 
   it('real layer: no model call; without a key or with one, exit 2 and nothing passes; the key never appears', async () => {
     const keyless = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: undefined, ANTHROPIC_API_KEY: undefined })

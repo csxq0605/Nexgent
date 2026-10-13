@@ -17,12 +17,20 @@
  * (`ctx.step6`: H01 the step-5 projects on v0, H02 the improver store, H03 a
  * job pinned across an adoption), and the experiment items E01 / E04 over
  * step6-experiment.mjs (`ctx.sets`, `ctx.report`), judged by step6-judges.mjs.
- * Still not implemented: H04–H17 (meta-improvement jobs, comparison, epochs;
- * W2 part 2), D24–D27, E02 / E03 (the experiment runner, W6 part 2) and the real
- * layer R01–R08.
+ *
+ * Round 4: the meta-improvement items H04–H17 over step6-meta.mjs (`ctx.step6Meta`:
+ * a trigger project, an adopting and a rejecting comparison; H07 judges the
+ * origin by ADR 0009), judged by step6-meta-judges.mjs; D24–D27 over
+ * step6-desktop.mjs (`ctx.step6Desktop`), judged by step6-desktop-judges.mjs;
+ * E02 / E03 over a scripted rehearsal of scripts/experiment/step6
+ * (step6-rehearsal.mjs, `ctx.rehearsal`), judged by step6-rehearsal-judges.mjs.
+ * Still not implemented: the real layer R01–R08.
  */
 import { CHECKS as STEP5_CHECKS, evaluateItem } from './step5-checks.mjs'
+import { DESKTOP_JUDGES } from './step6-desktop-judges.mjs'
 import { judgePinned, judgeReport, judgeSets, judgeStore, judgeV0 } from './step6-judges.mjs'
+import { META_JUDGES } from './step6-meta-judges.mjs'
+import { judgeHoldoutArms, judgeIsolation as judgeRehearsalIsolation } from './step6-rehearsal-judges.mjs'
 
 export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_PASS } from './step2-checks.mjs'
 
@@ -84,6 +92,21 @@ const step6Phase = (name, judge) => async (ctx) => {
   return judge(ctx?.step6?.[name], ctx)
 }
 
+/** A meta-improvement item over the step-6 meta scenario; a crashed phase fails every item. */
+const metaItem = id => async (ctx) => {
+  if (ctx?.step6MetaError !== undefined) return { status: 'failed', evidence: `step 6 meta scenario failed: ${ctx.step6MetaError}` }
+  if (ctx?.step6Meta === undefined) return { status: 'failed', evidence: 'step 6 meta scenario did not run' }
+  const crashed = Object.entries(ctx.step6Meta.errors ?? {})
+  if (crashed.length > 0) return { status: 'failed', evidence: `step 6 meta ${crashed.map(([name, error]) => `${name} phase failed: ${String(error).split('\n')[0]}`).join('; ')}` }
+  return META_JUDGES[id](ctx.step6Meta)
+}
+
+/** A step-6 desktop item over the improver scenario. */
+const desktopItem = id => async (ctx) => {
+  if (ctx?.step6DesktopError !== undefined) return { status: 'failed', evidence: `step 6 desktop scenario failed: ${ctx.step6DesktopError}` }
+  return DESKTOP_JUDGES[id](ctx?.step6Desktop)
+}
+
 /** An experiment-layer observation, or the failure that kept it out. */
 const experimentItem = (name, judge) => async (ctx) => {
   const error = ctx?.experimentErrors?.[name]
@@ -103,29 +126,29 @@ export const CHECKS = [
   item('H01', 'headless', 'v0：没有改进器记录的项目用 IMPROVER_V0，步骤 5 的作业行为不变（accept-step5 H01–H19 在 v0 下继续通过）', step6Phase('v0', async (obs, ctx) => judgeV0(obs, await step5Regression(ctx)))),
   item('H02', 'headless', '改进器版本：同内容同版本；采用历史是摘要链；回滚是新修订、不删文件；坏文件不加载并自动退回', step6Phase('store', judgeStore)),
   item('H03', 'headless', '固定版本：作业开始时固定改进器版本，作业中途采用新版本不影响它；job.json、改进会话与账本都写同一版本', step6Phase('pinned', judgePinned)),
-  item('H04', 'headless', '元改进触发：第 K−1 个结束作业后不开始，第 K 个后开始；取消与中断的作业不计；开关关时不自动开始，显式触发照常'),
-  item('H05', 'headless', '元诊断：只读，合 schema，证据指向真实的作业记录；不合 schema 3 次后 failed；none 时 no-proposal'),
-  item('H06', 'headless', '元提案：恰好一个改动、合 schema、在上下限内；改评价器字段、超出上下限、多于一个改动被拒'),
-  item('H07', 'headless', '同一起点：两臂的快照摘要、反馈集与纪元 id 相同；人为改动其中一份时不比较'),
-  item('H08', 'headless', '隔离：父子比较全程在副本里，真实项目的文件、会话、能力、成果与采用历史不变'),
-  item('H09', 'headless', '子必须真跑：子改进器在副本里跑完一次作业并产出后代才可能被采用；没产出后代时不采用'),
-  item('H10', 'headless', '比较规则：decideImprover 的结论与按规则从两臂记录重新算出的一致；任何 unknown 不采用'),
-  item('H11', 'headless', '采用后生效：新 OS 进程里下一个真实改进作业用子改进器版本，账本可证；“首次被使用”指向这个作业'),
-  item('H12', 'headless', '拒绝：拒绝原因、改动、两臂结果保留，父改进器照常使用'),
-  item('H13', 'headless', '纪元：评价器设置改动后纪元 id 变化；跨纪元不比较；改进器与元提案写不到评价器设置'),
-  item('H14', 'headless', '预算与费用：元改进预算用尽即停，记 budget-exhausted；元改进费用带 metaJobId 与阶段，与普通作业、普通任务分开可查'),
-  item('H15', 'headless', '并发与恢复：元改进作业与普通作业共用作业位；元改进作业进程被强杀后下次启动标为中断，不重跑'),
-  item('H16', 'headless', '副本保留：默认决定写完后删除比较副本；实验选项下保留并登记，超过上限时拒绝'),
-  item('H17', 'headless', '账本完整：新记录与字段全部通过 schema；.nexgent/ 与导出物中搜不到测试密钥'),
+  item('H04', 'headless', '元改进触发：第 K−1 个结束作业后不开始，第 K 个后开始；取消与中断的作业不计；开关关时不自动开始，显式触发照常', metaItem('H04')),
+  item('H05', 'headless', '元诊断：只读，合 schema，证据指向真实的作业记录；不合 schema 3 次后 failed；none 时 no-proposal', metaItem('H05')),
+  item('H06', 'headless', '元提案：恰好一个改动、合 schema、在上下限内；改评价器字段、超出上下限、多于一个改动被拒', metaItem('H06')),
+  item('H07', 'headless', '同一起点：两臂的快照摘要、反馈集与纪元 id 相同；人为改动其中一份时不比较；起点按 ADR 0009 选取（先找未解决的作业，再退回反馈当时的能力版本）并写明种类，种类不同也不比较', metaItem('H07')),
+  item('H08', 'headless', '隔离：父子比较全程在副本里，真实项目的文件、会话、能力、成果与采用历史不变', metaItem('H08')),
+  item('H09', 'headless', '子必须真跑：子改进器在副本里跑完一次作业并产出后代才可能被采用；没产出后代时不采用', metaItem('H09')),
+  item('H10', 'headless', '比较规则：decideImprover 的结论与按规则从两臂记录重新算出的一致；任何 unknown 不采用', metaItem('H10')),
+  item('H11', 'headless', '采用后生效：新 OS 进程里下一个真实改进作业用子改进器版本，账本可证；“首次被使用”指向这个作业', metaItem('H11')),
+  item('H12', 'headless', '拒绝：拒绝原因、改动、两臂结果保留，父改进器照常使用', metaItem('H12')),
+  item('H13', 'headless', '纪元：评价器设置改动后纪元 id 变化；跨纪元不比较；改进器与元提案写不到评价器设置', metaItem('H13')),
+  item('H14', 'headless', '预算与费用：元改进预算用尽即停，记 budget-exhausted；元改进费用带 metaJobId 与阶段，与普通作业、普通任务分开可查', metaItem('H14')),
+  item('H15', 'headless', '并发与恢复：元改进作业与普通作业共用作业位；元改进作业进程被强杀后下次启动标为中断，不重跑', metaItem('H15')),
+  item('H16', 'headless', '副本保留：默认决定写完后删除比较副本；实验选项下保留并登记，超过上限时拒绝', metaItem('H16')),
+  item('H17', 'headless', '账本完整：新记录与字段全部通过 schema；.nexgent/ 与导出物中搜不到测试密钥', metaItem('H17')),
   item('H18', 'headless', '回归：accept-step5 的 H01–H19（含步骤 3、4 回归）继续通过', step5Regression),
   ...desktopRegression,
-  item('D24', 'desktop', '“改进”页每个作业显示所用的改进器版本；元改进作业有单独的标记'),
-  item('D25', 'desktop', '元改进作业详情：元诊断摘要、改动前后对照、父子两臂的后代、门控结论、质量与费用、决定与原因'),
-  item('D26', 'desktop', '设置页“元改进”开关与元改进预算可改，重启后保持；关闭后不再自动开始元改进作业'),
-  item('D27', 'desktop', '改进器版本可在界面里回滚，回滚后下一个作业用回滚后的版本'),
+  item('D24', 'desktop', '“改进”页每个作业显示所用的改进器版本；元改进作业有单独的标记', desktopItem('D24')),
+  item('D25', 'desktop', '元改进作业详情：元诊断摘要、改动前后对照、父子两臂的后代、门控结论、质量与费用、决定与原因', desktopItem('D25')),
+  item('D26', 'desktop', '设置页“元改进”开关与元改进预算可改，重启后保持；关闭后不再自动开始元改进作业', desktopItem('D26')),
+  item('D27', 'desktop', '改进器版本可在界面里回滚，回滚后下一个作业用回滚后的版本', desktopItem('D27')),
   item('E01', 'experiment', '两个任务族的生成器同一种子产出相同文件；四个集合不重叠', experimentItem('sets', judgeSets)),
-  item('E02', 'experiment', '隔离：holdout 的用户消息、种子与素材在实验项目的会话、快照与回执里搜不到；门控挑中的用例都不在 holdout'),
-  item('E03', 'experiment', '三臂 holdout：每个用例每臂至少 3 次，每次新副本新会话'),
+  item('E02', 'experiment', '隔离：holdout 的用户消息、种子与素材在实验项目的会话、快照与回执里搜不到；门控挑中的用例都不在 holdout', experimentItem('rehearsal', judgeRehearsalIsolation)),
+  item('E03', 'experiment', '三臂 holdout：每个用例每臂至少 3 次，每次新副本新会话', experimentItem('rehearsal', judgeHoldoutArms)),
   item('E04', 'experiment', '报告生成器对同一份原始记录两次生成的报告相同；报告里每个数字都能追到原始记录', experimentItem('report', judgeReport)),
   item('R01', 'real', '两个任务族各建一个实验项目，跑完 selection 与 guard 的历史任务，留下快照与检查；任务提示不提能力工具'),
   item('R02', 'real', '每个任务族的 dev 任务收到模拟用户反馈后，改进作业自动开始，用改进器 v0，产出诊断、候选与门控结论（结论如实记录）'),

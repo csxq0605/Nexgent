@@ -12,8 +12,8 @@
  *
  * The rule, in order:
  *   1. the arms' epochs differ from each other or from the origin → reject `epoch-mismatch`;
- *      any other origin difference (source job, snapshot tree, feedback set, capability
- *      version) → reject `origin-mismatch`;
+ *      any other origin difference (origin kind (ADR 0009), source job, snapshot tree,
+ *      feedback set, capability version) → reject `origin-mismatch`;
  *   2. either arm unknown → reject `unknown-arm`. Unknown: the job did not finish, or ended
  *      interrupted / cancelled / budget-exhausted, or failed on an error other than its own
  *      invalid diagnosis, or its trial ended unknown-runs / budget-exhausted, or its cost is
@@ -38,7 +38,7 @@ const UNKNOWN_TRIALS = new Set(['unknown-runs', 'budget-exhausted'])
 const knownNumber = value => typeof value === 'number' && Number.isFinite(value)
 
 function sameOrigin(a, b) {
-  const key = o => JSON.stringify([o?.sourceJobId, o?.tree, o?.capabilityVersion, [...(o?.feedbackIds ?? [])].sort()])
+  const key = o => JSON.stringify([o?.kind, o?.sourceJobId, o?.tree, o?.capabilityVersion, [...(o?.feedbackIds ?? [])].sort()])
   return key(a) === key(b)
 }
 
