@@ -151,7 +151,7 @@ export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunn
 
 /** The gate for a job's candidate: the step-4 gate process's work, in this process. */
 export function gateTrialStarter(env: Env = process.env): TrialStarter {
-  return ({ layout, candidateId, comparison }) => runGateProcess(layout.root, candidateId, env, { comparison })
+  return ({ layout, candidateId, comparison, epoch }) => runGateProcess(layout.root, candidateId, env, { comparison, ...(epoch === undefined ? {} : { epoch }) })
 }
 
 /** Run one job (the `improve` mode); returns the jobs this process ran. */

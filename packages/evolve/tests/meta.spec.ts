@@ -12,7 +12,7 @@ import {
   type LedgerRecord,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { CapabilityStore, improversDir, ImproverStore } from '@nexgent/capabilities'
+import { CapabilityStore, improversDir, ImproverStore, projectEpoch } from '@nexgent/capabilities'
 import { JsonlLedger, validateImprovementFile } from '@nexgent/session'
 import {
   createImprovementStages,
@@ -77,10 +77,10 @@ function runner(scripts: Record<string, Script | undefined>, tokens = 100): Impr
 }
 
 /** A gate that decides as told per arm (`real` for a job outside any comparison). */
-function gate(outcomes: { real?: 'adopted' | 'rejected'; parent?: 'adopted' | 'rejected'; child?: 'adopted' | 'rejected' }): TrialStarter & { calls: { arm: string; root: string }[] } {
-  const starter = async ({ layout, candidateId, job }: Parameters<TrialStarter>[0]): Promise<GateOutcome> => {
+function gate(outcomes: { real?: 'adopted' | 'rejected'; parent?: 'adopted' | 'rejected'; child?: 'adopted' | 'rejected' }): TrialStarter & { calls: { arm: string; root: string; epoch?: string }[] } {
+  const starter = async ({ layout, candidateId, job, epoch }: Parameters<TrialStarter>[0]): Promise<GateOutcome> => {
     const arm = job.arm?.arm ?? 'real'
-    starter.calls.push({ arm, root: layout.root })
+    starter.calls.push({ arm, root: layout.root, ...(epoch === undefined ? {} : { epoch }) })
     const outcome = outcomes[arm] ?? 'rejected'
     const trialId = randomUUID()
     const decision: CapabilityDecision = await new CapabilityStore(layout.capabilities).recordDecision({
@@ -89,7 +89,7 @@ function gate(outcomes: { real?: 'adopted' | 'rejected'; parent?: 'adopted' | 'r
     })
     return { status: 'decided', trialId, decision }
   }
-  starter.calls = [] as { arm: string; root: string }[]
+  starter.calls = [] as { arm: string; root: string; epoch?: string }[]
   return starter
 }
 
@@ -208,6 +208,8 @@ describe('a meta job end to end (scripted)', () => {
     expect(arms.map(request => request.improverVersion)).toEqual(['v0', 'v0', childVersion, childVersion])
     expect(startTrial.calls.map(call => call.arm)).toEqual(['parent', 'child'])
     expect(startTrial.calls.every(call => call.root !== fixture.layout.root)).toBe(true)
+    // Each arm's gate is held to the origin's evaluator epoch, the project's.
+    expect(startTrial.calls.map(call => call.epoch)).toEqual([await projectEpoch(fixture.layout), await projectEpoch(fixture.layout)])
 
     // The records: meta diagnosis, change and comparison, all schema-valid.
     const paths = jobPaths(directory, meta.id)
@@ -229,7 +231,7 @@ describe('a meta job end to end (scripted)', () => {
     expect(comparison.verdict).toEqual({ outcome: 'adopt', reason: 'gate-passed' })
     expect(comparison.kept).toBeUndefined()
     // Copies are gone, and nothing of the arms reached the real project's jobs or capabilities.
-    expect((await readdir(copies)).filter(name => name.startsWith('nexgent-meta-'))).toEqual([])
+    expect((await readdir(copies)).filter(name => name.startsWith('nexgent-arm-'))).toEqual([])
     expect((await listJobs(directory)).map(job => job.id).sort()).toEqual([source.id, meta.id].sort())
     expect((await new CapabilityStore(fixture.layout.capabilities).decisions())).toHaveLength(1)
 
@@ -263,7 +265,7 @@ describe('a meta job end to end (scripted)', () => {
     expect(comparison.child.candidateId).toBeUndefined()
     expect(comparison.kept?.parent?.root.startsWith(copies)).toBe(true)
     expect(comparison.kept?.child?.bytes).toBeGreaterThan(0)
-    expect((await readdir(copies)).filter(name => name.startsWith('nexgent-meta-')).sort()).toHaveLength(2)
+    expect((await readdir(copies)).filter(name => name.startsWith('nexgent-arm-')).sort()).toHaveLength(2)
     // Each arm job's improvement.end (in its kept copy) names its pinned improver, the meta job and the arm.
     for (const arm of ['parent', 'child'] as const) {
       const ends = await ledgerOf(resolveWorkspaceLayout(comparison.kept![arm]!.root), 'improvement.end')
@@ -273,12 +275,17 @@ describe('a meta job end to end (scripted)', () => {
     }
   })
 
-  it('without a price table every arm cost is unknown, so nothing is adopted (unknown-arm)', async () => {
+  it('without a price table every arm cost is unknown, so nothing is adopted (unknown-arm); copies too large to keep are removed', async () => {
     const { fixture, directory, metaScripts } = await withSource()
-    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0' })
+    const copies = await tempDir()
+    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0', keepCopies: true })
     const scripted = runner({ ...metaScripts, 'parent:diagnose': diagnoseKind(fixture), 'parent:propose': proposeInCopy(fixture), 'child:diagnose': diagnoseKind(fixture), 'child:propose': proposeInCopy(fixture) })
-    await runImprovementJob(fixture.layout, meta.id, { stages: createImprovementStages({ runner: scripted, startTrial: gate({ parent: 'rejected', child: 'adopted' }), tempRoot: await tempDir() }), chain: false })
+    await runImprovementJob(fixture.layout, meta.id, { stages: createImprovementStages({ runner: scripted, startTrial: gate({ parent: 'rejected', child: 'adopted' }), tempRoot: copies, keepMaxBytes: 1 }), chain: false })
     expect(await readJob(directory, meta.id)).toMatchObject({ status: 'rejected', meta: { compared: { reason: 'unknown-arm' } } })
+    const comparison = JSON.parse(await readFile(jobPaths(directory, meta.id).comparison, 'utf8')) as ImproverComparison
+    expect(comparison.kept).toBeUndefined()
+    expect(await readdir(copies)).toEqual([])
+    expect(await readFile(jobPaths(directory, meta.id).log, 'utf8')).toContain('too large to keep')
   })
 
   it('a meta diagnosis of none ends no-proposal without a proposal or comparison', async () => {

@@ -9,33 +9,25 @@
  *    parent ({@link metaProposeTools}); the child is stored, not adopted.
  * 3. compare: the origin (the last finished feedback-triggered job before
  *    the meta job: its feedback task's snapshot tree, feedback ids, the
- *    capability version it started on, the evaluator epoch) is copied into
- *    two project copies; in each, an arm job (a capability job carrying
+ *    capability version it started on, the evaluator epoch) becomes two
+ *    project copies (the gate's `prepareProjectCopy`); in each, an arm job (a capability job carrying
  *    `arm`) runs diagnose → propose → gate on the parent or the child
  *    improver. The gate adopts only inside its copy; offspring never reach
  *    the real project. `decideImprover` concludes; on `adopt` the child is
  *    adopted in the project's `ImproverStore` (`trigger: meta-job`) and the
- *    next real job runs on it. The copies are removed unless `keepCopies`.
+ *    next real job runs on it. The copies are removed unless `keepCopies`
+ *    (and they are small enough).
  *
- * The epoch is the SHA-256 of `canonicalEvaluatorText(evaluatorSettings())`
- * of the project's capabilities settings (ADR 0008 decision 5); the gate
- * writes the same into `TrialPlan.epoch` (W4).
+ * The epoch is the gate's `projectEpoch` (ADR 0008 decision 5); each arm's
+ * gate is started with the origin's epoch and refuses to run in another.
  */
-import { createHash } from 'node:crypto'
-import { cp, mkdtemp, readdir, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, relative, sep } from 'node:path'
 import {
   addUsage,
   BASELINE_VERSION,
-  canonicalEvaluatorText,
   decideImprover,
-  evaluatorSettings,
   IMPROVER_LIMITS,
   isFinalImprovementStatus,
   NexgentError,
-  readProjectConfig,
-  resolveWorkspaceLayout,
   ZERO_USAGE,
   type ArmCost,
   type CapabilityDecision,
@@ -52,7 +44,7 @@ import {
   type MetaJobState,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { CapabilityStore, improversDir, ImproverStore } from '@nexgent/capabilities'
+import { CapabilityStore, improversDir, ImproverStore, prepareProjectCopy, projectEpoch, type ProjectCopy } from '@nexgent/capabilities'
 import { JsonlLedger, validateImprovementFile } from '@nexgent/session'
 import { sumTurns } from './diagnosis.js'
 import type { ImproverSource, PinnedImprover } from './improver.js'
@@ -114,7 +106,12 @@ export interface MetaStages {
 }
 
 /** The arm job's runner (injected so the meta stages can run a whole capability job in a copy). */
-export type ArmJobRunner = (layout: WorkspaceLayout, jobId: string, options: { readonly improvers: ImproverSource; readonly runner: ImprovementSessionRunner }) => Promise<unknown>
+export type ArmJobRunner = (layout: WorkspaceLayout, jobId: string, options: {
+  readonly improvers: ImproverSource
+  readonly runner: ImprovementSessionRunner
+  /** The origin's evaluator epoch: the arm's gate refuses to run in another. */
+  readonly epoch: string
+}) => Promise<unknown>
 
 /** What {@link createMetaStages} needs. */
 export interface MetaStagesOptions {
@@ -124,6 +121,8 @@ export interface MetaStagesOptions {
   readonly runArm: ArmJobRunner
   /** Parent directory of the comparison copies (default the OS temporary directory). */
   readonly tempRoot?: string
+  /** Largest comparison copy kept for `keepCopies` (default the gate's `KEEP_COPY_MAX_BYTES`; tests lower it). */
+  readonly keepMaxBytes?: number
   /**
    * Estimated dollars of one model request (the host passes `@nexgent/llm`'s
    * `estimateUsd`). Without it every arm's cost is unknown, so no child is
@@ -136,12 +135,6 @@ export interface MetaStagesOptions {
 function turnFailure(turn: ImprovementTurnResult): string | undefined {
   if (turn.outcome === 'completed') return undefined
   return turn.outcome === 'budget' ? 'a cost cap stopped the session' : `the session ended ${turn.outcome}${turn.detail === undefined ? '' : `: ${turn.detail}`}`
-}
-
-/** The evaluator epoch of a project (ADR 0008 decision 5). */
-export async function evaluatorEpoch(layout: WorkspaceLayout): Promise<string> {
-  const { config } = await readProjectConfig(layout.configFile)
-  return createHash('sha256').update(canonicalEvaluatorText(evaluatorSettings(config.capabilities))).digest('hex')
 }
 
 /** An improver source that only knows one pinned improver (an arm runs on exactly its own). */
@@ -178,41 +171,13 @@ async function activeVersion(layout: WorkspaceLayout): Promise<string> {
  * @throws `improvement/not-found` when the feedback task has no snapshot with checks.
  */
 export async function originOf(layout: WorkspaceLayout, job: ImprovementJob, sourceJobId: string, capabilityVersion: string): Promise<ComparisonOrigin> {
+  return (await originCase(layout, job, sourceJobId, capabilityVersion)).origin
+}
+
+async function originCase(layout: WorkspaceLayout, job: ImprovementJob, sourceJobId: string, capabilityVersion: string) {
   const task = await findFeedbackTask(layout, job)
-  return { sourceJobId, tree: task.replay.tree, feedbackIds: feedbackIdsOf(job), capabilityVersion, epoch: await evaluatorEpoch(layout) }
-}
-
-/** Paths a comparison copy leaves out: VCS and dependency folders, and the real project's improvement jobs. */
-function copyFilter(root: string, dataDir: string): (source: string) => boolean {
-  const jobs = join(dataDir, 'improvements')
-  return source => {
-    if (source === jobs || source.startsWith(`${jobs}${sep}`)) return false
-    const top = relative(root, source).split(sep)[0]
-    return top !== '.git' && top !== 'node_modules'
-  }
-}
-
-async function bytesOf(path: string): Promise<number> {
-  const info = await stat(path)
-  if (!info.isDirectory()) return info.size
-  let total = 0
-  for (const name of await readdir(path)) total += await bytesOf(join(path, name))
-  return total
-}
-
-/**
- * Copy the project for one arm and put the copy on the origin's capability
- * version (a manual adoption inside the copy when the real project has moved on).
- */
-async function prepareCopy(layout: WorkspaceLayout, arm: ComparisonArm, capabilityVersion: string, tempRoot?: string): Promise<WorkspaceLayout> {
-  const root = await mkdtemp(join(tempRoot ?? tmpdir(), `nexgent-meta-${arm}-`))
-  await cp(layout.root, root, { recursive: true, filter: copyFilter(layout.root, layout.dataDir) })
-  const copy = resolveWorkspaceLayout(root)
-  const store = new CapabilityStore(copy.capabilities)
-  if ((await activeVersion(copy)) !== capabilityVersion) {
-    await store.adopt(capabilityVersion, { trigger: 'manual', detail: 'A comparison copy starts on the capability version the origin job started on.' }).catch(() => undefined)
-  }
-  return copy
+  const origin: ComparisonOrigin = { sourceJobId, tree: task.replay.tree, feedbackIds: feedbackIdsOf(job), capabilityVersion, epoch: await projectEpoch(layout) }
+  return { origin, replay: task.replay }
 }
 
 /** Total spend of a job's phases. */
@@ -351,8 +316,9 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
       const source = sourceJob(await listJobs(improvementsDir(layout)), job)
       if (source === undefined) return { ...nothing, outcome: 'failed', detail: 'There is no finished feedback-triggered improvement job to compare the two improvers on.' }
       let origin: ComparisonOrigin
+      let replay: Awaited<ReturnType<typeof originCase>>['replay']
       try {
-        origin = await originOf(layout, source, source.id, source.baseVersion ?? await activeVersion(layout))
+        ;({ origin, replay } = await originCase(layout, source, source.id, source.baseVersion ?? await activeVersion(layout)))
       } catch (error) {
         return { ...nothing, outcome: 'failed', detail: `The comparison origin cannot be prepared: ${(error as Error).message}`, error }
       }
@@ -362,7 +328,7 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
         { arm: 'child', improver: { version: input.childVersion, bundle: input.child } },
       ]
       const results: Partial<Record<ComparisonArm, ComparisonArmResult>> = {}
-      const copies: Partial<Record<ComparisonArm, WorkspaceLayout>> = {}
+      const copies: Partial<Record<ComparisonArm, ProjectCopy>> = {}
       let spent: PhaseCost = { usage: ZERO_USAGE, requestCount: 0 }
       const keep = job.meta?.keepCopies === true
       let kept: { parent?: KeptCopy; child?: KeptCopy } | undefined
@@ -371,8 +337,21 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
           if (await input.budgetSpent()) {
             return { ...spent, outcome: 'budget-exhausted', detail: `The meta budget ran out before the ${arm} arm; no improver was compared.` }
           }
-          const copy = await prepareCopy(layout, arm, origin.capabilityVersion, options.tempRoot)
-          copies[arm] = copy
+          // The gate's copy: the origin's snapshot tree, the history, the origin's capability version, the same epoch.
+          let prepared: ProjectCopy
+          try {
+            prepared = await prepareProjectCopy({
+              layout,
+              origin: replay,
+              version: origin.capabilityVersion,
+              ...(options.tempRoot === undefined ? {} : { tempRoot: options.tempRoot }),
+              ...(options.keepMaxBytes === undefined ? {} : { keepMaxBytes: options.keepMaxBytes }),
+            })
+          } catch (error) {
+            return { ...spent, outcome: 'failed', detail: `The ${arm} arm's project copy cannot be prepared: ${(error as Error).message}`, error }
+          }
+          copies[arm] = prepared
+          const copy = prepared.layout
           const armJob = await createJob(improvementsDir(copy), {
             trigger: 'explicit',
             items: source.items,
@@ -384,7 +363,7 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
           if (found === undefined) return { ...spent, outcome: 'failed', detail: `The origin cannot be read in the ${arm} arm's copy; nothing was compared.` }
           const runner: ImprovementSessionRunner = { open: request => options.runner.open({ ...request, metaJobId: job.id, comparisonArm: arm, ledgerRoot: layout.root }) }
           await input.log(`compare: ${arm} arm job ${armJob.id} on improver ${improver.version} in ${copy.root}`)
-          await options.runArm(copy, armJob.id, { improvers: fixedImprover(improver), runner })
+          await options.runArm(copy, armJob.id, { improvers: fixedImprover(improver), runner, epoch: origin.epoch })
           const done = await readJob(improvementsDir(copy), armJob.id)
           const total = phaseTotal(done)
           spent = { usage: addUsage(spent.usage, total.usage), requestCount: spent.requestCount + total.requestCount }
@@ -406,14 +385,10 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
           await input.log(`compare: ${arm} arm ended ${done.status}${done.candidateId === undefined ? '' : ` with candidate ${done.candidateId}`}, ${typeof cost.estimatedUsd === 'number' ? `$${cost.estimatedUsd.toFixed(4)}` : 'cost unknown'}`)
         }
       } finally {
-        if (keep) {
-          kept = {}
-          for (const arm of ['parent', 'child'] as const) {
-            const copy = copies[arm]
-            if (copy !== undefined) kept[arm] = { root: copy.root, bytes: await bytesOf(copy.root).catch(() => 0) }
-          }
-        } else {
-          for (const copy of Object.values(copies)) if (copy !== undefined) await rm(copy.root, { recursive: true, force: true, maxRetries: 3 }).catch(() => undefined)
+        for (const arm of ['parent', 'child'] as const) {
+          const released = await copies[arm]?.release({ keep }).catch(() => undefined)
+          if (released?.status === 'kept') kept = { ...kept, [arm]: released.copy }
+          if (released?.status === 'too-large') await input.log(`compare: the ${arm} arm's copy (${released.bytes} bytes) is too large to keep; removed`)
         }
       }
       const parent = results.parent!

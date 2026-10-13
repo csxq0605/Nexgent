@@ -21,6 +21,8 @@ export type TrialStarter = (input: {
   readonly job: ImprovementJob
   /** Step 6: the gate parameters of the job's pinned improver (`trialComparison`: counts never below the project's). */
   readonly comparison: ImproverComparisonParams
+  /** Step 6: a comparison arm's evaluator epoch (the origin's); the gate refuses to run in another. */
+  readonly epoch?: string
 }) => Promise<GateOutcome>
 
 /** Summed model requests of one trial in the ledger. */

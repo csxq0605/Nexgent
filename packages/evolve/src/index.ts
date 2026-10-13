@@ -86,7 +86,6 @@ export { createImprovementStages, type ImprovementStagesOptions } from './stages
 export { jobImproverVersion, PROJECT_IMPROVERS, trialComparison, type ImproverSource, type PinnedImprover } from './improver.js'
 export {
   createMetaStages,
-  evaluatorEpoch,
   fixedImprover,
   metaDiagnosisPrompt,
   metaProposePrompt,

@@ -26,6 +26,10 @@ export interface ImprovementStagesOptions {
   readonly tempRoot?: string
   /** Step 6: estimated dollars of one model request (`@nexgent/llm` `estimateUsd`), for the comparison arms' costs. */
   readonly priceUsd?: (model: string, usage: LLMUsage) => number | 'unknown'
+  /** Step 6: largest comparison copy a meta job keeps for `keepCopies` (default the gate's limit). */
+  readonly keepMaxBytes?: number
+  /** Step 6: the evaluator epoch a comparison arm's gate must run in (set by the meta stages for the arm's job). */
+  readonly epoch?: string
 }
 
 function turnFailure(turn: ImprovementTurnResult): string | undefined {
@@ -72,7 +76,8 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
     startTrial: options.startTrial,
     ...(options.tempRoot === undefined ? {} : { tempRoot: options.tempRoot }),
     ...(options.priceUsd === undefined ? {} : { priceUsd: options.priceUsd }),
-    runArm: (layout, jobId, arm) => runImprovementJob(layout, jobId, { stages: createImprovementStages({ ...options, runner: arm.runner }), improvers: arm.improvers, chain: false }),
+    ...(options.keepMaxBytes === undefined ? {} : { keepMaxBytes: options.keepMaxBytes }),
+    runArm: (layout, jobId, arm) => runImprovementJob(layout, jobId, { stages: createImprovementStages({ ...options, runner: arm.runner, epoch: arm.epoch }), improvers: arm.improvers, chain: false }),
   })
   return {
     meta,
@@ -187,7 +192,7 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
 
     async trial(input) {
       const capabilities = (await readProjectConfig(input.layout.configFile)).config.capabilities
-      const outcome = await options.startTrial({ layout: input.layout, candidateId: input.candidateId, job: input.job, comparison: trialComparison(capabilities, input.improver.bundle) })
+      const outcome = await options.startTrial({ layout: input.layout, candidateId: input.candidateId, job: input.job, comparison: trialComparison(capabilities, input.improver.bundle), ...(options.epoch === undefined ? {} : { epoch: options.epoch }) })
       const spend = outcome.status === 'decided' ? await trialSpend(input.layout, outcome.trialId) : sumTurns([])
       const mapped = trialStatus(outcome)
       return {
