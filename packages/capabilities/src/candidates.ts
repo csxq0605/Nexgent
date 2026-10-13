@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path'
 import {
   CAPABILITY_DIRS,
   NexgentError,
+  type CandidateOrigin,
   type CandidateRecord,
   type CapabilityComponent,
   type CapabilityComponentRef,
@@ -46,6 +47,9 @@ export interface CandidateInput {
   readonly components: readonly ProposedComponent[]
   readonly proofs: readonly ComponentUseProof[]
   readonly summary?: string
+  /** Step 5: `improvement` for a candidate of an improvement job's propose phase (with its `jobId`); absent means a user task's own. */
+  readonly origin?: CandidateOrigin
+  readonly jobId?: string
 }
 
 /**
@@ -78,6 +82,8 @@ export async function writeCandidate(capabilitiesDir: string, input: CandidateIn
     proofs: input.proofs,
     requiresApproval: input.components.some(component => component.kind === 'plugin'),
     ...(input.summary === undefined ? {} : { summary: input.summary }),
+    ...(input.origin === undefined ? {} : { origin: input.origin }),
+    ...(input.jobId === undefined ? {} : { jobId: input.jobId }),
   }
   const issues = validateCapabilityFile('candidate', record)
   if (issues.length > 0) throw new NexgentError('config/invalid', `invalid candidate record: ${issues[0]!.path} ${issues[0]!.message}`)

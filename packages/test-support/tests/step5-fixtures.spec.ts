@@ -192,8 +192,8 @@ describe('playbooks', () => {
     for (const state of outcome) expect(TERMINAL_STATES).toContain(state)
   })
 
-  it('job states match @nexgent/evolve: the plan\'s twelve; terminal and parked sets; the counting rule agrees', () => {
-    expect(JOB_STATES).toHaveLength(12)
+  it('job states match @nexgent/evolve: the plan\'s twelve plus the contract\'s cancelled; terminal and parked sets; the counting rule agrees', () => {
+    expect(JOB_STATES).toHaveLength(13)
     expect(Object.keys(evolve.JOB_TRANSITIONS).sort()).toEqual([...JOB_STATES].sort())
     expect([...evolve.TERMINAL_STATUSES].sort()).toEqual([...TERMINAL_STATES].sort())
     expect([...evolve.PARKED_STATUSES].sort()).toEqual([...PARKED_STATES].sort())

@@ -8,10 +8,10 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { NexgentError } from '@nexgent/kernel'
+import { canMoveImprovement, IMPROVEMENT_FILES, IMPROVEMENT_LIMITS, IMPROVEMENT_STATUSES, NexgentError } from '@nexgent/kernel'
+import { validateImprovementFile } from '@nexgent/session'
 import { lockHeld, readJson, readLockPid, withFileLock, writeJsonAtomic } from './lock.js'
 import {
-  JOB_TRANSITIONS,
   RUNNING_STATUSES,
   type ImprovementJob,
   type ImprovementJobStatus,
@@ -34,16 +34,40 @@ export interface JobPaths {
   /** Serializes writes of `job.json`. */
   readonly writeLock: string
   readonly log: string
+  /** The accepted diagnosis. */
+  readonly diagnosis: string
 }
 
 /** Paths of job `jobId` under `improvementsDir`. */
 export function jobPaths(improvementsDir: string, jobId: string): JobPaths {
   if (!UUID.test(jobId)) throw new NexgentError('session/not-found', `no improvement job ${JSON.stringify(jobId)}`)
   const directory = join(improvementsDir, jobId)
-  return { directory, file: join(directory, 'job.json'), lock: join(directory, 'job.lock'), writeLock: join(directory, 'job.json.lock'), log: join(directory, 'job.log') }
+  return {
+    directory,
+    file: join(directory, IMPROVEMENT_FILES.job),
+    lock: join(directory, IMPROVEMENT_FILES.jobLock),
+    writeLock: join(directory, IMPROVEMENT_FILES.jobFileLock),
+    log: join(directory, IMPROVEMENT_FILES.jobLog),
+    diagnosis: join(directory, IMPROVEMENT_FILES.diagnosis),
+  }
 }
 
-const STATUSES = new Set(Object.keys(JOB_TRANSITIONS))
+const STATUSES = new Set<string>(IMPROVEMENT_STATUSES)
+
+/** Cut a detail to the contract's bound. */
+export function clip(text: string, max: number = IMPROVEMENT_LIMITS.maxDetailChars): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`
+}
+
+/**
+ * Validate and write a job record.
+ * @throws `internal` when the record breaks the schema (nothing is written).
+ */
+async function writeJob(path: string, job: ImprovementJob): Promise<void> {
+  const issues = validateImprovementFile('job', job)
+  if (issues.length > 0) throw new NexgentError('internal', `invalid improvement job ${job.id}: ${issues[0]!.path} ${issues[0]!.message}`)
+  await writeJsonAtomic(path, job)
+}
 
 function isJob(value: unknown, id: string): value is ImprovementJob {
   const job = value as Partial<ImprovementJob> | undefined
@@ -115,12 +139,12 @@ export async function createJob(improvementsDir: string, input: CreateJobInput):
     phases: {},
     history: [{ status: 'queued', at }],
   }
-  await writeJsonAtomic(paths.file, job)
+  await writeJob(paths.file, job)
   return job
 }
 
 /** Fields a writer may change besides the status. */
-export type JobPatch = Partial<Pick<ImprovementJob, 'phases' | 'candidateId' | 'trialId' | 'decisionId' | 'detail'>>
+export type JobPatch = Partial<Omit<ImprovementJob, 'formatVersion' | 'id' | 'createdAt' | 'updatedAt' | 'trigger' | 'status' | 'items' | 'request' | 'history'>>
 
 /**
  * Change a job's references or spend, keeping its status.
@@ -132,7 +156,7 @@ export async function updateJob(improvementsDir: string, jobId: string, patch: J
     const job = await readJob(improvementsDir, jobId)
     const change = typeof patch === 'function' ? patch(job) : patch
     const next: ImprovementJob = { ...job, ...change, updatedAt: now.toISOString() }
-    await writeJsonAtomic(paths.file, next)
+    await writeJob(paths.file, next)
     return next
   })
 }
@@ -153,9 +177,9 @@ export async function transitionJob(
   return withFileLock(paths.writeLock, async () => {
     const job = await readJob(improvementsDir, jobId)
     if (options.expect !== undefined && !options.expect.includes(job.status)) return undefined
-    if (!JOB_TRANSITIONS[job.status].includes(to)) throw new NexgentError('internal', `improvement job ${jobId} cannot move from ${job.status} to ${to}`)
+    if (!canMoveImprovement(job.status, to)) throw new NexgentError('internal', `improvement job ${jobId} cannot move from ${job.status} to ${to}`)
     const at = (options.now ?? new Date()).toISOString()
-    const detail = options.detail
+    const detail = options.detail === undefined ? undefined : clip(options.detail)
     const next: ImprovementJob = {
       ...job,
       ...options.patch,
@@ -164,7 +188,7 @@ export async function transitionJob(
       ...(detail === undefined ? {} : { detail }),
       history: [...job.history, { status: to, at, ...(detail === undefined ? {} : { detail }) }],
     }
-    await writeJsonAtomic(paths.file, next)
+    await writeJob(paths.file, next)
     return next
   })
 }

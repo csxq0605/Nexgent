@@ -44,10 +44,10 @@ describe('running a job', () => {
     return { layout, directory, job: await readJob(directory, job.id), result }
   }
 
-  it('round-1 stages end the job failed and say the diagnosis is not implemented', async () => {
+  it('a host without a session runner ends the job failed and says so', async () => {
     const { job } = await runTo(PENDING_STAGES)
     expect(job.status).toBe('failed')
-    expect(job.detail).toMatch(/not implemented/)
+    expect(job.detail).toMatch(/No improvement session runner/)
     expect(job.candidateId).toBeUndefined()
   })
 
@@ -93,21 +93,21 @@ describe('budget (decision 6)', () => {
     const recent = await createJob(directory, { trigger: 'explicit', items: [], now: new Date('2026-10-10T00:00:00Z') })
     await updateJob(directory, recent.id, { phases: { diagnose: { usage: { ...ZERO_USAGE, inputTokens: 40, outputTokens: 'unknown' }, requestCount: 1 } } })
     const { readJob: read } = await import('../src/index.js')
-    const status = budgetStatus([await read(directory, old.id), await read(directory, recent.id)], { tokens: 100, windowDays: 30 }, new Date('2026-10-13T00:00:00Z'))
+    const status = budgetStatus([await read(directory, old.id), await read(directory, recent.id)], { maxTokens: 100, windowDays: 30 }, new Date('2026-10-13T00:00:00Z'))
     expect(status).toMatchObject({ used: 40, remaining: 60, exhausted: false, unknownPhases: 1 })
   })
 
   it('stops before a phase once the budget is spent', async () => {
-    const layout = await project()
+    const layout = await project(true, { budget: { maxTokens: 1_000, windowDays: 30 } })
     const directory = improvementsDir(layout)
     const job = await startExplicitJob(directory, {})
-    await runImprovementJob(layout, job.id, { stages: stagesTo('adopted', 600), budget: { tokens: 1_000, windowDays: 30 } })
+    await runImprovementJob(layout, job.id, { stages: stagesTo('adopted', 600) })
     const done = await readJob(directory, job.id)
     expect(done.status).toBe('budget-exhausted')
     expect(done.phases.trial).toBeUndefined()
     expect(done.detail).toMatch(/before the trial phase/)
     const next = await startExplicitJob(directory, {})
-    await runImprovementJob(layout, next.id, { stages: stagesTo('adopted'), budget: { tokens: 1_000, windowDays: 30 } })
+    await runImprovementJob(layout, next.id, { stages: stagesTo('adopted') })
     expect(await readJob(directory, next.id)).toMatchObject({ status: 'budget-exhausted' })
     expect((await readJob(directory, next.id)).phases).toEqual({})
   })

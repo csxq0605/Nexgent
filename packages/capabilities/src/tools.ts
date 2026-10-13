@@ -232,6 +232,9 @@ export function capabilityProposeTool(service: CapabilityService, readRecords: R
       }
       const taskId = context.attribution?.taskId
       if (taskId === undefined) throw new NexgentError('tool/failed', 'this host does not attribute tasks; cannot propose')
+      // Step 5: an improvement job's propose session marks its candidate (origin and job).
+      const start = records[0]
+      const improvement = start?.type === 'session.start' && start.purpose === 'improvement' ? start.improvement : undefined
       const { record: candidate } = await writeCandidate(service.store.directory, {
         sessionId: context.sessionId,
         taskId,
@@ -240,6 +243,7 @@ export function capabilityProposeTool(service: CapabilityService, readRecords: R
         components,
         proofs,
         ...(input.summary === undefined ? {} : { summary: input.summary }),
+        ...(improvement === undefined ? {} : { origin: 'improvement' as const, jobId: improvement.jobId }),
       })
       await append({ type: 'capability.propose', turn: context.turn, step, toolCallId: context.callId, candidateId: candidate.id, proofs })
       return {

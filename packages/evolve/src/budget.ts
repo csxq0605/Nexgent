@@ -2,7 +2,8 @@
  * The improvement budget (decision 6): tokens per project over a rolling
  * window, covering the diagnosis, proposal and trial phases of every job
  * created inside the window. Decisions use tokens only; dollars are for
- * display (decision 9, not here).
+ * display (decision 9, not here). The budget is the project's
+ * `improvement.budget` (`maxTokens`, `windowDays`).
  *
  * A usage field the provider did not report (`'unknown'`) cannot be added
  * up; such phases count their known fields and are reported in
@@ -49,6 +50,6 @@ export function budgetStatus(jobs: readonly ImprovementJob[], budget: Improvemen
       if (!complete) unknownPhases += 1
     }
   }
-  const remaining = Math.max(0, budget.tokens - used)
-  return { limit: budget.tokens, used, remaining, exhausted: remaining <= 0, unknownPhases, windowStart: new Date(start).toISOString() }
+  const remaining = Math.max(0, budget.maxTokens - used)
+  return { limit: budget.maxTokens, used, remaining, exhausted: remaining <= 0, unknownPhases, windowStart: new Date(start).toISOString() }
 }

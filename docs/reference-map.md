@@ -86,7 +86,7 @@
 | `deliverables/tool-present`、`deliverables/workspace-changes` | `@nexgent/tasking` | 改写 | 2 | `present` 工具与每轮文件变更；`outputs/` 快照为 Nexgent 新增 |
 | `feedback/message-feedback`、`feedback/command-feedback` | `@nexgent/tasking` | 改写 | 2、5 | 评分与评语关联成果版本，是步骤 5 的输入 |
 | `goal/goal`、`goal/goal-round-driver`、`goal/tool-goal`、`goal/command-goal` | `@nexgent/tasking` | 改写 | 2 | 跨重启的持久目标 |
-| `jobs/jobs`、`jobs/jobs-local`、`jobs/tool-jobs` | `@nexgent/tasking` | 改写 | 2、5 | 后台作业；步骤 5 的改进作业跑在其上 |
+| `jobs/jobs`、`jobs/jobs-local`、`jobs/tool-jobs` | `@nexgent/tasking` | 改写 | 2、5 | 后台作业；步骤 5 的改进作业不跑在其上，由 `@nexgent/evolve` 自己的宿主照门控的分离进程做法管理 |
 | `skill/skill`、`skill/tool-skill` | `@nexgent/skill` | 改写 | 2 | 技能说明注入 |
 | `skill/skill-office` | `@nexgent/skill` | 改写 | 2 | Office 文件用技能说明 + 工具读取 |
 | `skill/skill-badge`、`skill/tool-workspace-dependencies` | — | 不要 | — | |
@@ -135,7 +135,7 @@
 
 | DSH 包组 / 具体包 | Nexgent 包 | 处理 | 归属步骤 | 备注 |
 | --- | --- | --- | --- | --- |
-| `session-query/session-query`、`session-query/tool-session-query` | `@nexgent/evolve` | 改写 | 5 | 诊断会话读取历史会话 |
+| `session-query/session-query`、`session-query/tool-session-query` | `@nexgent/evolve` | 重写 | 5 | 诊断会话的四个只读工具（按会话、轮次、记录类型切片，字节上限）；只参考设计，未复制文件 |
 | `session-query/session-query-sqlite`、`session-query/session-log-export` | `@nexgent/evolve` | 重写 | 5（按需） | 索引与导出按 Nexgent 的 JSONL v1 自写 |
 | `experimental/auto-review` | `@nexgent/evolve` | 重写 | 5 | 只参考单任务自动复核的诊断提示 |
 

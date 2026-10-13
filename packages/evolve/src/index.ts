@@ -2,13 +2,17 @@
  * `@nexgent/evolve`: the default feedback-improvement flow (step 5) —
  * counting feedback and check failures, the three triggers, improvement
  * jobs and their state machine, the job host (detached processes, locks,
- * recovery) and the improvement budget. Diagnosis and proposal come in
- * round 2; until then {@link PENDING_STAGES} ends every job `failed`.
+ * recovery), the improvement budget, the diagnose session with its four
+ * read-only tools, the propose phase (redo the feedback task in a snapshot
+ * copy, one candidate with `origin: improvement`), the hand-off to the gate
+ * and the first-use record. The host entry supplies the session runner and
+ * the gate ({@link createImprovementStages}); without them
+ * {@link PENDING_STAGES} ends every job `failed`.
  */
 export * from './types.js'
 export { improvementsDir } from './paths.js'
 export { breakStaleLock, lockHeld, processAlive, readLockPid, tryCreateLock, withFileLock, writeJsonAtomic, type FileLockOptions } from './lock.js'
-export { createJob, jobAlive, jobPaths, listJobs, readJob, START_GRACE_MS, transitionJob, updateJob, type CreateJobInput, type JobPatch, type JobPaths } from './jobs.js'
+export { clip, createJob, jobAlive, jobPaths, listJobs, readJob, START_GRACE_MS, transitionJob, updateJob, type CreateJobInput, type JobPatch, type JobPaths } from './jobs.js'
 export {
   admitItems,
   ensureQueue,
@@ -17,6 +21,7 @@ export {
   readQueue,
   reconcileQueue,
   releaseSlot,
+  retakeSlot,
   startExplicitJob,
   type AdmitOptions,
   type AdmitResult,
@@ -43,3 +48,31 @@ export {
   type StartedJob,
 } from './host.js'
 export { apply, EvolvePlugin, feedbackCounter, name, type EvolvePluginConfig } from './plugin.js'
+export type { ImprovementSession, ImprovementSessionRequest, ImprovementSessionRunner, ImprovementTurnResult } from './session-runner.js'
+export {
+  checkReport,
+  diagnosisNudge,
+  diagnosisPrompt,
+  diagnosisTools,
+  memberCostsFor,
+  selectLedger,
+  selectRecords,
+  sliceLines,
+  sumTurns,
+  type DiagnosisState,
+  type DiagnosisSubject,
+  type DiagnosisToolsInput,
+} from './diagnosis.js'
+export {
+  collectCandidate,
+  findFeedbackTask,
+  newSessionId,
+  prepareProposalCopy,
+  proposalBrief,
+  targetSession,
+  type FeedbackTask,
+  type ProposalOutcome,
+} from './propose.js'
+export { trialSpend, trialStatus, type GateOutcome, type TrialStarter } from './trial.js'
+export { sweepAdoptedJobs } from './first-use.js'
+export { createImprovementStages, type ImprovementStagesOptions } from './stages.js'

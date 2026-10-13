@@ -84,7 +84,7 @@ describe('two processes counting at once', () => {
     expect(results.reduce((sum, result) => sum + result.added, 0)).toBe(4)
     expect(results.filter(result => result.started !== null)).toHaveLength(1)
     const queue = (await readQueue(improvementsDir(layout)))!
-    expect([...queue.counted].sort()).toEqual([...ids].sort())
+    expect([...queue.counted].sort()).toEqual(ids.map(id => `feedback:${id}`).sort())
     const jobs = (await readdir(improvementsDir(layout))).filter(name => /^[0-9a-f-]{36}$/.test(name))
     expect(jobs).toHaveLength(1)
     // Three items went into the job, the fourth waits in the next batch.

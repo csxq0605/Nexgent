@@ -49,11 +49,12 @@ export const DIAGNOSIS_TOOL = 'improve_report_diagnosis'
 export const MAST = ['specification-and-system-design', 'inter-agent-misalignment', 'task-verification-and-termination']
 
 /**
- * Job states (plan §触发与作业): terminal ones end a job, parked ones wait for history or an
- * approval (they free the job slot). The fixtures spec pins them to @nexgent/evolve's sets.
+ * Job states (plan §触发与作业, plus the contract's `cancelled`): terminal ones end a job, parked
+ * ones wait for history or an approval (they free the job slot). The fixtures spec pins them to
+ * @nexgent/evolve's sets (the kernel contract's).
  */
-export const JOB_STATES = ['queued', 'diagnosing', 'proposing', 'trialing', 'adopted', 'rejected', 'awaiting-approval', 'no-proposal', 'waiting-history', 'budget-exhausted', 'failed', 'interrupted']
-export const TERMINAL_STATES = ['adopted', 'rejected', 'no-proposal', 'budget-exhausted', 'failed', 'interrupted']
+export const JOB_STATES = ['queued', 'diagnosing', 'proposing', 'trialing', 'adopted', 'rejected', 'awaiting-approval', 'no-proposal', 'waiting-history', 'budget-exhausted', 'failed', 'interrupted', 'cancelled']
+export const TERMINAL_STATES = ['adopted', 'rejected', 'no-proposal', 'budget-exhausted', 'failed', 'interrupted', 'cancelled']
 export const PARKED_STATES = ['waiting-history', 'awaiting-approval']
 
 const ordersPath = month => `data/orders-${month}.csv`
