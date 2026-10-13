@@ -13,7 +13,8 @@ test('the same month gives the same case, byte for byte', () => {
   const a = tableCase({ id: 'x', set: 'holdout', variant: 'returns', month: '2027-02' })
   const b = tableCase({ id: 'x', set: 'holdout', variant: 'returns', month: '2027-02' })
   assert.deepEqual(a, b)
-  assert.equal(a.materials.length, 2)
+  assert.deepEqual(Object.keys(a.files).sort(), ['data/orders-2027-02.csv', 'data/returns-2027-02.csv'])
+  assert.deepEqual(a.materials, [])
   assert.notEqual(returnsCsv('2027-02'), returnsCsv('2027-01'))
 })
 
