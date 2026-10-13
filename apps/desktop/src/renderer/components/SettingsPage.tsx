@@ -78,6 +78,10 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
   const [autoImprove, setAutoImprove] = useState(true)
   const [improveTokens, setImproveTokens] = useState('')
   const [improveWindow, setImproveWindow] = useState('')
+  const [metaEnabled, setMetaEnabled] = useState(false)
+  const [metaEvery, setMetaEvery] = useState('')
+  const [metaTokens, setMetaTokens] = useState('')
+  const [metaWindow, setMetaWindow] = useState('')
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'invalid'>('idle')
   const [key, setKey] = useState('')
   const [keyStatus, setKeyStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -93,6 +97,10 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
     setAutoImprove(settings.autoImprove)
     setImproveTokens(String(settings.improvement.budget.maxTokens))
     setImproveWindow(String(settings.improvement.budget.windowDays))
+    setMetaEnabled(settings.improvement.meta.enabled)
+    setMetaEvery(String(settings.improvement.meta.everyJobs))
+    setMetaTokens(String(settings.improvement.meta.budget.maxTokens))
+    setMetaWindow(String(settings.improvement.meta.budget.windowDays))
     // Only when another project's settings arrive; edits in progress are kept otherwise.
   }, [state.project?.projectId, settings === undefined])
 
@@ -102,10 +110,21 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
     const maxTokens = Number(improveTokens.trim())
     const windowDays = Number(improveWindow.trim())
     const improveInvalid = !Number.isInteger(maxTokens) || maxTokens <= 0 || !Number.isInteger(windowDays) || windowDays <= 0
+    const every = Number(metaEvery.trim())
+    const metaMaxTokens = Number(metaTokens.trim())
+    const metaWindowDays = Number(metaWindow.trim())
+    const metaInvalid =
+      !Number.isInteger(every) || every < 1 || every > 20 || !Number.isInteger(metaMaxTokens) || metaMaxTokens <= 0 || !Number.isInteger(metaWindowDays) || metaWindowDays <= 0
+    if (metaInvalid) {
+      setStatus('invalid')
+      return
+    }
     if (improveInvalid || task === 'invalid' || project === 'invalid' || model.trim() === '') {
       setStatus('invalid')
       return
     }
+    const meta = settings!.improvement.meta
+    const metaChanged = metaEnabled !== meta.enabled || every !== meta.everyJobs || metaMaxTokens !== meta.budget.maxTokens || metaWindowDays !== meta.budget.windowDays
     const patch: SettingsPatch = {
       model: model.trim(),
       thinking,
@@ -113,9 +132,11 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
       sandboxMode,
       // Only what changed, so an untouched page never rewrites the guarded fields.
       ...(autoImprove === settings!.autoImprove ? {} : { autoImprove }),
-      ...(maxTokens === settings!.improvement.budget.maxTokens && windowDays === settings!.improvement.budget.windowDays
+      ...(maxTokens === settings!.improvement.budget.maxTokens &&
+      windowDays === settings!.improvement.budget.windowDays &&
+      !metaChanged
         ? {}
-        : { improvement: { ...settings!.improvement, budget: { maxTokens, windowDays } } }),
+        : { improvement: { ...settings!.improvement, budget: { maxTokens, windowDays }, meta: { ...settings!.improvement.meta, enabled: metaEnabled, everyJobs: every, budget: { maxTokens: metaMaxTokens, windowDays: metaWindowDays } } } }),
       costCaps: { ...(task === undefined ? {} : { perTask: task }), ...(project === undefined ? {} : { perProject: project }) },
     }
     setStatus('saving')
@@ -195,9 +216,29 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
               <input type="number" step={1} value={improveWindow} onChange={e => setImproveWindow(e.target.value)} data-testid="settings-improvement-window" />
             </label>
           </div>
+          <h3>{T.settingsMeta}</h3>
+          <label className="row">
+            <input type="checkbox" checked={metaEnabled} onChange={e => setMetaEnabled(e.target.checked)} data-testid="settings-meta-enabled" />
+            {T.metaEnabled}
+          </label>
+          <p className="muted small wrap">{T.metaEnabledHelp}</p>
+          <div className="caps">
+            <label className="field">
+              {T.metaEveryJobs}
+              <input type="number" step={1} value={metaEvery} onChange={e => setMetaEvery(e.target.value)} data-testid="settings-meta-every" />
+            </label>
+            <label className="field">
+              {T.metaBudgetTokens}
+              <input type="number" step={1} value={metaTokens} onChange={e => setMetaTokens(e.target.value)} data-testid="settings-meta-budget" />
+            </label>
+            <label className="field">
+              {T.metaWindow}
+              <input type="number" step={1} value={metaWindow} onChange={e => setMetaWindow(e.target.value)} data-testid="settings-meta-window" />
+            </label>
+          </div>
           <div className="row end">
             {status === 'saved' && <span className="ok-text" data-testid="settings-saved">{T.settingsSaved}</span>}
-            {status === 'invalid' && <span className="field-error">请检查：模型不能为空，上限必须是正整数；改进预算和窗口也必须是正整数。</span>}
+            {status === 'invalid' && <span className="field-error">请检查：模型不能为空，上限必须是正整数；改进预算和窗口也必须是正整数；元改进的预算、窗口同理，触发作业数为 1 到 20。</span>}
             <button type="submit" className="primary" disabled={status === 'saving'} data-testid="settings-save">
               {T.save}
             </button>

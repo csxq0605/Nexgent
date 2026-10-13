@@ -5,26 +5,42 @@
  * the candidate as `capabilities.show` shows it; the display-only dollar
  * estimate from the ledger's model requests of the job (its `improvementId`
  * and its trial's `trialId`) and the `@nexgent/llm` price table.
+ *
+ * Step 6 (W5): meta jobs travel the same methods. Their detail adds
+ * `meta-diagnosis.json`, `change.json` and `comparison.json`; their dollar
+ * estimate adds both comparison arms (from `comparison.json` once written,
+ * which also covers the arms' gate trials kept in the copies' ledgers; from
+ * the real ledger's `metaJobId` records while the arms still run).
  */
 import { watch, type FSWatcher } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { billedTokens, budgetStatus, jobPaths, type ImprovementHost } from '@nexgent/evolve'
-import { jobFeedbackIds, jobPhaseTimes, NexgentError, type Diagnosis, type ImprovementCostPhase, type ImprovementJob, type ImproverDecisionReason, type LedgerRecord, type LLMUsage, type PhaseCost } from '@nexgent/kernel'
+import { billedTokens, jobPaths, type ImprovementHost } from '@nexgent/evolve'
+import { jobFeedbackIds, jobPhaseTimes, NexgentError, type Diagnosis, type ImprovementCostPhase, type ImprovementJob, type ImproverChangeRecord, type ImproverComparison, type ImproverDecisionReason, type MetaDiagnosis, type LedgerRecord, type LLMUsage, type PhaseCost } from '@nexgent/kernel'
 import { estimateUsdTotal } from '@nexgent/llm'
 import { JsonlLedger } from '@nexgent/session'
 import type { CapabilityService } from '@nexgent/capabilities'
 import type { ImprovementDetail, ImprovementJobView, ImprovementListing } from './api.js'
 import * as capabilities from './capabilities.js'
 
-/** The model requests of each job, from the ledger (`improvementId`, or its trial's `trialId`). */
-type JobRequests = Map<string, { model: string; usage: LLMUsage }[]>
+type Requests = { model: string; usage: LLMUsage }[]
+
+/** The model requests of each job, from the ledger (`improvementId`, or its trial's `trialId`), and of each meta job's comparison arms (`metaJobId`). */
+interface JobRequests {
+  readonly own: Map<string, Requests>
+  readonly arms: Map<string, Requests>
+}
 
 async function jobRequests(host: ImprovementHost, jobs: readonly ImprovementJob[]): Promise<JobRequests> {
   const byTrial = new Map<string, string>()
   for (const job of jobs) if (job.trialId !== undefined) byTrial.set(job.trialId, job.id)
   const ids = new Set(jobs.map(job => job.id))
-  const out: JobRequests = new Map()
+  const out: JobRequests = { own: new Map(), arms: new Map() }
+  const add = (map: Map<string, Requests>, id: string, record: { model: string; usage: LLMUsage }) => {
+    const list = map.get(id) ?? []
+    list.push({ model: record.model, usage: record.usage })
+    map.set(id, list)
+  }
   const ledger = new JsonlLedger({ ledgersDir: host.layout.ledgers })
   try {
     for await (const record of ledger.read({ types: ['llm.request.end'] }) as AsyncIterable<LedgerRecord>) {
@@ -32,10 +48,8 @@ async function jobRequests(host: ImprovementHost, jobs: readonly ImprovementJob[
       const jobId = record.improvementId !== undefined && ids.has(record.improvementId)
         ? record.improvementId
         : record.trialId === undefined ? undefined : byTrial.get(record.trialId)
-      if (jobId === undefined) continue
-      const list = out.get(jobId) ?? []
-      list.push({ model: record.model, usage: record.usage })
-      out.set(jobId, list)
+      if (jobId !== undefined) add(out.own, jobId, record)
+      else if (record.metaJobId !== undefined && ids.has(record.metaJobId)) add(out.arms, record.metaJobId, record)
     }
   } catch {
     // An unreadable ledger leaves the estimates unknown.
@@ -43,8 +57,17 @@ async function jobRequests(host: ImprovementHost, jobs: readonly ImprovementJob[
   return out
 }
 
+/** What a meta job's arms cost in dollars: both arms of `comparison.json` once written, else their records in the real ledger. */
+function armUsd(comparison: ImproverComparison | undefined, armRequests: Requests | undefined): number | 'unknown' {
+  if (comparison !== undefined) {
+    const { parent, child } = comparison
+    return parent.cost.estimatedUsd === 'unknown' || child.cost.estimatedUsd === 'unknown' ? 'unknown' : parent.cost.estimatedUsd + child.cost.estimatedUsd
+  }
+  return armRequests === undefined || armRequests.length === 0 ? 0 : estimateUsdTotal(armRequests)
+}
+
 /** One job as lists show it. */
-export function jobView(job: ImprovementJob, requests: readonly { model: string; usage: LLMUsage }[] | undefined): ImprovementJobView {
+export function jobView(job: ImprovementJob, requests: readonly { model: string; usage: LLMUsage }[] | undefined, arms: number | 'unknown' = 0): ImprovementJobView {
   const tokens: Partial<Record<ImprovementCostPhase, number | 'unknown'>> = {}
   for (const [phase, cost] of Object.entries(job.phases) as [ImprovementCostPhase, PhaseCost][]) {
     const billed = billedTokens(cost.usage)
@@ -52,9 +75,10 @@ export function jobView(job: ImprovementJob, requests: readonly { model: string;
   }
   const ranRequests = Object.values(job.phases).reduce((sum, cost) => sum + (cost?.requestCount ?? 0), 0)
   // A job whose phases made requests the ledger does not show cannot be priced.
-  const estimatedUsd = requests === undefined || requests.length === 0
+  const ownUsd = requests === undefined || requests.length === 0
     ? (ranRequests === 0 ? 0 : 'unknown')
     : estimateUsdTotal(requests)
+  const estimatedUsd = ownUsd === 'unknown' || arms === 'unknown' ? 'unknown' : ownUsd + arms
   return {
     id: job.id,
     ...(job.kind === undefined ? {} : { kind: job.kind }),
@@ -82,35 +106,53 @@ export function jobView(job: ImprovementJob, requests: readonly { model: string;
   }
 }
 
-/** One job's view with its own ledger requests. */
-export async function viewOf(host: ImprovementHost, job: ImprovementJob): Promise<ImprovementJobView> {
-  return jobView(job, (await jobRequests(host, [job])).get(job.id))
+/** A job side file, or `undefined` when not written (or unreadable). */
+async function sideFile<T>(path: string): Promise<T | undefined> {
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as T
+  } catch {
+    return undefined
+  }
 }
 
-/** `improvements.list`: jobs newest first, the batch waiting for the next job, the budget window. */
+async function comparisonOf(host: ImprovementHost, job: ImprovementJob): Promise<ImproverComparison | undefined> {
+  return job.kind === 'meta' ? sideFile<ImproverComparison>(jobPaths(host.directory, job.id).comparison) : undefined
+}
+
+function viewWith(job: ImprovementJob, requests: JobRequests, comparison: ImproverComparison | undefined): ImprovementJobView {
+  return jobView(job, requests.own.get(job.id), job.kind === 'meta' ? armUsd(comparison, requests.arms.get(job.id)) : 0)
+}
+
+/** One job's view with its own ledger requests. */
+export async function viewOf(host: ImprovementHost, job: ImprovementJob): Promise<ImprovementJobView> {
+  const [requests, comparison] = await Promise.all([jobRequests(host, [job]), comparisonOf(host, job)])
+  return viewWith(job, requests, comparison)
+}
+
+/** `improvements.list`: jobs newest first, the batch waiting for the next job, the budget windows (capability jobs; meta jobs). */
 export async function listing(host: ImprovementHost, now: Date = new Date()): Promise<ImprovementListing> {
-  const [jobs, queue, settings] = await Promise.all([host.list(), host.queue(), host.settings()])
-  const requests = await jobRequests(host, jobs)
-  const budget = budgetStatus(jobs, settings.improvement.budget, now)
+  const [jobs, queue, settings, budget, metaBudget] = await Promise.all([host.list(), host.queue(), host.settings(), host.budgetStatus(now), host.metaBudgetStatus(now)])
+  const [requests, comparisons] = await Promise.all([jobRequests(host, jobs), Promise.all(jobs.map(job => comparisonOf(host, job)))])
+  const meta = settings.improvement.meta
   return {
-    jobs: jobs.map(job => jobView(job, requests.get(job.id))).reverse(),
+    jobs: jobs.map((job, index) => viewWith(job, requests, comparisons[index])).reverse(),
     ...(queue?.activeJobId === undefined ? {} : { activeJobId: queue.activeJobId }),
     pending: queue?.pending.length ?? 0,
     threshold: settings.improvement.feedbackThreshold,
     budget: { usedTokens: budget.used, maxTokens: budget.limit, windowDays: settings.improvement.budget.windowDays },
     autoImprove: settings.autoImprove,
+    meta: {
+      enabled: meta.enabled,
+      pending: queue?.metaPending?.length ?? 0,
+      everyJobs: meta.everyJobs,
+      budget: { usedTokens: metaBudget.used, maxTokens: metaBudget.limit, windowDays: meta.budget.windowDays },
+    },
   }
 }
 
-const DIAGNOSIS_FILE = 'diagnosis.json'
-
 async function diagnosisOf(host: ImprovementHost, job: ImprovementJob): Promise<Diagnosis | undefined> {
   if (job.diagnosed === undefined) return undefined
-  try {
-    return JSON.parse(await readFile(join(jobPaths(host.directory, job.id).directory, DIAGNOSIS_FILE), 'utf8')) as Diagnosis
-  } catch {
-    return undefined
-  }
+  return sideFile<Diagnosis>(jobPaths(host.directory, job.id).diagnosis)
 }
 
 function jobId(value: unknown): string {
@@ -121,15 +163,26 @@ function jobId(value: unknown): string {
 /** `improvements.show`: the job, its diagnosis and its candidate. */
 export async function show(host: ImprovementHost, service: CapabilityService | undefined, id: unknown): Promise<ImprovementDetail> {
   const job = await host.show(jobId(id))
-  const [view, diagnosis] = await Promise.all([viewOf(host, job), diagnosisOf(host, job)])
+  const paths = jobPaths(host.directory, job.id)
+  const meta = job.kind === 'meta'
+  const [requests, diagnosis, metaDiagnosis, change, comparison] = await Promise.all([
+    jobRequests(host, [job]),
+    diagnosisOf(host, job),
+    meta ? sideFile<MetaDiagnosis>(paths.metaDiagnosis) : undefined,
+    meta ? sideFile<ImproverChangeRecord>(paths.change) : undefined,
+    comparisonOf(host, job),
+  ])
   const candidate = job.candidateId === undefined || service === undefined
     ? undefined
     : await capabilities.show(service, job.candidateId).catch(() => undefined)
   return {
-    view,
+    view: viewWith(job, requests, comparison),
     job,
     ...(diagnosis === undefined ? {} : { diagnosis }),
     ...(candidate === undefined ? {} : { candidate }),
+    ...(metaDiagnosis === undefined ? {} : { metaDiagnosis }),
+    ...(change === undefined ? {} : { change }),
+    ...(comparison === undefined ? {} : { comparison }),
   }
 }
 
@@ -144,6 +197,12 @@ export async function run(host: ImprovementHost, input: { readonly sessionId?: u
     ...(input.deliverableId === undefined ? {} : { deliverableId: input.deliverableId as string }),
   })
   return viewOf(host, job)
+}
+
+/** `improvements.runMeta`: a meta job now (trigger `explicit`). */
+export async function runMeta(host: ImprovementHost, input: { readonly keepCopies?: unknown }): Promise<ImprovementJobView> {
+  if (input.keepCopies !== undefined && typeof input.keepCopies !== 'boolean') throw new NexgentError('tool/invalid-input', 'keepCopies must be a boolean')
+  return viewOf(host, await host.runMeta(input.keepCopies === undefined ? {} : { keepCopies: input.keepCopies }))
 }
 
 /** `improvements.cancel`. */

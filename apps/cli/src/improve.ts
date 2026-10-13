@@ -1,5 +1,5 @@
 /**
- * `nexgent improve list | show | run | cancel`: improvement jobs (step 5)
+ * `nexgent improve list | show | run | meta | cancel`: improvement jobs (steps 5, 6)
  * through the SDK's `improvements.*` methods, plus the one-line note that
  * `run` / `resume` print when a job started or changed during the run.
  *
@@ -8,6 +8,7 @@
 import { isNexgentError } from '@nexgent/kernel'
 import type { ImprovementDetail, ImprovementJobView, ImprovementListing } from '@nexgent/sdk'
 import { CliError, EXIT } from './exit-codes.js'
+import { formatChange, formatComparison, formatMetaDiagnosis, shortVersion } from './improvers.js'
 
 /** Characters of a job id shown in lists. */
 export const SHORT_ID_CHARS = 8
@@ -52,13 +53,17 @@ export function formatListing(listing: ImprovementListing): string {
     `budget ${budget.usedTokens}/${budget.maxTokens} tokens in ${budget.windowDays} days`,
   ].join(' | ')
   const lines = [`Improvement jobs: ${header}`]
+  if (listing.meta !== undefined) {
+    const { meta } = listing
+    lines.push(`meta: ${meta.enabled ? 'on' : 'off'}, ${meta.pending}/${meta.everyJobs} finished jobs counted, budget ${meta.budget.usedTokens}/${meta.budget.maxTokens} tokens (${meta.budget.windowDays} days)`)
+  }
   if (listing.jobs.length === 0) {
     lines.push('No improvement jobs yet.')
     return lines.join('\n')
   }
   for (const job of listing.jobs) {
     lines.push(
-      `${shortId(job.id)}  ${job.status}  ${job.trigger}  ${formatTime(job.createdAt)}  ${formatTokens(billedTokensOf(job))}  ${formatCost(job.estimatedUsd)}`,
+      `${shortId(job.id)}  ${job.kind === 'meta' ? 'meta' : 'job'}  ${job.status}  ${job.trigger}  ${shortVersion(job.improverVersion ?? 'v0')}  ${formatTime(job.createdAt)}  ${formatTokens(billedTokensOf(job))}  ${formatCost(job.estimatedUsd)}`,
     )
     if (job.detail !== undefined) lines.push(`    ${job.detail}`)
   }
@@ -68,7 +73,8 @@ export function formatListing(listing: ImprovementListing): string {
 /** The text of `nexgent improve show`. */
 export function formatDetail(detail: ImprovementDetail): string {
   const { view, job, diagnosis, candidate } = detail
-  const lines = [`Improvement job ${job.id}`, `  status: ${job.status}`]
+  const lines = [`Improvement job ${job.id}${view.kind === 'meta' ? ' (meta)' : ''}`, `  status: ${job.status}`]
+  lines.push(`  improver: ${shortVersion(view.improverVersion ?? 'v0')}`)
   lines.push(`  trigger: ${job.trigger}, ${job.items.length} item${job.items.length === 1 ? '' : 's'}`)
   lines.push('  history:')
   for (const change of job.history) {
@@ -98,6 +104,10 @@ export function formatDetail(detail: ImprovementDetail): string {
       lines.push(`    gate: ${verdict.outcome} (${verdict.reason}); pass rate ${pass}; trial ${end.status}`)
     }
   }
+  if (detail.metaDiagnosis !== undefined) lines.push(...formatMetaDiagnosis(detail.metaDiagnosis))
+  if (detail.change !== undefined) lines.push(...formatChange(detail.change))
+  if (detail.comparison !== undefined) lines.push(...formatComparison(detail.comparison))
+  else if (view.meta?.outcome !== undefined) lines.push(`  meta outcome: ${view.meta.outcome}${view.meta.reason === undefined ? '' : ` (${view.meta.reason})`}`)
   const phases = Object.entries(view.tokens)
   lines.push(`  tokens: ${phases.length === 0 ? 'none yet' : phases.map(([phase, value]) => `${phase} ${value}`).join(', ')}`)
   lines.push(`  estimated cost: ${formatCost(view.estimatedUsd)}`)
@@ -115,6 +125,11 @@ function percent(rate: number): string {
 /** One line for a started job (`nexgent improve run`). */
 export function formatStarted(job: ImprovementJobView): string {
   return `improvement job ${job.id} started (${job.status}); it runs in the background. Follow it with \`nexgent improve list\` or \`nexgent improve show ${shortId(job.id)}\`.`
+}
+
+/** One line for a started meta job (`nexgent improve meta`). */
+export function formatMetaStarted(job: ImprovementJobView): string {
+  return `meta improvement job ${job.id} started (${job.status}); it runs in the background. Follow it with \`nexgent improve list\` or \`nexgent improve show ${shortId(job.id)}\`.`
 }
 
 /** One line for a cancelled job. */
