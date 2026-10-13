@@ -149,11 +149,12 @@ describe('nexgent improve', () => {
   it('list: jobs newest first with detail and unknown cost; --json', async () => {
     await ensureQueue(dir)
     await makeJob(A, '2026-10-12T08:00:00.000Z', 'failed', 'the model said no')
-    await makeJob(C, '2026-10-13T09:12:00.000Z')
+    // Created just now: a queued job older than evolve's start grace with no process would be recovered as interrupted.
+    await makeJob(C, new Date().toISOString())
     const r = await improve(['list'])
     expect(r.code, r.err).toBe(EXIT.OK)
     const lines = r.out.trimEnd().split('\n').slice(1)
-    expect(lines[0]).toMatch(/^cccccccc {2}queued {2}feedback-count {2}2026-10-13 09:12Z {2}0 tokens/)
+    expect(lines[0]).toMatch(/^cccccccc {2}queued {2}feedback-count {2}\d{4}-\d{2}-\d{2} \d{2}:\d{2}Z {2}0 tokens/)
     expect(lines[1]).toMatch(/^aaaaaaaa {2}failed /)
     expect(lines[2]).toBe('    the model said no')
     const json = await improve(['list', '--json'])
