@@ -555,7 +555,17 @@ export interface CandidateRecord {
   readonly requiresApproval: boolean
   /** The model's one-line reason, at most 500 characters. */
   readonly summary?: string
+  /** Step 5: who proposed it; absent means `session` (a user task's own `capability_propose`). */
+  readonly origin?: CandidateOrigin
+  /** Step 5: the improvement job, when `origin` is `improvement`. */
+  readonly jobId?: string
 }
+
+/** Where a candidate came from: a user task's session (step 4) or an improvement job's propose phase (step 5). */
+export type CandidateOrigin = 'session' | 'improvement'
+
+/** Every origin. */
+export const CANDIDATE_ORIGINS: readonly CandidateOrigin[] = ['session', 'improvement']
 
 // ---------------------------------------------------------------------------
 // Gate trials
@@ -584,15 +594,28 @@ export interface ReplayCaseRef {
   readonly sessionId: string
   /** Snapshot tree taken at task start. */
   readonly tree: string
-  /** Check specs recorded at task end (`checks/<taskId>.json`). */
+  /** Check specs recorded at the end of the replayed turn (`checks/<taskId>.json`, or per turn from step 5). */
   readonly checks: readonly TaskCheckSpec[]
+  /**
+   * Step 5: replay the user messages of turns 1 … `throughTurn` (each run
+   * still a fresh session); absent means the first turn only (step 4). For a
+   * feedback task it is the last turn before the first feedback, so the
+   * feedback text never reaches the replay.
+   */
+  readonly throughTurn?: number
+  /** Step 5: the feedback this case carries; each run of the case then gets a `trial.feedback` check. */
+  readonly feedbackIds?: readonly string[]
 }
 
 /** Token / request totals; dollars are estimated separately and never decide anything. */
 export interface TrialCost {
   readonly usage: LLMUsage
   readonly requestCount: number
-  /** Estimated USD from a price table, or `unknown`. */
+  /**
+   * Estimated USD from `@nexgent/llm`'s read-only price table (step 5,
+   * display only), or `unknown` when the model has no price or any usage is
+   * unknown. Never used by a decision.
+   */
   readonly estimatedUsd: number | 'unknown'
 }
 
@@ -657,6 +680,27 @@ export type TrialReceipt =
       readonly cost: TrialCost
     }
   | {
+      /**
+       * Step 5, ADR 0006: the feedback check of one run of a feedback case.
+       * The reviewer model reads the run's deliverables and the feedback
+       * text and answers whether the problem the feedback names is solved.
+       * Marked separately from deterministic checks and from `trial.review`.
+       */
+      readonly type: 'trial.feedback'
+      readonly format: 1
+      readonly trialId: string
+      readonly ts: string
+      readonly caseId: string
+      readonly arm: TrialArm
+      readonly repeat: number
+      readonly feedbackIds: readonly string[]
+      /** `unknown`: the run itself was unknown, the reviewer failed, or its answer did not parse. */
+      readonly status: TrialStatus
+      readonly reason: string
+      readonly model: string
+      readonly cost: TrialCost
+    }
+  | {
       readonly type: 'trial.end'
       readonly format: 1
       readonly trialId: string
@@ -667,7 +711,7 @@ export type TrialReceipt =
     }
 
 /** Receipt `type` vocabulary. */
-export const TRIAL_RECEIPT_TYPES = ['trial.start', 'trial.run', 'trial.review', 'trial.end'] as const
+export const TRIAL_RECEIPT_TYPES = ['trial.start', 'trial.run', 'trial.review', 'trial.feedback', 'trial.end'] as const
 
 /** Pass counts of one arm over one replay set. */
 export interface ArmTally {
@@ -688,6 +732,8 @@ export interface TrialTally {
   readonly budgetExhausted: boolean
   /** The candidate includes a plugin. */
   readonly requiresApproval: boolean
+  /** Step 5: feedback checks per arm (`trial.feedback`); absent when no case carries feedback. */
+  readonly feedback?: { readonly candidate: ArmTally; readonly baseline: ArmTally }
 }
 
 /** Why a trial or decision came out as it did. */
@@ -720,8 +766,10 @@ export const DECISION_REASONS: readonly DecisionReason[] = [
 export interface TrialVerdict {
   readonly outcome: 'adopt' | 'reject' | 'await-approval'
   readonly reason: DecisionReason
-  /** Selection pass rates (0–1), candidate and baseline; `unknown` runs excluded. */
+  /** Quality (0–1) per arm: selection runs plus feedback checks (step 5), `unknown` excluded. */
   readonly passRate: { readonly candidate: number; readonly baseline: number }
+  /** Step 5: feedback-check pass rates alone, when the trial had any (marked separately in evidence). */
+  readonly feedbackPassRate?: { readonly candidate: number; readonly baseline: number }
   /** Candidate tokens / baseline tokens, or `unknown`. */
   readonly costRatio: number | 'unknown'
   /** Whether the reviewer's opinion decided (only possible on a check tie). */
@@ -734,13 +782,16 @@ function rate(tally: ArmTally): number {
 }
 
 /**
- * The adoption rule (plan 4.4, decision 4), pure:
+ * The adoption rule (plan 4.4; ADR 0005 decision 5 as amended by ADR 0006),
+ * pure:
  *
- * 1. Any `unknown` run, or an exhausted budget, rejects (`unknown-runs` /
- *    `budget-exhausted`); the receipt's status is `unknown`.
+ * 1. Any `unknown` run or feedback check, or an exhausted budget, rejects
+ *    (`unknown-runs` / `budget-exhausted`); the receipt's status is `unknown`.
  * 2. The guard set may not regress: candidate guard passes below the
  *    baseline's reject (`guard-regressed`).
- * 3. Selection quality is the pass rate of the deterministic checks. Lower
+ * 3. Quality is the pass rate of the selection runs' deterministic checks
+ *    together with the feedback checks (each feedback check counts as one
+ *    more pass or fail of its arm; step 5, ADR 0006). Lower
  *    rejects (`quality-down`). Higher adopts if the cost ratio is within the
  *    cap (`quality-up`), else rejects (`cost-over-cap`).
  * 4. On a tie: a cost ratio below 1 adopts (`cost-down`); otherwise the
@@ -751,7 +802,12 @@ function rate(tally: ArmTally): number {
  *    `await-approval` with the same reason.
  */
 export function decideTrial(tally: TrialTally, costRatioCap: number): TrialVerdict {
-  const passRate = { candidate: rate(tally.selection.candidate), baseline: rate(tally.selection.baseline) }
+  const feedback = tally.feedback
+  const quality = (arm: 'candidate' | 'baseline'): ArmTally => feedback === undefined
+    ? tally.selection[arm]
+    : { passed: tally.selection[arm].passed + feedback[arm].passed, failed: tally.selection[arm].failed + feedback[arm].failed, unknown: tally.selection[arm].unknown + feedback[arm].unknown }
+  const passRate = { candidate: rate(quality('candidate')), baseline: rate(quality('baseline')) }
+  const feedbackPassRate = feedback === undefined ? undefined : { candidate: rate(feedback.candidate), baseline: rate(feedback.baseline) }
   const { candidate: candidateTokens, baseline: baselineTokens } = tally.tokens
   const costRatio: number | 'unknown' = candidateTokens === 'unknown' || baselineTokens === 'unknown' || baselineTokens === 0
     ? 'unknown'
@@ -760,10 +816,11 @@ export function decideTrial(tally: TrialTally, costRatioCap: number): TrialVerdi
     outcome: outcome === 'adopt' && tally.requiresApproval ? 'await-approval' : outcome,
     reason,
     passRate,
+    ...(feedbackPassRate === undefined ? {} : { feedbackPassRate }),
     costRatio,
     decidedByReview,
   })
-  const unknownRuns = tally.selection.candidate.unknown + tally.selection.baseline.unknown + tally.guard.candidate.unknown + tally.guard.baseline.unknown
+  const unknownRuns = quality('candidate').unknown + quality('baseline').unknown + tally.guard.candidate.unknown + tally.guard.baseline.unknown
   if (tally.budgetExhausted) return verdict('reject', 'budget-exhausted')
   if (unknownRuns > 0 || costRatio === 'unknown') return verdict('reject', 'unknown-runs')
   if (tally.guard.candidate.passed < tally.guard.baseline.passed) return verdict('reject', 'guard-regressed')
@@ -870,6 +927,12 @@ export function decideUsageRollback(
 /** Names of the deterministic checks the host runs at task end and in trials. */
 export type TaskCheckName = 'file-exists' | 'parses' | 'test-command'
 
+/** File base name of a per-turn snapshot or checks record (step 5): `<taskId>.t<turn>.json`. */
+export function perTurnFileName(taskId: string, turn: number): string {
+  if (!Number.isSafeInteger(turn) || turn < 1) throw new NexgentError('internal', `turn must be a positive integer: ${turn}`)
+  return `${taskId}.t${turn}.json`
+}
+
 /** Every check name. */
 export const TASK_CHECK_NAMES: readonly TaskCheckName[] = ['file-exists', 'parses', 'test-command']
 
@@ -909,10 +972,17 @@ export interface SnapshotTree {
   readonly files: readonly SnapshotFile[]
 }
 
-/** `.nexgent/snapshots/tasks/<taskId>.json`, written when a root task starts. */
+/**
+ * `.nexgent/snapshots/tasks/<taskId>.json` (step 4: written when a root task
+ * starts) and, from step 5, `tasks/<taskId>.t<turn>.json` written when each
+ * root turn starts (decision 7: the task id stays, snapshots are per turn).
+ * A step-4 file without `turn` is the task's first turn.
+ */
 export interface TaskSnapshotRecord {
   readonly formatVersion: 1
   readonly taskId: string
+  /** Step 5: the root turn it was taken before; absent in step-4 files (turn 1). */
+  readonly turn?: number
   readonly sessionId: string
   /** ISO-8601 UTC. */
   readonly takenAt: string
@@ -924,10 +994,17 @@ export interface TaskSnapshotRecord {
   readonly capabilityVersion: CapabilityVersion
 }
 
-/** `.nexgent/snapshots/checks/<taskId>.json`, written when a root task ends. */
+/**
+ * `.nexgent/snapshots/checks/<taskId>.json` (step 4: rewritten at the end of
+ * every root turn, so it holds the latest turn) and, from step 5,
+ * `checks/<taskId>.t<turn>.json` written once at the end of each root turn;
+ * a feedback turn never overwrites the turn it is about.
+ */
 export interface TaskChecksRecord {
   readonly formatVersion: 1
   readonly taskId: string
+  /** Step 5: the root turn checked; absent in step-4 files (the latest turn at the time). */
+  readonly turn?: number
   readonly sessionId: string
   /** ISO-8601 UTC. */
   readonly checkedAt: string

@@ -55,6 +55,8 @@ export function initialState(start: SessionStartRecord): SessionState {
   if (start.parentSessionId !== undefined) metadata.parentSessionId = start.parentSessionId
   if (start.member !== undefined) metadata.member = start.member
   if (start.capabilityVersion !== undefined) metadata.capabilityVersion = start.capabilityVersion
+  if (start.purpose !== undefined) metadata.purpose = start.purpose
+  if (start.improvement !== undefined) metadata.improvement = start.improvement
   return { sessionId: start.sessionId, version: 1, messages: [], metadata: { ...metadata } }
 }
 

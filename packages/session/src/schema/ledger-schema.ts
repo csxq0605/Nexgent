@@ -15,6 +15,9 @@ import {
   CAPABILITY_COMPONENT_KINDS,
   DECISION_OUTCOMES,
   DECISION_REASONS,
+  IMPROVEMENT_PHASES,
+  IMPROVEMENT_STATUSES,
+  IMPROVEMENT_TRIGGERS,
   isJsonValue,
   LEDGER_RECORD_TYPES,
   type JsonObject,
@@ -32,6 +35,7 @@ export const LEDGER_RECORD_DEFS: Readonly<Record<LedgerRecordType, string>> = {
   'tool.call': 'toolCallRecord',
   'task.outcome': 'taskOutcomeRecord',
   'capability.decision': 'capabilityDecisionRecord',
+  'improvement.end': 'improvementEndRecord',
 }
 
 function record(type: LedgerRecordType, properties: Record<string, JsonObject>, required: readonly string[]): JsonObject {
@@ -48,6 +52,8 @@ function record(type: LedgerRecordType, properties: Record<string, JsonObject>, 
       taskId: { type: 'string' },
       trialId: { type: 'string' },
       arm: { enum: ['candidate', 'baseline'] },
+      improvementId: { type: 'string' },
+      improvementPhase: { enum: [...IMPROVEMENT_PHASES] },
       ...properties,
     },
   }
@@ -107,6 +113,11 @@ export const ledgerRecordSchema: JsonObject = {
         requestCount: { type: 'integer', minimum: 0 },
         toolCallCount: { type: 'integer', minimum: 0 },
       },
+    },
+    phaseCost: {
+      type: 'object',
+      required: ['usage', 'requestCount'],
+      properties: { usage: ref('usage'), requestCount: { type: 'integer', minimum: 0 } },
     },
     llmRequestStartRecord: record(
       'llm.request.start',
@@ -169,6 +180,21 @@ export const ledgerRecordSchema: JsonObject = {
         revision: ref('positiveInteger'),
       },
       ['decisionId', 'outcome', 'reason', 'trigger', 'fromVersion', 'toVersion'],
+    ),
+    improvementEndRecord: record(
+      'improvement.end',
+      {
+        jobId: ref('nonEmptyString'),
+        trigger: { enum: [...IMPROVEMENT_TRIGGERS] },
+        status: { enum: [...IMPROVEMENT_STATUSES] },
+        phases: {
+          type: 'object',
+          properties: Object.fromEntries(IMPROVEMENT_PHASES.map(phase => [phase, ref('phaseCost')])),
+        },
+        candidateId: ref('nonEmptyString'),
+        decisionId: ref('nonEmptyString'),
+      },
+      ['jobId', 'trigger', 'status', 'phases'],
     ),
   },
 }

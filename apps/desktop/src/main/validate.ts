@@ -86,6 +86,10 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'capabilities.trial': { projectId: id, candidateId: id },
   'capabilities.approve': { projectId: id, candidateId: id, decision: { kind: 'allowDeny' } },
   'capabilities.rollback': { projectId: id, toVersion: { kind: 'capabilityVersion', optional: true }, reason: { kind: 'string', optional: true } },
+  'improvements.list': project,
+  'improvements.show': { projectId: id, jobId: id },
+  'improvements.run': { projectId: id, sessionId: { kind: 'nonEmptyString', optional: true }, deliverableId: { kind: 'nonEmptyString', optional: true } },
+  'improvements.cancel': { projectId: id, jobId: id },
 }
 
 const SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'full-access'])

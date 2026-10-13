@@ -13,6 +13,7 @@ import type { ApprovalDecision, ApprovalGrant, ApprovalRequest } from './approva
 import type { CapabilityComponentRef, CapabilityFile, CapabilityVersion, CapabilityVersionSwitchReason, ComponentUseProof } from './capabilities.js'
 import type { FinishReason, LLMMessage, LLMUsage, RefusalInfo, ToolCall } from './llm.js'
 import type { MemberExecutionForm, MemberIdentity, MemberResult, DelegationMode, TeamMember, TeamMessage, TeamTask, WorkflowStatus } from './collaboration.js'
+import type { ImprovementPhase } from './improvement.js'
 import type { DeliverableVersionRef, FeedbackEntry, FileChange, Goal, GoalStatus, MaterialRef } from './tasking.js'
 import type { SandboxMode } from './workspace.js'
 
@@ -50,6 +51,22 @@ export interface SessionStartRecord extends SessionRecordBase {
   readonly member?: MemberIdentity
   /** Step 4: capability bundle the session runs on (`baseline` or a content hash); absent in sessions written before step 4. */
   readonly capabilityVersion?: CapabilityVersion
+  /** Step 5: `improvement` for an improvement job's session (hidden from the conversation list); absent means `task`. */
+  readonly purpose?: SessionPurpose
+  /** Step 5: which job and phase; present exactly when `purpose` is `improvement`. */
+  readonly improvement?: SessionImprovement
+}
+
+/** What a session is for (step 5). */
+export type SessionPurpose = 'task' | 'improvement'
+
+/** Every purpose. */
+export const SESSION_PURPOSES: readonly SessionPurpose[] = ['task', 'improvement']
+
+/** The job an improvement session belongs to. The trial phase opens no improvement session (replays are ordinary trial runs). */
+export interface SessionImprovement {
+  readonly jobId: string
+  readonly phase: Exclude<ImprovementPhase, 'trial'>
 }
 
 /** A user-role message entering the conversation. */
@@ -613,6 +630,10 @@ export interface SessionMetadata {
   readonly member?: MemberIdentity
   /** Step 4: from `session.start`, then the latest `capability.version`. */
   readonly capabilityVersion?: CapabilityVersion
+  /** Step 5: from `session.start`. */
+  readonly purpose?: SessionPurpose
+  /** Step 5: from `session.start`. */
+  readonly improvement?: SessionImprovement
 }
 
 /** What a session projects to: the LLM-visible history plus metadata. The system prompt is not stored. */
@@ -637,6 +658,9 @@ export interface SessionInit {
   readonly member?: MemberIdentity
   /** Step 4: written into `session.start.capabilityVersion`. */
   readonly capabilityVersion?: CapabilityVersion
+  /** Step 5: written into `session.start`; `improvement` is required when `purpose` is `improvement`, refused otherwise. */
+  readonly purpose?: SessionPurpose
+  readonly improvement?: SessionImprovement
 }
 
 /** Where recovery stopped, when the file had a bad tail. */

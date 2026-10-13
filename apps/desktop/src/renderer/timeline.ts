@@ -275,6 +275,8 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
     case 'capability.version':
     case 'capability.candidate':
     case 'capability.trial':
+    // Step 5: improvement jobs are project-level too.
+    case 'improvement.job':
       return [...list]
   }
 }

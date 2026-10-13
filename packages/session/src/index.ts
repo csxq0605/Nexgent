@@ -64,6 +64,8 @@ export {
   validateCapabilityFile,
 } from './schema/capabilities-schema.js'
 export type { CapabilityFileKind } from './schema/capabilities-schema.js'
+export { IMPROVEMENT_FILE_DEFS, improvementSchema, validateImprovementFile } from './schema/improvement-schema.js'
+export type { ImprovementFileKind } from './schema/improvement-schema.js'
 export {
   checkSessionPluginConfig,
   createSessionServices,

@@ -962,6 +962,15 @@
         },
         "capabilityVersion": {
           "$ref": "#/$defs/capabilityVersion"
+        },
+        "purpose": {
+          "enum": [
+            "task",
+            "improvement"
+          ]
+        },
+        "improvement": {
+          "$ref": "#/$defs/sessionImprovement"
         }
       }
     },
@@ -1038,6 +1047,15 @@
         },
         "capabilityVersion": {
           "$ref": "#/$defs/capabilityVersion"
+        },
+        "purpose": {
+          "enum": [
+            "task",
+            "improvement"
+          ]
+        },
+        "improvement": {
+          "$ref": "#/$defs/sessionImprovement"
         }
       }
     },
@@ -2116,6 +2134,25 @@
     "capabilityVersion": {
       "type": "string",
       "pattern": "^(?:baseline|[a-f0-9]{64})$"
+    },
+    "sessionImprovement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jobId",
+        "phase"
+      ],
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "phase": {
+          "enum": [
+            "diagnose",
+            "propose"
+          ]
+        }
+      }
     },
     "componentRef": {
       "type": "object",
