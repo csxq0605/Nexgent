@@ -7,8 +7,10 @@
  *   headless  H01–H19  scripted model server, through @nexgent/sdk: H19 (step 4's H01–H19, with
  *                      step 3's H01–H23 inside, over fresh runs of step 4's headless and gate
  *                      scenarios); H01–H18 from the step-5 scenario (accept-common/step5-headless.mjs):
- *                      round 1 runs the feedback project and judges H01–H04 and H15 once
- *                      the SDK exposes the improvement flow; the fixture itself is recorded as a named check
+ *                      the feedback project and the trigger, switch, concurrency and recovery
+ *                      phases (H01–H04, H15: judged, but not-implemented until the SDK as shipped
+ *                      runs the flow, W4) and per-turn records (H16); the fixture itself is
+ *                      recorded as a named check
  *   desktop   D01–D23  D01–D18: steps 2–4's desktop scenarios and judges, as a regression;
  *                      D19–D23 (the 改进 page, settings) not wired yet
  *   real      R01–R08  real Claude model (scripts/real-task/step5-orders.mjs); round 1 checks the
@@ -239,6 +241,8 @@ async function main() {
         ? { status: 'failed', evidence: `step 5 headless scenario failed: ${ready.ctx.step5Error}` }
         : judgeFeedbackProject(ready.ctx.step5.project, { judgeTable: judgeRegionTable, csvOf: (await import('./accept-common/step5-headless.mjs')).csvOf })
       s.check('反馈夹具：历史任务、反馈任务与 5 条反馈（3 条计入）经 SDK 写成', fixture.status === 'passed', `${fixture.status}: ${fixture.evidence}`)
+      for (const [name, error] of Object.entries(ready.ctx.step5?.errors ?? {})) s.knownIssue(`step 5 headless phase ${name} failed: ${String(error).split('\n')[0]}`)
+      if (ready.ctx.step5 !== undefined && ready.ctx.step5.features?.shipped !== true) s.knownIssue('the SDK as shipped does not run the improvement flow yet (improvements.* refuses); the step-5 scenario inserted the @nexgent/evolve row and a test job entry itself, so H01–H04 and H15 stay not-implemented')
       log(`feedback fixture ${fixture.status}`)
     }
   }

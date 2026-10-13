@@ -11,11 +11,12 @@
  * H19 runs step 4's own headless items H01–H19 (H19 there is step 3's
  * H01–H23) over fresh runs of their scenarios (`ctx.regression`, the step-4
  * headless ctx); D01–D18 are step 4's desktop items with their own scenarios
- * and judges (the desktop ctx has step 4's shape). Of the new items, H01–H04
- * and H15 have judges (step5-judges.mjs) over the step-5 headless scenario
- * (`ctx.step5`), which report not-implemented until the SDK exposes the improvement flow
- * (`@nexgent/evolve` with EvolvePlugin and `improvements.*`);
- * the other H items, D19–D23 and R01–R08 are not wired yet (rounds 2–4).
+ * and judges (the desktop ctx has step 4's shape). Of the new items, H01–H04,
+ * H15 and H16 have judges (step5-judges.mjs) over the step-5 headless scenario
+ * (`ctx.step5`, step5-headless.mjs, round 2). H16 is judged as is; H01–H04 and
+ * H15 report what they checked as not-implemented until the SDK as shipped runs
+ * the improvement flow (W4). The other H items, D19–D23 and R01–R08 are not
+ * wired yet (rounds 2–4).
  */
 import { CHECKS as STEP4_CHECKS, evaluateItem } from './step4-checks.mjs'
 import { JUDGES, judge } from './step5-judges.mjs'
