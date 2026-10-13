@@ -24,7 +24,7 @@
 | `presentTool(deliverables)` | `Tool` | 名字、schema、effects、approval 取自 `PRESENT_TOOL`；经 `ToolContext.appendRecord` 写 `deliverable.presented`；结果文本给出 `deliverableId` 与版本号 |
 | `textHunks` `diffLines` `toHunks` `renderHunks` `splitLines` | — | 按行差异（Myers，先去掉公共首尾），统一差异块，上下文 3 行 |
 | `LocalTaskRecorder(layout, { processes?, now?, maxSnapshotBytes? })` | kernel `TaskRecorder`（步骤 4） | `begin` 拍任务快照，`end` 推出检查、运行并写检查记录；见下文“任务快照与检查” |
-| `csvProblem(text)`、`TEST_COMMAND_PATTERN` | — | 检查用的 CSV 结构判断、测试命令识别 |
+| `csvProblem(text)`、`TEST_COMMAND_PATTERN`、`testCommandRan(command, exitCode)` | — | 检查用的 CSV 结构判断、测试命令识别 |
 | `apply` / `name` / `TaskingPlugin` | Cordis plugin | `inject: ['workspace', 'session']`，`ctx.provide('tasking')` 与 `ctx.provide('taskRecorder')`（测试命令经 `ctx.processes` 运行）；启动时 `cleanup()`；有 `ctx.tools` 时注册 `present`，有 `ctx.context` 时注册目标提供者（任一方卸载时注销） |
 
 ## 规则与取舍
@@ -56,8 +56,9 @@
   文件体按 SHA-256 存一次（`objects/` 先写临时文件再改名），树按规范 JSON 的哈希命名，已存在的树与对象不重写；总量超过
   `maxSnapshotBytes`（默认 200 MiB）时 `tree: null`。检查从任务树交付过的每个成果的最新版本推出：每个文件一项 `file-exists`
   （id `file-<n>`），`.json` / `.csv` / `.xlsx` 另加一项 `parses`（`parse-<n>`；CSV 要求引号成对、各行字段数相同，XLSX 只认
-  zip 头和其中的 `[Content_Types].xml` 与 `xl/workbook.xml`）；在项目根目录退出码为 0 的命令里，符合 `TEST_COMMAND_PATTERN`
-  的测试命令取最近 3 条去重（`test-<n>`），经 `ctx.processes` 重跑（120 s），其他命令不重跑。`task.outcome.checks` 取最近一次。
+  zip 头和其中的 `[Content_Types].xml` 与 `xl/workbook.xml`）；在项目根目录跑过的命令里，符合 `TEST_COMMAND_PATTERN`
+  的测试命令（步骤 5 起成败都算，`testCommandRan` 只排除 126、127 与 pytest 的 4、5 这些“没跑到测试”的退出码）取最近 3 条去重
+  （`test-<n>`），经 `ctx.processes` 重跑（120 s），以重跑结果为准；其他命令不重跑。`task.outcome.checks` 取最近一次。
   快照的清理（超过总量时删旧对象）还没有做。
 - **按轮记（步骤 5）**：kernel 传入根轮号时，每个根轮开始写 `tasks/<taskId>.t<turn>.json`、结束写 `checks/<taskId>.t<turn>.json`，
   反馈轮不覆盖原轮；同时照旧写步骤 4 的文件名：`tasks/<taskId>.json` 只在不存在时写（即第一份快照），`checks/<taskId>.json`

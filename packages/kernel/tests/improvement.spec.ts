@@ -108,6 +108,47 @@ describe('per-turn task records and the check-failure signal', () => {
     expect(ledger.of('task.outcome')[0]).toMatchObject({ checks: [FAIL] })
   })
 
+  it('hands the recorder failing root commands with their exit codes and signals a failing test-command check (ADR 0006 decision 10)', async () => {
+    harness = await bootHarness({
+      script: [
+        toolCallReply('c1', 'bash', { command: 'npm test' }),
+        toolCallReply('c2', 'bash', { command: 'ls missing/' }),
+        toolCallReply('c3', 'bash', { command: 'pytest -q' }),
+        toolCallReply('c4', 'bash', { command: 'npm test', cwd: 'sub' }),
+        textReply('done'),
+      ],
+    })
+    const { app, store } = harness
+    const codes: Record<string, number | 'timeout'> = { 'npm test': 1, 'ls missing/': 2, 'pytest -q': 'timeout' }
+    app.ctx.tools.register({
+      definition: plainTool('bash').definition,
+      handler: async input => {
+        const code = codes[(input as { command: string }).command] ?? 0
+        return code === 'timeout' ? { content: 'timed out', isError: true } : { content: 'ran', meta: { exitCode: code } }
+      },
+    })
+    const commands: unknown[] = []
+    const failed: TaskCheck = { name: 'test-command', passed: false, target: 'test-1', detail: 'exit code 1' }
+    const s = services(() => [failed])
+    await provide(app, 'taskRecorder', {
+      begin: s.recorder.begin,
+      end: async input => {
+        commands.push(...input.commands)
+        return { specs: [{ id: 'test-1', name: 'test-command', command: 'npm test', shell: 'bash' }], results: [failed] }
+      },
+    })
+    await provide(app, 'improve', s.improve)
+    const agent = await app.agents.create()
+    await agent.run('test it')
+    await agent.close()
+    expect(commands).toEqual([
+      { command: 'npm test', shell: 'bash', exitCode: 1 },
+      { command: 'ls missing/', shell: 'bash', exitCode: 2 },
+    ])
+    expect(s.signals).toEqual([{ taskId: agent.attribution.taskId, sessionId: agent.sessionId, turn: 1, checks: [failed] }])
+    expect(store.of(agent.sessionId, 'error')).toEqual([])
+  })
+
   it('gives a gate trial session per-turn records but no signal, and stamps its job on every ledger record', async () => {
     harness = await bootHarness({ script: [textReply('replayed')] })
     const { app, ledger, llm } = harness

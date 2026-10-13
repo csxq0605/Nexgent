@@ -12,7 +12,8 @@
  *   `CAPABILITY_LIMITS.maxSnapshotBytes` gets `tree: null`.
  * - Checks: `file-exists` for every file of the deliverables the task tree
  *   presented, `parses` for those that are JSON, CSV or XLSX, and
- *   `test-command` for the last few test-runner commands that exited 0. The
+ *   `test-command` for the last few test-runner commands run in the project
+ *   root, passing or failing (step 5; see {@link testCommandRan}). The
  *   specs and results go to `checks/<taskId>.t<turn>.json` at each root turn
  *   end and the results into `task.outcome.checks`.
  * - Step-4 names: `tasks/<taskId>.json` is still written for the task's
@@ -65,9 +66,37 @@ export const TEST_COMMAND_PATTERN = new RegExp([
   String.raw`^(?:uv\s+run\s+)?pytest\b`,
   String.raw`^python3?\s+-m\s+(?:pytest|unittest)\b`,
   String.raw`^node\s+--test\b`,
+  String.raw`^node\s+\S+\.test\.[cm]?[jt]s(?:\s|$)`,
   String.raw`^(?:go|cargo)\s+test\b`,
   String.raw`^make\s+(?:test|check)\b`,
 ].join('|'))
+
+/**
+ * Exit codes that mean the runner never ran a test: the shell could not
+ * execute or find the command (126, 127), or pytest was given a bad path or
+ * option (4) or found no tests (5).
+ */
+const NO_TESTS_RAN: readonly number[] = [126, 127]
+const PYTEST_NO_TESTS_RAN: readonly number[] = [4, 5]
+const PYTEST_PATTERN = /^(?:uv\s+run\s+)?(?:python3?\s+-m\s+)?pytest\b/
+
+/**
+ * Whether a shell call counts as a test run for `test-command` checks: the
+ * command matches {@link TEST_COMMAND_PATTERN} and its exit code does not
+ * say that no test ran. Step 5 (user decision 2026-10-13, ADR 0006
+ * decision 10) keeps failing runs: they are re-run at turn end like passing
+ * ones, so a suite still failing then is a failing check. Exploratory
+ * commands (`ls`, `cat`, builds) never match the pattern, whatever their
+ * exit code. `exitCode` absent reads as 0 (step-4 callers).
+ */
+export function testCommandRan(command: string, exitCode: number | undefined): boolean {
+  const text = command.trim()
+  if (!TEST_COMMAND_PATTERN.test(text)) return false
+  const code = exitCode ?? 0
+  if (NO_TESTS_RAN.includes(code)) return false
+  if (PYTEST_PATTERN.test(text) && PYTEST_NO_TESTS_RAN.includes(code)) return false
+  return true
+}
 
 const PARSE_FORMATS: Readonly<Record<string, ParseFormat>> = { '.json': 'json', '.csv': 'csv', '.xlsx': 'xlsx' }
 
@@ -167,7 +196,7 @@ export class LocalTaskRecorder implements TaskRecorder {
       const tests: { command: string; shell: 'bash' | 'pwsh' }[] = []
       for (const call of input.commands) {
         const command = call.command.trim()
-        if (!TEST_COMMAND_PATTERN.test(command)) continue
+        if (!testCommandRan(command, call.exitCode)) continue
         const at = tests.findIndex(test => test.command === command && test.shell === call.shell)
         if (at >= 0) tests.splice(at, 1)
         tests.push({ command, shell: call.shell })

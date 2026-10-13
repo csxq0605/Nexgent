@@ -21,7 +21,7 @@ import { JsonlLedger, SessionPlugin, validateCapabilityFile } from '@nexgent/ses
 import { scriptedProvider } from '@nexgent/test-support'
 import { WorkspacePlugin } from '@nexgent/workspace'
 import { afterEach, describe, expect, it } from 'vitest'
-import { csvProblem, LocalTaskRecorder, TaskingPlugin, TEST_COMMAND_PATTERN } from '../src/index.js'
+import { csvProblem, LocalTaskRecorder, TaskingPlugin, TEST_COMMAND_PATTERN, testCommandRan } from '../src/index.js'
 import { project, SESSION_A, tempDir } from './helpers.js'
 
 const TASK = '0b6d7c1e-8f2a-4c3b-9d4e-5f6a7b8c9d0e'
@@ -184,12 +184,51 @@ describe('task checks', () => {
   })
 
   it('recognises test-runner commands only', () => {
-    for (const command of ['pytest', 'python -m pytest tests', 'python3 -m unittest', 'npm test', 'pnpm run test', 'npx vitest run', 'node --test', 'go test ./...', 'cargo test', 'make check']) {
+    for (const command of ['pytest', 'python -m pytest tests', 'python3 -m unittest', 'npm test', 'pnpm run test', 'npx vitest run', 'node --test', 'node checks/totals.test.mjs', 'go test ./...', 'cargo test', 'make check']) {
       expect(TEST_COMMAND_PATTERN.test(command)).toBe(true)
     }
-    for (const command of ['test -f x', 'ls', 'python make_report.py', 'npm install', 'echo pytest', 'rm -rf build && pytest']) {
+    for (const command of ['test -f x', 'ls', 'python make_report.py', 'npm install', 'echo pytest', 'rm -rf build && pytest', 'node build.mjs', 'node checks/totals.test.mjs.bak']) {
       expect(TEST_COMMAND_PATTERN.test(command)).toBe(false)
     }
+  })
+
+  it('keeps failing test runs but not runs where no test ran (step 5, ADR 0006 decision 10)', () => {
+    expect(testCommandRan('npm test', 1)).toBe(true)
+    expect(testCommandRan('pytest -q', 1)).toBe(true)
+    expect(testCommandRan('node checks/totals.test.mjs', 1)).toBe(true)
+    expect(testCommandRan('pnpm test', undefined)).toBe(true)
+    expect(testCommandRan('vitest run', 127)).toBe(false)
+    expect(testCommandRan('npm test', 126)).toBe(false)
+    expect(testCommandRan('pytest tests/missing.py', 4)).toBe(false)
+    expect(testCommandRan('python -m pytest -k nothing', 5)).toBe(false)
+    expect(testCommandRan('go test ./...', 5)).toBe(true)
+    expect(testCommandRan('ls missing/', 2)).toBe(false)
+    expect(testCommandRan('cat nope.txt', 1)).toBe(false)
+  })
+
+  it('records a failing test run as a failing check and drops exploratory failures', async () => {
+    const p = await project()
+    const processes = fakeProcesses({ 'pytest -q': 1 })
+    const recorder = new LocalTaskRecorder(p.workspace.layout, { now: NOW, processes: () => processes })
+    const { specs, results } = await recorder.end({
+      taskId: TASK,
+      sessionId: SESSION_A,
+      deliverableFiles: [],
+      commands: [
+        { command: 'npm test', shell: 'bash', exitCode: 0 },
+        { command: 'ls missing/', shell: 'bash', exitCode: 2 },
+        { command: 'vitest run', shell: 'bash', exitCode: 127 },
+        { command: 'pytest -q', shell: 'bash', exitCode: 1 },
+        { command: 'npm test', shell: 'bash', exitCode: 1 },
+      ],
+    })
+    expect(specs).toEqual([
+      { id: 'test-1', name: 'test-command', command: 'pytest -q', shell: 'bash' },
+      { id: 'test-2', name: 'test-command', command: 'npm test', shell: 'bash' },
+    ])
+    expect(results.map(result => [result.target, result.passed, result.detail])).toEqual([
+      ['test-1', false, 'exit code 1'], ['test-2', true, undefined],
+    ])
   })
 
   it('checks CSV structure', () => {

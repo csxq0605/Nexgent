@@ -192,7 +192,7 @@ kernel 的 `Agent` 在步骤 2 增加（形状由 W7 定，语义在此固定）
 步骤 5 增加（实现归步骤 5 分工表里对应的工作包，形状在契约固定）：
 
 - `SessionInit.purpose` / `improvement` 写进 `session.start`（只给其一时 `create` 报 `session/invalid-record`）；改进会话的每条账本记录带 `improvementId` 与 `improvementPhase`（`LedgerAttribution`，`JsonlLedger.setStamp` 同样带上）；该作业的门控试验记录带 `improvementPhase: trial`。
-- 快照与检查按根轮记（`perTurnFileName`，`data-formats.md` §任务快照与检查“按轮记”），根轮结束时检查有失败项即向改进队列计一个 `check-failure` 信号（只在 `autoImprove` 为真时自动开始作业）。
+- 快照与检查按根轮记（`perTurnFileName`，`data-formats.md` §任务快照与检查“按轮记”），根轮结束时检查有失败项即向改进队列计一个 `check-failure` 信号（失败的测试命令也成为检查，ADR 0006 决策 10；kernel 把项目根目录里有退出码的 `bash` / `pwsh` 命令连同 `exitCode` 交给记录器，由记录器判定哪些是测试命令）（只在 `autoImprove` 为真时自动开始作业）。
 - 路径策略把 `.nexgent/improvements/` 加入读写都拒绝的子目录（`@nexgent/workspace` `DENIED_PATTERNS`）。
 
 ## 测试

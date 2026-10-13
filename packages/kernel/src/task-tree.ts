@@ -41,8 +41,12 @@ export class TaskTree {
   private readonly memberTotals = new Map<string, { name: string; executionForm: ExecutionForm; task: MemberTotals; turn: MemberTotals }>()
   /** Step 4: files of the latest version of each deliverable the tree presented, by deliverable id in first-presentation order. */
   private readonly presented = new Map<string, readonly string[]>()
-  /** Step 4: shell commands of the tree that exited 0, in call order. */
-  readonly commands: { command: string; shell: 'bash' | 'pwsh' }[] = []
+  /**
+   * Shell commands of the tree run in the project root that exited with a
+   * code (any; step 5 keeps failing ones too), in call order. Timed-out and
+   * cancelled calls have no code and are left out.
+   */
+  readonly commands: { command: string; shell: 'bash' | 'pwsh'; exitCode: number }[] = []
   /** Step 4: whether a root-turn snapshot was taken (step 5 takes one every root turn), so checks run. */
   snapshotTaken = false
 
