@@ -26,6 +26,7 @@
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
+  candidateRunAttribution,
   decisionLedgerRecord,
   processReplayRunner,
   readCandidate,
@@ -33,6 +34,7 @@ import {
   runGate,
   type GateResult,
   type FeedbackCheckInput,
+  type JobRunAttribution,
   type FeedbackCheckResult,
   type ReplayRunRequest,
   type ReplayRunResult,
@@ -143,10 +145,10 @@ function outcomeOf(reason: TurnEndReason): ReplayRunResult['outcome'] | undefine
  * opens belongs to the job's `trial` phase (members inherit nothing; the
  * kernel refuses a job on a member).
  */
-function trialAgents(jobId: string): Plugin {
+function trialAgents(run: JobRunAttribution): Plugin {
   return class TrialAgentsService extends AgentsService {
     override async create(options: CreateAgentOptions = {}) {
-      return super.create(options.child === undefined ? { ...options, improvement: { jobId, phase: 'trial' } } : options)
+      return super.create(options.child === undefined ? { ...options, improvement: { ...run, phase: 'trial' } } : options)
     }
   } as unknown as Plugin
 }
@@ -162,7 +164,7 @@ export async function runReplay(request: ReplayRunRequest, env: Env = process.en
     approvalResponder: async request => ({ id: request.id, decision: 'deny', scope: 'once', decidedBy: 'headless', reason: 'gate trials run without anyone to ask' }),
     registry: {
       '@nexgent/session': trialSessionPlugin(request, tally),
-      ...(request.improvement === undefined ? {} : { [KERNEL_PLUGIN_NAMES.agents]: trialAgents(request.improvement.jobId) }),
+      ...(request.improvement === undefined ? {} : { [KERNEL_PLUGIN_NAMES.agents]: trialAgents(request.improvement) }),
     },
   })
   try {
@@ -252,10 +254,22 @@ function renderFeedback(feedback: FeedbackCheckInput['feedback']): string {
  *   output alone with the feedback text (no other attempt to compare, so no
  *   position to swap).
  */
-export function llmReviewer(options: { readonly ledger: Ledger; readonly home: string; readonly env: Env; readonly endpoint?: string; readonly improvementId?: string }): TrialReviewer {
+export function llmReviewer(options: { readonly ledger: Ledger; readonly home: string; readonly env: Env; readonly endpoint?: string; readonly improvement?: JobRunAttribution }): TrialReviewer {
   const ask = async (trialId: string, settings: Parameters<TrialReviewer['review']>[1], system: string, user: string, signal: AbortSignal) => {
     let usage: LLMUsage = UNKNOWN_USAGE
-    const fields = { trialId, ...(options.improvementId === undefined ? {} : { improvementId: options.improvementId, improvementPhase: 'trial' as const }) }
+    const run = options.improvement
+    const fields = {
+      trialId,
+      ...(run === undefined
+        ? {}
+        : {
+          improvementId: run.jobId,
+          improvementPhase: 'trial' as const,
+          ...(run.improverVersion === undefined ? {} : { improverVersion: run.improverVersion }),
+          ...(run.metaJobId === undefined ? {} : { metaJobId: run.metaJobId }),
+          ...(run.comparisonArm === undefined ? {} : { comparisonArm: run.comparisonArm }),
+        }),
+    }
     const provider = new AnthropicProvider({
       credentials: new LocalCredentials({ env: options.env as NodeJS.ProcessEnv, home: options.home }),
       ledger: trialLedger(options.ledger, fields),
@@ -307,18 +321,20 @@ export function llmReviewer(options: { readonly ledger: Ledger; readonly home: s
 }
 
 /** Run the gate for one candidate of a project (the `gate` mode). */
-export async function runGateProcess(root: string, candidateId: string, env: Env = process.env, options: { readonly comparison?: ImproverComparisonParams } = {}): Promise<GateResult> {
+export async function runGateProcess(root: string, candidateId: string, env: Env = process.env, options: { readonly comparison?: ImproverComparisonParams; readonly epoch?: string } = {}): Promise<GateResult> {
   const layout = resolveWorkspaceLayout(root)
   const ledger = new JsonlLedger({ ledgersDir: layout.ledgers })
   const endpoint = (await readProjectConfig(layout.configFile).catch(() => undefined))?.input.endpoint
-  const jobId = (await readCandidate(layout.capabilities, candidateId).catch(() => undefined))?.jobId
+  const candidate = await readCandidate(layout.capabilities, candidateId).catch(() => undefined)
+  const improvement = candidate === undefined ? undefined : await candidateRunAttribution(layout, candidate)
   return runGate({
     layout,
     candidateId,
     runner: processReplayRunner({ args: [TRIAL_ENTRY, 'replay'], env: env as NodeJS.ProcessEnv }),
-    reviewer: llmReviewer({ ledger, home: nexgentHome(env as NodeJS.ProcessEnv), env, ...(endpoint === undefined ? {} : { endpoint }), ...(jobId === undefined ? {} : { improvementId: jobId }) }),
+    reviewer: llmReviewer({ ledger, home: nexgentHome(env as NodeJS.ProcessEnv), env, ...(endpoint === undefined ? {} : { endpoint }), ...(improvement === undefined ? {} : { improvement }) }),
     log: line => process.stderr.write(`${line}\n`),
     ...(options.comparison === undefined ? {} : { comparison: options.comparison }),
+    ...(options.epoch === undefined ? {} : { epoch: options.epoch }),
     onDecision: async decision => {
       await ledger.append(decisionLedgerRecord(decision)).catch(() => undefined)
     },

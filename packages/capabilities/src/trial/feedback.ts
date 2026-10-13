@@ -15,17 +15,39 @@
  */
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { IMPROVEMENT_FILES, IMPROVEMENTS_DIR, type CandidateRecord, type FeedbackEntry, type ImprovementJob, type LLMUsage, type WorkspaceLayout } from '@nexgent/kernel'
+import { IMPROVEMENT_FILES, IMPROVEMENTS_DIR, type CandidateRecord, type ComparisonArm, type FeedbackEntry, type ImproverVersion, type ImprovementJob, type LLMUsage, type WorkspaceLayout } from '@nexgent/kernel'
 import type { ReplayCase, ReplayMessage } from './replay-set.js'
 
 /** Where the gate anchors a candidate's selection set. */
 export type SelectionAnchor =
   /** A user task's own candidate (step 4): the proposing task. */
   | { readonly kind: 'task'; readonly caseId: string }
-  /** An improvement job's candidate: its feedback task, with the feedback to check (possibly none). */
-  | { readonly kind: 'job'; readonly caseId: string; readonly feedback: readonly FeedbackEntry[] }
+  /** An improvement job's candidate: its feedback task, with the feedback to check (possibly none), and how its runs are attributed. */
+  | { readonly kind: 'job'; readonly caseId: string; readonly feedback: readonly FeedbackEntry[]; readonly run: JobRunAttribution }
   /** An improvement job's candidate whose task cannot be replayed: the gate does not run. */
   | { readonly kind: 'missing'; readonly detail: string }
+
+/**
+ * How the replay runs and reviews of a job's candidate are attributed
+ * (ledger `improvementId` / `improvementPhase: trial`; step 6: the job's
+ * pinned improver and, for a comparison arm's job, `metaJobId` and
+ * `comparisonArm`).
+ */
+export interface JobRunAttribution {
+  readonly jobId: string
+  readonly improverVersion?: ImproverVersion
+  readonly metaJobId?: string
+  readonly comparisonArm?: ComparisonArm
+}
+
+/** The attribution of a job's runs (pure). */
+export function jobRunAttribution(job: Pick<ImprovementJob, 'id' | 'improverVersion' | 'arm'>): JobRunAttribution {
+  return {
+    jobId: job.id,
+    ...(job.improverVersion === undefined ? {} : { improverVersion: job.improverVersion }),
+    ...(job.arm === undefined ? {} : { metaJobId: job.arm.metaJobId, comparisonArm: job.arm.arm }),
+  }
+}
 
 async function readJob(layout: WorkspaceLayout, jobId: string): Promise<ImprovementJob | undefined> {
   try {
@@ -33,6 +55,13 @@ async function readJob(layout: WorkspaceLayout, jobId: string): Promise<Improvem
   } catch {
     return undefined
   }
+}
+
+/** The attribution of a candidate's runs: its job's, or `undefined` for a candidate that is not a job's (or whose job cannot be read). */
+export async function candidateRunAttribution(layout: WorkspaceLayout, candidate: CandidateRecord): Promise<JobRunAttribution | undefined> {
+  if (candidate.origin !== 'improvement' || candidate.jobId === undefined) return undefined
+  const job = await readJob(layout, candidate.jobId)
+  return job === undefined ? undefined : jobRunAttribution(job)
 }
 
 /** Find the case a candidate's selection set starts with. */
@@ -50,7 +79,7 @@ export async function selectionAnchor(layout: WorkspaceLayout, candidate: Candid
   }
   const ids = new Set(job.items.flatMap(item => (item.kind === 'feedback' && item.sessionId === replay.sessionId ? [item.feedbackId] : [])))
   const feedback = replay.feedback.filter(item => ids.has(item.entry.id)).map(item => item.entry)
-  return { kind: 'job', caseId: replay.caseId, feedback }
+  return { kind: 'job', caseId: replay.caseId, feedback, run: jobRunAttribution(job) }
 }
 
 /** One feedback check question. */
