@@ -14,6 +14,7 @@
  */
 import { mkdir, open, readdir, readFile, rm, type FileHandle } from 'node:fs/promises'
 import { join } from 'node:path'
+import { retryTransient } from '../fs-retry.js'
 import { CAPABILITY_DIRS, NexgentError, type TrialReceipt } from '@nexgent/kernel'
 import { validateCapabilityFile } from '@nexgent/session'
 
@@ -144,7 +145,8 @@ export async function claimAttempt(capabilitiesDir: string, candidateId: string)
   const directory = join(capabilitiesDir, TRIALS_DIR)
   await mkdir(directory, { recursive: true })
   try {
-    const handle = await open(join(directory, `${candidateId}.attempt`), 'wx', 0o644)
+    // A transient Windows sharing violation (EPERM / EACCES / EBUSY) is retried, not taken for "attempted".
+    const handle = await retryTransient(() => open(join(directory, `${candidateId}.attempt`), 'wx', 0o644))
     await handle.close()
     return true
   } catch (error) {
@@ -164,9 +166,13 @@ export async function wasAttempted(capabilitiesDir: string, candidateId: string)
   }
 }
 
-/** Write `trials/<trialId>.lock` with this process id (removed by {@link releaseTrialLock}). */
-export async function writeTrialLock(capabilitiesDir: string, trialId: string, pid: number = process.pid): Promise<void> {
-  const handle = await open(join(capabilitiesDir, TRIALS_DIR, `${trialId}.lock`), 'wx', 0o644)
+/**
+ * Write `trials/<trialId>.lock` with this process id (removed by {@link releaseTrialLock}).
+ * A transient Windows sharing violation (EPERM / EACCES / EBUSY) on create is retried with backoff.
+ */
+export async function writeTrialLock(capabilitiesDir: string, trialId: string, pid: number = process.pid, io: { readonly open?: typeof open; readonly delays?: readonly number[] } = {}): Promise<void> {
+  const create = io.open ?? open
+  const handle = await retryTransient(() => create(join(capabilitiesDir, TRIALS_DIR, `${trialId}.lock`), 'wx', 0o644), io.delays)
   try {
     await handle.writeFile(`${pid}\n`)
     await handle.sync()
@@ -177,7 +183,7 @@ export async function writeTrialLock(capabilitiesDir: string, trialId: string, p
 
 /** Remove a trial's lock. */
 export async function releaseTrialLock(capabilitiesDir: string, trialId: string): Promise<void> {
-  await rm(join(capabilitiesDir, TRIALS_DIR, `${trialId}.lock`), { force: true })
+  await retryTransient(() => rm(join(capabilitiesDir, TRIALS_DIR, `${trialId}.lock`), { force: true }))
 }
 
 /** Whether the process named by a trial's lock is alive (no lock: not running). */

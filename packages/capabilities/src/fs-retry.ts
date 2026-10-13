@@ -22,6 +22,23 @@ export interface RenameRetryOptions {
   readonly rename?: (from: string, to: string) => Promise<void>
 }
 
+/** Whether an error is a transient sharing violation (EPERM / EBUSY / EACCES). */
+export function isTransientFsError(error: unknown): boolean {
+  return TRANSIENT_RENAME_CODES.has((error as NodeJS.ErrnoException | null)?.code ?? '')
+}
+
+/** Run a file operation, retrying it with backoff while it fails with a transient sharing violation. */
+export async function retryTransient<T>(op: () => Promise<T>, delays: readonly number[] = RENAME_RETRY_DELAYS_MS): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await op()
+    } catch (error) {
+      if (!isTransientFsError(error) || attempt >= delays.length) throw error
+      await new Promise(resolve => setTimeout(resolve, delays[attempt]))
+    }
+  }
+}
+
 /** `rename(from, to)`, retried while it fails with a transient sharing violation. */
 export async function renameRetrying(from: string, to: string, options: RenameRetryOptions = {}): Promise<void> {
   const delays = options.delays ?? RENAME_RETRY_DELAYS_MS
