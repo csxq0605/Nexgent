@@ -42,6 +42,7 @@ import { join } from 'node:path'
 import {
   addUsage,
   decideTrial,
+  NexgentError,
   readProjectConfig,
   ZERO_USAGE,
   type ArmTally,
@@ -64,7 +65,8 @@ import {
   type WorkspaceLayout,
 } from '@nexgent/kernel'
 import { readCandidate } from '../candidates.js'
-import { selectionAnchor, type FeedbackCheckInput, type FeedbackCheckResult } from './feedback.js'
+import { evaluatorEpoch } from './epoch.js'
+import { selectionAnchor, type JobRunAttribution, type FeedbackCheckInput, type FeedbackCheckResult } from './feedback.js'
 import type { Activation } from '../activation.js'
 import { CapabilityStore } from '../capability-store.js'
 import { runCheckSpecs } from './checks.js'
@@ -87,8 +89,12 @@ export interface ReplayRunRequest {
   readonly messages: readonly ReplayMessage[]
   /** Deadline of the whole run. */
   readonly timeoutMs: number
-  /** Step 5: the improvement job whose candidate this is; the run's session belongs to the job's `trial` phase. */
-  readonly improvement?: { readonly jobId: string }
+  /**
+   * Step 5: the improvement job whose candidate this is; the run's session
+   * belongs to the job's `trial` phase. Step 6: with the job's pinned
+   * improver and, in a comparison arm's copy, the meta job and the arm.
+   */
+  readonly improvement?: JobRunAttribution
 }
 
 /** How a run ended, as the runner reports it. */
@@ -166,6 +172,12 @@ export interface GateOptions {
    * `capabilities.selectionCases` / `repeats`. Absent: the project's, by similarity.
    */
   readonly comparison?: ImproverComparisonParams
+  /**
+   * Step 6: the evaluator epoch the caller expects (a comparison arm: the
+   * origin's). The gate runs in the epoch of the project's own settings;
+   * when that differs it writes nothing and throws `improvement/epoch-mismatch`.
+   */
+  readonly epoch?: string
 }
 
 /** What {@link runGate} did. */
@@ -311,6 +323,11 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
   if (await wasAttempted(capabilitiesDir, candidate.id)) return { status: 'skipped', detail: `candidate ${candidate.id} was tried before; a candidate is tried once` }
 
   const settings = (await readProjectConfig(layout.configFile)).config.capabilities
+  // ADR 0008 decision 5: the evaluator is frozen into the plan as an epoch; a caller expecting another epoch gets no trial.
+  const epoch = evaluatorEpoch(settings)
+  if (options.epoch !== undefined && options.epoch !== epoch) {
+    throw new NexgentError('improvement/epoch-mismatch', `the gate's evaluator epoch ${epoch.slice(0, 12)} is not the expected ${options.epoch.slice(0, 12)}; candidate ${candidate.id} was not tried`)
+  }
   const history = await listReplayCases(layout)
   const anchor = await selectionAnchor(layout, candidate, history)
   if (anchor.kind === 'missing') return { status: 'skipped', detail: anchor.detail }
@@ -344,6 +361,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
     costApprovalRatio: settings.costApprovalRatio,
     reviewer: settings.reviewer,
     budget: settings.trialBudget,
+    epoch,
   }
   const trialId = randomUUID()
   const receipts = await TrialReceiptWriter.create(capabilitiesDir, trialId, now)
@@ -395,7 +413,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
             ledgersDir: layout.ledgers,
             messages: replay.messages,
             timeoutMs: options.runTimeoutMs ?? RUN_TIMEOUT_MS,
-            ...(candidate.origin === 'improvement' && candidate.jobId !== undefined ? { improvement: { jobId: candidate.jobId } } : {}),
+            ...(anchor.kind === 'job' ? { improvement: anchor.run } : {}),
           }, signal)
           runCost = cost(result.usage, result.requestCount, result.estimatedUsd ?? 'unknown')
           arms[arm].add(result.usage, result.requestCount, result.estimatedUsd)

@@ -51,34 +51,45 @@ function sha256(bytes: Uint8Array): string {
 }
 
 /**
+ * Write a replay case's snapshot tree into `root` from the project's
+ * `.nexgent/snapshots/objects/`, checking every object against its hash.
+ * @returns paths and SHA-256 of the files written.
+ * @throws `session/corrupt` when the tree or an object is missing or does not match.
+ */
+export async function writeSnapshotTree(layout: WorkspaceLayout, replay: Pick<ReplayCase, 'tree' | 'caseId'>, root: string): Promise<Map<string, string>> {
+  const snapshots = join(layout.dataDir, SNAPSHOTS_DIR)
+  let tree: SnapshotTree
+  try {
+    const value: unknown = JSON.parse(await readFile(join(snapshots, 'trees', `${replay.tree}.json`), 'utf8'))
+    if (validateCapabilityFile('snapshotTree', value).length > 0) throw new Error('schema')
+    tree = value as SnapshotTree
+  } catch (error) {
+    throw new NexgentError('session/corrupt', `snapshot tree ${replay.tree} of task ${replay.caseId} is unreadable`, { cause: error })
+  }
+  const files = new Map<string, string>()
+  for (const file of tree.files) {
+    const bytes = await readFile(join(snapshots, 'objects', file.sha256)).catch((error: unknown) => {
+      throw new NexgentError('session/corrupt', `snapshot object ${file.sha256} (${file.path}) is missing`, { cause: error })
+    })
+    if (bytes.byteLength !== file.bytes || sha256(bytes) !== file.sha256) throw new NexgentError('session/corrupt', `snapshot object ${file.sha256} (${file.path}) does not match its hash`)
+    const target = join(root, ...file.path.split('/'))
+    await mkdir(dirname(target), { recursive: true })
+    await writeFile(target, bytes)
+    if (file.executable === true && process.platform !== 'win32') await chmod(target, 0o755)
+    files.set(file.path, file.sha256)
+  }
+  return files
+}
+
+/**
  * Write the copy.
  * @throws `session/corrupt` when the snapshot tree or an object is missing or does not match its hash.
  */
 export async function prepareReplayProject(input: ReplayProjectInput): Promise<ReplayProject> {
-  const snapshots = join(input.layout.dataDir, SNAPSHOTS_DIR)
   const root = await mkdtemp(join(input.tempRoot ?? tmpdir(), 'nexgent-replay-'))
   const dispose = () => rm(root, { recursive: true, force: true, maxRetries: 3 })
   try {
-    let tree: SnapshotTree
-    try {
-      const value: unknown = JSON.parse(await readFile(join(snapshots, 'trees', `${input.replay.tree}.json`), 'utf8'))
-      if (validateCapabilityFile('snapshotTree', value).length > 0) throw new Error('schema')
-      tree = value as SnapshotTree
-    } catch (error) {
-      throw new NexgentError('session/corrupt', `snapshot tree ${input.replay.tree} of task ${input.replay.caseId} is unreadable`, { cause: error })
-    }
-    const files = new Map<string, string>()
-    for (const file of tree.files) {
-      const bytes = await readFile(join(snapshots, 'objects', file.sha256)).catch((error: unknown) => {
-        throw new NexgentError('session/corrupt', `snapshot object ${file.sha256} (${file.path}) is missing`, { cause: error })
-      })
-      if (bytes.byteLength !== file.bytes || sha256(bytes) !== file.sha256) throw new NexgentError('session/corrupt', `snapshot object ${file.sha256} (${file.path}) does not match its hash`)
-      const target = join(root, ...file.path.split('/'))
-      await mkdir(dirname(target), { recursive: true })
-      await writeFile(target, bytes)
-      if (file.executable === true && process.platform !== 'win32') await chmod(target, 0o755)
-      files.set(file.path, file.sha256)
-    }
+    const files = await writeSnapshotTree(input.layout, input.replay, root)
 
     const layout = resolveWorkspaceLayout(root)
     await mkdir(join(root, NEXGENT_DIR), { recursive: true })
