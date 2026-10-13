@@ -29,8 +29,8 @@ const range = (prefix: string, from: number, to: number) =>
 
 /** Step-5 headless items with a judge (round 3). */
 const JUDGED = range('H', 1, 18)
-/** Wired so far: every headless and desktop item (round 3). The real layer is round 4 and must report not-implemented. */
-const WIRED = new Set([...range('H', 1, 19), ...range('D', 1, 23)])
+/** Wired: every headless and desktop item, and R01–R07 (round 4). R08 is a manual Windows run and must report not-implemented. */
+const WIRED = new Set([...range('H', 1, 19), ...range('D', 1, 23), ...range('R', 1, 7)])
 
 describe('accept-step5 checklist', () => {
   it('has every item of the step-5 plan in order, plus the D01–D18 regression', async () => {
@@ -134,22 +134,25 @@ describe('scripts/accept-step5.mjs (requires `pnpm build`)', () => {
     expect(fixture[0], fixture[0]?.detail).toMatchObject({ passed: true, detail: expect.stringMatching(/^passed: .*5 feedbacks recorded \(3 count\)/) })
   }, 840_000)
 
-  it('real layer: no model call this round; exit 2 with or without a key, the key never appears', async () => {
+  it('real layer: not runnable without a key (exit 2); with a key on a loopback server it is not real-model evidence (exit 1)', async () => {
     const keyless = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: undefined, ANTHROPIC_API_KEY: undefined })
     expect(keyless.result.status, keyless.result.stderr).toBe(EXIT_NOT_READY)
     expect(keyless.result.stderr).toContain('no API key')
     expect(validateAcceptanceSummary(keyless.summary)).toEqual({ valid: true, errors: [] })
     expect(keyless.summary?.checks.map(check => check.id)).toEqual(range('R', 1, 6))
+    for (const check of keyless.summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'not-implemented' })
 
     const key = 'sk-ant-accept5-test-value'
-    // A base URL nothing listens on: if anything tried a model call it would fail loudly.
+    // A base URL nothing listens on: any model call fails loudly instead of reaching a real API.
     const keyed = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: key, NEXGENT_API_BASE_URL: 'http://127.0.0.1:9' })
-    expect(keyed.result.status, keyed.result.stderr).toBe(EXIT_NOT_READY)
+    expect(keyed.result.status, keyed.result.stderr).toBe(EXIT_FAIL)
     expect(validateAcceptanceSummary(keyed.summary)).toEqual({ valid: true, errors: [] })
-    expect(keyed.summary?.realModel).toMatchObject({ result: 'fail', callCount: 0, cost: 0, runNote: expect.stringContaining('no model call made') })
-    for (const check of keyed.summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'not-implemented' })
+    expect(keyed.summary?.realModel).toMatchObject({ result: 'fail' })
+    expect(keyed.summary?.realModel?.runNote).toContain('NOT a real-model run')
+    expect(keyed.summary?.checks.map(check => check.id)).toEqual(range('R', 1, 7))
+    for (const check of keyed.summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'failed' })
     expect(keyed.raw + keyed.result.stderr + keyed.result.stdout).not.toContain(key)
-  }, 180_000)
+  }, 300_000)
 
   it('rejects an unknown layer with exit 1', async () => {
     const { result } = await runScript(['--layer', 'ui'])

@@ -12,4 +12,6 @@ export declare function judgeRegionTable(csvText: string, tableText: string | nu
 export declare function countsTowardImprovement(entry: { readonly rating?: number; readonly comment?: string } | null | undefined): boolean
 export declare const THRESHOLD: number
 export declare const FEEDBACK: readonly FeedbackSpec[]
+/** The column the second family of feedback names (R07). */
+export declare const SECOND_COLUMN: string
 export declare const SECOND_FEEDBACK: readonly FeedbackSpec[]
