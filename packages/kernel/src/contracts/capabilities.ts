@@ -607,14 +607,15 @@ export interface ReplayCaseRef {
   readonly feedbackIds?: readonly string[]
 }
 
-/** Token / request totals; dollars are estimated separately and never decide anything. */
+/** Token / request totals and the estimated dollars (ADR 0007: the gate's cost ratio is in dollars when both arms have them). */
 export interface TrialCost {
   readonly usage: LLMUsage
   readonly requestCount: number
   /**
-   * Estimated USD from `@nexgent/llm`'s read-only price table (step 5,
-   * display only), or `unknown` when the model has no price or any usage is
-   * unknown. Never used by a decision.
+   * Estimated USD from `@nexgent/llm`'s read-only price table (cache reads
+   * and writes included), or `unknown` when the model has no price or any
+   * usage is unknown. ADR 0007: the gate compares arms by it when both are
+   * known, by tokens otherwise.
    */
   readonly estimatedUsd: number | 'unknown'
 }
@@ -625,8 +626,10 @@ export interface TrialPlan {
   readonly guard: readonly ReplayCaseRef[]
   /** Runs per arm per case. */
   readonly repeats: number
-  /** Candidate tokens may be at most this multiple of the baseline's. */
+  /** On a quality tie, the reviewer's preference adopts only within this cost ratio. */
   readonly costRatioCap: number
+  /** ADR 0007: a quality rise above this cost ratio waits for the user's approval; absent in trials before ADR 0007. */
+  readonly costApprovalRatio?: number
   readonly reviewer: ReviewerSettings
   /** The trial's own budget; exhausting it stops the trial with `unknown` (H12). */
   readonly budget: TrialBudget
@@ -728,6 +731,8 @@ export interface TrialTally {
   readonly review: { readonly candidate: number; readonly baseline: number; readonly tie: number }
   /** Total tokens of each arm's runs (input + output, as cost caps count); `unknown` when any run's usage is unknown. */
   readonly tokens: { readonly candidate: number | 'unknown'; readonly baseline: number | 'unknown' }
+  /** ADR 0007: estimated USD of each arm's runs (cache included); the cost ratio uses it when both are known and the baseline's is above 0, tokens otherwise. */
+  readonly usd?: { readonly candidate: number | 'unknown'; readonly baseline: number | 'unknown' }
   /** The trial budget ran out before every run finished. */
   readonly budgetExhausted: boolean
   /** The candidate includes a plugin. */
@@ -770,11 +775,16 @@ export interface TrialVerdict {
   readonly passRate: { readonly candidate: number; readonly baseline: number }
   /** Step 5: feedback-check pass rates alone, when the trial had any (marked separately in evidence). */
   readonly feedbackPassRate?: { readonly candidate: number; readonly baseline: number }
-  /** Candidate tokens / baseline tokens, or `unknown`. */
+  /** Candidate cost / baseline cost in {@link costBasis} units, or `unknown`. */
   readonly costRatio: number | 'unknown'
+  /** ADR 0007: what {@link costRatio} compares (`usd`: estimated dollars with cache; `tokens`: input + output); absent before ADR 0007 (tokens). */
+  readonly costBasis?: 'usd' | 'tokens'
   /** Whether the reviewer's opinion decided (only possible on a check tie). */
   readonly decidedByReview: boolean
 }
+
+/** ADR 0007: the default cost ratio above which a quality rise waits for the user ({@link CapabilitiesConfig.costApprovalRatio}). */
+export const DEFAULT_COST_APPROVAL_RATIO = 2
 
 function rate(tally: ArmTally): number {
   const counted = tally.passed + tally.failed
@@ -782,8 +792,9 @@ function rate(tally: ArmTally): number {
 }
 
 /**
- * The adoption rule (plan 4.4; ADR 0005 decision 5 as amended by ADR 0006),
- * pure:
+ * The adoption rule (plan 4.4; ADR 0005 decision 5 as amended by ADR 0006
+ * and ADR 0007), pure. The cost ratio is candidate / baseline estimated
+ * dollars (cache included) when both arms have them, else tokens:
  *
  * 1. Any `unknown` run or feedback check, or an exhausted budget, rejects
  *    (`unknown-runs` / `budget-exhausted`); the receipt's status is `unknown`.
@@ -792,8 +803,10 @@ function rate(tally: ArmTally): number {
  * 3. Quality is the pass rate of the selection runs' deterministic checks
  *    together with the feedback checks (each feedback check counts as one
  *    more pass or fail of its arm; step 5, ADR 0006). Lower
- *    rejects (`quality-down`). Higher adopts if the cost ratio is within the
- *    cap (`quality-up`), else rejects (`cost-over-cap`).
+ *    rejects (`quality-down`). Higher adopts (`quality-up`) whatever it
+ *    costs, unless the cost ratio is above `costApprovalRatio`: then it
+ *    waits for the user (`await-approval`, still `quality-up`). ADR 0007
+ *    retires `cost-over-cap` here.
  * 4. On a tie: a cost ratio below 1 adopts (`cost-down`); otherwise the
  *    reviewer decides: more `candidate` than `baseline` preferences and a
  *    ratio within the cap adopt (`review-preferred`), anything else rejects
@@ -801,7 +814,7 @@ function rate(tally: ArmTally): number {
  * 5. An adopting verdict for a candidate with a plugin becomes
  *    `await-approval` with the same reason.
  */
-export function decideTrial(tally: TrialTally, costRatioCap: number): TrialVerdict {
+export function decideTrial(tally: TrialTally, costRatioCap: number, costApprovalRatio: number = DEFAULT_COST_APPROVAL_RATIO): TrialVerdict {
   const feedback = tally.feedback
   const quality = (arm: 'candidate' | 'baseline'): ArmTally => feedback === undefined
     ? tally.selection[arm]
@@ -809,15 +822,21 @@ export function decideTrial(tally: TrialTally, costRatioCap: number): TrialVerdi
   const passRate = { candidate: rate(quality('candidate')), baseline: rate(quality('baseline')) }
   const feedbackPassRate = feedback === undefined ? undefined : { candidate: rate(feedback.candidate), baseline: rate(feedback.baseline) }
   const { candidate: candidateTokens, baseline: baselineTokens } = tally.tokens
-  const costRatio: number | 'unknown' = candidateTokens === 'unknown' || baselineTokens === 'unknown' || baselineTokens === 0
-    ? 'unknown'
-    : candidateTokens / baselineTokens
-  const verdict = (outcome: 'adopt' | 'reject', reason: DecisionReason, decidedByReview = false): TrialVerdict => ({
+  const usd = tally.usd
+  const byUsd = usd !== undefined && typeof usd.candidate === 'number' && typeof usd.baseline === 'number' && usd.baseline > 0
+  const costBasis: 'usd' | 'tokens' = byUsd ? 'usd' : 'tokens'
+  const costRatio: number | 'unknown' = byUsd
+    ? (usd.candidate as number) / (usd.baseline as number)
+    : candidateTokens === 'unknown' || baselineTokens === 'unknown' || baselineTokens === 0
+      ? 'unknown'
+      : candidateTokens / baselineTokens
+  const verdict = (outcome: 'adopt' | 'reject' | 'await-approval', reason: DecisionReason, decidedByReview = false): TrialVerdict => ({
     outcome: outcome === 'adopt' && tally.requiresApproval ? 'await-approval' : outcome,
     reason,
     passRate,
     ...(feedbackPassRate === undefined ? {} : { feedbackPassRate }),
     costRatio,
+    costBasis,
     decidedByReview,
   })
   const unknownRuns = quality('candidate').unknown + quality('baseline').unknown + tally.guard.candidate.unknown + tally.guard.baseline.unknown
@@ -825,7 +844,7 @@ export function decideTrial(tally: TrialTally, costRatioCap: number): TrialVerdi
   if (unknownRuns > 0 || costRatio === 'unknown') return verdict('reject', 'unknown-runs')
   if (tally.guard.candidate.passed < tally.guard.baseline.passed) return verdict('reject', 'guard-regressed')
   if (passRate.candidate < passRate.baseline) return verdict('reject', 'quality-down')
-  if (passRate.candidate > passRate.baseline) return costRatio <= costRatioCap ? verdict('adopt', 'quality-up') : verdict('reject', 'cost-over-cap')
+  if (passRate.candidate > passRate.baseline) return costRatio <= costApprovalRatio ? verdict('adopt', 'quality-up') : verdict('await-approval', 'quality-up')
   if (costRatio < 1) return verdict('adopt', 'cost-down')
   if (tally.review.candidate > tally.review.baseline && costRatio <= costRatioCap) return verdict('adopt', 'review-preferred', true)
   return verdict('reject', 'no-improvement')
@@ -1049,8 +1068,10 @@ export interface CapabilitiesConfig {
   readonly guardCases: number
   /** Runs per arm per case, 1–5 (default 2). */
   readonly repeats: number
-  /** Candidate / baseline token ratio allowed when quality rises, 1–10 (default 1.2). */
+  /** Cost ratio within which the reviewer's preference adopts on a quality tie, 1–10 (default 1.2; ADR 0007: no longer limits a quality rise). */
   readonly costRatioCap: number
+  /** ADR 0007: a quality rise costing more than this multiple of the baseline waits for the user's approval, 1–10 (default 2). */
+  readonly costApprovalRatio: number
   /** Default `{ model: 'claude-sonnet-5-5', thinking: 'on' }`. */
   readonly reviewer: ReviewerSettings
   /** Usage-regression watch after an adoption (decision 6). */
@@ -1070,6 +1091,7 @@ export const DEFAULT_CAPABILITIES_CONFIG: CapabilitiesConfig = Object.freeze({
   guardCases: 1,
   repeats: 2,
   costRatioCap: 1.2,
+  costApprovalRatio: DEFAULT_COST_APPROVAL_RATIO,
   reviewer: Object.freeze({ model: 'claude-sonnet-5-5', thinking: 'on' as ThinkingMode }),
   rollback: Object.freeze({ windowTasks: 3, consecutiveErrors: 3 }),
 }) as CapabilitiesConfig
@@ -1082,6 +1104,7 @@ export interface CapabilitiesConfigInput {
   readonly guardCases?: number
   readonly repeats?: number
   readonly costRatioCap?: number
+  readonly costApprovalRatio?: number
   readonly reviewer?: Partial<ReviewerSettings>
   readonly rollback?: Partial<CapabilitiesConfig['rollback']>
 }
@@ -1096,6 +1119,7 @@ export function resolveCapabilitiesConfig(input: CapabilitiesConfigInput = {}): 
     guardCases: input.guardCases ?? d.guardCases,
     repeats: input.repeats ?? d.repeats,
     costRatioCap: input.costRatioCap ?? d.costRatioCap,
+    costApprovalRatio: input.costApprovalRatio ?? d.costApprovalRatio,
     reviewer: { model: input.reviewer?.model ?? d.reviewer.model, thinking: input.reviewer?.thinking ?? d.reviewer.thinking },
     rollback: {
       windowTasks: input.rollback?.windowTasks ?? d.rollback.windowTasks,
@@ -1115,7 +1139,7 @@ export function assertCapabilitiesConfig(value: unknown): asserts value is Capab
     throw new NexgentError('config/invalid', `.nexgent/config.json: capabilities.${field} ${message}`, { details: { field: `capabilities.${field}` } })
   }
   if (!isRecord(value)) throw new NexgentError('config/invalid', '.nexgent/config.json: capabilities must be an object', { details: { field: 'capabilities' } })
-  const known = ['autoTrial', 'trialBudget', 'selectionCases', 'guardCases', 'repeats', 'costRatioCap', 'reviewer', 'rollback']
+  const known = ['autoTrial', 'trialBudget', 'selectionCases', 'guardCases', 'repeats', 'costRatioCap', 'costApprovalRatio', 'reviewer', 'rollback']
   for (const key of Object.keys(value)) if (!known.includes(key)) fail(key, 'is not a known field')
   const integer = (field: string, entry: unknown, min: number, max: number) => {
     if (entry === undefined) return
@@ -1134,6 +1158,9 @@ export function assertCapabilitiesConfig(value: unknown): asserts value is Capab
   integer('repeats', value.repeats, 1, 5)
   if (value.costRatioCap !== undefined && (typeof value.costRatioCap !== 'number' || !Number.isFinite(value.costRatioCap) || value.costRatioCap < 1 || value.costRatioCap > 10)) {
     fail('costRatioCap', 'must be a number in 1..10')
+  }
+  if (value.costApprovalRatio !== undefined && (typeof value.costApprovalRatio !== 'number' || !Number.isFinite(value.costApprovalRatio) || value.costApprovalRatio < 1 || value.costApprovalRatio > 10)) {
+    fail('costApprovalRatio', 'must be a number in 1..10')
   }
   if (value.reviewer !== undefined) {
     if (!isRecord(value.reviewer)) fail('reviewer', 'must be an object')

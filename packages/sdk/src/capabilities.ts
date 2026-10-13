@@ -243,7 +243,7 @@ export async function approve(service: CapabilityService, candidateId: string, d
     const committed = await service.store.adopt(record.version, {
       trigger: 'approval',
       reason: 'approved',
-      detail: 'The user approved the plugin package after it passed its gate.',
+      detail: 'The user approved the candidate after it passed its gate (a plugin package, or a quality rise above the cost ratio that adopts on its own).',
       candidateId,
       ...(trialId === undefined ? {} : { trialId }),
       ...(pending?.verdict === undefined ? {} : { verdict: pending.verdict }),
@@ -260,7 +260,7 @@ export async function approve(service: CapabilityService, candidateId: string, d
       ...(trialId === undefined ? {} : { trialId }),
       fromVersion: current.version,
       toVersion: current.version,
-      detail: 'The user denied the plugin package; it is not adopted and none of its code runs.',
+      detail: 'The user denied the candidate; it is not adopted and none of its code runs.',
     })
   }
   return candidateView(service, candidateId)

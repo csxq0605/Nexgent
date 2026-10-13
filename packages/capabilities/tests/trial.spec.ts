@@ -136,12 +136,43 @@ describe('runGate', () => {
     expect((await runGate({ layout, candidateId: candidate.id, runner: arms({ output: 'good' }, { output: 'bad' }) })).status).toBe('skipped')
   })
 
-  it('rejects a better candidate that costs more than the cap', async () => {
+  it('adopts a better candidate that costs 1.5× in dollars (ADR 0007)', async () => {
     const { layout, tasks } = await historyProject()
     const candidate = await proposeCandidate(layout, tasks[0]!)
-    const result = await runGate({ layout, candidateId: candidate.id, runner: arms({ output: 'good', tokens: 130 }, { output: 'bad', tokens: 100 }), tempRoot: await tempDir() })
+    const result = await runGate({ layout, candidateId: candidate.id, runner: arms({ output: 'good', tokens: 300, estimatedUsd: 0.015 }, { output: 'bad', tokens: 100, estimatedUsd: 0.01 }), tempRoot: await tempDir() })
     if (result.status !== 'decided') throw new Error('expected a decision')
-    expect(result.verdict).toMatchObject({ outcome: 'reject', reason: 'cost-over-cap', costRatio: 1.3 })
+    expect(result.verdict).toMatchObject({ outcome: 'adopt', reason: 'quality-up', costBasis: 'usd' })
+    expect(result.verdict.costRatio).toBeCloseTo(1.5)
+    expect(result.decision.detail).toContain('estimated USD')
+    expect((await new CapabilityStore(layout.capabilities).activation()).version).toBe(candidate.version)
+  })
+
+  it('sends a better candidate that costs more than twice the baseline to the user\'s approval', async () => {
+    const { layout, tasks } = await historyProject()
+    const candidate = await proposeCandidate(layout, tasks[0]!)
+    const receipts: TrialReceipt[] = []
+    const result = await runGate({ layout, candidateId: candidate.id, runner: arms({ output: 'good', estimatedUsd: 0.025 }, { output: 'bad', estimatedUsd: 0.01 }), tempRoot: await tempDir(), onReceipt: receipt => receipts.push(receipt) })
+    if (result.status !== 'decided') throw new Error('expected a decision')
+    expect(result.verdict).toMatchObject({ outcome: 'await-approval', reason: 'quality-up', costBasis: 'usd' })
+    expect(result.decision).toMatchObject({ outcome: 'awaiting-approval', reason: 'quality-up' })
+    expect(result.decision.detail).toContain('only after the user approves it')
+    const start = receipts[0]
+    if (start?.type !== 'trial.start') throw new Error('no start')
+    expect(start.plan).toMatchObject({ costRatioCap: 1.2, costApprovalRatio: 2 })
+    expect((await new CapabilityStore(layout.capabilities).activation()).version).toBe('baseline')
+  })
+
+  it('rejects a tie that costs more, and falls back to tokens without dollars', async () => {
+    const { layout, tasks } = await historyProject()
+    const candidate = await proposeCandidate(layout, tasks[0]!)
+    const result = await runGate({ layout, candidateId: candidate.id, runner: arms({ output: 'good', tokens: 100, estimatedUsd: 0.013 }, { output: 'good', tokens: 100, estimatedUsd: 0.01 }), tempRoot: await tempDir() })
+    if (result.status !== 'decided') throw new Error('expected a decision')
+    expect(result.verdict).toMatchObject({ outcome: 'reject', reason: 'no-improvement', costBasis: 'usd' })
+    const second = await historyProject()
+    const other = await proposeCandidate(second.layout, second.tasks[0]!)
+    const byTokens = await runGate({ layout: second.layout, candidateId: other.id, runner: arms({ output: 'good', tokens: 130 }, { output: 'good', tokens: 100 }), tempRoot: await tempDir() })
+    if (byTokens.status !== 'decided') throw new Error('expected a decision')
+    expect(byTokens.verdict).toMatchObject({ outcome: 'reject', reason: 'no-improvement', costBasis: 'tokens', costRatio: 1.3 })
   })
 
   it('counts a run that does not complete as unknown, never as a failure', async () => {
