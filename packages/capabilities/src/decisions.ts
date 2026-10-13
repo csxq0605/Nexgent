@@ -1,9 +1,11 @@
 /**
  * Decision records `.nexgent/capabilities/decisions/<id>.json`
  * (`data-formats.md` §候选与门控): written once with exclusive create, never
- * changed. A decision that names a `revision` takes effect only if that
- * activation revision names the decision back; a crash between the two
- * writes leaves a decision no revision points to, which readers ignore.
+ * changed. An adoption or rollback commits its activation revision first
+ * and writes the decision it names only afterwards, so a change that loses
+ * the race for the tail leaves no decision behind; a crash between the two
+ * writes leaves a revision whose decision is missing, which readers of the
+ * decision treat as not found.
  */
 import { randomUUID } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
@@ -21,15 +23,31 @@ const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
 export type DecisionInput = Omit<CapabilityDecision, 'formatVersion' | 'id' | 'decidedAt'> & { readonly id?: string }
 
 /**
+ * Fill and validate a decision without writing it.
+ * @throws `config/invalid` for a decision the schema refuses.
+ */
+export function buildDecision(input: DecisionInput, now: () => Date = () => new Date()): CapabilityDecision {
+  const detail = input.detail.length > CAPABILITY_LIMITS.maxReasonChars ? `${input.detail.slice(0, CAPABILITY_LIMITS.maxReasonChars - 1)}…` : input.detail
+  const decision: CapabilityDecision = { ...input, formatVersion: 1, id: input.id ?? randomUUID(), decidedAt: now().toISOString(), detail }
+  const issues = validateCapabilityFile('decision', decision)
+  if (issues.length > 0) throw new NexgentError('config/invalid', `invalid capability decision: ${issues[0]!.path} ${issues[0]!.message}`)
+  return decision
+}
+
+/**
  * Validate and publish a decision.
  * @param directory - `.nexgent/capabilities/decisions`.
  * @throws `config/invalid` for a decision the schema refuses; `internal` when the id is taken.
  */
 export async function writeDecision(directory: string, input: DecisionInput, now: () => Date = () => new Date()): Promise<CapabilityDecision> {
-  const detail = input.detail.length > CAPABILITY_LIMITS.maxReasonChars ? `${input.detail.slice(0, CAPABILITY_LIMITS.maxReasonChars - 1)}…` : input.detail
-  const decision: CapabilityDecision = { ...input, formatVersion: 1, id: input.id ?? randomUUID(), decidedAt: now().toISOString(), detail }
-  const issues = validateCapabilityFile('decision', decision)
-  if (issues.length > 0) throw new NexgentError('config/invalid', `invalid capability decision: ${issues[0]!.path} ${issues[0]!.message}`)
+  return publishDecision(directory, buildDecision(input, now))
+}
+
+/**
+ * Publish a decision built by {@link buildDecision}.
+ * @throws `internal` when the id is taken.
+ */
+export async function publishDecision(directory: string, decision: CapabilityDecision): Promise<CapabilityDecision> {
   if (!(await publishExclusive(directory, `${decision.id}.json`, `${JSON.stringify(decision)}\n`))) {
     throw new NexgentError('internal', `capability decision ${decision.id} already exists`)
   }

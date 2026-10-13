@@ -51,6 +51,36 @@ describe('CapabilityStore', () => {
     expect(await capabilities.adopt(first.version, GATE, observed)).not.toBeNull()
     expect(await capabilities.adopt(second.version, GATE, observed)).toBeNull()
     expect(seen).toHaveLength(1)
+    // The losing change leaves no decision behind.
+    expect(await capabilities.decisions()).toEqual(seen)
+  })
+
+  it('two adoptions racing for the same tail: one wins, and only its decision is written', async () => {
+    const { capabilities, seen } = await store()
+    const first = await capabilities.write(sampleComponents('a'))
+    const second = await capabilities.write(sampleComponents('b'))
+    const observed = await capabilities.activation()
+    const results = await Promise.all([
+      capabilities.adopt(first.version, { ...GATE, candidateId: '8b1f2a6e-3c4d-4e5f-9a0b-1c2d3e4f5a61' }, observed),
+      capabilities.adopt(second.version, { ...GATE, candidateId: '8b1f2a6e-3c4d-4e5f-9a0b-1c2d3e4f5a62' }, observed),
+    ])
+    const winners = results.filter(result => result !== null)
+    expect(winners).toHaveLength(1)
+    const history = await capabilities.history()
+    expect(history).toHaveLength(1)
+    const decisions = await capabilities.decisions()
+    expect(decisions).toEqual([winners[0]!.decision])
+    expect(decisions[0]).toMatchObject({ outcome: 'adopted', revision: 1, toVersion: history[0]!.version })
+    expect(history[0]!.decisionId).toBe(decisions[0]!.id)
+    expect(seen).toEqual(decisions)
+  })
+
+  it('a decision the schema refuses commits no revision', async () => {
+    const { capabilities } = await store()
+    const bundle = await capabilities.write(sampleComponents())
+    await expect(capabilities.adopt(bundle.version, { ...GATE, candidateId: 'not-a-uuid' })).rejects.toMatchObject({ code: 'config/invalid' })
+    expect(await capabilities.history()).toEqual([])
+    expect(await capabilities.decisions()).toEqual([])
   })
 
   it('rolls back manually to the previous version and refuses past the baseline', async () => {
