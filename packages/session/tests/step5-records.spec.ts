@@ -78,7 +78,11 @@ const diagnosis: Diagnosis = {
   involved: { members: ['main', 'analyst'], tools: ['write_spreadsheet'], skills: [], components: [{ kind: 'skill', name: 'monthly-order-summary' }] },
   hypothesis: 'No step checks that every requested column exists.',
   proposalKind: 'skill',
-  memberCosts: [{ memberId: 'c1', name: 'analyst', executionForm: 'delegated', usage: KNOWN_USAGE, requestCount: 3, toolCallCount: 4 }],
+  memberCosts: [
+    // the root conversation is a member of the diagnosed task too (ExecutionForm 'direct')
+    { memberId: SESSION_ID, name: 'main', executionForm: 'direct', usage: KNOWN_USAGE, requestCount: 5, toolCallCount: 6 },
+    { memberId: 'c1', name: 'analyst', executionForm: 'delegated', usage: KNOWN_USAGE, requestCount: 3, toolCallCount: 4 },
+  ],
 }
 
 const VALID: Record<ImprovementFileKind, unknown[]> = {
@@ -122,6 +126,7 @@ const INVALID: Record<ImprovementFileKind, unknown[]> = {
   ],
   diagnosis: [
     { ...diagnosis, attempts: 4 },
+    { ...diagnosis, memberCosts: [{ ...diagnosis.memberCosts[0], executionForm: 'solo' }] },
     { ...diagnosis, proposalKind: 'magic' },
     { ...diagnosis, failureTypes: [{ ...diagnosis.failureTypes[0], evidence: [] }] },
     { ...diagnosis, failureTypes: [{ ...diagnosis.failureTypes[0], category: 'other' }] },
@@ -224,6 +229,8 @@ describe('step-5 ledger fields', () => {
   }
 
   it('accept improvement attribution and the improvement.end record for writers', () => {
+    const outcome = { type: 'task.outcome', ts: TS, sessionId: SESSION_ID, status: 'completed', totalUsage: KNOWN_USAGE, requestCount: 1, toolCallCount: 0, turns: 1, toolsUsed: [], memberCosts: [{ memberId: SESSION_ID, name: 'main', executionForm: 'direct', usage: KNOWN_USAGE, requestCount: 1, toolCallCount: 0 }] }
+    expect(validateLedgerRecord(outcome, { forbidAdditionalProperties: true })).toEqual([])
     const request = { type: 'llm.request.start', ts: TS, sessionId: 'diag-1', requestId: 'r1', provider: 'anthropic', endpoint: 'https://api.anthropic.com', model: 'claude-sonnet-5-5', purpose: 'task', thinking: 'on', improvementId: UUID(1), improvementPhase: 'diagnose' }
     expect(validateLedgerRecord(request, { forbidAdditionalProperties: true })).toEqual([])
     expect(validateLedgerRecord({ ...request, improvementPhase: 'review' })).not.toEqual([])
