@@ -920,8 +920,8 @@ export class Agent {
     if ((call.name === 'bash' || call.name === 'pwsh') && !isError && input !== null && typeof input === 'object') {
       const { command, cwd } = input as { command?: unknown; cwd?: unknown }
       const exitCode = meta !== null && typeof meta === 'object' && !Array.isArray(meta) ? (meta as Record<string, JsonValue>).exitCode : undefined
-      if (typeof command === 'string' && exitCode === 0 && (cwd === undefined || cwd === '.' || cwd === '')) {
-        this.init.tree.commands.push({ command, shell: call.name })
+      if (typeof command === 'string' && typeof exitCode === 'number' && (cwd === undefined || cwd === '.' || cwd === '')) {
+        this.init.tree.commands.push({ command, shell: call.name, exitCode })
       }
     }
   }

@@ -347,7 +347,7 @@ describe('task snapshot and checks', () => {
       sessionId: agent.sessionId,
       turn: 1,
       deliverableFiles: ['out.csv'],
-      commands: [{ command: 'pytest -q', shell: 'bash' }],
+      commands: [{ command: 'pytest -q', shell: 'bash', exitCode: 0 }],
     }])
     // Checks ran before turn.end, so a per-turn host outcome can carry them.
     expect(agent.turnOutcome().checks).toEqual([{ name: 'file-exists', passed: true, target: 'file-1' }])

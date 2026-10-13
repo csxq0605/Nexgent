@@ -942,7 +942,11 @@ export type ParseFormat = 'json' | 'csv' | 'xlsx'
 /**
  * One check to run (recorded at task end, replayed in trials). `file-exists`
  * and `parses` name a project-relative `path` (a deliverable's file);
- * `test-command` names a shell `command` that exited 0 in the original task.
+ * `test-command` names a test-runner shell `command` the original task ran in
+ * the project root, whatever its exit code (step 5: a failing test run is
+ * recorded too and re-run, so it becomes a failing check; ADR 0006 decision
+ * 10); it is re-run at turn end and in trials, and only that re-run decides
+ * the result.
  * The command text lives only here, never in the ledger: a ledger `TaskCheck`
  * carries the spec's `id` as its `target`.
  */

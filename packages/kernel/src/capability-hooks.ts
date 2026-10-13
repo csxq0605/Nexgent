@@ -120,8 +120,13 @@ export interface TaskEndInput {
   readonly turn?: number
   /** Project-relative files of the deliverable versions the task tree presented, first presentation first. */
   readonly deliverableFiles: readonly string[]
-  /** Shell commands of the task tree that exited 0, in call order. */
-  readonly commands: readonly { readonly command: string; readonly shell: 'bash' | 'pwsh' }[]
+  /**
+   * Shell commands of the task tree run in the project root that exited with
+   * a code, in call order. Step 5 keeps failing ones too (user decision
+   * 2026-10-13, ADR 0006 decision 10); `exitCode` absent reads as 0 (step-4
+   * callers).
+   */
+  readonly commands: readonly { readonly command: string; readonly shell: 'bash' | 'pwsh'; readonly exitCode?: number }[]
   readonly signal?: AbortSignal
 }
 
