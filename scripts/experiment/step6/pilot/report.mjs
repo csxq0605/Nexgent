@@ -69,7 +69,7 @@ export function buildPilotReport(raw) {
   const out = []
 
   out.push(`# 步骤 6 小试点报告（${raw.pilotId}）`, '')
-  out.push(`- 计划文件 \`scripts/experiment/step6/pilot/pilot-plan.json\`，SHA-256 \`${raw.planSha256}\``)
+  out.push(`- 计划文件 \`${raw.pilotId === 'step6-pilot-1' ? 'scripts/experiment/step6/pilot/pilot-plan.json' : `scripts/experiment/step6/pilot/pilot-plan-${raw.pilotId}.json`}\`，SHA-256 \`${raw.planSha256}\``)
   out.push(`- 后端：${raw.backend}；任务模型：${raw.model}`)
   out.push(`- 外部评审：${raw.reviewers.external.model}，thinking ${raw.reviewers.external.thinking}；循环内评审：${raw.reviewers.inLoop.model}，thinking ${raw.reviewers.inLoop.thinking}`)
   out.push(`- 纪元：${families.map(f => `${f} ${raw.epochs?.[f] ?? '未知'}`).join('；') || '—'}`)
@@ -132,6 +132,21 @@ export function buildPilotReport(raw) {
     for (const p of armPairs) {
       const o = orderOutcome(p.ab, p.ba)
       out.push(`| ${cell(p.caseId)} | ${cell(p.ab)} | ${cell(p.ba)} | ${p.missing === true ? '缺成果，没判' : o.winner === 'first' ? 'parent 好' : o.winner === 'second' ? 'memory 好' : o.winner === 'tie' ? '打平' : '前后不一致或缺回答'} |`)
+    }
+    out.push('')
+  }
+  // Both orders' reasons for every comparison whose two answers disagree (or one is missing), so the cause can be read.
+  const disagreed = [
+    ...(raw.referencePairs ?? []).map((/** @type {any} */ p) => ({ label: `参考 ${p.id}`, ...p })),
+    ...armPairs.filter((/** @type {any} */ p) => p.missing !== true).map((/** @type {any} */ p) => ({ label: `${p.caseId}（parent 在前为 AB）`, ...p })),
+  ].filter(p => orderOutcome(p.ab, p.ba).consistent !== true)
+  if (disagreed.length > 0) {
+    const replyText = (/** @type {any} */ r) => (r === undefined || r === null ? '没有记录' : r.failed !== undefined ? `调用失败：${r.failed}` : r.unreadable !== undefined ? `回复无法解析：${r.unreadable}` : `${r.reason}${(r.differences ?? []).length === 0 ? '（没有列出差别）' : `；差别：${r.differences.join('；')}`}`)
+    out.push('两种顺序结论不一致的比较，两次的理由：', '')
+    out.push('| 比较 | 顺序 | 结论 | 理由与差别 |', '| --- | --- | --- | --- |')
+    for (const p of disagreed) {
+      out.push(`| ${cell(p.label)} | AB | ${cell(p.ab)} | ${cell(replyText(p.replies?.ab))} |`)
+      out.push(`| ${cell(p.label)} | BA | ${cell(p.ba)} | ${cell(replyText(p.replies?.ba))} |`)
     }
     out.push('')
   }

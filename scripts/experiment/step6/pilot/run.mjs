@@ -48,7 +48,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { gate, readSpend, recordSpend, spentUsd, STEP6_CAP_USD } from '../budget.mjs'
 import { checkIsolation, PRESENT_REQUEST } from '../cases.mjs'
@@ -58,7 +58,7 @@ import { judgePilotCase, PILOT_FAMILIES, pilotCases, pilotReferencePairs, tasteM
 import { withReview, writeFiles } from './common.mjs'
 import { pilotFeedback } from './feedback.mjs'
 import { MEMORY_POLICY, memoryInstructions } from './memory.mjs'
-import { PILOT_ID, PLAN_FILE, planSha256, planText } from './plan.mjs'
+import { PILOT_ID, PLAN_FILE, PLAN_FILE_REL, planSha256, planText } from './plan.mjs'
 import { checkJudges } from './reliability.mjs'
 import { buildPilotReport } from './report.mjs'
 import { comparePair, EXTERNAL_REVIEWER, IN_LOOP_REVIEWER, reviewPoints } from './reviewer.mjs'
@@ -471,6 +471,7 @@ async function runPilotFamily(ctx, family) {
             await client.dispose().catch(() => undefined)
           }
           await spent('holdout', runId, run.costUsd, PILOT_RESERVE_USD.holdout)
+          run.outputsKept = await keepOutputs(task, runRoot, join(ctx.out, 'outputs', slug(runId)))
           if (!ctx.keepRuns) await rm(runRoot, { recursive: true, force: true })
           // Review points of documents: the external reviewer scores them; the in-loop reviewer judges the same points, for agreement only.
           if (run.judged !== null && task.rubric.some(p => p.by === 'review')) {
@@ -509,7 +510,7 @@ async function runPilotFamily(ctx, family) {
       await guard(PILOT_RESERVE_USD.pairReview, step)
       const judged = await comparePair(ctx.complete, task, first, second)
       await spent('review', `${task.id}: parent vs memory`, judged.usd, PILOT_RESERVE_USD.pairReview)
-      obs.pairs.push({ caseId: task.id, first: 'parent', second: 'memory', ab: judged.ab, ba: judged.ba })
+      obs.pairs.push({ caseId: task.id, first: 'parent', second: 'memory', ab: judged.ab, ba: judged.ba, replies: judged.replies })
     }
   } catch (error) {
     if (error instanceof Stop) obs.stopped = { step, reason: error.message }
@@ -559,6 +560,29 @@ async function adoptedComponents(pkgs, root, obs) {
 const rel = (out, path) => relative(out, path).split('\\').join('/')
 
 /**
+ * Copy a holdout run's deliverables (the case's output paths, files or folders) to `dest`
+ * before the run's copy is removed, so the documents the reviewers judged can be read later.
+ * Returns the kept paths (absolute; the raw records make them relative to the output folder).
+ * @param {{ outputs: string[] }} task
+ * @param {string} runRoot
+ * @param {string} dest
+ */
+export async function keepOutputs(task, runRoot, dest) {
+  const kept = []
+  for (const path of task.outputs) {
+    const target = join(dest, path)
+    await mkdir(dirname(target), { recursive: true })
+    try {
+      await cp(join(runRoot, path), target, { recursive: true })
+      kept.push(target)
+    } catch (error) {
+      if (/** @type {any} */ (error)?.code !== 'ENOENT') throw error
+    }
+  }
+  return kept
+}
+
+/**
  * The raw records (report.mjs's input). Everything here is the same on a rerun with the same
  * answers: no time, no session or job id, paths relative to the output directory.
  * @param {any[]} families
@@ -597,7 +621,8 @@ export function pilotRawRecords(families, meta) {
       runId: r.runId, family: r.family, caseId: r.caseId, arm: r.arm, repeat: r.repeat,
       rate: r.judged?.rate ?? null, pass: r.judged?.pass ?? null,
       unclear: (r.judged?.points ?? []).filter((/** @type {any} */ p) => p.unclear === true).length,
-      points: (r.judged?.points ?? []).map((/** @type {any} */ p) => ({ id: p.id, type: p.type, by: p.by, pass: p.pass, ...(p.unclear === true ? { unclear: true } : {}) })),
+      points: (r.judged?.points ?? []).map((/** @type {any} */ p) => ({ id: p.id, type: p.type, by: p.by, pass: p.pass, ...(p.unclear === true ? { unclear: true } : {}), ...(typeof p.detail === 'string' ? { detail: p.detail } : {}) })),
+      outputs: r.outputsKept === undefined ? [] : r.outputsKept.map((/** @type {string} */ path) => rel(meta.out, path)),
       costUsd: r.costUsd, componentsUsed: r.componentsUsed, capabilityVersions: r.capabilityVersions ?? [], followUp: r.followUp === true, turn: r.turn,
     }))),
     costs: families.flatMap(f => f.costs),
@@ -619,7 +644,7 @@ export async function runPilot(options) {
   const fresh = await planText()
   const current = (await readFile(PLAN_FILE, 'utf8').catch(() => '')).replace(/\r\n/g, '\n')
   const planCurrent = fresh === current
-  if (options.backend === 'real' && !planCurrent) return { code: 2, reason: 'pilot-plan.json is not current (plan.mjs --check); the pilot runs only on the frozen plan' }
+  if (options.backend === 'real' && !planCurrent) return { code: 2, reason: `${basename(PLAN_FILE)} is missing or not current (plan.mjs --check); the pilot runs only on the frozen plan` }
   const loaded = await loadPilotPackages()
   if (!loaded.ok) return { code: 2, reason: loaded.reason }
   const out = resolve(options.out)
@@ -635,8 +660,9 @@ export async function runPilot(options) {
   }
   const ctx = { pkgs: loaded.pkgs, backend, complete: backend.complete, out, spend, cap, pilotSpend, keepRuns: options.keepRuns === true, log }
   const startedAt = new Date().toISOString()
-  const planHash = await planSha256()
-  const notes = planCurrent ? [] : ['pilot-plan.json was not current when this run started (rehearsal only; the real pilot refuses to start)']
+  // Not frozen yet (a rehearsal): the hash of a fresh build, so the records still say which plan they ran on.
+  const planHash = planCurrent ? await planSha256() : createHash('sha256').update(fresh).digest('hex')
+  const notes = planCurrent ? [] : [`${basename(PLAN_FILE)} was missing or not current when this run started (rehearsal only; the real pilot refuses to start)`]
   try {
     const cases = pilotCases()
     const judges = await checkJudges(cases)
@@ -657,7 +683,7 @@ export async function runPilot(options) {
           const judged = await comparePair(ctx.complete, task, pair.good, pair.bad)
           const note = await spent(`reference pair ${pair.id}`, judged.usd, PILOT_RESERVE_USD.pairReview)
           if (note !== null) notes.push(note)
-          refs.push({ id: pair.id, caseId: pair.caseId, flaw: pair.flaw, ab: judged.ab, ba: judged.ba, usd: judged.usd })
+          refs.push({ id: pair.id, caseId: pair.caseId, flaw: pair.flaw, ab: judged.ab, ba: judged.ba, replies: judged.replies, usd: judged.usd })
           log(`reference pair ${pair.id}: ${judged.ab} / ${judged.ba}`)
         }
       } catch (error) {
@@ -668,7 +694,7 @@ export async function runPilot(options) {
     }
     const raw = pilotRawRecords(families, {
       out, backend: backend.name, model: backend.model, planSha256: planHash, judges: judgeSummary,
-      referencePairs: refs.map(r => ({ id: r.id, caseId: r.caseId, flaw: r.flaw, ab: r.ab, ba: r.ba })), notes,
+      referencePairs: refs.map(r => ({ id: r.id, caseId: r.caseId, flaw: r.flaw, ab: r.ab, ba: r.ba, replies: r.replies })), notes,
     })
     raw.costs.push(...refs.map(r => ({ kind: 'review', family: 'docs', ref: `reference pair ${r.id}`, usd: r.usd })))
     const report = buildPilotReport(raw)
@@ -676,7 +702,7 @@ export async function runPilot(options) {
     await writeFile(join(out, 'report.md'), report)
     await writeFile(join(out, 'observations.json'), `${JSON.stringify(families, null, 1)}\n`)
     await writeFile(join(out, 'manifest.json'), `${JSON.stringify({
-      pilotId: PILOT_ID, planFile: 'scripts/experiment/step6/pilot/pilot-plan.json', planSha256: planHash, planCurrent,
+      pilotId: PILOT_ID, planFile: PLAN_FILE_REL, planSha256: planHash, planCurrent,
       backend: backend.name, model: backend.model, reviewers: { external: EXTERNAL_REVIEWER, inLoop: IN_LOOP_REVIEWER },
       startedAt, finishedAt: new Date().toISOString(), platform: process.platform, node: process.version,
       repeats: PILOT_REPEATS, capUsd: cap, pilotGateUsd: PILOT_GATE_USD, spendFile: spend, spentUsd: spentUsd(await readSpend(spend, cap)), pilotSpentUsd: spentUsd(await readSpend(pilotSpend, PILOT_GATE_USD)),

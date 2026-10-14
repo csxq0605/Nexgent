@@ -11,7 +11,7 @@ import { judgePilotCase, pilotCases } from '../pilot/cases.mjs'
 import { listFiles, writeFiles } from '../pilot/common.mjs'
 import { MEMORY_POLICY } from '../pilot/memory.mjs'
 import { buildPilotReport, validatePilotRecords } from '../pilot/report.mjs'
-import { adoptMemoryPolicy, parsePilotArgs, pilotRawRecords } from '../pilot/run.mjs'
+import { adoptMemoryPolicy, keepOutputs, parsePilotArgs, pilotRawRecords } from '../pilot/run.mjs'
 import { applyCall, endState } from '../pilot/scripted-model.mjs'
 
 const RUN = fileURLToPath(new URL('../pilot/run.mjs', import.meta.url))
@@ -76,7 +76,7 @@ function sampleRaw() {
     components: { base: { components: [], literal: { components: 0, withLiterals: 0, rate: null } }, memory: { components: [{ kind: 'context-policy', name: 'project-notes', class: 'convention-or-fact' }], literal: { components: 1, withLiterals: 0, rate: 0 } }, parent: { components: [{ kind: 'skill', name: 's', class: 'way-of-working' }], literal: { components: 1, withLiterals: 1, rate: 1 } } },
     costs: [{ kind: 'holdout', family: 'docs', ref: 'r', usd: 0.1 }, { kind: 'improvement', family: 'docs', ref: 'j', usd: null }], notes: ['n'], checks: { epoch: 'e', isolation: { leaks: [], scanned: 9, skipped: 0 } },
   }
-  const refs = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'].map((id, i) => ({ id, caseId: 'docs/dev/x', flaw: 'f', ab: i === 5 ? 'B' : 'A', ba: 'B' }))
+  const refs = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'].map((id, i) => ({ id, caseId: 'docs/dev/x', flaw: 'f', ab: i === 5 ? 'B' : 'A', ba: 'B', ...(i === 5 ? { replies: { ab: { reason: '后一份更全', differences: ['B 列了来源'] }, ba: { unreadable: '???' } } } : {}) }))
   return pilotRawRecords([family], { out: '/o', backend: 'scripted', model: 'm', planSha256: 'h'.repeat(64), judges: { pass: true, samples: 77, failed: [], uncovered: [] }, referencePairs: refs, notes: [] })
 }
 
@@ -97,6 +97,10 @@ test('pilot records and report: no ids or absolute paths in the records; the sam
   assert.match(report, /\| docs \| base \| 6 \| 6 \| 0（0\.0%） \| 50\.0% \| 0 \| 2 \|/)
   assert.match(report, /\| docs \| parent \| skill:s \| 0 \| 1 \| 1 \/ 1（100\.0%） \|/)
   assert.match(report, /\| docs \| improvement \| 1 \| 0\.000 \| 1 \|/)
+  assert.match(report, /两种顺序结论不一致的比较，两次的理由/)
+  assert.match(report, /\| 参考 p6 \| AB \| B \| 后一份更全；差别：B 列了来源 \|/)
+  assert.match(report, /\| 参考 p6 \| BA \| B \| 回复无法解析：\?\?\? \|/)
+  assert.equal(raw.referencePairs[5].replies.ab.reason, '后一份更全', 'replies are kept in the raw records')
   const broken = { ...raw, runs: [...raw.runs, raw.runs[0]] }
   assert.throws(() => buildPilotReport(broken), /appears more than once/)
 })
@@ -121,6 +125,18 @@ test('memory arm: the policy is written and adopted through the capability store
     const decisions = await store.decisions()
     assert.equal(decisions.at(-1).outcome, 'adopted')
     await assert.rejects(adoptMemoryPolicy(pkgs, dir, entries), /already has a context policy/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('holdout outputs: the case\'s output files and folders are copied out before the run copy goes; missing ones are skipped', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'nx6-keep-'))
+  try {
+    await writeFiles(join(dir, 'run'), { 'd-1/output/a.md': '# A', 'f-1/out/x.csv': 'a,b\n', 'f-1/out/sub/y.txt': 'y' })
+    const kept = await keepOutputs({ outputs: ['d-1/output/a.md', 'f-1/out', 'd-1/output/missing.md'] }, join(dir, 'run'), join(dir, 'kept'))
+    assert.deepEqual(kept, [join(dir, 'kept', 'd-1/output/a.md'), join(dir, 'kept', 'f-1/out')])
+    assert.deepEqual(await listFiles(join(dir, 'kept')), ['d-1/output/a.md', 'f-1/out/sub/y.txt', 'f-1/out/x.csv'])
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

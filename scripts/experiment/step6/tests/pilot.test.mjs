@@ -10,9 +10,9 @@ import { amountForms, applyAnswer, citesAll, dateForms, hasAny, normalize, parse
 import { pilotFeedback } from '../pilot/feedback.mjs'
 import { MEMORY_POLICY, memoryInstructions } from '../pilot/memory.mjs'
 import { crc32, readDocx, readXlsx, unzip, writeDocx, writeXlsx } from '../pilot/office.mjs'
-import { PLAN_FILE, planSha256, planText } from '../pilot/plan.mjs'
+import { buildPlan, PILOT_ID, PLAN_FILE, planSha256, planText, ROUND_1_PLAN_FILE, ROUND_1_PLAN_SHA256 } from '../pilot/plan.mjs'
 import { checkJudges, orderConsistency, pairAccuracy, reliabilityVerdict } from '../pilot/reliability.mjs'
-import { comparePair, orderOutcome, parsePointVerdicts, parsePreference, pointRequest, reviewPoints, scriptedComplete } from '../pilot/reviewer.mjs'
+import { comparePair, orderOutcome, pairRequest, parsePairReply, parsePointVerdicts, parsePreference, pointRequest, reviewPoints, scriptedComplete } from '../pilot/reviewer.mjs'
 import { agreementRate, componentClass, followUpsByArm, literalRate, pairedRateDiff, repeatSpread, wholePass } from '../pilot/stats.mjs'
 
 const cases = pilotCases()
@@ -32,16 +32,20 @@ test('the plan: 16 cases, 8 per family split 2/2/1/3, rubrics within the rules, 
   assert.ok(cases.filter(c => c.family === 'files').every(c => c.rubric.every(p => p.by !== 'review')), 'file tasks are judged deterministically')
 })
 
-test('generators are deterministic, and pilot-plan.json is a fresh build of them', async () => {
+test('generators are deterministic; round 1\'s frozen plan is untouched; this round\'s plan file, once frozen, is a fresh build', async () => {
   const again = pilotCases()
   for (const [i, task] of cases.entries()) {
     assert.equal(again[i].message, task.message)
     for (const [path, content] of Object.entries(task.files)) assert.ok(Buffer.from(again[i].files[path]).equals(Buffer.from(content)), `${task.id} ${path}`)
   }
-  const committed = (await readFile(PLAN_FILE, 'utf8')).replace(/\r\n/g, '\n')
-  assert.equal(committed, await planText(), 'pilot-plan.json is stale: run node scripts/experiment/step6/pilot/plan.mjs --write')
-  assert.match(await planSha256(), /^[0-9a-f]{64}$/)
-  const plan = JSON.parse(committed)
+  assert.equal(await planSha256(ROUND_1_PLAN_FILE), ROUND_1_PLAN_SHA256, 'round 1 (step6-pilot-1) ran on this plan; it is a record and never changes')
+  assert.notEqual(PLAN_FILE, ROUND_1_PLAN_FILE)
+  const committed = await readFile(PLAN_FILE, 'utf8').catch(() => null)
+  // Not frozen yet: the real pilot refuses to start until plan.mjs --write writes the file.
+  if (committed !== null) assert.equal(committed.replace(/\r\n/g, '\n'), await planText(), `${PLAN_FILE} is stale`)
+  const plan = await buildPlan()
+  assert.equal(plan.pilotId, PILOT_ID)
+  assert.notEqual(PILOT_ID, 'step6-pilot-1')
   assert.equal(plan.reliability.pairs.length, 6)
   assert.equal(plan.statistics.bootstrap.iterations, 2000)
   assert.equal(plan.statistics.bootstrap.seed, 'step6-pilot')
@@ -145,6 +149,11 @@ test('external reviewer: request carries review points and materials; replies pa
   assert.equal(parsePointVerdicts('no json here', ['r']), null)
   assert.equal(parsePreference('{"preference":"B","reason":"x"}'), 'B')
   assert.equal(parsePreference('{"preference":"C"}'), null)
+  assert.deepEqual(parsePairReply('{"differences":[],"preference":"A","reason":"差不多"}'), { preference: 'tie', reason: '差不多', differences: [] }, 'no difference listed: a tie whatever it names')
+  assert.deepEqual(parsePairReply('{"differences":["A 写了负责人"],"preference":"A","reason":"r"}'), { preference: 'A', reason: 'r', differences: ['A 写了负责人'] })
+  const pair = pairRequest(task, 'DOC-A', 'DOC-B')
+  assert.ok(pair.user.indexOf('# 评分要点') < pair.user.indexOf('# 成果 A'), 'the points come before the documents')
+  for (const point of task.rubric) assert.equal(pair.user.includes(`- ${point.id}：${point.text}`), point.by !== 'none', `${point.id} (${point.by})`)
   const reviewed = await reviewPoints(scriptedComplete(() => '{"points":[{"id":"r","verdict":"否","reason":"超预算"}]}'), task, '# 备忘')
   const merged = withReview({ pass: null, rate: null, problems: [], points: [{ id: 'm', type: 'missing', by: 'check', pass: true, detail: '' }, { id: 'r', type: 'wrong-result', by: 'review', pass: null, detail: '' }, { id: 'f', type: 'format', by: 'review', pass: null, detail: '' }] }, reviewed.verdicts)
   assert.equal(merged.pass, null, 'a point the reviewer skipped stays unknown')
@@ -153,9 +162,13 @@ test('external reviewer: request carries review points and materials; replies pa
   assert.equal(unclear.rate, 1 / 3)
   assert.equal(unclear.points.find(p => p.id === 'f')?.unclear, true)
   const prefersFirst = scriptedComplete(request => (request.user.indexOf('GOOD') < request.user.indexOf('BAD') ? '{"preference":"A"}' : '{"preference":"B"}'))
-  assert.deepEqual(await comparePair(prefersFirst, task, 'GOOD', 'BAD'), { ab: 'A', ba: 'B', consistent: true, winner: 'first', usd: 0 })
-  const alwaysA = scriptedComplete(() => '{"preference":"A"}')
-  assert.equal((await comparePair(alwaysA, task, 'GOOD', 'BAD')).consistent, false)
+  assert.deepEqual(await comparePair(prefersFirst, task, 'GOOD', 'BAD'), { ab: 'A', ba: 'B', consistent: true, winner: 'first', replies: { ab: { reason: '', differences: [] }, ba: { reason: '', differences: [] } }, usd: 0 })
+  const alwaysA = scriptedComplete(() => '{"differences":["前一份更完整"],"preference":"A","reason":"更完整"}')
+  const biased = await comparePair(alwaysA, task, 'GOOD', 'BAD')
+  assert.equal(biased.consistent, false)
+  assert.deepEqual(biased.replies.ba, { reason: '更完整', differences: ['前一份更完整'] }, 'each order\'s reason is kept')
+  const broken = await comparePair(async () => { throw new Error('down') }, task, 'GOOD', 'BAD')
+  assert.deepEqual(broken.replies.ab, { failed: 'down' })
   assert.deepEqual(orderOutcome('tie', 'tie'), { consistent: true, winner: 'tie' })
 })
 

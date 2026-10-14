@@ -36,9 +36,10 @@ export const POINT_SYSTEM = [
 
 export const PAIR_SYSTEM = [
   '你是一名独立评审，负责比较同一任务的两份成果。',
-  '只根据给出的任务和资料判断哪一份更好地完成了任务：内容是否准确、完整，是否有资料里没有的内容，结构是否清楚。不要因为篇幅长短本身偏向任何一份。',
-  '两份质量相当时写 tie。',
-  '只输出一个 JSON 对象，不要输出其他文字：{"preference":"A|B|tie","reason":"一句话"}',
+  '比较的依据是任务要求、给出的资料和评分要点：内容是否准确、完整，是否有资料里没有的内容，结构是否清楚。不要因为篇幅长短或出现的先后本身偏向任何一份。',
+  '先逐条列出两份之间会影响任务完成好坏的具体差别，每条写明哪一份更好、依据是哪个要点或哪份资料；措辞、排版、详略上不影响任务完成的差别不算。',
+  '没有这样的差别，或差别互相抵消、分不出高下时，写 tie。',
+  '只输出一个 JSON 对象，不要输出其他文字：{"differences":["一条差别"],"preference":"A|B|tie","reason":"一句话"}',
 ].join('\n')
 
 /** Materials of a case as text blocks (file name, then content); materials sit under a `materials/` folder, in the case folder or not. @param {PilotCase} task */
@@ -68,16 +69,19 @@ export function pointRequest(task, document, reviewer = EXTERNAL_REVIEWER) {
 }
 
 /**
- * The request that compares two documents of the same task (`first` shown as A).
+ * The request that compares two documents of the same task (`first` shown as A). The scored
+ * review points (not the taste points) are the basis of the comparison.
  * @param {PilotCase} task
  * @param {string} first
  * @param {string} second
  * @returns {ReviewRequest}
  */
 export function pairRequest(task, first, second) {
+  const points = task.rubric.filter(point => point.by !== 'none')
   const user = [
     `# 任务\n${task.message}`,
     `# 资料\n${materialsText(task)}`,
+    `# 评分要点\n${points.map(point => `- ${point.id}：${point.text}`).join('\n')}`,
     `# 成果 A\n${first}`,
     `# 成果 B\n${second}`,
   ].join('\n\n')
@@ -126,12 +130,25 @@ export function parsePointVerdicts(text, ids) {
   return out
 }
 
-/** Preference from a reply, or null when unreadable. @param {string} text @returns {Preference | null} */
-export function parsePreference(text) {
+/**
+ * A comparison reply: the preference, the reason, and the listed differences. A reply that lists
+ * no difference (an empty `differences` array) is a tie whatever preference it names: the prompt
+ * asks for tie when nothing affects the task, and a preference with no difference behind it is
+ * what order effects look like. Null when unreadable.
+ * @param {string} text
+ * @returns {{ preference: Preference, reason: string, differences: string[] } | null}
+ */
+export function parsePairReply(text) {
   const value = lastJsonObject(text)
-  const preference = String(value?.preference ?? '').trim()
-  return preference === 'A' || preference === 'B' || preference === 'tie' ? preference : null
+  const named = String(value?.preference ?? '').trim()
+  if (named !== 'A' && named !== 'B' && named !== 'tie') return null
+  const differences = Array.isArray(value?.differences) ? value.differences.map(d => String(d)) : null
+  const preference = differences !== null && differences.length === 0 ? 'tie' : named
+  return { preference, reason: String(value?.reason ?? ''), differences: differences ?? [] }
 }
+
+/** Preference from a reply, or null when unreadable. @param {string} text @returns {Preference | null} */
+export const parsePreference = text => parsePairReply(text)?.preference ?? null
 
 /**
  * Judge a document's review points.
@@ -154,6 +171,8 @@ export async function reviewPoints(complete, task, document, reviewer = EXTERNAL
 /**
  * Compare two documents in both orders. `winner` maps the two answers back to the
  * documents: `first`, `second`, `tie`, or null when the orders disagree or a reply failed.
+ * `replies` keeps each order's reason and differences (or the unreadable text, or the error),
+ * so a disagreement can be read afterwards.
  * @param {Complete} complete
  * @param {PilotCase} task
  * @param {string} first
@@ -163,14 +182,19 @@ export async function comparePair(complete, task, first, second) {
   const ask = async (/** @type {string} */ a, /** @type {string} */ b) => {
     try {
       const reply = await complete(pairRequest(task, a, b))
-      return { preference: parsePreference(reply.text), usd: reply.usd }
-    } catch {
-      return { preference: null, usd: null }
+      const parsed = parsePairReply(reply.text)
+      return { preference: parsed?.preference ?? null, reply: parsed === null ? { unreadable: reply.text.slice(0, 2000) } : { reason: parsed.reason, differences: parsed.differences }, usd: reply.usd }
+    } catch (error) {
+      return { preference: null, reply: { failed: error instanceof Error ? error.message.slice(0, 500) : String(error) }, usd: null }
     }
   }
   const ab = await ask(first, second)
   const ba = await ask(second, first)
-  return { ab: ab.preference, ba: ba.preference, ...orderOutcome(ab.preference, ba.preference), usd: ab.usd === null || ba.usd === null ? null : ab.usd + ba.usd }
+  return {
+    ab: ab.preference, ba: ba.preference, ...orderOutcome(ab.preference, ba.preference),
+    replies: { ab: ab.reply, ba: ba.reply },
+    usd: ab.usd === null || ba.usd === null ? null : ab.usd + ba.usd,
+  }
 }
 
 /**
