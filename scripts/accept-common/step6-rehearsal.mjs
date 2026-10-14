@@ -1,23 +1,26 @@
 /**
- * Step 6's scripted rehearsal (E02, E03): observations made by running
- * `scripts/experiment/step6/run.mjs --scripted --keep-runs` (the measurement thread's
- * runner, spawned and imported, never edited) and then recomputing the checks from the
+ * Step 6's scripted rehearsal (E02, E03; rewritten 2026-10-14 for the pilot, ADR 0011 and the
+ * user's "按推薦" of 08:12): observations made by running
+ * `scripts/experiment/step6/pilot/run.mjs --scripted --keep-runs` (the measurement thread's
+ * pilot runner, spawned and imported, never edited) and then recomputing the checks from the
  * primary files it leaves behind, not from its own `observations.json` checks:
  *
- *   isolation (E02)  `checkIsolation(allCases(), …)` over each experiment project and each
- *                    kept arm copy (the whole root, so sessions, snapshots, receipts, outputs
- *                    and working files), with per-directory file counts for sessions and
- *                    snapshots; a negative control (a holdout fingerprint planted in a temp
- *                    copy of a session file must be found, the unplanted copy must be clean)
+ *   isolation (E02)  `checkIsolation(pilotCases(), …)` over each family project, each arm copy
+ *                    (base, memory, parent: the whole root, so sessions, snapshots, receipts,
+ *                    outputs and working files) and each arm's own NEXGENT_HOME, with
+ *                    per-directory file counts for sessions and snapshots; a negative control (a
+ *                    holdout fingerprint planted in a temp copy of a session file must be found,
+ *                    the unplanted copy must be clean)
  *   gate picks (E02) the case ids the gate's trial records name, recomputed from the trial
  *                    files under `.nexgent/capabilities/trials` and the project's session files
  *   holdout runs (E03) every record of raw.json joined to its kept run directory: the run's own
  *                    session is the one whose `session.start` names the run copy as its project
- *                    root and the run id as its title
+ *                    root and the run id as its title; each arm's NEXGENT_HOME (raw.json `arms`)
+ *                    is its own directory
  *
- * A scripted rehearsal, not the real experiment: it shows the runner and the checks work
- * (and would catch a leak or a reused copy); the real experiment's isolation and arms are R05's.
- * No model call; the spawned process gets a scripted key, never a real one.
+ * A scripted rehearsal, not the real pilot: it shows the runner and the checks work (and would
+ * catch a leak, a shared home or a reused copy); the real pilot's isolation and arms are R05's.
+ * No model call; the spawned process gets a scripted backend and no key.
  */
 import { spawn } from 'node:child_process'
 import { cp, mkdir, readdir, readFile, realpath, stat, writeFile, mkdtemp, rm } from 'node:fs/promises'
@@ -27,16 +30,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const repo = fileURLToPath(new URL('../../', import.meta.url))
 const experimentDir = join(repo, 'scripts', 'experiment', 'step6')
-const ARMS = ['base', 'parent', 'child']
+const ARMS = ['base', 'memory', 'parent']
 const REPEATS = 3
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'))
 const exists = async path => stat(path).then(() => true, () => false)
 const real = async path => realpath(path).catch(() => resolve(path))
 
-/** The runner's cases (imported, not edited). */
+/** The pilot's cases and the shared isolation scan (imported, not edited), as `{ allCases, checkIsolation }`. */
 async function loadCases() {
-  return import(pathToFileURL(join(experimentDir, 'cases.mjs')).href)
+  const pilot = await import(pathToFileURL(join(experimentDir, 'pilot', 'cases.mjs')).href)
+  const shared = await import(pathToFileURL(join(experimentDir, 'cases.mjs')).href)
+  return { allCases: pilot.pilotCases, checkIsolation: shared.checkIsolation }
 }
 
 /** Every file under `dir`, recursively (empty when it does not exist). */
@@ -109,6 +114,8 @@ async function scanRoot(cases, label, root) {
     return { dir, exists: await exists(dir), scanned: (await cases.checkIsolation(all, [dir])).scanned }
   }
   const directories = {}
+  // A NEXGENT_HOME is scanned whole; it has no .nexgent/ of its own.
+  if (label.includes(' home:')) return { label, root, exists: await exists(root), scanned: whole.scanned, skipped: whole.skipped, leaks: whole.leaks, directories }
   for (const name of ['sessions', 'snapshots', 'ledgers', 'capabilities', 'outputs', 'materials', 'improvements']) directories[name] = await part(name)
   return { label, root, exists: await exists(root), scanned: whole.scanned, skipped: whole.skipped, leaks: whole.leaks, directories }
 }
@@ -237,28 +244,29 @@ async function inspectRuns(familyDir, runs, armSessionIds, messageOf) {
 }
 
 /**
- * Run the scripted experiment (both families, 3 repeats) and make the E02 / E03 observations.
+ * Run the scripted pilot (both families, 3 repeats per case and arm) and make the E02 / E03 observations.
  * @param {string} work a scratch directory (created); the run's output goes to `<work>/out`
- * @param {{ log?: (line: string) => void, timeoutMs?: number, iterations?: number }} [options]
+ * @param {{ log?: (line: string) => void, timeoutMs?: number }} [options]
  * @returns {Promise<Record<string, unknown>>} observations, or `{ error }` when the run crashed
  */
-export async function runRehearsal(work, { log = () => {}, timeoutMs = 20 * 60_000, iterations = 200 } = {}) {
+export async function runRehearsal(work, { log = () => {}, timeoutMs = 20 * 60_000 } = {}) {
   const out = resolve(work, 'out')
   await mkdir(out, { recursive: true })
   const startedAt = Date.now()
   // The comparison copies the runner keeps (nexgent-arm-*) land under the work dir, not the OS temp dir.
   const temp = resolve(work, 'tmp')
   await mkdir(temp, { recursive: true })
-  const env = { ...process.env, NEXGENT_API_KEY: 'sk-step6-rehearsal-scripted-key', TMPDIR: temp, TEMP: temp, TMP: temp }
+  const env = { ...process.env, TMPDIR: temp, TEMP: temp, TMP: temp }
+  delete env.NEXGENT_API_KEY
   delete env.ANTHROPIC_API_KEY
-  const args = [join(experimentDir, 'run.mjs'), '--scripted', '--keep-runs', '--repeats', String(REPEATS), '--iterations', String(iterations), '--out', out]
+  const args = [join(experimentDir, 'pilot', 'run.mjs'), '--scripted', '--keep-runs', '--out', out]
   const child = await new Promise(resolveChild => {
     const proc = spawn(process.execPath, args, { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
     let stderr = ''
     const tail = chunk => {
       const text = chunk.toString('utf8')
       stderr = (stderr + text).slice(-4000)
-      for (const line of text.split('\n')) if (line.trim() !== '') log(`run.mjs: ${line}`)
+      for (const line of text.split('\n')) if (line.trim() !== '') log(`pilot/run.mjs: ${line}`)
     }
     proc.stdout.on('data', tail)
     proc.stderr.on('data', tail)
@@ -270,7 +278,7 @@ export async function runRehearsal(work, { log = () => {}, timeoutMs = 20 * 60_0
     })
   })
   const durationMs = Date.now() - startedAt
-  if (child.code !== 0) return { error: `run.mjs exited ${child.code ?? child.signal}: ${child.stderr.slice(-400)}`, durationMs }
+  if (child.code !== 0) return { error: `pilot/run.mjs exited ${child.code ?? child.signal}: ${child.stderr.slice(-400)}`, durationMs }
   return observeOutput(out, durationMs)
 }
 
@@ -293,7 +301,11 @@ export async function observeOutput(out, durationMs) {
     const holdoutRuns = []
     let controlRoot
     for (const family of families) {
-      const roots = [['project', family.root], ...ARMS.filter(arm => family.arms?.[arm]?.root !== undefined).map(arm => [`arm:${arm}`, family.arms[arm].root])]
+      const roots = [
+        ['project', family.root],
+        ...ARMS.filter(arm => family.arms?.[arm]?.root !== undefined).map(arm => [`arm:${arm}`, family.arms[arm].root]),
+        ...ARMS.filter(arm => family.arms?.[arm]?.home !== undefined).map(arm => [`home:${arm}`, family.arms[arm].home]),
+      ]
       for (const [label, root] of roots) isolationRoots.push({ family: family.family, ...(await scanRoot(cases, `${family.family} ${label}`, root)) })
       controlRoot ??= family.root
       gate.push({ family: family.family, ...(await recomputePicks(cases, family.root)) })
@@ -305,16 +317,26 @@ export async function observeOutput(out, durationMs) {
       const familyRuns = raw.runs.filter(run => run.family === family.family)
       holdoutRuns.push({ family: family.family, ...(await inspectRuns(join(out, family.family), familyRuns, armSessions, new Map(all.map(task => [task.id, task.message])))), runnerRuns: family.runs.length, stopped: family.stopped, error: family.error?.message?.split('\n')[0] })
     }
+    // Each arm's own NEXGENT_HOME, as raw.json names it (relative to the output) and as it is on disk.
+    const homes = []
+    for (const [family, arms] of Object.entries(raw.arms ?? {})) {
+      for (const [arm, facts] of Object.entries(arms ?? {})) {
+        const path = typeof facts?.home === 'string' ? resolve(out, facts.home) : undefined
+        homes.push({ family, arm, home: facts?.home, exists: path === undefined ? false : await exists(path), real: path === undefined ? undefined : await real(path) })
+      }
+    }
     return {
       scripted: true,
-      note: 'scripted rehearsal (run.mjs --scripted): the real experiment is R05\'s',
+      note: 'scripted rehearsal (pilot/run.mjs --scripted): the real pilot is R05\'s',
       out,
       durationMs,
-      command: `node scripts/experiment/step6/run.mjs --scripted --keep-runs --repeats ${REPEATS} --out <work>/out`,
+      command: 'node scripts/experiment/step6/pilot/run.mjs --scripted --keep-runs --out <work>/out',
       holdoutCaseIds,
       arms: ARMS,
       repeatsRequired: REPEATS,
       raw: { runs: raw.runs },
+      homes,
+      familyHomes: families.map(family => ({ family: family.family, home: family.home })),
       isolation: { roots: isolationRoots, negativeControl: controlRoot === undefined ? { planted: false, reason: 'no family project' } : await negativeControl(cases, controlRoot) },
       gate: { families: gate },
       holdout: { families: holdoutRuns },

@@ -411,9 +411,12 @@ export const JUDGES = {
     const integrity = main.integrity ?? {}
     const files = integrity.files ?? {}
     const exported = main.export ?? {}
-    const kinds = ['queue', 'job', 'diagnosis', 'candidate', 'trialReceipt', 'decision']
+    // ADR 0012: the user's queue is a record kind too; jobs that pinned an improver say improverScope user.
+    const kinds = ['queue', 'job', 'diagnosis', 'candidate', 'trialReceipt', 'decision', 'userQueue']
+    const scopes = integrity.scopes ?? []
     return {
       conditions: [
+        [scopes.length > 0 && scopes.every(job => job.improverScope === 'user'), `pinned jobs' improverScope: ${scopes.length === 0 ? 'no pinned job' : scopes.map(job => job.improverScope ?? 'absent').join(', ')} (want user)`],
         [(integrity.issues ?? ['not collected']).length === 0, `schema issues: ${(integrity.issues ?? ['not collected']).slice(0, 3).join('; ')}`],
         [integrity.sessions > 0 && integrity.ledger > 0 && kinds.every(kind => files[kind] > 0), `not every kind of record was checked (${JSON.stringify(files)})`],
         [(main.ledger ?? []).some(r => r.type === 'improvement.end' && r.improvementId === main.job?.jobId), 'the ledger has no improvement.end record for the job'],
@@ -421,7 +424,7 @@ export const JUDGES = {
         [exported.code === 0 && (exported.files ?? []).length > 0, `nexgent export of the feedback task failed (exit ${exported.code}: ${exported.stderr})`],
         [(exported.secretHits ?? ['?']).length === 0, `export files contain the test key (${(exported.secretHits ?? ['not scanned']).join(', ')})`],
       ],
-      evidence: `${integrity.sessions} sessions, ${integrity.ledger} ledger lines and ${kinds.map(kind => `${files[kind]} ${kind}`).join(', ')} pass the schema; the test key is in neither .nexgent/ nor the export (${(exported.files ?? []).length} files)`,
+      evidence: `${integrity.sessions} sessions, ${integrity.ledger} ledger lines and ${kinds.map(kind => `${files[kind]} ${kind}`).join(', ')} pass the schema; ${scopes.length} pinned job.json say improverScope user; the test key is in neither .nexgent/ nor the export (${(exported.files ?? []).length} files)`,
     }
   }),
 }

@@ -15,7 +15,9 @@ const TREE = h('1')
 const EPOCH = h('2')
 const EPOCH2 = h('3')
 const CHILD = h('c')
-const KINDS = ['metaDiagnosis', 'change', 'comparison', 'improver', 'improverRevision']
+const KINDS = ['metaDiagnosis', 'change', 'comparison', 'improver', 'improverRevision', 'userQueue']
+const PA = 'pa'
+const PB = 'pb'
 const T1 = '2026-01-01T00:00:01.000Z'
 const T2 = '2026-01-01T00:00:02.000Z'
 const T3 = '2026-01-01T00:00:03.000Z'
@@ -23,8 +25,8 @@ const T4 = '2026-01-01T00:00:04.000Z'
 const T5 = '2026-01-01T00:00:05.000Z'
 
 const state = () => ({ work: { 'a.txt': 'h1' }, capabilities: { c: 1 }, sessions: { s1: { purpose: 'chat' } }, deliverables: [], config: '{}' })
-const records = () => ({ issues: [], fileIssues: [], secretHits: [], checked: { sessions: 1, ledger: 1, files: 1, kinds: KINDS } })
-const originOf = (kind: string) => ({ kind, sourceJobId: 'job-f', tree: TREE, feedbackIds: ['f1'], capabilityVersion: 'baseline', epoch: EPOCH })
+const records = () => ({ issues: [], fileIssues: [], secretHits: [], checked: { sessions: 1, ledger: 1, files: 1, kinds: KINDS, userConfig: true }, scopes: [{ id: 'job-n', improverScope: 'user' }] })
+const originOf = (kind: string) => ({ kind, projectId: PA, sourceJobId: 'job-f', tree: TREE, feedbackIds: ['f1'], capabilityVersion: 'baseline', epoch: EPOCH })
 const arm = (kind: string, status: string, cost: number, candidateId?: string) => ({ origin: originOf(kind), status, cost: { estimatedUsd: cost }, ...(candidateId === undefined ? {} : { candidateId }) })
 
 /** One meta project: the source job `job-f` ended `sourceStatus` (adopted → feedback-version origin, rejected → unresolved). */
@@ -62,14 +64,21 @@ function good(): Obs {
       { name: 'on: cancelled job', result: { id: 'job-x', status: 'cancelled' }, pendingBefore: 0, pendingAfter: 0 },
       { name: 'on: interrupted job', result: { id: 'job-y', status: 'interrupted' }, pendingBefore: 0, pendingAfter: 0 },
       { name: 'on: counted job 2', pendingAfter: 2 },
-      { name: 'on: counted job 3', metaJobs: [{ trigger: 'job-count', basis: ['j4', 'j5', 'j6'] }] },
+      { name: 'on: counted job 3 (second project)', result: { id: 'j6', status: 'adopted' }, metaJobs: [{ trigger: 'job-count', basis: ['j4', 'j5', 'j6'], project: 'second', batch: [{ projectId: PA }, { projectId: PA }, { projectId: PB }] }] },
     ],
     offNoMeta: 0,
     metaSetting: { enabled: true, everyJobs: 3 },
+    metaVia: 'user config',
+    projectConfigMeta: null,
+    projectIds: { trigger: PA, second: PB },
     afterSecond: 1,
-    budget: { limit: 1, stopped: { status: 'budget-exhausted' }, refused: { code: 'improvement/budget-exhausted' } },
-    h15: { busy: { code: 'improvement/busy' }, statusBeforeKill: 'meta-diagnosing', killed: { pid: 9 }, statusAfter: 'interrupted', starts: 1, metaDiagnoseRequests: 1 },
+    budget: { limit: 1, via: 'user config', stopped: { status: 'budget-exhausted' }, refused: { code: 'improvement/budget-exhausted' }, refusedSecond: { code: 'improvement/budget-exhausted' }, status: { exhausted: true } },
+    h15: {
+      metaJobId: 'job-h', slot: { jobId: 'job-h' }, secondMeta: { code: 'improvement/busy' }, ordinary: { id: 'job-o', status: 'adopted' }, statusDuringOrdinary: 'meta-diagnosing',
+      statusBeforeKill: 'meta-diagnosing', killed: { pid: 9 }, statusAfter: 'interrupted', starts: 1, metaDiagnoseRequests: 1, slotAfter: null,
+    },
     records: records(),
+    secondRecords: records(),
   }
   Object.assign(adopt, {
     source: { id: 'job-f' },
@@ -77,24 +86,35 @@ function good(): Obs {
     tempAfter: [],
     armSessions: [{ arm: 'child' }],
     show: { version: CHILD, change: { childVersion: CHILD } },
-    improvers: { current: { version: CHILD, jobId: 'job-m', trigger: 'meta-job' } },
+    projectIds: { origin: PA, meta: PA },
+    improversBefore: { history: [], versions: [] },
+    improvers: { current: { version: CHILD, jobId: 'job-m', trigger: 'meta-job' }, history: [{ revision: 1, version: CHILD, jobId: 'job-m', trigger: 'meta-job' }], versions: [CHILD] },
     next: { code: 0, pid: 2, parentPid: 1, improverVersion: CHILD, jobId: 'job-n' },
     jobs: [{ id: 'job-f', createdAt: T1 }, { id: 'job-n', improverVersion: CHILD, createdAt: T5 }],
-    facts: { ledger: [{ improvementId: 'job-n', improverVersion: CHILD }], sessions: [{ jobId: 'job-n', improverVersion: CHILD }] },
+    facts: { jobs: [{ jobId: 'job-n', improverScope: 'user' }], ledger: [{ improvementId: 'job-n', improverVersion: CHILD }], sessions: [{ jobId: 'job-n', improverVersion: CHILD }] },
     costs: { metaDiagnose: { requests: 1 }, metaPropose: { requests: 1 }, parentArm: { requests: 1 }, childArm: { requests: 1 }, source: { requests: 1 }, meta: { requests: 4 } },
   })
   Object.assign(adopt.meta.files, { metaDiagnosis: { proposal: 'change', findings: [{ jobIds: ['job-f'] }] } })
   Object.assign(adopt.newLedger[0] as object, { improvementId: 'job-a' })
   Object.assign(reject, {
     kept: [{ root: '/p', exists: true, hasProject: true, bytes: 5 }, { root: '/c', exists: true, hasProject: true, bytes: 6 }],
-    improvers: { current: { version: 'v0' }, history: [] },
+    projectIds: { origin: PA, meta: PB },
+    metaFrom: 'other project',
+    metaRecords: records(),
+    improversBefore: { history: [], versions: [] },
+    improvers: { current: { version: 'v0' }, history: [], versions: [] },
     next: { improverVersion: 'v0' },
     extra: {
       epochBefore: EPOCH, epochAfter: EPOCH2, epochAfterOther: EPOCH2, costRatioCap: { before: 1.2, after: 2 }, configBefore: '{}', configAfter: '{}',
       invalid: { status: 'failed', files: {} }, bounds: { status: 'failed', files: {} }, proposeRequests: 3, versionsBefore: ['v0.json'], versionsAfter: ['v0.json'],
+      rules: { id: 'adr-0014', constant: 'adr-0014', epoch: EPOCH, epochAdr0008: h('5'), projectEpoch: EPOCH, sameEpoch: EPOCH, mixed: 'improvement/epoch-mismatch' },
     },
   })
-  return { trigger, adopt, reject, export: { code: 0, secretHits: [], files: ['a'] }, copyLimit: { status: 'too-large', exists: false, keepMaxBytes: 1 }, crossEpochProduct: { reason: 'epoch-mismatch' }, evaluatorKeysInImprovers: [] }
+  const rework = {
+    shared: { probe: { outsideProjectId: 'px', insideProjectId: PA, toolResults: [{ projectId: 'px', isError: true, text: 'Project px is not one of this meta job\'s projects' }, { projectId: PA, isError: false, text: '[]' }] } },
+    metaLiteral: { refusal: { isError: true, text: 'improver/instance-literal: 4321.09' } },
+  }
+  return { trigger, adopt, reject, rework, export: { code: 0, secretHits: [], files: ['a'] }, copyLimit: { status: 'too-large', exists: false, keepMaxBytes: 1 }, crossEpochProduct: { reason: 'epoch-mismatch' }, evaluatorKeysInImprovers: [] }
 }
 
 const mutated = (fn: Mutation): Obs => {
@@ -110,10 +130,16 @@ const COUNTERS: Record<keyof typeof META_JUDGES, readonly Case[]> = {
     ['a meta job exists after the 2nd counted job', o => { o.trigger.afterSecond = 2 }, 'meta jobs exist'],
     ['a cancelled job is counted', o => { step(o, 'on: cancelled job').pendingAfter = 1 }, 'on: cancelled job: counted'],
     ['an interrupted job is counted', o => { step(o, 'on: interrupted job').pendingAfter = 1 }, 'on: interrupted job: counted'],
-    ['no meta job starts after the 3rd counted job', o => { step(o, 'on: counted job 3').metaJobs = [] }, 'no meta job started by itself'],
-    ['the automatic basis includes the cancelled job', o => { step(o, 'on: counted job 3').metaJobs[0].basis = ['j4', 'j5', 'job-x'] }, 'the basis includes a cancelled or interrupted job'],
+    ['no meta job starts after the 3rd counted job', o => { step(o, 'on: counted job 3 (second project)').metaJobs = [] }, 'no meta job started by itself'],
+    ['the automatic basis includes the cancelled job', o => { step(o, 'on: counted job 3 (second project)').metaJobs[0].basis = ['j4', 'j5', 'job-x'] }, 'the basis includes a cancelled or interrupted job'],
     ['a meta job starts on its own with meta off', o => { o.trigger.offNoMeta = 1 }, 'meta job(s) started on their own'],
     ['the explicit meta job basis misses a counted job', o => { step(o, 'off: explicit meta job').metaJobs[0].basis = ['j1'] }, 'the explicit meta job\'s basis has 1 jobs'],
+    ['meta was turned on in the project config', o => { o.trigger.metaVia = 'project config' }, 'meta was not turned on in the user config'],
+    ['the project config carries the meta field', o => { o.trigger.projectConfigMeta = { enabled: true } }, 'the project config carries improvement.meta'],
+    ['the automatic meta job lives in the first project', o => { step(o, 'on: counted job 3 (second project)').metaJobs[0].project = 'trigger' }, 'lives in the trigger project'],
+    ['the batch names only one project', o => { step(o, 'on: counted job 3 (second project)').metaJobs[0].batch = [{ projectId: PA }] }, 'the batch\'s project ids are not the two projects\''],
+    ['the basis lacks the second project\'s job', o => { step(o, 'on: counted job 3 (second project)').metaJobs[0].basis = ['j3', 'j4', 'j5'] }, 'the basis lacks the second project\'s job'],
+    ['the second project\'s job did not run', o => { step(o, 'on: counted job 3 (second project)').result = { code: 'improvement/busy' } }, 'the second project\'s job did not run'],
   ],
   H05: [
     ['a meta-diagnose session is offered a write tool', o => { o.adopt.metaSessions[0].tools.push('improve_propose_change') }, 'was offered improve_propose_change'],
@@ -122,6 +148,9 @@ const COUNTERS: Record<keyof typeof META_JUDGES, readonly Case[]> = {
     ['the diagnosis cites its own job', o => { o.adopt.jobs.push({ id: 'job-m' }); o.adopt.meta.files.metaDiagnosis.findings[0].jobIds.push('job-m') }, 'cites its own job'],
     ['the diagnosis breaks the schema', o => { o.adopt.records.fileIssues.push({ kind: 'metaDiagnosis', message: 'bad', path: 'p' }) }, 'meta-diagnosis.json breaks the schema'],
     ['a diagnosis refused three times does not end failed', o => { o.reject.extra.invalid.status = 'adopted' }, 'refused three times ended adopted'],
+    ['the outside-the-batch read was not tried', o => { delete o.rework.shared }, 'the outside-the-batch read was not tried'],
+    ['a project outside the batch is answered', o => { o.rework.shared.probe.toolResults[0] = { projectId: 'px', isError: false, text: '[]' } }, 'improve_list_jobs on a project outside the batch: answered'],
+    ['the batch\'s own project is refused', o => { o.rework.shared.probe.toolResults[1] = { projectId: PA, isError: true, text: 'nope' } }, 'improve_list_jobs on the batch\'s project: nope'],
     ['a none diagnosis still produces a change', o => { step(o, 'off: explicit meta job').result.files.change = {} }, 'still produced a change'],
   ],
   H06: [
@@ -132,6 +161,8 @@ const COUNTERS: Record<keyof typeof META_JUDGES, readonly Case[]> = {
     ['the change has another op', o => { o.adopt.meta.files.change.change.op = 'other' }, 'change.json op other'],
     ['improvers.show does not return the child', o => { o.adopt.show.version = 'v0' }, 'improvers.show does not return the stored child'],
     ['fewer than three refused proposals were made', o => { o.reject.extra.proposeRequests = 2 }, 'only 2 refused proposals'],
+    ['a change carrying a batch value is accepted', o => { o.rework.metaLiteral.refusal = { isError: false, text: 'stored' } }, 'a change carrying a concrete value of the batch was not refused (stored)'],
+    ['the literal change was not tried', o => { delete o.rework.metaLiteral }, 'not tried'],
   ],
   H07: [
     ['an unresolved job exists but the kind is feedback-version', o => { o.adopt.origin.jobs.push({ id: 'job-u', kind: 'capability', status: 'rejected', createdAt: T3, updatedAt: T4, history: [], baseVersion: 'baseline', feedbackIds: ['f2'], baselineFeedbackPassRate: 0 }) }, 'ADR 0009 gives unresolved job'],
@@ -146,6 +177,10 @@ const COUNTERS: Record<keyof typeof META_JUDGES, readonly Case[]> = {
     ['the origin\'s feedback set is not the source job\'s', o => { o.adopt.meta.files.comparison.origin.feedbackIds = ['f9'] }, 'the origin\'s feedback set is not the source job\'s'],
     ['the project has no feedback job', o => { o.adopt.origin.jobs = [] }, 'no finished feedback job'],
     ['the origin facts are missing', o => { delete o.reject.origin }, 'reject: comparison.json, the meta job or the origin facts are missing'],
+    ['the origin names the meta project instead of the feedback project', o => { o.reject.meta.files.comparison.origin.projectId = PB }, 'reject: the origin names project pb, not the feedback project'],
+    ['the meta job from another project lives in the origin project', o => { o.reject.projectIds.meta = PA }, 'the meta job was meant to live in another project'],
+    ['the arms\' ledger is not in the origin project', o => { o.reject.newLedger = [] }, 'the arms\' ledger records are not in the origin project'],
+    ['no comparison had its origin in another project', o => { delete o.reject.metaFrom }, 'no comparison had its origin in another project'],
   ],
   H08: [
     ['a working file hash changed', o => { o.adopt.after.work['a.txt'] = 'h2' }, 'the meta job changed file a.txt'],
@@ -157,6 +192,11 @@ const COUNTERS: Record<keyof typeof META_JUDGES, readonly Case[]> = {
     ['an arm session is in the real project', o => { o.adopt.after.sessions['arm-1'] = { purpose: 'improvement', phase: 'diagnose' } }, 'is in the real project\'s sessions'],
     ['no arm records were written', o => { o.reject.newLedger = [] }, 'no arm records'],
     ['the before state is missing', o => { delete o.adopt.before }, 'project state before / after the meta job missing'],
+    ['the user line before is missing', o => { delete o.adopt.improversBefore }, 'adopt: the user-level improver line before / after is missing'],
+    ['an arm added a revision to the user line', o => { o.reject.improvers.history.push({ revision: 1, trigger: 'meta-job', jobId: 'job-m', version: CHILD }) }, 'reject: 1 revision(s) added to the user\'s improver line'],
+    ['the adoption is not the meta job\'s', o => { o.adopt.improvers.history[0].jobId = 'job-arm' }, 'is not the meta job\'s adoption of its child'],
+    ['an earlier revision changed', o => { o.adopt.improversBefore.history = [{ revision: 0, version: 'v0' }]; o.adopt.improvers.history.unshift({ revision: 0, version: 'v9' }) }, 'earlier revisions of the user\'s improver line changed'],
+    ['a stray improver is stored in the user line', o => { o.reject.improvers.versions = ['h-stray'] }, 'improvers other than the child stored in the user\'s line'],
   ],
   H09: [
     ['the adopted child has no offspring', o => { delete o.adopt.meta.files.comparison.child.candidateId }, 'without offspring'],
@@ -186,6 +226,8 @@ const COUNTERS: Record<keyof typeof META_JUDGES, readonly Case[]> = {
     ['the next job has no ledger records', o => { o.adopt.facts.ledger = [] }, 'the next job has no ledger records'],
     ['a session header is not on the child', o => { o.adopt.facts.sessions[0].improverVersion = 'v0' }, 'session headers are not on the child'],
     ['another job ran on the child first', o => { o.adopt.jobs.push({ id: 'job-early', improverVersion: CHILD, createdAt: T3 }) }, 'the first real job on the child is job-early'],
+    ['the next job\'s scope is project', o => { o.adopt.facts.jobs[0].improverScope = 'project' }, 'improverScope project (want user)'],
+    ['the next job\'s job.json has no scope', o => { o.adopt.facts.jobs = [] }, 'improverScope absent (want user)'],
   ],
   H12: [
     ['an improver revision exists after the reject', o => { o.reject.improvers.history.push({ revision: 1 }) }, 'with 1 revisions'],
@@ -207,6 +249,12 @@ const COUNTERS: Record<keyof typeof META_JUDGES, readonly Case[]> = {
     ['the comparison ran in another epoch', o => { o.reject.meta.files.comparison.origin.epoch = EPOCH2 }, 'the comparison did not run in the project\'s epoch'],
     ['decideImprover accepts arms from two epochs', o => { o.crossEpochProduct = { reason: 'no-improvement' } }, 'decideImprover on arms from two epochs: no-improvement'],
     ['there is no epoch before', o => { o.reject.extra.epochBefore = 'x' }, 'no epoch before'],
+    ['the rules id is still adr-0008', o => { o.reject.extra.rules.id = 'adr-0008' }, 'the evaluator rules id is adr-0008'],
+    ['the rules id is the superseded adr-0013', o => { o.reject.extra.rules.id = 'adr-0013'; o.reject.extra.rules.constant = 'adr-0013' }, 'the evaluator rules id is adr-0013 (want adr-0014)'],
+    ['the epoch did not move with the rules id', o => { o.reject.extra.rules.epochAdr0008 = EPOCH }, 'equals the one the same settings had under adr-0008'],
+    ['the project\'s epoch is another one', o => { o.reject.extra.rules.projectEpoch = EPOCH2 }, 'the project\'s epoch is not the one computed'],
+    ['trials of one epoch cannot be compared', o => { o.reject.extra.rules.sameEpoch = 'improvement/epoch-mismatch' }, 'two trials of one epoch could not be compared'],
+    ['trials of two rule ids are compared', o => { o.reject.extra.rules.mixed = EPOCH }, 'trials of the adr-0014 and adr-0008 epochs'],
   ],
   H14: [
     ['the stopped meta job is not budget-exhausted', o => { o.trigger.budget.stopped.status = 'failed' }, 'a meta job over the meta budget ended failed'],
@@ -217,10 +265,18 @@ const COUNTERS: Record<keyof typeof META_JUDGES, readonly Case[]> = {
     ['the meta job wrote records under the source job', o => { o.adopt.newLedger.push({ improvementId: 'job-f' }) }, 'wrote records under the source job'],
     ['a meta job record carries another phase', o => { o.adopt.newLedger.push({ improvementId: 'job-m', improvementPhase: 'diagnose', type: 'request' }) }, 'carries another phase'],
     ['the cost observations are missing', o => { delete o.adopt.costs }, 'the budget or cost observations are missing'],
+    ['the budget is set in the project config', o => { o.trigger.budget.via = 'project config' }, 'the meta budget was not set in the user config'],
+    ['the second project still runs a meta job', o => { o.trigger.budget.refusedSecond = { status: 'meta-diagnosing' } }, 'a meta job from the second project of the same user was started'],
+    ['the user\'s budget status is not exhausted', o => { o.trigger.budget.status = { exhausted: false } }, 'the user\'s meta budget status is not exhausted'],
   ],
   H15: [
     ['the meta diagnosis was asked twice', o => { o.trigger.h15.metaDiagnoseRequests = 2 }, 'asked 2 times'],
-    ['an ordinary job was started during a meta job', o => { o.trigger.h15.busy = { status: 'diagnosing' } }, 'an ordinary job during a meta job was started'],
+    ['a second meta job of the same user was started', o => { o.trigger.h15.secondMeta = { id: 'job-2', status: 'meta-diagnosing' } }, 'a second meta job of the same user (other project) was started'],
+    ['an ordinary job during the meta job was refused', o => { o.trigger.h15.ordinary = { code: 'improvement/busy' } }, 'an ordinary job during the meta job was improvement/busy'],
+    ['the ordinary job did not finish', o => { o.trigger.h15.ordinary.status = 'diagnosing' }, 'the ordinary job ended diagnosing'],
+    ['the meta job was not running while the ordinary job ran', o => { o.trigger.h15.statusDuringOrdinary = 'queued' }, 'the meta job was queued while the ordinary job ran'],
+    ['the meta slot held another job', o => { o.trigger.h15.slot = { jobId: 'job-o' } }, 'the user\'s meta slot held job-o'],
+    ['the meta slot is still held after recovery', o => { o.trigger.h15.slotAfter = { jobId: 'job-h' } }, 'still held job-h after recovery'],
     ['the killed meta job is not interrupted', o => { o.trigger.h15.statusAfter = 'meta-diagnosing' }, 'after the next start the meta job is meta-diagnosing'],
     ['the meta job process started twice', o => { o.trigger.h15.starts = 2 }, 'started 2 times'],
     ['the meta job was not diagnosing when killed', o => { o.trigger.h15.statusBeforeKill = 'comparing' }, 'was comparing when killed'],
@@ -241,9 +297,14 @@ const COUNTERS: Record<keyof typeof META_JUDGES, readonly Case[]> = {
     ['the test key is in .nexgent/', o => { o.trigger.records.secretHits = ['.nexgent/x'] }, 'the test key is in .nexgent/x'],
     ['the test key is in the export', o => { o.export.secretHits = ['a'] }, 'the test key is in the export: a'],
     ['the export failed', o => { o.export = { code: 1, stderr: 'boom' } }, 'the export of the meta project failed'],
-    ['no comparison file was checked', o => { for (const p of ['trigger', 'adopt', 'reject']) o[p].records.checked.kinds = KINDS.filter(k => k !== 'comparison') }, 'no comparison file was checked'],
+    ['no comparison file was checked', o => { for (const r of [o.trigger.records, o.trigger.secondRecords, o.adopt.records, o.reject.records, o.reject.metaRecords]) r.checked.kinds = KINDS.filter(k => k !== 'comparison') }, 'no comparison file was checked'],
     ['nothing was checked', o => { o.reject.records.checked = { sessions: 0, ledger: 0, files: 0, kinds: [] } }, 'reject: nothing checked'],
     ['a records block is missing', o => { delete o.adopt.records }, 'adopt: records missing'],
+    ['the second project\'s records are missing', o => { delete o.trigger.secondRecords }, 'trigger second: records missing'],
+    ['the reject meta project\'s records are missing', o => { delete o.reject.metaRecords }, 'reject meta project: records missing'],
+    ['a pinned job says project scope', o => { o.adopt.records.scopes = [{ id: 'job-n', improverScope: 'project' }] }, 'adopt: job job-n improverScope project'],
+    ['no user queue was checked', o => { for (const p of ['trigger', 'adopt', 'reject']) o[p].records.checked.kinds = KINDS.filter(k => k !== 'userQueue'); o.trigger.secondRecords.checked.kinds = []; o.reject.metaRecords.checked.kinds = [] }, 'no userQueue file was checked'],
+    ['no user config was checked', o => { for (const r of [o.trigger.records, o.trigger.secondRecords, o.adopt.records, o.reject.records, o.reject.metaRecords]) r.checked.userConfig = false }, 'no user config was checked'],
   ],
 }
 

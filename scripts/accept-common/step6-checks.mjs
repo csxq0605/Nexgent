@@ -26,14 +26,19 @@
  * (step6-rehearsal.mjs, `ctx.rehearsal`), judged by step6-rehearsal-judges.mjs.
  * Still not implemented: the real layer R01–R08.
  *
- * Step-6 rework, round 1 (ADR 0011–0013): skeleton items H19–H24 (not wired:
- * not-implemented, exit 2) and REWORK_EXPECTATIONS, the existing items whose
- * expectations the new rules change.
+ * Step-6 rework, round 1 (ADR 0011–0013): skeleton items H19–H24 and
+ * REWORK_EXPECTATIONS, the existing items whose expectations the new rules change.
+ * Round 3 (R7 part 2): H19–H24 wired over step6-rework.mjs (`ctx.step6Rework`), judged
+ * by step6-rework-judges.mjs; H01–H17 follow the user-level improver (ADR 0012) and
+ * the adr-0014 rules (ADR 0014 superseded adr-0013 during this round); the seven `stale` items rewritten on the user's decision of
+ * 2026-10-14 08:12 (H15, E03, R03–R07); E02 / E03 over the pilot's scripted rehearsal
+ * (base / memory / parent, an own NEXGENT_HOME per arm); E04 adds the pilot's report.
  */
 import { CHECKS as STEP5_CHECKS, evaluateItem } from './step5-checks.mjs'
 import { DESKTOP_JUDGES } from './step6-desktop-judges.mjs'
-import { judgePinned, judgeReport, judgeSets, judgeStore, judgeV0 } from './step6-judges.mjs'
+import { judgePilotReport, judgePinned, judgeReport, judgeSets, judgeStore, judgeV0 } from './step6-judges.mjs'
 import { META_JUDGES } from './step6-meta-judges.mjs'
+import { REWORK_JUDGES } from './step6-rework-judges.mjs'
 import { judgeHoldoutArms, judgeIsolation as judgeRehearsalIsolation } from './step6-rehearsal-judges.mjs'
 
 export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_PASS } from './step2-checks.mjs'
@@ -55,7 +60,9 @@ export const REAL_MODEL = {
   thinking: 'on',
   budgetUsd: 35,
   keyEnv: ['NEXGENT_API_KEY', 'ANTHROPIC_API_KEY'],
-  task: 'scripts/experiment/step6: two task families (tables / data, multi-file code); dev / selection / guard / holdout; improver v0, one meta-improvement job per family, parent / child comparison, three holdout arms × 3 repeats',
+  task: 'scripts/experiment/step6/pilot (ADR 0011): two pilot families (documents, file organizing); dev / selection / guard / holdout; improver v0, no meta job; arms base / memory / parent, each with its own NEXGENT_HOME, holdout cases × 3 repeats',
+  /** ADR 0011: the pilot's own gate, counted toward the step's 35 USD. */
+  pilotGateUsd: 12,
 }
 
 /** Step 5's headless items, in order: what H18 re-runs. */
@@ -96,13 +103,27 @@ const step6Phase = (name, judge) => async (ctx) => {
   return judge(ctx?.step6?.[name], ctx)
 }
 
-/** A meta-improvement item over the step-6 meta scenario; a crashed phase fails every item. */
+/** A meta-improvement item over the step-6 meta scenario; a crashed phase fails every item. The rework observations ride along (H05, H06 read them). */
 const metaItem = id => async (ctx) => {
   if (ctx?.step6MetaError !== undefined) return { status: 'failed', evidence: `step 6 meta scenario failed: ${ctx.step6MetaError}` }
   if (ctx?.step6Meta === undefined) return { status: 'failed', evidence: 'step 6 meta scenario did not run' }
   const crashed = Object.entries(ctx.step6Meta.errors ?? {})
   if (crashed.length > 0) return { status: 'failed', evidence: `step 6 meta ${crashed.map(([name, error]) => `${name} phase failed: ${String(error).split('\n')[0]}`).join('; ')}` }
-  return META_JUDGES[id](ctx.step6Meta)
+  return META_JUDGES[id]({ ...ctx.step6Meta, rework: ctx.step6Rework })
+}
+
+/** The phase of the rework scenario each rework item reads. */
+const REWORK_PHASE = { H19: 'shared', H20: 'literal', H21: 'similar', H22: 'similar', H23: 'literal', H24: 'metaLiteral' }
+
+/** A rework item (H19–H24) over step6-rework.mjs; a crash of its phase fails it. H22 also reads step 5's H19 (user-task candidates). */
+const reworkItem = id => async (ctx) => {
+  if (ctx?.step6ReworkError !== undefined) return { status: 'failed', evidence: `step 6 rework scenario failed: ${ctx.step6ReworkError}` }
+  if (ctx?.step6Rework === undefined) return { status: 'failed', evidence: 'step 6 rework scenario did not run' }
+  const error = ctx.step6Rework.errors?.[REWORK_PHASE[id]]
+  if (error !== undefined) return { status: 'failed', evidence: `step 6 rework ${REWORK_PHASE[id]} phase failed: ${String(error).split('\n')[0]}` }
+  const userTasks = STEP5_HEADLESS.find(check => check.id === 'H19')
+  const step5H19 = id === 'H22' && ctx.regression !== undefined ? await evaluateItem(userTasks, ctx.regression) : undefined
+  return REWORK_JUDGES[id]({ ...ctx.step6Rework, step5H19 })
 }
 
 /** A step-6 desktop item over the improver scenario. */
@@ -116,6 +137,12 @@ const experimentItem = (name, judge) => async (ctx) => {
   const error = ctx?.experimentErrors?.[name]
   if (error !== undefined) return { status: 'failed', evidence: `experiment ${name} failed: ${error}` }
   return judge(ctx?.[name])
+}
+
+/** E04: the experiment's report and the pilot's report (ADR 0011), both reproducible and traceable. */
+const bothReports = async (ctx) => {
+  const results = [await experimentItem('report', judgeReport)(ctx), await experimentItem('pilotReport', judgePilotReport)(ctx)]
+  return { status: results.every(r => r.status === 'passed') ? 'passed' : 'failed', evidence: `experiment report: ${results[0].evidence} — pilot report: ${results[1].evidence}` }
 }
 
 const item = (id, layer, title, run) => (run === undefined ? { id, layer, title } : { id, layer, title, run })
@@ -141,52 +168,54 @@ export const CHECKS = [
   item('H12', 'headless', '拒绝：拒绝原因、改动、两臂结果保留，父改进器照常使用', metaItem('H12')),
   item('H13', 'headless', '纪元：评价器设置改动后纪元 id 变化；跨纪元不比较；改进器与元提案写不到评价器设置', metaItem('H13')),
   item('H14', 'headless', '预算与费用：元改进预算用尽即停，记 budget-exhausted；元改进费用带 metaJobId 与阶段，与普通作业、普通任务分开可查', metaItem('H14')),
-  item('H15', 'headless', '并发与恢复：元改进作业与普通作业共用作业位；元改进作业进程被强杀后下次启动标为中断，不重跑', metaItem('H15')),
+  // H15, E03, R03–R07 rewritten per the user's decision of 2026-10-14 08:12 (“按推薦”, REWORK_EXPECTATIONS `rewritten`).
+  item('H15', 'headless', '并发与恢复（ADR 0012 第 3 条）：同一用户同时只有一个元改进作业，第二个被拒；元改进进行时普通作业照常开始；元改进作业进程被强杀后下次启动标为中断，不重跑', metaItem('H15')),
   item('H16', 'headless', '副本保留：默认决定写完后删除比较副本；实验选项下保留并登记，超过上限时拒绝', metaItem('H16')),
   item('H17', 'headless', '账本完整：新记录与字段全部通过 schema；.nexgent/ 与导出物中搜不到测试密钥', metaItem('H17')),
   item('H18', 'headless', '回归：accept-step5 的 H01–H19（含步骤 3、4 回归）继续通过', step5Regression),
-  // Step-6 rework, round 1 skeleton (docs/plan/step-6-rework-partition.md R7 part 1; ADR 0012, 0013): not wired yet.
-  item('H19', 'headless', '改进器用户级共享（ADR 0012）：同一 NEXGENT_HOME 下两个项目读到同一个生效改进器，回滚影响两者；旧项目级 .nexgent/improvers/ 只读、不被读成生效版本；job.json 与账本记 improverScope "user"；项目关掉 shareImproverEvidence 后其作业不计入元改进、不被元诊断读取，但仍用共享改进器'),
-  item('H20', 'headless', '提案时具体数值被拒（ADR 0013 第 2 条）：改进作业里 capability_propose 的组件含反馈原文或反馈原题成果里的具体数值时被拒，返回命中的值与来源，去掉后可再提；在两个以上任务里出现的项目常量、列名不算'),
-  item('H21', 'headless', '同类题变差被拒（ADR 0013 第 1 条）：改进作业的候选修好反馈原题，但同类题上确定性检查通过率低于基线时不采用，原因 similar-regression；同类题上有 unknown 时按 unknown 记'),
-  item('H22', 'headless', '没有同类题等批准（ADR 0013 第 1 条）：选择集里除反馈原题外没有用例时不自动采用，改为 await-approval，原因 no-similar-cases；用户任务自己提出的候选结论不变'),
-  item('H23', 'headless', '门控前具体数值拒绝（ADR 0013 第 2、3 条）：候选含具体数值时门控不回放、直接拒绝，原因 instance-literal，账本里没有这次试验的回放请求；评价器规则 id 为 adr-0013，纪元 id 随之改变'),
-  item('H24', 'headless', '元改进改动夹带项目数值被拒（ADR 0012 第 5 条）：元提案改动的文字含本批任一项目反馈原文或成果里的具体数值时被退回，写明命中的值，不存子改进器'),
+  // Step-6 rework (docs/plan/step-6-rework-partition.md R7; ADR 0012, 0013): skeleton in round 1, wired in round 3 over step6-rework.mjs.
+  item('H19', 'headless', '改进器用户级共享（ADR 0012）：同一 NEXGENT_HOME 下两个项目读到同一个生效改进器，回滚影响两者；旧项目级 .nexgent/improvers/ 只读、不被读成生效版本；job.json 与账本记 improverScope "user"；项目关掉 shareImproverEvidence 后其作业不计入元改进、不被元诊断读取，但仍用共享改进器', reworkItem('H19')),
+  item('H20', 'headless', '提案时具体数值被拒（ADR 0013 第 2 条）：改进作业里 capability_propose 的组件含反馈原文或反馈原题成果里的具体数值时被拒，返回命中的值与来源，去掉后可再提；在两个以上任务里出现的项目常量、列名不算', reworkItem('H20')),
+  item('H21', 'headless', '同类题变差被拒（ADR 0013 第 1 条）：改进作业的候选修好反馈原题，但同类题上确定性检查通过率低于基线时不采用，原因 similar-regression；同类题上有 unknown 时按 unknown 记', reworkItem('H21')),
+  item('H22', 'headless', '没有同类题等批准（ADR 0013 第 1 条）：选择集里除反馈原题外没有用例时不自动采用，改为 await-approval，原因 no-similar-cases；用户任务自己提出的候选结论不变', reworkItem('H22')),
+  item('H23', 'headless', '门控前具体数值拒绝（ADR 0013 第 2、3 条）：候选含具体数值时门控不回放、直接拒绝，原因 instance-literal，账本里没有这次试验的回放请求；评价器规则 id 为 adr-0014（ADR 0014 第 3 条取代 adr-0013），纪元 id 随之改变', reworkItem('H23')),
+  item('H24', 'headless', '元改进改动夹带项目数值被拒（ADR 0012 第 5 条）：元提案改动的文字含本批任一项目反馈原文或成果里的具体数值时被退回，写明命中的值，不存子改进器', reworkItem('H24')),
   ...desktopRegression,
   item('D24', 'desktop', '“改进”页每个作业显示所用的改进器版本；元改进作业有单独的标记', desktopItem('D24')),
   item('D25', 'desktop', '元改进作业详情：元诊断摘要、改动前后对照、父子两臂的后代、门控结论、质量与费用、决定与原因', desktopItem('D25')),
-  item('D26', 'desktop', '设置页“元改进”开关与元改进预算可改，重启后保持；关闭后不再自动开始元改进作业', desktopItem('D26')),
+  item('D26', 'desktop', '设置页“元改进”开关与元改进预算（用户级，ADR 0012）可改，重启后保持；关闭后不再自动开始元改进作业', desktopItem('D26')),
   item('D27', 'desktop', '改进器版本可在界面里回滚，回滚后下一个作业用回滚后的版本', desktopItem('D27')),
   item('E01', 'experiment', '两个任务族的生成器同一种子产出相同文件；四个集合不重叠', experimentItem('sets', judgeSets)),
-  item('E02', 'experiment', '隔离：holdout 的用户消息、种子与素材在实验项目的会话、快照与回执里搜不到；门控挑中的用例都不在 holdout', experimentItem('rehearsal', judgeRehearsalIsolation)),
-  item('E03', 'experiment', '三臂 holdout：每个用例每臂至少 3 次，每次新副本新会话', experimentItem('rehearsal', judgeHoldoutArms)),
-  item('E04', 'experiment', '报告生成器对同一份原始记录两次生成的报告相同；报告里每个数字都能追到原始记录', experimentItem('report', judgeReport)),
+  item('E02', 'experiment', '隔离（ADR 0011）：holdout 的用户消息、种子与素材在实验项目与试点各臂（base、memory、parent，各自的 NEXGENT_HOME）的会话、快照与回执里搜不到；门控挑中的用例都不在 holdout', experimentItem('rehearsal', judgeRehearsalIsolation)),
+  item('E03', 'experiment', '试点三臂 holdout（ADR 0011）：base / memory / parent，每题每臂至少 3 次，每次新副本新会话、每臂独立 NEXGENT_HOME', experimentItem('rehearsal', judgeHoldoutArms)),
+  item('E04', 'experiment', '报告生成器对同一份原始记录两次生成的报告相同；报告里每个数字都能追到原始记录（ADR 0011：试点报告多出的列也是）', bothReports),
   item('R01', 'real', '两个任务族各建一个实验项目，跑完 selection 与 guard 的历史任务，留下快照与检查；任务提示不提能力工具'),
   item('R02', 'real', '每个任务族的 dev 任务收到模拟用户反馈后，改进作业自动开始，用改进器 v0，产出诊断、候选与门控结论（结论如实记录）'),
-  item('R03', 'real', '每个任务族触发一次元改进作业：元诊断合 schema，元提案是一个合规改动（或 none，如实记录）'),
-  item('R04', 'real', '父子比较：两臂起点一致，各在副本里跑完一次作业，decideImprover 结论如实记录'),
-  item('R05', 'real', 'holdout：每个任务族三臂（base、parent、child）各跑完全部 holdout 用例 × 3 次，隐藏判定结果、组件调用证据与费用都有记录，没有 unknown 混进成功'),
-  item('R06', 'real', '报告：按“报告口径”给出两个差值、区间、正 / 零 / 负、费用（含改进与元改进）与摊薄；失败与缺测单列；累计费用不超过上限'),
-  item('R07', 'real', '（不进门槛）若子改进器在某个任务族被采用，在真实项目里再跑一个真实改进作业，证明它用的是子版本'),
+  item('R03', 'real', '试点不跑元改进（ADR 0011 第 2 条）：每类任务的改进作业用改进器 v0、当前纪元（adr-0014），清单记录改进器版本与纪元，实验中没有元改进作业'),
+  item('R04', 'real', 'memory 臂（ADR 0011，试点没有 child 臂）：编排经能力存储写入并采用一条上下文策略 project-notes（该类全部计数反馈原文），不诊断、不过门控；清单记录它的能力版本与全文摘要'),
+  item('R05', 'real', 'holdout（ADR 0011）：两类试点任务各三臂（base、memory、parent）跑完全部 holdout 用例 × 3 次，每臂独立 NEXGENT_HOME；判定结果、组件调用证据与费用都有记录，没有 unknown 混进成功'),
+  item('R06', 'real', '试点报告（ADR 0011）：三个比较（parent − base、memory − base、parent − memory）的配对差值、两层自助法 95% 区间与正 / 零 / 负，评分可靠三判据；费用（含改进作业）；失败与缺测单列；试点累计费用不超过 12 美元闸门'),
+  item('R07', 'real', '（不进门槛）试点没有子改进器（ADR 0011）：被采用组件按“项目约定或事实 / 做事方法”分类，背答案率与追问次数按臂记录'),
   item('R08', 'real', '（可选，不进门槛）Windows 上一个任务族的 R01–R04'),
 ]
 
 /** Items that do not count toward the exit criteria. */
 export const OPTIONAL_CHECKS = new Set(['R07', 'R08'])
 
-/** The items the step-6 rework adds (round 1: skeleton, not wired). */
+/** The items the step-6 rework adds (round 1: skeleton; round 3: wired over step6-rework.mjs). */
 export const REWORK_ITEMS = ['H19', 'H20', 'H21', 'H22', 'H23', 'H24']
 
 /**
  * What the step-6 rework (ADR 0011–0013, docs/plan/step-6-rework-partition.md) changes in
  * the checks that exist today, item by item, so round 3 knows what to rewire and the user
- * sees why. Nothing here changes a verdict yet: the product still runs the old rules.
+ * sees why. Round 3 rewired them (see each judge's evidence).
  *
  * `kind`:
  *  - `change`: the item stays, but its scenario or judge must follow the new rule;
  *  - `verify`: expected to hold unchanged; confirm when the new rules land;
  *  - `stale`: the item's own wording asserts something the new ADRs reverse. Listed for
- *    the user to decide; never deleted or loosened without that decision.
+ *    the user to decide; never deleted or loosened without that decision;
+ *  - `rewritten`: a `stale` item the user decided on (`decided`), rewritten as the reason says.
  * `step`: 5 (accept-step5) or 6 (accept-step6).
  */
 export const REWORK_EXPECTATIONS = [
@@ -203,9 +232,9 @@ export const REWORK_EXPECTATIONS = [
   { step: 6, id: 'H10', kind: 'verify', adr: '0013', why: 'decideImprover 不变；arm 记录里多出同类题字段时复算仍按原规则' },
   { step: 6, id: 'H11', kind: 'change', adr: '0012', why: '“生效版本”读用户级 improvers.list（不带 projectId）；新进程要用同一个 NEXGENT_HOME' },
   { step: 6, id: 'H12', kind: 'change', adr: '0012', why: '查改进器历史改为用户级 API；拒绝时用户级版本线不变' },
-  { step: 6, id: 'H13', kind: 'change', adr: '0013', why: '规则 id 从 adr-0008 改为 adr-0013，纪元 id 的值随之改变；“改评价器设置换纪元”的判定不变，另加“新旧纪元的试验不放进同一比较”' },
+  { step: 6, id: 'H13', kind: 'change', adr: '0013', why: '规则 id 从 adr-0008 改为 adr-0013（本轮中 ADR 0014 又改为 adr-0014），纪元 id 的值随之改变；“改评价器设置换纪元”的判定不变，另加“新旧纪元的试验不放进同一比较”' },
   { step: 6, id: 'H14', kind: 'change', adr: '0012', why: '元改进预算移到用户级配置，按用户计；场景改用户级配置降预算' },
-  { step: 6, id: 'H15', kind: 'stale', adr: '0012', why: '条目写“元改进作业与普通作业共用作业位”，现判定要求元改进进行时普通作业被拒（improvement/busy）。ADR 0012 第 3 条改为“整个用户只有一个元改进作业，它与各项目的能力作业互不占位”。建议改成：同一用户第二个元改进作业被拒；元改进进行时普通作业照常开始；强杀后中断、不重跑不变' },
+  { step: 6, id: 'H15', kind: 'rewritten', decided: '2026-10-14 08:12 按推薦', adr: '0012', why: '条目写“元改进作业与普通作业共用作业位”，现判定要求元改进进行时普通作业被拒（improvement/busy）。ADR 0012 第 3 条改为“整个用户只有一个元改进作业，它与各项目的能力作业互不占位”。建议改成：同一用户第二个元改进作业被拒；元改进进行时普通作业照常开始；强杀后中断、不重跑不变' },
   { step: 6, id: 'H16', kind: 'verify', adr: '0012', why: '副本保留与上限不变；副本仍在起点项目旁的临时目录' },
   { step: 6, id: 'H17', kind: 'change', adr: '0012', why: 'schema 检查范围加入用户级文件（<NEXGENT_HOME>/improvers/、用户级元改进队列与配置）与新字段 improverScope；搜密钥也要扫 NEXGENT_HOME' },
   { step: 6, id: 'H18', kind: 'verify', adr: '0013', why: '跟随 accept-step5 的变化（见下面 step 5 各条）' },
@@ -215,13 +244,13 @@ export const REWORK_EXPECTATIONS = [
   { step: 6, id: 'D27', kind: 'change', adr: '0012', why: '回滚写 <NEXGENT_HOME>/improvers/activation；确认框列出最近用过该改进器的项目；回滚后另一个项目的下一个作业也用回滚后的版本' },
   { step: 6, id: 'E01', kind: 'verify', adr: '0011', why: '表格、代码两族保留为题库，生成器检查不变；试点的两类新任务另需同样的检查（第 3 轮补）' },
   { step: 6, id: 'E02', kind: 'change', adr: '0011', why: '隔离判定扫描的臂从 base/parent/child 改为试点的 base/memory/parent；每臂独立 NEXGENT_HOME 也要扫' },
-  { step: 6, id: 'E03', kind: 'stale', adr: '0011', why: '条目与判定要求 base、parent、child 三臂；ADR 0011 第 2 条规定试点跑 base、memory、parent，不跑元改进与 child。建议改成“试点三臂 base/memory/parent，每题每臂至少 3 次，每次新副本新会话、每臂独立 NEXGENT_HOME”' },
+  { step: 6, id: 'E03', kind: 'rewritten', decided: '2026-10-14 08:12 按推薦', adr: '0011', why: '条目与判定要求 base、parent、child 三臂；ADR 0011 第 2 条规定试点跑 base、memory、parent，不跑元改进与 child。建议改成“试点三臂 base/memory/parent，每题每臂至少 3 次，每次新副本新会话、每臂独立 NEXGENT_HOME”' },
   { step: 6, id: 'E04', kind: 'change', adr: '0011', why: '报告可复现的判定不变；报告多出的列（组件分类、背答案率、追问次数、重复间波动、评分可靠三判据）也要能追到原始记录' },
-  { step: 6, id: 'R03', kind: 'stale', adr: '0011', why: '“每个任务族触发一次元改进作业”：试点不跑元改进' },
-  { step: 6, id: 'R04', kind: 'stale', adr: '0011', why: '“父子比较”：试点没有 child 臂' },
-  { step: 6, id: 'R05', kind: 'stale', adr: '0011', why: '“三臂（base、parent、child）各跑完全部 holdout”：试点是 base、memory、parent，两类新任务' },
-  { step: 6, id: 'R06', kind: 'stale', adr: '0011', why: '“两个差值”改为三个比较（parent − base、memory − base、parent − memory）加评分可靠三判据；费用闸门 12 美元' },
-  { step: 6, id: 'R07', kind: 'stale', adr: '0011', why: '“子改进器被采用后再跑真实作业”：试点没有子改进器' },
+  { step: 6, id: 'R03', kind: 'rewritten', decided: '2026-10-14 08:12 按推薦', adr: '0011', why: '“每个任务族触发一次元改进作业”：试点不跑元改进' },
+  { step: 6, id: 'R04', kind: 'rewritten', decided: '2026-10-14 08:12 按推薦', adr: '0011', why: '“父子比较”：试点没有 child 臂' },
+  { step: 6, id: 'R05', kind: 'rewritten', decided: '2026-10-14 08:12 按推薦', adr: '0011', why: '“三臂（base、parent、child）各跑完全部 holdout”：试点是 base、memory、parent，两类新任务' },
+  { step: 6, id: 'R06', kind: 'rewritten', decided: '2026-10-14 08:12 按推薦', adr: '0011', why: '“两个差值”改为三个比较（parent − base、memory − base、parent − memory）加评分可靠三判据；费用闸门 12 美元' },
+  { step: 6, id: 'R07', kind: 'rewritten', decided: '2026-10-14 08:12 按推薦', adr: '0011', why: '“子改进器被采用后再跑真实作业”：试点没有子改进器' },
   // accept-step5
   { step: 5, id: 'H07', kind: 'verify', adr: '0013', why: '提案时要过具体数值检查；脚本化技能 region-table-convention 不含三位以上整数、小数或日期，预计不被拦' },
   { step: 5, id: 'H09', kind: 'verify', adr: '0013', why: '选择集 = 反馈原题 regions-2026-09 + 同类题 regions-2026-08，有同类题，判定不变；回放集按两组记' },

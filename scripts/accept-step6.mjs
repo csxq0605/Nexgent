@@ -7,21 +7,23 @@
  *   headless    H01–H24  scripted provider through `@nexgent/sdk`: improver versions,
  *                        meta-improvement jobs, the parent / child comparison, epochs;
  *                        H18 re-runs accept-step5's H01–H19 over fresh scenario runs;
- *                        H19–H24 the step-6 rework rules (ADR 0012, 0013), not wired yet
+ *                        H19–H24 the step-6 rework rules (ADR 0012, 0013)
  *   desktop     D01–D27  D01–D23 are steps 2–5's desktop items (regression); D24–D27
  *                        the improver on the 改进 page and in settings
  *   experiment  E01–E04  scripts/experiment/step6 (「收益测量」): task families, set
- *                        isolation, holdout arms, report reproducibility; no model call
+ *                        isolation, the pilot's holdout arms (base / memory / parent),
+ *                        report reproducibility (the experiment's and the pilot's); no
+ *                        model call
  *   real        R01–R08  real Claude model, thinking on, cap 35 USD (user decision 8);
  *                        R07 and R08 (Windows) never decide the exit
  *
  * Wired: the regressions (H18, D01–D23), the improver-version items H01–H03
- * (step6-headless.mjs), the meta-improvement items H04–H17 (step6-meta.mjs),
- * D24–D27 (step6-desktop.mjs), E01 / E04 (step6-experiment.mjs) and E02 / E03
- * (a scripted rehearsal of the experiment runner, step6-rehearsal.mjs). The real
- * layer R01–R08 and the rework skeleton H19–H24 report not-implemented and the
- * script exits 2 for them — never a fake pass; the real layer checks its
- * prerequisites (key, budget) and calls no model.
+ * (step6-headless.mjs), the meta-improvement items H04–H17 (step6-meta.mjs), the
+ * rework items H19–H24 (step6-rework.mjs), D24–D27 (step6-desktop.mjs), E01 / E04
+ * (step6-experiment.mjs) and E02 / E03 (a scripted rehearsal of the pilot runner,
+ * step6-rehearsal.mjs). The real layer R01–R08 reports not-implemented and the
+ * script exits 2 for it — never a fake pass; it checks its prerequisites (key,
+ * budget) and calls no model.
  *
  * Usage:
  *   node scripts/accept-step6.mjs [--layer headless,desktop,experiment|real|all] [--out <summary.json>]
@@ -47,8 +49,9 @@ import { loadStep2Packages } from './accept-common/step2-runtime.mjs'
 import { budgetGate } from './accept-common/step2-checks.mjs'
 import { step5DesktopCtx, step5HeadlessCtx } from './accept-common/step6-regression.mjs'
 import { loadCapabilities, runStep6Headless } from './accept-common/step6-headless.mjs'
-import { loadExperiment, reportObservation, setsObservation } from './accept-common/step6-experiment.mjs'
+import { loadExperiment, pilotReportObservation, reportObservation, setsObservation } from './accept-common/step6-experiment.mjs'
 import { runStep6Meta } from './accept-common/step6-meta.mjs'
+import { runStep6Rework } from './accept-common/step6-rework.mjs'
 import { runStep6DesktopScenario } from './accept-common/step6-desktop.mjs'
 import { runRehearsal } from './accept-common/step6-rehearsal.mjs'
 import { loadStep5Packages, scriptedEnvironment } from './accept-common/step5-runtime.mjs'
@@ -133,6 +136,12 @@ async function prepareLayer(layer, harness, options) {
     } catch (error) {
       ctx.step6MetaError = errorText(error)
     }
+    // H19–H24 (ADR 0012, 0013): shared improver, instance literals, similar cases; four scripted phases.
+    try {
+      ctx.step6Rework = await runStep6Rework(harness, join(options.work, 'rework'), { log: line => log(`rework ${line}`) })
+    } catch (error) {
+      ctx.step6ReworkError = errorText(error)
+    }
     return { ok: true, ctx }
   }
   if (layer === 'desktop') {
@@ -174,6 +183,15 @@ async function prepareLayer(layer, harness, options) {
       else ctx.rehearsal = rehearsal
     } catch (error) {
       ctx.experimentErrors.rehearsal = errorText(error)
+    }
+    // E04 (pilot): the pilot's report over the rehearsal's own raw.json.
+    if (ctx.rehearsal === undefined) ctx.experimentErrors.pilotReport = `no pilot records (the rehearsal failed: ${ctx.experimentErrors.rehearsal})`
+    else {
+      try {
+        ctx.pilotReport = await pilotReportObservation(EXPERIMENT_DIR, join(ctx.rehearsal.out, 'raw.json'), join(options.work, 'pilot-report'))
+      } catch (error) {
+        ctx.experimentErrors.pilotReport = errorText(error)
+      }
     }
     return { ok: true, ctx }
   }

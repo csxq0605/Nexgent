@@ -14,21 +14,26 @@ const short = value => (typeof value === 'string' && value.length > 12 ? `${valu
 const missing = (obs, ...names) => names.filter(name => obs?.[name] === undefined)
 const stepOf = (trigger, name) => trigger?.steps?.find(step => step.name === name)
 
-/** H04: meta jobs start on the K-th counted finished job; cancelled / interrupted not counted; off → explicit only. */
+/**
+ * H04: meta jobs start on the K-th counted finished job of the user (ADR 0012: counted across the
+ * user's projects as (projectId, jobId) in the user queue); cancelled / interrupted not counted;
+ * off → explicit only; the switch lives in the user config.
+ */
 export function judgeTrigger(obs) {
   const t = obs?.trigger
   if (t === undefined) return fail(['the trigger observations are missing'])
   const problems = []
   const offJobs = [1, 2, 3].map(n => stepOf(t, `off: explicit job ${n}`))
   if (offJobs.some(step => step === undefined)) problems.push('the three explicit jobs with meta off did not all run')
-  if (offJobs.at(-1)?.pendingAfter !== 3) problems.push(`with meta off, 3 finished jobs left ${offJobs.at(-1)?.pendingAfter} counted (want 3)`)
+  if (offJobs.at(-1)?.pendingAfter !== 3) problems.push(`with meta off, 3 finished jobs left ${offJobs.at(-1)?.pendingAfter} counted in the user queue (want 3)`)
   if (t.offNoMeta !== 0) problems.push(`with meta off, ${t.offNoMeta} meta job(s) started on their own`)
   const explicit = stepOf(t, 'off: explicit meta job')
   const explicitJob = explicit?.result
   if (explicitJob?.trigger !== 'explicit' || explicitJob?.status !== 'no-proposal') problems.push(`the explicit meta job with meta off: ${explicitJob?.code ?? `${explicitJob?.trigger} / ${explicitJob?.status}`}`)
   const basis = explicit?.metaJobs?.find(job => job.id === explicitJob?.id)?.basis ?? []
   if (basis.length !== 3) problems.push(`the explicit meta job's basis has ${basis.length} jobs (want the 3 counted)`)
-  if (t.metaSetting?.enabled !== true || t.metaSetting?.everyJobs !== 3) problems.push('meta was not turned on through settings')
+  if (t.metaSetting?.enabled !== true || t.metaSetting?.everyJobs !== 3 || t.metaVia !== 'user config') problems.push(`meta was not turned on in the user config (${JSON.stringify(t.metaSetting)} via ${t.metaVia})`)
+  if (t.projectConfigMeta !== null && t.projectConfigMeta !== undefined) problems.push('the project config carries improvement.meta')
   for (const [name, status] of [['on: cancelled job', 'cancelled'], ['on: interrupted job', 'interrupted']]) {
     const step = stepOf(t, name)
     if (step?.result?.status !== status) problems.push(`${name}: ended ${step?.result?.status ?? 'unknown'}`)
@@ -37,17 +42,22 @@ export function judgeTrigger(obs) {
   const second = stepOf(t, 'on: counted job 2')
   if (second?.pendingAfter !== 2) problems.push(`after the 2nd counted job ${second?.pendingAfter} pending (want 2)`)
   if (t.afterSecond !== 1) problems.push(`after the 2nd counted job ${t.afterSecond} meta jobs exist (want only the explicit one)`)
-  const third = stepOf(t, 'on: counted job 3')
+  const third = stepOf(t, 'on: counted job 3 (second project)')
+  if (third?.result?.status === undefined) problems.push(`the second project's job did not run (${third?.result?.code ?? 'no step'})`)
   const auto = third?.metaJobs?.find(job => job.trigger === 'job-count')
-  if (auto === undefined) problems.push('no meta job started by itself after the 3rd counted job')
+  if (auto === undefined) problems.push('no meta job started by itself after the 3rd counted job (2 in the trigger project, 1 in the second)')
   else {
     if ((auto.basis ?? []).length !== 3) problems.push(`the automatic meta job's basis has ${(auto.basis ?? []).length} jobs`)
+    if (auto.project !== 'second') problems.push(`the automatic meta job lives in the ${auto.project} project, not the one whose job completed the batch`)
+    const ids = new Set((auto.batch ?? []).map(entry => entry.projectId))
+    if (!ids.has(t.projectIds?.trigger) || !ids.has(t.projectIds?.second) || ids.size !== 2) problems.push(`the batch's project ids are not the two projects' (${[...ids].map(short).join(', ')})`)
     const cancelled = stepOf(t, 'on: cancelled job')?.result?.id
     const interrupted = stepOf(t, 'on: interrupted job')?.result?.id
     if ((auto.basis ?? []).some(id => id === cancelled || id === interrupted)) problems.push('the basis includes a cancelled or interrupted job')
+    if (!(auto.basis ?? []).includes(third?.result?.id)) problems.push('the basis lacks the second project\'s job')
   }
   if (problems.length > 0) return fail(problems)
-  return pass(`meta off: 3 finished jobs counted, no meta job; explicit meta job ran on those 3 (no-proposal); meta on (K=3): a cancelled and an interrupted job left the count unchanged, after the 2nd counted job no meta job, after the 3rd a job-count meta job started on exactly those 3`)
+  return pass(`meta off (user config): 3 finished jobs counted in the user queue, no meta job; explicit meta job ran on those 3 (no-proposal); meta on in <NEXGENT_HOME>/config.json (K=3, project config has no meta field): a cancelled and an interrupted job left the count unchanged, after the 2nd counted job no meta job, the 3rd counted job finished in a second project of the same user and a job-count meta job started there on exactly those 3 (batch spans both project ids)`)
 }
 
 const READ_ONLY = /^improve_(list_jobs|read_job|read_session|read_ledger|report_meta_diagnosis|read_improver|propose_change)$/
@@ -83,8 +93,17 @@ export function judgeMetaDiagnosis(obs) {
   const none = stepOf(obs.trigger, 'off: explicit meta job')?.result
   if (none?.status !== 'no-proposal' || none?.files?.metaDiagnosis?.proposal !== 'none') problems.push(`a none meta diagnosis ended ${none?.status} (${none?.files?.metaDiagnosis?.proposal})`)
   if (none?.files?.change !== undefined) problems.push('a none meta diagnosis still produced a change')
+  // ADR 0012: the tools take a projectId and read only the batch's projects.
+  const probe = obs.rework?.shared?.probe
+  const outside = (probe?.toolResults ?? []).find(r => r.projectId === probe?.outsideProjectId)
+  const inside = (probe?.toolResults ?? []).find(r => r.projectId === probe?.insideProjectId)
+  if (probe === undefined) problems.push('the outside-the-batch read was not tried (H19 shared phase)')
+  else {
+    if (outside?.isError !== true || !String(outside?.text ?? '').includes('not one of this meta job')) problems.push(`improve_list_jobs on a project outside the batch: ${outside === undefined ? 'not seen' : outside.isError ? outside.text : 'answered'}`)
+    if (inside?.isError !== false) problems.push(`improve_list_jobs on the batch's project: ${inside === undefined ? 'not seen' : inside.text}`)
+  }
   if (problems.length > 0) return fail(problems)
-  return pass(`${sessions.length} meta-diagnose sessions offered only read tools and the report; the adopt job's meta-diagnosis.json passes the schema and cites ${(diagnosis.findings ?? []).flatMap(f => f.jobIds).length} real jobs; three refused reports → failed, nothing written; none → no-proposal, no change`)
+  return pass(`${sessions.length} meta-diagnose sessions offered only read tools and the report; the adopt job's meta-diagnosis.json passes the schema and cites ${(diagnosis.findings ?? []).flatMap(f => f.jobIds).length} real jobs; three refused reports → failed, nothing written; none → no-proposal, no change; improve_list_jobs with the projectId of a project outside the batch refused, with the batch's own answered`)
 }
 
 /** H06: one change within bounds accepted; evaluator field, out of bounds, two changes refused. */
@@ -107,8 +126,11 @@ export function judgeMetaProposal(obs) {
   if (extra?.bounds?.files?.change !== undefined) problems.push('a refused proposal wrote change.json')
   if (extra?.proposeRequests < 3) problems.push(`only ${extra?.proposeRequests} refused proposals were made`)
   if (JSON.stringify(extra?.versionsBefore) !== JSON.stringify(extra?.versionsAfter)) problems.push('a refused proposal stored an improver')
+  // ADR 0012 decision 5: a change carrying a batch task's concrete value is refused too (judged in full by H24).
+  const literal = obs.rework?.metaLiteral
+  if (literal?.refusal?.isError !== true || !String(literal?.refusal?.text ?? '').includes('instance-literal')) problems.push(`a change carrying a concrete value of the batch was not refused (${literal?.refusal?.text ?? 'not tried'})`)
   if (problems.length > 0) return fail(problems)
-  return pass(`one set-diagnosis-paragraph change accepted at the first proposal, stored as ${short(change.childVersion)} (schema ok, improvers.show returns it); an evaluator field (costApprovalRatio), an out-of-bounds repeats 9 and two changes at once were each refused, the job failed, no change.json, no improver stored`)
+  return pass(`one set-diagnosis-paragraph change accepted at the first proposal, stored as ${short(change.childVersion)} (schema ok, improvers.show returns it); an evaluator field (costApprovalRatio), an out-of-bounds repeats 9 and two changes at once were each refused, the job failed, no change.json, no improver stored; a change carrying a concrete value of the batch's tasks refused (instance-literal, H24)`)
 }
 
 /** Files of the project that changed between two states, allowing what a meta job writes. */
@@ -143,9 +165,23 @@ export function judgeIsolation(obs) {
     const armIds = new Set(armSessions.map(r => r.sessionId))
     for (const id of armIds) if (p.after.sessions?.[id] !== undefined) problems.push(`${name}: arm session ${short(id)} is in the real project's sessions`)
     if (Object.keys(p.after.capabilities ?? {}).length === 0 && Object.keys(p.before.capabilities ?? {}).length > 0) problems.push(`${name}: capabilities vanished`)
+    // ADR 0012: the arms never write the user's improver line; only the meta job's own adoption may add to it.
+    const before = p.improversBefore
+    const after = p.improvers
+    if (before?.history === undefined || after?.history === undefined) problems.push(`${name}: the user-level improver line before / after is missing`)
+    else {
+      const added = after.history.slice(before.history.length)
+      const adopted = p.meta?.status === 'adopted'
+      const child = p.meta?.files?.change?.childVersion
+      if (JSON.stringify(after.history.slice(0, before.history.length)) !== JSON.stringify(before.history)) problems.push(`${name}: earlier revisions of the user's improver line changed`)
+      if (added.length !== (adopted ? 1 : 0)) problems.push(`${name}: ${added.length} revision(s) added to the user's improver line (want ${adopted ? 'the meta job\'s adoption' : 'none'})`)
+      for (const r of added) if (r.trigger !== 'meta-job' || r.jobId !== p.meta?.id || r.version !== child) problems.push(`${name}: revision ${r.revision} of the user's line is not the meta job's adoption of its child (${r.trigger}, job ${short(r.jobId)})`)
+      const stray = (after.versions ?? []).filter(v => !(before.versions ?? []).includes(v) && v !== child)
+      if (stray.length > 0) problems.push(`${name}: improvers other than the child stored in the user's line: ${stray.map(short).join(', ')}`)
+    }
   }
   if (problems.length > 0) return fail(problems)
-  return pass(`adopt and reject: working files, .nexgent/capabilities (adoption history and candidates), deliverables, config.json and every earlier session unchanged across the meta job; the only new sessions are its meta-diagnose / meta-propose sessions; the arms' sessions are not in the real project (their ledger records carry metaJobId and comparisonArm)`)
+  return pass(`adopt and reject: working files, .nexgent/capabilities (adoption history and candidates), deliverables, config.json and every earlier session unchanged across the meta job; the only new sessions are its meta-diagnose / meta-propose sessions; the arms' sessions are not in the real project (their ledger records carry metaJobId and comparisonArm); <NEXGENT_HOME>/improvers gained only the adopt job's own adoption (reject: nothing), no arm wrote it`)
 }
 
 /** H09: the child must run a job in its copy and produce offspring to be adopted; none → not adopted. */
@@ -206,12 +242,14 @@ export function judgeAdoptedNext(obs) {
   const records = (a.facts?.ledger ?? []).filter(r => r.improvementId === next?.jobId)
   if (records.length === 0) problems.push('the next job has no ledger records')
   if (records.some(r => r.improverVersion !== child)) problems.push(`the next job's ledger records are not all on the child (${[...new Set(records.map(r => short(r.improverVersion)))].join(', ')})`)
+  const nextJob = (a.facts?.jobs ?? []).find(job => job.jobId === next?.jobId)
+  if (nextJob?.improverScope !== 'user') problems.push(`the next job's job.json improverScope ${nextJob?.improverScope ?? 'absent'} (want user)`)
   const sessions = (a.facts?.sessions ?? []).filter(s => s.jobId === next?.jobId)
   if (sessions.length === 0 || sessions.some(s => s.improverVersion !== child)) problems.push('the next job\'s session headers are not on the child')
   const onChild = (a.jobs ?? []).filter(job => job.improverVersion === child && job.arm === undefined).sort((x, y) => String(x.createdAt).localeCompare(String(y.createdAt)))
   if (onChild[0]?.id !== next?.jobId) problems.push(`the first real job on the child is ${short(onChild[0]?.id)}, not the next job`)
   if (problems.length > 0) return fail(problems)
-  return pass(`child ${short(child)} in force (meta-job revision by ${short(a.meta.id)}); the next job, from OS process ${next.pid}, pinned it; its ${records.length} ledger records and ${sessions.length} session headers say so; it is the first real job on the child (no improver firstUse field exists; judged by job order)`)
+  return pass(`child ${short(child)} in force in the user's line (meta-job revision by ${short(a.meta.id)}); the next job, from OS process ${next.pid}, pinned it; its ${records.length} ledger records and ${sessions.length} session headers say so; it is the first real job on the child (no improver firstUse field exists; judged by job order)`)
 }
 
 /** H12: rejection keeps reason, change and both arms; the parent stays in use. */
@@ -251,8 +289,15 @@ export function judgeEpoch(obs) {
   const evaluator = obs?.evaluatorKeysInImprovers ?? []
   if (evaluator.length > 0) problems.push(`a stored improver names evaluator fields: ${evaluator.join(', ')}`)
   if (e.bounds?.status !== 'failed') problems.push('a meta proposal naming an evaluator field was not refused')
+  // ADR 0013, superseded by ADR 0014 decision 3: the rules id (adr-0014), and with it the epoch.
+  const rules = e.rules
+  if (rules?.id !== 'adr-0014' || rules?.constant !== 'adr-0014') problems.push(`the evaluator rules id is ${rules?.id ?? 'unknown'} (want adr-0014)`)
+  if (!VERSION.test(rules?.epoch ?? '') || rules?.epoch === rules?.epochAdr0008) problems.push('the epoch under adr-0014 equals the one the same settings had under adr-0008')
+  if (rules?.epoch !== rules?.projectEpoch) problems.push('the project\'s epoch is not the one computed from its settings under adr-0014')
+  if (rules?.sameEpoch !== rules?.epoch) problems.push('two trials of one epoch could not be compared')
+  if (rules?.mixed !== 'improvement/epoch-mismatch') problems.push(`trials of the adr-0014 and adr-0008 epochs: ${rules?.mixed}`)
   if (problems.length > 0) return fail(problems)
-  return pass(`epoch ${short(e.epochBefore)} → ${short(e.epochAfter)} when costRatioCap was edited in config.json (settings.update does not take evaluator fields: ${e.costRatioCap.settingsPatch ?? 'accepted'}), unchanged by feedbackThreshold; both arms and the origin carried the project's epoch; the same records with the child in the new epoch → epoch-mismatch (decideImprover and the rule); a meta proposal on costApprovalRatio refused, config.json unchanged by meta jobs, no stored improver names an evaluator field`)
+  return pass(`rules id adr-0014: the epoch ${short(rules.epoch)} differs from the adr-0008 one ${short(rules.epochAdr0008)} for the same settings, and trials of the two are refused together (improvement/epoch-mismatch); epoch ${short(e.epochBefore)} → ${short(e.epochAfter)} when costRatioCap was edited in config.json (settings.update does not take evaluator fields: ${e.costRatioCap.settingsPatch ?? 'accepted'}), unchanged by feedbackThreshold; both arms and the origin carried the project's epoch; the same records with the child in the new epoch → epoch-mismatch (decideImprover and the rule); a meta proposal on costApprovalRatio refused, config.json unchanged by meta jobs, no stored improver names an evaluator field`)
 }
 
 /** H14: meta budget stops a meta job (budget-exhausted) and refuses the next; meta costs separate. */
@@ -263,6 +308,9 @@ export function judgeBudget(obs) {
   const problems = []
   if (t.budget.stopped?.status !== 'budget-exhausted') problems.push(`a meta job over the meta budget ended ${t.budget.stopped?.status ?? t.budget.stopped?.code}`)
   if (t.budget.refused?.code !== 'improvement/budget-exhausted') problems.push(`the next meta job was ${t.budget.refused?.code ?? 'started'}`)
+  if (t.budget.via !== 'user config') problems.push('the meta budget was not set in the user config')
+  if (t.budget.refusedSecond?.code !== 'improvement/budget-exhausted') problems.push(`a meta job from the second project of the same user was ${t.budget.refusedSecond?.code ?? 'started'} (the budget is the user's)`)
+  if (t.budget.status?.exhausted !== true) problems.push(`the user's meta budget status is not exhausted (${JSON.stringify(t.budget.status)})`)
   const c = a.costs
   for (const key of ['metaDiagnose', 'metaPropose', 'parentArm', 'childArm', 'source']) if (!(c[key]?.requests > 0)) problems.push(`no ${key} requests found by attribution`)
   if (c.meta?.requests !== (c.metaDiagnose?.requests ?? 0) + (c.metaPropose?.requests ?? 0) + (c.parentArm?.requests ?? 0) + (c.childArm?.requests ?? 0)) problems.push(`metaJobId requests ${c.meta?.requests} ≠ meta-diagnose + meta-propose + both arms in the real ledger`)
@@ -273,22 +321,32 @@ export function judgeBudget(obs) {
   if (arms.some(r => r.metaJobId !== a.meta?.id || r.improvementId === a.meta?.id)) problems.push('an arm record does not name the meta job as metaJobId under its own job id')
   if (records.some(r => r.improvementId === a.source?.id)) problems.push('the meta job wrote records under the source job')
   if (problems.length > 0) return fail(problems)
-  return pass(`meta budget lowered to ${t.budget.limit} tokens: the next meta job ended budget-exhausted, the one after was refused (improvement/budget-exhausted); in the adopt project sumLedgerCost by attribution: meta-diagnose ${c.metaDiagnose.requests}, meta-propose ${c.metaPropose.requests}, parent arm ${c.parentArm.requests}, child arm ${c.childArm.requests} requests (= ${c.meta.requests} by metaJobId), source job ${c.source.requests}, kept apart`)
+  return pass(`the user's meta budget (<NEXGENT_HOME>/config.json) lowered to ${t.budget.limit} tokens: the next meta job ended budget-exhausted, the one after was refused (improvement/budget-exhausted) in both projects of the user; in the adopt project sumLedgerCost by attribution: meta-diagnose ${c.metaDiagnose.requests}, meta-propose ${c.metaPropose.requests}, parent arm ${c.parentArm.requests}, child arm ${c.childArm.requests} requests (= ${c.meta.requests} by metaJobId), source job ${c.source.requests}, kept apart`)
 }
 
-/** H15: one slot for meta and ordinary jobs; a killed meta job is interrupted at the next start, not rerun. */
+/**
+ * H15 (rewritten 2026-10-14, user decision on ADR 0012 decision 3): one meta job per user, and it
+ * takes no capability job slot: a second meta job of the same user is refused while one runs, an
+ * ordinary job of the same project starts and finishes meanwhile; a killed meta job is marked
+ * interrupted at the next start and not rerun.
+ */
 export function judgeConcurrency(obs) {
   const x = obs?.trigger?.h15
   if (x === undefined) return fail(['the concurrency observations are missing'])
   const problems = []
-  if (x.busy?.code !== 'improvement/busy') problems.push(`an ordinary job during a meta job was ${x.busy?.code ?? 'started'}`)
+  if (x.slot?.jobId !== x.metaJobId) problems.push(`the user's meta slot held ${short(x.slot?.jobId)}, not the running meta job`)
+  if (x.secondMeta?.code !== 'improvement/busy') problems.push(`a second meta job of the same user (other project) was ${x.secondMeta?.code ?? 'started'}`)
+  if (x.ordinary?.id === undefined || x.ordinary?.code !== undefined) problems.push(`an ordinary job during the meta job was ${x.ordinary?.code ?? 'not started'}`)
+  else if (!FINAL.has(x.ordinary.status)) problems.push(`the ordinary job ended ${x.ordinary.status}`)
+  if (x.statusDuringOrdinary !== 'meta-diagnosing') problems.push(`the meta job was ${x.statusDuringOrdinary} while the ordinary job ran`)
   if (x.statusBeforeKill !== 'meta-diagnosing') problems.push(`the meta job was ${x.statusBeforeKill} when killed`)
   if (x.killed?.pid === undefined || x.killed?.error !== undefined) problems.push(`killing the meta job's process: ${x.killed?.error ?? 'no pid'}`)
   if (x.statusAfter !== 'interrupted') problems.push(`after the next start the meta job is ${x.statusAfter}`)
   if (x.starts !== 1) problems.push(`the meta job's process started ${x.starts} times`)
   if (x.metaDiagnoseRequests !== 1) problems.push(`its meta diagnosis was asked ${x.metaDiagnoseRequests} times (a rerun?)`)
+  if (x.slotAfter !== null && x.slotAfter !== undefined) problems.push(`the user's meta slot still held ${short(x.slotAfter?.jobId)} after recovery`)
   if (problems.length > 0) return fail(problems)
-  return pass(`an ordinary job was refused (improvement/busy) while the meta job held the slot; the meta job's process ${x.killed.pid} killed in meta-diagnosing; the next SDK start marked it interrupted; job.log shows one start and one meta-diagnose request`)
+  return pass(`while meta job ${short(x.metaJobId)} held the user's slot in meta-diagnosing: a meta job from the user's other project was refused (improvement/busy), an ordinary job of the same project started and ended ${x.ordinary.status}; the meta job's process ${x.killed.pid} killed; the next SDK start marked it interrupted and freed the slot; job.log shows one start and one meta-diagnose request`)
 }
 
 /** H16: copies removed by default; kept and registered on request; over the limit removed. */
@@ -309,10 +367,14 @@ export function judgeCopies(obs) {
   return pass(`default: no copy registered or left in the temporary directory; keepCopies: parent and child copies kept and registered in comparison.json (${kept.map(k => k.bytes).join(' / ')} bytes); a copy over the limit (prepareProjectCopy keepMaxBytes ${limit.keepMaxBytes}): too-large and removed — the limit is not settable through the SDK, so this one is the package call`)
 }
 
-/** H17: every new record and field passes its schema; the test key is nowhere in .nexgent/ or the export. */
+/**
+ * H17: every new record and field passes its schema, the user-level files included (ADR 0012:
+ * `<NEXGENT_HOME>/improvers/`, the user meta queue and config); jobs that pinned an improver say
+ * improverScope user; the test key is nowhere in .nexgent/, the home or the export.
+ */
 export function judgeLedger(obs) {
   const problems = []
-  const projects = ['trigger', 'adopt', 'reject'].map(name => [name, obs?.[name]?.records])
+  const projects = [['trigger', obs?.trigger?.records], ['trigger second', obs?.trigger?.secondRecords], ['adopt', obs?.adopt?.records], ['reject', obs?.reject?.records], ['reject meta project', obs?.reject?.metaRecords]]
   for (const [name, rec] of projects) {
     if (rec === undefined) {
       problems.push(`${name}: records missing`)
@@ -322,15 +384,18 @@ export function judgeLedger(obs) {
     if ((rec.fileIssues ?? []).length > 0) problems.push(`${name}: ${rec.fileIssues.length} improvement-file issues, first ${rec.fileIssues[0].path}: ${rec.fileIssues[0].message}`)
     if ((rec.secretHits ?? []).length > 0) problems.push(`${name}: the test key is in ${rec.secretHits.join(', ')}`)
     if (!(rec.checked?.sessions > 0 && rec.checked?.ledger > 0 && rec.checked?.files > 0)) problems.push(`${name}: nothing checked (${JSON.stringify(rec.checked)})`)
+    for (const job of rec.scopes ?? []) if (job.improverScope !== 'user') problems.push(`${name}: job ${short(job.id)} improverScope ${job.improverScope ?? 'absent'}`)
   }
   const kinds = new Set(projects.flatMap(([, rec]) => rec?.checked?.kinds ?? []))
-  for (const kind of ['metaDiagnosis', 'change', 'comparison', 'improver', 'improverRevision']) if (!kinds.has(kind)) problems.push(`no ${kind} file was checked`)
+  for (const kind of ['metaDiagnosis', 'change', 'comparison', 'improver', 'improverRevision', 'userQueue']) if (!kinds.has(kind)) problems.push(`no ${kind} file was checked`)
+  if (!projects.some(([, rec]) => rec?.checked?.userConfig === true)) problems.push('no user config was checked')
   const exp = obs?.export
   if (exp === undefined || exp.code !== 0) problems.push(`the export of the meta project failed (${exp?.code} ${exp?.stderr ?? ''})`)
   else if ((exp.secretHits ?? []).length > 0) problems.push(`the test key is in the export: ${exp.secretHits.join(', ')}`)
   if (problems.length > 0) return fail(problems)
   const total = key => projects.reduce((n, [, rec]) => n + (rec?.checked?.[key] ?? 0), 0)
-  return pass(`${total('sessions')} session records, ${total('ledger')} ledger records and ${total('files')} improvement files (${[...kinds].sort().join(', ')}) of the three meta projects pass their schemas; the test key is in none of their .nexgent/ nor in the export (${exp.files.length} files)`)
+  const scoped = projects.reduce((n, [, rec]) => n + (rec?.scopes?.length ?? 0), 0)
+  return pass(`${total('sessions')} session records, ${total('ledger')} ledger records and ${total('files')} improvement files (${[...kinds].sort().join(', ')}) of the meta projects and their homes pass their schemas, the user config too; ${scoped} pinned job.json files say improverScope user; the test key is in none of their .nexgent/, their NEXGENT_HOME nor the export (${exp.files.length} files)`)
 }
 
 // ---- H07: the origin (ADR 0009) --------------------------------------------------------------
@@ -395,6 +460,10 @@ export function judgeOrigin(obs) {
       for (const field of [...ORIGIN_FIELDS, 'epoch']) if (!sameValue(a?.[field], o[field])) problems.push(`${name}: the ${arm} arm's ${field} differs from the origin`)
     }
     if (!VERSION.test(o.tree ?? '') || !VERSION.test(o.epoch ?? '')) problems.push(`${name}: the origin has no snapshot tree or epoch id`)
+    // ADR 0012: the origin is searched across the batch's projects and names its project.
+    if (o.projectId !== p.projectIds?.origin) problems.push(`${name}: the origin names project ${short(o.projectId)}, not the feedback project ${short(p.projectIds?.origin)}`)
+    if (p.metaFrom === 'other project' && p.projectIds?.meta === p.projectIds?.origin) problems.push(`${name}: the meta job was meant to live in another project`)
+    if (p.metaFrom === 'other project' && !(p.newLedger ?? []).some(r => r.comparisonArm !== undefined)) problems.push(`${name}: the arms' ledger records are not in the origin project`)
     if (!(p.origin.logLine ?? '').includes(`${o.kind} origin`) || !(p.origin.logLine ?? '').includes(o.sourceJobId)) problems.push(`${name}: job.log does not name the origin kind and job (${p.origin.logLine ?? 'no compare line'})`)
     // One field of one arm's origin changed: never compared.
     const t = p.tampered
@@ -410,8 +479,9 @@ export function judgeOrigin(obs) {
     lines.push(`${name}: ${o.kind} origin (job ${short(o.sourceJobId)}, ${p.origin.jobs.find(job => job.id === o.sourceJobId)?.status}) on ${short(o.capabilityVersion)}`)
   }
   for (const kind of ORIGIN_KINDS) if (problems.length === 0 && !kinds.has(kind)) problems.push(`no comparison started from a ${kind} origin`)
+  if (problems.length === 0 && !['adopt', 'reject'].some(name => obs[name]?.metaFrom === 'other project')) problems.push('no comparison had its origin in another project than the meta job (ADR 0012)')
   if (problems.length > 0) return fail(problems)
-  return pass(`${lines.join('; ')} = ADR 0009 recomputed from the job files, adoption history and feedback sessions; both arms carry the origin's kind, job, tree, feedback set, version and epoch; job.log names the kind; the recorded arms with the child's sourceJobId, tree, feedbackIds, capabilityVersion or kind changed → origin-mismatch, its epoch changed → epoch-mismatch (decideImprover; the rule agrees on the kind)`)
+  return pass(`${lines.join('; ')} = ADR 0009 recomputed from the job files, adoption history and feedback sessions; the reject meta job lived in another project of the user, its origin names the feedback project and the arms' ledger went there (ADR 0012); both arms carry the origin's kind, job, tree, feedback set, version and epoch; job.log names the kind; the recorded arms with the child's sourceJobId, tree, feedbackIds, capabilityVersion or kind changed → origin-mismatch, its epoch changed → epoch-mismatch (decideImprover; the rule agrees on the kind)`)
 }
 
 /** Judges by item id (H07 included since ADR 0009 merged). */

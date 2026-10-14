@@ -31,7 +31,11 @@ beforeEach(async () => {
 afterEach(async () => {
   await server?.close()
   server = undefined
-  await fs.rm(work, { recursive: true, force: true })
+  // The evolve plugin's background `host.start()` (queue files under the
+  // project and NEXGENT_HOME, written under a lock) is not awaited by
+  // `sdk.dispose()`; a run that fails fast can return while it still writes.
+  // Retry on ENOTEMPTY / EBUSY instead of racing it.
+  await fs.rm(work, { recursive: true, force: true, maxRetries: 10 })
 })
 
 function env(s: ScriptedModelServer): Record<string, string> {

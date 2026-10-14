@@ -5,6 +5,8 @@ import type { Step6DesktopObservations } from './step6-desktop.mjs'
 
 export declare const IMPROVER_REASON_WORDS: Readonly<Record<string, string>>
 export declare const GATE_REASON_WORDS: Readonly<Record<string, string>>
+export declare const ADR0013_REASON_WORDS: Readonly<Record<string, string>>
+export declare const SHARED_NOTE: string
 export declare function judgeD24(obs: Step6DesktopObservations | undefined): JudgeResult
 export declare function judgeD25(obs: Step6DesktopObservations | undefined): JudgeResult
 export declare function judgeD26(obs: Step6DesktopObservations | undefined): JudgeResult

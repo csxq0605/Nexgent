@@ -1,21 +1,25 @@
 /**
  * Judges of step 6's E02 (holdout isolation) and E03 (three-arm holdout runs), over the
- * observations of step6-rehearsal.mjs. Pure: each takes observations and returns
+ * observations of step6-rehearsal.mjs (the pilot's scripted rehearsal; rewritten 2026-10-14 per
+ * ADR 0011 and the user's "按推薦": the arms are base / memory / parent, each with its own
+ * NEXGENT_HOME). Pure: each takes observations and returns
  * `{ status: 'passed' | 'failed', evidence }`. Missing observations fail; nothing here
  * passes on absence. The observations are a scripted rehearsal (run.mjs --scripted), and the
  * evidence says so: the real experiment's isolation and arms are R05's.
  * Counterexamples: packages/test-support/tests/accept-step6-rehearsal-judges.spec.ts.
  */
 
-const SCRIPTED = 'scripted rehearsal, not the real experiment (R05 checks that)'
+const SCRIPTED = 'scripted rehearsal of the pilot, not the real pilot (R05 checks that)'
+export const PILOT_ARMS = ['base', 'memory', 'parent']
 const pass = evidence => ({ status: 'passed', evidence: `${evidence} [${SCRIPTED}]` })
 const fail = (problems, context = '') => ({ status: 'failed', evidence: `${problems.slice(0, 12).join('; ')}${problems.length > 12 ? `; … ${problems.length - 12} more` : ''}${context === '' ? '' : ` (${context})`} [${SCRIPTED}]` })
 const list = value => (Array.isArray(value) ? value : [])
 const count = value => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
 
 /**
- * E02: no holdout message, seed or material in an experiment project's sessions, snapshots or
- * receipts (nor in any kept arm copy), and the gate picked no holdout case.
+ * E02: no holdout message, seed or material in a pilot project's sessions, snapshots or
+ * receipts, nor in any arm copy (base, memory, parent) nor any arm's own NEXGENT_HOME; and the
+ * gate picked no holdout case.
  * @param obs - `runRehearsal` observations.
  */
 export function judgeIsolation(obs) {
@@ -32,7 +36,7 @@ export function judgeIsolation(obs) {
   const families = new Set([...list(gate.families).map(f => f.family), ...roots.map(r => r.family)].filter(Boolean))
   if (families.size === 0) problems.push('no experiment family was observed')
   for (const family of families) {
-    for (const label of ['project', 'arm:base', 'arm:parent', 'arm:child']) {
+    for (const label of ['project', ...PILOT_ARMS.map(arm => `arm:${arm}`), ...PILOT_ARMS.map(arm => `home:${arm}`)]) {
       if (!roots.some(r => r.family === family && r.label === `${family} ${label}`)) problems.push(`${family}: ${label} was not scanned`)
     }
   }
@@ -41,9 +45,11 @@ export function judgeIsolation(obs) {
   for (const r of roots) {
     const name = r.label ?? String(r.root)
     if (r.exists !== true) problems.push(`${name}: root does not exist`)
-    if (count(r.scanned) === 0) problems.push(`${name}: the scan covered no files`)
-    if (count(r.directories?.sessions?.scanned) === 0) problems.push(`${name}: the scan covered no session files`)
-    if (count(r.directories?.snapshots?.scanned) === 0) problems.push(`${name}: the scan covered no snapshot files`)
+    const home = String(r.label ?? '').includes(' home:')
+    // A fresh arm home may hold nothing yet; a project or arm copy has sessions and snapshots.
+    if (!home && count(r.scanned) === 0) problems.push(`${name}: the scan covered no files`)
+    if (!home && count(r.directories?.sessions?.scanned) === 0) problems.push(`${name}: the scan covered no session files`)
+    if (!home && count(r.directories?.snapshots?.scanned) === 0) problems.push(`${name}: the scan covered no snapshot files`)
     for (const leak of list(r.leaks)) problems.push(`${name}: leak of ${leak.caseId} in ${leak.file}`)
     leaks += list(r.leaks).length
     files += count(r.scanned)
@@ -72,12 +78,13 @@ export function judgeIsolation(obs) {
 
   const context = `${roots.length} roots, ${files} files scanned, ${leaks} leaks; gate picks ${picks.join(', ')}; negative control ${control?.planted === true ? `found ${control.plantedLeaks} planted, ${control.cleanLeaks} clean` : 'not run'}`
   if (problems.length > 0) return fail(problems, context)
-  return pass(`${context}: no holdout fingerprint in any project, arm copy, session, snapshot or receipt (every root's sessions and snapshots were scanned, and the scan finds a planted fingerprint); every case the gate picked is dev, selection or guard, recomputed from the trial records`)
+  return pass(`${context}: no holdout fingerprint in any project, arm copy (base, memory, parent), arm NEXGENT_HOME, session, snapshot or receipt (every root's sessions and snapshots were scanned, and the scan finds a planted fingerprint); every case the gate picked is dev, selection or guard, recomputed from the trial records`)
 }
 
 /**
- * E03: every holdout case × arm (base, parent, child) ran at least 3 times, each run in its own
- * copy with its own new session; unknown results are counted apart and are never passes.
+ * E03: every holdout case × arm (base, memory, parent) ran at least 3 times, each run in its own
+ * copy with its own new session, each arm with its own NEXGENT_HOME; unknown results are counted
+ * apart and are never passes.
  * @param obs - `runRehearsal` observations.
  */
 export function judgeHoldoutArms(obs) {
@@ -88,7 +95,7 @@ export function judgeHoldoutArms(obs) {
   const runs = list(obs.raw?.runs)
   const records = list(obs.holdout?.families).flatMap(f => list(f.records))
   if (holdout.length === 0) return fail(['no holdout case ids were observed'])
-  if (arms.length === 0 || !['base', 'parent', 'child'].every(arm => arms.includes(arm))) return fail([`arms observed: ${JSON.stringify(arms)}, expected base, parent and child`])
+  if (arms.length !== PILOT_ARMS.length || !PILOT_ARMS.every(arm => arms.includes(arm))) return fail([`arms observed: ${JSON.stringify(arms)}, expected base, memory and parent`])
   if (runs.length === 0) return fail(['raw.json has no run'])
   if (records.length === 0) return fail(['no per-run copy or session was observed (the runner records neither; they were not found under <family>/runs either)'])
   const problems = []
@@ -133,6 +140,21 @@ export function judgeHoldoutArms(obs) {
     if (f.stopped !== undefined || f.error !== undefined) problems.push(`${f.family}: the runner stopped early (${f.error ?? JSON.stringify(f.stopped)})`)
   }
 
+  // Each family × arm ran on its own NEXGENT_HOME (raw.json arms), none shared, none the family's job home.
+  const homes = list(obs.homes)
+  const families = new Set(runs.map(run => run.family))
+  for (const family of families) {
+    for (const arm of PILOT_ARMS) {
+      const mine = homes.filter(h => h.family === family && h.arm === arm)
+      if (mine.length !== 1) problems.push(`${family} ${arm}: ${mine.length} NEXGENT_HOME entries in raw.json`)
+      else if (mine[0].exists !== true) problems.push(`${family} ${arm}: its NEXGENT_HOME ${mine[0].home} does not exist`)
+    }
+  }
+  const byHome = new Map()
+  for (const h of homes) if (typeof h.real === 'string') byHome.set(h.real, [...(byHome.get(h.real) ?? []), `${h.family} ${h.arm}`])
+  for (const [, who] of byHome) if (who.length > 1) problems.push(`NEXGENT_HOME shared by ${who.join(', ')}`)
+  for (const f of list(obs.familyHomes)) for (const h of homes) if (h.family === f.family && typeof h.real === 'string' && h.real === f.home) problems.push(`${f.family} ${h.arm}: runs on the family's job home`)
+
   // Unknown never counts as a pass.
   let passes = 0
   let fails = 0
@@ -146,5 +168,5 @@ export function judgeHoldoutArms(obs) {
 
   const context = `${holdout.length} holdout cases × ${arms.length} arms, ${runs.length} runs (${passes} passed, ${fails} failed, ${unknown} unknown, not counted as passes), ${new Set(records.map(r => r.copyDir)).size} copies, ${new Set(records.map(r => r.sessionId)).size} sessions`
   if (problems.length > 0) return fail(problems, context)
-  return pass(`${context}: every case × arm ran ${need}+ times with distinct repeat numbers, each run in its own fresh copy with its own new session whose file is in that copy`)
+  return pass(`${context}: every case × arm (base, memory, parent) ran ${need}+ times with distinct repeat numbers, each run in its own fresh copy with its own new session whose file is in that copy; each family × arm on its own NEXGENT_HOME (${homes.length} homes, none shared)`)
 }

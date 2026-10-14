@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,8 +23,8 @@ import {
   type CheckResult,
 } from '../../../scripts/accept-common/step6-checks.mjs'
 import { arm, changeFor, COST_DOWN_RATIO, PLAYBOOKS, referenceImproverDecision, type ArmLike, type OriginLike } from '../../../scripts/accept-common/step6-improver-rule.mjs'
-import { judgePinned, judgeReport, judgeSets, judgeStore, judgeV0 } from '../../../scripts/accept-common/step6-judges.mjs'
-import { loadExperiment, reportObservation, setsObservation } from '../../../scripts/accept-common/step6-experiment.mjs'
+import { judgePilotReport, judgePinned, judgeReport, judgeSets, judgeStore, judgeV0 } from '../../../scripts/accept-common/step6-judges.mjs'
+import { loadExperiment, pilotReportObservation, reportObservation, setsObservation } from '../../../scripts/accept-common/step6-experiment.mjs'
 import { loadCapabilities, storePhase } from '../../../scripts/accept-common/step6-headless.mjs'
 import * as kernel from '@nexgent/kernel'
 import { validateAcceptanceSummary, type AcceptanceSummary } from '../src/index.js'
@@ -34,8 +34,8 @@ const plan = fileURLToPath(new URL('../../../docs/plan/step-6-work-partition.md'
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
-/** Wired: every headless, desktop and experiment item but the rework skeleton H19–H24; the real layer is not. */
-const WIRED = new Set([...range('H', 1, 18), ...range('D', 1, 27), ...range('E', 1, 4)])
+/** Wired: every headless (H19–H24 since R7 round 3), desktop and experiment item; the real layer is not. */
+const WIRED = new Set([...range('H', 1, 24), ...range('D', 1, 27), ...range('E', 1, 4)])
 const experimentDir = fileURLToPath(new URL('../../../scripts/experiment/step6', import.meta.url))
 
 describe('accept-step6 checklist', () => {
@@ -76,15 +76,16 @@ describe('accept-step6 checklist', () => {
     expect(crashed).toMatchObject({ status: 'failed', evidence: expect.stringContaining('boom') })
   })
 
-  it('rework skeleton (ADR 0011–0013): H19–H24 not wired; every expectation names an existing item once, with a reason', async () => {
+  it('rework (ADR 0011–0013): H19–H24 wired; every expectation names an existing item once, with a reason', async () => {
     const rework = await readFile(fileURLToPath(new URL('../../../docs/plan/step-6-rework-partition.md', import.meta.url)), 'utf8')
     expect(rework).toContain('R7 测试与 CI')
     for (const id of REWORK_ITEMS) {
       const check = CHECKS.find(c => c.id === id)
       expect(check?.layer, id).toBe('headless')
-      expect(check?.run, id).toBeUndefined()
+      expect(typeof check?.run, id).toBe('function')
       expect(check?.title, id).toMatch(/ADR 001[23]/)
-      expect(await evaluateItem(check!, {}), id).toMatchObject({ status: 'not-implemented' })
+      expect(await evaluateItem(check!, {}), id).toMatchObject({ status: 'failed' })
+      expect(await evaluateItem(check!, { step6ReworkError: 'boom' }), id).toMatchObject({ status: 'failed', evidence: expect.stringContaining('boom') })
     }
     const step5Ids = new Set(STEP5_CHECKS.map(c => c.id))
     const step6Ids = new Set(CHECKS.map(c => c.id))
@@ -92,18 +93,24 @@ describe('accept-step6 checklist', () => {
     expect(new Set(keys).size).toBe(keys.length)
     for (const e of REWORK_EXPECTATIONS) {
       expect((e.step === 5 ? step5Ids : step6Ids).has(e.id), `${e.step}:${e.id}`).toBe(true)
-      expect(['change', 'verify', 'stale']).toContain(e.kind)
+      expect(['change', 'verify', 'rewritten']).toContain(e.kind)
       expect(['0011', '0012', '0013']).toContain(e.adr)
       expect(e.why.length, `${e.step}:${e.id}`).toBeGreaterThan(10)
       expect(REWORK_ITEMS.includes(e.id) && e.step === 6, `${e.id} is new, not a changed item`).toBe(false)
     }
-    // The items whose own wording the ADRs reverse are listed for the user, not removed.
-    expect(REWORK_EXPECTATIONS.filter(e => e.kind === 'stale').map(e => `${e.step}:${e.id}`)).toEqual(['6:H15', '6:E03', '6:R03', '6:R04', '6:R05', '6:R06', '6:R07'])
-    for (const e of REWORK_EXPECTATIONS.filter(x => x.kind === 'stale' && x.step === 6)) expect(CHECKS.some(c => c.id === e.id)).toBe(true)
+    // The items whose own wording the ADRs reversed were rewritten on the user's decision, not removed.
+    const rewritten = REWORK_EXPECTATIONS.filter(e => e.kind === 'rewritten')
+    expect(rewritten.map(e => `${e.step}:${e.id}`)).toEqual(['6:H15', '6:E03', '6:R03', '6:R04', '6:R05', '6:R06', '6:R07'])
+    for (const e of rewritten) {
+      expect(e.decided, e.id).toBe('2026-10-14 08:12 按推薦')
+      const check = CHECKS.find(c => c.id === e.id)
+      expect(check?.title, e.id).toMatch(/ADR 001[12]/)
+    }
+    expect(REWORK_EXPECTATIONS.some(e => e.kind === 'stale')).toBe(false)
   })
 
   it('real-model facts follow the user decisions: sonnet 5.5, thinking on, 35 USD for step 6', () => {
-    expect(REAL_MODEL).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', budgetUsd: 35 })
+    expect(REAL_MODEL).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', budgetUsd: 35, pilotGateUsd: 12 })
     expect(realModelKeySource({ ANTHROPIC_API_KEY: 'x' })).toBe('ANTHROPIC_API_KEY')
     expect(realModelKeySource({ NEXGENT_API_KEY: 'a', ANTHROPIC_API_KEY: 'b' })).toBe('NEXGENT_API_KEY')
     expect(realModelKeySource({ NEXGENT_API_KEY: '' })).toBeUndefined()
@@ -252,21 +259,29 @@ describe('step-6 judges (counterexamples)', () => {
   const C = 'c'.repeat(64)
   const passedRegression: CheckResult = { status: 'passed', evidence: 'step 5 H01–H19: all 19 passed' }
 
+  const homes = [{ home: 'main/home', bundles: 0, revisions: 0 }]
+
   it('H01: v0 everywhere passes; a job on another version, an improvers dir, a failed step-5 item or no jobs fail', () => {
     const project = (over: Record<string, unknown> = {}) => ({
       root: 'main/project',
-      jobs: [{ jobId: 'job-aaaaaaaa', status: 'adopted', improverVersion: 'v0', history: ['queued', 'diagnosing', 'adopted'] }, { jobId: 'job-bbbbbbbb', status: 'budget-exhausted', history: ['queued', 'budget-exhausted'] }],
-      sessions: [{ id: 'session-1', jobId: 'job-aaaaaaaa', phase: 'diagnose', improverVersion: 'v0' }],
-      ledger: [{ type: 'llm.request.end', improvementId: 'job-aaaaaaaa', improvementPhase: 'diagnose', improverVersion: 'v0' }, { type: 'llm.request.end', improvementId: 'job-aaaaaaaa', improvementPhase: 'trial' }],
+      jobs: [{ jobId: 'job-aaaaaaaa', status: 'adopted', improverVersion: 'v0', improverScope: 'user', history: ['queued', 'diagnosing', 'adopted'] }, { jobId: 'job-bbbbbbbb', status: 'budget-exhausted', history: ['queued', 'budget-exhausted'] }],
+      sessions: [{ id: 'session-1', jobId: 'job-aaaaaaaa', phase: 'diagnose', improverVersion: 'v0', improverScope: 'user' }],
+      ledger: [{ type: 'llm.request.end', improvementId: 'job-aaaaaaaa', improvementPhase: 'diagnose', improverVersion: 'v0', improverScope: 'user' }, { type: 'llm.request.end', improvementId: 'job-aaaaaaaa', improvementPhase: 'trial', improverScope: 'user' }],
       improversDir: false,
       ...over,
     })
-    expect(judgeV0({ projects: [project()] }, passedRegression)).toMatchObject({ status: 'passed' })
-    expect(judgeV0({ projects: [project({ jobs: [{ jobId: 'job-cccccccc', status: 'adopted', improverVersion: C, history: [] }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('pinned') })
-    expect(judgeV0({ projects: [project({ jobs: [{ jobId: 'job-cccccccc', status: 'adopted', history: ['diagnosing'] }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('without improverVersion') })
-    expect(judgeV0({ projects: [project({ improversDir: true })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('.nexgent/improvers/') })
-    expect(judgeV0({ projects: [project({ ledger: [{ type: 'llm.request.end', improvementId: 'x', improvementPhase: 'trial', improverVersion: C }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('not on v0') })
-    expect(judgeV0({ projects: [project()] }, { status: 'failed', evidence: 'H07 failed' })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('H07 failed') })
+    expect(judgeV0({ homes, projects: [project()] }, passedRegression)).toMatchObject({ status: 'passed' })
+    expect(judgeV0({ homes, projects: [project({ jobs: [{ jobId: 'job-cccccccc', status: 'adopted', improverVersion: C, history: [] }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('pinned') })
+    expect(judgeV0({ homes, projects: [project({ jobs: [{ jobId: 'job-cccccccc', status: 'adopted', history: ['diagnosing'] }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('without improverVersion') })
+    expect(judgeV0({ homes, projects: [project({ improversDir: true })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('.nexgent/improvers/') })
+    expect(judgeV0({ homes, projects: [project({ ledger: [{ type: 'llm.request.end', improvementId: 'x', improvementPhase: 'trial', improverVersion: C }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('not on v0') })
+    expect(judgeV0({ homes, projects: [project()] }, { status: 'failed', evidence: 'H07 failed' })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('H07 failed') })
+    // ADR 0012: the line is the user's; jobs, headers and ledger say improverScope user.
+    expect(judgeV0({ projects: [project()], homes: [] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('no Nexgent home') })
+    expect(judgeV0({ projects: [project()], homes: [{ home: 'main/home', bundles: 1, revisions: 1 }] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('main/home/improvers holds 1 improver(s) and 1 revision(s)') })
+    expect(judgeV0({ homes, projects: [project({ jobs: [{ jobId: 'job-aaaaaaaa', status: 'adopted', improverVersion: 'v0', history: [] }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('improverScope absent (want user)') })
+    expect(judgeV0({ homes, projects: [project({ sessions: [{ id: 's', jobId: 'job-aaaaaaaa', phase: 'diagnose', improverVersion: 'v0' }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('a session header says improverScope absent') })
+    expect(judgeV0({ homes, projects: [project({ ledger: [{ type: 'llm.request.end', improvementId: 'job-aaaaaaaa', improvementPhase: 'trial', improverScope: 'project' }] })] }, passedRegression)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('a ledger record says improverScope project') })
     expect(judgeV0({ projects: [] }, passedRegression)).toMatchObject({ status: 'failed' })
     expect(judgeV0(undefined, passedRegression)).toMatchObject({ status: 'failed' })
   })
@@ -289,6 +304,10 @@ describe('step-6 judges (counterexamples)', () => {
       versions.content.reordered.version = 'f'.repeat(64)
       expect(judgeStore(versions)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('reordered') })
       expect(judgeStore(undefined)).toMatchObject({ status: 'failed' })
+      // ADR 0012: the store under test is the user's line, writable.
+      expect(obs).toMatchObject({ scope: 'user', readOnly: false })
+      expect(judgeStore({ ...obs, scope: 'project', readOnly: true })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('the store is project, read-only') })
+      expect(judgeStore({ ...obs, directory: 'project/.nexgent/improvers' })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('not <NEXGENT_HOME>/improvers') })
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -299,24 +318,25 @@ describe('step-6 judges (counterexamples)', () => {
       adoptedBy: 'ImproverStore.adopt',
       child: { version: C },
       adoption: { inForce: C },
-      jobA: { id: 'a', pinnedBeforeAdoption: 'v0', statusAtAdoption: 'diagnosing', status: 'adopted', improverVersion: 'v0', history: ['queued', 'diagnosing', 'proposing', 'trialing', 'adopted'] },
-      jobB: { id: 'b', status: 'rejected', improverVersion: C, history: ['queued', 'diagnosing', 'proposing', 'trialing', 'rejected'] },
+      jobA: { id: 'a', pinnedBeforeAdoption: 'v0', statusAtAdoption: 'diagnosing', status: 'adopted', improverVersion: 'v0', improverScope: 'user', history: ['queued', 'diagnosing', 'proposing', 'trialing', 'adopted'] },
+      jobB: { id: 'b', status: 'rejected', improverVersion: C, improverScope: 'user', history: ['queued', 'diagnosing', 'proposing', 'trialing', 'rejected'] },
+      projectLine: { bundles: 0, revisions: 0 },
       facts: {
         sessions: [
-          { id: 's1', jobId: 'a', phase: 'diagnose', improverVersion: 'v0' }, { id: 's2', jobId: 'a', phase: 'propose', improverVersion: 'v0' },
-          { id: 's3', jobId: 'b', phase: 'diagnose', improverVersion: C },
+          { id: 's1', jobId: 'a', phase: 'diagnose', improverVersion: 'v0', improverScope: 'user' }, { id: 's2', jobId: 'a', phase: 'propose', improverVersion: 'v0', improverScope: 'user' },
+          { id: 's3', jobId: 'b', phase: 'diagnose', improverVersion: C, improverScope: 'user' },
         ],
         ledger: [
-          { type: 'llm.request.end', improvementId: 'a', improvementPhase: 'trial' },
-          { type: 'llm.request.end', improvementId: 'b', improvementPhase: 'diagnose', improverVersion: C },
-          { type: 'llm.request.end', improvementId: 'b', improvementPhase: 'trial', improverVersion: C },
+          { type: 'llm.request.end', improvementId: 'a', improvementPhase: 'trial', improverScope: 'user' },
+          { type: 'llm.request.end', improvementId: 'b', improvementPhase: 'diagnose', improverVersion: C, improverScope: 'user' },
+          { type: 'llm.request.end', improvementId: 'b', improvementPhase: 'trial', improverVersion: C, improverScope: 'user' },
         ],
-      },
+      } as { sessions: Record<string, unknown>[]; ledger: Record<string, unknown>[] },
       diagnoseTexts: [{ playbook: 'improve', hasChildParagraph: false }, { playbook: 'notes', hasChildParagraph: true }],
     })
     expect(judgePinned(good())).toMatchObject({ status: 'passed' })
     const unstamped = good()
-    unstamped.facts.ledger.push({ type: 'improvement.end', improvementId: 'b' } as never)
+    unstamped.facts.ledger.push({ type: 'improvement.end', improvementId: 'b', improverScope: 'user' })
     expect(judgePinned(unstamped)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('(absent → v0)') })
     const late = good()
     late.jobA.statusAtAdoption = 'adopted'
@@ -331,6 +351,19 @@ describe('step-6 judges (counterexamples)', () => {
     bOnV0.jobB.improverVersion = 'v0'
     expect(judgePinned(bOnV0)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('not the child') })
     expect(judgePinned(undefined)).toMatchObject({ status: 'failed' })
+    // ADR 0012: both jobs say improverScope user; the adoption stays out of the project's line.
+    const unscoped = good()
+    delete (unscoped.jobB as Record<string, unknown>).improverScope
+    expect(judgePinned(unscoped)).toMatchObject({ status: 'failed', evidence: expect.stringContaining("job B's job.json improverScope absent (want user)") })
+    const projectLine = good()
+    projectLine.projectLine = { bundles: 1, revisions: 1 }
+    expect(judgePinned(projectLine)).toMatchObject({ status: 'failed', evidence: expect.stringContaining("reached the project's .nexgent/improvers") })
+    const header = good()
+    delete header.facts.sessions[2]!.improverScope
+    expect(judgePinned(header)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('a session header says improverScope absent') })
+    const record = good()
+    record.facts.ledger[0]!.improverScope = 'project'
+    expect(judgePinned(record)).toMatchObject({ status: 'failed', evidence: expect.stringContaining('a ledger record says improverScope project') })
   })
 
   it('E01 / E04 over the measurement scripts pass; a differing generation, a missing run or a different second build fail', async () => {
@@ -360,6 +393,84 @@ describe('step-6 judges (counterexamples)', () => {
       await rm(dir, { recursive: true, force: true })
     }
   }, 120_000)
+})
+
+/** Pilot raw records in the shape pilot/run.mjs `pilotRawRecords` writes (one family, one holdout case). */
+function pilotRaw(): Record<string, any> {
+  const runs = []
+  for (const arm of ['base', 'memory', 'parent']) {
+    for (const repeat of [1, 2, 3]) {
+      const rate = arm === 'base' ? 0.5 : repeat === 3 ? 0.75 : 1
+      runs.push({
+        runId: `${arm}#docs/holdout/a#${repeat}`, family: 'docs', caseId: 'docs/holdout/a', arm, repeat, rate, pass: rate === 1, unclear: arm === 'parent' && repeat === 2 ? 1 : 0,
+        points: [{ id: 'c', type: 'convention', by: 'check', pass: rate === 1 }], costUsd: 0.01, componentsUsed: [], capabilityVersions: ['baseline'], followUp: arm === 'base' && repeat === 1, turn: 'completed',
+      })
+    }
+  }
+  return {
+    pilotId: 'step6-pilot', planSha256: 'h'.repeat(64), backend: 'scripted', model: 'm',
+    reviewers: { external: { model: 'e', thinking: 'on' }, inLoop: { model: 'i', thinking: 'on' } },
+    epochs: { docs: 'e'.repeat(64) },
+    arms: { docs: { base: { home: 'homes/docs-base', capabilityVersion: 'baseline', improverVersion: 'v0' }, memory: { home: 'homes/docs-memory', capabilityVersion: 'm'.repeat(64), improverVersion: 'v0' }, parent: { home: 'homes/docs-parent', capabilityVersion: 'p'.repeat(64), improverVersion: 'v0' } } },
+    memory: { docs: { version: 'm'.repeat(64), digest: 'd'.repeat(64), entries: 3, kept: 3, dropped: 0, bytes: 100 } },
+    jobs: { docs: [{ caseId: 'docs/dev/x', status: 'adopted', improverVersion: 'v0', history: ['queued', 'adopted'] }] },
+    dev: { docs: [{ caseId: 'docs/dev/x', primary: 'c', feedback: [{ rating: 2, comment: 'c' }] }] },
+    isolation: { docs: { leaks: 0, scanned: 9, skipped: 0 } },
+    judges: { pass: true, samples: 77, failed: [], uncovered: [] },
+    referencePairs: ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'].map((id, i) => ({ id, caseId: 'docs/dev/x', flaw: 'f', ab: i === 5 ? 'B' : 'A', ba: 'B' })),
+    armPairs: [{ family: 'docs', caseId: 'docs/holdout/a', first: 'parent', second: 'memory', ab: 'tie', ba: 'tie' }],
+    agreement: [{ runId: 'x', pointId: 'r', external: true, inLoop: false }],
+    components: { docs: {
+      base: { components: [], literal: { components: 0, withLiterals: 0, rate: null } },
+      memory: { components: [{ kind: 'context-policy', name: 'project-notes', class: 'convention-or-fact' }], literal: { components: 1, withLiterals: 0, rate: 0 } },
+      parent: { components: [{ kind: 'skill', name: 's', class: 'way-of-working' }, { kind: 'skill', name: 't', class: 'convention-or-fact' }], literal: { components: 2, withLiterals: 1, rate: 0.5 } },
+    } },
+    runs,
+    costs: [{ kind: 'holdout', family: 'docs', ref: 'r', usd: 0.1 }, { kind: 'improvement', family: 'docs', ref: 'j', usd: null }],
+    notes: ['n'],
+  }
+}
+
+describe('E04 pilot report (ADR 0011)', () => {
+  it('a reproducible, traceable pilot report passes; a mismatched column, a second build, an unchanged rebuild or a missing change fail', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'nexgent-accept6-pilot-'))
+    try {
+      const records = join(dir, 'raw.json')
+      await writeFile(records, JSON.stringify(pilotRaw()))
+      const obs = await pilotReportObservation(experimentDir, records, join(dir, 'work')) as Record<string, any>
+      const passed = judgePilotReport(obs) as unknown as { status: string; evidence: string }
+      expect(passed.status, passed.evidence).toBe('passed')
+      expect(passed.evidence).toContain('6 reference pairs with 5 right') // ab B / ba B is not "first"
+      const tampered = (mutate: (raw: Record<string, any>) => void) => {
+        const copy = structuredClone(obs)
+        mutate(copy.raw)
+        return judgePilotReport(copy)
+      }
+      expect(judgePilotReport(undefined)).toMatchObject({ status: 'failed' })
+      expect(judgePilotReport({ ...obs, second: `${obs.first}\n` })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('two builds') })
+      expect(judgePilotReport({ ...obs, cli: { code: 0, sameAsInProcess: false } })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('wrote a different report') })
+      // The records say something the report does not: each added column is checked against them.
+      expect(tampered(raw => { raw.runs[1].followUp = true })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('docs base: the per-arm row') })
+      expect(tampered(raw => { raw.runs[8].unclear = 3 })).toMatchObject({ status: 'failed', evidence: expect.stringContaining("can't tell") })
+      expect(tampered(raw => { raw.runs[4].rate = 0.25 })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('docs/holdout/a memory: the repeat-spread row') })
+      expect(tampered(raw => { raw.components.docs.parent.components[1].class = 'way-of-working' })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('docs parent: the component row') })
+      expect(tampered(raw => { raw.components.docs.parent.literal.withLiterals = 2 })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('docs parent: the component row') })
+      expect(tampered(raw => { raw.components.docs.parent.literal.components = 1 })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('the literal rate counts 1 components of 2') })
+      expect(tampered(raw => { raw.judges.samples = 78 })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('criterion 1') })
+      expect(tampered(raw => { raw.judges.pass = false })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('criterion 1') })
+      expect(tampered(raw => { raw.referencePairs[5].ab = 'A' })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('criterion 2') })
+      expect(tampered(raw => { raw.armPairs[0].ba = 'A' })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('criterion 3') })
+      expect(tampered(raw => { raw.costs[0].usd = 0.2 })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('the total') })
+      expect(tampered(raw => { raw.runs = raw.runs.filter((r: { arm: string }) => r.arm !== 'memory') })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('no memory run') })
+      // A change to the records that leaves the report as it was, or a change not tried.
+      expect(judgePilotReport({ ...obs, changes: { ...obs.changes, followUp: { what: 'x', report: obs.first } } })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('changing followUp (x) left the pilot report unchanged') })
+      expect(judgePilotReport({ ...obs, changes: { ...obs.changes, componentClass: { what: undefined } } })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('the componentClass change could not be made') })
+      const { rate: _rate, ...withoutRate } = obs.changes
+      expect(judgePilotReport({ ...obs, changes: withoutRate })).toMatchObject({ status: 'failed', evidence: expect.stringContaining('the rate change was not tried') })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
 })
 
 describe('scripts/accept-step6.mjs (requires `pnpm build`)', () => {

@@ -542,11 +542,18 @@
     "diagnosis": 1,
     "candidate": 1,
     "trialReceipt": 18,
-    "decision": 1
+    "decision": 1,
+    "userQueue": 1
    },
    "sessions": 7,
    "ledger": 264,
-   "secretHits": []
+   "secretHits": [],
+   "scopes": [
+    {
+     "id": "a32f9242-0916-4d63-a91e-b9f94c85dba2",
+     "improverScope": "user"
+    }
+   ]
   },
   "job": {
    "jobId": "a32f9242-0916-4d63-a91e-b9f94c85dba2",
