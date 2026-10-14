@@ -36,6 +36,7 @@ export {
 } from './receipts.js'
 export { candidateRunAttribution, jobRunAttribution, readImprovementJob, selectionAnchor, type FeedbackCheckInput, type FeedbackCheckResult, type JobRunAttribution, type SelectionAnchor } from './feedback.js'
 export { assertSameEpoch, evaluatorEpoch, projectEpoch, trialEpoch } from './epoch.js'
+export { contentSimilarity, FUNCTION_WORDS, isSimilarTask, SIMILAR_CASE_MIN } from './similar.js'
 export { candidateComponentTexts, candidateInstanceLiterals, jobLiteralSources, LITERAL_TEXT_LIMIT, projectTaskMessages } from './literals.js'
 export { recoverInterruptedTrials } from './recover.js'
 export { prepareReplayProject, writeSnapshotTree, type ReplayProject, type ReplayProjectInput } from './replay-project.js'

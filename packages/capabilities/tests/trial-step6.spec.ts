@@ -127,13 +127,13 @@ describe('the gate in a project copy (nested copies)', { timeout: 60_000 }, () =
     const job = await improvementJob(layout, [{ kind: 'feedback', feedbackId: task.feedback.id, sessionId: task.sessionId, deliverableId: task.feedback.deliverableId, version: 1, rating: 2, at: new Date().toISOString() }])
     const metaJobId = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d'
     const path = join(layout.dataDir, 'improvements', job.id, 'job.json')
-    await writeFile(path, JSON.stringify({ ...job, improverVersion: 'v0', arm: { metaJobId, arm: 'child' } }))
+    await writeFile(path, JSON.stringify({ ...job, improverVersion: 'v0', improverScope: 'user', arm: { metaJobId, arm: 'child' } }))
     const candidate = await proposeCandidate(layout, task, 'function-module', job.id)
     const runner = arms({ output: 'good' }, { output: 'bad' })
     const reviewer = { async review() { throw new Error('not expected') }, async checkFeedback() { return { status: 'pass' as const, reason: 'ok', usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 2, reasoningTokens: 0 }, requestCount: 1 } } }
     await runGate({ layout, candidateId: candidate.id, runner, reviewer, tempRoot: await tempDir() })
     expect(runner.requests.length).toBeGreaterThan(0)
-    for (const request of runner.requests) expect(request.improvement).toEqual({ jobId: job.id, improverVersion: 'v0', metaJobId, comparisonArm: 'child' })
+    for (const request of runner.requests) expect(request.improvement).toEqual({ jobId: job.id, improverVersion: 'v0', improverScope: 'user', metaJobId, comparisonArm: 'child' })
   })
 
   it('keeps a copy on request when it is small enough, and deletes a larger one', async () => {

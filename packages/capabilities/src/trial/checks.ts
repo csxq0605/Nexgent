@@ -5,10 +5,20 @@
  * xlsx) and `test-command` (exit code 0 in the project root). The gate runs
  * them itself after the run's process has exited, so a run cannot report its
  * own result.
+ *
+ * ADR 0014: the `file-exists` and `parses` specs name the files the original
+ * run happened to present. In a replay the path is the original run's
+ * choice, not the task's requirement: when the replay run presented its
+ * deliverables ({@link RunChecksOptions.delivered}) and a recorded path is
+ * missing, the check takes the next file the run presented that has the same
+ * extension and is not at a recorded path (one file per recorded path, in
+ * presentation order). A run that renamed or moved its output therefore
+ * passes as long as it delivered a file of that kind; a run that presented
+ * nothing of that kind still fails.
  */
 import { spawn } from 'node:child_process'
 import { readFile, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, posix } from 'node:path'
 import type { TaskCheck, TaskCheckSpec } from '@nexgent/kernel'
 import { csvProblem, TEST_COMMAND_TIMEOUT_MS } from '@nexgent/tasking'
 
@@ -20,6 +30,31 @@ export interface RunChecksOptions {
   readonly signal?: AbortSignal
   /** Deadline of one test command (default `TEST_COMMAND_TIMEOUT_MS`). */
   readonly timeoutMs?: number
+  /** ADR 0014: the project-relative files the run presented as deliverables, in presentation order (absent: recorded paths only). */
+  readonly delivered?: readonly string[]
+}
+
+async function isFile(root: string, path: string): Promise<boolean> {
+  return (await stat(absolute(root, path)).catch(() => undefined))?.isFile() === true
+}
+
+/** ADR 0014: where each recorded deliverable path is checked (itself, or the presented file standing in for it). */
+async function deliveredPaths(root: string, specs: readonly TaskCheckSpec[], delivered: readonly string[] | undefined): Promise<Map<string, string>> {
+  const recorded = [...new Set(specs.flatMap(spec => (spec.name === 'test-command' ? [] : [spec.path])))]
+  const where = new Map<string, string>()
+  if (delivered === undefined) return where
+  const taken = new Set(recorded)
+  for (const path of recorded) {
+    if (await isFile(root, path)) continue
+    const extension = posix.extname(path).toLowerCase()
+    for (const candidate of delivered) {
+      if (taken.has(candidate) || posix.extname(candidate).toLowerCase() !== extension || !(await isFile(root, candidate))) continue
+      taken.add(candidate)
+      where.set(path, candidate)
+      break
+    }
+  }
+  return where
 }
 
 function absolute(root: string, path: string): string {
@@ -90,17 +125,20 @@ function runCommand(root: string, spec: Extract<TaskCheckSpec, { name: 'test-com
 /** Run every spec in `root`, in order; one result per spec with `target` = the spec id. */
 export async function runCheckSpecs(root: string, specs: readonly TaskCheckSpec[], options: RunChecksOptions = {}): Promise<TaskCheck[]> {
   const results: TaskCheck[] = []
+  const standIn = await deliveredPaths(root, specs, options.delivered)
+  const moved = { detail: 'delivered under another path' }
   for (const spec of specs) {
     let result: Omit<TaskCheck, 'target'>
     switch (spec.name) {
       case 'file-exists': {
-        const info = await stat(absolute(root, spec.path)).catch(() => undefined)
-        result = info?.isFile() === true ? { name: spec.name, passed: true } : { name: spec.name, passed: false, detail: 'missing' }
+        const path = standIn.get(spec.path) ?? spec.path
+        result = await isFile(root, path) ? { name: spec.name, passed: true, ...(path === spec.path ? {} : moved) } : { name: spec.name, passed: false, detail: 'missing' }
         break
       }
       case 'parses': {
-        const problem = await parseProblem(absolute(root, spec.path), spec.format)
-        result = problem === undefined ? { name: spec.name, passed: true } : { name: spec.name, passed: false, detail: problem }
+        const path = standIn.get(spec.path) ?? spec.path
+        const problem = await parseProblem(absolute(root, path), spec.format)
+        result = problem === undefined ? { name: spec.name, passed: true, ...(path === spec.path ? {} : moved) } : { name: spec.name, passed: false, detail: problem }
         break
       }
       case 'test-command':

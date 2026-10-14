@@ -646,7 +646,9 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 5. ADR 0013，只对改进作业的候选（`origin: "improvement"`，`TrialTally.similar` 存在）：上面得到采用或 `await-approval` 时，同类题上候选的确定性检查通过率低于基线则拒绝（`similar-regression`）；选择集里没有同类题（`similar: "none"`）则不自动采用，改为 `await-approval`（`no-similar-cases`，界面写明“只在原题上验证过”）。同类题上的 `unknown` 运行已在第 1 条拒绝。已被前四条拒绝的结论不变。用户任务自己提出的候选没有 `similar`，不受这一条影响。
 6. 含 `plugin` 的候选，采用结论变为 `await-approval`，理由不变。
 
-**同类题**是选择集里除反馈原题以外的用例（门控按相似度挑出，提议会话没有见过）。`TrialTally.similar` 是这些用例的确定性检查每臂计数（选择集计数的子集，不含反馈检查），或 `"none"`。
+**同类题**是选择集里除反馈原题以外、首条消息与反馈原题首条消息的内容词 Jaccard 重合度 ≥ 0.25（`SIMILAR_CASE_MIN`）的用例（ADR 0014；提议会话没有见过）。内容词按选择集的分词（小写字母数字串，中日韩一字一词），去掉固定的功能词表（`FUNCTION_WORDS`：冠词、介词、代词、助动词，中日文助词与量词）和纯数字。选择集仍补满 `selectionCases` 个用例，只是重合度不够的不算同类题。`TrialTally.similar` 是这些用例的确定性检查每臂计数（选择集计数的子集，不含反馈检查），或 `"none"`。
+
+**回放中的成果路径**（ADR 0014）。门控在回放副本里重跑记录的检查。`file-exists` / `parses` 记录的路径在副本里不存在时，改查这次回放运行 `present` 的成果文件（各成果最新版本，按交付顺序）中下一个扩展名相同、不在任何记录路径上、也没替过别的路径的文件；同一路径的两条检查用同一个替代文件，通过时 `detail` 为 `delivered under another path`。没有交付同类文件时照旧失败。`test-command` 不变。
 
 **具体数值检查**（ADR 0013 决定 2，纯函数 `findInstanceLiterals(componentTexts, sources, projectMessages)`，契约 `instance-literals.ts`）。词元是带小数点的数（`\d+.\d+`）、三位及以上的整数、日期 `yyyy-mm-dd` 与年月 `yyyy-mm`；前面紧挨字母、数字、`_` 或 `.` 的不算，后面紧挨数字、`_`、`.数字` 或 `-数字` 的不算（所以 `sha256`、`v1.2.3`、`x86_64`、`col_100` 不产生词元，`2384.13USD` 与 `2026-10-05T08:00` 的日期产生）；千位分隔逗号先去掉（`2,384.13` 读作 `2384.13`）；按写出的字面比较（`2384.1` 与 `2384.10` 不同）。组件文本里的词元同时出现在某个原题来源里、而在项目历史里出现它的用户消息所属的不同根任务少于 2 个（`PROJECT_CONSTANT_MIN_TASKS`）时命中；两个及以上任务都出现的是项目常量。名字、列名、文件命名规则不检查。
 

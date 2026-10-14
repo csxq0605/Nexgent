@@ -15,7 +15,7 @@
  */
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { IMPROVEMENT_FILES, IMPROVEMENTS_DIR, type CandidateRecord, type ComparisonArm, type FeedbackEntry, type ImproverVersion, type ImprovementJob, type LLMUsage, type WorkspaceLayout } from '@nexgent/kernel'
+import { IMPROVEMENT_FILES, IMPROVEMENTS_DIR, type CandidateRecord, type ComparisonArm, type FeedbackEntry, type ImproverScope, type ImproverVersion, type ImprovementJob, type LLMUsage, type WorkspaceLayout } from '@nexgent/kernel'
 import type { ReplayCase, ReplayMessage } from './replay-set.js'
 
 /** Where the gate anchors a candidate's selection set. */
@@ -30,21 +30,24 @@ export type SelectionAnchor =
 /**
  * How the replay runs and reviews of a job's candidate are attributed
  * (ledger `improvementId` / `improvementPhase: trial`; step 6: the job's
- * pinned improver and, for a comparison arm's job, `metaJobId` and
+ * pinned improver and its scope and, for a comparison arm's job, `metaJobId` and
  * `comparisonArm`).
  */
 export interface JobRunAttribution {
   readonly jobId: string
   readonly improverVersion?: ImproverVersion
+  /** ADR 0012: where the improver version lives (`user` from the rework on; absent: project, older jobs). */
+  readonly improverScope?: ImproverScope
   readonly metaJobId?: string
   readonly comparisonArm?: ComparisonArm
 }
 
 /** The attribution of a job's runs (pure). */
-export function jobRunAttribution(job: Pick<ImprovementJob, 'id' | 'improverVersion' | 'arm'>): JobRunAttribution {
+export function jobRunAttribution(job: Pick<ImprovementJob, 'id' | 'improverVersion' | 'improverScope' | 'arm'>): JobRunAttribution {
   return {
     jobId: job.id,
     ...(job.improverVersion === undefined ? {} : { improverVersion: job.improverVersion }),
+    ...(job.improverScope === undefined ? {} : { improverScope: job.improverScope }),
     ...(job.arm === undefined ? {} : { metaJobId: job.arm.metaJobId, comparisonArm: job.arm.arm }),
   }
 }

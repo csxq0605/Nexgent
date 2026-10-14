@@ -347,6 +347,7 @@ describe('the capability gate through the SDK', () => {
         phases: {},
         // Step 6: a comparison arm's job pinned on a child improver; the trial records name both.
         improverVersion: 'a'.repeat(64),
+        improverScope: 'user',
         arm: { metaJobId: '7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d', arm: 'child' },
       }
       await mkdir(nodePath.join(layout.dataDir, IMPROVEMENTS_DIR, job.id), { recursive: true })
@@ -386,6 +387,10 @@ describe('the capability gate through the SDK', () => {
       expect(requests.length).toBeGreaterThan(12)
       expect(requests.every(record => record.improvementId === job.id && record.improvementPhase === 'trial')).toBe(true)
       expect(requests.every(record => record.improverVersion === job.improverVersion && record.metaJobId === job.arm!.metaJobId && record.comparisonArm === 'child')).toBe(true)
+      // ADR 0012: every record of the trial (requests, task outcomes, tool calls) names the improver's scope.
+      const trialRecords = ledger.filter(record => 'trialId' in record && record.trialId === trial!.trialId)
+      expect(trialRecords.some(record => record.type === 'task.outcome')).toBe(true)
+      expect(trialRecords.every(record => record.improverScope === 'user')).toBe(true)
       // Replays and reviews both: the replay sessions' records carry an arm, the reviewer's none.
       expect(new Set(requests.map(record => record.arm))).toEqual(new Set(['candidate', 'baseline', undefined]))
       // Display-only USD: the price table over the ledger's own records (unknown when a usage field is).

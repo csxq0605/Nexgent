@@ -52,6 +52,7 @@
 | [`adr/0011-measurement-pilot.md`](adr/0011-measurement-pilot.md) | 已接受：步骤 6 测量先在文档写作、文件整理两类新任务上做小试点，加“只记笔记”`memory` 对照臂，开跑前冻结题目、评分与统计（取代步骤 6 分工表已定决定 6、7 的族与臂部分）；用户 2026-10-14 按推荐 |
 | [`adr/0012-shared-improver.md`](adr/0012-shared-improver.md) | 已接受：改进器改为用户级共享，能力组件仍在项目；元改进按用户计数与计预算，项目可退出（取代 0008 第 1、3 条的项目级口径）；用户 2026-10-14 按推荐 |
 | [`adr/0013-gate-generalization-epoch.md`](adr/0013-gate-generalization-epoch.md) | 已接受：门控新纪元 `adr-0013`，改进作业候选在同类题上不得变差、没有同类题等批准，含原题具体数值的组件退回；用户 2026-10-14 按推荐 |
+| [`adr/0014-gate-deliverable-paths-similar-cases.md`](adr/0014-gate-deliverable-paths-similar-cases.md) | 已接受：门控新纪元 `adr-0014`，回放检查按运行自己交付的同类文件找成果（照反馈改名不再判退步），同类题按去掉功能词与纯数字后的内容词重合 ≥ 0.25 判定；用户 2026-10-14 选 B |
 | [`reference-map.md`](reference-map.md) | 步骤 0 建立，随各步更新 |
 | [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
 | [`plan/step-2-work-partition.md`](plan/step-2-work-partition.md) | 步骤 2 分工与验收设计，用户 2026-10-11 已定 |

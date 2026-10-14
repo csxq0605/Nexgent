@@ -80,7 +80,7 @@ async function writeChecks(layout: WorkspaceLayout, taskId: string, sessionId: s
  * turn 2 is a feedback turn (`feedback` record, then its user message), turn
  * 3 is a user message after it. Only turn 1 may be replayed.
  */
-export async function feedbackTask(layout: WorkspaceLayout, text: string, comment = 'the summary misses the south region'): Promise<{ taskId: string; sessionId: string; feedback: FeedbackEntry }> {
+export async function feedbackTask(layout: WorkspaceLayout, text: string, comment = 'the summary misses the south region', checkSpecs: TaskCheckSpec[] = specs()): Promise<{ taskId: string; sessionId: string; feedback: FeedbackEntry }> {
   const sessionId = randomUUID()
   const taskId = randomUUID()
   const feedback: FeedbackEntry = { id: randomUUID(), deliverableId: randomUUID(), version: 1, rating: 2, comment }
@@ -97,7 +97,7 @@ export async function feedbackTask(layout: WorkspaceLayout, text: string, commen
     }
     if (turn === 3) await store.append(sessionId, { type: 'user.message', turn, content: 'now also add a chart', source: 'user' })
     await store.append(sessionId, { type: 'turn.end', turn, reason: { kind: 'completed' } })
-    await writeChecks(layout, taskId, sessionId, turn, specs())
+    await writeChecks(layout, taskId, sessionId, turn, checkSpecs)
   }
   await store.release(lock)
   return { taskId, sessionId, feedback }
