@@ -1,0 +1,2595 @@
+{
+  "formatVersion": 1,
+  "pilotId": "step6-pilot-2",
+  "decision": "docs/adr/0011-measurement-pilot.md",
+  "partition": "docs/plan/step-6-rework-partition.md",
+  "families": [
+    "docs",
+    "files"
+  ],
+  "setSizes": {
+    "dev": 2,
+    "selection": 2,
+    "guard": 1,
+    "holdout": 3
+  },
+  "pointTypes": {
+    "wrong-result": "结果错误",
+    "missing": "漏做",
+    "format": "格式不对",
+    "unverified": "没核对就交",
+    "convention": "项目约定",
+    "taste": "个人口味"
+  },
+  "conventions": {
+    "docs": "文末列出引用的资料文件名（只在反馈里出现）",
+    "files": "输出的文件名和目录名不含空格（只在反馈里出现）"
+  },
+  "caseFolder": "每题在项目里有自己的目录（以种子命名）：起始文件与输出都在其中，任务消息开头说明；同一类的题共用一个项目，这样后一题不会碰到前一题留下的输入与输出",
+  "cases": [
+    {
+      "id": "docs/dev/minutes-d-201",
+      "family": "docs",
+      "set": "dev",
+      "variant": "minutes",
+      "seed": "d-201",
+      "folder": "d-201",
+      "message": "这次用到的文件都在项目的 d-201/ 目录下，下面说的路径都相对于这个目录。请根据 materials/ 下的 3 份周会记录，写一份 2026 年 9 月的月度会议纪要，保存为 output/9月会议纪要.md。",
+      "outputs": [
+        "d-201/output/9月会议纪要.md"
+      ],
+      "rubric": [
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "每项决定的负责人和截止日期都写进了纪要",
+          "feedback": "有的决定没写负责人或截止日期"
+        },
+        {
+          "id": "u",
+          "type": "unverified",
+          "by": "check",
+          "text": "纪要里的预算数字与周会记录一致",
+          "feedback": "纪要里的预算数字和记录对不上，像是没核对"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "review",
+          "text": "纪要内容都能在周会记录里找到依据，没有与记录矛盾或记录里没有的内容",
+          "feedback": "纪要里有记录里没有的内容"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "review",
+          "text": "按会议日期分节，每节写清议题和决定",
+          "feedback": "纪要的结构有点乱，看不出每次会议定了什么"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "文末列出引用的资料文件名",
+          "feedback": "文末没有列出用到的资料文件"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "篇幅控制在 800 字以内",
+          "feedback": "这次我想要短一点，800 字以内就行"
+        }
+      ],
+      "files": {
+        "d-201/materials/周会记录-2026-09-03.txt": {
+          "text": "周会记录\n日期：2026-09-03\n参会：王磊、赵敏、陈晨、郑凯\n\n议题1：年度预算\n讨论：大家认为年度预算需要尽快推进，预算按 200,000 元控制。有人担心人手不够。\n决定：由赵敏在 2026-09-29 前提交预算明细。\n\n议题2：供应商更换\n讨论：大家认为供应商更换需要尽快推进，预算按 260,000 元控制。市场部希望再看一轮数据。\n决定：由陈晨在 2026-10-18 前整理数据并汇报。\n"
+        },
+        "d-201/materials/周会记录-2026-09-10.txt": {
+          "text": "周会记录\n日期：2026-09-10\n参会：赵敏、陈晨、郑凯、何芳\n\n议题1：招聘计划\n讨论：大家认为招聘计划需要尽快推进，预算按 810,000 元控制。市场部希望再看一轮数据。\n决定：由陈晨在 2026-09-19 前确定上线时间。\n\n议题2：仓库搬迁\n讨论：大家认为仓库搬迁需要尽快推进，预算按 370,000 元控制。财务提醒注意回款周期。\n决定：由郑凯在 2026-09-22 前整理数据并汇报。\n"
+        },
+        "d-201/materials/周会记录-2026-09-17.txt": {
+          "text": "周会记录\n日期：2026-09-17\n参会：陈晨、郑凯、何芳、刘洋\n\n议题1：客服排班\n讨论：大家认为客服排班需要尽快推进，预算按 380,000 元控制。市场部希望再看一轮数据。\n决定：由郑凯在 2026-09-18 前完成供应商比价。\n\n议题2：新版官网上线\n讨论：大家认为新版官网上线需要尽快推进，预算按 620,000 元控制。市场部希望再看一轮数据。\n决定：由何芳在 2026-09-23 前整理数据并汇报。\n"
+        }
+      },
+      "fingerprints": [
+        "周会记录-2026-09-03.txt",
+        "周会记录-2026-09-10.txt",
+        "周会记录-2026-09-17.txt",
+        "周会记录\n日期：2026-09-03",
+        "周会记录\n日期：2026-09-10",
+        "周会记录\n日期：2026-09-17"
+      ],
+      "hidden": {
+        "decisions": [
+          {
+            "date": "2026-09-03",
+            "topic": "年度预算",
+            "text": "提交预算明细",
+            "owner": "赵敏",
+            "due": "2026-09-29"
+          },
+          {
+            "date": "2026-09-03",
+            "topic": "供应商更换",
+            "text": "整理数据并汇报",
+            "owner": "陈晨",
+            "due": "2026-10-18"
+          },
+          {
+            "date": "2026-09-10",
+            "topic": "招聘计划",
+            "text": "确定上线时间",
+            "owner": "陈晨",
+            "due": "2026-09-19"
+          },
+          {
+            "date": "2026-09-10",
+            "topic": "仓库搬迁",
+            "text": "整理数据并汇报",
+            "owner": "郑凯",
+            "due": "2026-09-22"
+          },
+          {
+            "date": "2026-09-17",
+            "topic": "客服排班",
+            "text": "完成供应商比价",
+            "owner": "郑凯",
+            "due": "2026-09-18"
+          },
+          {
+            "date": "2026-09-17",
+            "topic": "新版官网上线",
+            "text": "整理数据并汇报",
+            "owner": "何芳",
+            "due": "2026-09-23"
+          }
+        ],
+        "numbers": [
+          {
+            "value": 200000,
+            "unit": "元",
+            "label": "年度预算预算"
+          },
+          {
+            "value": 260000,
+            "unit": "元",
+            "label": "供应商更换预算"
+          },
+          {
+            "value": 810000,
+            "unit": "元",
+            "label": "招聘计划预算"
+          },
+          {
+            "value": 370000,
+            "unit": "元",
+            "label": "仓库搬迁预算"
+          },
+          {
+            "value": 380000,
+            "unit": "元",
+            "label": "客服排班预算"
+          },
+          {
+            "value": 620000,
+            "unit": "元",
+            "label": "新版官网上线预算"
+          }
+        ],
+        "dates": [
+          "2026-09-03",
+          "2026-09-10",
+          "2026-09-17"
+        ]
+      }
+    },
+    {
+      "id": "docs/dev/revision-d-202",
+      "family": "docs",
+      "set": "dev",
+      "variant": "revision",
+      "seed": "d-202",
+      "folder": "d-202",
+      "message": "这次用到的文件都在项目的 d-202/ 目录下，下面说的路径都相对于这个目录。请根据 materials/ 下的产品说明和 20 条用户意见，写一页改版建议，保存为 output/改版建议.md：说清楚用户意见最集中的问题，并给出改版建议。",
+      "outputs": [
+        "d-202/output/改版建议.md"
+      ],
+      "rubric": [
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "意见最多的 3 类问题都写到了",
+          "feedback": "用户意见最多的几个问题没写全"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "最集中的问题给出了意见条数，且与资料一致",
+          "feedback": "意见条数没写，或者数得不对"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "review",
+          "text": "每条建议都写了理由，并对应到具体的用户意见",
+          "feedback": "建议没有理由，也看不出对应哪些意见"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "文末列出引用的资料文件名",
+          "feedback": "文末没有列出用到的资料文件"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "建议用编号列表",
+          "feedback": "这次建议我想用编号列表，方便开会时逐条过"
+        }
+      ],
+      "files": {
+        "d-202/materials/产品说明.md": {
+          "text": "# 知识库 App产品说明\n\n知识库 App面向 20–200 人的团队，核心功能：记录、搜索、分享、通知、数据导出。当前版本 3.2，每两周发布一次。\n"
+        },
+        "d-202/materials/用户意见.csv": {
+          "text": "编号,用户,意见\n1,用户717,导出只能一条条来\n2,用户542,通知太多太吵\n3,用户227,导出只能一条条来，经常遇到\n4,用户398,夜间模式能不能跟随系统\n5,用户176,搜索结果经常不相关\n6,用户290,数据没法导出成表格，希望尽快改\n7,用户939,重要通知反而被淹没\n8,用户338,切换页面时总在加载，经常遇到\n9,用户295,首页加载很慢，影响很大\n10,用户225,图片加载要等好几秒\n11,用户570,搜不到刚发的内容\n12,用户947,首页加载很慢\n13,用户573,数据没法导出成表格\n14,用户729,首页加载很慢，经常遇到\n15,用户610,通知不能按类型关闭\n16,用户109,晚上用太刺眼，希望有夜间模式\n17,用户904,图片加载要等好几秒，影响很大\n18,用户290,切换页面时总在加载\n19,用户803,通知太多太吵，经常遇到\n20,用户402,希望能批量导出\n"
+        }
+      },
+      "fingerprints": [
+        "产品说明.md",
+        "用户意见.csv",
+        "# 知识库 App产品说明\n",
+        "编号,用户,意见\n1,用户717,导出只能一条条来"
+      ],
+      "hidden": {
+        "themes": [
+          {
+            "key": "加载",
+            "count": 7
+          },
+          {
+            "key": "导出",
+            "count": 5
+          },
+          {
+            "key": "通知",
+            "count": 4
+          },
+          {
+            "key": "搜索",
+            "count": 2
+          },
+          {
+            "key": "夜间模式",
+            "count": 2
+          }
+        ]
+      }
+    },
+    {
+      "id": "docs/selection/sales-summary-d-203",
+      "family": "docs",
+      "set": "selection",
+      "variant": "sales-summary",
+      "seed": "d-203",
+      "folder": "d-203",
+      "message": "这次用到的文件都在项目的 d-203/ 目录下，下面说的路径都相对于这个目录。请根据 materials/ 下 4 份销售周报写 8 月的销售月度小结，保存为 output/8月销售小结.md。",
+      "outputs": [
+        "d-203/output/8月销售小结.md"
+      ],
+      "rubric": [
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "月度总销售额正确",
+          "feedback": "月度总额算得不对"
+        },
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "每个区域的月度销售额都给出了",
+          "feedback": "有的区域没写月度销售额"
+        },
+        {
+          "id": "u",
+          "type": "unverified",
+          "by": "check",
+          "text": "指出的销售额最高的一周是对的",
+          "feedback": "说的最高那一周不对，像是没核对"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "review",
+          "text": "有基于数据的结论，不只是罗列数字",
+          "feedback": "只是把数字抄了一遍，没有结论"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "文末列出引用的资料文件名",
+          "feedback": "文末没有列出用到的资料文件"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "金额用万元表示",
+          "feedback": "这次金额我想看万元，读起来方便"
+        }
+      ],
+      "files": {
+        "d-203/materials/销售周报-8月第1周.txt": {
+          "text": "8 月第 1 周销售周报\n\n华东：16,400 元\n华南：12,500 元\n华北：23,100 元\n西南：17,700 元\n\n备注：西南促销活动效果明显。\n"
+        },
+        "d-203/materials/销售周报-8月第2周.txt": {
+          "text": "8 月第 2 周销售周报\n\n华东：31,500 元\n华南：28,400 元\n华北：28,900 元\n西南：27,000 元\n\n备注：华北受天气影响客流下降。\n"
+        },
+        "d-203/materials/销售周报-8月第3周.txt": {
+          "text": "8 月第 3 周销售周报\n\n华东：17,500 元\n华南：13,200 元\n华北：28,600 元\n西南：13,000 元\n\n备注：华北受天气影响客流下降。\n"
+        },
+        "d-203/materials/销售周报-8月第4周.txt": {
+          "text": "8 月第 4 周销售周报\n\n华东：31,800 元\n华南：23,600 元\n华北：14,900 元\n西南：10,400 元\n\n备注：华南新开两家门店。\n"
+        }
+      },
+      "fingerprints": [
+        "销售周报-8月第1周.txt",
+        "销售周报-8月第2周.txt",
+        "销售周报-8月第3周.txt",
+        "销售周报-8月第4周.txt",
+        "8 月第 1 周销售周报\n",
+        "8 月第 2 周销售周报\n",
+        "8 月第 3 周销售周报\n",
+        "8 月第 4 周销售周报\n"
+      ],
+      "hidden": {
+        "regions": [
+          "华东",
+          "华南",
+          "华北",
+          "西南"
+        ],
+        "totals": [
+          97200,
+          77700,
+          95500,
+          68100
+        ],
+        "total": 338500,
+        "top": 2,
+        "weekTotals": [
+          69700,
+          115800,
+          72300,
+          80700
+        ]
+      }
+    },
+    {
+      "id": "docs/selection/compare-memo-d-204",
+      "family": "docs",
+      "set": "selection",
+      "variant": "compare-memo",
+      "seed": "d-204",
+      "folder": "d-204",
+      "message": "这次用到的文件都在项目的 d-204/ 目录下，下面说的路径都相对于这个目录。请根据 materials/ 下的两份方案写一份对比备忘，保存为 output/方案对比备忘.md。预算不超过 49 万元，请给出推荐意见。",
+      "outputs": [
+        "d-204/output/方案对比备忘.md"
+      ],
+      "rubric": [
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "两个方案的费用和工期都写出来了",
+          "feedback": "费用或工期没写全"
+        },
+        {
+          "id": "u",
+          "type": "unverified",
+          "by": "check",
+          "text": "两个方案的主要风险都提到了",
+          "feedback": "漏了方案的风险，像是没对照原文"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "review",
+          "text": "推荐意见符合预算约束",
+          "feedback": "推荐的方案超预算了"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "review",
+          "text": "逐项对比（表格或分项），看得出差别",
+          "feedback": "没有逐项对比，看不出两个方案差在哪"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "文末列出引用的资料文件名",
+          "feedback": "文末没有列出用到的资料文件"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "开头先写结论",
+          "feedback": "这次我想开头先看结论"
+        }
+      ],
+      "files": {
+        "d-204/materials/客服系统替换-方案A.md": {
+          "text": "# 客服系统替换方案A\n\n费用：45 万元\n工期：14 周\n主要风险：依赖外部供应商\n"
+        },
+        "d-204/materials/客服系统替换-方案B.md": {
+          "text": "# 客服系统替换方案B\n\n费用：63 万元\n工期：8 周\n主要风险：许可证费用逐年上涨\n"
+        }
+      },
+      "fingerprints": [
+        "客服系统替换-方案A.md",
+        "客服系统替换-方案B.md",
+        "# 客服系统替换方案A\n",
+        "# 客服系统替换方案B\n"
+      ],
+      "hidden": {
+        "a": {
+          "label": "方案A",
+          "cost": 45,
+          "weeks": 14,
+          "risk": "依赖外部供应商"
+        },
+        "b": {
+          "label": "方案B",
+          "cost": 63,
+          "weeks": 8,
+          "risk": "许可证费用逐年上涨"
+        },
+        "budget": 49
+      }
+    },
+    {
+      "id": "docs/guard/translate-guide-d-205",
+      "family": "docs",
+      "set": "guard",
+      "variant": "translate-guide",
+      "seed": "d-205",
+      "folder": "d-205",
+      "message": "这次用到的文件都在项目的 d-205/ 目录下，下面说的路径都相对于这个目录。请把 materials/ 下的英文操作说明改写成中文的分步操作指南，保存为 output/备份操作指南.md。",
+      "outputs": [
+        "d-205/output/备份操作指南.md"
+      ],
+      "rubric": [
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "8 个步骤都在，并按原顺序编号",
+          "feedback": "步骤少了或者顺序变了"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "check",
+          "text": "命令和参数原样保留",
+          "feedback": "命令被改动了，照着敲会出错"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "review",
+          "text": "每一步的意思与原文一致，注意事项（如校验失败不要继续）没有丢",
+          "feedback": "有的步骤意思翻错了，或者注意事项丢了"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "文末列出引用的资料文件名",
+          "feedback": "文末没有列出用到的资料文件"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "不用“您”",
+          "feedback": "这次不用写“您”，直接写操作就行"
+        }
+      ],
+      "files": {
+        "d-205/materials/vaultctl-backup-guide.md": {
+          "text": "# Backup procedure (vaultctl)\n\n1. Stop the application service with `vaultctl service stop`.\n2. Check that free disk space is at least 48 GB.\n3. Run a full backup: `vaultctl backup --full --target /mnt/backup`.\n4. Verify the backup with `vaultctl verify --latest`. Do not continue if verification fails.\n5. Copy the backup to the offsite bucket using `vaultctl sync --offsite`.\n6. Record the backup ID in the operations log.\n7. Start the service again with `vaultctl service start`.\n8. Notify the on-call channel that maintenance has finished.\n"
+        }
+      },
+      "fingerprints": [
+        "vaultctl-backup-guide.md",
+        "# Backup procedure (vaultctl)\n"
+      ],
+      "hidden": {
+        "steps": [
+          {
+            "en": "Stop the application service with `vaultctl service stop`.",
+            "cmd": "vaultctl service stop"
+          },
+          {
+            "en": "Check that free disk space is at least 48 GB.",
+            "cmd": null
+          },
+          {
+            "en": "Run a full backup: `vaultctl backup --full --target /mnt/backup`.",
+            "cmd": "vaultctl backup --full --target /mnt/backup"
+          },
+          {
+            "en": "Verify the backup with `vaultctl verify --latest`. Do not continue if verification fails.",
+            "cmd": "vaultctl verify --latest"
+          },
+          {
+            "en": "Copy the backup to the offsite bucket using `vaultctl sync --offsite`.",
+            "cmd": "vaultctl sync --offsite"
+          },
+          {
+            "en": "Record the backup ID in the operations log.",
+            "cmd": null
+          },
+          {
+            "en": "Start the service again with `vaultctl service start`.",
+            "cmd": "vaultctl service start"
+          },
+          {
+            "en": "Notify the on-call channel that maintenance has finished.",
+            "cmd": null
+          }
+        ],
+        "tool": "vaultctl"
+      }
+    },
+    {
+      "id": "docs/holdout/incident-review-d-206",
+      "family": "docs",
+      "set": "holdout",
+      "variant": "incident-review",
+      "seed": "d-206",
+      "folder": "d-206",
+      "message": "这次用到的文件都在项目的 d-206/ 目录下，下面说的路径都相对于这个目录。请根据 materials/ 下的事故记录写一份事故复盘，保存为 output/事故复盘.md。",
+      "outputs": [
+        "d-206/output/事故复盘.md"
+      ],
+      "rubric": [
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "时间线的 4 个关键时间点都在",
+          "feedback": "时间线不全"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "影响时长和受影响用户数正确",
+          "feedback": "影响时长或用户数写错了"
+        },
+        {
+          "id": "u",
+          "type": "unverified",
+          "by": "review",
+          "text": "根因与改进措施对得上，每项措施有负责人和期限",
+          "feedback": "改进措施和根因对不上，或者没写负责人"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "review",
+          "text": "包含时间线、影响、根因、改进措施四部分",
+          "feedback": "复盘缺了某一部分"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "文末列出引用的资料文件名",
+          "feedback": "文末没有列出用到的资料文件"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "改进措施用表格列出",
+          "feedback": "这次改进措施我想用表格列"
+        }
+      ],
+      "files": {
+        "d-206/materials/事故记录-INC-3188.txt": {
+          "text": "事故编号：INC-3188\n影响服务：支付网关\n\n时间线：\n14:03 配置变更上线，数据库连接池上限被误改\n14:13 监控告警，值班人员开始排查\n14:28 回滚配置，错误率开始下降\n14:44 服务完全恢复\n\n影响：约 8,349 名用户下单失败，持续 41 分钟。\n根因：配置变更未经评审，连接池上限从 200 改成了 20。\n改进措施：\n- 为配置变更增加灰度发布（林悦，10 月底前）\n- 给连接池耗尽增加告警（孙浩，10 月 15 日前）\n- 补充回滚手册并演练一次（陈晨，11 月 10 日前）\n"
+        }
+      },
+      "fingerprints": [
+        "INC-3188",
+        "事故记录-INC-3188.txt",
+        "事故编号：INC-3188\n影响服务：支付网关"
+      ],
+      "hidden": {
+        "times": [
+          "14:03",
+          "14:13",
+          "14:28",
+          "14:44"
+        ],
+        "users": 8349,
+        "minutes": 41,
+        "actions": [
+          "为配置变更增加灰度发布（林悦，10 月底前）",
+          "给连接池耗尽增加告警（孙浩，10 月 15 日前）",
+          "补充回滚手册并演练一次（陈晨，11 月 10 日前）"
+        ],
+        "id": "INC-3188"
+      }
+    },
+    {
+      "id": "docs/holdout/interview-summary-d-207",
+      "family": "docs",
+      "set": "holdout",
+      "variant": "interview-summary",
+      "seed": "d-207",
+      "folder": "d-207",
+      "message": "这次用到的文件都在项目的 d-207/ 目录下，下面说的路径都相对于这个目录。请根据 materials/ 下 5 份用户访谈稿写一份需求摘要，保存为 output/需求摘要.md。",
+      "outputs": [
+        "d-207/output/需求摘要.md"
+      ],
+      "rubric": [
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "被 3 位以上受访者提到的需求都写进去了",
+          "feedback": "大家都提到的需求漏了"
+        },
+        {
+          "id": "u",
+          "type": "unverified",
+          "by": "check",
+          "text": "每条共性需求都注明了提到它的受访者",
+          "feedback": "没写清楚哪些人提了这些需求，看不出是否核对过"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "review",
+          "text": "没有把只有一个人提到的需求说成多数人的共识",
+          "feedback": "把个别人的想法写成了大家的需求"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "review",
+          "text": "按提到的人数或重要性排序，结构清楚",
+          "feedback": "需求没有主次，看不出先做哪个"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "文末列出引用的资料文件名",
+          "feedback": "文末没有列出用到的资料文件"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "用 P0 / P1 标优先级",
+          "feedback": "这次我想用 P0、P1 标一下优先级"
+        }
+      ],
+      "files": {
+        "d-207/materials/访谈-王磊.txt": {
+          "text": "访谈对象：王磊（财务）\n\n问：日常使用中最大的不便是什么？\n答：手机上只能看不能改。另外，外包同事不该看到全部内容。另外，开车时想用语音记录。\n"
+        },
+        "d-207/materials/访谈-陈晨.txt": {
+          "text": "访谈对象：陈晨（财务）\n\n问：日常使用中最大的不便是什么？\n答：手机上只能看不能改。另外，外包同事不该看到全部内容。另外，表单字段想自己加。\n"
+        },
+        "d-207/materials/访谈-马骏.txt": {
+          "text": "访谈对象：马骏（销售）\n\n问：日常使用中最大的不便是什么？\n答：手机上只能看不能改。另外，希望和日历同步。\n"
+        },
+        "d-207/materials/访谈-吴静.txt": {
+          "text": "访谈对象：吴静（运营）\n\n问：日常使用中最大的不便是什么？\n答：导出的文件想加水印。\n"
+        },
+        "d-207/materials/访谈-孙浩.txt": {
+          "text": "访谈对象：孙浩（运营）\n\n问：日常使用中最大的不便是什么？\n答：外包同事不该看到全部内容。另外，想要深色主题。\n"
+        }
+      },
+      "fingerprints": [
+        "访谈对象：王磊（",
+        "访谈对象：陈晨（",
+        "访谈对象：马骏（",
+        "访谈对象：吴静（",
+        "访谈对象：孙浩（",
+        "访谈-王磊.txt",
+        "访谈-陈晨.txt",
+        "访谈-马骏.txt",
+        "访谈-吴静.txt",
+        "访谈-孙浩.txt",
+        "访谈对象：王磊（财务）\n",
+        "访谈对象：陈晨（财务）\n",
+        "访谈对象：马骏（销售）\n",
+        "访谈对象：吴静（运营）\n",
+        "访谈对象：孙浩（运营）\n"
+      ],
+      "hidden": {
+        "common": [
+          {
+            "key": "移动端编辑",
+            "people": [
+              "王磊",
+              "陈晨",
+              "马骏"
+            ]
+          },
+          {
+            "key": "权限分级",
+            "people": [
+              "王磊",
+              "陈晨",
+              "孙浩"
+            ]
+          }
+        ],
+        "singles": [
+          "语音输入",
+          "自定义字段",
+          "日历同步",
+          "水印",
+          "深色主题"
+        ]
+      }
+    },
+    {
+      "id": "docs/holdout/decisions-todos-d-208",
+      "family": "docs",
+      "set": "holdout",
+      "variant": "decisions-todos",
+      "seed": "d-208",
+      "folder": "d-208",
+      "message": "这次用到的文件都在项目的 d-208/ 目录下，下面说的路径都相对于这个目录。请根据 materials/ 下的会议记录整理一份决议与待办清单，保存为 output/决议与待办.md。",
+      "outputs": [
+        "d-208/output/决议与待办.md"
+      ],
+      "rubric": [
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "每个待办的负责人和截止日期都在",
+          "feedback": "有的待办没写负责人或截止日期"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "check",
+          "text": "待办逐条列出，每条同一行写明负责人和截止日期",
+          "feedback": "待办没有逐条列清楚负责人和截止日期"
+        },
+        {
+          "id": "u",
+          "type": "unverified",
+          "by": "check",
+          "text": "每个待办对应的负责人正确",
+          "feedback": "有的待办负责人写错了人"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "review",
+          "text": "没有把只讨论、未决定的事项写成决议",
+          "feedback": "把还没定的事写成了决议"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "文末列出引用的资料文件名",
+          "feedback": "文末没有列出用到的资料文件"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "日期写成“X月X日”",
+          "feedback": "这次日期我想写成“10月12日”这样"
+        }
+      ],
+      "files": {
+        "d-208/materials/会议记录-华南仓启用推进会.txt": {
+          "text": "华南仓启用推进会 会议记录\n日期：2026-10-03\n参会：李娜、何芳、吴静、林悦、周婷\n\n讨论：\n- 要不要请代言人：意见不一，下次再议。\n- 是否更换物流商：意见不一，下次再议。\n\n决议：\n- 华南仓启用定在 11 月第二周\n- 先在两个城市试点\n- 外包团队续约一年\n\n待办：\n- 确认场地合同：李娜 负责，2026-10-24 前完成\n- 整理竞品价格表：何芳 负责，2026-10-25 前完成\n- 更新培训材料：吴静 负责，2026-11-11 前完成\n- 约见三家供应商：林悦 负责，2026-11-20 前完成\n- 准备试点数据看板：周婷 负责，2026-11-26 前完成\n"
+        }
+      },
+      "fingerprints": [
+        "华南仓启用推进会 会议记录",
+        "会议记录-华南仓启用推进会.txt",
+        "华南仓启用推进会 会议记录\n日期：2026-10-03"
+      ],
+      "hidden": {
+        "todos": [
+          {
+            "what": "确认场地合同",
+            "owner": "李娜",
+            "due": "2026-10-24"
+          },
+          {
+            "what": "整理竞品价格表",
+            "owner": "何芳",
+            "due": "2026-10-25"
+          },
+          {
+            "what": "更新培训材料",
+            "owner": "吴静",
+            "due": "2026-11-11"
+          },
+          {
+            "what": "约见三家供应商",
+            "owner": "林悦",
+            "due": "2026-11-20"
+          },
+          {
+            "what": "准备试点数据看板",
+            "owner": "周婷",
+            "due": "2026-11-26"
+          }
+        ],
+        "decisions": [
+          "华南仓启用定在 11 月第二周",
+          "先在两个城市试点",
+          "外包团队续约一年"
+        ],
+        "discussed": [
+          "要不要请代言人",
+          "是否更换物流商"
+        ]
+      }
+    },
+    {
+      "id": "files/dev/merge-csv-f-101",
+      "family": "files",
+      "set": "dev",
+      "variant": "merge-csv",
+      "seed": "f-101",
+      "folder": "f-101",
+      "message": "这次用到的文件都在项目的 f-101/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下的 4 个 csv 文件合并成一个 xlsx 文件，放在 output/ 目录下：每个 csv 一张工作表，工作表名用 csv 的文件名（不含 .csv），保留表头，数量和金额要存成数字。",
+      "outputs": [
+        "f-101/output"
+      ],
+      "rubric": [
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "4 个 csv 各有一张工作表，表名与 csv 文件名对应",
+          "feedback": "有的 csv 没有对应的工作表，或者表名对不上"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "每张工作表的内容与对应 csv 逐格一致",
+          "feedback": "工作表里的数据和原来的 csv 对不上"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "check",
+          "text": "数量和金额存成数字，不是文本",
+          "feedback": "数量和金额是文本格式，没法直接求和"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "输出的文件名和目录名里不含空格",
+          "feedback": "输出的文件名里带了空格"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "工作表按名称字母顺序排列",
+          "feedback": "这次我更想要工作表按名称字母顺序排"
+        }
+      ],
+      "files": {
+        "f-101/data/lake store.csv": {
+          "text": "日期,商品,数量,金额\n2026-08-14,便利贴,6,153.18\n2026-08-16,计算器,16,97.44\n2026-08-16,回形针,4,9.96\n2026-08-05,白板笔,14,485.8\n2026-08-05,白板笔,7,109.13\n2026-08-03,便利贴,4,39.52\n2026-08-20,订书机,11,235.73\n"
+        },
+        "f-101/data/north store.csv": {
+          "text": "日期,商品,数量,金额\n2026-08-10,签字笔,18,442.98\n2026-08-11,文件夹,17,444.38\n2026-08-04,订书机,3,90.39\n2026-08-23,笔记本,12,500.16\n2026-08-17,笔记本,6,105.54\n"
+        },
+        "f-101/data/harbor store.csv": {
+          "text": "日期,商品,数量,金额\n2026-08-20,计算器,12,201.72\n2026-08-17,签字笔,14,277.9\n2026-08-09,便利贴,14,186.9\n2026-08-02,计算器,17,523.77\n2026-08-03,笔记本,20,357\n"
+        },
+        "f-101/data/river store.csv": {
+          "text": "日期,商品,数量,金额\n2026-08-25,笔记本,13,359.45\n2026-08-26,回形针,6,216.06\n2026-08-08,文件夹,6,272.46\n2026-08-04,计算器,13,267.28\n2026-08-25,订书机,17,424.49\n"
+        }
+      },
+      "fingerprints": [
+        "lake store.csv",
+        "north store.csv",
+        "harbor store.csv",
+        "river store.csv"
+      ],
+      "hidden": {
+        "tables": {
+          "lake store": [
+            [
+              "日期",
+              "商品",
+              "数量",
+              "金额"
+            ],
+            [
+              "2026-08-14",
+              "便利贴",
+              6,
+              153.18
+            ],
+            [
+              "2026-08-16",
+              "计算器",
+              16,
+              97.44
+            ],
+            [
+              "2026-08-16",
+              "回形针",
+              4,
+              9.96
+            ],
+            [
+              "2026-08-05",
+              "白板笔",
+              14,
+              485.8
+            ],
+            [
+              "2026-08-05",
+              "白板笔",
+              7,
+              109.13
+            ],
+            [
+              "2026-08-03",
+              "便利贴",
+              4,
+              39.52
+            ],
+            [
+              "2026-08-20",
+              "订书机",
+              11,
+              235.73
+            ]
+          ],
+          "north store": [
+            [
+              "日期",
+              "商品",
+              "数量",
+              "金额"
+            ],
+            [
+              "2026-08-10",
+              "签字笔",
+              18,
+              442.98
+            ],
+            [
+              "2026-08-11",
+              "文件夹",
+              17,
+              444.38
+            ],
+            [
+              "2026-08-04",
+              "订书机",
+              3,
+              90.39
+            ],
+            [
+              "2026-08-23",
+              "笔记本",
+              12,
+              500.16
+            ],
+            [
+              "2026-08-17",
+              "笔记本",
+              6,
+              105.54
+            ]
+          ],
+          "harbor store": [
+            [
+              "日期",
+              "商品",
+              "数量",
+              "金额"
+            ],
+            [
+              "2026-08-20",
+              "计算器",
+              12,
+              201.72
+            ],
+            [
+              "2026-08-17",
+              "签字笔",
+              14,
+              277.9
+            ],
+            [
+              "2026-08-09",
+              "便利贴",
+              14,
+              186.9
+            ],
+            [
+              "2026-08-02",
+              "计算器",
+              17,
+              523.77
+            ],
+            [
+              "2026-08-03",
+              "笔记本",
+              20,
+              357
+            ]
+          ],
+          "river store": [
+            [
+              "日期",
+              "商品",
+              "数量",
+              "金额"
+            ],
+            [
+              "2026-08-25",
+              "笔记本",
+              13,
+              359.45
+            ],
+            [
+              "2026-08-26",
+              "回形针",
+              6,
+              216.06
+            ],
+            [
+              "2026-08-08",
+              "文件夹",
+              6,
+              272.46
+            ],
+            [
+              "2026-08-04",
+              "计算器",
+              13,
+              267.28
+            ],
+            [
+              "2026-08-25",
+              "订书机",
+              17,
+              424.49
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "files/dev/rename-archive-f-102",
+      "family": "files",
+      "set": "dev",
+      "variant": "rename-archive",
+      "seed": "f-102",
+      "folder": "f-102",
+      "message": "这次用到的文件都在项目的 f-102/ 目录下，下面说的路径都相对于这个目录。inbox/ 下有 20 个文件，每个文件开头写着日期、来源和标题。请把它们按“日期_来源_标题.原扩展名”重命名（日期写成 YYYYMMDD），并按年、月归档到 archive/YYYY/MM/ 目录下，inbox/ 里不要留下这些文件。",
+      "outputs": [
+        "f-102/archive",
+        "f-102/inbox"
+      ],
+      "rubric": [
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "20 个文件都归档了，inbox/ 里不剩",
+          "feedback": "有文件没归档，还留在 inbox/ 里"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "每个文件名是“日期(YYYYMMDD)_来源_标题.原扩展名”",
+          "feedback": "有的文件名不符合“日期_来源_标题”的规则"
+        },
+        {
+          "id": "d",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "每个文件放在它日期对应的 archive/YYYY/MM/ 下",
+          "feedback": "有的文件放错了年月目录"
+        },
+        {
+          "id": "u",
+          "type": "unverified",
+          "by": "check",
+          "text": "文件内容没有被改动",
+          "feedback": "有的文件内容被改了，和原件不一样"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "输出的文件名和目录名里不含空格",
+          "feedback": "输出的文件名里带了空格"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "archive/ 下另放一份新旧文件名对照表",
+          "feedback": "这次我还想要一份新旧文件名的对照表，放在 archive/ 下"
+        }
+      ],
+      "files": {
+        "f-102/inbox/扫描件 (1).md": {
+          "text": "日期：2025-11-07\n来源：研发部\n标题：合同续签\n\n研发部关于“合同续签”的记录，第 1 份，共 3 页。\n"
+        },
+        "f-102/inbox/扫描件 (2).txt": {
+          "text": "日期：2026-01-15\n来源：财务部\n标题：设备采购\n\n财务部关于“设备采购”的记录，第 2 份，共 9 页。\n"
+        },
+        "f-102/inbox/新建文本文档 (3).md": {
+          "text": "日期：2025-11-17\n来源：市场部\n标题：渠道分析\n\n市场部关于“渠道分析”的记录，第 3 份，共 3 页。\n"
+        },
+        "f-102/inbox/扫描件 (4).txt": {
+          "text": "日期：2026-01-20\n来源：销售部\n标题：季度目标复盘\n\n销售部关于“季度目标复盘”的记录，第 4 份，共 2 页。\n"
+        },
+        "f-102/inbox/扫描件 (5).txt": {
+          "text": "日期：2025-11-28\n来源：市场部\n标题：招聘进度\n\n市场部关于“招聘进度”的记录，第 5 份，共 5 页。\n"
+        },
+        "f-102/inbox/扫描件 (6).md": {
+          "text": "日期：2026-03-05\n来源：研发部\n标题：培训安排\n\n研发部关于“培训安排”的记录，第 6 份，共 2 页。\n"
+        },
+        "f-102/inbox/note (7).txt": {
+          "text": "日期：2025-12-10\n来源：财务部\n标题：Weekly Sync\n\n财务部关于“Weekly Sync”的记录，第 7 份，共 6 页。\n"
+        },
+        "f-102/inbox/新建文本文档 (8).txt": {
+          "text": "日期：2026-01-06\n来源：财务部\n标题：库存盘点\n\n财务部关于“库存盘点”的记录，第 8 份，共 6 页。\n"
+        },
+        "f-102/inbox/note (9).txt": {
+          "text": "日期：2026-02-25\n来源：市场部\n标题：价格调整\n\n市场部关于“价格调整”的记录，第 9 份，共 5 页。\n"
+        },
+        "f-102/inbox/新建文本文档 (10).txt": {
+          "text": "日期：2026-01-08\n来源：销售部\n标题：客户回访\n\n销售部关于“客户回访”的记录，第 10 份，共 3 页。\n"
+        },
+        "f-102/inbox/会议记录 (11).txt": {
+          "text": "日期：2025-12-08\n来源：销售部\n标题：Risk Notes\n\n销售部关于“Risk Notes”的记录，第 11 份，共 9 页。\n"
+        },
+        "f-102/inbox/新建文本文档 (12).md": {
+          "text": "日期：2025-12-01\n来源：销售部\n标题：展会筹备\n\n销售部关于“展会筹备”的记录，第 12 份，共 5 页。\n"
+        },
+        "f-102/inbox/note (13).txt": {
+          "text": "日期：2026-03-03\n来源：销售部\n标题：流程优化\n\n销售部关于“流程优化”的记录，第 13 份，共 9 页。\n"
+        },
+        "f-102/inbox/会议记录 (14).txt": {
+          "text": "日期：2026-03-09\n来源：销售部\n标题：年度规划\n\n销售部关于“年度规划”的记录，第 14 份，共 4 页。\n"
+        },
+        "f-102/inbox/新建文本文档 (15).md": {
+          "text": "日期：2026-01-11\n来源：人事部\n标题：报销制度\n\n人事部关于“报销制度”的记录，第 15 份，共 8 页。\n"
+        },
+        "f-102/inbox/扫描件 (16).txt": {
+          "text": "日期：2026-01-07\n来源：市场部\n标题：预算调整\n\n市场部关于“预算调整”的记录，第 16 份，共 9 页。\n"
+        },
+        "f-102/inbox/扫描件 (17).md": {
+          "text": "日期：2025-12-10\n来源：市场部\n标题：Team Offsite\n\n市场部关于“Team Offsite”的记录，第 17 份，共 9 页。\n"
+        },
+        "f-102/inbox/扫描件 (18).md": {
+          "text": "日期：2026-02-06\n来源：销售部\n标题：Launch Review\n\n销售部关于“Launch Review”的记录，第 18 份，共 2 页。\n"
+        },
+        "f-102/inbox/note (19).md": {
+          "text": "日期：2025-12-08\n来源：财务部\n标题：供应商评估\n\n财务部关于“供应商评估”的记录，第 19 份，共 2 页。\n"
+        },
+        "f-102/inbox/新建文本文档 (20).txt": {
+          "text": "日期：2025-11-01\n来源：研发部\n标题：Q2 Plan\n\n研发部关于“Q2 Plan”的记录，第 20 份，共 8 页。\n"
+        }
+      },
+      "fingerprints": [
+        "标题：Weekly Sync\n",
+        "标题：Risk Notes\n",
+        "标题：Team Offsite\n",
+        "标题：Launch Review\n",
+        "标题：Q2 Plan\n"
+      ],
+      "hidden": {
+        "items": [
+          {
+            "from": "inbox/扫描件 (1).md",
+            "date": "2025-11-07",
+            "source": "研发部",
+            "title": "合同续签",
+            "ext": ".md"
+          },
+          {
+            "from": "inbox/扫描件 (2).txt",
+            "date": "2026-01-15",
+            "source": "财务部",
+            "title": "设备采购",
+            "ext": ".txt"
+          },
+          {
+            "from": "inbox/新建文本文档 (3).md",
+            "date": "2025-11-17",
+            "source": "市场部",
+            "title": "渠道分析",
+            "ext": ".md"
+          },
+          {
+            "from": "inbox/扫描件 (4).txt",
+            "date": "2026-01-20",
+            "source": "销售部",
+            "title": "季度目标复盘",
+            "ext": ".txt"
+          },
+          {
+            "from": "inbox/扫描件 (5).txt",
+            "date": "2025-11-28",
+            "source": "市场部",
+            "title": "招聘进度",
+            "ext": ".txt"
+          },
+          {
+            "from": "inbox/扫描件 (6).md",
+            "date": "2026-03-05",
+            "source": "研发部",
+            "title": "培训安排",
+            "ext": ".md"
+          },
+          {
+            "from": "inbox/note (7).txt",
+            "date": "2025-12-10",
+            "source": "财务部",
+            "title": "Weekly Sync",
+            "ext": ".txt"
+          },
+          {
+            "from": "inbox/新建文本文档 (8).txt",
+            "date": "2026-01-06",
+            "source": "财务部",
+            "title": "库存盘点",
+            "ext": ".txt"
+          },
+          {
+            "from": "inbox/note (9).txt",
+            "date": "2026-02-25",
+            "source": "市场部",
+            "title": "价格调整",
+            "ext": ".txt"
+          },
+          {
+            "from": "inbox/新建文本文档 (10).txt",
+            "date": "2026-01-08",
+            "source": "销售部",
+            "title": "客户回访",
+            "ext": ".txt"
+          },
+          {
+            "from": "inbox/会议记录 (11).txt",
+            "date": "2025-12-08",
+            "source": "销售部",
+            "title": "Risk Notes",
+            "ext": ".txt"
+          },
+          {
+            "from": "inbox/新建文本文档 (12).md",
+            "date": "2025-12-01",
+            "source": "销售部",
+            "title": "展会筹备",
+            "ext": ".md"
+          },
+          {
+            "from": "inbox/note (13).txt",
+            "date": "2026-03-03",
+            "source": "销售部",
+            "title": "流程优化",
+            "ext": ".txt"
+          },
+          {
+            "from": "inbox/会议记录 (14).txt",
+            "date": "2026-03-09",
+            "source": "销售部",
+            "title": "年度规划",
+            "ext": ".txt"
+          },
+          {
+            "from": "inbox/新建文本文档 (15).md",
+            "date": "2026-01-11",
+            "source": "人事部",
+            "title": "报销制度",
+            "ext": ".md"
+          },
+          {
+            "from": "inbox/扫描件 (16).txt",
+            "date": "2026-01-07",
+            "source": "市场部",
+            "title": "预算调整",
+            "ext": ".txt"
+          },
+          {
+            "from": "inbox/扫描件 (17).md",
+            "date": "2025-12-10",
+            "source": "市场部",
+            "title": "Team Offsite",
+            "ext": ".md"
+          },
+          {
+            "from": "inbox/扫描件 (18).md",
+            "date": "2026-02-06",
+            "source": "销售部",
+            "title": "Launch Review",
+            "ext": ".md"
+          },
+          {
+            "from": "inbox/note (19).md",
+            "date": "2025-12-08",
+            "source": "财务部",
+            "title": "供应商评估",
+            "ext": ".md"
+          },
+          {
+            "from": "inbox/新建文本文档 (20).txt",
+            "date": "2025-11-01",
+            "source": "研发部",
+            "title": "Q2 Plan",
+            "ext": ".txt"
+          }
+        ]
+      }
+    },
+    {
+      "id": "files/selection/xlsx-to-csv-f-103",
+      "family": "files",
+      "set": "selection",
+      "variant": "xlsx-to-csv",
+      "seed": "f-103",
+      "folder": "f-103",
+      "message": "这次用到的文件都在项目的 f-103/ 目录下，下面说的路径都相对于这个目录。请把 data/sales report 63.xlsx 的第一张工作表导出为 UTF-8 编码的 csv 文件，放在 output/ 下：去掉最后的合计行，表头保留。",
+      "outputs": [
+        "f-103/output"
+      ],
+      "rubric": [
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "表头与数据行和原表逐格一致",
+          "feedback": "csv 里的数据和原表对不上"
+        },
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "合计行已去掉",
+          "feedback": "合计行没有去掉"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "check",
+          "text": "UTF-8 编码、逗号分隔",
+          "feedback": "csv 的编码或分隔符不对，打开是乱的"
+        },
+        {
+          "id": "u",
+          "type": "unverified",
+          "by": "check",
+          "text": "只导出了第一张表，没有混入第二张表的内容",
+          "feedback": "把第二张表的内容也导出来了"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "输出的文件名和目录名里不含空格",
+          "feedback": "输出的文件名里带了空格"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "csv 带 BOM，方便 Excel 打开",
+          "feedback": "这次我想要带 BOM 的 csv，Excel 直接打开不乱码"
+        }
+      ],
+      "files": {
+        "f-103/data/sales report 63.xlsx": {
+          "base64": "UEsDBBQAAAgAAAAAIQBZtGQMtgIAALYCAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFR5cGVzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L2NvbnRlbnQtdHlwZXMiPjxEZWZhdWx0IEV4dGVuc2lvbj0icmVscyIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1wYWNrYWdlLnJlbGF0aW9uc2hpcHMreG1sIi8+PERlZmF1bHQgRXh0ZW5zaW9uPSJ4bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi94bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii94bC93b3JrYm9vay54bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi92bmQub3BlbnhtbGZvcm1hdHMtb2ZmaWNlZG9jdW1lbnQuc3ByZWFkc2hlZXRtbC5zaGVldC5tYWluK3htbCIvPjxPdmVycmlkZSBQYXJ0TmFtZT0iL3hsL3dvcmtzaGVldHMvc2hlZXQxLnhtbCIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1vZmZpY2Vkb2N1bWVudC5zcHJlYWRzaGVldG1sLndvcmtzaGVldCt4bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii94bC93b3Jrc2hlZXRzL3NoZWV0Mi54bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi92bmQub3BlbnhtbGZvcm1hdHMtb2ZmaWNlZG9jdW1lbnQuc3ByZWFkc2hlZXRtbC53b3Jrc2hlZXQreG1sIi8+PC9UeXBlcz5QSwMEFAAACAAAAAAhAAZZx4IoAQAAKAEAAAsAAABfcmVscy8ucmVsczw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFJlbGF0aW9uc2hpcHMgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9wYWNrYWdlLzIwMDYvcmVsYXRpb25zaGlwcyI+PFJlbGF0aW9uc2hpcCBJZD0icklkMSIgVHlwZT0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL29mZmljZURvY3VtZW50LzIwMDYvcmVsYXRpb25zaGlwcy9vZmZpY2VEb2N1bWVudCIgVGFyZ2V0PSJ4bC93b3JrYm9vay54bWwiLz48L1JlbGF0aW9uc2hpcHM+UEsDBBQAAAgAAAAAIQBAZtq+SgEAAEoBAAAPAAAAeGwvd29ya2Jvb2sueG1sPD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9InllcyI/Pgo8d29ya2Jvb2sgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9zcHJlYWRzaGVldG1sLzIwMDYvbWFpbiIgeG1sbnM6cj0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL29mZmljZURvY3VtZW50LzIwMDYvcmVsYXRpb25zaGlwcyI+PHNoZWV0cz48c2hlZXQgbmFtZT0i5piO57uGIiBzaGVldElkPSIxIiByOmlkPSJySWQxIi8+PHNoZWV0IG5hbWU9IuivtOaYjiIgc2hlZXRJZD0iMiIgcjppZD0icklkMiIvPjwvc2hlZXRzPjwvd29ya2Jvb2s+UEsDBBQAAAgAAAAAIQASxxqMtgEAALYBAAAaAAAAeGwvX3JlbHMvd29ya2Jvb2sueG1sLnJlbHM8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCIgc3RhbmRhbG9uZT0ieWVzIj8+CjxSZWxhdGlvbnNoaXBzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L3JlbGF0aW9uc2hpcHMiPjxSZWxhdGlvbnNoaXAgSWQ9InJJZDEiIFR5cGU9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9vZmZpY2VEb2N1bWVudC8yMDA2L3JlbGF0aW9uc2hpcHMvd29ya3NoZWV0IiBUYXJnZXQ9IndvcmtzaGVldHMvc2hlZXQxLnhtbCIvPjxSZWxhdGlvbnNoaXAgSWQ9InJJZDIiIFR5cGU9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9vZmZpY2VEb2N1bWVudC8yMDA2L3JlbGF0aW9uc2hpcHMvd29ya3NoZWV0IiBUYXJnZXQ9IndvcmtzaGVldHMvc2hlZXQyLnhtbCIvPjwvUmVsYXRpb25zaGlwcz5QSwMEFAAACAAAAAAhAIhcdLS/CwAAvwsAABgAAAB4bC93b3Jrc2hlZXRzL3NoZWV0MS54bWw8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCIgc3RhbmRhbG9uZT0ieWVzIj8+Cjx3b3Jrc2hlZXQgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9zcHJlYWRzaGVldG1sLzIwMDYvbWFpbiI+PHNoZWV0RGF0YT48cm93IHI9IjEiPjxjIHI9IkExIiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7orqLljZXlj7c8L3Q+PC9pcz48L2M+PGMgcj0iQjEiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuWuouaItzwvdD48L2lzPjwvYz48YyByPSJDMSIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+6YeR6aKdPC90PjwvaXM+PC9jPjxjIHI9IkQxIiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7ml6XmnJ88L3Q+PC9pcz48L2M+PC9yb3c+PHJvdyByPSIyIj48YyByPSJBMiIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+U08tMzE3MDwvdD48L2lzPjwvYz48YyByPSJCMiIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5Y2O5Lic6LS45piTPC90PjwvaXM+PC9jPjxjIHI9IkMyIj48dj44NjAuMzc8L3Y+PC9jPjxjIHI9IkQyIiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj4yMDI2LTA3LTEyPC90PjwvaXM+PC9jPjwvcm93Pjxyb3cgcj0iMyI+PGMgcj0iQTMiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPlNPLTMwMTE8L3Q+PC9pcz48L2M+PGMgcj0iQjMiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuWSjOa2pumjn+WTgTwvdD48L2lzPjwvYz48YyByPSJDMyI+PHY+MzIyLjUxPC92PjwvYz48YyByPSJEMyIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+MjAyNi0wNy0wMzwvdD48L2lzPjwvYz48L3Jvdz48cm93IHI9IjQiPjxjIHI9IkE0IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj5TTy0yNzUyPC90PjwvaXM+PC9jPjxjIHI9IkI0IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7pnZLmnb7nianmtYE8L3Q+PC9pcz48L2M+PGMgcj0iQzQiPjx2Pjc4Ni43Njwvdj48L2M+PGMgcj0iRDQiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPjIwMjYtMDctMjE8L3Q+PC9pcz48L2M+PC9yb3c+PHJvdyByPSI1Ij48YyByPSJBNSIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+U08tMzA0MzwvdD48L2lzPjwvYz48YyByPSJCNSIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5ZiJ56a+5a625bGFPC90PjwvaXM+PC9jPjxjIHI9IkM1Ij48dj4zMDYuMjc8L3Y+PC9jPjxjIHI9IkQ1IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj4yMDI2LTA3LTIzPC90PjwvaXM+PC9jPjwvcm93Pjxyb3cgcj0iNiI+PGMgcj0iQTYiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPlNPLTMzNDQ8L3Q+PC9pcz48L2M+PGMgcj0iQjYiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPumdkuadvueJqea1gTwvdD48L2lzPjwvYz48YyByPSJDNiI+PHY+OTQuMzk8L3Y+PC9jPjxjIHI9IkQ2IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj4yMDI2LTA3LTE3PC90PjwvaXM+PC9jPjwvcm93Pjxyb3cgcj0iNyI+PGMgcj0iQTciIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPlNPLTMwNzU8L3Q+PC9pcz48L2M+PGMgcj0iQjciIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPueRnuS4sOWMluW3pTwvdD48L2lzPjwvYz48YyByPSJDNyI+PHY+Nzk0LjIzPC92PjwvYz48YyByPSJENyIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+MjAyNi0wNy0wMjwvdD48L2lzPjwvYz48L3Jvdz48cm93IHI9IjgiPjxjIHI9IkE4IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj5TTy0zMzk2PC90PjwvaXM+PC9jPjxjIHI9IkI4IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7lkK/mmI7ova/ku7Y8L3Q+PC9pcz48L2M+PGMgcj0iQzgiPjx2PjI4NS4yMzwvdj48L2M+PGMgcj0iRDgiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPjIwMjYtMDctMTI8L3Q+PC9pcz48L2M+PC9yb3c+PHJvdyByPSI5Ij48YyByPSJBOSIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+U08tMzI4NzwvdD48L2lzPjwvYz48YyByPSJCOSIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5piO5b635pWZ6IKyPC90PjwvaXM+PC9jPjxjIHI9IkM5Ij48dj40NDIuMzE8L3Y+PC9jPjxjIHI9IkQ5IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj4yMDI2LTA3LTA4PC90PjwvaXM+PC9jPjwvcm93Pjxyb3cgcj0iMTAiPjxjIHI9IkExMCIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+U08tMzQ3ODwvdD48L2lzPjwvYz48YyByPSJCMTAiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuaYjuW+t+aVmeiCsjwvdD48L2lzPjwvYz48YyByPSJDMTAiPjx2PjEyNi41Mjwvdj48L2M+PGMgcj0iRDEwIiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj4yMDI2LTA3LTI2PC90PjwvaXM+PC9jPjwvcm93Pjxyb3cgcj0iMTEiPjxjIHI9IkExMSIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5ZCI6K6hPC90PjwvaXM+PC9jPjxjIHI9IkMxMSI+PHY+NDAxOC41OTwvdj48L2M+PC9yb3c+PC9zaGVldERhdGE+PC93b3Jrc2hlZXQ+UEsDBBQAAAgAAAAAIQC9KLw44AEAAOABAAAYAAAAeGwvd29ya3NoZWV0cy9zaGVldDIueG1sPD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9InllcyI/Pgo8d29ya3NoZWV0IHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvc3ByZWFkc2hlZXRtbC8yMDA2L21haW4iPjxzaGVldERhdGE+PHJvdyByPSIxIj48YyByPSJBMSIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+6K+05piOPC90PjwvaXM+PC9jPjwvcm93Pjxyb3cgcj0iMiI+PGMgcj0iQTIiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuacrOihqOeUsemUgOWUruWKqeeQhuavj+aciOWvvOWHujwvdD48L2lzPjwvYz48L3Jvdz48cm93IHI9IjMiPjxjIHI9IkEzIiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7ph5Hpop3ljZXkvY3vvJrlhYPvvIzlkKvnqI48L3Q+PC9pcz48L2M+PC9yb3c+PC9zaGVldERhdGE+PC93b3Jrc2hlZXQ+UEsBAhQAFAAACAAAAAAhAFm0ZAy2AgAAtgIAABMAAAAAAAAAAAAAAAAAAAAAAFtDb250ZW50X1R5cGVzXS54bWxQSwECFAAUAAAIAAAAACEABlnHgigBAAAoAQAACwAAAAAAAAAAAAAAAADnAgAAX3JlbHMvLnJlbHNQSwECFAAUAAAIAAAAACEAQGbavkoBAABKAQAADwAAAAAAAAAAAAAAAAA4BAAAeGwvd29ya2Jvb2sueG1sUEsBAhQAFAAACAAAAAAhABLHGoy2AQAAtgEAABoAAAAAAAAAAAAAAAAArwUAAHhsL19yZWxzL3dvcmtib29rLnhtbC5yZWxzUEsBAhQAFAAACAAAAAAhAIhcdLS/CwAAvwsAABgAAAAAAAAAAAAAAAAAnQcAAHhsL3dvcmtzaGVldHMvc2hlZXQxLnhtbFBLAQIUABQAAAgAAAAAIQC9KLw44AEAAOABAAAYAAAAAAAAAAAAAAAAAJITAAB4bC93b3Jrc2hlZXRzL3NoZWV0Mi54bWxQSwUGAAAAAAYABgCLAQAAqBUAAAAA"
+        }
+      },
+      "fingerprints": [
+        "data/sales report 63.xlsx"
+      ],
+      "hidden": {
+        "rows": [
+          [
+            "订单号",
+            "客户",
+            "金额",
+            "日期"
+          ],
+          [
+            "SO-3170",
+            "华东贸易",
+            860.37,
+            "2026-07-12"
+          ],
+          [
+            "SO-3011",
+            "和润食品",
+            322.51,
+            "2026-07-03"
+          ],
+          [
+            "SO-2752",
+            "青松物流",
+            786.76,
+            "2026-07-21"
+          ],
+          [
+            "SO-3043",
+            "嘉禾家居",
+            306.27,
+            "2026-07-23"
+          ],
+          [
+            "SO-3344",
+            "青松物流",
+            94.39,
+            "2026-07-17"
+          ],
+          [
+            "SO-3075",
+            "瑞丰化工",
+            794.23,
+            "2026-07-02"
+          ],
+          [
+            "SO-3396",
+            "启明软件",
+            285.23,
+            "2026-07-12"
+          ],
+          [
+            "SO-3287",
+            "明德教育",
+            442.31,
+            "2026-07-08"
+          ],
+          [
+            "SO-3478",
+            "明德教育",
+            126.52,
+            "2026-07-26"
+          ]
+        ],
+        "note": [
+          "说明",
+          "本表由销售助理每月导出",
+          "金额单位：元，含税"
+        ]
+      }
+    },
+    {
+      "id": "files/selection/docx-to-md-f-104",
+      "family": "files",
+      "set": "selection",
+      "variant": "docx-to-md",
+      "seed": "f-104",
+      "folder": "f-104",
+      "message": "这次用到的文件都在项目的 f-104/ 目录下，下面说的路径都相对于这个目录。请把 data/门店收银说明 v2.docx 转成 Markdown 文件，放在 output/ 下：标题层级要保留（一级标题用 #，二级用 ##，以此类推），表格转成 Markdown 表格，正文段落都要在。",
+      "outputs": [
+        "f-104/output"
+      ],
+      "rubric": [
+        {
+          "id": "f",
+          "type": "format",
+          "by": "check",
+          "text": "每个标题的层级与原文一致（# / ## / ###）",
+          "feedback": "标题层级和原文对不上"
+        },
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "表格转成了 Markdown 表格，行列与原表一致",
+          "feedback": "表格没有转成 Markdown 表格"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "正文段落都在，文字与原文一致",
+          "feedback": "有正文段落丢了或者文字被改了"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "输出的文件名和目录名里不含空格",
+          "feedback": "输出的文件名里带了空格"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "标题和正文之间空一行",
+          "feedback": "这次我想要标题下面空一行再写正文"
+        }
+      ],
+      "files": {
+        "f-104/data/门店收银说明 v2.docx": {
+          "base64": "UEsDBBQAAAgAAAAAIQD1bniwLQIAAC0CAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFR5cGVzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L2NvbnRlbnQtdHlwZXMiPjxEZWZhdWx0IEV4dGVuc2lvbj0icmVscyIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1wYWNrYWdlLnJlbGF0aW9uc2hpcHMreG1sIi8+PERlZmF1bHQgRXh0ZW5zaW9uPSJ4bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi94bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii93b3JkL2RvY3VtZW50LnhtbCIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1vZmZpY2Vkb2N1bWVudC53b3JkcHJvY2Vzc2luZ21sLmRvY3VtZW50Lm1haW4reG1sIi8+PE92ZXJyaWRlIFBhcnROYW1lPSIvd29yZC9zdHlsZXMueG1sIiBDb250ZW50VHlwZT0iYXBwbGljYXRpb24vdm5kLm9wZW54bWxmb3JtYXRzLW9mZmljZWRvY3VtZW50LndvcmRwcm9jZXNzaW5nbWwuc3R5bGVzK3htbCIvPjwvVHlwZXM+UEsDBBQAAAgAAAAAIQC5gURxKgEAACoBAAALAAAAX3JlbHMvLnJlbHM8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCIgc3RhbmRhbG9uZT0ieWVzIj8+CjxSZWxhdGlvbnNoaXBzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L3JlbGF0aW9uc2hpcHMiPjxSZWxhdGlvbnNoaXAgSWQ9InJJZDEiIFR5cGU9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9vZmZpY2VEb2N1bWVudC8yMDA2L3JlbGF0aW9uc2hpcHMvb2ZmaWNlRG9jdW1lbnQiIFRhcmdldD0id29yZC9kb2N1bWVudC54bWwiLz48L1JlbGF0aW9uc2hpcHM+UEsDBBQAAAgAAAAAIQBE6Qio9woAAPcKAAARAAAAd29yZC9kb2N1bWVudC54bWw8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCIgc3RhbmRhbG9uZT0ieWVzIj8+Cjx3OmRvY3VtZW50IHhtbG5zOnc9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy93b3JkcHJvY2Vzc2luZ21sLzIwMDYvbWFpbiI+PHc6Ym9keT48dzpwPjx3OnBQcj48dzpwU3R5bGUgdzp2YWw9IkhlYWRpbmcxIi8+PC93OnBQcj48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+6Zeo5bqX5pS26ZO26aG555uu6K+05piOPC93OnQ+PC93OnI+PC93OnA+PHc6cD48dzpwUHI+PHc6cFN0eWxlIHc6dmFsPSJIZWFkaW5nMiIvPjwvdzpwUHI+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPumjjumZqTwvdzp0PjwvdzpyPjwvdzpwPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPumjjumZqeesrCAxIOadoe+8mumXqOW6l+aUtumTtuWcqOWugeazoueahOivleeCuemcgOimgeS4gOS4quaciOWujOaIkO+8jOi0n+i0o+S6uuadjuWonOOAgjwvdzp0PjwvdzpyPjwvdzpwPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPumjjumZqeesrCAyIOadoe+8mumXqOW6l+aUtumTtuWcqOadreW3nueahOivleeCuemcgOimgeS4pOWRqOWujOaIkO+8jOi0n+i0o+S6uuadjuWonOOAgjwvdzp0PjwvdzpyPjwvdzpwPjx3OnA+PHc6cFByPjx3OnBTdHlsZSB3OnZhbD0iSGVhZGluZzIiLz48L3c6cFByPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7ojIPlm7Q8L3c6dD48L3c6cj48L3c6cD48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7ojIPlm7TnrKwgMSDmnaHvvJrpl6jlupfmlLbpk7blnKjmna3lt57nmoTor5XngrnpnIDopoHkuInlkajlrozmiJDvvIzotJ/otKPkurrotbXmlY/jgII8L3c6dD48L3c6cj48L3c6cD48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7ojIPlm7TnrKwgMiDmnaHvvJrpl6jlupfmlLbpk7blnKjljZfkuqznmoTor5XngrnpnIDopoHkuKTlkajlrozmiJDvvIzotJ/otKPkurrotbXmlY/jgII8L3c6dD48L3c6cj48L3c6cD48dzpwPjx3OnBQcj48dzpwU3R5bGUgdzp2YWw9IkhlYWRpbmczIi8+PC93OnBQcj48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+6IyD5Zu057uG6aG5PC93OnQ+PC93OnI+PC93OnA+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+57uG6aG56K+05piO77ya6aKE566X5LiK6ZmQIDQwIOS4h+WFg++8jOmqjOaUtueUsemUgOWUrumDqOi0n+i0o+OAgjwvdzp0PjwvdzpyPjwvdzpwPjx3OnA+PHc6cFByPjx3OnBTdHlsZSB3OnZhbD0iSGVhZGluZzIiLz48L3c6cFByPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7nm67moIc8L3c6dD48L3c6cj48L3c6cD48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7nm67moIfnrKwgMSDmnaHvvJrpl6jlupfmlLbpk7blnKjmna3lt57nmoTor5XngrnpnIDopoHkuIDkuKrmnIjlrozmiJDvvIzotJ/otKPkurrnjovno4rjgII8L3c6dD48L3c6cj48L3c6cD48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7nm67moIfnrKwgMiDmnaHvvJrpl6jlupfmlLbpk7blnKjlkIjogqXnmoTor5XngrnpnIDopoHkuIDkuKrmnIjlrozmiJDvvIzotJ/otKPkurrpmYjmmajjgII8L3c6dD48L3c6cj48L3c6cD48dzpwPjx3OnBQcj48dzpwU3R5bGUgdzp2YWw9IkhlYWRpbmcyIi8+PC93OnBQcj48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5pe26Ze06KGoPC93OnQ+PC93OnI+PC93OnA+PHc6dGJsPjx3OnRibFByPjx3OnRibFN0eWxlIHc6dmFsPSJUYWJsZUdyaWQiLz48L3c6dGJsUHI+PHc6dHI+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+6Zi25q61PC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPuW8gOWnizwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7nu5PmnZ88L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PC93OnRyPjx3OnRyPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPuiuvuiuoTwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj4yMDI2LTAzLTAxPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjIwMjYtMDQtMTI8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PC93OnRyPjx3OnRyPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPuW8gOWPkTwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj4yMDI2LTA1LTAxPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjIwMjYtMDYtMTA8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PC93OnRyPjx3OnRyPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPuS4iue6vzwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj4yMDI2LTA3LTAxPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjIwMjYtMDgtMTc8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PC93OnRyPjwvdzp0Ymw+PC93OmJvZHk+PC93OmRvY3VtZW50PlBLAwQUAAAIAAAAACEAnfOyNxsBAAAbAQAAHAAAAHdvcmQvX3JlbHMvZG9jdW1lbnQueG1sLnJlbHM8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCIgc3RhbmRhbG9uZT0ieWVzIj8+CjxSZWxhdGlvbnNoaXBzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L3JlbGF0aW9uc2hpcHMiPjxSZWxhdGlvbnNoaXAgSWQ9InJJZDEiIFR5cGU9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9vZmZpY2VEb2N1bWVudC8yMDA2L3JlbGF0aW9uc2hpcHMvc3R5bGVzIiBUYXJnZXQ9InN0eWxlcy54bWwiLz48L1JlbGF0aW9uc2hpcHM+UEsDBBQAAAgAAAAAIQDdPKLrDgIAAA4CAAAPAAAAd29yZC9zdHlsZXMueG1sPD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9InllcyI/Pgo8dzpzdHlsZXMgeG1sbnM6dz0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL3dvcmRwcm9jZXNzaW5nbWwvMjAwNi9tYWluIj48dzpzdHlsZSB3OnR5cGU9InBhcmFncmFwaCIgdzpzdHlsZUlkPSJIZWFkaW5nMSI+PHc6bmFtZSB3OnZhbD0iaGVhZGluZyAxIi8+PHc6cFByPjx3Om91dGxpbmVMdmwgdzp2YWw9IjAiLz48L3c6cFByPjwvdzpzdHlsZT48dzpzdHlsZSB3OnR5cGU9InBhcmFncmFwaCIgdzpzdHlsZUlkPSJIZWFkaW5nMiI+PHc6bmFtZSB3OnZhbD0iaGVhZGluZyAyIi8+PHc6cFByPjx3Om91dGxpbmVMdmwgdzp2YWw9IjEiLz48L3c6cFByPjwvdzpzdHlsZT48dzpzdHlsZSB3OnR5cGU9InBhcmFncmFwaCIgdzpzdHlsZUlkPSJIZWFkaW5nMyI+PHc6bmFtZSB3OnZhbD0iaGVhZGluZyAzIi8+PHc6cFByPjx3Om91dGxpbmVMdmwgdzp2YWw9IjIiLz48L3c6cFByPjwvdzpzdHlsZT48L3c6c3R5bGVzPlBLAQIUABQAAAgAAAAAIQD1bniwLQIAAC0CAAATAAAAAAAAAAAAAAAAAAAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQAFAAACAAAAAAhALmBRHEqAQAAKgEAAAsAAAAAAAAAAAAAAAAAXgIAAF9yZWxzLy5yZWxzUEsBAhQAFAAACAAAAAAhAETpCKj3CgAA9woAABEAAAAAAAAAAAAAAAAAsQMAAHdvcmQvZG9jdW1lbnQueG1sUEsBAhQAFAAACAAAAAAhAJ3zsjcbAQAAGwEAABwAAAAAAAAAAAAAAAAA1w4AAHdvcmQvX3JlbHMvZG9jdW1lbnQueG1sLnJlbHNQSwECFAAUAAAIAAAAACEA3Tyi6w4CAAAOAgAADwAAAAAAAAAAAAAAAAAsEAAAd29yZC9zdHlsZXMueG1sUEsFBgAAAAAFAAUAQAEAAGcSAAAAAA=="
+        }
+      },
+      "fingerprints": [
+        "data/门店收银说明 v2.docx"
+      ],
+      "hidden": {
+        "blocks": [
+          {
+            "kind": "heading",
+            "level": 1,
+            "text": "门店收银项目说明"
+          },
+          {
+            "kind": "heading",
+            "level": 2,
+            "text": "风险"
+          },
+          {
+            "kind": "paragraph",
+            "text": "风险第 1 条：门店收银在宁波的试点需要一个月完成，负责人李娜。"
+          },
+          {
+            "kind": "paragraph",
+            "text": "风险第 2 条：门店收银在杭州的试点需要两周完成，负责人李娜。"
+          },
+          {
+            "kind": "heading",
+            "level": 2,
+            "text": "范围"
+          },
+          {
+            "kind": "paragraph",
+            "text": "范围第 1 条：门店收银在杭州的试点需要三周完成，负责人赵敏。"
+          },
+          {
+            "kind": "paragraph",
+            "text": "范围第 2 条：门店收银在南京的试点需要两周完成，负责人赵敏。"
+          },
+          {
+            "kind": "heading",
+            "level": 3,
+            "text": "范围细项"
+          },
+          {
+            "kind": "paragraph",
+            "text": "细项说明：预算上限 40 万元，验收由销售部负责。"
+          },
+          {
+            "kind": "heading",
+            "level": 2,
+            "text": "目标"
+          },
+          {
+            "kind": "paragraph",
+            "text": "目标第 1 条：门店收银在杭州的试点需要一个月完成，负责人王磊。"
+          },
+          {
+            "kind": "paragraph",
+            "text": "目标第 2 条：门店收银在合肥的试点需要一个月完成，负责人陈晨。"
+          },
+          {
+            "kind": "heading",
+            "level": 2,
+            "text": "时间表"
+          },
+          {
+            "kind": "table",
+            "rows": [
+              [
+                "阶段",
+                "开始",
+                "结束"
+              ],
+              [
+                "设计",
+                "2026-03-01",
+                "2026-04-12"
+              ],
+              [
+                "开发",
+                "2026-05-01",
+                "2026-06-10"
+              ],
+              [
+                "上线",
+                "2026-07-01",
+                "2026-08-17"
+              ]
+            ]
+          }
+        ],
+        "paragraphs": [
+          "风险第 1 条：门店收银在宁波的试点需要一个月完成，负责人李娜。",
+          "风险第 2 条：门店收银在杭州的试点需要两周完成，负责人李娜。",
+          "范围第 1 条：门店收银在杭州的试点需要三周完成，负责人赵敏。",
+          "范围第 2 条：门店收银在南京的试点需要两周完成，负责人赵敏。",
+          "细项说明：预算上限 40 万元，验收由销售部负责。",
+          "目标第 1 条：门店收银在杭州的试点需要一个月完成，负责人王磊。",
+          "目标第 2 条：门店收银在合肥的试点需要一个月完成，负责人陈晨。"
+        ],
+        "table": [
+          [
+            "阶段",
+            "开始",
+            "结束"
+          ],
+          [
+            "设计",
+            "2026-03-01",
+            "2026-04-12"
+          ],
+          [
+            "开发",
+            "2026-05-01",
+            "2026-06-10"
+          ],
+          [
+            "上线",
+            "2026-07-01",
+            "2026-08-17"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "files/guard/md-index-f-105",
+      "family": "files",
+      "set": "guard",
+      "variant": "md-index",
+      "seed": "f-105",
+      "folder": "f-105",
+      "message": "这次用到的文件都在项目的 f-105/ 目录下，下面说的路径都相对于这个目录。请把 notes/ 下 12 个 md 笔记的标题和日期汇总成一个索引表 csv 文件，放在 output/ 下：列为 文件名,标题,日期，按日期从早到晚排列。",
+      "outputs": [
+        "f-105/output"
+      ],
+      "rubric": [
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "12 个笔记都在索引里",
+          "feedback": "索引里少了几个笔记"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "每行的标题和日期与笔记一致",
+          "feedback": "有的标题或日期和笔记里写的不一样"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "check",
+          "text": "表头为 文件名,标题,日期，按日期从早到晚排列",
+          "feedback": "表头或排序不对"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "输出的文件名和目录名里不含空格",
+          "feedback": "输出的文件名里带了空格"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "日期写成 2026/03/01 的样子",
+          "feedback": "这次日期我想写成 2026/03/01 这种"
+        }
+      ],
+      "files": {
+        "f-105/notes/draft 01.md": {
+          "text": "# 培训：整理\n\n日期：2026-06-25\n\n培训相关内容，共 7 条。\n"
+        },
+        "f-105/notes/memo 02.md": {
+          "text": "# 技术分享：要点\n\n日期：2026-06-13\n\n技术分享相关内容，共 8 条。\n"
+        },
+        "f-105/notes/draft 03.md": {
+          "text": "# 客户拜访：整理\n\n日期：2026-03-16\n\n客户拜访相关内容，共 9 条。\n"
+        },
+        "f-105/notes/note 04.md": {
+          "text": "# 灵感：小结\n\n日期：2026-02-25\n\n灵感相关内容，共 4 条。\n"
+        },
+        "f-105/notes/note 05.md": {
+          "text": "# 采购：记录\n\n日期：2026-06-20\n\n采购相关内容，共 4 条。\n"
+        },
+        "f-105/notes/note 06.md": {
+          "text": "# 读书笔记：小结\n\n日期：2026-05-06\n\n读书笔记相关内容，共 9 条。\n"
+        },
+        "f-105/notes/note 07.md": {
+          "text": "# 方案草稿：第一版\n\n日期：2026-05-23\n\n方案草稿相关内容，共 5 条。\n"
+        },
+        "f-105/notes/memo 08.md": {
+          "text": "# 面试记录：小结\n\n日期：2026-02-16\n\n面试记录相关内容，共 7 条。\n"
+        },
+        "f-105/notes/note 09.md": {
+          "text": "# 周报：记录\n\n日期：2026-06-23\n\n周报相关内容，共 11 条。\n"
+        },
+        "f-105/notes/note 10.md": {
+          "text": "# 周会：小结\n\n日期：2026-03-06\n\n周会相关内容，共 9 条。\n"
+        },
+        "f-105/notes/note 11.md": {
+          "text": "# 复盘：小结\n\n日期：2026-05-07\n\n复盘相关内容，共 9 条。\n"
+        },
+        "f-105/notes/note 12.md": {
+          "text": "# 季度计划：整理\n\n日期：2026-02-28\n\n季度计划相关内容，共 9 条。\n"
+        }
+      },
+      "fingerprints": [
+        "# 培训：整理\n\n日期：2026-06-25",
+        "# 技术分享：要点\n\n日期：2026-06-13",
+        "# 客户拜访：整理\n\n日期：2026-03-16",
+        "# 灵感：小结\n\n日期：2026-02-25",
+        "# 采购：记录\n\n日期：2026-06-20",
+        "# 读书笔记：小结\n\n日期：2026-05-06",
+        "# 方案草稿：第一版\n\n日期：2026-05-23",
+        "# 面试记录：小结\n\n日期：2026-02-16",
+        "# 周报：记录\n\n日期：2026-06-23",
+        "# 周会：小结\n\n日期：2026-03-06",
+        "# 复盘：小结\n\n日期：2026-05-07",
+        "# 季度计划：整理\n\n日期：2026-02-28"
+      ],
+      "hidden": {
+        "entries": [
+          [
+            "draft 01.md",
+            "培训：整理",
+            "2026-06-25"
+          ],
+          [
+            "memo 02.md",
+            "技术分享：要点",
+            "2026-06-13"
+          ],
+          [
+            "draft 03.md",
+            "客户拜访：整理",
+            "2026-03-16"
+          ],
+          [
+            "note 04.md",
+            "灵感：小结",
+            "2026-02-25"
+          ],
+          [
+            "note 05.md",
+            "采购：记录",
+            "2026-06-20"
+          ],
+          [
+            "note 06.md",
+            "读书笔记：小结",
+            "2026-05-06"
+          ],
+          [
+            "note 07.md",
+            "方案草稿：第一版",
+            "2026-05-23"
+          ],
+          [
+            "memo 08.md",
+            "面试记录：小结",
+            "2026-02-16"
+          ],
+          [
+            "note 09.md",
+            "周报：记录",
+            "2026-06-23"
+          ],
+          [
+            "note 10.md",
+            "周会：小结",
+            "2026-03-06"
+          ],
+          [
+            "note 11.md",
+            "复盘：小结",
+            "2026-05-07"
+          ],
+          [
+            "note 12.md",
+            "季度计划：整理",
+            "2026-02-28"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "files/holdout/merge-dedupe-f-106",
+      "family": "files",
+      "set": "holdout",
+      "variant": "merge-dedupe",
+      "seed": "f-106",
+      "folder": "f-106",
+      "message": "这次用到的文件都在项目的 f-106/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下 3 个 xlsx 文件中名为“客户”的工作表纵向合并成一张表（表头只保留一行），同一客户编号只保留一行，结果存成 output/ 下的一个 xlsx 文件。",
+      "outputs": [
+        "f-106/output"
+      ],
+      "rubric": [
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "每个客户一行的数值与原表一致",
+          "feedback": "合并后有客户的数据和原表对不上"
+        },
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "3 个文件里的客户都在",
+          "feedback": "有文件里的客户没合并进来"
+        },
+        {
+          "id": "u",
+          "type": "unverified",
+          "by": "check",
+          "text": "没有重复的客户编号",
+          "feedback": "合并后还有重复的客户"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "check",
+          "text": "表头只有一行，累计消费是数字",
+          "feedback": "表头重复了，或者累计消费成了文本"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "输出的文件名和目录名里不含空格",
+          "feedback": "输出的文件名里带了空格"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "按客户编号从小到大排列",
+          "feedback": "这次我想要按客户编号从小到大排"
+        }
+      ],
+      "files": {
+        "f-106/data/branch A.xlsx": {
+          "base64": "UEsDBBQAAAgAAAAAIQBZtGQMtgIAALYCAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFR5cGVzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L2NvbnRlbnQtdHlwZXMiPjxEZWZhdWx0IEV4dGVuc2lvbj0icmVscyIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1wYWNrYWdlLnJlbGF0aW9uc2hpcHMreG1sIi8+PERlZmF1bHQgRXh0ZW5zaW9uPSJ4bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi94bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii94bC93b3JrYm9vay54bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi92bmQub3BlbnhtbGZvcm1hdHMtb2ZmaWNlZG9jdW1lbnQuc3ByZWFkc2hlZXRtbC5zaGVldC5tYWluK3htbCIvPjxPdmVycmlkZSBQYXJ0TmFtZT0iL3hsL3dvcmtzaGVldHMvc2hlZXQxLnhtbCIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1vZmZpY2Vkb2N1bWVudC5zcHJlYWRzaGVldG1sLndvcmtzaGVldCt4bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii94bC93b3Jrc2hlZXRzL3NoZWV0Mi54bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi92bmQub3BlbnhtbGZvcm1hdHMtb2ZmaWNlZG9jdW1lbnQuc3ByZWFkc2hlZXRtbC53b3Jrc2hlZXQreG1sIi8+PC9UeXBlcz5QSwMEFAAACAAAAAAhAAZZx4IoAQAAKAEAAAsAAABfcmVscy8ucmVsczw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFJlbGF0aW9uc2hpcHMgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9wYWNrYWdlLzIwMDYvcmVsYXRpb25zaGlwcyI+PFJlbGF0aW9uc2hpcCBJZD0icklkMSIgVHlwZT0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL29mZmljZURvY3VtZW50LzIwMDYvcmVsYXRpb25zaGlwcy9vZmZpY2VEb2N1bWVudCIgVGFyZ2V0PSJ4bC93b3JrYm9vay54bWwiLz48L1JlbGF0aW9uc2hpcHM+UEsDBBQAAAgAAAAAIQDuBRFVSgEAAEoBAAAPAAAAeGwvd29ya2Jvb2sueG1sPD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9InllcyI/Pgo8d29ya2Jvb2sgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9zcHJlYWRzaGVldG1sLzIwMDYvbWFpbiIgeG1sbnM6cj0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL29mZmljZURvY3VtZW50LzIwMDYvcmVsYXRpb25zaGlwcyI+PHNoZWV0cz48c2hlZXQgbmFtZT0i6K6i5Y2VIiBzaGVldElkPSIxIiByOmlkPSJySWQxIi8+PHNoZWV0IG5hbWU9IuWuouaItyIgc2hlZXRJZD0iMiIgcjppZD0icklkMiIvPjwvc2hlZXRzPjwvd29ya2Jvb2s+UEsDBBQAAAgAAAAAIQASxxqMtgEAALYBAAAaAAAAeGwvX3JlbHMvd29ya2Jvb2sueG1sLnJlbHM8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCIgc3RhbmRhbG9uZT0ieWVzIj8+CjxSZWxhdGlvbnNoaXBzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L3JlbGF0aW9uc2hpcHMiPjxSZWxhdGlvbnNoaXAgSWQ9InJJZDEiIFR5cGU9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9vZmZpY2VEb2N1bWVudC8yMDA2L3JlbGF0aW9uc2hpcHMvd29ya3NoZWV0IiBUYXJnZXQ9IndvcmtzaGVldHMvc2hlZXQxLnhtbCIvPjxSZWxhdGlv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ZXNlcnZlIj7lkK/mmI7ova/ku7Y8L3Q+PC9pcz48L2M+PGMgcj0iQzIiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuWugeazojwvdD48L2lzPjwvYz48YyByPSJEMiI+PHY+NzkwMjg8L3Y+PC9jPjwvcm93Pjxyb3cgcj0iMyI+PGMgcj0iQTMiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPkMxMDkyPC90PjwvaXM+PC9jPjxjIHI9IkIzIiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7mtbflt53ljLvnlpc8L3Q+PC9pcz48L2M+PGMgcj0iQzMiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuWugeazojwvdD48L2lzPjwvYz48YyByPSJEMyI+PHY+MjU3NTc8L3Y+PC9jPjwvcm93Pjxyb3cgcj0iNCI+PGMgcj0iQTQiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPkMxMDIyPC90PjwvaXM+PC9jPjxjIHI9IkI0IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7mmajlhYnmloflhbc8L3Q+PC9pcz48L2M+PGMgcj0iQzQiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuiLj+W3njwvdD48L2lzPjwvYz48YyByPSJENCI+PHY+NTc0NjI8L3Y+PC9jPjwvcm93Pjxyb3cgcj0iNSI+PGMgcj0iQTUiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPkMxMDE1PC90PjwvaXM+PC9jPjxjIHI9IkI1IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7pnZLmnb7nianmtYE8L3Q+PC9pcz48L2M+PGMgcj0iQzUiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuiLj+W3njwvdD48L2lzPjwvYz48YyByPSJENSI+PHY+OTc3MTI8L3Y+PC9jPjwvcm93Pjxyb3cgcj0iNiI+PGMgcj0iQTYiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPkMxMDAxPC90PjwvaXM+PC9jPjxjIHI9IkI2IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7ljY7kuJzotLjmmJM8L3Q+PC9pcz48L2M+PGMgcj0iQzYiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuWugeazojwvdD48L2lzPjwvYz48YyByPSJENiI+PHY+NzkyOTM8L3Y+PC9jPjwvcm93Pjxyb3cgcj0iNyI+PGMgcj0iQTciIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPkMxMDI5PC90PjwvaXM+PC9jPjxjIHI9IkI3IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7mmJ/msrPnp5HmioA8L3Q+PC9pcz48L2M+PGMgcj0iQzciIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuaXoOmUoTwvdD48L2lzPjwvYz48YyByPSJENyI+PHY+NDQ4OTY8L3Y+PC9jPjwvcm93Pjxyb3cgcj0iOCI+PGMgcj0iQTgiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPkMxMDcxPC90PjwvaXM+PC9jPjxjIHI9IkI4IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7lkozmtqbpo5/lk4E8L3Q+PC9pcz48L2M+PGMgcj0iQzgiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuaXoOmUoTwvdD48L2lzPjwvYz48YyByPSJEOCI+PHY+MjkxMjU8L3Y+PC9jPjwvcm93Pjwvc2hlZXREYXRhPjwvd29ya3NoZWV0PlBLAQIUABQAAAgAAAAAIQBZtGQMtgIAALYCAAATAAAAAAAAAAAAAAAAAAAAAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQAFAAACAAAAAAhAAZZx4IoAQAAKAEAAAsAAAAAAAAAAAAAAAAA5wIAAF9yZWxzLy5yZWxzUEsBAhQAFAAACAAAAAAhAO4FEVVKAQAASgEAAA8AAAAAAAAAAAAAAAAAOAQAAHhsL3dvcmtib29rLnhtbFBLAQIUABQAAAgAAAAAIQASxxqMtgEAALYBAAAaAAAAAAAAAAAAAAAAAK8FAAB4bC9fcmVscy93b3JrYm9vay54bWwucmVsc1BLAQIUABQAAAgAAAAAIQBGEOEgwQMAAMEDAAAYAAAAAAAAAAAAAAAAAJ0HAAB4bC93b3Jrc2hlZXRzL3NoZWV0MS54bWxQSwECFAAUAAAIAAAAACEA9j++0wQJAAAECQAAGAAAAAAAAAAAAAAAAACUCwAAeGwvd29ya3NoZWV0cy9zaGVldDIueG1sUEsFBgAAAAAGAAYAiwEAAM4UAAAAAA=="
+        },
+        "f-106/data/branch B.xlsx": {
+          "base64": "UEsDBBQAAAgAAAAAIQBZtGQMtgIAALYCAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFR5cGVzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L2NvbnRlbnQtdHlwZXMiPjxEZWZhdWx0IEV4dGVuc2lvbj0icmVscyIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1wYWNrYWdlLnJlbGF0aW9uc2hpcHMreG1sIi8+PERlZmF1bHQgRXh0ZW5zaW9uPSJ4bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi94bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii94bC93b3JrYm9vay54bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi92bmQub3BlbnhtbGZvcm1hdHMtb2ZmaWNlZG9jdW1lbnQuc3ByZWFkc2hlZXRtbC5zaGVldC5tYWluK3htbCIvPjxPdmVycmlkZSBQYXJ0TmFtZT0iL3hsL3dvcmtzaGVldHMvc2hlZXQxLnhtbCIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1vZmZpY2Vkb2N1bWVudC5zcHJlYWRzaGVldG1sLndvcmtzaGVldCt4bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii94bC93b3Jrc2hlZXRzL3NoZWV0Mi54bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi92bmQub3BlbnhtbGZvcm1hdHMtb2ZmaWNlZG9jdW1lbnQuc3ByZWFkc2hlZXRtbC53b3Jrc2hlZXQreG1sIi8+PC9UeXBlcz5QSwMEFAAACAAAAAAhAAZZx4IoAQAAKAEAAAsAAABfcmVscy8ucmVsczw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFJlbGF0aW9uc2hpcHMgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9wYWNrYWdlLzIwMDYvcmVsYXRpb25zaGlwcyI+PFJlbGF0aW9uc2hpcCBJZD0icklkMSIgVHlwZT0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL29mZmljZURvY3VtZW50LzIwMDYvcmVsYXRpb25zaGlwcy9vZmZpY2VEb2N1bWVudCIgVGFyZ2V0PSJ4bC93b3JrYm9vay54bWwiLz48L1JlbGF0aW9uc2hpcHM+UEsDBBQAAAgAAAAAIQDuBRFVSgEAAEoBAAAPAAAAeGwvd29ya2Jvb2sueG1sPD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9InllcyI/Pgo8d29ya2Jvb2sgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9zcHJlYWRzaGVldG1sLzIwMDYvbWFpbiIgeG1sbnM6cj0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL29mZmljZURvY3VtZW50LzIwMDYvcmVsYXRpb25zaGlwcyI+PHNoZWV0cz48c2hlZXQgbmFtZT0i6K6i5Y2VIiBzaGVldElkPSIxIiByOmlkPSJySWQxIi8+PHNoZWV0IG5hbWU9IuWuouaItyIgc2hlZXRJZD0iMiIgcjppZD0icklkMiIvPjwvc2hlZXRzPjwvd29ya2Jvb2s+UEsDBBQAAAgAAAAAIQASxxqMtgEAALYBAAAaAAAAeGwvX3JlbHMvd29ya2Jvb2sueG1sLnJlbHM8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCIgc3RhbmRhbG9uZT0ieWVzIj8+CjxSZWxhdGlvbnNoaXBzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L3JlbGF0aW9uc2hpcHMiPjxSZWxhdGlvbnNoaXAgSWQ9InJJZDEiIFR5cGU9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9vZmZpY2VEb2N1bWVudC8yMDA2L3JlbGF0aW9uc2hpcHMvd29ya3NoZWV0IiBUYXJnZXQ9IndvcmtzaGVldHMvc2hlZXQxLnhtbCIvPjxSZWxhdGlv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cmVzZXJ2ZSI+6L+c6Iiq55S15a2QPC90PjwvaXM+PC9jPjxjIHI9IkMyIiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7kuIrmtbc8L3Q+PC9pcz48L2M+PGMgcj0iRDIiPjx2PjUyODQxPC92PjwvYz48L3Jvdz48cm93IHI9IjMiPjxjIHI9IkEzIiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj5DMTA1MDwvdD48L2lzPjwvYz48YyByPSJCMyIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5Y2a6ZuF5Lmm5bqXPC90PjwvaXM+PC9jPjxjIHI9IkMzIiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7kuIrmtbc8L3Q+PC9pcz48L2M+PGMgcj0iRDMiPjx2Pjc3ODM3PC92PjwvYz48L3Jvdz48cm93IHI9IjQiPjxjIHI9IkE0IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj5DMTA5MjwvdD48L2lzPjwvYz48YyByPSJCNCIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5rW35bed5Yy755aXPC90PjwvaXM+PC9jPjxjIHI9IkM0IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7lroHms6I8L3Q+PC9pcz48L2M+PGMgcj0iRDQiPjx2PjI1NzU3PC92PjwvYz48L3Jvdz48cm93IHI9IjUiPjxjIHI9IkE1IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj5DMTAzNjwvdD48L2lzPjwvYz48YyByPSJCNSIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+55Ge5Liw5YyW5belPC90PjwvaXM+PC9jPjxjIHI9IkM1IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7lroHms6I8L3Q+PC9pcz48L2M+PGMgcj0iRDUiPjx2Pjg5ODE4PC92PjwvYz48L3Jvdz48cm93IHI9IjYiPjxjIHI9IkE2IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj5DMTA3MTwvdD48L2lzPjwvYz48YyByPSJCNiIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5ZKM5ram6aOf5ZOBPC90PjwvaXM+PC9jPjxjIHI9IkM2IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7ml6DplKE8L3Q+PC9pcz48L2M+PGMgcj0iRDYiPjx2PjI5MTI1PC92PjwvYz48L3Jvdz48cm93IHI9IjciPjxjIHI9IkE3IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj5DMTA2NDwvdD48L2lzPjwvYz48YyByPSJCNyIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5aSp5oiQ5rG96YWNPC90PjwvaXM+PC9jPjxjIHI9IkM3IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7kuIrmtbc8L3Q+PC9pcz48L2M+PGMgcj0iRDciPjx2PjEwMDQ5PC92PjwvYz48L3Jvdz48cm93IHI9IjgiPjxjIHI9IkE4IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj5DMTA1NzwvdD48L2lzPjwvYz48YyByPSJCOCIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+6ZW/6Z2S5Zut6Im6PC90PjwvaXM+PC9jPjxjIHI9IkM4IiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7kuIrmtbc8L3Q+PC9pcz48L2M+PGMgcj0iRDgiPjx2PjM3MDc5PC92PjwvYz48L3Jvdz48L3NoZWV0RGF0YT48L3dvcmtzaGVldD5QSwECFAAUAAAIAAAAACEAWbRkDLYCAAC2AgAAEwAAAAAAAAAAAAAAAAAAAAAAW0NvbnRlbnRfVHlwZXNdLnhtbFBLAQIUABQAAAgAAAAAIQAGWceCKAEAACgBAAALAAAAAAAAAAAAAAAAAOcCAABfcmVscy8ucmVsc1BLAQIUABQAAAgAAAAAIQDuBRFVSgEAAEoBAAAPAAAAAAAAAAAAAAAAADgEAAB4bC93b3JrYm9vay54bWxQSwECFAAUAAAIAAAAACEAEscajLYBAAC2AQAAGgAAAAAAAAAAAAAAAACvBQAAeGwvX3JlbHMvd29ya2Jvb2sueG1sLnJlbHNQSwECFAAUAAAIAAAAACEAw6W5TcIDAADCAwAAGAAAAAAAAAAAAAAAAACdBwAAeGwvd29ya3NoZWV0cy9zaGVldDEueG1sUEsBAhQAFAAACAAAAAAhAByyIYMECQAABAkAABgAAAAAAAAAAAAAAAAAlQsAAHhsL3dvcmtzaGVldHMvc2hlZXQyLnhtbFBLBQYAAAAABgAGAIsBAADPFAAAAAA="
+        },
+        "f-106/data/branch C.xlsx": {
+          "base64": "UEsDBBQAAAgAAAAAIQBZtGQMtgIAALYCAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFR5cGVzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L2NvbnRlbnQtdHlwZXMiPjxEZWZhdWx0IEV4dGVuc2lvbj0icmVscyIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1wYWNrYWdlLnJlbGF0aW9uc2hpcHMreG1sIi8+PERlZmF1bHQgRXh0ZW5zaW9uPSJ4bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi94bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii94bC93b3JrYm9vay54bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi92bmQub3BlbnhtbGZvcm1hdHMtb2ZmaWNlZG9jdW1lbnQuc3ByZWFkc2hlZXRtbC5zaGVldC5tYWluK3htbCIvPjxPdmVycmlkZSBQYXJ0TmFtZT0iL3hsL3dvcmtzaGVldHMvc2hlZXQxLnhtbCIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1vZmZpY2Vkb2N1bWVudC5zcHJlYWRzaGVldG1sLndvcmtzaGVldCt4bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii94bC93b3Jrc2hlZXRzL3NoZWV0Mi54bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi92bmQub3BlbnhtbGZvcm1hdHMtb2ZmaWNlZG9jdW1lbnQuc3ByZWFkc2hlZXRtbC53b3Jrc2hlZXQreG1sIi8+PC9UeXBlcz5QSwMEFAAACAAAAAAhAAZZx4IoAQAAKAEAAAsAAABfcmVscy8ucmVsczw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFJlbGF0aW9uc2hpcHMgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9wYWNrYWdlLzIwMDYvcmVsYXRpb25zaGlwcyI+PFJlbGF0aW9uc2hpcCBJZD0icklkMSIgVHlwZT0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL29mZmljZURvY3VtZW50LzIwMDYvcmVsYXRpb25zaGlwcy9vZmZpY2VEb2N1bWVudCIgVGFyZ2V0PSJ4bC93b3JrYm9vay54bWwiLz48L1JlbGF0aW9uc2hpcHM+UEsDBBQAAAgAAAAAIQDuBRFVSgEAAEoBAAAPAAAAeGwvd29ya2Jvb2sueG1sPD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9InllcyI/Pgo8d29ya2Jvb2sgeG1sbnM9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9zcHJlYWRzaGVldG1sLzIwMDYvbWFpbiIgeG1sbnM6cj0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL29mZmljZURvY3VtZW50LzIwMDYvcmVsYXRpb25zaGlwcyI+PHNoZWV0cz48c2hlZXQgbmFtZT0i6K6i5Y2VIiBzaGVldElkPSIxIiByOmlkPSJySWQxIi8+PHNoZWV0IG5hbWU9IuWuouaItyIgc2hlZXRJZD0iMiIgcjppZD0icklkMiIvPjwvc2hlZXRzPjwvd29ya2Jvb2s+UEsDBBQAAAgAAAAAIQASxxqMtgEAALYBAAAaAAAAeGwvX3JlbHMvd29ya2Jvb2sueG1sLnJlbHM8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCIgc3RhbmRhbG9uZT0ieWVzIj8+CjxSZWxhdGlvbnNoaXBzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L3JlbGF0aW9uc2hpcHMiPjxSZWxhdGlvbnNoaXAgSWQ9InJJZDEiIFR5cGU9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9vZmZpY2VEb2N1bWVudC8yMDA2L3JlbGF0aW9uc2hpcHMvd29ya3NoZWV0IiBUYXJnZXQ9IndvcmtzaGVldHMvc2hlZXQxLnhtbCIvPjxSZWxhdGlv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c2VydmUiPuaYn+ays+enkeaKgDwvdD48L2lzPjwvYz48YyByPSJDMiIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5peg6ZShPC90PjwvaXM+PC9jPjxjIHI9IkQyIj48dj40NDg5Njwvdj48L2M+PC9yb3c+PHJvdyByPSIzIj48YyByPSJBMyIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+QzEwOTk8L3Q+PC9pcz48L2M+PGMgcj0iQjMiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPumHkeemvuWGnOS4mjwvdD48L2lzPjwvYz48YyByPSJDMyIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5p2t5beePC90PjwvaXM+PC9jPjxjIHI9IkQzIj48dj43MjkzODwvdj48L2M+PC9yb3c+PHJvdyByPSI0Ij48YyByPSJBNCIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+QzEwODU8L3Q+PC9pcz48L2M+PGMgcj0iQjQiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuWuieazsOS/nemZqTwvdD48L2lzPjwvYz48YyByPSJDNCIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5bi45beePC90PjwvaXM+PC9jPjxjIHI9IkQ0Ij48dj45MDAwNzwvdj48L2M+PC9yb3c+PHJvdyByPSI1Ij48YyByPSJBNSIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+QzEwOTI8L3Q+PC9pcz48L2M+PGMgcj0iQjUiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPua1t+W3neWMu+eWlzwvdD48L2lzPjwvYz48YyByPSJDNSIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5a6B5rOiPC90PjwvaXM+PC9jPjxjIHI9IkQ1Ij48dj4yNTc1Nzwvdj48L2M+PC9yb3c+PHJvdyByPSI2Ij48YyByPSJBNiIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+QzEwNzg8L3Q+PC9pcz48L2M+PGMgcj0iQjYiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuWYieemvuWutuWxhTwvdD48L2lzPjwvYz48YyByPSJDNiIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+6IuP5beePC90PjwvaXM+PC9jPjxjIHI9IkQ2Ij48dj4yNTI0MTwvdj48L2M+PC9yb3c+PHJvdyByPSI3Ij48YyByPSJBNyIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+QzEwNjQ8L3Q+PC9pcz48L2M+PGMgcj0iQjciIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuWkqeaIkOaxvemFjTwvdD48L2lzPjwvYz48YyByPSJDNyIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5LiK5rW3PC90PjwvaXM+PC9jPjxjIHI9IkQ3Ij48dj4xMDA0OTwvdj48L2M+PC9yb3c+PHJvdyByPSI4Ij48YyByPSJBOCIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+QzEwNzE8L3Q+PC9pcz48L2M+PGMgcj0iQjgiIHQ9ImlubGluZVN0ciI+PGlzPjx0IHhtbDpzcGFjZT0icHJlc2VydmUiPuWSjOa2pumjn+WTgTwvdD48L2lzPjwvYz48YyByPSJDOCIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5peg6ZShPC90PjwvaXM+PC9jPjxjIHI9IkQ4Ij48dj4yOTEyNTwvdj48L2M+PC9yb3c+PC9zaGVldERhdGE+PC93b3Jrc2hlZXQ+UEsBAhQAFAAACAAAAAAhAFm0ZAy2AgAAtgIAABMAAAAAAAAAAAAAAAAAAAAAAFtDb250ZW50X1R5cGVzXS54bWxQSwECFAAUAAAIAAAAACEABlnHgigBAAAoAQAACwAAAAAAAAAAAAAAAADnAgAAX3JlbHMvLnJlbHNQSwECFAAUAAAIAAAAACEA7gURVUoBAABKAQAADwAAAAAAAAAAAAAAAAA4BAAAeGwvd29ya2Jvb2sueG1sUEsBAhQAFAAACAAAAAAhABLHGoy2AQAAtgEAABoAAAAAAAAAAAAAAAAArwUAAHhsL19yZWxzL3dvcmtib29rLnhtbC5yZWxzUEsBAhQAFAAACAAAAAAhAGVi7zbAAwAAwAMAABgAAAAAAAAAAAAAAAAAnQcAAHhsL3dvcmtzaGVldHMvc2hlZXQxLnhtbFBLAQIUABQAAAgAAAAAIQCy5WEDBAkAAAQJAAAYAAAAAAAAAAAAAAAAAJMLAAB4bC93b3Jrc2hlZXRzL3NoZWV0Mi54bWxQSwUGAAAAAAYABgCLAQAAzRQAAAAA"
+        }
+      },
+      "fingerprints": [
+        "data/branch A.xlsx",
+        "data/branch B.xlsx",
+        "data/branch C.xlsx"
+      ],
+      "hidden": {
+        "header": [
+          "客户编号",
+          "姓名",
+          "城市",
+          "累计消费"
+        ],
+        "unique": [
+          [
+            "C1001",
+            "华东贸易",
+            "宁波",
+            79293
+          ],
+          [
+            "C1008",
+            "启明软件",
+            "宁波",
+            79028
+          ],
+          [
+            "C1015",
+            "青松物流",
+            "苏州",
+            97712
+          ],
+          [
+            "C1022",
+            "晨光文具",
+            "苏州",
+            57462
+          ],
+          [
+            "C1029",
+            "星河科技",
+            "无锡",
+            44896
+          ],
+          [
+            "C1036",
+            "瑞丰化工",
+            "宁波",
+            89818
+          ],
+          [
+            "C1043",
+            "远航电子",
+            "上海",
+            52841
+          ],
+          [
+            "C1050",
+            "博雅书店",
+            "上海",
+            77837
+          ],
+          [
+            "C1057",
+            "长青园艺",
+            "上海",
+            37079
+          ],
+          [
+            "C1064",
+            "天成汽配",
+            "上海",
+            10049
+          ],
+          [
+            "C1071",
+            "和润食品",
+            "无锡",
+            29125
+          ],
+          [
+            "C1078",
+            "嘉禾家居",
+            "苏州",
+            25241
+          ],
+          [
+            "C1085",
+            "安泰保险",
+            "常州",
+            90007
+          ],
+          [
+            "C1092",
+            "海川医疗",
+            "宁波",
+            25757
+          ],
+          [
+            "C1099",
+            "金禾农业",
+            "杭州",
+            72938
+          ]
+        ]
+      }
+    },
+    {
+      "id": "files/holdout/docx-tables-f-107",
+      "family": "files",
+      "set": "holdout",
+      "variant": "docx-tables",
+      "seed": "f-107",
+      "folder": "f-107",
+      "message": "这次用到的文件都在项目的 f-107/ 目录下，下面说的路径都相对于这个目录。请把 data/经营报告 Q3-80.docx 里的所有表格分别导出为 csv 文件（UTF-8），放在 output/ 下，按表格在文档里出现的顺序在文件名里编号（例如 表1、表2）。",
+      "outputs": [
+        "f-107/output"
+      ],
+      "rubric": [
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": "每张表格都导出了一个 csv",
+          "feedback": "有的表格没有导出来"
+        },
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "每个 csv 的内容与对应表格逐格一致，编号与出现顺序一致",
+          "feedback": "导出的 csv 和文档里的表格对不上"
+        },
+        {
+          "id": "f",
+          "type": "format",
+          "by": "check",
+          "text": "csv 为 UTF-8、逗号分隔",
+          "feedback": "csv 的编码或分隔符不对"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "输出的文件名和目录名里不含空格",
+          "feedback": "输出的文件名里带了空格"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "文件名里带上表格前面的小标题",
+          "feedback": "这次我想在文件名里带上表格的小标题，好找"
+        }
+      ],
+      "files": {
+        "f-107/data/经营报告 Q3-80.docx": {
+          "base64": "UEsDBBQAAAgAAAAAIQD1bniwLQIAAC0CAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFR5cGVzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L2NvbnRlbnQtdHlwZXMiPjxEZWZhdWx0IEV4dGVuc2lvbj0icmVscyIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1wYWNrYWdlLnJlbGF0aW9uc2hpcHMreG1sIi8+PERlZmF1bHQgRXh0ZW5zaW9uPSJ4bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi94bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii93b3JkL2RvY3VtZW50LnhtbCIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1vZmZpY2Vkb2N1bWVudC53b3JkcHJvY2Vzc2luZ21sLmRvY3VtZW50Lm1haW4reG1sIi8+PE92ZXJyaWRlIFBhcnROYW1lPSIvd29yZC9zdHlsZXMueG1sIiBDb250ZW50VHlwZT0iYXBwbGljYXRpb24vdm5kLm9wZW54bWxmb3JtYXRzLW9mZmljZWRvY3VtZW50LndvcmRwcm9jZXNzaW5nbWwuc3R5bGVzK3htbCIvPjwvVHlwZXM+UEsDBBQAAAgAAAAAIQC5gURxKgEAACoBAAALAAAAX3JlbHMvLnJlbHM8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCIgc3RhbmRhbG9uZT0ieWVzIj8+CjxSZWxhdGlvbnNoaXBzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L3JlbGF0aW9uc2hpcHMiPjxSZWxhdGlvbnNoaXAgSWQ9InJJZDEiIFR5cGU9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy9vZmZpY2VEb2N1bWVudC8yMDA2L3JlbGF0aW9uc2hpcHMvb2ZmaWNlRG9jdW1lbnQiIFRhcmdldD0id29yZC9kb2N1bWVudC54bWwiLz48L1JlbGF0aW9uc2hpcHM+UEsDBBQAAAgAAAAAIQCcENJLXRYAAF0WAAARAAAAd29yZC9kb2N1bWVudC54bWw8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCIgc3RhbmRhbG9uZT0ieWVzIj8+Cjx3OmRvY3VtZW50IHhtbG5zOnc9Imh0dHA6Ly9zY2hlbWFzLm9wZW54bWxmb3JtYXRzLm9yZy93b3JkcHJvY2Vzc2luZ21sLzIwMDYvbWFpbiI+PHc6Ym9keT48dzpwPjx3OnBQcj48dzpwU3R5bGUgdzp2YWw9IkhlYWRpbmcxIi8+PC93OnBQcj48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+MjAyNiDlubTnrKzkuInlraPluqbnu4/okKXmiqXlkYrvvIjljY7ljZfljLrvvIk8L3c6dD48L3c6cj48L3c6cD48dzpwPjx3OnBQcj48dzpwU3R5bGUgdzp2YWw9IkhlYWRpbmcyIi8+PC93OnBQcj48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5bqT5a2Y5ZGo6L2sPC93OnQ+PC93OnI+PC93OnA+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5LiL6KGo5Li65pys5a2j5bqm5bqT5a2Y5ZGo6L2s77yM5pWw5o2u5oiq6IezIDkg5pyIIDMwIOaXpeOAgjwvdzp0PjwvdzpyPjwvdzpwPjx3OnRibD48dzp0YmxQcj48dzp0YmxTdHlsZSB3OnZhbD0iVGFibGVHcmlkIi8+PC93OnRibFByPjx3OnRyPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPumhueebrjwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj435pyIPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjjmnIg8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+OeaciDwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48L3c6dHI+PHc6dHI+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5bqT5a2YMTwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj43NzI8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+MzQ5PC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjQ5OTwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48L3c6dHI+PHc6dHI+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5bqT5a2YMjwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj40Mzwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj44NzA8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+NjgzPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjwvdzp0cj48dzp0cj48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7lupPlrZgzPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjc4Mzwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj4xNjQ8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+NTA1PC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjwvdzp0cj48L3c6dGJsPjx3OnA+PHc6cFByPjx3OnBTdHlsZSB3OnZhbD0iSGVhZGluZzIiLz48L3c6cFByPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7plIDllK7mpoLlhrU8L3c6dD48L3c6cj48L3c6cD48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7kuIvooajkuLrmnKzlraPluqbplIDllK7mpoLlhrXvvIzmlbDmja7miKroh7MgOSDmnIggMzAg5pel44CCPC93OnQ+PC93OnI+PC93OnA+PHc6dGJsPjx3OnRibFByPjx3OnRibFN0eWxlIHc6dmFsPSJUYWJsZUdyaWQiLz48L3c6dGJsUHI+PHc6dHI+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+6aG555uuPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjfmnIg8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+OOaciDwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj455pyIPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjwvdzp0cj48dzp0cj48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7plIDllK4xPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjU1OTwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj43ODY8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+ODQxPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjwvdzp0cj48dzp0cj48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7plIDllK4yPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjU3Mzwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj41NzI8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+NjA5PC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjwvdzp0cj48dzp0cj48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7plIDllK4zPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjc0Mjwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj42ODwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj42Mzk8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PC93OnRyPjx3OnRyPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPumUgOWUrjQ8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+ODQ5PC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjYwMTwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj42MTA8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PC93OnRyPjwvdzp0Ymw+PHc6cD48dzpwUHI+PHc6cFN0eWxlIHc6dmFsPSJIZWFkaW5nMiIvPjwvdzpwUHI+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPui0ueeUqOaYjue7hjwvdzp0PjwvdzpyPjwvdzpwPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPuS4i+ihqOS4uuacrOWto+W6pui0ueeUqOaYjue7hu+8jOaVsOaNruaIquiHsyA5IOaciCAzMCDml6XjgII8L3c6dD48L3c6cj48L3c6cD48dzp0Ymw+PHc6dGJsUHI+PHc6dGJsU3R5bGUgdzp2YWw9IlRhYmxlR3JpZCIvPjwvdzp0YmxQcj48dzp0cj48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj7pobnnm648L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+N+aciDwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj445pyIPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjnmnIg8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PC93OnRyPjx3OnRyPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPui0ueeUqDE8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+NzI2PC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjUyMzwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj40NzM8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PC93OnRyPjx3OnRyPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPui0ueeUqDI8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+OTk8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+MjUyPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjcwNzwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48L3c6dHI+PHc6dHI+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+6LS555SoMzwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj4xODg8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+ODUyPC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjE5Mjwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48L3c6dHI+PHc6dHI+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+6LS555SoNDwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48dzp0Yz48dzpwPjx3OnI+PHc6dCB4bWw6c3BhY2U9InByZXNlcnZlIj4zMTc8L3c6dD48L3c6cj48L3c6cD48L3c6dGM+PHc6dGM+PHc6cD48dzpyPjx3OnQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+MzQ2PC93OnQ+PC93OnI+PC93OnA+PC93OnRjPjx3OnRjPjx3OnA+PHc6cj48dzp0IHhtbDpzcGFjZT0icHJlc2VydmUiPjg1MDwvdzp0PjwvdzpyPjwvdzpwPjwvdzp0Yz48L3c6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"
+        }
+      },
+      "fingerprints": [
+        "data/经营报告 Q3-80.docx"
+      ],
+      "hidden": {
+        "tables": [
+          [
+            [
+              "项目",
+              "7月",
+              "8月",
+              "9月"
+            ],
+            [
+              "库存1",
+              "772",
+              "349",
+              "499"
+            ],
+            [
+              "库存2",
+              "43",
+              "870",
+              "683"
+            ],
+            [
+              "库存3",
+              "783",
+              "164",
+              "505"
+            ]
+          ],
+          [
+            [
+              "项目",
+              "7月",
+              "8月",
+              "9月"
+            ],
+            [
+              "销售1",
+              "559",
+              "786",
+              "841"
+            ],
+            [
+              "销售2",
+              "573",
+              "572",
+              "609"
+            ],
+            [
+              "销售3",
+              "742",
+              "68",
+              "639"
+            ],
+            [
+              "销售4",
+              "849",
+              "601",
+              "610"
+            ]
+          ],
+          [
+            [
+              "项目",
+              "7月",
+              "8月",
+              "9月"
+            ],
+            [
+              "费用1",
+              "726",
+              "523",
+              "473"
+            ],
+            [
+              "费用2",
+              "99",
+              "252",
+              "707"
+            ],
+            [
+              "费用3",
+              "188",
+              "852",
+              "192"
+            ],
+            [
+              "费用4",
+              "317",
+              "346",
+              "850"
+            ],
+            [
+              "费用5",
+              "294",
+              "141",
+              "528"
+            ]
+          ]
+        ],
+        "captions": [
+          "库存周转",
+          "销售概况",
+          "费用明细"
+        ]
+      }
+    },
+    {
+      "id": "files/holdout/cleanup-archive-f-108",
+      "family": "files",
+      "set": "holdout",
+      "variant": "cleanup-archive",
+      "seed": "f-108",
+      "folder": "f-108",
+      "message": "这次用到的文件都在项目的 f-108/ 目录下，下面说的路径都相对于这个目录。请整理 messy/ 目录：删除所有 .tmp 文件和 0 字节的文件；图片（.png、.jpg）移到 sorted/images/，文档（.pdf、.docx、.md）移到 sorted/docs/，表格（.csv、.xlsx）移到 sorted/data/；日志（.log）大于 10 KB 的移到 sorted/logs/large/，其余移到 sorted/logs/。移动时文件内容不能改，整理完 messy/ 里不留文件。",
+      "outputs": [
+        "f-108/sorted",
+        "f-108/messy"
+      ],
+      "rubric": [
+        {
+          "id": "r",
+          "type": "wrong-result",
+          "by": "check",
+          "text": "每个保留的文件都在规则对应的目录里",
+          "feedback": "有文件放错了目录"
+        },
+        {
+          "id": "m",
+          "type": "missing",
+          "by": "check",
+          "text": ".tmp 文件和 0 字节文件都删掉了",
+          "feedback": ".tmp 或空文件没删干净"
+        },
+        {
+          "id": "u",
+          "type": "unverified",
+          "by": "check",
+          "text": "保留的文件一个不少、内容没变，messy/ 里不剩文件",
+          "feedback": "有文件丢了或者内容变了，messy/ 里还有东西"
+        },
+        {
+          "id": "c",
+          "type": "convention",
+          "by": "check",
+          "text": "输出的文件名和目录名里不含空格",
+          "feedback": "输出的文件名里带了空格"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "text": "sorted/ 下另放一份整理记录",
+          "feedback": "这次我还想要一份整理记录，放在 sorted/ 下"
+        }
+      ],
+      "files": {
+        "f-108/messy/~$临时 1.tmp": {
+          "text": "lock"
+        },
+        "f-108/messy/cache 62.tmp": {
+          "text": "cache-data"
+        },
+        "f-108/messy/autosave.tmp": {
+          "text": "autosave"
+        },
+        "f-108/messy/空白 文件.txt": {
+          "text": ""
+        },
+        "f-108/messy/old export.csv": {
+          "text": ""
+        },
+        "f-108/messy/photo 965.png": {
+          "base64": "cG5nOjQ5MjkyNzp4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4"
+        },
+        "f-108/messy/产品图 2.jpg": {
+          "base64": "anBnOjI2NTgxMTp4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA=="
+        },
+        "f-108/messy/logo.png": {
+          "base64": "bG9nbzo5NTk5NzE6eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4"
+        },
+        "f-108/messy/合同 扫描.pdf": {
+          "base64": "cGRmOjk1NTYwMDp4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eA=="
+        },
+        "f-108/messy/周报 9月.docx": {
+          "base64": "ZG9jeDo3MjczODU6eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4"
+        },
+        "f-108/messy/readme draft.md": {
+          "text": "# 草稿\n\n备用\n"
+        },
+        "f-108/messy/库存 明细.csv": {
+          "text": "商品,数量\n签字笔,54\n"
+        },
+        "f-108/messy/预算表.xlsx": {
+          "base64": "UEsDBBQAAAgAAAAAIQDFLx19LgIAAC4CAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbDw/eG1sIHZlcnNpb249IjEuMCIgZW5jb2Rpbmc9IlVURi04IiBzdGFuZGFsb25lPSJ5ZXMiPz4KPFR5cGVzIHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvcGFja2FnZS8yMDA2L2NvbnRlbnQtdHlwZXMiPjxEZWZhdWx0IEV4dGVuc2lvbj0icmVscyIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1wYWNrYWdlLnJlbGF0aW9uc2hpcHMreG1sIi8+PERlZmF1bHQgRXh0ZW5zaW9uPSJ4bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi94bWwiLz48T3ZlcnJpZGUgUGFydE5hbWU9Ii94bC93b3JrYm9vay54bWwiIENvbnRlbnRUeXBlPSJhcHBsaWNhdGlvbi92bmQub3BlbnhtbGZvcm1hdHMtb2ZmaWNlZG9jdW1lbnQuc3ByZWFkc2hlZXRtbC5zaGVldC5tYWluK3htbCIvPjxPdmVycmlkZSBQYXJ0TmFtZT0iL3hsL3dvcmtzaGVldHMvc2hlZXQxLnhtbCIgQ29udGVudFR5cGU9ImFwcGxpY2F0aW9uL3ZuZC5vcGVueG1sZm9ybWF0cy1vZmZpY2Vkb2N1bWVudC5zcHJlYWRzaGVldG1sLndvcmtzaGVldCt4bWwiLz48L1R5cGVzPlBLAwQUAAAIAAAAACEABlnHgigBAAAoAQAACwAAAF9yZWxzLy5yZWxzPD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9InllcyI/Pgo8UmVsYXRpb25zaGlwcyB4bWxucz0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL3BhY2thZ2UvMjAwNi9yZWxhdGlvbnNoaXBzIj48UmVsYXRpb25zaGlwIElkPSJySWQxIiBUeXBlPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvb2ZmaWNlRG9jdW1lbnQvMjAwNi9yZWxhdGlvbnNoaXBzL29mZmljZURvY3VtZW50IiBUYXJnZXQ9InhsL3dvcmtib29rLnhtbCIvPjwvUmVsYXRpb25zaGlwcz5QSwMEFAAACAAAAAAhALExE/McAQAAHAEAAA8AAAB4bC93b3JrYm9vay54bWw8P3htbCB2ZXJzaW9uPSIxLjAiIGVuY29kaW5nPSJVVEYtOCIgc3RhbmRhbG9uZT0ieWVzIj8+Cjx3b3JrYm9vayB4bWxucz0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL3NwcmVhZHNoZWV0bWwvMjAwNi9tYWluIiB4bWxuczpyPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvb2ZmaWNlRG9jdW1lbnQvMjAwNi9yZWxhdGlvbnNoaXBzIj48c2hlZXRzPjxzaGVldCBuYW1lPSLpooTnrpciIHNoZWV0SWQ9IjEiIHI6aWQ9InJJZDEiLz48L3NoZWV0cz48L3dvcmtib29rPlBLAwQUAAAIAAAAACEAmm88fCkBAAApAQAAGgAAAHhsL19yZWxzL3dvcmtib29rLnhtbC5yZWxzPD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9InllcyI/Pgo8UmVsYXRpb25zaGlwcyB4bWxucz0iaHR0cDovL3NjaGVtYXMub3BlbnhtbGZvcm1hdHMub3JnL3BhY2thZ2UvMjAwNi9yZWxhdGlvbnNoaXBzIj48UmVsYXRpb25zaGlwIElkPSJySWQxIiBUeXBlPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvb2ZmaWNlRG9jdW1lbnQvMjAwNi9yZWxhdGlvbnNoaXBzL3dvcmtzaGVldCIgVGFyZ2V0PSJ3b3Jrc2hlZXRzL3NoZWV0MS54bWwiLz48L1JlbGF0aW9uc2hpcHM+UEsDBBQAAAgAAAAAIQA67VxtuAEAALgBAAAYAAAAeGwvd29ya3NoZWV0cy9zaGVldDEueG1sPD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9InllcyI/Pgo8d29ya3NoZWV0IHhtbG5zPSJodHRwOi8vc2NoZW1hcy5vcGVueG1sZm9ybWF0cy5vcmcvc3ByZWFkc2hlZXRtbC8yMDA2L21haW4iPjxzaGVldERhdGE+PHJvdyByPSIxIj48YyByPSJBMSIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+6aG555uuPC90PjwvaXM+PC9jPjxjIHI9IkIxIiB0PSJpbmxpbmVTdHIiPjxpcz48dCB4bWw6c3BhY2U9InByZXNlcnZlIj7ph5Hpop08L3Q+PC9pcz48L2M+PC9yb3c+PHJvdyByPSIyIj48YyByPSJBMiIgdD0iaW5saW5lU3RyIj48aXM+PHQgeG1sOnNwYWNlPSJwcmVzZXJ2ZSI+5beu5peFPC90PjwvaXM+PC9jPjxjIHI9IkIyIj48dj42NjU1PC92PjwvYz48L3Jvdz48L3NoZWV0RGF0YT48L3dvcmtzaGVldD5QSwECFAAUAAAIAAAAACEAxS8dfS4CAAAuAgAAEwAAAAAAAAAAAAAAAAAAAAAAW0NvbnRlbnRfVHlwZXNdLnhtbFBLAQIUABQAAAgAAAAAIQAGWceCKAEAACgBAAALAAAAAAAAAAAAAAAAAF8CAABfcmVscy8ucmVsc1BLAQIUABQAAAgAAAAAIQCxMRPzHAEAABwBAAAPAAAAAAAAAAAAAAAAALADAAB4bC93b3JrYm9vay54bWxQSwECFAAUAAAIAAAAACEAmm88fCkBAAApAQAAGgAAAAAAAAAAAAAAAAD5BAAAeGwvX3JlbHMvd29ya2Jvb2sueG1sLnJlbHNQSwECFAAUAAAIAAAAACEAOu1cbbgBAAC4AQAAGAAAAAAAAAAAAAAAAABaBgAAeGwvd29ya3NoZWV0cy9zaGVldDEueG1sUEsFBgAAAAAFAAUARQEAAEgIAAAAAA=="
+        },
+        "f-108/messy/server 1.log": {
+          "text": "2026-09-01 10:00:00 INFO request 0 ok\n2026-09-02 10:01:00 INFO request 1 ok\n2026-09-03 10:02:00 INFO request 2 ok\n2026-09-04 10:03:00 INFO request 3 ok\n2026-09-05 10:04:00 INFO request 4 ok\n2026-09-06 10:05:00 INFO request 5 ok\n2026-09-07 10:06:00 INFO request 6 ok\n2026-09-08 10:07:00 INFO request 7 ok\n2026-09-09 10:08:00 INFO request 8 ok\n2026-09-10 10:09:00 INFO request 9 ok\n2026-09-11 10:10:00 INFO request 10 ok\n2026-09-12 10:11:00 INFO request 11 ok\n2026-09-13 10:12:00 INFO request 12 ok\n2026-09-14 10:13:00 INFO request 13 ok\n2026-09-15 10:14:00 INFO request 14 ok\n2026-09-16 10:15:00 INFO request 15 ok\n2026-09-17 10:16:00 INFO request 16 ok\n2026-09-18 10:17:00 INFO request 17 ok\n2026-09-19 10:18:00 INFO request 18 ok\n2026-09-20 10:19:00 INFO request 19 ok\n2026-09-21 10:20:00 INFO request 20 ok\n2026-09-22 10:21:00 INFO request 21 ok\n2026-09-23 10:22:00 INFO request 22 ok\n2026-09-24 10:23:00 INFO request 23 ok\n2026-09-25 10:24:00 INFO request 24 ok\n2026-09-26 10:25:00 INFO request 25 ok\n2026-09-27 10:26:00 INFO request 26 ok\n2026-09-28 10:27:00 INFO request 27 ok\n2026-09-01 10:28:00 INFO request 28 ok\n2026-09-02 10:29:00 INFO request 29 ok\n2026-09-03 10:30:00 INFO request 30 ok\n2026-09-04 10:31:00 INFO request 31 ok\n2026-09-05 10:32:00 INFO request 32 ok\n2026-09-06 10:33:00 INFO request 33 ok\n2026-09-07 10:34:00 INFO request 34 ok\n2026-09-08 10:35:00 INFO request 35 ok\n2026-09-09 10:36:00 INFO request 36 ok\n2026-09-10 10:37:00 INFO request 37 ok\n2026-09-11 10:38:00 INFO request 38 ok\n2026-09-12 10:39:00 INFO request 39 ok\n2026-09-13 10:40:00 INFO request 40 ok\n2026-09-14 10:41:00 INFO request 41 ok\n2026-09-15 10:42:00 INFO request 42 ok\n2026-09-16 10:43:00 INFO request 43 ok\n2026-09-17 10:44:00 INFO request 44 ok\n2026-09-18 10:45:00 INFO request 45 ok\n2026-09-19 10:46:00 INFO request 46 ok\n2026-09-20 10:47:00 INFO request 47 ok\n2026-09-21 10:48:00 INFO request 48 ok\n2026-09-22 10:49:00 INFO request 49 ok\n2026-09-23 10:50:00 INFO request 50 ok\n2026-09-24 10:51:00 INFO request 51 ok\n2026-09-25 10:52:00 INFO request 52 ok\n2026-09-26 10:53:00 INFO request 53 ok\n2026-09-27 10:54:00 INFO request 54 ok\n2026-09-28 10:55:00 INFO request 55 ok\n2026-09-01 10:56:00 INFO request 56 ok\n2026-09-02 10:57:00 INFO request 57 ok\n2026-09-03 10:58:00 INFO request 58 ok\n2026-09-04 10:59:00 INFO request 59 ok\n2026-09-05 10:00:00 INFO request 60 ok\n2026-09-06 10:01:00 INFO request 61 ok\n2026-09-07 10:02:00 INFO request 62 ok\n2026-09-08 10:03:00 INFO request 63 ok\n2026-09-09 10:04:00 INFO request 64 ok\n2026-09-10 10:05:00 INFO request 65 ok\n2026-09-11 10:06:00 INFO request 66 ok\n2026-09-12 10:07:00 INFO request 67 ok\n2026-09-13 10:08:00 INFO request 68 ok\n2026-09-14 10:09:00 INFO request 69 ok\n2026-09-15 10:10:00 INFO request 70 ok\n2026-09-16 10:11:00 INFO request 71 ok\n2026-09-17 10:12:00 INFO request 72 ok\n2026-09-18 10:13:00 INFO request 73 ok\n2026-09-19 10:14:00 INFO request 74 ok\n2026-09-20 10:15:00 INFO request 75 ok\n2026-09-21 10:16:00 INFO request 76 ok\n2026-09-22 10:17:00 INFO request 77 ok\n2026-09-23 10:18:00 INFO request 78 ok\n2026-09-24 10:19:00 INFO request 79 ok\n2026-09-25 10:20:00 INFO request 80 ok\n2026-09-26 10:21:00 INFO request 81 ok\n2026-09-27 10:22:00 INFO request 82 ok\n2026-09-28 10:23:00 INFO request 83 ok\n2026-09-01 10:24:00 INFO request 84 ok\n2026-09-02 10:25:00 INFO request 85 ok\n2026-09-03 10:26:00 INFO request 86 ok\n2026-09-04 10:27:00 INFO request 87 ok\n2026-09-05 10:28:00 INFO request 88 ok\n2026-09-06 10:29:00 INFO request 89 ok\n2026-09-07 10:30:00 INFO request 90 ok\n2026-09-08 10:31:00 INFO request 91 ok\n2026-09-09 10:32:00 INFO request 92 ok\n2026-09-10 10:33:00 INFO request 93 ok\n2026-09-11 10:34:00 INFO request 94 ok\n2026-09-12 10:35:00 INFO request 95 ok\n2026-09-13 10:36:00 INFO request 96 ok\n2026-09-14 10:37:00 INFO request 97 ok\n2026-09-15 10:38:00 INFO request 98 ok\n2026-09-16 10:39:00 INFO request 99 ok\n2026-09-17 10:40:00 INFO request 100 ok\n2026-09-18 10:41:00 INFO request 101 ok\n2026-09-19 10:42:00 INFO request 102 ok\n2026-09-20 10:43:00 INFO request 103 ok\n2026-09-21 10:44:00 INFO request 104 ok\n2026-09-22 10:45:00 INFO request 105 ok\n2026-09-23 10:46:00 INFO request 106 ok\n2026-09-24 10:47:00 INFO request 107 ok\n2026-09-25 10:48:00 INFO request 108 ok\n2026-09-26 10:49:00 INFO request 109 ok\n2026-09-27 10:50:00 INFO request 110 ok\n2026-09-28 10:51:00 INFO request 111 ok\n2026-09-01 10:52:00 INFO request 112 ok\n2026-09-02 10:53:00 INFO request 113 ok\n2026-09-03 10:54:00 INFO request 114 ok\n2026-09-04 10:55:00 INFO request 115 ok\n2026-09-05 10:56:00 INFO request 116 ok\n2026-09-06 10:57:00 INFO request 117 ok\n2026-09-07 10:58:00 INFO request 118 ok\n2026-09-08 10:59:00 INFO request 119 ok\n2026-09-09 10:00:00 INFO request 120 ok\n2026-09-10 10:01:00 INFO request 121 ok\n2026-09-11 10:02:00 INFO request 122 ok\n2026-09-12 10:03:00 INFO request 123 ok\n2026-09-13 10:04:00 INFO request 124 ok\n2026-09-14 10:05:00 INFO request 125 ok\n2026-09-15 10:06:00 INFO request 126 ok\n2026-09-16 10:07:00 INFO request 127 ok\n2026-09-17 10:08:00 INFO request 128 ok\n2026-09-18 10:09:00 INFO request 129 ok\n2026-09-19 10:10:00 INFO request 130 ok\n2026-09-20 10:11:00 INFO request 131 ok\n2026-09-21 10:12:00 INFO request 132 ok\n2026-09-22 10:13:00 INFO request 133 ok\n2026-09-23 10:14:00 INFO request 134 ok\n2026-09-24 10:15:00 INFO request 135 ok\n2026-09-25 10:16:00 INFO request 136 ok\n2026-09-26 10:17:00 INFO request 137 ok\n2026-09-27 10:18:00 INFO request 138 ok\n2026-09-28 10:19:00 INFO request 139 ok\n2026-09-01 10:20:00 INFO request 140 ok\n2026-09-02 10:21:00 INFO request 141 ok\n2026-09-03 10:22:00 INFO request 142 ok\n2026-09-04 10:23:00 INFO request 143 ok\n2026-09-05 10:24:00 INFO request 144 ok\n2026-09-06 10:25:00 INFO request 145 ok\n2026-09-07 10:26:00 INFO request 146 ok\n2026-09-08 10:27:00 INFO request 147 ok\n2026-09-09 10:28:00 INFO request 148 ok\n2026-09-10 10:29:00 INFO request 149 ok\n2026-09-11 10:30:00 INFO request 150 ok\n2026-09-12 10:31:00 INFO request 151 ok\n2026-09-13 10:32:00 INFO request 152 ok\n2026-09-14 10:33:00 INFO request 153 ok\n2026-09-15 10:34:00 INFO request 154 ok\n2026-09-16 10:35:00 INFO request 155 ok\n2026-09-17 10:36:00 INFO request 156 ok\n2026-09-18 10:37:00 INFO request 157 ok\n2026-09-19 10:38:00 INFO request 158 ok\n2026-09-20 10:39:00 INFO request 159 ok\n2026-09-21 10:40:00 INFO request 160 ok\n2026-09-22 10:41:00 INFO request 161 ok\n2026-09-23 10:42:00 INFO request 162 ok\n2026-09-24 10:43:00 INFO request 163 ok\n2026-09-25 10:44:00 INFO request 164 ok\n2026-09-26 10:45:00 INFO request 165 ok\n2026-09-27 10:46:00 INFO request 166 ok\n2026-09-28 10:47:00 INFO request 167 ok\n2026-09-01 10:48:00 INFO request 168 ok\n2026-09-02 10:49:00 INFO request 169 ok\n2026-09-03 10:50:00 INFO request 170 ok\n2026-09-04 10:51:00 INFO request 171 ok\n2026-09-05 10:52:00 INFO request 172 ok\n2026-09-06 10:53:00 INFO request 173 ok\n2026-09-07 10:54:00 INFO request 174 ok\n2026-09-08 10:55:00 INFO request 175 ok\n2026-09-09 10:56:00 INFO request 176 ok\n2026-09-10 10:57:00 INFO request 177 ok\n2026-09-11 10:58:00 INFO request 178 ok\n2026-09-12 10:59:00 INFO request 179 ok\n2026-09-13 10:00:00 INFO request 180 ok\n2026-09-14 10:01:00 INFO request 181 ok\n2026-09-15 10:02:00 INFO request 182 ok\n2026-09-16 10:03:00 INFO request 183 ok\n2026-09-17 10:04:00 INFO request 184 ok\n2026-09-18 10:05:00 INFO request 185 ok\n2026-09-19 10:06:00 INFO request 186 ok\n2026-09-20 10:07:00 INFO request 187 ok\n2026-09-21 10:08:00 INFO request 188 ok\n2026-09-22 10:09:00 INFO request 189 ok\n2026-09-23 10:10:00 INFO request 190 ok\n2026-09-24 10:11:00 INFO request 191 ok\n2026-09-25 10:12:00 INFO request 192 ok\n2026-09-26 10:13:00 INFO request 193 ok\n2026-09-27 10:14:00 INFO request 194 ok\n2026-09-28 10:15:00 INFO request 195 ok\n2026-09-01 10:16:00 INFO request 196 ok\n2026-09-02 10:17:00 INFO request 197 ok\n2026-09-03 10:18:00 INFO request 198 ok\n2026-09-04 10:19:00 INFO request 199 ok\n2026-09-05 10:20:00 INFO request 200 ok\n2026-09-06 10:21:00 INFO request 201 ok\n2026-09-07 10:22:00 INFO request 202 ok\n2026-09-08 10:23:00 INFO request 203 ok\n2026-09-09 10:24:00 INFO request 204 ok\n2026-09-10 10:25:00 INFO request 205 ok\n2026-09-11 10:26:00 INFO request 206 ok\n2026-09-12 10:27:00 INFO request 207 ok\n2026-09-13 10:28:00 INFO request 208 ok\n2026-09-14 10:29:00 INFO request 209 ok\n2026-09-15 10:30:00 INFO request 210 ok\n2026-09-16 10:31:00 INFO request 211 ok\n2026-09-17 10:32:00 INFO request 212 ok\n2026-09-18 10:33:00 INFO request 213 ok\n2026-09-19 10:34:00 INFO request 214 ok\n2026-09-20 10:35:00 INFO request 215 ok\n2026-09-21 10:36:00 INFO request 216 ok\n2026-09-22 10:37:00 INFO request 217 ok\n2026-09-23 10:38:00 INFO request 218 ok\n2026-09-24 10:39:00 INFO request 219 ok\n2026-09-25 10:40:00 INFO request 220 ok\n2026-09-26 10:41:00 INFO request 221 ok\n2026-09-27 10:42:00 INFO request 222 ok\n2026-09-28 10:43:00 INFO request 223 ok\n2026-09-01 10:44:00 INFO request 224 ok\n2026-09-02 10:45:00 INFO request 225 ok\n2026-09-03 10:46:00 INFO request 226 ok\n2026-09-04 10:47:00 INFO request 227 ok\n2026-09-05 10:48:00 INFO request 228 ok\n2026-09-06 10:49:00 INFO request 229 ok\n2026-09-07 10:50:00 INFO request 230 ok\n2026-09-08 10:51:00 INFO request 231 ok\n2026-09-09 10:52:00 INFO request 232 ok\n2026-09-10 10:53:00 INFO request 233 ok\n2026-09-11 10:54:00 INFO request 234 ok\n2026-09-12 10:55:00 INFO request 235 ok\n2026-09-13 10:56:00 INFO request 236 ok\n2026-09-14 10:57:00 INFO request 237 ok\n2026-09-15 10:58:00 INFO request 238 ok\n2026-09-16 10:59:00 INFO request 239 ok\n2026-09-17 10:00:00 INFO request 240 ok\n2026-09-18 10:01:00 INFO request 241 ok\n2026-09-19 10:02:00 INFO request 242 ok\n2026-09-20 10:03:00 INFO request 243 ok\n2026-09-21 10:04:00 INFO request 244 ok\n2026-09-22 10:05:00 INFO request 245 ok\n2026-09-23 10:06:00 INFO request 246 ok\n2026-09-24 10:07:00 INFO request 247 ok\n2026-09-25 10:08:00 INFO request 248 ok\n2026-09-26 10:09:00 INFO request 249 ok\n2026-09-27 10:10:00 INFO request 250 ok\n2026-09-28 10:11:00 INFO request 251 ok\n2026-09-01 10:12:00 INFO request 252 ok\n2026-09-02 10:13:00 INFO request 253 ok\n2026-09-03 10:14:00 INFO request 254 ok\n2026-09-04 10:15:00 INFO request 255 ok\n2026-09-05 10:16:00 INFO request 256 ok\n2026-09-06 10:17:00 INFO request 257 ok\n2026-09-07 10:18:00 INFO request 258 ok\n2026-09-08 10:19:00 INFO request 259 ok\n2026-09-09 10:20:00 INFO request 260 ok\n2026-09-10 10:21:00 INFO request 261 ok\n2026-09-11 10:22:00 INFO request 262 ok\n2026-09-12 10:23:00 INFO request 263 ok\n2026-09-13 10:24:00 INFO request 264 ok\n2026-09-14 10:25:00 INFO request 265 ok\n2026-09-15 10:26:00 INFO request 266 ok\n2026-09-16 10:27:00 INFO request 267 ok\n2026-09-17 10:28:00 INFO request 268 ok\n2026-09-18 10:29:00 INFO request 269 ok\n2026-09-19 10:30:00 INFO request 270 ok\n2026-09-20 10:31:00 INFO request 271 ok\n2026-09-21 10:32:00 INFO request 272 ok\n2026-09-22 10:33:00 INFO request 273 ok\n2026-09-23 10:34:00 INFO request 274 ok\n2026-09-24 10:35:00 INFO request 275 ok\n2026-09-25 10:36:00 INFO request 276 ok\n2026-09-26 10:37:00 INFO request 277 ok\n2026-09-27 10:38:00 INFO request 278 ok\n2026-09-28 10:39:00 INFO request 279 ok\n2026-09-01 10:40:00 INFO request 280 ok\n2026-09-02 10:41:00 INFO request 281 ok\n2026-09-03 10:42:00 INFO request 282 ok\n2026-09-04 10:43:00 INFO request 283 ok\n2026-09-05 10:44:00 INFO request 284 ok\n2026-09-06 10:45:00 INFO request 285 ok\n2026-09-07 10:46:00 INFO request 286 ok\n2026-09-08 10:47:00 INFO request 287 ok\n2026-09-09 10:48:00 INFO request 288 ok\n2026-09-10 10:49:00 INFO request 289 ok\n2026-09-11 10:50:00 INFO request 290 ok\n2026-09-12 10:51:00 INFO request 291 ok\n2026-09-13 10:52:00 INFO request 292 ok\n2026-09-14 10:53:00 INFO request 293 ok\n2026-09-15 10:54:00 INFO request 294 ok\n2026-09-16 10:55:00 INFO request 295 ok\n2026-09-17 10:56:00 INFO request 296 ok\n2026-09-18 10:57:00 INFO request 297 ok\n2026-09-19 10:58:00 INFO request 298 ok\n2026-09-20 10:59:00 INFO request 299 ok\n2026-09-21 10:00:00 INFO request 300 ok\n2026-09-22 10:01:00 INFO request 301 ok\n2026-09-23 10:02:00 INFO request 302 ok\n2026-09-24 10:03:00 INFO request 303 ok\n2026-09-25 10:04:00 INFO request 304 ok\n2026-09-26 10:05:00 INFO request 305 ok\n2026-09-27 10:06:00 INFO request 306 ok\n2026-09-28 10:07:00 INFO request 307 ok\n2026-09-01 10:08:00 INFO request 308 ok\n2026-09-02 10:09:00 INFO request 309 ok\n"
+        },
+        "f-108/messy/job.log": {
+          "text": "2026-09-02 10:01:00 INFO request 1 ok\n2026-09-03 10:02:00 INFO request 2 ok\n"
+        },
+        "f-108/messy/error log.log": {
+          "text": "2026-09-04 10:03:00 INFO request 3 ok\n"
+        }
+      },
+      "fingerprints": [
+        "messy/server 1.log",
+        "messy/产品图 2.jpg"
+      ],
+      "hidden": {
+        "plan": [
+          {
+            "from": "messy/~$临时 1.tmp",
+            "to": null
+          },
+          {
+            "from": "messy/cache 62.tmp",
+            "to": null
+          },
+          {
+            "from": "messy/autosave.tmp",
+            "to": null
+          },
+          {
+            "from": "messy/空白 文件.txt",
+            "to": null
+          },
+          {
+            "from": "messy/old export.csv",
+            "to": null
+          },
+          {
+            "from": "messy/photo 965.png",
+            "to": "sorted/images"
+          },
+          {
+            "from": "messy/产品图 2.jpg",
+            "to": "sorted/images"
+          },
+          {
+            "from": "messy/logo.png",
+            "to": "sorted/images"
+          },
+          {
+            "from": "messy/合同 扫描.pdf",
+            "to": "sorted/docs"
+          },
+          {
+            "from": "messy/周报 9月.docx",
+            "to": "sorted/docs"
+          },
+          {
+            "from": "messy/readme draft.md",
+            "to": "sorted/docs"
+          },
+          {
+            "from": "messy/库存 明细.csv",
+            "to": "sorted/data"
+          },
+          {
+            "from": "messy/预算表.xlsx",
+            "to": "sorted/data"
+          },
+          {
+            "from": "messy/server 1.log",
+            "to": "sorted/logs/large"
+          },
+          {
+            "from": "messy/job.log",
+            "to": "sorted/logs"
+          },
+          {
+            "from": "messy/error log.log",
+            "to": "sorted/logs"
+          }
+        ]
+      }
+    }
+  ],
+  "scoring": {
+    "metric": "要点通过率：每次运行中计分要点（不含个人口味）通过的比例；“看不出”按未通过计并单列；判定器未能完成的运行记为未知，不计入，单列",
+    "wholeCase": "整题通过：全部计分要点通过",
+    "checks": "by=check 的要点由确定性判定器判；by=review 的要点由外部评审判（只有文档类）；by=none 的个人口味要点不计分",
+    "holdoutOnlyReview": "外部评审只判 holdout 运行与参考成对样本；它的判语不写进项目，也不生成反馈"
+  },
+  "feedback": {
+    "source": "只用确定性判定（by=check）没通过的要点；外部评审的判语不进反馈",
+    "priority": [
+      "missing",
+      "wrong-result",
+      "unverified",
+      "format",
+      "convention"
+    ],
+    "templates": {
+      "missing": [
+        "{detail}。",
+        "{detail}，这是任务里要的。",
+        "请对照任务要求检查一遍，这次{detail}。"
+      ],
+      "wrong-result": [
+        "结果不对：{detail}。",
+        "{detail}，请重新做一遍。",
+        "这次的结果还是有错（{detail}），交之前请核对。"
+      ],
+      "unverified": [
+        "{detail}。",
+        "交之前请自己核对一遍，这次{detail}。",
+        "又出现了没核对的问题：{detail}。以后交之前都要核对。"
+      ],
+      "format": [
+        "格式不对：{detail}。",
+        "{detail}，请按要求的格式来。",
+        "格式还是有问题（{detail}）。"
+      ],
+      "convention": [
+        "{detail}。",
+        "我们这边一直有这个习惯，这次{detail}。",
+        "又是这样：{detail}。以后都要注意。"
+      ]
+    },
+    "secondary": "另外，{detail}。",
+    "taste": "还有，{detail}。",
+    "praise": "这次的结果没问题，谢谢。",
+    "ratings": [
+      2,
+      null,
+      3
+    ],
+    "counting": "评分 ≤ 3，或有评论没评分，计入改进阈值（同 ../feedback.mjs counts）",
+    "tasteRule": "成果不符合个人口味要点时，在第一条反馈里说一句；通过的用例用评分 4（不计数）"
+  },
+  "reviewer": {
+    "external": {
+      "model": "claude-opus-5-5",
+      "thinking": "on",
+      "maxTokens": 16000
+    },
+    "inLoop": {
+      "model": "claude-sonnet-5-5",
+      "thinking": "on",
+      "maxTokens": 16000,
+      "use": "同一要点提示，判同一批 holdout 文档运行，只用于一致率（判据 4）"
+    },
+    "pointPrompt": {
+      "system": "你是一名独立评审，负责检查一份工作成果是否满足评分要点。\n只根据给出的任务、资料和成果判断，不要猜测资料以外的情况。\n对每个要点给出“是”“否”或“看不出”：满足写“是”，不满足写“否”，凭给出的内容确实无法判断时写“看不出”。\n每个要点用一句话说明理由。\n只输出一个 JSON 对象，不要输出其他文字：{\"points\":[{\"id\":\"要点编号\",\"verdict\":\"是|否|看不出\",\"reason\":\"一句话\"}]}",
+      "user": "# 任务 / # 资料（每个资料文件：【文件名】+全文）/ # 成果（输出路径）/ # 评分要点（- id：text，只列 by=review）"
+    },
+    "pairPrompt": {
+      "system": "你是一名独立评审，负责比较同一任务的两份成果。\n比较的依据是任务要求、给出的资料和评分要点：内容是否准确、完整，是否有资料里没有的内容，结构是否清楚。不要因为篇幅长短或出现的先后本身偏向任何一份。\n先逐条列出两份之间会影响任务完成好坏的具体差别，每条写明哪一份更好、依据是哪个要点或哪份资料；措辞、排版、详略上不影响任务完成的差别不算。\n没有这样的差别，或差别互相抵消、分不出高下时，写 tie。\n只输出一个 JSON 对象，不要输出其他文字：{\"differences\":[\"一条差别\"],\"preference\":\"A|B|tie\",\"reason\":\"一句话\"}",
+      "user": "# 任务 / # 资料 / # 评分要点（- id：text，不含个人口味）/ # 成果 A / # 成果 B",
+      "noDifferences": "回复的 differences 是空数组时按 tie 计（提示要求没有影响任务的差别就写 tie）"
+    },
+    "pairwise": {
+      "arms": [
+        "parent",
+        "memory"
+      ],
+      "repeat": 1,
+      "bothOrders": true,
+      "use": "每道文档类 holdout 题，第 1 次重复，parent 与 memory 两臂的成果，两种顺序各判一次；只作辅助指标与判据 3"
+    }
+  },
+  "statistics": {
+    "pairing": "holdout 用例",
+    "bootstrap": {
+      "levels": [
+        "case",
+        "repeat"
+      ],
+      "iterations": 2000,
+      "seed": "step6-pilot",
+      "interval": 0.95,
+      "quantile": "R type 7"
+    },
+    "verdict": "区间下限 > 0 记“正”，上限 < 0 记“负”，否则记“零”；没有可配对的用例记“不足”",
+    "comparisons": [
+      [
+        "parent",
+        "base"
+      ],
+      [
+        "memory",
+        "base"
+      ],
+      [
+        "parent",
+        "memory"
+      ]
+    ],
+    "repeats": 3,
+    "scope": "两类分别算，再两类合并算",
+    "also": [
+      "整题通过率",
+      "每题三次重复的波动",
+      "“看不出”次数按臂",
+      "追问成果次数按臂",
+      "被采用组件按“项目约定或事实 / 做事方法”分类（stats.mjs componentClass）",
+      "背答案率（ADR 0013 findInstanceLiterals）",
+      "内外评审一致率",
+      "费用"
+    ]
+  },
+  "arms": {
+    "list": [
+      "base",
+      "memory",
+      "parent"
+    ],
+    "base": "dev 任务与反馈之前的项目快照的副本",
+    "memory": {
+      "name": "project-notes",
+      "description": "用户以前对本项目成果的反馈（原文）",
+      "title": "用户以前对本项目成果的反馈（原文）",
+      "maxBytes": 16384,
+      "rule": "在 base 副本里经 @nexgent/capabilities 的存储接口直接写入并采用一条上下文策略：instructions 为该类全部计数反馈原文，按时间先后；超长时去掉最早的；不诊断、不过门控"
+    },
+    "parent": "dev 反馈触发改进作业（改进器 v0，adr-0016 纪元：ADR 0015 反馈检查不要求一次性附加要求、评审看到完整改动清单与反馈；ADR 0016 门控评审每对问两种顺序、看到任务输入文件）之后的项目副本",
+    "child": "试点不跑（不跑元改进）",
+    "isolation": "每个任务族、每个臂用自己的 NEXGENT_HOME",
+    "holdoutRuns": "每题每臂 3 次，每次在该臂的新副本里新开会话，关自动改进；没交成果时同一会话追问一次（PRESENT_REQUEST），按臂计数"
+  },
+  "reliability": {
+    "criteria": {
+      "judges": "每个判定器对已知好答案判过、已知坏答案判不过，全对",
+      "pairs": {
+        "text": "6 组已知一好一差的文档成对样本，外部评审至少选对 5 组（两种顺序都选对才算）",
+        "minCorrect": 5,
+        "of": 6
+      },
+      "order": {
+        "text": "两两偏好在两种顺序下一致率不低于 80%（6 组参考成对样本加试点的两臂比较）",
+        "minRate": 0.8
+      },
+      "agreement": "循环内评审与外部评审在同一批要点上的一致率，照实报告，不设门槛"
+    },
+    "pairs": [
+      {
+        "id": "minutes-fabricated",
+        "flaw": "加入了记录里没有的决定",
+        "good": "# 2026 年 9 月会议纪要\n\n本月共召开 3 次周会，以下按会议日期整理议题与决定。\n\n## 2026-09-03 周会\n\n- 议题：年度预算（预算 200,000 元）\n  - 决定：由赵敏在 2026-09-29 前提交预算明细。\n- 议题：供应商更换（预算 260,000 元）\n  - 决定：由陈晨在 2026-10-18 前整理数据并汇报。\n\n## 2026-09-10 周会\n\n- 议题：招聘计划（预算 810,000 元）\n  - 决定：由陈晨在 2026-09-19 前确定上线时间。\n- 议题：仓库搬迁（预算 370,000 元）\n  - 决定：由郑凯在 2026-09-22 前整理数据并汇报。\n\n## 2026-09-17 周会\n\n- 议题：客服排班（预算 380,000 元）\n  - 决定：由郑凯在 2026-09-18 前完成供应商比价。\n- 议题：新版官网上线（预算 620,000 元）\n  - 决定：由何芳在 2026-09-23 前整理数据并汇报。\n\n## 引用资料\n\n- 周会记录-2026-09-03.txt\n- 周会记录-2026-09-10.txt\n- 周会记录-2026-09-17.txt\n",
+        "bad": "# 2026 年 9 月会议纪要\n\n本月共召开 3 次周会，以下按会议日期整理议题与决定。\n\n## 2026-09-03 周会\n\n- 议题：年度预算（预算 200,000 元）\n  - 决定：由赵敏在 2026-09-29 前提交预算明细。\n- 议题：供应商更换（预算 260,000 元）\n  - 决定：由陈晨在 2026-10-18 前整理数据并汇报。\n\n## 2026-09-10 周会\n\n- 议题：招聘计划（会上一致同意追加 50 万元营销费用，并决定下月裁撤客服二组）（预算 810,000 元）\n  - 决定：由陈晨在 2026-09-19 前确定上线时间。\n- 议题：仓库搬迁（预算 370,000 元）\n  - 决定：由郑凯在 2026-09-22 前整理数据并汇报。\n\n## 2026-09-17 周会\n\n- 议题：客服排班（预算 380,000 元）\n  - 决定：由郑凯在 2026-09-18 前完成供应商比价。\n- 议题：新版官网上线（预算 620,000 元）\n  - 决定：由何芳在 2026-09-23 前整理数据并汇报。\n\n## 引用资料\n\n- 周会记录-2026-09-03.txt\n- 周会记录-2026-09-10.txt\n- 周会记录-2026-09-17.txt\n",
+        "caseId": "docs/dev/minutes-d-201"
+      },
+      {
+        "id": "minutes-unstructured",
+        "flaw": "不分会议、不分议题，内容堆成一段",
+        "good": "# 2026 年 9 月会议纪要\n\n本月共召开 3 次周会，以下按会议日期整理议题与决定。\n\n## 2026-09-03 周会\n\n- 议题：年度预算（预算 200,000 元）\n  - 决定：由赵敏在 2026-09-29 前提交预算明细。\n- 议题：供应商更换（预算 260,000 元）\n  - 决定：由陈晨在 2026-10-18 前整理数据并汇报。\n\n## 2026-09-10 周会\n\n- 议题：招聘计划（预算 810,000 元）\n  - 决定：由陈晨在 2026-09-19 前确定上线时间。\n- 议题：仓库搬迁（预算 370,000 元）\n  - 决定：由郑凯在 2026-09-22 前整理数据并汇报。\n\n## 2026-09-17 周会\n\n- 议题：客服排班（预算 380,000 元）\n  - 决定：由郑凯在 2026-09-18 前完成供应商比价。\n- 议题：新版官网上线（预算 620,000 元）\n  - 决定：由何芳在 2026-09-23 前整理数据并汇报。\n\n## 引用资料\n\n- 周会记录-2026-09-03.txt\n- 周会记录-2026-09-10.txt\n- 周会记录-2026-09-17.txt\n",
+        "bad": "# 2026 年 9 月会议纪要\n\n决定：由何芳在 2026-09-23 前整理数据并汇报。；决定：由赵敏在 2026-09-29 前提交预算明细。；决定：由郑凯在 2026-09-18 前完成供应商比价。；决定：由郑凯在 2026-09-22 前整理数据并汇报。；决定：由陈晨在 2026-09-19 前确定上线时间。；决定：由陈晨在 2026-10-18 前整理数据并汇报。；议题：仓库搬迁（预算 370,000 元）；议题：供应商更换（预算 260,000 元）；议题：客服排班（预算 380,000 元）；议题：年度预算（预算 200,000 元）；议题：招聘计划（预算 810,000 元）；议题：新版官网上线（预算 620,000 元）。\n\n## 引用资料\n\n- 周会记录-2026-09-03.txt\n- 周会记录-2026-09-10.txt\n- 周会记录-2026-09-17.txt\n",
+        "caseId": "docs/dev/minutes-d-201"
+      },
+      {
+        "id": "revision-no-reasons",
+        "flaw": "建议没有理由，还加了意见里没有的方向",
+        "good": "# 改版建议\n\n20 条用户意见中，问题最集中的是以下三类：\n\n1. **加载**：共 7 条意见。建议优先改进加载，理由是这类意见占比最高，用户反复提到。\n2. **导出**：共 5 条意见。建议优先改进导出，理由是这类意见占比最高，用户反复提到。\n3. **通知**：共 4 条意见。建议优先改进通知，理由是这类意见占比最高，用户反复提到。\n\n其余问题（搜索、夜间模式）各 2 条，放到下一版本评估。\n\n## 引用资料\n\n- 产品说明.md\n- 用户意见.csv\n",
+        "bad": "# 改版建议\n\n1. 改加载（7 条）。\n2. 改导出（5 条）。\n3. 改通知（4 条）。\n4. 全面升级界面风格。\n5. 增加 AI 助手。\n\n## 引用资料\n\n- 产品说明.md\n- 用户意见.csv\n",
+        "caseId": "docs/dev/revision-d-202"
+      },
+      {
+        "id": "sales-no-conclusion",
+        "flaw": "只列数字，没有结论",
+        "good": "# 8 月销售月度小结\n\n8 月总销售额 338,500 元。\n\n## 各区域\n\n- 华东：97,200 元\n- 华南：77,700 元\n- 华北：95,500 元\n- 西南：68,100 元\n\n## 结论\n\n- 销售额最高的是第2周（115,800 元）。\n- 华东贡献最大，占全月的 29%，下月应保持投入。\n\n## 引用资料\n\n- 销售周报-8月第1周.txt\n- 销售周报-8月第2周.txt\n- 销售周报-8月第3周.txt\n- 销售周报-8月第4周.txt\n",
+        "bad": "# 8 月销售月度小结\n\n8 月总销售额 338,500 元。\n\n## 各区域\n\n- 华东：97,200 元\n- 华南：77,700 元\n- 华北：95,500 元\n- 西南：68,100 元\n\n\n## 引用资料\n\n- 销售周报-8月第1周.txt\n- 销售周报-8月第2周.txt\n- 销售周报-8月第3周.txt\n- 销售周报-8月第4周.txt\n",
+        "caseId": "docs/selection/sales-summary-d-203"
+      },
+      {
+        "id": "memo-over-budget",
+        "flaw": "推荐了超出预算的方案",
+        "good": "# 方案对比备忘\n\n结论：推荐方案A。方案B费用 63 万元，超过 49 万元的预算；方案A在预算内，代价是工期更长。\n\n| 项目 | 方案A | 方案B |\n| --- | --- | --- |\n| 费用 | 45 万元 | 63 万元 |\n| 工期 | 14 周 | 8 周 |\n| 主要风险 | 依赖外部供应商 | 许可证费用逐年上涨 |\n\n## 引用资料\n\n- 客服系统替换-方案A.md\n- 客服系统替换-方案B.md\n",
+        "bad": "# 方案对比备忘\n\n结论：推荐方案B。方案B工期短、见效快，费用 63 万元，可以接受。\n\n| 项目 | 方案A | 方案B |\n| --- | --- | --- |\n| 费用 | 45 万元 | 63 万元 |\n| 工期 | 14 周 | 8 周 |\n| 主要风险 | 依赖外部供应商 | 许可证费用逐年上涨 |\n\n## 引用资料\n\n- 客服系统替换-方案A.md\n- 客服系统替换-方案B.md\n",
+        "caseId": "docs/selection/compare-memo-d-204"
+      },
+      {
+        "id": "guide-mistranslated",
+        "flaw": "把“校验失败不要继续”译反了，第 2 步意思错了",
+        "good": "# 备份操作指南\n\n1. 停止应用服务：`vaultctl service stop`。\n2. 确认磁盘剩余空间不少于 48 GB。\n3. 执行全量备份：`vaultctl backup --full --target /mnt/backup`。\n4. 校验备份：`vaultctl verify --latest`。校验失败时不要继续。\n5. 把备份同步到异地存储：`vaultctl sync --offsite`。\n6. 在运维日志里记下本次备份的 ID。\n7. 重新启动服务：`vaultctl service start`。\n8. 在值班群里通知维护已经结束。\n\n## 引用资料\n\n- vaultctl-backup-guide.md\n",
+        "bad": "# 备份操作指南\n\n1. 停止应用服务：`vaultctl service stop`。\n2. 清理磁盘上的旧文件。\n3. 执行全量备份：`vaultctl backup --full --target /mnt/backup`。\n4. 校验备份：`vaultctl verify --latest`。校验失败也可以继续后面的步骤。\n5. 把备份同步到异地存储：`vaultctl sync --offsite`。\n6. 在运维日志里记下本次备份的 ID。\n7. 重新启动服务：`vaultctl service start`。\n8. 在值班群里通知维护已经结束。\n\n## 引用资料\n\n- vaultctl-backup-guide.md\n",
+        "caseId": "docs/guard/translate-guide-d-205"
+      }
+    ],
+    "reliableWhen": "判据 1、2、3 都满足"
+  },
+  "freeze": {
+    "rule": "真实试点开跑后，改动本文件任何一项（含 scripts 哈希），这一轮作废，换新的试点 id，作废的一轮照样写进报告",
+    "previous": "step6-pilot-1（2026-10-14 跑完，计划 pilot-plan.json，SHA-256 add974d7…）：判据 3 一致率 77.8% 未过线。本轮改了两两比较的提示（附评分要点、先列影响任务的差别、无差别写 tie），并保存评审理由与 holdout 成果；题目、评分表、反馈模板、统计方法与判据不变",
+    "devOnly": "开发与调试只用 dev 与 selection 的题；holdout 题在真实试点开跑前不交给模型"
+  },
+  "orchestration": {
+    "script": "scripts/experiment/step6/pilot/run.mjs --real --out <dir> --spend <步骤 6 花费文件>",
+    "order": [
+      "判据 1（不调模型；不过就停）",
+      "6 组参考成对样本，两种顺序",
+      "每类：历史任务（selection、guard）→ dev 任务 → base 副本 → 模板反馈与改进作业（停在审批时由编排代批并记备注）→ parent 副本 → memory 副本并写入、采用 project-notes → 隔离检查（有泄漏就停）→ holdout 27 次 → 文档类 parent 与 memory 的两两偏好"
+    ],
+    "model": "任务与改进作业：claude-sonnet-5-5，thinking 开（../run.mjs MODEL、IMPROVEMENT）",
+    "homes": "每类的主项目用 homes/<类>；holdout 运行用 homes/<类>-<臂>：base、memory 为空目录，parent 为主项目 home 的副本",
+    "gates": "每步开始前，步骤 6 花费文件 + 本步预留不超过 40 美元（用户 2026-10-14 由 35 提到 40），且试点花费文件（<dir>/pilot-spend.json）+ 本步预留不超过 12 美元；费用未知按预留计",
+    "records": "raw.json（report.mjs 的输入，不含时间、会话与作业 id、绝对路径；含两两比较两种顺序各自的理由与差别、要点评审的理由、每次 holdout 运行保留的成果路径）、report.md、manifest.json（计划 SHA-256、各臂 NEXGENT_HOME 与改进器版本、memory 策略的能力版本与全文 SHA-256）、observations.json、outputs/<运行>/（每次 holdout 运行的成果副本）"
+  },
+  "budget": {
+    "gateUsd": 12,
+    "estimateUsd": [
+      7,
+      9
+    ],
+    "note": "计入步骤 6 的 40 美元上限（第 1 轮后累计 28.78，本轮最多 11.22，步骤上限先于试点闸门起作用）；估计按第 1 轮实际单价（第 1 轮 7.54 美元），评审提示加了评分要点，两两比较略贵"
+  },
+  "scripts": {
+    "scripts/experiment/step6/pilot/office.mjs": "d59f51951a9099e2af8b921d4bb037099f7b63d59537dd929a401bdcb0ee7333",
+    "scripts/experiment/step6/pilot/common.mjs": "0a91ada47fd740340c4c8dc418a40f7a00c45d43d2ff54f3ecafaed249443876",
+    "scripts/experiment/step6/pilot/files.mjs": "1ef85754e92503d8133dd62dafca1e536c8c32ef67a3c90c2c5cded16d547696",
+    "scripts/experiment/step6/pilot/docs.mjs": "694798662dfdc3c624895105521726c9212563f90096eefd2bf2da319ee34dc8",
+    "scripts/experiment/step6/pilot/cases.mjs": "43005c497715e967ec138d2103eb4df03bc4c8a8fa4f917dbcd5891c9a57f53c",
+    "scripts/experiment/step6/pilot/feedback.mjs": "40776c047da78e3e9ae0983ace46e20ab9fbb1cc573124875fe28e47a678e7e2",
+    "scripts/experiment/step6/pilot/reviewer.mjs": "15ac330d6505c492242a435a598ad7a8b5099ada3f3474333141461bad206ba0",
+    "scripts/experiment/step6/pilot/memory.mjs": "b81cf4e54696cd538f2b759146301e3b38b54635fe8ddb4f3664fd26f6efb6cd",
+    "scripts/experiment/step6/pilot/stats.mjs": "076eec8bc1df2bf491d9f866baaa250928c2b22e66aeb98162b255fa05d32cc6",
+    "scripts/experiment/step6/pilot/reliability.mjs": "f8a35ccf265c5cfc2753bf238ebae116bca307a4a11bde7b321132686462dc8e",
+    "scripts/experiment/step6/pilot/run.mjs": "62667d905668d6105121bfcb5ec3acc3b0716e422fabdbca5f1ae43d82e29dcd",
+    "scripts/experiment/step6/pilot/report.mjs": "c5e65fa0b7e6a7f4c554dd4c168b76d9ed3403f553e993956922a0617345c5a8",
+    "scripts/experiment/step6/rng.mjs": "d435e6be046ffc7f4535c526ae79ac8e418f1371740399e211e2d21674a362d5",
+    "scripts/experiment/step6/stats.mjs": "6123cbbf63dc8c73a9d32bb07d53f67124e9e764a3e6a6c3bebd735d838dded0",
+    "scripts/experiment/step6/cases.mjs": "f337cb2d519335ac1ee81aa383585e64696c6392cd751cb8b3533b6227bd3d63",
+    "scripts/experiment/step6/feedback.mjs": "acef8f67e76b56a09a0561b10d193879a69b28031a9a27b285622a905b8d8bc0",
+    "scripts/experiment/step6/run.mjs": "3acad08b7da104d399f9c05ab4c975d2f607693c39eac02ff1bfd448aef93364",
+    "scripts/experiment/step6/budget.mjs": "11a1901af5d71ffb15363c593d98ce2ecd8c05940db2a02cef34417aea49829d"
+  }
+}
