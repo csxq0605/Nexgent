@@ -11,7 +11,9 @@
  * 3. Run every case `repeats` times per arm, candidate bundle against the
  *    adopted bundle, each run in its own copy of the task's snapshot through
  *    the host's {@link TrialRunner} (a separate process in the product);
- *    the gate runs the recorded checks on the copy itself. A run that does
+ *    the gate runs the recorded checks on the copy itself (ADR 0014: a
+ *    recorded deliverable path the run did not use is checked on the file
+ *    it presented instead). A run that does
  *    not complete is `unknown`. The trial budget is checked before every run
  *    and passed down as the run's per-task cap; running out stops the trial.
  * 4. On a check tie that the cost alone does not settle, the reviewer model
@@ -36,12 +38,12 @@
  * the verdict's cost ratio is in those dollars (cache included) when both
  * arms have them, in tokens otherwise.
  *
- * ADR 0013 (epoch `adr-0013`), an improvement job's candidate only: before
+ * ADR 0013 and 0014 (epoch `adr-0014`), an improvement job's candidate only: before
  * anything is replayed, its components are checked for the concrete values
  * of the job's task (`findInstanceLiterals`); a hit rejects the candidate
  * (`instance-literal`) without a trial. The selection cases other than the
- * feedback task that are like it at all (their first message shares a word
- * with its first message) are its similar cases: their deterministic checks are
+ * feedback task that are like it (ADR 0014: their first messages overlap by
+ * content words, `isSimilarTask`) are its similar cases: their deterministic checks are
  * tallied apart (`TrialTally.similar`) and may not get worse; with none, an
  * adopting verdict waits for the user (`no-similar-cases`).
  */
@@ -53,6 +55,7 @@ import {
   decideTrial,
   NexgentError,
   readProjectConfig,
+  resolveWorkspaceLayout,
   ZERO_USAGE,
   CAPABILITY_LIMITS,
   type ArmTally,
@@ -74,6 +77,7 @@ import {
   type TrialVerdict,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
+import { LocalDeliverableStore } from '@nexgent/tasking'
 import { readCandidate } from '../candidates.js'
 import { evaluatorEpoch } from './epoch.js'
 import { candidateInstanceLiterals } from './literals.js'
@@ -83,7 +87,8 @@ import { CapabilityStore } from '../capability-store.js'
 import { runCheckSpecs } from './checks.js'
 import { claimAttempt, releaseTrialLock, TrialReceiptWriter, wasAttempted, writeTrialLock } from './receipts.js'
 import { prepareReplayProject } from './replay-project.js'
-import { buildReplaySet, listReplayCases, similarity, type ReplayCase, type ReplayMessage } from './replay-set.js'
+import { isSimilarTask } from './similar.js'
+import { buildReplaySet, listReplayCases, type ReplayCase, type ReplayMessage } from './replay-set.js'
 
 /** One replay run the host executes. */
 export interface ReplayRunRequest {
@@ -310,7 +315,7 @@ function explain(verdict: TrialVerdict, tally: { selection: { candidate: ArmTall
     ...(tally.similar === undefined
       ? []
       : tally.similar === 'none'
-        ? ['Similar cases: none (no other selection task shares a word with the feedback task), so it was checked on the feedback task only.']
+        ? ['Similar cases: none (no other selection task is like the feedback task by content words), so it was checked on the feedback task only.']
         : [`Similar cases (selection tasks other than the feedback task; deterministic checks only) passed: candidate ${rate(verdict.similarPassRate?.candidate ?? 0)}, baseline ${rate(verdict.similarPassRate?.baseline ?? 0)}`
           + ` (runs pass/fail/unknown ${tally.similar.candidate.passed}/${tally.similar.candidate.failed}/${tally.similar.candidate.unknown}`
           + ` vs ${tally.similar.baseline.passed}/${tally.similar.baseline.failed}/${tally.similar.baseline.unknown}).`]),
@@ -336,6 +341,12 @@ function approvalText(verdict: TrialVerdict, candidate: CandidateRecord, plan: T
     reasons.push(`It checks better but costs ${ratioText(verdict)} the baseline, above the ${approvalRatio}× that adopts on its own (ADR 0007).`)
   }
   return `${reasons.join(' ')} It is adopted only after the user approves it.`
+}
+
+/** ADR 0014: the files a replay run presented (latest version of each of its deliverables, in presentation order). */
+async function deliveredFiles(root: string): Promise<string[]> {
+  const summaries = await new LocalDeliverableStore(resolveWorkspaceLayout(root)).list().catch(() => [])
+  return [...new Set(summaries.flatMap(summary => summary.versions.at(-1)?.files.map(file => file.path) ?? []))]
 }
 
 /**
@@ -431,11 +442,11 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
     const tally = { selection: { candidate: emptyTally(), baseline: emptyTally() }, guard: { candidate: emptyTally(), baseline: emptyTally() } }
     const hasFeedback = set.selection.some(item => item.feedbackIds !== undefined)
     const feedbackTally = { candidate: emptyTally(), baseline: emptyTally() }
-    // ADR 0013: an improvement job's similar cases are the selection cases other than its feedback task that
-    // are like it at all (their first message shares a word with its first message, the selection's own measure).
+    // ADR 0013 as amended by ADR 0014: an improvement job's similar cases are the selection cases other than its
+    // feedback task whose first message overlaps the feedback task's by content words (`isSimilarTask`).
     const anchorText = set.selection.find(item => item.caseId === anchor.caseId)?.messages[0]?.text ?? ''
     const similarIds = new Set(anchor.kind !== 'job' ? [] : set.selection
-      .filter(item => item.caseId !== anchor.caseId && similarity(anchorText, item.messages[0]?.text ?? '') > 0)
+      .filter(item => item.caseId !== anchor.caseId && isSimilarTask(anchorText, item.messages[0]?.text ?? ''))
       .map(item => item.caseId))
     const similarCase = (caseId: string) => similarIds.has(caseId)
     const similarTally = { candidate: emptyTally(), baseline: emptyTally() }
@@ -480,7 +491,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
           const runTokens = tokensOf(result.usage)
           tokens[arm] = tokens[arm] === 'unknown' || runTokens === 'unknown' ? 'unknown' : tokens[arm] + runTokens
           if (result.outcome === 'completed') {
-            checks = await runCheckSpecs(project.root, replay.checks, { signal })
+            checks = await runCheckSpecs(project.root, replay.checks, { signal, delivered: await deliveredFiles(project.root) })
             status = checks.every(check => check.passed) ? 'pass' : 'fail'
             if (half === 'selection' || replay.feedbackIds !== undefined) outputs.set(`${replay.caseId}#${repeat}#${arm}`, await runOutput(project.root, project.files))
           } else {

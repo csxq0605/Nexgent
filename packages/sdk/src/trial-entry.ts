@@ -266,6 +266,7 @@ export function llmReviewer(options: { readonly ledger: Ledger; readonly home: s
           improvementId: run.jobId,
           improvementPhase: 'trial' as const,
           ...(run.improverVersion === undefined ? {} : { improverVersion: run.improverVersion }),
+          ...(run.improverScope === undefined ? {} : { improverScope: run.improverScope }),
           ...(run.metaJobId === undefined ? {} : { metaJobId: run.metaJobId }),
           ...(run.comparisonArm === undefined ? {} : { comparisonArm: run.comparisonArm }),
         }),

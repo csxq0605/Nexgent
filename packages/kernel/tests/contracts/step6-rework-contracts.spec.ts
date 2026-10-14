@@ -180,7 +180,8 @@ describe('decideTrial: the similar-cases rule (ADR 0013 decision 1)', () => {
 
   it('the reasons and the rules id', () => {
     for (const reason of ['similar-regression', 'no-similar-cases', 'instance-literal'] as const) expect(DECISION_REASONS).toContain(reason)
-    expect(EVALUATOR_RULES).toBe('adr-0013')
+    // ADR 0014 replaced adr-0013 (a new epoch).
+    expect(EVALUATOR_RULES).toBe('adr-0014')
     for (const code of ['capability/instance-literal', 'improver/instance-literal'] as const) expect(new NexgentError(code, 'found task values').code).toBe(code)
   })
 })

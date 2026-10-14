@@ -588,9 +588,10 @@ export function isNextImproverRevision(state: ImproverActivationState, next: Imp
  * feedback-check prompts and `decideImprover`. Changing any of them needs a
  * new ADR and a new id (ADR 0008 decision 5), so it starts a new epoch.
  * ADR 0013 (similar cases may not regress, instance literals are rejected)
- * replaced `adr-0008`.
+ * replaced `adr-0008`; ADR 0014 (recorded deliverable paths follow the run's
+ * own deliverables, similar cases by content words) replaced `adr-0013`.
  */
-export const EVALUATOR_RULES = 'adr-0013'
+export const EVALUATOR_RULES = 'adr-0014'
 
 /**
  * What decides "better" (ADR 0008 decision 5): the rules id and the
