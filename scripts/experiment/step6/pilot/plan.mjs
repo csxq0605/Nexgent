@@ -112,7 +112,7 @@ export async function buildPlan() {
       list: PILOT_ARMS,
       base: 'dev 任务与反馈之前的项目快照的副本',
       memory: { ...MEMORY_POLICY, rule: '在 base 副本里经 @nexgent/capabilities 的存储接口直接写入并采用一条上下文策略：instructions 为该类全部计数反馈原文，按时间先后；超长时去掉最早的；不诊断、不过门控' },
-      parent: 'dev 反馈触发改进作业（改进器 v0，adr-0014 纪元：ADR 0014 取代 0013 的同类题定义与规则 id）之后的项目副本',
+      parent: 'dev 反馈触发改进作业（改进器 v0，adr-0016 纪元：ADR 0015 反馈检查不要求一次性附加要求、评审看到完整改动清单与反馈；ADR 0016 门控评审每对问两种顺序、看到任务输入文件）之后的项目副本',
       child: '试点不跑（不跑元改进）',
       isolation: '每个任务族、每个臂用自己的 NEXGENT_HOME',
       holdoutRuns: '每题每臂 3 次，每次在该臂的新副本里新开会话，关自动改进；没交成果时同一会话追问一次（PRESENT_REQUEST），按臂计数',
@@ -132,10 +132,10 @@ export async function buildPlan() {
       order: ['判据 1（不调模型；不过就停）', '6 组参考成对样本，两种顺序', '每类：历史任务（selection、guard）→ dev 任务 → base 副本 → 模板反馈与改进作业（停在审批时由编排代批并记备注）→ parent 副本 → memory 副本并写入、采用 project-notes → 隔离检查（有泄漏就停）→ holdout 27 次 → 文档类 parent 与 memory 的两两偏好'],
       model: '任务与改进作业：claude-sonnet-5-5，thinking 开（../run.mjs MODEL、IMPROVEMENT）',
       homes: '每类的主项目用 homes/<类>；holdout 运行用 homes/<类>-<臂>：base、memory 为空目录，parent 为主项目 home 的副本',
-      gates: '每步开始前，步骤 6 花费文件 + 本步预留不超过 35 美元，且试点花费文件（<dir>/pilot-spend.json）+ 本步预留不超过 12 美元；费用未知按预留计',
+      gates: '每步开始前，步骤 6 花费文件 + 本步预留不超过 40 美元（用户 2026-10-14 由 35 提到 40），且试点花费文件（<dir>/pilot-spend.json）+ 本步预留不超过 12 美元；费用未知按预留计',
       records: 'raw.json（report.mjs 的输入，不含时间、会话与作业 id、绝对路径；含两两比较两种顺序各自的理由与差别、要点评审的理由、每次 holdout 运行保留的成果路径）、report.md、manifest.json（计划 SHA-256、各臂 NEXGENT_HOME 与改进器版本、memory 策略的能力版本与全文 SHA-256）、observations.json、outputs/<运行>/（每次 holdout 运行的成果副本）',
     },
-    budget: { gateUsd: 12, estimateUsd: [9, 11], note: '计入步骤 6 的 35 美元上限；外部与循环内评审约 1.9 美元（45 次 opus、27 次 sonnet）' },
+    budget: { gateUsd: 12, estimateUsd: [7, 9], note: '计入步骤 6 的 40 美元上限（第 1 轮后累计 28.78，本轮最多 11.22，步骤上限先于试点闸门起作用）；估计按第 1 轮实际单价（第 1 轮 7.54 美元），评审提示加了评分要点，两两比较略贵' },
     scripts,
   }
 }
