@@ -463,6 +463,14 @@ async function runFamily(ctx, family) {
             await client.call('settings.update', { projectId: pid, patch: { autoImprove: false } })
             const { sessionId } = await client.call('sessions.create', { projectId: pid, title: runId })
             const result = await turn(client, pid, sessionId, task.message)
+            // Same rule as history tasks: no deliverable, the user asks once (counted per arm, ADR 0011 decision 7).
+            const presented = async () => (await client.call('deliverables.list', { projectId: pid }))
+              .some((/** @type {any} */ d) => (d.versions ?? []).some((/** @type {any} */ v) => v.sessionId === sessionId))
+            let followUp = false
+            if (result.reason !== 'error' && !(await presented())) {
+              followUp = true
+              await turn(client, pid, sessionId, PRESENT_REQUEST)
+            }
             const judged = result.reason === 'error' ? { pass: null, issues: [], problems: [result.error ?? 'turn failed'] } : await judgeCase(task, runRoot)
             const ledger = await ledgerOf(runRoot)
             const outcome = ledger.filter(r => r.type === 'task.outcome' && r.sessionId === sessionId).at(-1)
@@ -472,6 +480,7 @@ async function runFamily(ctx, family) {
               costUsd: costOf(ledger.filter(r => r.sessionId === sessionId && r.improvementId === undefined && r.trialId === undefined), estimate),
               componentsUsed: (outcome?.componentsUsed ?? []).map((/** @type {any} */ c) => (typeof c === 'string' ? c : `${c.kind}:${c.name}`)).sort(),
               turn: result.reason,
+              followUp,
               problems: judged.problems,
             }
           } finally {
@@ -564,7 +573,7 @@ export function rawRecords(families, meta) {
       origins,
       decisions,
     },
-    runs: families.flatMap(f => f.runs.map((/** @type {any} */ r) => ({ runId: r.runId, family: r.family, caseId: r.caseId, arm: r.arm, repeat: r.repeat, pass: r.pass, costUsd: r.costUsd, componentsUsed: r.componentsUsed }))),
+    runs: families.flatMap(f => f.runs.map((/** @type {any} */ r) => ({ runId: r.runId, family: r.family, caseId: r.caseId, arm: r.arm, repeat: r.repeat, pass: r.pass, costUsd: r.costUsd, componentsUsed: r.componentsUsed, followUp: r.followUp === true }))),
     costs: families.flatMap(f => f.costs),
     disagreements: [],
     notes,

@@ -61,7 +61,7 @@ test('rawRecords: arms, improvers, capability versions and decisions reach the m
   assert.deepEqual(raw.manifest.decisions, { code: 'reject (no-improvement)', tables: 'no comparison (meta job failed)' })
   assert.deepEqual(raw.manifest.origins, { code: 'unresolved (job j1, capability version v-p)' })
   assert.equal(raw.manifest.epochId, 'e1')
-  assert.deepEqual(Object.keys(raw.runs[0]).sort(), ['arm', 'caseId', 'componentsUsed', 'costUsd', 'family', 'pass', 'repeat', 'runId'])
+  assert.deepEqual(Object.keys(raw.runs[0]).sort(), ['arm', 'caseId', 'componentsUsed', 'costUsd', 'family', 'followUp', 'pass', 'repeat', 'runId'])
   assert.ok(raw.notes.includes('tables: parent arm: no kept comparison copy'))
   assert.ok(raw.notes.some(n => n.startsWith('feedback check vs hidden judge: not compared')))
 })

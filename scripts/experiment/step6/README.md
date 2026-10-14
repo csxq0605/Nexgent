@@ -19,12 +19,40 @@
 
 用户约定只在反馈里出现、任务文字里没有：表格族是每张分组表都带 `avg_order_value`；代码族是改了哪个 `src/` 模块就要新增或修改对应的 `test/<模块>.test.js`，以及金额一律整数分。
 
+## 试点（ADR 0011，返工第 1 轮）
+
+`pilot/` 是步骤 6 返工的小试点：文档写作、文件整理与转换两类新任务各 8 题（dev 2 / selection 2 / guard 1 / holdout 3），不再给表格与代码两族加难。这一轮只有题目、评分与冻结的计划，不调模型；`memory` 臂、编排接入与真实试点在第 3 轮。
+
+| 文件 | 内容 |
+| --- | --- |
+| `pilot/office.mjs` | 最小的 zip / xlsx / docx 读写（只用 Node 内置模块，输出逐字节确定） |
+| `pilot/common.mjs` | 用例与评分表的类型、六种要点类型、数字与日期的写法容差、CSV、文件树、判定结果的合成 |
+| `pilot/files.mjs` | 文件整理与转换 8 题：生成器、确定性判定器、已知好答案、每个判定要点一个已知坏答案、个人口味检测 |
+| `pilot/docs.mjs` | 文档写作 8 题：素材生成器、可写成字符串检查的要点（数字、日期、负责人、引用文件名）、好坏文档、6 组参考成对样本（只取非 holdout 题） |
+| `pilot/cases.mjs` | 16 题汇总、集合与评分表检查（复用 `../cases.mjs` 的 `checkSets` 与隔离检查） |
+| `pilot/feedback.mjs` | 模拟反馈：只用确定性判定没通过的要点；个人口味只在反馈里说；外部评审的判语不进反馈 |
+| `pilot/reviewer.mjs` | 外部评审（`claude-opus-5-5`、thinking 开）的冻结提示、请求、解析与两种顺序的两两比较；模型调用注入，测试用脚本化后端 |
+| `pilot/reliability.mjs` | 评分可靠的三条判据与判据 4（内外评审一致率，只报告） |
+| `pilot/stats.mjs` | 要点通过率配对差（两层自助法，2000 次，种子 `step6-pilot`）、整题通过率、重复波动、追问按臂、组件分类、背答案率、一致率 |
+| `pilot/memory.mjs` | `memory` 臂的上下文策略 `project-notes` 的内容规则 |
+| `pilot/plan.mjs`、`pilot/pilot-plan.json` | 冻结的计划（题目、评分表、反馈模板、评审提示与模型、统计方法、臂、可靠性判据与成对样本、预算、各脚本的 SHA-256） |
+
+两类的项目约定只在反馈里出现：文档类“文末列出引用的资料文件名”，文件类“输出的文件名和目录名不含空格”。
+
+```sh
+node scripts/experiment/step6/pilot/plan.mjs --check   # pilot-plan.json 是否与生成器一致
+node scripts/experiment/step6/pilot/plan.mjs --write   # 重新生成（真实试点开跑后改动即作废这一轮）
+node scripts/experiment/step6/pilot/plan.mjs           # 打印计划文件的 SHA-256，写进实验清单
+```
+
+holdout 运行没交成果时，编排在同一会话里追问一次（`PRESENT_REQUEST`），`raw.json` 的每次运行记 `followUp`，报告按臂列出追问次数。
+
 ## 本地检查
 
 ```sh
 node --test 'scripts/experiment/step6/tests/*.test.mjs'
 node_modules/.bin/tsc --ignoreConfig --noEmit --allowJs --checkJs --strict --module nodenext \
-  --moduleResolution nodenext --target es2023 --types node --skipLibCheck scripts/experiment/step6/*.mjs
+  --moduleResolution nodenext --target es2023 --types node --skipLibCheck scripts/experiment/step6/*.mjs scripts/experiment/step6/pilot/*.mjs
 node scripts/experiment/step6/calibrate.mjs
 node scripts/experiment/step6/report.mjs --records <raw.json> --out <report.md>
 ```
