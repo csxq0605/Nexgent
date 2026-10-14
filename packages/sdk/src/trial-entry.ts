@@ -63,6 +63,7 @@ import {
   type TurnEndReason,
 } from '@nexgent/kernel'
 import { AnthropicProvider, estimateUsd } from '@nexgent/llm'
+import { extractDocx, extractPdf, extractXlsx } from '@nexgent/skill'
 import { JsonlLedger, SessionPlugin, type SessionPluginConfig } from '@nexgent/session'
 import { createSdk } from './sdk.js'
 
@@ -195,12 +196,39 @@ export async function runReplay(request: ReplayRunRequest, env: Env = process.en
 /** The preference review's system prompt (part of the evaluator rules, `EVALUATOR_RULES`). */
 export const REVIEW_SYSTEM = [
   'You compare two attempts at the same task for a quality gate.',
-  'You see the task (the user messages) and the files each attempt created or changed.',
+  'You see the task (the user messages), the project\'s input files as the task started, and the files each attempt created or changed.',
   'When feedback the user gave on an earlier attempt is shown, the standing preferences it states (how the user always wants such work done) are part of what the user asked; extras it asks for only that one time are not.',
   'A listing may name files without their contents; do not count a file as missing because its contents are not shown.',
-  'Judge which attempt better does what the user asked: correct results first, then completeness, then clarity.',
-  'Answer with one JSON object and nothing else: {"better": "A" | "B" | "tie", "reason": "<one or two sentences>"}.',
+  'Check the attempts against the input files where you can, and judge which attempt better does what the user asked: correct results first, then completeness, then clarity.',
+  'First find the concrete differences between the attempts that matter for what the user asked; if there is none, the answer is a tie.',
+  'The order in which the attempts are shown means nothing.',
+  'Answer with one JSON object and nothing else: {"better": "A" | "B" | "tie", "reason": "<one or two sentences naming the difference>"}.',
 ].join(' ')
+
+/** ADR 0016: the task's input files for the reviewer (the project as the task started). */
+export function renderInputs(inputs: ReviewInput['inputs']): string {
+  const unshown = inputs.unshown ?? []
+  if (inputs.files.length === 0 && unshown.length === 0) return '# Input files\n(none)'
+  const lines = ['# Input files (the project as the task started)', ...inputs.files.map(file => `## ${file.path}\n\`\`\`\n${file.text}\n\`\`\``)]
+  if (unshown.length > 0) {
+    const more = inputs.unlisted ?? 0
+    lines.push(`Also in the project (contents not shown): ${unshown.length + more} more file(s)`, ...unshown.map(path => `- ${path}`), ...(more > 0 ? [`- … and ${more} more`] : []))
+  }
+  return lines.join('\n')
+}
+
+/** ADR 0016: the text of a spreadsheet, Word document or PDF the reviewer is shown (other binary files: `undefined`). */
+export async function documentText(path: string, bytes: Uint8Array): Promise<string | undefined> {
+  const extension = path.slice(path.lastIndexOf('.')).toLowerCase()
+  try {
+    if (extension === '.xlsx') return await extractXlsx(bytes)
+    if (extension === '.docx') return await extractDocx(bytes)
+    if (extension === '.pdf') return await extractPdf(bytes)
+  } catch {
+    // An unreadable document is shown as binary.
+  }
+  return undefined
+}
 
 /** One attempt's files for the reviewer: contents of the first few, then the paths of the other changed files and of removed files (ADR 0015). */
 export function renderOutput(label: string, output: ReviewInput['candidate']): string {
@@ -267,8 +295,9 @@ function renderFeedback(feedback: FeedbackCheckInput['feedback']): string {
  * The reviewer model over the Claude Platform route, records with `trialId`
  * and no `arm` (and the job's `trial` phase for a job's candidate):
  *
- * - `review`: one request per selection run pair, attempts shown as A and B
- *   (the candidate is A on odd repeats, B on even ones).
+ * - `review`: one request per selection run pair and order (ADR 0016: the
+ *   gate asks each pair with the candidate as A and as B), with the task's
+ *   input files; spreadsheets, Word documents and PDFs shown as text.
  * - `checkFeedback`: one request per run of a feedback case, that run's
  *   output alone with the feedback text (no other attempt to compare, so no
  *   position to swap).
@@ -318,10 +347,10 @@ export function llmReviewer(options: { readonly ledger: Ledger; readonly home: s
   const taskText = (messages: readonly { readonly text: string }[]) => messages.map((message, index) => `Message ${index + 1}:\n${message.text}`).join('\n\n')
   return {
     async review(input: ReviewInput, settings, signal): Promise<ReviewResult> {
-      const candidateFirst = input.repeat % 2 === 1
+      const candidateFirst = input.candidateFirst
       const [a, b] = candidateFirst ? [input.candidate, input.baseline] : [input.baseline, input.candidate]
       const feedback = input.feedback === undefined || input.feedback.length === 0 ? '' : `# Feedback on an earlier attempt\n${renderFeedback(input.feedback)}\n\n`
-      const { text, usage, failure, estimatedUsd } = await ask(input.trialId, settings, REVIEW_SYSTEM, `# Task\n${taskText(input.messages)}\n\n${feedback}${renderOutput('A', a)}\n\n${renderOutput('B', b)}`, signal)
+      const { text, usage, failure, estimatedUsd } = await ask(input.trialId, settings, REVIEW_SYSTEM, `# Task\n${taskText(input.messages)}\n\n${renderInputs(input.inputs)}\n\n${feedback}${renderOutput('A', a)}\n\n${renderOutput('B', b)}`, signal)
       const parsed = failure === undefined ? parseReview(text) : undefined
       if (parsed === undefined) {
         return { preference: 'unknown', reason: (failure ?? `the reviewer did not answer with the JSON object: ${text.slice(0, 300)}`).slice(0, 2_000), usage, requestCount: 1, estimatedUsd }
@@ -354,6 +383,7 @@ export async function runGateProcess(root: string, candidateId: string, env: Env
     runner: processReplayRunner({ args: [TRIAL_ENTRY, 'replay'], env: env as NodeJS.ProcessEnv }),
     reviewer: llmReviewer({ ledger, home: nexgentHome(env as NodeJS.ProcessEnv), env, ...(endpoint === undefined ? {} : { endpoint }), ...(improvement === undefined ? {} : { improvement }) }),
     log: line => process.stderr.write(`${line}\n`),
+    documentText,
     ...(options.comparison === undefined ? {} : { comparison: options.comparison }),
     ...(options.epoch === undefined ? {} : { epoch: options.epoch }),
     onDecision: async decision => {

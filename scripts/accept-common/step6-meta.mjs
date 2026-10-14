@@ -38,7 +38,7 @@
  *             finds no capability problem: reject (no-offspring), `keepCopies` on (H16 kept);
  *             the next job on v0 (H12). Then the `bounds` proposals (H06), a meta diagnosis
  *             refused three times (H05), the evaluator settings changed through settings (H13
- *             epoch) and the rules id adr-0015 against adr-0008 (H13)
+ *             epoch) and the rules id adr-0016 against adr-0008 (H13)
  *
  * The copies go to a phase-local temporary directory (TMPDIR / TEMP / TMP), so what is left
  * there after a meta job is that job's.

@@ -8,6 +8,7 @@ import type { GateHost } from './host.js'
 
 export { runCheckSpecs, type RunChecksOptions } from './checks.js'
 export {
+  bothOrders,
   OUTPUT_CHARS,
   OUTPUT_FILES,
   OUTPUT_PATHS,

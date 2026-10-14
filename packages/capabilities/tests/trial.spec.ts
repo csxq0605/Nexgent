@@ -272,12 +272,12 @@ describe('runGate', () => {
     const result = await runGate({ layout, candidateId: candidate.id, runner: arms({ output: 'good' }, { output: 'good' }), reviewer, tempRoot: await tempDir() })
     if (result.status !== 'decided') throw new Error('expected a decision')
     expect(result.verdict).toMatchObject({ outcome: 'adopt', reason: 'review-preferred', decidedByReview: true })
-    // Selection runs only: 2 cases × 2 repeats.
-    expect(asked).toHaveLength(4)
+    // Selection runs only: 2 cases × 2 repeats, each pair asked in both orders (ADR 0016).
+    expect(asked).toHaveLength(8)
     expect(asked[0]!.candidate.files).toEqual([{ path: 'out/result.txt', text: 'good' }])
     const reviews = (await readTrialReceipts(layout.capabilities, result.trialId)).filter(receipt => receipt.type === 'trial.review')
     expect(reviews).toHaveLength(4)
-    expect(result.decision.cost?.review.requestCount).toBe(4)
+    expect(result.decision.cost?.review.requestCount).toBe(8)
 
     // Without a reviewer the same tie rejects.
     const other = await historyProject()

@@ -423,7 +423,7 @@ function goodGate(): Obs {
   const cases = { selection: ['T-A0', 'T-H1'], guard: ['T-H3'] }
   const tA = trialReceipts('tA', 'cA', cases, arm => (arm === 'candidate' ? 'pass' : 'fail'), { end: { type: 'trial.end', status: 'pass', verdict: { outcome: 'adopt', reason: 'quality-up', passRate: { candidate: 1, baseline: 0 }, costRatio: 1, decidedByReview: false } } })
   const tC = trialReceipts('tC', 'cC', { selection: ['T-C', 'T-H1'], guard: ['T-H3'] }, (arm, set) => (set === 'guard' || arm === 'baseline' ? 'pass' : 'fail'), { end: { type: 'trial.end', status: 'fail', verdict: { outcome: 'reject', reason: 'quality-down', passRate: { candidate: 0, baseline: 1 }, costRatio: 1, decidedByReview: false } } })
-  const reviews = [1, 2].flatMap(repeat => ['T-E', 'T-H1'].map(caseId => ({ type: 'trial.review', trialId: 'tE', set: 'selection', caseId, repeat, preference: 'candidate', reason: 'It also greets.', model: 'claude-sonnet-5-5', cost: cost(1) })))
+  const reviews = [1, 2].flatMap(repeat => ['T-E', 'T-H1'].map(caseId => ({ type: 'trial.review', trialId: 'tE', set: 'selection', caseId, repeat, preference: 'candidate', reason: 'It also greets.', model: 'claude-sonnet-5-5', cost: cost(2) })))
   const tE = trialReceipts('tE', 'cE', { selection: ['T-E', 'T-H1'], guard: ['T-H3'] }, (_arm, set) => (set === 'guard' ? 'pass' : 'fail'), { reviews, end: { type: 'trial.end', status: 'pass', verdict: { outcome: 'await-approval', reason: 'review-preferred', passRate: { candidate: 0, baseline: 0 }, costRatio: 1, decidedByReview: true } } })
   const tD = [
     { type: 'trial.start', trialId: 'tD', candidateId: 'cD', plan: { selection: [{ caseId: 'T-D' }, { caseId: 'T-H1' }], guard: [{ caseId: 'T-H3' }], repeats: 2, budget: { maxRequests: 3, maxTokens: 8_000_000 } } },
@@ -438,7 +438,7 @@ function goodGate(): Obs {
     { id: 'dC', outcome: 'rejected', reason: 'quality-down', trigger: 'gate', candidateId: 'cC', trialId: 'tC', fromVersion: VA, toVersion: VA, verdict: tC.at(-1)!['verdict'], cost: gateCost(18, 18, 0), detail: 'reject (quality-down).' },
     { id: 'dR', outcome: 'rolled-back', reason: 'component-errors', trigger: 'usage-regression', candidateId: 'cA', fromVersion: VA, toVersion: 'baseline', revision: 2, regression: { consecutiveErrors: 3, observations: [{ taskId: 'T-C' }, { taskId: 'T-B2' }, { taskId: 'T-R' }] }, detail: 'rolled back' },
     { id: 'dD', outcome: 'rejected', reason: 'budget-exhausted', trigger: 'gate', candidateId: 'cD', trialId: 'tD', fromVersion: 'baseline', toVersion: 'baseline', detail: 'reject (budget-exhausted).' },
-    { id: 'dE1', outcome: 'awaiting-approval', reason: 'review-preferred', trigger: 'gate', candidateId: 'cE', trialId: 'tE', fromVersion: 'baseline', toVersion: 'baseline', verdict: tE.at(-1)!['verdict'], cost: gateCost(18, 18, 4), detail: 'await approval' },
+    { id: 'dE1', outcome: 'awaiting-approval', reason: 'review-preferred', trigger: 'gate', candidateId: 'cE', trialId: 'tE', fromVersion: 'baseline', toVersion: 'baseline', verdict: tE.at(-1)!['verdict'], cost: gateCost(18, 18, 8), detail: 'await approval' },
     { id: 'dE2', outcome: 'adopted', reason: 'approved', trigger: 'approval', candidateId: 'cE', trialId: 'tE', fromVersion: 'baseline', toVersion: VE, revision: 3, detail: 'approved' },
     { id: 'dF', outcome: 'rejected', reason: 'interrupted', trigger: 'gate', candidateId: 'cF', trialId: 'tF', fromVersion: VE, toVersion: VE, detail: 'interrupted' },
   ]
@@ -477,7 +477,8 @@ function goodGate(): Obs {
     ledger: [
       ...trialRequests('tA', tA),
       ...trialRequests('tE', tE),
-      ...Array.from({ length: 4 }, () => ({ type: 'llm.request.end', trialId: 'tE', sessionId: 'review' })),
+      // ADR 0016: each opinion is two requests, one per order.
+      ...Array.from({ length: 8 }, () => ({ type: 'llm.request.end', trialId: 'tE', sessionId: 'review' })),
       ...trialRequests('tD', tD),
       { type: 'task.outcome', sessionId: 'G-B2', memberId: 'main', taskId: 'T-B2', componentsUsed: [{ kind: 'function-module', name: 'order-summary', version: VA, calls: 1, errors: 0 }], checks: passedChecks },
       { type: 'task.outcome', sessionId: 'G-G', memberId: 'main', taskId: 'T-G', componentsUsed: [], checks: passedChecks },
