@@ -111,7 +111,8 @@ export function trialRowConfig(env: Readonly<Record<string, string | undefined>>
  */
 export function step5ProfileRows(env: Readonly<Record<string, string | undefined>>, home?: string): AppProfileRow[] {
   const trial = trialRowConfig(env, home).trial as { readonly env: JsonObject }
-  return [{ id: 'evolve', name: EvolvePlugin.name, config: { entry: IMPROVE_ENTRY, env: trial.env } }]
+  // ADR 0012: the user's improvers, meta queue and config live in the same home.
+  return [{ id: 'evolve', name: EvolvePlugin.name, config: { entry: IMPROVE_ENTRY, env: trial.env, ...(home === undefined ? {} : { home }) } }]
 }
 
 /**
