@@ -1,12 +1,21 @@
 /**
- * The configuration contract: the per-project `.nexgent/config.json` and the
- * application profile rows the kernel loads plugins from.
+ * The configuration contract: the per-project `.nexgent/config.json`, the
+ * user-level `<NEXGENT_HOME>/config.json` (ADR 0012) and the application
+ * profile rows the kernel loads plugins from.
  */
 import { NexgentError } from './errors.js'
 import type { JsonObject, JsonValue } from './json.js'
 import type { ApprovalGrant } from './approvals.js'
 import { resolveCapabilitiesConfig, type CapabilitiesConfig, type CapabilitiesConfigInput } from './capabilities.js'
-import { resolveImprovementConfig, type ImprovementConfig, type ImprovementConfigInput } from './improvement.js'
+import {
+  checkMetaImprovementConfig,
+  resolveImprovementConfig,
+  resolveMetaImprovementConfig,
+  type ImprovementConfig,
+  type ImprovementConfigInput,
+  type MetaImprovementConfig,
+  type MetaImprovementConfigInput,
+} from './improvement.js'
 import type { Effort, ThinkingMode } from './llm.js'
 import type { SandboxMode } from './workspace.js'
 
@@ -106,6 +115,71 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
     capabilities: resolveCapabilitiesConfig(input.capabilities),
     improvement: resolveImprovementConfig(input.improvement),
   }
+}
+
+// ---------------------------------------------------------------------------
+// User config (ADR 0012)
+// ---------------------------------------------------------------------------
+
+/** `config.json` below the Nexgent home (`~/.nexgent`, or `NEXGENT_HOME`). */
+export const USER_CONFIG_FILE_NAME = 'config.json'
+
+/**
+ * `<NEXGENT_HOME>/config.json` (ADR 0012 decision 3): settings shared by
+ * every project of the user. A missing file equals `{}`; unknown fields are
+ * `config/invalid`. Only the meta-job settings live here so far; the
+ * improver itself is the user-level version line `<NEXGENT_HOME>/improvers/`.
+ */
+export interface UserConfig {
+  /** Format version; only 1 exists. */
+  readonly version: 1
+  readonly improvement: {
+    /** Meta jobs over the shared improver: switch (default off), `everyJobs`, the meta budget, the model. */
+    readonly meta: MetaImprovementConfig
+  }
+}
+
+/**
+ * User config fields whose change always needs approval when a model asks
+ * for it (the settings page is a user action); the file lies outside every
+ * project, so file tools cannot reach it anyway.
+ */
+export const GUARDED_USER_CONFIG_FIELDS = ['improvement'] as const
+
+/** A partial user config as read from disk, before defaults. */
+export interface UserConfigInput {
+  readonly version?: 1
+  readonly improvement?: { readonly meta?: MetaImprovementConfigInput }
+}
+
+/** Defaults of {@link UserConfig}. */
+export const DEFAULT_USER_CONFIG: UserConfig = Object.freeze({
+  version: 1,
+  improvement: Object.freeze({ meta: resolveMetaImprovementConfig() }),
+}) as UserConfig
+
+/** Fill a validated partial user config with defaults (pure). */
+export function resolveUserConfig(input: UserConfigInput = {}): UserConfig {
+  return { version: 1, improvement: { meta: resolveMetaImprovementConfig(input.improvement?.meta) } }
+}
+
+/**
+ * Validate a user config as read from disk (pure).
+ * @throws `config/invalid` with `details.field` naming the field path.
+ */
+export function assertUserConfig(value: unknown): asserts value is UserConfigInput {
+  const fail = (field: string, message: string): never => {
+    throw new NexgentError('config/invalid', `${USER_CONFIG_FILE_NAME} (Nexgent home): ${field} ${message}`, { details: { field } })
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) fail('config', 'must be an object')
+  const record = value as Record<string, unknown>
+  for (const key of Object.keys(record)) if (key !== 'version' && key !== 'improvement') fail(key, 'is not a known field')
+  if (record.version !== undefined && record.version !== 1) fail('version', 'must be 1')
+  if (record.improvement === undefined) return
+  if (record.improvement === null || typeof record.improvement !== 'object' || Array.isArray(record.improvement)) fail('improvement', 'must be an object')
+  const improvement = record.improvement as Record<string, unknown>
+  for (const key of Object.keys(improvement)) if (key !== 'meta') fail(`improvement.${key}`, 'is not a known field')
+  if (improvement.meta !== undefined) checkMetaImprovementConfig(improvement.meta, (field, message) => fail(`improvement.${field}`, message))
 }
 
 /**

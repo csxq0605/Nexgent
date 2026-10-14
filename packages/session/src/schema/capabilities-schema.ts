@@ -22,6 +22,7 @@ import {
   COMPONENT_NAME_PATTERN,
   DECISION_OUTCOMES,
   DECISION_REASONS,
+  INSTANCE_LITERAL_KINDS,
   isJsonValue,
   TASK_CHECK_NAMES,
   TRIAL_UNKNOWN_REASONS,
@@ -277,6 +278,10 @@ export const capabilitiesSchema: JsonObject = {
         costRatio: { anyOf: [{ type: 'number', minimum: 0 }, { const: 'unknown' }] },
         costBasis: { enum: ['usd', 'tokens'] },
         decidedByReview: { type: 'boolean' },
+        similarPassRate: closedObject(
+          { candidate: { type: 'number', minimum: 0 }, baseline: { type: 'number', minimum: 0 } },
+          ['candidate', 'baseline'],
+        ),
       },
       ['outcome', 'reason', 'passRate', 'costRatio', 'decidedByReview'],
     ),
@@ -382,6 +387,10 @@ export const capabilitiesSchema: JsonObject = {
       },
       ['observations', 'baselinePassRate', 'passRate', 'consecutiveErrors'],
     ),
+    instanceLiteralHit: closedObject(
+      { value: ref('nonEmptyString'), kind: { enum: [...INSTANCE_LITERAL_KINDS] }, path: ref('nonEmptyString'), source: ref('nonEmptyString') },
+      ['value', 'kind', 'path', 'source'],
+    ),
     capabilityDecision: closedObject(
       {
         formatVersion: { const: 1 },
@@ -398,6 +407,7 @@ export const capabilitiesSchema: JsonObject = {
         verdict: ref('trialVerdict'),
         cost: ref('armCosts'),
         regression: ref('usageRegressionEvidence'),
+        instanceLiterals: { type: 'array', items: ref('instanceLiteralHit') },
         detail: bounded(CAPABILITY_LIMITS.maxReasonChars),
       },
       ['formatVersion', 'id', 'outcome', 'reason', 'trigger', 'decidedAt', 'fromVersion', 'toVersion', 'detail'],

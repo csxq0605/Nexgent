@@ -81,6 +81,8 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'settings.get': project,
   'settings.update': { projectId: id, patch: { kind: 'object' } },
   'settings.setApiKey': { value: { kind: 'string' } },
+  'userSettings.get': {},
+  'userSettings.update': { patch: { kind: 'object' } },
   'capabilities.current': project,
   'capabilities.list': project,
   'capabilities.show': { projectId: id, candidateId: id },
@@ -92,9 +94,9 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'improvements.run': { projectId: id, sessionId: { kind: 'nonEmptyString', optional: true }, deliverableId: { kind: 'nonEmptyString', optional: true } },
   'improvements.cancel': { projectId: id, jobId: id },
   'improvements.runMeta': { projectId: id, keepCopies: { kind: 'boolean', optional: true } },
-  'improvers.list': project,
-  'improvers.show': { projectId: id, version: { kind: 'improverVersion' } },
-  'improvers.rollback': { projectId: id, toVersion: { kind: 'improverVersion', optional: true }, reason: { kind: 'string', optional: true } },
+  'improvers.list': { projectId: { kind: 'nonEmptyString', optional: true } },
+  'improvers.show': { projectId: { kind: 'nonEmptyString', optional: true }, version: { kind: 'improverVersion' } },
+  'improvers.rollback': { projectId: { kind: 'nonEmptyString', optional: true }, toVersion: { kind: 'improverVersion', optional: true }, reason: { kind: 'string', optional: true } },
 }
 
 const SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'full-access'])

@@ -2158,6 +2158,12 @@
           "type": "string",
           "pattern": "^(?:v0|[a-f0-9]{64})$"
         },
+        "improverScope": {
+          "enum": [
+            "user",
+            "project"
+          ]
+        },
         "metaJobId": {
           "$ref": "#/$defs/nonEmptyString"
         },

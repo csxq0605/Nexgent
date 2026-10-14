@@ -34,7 +34,6 @@ const phase = { usage: KNOWN_USAGE, requestCount: 2 }
 const FIXTURES = new URL('./fixtures/step5-run2/', import.meta.url)
 
 type Step6Kind = Extract<ImprovementFileKind, 'improver' | 'improverRevision' | 'metaDiagnosis' | 'change' | 'comparison'>
-type Step5Kind = Extract<ImprovementFileKind, 'queue' | 'job' | 'diagnosis'>
 
 const child: ImproverBundle = applyImproverChange(IMPROVER_V0, { op: 'set-comparison-param', param: 'repeats', value: 3 })
 
@@ -111,7 +110,8 @@ const INVALID: Record<Step6Kind, unknown[]> = {
 
 describe('step-6 improvement file schema', () => {
   it('covers every file kind (step 5 plus step 6)', () => {
-    const covered: (Step5Kind | Step6Kind)[] = ['queue', 'job', 'diagnosis', ...(Object.keys(VALID) as Step6Kind[])]
+    // `userQueue` (ADR 0012) is covered by step6-rework-records.spec.ts.
+    const covered: ImprovementFileKind[] = ['queue', 'job', 'diagnosis', 'userQueue', ...(Object.keys(VALID) as Step6Kind[])]
     expect(covered.sort()).toEqual((Object.keys(IMPROVEMENT_FILE_DEFS) as ImprovementFileKind[]).sort())
   })
 

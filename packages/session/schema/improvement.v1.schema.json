@@ -97,6 +97,10 @@
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
+    "userProjectId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "trialVerdict": {
       "type": "object",
       "additionalProperties": false,
@@ -132,7 +136,10 @@
             "load-failure",
             "usage-regression",
             "component-errors",
-            "manual"
+            "manual",
+            "similar-regression",
+            "no-similar-cases",
+            "instance-literal"
           ]
         },
         "passRate": {
@@ -190,6 +197,24 @@
         },
         "decidedByReview": {
           "type": "boolean"
+        },
+        "similarPassRate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "candidate",
+            "baseline"
+          ],
+          "properties": {
+            "candidate": {
+              "type": "number",
+              "minimum": 0
+            },
+            "baseline": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
         }
       }
     },
@@ -425,6 +450,12 @@
         },
         "improverVersion": {
           "$ref": "#/$defs/improverVersion"
+        },
+        "improverScope": {
+          "enum": [
+            "user",
+            "project"
+          ]
         },
         "arm": {
           "type": "object",
@@ -706,6 +737,105 @@
         },
         "revision": {
           "$ref": "#/$defs/positiveInteger"
+        },
+        "batch": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/userMetaQueueEntry"
+          }
+        }
+      }
+    },
+    "userMetaQueueEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "root",
+        "jobId",
+        "status",
+        "at"
+      ],
+      "properties": {
+        "projectId": {
+          "$ref": "#/$defs/userProjectId"
+        },
+        "root": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/improvementStatus"
+        },
+        "at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "userMetaJobRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "root",
+        "jobId",
+        "createdAt"
+      ],
+      "properties": {
+        "projectId": {
+          "$ref": "#/$defs/userProjectId"
+        },
+        "root": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "userMetaQueue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "since",
+        "counted",
+        "pending",
+        "metaJobs"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "since": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "counted": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          }
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/userMetaQueueEntry"
+          }
+        },
+        "active": {
+          "$ref": "#/$defs/userMetaJobRef"
+        },
+        "metaJobs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/userMetaJobRef"
+          }
         }
       }
     },
@@ -1426,6 +1556,9 @@
         },
         "sourceJobId": {
           "$ref": "#/$defs/uuid"
+        },
+        "projectId": {
+          "$ref": "#/$defs/userProjectId"
         },
         "tree": {
           "$ref": "#/$defs/sha256"

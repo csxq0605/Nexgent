@@ -34,6 +34,14 @@
  *   improvement job with `kind: 'meta'` and travels the same
  *   `improvements.*` methods and `improvement.job` events, its meta
  *   diagnosis, change and comparison linked from `improvements.show`.
+ * - Step 6 rework (API 7, ADR 0012): the improver is user-level, shared by
+ *   every project: `improvers.*` take no project (a `projectId` is ignored)
+ *   and `improver.version` is an application-level event (no `projectId`,
+ *   no `sessionId`). Meta-job settings are user settings
+ *   (`userSettings.get / update`); a project keeps only
+ *   `improvement.shareImproverEvidence`. Gate verdicts may carry the
+ *   ADR 0013 reasons `similar-regression`, `no-similar-cases` and
+ *   `instance-literal` (with the values found on the decision).
  */
 import type {
   ActivationRevision,
@@ -60,7 +68,10 @@ import type {
   ImproverComparison,
   ImproverDecisionReason,
   ImproverRevision,
+  ImproverScope,
   ImproverVersion,
+  MetaImprovementConfig,
+  MetaImprovementConfigInput,
   MetaDiagnosis,
   PhaseTimes,
   PluginApprovalInfo,
@@ -99,7 +110,7 @@ import type {
 } from '@nexgent/kernel'
 
 /** API version; bumped only by a contract-change PR. */
-export const SDK_API_VERSION = 6
+export const SDK_API_VERSION = 7
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -260,6 +271,16 @@ interface CapabilityEventBase {
   readonly parentSessionId?: undefined
 }
 
+/** Fields of an application-level event (API 7): no project, no session. */
+interface AppEventBase {
+  /** Absent; an API-6 host still set it. */
+  readonly projectId?: string
+  /** Per-application counter of application events starting at 1. */
+  readonly eventSeq: number
+  readonly sessionId?: undefined
+  readonly parentSessionId?: undefined
+}
+
 /** Everything the SDK pushes to a subscriber (desktop: over the `nexgent:event` channel). */
 export type SdkEvent =
   | EventBase & { readonly type: 'turn.start'; readonly turn: number; readonly source: Exclude<UserMessageSource, 'inject'> }
@@ -292,8 +313,8 @@ export type SdkEvent =
   | CapabilityEventBase & { readonly type: 'capability.trial'; readonly candidateId: string; readonly trialId: string; readonly receipt: TrialReceipt['type']; readonly runsDone: number; readonly runsTotal: number; readonly status?: TrialStatus }
   /** Step 5: an improvement job was created or changed status (one event per status change); step 6: meta jobs too. */
   | CapabilityEventBase & { readonly type: 'improvement.job'; readonly job: ImprovementJobView }
-  /** Step 6: the improver in force changed (a meta job adopted a child, a rollback). */
-  | CapabilityEventBase & { readonly type: 'improver.version'; readonly current: ImproverVersionView }
+  /** Step 6: the improver in force changed (a meta job adopted a child, a rollback); API 7: application-level (the improver is the user's). */
+  | AppEventBase & { readonly type: 'improver.version'; readonly current: ImproverVersionView }
 
 /** The `type` vocabulary of {@link SdkEvent}. */
 export type SdkEventType = SdkEvent['type']
@@ -372,6 +393,8 @@ export interface ImprovementJobView {
   readonly kind?: ImprovementJobKind
   /** Step 6: the improver version the job runs on (absent in step-5 jobs: `v0`). */
   readonly improverVersion?: ImproverVersion
+  /** ADR 0012: where that improver lives (`user` from the rework on; absent: `project`). */
+  readonly improverScope?: ImproverScope
   readonly trigger: ImprovementTrigger
   readonly status: ImprovementStatus
   readonly createdAt: string
@@ -429,7 +452,8 @@ export interface ImprovementListing {
   /**
    * Step 6: meta jobs: whether they start on their own, finished jobs
    * counted toward the next one and how many start it, and the meta budget
-   * window. Absent until the SDK reads meta jobs (W5).
+   * window. API 7: all user-level (the user queue and `userSettings`), the
+   * same in every project. Absent until the SDK reads meta jobs.
    */
   readonly meta?: {
     readonly enabled: boolean
@@ -460,8 +484,13 @@ export interface ImproverVersionView {
 /** `improvers.list`. */
 export interface ImproverListing {
   readonly current: ImproverVersionView
-  /** The activation chain, oldest first. */
+  /** The activation chain, oldest first (the user-level line, API 7). */
   readonly history: readonly ImproverRevision[]
+  /**
+   * API 7: projects whose jobs ran on the current improver, most recent
+   * first (for the rollback confirmation: a rollback affects them all).
+   */
+  readonly usedBy?: readonly { readonly root: string; readonly name: string; readonly lastJobAt: string }[]
 }
 
 /** `improvers.show`: one stored improver. */
@@ -502,6 +531,17 @@ export interface ProjectSettings {
  * (`GUARDED_PROJECT_CONFIG_FIELDS`).
  */
 export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey' | 'improvement'>> & { readonly improvement?: ImprovementConfigInput }
+
+/** API 7 (ADR 0012): `<NEXGENT_HOME>/config.json`, shared by every project. */
+export interface UserSettings {
+  /** Meta jobs over the shared improver: switch (default off), `everyJobs`, meta budget, model. */
+  readonly improvement: { readonly meta: MetaImprovementConfig }
+}
+
+/** A user settings change from the settings page (a user action, no approval prompt); missing meta fields take their defaults. */
+export interface UserSettingsPatch {
+  readonly improvement?: { readonly meta?: MetaImprovementConfigInput }
+}
 
 // ---------------------------------------------------------------------------
 // Project files
@@ -615,6 +655,10 @@ export interface SdkMethods {
   'settings.update': (input: { readonly projectId: string; readonly patch: SettingsPatch }) => Promise<ProjectSettings>
   /** Stores the key in `~/.nexgent/credentials.json` (mode 0600); returns only the facts, never the value. An empty string removes it. */
   'settings.setApiKey': (input: { readonly value: string }) => Promise<CredentialInfo>
+  /** API 7: the user-level settings (`<NEXGENT_HOME>/config.json`). */
+  'userSettings.get': (input: Record<string, never>) => Promise<UserSettings>
+  /** API 7: change the user-level settings; invalid values reject `config/invalid`. */
+  'userSettings.update': (input: { readonly patch: UserSettingsPatch }) => Promise<UserSettings>
 
   /** Step 4: the adopted version (verified; falls back like a new session would). */
   'capabilities.current': (input: { readonly projectId: string }) => Promise<CapabilityVersionView>
@@ -651,12 +695,12 @@ export interface SdkMethods {
    */
   'improvements.runMeta': (input: { readonly projectId: string; readonly keepCopies?: boolean }) => Promise<ImprovementJobView>
 
-  /** Step 6: the improver in force and the activation chain. */
-  'improvers.list': (input: { readonly projectId: string }) => Promise<ImproverListing>
-  /** Step 6: one stored improver (`v0` included); an unknown version rejects `improver/not-found`. */
-  'improvers.show': (input: { readonly projectId: string; readonly version: ImproverVersion }) => Promise<ImproverDetail>
-  /** Step 6: roll back to the previous improver (or `toVersion`, which must appear earlier in the chain, `v0` included); writes a `manual` revision. */
-  'improvers.rollback': (input: { readonly projectId: string; readonly toVersion?: ImproverVersion; readonly reason?: string }) => Promise<ImproverVersionView>
+  /** Step 6: the improver in force and the activation chain; API 7: the user-level line (`projectId` is ignored). */
+  'improvers.list': (input: { readonly projectId?: string }) => Promise<ImproverListing>
+  /** Step 6: one stored improver (`v0` included); an unknown version rejects `improver/not-found`. API 7: user-level. */
+  'improvers.show': (input: { readonly projectId?: string; readonly version: ImproverVersion }) => Promise<ImproverDetail>
+  /** Step 6: roll back to the previous improver (or `toVersion`, which must have been in force earlier, `v0` included); writes a `manual` revision. API 7: user-level, affects every project. */
+  'improvers.rollback': (input: { readonly projectId?: string; readonly toVersion?: ImproverVersion; readonly reason?: string }) => Promise<ImproverVersionView>
 }
 
 /** An IPC method name. */
@@ -709,6 +753,8 @@ export const SDK_METHOD_NAMES = [
   'settings.get',
   'settings.update',
   'settings.setApiKey',
+  'userSettings.get',
+  'userSettings.update',
   'capabilities.current',
   'capabilities.list',
   'capabilities.show',

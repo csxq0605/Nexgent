@@ -59,8 +59,8 @@
 | [`plan/step-4-work-partition.md`](plan/step-4-work-partition.md) | 步骤 4 分工与验收设计，用户 2026-10-12 已定 |
 | [`plan/step-5-work-partition.md`](plan/step-5-work-partition.md) | 步骤 5 分工与验收设计，用户 2026-10-13 已定 |
 | [`plan/step-6-rework-partition.md`](plan/step-6-rework-partition.md) | 步骤 6 返工分工：去掉任务特化、改进器共享、门控防背答案、小试点测量（ADR 0011–0013），用户 2026-10-14 按推荐 |
-| [`spec/data-formats.md`](spec/data-formats.md) | 步骤 1、步骤 2 章节已写定（材料、成果、反馈、持久目标、压缩）；能力清单留标题 |
-| [`spec/permissions.md`](spec/permissions.md) | 步骤 1、步骤 2 章节已写定（本地 IPC 与访问令牌）；插件安装审批（步骤 4）留标题 |
+| [`spec/data-formats.md`](spec/data-formats.md) | 步骤 1–6 的文件格式；步骤 6 返工（ADR 0012、0013）补上 Nexgent 主目录（用户级配置、用户级改进器版本线与元改进队列）、`improverScope`、`shareImproverEvidence`、同类题规则与具体数值检查 |
+| [`spec/permissions.md`](spec/permissions.md) | 步骤 1–6 的权限与审批；步骤 6 返工补上主目录拒绝读写、用户级受保护字段、元诊断只读本批项目、改进器文字的具体数值检查 |
 | [`spec/agent-hooks.md`](spec/agent-hooks.md) | 步骤 2：agent loop 挂点、步骤 2 工具、系统提示增量、技能 |
 | [`validation/README.md`](validation/README.md) | 证据政策 |
 | [`validation/TEMPLATE.md`](validation/TEMPLATE.md) | 验收记录模板 |

@@ -35,6 +35,7 @@ import {
   type PhaseCost,
 } from './improvement.js'
 import type { ErrorInfo } from './errors.js'
+import type { InstanceLiteralText } from './instance-literals.js'
 import type { JsonSchema, JsonValue } from './json.js'
 
 // ---------------------------------------------------------------------------
@@ -55,10 +56,26 @@ export const IMPROVER_V0_VERSION = 'v0'
 /** Pattern of an {@link ImproverVersion}. */
 export const IMPROVER_VERSION_PATTERN = /^(?:v0|[a-f0-9]{64})$/
 
-/** `.nexgent/improvers/` (host-written; the model's file tools can read and write none of it). */
+/**
+ * `improvers/`, below the Nexgent home (`<NEXGENT_HOME>/improvers/`, ADR
+ * 0012 decision 1: one version line shared by every project of the user)
+ * and, read-only for history, below a project's `.nexgent/` (ADR 0008).
+ * Host-written; the model's file tools can read and write none of it.
+ */
 export const IMPROVERS_DIR = 'improvers'
 
-/** Layout below `.nexgent/improvers/` (ADR 0008 decision 1: a project-level version line of its own). */
+/**
+ * Where the improver a job ran on lives (ADR 0012): `user` (the shared line
+ * below the Nexgent home, every job from the rework on) or `project` (a
+ * project's own `.nexgent/improvers/`, ADR 0008; read-only history). A job,
+ * ledger record or session without the field is `project` data.
+ */
+export type ImproverScope = 'user' | 'project'
+
+/** Every scope. */
+export const IMPROVER_SCOPES: readonly ImproverScope[] = ['user', 'project']
+
+/** Layout below an `improvers/` directory (user-level since ADR 0012; project-level before). */
 export const IMPROVER_DIRS = {
   /** `bundles/<version>.json`: every improver ever proposed (written `wx` once, never changed). */
   bundles: 'bundles',
@@ -389,7 +406,7 @@ export const EVALUATOR_FIELDS = [
 ] as const
 
 /** Why a proposed change was refused. */
-export type ImproverChangeRefusal = 'not-one-change' | 'evaluator-field' | 'out-of-bounds' | 'invalid' | 'no-op'
+export type ImproverChangeRefusal = 'not-one-change' | 'evaluator-field' | 'out-of-bounds' | 'invalid' | 'no-op' | 'instance-literal'
 
 /** The outcome of {@link checkImproverChange}. */
 export type ImproverChangeCheck =
@@ -479,6 +496,23 @@ export function checkImproverChange(parent: ImproverBundle, input: unknown): Imp
   return { ok: true, change, child }
 }
 
+/**
+ * The free text a change adds (pure), for the instance-literal check (ADR
+ * 0012 decision 5, `findInstanceLiterals`): the paragraph of
+ * `set-diagnosis-paragraph`, the template of `set-proposal-brief`; the other
+ * operators add none. A hit refuses the change (`instance-literal`).
+ */
+export function improverChangeTexts(change: ImproverChange): InstanceLiteralText[] {
+  switch (change.op) {
+    case 'set-diagnosis-paragraph':
+      return [{ path: `diagnosis.paragraphs[${change.index}]`, text: change.text }]
+    case 'set-proposal-brief':
+      return [{ path: `proposal.briefs.${change.kind}`, text: change.template }]
+    default:
+      return []
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Activation chain
 // ---------------------------------------------------------------------------
@@ -553,8 +587,10 @@ export function isNextImproverRevision(state: ImproverActivationState, next: Imp
  * Id of the adoption rules in force: `decideTrial`, the gate's review and
  * feedback-check prompts and `decideImprover`. Changing any of them needs a
  * new ADR and a new id (ADR 0008 decision 5), so it starts a new epoch.
+ * ADR 0013 (similar cases may not regress, instance literals are rejected)
+ * replaced `adr-0008`.
  */
-export const EVALUATOR_RULES = 'adr-0008'
+export const EVALUATOR_RULES = 'adr-0013'
 
 /**
  * What decides "better" (ADR 0008 decision 5): the rules id and the
@@ -690,6 +726,8 @@ export interface ComparisonOrigin {
   readonly feedbackIds: readonly string[]
   readonly capabilityVersion: CapabilityVersion
   readonly epoch: string
+  /** ADR 0012: the project of the source job (the arms run in its copies); absent for a project-level meta job. */
+  readonly projectId?: string
 }
 
 /** Total spend of one arm's job (diagnose + propose + trial), with the display dollars. */
@@ -841,7 +879,28 @@ export function decideImprover(origin: ComparisonOrigin, parent: ComparisonArmRe
 
 const id: JsonSchema = { type: 'string', minLength: 1 }
 
-/** `improve_list_jobs`: the project's finished and running jobs, one summary line each (status, trigger, diagnosis kind, verdict, cost, first use, rollback). */
+/**
+ * ADR 0012 decision 4: the project a meta-session read is about. Only the
+ * projects of the meta job's batch are accepted (the host refuses any other
+ * id, and any project that turned `shareImproverEvidence` off); the ids are
+ * listed in the session's first message and by `improve_list_jobs`.
+ */
+const projectId: JsonSchema = { type: 'string', pattern: '^[a-f0-9]{64}$', description: 'A project of this meta job\'s batch (its id as improve_list_jobs shows it).' }
+
+/** A meta-session copy of a read tool with the `projectId` parameter (required, or optional with the batch's newest project as default). */
+function withProject(tool: ImprovementToolSpec, required: boolean): ImprovementToolSpec {
+  const schema = tool.inputSchema as { readonly properties?: Record<string, JsonSchema>; readonly required?: readonly string[] }
+  return {
+    ...tool,
+    inputSchema: {
+      ...tool.inputSchema,
+      properties: { ...schema.properties, projectId },
+      ...(required ? { required: [...(schema.required ?? []), 'projectId'] } : {}),
+    },
+  }
+}
+
+/** `improve_list_jobs`: the finished and running jobs of the batch's projects (one project with `projectId`), one summary line each (project, status, trigger, diagnosis kind, verdict, cost, first use, rollback). */
 export const IMPROVE_LIST_JOBS_TOOL: ImprovementToolSpec = {
   name: 'improve_list_jobs',
   effects: ['read'],
@@ -850,19 +909,26 @@ export const IMPROVE_LIST_JOBS_TOOL: ImprovementToolSpec = {
     type: 'object',
     additionalProperties: false,
     properties: {
+      projectId,
       statuses: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Only jobs with these statuses.' },
       limit: { type: 'integer', minimum: 1, maximum: 100 },
     },
   },
 }
 
-/** `improve_read_job`: one job's record, diagnosis, candidate summary and gate verdict. */
+/** `improve_read_job`: one job's record, diagnosis, candidate summary and gate verdict; `projectId` may be left out when the job id is in the batch. */
 export const IMPROVE_READ_JOB_TOOL: ImprovementToolSpec = {
   name: 'improve_read_job',
   effects: ['read'],
   approval: 'never',
-  inputSchema: { type: 'object', additionalProperties: false, required: ['jobId'], properties: { jobId: id } },
+  inputSchema: { type: 'object', additionalProperties: false, required: ['jobId'], properties: { jobId: id, projectId } },
 }
+
+/** ADR 0012: `improve_read_session` in a meta-diagnose session: the same slice, of a session of one batch project. */
+export const META_READ_SESSION_TOOL: ImprovementToolSpec = withProject(IMPROVE_READ_SESSION_TOOL, true)
+
+/** ADR 0012: `improve_read_ledger` in a meta-diagnose session: the same slice, of one batch project's ledger. */
+export const META_READ_LEDGER_TOOL: ImprovementToolSpec = withProject(IMPROVE_READ_LEDGER_TOOL, true)
 
 /**
  * `improve_report_meta_diagnosis`: submit the meta diagnosis. The host
@@ -947,8 +1013,8 @@ export const IMPROVE_PROPOSE_CHANGE_TOOL: ImprovementToolSpec = {
 export const META_DIAGNOSIS_TOOLS: readonly ImprovementToolSpec[] = [
   IMPROVE_LIST_JOBS_TOOL,
   IMPROVE_READ_JOB_TOOL,
-  IMPROVE_READ_SESSION_TOOL,
-  IMPROVE_READ_LEDGER_TOOL,
+  META_READ_SESSION_TOOL,
+  META_READ_LEDGER_TOOL,
   IMPROVE_REPORT_META_DIAGNOSIS_TOOL,
 ]
 

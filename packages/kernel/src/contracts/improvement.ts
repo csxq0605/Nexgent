@@ -30,7 +30,7 @@ import type { MemberCost } from './ledger.js'
 import type { LLMUsage, ThinkingMode } from './llm.js'
 import type { Step2ToolSpec } from './step2-tools.js'
 import type { FeedbackEntry, FeedbackRating } from './tasking.js'
-import type { ImproverVersion } from './improver.js'
+import type { ImproverScope, ImproverVersion } from './improver.js'
 
 // ---------------------------------------------------------------------------
 // Layout and limits
@@ -233,6 +233,117 @@ export function takeMetaBatch(queue: ImprovementQueue, everyJobs: number): { rea
   return { queue: { ...queue, metaPending: [] }, batch: pending }
 }
 
+// ---------------------------------------------------------------------------
+// User-level meta queue (ADR 0012)
+// ---------------------------------------------------------------------------
+
+/**
+ * ADR 0012: a project's id in user-level records: the lowercase hex SHA-256
+ * (UTF-8) of its root's realpath, with `\` turned into `/` and, on Windows,
+ * lowercased. Stable across processes, unlike the SDK's per-process
+ * `projectId`.
+ */
+export const USER_PROJECT_ID_PATTERN = /^[a-f0-9]{64}$/
+
+/** `<NEXGENT_HOME>/improvements/` (host-written): the user-level meta queue. */
+export const USER_IMPROVEMENTS_DIR = 'improvements'
+
+/** One finished capability job counted toward the user's next meta job. */
+export interface UserMetaQueueEntry {
+  readonly projectId: string
+  /** The project's absolute root when counted (to find it again). */
+  readonly root: string
+  readonly jobId: string
+  /** Its final status ({@link META_COUNTED_STATUSES}). */
+  readonly status: ImprovementStatus
+  /** ISO-8601 UTC when it was counted. */
+  readonly at: string
+}
+
+/** A meta job as the user queue knows it: it lives in `root`'s `.nexgent/improvements/<jobId>/`. */
+export interface UserMetaJobRef {
+  readonly projectId: string
+  readonly root: string
+  readonly jobId: string
+  /** ISO-8601 UTC; the meta budget window counts the jobs created in it. */
+  readonly createdAt: string
+}
+
+/**
+ * `<NEXGENT_HOME>/improvements/queue.json` (ADR 0012 decision 3), changed
+ * like the project queue (`queue.lock`, temp file + rename). It counts the
+ * finished capability jobs of every project that shares its evidence, holds
+ * the user's single meta-job slot and lists the meta jobs for the meta
+ * budget. A meta job's own files stay in the project that hosts it (the
+ * project of the job that completed the batch, or where an explicit meta
+ * job was asked for); the project queues' `metaCounted` / `metaPending` are
+ * no longer written.
+ */
+export interface UserMetaQueue {
+  readonly formatVersion: 1
+  /** ISO-8601 UTC when counting began; jobs that finished earlier are never counted. */
+  readonly since: string
+  /** `<projectId>:<jobId>` of every job ever counted; never counted again. */
+  readonly counted: readonly string[]
+  /** Counted jobs not yet given to a meta job, oldest first. */
+  readonly pending: readonly UserMetaQueueEntry[]
+  /** The meta job holding the user's single slot; capability jobs of any project never wait on it. */
+  readonly active?: UserMetaJobRef
+  /** Meta jobs created, oldest first (the meta budget sums those created in its window; older entries may be dropped). */
+  readonly metaJobs: readonly UserMetaJobRef[]
+}
+
+/** The user queue that starts counting at `since`. */
+export function emptyUserMetaQueue(since: string): UserMetaQueue {
+  return { formatVersion: 1, since, counted: [], pending: [], metaJobs: [] }
+}
+
+/** The `counted` key of a job. */
+export function userMetaKey(projectId: string, jobId: string): string {
+  return `${projectId}:${jobId}`
+}
+
+/**
+ * Count one finished job of a project toward the user's next meta job
+ * (pure). Nothing changes for a job already counted, a meta job, a
+ * comparison arm, a status outside {@link META_COUNTED_STATUSES}, a job that
+ * finished before `since`, or a project with `shareImproverEvidence` off
+ * (`shares: false`).
+ */
+export function countUserFinishedJob(
+  queue: UserMetaQueue,
+  project: { readonly projectId: string; readonly root: string; readonly shares: boolean },
+  job: Pick<ImprovementJob, 'id' | 'status' | 'kind' | 'arm' | 'updatedAt'>,
+  at: string,
+): { readonly queue: UserMetaQueue; readonly counted: boolean } {
+  const key = userMetaKey(project.projectId, job.id)
+  if (!project.shares || job.kind === 'meta' || job.arm !== undefined || !META_COUNTED_STATUSES.includes(job.status) || job.updatedAt < queue.since || queue.counted.includes(key)) {
+    return { queue, counted: false }
+  }
+  const entry: UserMetaQueueEntry = { projectId: project.projectId, root: project.root, jobId: job.id, status: job.status, at }
+  return { queue: { ...queue, counted: [...queue.counted, key], pending: [...queue.pending, entry] }, counted: true }
+}
+
+/**
+ * Take the pending jobs as a meta job's batch (pure) when the user's slot is
+ * free and at least `everyJobs` are pending (an explicit meta job passes 0);
+ * `pending` empties and the caller sets `active` and appends to `metaJobs`
+ * in the same locked update. Entries of projects that turned sharing off
+ * since are dropped (`sharing` answers per project id).
+ */
+export function takeUserMetaBatch(queue: UserMetaQueue, everyJobs: number, sharing: (projectId: string) => boolean = () => true): { readonly queue: UserMetaQueue; readonly batch?: readonly UserMetaQueueEntry[] } {
+  const pending = queue.pending.filter(entry => sharing(entry.projectId))
+  if (queue.active !== undefined || pending.length < everyJobs) return { queue: { ...queue, pending } }
+  return { queue: { ...queue, pending: [] }, batch: pending }
+}
+
+/** Free the user's meta slot held by `jobId` (pure); another job leaves the queue unchanged. */
+export function releaseUserMetaSlot(queue: UserMetaQueue, jobId: string): UserMetaQueue {
+  if (queue.active?.jobId !== jobId) return queue
+  const { active: _released, ...rest } = queue
+  return rest
+}
+
 /** The trigger of a counted batch: `check-failure` when every signal is one, else `feedback-count`. */
 export function batchTrigger(signals: readonly ImprovementSignal[]): 'feedback-count' | 'check-failure' {
   return signals.length > 0 && signals.every(signal => signal.kind === 'check-failure') ? 'check-failure' : 'feedback-count'
@@ -371,6 +482,12 @@ export interface MetaJobState {
   readonly compared?: { readonly at: string; readonly outcome: 'adopt' | 'reject'; readonly reason: string }
   /** The improver activation revision written when the child was adopted. */
   readonly revision?: number
+  /**
+   * ADR 0012: the batch with the project of each job, as taken from the
+   * user-level meta queue (`basis` keeps the job ids); absent on a
+   * project-level meta job.
+   */
+  readonly batch?: readonly UserMetaQueueEntry[]
 }
 
 /**
@@ -400,6 +517,8 @@ export interface ImprovementJob {
    * Absent in step-5 jobs, which ran on `v0`.
    */
   readonly improverVersion?: ImproverVersion
+  /** ADR 0012: where {@link improverVersion} lives; `user` for every job from the rework on, absent (= `project`) before. */
+  readonly improverScope?: ImproverScope
   /** Step 6: set on a comparison arm's job (in the arm's project copy). */
   readonly arm?: ComparisonArmRef
   /** ISO-8601 UTC. */
@@ -781,8 +900,19 @@ export interface ImprovementConfig {
   readonly model: string
   /** Default `'on'`. */
   readonly thinking: ThinkingMode
-  /** Step 6: meta jobs ({@link MetaImprovementConfig}). */
+  /**
+   * Step 6: meta jobs ({@link MetaImprovementConfig}). ADR 0012 moved these
+   * settings to the user config (`UserConfig.improvement.meta`); this copy is
+   * still read and validated so older files load, and hosts ignore it.
+   * @deprecated read `UserConfig.improvement.meta`.
+   */
   readonly meta: MetaImprovementConfig
+  /**
+   * ADR 0012 decision 3: whether this project's jobs count toward the user's
+   * meta jobs and may be read by meta diagnoses; default `true`. Off, the
+   * project still runs on the shared improver.
+   */
+  readonly shareImproverEvidence: boolean
 }
 
 /** Defaults of {@link ImprovementConfig}. */
@@ -792,6 +922,7 @@ export const DEFAULT_IMPROVEMENT_CONFIG: ImprovementConfig = Object.freeze({
   model: 'claude-sonnet-5-5',
   thinking: 'on' as ThinkingMode,
   meta: Object.freeze({ enabled: false, everyJobs: 3, budget: Object.freeze({ maxTokens: 6_000_000, windowDays: 30 }), model: 'claude-sonnet-5-5' }),
+  shareImproverEvidence: true,
 }) as ImprovementConfig
 
 /** A partial `improvement.meta` object as written in the config file. */
@@ -809,6 +940,7 @@ export interface ImprovementConfigInput {
   readonly model?: string
   readonly thinking?: ThinkingMode
   readonly meta?: MetaImprovementConfigInput
+  readonly shareImproverEvidence?: boolean
 }
 
 /** Fill a validated partial `improvement` object with defaults (pure). */
@@ -826,6 +958,18 @@ export function resolveImprovementConfig(input: ImprovementConfigInput = {}): Im
       budget: { maxTokens: meta?.budget?.maxTokens ?? d.meta.budget.maxTokens, windowDays: meta?.budget?.windowDays ?? d.meta.budget.windowDays },
       model: meta?.model ?? d.meta.model,
     },
+    shareImproverEvidence: input.shareImproverEvidence ?? d.shareImproverEvidence,
+  }
+}
+
+/** Fill a validated partial `improvement.meta` object with defaults (pure; the user config's resolver uses it too). */
+export function resolveMetaImprovementConfig(input: MetaImprovementConfigInput = {}): MetaImprovementConfig {
+  const d = DEFAULT_IMPROVEMENT_CONFIG.meta
+  return {
+    enabled: input.enabled ?? d.enabled,
+    everyJobs: input.everyJobs ?? d.everyJobs,
+    budget: { maxTokens: input.budget?.maxTokens ?? d.budget.maxTokens, windowDays: input.budget?.windowDays ?? d.budget.windowDays },
+    model: input.model ?? d.model,
   }
 }
 
@@ -841,7 +985,7 @@ export function assertImprovementConfig(value: unknown): asserts value is Improv
     throw new NexgentError('config/invalid', '.nexgent/config.json: improvement must be an object', { details: { field: 'improvement' } })
   }
   const record = value as Record<string, unknown>
-  for (const key of Object.keys(record)) if (!['feedbackThreshold', 'budget', 'model', 'thinking', 'meta'].includes(key)) fail(key, 'is not a known field')
+  for (const key of Object.keys(record)) if (!['feedbackThreshold', 'budget', 'model', 'thinking', 'meta', 'shareImproverEvidence'].includes(key)) fail(key, 'is not a known field')
   const integer = (field: string, entry: unknown, min: number, max: number) => {
     if (entry === undefined) return
     if (typeof entry !== 'number' || !Number.isInteger(entry) || entry < min || entry > max) fail(field, `must be an integer in ${min}..${max}`)
@@ -864,12 +1008,31 @@ export function assertImprovementConfig(value: unknown): asserts value is Improv
   budgetField('budget', record.budget)
   model('model', record.model)
   if (record.thinking !== undefined && record.thinking !== 'on' && record.thinking !== 'off') fail('thinking', 'must be "on" or "off"')
-  if (record.meta !== undefined) {
-    const meta = object('meta', record.meta)
-    for (const key of Object.keys(meta)) if (!['enabled', 'everyJobs', 'budget', 'model'].includes(key)) fail(`meta.${key}`, 'is not a known field')
-    if (meta.enabled !== undefined && typeof meta.enabled !== 'boolean') fail('meta.enabled', 'must be a boolean')
-    integer('meta.everyJobs', meta.everyJobs, 1, 20)
-    budgetField('meta.budget', meta.budget)
-    model('meta.model', meta.model)
+  if (record.shareImproverEvidence !== undefined && typeof record.shareImproverEvidence !== 'boolean') fail('shareImproverEvidence', 'must be a boolean')
+  if (record.meta !== undefined) checkMetaImprovementConfig(record.meta, fail)
+}
+
+/**
+ * Check a partial `improvement.meta` object, reporting through `fail(field,
+ * message)` with `meta.`-prefixed field names (shared by the project and the
+ * user config validators).
+ */
+export function checkMetaImprovementConfig(value: unknown, fail: (field: string, message: string) => never): asserts value is MetaImprovementConfigInput {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) fail('meta', 'must be an object')
+  const meta = value as Record<string, unknown>
+  const integer = (field: string, entry: unknown, min: number, max: number) => {
+    if (entry === undefined) return
+    if (typeof entry !== 'number' || !Number.isInteger(entry) || entry < min || entry > max) fail(field, `must be an integer in ${min}..${max}`)
   }
+  for (const key of Object.keys(meta)) if (!['enabled', 'everyJobs', 'budget', 'model'].includes(key)) fail(`meta.${key}`, 'is not a known field')
+  if (meta.enabled !== undefined && typeof meta.enabled !== 'boolean') fail('meta.enabled', 'must be a boolean')
+  integer('meta.everyJobs', meta.everyJobs, 1, 20)
+  if (meta.budget !== undefined) {
+    if (meta.budget === null || typeof meta.budget !== 'object' || Array.isArray(meta.budget)) fail('meta.budget', 'must be an object')
+    const budget = meta.budget as Record<string, unknown>
+    for (const key of Object.keys(budget)) if (key !== 'maxTokens' && key !== 'windowDays') fail(`meta.budget.${key}`, 'is not a known field')
+    integer('meta.budget.maxTokens', budget.maxTokens, 1, Number.MAX_SAFE_INTEGER)
+    integer('meta.budget.windowDays', budget.windowDays, 1, 365)
+  }
+  if (meta.model !== undefined && (typeof meta.model !== 'string' || meta.model.trim() === '')) fail('meta.model', 'must be a non-empty string')
 }

@@ -32,11 +32,13 @@ import {
   IMPROVER_LIMITS,
   IMPROVER_PARAM_BOUNDS,
   IMPROVER_PARAMS,
+  IMPROVER_SCOPES,
   IMPROVER_VERSION_PATTERN,
   isJsonValue,
   META_FINDING_STAGES,
   PROPOSABLE_KINDS,
   REPLAY_SELECTIONS,
+  USER_PROJECT_ID_PATTERN,
   type JsonObject,
 } from '@nexgent/kernel'
 import { CAPABILITY_VERSION_SCHEMA, capabilitiesSchema } from './capabilities-schema.js'
@@ -58,6 +60,8 @@ export const IMPROVEMENT_FILE_DEFS = {
   change: 'improverChangeRecord',
   /** Step 6: `<jobId>/comparison.json`. */
   comparison: 'improverComparison',
+  /** ADR 0012: `<NEXGENT_HOME>/improvements/queue.json`, the user-level meta queue. */
+  userQueue: 'userMetaQueue',
 } as const
 
 /** A file kind of {@link IMPROVEMENT_FILE_DEFS}. */
@@ -88,6 +92,7 @@ export const improvementSchema: JsonObject = {
     capabilityVersion: CAPABILITY_VERSION_SCHEMA,
     improverVersion: { type: 'string', pattern: IMPROVER_VERSION_PATTERN.source },
     sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    userProjectId: { type: 'string', pattern: USER_PROJECT_ID_PATTERN.source },
     trialVerdict: CAPABILITY_DEFS.trialVerdict as JsonObject,
     componentKind: { enum: [...CAPABILITY_COMPONENT_KINDS] },
     proposalKind: { enum: [...CAPABILITY_COMPONENT_KINDS, 'none'] },
@@ -142,6 +147,7 @@ export const improvementSchema: JsonObject = {
         id: ref('uuid'),
         kind: { enum: [...IMPROVEMENT_JOB_KINDS] },
         improverVersion: ref('improverVersion'),
+        improverScope: { enum: [...IMPROVER_SCOPES] },
         arm: closedObject({ metaJobId: ref('uuid'), arm: { enum: [...COMPARISON_ARMS] } }, ['metaJobId', 'arm']),
         createdAt: ref('timestamp'),
         updatedAt: ref('timestamp'),
@@ -195,8 +201,28 @@ export const improvementSchema: JsonObject = {
           ['at', 'outcome', 'reason'],
         ),
         revision: ref('positiveInteger'),
+        batch: { type: 'array', items: ref('userMetaQueueEntry') },
       },
       ['basis', 'parentVersion'],
+    ),
+    userMetaQueueEntry: closedObject(
+      { projectId: ref('userProjectId'), root: ref('nonEmptyString'), jobId: ref('uuid'), status: ref('improvementStatus'), at: ref('timestamp') },
+      ['projectId', 'root', 'jobId', 'status', 'at'],
+    ),
+    userMetaJobRef: closedObject(
+      { projectId: ref('userProjectId'), root: ref('nonEmptyString'), jobId: ref('uuid'), createdAt: ref('timestamp') },
+      ['projectId', 'root', 'jobId', 'createdAt'],
+    ),
+    userMetaQueue: closedObject(
+      {
+        formatVersion: { const: 1 },
+        since: ref('timestamp'),
+        counted: { type: 'array', items: { type: 'string', pattern: `^[a-f0-9]{64}:${UUID.slice(1, -1)}$` } },
+        pending: { type: 'array', items: ref('userMetaQueueEntry') },
+        active: ref('userMetaJobRef'),
+        metaJobs: { type: 'array', items: ref('userMetaJobRef') },
+      },
+      ['formatVersion', 'since', 'counted', 'pending', 'metaJobs'],
     ),
     evidenceRef: closedObject(
       { sessionId: ref('nonEmptyString'), seq: ref('positiveInteger'), turn: ref('positiveInteger') },
@@ -346,6 +372,7 @@ export const improvementSchema: JsonObject = {
       {
         kind: { enum: [...COMPARISON_ORIGIN_KINDS] },
         sourceJobId: ref('uuid'),
+        projectId: ref('userProjectId'),
         tree: ref('sha256'),
         feedbackIds: names,
         capabilityVersion: ref('capabilityVersion'),
