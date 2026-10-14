@@ -6,7 +6,7 @@ import { createApp, resolveWorkspaceLayout, type Context, type NexgentApp, type 
 import { JsonlSessionStore, SessionPlugin } from '@nexgent/session'
 import { scriptedProvider } from '@nexgent/test-support'
 import { WorkspacePlugin } from '@nexgent/workspace'
-import { CapabilitiesPlugin, capabilitiesOf, capabilityTools, findUseProof, listCandidates, readCandidate, type CapabilityService } from '../src/index.js'
+import { CapabilitiesPlugin, capabilitiesOf, capabilityTools, findUseProof, listCandidates, readCandidate, type CapabilityService, type CapabilityToolsOptions } from '../src/index.js'
 import { tempDir } from './helpers.js'
 
 let app: NexgentApp | undefined
@@ -15,7 +15,7 @@ afterEach(async () => {
   app = undefined
 })
 
-async function boot(root: string): Promise<CapabilityService> {
+async function boot(root: string, sessionsOf?: string): Promise<CapabilityService> {
   const llm = scriptedProvider([])
   app = await createApp({
     registry: {
@@ -24,7 +24,12 @@ async function boot(root: string): Promise<CapabilityService> {
       '@nexgent/llm': { name: 'scripted-llm', apply: (ctx: Context) => { ctx.provide('llm', llm) } },
       '@nexgent/capabilities': CapabilitiesPlugin as Plugin,
     },
-    patches: [{ id: 'workspace', config: { root } }, { insert: [{ id: 'capabilities', name: '@nexgent/capabilities' }] }],
+    patches: [
+      { id: 'workspace', config: { root } },
+      // As `@nexgent/sdk` does for a propose session: work in `root` (a snapshot copy), sessions in the real project.
+      ...(sessionsOf === undefined ? [] : [{ id: 'session', config: { sessionsDir: resolveWorkspaceLayout(sessionsOf).sessions, ledgersDir: resolveWorkspaceLayout(sessionsOf).ledgers } }]),
+      { insert: [{ id: 'capabilities', name: '@nexgent/capabilities' }] },
+    ],
   })
   return capabilitiesOf(app.ctx)!
 }
@@ -192,10 +197,10 @@ describe('capability_propose in an improvement job: the instance-literal check (
   const ref = { kind: 'context-policy', name: 'house-rules' } as const
 
   /** Draft, try and use the policy in a propose session of `jobId`, then propose it. */
-  async function propose(service: CapabilityService, jobId: string | undefined, instructions: string) {
+  async function propose(service: CapabilityService, jobId: string | undefined, instructions: string, options: CapabilityToolsOptions = {}) {
     const session = new FakeSession()
     if (jobId !== undefined) session.push({ type: 'session.start', purpose: 'improvement', improvement: { jobId, phase: 'propose' } })
-    const [draft, tryTool, proposeTool] = capabilityTools(service, session.read)
+    const [draft, tryTool, proposeTool] = capabilityTools(service, session.read, options)
     await draft!.handler(policy(instructions), session.context())
     await tryTool!.handler(ref, session.context())
     session.turn = 2
@@ -230,5 +235,30 @@ describe('capability_propose in an improvement job: the instance-literal check (
     const other = await tempDir()
     const plain = await boot(other)
     expect((await propose(plain, undefined, 'Report the total as 2384.13.')).meta).toMatchObject({ candidateId: expect.any(String) })
+  })
+
+  it('in a snapshot copy, reads the job from the real project that holds its sessions, and refuses the feedback task\'s value', async () => {
+    const real = await tempDir()
+    const copy = await tempDir()
+    const service = await boot(copy, real)
+    const jobId = await feedbackJob(real, '# Summary\n\nTotal: 5,121.00 USD over 63 orders (2026-09).\n', 'Break the total down by region.')
+    const sessionsDir = () => (app!.ctx.get('session') as unknown as { sessionsDir: string }).sessionsDir
+    expect(sessionsDir()).toBe(resolveWorkspaceLayout(real).sessions)
+    const refused = await propose(service, jobId, 'Report the total as 5121.00, broken down by region.', { sessionsDir }).catch((error: unknown) => error)
+    expect(refused).toMatchObject({ code: 'capability/instance-literal', message: expect.stringContaining('5121.00') })
+    expect(await listCandidates(service.store.directory)).toEqual([])
+    const accepted = await propose(service, jobId, 'Report the total broken down by region.', { sessionsDir })
+    expect(accepted.meta).toMatchObject({ candidateId: expect.any(String) })
+  })
+
+  it('refuses to propose when the job cannot be read, instead of skipping the check', async () => {
+    const real = await tempDir()
+    const copy = await tempDir()
+    const service = await boot(copy, real)
+    const jobId = await feedbackJob(real, 'Total: 5,121.00 USD.\n', 'Break the total down by region.')
+    // Without the real project's sessions the copy has no `.nexgent/improvements/`.
+    const refused = await propose(service, jobId, 'Report the total broken down by region.').catch((error: unknown) => error)
+    expect(refused).toMatchObject({ code: 'tool/failed', message: expect.stringContaining('cannot be read'), details: { jobId } })
+    expect(await listCandidates(service.store.directory)).toEqual([])
   })
 })

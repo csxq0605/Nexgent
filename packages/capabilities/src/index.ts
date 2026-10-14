@@ -69,11 +69,11 @@ export {
   type ToolComponent,
   type VersionResolution,
 } from './service.js'
-export { capabilityDraftTool, capabilityProposeTool, capabilityTools, capabilityTryTool, type RecordReader } from './tools.js'
+export { capabilityDraftTool, capabilityProposeTool, capabilityTools, capabilityTryTool, type CapabilityToolsOptions, type RecordReader } from './tools.js'
 export { capabilitiesProvider } from './provider.js'
 export { apply, CapabilitiesPlugin, name, type CapabilitiesPluginConfig } from './plugin.js'
 export * from './trial/index.js'
-export { checkJobLiterals, componentLiteralTexts, instanceLiteralText, jobLiteralSources, MAX_LITERAL_TEXT_BYTES, projectTaskMessages, type LiteralCheckComponent } from './instance-literals.js'
+export { checkJobLiterals, componentLiteralTexts, findJobLayout, instanceLiteralText, jobLiteralSources, layoutOfSessionsDir, MAX_LITERAL_TEXT_BYTES, projectTaskMessages, type LiteralCheckComponent } from './instance-literals.js'
 export {
   improversDir,
   improverVersionOf,
