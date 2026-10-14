@@ -364,7 +364,9 @@ async function runFamily(ctx, family) {
         const events = /** @type {any[]} */ ([])
         const off = sdk.onAgentEvent((/** @type {any} */ e) => { if (e.projectId === projectId && e.sessionId === view.sessionId) events.push(e) })
         try {
-          await sdk.call('feedback.submit', { projectId, sessionId: view.sessionId, deliverableId: deliverable.deliverableId, version: deliverable.version, ...(entry.rating === undefined ? {} : { rating: entry.rating }), comment: entry.comment })
+          // A user comments on the latest version: a feedback turn may have presented a new one.
+          const latest = (await deliverableOf(view.sessionId)) ?? deliverable
+          await sdk.call('feedback.submit', { projectId, sessionId: view.sessionId, deliverableId: latest.deliverableId, version: latest.version, ...(entry.rating === undefined ? {} : { rating: entry.rating }), comment: entry.comment })
           const deadline = Date.now() + backend.turnTimeoutMs
           while (Date.now() < deadline && !(events.some(e => e.type === 'turn.end') && !sdk.isRunning(projectId, view.sessionId))) await sleep(100)
         } finally {
