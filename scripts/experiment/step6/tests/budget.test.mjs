@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { canStart, gate, readSpend, recordSpend, STEP6_CAP_USD } from '../budget.mjs'
 
-test('the step-6 cap is 35 USD', () => {
-  assert.equal(STEP6_CAP_USD, 35)
+test('the step-6 cap is 40 USD (35 raised by the user on 2026-10-14)', () => {
+  assert.equal(STEP6_CAP_USD, 40)
 })
 
 test('a run starts only while spent + estimate stays within the cap', () => {
@@ -23,9 +23,9 @@ test('spend accumulates on disk across calls; an unreadable file blocks every ru
   const dir = await mkdtemp(join(tmpdir(), 'nx6-b-'))
   try {
     const file = join(dir, 'nested', 'spend.json')
-    assert.deepEqual(await readSpend(file), { capUsd: 35, entries: [] })
+    assert.deepEqual(await readSpend(file), { capUsd: 40, entries: [] })
     await recordSpend(file, { label: 'history tables', usd: 20 })
-    await recordSpend(file, { label: 'improvement tables', usd: 14 })
+    await recordSpend(file, { label: 'improvement tables', usd: 19 })
     assert.equal((await gate(file, 1)).ok, true)
     assert.equal((await gate(file, 1.5)).ok, false)
     assert.equal((await gate(file, 0.5, 30)).ok, false)

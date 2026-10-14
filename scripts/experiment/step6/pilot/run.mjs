@@ -30,7 +30,7 @@
  *   arm pairs  per document holdout case, repeat 1: parent vs memory, both orders
  *   records    raw.json (report.mjs's input), report.md, manifest.json, observations.json
  *
- * Every step passes two cost gates first (budget.mjs): the step-6 cap (35 USD, the spend
+ * Every step passes two cost gates first (budget.mjs): the step-6 cap (40 USD, the spend
  * file given by --spend) and the pilot's own gate (12 USD, `pilot-spend.json` in --out);
  * each step's measured cost is added to both after it. An unknown cost is counted as the
  * step's reserve.

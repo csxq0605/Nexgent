@@ -132,10 +132,10 @@ export async function buildPlan() {
       order: ['判据 1（不调模型；不过就停）', '6 组参考成对样本，两种顺序', '每类：历史任务（selection、guard）→ dev 任务 → base 副本 → 模板反馈与改进作业（停在审批时由编排代批并记备注）→ parent 副本 → memory 副本并写入、采用 project-notes → 隔离检查（有泄漏就停）→ holdout 27 次 → 文档类 parent 与 memory 的两两偏好'],
       model: '任务与改进作业：claude-sonnet-5-5，thinking 开（../run.mjs MODEL、IMPROVEMENT）',
       homes: '每类的主项目用 homes/<类>；holdout 运行用 homes/<类>-<臂>：base、memory 为空目录，parent 为主项目 home 的副本',
-      gates: '每步开始前，步骤 6 花费文件 + 本步预留不超过 35 美元，且试点花费文件（<dir>/pilot-spend.json）+ 本步预留不超过 12 美元；费用未知按预留计',
+      gates: '每步开始前，步骤 6 花费文件 + 本步预留不超过 40 美元（用户 2026-10-14 由 35 提到 40），且试点花费文件（<dir>/pilot-spend.json）+ 本步预留不超过 12 美元；费用未知按预留计',
       records: 'raw.json（report.mjs 的输入，不含时间、会话与作业 id、绝对路径；含两两比较两种顺序各自的理由与差别、要点评审的理由、每次 holdout 运行保留的成果路径）、report.md、manifest.json（计划 SHA-256、各臂 NEXGENT_HOME 与改进器版本、memory 策略的能力版本与全文 SHA-256）、observations.json、outputs/<运行>/（每次 holdout 运行的成果副本）',
     },
-    budget: { gateUsd: 12, estimateUsd: [9, 11], note: '计入步骤 6 的 35 美元上限；外部与循环内评审约 1.9 美元（45 次 opus、27 次 sonnet）' },
+    budget: { gateUsd: 12, estimateUsd: [7, 9], note: '计入步骤 6 的 40 美元上限（第 1 轮后累计 28.78，本轮最多 11.22，步骤上限先于试点闸门起作用）；估计按第 1 轮实际单价（第 1 轮 7.54 美元），评审提示加了评分要点，两两比较略贵' },
     scripts,
   }
 }

@@ -10,7 +10,7 @@
 | `feedback.mjs` | 模拟用户反馈：按隐藏判定查出的问题套固定模板，不用模型 |
 | `stats.mjs` | 配对差、两层自助法 95% 区间、正 / 零 / 负、费用、摊薄 |
 | `report.mjs` | 报告生成器：原始记录 → Markdown，同一记录逐字节相同 |
-| `budget.mjs` | 费用闸门：累计估算 + 本次估算超过 35 美元就拒绝开始 |
+| `budget.mjs` | 费用闸门：累计估算 + 本次估算超过 40 美元（用户 2026-10-14 由 35 提到 40）就拒绝开始 |
 | `calibrate.mjs` | 代码族难度的脚本化校准表 |
 | `run.mjs` | 实验编排：经 `@nexgent/sdk` 的产品路径跑历史与 dev 任务、模板反馈、改进作业、元改进作业，再在 base / parent / child 三臂的项目副本里跑 holdout，产出原始记录、报告、实验清单；每步开始前过费用闸门 |
 | `scripted-model.mjs` | 演练用的脚本化模型：做任务（只有加载了覆盖本用例的技能才守约定）、诊断、提议、反馈检查、元诊断与元提议；子改进器的诊断段落让提议写出覆盖整族的技能 |
@@ -35,7 +35,7 @@
 | `pilot/reliability.mjs` | 评分可靠的三条判据与判据 4（内外评审一致率，只报告） |
 | `pilot/stats.mjs` | 要点通过率配对差（两层自助法，2000 次，种子 `step6-pilot`）、整题通过率、重复波动、追问按臂、组件分类、背答案率、一致率 |
 | `pilot/memory.mjs` | `memory` 臂的上下文策略 `project-notes` 的内容规则 |
-| `pilot/run.mjs` | 编排：判据 1 → 6 组参考成对样本 → 每类历史与 dev 任务、`base` 副本、模板反馈与改进作业、`parent` 副本、`memory` 副本（经 `@nexgent/capabilities` 的存储接口写入并采用 `project-notes`）→ 隔离检查 → holdout 27 次（每臂自己的 `NEXGENT_HOME`）与内外评审 → 文档类 parent 与 memory 两两偏好；每步过 35 美元与 12 美元两道闸门 |
+| `pilot/run.mjs` | 编排：判据 1 → 6 组参考成对样本 → 每类历史与 dev 任务、`base` 副本、模板反馈与改进作业、`parent` 副本、`memory` 副本（经 `@nexgent/capabilities` 的存储接口写入并采用 `project-notes`）→ 隔离检查 → holdout 27 次（每臂自己的 `NEXGENT_HOME`）与内外评审 → 文档类 parent 与 memory 两两偏好；每步过 40 美元与 12 美元两道闸门 |
 | `pilot/report.mjs` | 试点报告：评分是否可靠、`memory` 臂能否运行、三个比较、各臂明细、作业与组件、费用；同样的 `raw.json` 生成同样的字节 |
 | `pilot/scripted-model.mjs` | 演练用的脚本化模型（任务、改进作业、门控、两个评审），不调真实模型 |
 | `pilot/plan.mjs`、`pilot/pilot-plan.json`（第 1 轮）、`pilot/pilot-plan-<试点 id>.json`（之后各轮，冻结时写出） | 冻结的计划（题目、评分表、反馈模板、评审提示与模型、统计方法、臂、可靠性判据与成对样本、预算、各脚本的 SHA-256） |
@@ -83,7 +83,7 @@ node scripts/experiment/step6/run.mjs --real --until-meta --out <dir>  # 只跑�
 
 - 三臂：`base` 是历史与 dev 任务之后、反馈之前的项目副本；`parent` 与 `child` 是元改进作业用 `keepCopies` 留下的两份比较副本（同一快照出发，分别用旧版与新版改进器重做同一次改进）。holdout 每次运行都在所属臂的新副本里做，关掉自动改进，副本不带改进作业。
 - 元改进作业优先走 SDK `improvements.runMeta`；SDK 还没接通时退回 `ImprovementHost.runMeta`，实验清单的备注写明走了哪条路。
-- 费用闸门：每步开始前按预留额（任务 0.4、反馈 0.2、改进作业 2.5、元改进 6、holdout 每次 0.4 美元）检查累计花费，超过 `--cap`（默认 35 美元）就停在这一步，已完成的部分照常出报告；花费按账本估算美元记入 `spend.json`（`--spend` 可指定跨次共用的文件），费用未知的一步按 2.5 美元计。
+- 费用闸门：每步开始前按预留额（任务 0.4、反馈 0.2、改进作业 2.5、元改进 6、holdout 每次 0.4 美元）检查累计花费，超过 `--cap`（默认 40 美元）就停在这一步，已完成的部分照常出报告；花费按账本估算美元记入 `spend.json`（`--spend` 可指定跨次共用的文件），费用未知的一步按 2.5 美元计。
 - 真实后端只从环境读 `NEXGENT_API_KEY`（回退 `ANTHROPIC_API_KEY`），不打印、不写文件；没有密钥时以退出码 2 结束，什么都不跑。脚本化后端在运行期间把环境里的密钥换成脚本密钥。
 - 输出：`raw.json`（报告的输入）、`report.md`、`observations.json`（每族的作业、审批、比较、检查）、`manifest.json`（实验清单：后端、模型、用例计划版本、三臂来源与能力版本、父子比较的起点种类（`comparison.origin.kind`）与两臂门控结论、闸门与花费、检查结果）；`--dev-trial` 只写 `dev-trial.json`。运行副本默认删掉，`--keep-runs` 保留。
 - 历史与 dev 任务的回合没交成果（没调 `present`）时，编排脚本在同一会话里追问一句（`cases.mjs` 的 `PRESENT_REQUEST`），因为反馈要挂在成果上；观察记录里写明追问过以及是否交了成果。真实模型在代码任务里通常就地改文件而不调 `present`。

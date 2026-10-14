@@ -18,7 +18,7 @@
  *              the arm, a new session, the hidden judge, the run's estimated cost
  *   records    raw.json (report.mjs's input), report.md, manifest.json, observations.json
  *
- * Every step passes the cost gate first (budget.mjs, cap 35 USD): spent + the step's reserve
+ * Every step passes the cost gate first (budget.mjs, cap 40 USD): spent + the step's reserve
  * must stay within the cap; each step's measured cost is added after it.
  *
  *   node scripts/experiment/step6/run.mjs --scripted --out <dir>        rehearsal, scripted model

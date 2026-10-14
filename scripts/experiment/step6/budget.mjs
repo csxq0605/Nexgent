@@ -1,7 +1,7 @@
 // @ts-check
 /**
  * Cost gate of the step-6 real-model experiment (user decision 8: cap 35 USD for the
- * whole step). Every finished run adds its estimated cost to a spend file; a new run
+ * whole step; raised to 40 USD by the user on 2026-10-14 for the second pilot round). Every finished run adds its estimated cost to a spend file; a new run
  * may start only when spent + its estimate stays within the cap. A spend that is not
  * a finite, non-negative number is refused, and a spend file that cannot be read is
  * treated as "unknown", which blocks every new run (unknown is never "within budget").
@@ -12,7 +12,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 /** The step-6 real-model cap in USD. */
-export const STEP6_CAP_USD = 35
+export const STEP6_CAP_USD = 40
 
 /**
  * @typedef {{ label: string, usd: number, at?: string }} SpendEntry
