@@ -28,7 +28,7 @@ import { BASELINE_VERSION, type CapabilityVersion } from './contracts/capabiliti
 import type { ProjectConfig } from './contracts/config.js'
 import { NexgentError } from './contracts/errors.js'
 import { COMPARISON_ARMS, IMPROVEMENT_DIAGNOSIS_TOOLS, IMPROVEMENT_PHASES } from './contracts/improvement.js'
-import { IMPROVER_VERSION_PATTERN, META_DIAGNOSIS_TOOLS, META_PROPOSE_TOOLS } from './contracts/improver.js'
+import { IMPROVER_SCOPES, IMPROVER_VERSION_PATTERN, META_DIAGNOSIS_TOOLS, META_PROPOSE_TOOLS } from './contracts/improver.js'
 import { EFFORT_LEVELS, type Effort, type ThinkingMode } from './contracts/llm.js'
 import type { SessionImprovement, SessionLock } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
@@ -190,6 +190,7 @@ function improvementRun(run: ImprovementRun): ImprovementRun {
     jobId: run.jobId,
     phase: run.phase,
     ...(run.improverVersion === undefined ? {} : { improverVersion: run.improverVersion }),
+    ...(run.improverScope === undefined ? {} : { improverScope: run.improverScope }),
     ...(run.metaJobId === undefined ? {} : { metaJobId: run.metaJobId }),
     ...(run.comparisonArm === undefined ? {} : { comparisonArm: run.comparisonArm }),
   }
@@ -336,6 +337,9 @@ export class AgentsService extends Service {
     }
     if (run.improverVersion !== undefined && (typeof run.improverVersion !== 'string' || !IMPROVER_VERSION_PATTERN.test(run.improverVersion))) {
       throw new NexgentError('tool/invalid-input', 'improvement.improverVersion must be v0 or a 64-hex improver version')
+    }
+    if (run.improverScope !== undefined && !IMPROVER_SCOPES.includes(run.improverScope)) {
+      throw new NexgentError('tool/invalid-input', `improvement.improverScope must be one of ${IMPROVER_SCOPES.join(' | ')}`)
     }
     if ((run.metaJobId === undefined) !== (run.comparisonArm === undefined)) {
       throw new NexgentError('tool/invalid-input', 'improvement.metaJobId and improvement.comparisonArm go together')

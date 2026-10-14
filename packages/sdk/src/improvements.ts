@@ -11,11 +11,14 @@
  * estimate adds both comparison arms (from `comparison.json` once written,
  * which also covers the arms' gate trials kept in the copies' ledgers; from
  * the real ledger's `metaJobId` records while the arms still run).
+ *
+ * API 7 (ADR 0012): the listing's `meta` is the user's (user config, user
+ * meta queue, user meta budget), the same in every project.
  */
 import { watch, type FSWatcher } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { billedTokens, jobPaths, type ImprovementHost } from '@nexgent/evolve'
+import { billedTokens, jobPaths, readUserConfig, readUserQueue, type ImprovementHost } from '@nexgent/evolve'
 import { jobFeedbackIds, jobPhaseTimes, NexgentError, type Diagnosis, type ImprovementCostPhase, type ImprovementJob, type ImproverChangeRecord, type ImproverComparison, type ImproverDecisionReason, type MetaDiagnosis, type LedgerRecord, type LLMUsage, type PhaseCost } from '@nexgent/kernel'
 import { estimateUsdTotal } from '@nexgent/llm'
 import { JsonlLedger } from '@nexgent/session'
@@ -83,6 +86,7 @@ export function jobView(job: ImprovementJob, requests: readonly { model: string;
     id: job.id,
     ...(job.kind === undefined ? {} : { kind: job.kind }),
     ...(job.improverVersion === undefined ? {} : { improverVersion: job.improverVersion }),
+    ...(job.improverScope === undefined ? {} : { improverScope: job.improverScope }),
     trigger: job.trigger,
     status: job.status,
     createdAt: job.createdAt,
@@ -131,9 +135,13 @@ export async function viewOf(host: ImprovementHost, job: ImprovementJob): Promis
 
 /** `improvements.list`: jobs newest first, the batch waiting for the next job, the budget windows (capability jobs; meta jobs). */
 export async function listing(host: ImprovementHost, now: Date = new Date()): Promise<ImprovementListing> {
-  const [jobs, queue, settings, budget, metaBudget] = await Promise.all([host.list(), host.queue(), host.settings(), host.budgetStatus(now), host.metaBudgetStatus(now)])
+  const [jobs, queue, settings, budget, metaBudget, user, userQueue] = await Promise.all([
+    host.list(), host.queue(), host.settings(), host.budgetStatus(now), host.metaBudgetStatus(now),
+    // API 7 (ADR 0012): meta settings and counting are the user's, the same in every project.
+    readUserConfig(host.home), readUserQueue(host.home).catch(() => undefined),
+  ])
   const [requests, comparisons] = await Promise.all([jobRequests(host, jobs), Promise.all(jobs.map(job => comparisonOf(host, job)))])
-  const meta = settings.improvement.meta
+  const meta = user.improvement.meta
   return {
     jobs: jobs.map((job, index) => viewWith(job, requests, comparisons[index])).reverse(),
     ...(queue?.activeJobId === undefined ? {} : { activeJobId: queue.activeJobId }),
@@ -143,7 +151,7 @@ export async function listing(host: ImprovementHost, now: Date = new Date()): Pr
     autoImprove: settings.autoImprove,
     meta: {
       enabled: meta.enabled,
-      pending: queue?.metaPending?.length ?? 0,
+      pending: userQueue?.pending.length ?? 0,
       everyJobs: meta.everyJobs,
       budget: { usedTokens: metaBudget.used, maxTokens: metaBudget.limit, windowDays: meta.budget.windowDays },
     },

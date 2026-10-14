@@ -291,35 +291,35 @@ async function runImprove(invocation: Extract<Invocation, { command: 'improve' }
 }
 
 async function runImprovers(invocation: Extract<Invocation, { command: 'improvers' }>, io: CliIo, deps: CliDeps): Promise<ExitCode> {
-  const { layout } = await initProjectLayout(invocation.project, io.cwd)
+  // The improver is user-level: no project is opened (`--project` is accepted and ignored).
   const sdk = deps.createSdk?.() ?? createSdk({ appVersion: packageVersion(), env: io.env, ...deps.sdkOptions })
   const print = (type: string, text: string, data: Record<string, unknown>): void => {
     io.stdout.write(invocation.json ? `${JSON.stringify({ type, ...data })}\n` : `${text}\n`)
   }
   try {
-    const { projectId } = await sdk.call('projects.open', { root: layout.root })
-    const resolve = async (given: string): Promise<string> => resolveImproverVersion(knownVersions(await sdk.call('improvers.list', { projectId })), given)
+    const resolve = async (given: string): Promise<string> => resolveImproverVersion(knownVersions(await sdk.call('improvers.list', {})), given)
     try {
       switch (invocation.action) {
         case 'list': {
-          const listing = await sdk.call('improvers.list', { projectId })
+          const listing = await sdk.call('improvers.list', {})
           print('improvers.list', formatImproverListing(listing), { ...listing })
           break
         }
         case 'show': {
           const version = await resolve(invocation.version ?? '')
-          const detail = await sdk.call('improvers.show', { projectId, version })
+          const detail = await sdk.call('improvers.show', { version })
           print('improvers.show', formatImproverDetail(detail), { ...detail })
           break
         }
         case 'rollback': {
           const toVersion = invocation.to === undefined ? undefined : await resolve(invocation.to)
+          const listing = await sdk.call('improvers.list', {})
           const current = await sdk.call('improvers.rollback', {
-            projectId,
             ...(toVersion === undefined ? {} : { toVersion }),
             ...(invocation.reason === undefined ? {} : { reason: invocation.reason }),
           })
-          print('improvers.rollback', formatRolledBack(current), { current })
+          const usedBy = listing.usedBy ?? []
+          print('improvers.rollback', formatRolledBack(current, usedBy), { current, usedBy })
           break
         }
       }

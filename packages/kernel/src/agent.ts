@@ -850,6 +850,7 @@ export class Agent {
       ...(this.improvement === undefined ? {} : { improvementId: this.improvement.jobId, improvementPhase: this.improvement.phase }),
       // Step 6 (ADR 0008 decision 6): the pinned improver and, in a comparison arm, the meta job and arm.
       ...(this.improvement?.improverVersion === undefined ? {} : { improverVersion: this.improvement.improverVersion }),
+      ...(this.improvement?.improverScope === undefined ? {} : { improverScope: this.improvement.improverScope }),
       ...(this.improvement?.metaJobId === undefined ? {} : { metaJobId: this.improvement.metaJobId }),
       ...(this.improvement?.comparisonArm === undefined ? {} : { comparisonArm: this.improvement.comparisonArm }),
     }

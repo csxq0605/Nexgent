@@ -202,6 +202,12 @@ export function costApproval(detail: CandidateDetail): CostApproval | undefined 
   }
 }
 
+/** ADR 0013: the newest awaiting-approval decision waits because the candidate was verified only on the original task. */
+export function originalOnlyApproval(detail: CandidateDetail): boolean {
+  const decision = [...detail.decisions].reverse().find(d => d.outcome === 'awaiting-approval')
+  return decision?.reason === 'no-similar-cases'
+}
+
 const ratioText = (n: number) => (Math.round(n * 100) / 100).toString()
 const percent = (n: number) => `${Math.round(n * 100)}%`
 const usdText = (n: number | 'unknown') => (n === 'unknown' ? '未知' : `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`)
@@ -241,9 +247,16 @@ export function PluginApprovalDialog(): JSX.Element | null {
   const infoOf = (name: string) => detail.plugins?.find(info => info.name === name)
   const unreadable = plugins.filter(component => infoOf(component.name) === undefined).map(component => component.name)
   const cost = costApproval(detail)
-  const title = cost === undefined && plugins.length > 0 ? T.pluginApprovalTitle : T.candidateApprovalTitle
+  const originalOnly = originalOnlyApproval(detail)
+  const title = cost === undefined && !originalOnly && plugins.length > 0 ? T.pluginApprovalTitle : T.candidateApprovalTitle
   return (
     <Modal title={title} testId="plugin-approval-dialog" onClose={() => store.closePluginApproval()}>
+      {originalOnly && (
+        <div className="stack candidate-detail" data-testid="approval-original-only">
+          <strong className="small">{T.approvalOriginalOnlyTitle}</strong>
+          <p className="small wrap">{T.approvalOriginalOnlyBody}</p>
+        </div>
+      )}
       {cost !== undefined && <CostApprovalSection cost={cost} />}
       {plugins.length > 0 && (
         <div className="stack" data-testid="approval-plugins">

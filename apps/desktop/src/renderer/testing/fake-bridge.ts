@@ -372,6 +372,13 @@ export class FakeBridge implements NexgentBridge {
     for (const listener of this.listeners) listener(full)
   }
 
+  /** Push an application-level event (API 7 `improver.version`): no projectId, no sessionId. */
+  emitApp(event: Record<string, unknown> & { type: SdkEvent['type'] }): void {
+    this.seq += 1
+    const full = { eventSeq: this.seq, ...event } as unknown as SdkEvent
+    for (const listener of this.listeners) listener(full)
+  }
+
   callsOf(method: string): any[] {
     return this.calls.filter(call => call.method === method).map(call => call.input)
   }

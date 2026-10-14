@@ -8,7 +8,7 @@
  */
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
 import type { ImproverBundle } from '@nexgent/kernel'
-import type { CandidateDetail, CapabilityListing, ImprovementDetail, ImprovementListing, ImproverListing, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch } from '@nexgent/sdk'
+import type { CandidateDetail, CapabilityListing, ImprovementDetail, ImprovementListing, ImproverListing, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
@@ -72,6 +72,8 @@ export interface AppState {
   readonly improvementDetail?: ImprovementDetail | undefined
   /** Step 6: the improver in force and its activation history. */
   readonly improver?: ImproverListing | undefined
+  /** API 7: user-level settings (the shared improver's meta switch and budget). */
+  readonly userSettings?: UserSettings | undefined
   /** Step 6: the parent improver of the open meta job's change (for the before / after view). */
   readonly improvementParent?: ImproverBundle | undefined
 }
@@ -204,7 +206,7 @@ export class AppStore {
       improver: undefined,
       improvementParent: undefined,
     })
-    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshImprovements(), this.refreshImprover()])
+    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshImprovements(), this.refreshImprover(), this.refreshUserSettings()])
     const first = this.state.sessions[0]
     if (first !== undefined) await this.openSession(first.sessionId)
     return true
@@ -369,18 +371,16 @@ export class AppStore {
     // A meta job's change is shown against its parent improver.
     const parentVersion = improvementDetail.change?.parentVersion
     if (parentVersion === undefined) return
-    const parent = await this.guard(c => c.call('improvers.show', { projectId, version: parentVersion }))
+    const parent = await this.guard(c => c.call('improvers.show', { version: parentVersion }))
     if (parent !== undefined && this.projectId === projectId && this.state.improvementDetail?.view.id === jobId) this.set({ improvementParent: parent.bundle })
   }
 
   // --- improver versions and meta jobs (step 6) ------------------------------
 
   async refreshImprover(): Promise<void> {
-    const projectId = this.projectId
-    if (projectId === undefined) return
     await this.guard(async c => {
-      const improver = await c.call('improvers.list', { projectId })
-      if (this.projectId === projectId) this.set({ improver })
+      const improver = await c.call('improvers.list', {})
+      this.set({ improver })
     })
   }
 
@@ -394,10 +394,8 @@ export class AppStore {
   }
 
   async rollbackImprover(reason?: string): Promise<boolean> {
-    const projectId = this.projectId
-    if (projectId === undefined) return false
     const text = reason?.trim()
-    const current = await this.guard(c => c.call('improvers.rollback', { projectId, ...(text === undefined || text === '' ? {} : { reason: text }) }))
+    const current = await this.guard(c => c.call('improvers.rollback', { ...(text === undefined || text === '' ? {} : { reason: text }) }))
     await this.refreshImprover()
     return current !== undefined
   }
@@ -652,6 +650,20 @@ export class AppStore {
     return true
   }
 
+  /** API 7: the user-level settings (shared by every project). */
+  async refreshUserSettings(): Promise<void> {
+    await this.guard(async c => this.set({ userSettings: await c.call('userSettings.get', {}) }))
+  }
+
+  /** A user action, no approval; the improvements listing shows the user-level meta state, so it is refreshed. */
+  async saveUserSettings(patch: UserSettingsPatch): Promise<boolean> {
+    const userSettings = await this.guard(c => c.call('userSettings.update', { patch }))
+    if (userSettings === undefined) return false
+    this.set({ userSettings })
+    void this.refreshImprovements()
+    return true
+  }
+
   /** Sends the key once; only `{ configured, source }` comes back. */
   async setApiKey(value: string): Promise<boolean> {
     const info = await this.guard(c => c.call('settings.setApiKey', { value }))
@@ -672,6 +684,12 @@ export class AppStore {
   }
 
   private applySdkEvent(event: SdkEvent): void {
+    // API 7: the improver is application-level; its events carry no projectId.
+    if (event.type === 'improver.version') {
+      this.set(state => (state.improver === undefined ? {} : { improver: { ...state.improver, current: event.current } }))
+      void this.refreshImprover()
+      return
+    }
     if (event.projectId !== this.projectId) return
     // Step 4: project-level capability events (no session).
     if (event.type === 'capability.version' || event.type === 'capability.candidate' || event.type === 'capability.trial') {
@@ -682,12 +700,6 @@ export class AppStore {
     // Step 5: improvement jobs are project-level too.
     if (event.type === 'improvement.job') {
       void this.refreshImprovements()
-      return
-    }
-    // Step 6: the improver in force changed (a meta job adopted, a rollback, a load failure).
-    if (event.type === 'improver.version') {
-      this.set(state => (state.improver === undefined ? {} : { improver: { ...state.improver, current: event.current } }))
-      void this.refreshImprover()
       return
     }
     const current = event.sessionId === this.state.sessionId

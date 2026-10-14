@@ -69,6 +69,10 @@ describe('args', () => {
     expect(parseCliArgs(['improvers', 'rollback', '--project', 'p', '--to', 'v0', '--reason', 'bad'])).toMatchObject({ action: 'rollback', to: 'v0', reason: 'bad' })
     expect(parseCliArgs(['improvers', 'rollback', '--project', 'p'])).toEqual({ command: 'improvers', action: 'rollback', project: 'p', json: false })
     expect(parseCliArgs(['improve', 'meta', '--project', 'p'])).toEqual({ command: 'improve', action: 'meta', project: 'p', json: false })
+    expect(parseCliArgs(['improvers', 'list'])).toEqual({ command: 'improvers', action: 'list', json: false })
+    expect(parseCliArgs(['improvers', 'show', 'v0'])).toEqual({ command: 'improvers', action: 'show', version: 'v0', json: false })
+    expect(parseCliArgs(['improvers', 'rollback', '--to', 'v0'])).toEqual({ command: 'improvers', action: 'rollback', to: 'v0', json: false })
+    expect(() => parseCliArgs(['improve', 'list'])).toThrow(/--project is required/)
     expect(() => parseCliArgs(['improvers', '--project', 'p'])).toThrow(/needs an action/)
     expect(() => parseCliArgs(['improvers', 'nope', '--project', 'p'])).toThrow(/unknown improvers action/)
     expect(() => parseCliArgs(['improvers', 'show', '--project', 'p'])).toThrow(/needs a <version>/)
@@ -131,17 +135,22 @@ describe('formatting', () => {
       pending: 0, threshold: 5, budget: { usedTokens: 0, maxTokens: 10, windowDays: 7 }, autoImprove: true,
       meta: { enabled: true, pending: 2, everyJobs: 5, budget: { usedTokens: 7, maxTokens: 100, windowDays: 7 } },
     })
-    expect(text).toContain('meta: on, 2/5 finished jobs counted, budget 7/100 tokens (7 days)')
+    expect(text).toContain('meta (user-level, shared by all projects): on, 2/5 finished jobs counted, budget 7/100 tokens (7 days)')
     expect(text).toMatch(/dddddddd {2}meta {2}adopted {2}meta-every {2}aaaaaaaaaaaa {2}2026-10-13 09:12Z/)
     expect(text).toMatch(/cccccccc {2}job {2}adopted {2}explicit {2}v0 {2}2026-10-13/)
+    const scoped = formatListing({
+      jobs: [view({ improverVersion: 'v0', improverScope: 'user' })],
+      pending: 0, threshold: 5, budget: { usedTokens: 0, maxTokens: 10, windowDays: 7 }, autoImprove: true,
+    })
+    expect(scoped).toMatch(/dddddddd {2}job {2}adopted {2}meta-every {2}v0 \(user\) {2}2026-10-13/)
 
     const detail = {
-      view: view({ kind: 'meta', improverVersion: 'v0', meta: { childVersion: V1, outcome: 'adopt', reason: 'quality-up' } }),
+      view: view({ kind: 'meta', improverVersion: 'v0', improverScope: 'user', meta: { childVersion: V1, outcome: 'adopt', reason: 'quality-up' } }),
       job: { id: JOB, status: 'adopted', trigger: 'meta-every', items: [], history: [{ status: 'queued', at: '2026-10-13T09:12:00.000Z' }] },
       metaDiagnosis, change, comparison,
     } as unknown as ImprovementDetail
     const shown = formatDetail(detail)
-    for (const part of [`Improvement job ${JOB} (meta)`, 'improver: v0', 'meta diagnosis:', 'change: set-comparison-param', 'origin, job', 'verdict: adopt (quality-up)']) {
+    for (const part of [`Improvement job ${JOB} (meta)`, 'improver: v0 (user)', 'meta diagnosis:', 'change: set-comparison-param', 'origin, job', 'verdict: adopt (quality-up)']) {
       expect(shown).toContain(part)
     }
     expect(formatDetail({ ...detail, comparison: undefined } as unknown as ImprovementDetail)).toContain('meta outcome: adopt (quality-up)')
@@ -153,6 +162,7 @@ describe('commands through a fake SDK', () => {
   let project: string
   let calls: Array<{ method: string; input: unknown }>
   let failWith: NexgentError | undefined
+  let usedBy: Array<{ root: string; name: string; lastJobAt: string }> | undefined
 
   beforeEach(async () => {
     work = await fs.mkdtemp(path.join(os.tmpdir(), 'nexgent-cli-improvers-'))
@@ -160,6 +170,7 @@ describe('commands through a fake SDK', () => {
     await fs.mkdir(project)
     calls = []
     failWith = undefined
+    usedBy = undefined
   })
   afterEach(async () => {
     await fs.rm(work, { recursive: true, force: true, maxRetries: 5 })
@@ -177,7 +188,7 @@ describe('commands through a fake SDK', () => {
             case 'projects.open': return { projectId: 'p1' }
             case 'improvements.runMeta': return metaJob
             case 'improvements.list': return { jobs: [] }
-            case 'improvers.list': return listing
+            case 'improvers.list': return usedBy === undefined ? listing : { ...listing, usedBy }
             case 'improvers.show': {
               const { version } = input as { version: string }
               if (version !== V1 && version !== 'v0') throw new NexgentError('improver/not-found', `no improver ${version}`)
@@ -192,9 +203,9 @@ describe('commands through a fake SDK', () => {
     }
   }
 
-  async function run(args: string[], env: Record<string, string> = { NEXGENT_API_KEY: 'k', NEXGENT_HOME: path.join(work, 'home') }) {
+  async function run(args: string[], env: Record<string, string> = { NEXGENT_API_KEY: 'k', NEXGENT_HOME: path.join(work, 'home') }, withProject = true) {
     const t = testIo(work, env)
-    const code = await main([...args, '--project', project], t.io, { ...deps(), credentials: { env, home: path.join(work, 'home') } })
+    const code = await main(withProject ? [...args, '--project', project] : args, t.io, { ...deps(), credentials: { env, home: path.join(work, 'home') } })
     return { code, out: t.stdout.text, err: t.stderr.text }
   }
 
@@ -229,7 +240,7 @@ describe('commands through a fake SDK', () => {
     const shown = await run(['improvers', 'show', 'aaaaaaaaaaaa1'])
     expect(shown.code, shown.err).toBe(EXIT.OK)
     expect(shown.out).toContain(`Improver ${V1}`)
-    expect(calls.at(-1)).toEqual({ method: 'improvers.show', input: { projectId: 'p1', version: V1 } })
+    expect(calls.at(-1)).toEqual({ method: 'improvers.show', input: { version: V1 } })
     const v0 = await run(['improvers', 'show', 'v0', '--json'])
     expect(JSON.parse(v0.out)).toMatchObject({ type: 'improvers.show', version: 'v0', current: false })
 
@@ -243,9 +254,42 @@ describe('commands through a fake SDK', () => {
     const back = await run(['improvers', 'rollback', '--to', 'v0', '--reason', 'worse'])
     expect(back.code, back.err).toBe(EXIT.OK)
     expect(back.out).toContain('version v0 is now in force (revision 4)')
-    expect(calls.at(-1)).toEqual({ method: 'improvers.rollback', input: { projectId: 'p1', toVersion: 'v0', reason: 'worse' } })
+    expect(calls.at(-1)).toEqual({ method: 'improvers.rollback', input: { toVersion: 'v0', reason: 'worse' } })
     await run(['improvers', 'rollback'])
-    expect(calls.at(-1)).toEqual({ method: 'improvers.rollback', input: { projectId: 'p1' } })
+    expect(calls.at(-1)).toEqual({ method: 'improvers.rollback', input: {} })
+  })
+
+  it('improvers commands need no project: none is opened and no projectId is passed', async () => {
+    const env = { NEXGENT_HOME: path.join(work, 'home') }
+    const list = await run(['improvers', 'list'], env, false)
+    expect(list.code, list.err).toBe(EXIT.OK)
+    expect((await run(['improvers', 'show', 'v0'], env, false)).code).toBe(EXIT.OK)
+    expect((await run(['improvers', 'rollback', '--to', 'v0'], env, false)).code).toBe(EXIT.OK)
+    expect(calls.map(c => c.method)).not.toContain('projects.open')
+    for (const call of calls) expect(call.input).not.toHaveProperty('projectId')
+    // --project is still accepted and ignored
+    calls.length = 0
+    const legacy = await run(['improvers', 'list'])
+    expect(legacy.code, legacy.err).toBe(EXIT.OK)
+    expect(calls).toEqual([{ method: 'improvers.list', input: {} }])
+  })
+
+  it('list shows usedBy; rollback warns that every project is affected', async () => {
+    usedBy = [
+      { root: '/work/alpha', name: 'alpha', lastJobAt: '2026-10-13T09:12:00.000Z' },
+      { root: '/work/beta', name: 'beta', lastJobAt: '2026-10-12T08:00:00.000Z' },
+    ]
+    const list = await run(['improvers', 'list'], undefined, false)
+    expect(list.out).toContain('used by: alpha (/work/alpha), last job 2026-10-13 09:12Z')
+    expect(list.out).toContain('used by: beta (/work/beta), last job 2026-10-12 08:00Z')
+    const json = JSON.parse((await run(['improvers', 'list', '--json'], undefined, false)).out) as { usedBy: unknown[] }
+    expect(json.usedBy).toHaveLength(2)
+    const back = await run(['improvers', 'rollback'], undefined, false)
+    expect(back.out).toContain('affects every project (used by: alpha, beta)')
+    expect(JSON.parse((await run(['improvers', 'rollback', '--json'], undefined, false)).out)).toMatchObject({ type: 'improvers.rollback', usedBy: [{ name: 'alpha' }, { name: 'beta' }] })
+    usedBy = []
+    expect((await run(['improvers', 'list'], undefined, false)).out).toContain('used by: none yet')
+    expect((await run(['improvers', 'rollback'], undefined, false)).out).toContain('affects every project.')
   })
 
   it('an SDK-side improver/not-found exits 3', async () => {
@@ -290,6 +334,18 @@ describe('commands through the real SDK', () => {
     return { code, out: t.stdout.text, err: t.stderr.text }
   }
 
+  it('improvers list / show work with no project and no --project', async () => {
+    const t = testIo(work, { NEXGENT_API_KEY: 'k', NEXGENT_HOME: home })
+    const code = await main(['improvers', 'list', '--json'], t.io, realDeps())
+    expect(code, t.stderr.text).toBe(EXIT.OK)
+    expect(JSON.parse(t.stdout.text)).toMatchObject({ type: 'improvers.list', current: { version: 'v0', revision: 0 }, history: [], usedBy: [] })
+    const text = testIo(work, { NEXGENT_API_KEY: 'k', NEXGENT_HOME: home })
+    expect(await main(['improvers', 'list'], text.io, realDeps())).toBe(EXIT.OK)
+    expect(text.stdout.text).toContain('used by: none yet')
+    const show = testIo(work, { NEXGENT_HOME: home })
+    expect(await main(['improvers', 'show', 'v0'], show.io, realDeps())).toBe(EXIT.OK)
+  })
+
   it('a fresh project: v0 listed and shown; rollback has nowhere to go; improve meta starts a meta job on v0', async () => {
     const list = await run(['improvers', 'list', '--json'])
     expect(list.code, list.err).toBe(EXIT.OK)
@@ -305,7 +361,7 @@ describe('commands through the real SDK', () => {
     expect(job).toMatchObject({ kind: 'meta', trigger: 'explicit', status: 'queued' })
     expect(launched).toContain(job.id)
     const listed = await run(['improve', 'list'])
-    expect(listed.out).toMatch(/meta: off, 0\/3 finished jobs counted/)
+    expect(listed.out).toMatch(/meta \(user-level, shared by all projects\): off, 0\/3 finished jobs counted/)
     expect(listed.out).toContain(`${job.id.slice(0, 8)}  meta  queued`)
   })
 })

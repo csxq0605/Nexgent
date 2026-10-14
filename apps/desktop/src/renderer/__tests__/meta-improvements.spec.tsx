@@ -9,7 +9,7 @@ import type { ComparisonArmResult } from '@nexgent/kernel'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { CHILD_VERSION, FakeBridge, armResult, changeRecord, comparison, improvementDetail, improvementJob, metaDiagnosis, metaJob } from '../testing/fake-bridge.js'
-import { emit, renderApp } from './helpers.js'
+import { emit, emitApp, renderApp } from './helpers.js'
 
 async function openTab(bridge?: FakeBridge) {
   const rendered = await renderApp(bridge)
@@ -63,7 +63,7 @@ describe('meta job detail', () => {
     fireEvent.click(screen.getByTestId('improvement-status'))
     await waitFor(() => expect(screen.getByTestId('improvement-change-before').textContent).not.toContain('未取得'))
     expect(bridge.callsOf('improvements.show')).toEqual([{ projectId: 'p1', jobId: 'm-1' }])
-    expect(bridge.callsOf('improvers.show')).toEqual([{ projectId: 'p1', version: 'v0' }])
+    expect(bridge.callsOf('improvers.show')).toEqual([{ version: 'v0' }])
 
     const diagnosis = screen.getByTestId('improvement-meta-diagnosis')
     expect(diagnosis.textContent).toContain('诊断没有要求引用反馈原文')
@@ -181,14 +181,14 @@ describe('improver section', () => {
     fireEvent.change(screen.getByTestId('improver-rollback-reason'), { target: { value: '改坏了' } })
     fireEvent.click(screen.getByTestId('improver-rollback-confirm'))
     await waitFor(() => expect(screen.getByTestId('improver-current').dataset['version']).toBe('v0'))
-    expect(bridge.callsOf('improvers.rollback')).toEqual([{ projectId: 'p1', reason: '改坏了' }])
+    expect(bridge.callsOf('improvers.rollback')).toEqual([{ reason: '改坏了' }])
     expect(screen.getAllByTestId('improver-revision').map(r => r.dataset['type'])).toEqual(['rollback', 'adopt'])
     expect(screen.queryByTestId('improver-rollback')).toBeNull()
 
     // An adoption elsewhere (a meta job finished) arrives as an event.
     bridge.improver = { ...bridge.improver, current: { version: 'd'.repeat(64), revision: 3, trigger: 'meta-job', jobId: 'm-2' } }
     const lists = bridge.callsOf('improvers.list').length
-    emit(bridge, { type: 'improver.version', sessionId: undefined, current: bridge.improver.current })
+    emitApp(bridge, { type: 'improver.version', current: bridge.improver.current })
     await waitFor(() => expect(screen.getByTestId('improver-current').dataset['version']).toBe('d'.repeat(64)))
     await waitFor(() => expect(bridge.callsOf('improvers.list').length).toBeGreaterThan(lists))
   })
@@ -201,12 +201,13 @@ describe('improver section', () => {
   })
 })
 
-describe('meta settings', () => {
-  it('saves the meta switch and budget through settings.update without an approval dialog', async () => {
+describe('meta settings (user level)', () => {
+  it('loads and saves the meta switch and budget through userSettings without an approval dialog', async () => {
     const bridge = new FakeBridge()
     await renderApp(bridge)
     fireEvent.click(screen.getByTestId('open-settings'))
     await waitFor(() => expect(screen.getByTestId('settings-meta-enabled')).toBeTruthy())
+    expect(screen.getByTestId('settings-user-section').textContent).toContain('所有项目')
     expect((screen.getByTestId('settings-meta-enabled') as HTMLInputElement).checked).toBe(false)
     expect((screen.getByTestId('settings-meta-budget') as HTMLInputElement).value).toBe('6000000')
     expect((screen.getByTestId('settings-meta-window') as HTMLInputElement).value).toBe('30')
@@ -215,29 +216,112 @@ describe('meta settings', () => {
     fireEvent.change(screen.getByTestId('settings-meta-budget'), { target: { value: '2000000' } })
     fireEvent.change(screen.getByTestId('settings-meta-window'), { target: { value: '14' } })
     fireEvent.change(screen.getByTestId('settings-meta-every'), { target: { value: '5' } })
-    fireEvent.click(screen.getByTestId('settings-save'))
-    await waitFor(() => expect(screen.getByTestId('settings-saved')).toBeTruthy())
-    const patch = bridge.callsOf('settings.update')[0].patch
-    expect(patch.improvement).toMatchObject({ feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, meta: { enabled: true, everyJobs: 5, budget: { maxTokens: 2_000_000, windowDays: 14 } } })
-    expect(bridge.settings.improvement.meta).toMatchObject({ enabled: true, everyJobs: 5, budget: { maxTokens: 2_000_000, windowDays: 14 } })
+    const lists = bridge.callsOf('improvements.list').length
+    fireEvent.click(screen.getByTestId('settings-user-save'))
+    await waitFor(() => expect(screen.getByTestId('settings-user-saved')).toBeTruthy())
+    expect(bridge.callsOf('userSettings.update')).toEqual([
+      { patch: { improvement: { meta: { enabled: true, everyJobs: 5, budget: { maxTokens: 2_000_000, windowDays: 14 }, model: 'claude-sonnet-5-5' } } } },
+    ])
+    expect(bridge.callsOf('settings.update')).toEqual([])
+    expect(bridge.userSettings.improvement.meta).toMatchObject({ enabled: true, everyJobs: 5, budget: { maxTokens: 2_000_000, windowDays: 14 } })
+    await waitFor(() => expect(bridge.callsOf('improvements.list').length).toBeGreaterThan(lists))
     expect(screen.queryByTestId('approval-dialog')).toBeNull()
   })
 
-  it('does not send improvement when nothing about it changed, and rejects bad meta values', async () => {
+  it('reads saved user settings back when the page opens, and rejects bad values', async () => {
+    const bridge = new FakeBridge()
+    bridge.userSettings = { improvement: { meta: { ...bridge.userSettings.improvement.meta, enabled: true, everyJobs: 7 } } }
+    await renderApp(bridge)
+    fireEvent.click(screen.getByTestId('open-settings'))
+    await waitFor(() => expect((screen.getByTestId('settings-meta-every') as HTMLInputElement).value).toBe('7'))
+    expect((screen.getByTestId('settings-meta-enabled') as HTMLInputElement).checked).toBe(true)
+    fireEvent.change(screen.getByTestId('settings-meta-every'), { target: { value: '25' } })
+    fireEvent.click(screen.getByTestId('settings-user-save'))
+    await waitFor(() => expect(screen.getByText(/触发作业数必须是 1 到 20/)).toBeTruthy())
+    fireEvent.change(screen.getByTestId('settings-meta-every'), { target: { value: '3' } })
+    fireEvent.change(screen.getByTestId('settings-meta-budget'), { target: { value: '0' } })
+    fireEvent.click(screen.getByTestId('settings-user-save'))
+    await waitFor(() => expect(screen.getByText(/触发作业数必须是 1 到 20/)).toBeTruthy())
+    expect(bridge.callsOf('userSettings.update')).toEqual([])
+  })
+
+  it('saves the project share switch through settings.update and leaves meta out of it', async () => {
     const bridge = new FakeBridge()
     await renderApp(bridge)
     fireEvent.click(screen.getByTestId('open-settings'))
-    await waitFor(() => expect(screen.getByTestId('settings-meta-budget')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId('settings-share-improver')).toBeTruthy())
+    expect((screen.getByTestId('settings-share-improver') as HTMLInputElement).checked).toBe(true)
+    fireEvent.click(screen.getByTestId('settings-share-improver'))
+    fireEvent.click(screen.getByTestId('settings-save'))
+    await waitFor(() => expect(screen.getByTestId('settings-saved')).toBeTruthy())
+    expect(bridge.callsOf('settings.update')[0].patch.improvement).toMatchObject({ shareImproverEvidence: false })
+    expect(bridge.settings.improvement.shareImproverEvidence).toBe(false)
+    expect(bridge.callsOf('userSettings.update')).toEqual([])
+  })
+
+  it('does not send improvement when nothing about it changed', async () => {
+    const bridge = new FakeBridge()
+    await renderApp(bridge)
+    fireEvent.click(screen.getByTestId('open-settings'))
+    await waitFor(() => expect(screen.getByTestId('settings-share-improver')).toBeTruthy())
     fireEvent.click(screen.getByTestId('settings-save'))
     await waitFor(() => expect(screen.getByTestId('settings-saved')).toBeTruthy())
     expect(bridge.callsOf('settings.update')[0].patch.improvement).toBeUndefined()
+  })
+})
 
-    fireEvent.change(screen.getByTestId('settings-meta-every'), { target: { value: '25' } })
-    fireEvent.click(screen.getByTestId('settings-save'))
-    await waitFor(() => expect(screen.getByText(/触发作业数为 1 到 20/)).toBeTruthy())
-    fireEvent.change(screen.getByTestId('settings-meta-every'), { target: { value: '3' } })
-    fireEvent.change(screen.getByTestId('settings-meta-budget'), { target: { value: '0' } })
-    fireEvent.click(screen.getByTestId('settings-save'))
-    await waitFor(() => expect(bridge.callsOf('settings.update')).toHaveLength(1))
+describe('shared improver', () => {
+  const adopted = (): FakeBridge => {
+    const bridge = new FakeBridge()
+    bridge.improver = {
+      current: { version: CHILD_VERSION, revision: 1, since: '2026-10-12T09:00:00.000Z', trigger: 'meta-job', jobId: 'm-1' },
+      history: [],
+      usedBy: [
+        { root: '/work/orders', name: 'orders', lastJobAt: '2026-10-13T08:00:00.000Z' },
+        { root: '/work/sheets', name: 'sheets', lastJobAt: '2026-10-12T08:00:00.000Z' },
+      ],
+    }
+    return bridge
+  }
+
+  it('says the improver is shared and lists the projects that used it in the rollback confirmation', async () => {
+    const bridge = adopted()
+    await openTab(bridge)
+    expect(screen.getByTestId('improver-shared-note').textContent).toContain('所有项目')
+    fireEvent.click(screen.getByTestId('improver-rollback'))
+    const box = screen.getByTestId('improver-rollback-projects')
+    const items = within(box).getAllByTestId('improver-rollback-project')
+    expect(items.map(i => i.textContent)).toEqual([expect.stringContaining('orders'), expect.stringContaining('sheets')])
+    expect(screen.getByTestId('improver-section').textContent).toContain('影响所有项目')
+    expect(bridge.callsOf('improvers.list')[0]).toEqual({})
+  })
+
+  it('says so when no project has used the improver yet', async () => {
+    const bridge = adopted()
+    bridge.improver = { ...bridge.improver, usedBy: [] }
+    await openTab(bridge)
+    fireEvent.click(screen.getByTestId('improver-rollback'))
+    expect(within(screen.getByTestId('improver-rollback-projects')).queryAllByTestId('improver-rollback-project')).toEqual([])
+    expect(screen.getByTestId('improver-rollback-projects').textContent).toContain('还没有项目使用过它')
+  })
+
+  it('follows an application-level improver.version event without a projectId', async () => {
+    const bridge = new FakeBridge()
+    await openTab(bridge)
+    expect(screen.getByTestId('improver-current').dataset['version']).toBe('v0')
+    bridge.improver = { ...bridge.improver, current: { version: 'd'.repeat(64), revision: 1, trigger: 'meta-job', jobId: 'm-2' } }
+    emitApp(bridge, { type: 'improver.version', current: bridge.improver.current })
+    await waitFor(() => expect(screen.getByTestId('improver-current').dataset['version']).toBe('d'.repeat(64)))
+  })
+
+  it('shows the user scope of a job next to the improver version', async () => {
+    const bridge = new FakeBridge()
+    bridge.improvements = { ...bridge.improvements, jobs: [improvementJob({ id: 'j-2', improverVersion: 'v0', improverScope: 'user' }), improvementJob({ id: 'j-1' })] }
+    await openTab(bridge)
+    const [user, old] = screen.getAllByTestId('improvement-improver')
+    expect(user!.textContent).toBe('改进器 v0 · 用户级')
+    expect(user!.dataset['scope']).toBe('user')
+    expect(old!.dataset['scope']).toBe('project')
+    expect(old!.textContent).toBe('改进器 v0')
   })
 })

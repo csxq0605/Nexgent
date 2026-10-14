@@ -11,7 +11,7 @@ import { JsonlSessionStore } from '@nexgent/session'
 import { SessionFeedbackStore } from '@nexgent/tasking'
 import { diagnosisNudge, diagnosisPrompt, diagnosisTools, sumTurns, type DiagnosisState } from './diagnosis.js'
 import { collectCandidate, contextPolicyCheckText, contextPolicyProposeText, findFeedbackTask, newSessionId, pendingContextPolicies, prepareProposalCopy, proposalBrief, proposeRecords } from './propose.js'
-import { trialComparison } from './improver.js'
+import { scopeOf, trialComparison } from './improver.js'
 import { adoptedCapabilities } from './adopted.js'
 import { createMetaStages } from './meta.js'
 import { runImprovementJob, type ImprovementStages } from './runner.js'
@@ -90,7 +90,7 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
       const tools = diagnosisTools({ layout, job, sessionId, taskIds: subject.taskIds, state })
       await input.record({ sessions: { ...job.sessions, diagnose: sessionId } })
       const session = await options.runner.open({
-        jobId: job.id, phase: 'diagnose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version, model: config.model, thinking: config.thinking,
+        jobId: job.id, phase: 'diagnose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version, ...scopeOf(job), model: config.model, thinking: config.thinking,
         title: `improvement ${job.id} diagnose`, tools,
       })
       const turns: ImprovementTurnResult[] = []
@@ -151,7 +151,7 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
       const turns: ImprovementTurnResult[] = []
       try {
         const session = await options.runner.open({
-          jobId: job.id, phase: 'propose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version, workspaceRoot: copy.root, sandboxMode: task.sandboxMode,
+          jobId: job.id, phase: 'propose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version, ...scopeOf(job), workspaceRoot: copy.root, sandboxMode: task.sandboxMode,
           model: config.model, thinking: config.thinking, title: `improvement ${job.id} propose`,
         })
         try {

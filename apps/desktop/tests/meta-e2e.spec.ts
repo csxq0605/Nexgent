@@ -1,5 +1,6 @@
 /**
- * Desktop improver versions and meta jobs E2E (step 6, W5): Playwright drives
+ * Desktop improver versions and meta jobs E2E (step 6, W5; rework R5, ADR
+ * 0012: the improver and the meta settings are the user's): Playwright drives
  * the built Electron app with the real renderer and the real `@nexgent/sdk`
  * against the scripted Claude Messages API server — no real model. A project
  * whose meta job adopted a child improver: the 改进 tab shows the improver in
@@ -7,9 +8,12 @@
  * diagnosis, the change before / after, both arms, the verdict) (D24, D25);
  * at 1024 px nothing overflows; the improver is rolled back in the UI and the
  * next (meta) job, started with 立即元改进 as a real job process, runs on the
- * rolled-back version (D27); the settings page turns meta improvement on and
- * sets its budget without approval, and everything stays after a restart
- * (D26). Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots.
+ * rolled-back version (D27); the rollback confirmation lists the projects
+ * that ran on the improver (this one and another of the user's); the
+ * settings page turns meta improvement on and sets its budget in the user
+ * settings (`<home>/config.json`) without approval, turns this project's
+ * 参与改进器学习 off in the project config, and everything stays after a
+ * restart (D26). Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -18,8 +22,8 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ImproverStore, improversDir } from '@nexgent/capabilities'
-import { createJob, improvementsDir, jobPaths, readJob, transitionJob, updateJob } from '@nexgent/evolve'
+import { ImproverStore } from '@nexgent/capabilities'
+import { countFinishedJobForUser, createJob, improvementsDir, jobPaths, readJob, transitionJob, updateJob } from '@nexgent/evolve'
 import { applyImproverChange, IMPROVER_V0, resolveWorkspaceLayout, type ComparisonArmResult, type ImproverChange, type ImproverChangeRecord, type ImproverComparison, type MetaDiagnosis } from '@nexgent/kernel'
 import { scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
@@ -92,11 +96,23 @@ async function launch(home: string): Promise<{ app: ElectronApplication; page: P
 
 const CHANGE: ImproverChange = { op: 'set-diagnosis-paragraph', index: 0, text: 'Before naming a failure, read every failed check of the task and quote its output; a diagnosis that ignores a failed check is wrong.' }
 
-/** A meta job that adopted a child improver, as the flow leaves it (meta diagnosis, change, comparison, revision). */
-async function seedAdoptedMetaJob(root: string): Promise<{ jobId: string; child: string }> {
+/** A finished capability job of `root` that ran on `version` of the user line (and is counted toward meta jobs). */
+async function seedFinishedJob(home: string, root: string, version: string): Promise<string> {
   const layout = resolveWorkspaceLayout(root)
   const dir = improvementsDir(layout)
-  const store = new ImproverStore(improversDir(layout))
+  const job = await createJob(dir, { trigger: 'explicit', items: [] })
+  await transitionJob(dir, job.id, 'diagnosing', { expect: ['queued'] })
+  await updateJob(dir, job.id, { improverVersion: version, improverScope: 'user' } as never)
+  const done = await transitionJob(dir, job.id, 'no-proposal', { expect: ['diagnosing'], detail: 'Nothing to change.' })
+  await countFinishedJobForUser(home, layout, done!)
+  return job.id
+}
+
+/** A meta job that adopted a child improver on the user line, as the flow leaves it (meta diagnosis, change, comparison, revision). */
+async function seedAdoptedMetaJob(home: string, root: string): Promise<{ jobId: string; child: string }> {
+  const layout = resolveWorkspaceLayout(root)
+  const dir = improvementsDir(layout)
+  const store = ImproverStore.user({ home })
   const { version: child } = await store.write(applyImproverChange(IMPROVER_V0, CHANGE))
   const basis = [randomUUID(), randomUUID(), randomUUID()]
   const job = await createJob(dir, { trigger: 'job-count', items: [], kind: 'meta', meta: { parentVersion: 'v0', basis } })
@@ -107,6 +123,7 @@ async function seedAdoptedMetaJob(root: string): Promise<{ jobId: string; child:
   await transitionJob(dir, job.id, 'adopted', { expect: ['comparing'], detail: 'The child improver\'s offspring passed its gate; the parent\'s did not.' })
   await updateJob(dir, job.id, {
     improverVersion: 'v0',
+    improverScope: 'user',
     meta: { parentVersion: 'v0', basis, childVersion: child, diagnosed: { at, attempts: 1, proposal: 'change' }, compared: { at, outcome: 'adopt', reason: 'gate-passed' }, ...(commit === null ? {} : { revision: commit.revision.revision }) },
     phases: { 'meta-diagnose': { usage: big, requestCount: 3 }, 'meta-propose': { usage: big, requestCount: 2 }, compare: { usage: big, requestCount: 14 } },
   } as never)
@@ -130,9 +147,31 @@ async function seedAdoptedMetaJob(root: string): Promise<{ jobId: string; child:
 }
 
 /** Elements of the three columns wider than their box at the current window size. */
-async function overflowAt1024(app: ElectronApplication, page: Page): Promise<string[]> {
+function readUserConfig(home: string): any {
+  try {
+    return JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'))
+  } catch {
+    return undefined
+  }
+}
+
+/** Elements of the three columns (or `only`) wider than their box at 1024 px. */
+async function overflowAt1024(app: ElectronApplication, page: Page, only?: readonly string[]): Promise<string[]> {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1024, 720))
   await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1024)
+  if (only !== undefined) {
+    return page.evaluate((ids: readonly string[]) => {
+      const out: string[] = []
+      if (document.documentElement.scrollWidth > window.innerWidth) out.push(`document ${document.documentElement.scrollWidth}`)
+      for (const id of ids) {
+        const el = document.querySelector(`[data-testid="${id}"]`)
+        if (el === null) out.push(`${id} missing`)
+        else if (el.scrollWidth > el.clientWidth + 1) out.push(`${id} ${el.scrollWidth}>${el.clientWidth}`)
+        else if (el.getBoundingClientRect().right > window.innerWidth + 1) out.push(`${id} ends at ${el.getBoundingClientRect().right}`)
+      }
+      return out
+    }, only)
+  }
   return page.evaluate(() => {
     const out: string[] = []
     if (document.documentElement.scrollWidth > window.innerWidth) out.push(`document ${document.documentElement.scrollWidth}`)
@@ -142,7 +181,7 @@ async function overflowAt1024(app: ElectronApplication, page: Page): Promise<str
       if (el === null) out.push(`${id} missing`)
       else if (el.scrollWidth > el.clientWidth + 1) out.push(`${id} ${el.scrollWidth}>${el.clientWidth}`)
     }
-    for (const el of document.querySelectorAll('[data-testid="improvement-job"], [data-testid="improvement-detail"], [data-testid="improver-section"], [data-testid="improvement-arm"], [data-testid="improvement-change"]')) {
+    for (const el of document.querySelectorAll('[data-testid="improvement-job"], [data-testid="improvement-detail"], [data-testid="improver-section"], [data-testid="improvement-arm"], [data-testid="improvement-change"], [data-testid="improver-rollback-projects"]')) {
       if (el.scrollWidth > el.clientWidth + 1) out.push(`${el.dataset.testid} ${el.scrollWidth}>${el.clientWidth}`)
     }
     const right = document.querySelector('[data-testid="right-panel"]').getBoundingClientRect()
@@ -169,7 +208,9 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-meta-e2e-')))
       const home = join(base, 'home')
       const root = join(base, 'orders')
+      const reports = join(base, 'reports')
       mkdirSync(home)
+      mkdirSync(reports)
       server = await scriptedModelServer({
         script: [
           // The meta job process's meta-diagnose session: no improver problem.
@@ -187,7 +228,10 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
         await page.getByTestId('project-path').fill(root)
         await page.getByTestId('create-project').click()
         await page.getByTestId('workspace').waitFor()
-        seeded = await seedAdoptedMetaJob(root)
+        seeded = await seedAdoptedMetaJob(home, root)
+        // This project and another of the user's ran jobs on the child improver.
+        await seedFinishedJob(home, root, seeded.child)
+        await seedFinishedJob(home, reports, seeded.child)
 
         // D24: the improver in force and the meta job's marker and improver version.
         await page.getByTestId('new-session').click()
@@ -200,6 +244,8 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
         expect(await job.getAttribute('data-kind')).toBe('meta')
         expect(await job.getByTestId('improvement-meta-badge').count()).toBe(1)
         expect(await job.getByTestId('improvement-improver').getAttribute('data-version')).toBe('v0')
+        expect(await job.getByTestId('improvement-improver').getAttribute('data-scope')).toBe('user')
+        expect(await page.getByTestId('improver-shared-note').count()).toBe(1)
         expect(await job.getByTestId('improvement-cost').textContent()).toMatch(/≈ \$\d+\.\d\d|费用未知/)
 
         // D25: the meta job's detail.
@@ -214,49 +260,67 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
         expect(await detail.locator('[data-testid="improvement-arm"][data-arm="child"]').textContent()).toContain('$0.61')
         expect(await detail.getByTestId('improvement-comparison-verdict').getAttribute('data-reason')).toBe('gate-passed')
         await detail.getByTestId('improvement-meta-diagnosis').evaluate((el: any) => el.scrollIntoView({ block: 'start' }))
-        await shot(page, 'step6-w5-meta-detail')
+        await shot(page, 'step6-r5-meta-detail')
         await detail.getByTestId('improvement-comparison').evaluate((el: any) => el.scrollIntoView({ block: 'start' }))
-        await shot(page, 'step6-w5-meta-arms')
+        await shot(page, 'step6-r5-meta-arms')
 
         // 1024 px with the 改进 tab and the meta detail open
         expect(await overflowAt1024(app, page)).toEqual([])
-        await shot(page, 'step6-w5-meta-1024')
+        await shot(page, 'step6-r5-meta-1024')
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
 
-        // D27: roll back in the UI; the next job runs on the rolled-back improver.
+        // D27: roll back in the UI; the confirmation names the projects that ran on it; the next job runs on the rolled-back improver.
         await page.getByTestId('improver-rollback').click()
+        const used = page.getByTestId('improver-rollback-project')
+        await expect.poll(() => used.count()).toBe(2)
+        const usedText = await page.getByTestId('improver-rollback-projects').textContent()
+        expect(usedText).toContain('orders')
+        expect(usedText).toContain('reports')
+        await shot(page, 'step6-r5-improver-rollback-confirm')
         await page.getByTestId('improver-rollback-reason').fill('子改进器的诊断太慢')
         await page.getByTestId('improver-rollback-confirm').click()
         await expect.poll(() => current.getAttribute('data-version')).toBe('v0')
-        const store = new ImproverStore(improversDir(layout()))
+        const store = ImproverStore.user({ home })
         expect((await store.activation()).version).toBe('v0')
         expect((await store.chain()).revisions.map(revision => [revision.type, revision.trigger, revision.reason])).toEqual([['adopt', 'meta-job', undefined], ['rollback', 'manual', '子改进器的诊断太慢']])
         expect(await page.getByTestId('improver-revision').count()).toBe(2)
-        await shot(page, 'step6-w5-improver-rollback')
+        await shot(page, 'step6-r5-improver-rollback')
         await page.getByTestId('improvement-run-meta').click()
-        const started = page.locator('[data-testid="improvement-job"]').first()
+        const started = page.locator('[data-testid="improvement-job"][data-kind="meta"]').first()
         await expect.poll(() => started.getAttribute('data-job')).not.toBe(seeded.jobId)
         await expect.poll(() => started.getAttribute('data-status'), { timeout: 30_000 }).toBe('no-proposal')
         expect(await started.getAttribute('data-kind')).toBe('meta')
         const ran = await readJob(improvementsDir(layout()), (await started.getAttribute('data-job'))!)
-        expect(ran).toMatchObject({ kind: 'meta', trigger: 'explicit', improverVersion: 'v0', status: 'no-proposal' })
+        expect(ran).toMatchObject({ kind: 'meta', trigger: 'explicit', improverVersion: 'v0', improverScope: 'user', status: 'no-proposal' })
         expect(await started.getByTestId('improvement-improver').getAttribute('data-version')).toBe('v0')
         server.assertConsumed()
-        await shot(page, 'step6-w5-meta-list')
+        await shot(page, 'step6-r5-meta-list')
 
-        // D26: meta improvement on, its budget 2M tokens over 15 days; no approval asked.
+        // D26: meta improvement on, its budget 2M tokens over 15 days (user settings); this project stops sharing; no approval asked.
         await page.getByTestId('open-settings').click()
         const settings = page.getByTestId('settings-page')
+        await settings.getByTestId('settings-user-section').waitFor()
+        await expect.poll(() => settings.getByTestId('settings-meta-budget').inputValue()).toBe('6000000')
+        expect(await settings.getByTestId('settings-meta-enabled').isChecked()).toBe(false)
+        expect(await settings.getByTestId('settings-share-improver').isChecked()).toBe(true)
         await settings.getByTestId('settings-meta-enabled').check()
         await settings.getByTestId('settings-meta-budget').fill('2000000')
         await settings.getByTestId('settings-meta-window').fill('15')
+        await settings.getByTestId('settings-share-improver').uncheck()
         await settings.getByTestId('settings-meta-budget').scrollIntoViewIfNeeded()
-        await shot(page, 'step6-w5-settings-meta')
+        await shot(page, 'step6-r5-settings-meta')
+        expect(await overflowAt1024(app, page, ['settings-page'])).toEqual([])
+        await shot(page, 'step6-r5-settings-1024')
+        await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
+        await settings.getByTestId('settings-user-save').click()
+        await settings.getByTestId('settings-user-saved').waitFor()
         await settings.getByTestId('settings-save').click()
         await settings.getByTestId('settings-saved').waitFor()
         expect(await page.getByTestId('approval-dialog').count()).toBe(0)
+        await expect.poll(() => readUserConfig(home)?.improvement?.meta).toMatchObject({ enabled: true, budget: { maxTokens: 2_000_000, windowDays: 15 } })
         const config = JSON.parse(readFileSync(join(root, '.nexgent', 'config.json'), 'utf8'))
-        expect(config).toMatchObject({ improvement: { meta: { enabled: true, budget: { maxTokens: 2_000_000, windowDays: 15 } } } })
+        expect(config.improvement?.shareImproverEvidence).toBe(false)
+        expect(config.improvement?.meta).toBeUndefined()
         await page.keyboard.press('Escape')
         await expect.poll(() => page.getByTestId('improvement-meta-status').textContent()).toMatch(/开/)
         expect(consoleErrors).toEqual([])
@@ -269,13 +333,15 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
       try {
         await page.getByTestId('workspace').waitFor()
         await page.getByTestId('tab-improvements').click()
-        await expect.poll(() => page.getByTestId('improvement-job').count(), { timeout: 20_000 }).toBe(2)
+        await expect.poll(() => page.getByTestId('improvement-job').count(), { timeout: 20_000 }).toBe(3)
         expect(await page.getByTestId('improver-current').getAttribute('data-version')).toBe('v0')
         expect(await page.getByTestId('improver-revision').count()).toBe(2)
         expect(await page.getByTestId('improvement-meta-budget').textContent()).toContain('15')
         await page.getByTestId('open-settings').click()
         expect(await page.getByTestId('settings-meta-enabled').isChecked()).toBe(true)
-        expect(await page.getByTestId('settings-meta-budget').inputValue()).toBe('2000000')
+        await expect.poll(() => page.getByTestId('settings-meta-budget').inputValue()).toBe('2000000')
+        expect(await page.getByTestId('settings-meta-window').inputValue()).toBe('15')
+        expect(await page.getByTestId('settings-share-improver').isChecked()).toBe(false)
         await page.keyboard.press('Escape')
         expect(consoleErrors).toEqual([])
       } finally {
