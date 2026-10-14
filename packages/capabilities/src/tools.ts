@@ -3,14 +3,17 @@
  * effects and approval frozen in `step4-tools.ts`). Members never see them
  * (`MEMBER_DENIED_TOOLS`); the handlers refuse a member anyway.
  */
+import { dirname } from 'node:path'
 import {
   CAPABILITY_COMPONENT_KINDS,
   CAPABILITY_DRAFT_TOOL,
+  CAPABILITY_LIMITS,
   CAPABILITY_PROPOSE_TOOL,
   CAPABILITY_TRY_TOOL,
   COMPONENT_NAME_PATTERN,
   componentDir,
   NexgentError,
+  resolveWorkspaceLayout,
   type CapabilityComponentKind,
   type CapabilityComponentRef,
   type CapabilityDraftToolInput,
@@ -21,10 +24,12 @@ import {
   type Tool,
   type ToolContext,
   type ToolRecordInput,
+  type WorkspaceLayout,
 } from '@nexgent/kernel'
 import { writeCandidate, type ProposedComponent } from './candidates.js'
 import { applyDraft, draftDirectory, readComponentDirectory } from './drafts.js'
 import { componentFormat } from './formats.js'
+import { checkJobLiterals, instanceLiteralText } from './instance-literals.js'
 import { findUseProof } from './proofs.js'
 import type { CapabilityService } from './service.js'
 import { readComponentFiles } from './store.js'
@@ -178,6 +183,11 @@ export function capabilityTryTool(service: CapabilityService, readRecords: Recor
   }
 }
 
+/** The project whose capabilities the service writes (`<root>/.nexgent/capabilities`): its sessions, outputs and jobs. */
+function projectLayout(service: CapabilityService): WorkspaceLayout {
+  return resolveWorkspaceLayout(dirname(dirname(service.store.directory)))
+}
+
 /** `capability_propose`. */
 export function capabilityProposeTool(service: CapabilityService, readRecords: RecordReader): Tool {
   return {
@@ -235,6 +245,16 @@ export function capabilityProposeTool(service: CapabilityService, readRecords: R
       // Step 5: an improvement job's propose session marks its candidate (origin and job).
       const start = records[0]
       const improvement = start?.type === 'session.start' && start.purpose === 'improvement' ? start.improvement : undefined
+      // ADR 0013 decision 2: a job's component must not carry the concrete values of the task it was learned from.
+      if (improvement !== undefined) {
+        const hits = await checkJobLiterals(projectLayout(service), improvement.jobId, components)
+        if (hits.length > 0) {
+          const shown = hits.slice(0, CAPABILITY_LIMITS.maxInstanceLiterals)
+          throw new NexgentError('capability/instance-literal',
+            `not proposed; the component carries values of the task it was learned from (in its feedback or deliverables, and not given in two or more tasks of this project): ${instanceLiteralText(shown)}`,
+            { details: { hits: shown.map(hit => ({ ...hit })) } })
+        }
+      }
       const { record: candidate } = await writeCandidate(service.store.directory, {
         sessionId: context.sessionId,
         taskId,

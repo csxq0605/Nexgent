@@ -2,7 +2,7 @@ import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { applyImproverChange, canonicalImproverText, IMPROVER_V0, resolveWorkspaceLayout, type ImproverBundle } from '@nexgent/kernel'
 import { describe, expect, it } from 'vitest'
-import { improversDir, improverVersionOf, ImproverStore } from '../src/index.js'
+import { improversDir, improverVersionOf, ImproverStore, userImproversDir } from '../src/index.js'
 import { tempDir } from './helpers.js'
 
 const JOB_A = '8b1f2a6e-3c4d-4e5f-9a0b-1c2d3e4f5a61'
@@ -152,5 +152,56 @@ describe('ImproverStore', () => {
     const { createHash } = await import('node:crypto')
     await writeFile(join(improvers.activationDirectory, '2.json'), JSON.stringify({ format: 1, revision: 2, previous: createHash('sha256').update(raw).digest('hex'), from: a, version: b, type: 'rollback', trigger: 'manual', committedAt: '2026-10-13T16:00:00.000Z' }))
     expect((await improvers.chain()).problem).toMatchObject({ file: '2.json', message: expect.stringContaining('in force earlier') })
+  })
+
+  it('user level (ADR 0012): two projects under one home share the improver in force and its rollbacks', async () => {
+    const home = await tempDir()
+    // Each project's host opens the line of the same home, as two processes would.
+    const first = ImproverStore.user({ home })
+    const second = new ImproverStore(undefined, { home })
+    expect(first.directory).toBe(join(home, 'improvers'))
+    expect(second.directory).toBe(userImproversDir(home))
+    expect([first.scope, second.scope, first.readOnly]).toEqual(['user', 'user', false])
+    const a = (await first.write(repeats3)).version
+    await first.adopt(a, { jobId: JOB_A })
+    expect((await second.resolve()).version).toBe(a)
+    await second.rollback({ trigger: 'manual', reason: 'not better' })
+    expect((await first.resolve()).version).toBe('v0')
+
+    // Without a directory or home, NEXGENT_HOME decides.
+    const saved = process.env.NEXGENT_HOME
+    process.env.NEXGENT_HOME = home
+    try {
+      expect(new ImproverStore().directory).toBe(join(home, 'improvers'))
+    } finally {
+      if (saved === undefined) delete process.env.NEXGENT_HOME
+      else process.env.NEXGENT_HOME = saved
+    }
+  })
+
+  it('a project\'s old line is read-only and never the improver in force', async () => {
+    const root = await tempDir()
+    const layout = resolveWorkspaceLayout(root)
+    // Step 6 wrote an adoption into the project line before ADR 0012.
+    const old = new ImproverStore(improversDir(layout))
+    const a = (await old.write(repeats3)).version
+    await old.adopt(a, { jobId: JOB_A })
+
+    const project = ImproverStore.project(layout)
+    expect([project.scope, project.readOnly]).toEqual(['project', true])
+    expect((await project.chain()).revisions.map(revision => revision.version)).toEqual([a])
+    expect(await project.load(a)).toEqual(repeats3)
+    await expect(project.write(recency)).rejects.toMatchObject({ code: 'improver/activation' })
+    await expect(project.adopt(a, { jobId: JOB_B })).rejects.toMatchObject({ code: 'improver/activation' })
+    await expect(project.rollback({ trigger: 'manual' })).rejects.toMatchObject({ code: 'improver/activation' })
+    // A broken tail of the old line is reported, not rolled back.
+    await writeFile(join(project.bundlesDirectory, `${a}.json`), 'not json')
+    expect(await project.resolve()).toMatchObject({ version: 'v0', fallback: { version: a }, rollbacks: [] })
+    expect(await readdir(project.activationDirectory)).toEqual(['1.json'])
+
+    // The user-level line of a fresh home knows nothing of it.
+    const user = ImproverStore.user({ home: await tempDir() })
+    expect((await user.resolve()).version).toBe('v0')
+    expect(await user.versions()).toEqual([])
   })
 })
