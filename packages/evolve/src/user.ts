@@ -28,7 +28,6 @@ import {
   countUserFinishedJob,
   emptyUserMetaQueue,
   IMPROVEMENT_FILES,
-  IMPROVERS_DIR,
   nexgentHome,
   NexgentError,
   readProjectConfig,
@@ -46,7 +45,7 @@ import {
   type UserMetaQueueEntry,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { ImproverStore } from '@nexgent/capabilities'
+import { ImproverStore, userImproversDir } from '@nexgent/capabilities'
 import { validateImprovementFile } from '@nexgent/session'
 import { budgetStatus, type BudgetStatus } from './budget.js'
 import type { ImproverSource } from './improver.js'
@@ -60,10 +59,8 @@ export function homeOf(home: string | undefined): string {
   return home ?? nexgentHome()
 }
 
-/** `<home>/improvers`: the user's improver version line. */
-export function userImproversDir(home: string): string {
-  return join(home, IMPROVERS_DIR)
-}
+/** `<home>/improvers`: the user's improver version line (`@nexgent/capabilities`). */
+export { userImproversDir }
 
 /** `<home>/improvements`: the user's meta queue. */
 export function userImprovementsDir(home: string): string {
