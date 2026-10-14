@@ -109,8 +109,8 @@ describe('accept-step6 checklist', () => {
     expect(REWORK_EXPECTATIONS.some(e => e.kind === 'stale')).toBe(false)
   })
 
-  it('real-model facts follow the user decisions: sonnet 5.5, thinking on, 35 USD for step 6', () => {
-    expect(REAL_MODEL).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', budgetUsd: 35, pilotGateUsd: 12 })
+  it('real-model facts follow the user decisions: sonnet 5.5, thinking on, 40 USD for step 6', () => {
+    expect(REAL_MODEL).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', budgetUsd: 40, pilotGateUsd: 12 })
     expect(realModelKeySource({ ANTHROPIC_API_KEY: 'x' })).toBe('ANTHROPIC_API_KEY')
     expect(realModelKeySource({ NEXGENT_API_KEY: 'a', ANTHROPIC_API_KEY: 'b' })).toBe('NEXGENT_API_KEY')
     expect(realModelKeySource({ NEXGENT_API_KEY: '' })).toBeUndefined()
