@@ -35,6 +35,7 @@ node scripts/experiment/step6/run.mjs --scripted --out <dir>   # 脚本化全流
 node scripts/experiment/step6/run.mjs --real --dev-trial --out <dir> [--case code/dev/bugfix-101] [--repeats 3]
                                                                # v0 dev 试跑（真实模型，花钱）
 node scripts/experiment/step6/run.mjs --real --out <dir>       # 正式实验（真实模型，花钱）
+node scripts/experiment/step6/run.mjs --real --until-meta --out <dir>  # 只跑到元改进作业为止（不跑 holdout），先看元改进会不会提出改动
 ```
 
 - 三臂：`base` 是历史与 dev 任务之后、反馈之前的项目副本；`parent` 与 `child` 是元改进作业用 `keepCopies` 留下的两份比较副本（同一快照出发，分别用旧版与新版改进器重做同一次改进）。holdout 每次运行都在所属臂的新副本里做，关掉自动改进，副本不带改进作业。
