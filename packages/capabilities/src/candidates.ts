@@ -54,14 +54,20 @@ export interface CandidateInput {
 }
 
 /**
- * Store the candidate's bundle, then publish the candidate directory.
+ * Store the candidate's bundle, then publish the candidate directory. The
+ * base's components are kept unless a proposed component replaces them: one
+ * of the same kind and name, or for a context policy (at most one per
+ * bundle) any proposed context policy.
  * @throws `config/invalid` when the resulting bundle breaks the manifest rules (too many components, …).
  */
 export async function writeCandidate(capabilitiesDir: string, input: CandidateInput, now: () => Date = () => new Date()): Promise<{ readonly record: CandidateRecord; readonly bundle: StoredBundle }> {
   const key = (ref: CapabilityComponentRef) => `${ref.kind}/${ref.name}`
   const replaced = new Set(input.components.map(key))
+  // A bundle holds at most one context policy: a proposed one replaces the base's, whatever its name.
+  const newPolicy = input.components.some(component => component.kind === 'context-policy')
   const inputs: BundleComponentInput[] = []
   for (const component of input.base.manifest.components) {
+    if (newPolicy && component.kind === 'context-policy') continue
     if (!replaced.has(key(component))) inputs.push({ kind: component.kind, name: component.name, files: await readComponentFiles(input.base, component) })
   }
   for (const component of input.components) {

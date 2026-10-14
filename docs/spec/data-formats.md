@@ -581,7 +581,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 **草稿。** `capability_draft` 把组件写进 `.nexgent/capabilities/drafts/<sessionId>/<kind-dir>/<name>/`（宿主代写，模型的文件工具看不见这里），每次改动写一条 `capability.draft`。`capability_try` 把当前草稿装进本会话，写 `capability.try`。
 
-**候选。** `capability_propose` 把试用过的组件提成一个候选：宿主检查每个组件在试用之后至少被成功用过一次（决定 2），把证据写成 `proofs`（`{ kind, name, turn, toolCallId }`），不满足就拒绝调用。接受后写 `.nexgent/capabilities/candidates/<candidateId>/candidate.json` 并复制组件文件到同目录，再写会话记录 `capability.propose`。
+**候选。** `capability_propose` 把试用过的组件提成一个候选：宿主检查每个组件在试用之后至少被成功用过一次（决定 2），把证据写成 `proofs`（`{ kind, name, turn, toolCallId }`），不满足就拒绝调用。接受后写 `.nexgent/capabilities/candidates/<candidateId>/candidate.json` 并复制组件文件到同目录，再写会话记录 `capability.propose`。候选的包 = 会话所用的包 + 提出的组件：同种类同名的组件被替换；一个包至多一个 `context-policy`，所以提出的上下文策略取代基础包里已有的那一个，不论名字。
 
 `candidate.json`：`formatVersion: 1`、`id`（小写 UUID v4）、`proposedAt`、`sessionId`、`taskId`、`turn`、`base`（会话所用的版本）、`version`（`base` 加上这些组件后的能力包版本）、`components`、`proofs`、`requiresApproval`（含 `plugin` 时为真）、`summary?`（≤500 字符）、`origin?`（步骤 5：`"session" \| "improvement"`，缺省即 `session`，用户任务自己的 `capability_propose`）、`jobId?`（步骤 5：`origin` 为 `improvement` 时的改进作业 id）。改进作业的候选同样由提议会话的 `capability_propose` 写出，规则不变（必须在试用后成功用过一次）。
 
