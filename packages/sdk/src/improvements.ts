@@ -226,11 +226,19 @@ const SETTLE_MS = 100
  * their own processes, so the SDK watches `.nexgent/improvements/` (and
  * re-reads every few seconds where file events are not delivered) and
  * reports each job that appeared or changed status since the last look.
+ *
+ * A job process writes the job's final status first and frees the
+ * project's job slot (`queue.json` `activeJobId`) afterwards, so a listing
+ * read on the status event can still name the finished job as active. When
+ * the slot changes hands, the job that held it is reported once more, so a
+ * subscriber re-reads the listing with the slot free.
  */
 export class JobWatch {
   readonly #host: ImprovementHost
   readonly #onChange: (job: ImprovementJob) => void
   readonly #seen = new Map<string, string>()
+  /** The job holding the project's slot at the last look. */
+  #active: string | undefined
   #watcher: FSWatcher | undefined
   #timer: NodeJS.Timeout | undefined
   #settle: NodeJS.Timeout | undefined
@@ -245,6 +253,7 @@ export class JobWatch {
   /** Remember the jobs as they are now (no events for them), then follow changes. */
   async start(): Promise<void> {
     for (const job of await this.#host.list().catch(() => [] as ImprovementJob[])) this.#seen.set(job.id, job.status)
+    this.#active = (await this.#host.queue().catch(() => undefined))?.activeJobId
     if (this.#stopped) return
     try {
       await mkdir(this.#host.directory, { recursive: true })
@@ -261,17 +270,33 @@ export class JobWatch {
   check(): Promise<void> {
     this.#checking = this.#checking.then(async () => {
       if (this.#stopped) return
-      for (const job of await this.#host.list().catch(() => [] as ImprovementJob[])) {
+      const jobs = await this.#host.list().catch(() => [] as ImprovementJob[])
+      const reported = new Set<string>()
+      for (const job of jobs) {
         if (this.#seen.get(job.id) === job.status) continue
         this.#seen.set(job.id, job.status)
-        try {
-          this.#onChange(job)
-        } catch {
-          // a listener failure must not stop the watch
-        }
+        reported.add(job.id)
+        this.#report(job)
       }
+      // The slot freed (or passed on) after its job's last status: report that job again.
+      const queue = await this.#host.queue().catch(() => null)
+      if (queue === null) return
+      const active = queue?.activeJobId
+      if (active === this.#active) return
+      const released = this.#active
+      this.#active = active
+      const job = released === undefined || reported.has(released) ? undefined : jobs.find(item => item.id === released)
+      if (job !== undefined) this.#report(job)
     })
     return this.#checking
+  }
+
+  #report(job: ImprovementJob): void {
+    try {
+      this.#onChange(job)
+    } catch {
+      // a listener failure must not stop the watch
+    }
   }
 
   stop(): void {
