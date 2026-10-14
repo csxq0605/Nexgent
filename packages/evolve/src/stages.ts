@@ -200,7 +200,7 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
         ...spend,
         outcome: mapped.status,
         detail: mapped.detail,
-        ...(outcome.status === 'decided' ? { trialId: outcome.trialId, decisionId: outcome.decision.id } : {}),
+        ...(outcome.status === 'decided' ? { trialId: outcome.trialId, decisionId: outcome.decision.id } : outcome.status === 'refused' ? { decisionId: outcome.decision.id } : {}),
       }
     },
   }

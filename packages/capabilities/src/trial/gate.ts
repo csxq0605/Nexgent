@@ -35,6 +35,15 @@
  * Costs carry the `estimatedUsd` the runner and reviewer give; ADR 0007:
  * the verdict's cost ratio is in those dollars (cache included) when both
  * arms have them, in tokens otherwise.
+ *
+ * ADR 0013 (epoch `adr-0013`), an improvement job's candidate only: before
+ * anything is replayed, its components are checked for the concrete values
+ * of the job's task (`findInstanceLiterals`); a hit rejects the candidate
+ * (`instance-literal`) without a trial. The selection cases other than the
+ * feedback task that are like it at all (their first message shares a word
+ * with its first message) are its similar cases: their deterministic checks are
+ * tallied apart (`TrialTally.similar`) and may not get worse; with none, an
+ * adopting verdict waits for the user (`no-similar-cases`).
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
@@ -45,6 +54,7 @@ import {
   NexgentError,
   readProjectConfig,
   ZERO_USAGE,
+  CAPABILITY_LIMITS,
   type ArmTally,
   type CandidateRecord,
   type CapabilityDecision,
@@ -66,13 +76,14 @@ import {
 } from '@nexgent/kernel'
 import { readCandidate } from '../candidates.js'
 import { evaluatorEpoch } from './epoch.js'
+import { candidateInstanceLiterals } from './literals.js'
 import { selectionAnchor, type JobRunAttribution, type FeedbackCheckInput, type FeedbackCheckResult } from './feedback.js'
 import type { Activation } from '../activation.js'
 import { CapabilityStore } from '../capability-store.js'
 import { runCheckSpecs } from './checks.js'
 import { claimAttempt, releaseTrialLock, TrialReceiptWriter, wasAttempted, writeTrialLock } from './receipts.js'
 import { prepareReplayProject } from './replay-project.js'
-import { buildReplaySet, listReplayCases, type ReplayCase, type ReplayMessage } from './replay-set.js'
+import { buildReplaySet, listReplayCases, similarity, type ReplayCase, type ReplayMessage } from './replay-set.js'
 
 /** One replay run the host executes. */
 export interface ReplayRunRequest {
@@ -187,6 +198,8 @@ export type GateResult =
   /** The candidate was tried before, or already has a decision: nothing was written. */
   | { readonly status: 'skipped'; readonly detail: string }
   | { readonly status: 'decided'; readonly trialId: string; readonly verdict: TrialVerdict; readonly decision: CapabilityDecision }
+  /** ADR 0013: an improvement job's candidate carries a concrete value of its task; rejected (`instance-literal`) without a trial. */
+  | { readonly status: 'refused'; readonly decision: CapabilityDecision }
 
 const RUN_TIMEOUT_MS = 30 * 60_000
 
@@ -285,7 +298,7 @@ function usdText(value: number | 'unknown'): string {
   return value === 'unknown' ? 'unknown' : value.toFixed(4)
 }
 
-function explain(verdict: TrialVerdict, tally: { selection: { candidate: ArmTally; baseline: ArmTally }; guard: { candidate: ArmTally; baseline: ArmTally }; usd?: { candidate: number | 'unknown'; baseline: number | 'unknown' } }, review: { candidate: number; baseline: number; tie: number }, extra?: string): string {
+function explain(verdict: TrialVerdict, tally: { selection: { candidate: ArmTally; baseline: ArmTally }; guard: { candidate: ArmTally; baseline: ArmTally }; similar?: { candidate: ArmTally; baseline: ArmTally } | 'none'; usd?: { candidate: number | 'unknown'; baseline: number | 'unknown' } }, review: { candidate: number; baseline: number; tie: number }, extra?: string): string {
   const usd = tally.usd
   const rate = (value: number) => `${Math.round(value * 100)}%`
   const parts = [
@@ -294,6 +307,13 @@ function explain(verdict: TrialVerdict, tally: { selection: { candidate: ArmTall
       + ` (runs pass/fail/unknown ${tally.selection.candidate.passed}/${tally.selection.candidate.failed}/${tally.selection.candidate.unknown}`
       + ` vs ${tally.selection.baseline.passed}/${tally.selection.baseline.failed}/${tally.selection.baseline.unknown}).`,
     `Guard runs passed: candidate ${tally.guard.candidate.passed}, baseline ${tally.guard.baseline.passed}.`,
+    ...(tally.similar === undefined
+      ? []
+      : tally.similar === 'none'
+        ? ['Similar cases: none (no other selection task shares a word with the feedback task), so it was checked on the feedback task only.']
+        : [`Similar cases (selection tasks other than the feedback task; deterministic checks only) passed: candidate ${rate(verdict.similarPassRate?.candidate ?? 0)}, baseline ${rate(verdict.similarPassRate?.baseline ?? 0)}`
+          + ` (runs pass/fail/unknown ${tally.similar.candidate.passed}/${tally.similar.candidate.failed}/${tally.similar.candidate.unknown}`
+          + ` vs ${tally.similar.baseline.passed}/${tally.similar.baseline.failed}/${tally.similar.baseline.unknown}).`]),
     ...(verdict.feedbackPassRate === undefined
       ? []
       : [`Feedback checks (reviewer model, separate from the deterministic checks) passed: candidate ${rate(verdict.feedbackPassRate.candidate)}, baseline ${rate(verdict.feedbackPassRate.baseline)}.`]),
@@ -304,6 +324,18 @@ function explain(verdict: TrialVerdict, tally: { selection: { candidate: ArmTall
     ...(extra === undefined ? [] : [extra]),
   ]
   return parts.join(' ')
+}
+
+/** Why an awaiting-approval verdict waits (every reason that applies). */
+function approvalText(verdict: TrialVerdict, candidate: CandidateRecord, plan: TrialPlan): string {
+  const reasons: string[] = []
+  if (verdict.reason === 'no-similar-cases') reasons.push('It was checked on the feedback task only, with no similar past task to show it carries over (ADR 0013).')
+  if (candidate.requiresApproval) reasons.push('The candidate contains a plugin.')
+  const approvalRatio = plan.costApprovalRatio ?? 2
+  if (verdict.passRate.candidate > verdict.passRate.baseline && verdict.costRatio !== 'unknown' && verdict.costRatio > approvalRatio) {
+    reasons.push(`It checks better but costs ${ratioText(verdict)} the baseline, above the ${approvalRatio}× that adopts on its own (ADR 0007).`)
+  }
+  return `${reasons.join(' ')} It is adopted only after the user approves it.`
 }
 
 /**
@@ -327,6 +359,25 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
   const epoch = evaluatorEpoch(settings)
   if (options.epoch !== undefined && options.epoch !== epoch) {
     throw new NexgentError('improvement/epoch-mismatch', `the gate's evaluator epoch ${epoch.slice(0, 12)} is not the expected ${options.epoch.slice(0, 12)}; candidate ${candidate.id} was not tried`)
+  }
+  // ADR 0013 decision 2: a component carrying a concrete value of the job's task is rejected before anything is replayed.
+  const literals = await candidateInstanceLiterals(layout, candidate)
+  if (literals !== undefined && literals.length > 0) {
+    if (!(await claimAttempt(capabilitiesDir, candidate.id))) return { status: 'skipped', detail: `candidate ${candidate.id} is being or was tried by another process` }
+    const version = (await store.activation()).version
+    const shown = literals.slice(0, CAPABILITY_LIMITS.maxInstanceLiterals)
+    const decision = await store.recordDecision({
+      outcome: 'rejected',
+      reason: 'instance-literal',
+      trigger: 'gate',
+      candidateId: candidate.id,
+      fromVersion: version,
+      toVersion: version,
+      instanceLiterals: shown,
+      detail: `rejected (instance-literal), not replayed. The proposed components carry concrete values of the improvement job's own task (its feedback or its deliverables) that no two past tasks of the project share, so they would fit that one task rather than the next: `
+        + `${shown.map(hit => `${hit.value} in ${hit.path} (from ${hit.source})`).join('; ')}${literals.length > shown.length ? `; and ${literals.length - shown.length} more` : ''}.`,
+    })
+    return { status: 'refused', decision }
   }
   const history = await listReplayCases(layout)
   const anchor = await selectionAnchor(layout, candidate, history)
@@ -380,6 +431,15 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
     const tally = { selection: { candidate: emptyTally(), baseline: emptyTally() }, guard: { candidate: emptyTally(), baseline: emptyTally() } }
     const hasFeedback = set.selection.some(item => item.feedbackIds !== undefined)
     const feedbackTally = { candidate: emptyTally(), baseline: emptyTally() }
+    // ADR 0013: an improvement job's similar cases are the selection cases other than its feedback task that
+    // are like it at all (their first message shares a word with its first message, the selection's own measure).
+    const anchorText = set.selection.find(item => item.caseId === anchor.caseId)?.messages[0]?.text ?? ''
+    const similarIds = new Set(anchor.kind !== 'job' ? [] : set.selection
+      .filter(item => item.caseId !== anchor.caseId && similarity(anchorText, item.messages[0]?.text ?? '') > 0)
+      .map(item => item.caseId))
+    const similarCase = (caseId: string) => similarIds.has(caseId)
+    const similarTally = { candidate: emptyTally(), baseline: emptyTally() }
+    const similar = anchor.kind !== 'job' ? undefined : similarIds.size > 0 ? similarTally : 'none' as const
     const outputs = new Map<string, RunOutput>()
     let budgetExhausted = false
 
@@ -436,6 +496,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
         }
       }
       tally[half][arm] = bump(tally[half][arm], status)
+      if (half === 'selection' && similarCase(replay.caseId)) similarTally[arm] = bump(similarTally[arm], status)
       runsDone += 1
       emit(await receipts.append({
         type: 'trial.run',
@@ -509,6 +570,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
       budgetExhausted,
       requiresApproval: candidate.requiresApproval,
       ...(hasFeedback ? { feedback: feedbackTally } : {}),
+      ...(similar === undefined ? {} : { similar }),
     }, plan.costRatioCap, plan.costApprovalRatio)
     let verdict = verdictOf()
     // The reviewer is asked only when its opinion can change the verdict: a check tie the cost does not settle.
@@ -552,7 +614,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
     emit(await receipts.append({ type: 'trial.end', status, verdict, cost: costs }))
 
     const common = { candidateId: candidate.id, trialId, verdict, cost: costs }
-    const shown = { ...tally, usd: { candidate: arms.candidate.usd, baseline: arms.baseline.usd } }
+    const shown = { ...tally, ...(similar === undefined ? {} : { similar }), usd: { candidate: arms.candidate.usd, baseline: arms.baseline.usd } }
     let decision: CapabilityDecision
     if (verdict.outcome === 'adopt') {
       const committed = await store.adopt(candidate.version, { trigger: 'gate', reason: verdict.reason, detail: explain(verdict, shown, review), ...common }, observed).catch(() => null)
@@ -573,11 +635,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
         fromVersion: baselineVersion,
         toVersion: baselineVersion,
         ...common,
-        detail: explain(verdict, shown, review, verdict.outcome !== 'await-approval'
-          ? undefined
-          : candidate.requiresApproval
-            ? 'The candidate contains a plugin: it is adopted only after the user approves it.'
-            : `It checks better but costs ${ratioText(verdict)} the baseline, above the ${plan.costApprovalRatio ?? 2}× that adopts on its own (ADR 0007): it is adopted only after the user approves it.`),
+        detail: explain(verdict, shown, review, verdict.outcome !== 'await-approval' ? undefined : approvalText(verdict, candidate, plan)),
       })
     }
     return { status: 'decided', trialId, verdict, decision }
