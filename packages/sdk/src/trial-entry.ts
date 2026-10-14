@@ -192,16 +192,31 @@ export async function runReplay(request: ReplayRunRequest, env: Env = process.en
   }
 }
 
-const REVIEW_SYSTEM = [
+/** The preference review's system prompt (part of the evaluator rules, `EVALUATOR_RULES`). */
+export const REVIEW_SYSTEM = [
   'You compare two attempts at the same task for a quality gate.',
   'You see the task (the user messages) and the files each attempt created or changed.',
+  'When feedback the user gave on an earlier attempt is shown, the standing preferences it states (how the user always wants such work done) are part of what the user asked; extras it asks for only that one time are not.',
+  'A listing may name files without their contents; do not count a file as missing because its contents are not shown.',
   'Judge which attempt better does what the user asked: correct results first, then completeness, then clarity.',
   'Answer with one JSON object and nothing else: {"better": "A" | "B" | "tie", "reason": "<one or two sentences>"}.',
 ].join(' ')
 
-function renderOutput(label: string, output: ReviewInput['candidate']): string {
-  if (output.files.length === 0) return `## Attempt ${label}\n(no files created or changed)`
-  return [`## Attempt ${label}`, ...output.files.map(file => `### ${file.path}\n\`\`\`\n${file.text}\n\`\`\``)].join('\n')
+/** One attempt's files for the reviewer: contents of the first few, then the paths of the other changed files and of removed files (ADR 0015). */
+export function renderOutput(label: string, output: ReviewInput['candidate']): string {
+  const unshown = output.unshown ?? []
+  const removed = output.removed ?? []
+  if (output.files.length === 0 && removed.length === 0) return `## Attempt ${label}\n(no files created or changed)`
+  const lines = [`## Attempt ${label}`, ...output.files.map(file => `### ${file.path}\n\`\`\`\n${file.text}\n\`\`\``)]
+  if (unshown.length > 0) {
+    const more = output.unlisted ?? 0
+    lines.push(`Also created or changed (contents not shown): ${unshown.length + more} more file(s)`, ...unshown.map(path => `- ${path}`), ...(more > 0 ? [`- … and ${more} more`] : []))
+  }
+  if (removed.length > 0) {
+    const more = output.removedUnlisted ?? 0
+    lines.push(`Removed by this attempt: ${removed.length + more} file(s)`, ...removed.map(path => `- ${path}`), ...(more > 0 ? [`- … and ${more} more`] : []))
+  }
+  return lines.join('\n')
 }
 
 /** Parse the reviewer's JSON answer; `undefined` when it is not one. */
@@ -218,10 +233,14 @@ export function parseReview(text: string): { readonly better: 'A' | 'B' | 'tie';
   }
 }
 
-const FEEDBACK_SYSTEM = [
+/** The feedback check's system prompt (part of the evaluator rules, `EVALUATOR_RULES`). */
+export const FEEDBACK_SYSTEM = [
   'You check one attempt at a task for a quality gate.',
   'You see the task (the user messages), the feedback the user gave on an earlier attempt at the same task, and the files this attempt created or changed.',
   'Judge only whether this attempt has solved the problem the feedback names; ignore anything the feedback does not mention.',
+  'Feedback can also ask for something extra only for that one time (a new file or change beyond the task as given); this attempt was given only the task, so do not expect such one-time extras and judge only the problems the feedback names with how the task was done, including any standing preference it states.',
+  'If the feedback names nothing but such one-time extras, answer null.',
+  'A listing may name files without their contents; do not count a file as missing because its contents are not shown.',
   'Answer with one JSON object and nothing else: {"solved": true | false, "reason": "<one or two sentences>"}.',
   'If the files do not let you tell, answer {"solved": null, "reason": "..."}.',
 ].join(' ')
@@ -301,7 +320,8 @@ export function llmReviewer(options: { readonly ledger: Ledger; readonly home: s
     async review(input: ReviewInput, settings, signal): Promise<ReviewResult> {
       const candidateFirst = input.repeat % 2 === 1
       const [a, b] = candidateFirst ? [input.candidate, input.baseline] : [input.baseline, input.candidate]
-      const { text, usage, failure, estimatedUsd } = await ask(input.trialId, settings, REVIEW_SYSTEM, `# Task\n${taskText(input.messages)}\n\n${renderOutput('A', a)}\n\n${renderOutput('B', b)}`, signal)
+      const feedback = input.feedback === undefined || input.feedback.length === 0 ? '' : `# Feedback on an earlier attempt\n${renderFeedback(input.feedback)}\n\n`
+      const { text, usage, failure, estimatedUsd } = await ask(input.trialId, settings, REVIEW_SYSTEM, `# Task\n${taskText(input.messages)}\n\n${feedback}${renderOutput('A', a)}\n\n${renderOutput('B', b)}`, signal)
       const parsed = failure === undefined ? parseReview(text) : undefined
       if (parsed === undefined) {
         return { preference: 'unknown', reason: (failure ?? `the reviewer did not answer with the JSON object: ${text.slice(0, 300)}`).slice(0, 2_000), usage, requestCount: 1, estimatedUsd }

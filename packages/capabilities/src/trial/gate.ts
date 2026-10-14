@@ -18,7 +18,8 @@
  *    and passed down as the run's per-task cap; running out stops the trial.
  * 4. On a check tie that the cost alone does not settle, the reviewer model
  *    compares the two arms' outputs per selection run (kept apart from the
- *    checks in the receipts).
+ *    checks in the receipts). ADR 0015: it sees every changed and removed
+ *    path (`runOutput`), and on a job's feedback task the feedback too.
  * 5. `decideTrial` gives the verdict; the gate writes `trial.end`, then the
  *    decision: an adoption revision (`trigger: gate`), an awaiting-approval
  *    decision for a plugin (or, ADR 0007, a quality rise costing more than
@@ -38,7 +39,7 @@
  * the verdict's cost ratio is in those dollars (cache included) when both
  * arms have them, in tokens otherwise.
  *
- * ADR 0013 and 0014 (epoch `adr-0014`), an improvement job's candidate only: before
+ * ADR 0013 and 0014 (epoch `adr-0014`; ADR 0015: `adr-0015`), an improvement job's candidate only: before
  * anything is replayed, its components are checked for the concrete values
  * of the job's task (`findInstanceLiterals`); a hit rejects the candidate
  * (`instance-literal`) without a trial. The selection cases other than the
@@ -62,6 +63,7 @@ import {
   type CandidateRecord,
   type CapabilityDecision,
   type CapabilityVersion,
+  type FeedbackEntry,
   type ImproverComparisonParams,
   type LLMUsage,
   type ReplayCaseRef,
@@ -130,9 +132,23 @@ export interface TrialRunner {
   run(request: ReplayRunRequest, signal: AbortSignal): Promise<ReplayRunResult>
 }
 
-/** What one arm produced, for the reviewer: the files the run created or changed (text only, truncated). */
+/**
+ * What one arm produced, for the reviewer: the files the run created or
+ * changed (text, truncated; at most {@link OUTPUT_FILES} with their
+ * contents), and (ADR 0015) the paths of the other changed files and of the
+ * snapshot files the run removed, so that a reviewer never mistakes a
+ * shortened listing for missing work.
+ */
 export interface RunOutput {
   readonly files: readonly { readonly path: string; readonly text: string }[]
+  /** Created or changed files whose contents are not shown (sorted; at most {@link OUTPUT_PATHS}). */
+  readonly unshown?: readonly string[]
+  /** How many created or changed files are not listed at all (beyond {@link OUTPUT_PATHS}). */
+  readonly unlisted?: number
+  /** Snapshot files the run removed (sorted; at most {@link OUTPUT_PATHS}). */
+  readonly removed?: readonly string[]
+  /** How many removed files are not listed (beyond {@link OUTPUT_PATHS}). */
+  readonly removedUnlisted?: number
 }
 
 /** One reviewer question. */
@@ -142,6 +158,8 @@ export interface ReviewInput {
   readonly caseId: string
   readonly repeat: number
   readonly messages: readonly ReplayMessage[]
+  /** ADR 0015: the feedback of a job's feedback task (its standing preferences are part of what the user asked); absent for other cases. */
+  readonly feedback?: readonly FeedbackEntry[]
   readonly candidate: RunOutput
   readonly baseline: RunOutput
 }
@@ -219,8 +237,12 @@ function planRef(item: ReplayCase): ReplayCaseRef {
     ...(item.feedbackIds === undefined ? {} : { feedbackIds: item.feedbackIds }),
   }
 }
-const OUTPUT_FILES = 12
-const OUTPUT_CHARS = 6_000
+/** Changed files shown to the reviewer with their contents. */
+export const OUTPUT_FILES = 12
+/** Characters of one file's contents shown to the reviewer. */
+export const OUTPUT_CHARS = 6_000
+/** Paths listed (without contents) per list: changed files not shown, removed files. */
+export const OUTPUT_PATHS = 200
 
 function tokensOf(usage: LLMUsage): number | 'unknown' {
   return typeof usage.inputTokens === 'number' && typeof usage.outputTokens === 'number' ? usage.inputTokens + usage.outputTokens : 'unknown'
@@ -256,32 +278,54 @@ function bump(tally: ArmTally, status: TrialStatus): ArmTally {
   return status === 'pass' ? { ...tally, passed: tally.passed + 1 } : status === 'fail' ? { ...tally, failed: tally.failed + 1 } : { ...tally, unknown: tally.unknown + 1 }
 }
 
-/** Files of the copy the run created or changed (text, truncated), for the reviewer. */
-async function runOutput(root: string, before: ReadonlyMap<string, string>): Promise<RunOutput> {
-  const files: { path: string; text: string }[] = []
+/**
+ * Files of the copy the run created or changed, for the reviewer (ADR 0015):
+ * every changed path is found first; the first {@link OUTPUT_FILES} in path
+ * order are shown with their (truncated) text, the rest by path, and the
+ * snapshot files the run removed are listed too.
+ */
+export async function runOutput(root: string, before: ReadonlyMap<string, string>): Promise<RunOutput> {
+  const changed: string[] = []
+  const present = new Set<string>()
   const visit = async (directory: string, prefix: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
-      if (files.length >= OUTPUT_FILES) return
       const path = prefix === '' ? entry.name : `${prefix}/${entry.name}`
       if (entry.isDirectory()) {
         if (['.nexgent', '.git', 'node_modules'].includes(entry.name)) continue
         await visit(join(directory, entry.name), path)
       } else if (entry.isFile()) {
+        present.add(path)
         const bytes = await readFile(join(directory, entry.name)).catch(() => undefined)
         if (bytes === undefined) continue
         if (before.get(path) === createHash('sha256').update(bytes).digest('hex')) continue
-        let text: string
-        try {
-          text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-        } catch {
-          text = `(binary, ${bytes.byteLength} bytes)`
-        }
-        files.push({ path, text: text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n…(truncated)` : text })
+        changed.push(path)
       }
     }
   }
   await visit(root, '')
-  return { files: files.sort((left, right) => (left.path < right.path ? -1 : 1)) }
+  changed.sort()
+  // Only the shown files are kept in memory: they are read again here.
+  const files: { path: string; text: string }[] = []
+  for (const path of changed.slice(0, OUTPUT_FILES)) {
+    const bytes = await readFile(join(root, ...path.split('/'))).catch(() => undefined)
+    if (bytes === undefined) continue
+    let text: string
+    try {
+      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    } catch {
+      text = `(binary, ${bytes.byteLength} bytes)`
+    }
+    files.push({ path, text: text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n…(truncated)` : text })
+  }
+  const rest = changed.slice(OUTPUT_FILES)
+  const gone = [...before.keys()].filter(path => !present.has(path) && !path.startsWith('.nexgent/')).sort()
+  return {
+    files,
+    ...(rest.length === 0 ? {} : { unshown: rest.slice(0, OUTPUT_PATHS) }),
+    ...(rest.length > OUTPUT_PATHS ? { unlisted: rest.length - OUTPUT_PATHS } : {}),
+    ...(gone.length === 0 ? {} : { removed: gone.slice(0, OUTPUT_PATHS) }),
+    ...(gone.length > OUTPUT_PATHS ? { removedUnlisted: gone.length - OUTPUT_PATHS } : {}),
+  }
 }
 
 function remaining(budget: TrialBudget, spent: { tokens: number; requests: number }): TrialBudget | undefined {
@@ -452,6 +496,11 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
     const similarTally = { candidate: emptyTally(), baseline: emptyTally() }
     const similar = anchor.kind !== 'job' ? undefined : similarIds.size > 0 ? similarTally : 'none' as const
     const outputs = new Map<string, RunOutput>()
+    // The feedback the user gave on a replayed case (only a job's feedback task has any).
+    const feedbackOfCase = (replay: ReplayCase): readonly FeedbackEntry[] => {
+      const ids = replay.feedbackIds ?? []
+      return (anchor.kind === 'job' ? anchor.feedback : []).filter(entry => ids.includes(entry.id))
+    }
     let budgetExhausted = false
 
     const runOne = async (half: ReplaySet, replay: ReplayCase, repeat: number, arm: TrialArm): Promise<void> => {
@@ -527,7 +576,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
     // ADR 0006: the feedback check of one run, after its checks; an unknown run gives an unknown check.
     const feedbackCheck = async (replay: ReplayCase, repeat: number, arm: TrialArm, runStatus: TrialStatus): Promise<void> => {
       const ids = replay.feedbackIds ?? []
-      const entries = (anchor.kind === 'job' ? anchor.feedback : []).filter(entry => ids.includes(entry.id))
+      const entries = feedbackOfCase(replay)
       const output = outputs.get(`${replay.caseId}#${repeat}#${arm}`)
       let result: FeedbackCheckResult
       if (runStatus === 'unknown' || output === undefined) {
@@ -598,7 +647,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
           }
           let result: ReviewResult
           try {
-            result = await options.reviewer.review({ trialId, set: 'selection', caseId: replay.caseId, repeat, messages: replay.messages, candidate: candidateOutput, baseline: baselineOutput }, plan.reviewer, signal)
+            result = await options.reviewer.review({ trialId, set: 'selection', caseId: replay.caseId, repeat, messages: replay.messages, ...(feedbackOfCase(replay).length === 0 ? {} : { feedback: feedbackOfCase(replay) }), candidate: candidateOutput, baseline: baselineOutput }, plan.reviewer, signal)
           } catch (error) {
             result = { preference: 'unknown', reason: `the reviewer failed: ${(error as Error).message}`.slice(0, 2_000), usage: ZERO_USAGE, requestCount: 0 }
           }

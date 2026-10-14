@@ -627,8 +627,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | --- | --- |
 | `trial.start` | `trialId`、`candidateId`、`candidateVersion`、`baselineVersion`、`plan: TrialPlan`（选择集 ≥2、守护集 ≥1 个 `ReplayCaseRef { caseId, sessionId, tree, checks, throughTurn?, feedbackIds? }`，`repeats`、`costRatioCap`、`reviewer`、`budget`）。步骤 5：`throughTurn` 表示依次回放第 1 至 `throughTurn` 轮的用户消息（缺省只回放第 1 轮，即步骤 4 的行为）；反馈任务取第一条反馈之前的最后一轮，所以反馈内容不会进入回放。`feedbackIds` 是用例携带的反馈，有它的用例每次运行都做一次反馈检查 |
 | `trial.run` | `set: selection \| guard`、`caseId`、`arm: candidate \| baseline`、`repeat`、`status: pass \| fail \| unknown`、`reason?`（`unknown` 的原因：`not-run \| cancelled \| error \| timeout \| budget \| interrupted`）、`checks: TaskCheck[]`、`cost`、`durationMs` |
-| `trial.review` | `set`、`caseId`、`repeat`、`preference: candidate \| baseline \| tie \| unknown`、`reason`（≤2000 字符）、`model`、`cost` |
-| `trial.feedback` | 步骤 5（ADR 0006）：`caseId`、`arm`、`repeat`、`feedbackIds`（≥1）、`status: pass \| fail \| unknown`、`reason`（≤2000 字符）、`model`、`cost`。评审模型读这次运行的成果与反馈原文，回答“反馈指出的问题是否已经解决”；运行本身是 `unknown`、评审失败或回答无法解析时为 `unknown`。与确定性检查（`trial.run.checks`）和偏好评审（`trial.review`）分开记 |
+| `trial.review` | `set`、`caseId`、`repeat`、`preference: candidate \| baseline \| tie \| unknown`、`reason`（≤2000 字符）、`model`、`cost`。ADR 0015：改进作业的反馈原题，评审同时看到反馈原文（其中的长期习惯算用户要求）。两种评审看到的每臂成果：前 12 个改动文件的内容（每个至多 6000 字符），其余改动文件与被删掉的快照文件只列路径（各至多 200 条，超出写条数） |
+| `trial.feedback` | 步骤 5（ADR 0006）：`caseId`、`arm`、`repeat`、`feedbackIds`（≥1）、`status: pass \| fail \| unknown`、`reason`（≤2000 字符）、`model`、`cost`。评审模型读这次运行的成果与反馈原文，回答“反馈指出的问题是否已经解决”（ADR 0015：只判对做法的意见与长期习惯，不要求只针对那一次的附加要求；只有一次性附加要求时回答 `null`，记 `unknown`）；运行本身是 `unknown`、评审失败或回答无法解析时为 `unknown`。与确定性检查（`trial.run.checks`）和偏好评审（`trial.review`）分开记 |
 | `trial.end` | `status`、`verdict: TrialVerdict`、`cost: { candidate, baseline, review }`（反馈检查的费用计入 `review`） |
 
 每行都有 `format: 1`、`trialId`、`ts`。`cost` 是 `{ usage, requestCount, estimatedUsd }`；美元是估算，ADR 0007 起用于费用比（见下）。
@@ -787,7 +787,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 **作业固定改进器。** 每个改进作业（含元改进作业与比较臂）开始时读一次生效的改进器，把版本写进 `job.json` 的 `improverVersion`，之后整个作业只用它；作业进行中采用新的改进器不影响它。步骤 5 写出的作业没有这个字段，读作 `v0`。作业的诊断会话、提议会话与试验的账本记录都带 `improverVersion`。ADR 0012 起 `job.json`、`session.start.improvement` 与这些账本记录另带 `improverScope: "user"`；缺这个字段的（步骤 5、6 写出的）读作 `project`，即项目级旧版本线上的版本（`v0` 两边相同）。
 
-**评价器与纪元。** 评价器是决定“好不好”的部分：采用规则（`decideTrial`、门控的评审与反馈检查提示、`decideImprover`，规则 id `EVALUATOR_RULES`，ADR 0013 起为 `"adr-0013"`，之前为 `"adr-0008"`）以及项目的 `capabilities.costRatioCap`、`costApprovalRatio`、`guardCases`、`reviewer`。它们不在改进器里，改进器的改动也不能写到它们（`EVALUATOR_FIELDS`）。纪元 id 是 `EvaluatorSettings`（`{ formatVersion: 1, rules, costRatioCap, costApprovalRatio, guardCases, reviewer }`）规范化文本的 SHA-256：用户改了其中任何一项，或新 ADR 换了规则 id，就进入新纪元；`selectionCases`、`repeats`、改进预算、`autoImprove` 不进纪元。步骤 6 起门控把纪元写进 `TrialPlan.epoch`（步骤 4–5 的计划没有它，读出时视为未知纪元，不与有纪元的数据比较）；父子比较的起点与报告也写它。
+**评价器与纪元。** 评价器是决定“好不好”的部分：采用规则（`decideTrial`、门控的评审与反馈检查提示、`decideImprover`，规则 id `EVALUATOR_RULES`，ADR 0015 起为 `"adr-0015"`，之前依次为 `"adr-0014"`、`"adr-0013"`、`"adr-0008"`）以及项目的 `capabilities.costRatioCap`、`costApprovalRatio`、`guardCases`、`reviewer`。它们不在改进器里，改进器的改动也不能写到它们（`EVALUATOR_FIELDS`）。纪元 id 是 `EvaluatorSettings`（`{ formatVersion: 1, rules, costRatioCap, costApprovalRatio, guardCases, reviewer }`）规范化文本的 SHA-256：用户改了其中任何一项，或新 ADR 换了规则 id，就进入新纪元；`selectionCases`、`repeats`、改进预算、`autoImprove` 不进纪元。步骤 6 起门控把纪元写进 `TrialPlan.epoch`（步骤 4–5 的计划没有它，读出时视为未知纪元，不与有纪元的数据比较）；父子比较的起点与报告也写它。
 
 ## 元改进作业
 

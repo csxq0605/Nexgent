@@ -16,6 +16,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { IMPROVEMENT_FILES, IMPROVEMENTS_DIR, type CandidateRecord, type ComparisonArm, type FeedbackEntry, type ImproverScope, type ImproverVersion, type ImprovementJob, type LLMUsage, type WorkspaceLayout } from '@nexgent/kernel'
+import type { RunOutput } from './gate.js'
 import type { ReplayCase, ReplayMessage } from './replay-set.js'
 
 /** Where the gate anchors a candidate's selection set. */
@@ -96,8 +97,8 @@ export interface FeedbackCheckInput {
   readonly messages: readonly ReplayMessage[]
   /** The feedback the user gave on the original output. */
   readonly feedback: readonly FeedbackEntry[]
-  /** What the run created or changed. */
-  readonly output: { readonly files: readonly { readonly path: string; readonly text: string }[] }
+  /** What the run created or changed (and, ADR 0015, which changed files are listed without contents and which it removed). */
+  readonly output: RunOutput
 }
 
 /** The reviewer's answer to a feedback check. */

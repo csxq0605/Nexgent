@@ -101,9 +101,10 @@
     - 副本必须放在项目之外。
     副本里的门控在副本外另建回放副本，采用只发生在副本里。`release({ keep })` 默认删除副本；要求保留时，不超过 `KEEP_COPY_MAX_BYTES`（快照上限）就保留并返回 `{ root, bytes }`，超过则删除并返回 `too-large`。
   - 作业候选的回放请求带 `improvement: JobRunAttribution`（`jobId`、`improverVersion`，比较臂另带 `metaJobId`、`comparisonArm`），来自作业的 `job.json`；SDK 的回放进程与评审把这些写进账本。
-- 步骤 6 返工（ADR 0013、0014，纪元 `adr-0014`），只对改进作业的候选：
+- 步骤 6 返工（ADR 0013、0014，纪元 `adr-0014`，ADR 0015 起 `adr-0015`），只对改进作业的候选：
   - **具体数值**：核对纪元之后、建回放集之前，`candidateInstanceLiterals`（`src/trial/literals.ts`）用契约 `findInstanceLiterals` 检查提出组件的文本文件。来源是作业的反馈原文与请求 `note`、作业所涉会话的成果各版本文本文件；项目常量按全部根任务会话的用户消息算。命中即占用候选、写 `rejected / instance-literal` 决定（带 `instanceLiterals`），不建试验、不回放，`runGate` 返回 `{ status: 'refused', decision }`。
   - **同类题**（ADR 0014，`src/trial/similar.ts`）：选择集中除反馈原题外、首条消息与它的内容词 Jaccard 重合度 ≥ 0.25 的用例；内容词去掉功能词表 `FUNCTION_WORDS` 与纯数字。它们的确定性检查单独计为 `TrialTally.similar`（没有时为 `'none'`），由 `decideTrial` 判定 `similar-regression` 或 `no-similar-cases`；说明文字写出同类题通过率，待批准时写明“只在原题上验证过”。用户任务自己提出的候选不受影响。
+- ADR 0015（纪元 `adr-0015`），对所有候选：`runOutput` 先找出全部改动文件，前 `OUTPUT_FILES` 个给内容，其余与回放中删掉的快照文件只列路径（各至多 `OUTPUT_PATHS` 条），评审不再把列表截断当成没做；作业的反馈原题打平时，`ReviewInput.feedback` 带上反馈原文。反馈检查与评审的提示在 SDK `trial-entry.ts`。
 - ADR 0014，对所有候选：回放后，`file-exists` / `parses` 记录的路径在副本里不存在时，`runCheckSpecs(…, { delivered })` 改查这次运行 `present` 的成果里下一个扩展名相同、不在记录路径上的文件（一文件替一路径，`detail: delivered under another path`）。照反馈改名或换目录不再判为退步；没交付同类文件照旧失败。
 - 用量退化：`checkUsageRegression` 在根会话解析版本前和每轮结束后执行，只看 `gate` / `approval` 采用之后、该版本上的非试验记录：新组件工具的 `tool.call` 错误序列与根任务 `task.outcome.checks`（刚结束那一轮用 `turnOutcome()` 补上），交给 `decideUsageRollback`，触发即写 `usage-regression` 回滚。
 
