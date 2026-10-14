@@ -49,7 +49,8 @@ export function jobRunAttribution(job: Pick<ImprovementJob, 'id' | 'improverVers
   }
 }
 
-async function readJob(layout: WorkspaceLayout, jobId: string): Promise<ImprovementJob | undefined> {
+/** An improvement job's `job.json`, or `undefined` when it cannot be read. */
+export async function readImprovementJob(layout: WorkspaceLayout, jobId: string): Promise<ImprovementJob | undefined> {
   try {
     return JSON.parse(await readFile(join(layout.dataDir, IMPROVEMENTS_DIR, jobId, IMPROVEMENT_FILES.job), 'utf8')) as ImprovementJob
   } catch {
@@ -60,14 +61,14 @@ async function readJob(layout: WorkspaceLayout, jobId: string): Promise<Improvem
 /** The attribution of a candidate's runs: its job's, or `undefined` for a candidate that is not a job's (or whose job cannot be read). */
 export async function candidateRunAttribution(layout: WorkspaceLayout, candidate: CandidateRecord): Promise<JobRunAttribution | undefined> {
   if (candidate.origin !== 'improvement' || candidate.jobId === undefined) return undefined
-  const job = await readJob(layout, candidate.jobId)
+  const job = await readImprovementJob(layout, candidate.jobId)
   return job === undefined ? undefined : jobRunAttribution(job)
 }
 
 /** Find the case a candidate's selection set starts with. */
 export async function selectionAnchor(layout: WorkspaceLayout, candidate: CandidateRecord, cases: readonly ReplayCase[]): Promise<SelectionAnchor> {
   if (candidate.origin !== 'improvement' || candidate.jobId === undefined) return { kind: 'task', caseId: candidate.taskId }
-  const job = await readJob(layout, candidate.jobId)
+  const job = await readImprovementJob(layout, candidate.jobId)
   if (job === undefined) return { kind: 'missing', detail: `improvement job ${candidate.jobId} of candidate ${candidate.id} cannot be read` }
   const firstFeedback = job.items.find(item => item.kind === 'feedback')
   const failedCheck = job.items.find(item => item.kind === 'check-failure')

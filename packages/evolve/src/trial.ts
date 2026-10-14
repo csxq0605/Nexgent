@@ -13,6 +13,8 @@ export type GateOutcome =
   | { readonly status: 'waiting'; readonly detail: string }
   | { readonly status: 'skipped'; readonly detail: string }
   | { readonly status: 'decided'; readonly trialId: string; readonly decision: CapabilityDecision }
+  /** ADR 0013: rejected before any replay (`instance-literal`), no trial. */
+  | { readonly status: 'refused'; readonly decision: CapabilityDecision }
 
 /** Runs the gate for one candidate (provided by the host entry). */
 export type TrialStarter = (input: {

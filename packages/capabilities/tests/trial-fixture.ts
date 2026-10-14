@@ -146,10 +146,10 @@ const MODULE = JSON.stringify({
   functions: [{ name: 'summarize', description: 'Summarize orders.', inputSchema: { type: 'object' }, effects: ['read'] }],
 })
 
-/** Propose a candidate from `taskId` with one function module (or a plugin). */
-export async function proposeCandidate(layout: WorkspaceLayout, origin: { taskId: string; sessionId: string }, kind: 'function-module' | 'plugin' = 'function-module', jobId?: string): Promise<CandidateRecord> {
+/** Propose a candidate from `taskId` with one function module (or a plugin); `moduleSource` is the module's `index.mjs`. */
+export async function proposeCandidate(layout: WorkspaceLayout, origin: { taskId: string; sessionId: string }, kind: 'function-module' | 'plugin' = 'function-module', jobId?: string, moduleSource = 'export function summarize() { return 1 }\n'): Promise<CandidateRecord> {
   const files = kind === 'function-module'
-    ? new Map<string, Uint8Array>([['functions.json', Buffer.from(MODULE)], ['index.mjs', Buffer.from('export function summarize() { return 1 }\n')]])
+    ? new Map<string, Uint8Array>([['functions.json', Buffer.from(MODULE)], ['index.mjs', Buffer.from(moduleSource)]])
     : new Map<string, Uint8Array>([
       ['plugin.json', Buffer.from(JSON.stringify({ formatVersion: 1, name: 'order-plugin', description: 'p', permissions: 'none', tools: [] }))],
       ['index.mjs', Buffer.from('export default { apply() {} }\n')],
