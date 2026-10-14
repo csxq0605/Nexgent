@@ -37,6 +37,8 @@ test('parseArgs: a backend and --out are required; numbers must be positive; dev
   assert.ok(parseArgs(['--scripted', '--real', '--out', 'x']).problems.includes('--scripted and --real exclude each other'))
   assert.ok(parseArgs(['--scripted', '--out', 'x', '--repeats', '0']).problems.includes('--repeats must be a positive number'))
   assert.ok(parseArgs(['--scripted', '--out', 'x', '--families', 'tables,nope']).problems.includes('unknown family nope'))
+  assert.ok(parseArgs(['--scripted', '--out', 'x', '--difficulty', 'extreme']).problems.includes('--difficulty must be standard or hard'))
+  assert.equal(parseArgs(['--scripted', '--out', 'x', '--difficulty', 'hard']).options.difficulty, 'hard')
   const { options, problems } = parseArgs(['--real', '--out', 'x', '--dev-trial'])
   assert.deepEqual(problems, [])
   assert.deepEqual(options.devTrial, { caseId: 'code/dev/bugfix-101', repeats: 3 })

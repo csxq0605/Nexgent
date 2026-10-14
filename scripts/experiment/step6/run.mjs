@@ -39,7 +39,7 @@ import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { gate, readSpend, recordSpend, spentUsd, STEP6_CAP_USD } from './budget.mjs'
-import { allCases, checkGatePicks, checkIsolation, familyCases, FAMILIES, judgeCase, PLAN, PRESENT_REQUEST, writeCaseFiles } from './cases.mjs'
+import { allCases, checkGatePicks, checkIsolation, currentDifficulty, familyCases, FAMILIES, judgeCase, PLAN, PRESENT_REQUEST, useDifficulty, writeCaseFiles } from './cases.mjs'
 import { counts, feedbackFor } from './feedback.mjs'
 import { buildReport } from './report.mjs'
 
@@ -118,7 +118,10 @@ export function pickedCases(trialsText, sessionToCase) {
 }
 
 /** The plan's version: a digest of the case plan. */
-export const planVersion = () => createHash('sha256').update(JSON.stringify(PLAN)).digest('hex').slice(0, 16)
+export const planVersion = () => {
+  const digest = createHash('sha256').update(JSON.stringify(PLAN)).digest('hex').slice(0, 16)
+  return currentDifficulty() === 'standard' ? digest : `${digest}-${currentDifficulty()}`
+}
 
 // ---------------------------------------------------------------------------
 // Files
@@ -572,11 +575,12 @@ export function rawRecords(families, meta) {
 /**
  * Run the experiment (or the dev trial).
  * @param {{ backend: 'scripted' | 'real', out: string, families?: string[], repeats?: number, iterations?: number,
- *   spend?: string, cap?: number, keepRuns?: boolean, untilMeta?: boolean, id?: string, devTrial?: { caseId: string, repeats: number }, log?: (line: string) => void }} options
+ *   spend?: string, cap?: number, keepRuns?: boolean, untilMeta?: boolean, difficulty?: import('./cases.mjs').Difficulty, id?: string, devTrial?: { caseId: string, repeats: number }, log?: (line: string) => void }} options
  * @returns {Promise<{ code: number, reason?: string, report?: string }>}
  */
 export async function runExperiment(options) {
   const log = options.log ?? (line => process.stderr.write(`${line}\n`))
+  useDifficulty(options.difficulty ?? 'standard')
   if (options.backend === 'real' && !realKeyPresent()) return { code: 2, reason: 'no model key in the environment (NEXGENT_API_KEY or ANTHROPIC_API_KEY); nothing was run' }
   const loaded = await loadPackages()
   if (!loaded.ok) return { code: 2, reason: loaded.reason }
@@ -610,7 +614,7 @@ export async function runExperiment(options) {
     await writeFile(join(out, 'observations.json'), `${JSON.stringify(families, null, 1)}\n`)
     await writeFile(join(out, 'manifest.json'), `${JSON.stringify({
       experimentId, backend: backend.name, model: backend.model, startedAt, finishedAt: new Date().toISOString(), platform: process.platform, node: process.version,
-      planVersion: planVersion(), plan: PLAN, repeats: ctx.repeats, iterations, capUsd: cap, spendFile: spend, spentUsd: spentUsd(await readSpend(spend, cap)),
+      planVersion: planVersion(), difficulty: currentDifficulty(), plan: PLAN, repeats: ctx.repeats, iterations, capUsd: cap, spendFile: spend, spentUsd: spentUsd(await readSpend(spend, cap)),
       families: families.map(f => ({ family: f.family, stopped: f.stopped, error: f.error?.message?.split('\n')[0], arms: f.arms, meta: f.meta === null ? null : {
         jobId: f.meta.jobId, status: f.meta.status, origin: f.meta.comparison?.origin, verdict: f.meta.comparison?.verdict,
         arms: Object.fromEntries(['parent', 'child'].map(arm => [arm, f.meta.comparison?.[arm] === undefined ? undefined : { status: f.meta.comparison[arm].status, verdict: f.meta.comparison[arm].verdict }])),
@@ -696,11 +700,13 @@ export function parseArgs(argv) {
     return n
   }
   const repeats = number('--repeats')
+  const difficulty = value('--difficulty') ?? 'standard'
+  if (difficulty !== 'standard' && difficulty !== 'hard') problems.push('--difficulty must be standard or hard')
   const options = {
     backend: /** @type {'scripted' | 'real'} */ (backend),
     out: /** @type {string} */ (out),
     families, repeats, iterations: number('--iterations'), cap: number('--cap'),
-    spend: value('--spend'), keepRuns: flag('--keep-runs'), untilMeta: flag('--until-meta'), id: value('--id'),
+    spend: value('--spend'), keepRuns: flag('--keep-runs'), untilMeta: flag('--until-meta'), difficulty: /** @type {import('./cases.mjs').Difficulty} */ (difficulty), id: value('--id'),
     devTrial: flag('--dev-trial') ? { caseId: value('--case') ?? 'code/dev/bugfix-101', repeats: repeats ?? 3 } : undefined,
   }
   return { options, problems }
@@ -709,7 +715,7 @@ export function parseArgs(argv) {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const { options, problems } = parseArgs(process.argv.slice(2))
   if (problems.length > 0) {
-    process.stderr.write(`${problems.join('\n')}\nusage: run.mjs (--scripted | --real) --out <dir> [--dev-trial [--case <id>]] [--families tables,code] [--repeats N] [--iterations N] [--spend <file>] [--cap <usd>] [--keep-runs] [--until-meta] [--id <id>]\n`)
+    process.stderr.write(`${problems.join('\n')}\nusage: run.mjs (--scripted | --real) --out <dir> [--dev-trial [--case <id>]] [--families tables,code] [--repeats N] [--iterations N] [--spend <file>] [--cap <usd>] [--keep-runs] [--until-meta] [--difficulty standard|hard] [--id <id>]\n`)
     process.exitCode = 2
   } else {
     runExperiment(options).then(result => {
