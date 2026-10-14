@@ -54,14 +54,14 @@ export const LAYERS = /** @type {const} */ ({
 /** Default layers when `--layer` is not given. */
 export const DEFAULT_LAYERS = ['headless', 'desktop', 'experiment']
 
-/** Real-model run facts (partition §真实模型实验; user decision 8, 2026-10-13: 35 USD for step 6). */
+/** Real-model run facts (partition §真实模型实验; user decision 8, 2026-10-13: 35 USD for step 6; raised to 40 USD by the user on 2026-10-14). */
 export const REAL_MODEL = {
   model: 'claude-sonnet-5-5',
   thinking: 'on',
-  budgetUsd: 35,
+  budgetUsd: 40,
   keyEnv: ['NEXGENT_API_KEY', 'ANTHROPIC_API_KEY'],
   task: 'scripts/experiment/step6/pilot (ADR 0011): two pilot families (documents, file organizing); dev / selection / guard / holdout; improver v0, no meta job; arms base / memory / parent, each with its own NEXGENT_HOME, holdout cases × 3 repeats',
-  /** ADR 0011: the pilot's own gate, counted toward the step's 35 USD. */
+  /** ADR 0011: the pilot's own gate, counted toward the step's 40 USD. */
   pilotGateUsd: 12,
 }
 

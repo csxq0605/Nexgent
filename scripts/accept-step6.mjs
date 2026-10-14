@@ -14,7 +14,7 @@
  *                        isolation, the pilot's holdout arms (base / memory / parent),
  *                        report reproducibility (the experiment's and the pilot's); no
  *                        model call
- *   real        R01–R08  real Claude model, thinking on, cap 35 USD (user decision 8);
+ *   real        R01–R08  real Claude model, thinking on, cap 40 USD (user decision 8, raised from 35 on 2026-10-14);
  *                        R07 and R08 (Windows) never decide the exit
  *
  * Wired: the regressions (H18, D01–D23), the improver-version items H01–H03
@@ -27,7 +27,7 @@
  *
  * Usage:
  *   node scripts/accept-step6.mjs [--layer headless,desktop,experiment|real|all] [--out <summary.json>]
- *     [--work-dir <empty dir>] [--budget-usd 35] [--spent <earlier-runs.json>]
+ *     [--work-dir <empty dir>] [--budget-usd 40] [--spent <earlier-runs.json>]
  *
  * Writes a summary JSON (test-support schema, fields of docs/validation/TEMPLATE.md);
  * every checklist item appears with its id and status passed / failed / not-implemented.
