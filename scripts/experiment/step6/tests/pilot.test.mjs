@@ -5,9 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deflateRawSync } from 'node:zlib'
 import { checkIsolation } from '../cases.mjs'
-import { checkPilotPlan, judgePilotCase, pilotCases, tasteMet } from '../pilot/cases.mjs'
+import { checkPilotPlan, judgePilotCase, pilotCases, pilotReferencePairs, tasteMet } from '../pilot/cases.mjs'
 import { amountForms, applyAnswer, citesAll, dateForms, hasAny, normalize, parseCsv, withReview, writeFiles } from '../pilot/common.mjs'
-import { referencePairs } from '../pilot/docs.mjs'
 import { pilotFeedback } from '../pilot/feedback.mjs'
 import { MEMORY_POLICY, memoryInstructions } from '../pilot/memory.mjs'
 import { crc32, readDocx, readXlsx, unzip, writeDocx, writeXlsx } from '../pilot/office.mjs'
@@ -66,7 +65,7 @@ test('an untouched project fails every checked point; the taste detector reads t
     assert.equal(judged.pass, false)
     assert.ok(judged.points.every(p => p.pass === false))
     assert.equal(await tasteMet(task, dir), false)
-    await applyAnswer(dir, { write: { 'output/a.csv': '﻿订单号,客户,金额,日期\n' }, remove: [] })
+    await applyAnswer(dir, { write: { 'f-103/output/a.csv': '﻿订单号,客户,金额,日期\n' }, remove: [] })
     assert.equal(await tasteMet(task, dir), true)
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -161,7 +160,7 @@ test('external reviewer: request carries review points and materials; replies pa
 })
 
 test('reliability: six reference pairs from non-holdout tasks; thresholds 5/6 and 80%', () => {
-  const pairs = referencePairs(cases)
+  const pairs = pilotReferencePairs()
   assert.equal(pairs.length, 6)
   assert.ok(pairs.every(p => !p.caseId.includes('/holdout/') && p.good !== p.bad))
   const right = { ab: /** @type {const} */ ('A'), ba: /** @type {const} */ ('B') }

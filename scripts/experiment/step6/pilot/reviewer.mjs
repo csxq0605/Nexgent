@@ -22,9 +22,9 @@
  * @typedef {'A' | 'B' | 'tie'} Preference
  */
 
-export const EXTERNAL_REVIEWER = Object.freeze({ model: 'claude-opus-5-5', thinking: /** @type {const} */ ('on'), maxTokens: 8000 })
+export const EXTERNAL_REVIEWER = Object.freeze({ model: 'claude-opus-5-5', thinking: /** @type {const} */ ('on'), maxTokens: 16000 })
 /** The in-loop reviewer for the agreement report: the gate's reviewer settings. */
-export const IN_LOOP_REVIEWER = Object.freeze({ model: 'claude-sonnet-5-5', thinking: /** @type {const} */ ('on'), maxTokens: 8000 })
+export const IN_LOOP_REVIEWER = Object.freeze({ model: 'claude-sonnet-5-5', thinking: /** @type {const} */ ('on'), maxTokens: 16000 })
 
 export const POINT_SYSTEM = [
   '你是一名独立评审，负责检查一份工作成果是否满足评分要点。',
@@ -41,11 +41,11 @@ export const PAIR_SYSTEM = [
   '只输出一个 JSON 对象，不要输出其他文字：{"preference":"A|B|tie","reason":"一句话"}',
 ].join('\n')
 
-/** Materials of a case as text blocks (file name, then content). @param {PilotCase} task */
+/** Materials of a case as text blocks (file name, then content); materials sit under a `materials/` folder, in the case folder or not. @param {PilotCase} task */
 function materialsText(task) {
   return Object.entries(task.files)
-    .filter(([path]) => path.startsWith('materials/'))
-    .map(([path, content]) => `【${path.slice('materials/'.length)}】\n${typeof content === 'string' ? content : '(二进制文件)'}`)
+    .filter(([path]) => /(^|\/)materials\//.test(path))
+    .map(([path, content]) => `【${path.slice(path.indexOf('materials/') + 'materials/'.length)}】\n${typeof content === 'string' ? content : '(二进制文件)'}`)
     .join('\n\n')
 }
 

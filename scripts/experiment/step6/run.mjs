@@ -141,7 +141,7 @@ async function textUnder(dir) {
 }
 
 /** Ledger records of a project. @param {string} root */
-async function ledgerOf(root) {
+export async function ledgerOf(root) {
   const dir = join(root, '.nexgent', 'ledgers')
   const out = []
   for (const month of (await readdir(dir).catch(() => [])).sort()) {
@@ -152,7 +152,7 @@ async function ledgerOf(root) {
 }
 
 /** Copy a project. @param {string} from @param {string} to @param {{ jobs: boolean }} options */
-async function copyProject(from, to, options) {
+export async function copyProject(from, to, options) {
   await rm(to, { recursive: true, force: true })
   await cp(from, to, { recursive: true, filter: source => copied(relative(from, source), options) })
 }
@@ -234,7 +234,7 @@ function realBackend(pkgs, home) {
 }
 
 /** Every approval prompt is allowed in the user's place (the experiment has no user at the screen). @param {any} request */
-async function allowAll(request) {
+export async function allowAll(request) {
   return { id: request.id, decision: 'allow', scope: 'once', decidedBy: 'user' }
 }
 
