@@ -17,6 +17,8 @@ import {
   REAL_MODEL,
   realModelKeySource,
   regressionVerdict,
+  REWORK_EXPECTATIONS,
+  REWORK_ITEMS,
   STEP5_HEADLESS,
   type CheckResult,
 } from '../../../scripts/accept-common/step6-checks.mjs'
@@ -32,7 +34,7 @@ const plan = fileURLToPath(new URL('../../../docs/plan/step-6-work-partition.md'
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
-/** Wired: every headless, desktop and experiment item; the real layer is not. */
+/** Wired: every headless, desktop and experiment item but the rework skeleton H19–H24; the real layer is not. */
 const WIRED = new Set([...range('H', 1, 18), ...range('D', 1, 27), ...range('E', 1, 4)])
 const experimentDir = fileURLToPath(new URL('../../../scripts/experiment/step6', import.meta.url))
 
@@ -40,11 +42,13 @@ describe('accept-step6 checklist', () => {
   it('has every item of the step-6 plan in order, plus the D01–D23 regression', async () => {
     const ids = CHECKS.map(check => check.id)
     expect(new Set(ids).size).toBe(ids.length)
-    expect(ids).toEqual([...range('H', 1, 18), ...range('D', 1, 27), ...range('E', 1, 4), ...range('R', 1, 8)])
+    expect(ids).toEqual([...range('H', 1, 24), ...range('D', 1, 27), ...range('E', 1, 4), ...range('R', 1, 8)])
     for (const check of CHECKS) expect(LAYERS[check.layer].prefix).toBe(check.id[0])
     // The plan's tables are the source of truth; D01–D23 come from steps 2–5 and are not in them.
     const planIds = [...(await readFile(plan, 'utf8')).matchAll(/^\| ([HDER]\d\d) \|/gm)].map(match => match[1])
-    expect(planIds).toEqual(ids.filter(id => !range('D', 1, 23).includes(id)))
+    // H19–H24 come from the rework partition (R7 part 1), which names them by rule, not by id.
+    expect(REWORK_ITEMS).toEqual(range('H', 19, 24))
+    expect(planIds).toEqual(ids.filter(id => !range('D', 1, 23).includes(id) && !REWORK_ITEMS.includes(id)))
     expect([...OPTIONAL_CHECKS]).toEqual(['R07', 'R08'])
     // The regressions run step 5's own items, not copies that could drift.
     const step5Desktop = STEP5_CHECKS.filter(c => c.layer === 'desktop')
@@ -70,6 +74,32 @@ describe('accept-step6 checklist', () => {
     }
     const crashed = await evaluateItem(CHECKS.find(c => c.id === 'H18')!, { regressionError: 'boom' })
     expect(crashed).toMatchObject({ status: 'failed', evidence: expect.stringContaining('boom') })
+  })
+
+  it('rework skeleton (ADR 0011–0013): H19–H24 not wired; every expectation names an existing item once, with a reason', async () => {
+    const rework = await readFile(fileURLToPath(new URL('../../../docs/plan/step-6-rework-partition.md', import.meta.url)), 'utf8')
+    expect(rework).toContain('R7 测试与 CI')
+    for (const id of REWORK_ITEMS) {
+      const check = CHECKS.find(c => c.id === id)
+      expect(check?.layer, id).toBe('headless')
+      expect(check?.run, id).toBeUndefined()
+      expect(check?.title, id).toMatch(/ADR 001[23]/)
+      expect(await evaluateItem(check!, {}), id).toMatchObject({ status: 'not-implemented' })
+    }
+    const step5Ids = new Set(STEP5_CHECKS.map(c => c.id))
+    const step6Ids = new Set(CHECKS.map(c => c.id))
+    const keys = REWORK_EXPECTATIONS.map(e => `${e.step}:${e.id}`)
+    expect(new Set(keys).size).toBe(keys.length)
+    for (const e of REWORK_EXPECTATIONS) {
+      expect((e.step === 5 ? step5Ids : step6Ids).has(e.id), `${e.step}:${e.id}`).toBe(true)
+      expect(['change', 'verify', 'stale']).toContain(e.kind)
+      expect(['0011', '0012', '0013']).toContain(e.adr)
+      expect(e.why.length, `${e.step}:${e.id}`).toBeGreaterThan(10)
+      expect(REWORK_ITEMS.includes(e.id) && e.step === 6, `${e.id} is new, not a changed item`).toBe(false)
+    }
+    // The items whose own wording the ADRs reverse are listed for the user, not removed.
+    expect(REWORK_EXPECTATIONS.filter(e => e.kind === 'stale').map(e => `${e.step}:${e.id}`)).toEqual(['6:H15', '6:E03', '6:R03', '6:R04', '6:R05', '6:R06', '6:R07'])
+    for (const e of REWORK_EXPECTATIONS.filter(x => x.kind === 'stale' && x.step === 6)) expect(CHECKS.some(c => c.id === e.id)).toBe(true)
   })
 
   it('real-model facts follow the user decisions: sonnet 5.5, thinking on, 35 USD for step 6', () => {

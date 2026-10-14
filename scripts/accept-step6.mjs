@@ -4,9 +4,10 @@
  * 检查项清单): recursive improvement and a reproducible benefit report.
  *
  * Layers:
- *   headless    H01–H18  scripted provider through `@nexgent/sdk`: improver versions,
+ *   headless    H01–H24  scripted provider through `@nexgent/sdk`: improver versions,
  *                        meta-improvement jobs, the parent / child comparison, epochs;
- *                        H18 re-runs accept-step5's H01–H19 over fresh scenario runs
+ *                        H18 re-runs accept-step5's H01–H19 over fresh scenario runs;
+ *                        H19–H24 the step-6 rework rules (ADR 0012, 0013), not wired yet
  *   desktop     D01–D27  D01–D23 are steps 2–5's desktop items (regression); D24–D27
  *                        the improver on the 改进 page and in settings
  *   experiment  E01–E04  scripts/experiment/step6 (「收益测量」): task families, set
@@ -18,8 +19,9 @@
  * (step6-headless.mjs), the meta-improvement items H04–H17 (step6-meta.mjs),
  * D24–D27 (step6-desktop.mjs), E01 / E04 (step6-experiment.mjs) and E02 / E03
  * (a scripted rehearsal of the experiment runner, step6-rehearsal.mjs). The real
- * layer R01–R08 reports not-implemented and the script exits 2 for it — never a
- * fake pass; it checks its prerequisites (key, budget) and calls no model.
+ * layer R01–R08 and the rework skeleton H19–H24 report not-implemented and the
+ * script exits 2 for them — never a fake pass; the real layer checks its
+ * prerequisites (key, budget) and calls no model.
  *
  * Usage:
  *   node scripts/accept-step6.mjs [--layer headless,desktop,experiment|real|all] [--out <summary.json>]
@@ -221,7 +223,7 @@ async function main() {
     ...STEP,
     provider: realOnly ? 'real' : 'scripted',
     command: `node scripts/accept-step6.mjs --layer ${layers.join(',')}`,
-    simulated: 'scripted Claude Messages API model server (step 2–5 scenarios for the regressions, the step-6 improver-version, meta-improvement and desktop improver scenarios); scripted raw experiment record for E04; scripted rehearsal of scripts/experiment/step6 for E02 / E03; checklist H01–H18 / D01–D27 / E01–E04',
+    simulated: 'scripted Claude Messages API model server (step 2–5 scenarios for the regressions, the step-6 improver-version, meta-improvement and desktop improver scenarios); scripted raw experiment record for E04; scripted rehearsal of scripts/experiment/step6 for E02 / E03; checklist H01–H24 / D01–D27 / E01–E04',
   })
 
   const spent = await readSpent(values.spent)
