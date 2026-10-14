@@ -107,7 +107,7 @@ function good(): Obs {
     extra: {
       epochBefore: EPOCH, epochAfter: EPOCH2, epochAfterOther: EPOCH2, costRatioCap: { before: 1.2, after: 2 }, configBefore: '{}', configAfter: '{}',
       invalid: { status: 'failed', files: {} }, bounds: { status: 'failed', files: {} }, proposeRequests: 3, versionsBefore: ['v0.json'], versionsAfter: ['v0.json'],
-      rules: { id: 'adr-0015', constant: 'adr-0015', epoch: EPOCH, epochAdr0008: h('5'), projectEpoch: EPOCH, sameEpoch: EPOCH, mixed: 'improvement/epoch-mismatch' },
+      rules: { id: 'adr-0016', constant: 'adr-0016', epoch: EPOCH, epochAdr0008: h('5'), projectEpoch: EPOCH, sameEpoch: EPOCH, mixed: 'improvement/epoch-mismatch' },
     },
   })
   const rework = {
@@ -250,11 +250,11 @@ const COUNTERS: Record<keyof typeof META_JUDGES, readonly Case[]> = {
     ['decideImprover accepts arms from two epochs', o => { o.crossEpochProduct = { reason: 'no-improvement' } }, 'decideImprover on arms from two epochs: no-improvement'],
     ['there is no epoch before', o => { o.reject.extra.epochBefore = 'x' }, 'no epoch before'],
     ['the rules id is still adr-0008', o => { o.reject.extra.rules.id = 'adr-0008' }, 'the evaluator rules id is adr-0008'],
-    ['the rules id is the superseded adr-0013', o => { o.reject.extra.rules.id = 'adr-0013'; o.reject.extra.rules.constant = 'adr-0013' }, 'the evaluator rules id is adr-0013 (want adr-0015)'],
+    ['the rules id is the superseded adr-0013', o => { o.reject.extra.rules.id = 'adr-0013'; o.reject.extra.rules.constant = 'adr-0013' }, 'the evaluator rules id is adr-0013 (want adr-0016)'],
     ['the epoch did not move with the rules id', o => { o.reject.extra.rules.epochAdr0008 = EPOCH }, 'equals the one the same settings had under adr-0008'],
     ['the project\'s epoch is another one', o => { o.reject.extra.rules.projectEpoch = EPOCH2 }, 'the project\'s epoch is not the one computed'],
     ['trials of one epoch cannot be compared', o => { o.reject.extra.rules.sameEpoch = 'improvement/epoch-mismatch' }, 'two trials of one epoch could not be compared'],
-    ['trials of two rule ids are compared', o => { o.reject.extra.rules.mixed = EPOCH }, 'trials of the adr-0015 and adr-0008 epochs'],
+    ['trials of two rule ids are compared', o => { o.reject.extra.rules.mixed = EPOCH }, 'trials of the adr-0016 and adr-0008 epochs'],
   ],
   H14: [
     ['the stopped meta job is not budget-exhausted', o => { o.trigger.budget.stopped.status = 'failed' }, 'a meta job over the meta budget ended failed'],

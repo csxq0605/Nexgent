@@ -289,15 +289,15 @@ export function judgeEpoch(obs) {
   const evaluator = obs?.evaluatorKeysInImprovers ?? []
   if (evaluator.length > 0) problems.push(`a stored improver names evaluator fields: ${evaluator.join(', ')}`)
   if (e.bounds?.status !== 'failed') problems.push('a meta proposal naming an evaluator field was not refused')
-  // ADR 0013, superseded by ADR 0014 decision 3 and ADR 0015: the rules id (adr-0015), and with it the epoch.
+  // ADR 0013, superseded by ADR 0014 decision 3, ADR 0015 and ADR 0016: the rules id (adr-0016), and with it the epoch.
   const rules = e.rules
-  if (rules?.id !== 'adr-0015' || rules?.constant !== 'adr-0015') problems.push(`the evaluator rules id is ${rules?.id ?? 'unknown'} (want adr-0015)`)
-  if (!VERSION.test(rules?.epoch ?? '') || rules?.epoch === rules?.epochAdr0008) problems.push('the epoch under adr-0015 equals the one the same settings had under adr-0008')
-  if (rules?.epoch !== rules?.projectEpoch) problems.push('the project\'s epoch is not the one computed from its settings under adr-0015')
+  if (rules?.id !== 'adr-0016' || rules?.constant !== 'adr-0016') problems.push(`the evaluator rules id is ${rules?.id ?? 'unknown'} (want adr-0016)`)
+  if (!VERSION.test(rules?.epoch ?? '') || rules?.epoch === rules?.epochAdr0008) problems.push('the epoch under adr-0016 equals the one the same settings had under adr-0008')
+  if (rules?.epoch !== rules?.projectEpoch) problems.push('the project\'s epoch is not the one computed from its settings under adr-0016')
   if (rules?.sameEpoch !== rules?.epoch) problems.push('two trials of one epoch could not be compared')
-  if (rules?.mixed !== 'improvement/epoch-mismatch') problems.push(`trials of the adr-0015 and adr-0008 epochs: ${rules?.mixed}`)
+  if (rules?.mixed !== 'improvement/epoch-mismatch') problems.push(`trials of the adr-0016 and adr-0008 epochs: ${rules?.mixed}`)
   if (problems.length > 0) return fail(problems)
-  return pass(`rules id adr-0015: the epoch ${short(rules.epoch)} differs from the adr-0008 one ${short(rules.epochAdr0008)} for the same settings, and trials of the two are refused together (improvement/epoch-mismatch); epoch ${short(e.epochBefore)} → ${short(e.epochAfter)} when costRatioCap was edited in config.json (settings.update does not take evaluator fields: ${e.costRatioCap.settingsPatch ?? 'accepted'}), unchanged by feedbackThreshold; both arms and the origin carried the project's epoch; the same records with the child in the new epoch → epoch-mismatch (decideImprover and the rule); a meta proposal on costApprovalRatio refused, config.json unchanged by meta jobs, no stored improver names an evaluator field`)
+  return pass(`rules id adr-0016: the epoch ${short(rules.epoch)} differs from the adr-0008 one ${short(rules.epochAdr0008)} for the same settings, and trials of the two are refused together (improvement/epoch-mismatch); epoch ${short(e.epochBefore)} → ${short(e.epochAfter)} when costRatioCap was edited in config.json (settings.update does not take evaluator fields: ${e.costRatioCap.settingsPatch ?? 'accepted'}), unchanged by feedbackThreshold; both arms and the origin carried the project's epoch; the same records with the child in the new epoch → epoch-mismatch (decideImprover and the rule); a meta proposal on costApprovalRatio refused, config.json unchanged by meta jobs, no stored improver names an evaluator field`)
 }
 
 /** H14: meta budget stops a meta job (budget-exhausted) and refuses the next; meta costs separate. */

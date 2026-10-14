@@ -267,8 +267,8 @@ export const JUDGES = {
       [['candidate', 'baseline', 'review'].every(arm => typeof cost[arm]?.requestCount === 'number' && cost[arm].usage !== undefined), `and the cost of each arm and of the reviewer, separately (got ${Object.keys(cost).join(', ') || 'none'})`],
       [decision?.verdict?.decidedByReview === false && cost.review?.requestCount === 0 && !receipts.some(x => x.type === 'trial.review'), 'with a clear check result the reviewer was not asked, and the decision says so'],
       [reviews.length > 0 && reviews.every(x => ['candidate', 'baseline', 'tie'].includes(x.preference) && typeof x.reason === 'string' && x.reason !== '' && typeof x.model === 'string'), `on the tied trial the reviewer's opinions are their own receipt lines with preference, reason and model (got ${reviews.length})`],
-      [tieDecision?.verdict?.decidedByReview === true && tieDecision.cost?.review?.requestCount === reviews.length, `the tied decision is marked decided by review, with the reviewer's cost apart (got ${JSON.stringify(tieDecision?.verdict)})`],
-      [reviewerRequests.length === reviews.length, `the reviewer's ledger requests carry the trial id and no arm (${reviewerRequests.length} for ${reviews.length} opinions)`],
+      [tieDecision?.verdict?.decidedByReview === true && tieDecision.cost?.review?.requestCount === 2 * reviews.length, `the tied decision is marked decided by review, with the reviewer's cost apart (two requests per opinion, one per order: ADR 0016) (got ${JSON.stringify(tieDecision?.verdict)})`],
+      [reviewerRequests.length === 2 * reviews.length, `the reviewer's ledger requests carry the trial id and no arm (${reviewerRequests.length} for ${reviews.length} opinions, each asked in both orders)`],
     ], `the good candidate ran ${runs.length} paired runs (r = ${r}); adopted by the gate with both arms' checks and costs; the reviewer, asked only on a tie, is recorded apart`)
   }),
 

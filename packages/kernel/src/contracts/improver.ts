@@ -591,9 +591,11 @@ export function isNextImproverRevision(state: ImproverActivationState, next: Imp
  * replaced `adr-0008`; ADR 0014 (recorded deliverable paths follow the run's
  * own deliverables, similar cases by content words) replaced `adr-0013`;
  * ADR 0015 (feedback checks do not expect one-time extras, reviews see the
- * feedback and every changed or removed path) replaced `adr-0014`.
+ * feedback and every changed or removed path) replaced `adr-0014`; ADR 0016
+ * (each review pair asked in both orders, reviews see the task's input files)
+ * replaced `adr-0015`.
  */
-export const EVALUATOR_RULES = 'adr-0015'
+export const EVALUATOR_RULES = 'adr-0016'
 
 /**
  * What decides "better" (ADR 0008 decision 5): the rules id and the

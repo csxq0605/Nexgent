@@ -20,6 +20,8 @@
  *    compares the two arms' outputs per selection run (kept apart from the
  *    checks in the receipts). ADR 0015: it sees every changed and removed
  *    path (`runOutput`), and on a job's feedback task the feedback too.
+ *    ADR 0016: every pair is asked in both orders (a vote counts only when
+ *    both agree), and the reviewer sees the task's input files.
  * 5. `decideTrial` gives the verdict; the gate writes `trial.end`, then the
  *    decision: an adoption revision (`trigger: gate`), an awaiting-approval
  *    decision for a plugin (or, ADR 0007, a quality rise costing more than
@@ -39,7 +41,7 @@
  * the verdict's cost ratio is in those dollars (cache included) when both
  * arms have them, in tokens otherwise.
  *
- * ADR 0013 and 0014 (epoch `adr-0014`; ADR 0015: `adr-0015`), an improvement job's candidate only: before
+ * ADR 0013 and 0014 (epoch `adr-0014`; ADR 0015: `adr-0015`; ADR 0016: `adr-0016`), an improvement job's candidate only: before
  * anything is replayed, its components are checked for the concrete values
  * of the job's task (`findInstanceLiterals`); a hit rejects the candidate
  * (`instance-literal`) without a trial. The selection cases other than the
@@ -162,6 +164,14 @@ export interface ReviewInput {
   readonly feedback?: readonly FeedbackEntry[]
   readonly candidate: RunOutput
   readonly baseline: RunOutput
+  /**
+   * ADR 0016: the project's files as the task started (the case's snapshot;
+   * files the task's messages name first), so the reviewer can check the
+   * attempts against their input.
+   */
+  readonly inputs: RunOutput
+  /** ADR 0016: whether the candidate is shown as attempt A (the gate asks every pair in both orders). */
+  readonly candidateFirst: boolean
 }
 
 /** The reviewer's answer. */
@@ -195,6 +205,12 @@ export interface GateOptions {
   readonly tempRoot?: string
   /** Progress, one call per receipt line. */
   readonly onReceipt?: (receipt: TrialReceipt, progress: { readonly runsDone: number; readonly runsTotal: number }) => void
+  /**
+   * ADR 0016: the text of a file that is not UTF-8 (a spreadsheet, a
+   * document), for the reviewer; the host supplies its document readers.
+   * Absent or `undefined`: the file is shown as binary with its size.
+   */
+  readonly documentText?: (path: string, bytes: Uint8Array) => Promise<string | undefined> | string | undefined
   /** Called after the decision was written (the plugin appends the ledger's `capability.decision`). */
   readonly onDecision?: (decision: CapabilityDecision) => Promise<void> | void
   /** Diagnostics a receipt does not carry (why a run ended `unknown`); the product writes them to the gate's log. */
@@ -278,13 +294,49 @@ function bump(tally: ArmTally, status: TrialStatus): ArmTally {
   return status === 'pass' ? { ...tally, passed: tally.passed + 1 } : status === 'fail' ? { ...tally, failed: tally.failed + 1 } : { ...tally, unknown: tally.unknown + 1 }
 }
 
+type DocumentText = GateOptions['documentText']
+
+/** A file's text for the reviewer: UTF-8, else (ADR 0016) the host's document reader, else a binary marker; truncated. */
+async function fileText(path: string, bytes: Uint8Array, documentText: DocumentText): Promise<string> {
+  let text: string | undefined
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    text = await Promise.resolve(documentText?.(path, bytes)).catch(() => undefined)
+  }
+  text ??= `(binary, ${bytes.byteLength} bytes)`
+  return text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n…(truncated)` : text
+}
+
+/**
+ * ADR 0016: the project's files as a task started (its snapshot copy before
+ * the run), for the reviewer: the files a task message names (by path or
+ * file name) first, then the rest by path, at most {@link OUTPUT_FILES}.
+ */
+async function taskInputs(root: string, snapshot: ReadonlyMap<string, string>, messages: readonly ReplayMessage[], documentText: DocumentText): Promise<RunOutput> {
+  const said = messages.map(message => message.text).join('\n')
+  const named = (path: string) => said.includes(path) || said.includes(path.slice(path.lastIndexOf('/') + 1))
+  const paths = [...snapshot.keys()].filter(path => !path.startsWith('.nexgent/')).sort((left, right) => Number(named(right)) - Number(named(left)) || (left < right ? -1 : left > right ? 1 : 0))
+  const files: { path: string; text: string }[] = []
+  for (const path of paths.slice(0, OUTPUT_FILES)) {
+    const bytes = await readFile(join(root, ...path.split('/'))).catch(() => undefined)
+    if (bytes !== undefined) files.push({ path, text: await fileText(path, bytes, documentText) })
+  }
+  const rest = paths.slice(OUTPUT_FILES)
+  return {
+    files,
+    ...(rest.length === 0 ? {} : { unshown: rest.slice(0, OUTPUT_PATHS) }),
+    ...(rest.length > OUTPUT_PATHS ? { unlisted: rest.length - OUTPUT_PATHS } : {}),
+  }
+}
+
 /**
  * Files of the copy the run created or changed, for the reviewer (ADR 0015):
  * every changed path is found first; the first {@link OUTPUT_FILES} in path
  * order are shown with their (truncated) text, the rest by path, and the
  * snapshot files the run removed are listed too.
  */
-export async function runOutput(root: string, before: ReadonlyMap<string, string>): Promise<RunOutput> {
+export async function runOutput(root: string, before: ReadonlyMap<string, string>, documentText?: DocumentText): Promise<RunOutput> {
   const changed: string[] = []
   const present = new Set<string>()
   const visit = async (directory: string, prefix: string): Promise<void> => {
@@ -309,13 +361,7 @@ export async function runOutput(root: string, before: ReadonlyMap<string, string
   for (const path of changed.slice(0, OUTPUT_FILES)) {
     const bytes = await readFile(join(root, ...path.split('/'))).catch(() => undefined)
     if (bytes === undefined) continue
-    let text: string
-    try {
-      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-    } catch {
-      text = `(binary, ${bytes.byteLength} bytes)`
-    }
-    files.push({ path, text: text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n…(truncated)` : text })
+    files.push({ path, text: await fileText(path, bytes, documentText) })
   }
   const rest = changed.slice(OUTPUT_FILES)
   const gone = [...before.keys()].filter(path => !present.has(path) && !path.startsWith('.nexgent/')).sort()
@@ -373,6 +419,28 @@ function explain(verdict: TrialVerdict, tally: { selection: { candidate: ArmTall
     ...(extra === undefined ? [] : [extra]),
   ]
   return parts.join(' ')
+}
+
+/**
+ * ADR 0016: one pair's vote from its two orders (candidate as A, then as B).
+ * Both prefer the same attempt: that attempt. Either unknown: unknown (not
+ * counted). Anything else, a tie or a flip with the order: a tie. Costs add up.
+ */
+export function bothOrders(candidateFirst: ReviewResult, baselineFirst: ReviewResult): ReviewResult {
+  const preference = candidateFirst.preference === 'unknown' || baselineFirst.preference === 'unknown'
+    ? 'unknown'
+    : candidateFirst.preference === baselineFirst.preference ? candidateFirst.preference : 'tie'
+  const usd = (value: ReviewResult['estimatedUsd']) => value ?? 'unknown'
+  const estimatedUsd = usd(candidateFirst.estimatedUsd) === 'unknown' || usd(baselineFirst.estimatedUsd) === 'unknown'
+    ? 'unknown'
+    : (candidateFirst.estimatedUsd as number) + (baselineFirst.estimatedUsd as number)
+  return {
+    preference,
+    reason: `Candidate as A: ${candidateFirst.preference} (${candidateFirst.reason}) Candidate as B: ${baselineFirst.preference} (${baselineFirst.reason})`.slice(0, 2_000),
+    usage: addUsage(candidateFirst.usage, baselineFirst.usage),
+    requestCount: candidateFirst.requestCount + baselineFirst.requestCount,
+    estimatedUsd,
+  }
 }
 
 /** Why an awaiting-approval verdict waits (every reason that applies). */
@@ -496,6 +564,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
     const similarTally = { candidate: emptyTally(), baseline: emptyTally() }
     const similar = anchor.kind !== 'job' ? undefined : similarIds.size > 0 ? similarTally : 'none' as const
     const outputs = new Map<string, RunOutput>()
+    const inputs = new Map<string, RunOutput>()
     // The feedback the user gave on a replayed case (only a job's feedback task has any).
     const feedbackOfCase = (replay: ReplayCase): readonly FeedbackEntry[] => {
       const ids = replay.feedbackIds ?? []
@@ -523,6 +592,8 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
             budget: left,
             ...(options.tempRoot === undefined ? {} : { tempRoot: options.tempRoot }),
           })
+          // ADR 0016: the reviewer sees the task's input files (the snapshot, before any run changes it).
+          if (half === 'selection' && !inputs.has(replay.caseId)) inputs.set(replay.caseId, await taskInputs(project.root, project.files, replay.messages, options.documentText))
           const result = await options.runner.run({
             trialId,
             arm,
@@ -542,7 +613,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
           if (result.outcome === 'completed') {
             checks = await runCheckSpecs(project.root, replay.checks, { signal, delivered: await deliveredFiles(project.root) })
             status = checks.every(check => check.passed) ? 'pass' : 'fail'
-            if (half === 'selection' || replay.feedbackIds !== undefined) outputs.set(`${replay.caseId}#${repeat}#${arm}`, await runOutput(project.root, project.files))
+            if (half === 'selection' || replay.feedbackIds !== undefined) outputs.set(`${replay.caseId}#${repeat}#${arm}`, await runOutput(project.root, project.files, options.documentText))
           } else {
             reason = unknownReason(result.outcome)
             if (result.outcome === 'budget') budgetExhausted = true
@@ -641,17 +712,24 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
           const candidateOutput = outputs.get(`${replay.caseId}#${repeat}#candidate`)
           const baselineOutput = outputs.get(`${replay.caseId}#${repeat}#baseline`)
           if (candidateOutput === undefined || baselineOutput === undefined) continue
-          if (remaining(plan.budget, spent()) === undefined) {
-            budgetExhausted = true
-            break
+          // ADR 0016: every pair is asked in both orders; a vote counts only when both orders agree.
+          const asked: ReviewResult[] = []
+          for (const candidateFirst of [true, false]) {
+            if (remaining(plan.budget, spent()) === undefined) {
+              budgetExhausted = true
+              break
+            }
+            let answer: ReviewResult
+            try {
+              answer = await options.reviewer.review({ trialId, set: 'selection', caseId: replay.caseId, repeat, messages: replay.messages, ...(feedbackOfCase(replay).length === 0 ? {} : { feedback: feedbackOfCase(replay) }), candidate: candidateOutput, baseline: baselineOutput, inputs: inputs.get(replay.caseId) ?? { files: [] }, candidateFirst }, plan.reviewer, signal)
+            } catch (error) {
+              answer = { preference: 'unknown', reason: `the reviewer failed: ${(error as Error).message}`.slice(0, 2_000), usage: ZERO_USAGE, requestCount: 0 }
+            }
+            reviewCost.add(answer.usage, answer.requestCount, answer.estimatedUsd)
+            asked.push(answer)
           }
-          let result: ReviewResult
-          try {
-            result = await options.reviewer.review({ trialId, set: 'selection', caseId: replay.caseId, repeat, messages: replay.messages, ...(feedbackOfCase(replay).length === 0 ? {} : { feedback: feedbackOfCase(replay) }), candidate: candidateOutput, baseline: baselineOutput }, plan.reviewer, signal)
-          } catch (error) {
-            result = { preference: 'unknown', reason: `the reviewer failed: ${(error as Error).message}`.slice(0, 2_000), usage: ZERO_USAGE, requestCount: 0 }
-          }
-          reviewCost.add(result.usage, result.requestCount, result.estimatedUsd)
+          if (budgetExhausted) break
+          const result = bothOrders(asked[0]!, asked[1]!)
           if (result.preference !== 'unknown') review[result.preference] += 1
           emit(await receipts.append({
             type: 'trial.review',

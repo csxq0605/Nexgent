@@ -30,7 +30,7 @@
  * REWORK_EXPECTATIONS, the existing items whose expectations the new rules change.
  * Round 3 (R7 part 2): H19–H24 wired over step6-rework.mjs (`ctx.step6Rework`), judged
  * by step6-rework-judges.mjs; H01–H17 follow the user-level improver (ADR 0012) and
- * the adr-0014 rules (ADR 0014 superseded adr-0013 during this round); the seven `stale` items rewritten on the user's decision of
+ * the adr-0016 rules (ADR 0014, 0015 and 0016 superseded adr-0013 in turn during this round); the seven `stale` items rewritten on the user's decision of
  * 2026-10-14 08:12 (H15, E03, R03–R07); E02 / E03 over the pilot's scripted rehearsal
  * (base / memory / parent, an own NEXGENT_HOME per arm); E04 adds the pilot's report.
  */
@@ -178,7 +178,7 @@ export const CHECKS = [
   item('H20', 'headless', '提案时具体数值被拒（ADR 0013 第 2 条）：改进作业里 capability_propose 的组件含反馈原文或反馈原题成果里的具体数值时被拒，返回命中的值与来源，去掉后可再提；在两个以上任务里出现的项目常量、列名不算', reworkItem('H20')),
   item('H21', 'headless', '同类题变差被拒（ADR 0013 第 1 条）：改进作业的候选修好反馈原题，但同类题上确定性检查通过率低于基线时不采用，原因 similar-regression；同类题上有 unknown 时按 unknown 记', reworkItem('H21')),
   item('H22', 'headless', '没有同类题等批准（ADR 0013 第 1 条）：选择集里除反馈原题外没有用例时不自动采用，改为 await-approval，原因 no-similar-cases；用户任务自己提出的候选结论不变', reworkItem('H22')),
-  item('H23', 'headless', '门控前具体数值拒绝（ADR 0013 第 2、3 条）：候选含具体数值时门控不回放、直接拒绝，原因 instance-literal，账本里没有这次试验的回放请求；评价器规则 id 为 adr-0014（ADR 0014 第 3 条取代 adr-0013），纪元 id 随之改变', reworkItem('H23')),
+  item('H23', 'headless', '门控前具体数值拒绝（ADR 0013 第 2、3 条）：候选含具体数值时门控不回放、直接拒绝，原因 instance-literal，账本里没有这次试验的回放请求；评价器规则 id 为 adr-0016（ADR 0014、0015、0016 先后取代 adr-0013），纪元 id 随之改变', reworkItem('H23')),
   item('H24', 'headless', '元改进改动夹带项目数值被拒（ADR 0012 第 5 条）：元提案改动的文字含本批任一项目反馈原文或成果里的具体数值时被退回，写明命中的值，不存子改进器', reworkItem('H24')),
   ...desktopRegression,
   item('D24', 'desktop', '“改进”页每个作业显示所用的改进器版本；元改进作业有单独的标记', desktopItem('D24')),
@@ -191,7 +191,7 @@ export const CHECKS = [
   item('E04', 'experiment', '报告生成器对同一份原始记录两次生成的报告相同；报告里每个数字都能追到原始记录（ADR 0011：试点报告多出的列也是）', bothReports),
   item('R01', 'real', '两个任务族各建一个实验项目，跑完 selection 与 guard 的历史任务，留下快照与检查；任务提示不提能力工具'),
   item('R02', 'real', '每个任务族的 dev 任务收到模拟用户反馈后，改进作业自动开始，用改进器 v0，产出诊断、候选与门控结论（结论如实记录）'),
-  item('R03', 'real', '试点不跑元改进（ADR 0011 第 2 条）：每类任务的改进作业用改进器 v0、当前纪元（adr-0014），清单记录改进器版本与纪元，实验中没有元改进作业'),
+  item('R03', 'real', '试点不跑元改进（ADR 0011 第 2 条）：每类任务的改进作业用改进器 v0、当前纪元（adr-0016），清单记录改进器版本与纪元，实验中没有元改进作业'),
   item('R04', 'real', 'memory 臂（ADR 0011，试点没有 child 臂）：编排经能力存储写入并采用一条上下文策略 project-notes（该类全部计数反馈原文），不诊断、不过门控；清单记录它的能力版本与全文摘要'),
   item('R05', 'real', 'holdout（ADR 0011）：两类试点任务各三臂（base、memory、parent）跑完全部 holdout 用例 × 3 次，每臂独立 NEXGENT_HOME；判定结果、组件调用证据与费用都有记录，没有 unknown 混进成功'),
   item('R06', 'real', '试点报告（ADR 0011）：三个比较（parent − base、memory − base、parent − memory）的配对差值、两层自助法 95% 区间与正 / 零 / 负，评分可靠三判据；费用（含改进作业）；失败与缺测单列；试点累计费用不超过 12 美元闸门'),
@@ -232,7 +232,7 @@ export const REWORK_EXPECTATIONS = [
   { step: 6, id: 'H10', kind: 'verify', adr: '0013', why: 'decideImprover 不变；arm 记录里多出同类题字段时复算仍按原规则' },
   { step: 6, id: 'H11', kind: 'change', adr: '0012', why: '“生效版本”读用户级 improvers.list（不带 projectId）；新进程要用同一个 NEXGENT_HOME' },
   { step: 6, id: 'H12', kind: 'change', adr: '0012', why: '查改进器历史改为用户级 API；拒绝时用户级版本线不变' },
-  { step: 6, id: 'H13', kind: 'change', adr: '0013', why: '规则 id 从 adr-0008 改为 adr-0013（本轮中 ADR 0014 又改为 adr-0014），纪元 id 的值随之改变；“改评价器设置换纪元”的判定不变，另加“新旧纪元的试验不放进同一比较”' },
+  { step: 6, id: 'H13', kind: 'change', adr: '0013', why: '规则 id 从 adr-0008 改为 adr-0013（本轮中 ADR 0014、0015、0016 又先后改为 adr-0014、adr-0015、adr-0016），纪元 id 的值随之改变；“改评价器设置换纪元”的判定不变，另加“新旧纪元的试验不放进同一比较”' },
   { step: 6, id: 'H14', kind: 'change', adr: '0012', why: '元改进预算移到用户级配置，按用户计；场景改用户级配置降预算' },
   { step: 6, id: 'H15', kind: 'rewritten', decided: '2026-10-14 08:12 按推薦', adr: '0012', why: '条目写“元改进作业与普通作业共用作业位”，现判定要求元改进进行时普通作业被拒（improvement/busy）。ADR 0012 第 3 条改为“整个用户只有一个元改进作业，它与各项目的能力作业互不占位”。建议改成：同一用户第二个元改进作业被拒；元改进进行时普通作业照常开始；强杀后中断、不重跑不变' },
   { step: 6, id: 'H16', kind: 'verify', adr: '0012', why: '副本保留与上限不变；副本仍在起点项目旁的临时目录' },

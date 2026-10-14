@@ -82,7 +82,7 @@
 - 触发：根会话一轮结束后，插件先跑用量退化检查，再为该会话提出、未试过、未决定的候选启动门控进程（`capabilities.autoTrial` 开且行配置有 `trial.entry` 时；SDK 填的是 `@nexgent/sdk` 的 `trial-entry.js`）。进程分离运行，CLI 退出后继续；日志在 `trials/<candidateId>.log`。
 - 回放集：有快照树、检查记录（至少一条）与根会话用户消息的历史任务，一个根任务一个用例，回放它的全部用户消息。selection 先放提出候选的任务，再按与它首条消息的词重合度从高到低；guard 取最不相似的，两边不重叠。不够时返回 `waiting`，什么都不写。
 - 运行：每个用例每侧 `repeats` 次，候选在前；每次在快照的临时副本里（`autoTrial` 关、`perTask` 上限取剩余试验额度），由宿主的 `TrialRunner` 执行（产品里每次一个 `trial-entry.js replay` 子进程，审批一律 `headless` 拒绝），之后门控自己在副本上跑记录的检查。没跑完的记 `unknown`，不算失败。每次运行前查额度，用尽即停，结论 `budget-exhausted`。
-- 判定：`decideTrial`。只有检查打平且费用比不超上限时才问评审模型（`TrialReviewer`，SDK 里是 Claude Platform 上的 `capabilities.reviewer` 模型，A/B 位置按轮次交换），评审意见单独记 `trial.review`。通过写 `trigger: gate` 的采用修订；含插件的写 `awaiting-approval`；其余写 `rejected`。候选、回执、决定都保留。门控参数只读 `.nexgent/config.json`。
+- 判定：`decideTrial`。只有检查打平且费用比不超上限时才问评审模型（`TrialReviewer`，SDK 里是 Claude Platform 上的 `capabilities.reviewer` 模型；ADR 0016 起每对运行按候选在 A、候选在 B 各问一次，两次一致才计票，否则算平局，见下），评审意见单独记 `trial.review`。通过写 `trigger: gate` 的采用修订；含插件的写 `awaiting-approval`；其余写 `rejected`。候选、回执、决定都保留。门控参数只读 `.nexgent/config.json`。
 - 一次性与中断：候选首次试验前独占创建 `trials/<candidateId>.attempt`，之后不再试；运行中有 `trials/<trialId>.lock`（进程号）。启动时 `recoverInterruptedTrials` 把没有 `trial.end`、锁对应进程已不在的试验记为 `rejected / interrupted`，不重跑。
 - 步骤 5（ADR 0006 决定 6、7）：
   - 有逐轮检查记录（`checks/<taskId>.t<turn>.json`）的任务，回放到首次反馈之前最后一个有检查的轮次（`throughTurn`），按那一轮的检查判定；反馈轮和其后的消息都不回放。步骤 4 的任务（没有逐轮记录）照旧。改进会话（`purpose: improvement`）不是用例。
@@ -101,10 +101,11 @@
     - 副本必须放在项目之外。
     副本里的门控在副本外另建回放副本，采用只发生在副本里。`release({ keep })` 默认删除副本；要求保留时，不超过 `KEEP_COPY_MAX_BYTES`（快照上限）就保留并返回 `{ root, bytes }`，超过则删除并返回 `too-large`。
   - 作业候选的回放请求带 `improvement: JobRunAttribution`（`jobId`、`improverVersion`，比较臂另带 `metaJobId`、`comparisonArm`），来自作业的 `job.json`；SDK 的回放进程与评审把这些写进账本。
-- 步骤 6 返工（ADR 0013、0014，纪元 `adr-0014`，ADR 0015 起 `adr-0015`），只对改进作业的候选：
+- 步骤 6 返工（ADR 0013、0014，纪元 `adr-0014`，ADR 0015 起 `adr-0015`，ADR 0016 起 `adr-0016`），只对改进作业的候选：
   - **具体数值**：核对纪元之后、建回放集之前，`candidateInstanceLiterals`（`src/trial/literals.ts`）用契约 `findInstanceLiterals` 检查提出组件的文本文件。来源是作业的反馈原文与请求 `note`、作业所涉会话的成果各版本文本文件；项目常量按全部根任务会话的用户消息算。命中即占用候选、写 `rejected / instance-literal` 决定（带 `instanceLiterals`），不建试验、不回放，`runGate` 返回 `{ status: 'refused', decision }`。
   - **同类题**（ADR 0014，`src/trial/similar.ts`）：选择集中除反馈原题外、首条消息与它的内容词 Jaccard 重合度 ≥ 0.25 的用例；内容词去掉功能词表 `FUNCTION_WORDS` 与纯数字。它们的确定性检查单独计为 `TrialTally.similar`（没有时为 `'none'`），由 `decideTrial` 判定 `similar-regression` 或 `no-similar-cases`；说明文字写出同类题通过率，待批准时写明“只在原题上验证过”。用户任务自己提出的候选不受影响。
 - ADR 0015（纪元 `adr-0015`），对所有候选：`runOutput` 先找出全部改动文件，前 `OUTPUT_FILES` 个给内容，其余与回放中删掉的快照文件只列路径（各至多 `OUTPUT_PATHS` 条），评审不再把列表截断当成没做；作业的反馈原题打平时，`ReviewInput.feedback` 带上反馈原文。反馈检查与评审的提示在 SDK `trial-entry.ts`。
+- ADR 0016（纪元 `adr-0016`），对所有候选：评审每对运行问两次（`ReviewInput.candidateFirst`），`bothOrders` 合并，两次一致才计票，否则平局，任一次 `unknown` 整对不计；一对一条回执，理由写两次的回答，费用相加。评审另看到该用例快照里的输入文件（`ReviewInput.inputs`，任务消息点名的在前，前 `OUTPUT_FILES` 个给内容）；宿主给的 `GateOptions.documentText` 把非 UTF-8 文件转成文字（SDK 用 `@nexgent/skill` 读 xlsx、docx、pdf），输入、成果与反馈检查看到的成果都用它。
 - ADR 0014，对所有候选：回放后，`file-exists` / `parses` 记录的路径在副本里不存在时，`runCheckSpecs(…, { delivered })` 改查这次运行 `present` 的成果里下一个扩展名相同、不在记录路径上的文件（一文件替一路径，`detail: delivered under another path`）。照反馈改名或换目录不再判为退步；没交付同类文件照旧失败。
 - 用量退化：`checkUsageRegression` 在根会话解析版本前和每轮结束后执行，只看 `gate` / `approval` 采用之后、该版本上的非试验记录：新组件工具的 `tool.call` 错误序列与根任务 `task.outcome.checks`（刚结束那一轮用 `turnOutcome()` 补上），交给 `decideUsageRollback`，触发即写 `usage-regression` 回滚。
 
