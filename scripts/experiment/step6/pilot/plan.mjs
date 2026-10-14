@@ -18,9 +18,8 @@ import { createHash } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { PILOT_FAMILIES, pilotCases } from './cases.mjs'
+import { folderOf, PILOT_FAMILIES, pilotCases, pilotReferencePairs } from './cases.mjs'
 import { POINT_TYPES, SET_SIZES } from './common.mjs'
-import { referencePairs } from './docs.mjs'
 import { PRAISE, PRIORITY, RATINGS, SECONDARY, TASTE, TEMPLATES } from './feedback.mjs'
 import { MEMORY_POLICY } from './memory.mjs'
 import { CRITERIA } from './reliability.mjs'
@@ -32,7 +31,7 @@ export const PLAN_FILE = join(HERE, 'pilot-plan.json')
 export const PILOT_ID = 'step6-pilot-1'
 
 /** Scripts whose behaviour the plan freezes (hashed with LF line ends, so a Windows checkout hashes the same). */
-export const FROZEN_SCRIPTS = ['office.mjs', 'common.mjs', 'files.mjs', 'docs.mjs', 'cases.mjs', 'feedback.mjs', 'reviewer.mjs', 'memory.mjs', 'stats.mjs', 'reliability.mjs', '../rng.mjs', '../stats.mjs', '../cases.mjs', '../feedback.mjs']
+export const FROZEN_SCRIPTS = ['office.mjs', 'common.mjs', 'files.mjs', 'docs.mjs', 'cases.mjs', 'feedback.mjs', 'reviewer.mjs', 'memory.mjs', 'stats.mjs', 'reliability.mjs', 'run.mjs', 'report.mjs', '../rng.mjs', '../stats.mjs', '../cases.mjs', '../feedback.mjs', '../run.mjs', '../budget.mjs']
 
 const sha256 = (/** @type {string | Uint8Array} */ data) => createHash('sha256').update(data).digest('hex')
 
@@ -57,8 +56,9 @@ export async function buildPlan() {
       docs: '文末列出引用的资料文件名（只在反馈里出现）',
       files: '输出的文件名和目录名不含空格（只在反馈里出现）',
     },
+    caseFolder: '每题在项目里有自己的目录（以种子命名）：起始文件与输出都在其中，任务消息开头说明；同一类的题共用一个项目，这样后一题不会碰到前一题留下的输入与输出',
     cases: cases.map(task => ({
-      id: task.id, family: task.family, set: task.set, variant: task.variant, seed: task.seed,
+      id: task.id, family: task.family, set: task.set, variant: task.variant, seed: task.seed, folder: folderOf(task),
       message: task.message,
       outputs: task.outputs,
       rubric: task.rubric,
@@ -110,12 +110,20 @@ export async function buildPlan() {
     },
     reliability: {
       criteria: CRITERIA,
-      pairs: referencePairs(cases),
+      pairs: pilotReferencePairs(),
       reliableWhen: '判据 1、2、3 都满足',
     },
     freeze: {
       rule: '真实试点开跑后，改动本文件任何一项（含 scripts 哈希），这一轮作废，换新的试点 id，作废的一轮照样写进报告',
       devOnly: '开发与调试只用 dev 与 selection 的题；holdout 题在真实试点开跑前不交给模型',
+    },
+    orchestration: {
+      script: 'scripts/experiment/step6/pilot/run.mjs --real --out <dir> --spend <步骤 6 花费文件>',
+      order: ['判据 1（不调模型；不过就停）', '6 组参考成对样本，两种顺序', '每类：历史任务（selection、guard）→ dev 任务 → base 副本 → 模板反馈与改进作业（停在审批时由编排代批并记备注）→ parent 副本 → memory 副本并写入、采用 project-notes → 隔离检查（有泄漏就停）→ holdout 27 次 → 文档类 parent 与 memory 的两两偏好'],
+      model: '任务与改进作业：claude-sonnet-5-5，thinking 开（../run.mjs MODEL、IMPROVEMENT）',
+      homes: '每类的主项目用 homes/<类>；holdout 运行用 homes/<类>-<臂>：base、memory 为空目录，parent 为主项目 home 的副本',
+      gates: '每步开始前，步骤 6 花费文件 + 本步预留不超过 35 美元，且试点花费文件（<dir>/pilot-spend.json）+ 本步预留不超过 12 美元；费用未知按预留计',
+      records: 'raw.json（report.mjs 的输入，不含时间、会话与作业 id、绝对路径）、report.md、manifest.json（计划 SHA-256、各臂 NEXGENT_HOME 与改进器版本、memory 策略的能力版本与全文 SHA-256）、observations.json',
     },
     budget: { gateUsd: 12, estimateUsd: [9, 11], note: '计入步骤 6 的 35 美元上限；外部与循环内评审约 1.9 美元（45 次 opus、27 次 sonnet）' },
     scripts,

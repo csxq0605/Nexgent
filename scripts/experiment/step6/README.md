@@ -19,9 +19,9 @@
 
 用户约定只在反馈里出现、任务文字里没有：表格族是每张分组表都带 `avg_order_value`；代码族是改了哪个 `src/` 模块就要新增或修改对应的 `test/<模块>.test.js`，以及金额一律整数分。
 
-## 试点（ADR 0011，返工第 1 轮）
+## 试点（ADR 0011，返工第 1、3 轮）
 
-`pilot/` 是步骤 6 返工的小试点：文档写作、文件整理与转换两类新任务各 8 题（dev 2 / selection 2 / guard 1 / holdout 3），不再给表格与代码两族加难。这一轮只有题目、评分与冻结的计划，不调模型；`memory` 臂、编排接入与真实试点在第 3 轮。
+`pilot/` 是步骤 6 返工的小试点：文档写作、文件整理与转换两类新任务各 8 题（dev 2 / selection 2 / guard 1 / holdout 3），不再给表格与代码两族加难。第 1 轮是题目、评分与计划；第 3 轮加了 `memory` 臂、编排、报告和脚本化演练，并冻结计划。每题在项目里有自己的目录（以种子命名），起始文件与输出都放在里面，同一类的题共用一个项目也互不干扰。
 
 | 文件 | 内容 |
 | --- | --- |
@@ -35,6 +35,9 @@
 | `pilot/reliability.mjs` | 评分可靠的三条判据与判据 4（内外评审一致率，只报告） |
 | `pilot/stats.mjs` | 要点通过率配对差（两层自助法，2000 次，种子 `step6-pilot`）、整题通过率、重复波动、追问按臂、组件分类、背答案率、一致率 |
 | `pilot/memory.mjs` | `memory` 臂的上下文策略 `project-notes` 的内容规则 |
+| `pilot/run.mjs` | 编排：判据 1 → 6 组参考成对样本 → 每类历史与 dev 任务、`base` 副本、模板反馈与改进作业、`parent` 副本、`memory` 副本（经 `@nexgent/capabilities` 的存储接口写入并采用 `project-notes`）→ 隔离检查 → holdout 27 次（每臂自己的 `NEXGENT_HOME`）与内外评审 → 文档类 parent 与 memory 两两偏好；每步过 35 美元与 12 美元两道闸门 |
+| `pilot/report.mjs` | 试点报告：评分是否可靠、`memory` 臂能否运行、三个比较、各臂明细、作业与组件、费用；同样的 `raw.json` 生成同样的字节 |
+| `pilot/scripted-model.mjs` | 演练用的脚本化模型（任务、改进作业、门控、两个评审），不调真实模型 |
 | `pilot/plan.mjs`、`pilot/pilot-plan.json` | 冻结的计划（题目、评分表、反馈模板、评审提示与模型、统计方法、臂、可靠性判据与成对样本、预算、各脚本的 SHA-256） |
 
 两类的项目约定只在反馈里出现：文档类“文末列出引用的资料文件名”，文件类“输出的文件名和目录名不含空格”。
@@ -46,6 +49,14 @@ node scripts/experiment/step6/pilot/plan.mjs           # 打印计划文件的 S
 ```
 
 holdout 运行没交成果时，编排在同一会话里追问一次（`PRESENT_REQUEST`），`raw.json` 的每次运行记 `followUp`，报告按臂列出追问次数。
+
+```sh
+node scripts/experiment/step6/pilot/run.mjs --scripted --out <dir>                  # 脚本化演练（约 2 分钟）
+node scripts/experiment/step6/pilot/run.mjs --real --out <dir> --spend <花费文件>    # 真实试点，密钥从环境读
+node scripts/experiment/step6/pilot/report.mjs --records <dir>/raw.json --out <report.md>
+```
+
+真实试点只在 `pilot-plan.json` 与生成器一致时开跑（否则退出码 2）。输出：`raw.json`（报告的输入，不含时间、会话与作业 id、绝对路径）、`report.md`、`manifest.json`（计划 SHA-256、各臂 `NEXGENT_HOME` 与改进器版本、`memory` 策略的能力版本与全文 SHA-256、花费）、`observations.json`。评审的请求记在 `<dir>/reviewer/ledgers`，不进任何项目。
 
 ## 本地检查
 
