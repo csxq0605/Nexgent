@@ -128,6 +128,15 @@ export function buildReport(raw, { iterations = 10_000, seed = 'step6-bootstrap'
   }
   out.push('')
 
+  if (runs.some((/** @type {any} */ run) => run.followUp !== undefined)) {
+    out.push('## 追问成果', '', '任务回合没交成果时，编排在同一会话里追问一次；按臂计数。', '', '| 臂 | 运行数 | 追问次数 |', '| --- | --- | --- |')
+    for (const arm of ARMS) {
+      const mine = runs.filter(run => run.arm === arm)
+      if (mine.length > 0) out.push(`| ${arm} | ${mine.length} | ${mine.filter((/** @type {any} */ run) => run.followUp === true).length} |`)
+    }
+    out.push('')
+  }
+
   out.push('## 费用', '', '所有金额为估算美元（含缓存读写），不是账单。', '', '### holdout 每次运行的平均费用', '')
   out.push('| 任务族 | 臂 | 运行数 | 有费用的 | 平均 | 合计 |', '| --- | --- | --- | --- | --- | --- |')
   for (const family of families) {
