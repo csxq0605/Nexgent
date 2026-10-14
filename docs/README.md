@@ -48,6 +48,7 @@
 | [`adr/0007-gate-cost-rule.md`](adr/0007-gate-cost-rule.md) | 已接受：门控费用规则，质量提高不因费用拒绝、按估算美元比较、超过 2 倍等用户批准（用户 2026-10-13 选 C；取代 ADR 0005 决策 5 与 ADR 0006 决策 6、8 中的费用比条款） |
 | [`adr/0008-improver-versions.md`](adr/0008-improver-versions.md) | 已接受：改进器版本（项目级独立版本线，v0 为步骤 5 原文）、元改进作业、父子比较规则 `decideImprover`、评价器纪元、SDK API 6（步骤 6，用户 2026-10-13 “按推荐”） |
 | [`adr/0009-comparison-origin.md`](adr/0009-comparison-origin.md) | 已接受：父子比较的起点先找没解决反馈的作业（从它开始时的能力版本起步），找不到就取最近的作业、从反馈当时的能力版本起步；`ComparisonOrigin.kind`（取代 0008 的起点规则；用户 2026-10-13 选 C） |
+| [`adr/0010-diagnosis-sees-adopted-components.md`](adr/0010-diagnosis-sees-adopted-components.md) | 已接受：诊断提示列出作业所用能力版本的已采用组件（取代 0008 的“v0 与步骤 5 完全相同”）；比较两臂从反馈任务当时的版本起步（取代 0009 的“开始时的版本”）；用户 2026-10-14 选 A |
 | [`reference-map.md`](reference-map.md) | 步骤 0 建立，随各步更新 |
 | [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
 | [`plan/step-2-work-partition.md`](plan/step-2-work-partition.md) | 步骤 2 分工与验收设计，用户 2026-10-11 已定 |

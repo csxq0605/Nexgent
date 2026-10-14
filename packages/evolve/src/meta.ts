@@ -205,12 +205,16 @@ export interface OriginChoice {
   readonly kind: ComparisonOriginKind
   readonly job: ImprovementJob
   readonly capabilityVersion: string
+  /** For `unresolved`: the version the job started on (differs from `capabilityVersion` when an adoption came between the task and the job). */
+  readonly startedOn?: string
 }
 
 /**
- * Choose the comparison's origin (ADR 0009): the latest unresolved feedback
- * job on the version it started on; else the latest feedback job on the
- * version its feedback task ran on; else none.
+ * Choose the comparison's origin (ADR 0009, ADR 0010): the latest unresolved
+ * feedback job, else the latest feedback job; else none. Both arms start on
+ * the version the job's feedback task ran on: for an unresolved job that is
+ * the version it started on unless an adoption came in between (ADR 0010
+ * decision 2), when the problem may already have been covered.
  * @throws `improvement/not-found` when the latest feedback job's task cannot be replayed.
  */
 export async function chooseOrigin(layout: WorkspaceLayout, jobs: readonly ImprovementJob[], meta: ImprovementJob): Promise<OriginChoice | undefined> {
@@ -219,7 +223,9 @@ export async function chooseOrigin(layout: WorkspaceLayout, jobs: readonly Impro
     if (!UNRESOLVED_STATUSES.has(job.status) || (await baselineAlreadyPassed(layout, job))) continue
     // A job that failed because its task cannot be replayed cannot be an origin either.
     if ((await findFeedbackTask(layout, job).catch(() => undefined)) === undefined) continue
-    return { kind: 'unresolved', job, capabilityVersion: await jobStartVersion(layout, job) }
+    const startedOn = await jobStartVersion(layout, job)
+    const ranOn = await feedbackTaskVersion(layout, job)
+    return { kind: 'unresolved', job, capabilityVersion: ranOn === startedOn ? startedOn : ranOn, startedOn }
   }
   const latest = finished[0]
   if (latest === undefined) return undefined
@@ -390,6 +396,9 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
         if (choice === undefined) return { ...nothing, outcome: 'failed', detail: 'There is no finished feedback-triggered improvement job to compare the two improvers on.' }
         source = choice.job
         ;({ origin, replay } = await originCase(layout, choice.kind, source, source.id, choice.capabilityVersion))
+        if (choice.startedOn !== undefined && choice.startedOn !== choice.capabilityVersion) {
+          await input.log(`compare: job ${source.id} started on ${choice.startedOn}, after its feedback task ran on ${choice.capabilityVersion}; the arms start on the latter`)
+        }
       } catch (error) {
         return { ...nothing, outcome: 'failed', detail: `The comparison origin cannot be prepared: ${(error as Error).message}`, error }
       }

@@ -12,7 +12,7 @@ import {
   type LedgerRecord,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { CapabilityStore, improversDir, ImproverStore, projectEpoch } from '@nexgent/capabilities'
+import { CapabilityStore, improversDir, ImproverStore, projectEpoch, writeBundle } from '@nexgent/capabilities'
 import { JsonlLedger, validateImprovementFile } from '@nexgent/session'
 import {
   createImprovementStages,
@@ -29,6 +29,7 @@ import {
   transitionJob,
   updateJob,
   chooseOrigin,
+  adoptedCapabilities,
   type GateOutcome,
   type ImprovementSession,
   type ImprovementSessionRequest,
@@ -48,7 +49,7 @@ import { stagesTo, tempDir } from './helpers.js'
 const META = { meta: { enabled: true, everyJobs: 3 } }
 const PRICE = (_model: string, usage: { inputTokens: number | 'unknown' }) => (usage.inputTokens === 'unknown' ? 'unknown' as const : usage.inputTokens * 1e-6)
 
-type Script = (request: ImprovementSessionRequest, index: number) => Promise<void> | void
+type Script = (request: ImprovementSessionRequest, index: number, text: string) => Promise<void> | void
 
 /** A runner whose turns run the script of their phase (an arm's phases are keyed `<arm>:<phase>`). */
 function runner(scripts: Record<string, Script | undefined>, tokens = 100): ImprovementSessionRunner & { opened: ImprovementSessionRequest[] } {
@@ -61,9 +62,9 @@ function runner(scripts: Record<string, Script | undefined>, tokens = 100): Impr
       const ledger = new JsonlLedger({ ledgersDir: resolveWorkspaceLayout(request.ledgerRoot ?? request.projectRoot).ledgers })
       return {
         sessionId: request.sessionId,
-        async send() {
+        async send(text: string) {
           const key = request.comparisonArm === undefined ? request.phase : `${request.comparisonArm}:${request.phase}`
-          await scripts[key]?.(request, index++)
+          await scripts[key]?.(request, index++, text)
           const usage = { ...ZERO_USAGE, inputTokens: tokens, totalTokens: tokens }
           await ledger.append({
             type: 'llm.request.end', sessionId: request.sessionId, requestId: randomUUID(), provider: 'scripted', endpoint: 'scripted', model: 'claude-sonnet-5-5',
@@ -367,7 +368,7 @@ describe('the meta-propose tools', () => {
   })
 })
 
-describe('the comparison origin (ADR 0009)', () => {
+describe('the comparison origin (ADR 0009, ADR 0010)', () => {
   const FEEDBACK_TIME = 'c'.repeat(64)
   const STARTED_ON = 'b'.repeat(64)
 
@@ -389,22 +390,29 @@ describe('the comparison origin (ADR 0009)', () => {
 
   const metaJob = async (fixture: FeedbackTaskFixture) => startExplicitMetaJob(improvementsDir(fixture.layout), { parentVersion: 'v0' })
 
-  it('takes a job that did not solve its feedback, on the version it started on, over a later solved one', async () => {
+  it('takes a job that did not solve its feedback over a later solved one; an adoption between its task and its start puts the arms on the task\'s version', async () => {
     const fixture = await feedbackTask(true, META, FEEDBACK_TIME)
     const unresolved = await finishedJob(fixture, 'rejected', { baseVersion: STARTED_ON })
     await finishedJob(fixture, 'adopted', { baseVersion: STARTED_ON })
     const choice = await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture))
-    expect(choice).toMatchObject({ kind: 'unresolved', job: { id: unresolved.id }, capabilityVersion: STARTED_ON })
+    expect(choice).toMatchObject({ kind: 'unresolved', job: { id: unresolved.id }, capabilityVersion: FEEDBACK_TIME, startedOn: STARTED_ON })
   })
 
-  it('counts no-proposal and failed jobs as unresolved; without a recorded start version uses the version in force when the job started', async () => {
+  it('an unresolved job whose task ran on the version it started on starts the arms there', async () => {
+    const fixture = await feedbackTask(true, META, STARTED_ON)
+    const unresolved = await finishedJob(fixture, 'rejected', { baseVersion: STARTED_ON })
+    const choice = await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture))
+    expect(choice).toMatchObject({ kind: 'unresolved', job: { id: unresolved.id }, capabilityVersion: STARTED_ON, startedOn: STARTED_ON })
+  })
+
+  it('counts no-proposal and failed jobs as unresolved; without a recorded start version reads the version in force when the job started', async () => {
     for (const end of ['none', 'diagnose-failed'] as const) {
       const fixture = await feedbackTask(true, META, FEEDBACK_TIME)
       const job = await finishedJob(fixture, end)
       expect(job.baseVersion).toBeUndefined()
       const choice = await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture))
-      // Nothing was ever adopted in this project: the job started on the baseline (not the feedback task's version).
-      expect(choice).toMatchObject({ kind: 'unresolved', job: { id: job.id }, capabilityVersion: 'baseline' })
+      // Nothing was ever adopted in this project: the job started on the baseline; its task's own version wins.
+      expect(choice).toMatchObject({ kind: 'unresolved', job: { id: job.id }, capabilityVersion: FEEDBACK_TIME, startedOn: 'baseline' })
     }
   })
 
@@ -412,7 +420,7 @@ describe('the comparison origin (ADR 0009)', () => {
     const partlyFixture = await feedbackTask(true, META, FEEDBACK_TIME)
     const partly = await finishedJob(partlyFixture, 'rejected', { baseVersion: STARTED_ON, decisionId: await baselinePassedDecision(partlyFixture, 0.5) })
     expect(await chooseOrigin(partlyFixture.layout, await listJobs(improvementsDir(partlyFixture.layout)), await metaJob(partlyFixture)))
-      .toMatchObject({ kind: 'unresolved', job: { id: partly.id }, capabilityVersion: STARTED_ON })
+      .toMatchObject({ kind: 'unresolved', job: { id: partly.id }, capabilityVersion: FEEDBACK_TIME })
 
     const fixture = await feedbackTask(true, META, FEEDBACK_TIME)
     const solvedBefore = await finishedJob(fixture, 'rejected', { baseVersion: STARTED_ON, decisionId: await baselinePassedDecision(fixture, 1) })
@@ -445,5 +453,77 @@ describe('the comparison origin (ADR 0009)', () => {
     expect(comparison.child.origin).toEqual(comparison.origin)
     expect(comparison.verdict).toMatchObject({ outcome: 'adopt', reason: 'gate-passed' })
     expect(await readFile(jobPaths(directory, meta.id).log, 'utf8')).toContain(`compare: unresolved origin, job ${source.id} (rejected)`)
+  })
+})
+
+describe('adopted components in the diagnosis, and arms on the task\'s version (ADR 0010)', () => {
+  const POLICY = { formatVersion: 1, name: 'module-test-convention', description: 'Changed modules get their own tests.', instructions: 'Every changed or added module gets test/<module>.test.js with cases.' }
+
+  async function adoptPolicy(layout: WorkspaceLayout): Promise<string> {
+    const bundle = await writeBundle(layout.capabilities, [{ kind: 'context-policy', name: POLICY.name, files: [{ path: 'policy.json', content: JSON.stringify(POLICY) }] }])
+    await new CapabilityStore(layout.capabilities).adopt(bundle.version, { trigger: 'manual', detail: 'adopted by an earlier improvement (test)' })
+    return bundle.version
+  }
+
+  it('the diagnosis prompt lists the components the job runs on; with none it has no such section', async () => {
+    const fixture = await feedbackTask(true)
+    const directory = improvementsDir(fixture.layout)
+    const prompts: string[] = []
+    const capture: Script = (_request, index, text) => { if (index === 0) prompts.push(text) }
+    const first = await createJob(directory, { trigger: 'feedback-count', items: [signal(fixture)] })
+    await runImprovementJob(fixture.layout, first.id, { stages: createImprovementStages({ runner: runner({ diagnose: capture }), startTrial: gate({}) }), chain: false })
+    expect(prompts[0]).not.toContain('# Adopted capabilities')
+
+    const version = await adoptPolicy(fixture.layout)
+    expect(await adoptedCapabilities(fixture.layout)).toEqual({ version, components: [{ kind: 'context-policy', name: POLICY.name, description: POLICY.description, instructions: POLICY.instructions }] })
+    const second = await createJob(directory, { trigger: 'feedback-count', items: [signal(fixture)] })
+    await runImprovementJob(fixture.layout, second.id, { stages: createImprovementStages({ runner: runner({ diagnose: capture }), startTrial: gate({}) }), chain: false })
+    expect(prompts[1]).toContain(`# Adopted capabilities\nThis job runs on capability version ${version}.`)
+    expect(prompts[1]).toContain(`- context-policy ${POLICY.name}: ${POLICY.description}\n  Instructions: ${JSON.stringify(POLICY.instructions)}`)
+    expect(prompts[1]!.indexOf('# Adopted capabilities')).toBeLessThan(prompts[1]!.indexOf('# Sessions to examine'))
+  })
+
+  it('a job that started after an adoption its task did not have: both arms start on the task\'s version, reach the gate, and the gate can tell them apart', async () => {
+    const fixture = await feedbackTask(true, META)
+    const directory = improvementsDir(fixture.layout)
+    const version = await adoptPolicy(fixture.layout)
+    // The job answering the task's feedback started on the adopted version and failed to propose (as in the step-6 trial).
+    const job = await createJob(directory, { trigger: 'feedback-count', items: [signal(fixture)] })
+    await runImprovementJob(fixture.layout, job.id, { stages: stagesTo('propose-failed'), chain: false })
+    await updateJob(directory, job.id, { baseVersion: version })
+    expect((await readJob(directory, job.id)).status).toBe('failed')
+
+    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0' })
+    const prompts: Record<string, string> = {}
+    const diagnose = (arm: string): Script => async (request, index, text) => {
+      if (index === 0) prompts[arm] = text
+      await diagnoseKind(fixture, 'context-policy')(request, index, text)
+    }
+    const scripted = runner({
+      'meta-diagnose': async request => {
+        await callTool(request, 'improve_report_meta_diagnosis', { findings: [{ stage: 'diagnose', label: 'the diagnosis re-proposed a component the project already had', jobIds: [job.id] }], hypothesis: 'Diagnoses should look at the adopted components first.', proposal: 'change' })
+      },
+      'meta-propose': async request => {
+        await callTool(request, 'improve_propose_change', { change: CHANGE, rationale: 'Three runs per case.' })
+      },
+      'parent:diagnose': diagnose('parent'),
+      'parent:propose': proposeInCopy(fixture),
+      'child:diagnose': diagnose('child'),
+      'child:propose': proposeInCopy(fixture),
+    })
+    const startTrial = gate({ parent: 'rejected', child: 'adopted' })
+    await runImprovementJob(fixture.layout, meta.id, { stages: createImprovementStages({ runner: scripted, startTrial, tempRoot: await tempDir(), priceUsd: PRICE }), chain: false })
+
+    const comparison = JSON.parse(await readFile(jobPaths(directory, meta.id).comparison, 'utf8')) as ImproverComparison
+    expect(comparison.origin).toMatchObject({ kind: 'unresolved', sourceJobId: job.id, capabilityVersion: 'baseline' })
+    expect(await readFile(jobPaths(directory, meta.id).log, 'utf8')).toContain(`compare: job ${job.id} started on ${version}, after its feedback task ran on baseline; the arms start on the latter`)
+    // Both arms produced offspring and reached the gate, which told them apart.
+    expect(startTrial.calls.map(call => call.arm)).toEqual(['parent', 'child'])
+    expect(comparison.parent.candidateId).toBeDefined()
+    expect(comparison.child.candidateId).toBeDefined()
+    expect(comparison.verdict).toMatchObject({ outcome: 'adopt', reason: 'gate-passed' })
+    // On the task's version nothing was adopted yet, so the arms' diagnoses list no components.
+    expect(prompts.parent).toBeDefined()
+    expect(prompts.child).not.toContain('# Adopted capabilities')
   })
 })

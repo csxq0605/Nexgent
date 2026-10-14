@@ -43,6 +43,7 @@ import {
 } from '@nexgent/kernel'
 import { JsonlLedger, JsonlSessionStore, validateImprovementFile } from '@nexgent/session'
 import { SessionFeedbackStore } from '@nexgent/tasking'
+import { adoptedSection, type AdoptedCapabilities } from './adopted.js'
 import { jobPaths } from './jobs.js'
 import { improvementsDir } from './paths.js'
 import type { ImprovementJob } from './types.js'
@@ -330,6 +331,8 @@ export interface DiagnosisSubject {
   readonly sessions: readonly { readonly sessionId: string; readonly taskId?: string }[]
   /** The job's pinned improver, whose diagnosis policy opens the prompt (default `v0`). */
   readonly improver?: ImproverBundle
+  /** ADR 0010: the components the job's project already runs on (listed when there are any). */
+  readonly adopted?: AdoptedCapabilities
 }
 
 function describeSignal(job: ImprovementJob, feedback: readonly FeedbackListing[]): string[] {
@@ -359,6 +362,7 @@ export function diagnosisPrompt(subject: DiagnosisSubject): string {
     const extra = subject.feedback.filter(entry => !job.items.some(item => item.kind === 'feedback' && item.feedbackId === entry.id))
     for (const entry of extra) parts.push(`- feedback ${entry.id} on deliverable ${entry.deliverableId} v${entry.version} in session ${entry.sessionId} turn ${entry.turn} (${entry.rating === undefined ? 'no rating' : `rating ${entry.rating}/5`}): ${JSON.stringify(entry.comment)}`)
   }
+  parts.push(...adoptedSection(subject.adopted))
   parts.push('', '# Sessions to examine')
   if (subject.sessions.length === 0) parts.push('(none named; use improve_list_feedback and the ledger to find them)')
   for (const session of subject.sessions) parts.push(`- session ${session.sessionId}${session.taskId === undefined ? '' : ` (task ${session.taskId})`}`)
