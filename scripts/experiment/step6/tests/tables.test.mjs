@@ -80,3 +80,21 @@ test('judgeTableCase reads the output from the project directory', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('hard: finance net figures pass, the plain table fails on finance values and the column, the returns file is always there', () => {
+  for (const [variant, month] of /** @type {const} */ ([['region', '2026-09'], ['region', '2026-10'], ['category', '2026-08'], ['returns', '2027-02']])) {
+    assert.deepEqual(judgeTableText(variant, month, referenceTable(variant, month, { withConvention: true, hard: true }), { hard: true }).problems, [])
+    const plain = judgeTableText(variant, month, referenceTable(variant, month, { withConvention: false, hard: true }), { hard: true })
+    assert.equal(plain.pass, false)
+    assert.deepEqual(kinds(plain), ['convention-column', 'finance-value'], `${variant} ${month}`)
+    for (const issue of plain.issues.filter(i => i.kind === 'finance-value')) assert.match(issue.detail, /财务是 .+，表里是 /)
+  }
+  const task = tableCase({ id: 'x', set: 'dev', variant: 'region', month: '2026-09', hard: true })
+  assert.ok(task.files['data/returns-2026-09.csv'] !== undefined)
+  assert.ok(!task.message.includes('退货'))
+  assert.equal(task.hidden.hard, true)
+  const returns = tableCase({ id: 'x', set: 'holdout', variant: 'returns', month: '2027-02', hard: true })
+  assert.ok(returns.message.includes('orders 是全部订单数') && !returns.message.includes('revenue 不扣退货'))
+  // The standard table with the plain avg column still disagrees with finance.
+  assert.equal(judgeTableText('region', '2026-09', referenceTable('region', '2026-09', { withConvention: true }), { hard: true }).pass, false)
+})

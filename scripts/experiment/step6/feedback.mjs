@@ -23,7 +23,7 @@
  */
 export const PRIORITY = [
   'missing-output', 'invalid-output', 'missing-column', 'wrong-rows', 'wrong-value', 'convention-cents', 'hidden-test',
-  'refactor-incomplete', 'convention-tests', 'convention-column', 'convention-value',
+  'refactor-incomplete', 'convention-tests', 'finance-value', 'convention-column', 'convention-value',
 ]
 
 /** Three wordings per kind; `{detail}` is the problem's detail (several joined with 、). */
@@ -38,6 +38,8 @@ export const TEMPLATES = {
   'convention-tests': ['改了 {detail} 这些模块，但 test/ 下没有对应模块的测试文件和用例。', '我们的规矩是改哪个模块，就在 test/ 下那个模块的测试文件里补用例，这次 {detail} 没补。', '又漏了测试：{detail}。以后每个改动或新增的模块都要有对应的 test/<模块>.test.js 和用例。'],
   'convention-cents': ['金额要用整数分，这次有金额不是整数分。', '我们所有金额一律按整数分存和算，这次又出现了小数。', '请记住：金额一律整数分，不要用元或带小数的数。'],
   'convention-column': ['表少了一列：平均客单价 {detail}（收入除以订单数，保留两位小数）。', '我们的汇总表一直都要带平均客单价那一列，这次又没有。', '还是缺 {detail}，以后每张按组汇总的表都要有这一列。'],
+  // Hard cases: only where the table disagrees with finance, never why.
+  'finance-value': ['这张表和财务的对账单对不上：{detail}。', '还是和财务对不上，比如 {detail}。财务那边的数是对的，请按财务的口径出表。', '财务又退回来了：{detail}。以后出表要和财务对得上。'],
   'convention-value': ['平均客单价算得不对（{detail}），应是该组收入除以订单数，保留两位小数。', '{detail}：平均客单价的数对不上。', '平均客单价请按收入 ÷ 订单数、保留两位小数来算，这次有错（{detail}）。'],
 }
 

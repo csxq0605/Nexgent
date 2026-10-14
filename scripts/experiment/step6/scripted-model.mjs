@@ -240,7 +240,7 @@ export class ExperimentModel {
     if (task.family === 'tables') {
       const content = hidden.variant === 'summary'
         ? `${JSON.stringify(expectedSummary(hidden.month), null, 2)}\n`
-        : referenceTable(hidden.variant, hidden.month, { withConvention: skill !== undefined })
+        : referenceTable(hidden.variant, hidden.month, { withConvention: skill !== undefined, hard: hidden.hard === true })
       return [
         calls([...load, { name: 'write_file', arguments: { path: hidden.output, content } }]),
         calls([presentCall(task)]),

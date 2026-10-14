@@ -12,6 +12,12 @@
  * The user's convention, named only by feedback: every grouped table also has
  * `avg_order_value` = revenue / orders, to cents. The task text never mentions it.
  *
+ * Hard cases (`hard: true`, see cases.mjs `Difficulty`): the convention is finance's net
+ * figures. Returned orders (data/returns-<month>.csv, present in every hard case) count for
+ * neither orders nor revenue, except where the task text defines a column otherwise (the
+ * returns table's orders and return_rate stay over all orders), and avg_order_value is net
+ * revenue / net orders. Feedback shows only the rows that disagree with finance.
+ *
  * The hidden judge computes every expected value from the CSVs on its own; it
  * shares no code with capability components or a project's check script.
  *
@@ -43,27 +49,35 @@ export function returnsCsv(month) {
 const cents = (/** @type {number} */ value) => Math.round(value * 100) / 100
 const amountOf = (/** @type {{quantity:number, unitPrice:number, discount:number}} */ row) => row.quantity * row.unitPrice * (1 - row.discount)
 
+/** Order ids returned in a month. @param {string} month */
+const returnedIds = month => new Set(returnsCsv(month).split('\n').slice(1).filter(Boolean).map(line => line.split(',')[0]))
+
 /**
- * Expected rows of a grouped variant, keyed and sorted; every value a number.
+ * Expected rows of a grouped variant, keyed and sorted; every value a number. `net` gives
+ * finance's figures (hard cases): returned orders count for neither orders nor revenue
+ * (the returns table keeps orders over all orders, as its task text says).
  * @param {'region' | 'category' | 'returns'} variant
  * @param {string} month
+ * @param {{ net?: boolean }} [options]
  * @returns {{ key: string, columns: string[], rows: Array<Record<string, string | number>> }}
  */
-export function expectedTable(variant, month) {
+export function expectedTable(variant, month, { net = false } = {}) {
   const orders = parseOrders(ordersCsv(month))
   const key = variant === 'region' ? 'region' : 'product'
-  /** @type {Record<string, {orders:number, units:number, revenue:number, returned:number}>} */
+  /** @type {Record<string, {orders:number, units:number, revenue:number, returned:number, netOrders:number}>} */
   const groups = {}
-  const returned = variant === 'returns'
-    ? new Set(returnsCsv(month).split('\n').slice(1).filter(Boolean).map(line => line.split(',')[0]))
-    : new Set()
+  const returned = variant === 'returns' || net ? returnedIds(month) : new Set()
   for (const row of orders) {
     const name = key === 'region' ? row.region : row.product
-    const entry = groups[name] ?? (groups[name] = { orders: 0, units: 0, revenue: 0, returned: 0 })
+    const entry = groups[name] ?? (groups[name] = { orders: 0, units: 0, revenue: 0, returned: 0, netOrders: 0 })
+    const isReturned = returned.has(row.orderId)
     entry.orders += 1
     entry.units += row.quantity
-    entry.revenue += amountOf(row)
-    if (returned.has(row.orderId)) entry.returned += 1
+    if (!net || !isReturned) {
+      entry.revenue += amountOf(row)
+      entry.netOrders += 1
+    }
+    if (isReturned) entry.returned += 1
   }
   const columns = variant === 'region' ? ['region', 'orders', 'revenue']
     : variant === 'category' ? ['product', 'orders', 'units', 'revenue']
@@ -71,14 +85,15 @@ export function expectedTable(variant, month) {
   const rows = Object.keys(groups).sort().map(name => {
     const g = groups[name]
     const revenue = cents(g.revenue)
+    const ordersShown = net && variant !== 'returns' ? g.netOrders : g.orders
     return {
       [key]: name,
-      orders: g.orders,
+      orders: ordersShown,
       units: g.units,
       revenue,
       returned_orders: g.returned,
       return_rate: Math.round((g.returned / g.orders) * 1000) / 10,
-      [CONVENTION_COLUMN]: cents(revenue / g.orders),
+      [CONVENTION_COLUMN]: g.netOrders === 0 ? 0 : cents(revenue / (net ? g.netOrders : g.orders)),
     }
   })
   return { key, columns, rows }
@@ -88,10 +103,11 @@ export function expectedTable(variant, month) {
  * The table text the user actually wants (reference answer for judge tests).
  * @param {'region' | 'category' | 'returns'} variant
  * @param {string} month
- * @param {{ withConvention: boolean }} options
+ * @param {{ withConvention: boolean, hard?: boolean }} options
+ *   hard: with the convention, finance's net figures; without it, the plain table
  */
-export function referenceTable(variant, month, { withConvention }) {
-  const { columns, rows } = expectedTable(variant, month)
+export function referenceTable(variant, month, { withConvention, hard = false }) {
+  const { columns, rows } = expectedTable(variant, month, { net: hard && withConvention })
   const header = [...columns, ...(withConvention ? [CONVENTION_COLUMN] : [])]
   const format = (/** @type {string} */ column, /** @type {string | number} */ value) =>
     column === 'revenue' || column === CONVENTION_COLUMN ? Number(value).toFixed(2)
@@ -140,16 +156,16 @@ export function tableOutput(variant, month) {
 
 /**
  * One table task: user message, materials and the hidden expectations.
- * @param {{ id: string, set: import('./cases.mjs').CaseSet, variant: typeof TABLE_VARIANTS[number], month: string }} spec
+ * @param {{ id: string, set: import('./cases.mjs').CaseSet, variant: typeof TABLE_VARIANTS[number], month: string, hard?: boolean }} spec
  * @returns {import('./cases.mjs').TaskCase}
  */
-export function tableCase({ id, set, variant, month }) {
+export function tableCase({ id, set, variant, month, hard = false }) {
   const orders = ordersCsv(month)
   // The data sits in the project's work tree (`data/`), so the task's snapshot, the gate's
   // replays and an arm copy all carry it.
   /** @type {Record<string, string>} */
   const files = { [`data/orders-${month}.csv`]: orders }
-  if (variant === 'returns') files[`data/returns-${month}.csv`] = returnsCsv(month)
+  if (variant === 'returns' || hard) files[`data/returns-${month}.csv`] = returnsCsv(month)
   const output = tableOutput(variant, month)
   let message
   if (variant === 'summary') {
@@ -157,7 +173,7 @@ export function tableCase({ id, set, variant, month }) {
   } else {
     const text = VARIANT_TEXT[variant]
     const extra = variant === 'returns'
-      ? `退货记录在 data/returns-${month}.csv（一行一个退货的订单）；returned_orders 是退货订单数，return_rate 是退货订单占订单数的百分比，保留一位小数；revenue 不扣退货。`
+      ? `退货记录在 data/returns-${month}.csv（一行一个退货的订单）；returned_orders 是退货订单数，return_rate 是退货订单占订单数的百分比，保留一位小数${hard ? '；orders 是全部订单数' : '；revenue 不扣退货'}。`
       : ''
     message = `请根据 data/orders-${month}.csv 做 ${month} 的${text.what}，保存为 ${output}：${text.rows}，列为 ${text.columns}，${text.sort}。revenue = 数量×单价×(1−折扣)，保留两位小数。${extra}`
   }
@@ -173,9 +189,16 @@ export function tableCase({ id, set, variant, month }) {
     materials: [],
     outputs: [output],
     fingerprints: [message, firstRow, `${month.replace('-', '')}-001`],
-    hidden: { kind: 'table', variant, month, output },
+    hidden: { kind: 'table', variant, month, output, hard },
   }
 }
+
+/**
+ * One disagreement with finance, in the user's words: the row, the column, finance's value and the table's.
+ * @param {string | number} rowKey @param {string} column @param {string | number} want @param {string | undefined} got
+ */
+const financeDetail = (rowKey, column, want, got) =>
+  `${rowKey} 的 ${column}，财务是 ${column === 'orders' ? want : Number(want).toFixed(2)}，表里是 ${got === undefined || got === '' ? '空' : got}`
 
 const close = (/** @type {number} */ a, /** @type {number} */ b, tolerance = 0.005) => Number.isFinite(a) && Math.abs(a - b) < tolerance
 
@@ -184,9 +207,11 @@ const close = (/** @type {number} */ a, /** @type {number} */ b, tolerance = 0.0
  * @param {'region' | 'category' | 'returns'} variant
  * @param {string} month
  * @param {string | null | undefined} text
+ * @param {{ hard?: boolean }} [options] hard: values are judged against finance's net figures,
+ *   and a disagreement is a `finance-value` issue naming the row, finance's value and the table's
  * @returns {import('./cases.mjs').JudgeResult}
  */
-export function judgeTableText(variant, month, text) {
+export function judgeTableText(variant, month, text, { hard = false } = {}) {
   /** @type {import('./cases.mjs').Issue[]} */
   const issues = []
   if (typeof text !== 'string' || text.trim() === '') {
@@ -196,7 +221,7 @@ export function judgeTableText(variant, month, text) {
   const lines = text.split(/\r?\n/).filter(line => line.trim() !== '')
   const header = lines[0].split(',').map(cell => cell.trim())
   const at = (/** @type {string} */ name) => header.indexOf(name)
-  const { key, columns, rows } = expectedTable(variant, month)
+  const { key, columns, rows } = expectedTable(variant, month, { net: hard })
   for (const column of columns) if (at(column) < 0) issues.push({ kind: 'missing-column', detail: column })
   if (issues.length > 0) return finish(issues)
   const got = lines.slice(1).map(line => line.split(',').map(cell => cell.trim()))
@@ -211,7 +236,9 @@ export function judgeTableText(variant, month, text) {
       if (column === key) continue
       const tolerance = column === 'return_rate' ? 0.05 + 1e-9 : 0.005
       if (!close(Number(cells[at(column)]), Number(row[column]), tolerance)) {
-        issues.push({ kind: 'wrong-value', detail: `${row[key]} ${column} ${cells[at(column)]}, expected ${row[column]}` })
+        issues.push(hard && (column === 'orders' || column === 'revenue') && !(variant === 'returns' && column === 'orders')
+          ? { kind: 'finance-value', detail: financeDetail(row[key], column, row[column], cells[at(column)]) }
+          : { kind: 'wrong-value', detail: `${row[key]} ${column} ${cells[at(column)]}, expected ${row[column]}` })
       }
     }
   }
@@ -221,7 +248,9 @@ export function judgeTableText(variant, month, text) {
     for (const row of rows) {
       const cells = got.find(c => c[at(key)] === row[key])
       if (cells !== undefined && !close(Number(cells[at(CONVENTION_COLUMN)]), Number(row[CONVENTION_COLUMN]))) {
-        issues.push({ kind: 'convention-value', detail: `${row[key]} ${CONVENTION_COLUMN} ${cells[at(CONVENTION_COLUMN)]}, expected ${row[CONVENTION_COLUMN]}` })
+        issues.push(hard
+          ? { kind: 'finance-value', detail: financeDetail(row[key], CONVENTION_COLUMN, row[CONVENTION_COLUMN], cells[at(CONVENTION_COLUMN)]) }
+          : { kind: 'convention-value', detail: `${row[key]} ${CONVENTION_COLUMN} ${cells[at(CONVENTION_COLUMN)]}, expected ${row[CONVENTION_COLUMN]}` })
       }
     }
   }
@@ -268,7 +297,7 @@ export function judgeSummaryText(month, text) {
  * @returns {Promise<import('./cases.mjs').JudgeResult>}
  */
 export async function judgeTableCase(task, projectDir) {
-  const hidden = /** @type {{ variant: string, month: string, output: string }} */ (task.hidden)
+  const hidden = /** @type {{ variant: string, month: string, output: string, hard?: boolean }} */ (task.hidden)
   let text = null
   try {
     text = await readFile(join(projectDir, hidden.output), 'utf8')
@@ -277,7 +306,7 @@ export async function judgeTableCase(task, projectDir) {
   }
   return hidden.variant === 'summary'
     ? judgeSummaryText(hidden.month, text)
-    : judgeTableText(/** @type {'region' | 'category' | 'returns'} */ (hidden.variant), hidden.month, text)
+    : judgeTableText(/** @type {'region' | 'category' | 'returns'} */ (hidden.variant), hidden.month, text, { hard: hidden.hard === true })
 }
 
 /**

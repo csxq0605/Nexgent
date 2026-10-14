@@ -51,3 +51,14 @@ test('an unknown problem kind still gets three entries', () => {
   assert.equal(entries.length, 3)
   assert.ok(entries.every(e => e.comment.includes('x')))
 })
+
+test('hard table feedback shows where the table disagrees with finance, never the rule', () => {
+  const result = judgeTableText('region', '2026-09', referenceTable('region', '2026-09', { withConvention: false, hard: true }), { hard: true })
+  const { primary, entries } = feedbackFor(result)
+  assert.equal(primary, 'finance-value')
+  assert.equal(entries.filter(counts).length, 3)
+  for (const entry of entries) {
+    assert.match(entry.comment, /财务/)
+    assert.ok(!/退货|return/.test(entry.comment), entry.comment)
+  }
+})

@@ -77,6 +77,27 @@ export const PLAN = {
 }
 
 /**
+ * Case difficulty. `standard`: feedback names the user's convention. `hard` (user 2026-10-14,
+ * "换一个特别难的"): the table family's convention is the finance department's net figures
+ * (returned orders count for neither orders nor revenue, and avg_order_value follows from
+ * them); every table case carries the month's returns file, and feedback only shows where
+ * the table disagrees with finance, row by row, never the rule. The code family is the same
+ * in both.
+ * @typedef {'standard' | 'hard'} Difficulty
+ */
+/** @type {Difficulty} */
+let difficulty = 'standard'
+
+/** Set the difficulty every later call generates and judges with. @param {Difficulty} value */
+export function useDifficulty(value) {
+  if (value !== 'standard' && value !== 'hard') throw new Error(`unknown difficulty ${value}`)
+  difficulty = value
+}
+
+/** The difficulty in force. */
+export const currentDifficulty = () => difficulty
+
+/**
  * Every case of one family, in plan order.
  * @param {Family} family
  * @returns {TaskCase[]}
@@ -86,7 +107,7 @@ export function familyCases(family) {
     const id = `${family}/${entry.set}/${entry.variant}-${entry.seed}`
     const set = /** @type {CaseSet} */ (entry.set)
     return family === 'tables'
-      ? tableCase({ id, set, variant: /** @type {any} */ (entry.variant), month: String(entry.seed) })
+      ? tableCase({ id, set, variant: /** @type {any} */ (entry.variant), month: String(entry.seed), hard: difficulty === 'hard' })
       : codeCase({ id, set, variant: /** @type {any} */ (entry.variant), seed: Number(entry.seed) })
   })
 }
