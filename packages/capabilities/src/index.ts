@@ -73,10 +73,13 @@ export { capabilityDraftTool, capabilityProposeTool, capabilityTools, capability
 export { capabilitiesProvider } from './provider.js'
 export { apply, CapabilitiesPlugin, name, type CapabilitiesPluginConfig } from './plugin.js'
 export * from './trial/index.js'
+export { checkJobLiterals, componentLiteralTexts, instanceLiteralText, jobLiteralSources, MAX_LITERAL_TEXT_BYTES, projectTaskMessages, type LiteralCheckComponent } from './instance-literals.js'
 export {
   improversDir,
   improverVersionOf,
   ImproverStore,
+  userImproversDir,
+  type ImproverStoreOptions,
   V0_IMPROVER_ACTIVATION,
   type ImproverActivation,
   type ImproverChain,

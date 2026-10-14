@@ -28,7 +28,13 @@
 
 ## 改进器版本（`ImproverStore`，步骤 6）
 
-`.nexgent/improvers/`（`improversDir(layout)`）是项目级的另一条版本线，与能力包分开采用、分开回滚（ADR 0008 决策 1，`data-formats.md` §改进器版本）。
+改进器是另一条版本线，与能力包分开采用、分开回滚（ADR 0008 决策 1，`data-formats.md` §改进器版本）。ADR 0012 起它是用户级的：
+
+- `ImproverStore.user({ home? })`（或不带目录的 `new ImproverStore()`）打开 `<NEXGENT_HOME>/improvers/`（`userImproversDir`，默认 `$NEXGENT_HOME` 或 `~/.nexgent`），`scope: 'user'`。同一主目录下的所有项目读到同一个生效的改进器，采用和回滚对它们都生效。
+- `ImproverStore.project(layout)` 打开项目里步骤 6 写过的 `.nexgent/improvers/`（`improversDir`），`scope: 'project'`，只读：能查看历史、读出改进器，`write`、`adopt`、`rollback` 都报 `improver/activation`；`resolve` 遇到读不出的改进器不写回滚，返回 `v0` 与 `fallback`。旧数据不迁移，也不会被用户级版本线读成生效版本。
+- 直接 `new ImproverStore(dir)` 按给定目录读写（`scope` 默认 `user`）；evolve、sdk 现有调用还在用项目目录，换成用户级由它们各自的工作包完成。
+
+两种作用域的方法相同：
 
 - `write(bundle)`：按 `assertImproverBundle` 与 schema 校验后，把规范化文本以独占创建写到 `bundles/<version>.json`。同一内容得到同一版本（`improverVersionOf`），已存在不重写；内容等于 `v0` 的版本号就是 `v0`，不写文件。
 - `load(version)`：`v0` 返回内置 `IMPROVER_V0`；其余每次读都检查 schema、上下限与占位符，并核对内容哈希等于版本号。读不到是 `improver/not-found`，其他问题是 `improver/invalid`。
@@ -62,6 +68,7 @@
 - `capability_draft`：校验全部输入（路径、上限、种类）后才写；返回修订号 = 本会话该组件的第几次草稿。工具说明里写明每种组件入口文件的格式与一个最小示例（`src/formats.ts`，测试保证示例能通过校验）。
 - `capability_try`：校验草稿（契约 schema、名字一致、入口文件存在、已注册的种类校验；格式不合时一次列出所有问题并附上期望格式），冻结为该修订，加载进本会话。插件先问用户（`risk: high`，只有“本次允许”），拒绝时不导入、不执行任何代码；加载失败时本会话保留试用前的状态。
 - `capability_propose`：每个组件在最近一次试用之后必须有一次成功使用（函数或插件的工具调用、`load_skill`、带该预设的 `delegate` / `spawn_teammate` / 工作流节点、`spawn_teammate`、带图的 `workflow`；上下文策略要求试用之后有一轮正常结束），否则拒绝并列出缺什么。通过后写候选包与 `candidates/<id>/`。
+- 改进作业的提议会话里，`capability_propose` 还做具体数值检查（ADR 0013 决定 2，`src/instance-literals.ts`）：把组件的全部文本文件与作业的反馈原文、反馈任务各版本成果的文本文件比较，原题里出现、而在本项目少于两个任务的用户消息里出现的数值或日期（`findInstanceLiterals`）命中即拒绝（`capability/instance-literal`）。工具结果只列出命中的值、所在文件与来源，不给改法；会话可以改后再提。用户自己任务里的提交不做这项检查。门控可以复用 `checkJobLiterals`、`jobLiteralSources`、`projectTaskMessages`。
 - 会话所用的能力版本里已有内容完全相同的同名组件时（门控候选侧回放“起草、试用、提交”就是这种情形），`capability_try` 与 `capability_propose` 不报错也不写候选，直接说明“已在当前版本中（版本号）”；内容不同的同名组件照常走试用与提交。
 - 三个工具都拒绝成员调用。
 
@@ -94,6 +101,9 @@
     - 副本必须放在项目之外。
     副本里的门控在副本外另建回放副本，采用只发生在副本里。`release({ keep })` 默认删除副本；要求保留时，不超过 `KEEP_COPY_MAX_BYTES`（快照上限）就保留并返回 `{ root, bytes }`，超过则删除并返回 `too-large`。
   - 作业候选的回放请求带 `improvement: JobRunAttribution`（`jobId`、`improverVersion`，比较臂另带 `metaJobId`、`comparisonArm`），来自作业的 `job.json`；SDK 的回放进程与评审把这些写进账本。
+- 步骤 6 返工（ADR 0013，纪元 `adr-0013`），只对改进作业的候选：
+  - **具体数值**：核对纪元之后、建回放集之前，`candidateInstanceLiterals`（`src/trial/literals.ts`）用契约 `findInstanceLiterals` 检查提出组件的文本文件。来源是作业的反馈原文与请求 `note`、作业所涉会话的成果各版本文本文件；项目常量按全部根任务会话的用户消息算。命中即占用候选、写 `rejected / instance-literal` 决定（带 `instanceLiterals`），不建试验、不回放，`runGate` 返回 `{ status: 'refused', decision }`。
+  - **同类题**：选择集中除反馈原题外、首条消息与它至少有一个词相同的用例。它们的确定性检查单独计为 `TrialTally.similar`（没有时为 `'none'`），由 `decideTrial` 判定 `similar-regression` 或 `no-similar-cases`；说明文字写出同类题通过率，待批准时写明“只在原题上验证过”。用户任务自己提出的候选不受影响。
 - 用量退化：`checkUsageRegression` 在根会话解析版本前和每轮结束后执行，只看 `gate` / `approval` 采用之后、该版本上的非试验记录：新组件工具的 `tool.call` 错误序列与根任务 `task.outcome.checks`（刚结束那一轮用 `turnOutcome()` 补上），交给 `decideUsageRollback`，触发即写 `usage-regression` 回滚。
 
 ## Known Limitations and Deferred Work
