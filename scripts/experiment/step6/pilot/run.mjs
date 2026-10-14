@@ -14,7 +14,7 @@
  *   dev        the dev cases, one session each; then the `base` arm is copied
  *   feedback   template feedback from the deterministic points only (feedback.mjs
  *              `pilotFeedback`); three counted entries start an improvement job by itself
- *              (improver v0, epoch adr-0013); the orchestration waits for it, and answers an
+ *              (improver v0, epoch adr-0014); the orchestration waits for it, and answers an
  *              approval request in the user's place, recorded; then the `parent` arm is copied
  *   memory     a copy of `base` in which the orchestration writes and adopts one context
  *              policy `project-notes` through the `@nexgent/capabilities` store: the counted
@@ -398,7 +398,7 @@ async function runPilotFamily(ctx, family) {
     }
 
     step = 'parent'
-    obs.arms.parent = { root: join(dir, 'arms', 'parent'), home: homeOf(`${family}-parent`), from: 'the project after the dev feedback and its improvement jobs (improver v0, epoch adr-0013)' }
+    obs.arms.parent = { root: join(dir, 'arms', 'parent'), home: homeOf(`${family}-parent`), from: 'the project after the dev feedback and its improvement jobs (improver v0, epoch adr-0014)' }
     await copyProject(root, obs.arms.parent.root, { jobs: true })
     await rm(obs.arms.parent.home, { recursive: true, force: true })
     await cp(home, obs.arms.parent.home, { recursive: true, filter: source => !source.endsWith('.lock') })
