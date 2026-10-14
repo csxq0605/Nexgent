@@ -29,7 +29,7 @@ import {
 import { writeCandidate, type ProposedComponent } from './candidates.js'
 import { applyDraft, draftDirectory, readComponentDirectory } from './drafts.js'
 import { componentFormat } from './formats.js'
-import { checkJobLiterals, instanceLiteralText } from './instance-literals.js'
+import { checkJobLiterals, findJobLayout, instanceLiteralText, layoutOfSessionsDir } from './instance-literals.js'
 import { findUseProof } from './proofs.js'
 import type { CapabilityService } from './service.js'
 import { readComponentFiles } from './store.js'
@@ -183,13 +183,27 @@ export function capabilityTryTool(service: CapabilityService, readRecords: Recor
   }
 }
 
-/** The project whose capabilities the service writes (`<root>/.nexgent/capabilities`): its sessions, outputs and jobs. */
+/** The project whose capabilities the service writes (`<root>/.nexgent/capabilities`). */
 function projectLayout(service: CapabilityService): WorkspaceLayout {
   return resolveWorkspaceLayout(dirname(dirname(service.store.directory)))
 }
 
+/** What the tools learn from the host beyond the service. */
+export interface CapabilityToolsOptions {
+  /** The session store's directory: a propose session in a snapshot copy writes its session to the real project, which holds the job. */
+  readonly sessionsDir?: () => string | undefined
+}
+
+/** Where an improvement job may be: the project the session file is written to, then the service's own project. */
+function jobLayouts(service: CapabilityService, options: CapabilityToolsOptions): WorkspaceLayout[] {
+  const sessionsDir = options.sessionsDir?.()
+  const fromSessions = sessionsDir === undefined ? undefined : layoutOfSessionsDir(sessionsDir)
+  const own = projectLayout(service)
+  return fromSessions === undefined || fromSessions.root === own.root ? [own] : [fromSessions, own]
+}
+
 /** `capability_propose`. */
-export function capabilityProposeTool(service: CapabilityService, readRecords: RecordReader): Tool {
+export function capabilityProposeTool(service: CapabilityService, readRecords: RecordReader, options: CapabilityToolsOptions = {}): Tool {
   return {
     definition: definition(CAPABILITY_PROPOSE_TOOL, PROPOSE_DESCRIPTION),
     handler: async (raw, context) => {
@@ -247,7 +261,15 @@ export function capabilityProposeTool(service: CapabilityService, readRecords: R
       const improvement = start?.type === 'session.start' && start.purpose === 'improvement' ? start.improvement : undefined
       // ADR 0013 decision 2: a job's component must not carry the concrete values of the task it was learned from.
       if (improvement !== undefined) {
-        const hits = await checkJobLiterals(projectLayout(service), improvement.jobId, components)
+        const layouts = jobLayouts(service, options)
+        const jobLayout = await findJobLayout(layouts, improvement.jobId)
+        const hits = jobLayout === undefined ? undefined : await checkJobLiterals(jobLayout, improvement.jobId, components)
+        // An unchecked component never goes through: without the job there is nothing to compare it with.
+        if (hits === undefined) {
+          throw new NexgentError('tool/failed',
+            `not proposed; improvement job ${improvement.jobId} cannot be read (looked in ${layouts.map(layout => layout.root).join(', ')}), so the component cannot be checked for values of the task it was learned from`,
+            { details: { jobId: improvement.jobId, roots: layouts.map(layout => layout.root) } })
+        }
         if (hits.length > 0) {
           const shown = hits.slice(0, CAPABILITY_LIMITS.maxInstanceLiterals)
           throw new NexgentError('capability/instance-literal',
@@ -277,6 +299,6 @@ export function capabilityProposeTool(service: CapabilityService, readRecords: R
 }
 
 /** All three tools. */
-export function capabilityTools(service: CapabilityService, readRecords: RecordReader): Tool[] {
-  return [capabilityDraftTool(service, readRecords), capabilityTryTool(service, readRecords), capabilityProposeTool(service, readRecords)]
+export function capabilityTools(service: CapabilityService, readRecords: RecordReader, options: CapabilityToolsOptions = {}): Tool[] {
+  return [capabilityDraftTool(service, readRecords), capabilityTryTool(service, readRecords), capabilityProposeTool(service, readRecords, options)]
 }

@@ -68,7 +68,7 @@
 - `capability_draft`：校验全部输入（路径、上限、种类）后才写；返回修订号 = 本会话该组件的第几次草稿。工具说明里写明每种组件入口文件的格式与一个最小示例（`src/formats.ts`，测试保证示例能通过校验）。
 - `capability_try`：校验草稿（契约 schema、名字一致、入口文件存在、已注册的种类校验；格式不合时一次列出所有问题并附上期望格式），冻结为该修订，加载进本会话。插件先问用户（`risk: high`，只有“本次允许”），拒绝时不导入、不执行任何代码；加载失败时本会话保留试用前的状态。
 - `capability_propose`：每个组件在最近一次试用之后必须有一次成功使用（函数或插件的工具调用、`load_skill`、带该预设的 `delegate` / `spawn_teammate` / 工作流节点、`spawn_teammate`、带图的 `workflow`；上下文策略要求试用之后有一轮正常结束），否则拒绝并列出缺什么。通过后写候选包与 `candidates/<id>/`。
-- 改进作业的提议会话里，`capability_propose` 还做具体数值检查（ADR 0013 决定 2，`src/instance-literals.ts`）：把组件的全部文本文件与作业的反馈原文、反馈任务各版本成果的文本文件比较，原题里出现、而在本项目少于两个任务的用户消息里出现的数值或日期（`findInstanceLiterals`）命中即拒绝（`capability/instance-literal`）。工具结果只列出命中的值、所在文件与来源，不给改法；会话可以改后再提。用户自己任务里的提交不做这项检查。门控可以复用 `checkJobLiterals`、`jobLiteralSources`、`projectTaskMessages`。
+- 改进作业的提议会话里，`capability_propose` 还做具体数值检查（ADR 0013 决定 2，`src/instance-literals.ts`）：把组件的全部文本文件与作业的反馈原文、反馈任务各版本成果的文本文件比较，原题里出现、而在本项目少于两个任务的用户消息里出现的数值或日期（`findInstanceLiterals`）命中即拒绝（`capability/instance-literal`）。工具结果只列出命中的值、所在文件与来源，不给改法；会话可以改后再提。提议会话开在快照副本里，作业、反馈与成果都在真实项目：工具从会话存储的 `sessionsDir`（`@nexgent/sdk` 把它指向真实项目）推出真实项目，在那里与本项目里找作业（`layoutOfSessionsDir`、`findJobLayout`）；两处都读不到作业时拒绝提出（`tool/failed`），不跳过检查。用户自己任务里的提交不做这项检查。门控可以复用 `checkJobLiterals`、`jobLiteralSources`、`projectTaskMessages`。
 - 会话所用的能力版本里已有内容完全相同的同名组件时（门控候选侧回放“起草、试用、提交”就是这种情形），`capability_try` 与 `capability_propose` 不报错也不写候选，直接说明“已在当前版本中（版本号）”；内容不同的同名组件照常走试用与提交。
 - 三个工具都拒绝成员调用。
 

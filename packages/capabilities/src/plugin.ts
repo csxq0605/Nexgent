@@ -46,8 +46,13 @@ export const CapabilitiesPlugin = {
       const store = ctx.get('session')
       return store === undefined ? [] : (await store.readAll(sessionId)).records
     }
+    // A propose session in a snapshot copy writes its session to the real project, which holds the job.
+    const sessionsDir = (): string | undefined => {
+      const dir = (ctx.get('session') as { readonly sessionsDir?: unknown } | undefined)?.sessionsDir
+      return typeof dir === 'string' ? dir : undefined
+    }
     ctx.inject(['tools'], scope => {
-      for (const tool of capabilityTools(service, readRecords)) {
+      for (const tool of capabilityTools(service, readRecords, { sessionsDir })) {
         scope.effect(() => scope.tools.register(tool), `tools.register(${tool.definition.name})`)
       }
     })

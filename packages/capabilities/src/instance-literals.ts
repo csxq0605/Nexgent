@@ -15,11 +15,13 @@
  * Used by `capability_propose` in a propose session and, through the same
  * functions, before a gate replays (`src/trial/`).
  */
-import { readdir, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { access, readdir, readFile } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import {
   componentDir,
   findInstanceLiterals,
+  NEXGENT_DIR,
+  resolveWorkspaceLayout,
   IMPROVEMENT_FILES,
   IMPROVEMENTS_DIR,
   type CapabilityComponentKind,
@@ -157,13 +159,38 @@ export interface LiteralCheckComponent {
 }
 
 /**
+ * The project of a sessions directory `<root>/.nexgent/sessions`, or
+ * `undefined` for any other directory. A propose session works in a snapshot
+ * copy while its session file is written to the real project (`@nexgent/sdk`
+ * routes the session store there), so this names the project that holds the
+ * job, its feedback and its deliverables.
+ */
+export function layoutOfSessionsDir(sessionsDir: string): WorkspaceLayout | undefined {
+  const dataDir = dirname(sessionsDir)
+  if (basename(sessionsDir) !== 'sessions' || basename(dataDir) !== NEXGENT_DIR) return undefined
+  const layout = resolveWorkspaceLayout(dirname(dataDir))
+  return layout.sessions === sessionsDir ? layout : undefined
+}
+
+/** The first of `layouts` whose `.nexgent/improvements/<jobId>/job.json` exists. */
+export async function findJobLayout(layouts: readonly WorkspaceLayout[], jobId: string): Promise<WorkspaceLayout | undefined> {
+  for (const layout of layouts) {
+    const found = await access(join(layout.dataDir, IMPROVEMENTS_DIR, jobId, IMPROVEMENT_FILES.job)).then(() => true, () => false)
+    if (found) return layout
+  }
+  return undefined
+}
+
+/**
  * The instance-literal hits of components proposed for an improvement job,
  * each `path` prefixed with the component directory (`skills/<name>/SKILL.md`).
- * Empty when nothing hits or the job cannot be read (there is nothing to compare).
+ * Empty when nothing hits; `undefined` when the job cannot be read, so the
+ * caller can refuse instead of letting an unchecked component through.
  */
-export async function checkJobLiterals(layout: WorkspaceLayout, jobId: string, components: readonly LiteralCheckComponent[]): Promise<InstanceLiteralHit[]> {
+export async function checkJobLiterals(layout: WorkspaceLayout, jobId: string, components: readonly LiteralCheckComponent[]): Promise<InstanceLiteralHit[] | undefined> {
   const sources = await jobLiteralSources(layout, jobId)
-  if (sources === undefined || sources.length === 0) return []
+  if (sources === undefined) return undefined
+  if (sources.length === 0) return []
   const texts = components.flatMap(component => componentLiteralTexts(component.files).map(text => ({ path: `${componentDir(component.kind, component.name)}/${text.path}`, text: text.text })))
   return findInstanceLiterals(texts, sources, await projectTaskMessages(layout))
 }
