@@ -8,7 +8,8 @@ import { diagnosisPrompt, proposalBrief } from '../src/index.js'
  * is the step-5 text as data (kept only in the kernel contract). The
  * step-5 prompts are frozen here as they were sent before step 6, so a
  * project that never adopted another improver gets the same prompts word
- * for word.
+ * for word; ADR 0010 adds one section listing adopted capability
+ * components, only when the job's version has any.
  */
 const TS = '2026-10-13T00:00:00.000Z'
 const job: ImprovementJob = {
@@ -59,6 +60,13 @@ describe('improver v0 reproduces the step-5 prompts', () => {
     const prompt = diagnosisPrompt({ job, feedback: [], sessions: [] })
     expect(prompt.startsWith(`# Policy\n${STEP5_POLICY}\n\n# Why this job started\n`)).toBe(true)
     expect(diagnosisPrompt({ job, feedback: [], sessions: [], improver: IMPROVER_V0 })).toBe(prompt)
+    // ADR 0010: no adopted components (the baseline) leaves the step-5 prompt as it was.
+    expect(diagnosisPrompt({ job, feedback: [], sessions: [], adopted: { version: 'baseline', components: [] } })).toBe(prompt)
+    // With adopted components, one section is added before the sessions; the rest is unchanged.
+    const adopted = diagnosisPrompt({ job, feedback: [], sessions: [], adopted: { version: 'a'.repeat(64), components: [{ kind: 'skill', name: 'tests-first', description: 'Write the tests first.' }] } })
+    const section = `\n\n# Adopted capabilities\nThis job runs on capability version ${'a'.repeat(64)}.`
+    expect(adopted.replace(adopted.slice(adopted.indexOf(section), adopted.indexOf('\n\n# Sessions to examine')), '')).toBe(prompt)
+    expect(adopted).toContain('\n- skill tests-first: Write the tests first.')
   })
 
   it('proposal brief, with 0, 2 and 5 failure types, for every kind', () => {

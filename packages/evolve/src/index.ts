@@ -82,6 +82,7 @@ export {
 } from './propose.js'
 export { trialSpend, trialStatus, type GateOutcome, type TrialStarter } from './trial.js'
 export { sweepAdoptedJobs } from './first-use.js'
+export { adoptedCapabilities, adoptedSection, type AdoptedCapabilities, type AdoptedComponent } from './adopted.js'
 export { createImprovementStages, type ImprovementStagesOptions } from './stages.js'
 export { jobImproverVersion, PROJECT_IMPROVERS, trialComparison, type ImproverSource, type PinnedImprover } from './improver.js'
 export {

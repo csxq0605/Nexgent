@@ -691,6 +691,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 **诊断。** 作业先打开一个诊断会话（`session.start.purpose: "improvement"`、`improvement: { jobId, phase: "diagnose" }`，模型与 thinking 取 `improvement.model` / `improvement.thinking`）。它不出现在对话列表里，只能在“改进”页打开。这个会话只有四个只读工具（`IMPROVEMENT_DIAGNOSIS_TOOLS`）：`improve_read_session`（某个会话按轮与记录类型的切片）、`improve_read_ledger`（按 `taskId` / `sessionId` / `memberId` / `capabilityVersion` 的账本切片）、`improve_list_feedback`、`improve_report_diagnosis`；切片默认 64 KiB、最多 256 KiB，超出截断并标明。模型用 `improve_report_diagnosis` 交结构化诊断，宿主按 schema 校验并核对证据记录存在，不通过就在工具结果里说明并允许重交，共最多 3 次，仍不通过作业以 `failed` 结束（`improvement/invalid-diagnosis`）。
 
+诊断会话的第一条消息依次是 `# Policy`（改进器的诊断策略）、`# Why this job started`、`# Adopted capabilities`（ADR 0010：作业所用能力版本不是 `baseline` 时才有；列出版本号与每个组件的种类、名字、描述，上下文策略另附截到 1200 字符的 `instructions`，并说明在更早版本上跑的会话没有这些组件）、`# Sessions to examine`、`# Your report`。没有采用过任何组件的项目，这条消息与步骤 5 逐字相同。
+
 `<jobId>/diagnosis.json`（接受后写一次）：
 
 | 字段 | 类型 | 说明 |
@@ -783,7 +785,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 拒绝的原因（`ImproverChangeRefusal`）：`not-one-change`（一个列表，或多于该算子的字段）、`evaluator-field`（字段名或 `param` 是评价器字段，如 `costRatioCap`、`guardCases`、`reviewer`、`autoImprove`、`improvement`）、`out-of-bounds`、`invalid`（未知算子、缺字段、改完的改进器不合法）、`no-op`（改完和父改进器相同）。拒绝在工具结果里说明，可重交，共最多 3 次，仍不通过以 `failed` 结束（`improver/invalid-change`）。接受后写子改进器到 `improvers/bundles/`，再写 `<jobId>/change.json`：`{ formatVersion, jobId, createdAt, sessionId, attempts, parentVersion, childVersion, change, rationale ≤1000 字符 }`。
 
 **父子比较。** 起点（`ComparisonOrigin`，ADR 0009 取代 ADR 0008 的起点规则）按顺序选：
-- `kind: "unresolved"`：元改进作业开始前结束的、由反馈触发的能力作业里，最近一个没能解决反馈的作业（结束于 `rejected`、`failed` 或 `no-proposal`；门控结论里基线已通过全部反馈检查，即 `verdict.feedbackPassRate.baseline` 为 1 的不算；反馈任务不能重放的也不算）。`capabilityVersion` 是它开始时的能力版本：有 `baseVersion` 用它，否则取作业离开 `queued` 时（没有则用创建时）采用历史里生效的版本。
+- `kind: "unresolved"`：元改进作业开始前结束的、由反馈触发的能力作业里，最近一个没能解决反馈的作业（结束于 `rejected`、`failed` 或 `no-proposal`；门控结论里基线已通过全部反馈检查，即 `verdict.feedbackPassRate.baseline` 为 1 的不算；反馈任务不能重放的也不算）。`capabilityVersion` 是它的反馈任务在第一次反馈之前运行的版本（ADR 0010 取代 ADR 0009 的“开始时的版本”；与作业开始时的版本相同时结果一样，不同时说明中间有采用，问题可能已被覆盖）。作业开始时的版本：有 `baseVersion` 用它，否则取作业离开 `queued` 时（没有则用创建时）采用历史里生效的版本；两者不同时元作业日志写明。
 - `kind: "feedback-version"`：没有这样的作业时，取最近一个结束的、由反馈触发的能力作业，`capabilityVersion` 是它的反馈任务在第一次反馈之前运行的版本（`session.start.capabilityVersion`，其后有 `capability.version` 时取最后一条；都没有为 `baseline`）。
 - 两种都没有时元改进作业失败。
 

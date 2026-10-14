@@ -12,6 +12,7 @@ import { SessionFeedbackStore } from '@nexgent/tasking'
 import { diagnosisNudge, diagnosisPrompt, diagnosisTools, sumTurns, type DiagnosisState } from './diagnosis.js'
 import { collectCandidate, contextPolicyCheckText, contextPolicyProposeText, findFeedbackTask, newSessionId, pendingContextPolicies, prepareProposalCopy, proposalBrief, proposeRecords } from './propose.js'
 import { trialComparison } from './improver.js'
+import { adoptedCapabilities } from './adopted.js'
 import { createMetaStages } from './meta.js'
 import { runImprovementJob, type ImprovementStages } from './runner.js'
 import type { ImprovementSessionRunner, ImprovementTurnResult } from './session-runner.js'
@@ -94,7 +95,7 @@ export function createImprovementStages(options: ImprovementStagesOptions): Impr
       })
       const turns: ImprovementTurnResult[] = []
       try {
-        let text = diagnosisPrompt({ job, feedback: await feedbackOf(layout, job), sessions: subject.sessions, improver: input.improver.bundle })
+        let text = diagnosisPrompt({ job, feedback: await feedbackOf(layout, job), sessions: subject.sessions, improver: input.improver.bundle, adopted: await adoptedCapabilities(layout) })
         let nudges = 0
         for (;;) {
           const before = state.attempts
