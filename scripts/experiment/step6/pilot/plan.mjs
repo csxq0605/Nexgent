@@ -103,7 +103,7 @@ export async function buildPlan() {
       list: PILOT_ARMS,
       base: 'dev 任务与反馈之前的项目快照的副本',
       memory: { ...MEMORY_POLICY, rule: '在 base 副本里经 @nexgent/capabilities 的存储接口直接写入并采用一条上下文策略：instructions 为该类全部计数反馈原文，按时间先后；超长时去掉最早的；不诊断、不过门控' },
-      parent: 'dev 反馈触发改进作业（改进器 v0，adr-0013 纪元）之后的项目副本',
+      parent: 'dev 反馈触发改进作业（改进器 v0，adr-0014 纪元：ADR 0014 取代 0013 的同类题定义与规则 id）之后的项目副本',
       child: '试点不跑（不跑元改进）',
       isolation: '每个任务族、每个臂用自己的 NEXGENT_HOME',
       holdoutRuns: '每题每臂 3 次，每次在该臂的新副本里新开会话，关自动改进；没交成果时同一会话追问一次（PRESENT_REQUEST），按臂计数',
