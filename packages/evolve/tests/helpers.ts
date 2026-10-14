@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { afterEach } from 'vitest'
+import { afterEach, beforeEach } from 'vitest'
 import { resolveWorkspaceLayout, ZERO_USAGE, type FeedbackListing, type WorkspaceLayout } from '@nexgent/kernel'
 import type { ImprovementStages } from '../src/index.js'
 
@@ -11,6 +11,21 @@ const created: string[] = []
 afterEach(async () => {
   await Promise.all(created.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
+
+// ADR 0012: the user's improvers, meta queue and config live in the Nexgent home; every test gets its own.
+beforeEach(async () => {
+  process.env.NEXGENT_HOME = await tempDir()
+})
+
+/** The test's Nexgent home. */
+export function home(): string {
+  return process.env.NEXGENT_HOME!
+}
+
+/** Write the test home's user config (`<home>/config.json`). */
+export async function userConfig(meta: Record<string, unknown>): Promise<void> {
+  await writeFile(join(home(), 'config.json'), `${JSON.stringify({ version: 1, improvement: { meta } })}\n`)
+}
 
 /** A fresh directory removed after the test. */
 export async function tempDir(): Promise<string> {

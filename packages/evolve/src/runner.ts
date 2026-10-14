@@ -22,6 +22,13 @@
  * with the move to `diagnosing`; every phase gets that bundle, and a
  * resumed trial loads the same version again. An improver that cannot be
  * loaded fails the job.
+ *
+ * ADR 0012: the improver in force is the user's (below the Nexgent home),
+ * and jobs record `improverScope: "user"`. A finished capability job is
+ * counted in the user's meta queue (comparison arms never are); a full
+ * batch starts a meta job in this project, which this process runs next.
+ * A meta job's settings and budget are the user config's, and it frees the
+ * user's meta slot when it ends.
  */
 import { appendFile, rm } from 'node:fs/promises'
 import {
@@ -33,16 +40,18 @@ import {
   type ImprovementConfig,
   type ImprovementCostPhase,
   type LLMUsage,
+  type MetaImprovementConfig,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
 import { JsonlLedger } from '@nexgent/session'
 import { budgetStatus, type BudgetStatus } from './budget.js'
 import type { MetaStageInput, MetaStages } from './meta.js'
-import { jobImproverVersion, PROJECT_IMPROVERS, type ImproverSource, type PinnedImprover } from './improver.js'
+import { jobImproverVersion, pinnedSource, type ImproverSource, type PinnedImprover } from './improver.js'
 import { jobPaths, listJobs, readJob, transitionJob, updateJob, type JobPatch } from './jobs.js'
 import { breakStaleLock, readLockPid, tryCreateLock } from './lock.js'
 import { improvementsDir } from './paths.js'
 import { releaseSlot } from './queue.js'
+import { countFinishedJobForUser, homeOf, readUserConfig, releaseUserMeta, userImprovers, userMetaBudgetStatus } from './user.js'
 import { TERMINAL_STATUSES, type ImprovementJob, type ImprovementJobStatus, type PhaseCost } from './types.js'
 
 /** What a phase spent. */
@@ -122,8 +131,10 @@ export const PENDING_STAGES: ImprovementStages = {
 /** Options of {@link runImprovementJob}. */
 export interface RunJobOptions {
   readonly stages?: ImprovementStages
-  /** Where the job reads its improver (default {@link PROJECT_IMPROVERS}: the project's improver store). */
+  /** Where the job reads its improver (default the user's improver line below {@link RunJobOptions.home}). */
   readonly improvers?: ImproverSource
+  /** The Nexgent home (default `NEXGENT_HOME` / `~/.nexgent`): the user's improvers, meta queue and config. */
+  readonly home?: string
   /** Run the next batch's job in this process when it fills up meanwhile (default true). */
   readonly chain?: boolean
   readonly now?: () => Date
@@ -150,31 +161,52 @@ function mergeCost(previous: PhaseCost | undefined, spend: PhaseSpend): PhaseCos
 export async function runImprovementJob(layout: WorkspaceLayout, jobId: string, options: RunJobOptions = {}): Promise<RunJobResult> {
   const directory = improvementsDir(layout)
   const now = options.now ?? (() => new Date())
+  const home = homeOf(options.home)
   const ran: ImprovementJob[] = []
-  let next: string | undefined = jobId
+  const pending: string[] = [jobId]
   let skipped: string | undefined
-  while (next !== undefined) {
-    const id: string = next
-    next = undefined
+  while (pending.length > 0) {
+    const id = pending.shift()!
     const outcome = await runOne(layout, directory, id, options)
     if (outcome.skipped !== undefined) {
       if (ran.length === 0) skipped = outcome.skipped
       break
     }
-    ran.push(outcome.job)
+    const job = outcome.job
+    ran.push(job)
     const loaded = await readProjectConfig(layout.configFile).catch(() => undefined)
     const threshold = loaded?.config.improvement.feedbackThreshold
-    const metaConfig = loaded?.config.improvement.meta
-    const parentVersion = metaConfig?.enabled === true ? (await (options.improvers ?? PROJECT_IMPROVERS).current(layout).catch(() => undefined))?.version : undefined
     const started = await releaseSlot(directory, id, {
       autoStart: loaded?.config.autoImprove === true,
       ...(threshold === undefined ? {} : { threshold }),
-      ...(metaConfig === undefined || parentVersion === undefined ? {} : { meta: { enabled: true, everyJobs: metaConfig.everyJobs, parentVersion } }),
       now: now(),
     })
-    if (started !== undefined && options.chain !== false) next = started.id
+    if (started !== undefined && options.chain !== false) pending.push(started.id)
+    // Comparison arms run in copies and touch nothing of the user's.
+    if (job.arm !== undefined) continue
+    if (job.kind === 'meta') {
+      await releaseUserMeta(home, id, now()).catch(() => undefined)
+      continue
+    }
+    const meta = await startedMeta(home, layout, job, options, now())
+    if (meta !== undefined && options.chain !== false) pending.push(meta.id)
   }
   return { jobs: ran, ...(skipped === undefined ? {} : { skipped }) }
+}
+
+/** Count a finished capability job in the user's meta queue; with the user's switch on, a full batch starts a meta job here. */
+async function startedMeta(home: string, layout: WorkspaceLayout, job: ImprovementJob, options: RunJobOptions, now: Date): Promise<ImprovementJob | undefined> {
+  try {
+    const meta = (await readUserConfig(home)).improvement.meta
+    const parentVersion = meta.enabled ? (await (options.improvers ?? userImprovers(home)).current(layout).catch(() => undefined))?.version : undefined
+    return await countFinishedJobForUser(home, layout, job, {
+      ...(parentVersion === undefined ? {} : { meta: { enabled: true, everyJobs: meta.everyJobs, parentVersion } }),
+      now,
+    })
+  } catch {
+    // Counting is bookkeeping: a broken user config or queue never changes the job's outcome.
+    return undefined
+  }
 }
 
 /** Write `improvement.end` for a job that reached a final status (best effort: accounting never changes the outcome). */
@@ -189,6 +221,7 @@ async function writeEnd(layout: WorkspaceLayout, job: ImprovementJob): Promise<v
     phases: job.phases,
     improvementId: job.id,
     ...(job.improverVersion === undefined ? {} : { improverVersion: job.improverVersion }),
+    ...(job.improverScope === undefined ? {} : { improverScope: job.improverScope }),
     ...(job.meta?.childVersion === undefined ? {} : { childVersion: job.meta.childVersion }),
     ...(job.arm === undefined ? {} : { metaJobId: job.arm.metaJobId, comparisonArm: job.arm.arm }),
     ...(job.candidateId === undefined ? {} : { candidateId: job.candidateId }),
@@ -231,10 +264,21 @@ async function runOne(layout: WorkspaceLayout, directory: string, jobId: string,
     const spend = async (phase: ImprovementCostPhase, cost: PhaseSpend) => {
       job = await updateJob(directory, jobId, current => ({ phases: { ...current.phases, [phase]: mergeCost(current.phases[phase], cost) } }), now())
     }
-    // Meta jobs spend the meta budget; capability jobs the improvement budget (ADR 0008 decision 3).
+    // Meta jobs spend the user's meta budget (ADR 0012); capability jobs the project's improvement budget.
     const isMeta = job.kind === 'meta'
-    const status = async (): Promise<BudgetStatus> => budgetStatus((await listJobs(directory)).filter(item => (item.kind === 'meta') === isMeta), isMeta ? config.meta.budget : config.budget, now())
-    const source = options.improvers ?? PROJECT_IMPROVERS
+    const home = homeOf(options.home)
+    let metaConfig: MetaImprovementConfig | undefined
+    if (isMeta) {
+      try {
+        metaConfig = (await readUserConfig(home)).improvement.meta
+      } catch (error) {
+        return { job: await move('failed', `The user config cannot be read: ${(error as Error).message}`, undefined, error) }
+      }
+    }
+    const status = async (): Promise<BudgetStatus> => (metaConfig !== undefined
+      ? userMetaBudgetStatus(home, metaConfig.budget, now())
+      : budgetStatus((await listJobs(directory)).filter(item => item.kind !== 'meta'), config.budget, now()))
+    const source = options.improvers ?? userImprovers(home)
     let improver: PinnedImprover | undefined
     const input = async (): Promise<StageInput> => ({
       layout, job, config, budget: await status(), log, improver: improver!,
@@ -249,15 +293,17 @@ async function runOne(layout: WorkspaceLayout, directory: string, jobId: string,
       await move('budget-exhausted', `The ${isMeta ? 'meta improvement' : 'improvement'} budget is spent (${current.used} of ${current.limit} tokens since ${current.windowStart}); stopped before the ${phase} phase.`)
       return true
     }
-    if (isMeta) {
-      return { job: await runMeta({ layout, config, log, move, spend, halt, status, now, source, stages: stages.meta, get: () => job, set: next => { job = next }, directory }) }
+    if (metaConfig !== undefined) {
+      return { job: await runMeta({ layout, config, meta: metaConfig, home, log, move, spend, halt, status, now, source, stages: stages.meta, get: () => job, set: next => { job = next }, directory }) }
     }
 
     try {
       let candidateId = job.candidateId
       // A job pins the improver in force when it starts; a resumed trial keeps the version it pinned.
       try {
-        improver = resume ? { version: jobImproverVersion(job), bundle: await source.load(layout, jobImproverVersion(job)) } : await source.current(layout)
+        improver = resume
+          ? { version: jobImproverVersion(job), bundle: await pinnedSource(job, source, options.improvers !== undefined).load(layout, jobImproverVersion(job)) }
+          : await source.current(layout)
       } catch (error) {
         if (resume || !(await halt('diagnose'))) await move('failed', `The improver ${resume ? jobImproverVersion(job) : 'in force'} cannot be loaded: ${(error as Error).message}`, undefined, error)
         return { job }
@@ -265,7 +311,7 @@ async function runOne(layout: WorkspaceLayout, directory: string, jobId: string,
       const version = improver.version
       if (!resume) {
         if (await halt('diagnose')) return { job }
-        await move('diagnosing', undefined, { improverVersion: version })
+        await move('diagnosing', undefined, { improverVersion: version, improverScope: 'user' })
         await log(`improver ${version}`)
         const diagnosis = await stages.diagnose(await input())
         await spend('diagnose', diagnosis)
@@ -308,6 +354,9 @@ interface MetaRun {
   readonly layout: WorkspaceLayout
   readonly directory: string
   readonly config: ImprovementConfig
+  /** The user config's meta settings. */
+  readonly meta: MetaImprovementConfig
+  readonly home: string
   readonly stages: MetaStages | undefined
   readonly source: ImproverSource
   log(line: string): Promise<void>
@@ -339,10 +388,10 @@ async function runMeta(run: MetaRun): Promise<ImprovementJob> {
       return await move('failed', `The improver in force cannot be loaded: ${(error as Error).message}`, undefined, error)
     }
     const meta = { ...(run.get().meta ?? { basis: [] }), parentVersion: parent.version }
-    await move('meta-diagnosing', undefined, { improverVersion: parent.version, meta })
+    await move('meta-diagnosing', undefined, { improverVersion: parent.version, improverScope: 'user', meta })
     await log(`parent improver ${parent.version}`)
     const input = async (): Promise<MetaStageInput> => ({
-      layout, job: run.get(), config, budget: await run.status(), improver: parent, log,
+      layout, job: run.get(), config, meta: run.meta, home: run.home, budget: await run.status(), improver: parent, log,
       record: async patch => { run.set(await updateJob(directory, run.get().id, patch, run.now())) },
       budgetSpent: async () => (await run.status()).exhausted,
     })

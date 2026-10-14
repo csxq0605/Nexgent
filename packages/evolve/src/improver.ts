@@ -6,10 +6,14 @@
  * comparison parameters. An improver adopted while the job runs does not
  * affect it. Step-5 jobs carry no version and read as `v0`.
  *
- * The project's improvers live in `@nexgent/capabilities`' `ImproverStore`
- * (`.nexgent/improvers/`); {@link PROJECT_IMPROVERS} reads them there. A
- * project without revisions runs the built-in `v0`; an improver in force
- * that no longer loads is rolled back by the store (`load-failure`).
+ * ADR 0012: improvers live in `@nexgent/capabilities`' `ImproverStore`
+ * below the Nexgent home (`<home>/improvers/`, `userImprovers` in
+ * `user.ts`), one line for every project of the user; every new job reads
+ * there and records `improverScope: "user"`. A project's own
+ * `.nexgent/improvers/` ({@link PROJECT_IMPROVERS}) is read-only history: a
+ * job pinned before ADR 0012 (no `improverScope`) resumes on it. Without
+ * revisions the built-in `v0` runs; an improver in force that no longer
+ * loads is rolled back by the store (`load-failure`).
  */
 import {
   effectiveTrialCounts,
@@ -40,7 +44,7 @@ export interface ImproverSource {
   load(layout: WorkspaceLayout, version: ImproverVersion): Promise<ImproverBundle>
 }
 
-/** The project's improver store (`ImproverStore.resolve` / `load`). */
+/** A project's own improver store (`ImproverStore.resolve` / `load`): read-only history since ADR 0012. */
 export const PROJECT_IMPROVERS: ImproverSource = {
   async current(layout) {
     const resolved = await new ImproverStore(improversDir(layout)).resolve()
@@ -59,4 +63,14 @@ export function jobImproverVersion(job: Pick<ImprovementJob, 'improverVersion'>)
 /** The gate parameters of a job's trial: the counts never below the project's (`effectiveTrialCounts`), the improver's selection. */
 export function trialComparison(capabilities: Pick<CapabilitiesConfig, 'selectionCases' | 'repeats'>, improver: ImproverBundle): ImproverComparisonParams {
   return { ...effectiveTrialCounts(capabilities, improver), selection: improver.comparison.selection }
+}
+
+/**
+ * Where a pinned job loads its improver again (a resumed trial): the given
+ * source for a job of the user line (`improverScope: "user"`) or pinned on
+ * `v0`, the project's old line for a job pinned before ADR 0012, unless the
+ * caller chose the source itself (`explicit`).
+ */
+export function pinnedSource(job: Pick<ImprovementJob, 'improverVersion' | 'improverScope'>, source: ImproverSource, explicit: boolean): ImproverSource {
+  return explicit || job.improverScope === 'user' || jobImproverVersion(job) === IMPROVER_V0_VERSION ? source : PROJECT_IMPROVERS
 }
