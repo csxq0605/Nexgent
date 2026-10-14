@@ -14,7 +14,7 @@ import type { CapabilityComponentRef, CapabilityFile, CapabilityVersion, Capabil
 import type { FinishReason, LLMMessage, LLMUsage, RefusalInfo, ToolCall } from './llm.js'
 import type { MemberExecutionForm, MemberIdentity, MemberResult, DelegationMode, TeamMember, TeamMessage, TeamTask, WorkflowStatus } from './collaboration.js'
 import type { ComparisonArm, ImprovementPhase } from './improvement.js'
-import type { ImproverVersion } from './improver.js'
+import type { ImproverScope, ImproverVersion } from './improver.js'
 import type { DeliverableVersionRef, FeedbackEntry, FileChange, Goal, GoalStatus, MaterialRef } from './tasking.js'
 import type { SandboxMode } from './workspace.js'
 
@@ -71,6 +71,8 @@ export interface SessionImprovement {
   readonly phase: Exclude<ImprovementPhase, 'trial'>
   /** Step 6: the improver version the job pinned (absent: `v0`). */
   readonly improverVersion?: ImproverVersion
+  /** ADR 0012: where `improverVersion` lives: `user` from the rework on; absent (= `project`) before. */
+  readonly improverScope?: ImproverScope
   /** Step 6: the meta job, when the session belongs to a comparison arm's job (in the arm's copy). */
   readonly metaJobId?: string
   /** Step 6: which arm; present exactly when `metaJobId` is. */

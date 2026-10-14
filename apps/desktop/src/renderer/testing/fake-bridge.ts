@@ -5,7 +5,7 @@
  * Never bundled into the app (only tests import it).
  */
 import type { ApprovalRequest, ComparisonArmResult, DeliverableDiff, DeliverableSummary, DeliverableVersion, ImproverBundle, ImproverChangeRecord, ImproverComparison, MaterialMetadata, MetaDiagnosis, PluginApprovalInfo } from '@nexgent/kernel'
-import type { CandidateDetail, CandidateView, CapabilityListing, ImprovementDetail, ImprovementJobView, ImprovementListing, ImproverDetail, ImproverListing, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, WorkflowView } from '@nexgent/sdk'
+import type { CandidateDetail, CandidateView, CapabilityListing, ImprovementDetail, ImprovementJobView, ImprovementListing, ImproverDetail, ImproverListing, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -68,7 +68,7 @@ export const SETTINGS: ProjectSettings = {
   sandboxMode: 'workspace-write',
   costCaps: {},
   autoImprove: true,
-  improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on', meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } },
+  improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on', shareImproverEvidence: true, meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } },
   apiKey: { configured: false },
 }
 
@@ -198,6 +198,8 @@ export class FakeBridge implements NexgentBridge {
   recent: ProjectInfo[] = [PROJECT]
   sessions: SessionSummary[] = [SESSION]
   settings: ProjectSettings = SETTINGS
+  /** API 7: what `userSettings.get` answers (`update` changes it like the SDK would). */
+  userSettings: UserSettings = { improvement: { meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } } }
   files: ProjectFileEntry[] = [{ path: 'orders.csv', size: 2048, modifiedAt: '2026-10-11T08:00:00.000Z' }]
   filesTruncated = false
   turn = 0
@@ -220,7 +222,7 @@ export class FakeBridge implements NexgentBridge {
   /** `improvers.show` per version; `v0` is built in. */
   improverBundles: Record<string, ImproverBundle> = {}
   readonly handlers: Record<string, Handler> = {
-    'app.info': () => ({ sdkVersion: 6, appVersion: '0.0.0-test', platform: 'linux' }),
+    'app.info': () => ({ sdkVersion: 7, appVersion: '0.0.0-test', platform: 'linux' }),
     'projects.recent': () => this.recent,
     'projects.open': () => PROJECT,
     'projects.forget': () => undefined,
@@ -264,6 +266,12 @@ export class FakeBridge implements NexgentBridge {
       const { improvement, ...rest } = input.patch
       this.settings = { ...this.settings, ...rest, ...(improvement === undefined ? {} : { improvement: { ...this.settings.improvement, ...improvement, budget: { ...this.settings.improvement.budget, ...improvement.budget }, meta: { ...this.settings.improvement.meta, ...improvement.meta, budget: { ...this.settings.improvement.meta.budget, ...improvement.meta?.budget } } } }) }
       return this.settings
+    },
+    'userSettings.get': () => this.userSettings,
+    'userSettings.update': input => {
+      const meta = input.patch.improvement?.meta
+      if (meta !== undefined) this.userSettings = { improvement: { meta: { ...this.userSettings.improvement.meta, ...meta, budget: { ...this.userSettings.improvement.meta.budget, ...meta.budget } } } }
+      return this.userSettings
     },
     'capabilities.list': () => this.capabilities,
     'capabilities.current': () => this.capabilities.current,

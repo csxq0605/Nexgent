@@ -60,6 +60,10 @@ export type NexgentErrorCode =
   | 'improver/invalid'
   | 'improver/invalid-change'
   | 'improver/activation'
+  /** ADR 0013: a proposed component carries a concrete value of its feedback task (`findInstanceLiterals`). */
+  | 'capability/instance-literal'
+  /** ADR 0012 decision 5: a proposed improver change carries a concrete value of the batch's tasks. */
+  | 'improver/instance-literal'
   // catch-all for programmer errors and wrapped unknowns
   | 'internal'
 

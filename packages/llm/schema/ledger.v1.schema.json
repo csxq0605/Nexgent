@@ -47,6 +47,7 @@
         "improvementId": { "type": "string" },
         "improvementPhase": { "enum": ["diagnose", "propose", "trial", "meta-diagnose", "meta-propose"] },
         "improverVersion": { "$ref": "#/$defs/improverVersion" },
+        "improverScope": { "enum": ["user", "project"] },
         "metaJobId": { "type": "string" },
         "comparisonArm": { "enum": ["parent", "child"] }
       }

@@ -16,6 +16,7 @@ import { NexgentError } from './errors.js'
 import type { JsonSchema, JsonValue } from './json.js'
 import type { LLMUsage, ThinkingMode } from './llm.js'
 import type { TaskCheck } from './ledger.js'
+import type { InstanceLiteralHit } from './instance-literals.js'
 import type { ToolEffect } from './tools.js'
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,8 @@ export const CAPABILITY_LIMITS = {
   maxSnapshotBytes: 209_715_200,
   /** Characters of a reviewer's reason and a decision's detail. */
   maxReasonChars: 2_000,
+  /** ADR 0013: instance-literal hits kept on a decision. */
+  maxInstanceLiterals: 32,
 } as const
 
 // ---------------------------------------------------------------------------
@@ -745,6 +748,14 @@ export interface TrialTally {
   readonly requiresApproval: boolean
   /** Step 5: feedback checks per arm (`trial.feedback`); absent when no case carries feedback. */
   readonly feedback?: { readonly candidate: ArmTally; readonly baseline: ArmTally }
+  /**
+   * ADR 0013, an improvement job's candidate only: the deterministic checks
+   * of the similar cases (the selection cases other than the feedback case;
+   * a subset of {@link selection}) per arm, or `none` when the selection had
+   * no such case. Absent for a candidate from the user's own task, which the
+   * rule does not touch.
+   */
+  readonly similar?: { readonly candidate: ArmTally; readonly baseline: ArmTally } | 'none'
 }
 
 /** Why a trial or decision came out as it did. */
@@ -765,12 +776,18 @@ export type DecisionReason =
   | 'usage-regression'
   | 'component-errors'
   | 'manual'
+  /** ADR 0013: an improvement candidate passes fewer deterministic checks than the baseline on the similar cases. */
+  | 'similar-regression'
+  /** ADR 0013: an improvement candidate that would be adopted was checked on the feedback case only; it waits for the user. */
+  | 'no-similar-cases'
+  /** ADR 0013: an improvement candidate carries a concrete value of its feedback task; rejected before any replay. */
+  | 'instance-literal'
 
 /** Every decision reason. */
 export const DECISION_REASONS: readonly DecisionReason[] = [
   'quality-up', 'cost-down', 'review-preferred', 'quality-down', 'guard-regressed', 'cost-over-cap', 'no-improvement',
   'unknown-runs', 'budget-exhausted', 'interrupted', 'approved', 'approval-denied', 'load-failure', 'usage-regression',
-  'component-errors', 'manual',
+  'component-errors', 'manual', 'similar-regression', 'no-similar-cases', 'instance-literal',
 ]
 
 /** The gate's conclusion, before it is written as a decision. */
@@ -787,6 +804,8 @@ export interface TrialVerdict {
   readonly costBasis?: 'usd' | 'tokens'
   /** Whether the reviewer's opinion decided (only possible on a check tie). */
   readonly decidedByReview: boolean
+  /** ADR 0013: deterministic-check pass rates of the similar cases per arm, when the tally had any. */
+  readonly similarPassRate?: { readonly candidate: number; readonly baseline: number }
 }
 
 /** ADR 0007: the default cost ratio above which a quality rise waits for the user ({@link CapabilitiesConfig.costApprovalRatio}). */
@@ -817,7 +836,13 @@ function rate(tally: ArmTally): number {
  *    reviewer decides: more `candidate` than `baseline` preferences and a
  *    ratio within the cap adopt (`review-preferred`), anything else rejects
  *    (`no-improvement`).
- * 5. An adopting verdict for a candidate with a plugin becomes
+ * 5. ADR 0013, an improvement job's candidate ({@link TrialTally.similar}
+ *    present) that would be adopted or wait for approval: a deterministic
+ *    pass rate on the similar cases below the baseline's rejects
+ *    (`similar-regression`); with no similar case it waits for the user
+ *    (`await-approval`, `no-similar-cases`). Unknown similar runs are
+ *    already unknown runs (rule 1).
+ * 6. An adopting verdict for a candidate with a plugin becomes
  *    `await-approval` with the same reason.
  */
 export function decideTrial(tally: TrialTally, costRatioCap: number, costApprovalRatio: number = DEFAULT_COST_APPROVAL_RATIO): TrialVerdict {
@@ -836,15 +861,28 @@ export function decideTrial(tally: TrialTally, costRatioCap: number, costApprova
     : candidateTokens === 'unknown' || baselineTokens === 'unknown' || baselineTokens === 0
       ? 'unknown'
       : candidateTokens / baselineTokens
-  const verdict = (outcome: 'adopt' | 'reject' | 'await-approval', reason: DecisionReason, decidedByReview = false): TrialVerdict => ({
-    outcome: outcome === 'adopt' && tally.requiresApproval ? 'await-approval' : outcome,
-    reason,
-    passRate,
-    ...(feedbackPassRate === undefined ? {} : { feedbackPassRate }),
-    costRatio,
-    costBasis,
-    decidedByReview,
-  })
+  const similar = tally.similar
+  const similarPassRate = similar === undefined || similar === 'none' ? undefined : { candidate: rate(similar.candidate), baseline: rate(similar.baseline) }
+  const verdict = (outcome: 'adopt' | 'reject' | 'await-approval', reason: DecisionReason, decidedByReview = false): TrialVerdict => {
+    if (outcome !== 'reject' && similarPassRate !== undefined && similarPassRate.candidate < similarPassRate.baseline) {
+      outcome = 'reject'
+      reason = 'similar-regression'
+      decidedByReview = false
+    } else if (outcome !== 'reject' && similar === 'none') {
+      outcome = 'await-approval'
+      reason = 'no-similar-cases'
+    }
+    return {
+      outcome: outcome === 'adopt' && tally.requiresApproval ? 'await-approval' : outcome,
+      reason,
+      passRate,
+      ...(feedbackPassRate === undefined ? {} : { feedbackPassRate }),
+      costRatio,
+      costBasis,
+      decidedByReview,
+      ...(similarPassRate === undefined ? {} : { similarPassRate }),
+    }
+  }
   const unknownRuns = quality('candidate').unknown + quality('baseline').unknown + tally.guard.candidate.unknown + tally.guard.baseline.unknown
   if (tally.budgetExhausted) return verdict('reject', 'budget-exhausted')
   if (unknownRuns > 0 || costRatio === 'unknown') return verdict('reject', 'unknown-runs')
@@ -893,6 +931,8 @@ export interface CapabilityDecision {
   readonly cost?: { readonly candidate: TrialCost; readonly baseline: TrialCost; readonly review: TrialCost }
   /** Rollback evidence: the tasks and checks that triggered it (rollback decisions only). */
   readonly regression?: UsageRegressionEvidence
+  /** ADR 0013, `instance-literal` decisions: the values found (at most {@link CAPABILITY_LIMITS.maxInstanceLiterals}), shown to the user. */
+  readonly instanceLiterals?: readonly InstanceLiteralHit[]
   /** Human-readable explanation, at most {@link CAPABILITY_LIMITS.maxReasonChars} characters. */
   readonly detail: string
 }

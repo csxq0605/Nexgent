@@ -8,6 +8,7 @@ import {
   IMPROVEMENT_PHASES,
   IMPROVEMENT_STATUSES,
   IMPROVEMENT_TRIGGERS,
+  IMPROVER_SCOPES,
   IMPROVER_VERSION_PATTERN,
   LEDGER_RECORD_TYPES,
   UNKNOWN_USAGE,
@@ -92,6 +93,7 @@ describe('ledger.v1.schema.json step-6 enums', () => {
     const base = defs['base']?.['properties'] as Record<string, Record<string, unknown>>
     expect(base['improvementPhase']?.['enum']).toEqual([...IMPROVEMENT_PHASES])
     expect(base['comparisonArm']?.['enum']).toEqual([...COMPARISON_ARMS])
+    expect(base['improverScope']?.['enum']).toEqual([...IMPROVER_SCOPES])
     expect(defs['improverVersion']?.['pattern']).toBe(IMPROVER_VERSION_PATTERN.source)
     const end = ((defs['improvementEnd']?.['allOf'] as Record<string, unknown>[])[1]?.['properties']) as Record<string, Record<string, unknown>>
     expect(end['kind']?.['enum']).toEqual([...IMPROVEMENT_JOB_KINDS])

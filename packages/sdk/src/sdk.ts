@@ -420,6 +420,16 @@ export class LocalNexgentSdk implements NexgentSdk {
     return id
   }
 
+  /**
+   * API 7 drops `projectId` from `improvers.*` (the improver is user-level);
+   * until the store moves to `<NEXGENT_HOME>/improvers/` the project-level
+   * store of the given project still answers.
+   */
+  private improverProject(projectId: string | undefined): ProjectEntry {
+    if (projectId === undefined) throw new NexgentError('internal', 'the user-level improver store is not available yet; pass projectId')
+    return this.project(projectId)
+  }
+
   private project(projectId: string): ProjectEntry {
     if (typeof projectId !== 'string') throw invalid('projectId must be a string')
     const project = this.projects.get(projectId)
@@ -1188,19 +1198,26 @@ export class LocalNexgentSdk implements NexgentSdk {
         await project.jobs?.check()
         return view
       },
+      // API 7: user-level settings (`<NEXGENT_HOME>/config.json`); the backend lands with the shared improver (step 6 rework).
+      'userSettings.get': async () => {
+        throw new NexgentError('internal', 'userSettings.get is not available yet')
+      },
+      'userSettings.update': async () => {
+        throw new NexgentError('internal', 'userSettings.update is not available yet')
+      },
       'improvers.list': async input => {
-        const project = this.project(input.projectId)
+        const project = this.improverProject(input.projectId)
         const { listing, changed } = await improvers.list(improvers.storeOf(project.app.ctx.workspace.layout))
         if (changed) this.emitProject(project.projectId, { type: 'improver.version', current: listing.current })
         return listing
       },
-      'improvers.show': input => {
-        const project = this.project(input.projectId)
+      'improvers.show': async input => {
+        const project = this.improverProject(input.projectId)
         const layout = project.app.ctx.workspace.layout
         return improvers.show(improvers.storeOf(layout), improvementsDir(layout), input.version)
       },
       'improvers.rollback': async input => {
-        const project = this.project(input.projectId)
+        const project = this.improverProject(input.projectId)
         const current = await improvers.rollback(improvers.storeOf(project.app.ctx.workspace.layout), input)
         this.emitProject(project.projectId, { type: 'improver.version', current })
         return current

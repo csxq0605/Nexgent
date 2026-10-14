@@ -846,7 +846,10 @@
             "load-failure",
             "usage-regression",
             "component-errors",
-            "manual"
+            "manual",
+            "similar-regression",
+            "no-similar-cases",
+            "instance-literal"
           ]
         },
         "passRate": {
@@ -904,6 +907,24 @@
         },
         "decidedByReview": {
           "type": "boolean"
+        },
+        "similarPassRate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "candidate",
+            "baseline"
+          ],
+          "properties": {
+            "candidate": {
+              "type": "number",
+              "minimum": 0
+            },
+            "baseline": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
         }
       }
     },
@@ -1279,6 +1300,34 @@
         }
       }
     },
+    "instanceLiteralHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "kind",
+        "path",
+        "source"
+      ],
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kind": {
+          "enum": [
+            "decimal",
+            "integer",
+            "date"
+          ]
+        },
+        "path": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "source": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
     "capabilityDecision": {
       "type": "object",
       "additionalProperties": false,
@@ -1325,7 +1374,10 @@
             "load-failure",
             "usage-regression",
             "component-errors",
-            "manual"
+            "manual",
+            "similar-regression",
+            "no-similar-cases",
+            "instance-literal"
           ]
         },
         "trigger": {
@@ -1363,6 +1415,12 @@
         },
         "regression": {
           "$ref": "#/$defs/usageRegressionEvidence"
+        },
+        "instanceLiterals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/instanceLiteralHit"
+          }
         },
         "detail": {
           "type": "string",

@@ -44,6 +44,8 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'settings.get': p,
   'settings.update': { ...p, patch: { model: 'claude-sonnet-5-5' } },
   'settings.setApiKey': { value: 'not-a-real-key' },
+  'userSettings.get': {},
+  'userSettings.update': { patch: { improvement: { meta: { enabled: true } } } },
   'capabilities.current': p,
   'capabilities.list': p,
   'capabilities.show': { ...p, candidateId: 'c1' },

@@ -45,6 +45,8 @@
 | `skills/` | 允许 | 拒绝 | 项目技能，由用户维护（步骤 2）；`load_skill` 经宿主读取 |
 | `config.json` | 允许 | 拒绝 | 配置改动必须经用户或审批流 |
 
+**Nexgent 主目录**（`<NEXGENT_HOME>`，默认 `~/.nexgent`；ADR 0012）放凭证、用户级配置 `config.json`、用户级改进器版本线 `improvers/` 与用户级元改进队列 `improvements/`。它在每个项目之外，不在任何读根或写根里，文件工具与 `run_code` 读写都拒绝（路径规范化后的包含检查即可挡住），只有宿主写；用户把某个项目放在主目录之内或把主目录列进 `extraReadRoots` 时，这些路径仍按宿主专属目录处理，读写都拒绝。
+
 **拒绝与审批模式**（在写根内也生效）：
 
 | 模式 | 读 | 写 |
@@ -179,12 +181,14 @@
 
 步骤 6（ADR 0008）。元改进作业改进的是改进器，评价器（采用规则、守护集、评审与反馈检查、预算与开关）始终在它够不到的地方：
 
+- **元诊断只读本批的项目（ADR 0012 决定 4）。** 用户级元改进作业的元诊断可以读多个项目，但只限本批条目涉及、且仍开着 `improvement.shareImproverEvidence` 的项目：`improve_list_jobs`、`improve_read_job`、`improve_read_session`、`improve_read_ledger` 的 `projectId` 由宿主按本批核对，其他 id 在工具结果里拒绝，不打开对应项目。关掉共享的项目不被读取，也不作比较起点，但它的作业仍使用共享的改进器。
+- **改进器的文字不夹带项目内容（ADR 0012 决定 5、ADR 0013 决定 2）。** `improve_propose_change` 的段落与简报模板先过具体数值检查（`findInstanceLiterals`，来源是本批所有作业的反馈原文与成果文件），命中即拒绝（`instance-literal`）并写明命中的值，防止一个项目的数据经共享改进器流到另一个项目。改进作业提出的能力组件同样检查，提案时与门控回放前各一次（`data-formats.md` §候选与门控）。
 - **元诊断与元提案会话只读。** 元诊断会话的工具恰为 `META_DIAGNOSIS_TOOLS` 五个（`improve_list_jobs`、`improve_read_job`、`improve_read_session`、`improve_read_ledger`、`improve_report_meta_diagnosis`），元提案会话恰为 `META_PROPOSE_TOOLS` 三个（`improve_read_improver`、`improve_read_job`、`improve_propose_change`），全部 `effects: ['read']`、`approval: 'never'`；没有文件、命令、网络、协作与能力工具，不装载项目插件，切片上限与脱敏同诊断会话。交上来的改动只是数据，宿主用 `checkImproverChange` 校验后自己写 `improvers/bundles/`；一次只接受一个改动，名字是评价器字段（`EVALUATOR_FIELDS`：`costRatioCap`、`costApprovalRatio`、`guardCases`、`reviewer`、`autoImprove`、`improvement` 等）、超出上下限、多于一个改动都拒绝，没有自由代码。
 - **比较臂在副本里。** 两个比较臂作业在项目副本里各跑一遍诊断、提议、门控，权限与步骤 5 的同名会话相同（提议会话 `headless`、插件草稿试用直接拒绝）；门控采用只改副本的能力版本，后代候选不带回真实项目。副本默认在结论写出后删除；只有实验经 SDK `improvements.runMeta` 的 `keepCopies` 才保留，这个选项不在设置页上。
 - **成员看不到元改进工具。** 新的五个 `improve_*` 工具（`improve_list_jobs`、`improve_read_job`、`improve_report_meta_diagnosis`、`improve_read_improver`、`improve_propose_change`）在 `MEMBER_DENIED_TOOLS` 里。
-- **元改进预算。** `improvement.meta.budget` 计法同改进预算，覆盖窗内创建的元改进作业的元诊断、元提案与两个比较臂的全部费用，与能力改进预算分开；宿主在每个阶段（含每个臂的每个阶段）开始前检查，用尽时作业以 `budget-exhausted` 结束，比较不出结论，不采用子改进器。
-- **开关与预算只由用户改。** `improvement.meta`（开关、`everyJobs`、预算、模型）是 `improvement` 的一部分，在“始终审批”表里；评价器设置在 `capabilities` 里，同样受保护。所以改进器、元改进作业与模型都改不到纪元。
-- **采用与回滚。** 子改进器只由元改进作业按 `decideImprover` 采用，不弹审批（改进器只是文字与有上下限的参数）；用户可以随时经 `improvers.rollback` 回滚到任一更早的版本，包括 `v0`。
+- **元改进预算。** 用户级 `improvement.meta.budget`（ADR 0012 起在 `<NEXGENT_HOME>/config.json`）计法同改进预算，覆盖窗内创建的、用户全部项目里的元改进作业的元诊断、元提案与两个比较臂的全部费用，与各项目的能力改进预算分开；宿主在每个阶段（含每个臂的每个阶段）开始前检查，用尽时作业以 `budget-exhausted` 结束，比较不出结论，不采用子改进器。
+- **开关与预算只由用户改。** ADR 0012 起元改进的开关、`everyJobs`、预算与模型在用户级配置的 `improvement.meta`，`improvement` 是用户级受保护字段（`GUARDED_USER_CONFIG_FIELDS`），审批规则同项目级：模型或组件请求改动总要审批，用户在设置页（SDK `userSettings.update`）改是用户操作，不弹审批；文件在主目录里，文件工具够不到。项目级的 `improvement`（含 `shareImproverEvidence`）仍在“始终审批”表里。评价器设置在 `capabilities` 里，同样受保护。所以改进器、元改进作业与模型都改不到纪元。
+- **采用与回滚。** 子改进器只由元改进作业按 `decideImprover` 采用，不弹审批（改进器只是文字与有上下限的参数）；用户可以随时经 `improvers.rollback` 回滚到任一更早的版本，包括 `v0`。ADR 0012 起改进器是用户级的，采用与回滚影响同一主目录下的所有项目，回滚确认要列出最近使用过它的项目（SDK `ImproverListing.usedBy`）。
 
 ## 费用上限
 
@@ -429,3 +433,6 @@ interface ToolApprovalAsk {
 | 元改进（步骤 6） | 元诊断、元提案会话的工具列表 | 恰为 `META_DIAGNOSIS_TOOLS` 五个、`META_PROPOSE_TOOLS` 三个；成员工具列表不含其中任何一个 |
 | 元改进（步骤 6） | `improve_propose_change` 交评价器字段、超界的参数或两个改动 | 拒绝并说明原因（`evaluator-field`、`out-of-bounds`、`not-one-change`） |
 | 元改进（步骤 6） | 元改进预算用尽 | 进行中的元改进作业以 `budget-exhausted` 结束；不采用子改进器 |
+| 元改进（ADR 0012） | 文件工具与 `run_code` 读写 `<NEXGENT_HOME>/config.json`、`<NEXGENT_HOME>/improvers/**`、`<NEXGENT_HOME>/improvements/**` | 全部拒绝 |
+| 元改进（ADR 0012） | 元诊断工具给本批之外、或关掉共享的项目的 `projectId` | 工具结果拒绝，不读该项目 |
+| 元改进（ADR 0012、0013） | `improve_propose_change` 的文字含本批作业的具体数值；改进作业的 `capability_propose` 含反馈任务的具体数值 | 分别拒绝（`instance-literal`、`capability/instance-literal`），写明命中的值与来源 |
