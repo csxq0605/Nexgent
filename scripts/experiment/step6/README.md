@@ -38,12 +38,12 @@
 | `pilot/run.mjs` | 编排：判据 1 → 6 组参考成对样本 → 每类历史与 dev 任务、`base` 副本、模板反馈与改进作业、`parent` 副本、`memory` 副本（经 `@nexgent/capabilities` 的存储接口写入并采用 `project-notes`）→ 隔离检查 → holdout 27 次（每臂自己的 `NEXGENT_HOME`）与内外评审 → 文档类 parent 与 memory 两两偏好；每步过 35 美元与 12 美元两道闸门 |
 | `pilot/report.mjs` | 试点报告：评分是否可靠、`memory` 臂能否运行、三个比较、各臂明细、作业与组件、费用；同样的 `raw.json` 生成同样的字节 |
 | `pilot/scripted-model.mjs` | 演练用的脚本化模型（任务、改进作业、门控、两个评审），不调真实模型 |
-| `pilot/plan.mjs`、`pilot/pilot-plan.json` | 冻结的计划（题目、评分表、反馈模板、评审提示与模型、统计方法、臂、可靠性判据与成对样本、预算、各脚本的 SHA-256） |
+| `pilot/plan.mjs`、`pilot/pilot-plan.json`（第 1 轮）、`pilot/pilot-plan-<试点 id>.json`（之后各轮，冻结时写出） | 冻结的计划（题目、评分表、反馈模板、评审提示与模型、统计方法、臂、可靠性判据与成对样本、预算、各脚本的 SHA-256） |
 
 两类的项目约定只在反馈里出现：文档类“文末列出引用的资料文件名”，文件类“输出的文件名和目录名不含空格”。
 
 ```sh
-node scripts/experiment/step6/pilot/plan.mjs --check   # pilot-plan.json 是否与生成器一致
+node scripts/experiment/step6/pilot/plan.mjs --check   # 本轮计划文件是否存在且与生成器一致
 node scripts/experiment/step6/pilot/plan.mjs --write   # 重新生成（真实试点开跑后改动即作废这一轮）
 node scripts/experiment/step6/pilot/plan.mjs           # 打印计划文件的 SHA-256，写进实验清单
 ```
@@ -56,7 +56,9 @@ node scripts/experiment/step6/pilot/run.mjs --real --out <dir> --spend <花费�
 node scripts/experiment/step6/pilot/report.mjs --records <dir>/raw.json --out <report.md>
 ```
 
-真实试点只在 `pilot-plan.json` 与生成器一致时开跑（否则退出码 2）。输出：`raw.json`（报告的输入，不含时间、会话与作业 id、绝对路径）、`report.md`、`manifest.json`（计划 SHA-256、各臂 `NEXGENT_HOME` 与改进器版本、`memory` 策略的能力版本与全文 SHA-256、花费）、`observations.json`。评审的请求记在 `<dir>/reviewer/ledgers`，不进任何项目。
+每一轮试点有自己的冻结计划文件：第 1 轮（`step6-pilot-1`，2026-10-14 已跑）是 `pilot/pilot-plan.json`，作为记录不再改；之后各轮是 `pilot/pilot-plan-<试点 id>.json`，在该轮冻结时用 `plan.mjs --write` 写出。当前一轮是 `step6-pilot-2`：两两比较的提示附上评分要点，要求先列出影响任务的差别，没有差别就写 tie（回复里差别为空时按 tie 计）；两种顺序的理由、要点评审的理由与每次 holdout 运行的成果都会保存。它的计划还没冻结，所以真实试点现在会以退出码 2 拒绝开跑。
+
+真实试点只在本轮计划文件存在且与生成器一致时开跑（否则退出码 2）。输出：`raw.json`（报告的输入，不含时间、会话与作业 id、绝对路径；含两两比较两种顺序的理由与差别、要点评审理由、保留的成果路径）、`report.md`（两种顺序不一致时列出两次的理由）、`outputs/<运行>/`（每次 holdout 运行的成果副本）、`manifest.json`（计划 SHA-256、各臂 `NEXGENT_HOME` 与改进器版本、`memory` 策略的能力版本与全文 SHA-256、花费）、`observations.json`。评审的请求记在 `<dir>/reviewer/ledgers`，不进任何项目。
 
 ## 本地检查
 

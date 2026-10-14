@@ -4,11 +4,11 @@
  * The pilot's frozen plan (ADR 0011 decision 6): cases (tasks, set split, starting files,
  * rubrics), feedback templates, external reviewer prompts and models, statistics, arm
  * definitions, reliability criteria and reference pairs, the budget, and the SHA-256 of
- * every script that generates, judges or scores, written to `pilot-plan.json`. The
+ * every script that generates, judges or scores, written to `pilot-plan-<id>.json`. The
  * experiment manifest records the file's SHA-256; once the real pilot has started, any
  * change to it voids that round.
  *
- *   node scripts/experiment/step6/pilot/plan.mjs --write   regenerate pilot-plan.json
+ *   node scripts/experiment/step6/pilot/plan.mjs --write   freeze: write pilot-plan-<id>.json
  *   node scripts/experiment/step6/pilot/plan.mjs --check   exit 1 if the file differs from a fresh build
  *   node scripts/experiment/step6/pilot/plan.mjs           print the file's SHA-256
  *
@@ -27,8 +27,17 @@ import { EXTERNAL_REVIEWER, IN_LOOP_REVIEWER, PAIR_SYSTEM, POINT_SYSTEM } from '
 import { BOOTSTRAP, COMPARISONS, PILOT_ARMS } from './stats.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-export const PLAN_FILE = join(HERE, 'pilot-plan.json')
-export const PILOT_ID = 'step6-pilot-1'
+export const PILOT_ID = 'step6-pilot-2'
+/**
+ * Each round's frozen plan is its own file, written when that round is frozen and never
+ * changed afterwards. Round 1 (`step6-pilot-1`, run 2026-10-14) kept the first name,
+ * `pilot-plan.json` (SHA-256 `ROUND_1_PLAN_SHA256`); later rounds are `pilot-plan-<id>.json`.
+ * Until a round is frozen its file does not exist and the real pilot refuses to start.
+ */
+export const PLAN_FILE = join(HERE, `pilot-plan-${PILOT_ID}.json`)
+export const PLAN_FILE_REL = `scripts/experiment/step6/pilot/pilot-plan-${PILOT_ID}.json`
+export const ROUND_1_PLAN_FILE = join(HERE, 'pilot-plan.json')
+export const ROUND_1_PLAN_SHA256 = 'add974d7350885f9e0bfdc773ecbe33ef45d529a64a8cd455d4464542cb9c495'
 
 /** Scripts whose behaviour the plan freezes (hashed with LF line ends, so a Windows checkout hashes the same). */
 export const FROZEN_SCRIPTS = ['office.mjs', 'common.mjs', 'files.mjs', 'docs.mjs', 'cases.mjs', 'feedback.mjs', 'reviewer.mjs', 'memory.mjs', 'stats.mjs', 'reliability.mjs', 'run.mjs', 'report.mjs', '../rng.mjs', '../stats.mjs', '../cases.mjs', '../feedback.mjs', '../run.mjs', '../budget.mjs']
@@ -87,7 +96,7 @@ export async function buildPlan() {
       external: EXTERNAL_REVIEWER,
       inLoop: { ...IN_LOOP_REVIEWER, use: '同一要点提示，判同一批 holdout 文档运行，只用于一致率（判据 4）' },
       pointPrompt: { system: POINT_SYSTEM, user: '# 任务 / # 资料（每个资料文件：【文件名】+全文）/ # 成果（输出路径）/ # 评分要点（- id：text，只列 by=review）' },
-      pairPrompt: { system: PAIR_SYSTEM, user: '# 任务 / # 资料 / # 成果 A / # 成果 B' },
+      pairPrompt: { system: PAIR_SYSTEM, user: '# 任务 / # 资料 / # 评分要点（- id：text，不含个人口味）/ # 成果 A / # 成果 B', noDifferences: '回复的 differences 是空数组时按 tie 计（提示要求没有影响任务的差别就写 tie）' },
       pairwise: { arms: ['parent', 'memory'], repeat: 1, bothOrders: true, use: '每道文档类 holdout 题，第 1 次重复，parent 与 memory 两臂的成果，两种顺序各判一次；只作辅助指标与判据 3' },
     },
     statistics: {
@@ -115,6 +124,7 @@ export async function buildPlan() {
     },
     freeze: {
       rule: '真实试点开跑后，改动本文件任何一项（含 scripts 哈希），这一轮作废，换新的试点 id，作废的一轮照样写进报告',
+      previous: 'step6-pilot-1（2026-10-14 跑完，计划 pilot-plan.json，SHA-256 add974d7…）：判据 3 一致率 77.8% 未过线。本轮改了两两比较的提示（附评分要点、先列影响任务的差别、无差别写 tie），并保存评审理由与 holdout 成果；题目、评分表、反馈模板、统计方法与判据不变',
       devOnly: '开发与调试只用 dev 与 selection 的题；holdout 题在真实试点开跑前不交给模型',
     },
     orchestration: {
@@ -123,7 +133,7 @@ export async function buildPlan() {
       model: '任务与改进作业：claude-sonnet-5-5，thinking 开（../run.mjs MODEL、IMPROVEMENT）',
       homes: '每类的主项目用 homes/<类>；holdout 运行用 homes/<类>-<臂>：base、memory 为空目录，parent 为主项目 home 的副本',
       gates: '每步开始前，步骤 6 花费文件 + 本步预留不超过 35 美元，且试点花费文件（<dir>/pilot-spend.json）+ 本步预留不超过 12 美元；费用未知按预留计',
-      records: 'raw.json（report.mjs 的输入，不含时间、会话与作业 id、绝对路径）、report.md、manifest.json（计划 SHA-256、各臂 NEXGENT_HOME 与改进器版本、memory 策略的能力版本与全文 SHA-256）、observations.json',
+      records: 'raw.json（report.mjs 的输入，不含时间、会话与作业 id、绝对路径；含两两比较两种顺序各自的理由与差别、要点评审的理由、每次 holdout 运行保留的成果路径）、report.md、manifest.json（计划 SHA-256、各臂 NEXGENT_HOME 与改进器版本、memory 策略的能力版本与全文 SHA-256）、observations.json、outputs/<运行>/（每次 holdout 运行的成果副本）',
     },
     budget: { gateUsd: 12, estimateUsd: [9, 11], note: '计入步骤 6 的 35 美元上限；外部与循环内评审约 1.9 美元（45 次 opus、27 次 sonnet）' },
     scripts,
@@ -145,11 +155,11 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
     const fresh = await planText()
     const current = (await readFile(PLAN_FILE, 'utf8').catch(() => '')).replace(/\r\n/g, '\n')
     if (fresh !== current) {
-      console.error('pilot-plan.json differs from a fresh build')
+      console.error(`${PLAN_FILE_REL} is missing or differs from a fresh build`)
       process.exit(1)
     }
-    console.log(`pilot-plan.json is current (sha256 ${await planSha256()})`)
+    console.log(`${PLAN_FILE_REL} is current (sha256 ${await planSha256()})`)
   } else {
-    console.log(await planSha256())
+    console.log(await planSha256().catch(() => `${PLAN_FILE_REL} is not frozen yet`))
   }
 }

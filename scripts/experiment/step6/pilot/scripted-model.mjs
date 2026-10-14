@@ -156,7 +156,7 @@ export class PilotModel {
       const score = (/** @type {string} */ text) => (this.goodDocs.has(text.trim()) ? 1 : 0)
       const preference = score(a) > score(b) ? 'A' : score(b) > score(a) ? 'B' : 'tie'
       this.requests.push({ kind: 'pair-review', step: 0, detail: preference })
-      return answer(JSON.stringify({ preference, reason: '脚本化评审。' }))
+      return answer(JSON.stringify({ differences: preference === 'tie' ? [] : ['脚本化评审：只有一份是已知的好答案。'], preference, reason: '脚本化评审。' }))
     }
     const section = user.split('# 评分要点\n')[1] ?? ''
     const ids = [...section.matchAll(/^- ([^：\n]+)：/gm)].map(m => m[1])
