@@ -2481,7 +2481,7 @@
       "maxBytes": 16384,
       "rule": "在 base 副本里经 @nexgent/capabilities 的存储接口直接写入并采用一条上下文策略：instructions 为该类全部计数反馈原文，按时间先后；超长时去掉最早的；不诊断、不过门控"
     },
-    "parent": "dev 反馈触发改进作业（改进器 v0，adr-0013 纪元）之后的项目副本",
+    "parent": "dev 反馈触发改进作业（改进器 v0，adr-0014 纪元：ADR 0014 取代 0013 的同类题定义与规则 id）之后的项目副本",
     "child": "试点不跑（不跑元改进）",
     "isolation": "每个任务族、每个臂用自己的 NEXGENT_HOME",
     "holdoutRuns": "每题每臂 3 次，每次在该臂的新副本里新开会话，关自动改进；没交成果时同一会话追问一次（PRESENT_REQUEST），按臂计数"
@@ -2581,7 +2581,7 @@
     "scripts/experiment/step6/pilot/memory.mjs": "b81cf4e54696cd538f2b759146301e3b38b54635fe8ddb4f3664fd26f6efb6cd",
     "scripts/experiment/step6/pilot/stats.mjs": "076eec8bc1df2bf491d9f866baaa250928c2b22e66aeb98162b255fa05d32cc6",
     "scripts/experiment/step6/pilot/reliability.mjs": "f8a35ccf265c5cfc2753bf238ebae116bca307a4a11bde7b321132686462dc8e",
-    "scripts/experiment/step6/pilot/run.mjs": "0084dc176b425cc4d5615a39149b5b66b1ec1b1909474602f4046a6c9753a9d3",
+    "scripts/experiment/step6/pilot/run.mjs": "e974c6ce8f2a88d1c7d3fd8709f4188ac7de0b70a6830a39154f3e4115b1c76d",
     "scripts/experiment/step6/pilot/report.mjs": "755cc61701d22f321d4f735274630badf8507b9692e3f393f47be17765f55eac",
     "scripts/experiment/step6/rng.mjs": "d435e6be046ffc7f4535c526ae79ac8e418f1371740399e211e2d21674a362d5",
     "scripts/experiment/step6/stats.mjs": "6123cbbf63dc8c73a9d32bb07d53f67124e9e764a3e6a6c3bebd735d838dded0",
