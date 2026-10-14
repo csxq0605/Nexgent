@@ -31,6 +31,7 @@ Nexgent 正在被重写为一个 TypeScript 独立应用（Electron 桌面应用
 - **子智能体用 Sonnet、medium effort。** 派出子智能体（Agent 工具等）时指定 Sonnet 模型与 medium effort，除非用户另有指示。
 - **不设定时检查。** 不创建定时任务、轮询或周期性回访（cron、`/loop`、定时触发器等）；需要等待外部结果时结束本轮，由事件唤醒。
 - **密钥只从环境读取，绝不写入文件。** API 密钥只通过环境变量（`NEXGENT_API_KEY`，回退 `ANTHROPIC_API_KEY`）提供；不写进仓库里的任何文件，包括 `.env`、`.nexgent/`、验收记录、日志、测试夹具与提交信息。文档与示例里用 `<key>` 占位。密钥的产品侧规则见 `docs/spec/permissions.md`“密钥存放”。
+- **不做任务特化。** Nexgent 是通用 agent；产品代码、系统提示、改进器 v0、门控与评审提示里不写只为某个实验用例或某类任务服务的规则、例子或默认值，每项改动要能说明对任何任务都成立。用例只用来测量，不为让某题通过而改产品，也不为迎合产品改题或改评分（用户 2026-10-14；ADR 0011–0013）。
 - **顺序不颠倒。** 按六步顺序做，先机制后扩展；每步有验收脚本与验收记录。每个包只实现当前步骤需要的部分，边界用测试固定，不追求与 DSH 功能对等。
 - **根 README 只描述已验收能力。** 一项能力在 `docs/validation/` 有对应记录之前，只能出现在计划、规范和研究文档里。
 - **决策不改旧文。** 要改一项决策就写一份新 ADR 取代旧的，编号递增；研究文档发布后只勘误。
@@ -59,7 +60,7 @@ CI 只能手动触发（用户 2026-10-11）：`.github/workflows/nexgent.yml` �
 | --- | --- |
 | 文档索引与目录规则 | [`docs/README.md`](docs/README.md) |
 | 计划（六步、横切安排、里程碑、待定事项） | [`docs/research/pr4-review-and-plan-2026-10/README.md`](docs/research/pr4-review-and-plan-2026-10/README.md) |
-| ADR | [`docs/adr/0001-reference-rewrite.md`](docs/adr/0001-reference-rewrite.md)（参考重写与 16 项决策）、[`docs/adr/0002-claude-platform-route.md`](docs/adr/0002-claude-platform-route.md)（Claude Platform 路由，取代 0001 的模型部分）；0003–0010 见 [`docs/adr/`](docs/adr/)（thinking 默认开、执行形态、能力版本、改进作业、门控费用规则、改进器版本与元改进、父子比较起点、诊断看到已采用组件） |
+| ADR | [`docs/adr/0001-reference-rewrite.md`](docs/adr/0001-reference-rewrite.md)（参考重写与 16 项决策）、[`docs/adr/0002-claude-platform-route.md`](docs/adr/0002-claude-platform-route.md)（Claude Platform 路由，取代 0001 的模型部分）；0003–0013 见 [`docs/adr/`](docs/adr/)（thinking 默认开、执行形态、能力版本、改进作业、门控费用规则、改进器版本与元改进、父子比较起点、诊断看到已采用组件、测量小试点、改进器用户级共享、门控同类题与防背答案） |
 | 规范 | [`docs/spec/data-formats.md`](docs/spec/data-formats.md)（`.nexgent/`、会话 JSONL v1、账本）、[`docs/spec/permissions.md`](docs/spec/permissions.md)（沙箱、命令策略、审批、费用上限、密钥） |
 | 分工表 | [`docs/plan/step-1-work-partition.md`](docs/plan/step-1-work-partition.md) |
 | 验收记录与证据政策 | [`docs/validation/`](docs/validation/README.md)（模板 `TEMPLATE.md`，每步 `step-<n>-<yyyymmdd>.md` 与 `step-<n>/` 摘要） |

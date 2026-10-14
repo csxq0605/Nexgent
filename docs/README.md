@@ -49,12 +49,16 @@
 | [`adr/0008-improver-versions.md`](adr/0008-improver-versions.md) | 已接受：改进器版本（项目级独立版本线，v0 为步骤 5 原文）、元改进作业、父子比较规则 `decideImprover`、评价器纪元、SDK API 6（步骤 6，用户 2026-10-13 “按推荐”） |
 | [`adr/0009-comparison-origin.md`](adr/0009-comparison-origin.md) | 已接受：父子比较的起点先找没解决反馈的作业（从它开始时的能力版本起步），找不到就取最近的作业、从反馈当时的能力版本起步；`ComparisonOrigin.kind`（取代 0008 的起点规则；用户 2026-10-13 选 C） |
 | [`adr/0010-diagnosis-sees-adopted-components.md`](adr/0010-diagnosis-sees-adopted-components.md) | 已接受：诊断提示列出作业所用能力版本的已采用组件（取代 0008 的“v0 与步骤 5 完全相同”）；比较两臂从反馈任务当时的版本起步（取代 0009 的“开始时的版本”）；用户 2026-10-14 选 A |
+| [`adr/0011-measurement-pilot.md`](adr/0011-measurement-pilot.md) | 已接受：步骤 6 测量先在文档写作、文件整理两类新任务上做小试点，加“只记笔记”`memory` 对照臂，开跑前冻结题目、评分与统计（取代步骤 6 分工表已定决定 6、7 的族与臂部分）；用户 2026-10-14 按推荐 |
+| [`adr/0012-shared-improver.md`](adr/0012-shared-improver.md) | 已接受：改进器改为用户级共享，能力组件仍在项目；元改进按用户计数与计预算，项目可退出（取代 0008 第 1、3 条的项目级口径）；用户 2026-10-14 按推荐 |
+| [`adr/0013-gate-generalization-epoch.md`](adr/0013-gate-generalization-epoch.md) | 已接受：门控新纪元 `adr-0013`，改进作业候选在同类题上不得变差、没有同类题等批准，含原题具体数值的组件退回；用户 2026-10-14 按推荐 |
 | [`reference-map.md`](reference-map.md) | 步骤 0 建立，随各步更新 |
 | [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
 | [`plan/step-2-work-partition.md`](plan/step-2-work-partition.md) | 步骤 2 分工与验收设计，用户 2026-10-11 已定 |
 | [`plan/step-3-work-partition.md`](plan/step-3-work-partition.md) | 步骤 3 分工与验收设计，用户 2026-10-11 已定 |
 | [`plan/step-4-work-partition.md`](plan/step-4-work-partition.md) | 步骤 4 分工与验收设计，用户 2026-10-12 已定 |
 | [`plan/step-5-work-partition.md`](plan/step-5-work-partition.md) | 步骤 5 分工与验收设计，用户 2026-10-13 已定 |
+| [`plan/step-6-rework-partition.md`](plan/step-6-rework-partition.md) | 步骤 6 返工分工：去掉任务特化、改进器共享、门控防背答案、小试点测量（ADR 0011–0013），用户 2026-10-14 按推荐 |
 | [`spec/data-formats.md`](spec/data-formats.md) | 步骤 1、步骤 2 章节已写定（材料、成果、反馈、持久目标、压缩）；能力清单留标题 |
 | [`spec/permissions.md`](spec/permissions.md) | 步骤 1、步骤 2 章节已写定（本地 IPC 与访问令牌）；插件安装审批（步骤 4）留标题 |
 | [`spec/agent-hooks.md`](spec/agent-hooks.md) | 步骤 2：agent loop 挂点、步骤 2 工具、系统提示增量、技能 |
