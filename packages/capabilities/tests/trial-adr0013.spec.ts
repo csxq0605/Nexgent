@@ -147,13 +147,13 @@ describe('ADR 0013: instance literals are rejected before any replay', { timeout
   })
 })
 
-describe('ADR 0013 to 0015: a new evaluator epoch', { timeout: 60_000 }, () => {
-  it('derives the epoch from the rules id adr-0015; trials of the adr-0008, adr-0013 and adr-0014 epochs are not compared with new ones', async () => {
+describe('ADR 0013 to 0016: a new evaluator epoch', { timeout: 60_000 }, () => {
+  it('derives the epoch from the rules id adr-0016; trials of the adr-0008, adr-0013, adr-0014 and adr-0015 epochs are not compared with new ones', async () => {
     const settings = evaluatorSettings(DEFAULT_CAPABILITIES_CONFIG)
-    expect(settings.rules).toBe('adr-0015')
+    expect(settings.rules).toBe('adr-0016')
     const epochOf = (rules: string) => createHash('sha256').update(canonicalEvaluatorText({ ...settings, rules } as typeof settings), 'utf8').digest('hex')
-    const old = epochOf('adr-0014')
-    for (const rules of ['adr-0008', 'adr-0013', 'adr-0014']) expect(evaluatorEpoch(DEFAULT_CAPABILITIES_CONFIG)).not.toBe(epochOf(rules))
+    const old = epochOf('adr-0015')
+    for (const rules of ['adr-0008', 'adr-0013', 'adr-0014', 'adr-0015']) expect(evaluatorEpoch(DEFAULT_CAPABILITIES_CONFIG)).not.toBe(epochOf(rules))
 
     const { layout, task, candidate } = await jobProject()
     const result = await decided(layout, candidate.id, runner(task.taskId, 'good'))

@@ -60,7 +60,7 @@ CI 只能手动触发（用户 2026-10-11）：`.github/workflows/nexgent.yml` �
 | --- | --- |
 | 文档索引与目录规则 | [`docs/README.md`](docs/README.md) |
 | 计划（六步、横切安排、里程碑、待定事项） | [`docs/research/pr4-review-and-plan-2026-10/README.md`](docs/research/pr4-review-and-plan-2026-10/README.md) |
-| ADR | [`docs/adr/0001-reference-rewrite.md`](docs/adr/0001-reference-rewrite.md)（参考重写与 16 项决策）、[`docs/adr/0002-claude-platform-route.md`](docs/adr/0002-claude-platform-route.md)（Claude Platform 路由，取代 0001 的模型部分）；0003–0015 见 [`docs/adr/`](docs/adr/)（thinking 默认开、执行形态、能力版本、改进作业、门控费用规则、改进器版本与元改进、父子比较起点、诊断看到已采用组件、测量小试点、改进器用户级共享、门控同类题与防背答案、门控按运行成果查路径与同类题按内容词、反馈检查不要求一次性附加要求） |
+| ADR | [`docs/adr/0001-reference-rewrite.md`](docs/adr/0001-reference-rewrite.md)（参考重写与 16 项决策）、[`docs/adr/0002-claude-platform-route.md`](docs/adr/0002-claude-platform-route.md)（Claude Platform 路由，取代 0001 的模型部分）；0003–0016 见 [`docs/adr/`](docs/adr/)（thinking 默认开、执行形态、能力版本、改进作业、门控费用规则、改进器版本与元改进、父子比较起点、诊断看到已采用组件、测量小试点、改进器用户级共享、门控同类题与防背答案、门控按运行成果查路径与同类题按内容词、反馈检查不要求一次性附加要求、门控评审两种顺序与输入文件） |
 | 规范 | [`docs/spec/data-formats.md`](docs/spec/data-formats.md)（`.nexgent/`、会话 JSONL v1、账本）、[`docs/spec/permissions.md`](docs/spec/permissions.md)（沙箱、命令策略、审批、费用上限、密钥） |
 | 分工表 | [`docs/plan/step-1-work-partition.md`](docs/plan/step-1-work-partition.md) |
 | 验收记录与证据政策 | [`docs/validation/`](docs/validation/README.md)（模板 `TEMPLATE.md`，每步 `step-<n>-<yyyymmdd>.md` 与 `step-<n>/` 摘要） |

@@ -54,6 +54,7 @@
 | [`adr/0013-gate-generalization-epoch.md`](adr/0013-gate-generalization-epoch.md) | 已接受：门控新纪元 `adr-0013`，改进作业候选在同类题上不得变差、没有同类题等批准，含原题具体数值的组件退回；用户 2026-10-14 按推荐 |
 | [`adr/0014-gate-deliverable-paths-similar-cases.md`](adr/0014-gate-deliverable-paths-similar-cases.md) | 已接受：门控新纪元 `adr-0014`，回放检查按运行自己交付的同类文件找成果（照反馈改名不再判退步），同类题按去掉功能词与纯数字后的内容词重合 ≥ 0.25 判定；用户 2026-10-14 选 B |
 | [`adr/0015-gate-feedback-one-time-extras.md`](adr/0015-gate-feedback-one-time-extras.md) | 已接受：门控新纪元 `adr-0015`，反馈检查不要求只针对那一次的附加要求，评审看到全部改动与删除的路径，打平时的偏好评审看到反馈原题的反馈；用户 2026-10-14 要求按系统缺陷修 |
+| [`adr/0016-gate-review-both-orders-inputs.md`](adr/0016-gate-review-both-orders-inputs.md) | 提议：门控新纪元 `adr-0016`，偏好评审每对按两种顺序各问一次、两次一致才计票，评审看到任务的输入文件（xlsx、docx、pdf 转成文字）；等用户确认 |
 | [`reference-map.md`](reference-map.md) | 步骤 0 建立，随各步更新 |
 | [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
 | [`plan/step-2-work-partition.md`](plan/step-2-work-partition.md) | 步骤 2 分工与验收设计，用户 2026-10-11 已定 |
