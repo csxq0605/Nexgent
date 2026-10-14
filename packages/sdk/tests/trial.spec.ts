@@ -23,7 +23,7 @@ import { estimateUsdTotal } from '@nexgent/llm'
 import { readLedgerRecords, scriptedModelServer, type MessagesRequestBody, type ScriptedModelServer, type ScriptedTurn } from '@nexgent/test-support'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createSdk, type LocalNexgentSdk } from '../src/index.js'
-import { parseFeedbackCheck } from '../src/trial-entry.js'
+import { FEEDBACK_SYSTEM, parseFeedbackCheck, renderOutput, REVIEW_SYSTEM } from '../src/trial-entry.js'
 import { tempDir } from './helpers.js'
 
 const DIST_ENTRY = fileURLToPath(new URL('../dist/trial-entry.js', import.meta.url))
@@ -410,5 +410,30 @@ describe('the feedback check answer', () => {
     expect(parseFeedbackCheck('{"solved": null, "reason": "cannot tell"}')).toEqual({ status: 'unknown', reason: 'cannot tell' })
     expect(parseFeedbackCheck('{"solved": "yes"}')).toBeUndefined()
     expect(parseFeedbackCheck('no json')).toBeUndefined()
+  })
+})
+
+describe('ADR 0015: what the reviewer is told', () => {
+  it('lists the changed files without contents and the removed files after the shown ones', () => {
+    const text = renderOutput('A', { files: [{ path: 'archive/a_b.txt', text: 'a' }], unshown: ['archive/c_d.txt'], unlisted: 2, removed: ['inbox/a b.txt', 'inbox/c d.txt'] })
+    expect(text).toBe([
+      '## Attempt A',
+      '### archive/a_b.txt\n```\na\n```',
+      'Also created or changed (contents not shown): 3 more file(s)',
+      '- archive/c_d.txt',
+      '- … and 2 more',
+      'Removed by this attempt: 2 file(s)',
+      '- inbox/a b.txt',
+      '- inbox/c d.txt',
+    ].join('\n'))
+    expect(renderOutput('B', { files: [] })).toBe('## Attempt B\n(no files created or changed)')
+    expect(renderOutput('B', { files: [], removed: ['x.txt'] })).toContain('Removed by this attempt: 1 file(s)')
+  })
+
+  it('does not expect one-time extras of the feedback, and tells both prompts that listed files are not missing', () => {
+    expect(FEEDBACK_SYSTEM).toContain('only for that one time')
+    expect(FEEDBACK_SYSTEM).toContain('If the feedback names nothing but such one-time extras, answer null.')
+    expect(REVIEW_SYSTEM).toContain('standing preferences')
+    for (const system of [FEEDBACK_SYSTEM, REVIEW_SYSTEM]) expect(system).toContain('do not count a file as missing because its contents are not shown')
   })
 })

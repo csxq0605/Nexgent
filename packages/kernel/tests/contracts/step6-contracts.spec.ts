@@ -212,7 +212,7 @@ describe('step-6 improver activation chain', () => {
 describe('step-6 evaluator epoch', () => {
   it('is the canonical text of the evaluator settings and changes with any of them', () => {
     const base = evaluatorSettings(DEFAULT_CAPABILITIES_CONFIG)
-    expect(base).toEqual({ formatVersion: 1, rules: 'adr-0014', costRatioCap: 1.2, costApprovalRatio: 2, guardCases: 1, reviewer: { model: 'claude-sonnet-5-5', thinking: 'on' } })
+    expect(base).toEqual({ formatVersion: 1, rules: 'adr-0015', costRatioCap: 1.2, costApprovalRatio: 2, guardCases: 1, reviewer: { model: 'claude-sonnet-5-5', thinking: 'on' } })
     const text = canonicalEvaluatorText(base)
     // selection counts and repeats belong to the improver, not the epoch
     const moreCases = { ...DEFAULT_CAPABILITIES_CONFIG, selectionCases: 4, repeats: 3 }
