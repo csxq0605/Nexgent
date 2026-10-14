@@ -438,7 +438,9 @@ async function runFamily(ctx, family) {
         .then((/** @type {any} */ a) => a.version, () => 'unknown')
     }
 
-    for (const arm of ARMS) {
+    if (ctx.untilMeta) obs.notes.push('stopped after the meta job (--until-meta): no holdout runs')
+
+    for (const arm of ctx.untilMeta ? [] : ARMS) {
       const source = obs.arms[arm]
       if (source === undefined) continue
       for (const task of holdoutCases) {
@@ -570,7 +572,7 @@ export function rawRecords(families, meta) {
 /**
  * Run the experiment (or the dev trial).
  * @param {{ backend: 'scripted' | 'real', out: string, families?: string[], repeats?: number, iterations?: number,
- *   spend?: string, cap?: number, keepRuns?: boolean, id?: string, devTrial?: { caseId: string, repeats: number }, log?: (line: string) => void }} options
+ *   spend?: string, cap?: number, keepRuns?: boolean, untilMeta?: boolean, id?: string, devTrial?: { caseId: string, repeats: number }, log?: (line: string) => void }} options
  * @returns {Promise<{ code: number, reason?: string, report?: string }>}
  */
 export async function runExperiment(options) {
@@ -589,7 +591,7 @@ export async function runExperiment(options) {
   } catch (error) {
     return { code: 2, reason: errorText(error) }
   }
-  const ctx = { pkgs: loaded.pkgs, backend, out, spend, cap, repeats: options.repeats ?? 3, keepRuns: options.keepRuns === true, log }
+  const ctx = { pkgs: loaded.pkgs, backend, out, spend, cap, repeats: options.repeats ?? 3, keepRuns: options.keepRuns === true, untilMeta: options.untilMeta === true, log }
   const startedAt = new Date().toISOString()
   try {
     if (options.devTrial !== undefined) {
@@ -698,7 +700,7 @@ export function parseArgs(argv) {
     backend: /** @type {'scripted' | 'real'} */ (backend),
     out: /** @type {string} */ (out),
     families, repeats, iterations: number('--iterations'), cap: number('--cap'),
-    spend: value('--spend'), keepRuns: flag('--keep-runs'), id: value('--id'),
+    spend: value('--spend'), keepRuns: flag('--keep-runs'), untilMeta: flag('--until-meta'), id: value('--id'),
     devTrial: flag('--dev-trial') ? { caseId: value('--case') ?? 'code/dev/bugfix-101', repeats: repeats ?? 3 } : undefined,
   }
   return { options, problems }
@@ -707,7 +709,7 @@ export function parseArgs(argv) {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const { options, problems } = parseArgs(process.argv.slice(2))
   if (problems.length > 0) {
-    process.stderr.write(`${problems.join('\n')}\nusage: run.mjs (--scripted | --real) --out <dir> [--dev-trial [--case <id>]] [--families tables,code] [--repeats N] [--iterations N] [--spend <file>] [--cap <usd>] [--keep-runs] [--id <id>]\n`)
+    process.stderr.write(`${problems.join('\n')}\nusage: run.mjs (--scripted | --real) --out <dir> [--dev-trial [--case <id>]] [--families tables,code] [--repeats N] [--iterations N] [--spend <file>] [--cap <usd>] [--keep-runs] [--until-meta] [--id <id>]\n`)
     process.exitCode = 2
   } else {
     runExperiment(options).then(result => {
