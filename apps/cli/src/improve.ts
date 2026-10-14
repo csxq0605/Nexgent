@@ -44,6 +44,11 @@ export function formatCost(usd: number | 'unknown'): string {
   return `≈ $${usd.toFixed(2)}`
 }
 
+/** ` (user)` / ` (project)` after an improver version, when the job records its scope. */
+function scopeOf(job: { readonly improverScope?: string }): string {
+  return job.improverScope === undefined ? '' : ` (${job.improverScope})`
+}
+
 /** The text of `nexgent improve list`. */
 export function formatListing(listing: ImprovementListing): string {
   const { pending, threshold, budget } = listing
@@ -55,7 +60,7 @@ export function formatListing(listing: ImprovementListing): string {
   const lines = [`Improvement jobs: ${header}`]
   if (listing.meta !== undefined) {
     const { meta } = listing
-    lines.push(`meta: ${meta.enabled ? 'on' : 'off'}, ${meta.pending}/${meta.everyJobs} finished jobs counted, budget ${meta.budget.usedTokens}/${meta.budget.maxTokens} tokens (${meta.budget.windowDays} days)`)
+    lines.push(`meta (user-level, shared by all projects): ${meta.enabled ? 'on' : 'off'}, ${meta.pending}/${meta.everyJobs} finished jobs counted, budget ${meta.budget.usedTokens}/${meta.budget.maxTokens} tokens (${meta.budget.windowDays} days)`)
   }
   if (listing.jobs.length === 0) {
     lines.push('No improvement jobs yet.')
@@ -63,7 +68,7 @@ export function formatListing(listing: ImprovementListing): string {
   }
   for (const job of listing.jobs) {
     lines.push(
-      `${shortId(job.id)}  ${job.kind === 'meta' ? 'meta' : 'job'}  ${job.status}  ${job.trigger}  ${shortVersion(job.improverVersion ?? 'v0')}  ${formatTime(job.createdAt)}  ${formatTokens(billedTokensOf(job))}  ${formatCost(job.estimatedUsd)}`,
+      `${shortId(job.id)}  ${job.kind === 'meta' ? 'meta' : 'job'}  ${job.status}  ${job.trigger}  ${shortVersion(job.improverVersion ?? 'v0')}${scopeOf(job)}  ${formatTime(job.createdAt)}  ${formatTokens(billedTokensOf(job))}  ${formatCost(job.estimatedUsd)}`,
     )
     if (job.detail !== undefined) lines.push(`    ${job.detail}`)
   }
@@ -74,7 +79,7 @@ export function formatListing(listing: ImprovementListing): string {
 export function formatDetail(detail: ImprovementDetail): string {
   const { view, job, diagnosis, candidate } = detail
   const lines = [`Improvement job ${job.id}${view.kind === 'meta' ? ' (meta)' : ''}`, `  status: ${job.status}`]
-  lines.push(`  improver: ${shortVersion(view.improverVersion ?? 'v0')}`)
+  lines.push(`  improver: ${shortVersion(view.improverVersion ?? 'v0')}${scopeOf(view)}`)
   lines.push(`  trigger: ${job.trigger}, ${job.items.length} item${job.items.length === 1 ? '' : 's'}`)
   lines.push('  history:')
   for (const change of job.history) {

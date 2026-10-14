@@ -1,6 +1,6 @@
 /**
- * `nexgent improvers list | show | rollback`: the project's improver versions
- * (step 6) through the SDK's `improvers.*` methods, plus the meta-job
+ * `nexgent improvers list | show | rollback`: the user-level improver versions,
+ * shared by every project (step 6, ADR 0012) through the SDK's `improvers.*` methods, plus the meta-job
  * formatting `nexgent improve` shares (diagnosis, change, comparison).
  *
  * The formatting functions are pure so tests can pin the output.
@@ -120,9 +120,18 @@ function formatCurrent(current: ImproverVersionView): string[] {
   return lines
 }
 
+/** One project that ran jobs on the improver (`ImproverListing.usedBy`). */
+export type ImproverUser = NonNullable<ImproverListing['usedBy']>[number]
+
+/** `used by:` lines: one per project, newest first, or `none yet`. */
+function formatUsedBy(usedBy: readonly ImproverUser[]): string[] {
+  if (usedBy.length === 0) return ['  used by: none yet']
+  return usedBy.map(user => `  used by: ${user.name} (${user.root}), last job ${formatTime(user.lastJobAt)}`)
+}
+
 /** The text of `nexgent improvers list`. */
 export function formatImproverListing(listing: ImproverListing): string {
-  const lines = ['Improver versions:', ...formatCurrent(listing.current)]
+  const lines = ['Improver versions (shared by every project):', ...formatCurrent(listing.current), ...formatUsedBy(listing.usedBy ?? [])]
   if (listing.history.length === 0) {
     lines.push('  history: none (v0 has never changed)')
   } else {
@@ -148,9 +157,12 @@ export function formatImproverDetail(detail: ImproverDetail): string {
   return lines.join('\n')
 }
 
-/** One line for a rolled-back improver (`nexgent improvers rollback`). */
-export function formatRolledBack(current: ImproverVersionView): string {
-  return `improver rolled back: version ${shortVersion(current.version)} is now in force (revision ${current.revision}).`
+/** The result of a rolled-back improver, with a warning that every project is affected (`nexgent improvers rollback`). */
+export function formatRolledBack(current: ImproverVersionView, usedBy: readonly ImproverUser[] = []): string {
+  const line = `improver rolled back: version ${shortVersion(current.version)} is now in force (revision ${current.revision}).`
+  const names = usedBy.map(user => user.name).join(', ')
+  const scope = `warning: the improver is shared, so this rollback affects every project${names === '' ? '' : ` (used by: ${names})`}.`
+  return `${line}\n${scope}`
 }
 
 /**

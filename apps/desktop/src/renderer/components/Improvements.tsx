@@ -226,6 +226,32 @@ function Detail({ detail }: { readonly detail: ImprovementDetail }): JSX.Element
             <span className="small wrap" data-testid="improvement-gate-verdict">
               {improvementStatusText(decision.outcome === 'adopted' ? 'adopted' : decision.outcome === 'rejected' ? 'rejected' : decision.outcome === 'awaiting-approval' ? 'awaiting-approval' : decision.outcome)}：{decisionReasonText(decision.reason)}。{decision.detail}
             </span>
+            {decision.reason === 'instance-literal' && (
+              <div className="stack">
+                <span className="small">
+                  <span className="badge warn" data-testid="improvement-refused">{T.improvementRefused}</span>
+                </span>
+                <span className="muted small">{T.improvementLiteralsTitle}</span>
+                <ul className="file-list" data-testid="improvement-literals">
+                  {(decision.instanceLiterals ?? []).map((hit, index) => (
+                    <li key={index} className="small wrap" data-testid="improvement-literal">
+                      {T.improvementLiteral(hit.value, hit.path, hit.source)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {decision.outcome === 'awaiting-approval' && decision.reason === 'no-similar-cases' && (
+              <div className="stack" data-testid="improvement-original-only">
+                <strong className="small">{T.approvalOriginalOnlyTitle}</strong>
+                <span className="small wrap">{T.approvalOriginalOnlyBody}</span>
+              </div>
+            )}
+            {verdict?.similarPassRate !== undefined && (
+              <span className="small" data-testid="improvement-similar-rate">
+                {T.improvementSimilarRate(percentText(verdict.similarPassRate.candidate), percentText(verdict.similarPassRate.baseline))}
+              </span>
+            )}
             {verdict !== undefined && (
               <span className="muted small" data-testid="improvement-gate-rate">
                 {T.improvementPassRate(percentText(verdict.passRate.candidate), percentText(verdict.passRate.baseline))}
@@ -292,8 +318,9 @@ function Job({ view }: { readonly view: ImprovementJobView }): JSX.Element {
         </span>
       </button>
       <span className="muted small wrap">
-        <span data-testid="improvement-improver" data-version={view.improverVersion ?? 'v0'}>
+        <span data-testid="improvement-improver" data-version={view.improverVersion ?? 'v0'} data-scope={view.improverScope ?? 'project'}>
           {T.improverOfJob(improverVersionText(view.improverVersion))}
+          {view.improverScope === 'user' ? ` · ${T.improverScopeUser}` : ''}
         </span>{' '}
         · {formatTime(view.createdAt)} ·{' '}
         <span data-testid="improvement-cost">
@@ -325,11 +352,20 @@ function Job({ view }: { readonly view: ImprovementJobView }): JSX.Element {
 
 function Rollback(): JSX.Element {
   const store = useAppStore()
+  const usedBy = useAppState().improver?.usedBy ?? []
   const [confirming, setConfirming] = useState(false)
   const [reason, setReason] = useState('')
   if (!confirming) {
     return (
-      <button type="button" onClick={() => setConfirming(true)} data-testid="improver-rollback">
+      <button
+        type="button"
+        onClick={() => {
+          setConfirming(true)
+          // The projects that ran on the improver change with every job of any project: read them afresh.
+          void store.refreshImprover()
+        }}
+        data-testid="improver-rollback"
+      >
         {T.improverRollback}
       </button>
     )
@@ -343,6 +379,19 @@ function Rollback(): JSX.Element {
   }
   return (
     <form className="stack" onSubmit={submit}>
+      <p className="small wrap">{T.improverRollbackAffectsAll}</p>
+      <div className="stack" data-testid="improver-rollback-projects">
+        <span className="muted small">{T.improverRollbackProjects}</span>
+        {usedBy.length === 0 ? (
+          <span className="muted small">{T.improverRollbackNoProjects}</span>
+        ) : (
+          usedBy.map(project => (
+            <span key={project.root} className="small wrap" data-testid="improver-rollback-project" title={project.root}>
+              {project.name} · {formatTime(project.lastJobAt)}
+            </span>
+          ))
+        )}
+      </div>
       <input value={reason} onChange={event => setReason(event.target.value)} placeholder={T.improverRollbackReason} aria-label={T.improverRollbackReason} data-testid="improver-rollback-reason" />
       <div className="row">
         <button type="submit" className="danger" data-testid="improver-rollback-confirm">
@@ -367,6 +416,7 @@ function ImproverSection(): JSX.Element | null {
   return (
     <div className="stack" data-testid="improver-section">
       <span className="panel-label">{T.improverTitle}</span>
+      <span className="muted small wrap" data-testid="improver-shared-note">{T.improverSharedNote}</span>
       {current.problem !== undefined && (
         <div className="error-banner small wrap" role="alert" data-testid="improver-problem">
           <strong>{T.improverProblem}：</strong>

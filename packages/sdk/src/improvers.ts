@@ -1,20 +1,26 @@
 /**
- * Step 6 (W5): the SDK's `improvers.*` methods over one project's improver
- * version line (`@nexgent/capabilities` `ImproverStore`, `.nexgent/improvers/`).
- * The improver in force is what `resolve()` reads, so a version that fails to
- * load is rolled back (`load-failure`) here as in a job, and the view names
- * the problem. The change that produced a version is read from the meta job
- * whose `change.json` names it as the child.
+ * Step 6 (W5), API 7 (ADR 0012): the SDK's `improvers.*` methods over the
+ * user's improver version line (`@nexgent/capabilities` `ImproverStore`,
+ * `<NEXGENT_HOME>/improvers/`), shared by every project. The improver in
+ * force is what `resolve()` reads, so a version that fails to load is rolled
+ * back (`load-failure`) here as in a job, and the view names the problem.
+ * The change that produced a version is read from the meta job whose
+ * `change.json` names it as the child; meta jobs live in the projects that
+ * hosted them, found through the user meta queue and the recent projects.
  */
 import { readFile } from 'node:fs/promises'
-import { ImproverStore, improversDir, type ImproverActivation, type ResolvedImprover } from '@nexgent/capabilities'
-import { jobPaths, listJobs } from '@nexgent/evolve'
-import { IMPROVER_V0_VERSION, NexgentError, type ImproverChangeRecord, type ImproverRevision, type ImproverVersion, type WorkspaceLayout } from '@nexgent/kernel'
+import { basename } from 'node:path'
+import { ImproverStore, type ImproverActivation, type ResolvedImprover } from '@nexgent/capabilities'
+import { improvementsDir, jobPaths, listJobs, readUserQueue, type ImprovementJob } from '@nexgent/evolve'
+import { IMPROVER_V0_VERSION, NexgentError, resolveWorkspaceLayout, type ImproverChangeRecord, type ImproverRevision, type ImproverVersion } from '@nexgent/kernel'
 import type { ImproverDetail, ImproverListing, ImproverVersionView } from './api.js'
 
-/** The project's improver store. */
-export function storeOf(layout: Pick<WorkspaceLayout, 'dataDir'>): ImproverStore {
-  return new ImproverStore(improversDir(layout))
+/** At most this many projects in `ImproverListing.usedBy`. */
+export const USED_BY_LIMIT = 20
+
+/** The user's improver store below the Nexgent home. */
+export function storeOf(home: string): ImproverStore {
+  return ImproverStore.user({ home })
 }
 
 function problemOf(resolved: ResolvedImprover): string | undefined {
@@ -46,11 +52,48 @@ export async function current(store: ImproverStore): Promise<{ readonly view: Im
   return { view: viewOf(activation, chain.revisions, problemOf(resolved)), changed: resolved.rollbacks.length > 0 }
 }
 
-/** `improvers.list`. */
-export async function list(store: ImproverStore): Promise<{ readonly listing: ImproverListing; readonly changed: boolean }> {
+/**
+ * Project roots the user's improvement records point at: the user meta
+ * queue's entries (counted jobs, meta jobs, the active one) and `extra`
+ * (the recent and open projects), each once.
+ */
+export async function knownRoots(home: string, extra: readonly string[] = []): Promise<string[]> {
+  const queue = await readUserQueue(home).catch(() => undefined)
+  const roots = [
+    ...extra,
+    ...(queue?.active === undefined ? [] : [queue.active.root]),
+    ...[...(queue?.metaJobs ?? [])].reverse().map(ref => ref.root),
+    ...[...(queue?.pending ?? [])].reverse().map(entry => entry.root),
+  ]
+  return [...new Set(roots)]
+}
+
+async function jobsOf(root: string): Promise<ImprovementJob[]> {
+  return listJobs(improvementsDir(resolveWorkspaceLayout(root))).catch(() => [])
+}
+
+/**
+ * The projects whose jobs ran on `version` of the user line (`improverScope:
+ * user`), most recent first: a rollback affects them all (ADR 0012).
+ */
+export async function usedBy(roots: readonly string[], version: ImproverVersion): Promise<NonNullable<ImproverListing['usedBy']>> {
+  const found: { root: string; name: string; lastJobAt: string }[] = []
+  for (const root of roots) {
+    let last: string | undefined
+    for (const job of await jobsOf(root)) {
+      if (job.improverScope !== 'user' || (job.improverVersion ?? IMPROVER_V0_VERSION) !== version) continue
+      if (last === undefined || job.createdAt > last) last = job.createdAt
+    }
+    if (last !== undefined) found.push({ root, name: basename(root) || root, lastJobAt: last })
+  }
+  return found.sort((a, b) => b.lastJobAt.localeCompare(a.lastJobAt)).slice(0, USED_BY_LIMIT)
+}
+
+/** `improvers.list`: the user line, and the projects that ran on the improver in force. */
+export async function list(store: ImproverStore, roots: readonly string[]): Promise<{ readonly listing: ImproverListing; readonly changed: boolean }> {
   const { view, changed } = await current(store)
-  const chain = await store.chain()
-  return { listing: { current: view, history: chain.revisions }, changed }
+  const [chain, users] = await Promise.all([store.chain(), usedBy(roots, view.version)])
+  return { listing: { current: view, history: chain.revisions, usedBy: users }, changed }
 }
 
 function version(value: unknown, name: string): ImproverVersion {
@@ -58,25 +101,27 @@ function version(value: unknown, name: string): ImproverVersion {
   return value
 }
 
-/** The accepted change whose child is `version`, from the meta jobs' `change.json`. */
-async function changeOf(improvementsDir: string, version: ImproverVersion): Promise<ImproverChangeRecord | undefined> {
+/** The accepted change whose child is `version`, from the meta jobs' `change.json` in the known projects. */
+async function changeOf(roots: readonly string[], version: ImproverVersion): Promise<ImproverChangeRecord | undefined> {
   if (version === IMPROVER_V0_VERSION) return undefined
-  const jobs = await listJobs(improvementsDir).catch(() => [])
-  for (const job of [...jobs].reverse()) {
-    if (job.kind !== 'meta' || job.meta?.childVersion !== version) continue
-    try {
-      return JSON.parse(await readFile(jobPaths(improvementsDir, job.id).change, 'utf8')) as ImproverChangeRecord
-    } catch {
-      // not written (or unreadable): look further
+  for (const root of roots) {
+    const directory = improvementsDir(resolveWorkspaceLayout(root))
+    for (const job of [...await jobsOf(root)].reverse()) {
+      if (job.kind !== 'meta' || job.meta?.childVersion !== version) continue
+      try {
+        return JSON.parse(await readFile(jobPaths(directory, job.id).change, 'utf8')) as ImproverChangeRecord
+      } catch {
+        // not written (or unreadable): look further
+      }
     }
   }
   return undefined
 }
 
 /** `improvers.show`. */
-export async function show(store: ImproverStore, improvementsDir: string, input: unknown): Promise<ImproverDetail> {
+export async function show(store: ImproverStore, roots: readonly string[], input: unknown): Promise<ImproverDetail> {
   const wanted = version(input, 'version')
-  const [bundle, activation, change] = await Promise.all([store.load(wanted), store.activation(), changeOf(improvementsDir, wanted)])
+  const [bundle, activation, change] = await Promise.all([store.load(wanted), store.activation(), changeOf(roots, wanted)])
   return { version: wanted, bundle, ...(change === undefined ? {} : { change }), current: activation.version === wanted }
 }
 

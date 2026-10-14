@@ -144,7 +144,7 @@ describe('nexgent improve', () => {
     await ensureQueue(dir)
     const r = await improve(['list'])
     expect(r.code, r.err).toBe(EXIT.OK)
-    expect(r.out).toMatch(/^Improvement jobs: pending 0\/\d+ \| budget 0\/\d+ tokens in \d+ days\n(meta: (on|off), \d+\/\d+ finished jobs counted, budget \d+\/\d+ tokens \(\d+ days\)\n)?No improvement jobs yet\.\n$/)
+    expect(r.out).toMatch(/^Improvement jobs: pending 0\/\d+ \| budget 0\/\d+ tokens in \d+ days\n(meta \(user-level, shared by all projects\): (on|off), \d+\/\d+ finished jobs counted, budget \d+\/\d+ tokens \(\d+ days\)\n)?No improvement jobs yet\.\n$/)
   })
 
   it('list: jobs newest first with detail and unknown cost; --json', async () => {
@@ -154,7 +154,7 @@ describe('nexgent improve', () => {
     await makeJob(C, new Date().toISOString())
     const r = await improve(['list'])
     expect(r.code, r.err).toBe(EXIT.OK)
-    const lines = r.out.trimEnd().split('\n').slice(1).filter(line => !line.startsWith('meta: '))
+    const lines = r.out.trimEnd().split('\n').slice(1).filter(line => !line.startsWith('meta ('))
     expect(lines[0]).toMatch(/^cccccccc {2}job {2}queued {2}feedback-count {2}v0 {2}\d{4}-\d{2}-\d{2} \d{2}:\d{2}Z {2}0 tokens/)
     expect(lines[1]).toMatch(/^aaaaaaaa {2}job {2}failed /)
     expect(lines[2]).toBe('    the model said no')

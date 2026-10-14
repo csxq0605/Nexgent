@@ -1,13 +1,14 @@
 /**
- * Step 6 through the SDK (W5): `improvers.list / show / rollback` over the
- * project's improver version line, `improver.version` events, the meta
+ * Step 6 through the SDK (W5; API 7): `improvers.list / show / rollback`
+ * over the user's improver version line, `userSettings.*`, application-level
+ * `improver.version` events, the meta
  * listing fields, `improvements.runMeta`, and a meta job's detail (meta
  * diagnosis, change, comparison) with both arms in its dollar estimate.
  */
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
-import { ImproverStore, improversDir } from '@nexgent/capabilities'
+import { ImproverStore, improversDir, userImproversDir } from '@nexgent/capabilities'
 import { createJob, improvementsDir, jobPaths, readJob, transitionJob, updateJob } from '@nexgent/evolve'
 import {
   applyImproverChange,
@@ -43,18 +44,18 @@ async function until(predicate: () => boolean, timeoutMs = 10_000): Promise<void
 
 const versionEvents = (t: TestSdk) => t.events.filter((event): event is Extract<SdkEvent, { type: 'improver.version' }> => event.type === 'improver.version')
 
-describe('improver versions through the SDK', () => {
-  it('a fresh project runs v0; an adopted child is listed and shown with its change; rollback is a manual revision with an event', async () => {
+describe('improver versions through the SDK (API 7: the user line)', () => {
+  it('a fresh home runs v0; an adopted child is listed with the projects that used it and shown with its change; rollback is a manual, application-level event', async () => {
     const t = await testSdk([])
     const { root, projectId } = await openProject(t)
-    expect(await t.sdk.call('improvers.list', { projectId })).toEqual({ current: { version: 'v0', revision: 0 }, history: [] })
-    const v0 = await t.sdk.call('improvers.show', { projectId, version: 'v0' })
+    expect(await t.sdk.call('improvers.list', {})).toEqual({ current: { version: 'v0', revision: 0 }, history: [], usedBy: [] })
+    const v0 = await t.sdk.call('improvers.show', { version: 'v0' })
     expect(v0).toEqual({ version: 'v0', bundle: IMPROVER_V0, current: true })
-    await expect(t.sdk.call('improvers.show', { projectId, version: 'f'.repeat(64) })).rejects.toMatchObject({ code: 'improver/not-found' })
+    await expect(t.sdk.call('improvers.show', { version: 'f'.repeat(64) })).rejects.toMatchObject({ code: 'improver/not-found' })
 
-    // A meta job proposed the child (change.json) and adopted it.
+    // A meta job hosted in this project proposed the child (change.json) and adopted it on the user line.
     const layout = resolveWorkspaceLayout(root)
-    const store = new ImproverStore(improversDir(layout))
+    const store = ImproverStore.user({ home: t.home })
     const { version } = await store.write(CHILD)
     const jobs = improvementsDir(layout)
     const metaId = randomUUID()
@@ -63,36 +64,82 @@ describe('improver versions through the SDK', () => {
     const change: ImproverChangeRecord = { formatVersion: 1, jobId: metaId, createdAt: '2026-10-13T10:00:00.000Z', sessionId: randomUUID(), attempts: 1, parentVersion: 'v0', childVersion: version, change: CHANGE, rationale: 'more runs per case' }
     await writeFile(jobPaths(jobs, metaId).change, JSON.stringify(change))
     expect(await store.adopt(version, { jobId: metaId })).not.toBeNull()
+    // A capability job of this project ran on the child (user scope); one of another, recent project too; an old project-scope job does not count.
+    const used = randomUUID()
+    await createJob(jobs, { id: used, trigger: 'explicit', items: [] } as Parameters<typeof createJob>[1])
+    await updateJob(jobs, used, { improverVersion: version, improverScope: 'user' } as Parameters<typeof updateJob>[2])
+    const other = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'other'), create: true })
+    const otherJobs = improvementsDir(resolveWorkspaceLayout(other.root))
+    const old = randomUUID()
+    await createJob(otherJobs, { id: old, trigger: 'explicit', items: [] } as Parameters<typeof createJob>[1])
+    await updateJob(otherJobs, old, { improverVersion: version } as Parameters<typeof updateJob>[2])
 
-    const listing = await t.sdk.call('improvers.list', { projectId })
+    const listing = await t.sdk.call('improvers.list', {})
     expect(listing.current).toMatchObject({ version, revision: 1, trigger: 'meta-job', jobId: metaId, since: expect.any(String) })
     expect(listing.history.map(revision => [revision.type, revision.from, revision.version])).toEqual([['adopt', 'v0', version]])
-    expect(await t.sdk.call('improvers.show', { projectId, version })).toEqual({ version, bundle: CHILD, change, current: true })
-    expect((await t.sdk.call('improvers.show', { projectId, version: 'v0' })).current).toBe(false)
+    expect(listing.usedBy).toEqual([{ root, name: 'p', lastJobAt: expect.any(String) }])
+    // A projectId is ignored: every project sees the same line.
+    expect(await t.sdk.call('improvers.list', { projectId: other.projectId })).toEqual(listing)
+    expect(await t.sdk.call('improvers.show', { version })).toEqual({ version, bundle: CHILD, change, current: true })
+    expect((await t.sdk.call('improvers.show', { version: 'v0' })).current).toBe(false)
 
-    await expect(t.sdk.call('improvers.rollback', { projectId, reason: 42 } as never)).rejects.toMatchObject({ code: 'tool/invalid-input' })
-    const back = await t.sdk.call('improvers.rollback', { projectId, reason: 'the old one was better' })
+    await expect(t.sdk.call('improvers.rollback', { reason: 42 } as never)).rejects.toMatchObject({ code: 'tool/invalid-input' })
+    const back = await t.sdk.call('improvers.rollback', { reason: 'the old one was better' })
     expect(back).toMatchObject({ version: 'v0', revision: 2, trigger: 'manual' })
-    expect(versionEvents(t)).toEqual([expect.objectContaining({ type: 'improver.version', projectId, current: back })])
+    expect(versionEvents(t)).toEqual([expect.objectContaining({ type: 'improver.version', current: back, eventSeq: 1 })])
     expect(versionEvents(t)[0]).not.toHaveProperty('sessionId')
-    const after = await t.sdk.call('improvers.list', { projectId })
+    expect(versionEvents(t)[0]).not.toHaveProperty('projectId')
+    const after = await t.sdk.call('improvers.list', {})
     expect(after.history.map(revision => [revision.type, revision.trigger, revision.reason])).toEqual([['adopt', 'meta-job', undefined], ['rollback', 'manual', 'the old one was better']])
     // Files stay: the rolled-back child can still be shown, and rolled forward to.
-    expect((await t.sdk.call('improvers.show', { projectId, version })).current).toBe(false)
+    expect((await t.sdk.call('improvers.show', { version })).current).toBe(false)
     expect(await t.sdk.call('improvers.rollback', { projectId, toVersion: version })).toMatchObject({ version, revision: 3 })
+    expect((await ImproverStore.user({ home: t.home }).activation()).version).toBe(version)
   })
 
   it('an improver that fails to load is rolled back on read; the view names the problem and an event follows', async () => {
     const t = await testSdk([])
-    const { root, projectId } = await openProject(t)
-    const store = new ImproverStore(improversDir(resolveWorkspaceLayout(root)))
+    await openProject(t)
+    const store = ImproverStore.user({ home: t.home })
     const { version } = await store.write(CHILD)
     await store.adopt(version, { jobId: randomUUID() })
-    await writeFile(nodePath.join(improversDir(resolveWorkspaceLayout(root)), 'bundles', `${version}.json`), '{"formatVersion":1}')
-    const listing = await t.sdk.call('improvers.list', { projectId })
+    await writeFile(nodePath.join(userImproversDir(t.home), 'bundles', `${version}.json`), '{"formatVersion":1}')
+    const listing = await t.sdk.call('improvers.list', {})
     expect(listing.current).toMatchObject({ version: 'v0', revision: 2, trigger: 'load-failure' })
     expect(listing.current.problem).toContain(version.slice(0, 12))
     expect(versionEvents(t)).toHaveLength(1)
+  })
+
+  it('a project\'s own step-6 line is history only: it is not the improver in force', async () => {
+    const t = await testSdk([])
+    const { root } = await openProject(t)
+    const project = new ImproverStore(improversDir(resolveWorkspaceLayout(root)), { scope: 'user' }) // written as step 6 did
+    const { version } = await project.write(CHILD)
+    await project.adopt(version, { jobId: randomUUID() })
+    expect((await t.sdk.call('improvers.list', {})).current).toEqual({ version: 'v0', revision: 0 })
+  })
+})
+
+describe('user settings through the SDK (API 7)', () => {
+  it('reads defaults, writes <home>/config.json, keeps the meta switch off unless asked, and rejects invalid values', async () => {
+    const t = await testSdk([])
+    const { projectId } = await openProject(t)
+    const defaults = await t.sdk.call('userSettings.get', {})
+    expect(defaults.improvement.meta).toMatchObject({ enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 } })
+    const meta = { enabled: true, everyJobs: 4, budget: { maxTokens: 2_000_000, windowDays: 14 } }
+    const saved = await t.sdk.call('userSettings.update', { patch: { improvement: { meta } } })
+    expect(saved.improvement.meta).toMatchObject(meta)
+    expect(JSON.parse(await readFile(nodePath.join(t.home, 'config.json'), 'utf8'))).toEqual({ version: 1, improvement: { meta } })
+    expect(await t.sdk.call('userSettings.get', {})).toEqual(saved)
+    // Every project's listing shows the user's meta settings.
+    expect((await t.sdk.call('improvements.list', { projectId })).meta).toEqual({ enabled: true, pending: 0, everyJobs: 4, budget: { usedTokens: 0, maxTokens: 2_000_000, windowDays: 14 } })
+    await expect(t.sdk.call('userSettings.update', { patch: { improvement: { meta: { everyJobs: 0 } } } })).rejects.toMatchObject({ code: 'config/invalid' })
+    await expect(t.sdk.call('userSettings.update', { patch: { model: 'x' } as never })).rejects.toMatchObject({ code: 'config/invalid' })
+    expect(await t.sdk.call('userSettings.get', {})).toEqual(saved)
+    // The project keeps only its sharing switch (default on).
+    expect((await t.sdk.call('settings.get', { projectId })).improvement.shareImproverEvidence).toBe(true)
+    const off = await t.sdk.call('settings.update', { projectId, patch: { improvement: { shareImproverEvidence: false } } })
+    expect(off.improvement.shareImproverEvidence).toBe(false)
   })
 })
 
@@ -168,10 +215,10 @@ describe('meta jobs through the SDK', () => {
       expect(detail.view.estimatedUsd).toBeGreaterThan(0)
       const session = (await readJob(improvementsDir(resolveWorkspaceLayout(root)), job.id)).sessions!['meta-diagnose']!
       const records = (await readSessionRecords(root, session)).records as SessionRecord[]
-      expect(records[0]).toMatchObject({ type: 'session.start', purpose: 'improvement', improvement: { jobId: job.id, phase: 'meta-diagnose' } })
+      expect(records[0]).toMatchObject({ type: 'session.start', purpose: 'improvement', improvement: { jobId: job.id, phase: 'meta-diagnose', improverVersion: 'v0', improverScope: 'user' } })
       const requests = (await readLedgerRecords(root)).records.filter(record => record.type === 'llm.request.end' && record.sessionId === session)
       expect(requests).toHaveLength(2)
-      for (const record of requests) expect(record).toMatchObject({ improvementId: job.id, improvementPhase: 'meta-diagnose' })
+      for (const record of requests) expect(record).toMatchObject({ improvementId: job.id, improvementPhase: 'meta-diagnose', improverVersion: 'v0', improverScope: 'user' })
       // Not a conversation.
       expect(await t.sdk.call('sessions.list', { projectId })).toEqual([])
     } finally {

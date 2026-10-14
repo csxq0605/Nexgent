@@ -100,6 +100,8 @@ const ATTRIBUTION_KEYS = [
   'capabilityVersion', 'memberId', 'executionForm', 'taskId', 'improvementId', 'improvementPhase',
   // Step 6 (ADR 0008 decision 6).
   'improverVersion', 'metaJobId', 'comparisonArm',
+  // ADR 0012.
+  'improverScope',
 ] as const
 
 function pickAttribution(...sources: (LedgerAttribution | undefined)[]): LedgerAttribution {

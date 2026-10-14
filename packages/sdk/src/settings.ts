@@ -1,5 +1,6 @@
 /**
- * Project settings over `.nexgent/config.json` and the API-key facts.
+ * Project settings over `.nexgent/config.json`, user settings over
+ * `<NEXGENT_HOME>/config.json` (API 7, ADR 0012) and the API-key facts.
  *
  * Reads go through the kernel's validating reader; a patch is merged into
  * the file as it is on disk (fields the settings page does not know, such as
@@ -8,7 +9,9 @@
  * resolution plus the llm route's `ANTHROPIC_API_KEY` fallback; its value is
  * only ever read to redact exports and never returned.
  */
+import { join } from 'node:path'
 import {
+  assertUserConfig,
   credentialFilePath,
   LocalCredentials,
   NEXGENT_API_KEY,
@@ -17,11 +20,13 @@ import {
   readCredentialFile,
   readJsonFile,
   readProjectConfig,
+  resolveUserConfig,
+  USER_CONFIG_FILE_NAME,
   writeJsonFile,
   type CredentialInfo,
 } from '@nexgent/kernel'
 import { ANTHROPIC_API_KEY } from '@nexgent/llm'
-import type { ProjectSettings, SettingsPatch } from './api.js'
+import type { ProjectSettings, SettingsPatch, UserSettings, UserSettingsPatch } from './api.js'
 
 /** Where credentials are looked up. */
 export interface CredentialEnv {
@@ -99,4 +104,48 @@ export async function updateSettings(configFile: string, patch: SettingsPatch, w
   parseProjectConfig(next, configFile)
   await writeJsonFile(configFile, next, { mode: 0o644 })
   return readSettings(configFile, where)
+}
+
+/** `<home>/config.json`. */
+export function userConfigFile(home: string): string {
+  return join(home, USER_CONFIG_FILE_NAME)
+}
+
+async function readUserConfigRaw(file: string): Promise<Record<string, unknown> | undefined> {
+  let raw: unknown
+  try {
+    raw = await readJsonFile(file)
+  } catch (cause) {
+    throw new NexgentError('config/invalid', `${USER_CONFIG_FILE_NAME} (Nexgent home) is not valid JSON`, { cause })
+  }
+  if (raw === undefined) return undefined
+  assertUserConfig(raw)
+  return raw as Record<string, unknown>
+}
+
+/** `userSettings.get`: the user config with defaults (a missing file is `{}`). */
+export async function readUserSettings(home: string): Promise<UserSettings> {
+  const raw = await readUserConfigRaw(userConfigFile(home))
+  return { improvement: resolveUserConfig(raw ?? {}).improvement }
+}
+
+/**
+ * `userSettings.update`: the patch's `improvement.meta` replaces the stored
+ * one (missing fields take their defaults); other fields on disk are kept.
+ * Validated as a whole before writing.
+ */
+export async function updateUserSettings(home: string, patch: UserSettingsPatch): Promise<UserSettings> {
+  if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) throw new NexgentError('config/invalid', 'user settings patch must be an object')
+  for (const key of Object.keys(patch)) if (key !== 'improvement') throw new NexgentError('config/invalid', `user settings patch: unknown field ${key}`)
+  const file = userConfigFile(home)
+  const next: Record<string, unknown> = { version: 1, ...await readUserConfigRaw(file) }
+  if (patch.improvement !== undefined) {
+    const improvement = patch.improvement as unknown
+    if (improvement === null || typeof improvement !== 'object' || Array.isArray(improvement)) throw new NexgentError('config/invalid', 'user settings patch: improvement must be an object')
+    const current = (next.improvement ?? {}) as Record<string, unknown>
+    next.improvement = { ...current, ...(patch.improvement.meta === undefined ? {} : { meta: patch.improvement.meta }) }
+  }
+  assertUserConfig(next)
+  await writeJsonFile(file, next, { mode: 0o644, dirMode: 0o700 })
+  return readUserSettings(home)
 }

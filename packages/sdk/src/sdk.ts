@@ -62,7 +62,7 @@ import {
   type UserMessageSource,
 } from '@nexgent/kernel'
 import { capabilitiesOf, type CapabilityService } from '@nexgent/capabilities'
-import { improvementsDir, type ImprovementHost } from '@nexgent/evolve'
+import type { ImprovementHost } from '@nexgent/evolve'
 import { projectSession, SESSION_FILE_NAME } from '@nexgent/session'
 import { createFeedbackEntry, materialAddedRecord, type LocalTaskingService } from '@nexgent/tasking'
 import {
@@ -91,7 +91,7 @@ import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
 import { collaborationView, historyItems, memberRunView, runKey, sessionSummary, turnUsage } from './history.js'
 import { RecentProjects } from './recent.js'
-import { describeApiKey, readSettings, secretValues, setApiKey, updateSettings, type CredentialEnv } from './settings.js'
+import { describeApiKey, readSettings, readUserSettings, secretValues, setApiKey, updateSettings, updateUserSettings, type CredentialEnv } from './settings.js'
 
 /** `deliverables.readText` limit. */
 export const READ_TEXT_MAX_BYTES = 1024 * 1024
@@ -420,14 +420,10 @@ export class LocalNexgentSdk implements NexgentSdk {
     return id
   }
 
-  /**
-   * API 7 drops `projectId` from `improvers.*` (the improver is user-level);
-   * until the store moves to `<NEXGENT_HOME>/improvers/` the project-level
-   * store of the given project still answers.
-   */
-  private improverProject(projectId: string | undefined): ProjectEntry {
-    if (projectId === undefined) throw new NexgentError('internal', 'the user-level improver store is not available yet; pass projectId')
-    return this.project(projectId)
+  /** Project roots the user's improver records may point at: open projects, recent projects, the user meta queue's. */
+  private async improverRoots(): Promise<string[]> {
+    const recent = await this.recent.list().catch(() => [])
+    return improvers.knownRoots(this.home, [...[...this.projects.values()].map(project => project.root), ...recent.map(entry => entry.root)])
   }
 
   private project(projectId: string): ProjectEntry {
@@ -510,7 +506,7 @@ export class LocalNexgentSdk implements NexgentSdk {
           void improvements.viewOf(host, job).then(view => this.emitProject(projectId, { type: 'improvement.job', job: view }), () => undefined)
           // A meta job that adopted its child changed the improver in force.
           if (job.kind === 'meta' && job.status === 'adopted') {
-            void improvers.current(improvers.storeOf(ctx.workspace.layout)).then(({ view }) => this.emitProject(projectId, { type: 'improver.version', current: view }), () => undefined)
+            void improvers.current(improvers.storeOf(this.home)).then(({ view }) => this.emitApp({ type: 'improver.version', current: view }), () => undefined)
           }
         })
         await project.jobs.start()
@@ -794,6 +790,21 @@ export class LocalNexgentSdk implements NexgentSdk {
         listener(full)
       } catch {
         // a subscriber failure must not affect the turn
+      }
+    }
+  }
+
+  /** An application-level event (API 7: `improver.version`): its own counter, no project, no session. */
+  private emitApp(event: DistributiveOmitBase<SdkEvent>): void {
+    const key = '\u0000app'
+    const eventSeq = (this.eventSeq.get(key) ?? 0) + 1
+    this.eventSeq.set(key, eventSeq)
+    const full = { ...event, eventSeq } as SdkEvent
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(full)
+      } catch {
+        // a subscriber failure must not affect the caller
       }
     }
   }
@@ -1198,28 +1209,19 @@ export class LocalNexgentSdk implements NexgentSdk {
         await project.jobs?.check()
         return view
       },
-      // API 7: user-level settings (`<NEXGENT_HOME>/config.json`); the backend lands with the shared improver (step 6 rework).
-      'userSettings.get': async () => {
-        throw new NexgentError('internal', 'userSettings.get is not available yet')
-      },
-      'userSettings.update': async () => {
-        throw new NexgentError('internal', 'userSettings.update is not available yet')
-      },
-      'improvers.list': async input => {
-        const project = this.improverProject(input.projectId)
-        const { listing, changed } = await improvers.list(improvers.storeOf(project.app.ctx.workspace.layout))
-        if (changed) this.emitProject(project.projectId, { type: 'improver.version', current: listing.current })
+      // API 7: user-level settings (`<NEXGENT_HOME>/config.json`), shared by every project.
+      'userSettings.get': () => readUserSettings(this.home),
+      'userSettings.update': input => updateUserSettings(this.home, input?.patch),
+      // API 7 (ADR 0012): the user's improver line; a `projectId` is ignored.
+      'improvers.list': async () => {
+        const { listing, changed } = await improvers.list(improvers.storeOf(this.home), await this.improverRoots())
+        if (changed) this.emitApp({ type: 'improver.version', current: listing.current })
         return listing
       },
-      'improvers.show': async input => {
-        const project = this.improverProject(input.projectId)
-        const layout = project.app.ctx.workspace.layout
-        return improvers.show(improvers.storeOf(layout), improvementsDir(layout), input.version)
-      },
+      'improvers.show': async input => improvers.show(improvers.storeOf(this.home), await this.improverRoots(), input?.version),
       'improvers.rollback': async input => {
-        const project = this.improverProject(input.projectId)
-        const current = await improvers.rollback(improvers.storeOf(project.app.ctx.workspace.layout), input)
-        this.emitProject(project.projectId, { type: 'improver.version', current })
+        const current = await improvers.rollback(improvers.storeOf(this.home), input ?? {})
+        this.emitApp({ type: 'improver.version', current })
         return current
       },
     }

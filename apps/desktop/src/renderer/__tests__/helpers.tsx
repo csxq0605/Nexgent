@@ -30,3 +30,8 @@ export async function renderApp(given?: FakeBridge | null, options: { readonly o
 export function emit(bridge: FakeBridge, event: Parameters<FakeBridge['emit']>[0]): void {
   act(() => bridge.emit(event))
 }
+
+/** Emit an application-level event (no projectId) inside act. */
+export function emitApp(bridge: FakeBridge, event: Parameters<FakeBridge['emitApp']>[0]): void {
+  act(() => bridge.emitApp(event))
+}

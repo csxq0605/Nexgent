@@ -29,7 +29,7 @@
  * - Model and thinking are `request.model` / `request.thinking`
  *   (`improvement.model`, `improvement.thinking`).
  */
-import type { ComparisonArm, ImproverVersion, LLMUsage, SandboxMode, ThinkingMode, Tool } from '@nexgent/kernel'
+import type { ComparisonArm, ImproverScope, ImproverVersion, LLMUsage, SandboxMode, ThinkingMode, Tool } from '@nexgent/kernel'
 
 /** What a job asks the runner to open. */
 export interface ImprovementSessionRequest {
@@ -42,6 +42,8 @@ export interface ImprovementSessionRequest {
   readonly projectRoot: string
   /** Step 6: the improver version the job pinned (for `session.start.improvement` and the ledger). */
   readonly improverVersion: ImproverVersion
+  /** ADR 0012: where that improver lives (`job.improverScope`; absent before the rework). */
+  readonly improverScope?: ImproverScope
   /** Step 6, comparison arms: the meta job and the arm (on `session.start.improvement` and every ledger record). */
   readonly metaJobId?: string
   readonly comparisonArm?: ComparisonArm

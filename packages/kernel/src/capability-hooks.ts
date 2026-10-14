@@ -18,7 +18,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { CapabilityComponentRef, CapabilityVersion, TaskCheckSpec } from './contracts/capabilities.js'
 import type { MemberIdentity } from './contracts/collaboration.js'
 import type { ComparisonArm, ImprovementPhase } from './contracts/improvement.js'
-import type { ImproverVersion } from './contracts/improver.js'
+import type { ImproverScope, ImproverVersion } from './contracts/improver.js'
 import type { JsonValue } from './contracts/json.js'
 import type { TaskCheck } from './contracts/ledger.js'
 
@@ -165,6 +165,8 @@ export interface ImprovementRun {
   readonly jobId: string
   readonly phase: ImprovementPhase
   readonly improverVersion?: ImproverVersion
+  /** ADR 0012: where `improverVersion` lives (`user` from the rework on). */
+  readonly improverScope?: ImproverScope
   readonly metaJobId?: string
   readonly comparisonArm?: ComparisonArm
 }

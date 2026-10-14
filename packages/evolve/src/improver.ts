@@ -21,6 +21,7 @@ import {
   type CapabilitiesConfig,
   type ImproverBundle,
   type ImproverComparisonParams,
+  type ImproverScope,
   type ImproverVersion,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
@@ -53,6 +54,11 @@ export const PROJECT_IMPROVERS: ImproverSource = {
   load(layout, version) {
     return new ImproverStore(improversDir(layout)).load(version)
   },
+}
+
+/** ADR 0012: the job's `improverScope` for its sessions' header and ledger (nothing for a job pinned before). */
+export function scopeOf(job: Pick<ImprovementJob, 'improverScope'>): { readonly improverScope?: ImproverScope } {
+  return job.improverScope === undefined ? {} : { improverScope: job.improverScope }
 }
 
 /** The version a job pinned (`v0` for a step-5 job). */

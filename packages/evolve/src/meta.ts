@@ -58,7 +58,7 @@ import {
 import { CapabilityStore, ImproverStore, prepareProjectCopy, projectEpoch, type ProjectCopy } from '@nexgent/capabilities'
 import { JsonlLedger, JsonlSessionStore, validateImprovementFile } from '@nexgent/session'
 import { sumTurns } from './diagnosis.js'
-import type { ImproverSource, PinnedImprover } from './improver.js'
+import { scopeOf, type ImproverSource, type PinnedImprover } from './improver.js'
 import { createJob, jobPaths, listJobs, readJob, type JobPatch } from './jobs.js'
 import { metaDiagnosisTools, metaProposeTools, writeOnce, type MetaChangeState, type MetaDiagnosisState } from './meta-tools.js'
 import { improvementsDir } from './paths.js'
@@ -344,7 +344,7 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
       const tools = metaDiagnosisTools({ layout, projects, job, sessionId, improver: input.improver, state, now })
       await input.record({ sessions: { ...job.sessions, 'meta-diagnose': sessionId } })
       const session = await options.runner.open({
-        jobId: job.id, phase: 'meta-diagnose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version,
+        jobId: job.id, phase: 'meta-diagnose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version, ...scopeOf(job),
         model: input.meta.model, thinking: config.thinking, title: `meta improvement ${job.id} diagnose`, tools,
       })
       const turns: ImprovementTurnResult[] = []
@@ -389,7 +389,7 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
       const tools = metaProposeTools({ layout, projects: await metaProjects(layout, job), home: input.home, job, sessionId, improver: input.improver, state, now })
       await input.record({ sessions: { ...job.sessions, 'meta-propose': sessionId } })
       const session = await options.runner.open({
-        jobId: job.id, phase: 'meta-propose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version,
+        jobId: job.id, phase: 'meta-propose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version, ...scopeOf(job),
         model: input.meta.model, thinking: config.thinking, title: `meta improvement ${job.id} propose`, tools,
       })
       const turns: ImprovementTurnResult[] = []

@@ -109,6 +109,7 @@ export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunn
             jobId: request.jobId,
             phase: request.phase,
             improverVersion: request.improverVersion,
+            ...(request.improverScope === undefined ? {} : { improverScope: request.improverScope }),
             ...(request.metaJobId === undefined || request.comparisonArm === undefined ? {} : { metaJobId: request.metaJobId, comparisonArm: request.comparisonArm }),
           },
           model: request.model,
