@@ -9,8 +9,13 @@
  *            in this process and once by `report.mjs` as its own OS process; what the report
  *            says recomputed from the record; the record changed in one run and in one cost
  *
- * E04's record is scripted, not a real experiment's: it shows the generator's own
- * reproducibility and traceability; the real record is R06's.
+ *   pilot    (E04, ADR 0011) the pilot's report over the scripted pilot's own raw.json (the
+ *            E02 / E03 rehearsal's output): reproducible, and its added columns (component
+ *            classes, instance-literal rate, follow-ups, repeat spread, the reliability
+ *            criteria) recomputed from the records
+ *
+ * E04's records are scripted, not a real experiment's: they show the generators' own
+ * reproducibility and traceability; the real records are R06's.
  */
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -118,5 +123,66 @@ export async function reportObservation(experiment, work, { iterations } = {}) {
     cli: { code: cli.status, stderr: cli.stderr?.slice(0, 400), sameAsInProcess: fromCli === first },
     flipped: { runId: flipped.runs[flipAt].runId, report: experiment.report.buildReport(flipped, options) },
     costed: { ref: costed.costs[0].ref, report: experiment.report.buildReport(costed, options) },
+  }
+}
+
+/**
+ * E04, the pilot's report (ADR 0011): the pilot's raw records as `pilot/run.mjs --scripted`
+ * wrote them (the rehearsal's `raw.json`), built twice here and once by `pilot/report.mjs` as
+ * its own OS process; and the same records changed in one follow-up, one component class, one
+ * run's rate and the judges' sample count, each built again. A scripted pilot, not the real one.
+ * @param {string} dir the experiment directory (`scripts/experiment/step6`)
+ * @param {string} records the pilot's `raw.json`
+ * @param {string} work a scratch directory (created)
+ */
+export async function pilotReportObservation(dir, records, work) {
+  await mkdir(work, { recursive: true })
+  const reportScript = join(dir, 'pilot', 'report.mjs')
+  const { buildPilotReport } = await import(pathToFileURL(reportScript).href)
+  const raw = JSON.parse(await readFile(records, 'utf8'))
+  const first = buildPilotReport(raw)
+  const second = buildPilotReport(structuredClone(raw))
+  const out = join(work, 'pilot-report.md')
+  const cli = spawnSync(process.execPath, [reportScript, '--records', records, '--out', out], { encoding: 'utf8', timeout: 300_000 })
+  const fromCli = await readFile(out, 'utf8').catch(() => undefined)
+  const changed = mutate => {
+    const copy = structuredClone(raw)
+    const what = mutate(copy)
+    return { what, report: what === undefined ? undefined : buildPilotReport(copy) }
+  }
+  return {
+    raw,
+    first,
+    second,
+    cli: { code: cli.status, stderr: cli.stderr?.slice(0, 400), sameAsInProcess: fromCli === first },
+    changes: {
+      followUp: changed(copy => {
+        const run = copy.runs[0]
+        if (run === undefined) return undefined
+        run.followUp = run.followUp !== true
+        return run.runId
+      }),
+      componentClass: changed(copy => {
+        for (const [family, arms] of Object.entries(copy.components ?? {})) {
+          for (const [arm, c] of Object.entries(arms ?? {})) {
+            const x = c?.components?.[0]
+            if (x === undefined) continue
+            x.class = x.class === 'way-of-working' ? 'convention-or-fact' : 'way-of-working'
+            return `${family} ${arm} ${x.kind}:${x.name}`
+          }
+        }
+        return undefined
+      }),
+      rate: changed(copy => {
+        const run = copy.runs.find(r => typeof r.rate === 'number')
+        if (run === undefined) return undefined
+        run.rate = run.rate >= 0.5 ? run.rate - 0.25 : run.rate + 0.25
+        return run.runId
+      }),
+      judges: changed(copy => {
+        copy.judges.samples += 1
+        return 'judges.samples'
+      }),
+    },
   }
 }

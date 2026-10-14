@@ -22,7 +22,7 @@ Nexgent 正在被重写为一个 TypeScript 独立应用（Electron 桌面应用
 | 3 | 迁移已有能力与灵活协作（subagent、team、workflow、ptc），删除 Python | 已验收（[`step-3-20261011.md`](docs/validation/step-3-20261011.md)：无界面层 23/23、桌面层 14/14 在 Linux 与 Windows 通过；真实 Claude Sonnet 5.5 用五种形态完成补货任务，约 0.79 美元） |
 | 4 | 能力版本（`CapabilityBundle`）进入真实运行系统，门控采用与回滚 | 已验收（[`step-4-20261012.md`](docs/validation/step-4-20261012.md)：无界面层 19/19、桌面层 18/18 在 Linux 与 Windows 通过；真实 Claude Sonnet 5.5 第 6 次运行 R01–R06 通过，6 次累计约 5.67 美元） |
 | 5 | 默认的反馈改进流程（`@nexgent/evolve`） | 已验收（[`step-5-20261013.md`](docs/validation/step-5-20261013.md)：无界面层 19/19、桌面层 23/23 在 Linux 与 Windows 通过；真实 Claude Sonnet 5.5 第 2 次运行 R01–R06 通过，2 次累计约 7.17 美元） |
-| 6 | 递归改进并检验收益，可复现报告 | 未开始 |
+| 6 | 递归改进并检验收益，可复现报告 | 进行中：返工（ADR 0011–0013）的脚本化检查 `accept-step6` 无界面层 H01–H24、桌面层 D01–D27、实验层 E01–E04 已接通；真实模型试点与验收记录未做，尚未验收 |
 
 步骤 0–1 的代码已合入集成分支 `nexgent-app`（PR #5）。步骤 1 记录里列出的 Windows Job Object、`perProject` 费用上限与 `pause_turn` 续跑已在步骤 2 补上（`packages/workspace/src/windows-job.ts`、`packages/kernel/src/project-config.ts`、`packages/kernel/src/agent.ts`）。
 

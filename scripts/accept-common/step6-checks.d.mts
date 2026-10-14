@@ -18,6 +18,7 @@ export declare const REAL_MODEL: {
   readonly budgetUsd: number
   readonly keyEnv: readonly string[]
   readonly task: string
+  readonly pilotGateUsd: number
 }
 export declare const STEP5_HEADLESS: readonly { readonly id: string; readonly run?: (ctx: unknown) => CheckResult | Promise<CheckResult> }[]
 export declare function regressionVerdict(results: ReadonlyArray<readonly [string, CheckResult]>): CheckResult
@@ -29,7 +30,9 @@ export declare const REWORK_ITEMS: readonly string[]
 export interface ReworkExpectation {
   readonly step: 5 | 6
   readonly id: string
-  readonly kind: 'change' | 'verify' | 'stale'
+  readonly kind: 'change' | 'verify' | 'stale' | 'rewritten'
+  /** For `rewritten`: when and how the user decided. */
+  readonly decided?: string
   readonly adr: string
   readonly why: string
 }

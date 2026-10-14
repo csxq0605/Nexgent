@@ -11,31 +11,37 @@
  * out-of-bounds value and two changes), and per-arm playbooks: an arm's diagnose session is
  * told apart by the child's paragraph in its diagnosis policy (only the child improver has it).
  *
- *   trigger   autoImprove off, meta off: three explicit jobs finish, no meta job; an explicit
- *             meta job runs (`none` → no-proposal); meta turned on in settings; a cancelled
- *             and an interrupted job are not counted; after the 2nd counted job no meta job,
- *             after the 3rd one starts by itself (`job-count`). Then (H15) a meta job held in
- *             its diagnosis: an ordinary job is refused (one slot), the meta job's process is
- *             killed, the next SDK start marks it interrupted without rerunning it. Then (H14)
- *             the meta budget lowered just above what was spent: a meta job stops
- *             budget-exhausted, the next is refused
+ *   trigger   two projects of one user (one NEXGENT_HOME, ADR 0012). autoImprove off, meta off
+ *             in the user config: three explicit jobs finish, counted in the user queue, no
+ *             meta job; an explicit meta job runs (`none` → no-proposal); meta turned on by
+ *             writing <NEXGENT_HOME>/config.json (the project config has no meta field); a
+ *             cancelled and an interrupted job are not counted; after the 2nd counted job no
+ *             meta job; the 3rd counted job finishes in the second project and the meta job
+ *             starts there by itself (`job-count`, batch over both project ids). Then (H15,
+ *             rewritten on the user's decision of 2026-10-14) a meta job held in its
+ *             diagnosis holds the user's one meta slot: a meta job from the other project is
+ *             refused (improvement/busy), an ordinary job of the same project starts and ends;
+ *             the meta job's process is killed, the next SDK start marks it interrupted
+ *             without rerunning it and frees the slot. Then (H14) the user's meta budget
+ *             lowered just above what was spent: a meta job stops budget-exhausted, the next
+ *             is refused in both projects
  *   adopt     the step-5 feedback project (autoImprove on): the third counted feedback starts
  *             the source job (该改进 → adopted). An explicit meta job: meta diagnosis cites the
  *             jobs, the change appends a paragraph; the parent arm proposes the notes skill
  *             (its gate rejects), the child arm the convention skill (its gate adopts):
- *             adopt (gate-passed). The project before and after the meta job (H08); the next
- *             job, started from a new OS process, runs on the child (H11); costs by job and
- *             phase (H14); copies removed by default (H16)
- *   reject    same, the parent arm adopts and the child arm finds no capability problem:
- *             reject (no-offspring), `keepCopies` on (H16 kept); the next job on v0 (H12).
- *             Then the `bounds` proposals (H06) and a meta diagnosis refused three times
- *             (H05), the evaluator settings changed through settings (H13 epoch)
+ *             adopt (gate-passed), the child adopted in the user's improver line. The project
+ *             and the user line before and after the meta job (H08); the next job, started
+ *             from a new OS process, runs on the child (H11); costs by job and phase (H14);
+ *             copies removed by default (H16)
+ *   reject    same, but the meta job is started from another project of the user (its origin
+ *             is the feedback project, ADR 0012); the parent arm adopts and the child arm
+ *             finds no capability problem: reject (no-offspring), `keepCopies` on (H16 kept);
+ *             the next job on v0 (H12). Then the `bounds` proposals (H06), a meta diagnosis
+ *             refused three times (H05), the evaluator settings changed through settings (H13
+ *             epoch) and the rules id adr-0014 against adr-0008 (H13)
  *
  * The copies go to a phase-local temporary directory (TMPDIR / TEMP / TMP), so what is left
  * there after a meta job is that job's.
- *
- * The comparison's origin rule is being changed (user decision C, 2026-10-13, ADR 0009 to
- * come); H07 is not judged here until it lands.
  */
 import { spawn } from 'node:child_process'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -71,7 +77,7 @@ const answer = content => ({ content, usage: USAGE })
  * playbooks in order, one per session; `arms`: `{ parent, child }` step-5 playbooks for the
  * arms of the next comparison (set while a meta job runs).
  */
-class MetaModel extends PinnedModel {
+export class MetaModel extends PinnedModel {
   constructor(h, options) {
     super(h, { ...options, childParagraph: CHILD_PARAGRAPH })
     this.hold = false
@@ -152,8 +158,8 @@ class MetaModel extends PinnedModel {
   }
 }
 
-const modelServer = (h, model) => h.scriptedModelServer({ script: Array.from({ length: 10_000 }, () => model.entry) })
-const envOf = (server, home) => ({ NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home })
+export const modelServer = (h, model) => h.scriptedModelServer({ script: Array.from({ length: 10_000 }, () => model.entry) })
+export const envOf = (server, home) => ({ NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home })
 
 /** Point the temporary directory of this process and of the processes it starts at `dir`. */
 function localTemp(dir) {
@@ -171,7 +177,7 @@ function localTemp(dir) {
 const armDirs = async dir => (await readdir(dir).catch(() => [])).filter(name => name.startsWith('nexgent-arm-')).sort()
 
 /** A job's files under `.nexgent/improvements/<id>/`. */
-async function jobFiles(root, jobId) {
+export async function jobFiles(root, jobId) {
   const dir = join(improvementsPath(root), jobId)
   return {
     job: await readJsonFile(join(dir, 'job.json')),
@@ -182,14 +188,37 @@ async function jobFiles(root, jobId) {
   }
 }
 
-const queueOf = async (pkgs, root) => {
-  const { queue } = await readImprovements(pkgs, root)
-  return { metaPending: [...(queue?.metaPending ?? [])], metaCounted: [...(queue?.metaCounted ?? [])], activeJobId: queue?.activeJobId }
+/** The user's meta queue (ADR 0012: `<NEXGENT_HOME>/improvements/queue.json`). */
+const userQueueOf = async (pkgs, home) => {
+  const queue = await pkgs.evolve.readUserQueue(home).catch(() => undefined)
+  return { pending: [...(queue?.pending ?? [])], counted: [...(queue?.counted ?? [])], active: queue?.active, metaJobs: [...(queue?.metaJobs ?? [])] }
 }
 
-const jobsOf = async (pkgs, root) => (await readImprovements(pkgs, root)).jobs.map(job => ({ id: job.id, kind: job.kind ?? 'capability', trigger: job.trigger, status: job.status, improverVersion: job.improverVersion, arm: job.arm, meta: job.meta, createdAt: job.createdAt, history: (job.history ?? []).map(change => change.status) }))
+export const jobsOf = async (pkgs, root) => (await readImprovements(pkgs, root)).jobs.map(job => ({ id: job.id, kind: job.kind ?? 'capability', trigger: job.trigger, status: job.status, improverVersion: job.improverVersion, improverScope: job.improverScope, arm: job.arm, meta: job.meta, batch: (job.meta?.batch ?? []).map(entry => ({ projectId: entry.projectId, jobId: entry.jobId })), createdAt: job.createdAt, history: (job.history ?? []).map(change => change.status) }))
 
-async function attempt(fn) {
+/**
+ * Change the user config's meta settings (`<NEXGENT_HOME>/config.json` `improvement.meta`,
+ * ADR 0012 decision 3), as the user-level settings page would; other fields are kept.
+ */
+export async function writeUserMeta(home, patch) {
+  const file = join(home, 'config.json')
+  const raw = JSON.parse(await readFile(file, 'utf8').catch(() => '{}'))
+  const meta = { ...(raw.improvement?.meta ?? {}), ...patch }
+  await mkdir(home, { recursive: true })
+  await writeFile(file, `${JSON.stringify({ ...raw, version: 1, improvement: { ...(raw.improvement ?? {}), meta } }, null, 2)}\n`)
+  return meta
+}
+
+/** The user's improver line (`<NEXGENT_HOME>/improvers/`, read through `ImproverStore.user`; `improvers.*` of the SDK is project-level until R5). */
+export async function userLine(capabilities, home) {
+  const store = capabilities.ImproverStore.user({ home })
+  const chain = await store.chain().catch(error => ({ revisions: [], error: errorText(error) }))
+  const history = (chain.revisions ?? []).map(r => ({ revision: r.revision, type: r.type, version: r.version, from: r.from, trigger: r.trigger, jobId: r.jobId, committedAt: r.committedAt }))
+  const tail = history.at(-1)
+  return { via: 'ImproverStore.user', current: { version: tail?.version ?? 'v0', jobId: tail?.jobId, trigger: tail?.trigger }, history, versions: await store.versions().catch(() => []), ...(chain.error === undefined ? {} : { error: chain.error }) }
+}
+
+export async function attempt(fn) {
   try {
     return { value: await fn() }
   } catch (error) {
@@ -198,7 +227,7 @@ async function attempt(fn) {
 }
 
 /** Start an explicit job; wait for it to settle (or for `done`). */
-async function explicitJob(pkgs, sdk, root, projectId, sessionId, done = SETTLED) {
+export async function explicitJob(pkgs, sdk, root, projectId, sessionId, done = SETTLED) {
   const started = await attempt(() => sdk.call('improvements.run', { projectId, sessionId }))
   if (started.value === undefined) return started
   const job = await waitJob(pkgs, root, started.value.id, done)
@@ -206,7 +235,7 @@ async function explicitJob(pkgs, sdk, root, projectId, sessionId, done = SETTLED
 }
 
 /** Start a meta job through the SDK; wait for it to settle (or for `done`). */
-async function metaJob(pkgs, sdk, root, projectId, options = {}, done = SETTLED) {
+export async function metaJob(pkgs, sdk, root, projectId, options = {}, done = SETTLED) {
   const started = await attempt(() => sdk.call('improvements.runMeta', { projectId, ...options }))
   if (started.value === undefined) return started
   const job = await waitJob(pkgs, root, started.value.id, done)
@@ -226,7 +255,7 @@ async function killJob(pkgs, root, jobId) {
   return { pid }
 }
 
-async function killAll(pkgs, root) {
+export async function killAll(pkgs, root) {
   for (const name of await readdir(improvementsPath(root)).catch(() => [])) {
     const pid = await pkgs.evolve.readLockPid(join(improvementsPath(root), name, 'job.lock')).catch(() => undefined)
     if (typeof pid === 'number' && pid !== process.pid && pkgs.evolve.processAlive(pid)) {
@@ -239,119 +268,169 @@ async function killAll(pkgs, root) {
 
 // ---- trigger, concurrency, budget -------------------------------------------------------
 
-/** H04, H05 (none, read-only tools), H15, H14 (budget). */
+/**
+ * H04, H05 (none, read-only tools), H15, H14 (budget). Two projects share one NEXGENT_HOME
+ * (ADR 0012): the trigger project and a second project whose finished job completes the
+ * batch. Meta is turned on and budgeted in the user config, not the project's.
+ */
 export async function triggerPhase(h, pkgs, work, log) {
   const root = join(work, 'project')
+  const secondWork = join(work, 'second')
+  const secondRoot = join(secondWork, 'project')
   const model = new MetaModel(h, {
     root,
     playbooks: ['not-capability', 'not-capability', 'not-capability', 'stall', 'stall', 'not-capability', 'not-capability', 'not-capability'],
-    metaDiagnose: ['none', 'none', 'stall', 'change'],
+    metaDiagnose: ['none', 'stall', 'change'],
     metaPropose: ['append'],
   })
   model.parentParagraphs = pkgs.kernel.IMPROVER_V0.diagnosis.paragraphs
+  const secondModel = new MetaModel(h, { root: secondRoot, playbooks: ['not-capability'], metaDiagnose: ['none'], metaPropose: ['append'] })
+  secondModel.parentParagraphs = pkgs.kernel.IMPROVER_V0.diagnosis.paragraphs
   const server = await modelServer(h, model)
+  const secondServer = await modelServer(h, secondModel)
+  const roots = [root, secondRoot]
   const out = { steps: [] }
+  let home
+  const metaJobsAll = async () => (await Promise.all(roots.map(async (r, i) => (await jobsOf(pkgs, r)).filter(job => job.kind === 'meta').map(job => ({ ...job, project: i === 0 ? 'trigger' : 'second' }))))).flat()
   const step = async (name, fn) => {
     log(`trigger: ${name}`)
-    const before = await queueOf(pkgs, root)
+    const before = await userQueueOf(pkgs, home)
     const result = await fn()
-    const after = await queueOf(pkgs, root)
-    const jobs = await jobsOf(pkgs, root)
-    out.steps.push({ name, result, pendingBefore: before.metaPending.length, pendingAfter: after.metaPending.length, metaJobs: jobs.filter(job => job.kind === 'meta').map(job => ({ id: job.id, trigger: job.trigger, status: job.status, basis: job.meta?.basis })) })
+    // The job's process counts it in the user queue after writing its final status: wait for
+    // the count (a not-counted job gets the same grace, so a wrong count still shows).
+    const id = result?.id
+    if (typeof id === 'string') {
+      const counted = async () => (await pkgs.evolve.readUserQueue(home).catch(() => undefined))?.counted ?? []
+      if (['cancelled', 'interrupted'].includes(result.status)) await sleep(1000)
+      else await settle(counted, list => list.some(entry => entry.endsWith(`:${id}`)), { timeoutMs: 10_000, intervalMs: 100 }).catch(() => undefined)
+    }
+    const after = await userQueueOf(pkgs, home)
+    out.steps.push({ name, result, pendingBefore: before.pending.length, pendingAfter: after.pending.length, metaJobs: (await metaJobsAll()).map(job => ({ id: job.id, project: job.project, trigger: job.trigger, status: job.status, basis: job.meta?.basis, batch: job.batch })) })
     return result
   }
+  let sdk
+  let secondSdk
   try {
     const project = await runFeedbackProject(h, pkgs, work, {
       server,
       feedback: [],
       log: line => log(`trigger: ${line}`),
-      config: { autoImprove: false, improvement: { meta: { enabled: false, everyJobs: 3 } } },
+      config: { autoImprove: false },
       createSdk: (env, home) => createStep5Sdk(pkgs, { env, home }),
     })
+    home = project.home
+    out.home = home
     const session = project.tasks.at(-1)?.sessionId
+    // The second project: same user (same NEXGENT_HOME), its own files, sessions and model.
+    const second = await runFeedbackProject(h, pkgs, secondWork, {
+      server: secondServer,
+      feedback: [],
+      log: line => log(`trigger second: ${line}`),
+      config: { autoImprove: false },
+      createSdk: env => createStep5Sdk(pkgs, { env: { ...env, NEXGENT_HOME: home }, home }),
+    })
+    const secondSession = second.tasks.at(-1)?.sessionId
     model.phase = 'job'
-    out.home = project.home
-    let sdk = createStep5Sdk(pkgs, { env: envOf(server, project.home), home: project.home })
-    try {
-      let { projectId } = await sdk.call('projects.open', { root, create: true })
-      for (const n of [1, 2, 3]) await step(`off: explicit job ${n}`, () => explicitJob(pkgs, sdk, root, projectId, session))
-      await sleep(500)
-      out.offNoMeta = (await jobsOf(pkgs, root)).filter(job => job.kind === 'meta').length
-      await step('off: explicit meta job', () => metaJob(pkgs, sdk, root, projectId))
-      const settings = await sdk.call('settings.get', { projectId })
-      const updated = await sdk.call('settings.update', { projectId, patch: { improvement: { ...settings.improvement, meta: { ...settings.improvement.meta, enabled: true, everyJobs: 3 } } } })
-      out.metaSetting = updated.improvement?.meta
-      await step('on: cancelled job', async () => {
-        const left = model.playbooks.length
-        const started = await sdk.call('improvements.run', { projectId, sessionId: session })
-        await waitJob(pkgs, root, started.id, status => status === 'diagnosing')
-        await settle(async () => model.playbooks.length, n => n < left, { timeoutMs: 20_000 })
-        const cancelled = await attempt(() => sdk.call('improvements.cancel', { projectId, jobId: started.id }))
-        const job = await waitJob(pkgs, root, started.id, status => !ACTIVE.has(status))
-        return { id: job.id, status: job.status, cancel: cancelled.code ?? 'ok' }
-      })
-      await step('on: interrupted job', async () => {
-        const left = model.playbooks.length
-        const started = await sdk.call('improvements.run', { projectId, sessionId: session })
-        await waitJob(pkgs, root, started.id, status => status === 'diagnosing')
-        await settle(async () => model.playbooks.length, n => n < left, { timeoutMs: 20_000 })
-        const killed = await killJob(pkgs, root, started.id)
-        await sdk.dispose()
-        sdk = createStep5Sdk(pkgs, { env: envOf(server, project.home), home: project.home })
-        ;({ projectId } = await sdk.call('projects.open', { root, create: true }))
-        const job = await waitJob(pkgs, root, started.id, status => status === 'interrupted', 20_000).catch(() => undefined)
-        const files = await jobFiles(root, started.id)
-        return { id: started.id, status: files.job?.status, killed, seen: job?.status }
-      })
-      for (const n of [1, 2]) await step(`on: counted job ${n}`, () => explicitJob(pkgs, sdk, root, projectId, session))
-      await sleep(1_000)
-      out.afterSecond = (await jobsOf(pkgs, root)).filter(job => job.kind === 'meta').length
-      await step('on: counted job 3', async () => {
-        const result = await explicitJob(pkgs, sdk, root, projectId, session)
-        const meta = await settle(async () => (await jobsOf(pkgs, root)).filter(job => job.kind === 'meta' && job.trigger === 'job-count'), list => list.length > 0, { timeoutMs: 20_000 })
-        if (meta[0] !== undefined) await waitJob(pkgs, root, meta[0].id)
-        return { ...result, metaJobId: meta[0]?.id }
-      })
-
-      // H15: one slot; the meta job's process killed, interrupted at the next start, not rerun.
-      log('trigger: meta job held in its diagnosis')
-      const held = await sdk.call('improvements.runMeta', { projectId })
-      await waitJob(pkgs, root, held.id, status => status === 'meta-diagnosing')
-      const stalled = () => model.requests.filter(r => r.kind === 'meta-diagnose' && r.playbook === 'stall').length
-      await settle(async () => stalled(), n => n > 0, { timeoutMs: 20_000 })
-      out.h15 = { metaJobId: held.id, busy: await attempt(() => sdk.call('improvements.run', { projectId, sessionId: session })) }
-      out.h15.statusBeforeKill = (await jobFiles(root, held.id)).job?.status
-      out.h15.killed = await killJob(pkgs, root, held.id)
+    secondModel.phase = 'job'
+    out.projectIds = { trigger: await pkgs.evolve.userProjectId(root), second: await pkgs.evolve.userProjectId(secondRoot) }
+    sdk = createStep5Sdk(pkgs, { env: envOf(server, home), home })
+    secondSdk = createStep5Sdk(pkgs, { env: envOf(secondServer, home), home })
+    let { projectId } = await sdk.call('projects.open', { root, create: true })
+    const { projectId: secondId } = await secondSdk.call('projects.open', { root: secondRoot, create: true })
+    for (const n of [1, 2, 3]) await step(`off: explicit job ${n}`, () => explicitJob(pkgs, sdk, root, projectId, session))
+    await sleep(500)
+    out.offNoMeta = (await metaJobsAll()).length
+    await step('off: explicit meta job', () => metaJob(pkgs, sdk, root, projectId))
+    out.metaWritten = await writeUserMeta(home, { enabled: true, everyJobs: 3 })
+    out.metaSetting = (await pkgs.evolve.readUserConfig(home)).improvement?.meta
+    out.metaVia = 'user config'
+    out.projectConfigMeta = JSON.parse(await readFile(join(root, '.nexgent', 'config.json'), 'utf8').catch(() => '{}')).improvement?.meta ?? null
+    await step('on: cancelled job', async () => {
+      const left = model.playbooks.length
+      const started = await sdk.call('improvements.run', { projectId, sessionId: session })
+      await waitJob(pkgs, root, started.id, status => status === 'diagnosing')
+      await settle(async () => model.playbooks.length, n => n < left, { timeoutMs: 20_000 })
+      const cancelled = await attempt(() => sdk.call('improvements.cancel', { projectId, jobId: started.id }))
+      const job = await waitJob(pkgs, root, started.id, status => !ACTIVE.has(status))
+      return { id: job.id, status: job.status, cancel: cancelled.code ?? 'ok' }
+    })
+    await step('on: interrupted job', async () => {
+      const left = model.playbooks.length
+      const started = await sdk.call('improvements.run', { projectId, sessionId: session })
+      await waitJob(pkgs, root, started.id, status => status === 'diagnosing')
+      await settle(async () => model.playbooks.length, n => n < left, { timeoutMs: 20_000 })
+      const killed = await killJob(pkgs, root, started.id)
       await sdk.dispose()
-      sdk = createStep5Sdk(pkgs, { env: envOf(server, project.home), home: project.home })
+      sdk = createStep5Sdk(pkgs, { env: envOf(server, home), home })
       ;({ projectId } = await sdk.call('projects.open', { root, create: true }))
-      await waitJob(pkgs, root, held.id, status => status === 'interrupted', 20_000).catch(() => undefined)
-      await sleep(1_000)
-      const heldFiles = await jobFiles(root, held.id)
-      out.h15.statusAfter = heldFiles.job?.status
-      out.h15.starts = heldFiles.starts
-      out.h15.metaDiagnoseRequests = stalled()
+      const job = await waitJob(pkgs, root, started.id, status => status === 'interrupted', 20_000).catch(() => undefined)
+      const files = await jobFiles(root, started.id)
+      return { id: started.id, status: files.job?.status, killed, seen: job?.status }
+    })
+    for (const n of [1, 2]) await step(`on: counted job ${n}`, () => explicitJob(pkgs, sdk, root, projectId, session))
+    await sleep(1_000)
+    out.afterSecond = (await metaJobsAll()).length
+    // The third counted job finishes in the second project: the batch is the user's, so the meta job starts there.
+    await step('on: counted job 3 (second project)', async () => {
+      const result = await explicitJob(pkgs, secondSdk, secondRoot, secondId, secondSession)
+      const meta = await settle(async () => (await metaJobsAll()).filter(job => job.trigger === 'job-count'), list => list.length > 0, { timeoutMs: 20_000 })
+      const found = meta[0]
+      if (found !== undefined) await waitJob(pkgs, found.project === 'second' ? secondRoot : root, found.id)
+      return { ...result, metaJobId: found?.id, metaProject: found?.project }
+    })
 
-      // H14: the meta budget lowered to just above what meta jobs spent.
-      const listing = await sdk.call('improvements.list', { projectId })
-      const used = listing.meta?.budget?.usedTokens ?? 0
-      const current = await sdk.call('settings.get', { projectId })
-      out.budget = { used, limit: used + 60 }
-      log(`trigger: meta budget lowered to ${out.budget.limit} tokens`)
-      await sdk.call('settings.update', { projectId, patch: { improvement: { ...current.improvement, meta: { ...current.improvement.meta, budget: { ...current.improvement.meta.budget, maxTokens: out.budget.limit } } } } })
-      out.budget.stopped = await metaJob(pkgs, sdk, root, projectId)
-      out.budget.refused = await attempt(() => sdk.call('improvements.runMeta', { projectId }))
-      out.budget.listing = (await sdk.call('improvements.list', { projectId })).meta
-    } finally {
-      await sdk.dispose()
-    }
-    out.jobs = await jobsOf(pkgs, root)
-    out.metaSessions = model.metaSessions.map(s => ({ phase: s.phase, playbook: s.playbook, tools: s.tools }))
-    out.records = await projectRecords(pkgs, root)
+    // H15 (ADR 0012 decision 3): one meta job per user; it takes no capability job slot. A meta job
+    // held in its diagnosis: a second meta job of the same user (from the other project) is refused,
+    // an ordinary job of the same project starts and finishes; the meta job's process is killed, the
+    // next SDK start marks it interrupted without rerunning it.
+    log('trigger: meta job held in its diagnosis')
+    const held = await sdk.call('improvements.runMeta', { projectId })
+    await waitJob(pkgs, root, held.id, status => status === 'meta-diagnosing')
+    const stalled = () => model.requests.filter(r => r.kind === 'meta-diagnose' && r.playbook === 'stall').length
+    await settle(async () => stalled(), n => n > 0, { timeoutMs: 20_000 })
+    out.h15 = { metaJobId: held.id, slot: (await userQueueOf(pkgs, home)).active }
+    out.h15.secondMeta = await attempt(() => secondSdk.call('improvements.runMeta', { projectId: secondId }))
+    out.h15.ordinary = await explicitJob(pkgs, sdk, root, projectId, session)
+    out.h15.statusDuringOrdinary = (await jobFiles(root, held.id)).job?.status
+    out.h15.statusBeforeKill = (await jobFiles(root, held.id)).job?.status
+    out.h15.killed = await killJob(pkgs, root, held.id)
+    await sdk.dispose()
+    sdk = createStep5Sdk(pkgs, { env: envOf(server, home), home })
+    ;({ projectId } = await sdk.call('projects.open', { root, create: true }))
+    await waitJob(pkgs, root, held.id, status => status === 'interrupted', 20_000).catch(() => undefined)
+    await sleep(1_000)
+    const heldFiles = await jobFiles(root, held.id)
+    out.h15.statusAfter = heldFiles.job?.status
+    out.h15.starts = heldFiles.starts
+    out.h15.metaDiagnoseRequests = stalled()
+    out.h15.slotAfter = (await userQueueOf(pkgs, home)).active ?? null
+
+    // H14: the user's meta budget lowered to just above what meta jobs spent (user config).
+    const config = await pkgs.evolve.readUserConfig(home)
+    const used = (await pkgs.evolve.userMetaBudgetStatus(home, config.improvement.meta.budget)).used
+    out.budget = { used, limit: used + 60, via: 'user config' }
+    log(`trigger: meta budget lowered to ${out.budget.limit} tokens`)
+    await writeUserMeta(home, { budget: { ...config.improvement.meta.budget, maxTokens: out.budget.limit } })
+    out.budget.stopped = await metaJob(pkgs, sdk, root, projectId)
+    out.budget.refused = await attempt(() => sdk.call('improvements.runMeta', { projectId }))
+    out.budget.refusedSecond = await attempt(() => secondSdk.call('improvements.runMeta', { projectId: secondId }))
+    const after = await pkgs.evolve.readUserConfig(home)
+    out.budget.status = await pkgs.evolve.userMetaBudgetStatus(home, after.improvement.meta.budget)
+    out.budget.sdkListing = (await sdk.call('improvements.list', { projectId })).meta
   } finally {
+    await sdk?.dispose()
+    await secondSdk?.dispose()
     await killAll(pkgs, root)
+    await killAll(pkgs, secondRoot)
     await server.close()
+    await secondServer.close()
   }
+  out.jobs = await jobsOf(pkgs, root)
+  out.secondJobs = await jobsOf(pkgs, secondRoot)
+  out.userQueue = await userQueueOf(pkgs, home)
+  out.metaSessions = [...model.metaSessions, ...secondModel.metaSessions].map(s => ({ phase: s.phase, playbook: s.playbook, tools: s.tools }))
+  out.records = await projectRecords(pkgs, root, { home })
+  out.secondRecords = await projectRecords(pkgs, secondRoot, { home })
   return out
 }
 
@@ -379,8 +458,12 @@ async function projectState(sdk, projectId, root) {
   return { work, capabilities, sessions, deliverables, config }
 }
 
-/** Every session and ledger record and improvement file of a project, checked against its schema (H17). */
-async function projectRecords(pkgs, root) {
+/**
+ * Every session and ledger record and improvement file of a project, checked against its
+ * schema (H17); with `home`, the user-level files too (ADR 0012): the improver line
+ * `<home>/improvers/`, the meta queue `<home>/improvements/queue.json` and the user config.
+ */
+export async function projectRecords(pkgs, root, { home } = {}) {
   const { validateSessionRecord, validateLedgerRecord, validateImprovementFile } = pkgs.session
   const sessions = await sessionsOf(root)
   const ledger = await ledgerOf(root)
@@ -388,33 +471,56 @@ async function projectRecords(pkgs, root) {
   const dir = improvementsPath(root)
   const queue = await readJsonFile(join(dir, 'queue.json'))
   if (queue !== undefined) files.push({ kind: 'queue', path: 'improvements/queue.json', value: queue })
+  const jobs = []
   for (const name of await readdir(dir).catch(() => [])) {
     for (const [kind, file] of [['job', 'job.json'], ['diagnosis', 'diagnosis.json'], ['metaDiagnosis', 'meta-diagnosis.json'], ['change', 'change.json'], ['comparison', 'comparison.json']]) {
       const value = await readJsonFile(join(dir, name, file))
-      if (value !== undefined) files.push({ kind, path: `improvements/${name}/${file}`, value })
+      if (value === undefined) continue
+      files.push({ kind, path: `improvements/${name}/${file}`, value })
+      if (kind === 'job') jobs.push(value)
     }
   }
-  const improvers = join(root, '.nexgent', 'improvers')
-  for (const name of await readdir(join(improvers, 'bundles')).catch(() => [])) files.push({ kind: 'improver', path: `improvers/bundles/${name}`, value: await readJsonFile(join(improvers, 'bundles', name)) })
-  for (const name of await readdir(join(improvers, 'activation')).catch(() => [])) files.push({ kind: 'improverRevision', path: `improvers/activation/${name}`, value: await readJsonFile(join(improvers, 'activation', name)) })
+  const lines = [[join(root, '.nexgent', 'improvers'), 'improvers']]
+  if (home !== undefined) lines.push([join(home, 'improvers'), '<home>/improvers'])
+  for (const [improvers, label] of lines) {
+    for (const name of await readdir(join(improvers, 'bundles')).catch(() => [])) files.push({ kind: 'improver', path: `${label}/bundles/${name}`, value: await readJsonFile(join(improvers, 'bundles', name)) })
+    for (const name of await readdir(join(improvers, 'activation')).catch(() => [])) files.push({ kind: 'improverRevision', path: `${label}/activation/${name}`, value: await readJsonFile(join(improvers, 'activation', name)) })
+  }
+  const configIssues = []
+  if (home !== undefined) {
+    const userQueue = await readJsonFile(join(home, 'improvements', 'queue.json'))
+    if (userQueue !== undefined) files.push({ kind: 'userQueue', path: '<home>/improvements/queue.json', value: userQueue })
+    const userConfig = await readJsonFile(join(home, 'config.json'))
+    if (userConfig !== undefined) {
+      try {
+        pkgs.kernel.assertUserConfig(userConfig)
+      } catch (error) {
+        configIssues.push({ kind: 'userConfig', path: '<home>/config.json', message: errorText(error) })
+      }
+    }
+  }
   const text = issue => `${issue.path ?? ''} ${issue.message ?? JSON.stringify(issue)}`
   const issuesOf = (records, validate, where) => records.flatMap((record, index) => validate(record).map(issue => `${where}#${index + 1} ${record.type ?? ''}: ${text(issue)}`))
   const issues = [
     ...Object.entries(sessions).flatMap(([id, records]) => issuesOf(records, validateSessionRecord, `session ${id.slice(0, 8)}`)),
     ...issuesOf(ledger, validateLedgerRecord, 'ledger'),
   ]
-  const fileIssues = files.flatMap(file => validateImprovementFile(file.kind, file.value).map(issue => ({ kind: file.kind, path: file.path, message: text(issue) })))
+  const fileIssues = [...files.flatMap(file => validateImprovementFile(file.kind, file.value).map(issue => ({ kind: file.kind, path: file.path, message: text(issue) }))), ...configIssues]
   const checked = {
     sessions: Object.values(sessions).reduce((n, records) => n + records.length, 0),
     ledger: ledger.length,
     files: files.length,
     kinds: [...new Set(files.map(file => file.kind))].sort(),
+    userConfig: home !== undefined && await readJsonFile(join(home, 'config.json')) !== undefined,
   }
-  return { root, sessions, ledger, files, issues, fileIssues, checked, secretHits: await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root) }
+  // ADR 0012: a job that pinned an improver names its scope; there is only the user's.
+  const scopes = jobs.filter(job => job.improverVersion !== undefined).map(job => ({ id: job.id, improverScope: job.improverScope }))
+  const secretHits = [...await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root), ...(home === undefined ? [] : (await filesContaining(home, SCRIPTED_API_KEY, home)).map(hit => `<home>/${hit}`))]
+  return { root, sessions, ledger, files, issues, fileIssues, checked, scopes, secretHits }
 }
 
 /** What the origin rule (ADR 0009) reads, gathered from the project's own files (H07). */
-async function originFacts(capabilities, root, metaId) {
+async function originFacts(capabilities, root, metaId, metaRoot = root) {
   const capDir = join(root, '.nexgent', 'capabilities')
   const chain = await capabilities.readActivationChain(join(capDir, capabilities.ACTIVATION_DIR)).catch(error => ({ revisions: [], error: errorText(error) }))
   const sessions = await sessionsOf(root)
@@ -447,7 +553,7 @@ async function originFacts(capabilities, root, metaId) {
       baselineFeedbackPassRate: decision?.verdict?.feedbackPassRate?.baseline,
     })
   }
-  const log = metaId === undefined ? '' : await readFile(join(improvementsPath(root), metaId, 'job.log'), 'utf8').catch(() => '')
+  const log = metaId === undefined ? '' : await readFile(join(improvementsPath(metaRoot), metaId, 'job.log'), 'utf8').catch(() => '')
   return {
     revisions: (chain.revisions ?? []).map(revision => ({ revision: revision.revision, version: revision.version, committedAt: revision.committedAt })),
     chainError: chain.error,
@@ -487,8 +593,11 @@ function runDriver(spec) {
 /**
  * One comparison end to end (adopt or reject), in a fresh feedback project.
  * @param arms - `{ parent, child }` step-5 playbooks of the two arms.
+ * @param fromOther - start the meta job from another project of the same user (ADR 0012): the
+ *   origin is then found in the feedback project (its job is the batch) and the arms run in a
+ *   copy of it, their ledger written there.
  */
-async function comparisonPhase(h, pkgs, capabilities, work, log, { name, arms, source: sourcePlaybook = 'improve', keepCopies, extra }) {
+async function comparisonPhase(h, pkgs, capabilities, work, log, { name, arms, source: sourcePlaybook = 'improve', keepCopies, extra, fromOther = false }) {
   const root = join(work, 'project')
   const temp = join(work, 'tmp')
   await mkdir(temp, { recursive: true })
@@ -504,30 +613,40 @@ async function comparisonPhase(h, pkgs, capabilities, work, log, { name, arms, s
       createSdk: (env, home) => createStep5Sdk(pkgs, { env, home }),
     })
     const session = project.tasks.at(-1)?.sessionId
+    const home = project.home
     model.phase = 'job'
     let sdk = createStep5Sdk(pkgs, { env: envOf(server, project.home), home: project.home })
     try {
       const { projectId } = await sdk.call('projects.open', { root, create: true })
+      // Where the meta job lives: this project, or another project of the same user.
+      const metaRoot = fromOther ? join(work, 'other') : root
+      if (fromOther) await mkdir(metaRoot, { recursive: true })
+      const metaProjectId = fromOther ? (await sdk.call('projects.open', { root: metaRoot, create: true })).projectId : projectId
+      out.projectIds = { origin: await pkgs.evolve.userProjectId(root), meta: await pkgs.evolve.userProjectId(metaRoot) }
+      out.metaFrom = fromOther ? 'other project' : 'this project'
       // The source job: started by the third counted feedback.
       const source = await settle(async () => (await jobsOf(pkgs, root)).find(job => job.trigger === 'feedback-count'), job => job !== undefined, { timeoutMs: 30_000 })
       out.source = source === undefined ? undefined : await waitJob(pkgs, root, source.id).then(job => ({ id: job.id, status: job.status, improverVersion: job.improverVersion }))
       await sleep(500)
       out.before = await projectState(sdk, projectId, root)
       out.tempBefore = await armDirs(temp)
-      out.improversBefore = await sdk.call('improvers.list', { projectId }).catch(error => ({ error: errorText(error) }))
+      out.improversBefore = await userLine(capabilities, home)
       const ledgerBefore = (await ledgerOf(root)).length
-      log(`${name}: meta job (arms: parent ${arms.parent}, child ${arms.child})`)
+      log(`${name}: meta job from ${out.metaFrom} (arms: parent ${arms.parent}, child ${arms.child})`)
       model.arms = arms
-      out.meta = await metaJob(pkgs, sdk, root, projectId, keepCopies ? { keepCopies: true } : {})
+      out.meta = await metaJob(pkgs, sdk, metaRoot, metaProjectId, keepCopies ? { keepCopies: true } : {})
       model.arms = undefined
       out.armSessions = [...model.armSessions]
-      out.origin = await originFacts(capabilities, root, out.meta.id)
+      out.origin = await originFacts(capabilities, root, out.meta.id, metaRoot)
       out.tampered = tampered(pkgs.kernel, out.meta.files?.comparison)
       out.tempAfter = await armDirs(temp)
       out.after = await projectState(sdk, projectId, root)
-      out.newLedger = (await ledgerOf(root)).slice(ledgerBefore).map(r => ({ type: r.type, improvementId: r.improvementId, improvementPhase: r.improvementPhase, improverVersion: r.improverVersion, metaJobId: r.metaJobId, comparisonArm: r.comparisonArm, sessionId: r.sessionId }))
-      out.improvers = await sdk.call('improvers.list', { projectId }).catch(error => ({ error: errorText(error) }))
-      out.show = out.meta.files?.change?.childVersion === undefined ? undefined : await sdk.call('improvers.show', { projectId, version: out.meta.files.change.childVersion }).catch(error => ({ error: errorText(error) }))
+      out.newLedger = (await ledgerOf(root)).slice(ledgerBefore).map(r => ({ type: r.type, improvementId: r.improvementId, improvementPhase: r.improvementPhase, improverVersion: r.improverVersion, improverScope: r.improverScope, metaJobId: r.metaJobId, comparisonArm: r.comparisonArm, sessionId: r.sessionId }))
+      out.improvers = await userLine(capabilities, home)
+      out.sdkImprovers = await sdk.call('improvers.list', { projectId }).catch(error => ({ error: errorText(error) }))
+      const childVersion = out.meta.files?.change?.childVersion
+      out.show = childVersion === undefined ? undefined : await capabilities.ImproverStore.user({ home }).load(childVersion)
+        .then(() => ({ via: 'ImproverStore.user (improvers.show is project-level until R5)', version: childVersion, change: out.meta.files.change }), error => ({ error: errorText(error) }))
       out.listing = (await sdk.call('improvements.list', { projectId }).catch(() => ({ jobs: [] }))).jobs?.map(job => ({ id: job.id ?? job.jobId, kind: job.kind, improverVersion: job.improverVersion, estimatedUsd: job.cost?.estimatedUsd ?? job.estimatedUsd }))
       out.kept = []
       for (const kept of Object.values(out.meta.files?.comparison?.kept ?? {})) out.kept.push({ root: kept.root, bytes: kept.bytes, exists: await readdir(kept.root).then(() => true, () => false), hasProject: await readdir(join(kept.root, '.nexgent')).then(() => true, () => false) })
@@ -541,21 +660,23 @@ async function comparisonPhase(h, pkgs, capabilities, work, log, { name, arms, s
       out.next = { code: driven.code, pid: done?.pid, parentPid: process.pid, jobId: done?.jobId, status: done?.status, improverVersion: done?.improverVersion, error: driven.lines.find(line => line.type === 'driver.error')?.message ?? (driven.code === 0 ? undefined : driven.stderr), startedAfter: new Date(before).toISOString() }
       out.jobs = await jobsOf(pkgs, root)
       out.facts = await versionFacts(pkgs, root)
+      out.userLineAfterNext = await userLine(capabilities, home)
       if (extra !== undefined) {
         sdk = createStep5Sdk(pkgs, { env: envOf(server, project.home), home: project.home })
         const reopened = await sdk.call('projects.open', { root, create: true })
-        out.extra = await extra({ sdk, projectId: reopened.projectId, root, model, session, comparison: out.meta.files?.comparison, work })
+        out.extra = await extra({ sdk, projectId: reopened.projectId, root, home, model, session, comparison: out.meta.files?.comparison, work })
       }
     } finally {
       if (sdk !== undefined) await sdk.dispose()
     }
-    out.records = await projectRecords(pkgs, root)
+    out.records = await projectRecords(pkgs, root, { home })
+    if (fromOther) out.metaRecords = await projectRecords(pkgs, join(work, 'other'))
     out.metaSessions = model.metaSessions.map(s => ({ phase: s.phase, playbook: s.playbook, tools: s.tools }))
     // H17: the meta diagnosis session exported through the CLI carries no key.
     const exported = out.meta?.files?.job?.sessions?.['meta-diagnose']
     if (exported !== undefined) {
       const exportDir = join(work, 'export')
-      const cli = h.spawnNode([CLI_BIN, 'export', exported, '--project', root, '--out', exportDir, '--json'], { cwd: work, env: { NEXGENT_HOME: project.home, NEXGENT_API_KEY: SCRIPTED_API_KEY } })
+      const cli = h.spawnNode([CLI_BIN, 'export', exported, '--project', fromOther ? join(work, 'other') : root, '--out', exportDir, '--json'], { cwd: work, env: { NEXGENT_HOME: project.home, NEXGENT_API_KEY: SCRIPTED_API_KEY } })
       const cliExit = await cli.exit
       out.export = { session: exported, code: cliExit.code, stderr: cliExit.stderr.slice(0, 2000), files: (await readdir(exportDir).catch(() => [])).sort(), secretHits: await filesContaining(exportDir, SCRIPTED_API_KEY, work) }
     }
@@ -577,16 +698,18 @@ async function comparisonPhase(h, pkgs, capabilities, work, log, { name, arms, s
   } finally {
     restoreTemp()
     await killAll(pkgs, root)
+    if (fromOther) await killAll(pkgs, join(work, 'other'))
     await server.close()
   }
   return out
 }
 
 /** H06 (refused proposals), H05 (refused diagnosis), H13 (epoch): after the reject comparison. */
-async function rejectExtra(pkgs, capabilities, { sdk, projectId, root, model, comparison, work }) {
+async function rejectExtra(pkgs, capabilities, { sdk, projectId, root, home, model, comparison, work }) {
   const out = {}
   const config = () => readFile(join(root, '.nexgent', 'config.json'), 'utf8').catch(() => '')
-  const versions = async () => (await readdir(join(root, '.nexgent', 'improvers', 'bundles')).catch(() => [])).sort()
+  // ADR 0012: stored improvers are the user's.
+  const versions = async () => (await readdir(join(home, 'improvers', 'bundles')).catch(() => [])).sort()
   out.configBefore = await config()
   out.versionsBefore = await versions()
   model.metaDiagnose.push('change', 'invalid')
@@ -615,6 +738,15 @@ async function rejectExtra(pkgs, capabilities, { sdk, projectId, root, model, co
   const again = await sdk.call('settings.get', { projectId })
   await attempt(() => sdk.call('settings.update', { projectId, patch: { improvement: { ...again.improvement, feedbackThreshold: (again.improvement?.feedbackThreshold ?? 3) === 3 ? 4 : 3 } } }))
   out.epochAfterOther = await capabilities.projectEpoch(layout)
+  // ADR 0013: the rules id is adr-0013, so the epoch differs from the one the same settings had under adr-0008,
+  // and trials of the two epochs are never put into one comparison.
+  const settingsNow = pkgs.kernel.evaluatorSettings((await pkgs.kernel.readProjectConfig(layout.configFile)).config.capabilities)
+  const { createHash } = await import('node:crypto')
+  const epochUnder = rules => createHash('sha256').update(pkgs.kernel.canonicalEvaluatorText({ ...settingsNow, rules }), 'utf8').digest('hex')
+  out.rules = { id: settingsNow.rules, constant: pkgs.kernel.EVALUATOR_RULES, epoch: epochUnder(settingsNow.rules), epochAdr0008: epochUnder('adr-0008'), projectEpoch: out.epochAfterOther }
+  const startIn = epoch => [{ type: 'trial.start', plan: { epoch } }]
+  out.rules.sameEpoch = (await attempt(async () => capabilities.assertSameEpoch([startIn(out.rules.epoch), startIn(out.rules.epoch)]))).value ?? null
+  out.rules.mixed = (await attempt(async () => capabilities.assertSameEpoch([startIn(out.rules.epoch), startIn(out.rules.epochAdr0008)]))).code ?? 'accepted'
   out.crossEpoch = tampered(pkgs.kernel, comparison, out.epochAfter)?.epoch
   // H16 over the limit: the keep limit is not settable through the SDK, so the package call
   // with a lowered limit, on the comparison's own origin.
@@ -652,7 +784,7 @@ export async function runStep6Meta(h, pkgs, capabilities, work, { log = () => un
   }
   obs.trigger = await phase('trigger', dir => triggerPhase(h, pkgs, dir, log))
   obs.adopt = await phase('adopt', dir => comparisonPhase(h, pkgs, capabilities, dir, log, { name: 'adopt', arms: { parent: 'notes', child: 'improve' }, keepCopies: false }))
-  obs.reject = await phase('reject', dir => comparisonPhase(h, pkgs, capabilities, dir, log, { name: 'reject', arms: { parent: 'improve', child: 'not-capability' }, source: 'not-capability', keepCopies: true, extra: ctx => rejectExtra(pkgs, capabilities, ctx) }))
+  obs.reject = await phase('reject', dir => comparisonPhase(h, pkgs, capabilities, dir, log, { name: 'reject', arms: { parent: 'improve', child: 'not-capability' }, source: 'not-capability', keepCopies: true, fromOther: true, extra: ctx => rejectExtra(pkgs, capabilities, ctx) }))
   obs.export = obs.adopt?.export
   obs.copyLimit = obs.reject?.extra?.copyLimit
   if (obs.reject?.extra?.crossEpoch !== undefined) obs.crossEpochProduct = { reason: obs.reject.extra.crossEpoch }

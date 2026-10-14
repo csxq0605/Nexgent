@@ -20,9 +20,13 @@
  *            runs. A's job.json, sessions and ledger say `v0`; B's say the child's version,
  *            and B's diagnosis prompt carries the child's paragraph while A's does not
  *
- * The meta job that would adopt a child itself is not merged yet (W2 part 2); the
- * pinned phase adopts through the store directly, under a stand-in meta job id, and
- * says so in its observations. Meta-job items (H04–H16) are not wired.
+ * The pinned phase adopts through the store directly (`ImproverStore.user`, ADR 0012: the
+ * user-level line below the project's NEXGENT_HOME), under a stand-in meta job id, and says
+ * so in its observations; meta jobs that adopt are step6-meta.mjs.
+ *
+ * Rework round 3 (ADR 0012): versions live in `<NEXGENT_HOME>/improvers/`; job.json carries
+ * `improverScope: "user"`; session headers and ledger records are read for it too (written
+ * once the kernel passes it through, R5).
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -80,34 +84,59 @@ export async function versionFacts(pkgs, root) {
   const sessions = []
   for (const [id, records] of Object.entries(await sessionsOf(root))) {
     const start = records.find(record => record.type === 'session.start')
-    if (start?.purpose === 'improvement') sessions.push({ id, jobId: start.improvement?.jobId, phase: start.improvement?.phase, improverVersion: start.improvement?.improverVersion })
+    if (start?.purpose === 'improvement') sessions.push({ id, jobId: start.improvement?.jobId, phase: start.improvement?.phase, improverVersion: start.improvement?.improverVersion, improverScope: start.improvement?.improverScope })
   }
   const ledger = (await ledgerOf(root))
     .filter(record => record.improvementId !== undefined)
-    .map(record => ({ type: record.type, improvementId: record.improvementId, improvementPhase: record.improvementPhase, improverVersion: record.improverVersion }))
+    .map(record => ({ type: record.type, improvementId: record.improvementId, improvementPhase: record.improvementPhase, improverVersion: record.improverVersion, improverScope: record.improverScope }))
   return {
-    jobs: jobs.map(job => ({ jobId: job.id, status: job.status, improverVersion: job.improverVersion, history: (job.history ?? []).map(change => change.status) })),
+    jobs: jobs.map(job => ({ jobId: job.id, status: job.status, improverVersion: job.improverVersion, improverScope: job.improverScope, history: (job.history ?? []).map(change => change.status) })),
     sessions,
     ledger,
     improversDir: await readdir(join(root, '.nexgent', 'improvers')).then(() => true, () => false),
   }
 }
 
-/** H01: the step-5 regression's projects (no improver ever written there). */
+/** Nexgent homes under `dir`: directories named `home` (not descending into a project's `.nexgent/`). */
+async function homeDirs(dir) {
+  const out = []
+  const walk = async (current, depth) => {
+    for (const entry of await readdir(current, { withFileTypes: true }).catch(() => [])) {
+      if (!entry.isDirectory() || entry.name === '.nexgent' || entry.name === 'node_modules') continue
+      if (entry.name === 'home') out.push(join(current, entry.name))
+      else if (depth > 0) await walk(join(current, entry.name), depth - 1)
+    }
+  }
+  await walk(dir, 4)
+  return out.sort()
+}
+
+/** What a Nexgent home's user-level improver line holds (ADR 0012: `<home>/improvers/`). */
+export async function homeImprovers(home) {
+  const dir = join(home, 'improvers')
+  return {
+    bundles: (await readdir(join(dir, 'bundles')).catch(() => [])).filter(name => name.endsWith('.json')).length,
+    revisions: (await readdir(join(dir, 'activation')).catch(() => [])).filter(name => /^\d+\.json$/.test(name)).length,
+  }
+}
+
+/** H01: the step-5 regression's projects and their homes (no improver ever written in either). */
 export async function v0Phase(pkgs, step5Work) {
   const roots = await projectRoots(step5Work)
   const projects = []
   for (const root of roots) projects.push({ root: relative(step5Work, root).split('\\').join('/'), ...(await versionFacts(pkgs, root)) })
-  return { step5Work, projects }
+  const homes = []
+  for (const home of await homeDirs(step5Work)) homes.push({ home: relative(step5Work, home).split('\\').join('/'), ...(await homeImprovers(home)) })
+  return { step5Work, projects, homes }
 }
 
 /** H02: the improver store in a scratch project, through `@nexgent/capabilities` as built. */
 export async function storePhase(capabilities, kernel, work) {
-  const root = join(work, 'project')
-  await mkdir(join(root, '.nexgent'), { recursive: true })
-  const dir = capabilities.improversDir({ dataDir: join(root, '.nexgent') })
-  const store = new capabilities.ImproverStore(dir)
-  const out = {}
+  // ADR 0012: the version line is the user's, below the Nexgent home.
+  const home = join(work, 'home')
+  await mkdir(home, { recursive: true })
+  const store = capabilities.ImproverStore.user({ home })
+  const out = { scope: store.scope, readOnly: store.readOnly === true, directory: relative(work, store.directory).split('\\').join('/'), userDir: relative(work, capabilities.userImproversDir(home)).split('\\').join('/') }
   const bundleFile = version => join(store.bundlesDirectory, `${version}.json`)
   const revisionFiles = async () => (await readdir(store.activationDirectory).catch(() => [])).filter(name => /^\d+\.json$/.test(name)).sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
   const attempt = async fn => {
@@ -277,7 +306,7 @@ export async function pinnedPhase(h, pkgs, capabilities, work, log) {
   const child = pkgs.kernel.applyImproverChange(pkgs.kernel.IMPROVER_V0, changeFor(playbook, pkgs.kernel.IMPROVER_V0))
   const model = new PinnedModel(h, { root, playbooks: ['improve', 'notes'], childParagraph: playbook.change.text })
   const server = await h.scriptedModelServer({ script: Array.from({ length: 5_000 }, () => model.entry) })
-  const out = { adoptedBy: 'ImproverStore.adopt (stand-in meta job id; meta jobs are not merged yet)' }
+  const out = { adoptedBy: 'ImproverStore.user({ home }).adopt (stand-in meta job id: the adoption itself is what H03 pins against)' }
   try {
     const project = await runFeedbackProject(h, pkgs, work, {
       server,
@@ -298,7 +327,8 @@ export async function pinnedPhase(h, pkgs, capabilities, work, log) {
       out.jobA.pinnedBeforeAdoption = held?.improverVersion
       out.jobA.statusBeforeAdoption = held?.status
 
-      const store = new capabilities.ImproverStore(capabilities.improversDir({ dataDir: join(root, '.nexgent') }))
+      // ADR 0012: adopted in the user's line below the home every job of the project reads.
+      const store = capabilities.ImproverStore.user({ home: project.home })
       const written = await store.write(child)
       out.child = { version: written.version, created: written.created }
       const commit = await store.adopt(written.version, { jobId: randomUUID() })
@@ -311,16 +341,18 @@ export async function pinnedPhase(h, pkgs, capabilities, work, log) {
       out.jobA.status = doneA.status
       out.jobA.improverVersion = doneA.improverVersion
       out.jobA.history = (doneA.history ?? []).map(change => change.status)
+      out.jobA.improverScope = doneA.improverScope
 
       log('pinned: explicit job B')
       const b = await sdk.call('improvements.run', { projectId, sessionId: feedbackSession })
       const doneB = await waitJob(pkgs, root, b.id)
-      out.jobB = { id: b.id, status: doneB.status, improverVersion: doneB.improverVersion, history: (doneB.history ?? []).map(change => change.status) }
+      out.jobB = { id: b.id, status: doneB.status, improverVersion: doneB.improverVersion, improverScope: doneB.improverScope, history: (doneB.history ?? []).map(change => change.status) }
       out.inForceAfter = (await store.activation()).version
     } finally {
       await sdk.dispose()
     }
     out.facts = await versionFacts(pkgs, root)
+    out.projectLine = await homeImprovers(join(root, '.nexgent'))
     out.diagnoseTexts = model.diagnoseTexts
   } finally {
     await server.close()

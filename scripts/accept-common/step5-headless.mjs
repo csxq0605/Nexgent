@@ -189,8 +189,12 @@ const recordsHash = records => sha(JSON.stringify(records.filter(record => recor
 /** Records of a session whose `turn` is beyond `turns` (a job writing into the user's conversation). */
 const recordsAfterTurn = (records, turns) => records.filter(record => typeof record.turn === 'number' && record.turn > turns).length
 
-/** H18 data: schema issues of every record and file the flow wrote; files holding the test key. */
-async function integrity(pkgs, root) {
+/**
+ * H18 data: schema issues of every record and file the flow wrote; files holding the test key.
+ * Since ADR 0012 the user's queue under `home` (`<NEXGENT_HOME>/improvements/queue.json`) is
+ * checked too, and every job that pinned an improver is listed with its improverScope.
+ */
+async function integrity(pkgs, root, home) {
   const { validateSessionRecord, validateLedgerRecord, validateImprovementFile, validateCapabilityFile } = pkgs.session
   const issuesOf = (records, validate, where) => records.flatMap((record, index) => validate(record).map(issue => `${where}#${index + 1} ${record.type ?? ''}: ${issue.path ?? ''} ${issue.message ?? JSON.stringify(issue)}`))
   const sessions = await sessionsOf(root)
@@ -200,7 +204,8 @@ async function integrity(pkgs, root) {
     ...issuesOf(ledger, validateLedgerRecord, 'ledger'),
   ]
   const dir = improvementsPath(root)
-  const files = { queue: 0, job: 0, diagnosis: 0, candidate: 0, trialReceipt: 0, decision: 0 }
+  const files = { queue: 0, job: 0, diagnosis: 0, candidate: 0, trialReceipt: 0, decision: 0, userQueue: 0 }
+  const scopes = []
   const check = (kind, value, where, validate) => {
     files[kind] += 1
     issues.push(...validate(kind, value).map(issue => `${where}: ${issue.path ?? ''} ${issue.message ?? JSON.stringify(issue)}`))
@@ -210,13 +215,16 @@ async function integrity(pkgs, root) {
   for (const name of await readdir(dir).catch(() => [])) {
     const job = await readJsonFile(join(dir, name, 'job.json'))
     if (job !== undefined) check('job', job, `improvements/${name.slice(0, 8)}/job.json`, validateImprovementFile)
+    if (job?.improverVersion !== undefined) scopes.push({ id: job.id, improverScope: job.improverScope })
     const diagnosis = await readJsonFile(join(dir, name, 'diagnosis.json'))
     if (diagnosis !== undefined) check('diagnosis', diagnosis, `improvements/${name.slice(0, 8)}/diagnosis.json`, validateImprovementFile)
   }
   for (const candidate of await candidatesOf(root)) if (candidate.record !== undefined) check('candidate', candidate.record, `candidate ${candidate.id.slice(0, 8)}`, validateCapabilityFile)
   for (const [trialId, receipts] of Object.entries(await trialsOf(root))) for (const receipt of receipts) check('trialReceipt', receipt, `trial ${trialId.slice(0, 8)} ${receipt.type}`, validateCapabilityFile)
   for (const decision of await decisionsOf(root)) check('decision', decision, `decision ${String(decision.id).slice(0, 8)}`, validateCapabilityFile)
-  return { issues, files, sessions: Object.keys(sessions).length, ledger: ledger.length, secretHits: await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root) }
+  const userQueue = home === undefined ? undefined : await readJsonFile(join(home, 'improvements', 'queue.json'))
+  if (userQueue !== undefined) check('userQueue', userQueue, '<home>/improvements/queue.json', validateImprovementFile)
+  return { issues, files, scopes, sessions: Object.keys(sessions).length, ledger: ledger.length, secretHits: await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root) }
 }
 
 // ---- main --------------------------------------------------------------------------------
@@ -337,7 +345,7 @@ async function mainPhase(h, pkgs, work, log) {
     out.firstUse = (await readImprovements(pkgs, root)).jobs.find(j => j.id === job.id)?.firstUse
     out.ledger = await ledgerOf(root)
     out.configAfter = await configHash(root)
-    out.integrity = await integrity(pkgs, root)
+    out.integrity = await integrity(pkgs, root, project.home)
 
     // H18: the export of the feedback task carries no key.
     const exportDir = join(work, 'export')

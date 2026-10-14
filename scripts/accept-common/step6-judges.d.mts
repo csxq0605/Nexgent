@@ -6,3 +6,4 @@ export declare function judgeStore(obs: unknown): CheckResult
 export declare function judgePinned(obs: unknown): CheckResult
 export declare function judgeSets(obs: unknown): CheckResult
 export declare function judgeReport(obs: unknown): CheckResult
+export declare function judgePilotReport(obs: unknown): CheckResult
