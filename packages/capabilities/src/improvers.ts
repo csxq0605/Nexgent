@@ -1,7 +1,11 @@
 /**
- * Improver versions `.nexgent/improvers/` (`data-formats.md` §改进器版本,
- * ADR 0008 decision 1): a project-level version line of its own, adopted
- * and rolled back apart from capability bundles.
+ * Improver versions (`data-formats.md` §改进器版本, ADR 0008 decision 1): a
+ * version line of its own, adopted and rolled back apart from capability
+ * bundles. Since ADR 0012 it is user-level: `<NEXGENT_HOME>/improvers/`
+ * ({@link userImproversDir}, scope `user`), shared by every project under
+ * that home. A project's `.nexgent/improvers/` ({@link improversDir}, scope
+ * `project`) is step 6's earlier line: not migrated, opened read-only
+ * ({@link ImproverStore.project}) only to show its history.
  *
  * - `bundles/<version>.json`: an improver's canonical text, written once
  *   with exclusive create and never changed or deleted. `v0` is built in
@@ -35,9 +39,11 @@ import {
   isImproverV0,
   isNextImproverRevision,
   NexgentError,
+  nexgentHome,
   type ImproverActivationState,
   type ImproverBundle,
   type ImproverRevision,
+  type ImproverScope,
   type ImproverVersion,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
@@ -46,9 +52,23 @@ import { publishExclusive } from './activation.js'
 import { retryTransient } from './fs-retry.js'
 import { sha256 } from './manifest.js'
 
-/** `.nexgent/improvers` of a project. */
+/** `.nexgent/improvers` of a project: step 6's project-level line, read-only since ADR 0012 ({@link ImproverStore.project}). */
 export function improversDir(layout: Pick<WorkspaceLayout, 'dataDir'>): string {
   return join(layout.dataDir, IMPROVERS_DIR)
+}
+
+/** `<NEXGENT_HOME>/improvers`: the user-level line every project under that home shares (ADR 0012). */
+export function userImproversDir(home: string = nexgentHome()): string {
+  return join(home, IMPROVERS_DIR)
+}
+
+/** Options of {@link ImproverStore}. */
+export interface ImproverStoreOptions {
+  readonly now?: () => Date
+  /** `user` (default) or `project`; a `project` store is read-only. */
+  readonly scope?: ImproverScope
+  /** Nexgent home when no directory is given (default `$NEXGENT_HOME` or `~/.nexgent`). */
+  readonly home?: string
 }
 
 /** The version of an improver: `v0` when it equals the built-in one by content, else the SHA-256 of its canonical text. */
@@ -147,20 +167,42 @@ function rejectRevision(raw: string, file: string, state: ImproverActivation, se
 }
 
 /**
- * The improver version line of one project.
- * @param directory - `.nexgent/improvers` ({@link improversDir}).
+ * One improver version line.
+ * @param directory - The line's root; default {@link userImproversDir} of `options.home`.
  */
 export class ImproverStore {
   readonly directory: string
   readonly bundlesDirectory: string
   readonly activationDirectory: string
+  /** `user` (`<NEXGENT_HOME>/improvers`) or `project` (a project's old line, read-only). */
+  readonly scope: ImproverScope
   readonly #now: () => Date
 
-  constructor(directory: string, options: { readonly now?: () => Date } = {}) {
-    this.directory = directory
-    this.bundlesDirectory = join(directory, IMPROVER_DIRS.bundles)
-    this.activationDirectory = join(directory, IMPROVER_DIRS.activation)
+  constructor(directory?: string, options: ImproverStoreOptions = {}) {
+    this.directory = directory ?? userImproversDir(options.home)
+    this.bundlesDirectory = join(this.directory, IMPROVER_DIRS.bundles)
+    this.activationDirectory = join(this.directory, IMPROVER_DIRS.activation)
+    this.scope = options.scope ?? 'user'
     this.#now = options.now ?? (() => new Date())
+  }
+
+  /** The user-level line of a Nexgent home (default `$NEXGENT_HOME` or `~/.nexgent`). */
+  static user(options: Omit<ImproverStoreOptions, 'scope'> = {}): ImproverStore {
+    return new ImproverStore(undefined, { ...options, scope: 'user' })
+  }
+
+  /** A project's step-6 line, read-only: history and stored improvers can be read, nothing is written. */
+  static project(layout: Pick<WorkspaceLayout, 'dataDir'>, options: Pick<ImproverStoreOptions, 'now'> = {}): ImproverStore {
+    return new ImproverStore(improversDir(layout), { ...options, scope: 'project' })
+  }
+
+  /** Whether this line accepts writes (`project` lines do not, ADR 0012 decision 2). */
+  get readOnly(): boolean {
+    return this.scope === 'project'
+  }
+
+  #writable(): void {
+    if (this.readOnly) throw new NexgentError('improver/activation', `the project-level improver line ${this.directory} is read-only; improvers are user-level (ADR 0012)`)
   }
 
   /**
@@ -169,6 +211,7 @@ export class ImproverStore {
    * @throws `improver/invalid` for a bundle that breaks the schema or the bounds.
    */
   async write(bundle: ImproverBundle): Promise<{ readonly version: ImproverVersion; readonly created: boolean }> {
+    this.#writable()
     assertImproverBundle(bundle)
     const issues = validateImprovementFile('improver', bundle)
     if (issues.length > 0) throw new NexgentError('improver/invalid', `improver: ${issues[0]!.path} ${issues[0]!.message}`)
@@ -259,6 +302,7 @@ export class ImproverStore {
    * @throws `improver/not-found` / `improver/invalid` when it does not load; `improver/activation` for a damaged chain or when it is already in force.
    */
   async adopt(version: ImproverVersion, input: { readonly jobId: string }, observed?: ImproverActivation): Promise<ImproverCommit | null> {
+    this.#writable()
     await this.load(version)
     return this.#commit(observed, current => {
       if (version === current.version) throw new NexgentError('improver/activation', `improver ${version} is already in force`)
@@ -274,6 +318,7 @@ export class ImproverStore {
    * @throws `improver/activation` when there is nothing to roll back to, the target was never in force, or the chain is damaged; `improver/not-found` / `improver/invalid` when the target does not load.
    */
   async rollback(input: { readonly trigger: 'manual' | 'load-failure'; readonly toVersion?: ImproverVersion; readonly reason?: string }, observed?: ImproverActivation): Promise<ImproverCommit | null> {
+    this.#writable()
     const base = observed ?? (await this.activation())
     const target = input.toVersion ?? base.stack[base.stack.length - 2]
     if (target === undefined) throw new NexgentError('improver/activation', 'nothing to roll back: v0 is in force')
@@ -294,7 +339,9 @@ export class ImproverStore {
   /**
    * The improver in force, loaded. One that fails to load is rolled back
    * (`load-failure`, the problem in `reason`) and the previous one tried,
-   * down to `v0`. A damaged chain is reported in `problem` and not written to.
+   * down to `v0`. A damaged chain is reported in `problem` and not written to;
+   * a read-only (`project`) line is never written to either: a tail that does
+   * not load reads as `v0` with `fallback`.
    */
   async resolve(): Promise<ResolvedImprover> {
     const rollbacks: ImproverLoadRollback[] = []
@@ -305,8 +352,8 @@ export class ImproverStore {
         return { activation, version: activation.version, bundle, rollbacks, ...(problem === undefined ? {} : { problem }) }
       } catch (error) {
         if (!(error instanceof NexgentError) || (error.code !== 'improver/not-found' && error.code !== 'improver/invalid')) throw error
-        if (problem !== undefined) {
-          return { activation, version: IMPROVER_V0_VERSION, bundle: IMPROVER_V0, rollbacks, problem, fallback: { version: activation.version, error } }
+        if (problem !== undefined || this.readOnly) {
+          return { activation, version: IMPROVER_V0_VERSION, bundle: IMPROVER_V0, rollbacks, ...(problem === undefined ? {} : { problem }), fallback: { version: activation.version, error } }
         }
         const committed = await this.rollback({ trigger: 'load-failure', reason: `${activation.version}: ${error.message}` }, activation)
         if (committed !== null) rollbacks.push({ version: activation.version, error, revision: committed.revision })

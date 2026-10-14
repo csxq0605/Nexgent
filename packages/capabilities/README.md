@@ -28,7 +28,13 @@
 
 ## 改进器版本（`ImproverStore`，步骤 6）
 
-`.nexgent/improvers/`（`improversDir(layout)`）是项目级的另一条版本线，与能力包分开采用、分开回滚（ADR 0008 决策 1，`data-formats.md` §改进器版本）。
+改进器是另一条版本线，与能力包分开采用、分开回滚（ADR 0008 决策 1，`data-formats.md` §改进器版本）。ADR 0012 起它是用户级的：
+
+- `ImproverStore.user({ home? })`（或不带目录的 `new ImproverStore()`）打开 `<NEXGENT_HOME>/improvers/`（`userImproversDir`，默认 `$NEXGENT_HOME` 或 `~/.nexgent`），`scope: 'user'`。同一主目录下的所有项目读到同一个生效的改进器，采用和回滚对它们都生效。
+- `ImproverStore.project(layout)` 打开项目里步骤 6 写过的 `.nexgent/improvers/`（`improversDir`），`scope: 'project'`，只读：能查看历史、读出改进器，`write`、`adopt`、`rollback` 都报 `improver/activation`；`resolve` 遇到读不出的改进器不写回滚，返回 `v0` 与 `fallback`。旧数据不迁移，也不会被用户级版本线读成生效版本。
+- 直接 `new ImproverStore(dir)` 按给定目录读写（`scope` 默认 `user`）；evolve、sdk 现有调用还在用项目目录，换成用户级由它们各自的工作包完成。
+
+两种作用域的方法相同：
 
 - `write(bundle)`：按 `assertImproverBundle` 与 schema 校验后，把规范化文本以独占创建写到 `bundles/<version>.json`。同一内容得到同一版本（`improverVersionOf`），已存在不重写；内容等于 `v0` 的版本号就是 `v0`，不写文件。
 - `load(version)`：`v0` 返回内置 `IMPROVER_V0`；其余每次读都检查 schema、上下限与占位符，并核对内容哈希等于版本号。读不到是 `improver/not-found`，其他问题是 `improver/invalid`。
@@ -62,6 +68,7 @@
 - `capability_draft`：校验全部输入（路径、上限、种类）后才写；返回修订号 = 本会话该组件的第几次草稿。工具说明里写明每种组件入口文件的格式与一个最小示例（`src/formats.ts`，测试保证示例能通过校验）。
 - `capability_try`：校验草稿（契约 schema、名字一致、入口文件存在、已注册的种类校验；格式不合时一次列出所有问题并附上期望格式），冻结为该修订，加载进本会话。插件先问用户（`risk: high`，只有“本次允许”），拒绝时不导入、不执行任何代码；加载失败时本会话保留试用前的状态。
 - `capability_propose`：每个组件在最近一次试用之后必须有一次成功使用（函数或插件的工具调用、`load_skill`、带该预设的 `delegate` / `spawn_teammate` / 工作流节点、`spawn_teammate`、带图的 `workflow`；上下文策略要求试用之后有一轮正常结束），否则拒绝并列出缺什么。通过后写候选包与 `candidates/<id>/`。
+- 改进作业的提议会话里，`capability_propose` 还做具体数值检查（ADR 0013 决定 2，`src/instance-literals.ts`）：把组件的全部文本文件与作业的反馈原文、反馈任务各版本成果的文本文件比较，原题里出现、而在本项目少于两个任务的用户消息里出现的数值或日期（`findInstanceLiterals`）命中即拒绝（`capability/instance-literal`）。工具结果只列出命中的值、所在文件与来源，不给改法；会话可以改后再提。用户自己任务里的提交不做这项检查。门控可以复用 `checkJobLiterals`、`jobLiteralSources`、`projectTaskMessages`。
 - 会话所用的能力版本里已有内容完全相同的同名组件时（门控候选侧回放“起草、试用、提交”就是这种情形），`capability_try` 与 `capability_propose` 不报错也不写候选，直接说明“已在当前版本中（版本号）”；内容不同的同名组件照常走试用与提交。
 - 三个工具都拒绝成员调用。
 

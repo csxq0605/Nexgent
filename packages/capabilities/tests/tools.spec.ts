@@ -1,8 +1,9 @@
-import { readdir, readFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApp, type Context, type NexgentApp, type Plugin, type SessionRecord, type ToolContext, type ToolRecordInput } from '@nexgent/kernel'
-import { SessionPlugin } from '@nexgent/session'
+import { createApp, resolveWorkspaceLayout, type Context, type NexgentApp, type Plugin, type SessionRecord, type ToolContext, type ToolRecordInput } from '@nexgent/kernel'
+import { JsonlSessionStore, SessionPlugin } from '@nexgent/session'
 import { scriptedProvider } from '@nexgent/test-support'
 import { WorkspacePlugin } from '@nexgent/workspace'
 import { CapabilitiesPlugin, capabilitiesOf, capabilityTools, findUseProof, listCandidates, readCandidate, type CapabilityService } from '../src/index.js'
@@ -143,5 +144,91 @@ describe('capability_draft / try / propose', () => {
     await draft!.handler({ ...skill, files: [{ ...skillFile, content: skillFile.content.replace('Steps.', 'More steps.') }] }, session.context())
     await tryTool!.handler(skill, session.context())
     expect(findUseProof(session.records, skill)).toBe('it has no successful use since it was last tried')
+  })
+})
+
+/** A past root task with one deliverable and the feedback on it; and the improvement job that answers it. */
+async function feedbackJob(root: string, deliverableText: string, comment: string): Promise<string> {
+  const layout = resolveWorkspaceLayout(root)
+  const store = new JsonlSessionStore({ sessionsDir: layout.sessions })
+  const sessionId = randomUUID()
+  const deliverableId = randomUUID()
+  const feedbackId = randomUUID()
+  const lock = await store.create({ sessionId, projectRoot: root, model: 'claude-sonnet-5-5', sandboxMode: 'workspace-write' })
+  await store.append(sessionId, { type: 'turn.start', turn: 1 })
+  await store.append(sessionId, { type: 'user.message', turn: 1, content: 'Summarise the orders of the month.', source: 'user' })
+  await store.append(sessionId, { type: 'deliverable.presented', turn: 1, step: 1, toolCallId: 'call-1', deliverable: { deliverableId, version: 1, title: 'Summary', summary: 'The month.', files: [{ path: 'out/summary.md', size: deliverableText.length, sha256: 'a'.repeat(64), mediaType: 'text/markdown' }] } })
+  await store.append(sessionId, { type: 'turn.end', turn: 1, reason: { kind: 'completed' } })
+  await store.append(sessionId, { type: 'turn.start', turn: 2 })
+  await store.append(sessionId, { type: 'feedback', turn: 2, feedback: { id: feedbackId, deliverableId, version: 1, comment } })
+  await store.append(sessionId, { type: 'user.message', turn: 2, content: comment, source: 'feedback' })
+  await store.append(sessionId, { type: 'turn.end', turn: 2, reason: { kind: 'completed' } })
+  await store.release(lock)
+  await mkdir(join(layout.outputs, deliverableId, 'v1', 'files', 'out'), { recursive: true })
+  await writeFile(join(layout.outputs, deliverableId, 'v1', 'files', 'out', 'summary.md'), deliverableText)
+  const jobId = randomUUID()
+  await mkdir(join(layout.dataDir, 'improvements', jobId), { recursive: true })
+  await writeFile(join(layout.dataDir, 'improvements', jobId, 'job.json'), JSON.stringify({ formatVersion: 1, id: jobId, items: [{ kind: 'feedback', feedbackId, sessionId, deliverableId, at: '2026-10-14T08:00:00.000Z' }] }))
+  return jobId
+}
+
+/** Another root task whose user message carries `text`. */
+async function pastMessage(root: string, text: string): Promise<void> {
+  const store = new JsonlSessionStore({ sessionsDir: resolveWorkspaceLayout(root).sessions })
+  const sessionId = randomUUID()
+  const lock = await store.create({ sessionId, projectRoot: root, model: 'claude-sonnet-5-5', sandboxMode: 'workspace-write' })
+  await store.append(sessionId, { type: 'turn.start', turn: 1 })
+  await store.append(sessionId, { type: 'user.message', turn: 1, content: text, source: 'user' })
+  await store.append(sessionId, { type: 'turn.end', turn: 1, reason: { kind: 'completed' } })
+  await store.release(lock)
+}
+
+describe('capability_propose in an improvement job: the instance-literal check (ADR 0013 decision 2)', () => {
+  const policy = (instructions: string) => ({
+    kind: 'context-policy',
+    name: 'house-rules',
+    files: [{ path: 'policy.json', content: JSON.stringify({ formatVersion: 1, name: 'house-rules', description: 'How this project wants summaries.', instructions }) }],
+  })
+  const ref = { kind: 'context-policy', name: 'house-rules' } as const
+
+  /** Draft, try and use the policy in a propose session of `jobId`, then propose it. */
+  async function propose(service: CapabilityService, jobId: string | undefined, instructions: string) {
+    const session = new FakeSession()
+    if (jobId !== undefined) session.push({ type: 'session.start', purpose: 'improvement', improvement: { jobId, phase: 'propose' } })
+    const [draft, tryTool, proposeTool] = capabilityTools(service, session.read)
+    await draft!.handler(policy(instructions), session.context())
+    await tryTool!.handler(ref, session.context())
+    session.turn = 2
+    session.push({ type: 'turn.end', turn: 2, reason: { kind: 'completed' } })
+    return proposeTool!.handler({ components: [ref] }, session.context())
+  }
+
+  it('refuses a policy carrying a value of the feedback task, lists the hit only, and accepts it once the value is gone', async () => {
+    const root = await tempDir()
+    const service = await boot(root)
+    const jobId = await feedbackJob(root, '# Summary\n\nTotal: 2,384.13 USD over 41 orders (2026-09).\n', 'The total should use avg_order_value per region, not one figure.')
+    const refused = await propose(service, jobId, 'Report the total as 2384.13 and use the avg_order_value column.').catch((error: unknown) => error)
+    expect(refused).toMatchObject({ code: 'capability/instance-literal', message: expect.stringContaining('2384.13') })
+    const hits = (refused as { details: { hits: { value: string; path: string; source: string }[] } }).details.hits
+    expect(hits).toEqual([{ value: '2384.13', kind: 'decimal', path: 'context/house-rules/policy.json', source: expect.stringMatching(/^deliverable:[0-9a-f-]+\/v1\/out\/summary\.md$/) }])
+    expect((refused as Error).message).not.toContain('avg_order_value')
+    expect(await listCandidates(service.store.directory)).toEqual([])
+
+    // A column name from the feedback is a convention, not a value: it passes.
+    const accepted = await propose(service, jobId, 'Report the total with the avg_order_value column, per region.')
+    expect(accepted.meta).toMatchObject({ candidateId: expect.any(String) })
+  })
+
+  it('a value given in two or more tasks of the project is a project constant; a user task is not checked', async () => {
+    const root = await tempDir()
+    const service = await boot(root)
+    const jobId = await feedbackJob(root, 'Orders above 500 are large.\n', 'Flag the large orders.')
+    await pastMessage(root, 'List the orders above 500.')
+    await pastMessage(root, 'Count the orders above 500 per region.')
+    expect((await propose(service, jobId, 'Orders above 500 are large; flag them.')).meta).toMatchObject({ candidateId: expect.any(String) })
+
+    const other = await tempDir()
+    const plain = await boot(other)
+    expect((await propose(plain, undefined, 'Report the total as 2384.13.')).meta).toMatchObject({ candidateId: expect.any(String) })
   })
 })
