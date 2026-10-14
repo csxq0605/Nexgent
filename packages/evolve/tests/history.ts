@@ -28,7 +28,7 @@ export interface FeedbackTaskFixture {
   readonly replySeq: number
 }
 
-export async function feedbackTask(autoImprove = true, improvement?: Record<string, unknown>, capabilityVersion = 'baseline'): Promise<FeedbackTaskFixture> {
+export async function feedbackTask(autoImprove = true, improvement?: Record<string, unknown>, capabilityVersion = 'baseline', comment = 'the region column is missing again'): Promise<FeedbackTaskFixture> {
   const layout = await project(autoImprove, improvement)
   await writeFile(join(layout.root, 'orders.csv'), 'region,amount\nnorth,1\nsouth,2\n')
   const sessionId = randomUUID()
@@ -39,7 +39,7 @@ export async function feedbackTask(autoImprove = true, improvement?: Record<stri
   await store.append(sessionId, { type: 'user.message', turn: 1, content: ASK, source: 'user' })
   const reply = await store.append(sessionId, { type: 'assistant.message', turn: 1, step: 1, requestId: randomUUID(), content: 'Done; wrote out/summary.csv without the region column.', usage: ZERO_USAGE, finishReason: 'stop' })
   await store.append(sessionId, { type: 'turn.end', turn: 1, reason: { kind: 'completed' } })
-  const feedback: FeedbackEntry = { id: randomUUID(), deliverableId: randomUUID(), version: 1, rating: 2, comment: 'the region column is missing again' }
+  const feedback: FeedbackEntry = { id: randomUUID(), deliverableId: randomUUID(), version: 1, rating: 2, comment }
   await store.append(sessionId, { type: 'turn.start', turn: 2 })
   await store.append(sessionId, { type: 'feedback', turn: 2, feedback })
   await store.append(sessionId, { type: 'user.message', turn: 2, content: feedback.comment, source: 'feedback' })

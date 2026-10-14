@@ -29,7 +29,7 @@ import {
   type ImprovementTurnResult,
   type TrialStarter,
 } from '@nexgent/evolve'
-import { addUsage, resolveWorkspaceLayout, UNKNOWN_USAGE, ZERO_USAGE, type LedgerRecord, type LLMUsage, type TurnEndReason } from '@nexgent/kernel'
+import { addUsage, nexgentHome, resolveWorkspaceLayout, UNKNOWN_USAGE, ZERO_USAGE, type LedgerRecord, type LLMUsage, type TurnEndReason } from '@nexgent/kernel'
 import { estimateUsd } from '@nexgent/llm'
 import { JsonlLedger } from '@nexgent/session'
 import { createSdk } from './sdk.js'
@@ -157,6 +157,8 @@ export function gateTrialStarter(env: Env = process.env): TrialStarter {
 /** Run one job (the `improve` mode); returns the jobs this process ran. */
 export async function runImprovementProcess(root: string, jobId: string, env: Env = process.env) {
   return runImprovementJob(resolveWorkspaceLayout(root), jobId, {
+    // ADR 0012: the user's improvers, meta queue and config, in the Nexgent home this process was given.
+    home: nexgentHome(env as NodeJS.ProcessEnv),
     stages: createImprovementStages({ runner: sdkSessionRunner(env), startTrial: gateTrialStarter(env), priceUsd: estimateUsd }),
   })
 }

@@ -22,6 +22,13 @@
  *
  * The epoch is the gate's `projectEpoch` (ADR 0008 decision 5); each arm's
  * gate is started with the origin's epoch and refuses to run in another.
+ *
+ * ADR 0012: the improver is the user's. A meta job reads the projects of
+ * its batch (`metaProjects`); the origin is searched in all of them (jobs
+ * merged by when they finished) and records its `projectId`; the arms run
+ * in copies of the origin's project, their ledger records go to that
+ * project, and the child is stored and adopted in the user's line. Arms
+ * never touch the user's improvers or meta queue.
  */
 import {
   addUsage,
@@ -44,10 +51,11 @@ import {
   type LedgerRecord,
   type LLMUsage,
   type MetaDiagnosis,
+  type MetaImprovementConfig,
   type MetaJobState,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { CapabilityStore, improversDir, ImproverStore, prepareProjectCopy, projectEpoch, type ProjectCopy } from '@nexgent/capabilities'
+import { CapabilityStore, ImproverStore, prepareProjectCopy, projectEpoch, type ProjectCopy } from '@nexgent/capabilities'
 import { JsonlLedger, JsonlSessionStore, validateImprovementFile } from '@nexgent/session'
 import { sumTurns } from './diagnosis.js'
 import type { ImproverSource, PinnedImprover } from './improver.js'
@@ -59,6 +67,7 @@ import type { BudgetStatus } from './budget.js'
 import type { ImprovementSessionRunner, ImprovementTurnResult } from './session-runner.js'
 import type { TrialStarter } from './trial.js'
 import type { ImprovementConfig, ImprovementJob, PhaseCost } from './types.js'
+import { metaProjects, userImproversDir, type MetaProject } from './user.js'
 
 /** What a meta phase spent. */
 export interface MetaSpend {
@@ -70,7 +79,12 @@ export interface MetaSpend {
 export interface MetaStageInput {
   readonly layout: WorkspaceLayout
   readonly job: ImprovementJob
+  /** The hosting project's `improvement` settings (thinking). */
   readonly config: ImprovementConfig
+  /** The user config's meta settings (model, budget; ADR 0012). */
+  readonly meta: MetaImprovementConfig
+  /** The Nexgent home: the user's improver line the child is stored and adopted in. */
+  readonly home: string
   /** The meta budget left when the phase starts. */
   readonly budget: BudgetStatus
   /** The improver the meta job pinned: the parent. */
@@ -153,16 +167,33 @@ export function fixedImprover(improver: PinnedImprover): ImproverSource {
   }
 }
 
-/** Finished feedback-triggered capability jobs created before the meta job, latest finished first. */
-function feedbackJobs(jobs: readonly ImprovementJob[], meta: ImprovementJob): ImprovementJob[] {
-  const candidates = jobs.filter(job => job.kind !== 'meta' && job.arm === undefined && isFinalImprovementStatus(job.status)
-    && job.items.some(item => item.kind === 'feedback') && job.createdAt <= meta.createdAt && job.id !== meta.id)
-  return candidates.sort((left, right) => (left.updatedAt < right.updatedAt ? 1 : left.updatedAt > right.updatedAt ? -1 : 0))
+/** The jobs of one project an origin may come from. */
+export interface OriginProject {
+  readonly layout: WorkspaceLayout
+  /** ADR 0012: the project's id in user-level records (recorded in the origin). */
+  readonly projectId?: string
+  readonly jobs: readonly ImprovementJob[]
+}
+
+interface OriginEntry {
+  readonly project: OriginProject
+  readonly job: ImprovementJob
+}
+
+function isFeedbackJob(job: ImprovementJob, meta: ImprovementJob): boolean {
+  return job.kind !== 'meta' && job.arm === undefined && isFinalImprovementStatus(job.status)
+    && job.items.some(item => item.kind === 'feedback') && job.createdAt <= meta.createdAt && job.id !== meta.id
+}
+
+/** Finished feedback-triggered capability jobs created before the meta job, in every project, latest finished first. */
+function feedbackJobs(projects: readonly OriginProject[], meta: ImprovementJob): OriginEntry[] {
+  const candidates = projects.flatMap(project => project.jobs.filter(job => isFeedbackJob(job, meta)).map(job => ({ project, job })))
+  return candidates.sort((left, right) => (left.job.updatedAt < right.job.updatedAt ? 1 : left.job.updatedAt > right.job.updatedAt ? -1 : 0))
 }
 
 /** The last finished feedback-triggered capability job created before the meta job (the `feedback-version` origin's job). */
 export function sourceJob(jobs: readonly ImprovementJob[], meta: ImprovementJob): ImprovementJob | undefined {
-  return feedbackJobs(jobs, meta)[0]
+  return jobs.filter(job => isFeedbackJob(job, meta)).sort((left, right) => (left.updatedAt < right.updatedAt ? 1 : left.updatedAt > right.updatedAt ? -1 : 0))[0]
 }
 
 /** Statuses of a job that did not solve its feedback (ADR 0009). */
@@ -204,6 +235,9 @@ export async function feedbackTaskVersion(layout: WorkspaceLayout, job: Improvem
 export interface OriginChoice {
   readonly kind: ComparisonOriginKind
   readonly job: ImprovementJob
+  /** The project the job is in (the arms run in its copies). */
+  readonly layout: WorkspaceLayout
+  readonly projectId?: string
   readonly capabilityVersion: string
   /** For `unresolved`: the version the job started on (differs from `capabilityVersion` when an adoption came between the task and the job). */
   readonly startedOn?: string
@@ -218,18 +252,28 @@ export interface OriginChoice {
  * @throws `improvement/not-found` when the latest feedback job's task cannot be replayed.
  */
 export async function chooseOrigin(layout: WorkspaceLayout, jobs: readonly ImprovementJob[], meta: ImprovementJob): Promise<OriginChoice | undefined> {
-  const finished = feedbackJobs(jobs, meta)
-  for (const job of finished) {
+  return chooseOriginIn([{ layout, jobs }], meta)
+}
+
+/**
+ * {@link chooseOrigin} over several projects (ADR 0012 decision 4): the
+ * feedback jobs of all of them, latest finished first, by the same rules.
+ */
+export async function chooseOriginIn(projects: readonly OriginProject[], meta: ImprovementJob): Promise<OriginChoice | undefined> {
+  const finished = feedbackJobs(projects, meta)
+  const where = (project: OriginProject) => ({ layout: project.layout, ...(project.projectId === undefined ? {} : { projectId: project.projectId }) })
+  for (const { project, job } of finished) {
+    const layout = project.layout
     if (!UNRESOLVED_STATUSES.has(job.status) || (await baselineAlreadyPassed(layout, job))) continue
     // A job that failed because its task cannot be replayed cannot be an origin either.
     if ((await findFeedbackTask(layout, job).catch(() => undefined)) === undefined) continue
     const startedOn = await jobStartVersion(layout, job)
     const ranOn = await feedbackTaskVersion(layout, job)
-    return { kind: 'unresolved', job, capabilityVersion: ranOn === startedOn ? startedOn : ranOn, startedOn }
+    return { kind: 'unresolved', job, ...where(project), capabilityVersion: ranOn === startedOn ? startedOn : ranOn, startedOn }
   }
   const latest = finished[0]
   if (latest === undefined) return undefined
-  return { kind: 'feedback-version', job: latest, capabilityVersion: await feedbackTaskVersion(layout, latest) }
+  return { kind: 'feedback-version', job: latest.job, ...where(latest.project), capabilityVersion: await feedbackTaskVersion(latest.project.layout, latest.job) }
 }
 
 function feedbackIdsOf(job: ImprovementJob): string[] {
@@ -245,13 +289,16 @@ async function activeVersion(layout: WorkspaceLayout): Promise<string> {
  * its snapshot tree, its feedback ids, `capabilityVersion` and the epoch.
  * @throws `improvement/not-found` when the feedback task has no snapshot with checks.
  */
-export async function originOf(layout: WorkspaceLayout, kind: ComparisonOriginKind, job: ImprovementJob, sourceJobId: string, capabilityVersion: string): Promise<ComparisonOrigin> {
-  return (await originCase(layout, kind, job, sourceJobId, capabilityVersion)).origin
+export async function originOf(layout: WorkspaceLayout, kind: ComparisonOriginKind, job: ImprovementJob, sourceJobId: string, capabilityVersion: string, projectId?: string): Promise<ComparisonOrigin> {
+  return (await originCase(layout, kind, job, sourceJobId, capabilityVersion, projectId)).origin
 }
 
-async function originCase(layout: WorkspaceLayout, kind: ComparisonOriginKind, job: ImprovementJob, sourceJobId: string, capabilityVersion: string) {
+async function originCase(layout: WorkspaceLayout, kind: ComparisonOriginKind, job: ImprovementJob, sourceJobId: string, capabilityVersion: string, projectId?: string) {
   const task = await findFeedbackTask(layout, job)
-  const origin: ComparisonOrigin = { kind, sourceJobId, tree: task.replay.tree, feedbackIds: feedbackIdsOf(job), capabilityVersion, epoch: await projectEpoch(layout) }
+  const origin: ComparisonOrigin = {
+    kind, sourceJobId, tree: task.replay.tree, feedbackIds: feedbackIdsOf(job), capabilityVersion, epoch: await projectEpoch(layout),
+    ...(projectId === undefined ? {} : { projectId }),
+  }
   return { origin, replay: task.replay }
 }
 
@@ -293,16 +340,17 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
       const { layout, job, config } = input
       const sessionId = newSessionId()
       const state: MetaDiagnosisState = { attempts: 0 }
-      const tools = metaDiagnosisTools({ layout, job, sessionId, improver: input.improver, state, now })
+      const projects = await metaProjects(layout, job)
+      const tools = metaDiagnosisTools({ layout, projects, job, sessionId, improver: input.improver, state, now })
       await input.record({ sessions: { ...job.sessions, 'meta-diagnose': sessionId } })
       const session = await options.runner.open({
         jobId: job.id, phase: 'meta-diagnose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version,
-        model: config.meta.model, thinking: config.thinking, title: `meta improvement ${job.id} diagnose`, tools,
+        model: input.meta.model, thinking: config.thinking, title: `meta improvement ${job.id} diagnose`, tools,
       })
       const turns: ImprovementTurnResult[] = []
       const max = IMPROVER_LIMITS.maxMetaDiagnosisAttempts
       try {
-        let text = metaDiagnosisPrompt(job, input.improver)
+        let text = metaDiagnosisPrompt(job, input.improver, projects)
         let nudges = 0
         for (;;) {
           const before = state.attempts
@@ -338,11 +386,11 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
       const { layout, job, config } = input
       const sessionId = newSessionId()
       const state: MetaChangeState = { attempts: 0 }
-      const tools = metaProposeTools({ layout, job, sessionId, improver: input.improver, state, now })
+      const tools = metaProposeTools({ layout, projects: await metaProjects(layout, job), home: input.home, job, sessionId, improver: input.improver, state, now })
       await input.record({ sessions: { ...job.sessions, 'meta-propose': sessionId } })
       const session = await options.runner.open({
         jobId: job.id, phase: 'meta-propose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version,
-        model: config.meta.model, thinking: config.thinking, title: `meta improvement ${job.id} propose`, tools,
+        model: input.meta.model, thinking: config.thinking, title: `meta improvement ${job.id} propose`, tools,
       })
       const turns: ImprovementTurnResult[] = []
       const max = IMPROVER_LIMITS.maxChangeAttempts
@@ -391,18 +439,24 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
       let origin: ComparisonOrigin
       let replay: Awaited<ReturnType<typeof originCase>>['replay']
       let source: ImprovementJob
+      // The project the origin comes from: the arms run in its copies and write its ledger.
+      let at: WorkspaceLayout
+      let projectId: string | undefined
       try {
-        const choice = await chooseOrigin(layout, await listJobs(improvementsDir(layout)), job)
-        if (choice === undefined) return { ...nothing, outcome: 'failed', detail: 'There is no finished feedback-triggered improvement job to compare the two improvers on.' }
+        const projects = await metaProjects(layout, job)
+        const choice = await chooseOriginIn(await Promise.all(projects.map(async (project: MetaProject) => ({ layout: project.layout, projectId: project.projectId, jobs: await listJobs(improvementsDir(project.layout)) }))), job)
+        if (choice === undefined) return { ...nothing, outcome: 'failed', detail: 'There is no finished feedback-triggered improvement job in this meta job\'s projects to compare the two improvers on.' }
         source = choice.job
-        ;({ origin, replay } = await originCase(layout, choice.kind, source, source.id, choice.capabilityVersion))
+        at = choice.layout
+        projectId = choice.projectId
+        ;({ origin, replay } = await originCase(at, choice.kind, source, source.id, choice.capabilityVersion, projectId))
         if (choice.startedOn !== undefined && choice.startedOn !== choice.capabilityVersion) {
           await input.log(`compare: job ${source.id} started on ${choice.startedOn}, after its feedback task ran on ${choice.capabilityVersion}; the arms start on the latter`)
         }
       } catch (error) {
         return { ...nothing, outcome: 'failed', detail: `The comparison origin cannot be prepared: ${(error as Error).message}`, error }
       }
-      await input.log(`compare: ${origin.kind} origin, job ${source.id} (${source.status}), tree ${origin.tree}, capabilities ${origin.capabilityVersion}, epoch ${origin.epoch}`)
+      await input.log(`compare: ${origin.kind} origin, job ${source.id} (${source.status}), project ${at.root}, tree ${origin.tree}, capabilities ${origin.capabilityVersion}, epoch ${origin.epoch}`)
       const arms: { arm: ComparisonArm; improver: PinnedImprover }[] = [
         { arm: 'parent', improver: input.improver },
         { arm: 'child', improver: { version: input.childVersion, bundle: input.child } },
@@ -421,7 +475,7 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
           let prepared: ProjectCopy
           try {
             prepared = await prepareProjectCopy({
-              layout,
+              layout: at,
               origin: replay,
               version: origin.capabilityVersion,
               ...(options.tempRoot === undefined ? {} : { tempRoot: options.tempRoot }),
@@ -439,9 +493,9 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
             arm: { metaJobId: job.id, arm },
             now: now(),
           })
-          const found = await originOf(copy, origin.kind, armJob, source.id, await activeVersion(copy)).catch(() => undefined)
+          const found = await originOf(copy, origin.kind, armJob, source.id, await activeVersion(copy), projectId).catch(() => undefined)
           if (found === undefined) return { ...spent, outcome: 'failed', detail: `The origin cannot be read in the ${arm} arm's copy; nothing was compared.` }
-          const runner: ImprovementSessionRunner = { open: request => options.runner.open({ ...request, metaJobId: job.id, comparisonArm: arm, ledgerRoot: layout.root }) }
+          const runner: ImprovementSessionRunner = { open: request => options.runner.open({ ...request, metaJobId: job.id, comparisonArm: arm, ledgerRoot: at.root }) }
           await input.log(`compare: ${arm} arm job ${armJob.id} on improver ${improver.version} in ${copy.root}`)
           await options.runArm(copy, armJob.id, { improvers: fixedImprover(improver), runner, epoch: origin.epoch })
           const done = await readJob(improvementsDir(copy), armJob.id)
@@ -450,7 +504,7 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
           const decision: CapabilityDecision | undefined = done.decisionId === undefined
             ? undefined
             : (await new CapabilityStore(copy.capabilities).decisions().catch(() => [] as CapabilityDecision[])).find(item => item.id === done.decisionId)
-          const cost: ArmCost = { ...total, estimatedUsd: await armUsd([layout, copy], done, total.requestCount, options.priceUsd) }
+          const cost: ArmCost = { ...total, estimatedUsd: await armUsd([at, copy], done, total.requestCount, options.priceUsd) }
           results[arm] = {
             arm,
             improverVersion: improver.version,
@@ -492,7 +546,7 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
       if (verdict.outcome === 'reject') {
         return { ...spent, outcome: 'rejected', detail: `The child improver was not adopted (${verdict.reason}).`, patch: { meta } }
       }
-      const store = new ImproverStore(improversDir(layout))
+      const store = new ImproverStore(userImproversDir(input.home))
       let commit
       try {
         commit = await store.adopt(input.childVersion, { jobId: job.id })
@@ -510,9 +564,11 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
   }
 }
 
-/** The meta-diagnose session's first message. Pure. */
-export function metaDiagnosisPrompt(job: ImprovementJob, improver: PinnedImprover): string {
+/** The meta-diagnose session's first message (ADR 0012: with the projects it may read, when given). Pure. */
+export function metaDiagnosisPrompt(job: ImprovementJob, improver: PinnedImprover, projects?: readonly Pick<MetaProject, 'projectId' | 'name'>[]): string {
   const basis = job.meta?.basis ?? []
+  const batch = job.meta?.batch ?? []
+  const nameOf = (projectId: string) => projects?.find(project => project.projectId === projectId)?.name ?? projectId
   return [
     '# Policy',
     'You are the meta diagnosis step of Nexgent\'s improvement flow. The improver is the data that tells improvement jobs how to diagnose user feedback, which component kinds to propose with which brief, and how many past tasks the gate compares. You look at how its jobs went and decide whether one change to the improver would make future jobs better.',
@@ -524,7 +580,17 @@ export function metaDiagnosisPrompt(job: ImprovementJob, improver: PinnedImprove
     '',
     '# This meta job',
     `Trigger: ${job.trigger}. Improver in force: ${improver.version}.`,
-    basis.length === 0 ? 'No batch of jobs was named; use improve_list_jobs to find the recent ones.' : `Jobs that finished since the last meta job (oldest first): ${basis.join(', ')}.`,
+    basis.length === 0
+      ? 'No batch of jobs was named; use improve_list_jobs to find the recent ones.'
+      : batch.length === 0
+        ? `Jobs that finished since the last meta job (oldest first): ${basis.join(', ')}.`
+        : `Jobs that finished since the last meta job (oldest first): ${batch.map(entry => `${entry.jobId} (project ${nameOf(entry.projectId)})`).join(', ')}.`,
+    ...(projects === undefined ? [] : [
+      '',
+      '# Projects',
+      'The improver is shared by every project of the user, so judge it by what holds for any task, not for one project. You may read only these projects (pass projectId to improve_read_session and improve_read_ledger):',
+      ...projects.map(project => `- ${project.projectId} (${project.name})`),
+    ]),
   ].join('\n')
 }
 

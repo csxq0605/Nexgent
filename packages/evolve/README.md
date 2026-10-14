@@ -65,3 +65,12 @@
 - SDK（W4）：实现 `ImprovementSessionRunner`（会话与账本在真实项目里，`session.start.purpose: improvement` 与 `improvement: { jobId, phase }`，账本带 `improvementId` / `improvementPhase`；诊断会话只给四个工具；提案会话的文件工具工作区是副本，插件批准一律拒绝）；用 `runGate` 提供 `TrialStarter`；入口脚本加 `improve` 模式调 `runImprovementJob(layout, jobId, { stages: createImprovementStages({ runner, startTrial }) })`；装上 `EvolvePlugin`；`improvements.list / show / run / cancel` 调宿主同名方法。
 - kernel（W1）：根任务检查失败时调 `ctx.improve.noteCheckFailure`；创建会话支持 `purpose: improvement`。
 - 门控（W3）：选择集必含作业的反馈任务（候选的 `taskId` 是提案会话的任务，反馈任务从作业的信号找）。
+
+## 用户级改进器与元改进（步骤 6，ADR 0012）
+
+- 改进器是用户级的：作业开始时从 Nexgent 主目录（`NEXGENT_HOME`，默认 `~/.nexgent`）的 `improvers/` 读生效版本并固定，`job.json` 与 `improvement.end` 记 `improverScope: "user"`（`userImprovers`，`user.ts`）。项目里的 `.nexgent/improvers/` 只读，只有 ADR 0012 之前固定在它上面的作业续跑试验时还会读（`pinnedSource`）。
+- 元改进按用户计数：每结束一个能力作业，作业进程在 `<home>/improvements/queue.json`（`queue.lock` 下读改写）里按 `(projectId, jobId)` 计入；比较臂、元改进作业、`improvement.shareImproverEvidence` 为假的项目不计。用户配置 `<home>/config.json` 的 `improvement.meta.enabled` 为真且满 `everyJobs` 个时，在完成这一批的作业所在项目建元改进作业，同一进程接着跑。整个用户同时只有一个元改进作业，它不占项目的作业位。显式元改进（`ctx.improve.runMeta`）建在发起的项目里，带走当前批次。
+- 元改进的模型、预算取用户配置；预算按用户队列 `metaJobs` 列出的作业求和。项目配置里的 `improvement.meta` 已弃用，读出后忽略。
+- 元诊断只读本批涉及、且仍开着共享的项目：`improve_list_jobs` 每行带 `projectId`，`improve_read_session` / `improve_read_ledger` 必须给 `projectId`，其他项目在工具结果里拒绝。批次为空的显式元改进只读它自己的项目。
+- 元提案的改动文字先过具体数值检查（`findInstanceLiterals`）：来源是本批作业的反馈原文与反馈所指成果版本的文本文件，项目常量看本批各项目任务会话里的用户消息（`literals.ts`）；命中即拒绝并列出命中的值。子改进器写进用户级版本线，采用也在用户级。
+- 比较起点在本批所有项目里按 ADR 0009、0010 找（`chooseOriginIn`），起点记 `projectId`；两臂在起点项目的副本里跑，账本写进起点项目。臂作业不计数、不碰用户级队列与改进器。

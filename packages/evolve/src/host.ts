@@ -22,6 +22,10 @@
  * {@link runImprovementJob} — so it outlives a CLI run, as the step-4 gate
  * does. On start the host marks jobs whose process is gone `interrupted`
  * (they are not re-run) and frees the project's job slot.
+ *
+ * ADR 0012: meta jobs belong to the user (the Nexgent home): their switch,
+ * `everyJobs` and budget are the user config's, one runs at a time for the
+ * user, and the improver every job pins is the user's.
  */
 import { spawn } from 'node:child_process'
 import { closeSync, mkdirSync, openSync } from 'node:fs'
@@ -40,11 +44,12 @@ import {
 import { buildReplaySet, listReplayCases, readCandidate } from '@nexgent/capabilities'
 import { budgetStatus, type BudgetStatus } from './budget.js'
 import { sweepAdoptedJobs } from './first-use.js'
-import { jobImproverVersion, PROJECT_IMPROVERS, trialComparison, type ImproverSource } from './improver.js'
+import { jobImproverVersion, pinnedSource, trialComparison, type ImproverSource } from './improver.js'
 import { jobAlive, jobPaths, listJobs, readJob, transitionJob } from './jobs.js'
 import { processAlive, readLockPid, tryCreateLock } from './lock.js'
 import { improvementsDir } from './paths.js'
-import { admitItems, ensureQueue, readQueue, reconcileQueue, retakeSlot, startExplicitJob, startExplicitMetaJob, type AdmitResult } from './queue.js'
+import { admitItems, ensureQueue, readQueue, reconcileQueue, retakeSlot, startExplicitJob, type AdmitResult } from './queue.js'
+import { ensureUserQueue, homeOf, readUserConfig, reconcileUserQueue, startExplicitUserMetaJob, userImprovers, userMetaBudgetStatus } from './user.js'
 import { RUNNING_STATUSES, type ImprovementJob, type ImprovementQueue, type ImprovementRequest, type QueueItem } from './types.js'
 
 /**
@@ -96,8 +101,10 @@ export interface ImprovementHostConfig {
   readonly env?: Readonly<Record<string, string>>
   /** Start a job some other way than a process of `entry` (tests, embedding hosts). */
   readonly launch?: (layout: WorkspaceLayout, jobId: string) => StartedJob
-  /** Where a waiting job's pinned improver is read (its comparison counts decide when history suffices); default the project's store. */
+  /** Where improvers are read (a waiting job's pinned one, a meta job's parent); default the user's line below {@link ImprovementHostConfig.home}. */
   readonly improvers?: ImproverSource
+  /** The Nexgent home (default `NEXGENT_HOME` / `~/.nexgent`): the user's improvers, meta queue and config. */
+  readonly home?: string
 }
 
 /** The improvement flow of one project. */
@@ -105,6 +112,8 @@ export class ImprovementHost {
   readonly layout: WorkspaceLayout
   readonly directory: string
   readonly #config: ImprovementHostConfig
+  /** The Nexgent home this host's user-level records live in. */
+  readonly home: string
   readonly #feedback: () => FeedbackStore | undefined
   readonly #started = new Map<string, StartedJob>()
   readonly #live = new Set<string>()
@@ -113,6 +122,7 @@ export class ImprovementHost {
     this.layout = layout
     this.directory = improvementsDir(layout)
     this.#config = config
+    this.home = homeOf(config.home)
     this.#feedback = feedback
   }
 
@@ -135,6 +145,7 @@ export class ImprovementHost {
   /** Begin counting in this project (idempotent), recover interrupted jobs, resume jobs whose history is now enough, record first uses. */
   async start(): Promise<void> {
     await ensureQueue(this.directory)
+    await ensureUserQueue(this.home).catch(() => undefined)
     await this.recover()
     await this.resumeWaiting().catch(() => undefined)
     await sweepAdoptedJobs(this.layout).catch(() => undefined)
@@ -178,9 +189,9 @@ export class ImprovementHost {
     return budgetStatus((await listJobs(this.directory)).filter(job => job.kind !== 'meta'), (await this.settings()).improvement.budget, now)
   }
 
-  /** Step 6: what the meta budget's window has spent (meta jobs, both comparison arms included). */
+  /** ADR 0012: what the user's meta budget window has spent (the user's meta jobs in every project, both comparison arms included). */
   async metaBudgetStatus(now: Date = new Date()): Promise<BudgetStatus> {
-    return budgetStatus((await listJobs(this.directory)).filter(job => job.kind === 'meta'), (await this.settings()).improvement.meta.budget, now)
+    return userMetaBudgetStatus(this.home, (await readUserConfig(this.home)).improvement.meta.budget, now)
   }
 
   /** Count signals and start a job when the batch is full. */
@@ -238,9 +249,10 @@ export class ImprovementHost {
 
   /**
    * Step 6, explicit meta improvement (`improvements.runMeta`): start a meta
-   * job now, whatever `improvement.meta.enabled` and the count; it takes the
-   * pending meta batch. `keepCopies` keeps both comparison copies (experiments).
-   * @throws `improvement/busy` when a job is running; `improvement/budget-exhausted`
+   * job in this project now, whatever the user's `improvement.meta.enabled`
+   * and the count; it takes the user's pending meta batch. `keepCopies`
+   * keeps both comparison copies (experiments).
+   * @throws `improvement/busy` when the user's meta job is running; `improvement/budget-exhausted`
    *   when the meta budget is spent; `internal` when no entry or launcher is configured.
    */
   async runMeta(input: { readonly keepCopies?: boolean } = {}, now: Date = new Date()): Promise<ImprovementJob> {
@@ -249,8 +261,8 @@ export class ImprovementHost {
     if (budget.exhausted) {
       throw new NexgentError('improvement/budget-exhausted', `the meta improvement budget is spent (${budget.used} of ${budget.limit} tokens since ${budget.windowStart})`, { details: { used: budget.used, limit: budget.limit } })
     }
-    const parent = await (this.#config.improvers ?? PROJECT_IMPROVERS).current(this.layout)
-    const job = await startExplicitMetaJob(this.directory, { parentVersion: parent.version, ...(input.keepCopies === undefined ? {} : { keepCopies: input.keepCopies }) }, now)
+    const parent = await this.#improvers().current(this.layout)
+    const job = await startExplicitUserMetaJob(this.home, this.layout, { parentVersion: parent.version, ...(input.keepCopies === undefined ? {} : { keepCopies: input.keepCopies }) }, now)
     this.#launch(job.id)
     return job
   }
@@ -293,6 +305,7 @@ export class ImprovementHost {
       await rm(jobPaths(this.directory, job.id).lock, { force: true })
     }
     await reconcileQueue(this.directory, now)
+    await reconcileUserQueue(this.home, now).catch(() => undefined)
     return marked
   }
 
@@ -312,7 +325,7 @@ export class ImprovementHost {
     for (const job of waiting) {
       const candidate = await readCandidate(this.layout.capabilities, job.candidateId!).catch(() => undefined)
       if (candidate === undefined) continue
-      const improver = await (this.#config.improvers ?? PROJECT_IMPROVERS).load(this.layout, jobImproverVersion(job)).catch(() => undefined)
+      const improver = await pinnedSource(job, this.#improvers(), this.#config.improvers !== undefined).load(this.layout, jobImproverVersion(job)).catch(() => undefined)
       const selection = improver === undefined ? settings.selectionCases : trialComparison(settings, improver).selectionCases
       if (buildReplaySet(cases, candidate.taskId, { selection, guard: settings.guardCases }).status !== 'ready') continue
       if (!(await retakeSlot(this.directory, job.id, now))) break
@@ -331,6 +344,10 @@ export class ImprovementHost {
   /** Wait until every job process this host started has exited. */
   async settled(): Promise<void> {
     await Promise.all([...this.#started.values()].map(job => job.exited))
+  }
+
+  #improvers(): ImproverSource {
+    return this.#config.improvers ?? userImprovers(this.home)
   }
 
   #launch(jobId: string): StartedJob {
@@ -353,7 +370,8 @@ export class ImprovementHost {
         detached: true,
         stdio: ['ignore', log, log],
         // Under Electron `process.execPath` is the app binary: run it as plain Node.
-        env: { ...process.env, ...this.#config.env, ...(process.versions.electron === undefined ? {} : { ELECTRON_RUN_AS_NODE: '1' }) },
+        // The job reads the same Nexgent home (the user's improvers, meta queue and config).
+        env: { ...process.env, ...(this.#config.home === undefined ? {} : { NEXGENT_HOME: this.home }), ...this.#config.env, ...(process.versions.electron === undefined ? {} : { ELECTRON_RUN_AS_NODE: '1' }) },
         windowsHide: true,
       })
     } finally {

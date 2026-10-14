@@ -15,12 +15,22 @@
  *   stored with the project's `ImproverStore` (written once) and the change
  *   recorded in `<jobId>/change.json`.
  *
+ * ADR 0012: a meta job reads the projects of its batch ({@link MetaProject},
+ * `metaProjects`): `improve_list_jobs` lists their jobs (one project with
+ * `projectId`), `improve_read_job` finds a job in them, `improve_read_session`
+ * and `improve_read_ledger` need the `projectId`; any other project is
+ * refused in the tool result. The child improver is stored in the user's
+ * line (below the Nexgent home), and a change whose text carries a concrete
+ * value of the batch's tasks is refused (`instance-literal`, ADR 0012
+ * decision 5).
+ *
  * Handlers read through the host; nothing writes project files.
  */
 import { open, readFile } from 'node:fs/promises'
 import {
   checkImproverChange,
   EVALUATOR_FIELDS,
+  findInstanceLiterals,
   IMPROVE_LIST_JOBS_TOOL,
   IMPROVE_PROPOSE_CHANGE_TOOL,
   IMPROVE_READ_IMPROVER_TOOL,
@@ -29,7 +39,10 @@ import {
   IMPROVER_CHANGE_OPS,
   IMPROVER_LIMITS,
   IMPROVER_PARAM_BOUNDS,
+  improverChangeTexts,
   isFinalImprovementStatus,
+  META_READ_LEDGER_TOOL,
+  META_READ_SESSION_TOOL,
   REPLAY_SELECTIONS,
   type CapabilityDecision,
   type ImproverBundle,
@@ -39,22 +52,27 @@ import {
   type MetaDiagnosis,
   type MetaDiagnosisReport,
   type Tool,
+  type ToolOutput,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { CapabilityStore, improversDir, ImproverStore, readCandidate } from '@nexgent/capabilities'
+import { CapabilityStore, ImproverStore, readCandidate } from '@nexgent/capabilities'
 import { validateImprovementFile } from '@nexgent/session'
 import { readLedgerTool, readSessionTool, sliceLines, toolDefinition } from './diagnosis.js'
 import type { PinnedImprover } from './improver.js'
-import { jobPaths, listJobs, readJob } from './jobs.js'
+import { jobPaths, readJob } from './jobs.js'
+import { literalEvidence, type LiteralEvidence } from './literals.js'
 import { improvementsDir } from './paths.js'
 import type { ImprovementJob } from './types.js'
+import { homeOf, metaProjects, projectJobs, userImproversDir, type MetaProject, type ProjectJob } from './user.js'
 
 const DESCRIPTIONS: Record<string, string> = {
-  [IMPROVE_LIST_JOBS_TOOL.name]: 'List the improvement jobs of this project, one JSON line each: id, kind, status, trigger, improver version, diagnosed component kind, candidate, gate decision and tokens spent. Narrow by statuses; limit keeps the newest.',
-  [IMPROVE_READ_JOB_TOOL.name]: 'Read one improvement job: its record, its diagnosis, its candidate\'s summary and the gate\'s verdict (meta jobs: their meta diagnosis, change and comparison).',
+  [IMPROVE_LIST_JOBS_TOOL.name]: 'List the improvement jobs of this meta job\'s projects (one project with projectId), one JSON line each: project id, id, kind, status, trigger, improver version, diagnosed component kind, candidate, gate decision and tokens spent. Narrow by statuses; limit keeps the newest.',
+  [IMPROVE_READ_JOB_TOOL.name]: 'Read one improvement job: its record, its diagnosis, its candidate\'s summary and the gate\'s verdict (meta jobs: their meta diagnosis, change and comparison). projectId may be left out; the job is then looked up in every project of this meta job.',
+  [META_READ_SESSION_TOOL.name]: 'Read a slice of one session of a project of this meta job (projectId as improve_list_jobs shows it): its records by turn range and record type.',
+  [META_READ_LEDGER_TOOL.name]: 'Read a slice of the ledger of a project of this meta job (projectId as improve_list_jobs shows it), narrowed by task, session, member, capability version or record types.',
   [IMPROVE_REPORT_META_DIAGNOSIS_TOOL.name]: `Submit the meta diagnosis: findings (stage diagnose / propose / trial / other, a label, the job ids that show it), one hypothesis sentence about the improver, and proposal "change" or "none". The host checks it; at most ${IMPROVER_LIMITS.maxMetaDiagnosisAttempts} reports in total.`,
   [IMPROVE_READ_IMPROVER_TOOL.name]: 'Read the improver this meta job improves (the parent): its diagnosis policy paragraphs, its proposal kinds and briefs, its comparison parameters, and the change operators with their bounds.',
-  [IMPROVE_PROPOSE_CHANGE_TOOL.name]: `Propose exactly one change to the improver and why. The host checks it (one operator, within bounds, no evaluator field, a valid improver that differs from the parent) and says what to fix; at most ${IMPROVER_LIMITS.maxChangeAttempts} proposals in total.`,
+  [IMPROVE_PROPOSE_CHANGE_TOOL.name]: `Propose exactly one change to the improver and why. The host checks it (one operator, within bounds, no evaluator field, a valid improver that differs from the parent, no concrete value of the tasks it was learned from) and says what to fix; at most ${IMPROVER_LIMITS.maxChangeAttempts} proposals in total.`,
 }
 
 const definition = (spec: Parameters<typeof toolDefinition>[0]) => toolDefinition(spec, DESCRIPTIONS[spec.name])
@@ -88,8 +106,9 @@ function tokensOf(job: ImprovementJob): number {
 }
 
 /** One line of `improve_list_jobs`. */
-function summary(job: ImprovementJob): Record<string, unknown> {
+function summary(projectId: string, job: ImprovementJob): Record<string, unknown> {
   return {
+    projectId,
     id: job.id,
     kind: job.kind ?? 'capability',
     status: job.status,
@@ -136,20 +155,70 @@ async function jobDetail(layout: WorkspaceLayout, jobId: string): Promise<Record
   return out
 }
 
-function readJobTool(layout: WorkspaceLayout): Tool {
+/** The projects a meta session may read, resolved once. */
+type Projects = () => Promise<readonly MetaProject[]>
+
+function projectsOf(layout: WorkspaceLayout, job: ImprovementJob, given: readonly MetaProject[] | undefined): Projects {
+  let resolved: Promise<readonly MetaProject[]> | undefined
+  return () => (resolved ??= given === undefined ? metaProjects(layout, job) : Promise.resolve(given))
+}
+
+/** The project a tool call names, or the refusal to return. */
+async function projectNamed(projects: Projects, projectId: string): Promise<MetaProject | ToolOutput> {
+  const all = await projects()
+  const found = all.find(project => project.projectId === projectId)
+  if (found !== undefined) return found
+  return { content: `Project ${projectId} is not one of this meta job's projects (${all.map(project => project.projectId).join(', ') || 'none'}).`, isError: true }
+}
+
+function isProject(value: MetaProject | ToolOutput): value is MetaProject {
+  return 'layout' in value
+}
+
+function readJobTool(projects: Projects): Tool {
   return {
     definition: definition(IMPROVE_READ_JOB_TOOL),
     async handler(raw) {
-      const { jobId } = raw as { jobId: string }
-      const detail = await jobDetail(layout, jobId)
-      if (detail === undefined) return { content: `No improvement job ${jobId} in this project.`, isError: true }
-      const slice = sliceLines([detail])
-      return { content: slice.text, meta: { truncated: slice.truncated } }
+      const { jobId, projectId } = raw as { jobId: string; projectId?: string }
+      let searched: readonly MetaProject[]
+      if (projectId === undefined) searched = await projects()
+      else {
+        const named = await projectNamed(projects, projectId)
+        if (!isProject(named)) return named
+        searched = [named]
+      }
+      for (const project of searched) {
+        const detail = await jobDetail(project.layout, jobId)
+        if (detail === undefined) continue
+        const slice = sliceLines([{ projectId: project.projectId, ...detail }])
+        return { content: slice.text, meta: { truncated: slice.truncated } }
+      }
+      return { content: `No improvement job ${jobId} in ${projectId === undefined ? 'this meta job\'s projects' : `project ${projectId}`}.`, isError: true }
     },
   }
 }
 
-/** Final-status counts of the project's finished capability jobs (the host's, never the model's). */
+/** A project-scoped copy of a single-project read tool (`projectId` required). */
+function scopedReadTool(spec: typeof META_READ_SESSION_TOOL, projects: Projects, inner: (layout: WorkspaceLayout) => Tool): Tool {
+  return {
+    definition: definition(spec),
+    async handler(raw, context) {
+      const { projectId, ...rest } = raw as { projectId: string }
+      const named = await projectNamed(projects, projectId)
+      if (!isProject(named)) return named
+      return inner(named.layout).handler(rest, context)
+    },
+  }
+}
+
+/** The finished capability jobs of the batch (every finished capability job of the projects when the batch is empty). */
+function batchJobs(job: ImprovementJob, jobs: readonly ProjectJob[]): ProjectJob[] {
+  const batch = job.meta?.batch ?? []
+  if (batch.length > 0) return jobs.filter(item => batch.some(entry => entry.projectId === item.project.projectId && entry.jobId === item.job.id))
+  return jobs.filter(item => item.job.kind !== 'meta' && item.job.arm === undefined && isFinalImprovementStatus(item.job.status))
+}
+
+/** Final-status counts of the finished capability jobs given (the host's, never the model's). */
 export function finishedStatusCounts(jobs: readonly ImprovementJob[]): Partial<Record<ImprovementStatus, number>> {
   const counts: Partial<Record<ImprovementStatus, number>> = {}
   for (const job of jobs) {
@@ -168,7 +237,10 @@ export interface MetaDiagnosisState {
 
 /** What {@link metaDiagnosisTools} needs. */
 export interface MetaDiagnosisToolsInput {
+  /** The project hosting the meta job. */
   readonly layout: WorkspaceLayout
+  /** The projects it may read (default `metaProjects`: its batch's, or its own). */
+  readonly projects?: readonly MetaProject[]
   /** The meta job. */
   readonly job: ImprovementJob
   readonly sessionId: string
@@ -185,7 +257,7 @@ function reportProblems(report: MetaDiagnosisReport, known: ReadonlySet<string>)
   report.findings.forEach((finding, index) => {
     if (finding.label.length > IMPROVER_LIMITS.maxLabelChars) problems.push(`findings[${index}].label: at most ${IMPROVER_LIMITS.maxLabelChars} characters`)
     if (finding.jobIds.length === 0 || finding.jobIds.length > IMPROVER_LIMITS.maxFindingJobs) problems.push(`findings[${index}].jobIds: 1 to ${IMPROVER_LIMITS.maxFindingJobs} job ids`)
-    for (const jobId of finding.jobIds) if (!known.has(jobId)) problems.push(`findings[${index}].jobIds: no improvement job ${jobId} in this project`)
+    for (const jobId of finding.jobIds) if (!known.has(jobId)) problems.push(`findings[${index}].jobIds: no improvement job ${jobId} in this meta job's projects`)
   })
   if (report.hypothesis.length > IMPROVER_LIMITS.maxHypothesisChars) problems.push(`hypothesis: at most ${IMPROVER_LIMITS.maxHypothesisChars} characters`)
   return problems
@@ -196,21 +268,28 @@ export function metaDiagnosisTools(input: MetaDiagnosisToolsInput): Tool[] {
   const now = input.now ?? (() => new Date())
   const max = IMPROVER_LIMITS.maxMetaDiagnosisAttempts
   const directory = improvementsDir(input.layout)
+  const projects = projectsOf(input.layout, input.job, input.projects)
+  const others = async () => (await projectJobs(await projects())).filter(item => item.job.id !== input.job.id)
   return [
     {
       definition: definition(IMPROVE_LIST_JOBS_TOOL),
       async handler(raw) {
-        const args = raw as { statuses?: string[]; limit?: number }
-        let jobs = (await listJobs(directory)).filter(job => job.id !== input.job.id)
-        if (args.statuses !== undefined) jobs = jobs.filter(job => args.statuses!.includes(job.status))
+        const args = raw as { projectId?: string; statuses?: string[]; limit?: number }
+        let jobs = await others()
+        if (args.projectId !== undefined) {
+          const named = await projectNamed(projects, args.projectId)
+          if (!isProject(named)) return named
+          jobs = jobs.filter(item => item.project.projectId === named.projectId)
+        }
+        if (args.statuses !== undefined) jobs = jobs.filter(item => args.statuses!.includes(item.job.status))
         jobs = jobs.slice(-(args.limit ?? 50))
-        const slice = sliceLines(jobs.map(summary))
+        const slice = sliceLines(jobs.map(item => summary(item.project.projectId, item.job)))
         return { content: slice.text === '' ? '(no jobs)' : slice.text, meta: { jobs: slice.count, truncated: slice.truncated } }
       },
     },
-    readJobTool(input.layout),
-    readSessionTool(input.layout),
-    readLedgerTool(input.layout),
+    readJobTool(projects),
+    scopedReadTool(META_READ_SESSION_TOOL, projects, readSessionTool),
+    scopedReadTool(META_READ_LEDGER_TOOL, projects, readLedgerTool),
     {
       definition: definition(IMPROVE_REPORT_META_DIAGNOSIS_TOOL),
       async handler(raw) {
@@ -218,7 +297,7 @@ export function metaDiagnosisTools(input: MetaDiagnosisToolsInput): Tool[] {
         if (state.accepted !== undefined) return { content: 'The meta diagnosis was already accepted; nothing more to do. End your turn.' }
         if (state.attempts >= max) return { content: `No reports are left (${max} used); the meta job ends without a diagnosis.`, isError: true }
         state.attempts += 1
-        const jobs = await listJobs(directory)
+        const jobs = (await others()).map(item => item.job)
         const record = {
           formatVersion: 1 as const,
           jobId: input.job.id,
@@ -231,7 +310,7 @@ export function metaDiagnosisTools(input: MetaDiagnosisToolsInput): Tool[] {
           ...(raw as MetaDiagnosisReport),
         } as MetaDiagnosis
         const schema = validateImprovementFile('metaDiagnosis', record).map(issue => `${issue.path} ${issue.message}`)
-        const problems = schema.length > 0 ? schema : reportProblems(raw as MetaDiagnosisReport, new Set(jobs.filter(job => job.id !== input.job.id).map(job => job.id)))
+        const problems = schema.length > 0 ? schema : reportProblems(raw as MetaDiagnosisReport, new Set(jobs.map(job => job.id)))
         if (problems.length > 0) {
           state.lastProblems = problems
           const left = max - state.attempts
@@ -259,7 +338,12 @@ export interface MetaChangeState {
 
 /** What {@link metaProposeTools} needs. */
 export interface MetaProposeToolsInput {
+  /** The project hosting the meta job. */
   readonly layout: WorkspaceLayout
+  /** The projects it may read (default `metaProjects`). */
+  readonly projects?: readonly MetaProject[]
+  /** The Nexgent home whose improver line receives the child (default `NEXGENT_HOME` / `~/.nexgent`). */
+  readonly home?: string
   readonly job: ImprovementJob
   readonly sessionId: string
   /** The parent: the improver the meta job pinned. */
@@ -287,6 +371,9 @@ function improverText(improver: PinnedImprover): string {
 export function metaProposeTools(input: MetaProposeToolsInput): Tool[] {
   const now = input.now ?? (() => new Date())
   const max = IMPROVER_LIMITS.maxChangeAttempts
+  const projects = projectsOf(input.layout, input.job, input.projects)
+  let evidence: Promise<LiteralEvidence> | undefined
+  const batchEvidence = () => (evidence ??= projects().then(async all => literalEvidence(batchJobs(input.job, await projectJobs(all)), all)))
   return [
     {
       definition: definition(IMPROVE_READ_IMPROVER_TOOL),
@@ -294,7 +381,7 @@ export function metaProposeTools(input: MetaProposeToolsInput): Tool[] {
         return { content: improverText(input.improver) }
       },
     },
-    readJobTool(input.layout),
+    readJobTool(projects),
     {
       definition: definition(IMPROVE_PROPOSE_CHANGE_TOOL),
       async handler(raw) {
@@ -316,7 +403,15 @@ export function metaProposeTools(input: MetaProposeToolsInput): Tool[] {
         }
         const check = checkImproverChange(input.improver.bundle, args.change)
         if (!check.ok) return refuse([`${check.refusal}: ${check.problems.join('; ')}`])
-        const { version: childVersion } = await new ImproverStore(improversDir(input.layout)).write(check.child)
+        const texts = improverChangeTexts(check.change)
+        if (texts.length > 0) {
+          const { sources, messages } = await batchEvidence()
+          const hits = findInstanceLiterals(texts, sources, messages)
+          if (hits.length > 0) {
+            return refuse([`instance-literal: the change carries concrete values of the tasks it was learned from (${hits.map(hit => `${hit.value} in ${hit.path}, from ${hit.source}`).join('; ')}); an improver says how to diagnose and propose for any task`])
+          }
+        }
+        const { version: childVersion } = await new ImproverStore(userImproversDir(homeOf(input.home))).write(check.child)
         const record: ImproverChangeRecord = {
           formatVersion: 1,
           jobId: input.job.id,

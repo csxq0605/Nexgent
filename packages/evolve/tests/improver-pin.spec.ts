@@ -21,18 +21,22 @@ import {
   readJob,
   runImprovementJob,
   trialComparison,
+  jobPaths,
+  userImproversDir,
   type GateOutcome,
   type ImproverSource,
   type TrialStarter,
 } from '../src/index.js'
 import { callTool, feedbackTask, proposeIn, report, scriptedRunner, type FeedbackTaskFixture, type TurnScript } from './history.js'
+import { home } from './helpers.js'
 
 /**
  * Step 6 W2 part 1 (ADR 0008 decision 1): a job pins the improver in force
  * when it starts, writes the version into `job.json` and the session
  * requests, and runs on that bundle to the end; an improver adopted while it
- * runs only affects the next job. The default source is the project's
- * `ImproverStore`; the stand-in below lets a test switch versions freely.
+ * runs only affects the next job. The default source is the user's
+ * `ImproverStore` below the Nexgent home (ADR 0012); the stand-in below lets
+ * a test switch versions freely.
  */
 const CUSTOM: ImproverBundle = {
   formatVersion: 1,
@@ -101,7 +105,7 @@ describe('a job runs on the improver it pinned when it started', () => {
     const startTrial = gate('adopted')
     await runImprovementJob(fixture.layout, job.id, { stages: createImprovementStages({ runner, startTrial }) })
     const done = await readJob(improvementsDir(fixture.layout), job.id)
-    expect(done).toMatchObject({ status: 'adopted', improverVersion: 'v0' })
+    expect(done).toMatchObject({ status: 'adopted', improverVersion: 'v0', improverScope: 'user' })
     expect(validateImprovementFile('job', done)).toEqual([])
     expect(runner.opened.map(request => [request.phase, request.improverVersion])).toEqual([['diagnose', 'v0'], ['propose', 'v0']])
     expect(startTrial.comparisons).toEqual([{ selectionCases: 2, repeats: 2, selection: 'similarity' }])
@@ -109,10 +113,10 @@ describe('a job runs on the improver it pinned when it started', () => {
 
   it('an improver adopted while the job runs does not change it; the next job runs on the new one', async () => {
     const fixture = await feedbackTask()
-    const store = new ImproverStore(improversDir(fixture.layout))
+    const store = new ImproverStore(userImproversDir(home()))
     expect((await store.write(CUSTOM)).version).toBe(CUSTOM_VERSION)
     const first = await queuedJob(fixture)
-    // A meta job adopts CUSTOM (in the project's improver store) while the first job is diagnosing.
+    // A meta job adopts CUSTOM (in the user's improver store) while the first job is diagnosing.
     const adopted: Promise<unknown>[] = []
     const runner = scriptedRunner({ diagnose: reportKind(fixture, 'function-module', () => { adopted.push(store.adopt(CUSTOM_VERSION, { jobId: randomUUID() })) }), propose: proposeInCopy(fixture) })
     const startTrial = gate('adopted')
@@ -169,12 +173,34 @@ describe('a job runs on the improver it pinned when it started', () => {
     expect(startTrial.comparisons).toEqual([])
   })
 
-  it('the project\'s store heals an improver that no longer loads: the job runs on the version it falls back to', async () => {
+  it('a job pinned on a project\'s own improver before ADR 0012 resumes on it; new jobs ignore that line', async () => {
     const fixture = await feedbackTask()
-    const store = new ImproverStore(improversDir(fixture.layout))
+    const project = new ImproverStore(improversDir(fixture.layout))
+    await project.write(CUSTOM)
+    await project.adopt(CUSTOM_VERSION, { jobId: randomUUID() })
+    const job = await queuedJob(fixture)
+    const runner = scriptedRunner({ diagnose: reportKind(fixture, 'skill'), propose: proposeInCopy(fixture) })
+    await runImprovementJob(fixture.layout, job.id, { stages: createImprovementStages({ runner, startTrial: gate('waiting') }), improvers: source(CUSTOM_VERSION), chain: false })
+    // As a step-6 job would have recorded it: no scope, so the project's line.
+    const { improverScope: _scope, ...waiting } = await readJob(improvementsDir(fixture.layout), job.id)
+    await writeFile(jobPaths(improvementsDir(fixture.layout), job.id).file, `${JSON.stringify(waiting)}\n`)
+    const resumed = gate('adopted')
+    await runImprovementJob(fixture.layout, job.id, { stages: createImprovementStages({ runner: scriptedRunner({}), startTrial: resumed }), chain: false })
+    expect(await readJob(improvementsDir(fixture.layout), job.id)).toMatchObject({ status: 'adopted', improverVersion: CUSTOM_VERSION })
+    expect(resumed.comparisons).toEqual([{ selectionCases: 3, repeats: 3, selection: 'recency' }])
+
+    // The project's line is history only: a new job runs on the user's (here v0).
+    const next = await queuedJob(fixture)
+    await runImprovementJob(fixture.layout, next.id, { stages: createImprovementStages({ runner: scriptedRunner({ diagnose: reportKind(fixture, 'none') }), startTrial: gate('adopted') }), chain: false })
+    expect(await readJob(improvementsDir(fixture.layout), next.id)).toMatchObject({ status: 'no-proposal', improverVersion: 'v0', improverScope: 'user' })
+  })
+
+  it('the user\'s store heals an improver that no longer loads: the job runs on the version it falls back to', async () => {
+    const fixture = await feedbackTask()
+    const store = new ImproverStore(userImproversDir(home()))
     await store.write(CUSTOM)
     await store.adopt(CUSTOM_VERSION, { jobId: randomUUID() })
-    await writeFile(join(improversDir(fixture.layout), 'bundles', `${CUSTOM_VERSION}.json`), '{"broken": true}\n')
+    await writeFile(join(userImproversDir(home()), 'bundles', `${CUSTOM_VERSION}.json`), '{"broken": true}\n')
     const job = await queuedJob(fixture)
     const runner = scriptedRunner({ diagnose: reportKind(fixture, 'none') })
     await runImprovementJob(fixture.layout, job.id, { stages: createImprovementStages({ runner, startTrial: gate('adopted') }) })

@@ -107,10 +107,10 @@ describe('meta jobs through the SDK', () => {
     await until(() => t.events.some(event => event.type === 'improvement.job'))
     expect(t.events.find(event => event.type === 'improvement.job')).toMatchObject({ job: { id: job.id, kind: 'meta' } })
     const listing = await t.sdk.call('improvements.list', { projectId })
-    expect(listing.activeJobId).toBe(job.id)
+    // ADR 0012: a meta job holds the user's meta slot, never the project's job slot.
+    expect(listing.activeJobId).toBeUndefined()
     expect(listing.meta).toEqual({ enabled: false, pending: 0, everyJobs: 3, budget: { usedTokens: 0, maxTokens: 6_000_000, windowDays: 30 } })
     await expect(t.sdk.call('improvements.runMeta', { projectId })).rejects.toMatchObject({ code: 'improvement/busy' })
-    await expect(t.sdk.call('improvements.run', { projectId })).rejects.toMatchObject({ code: 'improvement/busy' })
   })
 
   it('a meta job shows its meta diagnosis, change and comparison; its estimate adds both arms', async () => {

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -12,8 +12,9 @@ import {
   type LedgerRecord,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { CapabilityStore, improversDir, ImproverStore, projectEpoch, writeBundle } from '@nexgent/capabilities'
-import { JsonlLedger, validateImprovementFile } from '@nexgent/session'
+import { CapabilityStore, ImproverStore, projectEpoch, writeBundle } from '@nexgent/capabilities'
+import { JsonlLedger, JsonlSessionStore, validateImprovementFile } from '@nexgent/session'
+import { LocalDeliverableStore } from '@nexgent/tasking'
 import {
   createImprovementStages,
   createJob,
@@ -21,32 +22,41 @@ import {
   improvementsDir,
   jobPaths,
   listJobs,
+  metaDiagnosisPrompt,
+  metaDiagnosisTools,
+  metaProjects,
   metaProposeTools,
   readJob,
   readQueue,
+  readUserQueue,
+  releaseUserMeta,
   runImprovementJob,
-  startExplicitMetaJob,
+  startExplicitUserMetaJob,
   transitionJob,
   updateJob,
   chooseOrigin,
   adoptedCapabilities,
+  userImproversDir,
+  userProjectId,
   type GateOutcome,
   type ImprovementSession,
   type ImprovementSessionRequest,
   type ImprovementSessionRunner,
   type MetaChangeState,
+  type MetaDiagnosisState,
   type TrialStarter,
 } from '../src/index.js'
 import { callTool, feedbackTask, proposeIn, report, type FeedbackTaskFixture } from './history.js'
-import { stagesTo, tempDir } from './helpers.js'
+import { home, stagesTo, tempDir, userConfig } from './helpers.js'
 
 /**
  * Step 6 W2 part 2 (ADR 0008 decisions 3–4): meta jobs with a scripted
  * session runner and gate. Each scripted turn writes one model request to
  * the ledger the runner was given (the real project's for comparison arms),
- * so the arms' costs are known and priced.
+ * so the arms' costs are known and priced. ADR 0012: the improver, the meta
+ * queue and the meta settings are the user's (the test's Nexgent home).
  */
-const META = { meta: { enabled: true, everyJobs: 3 } }
+const META = { enabled: true, everyJobs: 3 }
 const PRICE = (_model: string, usage: { inputTokens: number | 'unknown' }) => (usage.inputTokens === 'unknown' ? 'unknown' as const : usage.inputTokens * 1e-6)
 
 type Script = (request: ImprovementSessionRequest, index: number, text: string) => Promise<void> | void
@@ -112,7 +122,7 @@ const CHANGE = { op: 'set-comparison-param', param: 'repeats', value: 3 }
 
 /** The source job (a finished feedback job), then the meta sessions' scripts. */
 async function withSource(outcome: 'adopted' | 'rejected' = 'adopted') {
-  const fixture = await feedbackTask(true, META)
+  const fixture = await feedbackTask(true)
   const directory = improvementsDir(fixture.layout)
   const source = await createJob(directory, { trigger: 'feedback-count', items: [signal(fixture)] })
   const sourceRunner = runner({ diagnose: diagnoseKind(fixture), propose: proposeInCopy(fixture) })
@@ -122,6 +132,7 @@ async function withSource(outcome: 'adopted' | 'rejected' = 'adopted') {
     'meta-diagnose': async (request: ImprovementSessionRequest) => {
       const listed = await callTool(request, 'improve_list_jobs', {})
       expect(listed.content).toContain(source.id)
+      expect(listed.content).toContain(await userProjectId(fixture.layout.root))
       await callTool(request, 'improve_report_meta_diagnosis', { findings: [{ stage: 'trial', label: 'the gate compared too few runs to be sure', jobIds: [source.id] }], hypothesis: 'More runs per case would make the gate decide more reliably.', proposal: 'change' })
     },
     'meta-propose': async (request: ImprovementSessionRequest) => {
@@ -133,16 +144,24 @@ async function withSource(outcome: 'adopted' | 'rejected' = 'adopted') {
   return { fixture, directory, source, metaScripts }
 }
 
+/** An explicit meta job in the fixture's project (ADR 0012: the user's slot). */
+const explicitMeta = (fixture: FeedbackTaskFixture, keepCopies?: boolean) => startExplicitUserMetaJob(home(), fixture.layout, { parentVersion: 'v0', ...(keepCopies === undefined ? {} : { keepCopies }) })
+
+/** The user's improver line. */
+const userStore = () => new ImproverStore(userImproversDir(home()))
+
 async function ledgerOf(layout: WorkspaceLayout, type: LedgerRecord['type']): Promise<LedgerRecord[]> {
   const records: LedgerRecord[] = []
   for await (const record of new JsonlLedger({ ledgersDir: layout.ledgers }).read({ types: [type] })) records.push(record)
   return records
 }
 
-describe('meta jobs: counting and the trigger (ADR 0008 decision 3)', () => {
-  it('the K-th finished job starts a meta job, the (K-1)-th does not; cancelled and meta jobs are not counted', async () => {
-    const fixture = await feedbackTask(true, META)
+describe('meta jobs: counting and the trigger per user (ADR 0012 decision 3)', () => {
+  it('the K-th finished job of the user starts a meta job, the (K-1)-th does not; cancelled jobs are not counted; the project queue keeps no meta count', async () => {
+    await userConfig(META)
+    const fixture = await feedbackTask(true)
     const directory = improvementsDir(fixture.layout)
+    const projectId = await userProjectId(fixture.layout.root)
     const finished: string[] = []
     for (const end of ['rejected', 'none'] as const) {
       const job = await createJob(directory, { trigger: 'explicit', items: [] })
@@ -152,27 +171,67 @@ describe('meta jobs: counting and the trigger (ADR 0008 decision 3)', () => {
     const cancelled = await createJob(directory, { trigger: 'explicit', items: [] })
     await transitionJob(directory, cancelled.id, 'cancelled')
     expect((await listJobs(directory)).filter(job => job.kind === 'meta')).toEqual([])
-    expect((await readQueue(directory))?.metaPending).toEqual(finished)
+    expect((await readUserQueue(home()))?.pending.map(entry => [entry.projectId, entry.jobId])).toEqual(finished.map(id => [projectId, id]))
 
     const third = await createJob(directory, { trigger: 'explicit', items: [] })
     const result = await runImprovementJob(fixture.layout, third.id, { stages: stagesTo('diagnose-failed'), chain: false })
     expect(result.jobs.map(job => job.id)).toEqual([third.id])
     const [meta] = (await listJobs(directory)).filter(job => job.kind === 'meta')
-    expect(meta).toMatchObject({ kind: 'meta', trigger: 'job-count', status: 'queued', meta: { basis: [...finished, third.id], parentVersion: 'v0' } })
+    const basis = [...finished, third.id]
+    expect(meta).toMatchObject({ kind: 'meta', trigger: 'job-count', status: 'queued', meta: { basis, parentVersion: 'v0', batch: basis.map(jobId => ({ projectId, root: fixture.layout.root, jobId })) } })
     expect(validateImprovementFile('job', meta)).toEqual([])
-    const queue = await readQueue(directory)
-    expect(queue).toMatchObject({ activeJobId: meta!.id, metaPending: [], metaCounted: [...finished, third.id] })
+    const queue = await readUserQueue(home())
+    expect(validateImprovementFile('userQueue', queue)).toEqual([])
+    expect(queue).toMatchObject({ active: { projectId, jobId: meta!.id }, pending: [], counted: basis.map(id => `${projectId}:${id}`), metaJobs: [{ jobId: meta!.id, root: fixture.layout.root }] })
+    // The project's slot and step-6 meta counts are untouched: capability jobs never wait on a meta job.
+    const project = await readQueue(directory)
+    expect(project?.activeJobId).toBeUndefined()
+    expect(project?.metaPending).toBeUndefined()
   })
 
-  it('with the switch off finished jobs are still counted but no meta job starts', async () => {
-    const fixture = await feedbackTask(true)
+  it('with the user\'s switch off finished jobs are still counted but no meta job starts; the project\'s old switch is ignored', async () => {
+    const fixture = await feedbackTask(true, { meta: META })
     const directory = improvementsDir(fixture.layout)
     for (let index = 0; index < 3; index += 1) {
       const job = await createJob(directory, { trigger: 'explicit', items: [] })
       await runImprovementJob(fixture.layout, job.id, { stages: stagesTo('rejected'), chain: false })
     }
     expect((await listJobs(directory)).some(job => job.kind === 'meta')).toBe(false)
-    expect((await readQueue(directory))?.metaPending).toHaveLength(3)
+    expect((await readUserQueue(home()))?.pending).toHaveLength(3)
+  })
+
+  it('jobs of two projects add up; the meta job lives in the project whose job completed the batch, and this process runs it next', async () => {
+    await userConfig(META)
+    const first = await feedbackTask(true)
+    const second = await feedbackTask(true)
+    for (const fixture of [first, second]) {
+      const job = await createJob(improvementsDir(fixture.layout), { trigger: 'explicit', items: [] })
+      await runImprovementJob(fixture.layout, job.id, { stages: stagesTo('rejected'), chain: false })
+    }
+    const last = await createJob(improvementsDir(first.layout), { trigger: 'explicit', items: [] })
+    // With chaining on, the process runs the meta job it started (it fails: these stages have no meta phases).
+    const result = await runImprovementJob(first.layout, last.id, { stages: stagesTo('rejected') })
+    expect(result.jobs.map(job => job.kind ?? 'capability')).toEqual(['capability', 'meta'])
+    const meta = result.jobs[1]!
+    expect(meta).toMatchObject({ status: 'failed' })
+    expect((await listJobs(improvementsDir(second.layout))).some(job => job.kind === 'meta')).toBe(false)
+    const ids = [await userProjectId(first.layout.root), await userProjectId(second.layout.root), await userProjectId(first.layout.root)]
+    expect((await readJob(improvementsDir(first.layout), meta.id)).meta?.batch?.map(entry => entry.projectId)).toEqual(ids)
+    // Its end freed the user's slot.
+    expect((await readUserQueue(home()))?.active).toBeUndefined()
+  })
+
+  it('a project with shareImproverEvidence off is not counted', async () => {
+    await userConfig(META)
+    const shared = await feedbackTask(true)
+    const private_ = await feedbackTask(true, { shareImproverEvidence: false })
+    for (const fixture of [private_, private_, shared]) {
+      const job = await createJob(improvementsDir(fixture.layout), { trigger: 'explicit', items: [] })
+      await runImprovementJob(fixture.layout, job.id, { stages: stagesTo('rejected'), chain: false })
+    }
+    const queue = await readUserQueue(home())
+    expect(queue?.pending.map(entry => entry.projectId)).toEqual([await userProjectId(shared.layout.root)])
+    expect(queue?.active).toBeUndefined()
   })
 })
 
@@ -180,7 +239,7 @@ describe('a meta job end to end (scripted)', () => {
   it('diagnoses, proposes one change, runs both arms in copies, adopts the child whose offspring passed the gate, and the next real job runs on it', async () => {
     const { fixture, directory, source, metaScripts } = await withSource()
     const copies = await tempDir()
-    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0' })
+    const meta = await explicitMeta(fixture)
     const scripted = runner({
       ...metaScripts,
       'parent:diagnose': diagnoseKind(fixture),
@@ -192,14 +251,15 @@ describe('a meta job end to end (scripted)', () => {
     await runImprovementJob(fixture.layout, meta.id, { stages: createImprovementStages({ runner: scripted, startTrial, tempRoot: copies, priceUsd: PRICE }), chain: false })
 
     const done = await readJob(directory, meta.id)
-    const store = new ImproverStore(improversDir(fixture.layout))
+    const store = userStore()
     const childVersion = done.meta?.childVersion
     expect(childVersion).toMatch(/^[a-f0-9]{64}$/)
-    expect(done).toMatchObject({ status: 'adopted', kind: 'meta', improverVersion: 'v0', meta: { parentVersion: 'v0', diagnosed: { proposal: 'change', attempts: 1 }, compared: { outcome: 'adopt', reason: 'gate-passed' }, revision: 1 } })
+    expect(done).toMatchObject({ status: 'adopted', kind: 'meta', improverVersion: 'v0', improverScope: 'user', meta: { parentVersion: 'v0', diagnosed: { proposal: 'change', attempts: 1 }, compared: { outcome: 'adopt', reason: 'gate-passed' }, revision: 1 } })
     expect(validateImprovementFile('job', done)).toEqual([])
     expect(Object.keys(done.phases).sort()).toEqual(['compare', 'meta-diagnose', 'meta-propose'])
     expect((await store.activation()).version).toBe(childVersion)
-    expect((await store.chain()).revisions.at(-1)).toMatchObject({ type: 'adopt', trigger: 'meta-job', jobId: meta.id, version: childVersion })
+    // The arms adopted nothing in the user's line: the one revision is the meta job's.
+    expect((await store.chain()).revisions).toEqual([expect.objectContaining({ type: 'adopt', trigger: 'meta-job', jobId: meta.id, version: childVersion })])
 
     // The two meta sessions were opened on the real project with exactly their tools; the arms in their copies, attributed to the meta job.
     const phases = scripted.opened.map(request => `${request.comparisonArm ?? 'real'}:${request.phase}`)
@@ -225,7 +285,7 @@ describe('a meta job end to end (scripted)', () => {
     const comparison = JSON.parse(await readFile(paths.comparison, 'utf8')) as ImproverComparison
     expect(validateImprovementFile('comparison', comparison)).toEqual([])
     // The source job was adopted (solved), so the origin is its feedback task on the version that task ran on (ADR 0009).
-    expect(comparison.origin).toMatchObject({ kind: 'feedback-version', sourceJobId: source.id, feedbackIds: [fixture.feedback.id], capabilityVersion: 'baseline' })
+    expect(comparison.origin).toMatchObject({ kind: 'feedback-version', sourceJobId: source.id, feedbackIds: [fixture.feedback.id], capabilityVersion: 'baseline', projectId: await userProjectId(fixture.layout.root) })
     expect(await readFile(jobPaths(directory, meta.id).log, 'utf8')).toContain('compare: feedback-version origin')
     expect(comparison.parent.origin).toEqual(comparison.origin)
     expect(comparison.child.origin).toEqual(comparison.origin)
@@ -246,7 +306,10 @@ describe('a meta job end to end (scripted)', () => {
     expect(armRequests.map(record => record.comparisonArm)).toEqual(['parent', 'parent', 'child', 'child'])
     expect(done.phases.compare?.requestCount).toBe(4)
     const ends = (await ledgerOf(fixture.layout, 'improvement.end')).filter(record => record.type === 'improvement.end' && record.jobId === meta.id)
-    expect(ends).toEqual([expect.objectContaining({ kind: 'meta', status: 'adopted', childVersion, improverVersion: 'v0' })])
+    expect(ends).toEqual([expect.objectContaining({ kind: 'meta', status: 'adopted', childVersion, improverVersion: 'v0', improverScope: 'user' })])
+    // The arms were never counted in the user's queue, and the meta job freed the user's slot.
+    expect(await readUserQueue(home())).toMatchObject({ pending: [], counted: [`${await userProjectId(fixture.layout.root)}:${source.id}`] })
+    expect((await readUserQueue(home()))?.active).toBeUndefined()
 
     // The next real job pins the child.
     const next = await createJob(directory, { trigger: 'explicit', items: [signal(fixture)] })
@@ -259,12 +322,12 @@ describe('a meta job end to end (scripted)', () => {
   it('a child without offspring is not adopted (no-offspring), and keepCopies keeps both copies', async () => {
     const { fixture, directory, metaScripts } = await withSource()
     const copies = await tempDir()
-    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0', keepCopies: true })
+    const meta = await explicitMeta(fixture, true)
     const scripted = runner({ ...metaScripts, 'parent:diagnose': diagnoseKind(fixture), 'parent:propose': proposeInCopy(fixture), 'child:diagnose': diagnoseKind(fixture) })
     await runImprovementJob(fixture.layout, meta.id, { stages: createImprovementStages({ runner: scripted, startTrial: gate({ parent: 'adopted', child: 'adopted' }), tempRoot: copies, priceUsd: PRICE }), chain: false })
     const done = await readJob(directory, meta.id)
     expect(done).toMatchObject({ status: 'rejected', meta: { compared: { outcome: 'reject', reason: 'no-offspring' } } })
-    expect((await new ImproverStore(improversDir(fixture.layout)).activation()).version).toBe('v0')
+    expect((await userStore().activation()).version).toBe('v0')
     const comparison = JSON.parse(await readFile(jobPaths(directory, meta.id).comparison, 'utf8')) as ImproverComparison
     expect(comparison.child).toMatchObject({ status: 'failed' })
     expect(comparison.child.candidateId).toBeUndefined()
@@ -283,7 +346,7 @@ describe('a meta job end to end (scripted)', () => {
   it('without a price table every arm cost is unknown, so nothing is adopted (unknown-arm); copies too large to keep are removed', async () => {
     const { fixture, directory, metaScripts } = await withSource()
     const copies = await tempDir()
-    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0', keepCopies: true })
+    const meta = await explicitMeta(fixture, true)
     const scripted = runner({ ...metaScripts, 'parent:diagnose': diagnoseKind(fixture), 'parent:propose': proposeInCopy(fixture), 'child:diagnose': diagnoseKind(fixture), 'child:propose': proposeInCopy(fixture) })
     await runImprovementJob(fixture.layout, meta.id, { stages: createImprovementStages({ runner: scripted, startTrial: gate({ parent: 'rejected', child: 'adopted' }), tempRoot: copies, keepMaxBytes: 1 }), chain: false })
     expect(await readJob(directory, meta.id)).toMatchObject({ status: 'rejected', meta: { compared: { reason: 'unknown-arm' } } })
@@ -295,12 +358,13 @@ describe('a meta job end to end (scripted)', () => {
 
   it('a meta diagnosis of none ends no-proposal without a proposal or comparison', async () => {
     const { fixture, directory, source } = await withSource()
-    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0' })
+    const meta = await explicitMeta(fixture)
     const scripted = runner({
       'meta-diagnose': async request => {
         const refused = await callTool(request, 'improve_report_meta_diagnosis', { findings: [{ stage: 'trial', label: 'x', jobIds: [randomUUID()] }], hypothesis: 'h', proposal: 'change' })
         expect(refused).toMatchObject({ isError: true })
         expect(refused.content).toContain('no improvement job')
+        expect(refused.content).toContain('this meta job\'s projects')
         await callTool(request, 'improve_report_meta_diagnosis', { findings: [{ stage: 'other', label: 'taste', jobIds: [source.id] }], hypothesis: 'The feedback was about taste.', proposal: 'none' })
       },
     })
@@ -309,14 +373,15 @@ describe('a meta job end to end (scripted)', () => {
     expect(scripted.opened).toHaveLength(1)
   })
 
-  it('stops at once when the meta budget is spent, and leaves the improvement budget alone', async () => {
-    const fixture = await feedbackTask(true, { meta: { enabled: true, everyJobs: 3, budget: { maxTokens: 100, windowDays: 30 } } })
+  it('stops at once when the user\'s meta budget is spent, whichever project spent it, and leaves the improvement budget alone', async () => {
+    await userConfig({ enabled: true, everyJobs: 3, budget: { maxTokens: 100, windowDays: 30 } })
+    const other = await feedbackTask(true)
+    const fixture = await feedbackTask(true)
     const directory = improvementsDir(fixture.layout)
-    const spent = await startExplicitMetaJob(directory, { parentVersion: 'v0' })
-    await transitionJob(directory, spent.id, 'failed', { patch: { phases: { 'meta-diagnose': { usage: { ...ZERO_USAGE, inputTokens: 500, totalTokens: 500 }, requestCount: 1 } } } })
-    const { releaseSlot } = await import('../src/queue.js')
-    await releaseSlot(directory, spent.id, { autoStart: false })
-    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0' })
+    const spent = await explicitMeta(other)
+    await transitionJob(improvementsDir(other.layout), spent.id, 'failed', { patch: { phases: { 'meta-diagnose': { usage: { ...ZERO_USAGE, inputTokens: 500, totalTokens: 500 }, requestCount: 1 } } } })
+    await releaseUserMeta(home(), spent.id)
+    const meta = await explicitMeta(fixture)
     const scripted = runner({})
     await runImprovementJob(fixture.layout, meta.id, { stages: createImprovementStages({ runner: scripted, startTrial: gate({}) }), chain: false })
     expect(await readJob(directory, meta.id)).toMatchObject({ status: 'budget-exhausted' })
@@ -327,26 +392,28 @@ describe('a meta job end to end (scripted)', () => {
     await expect(host.runMeta()).rejects.toMatchObject({ code: 'improvement/budget-exhausted' })
   })
 
-  it('a meta job whose process was killed is marked interrupted on the next start and not re-run', async () => {
-    const fixture = await feedbackTask(true, META)
+  it('one meta job runs at a time for the user; one whose process was killed is marked interrupted on the next start, frees the slot and is not re-run', async () => {
+    const fixture = await feedbackTask(true)
+    const other = await feedbackTask(true)
     const directory = improvementsDir(fixture.layout)
-    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0' })
+    const meta = await explicitMeta(fixture)
+    await expect(explicitMeta(other)).rejects.toMatchObject({ code: 'improvement/busy' })
     await transitionJob(directory, meta.id, 'meta-diagnosing')
     await writeFile(jobPaths(directory, meta.id).lock, '999999999\n')
     const host = new ImprovementHost(fixture.layout, {})
     const [marked] = await host.recover()
     expect(marked).toMatchObject({ id: meta.id, kind: 'meta', status: 'interrupted' })
-    expect((await readQueue(directory))?.activeJobId).toBeUndefined()
+    expect((await readUserQueue(home()))?.active).toBeUndefined()
+    await expect(explicitMeta(other)).resolves.toMatchObject({ kind: 'meta' })
     const again = await runImprovementJob(fixture.layout, meta.id, { stages: createImprovementStages({ runner: runner({}), startTrial: gate({}) }), chain: false })
     expect(again.skipped).toContain('interrupted')
   })
 })
 
 describe('the meta-propose tools', () => {
-  it('refuse more than one change, evaluator fields and out-of-bounds values; accept one change and store the child', async () => {
-    const fixture = await feedbackTask(true, META)
-    const directory = improvementsDir(fixture.layout)
-    const job = await startExplicitMetaJob(directory, { parentVersion: 'v0' })
+  it('refuse more than one change, evaluator fields and out-of-bounds values; accept one change and store the child in the user\'s line', async () => {
+    const fixture = await feedbackTask(true)
+    const job = await explicitMeta(fixture)
     const state: MetaChangeState = { attempts: 0 }
     const sessionId = randomUUID()
     const tools = metaProposeTools({ layout: fixture.layout, job, sessionId, improver: { version: 'v0', bundle: IMPROVER_V0 }, state })
@@ -363,8 +430,8 @@ describe('the meta-propose tools', () => {
     const accepted = await again.handler({ change: { op: 'set-proposal-kinds', kinds: ['skill', 'function-module'] }, rationale: 'Fewer kinds.' }, {} as never)
     expect(accepted.isError).toBeUndefined()
     const childVersion = fresh.accepted!.childVersion
-    expect((await new ImproverStore(improversDir(fixture.layout)).load(childVersion)).proposal.kinds).toEqual(['skill', 'function-module'])
-    expect((await new ImproverStore(improversDir(fixture.layout)).activation()).version).toBe('v0')
+    expect((await userStore().load(childVersion)).proposal.kinds).toEqual(['skill', 'function-module'])
+    expect((await userStore().activation()).version).toBe('v0')
   })
 })
 
@@ -388,10 +455,11 @@ describe('the comparison origin (ADR 0009, ADR 0010)', () => {
     return decision.id
   }
 
-  const metaJob = async (fixture: FeedbackTaskFixture) => startExplicitMetaJob(improvementsDir(fixture.layout), { parentVersion: 'v0' })
+  // A meta job record only (its creation time bounds the origin search).
+  const metaJob = async (fixture: FeedbackTaskFixture) => createJob(improvementsDir(fixture.layout), { trigger: 'explicit', items: [], kind: 'meta', meta: { basis: [], parentVersion: 'v0' } })
 
   it('takes a job that did not solve its feedback over a later solved one; an adoption between its task and its start puts the arms on the task\'s version', async () => {
-    const fixture = await feedbackTask(true, META, FEEDBACK_TIME)
+    const fixture = await feedbackTask(true, undefined, FEEDBACK_TIME)
     const unresolved = await finishedJob(fixture, 'rejected', { baseVersion: STARTED_ON })
     await finishedJob(fixture, 'adopted', { baseVersion: STARTED_ON })
     const choice = await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture))
@@ -399,7 +467,7 @@ describe('the comparison origin (ADR 0009, ADR 0010)', () => {
   })
 
   it('an unresolved job whose task ran on the version it started on starts the arms there', async () => {
-    const fixture = await feedbackTask(true, META, STARTED_ON)
+    const fixture = await feedbackTask(true, undefined, STARTED_ON)
     const unresolved = await finishedJob(fixture, 'rejected', { baseVersion: STARTED_ON })
     const choice = await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture))
     expect(choice).toMatchObject({ kind: 'unresolved', job: { id: unresolved.id }, capabilityVersion: STARTED_ON, startedOn: STARTED_ON })
@@ -407,7 +475,7 @@ describe('the comparison origin (ADR 0009, ADR 0010)', () => {
 
   it('counts no-proposal and failed jobs as unresolved; without a recorded start version reads the version in force when the job started', async () => {
     for (const end of ['none', 'diagnose-failed'] as const) {
-      const fixture = await feedbackTask(true, META, FEEDBACK_TIME)
+      const fixture = await feedbackTask(true, undefined, FEEDBACK_TIME)
       const job = await finishedJob(fixture, end)
       expect(job.baseVersion).toBeUndefined()
       const choice = await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture))
@@ -417,19 +485,19 @@ describe('the comparison origin (ADR 0009, ADR 0010)', () => {
   })
 
   it('skips a job rejected because the baseline already passed every feedback check, falling back to the feedback task\'s own version', async () => {
-    const partlyFixture = await feedbackTask(true, META, FEEDBACK_TIME)
+    const partlyFixture = await feedbackTask(true, undefined, FEEDBACK_TIME)
     const partly = await finishedJob(partlyFixture, 'rejected', { baseVersion: STARTED_ON, decisionId: await baselinePassedDecision(partlyFixture, 0.5) })
     expect(await chooseOrigin(partlyFixture.layout, await listJobs(improvementsDir(partlyFixture.layout)), await metaJob(partlyFixture)))
       .toMatchObject({ kind: 'unresolved', job: { id: partly.id }, capabilityVersion: FEEDBACK_TIME })
 
-    const fixture = await feedbackTask(true, META, FEEDBACK_TIME)
+    const fixture = await feedbackTask(true, undefined, FEEDBACK_TIME)
     const solvedBefore = await finishedJob(fixture, 'rejected', { baseVersion: STARTED_ON, decisionId: await baselinePassedDecision(fixture, 1) })
     expect(await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture)))
       .toMatchObject({ kind: 'feedback-version', job: { id: solvedBefore.id }, capabilityVersion: FEEDBACK_TIME })
   })
 
   it('with only solved jobs replays the latest on the version its feedback task ran on, not the one the job started on', async () => {
-    const fixture = await feedbackTask(true, META, FEEDBACK_TIME)
+    const fixture = await feedbackTask(true, undefined, FEEDBACK_TIME)
     await finishedJob(fixture, 'adopted', { baseVersion: STARTED_ON })
     const latest = await finishedJob(fixture, 'adopted', { baseVersion: STARTED_ON })
     const choice = await chooseOrigin(fixture.layout, await listJobs(improvementsDir(fixture.layout)), await metaJob(fixture))
@@ -437,13 +505,13 @@ describe('the comparison origin (ADR 0009, ADR 0010)', () => {
   })
 
   it('without a finished feedback job there is no origin', async () => {
-    const fixture = await feedbackTask(true, META)
+    const fixture = await feedbackTask(true)
     expect(await chooseOrigin(fixture.layout, [], await metaJob(fixture))).toBeUndefined()
   })
 
   it('a meta job compares on an unresolved origin end to end and records its kind', async () => {
     const { fixture, directory, source, metaScripts } = await withSource('rejected')
-    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0' })
+    const meta = await explicitMeta(fixture)
     const scripted = runner({ ...metaScripts, 'parent:diagnose': diagnoseKind(fixture), 'parent:propose': proposeInCopy(fixture), 'child:diagnose': diagnoseKind(fixture), 'child:propose': proposeInCopy(fixture) })
     await runImprovementJob(fixture.layout, meta.id, { stages: createImprovementStages({ runner: scripted, startTrial: gate({ parent: 'rejected', child: 'adopted' }), tempRoot: await tempDir(), priceUsd: PRICE }), chain: false })
     const comparison = JSON.parse(await readFile(jobPaths(directory, meta.id).comparison, 'utf8')) as ImproverComparison
@@ -484,7 +552,7 @@ describe('adopted components in the diagnosis, and arms on the task\'s version (
   })
 
   it('a job that started after an adoption its task did not have: both arms start on the task\'s version, reach the gate, and the gate can tell them apart', async () => {
-    const fixture = await feedbackTask(true, META)
+    const fixture = await feedbackTask(true)
     const directory = improvementsDir(fixture.layout)
     const version = await adoptPolicy(fixture.layout)
     // The job answering the task's feedback started on the adopted version and failed to propose (as in the step-6 trial).
@@ -493,7 +561,7 @@ describe('adopted components in the diagnosis, and arms on the task\'s version (
     await updateJob(directory, job.id, { baseVersion: version })
     expect((await readJob(directory, job.id)).status).toBe('failed')
 
-    const meta = await startExplicitMetaJob(directory, { parentVersion: 'v0' })
+    const meta = await explicitMeta(fixture)
     const prompts: Record<string, string> = {}
     const diagnose = (arm: string): Script => async (request, index, text) => {
       if (index === 0) prompts[arm] = text
@@ -525,5 +593,131 @@ describe('adopted components in the diagnosis, and arms on the task\'s version (
     // On the task's version nothing was adopted yet, so the arms' diagnoses list no components.
     expect(prompts.parent).toBeDefined()
     expect(prompts.child).not.toContain('# Adopted capabilities')
+  })
+})
+
+describe('a meta job over several projects (ADR 0012 decisions 4–5)', () => {
+  /** A project with one finished feedback job (counted in the user's queue). */
+  async function projectWithJob(end: Parameters<typeof stagesTo>[0], comment?: string) {
+    const fixture = await feedbackTask(true, undefined, 'baseline', comment)
+    const job = await createJob(improvementsDir(fixture.layout), { trigger: 'feedback-count', items: [signal(fixture)] })
+    await runImprovementJob(fixture.layout, job.id, { stages: stagesTo(end), chain: false })
+    return { fixture, job: await readJob(improvementsDir(fixture.layout), job.id), projectId: await userProjectId(fixture.layout.root) }
+  }
+
+  it('the meta-diagnose tools read only the batch\'s projects that still share; others are refused', async () => {
+    const a = await projectWithJob('rejected')
+    const b = await projectWithJob('adopted')
+    const c = await projectWithJob('none')
+    // C stops sharing after its job was counted: it leaves the batch.
+    await writeFile(c.fixture.layout.configFile, `${JSON.stringify({ version: 1, autoImprove: true, improvement: { shareImproverEvidence: false } })}\n`)
+    const meta = await explicitMeta(a.fixture)
+    expect(meta.meta?.batch?.map(entry => entry.projectId)).toEqual([a.projectId, b.projectId])
+    const projects = await metaProjects(a.fixture.layout, meta)
+    expect(projects.map(project => project.projectId)).toEqual([a.projectId, b.projectId])
+
+    const state: MetaDiagnosisState = { attempts: 0 }
+    const tools = metaDiagnosisTools({ layout: a.fixture.layout, job: meta, sessionId: randomUUID(), improver: { version: 'v0', bundle: IMPROVER_V0 }, state })
+    expect(tools.map(tool => tool.definition.name)).toEqual(['improve_list_jobs', 'improve_read_job', 'improve_read_session', 'improve_read_ledger', 'improve_report_meta_diagnosis'])
+    expect((tools[2]!.definition.inputSchema as { required: string[] }).required).toContain('projectId')
+    const call = (name: string, input: unknown) => tools.find(tool => tool.definition.name === name)!.handler(input, {} as never)
+
+    const listed = await call('improve_list_jobs', {})
+    const lines = listed.content.split('\n').map(line => JSON.parse(line) as { projectId: string; id: string })
+    expect(lines.map(line => [line.projectId, line.id])).toEqual([[a.projectId, a.job.id], [b.projectId, b.job.id]])
+    expect((await call('improve_list_jobs', { projectId: b.projectId })).content).not.toContain(a.job.id)
+    expect(await call('improve_list_jobs', { projectId: c.projectId })).toMatchObject({ isError: true })
+
+    const read = await call('improve_read_job', { jobId: b.job.id })
+    expect(read.isError).toBeUndefined()
+    expect(read.content).toContain(b.projectId)
+    expect(await call('improve_read_job', { jobId: c.job.id })).toMatchObject({ isError: true })
+
+    const session = await call('improve_read_session', { projectId: b.projectId, sessionId: b.fixture.sessionId, types: ['user.message'] })
+    expect(session.isError).toBeUndefined()
+    expect(session.content).toContain('user.message')
+    const refused = await call('improve_read_session', { projectId: c.projectId, sessionId: c.fixture.sessionId })
+    expect(refused).toMatchObject({ isError: true })
+    expect(refused.content).toContain('not one of this meta job\'s projects')
+    expect(await call('improve_read_ledger', { projectId: c.projectId })).toMatchObject({ isError: true })
+
+    expect((await call('improve_report_meta_diagnosis', { findings: [{ stage: 'trial', label: 'x', jobIds: [c.job.id] }], hypothesis: 'h', proposal: 'change' })).content).toContain('no improvement job')
+    await call('improve_report_meta_diagnosis', { findings: [{ stage: 'diagnose', label: 'one diagnosis missed the cause', jobIds: [a.job.id, b.job.id] }], hypothesis: 'h', proposal: 'change' })
+    expect(state.accepted).toMatchObject({ statusCounts: { rejected: 1, adopted: 1 } })
+
+    const prompt = metaDiagnosisPrompt(meta, { version: 'v0', bundle: IMPROVER_V0 }, projects)
+    expect(prompt).toContain(`# Projects\n`)
+    expect(prompt).toContain(`- ${b.projectId} (`)
+    expect(prompt).toContain(`${b.job.id} (project `)
+    expect(prompt).not.toContain(c.projectId)
+  })
+
+  it('a change carrying a value of another project\'s feedback or of a deliverable is refused; a project constant is not', async () => {
+    const b = await projectWithJob('rejected', 'the total should be 2384.13, not 2384.10')
+    // A: the feedback was about a deliverable whose file holds 4410.5 and 1000; 1000 is also in two of A's tasks (a project constant).
+    const a = await feedbackTask(true)
+    await mkdir(join(a.layout.root, 'out'), { recursive: true })
+    await writeFile(join(a.layout.root, 'out', 'summary.csv'), 'region,total\nnorth,4410.5\nthreshold,1000\n')
+    const presented = await new LocalDeliverableStore(a.layout).present({ sessionId: a.sessionId, turn: 1, toolCallId: 'call-1', paths: ['out/summary.csv'], summary: 'the summary' })
+    const sessions = new JsonlSessionStore({ sessionsDir: a.layout.sessions })
+    for (let index = 0; index < 2; index += 1) {
+      const sessionId = randomUUID()
+      const lock = await sessions.create({ sessionId, projectRoot: a.layout.root, model: 'claude-sonnet-5-5', sandboxMode: 'workspace-write' })
+      await sessions.append(sessionId, { type: 'user.message', turn: 1, content: 'list the orders above 1000', source: 'user' })
+      await sessions.release(lock)
+    }
+    const signalA: ImprovementSignal = { kind: 'feedback', feedbackId: randomUUID(), sessionId: a.sessionId, deliverableId: presented.deliverableId, version: presented.version, rating: 2, at: new Date().toISOString() }
+    const jobA = await createJob(improvementsDir(a.layout), { trigger: 'feedback-count', items: [signalA] })
+    await runImprovementJob(a.layout, jobA.id, { stages: stagesTo('rejected'), chain: false })
+    const meta = await explicitMeta(a)
+    expect(meta.meta?.batch?.map(entry => entry.jobId)).toEqual([b.job.id, jobA.id])
+
+    const state: MetaChangeState = { attempts: 0 }
+    const propose = metaProposeTools({ layout: a.layout, job: meta, sessionId: randomUUID(), improver: { version: 'v0', bundle: IMPROVER_V0 }, state })
+      .find(tool => tool.definition.name === 'improve_propose_change')!
+    const paragraph = (text: string) => propose.handler({ change: { op: 'set-diagnosis-paragraph', index: IMPROVER_V0.diagnosis.paragraphs.length, text }, rationale: 'r' }, {} as never)
+    const fromFeedback = await paragraph('Check that totals such as 2384.13 match the source rows.')
+    expect(fromFeedback).toMatchObject({ isError: true })
+    expect(fromFeedback.content).toContain('instance-literal')
+    expect(fromFeedback.content).toContain('2384.13')
+    const fromDeliverable = await paragraph('Rows like north 4410.5 must keep their region.')
+    expect(fromDeliverable.content).toContain('instance-literal')
+    expect(fromDeliverable.content).toContain(`deliverable:${presented.deliverableId}/v${presented.version}/out/summary.csv`)
+    const accepted = await paragraph('When a fixed limit such as 1000 is the user\'s, check the output against it.')
+    expect(accepted.isError).toBeUndefined()
+    expect(state.accepted?.change).toMatchObject({ op: 'set-diagnosis-paragraph' })
+  })
+
+  it('the origin is searched in every project of the batch; the arms run in copies of the origin\'s project and write its ledger', async () => {
+    const b = await projectWithJob('rejected')
+    const a = await projectWithJob('adopted')
+    const meta = await explicitMeta(a.fixture)
+    const scripted = runner({
+      'meta-diagnose': async request => {
+        await callTool(request, 'improve_report_meta_diagnosis', { findings: [{ stage: 'propose', label: 'no candidate solved it', jobIds: [b.job.id] }], hypothesis: 'More runs per case.', proposal: 'change' })
+      },
+      'meta-propose': async request => {
+        await callTool(request, 'improve_propose_change', { change: CHANGE, rationale: 'Three runs per case.' })
+      },
+      'parent:diagnose': diagnoseKind(b.fixture),
+      'parent:propose': proposeInCopy(b.fixture),
+      'child:diagnose': diagnoseKind(b.fixture),
+      'child:propose': proposeInCopy(b.fixture),
+    })
+    const startTrial = gate({ parent: 'rejected', child: 'adopted' })
+    await runImprovementJob(a.fixture.layout, meta.id, { stages: createImprovementStages({ runner: scripted, startTrial, tempRoot: await tempDir(), priceUsd: PRICE }), chain: false })
+    const comparison = JSON.parse(await readFile(jobPaths(improvementsDir(a.fixture.layout), meta.id).comparison, 'utf8')) as ImproverComparison
+    expect(validateImprovementFile('comparison', comparison)).toEqual([])
+    // B's job did not solve its feedback; A's later one did: B's is the origin.
+    expect(comparison.origin).toMatchObject({ kind: 'unresolved', sourceJobId: b.job.id, projectId: b.projectId })
+    expect(comparison.parent.origin).toEqual(comparison.origin)
+    expect(comparison.verdict).toMatchObject({ outcome: 'adopt', reason: 'gate-passed' })
+    const arms = scripted.opened.filter(request => request.comparisonArm !== undefined)
+    expect(arms.every(request => request.ledgerRoot === b.fixture.layout.root)).toBe(true)
+    expect(startTrial.calls.map(call => call.epoch)).toEqual([await projectEpoch(b.fixture.layout), await projectEpoch(b.fixture.layout)])
+    expect((await ledgerOf(b.fixture.layout, 'llm.request.end')).filter(record => record.metaJobId === meta.id)).toHaveLength(4)
+    expect((await ledgerOf(a.fixture.layout, 'llm.request.end')).filter(record => record.metaJobId === meta.id)).toHaveLength(0)
+    // The child is the user's: adopted once, by the meta job.
+    expect((await userStore().chain()).revisions).toEqual([expect.objectContaining({ type: 'adopt', jobId: meta.id, version: meta.meta?.childVersion ?? expect.any(String) })])
   })
 })

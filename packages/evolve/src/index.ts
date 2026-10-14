@@ -9,7 +9,9 @@
  * the gate ({@link createImprovementStages}); without them
  * {@link PENDING_STAGES} ends every job `failed`. Step 6: every job runs on
  * the improver it pinned when it started ({@link ImproverSource}); meta jobs
- * ({@link createMetaStages}) improve the improver.
+ * ({@link createMetaStages}) improve the improver. ADR 0012: the improver,
+ * the meta queue, the meta settings and the meta budget are the user's
+ * (below the Nexgent home, `user.ts`).
  */
 export * from './types.js'
 export { improvementsDir } from './paths.js'
@@ -25,7 +27,6 @@ export {
   releaseSlot,
   retakeSlot,
   startExplicitJob,
-  startExplicitMetaJob,
   type AdmitOptions,
   type AdmitResult,
 } from './queue.js'
@@ -84,18 +85,43 @@ export { trialSpend, trialStatus, type GateOutcome, type TrialStarter } from './
 export { sweepAdoptedJobs } from './first-use.js'
 export { adoptedCapabilities, adoptedSection, type AdoptedCapabilities, type AdoptedComponent } from './adopted.js'
 export { createImprovementStages, type ImprovementStagesOptions } from './stages.js'
-export { jobImproverVersion, PROJECT_IMPROVERS, trialComparison, type ImproverSource, type PinnedImprover } from './improver.js'
+export { jobImproverVersion, pinnedSource, PROJECT_IMPROVERS, trialComparison, type ImproverSource, type PinnedImprover } from './improver.js'
+export {
+  countFinishedJobForUser,
+  ensureUserQueue,
+  homeOf,
+  metaProjects,
+  projectJobs,
+  projectShares,
+  readUserConfig,
+  readUserQueue,
+  reconcileUserQueue,
+  releaseUserMeta,
+  startExplicitUserMetaJob,
+  userImprovementsDir,
+  userImprovers,
+  userImproversDir,
+  userMetaBudgetStatus,
+  userMetaJobs,
+  userProjectId,
+  type MetaProject,
+  type ProjectJob,
+  type UserCountOptions,
+} from './user.js'
+export { literalEvidence, MAX_FILE_BYTES, type LiteralEvidence } from './literals.js'
 export {
   createMetaStages,
   fixedImprover,
   metaDiagnosisPrompt,
   metaProposePrompt,
   chooseOrigin,
+  chooseOriginIn,
   feedbackTaskVersion,
   jobStartVersion,
   originOf,
   sourceJob,
   type OriginChoice,
+  type OriginProject,
   type ArmJobRunner,
   type CompareResult,
   type MetaDiagnoseResult,

@@ -39,7 +39,7 @@ async function until(predicate: () => boolean | Promise<boolean>, timeoutMs = 10
 describe('improvement jobs through the SDK', () => {
   it('installs @nexgent/evolve with the SDK improve entry; a fresh project lists no jobs', async () => {
     const rows = step5ProfileRows({ NEXGENT_API_BASE_URL: 'http://127.0.0.1:1', NEXGENT_API_KEY: 'secret' }, '/home/x')
-    expect(rows).toEqual([{ id: 'evolve', name: '@nexgent/evolve', config: { entry: expect.stringMatching(/improve-entry\.(js|ts)$/), env: { NEXGENT_API_BASE_URL: 'http://127.0.0.1:1', NEXGENT_HOME: '/home/x' } } }])
+    expect(rows).toEqual([{ id: 'evolve', name: '@nexgent/evolve', config: { entry: expect.stringMatching(/improve-entry\.(js|ts)$/), env: { NEXGENT_API_BASE_URL: 'http://127.0.0.1:1', NEXGENT_HOME: '/home/x' }, home: '/home/x' } }])
     const t = await testSdk([])
     const { projectId } = await openProject(t)
     expect(await t.sdk.call('improvements.list', { projectId })).toEqual({ jobs: [], pending: 0, threshold: 3, budget: { usedTokens: 0, maxTokens: 3_000_000, windowDays: 30 }, autoImprove: true, meta: { enabled: false, pending: 0, everyJobs: 3, budget: { usedTokens: 0, maxTokens: 6_000_000, windowDays: 30 } } })
