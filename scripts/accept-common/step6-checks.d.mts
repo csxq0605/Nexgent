@@ -25,3 +25,12 @@ export declare const CHECKS: readonly Step6CheckEntry[]
 export declare const OPTIONAL_CHECKS: ReadonlySet<string>
 export declare function parseLayers(value: string | undefined): { ok: true; layers: Step6LayerId[] } | { ok: false; reason: string }
 export declare function realModelKeySource(env: Record<string, string | undefined>): string | undefined
+export declare const REWORK_ITEMS: readonly string[]
+export interface ReworkExpectation {
+  readonly step: 5 | 6
+  readonly id: string
+  readonly kind: 'change' | 'verify' | 'stale'
+  readonly adr: string
+  readonly why: string
+}
+export declare const REWORK_EXPECTATIONS: readonly ReworkExpectation[]
