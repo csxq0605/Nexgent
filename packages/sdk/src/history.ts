@@ -285,12 +285,17 @@ export function sessionSummary(records: readonly SessionRecord[], state: Session
   const last = records.at(-1)
   const meta = state.metadata
   let lastEnd: Extract<SessionRecord, { type: 'turn.end' }> | undefined
-  for (const record of records) if (record.type === 'turn.end') lastEnd = record
+  let firstMessage: string | undefined
+  for (const record of records) {
+    if (record.type === 'turn.end') lastEnd = record
+    else if (firstMessage === undefined && record.type === 'user.message' && record.source === 'user' && record.content.trim() !== '') firstMessage = record.content.trim().slice(0, 200)
+  }
   const interrupted = !running && (meta.openTurn !== undefined
     || (lastEnd !== undefined && lastEnd.reason.kind === 'interrupted' && lastEnd.turn === meta.lastTurn))
   return {
     sessionId: state.sessionId,
     ...(meta.title === undefined ? {} : { title: meta.title }),
+    ...(firstMessage === undefined ? {} : { firstMessage }),
     createdAt: start?.ts ?? meta.createdAt,
     updatedAt: last?.ts ?? meta.createdAt,
     lastTurn: meta.lastTurn,

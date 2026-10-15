@@ -97,6 +97,9 @@ const INITIAL: AppState = {
   freshMaterialIds: [],
 }
 
+/** How often the capability list is re-read while a gate trial runs. */
+export const TRIAL_POLL_MS = 5_000
+
 export class AppStore {
   private state: AppState = INITIAL
   private readonly listeners = new Set<() => void>()
@@ -193,6 +196,8 @@ export class AppStore {
   dispose(): void {
     this.unsubscribe?.()
     this.unsubscribe = undefined
+    if (this.trialPoll !== undefined) clearTimeout(this.trialPoll)
+    this.trialPoll = undefined
   }
 
   // --- projects -------------------------------------------------------------
@@ -314,6 +319,7 @@ export class AppStore {
       const capabilities = await c.call('capabilities.list', { projectId })
       if (this.projectId !== projectId || !latest()) return
       this.set({ capabilities })
+      this.pollWhileTrialing(capabilities.candidates.some(candidate => candidate.status === 'trialing'))
       // A plugin that passed its gate waits for the user: ask once per candidate.
       const waiting = capabilities.candidates.find(candidate => candidate.status === 'awaiting-approval' && !this.askedApproval.has(candidate.id))
       if (waiting !== undefined && this.state.pluginApproval === undefined) await this.askPluginApproval(waiting.id)
@@ -323,6 +329,21 @@ export class AppStore {
         if (now !== undefined && now.status !== open.view.status) await this.showCandidate(open.view.id)
       }
     })
+  }
+
+  /**
+   * A gate trial runs and decides in its own process, which sends no event to
+   * this window; while a candidate is trialing, re-read the list every few
+   * seconds so its result shows without a restart.
+   */
+  private trialPoll: ReturnType<typeof setTimeout> | undefined
+
+  private pollWhileTrialing(trialing: boolean): void {
+    if (this.trialPoll !== undefined) clearTimeout(this.trialPoll)
+    this.trialPoll = trialing ? setTimeout(() => {
+      this.trialPoll = undefined
+      void this.refreshCapabilities()
+    }, TRIAL_POLL_MS) : undefined
   }
 
   /** Candidates whose approval dialog was already shown (closing it without answering does not reopen it). */

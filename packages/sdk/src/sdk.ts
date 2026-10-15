@@ -114,6 +114,11 @@ export interface LocalSdkOptions extends CreateSdkOptions {
   readonly patches?: readonly AppProfilePatchEntry[]
   /** Start the gate and improvement-job processes (default true); see {@link BootOptions.background}. */
   readonly background?: boolean
+  /**
+   * Add opened projects to the user's recent list (default true). The gate's
+   * replays and improvement jobs open throwaway copies and pass false.
+   */
+  readonly recordRecent?: boolean
   /** Clock for recent projects and exports. */
   readonly now?: () => Date
   /** Start-up check of the command shell (tests); default {@link checkCommandShell} over {@link env}. */
@@ -477,7 +482,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     }
     root = project.root
     const at = this.now().toISOString()
-    await this.recent.touch(root, at).catch(() => undefined)
+    if (this.options.recordRecent !== false) await this.recent.touch(root, at).catch(() => undefined)
     return this.info(root, at, true)
   }
 

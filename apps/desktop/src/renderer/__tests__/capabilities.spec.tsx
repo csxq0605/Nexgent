@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest'
 import type { CandidateDetail } from '@nexgent/sdk'
 import type { TrialCost, TrialVerdict } from '@nexgent/kernel'
 import { BUNDLE, FakeBridge, candidate, pluginInfo } from '../testing/fake-bridge.js'
+import { TRIAL_POLL_MS } from '../store.js'
 import { emit, renderApp } from './helpers.js'
 
 const capabilityEvent = (type: 'capability.version' | 'capability.candidate', extra: Record<string, unknown>) => ({ type, sessionId: undefined, ...extra })
@@ -24,6 +25,24 @@ async function openTab(bridge?: FakeBridge) {
 }
 
 describe('capability versions in the right panel', () => {
+  it('re-reads the list while a candidate is trialing, so a gate decided in its own process shows without an event', async () => {
+    const bridge = new FakeBridge()
+    bridge.capabilities = { ...bridge.capabilities, candidates: [candidate({ id: 'c-9', status: 'trialing', trialId: 'abcdef12-0000' })] }
+    await openTab(bridge)
+    expect(screen.getByTestId('candidate-status').textContent).toBe('门控试验中')
+    const reads = bridge.callsOf('capabilities.list').length
+    bridge.capabilities = {
+      ...bridge.capabilities,
+      candidates: [candidate({ id: 'c-9', status: 'rejected', trialId: 'abcdef12-0000', decision: { id: 'd9', outcome: 'rejected', reason: 'quality-down', detail: 'Fewer checks passed.' } })],
+    }
+    await waitFor(() => expect(screen.getByTestId('candidate-status').textContent).toBe('未采用'), { timeout: TRIAL_POLL_MS + 3_000 })
+    const after = bridge.callsOf('capabilities.list').length
+    expect(after).toBeGreaterThan(reads)
+    // Nothing is trialing any more: no further reads.
+    await new Promise(resolve => setTimeout(resolve, TRIAL_POLL_MS + 500))
+    expect(bridge.callsOf('capabilities.list').length).toBe(after)
+  }, 3 * TRIAL_POLL_MS)
+
   it('shows the baseline of a fresh project and no rollback', async () => {
     await openTab()
     const current = screen.getByTestId('capability-current')

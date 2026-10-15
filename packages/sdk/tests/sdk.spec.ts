@@ -268,6 +268,33 @@ describe('method table', () => {
   })
 })
 
+describe('recent projects', () => {
+  it('a throwaway SDK (gate replay, improvement job) opens projects without adding them to the recent list', async () => {
+    const t = await testSdk([], { recordRecent: false })
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'copy'), create: true })
+    expect(project.projectId).toEqual(expect.any(String))
+    expect(await t.sdk.call('projects.recent', {})).toEqual([])
+    expect(existsSync(nodePath.join(t.home, 'recent-projects.json'))).toBe(false)
+  })
+})
+
+describe('session list titles', () => {
+  it('carries the first user prompt so an untitled session is recognisable when it is not open', async () => {
+    const t = await testSdk([{ content: 'ok', usage }, { content: 'ok again', usage }])
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
+    const session = await t.sdk.call('sessions.create', { projectId: project.projectId })
+    expect(session.firstMessage).toBeUndefined()
+    for (const text of [`  汇总九月订单\n按地区 ${'很长'.repeat(200)}`, 'second prompt']) {
+      await t.sdk.call('turns.send', { projectId: project.projectId, sessionId: session.sessionId, text })
+      await vi.waitFor(() => expect(t.sdk.isRunning(project.projectId, session.sessionId)).toBe(false))
+    }
+    const [listed] = await t.sdk.call('sessions.list', { projectId: project.projectId })
+    expect(listed!.title).toBeUndefined()
+    expect(listed!.firstMessage).toHaveLength(200)
+    expect(listed!.firstMessage!.startsWith('汇总九月订单\n按地区')).toBe(true)
+  })
+})
+
 describe('rename, project files and dialogs', () => {
   it('renames a session with a session.title record that survives a restart', async () => {
     const t = await testSdk([])

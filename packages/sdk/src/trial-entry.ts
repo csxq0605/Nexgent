@@ -162,6 +162,7 @@ export async function runReplay(request: ReplayRunRequest, env: Env = process.en
     env,
     // A replay runs on a project copy: it starts no gate and no improvement job of its own.
     background: false,
+    recordRecent: false,
     approvalResponder: async request => ({ id: request.id, decision: 'deny', scope: 'once', decidedBy: 'headless', reason: 'gate trials run without anyone to ask' }),
     registry: {
       '@nexgent/session': trialSessionPlugin(request, tally),

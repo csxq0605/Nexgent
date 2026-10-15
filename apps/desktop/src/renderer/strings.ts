@@ -443,8 +443,11 @@ export function usageText(usage: LLMUsage): string {
 }
 
 /** A conversation's display name: its title, else its goal, else the first thing the user said. */
-export function sessionTitle(session: { readonly title?: string; readonly goal?: { readonly text: string } } | undefined, firstMessage?: string): string {
-  const text = session?.title ?? session?.goal?.text ?? firstMessage
+export function sessionTitle(
+  session: { readonly title?: string; readonly goal?: { readonly text: string }; readonly firstMessage?: string } | undefined,
+  firstMessage?: string,
+): string {
+  const text = session?.title ?? session?.goal?.text ?? session?.firstMessage ?? firstMessage
   if (text === undefined || text.trim() === '') return T.untitled
   const line = text.trim().split('\n')[0]!
   return line.length > 40 ? `${line.slice(0, 39)}…` : line
