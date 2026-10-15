@@ -133,6 +133,22 @@ export class AppStore {
     this.set(state => ({ notices: state.notices.filter(notice => notice.id !== id) }))
   }
 
+  /**
+   * Per list (or open detail), the number of the latest read started. Reads
+   * can answer out of order (a refresh started by an event before a user
+   * action may answer after the refresh started by that action), so only the
+   * latest read's answer is kept; a direct write from a user action starts a
+   * new number too, dropping reads still in flight.
+   */
+  private readonly reads = new Map<string, number>()
+
+  /** Start a read of `key`; the returned check says whether it is still the latest. */
+  private startRead(key: string): () => boolean {
+    const ticket = (this.reads.get(key) ?? 0) + 1
+    this.reads.set(key, ticket)
+    return () => this.reads.get(key) === ticket
+  }
+
   private async guard<T>(work: (client: SdkClient) => Promise<T>): Promise<T | undefined> {
     if (this.client === undefined) return undefined
     try {
@@ -176,7 +192,11 @@ export class AppStore {
   // --- projects -------------------------------------------------------------
 
   async refreshRecent(): Promise<void> {
-    await this.guard(async c => this.set({ recent: await c.call('projects.recent', {}) }))
+    const latest = this.startRead('recent')
+    await this.guard(async c => {
+      const recent = await c.call('projects.recent', {})
+      if (latest()) this.set({ recent })
+    })
   }
 
   async openProject(root: string, create = false): Promise<boolean> {
@@ -220,7 +240,9 @@ export class AppStore {
   async forgetProject(root: string): Promise<void> {
     await this.guard(async c => {
       await c.call('projects.forget', { root })
-      this.set({ recent: await c.call('projects.recent', {}) })
+      const latest = this.startRead('recent')
+      const recent = await c.call('projects.recent', {})
+      if (latest()) this.set({ recent })
     })
   }
 
@@ -239,36 +261,40 @@ export class AppStore {
   async refreshSessions(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('sessions')
     await this.guard(async c => {
       const sessions = [...(await c.call('sessions.list', { projectId }))].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      if (this.projectId === projectId) this.set({ sessions })
+      if (this.projectId === projectId && latest()) this.set({ sessions })
     })
   }
 
   async refreshMaterials(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('materials')
     await this.guard(async c => {
       const materials = await c.call('materials.list', { projectId })
-      if (this.projectId === projectId) this.set({ materials })
+      if (this.projectId === projectId && latest()) this.set({ materials })
     })
   }
 
   async refreshDeliverables(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('deliverables')
     await this.guard(async c => {
       const deliverables = await c.call('deliverables.list', { projectId })
-      if (this.projectId === projectId) this.set({ deliverables })
+      if (this.projectId === projectId && latest()) this.set({ deliverables })
     })
   }
 
   async refreshFiles(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('projectFiles')
     await this.guard(async c => {
       const projectFiles = await c.call('files.list', { projectId })
-      if (this.projectId === projectId) this.set({ projectFiles })
+      if (this.projectId === projectId && latest()) this.set({ projectFiles })
     })
   }
 
@@ -277,9 +303,10 @@ export class AppStore {
   async refreshCapabilities(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('capabilities')
     await this.guard(async c => {
       const capabilities = await c.call('capabilities.list', { projectId })
-      if (this.projectId !== projectId) return
+      if (this.projectId !== projectId || !latest()) return
       this.set({ capabilities })
       // A plugin that passed its gate waits for the user: ask once per candidate.
       const waiting = capabilities.candidates.find(candidate => candidate.status === 'awaiting-approval' && !this.askedApproval.has(candidate.id))
@@ -298,6 +325,7 @@ export class AppStore {
   /** Open (or close, when it is open) a candidate's details. */
   async toggleCandidate(candidateId: string): Promise<void> {
     if (this.state.candidateDetail?.view.id === candidateId) {
+      this.startRead('candidateDetail')
       this.set({ candidateDetail: undefined })
       return
     }
@@ -307,8 +335,9 @@ export class AppStore {
   private async showCandidate(candidateId: string): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('candidateDetail')
     const candidateDetail = await this.guard(c => c.call('capabilities.show', { projectId, candidateId }))
-    if (candidateDetail !== undefined && this.projectId === projectId) this.set({ candidateDetail })
+    if (candidateDetail !== undefined && this.projectId === projectId && latest()) this.set({ candidateDetail })
   }
 
   async askPluginApproval(candidateId: string): Promise<void> {
@@ -340,9 +369,10 @@ export class AppStore {
   async refreshImprovements(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('improvements')
     await this.guard(async c => {
       const improvements = await c.call('improvements.list', { projectId })
-      if (this.projectId !== projectId) return
+      if (this.projectId !== projectId || !latest()) return
       this.set({ improvements })
       // Keep the open job fresh (its status, candidate and gate move on).
       const open = this.state.improvementDetail
@@ -356,6 +386,7 @@ export class AppStore {
   /** Open (or close, when it is open) a job's details. */
   async toggleImprovement(jobId: string): Promise<void> {
     if (this.state.improvementDetail?.view.id === jobId) {
+      this.startRead('improvementDetail')
       this.set({ improvementDetail: undefined, improvementParent: undefined })
       return
     }
@@ -365,22 +396,24 @@ export class AppStore {
   private async showImprovement(jobId: string): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('improvementDetail')
     const improvementDetail = await this.guard(c => c.call('improvements.show', { projectId, jobId }))
-    if (improvementDetail === undefined || this.projectId !== projectId) return
+    if (improvementDetail === undefined || this.projectId !== projectId || !latest()) return
     this.set({ improvementDetail, ...(improvementDetail.change === undefined ? { improvementParent: undefined } : {}) })
     // A meta job's change is shown against its parent improver.
     const parentVersion = improvementDetail.change?.parentVersion
     if (parentVersion === undefined) return
     const parent = await this.guard(c => c.call('improvers.show', { version: parentVersion }))
-    if (parent !== undefined && this.projectId === projectId && this.state.improvementDetail?.view.id === jobId) this.set({ improvementParent: parent.bundle })
+    if (parent !== undefined && this.projectId === projectId && latest()) this.set({ improvementParent: parent.bundle })
   }
 
   // --- improver versions and meta jobs (step 6) ------------------------------
 
   async refreshImprover(): Promise<void> {
+    const latest = this.startRead('improver')
     await this.guard(async c => {
       const improver = await c.call('improvers.list', {})
-      this.set({ improver })
+      if (latest()) this.set({ improver })
     })
   }
 
@@ -441,9 +474,10 @@ export class AppStore {
   async refreshSettings(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('settings')
     await this.guard(async c => {
       const settings = await c.call('settings.get', { projectId })
-      if (this.projectId === projectId) this.set({ settings })
+      if (this.projectId === projectId && latest()) this.set({ settings })
     })
   }
 
@@ -644,6 +678,7 @@ export class AppStore {
     if (projectId === undefined) return false
     const settings = await this.guard(c => c.call('settings.update', { projectId, patch }))
     if (settings === undefined) return false
+    this.startRead('settings')
     this.set({ settings })
     // The 改进 tab shows switches and budgets from the settings.
     if (patch.autoImprove !== undefined || patch.improvement !== undefined) void this.refreshImprovements()
@@ -652,13 +687,18 @@ export class AppStore {
 
   /** API 7: the user-level settings (shared by every project). */
   async refreshUserSettings(): Promise<void> {
-    await this.guard(async c => this.set({ userSettings: await c.call('userSettings.get', {}) }))
+    const latest = this.startRead('userSettings')
+    await this.guard(async c => {
+      const userSettings = await c.call('userSettings.get', {})
+      if (latest()) this.set({ userSettings })
+    })
   }
 
   /** A user action, no approval; the improvements listing shows the user-level meta state, so it is refreshed. */
   async saveUserSettings(patch: UserSettingsPatch): Promise<boolean> {
     const userSettings = await this.guard(c => c.call('userSettings.update', { patch }))
     if (userSettings === undefined) return false
+    this.startRead('userSettings')
     this.set({ userSettings })
     void this.refreshImprovements()
     return true
