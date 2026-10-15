@@ -167,8 +167,38 @@ describe('improvement jobs in the right panel', () => {
     emit(bridge, { type: 'deliverable.presented', turn: 1, deliverable: version(1) })
     emit(bridge, { type: 'turn.end', turn: 1, reason: { kind: 'completed' }, usage: ZERO_USAGE })
     await waitFor(() => expect(screen.getByTestId('deliverable-improve')).toBeTruthy())
+    // Hold the call: the button answers at once, before the job exists.
+    const run = bridge.handlers['improvements.run']!
+    let release!: () => void
+    const gate = new Promise<void>(resolve => (release = resolve))
+    bridge.handlers['improvements.run'] = (input: unknown) => gate.then(() => run(input))
     fireEvent.click(screen.getByTestId('deliverable-improve'))
     await waitFor(() => expect(bridge.callsOf('improvements.run')).toEqual([{ projectId: 'p1', sessionId: 's1', deliverableId: 'd1' }]))
+    const button = screen.getByTestId('deliverable-improve') as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(button.textContent).toBe('正在开始改进…')
+    release()
+    // Started: the card says so and the 改进 tab opens on the new job.
+    await waitFor(() => expect(screen.getByTestId('deliverable-improve-started').textContent).toContain('已开始改进'))
+    expect((screen.getByTestId('deliverable-improve') as HTMLButtonElement).disabled).toBe(false)
+    await waitFor(() => expect(screen.getByTestId('improvement-panel')).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByTestId('improvement-job').length).toBe(bridge.improvements.jobs.length))
+  })
+
+  it('returns the card button to normal when starting fails', async () => {
+    const bridge = new FakeBridge()
+    await renderApp(bridge)
+    bridge.deliverables = [{ deliverableId: 'd1', title: 'summary.csv', versions: [version(1)] }]
+    bridge.improvements = { ...bridge.improvements, activeJobId: 'busy' }
+    emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
+    emit(bridge, { type: 'deliverable.presented', turn: 1, deliverable: version(1) })
+    emit(bridge, { type: 'turn.end', turn: 1, reason: { kind: 'completed' }, usage: ZERO_USAGE })
+    await waitFor(() => expect(screen.getByTestId('deliverable-improve')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('deliverable-improve'))
+    await waitFor(() => expect(screen.getAllByTestId('notice').length).toBe(1))
+    await waitFor(() => expect((screen.getByTestId('deliverable-improve') as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.getByTestId('deliverable-improve').textContent).toBe('改进')
+    expect(screen.queryByTestId('deliverable-improve-started')).toBeNull()
   })
 })
 

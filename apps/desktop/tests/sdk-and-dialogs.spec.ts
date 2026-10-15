@@ -29,7 +29,7 @@ describe('sdk loader', () => {
     try {
       expect(source).toBe('sdk')
       expect(sdk.apiVersion).toBe(SDK_API_VERSION)
-      expect(await sdk.call('app.info', {})).toEqual({ sdkVersion: SDK_API_VERSION, appVersion: '0.0.2', platform: process.platform })
+      expect(await sdk.call('app.info', {})).toMatchObject({ sdkVersion: SDK_API_VERSION, appVersion: '0.0.2', platform: process.platform, commandShell: { required: process.platform === 'win32' } })
       expect(await sdk.call('projects.recent', {})).toEqual([])
       // The SDK's capabilities row is installed: a project opens and reports its version.
       const project = await sdk.call('projects.open', { root: join(home, 'project'), create: true })

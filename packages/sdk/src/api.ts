@@ -585,13 +585,26 @@ export interface ExportResult {
 // The SDK
 // ---------------------------------------------------------------------------
 
+/** What `app.info` reports. */
+export interface AppInfo {
+  readonly sdkVersion: number
+  readonly appVersion: string
+  readonly platform: string
+  /**
+   * The shell every command runs through, checked once at start-up. On
+   * Windows it is PowerShell 7 (`pwsh`); `available: false` means no command
+   * can run until it is installed.
+   */
+  readonly commandShell: { readonly shell: 'pwsh' | 'bash'; readonly required: boolean; readonly available: boolean }
+}
+
 /**
  * Every SDK operation, keyed by its IPC method name. Each entry is
  * `(input) => Promise<result>`; the desktop preload exposes exactly these
  * names (plus event subscription) and nothing else.
  */
 export interface SdkMethods {
-  'app.info': (input: Record<string, never>) => Promise<{ readonly sdkVersion: number; readonly appVersion: string; readonly platform: string }>
+  'app.info': (input: Record<string, never>) => Promise<AppInfo>
 
   'projects.recent': (input: Record<string, never>) => Promise<readonly ProjectInfo[]>
   'projects.open': (input: OpenProjectInput) => Promise<ProjectInfo>

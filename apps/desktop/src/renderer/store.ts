@@ -38,6 +38,8 @@ export interface AppState {
   readonly backend: 'connecting' | 'ready' | 'unavailable'
   readonly appVersion?: string | undefined
   readonly platform: string
+  /** Windows without PowerShell 7: no command can run; shown until dismissed. */
+  readonly shellMissing?: boolean | undefined
   readonly recent: readonly ProjectInfo[]
   readonly project?: ProjectInfo | undefined
   readonly sessions: readonly SessionSummary[]
@@ -129,6 +131,10 @@ export class AppStore {
     this.set(state => ({ notices: [...state.notices, notice] }))
   }
 
+  dismissShellMissing(): void {
+    this.set({ shellMissing: false })
+  }
+
   dismissNotice(id: number): void {
     this.set(state => ({ notices: state.notices.filter(notice => notice.id !== id) }))
   }
@@ -173,7 +179,7 @@ export class AppStore {
     await this.guard(async c => {
       const info = await c.call('app.info', {})
       const recent = await c.call('projects.recent', {})
-      this.set({ backend: 'ready', appVersion: info.appVersion, platform: info.platform, recent })
+      this.set({ backend: 'ready', appVersion: info.appVersion, platform: info.platform, shellMissing: info.commandShell?.available === false, recent })
     })
     if (this.state.backend !== 'ready') this.set({ backend: 'ready' })
   }
