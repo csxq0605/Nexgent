@@ -83,6 +83,7 @@ import {
   type TurnHandle,
   type Unsubscribe,
 } from './api.js'
+import { checkCommandShell, type CommandShellStatus } from '@nexgent/workspace'
 import { bootProjectApp, ROOT_SESSION_RECOVERIES, type BootOptions } from './boot.js'
 import * as capabilities from './capabilities.js'
 import * as improvements from './improvements.js'
@@ -115,6 +116,8 @@ export interface LocalSdkOptions extends CreateSdkOptions {
   readonly background?: boolean
   /** Clock for recent projects and exports. */
   readonly now?: () => Date
+  /** Start-up check of the command shell (tests); default {@link checkCommandShell} over {@link env}. */
+  readonly checkShell?: () => CommandShellStatus
 }
 
 /** A raw kernel event with the project it belongs to. */
@@ -248,6 +251,15 @@ export class LocalNexgentSdk implements NexgentSdk {
 
   private now(): Date {
     return this.options.now?.() ?? new Date()
+  }
+
+  private shellStatus: CommandShellStatus | undefined
+
+  /** Checked on first ask and kept: installing PowerShell needs a restart anyway. */
+  private commandShell(): { shell: 'pwsh' | 'bash'; required: boolean; available: boolean } {
+    this.shellStatus ??= this.options.checkShell?.() ?? checkCommandShell({ env: this.env })
+    const { shell, required, available } = this.shellStatus
+    return { shell, required, available }
   }
 
   // -------------------------------------------------------------------------
@@ -1009,7 +1021,7 @@ export class LocalNexgentSdk implements NexgentSdk {
 
   private buildMethods(): SdkMethods {
     return {
-      'app.info': async () => ({ sdkVersion: SDK_API_VERSION, appVersion: this.options.appVersion, platform: process.platform }),
+      'app.info': async () => ({ sdkVersion: SDK_API_VERSION, appVersion: this.options.appVersion, platform: process.platform, commandShell: this.commandShell() }),
 
       'projects.recent': () => this.recentProjects(),
       'projects.open': input => this.openProject(input),

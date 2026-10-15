@@ -1,4 +1,5 @@
 import type { DeliverableVersionRef } from '@nexgent/kernel'
+import { useState } from 'react'
 import { useAppState, useAppStore } from '../hooks.js'
 import { T, formatBytes } from '../strings.js'
 import { useUi } from '../ui.js'
@@ -9,6 +10,14 @@ export function DeliverableCard({ deliverable, latest }: { readonly deliverable:
   const store = useAppStore()
   const { sessionId } = useAppState()
   const { deliverableId, version } = deliverable
+  const [improving, setImproving] = useState<'idle' | 'starting' | 'started'>('idle')
+  const improve = async (): Promise<void> => {
+    setImproving('starting')
+    const started = await store.runImprovement({ ...(sessionId === undefined ? {} : { sessionId }), deliverableId })
+    setImproving(started ? 'started' : 'idle')
+    // The new job and its progress are in the 改进 tab; a failure is already a notice.
+    if (started) ui.showPanel('improvements')
+  }
   return (
     <section className="deliverable-card" data-testid="deliverable-card" data-version={version}>
       <header>
@@ -40,11 +49,19 @@ export function DeliverableCard({ deliverable, latest }: { readonly deliverable:
           </button>
         )}
         {latest && (
-          <button type="button" onClick={() => void store.runImprovement({ ...(sessionId === undefined ? {} : { sessionId }), deliverableId })} data-testid="deliverable-improve">
-            {T.deliverableImprove}
+          <button type="button" disabled={improving === 'starting'} onClick={() => void improve()} data-testid="deliverable-improve">
+            {improving === 'starting' ? T.deliverableImproveStarting : T.deliverableImprove}
           </button>
         )}
       </div>
+      {latest && improving === 'started' && (
+        <p className="muted small" role="status" data-testid="deliverable-improve-started">
+          {T.deliverableImproveStarted}{' '}
+          <button type="button" className="link" onClick={() => ui.showPanel('improvements')} data-testid="deliverable-improve-show">
+            {T.deliverableImproveShow}
+          </button>
+        </p>
+      )}
     </section>
   )
 }

@@ -222,7 +222,7 @@ export class FakeBridge implements NexgentBridge {
   /** `improvers.show` per version; `v0` is built in. */
   improverBundles: Record<string, ImproverBundle> = {}
   readonly handlers: Record<string, Handler> = {
-    'app.info': () => ({ sdkVersion: 7, appVersion: '0.0.0-test', platform: 'linux' }),
+    'app.info': () => ({ sdkVersion: 7, appVersion: '0.0.0-test', platform: 'linux', commandShell: { shell: 'bash', required: false, available: true } }),
     'projects.recent': () => this.recent,
     'projects.open': () => PROJECT,
     'projects.forget': () => undefined,

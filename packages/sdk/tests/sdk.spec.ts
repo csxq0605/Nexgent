@@ -242,10 +242,19 @@ describe('settings', () => {
 })
 
 describe('method table', () => {
+  it('reports a missing PowerShell 7 through app.info, checked once', async () => {
+    let checks = 0
+    const t = await testSdk([], { checkShell: () => { checks++; return { shell: 'pwsh', required: true, available: false } } })
+    expect((await t.sdk.call('app.info', {})).commandShell).toEqual({ shell: 'pwsh', required: true, available: false })
+    await t.sdk.call('app.info', {})
+    expect(checks).toBe(1)
+  })
+
   it('implements every whitelisted method and rejects others', async () => {
     const t = await testSdk([])
     const info = await t.sdk.call('app.info', {})
-    expect(info).toEqual({ sdkVersion: 7, appVersion: '0.0.0-test', platform: process.platform })
+    expect(info).toMatchObject({ sdkVersion: 7, appVersion: '0.0.0-test', platform: process.platform })
+    expect(info.commandShell).toEqual(process.platform === 'win32' ? { shell: 'pwsh', required: true, available: info.commandShell.available } : { shell: 'bash', required: false, available: true })
     await expect(t.sdk.call('nope' as never, {} as never)).rejects.toMatchObject({ code: 'internal' })
     for (const method of SDK_METHOD_NAMES) expect(typeof (t.sdk as unknown as { methods: Record<string, unknown> }).methods[method]).toBe('function')
     // step 5: the improvement methods work on open projects (tests/improvements.spec.ts)

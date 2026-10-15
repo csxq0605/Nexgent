@@ -18,6 +18,7 @@ import { NexgentError, type ProcessResult, type ProcessRunner, type ProcessSpec 
 import { scrubEnv } from './env.js'
 import { DEFAULT_MAX_OUTPUT_BYTES, TailBuffer } from './output.js'
 import { Redactor } from './redact.js'
+import { PWSH_MISSING_MESSAGE } from './shell-check.js'
 import { JOB_SPEC_ENV, JOB_START_FAILED_EXIT, JOB_START_FAILED_MARKER, jobLaunchSpec, jobLauncherArgs } from './windows-job.js'
 
 /** Default wait between the polite and the forced kill (ms). */
@@ -101,6 +102,15 @@ async function waitUntil(predicate: () => boolean, ms: number): Promise<boolean>
     await sleep(POLL_MS)
   }
   return true
+}
+
+/**
+ * Why a command could not start. When the Windows job launcher (`pwsh`) is
+ * itself missing, say so instead of blaming the command.
+ */
+export function startFailureMessage(command: string, error: NodeJS.ErrnoException, viaJobLauncher: boolean): string {
+  if (viaJobLauncher && error.code === 'ENOENT') return `failed to start ${command}: ${PWSH_MISSING_MESSAGE}`
+  return `failed to start ${command}: ${error.message}`
 }
 
 /** Spawns one-shot processes with deadline, cancellation, tree kill, env scrub, output cap and redaction. */
@@ -190,7 +200,7 @@ export class LocalProcessRunner implements ProcessRunner {
     } catch (error) {
       clearTimeout(timer)
       spec.signal?.removeEventListener('abort', onAbort)
-      throw new NexgentError('process/failed', `failed to start ${spec.command}: ${(error as Error).message}`, { cause: error })
+      throw new NexgentError('process/failed', startFailureMessage(spec.command, error as NodeJS.ErrnoException, useJob), { cause: error })
     } finally {
       clearTimeout(timer)
       spec.signal?.removeEventListener('abort', onAbort)

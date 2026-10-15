@@ -15,6 +15,8 @@ export const T = {
   crashedBody: '这一块界面遇到错误，已停止显示。你的会话和文件不受影响。',
   reload: '重新加载',
   dismiss: '关闭',
+  shellMissing:
+    '没有找到 PowerShell 7（pwsh）。Nexgent 在 Windows 上用它执行所有命令，系统自带的 Windows PowerShell 5.1 不能代替；不装的话，任务里的每条命令都会失败。请安装 PowerShell 7（例如在终端运行 winget install --id Microsoft.PowerShell），然后重启 Nexgent。',
   retry: '重试',
   cancel: '取消',
   save: '保存',
@@ -317,6 +319,9 @@ export const T = {
   metaWindow: '元改进预算窗口（天）',
   metaSettingsInvalid: '元改进的预算、窗口必须是正整数，触发作业数必须是 1 到 20 的整数。',
   deliverableImprove: '改进',
+  deliverableImproveStarting: '正在开始改进…',
+  deliverableImproveStarted: '已开始改进，进度在右侧“改进”页。',
+  deliverableImproveShow: '查看进度',
 } as const
 
 /** A capability version for people: the baseline in words, a bundle by its short hash. */
