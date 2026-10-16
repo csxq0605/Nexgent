@@ -25,13 +25,15 @@ describe('tool definitions', () => {
   it('exposes the file, search and platform shell tools with valid names and effects', async () => {
     const { tools } = await setup()
     const names = tools.map(t => t.definition.name)
-    expect(names).toEqual(['read_file', 'write_file', 'str_replace', 'list_files', 'search_text', process.platform === 'win32' ? 'pwsh' : 'bash'])
+    expect(names).toEqual(['read_file', 'write_file', 'str_replace', 'list_files', 'search_text', process.platform === 'win32' ? 'pwsh' : 'bash', 'shell_output', 'shell_kill'])
     for (const t of tools) {
       expect(t.definition.name).toMatch(/^[a-z][a-z0-9_]*$/)
       expect(t.definition.approval).toBe('never')
       expect(t.definition.inputSchema).toMatchObject({ type: 'object' })
     }
     expect(tools.find(t => t.definition.name === 'read_file')!.definition.effects).toEqual(['read'])
+    expect(tools.find(t => t.definition.name === 'shell_output')!.definition.effects).toEqual(['read'])
+    expect(tools.find(t => t.definition.name === 'shell_kill')!.definition.effects).toEqual(['execute'])
   })
 
   it('keeps descriptions free of shell prohibitions and exposes the frozen schemas', async () => {
@@ -58,8 +60,9 @@ describe('session temp directory', () => {
     const own = nodePath.join(base, `nexgent-${ctx.sessionId}`, 'scratch.txt')
     await write.handler({ path: own, content: 'mine' }, ctx)
     expect(await readFile(own, 'utf8')).toBe('mine')
+    // Another session's temp directory is outside this session's roots: it asks (ADR 0022 decision 2), and nobody answers here.
     const other = nodePath.join(base, 'nexgent-other', 'x.txt')
-    await expect(write.handler({ path: other, content: 'not mine' }, ctx)).rejects.toMatchObject({ code: 'sandbox/denied' })
+    await expect(write.handler({ path: other, content: 'not mine' }, ctx)).rejects.toMatchObject({ code: 'approval/denied' })
     await expect(readFile(other, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
@@ -120,15 +123,68 @@ describe('write_file / read_file across modes', () => {
     await expect(tool('str_replace').handler({ path: 'n.txt', old_str: '     1\ta', new_str: 'x' }, ctx)).rejects.toMatchObject({ details: { reason: 'no-match' } })
   })
 
-  it('denies an out-of-whitelist write with SANDBOX_DENIED and the resolved path', async () => {
+  it('asks before writing outside the project and names the directory grant (ADR 0022 decision 2)', async () => {
     const { tool, workspace, outside } = await setup()
     const ctx = toolContext(workspace)
     const result = await tool('write_file').preflight({ path: '../outside/x.txt', content: 'x' }, ctx)
-    expect(result).toMatchObject({ action: 'deny', error: { code: 'sandbox/denied' } })
+    const dir = outside.replaceAll('\\', '/')
+    expect(result).toMatchObject({ action: 'ask', approval: { risk: 'medium', options: ['once', 'session'], pattern: `${dir}/**`, grantTool: 'fs.write' } })
     const error = await tool('write_file').handler({ path: '../outside/x.txt', content: 'x' }, ctx).catch((e: unknown) => e)
-    expect(isNexgentError(error, 'sandbox/denied')).toBe(true)
-    expect((error as Error).message).toContain(nodePath.join(outside, 'x.txt'))
-    expect((error as Error).message).toContain('SANDBOX_DENIED')
+    expect(isNexgentError(error, 'approval/denied')).toBe(true)
+    await expect(readFile(nodePath.join(outside, 'x.txt'))).rejects.toThrow()
+  })
+
+  it('one directory grant admits every file tool outside the project; reads and writes are granted apart', async () => {
+    const { tool, workspace, outside } = await setup()
+    await writeFile(nodePath.join(outside, 'notes.txt'), 'outside notes')
+    const dir = outside.replaceAll('\\', '/')
+    const asks: Array<{ grantTool?: string; pattern?: string }> = []
+    const ctx = toolContext(workspace, 'workspace-write', {
+      requestApproval: async ask => {
+        asks.push(ask)
+        return true
+      },
+    })
+    const file = nodePath.join(outside, 'notes.txt')
+    expect((await tool('read_file').handler({ path: file }, ctx)).content).toContain('outside notes')
+    expect((await tool('list_files').handler({ path: outside }, ctx)).content).toContain('notes.txt')
+    expect((await tool('search_text').handler({ pattern: 'outside', path: outside }, ctx)).content).toContain('notes.txt')
+    await tool('write_file').handler({ path: nodePath.join(outside, 'new.txt'), content: 'x' }, ctx)
+    expect(asks.map(ask => [ask.grantTool, ask.pattern])).toEqual([
+      ['fs.read', `${dir}/**`], ['fs.read', `${dir}/**`], ['fs.read', `${dir}/**`], ['fs.write', `${dir}/**`],
+    ])
+    // With the session grants the kernel stores for those answers, the preflights admit every tool without asking.
+    const grants = [
+      { tool: 'fs.read', pattern: `${dir}/**`, grantedAt: '2026-10-16T08:00:00Z' },
+      { tool: 'fs.write', pattern: `${dir}/**`, grantedAt: '2026-10-16T08:00:00Z' },
+    ]
+    const plain = toolContext(workspace)
+    for (const [name, input] of [
+      ['read_file', { path: file }],
+      ['list_files', { path: outside }],
+      ['search_text', { pattern: 'x', path: outside }],
+      ['write_file', { path: nodePath.join(outside, 'b.txt'), content: 'x' }],
+      ['str_replace', { path: file, old_str: 'outside', new_str: 'inside' }],
+    ] as const) {
+      expect((await tool(name).preflight(input, plain, grants)).action, name).toBe('allow')
+      expect((await tool(name).preflight(input, plain, name === 'write_file' || name === 'str_replace' ? grants.slice(0, 1) : grants.slice(1))).action, `${name} with the other grant only`).toBe('ask')
+    }
+  })
+
+  it('denies credential directories and the Nexgent data directory without asking', async () => {
+    const p = await project()
+    const home = await tempDir()
+    const nexgentHomeDir = nodePath.join(home, '.nexgent')
+    await mkdir(nodePath.join(home, '.ssh'), { recursive: true })
+    await writeFile(nodePath.join(home, '.ssh', 'id_ed25519'), 'secret')
+    await mkdir(nodePath.join(nexgentHomeDir, 'projects'), { recursive: true })
+    const sandbox = await createSandbox({ root: p.workspace.root, userHome: home, nexgentHome: nexgentHomeDir })
+    for (const path of [nodePath.join(home, '.ssh', 'id_ed25519'), nodePath.join(nexgentHomeDir, 'projects', 'x.jsonl')]) {
+      expect((await sandbox.assessRead(path)).kind, path).toBe('deny')
+      expect((await sandbox.assessWrite(path)).kind, path).toBe('deny')
+    }
+    // Elsewhere in the same home asks.
+    expect((await sandbox.assessRead(nodePath.join(home, 'Downloads', 'a.txt'))).kind).toBe('ask')
   })
 
   it('read-only denies writes without asking but still reads', async () => {
@@ -315,9 +371,9 @@ describe('search tools ignore rules', () => {
     const { tool, workspace } = await tree()
     const { content } = await tool('list_files').handler({}, toolContext(workspace))
     const listed = content.split('\n')
-    expect(listed).toEqual(['.github/workflows/ci.yml', 'README.md', 'src/app.ts', 'src/util/helper.ts'])
+    expect(listed).toEqual(['.env  [sensitive: not read without approval]', '.github/workflows/ci.yml', 'README.md', 'src/app.ts', 'src/util/helper.ts', '[5 files total]'])
     const ts = await tool('list_files').handler({ pattern: '**/*.ts' }, toolContext(workspace))
-    expect(ts.content.split('\n')).toEqual(['src/app.ts', 'src/util/helper.ts'])
+    expect(ts.content.split('\n')).toEqual(['src/app.ts', 'src/util/helper.ts', '[2 files total]'])
   })
 
   it('search_text skips ignored directories and sensitive files', async () => {
@@ -327,6 +383,7 @@ describe('search tools ignore rules', () => {
       '.github/workflows/ci.yml:1: needle',
       'src/app.ts:1: export const needle = 1',
       'src/util/helper.ts:1: needle()',
+      '[skipped 1 sensitive file, not searched (reading one needs approval; use read_file): .env]',
     ])
     const scoped = await tool('search_text').handler({ pattern: 'NEEDLE', ignoreCase: true, glob: '*.ts', path: 'src' }, toolContext(workspace))
     expect(scoped.content.split('\n')).toEqual(['app.ts:1: export const needle = 1', 'util/helper.ts:1: needle()'])
@@ -335,7 +392,7 @@ describe('search tools ignore rules', () => {
   it('searching inside an allowed .nexgent subdirectory works when targeted directly', async () => {
     const { tool, workspace } = await tree()
     const { content } = await tool('list_files').handler({ path: '.nexgent/outputs' }, toolContext(workspace))
-    expect(content).toBe('report.md')
+    expect(content).toBe('report.md\n[1 files total]')
     expect(await tool('list_files').preflight({ path: '.nexgent/sessions' }, toolContext(workspace))).toMatchObject({ action: 'deny' })
   })
 
@@ -357,7 +414,7 @@ describe.skipIf(process.platform === 'win32')('bash tool', () => {
       .toMatchObject({ action: 'ask', approval: { tool: 'bash', summary: 'pnpm install', pattern: 'pnpm install', risk: 'medium' } })
     await expect(tool('bash').handler({ command: 'git push' }, ctx)).rejects.toMatchObject({ code: 'approval/denied' })
     expect(await tool('bash').preflight({ command: 'ls', cwd: outside }, ctx)).toMatchObject({ action: 'deny', error: { code: 'sandbox/denied' } })
-    const grant = { tool: 'bash', pattern: 'pnpm install', grantedAt: '2026-10-07T08:00:00Z' }
+    const grant = { tool: 'bash', pattern: 'pnpm install --offline', grantedAt: '2026-10-07T08:00:00Z' }
     expect(await tool('bash').preflight({ command: 'cd web && pnpm install --offline' }, ctx, [grant])).toMatchObject({ action: 'allow', grant })
   })
 
@@ -366,7 +423,7 @@ describe.skipIf(process.platform === 'win32')('bash tool', () => {
     const asks: unknown[] = []
     const ctx = { ...toolContext(workspace), requestApproval: async (ask: unknown) => (asks.push(ask), false) }
     await expect(tool('bash').handler({ command: 'touch ran.txt && git push origin main' }, ctx)).rejects.toMatchObject({ code: 'approval/denied' })
-    expect(asks[0]).toMatchObject({ risk: 'medium', pattern: 'git push', subject: { kind: 'command', value: 'git push origin main' } })
+    expect(asks[0]).toMatchObject({ risk: 'medium', pattern: 'git push origin main', subject: { kind: 'command', value: 'git push origin main' } })
     await expect(readFile(nodePath.join(workspace.root, 'ran.txt'))).rejects.toThrow()
   })
 

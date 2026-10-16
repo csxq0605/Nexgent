@@ -374,10 +374,12 @@ function h17(obs) {
     [files?.isError === false && textOf(files).includes(JSON.stringify(TOOL_FILES.input.content)), 'run_code read data/input.txt through readFile and returned it'],
     [fileText(t, TOOL_FILES.output) === TOOL_FILES.input.content.toUpperCase(), `run_code wrote ${TOOL_FILES.output} with the upper-cased text (got ${JSON.stringify(fileText(t, TOOL_FILES.output))})`],
     [/"envKeys": \[\]/.test(textOf(files)), 'process.env inside the program is empty'],
-    [outside?.isError === true && textOf(outside).includes('sandbox/denied') && !textOf(outside).includes('OUTSIDE-SECRET'), `reading a file outside the project fails with sandbox/denied and returns nothing of it (got ${JSON.stringify(textOf(outside).slice(0, 120))})`],
+    // ADR 0022 decision 2: outside the project asks (once, or the directory for the session); the caller said no.
+    [(t.approvals ?? []).some(a => a.phase === 'ptc' && a.answered === true && /\/\*\*$/.test(a.request?.pattern ?? '') && (a.request?.options ?? []).includes('session')), `reading outside the project asked for its directory (got ${JSON.stringify((t.approvals ?? []).map(a => [a.phase, a.request?.pattern, a.request?.options, a.answered]))})`],
+    [outside?.isError === true && textOf(outside).includes('approval/denied') && !textOf(outside).includes('OUTSIDE-SECRET'), `once refused, reading the file outside the project fails with approval/denied and returns nothing of it (got ${JSON.stringify(textOf(outside).slice(0, 120))})`],
     [timeout?.isError === true && /Timed out/.test(textOf(timeout)), `the endless loop is stopped at its 1 s timeout (got ${JSON.stringify(textOf(timeout).slice(0, 80))})`],
     [Number.isInteger(ptc.timeoutPid) && ptc.timeoutPidAlive === false, `the timed-out program's process (pid ${ptc.timeoutPid}) is gone once the tool returned`],
-  ], 'run_code read and wrote project files, saw an empty process.env, was refused outside the project (sandbox/denied), and was stopped at 1 s with its process gone')
+  ], 'run_code read and wrote project files, saw an empty process.env, asked before reading outside the project and was refused (approval/denied), and was stopped at 1 s with its process gone')
 }
 
 /** H18: write_spreadsheet writes formulas with correct cached values; refuses external references, unknown functions, #DIV/0! and over-limit input, writing nothing. */

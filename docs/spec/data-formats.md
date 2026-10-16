@@ -172,7 +172,10 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `costCaps.perConversation` | `CostCap` | 无 | 重做 C1：每个对话（会话的全部轮）上限 |
 | `costCaps.perProject` | `CostCap` | 无 | 每项目上限 |
 | `approvals` | `ApprovalGrant[]` | `[]` | `project` 范围的审批授权；语义见 `permissions.md`。迁移后移到用户数据目录的 `grants.json`，迁移没完成的项目仍在这里读写 |
-| `extraReadRoots` | `string[]` | `[]` | 额外可读的绝对目录；语义见 `permissions.md` |
+| `extraReadRoots` | `string[]` | `[]` | 额外可读的绝对目录；语义见 `permissions.md`；改动它总要审批（ADR 0022） |
+| `extraWriteRoots` | `string[]` | `[]` | ADR 0022：额外可写的绝对目录（文件工具与命令沙箱）；改动它总要审批 |
+| `commands.network` | boolean | `true` | ADR 0022：命令能否联网（有系统沙箱的平台上生效）；改动 `commands` 总要审批 |
+| `commands.systemSandbox` | `"auto" \| "required" \| "off"` | `"auto"` | ADR 0022：命令的系统沙箱；`required` 时没有沙箱就不执行命令，`off` 由用户关；语义见 `permissions.md` §命令策略 |
 | `autoImprove` | boolean | `true` | 步骤 5：计入的反馈与失败的检查是否自动开始改进作业（ADR 0006；步骤 4 之前默认 `false`，从未生效）；显式“改进”不受它限制；改动它总要审批。ADR 0017 决策 3 起由 `learning.enabled` 取代：没写 `learning.enabled` 时取它的值；设置页改其中一个时两个保持相等 |
 | `capabilities` | `CapabilitiesConfig` | 见下 | 门控与回滚设置（步骤 4）；改动它总要审批（`permissions.md` §工具审批） |
 | `improvement` | `ImprovementConfig` | 见下 | 步骤 5：触发阈值、改进预算、诊断与提案的模型；ADR 0012 起另有 `shareImproverEvidence`；改动它总要审批 |
@@ -306,7 +309,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 
 | `type` | 何时写 | 专有字段 |
 | --- | --- | --- |
-| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本）、`purpose?`（步骤 5，`"task" \| "improvement"`，缺省即 `task`）、`improvement?`（步骤 5，`{ jobId, phase: "diagnose" \| "propose" }`，当且仅当 `purpose` 为 `improvement` 时出现；步骤 6 加 `improverVersion?`、`metaJobId?`、`comparisonArm?` 与元改进的两个 `phase`，ADR 0012 加 `improverScope?`，含义同账本字段） |
+| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本）、`purpose?`（步骤 5，`"task" \| "improvement"`，缺省即 `task`）、`improvement?`（步骤 5，`{ jobId, phase: "diagnose" \| "propose" }`，当且仅当 `purpose` 为 `improvement` 时出现；步骤 6 加 `improverVersion?`、`metaJobId?`、`comparisonArm?` 与元改进的两个 `phase`，ADR 0012 加 `improverScope?`，含义同账本字段）、`plan?`（ADR 0022，`true` 表示以计划模式开始）、`commandSandbox?`（ADR 0022，`{ kind: "active", platform }` \| `{ kind: "none", reason }` \| `{ kind: "off" }`：本会话的命令是否在系统沙箱里跑） |
 | `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn`、`handbook?`（重做 C1，ADR 0018 决策 4：这一轮注入的经验手册条目 id，按检索顺序，至多 `HANDBOOK_TOP_K` 个；没注入时不写） |
 | `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示 | `turn`、`content`、`source: "user" \| "inject" \| "feedback"`、`materials?`（步骤 2） |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
@@ -318,6 +321,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `approval.decision` | 审批得到应答（含超时、取消、非 TTY 拒绝） | `turn`、`decision: ApprovalDecision` |
 | `approval.grant` | 用户选择 `session` 范围放行，紧跟对应的 `approval.decision` | `grant: { tool, pattern?, grantedAt }` |
 | `material.added`（步骤 2） | 宿主把一份资料复制进 `materials/` 后 | `turn?`、`material: MaterialRef` |
+| `session.mode`（ADR 0022） | 会话中途换模式：宿主切换（`sessions.setMode`），或用户经 `exit_plan` 批准计划 | `sandboxMode`（此后的执行模式）、`plan`（计划模式是否还开着）、`reason: "host" \| "plan-approved"`；从下一次工具调用起生效 |
 | `deliverable.presented`（步骤 2） | `present` 生成一个成果版本后，在该调用的 `tool.result` 之前 | `turn`、`step`、`toolCallId`、`deliverable: DeliverableVersionRef` |
 | `turn.files`（步骤 2） | 每轮 `turn.end` 之前（装了文件追踪时，空列表也写） | `turn`、`changes: FileChange[]`、`omitted?` |
 | `feedback`（步骤 2） | 反馈轮的 `turn.start` 之后 | `turn`、`feedback: FeedbackEntry` |
@@ -365,7 +369,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
   → turn.files → turn.end → [checkpoint]
 ```
 
-`material.added`、`goal.set`、`goal.update`、`session.title` 由宿主写，可以出现在两轮之间，也可以出现在一轮之中（此时带 `turn`）。
+`material.added`、`goal.set`、`goal.update`、`session.title` 由宿主写，可以出现在两轮之间，也可以出现在一轮之中（此时带 `turn`）。`session.mode` 不带 `turn`：宿主切换可以在两轮之间或一轮之中，`exit_plan` 批准时在该调用的 `tool.result` 之前。
 
 步骤 3 的记录归属：`fork.seed` 只由 kernel 在建子会话时写；`subagent.start`、`workflow.start` 由发起它们的工具经 `ToolContext.appendRecord` 写在该调用的 `tool.result` 之前；`subagent.end`、`team.*`、`workflow.phase`、`workflow.end` 既可由工具写，也可由协作包以宿主身份写（队友之间的邮件、恢复时的补记发生在 Lead 的工具调用之外），宿主写时带当时的 `turn`。白名单见契约 `ToolRecordType` / `HostRecordType`。
 
@@ -439,7 +443,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 | 记录 | 对 `messages` | 对 `metadata` |
 | --- | --- | --- |
-| `session.start` | 无 | `createdAt`、`projectRoot`、`model`、`sandboxMode`、`title`；`lastTurn = 0`；`grants = []`；`totalUsage` 置为全 0（`ZERO_USAGE`，加法单位元） |
+| `session.start` | 无 | `createdAt`、`projectRoot`、`model`、`sandboxMode`、`title`；`plan = true`（仅当记录的 `plan` 为 `true`）；`lastTurn = 0`；`grants = []`；`totalUsage` 置为全 0（`ZERO_USAGE`，加法单位元） |
 | `turn.start` | 无 | `lastTurn = turn`，`openTurn = turn` |
 | `user.message` | 追加 `{ role: "user", content }` | 无 |
 | `assistant.message` | 追加 `{ role: "assistant", content, toolCalls?, providerContent? }`；`interrupted` 且 `content` 为空时不追加 | `totalUsage = addUsage(totalUsage, usage)`（任一字段 `"unknown"` 则和为 `"unknown"`）；`usage` 的计费输入（`inputTokens + cacheReadTokens + cacheWriteTokens`）已知时 `lastUsage = usage`（ADR 0021） |
@@ -450,11 +454,12 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `goal.set`（步骤 2） | 无 | `goal = record.goal`（替换旧目标） |
 | `goal.update`（步骤 2） | 无 | `goal.status = status`；给了 `text` 则替换；给了 `note` 则替换；`goal.updatedAt = record.ts` |
 | `session.title`（步骤 2） | 无 | `title = record.title`（覆盖 `session.start` 的标题） |
+| `session.mode`（ADR 0022） | 无 | `sandboxMode = record.sandboxMode`；`plan` 为 `true` 时设 `plan = true`，否则删除 `plan` |
 | `compaction`（步骤 2） | `messages = [{ role: "user", content: renderCompactionSummary(summary) }, ...messages 的最后 keepMessages 条]` | `lastCompactionSeq = seq`；删除 `lastUsage` |
 | `material.added`、`deliverable.presented`、`turn.files`、`feedback`（步骤 2） | 无 | 无 |
 | 任意记录 | — | `lastSeq = seq` |
 
-`SessionMetadata` 字段：`createdAt`、`projectRoot`、`model`、`sandboxMode`、`grants`、`title?`、`lastTurn`、`openTurn?`、`totalUsage`、`lastSeq`；步骤 2 增加可选的 `goal?`（`Goal`）与 `lastCompactionSeq?`。步骤 1 写出的 checkpoint 没有这两个字段，读出时视为未设置。ADR 0021 增加可选的 `lastUsage?`（最近一次压缩之后、计费输入已知的最后一条回复的用量）：重开会话时压缩触发从它起算，没有它（压缩后还没有回复，或旧 checkpoint）时按整段历史估计。
+`SessionMetadata` 字段：`createdAt`、`projectRoot`、`model`、`sandboxMode`、`grants`、`title?`、`lastTurn`、`openTurn?`、`totalUsage`、`lastSeq`；步骤 2 增加可选的 `goal?`（`Goal`）与 `lastCompactionSeq?`；ADR 0022 增加可选的 `plan?`（计划模式还开着）。步骤 1 写出的 checkpoint 没有这两个字段，读出时视为未设置。ADR 0021 增加可选的 `lastUsage?`（最近一次压缩之后、计费输入已知的最后一条回复的用量）：重开会话时压缩触发从它起算，没有它（压缩后还没有回复，或旧 checkpoint）时按整段历史估计。
 
 ### 并发写保护
 

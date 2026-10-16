@@ -49,6 +49,7 @@ import type {
   ApprovalDecision,
   CandidateRecord,
   CandidateStatus,
+  CommandSandboxStatus,
   CapabilityComponentRef,
   CapabilityDecision,
   CapabilityVersion,
@@ -234,7 +235,12 @@ export type HistoryItem =
 /** A whole session as the UI shows it. */
 export interface SessionView {
   readonly summary: SessionSummary
+  /** The mode the session executes in (once plan mode is off). */
   readonly sandboxMode: SandboxMode
+  /** ADR 0022: plan mode is on (tools act as in read-only until the user approves a plan). */
+  readonly plan: boolean
+  /** ADR 0022: whether this session's commands run in an OS sandbox, from `session.start`; absent in sessions written before it. */
+  readonly commandSandbox?: CommandSandboxStatus
   readonly model: string
   readonly items: readonly HistoryItem[]
   readonly totalUsage: LLMUsage
@@ -246,6 +252,8 @@ export interface CreateSessionInput {
   readonly title?: string
   /** Overrides `config.json.sandboxMode` for this session. */
   readonly sandboxMode?: SandboxMode
+  /** ADR 0022: start in plan mode; `sandboxMode` applies once the user approves a plan. */
+  readonly plan?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +762,12 @@ export interface SdkMethods {
   'sessions.export': (input: { readonly projectId: string; readonly sessionId: string; readonly outDir: string }) => Promise<ExportResult>
   /** Writes `session.title` (the title is trimmed; empty rejects `tool/invalid-input`) and returns the updated summary. */
   'sessions.rename': (input: { readonly projectId: string; readonly sessionId: string; readonly title: string }) => Promise<SessionSummary>
+  /**
+   * ADR 0022 decision 4: the user switches the session's mode or plan mode
+   * mid-session (`session.mode`, effective from the next tool call); takes
+   * the session lock like `sessions.open`. Returns the updated view.
+   */
+  'sessions.setMode': (input: { readonly projectId: string; readonly sessionId: string; readonly sandboxMode?: SandboxMode; readonly plan?: boolean }) => Promise<SessionView>
 
   /** Lists the project's regular files (symbolic links are not followed; {@link PROJECT_FILES_SKIPPED_DIRS} are skipped). */
   'files.list': (input: { readonly projectId: string }) => Promise<ProjectFileListing>
@@ -886,6 +900,7 @@ export const SDK_METHOD_NAMES = [
   'sessions.close',
   'sessions.export',
   'sessions.rename',
+  'sessions.setMode',
   'files.list',
   'dialogs.pickDirectory',
   'dialogs.pickFiles',

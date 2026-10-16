@@ -117,7 +117,7 @@ describe('Cordis plugin', () => {
       ctx.provide('tools', registry)
     })
     expect([...registered.keys()]).toContain('str_replace')
-    expect(registered.size).toBe(6)
+    expect(registered.size).toBe(8)
     await tools.dispose()
     expect(registered.size).toBe(0)
     await app.ctx.fiber.dispose()

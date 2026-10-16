@@ -127,6 +127,7 @@ const inputs: SessionRecordInput[] = [
   },
   { type: 'goal.update', turn: 2, goalId: 'g1', status: 'completed', note: 'done' },
   { type: 'session.title', turn: 2, title: '月报整理' },
+  { type: 'session.mode', sandboxMode: 'workspace-write', plan: false, reason: 'plan-approved' },
   { type: 'turn.files', turn: 2, changes: [{ path: 'report/summary.csv', change: 'modified' }], omitted: 2 },
   // step 3 records (shapes only; a real child would not start members itself)
   { type: 'subagent.start', turn: 2, toolCallId: 'c9', childSessionId: 'child-1', childTurn: 1, name: 'checker', executionForm: 'workflow', workflowId: 'w1', task: 'check' },

@@ -15,6 +15,7 @@ Nexgent 以 [MIT](LICENSE) 许可发布。本文件列出 Nexgent 使用、参�
 | [`turndown`](https://www.npmjs.com/package/turndown) | 7.2.4 | `@nexgent/web`：HTML 转 Markdown（npm 依赖） | MIT | Copyright (c) 2017 Dom Christie |
 | [`@mixmark-io/domino`](https://www.npmjs.com/package/@mixmark-io/domino)（`turndown` 的依赖） | 2.2.0 | `turndown` 在 Node 下解析 HTML 用的 DOM | BSD-2-Clause | Copyright (c) 2011 The Mozilla Foundation |
 | [`@joplin/turndown-plugin-gfm`](https://www.npmjs.com/package/@joplin/turndown-plugin-gfm) | 1.0.67 | `@nexgent/web`：GitHub 风格表格（npm 依赖） | MIT | Copyright (c) 2017 Dom Christie |
+| [`@anthropic-ai/sandbox-runtime`](https://www.npmjs.com/package/@anthropic-ai/sandbox-runtime) | 0.0.80（钉死） | `@nexgent/workspace`：命令的系统沙箱（Linux bubblewrap、macOS seatbelt），ADR 0022（npm 依赖） | Apache-2.0 | Copyright Anthropic PBC |
 | [PDF.js](https://github.com/mozilla/pdf.js)（打包在 `unpdf` 内） | 6.1.x（随 `unpdf` 1.8.1） | `.pdf` 解析 | Apache-2.0 | Copyright Mozilla Foundation |
 
 `@deepseek-ai/cordis` 与 `@deepseek-ai/schemastery` 是 DeepSeek 对上游 `cordis` / `schemastery` 的再发布，包内保留上游 LICENSE。

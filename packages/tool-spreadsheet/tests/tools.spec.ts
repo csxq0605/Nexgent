@@ -107,7 +107,7 @@ describe('write_spreadsheet and read_spreadsheet', () => {
     await expect(write.handler({ path: 'bad.xlsx', sheets: [{ name: 'a:b', rows: [[1]] }] }, context())).rejects.toMatchObject({ code: 'tool/invalid-input' })
   })
 
-  it('follows the sandbox: read-only mode reads but cannot write; host directories and paths outside the project are denied', async () => {
+  it('follows the sandbox: read-only mode reads but cannot write; host directories are denied and paths outside the project ask', async () => {
     const { root, services, context } = await setup('read-only')
     const write = writeSpreadsheetTool(services.sandbox)
     const read = readSpreadsheetTool(services.sandbox)
@@ -122,9 +122,10 @@ describe('write_spreadsheet and read_spreadsheet', () => {
     await expect(write.handler({ path: '.nexgent/outputs/x.xlsx', sheets: [{ name: 'S', rows: [[1]] }] }, context(writable))).rejects.toMatchObject({ code: 'sandbox/denied' })
     await expect(write.handler({ path: '.nexgent/materials/m1/inventory.xlsx', sheets: [{ name: 'S', rows: [[1]] }], overwrite: true }, context(writable))).rejects.toMatchObject({ code: 'sandbox/denied' })
     const outside = await tempDir()
-    await expect(write.handler({ path: join(outside, 'x.xlsx'), sheets: [{ name: 'S', rows: [[1]] }] }, context(writable))).rejects.toMatchObject({ code: 'sandbox/denied' })
+    // ADR 0022 decision 2: outside the project asks; nobody answers here.
+    await expect(write.handler({ path: join(outside, 'x.xlsx'), sheets: [{ name: 'S', rows: [[1]] }] }, context(writable))).rejects.toMatchObject({ code: 'approval/denied' })
     await writeFile(join(outside, 'y.xlsx'), rawXlsx({ S: '' }))
-    await expect(read.handler({ path: join(outside, 'y.xlsx') }, context())).rejects.toMatchObject({ code: 'sandbox/denied' })
+    await expect(read.handler({ path: join(outside, 'y.xlsx') }, context())).rejects.toMatchObject({ code: 'approval/denied' })
     await expect(read.handler({ path: '.nexgent/sessions/x.xlsx' }, context())).rejects.toMatchObject({ code: 'sandbox/denied' })
   })
 

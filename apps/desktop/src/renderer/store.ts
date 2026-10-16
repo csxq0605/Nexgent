@@ -7,7 +7,7 @@
  * broken backend shows an error instead of a blank window.
  */
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
-import type { ImproverBundle } from '@nexgent/kernel'
+import type { CommandSandboxStatus, ImproverBundle } from '@nexgent/kernel'
 import type { LearningConfig } from '@nexgent/kernel'
 import type { CandidateDetail, CapabilityListing, HandbookEntryDetail, HandbookListing, ImprovementDetail, ImprovementListing, ImproverListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
@@ -22,6 +22,10 @@ export interface SessionMeta {
   readonly model: string
   readonly sandboxMode: SandboxMode
   readonly totalUsage: LLMUsage
+  /** ADR 0022: plan mode is on. */
+  readonly plan?: boolean
+  /** ADR 0022: whether commands run in an OS sandbox. */
+  readonly commandSandbox?: CommandSandboxStatus
 }
 
 /** Step 3: a member's session shown read-only in the middle column. */
@@ -625,7 +629,13 @@ export class AppStore {
     const pending = view.items.flatMap(item => (item.kind === 'approval' && item.decision === undefined && view.summary.running ? [item.request] : []))
     this.set(state => ({
       sessionLoading: false,
-      sessionMeta: { model: view.model, sandboxMode: view.sandboxMode, totalUsage: view.totalUsage },
+      sessionMeta: {
+        model: view.model,
+        sandboxMode: view.sandboxMode,
+        totalUsage: view.totalUsage,
+        plan: view.plan,
+        ...(view.commandSandbox === undefined ? {} : { commandSandbox: view.commandSandbox }),
+      },
       timeline: fromHistory(view.items),
       running: view.summary.running,
       pendingApprovals: pending,

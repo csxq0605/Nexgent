@@ -105,6 +105,12 @@ export interface ToolApprovalAsk {
   readonly subject?: ApprovalSubject
   /** Scopes to offer; default all the host supports; `high` risk offers only `once`. */
   readonly options?: readonly ApprovalScope[]
+  /**
+   * Store and match a grant made from this ask under this name instead of the
+   * calling tool's (ADR 0022 decision 2: `fs.read` / `fs.write` for a
+   * directory outside the project, so one session grant covers every file tool).
+   */
+  readonly grantTool?: string
 }
 
 /** The single host-side responder; without one every request is denied with `decidedBy: 'timeout'`. */

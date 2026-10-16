@@ -9,6 +9,7 @@
  */
 import type {
   ApprovalDecision,
+  CommandSandboxStatus,
   ApprovalRequest,
   ErrorInfo,
   LLMUsage,
@@ -30,6 +31,10 @@ export interface SessionOpenEvent {
   readonly projectRoot: string
   readonly model: string
   readonly sandboxMode: SandboxMode
+  /** ADR 0022: the session started in plan mode and no plan was approved yet. */
+  readonly plan?: boolean
+  /** ADR 0022: whether commands run in an OS sandbox (from the session header). */
+  readonly commandSandbox?: CommandSandboxStatus
   /** `true` for `nexgent resume`. */
   readonly resumed: boolean
 }

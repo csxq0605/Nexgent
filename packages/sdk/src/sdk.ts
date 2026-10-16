@@ -50,6 +50,7 @@ import {
   type LLMUsage,
   type NexgentApp,
   type Plugin,
+  SANDBOX_MODES,
   type SandboxMode,
   type SessionRecord,
   type SubagentStartRecord,
@@ -321,6 +322,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     const agent = await project.app.agents.create({
       ...(input.title === undefined ? {} : { title: input.title }),
       ...(input.sandboxMode === undefined ? {} : { sandboxMode: input.sandboxMode }),
+      ...(input.plan === true ? { plan: true } : {}),
       ...(input.model === undefined ? {} : { model: input.model }),
     })
     this.track(project, agent)
@@ -719,9 +721,13 @@ export class LocalNexgentSdk implements NexgentSdk {
     const records = await this.records(project, sessionId)
     const state = projectSession(records)
     const entry = project.sessions.get(sessionId)
+    const start = records.find(record => record.type === 'session.start')
+    const commandSandbox = start?.type === 'session.start' ? start.commandSandbox : undefined
     return {
       summary: sessionSummary(records, state, this.isRunning(project.projectId, sessionId)),
-      sandboxMode: entry?.agent.sandboxMode ?? state.metadata.sandboxMode,
+      sandboxMode: entry?.agent.executionMode ?? state.metadata.sandboxMode,
+      plan: entry?.agent.plan ?? state.metadata.plan === true,
+      ...(commandSandbox === undefined ? {} : { commandSandbox }),
       model: entry?.agent.model ?? state.metadata.model,
       items: historyItems(records),
       totalUsage: state.metadata.totalUsage,
@@ -1112,6 +1118,18 @@ export class LocalNexgentSdk implements NexgentSdk {
         const entry = await this.rootSession(project, input.sessionId)
         await entry.agent.appendHostRecord({ type: 'session.title', title })
         return this.summary(project, input.sessionId)
+      },
+
+      'sessions.setMode': async input => {
+        const project = this.project(input.projectId)
+        if (input.sandboxMode !== undefined && !SANDBOX_MODES.includes(input.sandboxMode)) throw invalid('sandboxMode must be a sandbox mode')
+        if (input.plan !== undefined && typeof input.plan !== 'boolean') throw invalid('plan must be a boolean')
+        const entry = await this.rootSession(project, input.sessionId)
+        await entry.agent.setMode({
+          ...(input.sandboxMode === undefined ? {} : { sandboxMode: input.sandboxMode }),
+          ...(input.plan === undefined ? {} : { plan: input.plan }),
+        })
+        return this.view(project, input.sessionId)
       },
 
       'files.list': input => listProjectFiles(this.project(input.projectId).root),

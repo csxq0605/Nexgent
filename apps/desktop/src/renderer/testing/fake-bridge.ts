@@ -195,7 +195,7 @@ export class FakeBridge implements NexgentBridge {
   private seq = 0
   deliverables: DeliverableSummary[] = []
   materials: MaterialMetadata[] = []
-  view: SessionView = { summary: SESSION, sandboxMode: 'workspace-write', model: 'claude-sonnet-5-5', items: [], totalUsage: ZERO_USAGE }
+  view: SessionView = { summary: SESSION, sandboxMode: 'workspace-write', plan: false, model: 'claude-sonnet-5-5', items: [], totalUsage: ZERO_USAGE }
   recent: ProjectInfo[] = [PROJECT]
   sessions: SessionSummary[] = [SESSION]
   settings: ProjectSettings = SETTINGS

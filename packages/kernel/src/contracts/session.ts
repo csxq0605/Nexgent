@@ -44,6 +44,14 @@ export interface SessionStartRecord extends SessionRecordBase {
   readonly model: string
   /** Sandbox mode in effect; `resume` keeps it unless the host passes `--sandbox` again. */
   readonly sandboxMode: SandboxMode
+  /**
+   * ADR 0022 decision 4: the session starts in plan mode (tools act as in
+   * `read-only` until the user approves a plan through `exit_plan`, then
+   * `sandboxMode` applies). Absent means false.
+   */
+  readonly plan?: boolean
+  /** ADR 0022 decision 1: whether commands run in an OS sandbox, as the host found it at start. */
+  readonly commandSandbox?: CommandSandboxStatus
   /** The session that started this one as a member (step 3 child session); absent for a root session. */
   readonly parentSessionId?: string
   /** Human-readable title when one was given. */
@@ -223,6 +231,28 @@ export interface ApprovalDecisionRecord extends SessionRecordBase {
   readonly type: 'approval.decision'
   readonly turn: number
   readonly decision: ApprovalDecision
+}
+
+/** ADR 0022 decision 1: whether commands run in an OS sandbox. */
+export type CommandSandboxStatus =
+  | { readonly kind: 'active'; readonly platform: string }
+  /** No OS sandbox here (Windows, missing bubblewrap...); commands run under the command policy only. */
+  | { readonly kind: 'none'; readonly reason: string }
+  /** The project turned it off (`commands.systemSandbox: 'off'`). */
+  | { readonly kind: 'off' }
+
+/**
+ * ADR 0022 decision 4: the session's mode changed mid-session (a host switch,
+ * or the user approved a plan through `exit_plan`). Effective from the next
+ * tool call; `resume` keeps the latest.
+ */
+export interface SessionModeRecord extends SessionRecordBase {
+  readonly type: 'session.mode'
+  readonly sandboxMode: SandboxMode
+  /** Whether plan mode is on after the change. */
+  readonly plan: boolean
+  /** `host` for a switch the user made in the app or CLI; `plan-approved` after `exit_plan`. */
+  readonly reason: 'host' | 'plan-approved'
 }
 
 /** A `session`-scope grant; survives `resume`. Written right after the deciding `approval.decision`. */
@@ -576,6 +606,7 @@ export type SessionRecord =
   | CapabilityDraftRecord
   | CapabilityTryRecord
   | CapabilityProposeRecord
+  | SessionModeRecord
 
 /** The `type` tag vocabulary. */
 export type SessionRecordType = SessionRecord['type']
@@ -614,6 +645,7 @@ export const SESSION_RECORD_TYPES: readonly SessionRecordType[] = [
   'capability.draft',
   'capability.try',
   'capability.propose',
+  'session.mode',
 ]
 
 /**
@@ -669,8 +701,10 @@ export interface SessionMetadata {
   readonly projectRoot: string
   /** From `session.start`. */
   readonly model: string
-  /** From `session.start`. */
+  /** From `session.start`, then the latest `session.mode`. */
   readonly sandboxMode: SandboxMode
+  /** ADR 0022: plan mode on; from `session.start`, then the latest `session.mode`. Absent means false. */
+  readonly plan?: boolean
   /** `session`-scope approval grants from `approval.grant` records, in order. */
   readonly grants: readonly ApprovalGrant[]
   /** Title when set. */
@@ -730,6 +764,10 @@ export interface SessionInit {
   /** Step 5: written into `session.start`; `improvement` is required when `purpose` is `improvement`, refused otherwise. */
   readonly purpose?: SessionPurpose
   readonly improvement?: SessionImprovement
+  /** ADR 0022: written into `session.start.plan` when true. */
+  readonly plan?: boolean
+  /** ADR 0022: written into `session.start.commandSandbox`. */
+  readonly commandSandbox?: CommandSandboxStatus
 }
 
 /** Where recovery stopped, when the file had a bad tail. */

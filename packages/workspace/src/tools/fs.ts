@@ -184,9 +184,10 @@ async function enforcePath(deps: ToolDeps, assessment: SandboxAssessment, contex
   return enforce(assessment, context, { summary: `${verb} ${assessment.path}`, ...(subject === undefined ? {} : { subject }) })
 }
 
+/** Grant subject: the project-relative path, or the absolute `/` path outside the project (ADR 0022: directory grants). */
 function subjectsFor(deps: ToolDeps, _context: ToolContext, real: string): { kind: 'path'; value: string }[] {
   const rel = deps.sandbox.relative(real)
-  return rel === undefined ? [] : [{ kind: 'path', value: rel }]
+  return [{ kind: 'path', value: rel ?? real.replaceAll('\\', '/') }]
 }
 
 /**
