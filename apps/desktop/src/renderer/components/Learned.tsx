@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { HandbookOp } from '@nexgent/kernel'
 import type { HandbookEntryView, LearningStatus } from '@nexgent/sdk'
 import { useAppState, useAppStore } from '../hooks.js'
@@ -107,7 +107,7 @@ function LearningCard({ learning }: { readonly learning: LearningStatus }): JSX.
           <div className="setting-name">{L.learningSwitch}</div>
           <div className="muted small">{learning.config.enabled ? L.learningSwitchHelp : L.learningOff}</div>
         </div>
-        <Switch checked={learning.config.enabled} onChange={enabled => void store.saveLearning({ enabled })} label={L.learningSwitch} testId="learning-toggle" />
+        <Switch checked={learning.config.enabled} onChange={enabled => store.saveLearning({ enabled })} label={L.learningSwitch} testId="learning-toggle" />
       </div>
       {learning.config.enabled && !learning.noticeAcknowledged && (
         <div className="setting-line">
@@ -228,11 +228,27 @@ function EntryHistory({ keywords, sources, ops }: { readonly keywords: readonly 
   )
 }
 
-/** A toggle switch on a checkbox, so keyboard, screen readers and tests treat it as one. */
-export function Switch({ checked, onChange, label, testId, disabled }: { readonly checked: boolean; readonly onChange: (checked: boolean) => void; readonly label: string; readonly testId: string; readonly disabled?: boolean }): JSX.Element {
+/**
+ * A toggle switch on a checkbox, so keyboard, screen readers and tests treat it as one.
+ * It shows the new state at once while `onChange`'s save runs, then follows `checked`.
+ */
+export function Switch({ checked, onChange, label, testId, disabled }: { readonly checked: boolean; readonly onChange: (checked: boolean) => unknown; readonly label: string; readonly testId: string; readonly disabled?: boolean }): JSX.Element {
+  const [pending, setPending] = useState<boolean | undefined>(undefined)
   return (
     <label className="switch">
-      <input type="checkbox" role="switch" checked={checked} disabled={disabled} aria-label={label} onChange={event => onChange(event.target.checked)} data-testid={testId} />
+      <input
+        type="checkbox"
+        role="switch"
+        checked={pending ?? checked}
+        disabled={disabled}
+        aria-label={label}
+        onChange={event => {
+          const next = event.target.checked
+          setPending(next)
+          void Promise.resolve(onChange(next)).finally(() => setPending(undefined))
+        }}
+        data-testid={testId}
+      />
       <span className="switch-track" aria-hidden="true" />
     </label>
   )

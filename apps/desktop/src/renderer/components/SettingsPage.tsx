@@ -58,12 +58,12 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'failed'
  * never races the first; the state is `saved` once the queue is empty and
  * every save in it went through.
  */
-function useSaver(): { readonly state: SaveState; readonly run: (work: () => Promise<boolean>) => void; readonly settle: () => void } {
+function useSaver(): { readonly state: SaveState; readonly run: (work: () => Promise<boolean>) => Promise<void>; readonly settle: () => void } {
   const [state, setState] = useState<SaveState>('idle')
   const queue = useRef<Promise<void>>(Promise.resolve())
   const pending = useRef(0)
   const failed = useRef(false)
-  const run = (work: () => Promise<boolean>): void => {
+  const run = (work: () => Promise<boolean>): Promise<void> => {
     pending.current += 1
     setState('saving')
     queue.current = queue.current.then(async () => {
@@ -75,6 +75,7 @@ function useSaver(): { readonly state: SaveState; readonly run: (work: () => Pro
         failed.current = false
       }
     })
+    return queue.current
   }
   // A field left without a change: nothing to send, but the page is up to date.
   const settle = (): void => {
@@ -137,8 +138,8 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
     return message === undefined ? rest : { ...rest, [field]: message }
   })
 
-  const saveProject = (patch: SettingsPatch): void => project.run(() => store.saveSettings(patch))
-  const saveUser = (patch: UserSettingsPatch): void => user.run(() => store.saveUserSettings(patch))
+  const saveProject = (patch: SettingsPatch): void => void project.run(() => store.saveSettings(patch))
+  const saveUser = (patch: UserSettingsPatch): void => void user.run(() => store.saveUserSettings(patch))
 
   const commitModel = (): void => {
     const value = model.trim()
@@ -250,7 +251,10 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
     )
   }
 
-  const saved = project.state === 'saved' && user.state !== 'saving'
+  // The page head speaks for the whole page: saved once something saved and nothing is saving or failed.
+  const busy = project.state === 'saving' || user.state === 'saving'
+  const failed = project.state === 'failed' || user.state === 'failed'
+  const saved = !busy && !failed && (project.state === 'saved' || user.state === 'saved')
   return (
     <Page
       title={T.settingsTitle}
@@ -258,8 +262,8 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
       onClose={onClose}
       testId="settings-page"
       aside={
-        <span className="save-state small" data-testid="settings-save-state" data-state={project.state === 'saving' || user.state === 'saving' ? 'saving' : project.state === 'failed' || user.state === 'failed' ? 'failed' : saved || user.state === 'saved' ? 'saved' : 'idle'} aria-live="polite">
-          {project.state === 'saving' || user.state === 'saving' ? <span className="muted">{L.saving}</span> : null}
+        <span className="save-state small" data-testid="settings-save-state" data-state={busy ? 'saving' : failed ? 'failed' : saved ? 'saved' : 'idle'} aria-live="polite">
+          {busy ? <span className="muted">{L.saving}</span> : null}
           {saved && <span className="ok-text" data-testid="settings-saved">{L.saved}</span>}
         </span>
       }
