@@ -33,7 +33,7 @@
 - **跟踪成员**：父会话写 `subagent.start` 时成员已在 kernel 里打开，SDK 当即订阅它，此后成员的全部事件带 `parentSessionId` 发出（`eventSeq` 按成员会话自己计）。成员关闭（`closed`）后取消订阅。成员不由 SDK 打开或关闭，也不写 SDK 的 `task.outcome`（kernel 在成员关闭时写它自己的）。
 - **成员进度事件**（发在父会话上）：`subagent.start` → `member.start`（`status: running`）；`subagent.end` → `member.end`（结局、成果、用量、错误）；`workflow.phase` → `workflow.phase`；`team.message` 的 queued / delivered 两次都发 `team.message`。
 - **只读**：`turns.send`、`sessions.rename`、`goals.*`、`materials.add` 遇到成员会话报 `tool/denied`；`sessions.open` 打开成员时返回只读视图（不加锁）；`sessions.close` 对成员不做任何事。`turns.cancel` 对成员会取消它正在跑的那一轮（父会话的工具按 `cancelled` 收尾）；取消父会话时 kernel 以 `parent` 取消成员。
-- **列表与视图**：`sessions.list` 默认只列根会话并带 `childCount`，`includeChildren: true` 时成员也列出（带 `parentSessionId`、`member`）；`sessions.children` 按创建时间列某会话的成员；`sessions.view` 不加锁读任何会话；`sessions.collaboration` 从父会话记录折叠出成员运行、工作流和团队（花名册按名字、任务按 id、邮件按 id 取最新）。历史里 `member`、`workflow`、`team.message` 项放在开始的位置，显示最新状态。
+- **列表与视图**：`sessions.list` 默认只列根会话并带 `childCount`，每项带 `firstMessage`（用户输入的第一条消息，截到 200 字，界面在没有标题和目标时用它作列表标题），`includeChildren: true` 时成员也列出（带 `parentSessionId`、`member`）；`sessions.children` 按创建时间列某会话的成员；`sessions.view` 不加锁读任何会话；`sessions.collaboration` 从父会话记录折叠出成员运行、工作流和团队（花名册按名字、任务按 id、邮件按 id 取最新）。历史里 `member`、`workflow`、`team.message` 项放在开始的位置，显示最新状态。
 - **审批**：成员的 `approval.request` 事件发在成员会话上（带 `parentSessionId`，请求带 `member`）；`approvals.respond` 用成员会话 id 或父会话 id 都能应答。
 
 进程内扩展（不经 IPC，CLI 用）：`onAgentEvent`（原始 kernel 事件）、`createSession({ model })`、`openSession({ sandboxMode })`、`cancelTurn({ cause })`、`startTurn`（返回 `done`，在 `task.outcome` 写完后 settle）、`isRunning`、`apiKeyInfo`。

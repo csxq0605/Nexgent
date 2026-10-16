@@ -88,7 +88,9 @@ describe('improvement jobs in the right panel', () => {
     expect(screen.getByTestId('improvement-candidate').textContent).toContain('order-summary')
     expect(screen.getByTestId('improvement-candidate').textContent).toContain('已采用')
     expect(screen.getByTestId('improvement-gate-verdict').textContent).toContain('检查通过率高于基线')
-    expect(screen.getByTestId('improvement-gate-verdict').textContent).toContain('候选多通过了 2 项。')
+    // The cost in the UI's words; the gate's own detail line is folded away under it.
+    expect(screen.getByTestId('improvement-gate-verdict').textContent).toContain('已采用：检查通过率高于基线。费用是基线的 1.00 倍。')
+    expect(screen.getByTestId('improvement-gate-verdict').querySelector('details')?.textContent).toContain('候选多通过了 2 项。')
     expect(screen.getByTestId('improvement-gate-feedback').textContent).toContain('反馈检查')
     expect(screen.getByTestId('improvement-gate-review')).toBeTruthy()
     expect(screen.getByTestId('improvement-phases').textContent).toContain('诊断：1,000 tokens')

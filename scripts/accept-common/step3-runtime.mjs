@@ -20,9 +20,14 @@ const PACKAGES = {
 
 /**
  * The one loopback address the test `web_fetch` row may reach (H19): the scenario's page
- * server listens here. The shipped `@nexgent/web` allows no loopback at all.
+ * server listens here. The shipped `@nexgent/web` allows no loopback at all. It must differ
+ * from 127.0.0.1, which stays refused: macOS answers only on 127.0.0.1 out of 127.0.0.0/8, so
+ * there the IPv6 loopback stands in.
  */
-export const TEST_WEB_ADDRESS = '127.0.0.2'
+export const TEST_WEB_ADDRESS = process.platform === 'darwin' ? '::1' : '127.0.0.2'
+
+/** {@link TEST_WEB_ADDRESS} as a URL host (an IPv6 literal goes in brackets). */
+export const TEST_WEB_HOST = TEST_WEB_ADDRESS.includes(':') ? `[${TEST_WEB_ADDRESS}]` : TEST_WEB_ADDRESS
 
 function entry(dir) {
   return new URL(`../../${dir}/dist/index.js`, import.meta.url)

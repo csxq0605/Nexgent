@@ -391,4 +391,13 @@ describe('markdown replies', () => {
     link.dispatchEvent(click)
     expect(click.defaultPrevented).toBe(true)
   })
+
+  it('bolds emphasis that ends in CJK punctuation right before CJK text', async () => {
+    const { bridge } = await renderApp()
+    emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
+    emit(bridge, { type: 'assistant.message', turn: 1, step: 1, text: '**金额口径：**按数量×单价计算，**“已完成”**才计入。', finishReason: 'stop', interrupted: false, usage })
+    const message = screen.getByTestId('assistant-message')
+    expect([...message.querySelectorAll('strong')].map(node => node.textContent)).toEqual(['金额口径：', '“已完成”'])
+    expect(message.textContent).not.toContain('**')
+  })
 })

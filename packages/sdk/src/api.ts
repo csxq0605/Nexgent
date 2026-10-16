@@ -158,6 +158,8 @@ export interface OpenProjectInput {
 export interface SessionSummary {
   readonly sessionId: string
   readonly title?: string
+  /** The first prompt the user typed (`user.message` with `source: 'user'`, trimmed, at most 200 characters); lists fall back to it when there is no title. */
+  readonly firstMessage?: string
   readonly createdAt: string
   /** `ts` of the last record. */
   readonly updatedAt: string
