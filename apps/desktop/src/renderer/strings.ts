@@ -762,3 +762,145 @@ export function effortText(effort: string): string {
   const words: Record<string, string> = { low: '低', medium: '中', high: '高', xhigh: '很高', max: '最高' }
   return words[effort] ?? effort
 }
+
+// ---------------------------------------------------------------------------
+// Rework D2: the 能力 and 设置 pages in plain words (ui-redesign-research §4.4).
+// Nothing here says 门控、候选、基线、改进器 or 元改进 (a test checks).
+// ---------------------------------------------------------------------------
+
+export const L = {
+  sectionLearned: '经验',
+  sectionPractices: '做法与版本',
+  sectionHistory: '改进记录',
+  leadNone: '做完任务后，Nexgent 会自己检查结果、总结经验；学到的会出现在这里。',
+  lead: (active: number, trial: number, last: string | undefined) =>
+    `Nexgent 在这个项目里用着 ${active} 条经验${trial > 0 ? `，另有 ${trial} 条在试用` : ''}${last === undefined ? '' : `，最近一次学到是在 ${last}`}。`,
+  decideTitle: '等你决定',
+  decideRow: (name: string) => `新做法「${name}」测试下来更好，要你同意才会启用`,
+  decideWhy: '它会给 Nexgent 加上新的能力（插件），所以先问你。',
+  decideOpen: '查看',
+  learningTitle: '自己学习',
+  learningSwitch: '每次任务后自己学习',
+  learningSwitchHelp: '做完任务后给结果打分、总结经验，下次做类似的事时用上。',
+  learningOff: '已关闭：不再打分，也不再总结新经验；已经学到的照常使用。',
+  learningWaiting: '还没开始：确认一次学习说明后才会花钱学习。',
+  learningAcknowledge: '知道了，开始学习',
+  learningAdjust: '调整预算和共享',
+  spend: (spent: string, max: string, days: number) => `近 ${days} 天学习花了 ${spent} 美元，预算 ${max} 美元`,
+  spendEstimated: '（含估算）',
+  spendLeft: (left: string) => `还剩 ${left} 美元`,
+  phases: { 'self-eval': '给结果打分', calibrate: '抽查打分', reflect: '总结经验', curate: '整理经验' } as Record<string, string>,
+  selfEvaluations: (n: number) => (n === 0 ? '还没有给任务打过分' : `给 ${n} 个任务打了分`),
+  reliability: {
+    insufficient: (sampled: number) => `打分抽查了 ${sampled} 次，还不到 10 次：经验照常试用，新技能先等你批准。`,
+    reliable: (rate: string) => `抽查时和外部评审一致 ${rate}，打分可信。`,
+    unreliable: (rate: string) => `抽查时和外部评审只一致 ${rate}（低于 80%）：新技能要等你批准。`,
+  },
+  activeTitle: '已学会',
+  trialTitle: '试用中',
+  retiredTitle: (n: number) => `已停用（${n}）`,
+  empty: '还没有学到经验。每条新经验先试用，帮上忙两次后正式启用；带偏了就自动停用。',
+  scopeUser: '所有项目共用',
+  scopeProject: '只用于这个项目',
+  helpful: (n: number) => `帮上忙 ${n} 次`,
+  harmful: (n: number) => `带偏 ${n} 次`,
+  untilActive: (n: number) => `再帮上忙 ${n} 次就正式启用`,
+  sinceDate: (date: string) => `${date} 学到`,
+  stop: '停用',
+  restore: '恢复',
+  historyTitle: '经过',
+  keywords: '适用于',
+  sources: (n: number) => `从 ${n} 个任务里学到`,
+  op: {
+    add: '学到这条经验',
+    edit: '改写了内容',
+    upvote: '一次任务里帮上了忙',
+    downvote: '一次任务里带偏了',
+    trial: '回到试用',
+    active: '正式启用',
+    retired: '停用',
+  } as Record<string, string>,
+  byUser: '你',
+  olderHistory: '以前的改进记录（旧方式）在“改进记录”里；改进方式本身的学习在 设置 → 高级。',
+  noticeTitle: 'Nexgent 会在后台学习',
+  noticeBody: (max: string, days: number) =>
+    `每次任务结束后，Nexgent 会给结果打分、总结经验，下次做类似的事时用上。每个项目每 ${days} 天最多花 ${max} 美元；在 设置 → 自动改进 里可以关掉或改预算。`,
+  noticeOk: '知道了',
+  noticeSettings: '去设置',
+  // settings
+  settingsLead: '改动会立即保存。',
+  saving: '正在保存…',
+  saved: '已保存',
+  groups: { general: '通用', model: '模型', permissions: '权限', cost: '费用', learning: '自动改进', advanced: '高级' } as Record<string, string>,
+  groupHelp: {
+    general: '外观和语言，对所有项目生效。',
+    model: '这个项目用哪个模型、想多深。',
+    permissions: 'Nexgent 能动这个项目里的哪些文件。',
+    cost: '超过上限时停下当前任务。按美元算，空着就是不限。',
+    learning: '做完任务后自己总结经验，花费单独记、有上限。',
+    advanced: '密钥和以前的改进方式。',
+  } as Record<string, string>,
+  language: '语言',
+  languageHelp: 'Nexgent 写给你的经验和说明用这种语言。界面目前只有中文。',
+  languageAuto: '跟每个任务一致',
+  model: '模型',
+  modelHelp: '执行任务用的模型。',
+  thinking: '先思考再回答',
+  thinkingHelp: '复杂任务更稳，但更慢、更贵。',
+  effort: '思考深度',
+  effortHelp: '想得越深越慢、越贵。',
+  sandbox: '文件权限',
+  sandboxHelp: '只读时 Nexgent 只能看；可写时只能改这个项目里的文件。',
+  perTask: '每个任务',
+  perTaskHelp: '一次任务（含它分出去的成员）最多花多少。',
+  perConversation: '每段对话',
+  perConversationHelp: '一段对话所有轮次加起来最多花多少。',
+  perProject: '整个项目',
+  perProjectHelp: (days: number) => `这个项目 ${days} 天内最多花多少。`,
+  usd: '美元',
+  unlimited: '不限',
+  windowDays: '天数',
+  usageCaps: '也可以按用量限制（tokens、请求次数），一般不用填。',
+  maxTokens: '最多 tokens',
+  maxRequests: '最多请求次数',
+  learningBudget: '学习预算',
+  learningBudgetHelp: (days: number) => `每个项目 ${days} 天内学习最多花多少，打分也算在里面。`,
+  useShared: '用其他项目学到的经验',
+  useSharedHelp: '关掉后，这个项目只用自己学到的。',
+  contribute: '把这里学到的经验分享给其他项目',
+  contributeHelp: '关掉后，这里学到的只留在这个项目。',
+  apiKey: '模型 API 密钥',
+  apiKeyHelp: '保存在本机，保存后不再显示。',
+  legacyTitle: '以前的改进方式',
+  legacyHelp: '只对以前留下的改进记录和手动“改进做法”有效；平时的学习看“自动改进”。',
+  legacyBudget: '改进预算（tokens）',
+  legacyWindow: '统计天数',
+  shareEvidence: '让改进方式参考这个项目的改进记录',
+  shareEvidenceHelp: '改进方式由所有项目共用；关掉后它不再读这个项目的记录。',
+  metaTitle: '改进方式也自己学习',
+  metaHelp: '对所有项目生效：积累几次改进后，Nexgent 试着改进“怎么改进”。默认关闭。',
+  metaEnabled: '开启',
+  metaEvery: '每几次改进学一次',
+  metaBudget: '预算（tokens）',
+  metaWindow: '统计天数',
+  invalidNumber: '请填正数，或留空表示不限。',
+  invalidInteger: '请填正整数。',
+  invalidModel: '模型不能为空。',
+  invalidEvery: '请填 1 到 20 的整数。',
+}
+
+/** Dollars for the 能力 and 设置 pages: two decimals below 10, else one. */
+export function usdText(usd: number): string {
+  return usd < 10 ? usd.toFixed(2) : usd.toFixed(1)
+}
+
+/** A percentage of a rate in [0, 1]. */
+export function rateText(rate: number | undefined): string {
+  return rate === undefined ? '—' : `${Math.round(rate * 100)}%`
+}
+
+/** A day as people say it: 10 月 16 日. */
+export function dayText(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? iso : `${date.getMonth() + 1} 月 ${date.getDate()} 日`
+}

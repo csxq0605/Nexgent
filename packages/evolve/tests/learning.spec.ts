@@ -327,6 +327,20 @@ describe('layer-1 learning, scripted end to end', () => {
     expect(await handbook.project.entries()).toEqual([expect.objectContaining({ scope: 'project', projectId: handbook.projectId, status: 'trial' })])
   })
 
+  it('writes in the interface language the user chose, whatever the task language', async () => {
+    const s = await setup()
+    await writeFile(join(home(), 'config.json'), `${JSON.stringify({ version: 1, learning: { noticeAcknowledgedAt: '2026-10-16T00:00:00.000Z' }, language: 'en' })}\n`)
+    let prompt = ''
+    await runTask(s, [{ text: '把这几个月的销售明细合并成一张汇总表' }], {
+      reply: request => {
+        prompt = String(request.messages[0]!.content)
+        return ops()
+      },
+    })
+    expect(prompt).toContain('English')
+    expect(prompt).not.toContain('简体中文')
+  })
+
   it('spends nothing before the notice is acknowledged, or once the budget is exhausted', async () => {
     const quiet = await setup({ acknowledged: false })
     await runTask(quiet, [{ text: 'Tidy the README' }])

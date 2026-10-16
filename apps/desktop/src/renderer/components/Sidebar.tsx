@@ -130,7 +130,7 @@ export function Sidebar(): JSX.Element {
         <button
           type="button"
           className={view === 'capabilities' ? 'nav-item active' : 'nav-item'}
-          onClick={() => ui.showPanel('capabilities')}
+          onClick={() => ui.showPanel('learned')}
           data-testid="nav-capabilities"
         >
           <Icon name="star" />

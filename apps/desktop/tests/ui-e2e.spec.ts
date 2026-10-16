@@ -21,7 +21,7 @@ import { scriptedModelServer, type MessagesRequestBody, type ScriptedModelServer
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { closeDrawer, fillProjectPath, showTab } from './fixtures/ui.js'
+import { closeDrawer, commitSettings, fillProjectPath, showTab, showUsageCaps } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -268,12 +268,12 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         const settings = page.getByTestId('settings-page')
         await settings.getByTestId('setting-model').fill('claude-opus-5-5')
         await settings.getByTestId('setting-thinking').selectOption('off')
+        await showUsageCaps(page)
         await settings.getByTestId('cap-task-tokens').fill('100000')
         await settings.getByTestId('cap-project-requests').fill('300')
         expect(await settings.getByTestId('api-key-status').textContent()).toBe('已配置（来源：环境变量）')
         await shot(page, '07-settings')
-        await settings.getByTestId('settings-save').click()
-        await settings.getByTestId('settings-saved').waitFor()
+        await commitSettings(page)
         const config = JSON.parse(readFileSync(join(root, '.nexgent', 'config.json'), 'utf8'))
         expect(config).toMatchObject({ model: 'claude-opus-5-5', thinking: 'off', costCaps: { perTask: { maxTokens: 100000 }, perProject: { maxRequests: 300 } } })
         expect(await page.content()).not.toContain(KEY)
@@ -327,7 +327,8 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         await page.getByTestId('rename-input').fill('订单汇总')
         await page.keyboard.press('Enter')
         await expect.poll(() => page.getByTestId('session-item').textContent()).toContain('订单汇总')
-        expect(sessionRecords(root).filter(r => r['type'] === 'session.title').map(r => r['title'])).toEqual(['订单汇总'])
+        // The first is the title named after the first turn (the scripted server's reply), the second the rename.
+        expect(sessionRecords(root).filter(r => r['type'] === 'session.title').map(r => r['title'])).toEqual(['对话标题', '订单汇总'])
 
         await page.getByTestId('composer-input').click()
         await page.keyboard.type('继续')

@@ -37,3 +37,22 @@ export async function fillProjectPath(page, root, options) {
   if ((await more.getAttribute('open')) === null) await more.locator('summary').click()
   await page.getByTestId('project-path').fill(root, options)
 }
+
+/**
+ * The settings page saves each change at once (rework D2): leave the field
+ * being typed in, then wait until the page says 已保存 (`user` waits for the
+ * user-level section's own mark).
+ */
+export async function commitSettings(page, options = {}, user = false) {
+  await page.evaluate(() => {
+    const active = document.activeElement
+    if (active instanceof HTMLElement) active.blur()
+  })
+  await page.getByTestId('settings-page').getByTestId(user ? 'settings-user-saved' : 'settings-saved').waitFor(options)
+}
+
+/** Open the settings page's limits by tokens and requests (folded under the dollar caps). */
+export async function showUsageCaps(page) {
+  const more = page.getByTestId('settings-page').locator('.usage-more')
+  if ((await more.getAttribute('open')) === null) await more.locator('summary').click()
+}

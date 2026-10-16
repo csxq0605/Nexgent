@@ -136,7 +136,7 @@ async function readUserConfigRaw(file: string): Promise<Record<string, unknown> 
 export async function readUserSettings(home: string): Promise<UserSettings> {
   const raw = await readUserConfigRaw(userConfigFile(home))
   const resolved = resolveUserConfig(raw ?? {})
-  return { improvement: resolved.improvement, learning: resolved.learning }
+  return { improvement: resolved.improvement, learning: resolved.learning, ...(resolved.language === undefined ? {} : { language: resolved.language }) }
 }
 
 /**
@@ -157,14 +157,17 @@ export async function acknowledgeLearning(home: string, now: () => Date = () => 
 
 /**
  * `userSettings.update`: the patch's `improvement.meta` replaces the stored
- * one (missing fields take their defaults); other fields on disk are kept.
+ * one (missing fields take their defaults), `language` sets the interface
+ * language (`null` removes it); other fields on disk are kept.
  * Validated as a whole before writing.
  */
 export async function updateUserSettings(home: string, patch: UserSettingsPatch): Promise<UserSettings> {
   if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) throw new NexgentError('config/invalid', 'user settings patch must be an object')
-  for (const key of Object.keys(patch)) if (key !== 'improvement') throw new NexgentError('config/invalid', `user settings patch: unknown field ${key}`)
+  for (const key of Object.keys(patch)) if (key !== 'improvement' && key !== 'language') throw new NexgentError('config/invalid', `user settings patch: unknown field ${key}`)
   const file = userConfigFile(home)
   const next: Record<string, unknown> = { version: 1, ...await readUserConfigRaw(file) }
+  if (patch.language === null) delete next.language
+  else if (patch.language !== undefined) next.language = patch.language
   if (patch.improvement !== undefined) {
     const improvement = patch.improvement as unknown
     if (improvement === null || typeof improvement !== 'object' || Array.isArray(improvement)) throw new NexgentError('config/invalid', 'user settings patch: improvement must be an object')

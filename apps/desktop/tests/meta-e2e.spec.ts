@@ -30,7 +30,7 @@ import { scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-sup
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { showTab, fillProjectPath } from './fixtures/ui.js'
+import { commitSettings, showTab, fillProjectPath } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -315,10 +315,8 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
         expect(await overflowAt1024(app, page, ['settings-page'])).toEqual([])
         await shot(page, 'step6-r5-settings-1024')
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
-        await settings.getByTestId('settings-user-save').click()
-        await settings.getByTestId('settings-user-saved').waitFor()
-        await settings.getByTestId('settings-save').click()
-        await settings.getByTestId('settings-saved').waitFor()
+        await commitSettings(page, true)
+        await commitSettings(page)
         expect(await page.getByTestId('approval-dialog').count()).toBe(0)
         await expect.poll(() => readUserConfig(home)?.improvement?.meta).toMatchObject({ enabled: true, budget: { maxTokens: 2_000_000, windowDays: 15 } })
         const config = JSON.parse(readFileSync(join(root, '.nexgent', 'config.json'), 'utf8'))

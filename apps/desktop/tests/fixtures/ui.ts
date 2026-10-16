@@ -33,3 +33,20 @@ export async function fillProjectPath(page: Page, root: string): Promise<void> {
   if ((await more.getAttribute('open')) === null) await more.locator('summary').click()
   await page.getByTestId('project-path').fill(root)
 }
+
+/**
+ * The settings page saves each change at once (rework D2): leave the field
+ * being typed in, then wait until the page says 已保存 (`user` waits for the
+ * user-level section's own mark).
+ */
+export async function commitSettings(page: Page, user = false): Promise<void> {
+  // Runs in the page: the DOM is there, though this file is type-checked without it.
+  await page.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?: () => void } | null } }).document.activeElement?.blur?.())
+  await page.getByTestId('settings-page').getByTestId(user ? 'settings-user-saved' : 'settings-saved').waitFor()
+}
+
+/** Open the settings page's limits by tokens and requests (folded under the dollar caps). */
+export async function showUsageCaps(page: Page): Promise<void> {
+  const more = page.getByTestId('settings-page').locator('.usage-more')
+  if ((await more.getAttribute('open')) === null) await more.locator('summary').click()
+}

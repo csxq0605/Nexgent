@@ -33,7 +33,7 @@ import { decisionsOf } from './step4-gate.mjs'
 import { FEEDBACK_TASK, NEXT_TASK, runFeedbackProject, SCRIPTED_API_KEY, TERMINAL_STATES, PARKED_STATES } from './step5-fixtures.mjs'
 import { Step5Model } from './step5-model.mjs'
 import { createStep5Sdk, improvementsPath, loadStep5Packages, readImprovements, scriptedEnvironment } from './step5-runtime.mjs'
-import { showTab, fillProjectPath } from './desktop-ui.mjs'
+import { commitSettings, showTab, fillProjectPath } from './desktop-ui.mjs'
 
 const TIMEOUT = 60_000
 const WAIT = 45_000
@@ -210,8 +210,7 @@ async function saveSettings(page, { autoImprove, budget, window }) {
   else await settings.getByTestId('settings-auto-improve').uncheck()
   await settings.getByTestId('settings-improvement-budget').fill(String(budget))
   await settings.getByTestId('settings-improvement-window').fill(String(window))
-  await settings.getByTestId('settings-save').click()
-  await settings.getByTestId('settings-saved').waitFor({ timeout: WAIT })
+  await commitSettings(page, { timeout: WAIT })
   return { approvalDialogs: await page.getByTestId('approval-dialog').count() }
 }
 

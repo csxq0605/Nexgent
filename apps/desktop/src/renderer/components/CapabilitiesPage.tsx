@@ -1,27 +1,32 @@
+import { useAppState } from '../hooks.js'
+import { L } from '../strings.js'
 import { useUi, useView, useViewActions } from '../ui.js'
-import { T } from '../strings.js'
 import { CapabilitiesPanel } from './Capabilities.js'
 import { ImprovementsPanel } from './Improvements.js'
+import { LearnedPanel, learnedLead } from './Learned.js'
 import { Page } from './Page.js'
+import { T } from '../strings.js'
 
 const SECTIONS = [
-  { id: 'capabilities', label: T.panelCapabilities },
-  { id: 'improvements', label: T.panelImprovements },
+  { id: 'learned', label: L.sectionLearned },
+  { id: 'capabilities', label: L.sectionPractices },
+  { id: 'improvements', label: L.sectionHistory },
 ] as const
 
 /**
- * 能力 as one page (ADR 0020 §1): the capability version and the improvement
- * jobs, each a section. This round changes only the container; the content
- * is redone with the evolution output (rework partition D2).
+ * 能力 as one page (ADR 0020 §1, rework D2): 经验 first (what waits for the
+ * user, the learning switch and spend, the handbook entries), then the
+ * capability versions and the older improvement jobs, each a section.
  */
 export function CapabilitiesPage(): JSX.Element {
   const ui = useUi()
+  const state = useAppState()
   const { section } = useView()
   const { setSection } = useViewActions()
   return (
     <Page
       title={T.capabilitiesTitle}
-      lead={T.capabilitiesLead}
+      lead={learnedLead(state.handbook?.entries)}
       onClose={ui.showConversation}
       testId="capabilities-page"
       bar={
@@ -34,7 +39,7 @@ export function CapabilitiesPage(): JSX.Element {
         </div>
       }
     >
-      {section === 'capabilities' ? <CapabilitiesPanel /> : <ImprovementsPanel />}
+      {section === 'learned' ? <LearnedPanel /> : section === 'capabilities' ? <CapabilitiesPanel /> : <ImprovementsPanel />}
     </Page>
   )
 }

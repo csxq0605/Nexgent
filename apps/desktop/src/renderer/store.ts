@@ -8,7 +8,8 @@
  */
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
 import type { CommandSandboxStatus, ImproverBundle } from '@nexgent/kernel'
-import type { CandidateDetail, CapabilityListing, ImprovementDetail, ImprovementListing, ImproverListing, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
+import type { LearningConfig } from '@nexgent/kernel'
+import type { CandidateDetail, CapabilityListing, HandbookEntryDetail, HandbookListing, ImprovementDetail, ImprovementListing, ImproverListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
@@ -82,6 +83,12 @@ export interface AppState {
   readonly userSettings?: UserSettings | undefined
   /** Step 6: the parent improver of the open meta job's change (for the before / after view). */
   readonly improvementParent?: ImproverBundle | undefined
+  /** Rework D2: the handbook entries this project sees, retired ones included (能力 → 经验). */
+  readonly handbook?: HandbookListing | undefined
+  /** Rework D2: the entry opened on the 能力 page, with its history. */
+  readonly handbookDetail?: HandbookEntryDetail | undefined
+  /** Rework D2: learning switch, spend against the budget, self-evaluations. */
+  readonly learning?: LearningStatus | undefined
 }
 
 const INITIAL: AppState = {
@@ -243,8 +250,11 @@ export class AppStore {
       improvementDetail: undefined,
       improver: undefined,
       improvementParent: undefined,
+      handbook: undefined,
+      handbookDetail: undefined,
+      learning: undefined,
     })
-    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshImprovements(), this.refreshImprover(), this.refreshUserSettings()])
+    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshImprovements(), this.refreshImprover(), this.refreshUserSettings(), this.refreshLearning()])
     const first = this.state.sessions[0]
     if (first !== undefined) await this.openSession(first.sessionId)
     return true
@@ -266,7 +276,7 @@ export class AppStore {
 
   /** Back to the start screen; the project stays open in the backend (running turns go on). */
   leaveProject(): void {
-    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined, improvements: undefined, improvementDetail: undefined, improver: undefined, improvementParent: undefined })
+    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined, improvements: undefined, improvementDetail: undefined, improver: undefined, improvementParent: undefined, handbook: undefined, handbookDetail: undefined, learning: undefined })
     void this.refreshRecent()
   }
 
@@ -398,6 +408,72 @@ export class AppStore {
     this.set({ pluginApproval: undefined })
     await this.guard(c => c.call('capabilities.approve', { projectId, candidateId: candidate.view.id, decision }))
     await this.refreshCapabilities()
+  }
+
+  // --- learning (rework D2) -----------------------------------------------------
+
+  /** The handbook (retired entries included) and the learning status; the open entry is re-read when it changed. */
+  async refreshLearning(): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    const latest = this.startRead('learning')
+    await this.guard(async c => {
+      const [handbook, learning] = await Promise.all([c.call('handbook.list', { projectId, includeRetired: true }), c.call('learning.status', { projectId })])
+      if (this.projectId !== projectId || !latest()) return
+      this.set({ handbook, learning })
+      const open = this.state.handbookDetail
+      const now = open === undefined ? undefined : handbook.entries.find(entry => entry.id === open.entry.id)
+      if (open !== undefined && now !== undefined && now.updatedAt !== open.entry.updatedAt) await this.showHandbookEntry(open.entry.id)
+    })
+  }
+
+  /** Open (or close, when it is open) an entry's history. */
+  async toggleHandbookEntry(entryId: string): Promise<void> {
+    if (this.state.handbookDetail?.entry.id === entryId) {
+      this.startRead('handbookDetail')
+      this.set({ handbookDetail: undefined })
+      return
+    }
+    await this.showHandbookEntry(entryId)
+  }
+
+  private async showHandbookEntry(entryId: string): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    const latest = this.startRead('handbookDetail')
+    const handbookDetail = await this.guard(c => c.call('handbook.show', { projectId, entryId }))
+    if (handbookDetail !== undefined && this.projectId === projectId && latest()) this.set({ handbookDetail })
+  }
+
+  /** The user stops an entry or takes it back. */
+  async setHandbookStatus(entryId: string, status: 'active' | 'retired'): Promise<boolean> {
+    const projectId = this.projectId
+    if (projectId === undefined) return false
+    const detail = await this.guard(c => c.call('handbook.setStatus', { projectId, entryId, status }))
+    if (detail === undefined) return false
+    this.startRead('handbookDetail')
+    this.set(state => ({ handbookDetail: state.handbookDetail?.entry.id === entryId ? detail : state.handbookDetail }))
+    await this.refreshLearning()
+    return true
+  }
+
+  /** Change the project's learning settings (a user action; the SDK keeps the retired `autoImprove` equal to `enabled`). */
+  async saveLearning(change: Partial<Omit<LearningConfig, 'budget'>> & { readonly budget?: Partial<LearningConfig['budget']> }): Promise<boolean> {
+    const current = this.state.settings?.learning
+    if (current === undefined) return false
+    const ok = await this.saveSettings({ learning: { ...current, ...change, budget: { ...current.budget, ...change.budget } } })
+    if (ok) void this.refreshLearning()
+    return ok
+  }
+
+  /** The one-time notice about background learning was read (ADR 0017 decision 3). */
+  async acknowledgeLearning(): Promise<boolean> {
+    const userSettings = await this.guard(c => c.call('learning.acknowledge', {}))
+    if (userSettings === undefined) return false
+    this.startRead('userSettings')
+    this.set({ userSettings })
+    void this.refreshLearning()
+    return true
   }
 
   // --- improvement jobs (step 5) ---------------------------------------------
@@ -722,8 +798,9 @@ export class AppStore {
     if (settings === undefined) return false
     this.startRead('settings')
     this.set({ settings })
-    // The 改进 tab shows switches and budgets from the settings.
-    if (patch.autoImprove !== undefined || patch.improvement !== undefined) void this.refreshImprovements()
+    // The 改进 tab shows switches and budgets from the settings, the 经验 tab the learning ones.
+    if (patch.autoImprove !== undefined || patch.improvement !== undefined || patch.learning !== undefined) void this.refreshImprovements()
+    if (patch.autoImprove !== undefined || patch.learning !== undefined) void this.refreshLearning()
     return true
   }
 
@@ -830,6 +907,7 @@ export class AppStore {
         // A proposal, the gate or a load-failure rollback may have changed the project's capabilities.
         void this.refreshCapabilities()
         void this.refreshImprovements()
+        void this.refreshLearning()
         if (this.state.projectFiles !== undefined) void this.refreshFiles()
         // A workflow's end has no event of its own.
         if (current && this.state.timeline.some(entry => entry.kind === 'workflow')) void this.refreshWorkflows(event.sessionId, event.turn)
@@ -856,6 +934,9 @@ export class AppStore {
       }
       case 'material.added':
         this.set(state => ({ materials: state.materials.some(m => m.id === event.material.id) ? state.materials : [...state.materials, event.material] }))
+        break
+      case 'session.title':
+        this.set(state => ({ sessions: state.sessions.map(s => (s.sessionId === event.sessionId ? { ...s, title: event.title } : s)) }))
         break
       case 'goal':
         this.set(state => ({

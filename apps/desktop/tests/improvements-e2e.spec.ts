@@ -25,7 +25,7 @@ import { listSessionIds, readSessionRecords, scriptedModelServer, type ScriptedM
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { showTab, fillProjectPath } from './fixtures/ui.js'
+import { commitSettings, showTab, fillProjectPath } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -244,8 +244,7 @@ describe('desktop improvement jobs over the real SDK (scripted model)', () => {
         await settings.getByTestId('settings-improvement-budget').fill('1000000')
         await settings.getByTestId('settings-improvement-window').fill('14')
         await shot(page, 'step5-w4-settings')
-        await settings.getByTestId('settings-save').click()
-        await settings.getByTestId('settings-saved').waitFor()
+        await commitSettings(page)
         expect(await page.getByTestId('approval-dialog').count()).toBe(0)
         const config = JSON.parse(readFileSync(join(root, '.nexgent', 'config.json'), 'utf8'))
         expect(config).toMatchObject({ autoImprove: false, improvement: { budget: { maxTokens: 1_000_000, windowDays: 14 } } })

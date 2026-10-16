@@ -33,7 +33,7 @@ export function App(): JSX.Element {
   const state = useAppState()
   const [view, setView] = useState<MainView>('conversation')
   const [drawer, setDrawer] = useState<ViewState['drawer']>(undefined)
-  const [section, setSection] = useState<ViewState['section']>('capabilities')
+  const [section, setSection] = useState<ViewState['section']>('learned')
   const [deliverable, setDeliverable] = useState<DeliverableTarget | undefined>(undefined)
   const ui = useMemo<UiActions>(
     () => ({

@@ -10,8 +10,11 @@ export interface DeliverableTarget {
 /** The main area: the conversation, or one of the two full pages (ADR 0020 §1). */
 export type MainView = 'conversation' | 'capabilities' | 'settings'
 
-/** Drawer tabs (`materials`, `deliverables`) and the capability page's sections (`capabilities`, `improvements`). */
-export type PanelTab = 'materials' | 'deliverables' | 'capabilities' | 'improvements'
+/** Drawer tabs (`materials`, `deliverables`) and the capability page's sections (`learned`, `capabilities`, `improvements`). */
+export type PanelTab = 'materials' | 'deliverables' | 'learned' | 'capabilities' | 'improvements'
+
+/** The 能力 page's sections: 经验 (the handbook and learning), 做法与版本, 改进记录. */
+export type CapabilitySection = 'learned' | 'capabilities' | 'improvements'
 
 export interface UiActions {
   openDeliverable(target: DeliverableTarget): void
@@ -37,10 +40,10 @@ export function useUi(): UiActions {
 export interface ViewState {
   readonly view: MainView
   readonly drawer: 'materials' | 'deliverables' | undefined
-  readonly section: 'capabilities' | 'improvements'
+  readonly section: CapabilitySection
 }
 
-export const ViewContext = createContext<ViewState>({ view: 'conversation', drawer: undefined, section: 'capabilities' })
+export const ViewContext = createContext<ViewState>({ view: 'conversation', drawer: undefined, section: 'learned' })
 
 export function useView(): ViewState {
   return useContext(ViewContext)
@@ -48,7 +51,7 @@ export function useView(): ViewState {
 
 export interface ViewActions {
   setDrawer(tab: 'materials' | 'deliverables' | undefined): void
-  setSection(section: 'capabilities' | 'improvements'): void
+  setSection(section: CapabilitySection): void
 }
 
 export const ViewActionsContext = createContext<ViewActions>({ setDrawer: () => undefined, setSection: () => undefined })
