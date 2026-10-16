@@ -172,12 +172,17 @@ function textRenderer(stdout: TextSink, stderr: TextSink): Renderer {
           note(`  approval: ${how}`)
           return
         }
+        case 'step.retry':
+          note(`nexgent: model request failed (${event.error.message}); retrying in ${Math.round(event.delayMs / 100) / 10} s (attempt ${event.attempt})`)
+          return
         case 'turn.end': {
           const { reason } = event
           if (reason.kind === 'completed') breakLine()
-          else if (reason.kind === 'cancelled') note(`nexgent: turn ${event.turn} cancelled (${reason.cause})`)
+          else if (reason.kind === 'cancelled' && reason.cause === 'step-limit') {
+            note(`nexgent: turn ${event.turn} reached its model-call limit; nothing was lost, resume the session to continue`)
+          } else if (reason.kind === 'cancelled') note(`nexgent: turn ${event.turn} cancelled (${reason.cause})`)
           else if (reason.kind === 'error') note(`nexgent: turn ${event.turn} failed: ${reason.error.code}: ${reason.error.message}`)
-          else if (reason.kind === 'max-tokens') note(`nexgent: turn ${event.turn} stopped at the output token limit`)
+          else if (reason.kind === 'max-tokens') note(`nexgent: turn ${event.turn} stopped: replies kept hitting the output token limit`)
           else note(`nexgent: turn ${event.turn} was interrupted`)
           return
         }

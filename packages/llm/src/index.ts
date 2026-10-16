@@ -15,10 +15,16 @@ export {
   AnthropicProvider,
   CLAUDE_API_HOST,
   createProvider,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_RETRY_BASE_DELAY_MS,
+  DEFAULT_RETRY_MAX_DELAY_MS,
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
   DEFAULT_TIMEOUT_MS,
+  isContextOverflow,
+  isRetryable,
   mapStopReason,
   NEXGENT_API_BASE_URL,
+  RETRYABLE_HTTP_STATUSES,
 } from './provider.js'
 export type { AnthropicProviderOptions, CompleteOptions, CreateProviderOptions, FallbacksMode } from './provider.js'
 export { apply, LLMPlugin, providerOptionsFromConfig, validateLLMPluginConfig } from './plugin.js'

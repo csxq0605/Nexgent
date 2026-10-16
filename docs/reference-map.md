@@ -31,7 +31,7 @@
 | `llm/llm` | `@nexgent/llm` | 重写 | 1 | 模型服务接口、流式与工具调用消息类型只参考设计 |
 | `llm/llm-pi-ai` | `@nexgent/llm` | 重写 | 1 | 单一 Claude Platform 路由（ADR 0002），只参考设计；端点作为配置项 |
 | `llm/token-meter` | `@nexgent/llm` | 重写 | 1 | 用量计量只参考设计；缺失用量显式标 unknown |
-| `llm/llm-retry` | — | 不要 | — | 步骤 1 定 `maxRetries: 0`，每次请求进账本 |
+| `llm/llm-retry` | `@nexgent/llm` | 重写 | 步骤 6 后 | 步骤 1 定 `maxRetries: 0`；ADR 0021 改为 provider 内部重试（只在回复内容到来前，指数退避，尊重 `retry-after`），每次尝试仍各进账本；只参考设计 |
 | `llm/llm-deepseek`、`llm/deepseek-llm-api-extensions`、`llm/plugin-package-inventory-deepseek` | — | 不要 | — | DeepSeek 专有路由与扩展 |
 | `session/session-persistence`、`session/session-persistence-jsonl` | `@nexgent/session` | 重写 | 1 | JSONL 追加写；只参考 `jsonl/src/storage.ts`（串行写链、撕裂尾截断）与 `lease.ts`（写租约）的设计 |
 | `session/session-checkpoint-policy` | `@nexgent/session` | 重写 | 1 | checkpoint 规则只参考设计 |

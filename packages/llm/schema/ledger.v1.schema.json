@@ -74,7 +74,8 @@
           "properties": {
             "type": { "const": "llm.request.start" },
             "purpose": { "enum": ["task", "auxiliary"] },
-            "thinking": { "enum": ["off", "on"] }
+            "thinking": { "enum": ["off", "on"] },
+            "attempt": { "type": "integer", "minimum": 2 }
           }
         }
       ]
@@ -93,7 +94,8 @@
             "latencyMs": { "type": "number", "minimum": 0 },
             "httpStatus": { "type": "integer", "minimum": 100, "maximum": 599 },
             "finishReason": { "enum": ["stop", "tool-calls", "max-tokens", "aborted", "refusal", "pause", "error"] },
-            "errorCode": { "type": "string", "pattern": "^[a-z]+(/[a-z-]+)?$" }
+            "errorCode": { "type": "string", "pattern": "^[a-z]+(/[a-z-]+)?$" },
+            "attempt": { "type": "integer", "minimum": 2 }
           }
         }
       ]

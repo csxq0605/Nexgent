@@ -8,6 +8,7 @@ import type { Context, Plugin } from '@deepseek-ai/cordis'
 import {
   addUsage,
   NexgentError,
+  compactionTail,
   renderCompactionSummary,
   resolveWorkspaceLayout,
   ZERO_USAGE,
@@ -181,7 +182,7 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
         messages.splice(0, messages.length, ...record.messages)
         break
       case 'compaction':
-        messages.splice(0, messages.length, { role: 'user', content: renderCompactionSummary(record.summary) }, ...messages.slice(messages.length - record.keepMessages))
+        messages.splice(0, messages.length, { role: 'user', content: renderCompactionSummary(record.summary) }, ...compactionTail(messages, record.keepMessages))
         break
       default:
         break

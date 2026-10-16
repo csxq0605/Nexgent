@@ -4,9 +4,10 @@
  * can say "unknown" instead of inventing zeros.
  *
  * Step 1 wires exactly one route (Claude Platform, ADR 0002) behind this
- * interface; there is no provider registry and no retry layer (`maxRetries`
- * is 0 by decision — every attempt, including a failed one, is one request
- * and one ledger record).
+ * interface; there is no provider registry. A provider may retry a request
+ * that failed before any reply content arrived (ADR 0021): every attempt,
+ * including a failed one, is one request and one pair of ledger records, and
+ * the stream reports each retry with a {@link RetryEvent}.
  */
 import type { JsonValue } from './json.js'
 import type { ErrorInfo } from './errors.js'
@@ -293,6 +294,23 @@ export interface ToolCallEndEvent {
   readonly call: ToolCall
 }
 
+/**
+ * The attempt before this one failed with a retryable error (rate limit,
+ * overload, server error, lost connection) before any reply content arrived;
+ * the provider waits `delayMs` and sends the request again (ADR 0021). Only
+ * `reasoning.delta` events may precede it; nothing the consumer keeps
+ * (text, tool calls) has been yielded yet.
+ */
+export interface RetryEvent {
+  readonly type: 'retry'
+  /** The attempt about to be sent (2 for the first retry). */
+  readonly attempt: number
+  /** Wait before that attempt, in ms. */
+  readonly delayMs: number
+  /** Why the previous attempt failed. */
+  readonly error: ErrorInfo
+}
+
 /** Token accounting; emitted at most once, before the terminal event. */
 export interface UsageEvent {
   readonly type: 'usage'
@@ -333,7 +351,9 @@ export interface StreamErrorEvent {
  * 4. abort is reported as `done` with `finishReason: 'aborted'`; text already
  *    yielded stays valid;
  * 5. the provider never throws out of the iterator for a request-level
- *    failure — it yields `error`. Throwing is reserved for programmer errors.
+ *    failure — it yields `error`. Throwing is reserved for programmer errors;
+ * 6. `retry` comes only before any `text.delta` or `tool-call.*` event; the
+ *    events after it belong to the next attempt.
  */
 export type LLMStreamEvent =
   | TextDeltaEvent
@@ -342,6 +362,7 @@ export type LLMStreamEvent =
   | ToolCallDeltaEvent
   | ToolCallEndEvent
   | UsageEvent
+  | RetryEvent
   | DoneEvent
   | StreamErrorEvent
 
@@ -374,7 +395,8 @@ export interface LLMProvider {
   /**
    * Send one request and stream its events. The iterable is single-use and
    * lazy: nothing is sent until iteration starts. Returning early from the
-   * loop (`break`) aborts the request. No retries happen inside.
+   * loop (`break`) aborts the request. Retries happen inside only before any
+   * reply content arrived, each announced by a {@link RetryEvent}.
    * @param request - the assembled request.
    * @param options - ledger and timeout options.
    */

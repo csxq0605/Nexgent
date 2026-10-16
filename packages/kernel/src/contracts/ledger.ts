@@ -72,6 +72,8 @@ export interface LLMRequestStartRecord extends LedgerRecordBase {
   readonly purpose: LLMRequestPurpose
   /** Whether reasoning was requested. */
   readonly thinking: 'off' | 'on'
+  /** Attempt number when the provider retried the request (ADR 0021); absent on the first attempt. Each attempt has its own start/end pair with the same `requestId`. */
+  readonly attempt?: number
 }
 
 /** How a request settled. `'unknown'` means the process died before the stream ended. */
@@ -95,6 +97,8 @@ export interface LLMRequestEndRecord extends LedgerRecordBase {
   readonly finishReason?: FinishReason
   /** Error code on `error`; never the message. */
   readonly errorCode?: string
+  /** Same as on the matching `llm.request.start`. */
+  readonly attempt?: number
 }
 
 /** A tool call ran (or was denied). No arguments and no output are recorded. */

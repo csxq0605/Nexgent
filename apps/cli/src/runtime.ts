@@ -131,6 +131,8 @@ export function mapAgentEvent(event: AgentEvent): CliEvent[] {
       return [{ type: 'turn.start', turn: event.turn }]
     case 'request.start':
       return [{ type: 'step.start', turn: event.turn, step: event.step, requestId: event.requestId }]
+    case 'request.retry':
+      return [{ type: 'step.retry', turn: event.turn, step: event.step, attempt: event.attempt, delayMs: event.delayMs, error: event.error }]
     case 'text.delta':
       return [{ type: 'text.delta', text: event.text }]
     case 'reasoning.delta':

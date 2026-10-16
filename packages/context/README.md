@@ -32,7 +32,7 @@
       enabled: true            # false: 不装压缩器（loop 不压缩）
       thresholdTokens: 160000  # 环境变量 NEXGENT_COMPACTION_THRESHOLD 覆盖
       keepRecentTurns: 2
-      maxTokens: 16000         # 摘要请求的输出上限
+      maxTokens: 32000         # 摘要请求的输出上限
       # timeoutMs / thinking / effort 可选；thinking、effort 缺省时取 .nexgent/config.json，再缺省取 DEFAULT_PROJECT_CONFIG（thinking on）
 ```
 

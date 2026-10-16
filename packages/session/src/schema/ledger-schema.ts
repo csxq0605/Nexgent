@@ -131,7 +131,7 @@ export const ledgerRecordSchema: JsonObject = {
     },
     llmRequestStartRecord: record(
       'llm.request.start',
-      { ...requestFields, purpose: { enum: ['task', 'auxiliary'] }, thinking: { enum: ['off', 'on'] } },
+      { ...requestFields, purpose: { enum: ['task', 'auxiliary'] }, thinking: { enum: ['off', 'on'] }, attempt: { type: 'integer', minimum: 2 } },
       ['requestId', 'provider', 'endpoint', 'model', 'purpose', 'thinking'],
     ),
     llmRequestEndRecord: record(
@@ -144,6 +144,7 @@ export const ledgerRecordSchema: JsonObject = {
         httpStatus: { type: 'integer' },
         finishReason: ref('finishReason'),
         errorCode: { type: 'string' },
+        attempt: { type: 'integer', minimum: 2 },
       },
       ['requestId', 'provider', 'endpoint', 'model', 'status', 'usage', 'latencyMs'],
     ),

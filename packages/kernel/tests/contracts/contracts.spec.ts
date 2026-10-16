@@ -69,7 +69,7 @@ const LEDGER_TYPES = ['llm.request.start', 'llm.request.end', 'tool.call', 'task
 describe('contracts: type-level shape', () => {
   it('llm: stream events are a closed tagged union with one terminal pair', () => {
     expectTypeOf<LLMStreamEventType>().toEqualTypeOf<
-      'text.delta' | 'reasoning.delta' | 'tool-call.start' | 'tool-call.delta' | 'tool-call.end' | 'usage' | 'done' | 'error'
+      'text.delta' | 'reasoning.delta' | 'tool-call.start' | 'tool-call.delta' | 'tool-call.end' | 'usage' | 'retry' | 'done' | 'error'
     >()
     expectTypeOf<DoneEvent['finishReason']>().toEqualTypeOf<'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'refusal' | 'pause'>()
     expectTypeOf<FinishReason>().toEqualTypeOf<'stop' | 'tool-calls' | 'max-tokens' | 'aborted' | 'refusal' | 'pause' | 'error'>()

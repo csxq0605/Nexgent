@@ -261,7 +261,7 @@ export const sessionRecordSchema: JsonObject = {
     turnEndReason: {
       oneOf: [
         closedObject({ kind: { const: 'completed' } }, ['kind']),
-        closedObject({ kind: { const: 'cancelled' }, cause: { enum: ['user', 'timeout', 'shutdown', 'cost-cap', 'parent'] } }, [
+        closedObject({ kind: { const: 'cancelled' }, cause: { enum: ['user', 'timeout', 'shutdown', 'cost-cap', 'parent', 'step-limit'] } }, [
           'kind',
           'cause',
         ]),

@@ -33,7 +33,7 @@ import { EFFORT_LEVELS, type Effort, type ThinkingMode } from './contracts/llm.j
 import type { SessionImprovement, SessionLock } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
 import { SANDBOX_MODES } from './contracts/workspace.js'
-import { Agent, type AgentInit, type AgentSettings, type ProjectGrantWriter } from './agent.js'
+import { Agent, DEFAULT_MAX_OUTPUT_CONTINUATIONS, DEFAULT_MAX_STEPS, type AgentInit, type AgentSettings, type ProjectGrantWriter } from './agent.js'
 import { readProjectConfig, type LoadedProjectConfig } from './project-config.js'
 import { DEFAULT_PERSONA, DEFAULT_PERSONA_SUFFIX } from './system-prompt.js'
 import type { AttachedComponent, CapabilityHost, ImprovementRun } from './capability-hooks.js'
@@ -64,10 +64,12 @@ export interface AgentsConfig {
   modelTimeoutMs: number
   /** Max stream silence in ms; 0 disables. */
   streamIdleTimeoutMs: number
-  /** Max model calls per turn. */
+  /** Max model calls per turn; past it the turn ends with cancel cause `step-limit` (ADR 0021). */
   maxSteps: number
   /** Max consecutive paused replies (`pause_turn`) continued automatically. */
   maxPauseContinuations: number
+  /** Max consecutive replies cut by the output cap continued automatically (ADR 0021). */
+  maxOutputContinuations: number
   /**
    * Kernel-side checkpoint at `turn.end` once N records accumulated; 0
    * (default) because `@nexgent/session` applies the spec policy inside
@@ -211,8 +213,11 @@ export class AgentsService extends Service {
     }).default({ persona: DEFAULT_PERSONA, suffix: DEFAULT_PERSONA_SUFFIX }),
     modelTimeoutMs: Schema.natural().default(180_000),
     streamIdleTimeoutMs: Schema.natural().default(180_000),
-    maxSteps: Schema.natural().min(1).default(64),
+    maxSteps: Schema.natural().min(1).default(DEFAULT_MAX_STEPS)
+      .description('Model calls per turn before the turn ends with cancel cause step-limit (the user can continue); the project config maxStepsPerTurn and a preset override it.'),
     maxPauseContinuations: Schema.natural().default(8).description('Consecutive pause_turn replies continued automatically before the turn ends with an error.'),
+    maxOutputContinuations: Schema.natural().default(DEFAULT_MAX_OUTPUT_CONTINUATIONS)
+      .description('Consecutive replies cut by the output cap continued automatically before the turn ends with max-tokens.'),
     checkpointEvery: Schema.natural().default(0)
       .description('Kernel-side checkpoint threshold; 0 (default) leaves the data-formats.md policy to the session store.'),
     toolAbortGraceMs: Schema.natural().default(5_000),
@@ -261,7 +266,8 @@ export class AgentsService extends Service {
     return entry === undefined ? [] : [...entry.children]
   }
 
-  private settings(preset?: AgentPreset): AgentSettings {
+  /** Loop settings: a preset's `maxSteps` wins over the project's `maxStepsPerTurn`, which wins over this row's. */
+  private settings(preset: AgentPreset | undefined, project: ProjectConfig): AgentSettings {
     const c = this.config
     return {
       thinking: c.thinking,
@@ -270,8 +276,9 @@ export class AgentsService extends Service {
       systemPrompt: { persona: preset?.persona ?? c.systemPrompt.persona, suffix: c.systemPrompt.suffix },
       modelTimeoutMs: c.modelTimeoutMs,
       streamIdleTimeoutMs: c.streamIdleTimeoutMs,
-      maxSteps: preset?.maxSteps ?? c.maxSteps,
+      maxSteps: preset?.maxSteps ?? project.maxStepsPerTurn ?? c.maxSteps,
       maxPauseContinuations: c.maxPauseContinuations,
+      maxOutputContinuations: c.maxOutputContinuations,
       checkpointEvery: c.checkpointEvery,
       toolAbortGraceMs: c.toolAbortGraceMs,
     }
@@ -598,7 +605,7 @@ export class AgentsService extends Service {
         lastCheckpointSeq: 0,
         grants: [],
         tree: new TaskTree(sessionId, loaded.config.costCaps.perTask, [...loaded.config.approvals]),
-        settings: this.settings(),
+        settings: this.settings(undefined, loaded.config),
         ...(capabilities === undefined ? {} : { capabilities }),
         ...(improvement === undefined ? {} : { improvement }),
       })
@@ -679,7 +686,7 @@ export class AgentsService extends Service {
         lastCheckpointSeq: 0,
         grants: [],
         tree,
-        settings: this.settings(preset),
+        settings: this.settings(preset, parent.projectConfig),
         member: { identity, parent, budget: child.budget },
         ...(capabilities === undefined ? {} : { capabilities }),
       })
@@ -781,7 +788,7 @@ export class AgentsService extends Service {
         lastCheckpointSeq: checkpoint?.seq ?? 0,
         grants: state.metadata.grants,
         tree: parent?.tree ?? new TaskTree(sessionId, projectConfig.costCaps.perTask, [...projectConfig.approvals]),
-        settings: this.settings(preset),
+        settings: this.settings(preset, projectConfig),
         ...(parent === undefined || member === undefined ? {} : { member: { identity: member, parent, budget: options.child?.budget } }),
         ...(capabilities === undefined ? {} : { capabilities }),
         ...(improvement === undefined ? {} : { improvement }),

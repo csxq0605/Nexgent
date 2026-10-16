@@ -48,6 +48,7 @@ import {
   type ToolResult,
 } from './contracts/llm.js'
 import {
+  compactionTail,
   renderCompactionSummary,
   TURN_FILES_LIMIT,
   type HostRecordInput,
@@ -134,10 +135,12 @@ export interface AgentSettings {
   readonly modelTimeoutMs: number
   /** Max silence between stream events in ms; 0 disables. */
   readonly streamIdleTimeoutMs: number
-  /** Max model calls in one turn. */
+  /** Max model calls in one turn; past it the turn ends with cancel cause `step-limit` (ADR 0021). */
   readonly maxSteps: number
   /** Max consecutive `pause` replies the loop continues before ending the turn with an error. */
   readonly maxPauseContinuations: number
+  /** Max consecutive replies cut by the output cap the loop continues before ending the turn with `max-tokens`; default {@link DEFAULT_MAX_OUTPUT_CONTINUATIONS}. */
+  readonly maxOutputContinuations?: number
   /** Write a checkpoint at `turn.end` once this many records accumulated since the last one; 0 disables. */
   readonly checkpointEvery: number
   /** How long to wait for a cancelled tool handler to settle before moving on, in ms. */
@@ -371,6 +374,22 @@ export function repairHistory(messages: readonly Exclude<LLMMessage, { role: 'sy
   return out
 }
 
+/**
+ * The `tool_use` blocks of a reply's provider content (Claude wire shape),
+ * as tool calls. Used for a reply cut by the output cap, whose last call may
+ * be in the content without a completed stream event. Pure.
+ */
+export function providerToolUses(providerContent: JsonValue | undefined): ToolCall[] {
+  if (!Array.isArray(providerContent)) return []
+  const calls: ToolCall[] = []
+  for (const block of providerContent) {
+    if (block === null || typeof block !== 'object' || Array.isArray(block)) continue
+    if (block['type'] !== 'tool_use' || typeof block['id'] !== 'string' || typeof block['name'] !== 'string') continue
+    calls.push({ id: block['id'], name: block['name'], arguments: JSON.stringify(block['input'] ?? {}) })
+  }
+  return calls
+}
+
 interface StreamOutcome {
   readonly requestId: string
   readonly content: string
@@ -416,6 +435,30 @@ export const PRESENT_REMINDER = '[Nexgent] Project files may have changed in thi
 
 /** Steps of a turn between two present reminders. */
 export const PRESENT_REMINDER_EVERY = 8
+
+/** Default model calls per turn (`agents.maxSteps`; ADR 0021). */
+export const DEFAULT_MAX_STEPS = 400
+
+/** Default consecutive replies cut by the output cap that the loop continues on its own (ADR 0021). */
+export const DEFAULT_MAX_OUTPUT_CONTINUATIONS = 3
+
+/** Sent with the last model call a turn may make (`maxSteps` ≥ 4), so the model wraps up instead of being cut off. */
+export function stepLimitNote(limit: number): string {
+  return `[Nexgent] This is the last model call this turn may make (limit ${limit}). Do not start new work. `
+    + 'Reply to the user now: what is done, what remains, and that sending another message continues the task.'
+}
+
+/** Sent after a text-only reply was cut by the output cap. */
+export const OUTPUT_CUT_NOTE = '[Nexgent] Your previous reply was cut off by the output length limit. '
+  + 'Continue exactly where it stopped, without repeating what was already written.'
+
+/** Sent after a reply with tool calls was cut by the output cap; its calls were not run. */
+export const OUTPUT_CUT_TOOLS_NOTE = '[Nexgent] Your previous reply was cut off by the output length limit, so its tool calls were not run. '
+  + 'Continue the task with smaller tool inputs: split large file contents into several smaller writes or edits.'
+
+/** The tool result of a call whose reply was cut by the output cap. */
+export const OUTPUT_CUT_TOOL_RESULT = 'Error: not run. The reply hit the output length limit while writing this call, so its input may be incomplete. '
+  + 'Issue it again with smaller input (split large file contents into several smaller writes or edits).'
 
 /** A live agent bound to one locked session. Created by `ctx.agents.create` / `resume`. */
 export class Agent {
@@ -1181,9 +1224,9 @@ export class Agent {
    * failed (the caller stops trying for the rest of the turn); the history is
    * then unchanged and a non-fatal `error` record says why.
    */
-  private async maybeCompact(context: ContextService, turn: number, step: number, signal: AbortSignal): Promise<boolean> {
+  private async maybeCompact(context: ContextService, turn: number, step: number, signal: AbortSignal, force = false): Promise<boolean> {
     const compactor = context.compactor
-    if (compactor === undefined) return true
+    if (compactor === undefined) return !force
     const input: CompactionCheckInput = {
       sessionId: this.sessionId,
       turn,
@@ -1194,14 +1237,10 @@ export class Agent {
       failedThisTurn: false,
     }
     try {
-      if (!compactor.shouldCompact(input)) return true
+      if (!force && !compactor.shouldCompact(input)) return true
       const result = await compactor.compact(input, signal)
       const kept = result.keepMessages
-      if (!Number.isInteger(kept) || kept < 1 || kept > this.messages.length) {
-        throw new NexgentError('session/invalid-record', `compaction keeps ${String(kept)} of ${this.messages.length} messages`)
-      }
-      const tail = this.messages.slice(this.messages.length - kept)
-      if (tail[0]!.role !== 'user') throw new NexgentError('session/invalid-record', 'the messages a compaction keeps must start with a user message')
+      const tail = compactionTail(this.messages, kept)
       // The summary request is a model request of this task (`requestCount` counts every request).
       this.charge(1, result.usage)
       await this.append({
@@ -1329,7 +1368,10 @@ export class Agent {
 
   private async loop(turn: number, signal: AbortSignal, tracker: { text: string; usage: LLMUsage }, context: ContextService | undefined): Promise<TurnEndReason> {
     let pauses = 0
+    let outputCuts = 0
     let compactionFailed = false
+    let overflowCompacted = false
+    const maxSteps = this.init.settings.maxSteps
     for (let step = 1; ; step += 1) {
       if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
       const exhausted = this.budgetExhausted()
@@ -1338,9 +1380,8 @@ export class Agent {
         await this.appendError(exhausted, false, turn)
         return { kind: 'cancelled', cause: 'cost-cap' }
       }
-      if (step > this.init.settings.maxSteps) {
-        return { kind: 'error', error: errorInfo('internal', `turn exceeded ${this.init.settings.maxSteps} model calls`) }
-      }
+      // The limit stops the turn, not the task: the history is intact and the next message continues it (ADR 0021).
+      if (step > maxSteps) return { kind: 'cancelled', cause: 'step-limit' }
       if (context !== undefined && !compactionFailed) {
         compactionFailed = !(await this.maybeCompact(context, turn, step, signal))
         if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
@@ -1352,6 +1393,7 @@ export class Agent {
       }
       // A paused reply's continuation goes out unchanged; the reminder waits for the next request.
       if (this.messages.at(-1)?.role !== 'assistant') await this.injectPresentReminder(turn, step)
+      if (step === maxSteps && maxSteps >= 4 && this.messages.at(-1)?.role !== 'assistant') await this.injectNote(turn, stepLimitNote(maxSteps))
 
       const outcome = await this.requestModel(turn, step, signal)
       tracker.usage = addUsage(tracker.usage, outcome.usage)
@@ -1394,11 +1436,32 @@ export class Agent {
       }
 
       if (interrupted) return { kind: 'cancelled', cause: signal.aborted ? causeOf(signal) : 'user' }
+      // The prompt no longer fits the context window: compact now (older steps of this turn included) and send again, once per turn.
+      if (outcome.finish === 'error' && outcome.error?.details?.['contextOverflow'] === true && context !== undefined && !overflowCompacted) {
+        overflowCompacted = true
+        await this.appendError({ ...outcome.error, message: `${outcome.error.message}; compacting the history and sending the request again` }, false, turn)
+        if (await this.maybeCompact(context, turn, step, signal, true)) continue
+        if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
+      }
       if (outcome.finish === 'error') return { kind: 'error', error: outcome.error ?? errorInfo('llm/request-failed', 'model request failed') }
       // A refused reply ends the turn; its tool calls are never run (ADR 0002).
       if (outcome.finish === 'refusal') return { kind: 'error', error: refusalError(outcome.refusal) }
-      // A reply cut by the output cap may carry truncated tool input; do not run it.
-      if (outcome.finish === 'max-tokens') return { kind: 'max-tokens' }
+      // A reply cut by the output cap may carry truncated tool input: its calls are answered with an
+      // error instead of being run, and the loop asks the model to continue (ADR 0021).
+      if (outcome.finish === 'max-tokens') {
+        outputCuts += 1
+        if (outputCuts > (this.init.settings.maxOutputContinuations ?? DEFAULT_MAX_OUTPUT_CONTINUATIONS)) return { kind: 'max-tokens' }
+        for (const call of toolCalls) {
+          await this.writeToolResult(turn, step, call, {
+            content: OUTPUT_CUT_TOOL_RESULT,
+            isError: true,
+            error: errorInfo('tool/invalid-input', 'not run: the reply was cut by the output length limit'),
+          }, 0)
+        }
+        await this.injectNote(turn, toolCalls.length > 0 ? OUTPUT_CUT_TOOLS_NOTE : OUTPUT_CUT_NOTE)
+        continue
+      }
+      outputCuts = 0
       // A paused reply (Claude `pause_turn`) is already in history; the next request sends it back to continue.
       if (outcome.finish === 'pause') {
         pauses += 1
@@ -1514,6 +1577,9 @@ export class Agent {
           case 'usage':
             usage = event.usage
             break
+          case 'retry':
+            this.emit({ type: 'request.retry', sessionId: this.sessionId, turn, step, requestId, attempt: event.attempt, delayMs: event.delayMs, error: event.error })
+            break
           case 'done':
             finish = event.finishReason
             providerContent = event.providerContent
@@ -1558,6 +1624,12 @@ export class Agent {
     if (finish === 'aborted') return { ...base, toolCalls: [], finish: 'aborted' }
     // `stop`/`tool-calls` follow the assembled calls; `max-tokens` and `refusal` are kept as reported.
     const reported = finish === 'stop' || finish === 'tool-calls' ? (ordered.length > 0 ? 'tool-calls' : 'stop') : finish
+    // A cut reply may hold a tool call the stream never completed; list it so it gets a result like the others.
+    if (reported === 'max-tokens') {
+      for (const call of providerToolUses(providerContent)) {
+        if (!ordered.some(known => known.id === call.id)) ordered.push(call)
+      }
+    }
     return {
       ...base,
       toolCalls: ordered,
@@ -1686,6 +1758,12 @@ export class Agent {
   }
 
   /** Send the due present reminder with this step's request (see {@link needsPresentReminder}). */
+  /** Append one loop note as `user.message { source: 'inject' }` (hidden from the history view) and send it with the next request. */
+  private async injectNote(turn: number, content: string): Promise<void> {
+    await this.append({ type: 'user.message', turn, content, source: 'inject' })
+    this.messages.push({ role: 'user', content })
+  }
+
   private async injectPresentReminder(turn: number, step: number): Promise<void> {
     if (!this.presentReminderDue) return
     this.presentReminderDue = false

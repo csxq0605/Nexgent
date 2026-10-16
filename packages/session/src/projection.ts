@@ -14,6 +14,7 @@
  */
 import {
   addUsage,
+  compactionTail,
   NexgentError,
   renderCompactionSummary,
   ZERO_USAGE,
@@ -211,13 +212,7 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
       break
     }
     case 'compaction': {
-      if (record.keepMessages > draft.messages.length) {
-        throw new NexgentError('session/invalid-record', `compaction keeps ${record.keepMessages} of ${draft.messages.length} messages`)
-      }
-      const tail = draft.messages.slice(draft.messages.length - record.keepMessages)
-      if (tail[0]?.role !== 'user') {
-        throw new NexgentError('session/invalid-record', 'compaction tail must start with a user message')
-      }
+      const tail = compactionTail(draft.messages, record.keepMessages)
       draft.messages = [{ role: 'user', content: renderCompactionSummary(record.summary) }, ...tail]
       meta.lastCompactionSeq = record.seq
       break

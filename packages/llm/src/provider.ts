@@ -1,8 +1,11 @@
 /**
  * `AnthropicProvider`: the Claude Platform (Anthropic Messages API) route
  * behind the {@link LLMProvider} contract, via `@anthropic-ai/sdk`. One
- * `complete` call is one streaming request (`maxRetries: 0`) and exactly one
- * `llm.request.start` / `llm.request.end` ledger pair, whatever the outcome.
+ * `complete` call is one streaming request; when it fails with a retryable
+ * error before any reply content arrived, the provider retries it with
+ * exponential backoff (ADR 0021; the SDK's own retries stay off). Every
+ * attempt writes its own `llm.request.start` / `llm.request.end` ledger pair,
+ * whatever the outcome.
  */
 import Anthropic, { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError } from '@anthropic-ai/sdk'
 import {
@@ -45,6 +48,14 @@ export const CLAUDE_API_HOST = 'api.anthropic.com'
 export const DEFAULT_TIMEOUT_MS = 180_000
 /** Default max silence between stream events (ms). */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 180_000
+/** Default retries after the first attempt (ADR 0021). */
+export const DEFAULT_MAX_RETRIES = 6
+/** Default wait before the first retry (ms); doubles per retry, with jitter. */
+export const DEFAULT_RETRY_BASE_DELAY_MS = 1_000
+/** Default cap on one wait, also applied to a server's `retry-after` (ms). */
+export const DEFAULT_RETRY_MAX_DELAY_MS = 60_000
+/** HTTP statuses worth retrying: timeout, conflict, rate limit, server errors, overload. */
+export const RETRYABLE_HTTP_STATUSES: readonly number[] = [408, 409, 429, 500, 502, 503, 504, 529]
 
 /** Server-side refusal fallback setting. */
 export type FallbacksMode = 'default' | 'off'
@@ -68,14 +79,21 @@ export interface AnthropicProviderOptions {
   readonly apiKeyName?: string
   /** `output_config.effort` when a request names none; default `medium`. */
   readonly effort?: Effort
-  /** `max_tokens` when a request names none; default 16000. */
+  /** `max_tokens` when a request names none; default {@link DEFAULT_WIRE_OPTIONS}. */
   readonly maxTokens?: number
   /** Default whole-request deadline (ms); per-call `timeoutMs` wins. */
   readonly timeoutMs?: number
   /** Default stream idle deadline (ms); per-call `streamIdleTimeoutMs` wins. */
   readonly streamIdleTimeoutMs?: number
-  /** Retries are fixed at 0 by decision; any other value is rejected. */
-  readonly maxRetries?: 0
+  /**
+   * Retries after a retryable failure that came before any reply content
+   * (ADR 0021); default {@link DEFAULT_MAX_RETRIES}; 0 turns retrying off.
+   */
+  readonly maxRetries?: number
+  /** Wait before the first retry (ms); default {@link DEFAULT_RETRY_BASE_DELAY_MS}. */
+  readonly retryBaseDelayMs?: number
+  /** Cap on one wait (ms); default {@link DEFAULT_RETRY_MAX_DELAY_MS}. */
+  readonly retryMaxDelayMs?: number
   /**
    * Server-side refusal fallbacks (`fallbacks: 'default'` + beta
    * `server-side-fallback-2026-07-01`); default `'default'`. Only sent when
@@ -232,10 +250,13 @@ export class AnthropicProvider implements LLMProvider {
   private readonly wire: WireOptions
   private readonly fallbacks: boolean
   private readonly attribution: LedgerAttribution
+  private readonly maxRetries: number
+  private readonly retryBaseDelayMs: number
+  private readonly retryMaxDelayMs: number
 
   constructor(options: AnthropicProviderOptions) {
-    if (options.maxRetries !== undefined && options.maxRetries !== 0) {
-      throw new NexgentError('config/invalid', 'maxRetries is fixed at 0 for this provider')
+    if (options.maxRetries !== undefined && !(Number.isSafeInteger(options.maxRetries) && options.maxRetries >= 0)) {
+      throw new NexgentError('config/invalid', 'maxRetries must be a non-negative integer')
     }
     if (options.effort !== undefined && !EFFORT_LEVELS.includes(options.effort)) {
       throw new NexgentError('config/invalid', `effort must be one of ${EFFORT_LEVELS.join(', ')}`)
@@ -264,13 +285,17 @@ export class AnthropicProvider implements LLMProvider {
     }
     this.fallbacks = (options.fallbacks ?? 'default') === 'default' && parsed.hostname === CLAUDE_API_HOST
     this.attribution = pickAttribution(options.attribution)
+    this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES
+    this.retryBaseDelayMs = positive(options.retryBaseDelayMs, DEFAULT_RETRY_BASE_DELAY_MS)
+    this.retryMaxDelayMs = positive(options.retryMaxDelayMs, DEFAULT_RETRY_MAX_DELAY_MS)
     this.baseURL = endpoint.replace(/\/+$/, '')
     this.fetch = options.fetch
   }
 
   /**
    * One SDK client per request: the key is read from `Credentials` each time
-   * and never kept in provider state. `maxRetries: 0` by decision.
+   * and never kept in provider state. The SDK's own retries stay off: the
+   * provider retries itself so each attempt is visible in the ledger.
    */
   private makeClient(apiKey: string, timeout: number): Anthropic {
     return new Anthropic({
@@ -316,33 +341,67 @@ export class AnthropicProvider implements LLMProvider {
       endpoint: this.info.endpoint,
       model,
     }
-    await this.append({ type: 'llm.request.start', ...common, purpose: options.purpose ?? 'task', thinking: request.thinking })
-    const started = performance.now()
-    const outcome: Outcome = { status: 'unknown', usage: UNKNOWN_USAGE }
-    const controller = new AbortController()
-    try {
-      for await (const event of this.stream(request, model, options, outcome, controller)) {
-        yield event
+    for (let attempt = 1; ; attempt++) {
+      const stamp = attempt > 1 ? { attempt } : {}
+      await this.append({ type: 'llm.request.start', ...common, ...stamp, purpose: options.purpose ?? 'task', thinking: request.thinking })
+      const started = performance.now()
+      const outcome: Outcome = { status: 'unknown', usage: UNKNOWN_USAGE }
+      const controller = new AbortController()
+      let retry: { delayMs: number; error: StreamErrorEvent['error'] } | undefined
+      let kept = false
+      try {
+        for await (const event of this.stream(request, model, options, outcome, controller)) {
+          if (event.type === 'error' && !kept && attempt <= this.maxRetries && isRetryable(event)) {
+            retry = { delayMs: this.retryDelay(attempt, event), error: event.error }
+            break
+          }
+          if (event.type === 'error') {
+            const final = finalError(event, attempt, !kept && isRetryable(event))
+            yield final
+            continue
+          }
+          if (event.type === 'text.delta' || event.type.startsWith('tool-call.')) kept = true
+          yield event
+        }
+      } finally {
+        if (outcome.status === 'unknown') {
+          // The consumer stopped iterating before a terminal event.
+          outcome.status = 'aborted'
+          outcome.finishReason = 'aborted'
+          outcome.usage = UNKNOWN_USAGE
+        }
+        if (!controller.signal.aborted) controller.abort(new AbortReason('consumer'))
+        await this.append({
+          type: 'llm.request.end',
+          ...common,
+          ...stamp,
+          status: outcome.status,
+          usage: outcome.usage,
+          latencyMs: Math.max(0, Math.round(performance.now() - started)),
+          ...outcome.httpStatus === undefined ? {} : { httpStatus: outcome.httpStatus },
+          ...outcome.finishReason === undefined ? {} : { finishReason: outcome.finishReason },
+          ...outcome.errorCode === undefined ? {} : { errorCode: outcome.errorCode },
+        })
       }
-    } finally {
-      if (outcome.status === 'unknown') {
-        // The consumer stopped iterating before a terminal event.
-        outcome.status = 'aborted'
-        outcome.finishReason = 'aborted'
-        outcome.usage = UNKNOWN_USAGE
+      if (retry === undefined) return
+      yield { type: 'retry', attempt: attempt + 1, delayMs: retry.delayMs, error: retry.error }
+      if (!(await sleep(retry.delayMs, request.signal))) {
+        yield { type: 'done', finishReason: 'aborted' }
+        return
       }
-      if (!controller.signal.aborted) controller.abort(new AbortReason('consumer'))
-      await this.append({
-        type: 'llm.request.end',
-        ...common,
-        status: outcome.status,
-        usage: outcome.usage,
-        latencyMs: Math.max(0, Math.round(performance.now() - started)),
-        ...outcome.httpStatus === undefined ? {} : { httpStatus: outcome.httpStatus },
-        ...outcome.finishReason === undefined ? {} : { finishReason: outcome.finishReason },
-        ...outcome.errorCode === undefined ? {} : { errorCode: outcome.errorCode },
-      })
     }
+  }
+
+  /**
+   * Wait before retry number `attempt`: the server's `retry-after` when it
+   * sent one, else base × 2^(attempt-1) with full jitter in its upper half;
+   * both capped at `retryMaxDelayMs`.
+   */
+  private retryDelay(attempt: number, event: StreamErrorEvent): number {
+    const after = event.error.details?.['retryAfterMs']
+    if (typeof after === 'number' && Number.isFinite(after) && after >= 0) return Math.min(after, this.retryMaxDelayMs)
+    const exponential = Math.min(this.retryBaseDelayMs * 2 ** (attempt - 1), this.retryMaxDelayMs)
+    return Math.round(exponential * (0.5 + Math.random() / 2))
   }
 
   /** Ledger writes never change the request outcome; the ledger counts its own failures. */
@@ -424,7 +483,12 @@ export class AnthropicProvider implements LLMProvider {
         if (error.status !== undefined) outcome.httpStatus = error.status
         providerRequestId ??= error.requestID ?? error.headers?.get('request-id') ?? undefined
         const detail = apiErrorMessage(error)
-        return fail('llm/request-failed', error.status === undefined ? detail : `HTTP ${error.status}: ${detail}`, error.type === null || error.type === undefined ? {} : { providerType: error.type })
+        const retryAfterMs = retryAfter(error.headers)
+        return fail('llm/request-failed', error.status === undefined ? detail : `HTTP ${error.status}: ${detail}`, {
+          ...error.type === null || error.type === undefined ? {} : { providerType: error.type },
+          ...retryAfterMs === undefined ? {} : { retryAfterMs },
+          ...isContextOverflow(error.status, detail) ? { contextOverflow: true } : {},
+        })
       }
       if (looksLikeTransport(error)) {
         const code = causeCode(error)
@@ -551,6 +615,67 @@ export class AnthropicProvider implements LLMProvider {
       signal?.removeEventListener('abort', onCallerAbort)
     }
   }
+}
+
+/** Provider error types worth retrying whatever the HTTP status (an SSE `error` event mid-stream has none). */
+const RETRYABLE_PROVIDER_TYPES = new Set(['overloaded_error', 'rate_limit_error', 'api_error', 'timeout_error'])
+
+/**
+ * Whether a failed attempt may be sent again: a rate limit, overload or
+ * server error, or a connection that failed or dropped (no HTTP error status
+ * and no provider error type). Timeouts, invalid requests, auth errors and
+ * malformed responses are final.
+ * @param event - the attempt's terminal error.
+ */
+export function isRetryable(event: StreamErrorEvent): boolean {
+  if (event.error.code !== 'llm/request-failed') return false
+  const details = event.error.details ?? {}
+  const providerType = details['providerType']
+  if (typeof providerType === 'string') return RETRYABLE_PROVIDER_TYPES.has(providerType)
+  const status = event.httpStatus
+  if (status === undefined || status === 200) return true
+  return RETRYABLE_HTTP_STATUSES.includes(status)
+}
+
+/** The error the consumer sees after the last attempt: tagged with how many attempts ran and whether more could help. */
+function finalError(event: StreamErrorEvent, attempts: number, retryable: boolean): StreamErrorEvent {
+  const details = { ...event.error.details, attempts, retryable }
+  const message = attempts > 1 ? `${event.error.message} (after ${attempts} attempts)` : event.error.message
+  return { ...event, error: { ...event.error, message, details } }
+}
+
+/** `retry-after-ms` or `retry-after` (seconds or an HTTP date) in ms, when present. */
+function retryAfter(headers: Headers | undefined): number | undefined {
+  const ms = Number(headers?.get('retry-after-ms') ?? Number.NaN)
+  if (Number.isFinite(ms) && ms >= 0) return Math.round(ms)
+  const raw = headers?.get('retry-after')
+  if (raw === null || raw === undefined || raw.trim() === '') return undefined
+  const seconds = Number(raw)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000)
+  const date = Date.parse(raw)
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now())
+}
+
+/** A 400/413 that says the prompt does not fit the model's context window. */
+export function isContextOverflow(status: number | undefined, message: string): boolean {
+  if (status !== 400 && status !== 413) return false
+  return /prompt is too long|context (?:window|length)|too many (?:input )?tokens|exceeds? the (?:model's )?(?:maximum )?context/i.test(message)
+}
+
+/** Resolve after `ms`, or `false` as soon as `signal` aborts. */
+function sleep(ms: number, signal: AbortSignal | undefined): Promise<boolean> {
+  if (signal?.aborted === true) return Promise.resolve(false)
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve(true)
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      resolve(false)
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 /** The API's own error message (`error.message` of the body) or the SDK message. */

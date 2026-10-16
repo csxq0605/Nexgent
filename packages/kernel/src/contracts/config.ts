@@ -62,6 +62,13 @@ export interface ProjectConfig {
   readonly improvement: ImprovementConfig
   /** Step 4: gate and rollback settings (`DEFAULT_CAPABILITIES_CONFIG`). Changing it always needs approval. */
   readonly capabilities: CapabilitiesConfig
+  /**
+   * Model calls one turn may make before it stops with cancel cause
+   * `step-limit` (the user continues by sending another message; ADR 0021).
+   * Absent: the `agents` profile row's `maxSteps` (400). A member preset's
+   * `maxSteps` still wins for that member. Changing it always needs approval.
+   */
+  readonly maxStepsPerTurn?: number
 }
 
 /**
@@ -69,7 +76,7 @@ export interface ProjectConfig {
  * sandbox mode (`permissions.md` "始终审批"): a model must not widen its own
  * permissions, budgets or gate.
  */
-export const GUARDED_PROJECT_CONFIG_FIELDS = ['approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement'] as const
+export const GUARDED_PROJECT_CONFIG_FIELDS = ['approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement', 'maxStepsPerTurn'] as const
 
 /** The defaults applied over a missing or partial config file. */
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
@@ -114,6 +121,7 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
     autoImprove: input.autoImprove ?? DEFAULT_PROJECT_CONFIG.autoImprove,
     capabilities: resolveCapabilitiesConfig(input.capabilities),
     improvement: resolveImprovementConfig(input.improvement),
+    ...(input.maxStepsPerTurn === undefined ? {} : { maxStepsPerTurn: input.maxStepsPerTurn }),
   }
 }
 

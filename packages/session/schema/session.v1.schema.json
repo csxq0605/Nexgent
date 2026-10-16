@@ -853,7 +853,8 @@
                 "timeout",
                 "shutdown",
                 "cost-cap",
-                "parent"
+                "parent",
+                "step-limit"
               ]
             }
           }

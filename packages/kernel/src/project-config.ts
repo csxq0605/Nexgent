@@ -25,6 +25,7 @@ export interface LoadedProjectConfig {
 
 const KNOWN_FIELDS = new Set([
   'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities', 'improvement',
+  'maxStepsPerTurn',
 ])
 
 function fail(path: string, message: string): never {
@@ -118,6 +119,12 @@ export function parseProjectConfig(value: unknown, path = 'config.json'): Loaded
   if (value.autoImprove !== undefined) {
     if (typeof value.autoImprove !== 'boolean') fail(path, 'autoImprove must be a boolean')
     input.autoImprove = value.autoImprove
+  }
+  if (value.maxStepsPerTurn !== undefined) {
+    if (typeof value.maxStepsPerTurn !== 'number' || !Number.isSafeInteger(value.maxStepsPerTurn) || value.maxStepsPerTurn < 1) {
+      fail(path, 'maxStepsPerTurn must be a positive integer')
+    }
+    input.maxStepsPerTurn = value.maxStepsPerTurn
   }
   if (value.capabilities !== undefined) {
     try {

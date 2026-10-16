@@ -85,7 +85,7 @@ describe('step-2 session records', () => {
     expect(state.metadata.openTurn).toBeUndefined()
   })
 
-  it('refuses a compaction whose tail does not start at a user message, and a goal.update for another goal', async () => {
+  it('refuses a compaction whose tail starts at a tool result, and a goal.update for another goal', async () => {
     const { root, store } = await setup()
     const lock = await store.create(sessionInit(root))
     for (const record of turnRecords(1)) await store.append(SESSION_ID, record)
@@ -99,6 +99,23 @@ describe('step-2 session records', () => {
       await expect(store.append(SESSION_ID, record)).rejects.toSatisfy(error => isNexgentError(error, 'session/invalid-record'))
     }
     expect((await store.readAll(SESSION_ID)).records).toHaveLength(before)
+    await store.release(lock)
+  })
+
+  it('accepts a compaction that splits the current turn at a reply (ADR 0021); kept replies lose their provider content', async () => {
+    const { root, store } = await setup()
+    const lock = await store.create(sessionInit(root))
+    const records = turnRecords(1).filter(record => record.type !== 'turn.end')
+    const withThinking = records.map(record => record.type === 'assistant.message' && record.step === 1
+      ? { ...record, providerContent: [{ type: 'thinking', thinking: 't', signature: 's' }] }
+      : record)
+    for (const record of withThinking) await store.append(SESSION_ID, record)
+    await store.append(SESSION_ID, { type: 'compaction', turn: 1, step: 3, summary: 's', keepMessages: 3, compactedMessages: 1, requestId: 'r', usage: KNOWN_USAGE, trigger: { inputTokens: 2, threshold: 1 } })
+    const state = await store.resume(SESSION_ID)
+    expect(state.messages[0]).toEqual({ role: 'user', content: renderCompactionSummary('s') })
+    expect(state.messages[1]).toMatchObject({ role: 'assistant', toolCalls: [{ id: 'call_1' }] })
+    expect(state.messages[1]).not.toHaveProperty('providerContent')
+    expect(state.messages.map(message => message.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
     await store.release(lock)
   })
 
