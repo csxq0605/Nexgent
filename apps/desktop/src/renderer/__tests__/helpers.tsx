@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect } from 'vitest'
 import { App } from '../App.js'
 import { StoreProvider } from '../hooks.js'
@@ -34,4 +34,22 @@ export function emit(bridge: FakeBridge, event: Parameters<FakeBridge['emit']>[0
 /** Emit an application-level event (no projectId) inside act. */
 export function emitApp(bridge: FakeBridge, event: Parameters<FakeBridge['emitApp']>[0]): void {
   act(() => bridge.emitApp(event))
+}
+
+type Tab = 'materials' | 'deliverables' | 'capabilities' | 'improvements'
+
+/**
+ * Show a tab whatever is on screen (ADR 0020): 资料 and 成果 live in the
+ * conversation's drawer, 能力 and 改进 on the 能力 page.
+ */
+export function showTab(id: Tab): void {
+  if (screen.queryByTestId(`tab-${id}`) === null) {
+    if (id === 'capabilities' || id === 'improvements') fireEvent.click(screen.getByTestId('nav-capabilities'))
+    else {
+      const back = screen.queryByTestId('page-back')
+      if (back !== null) fireEvent.click(back)
+      fireEvent.click(screen.getByTestId('drawer-toggle'))
+    }
+  }
+  fireEvent.click(screen.getByTestId(`tab-${id}`))
 }

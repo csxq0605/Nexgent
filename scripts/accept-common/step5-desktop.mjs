@@ -32,6 +32,7 @@ import { decisionsOf } from './step4-gate.mjs'
 import { FEEDBACK_TASK, NEXT_TASK, runFeedbackProject, SCRIPTED_API_KEY, TERMINAL_STATES, PARKED_STATES } from './step5-fixtures.mjs'
 import { Step5Model } from './step5-model.mjs'
 import { createStep5Sdk, improvementsPath, loadStep5Packages, readImprovements, scriptedEnvironment } from './step5-runtime.mjs'
+import { showTab, fillProjectPath } from './desktop-ui.mjs'
 
 const TIMEOUT = 60_000
 const WAIT = 45_000
@@ -332,7 +333,7 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
       }, state => state !== 'loading', 'the workspace or the start screen', WAIT)
       await sleep(1_500)
       if ((await page.getByTestId('workspace').count()) === 0) {
-        await page.getByTestId('project-path').fill(root, { timeout: 10_000 })
+        await fillProjectPath(page, root, { timeout: 10_000 })
         await page.getByRole('button', { name: '打开', exact: true }).click()
         await page.getByTestId('workspace').waitFor({ timeout: WAIT })
       }
@@ -347,7 +348,7 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
     step = 'launch 1'
     log('launch 1: the 改进 tab')
     let page = await launch('first')
-    await page.getByTestId('tab-improvements').click()
+    await showTab(page, 'improvements')
 
     step = 'D19 D20 job cards and details'
     const ids = [obs.prepared.noProposal.id, obs.prepared.failed.id, obs.prepared.rejected.id, obs.prepared.adopted.id]
@@ -379,7 +380,7 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
     // evolve records the first use when a turn starts after the task (or a host starts): look, nudge with a second turn, look again.
     const adoptedId = obs.prepared.adopted.id
     const firstUseText = async () => {
-      await page.getByTestId('tab-improvements').click()
+      await showTab(page, 'improvements')
       const detail = await openDetail(page, adoptedId)
       return detail.firstUse
     }
@@ -395,7 +396,7 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
     obs.firstUse.ui = await found(8_000)
     if (obs.firstUse.ui === null) {
       obs.firstUse.nudged = true
-      await page.getByTestId('tab-improvements').click()
+      await showTab(page, 'improvements')
       const sid = nextSession
       await page.getByTestId('session-item').filter({ hasText: NEXT_TASK.id }).first().click().catch(() => undefined)
       await typeTurn('谢谢', 'Noted.').catch(() => undefined)
@@ -415,7 +416,7 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
     await button.waitFor({ timeout: WAIT })
     obs.deliverable = { cardCount: await page.getByTestId('deliverable-card').count() }
     await button.click()
-    await page.getByTestId('tab-improvements').click()
+    await showTab(page, 'improvements')
     const started = await poll(async () => {
       const cards = await cardsOf(page)
       return cards.find(c => !ids.includes(c.id ?? '') && !jobsBefore.includes(c.id ?? '')) ?? null

@@ -17,6 +17,7 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { DESKTOP_DIR, VITE_BIN, ensureDisplay, poll, run } from './step2-desktop.mjs'
 import { isLoopbackUrl } from './step2-runtime.mjs'
+import { fillProjectPath } from './desktop-ui.mjs'
 
 const TIMEOUT = 60_000
 const WAIT = 20_000
@@ -119,7 +120,6 @@ export async function runMembersDesktopScenario(harness, work, { log = () => {} 
   }
   /** Open a member's read-only session, read it, and go back. */
   const openMember = async (page, block) => {
-    if ((await block.locator('[data-testid="open-member"]').count()) === 0 || !(await block.getByTestId('open-member').isVisible())) await block.locator('summary').click()
     await block.getByTestId('open-member').click()
     const view = page.getByTestId('member-view')
     await view.waitFor({ timeout: WAIT })
@@ -151,7 +151,7 @@ export async function runMembersDesktopScenario(harness, work, { log = () => {} 
     log('turn 1: delegate to writer')
     let page = await launch('first')
     await page.getByTestId('start-screen').waitFor({ timeout: WAIT })
-    await page.getByTestId('project-path').fill(root)
+    await fillProjectPath(page, root)
     await page.getByTestId('create-project').click()
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
     await page.getByTestId('new-session').click()
@@ -180,12 +180,11 @@ export async function runMembersDesktopScenario(harness, work, { log = () => {} 
 
     step = 'D11 finished block'
     obs.finished = { blocks: await blocksOf(page), toolBlocks: await page.getByTestId('tool-block').count() }
-    await writer.locator('summary').click()
     obs.finished.deliverableLinks = await writer.getByTestId('member-deliverable').allTextContents()
 
     step = 'D12 member view'
     obs.view = await openMember(page, writer)
-    obs.view.sessionItem = await poll(() => page.getByTestId('session-item').textContent(), text => (text ?? '').includes('1 个成员'), 'the member count in the sidebar')
+    obs.view.sessionItem = await poll(() => page.getByTestId('session-item').getAttribute('title'), text => (text ?? '').includes('1 个成员'), 'the member count in the sidebar')
 
     step = 'D14 kill while a member streams'
     log('turn 2: hard kill while slow streams')
@@ -205,11 +204,10 @@ export async function runMembersDesktopScenario(harness, work, { log = () => {} 
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
     obs.restart = {
       sessions: await poll(() => page.getByTestId('session-item').count(), n => n === 1, 'one session in the sidebar'),
-      sessionItem: await poll(() => page.getByTestId('session-item').textContent(), text => (text ?? '').includes('2 个成员'), 'two members in the sidebar'),
+      sessionItem: await poll(() => page.getByTestId('session-item').getAttribute('title'), text => (text ?? '').includes('2 个成员'), 'two members in the sidebar'),
       blocks: await poll(() => blocksOf(page), blocks => blocks.length === 2 && blocks.every(b => b.status !== 'running'), 'two settled member blocks'),
     }
     const writerAgain = page.locator('[data-testid="member-block"][data-member="writer"]')
-    await writerAgain.locator('summary').click()
     obs.restart.deliverableLinks = await writerAgain.getByTestId('member-deliverable').allTextContents()
     obs.restart.writerView = await openMember(page, writerAgain)
     obs.restart.slowView = await openMember(page, page.locator('[data-testid="member-block"][data-member="slow"]'))

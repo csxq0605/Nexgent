@@ -19,7 +19,7 @@ import { readFile, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import type { NexgentSdk } from '@nexgent/sdk'
 import { exportInterceptor, pickMaterialFiles, pickProjectDirectory, type ShowOpenDialog } from './dialogs.js'
 import { parseLaunchArgs } from './launch-args.js'
@@ -40,7 +40,7 @@ import {
 } from './origin.js'
 import { loadSdk } from './sdk-loader.js'
 import { ShutdownCoordinator, type RunningTurn } from './shutdown.js'
-import { preferenceViolations, secureWebPreferences } from './window-config.js'
+import { keepOnClose, preferenceViolations, secureWebPreferences } from './window-config.js'
 
 const dev = !app.isPackaged
 const devEnv = (name: string): string | undefined => (dev ? process.env[name] || undefined : undefined)
@@ -180,7 +180,8 @@ function createWindow(tokens: TokenRegistry): BrowserWindow {
     minHeight: 640,
     title: 'Nexgent',
     show: false,
-    backgroundColor: '#ffffff',
+    // The renderer's --bg in light / dark (styles.css), so the window does not flash white in dark mode.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#17181d' : '#fbfbfc',
     webPreferences: secureWebPreferences({ preload: preloadPath, token, dev }),
   })
   tokens.register(window.id, token)
@@ -264,8 +265,16 @@ async function start(): Promise<void> {
       if (decision === 'quit') app.quit()
     })
   }
-  app.on('before-quit', quit)
-  app.on('window-all-closed', () => app.quit())
+  // macOS: closing the window keeps the app in the Dock; Quit (⌘Q, the Dock menu) goes through `quit`.
+  let quitting = false
+  app.on('before-quit', (event) => {
+    quitting = true
+    quit(event)
+    if (!shutdown.done) void shutdown.requestQuit().then((decision) => { if (decision !== 'quit') quitting = false })
+  })
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
   app.on('second-instance', (_event, _argv, _cwd, additionalData) => {
     // The second instance passes its parsed `--project` as lock data (argv order is not reliable there).
     const project = (additionalData as { project?: unknown } | null)?.project
@@ -277,5 +286,17 @@ async function start(): Promise<void> {
   })
 
   const window = createWindow(tokens)
-  window.on('close', quit)
+  window.on('close', (event) => {
+    if (keepOnClose(process.platform, quitting)) {
+      event.preventDefault()
+      window.hide()
+      return
+    }
+    quit(event)
+  })
+  app.on('activate', () => {
+    if (window.isDestroyed()) return
+    window.show()
+    window.focus()
+  })
 }

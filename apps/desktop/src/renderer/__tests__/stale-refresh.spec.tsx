@@ -8,7 +8,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { FakeBridge, candidate, improvementJob } from '../testing/fake-bridge.js'
-import { emit, emitApp, renderApp } from './helpers.js'
+import { emit, emitApp, renderApp, showTab } from './helpers.js'
 
 /** Make the next call of `method` answer with what it would answer now, but only when `release` is called. */
 function holdNext(bridge: FakeBridge, method: string): { release: () => void; called: Promise<void> } {
@@ -46,7 +46,7 @@ describe('a list read that answers after a later one is dropped', () => {
     // The user denies; the refresh that follows reads it rejected and answers first.
     fireEvent.click(within(dialog).getByTestId('plugin-deny'))
     await waitFor(() => expect(screen.queryByTestId('plugin-approval-dialog')).toBeNull())
-    fireEvent.click(screen.getByTestId('tab-capabilities'))
+    showTab('capabilities')
     await waitFor(() => expect(screen.getByTestId('capability-candidate').dataset['status']).toBe('rejected'))
     slow.release()
     await tick()
@@ -58,7 +58,7 @@ describe('a list read that answers after a later one is dropped', () => {
     const bridge = new FakeBridge()
     bridge.improvements = { ...bridge.improvements, jobs: [improvementJob({ id: 'j-1', status: 'diagnosing' })], activeJobId: 'j-1' }
     await renderApp(bridge)
-    fireEvent.click(screen.getByTestId('tab-improvements'))
+    showTab('improvements')
     const job = await screen.findByTestId('improvement-job')
     expect(job.dataset['status']).toBe('diagnosing')
     const slow = holdNext(bridge, 'improvements.list')
@@ -80,7 +80,7 @@ describe('a list read that answers after a later one is dropped', () => {
       usedBy: [],
     } as never
     await renderApp(bridge)
-    fireEvent.click(screen.getByTestId('tab-improvements'))
+    showTab('improvements')
     await waitFor(() => expect(screen.getByTestId('improver-current').dataset['version']).toBe(child))
     const slow = holdNext(bridge, 'improvers.list')
     emitApp(bridge, { type: 'improver.version', current: bridge.improver.current })

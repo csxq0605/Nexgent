@@ -23,6 +23,7 @@ import { join } from 'node:path'
 import { DESKTOP_DIR, VITE_BIN, ensureDisplay, poll, run } from './step2-desktop.mjs'
 import { isLoopbackUrl } from './step2-runtime.mjs'
 import { COMPONENTS, UNUSED_SKILL } from './step4-fixtures.mjs'
+import { backToConversation, fillProjectPath, showTab } from './desktop-ui.mjs'
 
 const TIMEOUT = 60_000
 // Generous: the full test run starts several Electron apps at once.
@@ -202,6 +203,7 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
     return page
   }
   const turn = async (page, text, done) => {
+    await backToConversation(page)
     const input = page.getByTestId('composer-input')
     await input.click()
     await page.keyboard.type(text)
@@ -225,11 +227,11 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
     log('baseline project')
     let page = await launch('first')
     await page.getByTestId('start-screen').waitFor({ timeout: WAIT })
-    await page.getByTestId('project-path').fill(root)
+    await fillProjectPath(page, root)
     await page.getByTestId('create-project').click()
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
     await page.getByTestId('new-session').click()
-    await page.getByTestId('tab-capabilities').click()
+    await showTab(page, 'capabilities')
     obs.before = await poll(() => panelOf(page), p => p.version !== null, 'the 能力 tab', WAIT)
     await turn(page, CAPABILITY_TEXTS.firstTurn, CAPABILITY_TEXTS.firstDone)
     obs.firstSessions = await sessionVersions(harness, root)
@@ -259,7 +261,7 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
     obs.dialog.detached = true
 
     step = 'D15 D16 the 能力 tab after adoption'
-    await page.getByTestId('tab-capabilities').click()
+    await showTab(page, 'capabilities')
     obs.after = await poll(() => panelOf(page), p => p.version === obs.seed.A.version && p.candidates.find(c => c.id === obs.seed.P.id)?.status === 'rejected', 'version A and the denied plugin in the 能力 tab', WAIT)
     const rejected = page.locator(`[data-testid="capability-candidate"][data-candidate="${obs.seed.R.id}"]`)
     await rejected.locator('.item-button').click()
@@ -270,6 +272,7 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
 
     step = 'D18 manual rollback'
     log('manual rollback')
+    await showTab(page, 'capabilities')
     await page.getByTestId('capability-rollback').click()
     await page.getByTestId('capability-rollback-reason').fill(CAPABILITY_TEXTS.rollbackReason)
     await page.getByTestId('capability-rollback-confirm').click()
@@ -286,7 +289,7 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
     log('restart')
     page = await launch('second')
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
-    await page.getByTestId('tab-capabilities').click()
+    await showTab(page, 'capabilities')
     obs.restart = await poll(settled, p => p.version !== null && p.candidates.length > 0 && p.revisions.length === p.history.length, 'the 能力 tab after the restart', WAIT)
     obs.restart.dialogs = await page.getByTestId('plugin-approval-dialog').count()
 

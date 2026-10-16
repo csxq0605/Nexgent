@@ -25,11 +25,12 @@ export const T = {
   loading: '加载中…',
 
   startTitle: '打开一个项目',
-  startHint: '项目是你电脑上的一个文件夹，Nexgent 在里面工作，资料和成果都保存在它的 .nexgent 目录下。',
+  startHint: '选一个文件夹，Nexgent 就在里面帮你做事：读你给的资料，把成果交回给你。',
+  startMore: '用路径打开或新建',
   recentProjects: '最近的项目',
   noRecent: '还没有打开过项目。',
   missingProject: '文件夹已不存在',
-  chooseFolder: '选择文件夹…',
+  chooseFolder: '打开文件夹',
   folderPathLabel: '项目文件夹的绝对路径',
   folderPathPlaceholder: '例如 /home/me/projects/sales 或 C:\\work\\sales',
   openProject: '打开',
@@ -43,6 +44,11 @@ export const T = {
   conversations: '对话',
   newConversation: '新对话',
   noConversations: '还没有对话。点“新对话”开始。',
+  groupToday: '今天',
+  groupWeek: '本周',
+  groupEarlier: '更早',
+  capabilities: '能力',
+  needsApproval: '等你批准',
   untitled: '未命名对话',
   rename: '改名',
   renameLabel: '对话名称',
@@ -51,16 +57,20 @@ export const T = {
   settings: '设置',
 
   emptyConversationTitle: '开始一段对话',
-  emptyConversationBody: '先在右侧添加资料，然后告诉 Nexgent 你要什么成果。输入 @ 可以引用资料。',
+  emptyConversationBody: '告诉 Nexgent 你想要什么结果。要用到文件的话，先点“附件”加进来，输入 @ 可以引用。',
   noSessionTitle: '选择或新建一个对话',
   noSessionBody: '左侧列出了这个项目的全部对话。',
 
-  composerPlaceholder: '描述你要的成果，输入 @ 引用资料（Enter 发送，Shift+Enter 换行）',
+  composerPlaceholder: '描述你想要的结果',
+  composerPlaceholderMore: '接着说，或者让它改点什么',
+  mentionChip: '@ 资料',
   send: '发送',
   stop: '停止',
   stopping: '正在停止…',
   busy: '正在执行…',
-  attach: '添加资料',
+  attach: '附件',
+  addMaterial: '加入资料',
+  dropHint: '点“加入资料”选择文件，原文件不会被修改。',
   mentionNone: '没有匹配的资料',
 
   you: '你',
@@ -74,10 +84,25 @@ export const T = {
   toolDone: '完成',
   toolInput: '输入',
   toolOutput: '输出',
-  filesChanged: '本轮改动的文件',
+  filesChanged: (n: number) => `改动了 ${n} 个文件`,
+  filesOther: (n: number) => `过程中另外改动了 ${n} 个文件`,
+  stepsRunning: '正在处理',
+  thinkingStep: '思考',
+  stepsSummary: (parts: readonly string[], seconds: string | undefined) => `${parts.length === 0 ? '处理了一下' : parts.join('，')}${seconds === undefined ? '' : ` · ${seconds}`}`,
+  teamProgress: '小组进度',
+  teamDone: (done: number, total: number) => `${done} / ${total} 完成`,
+  memberWorking: '正在工作',
   compacted: '较早的对话已压缩为摘要',
 
   approvalTitle: '需要你的批准',
+  approvalWhat: (tool: string) => `要${tool}吗？`,
+  approvalCommand: '要执行的内容',
+  approvalDetail: '详细说明',
+  allowAlways: '总是允许',
+  allowScope: '选择范围',
+  alwaysSession: '在这段对话里总是允许',
+  alwaysProject: '在这个项目里总是允许',
+  approvalRiskLine: (risk: string) => `风险：${risk}`,
   approvalRisk: '风险',
   allowOnce: '允许一次',
   allowSession: '本对话内允许',
@@ -89,6 +114,12 @@ export const T = {
 
   deliverable: '成果',
   version: (n: number) => `v${n}`,
+  versionLong: (n: number) => `第 ${n} 版`,
+  cardOpen: '打开',
+  cardCompare: '对比上一版',
+  cardFeedback: '不满意？告诉 Nexgent',
+  fileCount: (n: number) => `${n} 个文件`,
+  moreFiles: (n: number) => `还有 ${n} 个`,
   viewDeliverable: '查看',
   giveFeedback: '提出修改',
   reveal: '在文件管理器中显示',
@@ -108,6 +139,10 @@ export const T = {
   commentPlaceholder: '说明哪里要改、改成什么样',
   submitFeedback: '提交并开始修改',
 
+  drawerTitle: '资料与成果',
+  drawerClose: '收起',
+  thisConversation: '这段对话',
+  otherConversations: '这个项目的其他对话',
   panelMaterials: '资料',
   panelDeliverables: '成果',
   panelFiles: '文件',
@@ -124,6 +159,17 @@ export const T = {
   filesTruncated: (limit: number) => `文件太多，只列出前 ${limit} 个。`,
   filesChangedHere: '本对话改动过',
   goalNone: '这个对话还没有目标。',
+  goalAdd: '设定目标',
+  goalLabel: (text: string) => `目标：${text}`,
+  backToChat: '返回对话',
+  capabilitiesTitle: '能力',
+  capabilitiesLead: 'Nexgent 在这个项目里学会的做法，以及每次改进的结果。',
+  settingsLead: '这个项目的模型、权限、费用与改进设置。',
+  appearance: '外观',
+  appearanceHint: '跟随系统时，系统切到深色，Nexgent 也跟着变深。',
+  themeSystem: '跟随系统',
+  themeLight: '浅色',
+  themeDark: '深色',
   goalPlaceholder: '一句话写下这个对话要达成的目标',
   setGoal: '设定目标',
   goalComplete: '标记完成',
@@ -133,10 +179,10 @@ export const T = {
   settingsTitle: '设置',
   settingsProject: '项目设置',
   model: '模型',
-  thinkingMode: '思考（thinking）',
+  thinkingMode: '先思考再回答',
   thinkingOn: '开启',
   thinkingOff: '关闭',
-  effort: '推理强度（effort）',
+  effort: '思考深度',
   sandbox: '沙箱模式',
   sandboxReadOnly: '只读',
   sandboxWorkspace: '可写工作区',
@@ -162,14 +208,15 @@ export const T = {
   memberInterrupted: '已中断',
   memberDeliverables: (n: number) => `成果 ${n}`,
   memberNoDeliverables: '这次没有交出成果。',
-  openMember: '查看成员会话',
+  openMember: '看它的过程',
   memberSessionTitle: (name: string) => `成员 ${name} 的会话`,
   memberReadOnly: '只读：成员由主对话安排工作，这里不能发消息。',
-  backToConversation: '← 返回主对话',
+  backToConversation: '返回主对话',
   workflow: '工作流',
   workflowPhases: '阶段',
   workflowMembers: (n: number) => `${n} 个成员`,
   teamMessage: '团队消息',
+  teamFromTo: (from: string, to: string) => `${from} 发给 ${to}`,
   teamQueued: '待投递',
   teamDelivered: '已投递',
   approvalByMember: (name: string, form: string) => `成员 ${name}（${form}）请求这一操作`,
@@ -319,9 +366,10 @@ export const T = {
   metaBudgetTokens: '元改进预算（tokens）',
   metaWindow: '元改进预算窗口（天）',
   metaSettingsInvalid: '元改进的预算、窗口必须是正整数，触发作业数必须是 1 到 20 的整数。',
-  deliverableImprove: '改进',
+  deliverableImprove: '改进做法',
+  deliverableImproveHint: '让 Nexgent 从这次的问题里学习，改进以后同类任务的做法',
   deliverableImproveStarting: '正在开始改进…',
-  deliverableImproveStarted: '已开始改进，进度在右侧“改进”页。',
+  deliverableImproveStarted: '已开始一次改进。',
   deliverableImproveShow: '查看进度',
 } as const
 
@@ -610,4 +658,99 @@ export function improverReasonText(reason: string): string {
 export function metaStageText(stage: string): string {
   const words: Record<string, string> = { diagnose: '诊断', propose: '提出候选', trial: '门控试验', other: '其他' }
   return words[stage] ?? stage
+}
+
+/** What a tool call does, as a Chinese verb (ADR 0020: no internal tool names on screen). */
+export function toolVerb(name: string): string {
+  const words: Record<string, string> = {
+    read_file: '读取',
+    read_document: '读取',
+    read_spreadsheet: '读取表格',
+    write_file: '写入',
+    write_spreadsheet: '写入表格',
+    str_replace: '修改',
+    list_files: '查看目录',
+    search_text: '搜索',
+    bash: '运行命令',
+    pwsh: '运行命令',
+    run_code: '运行代码',
+    present: '交付成果',
+    web_fetch: '读取网页',
+    load_skill: '读取做法说明',
+    delegate: '委派成员',
+    spawn_teammate: '安排成员',
+    wait_teammates: '等待成员',
+    send_message: '给成员留言',
+    team_task_create: '建小组任务',
+    team_task_list: '查看小组任务',
+    team_task_update: '更新小组任务',
+    workflow: '按流程安排',
+    capability_draft: '起草新做法',
+    capability_try: '试用新做法',
+    capability_propose: '提交新做法',
+  }
+  return words[name] ?? '使用工具'
+}
+
+/** Counted actions for the folded process line, in the order they first appear: “读了 1 个文件”. */
+export function stepsParts(names: readonly string[]): string[] {
+  const groups: Array<[string, (n: number) => string]> = []
+  const counts = new Map<string, number>()
+  const label = (name: string): [string, (n: number) => string] => {
+    if (['read_file', 'read_document', 'read_spreadsheet'].includes(name)) return ['read', n => `读了 ${n} 个文件`]
+    if (['write_file', 'write_spreadsheet', 'str_replace'].includes(name)) return ['write', n => `写入 ${n} 个文件`]
+    if (['bash', 'pwsh'].includes(name)) return ['run', n => `运行了 ${n} 条命令`]
+    if (name === 'run_code') return ['code', n => `运行了 ${n} 段代码`]
+    if (['list_files', 'search_text'].includes(name)) return ['look', n => `查找了 ${n} 次`]
+    if (name === 'web_fetch') return ['web', n => `读了 ${n} 个网页`]
+    if (name === 'present') return ['present', () => '交付了成果']
+    if (['delegate', 'spawn_teammate'].includes(name)) return ['member', n => `安排了 ${n} 个成员`]
+    if (name === 'wait_teammates') return ['wait', () => '等待成员']
+    return ['other', n => `用了 ${n} 次其他工具`]
+  }
+  for (const name of names) {
+    const [key, text] = label(name)
+    if (!counts.has(key)) groups.push([key, text])
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return groups.map(([key, text]) => text(counts.get(key)!))
+}
+
+/** A duration in Chinese: “0.2 秒”, “18 秒”, “2 分 5 秒”; under 0.1 s it says so instead of “0.0”. */
+export function durationText(ms: number): string {
+  if (ms < 100) return '不到 0.1 秒'
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)} 秒`
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 60) return `${seconds} 秒`
+  return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+}
+
+/** `claude-sonnet-5-5` → `Claude Sonnet 5.5`; anything else unchanged. */
+export function modelText(model: string): string {
+  const match = /^claude-([a-z]+)-(\d+)(?:-(\d+))?$/.exec(model)
+  if (match === null) return model
+  const family = match[1]!.charAt(0).toUpperCase() + match[1]!.slice(1)
+  return `Claude ${family} ${match[2]}${match[3] === undefined ? '' : `.${match[3]}`}`
+}
+
+/** Which list group a conversation falls in by its last update: 今天, 本周 (the last 7 days), 更早. */
+export function sessionGroup(iso: string, now: Date = new Date()): 'today' | 'week' | 'earlier' {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'earlier'
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  if (date.getTime() >= startOfDay) return 'today'
+  if (date.getTime() >= startOfDay - 6 * 24 * 60 * 60 * 1000) return 'week'
+  return 'earlier'
+}
+
+/** The upper-case extension shown on a file badge: `XLSX`, `CSV`; `FILE` without one. */
+export function fileKind(path: string): string {
+  const match = /\.([A-Za-z0-9]{1,5})$/.exec(path)
+  return match === null ? 'FILE' : match[1]!.toUpperCase()
+}
+
+/** How hard the model thinks, in words: `medium` → 中. */
+export function effortText(effort: string): string {
+  const words: Record<string, string> = { low: '低', medium: '中', high: '高', xhigh: '很高', max: '最高' }
+  return words[effort] ?? effort
 }

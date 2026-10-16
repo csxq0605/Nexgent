@@ -26,7 +26,7 @@ export const MEMBER_JUDGES = {
     return verdict([
       [running?.status === 'running', `while the member runs its block shows writer, running (got ${JSON.stringify(running)})`],
       [done?.status === 'completed', `after it ends the block reads completed (got ${JSON.stringify(done)})`],
-      [links.length === 1 && links[0].includes(`${MEMBER_FILES.north.path} v1`), `the finished block links the member's deliverable ${MEMBER_FILES.north.path} v1 (got ${JSON.stringify(links)})`],
+      [links.length === 1 && links[0].includes(`${MEMBER_FILES.north.path} · 第 1 版`), `the finished block links the member's deliverable ${MEMBER_FILES.north.path} v1 (got ${JSON.stringify(links)})`],
       [obs.finished?.toolBlocks === 1, `the member's own tool calls stay out of the main conversation: one tool block, the delegate call (got ${obs.finished?.toolBlocks})`],
       [consoleErrors(obs).length === 0, `no renderer console errors (got ${consoleErrors(obs).slice(0, 3).join(' | ')})`],
     ], 'a member block (name, status) appears in the middle column while the member runs and links its deliverable once it ends')
@@ -66,7 +66,7 @@ export const MEMBER_JUDGES = {
       [Array.isArray(r.blocks) && r.blocks.length === 2, `both member blocks are back (got ${JSON.stringify(r.blocks)})`],
       [writer?.status === 'completed', `writer still reads completed (got ${writer?.status})`],
       [slow?.status === 'interrupted' && slow?.label === '已中断', `the killed member reads 已中断 (got ${JSON.stringify(slow)})`],
-      [(r.deliverableLinks ?? []).some(l => l.includes(`${MEMBER_FILES.north.path} v1`)), `the member's deliverable link is still there (got ${JSON.stringify(r.deliverableLinks)})`],
+      [(r.deliverableLinks ?? []).some(l => l.includes(`${MEMBER_FILES.north.path} · 第 1 版`)), `the member's deliverable link is still there (got ${JSON.stringify(r.deliverableLinks)})`],
       [r.writerView?.title === '成员 writer 的会话' && r.writerView?.deliverableCards === 1, "writer's session still opens with its deliverable"],
       [r.slowView?.title === '成员 slow 的会话' && typeof r.slowView?.text === 'string' && r.slowView.text.includes(MEMBER_TEXTS.slowTask), "the killed member's session still opens with its task"],
       [consoleErrors(obs).length === 0, `no renderer console errors (got ${consoleErrors(obs).slice(0, 3).join(' | ')})`],

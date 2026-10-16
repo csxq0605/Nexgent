@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import type { CostCap, Effort, SandboxMode, ThinkingMode } from '@nexgent/kernel'
 import type { ProjectSettings, SettingsPatch } from '@nexgent/sdk'
 import { useAppState, useAppStore } from '../hooks.js'
-import { T, credentialText } from '../strings.js'
-import { Modal } from './Modal.js'
+import { T, credentialText, effortText } from '../strings.js'
+import { Page } from './Page.js'
+import { readTheme, saveTheme, type Theme } from '../theme.js'
 
 const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const SANDBOX: ReadonlyArray<{ readonly value: SandboxMode; readonly label: string }> = [
@@ -167,7 +168,8 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
   }
 
   return (
-    <Modal title={T.settingsTitle} onClose={onClose} testId="settings-page">
+    <Page title={T.settingsTitle} lead={T.settingsLead} onClose={onClose} testId="settings-page">
+      <Appearance />
       {settings === undefined ? (
         <p className="muted">{T.loading}</p>
       ) : (
@@ -195,7 +197,7 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
             <select value={effort} onChange={e => setEffort(e.target.value as Effort)} data-testid="setting-effort">
               {EFFORTS.map(e => (
                 <option key={e} value={e}>
-                  {e}
+                  {effortText(e)}
                 </option>
               ))}
             </select>
@@ -310,7 +312,44 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
         )}
         {keyStatus === 'saved' && <p className="ok-text small">{T.saved}</p>}
       </section>
-    </Modal>
+    </Page>
+  )
+}
+
+const THEMES: ReadonlyArray<{ readonly id: Theme; readonly label: string }> = [
+  { id: 'system', label: T.themeSystem },
+  { id: 'light', label: T.themeLight },
+  { id: 'dark', label: T.themeDark },
+]
+
+/** 外观: follow the system, or fix light or dark (ADR 0020 §5); applies at once, per machine. */
+function Appearance(): JSX.Element {
+  const [theme, setTheme] = useState<Theme>(readTheme)
+  return (
+    <section className="setting-row" data-testid="settings-appearance">
+      <div className="grow">
+        <div className="setting-name">{T.appearance}</div>
+        <div className="muted">{T.appearanceHint}</div>
+      </div>
+      <div className="segmented inline" role="radiogroup" aria-label={T.appearance}>
+        {THEMES.map(t => (
+          <button
+            type="button"
+            key={t.id}
+            role="radio"
+            aria-checked={theme === t.id}
+            aria-selected={theme === t.id}
+            onClick={() => {
+              setTheme(t.id)
+              saveTheme(t.id)
+            }}
+            data-testid={`theme-${t.id}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </section>
   )
 }
 

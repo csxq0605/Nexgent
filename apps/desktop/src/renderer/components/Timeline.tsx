@@ -1,18 +1,164 @@
-import { useEffect, useRef } from 'react'
-import type { DeliverableSummary } from '@nexgent/kernel'
+import { useEffect, useRef, useState } from 'react'
+import type { DeliverableSummary, FileChange } from '@nexgent/kernel'
 import type { TimelineEntry } from '../timeline.js'
-import { T, errorText, fileChangeText, riskText, turnEndText } from '../strings.js'
+import { T, durationText, errorText, fileChangeText, riskText, stepsParts, toolVerb, turnEndText } from '../strings.js'
 import { DeliverableCard } from './DeliverableCard.js'
+import { Icon } from './Icon.js'
 import { Markdown } from './Markdown.js'
-import { MemberBlock, TeamMessageNote, WorkflowBlock } from './MemberBlock.js'
-import { ToolBlock } from './ToolBlock.js'
+import { TeamCard, TeamMessageNote, WorkflowBlock } from './MemberBlock.js'
+import { ToolBlock, toolSummary } from './ToolBlock.js'
+
+type Entry = TimelineEntry
+type MemberEntry = Extract<Entry, { kind: 'member' }>
+
+/** What the stream shows: single entries, folded process groups, a team card per turn. */
+export type Block =
+  | { readonly kind: 'entry'; readonly key: string; readonly entry: Entry }
+  | { readonly kind: 'steps'; readonly key: string; readonly entries: readonly Entry[] }
+  | { readonly kind: 'team'; readonly key: string; readonly members: readonly MemberEntry[] }
+
+/** Process entries fold into one line (ADR 0020 §1): tool calls, thinking, workflow phases, team mail. */
+const FOLDED = new Set<Entry['kind']>(['tool', 'reasoning', 'workflow', 'team.message'])
+
+/**
+ * Group the flat timeline for display: consecutive process entries of a turn
+ * become one `steps` block; all member runs of a turn become one `team` card
+ * where the first of them appears. Everything else stays as it is.
+ */
+export function blocksOf(entries: readonly Entry[]): Block[] {
+  const blocks: Block[] = []
+  const membersByTurn = new Map<number, MemberEntry[]>()
+  for (const entry of entries) if (entry.kind === 'member') membersByTurn.set(entry.turn, [...(membersByTurn.get(entry.turn) ?? []), entry])
+  const placed = new Set<number>()
+  let run: Entry[] = []
+  const flush = (): void => {
+    if (run.length === 0) return
+    blocks.push({ kind: 'steps', key: `s:${run[0]!.key}`, entries: run })
+    run = []
+  }
+  for (const entry of entries) {
+    if (FOLDED.has(entry.kind)) {
+      if (run.length > 0 && run[0]!.turn !== entry.turn) flush()
+      run.push(entry)
+      continue
+    }
+    flush()
+    if (entry.kind === 'member') {
+      if (placed.has(entry.turn)) continue
+      placed.add(entry.turn)
+      blocks.push({ kind: 'team', key: `team:${entry.turn}`, members: membersByTurn.get(entry.turn)! })
+      continue
+    }
+    blocks.push({ kind: 'entry', key: entry.key, entry })
+  }
+  flush()
+  return blocks
+}
+
+/** The one line a folded group shows: what is happening now, or what was done and how long the steps took. */
+export function stepsLine(entries: readonly Entry[]): { readonly text: string; readonly running: boolean } {
+  const tools = entries.filter((e): e is Extract<Entry, { kind: 'tool' }> => e.kind === 'tool')
+  const live = tools.find(tool => tool.running)
+  if (live !== undefined) {
+    const target = toolSummary(live.name, live.args)
+    return { text: `${T.stepsRunning}：${toolVerb(live.name)}${target === '' ? '' : ` ${target}`}`, running: true }
+  }
+  if (entries.some(e => e.kind === 'reasoning' && e.streaming)) return { text: T.thinkingLive, running: true }
+  const timed = tools.filter(tool => tool.durationMs !== undefined)
+  const total = timed.reduce((sum, tool) => sum + tool.durationMs!, 0)
+  const parts = stepsParts(tools.map(tool => tool.name))
+  if (parts.length === 0) return { text: T.thinking, running: false }
+  return { text: T.stepsSummary(parts, timed.length === 0 ? undefined : durationText(total)), running: false }
+}
+
+function StepsBlock({ entries }: { readonly entries: readonly Entry[] }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const line = stepsLine(entries)
+  const failed = entries.some(e => e.kind === 'tool' && e.isError === true)
+  return (
+    <div className="steps" data-open={open ? 'true' : 'false'} data-testid="steps">
+      <button type="button" className="steps-toggle" aria-expanded={open} onClick={() => setOpen(!open)} data-testid="steps-toggle">
+        <Icon name="chevronRight" className="chev" />
+        {line.running && <span className="dot run" />}
+        {failed && !line.running && <span className="dot bad" />}
+        <span className="ellipsis">{line.text}</span>
+      </button>
+      <div className="steps-list" hidden={!open}>
+        {entries.map(entry => (
+          <StepEntry key={entry.key} entry={entry} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function StepEntry({ entry }: { readonly entry: Entry }): JSX.Element | null {
+  switch (entry.kind) {
+    case 'tool':
+      return <ToolBlock entry={entry} />
+    case 'reasoning':
+      return (
+        <details className="reasoning">
+          <summary>{entry.streaming ? T.thinkingLive : T.thinkingStep}</summary>
+          <p className="text muted">{entry.text}</p>
+        </details>
+      )
+    case 'workflow':
+      return <WorkflowBlock entry={entry} />
+    case 'team.message':
+      return <TeamMessageNote entry={entry} />
+    default:
+      return null
+  }
+}
+
+/** A turn's changed files when it presented nothing (with a deliverable they go on its card). */
+function FilesNote({ changes }: { readonly changes: readonly FileChange[] }): JSX.Element {
+  return (
+    <details className="files-note" data-testid="files-note">
+      <summary>{T.filesChanged(changes.length)}</summary>
+      <ul className="change-list">
+        {changes.map(change => (
+          <li key={change.path}>
+            <span className={`badge change-${change.change}`}>{fileChangeText(change.change)}</span> <code>{change.path}</code>
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
 
 function latestVersion(deliverables: readonly DeliverableSummary[], deliverableId: string, fallback: number): number {
   const found = deliverables.find(d => d.deliverableId === deliverableId)
   return found === undefined ? fallback : Math.max(fallback, ...found.versions.map(v => v.version))
 }
 
-function Entry({ entry, deliverables, readOnly }: { readonly entry: TimelineEntry; readonly deliverables: readonly DeliverableSummary[]; readonly readOnly: boolean }): JSX.Element | null {
+/** Per turn: its file changes (later entries win per path) and the key of its last deliverable card. */
+function turnFiles(entries: readonly Entry[]): { readonly changes: Map<number, FileChange[]>; readonly lastCard: Map<number, string> } {
+  const byPath = new Map<number, Map<string, FileChange>>()
+  const lastCard = new Map<number, string>()
+  for (const entry of entries) {
+    if (entry.kind === 'files') {
+      const map = byPath.get(entry.turn) ?? new Map<string, FileChange>()
+      for (const change of entry.changes) map.set(change.path, change)
+      byPath.set(entry.turn, map)
+    }
+    if (entry.kind === 'deliverable') lastCard.set(entry.turn, entry.key)
+  }
+  return { changes: new Map([...byPath].map(([turn, map]) => [turn, [...map.values()]])), lastCard }
+}
+
+function EntryView({
+  entry,
+  deliverables,
+  readOnly,
+  files,
+}: {
+  readonly entry: Entry
+  readonly deliverables: readonly DeliverableSummary[]
+  readonly readOnly: boolean
+  readonly files: ReturnType<typeof turnFiles>
+}): JSX.Element | null {
   switch (entry.kind) {
     case 'user':
       return (
@@ -39,26 +185,18 @@ function Entry({ entry, deliverables, readOnly }: { readonly entry: TimelineEntr
           {entry.interrupted && <p className="muted small">{T.interruptedText}</p>}
         </div>
       )
-    case 'reasoning':
-      return (
-        <details className="reasoning">
-          <summary>{entry.streaming ? T.thinkingLive : T.thinking}</summary>
-          <p className="text muted">{entry.text}</p>
-        </details>
-      )
-    case 'tool':
-      return <ToolBlock entry={entry} />
     case 'approval':
+      // While it waits, the card above the composer is the approval; afterwards one quiet line records it.
+      if (entry.decision === undefined) return null
       return (
         <div className="approval-note" data-testid="approval-note">
-          <span className={`badge risk-${entry.request.risk}`}>
-            {T.approvalRisk} {riskText(entry.request.risk)}
+          <span className={entry.decision.decision === 'allow' ? 'dot ok' : 'dot bad'} aria-hidden="true" />
+          <span>{entry.decision.decision === 'allow' ? T.approvalAllowed : T.approvalDenied}</span>
+          {entry.request.member !== undefined && <span>{entry.request.member.name}</span>}
+          <span>
+            {toolVerb(entry.request.tool)} · {T.approvalRiskLine(riskText(entry.request.risk))}
           </span>
-          {entry.request.member !== undefined && <span className="badge">{entry.request.member.name}</span>}
           <code>{entry.request.summary}</code>
-          <span className="muted small">
-            {entry.decision === undefined ? T.approvalTitle : entry.decision.decision === 'allow' ? T.approvalAllowed : T.approvalDenied}
-          </span>
         </div>
       )
     case 'deliverable':
@@ -66,27 +204,20 @@ function Entry({ entry, deliverables, readOnly }: { readonly entry: TimelineEntr
         <DeliverableCard
           deliverable={entry.deliverable}
           latest={!readOnly && latestVersion(deliverables, entry.deliverable.deliverableId, entry.deliverable.version) === entry.deliverable.version}
+          {...(files.lastCard.get(entry.turn) === entry.key && files.changes.has(entry.turn) ? { changes: files.changes.get(entry.turn)! } : {})}
         />
       )
     case 'files':
-      return (
-        <div className="files-note">
-          <div className="muted small">{T.filesChanged}</div>
-          <ul>
-            {entry.changes.map(change => (
-              <li key={change.path}>
-                <span className={`badge change-${change.change}`}>{fileChangeText(change.change)}</span> <code>{change.path}</code>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )
+      // Shown once per turn: on its deliverable card, or here when it presented nothing.
+      if (files.lastCard.has(entry.turn)) return null
+      if (entries_first_files(files, entry)) return <FilesNote changes={files.changes.get(entry.turn) ?? entry.changes} />
+      return null
     case 'feedback':
       return (
         <div className="msg user" data-testid="feedback-message">
           <div className="bubble feedback">
             <div className="muted small">
-              {T.feedbackLabel} · {T.version(entry.version)}
+              {T.feedbackLabel} · {T.versionLong(entry.version)}
               {entry.rating !== undefined && ` · ${'★'.repeat(entry.rating)}${'☆'.repeat(5 - entry.rating)}`}
             </div>
             <p className="text">{entry.comment}</p>
@@ -109,13 +240,21 @@ function Entry({ entry, deliverables, readOnly }: { readonly entry: TimelineEntr
           {errorText(entry.error)}
         </div>
       )
-    case 'member':
-      return <MemberBlock entry={entry} readOnly={readOnly} />
-    case 'workflow':
-      return <WorkflowBlock entry={entry} />
-    case 'team.message':
-      return <TeamMessageNote entry={entry} />
+    default:
+      return null
   }
+}
+
+/** Only the first `files` entry of a turn draws the turn's note. */
+const firstFilesKey = new WeakMap<ReturnType<typeof turnFiles>, Map<number, string>>()
+function entries_first_files(files: ReturnType<typeof turnFiles>, entry: Extract<Entry, { kind: 'files' }>): boolean {
+  let firsts = firstFilesKey.get(files)
+  if (firsts === undefined) {
+    firsts = new Map()
+    firstFilesKey.set(files, firsts)
+  }
+  if (!firsts.has(entry.turn)) firsts.set(entry.turn, entry.key)
+  return firsts.get(entry.turn) === entry.key
 }
 
 /** The conversation itself; follows the bottom while new content streams in. */
@@ -135,6 +274,7 @@ export function Timeline({
     const el = ref.current
     if (el !== null && stick.current) el.scrollTop = el.scrollHeight
   }, [entries])
+  const files = turnFiles(entries)
   return (
     <div
       className="timeline"
@@ -146,9 +286,15 @@ export function Timeline({
       }}
     >
       <div className="timeline-inner">
-        {entries.map(entry => (
-          <Entry key={entry.key} entry={entry} deliverables={deliverables} readOnly={readOnly} />
-        ))}
+        {blocksOf(entries).map(block =>
+          block.kind === 'steps' ? (
+            <StepsBlock key={block.key} entries={block.entries} />
+          ) : block.kind === 'team' ? (
+            <TeamCard key={block.key} members={block.members} readOnly={readOnly} />
+          ) : (
+            <EntryView key={block.key} entry={block.entry} deliverables={deliverables} readOnly={readOnly} files={files} />
+          ),
+        )}
       </div>
     </div>
   )
