@@ -291,7 +291,7 @@ export function judgeEpoch(obs) {
   if (e.bounds?.status !== 'failed') problems.push('a meta proposal naming an evaluator field was not refused')
   // ADR 0013, superseded by ADR 0014 decision 3, ADR 0015 and ADR 0016: the rules id (adr-0016), and with it the epoch.
   const rules = e.rules
-  if (rules?.id !== 'adr-0016' || rules?.constant !== 'adr-0016') problems.push(`the evaluator rules id is ${rules?.id ?? 'unknown'} (want adr-0016)`)
+  if (rules?.id !== 'adr-0019' || rules?.constant !== 'adr-0019') problems.push(`the evaluator rules id is ${rules?.id ?? 'unknown'} (want adr-0019)`)
   if (!VERSION.test(rules?.epoch ?? '') || rules?.epoch === rules?.epochAdr0008) problems.push('the epoch under adr-0016 equals the one the same settings had under adr-0008')
   if (rules?.epoch !== rules?.projectEpoch) problems.push('the project\'s epoch is not the one computed from its settings under adr-0016')
   if (rules?.sameEpoch !== rules?.epoch) problems.push('two trials of one epoch could not be compared')

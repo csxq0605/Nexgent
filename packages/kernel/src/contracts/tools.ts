@@ -49,6 +49,42 @@ export interface ToolDefinition {
    * enforce such per-call checks may set it (`permissions.md` §工具审批).
    */
   readonly selfSandboxed?: boolean
+  /**
+   * ADR 0017 decision 5: calls of this tool may run at the same time as the
+   * other concurrent calls of the same model step (`delegate` sets it).
+   * Absent, a tool is concurrent exactly when it only reads and never asks
+   * ({@link isConcurrentTool}).
+   */
+  readonly concurrent?: boolean
+}
+
+/**
+ * ADR 0017 decision 5 (pure): whether a call may run concurrently. A call
+ * that needs an approval answer never does (approvals stay in call order);
+ * otherwise the tool's `concurrent`, or, when unset, read-only effects with
+ * approval `never`.
+ */
+export function isConcurrentTool(definition: Pick<ToolDefinition, 'effects' | 'approval' | 'concurrent'>, needsApproval = false): boolean {
+  if (needsApproval) return false
+  if (definition.concurrent !== undefined) return definition.concurrent
+  return definition.approval === 'never' && definition.effects.length > 0 && definition.effects.every(effect => effect === 'read')
+}
+
+/**
+ * ADR 0017 decision 5 (pure): split one step's calls, in call order, into
+ * batches run one after another. Consecutive concurrent calls form one batch
+ * run together; every other call is a batch of its own. The result is the
+ * indices of the calls. Results go back to the model, and records are
+ * written, in call order, never in completion order.
+ */
+export function scheduleToolCalls(concurrent: readonly boolean[]): number[][] {
+  const batches: number[][] = []
+  concurrent.forEach((parallel, index) => {
+    const last = batches[batches.length - 1]
+    if (parallel && last !== undefined && concurrent[last[0]!] === true) last.push(index)
+    else batches.push([index])
+  })
+  return batches
 }
 
 /** What a tool receives besides its parsed arguments. */

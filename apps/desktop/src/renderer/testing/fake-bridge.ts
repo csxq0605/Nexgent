@@ -69,6 +69,7 @@ export const SETTINGS: ProjectSettings = {
   costCaps: {},
   autoImprove: true,
   improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on', shareImproverEvidence: true, meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } },
+  learning: { enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true },
   apiKey: { configured: false },
 }
 
@@ -199,7 +200,7 @@ export class FakeBridge implements NexgentBridge {
   sessions: SessionSummary[] = [SESSION]
   settings: ProjectSettings = SETTINGS
   /** API 7: what `userSettings.get` answers (`update` changes it like the SDK would). */
-  userSettings: UserSettings = { improvement: { meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } } }
+  userSettings: UserSettings = { improvement: { meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } }, learning: {} }
   files: ProjectFileEntry[] = [{ path: 'orders.csv', size: 2048, modifiedAt: '2026-10-11T08:00:00.000Z' }]
   filesTruncated = false
   turn = 0
@@ -222,7 +223,7 @@ export class FakeBridge implements NexgentBridge {
   /** `improvers.show` per version; `v0` is built in. */
   improverBundles: Record<string, ImproverBundle> = {}
   readonly handlers: Record<string, Handler> = {
-    'app.info': () => ({ sdkVersion: 7, appVersion: '0.0.0-test', platform: 'linux', commandShell: { shell: 'bash', required: false, available: true } }),
+    'app.info': () => ({ sdkVersion: 8, appVersion: '0.0.0-test', platform: 'linux', commandShell: { shell: 'bash', required: false, available: true } }),
     'projects.recent': () => this.recent,
     'projects.open': () => PROJECT,
     'projects.forget': () => undefined,
@@ -263,14 +264,14 @@ export class FakeBridge implements NexgentBridge {
     'goals.update': input => ({ id: 'g1', text: 'goal', status: input.status, setAt: 'x', updatedAt: 'x' }),
     'settings.get': () => this.settings,
     'settings.update': input => {
-      const { improvement, ...rest } = input.patch
-      this.settings = { ...this.settings, ...rest, ...(improvement === undefined ? {} : { improvement: { ...this.settings.improvement, ...improvement, budget: { ...this.settings.improvement.budget, ...improvement.budget }, meta: { ...this.settings.improvement.meta, ...improvement.meta, budget: { ...this.settings.improvement.meta.budget, ...improvement.meta?.budget } } } }) }
+      const { improvement, learning, ...rest } = input.patch
+      this.settings = { ...this.settings, ...rest, ...(learning === undefined ? {} : { learning: { ...this.settings.learning, ...learning, budget: { ...this.settings.learning.budget, ...learning.budget } } }), ...(improvement === undefined ? {} : { improvement: { ...this.settings.improvement, ...improvement, budget: { ...this.settings.improvement.budget, ...improvement.budget }, meta: { ...this.settings.improvement.meta, ...improvement.meta, budget: { ...this.settings.improvement.meta.budget, ...improvement.meta?.budget } } } }) }
       return this.settings
     },
     'userSettings.get': () => this.userSettings,
     'userSettings.update': input => {
       const meta = input.patch.improvement?.meta
-      if (meta !== undefined) this.userSettings = { improvement: { meta: { ...this.userSettings.improvement.meta, ...meta, budget: { ...this.userSettings.improvement.meta.budget, ...meta.budget } } } }
+      if (meta !== undefined) this.userSettings = { ...this.userSettings, improvement: { meta: { ...this.userSettings.improvement.meta, ...meta, budget: { ...this.userSettings.improvement.meta.budget, ...meta.budget } } } }
       return this.userSettings
     },
     'capabilities.list': () => this.capabilities,
@@ -343,6 +344,10 @@ export class FakeBridge implements NexgentBridge {
         history: [...history, { format: 1, revision, previous: null, from: current.version, version: target, type: 'rollback', trigger: 'manual', committedAt: '2026-10-12T11:00:00.000Z', ...(input.reason === undefined ? {} : { reason: input.reason }) }],
       }
       return this.improver.current
+    },
+    'learning.acknowledge': () => {
+      this.userSettings = { ...this.userSettings, learning: { noticeAcknowledgedAt: this.userSettings.learning.noticeAcknowledgedAt ?? '2026-10-16T12:00:00.000Z' } }
+      return this.userSettings
     },
     'settings.setApiKey': input => (input.value === '' ? { configured: false } : { configured: true, source: 'file' }),
   }

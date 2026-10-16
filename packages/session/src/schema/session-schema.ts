@@ -358,7 +358,7 @@ export const sessionRecordSchema: JsonObject = {
       },
       ['turn', 'step', 'toolCallId', 'name', 'content', 'isError', 'durationMs'],
     ),
-    turnStartRecord: record('turn.start', { turn }, ['turn']),
+    turnStartRecord: record('turn.start', { turn, handbook: { type: 'array', items: ref('nonEmptyString') } }, ['turn']),
     turnEndRecord: record('turn.end', { turn, reason: ref('turnEndReason') }, ['turn', 'reason']),
     checkpointRecord: record(
       'checkpoint',

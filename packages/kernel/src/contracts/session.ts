@@ -148,6 +148,12 @@ export interface ToolResultRecord extends SessionRecordBase {
 export interface TurnStartRecord extends SessionRecordBase {
   readonly type: 'turn.start'
   readonly turn: number
+  /**
+   * ADR 0018 decision 4: ids of the handbook entries given to this turn (at
+   * most `HANDBOOK_TOP_K`, retrieval order); absent when none were. Lets
+   * self-evaluation and `handbook_mark` tie votes to what the model saw.
+   */
+  readonly handbook?: readonly string[]
 }
 
 /** Who or what cancelled a turn. */

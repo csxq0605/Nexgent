@@ -178,7 +178,7 @@ export const CHECKS = [
   item('H20', 'headless', '提案时具体数值被拒（ADR 0013 第 2 条）：改进作业里 capability_propose 的组件含反馈原文或反馈原题成果里的具体数值时被拒，返回命中的值与来源，去掉后可再提；在两个以上任务里出现的项目常量、列名不算', reworkItem('H20')),
   item('H21', 'headless', '同类题变差被拒（ADR 0013 第 1 条）：改进作业的候选修好反馈原题，但同类题上确定性检查通过率低于基线时不采用，原因 similar-regression；同类题上有 unknown 时按 unknown 记', reworkItem('H21')),
   item('H22', 'headless', '没有同类题等批准（ADR 0013 第 1 条）：选择集里除反馈原题外没有用例时不自动采用，改为 await-approval，原因 no-similar-cases；用户任务自己提出的候选结论不变', reworkItem('H22')),
-  item('H23', 'headless', '门控前具体数值拒绝（ADR 0013 第 2、3 条）：候选含具体数值时门控不回放、直接拒绝，原因 instance-literal，账本里没有这次试验的回放请求；评价器规则 id 为 adr-0016（ADR 0014、0015、0016 先后取代 adr-0013），纪元 id 随之改变', reworkItem('H23')),
+  item('H23', 'headless', '门控前具体数值拒绝（ADR 0013 第 2、3 条）：候选含具体数值时门控不回放、直接拒绝，原因 instance-literal，账本里没有这次试验的回放请求；评价器规则 id 为当前纪元（ADR 0014、0015、0016 先后取代 adr-0013，重做 C1 起为 ADR 0019 的 adr-0019），纪元 id 随之改变', reworkItem('H23')),
   item('H24', 'headless', '元改进改动夹带项目数值被拒（ADR 0012 第 5 条）：元提案改动的文字含本批任一项目反馈原文或成果里的具体数值时被退回，写明命中的值，不存子改进器', reworkItem('H24')),
   ...desktopRegression,
   item('D24', 'desktop', '“改进”页每个作业显示所用的改进器版本；元改进作业有单独的标记', desktopItem('D24')),
