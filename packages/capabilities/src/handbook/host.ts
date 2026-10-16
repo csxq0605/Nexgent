@@ -170,6 +170,9 @@ export class HandbookHost {
           [{ op: input.verdict === 'helpful' ? 'upvote' : 'downvote', entryId: input.entryId, ...(reason === undefined ? {} : { reason }) }],
           { actor: 'execution', source: { projectId: handbook.projectId, taskId, sessionId: root.sessionId } },
         )
+        if (result?.outcome === 'rejected' && (result.reason === 'already-voted' || result.reason === 'own-source')) {
+          return { content: `Entry ${input.entryId} cannot be marked again by this task; this mark is ignored.`, meta: { entryId: input.entryId, verdict: input.verdict, recorded: false } }
+        }
         if (result?.outcome !== 'applied') throw new NexgentError('tool/failed', `entry ${input.entryId} could not be marked`)
         return { content: `Marked entry ${input.entryId} ${input.verdict}.`, meta: { entryId: input.entryId, verdict: input.verdict, recorded: true } }
       },

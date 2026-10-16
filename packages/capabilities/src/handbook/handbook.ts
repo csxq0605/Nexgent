@@ -13,7 +13,9 @@
  * migration) change entries only through {@link Handbook.apply}: one small
  * operation each, checked (limits, duplicates, concrete values of the task)
  * and appended under the log's lock, never a rewrite. Votes are followed by
- * the `status` operation `nextHandbookStatus` calls for.
+ * the `status` operation `nextHandbookStatus` calls for. A task votes on an
+ * entry at most once and never on an entry learned from it (checked under
+ * the lock, so concurrent writers cannot both vote).
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile, realpath } from 'node:fs/promises'
@@ -118,7 +120,7 @@ export type HandbookChange =
 export type HandbookChangeResult =
   | { readonly outcome: 'applied'; readonly entryId: string; readonly scope: HandbookScope; readonly ops: readonly HandbookOp[] }
   | { readonly outcome: 'duplicate'; readonly entryId: string; readonly duplicateOf: string }
-  | { readonly outcome: 'rejected'; readonly entryId?: string; readonly reason: 'not-found' | 'instance-literal' | 'invalid' | 'superseded-shared'; readonly detail: string; readonly hits?: readonly InstanceLiteralHit[] }
+  | { readonly outcome: 'rejected'; readonly entryId?: string; readonly reason: 'not-found' | 'instance-literal' | 'invalid' | 'superseded-shared' | 'already-voted' | 'own-source'; readonly detail: string; readonly hits?: readonly InstanceLiteralHit[] }
 
 /** Context of {@link Handbook.apply}. */
 export interface HandbookApplyContext {
@@ -130,6 +132,8 @@ export interface HandbookApplyContext {
    * value of these sources unless the project's tasks give it twice.
    */
   readonly literals?: { readonly sources: readonly InstanceLiteralSource[]; readonly projectMessages: readonly ProjectTaskMessage[] }
+  /** The `reason` of the `status` operation a vote leads to, in the user's language; default the vote counts. */
+  readonly statusReason?: (status: HandbookEntryStatus, entry: HandbookEntry) => string
 }
 
 /** An entry and the log it lives in. */
@@ -243,9 +247,10 @@ export class Handbook {
     return results
   }
 
-  #literalHits(text: string, context: HandbookApplyContext): InstanceLiteralHit[] {
+  /** A user-level entry is read by every project, so a constant of this project is no exemption there. */
+  #literalHits(text: string, context: HandbookApplyContext, scope: HandbookScope): InstanceLiteralHit[] {
     if (context.literals === undefined) return []
-    return findInstanceLiterals([{ path: 'text', text }], context.literals.sources, context.literals.projectMessages)
+    return findInstanceLiterals([{ path: 'text', text }], context.literals.sources, scope === 'project' ? context.literals.projectMessages : [])
   }
 
   async #applyOne(change: HandbookChange, context: HandbookApplyContext): Promise<HandbookChangeResult> {
@@ -255,7 +260,7 @@ export class Handbook {
       const entryId = change.entryId ?? randomUUID()
       const scope: HandbookScope = (change.scope ?? 'user') === 'user' && this.learning.contribute ? 'user' : 'project'
       const keywords = normalizeKeywords(change.keywords)
-      const hits = this.#literalHits(change.text, context)
+      const hits = this.#literalHits(change.text, context, scope)
       if (hits.length > 0) return { outcome: 'rejected', entryId, reason: 'instance-literal', detail: `carries values of the task: ${[...new Set(hits.map(hit => hit.value))].join(', ')}`, hits }
       const visible = await this.#located()
       const supersedes = [...new Set(change.supersedes ?? [])]
@@ -289,13 +294,25 @@ export class Handbook {
     const located = await this.find(change.entryId)
     if (located === undefined) return { outcome: 'rejected', entryId: change.entryId, reason: 'not-found', detail: `no handbook entry ${change.entryId} in this project` }
     if (change.op === 'edit' && change.text !== undefined) {
-      const hits = this.#literalHits(change.text, context)
+      const hits = this.#literalHits(change.text, context, located.scope)
       if (hits.length > 0) return { outcome: 'rejected', entryId: change.entryId, reason: 'instance-literal', detail: `carries values of the task: ${[...new Set(hits.map(hit => hit.value))].join(', ')}`, hits }
     }
     const log = this.logOf(located.scope)
+    let refused: HandbookChangeResult | undefined
     const written = await log.append(current => {
       const entry = foldHandbook(current).find(candidate => candidate.id === change.entryId)
       if (entry === undefined) return []
+      if ((change.op === 'upvote' || change.op === 'downvote') && source !== undefined) {
+        // One vote per entry per task, whoever casts it; a task does not vote on what it taught.
+        if (entry.sources.some(from => from.taskId === source.taskId)) {
+          refused = { outcome: 'rejected', entryId: entry.id, reason: 'own-source', detail: `entry ${entry.id} was learned from task ${source.taskId}` }
+          return []
+        }
+        if (current.some(op => op.entryId === entry.id && (op.op === 'upvote' || op.op === 'downvote') && op.source?.taskId === source.taskId)) {
+          refused = { outcome: 'rejected', entryId: entry.id, reason: 'already-voted', detail: `task ${source.taskId} already voted on entry ${entry.id}` }
+          return []
+        }
+      }
       switch (change.op) {
         case 'edit':
           return [{ op: 'edit', entryId: entry.id, ...common, ...(change.text === undefined ? {} : { text: change.text }), ...(change.keywords === undefined ? {} : { keywords: normalizeKeywords(change.keywords) }) }]
@@ -307,10 +324,12 @@ export class Handbook {
           const next = nextHandbookStatus(voted)
           const vote: HandbookOpInput = { op: change.op, entryId: entry.id, ...common }
           if (next === entry.status) return [vote]
-          return [vote, { op: 'status', entryId: entry.id, actor: 'host', ...(source === undefined ? {} : { source }), status: next, reason: `${voted.helpful} helpful / ${voted.harmful} harmful` }]
+          const why = context.statusReason?.(next, voted) ?? `${voted.helpful} helpful / ${voted.harmful} harmful`
+          return [vote, { op: 'status', entryId: entry.id, actor: 'host', ...(source === undefined ? {} : { source }), status: next, reason: trimReason(why)! }]
         }
       }
     })
+    if (refused !== undefined) return refused
     return { outcome: 'applied', entryId: change.entryId, scope: located.scope, ops: written }
   }
 

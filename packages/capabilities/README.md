@@ -72,7 +72,8 @@
 - 写入只经过 `apply(changes, { actor, source?, literals? })`，一次一条小操作：
   - `add` 先检查上限，再查重（词项 Jaccard ≥ 0.8 视为重复，不写）和具体数值（`findInstanceLiterals`，给了 `literals` 时；`taskLiteralSources` 收集一个任务的反馈与成果）。
   - `supersedes` 显式取代旧条目，被取代的条目退休；项目级条目不能取代用户级条目。
-  - 投票之后，按 `nextHandbookStatus` 追加 `status`（`actor: host`）。
+  - 投票在锁内检查：一个任务（`source.taskId`）对一条条目只投一票，也不能给从自己学来的条目投票（`already-voted`、`own-source`）。投票之后按 `nextHandbookStatus` 追加 `status`（`actor: host`），原因文字可以由调用方的 `statusReason` 给出（用户的语言）。
+  - 具体数值：项目级条目里，项目常量（两个以上任务给过的值）可以保留；用户级条目所有项目都会读，所以不豁免。
   - `rollback(scope, toSeq)` 追加补偿操作，恢复文字、关键词与状态；票数不回退。
 - 检索：`retrieve(text, { k?, exclude? })` 是 BM25。英文按词切分，`snake_case` 名字也算一个词；中日韩文字取单字与相邻两字。关键词计两次。只检索试用与启用的条目，默认前 5 条。索引按日志末尾缓存，1000 条时单次检索不到 50 ms。
 - 注入：kernel 在根会话的用户轮写 `turn.start` 之前调用 `capabilityHost.handbookForTurn`（`HandbookHost.forTurn`），把选中的 id 写进 `turn.start.handbook`，把文字作为 `user.message { source: 'inject' }` 放在这一轮用户消息之前。不进系统提示。
