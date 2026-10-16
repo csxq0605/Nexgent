@@ -53,6 +53,7 @@ export function initialState(start: SessionStartRecord): SessionState {
     totalUsage: ZERO_USAGE,
     lastSeq: start.seq,
   }
+  if (start.plan === true) metadata.plan = true
   if (start.title !== undefined) metadata.title = start.title
   if (start.parentSessionId !== undefined) metadata.parentSessionId = start.parentSessionId
   if (start.member !== undefined) metadata.member = start.member
@@ -197,6 +198,11 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
     }
     case 'approval.grant':
       meta.grants = [...meta.grants, record.grant]
+      break
+    case 'session.mode':
+      meta.sandboxMode = record.sandboxMode
+      if (record.plan) meta.plan = true
+      else delete meta.plan
       break
     case 'goal.set':
       meta.goal = record.goal

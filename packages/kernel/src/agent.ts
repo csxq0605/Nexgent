@@ -76,6 +76,7 @@ import {
   type ApprovalSubject,
 } from './approval-policy.js'
 import { validateJsonSchema } from './json-schema.js'
+import { exitPlanTool } from './plan-mode.js'
 import { renderSystemPrompt, type SystemPromptTemplate } from './system-prompt.js'
 import type { TaskTree } from './task-tree.js'
 import { abortPromise, deadline, timeoutOf, TimeoutReason } from './util/timeout.js'
@@ -268,6 +269,8 @@ export interface AgentInit {
   readonly thinking: 'off' | 'on'
   readonly effort: Effort
   readonly sandboxMode: SandboxMode
+  /** ADR 0022: start (or resume) in plan mode. */
+  readonly plan?: boolean
   readonly settings: AgentSettings
   readonly projectConfig: ProjectConfig
   readonly history: readonly Exclude<LLMMessage, { role: 'system' }>[]
@@ -462,8 +465,6 @@ export class Agent {
   readonly ctx: Context
   /** Model id requests use. */
   readonly model: string
-  /** Sandbox mode in force. */
-  readonly sandboxMode: SandboxMode
   /** Step 3: task-tree attribution stamped on every ledger record this agent writes. */
   readonly attribution: AgentAttribution
   /** Step 3: who this child session is; absent for a root session. */
@@ -477,6 +478,12 @@ export class Agent {
 
   private readonly init: AgentInit
   private readonly hub = new AgentEventHub()
+  /** The mode the session executes in once plan mode is off (ADR 0022). */
+  private mode: SandboxMode
+  /** Plan mode (ADR 0022 decision 4): tools act as in `read-only` until a plan is approved. */
+  private planning: boolean
+  /** Unregisters `exit_plan` from this agent's scope while plan mode is on. */
+  private planTool: (() => void) | undefined
   private readonly messages: Exclude<LLMMessage, { role: 'system' }>[]
   private readonly sessionGrants: ApprovalGrant[]
   private lastTurn: number
@@ -534,7 +541,9 @@ export class Agent {
     this.sessionId = init.sessionId
     this.ctx = init.ctx
     this.model = init.model
-    this.sandboxMode = init.sandboxMode
+    this.mode = init.sandboxMode
+    this.planning = init.plan === true
+    if (this.planning) this.offerExitPlan()
     this.attribution = init.attribution
     this.member = init.member
     this.parentSessionId = init.parentSessionId
@@ -550,6 +559,49 @@ export class Agent {
     this.lastSeq = init.lastSeq
     this.lastCheckpointSeq = init.lastCheckpointSeq
     this.lastUsage = init.lastUsage
+  }
+
+  /** The sandbox mode tools run under now: `read-only` while plan mode is on (ADR 0022), else the session's mode. */
+  get sandboxMode(): SandboxMode {
+    return this.planning ? 'read-only' : this.mode
+  }
+
+  /** The mode the session executes in once plan mode is off. */
+  get executionMode(): SandboxMode {
+    return this.mode
+  }
+
+  /** Whether plan mode is on. */
+  get plan(): boolean {
+    return this.planning
+  }
+
+  /**
+   * Switch the session's mode (ADR 0022 decision 4): writes `session.mode`
+   * and takes effect from the next tool call. For the host (the user's own
+   * switch in the app or CLI); the model leaves plan mode only through
+   * `exit_plan`'s approval.
+   */
+  async setMode(change: { readonly sandboxMode?: SandboxMode; readonly plan?: boolean }, reason: 'host' | 'plan-approved' = 'host'): Promise<void> {
+    if (this.closed) throw new NexgentError('session/locked', `session ${this.sessionId} is closed`)
+    const sandboxMode = change.sandboxMode ?? this.mode
+    const plan = change.plan ?? this.planning
+    await this.append({ type: 'session.mode', sandboxMode, plan, reason })
+    this.mode = sandboxMode
+    if (plan && !this.planning) this.offerExitPlan()
+    if (!plan && this.planning) {
+      this.planTool?.()
+      this.planTool = undefined
+    }
+    this.planning = plan
+  }
+
+  private offerExitPlan(): void {
+    if (this.planTool !== undefined) return
+    this.planTool = this.init.tools.register(exitPlanTool(async () => {
+      await this.setMode({ plan: false }, 'plan-approved')
+      return this.mode
+    }))
   }
 
   /** Whether a turn is in progress. */
@@ -1828,15 +1880,17 @@ export class Agent {
     if (problem !== undefined) return failure('tool/invalid-input', `invalid arguments for ${definition.name}: ${problem}`)
 
     const subject = approvalSubject(input)
-    const verdict = decideToolPolicy(definition, this.sandboxMode)
+    const verdict = decideToolPolicy(definition, this.sandboxMode, input)
     if (verdict.kind === 'deny') {
       setApproval({ required: false, decision: 'deny' })
       return failure('sandbox/denied', verdict.reason, { mode: this.sandboxMode, tool: definition.name })
     }
     let approved = false
     if (verdict.kind === 'ask') {
+      const text = definition.approvalText?.(input)
       const auth = await this.authorize(turn, call, definition, {
-        summary: subject.value,
+        summary: text?.summary ?? subject.value,
+        ...(text?.detail === undefined ? {} : { detail: text.detail }),
         subject,
         risk: verdict.risk,
         options: verdict.options,
@@ -1861,6 +1915,7 @@ export class Agent {
       attribution: this.attribution,
       ...(this.member === undefined ? {} : { member: this.member }),
       approved,
+      grants: () => [...this.sessionGrants, ...this.init.tree.projectGrants],
       requestApproval: async ask => {
         const auth = await this.authorize(turn, call, definition, ask, signal)
         setApproval(auth.approval)
@@ -1954,10 +2009,11 @@ export class Agent {
   private async authorize(turn: number, call: ToolCall, definition: ToolDefinition, ask: ToolApprovalAsk, signal: AbortSignal): Promise<Authorization> {
     const risk = ask.risk ?? 'medium'
     const subject = ask.subject ?? { kind: 'other' as const, value: ask.summary }
+    const grantTool = ask.grantTool ?? definition.name
     if (risk !== 'high') {
-      const sessionGrant = this.sessionGrants.find(grant => grantMatches(grant, definition.name, subject))
+      const sessionGrant = this.sessionGrants.find(grant => grantMatches(grant, grantTool, subject))
       if (sessionGrant !== undefined) return { allowed: true, cancelled: false, approval: { required: true, decision: 'auto', scope: 'session' } }
-      const projectGrant = this.init.tree.projectGrants.find(grant => grantMatches(grant, definition.name, subject))
+      const projectGrant = this.init.tree.projectGrants.find(grant => grantMatches(grant, grantTool, subject))
       if (projectGrant !== undefined) return { allowed: true, cancelled: false, approval: { required: true, decision: 'auto', scope: 'project' } }
     }
     const key = `${definition.name}\u0000${subject.value}`
@@ -1994,7 +2050,7 @@ export class Agent {
     this.emit({ type: 'approval.decision', sessionId: this.sessionId, turn, decision })
 
     if (decision.decision === 'allow') {
-      const grant: ApprovalGrant = { tool: definition.name, ...(pattern === undefined ? {} : { pattern }), grantedAt: new Date().toISOString() }
+      const grant: ApprovalGrant = { tool: grantTool, ...(pattern === undefined ? {} : { pattern }), grantedAt: new Date().toISOString() }
       if (decision.scope === 'session') {
         await this.append({ type: 'approval.grant', grant })
         this.sessionGrants.push(grant)

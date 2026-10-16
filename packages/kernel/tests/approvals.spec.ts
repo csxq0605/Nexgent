@@ -272,7 +272,7 @@ describe('tool approval in the loop', () => {
     const agent = await harness.app.agents.create()
     await agent.run('install')
     expect(harness.store.of(agent.sessionId, 'approval.request')[0]!.request).toMatchObject({
-      tool: 'bash', summary: 'pnpm install left-pad', pattern: 'pnpm install', risk: 'medium', detail: 'matched: package install',
+      tool: 'bash', summary: 'pnpm install left-pad', pattern: 'pnpm install left-pad', risk: 'medium', detail: 'matched: package install',
     })
     expect(harness.ledger.of('tool.call')[0]!.approval).toMatchObject({ required: true, decision: 'allow', scope: 'once' })
     expect(harness.store.of(agent.sessionId, 'tool.result')[0]!.content).toBe('installed')

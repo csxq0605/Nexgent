@@ -70,7 +70,7 @@ describe('run_code', () => {
     expect(await readFile(join(root, 'out', 'total.txt'), 'utf8')).toBe('x')
   })
 
-  it('refuses files outside the sandbox and the host data under .nexgent/', async () => {
+  it('asks for files outside the project and refuses the host data under .nexgent/', async () => {
     const { root, run } = await setup()
     const outside = await tempDir('nexgent-ptc-outside-')
     await writeFile(join(outside, 'secret.txt'), 'outside secret')
@@ -85,8 +85,9 @@ describe('run_code', () => {
       return out`)
     expect(output.isError).toBe(false)
     expect(output.content).not.toContain('outside secret')
-    expect(output.content).toContain('"abs": "sandbox/denied"')
-    expect(output.content).toContain('"up": "sandbox/denied"')
+    // ADR 0022 decision 2: outside the project asks; nobody answers here, so it is not approved.
+    expect(output.content).toContain('"abs": "approval/denied"')
+    expect(output.content).toContain('"up": "approval/denied"')
     expect(output.content).toContain('"session": "sandbox/denied"')
     expect(output.content).toMatch(/"write": "(sandbox|approval)\/denied"/)
   })

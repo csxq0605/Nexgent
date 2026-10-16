@@ -59,6 +59,22 @@ pattern / subject`（命令取命中的分段，路径取项目相对路径）�
 ## Not done yet
 
 - Windows ACL 隔离未接。Job Object 由启动器建立，每次命令多一次 `pwsh` 启动（约数百毫秒）。
-- 命令执行没有文件边界（bwrap / Landlock / ACL 未接）；黑名单可被绕过，见 permissions.md §已知边界。
+- Windows 命令仍没有文件边界（系统沙箱只有 Linux bubblewrap 与 macOS seatbelt）；黑名单可被绕过，见 permissions.md §已知边界。
 - 凭证文件中的密钥值不会自动进入脱敏表（只有被清洗的环境变量值与插件配置 `secrets`）。
-- `list_files` / `search_text` 不读 `.gitignore`。
+- `list_files` / `search_text` 是纯 JS 实现，语义向 ripgrep 看齐但不保证与它逐字一致（正则是 JavaScript 语法）；`multiline` 整文件读入，超过 16 MiB 的文件跳过并提示。
+
+## 搜索工具（`list_files` / `search_text`）
+
+- 读 `.gitignore`（根、嵌套、否定、`.git/info/exclude`，与 `GitignoreMatcher` 同一份解析，现在放在本包 `src/gitignore.ts`，`@nexgent/tasking` 再导出）；`.nexgent/`、`.git/`、`node_modules/` 总被跳过，`includeIgnored: true` 解除 `.gitignore` 和 `node_modules/`。目标目录本身在 `.nexgent/` 内时不套其 `.gitignore`。
+- 结果按相对路径排序。`list_files`：`offset` / `limit`（别名 `maxResults`），结尾写总数；需审批的敏感文件带 `[sensitive: …]` 标记列出。
+- `search_text`：`outputMode`（`content` / `files_with_matches` / `count`）、`before` / `after` / `context`、`ignoreCase`、`literal`、`multiline`、`glob`、`offset` / `limit`。还有更多结果时末尾写 `[more results: pass offset N]`。文件并发读取（16 路），按行流式匹配，不再跳过大文件；二进制文件跳过并写出个数。
+- 敏感文件（`assessRead` 为 `ask`）绝不在搜索里读取，也不弹审批；结果末尾写一行跳过了哪些（最多列 20 个，其余写个数）。被沙箱拒绝的文件仍静默跳过。
+
+## 命令的系统沙箱、后台运行与输出（ADR 0022 决策 1、6、7）
+
+- **系统沙箱**（`src/os-sandbox.ts`，`createOsSandbox()`）：包装 `@anthropic-ai/sandbox-runtime`（钉 0.0.80，Apache-2.0）。库的 `SandboxManager` 是进程级单例，所以全局只初始化一次（延迟、不带网络与文件规则），写根、写保护、读保护和网络开关全部作为每次 `wrapWithSandbox` 的 `customConfig` 传入，不同项目的会话可以在同一进程并发。网络允许时不加网络段（命令用宿主网络，不走代理）；`network: false` 时给空白名单（新网络命名空间，无网络）。`probe()` 做依赖检查并真跑一条试验命令，失败返回 `{ kind: 'none', reason }`，`wrap()` 返回 `unavailable`，从不抛错。Linux 需要 `bwrap`、`socat`、`rg`；Windows 与缺依赖的平台为 `none`。
+- **网络桥的寿命**（Linux）：库为网络常驻 `socat` 桥。进程内只生成一个包装脚本（临时目录里，退出时删除），让 `socat` 经 `setpriv --pdeathsig KILL` 启动，宿主被强杀时桥随之结束；没有 `setpriv` 时用库的默认方式。`WorkspacePlugin` 在 `agents` 可用时就开始探测，所以第一个会话不等探测；新会话与重开的会话都等探测完成，`session.start` 记 `commandSandbox`（经 `AgentsService.useCommandSandboxProbe`）。
+- **策略输入**由宿主经 `ShellToolDeps.os`（`ShellSandboxDeps`）给出：`inputs(context)` 返回 `ShellSandboxInputs`（是否启用、`required`、项目根、只读、本会话放行的写根、读保护路径、读保护里仍可读的路径 `allowRead`——迁移到用户数据目录的项目的 `materials/` 与 `outputs/`、网络）。工具参数 `sandbox: false` 请求沙箱外重跑，经 `approveUnsandboxed` 钩子批准，没有钩子就拒绝。
+- **后台运行**：`bash` / `pwsh` 的 `run_in_background` 立即返回编号；`shell_output`（读新增输出和状态）、`shell_kill`（杀进程树）。登记表是 `BackgroundShells`，宿主在会话关闭时调用 `backgroundShellsFor(deps).disposeSession(sessionId)`；宿主进程退出时同步 SIGKILL 所有后台进程树。
+- **输出**：每个流在进程里保留头尾（默认合计 64 KiB，中间写 `[nexgent: N bytes omitted from the middle]`）；给模型的文本最多约 30 000 字符，头尾各半；完整的（已脱敏的）stdout / stderr 写到会话临时目录，被截断时路径附在结果里，没截断就删。
+- **Windows**：没有 `pwsh` 时回退到 Windows PowerShell 5.1，工具描述和第一条结果里提示一次；Job Object 启动器按 `$PSVersionTable` 选 `ArgumentList`（7）或手工转义的 `Arguments`（5.1）。

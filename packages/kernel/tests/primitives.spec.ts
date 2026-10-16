@@ -191,10 +191,11 @@ describe('approval policy', () => {
     expect(decideToolPolicy(def('always', ['execute']), 'full-access')).toEqual({ kind: 'ask', risk: 'high', options: ['once'] })
   })
 
-  it('derives patterns and matches grants by prefix and glob', () => {
+  it('derives full-command patterns and matches grants by whole words and glob', () => {
     const command = approvalSubject({ command: 'pnpm install left-pad' })
-    expect(derivePattern(command)).toBe('pnpm install')
-    expect(grantMatches({ tool: 'bash', pattern: 'pnpm install', grantedAt: '' }, 'bash', command)).toBe(true)
+    expect(derivePattern(command)).toBe('pnpm install left-pad')
+    expect(grantMatches({ tool: 'bash', pattern: 'pnpm install left-pad', grantedAt: '' }, 'bash', command)).toBe(true)
+    expect(grantMatches({ tool: 'bash', pattern: 'pnpm install', grantedAt: '' }, 'bash', command)).toBe(false)
     expect(grantMatches({ tool: 'bash', pattern: 'pnpm i', grantedAt: '' }, 'bash', command)).toBe(false)
     expect(grantMatches({ tool: 'bash', grantedAt: '' }, 'bash', command)).toBe(true)
     expect(grantMatches({ tool: 'pwsh', grantedAt: '' }, 'bash', command)).toBe(false)

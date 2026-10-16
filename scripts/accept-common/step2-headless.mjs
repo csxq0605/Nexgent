@@ -163,8 +163,10 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
 
   const approvalLog = []
   const responder = async (request) => {
-    // The first approval is granted once; every later one is denied.
-    const decision = approvalLog.length === 0
+    // A write outside the project asks (ADR 0022) and is denied; of the rest the first is granted once and every later one denied.
+    const outside = request.summary.includes('outside-the-project')
+    const granted = approvalLog.filter(entry => !entry.request.summary.includes('outside-the-project')).length
+    const decision = !outside && granted === 0
       ? { id: request.id, decision: 'allow', scope: 'once', decidedBy: 'user' }
       : { id: request.id, decision: 'deny', scope: 'once', decidedBy: 'user' }
     approvalLog.push({ request, decision })
@@ -267,7 +269,7 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
       await close()
     }
     obs.approvals = {
-      log: approvalLog.map(({ request, decision }) => ({ tool: request.tool, summary: request.summary, risk: request.risk, options: request.options, decision: decision.decision, scope: decision.scope })),
+      log: approvalLog.map(({ request, decision }) => ({ tool: request.tool, summary: request.summary, risk: request.risk, options: request.options, pattern: request.pattern ?? null, decision: decision.decision, scope: decision.scope })),
       envContent: await readFile(join(root, '.env'), 'utf8').catch(() => null),
       outsideExists: (await fileSha(join(root, '..', 'outside-the-project.txt'))) !== null,
     }
@@ -288,13 +290,15 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
     await close()
 
     server = await open('cancelTool')
+    // Processes the host keeps for its whole life (the OS sandbox's network bridge, ADR 0022) are not the tool's.
+    const hostPids = await h.descendantPids(process.pid)
     let toolStarted
     const started = new Promise(resolve => { toolStarted = resolve })
     const turnDone = turn('cancelTool', { text: TASKS.cancelTool }, server, { onEvent(event) { if (event.type === 'tool.start') toolStarted() } })
     await started
     // Let the shell start its command, then look at our own descendants (the tool's processes).
     let before = []
-    await h.waitFor(async () => (before = await h.descendantPids(process.pid)).length > 0, { timeoutMs: 15_000, intervalMs: 100, label: 'the slow command to start' }).catch(() => undefined)
+    await h.waitFor(async () => (before = (await h.descendantPids(process.pid)).filter(pid => !hostPids.includes(pid))).length > 0, { timeoutMs: 15_000, intervalMs: 100, label: 'the slow command to start' }).catch(() => undefined)
     await sdk.cancelTurn({ projectId, sessionId: obs.sessionId, cause: 'user' })
     await turnDone
     await new Promise(resolve => setTimeout(resolve, 500))

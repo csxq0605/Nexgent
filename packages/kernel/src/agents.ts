@@ -30,7 +30,7 @@ import { NexgentError } from './contracts/errors.js'
 import { COMPARISON_ARMS, IMPROVEMENT_DIAGNOSIS_TOOLS, IMPROVEMENT_PHASES } from './contracts/improvement.js'
 import { IMPROVER_SCOPES, IMPROVER_VERSION_PATTERN, META_DIAGNOSIS_TOOLS, META_PROPOSE_TOOLS } from './contracts/improver.js'
 import { EFFORT_LEVELS, type Effort, type ThinkingMode } from './contracts/llm.js'
-import type { SessionImprovement, SessionLock } from './contracts/session.js'
+import type { CommandSandboxStatus, SessionImprovement, SessionLock } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
 import { SANDBOX_MODES } from './contracts/workspace.js'
 import { Agent, DEFAULT_MAX_OUTPUT_CONTINUATIONS, DEFAULT_MAX_STEPS, type AgentInit, type AgentSettings, type ProjectGrantWriter } from './agent.js'
@@ -119,6 +119,10 @@ export interface CreateAgentOptions {
   readonly improvement?: ImprovementRun
   /** Thinking override (an improvement job's `improvement.thinking`); else the project config, then the service default. */
   readonly thinking?: ThinkingMode
+  /** ADR 0022 decision 4: start in plan mode (CLI `--plan`); `sandboxMode` applies once the user approves a plan. */
+  readonly plan?: boolean
+  /** ADR 0022 decision 1: the command sandbox status to record in `session.start`. */
+  readonly commandSandbox?: CommandSandboxStatus
 }
 
 /** Options of {@link AgentsService.resume}. */
@@ -228,6 +232,8 @@ export class AgentsService extends Service {
   private readonly live = new Map<string, Agent>()
   private readonly entries = new Map<Agent, AgentEntry>()
   private grantWriter: ProjectGrantWriter | undefined
+  private readonly closeListeners = new Set<(sessionId: string) => void>()
+  private commandSandboxProbe: (() => Promise<CommandSandboxStatus>) | undefined
 
   constructor(ctx: Context, config: AgentsConfig) {
     super(ctx, 'agents')
@@ -244,6 +250,31 @@ export class AgentsService extends Service {
   /** An open agent by session id. */
   get(sessionId: string): Agent | undefined {
     return this.live.get(sessionId)
+  }
+
+  /**
+   * Call `listener` with the session id whenever an agent closes (ADR 0022:
+   * the workspace ends that session's background commands).
+   * @returns the unregister function.
+   */
+  onClosed(listener: (sessionId: string) => void): () => void {
+    this.closeListeners.add(listener)
+    return () => {
+      this.closeListeners.delete(listener)
+    }
+  }
+
+  /**
+   * ADR 0022 decision 1: where a new session's `session.start` learns whether
+   * its commands run in an OS sandbox (the workspace plugin registers it).
+   * An explicit `CreateAgentOptions.commandSandbox` wins.
+   * @returns the unregister function.
+   */
+  useCommandSandboxProbe(probe: () => Promise<CommandSandboxStatus>): () => void {
+    this.commandSandboxProbe = probe
+    return () => {
+      if (this.commandSandboxProbe === probe) this.commandSandboxProbe = undefined
+    }
   }
 
   /**
@@ -396,6 +427,7 @@ export class AgentsService extends Service {
     thinking: 'off' | 'on'
     effort: Effort
     sandboxMode: SandboxMode
+    plan?: boolean
     projectConfig: ProjectConfig
     history: AgentInit['history']
     lastTurn: number
@@ -437,6 +469,7 @@ export class AgentsService extends Service {
       thinking: args.thinking,
       effort: args.effort,
       sandboxMode: args.sandboxMode,
+      ...(args.plan === true ? { plan: true } : {}),
       settings: args.settings,
       projectConfig: args.projectConfig,
       history: args.history,
@@ -462,6 +495,13 @@ export class AgentsService extends Service {
         if (this.live.get(closed.sessionId) === closed) this.live.delete(closed.sessionId)
         this.entries.delete(closed)
         member?.parent.children.delete(closed)
+        for (const listener of this.closeListeners) {
+          try {
+            listener(closed.sessionId)
+          } catch {
+            // A listener's failure does not stop the close.
+          }
+        }
       },
     })
     this.live.set(agent.sessionId, agent)
@@ -571,6 +611,7 @@ export class AgentsService extends Service {
     // Step 4: a new root session runs on the adopted version as of now; a diagnose or meta session loads no components.
     const host = loadsNoComponents(improvement) ? undefined : this.capabilityHost()
     const version = host === undefined ? undefined : await host.current()
+    const commandSandbox = options.commandSandbox ?? await this.commandSandboxProbe?.()
     const lock = await this.home.session.create({
       sessionId,
       projectRoot: this.home.workspace.root,
@@ -579,6 +620,8 @@ export class AgentsService extends Service {
       ...(options.title === undefined ? {} : { title: options.title }),
       ...(version === undefined ? {} : { capabilityVersion: version }),
       ...(session === undefined ? {} : { purpose: 'improvement' as const, improvement: session }),
+      ...(options.plan === true ? { plan: true } : {}),
+      ...(commandSandbox === undefined ? {} : { commandSandbox }),
     })
     try {
       const scope = await this.scope(sessionId)
@@ -600,6 +643,7 @@ export class AgentsService extends Service {
         thinking,
         effort,
         sandboxMode,
+        ...(options.plan === true ? { plan: true } : {}),
         projectConfig: loaded.config,
         history: [],
         lastTurn: 0,
@@ -708,6 +752,8 @@ export class AgentsService extends Service {
     if (this.live.has(sessionId)) throw new NexgentError('session/locked', `session ${sessionId} is already open in this process`)
     const parent = options.child === undefined ? undefined : this.parentEntry(options.child.parentSessionId)
     const loaded = parent === undefined ? await this.projectConfig(options.projectConfig) : undefined
+    // The command sandbox is ready before the session runs anything, as for a new session (ADR 0022).
+    await this.commandSandboxProbe?.().catch(() => undefined)
     const session = this.home.session
     const lock = await session.lock(sessionId)
     try {
@@ -783,6 +829,7 @@ export class AgentsService extends Service {
         thinking: parent === undefined ? options.thinking ?? loaded!.input.thinking ?? this.config.thinking : preset?.thinking ?? parent.thinking,
         effort: parent === undefined ? loaded!.input.effort ?? this.config.effort : preset?.effort ?? parent.effort,
         sandboxMode,
+        ...(state.metadata.plan === true && parent === undefined ? { plan: true } : {}),
         projectConfig,
         history: state.messages,
         lastTurn: state.metadata.lastTurn,

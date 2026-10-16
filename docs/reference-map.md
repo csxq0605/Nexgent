@@ -49,7 +49,7 @@
 | `fs/fs-sandbox`、`fs/fs-observation-policy` | `@nexgent/workspace` | 改写 | 1 | 已复制 `fs-sandbox/src/containment.ts`（→ `paths.ts`）：路径白名单与写入限制；`fs-observation-policy` 未复制 |
 | `fs/tool-fs`、`fs/tool-fs-search`、`fs/tool-str-replace-editor` | `@nexgent/workspace` | 重写 | 1 | 读写、搜索、`str_replace` 工具，只参考设计 |
 | `shell/shell`、`shell/shell-env` | `@nexgent/workspace` | 重写 | 1 | 只参考设计 |
-| `shell/bash-local`、`shell/bash-sandbox`、`shell/tool-bash` | `@nexgent/workspace` | 重写 | 1 | Linux / macOS；只参考 `tool-bash` 的设计 |
+| `shell/bash-local`、`shell/bash-sandbox`、`shell/tool-bash` | `@nexgent/workspace` | 重写 | 1 | Linux / macOS；只参考 `tool-bash` 的设计；ADR 0022 起命令的系统沙箱用 npm 依赖 `@anthropic-ai/sandbox-runtime`，不来自 DSH |
 | `shell/pwsh-local`、`shell/pwsh-sandbox`、`shell/tool-pwsh` | `@nexgent/workspace` | 重写 | 1 | Windows；只参考 `tool-pwsh` 的设计 |
 | `shell/tool-bash-persistent`、`shell/tool-pwsh-persistent` | — | 不要 | — | 持久 shell 会话暂不做 |
 | `subprocess/subprocess`、`subprocess/subprocess-local`、`subprocess/win32-process` | `@nexgent/workspace` | 改写 | 1 | 已复制 `subprocess-local/src/spawn.ts`（→ `process.ts`）：子进程与进程组 / `taskkill` 终止；`win32-process` 未复制；Windows Job Object 由 `windows-job.ts` 重写（步骤 2） |
