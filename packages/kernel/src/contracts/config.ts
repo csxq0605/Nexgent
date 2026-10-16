@@ -150,6 +150,13 @@ export interface ProjectConfig {
   readonly capabilities: CapabilitiesConfig
   /** ADR 0017–0019: background learning switch, dollar budget, self-eval ceiling, sharing. Changing it always needs approval. */
   readonly learning: LearningConfig
+  /**
+   * Model calls one turn may make before it stops with cancel cause
+   * `step-limit` (the user continues by sending another message; ADR 0021).
+   * Absent: the `agents` profile row's `maxSteps` (400). A member preset's
+   * `maxSteps` still wins for that member. Changing it always needs approval.
+   */
+  readonly maxStepsPerTurn?: number
 }
 
 /**
@@ -157,7 +164,7 @@ export interface ProjectConfig {
  * sandbox mode (`permissions.md` "始终审批"): a model must not widen its own
  * permissions, budgets or gate.
  */
-export const GUARDED_PROJECT_CONFIG_FIELDS = ['approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement', 'learning'] as const
+export const GUARDED_PROJECT_CONFIG_FIELDS = ['approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement', 'learning', 'maxStepsPerTurn'] as const
 
 /** The defaults applied over a missing or partial config file. */
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
@@ -209,6 +216,7 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
       ...(input.autoImprove === undefined ? {} : { autoImprove: input.autoImprove }),
       ...(input.improvement?.shareImproverEvidence === undefined ? {} : { shareImproverEvidence: input.improvement.shareImproverEvidence }),
     }),
+    ...(input.maxStepsPerTurn === undefined ? {} : { maxStepsPerTurn: input.maxStepsPerTurn }),
   }
 }
 

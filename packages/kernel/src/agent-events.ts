@@ -17,6 +17,8 @@ interface Base {
 export type AgentEvent =
   | Base & { readonly type: 'turn.start'; readonly turn: number }
   | Base & { readonly type: 'request.start'; readonly turn: number; readonly step: number; readonly requestId: string; readonly model: string }
+  /** The provider retries the step's request after a retryable failure (ADR 0021); nothing of the failed attempt was kept. */
+  | Base & { readonly type: 'request.retry'; readonly turn: number; readonly step: number; readonly requestId: string; readonly attempt: number; readonly delayMs: number; readonly error: ErrorInfo }
   | Base & { readonly type: 'text.delta'; readonly turn: number; readonly step: number; readonly text: string }
   | Base & { readonly type: 'reasoning.delta'; readonly turn: number; readonly step: number; readonly text: string }
   | Base & { readonly type: 'tool-call.start'; readonly turn: number; readonly step: number; readonly index: number; readonly id: string; readonly name: string }

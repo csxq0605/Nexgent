@@ -483,13 +483,17 @@ export function turnEndText(reason: TurnEndReason): string | undefined {
         ? '已停止'
         : reason.cause === 'cost-cap'
           ? '达到费用上限，已停止'
-          : reason.cause === 'timeout'
-            ? '超时，已停止'
-            : '应用关闭，已停止'
+          : reason.cause === 'step-limit'
+            ? '本轮模型调用次数到上限了，工作还没丢；发一句“继续”就接着做'
+            : reason.cause === 'timeout'
+              ? '超时，已停止'
+              : reason.cause === 'parent'
+                ? '上级任务已结束，已停止'
+                : '应用关闭，已停止'
     case 'error':
       return `出错结束：${reason.error.message}`
     case 'max-tokens':
-      return '回复达到长度上限'
+      return '回复多次超出单次输出长度上限，已停止；可以让它分小块继续'
     case 'interrupted':
       return '上次运行被中断（应用曾意外退出）'
   }

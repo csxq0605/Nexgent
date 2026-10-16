@@ -27,8 +27,8 @@ export interface WireOptions {
   readonly maxTokens: number
 }
 
-/** Defaults of {@link WireOptions} (ADR 0002). */
-export const DEFAULT_WIRE_OPTIONS: WireOptions = Object.freeze({ effort: 'medium', maxTokens: 16000 }) as WireOptions
+/** Defaults of {@link WireOptions} (ADR 0002; `maxTokens` raised to half of Claude Sonnet 5.5's 128K output by ADR 0021). */
+export const DEFAULT_WIRE_OPTIONS: WireOptions = Object.freeze({ effort: 'medium', maxTokens: 64000 }) as WireOptions
 
 /** The request body before the SDK adds `stream: true` (and, on the beta route, `betas` / `fallbacks`). */
 export type MessageParams = Anthropic.MessageStreamParams

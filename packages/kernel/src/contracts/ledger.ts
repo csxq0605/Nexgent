@@ -82,9 +82,9 @@ export interface LLMRequestStartRecord extends LedgerRecordBase {
   /** Whether reasoning was requested. */
   readonly thinking: 'off' | 'on'
   /**
-   * ADR 0017 decision 2: 1-based attempt number when the host retries a
-   * failed request (absent: 1). Every attempt is its own request with its
-   * own `requestId`, so every attempt is counted.
+   * ADR 0017 decision 2 / ADR 0021: 1-based attempt number when the provider
+   * retries a failed request (absent: 1). Every attempt has its own start/end
+   * pair with the same `requestId` and is counted as a request.
    */
   readonly attempt?: number
 }

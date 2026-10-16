@@ -5,7 +5,10 @@ import {
   applyCompaction,
   BasicCompactor,
   COMPACTION_THRESHOLD_ENV,
+  contextWindowOf,
+  currentRequestText,
   DEFAULT_COMPACTION_THRESHOLD,
+  estimateTokens,
   planCompaction,
   renderTranscript,
   resolveCompactionThreshold,
@@ -62,7 +65,12 @@ describe('compaction split', () => {
   it('applyCompaction builds exactly what the session projection builds', () => {
     const messages = history()
     const result = applyCompaction(messages, 'S', 6)
-    expect(result).toEqual([{ role: 'user', content: renderCompactionSummary('S') }, ...messages.slice(-6)])
+    // kept replies lose their thinking blocks (ADR 0021), everything else is unchanged
+    expect(result).toEqual([{ role: 'user', content: renderCompactionSummary('S') }, ...messages.slice(-6).map(message => {
+      if (message.role !== 'assistant') return message
+      const { providerContent: _dropped, ...rest } = message
+      return rest
+    })])
     expect(() => applyCompaction(messages, 'S', 0)).toThrow()
     expect(() => applyCompaction(messages, 'S', messages.length + 1)).toThrow()
   })
@@ -72,7 +80,9 @@ describe('compaction trigger', () => {
   const compactor = new BasicCompactor({ llm: scriptedProvider([]), thresholdTokens: 1000, env: {} })
 
   it('triggers on billed input (input + cache read + cache write) at or above the threshold', () => {
-    expect(compactor.shouldCompact(check(history(), { lastUsage: usage(999) }))).toBe(false)
+    // the next input also counts the tool result added after the last reply (≈ 6 tokens)
+    expect(compactor.shouldCompact(check(history(), { lastUsage: usage(993) }))).toBe(false)
+    expect(compactor.shouldCompact(check(history(), { lastUsage: usage(994) }))).toBe(true)
     expect(compactor.shouldCompact(check(history(), { lastUsage: usage(1000) }))).toBe(true)
     expect(compactor.shouldCompact(check(history(), { lastUsage: usage(400, 600) }))).toBe(true)
   })
@@ -120,14 +130,15 @@ describe('compaction request', () => {
       summary: '## User requests\n- request 1',
       keepMessages: messages.length - 4,
       compactedMessages: 4,
-      trigger: { inputTokens: 1500, threshold: 1000 },
+      // billed input + the tool result added after the last reply ('contents of file 3', 18 chars ≈ 6 tokens)
+      trigger: { inputTokens: 1506, threshold: 1000 },
       usage: { inputTokens: 900, outputTokens: 80 },
     })
     llm.assertConsumed()
     const [call] = llm.calls
     expect(call!.options).toEqual({ sessionId: SESSION_ID, purpose: 'auxiliary' })
     expect(call!.request.requestId).toBe(result.requestId)
-    expect(call!.request).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', effort: 'medium', maxTokens: 16000 })
+    expect(call!.request).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', effort: 'medium', maxTokens: 32000 })
     expect(call!.request.tools).toBeUndefined()
     expect(call!.request.messages.map(message => message.role)).toEqual(['system', 'user'])
     expect(call!.request.messages[0]!.content).toBe(SUMMARY_SYSTEM_PROMPT)
@@ -220,5 +231,78 @@ describe('compaction request', () => {
   it('refuses to compact when there is nothing to summarize', async () => {
     const compactor = new BasicCompactor({ llm: scriptedProvider([]), env: {} })
     await expect(compactor.compact(check(turn(1)), new AbortController().signal)).rejects.toMatchObject({ code: 'internal' })
+  })
+})
+
+/** A long current turn: `steps` tool rounds, each result `size` characters. */
+function longTurn(steps: number, size: number): HistoryMessage[] {
+  const messages: HistoryMessage[] = [{ role: 'user', content: 'materials: a.txt' }, { role: 'user', content: 'refactor everything' }]
+  for (let i = 1; i <= steps; i++) {
+    messages.push({ role: 'assistant', content: '', toolCalls: [{ id: `c${i}`, name: 'bash', arguments: '{"command":"build"}' }], providerContent: [{ type: 'thinking', thinking: 't', signature: 's' }] })
+    messages.push({ role: 'tool', toolCallId: `c${i}`, name: 'bash', content: 'x'.repeat(size), isError: false })
+  }
+  return messages
+}
+
+describe('long turns (ADR 0021)', () => {
+  it('splits the current turn when the kept part would exceed the budget, keeping at least the last step', () => {
+    const messages = longTurn(10, 3000)
+    // the whole history is the current turn: no turn-level split exists
+    expect(planCompaction(messages)).toBeUndefined()
+    const plan = planCompaction(messages, 2, 2500)!
+    expect(plan.currentTurnStart).toBe(0)
+    // each step is ~1010 tokens: the last two fit 2500
+    expect(plan.keepMessages).toBe(4)
+    expect(messages[messages.length - plan.keepMessages]).toMatchObject({ role: 'assistant' })
+    // a budget nothing fits keeps the last step alone
+    expect(planCompaction(messages, 2, 10)).toMatchObject({ keepMessages: 2, compactedMessages: messages.length - 2 })
+    // a budget everything fits leaves the turn whole
+    expect(planCompaction([...turn(1), ...messages], 2, 1_000_000)).toEqual({ compactedMessages: 4, keepMessages: messages.length })
+  })
+
+  it('carries the current request verbatim (injections included) and estimates sizes', () => {
+    const messages = longTurn(2, 30)
+    expect(currentRequestText(messages, 0)).toBe('materials: a.txt\n\nrefactor everything')
+    expect(estimateTokens([{ role: 'user', content: 'x'.repeat(30) }])).toBe(10)
+  })
+
+  it('triggers on the estimated next input: billed input plus output plus what was added after the last reply', () => {
+    const compactor = new BasicCompactor({ llm: scriptedProvider([]), thresholdTokens: 30_000, env: {} })
+    const messages = longTurn(3, 60_000)
+    const last = { ...usage(4_000), outputTokens: 100 }
+    // 4000 + 100 + 20 000 (the last tool result) < 30 000; 9000 more tokens of results cross it (the turn is then split)
+    expect(compactor.shouldCompact(check(messages, { lastUsage: last }))).toBe(false)
+    expect(compactor.shouldCompact(check([...messages, { role: 'tool', toolCallId: 'c3', name: 'bash', content: 'y'.repeat(27_000), isError: false }], { lastUsage: last }))).toBe(true)
+    // with no usage known (after a resume) the whole history is estimated
+    expect(compactor.shouldCompact(check(messages))).toBe(true)
+  })
+
+  it('never lets the threshold exceed 75% of the model window', () => {
+    expect(contextWindowOf('claude-sonnet-5-5')).toBe(1_000_000)
+    expect(contextWindowOf('claude-opus-4-8')).toBe(1_000_000)
+    expect(contextWindowOf('claude-haiku-4-5')).toBe(200_000)
+    expect(contextWindowOf('some-unknown-model')).toBe(200_000)
+    const compactor = new BasicCompactor({ llm: scriptedProvider([]), thresholdTokens: 900_000, env: {} })
+    expect(compactor.shouldCompact(check(history(), { model: 'claude-haiku-4-5', lastUsage: usage(150_000) }))).toBe(true)
+    expect(compactor.shouldCompact(check(history(), { model: 'claude-sonnet-5-5', lastUsage: usage(150_000) }))).toBe(false)
+  })
+
+  it('appends the request to the summary when the turn is split', async () => {
+    const llm = scriptedProvider([{ content: '## Work done\n- built twice' }])
+    const compactor = new BasicCompactor({ llm, thresholdTokens: 10_000, env: {} })
+    // each step ≈ 10 000 tokens: the 20 000-token keep budget holds the last step only
+    const messages = longTurn(6, 30_000)
+    const result = await compactor.compact(check(messages, { lastUsage: usage(12_000) }), new AbortController().signal)
+    expect(result.summary).toBe('## Work done\n- built twice\n\n## Current request (verbatim; the work on it continues below)\nmaterials: a.txt\n\nrefactor everything')
+    expect(messages[messages.length - result.keepMessages]!.role).toBe('assistant')
+    expect(result.keepMessages).toBe(2)
+  })
+
+  it('keeps the transcript within its total budget', () => {
+    const messages = longTurn(40, 8_000)
+    const text = renderTranscript(messages, 8_000, 20_000)
+    expect(text.length).toBeLessThanOrEqual(20_200)
+    expect(text).toContain('[user]\nrefactor everything')
+    expect(renderTranscript(messages.slice(0, 4), 8_000, 1_000_000)).toBe(renderTranscript(messages.slice(0, 4)))
   })
 })

@@ -5,6 +5,7 @@ import {
   isNexgentError,
   renderCompactionSummary,
   resolveWorkspaceLayout,
+  UNKNOWN_USAGE,
   type SessionRecordInput,
 } from '@nexgent/kernel'
 import { JsonlSessionStore, projectSession, validateSessionRecord } from '../src/index.js'
@@ -82,10 +83,11 @@ describe('step-2 session records', () => {
     expect(state.metadata.goal).toMatchObject({ id: 'g1', status: 'completed', text: 'Summarize sales', note: 'presented v2' })
     expect(state.metadata.goal?.updatedAt).toBe(records.find(record => record.type === 'goal.update')?.ts)
     expect(state.metadata.lastCompactionSeq).toBe(records.find(record => record.type === 'compaction')?.seq)
+    expect(state.metadata.lastUsage).toBeUndefined()
     expect(state.metadata.openTurn).toBeUndefined()
   })
 
-  it('refuses a compaction whose tail does not start at a user message, and a goal.update for another goal', async () => {
+  it('refuses a compaction whose tail starts at a tool result, and a goal.update for another goal', async () => {
     const { root, store } = await setup()
     const lock = await store.create(sessionInit(root))
     for (const record of turnRecords(1)) await store.append(SESSION_ID, record)
@@ -99,6 +101,39 @@ describe('step-2 session records', () => {
       await expect(store.append(SESSION_ID, record)).rejects.toSatisfy(error => isNexgentError(error, 'session/invalid-record'))
     }
     expect((await store.readAll(SESSION_ID)).records).toHaveLength(before)
+    await store.release(lock)
+  })
+
+  it('accepts a compaction that splits the current turn at a reply (ADR 0021); kept replies lose their provider content', async () => {
+    const { root, store } = await setup()
+    const lock = await store.create(sessionInit(root))
+    const records = turnRecords(1).filter(record => record.type !== 'turn.end')
+    const withThinking = records.map(record => record.type === 'assistant.message' && record.step === 1
+      ? { ...record, providerContent: [{ type: 'thinking', thinking: 't', signature: 's' }] }
+      : record)
+    for (const record of withThinking) await store.append(SESSION_ID, record)
+    await store.append(SESSION_ID, { type: 'compaction', turn: 1, step: 3, summary: 's', keepMessages: 3, compactedMessages: 1, requestId: 'r', usage: KNOWN_USAGE, trigger: { inputTokens: 2, threshold: 1 } })
+    const state = await store.resume(SESSION_ID)
+    expect(state.messages[0]).toEqual({ role: 'user', content: renderCompactionSummary('s') })
+    expect(state.messages[1]).toMatchObject({ role: 'assistant', toolCalls: [{ id: 'call_1' }] })
+    expect(state.messages[1]).not.toHaveProperty('providerContent')
+    expect(state.messages.map(message => message.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
+    await store.release(lock)
+  })
+
+  it('projects the latest reply usage with a known billed input as lastUsage, cleared by a compaction (ADR 0021)', async () => {
+    const { root, store } = await setup()
+    const lock = await store.create(sessionInit(root))
+    const records = turnRecords(1).filter(record => record.type !== 'turn.end')
+    for (const record of records) await store.append(SESSION_ID, record)
+    const known = { ...KNOWN_USAGE, inputTokens: 1234 }
+    await store.append(SESSION_ID, { type: 'assistant.message', turn: 1, step: 3, requestId: 'r3', content: 'more', usage: known, finishReason: 'stop' })
+    await store.append(SESSION_ID, { type: 'assistant.message', turn: 1, step: 4, requestId: 'r4', content: 'cut', usage: UNKNOWN_USAGE, finishReason: 'error', interrupted: true })
+    expect((await store.resume(SESSION_ID)).metadata.lastUsage).toEqual(known)
+    await store.append(SESSION_ID, { type: 'compaction', turn: 1, step: 5, summary: 's', keepMessages: 1, compactedMessages: 5, requestId: 'r', usage: KNOWN_USAGE, trigger: { inputTokens: 2, threshold: 1 } })
+    const state = await store.resume(SESSION_ID)
+    expect(state.metadata.lastUsage).toBeUndefined()
+    expect(validateSessionRecord({ type: 'checkpoint', seq: 99, ts: new Date().toISOString(), sessionId: SESSION_ID, coversSeq: 98, state: { ...state, metadata: { ...state.metadata, lastUsage: known } } })).toEqual([])
     await store.release(lock)
   })
 
@@ -138,7 +173,10 @@ describe('a session written by step 1 stays readable', () => {
     expect(records).toHaveLength(12)
     const checkpoint = records[11]
     if (checkpoint?.type !== 'checkpoint') throw new Error('expected the fixture to end with a checkpoint')
-    expect(checkpoint.state).toEqual(projectSession(records.slice(0, 11)))
+    // The step-1 checkpoint predates `lastUsage` (ADR 0021); a reader resuming from it simply has none.
+    const { lastUsage, ...projected } = projectSession(records.slice(0, 11)).metadata
+    expect(lastUsage).toMatchObject({ inputTokens: expect.any(Number) })
+    expect(checkpoint.state).toEqual({ ...projectSession(records.slice(0, 11)), metadata: projected })
     const resumed = await store.resume(STEP1_SESSION)
     expect(resumed).toEqual({ ...checkpoint.state, metadata: { ...checkpoint.state.metadata, lastSeq: 12 } })
 

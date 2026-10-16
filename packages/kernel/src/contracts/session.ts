@@ -7,7 +7,7 @@
  * algorithm, lock file) is `docs/spec/data-formats.md` §会话 JSONL v1; this
  * file is its type-level mirror. Only v1 exists; there is no migration.
  */
-import type { ErrorInfo } from './errors.js'
+import { NexgentError, type ErrorInfo } from './errors.js'
 import type { JsonValue } from './json.js'
 import type { ApprovalDecision, ApprovalGrant, ApprovalRequest } from './approvals.js'
 import type { CapabilityComponentRef, CapabilityFile, CapabilityVersion, CapabilityVersionSwitchReason, ComponentUseProof } from './capabilities.js'
@@ -157,10 +157,15 @@ export interface TurnStartRecord extends SessionRecordBase {
 }
 
 /** Who or what cancelled a turn. */
-export type TurnCancelCause = 'user' | 'timeout' | 'shutdown' | 'cost-cap' | 'parent'
+export type TurnCancelCause = 'user' | 'timeout' | 'shutdown' | 'cost-cap' | 'parent' | 'step-limit'
 
-/** Every {@link TurnCancelCause}; `parent` (step 3): the parent session's turn was cancelled or ended. */
-export const TURN_CANCEL_CAUSES: readonly TurnCancelCause[] = ['user', 'timeout', 'shutdown', 'cost-cap', 'parent']
+/**
+ * Every {@link TurnCancelCause}; `parent` (step 3): the parent session's turn
+ * was cancelled or ended; `step-limit` (ADR 0021): the turn made its
+ * `maxSteps` model calls; the history is intact and the next user message
+ * continues the task.
+ */
+export const TURN_CANCEL_CAUSES: readonly TurnCancelCause[] = ['user', 'timeout', 'shutdown', 'cost-cap', 'parent', 'step-limit']
 
 /** Why a turn ended. */
 export type TurnEndReason =
@@ -308,10 +313,12 @@ export interface SessionTitleRecord extends SessionRecordBase {
 /**
  * Older history was replaced by a summary. Projection: `messages` becomes
  * `[{ role: 'user', content: renderCompactionSummary(summary) }]` followed by
- * the last `keepMessages` messages as they were. The kept tail always starts
- * with a `user` message (a turn or injection boundary), so no tool call is
- * separated from its result; summarized assistant replies lose their
- * `providerContent` (thinking blocks are not replayed), kept ones keep it.
+ * the last `keepMessages` messages ({@link compactionTail}). The kept tail
+ * starts with a `user` message (a turn or injection boundary) or, when the
+ * compaction split the current turn (ADR 0021), with an `assistant` reply of
+ * that turn, never with a tool result, so no tool call is separated from its
+ * result. Every assistant reply, summarized or kept, loses its
+ * `providerContent` (thinking blocks are not replayed across a compaction).
  */
 export interface CompactionRecord extends SessionRecordBase {
   readonly type: 'compaction'
@@ -336,6 +343,29 @@ export interface CompactionRecord extends SessionRecordBase {
 /** Wrapper the projection puts around a compaction summary. Pure; the exact text is part of the contract. */
 export function renderCompactionSummary(summary: string): string {
   return `<conversation-summary>\nThe earlier part of this conversation was compacted. Summary:\n\n${summary}\n</conversation-summary>`
+}
+
+/**
+ * The messages a compaction keeps, as the projection and the loop both build
+ * them: the last `keepMessages`, which start at a turn boundary (`user`) or,
+ * when the compaction split the current turn, at one of its replies
+ * (`assistant`, ADR 0021), never at a tool result. Kept replies lose their
+ * `providerContent`: their thinking blocks were bound to the history before
+ * the summary and would no longer verify, so they are sent as text and tool
+ * calls only. Pure.
+ * @throws `session/invalid-record` when the count is out of range or the tail starts with a tool result.
+ */
+export function compactionTail<M extends Exclude<LLMMessage, { role: 'system' }>>(messages: readonly M[], keepMessages: number): M[] {
+  if (!Number.isInteger(keepMessages) || keepMessages < 1 || keepMessages > messages.length) {
+    throw new NexgentError('session/invalid-record', `compaction keeps ${String(keepMessages)} of ${messages.length} messages`)
+  }
+  const tail = messages.slice(messages.length - keepMessages)
+  if (tail[0]!.role === 'tool') throw new NexgentError('session/invalid-record', 'compaction tail must not start with a tool result')
+  return tail.map(message => {
+    if (message.role !== 'assistant' || message.providerContent === undefined) return message
+    const { providerContent: _dropped, ...rest } = message
+    return rest as M
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -640,6 +670,12 @@ export interface SessionMetadata {
   readonly goal?: Goal
   /** `seq` of the latest `compaction` folded in (step 2). */
   readonly lastCompactionSeq?: number
+  /**
+   * Usage of the latest `assistant.message` after the latest compaction whose
+   * billed input is known (ADR 0021): the compaction trigger's starting point
+   * when an agent is reopened. Absent before the first such reply.
+   */
+  readonly lastUsage?: LLMUsage
   /** From `session.start` (step 3 child session). */
   readonly parentSessionId?: string
   /** From `session.start` (step 3 child session). */

@@ -38,6 +38,7 @@ export interface LoadedProjectConfig extends ProjectConfig {
 
 const TOP_LEVEL_KEYS = new Set([
   'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities', 'improvement', 'learning',
+  'maxStepsPerTurn',
 ])
 
 function invalid(message: string, field?: string): NexgentError {
@@ -81,6 +82,9 @@ export function validateProjectConfig(raw: unknown): ProjectConfigFile {
     throw invalid(`sandboxMode must be one of ${SANDBOX_MODES.join(', ')}`, 'sandboxMode')
   }
   if (raw.autoImprove !== undefined && typeof raw.autoImprove !== 'boolean') throw invalid('autoImprove must be a boolean', 'autoImprove')
+  if (raw.maxStepsPerTurn !== undefined && !(typeof raw.maxStepsPerTurn === 'number' && Number.isSafeInteger(raw.maxStepsPerTurn) && raw.maxStepsPerTurn >= 1)) {
+    throw invalid('maxStepsPerTurn must be a positive integer', 'maxStepsPerTurn')
+  }
   if (raw.costCaps !== undefined) {
     checkCostCaps(raw.costCaps, (field, message) => {
       throw invalid(message, field)
