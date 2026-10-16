@@ -6,7 +6,7 @@
  * package does not depend on schemastery); Cordis runs it before `apply`.
  */
 import { isAbsolute } from 'node:path'
-import { resolveWorkspaceLayout, type Context } from '@nexgent/kernel'
+import { resolveProjectLayout, type Context } from '@nexgent/kernel'
 import { JsonlLedger } from './ledger.js'
 import { JsonlSessionStore, type SessionFsyncPolicy } from './store.js'
 
@@ -15,8 +15,10 @@ import { JsonlSessionStore, type SessionFsyncPolicy } from './store.js'
  * `ledgersDir`; the Cordis plugin falls back to `ctx.workspace.layout`.
  */
 export interface SessionPluginConfig {
-  /** Absolute project root; data goes to `<root>/.nexgent/{sessions,ledgers}`. */
+  /** Absolute project root; data goes to `<root>/.nexgent/{sessions,ledgers}`, or under the user home when the project's data lives there. */
   readonly root?: string
+  /** Absolute `NEXGENT_HOME` for {@link SessionPluginConfig.root}; default from the environment. */
+  readonly home?: string
   /** Absolute sessions directory; overrides the one derived from `root`. */
   readonly sessionsDir?: string
   /** Absolute ledgers directory; overrides the one derived from `root`. */
@@ -50,9 +52,9 @@ export function checkSessionPluginConfig(value: unknown, requireLocation = true)
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return [{ message: 'config must be an object' }]
   const config = value as Record<string, unknown>
   const issues: Issue[] = []
-  const known = new Set(['root', 'sessionsDir', 'ledgersDir', 'checkpointEvery', 'checkpointOnRelease', 'fsync'])
+  const known = new Set(['root', 'home', 'sessionsDir', 'ledgersDir', 'checkpointEvery', 'checkpointOnRelease', 'fsync'])
   for (const key of Object.keys(config)) if (!known.has(key)) issues.push({ message: 'unknown option', path: [key] })
-  for (const key of ['root', 'sessionsDir', 'ledgersDir']) {
+  for (const key of ['root', 'home', 'sessionsDir', 'ledgersDir']) {
     const dir = config[key]
     if (dir !== undefined && (typeof dir !== 'string' || !isAbsolute(dir))) {
       issues.push({ message: 'must be an absolute path', path: [key] })
@@ -96,7 +98,7 @@ export function createSessionServices(config: SessionPluginConfig): SessionServi
   if (issues.length > 0) {
     throw new TypeError(`invalid session config: ${issues.map(issue => `${issue.path?.join('.') ?? '/'}: ${issue.message}`).join('; ')}`)
   }
-  const layout = config.root === undefined ? undefined : resolveWorkspaceLayout(config.root)
+  const layout = config.root === undefined ? undefined : resolveProjectLayout(config.root, config.home === undefined ? {} : { home: config.home })
   // Validation guarantees `root` or both directories.
   const sessionsDir = (config.sessionsDir ?? layout?.sessions) as string
   const ledgersDir = (config.ledgersDir ?? layout?.ledgers) as string
@@ -122,7 +124,7 @@ export const SessionPlugin = {
   provide: ['session', 'ledger'],
   Config: SessionPluginConfigSchema,
   apply(ctx: Context, config: SessionPluginConfig = {}): void {
-    const own = config.root === undefined ? undefined : resolveWorkspaceLayout(config.root)
+    const own = config.root === undefined ? undefined : resolveProjectLayout(config.root, config.home === undefined ? {} : { home: config.home })
     const layout = ctx.workspace.layout
     const { store, ledger } = createSessionServices({
       ...config,

@@ -2,10 +2,10 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApp, resolveWorkspaceLayout, type Context, type NexgentApp, type Plugin, type SessionRecord, type ToolContext, type ToolRecordInput } from '@nexgent/kernel'
+import { createApp, resolveProjectLayout, type Context, type NexgentApp, type Plugin, type SessionRecord, type ToolContext, type ToolRecordInput } from '@nexgent/kernel'
 import { JsonlSessionStore, SessionPlugin } from '@nexgent/session'
 import { scriptedProvider } from '@nexgent/test-support'
-import { WorkspacePlugin } from '@nexgent/workspace'
+import { prepareProjectData, WorkspacePlugin } from '@nexgent/workspace'
 import { CapabilitiesPlugin, capabilitiesOf, capabilityTools, findUseProof, listCandidates, readCandidate, type CapabilityService, type CapabilityToolsOptions } from '../src/index.js'
 import { tempDir } from './helpers.js'
 
@@ -27,7 +27,7 @@ async function boot(root: string, sessionsOf?: string): Promise<CapabilityServic
     patches: [
       { id: 'workspace', config: { root } },
       // As `@nexgent/sdk` does for a propose session: work in `root` (a snapshot copy), sessions in the real project.
-      ...(sessionsOf === undefined ? [] : [{ id: 'session', config: { sessionsDir: resolveWorkspaceLayout(sessionsOf).sessions, ledgersDir: resolveWorkspaceLayout(sessionsOf).ledgers } }]),
+      ...(sessionsOf === undefined ? [] : [{ id: 'session', config: { sessionsDir: resolveProjectLayout(sessionsOf).sessions, ledgersDir: resolveProjectLayout(sessionsOf).ledgers } }]),
       { insert: [{ id: 'capabilities', name: '@nexgent/capabilities' }] },
     ],
   })
@@ -154,7 +154,7 @@ describe('capability_draft / try / propose', () => {
 
 /** A past root task with one deliverable and the feedback on it; and the improvement job that answers it. */
 async function feedbackJob(root: string, deliverableText: string, comment: string): Promise<string> {
-  const layout = resolveWorkspaceLayout(root)
+  const { layout } = await prepareProjectData(root)
   const store = new JsonlSessionStore({ sessionsDir: layout.sessions })
   const sessionId = randomUUID()
   const deliverableId = randomUUID()
@@ -179,7 +179,7 @@ async function feedbackJob(root: string, deliverableText: string, comment: strin
 
 /** Another root task whose user message carries `text`. */
 async function pastMessage(root: string, text: string): Promise<void> {
-  const store = new JsonlSessionStore({ sessionsDir: resolveWorkspaceLayout(root).sessions })
+  const store = new JsonlSessionStore({ sessionsDir: resolveProjectLayout(root).sessions })
   const sessionId = randomUUID()
   const lock = await store.create({ sessionId, projectRoot: root, model: 'claude-sonnet-5-5', sandboxMode: 'workspace-write' })
   await store.append(sessionId, { type: 'turn.start', turn: 1 })
@@ -243,7 +243,7 @@ describe('capability_propose in an improvement job: the instance-literal check (
     const service = await boot(copy, real)
     const jobId = await feedbackJob(real, '# Summary\n\nTotal: 5,121.00 USD over 63 orders (2026-09).\n', 'Break the total down by region.')
     const sessionsDir = () => (app!.ctx.get('session') as unknown as { sessionsDir: string }).sessionsDir
-    expect(sessionsDir()).toBe(resolveWorkspaceLayout(real).sessions)
+    expect(sessionsDir()).toBe(resolveProjectLayout(real).sessions)
     const refused = await propose(service, jobId, 'Report the total as 5121.00, broken down by region.', { sessionsDir }).catch((error: unknown) => error)
     expect(refused).toMatchObject({ code: 'capability/instance-literal', message: expect.stringContaining('5121.00') })
     expect(await listCandidates(service.store.directory)).toEqual([])

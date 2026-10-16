@@ -21,8 +21,9 @@ describe('workspace layout', () => {
     const base = await tempDir()
     const workspace = await openWorkspace(nodePath.join(base, 'p'), { create: true, ensureLayout: true })
     await workspace.ensureLayout()
-    expect((await readdir(workspace.layout.dataDir)).sort()).toEqual([...NEXGENT_SUBDIRS, SNAPSHOTS_DIR].sort())
-    expect(workspace.sessionDir('abc')).toBe(nodePath.join(workspace.root, '.nexgent', 'sessions', 'abc'))
+    expect((await readdir(workspace.layout.dataDir)).sort()).toEqual([...NEXGENT_SUBDIRS, SNAPSHOTS_DIR, 'project.json'].sort())
+    expect(workspace.layout.location).toBe('user-data')
+    expect(workspace.sessionDir('abc')).toBe(nodePath.join(workspace.layout.dataDir, 'sessions', 'abc'))
     expect(() => workspace.sessionDir('../x')).toThrow()
     expect(workspace.resolve('a/b')).toBe(nodePath.join(workspace.root, 'a', 'b'))
     expect(workspace.relative(nodePath.join(workspace.root, 'a'))).toBe('a')
@@ -76,7 +77,9 @@ describe('project config', () => {
     const grant = { tool: 'bash', pattern: 'pnpm install', grantedAt: '2026-10-07T08:00:00Z' }
     await addProjectApproval(workspace.layout, grant)
     await addProjectApproval(workspace.layout, grant)
-    expect(JSON.parse(await readFile(workspace.layout.configFile, 'utf8'))).toEqual({ model: 'm', approvals: [grant] })
+    // K1: grants live in the data directory, not in config.json.
+    expect(JSON.parse(await readFile(workspace.layout.configFile, 'utf8'))).toEqual({ model: 'm' })
+    expect(JSON.parse(await readFile(nodePath.join(workspace.layout.dataDir, 'grants.json'), 'utf8'))).toMatchObject({ approvals: [grant] })
     expect((await readdir(workspace.layout.dataDir)).filter(name => name.endsWith('.tmp'))).toEqual([])
     await expect(writeProjectConfig(workspace.layout, { sandboxMode: 'nope' } as never)).rejects.toMatchObject({ code: 'config/invalid' })
   })

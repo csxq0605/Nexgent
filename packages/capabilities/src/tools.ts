@@ -13,6 +13,7 @@ import {
   COMPONENT_NAME_PATTERN,
   componentDir,
   NexgentError,
+  layoutOfDataDir,
   resolveWorkspaceLayout,
   type CapabilityComponentKind,
   type CapabilityComponentRef,
@@ -183,9 +184,10 @@ export function capabilityTryTool(service: CapabilityService, readRecords: Recor
   }
 }
 
-/** The project whose capabilities the service writes (`<root>/.nexgent/capabilities`). */
+/** The project whose capabilities the service writes (`<dataDir>/capabilities`, in the project or the user data directory). */
 function projectLayout(service: CapabilityService): WorkspaceLayout {
-  return resolveWorkspaceLayout(dirname(dirname(service.store.directory)))
+  const dataDir = dirname(service.store.directory)
+  return layoutOfDataDir(dataDir) ?? resolveWorkspaceLayout(dirname(dataDir))
 }
 
 /** What the tools learn from the host beyond the service. */

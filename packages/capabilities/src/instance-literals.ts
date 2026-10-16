@@ -20,8 +20,7 @@ import { basename, dirname, join } from 'node:path'
 import {
   componentDir,
   findInstanceLiterals,
-  NEXGENT_DIR,
-  resolveWorkspaceLayout,
+  layoutOfDataDir,
   IMPROVEMENT_FILES,
   IMPROVEMENTS_DIR,
   type CapabilityComponentKind,
@@ -182,10 +181,10 @@ export interface LiteralCheckComponent {
  * job, its feedback and its deliverables.
  */
 export function layoutOfSessionsDir(sessionsDir: string): WorkspaceLayout | undefined {
-  const dataDir = dirname(sessionsDir)
-  if (basename(sessionsDir) !== 'sessions' || basename(dataDir) !== NEXGENT_DIR) return undefined
-  const layout = resolveWorkspaceLayout(dirname(dataDir))
-  return layout.sessions === sessionsDir ? layout : undefined
+  if (basename(sessionsDir) !== 'sessions') return undefined
+  // In the project (`<root>/.nexgent/sessions`) or in the user data directory (K1).
+  const layout = layoutOfDataDir(dirname(sessionsDir))
+  return layout?.sessions === sessionsDir ? layout : undefined
 }
 
 /** The first of `layouts` whose `.nexgent/improvements/<jobId>/job.json` exists. */

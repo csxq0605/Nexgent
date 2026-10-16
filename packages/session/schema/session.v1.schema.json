@@ -1321,6 +1321,13 @@
         "coversSeq": {
           "$ref": "#/$defs/positiveInteger"
         },
+        "base": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "keep": {
+          "type": "integer",
+          "minimum": 0
+        },
         "state": {
           "$ref": "#/$defs/sessionState"
         }

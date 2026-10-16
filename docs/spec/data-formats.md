@@ -15,7 +15,7 @@
 
 共同约束：
 
-1. **只追加。** 会话与账本文件都是 JSON Lines：一行一个 JSON 对象，UTF-8，无 BOM，行以 `\n` 结束。写入方只在文件尾追加，不改写已有行；唯一的例外是恢复时对损坏尾部的截断（见“追加与截断规则”）。
+1. **只追加。** 会话与账本文件都是 JSON Lines：一行一个 JSON 对象，UTF-8，无 BOM，行以 `\n` 结束。写入方只在文件尾追加，不改写已有行；唯一的例外是恢复时对被撕裂的最后一行的截断（见“追加与截断规则”）。
 2. **每行自描述。** 每条记录都带 `type` 与时间戳；会话记录还带 `seq` 与 `sessionId`，任何一行脱离文件都能被归位。
 3. **只写 JSON 能表示的值。** `undefined`、函数、`NaN`、循环引用在写入前被拒绝（`isJsonValue`），不会在磁盘上以 `null` 或缺字段的形式悄悄出现。
 4. **账本不记内容。** 账本记录的类型里没有提示正文、消息内容、工具参数、工具输出、密钥、带凭证的 URL 的字段，因此写不进去；会话记录记内容，但不记密钥。
@@ -25,7 +25,7 @@
 
 ## `.nexgent/` 目录布局
 
-项目根目录下的 `.nexgent/` 是 Nexgent 在该项目中的全部数据。`@nexgent/workspace` 的 `Workspace.ensureLayout()` 在第一次运行时创建它和全部子目录，创建是幂等的；其他包只写自己的子目录。
+K1 起新项目与迁移完成的项目的数据在用户数据目录（见下一节），本节的项目内布局只用于迁移前的旧项目和临时副本；子目录的内部布局两处相同。项目根目录下的 `.nexgent/` 是 Nexgent 在该项目中的全部数据。`@nexgent/workspace` 的 `Workspace.ensureLayout()` 在第一次运行时创建它和全部子目录，创建是幂等的；其他包只写自己的子目录。
 
 ```text
 <project>/
@@ -150,7 +150,11 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 
 - 同一台机器上两个目录带同一个 `projectId`（复制了整个 `.nexgent/`）时，宿主发现 `ProjectDataIndex.root` 指向另一个仍然存在、身份相同的目录，就给后打开的目录生成新 id（新根 realpath 的 SHA-256）并改写它的 `project.json`，两份数据不混。
 - `.nexgent/.gitignore` 的内容是 `projectGitignoreText()`：先 `*`，再放行 `.gitignore`、`project.json`、`config.json` 与 `skills/`、`presets/`、`architectures/` 及其内容。旧数据还在项目里时（迁移前，或用户选择保留）它让 git 不收这些数据；迁移后无害。宿主不改项目根的 `.gitignore`。
-- 用户数据目录在项目之外，文件工具与 `run_code` 读写都拒绝（`permissions.md` §路径策略与写入限制）；只有宿主写。
+- 用户数据目录在项目之外，文件工具与 `run_code` 读写都拒绝（`permissions.md` §路径策略与写入限制）；只有宿主写。例外（K1）：数据在用户数据目录时，`materials/` 与 `outputs/` 作为只读根加给文件工具，模型按资料给出的绝对路径读资料副本。
+- 实现（K1）：路径由 kernel 的 `locateProjectData` / `resolveProjectLayout(root, { home })` 同步算出（读 `.nexgent/project.json`、`migration.json`，看 `.nexgent/` 里有没有旧数据），`WorkspaceLayout` 的 `dataDir` 与各数据子目录随之指向用户数据目录，`configFile` 仍在项目里；`location`、`projectId`、`grantsFile` 说明数据在哪。工作区服务打开项目时（`prepareProjectData`）第一次写 `project.json` 与 `.nexgent/.gitignore`，每次重写 `ProjectDataIndex`，有旧数据时迁移。从数据目录反查项目用 `layoutOfDataDir`（读索引的 `root`）。
+- 记录里的数据路径（如资料元数据的 `path`、会话记录里的资料引用）仍写成项目相对的逻辑路径 `.nexgent/materials/<id>/<storedName>`；读取方用 `resolveDataPath(layout, path)` 换算到当前位置，所以迁移不必改写任何记录。
+- 数据在用户数据目录时，`project` 范围授权只读写 `grants.json`，`config.json.approvals` 不再生效。
+- 临时副本（门控重放、比较臂）在 `.nexgent/` 放空文件 `local-data`（`LOCAL_DATA_MARKER_FILE`）：数据留在副本里，随副本删除，不进用户数据目录。
 
 ## 项目配置文件
 
@@ -347,7 +351,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 - `error.fatal`：为真表示会话不能继续；恢复时遇到最后一条是 fatal 的 `error`，`resume` 仍返回状态，由调用方决定是否继续。
 - `user.message.source`（步骤 2 增加 `feedback`）：`user` 是用户输入；`inject` 是合成上下文（资料引用、提供者注入），界面不显示；`feedback` 是反馈轮的提示，正文为 `renderFeedbackPrompt(feedback)`。`materials` 是本条消息引用的资料 ID（仅 `user` / `feedback` 消息），界面据此显示资料标签。
 - 步骤 2 记录里的路径一律是项目相对路径、`/` 分隔（`MaterialRef.path`、`DeliverableFile.path`、`FileChange.path`），schema 拒绝含 `\` 的路径；两平台写出的记录可以直接比较。SHA-256 一律小写十六进制 64 位。
-- `turn.files.changes`：按 `path` 排序，`change` 为 `added | modified | deleted`；最多 1000 条（`TURN_FILES_LIMIT`），超出部分只计数在 `omitted`。比较范围是项目根下除 `.nexgent/`、`node_modules/`、`.git/` 外的全部文件；同一路径先增后删不列出。
+- `turn.files.changes`：按 `path` 排序，`change` 为 `added | modified | deleted`；最多 1000 条（`TURN_FILES_LIMIT`），超出部分只计数在 `omitted`。比较范围是项目根下除 `.nexgent/`、`node_modules/`、`.git/` 与 `.gitignore` 忽略的路径外的全部文件；同一路径先增后删不列出。K1 起不再在轮首全量扫描：文件工具报告的路径直接记入；本轮跑过 `execute` 效果的工具（shell、代码执行）时，轮末做一次按 `.gitignore` 剪枝、只看大小与修改时间的扫描，找出它们的改动（删除以最近一次快照索引为基线，没有基线时不报告 shell 造成的删除）。同一项目里几个对话同时进行时，文件工具报告的路径只归报告它的对话；没人报告的 shell 改动归这段时间里跑过 shell 的对话。
 - `goal.update.goalId` 必须是当前目标的 ID；`compaction.keepMessages` 不能超过当时的消息数，且保留段不能以工具结果（`tool`）开始（ADR 0021 起可以以当前轮的 `assistant` 回复开始）。这两条单条 schema 表达不了，`SessionStore.append` 在写入前用投影检查，不合格的记录抛 `session/invalid-record`、不落盘。
 
 一轮的记录顺序固定为：`turn.start` → `user.message` → （`assistant.message` → `tool.result`×n）×steps → `turn.end`。需要审批的调用在其 `tool.result` 之前插入 `approval.request` → `approval.decision`（→ `approval.grant`）。`ApprovalRequest` / `ApprovalDecision` 的字段见 `permissions.md`。`step` 从 1 起，在轮内递增。
@@ -396,37 +400,38 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 1. 一条记录 = `JSON.stringify(record) + "\n"`，一次 `write` 调用写入整行；不拆行写。
 2. `turn.end` 与 `checkpoint` 之后 `fsync`；其他记录由实现决定是否每条 `fsync`（默认每条）。
-3. 写入前校验：值是 JSON 安全的（`isJsonValue`）、`type` 是已知类型、`seq` 等于上一条 +1。校验失败抛 `session/invalid-record`，不写。
+3. 写入前校验：值是 JSON 安全的（`isJsonValue`）、`type` 是已知类型、`seq` 等于文件里出现过的最大 `seq` +1（含被跳过、但仍在合理范围内的行，见下）。校验失败抛 `session/invalid-record`，不写。
 
 一行**有效**当且仅当同时满足：
 
 - 以 `\n` 结束（文件最后一行没有 `\n` 即无效——这是 `kill -9` 留下半行的典型形态）；
 - 能解析为 JSON 对象；
 - `type` 是已知类型且专有字段通过 schema；
-- `seq` 等于前一有效行的 `seq` + 1（第一行必须是 `seq: 1` 的 `session.start`）；
+- `seq` 落在 `(上一有效行的 seq, 上一有效行的 seq + 1 + 其后被跳过的行数]` 之内（第一行必须是 `seq: 1` 的 `session.start`）；
 - `sessionId` 与文件所属会话一致。
 
 恢复（`readAll`）：
 
 1. 从文件头顺序读，逐行校验；
-2. 遇到第一条无效行即停止，返回已读到的全部有效记录和 `truncation = { line, byteOffset, reason }`（`line` 为 1 起的行号，`byteOffset` 为该行起始字节）；
-3. 无效行之后的内容一律丢弃，即使它们本身能解析——因为 `seq` 已断，后面的记录无法可靠归位；
-4. 恢复不崩溃：任何损坏的文件都返回一个（可能为空的）记录列表加截断信息；只有 `session.start` 都读不出时才抛 `session/corrupt`。
+2. 以 `\n` 结束、但无效的行（坏行、更新版本写的未知记录类型）**跳过并报告**，继续往下读：结果带 `skipped = [{ line, byteOffset, reason }]`（`line` 为 1 起的行号，`byteOffset` 为该行起始字节）。跳过的行留在文件里，读取方从不删除或改写它（K1，重做计划；此前是“遇到第一条无效行即停止并截断其后全部内容”）；
+3. 只有最后一行没有 `\n`（被撕裂的尾行）才是 `truncation = { line, byteOffset, reason }`；
+4. 恢复不崩溃：任何损坏的文件都返回一个（可能为空的）记录列表加跳过与截断信息；只有 `session.start` 都读不出时才抛 `session/corrupt`。
 
-截断：持锁的写入者在下一次 `append` 之前把文件截到 `truncation.byteOffset`，然后先追加一条 `error` 记录（`code: "session/corrupt"`，`fatal: false`，`message` 写明丢弃的行号与原因），再追加调用方的记录。这样丢弃的事实留在文件里，`seq` 从最后一条有效记录继续。
+截断：持锁的写入者在下一次 `append` 之前把文件截到 `truncation.byteOffset`（只去掉撕裂的尾行），然后先追加一条 `error` 记录（`code: "session/corrupt"`，`fatal: false`，`message` 写明丢弃的行号与原因），再追加调用方的记录。新记录的 `seq` 是文件里出现过的最大 `seq` + 1，所以不会与被跳过的行重号。
 
 ### checkpoint
 
 - **触发**：写 `turn.end` 时，若自上一个 checkpoint（或文件头）起已写入 ≥ N 条记录（默认 N=50，可配置），紧接着写一条 `checkpoint`；会话存储关闭时若有新记录也写一条。`turn.end` 与它的 `checkpoint` 之间不会插入其他记录。
-- **内容**：`coversSeq` 是它前一条记录的 `seq`（即自身 `seq` − 1）；`state` 是把 `seq ≤ coversSeq` 的全部记录投影得到的完整 `SessionState`。多个 checkpoint 可以共存，最新的有效。
-- **大小**：checkpoint 是整份状态的副本，文件会随之增长；步骤 1 接受这一点，不做压缩。
+- **内容**：`coversSeq` 是它前一条记录的 `seq`（即自身 `seq` − 1）；`state` 是把 `seq ≤ coversSeq` 的全部记录投影得到的 `SessionState`。多个 checkpoint 可以共存，最新的可用者有效。
+- **增量**（K1）：checkpoint 可带 `base`（之前一个可用 checkpoint 的 `seq`）与 `keep`（保留 base 完整状态的前几条消息），此时 `state.messages` 只含其后的消息，`state.metadata` 总是完整的；完整消息 = base 的完整消息前 `keep` 条 + `state.messages`。下列情况写完整 checkpoint：会话的第一个、紧跟 `compaction` 或 `fork.seed` 之后、base 为空、或增量链已达 `MAX_CHECKPOINT_CHAIN`（256）。`base` 与 `keep` 必须同时出现，`base < coversSeq`；base 不可用（被跳过、`keep` 超过 base 的消息数）的增量 checkpoint 也不可用，恢复退到更早的可用者。实现：`@nexgent/session` 的 `resolveLatestCheckpoint`。
+- **大小**：增量 checkpoint 只写新增的消息，长会话的文件不再随每个 checkpoint 复制整段历史。
 
 ### 恢复算法（`resume`）
 
 1. `readAll`，得到有效记录与可能的截断信息。
-2. 找最后一条 `checkpoint`；有则 `state = checkpoint.state`，起点 `seq = coversSeq`；没有则 `state` 为空状态（只有 `session.start` 给出的元数据），起点 `seq = 1`。
+2. 找最后一条可用的 `checkpoint`（增量的按上节还原为完整状态）；有则 `state` 为它的完整状态，起点 `seq = coversSeq`；没有则 `state` 为空状态（只有 `session.start` 给出的元数据），起点 `seq = 1`。
 3. 按顺序把 `seq` 大于起点的记录投影进 `state`（投影规则见下表）；checkpoint 之前的记录不重放——这是性能测试的上限依据。
-4. 若 `state.metadata.openTurn` 有值（上一个进程在轮中死亡）：持锁的调用方追加 `turn.end { kind: "interrupted" }`，再更新状态；只读的调用方只在返回的状态里保留 `openTurn`。
+4. 若 `state.metadata.openTurn` 有值（上一个进程在轮中死亡）：持锁的调用方先为这一轮每个还没有结果的工具调用如实追加一条 `tool.result`（`isError: true`，`content: "Error: the call was interrupted before it returned a result."`，`error.code: "tool/aborted"`，`durationMs: 0`），再追加 `turn.end { kind: "interrupted" }`，然后更新状态；只读的调用方只在返回的状态里保留 `openTurn`。这样下一轮的请求里每个工具调用都有结果，不会因缺 `tool_result` 被拒（K1）。
 5. 返回 `SessionState`：`messages` 是 LLM 请求形式的历史（`user / assistant / tool` 三种角色；系统提示不存储，由 kernel 每次重新组装），`metadata` 见下。
 
 投影规则：
@@ -452,11 +457,15 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 ### 并发写保护
 
-- 锁文件 `sessions/<sessionId>/.lock`，内容为 JSON：`{ "pid": 12345, "ts": "2026-10-07T08:00:00.000Z", "host": "my-laptop" }`。
-- 取锁用独占创建（`open` 带 `wx`）；创建失败时读出现有内容：`host` 相同且 `pid` 不存活视为陈旧锁，覆盖接管；否则抛 `session/locked`（`details` 带现有锁的 `pid`、`ts`）。
+- 锁文件 `sessions/<sessionId>/.lock`，内容为 JSON：`{ "pid": 12345, "ts": "2026-10-07T08:00:00.000Z", "host": "my-laptop", "startedAt": "2026-10-07T07:59:58.000Z" }`。`startedAt`（K1，可选）是持锁进程的启动时间：Linux 读 `/proc`，macOS 用 `ps -o lstart=`，Windows 不写。
+- 取锁用独占创建（`open` 带 `wx`）；创建失败时读出现有内容：`host` 相同且 `pid` 不存活，或 `pid` 存活但它的启动时间与 `startedAt` 相差超过 5 秒（pid 已被别的进程复用），视为陈旧锁，覆盖接管；否则抛 `session/locked`（`details` 带现有锁的 `pid`、`ts`）。
 - 锁在写入进程的整个生命周期内持有，`release` 删除文件；进程异常退出留下的锁由上述陈旧检测处理。
 - `append` 要求调用方持有本进程取得的锁，否则抛 `session/locked`；`readAll` / `latestCheckpoint` / 只读的 `resume` 不需要锁。
 - 两个进程对同一会话 `create` / `lock`，恰有一个成功；这是 `@nexgent/session` 的必测项。
+
+### 会话列表索引（K1）
+
+`sessions/<sessionId>/summary.json` 是对话列表用的派生缓存，写入方关闭会话（或写完一轮）时以临时文件加改名整体替换：`{ "version": 1, "source": { "size", "mtimeMs", "lastSeq" }, "entry": { "sessionId", "title?", "firstMessage?", "createdAt", "updatedAt", "lastTurn", "interrupted", "goal?", "parentSessionId?", "member?", "improvement" } }`。读取方（`readSessionSummary`）在 `session.jsonl` 的大小与修改时间都等于 `source` 时直接用 `entry`，否则扫描文件重算并顺手重写缓存。缓存坏了或缺了都只是退回扫描，不影响会话本身；迁移与复制可以带上它，也可以丢掉。
 
 ## 账本记录
 
@@ -745,15 +754,16 @@ ADR 0019（纪元 `adr-0019`，`EVALUATOR_RULES` 与 `LEARNING_RULES`）给改�
 
 ## 任务快照与检查
 
-步骤 4。门控要重放过去的任务，所以从步骤 4 起每个根任务开始时都给工作区拍快照（决定 7）。
+步骤 4。门控要重放过去的任务，所以从步骤 4 起每个根任务开始时都给工作区拍快照（决定 7）。K1 起只在项目开启学习（`learning.enabled`）时拍，轮末不再拍；快照在这一轮第一次请求的回复开始到达时才开始（不和发出请求争文件系统），在后台进行；只有可能改项目的工具调用（效果不只是 `read` / `network`）之前等它完成，只读工具不等；轮末写检查之前也等它。
 
 - **对象**：`.nexgent/snapshots/objects/<sha256>`，文件原始字节，每份内容只存一次。
-- **树**：`.nexgent/snapshots/trees/<sha256>.json`，`{ formatVersion: 1, files: [{ path, sha256, bytes, executable? }] }`，按路径排序，范围与 `turn.files` 相同（不含 `.nexgent/`、`.git/`、`node_modules/`）；文件名是该对象规范 JSON 的 SHA-256。
+- **树**：`.nexgent/snapshots/trees/<sha256>.json`，`{ formatVersion: 1, files: [{ path, sha256, bytes, executable? }] }`，按路径排序，范围与 `turn.files` 相同（不含 `.nexgent/`、`.git/`、`node_modules/`，K1 起也不含项目 `.gitignore`、子目录 `.gitignore` 与 `.git/info/exclude` 忽略的路径；被忽略的目录不进入）；文件名是该对象规范 JSON 的 SHA-256。
+- **索引**（K1）：`snapshots/index.json`，`{ formatVersion: 1, writtenAtMs, prunedAtMs?, files: { <path>: { size, mtimeMs, sha256 } } }`。下一次快照对大小与修改时间都没变、且对象仍在的文件直接用记下的哈希，不再读内容；索引写入前 2 秒内改过的文件重读一次。索引只是缓存，缺了或坏了只多一次全量读取。实现：`@nexgent/tasking` 的 `LocalTaskRecorder`。
 - **任务快照**：`.nexgent/snapshots/tasks/<taskId>.json`，根任务开始时写：`{ formatVersion: 1, taskId, turn?, sessionId, takenAt, tree, omitted?, capabilityVersion }`。工作区超过 200 MiB（`maxSnapshotBytes`）时 `tree: null`、`omitted: { reason: "too-large", bytes }`，这个任务不能作为重放用例。
 - **检查记录**：`.nexgent/snapshots/checks/<taskId>.json`，根任务结束时写：`{ formatVersion: 1, taskId, turn?, sessionId, checkedAt, specs, results }`。`specs` 是 `TaskCheckSpec`：`{ id, name: "file-exists", path }`、`{ id, name: "parses", path, format: json | csv | xlsx }`、`{ id, name: "test-command", command, shell: bash | pwsh }`；`results` 与 `specs` 一一对应，`target` 为 spec 的 `id`。同样的结果写进 `task.outcome.checks`。
 - **按轮记（步骤 5，决定 7）。** 同一会话的多轮仍是同一个 `taskId`（反馈轮也是），快照与检查改为每个根轮各一份：`tasks/<taskId>.t<turn>.json` 在第 `turn` 个根轮开始时写，`checks/<taskId>.t<turn>.json` 在该轮结束时写一次，两者都带 `turn`（文件名由 `perTurnFileName(taskId, turn)` 给出）。反馈轮不会覆盖它所针对的那一轮的记录。不带轮号的 `<taskId>.json` 是步骤 4 写的：快照即第 1 轮，检查是当时最后一轮（每轮结束都覆盖）；读取方照旧接受，不迁移。步骤 5 起写入方继续同时写不带轮号的文件（第 1 轮快照、最新一轮检查），使步骤 4 的读取方不变。
-- **哪些命令成为 `test-command`（步骤 5，ADR 0006 决策 10）。** 取任务树在项目根目录跑过的 `bash` / `pwsh` 命令里符合测试命令模式（`TEST_COMMAND_PATTERN`：`npm|pnpm|yarn [run] test`、`vitest|jest|mocha`、`pytest`、`python -m pytest|unittest`、`node --test`、`node <文件>.test.<js|mjs|cjs|ts…>`、`go|cargo test`、`make test|check`，命令必须以它们开头）的，**退出码不论成败都算**，只排除表示“没有跑到测试”的退出码：任何命令的 126、127（不可执行、找不到命令），pytest 的 4、5（路径或参数错误、没有收集到测试）。超时或被取消的调用没有退出码，不算。同一命令只保留最近一次，取最近 3 条，在轮末重跑，**以重跑结果为准**：重跑仍失败即一项失败的检查（步骤 4 只取退出码为 0 的命令，失败的测试不留下检查）。`ls`、`cat`、构建与生成脚本等探索性命令不符合模式，无论成败都不成为检查。
-- 快照总量上限 200 MiB，超出时按任务时间从旧到新删除不再被任何试验引用的对象。路径一律项目相对、`/` 分隔。
+- **哪些命令成为 `test-command`（步骤 5，ADR 0006 决策 10）。** 取任务树在项目根目录跑过的 `bash` / `pwsh` 命令里符合测试命令模式（`TEST_COMMAND_PATTERN`：`npm|pnpm|yarn [run] test`、`vitest|jest|mocha`、`pytest`、`python -m pytest|unittest`、`node --test`、`node <文件>.test.<js|mjs|cjs|ts…>`、`go|cargo test`、`make test|check`，命令必须以它们开头）的，**退出码不论成败都算**，只排除表示“没有跑到测试”的退出码：任何命令的 126、127（不可执行、找不到命令），pytest 的 4、5（路径或参数错误、没有收集到测试）。超时或被取消的调用没有退出码，不算。同一命令只保留最近一次，取最近 3 条。K1 起**不在轮末重跑**：检查结果就是模型自己那次运行的退出码（`detail` 写 `the model's own run, exit code N`），退出码非 0 即一项失败的检查（此前在轮末重跑、以重跑结果为准；步骤 4 只取退出码为 0 的命令）。需要独立复核时在门控的后台副本里跑，不在用户的任务里跑。`ls`、`cat`、构建与生成脚本等探索性命令不符合模式，无论成败都不成为检查。
+- **保留**（K1）：每次快照后清理：先删超过 30 天（`retentionMs`）的任务快照，再在对象总量超过 200 MiB（`maxStoreBytes`）时从旧到新删不在保留名单里的任务快照（保留名单由调用方给出，如练习题集与试验引用的任务；当前任务总是保留），最后删没有任何剩余快照引用的树与对象；1 小时内新写的对象不删。总量统计每 10 分钟一次（或一次快照写入超过 8 MiB 时）。路径一律项目相对、`/` 分隔。
 
 ## 改进作业
 
@@ -1176,7 +1186,8 @@ ADR 0017 决策 4：已有项目内数据（`.nexgent/` 下 `PROJECT_DATA_SUBDIR
 2. 只有 `done` 之后读写才转到用户数据目录（`resolveDataLocation`）；`copying` 或 `failed` 时项目照旧用旧 `.nexgent/`，下次打开重试，不会把用户困住。
 3. `done` 之后在旧 `.nexgent/` 留 `MOVED.txt`（`MIGRATION_NOTICE_FILE`，说明数据去了哪里），写 `.gitignore`（见“用户数据目录”），把 `config.json.approvals` 移到 `grants.json` 后从 `config.json` 去掉该字段。
 4. 旧数据只在用户明确同意后删除，删除后写 `oldDataRemovedAt`。
-5. 迁移期间会话锁照常生效：有会话正在写的项目不开始迁移。
+5. 迁移期间会话锁照常生效：有会话正在写的项目不开始迁移（任一 `sessions/<id>/.lock` 的进程还活着，或锁读不出），不写记录，下次打开再试。
+6. 复制跳过 `.lock` 文件；核对逐文件比较大小与 SHA-256，有一个不同即 `failed`。实现：`@nexgent/workspace` 的 `prepareProjectData` / `migrateProjectData`。
 
 ## 自评
 
@@ -1272,7 +1283,7 @@ ADR 0018 决策 4：第 1 层学习。一个条目是一条可复用的做法，
 
 - **同版本内只能加可选字段。** 加必填字段、改字段类型、改记录语义都是新版本。
 - **读取方忽略未知的可选字段**（同版本的新写入方可以多写）。
-- **会话读取方拒绝未知的 `type`**：未知记录类型意味着投影不再可靠，按无效行处理（截断并报告），不静默跳过。账本读取方对未知 `type` 跳过并计数。
+- **会话读取方跳过未知的 `type`**（K1 起）：未知记录类型按无效的完整行处理，跳过并在 `skipped` 里报告，行留在文件里，不截断其后的内容；投影可能少了这条记录的作用，读取方据 `skipped` 告诉用户。账本读取方对未知 `type` 跳过并计数。
 - **不兼容旧 Python 数据**：Python 时代的 Episode、组织 SQLite、PR #4 的 `.nexgent/native/` 不读、不迁移（ADR 0001 决策 15）。
 - 步骤 4 的四个预留字段已经在 v1 中是可选字段，启用它们不升版本。
 - **步骤 4 的四种会话记录、`session.start.capabilityVersion`、账本的 `capability.decision` 与新可选字段也在 v1 内追加**，理由同步骤 3；步骤 3 写出的会话与账本照常读出。

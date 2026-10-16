@@ -1,6 +1,8 @@
 /**
- * The `ctx.workspace` implementation: one project directory and its
- * `.nexgent/` data layout (`docs/spec/data-formats.md` §`.nexgent/` 目录布局).
+ * The `ctx.workspace` implementation: one project directory and its data
+ * layout (`docs/spec/data-formats.md` §`.nexgent/` 目录布局, §用户数据目录):
+ * the data lives in `<NEXGENT_HOME>/projects/<projectId>/` unless old
+ * in-project data has not been migrated yet (K1).
  */
 import { mkdir, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,10 +13,12 @@ import {
   NexgentError,
   SNAPSHOTS_DIR,
   normalizeWorkspacePath,
+  resolveProjectLayout,
   resolveWorkspaceLayout,
   type Workspace,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
+import { prepareProjectData } from './project-data.js'
 
 /** Options for {@link openWorkspace}. */
 export interface OpenWorkspaceOptions {
@@ -22,6 +26,12 @@ export interface OpenWorkspaceOptions {
   readonly create?: boolean
   /** Also create `.nexgent/` and its subdirectories (default `false`). */
   readonly ensureLayout?: boolean
+  /**
+   * Nexgent home whose `projects/<projectId>/` holds the data (K1); default
+   * `$NEXGENT_HOME` or `~/.nexgent`. With `ensureLayout` the open also writes
+   * the identity file and migrates old in-project data (`prepareProjectData`).
+   */
+  readonly home?: string
 }
 
 /** A local-filesystem {@link Workspace}. Construct with {@link openWorkspace}. */
@@ -29,9 +39,12 @@ export class LocalWorkspace implements Workspace {
   readonly root: string
   readonly layout: WorkspaceLayout
 
-  /** @param root - absolute, already real (symlink-free) project root. */
-  constructor(root: string) {
-    this.layout = resolveWorkspaceLayout(root)
+  /**
+   * @param root - absolute, already real (symlink-free) project root.
+   * @param layout - where the data lives (default: the old in-project layout).
+   */
+  constructor(root: string, layout?: WorkspaceLayout) {
+    this.layout = layout ?? resolveWorkspaceLayout(root)
     this.root = this.layout.root
   }
 
@@ -52,6 +65,7 @@ export class LocalWorkspace implements Workspace {
   }
 
   async ensureLayout(): Promise<void> {
+    await mkdir(nodePath.join(this.root, NEXGENT_DIR), { recursive: true })
     await mkdir(this.layout.dataDir, { recursive: true })
     for (const sub of NEXGENT_SUBDIRS) await mkdir(this.layout[sub], { recursive: true })
     // Step 4: task snapshots and checks (host-only, `data-formats.md` §任务快照与检查).
@@ -74,7 +88,9 @@ export async function openWorkspace(root: string, options: OpenWorkspaceOptions 
   } catch (error) {
     throw new NexgentError('workspace/not-found', `project directory not found: ${absolute}`, { cause: error, details: { path: absolute } })
   }
-  const workspace = new LocalWorkspace(real)
+  const data = { ...(options.home === undefined ? {} : { home: options.home }) }
+  const layout = options.ensureLayout === true ? (await prepareProjectData(real, data)).layout : resolveProjectLayout(real, data)
+  const workspace = new LocalWorkspace(real, layout)
   if (options.ensureLayout === true) await workspace.ensureLayout()
   return workspace
 }

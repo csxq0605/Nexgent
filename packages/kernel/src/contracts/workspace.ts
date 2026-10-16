@@ -39,6 +39,24 @@ export interface WorkspaceLayout {
   readonly capabilities: string
   /** `<root>/.nexgent/ledgers`. */
   readonly ledgers: string
+  /**
+   * K1 (ADR 0017 decision 4): where the data subdirectories live. `project`
+   * (absent: the same) keeps them under `<root>/.nexgent/`; `user-data` puts
+   * `dataDir` at `<NEXGENT_HOME>/projects/<projectId>/` and every data path
+   * below it, while `configFile` and the shared entries stay in the project.
+   */
+  readonly location?: 'project' | 'user-data'
+  /** The project's stable id (`.nexgent/project.json`), when known. */
+  readonly projectId?: string
+  /** `<dataDir>/grants.json`, the `project`-scope grants, when the data is in the user data directory. */
+  readonly grantsFile?: string
+}
+
+/** Where {@link resolveWorkspaceLayout} puts the data subdirectories (K1). */
+export interface WorkspaceDataLocation {
+  /** Absolute data directory (`<NEXGENT_HOME>/projects/<projectId>`). */
+  readonly dataDir: string
+  readonly projectId: string
 }
 
 /** The `path` API subset the pure helpers need, so tests can pin a platform. */
@@ -46,22 +64,26 @@ export type PathApi = Pick<typeof nodePath, 'resolve' | 'relative' | 'isAbsolute
 
 /**
  * Compute the {@link WorkspaceLayout} for a root. Pure: no I/O, nothing is
- * created. `root` must be absolute.
+ * created. `root` must be absolute. Without `data` every data path is under
+ * `<root>/.nexgent/` (the old layout); with it they are under `data.dataDir`
+ * (K1). Hosts pick `data` with `resolveProjectLayout`.
  * @throws `TypeError` when `root` is relative.
  */
-export function resolveWorkspaceLayout(root: string, api: PathApi = nodePath): WorkspaceLayout {
+export function resolveWorkspaceLayout(root: string, api: PathApi = nodePath, data?: WorkspaceDataLocation): WorkspaceLayout {
   if (!api.isAbsolute(root)) throw new TypeError(`workspace root must be absolute: ${root}`)
   const normalizedRoot = api.resolve(root)
-  const dataDir = api.join(normalizedRoot, NEXGENT_DIR)
+  const projectDir = api.join(normalizedRoot, NEXGENT_DIR)
+  const dataDir = data === undefined ? projectDir : api.resolve(data.dataDir)
   return {
     root: normalizedRoot,
     dataDir,
-    configFile: api.join(dataDir, PROJECT_CONFIG_FILE),
+    configFile: api.join(projectDir, PROJECT_CONFIG_FILE),
     sessions: api.join(dataDir, 'sessions'),
     materials: api.join(dataDir, 'materials'),
     outputs: api.join(dataDir, 'outputs'),
     capabilities: api.join(dataDir, 'capabilities'),
     ledgers: api.join(dataDir, 'ledgers'),
+    ...(data === undefined ? {} : { location: 'user-data' as const, projectId: data.projectId, grantsFile: api.join(dataDir, 'grants.json') }),
   }
 }
 

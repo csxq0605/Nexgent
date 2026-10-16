@@ -17,6 +17,7 @@
  *
  * The key is never logged or written: it lives only in the SDK's env object.
  */
+import { dataDirSync, registerHome } from './data-dir.mjs'
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -73,6 +74,7 @@ function purchaseDeliverable(deliverables) {
 export async function runRestock(h, pkgs, work, run, { env, realModel = false, turnTimeoutMs = 30 * 60_000, log = () => {} }) {
   const root = join(work, 'project')
   const home = join(work, 'home')
+  registerHome(root, home)
   await mkdir(root, { recursive: true })
   await mkdir(home, { recursive: true })
   const source = join(work, 'inventory.xlsx')
@@ -100,7 +102,7 @@ export async function runRestock(h, pkgs, work, run, { env, realModel = false, t
     const v = deliverable?.versions.find(entry => entry.version === version)
     const file = v?.files.find(f => f.path === PURCHASE_PATH)
     if (file === undefined) return undefined
-    const bytes = await readFile(join(root, '.nexgent', 'outputs', deliverable.deliverableId, `v${version}`, 'files', PURCHASE_PATH)).catch(() => undefined)
+    const bytes = await readFile(join(dataDirSync(root), 'outputs', deliverable.deliverableId, `v${version}`, 'files', PURCHASE_PATH)).catch(() => undefined)
     return { bytes, recorded: file.sha256 }
   }
   try {
@@ -153,9 +155,9 @@ export async function runRestock(h, pkgs, work, run, { env, realModel = false, t
   } finally {
     await sdk.dispose().catch(() => undefined)
     if (obs.sessionId !== undefined) {
-      const records = (await h.readSessionRecords(root, obs.sessionId).catch(() => ({ records: [] }))).records
+      const records = (await h.readSessionRecords(root, obs.sessionId, { home }).catch(() => ({ records: [] }))).records
       obs.rootTexts = records.filter(r => r.type === 'assistant.message' && typeof r.content === 'string' && r.content.trim() !== '').map(r => ({ turn: r.turn, text: r.content.slice(0, 600) })).slice(0, 6)
-      const ledger = (await h.readLedgerRecords(root).catch(() => ({ records: [] }))).records
+      const ledger = (await h.readLedgerRecords(root, { home }).catch(() => ({ records: [] }))).records
       obs.formsUsed = ledger.filter(r => r.type === 'task.outcome' && r.sessionId === obs.sessionId).map(r => r.formsUsed ?? null)
       // The whole project: the root and every member (ledgerUsage keeps records without a sessionId).
       obs.usage = ledgerUsage(ledger.map(({ sessionId, ...rest }) => rest), undefined)

@@ -36,6 +36,7 @@ import { join } from 'node:path'
 import { CONVENTION_COLUMN, countsTowardImprovement, FEEDBACK, MONTHS, ordersCsv, regionTable } from '../real-task/step5-orders.mjs'
 import { expectedSummary } from '../real-task/step4-orders.mjs'
 import { shellCall } from './scenario-step2.mjs'
+import { registerHome } from './data-dir.mjs'
 import { runTurn } from './step2-runtime.mjs'
 import { createStep3Sdk } from './step3-runtime.mjs'
 import { VERIFY_SOURCE as SUMMARY_VERIFY_SOURCE } from './step4-fixtures.mjs'
@@ -434,6 +435,7 @@ export async function runFeedbackProject(h, pkgs, work, options = {}) {
   const own = options.server === undefined
   const server = own ? await h.scriptedModelServer({ script: [...taskScript(h, tasks), ...feedbackScript(h, feedback)] }) : options.server
   const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
+  registerHome(root, home)
   const sdk = options.createSdk === undefined ? createStep3Sdk(pkgs, { env, home }) : options.createSdk(env, home)
   const obs = { root, home, tasks: [], feedback: [] }
   try {

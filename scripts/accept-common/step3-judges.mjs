@@ -158,12 +158,12 @@ function h22(obs, tools) {
     [badRecords.length === 0, `every session record passes the schema (${describeIssues(badRecords)})`],
     [badLedger.length === 0, `every ledger record passes the schema (${describeIssues(badLedger)})`],
     [direct.export?.code === 0 && exportFiles.length > 0, `nexgent export ran and wrote files (exit ${direct.export?.code})`],
-    [secretHits.length === 0, `no file under any project's .nexgent/ contains the test key (${secretHits.join(', ')})`],
+    [secretHits.length === 0, `no file under any project's .nexgent/ or the data dir contains the test key (${secretHits.join(', ')})`],
     [(direct.exportSecretHits ?? ['?']).length === 0, `no export file contains the test key (${(direct.exportSecretHits ?? ['?']).join(', ')})`],
   ]
   const types = new Set(all.map(record => record.type))
   const seenStep3 = STEP3_RECORD_TYPES.filter(type => types.has(type))
-  const checked = `${projects.length} projects, ${sessions.length} session files, ${all.length} records, seq continuous, schema ok; ${ledgerAll.length} ledger lines ok; test key in none of .nexgent/ and ${exportFiles.length} export files; step-3 types seen: ${seenStep3.join(', ')}`
+  const checked = `${projects.length} projects, ${sessions.length} session files, ${all.length} records, seq continuous, schema ok; ${ledgerAll.length} ledger lines ok; test key in none of .nexgent/, the data dir and ${exportFiles.length} export files; step-3 types seen: ${seenStep3.join(', ')}`
   const missing = STEP3_RECORD_TYPES.filter(type => !seenStep3.includes(type))
   if (missing.length > 0) return partial(conditions, `step-3 record types not exercised yet: ${missing.join(', ')}`, checked)
   return verdict(conditions, `${checked}; all nine step-3 record types present`)
@@ -215,7 +215,8 @@ function h02(obs) {
   const sub = subStart(d, 'analyst')
   const first = memberRequests(d, 'analyst')[0]
   const text = first?.text ?? ''
-  const materialPath = `.nexgent/materials/${d.materialId}/${MATERIAL.name}`
+  // The model is shown the absolute copy in the data dir; the record keeps `.nexgent/materials/<id>/<name>`.
+  const materialPath = `materials/${d.materialId}/${MATERIAL.name}`
   const leaked = [HISTORY_MARKER, TASKS.setup, TASKS.fresh].filter(needle => text.includes(needle))
   return verdict([
     [d.phases?.fresh?.reason?.kind === 'completed', `the fresh turn completed (got ${JSON.stringify(d.phases?.fresh?.reason)})`],
@@ -223,7 +224,7 @@ function h02(obs) {
     [JSON.stringify(sub?.materialIds) === JSON.stringify([d.materialId]), `subagent.start.materialIds is [the stock.csv material] (got ${JSON.stringify(sub?.materialIds)})`],
     [recordsOf(d, childOf(d, 'analyst')).every(r => r.type !== 'fork.seed'), 'the fresh child has no fork.seed'],
     [first !== undefined, 'the analyst sent at least one model request'],
-    [text.includes(materialPath), `the analyst's first request references the material (${materialPath})`],
+    [text.replace(/\\+/g, '/').includes(materialPath), `the analyst's first request references the material (…/${materialPath})`],
     [leaked.length === 0, `the analyst's first request carries none of the parent's history (found: ${leaked.map(l => JSON.stringify(l.slice(0, 40))).join(', ')})`],
   ], `analyst child of the root (delegated, fresh); first request references ${MATERIAL.name} by its material path and carries no parent history`)
 }

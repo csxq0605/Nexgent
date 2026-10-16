@@ -427,17 +427,6 @@ interface Authorization {
   readonly cancelled: boolean
 }
 
-/**
- * Sent before the next request after a file-writing tool call while the turn
- * has presented nothing (see `Agent.needsPresentReminder`).
- */
-export const PRESENT_REMINDER = '[Nexgent] Project files may have changed in this turn and nothing has been presented yet. '
-  + 'If this work is a result for the user, call `present` with the files that make up the result (main file first) before your final reply; '
-  + 'otherwise the user has nothing to open or comment on.'
-
-/** Steps of a turn between two present reminders. */
-export const PRESENT_REMINDER_EVERY = 8
-
 /** How much longer than the provider's stream idle deadline the loop waits before giving up on the stream itself. */
 const IDLE_GRACE_MS = 15_000
 
@@ -511,10 +500,10 @@ export class Agent {
   private openTurn: number | undefined
   /** The running turn's file tracker, once `beginTurn` succeeded. */
   private turnFiles: TurnFileTracker | undefined
-  /** A file-writing call ran since the last request and nothing is presented: the next request carries the present reminder. */
-  private presentReminderDue = false
-  /** The step of the turn's latest present reminder. */
-  private presentRemindedAt: number | undefined
+  /** The running turn's snapshot, until the first tool call waits for it (see {@link beginTaskRecord}). */
+  private snapshotPending: Promise<unknown> | undefined
+  /** The turn's snapshot, not started yet: it starts once the first request is out ({@link startSnapshot}). */
+  private snapshotStart: (() => Promise<unknown>) | undefined
   /** Per-request injectors (see {@link beforeRequest}). */
   private readonly injectors = new Set<StepInjector>()
   /** Work that keeps the running turn open (see {@link holdTurn}). */
@@ -996,31 +985,58 @@ export class Agent {
   }
 
   /**
-   * Root turn start: snapshot the workspace (`snapshots/tasks/<taskId>.t<turn>.json`;
-   * step 5 takes one per root turn). Improvement sessions take none.
-   * Failures are non-fatal errors.
+   * Root turn start: snapshot the workspace (`snapshots/tasks/<taskId>.t<turn>.json`)
+   * when the project learns (`learning.enabled`; the snapshot is the input of
+   * later self-evaluation and practice cases, K1). The snapshot starts once
+   * the first request's response begins ({@link startSnapshot}), so its file
+   * system work never delays sending the request; tools wait for it
+   * ({@link awaitSnapshot}). Members and
+   * improvement sessions take none. Failures are non-fatal errors.
    */
-  private async beginTaskRecord(recorder: TaskRecorder | undefined, turn: number): Promise<void> {
+  private beginTaskRecord(recorder: TaskRecorder | undefined, turn: number): void {
     const tree = this.init.tree
     if (recorder === undefined || this.member !== undefined || this.isImprovementSession) return
+    if (!this.init.projectConfig.learning.enabled) return
     tree.snapshotTaken = true
-    try {
-      await recorder.begin({ taskId: tree.taskId, sessionId: this.sessionId, capabilityVersion: this.capabilityVersion ?? BASELINE_VERSION, turn })
-    } catch (error) {
-      await this.appendError(errorInfo('internal', `task snapshot failed: ${toErrorInfo(error).message}`), false, turn)
-    }
+    const capabilityVersion = this.capabilityVersion ?? BASELINE_VERSION
+    this.snapshotStart = () => recorder.begin({ taskId: tree.taskId, sessionId: this.sessionId, capabilityVersion, turn })
+      .catch(error => this.appendError(errorInfo('internal', `task snapshot failed: ${toErrorInfo(error).message}`), false, turn))
+  }
+
+  /** Whether a call's tool declares only `read` / `network` effects (unknown tools are not read-only). */
+  private readOnly(call: ToolCall): boolean {
+    const effects = this.init.tools.get(call.name)?.definition.effects
+    return effects !== undefined && effects.length > 0 && effects.every(effect => effect === 'read' || effect === 'network')
+  }
+
+  /** Start the turn's pending snapshot, if any. */
+  private startSnapshot(): void {
+    const start = this.snapshotStart
+    if (start === undefined) return
+    this.snapshotStart = undefined
+    this.snapshotPending = start()
+  }
+
+  /** Wait for the turn's snapshot before a tool can change the project. */
+  private async awaitSnapshot(): Promise<void> {
+    this.startSnapshot()
+    const pending = this.snapshotPending
+    if (pending === undefined) return
+    this.snapshotPending = undefined
+    await pending
   }
 
   /**
-   * Root turn end, before `turn.end`: run the deterministic checks of the
-   * task so far (when a snapshot was taken) and keep the results for
-   * `task.outcome.checks`. A failing check of a task session (not a gate
+   * Root turn end, before `turn.end`: record the deterministic checks of the
+   * task so far (presented files exist and parse; the test commands the
+   * model itself ran, with their exit codes; nothing is re-run, K1) and keep
+   * the results for `task.outcome.checks`. A failing check of a task session (not a gate
    * trial run) is signalled to `ctx.improve` as one `check-failure`.
    * Failures are non-fatal errors and leave `checks` out.
    */
   private async runTaskChecks(recorder: TaskRecorder | undefined, improve: ImprovementSignals | undefined, turn: number, signal: AbortSignal): Promise<void> {
     const tree = this.init.tree
-    if (recorder === undefined || this.member !== undefined || !tree.snapshotTaken) return
+    if (recorder === undefined || this.member !== undefined || this.isImprovementSession) return
     this.lastChecks = undefined
     let checks: readonly TaskCheck[]
     try {
@@ -1064,8 +1080,6 @@ export class Agent {
     this.turnDenials = new Set()
     this.turnSections = []
     this.turnFiles = undefined
-    this.presentReminderDue = false
-    this.presentRemindedAt = undefined
     this.turnMaterials = false
     this.stats.turns += 1
     this.openTurn = turn
@@ -1075,7 +1089,7 @@ export class Agent {
       this.emit({ type: 'turn.start', sessionId: this.sessionId, turn })
       this.componentUse.turn.clear()
       if (this.member === undefined) this.init.tree.beginRootTurn()
-      await this.beginTaskRecord(services.taskRecorder, turn)
+      this.beginTaskRecord(services.taskRecorder, turn)
       if (input.source === 'feedback') await this.append({ type: 'feedback', turn, feedback: input.feedback })
       if (services.tasking !== undefined) {
         await this.beginFiles(services.tasking, turn)
@@ -1100,6 +1114,7 @@ export class Agent {
         reason = { kind: 'error', error: toErrorInfo(error) }
       }
       await this.settleMembers()
+      await this.awaitSnapshot()
       await this.endFiles(turn, signal)
       // A cancelled turn still gets its checks, bounded like `endTurn`.
       await this.runTaskChecks(services.taskRecorder, services.improve, turn, signal.aborted
@@ -1205,6 +1220,7 @@ export class Agent {
           sessionId: this.sessionId,
           turn,
           projectRoot: this.init.workspace.root,
+          dataDir: this.init.workspace.layout.dataDir,
           text: args.text,
           source: args.source,
           materialIds: args.materialIds,
@@ -1417,8 +1433,6 @@ export class Agent {
         await this.injectStep(turn, step, signal)
         if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
       }
-      // A paused reply's continuation goes out unchanged; the reminder waits for the next request.
-      if (this.messages.at(-1)?.role !== 'assistant') await this.injectPresentReminder(turn, step)
       if (step === maxSteps && maxSteps >= 4 && this.messages.at(-1)?.role !== 'assistant') await this.injectNote(turn, stepLimitNote(maxSteps))
 
       const outcome = await this.requestModel(turn, step, signal)
@@ -1571,6 +1585,8 @@ export class Agent {
         )
         const raced = await Promise.race([next, stopped, idle])
         if (idleTimer !== undefined) clearTimeout(idleTimer)
+        // The request is out and answering: the snapshot's file system work no longer delays it.
+        this.startSnapshot()
         if (raced.kind === 'stopped') break
         if (raced.kind === 'idle') {
           idleTimedOut = true
@@ -1671,7 +1687,10 @@ export class Agent {
   // -------------------------------------------------------------------------
 
   private async runTools(turn: number, step: number, calls: readonly ToolCall[], signal: AbortSignal): Promise<void> {
+    this.startSnapshot()
     for (const call of calls) {
+      // Only a call that may change the project waits for the snapshot; reads go ahead while it runs.
+      if (!this.readOnly(call)) await this.awaitSnapshot()
       if (signal.aborted) {
         await this.writeToolResult(turn, step, call, {
           content: 'Error: the turn was cancelled before this call ran.',
@@ -1705,6 +1724,7 @@ export class Agent {
       durationMs,
     })
     this.messages.push({ role: 'tool', ...result })
+    const effects = this.init.tools.get(call.name)?.definition.effects
     try {
       this.turnFiles?.observe({
         sessionId: this.sessionId,
@@ -1713,6 +1733,7 @@ export class Agent {
         name: call.name,
         isError: output.isError,
         ...(output.meta === undefined ? {} : { meta: output.meta }),
+        ...(effects === undefined ? {} : { effects }),
       })
     } catch {
       // `observe` failures never change the tool result (agent-hooks.md §失败语义).
@@ -1744,7 +1765,6 @@ export class Agent {
       output = failure('tool/not-found', `unknown tool "${call.name}"`)
     } else {
       output = await this.executeTool(turn, step, call, tool, signal, failure, value => { approval = value }, ms => { durationMs = ms })
-      if (this.needsPresentReminder(tool, output.isError)) this.presentReminderDue = true
     }
 
     await this.writeToolResult(turn, step, call, output, durationMs)
@@ -1766,39 +1786,10 @@ export class Agent {
     }, turn)
   }
 
-  /**
-   * The present reminder (`agent-hooks.md` §成果提醒): after a successful
-   * call of a tool that may write files (`effects` has `write`), in a root
-   * task session with `present` in scope and no deliverable presented in the
-   * task tree yet this turn, the next request carries {@link PRESENT_REMINDER}
-   * as `user.message { source: 'inject' }` (hidden from the history view).
-   * At most once per {@link PRESENT_REMINDER_EVERY} steps of a turn, so a
-   * long turn is reminded again without repeating it every step. Real runs
-   * (step 6, experiment 1) ended code tasks after editing files without
-   * `present`: the user saw no result and could not leave feedback. The
-   * model still picks the files; nothing is presented for it.
-   */
-  private needsPresentReminder(tool: Tool, isError: boolean): boolean {
-    if (isError || tool.definition.name === 'present' || !tool.definition.effects.includes('write')) return false
-    if (this.member !== undefined || this.isImprovementSession) return false
-    return this.init.tree.presentedThisTurn === 0 && this.init.tools.get('present') !== undefined
-  }
-
-  /** Send the due present reminder with this step's request (see {@link needsPresentReminder}). */
   /** Append one loop note as `user.message { source: 'inject' }` (hidden from the history view) and send it with the next request. */
   private async injectNote(turn: number, content: string): Promise<void> {
     await this.append({ type: 'user.message', turn, content, source: 'inject' })
     this.messages.push({ role: 'user', content })
-  }
-
-  private async injectPresentReminder(turn: number, step: number): Promise<void> {
-    if (!this.presentReminderDue) return
-    this.presentReminderDue = false
-    if (this.init.tree.presentedThisTurn > 0) return
-    if (this.presentRemindedAt !== undefined && step - this.presentRemindedAt < PRESENT_REMINDER_EVERY) return
-    this.presentRemindedAt = step
-    await this.append({ type: 'user.message', turn, content: PRESENT_REMINDER, source: 'inject' })
-    this.messages.push({ role: 'user', content: PRESENT_REMINDER })
   }
 
   private async executeTool(

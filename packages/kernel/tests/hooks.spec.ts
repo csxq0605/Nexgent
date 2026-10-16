@@ -273,7 +273,7 @@ describe('turn file tracker', () => {
     const result = await agent.run('go')
     expect(result.reason).toEqual({ kind: 'completed' })
     expect(tracker.calls).toEqual(['begin:1', 'end:1'])
-    expect(tracker.observed).toEqual([{ sessionId: agent.sessionId, turn: 1, callId: 'c1', name: 'echo', isError: false, meta: { paths: ['a.txt'] } }])
+    expect(tracker.observed).toEqual([{ sessionId: agent.sessionId, turn: 1, callId: 'c1', name: 'echo', isError: false, effects: ['read'], meta: { paths: ['a.txt'] } }])
     expect(store.of(agent.sessionId, 'tool.result')[0]!.isError).toBe(false)
     const types = store.types(agent.sessionId)
     expect(types.slice(-2)).toEqual(['turn.files', 'turn.end'])
@@ -439,7 +439,7 @@ describe('host records and turn input', () => {
     expect(message).toMatchObject({ source: 'feedback', content: renderFeedbackPrompt(feedback) })
     expect(conversation(llm.requests[0]!).at(-1)).toEqual({ role: 'user', content: renderFeedbackPrompt(feedback) })
     // the project has a material: the read-only line is in the prompt
-    expect(llm.requests[0]!.messages[0]!.content).toContain('`.nexgent/materials/` and are read-only')
+    expect(llm.requests[0]!.messages[0]!.content).toContain('read-only copies at the paths given with them')
     await agent.close()
   })
 })

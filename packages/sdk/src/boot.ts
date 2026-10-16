@@ -197,7 +197,7 @@ export async function bootProjectApp(options: BootOptions): Promise<NexgentApp> 
     },
   }
   const patches: AppProfilePatchEntry[] = [
-    { id: 'workspace', config: { root: options.root } },
+    { id: 'workspace', config: { root: options.root, home: options.home } },
     ...(options.approvalTimeoutMs === undefined ? [] : [{ id: 'approvals', config: { timeoutMs: options.approvalTimeoutMs } }]),
     { insert: [...step2ProfileRows(env, options.home), ...withoutCallerRows(sdkRows(env, options.home, options.background !== false), options.patches ?? [])] },
     ...(options.patches ?? []),

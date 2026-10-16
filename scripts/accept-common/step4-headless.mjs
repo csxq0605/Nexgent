@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto'
 import { appendFile, mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { dataDirSync, registerHome, scanSecrets } from './data-dir.mjs'
 import { filesContaining } from './step2-headless.mjs'
 import { CLI_BIN, runTurn } from './step2-runtime.mjs'
 import { createStep3Sdk, loadStep3Packages } from './step3-runtime.mjs'
@@ -34,7 +35,7 @@ export async function jsonl(path) {
 
 /** Every session file of the project: `{ <sessionId>: records[] }`. */
 export async function sessionsOf(root) {
-  const dir = join(root, '.nexgent', 'sessions')
+  const dir = join(dataDirSync(root), 'sessions')
   const out = {}
   for (const id of await readdir(dir).catch(() => [])) out[id] = await jsonl(join(dir, id, 'session.jsonl'))
   return out
@@ -42,7 +43,7 @@ export async function sessionsOf(root) {
 
 /** Every ledger record of the project, in file order per month. */
 export async function ledgerOf(root) {
-  const dir = join(root, '.nexgent', 'ledgers')
+  const dir = join(dataDirSync(root), 'ledgers')
   const out = []
   for (const month of (await readdir(dir).catch(() => [])).sort()) out.push(...await jsonl(join(dir, month, 'requests.jsonl')))
   return out
@@ -50,7 +51,7 @@ export async function ledgerOf(root) {
 
 /** `activation/<n>.json` revisions in order (an unreadable one is recorded as `{ error }`). */
 export async function activationOf(root) {
-  const dir = join(root, '.nexgent', 'capabilities', 'activation')
+  const dir = join(dataDirSync(root), 'capabilities', 'activation')
   const names = (await readdir(dir).catch(() => [])).filter(name => /^\d+\.json$/.test(name)).sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10))
   const out = []
   for (const name of names) out.push(await readFile(join(dir, name), 'utf8').then(JSON.parse, error => ({ file: name, error: errorText(error) })))
@@ -70,7 +71,7 @@ export async function filesUnder(dir, base = dir) {
 
 /** `candidates/<id>/candidate.json` of every candidate. */
 export async function candidatesOf(root) {
-  const dir = join(root, '.nexgent', 'capabilities', 'candidates')
+  const dir = join(dataDirSync(root), 'capabilities', 'candidates')
   const out = []
   for (const id of await readdir(dir).catch(() => [])) {
     out.push({ id, record: await readFile(join(dir, id, 'candidate.json'), 'utf8').then(JSON.parse, error => ({ error: errorText(error) })), files: await filesUnder(join(dir, id)) })
@@ -83,7 +84,7 @@ export async function candidatesOf(root) {
  * contract's canonical form, and each listed file's actual hash.
  */
 export async function bundleFacts(root, version) {
-  const dir = join(root, '.nexgent', 'capabilities', version)
+  const dir = join(dataDirSync(root), 'capabilities', version)
   const facts = { version, files: [] }
   try {
     facts.manifestText = await readFile(join(dir, 'manifest.json'), 'utf8')
@@ -110,7 +111,7 @@ export async function bundleFacts(root, version) {
  * SEAM: the store's write / adopt calls.
  */
 async function adoptManually(cap, root) {
-  const store = new cap.CapabilityStore(join(root, '.nexgent', 'capabilities'))
+  const store = new cap.CapabilityStore(join(dataDirSync(root), 'capabilities'))
   const components = [CANDIDATE.functionModule, CANDIDATE.skill].map(c => ({ kind: c.kind, name: c.name, files: c.files }))
   const bundle = await store.write(components)
   const tail = await store.adopt(bundle.version, { trigger: 'manual' })
@@ -158,6 +159,7 @@ export async function runStep4Headless(h, work, { log = () => {} } = {}) {
   const script = await buildStep4Script(h, state)
   const server = await h.scriptedModelServer({ script: script.lead, routes: script.routes, routeKey: routeOf(h) })
   const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
+  registerHome(root, home)
   const obs = { root, key: SCRIPTED_API_KEY, features: {}, phases: {} }
   const turnObs = ({ result, error }) => ({ reason: result?.reason, ...(error === undefined ? {} : { error: errorText(error) }) })
   try {
@@ -230,7 +232,7 @@ export async function runStep4Headless(h, work, { log = () => {} } = {}) {
       obs.exportSecretHits = await filesContaining(exportDir, SCRIPTED_API_KEY, work)
 
       log('phase tamper')
-      const target = join(root, '.nexgent', 'capabilities', state.adoptedVersion, componentDir(CANDIDATE.functionModule.kind, CANDIDATE.functionModule.name), 'index.mjs')
+      const target = join(dataDirSync(root), 'capabilities', state.adoptedVersion, componentDir(CANDIDATE.functionModule.kind, CANDIDATE.functionModule.name), 'index.mjs')
       obs.activationBeforeTamper = await activationOf(root)
       await appendFile(target, '// tampered\n')
       obs.tampered = { version: state.adoptedVersion, path: 'index.mjs' }
@@ -252,10 +254,10 @@ export async function runStep4Headless(h, work, { log = () => {} } = {}) {
   obs.ledger = await ledgerOf(root)
   obs.activation = await activationOf(root)
   obs.candidates = await candidatesOf(root)
-  obs.drafts = await filesUnder(join(root, '.nexgent', 'capabilities', 'drafts'))
-  obs.snapshots = await filesUnder(join(root, '.nexgent', 'snapshots'))
+  obs.drafts = await filesUnder(join(dataDirSync(root), 'capabilities', 'drafts'))
+  obs.snapshots = await filesUnder(join(dataDirSync(root), 'snapshots'))
   obs.pluginRan = await stat(state.pluginMarker).then(() => true, () => false)
-  obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+  obs.secretHits = await scanSecrets(filesContaining, root, home, SCRIPTED_API_KEY)
   // Schema of every record (H18), with the session package's own validators.
   const { validateSessionRecord, validateLedgerRecord } = pkgs.session
   const issuesOf = (records, validate, where) => records.flatMap((record, index) => validate(record).map(issue => `${where}#${index + 1} ${record.type}: ${issue.path ?? ''} ${issue.message ?? JSON.stringify(issue)}`))

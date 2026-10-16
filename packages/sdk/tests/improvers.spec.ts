@@ -13,7 +13,7 @@ import { createJob, improvementsDir, jobPaths, readJob, transitionJob, updateJob
 import {
   applyImproverChange,
   IMPROVER_V0,
-  resolveWorkspaceLayout,
+  resolveProjectLayout,
   type ComparisonArmResult,
   type ImproverChange,
   type ImproverChangeRecord,
@@ -54,7 +54,7 @@ describe('improver versions through the SDK (API 7: the user line)', () => {
     await expect(t.sdk.call('improvers.show', { version: 'f'.repeat(64) })).rejects.toMatchObject({ code: 'improver/not-found' })
 
     // A meta job hosted in this project proposed the child (change.json) and adopted it on the user line.
-    const layout = resolveWorkspaceLayout(root)
+    const layout = resolveProjectLayout(root, { home: t.home })
     const store = ImproverStore.user({ home: t.home })
     const { version } = await store.write(CHILD)
     const jobs = improvementsDir(layout)
@@ -69,7 +69,7 @@ describe('improver versions through the SDK (API 7: the user line)', () => {
     await createJob(jobs, { id: used, trigger: 'explicit', items: [] } as Parameters<typeof createJob>[1])
     await updateJob(jobs, used, { improverVersion: version, improverScope: 'user' } as Parameters<typeof updateJob>[2])
     const other = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'other'), create: true })
-    const otherJobs = improvementsDir(resolveWorkspaceLayout(other.root))
+    const otherJobs = improvementsDir(resolveProjectLayout(other.root, { home: t.home }))
     const old = randomUUID()
     await createJob(otherJobs, { id: old, trigger: 'explicit', items: [] } as Parameters<typeof createJob>[1])
     await updateJob(otherJobs, old, { improverVersion: version } as Parameters<typeof updateJob>[2])
@@ -113,7 +113,7 @@ describe('improver versions through the SDK (API 7: the user line)', () => {
   it('a project\'s own step-6 line is history only: it is not the improver in force', async () => {
     const t = await testSdk([])
     const { root } = await openProject(t)
-    const project = new ImproverStore(improversDir(resolveWorkspaceLayout(root)), { scope: 'user' }) // written as step 6 did
+    const project = new ImproverStore(improversDir(resolveProjectLayout(root, { home: t.home })), { scope: 'user' }) // written as step 6 did
     const { version } = await project.write(CHILD)
     await project.adopt(version, { jobId: randomUUID() })
     expect((await t.sdk.call('improvers.list', {})).current).toEqual({ version: 'v0', revision: 0 })
@@ -184,7 +184,7 @@ describe('meta jobs through the SDK', () => {
   it('a meta job shows its meta diagnosis, change and comparison; its estimate adds both arms', async () => {
     const t = await testSdk([])
     const { root, projectId } = await openProject(t)
-    const layout = resolveWorkspaceLayout(root)
+    const layout = resolveProjectLayout(root, { home: t.home })
     const jobs = improvementsDir(layout)
     const id = randomUUID()
     const child = 'c'.repeat(64)
@@ -234,10 +234,10 @@ describe('meta jobs through the SDK', () => {
       expect(detail.metaDiagnosis).toMatchObject({ proposal: 'none', improverVersion: 'v0' })
       expect(detail.view).toMatchObject({ kind: 'meta', status: 'no-proposal', improverVersion: 'v0', tokens: { 'meta-diagnose': 2400 } })
       expect(detail.view.estimatedUsd).toBeGreaterThan(0)
-      const session = (await readJob(improvementsDir(resolveWorkspaceLayout(root)), job.id)).sessions!['meta-diagnose']!
-      const records = (await readSessionRecords(root, session)).records as SessionRecord[]
+      const session = (await readJob(improvementsDir(resolveProjectLayout(root, { home: t.home })), job.id)).sessions!['meta-diagnose']!
+      const records = (await readSessionRecords(root, session, { home: t.home })).records as SessionRecord[]
       expect(records[0]).toMatchObject({ type: 'session.start', purpose: 'improvement', improvement: { jobId: job.id, phase: 'meta-diagnose', improverVersion: 'v0', improverScope: 'user' } })
-      const requests = (await readLedgerRecords(root)).records.filter(record => record.type === 'llm.request.end' && record.sessionId === session)
+      const requests = (await readLedgerRecords(root, { home: t.home })).records.filter(record => record.type === 'llm.request.end' && record.sessionId === session)
       expect(requests).toHaveLength(2)
       for (const record of requests) expect(record).toMatchObject({ improvementId: job.id, improvementPhase: 'meta-diagnose', improverVersion: 'v0', improverScope: 'user' })
       // Not a conversation.

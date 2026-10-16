@@ -134,6 +134,11 @@ export class SessionProjector {
     return this.draft.metadata.openTurn
   }
 
+  /** An immutable copy of the current metadata (no message copy). */
+  metadata(): SessionMetadata {
+    return { ...this.draft.metadata }
+  }
+
   /** An immutable copy of the current state. */
   snapshot(): SessionState {
     const state = fromDraft(this.draft)
@@ -183,6 +188,8 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
       delete meta.openTurn
       break
     case 'checkpoint': {
+      // An incremental checkpoint equals the projection so far; the draft already is that.
+      if (record.base !== undefined) break
       const next = toDraft(record.state)
       draft.messages = next.messages
       draft.metadata = next.metadata

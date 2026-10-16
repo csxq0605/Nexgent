@@ -11,7 +11,7 @@ import { checkCostCaps, resolveProjectConfig, type ProjectConfig, type ProjectCo
 import { assertLearningConfig } from './contracts/learning.js'
 import type { ApprovalGrant } from './contracts/approvals.js'
 import { EFFORT_LEVELS, type Effort } from './contracts/llm.js'
-import { SANDBOX_MODES, type SandboxMode } from './contracts/workspace.js'
+import { SANDBOX_MODES, type SandboxMode, type WorkspaceLayout } from './contracts/workspace.js'
 import { readJsonFile, writeJsonFile } from './storage/json-file.js'
 
 /** A loaded project config: the resolved values plus what the file actually set. */
@@ -157,4 +157,33 @@ export async function appendProjectGrant(path: string, grant: ApprovalGrant): Pr
   const current = (raw ?? {}) as Record<string, unknown>
   const approvals = Array.isArray(current.approvals) ? current.approvals : []
   await writeJsonFile(path, { ...current, approvals: [...approvals, grant] }, { mode: 0o644 })
+}
+
+/**
+ * Read a project's config at its data location (K1, ADR 0017 decision 4):
+ * when the data is in the user data directory the `project`-scope grants
+ * come from `grants.json` there and `config.json.approvals` is ignored, so
+ * a cloned project never brings someone else's grants.
+ */
+export async function readProjectSettings(layout: Pick<WorkspaceLayout, 'configFile' | 'grantsFile'>): Promise<LoadedProjectConfig> {
+  const loaded = await readProjectConfig(layout.configFile)
+  if (layout.grantsFile === undefined) return loaded
+  const approvals = await readProjectGrants(layout.grantsFile)
+  const input = { ...loaded.input, approvals }
+  return { ...loaded, input, config: { ...loaded.config, approvals } }
+}
+
+/** The grants of `grants.json` (`ProjectGrantsFile`); a missing file has none. */
+export async function readProjectGrants(path: string): Promise<ApprovalGrant[]> {
+  const raw = await readJsonFile(path)
+  if (raw === undefined) return []
+  if (!isObject(raw) || raw.formatVersion !== 1 || !Array.isArray(raw.approvals)) fail(path, 'expected { formatVersion: 1, approvals: [] }')
+  return raw.approvals.map((grant, index) => parseGrant(path, index, grant))
+}
+
+/** Append a `project`-scope grant where the project keeps them: `grants.json` in the user data directory, else `config.json.approvals`. */
+export async function appendGrant(layout: Pick<WorkspaceLayout, 'configFile' | 'grantsFile'>, grant: ApprovalGrant): Promise<void> {
+  if (layout.grantsFile === undefined) return appendProjectGrant(layout.configFile, grant)
+  const approvals = await readProjectGrants(layout.grantsFile)
+  await writeJsonFile(layout.grantsFile, { formatVersion: 1, approvals: [...approvals, grant] }, { mode: 0o600 })
 }

@@ -13,7 +13,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { LLMRequest, SessionRecord } from '@nexgent/kernel'
+import { resolveProjectLayout, type LLMRequest, type SessionRecord } from '@nexgent/kernel'
 import type { ScriptEntry } from '@nexgent/test-support'
 import { describe, expect, it } from 'vitest'
 import { collaborationView, historyItems, type SdkEvent } from '../src/index.js'
@@ -200,7 +200,7 @@ describe('members through the SDK', () => {
     // The member stays readable (its streamed text up to the kill) without being locked.
     const view = await t.sdk.call('sessions.view', { projectId: project.projectId, sessionId: childId })
     expect(view.summary).toMatchObject({ parentSessionId: parentId, member: { name: 'slow' } })
-    expect(existsSync(nodePath.join(root, '.nexgent', 'sessions', childId, 'session.lock'))).toBe(false)
+    expect(existsSync(nodePath.join(resolveProjectLayout(root, { home }).sessions, childId, 'session.lock'))).toBe(false)
     expect(await t.sdk.call('sessions.children', { projectId: project.projectId, sessionId: parentId })).toEqual([expect.objectContaining({ sessionId: childId })])
   })
 })
