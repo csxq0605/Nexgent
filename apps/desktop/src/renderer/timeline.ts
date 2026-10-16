@@ -279,6 +279,8 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
     case 'improvement.job':
     // Step 6: so is the improver in force.
     case 'improver.version':
+    // API 8: cost warnings are project-level (the shell shows them, not the timeline).
+    case 'cost.warning':
       return [...list]
   }
 }

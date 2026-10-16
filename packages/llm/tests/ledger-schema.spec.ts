@@ -3,6 +3,10 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   COMPARISON_ARMS,
+  COST_CAP_SCOPES,
+  COST_WARNING_LEVELS,
+  DECISION_REASONS,
+  LEARNING_PHASES,
   IMPROVEMENT_COST_PHASES,
   IMPROVEMENT_JOB_KINDS,
   IMPROVEMENT_PHASES,
@@ -100,6 +104,20 @@ describe('ledger.v1.schema.json step-6 enums', () => {
     expect(end['trigger']?.['enum']).toEqual([...IMPROVEMENT_TRIGGERS])
     expect(end['status']?.['enum']).toEqual([...IMPROVEMENT_STATUSES])
     expect(Object.keys(end['phases']?.['properties'] as object)).toEqual([...IMPROVEMENT_COST_PHASES])
+  })
+
+  it('rework C1: learning phase, decision reasons and cost.warning match the kernel constants', () => {
+    const defs = schema['$defs'] as Record<string, Record<string, unknown>>
+    const base = defs['base']?.['properties'] as Record<string, Record<string, unknown>>
+    expect(base['learningPhase']?.['enum']).toEqual([...LEARNING_PHASES])
+    const decision = ((defs['capabilityDecision']?.['allOf'] as Record<string, unknown>[])[1]?.['properties']) as Record<string, Record<string, unknown>>
+    expect(decision['reason']?.['enum']).toEqual([...DECISION_REASONS])
+    const warning = ((defs['costWarning']?.['allOf'] as Record<string, unknown>[])[1]?.['properties']) as Record<string, Record<string, unknown>>
+    expect(warning['scope']?.['enum']).toEqual([...COST_CAP_SCOPES])
+    expect(warning['level']?.['enum']).toEqual([...COST_WARNING_LEVELS])
+    const at = '2026-10-16T08:00:00.000Z'
+    expect(validate(schema, { type: 'cost.warning', ts: at, sessionId: 's1', scope: 'perTask', level: 'warning', limit: 'maxUsd', used: 0.81, cap: 1, estimated: false })).toEqual([])
+    expect(validate(schema, { type: 'cost.warning', ts: at, scope: 'perWeek', level: 'warning', limit: 'maxUsd', used: 1, cap: 1, estimated: false })).not.toEqual([])
   })
 })
 

@@ -782,12 +782,17 @@ export type DecisionReason =
   | 'no-similar-cases'
   /** ADR 0013: an improvement candidate carries a concrete value of its feedback task; rejected before any replay. */
   | 'instance-literal'
+  /** ADR 0019 decision 3: quality tied and the candidate is cheaper; adopted, but counted as saving money, never as an evolution. */
+  | 'cost-optimized'
+  /** ADR 0019 decision 6: the self-evaluation scorer agrees with the external reviewer on fewer than 80% of samples; a skill waits for the user, layer 3 does not run. */
+  | 'scorer-unreliable'
 
 /** Every decision reason. */
 export const DECISION_REASONS: readonly DecisionReason[] = [
   'quality-up', 'cost-down', 'review-preferred', 'quality-down', 'guard-regressed', 'cost-over-cap', 'no-improvement',
   'unknown-runs', 'budget-exhausted', 'interrupted', 'approved', 'approval-denied', 'load-failure', 'usage-regression',
-  'component-errors', 'manual', 'similar-regression', 'no-similar-cases', 'instance-literal',
+  'component-errors', 'manual', 'similar-regression', 'no-similar-cases', 'instance-literal', 'cost-optimized',
+  'scorer-unreliable',
 ]
 
 /** The gate's conclusion, before it is written as a decision. */

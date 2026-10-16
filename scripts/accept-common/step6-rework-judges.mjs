@@ -131,7 +131,7 @@ export function judgeNoSimilar(obs) {
   return pass(`history tasks asked in words the feedback task does not share (checks passed): the candidate fixed the feedback task (${v.feedbackPassRate.candidate} vs ${v.feedbackPassRate.baseline}) yet, with no similar case in the selection, the job waits for approval (await-approval, no-similar-cases, "checked on the feedback task only"); candidates proposed by user tasks decide as before (step 5 H19 = step 4 H01–H19 passed)`)
 }
 
-/** H23: a candidate carrying a concrete value is refused by the gate before any replay; the rules id is adr-0016 (ADR 0016, after ADR 0014 decision 3 and ADR 0015) and the epoch moved with it. */
+/** H23: a candidate carrying a concrete value is refused by the gate before any replay; the rules id is adr-0019 (ADR 0019, after ADR 0014–0016) and the epoch moved with it. */
 export function judgeGateLiteral(obs) {
   const l = obs?.literal
   const x = l?.second
@@ -149,12 +149,12 @@ export function judgeGateLiteral(obs) {
   if (x.newTrialRecords !== 0) problems.push(`${x.newTrialRecords} ledger records with a trialId were written during job 2`)
   if (x.replayRequests !== 0) problems.push(`${x.replayRequests} replay / review requests reached the model during job 2`)
   const r = l.rules ?? {}
-  if (r.id !== 'adr-0016') problems.push(`the evaluator rules id is ${r.id}`)
-  if (!VERSION.test(r.epoch ?? '') || r.epoch !== r.projectEpoch) problems.push('the project epoch is not the adr-0016 epoch of its settings')
+  if (r.id !== 'adr-0019') problems.push(`the evaluator rules id is ${r.id}`)
+  if (!VERSION.test(r.epoch ?? '') || r.epoch !== r.projectEpoch) problems.push('the project epoch is not the adr-0019 epoch of its settings')
   if (r.epoch === r.epochAdr0008) problems.push('the epoch did not change with the rules id')
   if (r.firstTrialEpoch !== undefined && r.firstTrialEpoch !== r.projectEpoch) problems.push(`job 1's trial ran in epoch ${short(r.firstTrialEpoch)}`)
   if (problems.length > 0) return fail(problems)
-  return pass(`a skill carrying ${l.lateValue} passed capability_propose (no source had it); the user then presented a note with it in the feedback session; the gate refused the candidate before replaying (rejected, instance-literal, ${hit.source}): no trial, no ledger record with a trialId, no replay or review request; rules id adr-0016, epoch ${short(r.epoch)} (adr-0008 would give ${short(r.epochAdr0008)})${r.firstTrialEpoch === undefined ? '' : ', job 1\'s trial ran in it'}`)
+  return pass(`a skill carrying ${l.lateValue} passed capability_propose (no source had it); the user then presented a note with it in the feedback session; the gate refused the candidate before replaying (rejected, instance-literal, ${hit.source}): no trial, no ledger record with a trialId, no replay or review request; rules id adr-0019, epoch ${short(r.epoch)} (adr-0008 would give ${short(r.epochAdr0008)})${r.firstTrialEpoch === undefined ? '' : ', job 1\'s trial ran in it'}`)
 }
 
 /** H24: a meta change carrying a concrete value of the batch's tasks is refused, the value named, no child stored. */

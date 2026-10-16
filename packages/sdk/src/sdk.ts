@@ -92,7 +92,7 @@ import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
 import { collaborationView, historyItems, memberRunView, runKey, sessionSummary, turnUsage } from './history.js'
 import { RecentProjects } from './recent.js'
-import { describeApiKey, readSettings, readUserSettings, secretValues, setApiKey, updateSettings, updateUserSettings, type CredentialEnv } from './settings.js'
+import { acknowledgeLearning, describeApiKey, readSettings, readUserSettings, secretValues, setApiKey, updateSettings, updateUserSettings, type CredentialEnv } from './settings.js'
 
 /** `deliverables.readText` limit. */
 export const READ_TEXT_MAX_BYTES = 1024 * 1024
@@ -1235,6 +1235,24 @@ export class LocalNexgentSdk implements NexgentSdk {
         const current = await improvers.rollback(improvers.storeOf(this.home), input ?? {})
         this.emitApp({ type: 'improver.version', current })
         return current
+      },
+      // API 8 (rework C1): contracts only; the handbook store (V1), the
+      // learning ledger view (E1) and the practice set (G1) implement them.
+      'handbook.list': async () => {
+        throw new NexgentError('internal', 'handbook.list is not available yet')
+      },
+      'handbook.show': async () => {
+        throw new NexgentError('internal', 'handbook.show is not available yet')
+      },
+      'learning.status': async () => {
+        throw new NexgentError('internal', 'learning.status is not available yet')
+      },
+      'learning.acknowledge': () => acknowledgeLearning(this.home),
+      'practice.list': async () => {
+        throw new NexgentError('internal', 'practice.list is not available yet')
+      },
+      'practice.show': async () => {
+        throw new NexgentError('internal', 'practice.show is not available yet')
       },
     }
   }

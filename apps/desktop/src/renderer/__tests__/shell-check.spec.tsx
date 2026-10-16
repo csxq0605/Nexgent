@@ -11,7 +11,7 @@ import { renderApp } from './helpers.js'
 describe('command shell check', () => {
   it('tells the user to install PowerShell 7 when pwsh is missing', async () => {
     const bridge = new FakeBridge()
-    bridge.handlers['app.info'] = () => ({ sdkVersion: 7, appVersion: '0.0.0-test', platform: 'win32', commandShell: { shell: 'pwsh', required: true, available: false } })
+    bridge.handlers['app.info'] = () => ({ sdkVersion: 8, appVersion: '0.0.0-test', platform: 'win32', commandShell: { shell: 'pwsh', required: true, available: false } })
     await renderApp(bridge, { open: false })
     const notice = await waitFor(() => screen.getByTestId('shell-missing'))
     expect(notice.textContent).toContain('PowerShell 7')

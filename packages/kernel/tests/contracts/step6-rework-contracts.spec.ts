@@ -181,7 +181,7 @@ describe('decideTrial: the similar-cases rule (ADR 0013 decision 1)', () => {
   it('the reasons and the rules id', () => {
     for (const reason of ['similar-regression', 'no-similar-cases', 'instance-literal'] as const) expect(DECISION_REASONS).toContain(reason)
     // ADR 0014 replaced adr-0013 (a new epoch).
-    expect(EVALUATOR_RULES).toBe('adr-0016')
+    expect(EVALUATOR_RULES).toBe('adr-0019')
     for (const code of ['capability/instance-literal', 'improver/instance-literal'] as const) expect(new NexgentError(code, 'found task values').code).toBe(code)
   })
 })
@@ -239,7 +239,7 @@ describe('user-level meta queue (ADR 0012 decision 3)', () => {
 
 describe('user config and the project switch', () => {
   it('defaults: meta off, every 3 jobs, its own budget', () => {
-    expect(DEFAULT_USER_CONFIG).toEqual({ version: 1, improvement: { meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } } })
+    expect(DEFAULT_USER_CONFIG).toEqual({ version: 1, improvement: { meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } }, learning: {} })
     expect(resolveUserConfig({ improvement: { meta: { enabled: true } } }).improvement.meta).toMatchObject({ enabled: true, everyJobs: 3 })
     expect(GUARDED_USER_CONFIG_FIELDS).toEqual(['improvement'])
   })

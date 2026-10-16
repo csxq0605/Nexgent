@@ -230,7 +230,7 @@ describe('meta settings (user level)', () => {
 
   it('reads saved user settings back when the page opens, and rejects bad values', async () => {
     const bridge = new FakeBridge()
-    bridge.userSettings = { improvement: { meta: { ...bridge.userSettings.improvement.meta, enabled: true, everyJobs: 7 } } }
+    bridge.userSettings = { ...bridge.userSettings, improvement: { meta: { ...bridge.userSettings.improvement.meta, enabled: true, everyJobs: 7 } } }
     await renderApp(bridge)
     fireEvent.click(screen.getByTestId('open-settings'))
     await waitFor(() => expect((screen.getByTestId('settings-meta-every') as HTMLInputElement).value).toBe('7'))

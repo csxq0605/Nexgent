@@ -1,6 +1,6 @@
 # 权限与审批模型
 
-> 步骤 1 章节（沙箱模式、路径与命令策略、工具审批、费用上限格式、密钥存放、已知边界、共用审批交互、测试）已定稿；步骤 2 第 1 轮填写"本地 IPC 与访问令牌"，并把 `.nexgent/outputs/` 改为对模型只读、补上 `.nexgent/skills/`；步骤 3 第 1 轮新增"子会话继承""网页获取（`web_fetch`）""代码执行进程（PTC）"三节，并补充费用上限与审批交互里的成员规则（决策见 ADR 0004）；"插件安装审批"在步骤 4 填。字段名以 `packages/kernel/src/contracts/` 为准，二者冲突时改契约 PR 并同步本文。来源：计划 4.10 第 2 行与"安全"一行；ADR 0001 决策 9、12。
+> 步骤 1 章节（沙箱模式、路径与命令策略、工具审批、费用上限格式、密钥存放、已知边界、共用审批交互、测试）已定稿；步骤 2 第 1 轮填写"本地 IPC 与访问令牌"，并把 `.nexgent/outputs/` 改为对模型只读、补上 `.nexgent/skills/`；步骤 3 第 1 轮新增"子会话继承""网页获取（`web_fetch`）""代码执行进程（PTC）"三节，并补充费用上限与审批交互里的成员规则（决策见 ADR 0004）；"插件安装审批"在步骤 4 填。重做 C1（ADR 0017–0019）补上用户数据目录的访问规则、编辑工具、工具并发、美元费用上限与 80% 提醒，并新增“学习与学习预算”一节。字段名以 `packages/kernel/src/contracts/` 为准，二者冲突时改契约 PR 并同步本文。来源：计划 4.10 第 2 行与"安全"一行；ADR 0001 决策 9、12。
 
 ## 目的与范围
 
@@ -46,6 +46,14 @@
 | `config.json` | 允许 | 拒绝 | 配置改动必须经用户或审批流 |
 
 **Nexgent 主目录**（`<NEXGENT_HOME>`，默认 `~/.nexgent`；ADR 0012）放凭证、用户级配置 `config.json`、用户级改进器版本线 `improvers/` 与用户级元改进队列 `improvements/`。它在每个项目之外，不在任何读根或写根里，文件工具与 `run_code` 读写都拒绝（路径规范化后的包含检查即可挡住），只有宿主写；用户把某个项目放在主目录之内或把主目录列进 `extraReadRoots` 时，这些路径仍按宿主专属目录处理，读写都拒绝。
+
+**用户数据目录**（重做 C1，ADR 0017 决策 4）：`<NEXGENT_HOME>/projects/<projectId>/`（会话、账本、快照、资料副本、成果快照、能力与改进记录、授权 `grants.json`、自评）与 `<NEXGENT_HOME>/handbook/`、`practice/`、`skills/` 同属主目录，规则同上：文件工具与 `run_code` 读写都拒绝，只有宿主写。资料副本与成果快照对模型只读，仍经宿主工具（读资料、`present`）提供，不经路径读取。迁移没完成的项目，上表的项目内规则照旧适用。“在本项目始终允许”的授权迁移后在 `grants.json`，项目里的 `config.json` 不再有 `approvals`，所以克隆来的项目不带别人的授权。
+
+**编辑工具**（重做 C1，ADR 0017 决策 1；契约 `edit-tools.ts`，输入 schema `WRITE_FILE_INPUT_SCHEMA`、`STR_REPLACE_INPUT_SCHEMA`）。路径检查与上面相同，改动照旧进入本轮的文件变更与成果：
+
+- `write_file` 可以写新文件；已有文件只有在本会话读过它（`read_file` 读过，或本会话写过），或调用给出 `overwrite: true` 时才覆盖（`mayWriteFile`），否则报错并提示先读。
+- `str_replace` 接受单个 `old_str` / `new_str`（加 `replace_all` 替换全部出现），或 `edits` 列表（至多 50 个，`MAX_TEXT_EDITS`），两种形式不能同时给。多个编辑按顺序作用在前一个的结果上，全部成功才写文件（`applyTextEdits`）；`old_str` 为空、找不到、或没有 `replace_all` 时出现多次，报出失败的那一个编辑的序号。
+- `read_file` 的输出每行带行号（右对齐 6 列加制表符，同 `cat -n`；`numberLines`）；行号不是文件内容，`str_replace` 匹配制表符之后的文字。
 
 **拒绝与审批模式**（在写根内也生效）：
 
@@ -108,15 +116,17 @@
 | `workspace-write` | 执行 | 弹审批 | 拒绝，不提示 |
 | `full-access` | 执行 | 执行，不提示；例外是"始终审批"表 | — |
 
+**并发**（重做 C1，ADR 0017 决策 5；`isConcurrentTool`、`scheduleToolCalls`）。一个模型步骤里的多个工具调用，按调用顺序切成批：连续的可并发调用是一批，同时运行；其他调用各自一批，依次运行。可并发的是 `concurrent: true` 的工具（如 `delegate`、`handbook_mark`），或没声明时只有 `read` 效果、`approval: 'never'` 的工具；本次需要审批应答的调用永不并发，所以审批仍按调用顺序一个一个问。结果按调用顺序交回模型、按调用顺序写会话与账本，不按完成顺序。
+
 `read-only` 下“始终审批”表里的写 / 执行类调用同样直接拒绝。`selfSandboxed` 是 `ToolDefinition` 的契约字段（`contracts/tools.ts`），只有确实对每次读写调用做沙箱与路径检查的宿主包才能声明；策略层按字段判断，不按工具名豁免（步骤 3 勘误，取代按名豁免 `run_code`）。
 
-"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的 `approvals` / `costCaps` / `sandboxMode` / `capabilities` / `autoImprove` / `improvement` 字段（契约 `GUARDED_PROJECT_CONFIG_FIELDS`，`capabilities` 为步骤 4 新增，`autoImprove` 与 `improvement` 为步骤 5 新增：模型不能打开、关闭或放宽自己的改进流程与改进预算）、步骤 4 的插件试用与插件采用（下节）。
+"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的 `approvals` / `costCaps` / `sandboxMode` / `capabilities` / `autoImprove` / `improvement` / `learning` 字段（契约 `GUARDED_PROJECT_CONFIG_FIELDS`，`capabilities` 为步骤 4 新增，`autoImprove` 与 `improvement` 为步骤 5 新增，`learning` 为重做 C1 新增：模型不能打开、关闭或放宽自己的改进流程、学习与它们的预算）、步骤 4 的插件试用与插件采用（下节）。
 
 **粒度。** 用户每次应答选择作用范围：
 
 - `once`：只放行本次调用；
 - `session`：本会话内相同工具 + 相同匹配模式（命令前缀或路径模式）不再问，记录在会话中（`approval.grant` 记录），`resume` 后仍有效；
-- `project`：写入 `.nexgent/config.json` 的 `approvals` 列表，之后所有会话生效。
+- `project`：写入 `.nexgent/config.json` 的 `approvals` 列表（迁移后写用户数据目录的 `grants.json`），之后所有会话生效。
 
 ```json
 {
@@ -190,6 +200,16 @@
 - **开关与预算只由用户改。** ADR 0012 起元改进的开关、`everyJobs`、预算与模型在用户级配置的 `improvement.meta`，`improvement` 是用户级受保护字段（`GUARDED_USER_CONFIG_FIELDS`），审批规则同项目级：模型或组件请求改动总要审批，用户在设置页（SDK `userSettings.update`）改是用户操作，不弹审批；文件在主目录里，文件工具够不到。项目级的 `improvement`（含 `shareImproverEvidence`）仍在“始终审批”表里。评价器设置在 `capabilities` 里，同样受保护。所以改进器、元改进作业与模型都改不到纪元。
 - **采用与回滚。** 子改进器只由元改进作业按 `decideImprover` 采用，不弹审批（改进器只是文字与有上下限的参数）；用户可以随时经 `improvers.rollback` 回滚到任一更早的版本，包括 `v0`。ADR 0012 起改进器是用户级的，采用与回滚影响同一主目录下的所有项目，回滚确认要列出最近使用过它的项目（SDK `ImproverListing.usedBy`）。
 
+## 学习与学习预算
+
+重做 C1（ADR 0017 决策 3、ADR 0018 决策 2、8、10、ADR 0019 决策 6）。后台学习（自评、外部评审校准、反思、整理）由宿主在任务结束后打开，用户没有发消息，所以：
+
+- **先告知，再花钱。** 用户第一次确认后台学习的说明（用户级 `learning.noticeAcknowledgedAt`，SDK `learning.acknowledge`）之前，任何项目的后台学习都不花钱；确认之后，项目的 `learning.enabled` 决定（`mayLearn`）。确定性检查不花模型费用，学习开着就做。
+- **学习预算。** `learning.budget`（默认每项目 30 天 3 美元）按带 `learningPhase` 的账本记录的估算美元在滚动时间窗内计，含自评与校准；单个任务的自评另有 `learning.selfEvalMaxUsd`（默认 0.05 美元）。宿主在每次学习请求前检查，余额不够一个任务上限时不再打分（自评记 `budget-exhausted`）。学习费用不计入任何用户任务的 `perTask` / `perConversation`，但计入 `perProject`。
+- **评分器不可靠时收紧。** 自评与外部评审的一致率不足（少于 10 次校准或低于 80%）时，技能不自动启用而等用户批准，第 3 层不运行；手册条目照常试用（`data-formats.md` §自评）。
+- **共享由项目决定。** `learning.useShared` 关掉后本项目不使用用户级手册条目与技能；`learning.contribute` 关掉后本项目的条目、技能与练习题不进用户级。
+- **开关与预算只由用户改。** `learning` 在“始终审批”表里；用户在设置页（SDK `settings.update`）改是用户操作，不弹审批。用户级配置在主目录里，文件工具够不到。手册、练习题与自评都在主目录里，模型读写都拒绝；执行中的模型只能经 `handbook_mark` 给注入的条目投票。
+
 ## 费用上限
 
 步骤 1 只定格式与达到上限的行为，不做产品设置页。配置在 `.nexgent/config.json`：
@@ -209,6 +229,7 @@
 - 步骤 1 执行 `perTask`；`perProject` 只定格式。
 - 步骤 3：`perTask` 按整棵任务树计（根会话与它的全部成员共享同一 `taskId` 与同一份累计），成员花的请求与 token 算进根会话的额度；成员的下一次请求被挡下时，成员以 `budget` 结束，父会话下一次请求同样被挡下。`ErrorInfo.details.scope` 仍为 `task`。见下节。
 - 字段缺省表示不限制；步骤 2 的设置页只改这两个对象。
+- **重做 C1（ADR 0017 决策 5）：美元为主，三个范围，80% 提醒。** `CostCap.maxUsd` 按价目表估算美元（含缓存读写；provider 没报用量时用宿主的估算，记 `usageEstimated` 并在提醒里标明含估算）。范围加 `perConversation`（一个对话的全部轮），与 `perTask`（整棵任务树）、`perProject`（时间窗）并列；几个字段同时给出时先达到的生效。任一上限的任一字段达到 80%（`COST_WARNING_RATIO`）时，账本写一条 `cost.warning`（每个上限实例一次），SDK 推送 `cost.warning` 事件，界面提示用户；达到 100% 时再写一条 `level: "reached"`，然后按上面的规则取消本轮。`ErrorInfo.details.scope` 相应为 `task` / `conversation` / `project`，`metric` 加 `usd`。只有 token / 次数字段的旧配置照常执行。
 
 ## 子会话继承
 
@@ -408,6 +429,11 @@ interface ToolApprovalAsk {
 | 审批 | `session` 授权后同形态再调用；`resume` 后再调用 | 不再提问；账本 `decision: 'auto'` |
 | 审批 | `project` 授权 | `config.json.approvals` 新增条目，新会话不再提问 |
 | 费用 | `costCaps.perTask.maxRequests: 2` 下第 3 次请求 | 不发出请求；轮次以 `cost-cap` 取消，会话与账本各一条 `budget/exhausted`，无重试 |
+| 费用（重做 C1） | `perConversation.maxUsd` 下花到 80%、100% | 各写一条 `cost.warning`（`warning` 一次、`reached` 一次）并推送事件；100% 时本轮以 `cost-cap` 取消 |
+| 编辑（重做 C1） | `write_file` 覆盖未读过的已有文件；`str_replace` 的 `edits` 中第 2 个找不到 | 前者报错、文件不变（给 `overwrite: true` 才写）；后者整次不写，报出序号 2 |
+| 并发（重做 C1） | 一个步骤里三个只读调用夹一个写调用 | 只读调用成批同时运行，写调用单独一批；结果与记录按调用顺序 |
+| 学习（重做 C1） | 未确认学习说明时任务结束；学习预算用尽 | 不发出学习请求，只做确定性检查；自评记 `learning-off` 或 `budget-exhausted` |
+| 学习（重做 C1） | 文件工具与 `run_code` 读写 `<NEXGENT_HOME>/projects/**`、`handbook/**`、`practice/**`；`full-access` 下写 `config.json` 的 `learning` | 读写都拒绝；写 `learning` 产生“始终审批”请求 |
 | 密钥 | 凭证文件权限 `0644`（POSIX） | 拒绝读取并给出修复提示 |
 | 密钥 | 会话、账本全文 | 不含密钥值 |
 | 子会话（步骤 3） | `read-only` 父会话下以 `workspace-write` 请求成员；预设 `deny: ['bash']` | 创建失败 `sandbox/denied`；成员工具列表里没有 `bash` |

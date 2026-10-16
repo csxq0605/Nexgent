@@ -15,7 +15,7 @@
 
 仓库根目录另有 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)（第三方软件声明）；从参考库复制并改写的每个文件都要在其中登记。
 
-代码的说明在各包自己的 README 里：[`packages/kernel`](../packages/kernel/README.md)、[`packages/llm`](../packages/llm/README.md)、[`packages/session`](../packages/session/README.md)、[`packages/workspace`](../packages/workspace/README.md)、[`packages/test-support`](../packages/test-support/README.md)、[`apps/cli`](../apps/cli/README.md)。每份写明用途、公开 API、对应的 DSH 参考与未完成项。它们实现的格式与策略以两份规范为准：[`spec/data-formats.md`](spec/data-formats.md)（`.nexgent/` 下的文件格式、项目配置、会话 JSONL、账本）与 [`spec/permissions.md`](spec/permissions.md)（沙箱模式、路径与命令策略、工具审批、费用上限、密钥存放）。
+代码的说明在各包自己的 README 里：[`packages/kernel`](../packages/kernel/README.md)、[`packages/llm`](../packages/llm/README.md)、[`packages/session`](../packages/session/README.md)、[`packages/workspace`](../packages/workspace/README.md)、[`packages/test-support`](../packages/test-support/README.md)、[`apps/cli`](../apps/cli/README.md)。每份写明用途、公开 API、对应的 DSH 参考与未完成项。它们实现的格式与策略以两份规范为准：[`spec/data-formats.md`](spec/data-formats.md)（`.nexgent/` 与用户数据目录下的文件格式、项目配置、会话 JSONL、账本、自评、练习题、经验手册）与 [`spec/permissions.md`](spec/permissions.md)（沙箱模式、路径与命令策略、工具审批、费用上限、密钥存放）。
 
 ## 根 README 只描述已验收能力
 
@@ -67,8 +67,8 @@
 | [`plan/step-5-work-partition.md`](plan/step-5-work-partition.md) | 步骤 5 分工与验收设计，用户 2026-10-13 已定 |
 | [`plan/step-6-rework-partition.md`](plan/step-6-rework-partition.md) | 步骤 6 返工分工：去掉任务特化、改进器共享、门控防背答案、小试点测量（ADR 0011–0013），用户 2026-10-14 按推荐 |
 | [`plan/rework-partition.md`](plan/rework-partition.md) | 重做分工：三层进化、把进化的代价移出主路径、权限与协作翻正、界面重做（ADR 0017–0020），用户 2026-10-16 按推荐 |
-| [`spec/data-formats.md`](spec/data-formats.md) | 步骤 1–6 的文件格式；步骤 6 返工（ADR 0012、0013）补上 Nexgent 主目录（用户级配置、用户级改进器版本线与元改进队列）、`improverScope`、`shareImproverEvidence`、同类题规则与具体数值检查 |
-| [`spec/permissions.md`](spec/permissions.md) | 步骤 1–6 的权限与审批；步骤 6 返工补上主目录拒绝读写、用户级受保护字段、元诊断只读本批项目、改进器文字的具体数值检查 |
+| [`spec/data-formats.md`](spec/data-formats.md) | 步骤 1–6 的文件格式；步骤 6 返工（ADR 0012、0013）补上 Nexgent 主目录（用户级配置、用户级改进器版本线与元改进队列）、`improverScope`、`shareImproverEvidence`、同类题规则与具体数值检查；重做 C1（ADR 0017–0019）补上用户数据目录与迁移、项目身份、美元费用上限与 `cost.warning`、学习设置、自评、练习题集、经验手册 |
+| [`spec/permissions.md`](spec/permissions.md) | 步骤 1–6 的权限与审批；步骤 6 返工补上主目录拒绝读写、用户级受保护字段、元诊断只读本批项目、改进器文字的具体数值检查；重做 C1 补上用户数据目录、编辑工具、工具并发、美元费用上限与 80% 提醒、学习与学习预算 |
 | [`spec/agent-hooks.md`](spec/agent-hooks.md) | 步骤 2：agent loop 挂点、步骤 2 工具、系统提示增量、技能 |
 | [`validation/README.md`](validation/README.md) | 证据政策 |
 | [`validation/TEMPLATE.md`](validation/TEMPLATE.md) | 验收记录模板 |

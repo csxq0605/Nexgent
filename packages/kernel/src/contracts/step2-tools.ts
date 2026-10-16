@@ -16,6 +16,8 @@ export interface Step2ToolSpec {
   readonly approval: ToolApproval
   /** Step 3: copied into {@link ToolDefinition.selfSandboxed}. */
   readonly selfSandboxed?: boolean
+  /** ADR 0017 decision 5: copied into {@link ToolDefinition.concurrent}. */
+  readonly concurrent?: boolean
 }
 
 /** `present`: declare files as a deliverable; the host snapshots them into `.nexgent/outputs/`. */

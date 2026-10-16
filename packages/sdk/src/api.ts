@@ -78,7 +78,6 @@ import type {
   TrialReceipt,
   TrialStatus,
   ApprovalRequest,
-  CostCap,
   CredentialInfo,
   DelegationMode,
   DeliverableDiff,
@@ -93,6 +92,20 @@ import type {
   Goal,
   GoalStatus,
   LLMUsage,
+  CostCaps,
+  CostCapLevel,
+  CostCapScope,
+  DollarBudget,
+  HandbookEntry,
+  HandbookOp,
+  HandbookScope,
+  LearningConfig,
+  LearningConfigInput,
+  LearningPhase,
+  PracticeCase,
+  PracticeSplit,
+  ScorerReliability,
+  UserLearningSettings,
   MaterialMetadata,
   MemberExecutionForm,
   MemberIdentity,
@@ -110,7 +123,7 @@ import type {
 } from '@nexgent/kernel'
 
 /** API version; bumped only by a contract-change PR. */
-export const SDK_API_VERSION = 7
+export const SDK_API_VERSION = 8
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -315,6 +328,13 @@ export type SdkEvent =
   | CapabilityEventBase & { readonly type: 'improvement.job'; readonly job: ImprovementJobView }
   /** Step 6: the improver in force changed (a meta job adopted a child, a rollback); API 7: application-level (the improver is the user's). */
   | AppEventBase & { readonly type: 'improver.version'; readonly current: ImproverVersionView }
+  /**
+   * API 8 (ADR 0017 decision 5): spending crossed 80% of a cap (`warning`,
+   * once per cap instance) or met it (`reached`). Project-level, so a
+   * `perProject` warning reaches the window without an open session;
+   * `sessionId` of the triggering session is in `triggerSessionId`.
+   */
+  | CapabilityEventBase & { readonly type: 'cost.warning'; readonly warning: CostWarningView }
 
 /** The `type` vocabulary of {@link SdkEvent}. */
 export type SdkEventType = SdkEvent['type']
@@ -504,6 +524,96 @@ export interface ImproverDetail {
 }
 
 // ---------------------------------------------------------------------------
+// Costs and learning (API 8, ADR 0017–0019)
+// ---------------------------------------------------------------------------
+
+/** What a `cost.warning` event carries (the ledger `cost.warning` record without attribution). */
+export interface CostWarningView {
+  readonly scope: CostCapScope
+  readonly level: Exclude<CostCapLevel, 'ok'>
+  readonly limit: 'maxUsd' | 'maxTokens' | 'maxRequests'
+  readonly used: number
+  readonly cap: number
+  /** `used` includes estimated usage. */
+  readonly estimated: boolean
+  /** The session whose spending crossed it, when there is one. */
+  readonly triggerSessionId?: string
+  readonly ts: string
+}
+
+/** One handbook entry as the settings and learning pages show it. */
+export interface HandbookEntryView extends HandbookEntry {
+  /** Whether a task may be given it now (`isRetrievable`). */
+  readonly retrievable: boolean
+}
+
+/** What `handbook.list` returns: the entries this project sees (its own plus the user's shared ones when `useShared`). */
+export interface HandbookListing {
+  readonly entries: readonly HandbookEntryView[]
+  /** Whether user-scope entries are included (the project's `learning.useShared`). */
+  readonly sharedIncluded: boolean
+}
+
+/** What `handbook.show` returns: the entry and every operation on it, oldest first. */
+export interface HandbookEntryDetail {
+  readonly entry: HandbookEntryView
+  readonly ops: readonly HandbookOp[]
+}
+
+/** Learning spend of one phase in the budget window. */
+export interface LearningPhaseSpend {
+  readonly phase: LearningPhase
+  readonly usd: number
+  readonly requestCount: number
+}
+
+/** What `learning.status` returns. */
+export interface LearningStatus {
+  /** The project's `learning` settings. */
+  readonly config: LearningConfig
+  /** Whether the user acknowledged the notice (user level). */
+  readonly noticeAcknowledged: boolean
+  /** `mayLearn`: enabled and acknowledged. */
+  readonly active: boolean
+  /** Rules id of self-evaluations (`LEARNING_RULES`). */
+  readonly rules: string
+  /** Spend in the rolling window, against `config.budget`. */
+  readonly budget: DollarBudget & {
+    readonly spentUsd: number
+    readonly remainingUsd: number
+    /** Window start, ISO-8601 UTC. */
+    readonly windowStart: string
+    /** Some of the spend was estimated (`usageEstimated`). */
+    readonly estimated: boolean
+    readonly phases: readonly LearningPhaseSpend[]
+  }
+  /** Self-evaluations recorded in the window. */
+  readonly selfEvaluations: number
+  /** Scorer reliability of this project (ADR 0019 decision 6). */
+  readonly reliability: ScorerReliability
+}
+
+/** One practice case without its prompt and rubric (`practice.list`). */
+export interface PracticeCaseSummary {
+  readonly id: string
+  readonly source: PracticeCase['source']
+  readonly split: PracticeSplit
+  readonly clusterId: string
+  readonly createdAt: string
+  readonly projectId?: string
+  readonly taskId?: string
+  /** First line of the prompt, at most 200 characters. */
+  readonly title: string
+  readonly score?: number
+}
+
+/** What `practice.list` returns (read-only in API 8). */
+export interface PracticeListing {
+  readonly cases: readonly PracticeCaseSummary[]
+  readonly counts: Readonly<Record<PracticeSplit, number>>
+}
+
+// ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 
@@ -513,11 +623,14 @@ export interface ProjectSettings {
   readonly thinking: ThinkingMode
   readonly effort: Effort
   readonly sandboxMode: SandboxMode
-  readonly costCaps: { readonly perTask?: CostCap; readonly perProject?: CostCap }
-  /** Step 5: whether counted feedback and failed checks start improvement jobs on their own (default `true`). */
+  /** API 8: `perConversation` and `maxUsd` added. */
+  readonly costCaps: CostCaps
+  /** Step 5: whether counted feedback and failed checks start improvement jobs on their own (default `true`). Superseded by `learning.enabled` (API 8). */
   readonly autoImprove: boolean
   /** Step 5: threshold, improvement budget, model and thinking of improvement jobs. */
   readonly improvement: ImprovementConfig
+  /** API 8 (ADR 0017–0019): background learning switch, dollar budget, self-eval ceiling, sharing. */
+  readonly learning: LearningConfig
   /** The model API key: configured or not, and from where. Never the value. */
   readonly apiKey: CredentialInfo
 }
@@ -530,12 +643,18 @@ export interface ProjectSettings {
  * from the settings page; the model can change none of them without approval
  * (`GUARDED_PROJECT_CONFIG_FIELDS`).
  */
-export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey' | 'improvement'>> & { readonly improvement?: ImprovementConfigInput }
+export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey' | 'improvement' | 'learning'>> & {
+  readonly improvement?: ImprovementConfigInput
+  /** API 8: replaces the object as given; missing fields take their defaults. */
+  readonly learning?: LearningConfigInput
+}
 
 /** API 7 (ADR 0012): `<NEXGENT_HOME>/config.json`, shared by every project. */
 export interface UserSettings {
   /** Meta jobs over the shared improver: switch (default off), `everyJobs`, meta budget, model. */
   readonly improvement: { readonly meta: MetaImprovementConfig }
+  /** API 8: whether the user acknowledged background learning (`learning.acknowledge`). */
+  readonly learning: UserLearningSettings
 }
 
 /** A user settings change from the settings page (a user action, no approval prompt); missing meta fields take their defaults. */
@@ -714,6 +833,19 @@ export interface SdkMethods {
   'improvers.show': (input: { readonly projectId?: string; readonly version: ImproverVersion }) => Promise<ImproverDetail>
   /** Step 6: roll back to the previous improver (or `toVersion`, which must have been in force earlier, `v0` included); writes a `manual` revision. API 7: user-level, affects every project. */
   'improvers.rollback': (input: { readonly projectId?: string; readonly toVersion?: ImproverVersion; readonly reason?: string }) => Promise<ImproverVersionView>
+
+  /** API 8: handbook entries this project sees; retired ones only with `includeRetired`; `scope` narrows. */
+  'handbook.list': (input: { readonly projectId: string; readonly scope?: HandbookScope; readonly includeRetired?: boolean }) => Promise<HandbookListing>
+  /** API 8: one entry with its operations; an unknown id rejects `handbook/not-found`. */
+  'handbook.show': (input: { readonly projectId: string; readonly entryId: string }) => Promise<HandbookEntryDetail>
+  /** API 8: learning settings, spend in the window and scorer reliability. */
+  'learning.status': (input: { readonly projectId: string }) => Promise<LearningStatus>
+  /** API 8: the user acknowledged the background-learning notice (user level; idempotent, keeps the first time). */
+  'learning.acknowledge': (input: Record<string, never>) => Promise<UserSettings>
+  /** API 8: practice cases (user level), optionally of one project or split; read-only. */
+  'practice.list': (input: { readonly projectId?: string; readonly split?: PracticeSplit }) => Promise<PracticeListing>
+  /** API 8: one practice case; an unknown id rejects `practice/not-found`. */
+  'practice.show': (input: { readonly caseId: string }) => Promise<PracticeCase>
 }
 
 /** An IPC method name. */
@@ -782,6 +914,12 @@ export const SDK_METHOD_NAMES = [
   'improvers.list',
   'improvers.show',
   'improvers.rollback',
+  'handbook.list',
+  'handbook.show',
+  'learning.status',
+  'learning.acknowledge',
+  'practice.list',
+  'practice.show',
 ] as const satisfies readonly SdkMethodName[]
 
 /** The in-process SDK object (CLI and desktop main process). */
