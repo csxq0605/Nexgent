@@ -14,6 +14,7 @@ import {
   resolveWorkspaceLayout,
   ZERO_USAGE,
   type CapabilityDecision,
+  type LLMProvider,
   type LLMUsage,
   type PracticeCase,
   type SelfEvaluation,
@@ -33,6 +34,8 @@ import {
   listPracticeCases,
   loadGenericPracticeCases,
   practiceCasesDirectory,
+  providerSelfEvalModel,
+  rejectsThinkingOff,
   recordEvaluationFeedback,
   referencedPaths,
   RUBRIC_GENERATOR,
@@ -410,5 +413,31 @@ describe('generic checks', () => {
     const checks: TaskCheck[] = await genericChecks(root, ['out.csv'], 'done')
     expect(checks).toEqual([{ name: 'totals-recompute', passed: false, detail: '1 of 1 total columns do not add up' }])
     expect(await genericChecks(root, [], 'no table, no reference')).toEqual([])
+  })
+})
+
+describe('models without a no-reasoning mode', () => {
+  it('a request refused for thinking off is asked again with thinking on, once', async () => {
+    const sent: { thinking: string; effort?: string }[] = []
+    const provider = {
+      info: { id: 'scripted', endpoint: 'http://localhost', defaultModel: 'claude-opus-5-5' },
+      async *complete(request: { thinking: string; effort?: string }) {
+        sent.push({ thinking: request.thinking, ...(request.effort === undefined ? {} : { effort: request.effort }) })
+        if (request.thinking === 'off') {
+          yield { type: 'error', error: { code: 'llm/request-failed', message: 'HTTP 400: "thinking.type.between_tools" is not supported for this model.' }, httpStatus: 400 }
+          return
+        }
+        yield { type: 'text.delta', text: '{"ok":true}' }
+        yield { type: 'usage', usage: { ...ZERO_USAGE, inputTokens: 10, outputTokens: 5 } }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    } as unknown as LLMProvider
+    const model = providerSelfEvalModel({ providerFor: () => provider, estimateUsd: () => 0.001 })
+    const reply = await model.complete({ phase: 'self-eval', model: 'claude-opus-5-5', system: 's', user: 'u', maxTokens: 100, thinking: 'off', taskId: 't' })
+    expect(sent).toEqual([{ thinking: 'off' }, { thinking: 'on', effort: 'low' }])
+    expect(reply.failure).toBeUndefined()
+    expect(reply.text).toBe('{"ok":true}')
+    expect(rejectsThinkingOff('llm/request-failed: HTTP 500: thinking')).toBe(false)
+    expect(rejectsThinkingOff('llm/request-failed: HTTP 400: max_tokens too large')).toBe(false)
   })
 })

@@ -19,6 +19,7 @@ export {
   parseRubric,
   parseScores,
   providerSelfEvalModel,
+  rejectsThinkingOff,
   RUBRIC_GENERATOR,
   rubricPrompt,
   scoredBy,
