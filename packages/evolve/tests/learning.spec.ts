@@ -33,6 +33,7 @@ import {
   learningBudgetStatus,
   longestSharedRun,
   parseReflection,
+  projectNames,
   readLearningQueue,
   tokenize,
   type CurationContext,
@@ -219,6 +220,17 @@ describe('curation', () => {
     // A project entry cannot retire a user entry.
     expect(result.changes[0]).not.toHaveProperty('supersedes')
     expect(result.rejected.map(r => r.reason)).toEqual(['outcome-unknown', 'not-given'])
+  })
+
+  it('keeps an entry that names a file of the project\'s tasks in the project, and refuses such an edit of a shared entry', () => {
+    const result = curateReflection([
+      { op: 'add', text: 'Name every output by its full path from the project root, for example out/jan_summary.csv, never a bare file name.', keywords: ['paths'], scope: 'user', supersedes: [] },
+      { op: 'add', text: 'Name every output by its full path from the project root and check it exists before the final reply.', keywords: ['paths'], scope: 'user', supersedes: [] },
+      { op: 'edit', entryId: given.id, text: 'Check the header rows of out/jan_summary.csv before merging tables.' },
+    ], base({ projectMessages: [{ taskId: 't0', text: 'Summarize data/sales_jan.csv into out/jan_summary.csv.', projectId: PROJECT }] }))
+    expect(result.changes.map(change => change.op === 'add' ? change.scope : change.op)).toEqual(['project', 'user'])
+    expect(result.rejected).toEqual([expect.objectContaining({ reason: 'project-name', detail: 'out/jan_summary.csv' })])
+    expect(projectNames('See README.md and src/a.ts', ['Edit src/a.ts'])).toEqual(['src/a.ts'])
   })
 
   it('never lets a task vote for an entry learned from itself', () => {

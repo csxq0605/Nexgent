@@ -20,8 +20,10 @@
  * - Votes only on the entries given to the task, only with a known outcome,
  *   one per entry per task, never on an entry learned from the same task
  *   (an entry needs evidence from other tasks to be enabled).
- * - Project-level when the reflection says so or the project does not
- *   contribute (`learning.contribute`).
+ * - Project-level when the reflection says so, the project does not
+ *   contribute (`learning.contribute`), or the text names a file or path
+ *   of this project's tasks ({@link projectNames}): names mean something
+ *   only in their project, so such an entry is not shared with others.
  *
  * What passes goes to `Handbook.apply` (`@nexgent/capabilities`), which
  * checks its own limits, duplicates and values again under the log's lock
@@ -54,7 +56,7 @@ export const MAX_OPS_PER_REFLECTION = 10
 /** Why an operation was not written. */
 export type CurationRejection =
   | 'empty' | 'too-long' | 'instance-literal' | 'copies-request' | 'duplicate' | 'unknown-entry' | 'not-given'
-  | 'outcome-unknown' | 'already-voted' | 'own-entry' | 'too-many'
+  | 'outcome-unknown' | 'already-voted' | 'own-entry' | 'too-many' | 'project-name'
 
 /** What curation knows about the task. */
 export interface CurationContext {
@@ -101,6 +103,15 @@ export function normalizeKeywords(keywords: readonly string[], text: string): st
   return out.length > 0 ? out : keywordsOf(text, 8, HANDBOOK_LIMITS.maxKeywordChars)
 }
 
+/** File names (`name.ext`) and paths (`a/b`) of a text. */
+const NAME = /(?<![\p{L}\p{N}_./-])(?:[\p{L}\p{N}_.-]+\/)+[\p{L}\p{N}_.-]+|(?<![\p{L}\p{N}_./-])[\p{L}\p{N}_-]+\.[A-Za-z][A-Za-z0-9]{0,4}(?![\p{L}\p{N}_/])/gu
+
+/** The file names and paths of `text` that also appear in the project's task texts (pure). */
+export function projectNames(text: string, taskTexts: readonly string[]): string[] {
+  const names = [...new Set([...text.matchAll(NAME)].map(match => match[0].replace(/[.]+$/, '')))]
+  return names.filter(name => taskTexts.some(task => task.includes(name)))
+}
+
 /** Decide on a reflection's operations (pure). */
 export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationContext): CurationResult {
   const result: { changes: HandbookChange[]; rejected: { op: ProposedOp; reason: CurationRejection; detail?: string }[] } = { changes: [], rejected: [] }
@@ -109,6 +120,7 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
   for (const entry of ctx.user) byId.set(entry.id, entry)
   const visible = [...byId.values()].filter(entry => entry.status !== 'retired')
   const voted = new Set(ctx.votedFromTask)
+  const taskTexts = [...ctx.requests, ...ctx.projectMessages.map(message => message.text)]
   const added: { text: string; scope: HandbookScope }[] = []
   let adds = 0
   let written = 0
@@ -140,8 +152,9 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
         reject(op, 'too-many')
         continue
       }
-      const scope: HandbookScope = op.scope === 'project' || !ctx.contribute ? 'project' : 'user'
       const text = op.text.trim()
+      const named = projectNames(text, taskTexts).length > 0
+      const scope: HandbookScope = op.scope === 'project' || !ctx.contribute || named ? 'project' : 'user'
       const failed = checkText(text, scope)
       if (failed !== undefined) {
         reject(op, failed.reason, failed.detail)
@@ -176,6 +189,11 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
     if (op.op === 'edit') {
       const text = op.text?.trim()
       if (text !== undefined) {
+        const names = entry.scope === 'user' ? projectNames(text, taskTexts) : []
+        if (names.length > 0) {
+          reject(op, 'project-name', names.join(', '))
+          continue
+        }
         const failed = checkText(text, entry.scope)
         if (failed !== undefined) {
           reject(op, failed.reason, failed.detail)
