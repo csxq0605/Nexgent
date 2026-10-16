@@ -7,6 +7,7 @@ import {
   T,
   candidateStatusText,
   componentKindText,
+  costRatioText,
   decisionReasonText,
   failureCategoryText,
   formatTime,
@@ -20,6 +21,7 @@ import {
   triggerText,
   tokensText,
 } from '../strings.js'
+import { DecisionDetail } from './DecisionDetail.js'
 
 function statusClass(status: string): string {
   if (status === 'adopted') return 'ok'
@@ -223,9 +225,10 @@ function Detail({ detail }: { readonly detail: ImprovementDetail }): JSX.Element
           <span className="muted small">{T.improvementNoGate}</span>
         ) : (
           <>
-            <span className="small wrap" data-testid="improvement-gate-verdict">
-              {improvementStatusText(decision.outcome === 'adopted' ? 'adopted' : decision.outcome === 'rejected' ? 'rejected' : decision.outcome === 'awaiting-approval' ? 'awaiting-approval' : decision.outcome)}：{decisionReasonText(decision.reason)}。{decision.detail}
-            </span>
+            <div className="small wrap" data-testid="improvement-gate-verdict">
+              {improvementStatusText(decision.outcome === 'adopted' ? 'adopted' : decision.outcome === 'rejected' ? 'rejected' : decision.outcome === 'awaiting-approval' ? 'awaiting-approval' : decision.outcome)}：{decisionReasonText(decision.reason)}。
+              <DecisionDetail detail={decision.detail} {...(verdict === undefined ? {} : { summary: `${costRatioText(verdict.costRatio)}。` })} />
+            </div>
             {decision.reason === 'instance-literal' && (
               <div className="stack">
                 <span className="small">

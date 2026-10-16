@@ -70,6 +70,23 @@ describe('gate conclusions of ADR 0013', () => {
     fireEvent.click(await screen.findByTestId('candidate-status'))
     await waitFor(() => expect(screen.getByTestId('candidate-reason').textContent).toContain('回放前已拒绝：候选含有原题的具体数值'))
   })
+
+  it('the capabilities page gives a gate verdict\'s numbers in words and folds the English detail line away', async () => {
+    const bridge = new FakeBridge()
+    bridge.capabilities = { ...bridge.capabilities, candidates: [candidate({ id: 'c-3', status: 'rejected', decision: { id: 'd-3', outcome: 'rejected', reason: 'no-improvement', detail: 'reject (no-improvement). Quality passed: candidate 67%, baseline 67%.' } })] }
+    const verdict = { outcome: 'reject', reason: 'no-improvement', passRate: { candidate: 2 / 3, baseline: 2 / 3 }, similarPassRate: { candidate: 1, baseline: 1 }, feedbackPassRate: { candidate: 0, baseline: 0 }, costRatio: 1.358, decidedByReview: false } as TrialVerdict
+    bridge.evidence['c-3'] = { receipts: [], decisions: [decision({ id: 'd-3', candidateId: 'c-3', reason: 'no-improvement', verdict })] }
+    await renderApp(bridge)
+    fireEvent.click(screen.getByTestId('tab-capabilities'))
+    fireEvent.click(await screen.findByTestId('candidate-status'))
+    await waitFor(() => expect(screen.getByTestId('candidate-reason').textContent).toContain(
+      '原因：没有改进。检查通过率 候选 67% / 基线 67%；同类题通过率：候选 100%，现在 100%；反馈检查（单独记）候选 0% / 基线 0%；费用是基线的 1.36 倍。',
+    ))
+    // The English line is still there, folded under a summary.
+    const record = screen.getByTestId('candidate-reason').querySelector('details')!
+    expect(record.open).toBe(false)
+    expect(record.textContent).toContain('reject (no-improvement)')
+  })
 })
 
 describe('approval for a candidate verified only on the original task', () => {

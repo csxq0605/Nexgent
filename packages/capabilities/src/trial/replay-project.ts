@@ -2,12 +2,13 @@
  * The throw-away project one trial run works in: the replay case's snapshot
  * tree written out from `.nexgent/snapshots/objects/`, the project's config
  * (with automatic trials off and the remaining trial budget as the per-task
- * cap), the materials the case's messages attached, and the arm's capability
+ * cap), the project's materials as the task started (with those the case's
+ * messages attached), and the arm's capability
  * bundle adopted as revision 1 of a fresh activation chain. Nothing in it is
  * ever copied back to the real project.
  */
 import { createHash } from 'node:crypto'
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -24,6 +25,22 @@ import {
 import { validateCapabilityFile } from '@nexgent/session'
 import { CapabilityStore } from '../capability-store.js'
 import type { ReplayCase } from './replay-set.js'
+
+/** Ids of the project's materials that were present at `at` (added by then and not yet removed); unreadable ones are skipped. */
+async function materialsAt(layout: WorkspaceLayout, at: string): Promise<string[]> {
+  const ids: string[] = []
+  for (const id of await readdir(layout.materials).catch(() => [] as string[])) {
+    try {
+      const value = JSON.parse(await readFile(join(layout.materials, id, 'material.json'), 'utf8')) as { addedAt?: unknown; status?: unknown; removedAt?: unknown }
+      if (typeof value.addedAt !== 'string' || value.addedAt > at) continue
+      if (value.status === 'removed' && !(typeof value.removedAt === 'string' && value.removedAt > at)) continue
+      ids.push(id)
+    } catch {
+      // Not a material (a `.tmp-*` copy in progress, or unreadable metadata).
+    }
+  }
+  return ids
+}
 
 /** What {@link prepareReplayProject} needs. */
 export interface ReplayProjectInput {
@@ -111,7 +128,8 @@ export async function prepareReplayProject(input: ReplayProjectInput): Promise<R
     config = { ...config, costCaps: { ...caps, perTask }, autoImprove: false, capabilities: { ...capabilities, autoTrial: false } }
     await writeFile(layout.configFile, `${JSON.stringify(config, null, 2)}\n`)
 
-    const materials = new Set(input.replay.messages.flatMap(message => message.materialIds ?? []))
+    // A task may use a material added before it without attaching it again: copy what the project had when the task started.
+    const materials = new Set([...input.replay.messages.flatMap(message => message.materialIds ?? []), ...(await materialsAt(input.layout, input.replay.takenAt))])
     for (const id of materials) {
       if (!/^[0-9a-f-]{36}$/.test(id)) continue
       await cp(join(input.layout.materials, id), join(layout.materials, id), { recursive: true, errorOnExist: false }).catch(() => undefined)
