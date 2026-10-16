@@ -417,14 +417,15 @@ export function playbookScript(h, name, ctx) {
  *   scripted with `taskScript` and `feedbackScript`); `tasks` (default the history tasks, then the
  *   feedback task; the feedback goes to the last one); `beforeFeedback(ctx)` and `afterFeedback(entry, ctx)` hooks, whose
  *   results are kept as `obs.before` and each feedback entry's `observed`
- *   (`ctx`: `{ sdk, projectId, root, feedbackSession, id? }`).
+ *   (`ctx`: `{ sdk, projectId, root, feedbackSession, id? }`); `home` (the NEXGENT_HOME the
+ *   project opens under; default `<work>/home`; pass another project's to share one user).
  * @returns `{ root, home, projectId, tasks, deliverable, deliverables, feedback, listing }`; each
  *   feedback entry carries the oracle's `counted` and the feedback turn's end reason.
  */
 export async function runFeedbackProject(h, pkgs, work, options = {}) {
   const { feedback = FEEDBACK, log = () => undefined, config, beforeFeedback, afterFeedback } = options
   const root = join(work, 'project')
-  const home = join(work, 'home')
+  const home = options.home ?? join(work, 'home')
   await mkdir(root, { recursive: true })
   await writeFeedbackProject(root)
   if (config !== undefined) {

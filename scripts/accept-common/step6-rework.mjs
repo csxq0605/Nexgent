@@ -34,6 +34,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { dataDirSync } from './data-dir.mjs'
 import { ledgerOf } from './step4-headless.mjs'
 import { CONVENTION_COLUMN, FEEDBACK } from '../real-task/step5-orders.mjs'
 import { shellCall } from './scenario-step2.mjs'
@@ -255,7 +256,7 @@ export class ReworkModel extends MetaModel {
   }
 }
 
-const capDir = root => join(root, '.nexgent', 'capabilities')
+const capDir = root => join(dataDirSync(root), 'capabilities')
 
 /** A job's decision and the runs of its trial, per case (`{ caseId: { candidate: [statuses], baseline: [...] } }`). */
 async function decisionOf(capabilities, root, job) {
@@ -293,9 +294,10 @@ async function feedbackProject(h, pkgs, dir, model, log, { home, config, feedbac
     ...(config === undefined ? {} : { config }),
     ...(feedback === undefined ? {} : { feedback }),
     ...(tasks === undefined ? {} : { tasks }),
-    createSdk: (env, own) => createStep5Sdk(pkgs, { env: { ...env, NEXGENT_HOME: home ?? own }, home: home ?? own }),
+    ...(home === undefined ? {} : { home }),
+    createSdk: (env, own) => createStep5Sdk(pkgs, { env, home: own }),
   })
-  return { server, root: project.root, home: home ?? project.home, project, session: project.tasks.at(-1)?.sessionId, taskSessions: Object.fromEntries(project.tasks.map(task => [task.sessionId, task.id])) }
+  return { server, root: project.root, home: project.home, project, session: project.tasks.at(-1)?.sessionId, taskSessions: Object.fromEntries(project.tasks.map(task => [task.sessionId, task.id])) }
 }
 
 // ---- shared (H19) ---------------------------------------------------------------------------
@@ -490,7 +492,7 @@ async function similarCase(h, pkgs, capabilities, dir, log, { name, similarMode,
     out.decision = await decisionOf(capabilities, root, done)
     out.similarReplays = model.similarReplays.length
     // Trial runs name cases by task id (the root task snapshot's taskId), not by session id.
-    const snapDir = join(root, '.nexgent', 'snapshots', 'tasks')
+    const snapDir = join(dataDirSync(root), 'snapshots', 'tasks')
     const snapshots = await Promise.all((await readdir(snapDir).catch(() => [])).filter(name => /^[^.]+\.json$/.test(name)).map(async name => JSON.parse(await readFile(join(snapDir, name), 'utf8'))))
     const taskIdOf = sessionId => snapshots.find(snapshot => snapshot.sessionId === sessionId)?.taskId
     out.taskIds = Object.fromEntries(Object.entries(p.taskSessions).map(([sessionId, label]) => [label, taskIdOf(sessionId)]))

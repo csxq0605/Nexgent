@@ -31,6 +31,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
+import { dataDirSync } from './data-dir.mjs'
 import { ledgerOf, sessionsOf } from './step4-headless.mjs'
 import { DIAGNOSIS_TOOL, FEEDBACK_TASK, MAST, outputFor, PROPOSAL_MARKER, runFeedbackProject, SCRIPTED_API_KEY, SECOND_SKILL, TERMINAL_STATES } from './step5-fixtures.mjs'
 import { evidenceFor, firstUserText, Step5Model, USAGE } from './step5-model.mjs'
@@ -93,7 +94,7 @@ export async function versionFacts(pkgs, root) {
     jobs: jobs.map(job => ({ jobId: job.id, status: job.status, improverVersion: job.improverVersion, improverScope: job.improverScope, history: (job.history ?? []).map(change => change.status) })),
     sessions,
     ledger,
-    improversDir: await readdir(join(root, '.nexgent', 'improvers')).then(() => true, () => false),
+    improversDir: await readdir(join(dataDirSync(root), 'improvers')).then(() => true, () => false),
   }
 }
 
@@ -352,7 +353,7 @@ export async function pinnedPhase(h, pkgs, capabilities, work, log) {
       await sdk.dispose()
     }
     out.facts = await versionFacts(pkgs, root)
-    out.projectLine = await homeImprovers(join(root, '.nexgent'))
+    out.projectLine = await homeImprovers(dataDirSync(root))
     out.diagnoseTexts = model.diagnoseTexts
   } finally {
     await server.close()

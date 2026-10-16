@@ -47,6 +47,7 @@ import { spawn } from 'node:child_process'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { dataDirSync, registerHome } from './data-dir.mjs'
 import { CLI_BIN } from './harness.mjs'
 import { filesContaining } from './step2-headless.mjs'
 import { ledgerOf, sessionsOf } from './step4-headless.mjs'
@@ -327,7 +328,8 @@ export async function triggerPhase(h, pkgs, work, log) {
       feedback: [],
       log: line => log(`trigger second: ${line}`),
       config: { autoImprove: false, learning: { enabled: true } },
-      createSdk: env => createStep5Sdk(pkgs, { env: { ...env, NEXGENT_HOME: home }, home }),
+      home,
+      createSdk: (env, own) => createStep5Sdk(pkgs, { env, home: own }),
     })
     const secondSession = second.tasks.at(-1)?.sessionId
     model.phase = 'job'
@@ -447,7 +449,7 @@ async function projectState(sdk, projectId, root) {
     work[rel] = await hashOf(join(root, rel))
   }
   const capabilities = {}
-  for (const rel of await filesUnder(join(root, '.nexgent', 'capabilities'))) capabilities[rel] = await hashOf(join(root, '.nexgent', 'capabilities', rel))
+  for (const rel of await filesUnder(join(dataDirSync(root), 'capabilities'))) capabilities[rel] = await hashOf(join(dataDirSync(root), 'capabilities', rel))
   const sessions = {}
   for (const [id, records] of Object.entries(await sessionsOf(root))) {
     const start = records.find(r => r.type === 'session.start')
@@ -480,7 +482,7 @@ export async function projectRecords(pkgs, root, { home } = {}) {
       if (kind === 'job') jobs.push(value)
     }
   }
-  const lines = [[join(root, '.nexgent', 'improvers'), 'improvers']]
+  const lines = [[join(dataDirSync(root), 'improvers'), 'improvers']]
   if (home !== undefined) lines.push([join(home, 'improvers'), '<home>/improvers'])
   for (const [improvers, label] of lines) {
     for (const name of await readdir(join(improvers, 'bundles')).catch(() => [])) files.push({ kind: 'improver', path: `${label}/bundles/${name}`, value: await readJsonFile(join(improvers, 'bundles', name)) })
@@ -515,13 +517,14 @@ export async function projectRecords(pkgs, root, { home } = {}) {
   }
   // ADR 0012: a job that pinned an improver names its scope; there is only the user's.
   const scopes = jobs.filter(job => job.improverVersion !== undefined).map(job => ({ id: job.id, improverScope: job.improverScope }))
-  const secretHits = [...await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root), ...(home === undefined ? [] : (await filesContaining(home, SCRIPTED_API_KEY, home)).map(hit => `<home>/${hit}`))]
+  const projectDirs = [...new Set([join(root, '.nexgent'), dataDirSync(root)])]
+  const secretHits = [...(await Promise.all(projectDirs.map(dir => filesContaining(dir, SCRIPTED_API_KEY, root)))).flat(), ...(home === undefined ? [] : (await filesContaining(home, SCRIPTED_API_KEY, home)).map(hit => `<home>/${hit}`))]
   return { root, sessions, ledger, files, issues, fileIssues, checked, scopes, secretHits }
 }
 
 /** What the origin rule (ADR 0009) reads, gathered from the project's own files (H07). */
 async function originFacts(capabilities, root, metaId, metaRoot = root) {
-  const capDir = join(root, '.nexgent', 'capabilities')
+  const capDir = join(dataDirSync(root), 'capabilities')
   const chain = await capabilities.readActivationChain(join(capDir, capabilities.ACTIVATION_DIR)).catch(error => ({ revisions: [], error: errorText(error) }))
   const sessions = await sessionsOf(root)
   const taskVersion = sessionId => {
@@ -621,6 +624,8 @@ async function comparisonPhase(h, pkgs, capabilities, work, log, { name, arms, s
       // Where the meta job lives: this project, or another project of the same user.
       const metaRoot = fromOther ? join(work, 'other') : root
       if (fromOther) await mkdir(metaRoot, { recursive: true })
+      // The other project belongs to the same user: its data sits under the same NEXGENT_HOME.
+      registerHome(metaRoot, home)
       const metaProjectId = fromOther ? (await sdk.call('projects.open', { root: metaRoot, create: true })).projectId : projectId
       out.projectIds = { origin: await pkgs.evolve.userProjectId(root), meta: await pkgs.evolve.userProjectId(metaRoot) }
       out.metaFrom = fromOther ? 'other project' : 'this project'
@@ -681,7 +686,7 @@ async function comparisonPhase(h, pkgs, capabilities, work, log, { name, arms, s
       out.export = { session: exported, code: cliExit.code, stderr: cliExit.stderr.slice(0, 2000), files: (await readdir(exportDir).catch(() => [])).sort(), secretHits: await filesContaining(exportDir, SCRIPTED_API_KEY, work) }
     }
     // Costs by attribution (H14), through the product's own ledger reads.
-    const ledger = new pkgs.session.JsonlLedger({ ledgersDir: join(root, '.nexgent', 'ledgers') })
+    const ledger = new pkgs.session.JsonlLedger({ ledgersDir: join(dataDirSync(root), 'ledgers') })
     const cost = async query => {
       const sum = await pkgs.kernel.sumLedgerCost(ledger, query)
       return { requests: sum.total.requestCount, tokens: sum.total.usage?.totalTokens ?? null }
@@ -755,7 +760,7 @@ async function rejectExtra(pkgs, capabilities, { sdk, projectId, root, home, mod
     const tempRoot = join(work, 'limit')
     await mkdir(tempRoot, { recursive: true })
     try {
-      const copy = await capabilities.prepareProjectCopy({ layout: pkgs.kernel.resolveWorkspaceLayout(root), origin: { tree: comparison.origin.tree, caseId: comparison.origin.sourceJobId }, version: comparison.origin.capabilityVersion, tempRoot, keepMaxBytes })
+      const copy = await capabilities.prepareProjectCopy({ layout: pkgs.kernel.resolveProjectLayout(root, { home }), origin: { tree: comparison.origin.tree, caseId: comparison.origin.sourceJobId }, version: comparison.origin.capabilityVersion, tempRoot, keepMaxBytes })
       const released = await copy.release({ keep: true })
       out.copyLimit = { keepMaxBytes, status: released.status, bytes: released.bytes, exists: await readdir(copy.root).then(() => true, () => false) }
     } catch (error) {
