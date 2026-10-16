@@ -853,7 +853,8 @@
                 "timeout",
                 "shutdown",
                 "cost-cap",
-                "parent"
+                "parent",
+                "step-limit"
               ]
             }
           }
@@ -953,6 +954,9 @@
         },
         "lastCompactionSeq": {
           "$ref": "#/$defs/positiveInteger"
+        },
+        "lastUsage": {
+          "$ref": "#/$defs/usage"
         },
         "parentSessionId": {
           "$ref": "#/$defs/nonEmptyString"

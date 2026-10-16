@@ -244,7 +244,8 @@ describe('session record schema', () => {
 
   it('reads records written before cacheWriteTokens existed with it as unknown', async () => {
     const text = await readFile(new URL('./fixtures/spec-example.jsonl', import.meta.url), 'utf8')
-    const legacy = text.replace(/"cacheWriteTokens":(?:"unknown"|\d+),/g, '')
+    // Such records also predate `lastUsage` (ADR 0021).
+    const legacy = text.replace(/,"lastUsage":\{[^}]*\}/g, '').replace(/"cacheWriteTokens":(?:"unknown"|\d+),/g, '')
     expect(legacy).not.toContain('cacheWriteTokens')
     const scan = scanSessionLog(Buffer.from(legacy, 'utf8'), ID)
     expect(scan.truncation).toBeUndefined()

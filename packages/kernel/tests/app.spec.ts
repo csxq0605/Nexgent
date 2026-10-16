@@ -39,10 +39,11 @@ describe('default product profile', () => {
     apiKeyEnv: 'NEXGENT_API_KEY',
     thinking: 'on',
     effort: 'medium',
-    maxTokens: 16000,
-    timeoutMs: 600000,
+    maxTokens: 64000,
+    timeoutMs: 1200000,
+    modelTimeoutMs: 1800000,
     streamIdleTimeoutMs: 180000,
-    maxRetries: 0,
+    maxRetries: 6,
     fallbacks: 'default',
     personaPrefix: 'You are Nexgent, a general task agent running on the {{model}} model. '
       + 'Complete the user\'s task with the available materials and tools. '
@@ -74,7 +75,7 @@ describe('default product profile', () => {
       thinking: 'on',
       effort: 'medium',
       maxTokens: ROUTE.maxTokens,
-      modelTimeoutMs: ROUTE.timeoutMs,
+      modelTimeoutMs: ROUTE.modelTimeoutMs,
       streamIdleTimeoutMs: ROUTE.streamIdleTimeoutMs,
       systemPrompt: { persona: ROUTE.personaPrefix, suffix: ROUTE.personaSuffix },
     })

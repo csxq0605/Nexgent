@@ -261,7 +261,7 @@ export const sessionRecordSchema: JsonObject = {
     turnEndReason: {
       oneOf: [
         closedObject({ kind: { const: 'completed' } }, ['kind']),
-        closedObject({ kind: { const: 'cancelled' }, cause: { enum: ['user', 'timeout', 'shutdown', 'cost-cap', 'parent'] } }, [
+        closedObject({ kind: { const: 'cancelled' }, cause: { enum: ['user', 'timeout', 'shutdown', 'cost-cap', 'parent', 'step-limit'] } }, [
           'kind',
           'cause',
         ]),
@@ -284,6 +284,7 @@ export const sessionRecordSchema: JsonObject = {
         lastSeq: ref('positiveInteger'),
         goal: ref('goal'),
         lastCompactionSeq: ref('positiveInteger'),
+        lastUsage: ref('usage'),
         parentSessionId: ref('nonEmptyString'),
         member: ref('memberIdentity'),
         capabilityVersion: ref('capabilityVersion'),

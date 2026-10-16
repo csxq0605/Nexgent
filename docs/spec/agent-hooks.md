@@ -30,10 +30,10 @@
    - `inject` 的每一段写一条 `user.message { source: 'inject' }`，按提供者顺序，在用户消息**之前**。
 5. 写用户消息 `user.message { source: 'user' | 'feedback', materials? }`。`materials` 是本条消息引用的资料 ID（`SendMessageInput.materialIds`），资料引用的正文由 `materials` 提供者在第 4 步作为 `inject` 写出。
 6. 步骤循环，每一步：
-   1. 取消检查、费用上限检查（步骤 1 不变）；
+   1. 取消检查、费用上限检查（步骤 1 不变）；调用次数检查：本轮已用满 `maxSteps` 次调用时以 `cancelled`、`cause: 'step-limit'` 结束本轮（ADR 0021；此前是 `internal` 错误），用满前的最后一次调用（`maxSteps` ≥ 4 时）先注入一条收尾提示 `user.message { source: 'inject' }`；
    2. \* 压缩检查：有 `compactor` 且本轮还没有失败过压缩时调用 `shouldCompact(input)`；为真则 `compact(input, signal)`，成功后写 `compaction` 并按投影规则替换内存中的历史；
    3. 步骤 3：逐次注入：在压缩检查之后、模型请求之前，按登记顺序调用 agent 上的 `beforeRequest` 注入器（kernel 接口 `Agent.beforeRequest`，不是契约，见 §宿主接口；`@nexgent/team` 用它在运行中的队友下一步之前投递邮件），返回的每段写一条 `user.message { source: 'inject' }` 并随本次请求发出（每一步都调用，包括第 1 步，此时注入记录在用户消息之后）；续接 `pause_turn` 回复的那次请求之前不调用；注入器抛错时本次请求跳过它，写 `error`（`fatal: false`）；
-   4. 模型请求，写 `assistant.message`（步骤 1 不变）；
+   4. 模型请求，写 `assistant.message`（步骤 1 不变）；provider 重试可重试的失败时 loop 发 `request.retry` 事件，不写会话记录（账本里每次尝试各有一对记录）。请求因提示超过上下文窗口失败（`details.contextOverflow`）时，写 `error`（`fatal: false`），不经 `shouldCompact` 直接压缩一次并重发，每轮一次（ADR 0021）。回复因输出上限停下（`max-tokens`）时，它的工具调用不执行，各写一条错误 `tool.result`，再注入一条“接着写”的提示并继续；连续超过 `maxOutputContinuations`（默认 3）次才以 `max-tokens` 结束本轮；
    5. 执行工具：每个调用写（`approval.*`）→ \*（工具通过 `appendRecord` 追加的记录，如 `deliverable.presented`）→ `tool.result`；\* 每个 `tool.result` 之后调用 `files.observe(...)`。
 7. \* `ctx.tasking.files.endTurn(sessionId, turn, signal)`，写 `turn.files`（列表为空也写）。
 8. 写 `turn.end`；按步骤 1 规则写 `checkpoint`。
@@ -54,7 +54,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | --- | --- |
 | `ContextProvider.beginTurn` 抛错 | 跳过这个提供者，写一条 `error`（`fatal: false`，`code` 取错误自身的，非 Nexgent 错误为 `internal`），本轮照常进行 |
 | `Compactor.compact` 抛错或被中止 | 写 `error`（`fatal: false`）；保留未压缩的历史；本轮不再尝试压缩（`CompactionCheckInput.failedThisTurn` 为真）；摘要请求本身照常在账本里有 `llm.request.start/end`（`purpose: 'auxiliary'`） |
-| 压缩结果不合法（`keepMessages` 越界、保留段不以 `user` 开头） | 等同 `compact` 失败；`SessionStore.append` 在写入前用投影检查它，不会落盘 |
+| 压缩结果不合法（`keepMessages` 越界、保留段以工具结果开头） | 等同 `compact` 失败；`SessionStore.append` 在写入前用投影检查它，不会落盘 |
 | `TurnFileTracker.observe` 抛错 | 吞掉，不影响工具结果 |
 | `TurnFileTracker.endTurn` 抛错 | 写 `error`（`fatal: false`），不写 `turn.files`，照常写 `turn.end` |
 | 工具的 `appendRecord` 失败 | 该工具调用以错误结束（`tool/failed`），模型拿到错误；已写入的快照文件留在 `outputs/`，但没有会话记录指向它（列成果时按 `deliverable.json` 列出，见 `data-formats.md` §成果元数据） |
@@ -155,9 +155,9 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 ## 压缩
 
-- 触发（`@nexgent/context` 的实现约定，不是 loop 的规则）：本会话最近一次请求的计费输入（`billedInputTokens(lastUsage)`，任一部分为 `unknown` 时不触发）达到阈值。阈值在 `@nexgent/context` 的 profile 行配置 `compaction.thresholdTokens`（默认 160 000），可由环境变量 `NEXGENT_COMPACTION_THRESHOLD` 覆盖（验收脚本与真实模型补验用它把阈值调低）；`compaction.keepRecentTurns`（默认 2）决定保留几轮完整轮次。不新增 `config.json` 字段。
-- 保留段从某个 `user` 消息开始（轮或注入的边界），因此工具调用与结果不会被拆开；当前轮总是完整保留。
-- 摘要请求：`purpose: 'auxiliary'`，模型与 thinking 沿用项目配置，不带工具；请求内容是被压缩的消息加一段固定的摘要指令（由 W1 写进包内并有快照测试）。
+- 触发（`@nexgent/context` 的实现约定，不是 loop 的规则）：下一次请求的估计输入达到阈值。估计 = 最近一次请求的计费输入 + 它的输出 + 之后新加消息的估计（约 3 字符一个 token）；用量未知时（恢复后、压缩后）按整段历史估计（ADR 0021；此前只看计费输入，未知时不触发）。阈值在 `@nexgent/context` 的 profile 行配置 `compaction.thresholdTokens`（默认 160 000），可由环境变量 `NEXGENT_COMPACTION_THRESHOLD` 覆盖（验收脚本与真实模型补验用它把阈值调低），并且不超过模型上下文窗口的 75%；`compaction.keepRecentTurns`（默认 2）决定保留几轮完整轮次。
+- 保留段从某个 `user` 消息开始（轮或注入的边界）；保留段估计仍超过阈值的 30% 时，当前轮也被切开，保留段从这一轮的某条回复开始（至少保留最后一步及其工具结果），这一轮的请求原文附在摘要末尾。保留段从不以工具结果开始，因此工具调用与结果不会被拆开。保留的回复只回放文字与工具调用，不回放 thinking 块（`compactionTail`）。
+- 摘要请求：`purpose: 'auxiliary'`，模型与 thinking 沿用项目配置，不带工具，输出上限 32 000；请求内容是被压缩的消息转写（总长不超过 40 万字符，超过时先收紧单条上限、再截中间）加一段固定的摘要指令（由 W1 写进包内并有快照测试）。
 - 记录与恢复规则见 `data-formats.md` §压缩。
 
 ## 宿主接口（W7 实现，W4 调用）

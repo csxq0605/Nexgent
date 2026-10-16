@@ -39,11 +39,11 @@ describe('step-3 contracts: types', () => {
   it('fix the execution forms, the new cancel cause and the member result statuses', () => {
     expectTypeOf<ExecutionForm>().toEqualTypeOf<'direct' | 'delegated' | 'team' | 'workflow'>()
     expectTypeOf<LedgerAttribution['executionForm']>().toEqualTypeOf<ExecutionForm | undefined>()
-    expectTypeOf<TurnCancelCause>().toEqualTypeOf<'user' | 'timeout' | 'shutdown' | 'cost-cap' | 'parent'>()
+    expectTypeOf<TurnCancelCause>().toEqualTypeOf<'user' | 'timeout' | 'shutdown' | 'cost-cap' | 'parent' | 'step-limit'>()
     expectTypeOf<MemberResultStatus>().toEqualTypeOf<'completed' | 'failed' | 'cancelled' | 'budget' | 'interrupted'>()
     expectTypeOf<SkillSource>().toEqualTypeOf<'builtin' | 'user' | 'project'>()
     expect(EXECUTION_FORMS).toEqual(['direct', 'delegated', 'team', 'workflow'])
-    expect(TURN_CANCEL_CAUSES).toEqual(['user', 'timeout', 'shutdown', 'cost-cap', 'parent'])
+    expect(TURN_CANCEL_CAUSES).toEqual(['user', 'timeout', 'shutdown', 'cost-cap', 'parent', 'step-limit'])
   })
 
   it('limit which records hosts and tools may append (step-4 additions included)', () => {

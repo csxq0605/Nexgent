@@ -47,7 +47,7 @@ describe('buildMessageParams', () => {
     const params = buildMessageParams(makeRequest({ temperature: 0.1 }), 'claude-sonnet-5-5')
     expect(params).toEqual({
       model: 'claude-sonnet-5-5',
-      max_tokens: 16000,
+      max_tokens: 64000,
       system: 'You are a test.',
       messages: [{ role: 'user', content: 'Say hello.' }],
       thinking: { type: 'adaptive', display: 'summarized' },

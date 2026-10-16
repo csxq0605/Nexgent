@@ -10,7 +10,7 @@ import {
   type StreamErrorEvent,
   type ToolCallEndEvent,
 } from '@nexgent/kernel'
-import { AnthropicProvider, createProvider, FALLBACK_BETA, NEXGENT_API_BASE_URL, THINKING_BINDING_BETA } from '../src/index.js'
+import { AnthropicProvider, createProvider, DEFAULT_MAX_RETRIES, FALLBACK_BETA, isContextOverflow, isRetryable, NEXGENT_API_BASE_URL, THINKING_BINDING_BETA } from '../src/index.js'
 import { closedPort, loadSseFixture, sseEvent, startFakeAnthropic, type FakeAnthropic } from './helpers/fake-anthropic.js'
 import { memoryCredentials, MemoryLedger } from './helpers/fakes.js'
 import { collect, expectStreamInvariants, makeProvider, makeRequest, TEST_KEY, textOf } from './helpers/stream.js'
@@ -72,7 +72,7 @@ describe('AnthropicProvider — streaming', () => {
     expect(sent?.headers).not.toHaveProperty('authorization')
     expect(sent?.body).toEqual({
       model: 'claude-sonnet-5-5',
-      max_tokens: 16000,
+      max_tokens: 64000,
       stream: true,
       system: 'You are a test.',
       messages: [{ role: 'user', content: 'Say hello.' }],
@@ -462,6 +462,148 @@ describe('AnthropicProvider — failures (one ledger pair each, usage unknown, n
   })
 })
 
+const OVERLOADED = { status: 529, body: '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}' }
+const FAST_RETRY = { maxRetries: 3, retryBaseDelayMs: 5, retryMaxDelayMs: 50 }
+
+describe('AnthropicProvider — retries (ADR 0021)', { timeout: 15_000 }, () => {
+  it('retries a 529 and a 429 before the reply, then streams the reply; one ledger pair per attempt', async () => {
+    fake = await startFakeAnthropic([OVERLOADED, { status: 429, body: '{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}' }, { sse: loadSseFixture('text') }])
+    const { provider, ledger } = makeProvider(fake.baseUrl, FAST_RETRY)
+    const request = makeRequest()
+    const events = await collect(provider.complete(request, { sessionId: 'sess-1' }))
+
+    expectStreamInvariants(events)
+    expect(textOf(events)).toBe('Hello, world.')
+    expect(doneOf(events).finishReason).toBe('stop')
+    const retries = events.filter(event => event.type === 'retry')
+    expect(retries).toEqual([
+      expect.objectContaining({ type: 'retry', attempt: 2, error: expect.objectContaining({ code: 'llm/request-failed' }) }),
+      expect.objectContaining({ type: 'retry', attempt: 3 }),
+    ])
+    for (const retry of retries) expect(retry.type === 'retry' && retry.delayMs).toBeLessThanOrEqual(50)
+    expect(fake.requests).toHaveLength(3)
+
+    expect(ledger.records.map(record => [record.type, (record as { attempt?: number }).attempt, (record as { status?: string }).status])).toEqual([
+      ['llm.request.start', undefined, undefined],
+      ['llm.request.end', undefined, 'error'],
+      ['llm.request.start', 2, undefined],
+      ['llm.request.end', 2, 'error'],
+      ['llm.request.start', 3, undefined],
+      ['llm.request.end', 3, 'ok'],
+    ])
+    expect(new Set(ledger.records.map(record => (record as { requestId: string }).requestId))).toEqual(new Set([request.requestId]))
+  })
+
+  it('honours retry-after from the server (capped at retryMaxDelayMs)', async () => {
+    fake = await startFakeAnthropic([{ ...OVERLOADED, headers: { 'retry-after': '0.02' } }, { sse: loadSseFixture('text') }])
+    const { provider } = makeProvider(fake.baseUrl, FAST_RETRY)
+    const events = await collect(provider.complete(makeRequest()))
+    expect(events.find(event => event.type === 'retry')).toMatchObject({ delayMs: 20 })
+    expect(doneOf(events).finishReason).toBe('stop')
+  })
+
+  it('retries an in-band overloaded error and a refused connection', async () => {
+    fake = await startFakeAnthropic([{ sse: [sseEvent({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } })] }, { sse: loadSseFixture('text') }])
+    const { provider } = makeProvider(fake.baseUrl, FAST_RETRY)
+    expect(textOf(await collect(provider.complete(makeRequest())))).toBe('Hello, world.')
+
+    const port = await closedPort()
+    const refused = makeProvider(`http://127.0.0.1:${port}`, { ...FAST_RETRY, maxRetries: 2 })
+    const events = await collect(refused.provider.complete(makeRequest()))
+    expect(events.filter(event => event.type === 'retry')).toHaveLength(2)
+    const error = errorOf(events)
+    expect(error.error.message).toContain('after 3 attempts')
+    expect(error.error.details).toMatchObject({ attempts: 3, retryable: true, cause: 'ECONNREFUSED' })
+    expect(refused.ledger.records).toHaveLength(6)
+  })
+
+  it('gives up after maxRetries and reports the last error as retryable', async () => {
+    fake = await startFakeAnthropic([OVERLOADED])
+    const { provider, ledger } = makeProvider(fake.baseUrl, { ...FAST_RETRY, maxRetries: 2 })
+    const events = await collect(provider.complete(makeRequest()))
+    expectStreamInvariants(events)
+    expect(fake.requests).toHaveLength(3)
+    expect(errorOf(events).error.details).toMatchObject({ attempts: 3, retryable: true, providerType: 'overloaded_error' })
+    expect(ledger.records.filter(record => record.type === 'llm.request.end')).toHaveLength(3)
+  })
+
+  it('does not retry a request error, a timeout, or a failure after text was streamed', async () => {
+    fake = await startFakeAnthropic([{ status: 400, body: '{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}' }])
+    const bad = makeProvider(fake.baseUrl, FAST_RETRY)
+    const badError = errorOf(await collect(bad.provider.complete(makeRequest())))
+    expect(fake.requests).toHaveLength(1)
+    expect(badError.error.details).toMatchObject({ attempts: 1, retryable: false })
+    await fake.close()
+
+    fake = await startFakeAnthropic([{ sse: loadSseFixture('text').slice(0, 5) }, { sse: loadSseFixture('text') }])
+    const cut = makeProvider(fake.baseUrl, FAST_RETRY)
+    const events = await collect(cut.provider.complete(makeRequest()))
+    expect(textOf(events)).toBe('Hello, world.')
+    expect(errorOf(events).error.details).toMatchObject({ retryable: false })
+    expect(fake.requests).toHaveLength(1)
+    await fake.close()
+
+    fake = await startFakeAnthropic([{ hangBeforeHeaders: true }])
+    const slow = makeProvider(fake.baseUrl, { ...FAST_RETRY, timeoutMs: 100 })
+    expect(errorOf(await collect(slow.provider.complete(makeRequest()))).error.code).toBe('llm/timeout')
+    expect(fake.requests).toHaveLength(1)
+  })
+
+  it('retries a stream that stalled before any text, but not one that stalled after', async () => {
+    fake = await startFakeAnthropic([{ sse: loadSseFixture('text'), hangAfter: 1 }, { sse: loadSseFixture('text') }])
+    const { provider } = makeProvider(fake.baseUrl, FAST_RETRY)
+    const events = await collect(provider.complete(makeRequest(), { streamIdleTimeoutMs: 150 }))
+    expect(events.find(event => event.type === 'retry')).toMatchObject({ error: { code: 'llm/timeout' } })
+    expect(textOf(events)).toBe('Hello, world.')
+    await fake.close()
+
+    fake = await startFakeAnthropic([{ sse: loadSseFixture('text'), hangAfter: 3 }, { sse: loadSseFixture('text') }])
+    const late = makeProvider(fake.baseUrl, FAST_RETRY)
+    const stalled = await collect(late.provider.complete(makeRequest(), { streamIdleTimeoutMs: 150 }))
+    expect(textOf(stalled)).toBe('Hello')
+    expect(errorOf(stalled).error.code).toBe('llm/timeout')
+    expect(fake.requests).toHaveLength(1)
+  })
+
+  it('an abort during the wait ends the stream as aborted without another attempt', async () => {
+    fake = await startFakeAnthropic([OVERLOADED, { sse: loadSseFixture('text') }])
+    const { provider } = makeProvider(fake.baseUrl, { maxRetries: 3, retryBaseDelayMs: 5_000, retryMaxDelayMs: 5_000 })
+    const controller = new AbortController()
+    const events: LLMStreamEvent[] = []
+    for await (const event of provider.complete(makeRequest({ signal: controller.signal }))) {
+      events.push(event)
+      if (event.type === 'retry') controller.abort()
+    }
+    expect(events.at(-1)).toEqual({ type: 'done', finishReason: 'aborted' })
+    expect(fake.requests).toHaveLength(1)
+  })
+
+  it('flags a prompt that exceeds the context window', async () => {
+    fake = await startFakeAnthropic([{ status: 400, body: '{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1012345 tokens > 1000000 maximum"}}' }])
+    const { provider } = makeProvider(fake.baseUrl, FAST_RETRY)
+    const error = errorOf(await collect(provider.complete(makeRequest())))
+    expect(error.error.details).toMatchObject({ contextOverflow: true, retryable: false })
+    expect(isContextOverflow(400, 'messages: at least one message is required')).toBe(false)
+    expect(isContextOverflow(413, 'Request exceeds the maximum context length')).toBe(true)
+  })
+
+  it('classifies retryable failures', () => {
+    const failure = (details: Record<string, unknown>, httpStatus?: number): StreamErrorEvent => ({
+      type: 'error',
+      error: { name: 'NexgentError', code: 'llm/request-failed', message: 'x', details },
+      ...(httpStatus === undefined ? {} : { httpStatus }),
+    })
+    expect(DEFAULT_MAX_RETRIES).toBe(6)
+    expect(isRetryable(failure({}, 503))).toBe(true)
+    expect(isRetryable(failure({}, 401))).toBe(false)
+    expect(isRetryable(failure({ providerType: 'api_error' }, 200))).toBe(true)
+    expect(isRetryable(failure({ providerType: 'invalid_request_error' }, 400))).toBe(false)
+    expect(isRetryable(failure({ cause: 'ECONNRESET' }))).toBe(true)
+    expect(isRetryable({ type: 'error', error: { name: 'NexgentError', code: 'llm/timeout', message: 'x', details: { timeout: 'request' } } })).toBe(false)
+    expect(isRetryable({ type: 'error', error: { name: 'NexgentError', code: 'llm/timeout', message: 'x', details: { timeout: 'idle' } } })).toBe(true)
+  })
+})
+
 describe('AnthropicProvider — configuration and secrets', () => {
   it('defaults to the Claude API route from DEFAULT_PROJECT_CONFIG', () => {
     const provider = createProvider({ credentials: memoryCredentials({}), ledger: new MemoryLedger(), env: {} })
@@ -470,9 +612,11 @@ describe('AnthropicProvider — configuration and secrets', () => {
     expect(provider.info.endpoint).toBe('https://api.anthropic.com')
   })
 
-  it('rejects maxRetries other than 0, bad effort and non-http endpoints', () => {
+  it('rejects a negative or fractional maxRetries, bad effort and non-http endpoints', () => {
     const base = { credentials: memoryCredentials({}), ledger: new MemoryLedger(), env: {} }
-    expect(() => createProvider({ ...base, maxRetries: 2 as 0 })).toThrow(expect.objectContaining({ code: 'config/invalid' }))
+    expect(() => createProvider({ ...base, maxRetries: -1 })).toThrow(expect.objectContaining({ code: 'config/invalid' }))
+    expect(() => createProvider({ ...base, maxRetries: 1.5 })).toThrow(expect.objectContaining({ code: 'config/invalid' }))
+    expect(() => createProvider({ ...base, maxRetries: 3 })).not.toThrow()
     expect(() => createProvider({ ...base, effort: 'ultra' as never })).toThrow(expect.objectContaining({ code: 'config/invalid' }))
     let thrown: unknown
     try {

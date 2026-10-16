@@ -48,6 +48,17 @@ export interface StepStartEvent {
   readonly requestId: string
 }
 
+/** The step's model request failed retryably and is sent again after `delayMs` (ADR 0021). */
+export interface StepRetryEvent {
+  readonly type: 'step.retry'
+  readonly turn: number
+  readonly step: number
+  /** The attempt about to be sent (2 for the first retry). */
+  readonly attempt: number
+  readonly delayMs: number
+  readonly error: ErrorInfo
+}
+
 /** A tool handler is about to run (after approval). */
 export interface ToolStartEvent {
   readonly type: 'tool.start'
@@ -138,6 +149,7 @@ export type CliEvent =
   | SessionOpenEvent
   | TurnStartEvent
   | StepStartEvent
+  | StepRetryEvent
   | ForwardedLLMEvent
   | ToolStartEvent
   | ToolEndEvent

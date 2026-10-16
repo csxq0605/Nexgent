@@ -7,7 +7,9 @@ import { mkdirSync } from 'node:fs'
 import type { Context, Plugin } from '@deepseek-ai/cordis'
 import {
   addUsage,
+  billedInputTokens,
   NexgentError,
+  compactionTail,
   renderCompactionSummary,
   resolveWorkspaceLayout,
   ZERO_USAGE,
@@ -166,7 +168,7 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
             ...(record.providerContent === undefined ? {} : { providerContent: record.providerContent }),
           })
         }
-        meta = { ...meta!, totalUsage: addUsage(meta!.totalUsage, record.usage) }
+        meta = { ...meta!, totalUsage: addUsage(meta!.totalUsage, record.usage), ...(billedInputTokens(record.usage) === undefined ? {} : { lastUsage: record.usage }) }
         break
       case 'tool.result':
         messages.push({ role: 'tool', toolCallId: record.toolCallId, name: record.name, content: record.content, isError: record.isError })
@@ -181,7 +183,11 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
         messages.splice(0, messages.length, ...record.messages)
         break
       case 'compaction':
-        messages.splice(0, messages.length, { role: 'user', content: renderCompactionSummary(record.summary) }, ...messages.slice(messages.length - record.keepMessages))
+        messages.splice(0, messages.length, { role: 'user', content: renderCompactionSummary(record.summary) }, ...compactionTail(messages, record.keepMessages))
+        if (meta !== undefined) {
+          const { lastUsage: _dropped, ...rest } = meta
+          meta = rest
+        }
         break
       default:
         break

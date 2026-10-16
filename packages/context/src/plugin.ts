@@ -26,7 +26,7 @@ export interface ContextPluginConfig {
     readonly thresholdTokens?: number
     /** Default 2. */
     readonly keepRecentTurns?: number
-    /** Output cap of the summary request; default 16 000. */
+    /** Output cap of the summary request; default 32 000. */
     readonly maxTokens?: number
     /** Whole-request deadline of the summary request in ms. */
     readonly timeoutMs?: number

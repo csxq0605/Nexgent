@@ -172,6 +172,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `autoImprove` | boolean | `true` | 步骤 5：计入的反馈与失败的检查是否自动开始改进作业（ADR 0006；步骤 4 之前默认 `false`，从未生效）；显式“改进”不受它限制；改动它总要审批。ADR 0017 决策 3 起由 `learning.enabled` 取代：没写 `learning.enabled` 时取它的值；设置页改其中一个时两个保持相等 |
 | `capabilities` | `CapabilitiesConfig` | 见下 | 门控与回滚设置（步骤 4）；改动它总要审批（`permissions.md` §工具审批） |
 | `improvement` | `ImprovementConfig` | 见下 | 步骤 5：触发阈值、改进预算、诊断与提案的模型；ADR 0012 起另有 `shareImproverEvidence`；改动它总要审批 |
+| `maxStepsPerTurn` | integer ≥ 1 | 无（用 `agents.maxSteps`，400） | 一轮最多的模型调用次数；到了上限这一轮以 `cancelled`、`cause: "step-limit"` 结束，再发一条消息接着做（ADR 0021）；成员预设的 `maxSteps` 优先；改动它总要审批 |
 | `learning` | `LearningConfig` | 见下 | 重做 C1（ADR 0017 决策 3、ADR 0018 决策 2、8、10）：后台学习开关、美元预算、单任务自评上限、共享两个方向；改动它总要审批 |
 
 `CapabilitiesConfig`（步骤 4，契约 `capabilities.ts`，校验 `assertCapabilitiesConfig`）：
@@ -342,12 +343,12 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 - `assistant.message.interrupted: true`：该轮在流中被取消，`content` 是已流出的前缀，`toolCalls` 不写（未派发的调用不进入历史）。
 - `tool.result.error`：`ErrorInfo = { name, code, message, details? }`，仅当 `isError` 为真；`meta` 是工具私有的 JSON 值（如 diff），原样持久化。
 - `max-tokens` 且回复含工具调用时：工具调用记录在案但不执行，轮次以 `{ kind: "max-tokens" }` 结束；下一次请求由历史修复以合成的错误结果答复这些调用。
-- `turn.end.reason`：`{ kind: "completed" }`、`{ kind: "cancelled", cause: "user" | "timeout" | "shutdown" | "cost-cap" | "parent" }`（`parent` 是步骤 3 新增：父会话的轮次取消或结束，成员随之取消）、`{ kind: "error", error: ErrorInfo }`、`{ kind: "max-tokens" }`、`{ kind: "interrupted" }`。最后一种只由恢复过程写出，用来关闭上一个进程没来得及关闭的轮次。
+- `turn.end.reason`：`{ kind: "completed" }`、`{ kind: "cancelled", cause: "user" | "timeout" | "shutdown" | "cost-cap" | "parent" | "step-limit" }`（`parent` 是步骤 3 新增：父会话的轮次取消或结束，成员随之取消；`step-limit` 由 ADR 0021 新增：这一轮用完了模型调用次数上限，历史完整，下一条用户消息接着做）、`{ kind: "error", error: ErrorInfo }`、`{ kind: "max-tokens" }`、`{ kind: "interrupted" }`。最后一种只由恢复过程写出，用来关闭上一个进程没来得及关闭的轮次。
 - `error.fatal`：为真表示会话不能继续；恢复时遇到最后一条是 fatal 的 `error`，`resume` 仍返回状态，由调用方决定是否继续。
 - `user.message.source`（步骤 2 增加 `feedback`）：`user` 是用户输入；`inject` 是合成上下文（资料引用、提供者注入），界面不显示；`feedback` 是反馈轮的提示，正文为 `renderFeedbackPrompt(feedback)`。`materials` 是本条消息引用的资料 ID（仅 `user` / `feedback` 消息），界面据此显示资料标签。
 - 步骤 2 记录里的路径一律是项目相对路径、`/` 分隔（`MaterialRef.path`、`DeliverableFile.path`、`FileChange.path`），schema 拒绝含 `\` 的路径；两平台写出的记录可以直接比较。SHA-256 一律小写十六进制 64 位。
 - `turn.files.changes`：按 `path` 排序，`change` 为 `added | modified | deleted`；最多 1000 条（`TURN_FILES_LIMIT`），超出部分只计数在 `omitted`。比较范围是项目根下除 `.nexgent/`、`node_modules/`、`.git/` 外的全部文件；同一路径先增后删不列出。
-- `goal.update.goalId` 必须是当前目标的 ID；`compaction.keepMessages` 不能超过当时的消息数，且保留段必须以 `user` 消息开始。这两条单条 schema 表达不了，`SessionStore.append` 在写入前用投影检查，不合格的记录抛 `session/invalid-record`、不落盘。
+- `goal.update.goalId` 必须是当前目标的 ID；`compaction.keepMessages` 不能超过当时的消息数，且保留段不能以工具结果（`tool`）开始（ADR 0021 起可以以当前轮的 `assistant` 回复开始）。这两条单条 schema 表达不了，`SessionStore.append` 在写入前用投影检查，不合格的记录抛 `session/invalid-record`、不落盘。
 
 一轮的记录顺序固定为：`turn.start` → `user.message` → （`assistant.message` → `tool.result`×n）×steps → `turn.end`。需要审批的调用在其 `tool.result` 之前插入 `approval.request` → `approval.decision`（→ `approval.grant`）。`ApprovalRequest` / `ApprovalDecision` 的字段见 `permissions.md`。`step` 从 1 起，在轮内递增。
 
@@ -377,7 +378,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 {"type":"tool.result","seq":5,"ts":"…","sessionId":"6f1c…","turn":1,"step":1,"toolCallId":"call_1","name":"str_replace","content":"replaced 1 occurrence","isError":false,"durationMs":4}
 {"type":"assistant.message","seq":6,"ts":"…","sessionId":"6f1c…","turn":1,"step":2,"requestId":"c2d3…","content":"已改好。","usage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","cacheWriteTokens":"unknown","reasoningTokens":"unknown"},"finishReason":"stop"}
 {"type":"turn.end","seq":7,"ts":"…","sessionId":"6f1c…","turn":1,"reason":{"kind":"completed"}}
-{"type":"checkpoint","seq":8,"ts":"…","sessionId":"6f1c…","coversSeq":7,"state":{"sessionId":"6f1c…","version":1,"messages":[{"role":"user","content":"把 README 第一行改成 Hello"},{"role":"assistant","content":"","toolCalls":[{"id":"call_1","name":"str_replace","arguments":"{…}"}]},{"role":"tool","toolCallId":"call_1","name":"str_replace","content":"replaced 1 occurrence","isError":false},{"role":"assistant","content":"已改好。"}],"metadata":{"createdAt":"2026-10-07T08:00:00.000Z","projectRoot":"/home/u/proj","model":"claude-sonnet-5-5","sandboxMode":"workspace-write","grants":[],"lastTurn":1,"totalUsage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","cacheWriteTokens":"unknown","reasoningTokens":"unknown"},"lastSeq":7}}}
+{"type":"checkpoint","seq":8,"ts":"…","sessionId":"6f1c…","coversSeq":7,"state":{"sessionId":"6f1c…","version":1,"messages":[{"role":"user","content":"把 README 第一行改成 Hello"},{"role":"assistant","content":"","toolCalls":[{"id":"call_1","name":"str_replace","arguments":"{…}"}]},{"role":"tool","toolCallId":"call_1","name":"str_replace","content":"replaced 1 occurrence","isError":false},{"role":"assistant","content":"已改好。"}],"metadata":{"createdAt":"2026-10-07T08:00:00.000Z","projectRoot":"/home/u/proj","model":"claude-sonnet-5-5","sandboxMode":"workspace-write","grants":[],"lastTurn":1,"totalUsage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","cacheWriteTokens":"unknown","reasoningTokens":"unknown"},"lastSeq":7,"lastUsage":{"inputTokens":812,"outputTokens":37,"totalTokens":849,"cacheReadTokens":0,"cacheWriteTokens":0,"reasoningTokens":0}}}}
 ```
 
 被取消的一轮：
@@ -435,7 +436,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `session.start` | 无 | `createdAt`、`projectRoot`、`model`、`sandboxMode`、`title`；`lastTurn = 0`；`grants = []`；`totalUsage` 置为全 0（`ZERO_USAGE`，加法单位元） |
 | `turn.start` | 无 | `lastTurn = turn`，`openTurn = turn` |
 | `user.message` | 追加 `{ role: "user", content }` | 无 |
-| `assistant.message` | 追加 `{ role: "assistant", content, toolCalls?, providerContent? }`；`interrupted` 且 `content` 为空时不追加 | `totalUsage = addUsage(totalUsage, usage)`（任一字段 `"unknown"` 则和为 `"unknown"`） |
+| `assistant.message` | 追加 `{ role: "assistant", content, toolCalls?, providerContent? }`；`interrupted` 且 `content` 为空时不追加 | `totalUsage = addUsage(totalUsage, usage)`（任一字段 `"unknown"` 则和为 `"unknown"`）；`usage` 的计费输入（`inputTokens + cacheReadTokens + cacheWriteTokens`）已知时 `lastUsage = usage`（ADR 0021） |
 | `tool.result` | 追加 `{ role: "tool", toolCallId, name, content, isError }` | 无 |
 | `turn.end` | 无 | 清除 `openTurn` |
 | `checkpoint` | 从头重放时整体替换 `state` | 同左 |
@@ -443,11 +444,11 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `goal.set`（步骤 2） | 无 | `goal = record.goal`（替换旧目标） |
 | `goal.update`（步骤 2） | 无 | `goal.status = status`；给了 `text` 则替换；给了 `note` 则替换；`goal.updatedAt = record.ts` |
 | `session.title`（步骤 2） | 无 | `title = record.title`（覆盖 `session.start` 的标题） |
-| `compaction`（步骤 2） | `messages = [{ role: "user", content: renderCompactionSummary(summary) }, ...messages 的最后 keepMessages 条]` | `lastCompactionSeq = seq` |
+| `compaction`（步骤 2） | `messages = [{ role: "user", content: renderCompactionSummary(summary) }, ...messages 的最后 keepMessages 条]` | `lastCompactionSeq = seq`；删除 `lastUsage` |
 | `material.added`、`deliverable.presented`、`turn.files`、`feedback`（步骤 2） | 无 | 无 |
 | 任意记录 | — | `lastSeq = seq` |
 
-`SessionMetadata` 字段：`createdAt`、`projectRoot`、`model`、`sandboxMode`、`grants`、`title?`、`lastTurn`、`openTurn?`、`totalUsage`、`lastSeq`；步骤 2 增加可选的 `goal?`（`Goal`）与 `lastCompactionSeq?`。步骤 1 写出的 checkpoint 没有这两个字段，读出时视为未设置。
+`SessionMetadata` 字段：`createdAt`、`projectRoot`、`model`、`sandboxMode`、`grants`、`title?`、`lastTurn`、`openTurn?`、`totalUsage`、`lastSeq`；步骤 2 增加可选的 `goal?`（`Goal`）与 `lastCompactionSeq?`。步骤 1 写出的 checkpoint 没有这两个字段，读出时视为未设置。ADR 0021 增加可选的 `lastUsage?`（最近一次压缩之后、计费输入已知的最后一条回复的用量）：重开会话时压缩触发从它起算，没有它（压缩后还没有回复，或旧 checkpoint）时按整段历史估计。
 
 ### 并发写保护
 
@@ -498,7 +499,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `model` | string | 模型 ID |
 | `purpose` | `"task" \| "auxiliary"` | 任务请求或辅助请求 |
 | `thinking` | `"off" \| "on"` | 是否请求了 reasoning |
-| `attempt` | integer ≥ 1? | 重做 C1（ADR 0017 决策 2）：宿主重试失败请求时的第几次尝试，缺省为 1。每次尝试是独立的请求，有自己的 `requestId`，都计费 |
+| `attempt` | integer ≥ 1? | ADR 0017 决策 2、ADR 0021：provider 重试这次请求时的第几次尝试，缺省为 1（第一次尝试不写）。每次尝试各有一对 start / end，`requestId` 相同，都算一次请求、都计费 |
 
 **`llm.request.end`** —— 一次模型请求已结束（成功、失败、中止都写）。
 
@@ -511,10 +512,10 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `httpStatus` | number? | 收到 HTTP 响应时的状态码（含 4xx / 5xx） |
 | `finishReason` | string? | `ok` / `aborted` 时的结束原因 |
 | `errorCode` | string? | `error` 时的错误码（`NexgentErrorCode`），**不写错误消息** |
-| `attempt` | integer ≥ 1? | 同 start |
+| `attempt` | integer ≥ 1? | 与对应的 start 相同 |
 | `usageEstimated` | `true`? | 重做 C1（ADR 0017 决策 5）：`usage` 是宿主估算的（provider 没报，如流中断），不是报告的；费用合计计入它并标明含估算 |
 
-读取方以 `requestId` 配对 start 与 end；只有 start 没有 end 的请求按 `status: "unknown"` 计（进程在流中死亡），用量按全 `"unknown"` 计。
+读取方以 `requestId` 加 `attempt`（缺省为 1）配对 start 与 end；重试的每次尝试都算一次请求；只有 start 没有 end 的请求按 `status: "unknown"` 计（进程在流中死亡），用量按全 `"unknown"` 计。
 
 **`tool.call`** —— 一次工具调用执行（或被拒绝）。
 
@@ -1085,13 +1086,13 @@ ADR 0019（纪元 `adr-0019`，`EVALUATOR_RULES` 与 `LEARNING_RULES`）给改�
 | --- | --- | --- |
 | `turn` / `step` | integer | 压缩发生在第 `turn` 轮第 `step` 次模型请求之前 |
 | `summary` | string | 摘要正文（非空） |
-| `keepMessages` | integer ≥ 1 | 摘要之后原样保留的末尾消息条数 |
+| `keepMessages` | integer ≥ 1 | 摘要之后保留的末尾消息条数 |
 | `compactedMessages` | integer ≥ 1 | 被并入摘要的消息条数（上一次的摘要算一条） |
 | `requestId` | string | 产生摘要的辅助请求，与账本 `purpose: "auxiliary"` 的记录相关联 |
 | `usage` | `LLMUsage` | 该请求的用量 |
 | `trigger` | `{ inputTokens, threshold }` | 触发时的计费输入与阈值 |
 
-投影：`messages` 变为 `[{ role: "user", content: renderCompactionSummary(summary) }]` 加压缩前 `messages` 的最后 `keepMessages` 条；`metadata.lastCompactionSeq` 记下该记录的 `seq`。`renderCompactionSummary` 的文本是契约的一部分：
+投影：`messages` 变为 `[{ role: "user", content: renderCompactionSummary(summary) }]` 加 `compactionTail(压缩前 messages, keepMessages)`，即最后 `keepMessages` 条，其中的助手回复去掉 `providerContent`；`metadata.lastCompactionSeq` 记下该记录的 `seq`。`renderCompactionSummary` 的文本是契约的一部分：
 
 ```text
 <conversation-summary>
@@ -1103,8 +1104,8 @@ The earlier part of this conversation was compacted. Summary:
 
 规则：
 
-- 保留段必须以 `user` 消息开始（一轮或一次注入的边界），工具调用与其结果不会被拆开；不满足时 `SessionStore.append` 拒绝写入（见“字段细则”）。
-- **thinking 块**：被压进摘要的助手回复连同其 `providerContent`（thinking 块）一起丢弃，之后的请求不再回放；保留段里的助手回复照常带 `providerContent` 回放（ADR 0002 决策 4、ADR 0003）。
+- 保留段以 `user` 消息开始（一轮或一次注入的边界），或者在当前轮被切开时以这一轮的某条 `assistant` 回复开始（ADR 0021），从不以工具结果开始，所以工具调用与其结果不会被拆开；不满足时 `SessionStore.append` 拒绝写入（见“字段细则”）。当前轮被切开时，摘要末尾带“## Current request (verbatim; …)”一节，原文写出这一轮的请求。
+- **thinking 块**：被压进摘要的助手回复连同其 `providerContent`（thinking 块）一起丢弃；保留段里的助手回复也去掉 `providerContent`，只回放文字与工具调用——这些 thinking 块绑定的是压缩前的历史，保留 thinking 校验会拒绝或丢弃它们（ADR 0021，取代此前“保留段照常回放”）。
 - 恢复：恢复算法从最后一个 checkpoint 起按顺序投影，遇到 `compaction` 就按上式替换，所以重建的历史与强杀前一致；不需要另外“找最后一条 compaction”。多次压缩时，后一次的摘要请求输入里包含前一次的摘要，`compactedMessages` 把它算作一条。
 - `compaction` 不改变 `totalUsage`（辅助请求的用量只在账本与该记录的 `usage` 里）。
 - 摘要请求失败不写 `compaction`，只写 `error`（`fatal: false`），历史保持原样。
@@ -1325,7 +1326,7 @@ schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`
 步骤 2 新增（`@nexgent/session`）：
 
 1. 七种新记录各一条写入后 `readAll` 逐字段相等，并通过 schema；投影出的 `goal`、`lastCompactionSeq` 与压缩后的 `messages` 符合上面的投影表。
-2. 不合格的 `compaction`（保留段越界或不以 `user` 开始）与 `goal.update`（目标 ID 不符）在写入前被拒，文件不变。
+2. 不合格的 `compaction`（保留段越界或以工具结果开始）与 `goal.update`（目标 ID 不符）在写入前被拒，文件不变。
 3. 步骤 1 写出的真实会话（夹具 `packages/session/tests/fixtures/step1-real-session.jsonl`，取自步骤 1 真实模型验收的第一轮及其 checkpoint）能被读出、恢复，并能在其后追加步骤 2 记录。
 4. `material.json` 与 `deliverable.json` 读写往返并通过 schema；含 `\` 的路径、大写或长度不对的 SHA-256 被拒。
 

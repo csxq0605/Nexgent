@@ -237,24 +237,25 @@ describe('compaction', () => {
     await agent.close()
   })
 
-  it('treats a result that keeps a tail not starting with a user message as a failure', async () => {
-    harness = await bootHarness({ script: [textReply('first', usage(1000, 5)), textReply('second')] })
+  it('treats a result that keeps a tail starting with a tool result as a failure', async () => {
+    harness = await bootHarness({ script: [toolCallReply('c1', 'echo', { text: 'x' }), textReply('first', usage(1000, 5)), textReply('second')] })
     const { app, llm, store } = harness
+    app.ctx.tools.register(echo)
     const bad: Compactor = {
       shouldCompact: input => input.lastUsage !== undefined,
       compact: async () => ({ summary: 's', keepMessages: 1, compactedMessages: 1, requestId: 'r', usage: usage(1, 1), trigger: { inputTokens: 1000, threshold: 1 } }),
     }
     await app.ctx.plugin(servicePlugin('context', contextService([], {
       shouldCompact: bad.shouldCompact,
-      // keep only the assistant reply: invalid
-      compact: async input => ({ ...(await bad.compact(input, new AbortController().signal)), keepMessages: input.messages.length - 1 }),
+      // keep from the tool result on: invalid (its call would be summarized away)
+      compact: async input => ({ ...(await bad.compact(input, new AbortController().signal)), keepMessages: input.messages.length - 2 }),
     })))
     const agent = await app.agents.create()
     await agent.run('one')
     await agent.run('two')
     expect(store.of(agent.sessionId, 'compaction')).toHaveLength(0)
     expect(store.of(agent.sessionId, 'error')[0]!.error.code).toBe('session/invalid-record')
-    expect(conversation(llm.requests[1]!)).toHaveLength(3)
+    expect(conversation(llm.requests[2]!)).toHaveLength(5)
     await agent.close()
   })
 })

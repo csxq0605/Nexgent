@@ -31,10 +31,10 @@
     apiKeyCredential: NEXGENT_API_KEY
     thinking: 'on'
     effort: medium
-    maxTokens: 16000
-    timeoutMs: 600000
+    maxTokens: 64000
+    timeoutMs: 1200000
     streamIdleTimeoutMs: 180000
-    maxRetries: 0
+    maxRetries: 6
     fallbacks: default
 
 - id: tools
@@ -49,8 +49,8 @@
     model: claude-sonnet-5-5
     thinking: 'on'
     effort: medium
-    maxTokens: 16000
-    modelTimeoutMs: 600000
+    maxTokens: 64000
+    modelTimeoutMs: 1800000
     streamIdleTimeoutMs: 180000
     systemPrompt:
       persona: >-
