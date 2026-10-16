@@ -1,7 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { MaterialMetadata } from '@nexgent/kernel'
 import { useAppState, useAppStore } from '../hooks.js'
-import { T } from '../strings.js'
+import { T, modelText } from '../strings.js'
+import { Icon } from './Icon.js'
 
 /** The `@query` being typed right before the caret, if any. */
 export function mentionAt(text: string, caret: number): { readonly start: number; readonly query: string } | undefined {
@@ -93,17 +94,23 @@ export function Composer(): JSX.Element {
     }
   }
 
+  const insertMention = (): void => {
+    const el = ref.current
+    const at = el?.selectionStart ?? text.length
+    const before = text.slice(0, at)
+    const insert = before === '' || /\s$/.test(before) ? '@' : ' @'
+    const next = before + insert + text.slice(at)
+    const position = at + insert.length
+    setText(next)
+    setCaret(position)
+    setHighlight(0)
+    pendingCaret.current = position
+  }
+
+  const placeholder = state.timeline.length === 0 ? T.composerPlaceholder : T.composerPlaceholderMore
+  const model = state.sessionMeta?.model
   return (
     <div className="composer" data-testid="composer">
-      {fresh.length > 0 && (
-        <div className="chips fresh">
-          {fresh.map(m => (
-            <span key={m.id} className="chip">
-              📎 {m.originalName}
-            </span>
-          ))}
-        </div>
-      )}
       {mention !== undefined && (
         <ul className="mention-menu" role="listbox" data-testid="mention-menu">
           {options.length === 0 && <li className="muted small">{T.mentionNone}</li>}
@@ -116,38 +123,55 @@ export function Composer(): JSX.Element {
           ))}
         </ul>
       )}
-      <textarea
-        ref={ref}
-        data-testid="composer-input"
-        aria-label={T.composerPlaceholder}
-        placeholder={T.composerPlaceholder}
-        value={text}
-        disabled={disabled}
-        rows={3}
-        onChange={event => {
-          setText(event.target.value)
-          setCaret(event.target.selectionStart)
-          setHighlight(0)
-        }}
-        onSelect={event => setCaret(event.currentTarget.selectionStart)}
-        onKeyDown={onKeyDown}
-      />
-      <div className="composer-bar">
-        {store.client?.canPickFiles === true && (
-          <button type="button" className="ghost" onClick={() => void store.pickAndAddMaterials()} disabled={disabled} data-testid="attach-files">
-            📎 {T.attach}
-          </button>
+      <div className="composer-box">
+        {fresh.length > 0 && (
+          <div className="chips fresh">
+            {fresh.map(m => (
+              <span key={m.id} className="chip">
+                <Icon name="paperclip" />
+                {m.originalName}
+              </span>
+            ))}
+          </div>
         )}
-        <span className="muted small grow">{state.running ? (state.stopping ? T.stopping : T.busy) : ''}</span>
-        {state.running ? (
-          <button type="button" className="danger" onClick={() => void store.cancel()} disabled={state.stopping} data-testid="stop">
-            ■ {T.stop}
+        <textarea
+          ref={ref}
+          data-testid="composer-input"
+          aria-label={T.composerPlaceholder}
+          placeholder={placeholder}
+          value={text}
+          disabled={disabled}
+          rows={2}
+          onChange={event => {
+            setText(event.target.value)
+            setCaret(event.target.selectionStart)
+            setHighlight(0)
+          }}
+          onSelect={event => setCaret(event.currentTarget.selectionStart)}
+          onKeyDown={onKeyDown}
+        />
+        <div className="composer-bar">
+          {store.client?.canPickFiles === true && (
+            <button type="button" className="chip-button" onClick={() => void store.pickAndAddMaterials()} disabled={disabled} data-testid="attach-files">
+              <Icon name="paperclip" />
+              {T.attach}
+            </button>
+          )}
+          <button type="button" className="chip-button" onMouseDown={event => event.preventDefault()} onClick={insertMention} disabled={disabled} data-testid="mention-button">
+            {T.mentionChip}
           </button>
-        ) : (
-          <button type="button" className="primary" onClick={() => void send()} disabled={disabled || text.trim() === ''} data-testid="send">
-            {T.send}
-          </button>
-        )}
+          {model !== undefined && <span className="faint small model-chip">{modelText(model)}</span>}
+          <span className="composer-status">{state.running ? (state.stopping ? T.stopping : T.busy) : ''}</span>
+          {state.running ? (
+            <button type="button" className="send-button" aria-label={T.stop} title={T.stop} onClick={() => void store.cancel()} disabled={state.stopping} data-testid="stop">
+              <Icon name="stop" />
+            </button>
+          ) : (
+            <button type="button" className="send-button" aria-label={T.send} title={T.send} onClick={() => void send()} disabled={disabled || text.trim() === ''} data-testid="send">
+              <Icon name="send" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

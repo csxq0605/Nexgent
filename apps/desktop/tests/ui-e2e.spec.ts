@@ -20,6 +20,7 @@ import { scriptedModelServer, type MessagesRequestBody, type ScriptedModelServer
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { closeDrawer, fillProjectPath, showTab } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -161,20 +162,23 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         await page.getByTestId('pick-directory').waitFor()
         await shot(page, '01-start')
         // D02: create the project by path
-        await page.getByTestId('project-path').fill(root)
+        await fillProjectPath(page, root)
         await page.getByTestId('create-project').click()
         await page.getByTestId('workspace').waitFor()
         await page.getByTestId('new-session').click()
         await page.getByTestId('composer-input').waitFor()
         expect(JSON.parse(readFileSync(join(root, '.nexgent', 'config.json'), 'utf8'))).toMatchObject({ version: 1 })
 
-        // D03: two materials appear in the right column
+        // D03: two materials appear in the drawer
+        await showTab(page, 'materials')
         for (const file of [csv, xlsx]) {
           await page.getByTestId('material-path').fill(file)
           await page.getByTestId('add-material').click()
         }
         await expect.poll(() => page.getByTestId('material-item').count()).toBe(2)
         expect(await page.getByTestId('material-list').textContent()).toContain('regions.xlsx')
+        await shot(page, '01b-drawer')
+        await closeDrawer(page)
 
         // D04: send with an @ mention; text streams in and tool blocks appear
         const input = page.getByTestId('composer-input')
@@ -218,9 +222,9 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         expect(await diff.locator('[data-op="add"]').allTextContents()).toEqual(['+华北,1200'])
         await shot(page, '05-diff')
         await page.keyboard.press('Escape')
-        await page.getByTestId('tab-deliverables').click()
+        await showTab(page, 'deliverables')
         expect(await page.getByTestId('deliverable-item').count()).toBe(1)
-        await page.getByTestId('tab-materials').click()
+        await closeDrawer(page)
 
         // D07: stop mid-stream; the streamed text stays in the UI and in the session
         await input.click()
@@ -245,13 +249,13 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         const overflow = await page.evaluate(() => {
           const out: string[] = []
           if (document.documentElement.scrollWidth > window.innerWidth) out.push(`document ${document.documentElement.scrollWidth}`)
-          for (const id of ['sidebar', 'conversation', 'right-panel', 'timeline', 'composer']) {
+          for (const id of ['sidebar', 'conversation', 'main', 'timeline', 'composer']) {
             const el = document.querySelector(`[data-testid="${id}"]`)
             if (el === null) out.push(`${id} missing`)
             else if (el.scrollWidth > el.clientWidth + 1) out.push(`${id} ${el.scrollWidth}>${el.clientWidth}`)
           }
-          const right = document.querySelector('[data-testid="right-panel"]').getBoundingClientRect()
-          if (right.right > window.innerWidth + 1) out.push(`right panel ends at ${right.right}`)
+          const right = document.querySelector('[data-testid="main"]').getBoundingClientRect()
+          if (right.right > window.innerWidth + 1) out.push(`main area ends at ${right.right}`)
           return out
         })
         expect(overflow).toEqual([])
@@ -293,29 +297,29 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         await page.getByTestId('workspace').waitFor()
         await expect.poll(() => page.getByTestId('session-item').count()).toBe(1)
         await expect.poll(() => page.getByTestId('turn-end').last().textContent(), { timeout: 20_000 }).toBe('上次运行被中断（应用曾意外退出）')
-        expect(await page.getByTestId('material-item').count()).toBe(2)
         expect(await page.getByTestId('deliverable-card').count()).toBe(2)
-        expect(await page.getByTestId('tab-deliverables').textContent()).toContain('1')
         await shot(page, '08-after-restart')
+        await showTab(page, 'materials')
+        expect(await page.getByTestId('material-item').count()).toBe(2)
+        expect(await page.getByTestId('tab-deliverables').textContent()).toContain('1')
+        expect(await page.getByTestId('pick-files').count()).toBe(1)
+        await closeDrawer(page)
 
         // replayed deliverable cards come right after their present blocks
         const order = await page.evaluate(() =>
           [...document.querySelectorAll('[data-testid="tool-block"], [data-testid="deliverable-card"]')].map((el: any) =>
-            el.dataset.testid === 'deliverable-card' ? 'card' : String(el.textContent).includes('present') ? 'present' : 'tool',
+            el.dataset.testid === 'deliverable-card' ? 'card' : el.dataset.tool === 'present' ? 'present' : 'tool',
           ),
         )
         expect(order).toEqual(['tool', 'tool', 'present', 'card', 'tool', 'present', 'card'])
-        expect(await page.getByTestId('pick-files').count()).toBe(1)
         expect(await page.getByTestId('attach-files').count()).toBe(1)
 
-        // the 文件 tab lists the project folder (not .nexgent) and marks this conversation's changes
-        await page.getByTestId('tab-files').click()
-        await expect.poll(() => page.getByTestId('file-item').count()).toBe(2)
-        const files = await page.getByTestId('file-item').allTextContents()
-        expect(files[0]).toContain('.env')
-        expect(files[1]).toContain('report/summary.csv')
-        expect(files[1]).toContain('修改')
-        await page.getByTestId('tab-materials').click()
+        // each turn's changed files show once, on its card: the deliverable's own, then the rest of the process
+        const cards = page.getByTestId('deliverable-card')
+        expect(await cards.nth(0).getByTestId('other-changes').textContent()).toContain('.env')
+        const second = (await cards.nth(1).getByTestId('deliverable-changes').textContent()) ?? ''
+        expect(second).toContain('report/summary.csv')
+        expect(second).toContain('修改')
 
         // rename the conversation; the title survives in the session file
         await page.getByTestId('rename-session').click()

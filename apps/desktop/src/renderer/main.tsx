@@ -4,7 +4,10 @@ import { App } from './App.js'
 import { ErrorBoundary } from './components/ErrorBoundary.js'
 import { StoreProvider } from './hooks.js'
 import { AppStore } from './store.js'
+import { applyTheme, readTheme } from './theme.js'
 import './styles.css'
+
+applyTheme(readTheme())
 
 const store = new AppStore(window.nexgent)
 window.addEventListener('unhandledrejection', event => store.notify(event.reason))

@@ -53,3 +53,12 @@ export function preferenceViolations(actual: Readonly<Record<string, unknown>>, 
   if (!dev && 'devTools' in actual && actual['devTools'] !== false) violations.push('devTools')
   return violations
 }
+
+/**
+ * macOS keeps an app running with no window: closing the window only hides
+ * it (the Dock icon brings it back) unless the app is quitting. Elsewhere
+ * closing the window quits.
+ */
+export function keepOnClose(platform: NodeJS.Platform, quitting: boolean): boolean {
+  return platform === 'darwin' && !quitting
+}

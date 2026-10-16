@@ -7,7 +7,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { FakeBridge, SESSION, ZERO_USAGE, approvalRequest, memberRun, version } from '../testing/fake-bridge.js'
-import { emit, renderApp } from './helpers.js'
+import { emit, renderApp, showTab } from './helpers.js'
 
 const usage = { ...ZERO_USAGE, inputTokens: 1200, outputTokens: 80, totalTokens: 1280 }
 const ref = { deliverableId: 'd2', version: 1, title: 'north.md', summary: '北区', files: [{ path: 'out/north.md', size: 10, sha256: 'c'.repeat(64), mediaType: 'text/markdown' }], memberName: 'analyst' }
@@ -31,10 +31,8 @@ describe('member blocks', () => {
     emit(bridge, { type: 'member.end', turn: 1, run: memberRun({ preset: 'read-only-analyst', status: 'completed', deliverables: [ref], usage }) })
     const done = screen.getByTestId('member-block')
     expect(within(done).getByTestId('member-status').textContent).toBe('完成')
-    expect(done.textContent).toContain('成果 1')
-    fireEvent.click(within(done).getByText('analyst'))
     expect(within(done).getByTestId('member-usage').textContent).toBe('输入 1200 / 输出 80 tokens')
-    expect(within(done).getByTestId('member-deliverable').textContent).toContain('north.md v1')
+    expect(within(done).getByTestId('member-deliverable').textContent).toContain('north.md · 第 1 版')
     fireEvent.click(within(done).getByTestId('member-deliverable'))
     await waitFor(() => expect(bridge.callsOf('deliverables.get')).toContainEqual(expect.objectContaining({ deliverableId: 'd2', version: 1 })))
   })
@@ -54,7 +52,8 @@ describe('member blocks', () => {
       totalUsage: ZERO_USAGE,
     }
     await renderApp(bridge)
-    fireEvent.click(within(screen.getByTestId('member-block')).getByText('analyst'))
+    // one 小组进度 card per turn; each member's way in is on its row
+    expect(screen.getByTestId('team-card').textContent).toContain('小组进度')
     fireEvent.click(screen.getByTestId('open-member'))
     await waitFor(() => expect(screen.getByTestId('member-view')).toBeTruthy())
     expect(bridge.callsOf('sessions.view')).toEqual([{ projectId: 'p1', sessionId: 'c1' }])
@@ -93,7 +92,7 @@ describe('member blocks', () => {
     expect(screen.getByTestId('team-message').textContent).toContain('待投递')
     emit(b, { type: 'team.message', turn: 1, message: { id: 'x1', from: 'bob', to: 'lead', text: '数据好了', state: 'delivered' } })
     expect(screen.getAllByTestId('team-message')).toHaveLength(1)
-    expect(screen.getByTestId('team-message').textContent).toContain('bob → lead')
+    expect(screen.getByTestId('team-message').textContent).toContain('bob 发给 lead')
     expect(screen.getByTestId('team-message').textContent).toContain('已投递')
   })
 
@@ -104,13 +103,13 @@ describe('member blocks', () => {
       { deliverableId: 'd1', title: 'summary.csv', versions: [version(1)] },
     ]
     await renderApp(bridge)
-    fireEvent.click(screen.getByTestId('tab-deliverables'))
+    showTab('deliverables')
     const finals = screen.getByTestId('final-deliverables')
     const members = screen.getByTestId('member-deliverables')
     expect(within(finals).getByText('summary.csv')).toBeTruthy()
     expect(within(finals).queryByText('north.md')).toBeNull()
     expect(within(members).getByText('north.md')).toBeTruthy()
-    expect(within(members).getByText('来自成员 analyst')).toBeTruthy()
+    expect(members.textContent).toContain('来自成员 analyst')
     expect(screen.getByText('最终成果')).toBeTruthy()
     expect(screen.getByText('成员成果')).toBeTruthy()
   })
@@ -122,13 +121,13 @@ describe('member blocks', () => {
     await renderApp(bridge)
     await waitFor(() => expect(bridge.callsOf('sessions.open')).toHaveLength(1))
     // sessions.open answers without the count; the list keeps it
-    expect(screen.getByTestId('session-item').textContent).toContain('2 个成员')
+    expect(screen.getByTestId('session-item').getAttribute('title')).toContain('2 个成员')
     emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
     emit(bridge, { type: 'member.start', turn: 1, run: memberRun({ childSessionId: 'c3' }) })
-    expect(screen.getByTestId('session-item').textContent).toContain('3 个成员')
+    expect(screen.getByTestId('session-item').getAttribute('title')).toContain('3 个成员')
     // a teammate's later turn is not a new member
     emit(bridge, { type: 'member.start', turn: 1, run: memberRun({ childSessionId: 'c3', childTurn: 2, executionForm: 'team' }) })
-    expect(screen.getByTestId('session-item').textContent).toContain('3 个成员')
+    expect(screen.getByTestId('session-item').getAttribute('title')).toContain('3 个成员')
   })
 })
 
@@ -141,12 +140,14 @@ describe('member approvals', () => {
     emit(bridge, { type: 'approval.request', sessionId: 'c1', parentSessionId: 's1', turn: 1, request })
     const dialog = await screen.findByTestId('approval-dialog')
     expect(within(dialog).getByTestId('approval-member').textContent).toBe('成员 writer（委派）请求这一操作')
-    expect(screen.getByTestId('approval-note').textContent).toContain('writer')
+    // while it waits, the card is the approval; the conversation records it once answered
+    expect(screen.queryByTestId('approval-note')).toBeNull()
     fireEvent.click(within(dialog).getByTestId('approval-once'))
     await waitFor(() => expect(bridge.callsOf('approvals.respond')).toEqual([{ projectId: 'p1', sessionId: 'c1', decision: { id: 'ap1', decision: 'allow', scope: 'once' } }]))
     expect(screen.queryByTestId('approval-dialog')).toBeNull()
     emit(bridge, { type: 'approval.decision', sessionId: 'c1', parentSessionId: 's1', turn: 1, decision: { id: 'ap1', decision: 'allow', scope: 'once', decidedBy: 'user' } })
     expect(screen.getByTestId('approval-note').textContent).toContain('已允许')
+    expect(screen.getByTestId('approval-note').textContent).toContain('writer')
   })
 
   it('ignores approvals of members of other conversations', async () => {
