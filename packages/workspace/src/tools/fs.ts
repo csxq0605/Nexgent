@@ -5,7 +5,21 @@
  */
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
-import { GUARDED_PROJECT_CONFIG_FIELDS, NexgentError, type ApprovalGrant, type ToolContext } from '@nexgent/kernel'
+import {
+  GUARDED_PROJECT_CONFIG_FIELDS,
+  MAX_TEXT_EDITS,
+  NexgentError,
+  STR_REPLACE_INPUT_SCHEMA,
+  WRITE_FILE_INPUT_SCHEMA,
+  applyTextEdits,
+  editsOf,
+  mayWriteFile,
+  numberLines,
+  type ApprovalGrant,
+  type StrReplaceInput,
+  type TextEdit,
+  type ToolContext,
+} from '@nexgent/kernel'
 import { comparablePath } from '../paths.js'
 import type { SandboxAssessment } from '../sandbox.js'
 import {
@@ -91,14 +105,29 @@ async function guardConfigWrite(
   }
 }
 
-function lineRange(text: string, offset: number | undefined, limit: number | undefined): { text: string; note?: string } {
-  if (offset === undefined && limit === undefined) return { text }
+/** Files each session has read or written (real paths); in memory, per tool set, reset on process restart. */
+const sessionFiles = new WeakMap<object, Map<string, Set<string>>>()
+
+function touched(deps: ToolDeps, sessionId: string): Set<string> {
+  let sessions = sessionFiles.get(deps)
+  if (sessions === undefined) sessionFiles.set(deps, sessions = new Map())
+  let files = sessions.get(sessionId)
+  if (files === undefined) sessions.set(sessionId, files = new Set())
+  return files
+}
+
+const markTouched = (deps: ToolDeps, context: ToolContext, real: string): void => {
+  touched(deps, context.sessionId).add(comparablePath(real))
+}
+
+function lineRange(text: string, offset: number | undefined, limit: number | undefined): { lines: string[]; first: number; note?: string } {
   const lines = text.split('\n')
+  if (offset === undefined && limit === undefined) return { lines, first: 1 }
   const start = Math.max(1, Math.floor(offset ?? 1))
   const count = limit === undefined ? lines.length : Math.max(0, Math.floor(limit))
   const slice = lines.slice(start - 1, start - 1 + count)
   const end = start - 1 + slice.length
-  return { text: slice.join('\n'), note: `[lines ${start}-${end} of ${lines.length}]` }
+  return { lines: slice, first: start, note: `[lines ${start}-${end} of ${lines.length}]` }
 }
 
 /** `read_file`: read a UTF-8 text file, optionally a line range. */
@@ -109,7 +138,7 @@ export function readFileTool(deps: ToolDeps): WorkspaceTool {
   return {
     definition: {
       name,
-      description: 'Read a UTF-8 text file in the project. Paths are relative to the project root. Use offset (1-based line) and limit for large files.',
+      description: 'Read a UTF-8 text file in the project; each line is prefixed with its number and a tab (not part of the file). Paths are relative to the project root. Use offset (1-based line) and limit for large files.',
       inputSchema: objectSchema({
         path: { type: 'string', description: 'File path, relative to the project root.' },
         offset: { type: 'integer', minimum: 1, description: 'First line to return (1-based).' },
@@ -142,7 +171,9 @@ export function readFileTool(deps: ToolDeps): WorkspaceTool {
       const buffer = await readFile(real)
       if (buffer.subarray(0, 8192).includes(0)) throw new NexgentError('tool/failed', `${real} looks like a binary file`)
       const range = lineRange(buffer.toString('utf8'), offset, limit)
-      const content = range.note === undefined ? range.text : `${range.text}\n${range.note}`
+      const numbered = numberLines(range.lines, range.first)
+      const content = range.note === undefined ? numbered : `${numbered}\n${range.note}`
+      markTouched(deps, context, real)
       return { content: deps.redactor.redact(content), meta: { path: real, bytes: info.size } }
     },
   }
@@ -159,11 +190,11 @@ function subjectsFor(deps: ToolDeps, _context: ToolContext, real: string): { kin
 }
 
 /**
- * `write_file`: create a new file (parents are created). An existing path is
- * refused with `tool/failed` and a hint to use `str_replace`: real runs
- * rewrote whole files instead of editing them (step 2, R02), so the product
- * keeps whole-file writes to new files only. The create is exclusive (`wx`),
- * so a file that appears between the check and the write is not overwritten.
+ * `write_file`: write a whole file (parents are created). A new path is
+ * always written; an existing one only when this session read or wrote it,
+ * or the call says `overwrite: true` (ADR 0017 decision 1, `mayWriteFile`).
+ * A new file is created exclusively (`wx`), so one that appears between the
+ * check and the write is not clobbered unnoticed.
  */
 export function writeFileTool(deps: ToolDeps): WorkspaceTool {
   const name = 'write_file'
@@ -175,11 +206,8 @@ export function writeFileTool(deps: ToolDeps): WorkspaceTool {
   return {
     definition: {
       name,
-      description: 'Create a new UTF-8 text file in the project. Use this, not shell heredocs, echo or scripts, whenever you create a file yourself. It only creates files: an existing file is refused; change it with str_replace instead. Parent directories are created.',
-      inputSchema: objectSchema({
-        path: { type: 'string', description: 'File path, relative to the project root.' },
-        content: { type: 'string', description: 'Complete content of the new file.' },
-      }, ['path', 'content']),
+      description: 'Write a UTF-8 text file (parent directories are created). An existing file is replaced only if you read it in this session, or pass overwrite: true. Prefer str_replace for small changes.',
+      inputSchema: WRITE_FILE_INPUT_SCHEMA as never,
       effects: ['write'],
       approval: 'never',
     },
@@ -194,73 +222,106 @@ export function writeFileTool(deps: ToolDeps): WorkspaceTool {
     handler: async (input, context) => {
       const args = inputObject(input)
       const content = stringField(args, 'content', true)
+      const overwrite = args.overwrite === true
       const real = await enforcePath(deps, await assess(args, context), context, 'write')
-      const refuse = () => new NexgentError('tool/failed',
-        `${context.workspace.relative(real)} already exists; write_file only creates new files. Change it with str_replace (read it with read_file first).`,
-        { details: { reason: 'exists' } })
-      if (await pathExists(real)) throw refuse()
-      await mkdir(nodePath.dirname(real), { recursive: true })
-      try {
-        await writeFile(real, content, { encoding: 'utf8', flag: 'wx' })
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw refuse()
-        throw error
+      const shown = context.workspace.relative(real)
+      const exists = await pathExists(real)
+      const readInSession = touched(deps, context.sessionId).has(comparablePath(real))
+      if (exists && (await stat(real)).isDirectory()) {
+        throw new NexgentError('tool/failed', `${shown} is a directory`, { details: { reason: 'directory' } })
       }
+      if (!mayWriteFile({ exists, readInSession, overwrite })) {
+        throw new NexgentError('tool/failed',
+          `${shown} already exists and was not read in this session. Read it with read_file first, or pass overwrite: true to replace it.`,
+          { details: { reason: 'exists' } })
+      }
+      await mkdir(nodePath.dirname(real), { recursive: true })
+      if (exists) {
+        await writeFile(real, content, 'utf8')
+      } else {
+        try {
+          await writeFile(real, content, { encoding: 'utf8', flag: 'wx' })
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+          throw new NexgentError('tool/failed',
+            `${shown} appeared while writing; read it with read_file first, or pass overwrite: true to replace it.`,
+            { details: { reason: 'exists' } })
+        }
+      }
+      markTouched(deps, context, real)
       const bytes = Buffer.byteLength(content, 'utf8')
       return {
-        content: `Created ${context.workspace.relative(real)} (${bytes} bytes)`,
-        meta: { path: real, bytes, created: true },
+        content: `${exists ? 'Wrote' : 'Created'} ${shown} (${bytes} bytes)`,
+        meta: exists ? { path: real, bytes } : { path: real, bytes, created: true },
       }
     },
   }
 }
 
-/** Outcome of {@link applyStrReplace}. */
-export type StrReplaceResult =
-  | { readonly ok: true; readonly content: string; readonly line: number }
-  | { readonly ok: false; readonly reason: 'empty' | 'no-match' | 'multiple'; readonly lines: readonly number[] }
+/** Why a `str_replace` call could not be applied. */
+type EditProblem = { readonly message: string; readonly details: { reason: string; index?: number; lines?: number[] } }
 
 /**
- * Replace exactly one occurrence of `oldStr`. In a CRLF file, bare `\n` in
- * `oldStr` / `newStr` is converted to `\r\n` so the file stays CRLF.
+ * Apply the edits of one call to `content` (all or nothing). In a CRLF file,
+ * bare `\n` in `old_str` / `new_str` becomes `\r\n` so the file stays CRLF.
  */
-export function applyStrReplace(content: string, oldStr: string, newStr: string): StrReplaceResult {
-  if (oldStr === '') return { ok: false, reason: 'empty', lines: [] }
+export function applyEdits(content: string, edits: readonly TextEdit[], shown: string): { content: string; replacements: number } | EditProblem {
   const crlf = content.includes('\r\n')
   const toEol = (text: string): string => (crlf ? text.replace(/\r?\n/g, '\r\n') : text)
-  const needle = toEol(oldStr)
-  const replacement = toEol(newStr)
-  const positions: number[] = []
-  for (let index = content.indexOf(needle); index !== -1; index = content.indexOf(needle, index + 1)) positions.push(index)
-  const lineOf = (index: number): number => content.slice(0, index).split('\n').length
-  if (positions.length === 0) return { ok: false, reason: 'no-match', lines: [] }
-  if (positions.length > 1) return { ok: false, reason: 'multiple', lines: positions.map(lineOf) }
-  const at = positions[0]!
-  return { ok: true, content: content.slice(0, at) + replacement + content.slice(at + needle.length), line: lineOf(at) }
+  const converted = edits.map(e => ({ ...e, old_str: toEol(e.old_str), new_str: toEol(e.new_str) }))
+  const result = applyTextEdits(content, converted)
+  if (result.ok) return { content: result.content, replacements: result.replacements }
+  const { index } = result
+  const label = edits.length > 1 ? `edit ${index + 1} of ${edits.length}` : 'old_str'
+  const note = edits.length > 1 ? '; no edit was applied, the file is unchanged' : ''
+  switch (result.failure) {
+    case 'empty':
+      return { message: `No replacement was performed: ${label} has an empty old_str${note}`, details: { reason: 'empty', index } }
+    case 'not-found':
+      return { message: `No replacement was performed: ${label} was not found in ${shown}${note}`, details: { reason: 'no-match', index } }
+    case 'not-unique': {
+      // text the failing edit saw: the earlier edits applied in order
+      const before = index === 0 ? content : (applyTextEdits(content, converted.slice(0, index)) as { content: string }).content
+      const needle = converted[index]!.old_str
+      const lines: number[] = []
+      for (let at = before.indexOf(needle); at !== -1; at = before.indexOf(needle, at + 1)) lines.push(before.slice(0, at).split('\n').length)
+      return {
+        message: `No replacement was performed: ${label} occurs ${lines.length} times (lines ${lines.join(', ')}) in ${shown}; include more context to make it unique, or set replace_all${note}`,
+        details: { reason: 'multiple', index, lines },
+      }
+    }
+    default:
+      return { message: `No replacement was performed: expected 1 to ${MAX_TEXT_EDITS} edits`, details: { reason: 'invalid', index } }
+  }
 }
 
-/** `str_replace`: replace one unique occurrence of `old_str` with `new_str`. */
+const isProblem = (value: ReturnType<typeof applyEdits>): value is EditProblem => 'message' in value
+
+function editsFromArgs(args: Record<string, unknown>): readonly TextEdit[] {
+  const edits = editsOf(args as unknown as StrReplaceInput)
+  if (edits === undefined) {
+    throw new NexgentError('tool/invalid-input', 'str_replace takes either old_str and new_str, or edits (not both)')
+  }
+  return edits
+}
+
+/** `str_replace`: replace text in an existing file; one inline edit or several (all or nothing). */
 export function strReplaceTool(deps: ToolDeps): WorkspaceTool {
   const name = 'str_replace'
   const assess = async (args: Record<string, unknown>, context: ToolContext) => {
-    const oldStr = stringField(args, 'old_str', true)
-    const newStr = stringField(args, 'new_str', true)
+    const edits = editsFromArgs(args)
     const first = await sandboxFor(deps, context).assessWrite(context.workspace.resolve(stringField(args, 'path', true)))
     return guardConfigWrite(deps, context, first, current => {
-      const result = applyStrReplace(current ?? '', oldStr, newStr)
-      if (!result.ok) throw new Error(result.reason)
+      const result = applyEdits(current ?? '', edits, '')
+      if (isProblem(result)) throw new Error(result.message)
       return result.content
     })
   }
   return {
     definition: {
       name,
-      description: 'Change an existing text file by replacing old_str with new_str. Use this, not sed, Python or other scripts, for every edit; call it once per change. old_str must match exactly one location (include surrounding lines to make it unique). Line endings of the file are preserved.',
-      inputSchema: objectSchema({
-        path: { type: 'string', description: 'File path, relative to the project root.' },
-        old_str: { type: 'string', description: 'Exact text to replace; must occur exactly once.' },
-        new_str: { type: 'string', description: 'Replacement text.' },
-      }, ['path', 'old_str', 'new_str']),
+      description: 'Change an existing text file by replacing old_str with new_str. old_str must match exactly one place unless replace_all is set. Pass edits to apply several in order; the file is written only if all succeed. Line endings are preserved.',
+      inputSchema: STR_REPLACE_INPUT_SCHEMA as never,
       effects: ['read', 'write'],
       approval: 'never',
     },
@@ -274,24 +335,17 @@ export function strReplaceTool(deps: ToolDeps): WorkspaceTool {
     }),
     handler: async (input, context) => {
       const args = inputObject(input)
-      const oldStr = stringField(args, 'old_str', true)
-      const newStr = stringField(args, 'new_str', true)
+      const edits = editsFromArgs(args)
       const real = await enforcePath(deps, await assess(args, context), context, 'edit')
       const current = await readIfExists(real)
       if (current === undefined) throw new NexgentError('tool/failed', `${real} does not exist; use write_file to create it`)
-      const result = applyStrReplace(current, oldStr, newStr)
-      if (!result.ok) {
-        const message = result.reason === 'empty'
-          ? 'old_str must not be empty'
-          : result.reason === 'no-match'
-            ? `No replacement was performed: old_str was not found in ${real}`
-            : `No replacement was performed: old_str occurs ${result.lines.length} times (lines ${result.lines.join(', ')}) in ${real}; include more context to make it unique`
-        throw new NexgentError('tool/failed', message, { details: { reason: result.reason, lines: [...result.lines] } })
-      }
+      const result = applyEdits(current, edits, real)
+      if (isProblem(result)) throw new NexgentError('tool/failed', result.message, { details: result.details })
       await writeFile(real, result.content, 'utf8')
+      markTouched(deps, context, real)
       return {
-        content: `Edited ${context.workspace.relative(real)} at line ${result.line}`,
-        meta: { path: real, line: result.line },
+        content: `Edited ${context.workspace.relative(real)} (${result.replacements} replacement${result.replacements === 1 ? '' : 's'})`,
+        meta: { path: real, replacements: result.replacements },
       }
     },
   }

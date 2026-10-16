@@ -150,7 +150,7 @@ export const JUDGES = {
       [completed(obs.phases?.peer), `the peer session completed (got ${obs.phases?.peer?.reason?.kind})`],
       [taskATools, `task A did have ${FUNCTION_TOOL} (otherwise this check proves nothing)`],
       [peerRequests.length > 0 && peerRequests.every(r => !r.tools.includes(FUNCTION_TOOL)), `no request of the peer session offers ${FUNCTION_TOOL}`],
-      [peerRequests.every(r => !r.system.includes(SKILL.name)), `the peer session's system prompt does not list ${SKILL.name}`],
+      [peerRequests.every(r => !r.system.includes(SKILL.name)), `the peer session's system prompt and skills list do not list ${SKILL.name}`],
       [refused(resultOf(obs, peer, 'peer-skill')), `load_skill of ${SKILL.name} failed in the peer session`],
     ], 'a second root session, opened while task A was, saw neither the tried function nor the tried skill')
   },

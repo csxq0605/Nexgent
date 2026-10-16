@@ -120,7 +120,7 @@ describe('context providers', () => {
 
     const prompt = llm.requests[0]!.messages[0]!.content as string
     expect(llm.requests[1]!.messages[0]!.content).toBe(prompt)
-    const order = ['# Environment', '# Tools', '# First\none', '# Second\ntwo', '# Third\nthree', 'Your project working directory is']
+    const order = ['# Environment', '# First\none', '# Second\ntwo', '# Third\nthree', 'Your project working directory is']
     const positions = order.map(text => prompt.indexOf(text))
     expect(positions.every(position => position >= 0)).toBe(true)
     expect([...positions].sort((a, b) => a - b)).toEqual(positions)
@@ -453,9 +453,9 @@ describe('system prompt sections', () => {
       cwd: '/p',
       sandboxMode: 'workspace-write',
       platform: 'linux',
-      tools: [tool('write_file')],
+      tools: [tool('present')],
       sections: [{ id: 'a', title: 'Project instructions', body: 'Be brief.' }],
     })
-    expect(prompt.endsWith('# Working with files\n- To create a new file, use `write_file`; it refuses a file that already exists.\n\n# Project instructions\nBe brief.\n\nS')).toBe(true)
+    expect(prompt).toMatch(/# Working with files\n- When the user asks for a result file[^\n]*\n\n# Project instructions\nBe brief\.\n\nS$/)
   })
 })

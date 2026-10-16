@@ -18,9 +18,7 @@ export const RUN_CODE_DESCRIPTION = 'Run JavaScript in a fresh, isolated Node.js
   + 'each checked against this session\'s sandbox like the file tools: '
   + 'readFile(path, { encoding?: "utf8" | "base64" }) → string; '
   + 'writeFile(path, content, { encoding?, overwrite?: boolean }) → { path, bytes, created } (an existing file is replaced only with overwrite: true); '
-  + 'listDir(path = ".") → [{ name, type }]; exists(path) → boolean; '
-  + 'readSpreadsheet(path, { sheet? }) → { sheets, sheet, rows (calculated values, row 1 first), formulas ({ "C2": "=A2*B2" }) }; '
-  + 'writeSpreadsheet({ path, sheets: [{ name, rows, headerRow? }], overwrite? }) — same input as write_spreadsheet, formulas as "=..." text. '
+  + 'listDir(path = ".") → [{ name, type }]; exists(path) → boolean. '
   + 'Paths are project paths. Use it for computing over data, transforming files and checking results; use bash for installed tools. '
   + `Default timeout ${PTC_LIMITS.defaultTimeoutMs / 1000} s (timeoutMs up to ${PTC_LIMITS.maxTimeoutMs / 1000} s); output is cut at ${PTC_LIMITS.maxOutputChars} characters.`
 

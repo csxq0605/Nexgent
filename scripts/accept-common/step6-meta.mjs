@@ -315,7 +315,7 @@ export async function triggerPhase(h, pkgs, work, log) {
       server,
       feedback: [],
       log: line => log(`trigger: ${line}`),
-      config: { autoImprove: false },
+      config: { autoImprove: false, learning: { enabled: true } },
       createSdk: (env, home) => createStep5Sdk(pkgs, { env, home }),
     })
     home = project.home
@@ -326,7 +326,7 @@ export async function triggerPhase(h, pkgs, work, log) {
       server: secondServer,
       feedback: [],
       log: line => log(`trigger second: ${line}`),
-      config: { autoImprove: false },
+      config: { autoImprove: false, learning: { enabled: true } },
       createSdk: env => createStep5Sdk(pkgs, { env: { ...env, NEXGENT_HOME: home }, home }),
     })
     const secondSession = second.tasks.at(-1)?.sessionId
