@@ -69,6 +69,10 @@ import {
   realModelKeySource,
 } from './accept-common/step6-checks.mjs'
 
+// ADR 0018 (rework E1) retired the counting path these checks exercise; keep it on for them until
+// the rework's T1 list retires or rewrites them (inherited by in-process SDKs and child processes).
+process.env.NEXGENT_LEGACY_COUNTING ??= '1'
+
 const STEP = {
   step: 6,
   name: '递归改进并检验收益',

@@ -54,6 +54,7 @@ export {
   countsTowardImprovement,
   feedbackItem,
   ImprovementHost,
+  LEGACY_COUNTING_ENV,
   type CheckFailureInput,
   type ImprovementHostConfig,
   type StartedJob,

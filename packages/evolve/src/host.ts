@@ -101,6 +101,13 @@ export interface StartedJob {
   readonly exited: Promise<number | null>
 }
 
+/**
+ * Environment switch of the retired counting path (`1` turns it on when the
+ * host config leaves `legacyCounting` out): only for the step-5/6
+ * acceptance scripts until the rework's T1 list retires their checks.
+ */
+export const LEGACY_COUNTING_ENV = 'NEXGENT_LEGACY_COUNTING'
+
 /** Plugin-row config of the improvement flow (process wiring only; the settings live in the project config). */
 export interface ImprovementHostConfig {
   /** Absolute path of the host's entry script (it handles `improve <projectRoot> <jobId>`); absent: jobs are never started. */
@@ -116,7 +123,7 @@ export interface ImprovementHostConfig {
   /**
    * The retired step-5 path (ADR 0018): counted feedback and failed checks
    * start jobs, waiting jobs resume. Default off; on only for the tests of
-   * that path.
+   * that path (absent: {@link LEGACY_COUNTING_ENV}).
    */
   readonly legacyCounting?: boolean
   /** ADR 0018 decision 11: the interface language (BCP 47) of what learning writes for the user; absent: each task's language. */
@@ -146,7 +153,7 @@ export class ImprovementHost {
 
   /** Whether the retired counting path is on (tests only). */
   get legacyCounting(): boolean {
-    return this.#config.legacyCounting === true
+    return this.#config.legacyCounting ?? process.env[LEGACY_COUNTING_ENV] === '1'
   }
 
   /** ADR 0018: a root task turn ended; queue it for background learning (the kernel's optional signal). */
