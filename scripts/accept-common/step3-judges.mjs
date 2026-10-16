@@ -432,7 +432,7 @@ function h19(obs) {
     [blocked('call-web-redirect'), 'a redirect from the page server to 127.0.0.1 is refused'],
     [t.webHits?.['/stock.html'] === 1 && t.webHits?.['/redirect'] === 1, `the page server saw exactly the allowed page fetch and the redirect (got ${JSON.stringify(t.webHits)})`],
     [shipped?.isError === true && shipped.error?.code === 'tool/denied' && shipped.error?.details?.reason === 'blocked-address', 'the shipped @nexgent/web refuses the same local page (loopback), sending no request'],
-  ], 'local page converted to Markdown (test row: the shipped tool plus one allowed address, 127.0.0.2); 127.0.0.1, 10.0.0.1 and a redirect to 127.0.0.1 refused; the shipped plugin refuses the loopback page')
+  ], 'local page converted to Markdown (test row: the shipped tool plus one allowed loopback address other than 127.0.0.1); 127.0.0.1, 10.0.0.1 and a redirect to 127.0.0.1 refused; the shipped plugin refuses the loopback page')
 }
 
 // ---- workflow (H07–H09) ------------------------------------------------------------------------

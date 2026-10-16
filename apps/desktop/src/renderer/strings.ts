@@ -193,6 +193,7 @@ export const T = {
   capabilityHistory: '采用记录',
   capabilityNoHistory: '还没有采用或回滚。',
   candidateReason: '原因',
+  gateRecord: '门控原始记录（英文）',
   candidateTrial: '门控试验',
   candidateTrialRuns: (n: number) => `${n} 次运行`,
   candidateNoTrial: '还没有门控试验。',
@@ -561,6 +562,20 @@ export function failureCategoryText(category: string): string {
 
 export function improvementPhaseText(phase: string): string {
   return phase === 'diagnose' ? '诊断' : phase === 'propose' ? '提出候选' : phase === 'trial' ? '门控试验' : phase === 'meta-diagnose' ? '元诊断' : phase === 'meta-propose' ? '改进器提案' : phase === 'compare' ? '父子对比' : phase
+}
+
+/** A gate's cost ratio, candidate over baseline. */
+export function costRatioText(ratio: number | 'unknown' | undefined): string {
+  return typeof ratio === 'number' ? `费用是基线的 ${ratio.toFixed(2)} 倍` : T.improvementCostUnknown
+}
+
+/** The gate's numbers in the UI's words (the decision's own `detail` is an English log line). */
+export function verdictText(verdict: { readonly passRate: { readonly candidate: number; readonly baseline: number }; readonly similarPassRate?: { readonly candidate: number; readonly baseline: number }; readonly feedbackPassRate?: { readonly candidate: number; readonly baseline: number }; readonly costRatio: number | 'unknown' }): string {
+  const parts = [T.improvementPassRate(percentText(verdict.passRate.candidate), percentText(verdict.passRate.baseline))]
+  if (verdict.similarPassRate !== undefined) parts.push(T.improvementSimilarRate(percentText(verdict.similarPassRate.candidate), percentText(verdict.similarPassRate.baseline)))
+  if (verdict.feedbackPassRate !== undefined) parts.push(T.improvementFeedbackRate(percentText(verdict.feedbackPassRate.candidate), percentText(verdict.feedbackPassRate.baseline)))
+  parts.push(costRatioText(verdict.costRatio))
+  return `${parts.join('；')}。`
 }
 
 export function percentText(rate: number): string {
