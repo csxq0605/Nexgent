@@ -25,7 +25,7 @@ async function until<T>(probe: () => Promise<T | undefined>, timeoutMs = 20_000)
 describe('job processes', () => {
   it('the third feedback starts a detached job process that runs the job', async () => {
     const layout = await project()
-    const host = new ImprovementHost(layout, { entry: ENTRY, env: { ...TSX_ENV, NEXGENT_TEST_STAGES: 'adopted' } })
+    const host = new ImprovementHost(layout, { legacyCounting: true, entry: ENTRY, env: { ...TSX_ENV, NEXGENT_TEST_STAGES: 'adopted' } })
     await host.start()
     const result = await host.noteFeedback([feedback(), feedback({ rating: 1 }), feedback()])
     const started = host.started.get(result.started!.id)!
@@ -36,7 +36,7 @@ describe('job processes', () => {
 
   it('a killed job process is marked interrupted on the next start and not re-run', async () => {
     const layout = await project()
-    const host = new ImprovementHost(layout, { entry: ENTRY, env: { ...TSX_ENV, NEXGENT_TEST_STAGES: 'hang' } })
+    const host = new ImprovementHost(layout, { legacyCounting: true, entry: ENTRY, env: { ...TSX_ENV, NEXGENT_TEST_STAGES: 'hang' } })
     await host.start()
     const job = await host.run()
     const started = host.started.get(job.id)!
@@ -45,7 +45,7 @@ describe('job processes', () => {
     process.kill(started.pid!, 'SIGKILL')
     await started.exited
     // A new app start in another "process": a fresh host.
-    const restarted = new ImprovementHost(layout, { entry: ENTRY, env: { ...TSX_ENV, NEXGENT_TEST_STAGES: 'adopted' } })
+    const restarted = new ImprovementHost(layout, { legacyCounting: true, entry: ENTRY, env: { ...TSX_ENV, NEXGENT_TEST_STAGES: 'adopted' } })
     await restarted.start()
     const after = await restarted.show(job.id)
     expect(after.status).toBe('interrupted')

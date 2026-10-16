@@ -20,6 +20,9 @@
     },
     {
       "path": "../capabilities"
+    },
+    {
+      "path": "../llm"
     }
   ]
 }

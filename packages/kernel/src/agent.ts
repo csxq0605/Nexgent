@@ -1046,6 +1046,20 @@ export class Agent {
     }
   }
 
+  /**
+   * ADR 0018: after `turn.end` of a root task turn (not a member, not an
+   * improvement session), tell `ctx.improve` so it can queue the task for
+   * background learning. Optional on the host; a failure is non-fatal.
+   */
+  private async signalTurnEnd(improve: ImprovementSignals | undefined, turn: number, reason: TurnEndReason): Promise<void> {
+    if (improve?.noteTurnEnd === undefined || this.member !== undefined || this.improvement !== undefined) return
+    try {
+      await improve.noteTurnEnd({ taskId: this.init.tree.taskId, sessionId: this.sessionId, turn, reason, ...(this.lastChecks === undefined ? {} : { checks: this.lastChecks }) })
+    } catch (error) {
+      await this.appendError(errorInfo('internal', `turn-end signal failed: ${toErrorInfo(error).message}`), false, turn)
+    }
+  }
+
   // -------------------------------------------------------------------------
   // turn
   // -------------------------------------------------------------------------
@@ -1104,6 +1118,7 @@ export class Agent {
       this.settledHistory = { messages: [...this.messages], throughSeq: end.seq }
       this.lastReason = reason
       this.emit({ type: 'turn.end', sessionId: this.sessionId, turn, reason })
+      await this.signalTurnEnd(services.improve, turn, reason)
       await this.maybeCheckpoint()
       if (reason.kind === 'cancelled' && reason.cause === 'cost-cap' && !this.outcomeWritten) {
         await this.writeOutcome('cancelled')

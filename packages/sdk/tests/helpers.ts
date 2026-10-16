@@ -46,9 +46,9 @@ export type MemberRoutes = Readonly<Record<string, ScriptEntry<LLMRequest>[]>>
 /** An SDK over a scripted model with a hermetic env and home. */
 export async function testSdk(
   script: ScriptFor | ScriptEntry<LLMRequest>[],
-  options: Partial<LocalSdkOptions> & { readonly routes?: MemberRoutes; readonly launch?: JobLauncher } = {},
+  options: Partial<LocalSdkOptions> & { readonly routes?: MemberRoutes; readonly launch?: JobLauncher; readonly legacyCounting?: boolean } = {},
 ): Promise<TestSdk> {
-  const { routes, registry, launch, ...sdkOptions } = options
+  const { routes, registry, launch, legacyCounting = true, ...sdkOptions } = options
   const launched: Array<{ root: string; jobId: string }> = []
   const base = await tempDir()
   const home = nodePath.join(base, 'home')
@@ -71,11 +71,13 @@ export async function testSdk(
         },
       },
       // Improvement jobs never start a process of the real entry here (it would reach the real model API).
+      // The step-5/6 tests cover the counting path ADR 0018 retired, so it stays on unless a test turns it off.
       [EvolvePlugin.name]: {
         ...EvolvePlugin,
         apply(ctx: Context, config: EvolvePluginConfig = {}) {
           EvolvePlugin.apply(ctx, {
             ...config,
+            legacyCounting,
             launch: (layout, jobId): StartedJob => {
               launched.push({ root: layout.root, jobId })
               return launch?.(layout, jobId) ?? { jobId, pid: undefined, exited: Promise.resolve(0) }

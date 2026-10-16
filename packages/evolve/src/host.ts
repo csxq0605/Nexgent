@@ -26,6 +26,13 @@
  * ADR 0012: meta jobs belong to the user (the Nexgent home): their switch,
  * `everyJobs` and budget are the user config's, one runs at a time for the
  * user, and the improver every job pins is the user's.
+ *
+ * ADR 0018 (rework E1) retires the counting path: feedback and failed checks
+ * no longer start jobs, and waiting jobs are not resumed, unless the host is
+ * configured with `legacyCounting` (kept for the step-5/6 tests until they
+ * are retired). Learning after every task is {@link LearningHost}'s
+ * ({@link ImprovementHost.noteTurnEnd}); explicit "改进" still starts a job,
+ * and every old job record stays readable.
  */
 import { spawn } from 'node:child_process'
 import { closeSync, mkdirSync, openSync } from 'node:fs'
@@ -50,6 +57,7 @@ import { processAlive, readLockPid, tryCreateLock } from './lock.js'
 import { improvementsDir } from './paths.js'
 import { admitItems, ensureQueue, readQueue, reconcileQueue, retakeSlot, startExplicitJob, type AdmitResult } from './queue.js'
 import { ensureUserQueue, homeOf, readUserConfig, reconcileUserQueue, startExplicitUserMetaJob, userImprovers, userMetaBudgetStatus } from './user.js'
+import type { LearningHost, TurnEndInput } from './learning/host.js'
 import { RUNNING_STATUSES, type ImprovementJob, type ImprovementQueue, type ImprovementRequest, type QueueItem } from './types.js'
 
 /**
@@ -105,6 +113,14 @@ export interface ImprovementHostConfig {
   readonly improvers?: ImproverSource
   /** The Nexgent home (default `NEXGENT_HOME` / `~/.nexgent`): the user's improvers, meta queue and config. */
   readonly home?: string
+  /**
+   * The retired step-5 path (ADR 0018): counted feedback and failed checks
+   * start jobs, waiting jobs resume. Default off; on only for the tests of
+   * that path.
+   */
+  readonly legacyCounting?: boolean
+  /** ADR 0018 decision 11: the interface language (BCP 47) of what learning writes for the user; absent: each task's language. */
+  readonly language?: string
 }
 
 /** The improvement flow of one project. */
@@ -117,6 +133,8 @@ export class ImprovementHost {
   readonly #feedback: () => FeedbackStore | undefined
   readonly #started = new Map<string, StartedJob>()
   readonly #live = new Set<string>()
+  /** Layer-1 learning (ADR 0018), when the app wires it. */
+  learning: LearningHost | undefined
 
   constructor(layout: WorkspaceLayout, config: ImprovementHostConfig = {}, feedback: () => FeedbackStore | undefined = () => undefined) {
     this.layout = layout
@@ -124,6 +142,16 @@ export class ImprovementHost {
     this.#config = config
     this.home = homeOf(config.home)
     this.#feedback = feedback
+  }
+
+  /** Whether the retired counting path is on (tests only). */
+  get legacyCounting(): boolean {
+    return this.#config.legacyCounting === true
+  }
+
+  /** ADR 0018: a root task turn ended; queue it for background learning (the kernel's optional signal). */
+  async noteTurnEnd(input: TurnEndInput): Promise<void> {
+    await this.learning?.noteTurnEnd(input)
   }
 
   /** Whether this host can start a job process. */
@@ -147,7 +175,7 @@ export class ImprovementHost {
     await ensureQueue(this.directory)
     await ensureUserQueue(this.home).catch(() => undefined)
     await this.recover()
-    await this.resumeWaiting().catch(() => undefined)
+    if (this.legacyCounting) await this.resumeWaiting().catch(() => undefined)
     await sweepAdoptedJobs(this.layout).catch(() => undefined)
   }
 
@@ -196,6 +224,7 @@ export class ImprovementHost {
 
   /** Count signals and start a job when the batch is full. */
   async admit(items: readonly QueueItem[], now: Date = new Date()): Promise<AdmitResult> {
+    if (!this.legacyCounting) return { added: [], pending: (await this.queue())?.pending.length ?? 0 }
     const settings = await this.settings()
     const autoStart = this.canLaunch && settings.autoImprove
     const result = await admitItems(this.directory, items, { autoStart, threshold: settings.improvement.feedbackThreshold, now })

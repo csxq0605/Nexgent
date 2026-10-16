@@ -2,7 +2,7 @@
   "name": "@nexgent/evolve",
   "version": "0.0.0",
   "private": true,
-  "description": "默认的反馈改进流程：反馈计数与三种触发、改进作业与状态机、作业宿主、改进预算、诊断会话与只读诊断工具、在快照副本里重做任务提出候选、交给门控、记录首次被使用。",
+  "description": "每次任务后的第 1 层学习（反思、整理、经验手册、后台学习队列、美元学习预算），以及只读保留与显式启动的旧改进作业（作业宿主、诊断、提议、交给门控、改进器版本）。",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -22,6 +22,7 @@
   "dependencies": {
     "@nexgent/capabilities": "workspace:*",
     "@nexgent/kernel": "workspace:*",
+    "@nexgent/llm": "workspace:*",
     "@nexgent/session": "workspace:*",
     "@nexgent/tasking": "workspace:*"
   }

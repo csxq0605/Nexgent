@@ -1,10 +1,25 @@
 # @nexgent/evolve
 
-默认的反馈改进流程（步骤 5，W2）：反馈计数、三种触发、改进作业目录与状态机、作业宿主（分离进程、锁、恢复、取消）、改进预算闸门（第 1 轮）；诊断会话与四个只读诊断工具、在反馈任务的快照副本里重做任务提出候选、交给门控、记录采用后的“首次被使用”与回滚（第 2 轮）。
+重做 E1（ADR 0018 第 1 层）起，本包的默认流程是**每次任务后的后台学习**：根任务的每一轮结束后，任务进入项目的学习队列；应用进程里的后台循环一次处理一个任务，读会话记录与自评，找相似但结局不同的历史任务对照，发一次反思请求，把提出的增量操作（新增、修改、赞、踩）交给确定性整理后追加到经验手册日志，再按计数追加状态变化（试用 → 启用 / 下线）。花钱前要用户确认过后台学习说明（`mayLearn`）且学习预算（美元，默认每项目 30 天 3 美元）有余额；应用退出时停止，下次启动继续。
 
-归属：「改进流程」讨论串（`docs/plan/step-5-work-partition.md` W2）。作业、队列、诊断的类型与纯函数都来自 `@nexgent/kernel` 的步骤 5 契约（`contracts/improvement.ts`），`src/types.ts` 只做再导出与旧名别名。运行时依赖：`@nexgent/kernel`、`@nexgent/session`（校验与账本）、`@nexgent/tasking`（反馈读取）、`@nexgent/capabilities`（回放任务、快照副本、候选）。
+步骤 5/6 的改进作业机制（作业宿主、诊断、提议、交给门控、改进器版本与元改进）仍在：显式“改进”照常开始作业，旧作业记录照常可读；“3 条差评 / 检查失败 → 自动开始作业”的计数路径已退役，只在宿主配置 `legacyCounting: true` 时开启（留给那条路径自己的测试，等「测试与 CI」的 T1 清单决定退役）。
 
-本包不启动 SDK（SDK 依赖本包）。真正的会话由宿主入口注入：`ImprovementSessionRunner`（开会话、逐条发消息、关会话）与 `TrialStarter`（门控）。没有注入时作业用 `PENDING_STAGES`，一律以 `failed` 结束并写明原因（未知结果不算成功）。
+归属：「改进流程」讨论串（`docs/plan/rework-partition.md` E1；步骤 5 的 W2）。运行时依赖：`@nexgent/kernel`、`@nexgent/session`、`@nexgent/tasking`、`@nexgent/capabilities`、`@nexgent/llm`（价格表）。
+
+## 第 1 层学习（`src/learning/`）
+
+| 文件 | 内容 |
+| --- | --- |
+| `host.ts` | `LearningHost`：`noteTurnEnd` 入队、后台循环、`stop` / `start`、`mark`（执行中模型的 `handbook_mark` 记票）、`retrieve`、`status` |
+| `handbook.ts` | 手册日志 `HandbookLog`（`ops.jsonl` 只追加、锁内编号、截掉残行）与 BM25 词法检索 `retrieveEntries`；V1 之前的过渡位置，格式严格按 `data-formats.md` §经验手册 |
+| `reflect.ts` | 反思指令 v0（通用、不含任何用例的例子）、请求正文、回答解析 |
+| `curate.ts` | 确定性整理：长度与关键词、具体数值（`findInstanceLiterals`）、照抄请求、重复、取代与修改的范围、投票规则、项目级 / 用户级；`statusOps` |
+| `queue.ts` | 学习队列 `<项目数据>/learning/queue.json`（迁移前 `.nexgent/learning/`） |
+| `budget.ts` | 学习预算：账本里带 `learningPhase` 的记录按价格表折美元，滚动窗口 |
+| `run-record.ts` | 会话记录压成反思读的文字（用户消息、步骤、失败、文件、成果、反馈、给到的条目） |
+| `text.ts` | 中英文分词（中文二元组）、关键词、相似度、最长公共片段、语言判断 |
+
+给用户看的文字（条目、理由、状态变化原因）按界面语言写：宿主配置 `language`（BCP 47）；没有时按任务首条消息的语言（汉字占字母的五分之一以上为中文）。
 
 ## 目录
 
@@ -20,7 +35,7 @@
     └── job.log       作业进程的诊断输出（宿主数据）
 ```
 
-## 计数与触发
+## 计数与触发（已退役，`legacyCounting`）
 
 - 计入的反馈：评分 ≤ 3，或只有评语没有评分（决定 2）；4–5 分不计入，反馈本身照常留在会话里。
 - 检查失败：根任务某一轮的检查有失败项，按 `check:<taskId>:<turn>` 计 1 条（kernel 发信号，调 `ctx.improve.noteCheckFailure`）。

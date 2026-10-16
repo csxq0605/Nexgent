@@ -137,7 +137,10 @@ describe('learning settings through the SDK (API 8)', () => {
     const first = await t.sdk.call('learning.acknowledge', {})
     expect(first.learning.noticeAcknowledgedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
     expect((await t.sdk.call('learning.acknowledge', {})).learning).toEqual(first.learning)
-    for (const method of ['handbook.list', 'learning.status'] as const) await expect(t.sdk.call(method, { projectId } as never)).rejects.toMatchObject({ code: 'internal' })
+    // E1 implements the handbook and learning views (tests/learning.spec.ts); the practice set (G1) is still to come.
+    expect(await t.sdk.call('handbook.list', { projectId })).toEqual({ entries: [], sharedIncluded: true })
+    expect(await t.sdk.call('learning.status', { projectId })).toMatchObject({ noticeAcknowledged: true, active: true })
+    await expect(t.sdk.call('practice.list', { projectId } as never)).rejects.toMatchObject({ code: 'internal' })
   })
 })
 
