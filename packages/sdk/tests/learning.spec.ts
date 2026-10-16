@@ -74,6 +74,21 @@ describe('layer-1 learning through the SDK', () => {
     expect(t.launched).toEqual([])
   })
 
+  it('lets the user stop an entry and take it back (handbook.setStatus)', async () => {
+    const t = await testSdk([{ content: 'done', usage }, learner, learner, learner, learner], { legacyCounting: false })
+    const { projectId, root } = await runOne(t, true)
+    await until(async () => (await history(t, root)).history.length === 1)
+    const [entry] = (await t.sdk.call('handbook.list', { projectId })).entries
+    const stopped = await t.sdk.call('handbook.setStatus', { projectId, entryId: entry!.id, status: 'retired', reason: '我不需要这条' })
+    expect(stopped.entry).toMatchObject({ status: 'retired', retrievable: false })
+    expect(stopped.ops.at(-1)).toMatchObject({ op: 'status', status: 'retired', actor: 'user', reason: '我不需要这条' })
+    expect((await t.sdk.call('handbook.list', { projectId })).entries).toEqual([])
+    expect((await t.sdk.call('handbook.list', { projectId, includeRetired: true })).entries).toHaveLength(1)
+    expect((await t.sdk.call('handbook.setStatus', { projectId, entryId: entry!.id, status: 'active' })).entry).toMatchObject({ status: 'active', retrievable: true })
+    await expect(t.sdk.call('handbook.setStatus', { projectId, entryId: '00000000-0000-4000-8000-000000000000', status: 'retired' })).rejects.toMatchObject({ code: 'handbook/not-found' })
+    await expect(t.sdk.call('handbook.setStatus', { projectId, entryId: entry!.id, status: 'trial' as 'active' })).rejects.toMatchObject({ code: 'tool/invalid-input' })
+  })
+
   it('asks nothing of the model before the notice is acknowledged', async () => {
     const t = await testSdk([{ content: 'done', usage }], { legacyCounting: false })
     const { projectId, root } = await runOne(t, false)

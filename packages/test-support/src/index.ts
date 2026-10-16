@@ -30,6 +30,7 @@ export {
   type RecordedModelRequest,
   type ScriptedModelServer,
   type ScriptedModelServerOptions,
+  isTitleRequest,
   scriptedModelServer,
   toWireUsage,
 } from './server.js'

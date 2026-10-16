@@ -281,6 +281,8 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
     case 'improver.version':
     // API 8: cost warnings are project-level (the shell shows them, not the timeline).
     case 'cost.warning':
+    // Rework D2: the sidebar and the title bar show the title.
+    case 'session.title':
       return [...list]
   }
 }

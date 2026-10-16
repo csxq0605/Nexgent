@@ -94,6 +94,7 @@ import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
 import { collaborationView, historyItems, memberRunView, runKey, sessionSummary, summaryOfEntry, turnUsage } from './history.js'
 import { RecentProjects } from './recent.js'
+import { nameConversation } from './title.js'
 import { acknowledgeLearning, describeApiKey, readSettings, readUserSettings, secretValues, setApiKey, updateSettings, updateUserSettings, type CredentialEnv } from './settings.js'
 
 /** `deliverables.readText` limit. */
@@ -244,6 +245,8 @@ export class LocalNexgentSdk implements NexgentSdk {
   private readonly eventSeq = new Map<string, number>()
   private disposed = false
   private readonly methods: SdkMethods
+  /** Rework D2: title requests in flight (aborted on dispose). */
+  private readonly titling = new Set<{ readonly controller: AbortController; readonly done: Promise<void> }>()
 
   constructor(private readonly options: LocalSdkOptions) {
     this.env = options.env ?? process.env
@@ -296,6 +299,8 @@ export class LocalNexgentSdk implements NexgentSdk {
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
+    for (const job of this.titling) job.controller.abort()
+    await Promise.allSettled([...this.titling].map(job => job.done))
     await Promise.allSettled([...this.projects.keys()].map(projectId => this.closeProject(projectId)))
   }
 
@@ -400,6 +405,9 @@ export class LocalNexgentSdk implements NexgentSdk {
     const done = run.then(
       async result => {
         await this.writeOutcome(project, entry.agent.sessionId, tally)
+        if (this.options.autoTitle === true && turn === 1 && source === 'user' && tally.reason?.kind === 'completed') {
+          this.nameAfterFirstTurn(project, entry, (input as SendMessageInput).text)
+        }
         return result
       },
       (error: unknown) => {
@@ -418,6 +426,26 @@ export class LocalNexgentSdk implements NexgentSdk {
     entry.running = { tally, done }
     done.catch(() => undefined)
     return { sessionId: entry.agent.sessionId, turn, done }
+  }
+
+  /**
+   * Rework D2 (`autoTitle`): name a conversation that has no title yet from
+   * its first message, in the background; a title the user gave meanwhile
+   * wins, and a failed request leaves the list showing the first message.
+   */
+  private nameAfterFirstTurn(project: ProjectEntry, entry: SessionEntry, message: string): void {
+    const controller = new AbortController()
+    const sessionId = entry.agent.sessionId
+    const done = (async () => {
+      if ((await this.summary(project, sessionId)).title !== undefined) return
+      const title = await nameConversation({ llm: project.app.ctx.llm, model: entry.agent.model, sessionId, message, signal: controller.signal })
+      if (title === undefined || controller.signal.aborted || this.disposed) return
+      if ((await this.summary(project, sessionId)).title !== undefined) return
+      await entry.agent.appendHostRecord({ type: 'session.title', title })
+    })().catch(() => undefined)
+    const job = { controller, done }
+    this.titling.add(job)
+    void done.finally(() => this.titling.delete(job))
   }
 
   /** Whether the session has a running turn in this instance (a member: its parent's tool is running one). */
@@ -976,6 +1004,9 @@ export class LocalNexgentSdk implements NexgentSdk {
       case 'compaction':
         send({ type: 'compaction', turn: record.turn, compactedMessages: record.compactedMessages })
         return
+      case 'session.title':
+        send({ type: 'session.title', title: record.title })
+        return
       case 'subagent.start':
         entry.runStarts.set(runKey(record.childSessionId, record.childTurn), record)
         this.trackMember(project, record.childSessionId)
@@ -1266,6 +1297,7 @@ export class LocalNexgentSdk implements NexgentSdk {
       // the practice set (G1) is still to come.
       'handbook.list': input => learning.handbookList(this.improve(this.project(input.projectId)), input),
       'handbook.show': input => learning.handbookShow(this.improve(this.project(input.projectId)), input.entryId),
+      'handbook.setStatus': input => learning.handbookSetStatus(this.improve(this.project(input.projectId)), input),
       'learning.status': input => {
         const project = this.project(input.projectId)
         return learning.learningStatus(this.improve(project), this.home, project.app.ctx.get('ledger'), this.now())

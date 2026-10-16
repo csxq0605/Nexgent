@@ -63,6 +63,7 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'improvers.rollback': { ...p, toVersion: 'v0', reason: '子改进器更差' },
   'handbook.list': { ...p, scope: 'user', includeRetired: true },
   'handbook.show': { ...p, entryId: 'e1' },
+  'handbook.setStatus': { ...p, entryId: 'e1', status: 'retired', reason: 'x' },
   'learning.status': p,
   'learning.acknowledge': {},
   'practice.list': { ...p, split: 'holdout' },

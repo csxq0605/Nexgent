@@ -963,6 +963,8 @@ a {
 }
 
 .page-body {
+  /* Positioned, so visually hidden text inside stays in its scroll area. */
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -2314,7 +2316,79 @@ button.chip {
   border-radius: 6px;
 }
 
-/* --- settings page (content redone in D2) ------------------------------------ */
+/* --- settings page (rework D2): six groups, a row per setting -------------------- */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.page[data-testid='settings-page'] .page-head > .inner,
+.page[data-testid='settings-page'] .page-body > .inner {
+  max-width: 900px;
+}
+
+.save-state {
+  align-self: center;
+  min-width: 56px;
+  text-align: right;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav .nav-item {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+.settings-nav .nav-item:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.settings-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  min-width: 0;
+}
+
+.settings-group {
+  scroll-margin-top: 8px;
+}
+
+.settings-group h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.settings-group > p {
+  margin: 4px 0 4px;
+}
+
+.setting-rows {
+  display: flex;
+  flex-direction: column;
+}
 
 .setting-row {
   display: flex;
@@ -2322,7 +2396,292 @@ button.chip {
   gap: 24px;
   padding: 14px 0;
   border-bottom: 1px solid var(--line);
-  margin-bottom: 16px;
+}
+
+.setting-row:last-child {
+  border-bottom: none;
+}
+
+.setting-control {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 55%;
+}
+
+.setting-control select,
+.setting-control > input {
+  width: 220px;
+}
+
+.unit-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.unit-input input {
+  width: 96px;
+  text-align: right;
+}
+
+.unit-input input.short {
+  width: 56px;
+}
+
+.usage-more {
+  padding: 10px 0 4px;
+}
+
+.usage-more summary {
+  cursor: pointer;
+}
+
+.usage-caps {
+  display: grid;
+  grid-template-columns: 96px repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.usage-caps label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.legacy {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.legacy > summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.legacy .usage-caps {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* A switch drawn over a real checkbox. */
+.switch {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  width: 34px;
+  height: 20px;
+}
+
+.switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.switch-track {
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  background: var(--line);
+  transition: background 0.15s;
+}
+
+.switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s;
+}
+
+.switch input:checked + .switch-track {
+  background: var(--accent);
+}
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(14px);
+}
+
+.switch input:focus-visible + .switch-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.switch input:disabled + .switch-track {
+  opacity: 0.5;
+}
+
+/* --- 能力 → 经验 (rework D2) ---------------------------------------------------- */
+
+.learned {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.learning-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raise);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.setting-line {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  align-self: stretch;
+}
+
+.spend {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--subtle);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.group-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.entry-group.folded > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.entry:last-child {
+  border-bottom: none;
+}
+
+.entry > .dot {
+  margin-top: 7px;
+  flex: none;
+}
+
+.entry > .link {
+  flex: none;
+  margin-top: 2px;
+}
+
+.entry-button {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.entry-button:hover:not(:disabled) {
+  background: transparent;
+}
+
+.entry-text {
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.entry-detail {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.decide {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  background: var(--raise);
+}
+
+.foot-note {
+  margin: 0;
+}
+
+.learning-notice {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0 auto 8px;
+  width: calc(100% - 48px);
+  max-width: 720px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raise);
+  box-shadow: var(--shadow);
+}
+
+.learning-notice p {
+  margin: 2px 0 0;
 }
 
 .setting-name {
@@ -2395,4 +2754,15 @@ button.chip {
   .drawer {
     animation: none;
   }
+}
+
+.setting-control .inline-form {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.setting-control .inline-form input {
+  width: 220px;
+  min-width: 0;
 }

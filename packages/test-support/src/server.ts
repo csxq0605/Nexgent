@@ -20,6 +20,7 @@ import {
   type ScriptedTurn,
   type ScriptedUsage,
 } from './script.js'
+import { SESSION_TITLE_PROMPT } from '@nexgent/kernel'
 import { RoutedQueues, type ScriptRouting } from './routing.js'
 
 /** The parsed JSON body of a Messages API request (loosely typed: tests assert on it). */
@@ -79,6 +80,13 @@ export interface ScriptedModelServerOptions extends ScriptRouting<MessagesReques
   readonly host?: string
   /** Delay before each SSE event in ms (default 0); a turn's `chunkDelayMs` wins. */
   readonly chunkDelayMs?: number
+  /**
+   * The reply to the conversation-title request (`SESSION_TITLE_PROMPT`, the
+   * desktop's `autoTitle`), answered outside the script and kept out of
+   * `requests` so scripts written before titles existed still line up
+   * (default `对话标题`); `false` sends it through the script like any other.
+   */
+  readonly titleReply?: string | false
 }
 
 /** A running scripted server. */
@@ -89,6 +97,8 @@ export interface ScriptedModelServer {
   readonly port: number
   /** `/v1/messages` requests received so far, in order. */
   readonly requests: readonly RecordedModelRequest[]
+  /** Title requests answered outside the script (see {@link ScriptedModelServerOptions.titleReply}). */
+  readonly titleRequests: readonly RecordedModelRequest[]
   /** Script entries not yet consumed, over all queues. */
   readonly remaining: number
   /** Entries left per queue; the default script is under `''`. */
@@ -280,9 +290,18 @@ function errorBody(type: string, message: string): Record<string, unknown> {
  * concurrent sessions each replay their own script in order.
  * @param options - script, port and pacing.
  */
+/** Whether a request is the one that names a conversation (its system prompt is `SESSION_TITLE_PROMPT`). */
+export function isTitleRequest(body: MessagesRequestBody): boolean {
+  const system = (body as { system?: unknown }).system
+  const text = typeof system === 'string' ? system : Array.isArray(system) ? system.map(block => (block as { text?: unknown }).text).filter(t => typeof t === 'string').join('\n') : ''
+  return text.includes(SESSION_TITLE_PROMPT)
+}
+
 export async function scriptedModelServer(options: ScriptedModelServerOptions = {}): Promise<ScriptedModelServer> {
   const queues = new RoutedQueues<MessagesRequestBody>('scriptedModelServer', options.script ?? [], options)
   const requests: RecordedModelRequest[] = []
+  const titleRequests: RecordedModelRequest[] = []
+  const titleReply = options.titleReply ?? '对话标题'
   const sockets = new Set<Socket>()
   const waiters = new Set<() => void>()
   const host = options.host ?? '127.0.0.1'
@@ -300,6 +319,23 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
       body = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed as MessagesRequestBody : undefined
     } catch {
       body = undefined
+    }
+    if (titleReply !== false && body !== undefined && isTitleRequest(body)) {
+      const record: RecordedModelRequest = { index: titleRequests.length, method: req.method, path, headers: redactHeaders(req), hasApiKey: req.headers['x-api-key'] !== undefined || req.headers.authorization !== undefined, body, rawBody, chunksSent: 0, outcome: 'completed' }
+      titleRequests.push(record)
+      const turn: ScriptedTurn = { content: titleReply, usage: { inputTokens: 60, outputTokens: 8 } }
+      const model = typeof body.model === 'string' ? body.model : 'scripted-model'
+      if (body.stream !== true) {
+        sendJson(res, 200, messageBody(turn, titleRequests.length, model))
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'connection': 'keep-alive' })
+      for (const event of streamEvents(turn, titleRequests.length, model)) {
+        res.write(`event: ${String(event['type'])}\ndata: ${JSON.stringify(event)}\n\n`)
+        record.chunksSent++
+      }
+      res.end()
+      return
     }
     const route = queues.routeOf(body ?? {})
     const record: RecordedModelRequest = {
@@ -430,6 +466,7 @@ export async function scriptedModelServer(options: ScriptedModelServerOptions = 
     baseUrl: `http://${urlHost}:${port}`,
     port,
     get requests() { return requests },
+    get titleRequests() { return titleRequests },
     get remaining() { return queues.remaining },
     remainingByRoute() { return queues.remainingByRoute() },
     push(...entries) { queues.push(entries) },

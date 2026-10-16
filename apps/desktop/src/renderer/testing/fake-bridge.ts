@@ -4,8 +4,8 @@
  * handlers, and `emit` to push `SdkEvent`s as the main process would.
  * Never bundled into the app (only tests import it).
  */
-import type { ApprovalRequest, ComparisonArmResult, DeliverableDiff, DeliverableSummary, DeliverableVersion, ImproverBundle, ImproverChangeRecord, ImproverComparison, MaterialMetadata, MetaDiagnosis, PluginApprovalInfo } from '@nexgent/kernel'
-import type { CandidateDetail, CandidateView, CapabilityListing, ImprovementDetail, ImprovementJobView, ImprovementListing, ImproverDetail, ImproverListing, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
+import type { ApprovalRequest, ComparisonArmResult, DeliverableDiff, DeliverableSummary, DeliverableVersion, ImproverBundle, ImproverChangeRecord, ImproverComparison, HandbookOp, MaterialMetadata, MetaDiagnosis, PluginApprovalInfo } from '@nexgent/kernel'
+import type { CandidateDetail, CandidateView, CapabilityListing, HandbookEntryView, ImprovementDetail, ImprovementJobView, ImprovementListing, ImproverDetail, ImproverListing, LearningStatus, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -222,6 +222,13 @@ export class FakeBridge implements NexgentBridge {
   improver: ImproverListing = { current: { version: 'v0', revision: 0 }, history: [] }
   /** `improvers.show` per version; `v0` is built in. */
   improverBundles: Record<string, ImproverBundle> = {}
+  /** Rework D2: what `handbook.list` answers (`setStatus` changes it like the SDK would), and each entry's operations for `handbook.show`. */
+  handbook: HandbookEntryView[] = []
+  handbookOps: Record<string, HandbookOp[]> = {}
+  /** Rework D2: `learning.status`; config and notice follow the settings like the SDK's. */
+  learningSpend: Pick<LearningStatus['budget'], 'spentUsd' | 'estimated' | 'phases'> = { spentUsd: 0, estimated: false, phases: [] }
+  selfEvaluations = 0
+  reliability: LearningStatus['reliability'] = { sampled: 0, agreed: 0, status: 'insufficient' }
   readonly handlers: Record<string, Handler> = {
     'app.info': () => ({ sdkVersion: 8, appVersion: '0.0.0-test', platform: 'linux', commandShell: { shell: 'bash', required: false, available: true } }),
     'projects.recent': () => this.recent,
@@ -265,11 +272,17 @@ export class FakeBridge implements NexgentBridge {
     'settings.get': () => this.settings,
     'settings.update': input => {
       const { improvement, learning, ...rest } = input.patch
+      // Like the SDK: the retired autoImprove follows learning.enabled.
+      if (learning?.enabled !== undefined && rest.autoImprove === undefined) rest.autoImprove = learning.enabled
       this.settings = { ...this.settings, ...rest, ...(learning === undefined ? {} : { learning: { ...this.settings.learning, ...learning, budget: { ...this.settings.learning.budget, ...learning.budget } } }), ...(improvement === undefined ? {} : { improvement: { ...this.settings.improvement, ...improvement, budget: { ...this.settings.improvement.budget, ...improvement.budget }, meta: { ...this.settings.improvement.meta, ...improvement.meta, budget: { ...this.settings.improvement.meta.budget, ...improvement.meta?.budget } } } }) }
       return this.settings
     },
     'userSettings.get': () => this.userSettings,
     'userSettings.update': input => {
+      if (input.patch.language === null) {
+        const { language: _old, ...rest } = this.userSettings
+        this.userSettings = rest
+      } else if (input.patch.language !== undefined) this.userSettings = { ...this.userSettings, language: input.patch.language }
       const meta = input.patch.improvement?.meta
       if (meta !== undefined) this.userSettings = { ...this.userSettings, improvement: { meta: { ...this.userSettings.improvement.meta, ...meta, budget: { ...this.userSettings.improvement.meta.budget, ...meta.budget } } } }
       return this.userSettings
@@ -344,6 +357,34 @@ export class FakeBridge implements NexgentBridge {
         history: [...history, { format: 1, revision, previous: null, from: current.version, version: target, type: 'rollback', trigger: 'manual', committedAt: '2026-10-12T11:00:00.000Z', ...(input.reason === undefined ? {} : { reason: input.reason }) }],
       }
       return this.improver.current
+    },
+    'handbook.list': input => ({ entries: this.handbook.filter(entry => input.includeRetired === true || entry.status !== 'retired'), sharedIncluded: this.settings.learning.useShared }),
+    'handbook.show': input => {
+      const entry = this.handbook.find(e => e.id === input.entryId)
+      if (entry === undefined) throw { name: 'NexgentError', code: 'handbook/not-found', message: `no entry ${input.entryId}` }
+      return { entry, ops: this.handbookOps[entry.id] ?? [] }
+    },
+    'handbook.setStatus': input => {
+      const entry = this.handbook.find(e => e.id === input.entryId)
+      if (entry === undefined) throw { name: 'NexgentError', code: 'handbook/not-found', message: `no entry ${input.entryId}` }
+      const updated: HandbookEntryView = { ...entry, status: input.status, retrievable: input.status === 'active', updatedAt: '2026-10-16T13:00:00.000Z' }
+      this.handbook = this.handbook.map(e => (e.id === entry.id ? updated : e))
+      const ops = this.handbookOps[entry.id] ?? []
+      this.handbookOps[entry.id] = [...ops, { formatVersion: 1, seq: ops.length + 1, at: '2026-10-16T13:00:00.000Z', entryId: entry.id, actor: 'user', op: 'status', status: input.status }]
+      return { entry: updated, ops: this.handbookOps[entry.id] }
+    },
+    'learning.status': () => {
+      const config = this.settings.learning
+      const noticeAcknowledged = this.userSettings.learning.noticeAcknowledgedAt !== undefined
+      return {
+        config,
+        noticeAcknowledged,
+        active: config.enabled && noticeAcknowledged,
+        rules: 'adr-0019',
+        budget: { ...config.budget, ...this.learningSpend, remainingUsd: Math.max(0, config.budget.maxUsd - this.learningSpend.spentUsd), windowStart: '2026-09-16T00:00:00.000Z' },
+        selfEvaluations: this.selfEvaluations,
+        reliability: this.reliability,
+      } satisfies LearningStatus
     },
     'learning.acknowledge': () => {
       this.userSettings = { ...this.userSettings, learning: { noticeAcknowledgedAt: this.userSettings.learning.noticeAcknowledgedAt ?? '2026-10-16T12:00:00.000Z' } }

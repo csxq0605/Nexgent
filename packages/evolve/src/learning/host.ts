@@ -112,7 +112,7 @@ export interface LearningHostOptions {
   readonly llm: () => LLMProvider | undefined
   readonly ledger: () => Ledger | undefined
   readonly sessions: () => Pick<SessionStore, 'readAll'> | undefined
-  /** The interface language (BCP 47); absent: the language of each task's first message. */
+  /** The interface language (BCP 47); absent: the user's `language` setting, else the language of each task's first message. */
   readonly language?: LearningLanguage
   readonly now?: () => Date
 }
@@ -461,7 +461,9 @@ export class LearningHost {
       return { ...base, finishedAt: finishedAt(), status: 'skipped', outcome: evaluation.outcome, ops: {}, rejected: {}, added: [], detail: 'not a root task session' }
     }
     const { config } = await readProjectConfig(this.#options.layout.configFile)
-    const language = this.#options.language ?? detectLanguage(run.task)
+    // ADR 0020 decision 4: the interface language the user chose in the settings, read per task so a change applies to the next one.
+    const userLanguage = this.#options.language === undefined ? (await readUserConfig(this.#options.home).catch(() => undefined))?.language : undefined
+    const language = this.#options.language ?? userLanguage ?? detectLanguage(run.task)
     const handbook = await this.handbook()
     const projectId = handbook.projectId
     const [userOps, projectOps] = await Promise.all([handbook.user.read(), handbook.project.read()])

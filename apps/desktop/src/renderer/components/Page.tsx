@@ -9,6 +9,8 @@ interface Props {
   readonly testId?: string
   /** Between the header and the scrolling body (a section switch). */
   readonly bar?: ReactNode
+  /** Beside the title, before the way back (the settings page's “已保存”). */
+  readonly aside?: ReactNode
   readonly children: ReactNode
 }
 
@@ -17,7 +19,7 @@ interface Props {
  * way back to the conversation, then a scrolling body. Escape goes back too,
  * unless a dialog is open over it.
  */
-export function Page({ title, lead, onClose, testId, bar, children }: Props): JSX.Element {
+export function Page({ title, lead, onClose, testId, bar, aside, children }: Props): JSX.Element {
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || document.querySelector('.backdrop') !== null) return
@@ -35,6 +37,7 @@ export function Page({ title, lead, onClose, testId, bar, children }: Props): JS
               <h2 className="page-title">{title}</h2>
               {lead !== undefined && <p>{lead}</p>}
             </div>
+            {aside}
             <button type="button" className="ghost" onClick={onClose} data-testid="page-back">
               <Icon name="back" />
               {T.backToChat}

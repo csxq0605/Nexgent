@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { SESSION_TITLE_PROMPT } from '@nexgent/kernel'
 import { closedPortUrl, scriptedModelServer, type ScriptedModelServer } from '../src/index.js'
 
 let server: ScriptedModelServer | undefined
@@ -222,6 +223,21 @@ describe('scriptedModelServer', () => {
     expect(server.requests[0]!.rawBody).toContain('"claude-sonnet-5-5"')
     expect(server.requests[0]!.hasApiKey).toBe(false)
     server.assertConsumed()
+  })
+
+  it('answers the conversation-title request outside the script, unless told not to', async () => {
+    server = await scriptedModelServer({ script: [{ content: 'task reply' }] })
+    const title = await streamed({ model: 'm', max_tokens: 60, stream: true, system: SESSION_TITLE_PROMPT, messages: [{ role: 'user', content: '汇总订单' }] })
+    expect(title.filter((e) => e['type'] === 'content_block_delta').map((e) => e.delta!['text']).join('')).toBe('对话标题')
+    expect(server.requests).toEqual([])
+    expect(server.titleRequests).toHaveLength(1)
+    expect(server.remaining).toBe(1)
+    await server.close()
+
+    server = await scriptedModelServer({ script: [{ content: 'scripted title' }], titleReply: false })
+    const scripted = await streamed({ model: 'm', max_tokens: 60, stream: true, system: [{ type: 'text', text: SESSION_TITLE_PROMPT }], messages: [{ role: 'user', content: 'x' }] })
+    expect(scripted.filter((e) => e['type'] === 'content_block_delta').map((e) => e.delta!['text']).join('')).toBe('scripted title')
+    expect(server.requests).toHaveLength(1)
   })
 
   it('closedPortUrl refuses connections (network down)', async () => {
