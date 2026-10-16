@@ -13,6 +13,7 @@
  *     feedback: sessionId, deliverableId, version, rating?, comment, startAt
  *     task:     title, text
  */
+import { registerHome } from './data-dir.mjs'
 import { runTurn } from './step2-runtime.mjs'
 import { createStep5Sdk, improvementsPath, loadStep5Packages } from './step5-runtime.mjs'
 
@@ -24,6 +25,7 @@ if (!loaded.ok) {
   process.exit(2)
 }
 const pkgs = loaded.pkgs
+registerHome(spec.root, spec.home)
 const sdk = createStep5Sdk(pkgs, { env: { NEXGENT_API_BASE_URL: spec.baseUrl, NEXGENT_API_KEY: spec.key, NEXGENT_HOME: spec.home }, home: spec.home })
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 

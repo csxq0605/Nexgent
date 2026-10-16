@@ -27,9 +27,10 @@ export interface ProjectLayoutResult {
  * `.nexgent/` and every subdir through the workspace service, and write
  * `config.json` with the defaults when it does not exist. Idempotent; an
  * existing config file is never touched.
+ * `env` is the invocation environment: its `NEXGENT_HOME` selects the user data directory.
  * @throws {@link CliError} with {@link EXIT.ENVIRONMENT} when the project is missing, not a directory, or not writable.
  */
-export async function initProjectLayout(project: string, cwd: string = process.cwd()): Promise<ProjectLayoutResult> {
+export async function initProjectLayout(project: string, cwd: string = process.cwd(), env?: NodeJS.ProcessEnv): Promise<ProjectLayoutResult> {
   const root = path.resolve(cwd, project)
   let stat
   try {
@@ -41,9 +42,13 @@ export async function initProjectLayout(project: string, cwd: string = process.c
 
   // The layout the CLI reports keeps the path as given (resolved, not realpath'd);
   // the workspace service realpaths it internally for its sandbox checks.
-  const layout = resolveWorkspaceLayout(root)
+  // The invocation's NEXGENT_HOME decides where the data lives (else the process environment's).
+  const home = env?.NEXGENT_HOME !== undefined && env.NEXGENT_HOME !== '' ? env.NEXGENT_HOME : undefined
+  let layout = resolveWorkspaceLayout(root)
   try {
-    await openWorkspace(root, { ensureLayout: true })
+    const opened = await openWorkspace(root, { ensureLayout: true, ...(home === undefined ? {} : { home }) })
+    // The data may live in the user data directory (K1); the config stays in the project.
+    if (opened.layout.location === 'user-data') layout = { ...opened.layout, root, configFile: layout.configFile }
   } catch (error) {
     const code = isNexgentError(error) ? error.code : undefined
     throw new CliError(EXIT.ENVIRONMENT, `cannot open ${root}: ${describe(error)}`, { cause: error, ...(code === undefined ? {} : { code }) })

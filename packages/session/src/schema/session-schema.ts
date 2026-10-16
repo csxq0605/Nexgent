@@ -363,7 +363,7 @@ export const sessionRecordSchema: JsonObject = {
     turnEndRecord: record('turn.end', { turn, reason: ref('turnEndReason') }, ['turn', 'reason']),
     checkpointRecord: record(
       'checkpoint',
-      { coversSeq: ref('positiveInteger'), state: ref('sessionState') },
+      { coversSeq: ref('positiveInteger'), base: ref('positiveInteger'), keep: { type: 'integer', minimum: 0 }, state: ref('sessionState') },
       ['coversSeq', 'state'],
     ),
     errorRecord: record('error', { turn, error: ref('errorInfo'), fatal: { type: 'boolean' } }, ['error', 'fatal']),

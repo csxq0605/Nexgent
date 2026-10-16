@@ -147,7 +147,7 @@ async function runTask(
   io: CliIo,
   deps: CliDeps,
 ): Promise<ExitCode> {
-  const { layout } = await initProjectLayout(invocation.project, io.cwd)
+  const { layout } = await initProjectLayout(invocation.project, io.cwd, io.env)
   await requireApiKey(deps.credentials ?? { env: io.env })
   const runtime = await (deps.loadRuntime ?? loadRuntime)()
 
@@ -219,7 +219,7 @@ async function runTask(
 }
 
 async function runExport(invocation: Extract<Invocation, { command: 'export' }>, io: CliIo): Promise<ExitCode> {
-  const { layout } = await initProjectLayout(invocation.project, io.cwd)
+  const { layout } = await initProjectLayout(invocation.project, io.cwd, io.env)
   if (!existsSync(path.join(layout.sessions, invocation.sessionId, 'session.jsonl'))) {
     throw new NexgentError('session/not-found', `session ${invocation.sessionId} not found in ${layout.root}`)
   }
@@ -237,7 +237,7 @@ async function runExport(invocation: Extract<Invocation, { command: 'export' }>,
 }
 
 async function runImprove(invocation: Extract<Invocation, { command: 'improve' }>, io: CliIo, deps: CliDeps): Promise<ExitCode> {
-  const { layout } = await initProjectLayout(invocation.project, io.cwd)
+  const { layout } = await initProjectLayout(invocation.project, io.cwd, io.env)
   // Starting a job needs the key now: the job process reads it from the same sources.
   if (invocation.action === 'run' || invocation.action === 'meta') await requireApiKey(deps.credentials ?? { env: io.env })
   const sdk = deps.createSdk?.() ?? createSdk({ appVersion: packageVersion(), env: io.env, ...deps.sdkOptions })

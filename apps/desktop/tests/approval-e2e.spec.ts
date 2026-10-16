@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CapabilityStore, writeCandidate, type BundleComponentInput } from '@nexgent/capabilities'
+import { dataPath, useHome } from './data-layout.js'
 import type { CandidateRecord, TrialCost, TrialVerdict } from '@nexgent/kernel'
 import { scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
@@ -163,10 +164,10 @@ describe('desktop approval dialog over the real SDK (scripted model)', () => {
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-approval-e2e-')))
       const home = join(base, 'home')
-      const root = join(base, 'orders')
+      const root = useHome(join(base, 'orders'), home)
       mkdirSync(home)
       server = await scriptedModelServer({ script: [] })
-      const dir = join(root, '.nexgent', 'capabilities')
+      const dir = dataPath(root, 'capabilities')
       const { app, page, consoleErrors } = await launch(home)
       try {
         await page.getByTestId('start-screen').waitFor()

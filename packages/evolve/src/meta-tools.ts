@@ -158,9 +158,9 @@ async function jobDetail(layout: WorkspaceLayout, jobId: string): Promise<Record
 /** The projects a meta session may read, resolved once. */
 type Projects = () => Promise<readonly MetaProject[]>
 
-function projectsOf(layout: WorkspaceLayout, job: ImprovementJob, given: readonly MetaProject[] | undefined): Projects {
+function projectsOf(layout: WorkspaceLayout, job: ImprovementJob, given: readonly MetaProject[] | undefined, home?: string): Projects {
   let resolved: Promise<readonly MetaProject[]> | undefined
-  return () => (resolved ??= given === undefined ? metaProjects(layout, job) : Promise.resolve(given))
+  return () => (resolved ??= given === undefined ? metaProjects(layout, job, home) : Promise.resolve(given))
 }
 
 /** The project a tool call names, or the refusal to return. */
@@ -241,6 +241,8 @@ export interface MetaDiagnosisToolsInput {
   readonly layout: WorkspaceLayout
   /** The projects it may read (default `metaProjects`: its batch's, or its own). */
   readonly projects?: readonly MetaProject[]
+  /** The Nexgent home the projects' data is located under (default `NEXGENT_HOME` / `~/.nexgent`). */
+  readonly home?: string
   /** The meta job. */
   readonly job: ImprovementJob
   readonly sessionId: string
@@ -268,7 +270,7 @@ export function metaDiagnosisTools(input: MetaDiagnosisToolsInput): Tool[] {
   const now = input.now ?? (() => new Date())
   const max = IMPROVER_LIMITS.maxMetaDiagnosisAttempts
   const directory = improvementsDir(input.layout)
-  const projects = projectsOf(input.layout, input.job, input.projects)
+  const projects = projectsOf(input.layout, input.job, input.projects, input.home)
   const others = async () => (await projectJobs(await projects())).filter(item => item.job.id !== input.job.id)
   return [
     {
@@ -371,7 +373,7 @@ function improverText(improver: PinnedImprover): string {
 export function metaProposeTools(input: MetaProposeToolsInput): Tool[] {
   const now = input.now ?? (() => new Date())
   const max = IMPROVER_LIMITS.maxChangeAttempts
-  const projects = projectsOf(input.layout, input.job, input.projects)
+  const projects = projectsOf(input.layout, input.job, input.projects, input.home)
   let evidence: Promise<LiteralEvidence> | undefined
   const batchEvidence = () => (evidence ??= projects().then(async all => literalEvidence(batchJobs(input.job, await projectJobs(all)), all)))
   return [

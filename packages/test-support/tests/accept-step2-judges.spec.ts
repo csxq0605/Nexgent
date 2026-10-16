@@ -61,11 +61,12 @@ describe('accept-step2 H judges', () => {
 
   const cases: Array<[string, string, (obs: Observations) => void]> = [
     ['H01', 'config.json missing', obs => { obs.init.configExists = false }],
+    ['H01', 'per-project data is left under <root>/.nexgent', obs => { obs.init.strayInProject = ['sessions'] }],
     ['H01', 'the project is not in the recent list', obs => { obs.init.recent = [] }],
     ['H02', 'the original file changed', obs => { obs.materials[1].sourceShaAfter = '0'.repeat(64) }],
     ['H02', 'metadata fails the schema', obs => { delete obs.materials[0].meta.sha256 }],
     ['H03', 'the first request lacks the material references', obs => { obs.phases.first.requests[0].messages = [{ role: 'user', content: TASKS.first }] }],
-    ['H03', 'the write into materials/ succeeded', obs => { toolResult(obs, 'first', 'write_file', a => String(a.path).includes('.nexgent/materials/')).isError = false }],
+    ['H03', 'the write into materials/ succeeded', obs => { toolResult(obs, 'first', 'write_file', a => /materials[\\/]/.test(String(a.path))).isError = false }],
     ['H04', 'read_document failed', obs => { toolResult(obs, 'first', 'read_document').isError = true }],
     ['H05', 'AGENTS.md missing from the system prompt', obs => { obs.phases.first.requests[0].system = 'You are Nexgent.' }],
     ['H06', 'the first turn ended in an error', obs => { obs.phases.first.reason = { kind: 'error' } }],

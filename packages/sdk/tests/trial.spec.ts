@@ -18,7 +18,7 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BASELINE_BUNDLE, CapabilitiesPlugin, CapabilityStore, gateOf, listCandidates, listTrials, writeCandidate, type CapabilitiesPluginConfig, type GateHost } from '@nexgent/capabilities'
-import { IMPROVEMENT_FILES, IMPROVEMENTS_DIR, resolveWorkspaceLayout, type Context, type ImprovementJob, type LedgerRecord, type Plugin } from '@nexgent/kernel'
+import { IMPROVEMENT_FILES, IMPROVEMENTS_DIR, resolveProjectLayout, type Context, type ImprovementJob, type LedgerRecord, type Plugin } from '@nexgent/kernel'
 import { estimateUsdTotal } from '@nexgent/llm'
 import { readLedgerRecords, scriptedModelServer, type MessagesRequestBody, type ScriptedModelServer, type ScriptedTurn } from '@nexgent/test-support'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -186,7 +186,7 @@ async function gateSdk() {
     registry: { '@nexgent/capabilities': capabilities },
   })
   const project = await sdk.call('projects.open', { root, create: true })
-  const layout = resolveWorkspaceLayout(project.root)
+  const layout = resolveProjectLayout(project.root, { home })
   const store = new CapabilityStore(layout.capabilities)
   const run = async (text: string) => {
     const session = await sdk.call('sessions.create', { projectId: project.projectId })
@@ -205,12 +205,12 @@ async function gateSdk() {
     await sdk.dispose()
     await server.close()
   }
-  return { sdk, project, layout, store, run, settle, gateHost, model, server, root, dispose }
+  return { sdk, project, layout, store, run, settle, gateHost, model, server, root, home, dispose }
 }
 
 describe('the capability gate through the SDK', () => {
   it('adopts a better candidate, rejects a worse one, and rolls back a regression', { timeout: 300_000 }, async () => {
-    const { sdk, project, layout, store, run, settle, gateHost, model, server, root, dispose } = await gateSdk()
+    const { sdk, project, layout, store, run, settle, gateHost, model, server, root, home, dispose } = await gateSdk()
     try {
       // 1. History, then the proposing task.
       await run(TASKS.june.text)
@@ -232,7 +232,7 @@ describe('the capability gate through the SDK', () => {
       expect((await store.history()).at(-1)).toMatchObject({ type: 'adopt', trigger: 'gate', version: first!.version })
       // The real project's outputs are the tasks' own; the replays wrote only to their copies.
       expect(await readFile(nodePath.join(root, TASKS.june.path), 'utf8')).toBe('{"total": 3}\n')
-      const ledger = (await readLedgerRecords(project.root)).records as LedgerRecord[]
+      const ledger = (await readLedgerRecords(project.root, { home })).records as LedgerRecord[]
       const trialRequests = ledger.filter(record => record.type === 'llm.request.end' && record.trialId === trial!.trialId)
       expect(new Set(trialRequests.map(record => record.arm))).toEqual(new Set(['candidate', 'baseline']))
       expect(ledger.some(record => record.type === 'capability.decision' && record.trigger === 'gate' && record.outcome === 'adopted')).toBe(true)
@@ -312,7 +312,7 @@ describe('the capability gate through the SDK', () => {
   })
 
   it('judges an improvement job\'s candidate on its feedback task: replays before the feedback, feedback checks, the job\'s trial phase', { timeout: 300_000 }, async () => {
-    const { sdk, project, layout, store, run, settle, model, dispose } = await gateSdk()
+    const { sdk, project, layout, store, run, settle, model, home, dispose } = await gateSdk()
     try {
       // History; the june task then gets feedback (a second turn that must never be replayed).
       const june = await run(TASKS.june.text)
@@ -382,7 +382,7 @@ describe('the capability gate through the SDK', () => {
       expect(trial!.end!.verdict).toMatchObject({ outcome: 'adopt', feedbackPassRate: { candidate: 1, baseline: 0 } })
       expect((await store.activation()).version).toBe(candidate.version)
       // Every request of the trial (replays and feedback checks) belongs to the job's trial phase.
-      const ledger = (await readLedgerRecords(project.root)).records as LedgerRecord[]
+      const ledger = (await readLedgerRecords(project.root, { home })).records as LedgerRecord[]
       const requests = ledger.filter(record => record.type === 'llm.request.end' && record.trialId === trial!.trialId)
       expect(requests.length).toBeGreaterThan(12)
       expect(requests.every(record => record.improvementId === job.id && record.improvementPhase === 'trial')).toBe(true)

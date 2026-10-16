@@ -27,6 +27,7 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { countsTowardImprovement, SECOND_FEEDBACK } from '../real-task/step5-orders.mjs'
 import { isLoopbackUrl } from './step2-runtime.mjs'
+import { dataDirSync, homeOf, registerHome } from './data-dir.mjs'
 import { DESKTOP_DIR, VITE_BIN, ensureDisplay, poll, run } from './step2-desktop.mjs'
 import { decisionsOf } from './step4-gate.mjs'
 import { FEEDBACK_TASK, NEXT_TASK, runFeedbackProject, SCRIPTED_API_KEY, TERMINAL_STATES, PARKED_STATES } from './step5-fixtures.mjs'
@@ -82,7 +83,7 @@ async function filesOf(pkgs, root) {
     const decision = decisions.find(d => d.id === job.decisionId)
     if (decision !== undefined) file.decision = { outcome: decision.outcome, reason: decision.reason, decidedByReview: decision.verdict?.decidedByReview === true, feedbackPassRate: decision.verdict?.feedbackPassRate, passRate: decision.verdict?.passRate }
     if (job.candidateId !== undefined) {
-      const candidate = await cap.readCandidate(join(root, '.nexgent', 'capabilities'), job.candidateId).catch(() => undefined)
+      const candidate = await cap.readCandidate(join(dataDirSync(root), 'capabilities'), job.candidateId).catch(() => undefined)
       file.candidate = candidate === undefined ? null : { components: candidate.components.map(c => ({ kind: c.kind, name: c.name })), summary: candidate.summary }
     }
     file.diagnosis = await readJson(join(improvementsPath(root), job.id, 'diagnosis.json'))
@@ -240,6 +241,7 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
   const rendererDir = join(work, 'renderer')
   const root = join(work, 'project')
   const home = join(work, 'home')
+  registerHome(root, home)
   createRequire(join(DESKTOP_DIR, 'package.json'))('electron')
 
   let server
@@ -364,7 +366,7 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
 
     step = 'D23 next task and first use'
     log('D23: the next task')
-    const sessionsBefore = await harness.listSessionIds(root)
+    const sessionsBefore = await harness.listSessionIds(root, { home: homeOf(root) })
     await page.getByTestId('new-session').click()
     const typeTurn = async (text, done) => {
       await page.getByTestId('composer-input').click()
@@ -374,7 +376,7 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
       await page.getByTestId('send').waitFor({ timeout: WAIT })
     }
     await typeTurn(NEXT_TASK.ask, NEXT_TASK.output)
-    const nextSession = (await harness.listSessionIds(root)).find(id => !sessionsBefore.includes(id))
+    const nextSession = (await harness.listSessionIds(root, { home: homeOf(root) })).find(id => !sessionsBefore.includes(id))
     obs.firstUse = { nextSession, uiBefore: null }
     // evolve records the first use when a turn starts after the task (or a host starts): look, nudge with a second turn, look again.
     const adoptedId = obs.prepared.adopted.id
@@ -403,7 +405,7 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
     }
     obs.firstUse.file = (await filesOf(pkgs, root)).jobs[adoptedId]?.firstUse ?? null
     obs.firstUse.adoptedDecidedAt = (await decisionsOf(root)).find(d => d.id === obs.files.jobs[adoptedId]?.decisionId)?.decidedAt ?? null
-    obs.firstUse.sessionIds = await harness.listSessionIds(root)
+    obs.firstUse.sessionIds = await harness.listSessionIds(root, { home: homeOf(root) })
 
     step = 'D21 improve from a deliverable card'
     log('D21: 改进 on the deliverable card')

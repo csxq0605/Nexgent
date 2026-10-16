@@ -29,7 +29,8 @@ describe('materials', () => {
       size: Buffer.byteLength('id,amount\n1,"1,200"\n2,30\n'),
     })
     expect(material.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-    const copy = nodePath.join(p.root, ...material.path.split('/'))
+    // K1: the record keeps the logical path; the copy lives in the data directory.
+    const copy = nodePath.join(p.workspace.layout.materials, material.id, 'orders.csv')
     expect(sha256Of(copy)).toBe(before)
     expect(material.sha256).toBe(before)
     expect(sha256Of(source)).toBe(before)

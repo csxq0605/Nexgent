@@ -24,7 +24,8 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ImproverStore } from '@nexgent/capabilities'
 import { countFinishedJobForUser, createJob, improvementsDir, jobPaths, readJob, transitionJob, updateJob } from '@nexgent/evolve'
-import { applyImproverChange, IMPROVER_V0, resolveWorkspaceLayout, type ComparisonArmResult, type ImproverChange, type ImproverChangeRecord, type ImproverComparison, type MetaDiagnosis } from '@nexgent/kernel'
+import { layoutOf, useHome } from './data-layout.js'
+import { applyImproverChange, IMPROVER_V0, type ComparisonArmResult, type ImproverChange, type ImproverChangeRecord, type ImproverComparison, type MetaDiagnosis } from '@nexgent/kernel'
 import { scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
@@ -98,7 +99,7 @@ const CHANGE: ImproverChange = { op: 'set-diagnosis-paragraph', index: 0, text: 
 
 /** A finished capability job of `root` that ran on `version` of the user line (and is counted toward meta jobs). */
 async function seedFinishedJob(home: string, root: string, version: string): Promise<string> {
-  const layout = resolveWorkspaceLayout(root)
+  const layout = layoutOf(root)
   const dir = improvementsDir(layout)
   const job = await createJob(dir, { trigger: 'explicit', items: [] })
   await transitionJob(dir, job.id, 'diagnosing', { expect: ['queued'] })
@@ -110,7 +111,7 @@ async function seedFinishedJob(home: string, root: string, version: string): Pro
 
 /** A meta job that adopted a child improver on the user line, as the flow leaves it (meta diagnosis, change, comparison, revision). */
 async function seedAdoptedMetaJob(home: string, root: string): Promise<{ jobId: string; child: string }> {
-  const layout = resolveWorkspaceLayout(root)
+  const layout = layoutOf(root)
   const dir = improvementsDir(layout)
   const store = ImproverStore.user({ home })
   const { version: child } = await store.write(applyImproverChange(IMPROVER_V0, CHANGE))
@@ -207,8 +208,8 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-meta-e2e-')))
       const home = join(base, 'home')
-      const root = join(base, 'orders')
-      const reports = join(base, 'reports')
+      const root = useHome(join(base, 'orders'), home)
+      const reports = useHome(join(base, 'reports'), home)
       mkdirSync(home)
       mkdirSync(reports)
       server = await scriptedModelServer({
@@ -218,7 +219,7 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
           { content: 'Reported.', usage },
         ],
       })
-      const layout = () => resolveWorkspaceLayout(root)
+      const layout = () => layoutOf(root)
 
       // ---- first run -------------------------------------------------------
       let { app, page, consoleErrors } = await launch(home)

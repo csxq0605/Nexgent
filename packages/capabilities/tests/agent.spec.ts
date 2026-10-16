@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApp, type Context, type NexgentApp, type Plugin, type ToolContext } from '@nexgent/kernel'
+import { createApp, resolveProjectLayout, type Context, type NexgentApp, type Plugin, type ToolContext } from '@nexgent/kernel'
 import { ContextPlugin } from '@nexgent/context'
 import { SessionPlugin } from '@nexgent/session'
 import { SkillPlugin } from '@nexgent/skill'
@@ -246,7 +246,7 @@ export default {
     expect((await agent.run({ text: 'Make it reusable.' })).reason).toEqual({ kind: 'completed' })
     const toolResults = llm.requests.slice(1).flatMap(request => request.messages.filter(message => message.role === 'tool').slice(-2))
     expect(toolResults.every(message => !message.isError)).toBe(true)
-    const log = (await readFile(join(root, '.nexgent', 'sessions', agent.sessionId, 'session.jsonl'), 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line) as { type: string })
+    const log = (await readFile(join(resolveProjectLayout(root).sessions, agent.sessionId, 'session.jsonl'), 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line) as { type: string })
     expect(log.map(record => record.type).filter(type => type.startsWith('capability.'))).toEqual(['capability.draft', 'capability.draft', 'capability.try', 'capability.try', 'capability.propose'])
     const [candidate] = await (await import('../src/index.js')).listCandidates(service().store.directory)
     expect(candidate?.components.map(component => component.name)).toEqual(['order-notes', 'probe'])

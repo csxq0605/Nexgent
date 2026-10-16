@@ -1,5 +1,5 @@
 /**
- * Read session and ledger JSONL files from a project's `.nexgent/` layout
+ * Read session and ledger JSONL files from a project's data directory (ADR 0017)
  * (`docs/spec/data-formats.md`). These are lenient test-side readers: they
  * stop at the first line that is unterminated or not a JSON object (the
  * `kill -9` half line) and report it, but do not re-run the session
@@ -8,7 +8,16 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { LedgerRecord, LLMRequestEndRecord, SessionRecord } from '@nexgent/kernel'
-import { LEDGER_FILE_NAME } from '@nexgent/kernel'
+import { LEDGER_FILE_NAME, resolveProjectLayout } from '@nexgent/kernel'
+
+/** Where to look for a project's data: `home` overrides `$NEXGENT_HOME`. */
+export interface RecordsLocation {
+  readonly home?: string
+}
+
+function dataLayout(projectRoot: string, location: RecordsLocation = {}) {
+  return resolveProjectLayout(projectRoot, location.home === undefined ? {} : { home: location.home })
+}
 
 /** Why a JSONL read stopped early. */
 export interface JsonlTruncation {
@@ -74,9 +83,9 @@ export async function readJsonlFile<T = unknown>(path: string): Promise<JsonlRea
   return { path, exists: true, records, truncation: undefined }
 }
 
-/** `<projectRoot>/.nexgent/sessions/<sessionId>/session.jsonl`. */
-export function sessionFilePath(projectRoot: string, sessionId: string): string {
-  return join(projectRoot, '.nexgent', 'sessions', sessionId, 'session.jsonl')
+/** `<data dir>/sessions/<sessionId>/session.jsonl` (data dir resolved with `resolveProjectLayout`). */
+export function sessionFilePath(projectRoot: string, sessionId: string, location?: RecordsLocation): string {
+  return join(dataLayout(projectRoot, location).sessions, sessionId, 'session.jsonl')
 }
 
 /**
@@ -84,17 +93,17 @@ export function sessionFilePath(projectRoot: string, sessionId: string): string 
  * @param projectRoot - project directory (the parent of `.nexgent/`).
  * @param sessionId - session id.
  */
-export function readSessionRecords(projectRoot: string, sessionId: string): Promise<JsonlReadResult<SessionRecord>> {
-  return readJsonlFile<SessionRecord>(sessionFilePath(projectRoot, sessionId))
+export function readSessionRecords(projectRoot: string, sessionId: string, location?: RecordsLocation): Promise<JsonlReadResult<SessionRecord>> {
+  return readJsonlFile<SessionRecord>(sessionFilePath(projectRoot, sessionId, location))
 }
 
 /**
- * Session ids present under `.nexgent/sessions/` (directories only), sorted.
+ * Session ids present under the project's data `sessions/` directory (directories only), sorted.
  * @param projectRoot - project directory.
  */
-export async function listSessionIds(projectRoot: string): Promise<string[]> {
+export async function listSessionIds(projectRoot: string, location?: RecordsLocation): Promise<string[]> {
   try {
-    const entries = await readdir(join(projectRoot, '.nexgent', 'sessions'), { withFileTypes: true })
+    const entries = await readdir(dataLayout(projectRoot, location).sessions, { withFileTypes: true })
     return entries.filter((e) => e.isDirectory()).map((e) => e.name).sort()
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
@@ -111,12 +120,12 @@ export interface LedgerReadResult {
 }
 
 /**
- * Read every `.nexgent/ledgers/<yyyy-mm>/requests.jsonl`.
+ * Read every `<data dir>/ledgers/<yyyy-mm>/requests.jsonl`.
  * @param projectRoot - project directory.
  * @param options - `month` restricts to one `yyyy-mm`.
  */
-export async function readLedgerRecords(projectRoot: string, options: { readonly month?: string } = {}): Promise<LedgerReadResult> {
-  const root = join(projectRoot, '.nexgent', 'ledgers')
+export async function readLedgerRecords(projectRoot: string, options: { readonly month?: string; readonly home?: string } = {}): Promise<LedgerReadResult> {
+  const root = dataLayout(projectRoot, options.home === undefined ? undefined : { home: options.home }).ledgers
   let months: string[]
   try {
     months = (await readdir(root, { withFileTypes: true }))

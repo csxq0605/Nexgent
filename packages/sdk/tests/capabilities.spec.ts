@@ -28,9 +28,9 @@ describe('capability versions through the SDK', () => {
     const tools = t.providers[0]!.llm.calls[0]!.request.tools?.map(tool => tool.name) ?? []
     expect(tools).toEqual(expect.arrayContaining(['capability_draft', 'capability_try', 'capability_propose']))
     // The plugin is the capability host: a project with nothing adopted runs on baseline.
-    const records = (await readSessionRecords(project.root, session.sessionId)).records as SessionRecord[]
+    const records = (await readSessionRecords(project.root, session.sessionId, { home: t.home })).records as SessionRecord[]
     expect(records.find(record => record.type === 'session.start')).toMatchObject({ capabilityVersion: 'baseline' })
-    const outcome = (await readLedgerRecords(project.root)).records.find(record => record.type === 'task.outcome')
+    const outcome = (await readLedgerRecords(project.root, { home: t.home })).records.find(record => record.type === 'task.outcome')
     expect(outcome).toMatchObject({ capabilityVersion: 'baseline' })
   })
 
@@ -56,10 +56,10 @@ describe('capability versions through the SDK', () => {
     const started = await t.sdk.startTurn({ projectId: project.projectId, sessionId: session.sessionId, text: 'hi' })
     expect((await started.done).reason).toEqual({ kind: 'completed' })
 
-    const records = (await readSessionRecords(root, session.sessionId)).records as SessionRecord[]
+    const records = (await readSessionRecords(root, session.sessionId, { home: t.home })).records as SessionRecord[]
     expect(records.find(record => record.type === 'session.start')).toMatchObject({ capabilityVersion: VERSION })
     expect(attached).toEqual([expect.objectContaining({ sessionId: session.sessionId, version: VERSION, resumed: false })])
-    const ledger = (await readLedgerRecords(root)).records
+    const ledger = (await readLedgerRecords(root, { home: t.home })).records
     expect(ledger.length).toBeGreaterThan(0)
     expect(ledger.every(record => (record as { capabilityVersion?: string }).capabilityVersion === VERSION)).toBe(true)
     expect(ledger.some(record => record.type === 'task.outcome')).toBe(true)

@@ -86,10 +86,10 @@ function fileGuidance(tools: ReadonlySet<string>, materials: boolean): string[] 
       + `Use ${shells.join(' or ')} to run programs, scripts and tests; files those programs produce (for example a report your script generates), and copying or moving files, are fine.`)
   }
   if (tools.has('present')) {
-    lines.push('- When your work creates or changes project files for the user (code changes included), declare the files that make up the result with `present` before your final reply, and again after each revision; '
-      + 'when presenting a revision, pass the `deliverableId` that `present` returned so it becomes a new version of the same deliverable.')
+    lines.push('- When the user asks for a result file (a report, a document, a table, a figure), declare it with `present` before your final reply, and again after each revision, '
+      + 'passing the `deliverableId` that `present` returned so it becomes a new version of the same deliverable. Ordinary code edits need no `present`: the files you changed are shown to the user anyway.')
   }
-  if (materials) lines.push('- Materials the user attached are under `.nexgent/materials/` and are read-only; read them there and write your results into the project.')
+  if (materials) lines.push('- Materials the user attached are read-only copies at the paths given with them; read them there and write your results into the project.')
   return lines
 }
 

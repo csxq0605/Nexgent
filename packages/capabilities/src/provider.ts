@@ -12,7 +12,7 @@
  * the turn.
  */
 import { readFile } from 'node:fs/promises'
-import type { ContextContribution, ContextProvider, SystemPromptSection, TeamTemplateSpec, TurnContextInput } from '@nexgent/kernel'
+import { renderHandbookInjection, type ContextContribution, type ContextProvider, type HandbookRetriever, type SystemPromptSection, type TeamTemplateSpec, type TurnContextInput } from '@nexgent/kernel'
 import type { ActiveComponent, CapabilityService } from './service.js'
 
 async function collaborationLines(components: readonly ActiveComponent[]): Promise<string[]> {
@@ -47,8 +47,16 @@ export type CompactionOverrideSink = (sessionId: string, override: { readonly th
 /**
  * Build the provider.
  * @param compaction - applies a context policy's `compaction` to the session (from the next compaction check on).
+ * @param retriever - the handbook retriever (V1). When it returns one, the
+ *   entries retrieved for a session's first turn are injected before its
+ *   user message and the context policy's text is no longer rendered as
+ *   `# Learned practices`; without one the old section stays.
  */
-export function capabilitiesProvider(service: CapabilityService, compaction?: () => CompactionOverrideSink | undefined): ContextProvider {
+export function capabilitiesProvider(
+  service: CapabilityService,
+  compaction?: () => CompactionOverrideSink | undefined,
+  retriever?: () => HandbookRetriever | undefined,
+): ContextProvider {
   return {
     id: 'capabilities',
     async beginTurn(input: TurnContextInput): Promise<ContextContribution> {
@@ -61,8 +69,14 @@ export function capabilitiesProvider(service: CapabilityService, compaction?: ()
       const components = await service.components(input.sessionId)
       const policy = components.find(component => component.spec.kind === 'context-policy')
       compaction?.()?.(input.sessionId, policy?.spec.kind === 'context-policy' ? policy.spec.spec.compaction : undefined)
+      const handbook = retriever?.()
+      const inject: string[] = []
+      if (handbook !== undefined && input.turn === 1) {
+        const text = renderHandbookInjection(await handbook.retrieve({ sessionId: input.sessionId, projectRoot: input.projectRoot, text: input.text, signal: input.signal }))
+        if (text !== undefined) inject.push(text)
+      }
       for (const component of components) {
-        if (component.spec.kind !== 'context-policy') continue
+        if (handbook !== undefined || component.spec.kind !== 'context-policy') continue
         const parts = [component.spec.spec.instructions, component.spec.spec.personaSuffix].filter((part): part is string => part !== undefined && part.trim() !== '')
         if (parts.length > 0) sections.push({ id: 'capabilities-practices', title: 'Learned practices', body: parts.join('\n\n') })
       }
@@ -78,7 +92,10 @@ export function capabilitiesProvider(service: CapabilityService, compaction?: ()
       if (collaboration.length > 0) {
         sections.push({ id: 'capabilities-collaboration', title: 'Learned collaboration', body: `Presets and workflow graphs that worked before:\n${collaboration.join('\n')}` })
       }
-      return sections.length === 0 ? {} : { systemSections: sections }
+      return {
+        ...(sections.length === 0 ? {} : { systemSections: sections }),
+        ...(inject.length === 0 ? {} : { inject }),
+      }
     },
   }
 }

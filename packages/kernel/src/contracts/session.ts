@@ -183,13 +183,22 @@ export interface TurnEndRecord extends SessionRecordBase {
   readonly reason: TurnEndReason
 }
 
-/** A full state snapshot; resume starts from the latest one and replays records with `seq > coversSeq`. */
+/**
+ * A state snapshot; resume starts from the latest usable one and replays
+ * records with `seq > coversSeq`. With `base` it is incremental: the full
+ * state is the base's full messages cut to `keep`, then `state.messages`
+ * (data-formats.md §checkpoint).
+ */
 export interface CheckpointRecord extends SessionRecordBase {
   readonly type: 'checkpoint'
   /** The last `seq` folded into `state`. */
   readonly coversSeq: number
-  /** Complete projected state as of `coversSeq`. */
+  /** Projected state as of `coversSeq`; with `base`, `messages` holds only the messages after the first `keep` (metadata is always full). */
   readonly state: SessionState
+  /** Seq of the previous usable checkpoint this one builds on; absent: `state` is full. */
+  readonly base?: number
+  /** With `base`: leading messages of the base's full state that are kept. */
+  readonly keep?: number
 }
 
 /** A failure worth keeping that is not already a `turn.end`/`tool.result` error (e.g. ledger write failure). */
@@ -725,12 +734,24 @@ export interface SessionTruncation {
   readonly reason: string
 }
 
+/** A line in the middle of a session file that was skipped and kept on disk. */
+export interface SessionSkippedLine {
+  /** 1-based line number. */
+  readonly line: number
+  /** Byte offset of the line's start. */
+  readonly byteOffset: number
+  /** Why the line was not used (unparsable, unknown record type, seq out of window). */
+  readonly reason: string
+}
+
 /** The result of reading a whole file. */
 export interface SessionReadResult {
   /** Every valid record, in `seq` order. */
   readonly records: readonly SessionRecord[]
-  /** Present when the file had an invalid tail; records after it are discarded. */
+  /** Present only when the last line is torn (no newline, unparsable); it is cut before the next append. */
   readonly truncation?: SessionTruncation
+  /** Unusable lines before the last one; skipped, never deleted. */
+  readonly skipped?: readonly SessionSkippedLine[]
 }
 
 /** Contents of `sessions/<id>/.lock`; a single-writer lease. */
@@ -741,6 +762,8 @@ export interface SessionLockFile {
   readonly ts: string
   /** Host name, so a stale lock from another machine is recognizable on shared disks. */
   readonly host: string
+  /** ISO-8601 start time of the owning process, so a reused pid is not mistaken for the owner. */
+  readonly startedAt?: string
 }
 
 /** A held lock; release through the store. */

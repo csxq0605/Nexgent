@@ -34,7 +34,7 @@ const text = (body: MessagesRequestBody) => JSON.stringify(body)
 const sha256 = async (file: string) => createHash('sha256').update(await readFile(file)).digest('hex')
 
 function workbookPath(body: MessagesRequestBody): string {
-  const match = /\.nexgent\/materials\/[0-9a-f-]{36}\/[^"\\\s]+\.xlsx/.exec(text(body))
+  const match = /[^"\\\s]+\/materials\/[0-9a-f-]{36}\/[^"\\\s]+\.xlsx/.exec(text(body))
   if (match === null) throw new Error('no workbook path in the request')
   return match[0]
 }
@@ -170,9 +170,9 @@ describe('mid-term checkpoint: the whole chain through the SDK only', () => {
       expect(turnEnds).toEqual([[3, 'interrupted'], [4, 'completed']])
 
       // records: continuous seq; ledger: one task.outcome per finished turn, none for the killed one
-      const { records } = await readSessionRecords(project.root, sessionId)
+      const { records } = await readSessionRecords(project.root, sessionId, { home })
       expect(records.map(record => record.seq)).toEqual(records.map((_, index) => index + 1))
-      const outcomes = (await readLedgerRecords(project.root)).records.filter(record => record.type === 'task.outcome')
+      const outcomes = (await readLedgerRecords(project.root, { home })).records.filter(record => record.type === 'task.outcome')
       expect(outcomes.map(record => record.type === 'task.outcome' && record.status)).toEqual(['completed', 'completed', 'completed'])
 
       // export: the bundle carries the session, its ledger lines and metadata, never the key

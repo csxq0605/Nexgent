@@ -26,6 +26,7 @@
  * The key is never logged or written: it lives in the environment and the SDK's env
  * object only; the task-B child reads it from its inherited environment.
  */
+import { dataDirSync, registerHome } from './data-dir.mjs'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -163,6 +164,7 @@ export async function runRealScenario(h, work, { env, realModel, budgetUsd = REA
   const pkgs = loaded.pkgs
   const root = join(work, 'project')
   const home = join(work, 'home')
+  registerHome(root, home)
   await mkdir(root, { recursive: true })
   await mkdir(home, { recursive: true })
   await writeReplayProject(root)
@@ -276,7 +278,7 @@ export async function runRealScenario(h, work, { env, realModel, budgetUsd = REA
     // R05: inject a broken copy of the adopted function module.
     step = 'inject'
     const cap = await import(new URL('../../packages/capabilities/dist/index.js', import.meta.url).href)
-    obs.injection = await injectRegression(cap, join(root, '.nexgent', 'capabilities'), obs.adopted.version, adoptedDecision.verdict)
+    obs.injection = await injectRegression(cap, join(dataDirSync(root), 'capabilities'), obs.adopted.version, adoptedDecision.verdict)
     if (obs.injection.skipped !== undefined) throw new StopScenario(obs.injection.skipped)
     log(`R05: injected ${obs.injection.version.slice(0, 12)} over ${obs.adopted.version.slice(0, 12)}`)
 
@@ -303,7 +305,7 @@ export async function runRealScenario(h, work, { env, realModel, budgetUsd = REA
   obs.activation = await activationOf(root)
   obs.decisions = await decisionsOf(root)
   obs.trials = await trialsOf(root)
-  obs.snapshots = await filesUnder(join(root, '.nexgent', 'snapshots'))
+  obs.snapshots = await filesUnder(join(dataDirSync(root), 'snapshots'))
   obs.ledgerVersions = Object.fromEntries(Object.values(obs.tasks).map(t => [t.sessionId, [...new Set(ledger.filter(r => r.sessionId === t.sessionId && r.trialId === undefined).map(r => r.capabilityVersion))]]))
   obs.usage = {
     tasks: Object.fromEntries(Object.entries(obs.tasks).map(([key, t]) => [key, usageOf(ledger.filter(r => r.sessionId === t.sessionId && r.trialId === undefined))])),

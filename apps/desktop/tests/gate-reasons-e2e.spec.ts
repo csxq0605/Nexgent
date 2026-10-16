@@ -19,7 +19,8 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CapabilityStore, writeCandidate, type BundleComponentInput } from '@nexgent/capabilities'
 import { createJob, improvementsDir, transitionJob, updateJob } from '@nexgent/evolve'
-import { resolveWorkspaceLayout, type CandidateRecord, type DecisionReason, type InstanceLiteralHit, type TrialCost, type TrialVerdict } from '@nexgent/kernel'
+import { dataPath, layoutOf, useHome } from './data-layout.js'
+import { type CandidateRecord, type DecisionReason, type InstanceLiteralHit, type TrialCost, type TrialVerdict } from '@nexgent/kernel'
 import { scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
@@ -116,9 +117,9 @@ async function seedJob(root: string, store: CapabilityStore, component: BundleCo
   readonly instanceLiterals?: readonly InstanceLiteralHit[]
   readonly detail: string
 }): Promise<Seeded> {
-  const layout = resolveWorkspaceLayout(root)
+  const layout = layoutOf(root)
   const jobs = improvementsDir(layout)
-  const dir = join(root, '.nexgent', 'capabilities')
+  const dir = dataPath(root, 'capabilities')
   const job = await createJob(jobs, { trigger: 'explicit', items: [] })
   await transitionJob(jobs, job.id, 'diagnosing', { expect: ['queued'] })
   await transitionJob(jobs, job.id, 'proposing', { expect: ['diagnosing'] })
@@ -203,7 +204,7 @@ describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)',
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-gate-reasons-e2e-')))
       const home = join(base, 'home')
-      const root = join(base, 'orders')
+      const root = useHome(join(base, 'orders'), home)
       mkdirSync(home)
       server = await scriptedModelServer({ script: [] })
       let jobs: { literal: Seeded; similar: Seeded; original: Seeded }
@@ -213,7 +214,7 @@ describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)',
         await page.getByTestId('project-path').fill(root)
         await page.getByTestId('create-project').click()
         await page.getByTestId('workspace').waitFor()
-        const store = new CapabilityStore(join(root, '.nexgent', 'capabilities'))
+        const store = new CapabilityStore(dataPath(root, 'capabilities'))
         const literal = await seedJob(root, store, skill('region-table', 'Region tables show the average order value 2384.13 for 2026-09.'), '地区表带均价', {
           outcome: 'rejected',
           reason: 'instance-literal',

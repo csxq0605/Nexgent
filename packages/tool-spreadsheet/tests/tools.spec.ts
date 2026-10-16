@@ -195,7 +195,7 @@ describe('in the agent loop (scripted model)', () => {
     const results = llm.requests[2]!.messages.filter(message => message.role === 'tool')
     expect(results.map(message => [message.name, message.isError])).toEqual([['write_spreadsheet', false], ['read_spreadsheet', false]])
     expect(results[1]!.content).toContain('2,Units to order,53')
-    const log = (await readFile(join(app.ctx.workspace.root, '.nexgent', 'sessions', result.sessionId, 'session.jsonl'), 'utf8'))
+    const log = (await readFile(join(app.ctx.workspace.layout.sessions, result.sessionId, 'session.jsonl'), 'utf8'))
       .split('\n').filter(Boolean).map(line => JSON.parse(line) as SessionRecord)
     expect(log.filter(record => record.type === 'tool.result')).toHaveLength(2)
   })

@@ -232,3 +232,46 @@ export const HANDBOOK_MARK_TOOL: Step2ToolSpec = {
     },
   },
 }
+
+/**
+ * K1 (rework plan, K1 last item): what a task's handbook entries are
+ * retrieved by. V1 implements the retriever (local lexical retrieval);
+ * until it is registered the capability provider keeps the old
+ * `# Learned practices` system section.
+ */
+export interface HandbookQuery {
+  readonly sessionId: string
+  /** Absolute project root. */
+  readonly projectRoot: string
+  /** Project id (`WorkspaceLayout.projectId`), for project-scope entries and the project's sharing switch. */
+  readonly projectId?: string
+  /** The task's text: the user message that starts it. */
+  readonly text: string
+  /** How many entries at most; default {@link HANDBOOK_TOP_K}. */
+  readonly k?: number
+  readonly signal?: AbortSignal
+}
+
+/** One retrieved entry. */
+export interface RetrievedHandbookEntry {
+  readonly entry: HandbookEntry
+  /** Relevance score; higher is more relevant. Only the order is meaningful. */
+  readonly score: number
+}
+
+/** Retrieves the entries a task is given (only {@link isRetrievable} ones, most relevant first). */
+export interface HandbookRetriever {
+  retrieve(query: HandbookQuery): Promise<readonly RetrievedHandbookEntry[]>
+}
+
+/**
+ * The text injected right before a task's first user message (ADR 0018
+ * decision 4: never in the system prompt); `undefined` for no entries.
+ */
+export function renderHandbookInjection(entries: readonly RetrievedHandbookEntry[]): string | undefined {
+  if (entries.length === 0) return undefined
+  return [
+    'Practices learned from earlier tasks that may apply here. Use them only where they fit this task; after using one, call handbook_mark with its id to say whether it helped or led you astray.',
+    ...entries.map(({ entry }) => `- [${entry.id}] ${entry.text}`),
+  ].join('\n')
+}

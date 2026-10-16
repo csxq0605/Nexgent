@@ -19,6 +19,16 @@ export {
   shouldCheckpoint,
 } from './projection.js'
 export type { ReplayResult } from './projection.js'
+export {
+  readSessionSummary,
+  SUMMARY_FILE_NAME,
+  summarizeSession,
+  SummaryFold,
+  writeSessionSummary,
+} from './summary.js'
+export type { SessionIndexEntry, SessionSummaryFile } from './summary.js'
+export { MAX_CHECKPOINT_CHAIN, resolveLatestCheckpoint } from './checkpoint.js'
+export type { ResolvedCheckpoint } from './checkpoint.js'
 export { checkSequence, encodeLine, scanSessionLog } from './jsonl.js'
 export type { ScanResult } from './jsonl.js'
 export {
@@ -27,6 +37,8 @@ export {
   isProcessAlive,
   LOCK_FILE_NAME,
   parseLockFile,
+  processStartTime,
+  START_TIME_TOLERANCE_MS,
   releaseLockFile,
 } from './lock.js'
 export type { LockIdentity } from './lock.js'

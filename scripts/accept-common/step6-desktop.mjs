@@ -56,6 +56,7 @@ import { appendFile, mkdir, readFile, readdir, realpath } from 'node:fs/promises
 import { createRequire } from 'node:module'
 import { basename, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { dataDirSync, registerHome } from './data-dir.mjs'
 import { isLoopbackUrl } from './step2-runtime.mjs'
 import { DESKTOP_DIR, VITE_BIN, ensureDisplay, poll, run } from './step2-desktop.mjs'
 import { ledgerOf } from './step4-headless.mjs'
@@ -367,7 +368,7 @@ export const GATE_SEEDS = [
 async function seedGateJob(pkgs, capabilities, root, store, seed) {
   const evolve = pkgs.evolve
   const jobs = improvementsPath(root)
-  const dir = join(root, '.nexgent', 'capabilities')
+  const dir = join(dataDirSync(root), 'capabilities')
   const job = await evolve.createJob(jobs, { trigger: 'explicit', items: [] })
   await evolve.transitionJob(jobs, job.id, 'diagnosing', { expect: ['queued'] })
   await evolve.transitionJob(jobs, job.id, 'proposing', { expect: ['diagnosing'] })
@@ -417,7 +418,7 @@ async function seedGateJob(pkgs, capabilities, root, store, seed) {
 /** What a gate job's files say: its status and scope, and the decision record (outcome, reason, the literals found, the similar-case rates). */
 async function gateFilesOf(pkgs, capabilities, root, seeded) {
   const job = (await readImprovements(pkgs, root)).jobs.find(item => item.id === seeded.jobId)
-  const decision = await capabilities.readDecision(join(root, '.nexgent', 'capabilities', capabilities.DECISIONS_DIR), seeded.decisionId).catch(() => undefined)
+  const decision = await capabilities.readDecision(join(dataDirSync(root), 'capabilities', capabilities.DECISIONS_DIR), seeded.decisionId).catch(() => undefined)
   return {
     job: job === undefined ? undefined : jobFile(job),
     decisionId: job?.decisionId,
@@ -620,6 +621,7 @@ export async function runStep6DesktopScenario(harness, work, { log = () => {} } 
   const rendererDir = join(work, 'renderer')
   const root = join(work, 'project')
   const home = join(work, 'home')
+  registerHome(root, home)
   const other = join(work, 'reports')
   createRequire(join(DESKTOP_DIR, 'package.json'))('electron')
 
@@ -902,7 +904,7 @@ export async function runStep6DesktopScenario(harness, work, { log = () => {} } 
     // ---- launch 4: the ADR 0013 conclusions (seeded now: nothing above should see them) -----
     await item('d25', async () => {
       log('seeding the three gate conclusions')
-      const store = new capabilities.CapabilityStore(join(root, '.nexgent', 'capabilities'))
+      const store = new capabilities.CapabilityStore(join(dataDirSync(root), 'capabilities'))
       const gates = []
       for (const seed of GATE_SEEDS) {
         const written = await seedGateJob(pkgs, capabilities, root, store, seed)

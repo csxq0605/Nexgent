@@ -8,12 +8,12 @@
  */
 import { readdir, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
-import { renderFeedbackPrompt, resolveWorkspaceLayout, toDeliverableVersionRef, type SessionRecordInput } from '@nexgent/kernel'
+import { renderFeedbackPrompt, resolveProjectLayout, toDeliverableVersionRef, type SessionRecordInput } from '@nexgent/kernel'
 import { JsonlSessionStore } from '@nexgent/session'
 import { createFeedbackEntry, createTaskingService, materialAddedRecord } from '../../src/index.js'
 
 const [root, sessionId, materialSource, bigFile] = process.argv.slice(2) as [string, string, string, string]
-const layout = resolveWorkspaceLayout(root)
+const layout = resolveProjectLayout(root)
 const store = new JsonlSessionStore({ sessionsDir: layout.sessions })
 const tasking = createTaskingService(layout, store)
 const append = (record: SessionRecordInput) => store.append(sessionId, record)
@@ -28,6 +28,7 @@ await append({ type: 'turn.start', turn: 1 })
 await append({ type: 'user.message', turn: 1, content: 'Summarize the orders.', source: 'user', materials: [material.id] })
 await tasking.files.beginTurn(sessionId, 1)
 await writeFile(nodePath.join(root, 'summary.csv'), 'region,total\nnorth,100\n')
+tasking.files.observe({ sessionId, turn: 1, callId: 'w1', name: 'write_file', isError: false, meta: { path: nodePath.join(root, 'summary.csv'), created: true } })
 const v1 = await tasking.deliverables.present({ sessionId, turn: 1, toolCallId: 'call_1', paths: ['summary.csv'], summary: 'First summary.' })
 await append({ type: 'deliverable.presented', turn: 1, step: 1, toolCallId: 'call_1', deliverable: toDeliverableVersionRef(v1) })
 await append({ type: 'turn.files', turn: 1, changes: [...(await tasking.files.endTurn(sessionId, 1))] })
@@ -40,6 +41,7 @@ await append({ type: 'feedback', turn: 2, feedback })
 await append({ type: 'user.message', turn: 2, content: renderFeedbackPrompt(feedback), source: 'feedback' })
 await tasking.files.beginTurn(sessionId, 2)
 await writeFile(nodePath.join(root, 'summary.csv'), 'region,total\n华北,100\n')
+tasking.files.observe({ sessionId, turn: 2, callId: 'w2', name: 'write_file', isError: false, meta: { path: nodePath.join(root, 'summary.csv') } })
 const v2 = await tasking.deliverables.present({ sessionId, turn: 2, toolCallId: 'call_2', paths: ['summary.csv'], summary: 'Chinese names.', deliverableId: v1.deliverableId })
 await append({ type: 'deliverable.presented', turn: 2, step: 1, toolCallId: 'call_2', deliverable: toDeliverableVersionRef(v2) })
 await append({ type: 'turn.files', turn: 2, changes: [...(await tasking.files.endTurn(sessionId, 2))] })

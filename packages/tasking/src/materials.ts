@@ -7,6 +7,7 @@ import * as nodePath from 'node:path'
 import {
   MATERIAL_METADATA_FILE,
   NexgentError,
+  resolveDataPath,
   toMaterialRef,
   type AddMaterialInput,
   type HostRecordInput,
@@ -131,7 +132,8 @@ export class LocalMaterialStore implements MaterialStore {
 
   /** Absolute path of a material's stored copy. */
   absolutePath(material: MaterialMetadata): string {
-    return nodePath.join(this.layout.root, ...material.path.split('/'))
+    // The record keeps the logical `.nexgent/materials/...` path; the copy lives in the data directory (K1).
+    return resolveDataPath(this.layout, material.path)
   }
 
   /** Read and validate one `material.json`; `undefined` when missing or invalid (an invalid file is never listed). */

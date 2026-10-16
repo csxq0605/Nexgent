@@ -12,7 +12,7 @@ import { readFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { ImproverStore, type ImproverActivation, type ResolvedImprover } from '@nexgent/capabilities'
 import { improvementsDir, jobPaths, listJobs, readUserQueue, type ImprovementJob } from '@nexgent/evolve'
-import { IMPROVER_V0_VERSION, NexgentError, resolveWorkspaceLayout, type ImproverChangeRecord, type ImproverRevision, type ImproverVersion } from '@nexgent/kernel'
+import { IMPROVER_V0_VERSION, NexgentError, resolveProjectLayout, type ImproverChangeRecord, type ImproverRevision, type ImproverVersion } from '@nexgent/kernel'
 import type { ImproverDetail, ImproverListing, ImproverVersionView } from './api.js'
 
 /** At most this many projects in `ImproverListing.usedBy`. */
@@ -68,19 +68,19 @@ export async function knownRoots(home: string, extra: readonly string[] = []): P
   return [...new Set(roots)]
 }
 
-async function jobsOf(root: string): Promise<ImprovementJob[]> {
-  return listJobs(improvementsDir(resolveWorkspaceLayout(root))).catch(() => [])
+async function jobsOf(root: string, home: string): Promise<ImprovementJob[]> {
+  return listJobs(improvementsDir(resolveProjectLayout(root, { home }))).catch(() => [])
 }
 
 /**
  * The projects whose jobs ran on `version` of the user line (`improverScope:
  * user`), most recent first: a rollback affects them all (ADR 0012).
  */
-export async function usedBy(roots: readonly string[], version: ImproverVersion): Promise<NonNullable<ImproverListing['usedBy']>> {
+export async function usedBy(roots: readonly string[], version: ImproverVersion, home: string): Promise<NonNullable<ImproverListing['usedBy']>> {
   const found: { root: string; name: string; lastJobAt: string }[] = []
   for (const root of roots) {
     let last: string | undefined
-    for (const job of await jobsOf(root)) {
+    for (const job of await jobsOf(root, home)) {
       if (job.improverScope !== 'user' || (job.improverVersion ?? IMPROVER_V0_VERSION) !== version) continue
       if (last === undefined || job.createdAt > last) last = job.createdAt
     }
@@ -90,9 +90,9 @@ export async function usedBy(roots: readonly string[], version: ImproverVersion)
 }
 
 /** `improvers.list`: the user line, and the projects that ran on the improver in force. */
-export async function list(store: ImproverStore, roots: readonly string[]): Promise<{ readonly listing: ImproverListing; readonly changed: boolean }> {
+export async function list(store: ImproverStore, roots: readonly string[], home: string): Promise<{ readonly listing: ImproverListing; readonly changed: boolean }> {
   const { view, changed } = await current(store)
-  const [chain, users] = await Promise.all([store.chain(), usedBy(roots, view.version)])
+  const [chain, users] = await Promise.all([store.chain(), usedBy(roots, view.version, home)])
   return { listing: { current: view, history: chain.revisions, usedBy: users }, changed }
 }
 
@@ -102,11 +102,11 @@ function version(value: unknown, name: string): ImproverVersion {
 }
 
 /** The accepted change whose child is `version`, from the meta jobs' `change.json` in the known projects. */
-async function changeOf(roots: readonly string[], version: ImproverVersion): Promise<ImproverChangeRecord | undefined> {
+async function changeOf(roots: readonly string[], version: ImproverVersion, home: string): Promise<ImproverChangeRecord | undefined> {
   if (version === IMPROVER_V0_VERSION) return undefined
   for (const root of roots) {
-    const directory = improvementsDir(resolveWorkspaceLayout(root))
-    for (const job of [...await jobsOf(root)].reverse()) {
+    const directory = improvementsDir(resolveProjectLayout(root, { home }))
+    for (const job of [...await jobsOf(root, home)].reverse()) {
       if (job.kind !== 'meta' || job.meta?.childVersion !== version) continue
       try {
         return JSON.parse(await readFile(jobPaths(directory, job.id).change, 'utf8')) as ImproverChangeRecord
@@ -119,9 +119,9 @@ async function changeOf(roots: readonly string[], version: ImproverVersion): Pro
 }
 
 /** `improvers.show`. */
-export async function show(store: ImproverStore, roots: readonly string[], input: unknown): Promise<ImproverDetail> {
+export async function show(store: ImproverStore, roots: readonly string[], input: unknown, home: string): Promise<ImproverDetail> {
   const wanted = version(input, 'version')
-  const [bundle, activation, change] = await Promise.all([store.load(wanted), store.activation(), changeOf(roots, wanted)])
+  const [bundle, activation, change] = await Promise.all([store.load(wanted), store.activation(), changeOf(roots, wanted, home)])
   return { version: wanted, bundle, ...(change === undefined ? {} : { change }), current: activation.version === wanted }
 }
 

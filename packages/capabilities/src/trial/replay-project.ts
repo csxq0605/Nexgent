@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
   BASELINE_VERSION,
+  LOCAL_DATA_MARKER_FILE,
   NEXGENT_DIR,
   NexgentError,
   resolveWorkspaceLayout,
@@ -110,6 +111,8 @@ export async function prepareReplayProject(input: ReplayProjectInput): Promise<R
 
     const layout = resolveWorkspaceLayout(root)
     await mkdir(join(root, NEXGENT_DIR), { recursive: true })
+    // A scratch copy keeps its sessions and records inside itself (K1), so they go away with it.
+    await writeFile(join(root, NEXGENT_DIR, LOCAL_DATA_MARKER_FILE), '')
     let config: Record<string, unknown> = {}
     try {
       const value: unknown = JSON.parse(await readFile(input.layout.configFile, 'utf8'))

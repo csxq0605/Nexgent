@@ -82,8 +82,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 2. 新建文件用 `write_file`。`write_file` 只新建：目标已存在（文件或目录）时以 `tool/failed` 拒绝，错误信息为“`<path>` already exists; write_file only creates new files. Change it with str_replace (read it with read_file first).”，文件不变；创建是排他的（`wx`），检查与写入之间出现的文件也不会被覆盖。没有例外（本轮刚由 `write_file` 新建的文件同样要用 `str_replace` 修改）。——已实现（Windows 第 4 次真实运行的反馈轮里，模型用 `write_file` 整个重写已有脚本，R02 因此失败）。
 2a. 有 shell 工具时：文件内容只用 `write_file`（新建）/ `str_replace`（修改）写改，不经 shell 新建或修改文件（heredoc、`echo >`、`tee`、`sed -i`，以及写文件的 Python / Node 脚本都不行）；shell 用来运行程序、脚本和测试，程序自己产出的文件以及复制、移动文件不受限。`write_file`、`str_replace`、`bash` / `pwsh` 的工具描述里也写了同样的分工。——已实现（第 1 次真实模型补验 R02 里，模型全程用 heredoc 和 Python 替换写改文件，因此加强了这一条）。
 3. 结果就绪时用 `present` 声明交付，每次修订后再次声明；再次声明时带上 `present` 返回的 `deliverableId`，使之成为同一成果的新版本。——已实现。
-3a. **成果提醒**（2026-10-13，步骤 6 正式实验第 1 次：真实模型在代码任务里改完文件就结束，没有调 `present`，用户看不到成果、挂不上反馈）。第 3 条的措辞加强为“工作新建或修改了项目文件（包括改代码）时，在最后回复之前用 `present` 声明组成结果的文件”。另外，根会话（不含成员与改进会话）在 `present` 可用、本轮任务树还没有交付任何版本时，若一次带 `write` 效果的工具调用成功，下一次模型请求之前写一条 `user.message { source: 'inject' }`（`PRESENT_REMINDER`），提醒先 `present` 再收尾。同一轮内两次提醒至少相隔 `PRESENT_REMINDER_EVERY`（8）步，本轮已有交付就不再提醒。提醒不增加请求次数，SDK 的历史视图不显示 `inject` 消息。是否交付、交付哪些文件仍由模型决定，宿主不代为生成成果。——已实现。
-4. `.nexgent/materials/` 下的资料只读，结果写进项目。只在项目有资料（`ctx.tasking.materials.list()` 非空，轮次开始时检查）时出现。——已实现。
+3a. **成果提醒**（2026-10-13 加，K1 去掉）：原来根会话在一次带 `write` 效果的工具调用成功、本轮还没有交付时，下一次请求前注入 `PRESENT_REMINDER`，每 `PRESENT_REMINDER_EVERY`（8）步至多一次；第 3 条也要求“改了项目文件（包括改代码）就用 `present` 声明”。这让 `present` 成了每个改文件任务的闸门（系统设计审查 P21）。K1 起不再注入提醒；第 3 条改为“用户要的成果文件（报告、文档、表格、图）用 `present` 声明；普通的代码修改不需要 `present`，改动过的文件本来就会展示给用户”。轮内改了哪些文件由 `turn.files` 给出，桌面应用在这一轮下面列出“本轮改动的文件”（已有）。——已实现。
+4. 用户附加的资料是只读副本，按随资料给出的路径读取，结果写进项目（K1 起资料在用户数据目录里，路径是绝对路径；数据还在项目里的旧项目仍是 `.nexgent/materials/` 下的相对路径）。只在项目有资料（`ctx.tasking.materials.list()` 非空，轮次开始时检查）时出现。——已实现。
 
 第 1、2、2a、3 条对应真实模型补验的 R02（修改轮里对已有文件的修改走 `str_replace`）与链路里的 present / v2。
 
@@ -188,12 +188,12 @@ kernel 的 `Agent` 在步骤 2 增加（形状由 W7 定，语义在此固定）
 - 会话打开时读采用历史链尾，经 `SessionInit.capabilityVersion` 写进 `session.start`；kernel 给该会话的每条账本记录加 `capabilityVersion`（与 `AgentAttribution` 一起，`JsonlLedger.setStamp` 同样带上）。恢复时版本不可用写 `capability.version`（宿主记录）。
 - `ToolRecordType` 增加 `capability.draft` / `try` / `propose`，`HostRecordType` 增加 `capability.version`；kernel 的运行时白名单（`agent.ts` 的 `TOOL_RECORD_TYPES` / `HOST_RECORD_TYPES`）随之放宽。
 - `Workspace.ensureLayout` 创建 `.nexgent/snapshots/`；路径策略把 `.nexgent/snapshots/` 加入读写都拒绝的子目录。
-- 根任务开始时拍快照、结束时写检查记录与 `task.outcome.checks` / `componentsUsed` / `memberCosts`（`data-formats.md` §任务快照与检查）。
+- 根任务开始时拍快照、结束时写检查记录与 `task.outcome.checks` / `componentsUsed` / `memberCosts`（`data-formats.md` §任务快照与检查）。K1 起：快照只在项目开启学习（`learning.enabled`）时拍；它在第一次请求的回复开始到达时开始、在后台进行；可能改项目的工具调用（效果不只是 `read` / `network`）与轮末先等它完成，只读工具不等，所以一轮的开始不再等待扫描项目；检查只记录，不重跑命令（见下）。
 
 步骤 5 增加（实现归步骤 5 分工表里对应的工作包，形状在契约固定）：
 
 - `SessionInit.purpose` / `improvement` 写进 `session.start`（只给其一时 `create` 报 `session/invalid-record`）；改进会话的每条账本记录带 `improvementId` 与 `improvementPhase`（`LedgerAttribution`，`JsonlLedger.setStamp` 同样带上）；该作业的门控试验记录带 `improvementPhase: trial`。
-- 快照与检查按根轮记（`perTurnFileName`，`data-formats.md` §任务快照与检查“按轮记”），根轮结束时检查有失败项即向改进队列计一个 `check-failure` 信号（失败的测试命令也成为检查，ADR 0006 决策 10；kernel 把项目根目录里有退出码的 `bash` / `pwsh` 命令连同 `exitCode` 交给记录器，由记录器判定哪些是测试命令）（只在 `autoImprove` 为真时自动开始作业）。
+- 快照与检查按根轮记（`perTurnFileName`，`data-formats.md` §任务快照与检查“按轮记”），根轮结束时检查有失败项即向改进队列计一个 `check-failure` 信号（失败的测试命令也成为检查，ADR 0006 决策 10；kernel 把项目根目录里有退出码的 `bash` / `pwsh` 命令连同 `exitCode` 交给记录器，由记录器判定哪些是测试命令；K1 起检查结果就是模型那次运行的退出码，轮末不再重跑）（只在 `autoImprove` 为真时自动开始作业）。
 - 路径策略把 `.nexgent/improvements/` 加入读写都拒绝的子目录（`@nexgent/workspace` `DENIED_PATTERNS`）。
 
 ## 测试

@@ -20,7 +20,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CapabilityStore, writeCandidate } from '@nexgent/capabilities'
 import { createJob, improvementsDir, transitionJob, updateJob } from '@nexgent/evolve'
-import { resolveWorkspaceLayout } from '@nexgent/kernel'
+import { homeOf, layoutOf, useHome } from './data-layout.js'
 import { listSessionIds, readSessionRecords, scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
@@ -92,7 +92,7 @@ async function launch(home: string): Promise<{ app: ElectronApplication; page: P
 
 /** A finished job as the flow leaves it: diagnosis, a skill candidate adopted by the gate, first use. */
 async function seedAdoptedJob(root: string, sessionId: string): Promise<string> {
-  const layout = resolveWorkspaceLayout(root)
+  const layout = layoutOf(root)
   const dir = improvementsDir(layout)
   const store = new CapabilityStore(layout.capabilities)
   const base = await store.load((await store.activation()).version)
@@ -169,7 +169,7 @@ describe('desktop improvement jobs over the real SDK (scripted model)', () => {
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-improvements-e2e-')))
       const home = join(base, 'home')
-      const root = join(base, 'orders')
+      const root = useHome(join(base, 'orders'), home)
       mkdirSync(home)
       let evidence: { sessionId: string; seq: number } | undefined
       server = await scriptedModelServer({
@@ -200,8 +200,8 @@ describe('desktop improvement jobs over the real SDK (scripted model)', () => {
         await page.keyboard.press('Enter')
         await expect.poll(() => page.getByTestId('assistant-message').last().textContent(), { timeout: 20_000 }).toContain('地区表已写好。')
         await page.getByTestId('send').waitFor({ timeout: 20_000 })
-        const [sessionId] = await listSessionIds(root)
-        const user = (await readSessionRecords(root, sessionId!)).records.find(record => record.type === 'user.message')!
+        const [sessionId] = await listSessionIds(root, { home: homeOf(root) })
+        const user = (await readSessionRecords(root, sessionId!, { home: homeOf(root) })).records.find(record => record.type === 'user.message')!
         evidence = { sessionId: sessionId!, seq: user.seq }
         seeded = await seedAdoptedJob(root, sessionId!)
 

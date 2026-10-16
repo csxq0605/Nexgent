@@ -233,7 +233,7 @@ describe('H02 fresh delegation', () => {
     ['the child is not marked delegated', d => { childRecords(d, 'analyst')[0]!['member'].executionForm = 'team' }],
     ['subagent.start says fork', d => { subStart(d, 'analyst')['mode'] = 'fork' }],
     ['the material id was not passed', d => { subStart(d, 'analyst')['materialIds'] = [] }],
-    ['the first request lacks the material reference', d => { const r = firstRequest(d, 'analyst'); r['text'] = r['text'].replaceAll('.nexgent/materials/', 'materials/') }],
+    ['the first request lacks the material reference', d => { const r = firstRequest(d, 'analyst'); r['text'] = r['text'].replaceAll('materials/', 'files/') }],
     ['the first request leaks parent history', d => { firstRequest(d, 'analyst')['text'] += ' PARENT-HISTORY-MARKER' }],
     ['the fresh child got a fork.seed', d => { childRecords(d, 'analyst').splice(1, 0, { type: 'fork.seed' }) }],
   ])('fails when %s', (_label, edit) => {

@@ -340,8 +340,8 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
       const { layout, job, config } = input
       const sessionId = newSessionId()
       const state: MetaDiagnosisState = { attempts: 0 }
-      const projects = await metaProjects(layout, job)
-      const tools = metaDiagnosisTools({ layout, projects, job, sessionId, improver: input.improver, state, now })
+      const projects = await metaProjects(layout, job, input.home)
+      const tools = metaDiagnosisTools({ layout, projects, home: input.home, job, sessionId, improver: input.improver, state, now })
       await input.record({ sessions: { ...job.sessions, 'meta-diagnose': sessionId } })
       const session = await options.runner.open({
         jobId: job.id, phase: 'meta-diagnose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version, ...scopeOf(job),
@@ -386,7 +386,7 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
       const { layout, job, config } = input
       const sessionId = newSessionId()
       const state: MetaChangeState = { attempts: 0 }
-      const tools = metaProposeTools({ layout, projects: await metaProjects(layout, job), home: input.home, job, sessionId, improver: input.improver, state, now })
+      const tools = metaProposeTools({ layout, projects: await metaProjects(layout, job, input.home), home: input.home, job, sessionId, improver: input.improver, state, now })
       await input.record({ sessions: { ...job.sessions, 'meta-propose': sessionId } })
       const session = await options.runner.open({
         jobId: job.id, phase: 'meta-propose', sessionId, projectRoot: layout.root, improverVersion: input.improver.version, ...scopeOf(job),
@@ -443,7 +443,7 @@ export function createMetaStages(options: MetaStagesOptions): MetaStages {
       let at: WorkspaceLayout
       let projectId: string | undefined
       try {
-        const projects = await metaProjects(layout, job)
+        const projects = await metaProjects(layout, job, input.home)
         const choice = await chooseOriginIn(await Promise.all(projects.map(async (project: MetaProject) => ({ layout: project.layout, projectId: project.projectId, jobs: await listJobs(improvementsDir(project.layout)) }))), job)
         if (choice === undefined) return { ...nothing, outcome: 'failed', detail: 'There is no finished feedback-triggered improvement job in this meta job\'s projects to compare the two improvers on.' }
         source = choice.job

@@ -65,11 +65,13 @@ export type Config = Record<string, never>
  * directories are removed on start.
  */
 export async function apply(ctx: Context): Promise<void> {
-  const service = createTaskingService(ctx.workspace.layout, ctx.session)
+  // Step 4: root-task snapshots and checks (test-command checks come from the model's own runs).
+  const recorder = new LocalTaskRecorder(ctx.workspace.layout)
+  // The snapshot index taken at turn start is the baseline that lets the file tracker see shell-made deletions.
+  const service = createTaskingService(ctx.workspace.layout, ctx.session, { files: { baseline: () => recorder.indexedPaths() } })
   await service.cleanup()
   ctx.provide('tasking', service)
-  // Step 4: root-task snapshots and checks; test commands run through `ctx.processes` when it is there.
-  ctx.provide('taskRecorder', new LocalTaskRecorder(ctx.workspace.layout, { processes: () => ctx.get('processes') }))
+  ctx.provide('taskRecorder', recorder)
   ctx.inject(['tools'], scope => {
     const registry = scope.tools as ToolRegistry
     scope.effect(() => registry.register(presentTool(service.deliverables)), 'tools.register(present)')

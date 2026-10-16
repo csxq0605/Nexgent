@@ -10,7 +10,9 @@ import { amountForms, applyAnswer, citesAll, dateForms, hasAny, normalize, parse
 import { pilotFeedback } from '../pilot/feedback.mjs'
 import { MEMORY_POLICY, memoryInstructions } from '../pilot/memory.mjs'
 import { crc32, readDocx, readXlsx, unzip, writeDocx, writeXlsx } from '../pilot/office.mjs'
-import { buildPlan, PILOT_ID, PLAN_FILE, planSha256, planText, ROUND_1_PLAN_FILE, ROUND_1_PLAN_SHA256 } from '../pilot/plan.mjs'
+import { buildPlan, PILOT_ID, PLAN_FILE, planSha256, ROUND_1_PLAN_FILE, ROUND_1_PLAN_SHA256 } from '../pilot/plan.mjs'
+
+const ROUND_2_PLAN_SHA256 = 'fa5a9ae12668840b41bceac85934e5ed48d23f550fcbefa44dd1d1b3508a7e7a'
 import { checkJudges, orderConsistency, pairAccuracy, reliabilityVerdict } from '../pilot/reliability.mjs'
 import { comparePair, orderOutcome, pairRequest, parsePairReply, parsePointVerdicts, parsePreference, pointRequest, reviewPoints, scriptedComplete } from '../pilot/reviewer.mjs'
 import { agreementRate, componentClass, followUpsByArm, literalRate, pairedRateDiff, repeatSpread, wholePass } from '../pilot/stats.mjs'
@@ -40,9 +42,9 @@ test('generators are deterministic; round 1\'s frozen plan is untouched; this ro
   }
   assert.equal(await planSha256(ROUND_1_PLAN_FILE), ROUND_1_PLAN_SHA256, 'round 1 (step6-pilot-1) ran on this plan; it is a record and never changes')
   assert.notEqual(PLAN_FILE, ROUND_1_PLAN_FILE)
-  const committed = await readFile(PLAN_FILE, 'utf8').catch(() => null)
-  // Not frozen yet: the real pilot refuses to start until plan.mjs --write writes the file.
-  if (committed !== null) assert.equal(committed.replace(/\r\n/g, '\n'), await planText(), `${PLAN_FILE} is stale`)
+  // Round 2 (step6-pilot-2) ran on its frozen plan too (handoff step6-closeout-measure.md); the file is a
+  // record now, so later runner changes (K1 moved the project data) no longer have to match a fresh build.
+  assert.equal(await planSha256(PLAN_FILE), ROUND_2_PLAN_SHA256, 'round 2 (step6-pilot-2) ran on this plan; it is a record and never changes')
   const plan = await buildPlan()
   assert.equal(plan.pilotId, PILOT_ID)
   assert.notEqual(PILOT_ID, 'step6-pilot-1')

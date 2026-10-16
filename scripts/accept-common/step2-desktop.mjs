@@ -21,6 +21,7 @@ import { access, copyFile, mkdir, readdir, readFile, realpath, writeFile } from 
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { dataDirSync, registerHome } from './data-dir.mjs'
 import { isLoopbackUrl } from './step2-runtime.mjs'
 
 // No trailing separator: on Windows a trailing backslash escapes the closing quote of the argument.
@@ -152,7 +153,7 @@ export async function poll(read, ok, what, ms = WAIT) {
 }
 
 async function sessionRecords(root) {
-  const dir = join(root, '.nexgent', 'sessions')
+  const dir = join(dataDirSync(root), 'sessions')
   const [id] = await readdir(dir)
   return (await readFile(join(dir, id, 'session.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
 }
@@ -178,7 +179,7 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
   const obs = { consoleErrors: { first: [], second: [] } }
   const rendererDir = join(work, 'renderer')
   const home = join(work, 'home')
-  const root = join(work, 'sales')
+  const root = registerHome(join(work, 'sales'), home)
   const csv = join(work, 'orders.csv')
   const xlsx = join(work, 'regions.xlsx')
   await mkdir(home, { recursive: true })
@@ -298,7 +299,7 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
       dialogCalls: await poll(() => app.evaluate(() => globalThis.acceptDialogCalls), calls => calls.length >= 1, 'the file dialog'),
       count: await poll(() => page.getByTestId('material-item').count(), n => n === 2, 'two material items'),
       listText: await page.getByTestId('material-list').textContent(),
-      onDisk: (await readdir(join(root, '.nexgent', 'materials'))).length,
+      onDisk: (await readdir(join(dataDirSync(root), 'materials'))).length,
     }
 
     step = 'D04 send and stream'

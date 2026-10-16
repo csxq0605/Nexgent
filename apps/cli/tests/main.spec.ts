@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { NexgentError } from '@nexgent/kernel'
+import { NexgentError, resolveProjectLayout } from '@nexgent/kernel'
 import { EXIT, main, RESUME_DEFAULT_TASK } from '../src/index.js'
 import { FakeRuntime, SID, testIo, writeFileTurn } from './helpers.js'
 
@@ -56,7 +56,7 @@ describe('main', () => {
     expect(await main(['run', '--project', tmp, '--task', 't'], t.io, { credentials: noKeyProbe, loadRuntime: async () => runtime })).toBe(EXIT.ENVIRONMENT)
     expect(t.stderr.text).toContain('no model API key configured')
     expect(runtime.opened).toHaveLength(0)
-    await fs.access(path.join(tmp, '.nexgent', 'sessions'))
+    await fs.access(resolveProjectLayout(tmp).sessions)
   })
 
   it('passes --sandbox and --model through to the runtime', async () => {

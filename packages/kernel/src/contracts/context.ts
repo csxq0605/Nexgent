@@ -25,6 +25,11 @@ export interface TurnContextInput {
   readonly turn: number
   /** Absolute project root. */
   readonly projectRoot: string
+  /**
+   * Absolute directory of the project's data (`WorkspaceLayout.dataDir`);
+   * absent: `<projectRoot>/.nexgent`. K1 moves it to the user data directory.
+   */
+  readonly dataDir?: string
   /** The user's text for this turn (already recorded or about to be). */
   readonly text: string
   readonly source: Exclude<UserMessageSource, 'inject'>

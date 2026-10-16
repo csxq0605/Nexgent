@@ -8,7 +8,7 @@ import {
   type SessionRecord,
   type SessionRecordInput,
 } from '@nexgent/kernel'
-import { encodeLine, JsonlSessionStore, projectSession, scanSessionLog, type JsonlSessionStoreOptions } from '../src/index.js'
+import { encodeLine, JsonlSessionStore, projectSession, resolveLatestCheckpoint, scanSessionLog, type JsonlSessionStoreOptions } from '../src/index.js'
 import { SESSION_ID, sessionInit, tempDir, turnRecords } from './helpers.js'
 
 async function expectCode(promise: Promise<unknown>, code: NexgentErrorCode): Promise<void> {
@@ -60,7 +60,7 @@ describe('JsonlSessionStore: layout and basic writes', () => {
     expect(JSON.parse(await readFile(lock.path, 'utf8'))).toEqual(lock.info)
     expect((await readdir(dir)).sort()).toEqual(['.lock', 'session.jsonl'])
     await store.release(lock)
-    expect(await readdir(dir)).toEqual(['session.jsonl'])
+    expect(await readdir(dir)).toEqual(['session.jsonl', 'summary.json'])
 
     const text = await readFile(join(dir, 'session.jsonl'), 'utf8')
     expect(text.endsWith('\n')).toBe(true)
@@ -165,9 +165,15 @@ describe('JsonlSessionStore: checkpoints', () => {
       if (checkpoint.type !== 'checkpoint') continue
       expect(records[checkpoint.seq - 2]?.type).toBe('turn.end')
       expect(checkpoint.coversSeq).toBe(checkpoint.seq - 1)
-      expect(checkpoint.state).toEqual(projectSession(records.slice(0, checkpoint.coversSeq)))
+      // The second one is incremental: it shares the first one's messages.
+      const resolved = resolveLatestCheckpoint(records.slice(0, checkpoint.seq))
+      expect(resolved?.state).toEqual(projectSession(records.slice(0, checkpoint.coversSeq)))
     }
-    expect(await store.latestCheckpoint(SESSION_ID)).toEqual(checkpoints.at(-1))
+    expect(checkpoints[0]).not.toHaveProperty('base')
+    expect(checkpoints[1]).toMatchObject({ base: 14 })
+    const latest = await store.latestCheckpoint(SESSION_ID)
+    expect(latest).not.toHaveProperty('base')
+    expect(latest?.state).toEqual(projectSession(records.slice(0, 26)))
   })
 
   it('uses N = 50 by default', async () => {
@@ -306,19 +312,25 @@ describe('JsonlSessionStore: recovery', () => {
     }
   })
 
-  it('a corrupt middle line stops recovery there and discards everything after it', async () => {
+  it('a damaged middle line is skipped and reported; the lines after it are still read', async () => {
     const { root, store } = await setupFewSyncs({ checkpointOnRelease: false })
     const file = await writeSession(store, root, 2)
     const lines = (await readFile(file, 'utf8')).split('\n')
     lines[4] = '{"type":"tool.result", not json'
     await writeFile(file, lines.join('\n'))
-    const { records, truncation } = await store.readAll(SESSION_ID)
-    expect(records.map(record => record.seq)).toEqual([1, 2, 3, 4])
-    expect(truncation).toMatchObject({ line: 5, reason: 'not valid JSON' })
-    expect(truncation?.byteOffset).toBe(Buffer.byteLength(lines.slice(0, 4).join('\n')) + 1)
+    const { records, truncation, skipped } = await store.readAll(SESSION_ID)
+    expect(records.map(record => record.seq)).toEqual([1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13])
+    expect(truncation).toBeUndefined()
+    expect(skipped).toEqual([{ line: 5, byteOffset: Buffer.byteLength(lines.slice(0, 4).join('\n')) + 1, reason: 'not valid JSON' }])
+    expect(await readFile(file, 'utf8')).toBe(lines.join('\n')) // nothing was deleted
+    // A damaged line has no usable seq: the writer continues after the highest seq it can see.
+    const lock = await store.lock(SESSION_ID)
+    expect((await store.append(SESSION_ID, { type: 'turn.start', turn: 3 })).seq).toBe(14)
+    await store.release(lock)
+    expect((await store.readAll(SESSION_ID)).skipped).toHaveLength(1)
   })
 
-  it('a seq gap, a foreign session id or an unknown type is an invalid line', async () => {
+  it('a record with a bad seq, a foreign session id or an unknown type is skipped, not truncated', async () => {
     const { root, store } = await setupFewSyncs({ checkpointOnRelease: false })
     const file = await writeSession(store, root, 1)
     const original = await readFile(file, 'utf8')
@@ -327,16 +339,37 @@ describe('JsonlSessionStore: recovery', () => {
       [record => { record.seq = 9 }, /seq 9 where 3/],
       [record => { record.sessionId = 'other' }, /does not match/],
       [record => { record.type = 'turn.pause' }, /unknown record type/],
+      [record => { record.turn = 'x' }, /schema/],
     ]
     for (const [mutate, reason] of cases) {
       const record = JSON.parse(lines[2] as string) as Record<string, unknown>
       mutate(record)
       await writeFile(file, [...lines.slice(0, 2), JSON.stringify(record), ...lines.slice(3)].join('\n'))
-      const { records, truncation } = await store.readAll(SESSION_ID)
-      expect(records).toHaveLength(2)
-      expect(truncation?.line).toBe(3)
-      expect(truncation?.reason).toMatch(reason)
+      const { records, truncation, skipped } = await store.readAll(SESSION_ID)
+      expect(records.map(r => r.seq)).toEqual([1, 2, 4, 5, 6, 7])
+      expect(truncation).toBeUndefined()
+      expect(skipped).toHaveLength(1)
+      expect(skipped?.[0]?.line).toBe(3)
+      expect(skipped?.[0]?.reason).toMatch(reason)
     }
+  })
+
+  it('an unknown record of a newer version keeps its seq: the writer appends after it', async () => {
+    const { root, store } = await setupFewSyncs({ checkpointOnRelease: false })
+    const file = await writeSession(store, root, 1)
+    const future = JSON.stringify({ type: 'future.thing', seq: 8, ts: '2026-10-07T08:00:00.000Z', sessionId: SESSION_ID, x: 1 })
+    await writeFile(file, `${await readFile(file, 'utf8')}${future}\n`)
+    const scan = scanSessionLog(await readFile(file), SESSION_ID)
+    expect(scan.records).toHaveLength(7)
+    expect(scan.skipped).toHaveLength(1)
+    expect(scan.lastSeq).toBe(8)
+    const lock = await store.lock(SESSION_ID)
+    expect((await store.append(SESSION_ID, { type: 'turn.start', turn: 2 })).seq).toBe(9)
+    await store.release(lock)
+    const { records, skipped } = await store.readAll(SESSION_ID)
+    expect(records.map(r => r.seq).slice(-2)).toEqual([7, 9]) // 8 is the skipped record
+    expect(skipped).toHaveLength(1)
+    expect((await readFile(file, 'utf8')).includes('future.thing')).toBe(true)
   })
 
   it('the next append truncates the bad tail, records an error, and continues seq', async () => {
@@ -364,7 +397,7 @@ describe('JsonlSessionStore: recovery', () => {
     await expectCode(store.readAll(SESSION_ID), 'session/corrupt')
     await expectCode(store.lock(SESSION_ID), 'session/corrupt')
     // The failed lock attempt left no lock file behind.
-    expect(await readdir(join(store.sessionsDir, SESSION_ID))).toEqual(['session.jsonl'])
+    expect(await readdir(join(store.sessionsDir, SESSION_ID))).toEqual(['session.jsonl', 'summary.json'])
   })
 
   it('resume closes a dangling turn as interrupted only for the lock holder', async () => {
