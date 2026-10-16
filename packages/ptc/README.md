@@ -2,7 +2,7 @@
 
 程序化工具调用（PTC）的 Node 后端：模型写的 JavaScript 在一个新的、隔离的 Node 进程里运行，只能通过宿主函数（stdio 上的 NDJSON 消息）接触项目；宿主按调用方会话的沙箱检查每次访问。对模型提供 `run_code` 工具（名字、schema、`effects`、`approval` 冻结在契约 `RUN_CODE_TOOL`，`packages/kernel/src/contracts/step3-tools.ts`）；`@nexgent/workflow` 的脚本也跑在同一运行时上。权限规则见 `docs/spec/permissions.md`。
 
-归属：步骤 3 W4「工作流与代码」（`docs/plan/step-3-work-partition.md`）。运行时依赖：Node 内置模块、`@nexgent/kernel`、`@nexgent/skill`、`@nexgent/tool-spreadsheet`、`@nexgent/workspace`。DSH 的 `ptc` 包只参考了设计（宿主函数经 IPC、每次一个进程），没有复制代码。
+归属：步骤 3 W4「工作流与代码」（`docs/plan/step-3-work-partition.md`）。运行时依赖：Node 内置模块、`@nexgent/kernel`、`@nexgent/workspace`。DSH 的 `ptc` 包只参考了设计（宿主函数经 IPC、每次一个进程），没有复制代码。
 
 ## Public API
 
@@ -11,7 +11,7 @@
 | `PtcPlugin` / `apply` / `name` | 行名 `@nexgent/ptc`；注入 `workspace`、`sandbox` 后注册 `run_code`，卸载即注销 |
 | `runCodeTool(sandbox, options?)` | 工具本身 |
 | `runProgram(options)` | 跑一段程序：`code`、`cwd`、`functions`（宿主函数）、`globals`（JSON 值）、`prelude`、`timeoutMs` / `unboundedTimeout`、`signal`、`caps`、`onOutput`；返回 `ProgramResult`（`completed | failed | timeout | cancelled | crashed`、`value`、`output`、`outputTruncated`、`error`、`calls`、`durationMs`） |
-| `projectFunctions(sandbox, context)`、`sandboxFor` | 项目宿主函数：`readFile`、`writeFile`、`listDir`、`exists`、`readSpreadsheet`、`writeSpreadsheet` |
+| `projectFunctions(sandbox, context)`、`sandboxFor` | 项目宿主函数：`readFile`、`writeFile`、`listDir`、`exists` |
 | `PTC_LIMITS`、`permissionFlag`、`programArgs`、`programEnv` | 上限与启动参数 |
 | `parseProgramMessage`、`BOOTSTRAP_SOURCE`、`HOST_GONE_EXIT` | 协议与子进程引导代码 |
 | `renderProgramResult`、`RUN_CODE_DESCRIPTION` | 工具结果文本与描述 |

@@ -81,10 +81,10 @@ describe('goal', () => {
     for (const record of records) expect(validateSessionRecord(record)).toEqual([])
   })
 
-  it('provides a Current goal system section only while the goal is active', async () => {
+  it('injects the Current goal while it is active and the history does not carry it yet (K2: not a system section)', async () => {
     const provider = goalContextProvider()
     expect(provider.id).toBe('goal')
-    const input = (goal?: { status: 'active' | 'completed' }): TurnContextInput => ({
+    const input = (goal?: { status: 'active' | 'completed' }, messages: TurnContextInput['state']['messages'] = []): TurnContextInput => ({
       sessionId: SESSION_A,
       turn: 2,
       projectRoot: '/p',
@@ -95,7 +95,7 @@ describe('goal', () => {
       state: {
         sessionId: SESSION_A,
         version: 1,
-        messages: [],
+        messages,
         metadata: {
           createdAt: '2026-10-11T09:00:00.000Z', projectRoot: '/p', model: 'm', sandboxMode: 'workspace-write', grants: [], lastTurn: 1,
           totalUsage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, reasoningTokens: 0 }, lastSeq: 3,
@@ -106,7 +106,9 @@ describe('goal', () => {
     expect(await provider.beginTurn(input())).toEqual({})
     expect(await provider.beginTurn(input({ status: 'completed' }))).toEqual({})
     const active = await provider.beginTurn(input({ status: 'active' }))
-    expect(active.systemSections).toEqual([{ id: 'goal', title: 'Current goal', body: expect.stringContaining('Summarize sales') }])
-    expect(active.inject).toBeUndefined()
+    expect(active.systemSections).toBeUndefined()
+    expect(active.inject).toEqual([expect.stringMatching(/^# Current goal\nSummarize sales/)])
+    // Already in the history: not injected again.
+    expect(await provider.beginTurn(input({ status: 'active' }, [{ role: 'user', content: active.inject![0]! }]))).toEqual({})
   })
 })

@@ -43,7 +43,10 @@ describe('members through the SDK', () => {
     expect((await started.done).reason).toEqual({ kind: 'completed' })
 
     const tools = t.providers[0]!.llm.calls[0]!.request.tools?.map(tool => tool.name) ?? []
-    expect(tools).toEqual(expect.arrayContaining(['delegate', 'workflow', 'run_code', 'read_spreadsheet', 'write_spreadsheet', 'web_fetch']))
+    expect(tools).toEqual(expect.arrayContaining(['delegate', 'workflow', 'run_code', 'load_skill', 'web_fetch']))
+    // Spreadsheet tools are skill-gated (K2): not in the default tool set.
+    expect(tools).not.toContain('read_spreadsheet')
+    expect(tools).not.toContain('write_spreadsheet')
 
     const memberStart = ofType(t.eventsOf(root.sessionId), 'member.start')
     const memberEnd = ofType(t.eventsOf(root.sessionId), 'member.end')

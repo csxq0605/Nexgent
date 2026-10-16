@@ -22,7 +22,7 @@
 
 工具名：`read_file`、`write_file`、`str_replace`、`list_files`、`search_text`、`bash` / `pwsh`。全部声明
 `approval: 'never'`；按调用的升级（形态黑名单、敏感文件、始终审批表）由沙箱判定。
-`write_file` 只新建文件：路径已存在时返回 `tool/failed`，并提示改用 `str_replace`（`docs/spec/agent-hooks.md` §系统提示增量第 2 条）。
+`write_file` 新建文件，或覆盖本会话读过/写过的文件、给出 `overwrite: true` 的文件（否则 `tool/failed` 并提示先读）；`str_replace` 支持 `replace_all` 与 `edits`（全成功才写）；`read_file` 输出带行号（ADR 0017 决策 1，契约 `edit-tools.ts`）。
 
 ## Policy summary
 

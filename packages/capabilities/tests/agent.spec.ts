@@ -129,7 +129,7 @@ describe('capability components in the agent loop (scripted model)', () => {
     expect(resultA.reason).toEqual({ kind: 'completed' })
     const first = llm.requests[0]!
     expect(first.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining(['cap_probe_total', 'capability_draft', 'capability_try', 'capability_propose']))
-    expect(first.messages[0]!.content).toContain('- order-notes: How we sum orders.')
+    expect(first.messages.some(message => message.role === 'user' && message.content.includes('- order-notes: How we sum orders.'))).toBe(true)
     const results = llm.requests[1]!.messages.filter(message => message.role === 'tool')
     expect(results.map(message => [message.name, message.isError])).toEqual([
       ['cap_probe_total', false], ['cap_probe_secrets', false], ['cap_probe_peek', false], ['load_skill', false],

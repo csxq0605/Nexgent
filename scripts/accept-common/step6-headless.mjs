@@ -311,7 +311,7 @@ export async function pinnedPhase(h, pkgs, capabilities, work, log) {
     const project = await runFeedbackProject(h, pkgs, work, {
       server,
       log: line => log(`pinned: ${line}`),
-      config: { autoImprove: false },
+      config: { autoImprove: false, learning: { enabled: true } },
       createSdk: (env, home) => createStep5Sdk(pkgs, { env, home }),
     })
     const feedbackSession = project.tasks.at(-1)?.sessionId

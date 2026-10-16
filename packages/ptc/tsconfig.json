@@ -6,5 +6,5 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../kernel" }, { "path": "../skill" }, { "path": "../tool-spreadsheet" }, { "path": "../workspace" }]
+  "references": [{ "path": "../kernel" }, { "path": "../workspace" }]
 }

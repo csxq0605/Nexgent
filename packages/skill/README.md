@@ -14,7 +14,8 @@
 | `SkillPlugin` / `apply` / `name` | Cordis plugin | 行名 `@nexgent/skill`；`inject: ['workspace', 'sandbox']`，`ctx.provide('skills')`；有 `ctx.tools` 时注册 `load_skill`、`read_document`，有 `ctx.context` 时注册 `skills` 提供者，任一方卸载即注销。配置：`builtinDir?`、`userDir?`（默认 `$NEXGENT_HOME` 或 `~/.nexgent` 下的 `skills`，按 `process.env` 取；有自己 home 的宿主应显式传入） |
 | `FileSkillRegistry({ projectRoot, builtinDir?, userDir? })` | `SkillRegistry` | 扫描内置目录、用户目录（给了 `userDir` 时）与 `<project>/.nexgent/skills/*/SKILL.md`；每次调用重新扫描（轮中新增的技能下一轮可见） |
 | `parseSkillFile` / `splitFrontMatter` | — | 解析 `SKILL.md` |
-| `skillsProvider(registry)` / `renderSkillList` | `ContextProvider` | `id: 'skills'`，有技能时输出 `# Skills` 一节系统提示 |
+| `skillsProvider(registry)` / `renderSkillList` | `ContextProvider` | `id: 'skills'`，有技能时把 `# Skills` 列表作为注入消息给出（不在系统提示里；仅当与该会话上次注入的列表不同时才注入） |
+| `SkillToolGate`（`ctx.skillTools`） | 技能门控工具 | 插件 `offer(tool)` 一个门控工具；会话 `load_skill` 了在 `tools:` 里点名它的技能后，它才进入该会话的工具集；恢复会话时按 `load_skill` 结果补回 |
 | `loadSkillTool(registry)` / `readDocumentTool(sandbox)` | `Tool` | 两个工具 |
 | `extractDocument(format, bytes, options)` 及 `extractDocx` / `extractXlsx` / `readXlsx` / `extractPdf` | — | 文档转文本；失败抛 `DocumentError` |
 | `readXlsxCells(bytes, { maxCells? })` | — | `.xlsx` 的类型化单元格（数字 / 文本 / 布尔 / 错误、日期标记）与公式（普通、共享、数组、数据表），`@nexgent/tool-spreadsheet` 用它读工作簿；超过 `maxCells` 抛 `DocumentError` |

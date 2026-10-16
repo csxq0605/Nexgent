@@ -209,7 +209,7 @@ export class ReworkModel extends MetaModel {
     if (this.similarMode === undefined) return undefined
     const similar = HISTORY_TASKS.find(task => task.kind === 'regions')
     if (!first.includes(similar.ask) || first.includes(FEEDBACK_TASK.ask)) return undefined
-    const offered = tools.includes('load_skill') && JSON.stringify(body?.system ?? '').includes(CONVENTION_SKILL.name)
+    const offered = tools.includes('load_skill') && JSON.stringify((body?.messages ?? []).filter(message => message?.role === 'user').flatMap(message => (typeof message.content === 'string' ? [message.content] : (message.content ?? []).filter(block => block?.type === 'text').map(block => block.text))).filter(text => typeof text === 'string' && text.startsWith('# Skills'))).includes(CONVENTION_SKILL.name)
     const used = (body?.messages ?? []).filter(m => m.role === 'assistant').flatMap(m => blocks(m.content)).some(b => b.type === 'tool_use' && b.name === 'load_skill')
     if (!(at === 0 ? offered : used)) return undefined
     // Only the first of the candidate's replays of the similar case goes wrong: the candidate still wins
@@ -313,10 +313,10 @@ export async function sharedPhase(h, pkgs, capabilities, work, log) {
   let sdkOne
   let sdkTwo
   try {
-    const p1 = await feedbackProject(h, pkgs, join(work, 'one'), one, line => log(`shared one: ${line}`), { config: { autoImprove: false }, feedback: [] })
+    const p1 = await feedbackProject(h, pkgs, join(work, 'one'), one, line => log(`shared one: ${line}`), { config: { autoImprove: false, learning: { enabled: true } }, feedback: [] })
     servers.push(p1.server)
     const home = p1.home
-    const p2 = await feedbackProject(h, pkgs, join(work, 'two'), two, line => log(`shared two: ${line}`), { home, config: { autoImprove: false, improvement: { shareImproverEvidence: false } }, feedback: [] })
+    const p2 = await feedbackProject(h, pkgs, join(work, 'two'), two, line => log(`shared two: ${line}`), { home, config: { autoImprove: false, learning: { enabled: true }, improvement: { shareImproverEvidence: false } }, feedback: [] })
     servers.push(p2.server)
     one.phase = 'job'
     two.phase = 'job'
@@ -410,7 +410,7 @@ export async function literalPhase(h, pkgs, capabilities, work, log) {
   let server
   let sdk
   try {
-    const p = await feedbackProject(h, pkgs, work, model, line => log(`literal: ${line}`), { config: { autoImprove: false }, feedback, tasks })
+    const p = await feedbackProject(h, pkgs, work, model, line => log(`literal: ${line}`), { config: { autoImprove: false, learning: { enabled: true } }, feedback, tasks })
     server = p.server
     model.phase = 'job'
     sdk = createStep5Sdk(pkgs, { env: envOf(server, p.home), home: p.home })

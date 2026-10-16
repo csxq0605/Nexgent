@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp, STEP3_MIGRATED_TOOLS, type Context, type NexgentApp, type Plugin, type SessionRecord } from '@nexgent/kernel'
 import { SessionPlugin } from '@nexgent/session'
-import { readDocumentTool } from '@nexgent/skill'
+import { readDocumentTool, SkillPlugin } from '@nexgent/skill'
 import { scriptedProvider } from '@nexgent/test-support'
 import { WorkspacePlugin } from '@nexgent/workspace'
 import { readSpreadsheetTool, SpreadsheetPlugin, writeSpreadsheetTool } from '../src/index.js'
@@ -167,22 +167,28 @@ describe('in the agent loop (scripted model)', () => {
     app = undefined
   })
 
-  it('the plugin registers both tools; a write and a read run as tool calls and land in the session', async () => {
-    const root = await tempDir()
-    const llm = scriptedProvider([])
-    app = await createApp({
+  async function boot(root: string, llm: ReturnType<typeof scriptedProvider>): Promise<NexgentApp> {
+    return createApp({
       registry: {
         '@nexgent/workspace': WorkspacePlugin as Plugin,
         '@nexgent/session': SessionPlugin as Plugin,
         '@nexgent/llm': { name: 'scripted-llm', apply: (ctx: Context) => { ctx.provide('llm', llm) } },
+        [SkillPlugin.name]: SkillPlugin as Plugin,
         [SpreadsheetPlugin.name]: SpreadsheetPlugin as Plugin,
       },
       patches: [
         { id: 'workspace', config: { root } },
-        { insert: [{ id: 'tool-spreadsheet', name: SpreadsheetPlugin.name }] },
+        { insert: [{ id: 'skill', name: SkillPlugin.name }, { id: 'tool-spreadsheet', name: SpreadsheetPlugin.name }] },
       ],
     })
+  }
+
+  it('the tools are hidden until the spreadsheets skill is loaded; then a write and a read run as tool calls and land in the session', async () => {
+    const root = await tempDir()
+    const llm = scriptedProvider([])
+    app = await boot(root, llm)
     llm.push(
+      { toolCalls: [{ name: 'load_skill', arguments: { name: 'spreadsheets' } }] },
       { toolCalls: [{ name: 'write_spreadsheet', arguments: { path: 'purchase.xlsx', sheets: restock() } }] },
       { toolCalls: [{ name: 'read_spreadsheet', arguments: { path: 'purchase.xlsx', sheet: 'Summary' } }] },
       { content: 'Order 53 units for 142.3.' },
@@ -191,12 +197,18 @@ describe('in the agent loop (scripted model)', () => {
     const result = await agent.run({ text: 'Plan the restock.' })
     expect(result.reason).toEqual({ kind: 'completed' })
     llm.assertConsumed()
-    expect(llm.requests[0]!.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining(['read_spreadsheet', 'write_spreadsheet']))
-    const results = llm.requests[2]!.messages.filter(message => message.role === 'tool')
-    expect(results.map(message => [message.name, message.isError])).toEqual([['write_spreadsheet', false], ['read_spreadsheet', false]])
-    expect(results[1]!.content).toContain('2,Units to order,53')
+    const names = (index: number) => llm.requests[index]!.tools?.map(tool => tool.name) ?? []
+    expect(names(0)).toContain('load_skill')
+    expect(names(0)).not.toContain('read_spreadsheet')
+    expect(names(0)).not.toContain('write_spreadsheet')
+    expect(names(1)).toEqual(expect.arrayContaining(['read_spreadsheet', 'write_spreadsheet']))
+    const loaded = llm.requests[1]!.messages.find(message => message.role === 'tool')
+    expect(loaded?.content).toContain('Tools now available: read_spreadsheet, write_spreadsheet.')
+    const results = llm.requests[3]!.messages.filter(message => message.role === 'tool')
+    expect(results.map(message => [message.name, message.isError])).toEqual([['load_skill', false], ['write_spreadsheet', false], ['read_spreadsheet', false]])
+    expect(results[2]!.content).toContain('2,Units to order,53')
     const log = (await readFile(join(app.ctx.workspace.layout.sessions, result.sessionId, 'session.jsonl'), 'utf8'))
       .split('\n').filter(Boolean).map(line => JSON.parse(line) as SessionRecord)
-    expect(log.filter(record => record.type === 'tool.result')).toHaveLength(2)
+    expect(log.filter(record => record.type === 'tool.result')).toHaveLength(3)
   })
 })

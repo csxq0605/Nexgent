@@ -255,7 +255,7 @@ export const RUN_CODE_TOOL: Step3ToolSpec = {
     additionalProperties: false,
     required: ['code'],
     properties: {
-      code: { type: 'string', minLength: 1, description: 'Async JavaScript body; use the documented host functions for files and spreadsheets.' },
+      code: { type: 'string', minLength: 1, description: 'Async JavaScript body; use the documented host functions for files.' },
       timeoutMs: { type: 'integer', minimum: 1000, maximum: 300000, description: 'Default 60000.' },
     },
   },

@@ -70,6 +70,9 @@ function firstUserText(body) {
   return ''
 }
 
+/** The injected skills-list messages of a request as one string (the list is no longer part of the system prompt). @param {any} body */
+const skillsListText = body => JSON.stringify((body?.messages ?? []).filter(message => message?.role === 'user').flatMap(message => (typeof message.content === 'string' ? [message.content] : (message.content ?? []).filter(block => block?.type === 'text').map(block => block.text))).filter(text => typeof text === 'string' && text.startsWith('# Skills')))
+
 /** Every text of a request (system, messages, tool results), for marker searches. @param {any} body */
 function allText(body) {
   return JSON.stringify(body ?? {})
@@ -160,7 +163,7 @@ export class ExperimentModel {
       this.requests.push({ kind: 'other', step: at })
       return answer('Done.')
     }
-    return this.task(body, system, tools, task, at)
+    return this.task(body, system + skillsListText(body), tools, task, at)
   }
 
   /** @param {any} body */

@@ -663,7 +663,7 @@ export async function runStep6DesktopScenario(harness, work, { log = () => {} } 
       const project = await runFeedbackProject(harness, pkgs, work, {
         server,
         log: line => log(`prep: ${line}`),
-        config: { autoImprove: false },
+        config: { autoImprove: false, learning: { enabled: true } },
         createSdk: (e, h) => createStep5Sdk(pkgs, { env: e, home: h }),
       })
       obs.prepared.feedbackSession = project.tasks.at(-1)?.sessionId

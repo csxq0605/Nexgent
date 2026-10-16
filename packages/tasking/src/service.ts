@@ -13,6 +13,7 @@ import { LocalDeliverableStore } from './deliverables.js'
 import { goalContextProvider, SessionFeedbackStore, SessionGoalStore } from './feedback-goals.js'
 import { LocalMaterialStore } from './materials.js'
 import { presentTool } from './present-tool.js'
+import { todoWriteTool } from './todo-tool.js'
 import { LocalTaskRecorder } from './task-records.js'
 import { LocalTurnFileTracker, type LocalTurnFileTrackerOptions } from './turn-files.js'
 
@@ -59,7 +60,7 @@ export const name = '@nexgent/tasking'
 export type Config = Record<string, never>
 
 /**
- * Cordis plugin: provides `ctx.tasking`; registers `present` whenever
+ * Cordis plugin: provides `ctx.tasking`; registers `present` and `todo_write` whenever
  * `ctx.tools` is available and the goal provider whenever `ctx.context` is
  * (both unregistered when either side is disposed). Leftover `.tmp-*`
  * directories are removed on start.
@@ -75,6 +76,7 @@ export async function apply(ctx: Context): Promise<void> {
   ctx.inject(['tools'], scope => {
     const registry = scope.tools as ToolRegistry
     scope.effect(() => registry.register(presentTool(service.deliverables)), 'tools.register(present)')
+    scope.effect(() => registry.register(todoWriteTool()), 'tools.register(todo_write)')
   })
   ctx.inject(['context'], scope => {
     const context = (scope as unknown as { readonly context: ContextService }).context
