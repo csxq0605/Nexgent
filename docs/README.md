@@ -55,6 +55,10 @@
 | [`adr/0014-gate-deliverable-paths-similar-cases.md`](adr/0014-gate-deliverable-paths-similar-cases.md) | 已接受：门控新纪元 `adr-0014`，回放检查按运行自己交付的同类文件找成果（照反馈改名不再判退步），同类题按去掉功能词与纯数字后的内容词重合 ≥ 0.25 判定；用户 2026-10-14 选 B |
 | [`adr/0015-gate-feedback-one-time-extras.md`](adr/0015-gate-feedback-one-time-extras.md) | 已接受：门控新纪元 `adr-0015`，反馈检查不要求只针对那一次的附加要求，评审看到全部改动与删除的路径，打平时的偏好评审看到反馈原题的反馈；用户 2026-10-14 要求按系统缺陷修 |
 | [`adr/0016-gate-review-both-orders-inputs.md`](adr/0016-gate-review-both-orders-inputs.md) | 已接受：门控新纪元 `adr-0016`，偏好评审每对按两种顺序各问一次、两次一致才计票，评审看到任务的输入文件（xlsx、docx、pdf 转成文字）；用户 2026-10-14 回复“按推荐” |
+| [`adr/0017-audit-revised-rules.md`](adr/0017-audit-revised-rules.md) | 已接受：系统设计审查后修订的六条旧规定（编辑工具可覆盖、模型请求退避重试、学习默认开但先告知并封顶、数据移出项目、只读工具与委派并发、费用上限按美元）；用户 2026-10-16 按推荐 |
+| [`adr/0018-three-layer-evolution.md`](adr/0018-three-layer-evolution.md) | 已接受：三层进化（经验手册、经过验证的技能与流程库、离线进化执行框架与改进器），每个任务自评，练习题集，经验与技能用户级共享、项目可关（取代 ADR 0006 的触发与单候选作业）；用户 2026-10-16 按推荐 |
+| [`adr/0019-evaluation-epoch-practice-set.md`](adr/0019-evaluation-epoch-practice-set.md) | 已接受：评价纪元 `adr-0019`，在练习题集留出题上打分，“更省”单独记账，评分可靠性门槛，怎样才算进化（取代 ADR 0006 决策 6、0007 决策 3、0008 决策 4、0009）；用户 2026-10-16 按推荐 |
+| [`adr/0020-desktop-information-architecture.md`](adr/0020-desktop-information-architecture.md) | 已接受：桌面两栏加按需抽屉、能力与设置整页、术语改人话、生成文字用用户语言、深浅两套配色；用户 2026-10-16 按推荐 |
 | [`reference-map.md`](reference-map.md) | 步骤 0 建立，随各步更新 |
 | [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
 | [`plan/step-2-work-partition.md`](plan/step-2-work-partition.md) | 步骤 2 分工与验收设计，用户 2026-10-11 已定 |
@@ -62,6 +66,7 @@
 | [`plan/step-4-work-partition.md`](plan/step-4-work-partition.md) | 步骤 4 分工与验收设计，用户 2026-10-12 已定 |
 | [`plan/step-5-work-partition.md`](plan/step-5-work-partition.md) | 步骤 5 分工与验收设计，用户 2026-10-13 已定 |
 | [`plan/step-6-rework-partition.md`](plan/step-6-rework-partition.md) | 步骤 6 返工分工：去掉任务特化、改进器共享、门控防背答案、小试点测量（ADR 0011–0013），用户 2026-10-14 按推荐 |
+| [`plan/rework-partition.md`](plan/rework-partition.md) | 重做分工：三层进化、把进化的代价移出主路径、权限与协作翻正、界面重做（ADR 0017–0020），用户 2026-10-16 按推荐 |
 | [`spec/data-formats.md`](spec/data-formats.md) | 步骤 1–6 的文件格式；步骤 6 返工（ADR 0012、0013）补上 Nexgent 主目录（用户级配置、用户级改进器版本线与元改进队列）、`improverScope`、`shareImproverEvidence`、同类题规则与具体数值检查 |
 | [`spec/permissions.md`](spec/permissions.md) | 步骤 1–6 的权限与审批；步骤 6 返工补上主目录拒绝读写、用户级受保护字段、元诊断只读本批项目、改进器文字的具体数值检查 |
 | [`spec/agent-hooks.md`](spec/agent-hooks.md) | 步骤 2：agent loop 挂点、步骤 2 工具、系统提示增量、技能 |
