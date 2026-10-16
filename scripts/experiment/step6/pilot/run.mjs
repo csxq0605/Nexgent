@@ -50,6 +50,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { dataDirFor } from '../../../accept-common/data-dir.mjs'
 import { gate, readSpend, recordSpend, spentUsd, STEP6_CAP_USD } from '../budget.mjs'
 import { checkIsolation, PRESENT_REQUEST } from '../cases.mjs'
 import { counts } from '../feedback.mjs'
@@ -231,10 +232,12 @@ function costGates(ctx) {
  * @param {any} pkgs
  * @param {string} armRoot
  * @param {ReadonlyArray<{ at: string, comment: string }>} entries counted feedback of the family
+ * @param {string} [home] the arm's NEXGENT_HOME (its data dir holds the capabilities; without it `<armRoot>/.nexgent`)
  */
-export async function adoptMemoryPolicy(pkgs, armRoot, entries) {
+export async function adoptMemoryPolicy(pkgs, armRoot, entries, home) {
   const cap = pkgs.capabilities
-  const store = new cap.CapabilityStore(join(armRoot, '.nexgent', 'capabilities'))
+  const capDir = home === undefined ? join(armRoot, '.nexgent', 'capabilities') : join(await dataDirFor(armRoot, home), 'capabilities')
+  const store = new cap.CapabilityStore(capDir)
   const { bundle } = await store.resolveAdopted()
   const existing = bundle.manifest.components
   if (existing.some((/** @type {any} */ c) => c.kind === 'context-policy')) throw new Stop('the base arm already has a context policy; a bundle holds at most one, so the memory arm cannot add its own')
@@ -243,7 +246,7 @@ export async function adoptMemoryPolicy(pkgs, armRoot, entries) {
   const { instructions, kept, dropped } = memoryInstructions(entries)
   const policy = `${JSON.stringify({ formatVersion: 1, name: MEMORY_POLICY.name, description: MEMORY_POLICY.description, instructions }, null, 2)}\n`
   const ref = { kind: 'context-policy', name: MEMORY_POLICY.name }
-  await cap.validateComponent(ref, new Map([['policy.json', new Uint8Array(Buffer.from(policy, 'utf8'))]]), join(armRoot, '.nexgent', 'capabilities'))
+  await cap.validateComponent(ref, new Map([['policy.json', new Uint8Array(Buffer.from(policy, 'utf8'))]]), capDir)
   const stored = await store.write([...inputs, { ...ref, files: [{ path: 'policy.json', content: policy }] }])
   const adopted = await store.adopt(stored.version, { trigger: 'manual', detail: `pilot memory arm: ${kept} counted feedback entries of the family as one context policy (no diagnosis, no gate)` })
   if (adopted === null) throw new Stop('the memory arm\'s adoption lost a race on the activation chain')
@@ -282,7 +285,7 @@ async function runPilotFamily(ctx, family) {
   const sdk = backend.createSdk(home)
   let projectId = ''
   let step = 'setup'
-  const sessionCost = async (/** @type {string} */ projectRoot, /** @type {string} */ sessionId) => costOf((await ledgerOf(projectRoot)).filter(r => r.sessionId === sessionId && r.improvementId === undefined && r.trialId === undefined), estimate)
+  const sessionCost = async (/** @type {string} */ projectRoot, /** @type {string} */ sessionId, /** @type {string} */ projectHome = home) => costOf((await ledgerOf(projectRoot, projectHome)).filter(r => r.sessionId === sessionId && r.improvementId === undefined && r.trialId === undefined), estimate)
   const turn = async (/** @type {any} */ client, /** @type {string} */ pid, /** @type {string} */ sessionId, /** @type {string} */ text) => {
     let timer
     try {
@@ -321,7 +324,7 @@ async function runPilotFamily(ctx, family) {
     await spent(task.set === 'dev' ? 'dev' : 'history', task.id, usd, PILOT_RESERVE_USD.task)
     log(`${task.id}: ${result.reason}, checks ${judged.points.filter(p => p.by === 'check').map(p => `${p.id}=${p.pass === null ? '?' : p.pass ? 'ok' : 'no'}`).join(' ')}`)
   }
-  const jobs = async () => (await pkgs.evolve.listJobs(join(root, '.nexgent', 'improvements')).catch(() => []))
+  const jobs = async () => (await pkgs.evolve.listJobs(join(await dataDirFor(root, home), 'improvements')).catch(() => []))
   const awaitJob = async (/** @type {string[]} */ known, /** @type {string} */ label) => {
     const deadline = Date.now() + backend.jobTimeoutMs
     let job
@@ -345,7 +348,9 @@ async function runPilotFamily(ctx, family) {
 
     step = 'base'
     obs.arms.base = { root: join(dir, 'arms', 'base'), home: homeOf(`${family}-base`), from: 'the project after the history and dev tasks, before any feedback' }
-    await copyProject(root, obs.arms.base.root, { jobs: true })
+    await rm(obs.arms.base.home, { recursive: true, force: true })
+    await mkdir(obs.arms.base.home, { recursive: true })
+    await copyProject(root, obs.arms.base.root, { jobs: true }, { from: home, to: obs.arms.base.home })
 
     /** @type {Array<{ at: string, comment: string }>} */
     const memoryEntries = []
@@ -399,28 +404,27 @@ async function runPilotFamily(ctx, family) {
 
     step = 'parent'
     obs.arms.parent = { root: join(dir, 'arms', 'parent'), home: homeOf(`${family}-parent`), from: 'the project after the dev feedback and its improvement jobs (improver v0, epoch adr-0014)' }
-    await copyProject(root, obs.arms.parent.root, { jobs: true })
     await rm(obs.arms.parent.home, { recursive: true, force: true })
-    await cp(home, obs.arms.parent.home, { recursive: true, filter: source => !source.endsWith('.lock') })
+    // The user level (improvers...) is the family's; the project's data is copied under the arm's own id.
+    await cp(home, obs.arms.parent.home, { recursive: true, filter: source => !source.endsWith('.lock') && relative(home, source) !== 'projects' })
+    await copyProject(root, obs.arms.parent.root, { jobs: true }, { from: home, to: obs.arms.parent.home })
 
     step = 'memory'
     obs.arms.memory = { root: join(dir, 'arms', 'memory'), home: homeOf(`${family}-memory`), from: 'a copy of base with the counted feedback of the family adopted as one context policy' }
-    await copyProject(obs.arms.base.root, obs.arms.memory.root, { jobs: true })
-    obs.memory = { entries: memoryEntries.length, ...await adoptMemoryPolicy(pkgs, obs.arms.memory.root, memoryEntries) }
+    await rm(obs.arms.memory.home, { recursive: true, force: true })
+    await mkdir(obs.arms.memory.home, { recursive: true })
+    await copyProject(obs.arms.base.root, obs.arms.memory.root, { jobs: true }, { from: obs.arms.base.home, to: obs.arms.memory.home })
+    obs.memory = { entries: memoryEntries.length, ...await adoptMemoryPolicy(pkgs, obs.arms.memory.root, memoryEntries, obs.arms.memory.home) }
     log(`memory: ${obs.memory.kept} entries kept, ${obs.memory.dropped} dropped, version ${obs.memory.version}`)
-    for (const arm of ['base', 'memory']) {
-      await rm(obs.arms[arm].home, { recursive: true, force: true })
-      await mkdir(obs.arms[arm].home, { recursive: true })
-    }
 
     step = 'checks'
-    const roots = [join(root, '.nexgent'), ...PILOT_ARMS.map(arm => join(obs.arms[arm].root, '.nexgent'))]
+    const roots = [join(root, '.nexgent'), await dataDirFor(root, home), ...await Promise.all(PILOT_ARMS.flatMap(arm => [Promise.resolve(join(obs.arms[arm].root, '.nexgent')), dataDirFor(obs.arms[arm].root, obs.arms[arm].home)]))]
     const isolation = await checkIsolation(/** @type {any} */ (cases), roots)
     obs.checks.isolation = { leaks: isolation.leaks, scanned: isolation.scanned, skipped: isolation.skipped.length }
-    obs.checks.epoch = await pkgs.capabilities.projectEpoch(pkgs.kernel.resolveWorkspaceLayout(root)).catch(() => undefined)
+    obs.checks.epoch = await pkgs.capabilities.projectEpoch(pkgs.kernel.resolveProjectLayout(root, { home })).catch(() => undefined)
     for (const arm of PILOT_ARMS) {
       const source = obs.arms[arm]
-      source.capabilityVersion = await pkgs.capabilities.readActivation(join(source.root, '.nexgent', 'capabilities', 'activation')).then((/** @type {any} */ a) => a.version, () => 'unknown')
+      source.capabilityVersion = await pkgs.capabilities.readActivation(join(await dataDirFor(source.root, source.home), 'capabilities', 'activation')).then((/** @type {any} */ a) => a.version, () => 'unknown')
       source.improverVersion = await new pkgs.capabilities.ImproverStore(pkgs.capabilities.userImproversDir(arm === 'parent' ? source.home : home)).activation().then((/** @type {any} */ a) => a.version, () => 'unknown')
     }
     obs.components = await adoptedComponents(pkgs, root, obs)
@@ -437,9 +441,13 @@ async function runPilotFamily(ctx, family) {
           step = runId
           await guard(PILOT_RESERVE_USD.holdout, runId)
           const runRoot = join(dir, 'runs', slug(`${arm}-${task.id}-${repeat}`))
-          await copyProject(source.root, runRoot, { jobs: false })
+          // A run copy has its own home too: the arm's data (capabilities...) under the copy's id, nothing shared between repeats.
+          const runHome = join(dir, 'runs', `${slug(`${arm}-${task.id}-${repeat}`)}-home`)
+          await rm(runHome, { recursive: true, force: true })
+          await mkdir(runHome, { recursive: true })
+          await copyProject(source.root, runRoot, { jobs: false }, { from: source.home, to: runHome })
           await writeFiles(runRoot, task.files)
-          const client = backend.createSdk(source.home)
+          const client = backend.createSdk(runHome)
           /** @type {any} */
           let run
           try {
@@ -454,7 +462,7 @@ async function runPilotFamily(ctx, family) {
               await turn(client, pid, sessionId, PRESENT_REQUEST)
             }
             const judged = result.reason === 'error' ? null : await judgePilotCase(task, runRoot)
-            const ledger = await ledgerOf(runRoot)
+            const ledger = await ledgerOf(runRoot, runHome)
             const outcome = ledger.filter(r => r.type === 'task.outcome' && r.sessionId === sessionId).at(-1)
             if (task.family === 'docs') docs[runId] = await readFile(join(runRoot, task.outputs[0]), 'utf8').catch(() => null)
             run = {
@@ -472,7 +480,10 @@ async function runPilotFamily(ctx, family) {
           }
           await spent('holdout', runId, run.costUsd, PILOT_RESERVE_USD.holdout)
           run.outputsKept = await keepOutputs(task, runRoot, join(ctx.out, 'outputs', slug(runId)))
-          if (!ctx.keepRuns) await rm(runRoot, { recursive: true, force: true })
+          if (!ctx.keepRuns) {
+            await rm(runRoot, { recursive: true, force: true })
+            await rm(runHome, { recursive: true, force: true })
+          }
           // Review points of documents: the external reviewer scores them; the in-loop reviewer judges the same points, for agreement only.
           if (run.judged !== null && task.rubric.some(p => p.by === 'review')) {
             const doc = docs[runId]
@@ -530,7 +541,7 @@ async function runPilotFamily(ctx, family) {
  * @param {any} obs
  */
 async function adoptedComponents(pkgs, root, obs) {
-  const layout = pkgs.kernel.resolveWorkspaceLayout(root)
+  const layout = pkgs.kernel.resolveProjectLayout(root, { home: obs.home })
   /** @type {any[]} */
   const sources = []
   for (const job of obs.jobs) sources.push(...(await pkgs.capabilities.jobLiteralSources(layout, job.jobId).catch(() => undefined) ?? []))
@@ -538,7 +549,7 @@ async function adoptedComponents(pkgs, root, obs) {
   /** @type {Record<string, any>} */
   const out = {}
   for (const arm of PILOT_ARMS) {
-    const store = new pkgs.capabilities.CapabilityStore(join(obs.arms[arm].root, '.nexgent', 'capabilities'))
+    const store = new pkgs.capabilities.CapabilityStore(join(await dataDirFor(obs.arms[arm].root, obs.arms[arm].home), 'capabilities'))
     const { bundle } = await store.resolveAdopted()
     const components = []
     for (const component of bundle.manifest.components) {

@@ -16,16 +16,17 @@
 | `LocalMaterialStore` | `MaterialStore` | `add` 复制到 `materials/.tmp-<uuid>/` 并边复制边算 SHA-256、判断 UTF-8，写 `material.json` 后整体改名为 `materials/<id>/`；`list`（按 `addedAt`）、`get`、`remove`（只改 `status`，原子写，不删文件）；`absolutePath(material)` |
 | `materialAddedRecord(material)` | `HostRecordInput` | SDK 经 `agent.appendHostRecord` 写的 `material.added` |
 | `LocalDeliverableStore` | `DeliverableStore` | `present` 校验路径、在 `outputs/<id>/.tmp-<uuid>/` 写快照与 `deliverable.json` 后改名为 `v<n>/`（`v<n>` 已被占用时重取 n，进程内串行）；`list`、`get`、`diff`、`snapshotPath` |
-| `LocalTurnFileTracker` | `TurnFileTracker` | 轮前 / 轮后扫描项目（`lstat` 的类型、大小、mtime、ctime，纳秒）加 `write_file` / `str_replace` 的 `meta.path` |
+| `LocalTurnFileTracker` | `TurnFileTracker` | 轮前只记开始时刻（和可选的快照基线），不扫描；变更来自 `write_file` / `str_replace` 的 `meta.path`（`created` / `deleted` 标记），以及本轮跑过 shell 类工具（`bash` / `pwsh` / `run_code`，或观察到 `effects` 含 `execute`）时轮末一次按 `.gitignore` 的 `lstat` 遍历，取 mtime / ctime ≥ 轮起点的文件（birthtime ≥ 起点为 `added`，否则 `modified`）；shell 删除只有给了基线才报；多会话共用，别的会话的写工具路径不记到本会话 |
+| `GitignoreMatcher` `IgnoreScope` `parseGitignore` `walkProject` | — | 无依赖的 `.gitignore` 匹配（根、嵌套、`.git/info/exclude`、`!`、`**`、字符类）与共用的 `lstat` 遍历；`.git/`、`node_modules/`、根 `.nexgent/` 恒跳过 |
 | `SessionFeedbackStore` | `FeedbackStore` | 读各会话的 `feedback` 记录，按 `ts` 排序，可按会话或成果过滤 |
 | `createFeedbackEntry(input, deliverables)` | `FeedbackEntry` | 校验评分（1–5 整数）、评语、成果版本存在，生成新 id；kernel 用 `agent.run({ source: 'feedback', feedback })` 开反馈轮 |
 | `SessionGoalStore` | `GoalStore` | `set` / `update` 经宿主 sink 写 `goal.set` / `goal.update`；`get` 用 `readAll` + `projectSession`（不调 `resume`，见下） |
 | `goalContextProvider()` | `ContextProvider` | `id: 'goal'`；目标为 `active` 时给出 `# Current goal` 系统提示节，不写会话 |
 | `presentTool(deliverables)` | `Tool` | 名字、schema、effects、approval 取自 `PRESENT_TOOL`；经 `ToolContext.appendRecord` 写 `deliverable.presented`；结果文本给出 `deliverableId` 与版本号 |
 | `textHunks` `diffLines` `toHunks` `renderHunks` `splitLines` | — | 按行差异（Myers，先去掉公共首尾），统一差异块，上下文 3 行 |
-| `LocalTaskRecorder(layout, { processes?, now?, maxSnapshotBytes? })` | kernel `TaskRecorder`（步骤 4） | `begin` 拍任务快照，`end` 推出检查、运行并写检查记录；见下文“任务快照与检查” |
+| `LocalTaskRecorder(layout, { now?, maxSnapshotBytes?, maxStoreBytes?, retentionMs?, retain?, … })` | kernel `TaskRecorder`（步骤 4） | `begin` 增量拍任务快照（`snapshots/index.json`，遵守 `.gitignore`）并按 30 天 / 200 MiB 裁剪（`retain` 保留名单），`end` 推出检查并写检查记录（`test-command` 取模型自己那次运行的退出码，轮末不重跑）；见下文“任务快照与检查” |
 | `csvProblem(text)`、`TEST_COMMAND_PATTERN`、`testCommandRan(command, exitCode)` | — | 检查用的 CSV 结构判断、测试命令识别 |
-| `apply` / `name` / `TaskingPlugin` | Cordis plugin | `inject: ['workspace', 'session']`，`ctx.provide('tasking')` 与 `ctx.provide('taskRecorder')`（测试命令经 `ctx.processes` 运行）；启动时 `cleanup()`；有 `ctx.tools` 时注册 `present`，有 `ctx.context` 时注册目标提供者（任一方卸载时注销） |
+| `apply` / `name` / `TaskingPlugin` | Cordis plugin | `inject: ['workspace', 'session']`，`ctx.provide('tasking')` 与 `ctx.provide('taskRecorder')`；启动时 `cleanup()`；有 `ctx.tools` 时注册 `present`，有 `ctx.context` 时注册目标提供者（任一方卸载时注销） |
 
 ## 规则与取舍
 

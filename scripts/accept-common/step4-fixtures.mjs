@@ -27,6 +27,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { MONTHS, expectedRegionsCsv, ordersCsv } from '../real-task/step4-orders.mjs'
 import { shellCall } from './scenario-step2.mjs'
+import { registerHome } from './data-dir.mjs'
 import { runTurn } from './step2-runtime.mjs'
 import { createStep3Sdk } from './step3-runtime.mjs'
 
@@ -321,6 +322,7 @@ export async function runReplayHistory(h, pkgs, work, { quality = 'good', tasks 
   await writeReplayProject(root)
   const server = await h.scriptedModelServer({ script: await replayScript(h, tasks, quality) })
   const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
+  registerHome(root, home)
   const sdk = createStep3Sdk(pkgs, { env, home })
   const obs = { root, quality, tasks: [] }
   try {

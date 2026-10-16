@@ -41,6 +41,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expectedRegionsCsv, ordersCsv } from '../real-task/step4-orders.mjs'
+import { dataDirSync, registerHome } from './data-dir.mjs'
 import { shellCall } from './scenario-step2.mjs'
 import { runTurn } from './step2-runtime.mjs'
 import { createStep3Sdk, loadStep3Packages } from './step3-runtime.mjs'
@@ -282,7 +283,7 @@ const AFTER = { C: 'trial', D: 'trial', E: 'trial', F: 'slow' }
 
 // --- files --------------------------------------------------------------------
 
-const capDir = root => join(root, '.nexgent', 'capabilities')
+const capDir = root => join(dataDirSync(root), 'capabilities')
 const trialsDir = root => join(capDir(root), 'trials')
 
 async function writeGateProject(root) {
@@ -422,6 +423,7 @@ export async function runStep4Gate(h, work, { log = () => {} } = {}) {
   const server = await h.scriptedModelServer({ script: Array.from({ length: 3_000 }, () => body => model.respond(body)) })
   const restoreEnv = gateEnvironment(server.baseUrl)
   const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
+  registerHome(root, home)
   const approvals = []
   const responder = async (request) => {
     const allow = String(request.summary ?? '').includes(`"${GATE_PLUGIN.name}"`)
@@ -477,13 +479,13 @@ export async function runStep4Gate(h, work, { log = () => {} } = {}) {
     for (const key of ['H1', 'H2', 'H3']) await task(key, GATE_TASKS[key].ask)
 
     // H11: the project's files and sessions before the trial.
-    obs.isolation = { before: { files: await treeHashes(root, ['.nexgent']), sessions: await treeHashes(join(root, '.nexgent', 'sessions')) } }
+    obs.isolation = { before: { files: await treeHashes(root, ['.nexgent']), sessions: await treeHashes(join(dataDirSync(root), 'sessions')) } }
     // Once there is history the same app starts the gate on request (the waiting process has exited).
     step = 'trial A0'
     model.phase = 'trial'
     obs.retry = { sameApp: await tryTrial('A0') }
     obs.adopted = { line: await settle('A0', 2) }
-    obs.isolation.after = { files: await treeHashes(root, ['.nexgent']), sessions: await treeHashes(join(root, '.nexgent', 'sessions')) }
+    obs.isolation.after = { files: await treeHashes(root, ['.nexgent']), sessions: await treeHashes(join(dataDirSync(root), 'sessions')) }
     obs.adopted.status = (await show('A0')).status
 
     // H08: a worse candidate is rejected by the automatic gate; the next task uses the adopted version.

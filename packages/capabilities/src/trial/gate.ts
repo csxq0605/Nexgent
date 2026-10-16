@@ -58,7 +58,7 @@ import {
   decideTrial,
   NexgentError,
   readProjectConfig,
-  resolveWorkspaceLayout,
+  resolveProjectLayout,
   ZERO_USAGE,
   CAPABILITY_LIMITS,
   type ArmTally,
@@ -457,7 +457,7 @@ function approvalText(verdict: TrialVerdict, candidate: CandidateRecord, plan: T
 
 /** ADR 0014: the files a replay run presented (latest version of each of its deliverables, in presentation order). */
 async function deliveredFiles(root: string): Promise<string[]> {
-  const summaries = await new LocalDeliverableStore(resolveWorkspaceLayout(root)).list().catch(() => [])
+  const summaries = await new LocalDeliverableStore(resolveProjectLayout(root)).list().catch(() => [])
   return [...new Set(summaries.flatMap(summary => summary.versions.at(-1)?.files.map(file => file.path) ?? []))]
 }
 

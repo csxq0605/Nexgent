@@ -33,8 +33,8 @@ async function boot(root: string, llm: ScriptedProvider): Promise<NexgentApp> {
   return app
 }
 
-async function records(root: string, sessionId: string): Promise<SessionRecord[]> {
-  const text = await readFile(join(root, '.nexgent', 'sessions', sessionId, 'session.jsonl'), 'utf8')
+async function records(dataDir: string, sessionId: string): Promise<SessionRecord[]> {
+  const text = await readFile(join(dataDir, 'sessions', sessionId, 'session.jsonl'), 'utf8')
   return text.split('\n').filter(Boolean).map(line => JSON.parse(line) as SessionRecord)
 }
 
@@ -44,10 +44,13 @@ describe('skills and context in the agent loop (scripted model)', () => {
     const llm = scriptedProvider([])
     const { agents } = await boot(root, llm)
     const projectRoot = app!.ctx.workspace.root
+    const dataDir = app!.ctx.workspace.layout.dataDir
     await writeFile(join(projectRoot, 'AGENTS.md'), 'Answer in one sentence.')
-    const material = await addMaterial(projectRoot, 'orders.xlsx', await fixtureBytes('orders.xlsx'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    const material = await addMaterial(projectRoot, 'orders.xlsx', await fixtureBytes('orders.xlsx'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', dataDir)
+    // K1: the model is shown the absolute path in the user data directory.
+    const shown = join(dataDir, 'materials', material.id, 'orders.xlsx')
     llm.push(
-      { toolCalls: [{ name: 'load_skill', arguments: { name: 'office-documents' } }, { name: 'read_document', arguments: { path: material.path, sheet: 'Summary' } }] },
+      { toolCalls: [{ name: 'load_skill', arguments: { name: 'office-documents' } }, { name: 'read_document', arguments: { path: shown, sheet: 'Summary' } }] },
       { content: 'The total is 139.75.' },
     )
 
@@ -66,7 +69,7 @@ describe('skills and context in the agent loop (scripted model)', () => {
     expect(first!.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining(['load_skill', 'read_document']))
 
     const userTexts = first!.messages.filter(message => message.role === 'user').map(message => message.content)
-    expect(userTexts.some(text => text.includes(`- path: ${material.path}`) && text.includes('read it with read_document'))).toBe(true)
+    expect(userTexts.some(text => text.includes(`- path: ${shown}`) && text.includes('read it with read_document'))).toBe(true)
     expect(userTexts.at(-1)).toContain('What is the total?')
 
     const results = second!.messages.filter(message => message.role === 'tool')
@@ -74,8 +77,8 @@ describe('skills and context in the agent loop (scripted model)', () => {
     expect(results[0]!.content).toContain('# Skill: office-documents')
     expect(results[1]!.content).toBe('## Sheet: Summary (range B2:C2, 1 rows × 2 columns)\nTotal,139.75')
 
-    const log = await records(projectRoot, result.sessionId)
-    expect(log.find(record => record.type === 'user.message' && record.source === 'inject')).toMatchObject({ content: expect.stringContaining(material.path) })
+    const log = await records(dataDir, result.sessionId)
+    expect(log.find(record => record.type === 'user.message' && record.source === 'inject')).toMatchObject({ content: expect.stringContaining(shown) })
     expect(log.find(record => record.type === 'user.message' && record.source === 'user')).toMatchObject({ materials: [material.id] })
   })
 

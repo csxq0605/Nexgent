@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { REPO_ROOT } from './harness.mjs'
 import { BUDGET, CANCEL_MEMBERS, MATERIAL, MEMBER_ENV, PAGE, SKILLS, SCRIPTED_API_KEY, STALL_TEXT, TASKS, TOOL_FILES, WF_STALL_TEXT, buildStep3Script, readonlyPresets } from './step3-scenario.mjs'
 import { filesContaining } from './step2-headless.mjs'
+import { layoutFor, readLedgerRecordsAt, readSessionRecordsAt, scanSecrets } from './data-dir.mjs'
 import { CLI_BIN, runTurn } from './step2-runtime.mjs'
 import { TEST_WEB_ADDRESS, TEST_WEB_HOST, createStep3Sdk, loadStep3Packages } from './step3-runtime.mjs'
 
@@ -49,9 +50,9 @@ export async function repoInventory(root = REPO_ROOT) {
   return { source: 'directory walk', files: await walk(root) }
 }
 
-/** Session ids that have a session file (data-formats.md: `.nexgent/sessions/<sessionId>/session.jsonl`). */
-async function sessionFiles(root) {
-  const dir = join(root, '.nexgent', 'sessions')
+/** Session ids that have a session file (data-formats.md: `<dataDir>/sessions/<sessionId>/session.jsonl`). */
+async function sessionFiles(root, home) {
+  const dir = (await layoutFor(root, home)).sessions
   const ids = []
   for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
     if (entry.isDirectory() && (await readdir(join(dir, entry.name)).catch(() => [])).includes('session.jsonl')) ids.push(entry.name)
@@ -87,13 +88,13 @@ async function runDirect(h, pkgs, work, script, servers, log) {
   }
   obs.requests = server.requests.map(r => ({ route: r.route ?? null, outcome: r.outcome, status: r.outcome === 'completed' ? 'ok' : r.outcome }))
   obs.unconsumed = server.remainingByRoute()
-  obs.sessionFiles = await sessionFiles(root)
+  obs.sessionFiles = await sessionFiles(root, home)
   obs.sessions = {}
   for (const id of obs.sessionFiles) {
-    const read = await h.readSessionRecords(root, id)
+    const read = await readSessionRecordsAt(h, root, home, id)
     obs.sessions[id] = { records: read.records, truncated: read.truncated ?? null }
   }
-  obs.ledger = (await h.readLedgerRecords(root)).records
+  obs.ledger = (await readLedgerRecordsAt(h, root, home)).records
 
   const exportDir = join(work, 'direct-export')
   log('phase direct export')
@@ -102,7 +103,7 @@ async function runDirect(h, pkgs, work, script, servers, log) {
   const exported = {}
   for (const name of await readdir(exportDir).catch(() => [])) exported[name] = await readFile(join(exportDir, name), 'utf8')
   obs.export = { code: cliExit.code, stderr: cliExit.stderr.slice(0, 2000), files: exported }
-  obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+  obs.secretHits = await scanSecrets(filesContaining, root, home, SCRIPTED_API_KEY)
   obs.exportSecretHits = await filesContaining(exportDir, SCRIPTED_API_KEY, work)
   return obs
 }
@@ -165,11 +166,11 @@ function slimRequest(h, phase, r) {
 }
 
 /** Every session file of a project, its records and torn tail. */
-async function readSessions(h, root) {
-  const files = await sessionFiles(root)
+async function readSessions(h, root, home) {
+  const files = await sessionFiles(root, home)
   const sessions = {}
   for (const id of files) {
-    const read = await h.readSessionRecords(root, id)
+    const read = await readSessionRecordsAt(h, root, home, id)
     sessions[id] = { records: read.records, truncated: read.truncated ?? null }
   }
   return { sessionFiles: files, sessions }
@@ -243,7 +244,7 @@ async function runDelegation(h, pkgs, work, servers, log) {
     await new Promise(resolve => setTimeout(resolve, 300))
     collect('forkKill', s, { ready, streaming, stallText: STALL_TEXT, exit: { code: exit.code, signal: exit.signal }, mainAlive: h.isProcessAlive(handle.pid) })
   }
-  obs.afterKill = await readSessions(h, root)
+  obs.afterKill = await readSessions(h, root, home)
 
   // ---- resume: a fresh SDK reopens the root session and runs a plain turn ------------------------
   {
@@ -260,9 +261,9 @@ async function runDelegation(h, pkgs, work, servers, log) {
     }
     collect('resume', s)
   }
-  Object.assign(obs, await readSessions(h, root))
-  obs.ledger = (await h.readLedgerRecords(root)).records
-  obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+  Object.assign(obs, await readSessions(h, root, home))
+  obs.ledger = (await readLedgerRecordsAt(h, root, home)).records
+  obs.secretHits = await scanSecrets(filesContaining, root, home, SCRIPTED_API_KEY)
   return obs
 }
 
@@ -308,9 +309,9 @@ async function runReadonly(h, pkgs, work, servers, log, web) {
   }
   obs.requests = server.requests.map(r => slimRequest(h, 'readonly', r))
   obs.unconsumed = server.remainingByRoute()
-  Object.assign(obs, await readSessions(h, root))
-  obs.ledger = (await h.readLedgerRecords(root)).records
-  obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+  Object.assign(obs, await readSessions(h, root, home))
+  obs.ledger = (await readLedgerRecordsAt(h, root, home)).records
+  obs.secretHits = await scanSecrets(filesContaining, root, home, SCRIPTED_API_KEY)
   return obs
 }
 
@@ -356,9 +357,9 @@ async function runTools(h, pkgs, work, servers, log, web) {
     obs.files[path] = await readFile(join(root, path)).then(bytes => bytes.toString('base64'), () => null)
   }
   obs.webHits = { ...web.hits }
-  Object.assign(obs, await readSessions(h, root))
-  obs.ledger = (await h.readLedgerRecords(root)).records
-  obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+  Object.assign(obs, await readSessions(h, root, home))
+  obs.ledger = (await readLedgerRecordsAt(h, root, home)).records
+  obs.secretHits = await scanSecrets(filesContaining, root, home, SCRIPTED_API_KEY)
   return obs
 }
 
@@ -418,7 +419,7 @@ async function runWorkflowProject(h, pkgs, work, servers, log) {
     for (const pid of survivors) await h.killProcessTree(pid).catch(() => undefined)
     collect('wfKill', s, { ready, streaming, stallText: WF_STALL_TEXT, exit: { code: exit.code, signal: exit.signal }, mainAlive: h.isProcessAlive(handle.pid), descendantsBefore, survivors, settled })
   }
-  obs.afterKill = await readSessions(h, root)
+  obs.afterKill = await readSessions(h, root, home)
 
   {
     const s = await serverFor('wfResume')
@@ -433,9 +434,9 @@ async function runWorkflowProject(h, pkgs, work, servers, log) {
     }
     collect('wfResume', s)
   }
-  Object.assign(obs, await readSessions(h, root))
-  obs.ledger = (await h.readLedgerRecords(root)).records
-  obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+  Object.assign(obs, await readSessions(h, root, home))
+  obs.ledger = (await readLedgerRecordsAt(h, root, home)).records
+  obs.secretHits = await scanSecrets(filesContaining, root, home, SCRIPTED_API_KEY)
   return obs
 }
 
@@ -452,9 +453,9 @@ function projectKit(h, pkgs, work, servers, script, obs, home) {
     obs.phases[phase] = { ...(obs.phases[phase] ?? {}), ...extra, unconsumed: server.remainingByRoute() }
   }
   const finish = async () => {
-    Object.assign(obs, await readSessions(h, obs.root))
-    obs.ledger = (await h.readLedgerRecords(obs.root)).records
-    obs.secretHits = await filesContaining(join(obs.root, '.nexgent'), SCRIPTED_API_KEY, obs.root)
+    Object.assign(obs, await readSessions(h, obs.root, home))
+    obs.ledger = (await readLedgerRecordsAt(h, obs.root, home)).records
+    obs.secretHits = await scanSecrets(filesContaining, obs.root, home, SCRIPTED_API_KEY)
   }
   return { serverFor, envFor, collect, finish, sdkFor: server => createStep3Sdk(pkgs, { env: envFor(server), home }) }
 }
@@ -515,7 +516,7 @@ async function runTeamKill(h, pkgs, work, servers, log) {
     const settled = await h.waitFor(() => descendantsBefore.every(pid => !h.isProcessAlive(pid)), { timeoutMs: 5_000, label: 'driver processes gone' }).then(() => true, () => false)
     kit.collect('teamKill', s, { ready, stalled, exit: { code: exit.code, signal: exit.signal }, mainAlive: h.isProcessAlive(handle.pid), settled })
   }
-  obs.afterKill = await readSessions(h, obs.root)
+  obs.afterKill = await readSessions(h, obs.root, home)
   obs.atKill = teamState(pkgs, obs.afterKill.sessions[obs.sessionId]?.records ?? [])
   {
     const s = await kit.serverFor('teamResume')

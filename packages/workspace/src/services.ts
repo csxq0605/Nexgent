@@ -30,6 +30,8 @@ export interface WorkspaceServicesOptions {
   readonly tempBase?: string
   /** Shell tools for this platform (default `process.platform`). */
   readonly platform?: NodeJS.Platform
+  /** Nexgent home that holds the project's data (default `$NEXGENT_HOME` or `~/.nexgent`). */
+  readonly home?: string
 }
 
 /** Everything the package provides, wired together. */
@@ -49,12 +51,13 @@ export async function createWorkspaceServices(options: WorkspaceServicesOptions)
   if (options.sandboxMode !== undefined && !SANDBOX_MODES.includes(options.sandboxMode)) {
     throw new NexgentError('config/invalid', `invalid sandbox mode: ${String(options.sandboxMode)}`, { details: { field: 'sandboxMode' } })
   }
-  const workspace = await openWorkspace(options.root ?? process.cwd(), { create, ensureLayout: create })
+  const workspace = await openWorkspace(options.root ?? process.cwd(), { create, ensureLayout: create, ...(options.home === undefined ? {} : { home: options.home }) })
   const config = await loadProjectConfig(workspace.layout)
   const sandbox = await createSandbox({
     root: workspace.root,
     mode: options.sandboxMode ?? config.sandboxMode,
-    extraReadRoots: config.extraReadRoots,
+    // Material copies and deliverables stay readable after they moved out of the project (K1).
+    extraReadRoots: workspace.layout.location === 'user-data' ? [...config.extraReadRoots, workspace.layout.materials, workspace.layout.outputs] : config.extraReadRoots,
     ...(options.tempBase === undefined ? {} : { tempBase: options.tempBase }),
   })
   const redactor = new Redactor(options.secrets ?? [])

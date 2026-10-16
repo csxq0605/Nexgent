@@ -20,6 +20,7 @@ import { appendFile, mkdir, readdir, readFile, realpath, stat } from 'node:fs/pr
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
+import { dataDirSync, homeOf, registerHome } from './data-dir.mjs'
 import { DESKTOP_DIR, VITE_BIN, ensureDisplay, poll, run } from './step2-desktop.mjs'
 import { isLoopbackUrl } from './step2-runtime.mjs'
 import { COMPONENTS, UNUSED_SKILL } from './step4-fixtures.mjs'
@@ -68,7 +69,7 @@ function pluginComponent(marker) {
  * @returns `{ A, R, T, B, P }`, each `{ id, version }`.
  */
 async function seedCapabilities(cap, root, marker) {
-  const dir = join(root, '.nexgent', 'capabilities')
+  const dir = join(dataDirSync(root), 'capabilities')
   const store = new cap.CapabilityStore(dir)
   const verdict = (outcome, reason, candidate) => ({ outcome, reason, passRate: { candidate, baseline: 0.5 }, costRatio: 1, decidedByReview: false })
   const propose = async (base, component, summary) => {
@@ -147,13 +148,13 @@ const panelOf = page => page.evaluate(() => {
 /** Every session's id and first record's capabilityVersion. */
 async function sessionVersions(harness, root) {
   const out = {}
-  for (const id of await harness.listSessionIds(root)) out[id] = (await harness.readSessionRecords(root, id)).records.find(r => r.type === 'session.start')?.capabilityVersion ?? null
+  for (const id of await harness.listSessionIds(root, { home: homeOf(root) })) out[id] = (await harness.readSessionRecords(root, id, { home: homeOf(root) })).records.find(r => r.type === 'session.start')?.capabilityVersion ?? null
   return out
 }
 
 /** Decisions in `decisions/`, as written. */
 async function decisionsOf(root) {
-  const dir = join(root, '.nexgent', 'capabilities', 'decisions')
+  const dir = join(dataDirSync(root), 'capabilities', 'decisions')
   const out = []
   for (const name of await readdir(dir).catch(() => [])) out.push(JSON.parse(await readFile(join(dir, name), 'utf8')))
   return out
@@ -173,9 +174,9 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
   const obs = { consoleErrors: { first: [], second: [] } }
   const rendererDir = join(work, 'renderer')
   const home = join(work, 'home')
-  const root = join(work, 'orders')
+  const root = registerHome(join(work, 'orders'), home)
   const marker = join(work, 'plugin-ran.txt')
-  const history = async () => (await new cap.CapabilityStore(join(root, '.nexgent', 'capabilities')).history()).map(r => ({ type: r.type, trigger: r.trigger, version: r.version, revision: r.revision }))
+  const history = async () => (await new cap.CapabilityStore(join(dataDirSync(root), 'capabilities')).history()).map(r => ({ type: r.type, trigger: r.trigger, version: r.version, revision: r.revision }))
   await mkdir(home, { recursive: true })
   createRequire(join(DESKTOP_DIR, 'package.json'))('electron')
 

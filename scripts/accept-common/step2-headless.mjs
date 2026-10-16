@@ -24,6 +24,7 @@ import {
   TASKS,
   buildStep2Script,
 } from './scenario-step2.mjs'
+import { layoutFor, resolveRecorded, readLedgerRecordsAt, readSessionRecordsAt, scanSecrets, strayDataIn } from './data-dir.mjs'
 import { CLI_BIN, createStep2Sdk, loadStep2Packages, runTurn } from './step2-runtime.mjs'
 
 export const DRIVER = fileURLToPath(new URL('./step2-driver.mjs', import.meta.url))
@@ -196,9 +197,12 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
     // ---- init + materials -------------------------------------------------------------------
     let server = await open('first')
     const configFile = join(root, '.nexgent', 'config.json')
+    const layout = await layoutFor(root, home)
     obs.init = {
       configExists: (await fileSha(configFile)) !== null,
-      layout: Object.fromEntries(await Promise.all(['sessions', 'materials', 'outputs', 'ledgers'].map(async name => [name, await readdir(join(root, '.nexgent', name)).then(() => true, () => false)]))),
+      layout: Object.fromEntries(await Promise.all(['sessions', 'materials', 'outputs', 'ledgers'].map(async name => [name, await readdir(layout[name]).then(() => true, () => false)]))),
+      dataDir: layout.dataDir,
+      strayInProject: await strayDataIn(root),
       realRoot: await realpath(root),
       recent: (await sdk.call('projects.recent', {})).map(p => p.root),
     }
@@ -216,8 +220,8 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
     const [deliverable] = await sdk.call('deliverables.list', { projectId })
     obs.deliverableAfterFirst = deliverable
     const v1 = deliverable?.versions[0]
-    // data-formats.md: `.nexgent/outputs/<deliverableId>/v<n>/files/<path>`
-    const snapshot = file => join(root, '.nexgent', 'outputs', v1.deliverableId, 'v1', 'files', ...file.path.split('/'))
+    // data-formats.md: `<dataDir>/outputs/<deliverableId>/v<n>/files/<path>`
+    const snapshot = file => join(layout.outputs, v1.deliverableId, 'v1', 'files', ...file.path.split('/'))
     const v1Files = v1 === undefined ? [] : await Promise.all(v1.files.map(async file => ({ path: file.path, recorded: file.sha256, snapshot: snapshot(file), afterV1: await fileSha(snapshot(file)) })))
     await close()
 
@@ -306,11 +310,14 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
       return { server: s, handle: h.spawnNode([DRIVER, JSON.stringify(spec)], { cwd: work }) }
     }
     const resumeTurn = async (phase, text) => {
-      const openTurnBefore = openTurn((await h.readSessionRecords(root, obs.sessionId)).records)
+      const beforeRecords = (await readSessionRecordsAt(h, root, home, obs.sessionId)).records
+      const openTurnBefore = openTurn(beforeRecords)
+      // As the kill left it: recovery on resume may later close dangling calls with a synthetic result.
+      const toolResultsBefore = beforeRecords.filter(record => record.turn === openTurnBefore && record.type === 'tool.result').length
       const s = await open(phase)
       log(`phase ${phase}`)
       const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, text })
-      record(phase, s, { openTurnBefore, reason: result?.reason, error: error === undefined ? undefined : String(error), events: events.map(slimEvent) })
+      record(phase, s, { openTurnBefore, toolResultsBefore, reason: result?.reason, error: error === undefined ? undefined : String(error), events: events.map(slimEvent) })
     }
 
     // H15: kill the whole tree while the model is streaming
@@ -360,15 +367,15 @@ export async function runHeadlessScenario(h, work, { log = () => {} } = {}) {
     obs.export = { code: cliExit.code, stderr: cliExit.stderr.slice(0, 2000), files: exported }
 
     // ---- records, ledger, secret scan ---------------------------------------------------------
-    const session = await h.readSessionRecords(root, obs.sessionId)
+    const session = await readSessionRecordsAt(h, root, home, obs.sessionId)
     obs.records = session.records
     obs.recordsTruncated = session.truncated ?? null
-    obs.ledger = (await h.readLedgerRecords(root)).records
-    obs.secretHits = await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root)
+    obs.ledger = (await readLedgerRecordsAt(h, root, home)).records
+    obs.secretHits = await scanSecrets(filesContaining, root, home, SCRIPTED_API_KEY)
     obs.exportSecretHits = await filesContaining(exportDir, SCRIPTED_API_KEY, work)
     obs.materials = await Promise.all(obs.materials.map(async m => ({
       ...m,
-      copySha: await fileSha(join(root, ...m.meta.path.split('/'))),
+      copySha: await fileSha(await resolveRecorded(root, home, m.meta.path)),
       sourceShaBefore: sourceShaBefore[m.kind],
       sourceShaAfter: await fileSha(sources[m.kind]),
     })))
@@ -400,13 +407,13 @@ async function runBudgetProject(h, pkgs, script, root, home, envFor, log, server
       }
       const { sessionId } = await sdk.call('sessions.create', { projectId, title: `budget ${index + 1}` })
       const { result, error, events } = await runTurn(sdk, { projectId, sessionId, text: TASKS.budget })
-      const records = (await h.readSessionRecords(root, sessionId)).records
+      const records = (await readSessionRecordsAt(h, root, home, sessionId)).records
       out.turns.push({ sessionId, reason: result?.reason, error: error === undefined ? undefined : String(error), events: events.map(slimEvent), records })
     } finally {
       await sdk.dispose()
     }
   }
   out.requests = server.requests.map(r => r.body)
-  out.ledger = (await h.readLedgerRecords(root)).records
+  out.ledger = (await readLedgerRecordsAt(h, root, home)).records
   return out
 }

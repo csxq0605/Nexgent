@@ -42,6 +42,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { countsTowardImprovement, FEEDBACK, judgeRegionTable, MONTHS, ordersCsv, THRESHOLD } from '../real-task/step5-orders.mjs'
 import { shellCall } from './scenario-step2.mjs'
+import { dataDirSync, registerHome, scanSecrets, strayDataIn } from './data-dir.mjs'
 import { filesContaining } from './step2-headless.mjs'
 import { CLI_BIN, runTurn } from './step2-runtime.mjs'
 import { decisionsOf, trialsOf } from './step4-gate.mjs'
@@ -100,7 +101,7 @@ const deliverablesOf = async (sdk, projectId) => (await sdk.call('deliverables.l
 
 /** Per-turn snapshot and check files of the task a session ran (`snapshots/tasks|checks/<taskId>.t<n>.json`). */
 async function turnFiles(root, sessionId) {
-  const dir = join(root, '.nexgent', 'snapshots')
+  const dir = join(dataDirSync(root), 'snapshots')
   const out = { taskId: undefined, tasks: {}, checks: {}, legacy: {} }
   for (const name of await readdir(join(dir, 'tasks')).catch(() => [])) {
     let record
@@ -150,6 +151,7 @@ const envOf = (server, home) => ({ NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT
 
 /** Open the project with the SDK as shipped, run `fn(sdk, projectId)`, close. */
 async function withSdk(pkgs, root, env, fn) {
+  registerHome(root, env.NEXGENT_HOME)
   const sdk = createStep5Sdk(pkgs, { env, home: env.NEXGENT_HOME })
   try {
     const { projectId } = await sdk.call('projects.open', { root, create: true })
@@ -224,7 +226,7 @@ async function integrity(pkgs, root, home) {
   for (const decision of await decisionsOf(root)) check('decision', decision, `decision ${String(decision.id).slice(0, 8)}`, validateCapabilityFile)
   const userQueue = home === undefined ? undefined : await readJsonFile(join(home, 'improvements', 'queue.json'))
   if (userQueue !== undefined) check('userQueue', userQueue, '<home>/improvements/queue.json', validateImprovementFile)
-  return { issues, files, scopes, sessions: Object.keys(sessions).length, ledger: ledger.length, secretHits: await filesContaining(join(root, '.nexgent'), SCRIPTED_API_KEY, root) }
+  return { issues, files, scopes, sessions: Object.keys(sessions).length, ledger: ledger.length, secretHits: await scanSecrets(filesContaining, root, home, SCRIPTED_API_KEY), strayInProject: await strayDataIn(root) }
 }
 
 // ---- main --------------------------------------------------------------------------------
@@ -481,7 +483,8 @@ async function disabledPhase(h, pkgs, work, log) {
     const project = await runFeedbackProject(h, pkgs, work, {
       server,
       log: line => log(`disabled: ${line}`),
-      config: { autoImprove: false },
+      // K1: task snapshots are taken only while the project learns; automatic jobs stay off through autoImprove.
+      config: { autoImprove: false, learning: { enabled: true } },
       createSdk: (env, home) => createStep5Sdk(pkgs, { env, home }),
     })
     // Give the background count time to finish, then look.

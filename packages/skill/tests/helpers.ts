@@ -42,10 +42,10 @@ export function skillText(name: string, description = `Does ${name}.`, body = `I
   return `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`
 }
 
-/** Copy a file in as a material, the way `MaterialStore.add` lays it out. */
-export async function addMaterial(root: string, name: string, bytes: Buffer, mediaType: string): Promise<MaterialMetadata> {
+/** Copy a file in as a material, the way `MaterialStore.add` lays it out (`dataDir`: the project's data directory, K1). */
+export async function addMaterial(root: string, name: string, bytes: Buffer, mediaType: string, dataDir: string = join(root, '.nexgent')): Promise<MaterialMetadata> {
   const id = randomUUID()
-  const dir = join(root, '.nexgent', 'materials', id)
+  const dir = join(dataDir, 'materials', id)
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, name), bytes)
   const material: MaterialMetadata = {

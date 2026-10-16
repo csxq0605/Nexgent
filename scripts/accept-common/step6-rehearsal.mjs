@@ -27,6 +27,7 @@ import { cp, mkdir, readdir, readFile, realpath, stat, writeFile, mkdtemp, rm } 
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { dataDirFor } from './data-dir.mjs'
 
 const repo = fileURLToPath(new URL('../../', import.meta.url))
 const experimentDir = join(repo, 'scripts', 'experiment', 'step6')
@@ -36,6 +37,8 @@ const REPEATS = 3
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'))
 const exists = async path => stat(path).then(() => true, () => false)
 const real = async path => realpath(path).catch(() => resolve(path))
+/** The directory holding a project's data: its data dir under `home` (ADR 0017), or `<root>/.nexgent` without one. */
+const dataDirOf = async (root, home) => (home === undefined ? join(root, '.nexgent') : dataDirFor(root, home))
 
 /** The pilot's cases and the shared isolation scan (imported, not edited), as `{ allCases, checkIsolation }`. */
 async function loadCases() {
@@ -105,12 +108,14 @@ function sessionIdsIn(value, out = new Set()) {
  * @param {any} cases the runner's cases module
  * @param {string} label
  * @param {string} root a project root (or kept arm copy)
+ * @param {string} [home] the NEXGENT_HOME that holds its data (its data dir is scanned too)
  */
-async function scanRoot(cases, label, root) {
+async function scanRoot(cases, label, root, home) {
   const all = cases.allCases()
-  const whole = await cases.checkIsolation(all, [root])
+  const dataDir = await dataDirOf(root, home)
+  const whole = await cases.checkIsolation(all, home === undefined ? [root] : [root, dataDir])
   const part = async name => {
-    const dir = join(root, '.nexgent', name)
+    const dir = join(dataDir, name)
     return { dir, exists: await exists(dir), scanned: (await cases.checkIsolation(all, [dir])).scanned }
   }
   const directories = {}
@@ -126,17 +131,19 @@ async function scanRoot(cases, label, root) {
  * that session in the project's own session files.
  * @param {any} cases
  * @param {string} root
+ * @param {string} [home]
  */
-async function recomputePicks(cases, root) {
+async function recomputePicks(cases, root, home) {
   const all = cases.allCases()
   const byMessage = new Map(all.map(task => [task.message, task.id]))
-  const sessions = await readSessions(join(root, '.nexgent', 'sessions'))
+  const dataDir = await dataDirOf(root, home)
+  const sessions = await readSessions(join(dataDir, 'sessions'))
   const sessionToCase = {}
   for (const s of sessions) {
     const caseId = typeof s.firstUserMessage === 'string' ? byMessage.get(s.firstUserMessage) : undefined
     if (caseId !== undefined) sessionToCase[s.id] = caseId
   }
-  const trialsDir = join(root, '.nexgent', 'capabilities', 'trials')
+  const trialsDir = join(dataDir, 'capabilities', 'trials')
   const trialFiles = (await filesUnder(trialsDir)).filter(path => path.endsWith('.jsonl'))
   const referenced = new Set()
   let trialText = ''
@@ -165,10 +172,11 @@ async function recomputePicks(cases, root) {
  * copy without it must be clean. A scan that finds nothing by construction fails this.
  * @param {any} cases
  * @param {string} root a project root with at least one session
+ * @param {string} [home]
  */
-async function negativeControl(cases, root) {
+async function negativeControl(cases, root, home) {
   const holdout = cases.allCases().find(task => task.set === 'holdout' && task.fingerprints.length > 0)
-  const sessionsDir = join(root, '.nexgent', 'sessions')
+  const sessionsDir = join(await dataDirOf(root, home), 'sessions')
   const first = (await readdir(sessionsDir).catch(() => [])).sort()[0]
   if (holdout === undefined || first === undefined) return { planted: false, reason: holdout === undefined ? 'no holdout case with a fingerprint' : `no session under ${sessionsDir}` }
   const tmp = await mkdtemp(join(tmpdir(), 'nexgent-rehearsal-control-'))
@@ -206,12 +214,13 @@ async function negativeControl(cases, root) {
  */
 async function inspectRuns(familyDir, runs, armSessionIds, messageOf) {
   const runsDir = join(familyDir, 'runs')
-  const dirs = (await readdir(runsDir, { withFileTypes: true }).catch(() => [])).filter(e => e.isDirectory()).map(e => join(runsDir, e.name)).sort()
+  // `<run>` is the copy of the project, `<run>-home` the NEXGENT_HOME that holds its data.
+  const dirs = (await readdir(runsDir, { withFileTypes: true }).catch(() => [])).filter(e => e.isDirectory() && !e.name.endsWith('-home')).map(e => join(runsDir, e.name)).sort()
   // runId → the copy directories and sessions that claim it (session.start title + projectRoot)
   const claims = new Map()
   for (const dir of dirs) {
     const own = await real(dir)
-    for (const s of await readSessions(join(dir, '.nexgent', 'sessions'))) {
+    for (const s of await readSessions(join(await dataDirOf(dir, `${dir}-home`), 'sessions'))) {
       if (s.start === undefined || typeof s.start.projectRoot !== 'string') continue
       if ((await real(s.start.projectRoot)) !== own) continue
       const title = String(s.start.title ?? '')
@@ -302,17 +311,17 @@ export async function observeOutput(out, durationMs) {
     let controlRoot
     for (const family of families) {
       const roots = [
-        ['project', family.root],
-        ...ARMS.filter(arm => family.arms?.[arm]?.root !== undefined).map(arm => [`arm:${arm}`, family.arms[arm].root]),
-        ...ARMS.filter(arm => family.arms?.[arm]?.home !== undefined).map(arm => [`home:${arm}`, family.arms[arm].home]),
+        ['project', family.root, family.home],
+        ...ARMS.filter(arm => family.arms?.[arm]?.root !== undefined).map(arm => [`arm:${arm}`, family.arms[arm].root, family.arms[arm].home]),
+        ...ARMS.filter(arm => family.arms?.[arm]?.home !== undefined).map(arm => [`home:${arm}`, family.arms[arm].home, undefined]),
       ]
-      for (const [label, root] of roots) isolationRoots.push({ family: family.family, ...(await scanRoot(cases, `${family.family} ${label}`, root)) })
-      controlRoot ??= family.root
-      gate.push({ family: family.family, ...(await recomputePicks(cases, family.root)) })
+      for (const [label, root, home] of roots) isolationRoots.push({ family: family.family, ...(await scanRoot(cases, `${family.family} ${label}`, root, home)) })
+      controlRoot ??= { root: family.root, home: family.home }
+      gate.push({ family: family.family, ...(await recomputePicks(cases, family.root, family.home)) })
       const armSessions = {}
       for (const arm of ARMS) {
         const root = family.arms?.[arm]?.root
-        armSessions[arm] = root === undefined ? [] : (await readSessions(join(root, '.nexgent', 'sessions'))).map(s => s.id)
+        armSessions[arm] = root === undefined ? [] : (await readSessions(join(await dataDirOf(root, family.arms[arm].home), 'sessions'))).map(s => s.id)
       }
       const familyRuns = raw.runs.filter(run => run.family === family.family)
       holdoutRuns.push({ family: family.family, ...(await inspectRuns(join(out, family.family), familyRuns, armSessions, new Map(all.map(task => [task.id, task.message])))), runnerRuns: family.runs.length, stopped: family.stopped, error: family.error?.message?.split('\n')[0] })
@@ -337,7 +346,7 @@ export async function observeOutput(out, durationMs) {
       raw: { runs: raw.runs },
       homes,
       familyHomes: families.map(family => ({ family: family.family, home: family.home })),
-      isolation: { roots: isolationRoots, negativeControl: controlRoot === undefined ? { planted: false, reason: 'no family project' } : await negativeControl(cases, controlRoot) },
+      isolation: { roots: isolationRoots, negativeControl: controlRoot === undefined ? { planted: false, reason: 'no family project' } : await negativeControl(cases, controlRoot.root, controlRoot.home) },
       gate: { families: gate },
       holdout: { families: holdoutRuns },
     }

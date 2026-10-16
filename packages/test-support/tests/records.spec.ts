@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { LedgerRecord } from '@nexgent/kernel'
+import { resolveProjectLayout, type LedgerRecord } from '@nexgent/kernel'
 import {
   appendPartialLine,
   ledgerStats,
@@ -40,7 +40,7 @@ async function writeSession(lines: unknown[]): Promise<string> {
 describe('readSessionRecords', () => {
   it('reads every complete record from the spec layout', async () => {
     const path = await writeSession(sessionLines)
-    expect(path).toBe(join(root, '.nexgent', 'sessions', SID, 'session.jsonl'))
+    expect(path).toBe(join(resolveProjectLayout(root).sessions, SID, 'session.jsonl'))
     const result = await readSessionRecords(root, SID)
     expect(result.exists).toBe(true)
     expect(result.records.map((r) => r.seq)).toEqual([1, 2, 3])
@@ -90,8 +90,8 @@ describe('readLedgerRecords / ledgerStats', () => {
   ]
 
   it('reads month files in order, tolerating a truncated tail', async () => {
-    const sep = join(root, '.nexgent', 'ledgers', '2026-09')
-    const oct = join(root, '.nexgent', 'ledgers', '2026-10')
+    const sep = join(resolveProjectLayout(root).ledgers, '2026-09')
+    const oct = join(resolveProjectLayout(root).ledgers, '2026-10')
     await mkdir(sep, { recursive: true })
     await mkdir(oct, { recursive: true })
     await writeFile(join(sep, 'requests.jsonl'), `${JSON.stringify(records[0])}\n`)

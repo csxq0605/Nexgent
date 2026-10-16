@@ -31,7 +31,7 @@ import { mkdir, open, readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import {
   addUsage,
-  appendProjectGrant,
+  appendGrant,
   isNexgentError,
   nexgentHome,
   NexgentError,
@@ -63,7 +63,7 @@ import {
 } from '@nexgent/kernel'
 import { capabilitiesOf, type CapabilityService } from '@nexgent/capabilities'
 import type { ImprovementHost } from '@nexgent/evolve'
-import { projectSession, SESSION_FILE_NAME } from '@nexgent/session'
+import { projectSession, readSessionSummary, SESSION_FILE_NAME } from '@nexgent/session'
 import { createFeedbackEntry, materialAddedRecord, type LocalTaskingService } from '@nexgent/tasking'
 import {
   SDK_API_VERSION,
@@ -90,7 +90,7 @@ import * as improvements from './improvements.js'
 import * as improvers from './improvers.js'
 import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
-import { collaborationView, historyItems, memberRunView, runKey, sessionSummary, turnUsage } from './history.js'
+import { collaborationView, historyItems, memberRunView, runKey, sessionSummary, summaryOfEntry, turnUsage } from './history.js'
 import { RecentProjects } from './recent.js'
 import { acknowledgeLearning, describeApiKey, readSettings, readUserSettings, secretValues, setApiKey, updateSettings, updateUserSettings, type CredentialEnv } from './settings.js'
 
@@ -515,7 +515,7 @@ export class LocalNexgentSdk implements NexgentSdk {
         pendingApprovals: new Map(),
       }
       ctx.approvals.setResponder(this.options.approvalResponder ?? ((request, signal) => this.awaitApproval(project, request, signal)))
-      app.agents.setProjectGrantWriter(grant => appendProjectGrant(ctx.workspace.layout.configFile, grant))
+      app.agents.setProjectGrantWriter(grant => appendGrant(ctx.workspace.layout, grant))
       this.projects.set(projectId, project)
       const host = ctx.get('improve') as ImprovementHost | undefined
       if (host !== undefined) {
@@ -704,9 +704,10 @@ export class LocalNexgentSdk implements NexgentSdk {
     const summaries: SessionSummary[] = []
     for (const sessionId of await this.sessionIds(project)) {
       try {
-        const records = await this.records(project, sessionId)
-        if (isImprovementSession(records)) continue
-        summaries.push(sessionSummary(records, projectSession(records), this.isRunning(project.projectId, sessionId)))
+        // `summary.json` answers while it matches the file; otherwise this reads the file and refreshes it.
+        const entry = await readSessionSummary(project.app.ctx.workspace.layout.sessions, sessionId)
+        if (entry === undefined || entry.improvement) continue
+        summaries.push(summaryOfEntry(entry, this.isRunning(project.projectId, sessionId)))
       } catch (error) {
         if (!isNexgentError(error)) throw error
         // an unreadable session is skipped in the list; opening it reports why
@@ -1231,11 +1232,11 @@ export class LocalNexgentSdk implements NexgentSdk {
       'userSettings.update': input => updateUserSettings(this.home, input?.patch),
       // API 7 (ADR 0012): the user's improver line; a `projectId` is ignored.
       'improvers.list': async () => {
-        const { listing, changed } = await improvers.list(improvers.storeOf(this.home), await this.improverRoots())
+        const { listing, changed } = await improvers.list(improvers.storeOf(this.home), await this.improverRoots(), this.home)
         if (changed) this.emitApp({ type: 'improver.version', current: listing.current })
         return listing
       },
-      'improvers.show': async input => improvers.show(improvers.storeOf(this.home), await this.improverRoots(), input?.version),
+      'improvers.show': async input => improvers.show(improvers.storeOf(this.home), await this.improverRoots(), input?.version, this.home),
       'improvers.rollback': async input => {
         const current = await improvers.rollback(improvers.storeOf(this.home), input ?? {})
         this.emitApp({ type: 'improver.version', current })

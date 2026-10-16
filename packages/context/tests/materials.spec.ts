@@ -7,10 +7,10 @@ import { materialsProvider, planMaterialReferences, readMaterialMetadata, render
 import { tempDir, turnInput } from './helpers.js'
 
 /** Write a material the way `MaterialStore.add` lays it out. */
-async function addMaterial(root: string, name: string, content: Buffer | string, overrides: Partial<MaterialMetadata> = {}): Promise<MaterialMetadata> {
+async function addMaterial(root: string, name: string, content: Buffer | string, overrides: Partial<MaterialMetadata> = {}, dataDir = join(root, '.nexgent')): Promise<MaterialMetadata> {
   const id = randomUUID()
   const buffer = Buffer.isBuffer(content) ? content : Buffer.from(content)
-  const dir = join(root, '.nexgent', 'materials', id)
+  const dir = join(dataDir, 'materials', id)
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, name), buffer)
   const material: MaterialMetadata = {
@@ -47,6 +47,19 @@ function entries(text: string): { name: string; path?: string; content?: string 
 }
 
 describe('materials provider', () => {
+  it('shows absolute paths when the project data is in the user data directory (K1)', async () => {
+    const root = await tempDir()
+    const dataDir = await tempDir()
+    const csv = await addMaterial(root, 'orders.csv', 'id\n1\n', {}, dataDir)
+    const xlsx = await addMaterial(root, 'sales.xlsx', Buffer.from([0x50, 0x4b, 3, 4]), {}, dataDir)
+    const refs = await planMaterialReferences([csv.id, xlsx.id], root, {}, dataDir)
+    expect(refs.map(ref => ref.kind)).toEqual(['inline', 'path'])
+    expect(entries(renderMaterialReferences(refs)).map(entry => entry.path)).toEqual([
+      join(dataDir, 'materials', csv.id, 'orders.csv'),
+      join(dataDir, 'materials', xlsx.id, 'sales.xlsx'),
+    ])
+  })
+
   it('gives nothing when the message attaches no materials', async () => {
     const root = await tempDir()
     expect(await materialsProvider().beginTurn(turnInput(root))).toEqual({})
@@ -62,7 +75,7 @@ describe('materials provider', () => {
     expect(contribution.inject).toHaveLength(1)
     const text = contribution.inject![0]!
 
-    expect(text.split('\n')[0]).toContain('read-only copies under .nexgent/materials/')
+    expect(text.split('\n')[0]).toContain('read-only copies at the paths below')
     expect(entries(text)).toEqual([
       { name: 'orders.csv', path: csv.path, content: 'inlined below' },
       { name: 'log.txt', path: big.path, content: 'not inlined (too large); read it with read_file (use offset/limit for large files)' },

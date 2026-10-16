@@ -29,7 +29,7 @@ import {
   type ImprovementTurnResult,
   type TrialStarter,
 } from '@nexgent/evolve'
-import { addUsage, nexgentHome, resolveWorkspaceLayout, UNKNOWN_USAGE, ZERO_USAGE, type LedgerRecord, type LLMUsage, type TurnEndReason } from '@nexgent/kernel'
+import { addUsage, nexgentHome, resolveProjectLayout, UNKNOWN_USAGE, ZERO_USAGE, type LedgerRecord, type LLMUsage, type TurnEndReason } from '@nexgent/kernel'
 import { estimateUsd } from '@nexgent/llm'
 import { JsonlLedger } from '@nexgent/session'
 import { createSdk } from './sdk.js'
@@ -86,9 +86,9 @@ function usageSince(after: LLMUsage, before: LLMUsage): LLMUsage {
 export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunner {
   return {
     async open(request: ImprovementSessionRequest): Promise<ImprovementSession> {
-      const real = resolveWorkspaceLayout(request.projectRoot)
+      const real = resolveProjectLayout(request.projectRoot, { env: env as NodeJS.ProcessEnv })
       // A comparison arm's records go to the real project's ledger (its sessions stay in the arm's copy).
-      const ledgers = request.ledgerRoot === undefined ? real.ledgers : resolveWorkspaceLayout(request.ledgerRoot).ledgers
+      const ledgers = request.ledgerRoot === undefined ? real.ledgers : resolveProjectLayout(request.ledgerRoot, { env: env as NodeJS.ProcessEnv }).ledgers
       const propose = request.phase === 'propose'
       if (propose && request.workspaceRoot === undefined) throw new Error('a propose session needs the snapshot copy (workspaceRoot)')
       const sdk = createSdk({
@@ -158,7 +158,7 @@ export function gateTrialStarter(env: Env = process.env): TrialStarter {
 
 /** Run one job (the `improve` mode); returns the jobs this process ran. */
 export async function runImprovementProcess(root: string, jobId: string, env: Env = process.env) {
-  return runImprovementJob(resolveWorkspaceLayout(root), jobId, {
+  return runImprovementJob(resolveProjectLayout(root, { env: env as NodeJS.ProcessEnv }), jobId, {
     // ADR 0012: the user's improvers, meta queue and config, in the Nexgent home this process was given.
     home: nexgentHome(env as NodeJS.ProcessEnv),
     stages: createImprovementStages({ runner: sdkSessionRunner(env), startTrial: gateTrialStarter(env), priceUsd: estimateUsd }),

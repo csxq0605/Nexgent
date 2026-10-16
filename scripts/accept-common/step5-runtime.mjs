@@ -9,6 +9,7 @@
  */
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { dataDirSync } from './data-dir.mjs'
 import { isLoopbackUrl } from './step2-runtime.mjs'
 import { loadStep3Packages } from './step3-runtime.mjs'
 
@@ -34,8 +35,8 @@ export function createStep5Sdk(pkgs, { env, home }) {
   return pkgs.sdk.createSdk({ appVersion: 'accept-step5', env, home })
 }
 
-/** `.nexgent/improvements/` of a project root. */
-export const improvementsPath = root => join(root, '.nexgent', 'improvements')
+/** `<dataDir>/improvements/` of a project root (its home registered by `withSdk` / the fixtures). */
+export const improvementsPath = root => join(dataDirSync(root), 'improvements')
 
 /** The queue and the jobs of a project, as files say (no host). */
 export async function readImprovements(pkgs, root) {

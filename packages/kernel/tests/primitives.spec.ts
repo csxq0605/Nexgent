@@ -237,7 +237,7 @@ describe('system prompt, schema check, timeouts, history repair', () => {
     expect(section).toContain('- Write and edit file contents only with `write_file` and `str_replace`. Do not create or modify files through `bash`: ')
     expect(section).toContain('no heredocs (`cat > file <<EOF`), `echo >`, `tee`, `sed -i`, and no Python, Node or other scripts that write or rewrite a file.')
     expect(section).toContain('Use `bash` to run programs, scripts and tests')
-    expect(section).toContain('declare the files that make up the result with `present` before your final reply')
+    expect(section).toContain('Ordinary code edits need no `present`')
     const noPresent = renderSystemPrompt({ ...base, tools: ['write_file', 'str_replace'].map(tool) })
     expect(noPresent).toContain('use `str_replace`; for several changes')
     expect(noPresent).not.toContain('present')
@@ -245,10 +245,10 @@ describe('system prompt, schema check, timeouts, history repair', () => {
     const pwshOnly = renderSystemPrompt({ ...base, tools: ['str_replace', 'pwsh'].map(tool) })
     expect(pwshOnly).toContain('- Write and edit file contents only with `str_replace`. Do not create or modify files through `pwsh`: ')
     expect(renderSystemPrompt({ ...base, tools: ['bash'].map(tool) })).not.toContain('# Working with files')
-    expect(section).toContain('pass the `deliverableId` that `present` returned')
+    expect(section).toContain('passing the `deliverableId` that `present` returned')
     expect(full).not.toContain('.nexgent/materials/')
     const withMaterials = renderSystemPrompt({ ...base, tools: ['read_file'].map(tool), materials: true })
-    expect(withMaterials).toContain('# Working with files\n- Materials the user attached are under `.nexgent/materials/` and are read-only')
+    expect(withMaterials).toContain('# Working with files\n- Materials the user attached are read-only copies at the paths given with them; read them there and write your results into the project.')
   })
 
   it('says in read-only that run_code still runs, only when run_code is offered', () => {

@@ -117,15 +117,16 @@ export const JUDGES = {
     return {
       conditions: [
         [['corrupt', 'failing', 'explore', 'fixed'].every(key => runs[key]?.reason === 'completed'), `a task did not complete (${Object.entries(runs).map(([k, r]) => `${k} ${r?.reason}`).join(', ')})`],
-        [tests(runs.corrupt).length === 1 && tests(runs.corrupt)[0].passed === false, 'the table broken after its passing test has no failed test check'],
-        [signal(runs.corrupt), `the broken table counted ${JSON.stringify(runs.corrupt?.added)}, expected once (check:<taskId>:1)`],
+        // K1: checks are the model's own runs, not re-run at turn end; a table broken after its passing test is the self-evaluation's to find (G1).
+        [tests(runs.corrupt).length === 1 && tests(runs.corrupt)[0].passed === true, 'the table broken after its passing test: the recorded test check is not the passing run'],
+        [(runs.corrupt?.added ?? []).length === 0, `the broken table counted ${JSON.stringify(runs.corrupt?.added)}; with no turn-end re-run nothing failed`],
         [tests(runs.failing).length === 1 && tests(runs.failing)[0].passed === false, 'the failing test run is not a failed test check (decision B)'],
         [signal(runs.failing), `the failing test run counted ${JSON.stringify(runs.failing?.added)}, expected once (decision B)`],
         [tests(runs.explore).length === 1 && tests(runs.explore)[0].passed === true, 'beside failing exploratory commands, the passing test is not the one passing test check'],
         [(runs.explore?.added ?? []).length === 0, `failing exploratory commands counted (${JSON.stringify(runs.explore?.added)})`],
         [explored(runs.explore).length === 0 && explored(runs.failing).length === 0, `an exploratory command became a check (${[...explored(runs.explore), ...explored(runs.failing)].join('; ')})`],
-        [tests(runs.fixed).length === 1 && tests(runs.fixed)[0].passed === true && (runs.fixed?.added ?? []).length === 0, 'a test that failed and was fixed counted (the turn-end re-run decides)'],
-        [after.length === before.length + 2 && before.every(key => after.includes(key)), `the queue went from ${before.length} to ${after.length}, expected +2`],
+        [tests(runs.fixed).length === 1 && tests(runs.fixed)[0].passed === true && (runs.fixed?.added ?? []).length === 0, 'a test that failed and was fixed counted (the latest run of the command decides)'],
+        [after.length === before.length + 1 && before.every(key => after.includes(key)), `the queue went from ${before.length} to ${after.length}, expected +1`],
         [(phase.jobs ?? []).length === 0, 'a job started below the threshold'],
       ],
       evidence: 'a test passing then the file broken before present: one count; a failing test presented anyway: one count; failing exploratory commands beside a passing test: no count, not checks; a test failing then fixed: no count (re-run passes)',
@@ -420,11 +421,12 @@ export const JUDGES = {
         [(integrity.issues ?? ['not collected']).length === 0, `schema issues: ${(integrity.issues ?? ['not collected']).slice(0, 3).join('; ')}`],
         [integrity.sessions > 0 && integrity.ledger > 0 && kinds.every(kind => files[kind] > 0), `not every kind of record was checked (${JSON.stringify(files)})`],
         [(main.ledger ?? []).some(r => r.type === 'improvement.end' && r.improvementId === main.job?.jobId), 'the ledger has no improvement.end record for the job'],
-        [(integrity.secretHits ?? ['?']).length === 0, `files under .nexgent/ contain the test key (${(integrity.secretHits ?? ['not scanned']).join(', ')})`],
+        [(integrity.strayInProject ?? ['?']).length === 0, `<root>/.nexgent holds per-project data (${(integrity.strayInProject ?? ['not scanned']).join(', ')})`],
+        [(integrity.secretHits ?? ['?']).length === 0, `files under .nexgent/ or the data dir contain the test key (${(integrity.secretHits ?? ['not scanned']).join(', ')})`],
         [exported.code === 0 && (exported.files ?? []).length > 0, `nexgent export of the feedback task failed (exit ${exported.code}: ${exported.stderr})`],
         [(exported.secretHits ?? ['?']).length === 0, `export files contain the test key (${(exported.secretHits ?? ['not scanned']).join(', ')})`],
       ],
-      evidence: `${integrity.sessions} sessions, ${integrity.ledger} ledger lines and ${kinds.map(kind => `${files[kind]} ${kind}`).join(', ')} pass the schema; ${scopes.length} pinned job.json say improverScope user; the test key is in neither .nexgent/ nor the export (${(exported.files ?? []).length} files)`,
+      evidence: `${integrity.sessions} sessions, ${integrity.ledger} ledger lines and ${kinds.map(kind => `${files[kind]} ${kind}`).join(', ')} pass the schema; ${scopes.length} pinned job.json say improverScope user; the test key is in neither .nexgent/, the data dir nor the export (${(exported.files ?? []).length} files)`,
     }
   }),
 }

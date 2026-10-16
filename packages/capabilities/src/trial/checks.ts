@@ -20,7 +20,10 @@ import { spawn } from 'node:child_process'
 import { readFile, stat } from 'node:fs/promises'
 import { join, posix } from 'node:path'
 import type { TaskCheck, TaskCheckSpec } from '@nexgent/kernel'
-import { csvProblem, TEST_COMMAND_TIMEOUT_MS } from '@nexgent/tasking'
+import { csvProblem } from '@nexgent/tasking'
+
+/** Deadline of one test command in a trial copy. */
+export const TEST_COMMAND_TIMEOUT_MS = 120_000
 
 /** Environment variables a check command never sees (credentials). */
 const SECRET_ENV = /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i

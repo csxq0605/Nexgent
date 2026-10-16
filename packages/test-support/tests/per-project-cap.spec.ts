@@ -5,13 +5,13 @@
  * so the only thing the processes share is the project's ledger on disk.
  */
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { loadStep3Packages, createStep3Sdk } from '../../../scripts/accept-common/step3-runtime.mjs'
-import { scriptedModelServer, type ScriptedModelServer } from '../src/index.js'
+import { readLedgerRecords, scriptedModelServer, type ScriptedModelServer } from '../src/index.js'
 
 const driver = fileURLToPath(new URL('../../../scripts/accept-common/step3-driver.mjs', import.meta.url))
 const KEY = 'sk-per-project-cap-test-key'
@@ -41,14 +41,9 @@ async function turnInChild(spec: Record<string, unknown>): Promise<DriverLine> {
   return done
 }
 
-async function ledgerRecords(root: string): Promise<Record<string, unknown>[]> {
-  const dir = join(root, '.nexgent', 'ledgers')
-  const records: Record<string, unknown>[] = []
-  for (const month of await readdir(dir)) {
-    const text = await readFile(join(dir, month, 'requests.jsonl'), 'utf8')
-    for (const line of text.split('\n').filter(Boolean)) records.push(JSON.parse(line) as Record<string, unknown>)
-  }
-  return records
+async function ledgerRecords(root: string, home: string): Promise<Record<string, unknown>[]> {
+  // The ledger lives in the user data directory (ADR 0017), shared by the child processes through NEXGENT_HOME (the test's own home).
+  return (await readLedgerRecords(root, { home })).records as unknown as Record<string, unknown>[]
 }
 
 describe('costCaps.perProject across processes (step 4 round 1 confirmation)', () => {
@@ -98,7 +93,7 @@ describe('costCaps.perProject across processes (step 4 round 1 confirmation)', (
     expect(server.requests).toHaveLength(2)
     expect(server.remaining).toBe(1)
 
-    const records = await ledgerRecords(root)
+    const records = await ledgerRecords(root, home)
     expect(records.filter(record => record['type'] === 'llm.request.start')).toHaveLength(2)
     const outcomes = records.filter(record => record['type'] === 'task.outcome')
     expect(outcomes).toHaveLength(3)
