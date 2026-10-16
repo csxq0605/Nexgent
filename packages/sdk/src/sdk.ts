@@ -88,6 +88,7 @@ import { bootProjectApp, ROOT_SESSION_RECOVERIES, type BootOptions } from './boo
 import * as capabilities from './capabilities.js'
 import * as improvements from './improvements.js'
 import * as improvers from './improvers.js'
+import * as learning from './learning.js'
 import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
 import { collaborationView, historyItems, memberRunView, runKey, sessionSummary, summaryOfEntry, turnUsage } from './history.js'
@@ -1242,16 +1243,14 @@ export class LocalNexgentSdk implements NexgentSdk {
         this.emitApp({ type: 'improver.version', current })
         return current
       },
-      // API 8 (rework C1): contracts only; the handbook store (V1), the
-      // learning ledger view (E1) and the practice set (G1) implement them.
-      'handbook.list': async () => {
-        throw new NexgentError('internal', 'handbook.list is not available yet')
-      },
-      'handbook.show': async () => {
-        throw new NexgentError('internal', 'handbook.show is not available yet')
-      },
-      'learning.status': async () => {
-        throw new NexgentError('internal', 'learning.status is not available yet')
+      // API 8 (rework C1): the handbook and the learning view come from
+      // @nexgent/evolve's layer-1 learner (E1; the handbook store moves to V1);
+      // the practice set (G1) is still to come.
+      'handbook.list': input => learning.handbookList(this.improve(this.project(input.projectId)), input),
+      'handbook.show': input => learning.handbookShow(this.improve(this.project(input.projectId)), input.entryId),
+      'learning.status': input => {
+        const project = this.project(input.projectId)
+        return learning.learningStatus(this.improve(project), this.home, project.app.ctx.get('ledger'), this.now())
       },
       'learning.acknowledge': () => acknowledgeLearning(this.home),
       'practice.list': async () => {

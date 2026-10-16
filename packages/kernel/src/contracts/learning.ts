@@ -240,7 +240,7 @@ export interface SelfEvalCalibration {
   readonly model: string
   /** The reviewer's combined score with the same rubric and checks. */
   readonly score: number
-  /** Whether both scores fall in the same {@link scoreBand}. */
+  /** Whether both scorers lead to the same {@link selfEvalOutcome} (without a rating). */
   readonly agree: boolean
   readonly at: string
   readonly cost: LearningCost
@@ -326,14 +326,17 @@ export function scoreBand(score: number): Exclude<SelfEvalOutcome, 'unknown'> {
 /**
  * The outcome of a task (pure). The user's rating decides when present
  * (4–5 success, 3 mixed, 1–2 failure); otherwise a failed deterministic
- * check is a failure, and a combined score decides by {@link scoreBand}.
+ * check is a failure, and a score decides by {@link scoreBand}: the rubric
+ * score when given ({@link rubricScore}), else the combined score. Checks
+ * that all passed say nothing about the rubric's items, so averaging them in
+ * would let a result that misses a weighted requirement reach success.
  * Passing checks alone, without a rubric score, prove nothing: `unknown`.
  */
-export function selfEvalOutcome(input: { readonly checks: readonly Pick<TaskCheck, 'passed'>[]; readonly rubricScored: boolean; readonly score?: number; readonly rating?: number }): SelfEvalOutcome {
+export function selfEvalOutcome(input: { readonly checks: readonly Pick<TaskCheck, 'passed'>[]; readonly rubricScored: boolean; readonly score?: number; readonly rubricScore?: number; readonly rating?: number }): SelfEvalOutcome {
   if (input.rating !== undefined) return input.rating >= 4 ? 'success' : input.rating <= 2 ? 'failure' : 'mixed'
   if (input.checks.some(check => !check.passed)) return 'failure'
   if (!input.rubricScored || input.score === undefined) return 'unknown'
-  return scoreBand(input.score)
+  return scoreBand(input.rubricScore ?? input.score)
 }
 
 /** Remaining budget at or above this many per-task ceilings scores every task. */

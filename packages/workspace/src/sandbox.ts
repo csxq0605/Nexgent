@@ -48,8 +48,15 @@ export function clampTimeout(requested: number | undefined, fallback = DEFAULT_C
   return Math.min(Math.floor(requested), MAX_COMMAND_TIMEOUT_MS)
 }
 
-/** Read-and-write denied below the project root (`.nexgent/` host-only directories). */
-export const DENIED_PATTERNS: readonly string[] = ['.nexgent/sessions/**', '.nexgent/ledgers/**', '.nexgent/capabilities/**', '.nexgent/snapshots/**', '.nexgent/improvements/**', '.nexgent/improvers/**']
+/**
+ * Read-and-write denied below the project root (`.nexgent/` host-only
+ * directories). ADR 0018: the project handbook, self-evaluations and the
+ * learning queue of a project whose data is still in `.nexgent/`.
+ */
+export const DENIED_PATTERNS: readonly string[] = [
+  '.nexgent/sessions/**', '.nexgent/ledgers/**', '.nexgent/capabilities/**', '.nexgent/snapshots/**', '.nexgent/improvements/**', '.nexgent/improvers/**',
+  '.nexgent/handbook/**', '.nexgent/evaluations/**', '.nexgent/learning/**',
+]
 /** Write-denied below the project root, at any depth. */
 export const WRITE_DENIED_PATTERNS: readonly string[] = [
   '.nexgent',

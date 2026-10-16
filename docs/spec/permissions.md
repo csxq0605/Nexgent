@@ -39,7 +39,7 @@
 
 | 子目录 | 工具读 | 工具写 | 说明 |
 | --- | --- | --- | --- |
-| `sessions/`、`ledgers/`、`capabilities/`、`snapshots/`、`improvements/`、`improvers/` | 拒绝 | 拒绝 | 只有宿主写；模型不能改自己的历史、账本、能力版本、任务快照、改进作业与改进器（`improvers/` 为步骤 6 新增）。草稿组件经 `capability_draft` 由宿主代写（步骤 4）；改进会话只经只读的 `improve_*` 工具读会话与账本（步骤 5）；元改进会话只经 `improve_read_improver` 读改进器、经 `improve_propose_change` 交改动，由宿主校验后代写（步骤 6） |
+| `sessions/`、`ledgers/`、`capabilities/`、`snapshots/`、`improvements/`、`improvers/`、`handbook/`、`evaluations/`、`learning/` | 拒绝 | 拒绝 | 只有宿主写；模型不能改自己的历史、账本、能力版本、任务快照、改进作业与改进器（`improvers/` 为步骤 6 新增）；`handbook/`、`evaluations/`、`learning/` 是尚未迁移的项目的项目级手册、自评与学习队列（重做 E1）。草稿组件经 `capability_draft` 由宿主代写（步骤 4）；改进会话只经只读的 `improve_*` 工具读会话与账本（步骤 5）；元改进会话只经 `improve_read_improver` 读改进器、经 `improve_propose_change` 交改动，由宿主校验后代写（步骤 6） |
 | `materials/` | 允许 | 拒绝 | 用户提供的资料，由宿主（`@nexgent/tasking`）复制写入；模型只读，原文件与副本都不被模型修改 |
 | `outputs/` | 允许 | 拒绝 | 成果快照，只由宿主（`@nexgent/tasking`）在 `present` 时写；模型不能改任何版本的快照（步骤 2 起，步骤 1 曾允许写）。模型把成果写在项目里，再用 `present` 交付 |
 | `skills/` | 允许 | 拒绝 | 项目技能，由用户维护（步骤 2）；`load_skill` 经宿主读取 |

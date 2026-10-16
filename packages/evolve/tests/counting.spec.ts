@@ -3,9 +3,14 @@ import { runImprovementJob, ImprovementHost, countsTowardImprovement, readQueue,
 import { feedback, project, stagesTo } from './helpers.js'
 import { signalKey, type WorkspaceLayout } from '@nexgent/kernel'
 
-/** A host whose jobs run in this process with the given stages. */
+/**
+ * A host whose jobs run in this process with the given stages. These tests
+ * cover the retired counting path (ADR 0018), so every host here opts in
+ * with `legacyCounting`.
+ */
 function inProcess(layout: WorkspaceLayout, stages: ImprovementStages = stagesTo('adopted'), extra: ImprovementHostConfig = {}): ImprovementHost {
   return new ImprovementHost(layout, {
+    legacyCounting: true,
     ...extra,
     launch: (target, jobId): StartedJob => ({ jobId, pid: process.pid, exited: runImprovementJob(target, jobId, { stages }).then(() => 0) }),
   })
@@ -69,7 +74,7 @@ describe('counting and the feedback trigger', () => {
     const layout = await project()
     const sessionId = 'session-a'
     const entries = [feedback({ sessionId }), feedback({ sessionId, rating: 5 }), feedback({ sessionId })]
-    const host = new ImprovementHost(layout, {}, () => ({ list: async filter => entries.filter(entry => filter?.sessionId === undefined || entry.sessionId === filter.sessionId) }))
+    const host = new ImprovementHost(layout, { legacyCounting: true }, () => ({ list: async filter => entries.filter(entry => filter?.sessionId === undefined || entry.sessionId === filter.sessionId) }))
     await host.start()
     expect((await host.syncFeedback(sessionId)).added).toHaveLength(2)
     expect((await host.syncFeedback(sessionId)).added).toHaveLength(0)
@@ -88,7 +93,7 @@ describe('counting and the feedback trigger', () => {
 
   it('without an entry or launcher counted items wait instead of starting a job', async () => {
     const layout = await project()
-    const host = new ImprovementHost(layout)
+    const host = new ImprovementHost(layout, { legacyCounting: true })
     await host.start()
     const result = await host.noteFeedback([feedback(), feedback(), feedback()])
     expect(result.started).toBeUndefined()
@@ -194,7 +199,7 @@ describe('the feedback counter provider', () => {
     const { feedbackCounter } = await import('../src/index.js')
     const layout = await project(false)
     const entry = feedback({ sessionId: 's1' })
-    const host = new ImprovementHost(layout, {}, () => ({ list: async () => [entry] }))
+    const host = new ImprovementHost(layout, { legacyCounting: true }, () => ({ list: async () => [entry] }))
     await host.start()
     const contribution = await feedbackCounter(host).beginTurn!({ sessionId: 's1' } as Parameters<NonNullable<ReturnType<typeof feedbackCounter>['beginTurn']>>[0])
     expect(contribution).toEqual({})

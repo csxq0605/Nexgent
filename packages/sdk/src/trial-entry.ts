@@ -30,6 +30,7 @@ import {
   decisionLedgerRecord,
   processReplayRunner,
   readCandidate,
+  rejectsThinkingOff,
   REPLAY_RESULT_PREFIX,
   runGate,
   type GateResult,
@@ -329,20 +330,27 @@ export function llmReviewer(options: { readonly ledger: Ledger; readonly home: s
     })
     let text = ''
     let failure: string | undefined
-    for await (const event of provider.complete({
-      requestId: randomUUID(),
-      model: settings.model,
-      thinking: settings.thinking,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      signal,
-    }, { purpose: 'auxiliary' })) {
-      if (event.type === 'text.delta') text += event.text
-      else if (event.type === 'usage') usage = event.usage
-      else if (event.type === 'error') failure = `${event.error.code}: ${event.error.message}`
+    const send = async (thinking: typeof settings.thinking) => {
+      text = ''
+      failure = undefined
+      for await (const event of provider.complete({
+        requestId: randomUUID(),
+        model: settings.model,
+        thinking,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        signal,
+      }, { purpose: 'auxiliary' })) {
+        if (event.type === 'text.delta') text += event.text
+        else if (event.type === 'usage') usage = event.usage
+        else if (event.type === 'error') failure = `${event.error.code}: ${event.error.message}`
+      }
     }
+    await send(settings.thinking)
+    // A reviewer model without a no-reasoning mode refuses `thinking: off` before any work: ask again with reasoning on.
+    if (settings.thinking === 'off' && rejectsThinkingOff(failure)) await send('on')
     return { text, usage, failure, estimatedUsd: estimateUsd(settings.model, usage) }
   }
   const taskText = (messages: readonly { readonly text: string }[]) => messages.map((message, index) => `Message ${index + 1}:\n${message.text}`).join('\n\n')
