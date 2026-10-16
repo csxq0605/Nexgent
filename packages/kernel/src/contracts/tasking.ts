@@ -13,6 +13,7 @@
  * files and records written on Windows and Linux compare equal.
  */
 import type { SessionRecord, HostRecordInput } from './session.js'
+import type { ToolEffect } from './tools.js'
 
 // ---------------------------------------------------------------------------
 // Materials
@@ -272,6 +273,8 @@ export interface ToolCallObservation {
   readonly isError: boolean
   /** The tool's `meta` (file tools report the paths they touched). */
   readonly meta?: unknown
+  /** The tool's declared effects; `execute` (a shell or code runner) makes the tracker look for changes it did not report (K1). */
+  readonly effects?: readonly ToolEffect[]
 }
 
 /**

@@ -11,7 +11,7 @@ import { access, readFile, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import { listCandidates } from '@nexgent/capabilities'
 import { createJob, improvementsDir, readJob, transitionJob, updateJob } from '@nexgent/evolve'
-import { IMPROVEMENT_DIAGNOSIS_TOOLS, resolveWorkspaceLayout, type SessionRecord } from '@nexgent/kernel'
+import { IMPROVEMENT_DIAGNOSIS_TOOLS, resolveProjectLayout, type SessionRecord } from '@nexgent/kernel'
 import { JsonlLedger } from '@nexgent/session'
 import { readLedgerRecords, readSessionRecords, scriptedModelServer } from '@nexgent/test-support'
 import { describe, expect, it } from 'vitest'
@@ -103,7 +103,7 @@ describe('improvement jobs through the SDK', () => {
   it('reports a job another process changes; refuses run when the budget window is spent', async () => {
     const t = await testSdk([])
     const { root, projectId } = await openProject(t)
-    const dir = improvementsDir(resolveWorkspaceLayout(root))
+    const dir = improvementsDir(resolveProjectLayout(root, { home: t.home }))
     const job = await createJob(dir, { trigger: 'explicit', items: [], request: {} })
     await until(() => jobEvents(t).some(event => event.job.id === job.id))
     await transitionJob(dir, job.id, 'diagnosing', { expect: ['queued'] })
@@ -121,7 +121,7 @@ describe('improvement jobs through the SDK', () => {
   it('show: the diagnosis, the candidate and an estimate from the job\'s ledger requests', async () => {
     const t = await testSdk([])
     const { root, projectId } = await openProject(t)
-    const layout = resolveWorkspaceLayout(root)
+    const layout = resolveProjectLayout(root, { home: t.home })
     const dir = improvementsDir(layout)
     const candidate = await propose(root, [skill('region-table')])
     const job = await createJob(dir, { trigger: 'explicit', items: [], request: {} })
@@ -145,7 +145,7 @@ describe('the improve entry over the SDK (scripted model server)', () => {
     const { root, projectId } = await openProject(t)
     const { sessionId } = await t.sdk.call('sessions.create', { projectId })
     await (await t.sdk.startTurn({ projectId, sessionId, text: 'summarize the orders' })).done
-    const user = (await readSessionRecords(root, sessionId)).records.find(record => record.type === 'user.message')!
+    const user = (await readSessionRecords(root, sessionId, { home: t.home })).records.find(record => record.type === 'user.message')!
     const report = {
       failureTypes: [{ category: 'system-design', label: 'requirement changed after delivery', evidence: [{ sessionId, seq: user.seq }] }],
       involved: { members: ['root'], tools: [], skills: [], components: [] },
@@ -171,10 +171,10 @@ describe('the improve entry over the SDK (scripted model server)', () => {
       expect(detail.diagnosis).toMatchObject({ proposalKind: 'none', hypothesis: report.hypothesis })
       expect(detail.view).toMatchObject({ status: 'no-proposal', tokens: { diagnose: 2400 } })
       expect(detail.view.estimatedUsd).toBeGreaterThan(0)
-      const diagnose = (await readJob(improvementsDir(resolveWorkspaceLayout(root)), job.id)).sessions!.diagnose!
-      const records = (await readSessionRecords(root, diagnose)).records as SessionRecord[]
+      const diagnose = (await readJob(improvementsDir(resolveProjectLayout(root, { home: t.home })), job.id)).sessions!.diagnose!
+      const records = (await readSessionRecords(root, diagnose, { home: t.home })).records as SessionRecord[]
       expect(records[0]).toMatchObject({ type: 'session.start', purpose: 'improvement', improvement: { jobId: job.id, phase: 'diagnose' } })
-      const requests = (await readLedgerRecords(root)).records.filter(record => record.type === 'llm.request.end' && record.sessionId === diagnose)
+      const requests = (await readLedgerRecords(root, { home: t.home })).records.filter(record => record.type === 'llm.request.end' && record.sessionId === diagnose)
       expect(requests).toHaveLength(2)
       for (const record of requests) expect(record).toMatchObject({ improvementId: job.id, improvementPhase: 'diagnose' })
 
@@ -183,7 +183,7 @@ describe('the improve entry over the SDK (scripted model server)', () => {
       expect((await t.sdk.call('sessions.view', { projectId, sessionId: diagnose })).items.length).toBeGreaterThan(0)
       await expect(t.sdk.call('sessions.open', { projectId, sessionId: diagnose })).rejects.toMatchObject({ code: 'tool/denied' })
       await until(() => jobEvents(t).some(event => event.job.status === 'no-proposal'))
-      expect(JSON.parse(await readFile(nodePath.join(improvementsDir(resolveWorkspaceLayout(root)), job.id, 'diagnosis.json'), 'utf8'))).toMatchObject({ proposalKind: 'none' })
+      expect(JSON.parse(await readFile(nodePath.join(improvementsDir(resolveProjectLayout(root, { home: t.home })), job.id, 'diagnosis.json'), 'utf8'))).toMatchObject({ proposalKind: 'none' })
     } finally {
       await server.close()
     }
@@ -201,7 +201,7 @@ describe('the improve entry over the SDK (scripted model server)', () => {
     const { root, projectId } = await openProject(t)
     const { sessionId } = await t.sdk.call('sessions.create', { projectId })
     await (await t.sdk.startTurn({ projectId, sessionId, text: 'write the region table to regions.md and check it' })).done
-    const user = (await readSessionRecords(root, sessionId)).records.find(record => record.type === 'user.message')!
+    const user = (await readSessionRecords(root, sessionId, { home: t.home })).records.find(record => record.type === 'user.message')!
     const skillFile = '---\nname: region-table-convention\ndescription: Region tables carry the average order value.\n---\n\nAdd avg_order_value.\n'
     const ref = { kind: 'skill', name: 'region-table-convention' }
     const server = await scriptedModelServer({
@@ -227,26 +227,26 @@ describe('the improve entry over the SDK (scripted model server)', () => {
       const [ran] = (await runImprovementProcess(root, job.id, env)).jobs
       server.assertConsumed()
       if (ran!.status !== 'waiting-history') {
-        const diag = (await readSessionRecords(root, ran!.sessions!.diagnose!)).records.filter(record => record.type === 'tool.result').map(record => (record as { content: string }).content.slice(0, 600))
+        const diag = (await readSessionRecords(root, ran!.sessions!.diagnose!, { home: t.home })).records.filter(record => record.type === 'tool.result').map(record => (record as { content: string }).content.slice(0, 600))
         throw new Error(`${ran!.detail}\n${diag.join('\n---\n')}`)
       }
       expect(ran!.candidateId).toEqual(expect.any(String))
       // The copy took the write; the real project is unchanged.
       expect(await readFile(nodePath.join(root, 'regions.md'), 'utf8')).toBe('| region | revenue |\n')
-      const [candidate] = await listCandidates(resolveWorkspaceLayout(root).capabilities)
+      const [candidate] = await listCandidates(resolveProjectLayout(root, { home: t.home }).capabilities)
       expect(candidate).toMatchObject({ id: ran!.candidateId, origin: 'improvement', jobId: job.id, components: [expect.objectContaining(ref)] })
       // The propose session and its requests live in the real project, hidden from the list.
       const propose = ran!.sessions!.propose!
-      const records = (await readSessionRecords(root, propose)).records as SessionRecord[]
+      const records = (await readSessionRecords(root, propose, { home: t.home })).records as SessionRecord[]
       expect(records[0]).toMatchObject({ type: 'session.start', purpose: 'improvement', improvement: { jobId: job.id, phase: 'propose' } })
-      const requests = (await readLedgerRecords(root)).records.filter(record => record.type === 'llm.request.end' && record.sessionId === propose)
+      const requests = (await readLedgerRecords(root, { home: t.home })).records.filter(record => record.type === 'llm.request.end' && record.sessionId === propose)
       expect(requests).toHaveLength(6)
       for (const record of requests) expect(record).toMatchObject({ improvementId: job.id, improvementPhase: 'propose' })
       expect((await t.sdk.call('sessions.list', { projectId })).map(item => item.sessionId)).toEqual([sessionId])
       const detail = await t.sdk.call('improvements.show', { projectId, jobId: job.id })
       expect(detail.candidate?.record.id).toBe(ran!.candidateId)
       expect(detail.view.tokens).toEqual({ diagnose: 2400, propose: 7200, trial: 0 })
-      await expect(access(nodePath.join(root, '.nexgent', 'improvements', 'queue.json'))).resolves.toBeUndefined()
+      await expect(access(nodePath.join(resolveProjectLayout(root, { home: t.home }).dataDir, 'improvements', 'queue.json'))).resolves.toBeUndefined()
     } finally {
       await server.close()
     }

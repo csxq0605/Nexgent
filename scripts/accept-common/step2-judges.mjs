@@ -62,7 +62,8 @@ export const JUDGES = {
     const layout = obs.init?.layout ?? {}
     return verdict([
       [obs.init?.configExists === true, '.nexgent/config.json exists'],
-      [['sessions', 'materials', 'outputs', 'ledgers'].every(name => layout[name] === true), `.nexgent/ layout directories (${JSON.stringify(layout)})`],
+      [['sessions', 'materials', 'outputs', 'ledgers'].every(name => layout[name] === true), `layout directories in the data dir ${obs.init?.dataDir} (${JSON.stringify(layout)})`],
+      [Array.isArray(obs.init?.strayInProject) && obs.init.strayInProject.length === 0, `<root>/.nexgent holds no per-project data (${JSON.stringify(obs.init?.strayInProject)})`],
       [(obs.init?.recent ?? []).includes(obs.init?.realRoot), `projects.recent lists the project (${JSON.stringify(obs.init?.recent)})`],
     ], `layout and config.json present; projects.recent lists ${obs.init?.realRoot}`)
   },
@@ -87,11 +88,14 @@ export const JUDGES = {
   H03(obs, tools) {
     const first = phase(obs, 'first').requests?.[0]
     const text = tools.requestText(first ?? {})
+    // The record keeps the logical path `.nexgent/materials/<id>/<name>`; the model is shown the absolute copy in the data dir.
     const paths = (obs.materials ?? []).map(m => m.meta.path)
-    const refused = toolCalls(obs, 'first').filter(call => call.name === 'write_file' && String(call.arguments.path ?? '').includes('.nexgent/materials/'))
+    const tails = paths.map(path => path.replace(/^\.nexgent\//, ''))
+    const flat = text.replace(/\\+/g, '/')
+    const refused = toolCalls(obs, 'first').filter(call => call.name === 'write_file' && /materials[\\/]/.test(String(call.arguments.path ?? '')))
     return verdict([
       [first !== undefined, 'a first request was made'],
-      [paths.length === 2 && paths.every(path => text.includes(path)), 'the first request references both materials by path'],
+      [paths.length === 2 && tails.every(tail => flat.includes(tail)), 'the first request references both materials by path (data-dir copies)'],
       [refused.length > 0, 'the model tried to write into materials/'],
       [refused.every(call => call.isError === true && /SANDBOX_DENIED|denied|write-prot/i.test(call.content)), 'every write into materials/ was refused'],
       [(obs.materials ?? []).every(m => m.copySha === m.meta.sha256), 'material copies unchanged'],
@@ -259,7 +263,7 @@ export const JUDGES = {
       [SHELLS.has(crash.tool), `a shell tool was running (got ${crash.tool})`],
       [crash.exit?.signal !== null || (crash.exit?.code ?? 0) !== 0, 'the process died from the kill'],
       [(crash.descendantsBefore ?? []).length > 0, 'the tool had started its command'],
-      [turn !== undefined && recordsOf(obs, turn, 'tool.result').length === 0, 'the killed turn has no tool result'],
+      [turn !== undefined && (phase(obs, 'resumeAfterTool').toolResultsBefore ?? recordsOf(obs, turn, 'tool.result').length) === 0, 'the killed turn has no tool result (as the kill left it)'],
     ]
     // Windows: libuv's kill-on-close job takes a Node process's children with it.
     if (obs.platform === 'win32') conditions.push([(crash.survivors ?? ['?']).length === 0, `no orphan on Windows (survivors ${JSON.stringify(crash.survivors)})`])
@@ -333,10 +337,10 @@ export const JUDGES = {
     const hits = obs.secretHits ?? ['?']
     const exportHits = obs.exportSecretHits ?? ['?']
     return verdict([
-      [hits.length === 0, `no file under .nexgent/ contains the test key (${hits.join(', ')})`],
+      [hits.length === 0, `no file under .nexgent/ or the data dir contains the test key (${hits.join(', ')})`],
       [Object.keys(obs.export?.files ?? {}).length > 0, 'there is an export to search'],
       [exportHits.length === 0, `no export file contains the test key (${exportHits.join(', ')})`],
-    ], `test key found in none of .nexgent/ and the ${Object.keys(obs.export?.files ?? {}).length} export files`)
+    ], `test key found in none of .nexgent/, the data dir and the ${Object.keys(obs.export?.files ?? {}).length} export files`)
   },
 
   H21(obs) {

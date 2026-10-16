@@ -26,6 +26,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { CONVENTION_COLUMN, FEEDBACK, SECOND_FEEDBACK } from '../real-task/step5-orders.mjs'
+import { dataDirSync } from './data-dir.mjs'
 import { shellCall } from './scenario-step2.mjs'
 import { CONVENTION_SKILL, DIAGNOSIS_TOOL, FEEDBACK_TASK, HISTORY_TASKS, NEXT_TASK, outputFor, playbook, PROPOSAL_MARKER } from './step5-fixtures.mjs'
 
@@ -59,7 +60,7 @@ const COMMENTS = [...FEEDBACK, ...SECOND_FEEDBACK].map(entry => entry.comment).f
 
 function readRecords(root, sessionId) {
   try {
-    return readFileSync(join(root, '.nexgent', 'sessions', sessionId, 'session.jsonl'), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
+    return readFileSync(join(dataDirSync(root), 'sessions', sessionId, 'session.jsonl'), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
   } catch {
     return []
   }

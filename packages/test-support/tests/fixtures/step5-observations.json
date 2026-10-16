@@ -113,12 +113,10 @@
       },
       {
        "name": "test-command",
-       "passed": false
+       "passed": true
       }
      ],
-     "added": [
-      "check:a156e81f-e7c3-4154-aa93-512c177b044d:1"
-     ],
+     "added": [],
      "taskId": "a156e81f-e7c3-4154-aa93-512c177b044d"
     },
     "failing": {
@@ -195,7 +193,6 @@
    },
    "queueBefore": [],
    "queueAfter": [
-    "check:a156e81f-e7c3-4154-aa93-512c177b044d:1",
     "check:0422c7f3-90f6-4774-ada8-f6c05a5c574f:1"
    ],
    "jobs": []
@@ -553,7 +550,8 @@
      "id": "a32f9242-0916-4d63-a91e-b9f94c85dba2",
      "improverScope": "user"
     }
-   ]
+   ],
+   "strayInProject": []
   },
   "job": {
    "jobId": "a32f9242-0916-4d63-a91e-b9f94c85dba2",

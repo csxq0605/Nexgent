@@ -10,6 +10,7 @@
  *
  * Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots of the main views.
  */
+import { dataPath, useHome } from './data-layout.js'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -101,7 +102,7 @@ const presentedId = (body: MessagesRequestBody): string => {
 }
 
 function sessionRecords(root: string): Array<Record<string, any>> {
-  const dir = join(root, '.nexgent', 'sessions')
+  const dir = dataPath(root, 'sessions')
   const [id] = readdirSync(dir)
   return readFileSync(join(dir, id!, 'session.jsonl'), 'utf8')
     .trim()
@@ -126,7 +127,7 @@ describe('desktop UI over the real SDK (scripted model)', () => {
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-ui-e2e-')))
       const home = join(base, 'home')
-      const root = join(base, 'sales')
+      const root = useHome(join(base, 'sales'), home)
       mkdirSync(home)
       const csv = join(base, 'orders.csv')
       const xlsx = join(base, 'regions.xlsx')

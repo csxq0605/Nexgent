@@ -223,6 +223,9 @@ describe('self-evaluation (ADR 0018 decision 2, ADR 0019 decisions 1 and 6)', ()
     expect(selfEvalOutcome({ checks: [{ passed: false }], rubricScored: true, score: 0.95 })).toBe('failure')
     expect(selfEvalOutcome({ checks: [{ passed: true }], rubricScored: false, score: 1 })).toBe('unknown')
     expect(selfEvalOutcome({ checks: [], rubricScored: true, score: 0.6 })).toBe('mixed')
+    // The rubric score, when given, decides the band: passing checks do not lift a result that misses rubric items.
+    expect(selfEvalOutcome({ checks: [{ passed: true }], rubricScored: true, score: 0.84, rubricScore: 0.68 })).toBe('mixed')
+    expect(selfEvalOutcome({ checks: [{ passed: true }], rubricScored: true, score: 0.95, rubricScore: 0.9 })).toBe('success')
     expect([scoreBand(0.8), scoreBand(0.79), scoreBand(0.49)]).toEqual(['success', 'mixed', 'failure'])
   })
 

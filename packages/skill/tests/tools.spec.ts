@@ -1,4 +1,4 @@
-import { readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, stat, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { LOAD_SKILL_TOOL, READ_DOCUMENT_TOOL, type SandboxMode, type ToolContext } from '@nexgent/kernel'
@@ -76,10 +76,16 @@ describe('read_document tool', () => {
   })
 
   it('applies the sandbox read policy: outside the project and host-only .nexgent paths are denied', async () => {
-    const { root, tool, context } = await setup()
+    const { root, services, tool, context } = await setup()
+    const layout = services.workspace.layout
     const outside = await tempDir('outside-')
     await writeFile(join(outside, 'x.pdf'), await fixtureBytes('pages.pdf'))
     await expect(tool.handler({ path: join(outside, 'x.pdf') }, context())).rejects.toMatchObject({ code: 'sandbox/denied' })
+    // K1: the host-only data (sessions, ledgers...) lives in the user data directory, outside every read root.
+    await writeFile(join(layout.sessions, 'x.pdf'), await fixtureBytes('pages.pdf'))
+    await expect(tool.handler({ path: join(layout.sessions, 'x.pdf') }, context())).rejects.toMatchObject({ code: 'sandbox/denied' })
+    // an in-project .nexgent/sessions path (old layout) stays denied too
+    await mkdir(join(root, '.nexgent', 'sessions'), { recursive: true })
     await writeFile(join(root, '.nexgent', 'sessions', 'x.pdf'), await fixtureBytes('pages.pdf'))
     await expect(tool.handler({ path: '.nexgent/sessions/x.pdf' }, context())).rejects.toMatchObject({ code: 'sandbox/denied' })
   })

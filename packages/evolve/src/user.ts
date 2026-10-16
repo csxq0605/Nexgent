@@ -33,7 +33,7 @@ import {
   readProjectConfig,
   releaseUserMetaSlot,
   resolveUserConfig,
-  resolveWorkspaceLayout,
+  resolveProjectLayout,
   takeUserMetaBatch,
   USER_CONFIG_FILE_NAME,
   USER_IMPROVEMENTS_DIR,
@@ -108,10 +108,15 @@ export async function readUserConfig(home: string): Promise<UserConfig> {
   return resolveUserConfig(value)
 }
 
+/** `resolveProjectLayout` options for an optional home (default: `NEXGENT_HOME` / `~/.nexgent`). */
+function homeOptions(home: string | undefined): { home?: string } {
+  return home === undefined ? {} : { home }
+}
+
 /** Whether a project shares its improvement evidence (`improvement.shareImproverEvidence`); an unreadable project does not. */
-export async function projectShares(root: string): Promise<boolean> {
+export async function projectShares(root: string, home?: string): Promise<boolean> {
   try {
-    return (await readProjectConfig(resolveWorkspaceLayout(root).configFile)).config.improvement.shareImproverEvidence
+    return (await readProjectConfig(resolveProjectLayout(root, homeOptions(home)).configFile)).config.improvement.shareImproverEvidence
   } catch {
     return false
   }
@@ -158,19 +163,19 @@ export async function ensureUserQueue(home: string, now: Date = new Date()): Pro
 }
 
 /** The meta job of a queue reference, read from its project (`undefined` when gone). */
-async function refJob(ref: Pick<UserMetaJobRef, 'root' | 'jobId'>): Promise<ImprovementJob | undefined> {
-  return readJob(improvementsDir(resolveWorkspaceLayout(ref.root)), ref.jobId).catch(() => undefined)
+async function refJob(ref: Pick<UserMetaJobRef, 'root' | 'jobId'>, home: string): Promise<ImprovementJob | undefined> {
+  return readJob(improvementsDir(resolveProjectLayout(ref.root, { home })), ref.jobId).catch(() => undefined)
 }
 
 /**
  * Free the user's meta slot when its job no longer runs; a running meta job
  * whose process is gone is marked `interrupted` (not re-run).
  */
-async function reconcileUserSlot(queue: UserMetaQueue, now: Date): Promise<{ queue: UserMetaQueue; active?: ImprovementJob }> {
+async function reconcileUserSlot(queue: UserMetaQueue, now: Date, home: string): Promise<{ queue: UserMetaQueue; active?: ImprovementJob }> {
   const ref = queue.active
   if (ref === undefined) return { queue }
-  const directory = improvementsDir(resolveWorkspaceLayout(ref.root))
-  const job = await refJob(ref)
+  const directory = improvementsDir(resolveProjectLayout(ref.root, { home }))
+  const job = await refJob(ref, home)
   if (job !== undefined && await jobAlive(directory, job, now)) return { queue, active: job }
   if (job !== undefined && RUNNING_STATUSES.has(job.status)) {
     await transitionJob(directory, ref.jobId, 'interrupted', { expect: [...RUNNING_STATUSES], now, detail: 'The meta job process is gone; the job stopped before it finished and is not re-run.' }).catch(() => undefined)
@@ -179,9 +184,9 @@ async function reconcileUserSlot(queue: UserMetaQueue, now: Date): Promise<{ que
 }
 
 /** Which of the queue's projects still share their evidence (read once per project). */
-async function sharingOf(entries: readonly UserMetaQueueEntry[]): Promise<(projectId: string) => boolean> {
+async function sharingOf(entries: readonly UserMetaQueueEntry[], home: string): Promise<(projectId: string) => boolean> {
   const shares = new Map<string, boolean>()
-  for (const entry of entries) if (!shares.has(entry.projectId)) shares.set(entry.projectId, await projectShares(entry.root))
+  for (const entry of entries) if (!shares.has(entry.projectId)) shares.set(entry.projectId, await projectShares(entry.root, home))
   return projectId => shares.get(projectId) ?? false
 }
 
@@ -215,17 +220,17 @@ export interface UserCountOptions {
 export async function countFinishedJobForUser(home: string, layout: WorkspaceLayout, job: ImprovementJob, options: UserCountOptions = {}): Promise<ImprovementJob | undefined> {
   if (job.arm !== undefined || job.kind === 'meta') return undefined
   const now = options.now ?? new Date()
-  const project = { projectId: await userProjectId(layout.root), root: layout.root, shares: await projectShares(layout.root) }
+  const project = { projectId: await userProjectId(layout.root), root: layout.root, shares: await projectShares(layout.root, home) }
   // A queue first created here counts from the job's own start.
   return updateUserQueue(home, job.createdAt, async current => {
     const counted = countUserFinishedJob(current, project, job, now.toISOString())
     let queue = counted.queue
     const meta = options.meta
     if (meta?.enabled !== true) return { queue, result: undefined }
-    const slot = await reconcileUserSlot(queue, now)
+    const slot = await reconcileUserSlot(queue, now, home)
     queue = slot.queue
     if (slot.active !== undefined) return { queue, result: undefined }
-    const taken = takeUserMetaBatch(queue, meta.everyJobs, await sharingOf(queue.pending))
+    const taken = takeUserMetaBatch(queue, meta.everyJobs, await sharingOf(queue.pending, home))
     if (taken.batch === undefined) return { queue: taken.queue, result: undefined }
     const next = await startMeta(layout, taken.queue, taken.batch, { trigger: 'job-count', parentVersion: meta.parentVersion, now })
     return { queue: next.queue, result: next.started }
@@ -245,12 +250,12 @@ export async function startExplicitUserMetaJob(
   now: Date = new Date(),
 ): Promise<ImprovementJob> {
   return updateUserQueue(home, now.toISOString(), async current => {
-    const slot = await reconcileUserSlot(current, now)
+    const slot = await reconcileUserSlot(current, now, home)
     if (slot.active !== undefined) {
       const root = slot.queue.active?.root
       throw new NexgentError('improvement/busy', `meta improvement job ${slot.active.id} is still running${root === undefined ? '' : ` (project ${root})`}; one meta job runs at a time`, { details: { jobId: slot.active.id } })
     }
-    const taken = takeUserMetaBatch(slot.queue, 0, await sharingOf(slot.queue.pending))
+    const taken = takeUserMetaBatch(slot.queue, 0, await sharingOf(slot.queue.pending, home))
     const next = await startMeta(layout, taken.queue, taken.batch ?? [], { trigger: 'explicit', parentVersion: input.parentVersion, ...(input.keepCopies === undefined ? {} : { keepCopies: input.keepCopies }), now })
     return { queue: next.queue, result: next.started }
   })
@@ -266,7 +271,7 @@ export async function releaseUserMeta(home: string, jobId: string, now: Date = n
 export async function reconcileUserQueue(home: string, now: Date = new Date()): Promise<UserMetaQueue | undefined> {
   if ((await readUserQueue(home)) === undefined) return undefined
   return updateUserQueue(home, now.toISOString(), async current => {
-    const slot = await reconcileUserSlot(current, now)
+    const slot = await reconcileUserSlot(current, now, home)
     return { queue: slot.queue, result: slot.queue }
   })
 }
@@ -276,7 +281,7 @@ export async function userMetaJobs(home: string): Promise<ImprovementJob[]> {
   const queue = await readUserQueue(home)
   const jobs: ImprovementJob[] = []
   for (const ref of queue?.metaJobs ?? []) {
-    const job = await refJob(ref)
+    const job = await refJob(ref, home)
     if (job !== undefined) jobs.push(job)
   }
   return jobs
@@ -305,13 +310,13 @@ export interface MetaProject {
  * empty batch, or a project-level meta job from before ADR 0012) reads its
  * own project.
  */
-export async function metaProjects(host: WorkspaceLayout, job: ImprovementJob): Promise<MetaProject[]> {
+export async function metaProjects(host: WorkspaceLayout, job: ImprovementJob, home?: string): Promise<MetaProject[]> {
   const batch = job.meta?.batch ?? []
   const projects: MetaProject[] = []
   for (const entry of batch) {
     if (projects.some(project => project.projectId === entry.projectId)) continue
-    if (!(await projectShares(entry.root))) continue
-    projects.push({ projectId: entry.projectId, layout: resolveWorkspaceLayout(entry.root), name: basename(entry.root) })
+    if (!(await projectShares(entry.root, home))) continue
+    projects.push({ projectId: entry.projectId, layout: resolveProjectLayout(entry.root, homeOptions(home)), name: basename(entry.root) })
   }
   if (batch.length === 0) projects.push({ projectId: await userProjectId(host.root), layout: host, name: basename(host.root) })
   return projects

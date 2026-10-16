@@ -17,6 +17,7 @@ import {
   type TeamTask,
   type ToolCall,
 } from '@nexgent/kernel'
+import { summarizeSession, type SessionIndexEntry } from '@nexgent/session'
 import type { CollaborationView, HistoryItem, MemberRunView, SessionSummary, WorkflowView } from './api.js'
 
 type MutableApproval = { kind: 'approval'; turn: number; request: ApprovalRequest; decision?: ApprovalDecision }
@@ -281,28 +282,22 @@ export function turnUsage(records: readonly SessionRecord[], turn: number) {
  * @param running - a turn of it is running in this SDK instance.
  */
 export function sessionSummary(records: readonly SessionRecord[], state: SessionState, running: boolean): SessionSummary {
-  const start = records[0]
-  const last = records.at(-1)
-  const meta = state.metadata
-  let lastEnd: Extract<SessionRecord, { type: 'turn.end' }> | undefined
-  let firstMessage: string | undefined
-  for (const record of records) {
-    if (record.type === 'turn.end') lastEnd = record
-    else if (firstMessage === undefined && record.type === 'user.message' && record.source === 'user' && record.content.trim() !== '') firstMessage = record.content.trim().slice(0, 200)
-  }
-  const interrupted = !running && (meta.openTurn !== undefined
-    || (lastEnd !== undefined && lastEnd.reason.kind === 'interrupted' && lastEnd.turn === meta.lastTurn))
+  return summaryOfEntry(summarizeSession(records, state), running)
+}
+
+/** The list entry for an index entry (read from `summary.json` or built from the records). */
+export function summaryOfEntry(entry: SessionIndexEntry, running: boolean): SessionSummary {
   return {
-    sessionId: state.sessionId,
-    ...(meta.title === undefined ? {} : { title: meta.title }),
-    ...(firstMessage === undefined ? {} : { firstMessage }),
-    createdAt: start?.ts ?? meta.createdAt,
-    updatedAt: last?.ts ?? meta.createdAt,
-    lastTurn: meta.lastTurn,
+    sessionId: entry.sessionId,
+    ...(entry.title === undefined ? {} : { title: entry.title }),
+    ...(entry.firstMessage === undefined ? {} : { firstMessage: entry.firstMessage }),
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+    lastTurn: entry.lastTurn,
     running,
-    interrupted,
-    ...(meta.goal === undefined ? {} : { goal: meta.goal }),
-    ...(meta.parentSessionId === undefined ? {} : { parentSessionId: meta.parentSessionId }),
-    ...(meta.member === undefined ? {} : { member: meta.member }),
+    interrupted: !running && entry.interrupted,
+    ...(entry.goal === undefined ? {} : { goal: entry.goal }),
+    ...(entry.parentSessionId === undefined ? {} : { parentSessionId: entry.parentSessionId }),
+    ...(entry.member === undefined ? {} : { member: entry.member }),
   }
 }

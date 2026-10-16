@@ -62,7 +62,8 @@ describe('accept-step5 judges', () => {
     ['H02', 'the queue was not empty', o => { o.trigger.explicit.queueBefore = ['x'] }],
     ['H02', 'the start errored', o => { o.trigger.explicit.error = 'improvement/busy' }],
     ['H02', 'the job never ran', o => { o.trigger.explicit.job.history = ['queued'] }],
-    ['H03', 'the broken table did not count', o => { o.trigger.checkFailure.runs.corrupt.added = [] }],
+    ['H03', 'the broken table counted although nothing re-ran at turn end', o => { o.trigger.checkFailure.runs.corrupt.added = ['check:x:1'] }],
+    ['H03', 'the recorded test check of the broken-table run is not the passing run', o => { o.trigger.checkFailure.runs.corrupt.results.at(-1).passed = false }],
     ['H03', 'a failing test run is not a failed check (decision B)', o => { o.trigger.checkFailure.runs.failing.results = o.trigger.checkFailure.runs.failing.results.filter((r: { name: string }) => r.name !== 'test-command') }],
     ['H03', 'a failing test run did not count (decision B)', o => { o.trigger.checkFailure.runs.failing.added = [] }],
     ['H03', 'a failing exploratory command counted', o => { o.trigger.checkFailure.runs.explore.added = ['check:x:1'] }],
@@ -70,8 +71,8 @@ describe('accept-step5 judges', () => {
     ['H03', 'a test failing then fixed counted', o => { o.trigger.checkFailure.runs.fixed.added = ['check:y:1'] }],
     ['H03', 'a test failing then fixed is recorded failed', o => { o.trigger.checkFailure.runs.fixed.results.at(-1).passed = false }],
     ['H03', 'a task did not complete', o => { o.trigger.checkFailure.runs.explore.reason = 'error' }],
-    ['H03', 'it counted twice', o => { const r = o.trigger.checkFailure.runs.corrupt; r.added = [...r.added, r.added[0]] }],
-    ['H03', 'the queue did not grow by two', o => { o.trigger.checkFailure.queueAfter = o.trigger.checkFailure.queueAfter.slice(1) }],
+    ['H03', 'it counted twice', o => { const r = o.trigger.checkFailure.runs.failing; r.added = [...r.added, r.added[0]] }],
+    ['H03', 'the queue did not grow by one', o => { o.trigger.checkFailure.queueAfter = [] }],
     ['H03', 'a job started below the threshold', o => { o.trigger.checkFailure.jobs = [{}] }],
     ['H04', 'a job started with autoImprove off', o => { o.trigger.disabled.jobs = [{}] }],
     ['H04', 'a feedback was not recorded', o => { o.trigger.disabled.recorded = 4 }],
@@ -168,6 +169,7 @@ describe('accept-step5 judges', () => {
     ['H18', 'no improvement.end', o => { o.main.ledger = ledger(o).filter(r => r.type !== 'improvement.end') }],
     ['H18', 'the key is under .nexgent/', o => { o.main.integrity.secretHits = ['.nexgent/ledger.jsonl'] }],
     ['H18', 'the export failed', o => { o.main.export.code = 1 }],
+    ['H18', 'per-project data is left under <root>/.nexgent', o => { o.main.integrity.strayInProject = ['sessions'] }],
     ['H18', 'the key is in the export', o => { o.main.export.secretHits = ['session.jsonl'] }],
   ]
   for (const [key, defect, mutate] of cases) {

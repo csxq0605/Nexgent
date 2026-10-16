@@ -157,6 +157,31 @@ describe('Handbook', () => {
     await expect(handbook.ops('00000000-0000-4000-8000-000000000000')).rejects.toMatchObject({ code: 'handbook/not-found' })
   })
 
+  it('a task votes on an entry once and never on an entry it taught; the status reason can be the caller\'s', async () => {
+    const handbook = await project(await tempDir())
+    const id = await add(handbook, 'List the files you changed at the end.', ['changes'])
+    const votes = await handbook.apply([
+      { op: 'upvote', entryId: id, source: { taskId: 'task-1' } },
+      { op: 'upvote', entryId: id, source: { taskId: 'task-2' } },
+      { op: 'downvote', entryId: id, source: { taskId: 'task-2' } },
+    ], { actor: 'execution' })
+    expect(votes.map(vote => vote.outcome === 'rejected' ? vote.reason : vote.outcome)).toEqual(['own-source', 'applied', 'already-voted'])
+    await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'reflection', source: { taskId: 'task-3' }, statusReason: status => `已${status === 'active' ? '启用' : '下线'}` })
+    expect((await handbook.ops(id)).ops.at(-1)).toMatchObject({ op: 'status', status: 'active', actor: 'host', reason: '已启用' })
+  })
+
+  it('a project constant may stay in a project entry but not in a shared one', async () => {
+    const handbook = await project(await tempDir())
+    const literals = {
+      sources: [{ kind: 'feedback' as const, ref: 'feedback:f', text: 'Orders above 500 count as large.' }],
+      projectMessages: [{ taskId: 'a', text: 'List orders above 500.' }, { taskId: 'b', text: 'Count orders above 500.' }],
+    }
+    const [shared] = await handbook.apply([{ op: 'add', text: 'Orders above 500 are large.', keywords: ['orders'] }], { actor: 'reflection', literals })
+    expect(shared).toMatchObject({ outcome: 'rejected', reason: 'instance-literal' })
+    const [local] = await handbook.apply([{ op: 'add', text: 'Orders above 500 are large.', keywords: ['orders'], scope: 'project' }], { actor: 'reflection', literals })
+    expect(local).toMatchObject({ outcome: 'applied', scope: 'project' })
+  })
+
   it('rolls a log back to an earlier moment', async () => {
     const handbook = await project(await tempDir())
     const kept = await add(handbook, 'Keep units in column headers.', ['units'])

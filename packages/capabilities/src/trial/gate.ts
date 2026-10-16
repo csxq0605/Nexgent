@@ -58,7 +58,7 @@ import {
   decideTrial,
   NexgentError,
   readProjectConfig,
-  resolveWorkspaceLayout,
+  resolveProjectLayout,
   ZERO_USAGE,
   CAPABILITY_LIMITS,
   type ArmTally,
@@ -294,10 +294,10 @@ function bump(tally: ArmTally, status: TrialStatus): ArmTally {
   return status === 'pass' ? { ...tally, passed: tally.passed + 1 } : status === 'fail' ? { ...tally, failed: tally.failed + 1 } : { ...tally, unknown: tally.unknown + 1 }
 }
 
-type DocumentText = GateOptions['documentText']
+export type DocumentText = GateOptions['documentText']
 
-/** A file's text for the reviewer: UTF-8, else (ADR 0016) the host's document reader, else a binary marker; truncated. */
-async function fileText(path: string, bytes: Uint8Array, documentText: DocumentText): Promise<string> {
+/** A file's text for a reviewer: UTF-8, else (ADR 0016) the host's document reader, else a binary marker; truncated at `maxChars`. */
+export async function fileText(path: string, bytes: Uint8Array, documentText: DocumentText, maxChars: number = OUTPUT_CHARS): Promise<string> {
   let text: string | undefined
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
@@ -305,7 +305,7 @@ async function fileText(path: string, bytes: Uint8Array, documentText: DocumentT
     text = await Promise.resolve(documentText?.(path, bytes)).catch(() => undefined)
   }
   text ??= `(binary, ${bytes.byteLength} bytes)`
-  return text.length > OUTPUT_CHARS ? `${text.slice(0, OUTPUT_CHARS)}\n…(truncated)` : text
+  return text.length > maxChars ? `${text.slice(0, maxChars)}\n…(truncated)` : text
 }
 
 /**
@@ -457,7 +457,7 @@ function approvalText(verdict: TrialVerdict, candidate: CandidateRecord, plan: T
 
 /** ADR 0014: the files a replay run presented (latest version of each of its deliverables, in presentation order). */
 async function deliveredFiles(root: string): Promise<string[]> {
-  const summaries = await new LocalDeliverableStore(resolveWorkspaceLayout(root)).list().catch(() => [])
+  const summaries = await new LocalDeliverableStore(resolveProjectLayout(root)).list().catch(() => [])
   return [...new Set(summaries.flatMap(summary => summary.versions.at(-1)?.files.map(file => file.path) ?? []))]
 }
 

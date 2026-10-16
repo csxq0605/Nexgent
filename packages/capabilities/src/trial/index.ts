@@ -9,11 +9,13 @@ import type { GateHost } from './host.js'
 export { runCheckSpecs, type RunChecksOptions } from './checks.js'
 export {
   bothOrders,
+  fileText,
   OUTPUT_CHARS,
   OUTPUT_FILES,
   OUTPUT_PATHS,
   runGate,
   runOutput,
+  type DocumentText,
   type GateOptions,
   type GateResult,
   type ReplayRunRequest,
@@ -40,6 +42,7 @@ export {
   type TrialSummary,
 } from './receipts.js'
 export { candidateRunAttribution, jobRunAttribution, readImprovementJob, selectionAnchor, type FeedbackCheckInput, type FeedbackCheckResult, type JobRunAttribution, type SelectionAnchor } from './feedback.js'
+export { COST_ONLY_REASONS, epochVerdict, evolutionCount, type EpochCandidateKind } from './epoch-rules.js'
 export { assertSameEpoch, evaluatorEpoch, projectEpoch, trialEpoch } from './epoch.js'
 export { contentSimilarity, FUNCTION_WORDS, isSimilarTask, SIMILAR_CASE_MIN } from './similar.js'
 export { candidateComponentTexts, candidateInstanceLiterals, jobLiteralSources, LITERAL_TEXT_LIMIT, projectTaskMessages } from './literals.js'

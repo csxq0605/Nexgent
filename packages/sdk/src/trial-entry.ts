@@ -49,7 +49,7 @@ import {
   LocalCredentials,
   nexgentHome,
   readProjectConfig,
-  resolveWorkspaceLayout,
+  resolveProjectLayout,
   UNKNOWN_USAGE,
   ZERO_USAGE,
   type Context,
@@ -373,7 +373,7 @@ export function llmReviewer(options: { readonly ledger: Ledger; readonly home: s
 
 /** Run the gate for one candidate of a project (the `gate` mode). */
 export async function runGateProcess(root: string, candidateId: string, env: Env = process.env, options: { readonly comparison?: ImproverComparisonParams; readonly epoch?: string } = {}): Promise<GateResult> {
-  const layout = resolveWorkspaceLayout(root)
+  const layout = resolveProjectLayout(root, { env: env as NodeJS.ProcessEnv })
   const ledger = new JsonlLedger({ ledgersDir: layout.ledgers })
   const endpoint = (await readProjectConfig(layout.configFile).catch(() => undefined))?.input.endpoint
   const candidate = await readCandidate(layout.capabilities, candidateId).catch(() => undefined)

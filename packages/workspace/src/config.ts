@@ -7,12 +7,14 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import {
+  appendGrant,
   assertCapabilitiesConfig,
   assertImprovementConfig,
   assertLearningConfig,
   checkCostCaps,
   EFFORT_LEVELS,
   NexgentError,
+  readProjectGrants,
   SANDBOX_MODES,
   resolveProjectConfig,
   type ApprovalGrant,
@@ -173,8 +175,18 @@ export async function updateProjectConfig(
   return next
 }
 
-/** Append a `project`-scope grant to `config.json.approvals` (deduplicated by tool + pattern). */
-export async function addProjectApproval(layout: Pick<WorkspaceLayout, 'configFile'>, grant: ApprovalGrant): Promise<void> {
+/**
+ * Append a `project`-scope grant (deduplicated by tool + pattern) where the
+ * project keeps them: `grants.json` when the data is in the user data
+ * directory (K1), else `config.json.approvals`.
+ */
+export async function addProjectApproval(layout: Pick<WorkspaceLayout, 'configFile' | 'grantsFile'>, grant: ApprovalGrant): Promise<void> {
+  if (layout.grantsFile !== undefined) {
+    const approvals = await readProjectGrants(layout.grantsFile)
+    if (approvals.some(entry => entry.tool === grant.tool && entry.pattern === grant.pattern)) return
+    await appendGrant(layout, grant)
+    return
+  }
   await updateProjectConfig(layout, current => {
     const approvals = current.approvals ?? []
     if (approvals.some(entry => entry.tool === grant.tool && entry.pattern === grant.pattern)) return current

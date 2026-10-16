@@ -11,6 +11,10 @@
  * `fsync: 'boundaries'` only `turn.end`, `checkpoint` and `error` records
  * (and the truncation repair) are synced, which the spec permits.
  *
+ * Reading never deletes: a complete line that is not a valid record is skipped
+ * and reported (`readAll().skipped`), and only a torn final line is cut by a
+ * lock holder. New checkpoints are incremental (see `checkpoint.ts`).
+ *
  * Design reference: deepseek-harness@46a7f68b
  * `session/session-persistence-jsonl` (per-handle mutation chain, torn-tail
  * truncation before the first new append, one writer per session id).
@@ -26,15 +30,18 @@ import {
   type SessionReadResult,
   type SessionRecord,
   type SessionRecordInput,
+  type SessionSkippedLine,
   type SessionStartRecord,
   type SessionState,
   type SessionStore,
   type SessionTruncation,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
+import { MAX_CHECKPOINT_CHAIN, resolveLatestCheckpoint } from './checkpoint.js'
 import { checkSequence, encodeLine, scanSessionLog } from './jsonl.js'
 import { acquireLockFile, LOCK_FILE_NAME, releaseLockFile, type LockIdentity } from './lock.js'
 import { DEFAULT_CHECKPOINT_EVERY, foldRecord, initialState, replay, SessionProjector, shouldCheckpoint } from './projection.js'
+import { SummaryFold, writeSessionSummary } from './summary.js'
 import { jsonEqual } from './schema/evaluator.js'
 import { assertSessionRecord } from './schema/session-schema.js'
 
@@ -65,8 +72,12 @@ export interface ResumeResult {
   readonly folded: number
   /** `seq` of the checkpoint resume started from, when there was one. */
   readonly checkpointSeq?: number
-  /** Present when the file had an invalid tail. */
+  /** Present when the file had a torn final line. */
   readonly truncation?: SessionTruncation
+  /** Complete lines that were skipped (unknown or damaged records); absent when none. */
+  readonly skipped?: readonly SessionSkippedLine[]
+  /** `tool.result` records this resume wrote for calls the dead process never answered (lock holders only). */
+  readonly interruptedToolCalls?: number
   /** The turn closed with `turn.end { kind: 'interrupted' }` by this resume (lock holders only). */
   readonly interruptedTurn?: number
 }
@@ -77,12 +88,28 @@ interface Writer {
   readonly handle: FileHandle
   /** Byte length of the valid file content; the next write position. */
   size: number
+  /** Highest `seq` in the file (valid or skipped); the next record is `lastSeq + 1`. */
   lastSeq: number
   lastCheckpointSeq: number
+  /** The latest usable checkpoint a new one can build on; absent after a compaction or when there is none. */
+  checkpointBase: CheckpointBase | undefined
   readonly projector: SessionProjector
+  /** Facts for the summary cache. */
+  readonly summary: SummaryFold
+  /** Records were written since the summary cache was last written. */
+  summaryStale: boolean
   /** Invalid tail found at lock time; repaired before the next append. */
   pendingTruncation: SessionTruncation | undefined
   chain: Promise<unknown>
+}
+
+/** What an incremental checkpoint needs from the one before it. */
+interface CheckpointBase {
+  readonly seq: number
+  /** Messages in the full state it stood for. */
+  readonly count: number
+  /** Incremental links behind it. */
+  readonly depth: number
 }
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -114,6 +141,7 @@ export class JsonlSessionStore implements SessionStore {
     if (options.host !== undefined) identity.host = options.host
     if (options.isAlive !== undefined) identity.isAlive = options.isAlive
     if (options.now !== undefined) identity.now = options.now
+    if (options.startTimeOf !== undefined) identity.startTimeOf = options.startTimeOf
     this.identity = identity
   }
 
@@ -190,7 +218,10 @@ export class JsonlSessionStore implements SessionStore {
           size: bytes.length,
           lastSeq: 1,
           lastCheckpointSeq: 0,
+          checkpointBase: undefined,
           projector: new SessionProjector(initialState(start)),
+          summary: foldSummary([start]),
+          summaryStale: true,
           pendingTruncation: undefined,
           chain: Promise.resolve(),
         })
@@ -224,9 +255,12 @@ export class JsonlSessionStore implements SessionStore {
           lock,
           handle,
           size: scan.validBytes,
-          lastSeq: scan.records.length,
+          lastSeq: scan.lastSeq,
           lastCheckpointSeq: lastCheckpoint?.seq ?? 0,
+          checkpointBase: loaded.base,
           projector,
+          summary: foldSummary(scan.records),
+          summaryStale: false,
           pendingTruncation: scan.truncation,
           chain: Promise.resolve(),
         })
@@ -249,6 +283,7 @@ export class JsonlSessionStore implements SessionStore {
       if (shouldCheckpoint(written, writer.lastCheckpointSeq, this.checkpointEvery)) {
         await this.writeCheckpoint(writer)
       }
+      if (written.type === 'turn.end') await this.writeSummary(writer)
       return written
     })
   }
@@ -271,14 +306,23 @@ export class JsonlSessionStore implements SessionStore {
     const writer = this.writers.get(sessionId)
     if (writer !== undefined) await writer.chain.catch(() => {})
     const scan = await this.scan(sessionId)
-    return scan.truncation === undefined
-      ? { records: scan.records }
-      : { records: scan.records, truncation: scan.truncation }
+    return {
+      records: scan.records,
+      ...(scan.skipped.length === 0 ? {} : { skipped: scan.skipped }),
+      ...(scan.truncation === undefined ? {} : { truncation: scan.truncation }),
+    }
   }
 
+  /**
+   * The latest usable checkpoint with its complete state (an incremental one
+   * is returned resolved: no `base`/`keep`, all messages).
+   */
   async latestCheckpoint(sessionId: string): Promise<CheckpointRecord | undefined> {
     const { records } = await this.readAll(sessionId)
-    return findLastCheckpoint(records)
+    const resolved = resolveLatestCheckpoint(records)
+    if (resolved === undefined) return undefined
+    const { base: _base, keep: _keep, ...rest } = resolved.record
+    return { ...rest, state: resolved.state }
   }
 
   async resume(sessionId: string): Promise<SessionState> {
@@ -297,14 +341,30 @@ export class JsonlSessionStore implements SessionStore {
    * a lock holder's open turn is always treated as interrupted.
    */
   async resumeDetailed(sessionId: string): Promise<ResumeResult> {
-    const { records, truncation } = await this.readAll(sessionId)
+    const { records, truncation, skipped } = await this.readAll(sessionId)
     const loaded = startingPoint(records)
     const replayed = replay(loaded.state, records, loaded.from)
     let state = replayed.state
     let interruptedTurn: number | undefined
     const openTurn = state.metadata.openTurn
     const writer = this.writers.get(sessionId)
+    let interruptedToolCalls = 0
     if (openTurn !== undefined && writer !== undefined) {
+      // Tell the truth about calls the dead process never answered, before closing the turn.
+      for (const call of unansweredToolCalls(records, openTurn)) {
+        await this.append(sessionId, {
+          type: 'tool.result',
+          turn: openTurn,
+          step: call.step,
+          toolCallId: call.id,
+          name: call.name,
+          content: 'Error: the call was interrupted before it returned a result.',
+          isError: true,
+          error: { name: 'NexgentError', code: 'tool/aborted', message: 'interrupted before it returned a result' },
+          durationMs: 0,
+        })
+        interruptedToolCalls += 1
+      }
       await this.append(sessionId, { type: 'turn.end', turn: openTurn, reason: { kind: 'interrupted' } })
       interruptedTurn = openTurn
       state = writer.projector.snapshot()
@@ -314,6 +374,8 @@ export class JsonlSessionStore implements SessionStore {
       folded: replayed.folded,
       ...(loaded.checkpointSeq === undefined ? {} : { checkpointSeq: loaded.checkpointSeq }),
       ...(truncation === undefined ? {} : { truncation }),
+      ...(skipped === undefined ? {} : { skipped }),
+      ...(interruptedToolCalls === 0 ? {} : { interruptedToolCalls }),
       ...(interruptedTurn === undefined ? {} : { interruptedTurn }),
     }
   }
@@ -328,6 +390,7 @@ export class JsonlSessionStore implements SessionStore {
         if (this.checkpointOnRelease && fresh && writer.pendingTruncation === undefined) {
           await this.enqueue(writer, () => this.writeCheckpoint(writer)).catch(() => {})
         }
+        if (writer.summaryStale) await this.writeSummary(writer)
       } finally {
         this.writers.delete(lock.sessionId)
         await writer.handle.close().catch(() => {})
@@ -411,8 +474,15 @@ export class JsonlSessionStore implements SessionStore {
     })
   }
 
+  /** Refresh `summary.json` (a derived cache; failures are ignored). */
+  private async writeSummary(writer: Writer): Promise<void> {
+    await writeSessionSummary(this.sessionDir(writer.lock.sessionId), writer.summary.entry(writer.lock.sessionId, writer.projector.metadata()), writer.lastSeq)
+    writer.summaryStale = false
+  }
+
   private async writeCheckpoint(writer: Writer): Promise<CheckpointRecord> {
     const state = writer.projector.snapshot()
+    // Written as a full state; `writeRecord` stores it incrementally when it can.
     return (await this.writeRecord(writer, { type: 'checkpoint', coversSeq: writer.lastSeq, state })) as CheckpointRecord
   }
 
@@ -422,12 +492,23 @@ export class JsonlSessionStore implements SessionStore {
     delete rest.seq
     delete rest.ts
     delete rest.sessionId
-    const record = { type, seq: writer.lastSeq + 1, ts: this.now(), sessionId, ...rest } as SessionRecord
+    // Skipped lines can leave `lastSeq` ahead of the projection's `lastSeq`; the checkpoint covers up to `lastSeq`.
+    if (type === 'checkpoint' && (rest as { coversSeq?: unknown }).coversSeq === writer.projector.lastSeq) {
+      ;(rest as { coversSeq?: number }).coversSeq = writer.lastSeq
+    }
+    let record = { type, seq: writer.lastSeq + 1, ts: this.now(), sessionId, ...rest } as SessionRecord
     assertSessionRecord(record)
     const violation = checkSequence(record, writer.lastSeq, sessionId)
     if (violation !== undefined) throw invalidRecord(violation)
-    if (record.type === 'checkpoint' && !jsonEqual(record.state, writer.projector.snapshot())) {
-      throw invalidRecord('checkpoint.state does not equal the projection of the records it covers')
+    let nextBase: CheckpointBase | undefined
+    if (record.type === 'checkpoint') {
+      const snapshot = writer.projector.snapshot()
+      record = this.incremental(writer, record, snapshot)
+      nextBase = {
+        seq: record.seq,
+        count: snapshot.messages.length,
+        depth: record.type === 'checkpoint' && record.base !== undefined ? (writer.checkpointBase?.depth ?? 0) + 1 : 0,
+      }
     }
     // Records whose projection can fail are folded into a copy first, so a bad one never reaches the file.
     if (record.type === 'goal.update' || record.type === 'compaction') foldRecord(writer.projector.snapshot(), record)
@@ -443,7 +524,41 @@ export class JsonlSessionStore implements SessionStore {
     writer.size += bytes.length
     writer.lastSeq = record.seq
     writer.projector.apply(record)
-    if (record.type === 'checkpoint') writer.lastCheckpointSeq = record.seq
+    writer.summary.apply(record)
+    writer.summaryStale = true
+    if (record.type === 'checkpoint') {
+      writer.lastCheckpointSeq = record.seq
+      writer.checkpointBase = nextBase
+    } else if (record.type === 'compaction' || record.type === 'fork.seed') {
+      // The messages are rewritten: the next checkpoint is a full one.
+      writer.checkpointBase = undefined
+    }
+    return record
+  }
+
+  /**
+   * Check a checkpoint against the projection and return it in the form to
+   * store: a full one is rewritten as an incremental one on the latest usable
+   * checkpoint when it can be (messages not rewritten since, chain not too
+   * long, something to share).
+   */
+  private incremental(writer: Writer, record: CheckpointRecord, snapshot: SessionState): CheckpointRecord {
+    const base = writer.checkpointBase
+    if (record.base === undefined) {
+      if (!jsonEqual(record.state, snapshot)) {
+        throw invalidRecord('checkpoint.state does not equal the projection of the records it covers')
+      }
+      if (base === undefined || base.count === 0 || base.depth >= MAX_CHECKPOINT_CHAIN) return record
+      return { ...record, base: base.seq, keep: base.count, state: { ...snapshot, messages: snapshot.messages.slice(base.count) } }
+    }
+    const keep = record.keep ?? 0
+    if (base === undefined || record.base !== base.seq || keep > base.count) {
+      throw invalidRecord('checkpoint.base is not the latest usable checkpoint')
+    }
+    const full = { ...record.state, messages: [...snapshot.messages.slice(0, keep), ...record.state.messages] }
+    if (!jsonEqual(full, snapshot)) {
+      throw invalidRecord('checkpoint.state does not equal the projection of the records it covers')
+    }
     return record
   }
 }
@@ -453,12 +568,19 @@ function startingPoint(records: readonly SessionRecord[]): {
   state: SessionState
   from: number
   checkpointSeq?: number
+  /** What the next checkpoint can build on (absent when a compaction or fork seed came after the checkpoint). */
+  base?: CheckpointBase | undefined
 } {
-  for (let index = records.length - 1; index >= 1; index -= 1) {
-    const record = records[index] as SessionRecord
-    if (record.type === 'checkpoint') {
-      const state: SessionState = { ...record.state, metadata: { ...record.state.metadata, lastSeq: record.seq } }
-      return { state, from: index + 1, checkpointSeq: record.seq }
+  const resolved = resolveLatestCheckpoint(records)
+  if (resolved !== undefined) {
+    const { record } = resolved
+    const state: SessionState = { ...resolved.state, metadata: { ...resolved.state.metadata, lastSeq: record.seq } }
+    const rewritten = records.slice(resolved.index + 1).some(later => later.type === 'compaction' || later.type === 'fork.seed')
+    return {
+      state,
+      from: resolved.index + 1,
+      checkpointSeq: record.seq,
+      base: rewritten ? undefined : { seq: record.seq, count: resolved.state.messages.length, depth: resolved.depth },
     }
   }
   const start = records[0]
@@ -472,6 +594,27 @@ function findLastCheckpoint(records: readonly SessionRecord[]): CheckpointRecord
     if (record.type === 'checkpoint') return record
   }
   return undefined
+}
+
+function foldSummary(records: readonly SessionRecord[]): SummaryFold {
+  const fold = new SummaryFold()
+  for (const record of records) fold.apply(record)
+  return fold
+}
+
+/** Tool calls of the open `turn` that no `tool.result` answers, in call order. */
+function unansweredToolCalls(records: readonly SessionRecord[], turn: number): { id: string; name: string; step: number }[] {
+  const answered = new Set<string>()
+  const calls: { id: string; name: string; step: number }[] = []
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const record = records[index] as SessionRecord
+    if (record.type === 'turn.start' && record.turn === turn) break
+    if (record.type === 'tool.result' && record.turn === turn) answered.add(record.toolCallId)
+    else if (record.type === 'assistant.message' && record.turn === turn) {
+      calls.unshift(...(record.toolCalls ?? []).map(call => ({ id: call.id, name: call.name, step: record.step })))
+    }
+  }
+  return calls.filter(call => !answered.has(call.id))
 }
 
 function isBoundary(record: SessionRecord): boolean {

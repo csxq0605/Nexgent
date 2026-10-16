@@ -73,6 +73,7 @@ export { capabilityDraftTool, capabilityProposeTool, capabilityTools, capability
 export { capabilitiesProvider } from './provider.js'
 export { apply, CapabilitiesPlugin, name, type CapabilitiesPluginConfig } from './plugin.js'
 export * from './trial/index.js'
+export * from './learning/index.js'
 export { checkJobLiterals, componentLiteralTexts, taskLiteralSources, findJobLayout, instanceLiteralText, jobLiteralSources, layoutOfSessionsDir, MAX_LITERAL_TEXT_BYTES, projectTaskMessages, type LiteralCheckComponent } from './instance-literals.js'
 export {
   improversDir,

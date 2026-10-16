@@ -268,6 +268,14 @@ export interface MigrationRecord {
   readonly error?: ErrorInfo
 }
 
+/**
+ * K1: a file in `.nexgent/` that keeps a project's data inside the project.
+ * Scratch copies the host makes (gate replays, comparison arms) carry it, so
+ * their sessions and records stay in the copy and go away with it instead of
+ * filling the user data directory. Not shared (`.nexgent/.gitignore` ignores it).
+ */
+export const LOCAL_DATA_MARKER_FILE = 'local-data'
+
 /** Where a project's data is read from and written to. */
 export type DataLocation = 'user-data' | 'project'
 

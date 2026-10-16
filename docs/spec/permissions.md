@@ -47,7 +47,7 @@
 
 **Nexgent 主目录**（`<NEXGENT_HOME>`，默认 `~/.nexgent`；ADR 0012）放凭证、用户级配置 `config.json`、用户级改进器版本线 `improvers/` 与用户级元改进队列 `improvements/`。它在每个项目之外，不在任何读根或写根里，文件工具与 `run_code` 读写都拒绝（路径规范化后的包含检查即可挡住），只有宿主写；用户把某个项目放在主目录之内或把主目录列进 `extraReadRoots` 时，这些路径仍按宿主专属目录处理，读写都拒绝。
 
-**用户数据目录**（重做 C1，ADR 0017 决策 4）：`<NEXGENT_HOME>/projects/<projectId>/`（会话、账本、快照、资料副本、成果快照、能力与改进记录、授权 `grants.json`、自评）与 `<NEXGENT_HOME>/handbook/`、`practice/`、`skills/` 同属主目录，规则同上：文件工具与 `run_code` 读写都拒绝，只有宿主写。资料副本与成果快照对模型只读，仍经宿主工具（读资料、`present`）提供，不经路径读取。迁移没完成的项目，上表的项目内规则照旧适用。“在本项目始终允许”的授权迁移后在 `grants.json`，项目里的 `config.json` 不再有 `approvals`，所以克隆来的项目不带别人的授权。
+**用户数据目录**（重做 C1，ADR 0017 决策 4）：`<NEXGENT_HOME>/projects/<projectId>/`（会话、账本、快照、资料副本、成果快照、能力与改进记录、授权 `grants.json`、自评）与 `<NEXGENT_HOME>/handbook/`、`practice/`、`skills/` 同属主目录，规则同上：文件工具与 `run_code` 读写都拒绝，只有宿主写。资料副本与成果快照对模型只读：K1 把数据目录的 `materials/` 与 `outputs/` 加为文件工具的只读根（写入照样拒绝），模型按资料给出的绝对路径读取，和迁移前读 `.nexgent/materials/` 一样；目前没有专门读资料的宿主工具，大文件与二进制资料只能这样读。数据目录里的其他内容读写都拒绝。迁移没完成的项目，上表的项目内规则照旧适用。“在本项目始终允许”的授权迁移后在 `grants.json`，项目里的 `config.json` 不再有 `approvals`，所以克隆来的项目不带别人的授权。
 
 **编辑工具**（重做 C1，ADR 0017 决策 1；契约 `edit-tools.ts`，输入 schema `WRITE_FILE_INPUT_SCHEMA`、`STR_REPLACE_INPUT_SCHEMA`）。路径检查与上面相同，改动照旧进入本轮的文件变更与成果：
 

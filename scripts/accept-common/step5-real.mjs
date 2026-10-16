@@ -23,6 +23,7 @@
  * reserve must stay under the cap, or the scenario stops. A task that did not complete stops
  * it too: later steps would prove nothing. The key is never logged or written.
  */
+import { dataDirSync, registerHome } from './data-dir.mjs'
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -120,6 +121,7 @@ export async function runRealScenario(h, work, { env, realModel, budgetUsd = REA
   const pkgs = loaded.pkgs
   const root = join(work, 'project')
   const home = join(work, 'home')
+  registerHome(root, home)
   await mkdir(root, { recursive: true })
   await mkdir(home, { recursive: true })
   await writeFeedbackProject(root)
@@ -234,7 +236,7 @@ export async function runRealScenario(h, work, { env, realModel, budgetUsd = REA
     if (job === undefined) throw new StopScenario(`${label}: no job started`)
     if (!SETTLED.has(job.status)) throw new StopScenario(`${label}: job ${job.id} did not settle within ${jobTimeoutMs / 60_000} min (status ${job.status})`)
     const view = jobView(job)
-    const dir = join(root, '.nexgent', 'improvements', job.id)
+    const dir = join(dataDirSync(root), 'improvements', job.id)
     obs.jobs[label] = {
       ...view,
       request: job.request,
@@ -308,7 +310,7 @@ export async function runRealScenario(h, work, { env, realModel, budgetUsd = REA
   obs.activation = await activationOf(root)
   obs.decisions = await decisionsOf(root)
   obs.trials = await trialsOf(root)
-  obs.snapshots = await filesUnder(join(root, '.nexgent', 'snapshots'))
+  obs.snapshots = await filesUnder(join(dataDirSync(root), 'snapshots'))
   obs.diagnosisValid = Object.fromEntries(Object.entries(obs.jobs).map(([label, job]) => [label, job.diagnosis === undefined ? null : (issues => ({ valid: issues.length === 0, errors: issues.map(i => `${i.path}: ${i.message}`) }))(pkgs.session.validateImprovementFile('diagnosis', job.diagnosis))]))
   obs.ledgerVersions = Object.fromEntries(Object.values(obs.tasks).map(t => [t.sessionId, [...new Set(ledger.filter(r => r.sessionId === t.sessionId && r.trialId === undefined && r.improvementId === undefined).map(r => r.capabilityVersion))]]))
   const userRecords = ledger.filter(r => r.trialId === undefined && r.improvementId === undefined)

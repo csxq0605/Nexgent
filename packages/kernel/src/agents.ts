@@ -34,7 +34,7 @@ import type { SessionImprovement, SessionLock } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
 import { SANDBOX_MODES } from './contracts/workspace.js'
 import { Agent, DEFAULT_MAX_OUTPUT_CONTINUATIONS, DEFAULT_MAX_STEPS, type AgentInit, type AgentSettings, type ProjectGrantWriter } from './agent.js'
-import { readProjectConfig, type LoadedProjectConfig } from './project-config.js'
+import { readProjectSettings, type LoadedProjectConfig } from './project-config.js'
 import { DEFAULT_PERSONA, DEFAULT_PERSONA_SUFFIX } from './system-prompt.js'
 import type { AttachedComponent, CapabilityHost, ImprovementRun } from './capability-hooks.js'
 import { TaskTree } from './task-tree.js'
@@ -286,7 +286,7 @@ export class AgentsService extends Service {
 
   private async projectConfig(override: LoadedProjectConfig | undefined): Promise<LoadedProjectConfig> {
     if (override !== undefined) return override
-    return readProjectConfig(this.home.workspace.layout.configFile)
+    return readProjectSettings(this.home.workspace.layout)
   }
 
   private async scope(sessionId: string): Promise<{ ctx: Context; fiber: Fiber; scope: ToolScope }> {

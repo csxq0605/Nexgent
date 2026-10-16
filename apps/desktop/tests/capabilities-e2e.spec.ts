@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CapabilityStore, writeCandidate, type BundleComponentInput } from '@nexgent/capabilities'
+import { dataPath, homeOf, useHome } from './data-layout.js'
 import type { CandidateRecord, ToolResultRecord, TrialVerdict } from '@nexgent/kernel'
 import { listSessionIds, readSessionRecords, scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
@@ -154,7 +155,7 @@ const verdict = (outcome: TrialVerdict['outcome'], reason: TrialVerdict['reason'
 
 /** The project's capabilities: `order-tools` adopted by the gate, a rejected skill candidate, a plugin candidate awaiting approval. */
 async function seedCapabilities(root: string): Promise<{ bundle: string; plugin: CandidateRecord; skill: CandidateRecord }> {
-  const dir = join(root, '.nexgent', 'capabilities')
+  const dir = dataPath(root, 'capabilities')
   const store = new CapabilityStore(dir)
   const bundle = await store.write([ORDER_TOOLS])
   if ((await store.adopt(bundle.version, { trigger: 'gate', reason: 'quality-up', detail: 'Passed its gate.' })) === null) throw new Error('adopt raced')
@@ -205,7 +206,7 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-capabilities-e2e-')))
       const home = join(base, 'home')
-      const root = join(base, 'orders')
+      const root = useHome(join(base, 'orders'), home)
       mkdirSync(home)
       server = await scriptedModelServer({
         script: [
@@ -262,8 +263,8 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         await page.keyboard.press('Enter')
         await expect.poll(() => page.getByTestId('assistant-message').last().textContent(), { timeout: 30_000 }).toContain('合计 1230.5。')
         await page.getByTestId('send').waitFor({ timeout: 20_000 })
-        const [sessionId] = await listSessionIds(root)
-        const { records } = await readSessionRecords(root, sessionId!)
+        const [sessionId] = await listSessionIds(root, { home: homeOf(root) })
+        const { records } = await readSessionRecords(root, sessionId!, { home: homeOf(root) })
         const start = records.find(record => record.type === 'session.start') as { capabilityVersion?: string } | undefined
         expect(start?.capabilityVersion).toBe(seeded.bundle)
         const result = records.find((record): record is ToolResultRecord => record.type === 'tool.result' && record.name === 'cap_order-tools_total')
@@ -282,7 +283,7 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         await expect.poll(() => current.getAttribute('data-version')).toBe('baseline')
         expect(await current.getAttribute('data-revision')).toBe('2')
         expect(await page.getByTestId('capability-revision').evaluateAll(items => items.map(item => item.dataset.type))).toEqual(['rollback', 'adopt'])
-        const history = await new CapabilityStore(join(root, '.nexgent', 'capabilities')).history()
+        const history = await new CapabilityStore(dataPath(root, 'capabilities')).history()
         expect(history.map(revision => [revision.type, revision.trigger, revision.version])).toEqual([['adopt', 'gate', seeded.bundle], ['rollback', 'manual', 'baseline']])
         expect(await page.getByTestId('capability-current').textContent()).toContain('手动')
         expect(consoleErrors).toEqual([])

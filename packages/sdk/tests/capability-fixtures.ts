@@ -7,13 +7,14 @@ import { randomUUID } from 'node:crypto'
 import { appendFile, mkdir } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import { CapabilityStore, writeCandidate, type BundleComponentInput } from '@nexgent/capabilities'
-import type { CandidateRecord, TrialReceipt, TrialVerdict } from '@nexgent/kernel'
+import { resolveProjectLayout, type CandidateRecord, type TrialReceipt, type TrialVerdict } from '@nexgent/kernel'
 import { validateCapabilityFile } from '@nexgent/session'
 
 const ZERO = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }
 const COST = { usage: ZERO, requestCount: 0, estimatedUsd: 0 }
 
-export const capabilitiesDir = (root: string): string => nodePath.join(root, '.nexgent', 'capabilities')
+/** The project's capabilities directory (K1: in the user data directory). `testSdk` keeps its home next to the projects: `<base>/home`, projects at `<base>/<name>`. */
+export const capabilitiesDir = (root: string): string => resolveProjectLayout(root, { home: nodePath.join(nodePath.dirname(root), 'home') }).capabilities
 export const capabilityStore = (root: string): CapabilityStore => new CapabilityStore(capabilitiesDir(root))
 
 /** A skill component; `variant` changes its content. */

@@ -94,7 +94,7 @@ export const SLOW_COMMAND = { bash: 'sleep 120', pwsh: 'Start-Sleep -Seconds 120
 /** The material path the model is shown for `name` (`.nexgent/materials/<id>/<name>`), from the request text. */
 export function materialPath(text, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`\\.nexgent[\\\\/]materials[\\\\/][^\\s"'\`)]+?[\\\\/]${escaped}`).exec(text)?.[0]?.replaceAll('\\', '/')
+  return new RegExp(`(?:[^\\s"'\`(]*[\\\\/])?materials[\\\\/][^\\s"'\`)]+?[\\\\/]${escaped}`).exec(text)?.[0]?.replaceAll('\\', '/')
 }
 
 /** The deliverable id a feedback prompt or a present result names. */

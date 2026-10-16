@@ -5,6 +5,7 @@
  */
 export * from './config.js'
 export * from './workspace.js'
+export * from './project-data.js'
 export * from './paths.js'
 export * from './glob.js'
 export * from './command-policy.js'

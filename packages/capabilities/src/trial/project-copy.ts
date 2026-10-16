@@ -26,6 +26,8 @@ import {
   BASELINE_VERSION,
   CAPABILITY_LIMITS,
   IMPROVEMENTS_DIR,
+  LOCAL_DATA_MARKER_FILE,
+  MIGRATION_NOTICE_FILE,
   NexgentError,
   resolveWorkspaceLayout,
   type CapabilityVersion,
@@ -41,7 +43,8 @@ import type { ReplayCase } from './replay-set.js'
 export const KEEP_COPY_MAX_BYTES = CAPABILITY_LIMITS.maxSnapshotBytes
 
 /** `.nexgent/` entries a copy does not take from the project. */
-const NOT_COPIED = new Set([IMPROVEMENTS_DIR, 'capabilities', 'config.json'])
+// The data directory's own files (K1: identity and index, migration record, grants, marker) stay with the project.
+const NOT_COPIED = new Set([IMPROVEMENTS_DIR, 'capabilities', 'config.json', 'project.json', 'migration.json', 'grants.json', MIGRATION_NOTICE_FILE, LOCAL_DATA_MARKER_FILE, '.gitignore'])
 
 /** What {@link prepareProjectCopy} needs. */
 export interface ProjectCopyInput {
@@ -121,6 +124,8 @@ export async function prepareProjectCopy(input: ProjectCopyInput): Promise<Proje
     await writeSnapshotTree(input.layout, input.origin, root)
     const layout = resolveWorkspaceLayout(root)
     await mkdir(layout.dataDir, { recursive: true })
+    // A scratch copy keeps its sessions and records inside itself (K1), so they go away with it.
+    await writeFile(join(layout.dataDir, LOCAL_DATA_MARKER_FILE), '')
 
     // History: everything under .nexgent/ but the jobs, the capability chain and the config; no lock files.
     const entries = await readdir(input.layout.dataDir, { withFileTypes: true }).catch(() => [])

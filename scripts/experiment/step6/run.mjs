@@ -38,6 +38,7 @@ import { createHash } from 'node:crypto'
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { dataDirFor } from '../../accept-common/data-dir.mjs'
 import { gate, readSpend, recordSpend, spentUsd, STEP6_CAP_USD } from './budget.mjs'
 import { allCases, checkGatePicks, checkIsolation, currentDifficulty, familyCases, FAMILIES, judgeCase, PLAN, PRESENT_REQUEST, useDifficulty, writeCaseFiles } from './cases.mjs'
 import { counts, feedbackFor } from './feedback.mjs'
@@ -140,9 +141,13 @@ async function textUnder(dir) {
   return out
 }
 
-/** Ledger records of a project. @param {string} root */
-export async function ledgerOf(root) {
-  const dir = join(root, '.nexgent', 'ledgers')
+/**
+ * Ledger records of a project. The ledger lives in the project's data directory under `home`
+ * (ADR 0017); without `home` the old in-project place is read.
+ * @param {string} root @param {string} [home]
+ */
+export async function ledgerOf(root, home) {
+  const dir = home === undefined ? join(root, '.nexgent', 'ledgers') : join(await dataDirFor(root, home), 'ledgers')
   const out = []
   for (const month of (await readdir(dir).catch(() => [])).sort()) {
     const text = await readFile(join(dir, month, 'requests.jsonl'), 'utf8').catch(() => '')
@@ -151,10 +156,33 @@ export async function ledgerOf(root) {
   return out
 }
 
-/** Copy a project. @param {string} from @param {string} to @param {{ jobs: boolean }} options */
-export async function copyProject(from, to, options) {
+/**
+ * Copy a project. With `homes` the project's data (sessions, ledgers, capabilities, ... in the
+ * user data directory, ADR 0017) is copied too: from `homes.from`'s data dir of `from` into
+ * `homes.to`'s data dir of `to`. The copy gets its own id (its identity file is dropped, so the
+ * host derives one from the new root) and no data index, so the host does not take it for a
+ * moved or duplicated project.
+ * @param {string} from @param {string} to @param {{ jobs: boolean }} options
+ * @param {{ from: string, to: string }} [homes]
+ */
+export async function copyProject(from, to, options, homes) {
   await rm(to, { recursive: true, force: true })
   await cp(from, to, { recursive: true, filter: source => copied(relative(from, source), options) })
+  if (homes === undefined) return
+  await rm(join(to, '.nexgent', 'project.json'), { force: true })
+  const source = await dataDirFor(from, homes.from)
+  const target = await dataDirFor(to, homes.to)
+  await rm(target, { recursive: true, force: true })
+  await cp(source, target, {
+    recursive: true,
+    filter: path => {
+      const rel = relative(source, path)
+      const parts = rel.split(/[\\/]/)
+      if (parts.at(-1)?.endsWith('.lock')) return false
+      if (!options.jobs && parts[0] === 'improvements') return false
+      return rel !== 'project.json'
+    },
+  })
 }
 
 const readJson = async (/** @type {string} */ path) => JSON.parse(await readFile(path, 'utf8'))
@@ -200,6 +228,7 @@ async function scriptedBackend(pkgs, home) {
   const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_KEY, NEXGENT_HOME: home }
   return {
     name: 'scripted',
+    home,
     model: 'scripted (local scripted server, no model call)',
     createSdk: () => pkgs.sdk.createSdk({ appVersion: 'experiment-step6-scripted', env, home, approvalResponder: allowAll }),
     setRoot: (/** @type {string} */ r) => { root = r },
@@ -222,6 +251,7 @@ function realBackend(pkgs, home) {
   const env = { ...process.env, NEXGENT_HOME: home }
   return {
     name: 'real',
+    home,
     model: `${MODEL.model}, thinking ${MODEL.thinking}`,
     createSdk: () => pkgs.sdk.createSdk({ appVersion: 'experiment-step6-real', env, home, approvalResponder: allowAll }),
     setRoot: () => undefined,
@@ -248,6 +278,7 @@ export async function allowAll(request) {
  */
 async function runFamily(ctx, family) {
   const { pkgs, backend, log } = ctx
+  const home = backend.home
   const cases = familyCases(family)
   const dir = join(ctx.out, family)
   const root = join(dir, 'project')
@@ -260,7 +291,7 @@ async function runFamily(ctx, family) {
   const sdk = backend.createSdk()
   let projectId = ''
   let step = 'setup'
-  const sessionCost = async (/** @type {string} */ projectRoot, /** @type {string} */ sessionId) => costOf((await ledgerOf(projectRoot)).filter(r => r.sessionId === sessionId && r.improvementId === undefined && r.trialId === undefined), estimate)
+  const sessionCost = async (/** @type {string} */ projectRoot, /** @type {string} */ sessionId) => costOf((await ledgerOf(projectRoot, home)).filter(r => r.sessionId === sessionId && r.improvementId === undefined && r.trialId === undefined), estimate)
   const guard = async (/** @type {number} */ reserve, /** @type {string} */ label) => {
     const verdict = await gate(ctx.spend, reserve, ctx.cap)
     if (!verdict.ok) {
@@ -317,7 +348,7 @@ async function runFamily(ctx, family) {
     await spent(task.id, usd)
     log(`${task.id}: ${result.reason}, hidden ${judged.pass === null ? 'unknown' : judged.pass ? 'pass' : `fail (${[...new Set(judged.issues.map(i => i.kind))].join(', ')})`}`)
   }
-  const jobs = async () => (await pkgs.evolve.listJobs(join(root, '.nexgent', 'improvements')).catch(() => []))
+  const jobs = async () => (await pkgs.evolve.listJobs(join(await dataDirFor(root, home), 'improvements')).catch(() => []))
   const awaitJob = async (/** @type {string[]} */ known, /** @type {string} */ label, /** @type {string | undefined} */ jobId) => {
     const deadline = Date.now() + backend.jobTimeoutMs
     let job
@@ -341,7 +372,7 @@ async function runFamily(ctx, family) {
 
     step = 'base'
     obs.arms.base = { root: join(dir, 'arms', 'base'), from: 'the project after the history and dev tasks, before any feedback' }
-    await copyProject(root, obs.arms.base.root, { jobs: true })
+    await copyProject(root, obs.arms.base.root, { jobs: true }, { from: home, to: home })
 
     for (const task of dev) {
       step = `${task.id}: feedback`
@@ -382,7 +413,7 @@ async function runFamily(ctx, family) {
         obs.approvals.push({ jobId: job.id, candidateId: job.candidateId, result: approved?.status ?? approved?.error })
         job = (await jobs()).find((/** @type {any} */ j) => j.id === job.id) ?? job
       }
-      const usd = costOf((await ledgerOf(root)).filter(r => r.improvementId === job.id), estimate)
+      const usd = costOf((await ledgerOf(root, home)).filter(r => r.improvementId === job.id), estimate)
       obs.jobs.push({ caseId: task.id, jobId: job.id, status: job.status, candidateId: job.candidateId, improverVersion: job.improverVersion, history: (job.history ?? []).map((/** @type {any} */ h) => h.status), costUsd: usd })
       await spent(`job ${job.id}`, usd)
       log(`${task.id}: job ${job.status}`)
@@ -404,7 +435,7 @@ async function runFamily(ctx, family) {
       obs.metaVia = 'evolve ImprovementHost.runMeta (sdk improvements.runMeta not wired yet)'
     }
     const meta = await awaitJob(known, 'meta', started.id)
-    const metaDir = join(root, '.nexgent', 'improvements', meta.id)
+    const metaDir = join(await dataDirFor(root, home), 'improvements', meta.id)
     const comparison = await readJson(join(metaDir, 'comparison.json')).catch(() => undefined)
     obs.meta = {
       jobId: meta.id, status: meta.status, history: (meta.history ?? []).map((/** @type {any} */ h) => h.status), detail: meta.history?.at(-1)?.detail,
@@ -412,13 +443,13 @@ async function runFamily(ctx, family) {
       change: await readJson(join(metaDir, 'change.json')).catch(() => undefined),
       comparison,
     }
-    const metaUsd = costOf((await ledgerOf(root)).filter(r => r.improvementId === meta.id && r.comparisonArm === undefined), estimate)
+    const metaUsd = costOf((await ledgerOf(root, home)).filter(r => r.improvementId === meta.id && r.comparisonArm === undefined), estimate)
     const armUsd = /** @type {Record<string, number | null>} */ ({ parent: comparison?.parent?.cost?.estimatedUsd ?? null, child: comparison?.child?.cost?.estimatedUsd ?? null })
     obs.meta.costUsd = { meta: metaUsd, ...armUsd }
     // Without a comparison file (no proposal, or stopped before it) the gate is charged whatever
     // the ledger holds for the meta job and any arm it started.
     const metaTotal = comparison === undefined
-      ? costOf((await ledgerOf(root)).filter(r => r.improvementId === meta.id || r.metaJobId === meta.id), estimate)
+      ? costOf((await ledgerOf(root, home)).filter(r => r.improvementId === meta.id || r.metaJobId === meta.id), estimate)
       : metaUsd === null || armUsd.parent === null || armUsd.child === null ? null : metaUsd + armUsd.parent + armUsd.child
     await spent(`meta ${meta.id}`, metaTotal)
     log(`meta: ${meta.status}${comparison === undefined ? '' : ` (${comparison.origin.kind} origin; ${comparison.verdict.outcome}, ${comparison.verdict.reason})`}`)
@@ -431,15 +462,15 @@ async function runFamily(ctx, family) {
     step = 'checks'
     const holdoutCases = cases.filter(c => c.set === 'holdout')
     const sessionToCase = Object.fromEntries(Object.entries(obs.tasks).map(([caseId, t]) => [/** @type {any} */ (t).sessionId, caseId]))
-    obs.checks.gatePicks = pickedCases(await textUnder(join(root, '.nexgent', 'capabilities')), sessionToCase)
+    obs.checks.gatePicks = pickedCases(await textUnder(join(await dataDirFor(root, home), 'capabilities')), sessionToCase)
     obs.checks.gatePickProblems = checkGatePicks(obs.checks.gatePicks, allCases())
-    const roots = [join(root, '.nexgent'), ...Object.values(obs.arms).map((/** @type {any} */ a) => join(a.root, '.nexgent'))]
+    const roots = [join(root, '.nexgent'), await dataDirFor(root, home), ...Object.values(obs.arms).flatMap((/** @type {any} */ a) => [join(a.root, '.nexgent'), ...(a.home === undefined ? [] : [a.home])])]
     const isolation = await checkIsolation(allCases(), roots)
     obs.checks.isolation = { leaks: isolation.leaks, scanned: isolation.scanned, skipped: isolation.skipped.length }
-    obs.checks.epoch = await ctx.pkgs.capabilities.projectEpoch?.(projectLayout(root)).catch(() => undefined)
+    obs.checks.epoch = await ctx.pkgs.capabilities.projectEpoch?.(await projectLayout(root, home)).catch(() => undefined)
 
     for (const source of Object.values(obs.arms)) {
-      source.capabilityVersion = await ctx.pkgs.capabilities.readActivation(join(source.root, '.nexgent', 'capabilities', 'activation'))
+      source.capabilityVersion = await ctx.pkgs.capabilities.readActivation(join(await dataDirFor(source.root, source.home ?? home), 'capabilities', 'activation'))
         .then((/** @type {any} */ a) => a.version, () => 'unknown')
     }
 
@@ -454,7 +485,7 @@ async function runFamily(ctx, family) {
           step = runId
           await guard(RESERVE_USD.holdout, runId)
           const runRoot = join(dir, 'runs', slug(`${arm}-${task.id}-${repeat}`))
-          await copyProject(source.root, runRoot, { jobs: false })
+          await copyProject(source.root, runRoot, { jobs: false }, { from: source.home ?? home, to: home })
           await writeCaseFiles(task, runRoot)
           const client = backend.createSdk()
           let record
@@ -472,7 +503,7 @@ async function runFamily(ctx, family) {
               await turn(client, pid, sessionId, PRESENT_REQUEST)
             }
             const judged = result.reason === 'error' ? { pass: null, issues: [], problems: [result.error ?? 'turn failed'] } : await judgeCase(task, runRoot)
-            const ledger = await ledgerOf(runRoot)
+            const ledger = await ledgerOf(runRoot, home)
             const outcome = ledger.filter(r => r.type === 'task.outcome' && r.sessionId === sessionId).at(-1)
             record = {
               runId, family, caseId: task.id, arm, repeat,
@@ -502,7 +533,7 @@ async function runFamily(ctx, family) {
   }
 
   // Costs of everything but the holdout runs, from the project's ledger.
-  const ledger = await ledgerOf(root)
+  const ledger = await ledgerOf(root, home)
   const add = (/** @type {string} */ kind, /** @type {string} */ ref, /** @type {number | null} */ usd) => {
     if (usd === null) obs.notes.push(`${kind} ${ref}: cost unknown, left out of the cost table`)
     else obs.costs.push({ kind, family, usd, ref })
@@ -523,10 +554,10 @@ async function sessionCostAll(ledger, sessionId, estimate) {
   return costOf(ledger.filter(r => r.sessionId === sessionId && r.improvementId === undefined && r.trialId === undefined), estimate)
 }
 
-/** The layout `projectEpoch` reads. @param {string} root */
-function projectLayout(root) {
-  const dataDir = join(root, '.nexgent')
-  return { root, dataDir, configFile: join(dataDir, 'config.json') }
+/** The layout `projectEpoch` reads. @param {string} root @param {string} home */
+async function projectLayout(root, home) {
+  const dataDir = await dataDirFor(root, home)
+  return { root, dataDir, configFile: join(root, '.nexgent', 'config.json') }
 }
 
 /**
@@ -675,7 +706,7 @@ async function devTrial(ctx, { caseId, repeats }) {
       const started = await sdk.startTurn({ projectId, sessionId, text: task.message })
       const result = await started.done.catch((/** @type {unknown} */ error) => ({ reason: { kind: 'error', message: errorText(error) } }))
       const judged = await judgeCase(task, root)
-      const usd = costOf((await ledgerOf(root)).filter(r => r.sessionId === sessionId), estimate)
+      const usd = costOf((await ledgerOf(root, ctx.backend.home)).filter(r => r.sessionId === sessionId), estimate)
       await recordSpend(ctx.spend, { label: `dev-trial ${caseId} #${repeat}`, usd: usd ?? RESERVE_USD.task }, ctx.cap)
       const kinds = [...new Set(judged.issues.map(i => i.kind))].sort()
       runs.push({ repeat, turn: result?.reason?.kind, pass: judged.pass, taskRight: judged.pass === true || (judged.pass === false && kinds.every(k => k.startsWith('convention-'))), issues: kinds, problems: judged.problems, costUsd: usd })

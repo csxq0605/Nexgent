@@ -72,7 +72,8 @@
 - 写入只经过 `apply(changes, { actor, source?, literals? })`，一次一条小操作：
   - `add` 先检查上限，再查重（词项 Jaccard ≥ 0.8 视为重复，不写）和具体数值（`findInstanceLiterals`，给了 `literals` 时；`taskLiteralSources` 收集一个任务的反馈与成果）。
   - `supersedes` 显式取代旧条目，被取代的条目退休；项目级条目不能取代用户级条目。
-  - 投票之后，按 `nextHandbookStatus` 追加 `status`（`actor: host`）。
+  - 投票在锁内检查：一个任务（`source.taskId`）对一条条目只投一票，也不能给从自己学来的条目投票（`already-voted`、`own-source`）。投票之后按 `nextHandbookStatus` 追加 `status`（`actor: host`），原因文字可以由调用方的 `statusReason` 给出（用户的语言）。
+  - 具体数值：项目级条目里，项目常量（两个以上任务给过的值）可以保留；用户级条目所有项目都会读，所以不豁免。
   - `rollback(scope, toSeq)` 追加补偿操作，恢复文字、关键词与状态；票数不回退。
 - 检索：`retrieve(text, { k?, exclude? })` 是 BM25。英文按词切分，`snake_case` 名字也算一个词；中日韩文字取单字与相邻两字。关键词计两次。只检索试用与启用的条目，默认前 5 条。索引按日志末尾缓存，1000 条时单次检索不到 50 ms。
 - 注入：kernel 在根会话的用户轮写 `turn.start` 之前调用 `capabilityHost.handbookForTurn`（`HandbookHost.forTurn`），把选中的 id 写进 `turn.start.handbook`，把文字作为 `user.message { source: 'inject' }` 放在这一轮用户消息之前。不进系统提示。
@@ -128,6 +129,14 @@
 - ADR 0016（纪元 `adr-0016`），对所有候选：评审每对运行问两次（`ReviewInput.candidateFirst`），`bothOrders` 合并，两次一致才计票，否则平局，任一次 `unknown` 整对不计；一对一条回执，理由写两次的回答，费用相加。评审另看到该用例快照里的输入文件（`ReviewInput.inputs`，任务消息点名的在前，前 `OUTPUT_FILES` 个给内容）；宿主给的 `GateOptions.documentText` 把非 UTF-8 文件转成文字（SDK 用 `@nexgent/skill` 读 xlsx、docx、pdf），输入、成果与反馈检查看到的成果都用它。
 - ADR 0014，对所有候选：回放后，`file-exists` / `parses` 记录的路径在副本里不存在时，`runCheckSpecs(…, { delivered })` 改查这次运行 `present` 的成果里下一个扩展名相同、不在记录路径上的文件（一文件替一路径，`detail: delivered under another path`）。照反馈改名或换目录不再判为退步；没交付同类文件照旧失败。
 - 用量退化：`checkUsageRegression` 在根会话解析版本前和每轮结束后执行，只看 `gate` / `approval` 采用之后、该版本上的非试验记录：新组件工具的 `tool.call` 错误序列与根任务 `task.outcome.checks`（刚结束那一轮用 `turnOutcome()` 补上），交给 `decideUsageRollback`，触发即写 `usage-regression` 回滚。
+
+## 自评与练习题集（`src/learning/`，重做 G1，ADR 0018 决策 2、3，ADR 0019 决策 1、3、6、7）
+
+- `selfEvaluate`：根任务结束时由宿主（`@nexgent/evolve` 的学习队列）调用，每个任务只写一次 `<数据目录>/evaluations/<taskId>.json`。确定性检查 = 内核记下的这一轮检查 + 通用检查（`genericChecks`：回答与文本成果里引用的项目文件存在；末行标为合计的表格各数字列等于上面各行之和）。按 `selfEvalSample` 抽中时，执行模型先只看任务消息与开始时的输入文件写 3–8 条评分要点（`generator: v0`，提示写在本包，改进器改不了），再对照结果打分；思考关闭，提示有字数上限，发请求前按最坏情况估价，单任务不超过 `learning.selfEvalMaxUsd`。结局见契约 `selfEvalOutcome`：有评分要点得分时按它分档。再次调用只合并用户反馈；门控试验副本、子会话和改进会话不评。
+- 模型由宿主注入（`SelfEvalModel`，`providerSelfEvalModel` 包装内核 provider），每个请求带 `phase`（账本 `learningPhase`）与 `taskId`。
+- 校准：抽中的已打分任务按 `CALIBRATION_SAMPLE_RATE` 再由外部评审（默认 `claude-opus-5-5`，开思考、effort `low`）用同一份要点和检查打分，`agree` = 两边结局相同；预算须够它的最坏花费再加一个单任务上限。`scorerReliabilityOf` 按项目或整个用户目录算一致率。
+- 练习题集：项目允许贡献（`learning.contribute`）且有评分要点时，任务进 `<NEXGENT_HOME>/practice/cases/`；相似度键是任务文字里最常见的词，与已有题的键 Jaccard ≥ 0.25 就并入它的簇，同簇同组（`practiceSplit`）。`listPracticeCases` 默认只给学习者 `train` / `selection`；`audience: 'measure'` 才看到 `holdout` 与 `guard`。`loadGenericPracticeCases` 载入测量给的通用防退步题（只收 `generic` / `guard`，已有的不覆盖）。
+- 纪元规则骨架（`src/trial/epoch-rules.ts`）：`epochVerdict` 把学到的候选“打平更省”的采用记为 `cost-optimized`；评分器不是 `reliable` 时技能改为等用户批准、框架改动不往下走（`scorer-unreliable`）；用户提出的候选照旧。`evolutionCount` 不把 `cost-optimized` / `cost-down` 计为进化。接入门控是 G2 的事。
 
 ## Known Limitations and Deferred Work
 

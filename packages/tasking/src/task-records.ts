@@ -3,26 +3,33 @@
  * `ctx.taskRecorder` the kernel calls when a root task starts and when each
  * of its turns ends.
  *
- * - Snapshot: every project file in `turn.files` scope (no `.nexgent/`,
- *   `.git/`, `node_modules/`; regular files only) is stored once under
- *   `.nexgent/snapshots/objects/<sha256>`, the sorted list under
- *   `trees/<sha256>.json` (named by the hash of its canonical JSON), and the
- *   pointer under `tasks/<taskId>.t<turn>.json` at the start of every root
- *   turn (step 5, per turn). A workspace over
- *   `CAPABILITY_LIMITS.maxSnapshotBytes` gets `tree: null`.
+ * - Snapshot: every project file in `turn.files` scope (regular files, not
+ *   `.nexgent/`, `.git/`, `node_modules/` and nothing `.gitignore` excludes)
+ *   is stored once under `.nexgent/snapshots/objects/<sha256>`, the sorted
+ *   list under `trees/<sha256>.json` (named by the hash of its canonical
+ *   JSON), and the pointer under `tasks/<taskId>.t<turn>.json` at the start
+ *   of every root turn (step 5, per turn). A workspace over
+ *   `CAPABILITY_LIMITS.maxSnapshotBytes` gets `tree: null`. It is
+ *   incremental: `snapshots/index.json` remembers each file's size, mtime
+ *   and hash from the previous snapshot, so only new or changed files are
+ *   read and hashed; the expensive part of a snapshot is the `lstat` walk.
+ *   After each snapshot, records older than 30 days (and, over the size cap,
+ *   the oldest ones) are pruned unless retained, then unreferenced trees and
+ *   objects are deleted.
  * - Checks: `file-exists` for every file of the deliverables the task tree
  *   presented, `parses` for those that are JSON, CSV or XLSX, and
- *   `test-command` for the last few test-runner commands run in the project
- *   root, passing or failing (step 5; see {@link testCommandRan}). The
- *   specs and results go to `checks/<taskId>.t<turn>.json` at each root turn
- *   end and the results into `task.outcome.checks`.
+ *   `test-command` for the last few test-runner commands the model ran in
+ *   the project root. A `test-command` result is the exit code of the
+ *   model's own run; nothing is re-run at turn end. The specs and results go
+ *   to `checks/<taskId>.t<turn>.json` at each root turn end and the results
+ *   into `task.outcome.checks`.
  * - Step-4 names: `tasks/<taskId>.json` is still written for the task's
  *   first snapshot (never replaced) and `checks/<taskId>.json` for the latest
  *   turn's checks, so step-4 readers keep working.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { lstat, mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import {
   CAPABILITY_LIMITS,
@@ -32,7 +39,6 @@ import {
   writeFileAtomic,
   type JsonValue,
   type ParseFormat,
-  type ProcessRunner,
   type SnapshotFile,
   type SnapshotTree,
   type TaskBeginInput,
@@ -46,19 +52,16 @@ import {
   type WorkspaceLayout,
 } from '@nexgent/kernel'
 import { isNotFound } from './files-util.js'
-import { isIgnoredPath } from './turn-files.js'
+import { walkProject, type WalkedEntry } from './project-walk.js'
 
-/** At most this many test commands are re-run per task (the latest ones). */
+/** At most this many test commands the model ran become checks per turn (the latest ones). */
 export const MAX_TEST_COMMANDS = 3
-
-/** Deadline of one re-run test command. */
-export const TEST_COMMAND_TIMEOUT_MS = 120_000
 
 /**
  * Commands that run a test suite (and nothing else first): package-manager
  * `test` scripts, common runners, `make test|check`. Only these become
  * `test-command` checks; other shell calls (builds, scripts that write
- * files) are not re-run.
+ * files) never do.
  */
 export const TEST_COMMAND_PATTERN = new RegExp([
   String.raw`^(?:npm|pnpm|yarn)\s+(?:run\s+)?test\b`,
@@ -84,8 +87,7 @@ const PYTEST_PATTERN = /^(?:uv\s+run\s+)?(?:python3?\s+-m\s+)?pytest\b/
  * Whether a shell call counts as a test run for `test-command` checks: the
  * command matches {@link TEST_COMMAND_PATTERN} and its exit code does not
  * say that no test ran. Step 5 (user decision 2026-10-13, ADR 0006
- * decision 10) keeps failing runs: they are re-run at turn end like passing
- * ones, so a suite still failing then is a failing check. Exploratory
+ * decision 10) keeps failing runs: a failing run is a failing check. Exploratory
  * commands (`ls`, `cat`, builds) never match the pattern, whatever their
  * exit code. `exitCode` absent reads as 0 (step-4 callers).
  */
@@ -100,21 +102,80 @@ export function testCommandRan(command: string, exitCode: number | undefined): b
 
 const PARSE_FORMATS: Readonly<Record<string, ParseFormat>> = { '.json': 'json', '.csv': 'csv', '.xlsx': 'xlsx' }
 
+/** Task snapshot records older than this are pruned (30 days). */
+export const SNAPSHOT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+
+/** Format version of `snapshots/index.json`. */
+export const SNAPSHOT_INDEX_VERSION = 1
+
+/** One file of the snapshot index: enough to know the file is unchanged without reading it. */
+export interface SnapshotIndexEntry {
+  readonly size: number
+  readonly mtimeMs: number
+  readonly sha256: string
+}
+
+/**
+ * `.nexgent/snapshots/index.json`: the files of the latest snapshot. A file
+ * whose size and mtime match is not read again. `writtenAtMs` is when the
+ * index was saved (wall clock): entries modified within
+ * {@link RACY_WINDOW_MS} of it might have changed again without a new mtime
+ * and are re-hashed once.
+ */
+export interface SnapshotIndex {
+  readonly formatVersion: 1
+  readonly writtenAtMs: number
+  /** When the last size-cap check ran (wall clock); the check is not repeated on every snapshot. */
+  readonly prunedAtMs?: number
+  readonly files: Readonly<Record<string, SnapshotIndexEntry>>
+}
+
+/** Index entries this close to the index's write time are re-hashed (coarse mtime granularity). */
+export const RACY_WINDOW_MS = 2_000
+
+/** The size cap is re-checked after this long, or when one snapshot stored more than {@link SIZE_CHECK_NEW_BYTES}. */
+export const SIZE_CHECK_INTERVAL_MS = 10 * 60 * 1000
+export const SIZE_CHECK_NEW_BYTES = 8 * 1024 * 1024
+
+/** Hashing and copying run this many files at once. */
+const STORE_CONCURRENCY = 16
+/** Bodies up to this size are read into memory once instead of hashed as a stream and read again. */
+const SMALL_OBJECT_BYTES = 1024 * 1024
+
+/** Orphaned objects and trees younger than this are left for a concurrent writer to reference. */
+export const DEFAULT_PRUNE_GRACE_MS = 60 * 60 * 1000
+
+/** Which snapshot records pruning must keep: a predicate over the record's file name, or a set of task ids. */
+export type SnapshotRetention = ((taskSnapshotFile: string) => boolean) | ReadonlySet<string>
+
 /** Options of {@link LocalTaskRecorder}. */
 export interface LocalTaskRecorderOptions {
-  /** Runs `test-command` checks (read when checks run); without one they are not derived. */
-  readonly processes?: () => ProcessRunner | undefined
-  /** Clock for `takenAt` / `checkedAt` (tests pin it). */
+  /** Clock for `takenAt` / `checkedAt` and record ages (tests pin it). */
   readonly now?: () => Date
   /** Snapshot size limit (default `CAPABILITY_LIMITS.maxSnapshotBytes`; tests lower it). */
   readonly maxSnapshotBytes?: number
+  /** Cap on the total bytes of stored objects (default `CAPABILITY_LIMITS.maxSnapshotBytes`). */
+  readonly maxStoreBytes?: number
+  /** Age after which task snapshot records are pruned (default {@link SNAPSHOT_RETENTION_MS}). */
+  readonly retentionMs?: number
+  /**
+   * Records that must never be pruned (age or size): a function called with
+   * the record's file name under `tasks/` (`<taskId>.json` or
+   * `<taskId>.t<turn>.json`), or a set of task ids. Read at each prune, so a
+   * live set can grow. The task being snapshotted is always kept.
+   */
+  readonly retain?: SnapshotRetention
+  /** Minimum time between size-cap checks (default {@link SIZE_CHECK_INTERVAL_MS}; tests pass 0). */
+  readonly sizeCheckIntervalMs?: number
+  /** Grace before unreferenced objects and trees are deleted (default {@link DEFAULT_PRUNE_GRACE_MS}). */
+  readonly pruneGraceMs?: number
 }
 
-interface WalkedFile {
-  readonly path: string
-  readonly absolute: string
-  readonly bytes: number
-  readonly executable: boolean
+/** A `test-command` the model ran, as the specs derive it. */
+interface TestRun {
+  readonly command: string
+  readonly shell: 'bash' | 'pwsh'
+  readonly exitCode: number
 }
 
 function sha256(text: string): string {
@@ -127,8 +188,32 @@ async function hashFile(path: string): Promise<string> {
   return hash.digest('hex')
 }
 
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
+/** Run `task` over `items`, `limit` at a time, in order of completion. */
+async function mapLimited<T, R>(items: readonly T[], limit: number, task: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next
+      next += 1
+      results[index] = await task(items[index]!, index)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
+}
+
+function retained(retain: SnapshotRetention | undefined, file: string, taskId: string): boolean {
+  if (retain === undefined) return false
+  if (typeof retain === 'function') return retain(file)
+  return retain.has(taskId)
+}
+
+interface TaskFileInfo {
+  readonly file: string
+  readonly taskId: string
+  readonly takenAtMs: number
+  readonly tree: string | null
 }
 
 /** The `ctx.taskRecorder` of one project. */
@@ -145,10 +230,11 @@ export class LocalTaskRecorder implements TaskRecorder {
   }
 
   async begin(input: TaskBeginInput): Promise<void> {
-    const files = await this.walk()
-    const bytes = files.reduce((sum, file) => sum + file.bytes, 0)
+    const { files } = await walkProject(this.layout.root)
+    const bytes = files.reduce((sum, file) => sum + file.size, 0)
     let tree: string | null = null
-    if (bytes <= this.maxBytes) tree = await this.storeTree(files)
+    let newBytes = 0
+    if (bytes <= this.maxBytes) ({ tree, newBytes } = await this.storeTree(files))
     const record: TaskSnapshotRecord = {
       formatVersion: 1,
       taskId: input.taskId,
@@ -163,12 +249,15 @@ export class LocalTaskRecorder implements TaskRecorder {
     // The step-4 name keeps the task's first snapshot.
     const legacy = nodePath.join('tasks', `${input.taskId}.json`)
     if (input.turn === undefined || !(await exists(nodePath.join(this.dir, legacy)))) await this.writeJson(legacy, record)
+    // Pruning is housekeeping: it never fails the task.
+    await this.prune(input.taskId, newBytes).catch(() => undefined)
   }
 
   async end(input: TaskEndInput): Promise<TaskEndResult> {
     const specs = this.specs(input)
+    const runs = this.testRuns(input)
     const results: TaskCheck[] = []
-    for (const spec of specs) results.push({ ...(await this.run(spec, input.signal)), target: spec.id })
+    for (const spec of specs) results.push({ ...(await this.run(spec, runs)), target: spec.id })
     const record: TaskChecksRecord = {
       formatVersion: 1,
       taskId: input.taskId,
@@ -184,7 +273,7 @@ export class LocalTaskRecorder implements TaskRecorder {
     return { specs, results }
   }
 
-  /** The check specs a task's deliverables and test commands give. */
+  /** The check specs a task's deliverables and the test commands the model ran give. */
   specs(input: Pick<TaskEndInput, 'deliverableFiles' | 'commands'>): TaskCheckSpec[] {
     const specs: TaskCheckSpec[] = []
     input.deliverableFiles.forEach((path, index) => {
@@ -192,23 +281,26 @@ export class LocalTaskRecorder implements TaskRecorder {
       const format = PARSE_FORMATS[nodePath.posix.extname(path).toLowerCase()]
       if (format !== undefined) specs.push({ id: `parse-${index + 1}`, name: 'parses', path, format })
     })
-    if (this.options.processes?.() !== undefined) {
-      const tests: { command: string; shell: 'bash' | 'pwsh' }[] = []
-      for (const call of input.commands) {
-        const command = call.command.trim()
-        if (!testCommandRan(command, call.exitCode)) continue
-        const at = tests.findIndex(test => test.command === command && test.shell === call.shell)
-        if (at >= 0) tests.splice(at, 1)
-        tests.push({ command, shell: call.shell })
-      }
-      tests.slice(-MAX_TEST_COMMANDS).forEach((test, index) => {
-        specs.push({ id: `test-${index + 1}`, name: 'test-command', command: test.command, shell: test.shell })
-      })
-    }
+    this.testRuns(input).forEach((test, index) => {
+      specs.push({ id: `test-${index + 1}`, name: 'test-command', command: test.command, shell: test.shell })
+    })
     return specs
   }
 
-  private async run(spec: TaskCheckSpec, signal: AbortSignal | undefined): Promise<Omit<TaskCheck, 'target'>> {
+  /** The test runs the model made: pattern match, a run that ran tests, newest of each command, last {@link MAX_TEST_COMMANDS}. */
+  private testRuns(input: Pick<TaskEndInput, 'commands'>): TestRun[] {
+    const tests: TestRun[] = []
+    for (const call of input.commands) {
+      const command = call.command.trim()
+      if (!testCommandRan(command, call.exitCode)) continue
+      const at = tests.findIndex(test => test.command === command && test.shell === call.shell)
+      if (at >= 0) tests.splice(at, 1)
+      tests.push({ command, shell: call.shell, exitCode: call.exitCode ?? 0 })
+    }
+    return tests.slice(-MAX_TEST_COMMANDS)
+  }
+
+  private async run(spec: TaskCheckSpec, runs: readonly TestRun[]): Promise<Omit<TaskCheck, 'target'>> {
     switch (spec.name) {
       case 'file-exists': {
         const info = await stat(this.absolute(spec.path)).catch(() => undefined)
@@ -219,21 +311,10 @@ export class LocalTaskRecorder implements TaskRecorder {
         return problem === undefined ? { name: spec.name, passed: true } : { name: spec.name, passed: false, detail: problem }
       }
       case 'test-command': {
-        const processes = this.options.processes?.()
-        if (processes === undefined) return { name: spec.name, passed: false, detail: 'no process runner' }
-        const result = await processes.run({
-          command: spec.shell === 'bash' ? 'bash' : 'pwsh',
-          args: spec.shell === 'bash' ? ['-c', spec.command] : ['-NoProfile', '-NonInteractive', '-Command', spec.command],
-          cwd: this.layout.root,
-          timeoutMs: TEST_COMMAND_TIMEOUT_MS,
-          ...(signal === undefined ? {} : { signal }),
-        }).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) }))
-        if ('failed' in result) return { name: spec.name, passed: false, detail: `could not start: ${result.failed}`.slice(0, 200) }
-        if (result.timedOut) return { name: spec.name, passed: false, detail: 'timed out' }
-        if (result.aborted) return { name: spec.name, passed: false, detail: 'cancelled' }
-        return result.exitCode === 0
-          ? { name: spec.name, passed: true }
-          : { name: spec.name, passed: false, detail: `exit code ${result.exitCode ?? `signal ${result.signal ?? 'unknown'}`}` }
+        // The model's own run decides; nothing is executed here.
+        const run = runs.find(test => test.command === spec.command && test.shell === spec.shell)
+        if (run === undefined) return { name: spec.name, passed: false, detail: 'no recorded run' }
+        return { name: spec.name, passed: run.exitCode === 0, detail: `the model's own run, exit code ${run.exitCode}` }
       }
     }
   }
@@ -269,77 +350,208 @@ export class LocalTaskRecorder implements TaskRecorder {
     return csvProblem(text)
   }
 
+  /**
+   * The project paths of the latest snapshot (from `index.json`), the
+   * baseline a turn file tracker uses to find shell-made deletions;
+   * `undefined` when there is no index.
+   */
+  async indexedPaths(): Promise<ReadonlySet<string> | undefined> {
+    const index = await this.readIndex()
+    return index === undefined ? undefined : new Set(Object.keys(index.files))
+  }
+
   private absolute(path: string): string {
     return nodePath.join(this.layout.root, ...path.split('/'))
   }
 
-  /** Project files in snapshot scope, sorted by portable path. */
-  private async walk(): Promise<WalkedFile[]> {
-    const files: WalkedFile[] = []
-    const visit = async (dir: string, prefix: string): Promise<void> => {
-      let entries
-      try {
-        entries = await readdir(dir, { withFileTypes: true })
-      } catch (error) {
-        if (isNotFound(error)) return
-        throw error
-      }
-      for (const entry of entries) {
-        const path = prefix === '' ? entry.name : `${prefix}/${entry.name}`
-        const absolute = nodePath.join(dir, entry.name)
-        if (entry.isDirectory()) {
-          if (isIgnoredPath(`${path}/x`)) continue
-          await visit(absolute, path)
-        } else if (entry.isFile()) {
-          if (isIgnoredPath(path)) continue
-          const info = await lstat(absolute)
-          files.push({ path, absolute, bytes: info.size, executable: process.platform !== 'win32' && (info.mode & 0o111) !== 0 })
-        }
-      }
+  private async readIndex(): Promise<SnapshotIndex | undefined> {
+    try {
+      const parsed = JSON.parse(await readFile(nodePath.join(this.dir, 'index.json'), 'utf8')) as Partial<SnapshotIndex>
+      if (parsed.formatVersion !== SNAPSHOT_INDEX_VERSION || typeof parsed.writtenAtMs !== 'number' || parsed.files === null || typeof parsed.files !== 'object') return undefined
+      return parsed as SnapshotIndex
+    } catch {
+      return undefined
     }
-    await visit(this.layout.root, '')
-    return files.sort((a, b) => compare(a.path, b.path))
   }
 
-  /** Store each body once and the tree; returns the tree id. */
-  private async storeTree(files: readonly WalkedFile[]): Promise<string> {
-    const entries: SnapshotFile[] = []
-    for (const file of files) {
-      const digest = await this.storeObject(file.absolute)
-      entries.push({ path: file.path, sha256: digest, bytes: file.bytes, ...(file.executable ? { executable: true as const } : {}) })
+  /** Names in `objects/` (one `readdir`, instead of a `stat` per file). */
+  private async objectNames(): Promise<Set<string>> {
+    try {
+      return new Set(await readdir(nodePath.join(this.dir, 'objects')))
+    } catch {
+      return new Set()
     }
-    const tree: SnapshotTree = { formatVersion: 1, files: entries }
+  }
+
+  /**
+   * Store each new or changed body once and the tree; returns the tree id.
+   * Unchanged files (same size and mtime as in the index, whose object still
+   * exists) keep their recorded hash without being read.
+   */
+  private async storeTree(files: readonly WalkedEntry[]): Promise<{ tree: string; newBytes: number }> {
+    const index = await this.readIndex()
+    const objects = await this.objectNames()
+    let newBytes = 0
+    const racyAfter = index === undefined ? 0 : index.writtenAtMs - RACY_WINDOW_MS
+    const entries = await mapLimited(files, STORE_CONCURRENCY, async (file): Promise<SnapshotFile & { mtimeMs: number }> => {
+      const known = index?.files[file.path]
+      let digest: string | undefined
+      if (known !== undefined && known.size === file.size && known.mtimeMs === file.mtimeMs && file.mtimeMs < racyAfter && objects.has(known.sha256)) {
+        digest = known.sha256
+      } else {
+        const had = objects.size
+        digest = await this.storeObject(nodePath.join(this.layout.root, ...file.path.split('/')), objects, file.size)
+        if (objects.size > had) newBytes += file.size
+      }
+      const executable = process.platform !== 'win32' && (file.mode & 0o111) !== 0
+      return { path: file.path, sha256: digest, bytes: file.size, mtimeMs: file.mtimeMs, ...(executable ? { executable: true as const } : {}) }
+    })
+    const tree: SnapshotTree = {
+      formatVersion: 1,
+      files: entries.map(({ mtimeMs: _mtime, ...entry }) => entry),
+    }
     const text = canonicalJson(tree as unknown as JsonValue)
     const id = sha256(text)
     const target = nodePath.join(this.dir, 'trees', `${id}.json`)
     if (!(await exists(target))) await this.writeText(nodePath.join('trees', `${id}.json`), `${text}\n`)
-    return id
+    const next: SnapshotIndex = {
+      formatVersion: SNAPSHOT_INDEX_VERSION,
+      writtenAtMs: Date.now(),
+      ...(index?.prunedAtMs === undefined ? {} : { prunedAtMs: index.prunedAtMs }),
+      files: Object.fromEntries(entries.map(entry => [entry.path, { size: entry.bytes, mtimeMs: entry.mtimeMs, sha256: entry.sha256 }])),
+    }
+    // The index is a cache: failing to save it only costs the next snapshot a full read.
+    await this.writeText('index.json', JSON.stringify(next)).catch(() => undefined)
+    return { tree: id, newBytes }
   }
 
-  /** Copy a file into `objects/<sha256>` unless that body is stored already. */
-  private async storeObject(absolute: string): Promise<string> {
-    const digest = await hashFile(absolute)
+  /** Copy a file into `objects/<sha256>` unless that body is stored already (`known` lists the stored names). */
+  private async storeObject(absolute: string, known: Set<string>, size = Number.POSITIVE_INFINITY): Promise<string> {
+    // Small files are read once; large ones are hashed as a stream first so a known body is never held in memory.
+    const small = size <= SMALL_OBJECT_BYTES ? await readFile(absolute) : undefined
+    const digest = small === undefined ? await hashFile(absolute) : createHash('sha256').update(small).digest('hex')
+    if (known.has(digest)) return digest
     const objects = nodePath.join(this.dir, 'objects')
     const target = nodePath.join(objects, digest)
-    if (await exists(target)) return digest
+    if (await exists(target)) {
+      known.add(digest)
+      return digest
+    }
     await mkdir(objects, { recursive: true })
     const temp = nodePath.join(objects, `.tmp-${randomUUID()}`)
     try {
-      const body = await readFile(absolute)
+      const body = small ?? await readFile(absolute)
       // The file may have changed between hashing and reading: store it under the hash of what was read.
       const actual = createHash('sha256').update(body).digest('hex')
-      const handle = await open(temp, 'wx')
-      try {
-        await handle.writeFile(body)
-        await handle.sync()
-      } finally {
-        await handle.close()
-      }
+      // No fsync per object: a body lost to a power cut only makes that snapshot unusable as a case.
+      await writeFile(temp, body, { flag: 'wx' })
       await rename(temp, nodePath.join(objects, actual))
+      known.add(actual)
       return actual
     } catch (error) {
       await rm(temp, { force: true }).catch(() => undefined)
       throw error
+    }
+  }
+
+  /**
+   * Retention: delete task records past {@link LocalTaskRecorderOptions.retentionMs},
+   * then the oldest ones while the referenced objects exceed the store cap,
+   * then trees and objects no remaining record references. Retained records
+   * and the current task's are never deleted.
+   */
+  private async prune(currentTaskId: string, newBytes: number): Promise<void> {
+    const tasksDir = nodePath.join(this.dir, 'tasks')
+    const names = (await readdir(tasksDir).catch(() => [] as string[])).filter(name => name.endsWith('.json'))
+    const records: TaskFileInfo[] = []
+    for (const file of names) {
+      try {
+        const parsed = JSON.parse(await readFile(nodePath.join(tasksDir, file), 'utf8')) as Partial<TaskSnapshotRecord>
+        const takenAtMs = Date.parse(parsed.takenAt ?? '')
+        if (typeof parsed.taskId !== 'string' || Number.isNaN(takenAtMs)) continue
+        records.push({ file, taskId: parsed.taskId, takenAtMs, tree: typeof parsed.tree === 'string' ? parsed.tree : null })
+      } catch {
+        // unreadable records are left alone
+      }
+    }
+    const keep = (record: TaskFileInfo): boolean => record.taskId === currentTaskId || retained(this.options.retain, record.file, record.taskId)
+    const cutoff = this.now().getTime() - (this.options.retentionMs ?? SNAPSHOT_RETENTION_MS)
+    let remaining = records.filter(record => keep(record) || record.takenAtMs >= cutoff)
+    const expired = remaining.length !== records.length
+    for (const record of records) if (!remaining.includes(record)) await unlink(nodePath.join(tasksDir, record.file)).catch(() => undefined)
+
+    const cap = this.options.maxStoreBytes ?? CAPABILITY_LIMITS.maxSnapshotBytes
+    if (!expired) {
+      // The size check stats every object: it runs on a timer or after a big snapshot, not on every one.
+      const index = await this.readIndex()
+      const due = index?.prunedAtMs === undefined || Date.now() - index.prunedAtMs >= (this.options.sizeCheckIntervalMs ?? SIZE_CHECK_INTERVAL_MS) || newBytes > SIZE_CHECK_NEW_BYTES
+      if (!due) return
+      if (index !== undefined) await this.writeText('index.json', JSON.stringify({ ...index, prunedAtMs: Date.now() })).catch(() => undefined)
+      if ((await this.objectsBytes()) <= cap) return
+    }
+
+    const trees = new Map<string, readonly SnapshotFile[]>()
+    const treeFiles = async (id: string): Promise<readonly SnapshotFile[]> => {
+      let files = trees.get(id)
+      if (files === undefined) {
+        try {
+          files = (JSON.parse(await readFile(nodePath.join(this.dir, 'trees', `${id}.json`), 'utf8')) as SnapshotTree).files
+        } catch {
+          files = []
+        }
+        trees.set(id, files)
+      }
+      return files
+    }
+    const sizes = new Map<string, number>()
+    const refs = new Map<string, number>()
+    const addRefs = async (record: TaskFileInfo, delta: 1 | -1): Promise<void> => {
+      if (record.tree === null) return
+      for (const file of await treeFiles(record.tree)) {
+        sizes.set(file.sha256, file.bytes)
+        refs.set(file.sha256, (refs.get(file.sha256) ?? 0) + delta)
+      }
+    }
+    for (const record of remaining) await addRefs(record, 1)
+    let total = 0
+    for (const [digest, count] of refs) if (count > 0) total += sizes.get(digest) ?? 0
+    const oldestFirst = remaining.filter(record => !keep(record)).sort((a, b) => a.takenAtMs - b.takenAtMs)
+    for (const record of oldestFirst) {
+      if (total <= cap) break
+      await unlink(nodePath.join(tasksDir, record.file)).catch(() => undefined)
+      remaining = remaining.filter(other => other !== record)
+      if (record.tree === null) continue
+      for (const file of await treeFiles(record.tree)) {
+        const left = (refs.get(file.sha256) ?? 0) - 1
+        refs.set(file.sha256, left)
+        if (left === 0) total -= sizes.get(file.sha256) ?? 0
+      }
+    }
+
+    const liveTrees = new Set(remaining.flatMap(record => (record.tree === null ? [] : [record.tree])))
+    const liveObjects = new Set<string>()
+    for (const [digest, count] of refs) if (count > 0) liveObjects.add(digest)
+    const grace = Date.now() - (this.options.pruneGraceMs ?? DEFAULT_PRUNE_GRACE_MS)
+    await this.sweep('trees', name => !liveTrees.has(name.replace(/\.json$/, '')), grace)
+    await this.sweep('objects', name => !name.startsWith('.tmp-') && !liveObjects.has(name), grace)
+  }
+
+  /** Sum of the sizes of `objects/`. */
+  private async objectsBytes(): Promise<number> {
+    const dir = nodePath.join(this.dir, 'objects')
+    const names = await readdir(dir).catch(() => [] as string[])
+    const sizes = await mapLimited(names, 32, async name => (await stat(nodePath.join(dir, name)).catch(() => undefined))?.size ?? 0)
+    return sizes.reduce((sum, size) => sum + size, 0)
+  }
+
+  /** Delete the entries of `snapshots/<sub>/` that `doomed` selects and that are older than `graceBefore` (ms). */
+  private async sweep(sub: string, doomed: (name: string) => boolean, graceBefore: number): Promise<void> {
+    const dir = nodePath.join(this.dir, sub)
+    for (const name of await readdir(dir).catch(() => [] as string[])) {
+      if (!doomed(name)) continue
+      const info = await stat(nodePath.join(dir, name)).catch(() => undefined)
+      if (info === undefined || info.mtimeMs > graceBefore) continue
+      await unlink(nodePath.join(dir, name)).catch(() => undefined)
     }
   }
 
