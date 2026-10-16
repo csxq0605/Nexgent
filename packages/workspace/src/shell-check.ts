@@ -1,12 +1,11 @@
 /**
- * Whether the host can run commands. On Windows every command goes through
- * PowerShell 7 (`pwsh`): the shell tool is `pwsh -Command`, and the Job
- * Object launcher (`windows-job.ts`) is a `pwsh` script. Windows PowerShell
- * 5.1 (`powershell.exe`) is not a fallback: the launcher uses
- * `ProcessStartInfo.ArgumentList` (.NET Core only), and the model writes
- * PowerShell 7 syntax (`&&`, `||`, `-Parallel`, UTF-8 output by default)
- * that 5.1 rejects or reads differently. So the host is checked once at
- * start-up and the user is told to install PowerShell 7 when it is missing.
+ * Whether the host can run commands. On Windows commands go through
+ * PowerShell: PowerShell 7 (`pwsh`) when it is installed, otherwise Windows
+ * PowerShell 5.1 (`powershell.exe`, ADR 0022 decision 7) with a one-time
+ * notice that recommends installing PowerShell 7 (the model writes PowerShell
+ * 7 syntax such as `&&`, which 5.1 rejects). The Job Object launcher
+ * (`windows-job.ts`) runs under either. When neither is found the host is
+ * reported as not able to run commands.
  */
 import { statSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
@@ -21,6 +20,22 @@ export interface CommandShellStatus {
   readonly available: boolean
   /** Where it was found, when it was looked up and found. */
   readonly path?: string
+  /** Which PowerShell was found (Windows only). */
+  readonly edition?: PowerShellEdition
+  /** Shown once to the user and the model when the 5.1 fallback is in use. */
+  readonly notice?: string
+}
+
+/** The PowerShell flavours Nexgent can drive. */
+export type PowerShellEdition = 'pwsh' | 'windows-powershell'
+
+/** The PowerShell the host uses. */
+export interface PowerShellChoice {
+  readonly edition: PowerShellEdition
+  /** Executable name or path to spawn. */
+  readonly program: string
+  /** Set for the 5.1 fallback. */
+  readonly notice?: string
 }
 
 /** Inputs of {@link checkCommandShell}; defaults are the current process. */
@@ -35,9 +50,14 @@ export interface CommandShellCheckOptions {
 
 /** Message shown when {@link CommandShellStatus.available} is `false`. */
 export const PWSH_MISSING_MESSAGE =
-  'PowerShell 7 (pwsh) was not found. Nexgent runs every command through it on Windows; ' +
-  'Windows PowerShell 5.1 (powershell.exe) does not work. Install PowerShell 7 ' +
-  '(for example `winget install --id Microsoft.PowerShell`) and restart Nexgent.'
+  'PowerShell was not found (neither pwsh nor powershell.exe). Nexgent runs every command through PowerShell on Windows. ' +
+  'Install PowerShell 7 (for example `winget install --id Microsoft.PowerShell`) and restart Nexgent.'
+
+/** Shown once when Windows PowerShell 5.1 stands in for PowerShell 7. */
+export const POWERSHELL_51_NOTICE =
+  'PowerShell 7 (pwsh) was not found, so commands run in Windows PowerShell 5.1. Write 5.1 syntax: no `&&` / `||` chaining ' +
+  '(use `;` and check `$LASTEXITCODE`), and output may not be UTF-8 by default. Installing PowerShell 7 is recommended ' +
+  '(`winget install --id Microsoft.PowerShell`).'
 
 function isFile(path: string): boolean {
   try {
@@ -77,10 +97,50 @@ export function findPwsh(options: CommandShellCheckOptions = {}): string | undef
   return undefined
 }
 
+/** Pick PowerShell 7, else Windows PowerShell 5.1, else `undefined`. Pure over the injected probes. */
+export function selectPowerShell(options: CommandShellCheckOptions = {}): (PowerShellChoice & { readonly path: string }) | undefined {
+  const pwsh = findPwsh(options)
+  if (pwsh !== undefined) return { edition: 'pwsh', program: options.pwshPath !== undefined ? pwsh : 'pwsh', path: pwsh }
+  // An explicit launcher path is a deliberate choice; do not second-guess it.
+  if (options.pwshPath !== undefined) return undefined
+  const legacy = findPwsh({ ...options, pwshPath: 'powershell' })
+  return legacy === undefined ? undefined : { edition: 'windows-powershell', program: 'powershell', path: legacy, notice: POWERSHELL_51_NOTICE }
+}
+
+let cachedChoice: PowerShellChoice | undefined
+let noticeTaken = false
+
+/** The PowerShell this process uses on Windows (probed once; falls back to the name `pwsh` when none is found). */
+export function currentPowerShell(): PowerShellChoice {
+  if (cachedChoice === undefined) {
+    const found = selectPowerShell()
+    if (found === undefined) return { edition: 'pwsh', program: 'pwsh' }
+    cachedChoice = { edition: found.edition, program: found.program, ...(found.notice === undefined ? {} : { notice: found.notice }) }
+  }
+  return cachedChoice
+}
+
+/** The 5.1 notice the first time it is asked for, then `undefined`. */
+export function takePowerShellNotice(choice: PowerShellChoice = currentPowerShell()): string | undefined {
+  if (choice.notice === undefined || noticeTaken) return undefined
+  noticeTaken = true
+  return choice.notice
+}
+
+/** Forget the cached choice and the shown-notice flag (tests). */
+export function resetPowerShellCache(): void {
+  cachedChoice = undefined
+  noticeTaken = false
+}
+
 /** Check, once at start-up, that commands can run on this host. Never throws. */
 export function checkCommandShell(options: CommandShellCheckOptions = {}): CommandShellStatus {
   const platform = options.platform ?? process.platform
   if (platform !== 'win32') return { shell: 'bash', required: false, available: true }
-  const path = findPwsh({ ...options, platform })
-  return path === undefined ? { shell: 'pwsh', required: true, available: false } : { shell: 'pwsh', required: true, available: true, path }
+  const found = selectPowerShell({ ...options, platform })
+  if (found === undefined) return { shell: 'pwsh', required: true, available: false }
+  return {
+    shell: 'pwsh', required: true, available: true, path: found.path, edition: found.edition,
+    ...(found.notice === undefined ? {} : { notice: found.notice }),
+  }
 }

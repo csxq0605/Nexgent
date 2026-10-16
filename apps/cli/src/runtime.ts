@@ -54,6 +54,8 @@ export interface RuntimeOpenOptions {
    * `workspace-write`; resume → the mode in the session header.
    */
   readonly sandboxMode?: SandboxMode
+  /** Start in plan mode (`--plan`, new sessions only). */
+  readonly plan?: boolean
   /** The host's approval responder, to register with `ctx.approvals`. */
   readonly approvals: ApprovalResponder
   /** Process environment (API base URL override, `NEXGENT_HOME`). */
@@ -248,6 +250,7 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
           sessionId: (await sdk.createSession({
             projectId,
             ...(options.sandboxMode === undefined ? {} : { sandboxMode: options.sandboxMode }),
+            ...(options.plan === true ? { plan: true } : {}),
             ...(options.model === undefined ? {} : { model: options.model }),
           })).sessionId,
         })
@@ -278,6 +281,8 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
       projectRoot: project.root,
       model: view.model,
       sandboxMode: view.sandboxMode,
+      ...(view.plan ? { plan: true } : {}),
+      ...(view.commandSandbox === undefined ? {} : { commandSandbox: view.commandSandbox }),
       resumed: resumeId !== undefined,
     }
     let closing: Promise<void> | undefined

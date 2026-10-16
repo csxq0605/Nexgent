@@ -1,6 +1,6 @@
 # 权限与审批模型
 
-> 步骤 1 章节（沙箱模式、路径与命令策略、工具审批、费用上限格式、密钥存放、已知边界、共用审批交互、测试）已定稿；步骤 2 第 1 轮填写"本地 IPC 与访问令牌"，并把 `.nexgent/outputs/` 改为对模型只读、补上 `.nexgent/skills/`；步骤 3 第 1 轮新增"子会话继承""网页获取（`web_fetch`）""代码执行进程（PTC）"三节，并补充费用上限与审批交互里的成员规则（决策见 ADR 0004）；"插件安装审批"在步骤 4 填。重做 C1（ADR 0017–0019）补上用户数据目录的访问规则、编辑工具、工具并发、美元费用上限与 80% 提醒，并新增“学习与学习预算”一节。字段名以 `packages/kernel/src/contracts/` 为准，二者冲突时改契约 PR 并同步本文。来源：计划 4.10 第 2 行与"安全"一行；ADR 0001 决策 9、12。
+> 步骤 1 章节（沙箱模式、路径与命令策略、工具审批、费用上限格式、密钥存放、已知边界、共用审批交互、测试）已定稿；步骤 2 第 1 轮填写"本地 IPC 与访问令牌"，并把 `.nexgent/outputs/` 改为对模型只读、补上 `.nexgent/skills/`；步骤 3 第 1 轮新增"子会话继承""网页获取（`web_fetch`）""代码执行进程（PTC）"三节，并补充费用上限与审批交互里的成员规则（决策见 ADR 0004）；"插件安装审批"在步骤 4 填。重做 C1（ADR 0017–0019）补上用户数据目录的访问规则、编辑工具、工具并发、美元费用上限与 80% 提醒，并新增“学习与学习预算”一节。重做 K3（ADR 0022）把权限翻正：命令进系统沙箱、项目外路径改为询问、命令策略按 shell 语法解析、只读模式能跑只读命令并新增计划模式、搜索不再静默隐藏敏感文件、shell 可后台运行且输出保留头尾；改动处标“ADR 0022”。字段名以 `packages/kernel/src/contracts/` 为准，二者冲突时改契约 PR 并同步本文。来源：计划 4.10 第 2 行与"安全"一行；ADR 0001 决策 9、12。
 
 ## 目的与范围
 
@@ -12,16 +12,19 @@
 
 | 模式 | 文件读 | 文件写 / 编辑 | `bash` / `pwsh` | 命令内网络 |
 | --- | --- | --- | --- | --- |
-| `read-only` | 读根内允许 | 全部拒绝（不提示） | 不执行（拒绝，不提示） | 无（无命令） |
-| `workspace-write`（默认） | 读根内允许；根外拒绝 | 写根内允许；`.nexgent/` 内部目录与拒绝模式按下节；根外拒绝 | cwd 必须在项目内；命令形态黑名单需审批 | 允许，下载并执行类形态需审批 |
-| `full-access` | 任意 | 任意，不检查 | 任意 cwd | 允许，不检查 |
+| `read-only` | 读根内允许；根外询问 | 全部拒绝（不提示） | 只读命令执行（有系统沙箱时在只读沙箱里，只有会话临时目录可写）；其余拒绝，不提示，并提示需要切换模式（ADR 0022） | 按 `commands.network` |
+| `workspace-write`（默认） | 读根内允许；根外询问（ADR 0022） | 写根内允许；`.nexgent/` 内部目录与拒绝模式按下节；根外询问 | 在系统沙箱里执行，只能写项目、会话临时目录与本会话放行的目录；cwd 在项目或已放行的目录内；命令形态黑名单需审批 | 按 `commands.network`（默认开，用宿主网络）；下载并执行类形态需审批 |
+| `full-access` | 任意 | 任意，不检查 | 任意 cwd，不进系统沙箱 | 允许，不检查 |
+
+**计划模式**（ADR 0022 决策 4）。开始会话时可以选（CLI `nexgent run --plan`，SDK `sessions.create` 的 `plan: true`）。行为等同 `read-only`，另外多一个工具 `exit_plan`（输入 `{ plan }`，`approval: 'always'`，审批详情就是计划全文）：用户批准后，会话切到原定的执行模式（会话头的 `sandboxMode`）并写一条 `session.mode` 记录（`reason: 'plan-approved'`），`exit_plan` 随即从工具列表消失。模型不能自己切模式，只能经 `exit_plan` 的审批。
 
 - 模式只约束**工具层**，`read-only` 的"拒绝"是工具返回结构化错误 `SANDBOX_DENIED { mode, path | command }`，模型可据此换方案或请求用户切换模式；不会弹审批。
 - 模式设置与优先级（高者胜）：
   1. CLI 参数 `--sandbox <read-only|workspace-write|full-access>`（`run` / `resume` / `app` 均接受）；
   2. 项目配置 `.nexgent/config.json` 的 `sandboxMode` 字段；
   3. 默认 `workspace-write`。
-- 生效值在会话创建时写入会话头（`sandboxMode` 字段，见 `data-formats.md`），`resume` 时沿用会话头的值，除非再次传 `--sandbox`。步骤 1 不做会话中途切换；步骤 2 桌面应用若加切换控件，必须以会话记录落盘并从下一次工具调用起生效。
+- 生效值在会话创建时写入会话头（`sandboxMode` 字段，见 `data-formats.md`），`resume` 时沿用会话头与其后最近一条 `session.mode` 的值，除非再次传 `--sandbox`。
+- **中途切换**（ADR 0022 决策 4）：宿主经 SDK `sessions.setMode({ sandboxMode?, plan? })` 在会话中途切换模式或计划模式，会话写一条 `session.mode` 记录（`reason: 'host'`），从下一次工具调用起生效，`resume` 后沿用。
 - 非法值在装载时报错退出，不回落到默认值。
 - `full-access` 启动时在 CLI 与桌面应用各打印一行警告，并在系统提示里告知模型。
 
@@ -32,7 +35,8 @@
 | 类别 | 内容 | 来源 |
 | --- | --- | --- |
 | 读根 | 项目目录（`--project`，realpath 后）；加 `.nexgent/config.json` 的 `extraReadRoots: string[]`（绝对路径） | 项目配置；CLI 不加 |
-| 写根 | 项目目录；再减去下面的宿主专属目录与拒绝模式 | 固定，不可配置扩大 |
+| 写根 | 项目目录；加 `extraWriteRoots: string[]`（绝对路径，ADR 0022）；再减去下面的宿主专属目录与拒绝模式 | 项目配置，改它要审批 |
+| 本会话放行的目录 | 用户在“项目外路径”审批里选“本会话允许这个目录”的目录，读与写分开放行（授权 `fs.read` / `fs.write`，模式 `<目录>/**`） | `approval.grant` 记录 |
 | 临时目录 | `os.tmpdir()` 下的 `nexgent-<sessionId>/`，会话结束删除 | 宿主创建，可读写 |
 
 **`.nexgent/` 内部。**
@@ -44,6 +48,13 @@
 | `outputs/` | 允许 | 拒绝 | 成果快照，只由宿主（`@nexgent/tasking`）在 `present` 时写；模型不能改任何版本的快照（步骤 2 起，步骤 1 曾允许写）。模型把成果写在项目里，再用 `present` 交付 |
 | `skills/` | 允许 | 拒绝 | 项目技能，由用户维护（步骤 2）；`load_skill` 经宿主读取 |
 | `config.json` | 允许 | 拒绝 | 配置改动必须经用户或审批流 |
+
+**项目外的路径**（ADR 0022 决策 2）。文件工具（`read_file`、`write_file`、`str_replace`、`list_files`、`search_text`，以及 `read_document`、表格工具、`run_code` 的宿主函数）读写读根 / 写根之外的路径时不再直接拒绝，而是弹审批：风险中，选项“仅本次”或“本会话允许这个目录”（`options: ['once', 'session']`），模式为该文件所在目录（或该目录本身）加 `/**`。读和写分开放行：读的授权名是 `fs.read`，写的是 `fs.write`（`ToolApprovalAsk.grantTool`），所以一次“本会话允许”对所有文件工具都生效，读的放行不放行写。本会话放行写的目录同时加进命令沙箱的可写目录。以下位置仍直接拒绝，不询问：
+- `<NEXGENT_HOME>` 整个目录（用户数据目录里本项目的 `materials/`、`outputs/` 只读例外，见下）；
+- 凭证目录（`PROTECTED_HOME_ENTRIES`，相对用户主目录）：`.ssh`、`.aws`、`.gnupg`、`.config/gcloud`、`.kube`、`.docker`、`.netrc`、`.npmrc`、`.pypirc`、`.git-credentials`、`.config/gh`、`.azure`、`.password-store`；
+- 写入时还有系统目录（`systemWriteDenied`：`/etc`、`/usr`、`/bin`、`/sbin`、`/System`、`/Library`、`C:\Windows`、`C:\Program Files` 等）；
+- 经符号链接从项目内逃到外面的路径（`symlink-escape`）照旧拒绝。
+长期放行写项目配置的 `extraReadRoots` / `extraWriteRoots`，两者都是用户操作，改它们要审批（`GUARDED_PROJECT_CONFIG_FIELDS`）。
 
 **Nexgent 主目录**（`<NEXGENT_HOME>`，默认 `~/.nexgent`；ADR 0012）放凭证、用户级配置 `config.json`、用户级改进器版本线 `improvers/` 与用户级元改进队列 `improvements/`。它在每个项目之外，不在任何读根或写根里，文件工具与 `run_code` 读写都拒绝（路径规范化后的包含检查即可挡住），只有宿主写；用户把某个项目放在主目录之内或把主目录列进 `extraReadRoots` 时，这些路径仍按宿主专属目录处理，读写都拒绝。
 
@@ -61,7 +72,7 @@
 | --- | --- | --- |
 | `.git/**` | 允许 | 拒绝（`git` 命令不在此列，由命令策略管） |
 | `node_modules/**`、`.pnpm-store/**` | 允许 | 拒绝；要改依赖走包管理命令并审批 |
-| `.env`、`.env.*`、`*.pem`、`*.key`、`id_rsa*`、`.npmrc`、`.netrc` | 审批 | 审批 |
+| `.env`、`.env.*`、`*.pem`、`id_rsa*`、`id_ed25519*`、`id_ecdsa*`、`*.p12`、`*.pfx`、`.npmrc`、`.netrc`（ADR 0022 决策 5 收窄：`.env.example`、`.env.sample`、`.env.template`、`.env.dist` 与 `*.pub` 不算，去掉 `*.key`） | 审批 | 审批 |
 | 其他以 `.` 开头的文件 / 目录 | 允许 | 允许 |
 
 **规范化**（每次调用、在检查前执行，一次）：
@@ -73,38 +84,62 @@
 5. 路径长度：解析后超过 4096 个字符拒绝；Windows 超过 260 字符的路径交给 Node 的长路径支持处理，不做额外限制。
 6. 所有检查用解析后的绝对路径记录在错误与账本里，不记录模型给的原始拼法以外的内容。
 
-**Windows：先路径策略，后 ACL**（ADR 0001 决策 9）。步骤 1 的策略只在文件工具中生效，对 `pwsh` 启动的进程没有约束力。后补的 ACL 隔离（参考 DSH `sandbox-windows-acl` 的受限令牌方案）会增加：子进程及其后代的写入与删除被限制在项目目录与会话临时目录；受限令牌在 `read-only` 下无任何写授权；失败时不以非受限方式启动。ACL 不能补上的：硬链接别名、读取不受限、被其他 AppContainer 工具加过 ACL 的目录不可读。
+**搜索**（ADR 0022 决策 5）。`list_files` 与 `search_text` 读 `.gitignore`（与任务快照同一个解析器；`includeIgnored: true` 时不读），`search_text` 支持输出模式（内容 / 文件名 / 计数）、上下文行（`before` / `after` / `context`）、多行匹配、`limit` / `offset` 分页，大文件流式搜索，不再静默跳过。遇到需要审批的敏感文件，结果末尾写明跳过了哪些（`[sensitive: not read without approval]`），不再让它们消失。实现是 JS，不依赖本机 `rg`。搜索项目外的目录按上面的“项目外的路径”询问一次，放行后在该目录下搜。
+
+**Windows：先路径策略，后 ACL**（ADR 0001 决策 9）。步骤 1 的策略只在文件工具中生效，对 `pwsh` 启动的进程没有约束力（ADR 0022 不声称 Windows 有系统沙箱）。后补的 ACL 隔离（参考 DSH `sandbox-windows-acl` 的受限令牌方案）会增加：子进程及其后代的写入与删除被限制在项目目录与会话临时目录；受限令牌在 `read-only` 下无任何写授权；失败时不以非受限方式启动。ACL 不能补上的：硬链接别名、读取不受限、被其他 AppContainer 工具加过 ACL 的目录不可读。
 
 ## 命令策略
 
-工具：Linux / macOS 为 `bash`（`bash -c <command>`，不是登录 shell），Windows 为 `pwsh`（`pwsh -NoProfile -NonInteractive -Command <command>`）。两者都是一次性进程，不保留 shell 状态。
+工具：Linux / macOS 为 `bash`（`bash -c <command>`，不是登录 shell），Windows 为 `pwsh`（`pwsh -NoProfile -NonInteractive -Command <command>`；没有 PowerShell 7 时回退到 Windows PowerShell 5.1 `powershell.exe`，并提示一次建议安装 pwsh 7，ADR 0022 决策 7）。两者都是一次性进程，不保留 shell 状态。
 
-| 规则 | `read-only` | `workspace-write` | `full-access` |
+| 规则 | `read-only` / 计划模式 | `workspace-write` | `full-access` |
 | --- | --- | --- | --- |
-| 是否执行 | 否 | 是 | 是 |
-| cwd | — | 必须在项目目录内（按路径策略解析），默认项目目录 | 任意 |
-| 超时 | — | 每次调用 `timeoutMs`，默认 120 000，上限 600 000；超出上限按上限 | 同左 |
-| 形态黑名单 | — | 命中则审批 | 不审批 |
-| 网络 | — | 不限制 | 不限制 |
+| 是否执行 | 只读命令执行，其余拒绝 | 是 | 是 |
+| 系统沙箱 | 有：只读，只有会话临时目录可写 | 有：见下节 | 不进 |
+| cwd | 项目目录内 | 项目目录或已放行的写目录内（按路径策略解析），默认项目目录 | 任意 |
+| 超时 | 每次调用 `timeoutMs`，默认 120 000，上限 600 000；超出上限按上限；后台运行时不给就没有 | 同左 | 同左 |
+| 形态黑名单 | — | 命中则审批 | 只有“始终审批”表 |
+| 网络 | 按 `commands.network` | 按 `commands.network` | 不限制 |
+
+**只读命令**（ADR 0022 决策 4；`isReadOnlyCommand`）。一条命令里每个简单命令都在只读命令表里，而且没有写文件的重定向（`> file`、`>> file`；`2>&1` 与 `> /dev/null` 不算）时，算只读命令。表（POSIX）：`ls`、`cat`、`head`、`tail`、`wc`、`rg`、`grep`、`pwd`、`echo`、`printf`、`which`、`du`、`df`、`file`、`stat`、`tree`、`sort`、`uniq`、`cut`、`tr`、`jq`、`diff`、`basename`、`dirname`、`realpath`、`env`、`date`、`uname`、`ps` 等；`find` 不带 `-delete` / `-exec` / `-ok` / `-fprint*`；`sed` 只限不带 `-i`、`w` 命令与脚本文件的打印类脚本；`awk` 不带 `system`、`getline`、重定向与管道写出；`sort` 不带 `-o`；`git` 只限 `status`、`diff`、`log`、`show`、`branch`（不带改动选项）、`rev-parse`、`ls-files`、`blame` 等读的子命令；常见程序的 `--version`。PowerShell 有对应的 cmdlet 表（`Get-ChildItem`、`Get-Content`、`Select-String` 等）。清单在 `packages/workspace/src/command-policy.ts`。
+
+**系统沙箱**（ADR 0022 决策 1）。`workspace-write`、`read-only` 与计划模式下，`bash` 在系统沙箱里运行：macOS 用 seatbelt（`sandbox-exec`），Linux 用 bubblewrap（需要 `bwrap` 与 `socat`）；实现是 `@anthropic-ai/sandbox-runtime`（Apache-2.0，钉版本 0.0.80）。
+- 只能写：项目目录、会话临时目录、`extraWriteRoots`、本会话放行写的目录；`read-only` / 计划模式只能写会话临时目录。
+- 写保护：项目的 `.nexgent/`、`.git/hooks/`、`.git/config`。
+- 读写都不行：`<NEXGENT_HOME>`（本项目的资料 `materials/` 与成果 `outputs/` 可读，不可写）与上面的凭证目录。
+- 网络：`commands.network` 为 `true`（默认）时命令用宿主网络，不经代理；为 `false` 时命令在新的网络命名空间里，没有网络。
+- 命令触犯沙箱失败时，工具结果附上被拦的操作与一句说明（`<sandbox_violations>`），让模型知道原因。
+- 不进沙箱重跑：调用参数 `sandbox: false`，每次都要审批（风险高，只给“仅本次”）。
+- Linux 上库为网络桥常驻的 `socat` 经 `setpriv --pdeathsig KILL` 启动，宿主进程被强杀时随之结束（没有 `setpriv` 时用库的默认方式）。
+- 没有系统沙箱的平台（Windows；Linux 缺 bubblewrap 或 socat，或不允许用户命名空间）：命令照旧只在命令策略下运行。会话头 `commandSandbox` 记下 `{ kind: 'none', reason }`，CLI 打一行说明、桌面在输入框旁显示“命令未进系统沙箱”，不声称有沙箱。
+- 项目配置 `commands.systemSandbox: 'auto' | 'required' | 'off'`，默认 `auto`。`required` 时没有沙箱就不执行命令；`off` 由用户自己关，会话头记 `{ kind: 'off' }`，界面显示“系统沙箱已关闭”。改这个字段要审批（`commands` 在 `GUARDED_PROJECT_CONFIG_FIELDS` 里）。
+
+**后台运行**（ADR 0022 决策 6）。`bash` / `pwsh` 的 `run_in_background: true` 立即返回一个编号；`shell_output({ id })` 读新增输出与是否还在运行 / 退出码，`shell_kill({ id })` 结束它和它启动的一切。会话关闭时全部回收，宿主退出时也回收，不留进程。
 
 **进程树终止。** 超时或用户取消时：POSIX 子进程以独立进程组启动（`detached: true`），先对进程组发 `SIGTERM`，等 `graceMs`（默认 5 000）后发 `SIGKILL`；Windows 优先用 Job Object（`KILL_ON_JOB_CLOSE`，参考 DSH `win32-process` 的方式），不可用时退回 `taskkill /T /F /PID`。终止后必须等到进程组 / Job 为空再返回工具结果，结果带 `terminated: 'timeout' | 'cancel'`。
 
 **环境清洗。** 子进程环境从宿主环境复制后删除：`NEXGENT_*`、名字以 `_API_KEY`、`_TOKEN`、`_SECRET`、`_PASSWORD` 结尾的变量、`AWS_*`、`AZURE_*`、`GOOGLE_APPLICATION_CREDENTIALS`；再叠加 `TMP` / `TEMP` / `TMPDIR` 指向会话临时目录。工具调用显式传入的 `env` 在清洗之后合并，因此模型不能靠传 `env` 拿回密钥（密钥值不在模型可见范围内）。`PATH` 保留。
 
-**输出上限。** stdout 与 stderr 各保留末尾 64 KiB（可配置 `maxOutputBytes`），超出部分丢弃并在开头加一行标记 `[nexgent: output truncated, dropped N bytes]`；完整输出不落盘。结果在进入会话与账本前经过密钥脱敏（见"密钥存放"）。
+**输出上限**（ADR 0022 决策 6）。交给模型的结果最多约 30 000 字符（`MODEL_OUTPUT_CHARS`），超出时保留开头和结尾，中间写明省略了多少；完整输出写到会话临时目录，路径附在结果里。结果在进入会话与账本前经过密钥脱敏（见"密钥存放"）。
 
-**形态黑名单**（`workspace-write` 下命中即触发审批，审批通过后才执行；匹配对象是命令字符串，按空白与管道分段做前缀匹配，故意写得宽，宁可多问）：
+**解析**（ADR 0022 决策 3；`packages/kernel/src/command-parse.ts`）。命令按 shell 语法解析：引号、转义、`;` `&&` `||` `|` `&`、`$( )`、反引号、子 shell、重定向都识别；`sh|bash|zsh -c '…'`、`env`、`nohup`、`time`、`nice`、`timeout`、`xargs`、`command`、`exec` 这类包装逐层展开，取出每个简单命令；`git`、`npm`、`pnpm`、`yarn` 先去掉全局选项（`-C <dir>`、`--prefix`、`-w`、`--filter <x>` 等）再取子命令。规则逐个作用于简单命令，引号里的文字不参与匹配（提交信息里写“sudo”不会误报）。`$HOME`、`~`、`$TMPDIR` 先展开，再判断“删除项目外内容”。PowerShell 用同一个词法器处理引号与分隔符，规则表照旧按 cmdlet 名。
+
+**形态黑名单**（`workspace-write` 下命中即触发审批，审批通过后才执行）：
 
 | 类别 | 形态举例 |
 | --- | --- |
 | 安装包 | `npm\|pnpm\|yarn\|pip\|pip3\|uv\|cargo\|go install`、`apt\|apt-get\|brew\|choco\|winget\|scoop install` |
 | 推送 / 发布 | `git push`、`git remote add`、`npm publish`、`gh pr merge` |
-| 删除根外内容 | `rm -r*`、`Remove-Item -Recurse` 且参数解析为项目外路径或 `/`、`~`、盘符根 |
+| 删除根外内容 | `rm -r*`、`Remove-Item -Recurse` 且参数解析为项目、会话临时目录与已放行写目录之外的路径，或 `/`、`~`、盘符根 |
+| 删除项目 | 删除项目目录本身，或项目的 `.nexgent/`、`.git/`（任何模式都问） |
+| 丢弃改动 | `git clean`、`git reset --hard`、`git checkout --`、`git restore`、`git stash drop` 这类丢弃未提交改动或历史的形态 |
 | 提权 | `sudo`、`su`、`doas`、`runas`、`Start-Process -Verb RunAs` |
 | 下载并执行 | `curl\|wget\|Invoke-WebRequest ... \| sh\|bash\|pwsh\|iex`、`Invoke-Expression`、`eval "$(curl ...)"` |
 | 改系统状态 | `systemctl`、`sc.exe`、`reg add`、`Set-ExecutionPolicy`、`chmod -R` / `chown -R` 作用于项目外 |
 
-黑名单不是安全边界，只是把高风险形态交给用户决定；绕过方式（如 base64 解码后执行）不在步骤 1 的拦截范围内，见"已知边界"。
+黑名单不是安全边界，只是把高风险形态交给用户决定；有系统沙箱时，文件与网络的边界由沙箱给出。绕过方式（如 base64 解码后执行）不在黑名单的拦截范围内，见"已知边界"。
+
+提权、删除项目外内容、删除项目、下载并执行、改系统状态五类，以及“不进沙箱重跑”，审批只给“仅本次”；其他类别可以选本会话 / 本项目。
 
 ## 工具审批
 
@@ -125,7 +160,7 @@
 **粒度。** 用户每次应答选择作用范围：
 
 - `once`：只放行本次调用；
-- `session`：本会话内相同工具 + 相同匹配模式（命令前缀或路径模式）不再问，记录在会话中（`approval.grant` 记录），`resume` 后仍有效；
+- `session`：本会话内相同工具 + 相同匹配模式不再问，记录在会话中（`approval.grant` 记录），`resume` 后仍有效；
 - `project`：写入 `.nexgent/config.json` 的 `approvals` 列表（迁移后写用户数据目录的 `grants.json`），之后所有会话生效。
 
 ```json
@@ -137,7 +172,7 @@
 }
 ```
 
-`pattern` 对命令是前缀匹配，对路径是项目相对路径的 glob；没有 `pattern` 的条目放行该工具的所有调用，CLI 与桌面应用都只在用户显式选择时才写无 `pattern` 的条目。
+`pattern` 对命令是触发审批的那个简单命令的完整词序列（ADR 0022 决策 3，例如 `git push origin main`），匹配按整词比较：脚本里每个简单命令都要与某条授权的词序列相同才放行，`git push` 的授权不放行 `git push --force`；对路径是项目相对路径（项目外为绝对路径）的 glob，`<目录>/**` 也覆盖该目录本身。授权匹配只有 kernel 一套实现（`grantMatches`），workspace 不再自带。授权的工具名一般是工具名；项目外目录的授权用 `fs.read` / `fs.write`，对所有文件工具通用（`ToolApprovalAsk.grantTool`）。没有 `pattern` 的条目放行该工具的所有调用，CLI 与桌面应用都只在用户显式选择时才写无 `pattern` 的条目。
 
 **记录。** 账本的 `tool.call` 记录带 `approval` 字段（契约 `ToolCallApproval`）：`{ required: boolean, decision: 'allow' | 'deny' | 'timeout' | 'cancel' | 'auto', scope?: 'once' | 'session' | 'project', requestId?: string }`；`auto` 表示命中已有授权。会话里写同一事实的 `approval.request` / `approval.decision` 两条记录，字段与 `ApprovalRequest` / `ApprovalDecision` 一致。审批 UI 的呈现不进入会话。
 
@@ -339,17 +374,18 @@
 
 如实列出步骤 1 不能防住的情况；这些不是待办，是当前策略面的定义：
 
-1. **路径策略只约束文件工具。** `workspace-write` 下 `bash` / `pwsh` 启动的进程以用户身份运行，能读写用户能读写的任何路径；cwd 限制与形态黑名单只提高门槛。在 Linux 上接 bwrap / Landlock、Windows 上接 ACL 之前，命令执行没有文件边界。
+1. **命令的文件边界只在有系统沙箱的平台上成立**（ADR 0022）。macOS 与有 bubblewrap 的 Linux 上，命令写不出项目、会话临时目录与放行目录，读不到 `<NEXGENT_HOME>` 与凭证目录；但系统沙箱挡不住命令读取**项目内**的敏感文件（`.env` 等），项目内敏感文件只有文件工具会问，命令读它们不问。Windows 与没有沙箱的 Linux 上，`bash` / `pwsh` 启动的进程以用户身份运行，能读写用户能读写的任何路径；cwd 限制与形态黑名单只提高门槛。`sandbox: false` 经审批后同样没有边界。
 2. **形态黑名单可被绕过。** 编码、变量拼接、脚本文件间接执行都不在匹配范围内。黑名单的目的是让常见高风险操作经过用户，不是阻止有意绕过。
 3. **`full-access` 没有任何边界。** 等同于用户亲自执行。
 4. **插件包进程内执行（步骤 4）。** 插件包与宿主同进程、同权限，沙箱与审批对其无效，因此采用前每次人审批（ADR 0001 决策 12）。
 5. **符号链接竞争。** 解析与打开之间仍有窗口；二次解析把窗口缩小但没有消除。对手是同一用户的并发进程时无法防御。
 6. **Windows 路径策略弱于 ACL。** 大小写、8.3 短名、交接点（junction）、硬链接都靠 realpath 与身份比较，覆盖不完整；ACL 后补后仍有硬链接别名与读不受限的边界。
 7. **读根不隔离读取。** `extraReadRoots` 之外的读取被文件工具拒绝，但命令可以读任何东西；密钥脱敏只覆盖已知形态。
-8. **网络不受限。** 三种模式都不限制子进程网络；只有 `read-only` 因不执行命令而没有网络。
+8. **网络只有开关。** `commands.network: false` 在有系统沙箱的平台上切断命令的网络；开着时命令用宿主网络，不按域名过滤。没有系统沙箱时这个开关不起作用。
 9. **审批依赖宿主在场。** 非 TTY 的 CLI 把所有审批视为拒绝，任务可能因此失败而不是等待。
 10. **成员共用工作目录（步骤 3）。** 多个成员可以同时写同一项目；`write_file` 只新建、提示要求成员写各自子目录，但两个成员用 `str_replace` 改同一文件时仍会交错。同名成果不会互相追加版本，文件本身不受保护。
-11. **PTC 进程不是安全沙箱（步骤 3）。** 空环境变量与宿主函数的路径检查限制了常见的越界，但 Node 进程仍以用户身份运行；在接入操作系统级隔离之前，`workspace-write` 下的 `run_code` 与 `bash` 处于同一信任级别。
+11. **PTC 进程不是安全沙箱（步骤 3）。** 空环境变量与宿主函数的路径检查限制了常见的越界，但 Node 进程仍以用户身份运行，`run_code` 没有进系统沙箱（ADR 0022 只覆盖 `bash`）。
+12. **只读命令表是判断，不是隔离**（ADR 0022）。`read-only` 下放行的只读命令在有系统沙箱时还在只读沙箱里；没有沙箱时只靠命令表与解析，表外的写法（如 `git` 的别名配置、`find -fprint`）以外的绕过仍可能写文件。
 
 ## CLI 与桌面应用共用的审批交互
 
@@ -364,7 +400,7 @@ interface ApprovalRequest {
   summary: string                  // 一行：要做什么（命令全文或路径）
   detail?: string                  // 多行上下文：cwd、匹配到的规则、模型给的理由
   risk: 'low' | 'medium' | 'high'  // 低：敏感文件读；中：黑名单命令；高：始终审批表
-  options: Array<'once' | 'session' | 'project'>  // 允许选择的作用范围；始终审批表只给 'once'
+  options: Array<'once' | 'session' | 'project'>  // 允许选择的作用范围；始终审批表只给 'once'；项目外路径给 ['once', 'session']
   pattern?: string                 // session / project 授权将保存的匹配模式
   expiresAt?: string               // ISO 时间；CLI 填，桌面应用可空
   member?: {                       // 步骤 3：成员（子会话）发起时才有；sessionId 此时是成员会话
@@ -399,8 +435,11 @@ interface ToolApprovalAsk {
   pattern?: string                 // session / project 授权保存的匹配模式；缺省从 subject 推导
   subject?: { kind: 'command' | 'path' | 'other', value: string }  // 用于匹配已有授权；默认 { kind: 'other', value: summary }
   options?: Array<'once' | 'session' | 'project'>  // 可选作用范围；默认宿主支持的全部，risk 为 'high' 时只给 'once'
+  grantTool?: string               // ADR 0022：授权存放与匹配用的名字；缺省为工具名。项目外路径用 'fs.read' / 'fs.write'
 }
 ```
+
+`ToolContext.grants()`（ADR 0022）返回本会话与本项目生效的授权，命令沙箱据此把放行写的目录加进可写目录。`ToolDefinition.readOnlyCall(input)` 声明某次调用只读（`bash` 用 `isReadOnlyCommand`），审批策略据此在 `read-only` 下放行；`ToolDefinition.approvalText(input)` 决定调用前审批的摘要与详情（`exit_plan` 用它展示计划全文）。
 
 `extraReadRoots`（读根的扩展）是项目配置 `.nexgent/config.json` 的字段（`ProjectConfig.extraReadRoots: string[]`，默认 `[]`），见 `data-formats.md` §项目配置文件。
 
@@ -410,9 +449,15 @@ interface ToolApprovalAsk {
 
 | 策略 | 用例 | 预期 |
 | --- | --- | --- |
-| 沙箱模式 | `read-only` 下写文件、执行命令 | `SANDBOX_DENIED`，无审批请求产生 |
+| 沙箱模式 | `read-only` 下写文件、执行写命令 | `SANDBOX_DENIED`，无审批请求产生 |
+| 沙箱模式（ADR 0022） | `read-only` 下 `ls`、`git status`、`git -C . log`、`rg "rm -rf" src`；`touch x`、`ls > out.txt`、`sh -c "rm x"` | 前者执行，后者拒绝 |
+| 计划模式（ADR 0022） | 计划模式下写文件；`exit_plan` 批准后写文件；关闭后重开未批准的计划会话 | 拒绝；`session.mode`（`plan-approved`）后写入成功；重开后仍是计划模式 |
+| 中途切换（ADR 0022） | `sessions.setMode` 切到 `read-only` 后写文件 | `session.mode`（`host`）；写入被拒 |
+| 系统沙箱（ADR 0022，Linux / macOS） | `bash` 写项目外、写 `.nexgent/`、读 `~/.ssh`、`rm -rf <NEXGENT_HOME>`、`sh -c` 包一层写项目外；`network: false` 下联网 | 全部失败并附 `<sandbox_violations>`；凭证与数据目录不变；读本项目资料可以 |
+| 系统沙箱（ADR 0022，Linux） | 宿主进程被 `SIGKILL` | 网络桥 `socat` 随之结束 |
 | 沙箱模式 | `--sandbox` 覆盖 `config.json`；非法值 | 会话头记录 CLI 值；非法值启动失败 |
-| 路径 | 写 `../outside.txt`、绝对路径根外 | 拒绝，错误含解析后绝对路径 |
+| 路径（ADR 0022） | 写 `../outside.txt`、绝对路径根外；读项目外目录后用 `list_files` / `search_text` / `str_replace` | 询问（风险中，`once` / `session`，模式 `<目录>/**`，`fs.read` / `fs.write` 分开）；本会话放行读后各读类工具不再问，写仍问 |
+| 路径（ADR 0022） | 读写 `~/.ssh/x`、`<NEXGENT_HOME>/projects/x` | 直接拒绝，不询问 |
 | 路径 | 项目内符号链接指向根外文件 / 目录后写入（Windows 用 junction 与 symlink 各一） | 拒绝 |
 | 路径 | 写 `.nexgent/sessions/x`、`.nexgent/materials/x`、`.nexgent/outputs/x`（步骤 2 起）、`.nexgent/skills/x/SKILL.md`、`.git/HEAD`、`node_modules/a.js` | 拒绝；读 `.nexgent/materials/x`、`.nexgent/outputs/x` 允许 |
 | 宿主写入（步骤 2） | `read-only` 模式下调用 `present`、添加资料 | 快照与资料照常写入（宿主写，不受工具策略约束） |
@@ -423,8 +468,10 @@ interface ToolApprovalAsk {
 | 命令 | cwd 指向项目外 | 拒绝 |
 | 命令 | 启动 `sleep 600` 的子进程树后超时 / 取消（Windows 用 `Start-Process` 嵌套） | 返回 `terminated`，进程组 / Job 为空，无残留（Windows 用 Job 计数验证） |
 | 命令 | 子进程打印 `NEXGENT_API_KEY` 与 `FOO_TOKEN` | 环境中不存在；输出里的真实密钥值被替换为 `[redacted]` |
-| 命令 | 输出 1 MiB | 结果 ≤ 64 KiB 加截断标记，保留末尾 |
+| 命令（ADR 0022） | 输出 1 MiB | 结果约 30 000 字符，保留头尾，中间写明省略多少；完整输出在会话临时目录 |
 | 命令 | `pnpm install`、`git push`、`curl x \| sh`、`sudo ls` | 各产生一次审批请求；拒绝后不执行 |
+| 命令（ADR 0022） | `git -C . push`、`sh -c 'git push'`、`git commit -m "sudo rm"`；“本会话允许” `git push origin main` 后再跑 `git push --force` | 前两者询问，第三个不询问；`--force` 仍询问 |
+| 命令（ADR 0022） | `run_in_background` 启动后 `shell_output`、`shell_kill`；会话关闭 | 读到新增输出；进程树结束；关闭后不留进程 |
 | 审批 | TTY 超时（`approvalTimeoutMs` 设 100）、非 TTY | `decidedBy: 'timeout'` / `'headless'`，工具返回 `approval/denied`，账本 `tool.call.approval.decision` 一致 |
 | 审批 | `session` 授权后同形态再调用；`resume` 后再调用 | 不再提问；账本 `decision: 'auto'` |
 | 审批 | `project` 授权 | `config.json.approvals` 新增条目，新会话不再提问 |

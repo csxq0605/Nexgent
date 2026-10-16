@@ -75,12 +75,13 @@ describe('read_document tool', () => {
     await expect(tool.handler({}, context())).rejects.toMatchObject({ code: 'tool/invalid-input' })
   })
 
-  it('applies the sandbox read policy: outside the project and host-only .nexgent paths are denied', async () => {
+  it('applies the sandbox read policy: outside the project asks, host-only .nexgent paths are denied', async () => {
     const { root, services, tool, context } = await setup()
     const layout = services.workspace.layout
     const outside = await tempDir('outside-')
     await writeFile(join(outside, 'x.pdf'), await fixtureBytes('pages.pdf'))
-    await expect(tool.handler({ path: join(outside, 'x.pdf') }, context())).rejects.toMatchObject({ code: 'sandbox/denied' })
+    // ADR 0022 decision 2: outside the project asks; nobody answers here.
+    await expect(tool.handler({ path: join(outside, 'x.pdf') }, context())).rejects.toMatchObject({ code: 'approval/denied' })
     // K1: the host-only data (sessions, ledgers...) lives in the user data directory, outside every read root.
     await writeFile(join(layout.sessions, 'x.pdf'), await fixtureBytes('pages.pdf'))
     await expect(tool.handler({ path: join(layout.sessions, 'x.pdf') }, context())).rejects.toMatchObject({ code: 'sandbox/denied' })

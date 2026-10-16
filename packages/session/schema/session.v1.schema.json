@@ -99,6 +99,9 @@
     },
     {
       "$ref": "#/$defs/capabilityProposeRecord"
+    },
+    {
+      "$ref": "#/$defs/sessionModeRecord"
     }
   ],
   "$defs": {
@@ -927,6 +930,9 @@
         "sandboxMode": {
           "$ref": "#/$defs/sandboxMode"
         },
+        "plan": {
+          "type": "boolean"
+        },
         "grants": {
           "type": "array",
           "items": {
@@ -1060,6 +1066,96 @@
         },
         "improvement": {
           "$ref": "#/$defs/sessionImprovement"
+        },
+        "plan": {
+          "type": "boolean"
+        },
+        "commandSandbox": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "platform"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "active"
+                },
+                "platform": {
+                  "$ref": "#/$defs/nonEmptyString"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "reason"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "none"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "off"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "sessionModeRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "sandboxMode",
+        "plan",
+        "reason"
+      ],
+      "properties": {
+        "type": {
+          "const": "session.mode"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sandboxMode": {
+          "$ref": "#/$defs/sandboxMode"
+        },
+        "plan": {
+          "type": "boolean"
+        },
+        "reason": {
+          "enum": [
+            "host",
+            "plan-approved"
+          ]
         }
       }
     },

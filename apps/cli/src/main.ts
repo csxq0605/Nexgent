@@ -163,6 +163,7 @@ async function runTask(
     env: io.env,
     ...(invocation.command === 'resume' ? { resumeSessionId: invocation.sessionId } : {}),
     ...(invocation.command === 'run' && invocation.model !== undefined ? { model: invocation.model } : {}),
+    ...(invocation.command === 'run' && invocation.plan === true ? { plan: true } : {}),
     ...(invocation.sandbox === undefined ? {} : { sandboxMode: invocation.sandbox }),
   })
 

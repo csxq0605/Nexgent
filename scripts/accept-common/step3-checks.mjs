@@ -91,7 +91,7 @@ export const CHECKS = [
   item('H14', 'headless', '成员审批：子会话写 .env 时审批请求带成员名与子会话 id；拒绝后文件不变'),
   item('H15', 'headless', '成员不能再委派：成员的工具列表里没有 delegate、团队、工作流工具'),
   item('H16', 'headless', '同名成果：两个成员 present 同一路径时各成一份成果，不互相追加版本'),
-  item('H17', 'headless', 'PTC：run_code 读写工作区文件成功；读环境变量为空；读沙箱外文件被拒；超时终止且无残留进程'),
+  item('H17', 'headless', 'PTC：run_code 读写工作区文件成功；读环境变量为空；读项目外文件先询问，拒绝后读不到；超时终止且无残留进程'),
   item('H18', 'headless', '表格：write_spreadsheet 写出的公式与缓存值正确；外部引用、未知函数、除零、超上限各被拒'),
   item('H19', 'headless', '网页：本地测试服务器上的页面经 web_fetch 转成 Markdown；私网、回环、重定向到私网被拒'),
   item('H20', 'headless', '技能：用户级技能被发现；同名时项目级优先'),

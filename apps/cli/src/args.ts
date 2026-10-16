@@ -43,6 +43,8 @@ export interface RunInvocation {
   readonly sandbox?: SandboxMode
   /** `--model`; absent means config, then the default. */
   readonly model?: string
+  /** `--plan`: start in plan mode (ADR 0022). */
+  readonly plan?: boolean
   /** Emit JSON lines on stdout instead of text. */
   readonly json: boolean
 }
@@ -152,6 +154,7 @@ const OPTIONS = {
   to: { type: 'string' },
   reason: { type: 'string' },
   json: { type: 'boolean' },
+  plan: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' },
 } as const
@@ -160,7 +163,7 @@ type OptionName = keyof typeof OPTIONS
 
 /** Which options each command accepts (`help` is accepted everywhere). */
 const ACCEPTED: Readonly<Record<Command, readonly OptionName[]>> = {
-  run: ['project', 'task', 'sandbox', 'model', 'json'],
+  run: ['project', 'task', 'sandbox', 'model', 'plan', 'json'],
   resume: ['project', 'task', 'sandbox', 'json'],
   export: ['project', 'out', 'json'],
   improve: ['project', 'session', 'deliverable', 'json'],
@@ -239,6 +242,7 @@ export function parseCliArgs(argv: readonly string[]): Invocation {
         command, project, task, json,
         ...(sandbox === undefined ? {} : { sandbox }),
         ...(model === undefined ? {} : { model }),
+        ...(values.plan === true ? { plan: true } : {}),
       }
     }
     case 'resume': {
@@ -363,7 +367,7 @@ export function commandUsage(command: Command): string {
   switch (command) {
     case 'run':
       return [
-        'Usage: nexgent run --project <dir> --task "<text>" [--sandbox <mode>] [--model <id>] [--json]',
+        'Usage: nexgent run --project <dir> --task "<text>" [--sandbox <mode>] [--plan] [--model <id>] [--json]',
         '',
         'Start a new session in <dir> and run one task. The model API key comes from',
         'NEXGENT_API_KEY or ~/.nexgent/credentials.json.',
@@ -371,6 +375,7 @@ export function commandUsage(command: Command): string {
         '  --project <dir>    project directory (its data lives in ~/.nexgent/projects/<id>/, created if missing)',
         '  --task "<text>"    what to do',
         `${sandbox} (default: config, then workspace-write)`,
+        '  --plan             plan mode: read and plan first; changes start once you approve the plan',
         `  --model <id>       model id (default: config, then ${DEFAULT_PROJECT_CONFIG.model})`,
         '  --json             JSON lines on stdout instead of text',
         '',

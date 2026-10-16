@@ -109,6 +109,9 @@ export function Composer(): JSX.Element {
 
   const placeholder = state.timeline.length === 0 ? T.composerPlaceholder : T.composerPlaceholderMore
   const model = state.sessionMeta?.model
+  // ADR 0022 decision 1: say when commands run without an OS sandbox; never claim one.
+  const status = state.sessionMeta?.sandboxMode === 'full-access' ? undefined : state.sessionMeta?.commandSandbox
+  const sandboxNote = status?.kind === 'none' ? { text: T.noOsSandbox, title: status.reason } : status?.kind === 'off' ? { text: T.osSandboxOff, title: 'commands.systemSandbox: off' } : undefined
   return (
     <div className="composer" data-testid="composer">
       {mention !== undefined && (
@@ -161,6 +164,8 @@ export function Composer(): JSX.Element {
             {T.mentionChip}
           </button>
           {model !== undefined && <span className="faint small model-chip">{modelText(model)}</span>}
+          {state.sessionMeta?.plan === true && <span className="faint small model-chip" title={T.planModeHelp} data-testid="plan-chip">{T.planMode}</span>}
+          {sandboxNote !== undefined && <span className="faint small model-chip" title={sandboxNote.title} data-testid="sandbox-note">{sandboxNote.text}</span>}
           <span className="composer-status">{state.running ? (state.stopping ? T.stopping : T.busy) : ''}</span>
           {state.running ? (
             <button type="button" className="send-button" aria-label={T.stop} title={T.stop} onClick={() => void store.cancel()} disabled={state.stopping} data-testid="stop">
