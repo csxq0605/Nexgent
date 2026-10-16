@@ -17,7 +17,7 @@ import { REPO_ROOT } from './harness.mjs'
 import { BUDGET, CANCEL_MEMBERS, MATERIAL, MEMBER_ENV, PAGE, SKILLS, SCRIPTED_API_KEY, STALL_TEXT, TASKS, TOOL_FILES, WF_STALL_TEXT, buildStep3Script, readonlyPresets } from './step3-scenario.mjs'
 import { filesContaining } from './step2-headless.mjs'
 import { CLI_BIN, runTurn } from './step2-runtime.mjs'
-import { TEST_WEB_ADDRESS, createStep3Sdk, loadStep3Packages } from './step3-runtime.mjs'
+import { TEST_WEB_ADDRESS, TEST_WEB_HOST, createStep3Sdk, loadStep3Packages } from './step3-runtime.mjs'
 
 /** The kill driver: one SDK turn in a child process (step3-driver.mjs). */
 export const DRIVER = fileURLToPath(new URL('./step3-driver.mjs', import.meta.url))
@@ -141,9 +141,9 @@ async function pageServer() {
   port = server.address().port
   return {
     hits,
-    pageUrl: `http://${TEST_WEB_ADDRESS}:${port}/stock.html`,
+    pageUrl: `http://${TEST_WEB_HOST}:${port}/stock.html`,
     loopbackUrl: `http://127.0.0.1:${port}/stock.html`,
-    redirectUrl: `http://${TEST_WEB_ADDRESS}:${port}/redirect`,
+    redirectUrl: `http://${TEST_WEB_HOST}:${port}/redirect`,
     close: () => new Promise(resolve => server.close(() => resolve())),
   }
 }

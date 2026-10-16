@@ -1,4 +1,4 @@
-import { access, readdir, readFile, writeFile } from 'node:fs/promises'
+import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { functionToolName, resolveWorkspaceLayout, type LedgerRecord, type TrialReceipt, type WorkspaceLayout } from '@nexgent/kernel'
@@ -150,6 +150,30 @@ describe('runGate', () => {
     // The real project was never touched by a run, and the copies are gone.
     expect(await exists(join(layout.root, 'out'))).toBe(false)
     expect(await exists(runner.requests[0]!.projectRoot)).toBe(false)
+  })
+
+  it('copies the materials the project had when the task started, attached or not', async () => {
+    const { layout, tasks } = await historyProject()
+    const ids = { before: '11111111-1111-4111-8111-111111111111', removed: '22222222-2222-4222-8222-222222222222', after: '33333333-3333-4333-8333-333333333333' }
+    const material = async (id: string, fields: Record<string, string>) => {
+      await mkdir(join(layout.materials, id), { recursive: true })
+      await writeFile(join(layout.materials, id, 'orders.csv'), 'region,amount\nnorth,1\n')
+      await writeFile(join(layout.materials, id, 'material.json'), JSON.stringify({ formatVersion: 1, id, originalName: 'orders.csv', path: `.nexgent/materials/${id}/orders.csv`, size: 21, sha256: 'x', mediaType: 'text/csv', text: true, status: 'active', ...fields }))
+    }
+    await material(ids.before, { addedAt: '2000-01-01T00:00:00.000Z' })
+    await material(ids.removed, { addedAt: '2000-01-01T00:00:00.000Z', status: 'removed', removedAt: '2000-01-02T00:00:00.000Z' })
+    await material(ids.after, { addedAt: '2999-01-01T00:00:00.000Z' })
+    const candidate = await proposeCandidate(layout, tasks[0]!)
+    const seen: string[][] = []
+    const runner = scriptedRunner(request => ({
+      output: 'good',
+      inspect: async () => {
+        seen.push((await readdir(resolveWorkspaceLayout(request.projectRoot).materials).catch(() => [] as string[])).sort())
+      },
+    }))
+    await runGate({ layout, candidateId: candidate.id, runner, tempRoot: await tempDir() })
+    expect(seen.length).toBeGreaterThan(0)
+    for (const listed of seen) expect(listed).toEqual([ids.before])
   })
 
   it('a candidate beaten to adoption while its trial ran is rejected as interrupted, with no adopted decision left behind', async () => {

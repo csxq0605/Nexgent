@@ -95,6 +95,7 @@ export function sdkSessionRunner(env: Env = process.env): ImprovementSessionRunn
         appVersion: 'improvement',
         env,
         background: false,
+        recordRecent: false,
         approvalResponder: async approval => ({ id: approval.id, decision: 'deny', scope: 'once', decidedBy: 'headless', reason: 'improvement jobs run without anyone to ask' }),
         // Propose works in the copy; its session and ledger belong to the real project.
         ...(propose || request.ledgerRoot !== undefined ? { patches: [{ id: 'session', config: { sessionsDir: real.sessions, ledgersDir: ledgers } }] } : {}),

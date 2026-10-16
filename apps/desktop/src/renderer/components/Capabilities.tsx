@@ -1,11 +1,17 @@
 import { useState, type FormEvent } from 'react'
 import type { CandidateDetail, CandidateView } from '@nexgent/sdk'
 import { useAppState, useAppStore } from '../hooks.js'
-import { T, candidateStatusText, componentKindText, decisionReasonText, formatTime, triggerText, versionText } from '../strings.js'
+import { T, candidateStatusText, componentKindText, decisionReasonText, formatTime, triggerText, verdictText, versionText } from '../strings.js'
+import { DecisionDetail } from './DecisionDetail.js'
 import { Modal } from './Modal.js'
 
 function statusClass(status: string): string {
   return status === 'adopted' ? 'ok' : status === 'rejected' || status === 'rolled-back' ? 'warn' : status === 'awaiting-approval' ? 'accent' : 'live'
+}
+
+function verdictSummary(detail: CandidateDetail, decisionId: string): string | undefined {
+  const verdict = detail.decisions.find(d => d.id === decisionId)?.verdict
+  return verdict === undefined ? undefined : verdictText(verdict)
 }
 
 function Candidate({ candidate }: { readonly candidate: CandidateView }): JSX.Element {
@@ -29,9 +35,10 @@ function Candidate({ candidate }: { readonly candidate: CandidateView }): JSX.El
       {detail !== undefined && (
         <div className="candidate-detail" data-testid="candidate-detail">
           {candidate.decision !== undefined ? (
-            <p className="small wrap" data-testid="candidate-reason">
-              {T.candidateReason}：{decisionReasonText(candidate.decision.reason)}。{candidate.decision.detail}
-            </p>
+            <div className="small wrap" data-testid="candidate-reason">
+              {T.candidateReason}：{decisionReasonText(candidate.decision.reason)}。
+              <DecisionDetail detail={candidate.decision.detail} summary={verdictSummary(detail, candidate.decision.id)} />
+            </div>
           ) : null}
           <p className="muted small">
             {candidate.trialId === undefined ? T.candidateNoTrial : `${T.candidateTrial} ${candidate.trialId.slice(0, 8)} · ${T.candidateTrialRuns(runs)}`}

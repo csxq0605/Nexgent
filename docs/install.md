@@ -1,6 +1,6 @@
 # 安装与运行 Nexgent 桌面应用
 
-> 桌面应用在 Linux 和 Windows 上从源码运行，已通过步骤 2–5 的桌面层验收（见文末“验证记录”）。Windows 安装包与 macOS 尚未验证。安装包未签名，没有自动更新，没有应用图标；签名与自动更新还没有做。
+> 桌面应用在 Linux 和 Windows 上从源码运行，已通过步骤 2–5 的桌面层验收（见文末“验证记录”）。Windows 安装包尚未验证；macOS 只做过一次从源码运行的人工试用，不算验收。安装包未签名，没有自动更新，没有应用图标；签名与自动更新还没有做。
 
 ## 从源码运行
 
@@ -71,6 +71,7 @@ chmod +x Nexgent-0.0.0-linux-x86_64.AppImage
 - Linux（云端会话，2026-10-11）：`package:linux` 产出 AppImage；解包目录与 AppImage（`APPIMAGE_EXTRACT_AND_RUN=1`）都能启动，`app.info` 的 IPC 往返成功，打包后的应用忽略开发用环境变量。
 - Linux，从源码运行（2026-10-11，提交 `f7077a4`）：`accept-step2` 桌面层 D01–D10 全部通过，见 [`step-2-20261011.md`](validation/step-2-20261011.md)。验收没有覆盖安装包本身。
 - Windows，从源码运行（2026-10-11，GitHub `windows-latest`，手动触发的 `windows-accept.yml`）：`accept-step2` 桌面层 D01–D10 与 desktop 包测试（含 UI e2e）全部通过，见 [`step-2-20261011.md`](validation/step-2-20261011.md)。
+- macOS，从源码运行（2026-10-16，arm64，Node 26，Electron 44）：按本文安装、构建、启动没有遇到阻碍；desktop 包测试（含 UI e2e）全部通过，`accept-step3` 无界面层 23/23 通过。这是一次人工试用，不是验收；没有打 macOS 安装包。macOS 没有虚拟屏幕，desktop 包的 e2e 测试会在屏幕上打开真实窗口并模拟输入。
 - 步骤 3（2026-10-11）：`accept-step3` 桌面层 14/14 在 Linux 通过；Windows 手动运行 [38163013365](https://github.com/csxq0605/Nexgent/actions/runs/38163013365)（提交 `ce6c14c8`）通过，desktop 包测试 162 项通过。见 [`step-3-20261011.md`](validation/step-3-20261011.md)。
 - 步骤 4（2026-10-12）：`accept-step4` 桌面层 18/18 在 Linux 通过；Windows 手动运行 [38287245347](https://github.com/csxq0605/Nexgent/actions/runs/38287245347)（提交 `2043e919`）通过，desktop 包测试通过。见 [`step-4-20261012.md`](validation/step-4-20261012.md)。
 - 步骤 5（2026-10-13）：`accept-step5` 桌面层 23/23 在 Linux 通过；Windows 手动运行 [38412397510](https://github.com/csxq0605/Nexgent/actions/runs/38412397510)（提交 `6a769c38`）通过，desktop 包测试通过。见 [`step-5-20261013.md`](validation/step-5-20261013.md)。
