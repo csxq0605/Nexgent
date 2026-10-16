@@ -18,13 +18,17 @@
  *   written by the gate package) when there is one; otherwise it is derived
  *   from the turn's checks and the user's rating (`selfEvalOutcome`, an
  *   unknown outcome allows no votes).
- * - Votes from the executing model (`handbook_mark`) arrive through
- *   {@link LearningHost.mark}.
+ * - The handbook is `@nexgent/capabilities`' {@link Handbook}: retrieval,
+ *   and every write through `Handbook.apply` (actor `reflection`). Votes of
+ *   the executing model come through its `handbook_mark` tool.
+ * - A trial copy of a project (gate replay, comparison arm) learns nothing.
  */
 import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { CapabilityStore, Handbook, isTrialCopy, type HandbookChangeResult, type ScoredEntry } from '@nexgent/capabilities'
 import {
+  foldHandbook,
   HANDBOOK_TOP_K,
   LEARNING_RULES,
   mayLearn,
@@ -33,7 +37,6 @@ import {
   ZERO_USAGE,
   isRetrievable,
   type HandbookEntry,
-  type HandbookOp,
   type InstanceLiteralSource,
   type Ledger,
   type LedgerAttribution,
@@ -49,10 +52,9 @@ import {
 } from '@nexgent/kernel'
 import { estimateUsd } from '@nexgent/llm'
 import { breakStaleLock, tryCreateLock } from '../lock.js'
-import { readUserConfig, userProjectId } from '../user.js'
+import { readUserConfig } from '../user.js'
 import { learningBudgetStatus, type LearningBudgetStatus } from './budget.js'
-import { curateReflection, statusOps, votesFromTask, type CurationRejection } from './curate.js'
-import { handbookLogs, retrieveEntries, visibleEntries, type HandbookLogs, type RetrievedEntry } from './handbook.js'
+import { curateReflection, votesFromTask, type CurationRejection } from './curate.js'
 import {
   enqueueItem,
   learningPaths,
@@ -118,13 +120,6 @@ export interface LearningStatus {
   readonly entries: Readonly<Record<'trial' | 'active' | 'retired', number>>
 }
 
-/** The result of an executing model's vote. */
-export interface MarkResult {
-  readonly recorded: boolean
-  readonly reason?: 'unknown-entry' | 'already-voted' | 'own-entry'
-  readonly entry?: HandbookEntry
-}
-
 function count<T extends string>(values: readonly T[]): Record<string, number> {
   const out: Record<string, number> = {}
   for (const value of values) out[value] = (out[value] ?? 0) + 1
@@ -138,9 +133,8 @@ function clip(text: string, max: number): string {
 /** Background layer-1 learning of one project. */
 export class LearningHost {
   readonly #options: LearningHostOptions
-  readonly #logs: HandbookLogs
   readonly #paths: ReturnType<typeof learningPaths>
-  #projectId: Promise<string> | undefined
+  #copy: Promise<boolean> | undefined
   #loop: Promise<void> | undefined
   #again = false
   #stopped = false
@@ -149,28 +143,30 @@ export class LearningHost {
 
   constructor(options: LearningHostOptions) {
     this.#options = options
-    this.#logs = handbookLogs(options.home, options.layout.dataDir)
     this.#paths = learningPaths(options.layout.dataDir)
-  }
-
-  get logs(): HandbookLogs {
-    return this.#logs
   }
 
   #now(): Date {
     return this.#options.now?.() ?? new Date()
   }
 
-  projectId(): Promise<string> {
-    this.#projectId ??= userProjectId(this.#options.layout.root)
-    return this.#projectId
+  /** The handbook this project sees, with its current `learning` switches. */
+  handbook(): Promise<Handbook> {
+    const now = this.#options.now
+    return Handbook.open({ projectRoot: this.#options.layout.root, home: this.#options.home, ...(now === undefined ? {} : { now }) })
+  }
+
+  /** Whether this project is a gate trial's or comparison arm's throw-away copy (asked once). */
+  trialCopy(): Promise<boolean> {
+    this.#copy ??= isTrialCopy(new CapabilityStore(this.#options.layout.capabilities)).catch(() => false)
+    return this.#copy
   }
 
   /** Queue a root task turn (when worth learning from) and wake the loop. */
   async noteTurnEnd(input: TurnEndInput): Promise<void> {
     if (!learnsFrom(input.reason)) return
     const { config } = await readProjectConfig(this.#options.layout.configFile)
-    if (!config.learning.enabled) return
+    if (!config.learning.enabled || await this.trialCopy()) return
     await updateLearningQueue(this.#options.layout.dataDir, queue => ({
       queue: enqueueItem(queue, { taskId: input.taskId, sessionId: input.sessionId, turn: input.turn, checks: input.checks ?? [], enqueuedAt: (input.at ?? this.#now()).toISOString() }),
       result: undefined,
@@ -350,39 +346,9 @@ export class LearningHost {
     return { outcome: selfEvalOutcome({ checks, rubricScored: false, ...(rating === undefined ? {} : { rating }) }), checks, ...(rating === undefined ? {} : { rating }), source: 'derived' }
   }
 
-  /** Every entry of both logs, and the ones this project may retrieve. */
-  async handbook(): Promise<{ readonly user: HandbookEntry[]; readonly project: HandbookEntry[]; readonly visible: HandbookEntry[] }> {
-    const [user, project] = await Promise.all([this.#logs.user.entries(), this.#logs.project.entries()])
-    const { config } = await readProjectConfig(this.#options.layout.configFile)
-    return { user, project, visible: visibleEntries(user, project, { projectId: await this.projectId(), useShared: config.learning.useShared }) }
-  }
-
-  /** The entries a task with this text would be given (at most `HANDBOOK_TOP_K`). For the injection (V1) and tests. */
-  async retrieve(query: string, limit = HANDBOOK_TOP_K): Promise<RetrievedEntry[]> {
-    return retrieveEntries(query, (await this.handbook()).visible, limit)
-  }
-
-  /**
-   * One vote of the executing model (`handbook_mark`): one per entry per
-   * task, whoever cast the first, never on an entry learned from the same
-   * task; the status change the counts call for is appended with it.
-   */
-  async mark(input: { readonly taskId: string; readonly sessionId?: string; readonly entryId: string; readonly verdict: 'helpful' | 'harmful'; readonly reason?: string }): Promise<MarkResult> {
-    const { user, project } = await this.handbook()
-    const entry = [...user, ...project].find(candidate => candidate.id === input.entryId)
-    if (entry === undefined || !isRetrievable(entry)) return { recorded: false, reason: 'unknown-entry' }
-    if (entry.sources.some(source => source.taskId === input.taskId)) return { recorded: false, reason: 'own-entry' }
-    const log = entry.scope === 'user' ? this.#logs.user : this.#logs.project
-    const source = { projectId: await this.projectId(), taskId: input.taskId, ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }) }
-    const language = this.#options.language ?? detectLanguage(entry.text)
-    const written = await log.append(current => {
-      if (votesFromTask(current, input.taskId).has(entry.id)) return []
-      const vote = { op: input.verdict === 'helpful' ? 'upvote' as const : 'downvote' as const, entryId: entry.id, actor: 'execution' as const, source, ...(input.reason === undefined ? {} : { reason: clip(input.reason, 200) }) }
-      return [vote, ...statusOps(current, [vote], language, source)]
-    }, () => this.#now())
-    if (written.length === 0) return { recorded: false, reason: 'already-voted' }
-    const after = (await log.entries()).find(candidate => candidate.id === entry.id)
-    return { recorded: true, ...(after === undefined ? {} : { entry: after }) }
+  /** The entries a task with this text would be given (at most `HANDBOOK_TOP_K`). */
+  async retrieve(query: string, limit = HANDBOOK_TOP_K): Promise<ScoredEntry[]> {
+    return (await this.handbook()).retrieve(query, { k: limit })
   }
 
   /** The self-evaluations of this epoch written for the project (`evaluations/*.json`), oldest first. */
@@ -413,9 +379,7 @@ export class LearningHost {
     const acknowledged = user?.learning.noticeAcknowledgedAt !== undefined
     const ledger = this.#options.ledger()
     const queue = await readLearningQueue(this.#options.layout.dataDir)
-    const { visible, user: userEntries, project } = await this.handbook()
-    const projectId = await this.projectId()
-    const all = [...project.filter(entry => entry.projectId === undefined || entry.projectId === projectId), ...(config.learning.useShared ? userEntries : [])]
+    const all = await (await this.handbook()).entries({ includeRetired: true })
     return {
       enabled: config.learning.enabled,
       acknowledged,
@@ -426,8 +390,8 @@ export class LearningHost {
       ...(this.#running === undefined ? {} : { running: this.#running }),
       recent: [...queue.history].reverse().slice(0, 10),
       entries: {
-        trial: visible.filter(entry => entry.status === 'trial').length,
-        active: visible.filter(entry => entry.status === 'active').length,
+        trial: all.filter(entry => entry.status === 'trial').length,
+        active: all.filter(entry => entry.status === 'active').length,
         retired: all.filter(entry => entry.status === 'retired').length,
       },
     }
@@ -466,18 +430,21 @@ export class LearningHost {
     if (!run.isRootTask || run.task === '') {
       return { ...base, finishedAt: finishedAt(), status: 'skipped', outcome: evaluation.outcome, ops: {}, rejected: {}, added: [], detail: 'not a root task session' }
     }
-    const projectId = await this.projectId()
     const { config } = await readProjectConfig(this.#options.layout.configFile)
     const language = this.#options.language ?? detectLanguage(run.task)
-    const { user, project, visible } = await this.handbook()
+    const handbook = await this.handbook()
+    const projectId = handbook.projectId
+    const [userOps, projectOps] = await Promise.all([handbook.user.read(), handbook.project.read()])
+    const user = foldHandbook(userOps).filter(entry => entry.scope === 'user')
+    const project = foldHandbook(projectOps).filter(entry => entry.projectId === projectId)
     const query = [run.task, ...run.messages.filter(message => message.source !== 'inject').map(message => message.text)].join('\n')
     const shownIds = run.shownEntries
-    const everything = new Map([...project, ...user].map(entry => [entry.id, entry]))
+    const everything = new Map([...project, ...(handbook.learning.useShared ? user : [])].map(entry => [entry.id, entry]))
     const votable = shownIds.length > 0
       ? shownIds.map(id => everything.get(id)).filter((entry): entry is HandbookEntry => entry !== undefined && isRetrievable(entry))
-      : retrieveEntries(query, visible, HANDBOOK_TOP_K).map(hit => hit.entry)
+      : (await handbook.retrieve(query, { k: HANDBOOK_TOP_K })).map(hit => hit.entry)
     const votableIds = new Set(votable.map(entry => entry.id))
-    const related = retrieveEntries(query, visible, HANDBOOK_TOP_K + RELATED_ENTRIES).map(hit => hit.entry).filter(entry => !votableIds.has(entry.id)).slice(0, RELATED_ENTRIES)
+    const related = (await handbook.retrieve(query, { k: HANDBOOK_TOP_K + RELATED_ENTRIES, exclude: votableIds })).map(hit => hit.entry).slice(0, RELATED_ENTRIES)
     const queue = await readLearningQueue(this.#options.layout.dataDir)
     const contrast = this.#contrast(queue.history, run, item.taskId, evaluation.outcome)
 
@@ -523,30 +490,27 @@ export class LearningHost {
       ...queue.history.filter(task => task.task !== '').map(task => ({ taskId: task.taskId, text: task.task, projectId })),
       { taskId: item.taskId, text: run.task, projectId },
     ]
-    const [userOps, projectOps] = await Promise.all([this.#logs.user.read(), this.#logs.project.read()])
     const curated = curateReflection(parsed.ops, {
       projectId,
-      source,
+      taskId: item.taskId,
       outcome: evaluation.outcome,
-      contribute: config.learning.contribute,
+      contribute: handbook.learning.contribute,
       votable: votableIds,
-      user,
+      user: handbook.learning.useShared ? user : [],
       project,
       sources,
       projectMessages,
       requests: [run.task, ...run.messages.filter(message => message.source !== 'inject').map(message => message.text), ...run.feedback.map(entry => entry.comment)],
       votedFromTask: new Set([...votesFromTask(userOps, item.taskId), ...votesFromTask(projectOps, item.taskId)]),
     })
-    const write = async (log: HandbookLogs['user'], ops: typeof curated.user): Promise<HandbookOp[]> => {
-      if (ops.length === 0) return []
-      return log.append(current => {
-        const already = votesFromTask(current, item.taskId)
-        const kept = ops.filter(op => !((op.op === 'upvote' || op.op === 'downvote') && already.has(op.entryId)))
-        return [...kept, ...statusOps(current, kept, language, source)]
-      }, () => this.#now())
-    }
-    const written = [...await write(this.#logs.user, curated.user), ...await write(this.#logs.project, curated.project)]
-    const rejected: CurationRejection[] = curated.rejected.map(entry => entry.reason)
+    // Votes cast meanwhile (handbook_mark of a later turn) win over the reflection's.
+    const [userNow, projectNow] = await Promise.all([handbook.user.read(), handbook.project.read()])
+    const votedNow = new Set([...votesFromTask(userNow, item.taskId), ...votesFromTask(projectNow, item.taskId)])
+    const changes = curated.changes.filter(change => !((change.op === 'upvote' || change.op === 'downvote') && votedNow.has(change.entryId)))
+    const results: HandbookChangeResult[] = await handbook.apply(changes, { actor: 'reflection', source, literals: { sources, projectMessages } })
+    const written = results.flatMap(result => (result.outcome === 'applied' ? result.ops : []))
+    const refused = results.flatMap(result => (result.outcome === 'duplicate' ? ['duplicate' as const] : result.outcome === 'rejected' ? [result.reason === 'not-found' ? 'unknown-entry' as const : result.reason] : []))
+    const rejected: string[] = [...curated.rejected.map(entry => entry.reason as CurationRejection), ...refused]
     return {
       ...base,
       finishedAt: finishedAt(),

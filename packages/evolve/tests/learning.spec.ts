@@ -1,6 +1,6 @@
 /**
- * Rework E1 (ADR 0018 layer 1): the handbook logs and retrieval, curation,
- * the dollar learning budget and the scripted full flow of the background
+ * Rework E1 (ADR 0018 layer 1) over `@nexgent/capabilities`' handbook:
+ * curation, the dollar learning budget and the scripted full flow of the background
  * learner — task → evaluation → reflection → entry on trial → the next
  * similar task retrieves it → marked helpful → enabled; a misleading entry
  * retired; the loop stops with the app; nothing is spent without the notice
@@ -8,9 +8,10 @@
  * counting path no longer starts jobs.
  */
 import { randomUUID } from 'node:crypto'
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { CapabilityStore } from '@nexgent/capabilities'
 import {
   foldHandbook,
   type HandbookEntry,
@@ -26,7 +27,6 @@ import {
   createJob,
   curateReflection,
   detectLanguage,
-  HandbookLog,
   ImprovementHost,
   improvementsDir,
   LearningHost,
@@ -34,12 +34,8 @@ import {
   longestSharedRun,
   parseReflection,
   readLearningQueue,
-  retrieveEntries,
-  statusOps,
   tokenize,
-  visibleEntries,
   type CurationContext,
-  type HandbookOpInput,
 } from '../src/index.js'
 import { feedback, home, project } from './helpers.js'
 
@@ -179,45 +175,11 @@ describe('lexical helpers', () => {
   })
 })
 
-describe('handbook log', () => {
-  it('appends contiguous seq under the lock, folds, and cuts a torn tail', async () => {
-    const dir = join((await project()).dataDir, 'handbook')
-    const log = new HandbookLog(dir)
-    const id = randomUUID()
-    await log.append(() => [{ op: 'add', entryId: id, actor: 'reflection', text: 'Read the failing test output before editing code.', keywords: ['tests'], scope: 'user' }])
-    await Promise.all([1, 2, 3].map(n => log.append(() => [{ op: 'upvote', entryId: id, actor: 'execution', source: { taskId: `t${n}` } }])))
-    await appendFile(log.file, '{"formatVersion":1,"seq":5,"at":"2026-')
-    const read = await log.read()
-    expect(read.map(op => op.seq)).toEqual([1, 2, 3, 4])
-    expect(read[0]!.op).toBe('add')
-    await log.append(() => [{ op: 'status', entryId: id, actor: 'host', status: 'active' }])
-    const text = await readFile(log.file, 'utf8')
-    expect(text.trim().split('\n').map(line => JSON.parse(line).seq)).toEqual([1, 2, 3, 4, 5])
-    expect(await log.entries()).toEqual([expect.objectContaining({ id, helpful: 3, status: 'active' })])
-  })
-})
-
-describe('retrieval', () => {
-  it('ranks relevant retrievable entries, at most five, and applies the project and sharing rules', () => {
-    const tests = entry({ text: 'Run the project test suite after editing code and read failures before retrying.', keywords: ['tests', 'code'] })
-    const csv = entry({ text: 'When merging CSV files, check that the header rows match before concatenating.', keywords: ['csv', 'merge'] })
-    const retired = entry({ text: 'Merge CSV files by appending them blindly.', keywords: ['csv'], status: 'retired' })
-    const mine = entry({ text: 'In this project spreadsheets live under data/.', keywords: ['csv', 'spreadsheet'], scope: 'project', projectId: PROJECT })
-    const other = entry({ text: 'Another project keeps CSV files in raw/.', keywords: ['csv'], scope: 'project', projectId: 'b'.repeat(64) })
-    const visible = visibleEntries([tests, csv, retired], [mine, other], { projectId: PROJECT, useShared: true })
-    expect(visible.map(e => e.id).sort()).toEqual([tests.id, csv.id, mine.id].sort())
-    expect(retrieveEntries('merge two csv exports into one table', visible).map(hit => hit.entry.id)).toEqual([csv.id, mine.id])
-    expect(visibleEntries([tests, csv], [mine], { projectId: PROJECT, useShared: false }).map(e => e.id)).toEqual([mine.id])
-    const many = Array.from({ length: 9 }, (_, i) => entry({ text: `csv practice number ${i}`, keywords: ['csv'] }))
-    expect(retrieveEntries('csv', many)).toHaveLength(5)
-  })
-})
-
 describe('curation', () => {
   const given = entry({ text: 'Check the header rows of every input file before merging tables.', keywords: ['merge'] })
   const base = (over: Partial<CurationContext> = {}): CurationContext => ({
     projectId: PROJECT,
-    source: { projectId: PROJECT, taskId: 't1', sessionId: 's1' },
+    taskId: 't1',
     outcome: 'success',
     contribute: true,
     votable: new Set([given.id]),
@@ -240,9 +202,9 @@ describe('curation', () => {
       { op: 'upvote', entryId: given.id },
       { op: 'downvote', entryId: randomUUID() },
     ], base())
-    expect(result.user.map(op => op.op)).toEqual(['add', 'upvote'])
-    expect(result.user[0]).toMatchObject({ actor: 'reflection', scope: 'user', keywords: ['merge', 'totals'], source: { taskId: 't1' } })
-    expect((result.user[1] as { reason: string }).reason).toHaveLength(200)
+    expect(result.changes.map(change => change.op)).toEqual(['add', 'upvote'])
+    expect(result.changes[0]).toMatchObject({ scope: 'user', keywords: ['merge', 'totals'] })
+    expect((result.changes[1] as { reason: string }).reason).toHaveLength(200)
     expect(result.rejected.map(r => r.reason)).toEqual(['instance-literal', 'copies-request', 'duplicate', 'already-voted', 'unknown-entry'])
   })
 
@@ -253,26 +215,17 @@ describe('curation', () => {
       { op: 'upvote', entryId: given.id },
       { op: 'upvote', entryId: elsewhere.id },
     ], base({ contribute: false, outcome: 'unknown', user: [given, elsewhere] }))
-    expect(result.user).toEqual([])
-    expect(result.project).toEqual([expect.objectContaining({ op: 'add', scope: 'project', projectId: PROJECT })])
+    expect(result.changes).toEqual([expect.objectContaining({ op: 'add', scope: 'project' })])
     // A project entry cannot retire a user entry.
-    expect(result.project[0]).not.toHaveProperty('supersedes')
+    expect(result.changes[0]).not.toHaveProperty('supersedes')
     expect(result.rejected.map(r => r.reason)).toEqual(['outcome-unknown', 'not-given'])
   })
 
   it('never lets a task vote for an entry learned from itself', () => {
     const own = entry({ text: 'Compare row counts before and after a merge.', keywords: ['merge'], sources: [{ taskId: 't1' }] })
     const result = curateReflection([{ op: 'upvote', entryId: own.id }], base({ votable: new Set([own.id]), user: [own] }))
-    expect(result.user).toEqual([])
+    expect(result.changes).toEqual([])
     expect(result.rejected.map(r => r.reason)).toEqual(['own-entry'])
-  })
-
-  it('derives status changes from the counts', () => {
-    const id = randomUUID()
-    const add: HandbookOpInput = { op: 'add', entryId: id, actor: 'reflection', text: 'x', keywords: [], scope: 'user' }
-    const current = [{ ...add, formatVersion: 1, seq: 1, at: 'x' }, { op: 'upvote', entryId: id, actor: 'execution', formatVersion: 1, seq: 2, at: 'x' }] as never
-    expect(statusOps(current, [{ op: 'upvote', entryId: id, actor: 'reflection' }], 'zh')).toEqual([{ op: 'status', entryId: id, actor: 'host', status: 'active', reason: '有用 2 票、有害 0 票，转为启用' }])
-    expect(statusOps(current, [{ op: 'downvote', entryId: id, actor: 'reflection' }], 'en')).toEqual([])
   })
 })
 
@@ -309,7 +262,8 @@ describe('layer-1 learning, scripted end to end', () => {
     expect(user).toContain('Outcome: success')
     expect(user).toContain('user rating 5/5')
     expect(s.requests[0]!.request.messages[0]!.content).toContain('English')
-    let entries = await s.host.logs.user.entries()
+    const handbook = await s.host.handbook()
+    let entries = await handbook.user.entries()
     expect(entries).toEqual([expect.objectContaining({ text, status: 'trial', scope: 'user', sources: [{ projectId: expect.any(String), taskId: first.taskId, sessionId: first.sessionId }] })])
     const id = entries[0]!.id
     expect((await readLearningQueue(s.layout.dataDir)).history).toEqual([expect.objectContaining({ taskId: first.taskId, status: 'done', outcome: 'success', throughTurn: 2, added: [id] })])
@@ -318,17 +272,17 @@ describe('layer-1 learning, scripted end to end', () => {
     const next = 'Merge last quarter spreadsheet exports'
     expect((await s.host.retrieve(next)).map(hit => hit.entry.id)).toEqual([id])
     const second = { taskId: randomUUID(), sessionId: randomUUID() }
-    expect(await s.host.mark({ ...second, entryId: id, verdict: 'helpful' })).toMatchObject({ recorded: true, entry: { helpful: 1, status: 'trial' } })
-    expect(await s.host.mark({ ...second, entryId: id, verdict: 'helpful' })).toEqual({ recorded: false, reason: 'already-voted' })
-    expect(await s.host.mark({ ...first, entryId: id, verdict: 'helpful' })).toEqual({ recorded: false, reason: 'own-entry' })
+    // What handbook_mark writes for the executing model.
+    expect(await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'execution', source: { projectId: handbook.projectId, ...second } })).toEqual([expect.objectContaining({ outcome: 'applied' })])
+    expect(await handbook.find(id)).toMatchObject({ entry: { helpful: 1, status: 'trial' } })
     // Its reflection votes too: the same task cannot vote twice.
     await runTask(s, [{ text: next, handbook: [id] }, { text: 'thanks', rating: 4 }], { taskId: second.taskId, reply: ops({ op: 'upvote', entryId: id }) })
     expect((await readLearningQueue(s.layout.dataDir)).history.at(-1)).toMatchObject({ rejected: { 'already-voted': 1 } })
     // A third similar task: the reflection's helpful vote enables it.
     await runTask(s, [{ text: 'Merge the spreadsheet exports from both stores', handbook: [id] }, { text: 'great', rating: 5 }], { reply: ops({ op: 'upvote', entryId: id, reason: 'Comparing headers caught a renamed column.' }) })
-    entries = await s.host.logs.user.entries()
+    entries = await handbook.user.entries()
     expect(entries).toEqual([expect.objectContaining({ id, helpful: 2, harmful: 0, status: 'active' })])
-    const log = await s.host.logs.user.read()
+    const log = await handbook.user.read()
     expect(log.at(-1)).toMatchObject({ op: 'status', status: 'active', actor: 'host' })
     expect(log.map(op => op.seq)).toEqual(log.map((_, i) => i + 1))
     // The contrast and the evaluation reach the prompt; the entries given are listed as votable.
@@ -338,12 +292,13 @@ describe('layer-1 learning, scripted end to end', () => {
 
   it('retires a misleading entry after harmful votes, and it is no longer retrieved', async () => {
     const s = await setup()
-    const id = randomUUID()
-    await s.host.logs.user.append(() => [{ op: 'add', entryId: id, actor: 'reflection', text: 'For report tasks, skip reading the source files and write from the title alone.', keywords: ['report'], scope: 'user' }])
+    const handbook = await s.host.handbook()
+    const [added] = await handbook.apply([{ op: 'add', text: 'For report tasks, skip reading the source files and write from the title alone.', keywords: ['report'] }], { actor: 'reflection' })
+    const id = added!.entryId!
     for (const answer of ['first report', 'second report']) {
       await runTask(s, [{ text: 'Write a report from the meeting notes', handbook: [id], answer }, { text: 'this is wrong', rating: 1 }], { reply: ops({ op: 'downvote', entryId: id, reason: 'Skipping the sources produced wrong content.' }) })
     }
-    expect(await s.host.logs.user.entries()).toEqual([expect.objectContaining({ id, harmful: 2, status: 'retired' })])
+    expect(await handbook.user.entries()).toEqual([expect.objectContaining({ id, harmful: 2, status: 'retired' })])
     expect(await s.host.retrieve('write a report from notes')).toEqual([])
   })
 
@@ -355,8 +310,9 @@ describe('layer-1 learning, scripted end to end', () => {
         return ops({ op: 'add', text: '合并多份明细前先核对各文件的列名是否一致，不一致时先统一再合并。', keywords: ['合并', '明细'], scope: 'user' })
       },
     })
-    expect(await s.host.logs.user.entries()).toEqual([])
-    expect(await s.host.logs.project.entries()).toEqual([expect.objectContaining({ scope: 'project', projectId: expect.any(String), status: 'trial' })])
+    const handbook = await s.host.handbook()
+    expect(await handbook.user.entries()).toEqual([])
+    expect(await handbook.project.entries()).toEqual([expect.objectContaining({ scope: 'project', projectId: handbook.projectId, status: 'trial' })])
   })
 
   it('spends nothing before the notice is acknowledged, or once the budget is exhausted', async () => {
@@ -379,6 +335,13 @@ describe('layer-1 learning, scripted end to end', () => {
     const on = await setup()
     await on.host.noteTurnEnd({ taskId: randomUUID(), sessionId: randomUUID(), turn: 1, reason: { kind: 'cancelled', cause: 'user' } })
     expect((await readLearningQueue(on.layout.dataDir)).items).toEqual([])
+    // A gate trial's throw-away copy learns nothing.
+    const copy = await setup()
+    const store = new CapabilityStore(copy.layout.capabilities)
+    const bundle = await store.write([{ kind: 'context-policy', name: 'rules', files: [{ path: 'policy.json', content: JSON.stringify({ formatVersion: 1, name: 'rules', description: 'Rules.', instructions: 'Cite files.' }) }] }])
+    await store.adopt(bundle.version, { trigger: 'manual', detail: 'replay copy for a gate trial' })
+    await runTask(copy, [{ text: 'Tidy the README' }])
+    expect(await readLearningQueue(copy.layout.dataDir)).toEqual({ formatVersion: 1, items: [], history: [] })
   })
 
   it('stops with the app: the running request is aborted, the item stays queued and runs on the next start', async () => {

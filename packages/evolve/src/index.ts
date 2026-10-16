@@ -139,10 +139,9 @@ export {
   type MetaStagesOptions,
 } from './meta.js'
 export { finishedStatusCounts, metaDiagnosisTools, metaProposeTools, type MetaChangeState, type MetaDiagnosisState } from './meta-tools.js'
-export { LearningHost, learnsFrom, REFLECTION_RESERVE_USD, type LearningHostOptions, type LearningStatus, type MarkResult, type TurnEndInput } from './learning/host.js'
-export { HandbookLog, handbookLogs, HANDBOOK_OPS_FILE, isHandbookOp, retrieveEntries, visibleEntries, type HandbookLogs, type HandbookOpInput, type HandbookView, type RetrievedEntry } from './learning/handbook.js'
+export { LearningHost, learnsFrom, REFLECTION_RESERVE_USD, type LearningHostOptions, type LearningStatus, type TurnEndInput } from './learning/host.js'
 export { learningBudgetStatus, recordUsd, type LearningBudgetStatus } from './learning/budget.js'
-export { COPIED_REQUEST_CHARS, curateReflection, DUPLICATE_SIMILARITY, MAX_ADDS_PER_REFLECTION, MAX_OPS_PER_REFLECTION, normalizeKeywords, statusOps, statusReason, votesFromTask, type CurationContext, type CurationRejection, type CurationResult } from './learning/curate.js'
+export { COPIED_REQUEST_CHARS, curateReflection, DUPLICATE_SIMILARITY, MAX_ADDS_PER_REFLECTION, MAX_OPS_PER_REFLECTION, votesFromTask, type CurationContext, type CurationRejection, type CurationResult } from './learning/curate.js'
 export { parseReflection, REFLECTION_MAX_TOKENS, REFLECTION_PROMPT_VERSION, reflectionSystemPrompt, reflectionUserMessage, type ContrastTask, type ParsedReflection, type ProposedOp, type ReflectionEvaluation, type ReflectionInput } from './learning/reflect.js'
 export { readTaskRun, renderTaskRun, RUN_RECORD_LIMITS, taskRunOf, type TaskRun } from './learning/run-record.js'
 export { enqueueItem, learningPaths, LEARNING_DIR, MAX_ATTEMPTS, MAX_HISTORY, MAX_PENDING, readLearningQueue, updateLearningQueue, type LearnedStatus, type LearnedTask, type LearningItem, type LearningItemStatus, type LearningQueueFile } from './learning/queue.js'

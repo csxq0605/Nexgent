@@ -1,7 +1,7 @@
 /**
  * API 8 over `@nexgent/evolve`'s layer-1 learner (rework E1): the handbook a
- * project sees (`handbook.list`, `handbook.show`, read from the interim
- * store until V1 owns it) and the learning view (`learning.status`: settings,
+ * project sees (`handbook.list`, `handbook.show`, over `@nexgent/capabilities`'
+ * `Handbook`) and the learning view (`learning.status`: settings,
  * notice, dollar spend in the window by phase, self-evaluations and scorer
  * reliability).
  */
@@ -26,18 +26,11 @@ function learnerOf(host: ImprovementHost): LearningHost {
 
 const view = (entry: HandbookEntry) => ({ ...entry, retrievable: isRetrievable(entry) })
 
-/** `handbook.list`: the project's own entries and, with `useShared`, the user's (retired ones only when asked). */
+/** `handbook.list`: the project's own entries and, with `useShared`, the user's (retired ones only when asked), newest change first. */
 export async function handbookList(host: ImprovementHost, input: { readonly scope?: HandbookScope; readonly includeRetired?: boolean }): Promise<HandbookListing> {
-  const learner = learnerOf(host)
-  const { user, project } = await learner.handbook()
-  const projectId = await learner.projectId()
-  const { config } = await readProjectConfig(host.layout.configFile)
-  const sharedIncluded = config.learning.useShared && input.scope !== 'project'
-  const entries = [
-    ...(input.scope === 'user' ? [] : project.filter(entry => entry.projectId === undefined || entry.projectId === projectId)),
-    ...(sharedIncluded ? user : []),
-  ].filter(entry => input.includeRetired === true || entry.status !== 'retired')
-  return { entries: entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(view), sharedIncluded }
+  const handbook = await learnerOf(host).handbook()
+  const entries = await handbook.entries({ ...(input.scope === undefined ? {} : { scope: input.scope }), ...(input.includeRetired === undefined ? {} : { includeRetired: input.includeRetired }) })
+  return { entries: entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(view), sharedIncluded: handbook.learning.useShared && input.scope !== 'project' }
 }
 
 /**
@@ -46,12 +39,8 @@ export async function handbookList(host: ImprovementHost, input: { readonly scop
  */
 export async function handbookShow(host: ImprovementHost, entryId: unknown): Promise<HandbookEntryDetail> {
   if (typeof entryId !== 'string' || entryId === '') throw new NexgentError('tool/invalid-input', 'handbook.show needs an entryId')
-  const learner = learnerOf(host)
-  const listing = await handbookList(host, { includeRetired: true })
-  const entry = listing.entries.find(candidate => candidate.id === entryId)
-  if (entry === undefined) throw new NexgentError('handbook/not-found', `no handbook entry ${entryId} in this project`)
-  const log = entry.scope === 'user' ? learner.logs.user : learner.logs.project
-  return { entry, ops: (await log.read()).filter(op => op.entryId === entryId) }
+  const { entry, ops } = await (await learnerOf(host).handbook()).ops(entryId)
+  return { entry: view(entry), ops: [...ops] }
 }
 
 /** `learning.status`. */

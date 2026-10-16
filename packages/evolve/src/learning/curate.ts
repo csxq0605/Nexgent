@@ -22,25 +22,24 @@
  *   (an entry needs evidence from other tasks to be enabled).
  * - Project-level when the reflection says so or the project does not
  *   contribute (`learning.contribute`).
+ *
+ * What passes goes to `Handbook.apply` (`@nexgent/capabilities`), which
+ * checks its own limits, duplicates and values again under the log's lock
+ * and appends the status change the counts call for after a vote.
  */
-import { randomUUID } from 'node:crypto'
+import type { HandbookChange } from '@nexgent/capabilities'
 import {
   findInstanceLiterals,
   HANDBOOK_LIMITS,
-  nextHandbookStatus,
-  foldHandbook,
   type HandbookEntry,
-  type HandbookEntryStatus,
   type HandbookOp,
   type HandbookScope,
-  type HandbookSource,
   type InstanceLiteralSource,
   type ProjectTaskMessage,
   type SelfEvalOutcome,
 } from '@nexgent/kernel'
-import type { HandbookOpInput } from './handbook.js'
 import type { ProposedOp } from './reflect.js'
-import { keywordsOf, longestSharedRun, similarity, type LearningLanguage } from './text.js'
+import { keywordsOf, longestSharedRun, similarity } from './text.js'
 
 /** Shared characters that make an entry a copy of a request. */
 export const COPIED_REQUEST_CHARS = 24
@@ -59,7 +58,8 @@ export type CurationRejection =
 /** What curation knows about the task. */
 export interface CurationContext {
   readonly projectId: string
-  readonly source: HandbookSource
+  /** The task reflected on. */
+  readonly taskId: string
   readonly outcome: SelfEvalOutcome
   /** `learning.contribute`: whether user-level entries may be written. */
   readonly contribute: boolean
@@ -78,10 +78,9 @@ export interface CurationContext {
   readonly votedFromTask: ReadonlySet<string>
 }
 
-/** What curation decided. */
+/** What curation decided: the changes to apply, in order, and what it dropped. */
 export interface CurationResult {
-  readonly user: HandbookOpInput[]
-  readonly project: HandbookOpInput[]
+  readonly changes: HandbookChange[]
   readonly rejected: readonly { readonly op: ProposedOp; readonly reason: CurationRejection; readonly detail?: string }[]
 }
 
@@ -103,7 +102,7 @@ export function normalizeKeywords(keywords: readonly string[], text: string): st
 
 /** Decide on a reflection's operations (pure). */
 export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationContext): CurationResult {
-  const result: { user: HandbookOpInput[]; project: HandbookOpInput[]; rejected: { op: ProposedOp; reason: CurationRejection; detail?: string }[] } = { user: [], project: [], rejected: [] }
+  const result: { changes: HandbookChange[]; rejected: { op: ProposedOp; reason: CurationRejection; detail?: string }[] } = { changes: [], rejected: [] }
   const byId = new Map<string, HandbookEntry>()
   for (const entry of ctx.project) if (entry.projectId === undefined || entry.projectId === ctx.projectId) byId.set(entry.id, entry)
   for (const entry of ctx.user) byId.set(entry.id, entry)
@@ -113,8 +112,8 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
   let adds = 0
   let written = 0
   const reject = (op: ProposedOp, reason: CurationRejection, detail?: string) => result.rejected.push({ op, reason, ...(detail === undefined ? {} : { detail }) })
-  const push = (scope: HandbookScope, op: HandbookOpInput) => {
-    (scope === 'user' ? result.user : result.project).push(op)
+  const push = (change: HandbookChange) => {
+    result.changes.push(change)
     written += 1
   }
   const reasonOf = (op: ProposedOp) => (op.reason === undefined || op.reason.trim() === '' ? {} : { reason: clip(op.reason.trim(), HANDBOOK_LIMITS.maxReasonChars) })
@@ -156,16 +155,12 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
         reject(op, 'duplicate', 'id' in twin ? (twin as HandbookEntry).id : undefined)
         continue
       }
-      push(scope, {
+      push({
         op: 'add',
-        entryId: randomUUID(),
-        actor: 'reflection',
-        source: ctx.source,
         ...reasonOf(op),
         text,
         keywords: normalizeKeywords(op.keywords, text),
         scope,
-        ...(scope === 'project' ? { projectId: ctx.projectId } : {}),
         ...(supersedes.length > 0 ? { supersedes } : {}),
       })
       added.push({ text, scope })
@@ -187,7 +182,7 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
         }
       }
       const keywords = op.keywords === undefined ? undefined : normalizeKeywords(op.keywords, text ?? entry.text)
-      push(entry.scope, { op: 'edit', entryId: entry.id, actor: 'reflection', source: ctx.source, ...reasonOf(op), ...(text === undefined ? {} : { text }), ...(keywords === undefined ? {} : { keywords }) })
+      push({ op: 'edit', entryId: entry.id, ...reasonOf(op), ...(text === undefined ? {} : { text }), ...(keywords === undefined ? {} : { keywords }) })
       continue
     }
     if (!ctx.votable.has(entry.id)) {
@@ -198,7 +193,7 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
       reject(op, 'outcome-unknown')
       continue
     }
-    if (entry.sources.some(source => source.taskId === ctx.source.taskId)) {
+    if (entry.sources.some(source => source.taskId === ctx.taskId)) {
       reject(op, 'own-entry')
       continue
     }
@@ -207,7 +202,7 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
       continue
     }
     voted.add(entry.id)
-    push(entry.scope, { op: op.op, entryId: entry.id, actor: 'reflection', source: ctx.source, ...reasonOf(op) })
+    push({ op: op.op, entryId: entry.id, ...reasonOf(op) })
   }
   return result
 }
@@ -217,33 +212,4 @@ export function votesFromTask(ops: readonly HandbookOp[], taskId: string): Set<s
   const ids = new Set<string>()
   for (const op of ops) if ((op.op === 'upvote' || op.op === 'downvote') && op.source?.taskId === taskId) ids.add(op.entryId)
   return ids
-}
-
-/** The reason a status change is written with, in the user's language. */
-export function statusReason(status: HandbookEntryStatus, entry: Pick<HandbookEntry, 'helpful' | 'harmful' | 'supersededBy'>, language: LearningLanguage): string {
-  const zh = language.toLowerCase().startsWith('zh')
-  if (status === 'active') return zh ? `有用 ${entry.helpful} 票、有害 ${entry.harmful} 票，转为启用` : `${entry.helpful} helpful and ${entry.harmful} harmful votes: enabled`
-  if (status === 'retired') return zh ? `有害 ${entry.harmful} 票、有用 ${entry.helpful} 票，下线` : `${entry.harmful} harmful and ${entry.helpful} helpful votes: retired`
-  return zh ? '回到试用' : 'back to trial'
-}
-
-/**
- * The `status` operations the counts call for after `pending` are appended to
- * `current` (pure): one per entry whose {@link nextHandbookStatus} differs
- * from its status.
- */
-export function statusOps(current: readonly HandbookOp[], pending: readonly HandbookOpInput[], language: LearningLanguage, source?: HandbookSource): HandbookOpInput[] {
-  const touched = new Set(pending.filter(op => op.op === 'upvote' || op.op === 'downvote').map(op => op.entryId))
-  if (touched.size === 0) return []
-  let seq = current.length
-  const at = new Date(0).toISOString()
-  const after = foldHandbook([...current, ...pending.map(op => ({ formatVersion: 1, seq: (seq += 1), at, ...op }) as HandbookOp)])
-  const ops: HandbookOpInput[] = []
-  for (const entry of after) {
-    if (!touched.has(entry.id)) continue
-    const next = nextHandbookStatus(entry)
-    if (next === entry.status) continue
-    ops.push({ op: 'status', entryId: entry.id, actor: 'host', status: next, reason: statusReason(next, entry, language), ...(source === undefined ? {} : { source }) })
-  }
-  return ops
 }

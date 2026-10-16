@@ -10,8 +10,7 @@
 
 | 文件 | 内容 |
 | --- | --- |
-| `host.ts` | `LearningHost`：`noteTurnEnd` 入队、后台循环、`stop` / `start`、`mark`（执行中模型的 `handbook_mark` 记票）、`retrieve`、`status` |
-| `handbook.ts` | 手册日志 `HandbookLog`（`ops.jsonl` 只追加、锁内编号、截掉残行）与 BM25 词法检索 `retrieveEntries`；V1 之前的过渡位置，格式严格按 `data-formats.md` §经验手册 |
+| `host.ts` | `LearningHost`：`noteTurnEnd` 入队、后台循环、`stop` / `start`、`retrieve`、`status`；手册读写都经 `@nexgent/capabilities` 的 `Handbook`（写入只用 `apply`），项目副本不学 |
 | `reflect.ts` | 反思指令 v0（通用、不含任何用例的例子）、请求正文、回答解析 |
 | `curate.ts` | 确定性整理：长度与关键词、具体数值（`findInstanceLiterals`）、照抄请求、重复、取代与修改的范围、投票规则、项目级 / 用户级；`statusOps` |
 | `queue.ts` | 学习队列 `<项目数据>/learning/queue.json`（迁移前 `.nexgent/learning/`） |
