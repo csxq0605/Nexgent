@@ -2,14 +2,17 @@
  * The context provider of `@nexgent/capabilities` (id `capabilities`). At
  * the start of every turn it makes sure the session's function-module and
  * plugin tools are registered in its scope (so a session opened on an
- * adopted bundle gets them before its first request), and renders the
- * text-only components in force: the context policy's `instructions` (and
- * `personaSuffix`) as `# Learned practices`, team templates as
+ * adopted bundle gets them before its first request), applies the context
+ * policy's `compaction`, and renders the text-only components in force:
+ * team templates as
  * `# Team templates`, presets and workflow graphs as `# Learned
  * collaboration` (the collaboration tools take a preset by name and a graph
  * inline; the `workflow` tool cannot name a stored graph). A component that
  * fails to attach is named in `# Capability problems` instead of failing
- * the turn.
+ * the turn. A context policy's `instructions` and `personaSuffix` are no
+ * longer a system-prompt section (ADR 0018 decision 4): they reach the
+ * session through the handbook (`src/handbook/host.ts`), before the user
+ * message.
  */
 import { readFile } from 'node:fs/promises'
 import type { ContextContribution, ContextProvider, SystemPromptSection, TeamTemplateSpec, TurnContextInput } from '@nexgent/kernel'
@@ -61,11 +64,6 @@ export function capabilitiesProvider(service: CapabilityService, compaction?: ()
       const components = await service.components(input.sessionId)
       const policy = components.find(component => component.spec.kind === 'context-policy')
       compaction?.()?.(input.sessionId, policy?.spec.kind === 'context-policy' ? policy.spec.spec.compaction : undefined)
-      for (const component of components) {
-        if (component.spec.kind !== 'context-policy') continue
-        const parts = [component.spec.spec.instructions, component.spec.spec.personaSuffix].filter((part): part is string => part !== undefined && part.trim() !== '')
-        if (parts.length > 0) sections.push({ id: 'capabilities-practices', title: 'Learned practices', body: parts.join('\n\n') })
-      }
       const templates = components.flatMap(component => (component.spec.kind === 'team-template' ? [component.spec.spec] : []))
       if (templates.length > 0) {
         sections.push({
