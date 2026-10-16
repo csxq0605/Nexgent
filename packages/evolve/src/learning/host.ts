@@ -14,23 +14,35 @@
  *   later turn or start once the window has room.
  * - {@link LearningHost.stop} (app exit) aborts the running request and
  *   leaves its item pending; {@link LearningHost.start} picks it up again.
- * - The evaluation is the task's self-evaluation (`evaluations/<taskId>.json`,
- *   written by the gate package) when there is one; otherwise it is derived
- *   from the turn's checks and the user's rating (`selfEvalOutcome`, an
- *   unknown outcome allows no votes).
+ * - Before reflecting it runs `@nexgent/capabilities`' `selfEvaluate` for
+ *   the task (once per task; later turns only merge the user's feedback),
+ *   whose requests carry `learningPhase: 'self-eval' | 'calibrate'` and
+ *   count against the same budget. The reflection reads that evaluation;
+ *   only when there is none (it failed, or a trial copy) the outcome is
+ *   derived from the turn's checks and the user's rating
+ *   (`selfEvalOutcome`). An unknown outcome allows no votes.
  * - The handbook is `@nexgent/capabilities`' {@link Handbook}: retrieval,
  *   and every write through `Handbook.apply` (actor `reflection`). Votes of
  *   the executing model come through its `handbook_mark` tool.
  * - A trial copy of a project (gate replay, comparison arm) learns nothing.
  */
 import { randomUUID } from 'node:crypto'
-import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
-import { join } from 'node:path'
-import { CapabilityStore, Handbook, isTrialCopy, type HandbookChangeResult, type ScoredEntry } from '@nexgent/capabilities'
+import { mkdir, rm } from 'node:fs/promises'
+import {
+  CapabilityStore,
+  evaluationsDirectory,
+  Handbook,
+  isTrialCopy,
+  listEvaluations,
+  providerSelfEvalModel,
+  readEvaluation,
+  selfEvaluate,
+  type HandbookChangeResult,
+  type ScoredEntry,
+} from '@nexgent/capabilities'
 import {
   foldHandbook,
   HANDBOOK_TOP_K,
-  LEARNING_RULES,
   mayLearn,
   readProjectConfig,
   selfEvalOutcome,
@@ -54,7 +66,7 @@ import { estimateUsd } from '@nexgent/llm'
 import { breakStaleLock, tryCreateLock } from '../lock.js'
 import { readUserConfig } from '../user.js'
 import { learningBudgetStatus, type LearningBudgetStatus } from './budget.js'
-import { curateReflection, votesFromTask, type CurationRejection } from './curate.js'
+import { curateReflection, statusReason, votesFromTask, type CurationRejection } from './curate.js'
 import {
   enqueueItem,
   learningPaths,
@@ -268,7 +280,7 @@ export class LearningHost {
         let learned: LearnedTask | undefined
         let failure: unknown
         try {
-          learned = await this.learnFrom(item, { llm, sessions, signal: this.#abort.signal })
+          learned = await this.learnFrom(item, { llm, sessions, signal: this.#abort.signal, budgetLeftUsd: budget.remainingUsd })
         } catch (error) {
           failure = error
         } finally {
@@ -321,29 +333,62 @@ export class LearningHost {
     })
   }
 
-  /** The task's evaluation: its self-evaluation of this epoch when written, else derived from checks and rating. */
-  async evaluationOf(taskId: string, checks: readonly TaskCheck[], rating: number | undefined): Promise<ReflectionEvaluation> {
-    try {
-      const evaluation = JSON.parse(await readFile(join(this.#options.layout.dataDir, 'evaluations', `${taskId}.json`), 'utf8')) as SelfEvaluation
-      if (evaluation.formatVersion === 1 && evaluation.rules === LEARNING_RULES && evaluation.taskId === taskId) {
-        const scores = new Map((evaluation.scores ?? []).map(score => [score.itemId, score.score]))
-        const latestRating = rating ?? evaluation.feedback?.rating
-        const outcome = latestRating !== undefined && latestRating !== evaluation.feedback?.rating
-          ? selfEvalOutcome({ checks: evaluation.checks, rubricScored: evaluation.scores !== undefined, ...(evaluation.score === undefined ? {} : { score: evaluation.score }), rating: latestRating })
-          : evaluation.outcome
-        return {
-          outcome,
-          ...(evaluation.score === undefined ? {} : { score: evaluation.score }),
-          checks: evaluation.checks,
-          ...(latestRating === undefined ? {} : { rating: latestRating }),
-          source: 'self-evaluation',
-          ...(evaluation.rubric === undefined ? {} : { rubric: evaluation.rubric.items.map(rubricItem => ({ text: rubricItem.text, ...(scores.has(rubricItem.id) ? { score: scores.get(rubricItem.id)! } : {}) })) }),
-        }
+  /** What the reflection is told about a task's result: its self-evaluation when there is one, else derived from checks and rating. */
+  evaluationFrom(evaluation: SelfEvaluation | undefined, checks: readonly TaskCheck[], rating: number | undefined): ReflectionEvaluation {
+    if (evaluation !== undefined) {
+      const scores = new Map((evaluation.scores ?? []).map(score => [score.itemId, score.score]))
+      const latestRating = evaluation.feedback?.rating ?? rating
+      return {
+        outcome: evaluation.outcome,
+        ...(evaluation.score === undefined ? {} : { score: evaluation.score }),
+        checks: evaluation.checks,
+        ...(latestRating === undefined ? {} : { rating: latestRating }),
+        source: 'self-evaluation',
+        ...(evaluation.rubric === undefined ? {} : { rubric: evaluation.rubric.items.map(rubricItem => ({ text: rubricItem.text, ...(scores.has(rubricItem.id) ? { score: scores.get(rubricItem.id)! } : {}) })) }),
       }
-    } catch {
-      // No self-evaluation (yet): derive.
     }
     return { outcome: selfEvalOutcome({ checks, rubricScored: false, ...(rating === undefined ? {} : { rating }) }), checks, ...(rating === undefined ? {} : { rating }), source: 'derived' }
+  }
+
+  /** The task's evaluation as written (`evaluations/<taskId>.json`), else derived. */
+  async evaluationOf(taskId: string, checks: readonly TaskCheck[], rating: number | undefined): Promise<ReflectionEvaluation> {
+    return this.evaluationFrom(await readEvaluation(evaluationsDirectory(this.#options.layout), taskId).catch(() => undefined), checks, rating)
+  }
+
+  /**
+   * Self-evaluate a task through `selfEvaluate` (first call scores it, later
+   * ones merge the user's feedback); `undefined` when it gives none or
+   * fails. An abort is rethrown so the item goes back to the queue.
+   */
+  async #selfEvaluate(item: LearningItem, llm: LLMProvider, signal: AbortSignal, budgetLeftUsd: number): Promise<SelfEvaluation | undefined> {
+    const { config } = await readProjectConfig(this.#options.layout.configFile)
+    const model = providerSelfEvalModel({
+      providerFor: attribution => ({
+        info: llm.info,
+        complete: (request, options) => llm.complete(request, { ...options, purpose: 'auxiliary', taskId: attribution.taskId, learningPhase: attribution.learningPhase } as LLMCompleteOptions & LedgerAttribution),
+      }),
+      estimateUsd,
+    })
+    try {
+      return await selfEvaluate({
+        layout: this.#options.layout,
+        sessionId: item.sessionId,
+        turn: item.turn,
+        taskId: item.taskId,
+        model,
+        executionModel: config.model,
+        learning: config.learning,
+        mayLearn: true,
+        budgetLeftUsd,
+        home: this.#options.home,
+        estimateUsd,
+        signal,
+        ...(this.#options.now === undefined ? {} : { now: this.#options.now }),
+      })
+    } catch (error) {
+      if (signal.aborted) throw error
+      return undefined
+    }
   }
 
   /** The entries a task with this text would be given (at most `HANDBOOK_TOP_K`). */
@@ -351,25 +396,9 @@ export class LearningHost {
     return (await this.handbook()).retrieve(query, { k: limit })
   }
 
-  /** The self-evaluations of this epoch written for the project (`evaluations/*.json`), oldest first. */
-  async evaluations(): Promise<SelfEvaluation[]> {
-    const dir = join(this.#options.layout.dataDir, 'evaluations')
-    let names: string[]
-    try {
-      names = (await readdir(dir)).filter(name => name.endsWith('.json'))
-    } catch {
-      return []
-    }
-    const found: SelfEvaluation[] = []
-    for (const name of names) {
-      try {
-        const value = JSON.parse(await readFile(join(dir, name), 'utf8')) as SelfEvaluation
-        if (value?.formatVersion === 1 && value.rules === LEARNING_RULES) found.push(value)
-      } catch {
-        // An unreadable file is not an evaluation.
-      }
-    }
-    return found.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  /** The self-evaluations of this epoch written for the project, oldest first. */
+  evaluations(): Promise<SelfEvaluation[]> {
+    return listEvaluations(evaluationsDirectory(this.#options.layout))
   }
 
   /** The learning page's numbers. */
@@ -413,7 +442,7 @@ export class LearningHost {
    * the model request fails (the item is retried); a reply that is not the
    * JSON asked for ends the item without operations.
    */
-  async learnFrom(item: LearningItem, services: { readonly llm: LLMProvider; readonly sessions: Pick<SessionStore, 'readAll'>; readonly signal: AbortSignal }): Promise<LearnedTask> {
+  async learnFrom(item: LearningItem, services: { readonly llm: LLMProvider; readonly sessions: Pick<SessionStore, 'readAll'>; readonly signal: AbortSignal; readonly budgetLeftUsd?: number }): Promise<LearnedTask> {
     // The whole task so far, with the turns no reflection saw yet marked.
     const run = await readTaskRun(services.sessions, item.sessionId, 1, item.turn, item.fromTurn)
     const base = {
@@ -425,8 +454,9 @@ export class LearningHost {
       keywords: keywordsOf([run.task, ...run.messages.map(message => message.text)].join('\n'), 12),
       approach: clip(`${run.toolCalls} tool calls (${run.failedToolCalls} failed); tools: ${[...new Set(run.steps.map(step => step.split(' ')[3]).filter(Boolean))].slice(0, 12).join(', ') || 'none'}; files changed: ${run.filesChanged.length}; answer: ${run.answer.replace(/\s+/g, ' ')}`, 600),
     }
-    const evaluation = await this.evaluationOf(item.taskId, item.checks, run.rating)
     const finishedAt = () => this.#now().toISOString()
+    const selfEvaluation = run.isRootTask && run.task !== '' ? await this.#selfEvaluate(item, services.llm, services.signal, services.budgetLeftUsd ?? REFLECTION_RESERVE_USD) : undefined
+    const evaluation = this.evaluationFrom(selfEvaluation, item.checks, run.rating)
     if (!run.isRootTask || run.task === '') {
       return { ...base, finishedAt: finishedAt(), status: 'skipped', outcome: evaluation.outcome, ops: {}, rejected: {}, added: [], detail: 'not a root task session' }
     }
@@ -503,13 +533,10 @@ export class LearningHost {
       requests: [run.task, ...run.messages.filter(message => message.source !== 'inject').map(message => message.text), ...run.feedback.map(entry => entry.comment)],
       votedFromTask: new Set([...votesFromTask(userOps, item.taskId), ...votesFromTask(projectOps, item.taskId)]),
     })
-    // Votes cast meanwhile (handbook_mark of a later turn) win over the reflection's.
-    const [userNow, projectNow] = await Promise.all([handbook.user.read(), handbook.project.read()])
-    const votedNow = new Set([...votesFromTask(userNow, item.taskId), ...votesFromTask(projectNow, item.taskId)])
-    const changes = curated.changes.filter(change => !((change.op === 'upvote' || change.op === 'downvote') && votedNow.has(change.entryId)))
-    const results: HandbookChangeResult[] = await handbook.apply(changes, { actor: 'reflection', source, literals: { sources, projectMessages } })
+    // Apply checks again under the log's lock: one vote per entry per task (handbook_mark of a later turn included), none on the task's own entry.
+    const results: HandbookChangeResult[] = await handbook.apply(curated.changes, { actor: 'reflection', source, literals: { sources, projectMessages }, statusReason: (status, entry) => statusReason(status, entry, language) })
     const written = results.flatMap(result => (result.outcome === 'applied' ? result.ops : []))
-    const refused = results.flatMap(result => (result.outcome === 'duplicate' ? ['duplicate' as const] : result.outcome === 'rejected' ? [result.reason === 'not-found' ? 'unknown-entry' as const : result.reason] : []))
+    const refused = results.flatMap(result => (result.outcome === 'duplicate' ? ['duplicate' as const] : result.outcome === 'rejected' ? [result.reason === 'not-found' ? 'unknown-entry' as const : result.reason === 'own-source' ? 'own-entry' as const : result.reason] : []))
     const rejected: string[] = [...curated.rejected.map(entry => entry.reason as CurationRejection), ...refused]
     return {
       ...base,

@@ -32,6 +32,7 @@ import {
   findInstanceLiterals,
   HANDBOOK_LIMITS,
   type HandbookEntry,
+  type HandbookEntryStatus,
   type HandbookOp,
   type HandbookScope,
   type InstanceLiteralSource,
@@ -39,7 +40,7 @@ import {
   type SelfEvalOutcome,
 } from '@nexgent/kernel'
 import type { ProposedOp } from './reflect.js'
-import { keywordsOf, longestSharedRun, similarity } from './text.js'
+import { keywordsOf, longestSharedRun, similarity, type LearningLanguage } from './text.js'
 
 /** Shared characters that make an entry a copy of a request. */
 export const COPIED_REQUEST_CHARS = 24
@@ -212,4 +213,12 @@ export function votesFromTask(ops: readonly HandbookOp[], taskId: string): Set<s
   const ids = new Set<string>()
   for (const op of ops) if ((op.op === 'upvote' || op.op === 'downvote') && op.source?.taskId === taskId) ids.add(op.entryId)
   return ids
+}
+
+/** The reason of the status change a vote leads to, in the user's language (`Handbook.apply`'s `statusReason`). */
+export function statusReason(status: HandbookEntryStatus, entry: Pick<HandbookEntry, 'helpful' | 'harmful'>, language: LearningLanguage): string {
+  const zh = language.toLowerCase().startsWith('zh')
+  if (status === 'active') return zh ? `有用 ${entry.helpful} 票、有害 ${entry.harmful} 票，转为启用` : `${entry.helpful} helpful and ${entry.harmful} harmful votes: enabled`
+  if (status === 'retired') return zh ? `有害 ${entry.harmful} 票、有用 ${entry.helpful} 票，下线` : `${entry.harmful} harmful and ${entry.helpful} helpful votes: retired`
+  return zh ? '回到试用' : 'back to trial'
 }

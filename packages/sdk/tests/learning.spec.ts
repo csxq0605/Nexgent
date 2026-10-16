@@ -1,20 +1,30 @@
 /**
  * Rework E1 through the SDK: with the notice acknowledged, a finished task is
- * reflected on in the background (the counting path is off), the entry shows
+ * self-evaluated (G1) and reflected on in the background (the counting path
+ * is off), the entry shows
  * in `handbook.list` / `handbook.show`, and `learning.status` reports the
  * settings and the notice; without the notice nothing is asked of the model.
  */
 import { readFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { resolveProjectLayout, type LLMRequest } from '@nexgent/kernel'
 import { testSdk, type TestSdk } from './helpers.js'
 
 const usage = { inputTokens: 1000, outputTokens: 200, totalTokens: 1200, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }
 const TEXT = 'Before editing a configuration file, read it fully and keep its existing comments and ordering.'
 
-async function history(root: string): Promise<{ items: unknown[]; history: Array<{ status: string; added: string[] }> }> {
+/** The background requests, answered by what each asks for: rubric, scores (self-score or calibration), reflection. */
+const learner = (request: LLMRequest) => {
+  const system = String(request.messages[0]?.content ?? '')
+  if (system.includes('grading rubric')) return { content: JSON.stringify({ items: [{ text: 'Verbose logging is enabled in the settings file.', weight: 3 }] }), usage }
+  if (system.includes('fixed rubric')) return { content: JSON.stringify({ scores: [{ id: 'r1', score: 1, note: 'Enabled.' }] }), usage }
+  return { content: JSON.stringify({ ops: [{ op: 'add', text: TEXT, keywords: ['configuration', 'edit'], scope: 'user' }] }), usage }
+}
+
+async function history(t: TestSdk, root: string): Promise<{ items: unknown[]; history: Array<{ status: string; added: string[] }> }> {
   try {
-    return JSON.parse(await readFile(nodePath.join(root, '.nexgent', 'learning', 'queue.json'), 'utf8'))
+    return JSON.parse(await readFile(nodePath.join(resolveProjectLayout(root, { home: t.home }).dataDir, 'learning', 'queue.json'), 'utf8'))
   } catch {
     return { items: [], history: [] }
   }
@@ -38,14 +48,15 @@ async function runOne(t: TestSdk, acknowledge: boolean): Promise<{ projectId: st
 
 describe('layer-1 learning through the SDK', () => {
   it('reflects after a task and lists the entry; learning.status reports settings and notice', async () => {
-    const t = await testSdk([
-      { content: 'done', usage },
-      { content: JSON.stringify({ ops: [{ op: 'add', text: TEXT, keywords: ['configuration', 'edit'], scope: 'user' }] }), usage },
-    ], { legacyCounting: false })
+    const t = await testSdk([{ content: 'done', usage }, learner, learner, learner, learner], { legacyCounting: false })
     const { projectId, root } = await runOne(t, true)
-    await until(async () => (await history(root)).history.length === 1)
-    expect((await history(root)).history[0]).toMatchObject({ status: 'done' })
-    expect(t.providers[0]!.llm.calls).toHaveLength(2)
+    await until(async () => (await history(t, root)).history.length === 1)
+    expect((await history(t, root)).history[0]).toMatchObject({ status: 'done' })
+    // Self-evaluation first (rubric, then score), then the reflection.
+    const phases = t.providers[0]!.llm.calls.slice(1).map(call => (call.options as { learningPhase?: string } | undefined)?.learningPhase)
+    expect(phases.slice(0, 2)).toEqual(['self-eval', 'self-eval'])
+    expect(phases.at(-1)).toBe('reflect')
+    expect(t.providers[0]!.llm.calls.slice(1).every(call => call.options?.purpose === 'auxiliary')).toBe(true)
     const listing = await t.sdk.call('handbook.list', { projectId })
     expect(listing).toMatchObject({ sharedIncluded: true, entries: [{ text: TEXT, status: 'trial', scope: 'user', retrievable: true }] })
     const detail = await t.sdk.call('handbook.show', { projectId, entryId: listing.entries[0]!.id })
@@ -57,8 +68,8 @@ describe('layer-1 learning through the SDK', () => {
       rules: 'adr-0019',
       config: { enabled: true, budget: { maxUsd: 3, windowDays: 30 } },
       budget: { maxUsd: 3, windowDays: 30 },
-      selfEvaluations: 0,
-      reliability: { status: 'insufficient', sampled: 0 },
+      selfEvaluations: 1,
+      reliability: { status: 'insufficient' },
     })
     expect(t.launched).toEqual([])
   })
@@ -66,7 +77,7 @@ describe('layer-1 learning through the SDK', () => {
   it('asks nothing of the model before the notice is acknowledged', async () => {
     const t = await testSdk([{ content: 'done', usage }], { legacyCounting: false })
     const { projectId, root } = await runOne(t, false)
-    await until(async () => (await history(root)).items.length === 1)
+    await until(async () => (await history(t, root)).items.length === 1)
     expect(t.providers[0]!.llm.calls).toHaveLength(1)
     expect(await t.sdk.call('learning.status', { projectId })).toMatchObject({ noticeAcknowledged: false, active: false })
     expect(await t.sdk.call('handbook.list', { projectId })).toEqual({ entries: [], sharedIncluded: true })
