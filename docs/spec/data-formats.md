@@ -1262,6 +1262,11 @@ ADR 0018 决策 4：第 1 层学习。一个条目是一条可复用的做法，
 - 执行中的模型用 `handbook_mark`（只读、不审批、可并发）说一条注入的条目帮了忙还是带偏了；每个任务每个条目一票，重复的忽略。
 - 条目文字用用户的界面语言（ADR 0018 决策 11）；不得含某个任务的具体数值（沿用“候选与门控”的具体数值检查）。
 
+**反思与整理**（重做 E1，`@nexgent/evolve` 的 `LearningHost`）：每个根任务轮结束后（`turn.end` 之后，内核调用可选的 `ctx.improve.noteTurnEnd`；用户、关机或父会话取消的轮不学），任务进入项目的学习队列；应用进程里的后台循环一次处理一个任务：先调 `selfEvaluate`（`@nexgent/capabilities`，见 §自评；每个任务只评一次，之后的轮只并入用户反馈；请求记 `learningPhase: "self-eval"` 或 `"calibrate"`，与反思共用学习预算），再读整段任务的会话记录与这份自评（自评失败或项目副本没有自评时，由本轮确定性检查与用户最后一次评分按 `selfEvalOutcome` 推出；`unknown` 不允许投票），找本项目历史里最相似、结局不同的一个任务作对照，发一次反思请求（`purpose: "auxiliary"`、`learningPhase: "reflect"`、`taskId` 为被学习的任务，不带 `sessionId`），把回答里的操作交给确定性整理，通过的经 `Handbook.apply`（`@nexgent/capabilities`，`actor: "reflection"`）写入，`apply` 在日志锁内再查一遍并按 `nextHandbookStatus` 追加 `status` 操作。被测试改进或比较组用的项目副本（`isTrialCopy`）不入队、不学。整理规则（任何任务都成立）：文字 1–600 字符；关键词小写、去重、至多 12 个，缺省时从文字取；含任务具体数值的条目拒绝（`findInstanceLiterals`，项目级条目允许项目常量，用户级不允许）；与任务的用户消息或反馈评论共享 24 个以上连续字符的条目视为照抄一次性要求，拒绝；与可见条目文字相似度 ≥ 0.6 且未声明取代的新条目视为重复，拒绝；`supersedes` 与 `edit` 只能指向同一份日志里未退休的条目；投票只能投给本任务被给到的条目（`turn.start.handbook`；没有注入记录时为按任务文字检索到的前 5 条），每个任务每个条目一票；`learning.contribute` 关着时新条目一律记为项目级；文字里有本项目任务消息中出现过的文件名（`name.ext`）或路径（`a/b`）时，新条目记为项目级（名字只在本项目有意义），给用户级条目的 `edit` 带进这类名字时拒绝；一次反思至多新增 3 条、写 10 个操作。执行中的模型经 `handbook_mark` 记票（`actor: "execution"`）；同一任务已投过的条目，反思不再投。
+
+**学习队列** `<项目数据>/learning/queue.json`（迁移前在 `.nexgent/learning/`，在 `queue.lock` 下原子重写；处理它的进程持有 `worker.lock`，别的进程只入队）：`{ formatVersion: 1, items, history }`。`items[]`：`{ taskId, sessionId, fromTurn, turn, checks, enqueuedAt, status: "pending" | "running" | "waiting-budget", attempts, detail? }`，同一任务的新一轮替换它等待中的那项，反思覆盖自上次学到的轮之后的所有轮；至多 50 项。`history[]`：`{ taskId, sessionId, fromTurn, throughTurn, finishedAt, status: "done" | "skipped" | "failed", outcome, task（≤500 字符）, keywords, approach（≤600 字符）, ops, rejected, added, usd?, detail? }`，至多 500 项，供找对照任务。花钱前检查 `mayLearn` 与学习预算：没确认说明时项留在队列里；预算余额不足 0.1 美元（`REFLECTION_RESERVE_USD`）时项标为 `waiting-budget`，等之后某轮结束或应用重启时窗口有余额再跑；应用退出时中止正在进行的请求，那一项回到 `pending`（本次不计入尝试次数），下次启动继续；请求失败重试，3 次后记为 `failed`。
+
+
 ## 版本与兼容
 
 | 格式 | 版本字段 | 当前 | 升级方式 |

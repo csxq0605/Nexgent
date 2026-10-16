@@ -177,6 +177,9 @@ importers:
       '@nexgent/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@nexgent/llm':
+        specifier: workspace:*
+        version: link:../llm
       '@nexgent/session':
         specifier: workspace:*
         version: link:../session

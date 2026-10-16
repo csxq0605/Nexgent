@@ -91,4 +91,5 @@ export type {
   TaskEndInput,
   TaskEndResult,
   TaskRecorder,
+  TurnEndSignal,
 } from './capability-hooks.js'

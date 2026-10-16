@@ -12,7 +12,8 @@
  *   when a root turn starts (workspace snapshot) and when it ends
  *   (deterministic checks); step 5 keeps one record of each per turn.
  * - `ctx.improve` (step 5) is provided by `@nexgent/evolve`. The kernel
- *   signals a root turn whose checks failed.
+ *   signals a root turn whose checks failed, and (ADR 0018, optional) every
+ *   root turn that ended, so the host can learn from the task.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { CapabilityComponentRef, CapabilityVersion, TaskCheckSpec } from './contracts/capabilities.js'
@@ -21,6 +22,7 @@ import type { ComparisonArm, ImprovementPhase } from './contracts/improvement.js
 import type { ImproverScope, ImproverVersion } from './contracts/improver.js'
 import type { JsonValue } from './contracts/json.js'
 import type { TaskCheck } from './contracts/ledger.js'
+import type { TurnEndReason } from './contracts/session.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -213,4 +215,21 @@ export interface CheckFailureSignal {
  */
 export interface ImprovementSignals {
   noteCheckFailure(input: CheckFailureSignal): Promise<unknown>
+  /**
+   * ADR 0018 (optional): a root turn of a task session ended (`turn.end` is
+   * written). The host queues the task for background learning and returns
+   * at once; it never holds the next turn up.
+   */
+  noteTurnEnd?(input: TurnEndSignal): Promise<unknown>
+}
+
+/** A root turn of a task session ended. */
+export interface TurnEndSignal {
+  readonly taskId: string
+  readonly sessionId: string
+  readonly turn: number
+  readonly reason: TurnEndReason
+  /** The turn's deterministic checks, when they ran. */
+  readonly checks?: readonly TaskCheck[]
+  readonly at?: Date
 }

@@ -1,5 +1,12 @@
 /**
- * `@nexgent/evolve`: the default feedback-improvement flow (step 5) —
+ * `@nexgent/evolve`. ADR 0018 (rework E1): layer-1 learning after every
+ * task — the learning queue in the app process, reflection, deterministic
+ * curation, the handbook logs and their lexical retrieval, the dollar
+ * learning budget ({@link LearningHost}). The step-5/6 job machinery below
+ * stays for explicit runs and for reading old jobs; its counting path is
+ * retired (`legacyCounting`).
+ *
+ * Step 5/6: the feedback-improvement flow —
  * counting feedback and check failures, the three triggers, improvement
  * jobs and their state machine, the job host (detached processes, locks,
  * recovery), the improvement budget, the diagnose session with its four
@@ -47,6 +54,7 @@ export {
   countsTowardImprovement,
   feedbackItem,
   ImprovementHost,
+  LEGACY_COUNTING_ENV,
   type CheckFailureInput,
   type ImprovementHostConfig,
   type StartedJob,
@@ -131,3 +139,10 @@ export {
   type MetaStagesOptions,
 } from './meta.js'
 export { finishedStatusCounts, metaDiagnosisTools, metaProposeTools, type MetaChangeState, type MetaDiagnosisState } from './meta-tools.js'
+export { LearningHost, learnsFrom, REFLECTION_RESERVE_USD, type LearningHostOptions, type LearningStatus, type TurnEndInput } from './learning/host.js'
+export { learningBudgetStatus, recordUsd, type LearningBudgetStatus } from './learning/budget.js'
+export { COPIED_REQUEST_CHARS, curateReflection, DUPLICATE_SIMILARITY, MAX_ADDS_PER_REFLECTION, MAX_OPS_PER_REFLECTION, projectNames, statusReason, votesFromTask, type CurationContext, type CurationRejection, type CurationResult } from './learning/curate.js'
+export { parseReflection, REFLECTION_MAX_TOKENS, REFLECTION_PROMPT_VERSION, reflectionSystemPrompt, reflectionUserMessage, type ContrastTask, type ParsedReflection, type ProposedOp, type ReflectionEvaluation, type ReflectionInput } from './learning/reflect.js'
+export { readTaskRun, renderTaskRun, RUN_RECORD_LIMITS, taskRunOf, type TaskRun } from './learning/run-record.js'
+export { enqueueItem, learningPaths, LEARNING_DIR, MAX_ATTEMPTS, MAX_HISTORY, MAX_PENDING, readLearningQueue, updateLearningQueue, type LearnedStatus, type LearnedTask, type LearningItem, type LearningItemStatus, type LearningQueueFile } from './learning/queue.js'
+export { detectLanguage, keywordsOf, languageName, longestSharedRun, similarity, tokenize, type LearningLanguage } from './learning/text.js'

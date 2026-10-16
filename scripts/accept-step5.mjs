@@ -62,6 +62,10 @@ import {
   REAL_MODEL,
 } from './accept-common/step5-checks.mjs'
 
+// ADR 0018 (rework E1) retired the counting path these checks exercise; keep it on for them until
+// the rework's T1 list retires or rewrites them (inherited by in-process SDKs and child processes).
+process.env.NEXGENT_LEGACY_COUNTING ??= '1'
+
 const STEP = {
   step: 5,
   name: '默认反馈改进流程',

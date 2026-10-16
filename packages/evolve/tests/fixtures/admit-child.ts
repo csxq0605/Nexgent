@@ -7,7 +7,7 @@ import { ImprovementHost, type StartedJob } from '../../src/index.js'
 const [root, barrier, index, ...ids] = process.argv.slice(2)
 const layout = resolveWorkspaceLayout(root!)
 const launched: string[] = []
-const host = new ImprovementHost(layout, { launch: (_layout, jobId): StartedJob => { launched.push(jobId); return { jobId, pid: undefined, exited: new Promise(() => undefined) } } })
+const host = new ImprovementHost(layout, { legacyCounting: true, launch: (_layout, jobId): StartedJob => { launched.push(jobId); return { jobId, pid: undefined, exited: new Promise(() => undefined) } } })
 await writeFile(join(barrier!, `ready-${index}`), '')
 for (;;) {
   try {

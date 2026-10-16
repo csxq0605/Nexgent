@@ -120,6 +120,8 @@ const ATTRIBUTION_KEYS = [
   'improverVersion', 'metaJobId', 'comparisonArm',
   // ADR 0012.
   'improverScope',
+  // ADR 0018: background learning requests (counted against `learning.budget`).
+  'learningPhase',
 ] as const
 
 function pickAttribution(...sources: (LedgerAttribution | undefined)[]): LedgerAttribution {
