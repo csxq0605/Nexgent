@@ -237,6 +237,32 @@ describe('context overflow', () => {
   })
 })
 
+describe('compaction trigger after reopening', () => {
+  it('starts from the usage of the latest reply recorded in the session, not a whole-history estimate', async () => {
+    harness = await bootHarness({ script: [textReply('first', usage(321, 7)), textReply('second')] })
+    const { app } = harness
+    const checks: CompactionCheckInput[] = []
+    const compactor: Compactor = {
+      shouldCompact(input) {
+        checks.push(input)
+        return false
+      },
+      async compact() {
+        throw new Error('not expected')
+      },
+    }
+    await app.ctx.plugin(servicePlugin('context', { providers: [], register: () => () => undefined, compactor } satisfies ContextService))
+    const agent = await app.agents.create()
+    await agent.run('one')
+    expect(checks[0]!.lastUsage).toBeUndefined()
+    await agent.close()
+    const resumed = await app.agents.resume(agent.sessionId)
+    await resumed.run('two')
+    expect(checks.at(-1)!.lastUsage).toEqual(usage(321, 7))
+    await resumed.close()
+  })
+})
+
 describe('provider retries', () => {
   it('forwards a retry event to subscribers and keeps only the final attempt', async () => {
     harness = await bootHarness({

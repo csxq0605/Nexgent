@@ -323,7 +323,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 {"type":"tool.result","seq":5,"ts":"…","sessionId":"6f1c…","turn":1,"step":1,"toolCallId":"call_1","name":"str_replace","content":"replaced 1 occurrence","isError":false,"durationMs":4}
 {"type":"assistant.message","seq":6,"ts":"…","sessionId":"6f1c…","turn":1,"step":2,"requestId":"c2d3…","content":"已改好。","usage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","cacheWriteTokens":"unknown","reasoningTokens":"unknown"},"finishReason":"stop"}
 {"type":"turn.end","seq":7,"ts":"…","sessionId":"6f1c…","turn":1,"reason":{"kind":"completed"}}
-{"type":"checkpoint","seq":8,"ts":"…","sessionId":"6f1c…","coversSeq":7,"state":{"sessionId":"6f1c…","version":1,"messages":[{"role":"user","content":"把 README 第一行改成 Hello"},{"role":"assistant","content":"","toolCalls":[{"id":"call_1","name":"str_replace","arguments":"{…}"}]},{"role":"tool","toolCallId":"call_1","name":"str_replace","content":"replaced 1 occurrence","isError":false},{"role":"assistant","content":"已改好。"}],"metadata":{"createdAt":"2026-10-07T08:00:00.000Z","projectRoot":"/home/u/proj","model":"claude-sonnet-5-5","sandboxMode":"workspace-write","grants":[],"lastTurn":1,"totalUsage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","cacheWriteTokens":"unknown","reasoningTokens":"unknown"},"lastSeq":7}}}
+{"type":"checkpoint","seq":8,"ts":"…","sessionId":"6f1c…","coversSeq":7,"state":{"sessionId":"6f1c…","version":1,"messages":[{"role":"user","content":"把 README 第一行改成 Hello"},{"role":"assistant","content":"","toolCalls":[{"id":"call_1","name":"str_replace","arguments":"{…}"}]},{"role":"tool","toolCallId":"call_1","name":"str_replace","content":"replaced 1 occurrence","isError":false},{"role":"assistant","content":"已改好。"}],"metadata":{"createdAt":"2026-10-07T08:00:00.000Z","projectRoot":"/home/u/proj","model":"claude-sonnet-5-5","sandboxMode":"workspace-write","grants":[],"lastTurn":1,"totalUsage":{"inputTokens":"unknown","outputTokens":"unknown","totalTokens":"unknown","cacheReadTokens":"unknown","cacheWriteTokens":"unknown","reasoningTokens":"unknown"},"lastSeq":7,"lastUsage":{"inputTokens":812,"outputTokens":37,"totalTokens":849,"cacheReadTokens":0,"cacheWriteTokens":0,"reasoningTokens":0}}}}
 ```
 
 被取消的一轮：
@@ -381,7 +381,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `session.start` | 无 | `createdAt`、`projectRoot`、`model`、`sandboxMode`、`title`；`lastTurn = 0`；`grants = []`；`totalUsage` 置为全 0（`ZERO_USAGE`，加法单位元） |
 | `turn.start` | 无 | `lastTurn = turn`，`openTurn = turn` |
 | `user.message` | 追加 `{ role: "user", content }` | 无 |
-| `assistant.message` | 追加 `{ role: "assistant", content, toolCalls?, providerContent? }`；`interrupted` 且 `content` 为空时不追加 | `totalUsage = addUsage(totalUsage, usage)`（任一字段 `"unknown"` 则和为 `"unknown"`） |
+| `assistant.message` | 追加 `{ role: "assistant", content, toolCalls?, providerContent? }`；`interrupted` 且 `content` 为空时不追加 | `totalUsage = addUsage(totalUsage, usage)`（任一字段 `"unknown"` 则和为 `"unknown"`）；`usage` 的计费输入（`inputTokens + cacheReadTokens + cacheWriteTokens`）已知时 `lastUsage = usage`（ADR 0021） |
 | `tool.result` | 追加 `{ role: "tool", toolCallId, name, content, isError }` | 无 |
 | `turn.end` | 无 | 清除 `openTurn` |
 | `checkpoint` | 从头重放时整体替换 `state` | 同左 |
@@ -389,11 +389,11 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `goal.set`（步骤 2） | 无 | `goal = record.goal`（替换旧目标） |
 | `goal.update`（步骤 2） | 无 | `goal.status = status`；给了 `text` 则替换；给了 `note` 则替换；`goal.updatedAt = record.ts` |
 | `session.title`（步骤 2） | 无 | `title = record.title`（覆盖 `session.start` 的标题） |
-| `compaction`（步骤 2） | `messages = [{ role: "user", content: renderCompactionSummary(summary) }, ...messages 的最后 keepMessages 条]` | `lastCompactionSeq = seq` |
+| `compaction`（步骤 2） | `messages = [{ role: "user", content: renderCompactionSummary(summary) }, ...messages 的最后 keepMessages 条]` | `lastCompactionSeq = seq`；删除 `lastUsage` |
 | `material.added`、`deliverable.presented`、`turn.files`、`feedback`（步骤 2） | 无 | 无 |
 | 任意记录 | — | `lastSeq = seq` |
 
-`SessionMetadata` 字段：`createdAt`、`projectRoot`、`model`、`sandboxMode`、`grants`、`title?`、`lastTurn`、`openTurn?`、`totalUsage`、`lastSeq`；步骤 2 增加可选的 `goal?`（`Goal`）与 `lastCompactionSeq?`。步骤 1 写出的 checkpoint 没有这两个字段，读出时视为未设置。
+`SessionMetadata` 字段：`createdAt`、`projectRoot`、`model`、`sandboxMode`、`grants`、`title?`、`lastTurn`、`openTurn?`、`totalUsage`、`lastSeq`；步骤 2 增加可选的 `goal?`（`Goal`）与 `lastCompactionSeq?`。步骤 1 写出的 checkpoint 没有这两个字段，读出时视为未设置。ADR 0021 增加可选的 `lastUsage?`（最近一次压缩之后、计费输入已知的最后一条回复的用量）：重开会话时压缩触发从它起算，没有它（压缩后还没有回复，或旧 checkpoint）时按整段历史估计。
 
 ### 并发写保护
 

@@ -274,6 +274,8 @@ export interface AgentInit {
   readonly lastTurn: number
   readonly lastSeq: number
   readonly lastCheckpointSeq: number
+  /** Usage of the history's latest reply (`SessionMetadata.lastUsage`), for the compaction trigger. */
+  readonly lastUsage?: LLMUsage
   readonly sessionGrants: readonly ApprovalGrant[]
   readonly projectGrantWriter: () => ProjectGrantWriter | undefined
   readonly onClose: (agent: Agent) => void
@@ -436,6 +438,9 @@ export const PRESENT_REMINDER = '[Nexgent] Project files may have changed in thi
 /** Steps of a turn between two present reminders. */
 export const PRESENT_REMINDER_EVERY = 8
 
+/** How much longer than the provider's stream idle deadline the loop waits before giving up on the stream itself. */
+const IDLE_GRACE_MS = 15_000
+
 /** Default model calls per turn (`agents.maxSteps`; ADR 0021). */
 export const DEFAULT_MAX_STEPS = 400
 
@@ -555,6 +560,7 @@ export class Agent {
     this.lastTurn = init.lastTurn
     this.lastSeq = init.lastSeq
     this.lastCheckpointSeq = init.lastCheckpointSeq
+    this.lastUsage = init.lastUsage
   }
 
   /** Whether a turn is in progress. */
@@ -1535,7 +1541,8 @@ export class Agent {
         let idleTimer: ReturnType<typeof setTimeout> | undefined
         const idle = settings.streamIdleTimeoutMs > 0
           ? new Promise<{ kind: 'idle' }>(resolve => {
-            idleTimer = setTimeout(() => resolve({ kind: 'idle' }), settings.streamIdleTimeoutMs)
+            // A little later than the provider's own idle deadline, so a provider that retries a stalled attempt (ADR 0021) gets to.
+            idleTimer = setTimeout(() => resolve({ kind: 'idle' }), settings.streamIdleTimeoutMs + Math.min(IDLE_GRACE_MS, Math.floor(settings.streamIdleTimeoutMs / 2)))
           })
           : new Promise<never>(() => {})
         const next = iterator.next().then(

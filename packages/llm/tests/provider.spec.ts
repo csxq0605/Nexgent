@@ -549,6 +549,22 @@ describe('AnthropicProvider — retries (ADR 0021)', { timeout: 15_000 }, () => 
     expect(fake.requests).toHaveLength(1)
   })
 
+  it('retries a stream that stalled before any text, but not one that stalled after', async () => {
+    fake = await startFakeAnthropic([{ sse: loadSseFixture('text'), hangAfter: 1 }, { sse: loadSseFixture('text') }])
+    const { provider } = makeProvider(fake.baseUrl, FAST_RETRY)
+    const events = await collect(provider.complete(makeRequest(), { streamIdleTimeoutMs: 150 }))
+    expect(events.find(event => event.type === 'retry')).toMatchObject({ error: { code: 'llm/timeout' } })
+    expect(textOf(events)).toBe('Hello, world.')
+    await fake.close()
+
+    fake = await startFakeAnthropic([{ sse: loadSseFixture('text'), hangAfter: 3 }, { sse: loadSseFixture('text') }])
+    const late = makeProvider(fake.baseUrl, FAST_RETRY)
+    const stalled = await collect(late.provider.complete(makeRequest(), { streamIdleTimeoutMs: 150 }))
+    expect(textOf(stalled)).toBe('Hello')
+    expect(errorOf(stalled).error.code).toBe('llm/timeout')
+    expect(fake.requests).toHaveLength(1)
+  })
+
   it('an abort during the wait ends the stream as aborted without another attempt', async () => {
     fake = await startFakeAnthropic([OVERLOADED, { sse: loadSseFixture('text') }])
     const { provider } = makeProvider(fake.baseUrl, { maxRetries: 3, retryBaseDelayMs: 5_000, retryMaxDelayMs: 5_000 })
@@ -583,7 +599,8 @@ describe('AnthropicProvider — retries (ADR 0021)', { timeout: 15_000 }, () => 
     expect(isRetryable(failure({ providerType: 'api_error' }, 200))).toBe(true)
     expect(isRetryable(failure({ providerType: 'invalid_request_error' }, 400))).toBe(false)
     expect(isRetryable(failure({ cause: 'ECONNRESET' }))).toBe(true)
-    expect(isRetryable({ type: 'error', error: { name: 'NexgentError', code: 'llm/timeout', message: 'x' } })).toBe(false)
+    expect(isRetryable({ type: 'error', error: { name: 'NexgentError', code: 'llm/timeout', message: 'x', details: { timeout: 'request' } } })).toBe(false)
+    expect(isRetryable({ type: 'error', error: { name: 'NexgentError', code: 'llm/timeout', message: 'x', details: { timeout: 'idle' } } })).toBe(true)
   })
 })
 

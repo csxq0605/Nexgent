@@ -664,6 +664,12 @@ export interface SessionMetadata {
   readonly goal?: Goal
   /** `seq` of the latest `compaction` folded in (step 2). */
   readonly lastCompactionSeq?: number
+  /**
+   * Usage of the latest `assistant.message` after the latest compaction whose
+   * billed input is known (ADR 0021): the compaction trigger's starting point
+   * when an agent is reopened. Absent before the first such reply.
+   */
+  readonly lastUsage?: LLMUsage
   /** From `session.start` (step 3 child session). */
   readonly parentSessionId?: string
   /** From `session.start` (step 3 child session). */

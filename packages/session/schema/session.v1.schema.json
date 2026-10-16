@@ -955,6 +955,9 @@
         "lastCompactionSeq": {
           "$ref": "#/$defs/positiveInteger"
         },
+        "lastUsage": {
+          "$ref": "#/$defs/usage"
+        },
         "parentSessionId": {
           "$ref": "#/$defs/nonEmptyString"
         },

@@ -401,6 +401,7 @@ export class AgentsService extends Service {
     lastTurn: number
     lastSeq: number
     lastCheckpointSeq: number
+    lastUsage?: AgentInit['lastUsage']
     grants: AgentInit['sessionGrants']
     tree: TaskTree
     settings: AgentSettings
@@ -442,6 +443,7 @@ export class AgentsService extends Service {
       lastTurn: args.lastTurn,
       lastSeq: args.lastSeq,
       lastCheckpointSeq: args.lastCheckpointSeq,
+      ...(args.lastUsage === undefined ? {} : { lastUsage: args.lastUsage }),
       sessionGrants: args.grants,
       projectGrantWriter: () => this.grantWriter,
       tree: args.tree,
@@ -786,6 +788,7 @@ export class AgentsService extends Service {
         lastTurn: state.metadata.lastTurn,
         lastSeq: capabilities?.lastSeq ?? state.metadata.lastSeq,
         lastCheckpointSeq: checkpoint?.seq ?? 0,
+        ...(state.metadata.lastUsage === undefined ? {} : { lastUsage: state.metadata.lastUsage }),
         grants: state.metadata.grants,
         tree: parent?.tree ?? new TaskTree(sessionId, projectConfig.costCaps.perTask, [...projectConfig.approvals]),
         settings: this.settings(preset, projectConfig),

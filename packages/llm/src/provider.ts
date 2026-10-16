@@ -622,14 +622,16 @@ const RETRYABLE_PROVIDER_TYPES = new Set(['overloaded_error', 'rate_limit_error'
 
 /**
  * Whether a failed attempt may be sent again: a rate limit, overload or
- * server error, or a connection that failed or dropped (no HTTP error status
- * and no provider error type). Timeouts, invalid requests, auth errors and
- * malformed responses are final.
+ * server error, a connection that failed or dropped (no HTTP error status
+ * and no provider error type), or a stream that went idle. The whole-request
+ * deadline, invalid requests, auth errors and malformed responses are final.
  * @param event - the attempt's terminal error.
  */
 export function isRetryable(event: StreamErrorEvent): boolean {
-  if (event.error.code !== 'llm/request-failed') return false
   const details = event.error.details ?? {}
+  // A stream that stalled (ADR 0017 decision 2); the request deadline is the caller's whole budget and is final.
+  if (event.error.code === 'llm/timeout') return details['timeout'] === 'idle'
+  if (event.error.code !== 'llm/request-failed') return false
   const providerType = details['providerType']
   if (typeof providerType === 'string') return RETRYABLE_PROVIDER_TYPES.has(providerType)
   const status = event.httpStatus

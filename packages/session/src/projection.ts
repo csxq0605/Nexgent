@@ -14,6 +14,7 @@
  */
 import {
   addUsage,
+  billedInputTokens,
   compactionTail,
   NexgentError,
   renderCompactionSummary,
@@ -166,6 +167,7 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
         draft.messages.push(message)
       }
       meta.totalUsage = addUsage(meta.totalUsage, record.usage)
+      if (billedInputTokens(record.usage) !== undefined) meta.lastUsage = record.usage
       break
     }
     case 'tool.result':
@@ -215,6 +217,7 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
       const tail = compactionTail(draft.messages, record.keepMessages)
       draft.messages = [{ role: 'user', content: renderCompactionSummary(record.summary) }, ...tail]
       meta.lastCompactionSeq = record.seq
+      delete meta.lastUsage
       break
     }
     case 'fork.seed':

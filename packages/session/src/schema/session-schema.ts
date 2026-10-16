@@ -284,6 +284,7 @@ export const sessionRecordSchema: JsonObject = {
         lastSeq: ref('positiveInteger'),
         goal: ref('goal'),
         lastCompactionSeq: ref('positiveInteger'),
+        lastUsage: ref('usage'),
         parentSessionId: ref('nonEmptyString'),
         member: ref('memberIdentity'),
         capabilityVersion: ref('capabilityVersion'),
