@@ -276,7 +276,7 @@ async function seedFinishedJob(pkgs, home, root, version) {
   await evolve.transitionJob(dir, job.id, 'diagnosing', { expect: ['queued'] })
   await evolve.updateJob(dir, job.id, { improverVersion: version, improverScope: 'user' })
   const done = await evolve.transitionJob(dir, job.id, 'no-proposal', { expect: ['diagnosing'], detail: 'Nothing to change.' })
-  await evolve.countFinishedJobForUser(home, pkgs.kernel.resolveWorkspaceLayout(root), done)
+  await evolve.countFinishedJobForUser(home, pkgs.kernel.resolveProjectLayout(root, { home }), done)
   return job.id
 }
 
@@ -624,6 +624,8 @@ export async function runStep6DesktopScenario(harness, work, { log = () => {} } 
   const home = join(work, 'home')
   registerHome(root, home)
   const other = join(work, 'reports')
+  // The other project of the same user: its data sits under the same NEXGENT_HOME.
+  registerHome(other, home)
   createRequire(join(DESKTOP_DIR, 'package.json'))('electron')
 
   let server

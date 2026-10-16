@@ -106,6 +106,8 @@ export declare function runFeedbackProject(
     log?: (line: string) => void
     config?: Record<string, unknown>
     createSdk?: (env: Record<string, string>, home: string) => unknown
+    /** The NEXGENT_HOME the project opens under (default `<work>/home`); another project's to share one user. */
+    home?: string
     server?: { readonly baseUrl: string; close(): Promise<void> }
     tasks?: readonly FamilyTask[]
     beforeFeedback?: (ctx: { sdk: any; projectId: string; root: string; feedbackSession: string }) => Promise<unknown>

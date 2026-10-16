@@ -271,7 +271,7 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
       const project = await runFeedbackProject(harness, pkgs, work, {
         server,
         log: line => log(`prep: ${line}`),
-        config: { autoImprove: false },
+        config: { autoImprove: false, learning: { enabled: true } },
         createSdk: (e, h) => createStep5Sdk(pkgs, { env: e, home: h }),
       })
       obs.prepared.feedbackSession = project.tasks.at(-1)?.sessionId
@@ -399,8 +399,8 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
     if (obs.firstUse.ui === null) {
       obs.firstUse.nudged = true
       await showTab(page, 'improvements')
-      const sid = nextSession
-      await page.getByTestId('session-item').filter({ hasText: NEXT_TASK.id }).first().click().catch(() => undefined)
+      // Back to the next task's conversation: it is still the open one (the sidebar shortens titles, so not by text).
+      await page.locator('[data-testid="session-item"][aria-current="true"]').first().click().catch(() => undefined)
       await typeTurn('谢谢', 'Noted.').catch(() => undefined)
       obs.firstUse.ui = await found(30_000)
     }
