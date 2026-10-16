@@ -330,14 +330,23 @@ async function runTools(h, pkgs, work, servers, log, web) {
   const server = await h.scriptedModelServer({ script: script.tools.lead, routes: script.tools.routes, routeKey: h.routeByMember(h.sessionText) })
   servers.push({ phase: 'tools', server })
   const env = { NEXGENT_API_BASE_URL: server.baseUrl, NEXGENT_API_KEY: SCRIPTED_API_KEY, NEXGENT_HOME: home }
-  const obs = { root, outsidePath, phases: {} }
+  const obs = { root, outsidePath, phases: {}, approvals: [] }
   const sdk = createStep3Sdk(pkgs, { env, home, web: 'test' })
   try {
     const { projectId } = await sdk.call('projects.open', { root, create: true })
     obs.sessionId = (await sdk.call('sessions.create', { projectId, title: 'step-3 tools' })).sessionId
     for (const phase of ['ptc', 'sheet', 'web']) {
       log(`phase ${phase}`)
-      const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS[phase] })
+      // ADR 0022 decision 2: reading outside the project asks; the caller says no.
+      const onEvent = (event) => {
+        if (event.type !== 'approval.request') return
+        const entry = { phase, request: event.request }
+        obs.approvals.push(entry)
+        entry.answered = sdk.call('approvals.respond', { projectId, sessionId: event.request.sessionId, decision: { id: event.request.id, decision: 'deny', scope: 'once' } })
+          .then(ok => ok, error => `error: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS[phase] }, { onEvent })
+      for (const entry of obs.approvals) entry.answered = await entry.answered
       obs.phases[phase] = { reason: result?.reason, error: error === undefined ? undefined : String(error), toolResults: toolResultsOf(events) }
       if (phase === 'ptc') {
         // The timed-out program printed its pid; it must be gone once the tool returned.
@@ -556,16 +565,19 @@ async function runCancel(h, pkgs, work, servers, log) {
       else await sdk.openSession({ projectId, sessionId: obs.sessionId })
       log(`phase ${phase}`)
       const want = CANCEL_MEMBERS[phase].length
+      // Processes the host keeps for its whole life (the OS sandbox's network bridge, ADR 0022) are not the turn's.
+      const host = await h.descendantPids(process.pid)
+      const turnPids = async () => (await h.descendantPids(process.pid)).filter(pid => !host.includes(pid))
       const turnDone = runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS[phase] })
       // Every member is in its slow command: one shell process tree per member under this process.
       let before = []
       const running = await h.waitFor(async () => {
         const shells = server.requests.filter(r => r.route !== undefined && r.outcome === 'completed').length
-        before = await h.descendantPids(process.pid)
+        before = await turnPids()
         return shells >= want && before.length >= want
       }, { timeoutMs: 30_000, intervalMs: 100, label: `${phase}: members running` }).then(() => true, () => false)
       await new Promise(resolve => setTimeout(resolve, 300))
-      before = await h.descendantPids(process.pid)
+      before = await turnPids()
       await sdk.cancelTurn({ projectId, sessionId: obs.sessionId, cause: 'user' })
       const { result, error, events } = await turnDone
       await h.waitFor(() => before.every(pid => !h.isProcessAlive(pid)), { timeoutMs: 5_000, label: 'slow commands gone' }).catch(() => undefined)

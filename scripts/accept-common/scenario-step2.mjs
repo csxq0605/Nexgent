@@ -17,7 +17,7 @@
  *             request fails (HTTP 500) → the next request carries the full history
  *   compact   the same, but the summary succeeds → the next request carries
  *             the summary instead of the early turns
- *   approvals write outside the project (sandbox denies, no approval) → write
+ *   approvals write outside the project (asks; denied) → write
  *             .env (approval: allowed once) → write .env again (asked again: denied)
  *   cancelStream  a reply that stalls mid-stream (the host cancels there)
  *   cancelTool    a long shell command (the host cancels while it runs)
@@ -189,7 +189,7 @@ export function buildStep2Script(h) {
   const approvals = [
     h.expectRequest('approvals turn', body => lastUserMentions(body, TASKS.approvals, h), {
       // Kept after the compaction: the thinking block whose replay H17 checks after the kills.
-      reasoning: 'The outside path will be refused; .env needs approval.',
+      reasoning: 'The outside path needs approval; .env needs approval.',
       toolCalls: [{ name: 'write_file', arguments: { path: FILES.outside.path, content: FILES.outside.content } }],
       usage,
     }),

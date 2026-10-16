@@ -47,7 +47,9 @@ export { FUNCTION_TOOL_NAME_PATTERN, isValidToolName, TOOL_NAME_PATTERN, TOOL_SC
 export type { ToolScope } from './tools.js'
 export { ApprovalBrokerService } from './approvals.js'
 export type { ApprovalsConfig } from './approvals.js'
-export { approvalSubject, decideToolPolicy, derivePattern, globMatch, grantMatches } from './approval-policy.js'
+export { approvalSubject, decideToolPolicy, derivePattern, globMatch, grantMatches, isReadOnlyCall } from './approval-policy.js'
+export { lexWords, parseScript, programOf, quoteWord, quoteWords, UNKNOWN_TEXT } from './command-parse.js'
+export type { ParsedScript, ParseOptions, Redirect, ShellDialect, SimpleCommand } from './command-parse.js'
 export type { ApprovalSubject, ToolPolicyVerdict } from './approval-policy.js'
 export {
   CREDENTIAL_FILE_NAME,
@@ -93,3 +95,4 @@ export type {
   TaskRecorder,
   TurnEndSignal,
 } from './capability-hooks.js'
+export { EXIT_PLAN_DEFINITION, exitPlanTool } from './plan-mode.js'

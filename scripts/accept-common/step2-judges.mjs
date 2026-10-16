@@ -221,12 +221,14 @@ export const JUDGES = {
     const calls = toolCalls(obs, 'approvals')
     const outside = calls.filter(call => call.name === 'write_file' && call.arguments.path === FILES.outside.path)
     const asked = (obs.approvals?.log ?? []).filter(entry => entry.summary.includes('outside-the-project'))
+    // ADR 0022 decision 2: a path outside the project asks (medium risk, once or this directory for the session); the user said no.
     return verdict([
       [outside.length === 1, 'the model tried one write outside the project'],
-      [outside.every(call => call.isError === true && /SANDBOX_DENIED/.test(call.content)), 'the sandbox refused it (SANDBOX_DENIED)'],
-      [asked.length === 0, 'no approval was requested for it'],
+      [asked.length === 1 && asked[0].risk === 'medium' && JSON.stringify(asked[0].options) === '["once","session"]' && /\/\*\*$/.test(asked[0].pattern ?? ''), `one approval was requested for it, offering once or the directory for the session (got ${JSON.stringify(asked)})`],
+      [asked[0]?.decision === 'deny', 'the user denied it'],
+      [outside.every(call => call.isError === true && /not approved/.test(call.content)), 'the tool result says it was not approved'],
       [obs.approvals?.outsideExists === false, 'nothing was written outside the project'],
-    ], `outside write refused by the sandbox without an approval request: ${outside[0]?.content.slice(0, 80)}`)
+    ], `outside write asked, denied, nothing written: ${outside[0]?.content.slice(0, 80)}`)
   },
 
   H14(obs, tools) {
@@ -384,12 +386,12 @@ export const JUDGES = {
     const log = (obs.approvals?.log ?? []).filter(entry => entry.summary.includes(FILES.env.path))
     const turn = turnOf(obs, 'approvals')
     return verdict([
-      [log.length === 2 && (obs.approvals?.log ?? []).length === 2, `exactly two approval requests, both for ${FILES.env.path} (got ${(obs.approvals?.log ?? []).length})`],
+      [log.length === 2 && (obs.approvals?.log ?? []).filter(entry => !entry.summary.includes('outside-the-project')).length === 2, `exactly two approval requests besides the outside write, both for ${FILES.env.path} (got ${(obs.approvals?.log ?? []).length})`],
       [log[0]?.decision === 'allow' && log[0]?.scope === 'once', 'the first is allowed once'],
       [log[1]?.decision === 'deny', 'the second write asks again (once is spent) and is denied'],
       [obs.approvals?.envContent === FILES.env.allowed, `${FILES.env.path} holds only the allowed write`],
       [calls.filter(call => call.name === 'write_file' && call.arguments.path === FILES.env.path).map(call => call.isError).join(',') === 'false,true', 'the denied write returns an error result'],
-      [recordsOf(obs, turn, 'approval.request').length === 2 && recordsOf(obs, turn, 'approval.decision').length === 2, 'two approval.request and two approval.decision records'],
+      [recordsOf(obs, turn, 'approval.request').length === 3 && recordsOf(obs, turn, 'approval.decision').length === 3, 'three approval.request and three approval.decision records (the outside write and two .env writes)'],
     ], `${FILES.env.path}: approval asked, allowed once, asked again, denied; file unchanged`)
   },
 }

@@ -13,7 +13,7 @@ describe('command rules', () => {
     expect(kinds('pnpm install')).toEqual(['install'])
     expect(kinds('cd web && npm i lodash')).toEqual(['install'])
     expect(kinds('python3 -m pip install x')).toEqual(['install'])
-    expect(kinds('sudo apt-get install jq')).toEqual(['privilege'])
+    expect(kinds('sudo apt-get install jq')).toEqual(['privilege', 'install'])
     expect(kinds('git push origin main')).toEqual(['publish'])
     expect(kinds('git remote add up x')).toEqual(['publish'])
     expect(kinds('gh pr merge 3')).toEqual(['publish'])
@@ -46,8 +46,8 @@ describe('command rules', () => {
 
   it('records the grant pattern and risk', () => {
     const [hit] = matchCommandRules('FOO=1 pnpm install --frozen-lockfile', scope)
-    expect(hit).toMatchObject({ pattern: 'pnpm install', risk: 'medium', alwaysAsk: false })
-    expect(matchCommandRules('sudo ls', scope)[0]).toMatchObject({ risk: 'high', alwaysAsk: true, pattern: 'sudo' })
+    expect(hit).toMatchObject({ pattern: 'pnpm install --frozen-lockfile', risk: 'medium', alwaysAsk: false })
+    expect(matchCommandRules('sudo ls', scope)[0]).toMatchObject({ risk: 'high', alwaysAsk: true, pattern: 'sudo ls', allowedScopes: ['once'] })
   })
 
   it('extracts scripts from shell argv', () => {
@@ -65,9 +65,14 @@ describe('command rules', () => {
 })
 
 describe('command mode matrix', () => {
-  it('read-only never runs commands', async () => {
+  it('read-only runs only read-only commands (ADR 0022 decision 4)', async () => {
     const { sandbox, workspace } = await project('read-only')
-    expect(await sandbox.assessCommand(bash('ls', workspace.root))).toMatchObject({ kind: 'deny', code: 'read-only-mode' })
+    for (const script of ['ls', 'git status', 'git -C . log --oneline', 'cat a.txt | wc -l', 'rg "rm -rf" src']) {
+      expect((await sandbox.assessCommand(bash(script, workspace.root))).kind, script).toBe('allow')
+    }
+    for (const script of ['touch x', 'ls > out.txt', 'git commit -m x', 'find . -delete', 'sh -c "rm x"', 'pnpm install']) {
+      expect(await sandbox.assessCommand(bash(script, workspace.root)), script).toMatchObject({ kind: 'deny', code: 'read-only-mode' })
+    }
   })
 
   it('workspace-write requires cwd inside the project and asks for blacklisted shapes', async () => {

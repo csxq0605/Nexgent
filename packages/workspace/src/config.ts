@@ -30,16 +30,38 @@ import {
  */
 export interface ProjectConfigFile extends ProjectConfigInput {
   readonly extraReadRoots?: readonly string[]
+  /** Absolute directories outside the project the tools and commands may also write (ADR 0022 decision 2). */
+  readonly extraWriteRoots?: readonly string[]
+  /** Command settings (ADR 0022 decision 1). */
+  readonly commands?: ProjectCommandsConfig
+}
+
+/** Whether commands run in the OS sandbox: `auto` when the platform has one, `required` refuses to run without, `off` never. */
+export type SystemSandboxSetting = 'auto' | 'required' | 'off'
+
+/** `.nexgent/config.json` → `commands`. */
+export interface ProjectCommandsConfig {
+  /** Whether commands may reach the network; default `true`. Enforced by the OS sandbox where there is one. */
+  readonly network?: boolean
+  /** Default `auto`. */
+  readonly systemSandbox?: SystemSandboxSetting
 }
 
 /** A loaded config: contract defaults filled in, plus the workspace-only fields. */
 export interface LoadedProjectConfig extends ProjectConfig {
   /** Absolute extra read roots; default `[]`. */
   readonly extraReadRoots: readonly string[]
+  /** Absolute extra write roots; default `[]`. */
+  readonly extraWriteRoots: readonly string[]
+  /** Command settings with defaults: network on, system sandbox `auto`. */
+  readonly commands: { readonly network: boolean; readonly systemSandbox: SystemSandboxSetting }
 }
 
+/** Accepted `commands.systemSandbox` values. */
+export const SYSTEM_SANDBOX_SETTINGS: readonly SystemSandboxSetting[] = ['auto', 'required', 'off']
+
 const TOP_LEVEL_KEYS = new Set([
-  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities', 'improvement', 'learning',
+  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'extraWriteRoots', 'commands', 'capabilities', 'improvement', 'learning',
   'maxStepsPerTurn',
 ])
 
@@ -99,10 +121,19 @@ export function validateProjectConfig(raw: unknown): ProjectConfigFile {
   if (raw.capabilities !== undefined) assertCapabilitiesConfig(raw.capabilities)
   if (raw.improvement !== undefined) assertImprovementConfig(raw.improvement)
   if (raw.learning !== undefined) assertLearningConfig(raw.learning)
-  if (raw.extraReadRoots !== undefined) {
-    if (!Array.isArray(raw.extraReadRoots)
-      || raw.extraReadRoots.some(root => typeof root !== 'string' || !nodePath.isAbsolute(root))) {
-      throw invalid('extraReadRoots must be an array of absolute paths', 'extraReadRoots')
+  for (const key of ['extraReadRoots', 'extraWriteRoots'] as const) {
+    const roots = raw[key]
+    if (roots !== undefined && (!Array.isArray(roots) || roots.some(root => typeof root !== 'string' || !nodePath.isAbsolute(root)))) {
+      throw invalid(`${key} must be an array of absolute paths`, key)
+    }
+  }
+  if (raw.commands !== undefined) {
+    const commands = raw.commands
+    if (!isObject(commands)) throw invalid('commands must be an object', 'commands')
+    for (const key of Object.keys(commands)) if (key !== 'network' && key !== 'systemSandbox') throw invalid(`unknown field commands.${key}`, `commands.${key}`)
+    if (commands.network !== undefined && typeof commands.network !== 'boolean') throw invalid('commands.network must be a boolean', 'commands.network')
+    if (commands.systemSandbox !== undefined && !(SYSTEM_SANDBOX_SETTINGS as readonly unknown[]).includes(commands.systemSandbox)) {
+      throw invalid(`commands.systemSandbox must be one of ${SYSTEM_SANDBOX_SETTINGS.join(', ')}`, 'commands.systemSandbox')
     }
   }
   return raw as ProjectConfigFile
@@ -133,8 +164,13 @@ export async function readProjectConfigFile(layout: Pick<WorkspaceLayout, 'confi
  */
 export async function loadProjectConfig(layout: Pick<WorkspaceLayout, 'configFile'>): Promise<LoadedProjectConfig> {
   const file = await readProjectConfigFile(layout)
-  const { extraReadRoots, ...contract } = file
-  return { ...resolveProjectConfig(contract), extraReadRoots: extraReadRoots ?? [] }
+  const { extraReadRoots, extraWriteRoots, commands, ...contract } = file
+  return {
+    ...resolveProjectConfig(contract),
+    extraReadRoots: extraReadRoots ?? [],
+    extraWriteRoots: extraWriteRoots ?? [],
+    commands: { network: commands?.network ?? true, systemSandbox: commands?.systemSandbox ?? 'auto' },
+  }
 }
 
 /**

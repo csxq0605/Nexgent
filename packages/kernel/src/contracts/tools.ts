@@ -9,7 +9,7 @@
  * agent is disposed, and a tool registered from an agent's context is visible
  * only to that agent. Global registrations come from the root context.
  */
-import type { ToolApprovalAsk } from './approvals.js'
+import type { ApprovalGrant, ToolApprovalAsk } from './approvals.js'
 import type { AgentAttribution, MemberIdentity } from './collaboration.js'
 import { NexgentError } from './errors.js'
 import type { JsonSchema, JsonValue } from './json.js'
@@ -50,6 +50,21 @@ export interface ToolDefinition {
    */
   readonly selfSandboxed?: boolean
   /**
+   * ADR 0022 decision 4: true when this particular call only reads (e.g. a
+   * shell command made only of read-only commands). The approval policy then
+   * treats the call as a read: in `read-only` mode it is not refused. Must be
+   * conservative (unknown means false), cheap and must not throw or touch the
+   * file system.
+   */
+  readonly readOnlyCall?: (input: unknown) => boolean
+  /**
+   * ADR 0022: how an up-front approval question (`approval` `always`, or an
+   * `ask` the sandbox mode raises) presents this call; absent, the question
+   * shows the call's command, path or arguments. Must be cheap and must not
+   * throw.
+   */
+  readonly approvalText?: (input: unknown) => { readonly summary: string; readonly detail?: string }
+  /**
    * ADR 0017 decision 5: calls of this tool may run at the same time as the
    * other concurrent calls of the same model step (`delegate` sets it).
    * Absent, a tool is concurrent exactly when it only reads and never asks
@@ -61,12 +76,14 @@ export interface ToolDefinition {
 /**
  * ADR 0017 decision 5 (pure): whether a call may run concurrently. A call
  * that needs an approval answer never does (approvals stay in call order);
- * otherwise the tool's `concurrent`, or, when unset, read-only effects with
- * approval `never`.
+ * otherwise the tool's `concurrent`, or, when unset, read-only effects (or a
+ * call the tool declares read-only through `readOnlyCall`, passed as the third
+ * argument) with approval `never`.
  */
-export function isConcurrentTool(definition: Pick<ToolDefinition, 'effects' | 'approval' | 'concurrent'>, needsApproval = false): boolean {
+export function isConcurrentTool(definition: Pick<ToolDefinition, 'effects' | 'approval' | 'concurrent'>, needsApproval = false, readOnlyCall = false): boolean {
   if (needsApproval) return false
   if (definition.concurrent !== undefined) return definition.concurrent
+  if (readOnlyCall) return definition.approval === 'never'
   return definition.approval === 'never' && definition.effects.length > 0 && definition.effects.every(effect => effect === 'read')
 }
 
@@ -124,6 +141,13 @@ export interface ToolContext {
   readonly attribution?: AgentAttribution
   /** Step 3: set when the calling session is a member (child session). */
   readonly member?: MemberIdentity
+  /**
+   * ADR 0022: the `session` and `project` grants in force for this session,
+   * e.g. directories outside the project the user allowed (`fs.write`), so
+   * a command sandbox can let commands write there too. Absent on hosts that
+   * do not support it.
+   */
+  readonly grants?: () => readonly ApprovalGrant[]
 }
 
 /** What a handler returns; the loop wraps it into a `tool.result` record and a `tool` message. */

@@ -43,6 +43,7 @@ describe('member blocks', () => {
     bridge.memberViews['c1'] = {
       summary: { ...SESSION, sessionId: 'c1', title: undefined, parentSessionId: 's1', member: { name: 'analyst', executionForm: 'delegated' } } as never,
       sandboxMode: 'read-only',
+      plan: false,
       model: 'claude-sonnet-5-5',
       items: [
         { kind: 'user', turn: 1, text: '写北区汇总', source: 'user', materials: [] },

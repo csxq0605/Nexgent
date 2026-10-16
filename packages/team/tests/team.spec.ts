@@ -5,6 +5,7 @@
  * cancel and the next turn continuing, the concurrency limit, and what
  * members see.
  */
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -89,20 +90,9 @@ const resultOf = (records: readonly SessionRecord[], callId: string) => {
 }
 const count = (haystack: string, needle: string) => haystack.split(needle).length - 1
 
-/** Whether a pid is alive; a zombie counts as dead. */
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-  } catch {
-    return false
-  }
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
-    const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0]
-    return state !== 'Z' && state !== 'X'
-  } catch {
-    return process.platform !== 'linux'
-  }
+/** Whether a process whose command line contains `marker` runs (pids inside a command sandbox are namespaced). */
+function commandRunning(marker: string): boolean {
+  return execFileSync('ps', ['-A', '-o', 'args='], { encoding: 'utf8' }).split('\n').some(line => line.includes(marker))
 }
 
 async function until(check: () => boolean | Promise<boolean>, label: string, timeoutMs = 5_000): Promise<void> {
@@ -254,7 +244,7 @@ describe('team: cancel and continue', () => {
       calls(call('wait_teammates', {}, 'w2')),
       { content: 'all done' },
     ], {
-      runner: [calls(call('bash', { command: 'sleep 30 & echo $! > sleeper.pid; wait' }, 'r1')), { content: 'runner finished' }],
+      runner: [calls(call('bash', { command: 'sleep 30.731 & echo $! > sleeper.pid; wait' }, 'r1')), { content: 'runner finished' }],
       thinker: [hang, { content: 'thinker finished' }],
     })
     const lead = await app.agents.create()
@@ -263,12 +253,11 @@ describe('team: cancel and continue', () => {
     const pidFile = nodePath.join(root, 'sleeper.pid')
     await until(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').trim() !== '', 'the sleeper pid')
     await until(() => llm.calls.some(c => c.route === 'thinker'), 'the thinker to be thinking')
-    const pid = Number(readFileSync(pidFile, 'utf8').trim())
-    expect(pidAlive(pid)).toBe(true)
+    expect(commandRunning('sleep 30.731')).toBe(true)
     controller.abort()
     const ended = await running
     expect(ended.reason).toEqual({ kind: 'cancelled', cause: 'user' })
-    await until(() => !pidAlive(pid), 'the sleeper to end')
+    await until(() => !commandRunning('sleep 30.731'), 'the sleeper to end')
 
     let leadRecords = await records(lead.sessionId)
     const roster = new Map(of(leadRecords, 'team.member').map(r => [r.member.name, r.member]))
@@ -289,7 +278,7 @@ describe('team: cancel and continue', () => {
     expect(of(leadRecords, 'subagent.end').filter(r => r.turn === 2).map(r => r.result.status)).toEqual(['completed', 'completed'])
     expect(resultOf(leadRecords, 'w2').content).toContain('runner finished')
     await lead.close()
-  })
+  }, 20_000) // commands start inside the OS sandbox (ADR 0022), slower under a loaded test run
 
   it('starts at most four teammates at once', async () => {
     const root = await tempRoot()

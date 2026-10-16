@@ -164,7 +164,11 @@ export interface ProjectConfig {
  * sandbox mode (`permissions.md` "始终审批"): a model must not widen its own
  * permissions, budgets or gate.
  */
-export const GUARDED_PROJECT_CONFIG_FIELDS = ['approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement', 'learning', 'maxStepsPerTurn'] as const
+export const GUARDED_PROJECT_CONFIG_FIELDS = [
+  'approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement', 'learning', 'maxStepsPerTurn',
+  // ADR 0022: directories outside the project and the command sandbox are the user's to widen.
+  'extraReadRoots', 'extraWriteRoots', 'commands',
+] as const
 
 /** The defaults applied over a missing or partial config file. */
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({

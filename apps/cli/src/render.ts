@@ -77,9 +77,15 @@ export function createRenderer(mode: RenderMode, stdout: TextSink, stderr: TextS
 }
 
 function fullAccessWarning(stderr: TextSink, event: CliEvent): void {
-  if (event.type === 'session' && event.sandboxMode === 'full-access') {
+  if (event.type !== 'session') return
+  if (event.sandboxMode === 'full-access') {
     stderr.write('nexgent: warning: full-access sandbox: tools may read, write and run anything you can\n')
+    return
   }
+  // ADR 0022 decision 1: say once when commands run without an OS sandbox; never claim one that is not there.
+  const status = event.commandSandbox
+  if (status?.kind === 'none') stderr.write(`nexgent: note: commands run without an OS sandbox here (${status.reason}); the command policy still applies\n`)
+  if (status?.kind === 'off') stderr.write('nexgent: note: the OS sandbox for commands is turned off in this project (commands.systemSandbox: off)\n')
 }
 
 function jsonRenderer(stdout: TextSink, stderr: TextSink): Renderer {

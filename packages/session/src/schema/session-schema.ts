@@ -41,6 +41,7 @@ export const SESSION_RECORD_DEFS: Readonly<Record<SessionRecordType, string>> = 
   'approval.request': 'approvalRequestRecord',
   'approval.decision': 'approvalDecisionRecord',
   'approval.grant': 'approvalGrantRecord',
+  'session.mode': 'sessionModeRecord',
   'material.added': 'materialAddedRecord',
   'deliverable.presented': 'deliverablePresentedRecord',
   'turn.files': 'turnFilesRecord',
@@ -276,6 +277,7 @@ export const sessionRecordSchema: JsonObject = {
         projectRoot: { type: 'string' },
         model: { type: 'string' },
         sandboxMode: ref('sandboxMode'),
+        plan: { type: 'boolean' },
         grants: { type: 'array', items: ref('approvalGrant') },
         title: { type: 'string' },
         lastTurn: { type: 'integer', minimum: 0 },
@@ -315,8 +317,21 @@ export const sessionRecordSchema: JsonObject = {
         capabilityVersion: ref('capabilityVersion'),
         purpose: { enum: [...SESSION_PURPOSES] },
         improvement: ref('sessionImprovement'),
+        plan: { type: 'boolean' },
+        commandSandbox: {
+          oneOf: [
+            closedObject({ kind: { const: 'active' }, platform: ref('nonEmptyString') }, ['kind', 'platform']),
+            closedObject({ kind: { const: 'none' }, reason: { type: 'string' } }, ['kind', 'reason']),
+            closedObject({ kind: { const: 'off' } }, ['kind']),
+          ],
+        },
       },
       ['version', 'projectRoot', 'model', 'sandboxMode'],
+    ),
+    sessionModeRecord: record(
+      'session.mode',
+      { sandboxMode: ref('sandboxMode'), plan: { type: 'boolean' }, reason: { enum: ['host', 'plan-approved'] } },
+      ['sandboxMode', 'plan', 'reason'],
     ),
     userMessageRecord: record(
       'user.message',

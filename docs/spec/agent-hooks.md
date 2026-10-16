@@ -124,6 +124,19 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `capability_try` | `kind`、`name` | `['read']` / `never` | 校验草稿（清单与对应入口文件的 schema），只在本会话装载：技能进技能列表，函数模块的函数成为本会话工具 `cap_<module>_<fn>`，预设 / 团队模板 / 架构图供本会话的协作工具使用，上下文策略从下一次请求起生效；写 `capability.try`。试用 `plugin` 先问用户（`permissions.md` §插件安装审批） |
 | `capability_propose` | `components: { kind, name }[]`（1–16）、`summary?`（≤500 字符） | `['read']` / `never` | 每个组件必须试用过，且试用之后至少有一次 `isError: false` 的使用（函数模块与插件为其工具调用，技能为 `load_skill`，协作组件为引用它的协作工具调用），否则报 `tool/failed` 说明哪个组件缺证据；接受后写 `candidates/<id>/`、`capability.propose`，任务结束后自动门控 |
 
+## 重做 K3 工具（ADR 0022）
+
+文件工具与命令工具由 `@nexgent/workspace` 实现，`exit_plan` 由 kernel 在计划模式的会话里注册到该会话自己的作用域；权限语义见 `permissions.md`。
+
+| 工具 | 参数（新增部分） | effects / approval | 行为要点 |
+| --- | --- | --- | --- |
+| `bash` / `pwsh` | `run_in_background?: boolean`、`sandbox?: boolean` | `['execute', 'write', 'network']` / `never` | 在系统沙箱里运行（Linux / macOS，`workspace-write`、`read-only` 与计划模式）；`sandbox: false` 每次审批后在沙箱外重跑；后台运行立即返回编号；结果约 30 000 字符、保留头尾，完整输出在会话临时目录；`readOnlyCall` 判断只读命令，`read-only` 下照常执行 |
+| `shell_output` | `id: string` | `['read']` / `never` | 读后台进程上次读取之后的输出，以及是否还在运行、退出码 |
+| `shell_kill` | `id: string` | `['execute']` / `never` | 结束后台进程及其启动的一切 |
+| `exit_plan` | `plan: string` | `['read']` / `always` | 只在计划模式下出现；审批详情是计划全文（`approvalText`）；批准后会话切到执行模式并写 `session.mode`，工具随之消失 |
+| `search_text` | `outputMode?: "content" \| "files_with_matches" \| "count"`、`before?`、`after?`、`context?`、`multiline?`、`literal?`、`ignoreCase?`、`limit?`（`maxResults` 为别名）、`offset?`、`includeIgnored?`、`glob?` | `['read']` / `never` | 按 ripgrep 语义：读 `.gitignore`，大文件流式搜索，敏感文件列在结果末尾而不静默跳过；项目外目录先问一次 |
+| `list_files` | `limit?`（`maxResults` 为别名）、`offset?`、`includeIgnored?` | `['read']` / `never` | 读 `.gitignore`；敏感文件标出；项目外目录先问一次 |
+
 ## 步骤 5 工具（改进会话）
 
 名字、参数 schema、`effects` 与 `approval` 冻结在 `improvement.ts`（`IMPROVEMENT_DIAGNOSIS_TOOLS`），描述文字由 `@nexgent/evolve` 写。四个工具只注册在改进作业的诊断会话（`session.start.purpose: improvement`、`improvement.phase: diagnose`）的作用域里，那个会话也只有这四个工具；用户任务、提议会话与成员都看不到（`MEMBER_DENIED_TOOLS`）。

@@ -3,7 +3,8 @@
  * and tasking): `present` appends only within one session and stamps the
  * member on the version; a parent cancel stops a member's shell process tree.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import {
@@ -57,19 +58,18 @@ function membersTool(app: NexgentApp, names: readonly string[], started: Agent[]
   }
 }
 
-/** Whether a pid is alive; a zombie (killed, not yet reaped) counts as dead, as in the workspace tests. */
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-  } catch {
-    return false
-  }
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
-    const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0]
-    return state !== 'Z' && state !== 'X'
-  } catch {
-    return process.platform !== 'linux'
+/**
+ * Whether a process whose command line contains `marker` is still running
+ * after `ms`. Pids inside a command sandbox are namespaced, so the command
+ * line is the stable handle; the sandbox's PID namespace ends its processes
+ * a moment after the sandbox itself, hence the short wait.
+ */
+async function commandRunning(marker: string, ms = 3000): Promise<boolean> {
+  const deadline = Date.now() + ms
+  for (;;) {
+    const running = execFileSync('ps', ['-A', '-o', 'args='], { encoding: 'utf8' }).split('\n').some(line => line.includes(marker))
+    if (!running || Date.now() > deadline) return running
+    await new Promise(resolve => setTimeout(resolve, 50))
   }
 }
 
@@ -111,7 +111,7 @@ describe('members and present', () => {
     const root = await tempDir()
     const { app } = await boot(root, [
       { toolCalls: [{ name: 'members' }] },
-      { toolCalls: [{ name: 'bash', arguments: { command: 'sleep 30 & echo $! > sleeper.pid; wait' } }] },
+      { toolCalls: [{ name: 'bash', arguments: { command: 'sleep 30.417 & echo $! > sleeper.pid; wait' } }] },
     ])
     const started: Agent[] = []
     app.ctx.tools.register(membersTool(app, ['runner'], started))
@@ -120,14 +120,13 @@ describe('members and present', () => {
     const running = lead.run('run it', { signal: controller.signal })
     const pidFile = nodePath.join(root, 'sleeper.pid')
     while (!existsSync(pidFile) || (await readFile(pidFile, 'utf8')).trim() === '') await new Promise(resolve => setTimeout(resolve, 20))
-    const pid = Number((await readFile(pidFile, 'utf8')).trim())
     controller.abort()
     const result = await running
     expect(result.reason).toEqual({ kind: 'cancelled', cause: 'user' })
     const { records } = await app.ctx.session.readAll(started[0]!.sessionId)
     const end = records.find(record => record.type === 'turn.end')
     expect(end?.type === 'turn.end' && end.reason).toEqual({ kind: 'cancelled', cause: 'parent' })
-    expect(pidAlive(pid)).toBe(false)
+    expect(await commandRunning('sleep 30.417')).toBe(false)
     await lead.close()
   })
 })

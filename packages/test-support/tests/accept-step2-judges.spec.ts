@@ -93,11 +93,12 @@ describe('accept-step2 H judges', () => {
       obs.records = obs.records.filter((r: { type: string; turn?: number }) => !(r.type === 'assistant.message' && r.turn === turnOf(obs, 'cancelStream')))
     }],
     ['H13', 'the outside write went through', obs => { obs.approvals.outsideExists = true }],
-    ['H13', 'the outside write asked for approval instead of being refused', obs => { obs.approvals.log.unshift({ tool: 'write_file', summary: 'write ../outside-the-project.txt', decision: 'deny', scope: 'once' }) }],
+    ['H13', 'the outside write did not ask (ADR 0022)', obs => { obs.approvals.log = obs.approvals.log.filter((entry: { summary: string }) => !entry.summary.includes('outside-the-project')) }],
+    ['H13', 'the outside ask offered no session grant for its directory', obs => { obs.approvals.log.find((entry: { summary: string }) => entry.summary.includes('outside-the-project')).options = ['once'] }],
     ['H13', 'the outside write was not refused by the sandbox', obs => { toolResult(obs, 'approvals', 'write_file', a => a.path === FILES.outside.path).content = 'Created ../outside-the-project.txt' }],
-    ['H23', 'once was not spent (no second approval)', obs => { obs.approvals.log = obs.approvals.log.slice(0, 1) }],
+    ['H23', 'once was not spent (no second approval)', obs => { obs.approvals.log = obs.approvals.log.filter((entry: { summary: string }, i: number, all: Array<{ summary: string }>) => !(entry.summary.includes('.env') && all.slice(0, i).some(e => e.summary.includes('.env')))) }],
     ['H23', 'the denied write landed', obs => { obs.approvals.envContent = FILES.env.denied }],
-    ['H23', 'the first approval was not once', obs => { obs.approvals.log[0].scope = 'session' }],
+    ['H23', 'the first approval was not once', obs => { obs.approvals.log.find((entry: { summary: string }) => entry.summary.includes('.env')).scope = 'session' }],
     ['H14', 'no compaction record', obs => { obs.records = obs.records.filter((r: { type: string }) => r.type !== 'compaction') }],
     ['H14', 'the request after compaction still carries the early turns', obs => {
       obs.phases.compact.requests[2].messages.unshift({ role: 'user', content: TASKS.first })

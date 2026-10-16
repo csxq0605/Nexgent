@@ -11,7 +11,8 @@
  * The P/Invoke source is written once to the temp directory
  * (`nexgent-job-<hash>.cs`), compiled by the first launcher into
  * `nexgent-job-<hash>.dll` and loaded from there afterwards; the spec passed
- * through the environment stays small. When the job
+ * through the environment stays small. The launcher runs under PowerShell 7
+ * and under Windows PowerShell 5.1 (ADR 0022 decision 7). When the job
  * cannot be created the launcher still runs the command, and the runner's
  * `taskkill /T` fallback applies.
  */
@@ -104,11 +105,35 @@ try {
   $null = [NexgentJob]::Enter()
 } catch {
 }
-$psi = [Diagnostics.ProcessStartInfo]::new([string]$spec.command)
-foreach ($arg in @($spec.args)) { $psi.ArgumentList.Add([string]$arg) }
+$psi = New-Object Diagnostics.ProcessStartInfo -ArgumentList ([string]$spec.command)
+if ($PSVersionTable.PSVersion.Major -ge 6) {
+  foreach ($arg in @($spec.args)) { $psi.ArgumentList.Add([string]$arg) }
+} else {
+  # Windows PowerShell 5.1 (.NET Framework) has no ArgumentList: build the command line with CommandLineToArgvW quoting.
+  $quoted = foreach ($arg in @($spec.args)) {
+    $text = [string]$arg
+    if ($text.Length -gt 0 -and $text -notmatch '[\\s"]') { $text; continue }
+    $sb = New-Object Text.StringBuilder
+    [void]$sb.Append('"')
+    $slashes = 0
+    foreach ($ch in $text.ToCharArray()) {
+      if ([string]$ch -ceq '\\') { $slashes++ }
+      elseif ([string]$ch -ceq '"') { [void]$sb.Append('\\' * ($slashes * 2 + 1)); [void]$sb.Append('"'); $slashes = 0 }
+      else { if ($slashes -gt 0) { [void]$sb.Append('\\' * $slashes) }; [void]$sb.Append($ch); $slashes = 0 }
+    }
+    if ($slashes -gt 0) { [void]$sb.Append('\\' * ($slashes * 2)) }
+    [void]$sb.Append('"')
+    $sb.ToString()
+  }
+  $psi.Arguments = ($quoted -join ' ')
+}
 $psi.UseShellExecute = $false
 $psi.WorkingDirectory = [Environment]::CurrentDirectory
-if ($null -eq $spec.psModulePath) { $null = $psi.Environment.Remove('PSModulePath') } else { $psi.Environment['PSModulePath'] = [string]$spec.psModulePath }
+if ($PSVersionTable.PSVersion.Major -ge 6) {
+  if ($null -eq $spec.psModulePath) { $null = $psi.Environment.Remove('PSModulePath') } else { $psi.Environment['PSModulePath'] = [string]$spec.psModulePath }
+} else {
+  if ($null -eq $spec.psModulePath) { $psi.EnvironmentVariables.Remove('PSModulePath') } else { $psi.EnvironmentVariables['PSModulePath'] = [string]$spec.psModulePath }
+}
 try {
   $child = [Diagnostics.Process]::Start($psi)
 } catch {

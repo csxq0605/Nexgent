@@ -9,8 +9,8 @@
  * `check*` methods map `ask` to a denial (fail closed) for callers that
  * cannot run the approval flow.
  */
-import { realpath } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { realpath, stat } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import * as nodePath from 'node:path'
 import type {
   ApprovalRisk,
@@ -23,7 +23,8 @@ import type {
   SandboxMode,
   SandboxPolicy,
 } from '@nexgent/kernel'
-import { commandScript, matchCommandRules, programName, type CommandMatch } from './command-policy.js'
+import { nexgentHome } from '@nexgent/kernel'
+import { commandAskScopes, commandScript, isReadOnlyCommand, matchCommandRules, programName, type CommandMatch } from './command-policy.js'
 import { matchGlob } from './glob.js'
 import {
   HOST_FLAVOR,
@@ -68,8 +69,41 @@ export const WRITE_DENIED_PATTERNS: readonly string[] = [
   '**/node_modules/**',
   '**/.pnpm-store/**',
 ]
-/** Basename patterns whose read and write need approval. */
-export const SENSITIVE_PATTERNS: readonly string[] = ['.env', '.env.*', '*.pem', '*.key', 'id_rsa*', '.npmrc', '.netrc']
+/**
+ * Basename patterns whose read and write need approval (ADR 0022 decision 5:
+ * `*.key` dropped, private-key and keystore names added).
+ */
+export const SENSITIVE_PATTERNS: readonly string[] = [
+  '.env', '.env.*', '*.pem', 'id_rsa*', 'id_ed25519*', 'id_ecdsa*', 'id_dsa*', '*.p12', '*.pfx', '.npmrc', '.netrc',
+]
+/** Basenames matching {@link SENSITIVE_PATTERNS} that are templates, not secrets. */
+export const SENSITIVE_EXEMPT_PATTERNS: readonly string[] = ['.env.example', '.env.sample', '.env.template', '.env.dist', '*.pub']
+
+/**
+ * Credential locations under the user's home directory that no tool and no
+ * sandboxed command may read or write, wherever the roots are (ADR 0022
+ * decision 1). Home-relative.
+ */
+export const PROTECTED_HOME_ENTRIES: readonly string[] = [
+  '.ssh', '.aws', '.gnupg', '.config/gcloud', '.kube', '.docker', '.netrc', '.npmrc', '.pypirc', '.git-credentials',
+  '.config/gh', '.azure', '.password-store',
+]
+
+/** Absolute protected paths: {@link PROTECTED_HOME_ENTRIES} under `userHome`, plus the Nexgent home. */
+export function protectedPaths(userHome: string, nexgentHomeDir: string): string[] {
+  return [...PROTECTED_HOME_ENTRIES.map(entry => nodePath.join(userHome, entry)), nexgentHomeDir]
+}
+
+/** System directories a tool never writes to, even when a session allows a directory outside the project. */
+export function systemWriteDenied(flavor: PathFlavor = HOST_FLAVOR): string[] {
+  return flavor === 'win32'
+    ? ['C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)', 'C:\\ProgramData']
+    : ['/etc', '/usr', '/bin', '/sbin', '/lib', '/lib32', '/lib64', '/boot', '/dev', '/proc', '/sys', '/System', '/Library', '/private/etc', '/private/var/db', '/Applications']
+}
+
+/** Grant names for directories allowed outside the project (`ToolApprovalAsk.grantTool`). */
+export const OUTSIDE_READ_GRANT = 'fs.read'
+export const OUTSIDE_WRITE_GRANT = 'fs.write'
 
 /** A three-way policy answer. `path` is the resolved real path the operation must use. */
 export type SandboxAssessment =
@@ -85,6 +119,8 @@ export type SandboxAssessment =
     readonly reason: string
     /** Command rule hits, for command assessments. */
     readonly matches?: readonly CommandMatch[]
+    /** Store and match grants under this name instead of the tool's (outside-project directories). */
+    readonly grantTool?: string
   }
   | { readonly kind: 'deny'; readonly path: string; readonly code: Exclude<SandboxDenyCode, 'approval-required'>; readonly reason: string }
 
@@ -98,6 +134,10 @@ export interface LocalSandboxPolicy extends SandboxPolicy {
   readonly sensitivePatterns: readonly string[]
   /** Real directory under which `nexgent-<sessionId>/` temp dirs live. */
   readonly tempBase: string
+  /** Real paths no tool reads or writes outside full-access ({@link protectedPaths}), unless inside an explicit root below them. */
+  readonly protectedPaths: readonly string[]
+  /** Extra real write roots (`extraWriteRoots`). */
+  readonly extraWriteRoots: readonly string[]
   /**
    * The session whose temp dir (`<tempBase>/nexgent-<sessionId>/`) is readable
    * and writable; absent admits no temp dir. Set per call with
@@ -114,6 +154,12 @@ export interface SandboxOptions {
   readonly mode?: SandboxMode
   /** Extra absolute read roots (`config.json.extraReadRoots`). */
   readonly extraReadRoots?: readonly string[]
+  /** Extra absolute write roots (`config.json.extraWriteRoots`); also readable. */
+  readonly extraWriteRoots?: readonly string[]
+  /** Nexgent home (default `$NEXGENT_HOME` or `~/.nexgent`); always protected. */
+  readonly nexgentHome?: string
+  /** The user's home directory for {@link PROTECTED_HOME_ENTRIES}; default `os.homedir()`. */
+  readonly userHome?: string
   /** Base of session temp dirs; default `os.tmpdir()`. */
   readonly tempBase?: string
   /** Command policy overrides. */
@@ -136,7 +182,9 @@ async function realOrSelf(path: string): Promise<string> {
 export async function createSandbox(options: SandboxOptions): Promise<LocalSandbox> {
   const mode = options.mode ?? 'workspace-write'
   const projectRoot = await realOrSelf(options.root)
-  const extra = await Promise.all((options.extraReadRoots ?? []).map(realOrSelf))
+  const extraWrite = await Promise.all((options.extraWriteRoots ?? []).map(realOrSelf))
+  const extra = [...await Promise.all((options.extraReadRoots ?? []).map(realOrSelf)), ...extraWrite]
+  const guarded = await Promise.all(protectedPaths(options.userHome ?? homedir(), options.nexgentHome ?? nexgentHome()).map(realOrSelf))
   const tempBase = await realOrSelf(options.tempBase ?? tmpdir())
   const commands: CommandPolicy = {
     deny: options.commands?.deny ?? [],
@@ -148,11 +196,13 @@ export async function createSandbox(options: SandboxOptions): Promise<LocalSandb
     mode,
     projectRoot,
     readRoots: mode === 'full-access' ? [rootOf(projectRoot)] : [projectRoot, ...extra],
-    writeRoots: mode === 'read-only' ? [] : mode === 'full-access' ? [rootOf(projectRoot)] : [projectRoot],
+    writeRoots: mode === 'read-only' ? [] : mode === 'full-access' ? [rootOf(projectRoot)] : [projectRoot, ...extraWrite],
     deniedPatterns: DENIED_PATTERNS,
     writeDeniedPatterns: WRITE_DENIED_PATTERNS,
     sensitivePatterns: SENSITIVE_PATTERNS,
     tempBase,
+    protectedPaths: guarded,
+    extraWriteRoots: extraWrite,
     commands,
   }, extra)
 }
@@ -183,11 +233,22 @@ export class LocalSandbox implements Sandbox {
         ...this.policy,
         mode,
         readRoots: mode === 'full-access' ? [rootOf(root)] : [root, ...this.extraReadRoots],
-        writeRoots: mode === 'read-only' ? [] : mode === 'full-access' ? [rootOf(root)] : [root],
+        writeRoots: mode === 'read-only' ? [] : mode === 'full-access' ? [rootOf(root)] : [root, ...this.policy.extraWriteRoots],
       }, this.extraReadRoots, this.flavor)
       this.derived.set(mode, sandbox)
     }
     return sandbox
+  }
+
+  /**
+   * The same sandbox with more read roots (directories outside the project
+   * the user allowed for this call or session, ADR 0022 decision 2). Protected
+   * locations stay denied.
+   */
+  withReadRoots(roots: readonly string[]): LocalSandbox {
+    const extra = roots.filter(root => !this.extraReadRoots.includes(root) && root !== this.policy.projectRoot)
+    if (extra.length === 0) return this
+    return new LocalSandbox({ ...this.policy, readRoots: [...this.policy.readRoots, ...extra] }, [...this.extraReadRoots, ...extra], this.flavor)
   }
 
   /**
@@ -231,9 +292,47 @@ export class LocalSandbox implements Sandbox {
     return rel.split('/')[0] === (this.flavor === 'win32' ? own.toLowerCase() : own)
   }
 
-  private sensitive(real: string): boolean {
+  /** Whether a path's basename names a secret ({@link SENSITIVE_PATTERNS} minus {@link SENSITIVE_EXEMPT_PATTERNS}). */
+  sensitive(real: string): boolean {
     const base = comparablePath(real, this.flavor).split(/[\\/]/).pop() ?? ''
-    return this.policy.sensitivePatterns.some(pattern => matchGlob(pattern, base, this.flavor === 'win32'))
+    const win = this.flavor === 'win32'
+    return this.policy.sensitivePatterns.some(pattern => matchGlob(pattern, base, win))
+      && !SENSITIVE_EXEMPT_PATTERNS.some(pattern => matchGlob(pattern, base, win))
+  }
+
+  /**
+   * The protected location containing `real`, unless an explicit root below
+   * that location contains it (the data dir's `materials/` and `outputs/`).
+   */
+  private protectedBy(real: string, roots: readonly string[]): string | undefined {
+    const guard = this.policy.protectedPaths.find(path => isWithin(path, real, this.flavor))
+    if (guard === undefined) return undefined
+    const explicit = roots.some(root => isWithin(guard, root, this.flavor) && root !== guard && isWithin(root, real, this.flavor))
+    return explicit ? undefined : guard
+  }
+
+  /**
+   * Outside the roots: ask (ADR 0022 decision 2) once or for the session,
+   * with the containing directory as the grant pattern under a shared grant
+   * name, so a session grant covers every file tool.
+   */
+  private async askOutside(real: string, write: boolean): Promise<SandboxAssessment> {
+    let dir = nodePath.dirname(real)
+    try {
+      if ((await stat(real)).isDirectory()) dir = real
+    } catch {
+      // A new file: its directory.
+    }
+    const slash = dir.replaceAll('\\', '/').replace(/\/$/, '')
+    return {
+      kind: 'ask',
+      path: real,
+      risk: 'medium',
+      options: ['once', 'session'],
+      pattern: `${slash}/**`,
+      reason: `${write ? 'writing' : 'reading'} outside the project, in ${dir}`,
+      grantTool: write ? OUTSIDE_WRITE_GRANT : OUTSIDE_READ_GRANT,
+    }
   }
 
   /** Lexical checks shared by read and write; returns a denial or the resolved real path. */
@@ -274,8 +373,15 @@ export class LocalSandbox implements Sandbox {
     const { mode } = this.policy
     if (mode !== 'full-access') {
       const roots = [this.policy.projectRoot, ...this.extraReadRoots]
+      const guard = this.protectedBy(real, roots)
+      if (guard !== undefined) {
+        return { kind: 'deny', path: real, code: 'denied-pattern', reason: `${real} is a protected location (${guard}); no tool reads it` }
+      }
       const inRoots = roots.some(root => isWithin(root, real, this.flavor)) || this.inTemp(real)
-      if (!inRoots) return this.escapeOrOutside(lexical, real, roots, false)
+      if (!inRoots) {
+        const escape = this.escapeOrOutside(lexical, real, roots, false)
+        return escape.kind === 'deny' && escape.code === 'symlink-escape' ? escape : this.askOutside(real, false)
+      }
       const rel = this.relative(real)
       if (rel !== undefined) {
         const denied = this.policy.deniedPatterns.find(pattern => matchGlob(pattern, rel))
@@ -300,7 +406,16 @@ export class LocalSandbox implements Sandbox {
       return { kind: 'deny', path: real, code: 'read-only-mode', reason: `writes are disabled in read-only mode (${real})` }
     }
     const root = this.policy.projectRoot
-    if (!isWithin(root, real, this.flavor) && !this.inTemp(real)) return this.escapeOrOutside(lexical, real, [root], true)
+    const writeRoots = [root, ...this.policy.extraWriteRoots]
+    const guard = this.protectedBy(real, writeRoots)
+      ?? systemWriteDenied(this.flavor).find(dir => isWithin(dir, real, this.flavor))
+    if (guard !== undefined) {
+      return { kind: 'deny', path: real, code: 'denied-pattern', reason: `${real} is a protected location (${guard}); no tool writes it` }
+    }
+    if (!writeRoots.some(dir => isWithin(dir, real, this.flavor)) && !this.inTemp(real)) {
+      const escape = this.escapeOrOutside(lexical, real, writeRoots, true)
+      return escape.kind === 'deny' && escape.code === 'symlink-escape' ? escape : this.askOutside(real, true)
+    }
     const rel = this.relative(real)
     if (rel !== undefined) {
       if (rel === '' || rel === '.') {
@@ -341,25 +456,34 @@ export class LocalSandbox implements Sandbox {
     if (commands.allow !== undefined && !commands.allow.some(entry => programName(entry) === name)) {
       return { kind: 'deny', path: cwd, code: 'command-not-allowed', reason: `${name} is not on the command allow list` }
     }
-    if (mode === 'read-only') {
-      return { kind: 'deny', path: cwd, code: 'read-only-mode', reason: 'commands do not run in read-only mode' }
+    const script = commandScript(request.command, request.args)
+    if (mode === 'read-only' && !isReadOnlyCommand(script, this.flavor === 'win32' ? 'win32' : 'linux')) {
+      return {
+        kind: 'deny',
+        path: cwd,
+        code: 'read-only-mode',
+        reason: 'only read-only commands (ls, cat, rg, git status / diff / log ...) run in read-only and plan mode; ask the user to switch modes for others',
+      }
     }
     if (cwdResolved.kind !== 'resolved') return cwdResolved
-    if (mode === 'workspace-write' && !isWithin(projectRoot, cwd, this.flavor)) {
+    if (mode !== 'full-access' && !isWithin(projectRoot, cwd, this.flavor) && !this.policy.extraWriteRoots.some(root => isWithin(root, cwd, this.flavor))) {
       return { kind: 'deny', path: cwd, code: 'outside-write-roots', reason: `working directory ${cwd} is outside the project` }
     }
-    const script = commandScript(request.command, request.args)
-    const hits = matchCommandRules(script, { root: projectRoot, cwd, flavor: this.flavor })
-      .filter(hit => hit.alwaysAsk || mode === 'workspace-write')
+    const tempSession = this.policy.tempSessionId
+    const hits = matchCommandRules(script, {
+      root: projectRoot,
+      cwd,
+      flavor: this.flavor,
+      ...(tempSession === undefined ? {} : { tempDir: nodePath.join(this.policy.tempBase, `${SESSION_TEMP_PREFIX}${tempSession}`) }),
+      writeRoots: this.policy.extraWriteRoots,
+    }).filter(hit => hit.alwaysAsk || mode !== 'full-access')
     if (hits.length === 0) return { kind: 'allow', path: cwd }
-    const high = hits.some(hit => hit.alwaysAsk)
-    const patterns = new Set(hits.map(hit => hit.pattern))
-    const pattern = !high && patterns.size === 1 ? hits[0]!.pattern : undefined
+    const { options, pattern, risk } = commandAskScopes(hits)
     return {
       kind: 'ask',
       path: cwd,
-      risk: high ? 'high' : 'medium',
-      options: high || pattern === undefined ? ['once'] : ['once', 'session', 'project'],
+      risk,
+      options,
       ...(pattern === undefined ? {} : { pattern }),
       reason: [...new Set(hits.map(hit => hit.description))].join('; '),
       matches: hits,
@@ -385,6 +509,7 @@ export function toDecision(assessment: SandboxAssessment): SandboxDecision {
           risk: assessment.risk,
           options: assessment.options,
           ...(assessment.pattern === undefined ? {} : { pattern: assessment.pattern }),
+          ...(assessment.grantTool === undefined ? {} : { grantTool: assessment.grantTool }),
           subject: { kind: assessment.matches === undefined ? 'path' : 'command', value: assessment.path },
         },
       }
