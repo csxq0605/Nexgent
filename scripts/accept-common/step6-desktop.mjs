@@ -64,7 +64,7 @@ import { FEEDBACK_TASK, runFeedbackProject, SCRIPTED_API_KEY, TERMINAL_STATES } 
 import { Step5Model, USAGE } from './step5-model.mjs'
 import { createStep5Sdk, improvementsPath, loadStep5Packages, readImprovements, scriptedEnvironment } from './step5-runtime.mjs'
 import { loadCapabilities } from './step6-headless.mjs'
-import { showTab, fillProjectPath } from './desktop-ui.mjs'
+import { commitSettings, showTab, fillProjectPath } from './desktop-ui.mjs'
 
 const TIMEOUT = 60_000
 const WAIT = 45_000
@@ -549,8 +549,7 @@ async function saveUserSettings(page, { enabled, every, budget, window }) {
   await section.getByTestId('settings-meta-every').fill(String(every))
   await section.getByTestId('settings-meta-budget').fill(String(budget))
   await section.getByTestId('settings-meta-window').fill(String(window))
-  await section.getByTestId('settings-user-save').click()
-  await section.getByTestId('settings-user-saved').waitFor({ timeout: WAIT })
+  await commitSettings(page, { timeout: WAIT }, true)
   return { approvalDialogs: await page.getByTestId('approval-dialog').count() }
 }
 
@@ -559,8 +558,7 @@ async function saveProjectSharing(page, share) {
   const settings = page.getByTestId('settings-page')
   if (share) await settings.getByTestId('settings-share-improver').check()
   else await settings.getByTestId('settings-share-improver').uncheck()
-  await settings.getByTestId('settings-save').click()
-  await settings.getByTestId('settings-saved').waitFor({ timeout: WAIT })
+  await commitSettings(page, { timeout: WAIT })
   return { approvalDialogs: await page.getByTestId('approval-dialog').count() }
 }
 

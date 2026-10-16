@@ -23,7 +23,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dataDirSync, registerHome } from './data-dir.mjs'
 import { isLoopbackUrl } from './step2-runtime.mjs'
-import { closeDrawer, fillProjectPath, showTab } from './desktop-ui.mjs'
+import { closeDrawer, commitSettings, fillProjectPath, showTab, showUsageCaps } from './desktop-ui.mjs'
 
 // No trailing separator: on Windows a trailing backslash escapes the closing quote of the argument.
 export const DESKTOP_DIR = resolve(fileURLToPath(new URL('../../apps/desktop/', import.meta.url)))
@@ -381,11 +381,11 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     const settings = page.getByTestId('settings-page')
     await settings.getByTestId('setting-model').fill(SETTINGS.model)
     await settings.getByTestId('setting-thinking').selectOption(SETTINGS.thinking)
+    await showUsageCaps(page)
     await settings.getByTestId('cap-task-tokens').fill(String(SETTINGS.perTaskTokens))
     await settings.getByTestId('cap-project-requests').fill(String(SETTINGS.perProjectRequests))
     obs.settings = { keyStatus: await settings.getByTestId('api-key-status').textContent() }
-    await settings.getByTestId('settings-save').click()
-    await settings.getByTestId('settings-saved').waitFor({ timeout: WAIT })
+    await commitSettings(page, { timeout: WAIT })
     const configText = await readFile(join(root, '.nexgent', 'config.json'), 'utf8')
     obs.settings.config = JSON.parse(configText)
     obs.settings.configHasKey = configText.includes(DESKTOP_KEY)

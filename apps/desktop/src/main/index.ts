@@ -11,6 +11,7 @@
  * Environment (unpackaged builds only, except `NEXGENT_HOME` and `NEXGENT_LOG_LEVEL`):
  * - `NEXGENT_HOME`: overrides `~/.nexgent` (logs, Chromium profile, SDK home).
  * - `NEXGENT_LOG_LEVEL`: `debug` | `info` (default) | `warn` | `error`.
+ * - `NEXGENT_AUTO_TITLE`: `0` keeps conversations untitled until renamed (no title request after the first turn).
  * - `NEXGENT_DESKTOP_DEV_URL`: load the UI from a vite dev server on localhost.
  * - `NEXGENT_DESKTOP_RENDERER_DIR`: serve `app://nexgent/` from this directory instead of `dist/renderer`.
  * - `NEXGENT_DESKTOP_SDK_MODULE`: a module exporting `createSdk` (scripted SDKs in E2E tests).
@@ -229,6 +230,8 @@ async function start(): Promise<void> {
       reveal: async (absolutePath) => shell.showItemInFolder(absolutePath),
       pickDirectory: async () => (await pickProjectDirectory(showOpenDialog)) ?? null,
       pickFiles: () => pickMaterialFiles(showOpenDialog),
+      // Rework D2: a conversation is named after its first turn (NEXGENT_AUTO_TITLE=0 turns it off).
+      autoTitle: process.env['NEXGENT_AUTO_TITLE'] !== '0',
     },
     devEnv('NEXGENT_DESKTOP_SDK_MODULE'),
   )

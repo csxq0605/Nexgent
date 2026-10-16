@@ -217,9 +217,11 @@ describe('meta settings (user level)', () => {
     fireEvent.change(screen.getByTestId('settings-meta-window'), { target: { value: '14' } })
     fireEvent.change(screen.getByTestId('settings-meta-every'), { target: { value: '5' } })
     const lists = bridge.callsOf('improvements.list').length
-    fireEvent.click(screen.getByTestId('settings-user-save'))
+    fireEvent.blur(screen.getByTestId('settings-meta-every'))
     await waitFor(() => expect(screen.getByTestId('settings-user-saved')).toBeTruthy())
+    // The switch saved at once, the typed values when the field was left.
     expect(bridge.callsOf('userSettings.update')).toEqual([
+      { patch: { improvement: { meta: { enabled: true, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } } } },
       { patch: { improvement: { meta: { enabled: true, everyJobs: 5, budget: { maxTokens: 2_000_000, windowDays: 14 }, model: 'claude-sonnet-5-5' } } } },
     ])
     expect(bridge.callsOf('settings.update')).toEqual([])
@@ -236,12 +238,12 @@ describe('meta settings (user level)', () => {
     await waitFor(() => expect((screen.getByTestId('settings-meta-every') as HTMLInputElement).value).toBe('7'))
     expect((screen.getByTestId('settings-meta-enabled') as HTMLInputElement).checked).toBe(true)
     fireEvent.change(screen.getByTestId('settings-meta-every'), { target: { value: '25' } })
-    fireEvent.click(screen.getByTestId('settings-user-save'))
-    await waitFor(() => expect(screen.getByText(/触发作业数必须是 1 到 20/)).toBeTruthy())
+    fireEvent.blur(screen.getByTestId('settings-meta-every'))
+    await waitFor(() => expect(screen.getByText(/请填 1 到 20 的整数/)).toBeTruthy())
     fireEvent.change(screen.getByTestId('settings-meta-every'), { target: { value: '3' } })
     fireEvent.change(screen.getByTestId('settings-meta-budget'), { target: { value: '0' } })
-    fireEvent.click(screen.getByTestId('settings-user-save'))
-    await waitFor(() => expect(screen.getByText(/触发作业数必须是 1 到 20/)).toBeTruthy())
+    fireEvent.blur(screen.getByTestId('settings-meta-budget'))
+    await waitFor(() => expect(screen.getByText(/请填正整数/)).toBeTruthy())
     expect(bridge.callsOf('userSettings.update')).toEqual([])
   })
 
@@ -252,7 +254,6 @@ describe('meta settings (user level)', () => {
     await waitFor(() => expect(screen.getByTestId('settings-share-improver')).toBeTruthy())
     expect((screen.getByTestId('settings-share-improver') as HTMLInputElement).checked).toBe(true)
     fireEvent.click(screen.getByTestId('settings-share-improver'))
-    fireEvent.click(screen.getByTestId('settings-save'))
     await waitFor(() => expect(screen.getByTestId('settings-saved')).toBeTruthy())
     expect(bridge.callsOf('settings.update')[0].patch.improvement).toMatchObject({ shareImproverEvidence: false })
     expect(bridge.settings.improvement.shareImproverEvidence).toBe(false)
@@ -264,9 +265,9 @@ describe('meta settings (user level)', () => {
     await renderApp(bridge)
     fireEvent.click(screen.getByTestId('open-settings'))
     await waitFor(() => expect(screen.getByTestId('settings-share-improver')).toBeTruthy())
-    fireEvent.click(screen.getByTestId('settings-save'))
+    fireEvent.blur(screen.getByTestId('settings-improvement-budget'))
     await waitFor(() => expect(screen.getByTestId('settings-saved')).toBeTruthy())
-    expect(bridge.callsOf('settings.update')[0].patch.improvement).toBeUndefined()
+    expect(bridge.callsOf('settings.update')).toEqual([])
   })
 })
 

@@ -242,6 +242,12 @@ export interface UserConfig {
   }
   /** ADR 0017 decision 3: when the user was told about background learning (absent: not yet; learning waits). */
   readonly learning: UserLearningSettings
+  /**
+   * ADR 0020 decision 4: the interface language (BCP 47, e.g. `zh-CN`, `en`)
+   * of the text Nexgent writes for the user (handbook entries, reasons);
+   * absent: the language of each task.
+   */
+  readonly language?: string
 }
 
 /**
@@ -256,7 +262,11 @@ export interface UserConfigInput {
   readonly version?: 1
   readonly improvement?: { readonly meta?: MetaImprovementConfigInput }
   readonly learning?: UserLearningSettings
+  readonly language?: string
 }
+
+/** A BCP 47 language tag as `UserConfig.language` takes it: a 2–3 letter language, then subtags of 1–8 letters or digits. */
+export const LANGUAGE_TAG_PATTERN = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/
 
 /** Defaults of {@link UserConfig}. */
 export const DEFAULT_USER_CONFIG: UserConfig = Object.freeze({
@@ -271,6 +281,7 @@ export function resolveUserConfig(input: UserConfigInput = {}): UserConfig {
     version: 1,
     improvement: { meta: resolveMetaImprovementConfig(input.improvement?.meta) },
     learning: input.learning?.noticeAcknowledgedAt === undefined ? {} : { noticeAcknowledgedAt: input.learning.noticeAcknowledgedAt },
+    ...(input.language === undefined ? {} : { language: input.language }),
   }
 }
 
@@ -284,8 +295,9 @@ export function assertUserConfig(value: unknown): asserts value is UserConfigInp
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) fail('config', 'must be an object')
   const record = value as Record<string, unknown>
-  for (const key of Object.keys(record)) if (key !== 'version' && key !== 'improvement' && key !== 'learning') fail(key, 'is not a known field')
+  for (const key of Object.keys(record)) if (key !== 'version' && key !== 'improvement' && key !== 'learning' && key !== 'language') fail(key, 'is not a known field')
   if (record.version !== undefined && record.version !== 1) fail('version', 'must be 1')
+  if (record.language !== undefined && (typeof record.language !== 'string' || !LANGUAGE_TAG_PATTERN.test(record.language))) fail('language', 'must be a BCP 47 language tag such as zh-CN or en')
   if (record.learning !== undefined) {
     if (record.learning === null || typeof record.learning !== 'object' || Array.isArray(record.learning)) fail('learning', 'must be an object')
     const learning = record.learning as Record<string, unknown>

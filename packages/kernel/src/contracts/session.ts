@@ -310,7 +310,15 @@ export interface GoalUpdateRecord extends SessionRecordBase {
   readonly note?: string
 }
 
-/** The session was renamed by the user (step 2); the latest one wins over `session.start.title`. */
+/**
+ * Rework D2: the system prompt of the one request that names a conversation
+ * after its first turn (the SDK's `autoTitle`; the reply becomes a
+ * `session.title`). Exported so scripted model servers can recognise and
+ * answer that request outside a test's script.
+ */
+export const SESSION_TITLE_PROMPT = 'Name this conversation. Reply with a short title only: at most 20 characters for Chinese or Japanese, at most 6 words otherwise, in the language of the message, with no quotes and no closing punctuation.'
+
+/** The session was renamed by the user (step 2), or named after its first turn (rework D2); the latest one wins over `session.start.title`. */
 export interface SessionTitleRecord extends SessionRecordBase {
   readonly type: 'session.title'
   /** Turn in progress, if any. */

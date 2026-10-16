@@ -313,6 +313,8 @@ export type SdkEvent =
   | EventBase & { readonly type: 'material.added'; readonly material: MaterialMetadata }
   | EventBase & { readonly type: 'error'; readonly turn?: number; readonly error: ErrorInfo; readonly fatal: boolean }
   | EventBase & { readonly type: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly usage: LLMUsage }
+  /** Rework D2: the conversation got a title (`sessions.rename`, or the one named after its first turn). */
+  | EventBase & { readonly type: 'session.title'; readonly title: string }
   /** Step 3, emitted on the parent session: a member run started / settled. */
   | EventBase & { readonly type: 'member.start'; readonly turn: number; readonly run: MemberRunView }
   | EventBase & { readonly type: 'member.end'; readonly turn: number; readonly run: MemberRunView }
@@ -657,11 +659,15 @@ export interface UserSettings {
   readonly improvement: { readonly meta: MetaImprovementConfig }
   /** API 8: whether the user acknowledged background learning (`learning.acknowledge`). */
   readonly learning: UserLearningSettings
+  /** Rework D2: the interface language (BCP 47) learning writes in; absent: each task's language. */
+  readonly language?: string
 }
 
 /** A user settings change from the settings page (a user action, no approval prompt); missing meta fields take their defaults. */
 export interface UserSettingsPatch {
   readonly improvement?: { readonly meta?: MetaImprovementConfigInput }
+  /** Rework D2: the interface language (BCP 47); `null` removes it (each task's language again). */
+  readonly language?: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -840,6 +846,8 @@ export interface SdkMethods {
   'handbook.list': (input: { readonly projectId: string; readonly scope?: HandbookScope; readonly includeRetired?: boolean }) => Promise<HandbookListing>
   /** API 8: one entry with its operations; an unknown id rejects `handbook/not-found`. */
   'handbook.show': (input: { readonly projectId: string; readonly entryId: string }) => Promise<HandbookEntryDetail>
+  /** Rework D2: the user stops (`retired`) or restores (`active`) an entry; returns it with its operations. An unknown id rejects `handbook/not-found`. */
+  'handbook.setStatus': (input: { readonly projectId: string; readonly entryId: string; readonly status: 'active' | 'retired'; readonly reason?: string }) => Promise<HandbookEntryDetail>
   /** API 8: learning settings, spend in the window and scorer reliability. */
   'learning.status': (input: { readonly projectId: string }) => Promise<LearningStatus>
   /** API 8: the user acknowledged the background-learning notice (user level; idempotent, keeps the first time). */
@@ -918,6 +926,7 @@ export const SDK_METHOD_NAMES = [
   'improvers.rollback',
   'handbook.list',
   'handbook.show',
+  'handbook.setStatus',
   'learning.status',
   'learning.acknowledge',
   'practice.list',
@@ -947,4 +956,11 @@ export interface CreateSdkOptions {
   readonly pickDirectory?: () => Promise<string | null>
   /** Desktop only: the native multi-file picker behind `dialogs.pickFiles` (empty when cancelled). */
   readonly pickFiles?: () => Promise<readonly string[]>
+  /**
+   * Rework D2: after a conversation's first turn completes and it has no
+   * title, name it with one short request to the execution model (counted in
+   * the ledger) and write `session.title` (default off; the desktop app turns
+   * it on).
+   */
+  readonly autoTitle?: boolean
 }

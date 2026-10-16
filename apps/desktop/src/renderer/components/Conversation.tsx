@@ -3,6 +3,7 @@ import { useAppState, useAppStore } from '../hooks.js'
 import { T, goalStatusText, memberFormText, sessionTitle } from '../strings.js'
 import { useView, useViewActions } from '../ui.js'
 import { ApprovalCard } from './ApprovalDialog.js'
+import { LearningNotice } from './LearningNotice.js'
 import { Composer } from './Composer.js'
 import { Drawer } from './Drawer.js'
 import { Icon } from './Icon.js'
@@ -227,6 +228,7 @@ function MainConversation(): JSX.Element {
         <Timeline entries={state.timeline} deliverables={state.deliverables} />
       )}
       <Approvals />
+      <LearningNotice />
       <Composer />
       <Drawer />
     </section>

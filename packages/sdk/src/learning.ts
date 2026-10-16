@@ -43,6 +43,23 @@ export async function handbookShow(host: ImprovementHost, entryId: unknown): Pro
   return { entry: view(entry), ops: [...ops] }
 }
 
+/**
+ * `handbook.setStatus` (rework D2): the user stops an entry (`retired`) or
+ * takes it back (`active`) from the 能力 page; written as a `status`
+ * operation with actor `user`.
+ * @throws `handbook/not-found`, `tool/invalid-input`.
+ */
+export async function handbookSetStatus(host: ImprovementHost, input: { readonly entryId?: unknown; readonly status?: unknown; readonly reason?: unknown }): Promise<HandbookEntryDetail> {
+  if (typeof input.entryId !== 'string' || input.entryId === '') throw new NexgentError('tool/invalid-input', 'handbook.setStatus needs an entryId')
+  if (input.status !== 'active' && input.status !== 'retired') throw new NexgentError('tool/invalid-input', 'handbook.setStatus: status must be active or retired')
+  if (input.reason !== undefined && typeof input.reason !== 'string') throw new NexgentError('tool/invalid-input', 'handbook.setStatus: reason must be a string')
+  const handbook = await learnerOf(host).handbook()
+  const [result] = await handbook.apply([{ op: 'status', entryId: input.entryId, status: input.status, ...(input.reason === undefined || input.reason.trim() === '' ? {} : { reason: input.reason.trim() }) }], { actor: 'user' })
+  if (result?.outcome === 'rejected' && result.reason === 'not-found') throw new NexgentError('handbook/not-found', result.detail)
+  if (result?.outcome !== 'applied') throw new NexgentError('tool/invalid-input', result?.outcome === 'rejected' ? result.detail : 'the status was not changed')
+  return handbookShow(host, input.entryId)
+}
+
 /** `learning.status`. */
 export async function learningStatus(host: ImprovementHost, home: string, ledger: Pick<Ledger, 'read'> | undefined, now: Date): Promise<LearningStatus> {
   const learner = learnerOf(host)

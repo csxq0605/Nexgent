@@ -265,6 +265,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `improvement.meta.budget.windowDays` | 1–365 | `30` | 元改进预算的时间窗 |
 | `improvement.meta.model` | string | `"claude-sonnet-5-5"` | 元诊断与元提案会话的模型，可改为 `claude-opus-5-5` |
 | `learning.noticeAcknowledgedAt` | ISO-8601 UTC? | 无 | 重做 C1（ADR 0017 决策 3）：用户确认“Nexgent 会在后台用你的任务学习、每项目每月最多花费 X 美元”的时刻。没有它，任何项目的后台学习都不花钱（`mayLearn`）；SDK `learning.acknowledge` 写入，再次确认保留第一次的时刻 |
+| `language` | BCP 47 语言标签? | 无 | 重做 D2（ADR 0020 决策 4、ADR 0018 决策 11）：界面语言，即 Nexgent 写给用户看的文字（经验条目、状态原因、学习理由）用的语言，例如 `zh-CN`、`en`；没有时按每个任务第一条消息的语言。格式 `^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$`。设置页（SDK `userSettings.update` 的 `language`，`null` 删除）写入，后台学习每次反思前读取 |
 
 受保护字段（`GUARDED_USER_CONFIG_FIELDS`）：`improvement`。审批规则同项目级的受保护字段：模型或组件请求改动总要审批，设置页（SDK `userSettings.update`）是用户自己的操作，不弹审批；文件在项目之外，文件工具够不到。
 
@@ -322,7 +323,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `feedback`（步骤 2） | 反馈轮的 `turn.start` 之后 | `turn`、`feedback: FeedbackEntry` |
 | `goal.set`（步骤 2） | 宿主设定持久目标 | `turn?`、`goal: Goal` |
 | `goal.update`（步骤 2） | 宿主更新目标状态或文本 | `turn?`、`goalId`、`status`、`text?`、`note?` |
-| `session.title`（步骤 2） | 用户给对话改名（`sessions.rename`） | `turn?`、`title`（非空，宿主已去掉首尾空白） |
+| `session.title`（步骤 2） | 用户给对话改名（`sessions.rename`）；重做 D2：桌面应用在第一轮正常结束后、对话还没有标题时，用执行模型一次短请求（`purpose: auxiliary`，带 `sessionId`，计入账本与 `perProject`）生成的标题 | `turn?`、`title`（非空，宿主已去掉首尾空白） |
 | `compaction`（步骤 2） | 压缩成功后、使用压缩历史的那次模型请求之前 | `turn`、`step`、`summary`、`keepMessages`、`compactedMessages`、`requestId`、`usage`、`trigger: { inputTokens, threshold }` |
 | `fork.seed`（步骤 3） | fork 子会话创建后，必为 `seq: 2` | `fromSessionId`、`throughSeq`、`messages` |
 | `subagent.start`（步骤 3） | 父会话里一次成员运行开始 | `turn`、`toolCallId?`、`childSessionId`、`childTurn`、`name`、`executionForm`、`mode?`、`preset?`、`workflowId?`、`task`（≤500 字符）、`materialIds?` |

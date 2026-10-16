@@ -177,25 +177,32 @@ describe('deliverables', () => {
 })
 
 describe('settings', () => {
-  it('saves model, thinking, effort, sandbox and cost caps as one patch', async () => {
+  it('saves each change at once: a choice when made, a typed value when the field is left', async () => {
     const { bridge } = await renderApp()
     fireEvent.click(screen.getByTestId('open-settings'))
     const page = await screen.findByTestId('settings-page')
     fireEvent.change(within(page).getByTestId('setting-model'), { target: { value: 'claude-opus-5-5' } })
+    expect(bridge.callsOf('settings.update')).toEqual([])
+    fireEvent.blur(within(page).getByTestId('setting-model'))
     fireEvent.change(within(page).getByTestId('setting-thinking'), { target: { value: 'off' } })
     fireEvent.change(within(page).getByTestId('setting-effort'), { target: { value: 'high' } })
     fireEvent.change(within(page).getByTestId('setting-sandbox'), { target: { value: 'read-only' } })
+    fireEvent.change(within(page).getByTestId('cap-task-usd'), { target: { value: '1.5' } })
     fireEvent.change(within(page).getByTestId('cap-task-tokens'), { target: { value: '200000' } })
     fireEvent.change(within(page).getByTestId('cap-project-requests'), { target: { value: '500' } })
     fireEvent.change(within(page).getByTestId('cap-project-window'), { target: { value: '7' } })
-    fireEvent.click(within(page).getByTestId('settings-save'))
-    await screen.findByTestId('settings-saved')
-    expect(bridge.callsOf('settings.update')).toEqual([
-      {
-        projectId: 'p1',
-        patch: { model: 'claude-opus-5-5', thinking: 'off', effort: 'high', sandboxMode: 'read-only', costCaps: { perTask: { maxTokens: 200000 }, perProject: { maxRequests: 500, windowDays: 7 } } },
-      },
+    fireEvent.blur(within(page).getByTestId('cap-project-window'))
+    await waitFor(() => expect(within(page).getByTestId('settings-saved').textContent).toBe('已保存'))
+    expect(bridge.callsOf('settings.update').map(call => call.patch)).toEqual([
+      { model: 'claude-opus-5-5' },
+      { thinking: 'off' },
+      { effort: 'high' },
+      { sandboxMode: 'read-only' },
+      { costCaps: { perTask: { maxUsd: 1.5, maxTokens: 200000 }, perProject: { maxRequests: 500, windowDays: 7 } } },
     ])
+    // Leaving a field that did not change sends nothing.
+    fireEvent.blur(within(page).getByTestId('setting-model'))
+    expect(bridge.callsOf('settings.update')).toHaveLength(5)
   })
 
   it('rejects a non-numeric cap without calling the backend', async () => {
@@ -203,8 +210,10 @@ describe('settings', () => {
     fireEvent.click(screen.getByTestId('open-settings'))
     const page = await screen.findByTestId('settings-page')
     fireEvent.change(within(page).getByTestId('cap-task-tokens'), { target: { value: '十万' } })
-    fireEvent.click(within(page).getByTestId('settings-save'))
-    expect(within(page).getByText(/上限必须是正整数/)).toBeTruthy()
+    fireEvent.blur(within(page).getByTestId('cap-task-tokens'))
+    expect(within(page).getByText(/请填正数/)).toBeTruthy()
+    fireEvent.change(within(page).getByTestId('cap-task-usd'), { target: { value: '-1' } })
+    fireEvent.keyDown(within(page).getByTestId('cap-task-usd'), { key: 'Enter' })
     expect(bridge.callsOf('settings.update')).toEqual([])
   })
 
