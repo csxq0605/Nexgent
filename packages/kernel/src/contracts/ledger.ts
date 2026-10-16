@@ -13,6 +13,8 @@ import type { ActivationTrigger, CapabilityVersion, ComponentUsage, DecisionOutc
 import type { ExecutionForm } from './collaboration.js'
 import type { ComparisonArm, ImprovementCostPhase, ImprovementJobKind, ImprovementPhase, ImprovementStatus, ImprovementTrigger, PhaseCost } from './improvement.js'
 import type { ImproverScope, ImproverVersion } from './improver.js'
+import type { CostCapLevel, CostCapScope } from './config.js'
+import type { LearningPhase } from './learning.js'
 import type { ErrorInfo } from './errors.js'
 import type { FinishReason, LLMRequestPurpose, LLMUsage } from './llm.js'
 import type { ToolEffect } from './tools.js'
@@ -48,6 +50,13 @@ export interface LedgerAttribution {
   readonly metaJobId?: string
   /** Step 6: which arm; present exactly when `metaJobId` is. */
   readonly comparisonArm?: ComparisonArm
+  /**
+   * ADR 0018: on the records of background learning (self-evaluation,
+   * calibration, reflection, curation), which phase; these count against
+   * `learning.budget`, never against the task's caps. With `taskId` naming
+   * the task learned from.
+   */
+  readonly learningPhase?: LearningPhase
 }
 
 /** Fields every ledger record carries. */
@@ -72,7 +81,11 @@ export interface LLMRequestStartRecord extends LedgerRecordBase {
   readonly purpose: LLMRequestPurpose
   /** Whether reasoning was requested. */
   readonly thinking: 'off' | 'on'
-  /** Attempt number when the provider retried the request (ADR 0021); absent on the first attempt. Each attempt has its own start/end pair with the same `requestId`. */
+  /**
+   * ADR 0017 decision 2 / ADR 0021: 1-based attempt number when the provider
+   * retries a failed request (absent: 1). Every attempt has its own start/end
+   * pair with the same `requestId` and is counted as a request.
+   */
   readonly attempt?: number
 }
 
@@ -97,8 +110,14 @@ export interface LLMRequestEndRecord extends LedgerRecordBase {
   readonly finishReason?: FinishReason
   /** Error code on `error`; never the message. */
   readonly errorCode?: string
-  /** Same as on the matching `llm.request.start`. */
+  /** Same as on the start record. */
   readonly attempt?: number
+  /**
+   * ADR 0017 decision 5: `true` when `usage` was estimated by the host
+   * (the provider reported none, e.g. an interrupted stream) rather than
+   * reported; cost totals include it and say they are estimates.
+   */
+  readonly usageEstimated?: true
 }
 
 /** A tool call ran (or was denied). No arguments and no output are recorded. */
@@ -199,8 +218,27 @@ export interface ImprovementEndRecord extends LedgerRecordBase {
   readonly childVersion?: ImproverVersion
 }
 
+/**
+ * ADR 0017 decision 5: spending crossed {@link COST_WARNING_RATIO} of a cap
+ * (`warning`, once per cap and scope instance) or met it (`reached`, written
+ * just before the turn is cancelled with cause `cost-cap`).
+ */
+export interface CostWarningRecord extends LedgerRecordBase {
+  readonly type: 'cost.warning'
+  readonly scope: CostCapScope
+  readonly level: Exclude<CostCapLevel, 'ok'>
+  /** Which limit crossed: the first one in the order `maxUsd`, `maxTokens`, `maxRequests`. */
+  readonly limit: 'maxUsd' | 'maxTokens' | 'maxRequests'
+  /** Spending so far in the limit's unit (USD, tokens or requests). */
+  readonly used: number
+  /** The limit's value. */
+  readonly cap: number
+  /** Whether `used` includes estimated usage. */
+  readonly estimated: boolean
+}
+
 /** Every ledger record kind. */
-export type LedgerRecord = LLMRequestStartRecord | LLMRequestEndRecord | ToolCallRecord | TaskOutcomeRecord | CapabilityDecisionRecord | ImprovementEndRecord
+export type LedgerRecord = LLMRequestStartRecord | LLMRequestEndRecord | ToolCallRecord | TaskOutcomeRecord | CapabilityDecisionRecord | ImprovementEndRecord | CostWarningRecord
 
 /** The `type` tag vocabulary. */
 export type LedgerRecordType = LedgerRecord['type']
@@ -213,6 +251,7 @@ export const LEDGER_RECORD_TYPES: readonly LedgerRecordType[] = [
   'task.outcome',
   'capability.decision',
   'improvement.end',
+  'cost.warning',
 ]
 
 /** Distributive omit over a union. */

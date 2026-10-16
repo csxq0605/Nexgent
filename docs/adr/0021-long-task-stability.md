@@ -18,7 +18,7 @@
 
 1. **请求重试在 provider 里做，只在回复内容到来之前（ADR 0017 第 2 条的实现）。** `AnthropicProvider` 对可重试的失败重发同一请求：HTTP 408/409/429/500/502/503/504/529，provider 错误类型 `overloaded_error`、`rate_limit_error`、`api_error`、`timeout_error`，连接失败或断开（没有错误状态码），以及流空闲超时（`llm/timeout`，`timeout: 'idle'`）。loop 自己的空闲时限比 provider 的多等一点（至多 15 秒），好让 provider 先重试。整个请求的时限、400 类请求错误、鉴权错误、响应格式错误不重试。已经产出正文或工具调用（`text.delta`、`tool-call.*`）之后的失败不重试，只有 thinking 流过的可以。
    - 等待：服务端给了 `retry-after-ms` / `retry-after` 就用它，否则 1 秒 × 2^(n−1)，取上半区间的随机值；单次等待不超过 60 秒。默认最多重试 6 次（`llm.maxRetries`，0 关闭）。等待可被取消。
-   - 每次尝试各写一对 `llm.request.start` / `llm.request.end`，`requestId` 相同，第 2 次起带 `attempt`。流里在重发前给一个 `retry` 事件（`attempt`、`delayMs`、`error`），loop 转成 `request.retry` 事件，CLI 显示“n 秒后重试”。最终仍失败的错误在 `details` 里带 `attempts` 与 `retryable`。
+   - 每次尝试各写一对 `llm.request.start` / `llm.request.end`，`requestId` 相同，第 2 次起带 `attempt`（1 起，缺省为 1）。重做 C1 的契约注释原写“每次尝试有自己的 `requestId`”；用同一个 `requestId` 是为了让 `assistant.message.requestId` 直接对上账本里成功的那次尝试，读取方按 `requestId` 加 `attempt` 配对，本 ADR 以此为准。流里在重发前给一个 `retry` 事件（`attempt`、`delayMs`、`error`），loop 转成 `request.retry` 事件，CLI 显示“n 秒后重试”。最终仍失败的错误在 `details` 里带 `attempts` 与 `retryable`。
    - SDK 自己的重试仍关闭（`maxRetries: 0` 构造客户端），这样每次尝试都进账本。
 2. **调用上限可配置，到了上限不是错误。** `agents.maxSteps` 默认改为 400；项目配置新增 `maxStepsPerTurn`（正整数，改它要审批），优先于 profile 行；成员预设的 `maxSteps` 仍优先。上限前的最后一次调用（上限 ≥ 4 时）附一条隐藏提示，让模型收尾、说明做完了什么、还剩什么。超过上限时这一轮以 `cancelled`、cause `step-limit` 结束，历史完整，用户再发一条消息就接着做。桌面显示“本轮模型调用次数到上限了，工作还没丢；发一句“继续”就接着做”。
 3. **输出被截断时续写。** 单次输出默认改为 64000 token（Claude Sonnet 5.5 上限 128K 的一半）；请求整体时限随之放宽（llm 1200 秒，loop 1800 秒，含重试），流空闲时限仍 180 秒。回复因输出上限停下（`max-tokens`）时：
@@ -35,7 +35,7 @@
 
 ## 后果
 
-- **契约**：`LLMStreamEvent` 加 `RetryEvent`；账本两种请求记录加可选 `attempt`；`TurnCancelCause` 加 `step-limit`；`ProjectConfig` 加可选 `maxStepsPerTurn`（在 `GUARDED_PROJECT_CONFIG_FIELDS` 里）；`compactionTail` 成为契约函数；`AgentEvent` 加 `request.retry`；`SessionMetadata` 加可选 `lastUsage`。JSON schema 与 `data-formats.md` 同步。
+- **契约**：`LLMStreamEvent` 加 `RetryEvent`；账本两种请求记录的可选 `attempt`（重做 C1 已加）按上面的写法填；`TurnCancelCause` 加 `step-limit`；`ProjectConfig` 加可选 `maxStepsPerTurn`（在 `GUARDED_PROJECT_CONFIG_FIELDS` 里）；`compactionTail` 成为契约函数；`AgentEvent` 加 `request.retry`；`SessionMetadata` 加可选 `lastUsage`。JSON schema 与 `data-formats.md` 同步。
 - **账本**：重试的每次尝试都算一次请求（`perProject.maxRequests` 照常计）；失败的尝试用量未知，不计 token。
 - **费用**：输出上限提高只在模型确实写得长时多花；调用上限提高后，单轮最多花的钱变多，仍受 `costCaps` 约束（默认不设上限，见审查 P16，不在本 ADR 范围）。
 - **不做**：压缩失败后改为“清空旧工具结果”的回退（审查 B6 的最后一条）——这是对前缀的改写，会让后面所有 thinking 块失效，留待服务端上下文编辑接入时再做；流中途断开且已有正文时的续传；按模型查询窗口的 Models API 调用（用静态表）。

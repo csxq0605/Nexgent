@@ -9,12 +9,13 @@ import * as nodePath from 'node:path'
 import {
   assertCapabilitiesConfig,
   assertImprovementConfig,
+  assertLearningConfig,
+  checkCostCaps,
   EFFORT_LEVELS,
   NexgentError,
   SANDBOX_MODES,
   resolveProjectConfig,
   type ApprovalGrant,
-  type CostCap,
   type ProjectConfig,
   type ProjectConfigInput,
   type WorkspaceLayout,
@@ -36,7 +37,7 @@ export interface LoadedProjectConfig extends ProjectConfig {
 }
 
 const TOP_LEVEL_KEYS = new Set([
-  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities', 'improvement',
+  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities', 'improvement', 'learning',
   'maxStepsPerTurn',
 ])
 
@@ -46,18 +47,6 @@ function invalid(message: string, field?: string): NexgentError {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-function checkCostCap(value: unknown, field: string, allowWindow: boolean): CostCap {
-  if (!isObject(value)) throw invalid(`${field} must be an object`, field)
-  const allowed = allowWindow ? ['maxTokens', 'maxRequests', 'windowDays'] : ['maxTokens', 'maxRequests']
-  for (const [key, entry] of Object.entries(value)) {
-    if (!allowed.includes(key)) throw invalid(`unknown field ${field}.${key}`, `${field}.${key}`)
-    if (typeof entry !== 'number' || !Number.isInteger(entry) || entry < 0) {
-      throw invalid(`${field}.${key} must be a non-negative integer`, `${field}.${key}`)
-    }
-  }
-  return value as CostCap
 }
 
 function checkGrant(value: unknown, index: number): ApprovalGrant {
@@ -97,11 +86,9 @@ export function validateProjectConfig(raw: unknown): ProjectConfigFile {
     throw invalid('maxStepsPerTurn must be a positive integer', 'maxStepsPerTurn')
   }
   if (raw.costCaps !== undefined) {
-    if (!isObject(raw.costCaps)) throw invalid('costCaps must be an object', 'costCaps')
-    for (const [key, cap] of Object.entries(raw.costCaps)) {
-      if (key !== 'perTask' && key !== 'perProject') throw invalid(`unknown field costCaps.${key}`, `costCaps.${key}`)
-      checkCostCap(cap, `costCaps.${key}`, key === 'perProject')
-    }
+    checkCostCaps(raw.costCaps, (field, message) => {
+      throw invalid(message, field)
+    })
   }
   if (raw.approvals !== undefined) {
     if (!Array.isArray(raw.approvals)) throw invalid('approvals must be an array', 'approvals')
@@ -109,6 +96,7 @@ export function validateProjectConfig(raw: unknown): ProjectConfigFile {
   }
   if (raw.capabilities !== undefined) assertCapabilitiesConfig(raw.capabilities)
   if (raw.improvement !== undefined) assertImprovementConfig(raw.improvement)
+  if (raw.learning !== undefined) assertLearningConfig(raw.learning)
   if (raw.extraReadRoots !== undefined) {
     if (!Array.isArray(raw.extraReadRoots)
       || raw.extraReadRoots.some(root => typeof root !== 'string' || !nodePath.isAbsolute(root))) {

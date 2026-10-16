@@ -5,7 +5,9 @@
  * and workflow records) and the step-4 additions (`capabilities`,
  * `step4-tools`, capability session records and ledger fields) and the
  * step-5 additions (`improvement`, improvement-session records and ledger
- * fields) and the step-6 additions (`improver`, meta jobs, epochs). Types
+ * fields) and the step-6 additions (`improver`, meta jobs, epochs) and the
+ * rework C1 additions (`data-layout`, `learning`, `handbook`, `edit-tools`,
+ * USD cost caps, read-only tool concurrency). Types
  * and small pure helpers only:
  * no I/O, no Cordis services. Implementations live in `@nexgent/llm`,
  * `@nexgent/session`, `@nexgent/workspace` and the kernel itself; changes to
@@ -32,3 +34,7 @@ export * from './step4-tools.js'
 export * from './improvement.js'
 export * from './improver.js'
 export * from './instance-literals.js'
+export * from './data-layout.js'
+export * from './learning.js'
+export * from './handbook.js'
+export * from './edit-tools.js'

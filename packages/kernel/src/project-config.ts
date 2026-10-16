@@ -7,7 +7,8 @@
 import { NexgentError } from './contracts/errors.js'
 import { assertCapabilitiesConfig } from './contracts/capabilities.js'
 import { assertImprovementConfig } from './contracts/improvement.js'
-import { resolveProjectConfig, type CostCap, type ProjectConfig, type ProjectConfigInput } from './contracts/config.js'
+import { checkCostCaps, resolveProjectConfig, type ProjectConfig, type ProjectConfigInput } from './contracts/config.js'
+import { assertLearningConfig } from './contracts/learning.js'
 import type { ApprovalGrant } from './contracts/approvals.js'
 import { EFFORT_LEVELS, type Effort } from './contracts/llm.js'
 import { SANDBOX_MODES, type SandboxMode } from './contracts/workspace.js'
@@ -24,7 +25,7 @@ export interface LoadedProjectConfig {
 }
 
 const KNOWN_FIELDS = new Set([
-  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities', 'improvement',
+  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities', 'improvement', 'learning',
   'maxStepsPerTurn',
 ])
 
@@ -34,21 +35,6 @@ function fail(path: string, message: string): never {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-function parseCap(path: string, field: string, value: unknown, allowWindow: boolean): CostCap {
-  if (!isObject(value)) fail(path, `${field} must be an object`)
-  const cap: { maxTokens?: number; maxRequests?: number; windowDays?: number } = {}
-  for (const [key, raw] of Object.entries(value)) {
-    if (key !== 'maxTokens' && key !== 'maxRequests' && !(allowWindow && key === 'windowDays')) {
-      fail(path, `unknown field ${field}.${key}`)
-    }
-    if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) {
-      fail(path, `${field}.${key} must be a non-negative integer`)
-    }
-    cap[key as 'maxTokens'] = raw
-  }
-  return cap
 }
 
 function parseGrant(path: string, index: number, value: unknown): ApprovalGrant {
@@ -103,13 +89,8 @@ export function parseProjectConfig(value: unknown, path = 'config.json'): Loaded
     input.sandboxMode = value.sandboxMode as SandboxMode
   }
   if (value.costCaps !== undefined) {
-    if (!isObject(value.costCaps)) fail(path, 'costCaps must be an object')
-    const caps: { perTask?: CostCap; perProject?: CostCap } = {}
-    for (const [key, raw] of Object.entries(value.costCaps)) {
-      if (key === 'perTask') caps.perTask = parseCap(path, 'costCaps.perTask', raw, false)
-      else if (key === 'perProject') caps.perProject = parseCap(path, 'costCaps.perProject', raw, true)
-      else fail(path, `unknown field costCaps.${key}`)
-    }
+    const caps = value.costCaps
+    checkCostCaps(caps, (_field, message) => fail(path, message))
     input.costCaps = caps
   }
   if (value.approvals !== undefined) {
@@ -141,6 +122,14 @@ export function parseProjectConfig(value: unknown, path = 'config.json'): Loaded
       fail(path, (error as Error).message.replace('.nexgent/config.json: ', ''))
     }
     input.improvement = value.improvement
+  }
+  if (value.learning !== undefined) {
+    try {
+      assertLearningConfig(value.learning)
+    } catch (error) {
+      fail(path, (error as Error).message.replace('.nexgent/config.json: ', ''))
+    }
+    input.learning = value.learning
   }
   let extraReadRoots: string[] = []
   if (value.extraReadRoots !== undefined) {

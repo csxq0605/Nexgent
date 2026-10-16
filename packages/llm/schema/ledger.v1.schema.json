@@ -9,7 +9,8 @@
     { "$ref": "#/$defs/toolCall" },
     { "$ref": "#/$defs/taskOutcome" },
     { "$ref": "#/$defs/capabilityDecision" },
-    { "$ref": "#/$defs/improvementEnd" }
+    { "$ref": "#/$defs/improvementEnd" },
+    { "$ref": "#/$defs/costWarning" }
   ],
   "$defs": {
     "nonEmptyString": { "type": "string", "minLength": 1 },
@@ -49,7 +50,8 @@
         "improverVersion": { "$ref": "#/$defs/improverVersion" },
         "improverScope": { "enum": ["user", "project"] },
         "metaJobId": { "type": "string" },
-        "comparisonArm": { "enum": ["parent", "child"] }
+        "comparisonArm": { "enum": ["parent", "child"] },
+        "learningPhase": { "enum": ["self-eval", "calibrate", "reflect", "curate"] }
       }
     },
     "capabilityVersion": { "type": "string", "pattern": "^(?:baseline|[a-f0-9]{64})$" },
@@ -75,7 +77,7 @@
             "type": { "const": "llm.request.start" },
             "purpose": { "enum": ["task", "auxiliary"] },
             "thinking": { "enum": ["off", "on"] },
-            "attempt": { "type": "integer", "minimum": 2 }
+            "attempt": { "type": "integer", "minimum": 1 }
           }
         }
       ]
@@ -95,7 +97,8 @@
             "httpStatus": { "type": "integer", "minimum": 100, "maximum": 599 },
             "finishReason": { "enum": ["stop", "tool-calls", "max-tokens", "aborted", "refusal", "pause", "error"] },
             "errorCode": { "type": "string", "pattern": "^[a-z]+(/[a-z-]+)?$" },
-            "attempt": { "type": "integer", "minimum": 2 }
+            "attempt": { "type": "integer", "minimum": 1 },
+            "usageEstimated": { "const": true }
           }
         }
       ]
@@ -213,7 +216,8 @@
               "enum": [
                 "quality-up", "cost-down", "review-preferred", "quality-down", "guard-regressed", "cost-over-cap", "no-improvement",
                 "unknown-runs", "budget-exhausted", "interrupted", "approved", "approval-denied", "load-failure", "usage-regression",
-                "component-errors", "manual"
+                "component-errors", "manual", "similar-regression", "no-similar-cases", "instance-literal", "cost-optimized",
+                "scorer-unreliable"
               ]
             },
             "trigger": { "enum": ["gate", "approval", "load-failure", "usage-regression", "manual"] },
@@ -261,6 +265,24 @@
             "candidateId": { "$ref": "#/$defs/nonEmptyString" },
             "decisionId": { "$ref": "#/$defs/nonEmptyString" },
             "childVersion": { "$ref": "#/$defs/improverVersion" }
+          }
+        }
+      ]
+    },
+    "costWarning": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["type", "scope", "level", "limit", "used", "cap", "estimated"],
+          "properties": {
+            "type": { "const": "cost.warning" },
+            "scope": { "enum": ["perTask", "perConversation", "perProject"] },
+            "level": { "enum": ["warning", "reached"] },
+            "limit": { "enum": ["maxUsd", "maxTokens", "maxRequests"] },
+            "used": { "type": "number", "minimum": 0 },
+            "cap": { "type": "number", "minimum": 0 },
+            "estimated": { "type": "boolean" }
           }
         }
       ]

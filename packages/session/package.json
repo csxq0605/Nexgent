@@ -15,7 +15,8 @@
     "./schema/material.v1.schema.json": "./schema/material.v1.schema.json",
     "./schema/deliverable.v1.schema.json": "./schema/deliverable.v1.schema.json",
     "./schema/capabilities.v1.schema.json": "./schema/capabilities.v1.schema.json",
-    "./schema/improvement.v1.schema.json": "./schema/improvement.v1.schema.json"
+    "./schema/improvement.v1.schema.json": "./schema/improvement.v1.schema.json",
+    "./schema/learning.v1.schema.json": "./schema/learning.v1.schema.json"
   },
   "files": [
     "dist",

@@ -593,9 +593,12 @@ export function isNextImproverRevision(state: ImproverActivationState, next: Imp
  * ADR 0015 (feedback checks do not expect one-time extras, reviews see the
  * feedback and every changed or removed path) replaced `adr-0014`; ADR 0016
  * (each review pair asked in both orders, reviews see the task's input files)
- * replaced `adr-0015`.
+ * replaced `adr-0015`. ADR 0019 (quality is the score on held-out practice
+ * cases, combined as `combineScore`; a cheaper tie is `cost-optimized`; an
+ * unreliable scorer blocks automatic skills) replaced `adr-0016`; it equals
+ * `LEARNING_RULES`.
  */
-export const EVALUATOR_RULES = 'adr-0016'
+export const EVALUATOR_RULES = 'adr-0019'
 
 /**
  * What decides "better" (ADR 0008 decision 5): the rules id and the

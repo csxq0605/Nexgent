@@ -16,6 +16,8 @@ import {
   DECISION_OUTCOMES,
   DECISION_REASONS,
   COMPARISON_ARMS,
+  COST_CAP_SCOPES,
+  COST_WARNING_LEVELS,
   IMPROVEMENT_COST_PHASES,
   IMPROVEMENT_JOB_KINDS,
   IMPROVEMENT_PHASES,
@@ -24,6 +26,7 @@ import {
   IMPROVER_SCOPES,
   IMPROVER_VERSION_PATTERN,
   isJsonValue,
+  LEARNING_PHASES,
   LEDGER_RECORD_TYPES,
   type JsonObject,
   type LedgerRecordType,
@@ -41,6 +44,7 @@ export const LEDGER_RECORD_DEFS: Readonly<Record<LedgerRecordType, string>> = {
   'task.outcome': 'taskOutcomeRecord',
   'capability.decision': 'capabilityDecisionRecord',
   'improvement.end': 'improvementEndRecord',
+  'cost.warning': 'costWarningRecord',
 }
 
 function record(type: LedgerRecordType, properties: Record<string, JsonObject>, required: readonly string[]): JsonObject {
@@ -63,6 +67,7 @@ function record(type: LedgerRecordType, properties: Record<string, JsonObject>, 
       improverScope: { enum: [...IMPROVER_SCOPES] },
       metaJobId: { type: 'string' },
       comparisonArm: { enum: [...COMPARISON_ARMS] },
+      learningPhase: { enum: [...LEARNING_PHASES] },
       ...properties,
     },
   }
@@ -73,6 +78,7 @@ const requestFields: Record<string, JsonObject> = {
   provider: ref('nonEmptyString'),
   endpoint: { type: 'string' },
   model: { type: 'string' },
+  attempt: ref('positiveInteger'),
 }
 
 /** The ledger record schema (draft 2020-12). */
@@ -131,7 +137,7 @@ export const ledgerRecordSchema: JsonObject = {
     },
     llmRequestStartRecord: record(
       'llm.request.start',
-      { ...requestFields, purpose: { enum: ['task', 'auxiliary'] }, thinking: { enum: ['off', 'on'] }, attempt: { type: 'integer', minimum: 2 } },
+      { ...requestFields, purpose: { enum: ['task', 'auxiliary'] }, thinking: { enum: ['off', 'on'] } },
       ['requestId', 'provider', 'endpoint', 'model', 'purpose', 'thinking'],
     ),
     llmRequestEndRecord: record(
@@ -144,7 +150,7 @@ export const ledgerRecordSchema: JsonObject = {
         httpStatus: { type: 'integer' },
         finishReason: ref('finishReason'),
         errorCode: { type: 'string' },
-        attempt: { type: 'integer', minimum: 2 },
+        usageEstimated: { const: true },
       },
       ['requestId', 'provider', 'endpoint', 'model', 'status', 'usage', 'latencyMs'],
     ),
@@ -208,6 +214,18 @@ export const ledgerRecordSchema: JsonObject = {
         childVersion: ref('improverVersion'),
       },
       ['jobId', 'trigger', 'status', 'phases'],
+    ),
+    costWarningRecord: record(
+      'cost.warning',
+      {
+        scope: { enum: [...COST_CAP_SCOPES] },
+        level: { enum: [...COST_WARNING_LEVELS] },
+        limit: { enum: ['maxUsd', 'maxTokens', 'maxRequests'] },
+        used: ref('nonNegativeNumber'),
+        cap: ref('nonNegativeNumber'),
+        estimated: { type: 'boolean' },
+      },
+      ['scope', 'level', 'limit', 'used', 'cap', 'estimated'],
     ),
   },
 }

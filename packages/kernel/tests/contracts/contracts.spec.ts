@@ -65,7 +65,7 @@ const SESSION_TYPES = [
   'fork.seed', 'subagent.start', 'subagent.end', 'team.member', 'team.task', 'team.message', 'workflow.start', 'workflow.phase', 'workflow.end',
   'capability.version', 'capability.draft', 'capability.try', 'capability.propose',
 ] as const
-const LEDGER_TYPES = ['llm.request.start', 'llm.request.end', 'tool.call', 'task.outcome', 'capability.decision', 'improvement.end'] as const
+const LEDGER_TYPES = ['llm.request.start', 'llm.request.end', 'tool.call', 'task.outcome', 'capability.decision', 'improvement.end', 'cost.warning'] as const
 describe('contracts: type-level shape', () => {
   it('llm: stream events are a closed tagged union with one terminal pair', () => {
     expectTypeOf<LLMStreamEventType>().toEqualTypeOf<

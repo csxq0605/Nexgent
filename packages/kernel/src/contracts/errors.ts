@@ -64,6 +64,13 @@ export type NexgentErrorCode =
   | 'capability/instance-literal'
   /** ADR 0012 decision 5: a proposed improver change carries a concrete value of the batch's tasks. */
   | 'improver/instance-literal'
+  // learning (ADR 0017–0019, rework C1)
+  /** An unknown handbook entry id. */
+  | 'handbook/not-found'
+  /** An unknown practice case id. */
+  | 'practice/not-found'
+  /** Background learning was asked to spend before the user acknowledged the notice (ADR 0017 decision 3). */
+  | 'learning/notice-required'
   // catch-all for programmer errors and wrapped unknowns
   | 'internal'
 

@@ -1,6 +1,6 @@
 # 数据与文件格式规范
 
-> 步骤 1 章节（目的与范围、目录布局、项目配置、会话 JSONL v1、账本记录、版本与兼容、schema 与测试）已写定；步骤 2 第 1 轮补上会话的七种新记录、材料元数据、成果元数据，并新增反馈、持久目标、压缩三节；`CapabilityBundle` 清单留标题，在步骤 4 填写。步骤 3 第 1 轮补上子会话、团队、工作流的九种新记录与 `session.start.member`、账本的 `team` 形态与 `formsUsed`、成果的成员字段，并新增子会话与成员、团队、工作流、预设、架构图存储五节（决策见 ADR 0004；类型镜像 `collaboration.ts`）。每种格式配 JSON schema 与读写测试，二者与本文同步改。本文的类型镜像在 `packages/kernel/src/contracts/`（`session.ts`、`ledger.ts`、`config.ts`、`workspace.ts`、`credentials.ts`、`tasking.ts`、`context.ts`），两处不一致时以本文为准并提契约修改 PR。来源：计划 4.10 第 1 行；分工见 `docs/plan/step-1-work-partition.md` 与 `docs/plan/step-2-work-partition.md`；loop 中各记录的写入时机见 `agent-hooks.md`。
+> 步骤 1 章节（目的与范围、目录布局、项目配置、会话 JSONL v1、账本记录、版本与兼容、schema 与测试）已写定；步骤 2 第 1 轮补上会话的七种新记录、材料元数据、成果元数据，并新增反馈、持久目标、压缩三节；`CapabilityBundle` 清单留标题，在步骤 4 填写。步骤 3 第 1 轮补上子会话、团队、工作流的九种新记录与 `session.start.member`、账本的 `team` 形态与 `formsUsed`、成果的成员字段，并新增子会话与成员、团队、工作流、预设、架构图存储五节（决策见 ADR 0004；类型镜像 `collaboration.ts`）。每种格式配 JSON schema 与读写测试，二者与本文同步改。本文的类型镜像在 `packages/kernel/src/contracts/`（`session.ts`、`ledger.ts`、`config.ts`、`workspace.ts`、`credentials.ts`、`tasking.ts`、`context.ts`），两处不一致时以本文为准并提契约修改 PR。重做 C1（ADR 0017–0019）补上用户数据目录与迁移、项目身份文件、美元费用上限与 `perConversation`、学习设置、账本的 `learningPhase` / `attempt` / `usageEstimated` 与 `cost.warning`、`turn.start.handbook`，并新增迁移、自评、练习题集、经验手册四节（类型镜像 `data-layout.ts`、`learning.ts`、`handbook.ts`；编辑工具与工具并发见 `permissions.md`）。来源：计划 4.10 第 1 行；分工见 `docs/plan/step-1-work-partition.md` 与 `docs/plan/step-2-work-partition.md`；loop 中各记录的写入时机见 `agent-hooks.md`。
 
 ## 目的与范围
 
@@ -114,6 +114,44 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 - 本机凭证文件不在项目内：`~/.nexgent/credentials.json`（Windows 为 `%USERPROFILE%\.nexgent\credentials.json`），形状见“项目配置文件”末尾。
 - `<NEXGENT_HOME>/` 下的 `config.json`、`improvers/`、`improvements/` 只由宿主写（`@nexgent/sdk` 的设置页、`@nexgent/capabilities` 的 `ImproverStore`、`@nexgent/evolve`）；它们在每个项目之外，模型的文件工具本来就够不到（`permissions.md` §路径策略与写入限制）。
 
+### 用户数据目录（ADR 0017 决策 4）
+
+重做起，会话、账本、快照、资料副本、成果快照、能力与改进记录和“在本项目始终允许”的授权放在用户数据目录 `<NEXGENT_HOME>/projects/<projectId>/`；项目里的 `.nexgent/` 只留可以和同事共享的文件（`SHARED_PROJECT_ENTRIES`）。上面的项目内布局仍然有效：迁移没完成的项目照旧在项目内读写（`resolveDataLocation`，见“迁移”）。契约 `data-layout.ts`；路径由纯函数 `resolveUserDataLayout(home)`、`resolveProjectDataLayout(home, projectId)` 算出。
+
+```text
+<project>/.nexgent/                       可以入库的部分
+├── project.json                          项目身份（ProjectIdentity）
+├── config.json                           项目配置；迁移后不再含 approvals
+├── .gitignore                            Nexgent 写入，只放行下面这些（projectGitignoreText）
+├── skills/  presets/  architectures/     同上
+<NEXGENT_HOME>/
+├── credentials.json  config.json  recent-projects.json
+├── improvers/  improvements/             ADR 0012，不变
+├── skills/                               用户技能（C2 细化库的布局）
+├── handbook/ops.jsonl                    用户级经验手册（本文“经验手册”）
+├── practice/cases/<caseId>.json          练习题（本文“练习题集”）
+└── projects/<projectId>/
+    ├── project.json                      最近一次打开的位置（ProjectDataIndex）
+    ├── grants.json                       project 范围授权（ProjectGrantsFile）
+    ├── migration.json                    迁移记录（MigrationRecord；迁移过才有）
+    ├── sessions/ ledgers/ snapshots/ materials/ outputs/ capabilities/ improvements/ improvers/
+    │                                     内部布局与上面项目内的同名目录相同（PROJECT_DATA_SUBDIRS）
+    ├── handbook/ops.jsonl                项目级经验手册
+    └── evaluations/<taskId>.json         自评（本文“自评”）
+```
+
+| 文件 | 字段 | 说明 |
+| --- | --- | --- |
+| `.nexgent/project.json` | `formatVersion: 1`、`projectId`、`createdAt`、`name?`（≤200 字符） | 第一次打开项目时写一次，此后只改 `name`。`projectId` 是 64 位小写十六进制：创建时取项目根 realpath 的 SHA-256（与 ADR 0012 的算法相同，所以之前写下的用户级记录仍对得上），之后固定，移动或改名目录不换 id、不丢数据。不含路径、授权与密钥 |
+| `<home>/projects/<id>/project.json` | `formatVersion: 1`、`projectId`、`root`、`lastOpenedAt` | 每次打开时重写，供不打开项目就能列出与清理用户数据 |
+| `<home>/projects/<id>/grants.json` | `formatVersion: 1`、`approvals: ApprovalGrant[]` | `project` 范围授权（之前在 `config.json.approvals`）；永远不在项目里，所以克隆别人的项目不会带来别人的授权 |
+
+规则：
+
+- 同一台机器上两个目录带同一个 `projectId`（复制了整个 `.nexgent/`）时，宿主发现 `ProjectDataIndex.root` 指向另一个仍然存在、身份相同的目录，就给后打开的目录生成新 id（新根 realpath 的 SHA-256）并改写它的 `project.json`，两份数据不混。
+- `.nexgent/.gitignore` 的内容是 `projectGitignoreText()`：先 `*`，再放行 `.gitignore`、`project.json`、`config.json` 与 `skills/`、`presets/`、`architectures/` 及其内容。旧数据还在项目里时（迁移前，或用户选择保留）它让 git 不收这些数据；迁移后无害。宿主不改项目根的 `.gitignore`。
+- 用户数据目录在项目之外，文件工具与 `run_code` 读写都拒绝（`permissions.md` §路径策略与写入限制）；只有宿主写。
+
 ## 项目配置文件
 
 文件：`.nexgent/config.json`，一个 JSON 对象。文件不存在等同于 `{}`；每个字段都有默认值。启动时读取一次，运行中不热加载。密钥不写在这里。
@@ -126,14 +164,16 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `thinking` | `"off" \| "on"` | `"on"` | 执行时是否开启 reasoning；`on` 是自适应 thinking，`off` 是 provider 的最低 thinking 设置（ADR 0002 决策 3 的映射；默认值按 ADR 0003 为 `on`） |
 | `effort` | `"low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"medium"` | 推理深度（`output_config.effort`） |
 | `sandboxMode` | `"read-only" \| "workspace-write" \| "full-access"` | `"workspace-write"` | 新会话的默认沙箱模式；语义见 `permissions.md` |
-| `costCaps.perTask` | `CostCap` | 无 | 每任务上限 |
+| `costCaps.perTask` | `CostCap` | 无 | 每任务上限（整棵任务树） |
+| `costCaps.perConversation` | `CostCap` | 无 | 重做 C1：每个对话（会话的全部轮）上限 |
 | `costCaps.perProject` | `CostCap` | 无 | 每项目上限 |
-| `approvals` | `ApprovalGrant[]` | `[]` | `project` 范围的审批授权；语义见 `permissions.md` |
+| `approvals` | `ApprovalGrant[]` | `[]` | `project` 范围的审批授权；语义见 `permissions.md`。迁移后移到用户数据目录的 `grants.json`，迁移没完成的项目仍在这里读写 |
 | `extraReadRoots` | `string[]` | `[]` | 额外可读的绝对目录；语义见 `permissions.md` |
-| `autoImprove` | boolean | `true` | 步骤 5：计入的反馈与失败的检查是否自动开始改进作业（ADR 0006；步骤 4 之前默认 `false`，从未生效）；显式“改进”不受它限制；改动它总要审批 |
+| `autoImprove` | boolean | `true` | 步骤 5：计入的反馈与失败的检查是否自动开始改进作业（ADR 0006；步骤 4 之前默认 `false`，从未生效）；显式“改进”不受它限制；改动它总要审批。ADR 0017 决策 3 起由 `learning.enabled` 取代：没写 `learning.enabled` 时取它的值；设置页改其中一个时两个保持相等 |
 | `capabilities` | `CapabilitiesConfig` | 见下 | 门控与回滚设置（步骤 4）；改动它总要审批（`permissions.md` §工具审批） |
 | `improvement` | `ImprovementConfig` | 见下 | 步骤 5：触发阈值、改进预算、诊断与提案的模型；ADR 0012 起另有 `shareImproverEvidence`；改动它总要审批 |
 | `maxStepsPerTurn` | integer ≥ 1 | 无（用 `agents.maxSteps`，400） | 一轮最多的模型调用次数；到了上限这一轮以 `cancelled`、`cause: "step-limit"` 结束，再发一条消息接着做（ADR 0021）；成员预设的 `maxSteps` 优先；改动它总要审批 |
+| `learning` | `LearningConfig` | 见下 | 重做 C1（ADR 0017 决策 3、ADR 0018 决策 2、8、10）：后台学习开关、美元预算、单任务自评上限、共享两个方向；改动它总要审批 |
 
 `CapabilitiesConfig`（步骤 4，契约 `capabilities.ts`，校验 `assertCapabilitiesConfig`）：
 
@@ -168,15 +208,29 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 
 步骤 6 起两份预算分开计：`budget` 只算本项目的能力改进作业（`kind` 缺省或 `capability`，不含比较臂）；元改进预算（ADR 0012 起是用户级 `improvement.meta.budget`）算时间窗内创建的、用户全部项目里的元改进作业的 `phases`（按用户级队列的 `metaJobs` 找到各自宿主项目里的 `job.json`），其中 `compare` 是父子两臂（各自的诊断、提议、试验）之和。元改进预算用尽时进行中的元改进作业以 `budget-exhausted` 结束，比较中断的臂按“未知”算，不采用子改进器。`improvement` 整个对象（含 `meta`、`shareImproverEvidence`）与用户级配置都不能由能力组件、改进器或改进作业改写（`permissions.md` §元改进会话与元改进预算）。
 
+`LearningConfig`（重做 C1，契约 `learning.ts`，校验 `assertLearningConfig`，补默认值 `resolveLearningConfig`；未知字段报 `config/invalid`，`details.field` 写 `learning.…`）：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `true`（没写时取旧字段 `autoImprove`） | 本项目是否自评并在后台学习（ADR 0017 决策 3）。用户级通知没确认之前，开着也不花钱（`mayLearn`，见“用户级配置文件”） |
+| `budget.maxUsd` | 0–1000 | `3` | 第 1、2 层学习（含自评、校准）的估算美元上限（ADR 0018 决策 10）；按价目表估算、含缓存；0 表示一分不花 |
+| `budget.windowDays` | 1–365 | `30` | 时间窗天数，按账本 `ts` 往前滚动 |
+| `selfEvalMaxUsd` | 0–5 | `0.05` | 一个任务的自评（生成评分要点加打分）上限（ADR 0018 决策 2） |
+| `useShared` | boolean | `true` | 使用用户级共享的手册条目与技能（ADR 0018 决策 8） |
+| `contribute` | boolean | `true`（没写时取 `improvement.shareImproverEvidence`） | 把本项目的条目、技能与练习题贡献到用户级（ADR 0018 决策 8） |
+
+学习的花费是带 `learningPhase` 的账本记录之和（见“账本记录”），只计入 `learning.budget`，不计入任务的费用上限。
+
 `CostCap`：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `maxTokens` | number | 输入 + 输出 token 上限；超过时当前轮以 `cost-cap` 取消 |
-| `maxRequests` | number | 模型请求次数上限（含失败的请求） |
-| `windowDays` | number | 仅 `perProject`：按账本累加的时间窗，默认 30 |
+| `maxUsd` | number 0–100000 | 重做 C1（ADR 0017 决策 5）：估算美元上限，按价目表、含缓存读写；用量里有估算值时照样计入并标明是估算。主字段，产品设置页只给它 |
+| `maxTokens` | integer | 输入 + 输出 token 上限；超过时当前轮以 `cost-cap` 取消 |
+| `maxRequests` | integer | 模型请求次数上限（含失败的请求） |
+| `windowDays` | integer | 仅 `perProject`：按账本累加的时间窗，默认 30 |
 
-计数方式与达到上限的行为见 `permissions.md` §费用上限。步骤 1 执行 `perTask`；`perProject` 只定格式，产品设置页在步骤 2。
+几个字段同时给出时，先达到的那个生效（`costCapLevel`）；任一字段达到 80%（`COST_WARNING_RATIO`）时写一次 `cost.warning`。旧文件只有 `maxTokens` / `maxRequests` 时照常读出、照常执行。两个配置读取方都用 `checkCostCaps` 校验，所以接受同样的文件。计数方式与达到上限的行为见 `permissions.md` §费用上限。
 
 示例：
 
@@ -188,9 +242,9 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
   "thinking": "on",
   "effort": "medium",
   "sandboxMode": "workspace-write",
-  "costCaps": { "perTask": { "maxRequests": 50 } },
-  "autoImprove": true,
-  "improvement": { "budget": { "maxTokens": 4000000 } }
+  "costCaps": { "perTask": { "maxUsd": 2 }, "perConversation": { "maxUsd": 10 } },
+  "improvement": { "budget": { "maxTokens": 4000000 } },
+  "learning": { "budget": { "maxUsd": 3, "windowDays": 30 }, "useShared": true }
 }
 ```
 
@@ -206,6 +260,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `improvement.meta.budget.maxTokens` | integer ≥ 1 | `6000000` | 元改进预算，计法同 `improvement.budget.maxTokens`；默认约合 6 美元，只是显示用的估算 |
 | `improvement.meta.budget.windowDays` | 1–365 | `30` | 元改进预算的时间窗 |
 | `improvement.meta.model` | string | `"claude-sonnet-5-5"` | 元诊断与元提案会话的模型，可改为 `claude-opus-5-5` |
+| `learning.noticeAcknowledgedAt` | ISO-8601 UTC? | 无 | 重做 C1（ADR 0017 决策 3）：用户确认“Nexgent 会在后台用你的任务学习、每项目每月最多花费 X 美元”的时刻。没有它，任何项目的后台学习都不花钱（`mayLearn`）；SDK `learning.acknowledge` 写入，再次确认保留第一次的时刻 |
 
 受保护字段（`GUARDED_USER_CONFIG_FIELDS`）：`improvement`。审批规则同项目级的受保护字段：模型或组件请求改动总要审批，设置页（SDK `userSettings.update`）是用户自己的操作，不弹审批；文件在项目之外，文件工具够不到。
 
@@ -247,7 +302,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `type` | 何时写 | 专有字段 |
 | --- | --- | --- |
 | `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本）、`purpose?`（步骤 5，`"task" \| "improvement"`，缺省即 `task`）、`improvement?`（步骤 5，`{ jobId, phase: "diagnose" \| "propose" }`，当且仅当 `purpose` 为 `improvement` 时出现；步骤 6 加 `improverVersion?`、`metaJobId?`、`comparisonArm?` 与元改进的两个 `phase`，ADR 0012 加 `improverScope?`，含义同账本字段） |
-| `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn` |
+| `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn`、`handbook?`（重做 C1，ADR 0018 决策 4：这一轮注入的经验手册条目 id，按检索顺序，至多 `HANDBOOK_TOP_K` 个；没注入时不写） |
 | `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示 | `turn`、`content`、`source: "user" \| "inject" \| "feedback"`、`materials?`（步骤 2） |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
 | `tool.result` | 一次工具调用返回 | `turn`、`step`、`toolCallId`、`name`、`content`、`isError`、`error?`、`meta?`、`durationMs` |
@@ -428,6 +483,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `improverScope` | `"user" \| "project"`? | ADR 0012：`improverVersion` 所在的版本线；返工后的写入方写 `user`，缺省（之前写出的记录）读作 `project` |
 | `metaJobId` | string? | 步骤 6：比较臂的记录上：所属的元改进作业 id。比较臂的 `improvementId` 是臂作业自己的 id、`improvementPhase` 是臂作业自己的阶段，所以元改进费用按 `metaJobId` 查，与普通改进作业、普通任务分开 |
 | `comparisonArm` | `"parent" \| "child"`? | 步骤 6：比较臂；与 `metaJobId` 同时出现 |
+| `learningPhase` | `"self-eval" \| "calibrate" \| "reflect" \| "curate"`? | 重做 C1（ADR 0018）：后台学习的记录（自评、外部评审校准、反思、整理）上的阶段；`taskId` 写被学习的任务。这些费用只计入 `learning.budget` |
 
 这些字段在所有记录类型上都是可选的（schema 层面）；步骤 1、2 的写入方不写它们。步骤 3 起 kernel 给一个会话写出的每条 `llm.request.*`、`tool.call`、`task.outcome` 都带 `taskId`、`memberId`、`executionForm`（契约 `AgentAttribution`）；步骤 4 起再带 `capabilityVersion`。试验运行的会话在项目的临时副本里，但它们的账本记录写进**真实项目**的账本，带 `trialId` 与 `arm`，所以费用汇总能区分试验与普通任务。
 
@@ -443,7 +499,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `model` | string | 模型 ID |
 | `purpose` | `"task" \| "auxiliary"` | 任务请求或辅助请求 |
 | `thinking` | `"off" \| "on"` | 是否请求了 reasoning |
-| `attempt` | integer ≥ 2? | provider 重试这次请求时的尝试序号（ADR 0021）；第一次尝试不写。每次尝试各有一对 start / end，`requestId` 相同 |
+| `attempt` | integer ≥ 1? | ADR 0017 决策 2、ADR 0021：provider 重试这次请求时的第几次尝试，缺省为 1（第一次尝试不写）。每次尝试各有一对 start / end，`requestId` 相同，都算一次请求、都计费 |
 
 **`llm.request.end`** —— 一次模型请求已结束（成功、失败、中止都写）。
 
@@ -456,7 +512,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `httpStatus` | number? | 收到 HTTP 响应时的状态码（含 4xx / 5xx） |
 | `finishReason` | string? | `ok` / `aborted` 时的结束原因 |
 | `errorCode` | string? | `error` 时的错误码（`NexgentErrorCode`），**不写错误消息** |
-| `attempt` | integer ≥ 2? | 与对应的 start 相同 |
+| `attempt` | integer ≥ 1? | 与对应的 start 相同 |
+| `usageEstimated` | `true`? | 重做 C1（ADR 0017 决策 5）：`usage` 是宿主估算的（provider 没报，如流中断），不是报告的；费用合计计入它并标明含估算 |
 
 读取方以 `requestId` 加 `attempt`（缺省为 1）配对 start 与 end；重试的每次尝试都算一次请求；只有 start 没有 end 的请求按 `status: "unknown"` 计（进程在流中死亡），用量按全 `"unknown"` 计。
 
@@ -518,6 +575,17 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `decisionId` | string? | 门控或批准写出的决定 |
 | `childVersion` | string? | 步骤 6，元改进作业：提出的子改进器版本 |
 
+**`cost.warning`**（重做 C1，ADR 0017 决策 5）—— 花费达到某个上限的 80%（`level: "warning"`，每个上限实例一次）或达到上限（`level: "reached"`，在本轮以 `cost-cap` 取消之前写）。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `scope` | `"perTask" \| "perConversation" \| "perProject"` | 哪个上限 |
+| `level` | `"warning" \| "reached"` | 80% 提醒或已达到 |
+| `limit` | `"maxUsd" \| "maxTokens" \| "maxRequests"` | 越线的字段；同时越线时按此顺序取第一个 |
+| `used` | number | 到此为止的花费，单位同 `limit`（美元、token、次数） |
+| `cap` | number | 该字段的值 |
+| `estimated` | boolean | `used` 是否含估算用量 |
+
 比较臂作业（步骤 6）在项目副本里结束，它们的 `improvement.end` 写在副本的账本里；真实项目的账本只有元改进作业那一条，其 `phases.compare` 是两臂之和。比较臂发出的请求记录照常写进真实项目的账本（臂会话的账本指向真实项目），带 `metaJobId` 与 `comparisonArm`。
 
 ### 示例
@@ -533,6 +601,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 {"type":"llm.request.start","ts":"2026-10-13T08:00:01.000Z","sessionId":"9a8b…","requestId":"e4f5…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","purpose":"task","thinking":"on","improvementId":"7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f","improvementPhase":"diagnose"}
 {"type":"improvement.end","ts":"2026-10-13T09:30:00.000Z","jobId":"7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f","trigger":"feedback-count","status":"no-proposal","phases":{"diagnose":{"usage":{"inputTokens":40210,"outputTokens":1830,"totalTokens":42040,"cacheReadTokens":36000,"cacheWriteTokens":2100,"reasoningTokens":900},"requestCount":6}},"improvementId":"7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f"}
 {"type":"llm.request.start","ts":"2026-10-14T08:00:01.000Z","sessionId":"b1c2…","requestId":"f6a7…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","purpose":"task","thinking":"on","improvementId":"2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a","improvementPhase":"propose","improverVersion":"v0","metaJobId":"8e9f0a1b-2c3d-4e5f-8a6b-7c8d9e0f1a2b","comparisonArm":"parent"}
+{"type":"llm.request.start","ts":"2026-10-16T08:00:01.000Z","sessionId":"c3d4…","requestId":"a8b9…","provider":"anthropic","endpoint":"https://api.anthropic.com","model":"claude-sonnet-5-5","purpose":"auxiliary","thinking":"on","taskId":"5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d","learningPhase":"self-eval","attempt":2}
+{"type":"cost.warning","ts":"2026-10-16T08:10:00.000Z","sessionId":"c3d4…","taskId":"5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d","scope":"perTask","level":"warning","limit":"maxUsd","used":1.62,"cap":2,"estimated":false}
 ```
 
 ### 必产生记录的失败路径
@@ -648,6 +718,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 4. 打平：费用比 < 1 采用（`cost-down`）；否则看评审，候选偏好多于基线且费用比 ≤ `costRatioCap` 采用（`review-preferred`），其他拒绝（`no-improvement`）。
 5. ADR 0013，只对改进作业的候选（`origin: "improvement"`，`TrialTally.similar` 存在）：上面得到采用或 `await-approval` 时，同类题上候选的确定性检查通过率低于基线则拒绝（`similar-regression`）；选择集里没有同类题（`similar: "none"`）则不自动采用，改为 `await-approval`（`no-similar-cases`，界面写明“只在原题上验证过”）。同类题上的 `unknown` 运行已在第 1 条拒绝。已被前四条拒绝的结论不变。用户任务自己提出的候选没有 `similar`，不受这一条影响。
 6. 含 `plugin` 的候选，采用结论变为 `await-approval`，理由不变。
+
+ADR 0019（纪元 `adr-0019`，`EVALUATOR_RULES` 与 `LEARNING_RULES`）给改进流程的候选加两个原因，契约在重做 C1 定下，判定由门控实现：`cost-optimized`（质量打平而更省，可以启用，但界面与报告只计入省钱、不计入进化次数，取代上面第 4 条对改进候选的 `cost-down`）；`scorer-unreliable`（评分器与外部评审一致率不足，技能不自动启用而等用户批准，第 3 层不运行；见“自评”的评分器可靠性）。质量的定义见“自评”的得分组合。用户任务自己提出的候选仍按上面六条。
 
 **同类题**是选择集里除反馈原题以外、首条消息与反馈原题首条消息的内容词 Jaccard 重合度 ≥ 0.25（`SIMILAR_CASE_MIN`）的用例（ADR 0014；提议会话没有见过）。内容词按选择集的分词（小写字母数字串，中日韩一字一词），去掉固定的功能词表（`FUNCTION_WORDS`：冠词、介词、代词、助动词，中日文助词与量词）和纯数字。选择集仍补满 `selectionCases` 个用例，只是重合度不够的不算同类题。`TrialTally.similar` 是这些用例的确定性检查每臂计数（选择集计数的子集，不含反馈检查），或 `"none"`。
 
@@ -1081,6 +1153,104 @@ The earlier part of this conversation was compacted. Summary:
 - 节点：`{ id, prompt, dependencies, preset?, tools?, model? }`；`id` 是成员名，图内唯一；依赖必须指向已有节点、不得成环，违者在保存前报可读错误，不写文件。
 - 写入：先写临时文件，再以硬链接发布到目标名（目标已存在则读回校验哈希）；文件一经写出不改。Windows 上硬链接需在验收中补测。
 
+## 迁移
+
+ADR 0017 决策 4：已有项目内数据（`.nexgent/` 下 `PROJECT_DATA_SUBDIRS` 中任一目录非空，或 `config.json` 有 `approvals`）的项目，由宿主一次性复制到用户数据目录。契约 `data-layout.ts` 的 `MigrationRecord`，文件 `<home>/projects/<projectId>/migration.json`。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `formatVersion` | `1` | |
+| `projectId` | string | 64 位小写十六进制 |
+| `from` | string | 旧 `.nexgent/` 的绝对路径 |
+| `status` | `"copying" \| "done" \| "failed"` | 进行中、复制并核对完成、放弃 |
+| `startedAt`、`finishedAt?` | 时间戳 | `finishedAt` 在 `done` / `failed` 时写 |
+| `entries` | `{ name, files, bytes }[]` | 每个复制过的子目录（`name` 取自 `PROJECT_DATA_SUBDIRS`） |
+| `grantsMoved` | integer | 从 `config.json.approvals` 移到 `grants.json` 的条数 |
+| `oldDataKept` | `true` | 迁移从不删除旧数据，写出时恒为 `true` |
+| `oldDataRemovedAt?` | 时间戳 | 用户批准删除旧数据、删除完成的时刻 |
+| `error?` | `ErrorInfo` | `failed` 的原因 |
+
+规则：
+
+1. 先写 `status: "copying"`，再逐目录复制；复制完逐文件比较大小与内容哈希，全部一致才写 `done`。
+2. 只有 `done` 之后读写才转到用户数据目录（`resolveDataLocation`）；`copying` 或 `failed` 时项目照旧用旧 `.nexgent/`，下次打开重试，不会把用户困住。
+3. `done` 之后在旧 `.nexgent/` 留 `MOVED.txt`（`MIGRATION_NOTICE_FILE`，说明数据去了哪里），写 `.gitignore`（见“用户数据目录”），把 `config.json.approvals` 移到 `grants.json` 后从 `config.json` 去掉该字段。
+4. 旧数据只在用户明确同意后删除，删除后写 `oldDataRemovedAt`。
+5. 迁移期间会话锁照常生效：有会话正在写的项目不开始迁移。
+
+## 自评
+
+ADR 0018 决策 2、ADR 0019 决策 1、6：每个根任务结束后有一份自评。先做确定性检查（不花模型费用，学习开着就总做），再按冻结的评分要点由执行模型打分；用户自己的评分权重最高。契约 `learning.ts` 的 `SelfEvaluation`，文件 `<projectdata>/evaluations/<taskId>.json`（迁移前的项目写在 `.nexgent/evaluations/`）。检查、评分要点与分数只写一次；`feedback`、`outcome`、`calibration` 可以之后补（用户后来评了分、抽中了校准）。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `formatVersion` | `1` | |
+| `rules` | `"adr-0019"` | `LEARNING_RULES`，等于 `EVALUATOR_RULES`；不同纪元的自评不混用 |
+| `projectId`、`taskId`、`sessionId` | string | `sessionId` 是根会话 |
+| `turn` | integer ≥ 1 | 评到的最后一个根轮 |
+| `createdAt` | 时间戳 | |
+| `checks` | `TaskCheck[]` | 确定性检查，同 `task.outcome.checks` |
+| `sample` | `"user-feedback" \| "check-failed" \| "random" \| "not-sampled" \| "budget-exhausted" \| "learning-off"` | 为什么打了分（或没打）：`selfEvalSample` |
+| `rubric?` | `Rubric` | 打了分才有：`{ items: { id: "r1"…, text ≤300 字符, weight?: 1–3 }[] (1–12 项), model, createdAt, generator }`。任务结束时由任务文字与输入生成一次后冻结，宿主与任何学习者都不改；`generator` 是生成指令的版本（C2 之前为 `v0`） |
+| `scores?` | `{ itemId, score: 0 \| 0.5 \| 1, note? }[]` | 每项得分（不满足、部分满足、满足） |
+| `scorer?` | string | 打分的模型，默认执行模型 |
+| `feedback?` | `{ feedbackIds, rating?: 1–5 }` | 用户对这个任务成果的反馈，最后一次评分 |
+| `score?` | number 0–1 | `combineScore` 的结果 |
+| `outcome` | `"success" \| "mixed" \| "failure" \| "unknown"` | `selfEvalOutcome` 的结果 |
+| `cost` | `LearningCost` | 生成要点与打分的花费 `{ usage, requestCount, estimatedUsd \| "unknown" }`，计入学习预算 |
+| `calibration?` | `{ model, score, agree, at, cost }` | 外部评审（默认 `claude-opus-5-5`）用同样的要点与检查打的分，`agree` 表示两边落在同一档 |
+
+**得分组合**（ADR 0019 决策 1，纪元内不变，纯函数 `combineScore`）：确定性检查通过率与加权评分要点得分（`rubricScore`，权重缺省 1）的平均；只有其一时取其一；都没有时没有得分。
+
+**结局**（`selfEvalOutcome`）：有用户评分时按评分（4–5 成功，3 一般，1–2 失败）；否则有检查失败即失败；没有评分要点得分时为 `unknown`（只过了检查不能证明做好了）；否则按得分分档：≥ 0.8 成功（`SUCCESS_SCORE`），< 0.5 失败（`FAILURE_SCORE`），其间一般（`scoreBand`）。
+
+**抽样**（ADR 0018 决策 2，`selfEvalSample`）：学习关闭为 `learning-off`；预算余额不到一个任务上限为 `budget-exhausted`；余额宽裕（≥ 10 个任务上限，`SELF_EVAL_COMFORT_FACTOR`）时每个任务都打分（记 `random`）；余额紧张时依次给有用户反馈的、有检查失败的任务打分，其余按 25%（`SELF_EVAL_RANDOM_RATE`）抽取，没抽中记 `not-sampled`。
+
+**评分器可靠性**（ADR 0019 决策 6，`scorerReliability`）：按项目与总体统计带 `calibration` 的自评，一致率 = `agree` 的比例。少于 10 次校准（`MIN_CALIBRATION_SAMPLES`）为 `insufficient`，一致率 < 80%（`SCORER_AGREEMENT_THRESHOLD`）为 `unreliable`，否则 `reliable`。`insufficient` 与 `unreliable` 一样：第 1 层照常，技能不自动启用而等用户批准，第 3 层不运行，界面写明原因。默认校准抽样比例 10%（`CALIBRATION_SAMPLE_RATE`），花费计入学习预算（`learningPhase: "calibrate"`）。
+
+## 练习题集
+
+ADR 0018 决策 3：做完的任务变成练习题，按相似任务成簇划分为训练、选择、留出；学习者只能看训练与选择。契约 `learning.ts` 的 `PracticeCase`，文件 `<NEXGENT_HOME>/practice/cases/<caseId>.json`（用户级；只收 `learning.contribute` 开着的项目的任务，和 Nexgent 自带的少量通用题）。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `formatVersion` | `1` | |
+| `id` | string | 小写 UUID v4 |
+| `source` | `"task" \| "generic"` | 用户任务，或自带的通用题 |
+| `createdAt` | 时间戳 | |
+| `prompt` | string 1–20000 字符 | 任务文字：根任务的第一条用户消息；覆盖多轮时加上到所评那轮为止的后续消息 |
+| `input?` | `{ projectId, tree }` | 任务题：输入快照在 `<projectdata>/snapshots/trees/<tree>.json`；有题引用时快照不回收 |
+| `projectId?`、`taskId?`、`sessionId?` | string | 来源 |
+| `similarityKey` | string[] | 任务的小写关键词（≤16 个，每个 ≤40 字符），相似度计算用 |
+| `clusterId` | string | 同簇是相似任务，总在同一个划分里 |
+| `split` | `"train" \| "selection" \| "holdout" \| "guard"` | 划分 |
+| `rubric?` | `Rubric` | 从自评复制的冻结评分要点 |
+| `outcome?`、`score?` | 同自评 | 原始运行的结局与得分 |
+
+划分（纯函数 `practiceSplit(clusterId, source)`，稳定）：按簇 id 的 FNV-1a 哈希模 10，0–5 训练、6–7 选择、8–9 留出，约 60/20/20，所以相似任务不会一半在留出、一半在别处；通用题恒为 `guard`，只用来防退化。反思、归纳与提案只读 `train` 与 `selection`（`isVisibleToLearners`）；`holdout` 与 `guard` 只用于测量（ADR 0019 决策 1）。
+
+## 经验手册
+
+ADR 0018 决策 4：第 1 层学习。一个条目是一条可复用的做法，带计数；它只通过追加到日志的小操作改变（新增、修改、赞、踩、状态），从不由模型整本重写。当前手册是日志的折叠（`foldHandbook`），所以回到任意时刻就是折叠一个前缀。契约 `handbook.ts`。
+
+文件：用户级 `<NEXGENT_HOME>/handbook/ops.jsonl`，项目级 `<projectdata>/handbook/ops.jsonl`；JSON Lines，只追加，`seq` 从 1 起连续。每行一个操作，公共字段 `formatVersion: 1`、`seq`、`at`、`entryId`（小写 UUID v4）、`actor`（`reflection` / `execution` / `user` / `host` / `migration`）、`source?`（`{ projectId?, taskId, sessionId? }`）、`reason?`（≤200 字符，用户的语言）：
+
+| `op` | 专有字段 | 说明 |
+| --- | --- | --- |
+| `add` | `text`（≤600 字符）、`keywords`（≤12 个小写词，每个 ≤40 字符）、`scope: "user" \| "project"`、`projectId?`、`status?: "trial" \| "active"`、`supersedes?` | 新条目，缺省 `trial`；从上下文策略迁来的条目直接 `active`。`supersedes` 列出被取代的条目，它们随之退休 |
+| `edit` | `text?`、`keywords?` | 改措辞或关键词；计数与状态不变 |
+| `upvote` / `downvote` | 无 | 一票有用 / 有害 |
+| `status` | `status: "trial" \| "active" \| "retired"` | 宿主按 `nextHandbookStatus` 追加，或用户改 |
+
+条目（折叠结果）字段：`id`、`text`、`keywords`、`scope`、`projectId?`、`status`、`helpful`、`harmful`、`sources`、`supersedes`、`supersededBy?`、`createdAt`、`updatedAt`。
+
+规则：
+
+- 状态（`nextHandbookStatus`）：试用条目得到 2 票有用（`HANDBOOK_ACTIVATE_HELPFUL`）且有害票更少时启用；有害票比有用票多 2（`HANDBOOK_RETIRE_MARGIN`）或被取代时退休；退休的条目只有用户能恢复。投票本身不改状态，宿主随后追加 `status` 操作，让日志记下每次变化的原因。
+- 检索：试用与启用的条目可被检索（`isRetrievable`），每个任务至多 5 条（`HANDBOOK_TOP_K`）；项目级条目只给本项目，用户级条目在 `learning.useShared` 开着时给所有项目。注入的条目 id 写在 `turn.start.handbook`。
+- 执行中的模型用 `handbook_mark`（只读、不审批、可并发）说一条注入的条目帮了忙还是带偏了；每个任务每个条目一票，重复的忽略。
+- 条目文字用用户的界面语言（ADR 0018 决策 11）；不得含某个任务的具体数值（沿用“候选与门控”的具体数值检查）。
+
 ## 版本与兼容
 
 | 格式 | 版本字段 | 当前 | 升级方式 |
@@ -1096,6 +1266,7 @@ The earlier part of this conversation was compacted. Summary:
 | 改进队列、作业、诊断（步骤 5） | `formatVersion` | 1 | 同上 |
 | 改进器、改进器采用修订、元诊断、改动、父子比较（步骤 6） | `formatVersion` / `format` | 1 | 同上 |
 | 用户级配置、用户级元改进队列（ADR 0012） | `version` / `formatVersion` | 1 | 同上 |
+| 项目身份、用户数据目录索引、授权、迁移记录、自评、练习题、手册操作（重做 C1） | `formatVersion` | 1 | 同上 |
 
 兼容规则：
 
@@ -1109,6 +1280,7 @@ The earlier part of this conversation was compacted. Summary:
 - **步骤 5 的 `session.start.purpose` / `improvement`、账本的 `improvementId` / `improvementPhase` 与 `improvement.end`、候选的 `origin` / `jobId`、`ReplayCaseRef.throughTurn` / `feedbackIds`、收据 `trial.feedback`、`TrialVerdict.feedbackPassRate`、快照与检查记录的 `turn`，以及 ADR 0007 的 `TrialVerdict.costBasis`、`TrialPlan.costApprovalRatio` 与设置 `capabilities.costApprovalRatio` 都在各自的 v1 内追加**；步骤 4 写出的会话、账本与能力文件照常读出。只认识步骤 4 收据类型的读取方会拒绝含 `trial.feedback` 的收据文件，与读写方同步升级（仍没有对外发布的构建）。`autoImprove` 默认值从 `false` 改为 `true`：没写这个字段的项目在步骤 5 起自动改进开启（ADR 0006）。
 - **步骤 6 的 `session.start.improvement.improverVersion` / `metaJobId` / `comparisonArm` 与两个新 `phase` 值、账本的 `improverVersion` / `metaJobId` / `comparisonArm` 与新 `improvementPhase` 值、`improvement.end` 的 `kind` / `childVersion` / `trigger: "job-count"` / 新阶段键、作业的 `kind` / `improverVersion` / `arm` / `meta` 与三个元改进状态、队列的 `metaCounted` / `metaPending`、`TrialPlan.epoch` 都在各自的 v1 内追加**；新文件（`improvers/` 下两种、元改进作业目录下三种）归入 `improvement.v1.schema.json`。步骤 5 写出的会话、账本、改进作业与能力文件照常读出（测试用步骤 5 Linux 第 2 次真实运行的行做夹具）；缺 `improverVersion` 的作业读作 `v0`，缺 `kind` 的读作 `capability`。
 - **步骤 6 返工（ADR 0012、0013）的 `improverScope`（作业、账本、`session.start.improvement`）、`MetaJobState.batch`、`ComparisonOrigin.projectId`、`TrialVerdict.similarPassRate`、决定的 `instanceLiterals`、决定原因 `similar-regression` / `no-similar-cases` / `instance-literal`、改动拒绝原因 `instance-literal`、项目配置 `improvement.shareImproverEvidence` 都在各自的 v1 内追加**；用户级队列归入 `improvement.v1.schema.json`（`$defs/userMetaQueue`）。步骤 5、6 写出的数据照常读出：缺 `improverScope` 的读作项目级旧数据；项目配置里的 `improvement.meta` 仍通过校验，但被忽略（元改进设置改在用户级配置）。评价器规则 id 换成 `adr-0013`，纪元随之改变，新旧纪元的门控结论、父子比较与报告不放在一起（ADR 0008 第 5 条）。
+- **重做 C1（ADR 0017–0019）的 `CostCap.maxUsd`、`costCaps.perConversation`、项目配置 `learning`、用户级配置 `learning`、账本的 `learningPhase` / `attempt` / `usageEstimated` 与 `cost.warning`、`turn.start.handbook`、决定原因 `cost-optimized` / `scorer-unreliable` 都在各自的 v1 内追加**；新文件归入 `learning.v1.schema.json`。旧数据照常读出：只有 token / 次数上限的配置照常执行；没有 `learning` 的配置取 `autoImprove` 与 `improvement.shareImproverEvidence` 作默认值；项目内 `.nexgent/` 的数据在迁移完成前照旧在原处读写；旧纪元（`adr-0013`–`adr-0016`）的决定与比较照常读出，但不与 `adr-0019` 的放在一起。评价器规则 id 换成 `adr-0019`，纪元随之改变。
 - **步骤 3 的九种新记录、`session.start.member` 与成果的成员字段也在 v1 内追加。** 评估结果：仍没有对外发布的构建（`main` 上的步骤 2 只供本仓库验收），读取方与写入方同步升级，所以不升版本；步骤 2 写出的会话照常读出、恢复与续写。
 
 ## schema 与读写测试
@@ -1123,6 +1295,7 @@ The earlier part of this conversation was compacted. Summary:
 | 材料元数据、成果版本元数据（步骤 2） | `packages/session/schema/material.v1.schema.json`、`deliverable.v1.schema.json` | 与会话 schema 共用 `@nexgent/session` 的求值器；写入方是 `@nexgent/tasking` |
 | 能力文件与快照（步骤 4） | `packages/session/schema/capabilities.v1.schema.json`（按 `$defs/<name>` 校验，`validateCapabilityFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/capabilities` |
 | 改进队列、作业、诊断（步骤 5）；改进器、采用修订、元诊断、改动、父子比较（步骤 6）；用户级元改进队列（ADR 0012） | `packages/session/schema/improvement.v1.schema.json`（按 `$defs/<name>` 校验，`validateImprovementFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/evolve`；改进器与采用修订由 `@nexgent/capabilities` 的 `ImproverStore` 写 |
+| 项目身份、用户数据目录索引、授权、迁移记录、自评、练习题、手册操作（重做 C1） | `packages/session/schema/learning.v1.schema.json`（按 `$defs/<name>` 校验，`validateLearningFile`，种类见 `LEARNING_FILE_DEFS`） | 与会话 schema 共用求值器；写入方由重做的各工作项决定（数据位置 K1，手册 V1，自评与练习题 G1） |
 
 schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`（账本记录除外：它允许未知可选字段以便跨版本读取）。会话 schema 的严格校验只用于写入方的追加；读取方按上面的兼容规则放过未知的可选字段，不因此截断。
 
@@ -1194,5 +1367,12 @@ schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`
 3. `findInstanceLiterals` 每条词元规则有正例与反例：`2384.13`、`2026-10` 命中；两个任务里出现的项目常量、列名与命名约定、不在来源里的值不命中；`sha256`、`v1.2.3` 不产生词元；按项目区分常量。
 4. `decideTrial` 的同类题规则表驱动测试：用户任务候选不变；同类题变差时把 `quality-up`、`cost-down`、`review-preferred`、超倍数待批准、含插件的结论都改为拒绝；没有同类题时待批准；已拒绝的结论不变。
 5. `countUserFinishedJob` / `takeUserMetaBatch` / `releaseUserMetaSlot`、`assertUserConfig` / `resolveUserConfig`、`shareImproverEvidence` 的默认值与校验、元诊断工具的 `projectId`、`EVALUATOR_RULES` 为 `adr-0013` 有运行时测试。
+
+重做 C1 新增（`@nexgent/session`、`@nexgent/kernel`、`@nexgent/llm`、`@nexgent/workspace`、`@nexgent/sdk`）：
+
+1. `learning.v1.schema.json` 的七种文件各有合格与不合格样例，发布的文件与源一致；每个枚举与 kernel 常量逐项相等；手册日志的五种操作往返并折叠。
+2. `cost.warning`、`learningPhase`、`attempt`、`usageEstimated` 以写入方的严格校验通过；手写 `ledger.v1.schema.json` 的 `learningPhase`、决定原因、`cost.warning` 枚举与 kernel 常量相等；本文账本示例行包含 `cost.warning` 与学习记录；`turn.start.handbook` 往返，旧的 `turn.start` 照常通过。
+3. 旧数据：只有 token 上限的配置、只有 `autoImprove` / `shareImproverEvidence` 的配置、没有迁移记录的项目（`resolveDataLocation`）照常读出；两个配置读取方接受并校验 `learning`、`perConversation`、`maxUsd`。
+4. `costCapLevel`、`combineScore`、`selfEvalOutcome`、`selfEvalSample`、`scorerReliability`、`practiceSplit`、`nextHandbookStatus`、`foldHandbook`、`applyTextEdits`、`numberLines`、`isConcurrentTool`、`scheduleToolCalls` 有运行时测试；`EVALUATOR_RULES` 为 `adr-0019`。
 
 契约层（`packages/kernel/tests/contracts/`）：类型级断言固定记录集合与公共字段，纯函数（`addUsage`、工具限制交集、布局解析、profile 补丁）有运行时测试。

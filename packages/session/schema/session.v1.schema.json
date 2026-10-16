@@ -1253,6 +1253,12 @@
         },
         "turn": {
           "$ref": "#/$defs/positiveInteger"
+        },
+        "handbook": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
         }
       }
     },

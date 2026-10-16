@@ -16,17 +16,104 @@ import {
   type MetaImprovementConfig,
   type MetaImprovementConfigInput,
 } from './improvement.js'
+import {
+  resolveLearningConfig,
+  type LearningConfig,
+  type LearningConfigInput,
+  type UserLearningSettings,
+} from './learning.js'
 import type { Effort, ThinkingMode } from './llm.js'
 import type { SandboxMode } from './workspace.js'
 
-/** A spending ceiling; `permissions.md` §费用上限 defines counting and what happens on reaching it. */
+/**
+ * A spending ceiling; `permissions.md` §费用上限 defines counting and what
+ * happens on reaching it. ADR 0017 decision 5 makes `maxUsd` the primary
+ * field (estimated from the price table, cache included); the token and
+ * request fields stay valid, and whichever limit is reached first applies.
+ */
 export interface CostCap {
+  /** Max estimated USD before the turn is cancelled with cause `cost-cap`; a warning is emitted at {@link COST_WARNING_RATIO}. */
+  readonly maxUsd?: number
   /** Max tokens (input + output) before the turn is cancelled with cause `cost-cap`. */
   readonly maxTokens?: number
   /** Max model requests, failed ones included. */
   readonly maxRequests?: number
   /** `perProject` only: the ledger window the totals are summed over; default 30. */
   readonly windowDays?: number
+}
+
+/** The scopes a cap can apply to (ADR 0017 decision 5). */
+export type CostCapScope = 'perTask' | 'perConversation' | 'perProject'
+
+/** Every {@link CostCapScope}. */
+export const COST_CAP_SCOPES: readonly CostCapScope[] = ['perTask', 'perConversation', 'perProject']
+
+/** `.nexgent/config.json` `costCaps`. */
+export interface CostCaps {
+  /** One root task: the turn and every subagent, team member and workflow node it starts. */
+  readonly perTask?: CostCap
+  /** One conversation (session), all its turns. */
+  readonly perConversation?: CostCap
+  /** The whole project over `windowDays`. */
+  readonly perProject?: CostCap
+}
+
+/** Share of a cap at which the host emits one `cost.warning` (ADR 0017 decision 5). */
+export const COST_WARNING_RATIO = 0.8
+
+/** Where spending stands against a cap. */
+export type CostCapLevel = 'ok' | 'warning' | 'reached'
+
+/** Every {@link CostCapLevel} a warning record may carry. */
+export const COST_WARNING_LEVELS: readonly Exclude<CostCapLevel, 'ok'>[] = ['warning', 'reached']
+
+/** Spending to compare with a cap. */
+export interface CostCapUsage {
+  readonly usd: number
+  readonly tokens: number
+  readonly requests: number
+}
+
+/**
+ * The level of a cap (pure): `reached` once any set limit is met, `warning`
+ * once any reaches {@link COST_WARNING_RATIO} of its limit, else `ok`. A
+ * limit of 0 is reached at once.
+ */
+export function costCapLevel(cap: CostCap, used: CostCapUsage): CostCapLevel {
+  const pairs: [number | undefined, number][] = [[cap.maxUsd, used.usd], [cap.maxTokens, used.tokens], [cap.maxRequests, used.requests]]
+  let level: CostCapLevel = 'ok'
+  for (const [limit, value] of pairs) {
+    if (limit === undefined) continue
+    if (value >= limit) return 'reached'
+    if (value >= limit * COST_WARNING_RATIO) level = 'warning'
+  }
+  return level
+}
+
+/** Largest `maxUsd` the validator accepts. */
+export const MAX_COST_CAP_USD = 100_000
+
+/**
+ * Validate a `costCaps` object as read from disk (pure); both config readers
+ * use it so they accept the same files. `fail` receives the field path and a
+ * message that already names it.
+ */
+export function checkCostCaps(value: unknown, fail: (field: string, message: string) => never): asserts value is CostCaps {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) fail('costCaps', 'costCaps must be an object')
+  for (const [scope, cap] of Object.entries(value as Record<string, unknown>)) {
+    const field = `costCaps.${scope}`
+    if (!(COST_CAP_SCOPES as readonly string[]).includes(scope)) fail(field, `unknown field ${field}`)
+    if (cap === null || typeof cap !== 'object' || Array.isArray(cap)) fail(field, `${field} must be an object`)
+    for (const [key, raw] of Object.entries(cap as Record<string, unknown>)) {
+      const sub = `${field}.${key}`
+      if (key === 'maxUsd') {
+        if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > MAX_COST_CAP_USD) fail(sub, `${sub} must be a number from 0 to ${MAX_COST_CAP_USD}`)
+        continue
+      }
+      if (key !== 'maxTokens' && key !== 'maxRequests' && !(scope === 'perProject' && key === 'windowDays')) fail(sub, `unknown field ${sub}`)
+      if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) fail(sub, `${sub} must be a non-negative integer`)
+    }
+  }
 }
 
 /** `.nexgent/config.json`. Every field has a default; a missing file equals `{}`. */
@@ -44,10 +131,7 @@ export interface ProjectConfig {
   /** Default sandbox mode for new sessions; default `'workspace-write'`. */
   readonly sandboxMode: SandboxMode
   /** Cost ceilings. */
-  readonly costCaps: {
-    readonly perTask?: CostCap
-    readonly perProject?: CostCap
-  }
+  readonly costCaps: CostCaps
   /** `project`-scope approval grants; default `[]`. Changing it always needs approval. */
   readonly approvals: readonly ApprovalGrant[]
   /** Absolute directories readable besides the project root (`permissions.md` §路径策略); default `[]`. */
@@ -56,12 +140,16 @@ export interface ProjectConfig {
    * Whether counted feedback and failed checks start improvement jobs on
    * their own (step 5); default `true` (decision 1). An explicit "improve"
    * is not limited by it. Changing it always needs approval.
+   * @deprecated ADR 0017 decision 3: read {@link ProjectConfig.learning}
+   * `enabled`, which takes this value as its default.
    */
   readonly autoImprove: boolean
   /** Step 5: trigger threshold, improvement budget and model (`DEFAULT_IMPROVEMENT_CONFIG`). Changing it always needs approval. */
   readonly improvement: ImprovementConfig
   /** Step 4: gate and rollback settings (`DEFAULT_CAPABILITIES_CONFIG`). Changing it always needs approval. */
   readonly capabilities: CapabilitiesConfig
+  /** ADR 0017–0019: background learning switch, dollar budget, self-eval ceiling, sharing. Changing it always needs approval. */
+  readonly learning: LearningConfig
   /**
    * Model calls one turn may make before it stops with cancel cause
    * `step-limit` (the user continues by sending another message; ADR 0021).
@@ -76,7 +164,7 @@ export interface ProjectConfig {
  * sandbox mode (`permissions.md` "始终审批"): a model must not widen its own
  * permissions, budgets or gate.
  */
-export const GUARDED_PROJECT_CONFIG_FIELDS = ['approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement', 'maxStepsPerTurn'] as const
+export const GUARDED_PROJECT_CONFIG_FIELDS = ['approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement', 'learning', 'maxStepsPerTurn'] as const
 
 /** The defaults applied over a missing or partial config file. */
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
@@ -92,15 +180,18 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
   autoImprove: true,
   capabilities: resolveCapabilitiesConfig(),
   improvement: resolveImprovementConfig(),
+  learning: resolveLearningConfig(),
 }) as ProjectConfig
 
 /** A partial config as read from disk, before defaults. */
-export type ProjectConfigInput = Partial<Omit<ProjectConfig, 'version' | 'capabilities' | 'improvement'>> & {
+export type ProjectConfigInput = Partial<Omit<ProjectConfig, 'version' | 'capabilities' | 'improvement' | 'learning'>> & {
   readonly version?: 1
   /** Validated with `assertCapabilitiesConfig`; missing fields take their defaults. */
   readonly capabilities?: CapabilitiesConfigInput
   /** Validated with `assertImprovementConfig`; missing fields take their defaults. */
   readonly improvement?: ImprovementConfigInput
+  /** Validated with `assertLearningConfig`; missing fields take their defaults (or the retired `autoImprove` / `shareImproverEvidence`). */
+  readonly learning?: LearningConfigInput
 }
 
 /**
@@ -121,6 +212,10 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
     autoImprove: input.autoImprove ?? DEFAULT_PROJECT_CONFIG.autoImprove,
     capabilities: resolveCapabilitiesConfig(input.capabilities),
     improvement: resolveImprovementConfig(input.improvement),
+    learning: resolveLearningConfig(input.learning, {
+      ...(input.autoImprove === undefined ? {} : { autoImprove: input.autoImprove }),
+      ...(input.improvement?.shareImproverEvidence === undefined ? {} : { shareImproverEvidence: input.improvement.shareImproverEvidence }),
+    }),
     ...(input.maxStepsPerTurn === undefined ? {} : { maxStepsPerTurn: input.maxStepsPerTurn }),
   }
 }
@@ -145,6 +240,8 @@ export interface UserConfig {
     /** Meta jobs over the shared improver: switch (default off), `everyJobs`, the meta budget, the model. */
     readonly meta: MetaImprovementConfig
   }
+  /** ADR 0017 decision 3: when the user was told about background learning (absent: not yet; learning waits). */
+  readonly learning: UserLearningSettings
 }
 
 /**
@@ -158,17 +255,23 @@ export const GUARDED_USER_CONFIG_FIELDS = ['improvement'] as const
 export interface UserConfigInput {
   readonly version?: 1
   readonly improvement?: { readonly meta?: MetaImprovementConfigInput }
+  readonly learning?: UserLearningSettings
 }
 
 /** Defaults of {@link UserConfig}. */
 export const DEFAULT_USER_CONFIG: UserConfig = Object.freeze({
   version: 1,
   improvement: Object.freeze({ meta: resolveMetaImprovementConfig() }),
+  learning: Object.freeze({}),
 }) as UserConfig
 
 /** Fill a validated partial user config with defaults (pure). */
 export function resolveUserConfig(input: UserConfigInput = {}): UserConfig {
-  return { version: 1, improvement: { meta: resolveMetaImprovementConfig(input.improvement?.meta) } }
+  return {
+    version: 1,
+    improvement: { meta: resolveMetaImprovementConfig(input.improvement?.meta) },
+    learning: input.learning?.noticeAcknowledgedAt === undefined ? {} : { noticeAcknowledgedAt: input.learning.noticeAcknowledgedAt },
+  }
 }
 
 /**
@@ -181,8 +284,15 @@ export function assertUserConfig(value: unknown): asserts value is UserConfigInp
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) fail('config', 'must be an object')
   const record = value as Record<string, unknown>
-  for (const key of Object.keys(record)) if (key !== 'version' && key !== 'improvement') fail(key, 'is not a known field')
+  for (const key of Object.keys(record)) if (key !== 'version' && key !== 'improvement' && key !== 'learning') fail(key, 'is not a known field')
   if (record.version !== undefined && record.version !== 1) fail('version', 'must be 1')
+  if (record.learning !== undefined) {
+    if (record.learning === null || typeof record.learning !== 'object' || Array.isArray(record.learning)) fail('learning', 'must be an object')
+    const learning = record.learning as Record<string, unknown>
+    for (const key of Object.keys(learning)) if (key !== 'noticeAcknowledgedAt') fail(`learning.${key}`, 'is not a known field')
+    const at = learning.noticeAcknowledgedAt
+    if (at !== undefined && (typeof at !== 'string' || Number.isNaN(Date.parse(at)))) fail('learning.noticeAcknowledgedAt', 'must be an ISO-8601 timestamp')
+  }
   if (record.improvement === undefined) return
   if (record.improvement === null || typeof record.improvement !== 'object' || Array.isArray(record.improvement)) fail('improvement', 'must be an object')
   const improvement = record.improvement as Record<string, unknown>
