@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-libra
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { FakeBridge, MATERIAL, ZERO_USAGE, approvalRequest, version } from '../testing/fake-bridge.js'
-import { emit, renderApp } from './helpers.js'
+import { emit, renderApp, showTab } from './helpers.js'
 
 const usage = ZERO_USAGE
 
@@ -30,13 +30,20 @@ describe('conversation', () => {
     emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
     emit(bridge, { type: 'tool.start', turn: 1, step: 1, call: { id: 'c1', name: 'write_file', arguments: JSON.stringify({ path: 'report/summary.csv', content: 'x' }) } })
     const block = screen.getByTestId('tool-block')
-    expect(block.textContent).toContain('write_file')
+    expect(block.textContent).toContain('写入')
     expect(block.textContent).toContain('report/summary.csv')
     expect(block.textContent).toContain('执行中')
     expect(block.hasAttribute('open')).toBe(false)
+    // the process is folded into one line by default
+    const toggle = screen.getByTestId('steps-toggle')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.textContent).toBe('正在处理：写入 report/summary.csv')
     emit(bridge, { type: 'tool.result', turn: 1, step: 1, callId: 'c1', name: 'write_file', content: 'Wrote 1 line', isError: false, durationMs: 1200 })
-    expect(screen.getByTestId('tool-block').textContent).toContain('完成')
-    fireEvent.click(within(screen.getByTestId('tool-block')).getByText('write_file'))
+    expect(screen.getByTestId('steps-toggle').textContent).toBe('写入 1 个文件 · 1.2 秒')
+    expect(screen.getByTestId('tool-block').textContent).toContain('1.2 秒')
+    fireEvent.click(screen.getByTestId('steps-toggle'))
+    expect(screen.getByTestId('steps').dataset['open']).toBe('true')
+    fireEvent.click(within(screen.getByTestId('tool-block')).getByText('写入'))
     expect(screen.getByTestId('tool-block').textContent).toContain('Wrote 1 line')
   })
 
@@ -84,12 +91,20 @@ describe('approvals', () => {
       const { bridge } = await renderApp()
       emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
       emit(bridge, { type: 'approval.request', turn: 1, request: approvalRequest(['once', 'session', 'project']) })
+      // the card sits in the conversation, above the composer: deny, once, always (▾ picks the scope)
       const dialog = screen.getByTestId('approval-dialog')
+      expect(dialog.closest('[data-testid="conversation"]')).not.toBeNull()
       expect(dialog.textContent).toContain('write .env')
       expect(within(dialog).getByText('允许一次')).toBeTruthy()
-      expect(within(dialog).getByText('本对话内允许')).toBeTruthy()
-      expect(within(dialog).getByText('本项目内允许')).toBeTruthy()
-      fireEvent.click(screen.getByTestId(`approval-${scope}`))
+      expect(within(dialog).getByText('总是允许')).toBeTruthy()
+      expect(screen.queryByTestId('approval-project')).toBeNull()
+      if (scope === 'once') fireEvent.click(screen.getByTestId('approval-once'))
+      else if (scope === 'session') fireEvent.click(screen.getByTestId('approval-always'))
+      else {
+        fireEvent.click(screen.getByTestId('approval-scope'))
+        expect(within(dialog).getByText('在这段对话里总是允许')).toBeTruthy()
+        fireEvent.click(screen.getByTestId('approval-project'))
+      }
       await waitFor(() => expect(bridge.callsOf('approvals.respond')).toHaveLength(1))
       expect(bridge.callsOf('approvals.respond')[0]).toEqual({ projectId: 'p1', sessionId: 's1', decision: { id: 'ap1', decision: 'allow', scope } })
       expect(screen.queryByTestId('approval-dialog')).toBeNull()
@@ -99,8 +114,8 @@ describe('approvals', () => {
   it('denies with scope once, and offers only the scopes the request allows', async () => {
     const { bridge } = await renderApp()
     emit(bridge, { type: 'approval.request', turn: 1, request: approvalRequest(['once']) })
-    expect(screen.queryByTestId('approval-session')).toBeNull()
-    expect(screen.queryByTestId('approval-project')).toBeNull()
+    expect(screen.queryByTestId('approval-always')).toBeNull()
+    expect(screen.queryByTestId('approval-scope')).toBeNull()
     fireEvent.click(screen.getByTestId('approval-deny'))
     await waitFor(() => expect(bridge.callsOf('approvals.respond')).toEqual([{ projectId: 'p1', sessionId: 's1', decision: { id: 'ap1', decision: 'deny', scope: 'once' } }]))
     emit(bridge, { type: 'approval.decision', turn: 1, decision: { id: 'ap1', decision: 'deny', scope: 'once', decidedBy: 'user' } })
@@ -125,10 +140,11 @@ describe('deliverables', () => {
     emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
     emit(bridge, { type: 'deliverable.presented', turn: 1, deliverable: version(1) })
     emit(bridge, { type: 'turn.end', turn: 1, reason: { kind: 'completed' }, usage })
+    showTab('deliverables')
     await waitFor(() => expect(screen.getByTestId('tab-deliverables').textContent).toContain('1'))
     const card = screen.getByTestId('deliverable-card')
     expect(card.textContent).toContain('summary.csv')
-    expect(card.textContent).toContain('v1')
+    expect(card.textContent).toContain('第 1 版')
     expect(card.textContent).toContain('report/summary.csv')
 
     // feedback from the card opens the form; submitting starts the feedback turn
@@ -259,7 +275,7 @@ describe('errors', () => {
     emit(bridge, { type: 'deliverable.presented', turn: 1, deliverable: { deliverableId: 'd9', version: 1, title: 'x', summary: '' } })
     expect(screen.getByTestId('render-error').textContent).toContain('界面出错了')
     expect(screen.getByTestId('sidebar')).toBeTruthy()
-    expect(screen.getByTestId('right-panel')).toBeTruthy()
+    expect(screen.getByTestId('nav-capabilities')).toBeTruthy()
   })
 
   it('reports a malformed event instead of throwing out of the listener', async () => {
@@ -274,6 +290,7 @@ describe('errors', () => {
 describe('project and materials', () => {
   it('lists materials added by path and removes them', async () => {
     const { bridge } = await renderApp()
+    showTab('materials')
     fireEvent.change(screen.getByTestId('material-path'), { target: { value: '/data/orders.csv' } })
     fireEvent.click(screen.getByTestId('add-material'))
     await waitFor(() => expect(screen.getAllByTestId('material-item')).toHaveLength(1))
@@ -298,7 +315,7 @@ describe('project and materials', () => {
     expect(screen.getByTestId('recent-projects').textContent).toContain('sales')
     fireEvent.click(within(screen.getByTestId('recent-projects')).getByText('sales'))
     await screen.findByTestId('workspace')
-    expect(screen.getByTestId('session-item').textContent).toContain('上次中断')
+    expect(screen.getByTestId('session-item').querySelector('.dot')?.getAttribute('aria-label')).toBe('上次中断')
     expect(bridge.callsOf('sessions.open')).toEqual([{ projectId: 'p1', sessionId: 's1' }])
   })
 
@@ -317,32 +334,34 @@ describe('project and materials', () => {
     await screen.findByTestId('workspace')
     expect(bridge.callsOf('projects.open')).toEqual([{ root: '/work/sales' }])
     expect(screen.getByTestId('attach-files')).toBeTruthy()
+    showTab('materials')
     fireEvent.click(screen.getByTestId('pick-files'))
     await waitFor(() => expect(screen.getAllByTestId('material-item')).toHaveLength(2))
     expect(bridge.pickFiles).toHaveBeenCalledTimes(1)
     expect(bridge.callsOf('materials.add').map(input => input.sourcePath)).toEqual(['/data/orders.csv', '/data/regions.xlsx'])
   })
 
-  it('lists the project folder in the 文件 tab, marks this conversation\'s changes and refreshes after a turn', async () => {
+  it('shows a turn\'s changed files once: folded under the turn, or on its deliverable card split from the rest', async () => {
     const bridge = new FakeBridge()
     await renderApp(bridge)
-    fireEvent.click(screen.getByTestId('tab-files'))
-    await waitFor(() => expect(screen.getAllByTestId('file-item')).toHaveLength(1))
-    expect(screen.getByTestId('file-list').textContent).toContain('orders.csv')
-    expect(bridge.callsOf('files.list')).toEqual([{ projectId: 'p1' }])
-
-    bridge.files = [...bridge.files, { path: 'report/summary.csv', size: 40, modifiedAt: '2026-10-11T08:10:00.000Z' }]
-    bridge.filesTruncated = true
     emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
     emit(bridge, { type: 'turn.files', turn: 1, changes: [{ path: 'report/summary.csv', change: 'added' }, { path: 'old.txt', change: 'deleted' }] })
     emit(bridge, { type: 'turn.end', turn: 1, reason: { kind: 'completed' }, usage })
-    await waitFor(() => expect(screen.getAllByTestId('file-item')).toHaveLength(3))
-    const items = screen.getAllByTestId('file-item').map(item => item.textContent)
-    expect(items[1]).toContain('report/summary.csv')
-    expect(items[1]).toContain('新增')
-    expect(items[2]).toContain('old.txt')
-    expect(items[2]).toContain('删除')
-    expect(screen.getByTestId('files-panel').textContent).toContain('只列出前 2 个')
+    const note = screen.getByTestId('files-note')
+    expect(note.hasAttribute('open')).toBe(false)
+    expect(note.textContent).toContain('改动了 2 个文件')
+    expect(note.textContent).toContain('新增')
+    expect(note.textContent).toContain('删除')
+
+    emit(bridge, { type: 'turn.start', turn: 2, source: 'user' })
+    emit(bridge, { type: 'turn.files', turn: 2, changes: [{ path: 'report/summary.csv', change: 'modified' }, { path: 'scratch/draft.md', change: 'added' }] })
+    emit(bridge, { type: 'deliverable.presented', turn: 2, deliverable: version(1) })
+    emit(bridge, { type: 'turn.end', turn: 2, reason: { kind: 'completed' }, usage })
+    expect(screen.getAllByTestId('files-note')).toHaveLength(1)
+    const changes = within(screen.getByTestId('deliverable-card')).getByTestId('deliverable-changes')
+    expect(changes.textContent).toContain('改动了 1 个文件')
+    expect(within(changes).getByTestId('other-changes').textContent).toContain('过程中另外改动了 1 个文件')
+    expect(within(changes).getByTestId('other-changes').textContent).toContain('scratch/draft.md')
   })
 })
 

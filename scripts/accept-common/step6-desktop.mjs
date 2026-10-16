@@ -64,6 +64,7 @@ import { FEEDBACK_TASK, runFeedbackProject, SCRIPTED_API_KEY, TERMINAL_STATES } 
 import { Step5Model, USAGE } from './step5-model.mjs'
 import { createStep5Sdk, improvementsPath, loadStep5Packages, readImprovements, scriptedEnvironment } from './step5-runtime.mjs'
 import { loadCapabilities } from './step6-headless.mjs'
+import { showTab, fillProjectPath } from './desktop-ui.mjs'
 
 const TIMEOUT = 60_000
 const WAIT = 45_000
@@ -717,7 +718,7 @@ export async function runStep6DesktopScenario(harness, work, { log = () => {} } 
       }, state => state !== 'loading', 'the workspace or the start screen', WAIT)
       await sleep(1_500)
       if ((await page.getByTestId('workspace').count()) === 0) {
-        await page.getByTestId('project-path').fill(root, { timeout: 10_000 })
+        await fillProjectPath(page, root, { timeout: 10_000 })
         await page.getByRole('button', { name: '打开', exact: true }).click()
         await page.getByTestId('workspace').waitFor({ timeout: WAIT })
       }
@@ -742,7 +743,7 @@ export async function runStep6DesktopScenario(harness, work, { log = () => {} } 
     seededId = obs.seeded.jobId
     await item('d24', async () => {
       page = await launch('first')
-      await page.getByTestId('tab-improvements').click()
+      await showTab(page, 'improvements')
       const ids = [obs.prepared.j1.id, obs.prepared.j2.id, seededId]
       await poll(() => cardsOf(page), cards => ids.every(id => cards.some(c => c.id === id)), 'the three job cards', WAIT)
       await poll(() => improverOf(page), v => v.present && v.version === obs.seeded.child, 'the improver section with the child in force', WAIT)
@@ -783,7 +784,7 @@ export async function runStep6DesktopScenario(harness, work, { log = () => {} } 
       const button = page.getByTestId('deliverable-improve').last()
       await button.waitFor({ timeout: WAIT })
       await button.click()
-      await page.getByTestId('tab-improvements').click()
+      await showTab(page, 'improvements')
       const card = await newSettledCard(page, known, 'capability')
       obs.d27.next.push({ via: 'deliverable-improve', id: card.id, card })
       // Counted by the user queue before the meta job takes its batch, so the queue is empty afterwards.
@@ -835,7 +836,7 @@ export async function runStep6DesktopScenario(harness, work, { log = () => {} } 
       obs.d26.saveShareOff = await saveProjectSharing(page, false)
       obs.d26.configOn = await configs()
       await closeSettings(page)
-      await page.getByTestId('tab-improvements').click()
+      await showTab(page, 'improvements')
       obs.d26.screenOn = await poll(() => improverOf(page), v => (v.metaStatus ?? '').includes('开') && (v.metaBudget ?? '').includes(META_SETTINGS.on.budget.toLocaleString('en-US')), 'the meta status line to read 开 with the new budget', WAIT)
       await closeApp()
 
@@ -854,7 +855,7 @@ export async function runStep6DesktopScenario(harness, work, { log = () => {} } 
       obs.d26.restartOff = await readSettings(page)
       obs.d26.configAfterRestartOff = await configs()
       await closeSettings(page)
-      await page.getByTestId('tab-improvements').click()
+      await showTab(page, 'improvements')
       obs.d26.screenOff = await poll(() => improverOf(page), v => v.metaStatus !== null, 'the meta status line', WAIT)
       obs.d26.filesAtRestart = await snapshot(pkgs, root, home)
       await closeApp()
@@ -925,7 +926,7 @@ export async function runStep6DesktopScenario(harness, work, { log = () => {} } 
       }
       await page.keyboard.press('Escape')
       await dialog.waitFor({ state: 'detached', timeout: WAIT })
-      await page.getByTestId('tab-improvements').click()
+      await showTab(page, 'improvements')
       await poll(() => cardsOf(page), cards => gates.every(g => cards.some(c => c.id === g.jobId)), 'the three gate job cards', WAIT)
       for (const gate of gates) {
         const dom = await openGateDetail(page, gate.jobId)

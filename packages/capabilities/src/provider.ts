@@ -2,17 +2,20 @@
  * The context provider of `@nexgent/capabilities` (id `capabilities`). At
  * the start of every turn it makes sure the session's function-module and
  * plugin tools are registered in its scope (so a session opened on an
- * adopted bundle gets them before its first request), and renders the
- * text-only components in force: the context policy's `instructions` (and
- * `personaSuffix`) as `# Learned practices`, team templates as
+ * adopted bundle gets them before its first request), applies the context
+ * policy's `compaction`, and renders the text-only components in force:
+ * team templates as
  * `# Team templates`, presets and workflow graphs as `# Learned
  * collaboration` (the collaboration tools take a preset by name and a graph
  * inline; the `workflow` tool cannot name a stored graph). A component that
  * fails to attach is named in `# Capability problems` instead of failing
- * the turn.
+ * the turn. A context policy's `instructions` and `personaSuffix` are no
+ * longer a system-prompt section (ADR 0018 decision 4): they reach the
+ * session through the handbook (`src/handbook/host.ts`), before the user
+ * message.
  */
 import { readFile } from 'node:fs/promises'
-import { renderHandbookInjection, type ContextContribution, type ContextProvider, type HandbookRetriever, type SystemPromptSection, type TeamTemplateSpec, type TurnContextInput } from '@nexgent/kernel'
+import type { ContextContribution, ContextProvider, SystemPromptSection, TeamTemplateSpec, TurnContextInput } from '@nexgent/kernel'
 import type { ActiveComponent, CapabilityService } from './service.js'
 
 async function collaborationLines(components: readonly ActiveComponent[]): Promise<string[]> {
@@ -47,16 +50,8 @@ export type CompactionOverrideSink = (sessionId: string, override: { readonly th
 /**
  * Build the provider.
  * @param compaction - applies a context policy's `compaction` to the session (from the next compaction check on).
- * @param retriever - the handbook retriever (V1). When it returns one, the
- *   entries retrieved for a session's first turn are injected before its
- *   user message and the context policy's text is no longer rendered as
- *   `# Learned practices`; without one the old section stays.
  */
-export function capabilitiesProvider(
-  service: CapabilityService,
-  compaction?: () => CompactionOverrideSink | undefined,
-  retriever?: () => HandbookRetriever | undefined,
-): ContextProvider {
+export function capabilitiesProvider(service: CapabilityService, compaction?: () => CompactionOverrideSink | undefined): ContextProvider {
   return {
     id: 'capabilities',
     async beginTurn(input: TurnContextInput): Promise<ContextContribution> {
@@ -69,17 +64,6 @@ export function capabilitiesProvider(
       const components = await service.components(input.sessionId)
       const policy = components.find(component => component.spec.kind === 'context-policy')
       compaction?.()?.(input.sessionId, policy?.spec.kind === 'context-policy' ? policy.spec.spec.compaction : undefined)
-      const handbook = retriever?.()
-      const inject: string[] = []
-      if (handbook !== undefined && input.turn === 1) {
-        const text = renderHandbookInjection(await handbook.retrieve({ sessionId: input.sessionId, projectRoot: input.projectRoot, text: input.text, signal: input.signal }))
-        if (text !== undefined) inject.push(text)
-      }
-      for (const component of components) {
-        if (handbook !== undefined || component.spec.kind !== 'context-policy') continue
-        const parts = [component.spec.spec.instructions, component.spec.spec.personaSuffix].filter((part): part is string => part !== undefined && part.trim() !== '')
-        if (parts.length > 0) sections.push({ id: 'capabilities-practices', title: 'Learned practices', body: parts.join('\n\n') })
-      }
       const templates = components.flatMap(component => (component.spec.kind === 'team-template' ? [component.spec.spec] : []))
       if (templates.length > 0) {
         sections.push({
@@ -92,10 +76,7 @@ export function capabilitiesProvider(
       if (collaboration.length > 0) {
         sections.push({ id: 'capabilities-collaboration', title: 'Learned collaboration', body: `Presets and workflow graphs that worked before:\n${collaboration.join('\n')}` })
       }
-      return {
-        ...(sections.length === 0 ? {} : { systemSections: sections }),
-        ...(inject.length === 0 ? {} : { inject }),
-      }
+      return sections.length === 0 ? {} : { systemSections: sections }
     },
   }
 }

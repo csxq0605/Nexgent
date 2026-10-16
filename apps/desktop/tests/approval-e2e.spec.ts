@@ -22,6 +22,7 @@ import { scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-sup
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { showTab, fillProjectPath } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -171,7 +172,7 @@ describe('desktop approval dialog over the real SDK (scripted model)', () => {
       const { app, page, consoleErrors } = await launch(home)
       try {
         await page.getByTestId('start-screen').waitFor()
-        await page.getByTestId('project-path').fill(root)
+        await fillProjectPath(page, root)
         await page.getByTestId('create-project').click()
         await page.getByTestId('workspace').waitFor()
         const store = new CapabilityStore(dir)
@@ -193,7 +194,7 @@ describe('desktop approval dialog over the real SDK (scripted model)', () => {
         await shot(page, 'step5-w4-approval-cost')
         await dialog.getByTestId('plugin-allow').click()
         await dialog.waitFor({ state: 'detached' })
-        await page.getByTestId('tab-capabilities').click()
+        await showTab(page, 'capabilities')
         await expect.poll(() => page.getByTestId('capability-current').getAttribute('data-version')).toBe(skill.version)
         expect((await store.activation()).version).toBe(skill.version)
 
@@ -212,6 +213,7 @@ describe('desktop approval dialog over the real SDK (scripted model)', () => {
         await shot(page, 'step5-w4-approval-plugin-cost')
         await dialog.getByTestId('plugin-deny').click()
         await dialog.waitFor({ state: 'detached' })
+        await showTab(page, 'capabilities')
         const denied = page.locator(`[data-testid="capability-candidate"][data-candidate="${plugin.id}"]`)
         await expect.poll(() => denied.getAttribute('data-status')).toBe('rejected')
         expect((await store.activation()).version).toBe(skill.version)

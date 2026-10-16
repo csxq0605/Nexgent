@@ -30,6 +30,7 @@ import { scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-sup
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { showTab, fillProjectPath } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -176,8 +177,9 @@ async function overflowAt1024(app: ElectronApplication, page: Page, only?: reado
   return page.evaluate(() => {
     const out: string[] = []
     if (document.documentElement.scrollWidth > window.innerWidth) out.push(`document ${document.documentElement.scrollWidth}`)
-    const middle = document.querySelector('[data-testid="member-view"]') === null ? 'conversation' : 'member-view'
-    for (const id of ['sidebar', middle, 'right-panel']) {
+    const middle = ['member-view', 'conversation', 'capabilities-page', 'settings-page'].find(id => document.querySelector(`[data-testid="${id}"]`) !== null) ?? 'conversation'
+    const onPage = middle.endsWith('-page')
+    for (const id of ['sidebar', middle, 'main']) {
       const el = document.querySelector(`[data-testid="${id}"]`)
       if (el === null) out.push(`${id} missing`)
       else if (el.scrollWidth > el.clientWidth + 1) out.push(`${id} ${el.scrollWidth}>${el.clientWidth}`)
@@ -185,8 +187,8 @@ async function overflowAt1024(app: ElectronApplication, page: Page, only?: reado
     for (const el of document.querySelectorAll('[data-testid="improvement-job"], [data-testid="improvement-detail"], [data-testid="improver-section"], [data-testid="improvement-arm"], [data-testid="improvement-change"], [data-testid="improver-rollback-projects"]')) {
       if (el.scrollWidth > el.clientWidth + 1) out.push(`${el.dataset.testid} ${el.scrollWidth}>${el.clientWidth}`)
     }
-    const right = document.querySelector('[data-testid="right-panel"]').getBoundingClientRect()
-    if (right.right > window.innerWidth + 1) out.push(`right panel ends at ${right.right}`)
+    const right = document.querySelector('[data-testid="main"]').getBoundingClientRect()
+    if (right.right > window.innerWidth + 1) out.push(`main area ends at ${right.right}`)
     return out
   })
 }
@@ -226,7 +228,7 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
       let seeded: Awaited<ReturnType<typeof seedAdoptedMetaJob>>
       try {
         await page.getByTestId('start-screen').waitFor()
-        await page.getByTestId('project-path').fill(root)
+        await fillProjectPath(page, root)
         await page.getByTestId('create-project').click()
         await page.getByTestId('workspace').waitFor()
         seeded = await seedAdoptedMetaJob(home, root)
@@ -236,7 +238,7 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
 
         // D24: the improver in force and the meta job's marker and improver version.
         await page.getByTestId('new-session').click()
-        await page.getByTestId('tab-improvements').click()
+        await showTab(page, 'improvements')
         const current = page.getByTestId('improver-current')
         await expect.poll(() => current.getAttribute('data-version'), { timeout: 20_000 }).toBe(seeded.child)
         expect(await page.getByTestId('improver-version').textContent()).toContain(seeded.child.slice(0, 12))
@@ -284,7 +286,7 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
         const store = ImproverStore.user({ home })
         expect((await store.activation()).version).toBe('v0')
         expect((await store.chain()).revisions.map(revision => [revision.type, revision.trigger, revision.reason])).toEqual([['adopt', 'meta-job', undefined], ['rollback', 'manual', '子改进器的诊断太慢']])
-        expect(await page.getByTestId('improver-revision').count()).toBe(2)
+        await expect.poll(() => page.getByTestId('improver-revision').count()).toBe(2)
         await shot(page, 'step6-r5-improver-rollback')
         await page.getByTestId('improvement-run-meta').click()
         const started = page.locator('[data-testid="improvement-job"][data-kind="meta"]').first()
@@ -323,6 +325,7 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
         expect(config.improvement?.shareImproverEvidence).toBe(false)
         expect(config.improvement?.meta).toBeUndefined()
         await page.keyboard.press('Escape')
+        await showTab(page, 'improvements')
         await expect.poll(() => page.getByTestId('improvement-meta-status').textContent()).toMatch(/开/)
         expect(consoleErrors).toEqual([])
       } finally {
@@ -333,10 +336,10 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
       ;({ app, page, consoleErrors } = await launch(home))
       try {
         await page.getByTestId('workspace').waitFor()
-        await page.getByTestId('tab-improvements').click()
+        await showTab(page, 'improvements')
         await expect.poll(() => page.getByTestId('improvement-job').count(), { timeout: 20_000 }).toBe(3)
         expect(await page.getByTestId('improver-current').getAttribute('data-version')).toBe('v0')
-        expect(await page.getByTestId('improver-revision').count()).toBe(2)
+        await expect.poll(() => page.getByTestId('improver-revision').count()).toBe(2)
         expect(await page.getByTestId('improvement-meta-budget').textContent()).toContain('15')
         await page.getByTestId('open-settings').click()
         expect(await page.getByTestId('settings-meta-enabled').isChecked()).toBe(true)

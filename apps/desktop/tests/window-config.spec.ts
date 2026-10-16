@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { menuTemplate } from '../src/main/menu.js'
-import { preferenceViolations, REQUIRED_PREFERENCES, secureWebPreferences } from '../src/main/window-config.js'
+import { keepOnClose, preferenceViolations, REQUIRED_PREFERENCES, secureWebPreferences } from '../src/main/window-config.js'
 
 describe('secureWebPreferences', () => {
   it('isolates the renderer and passes the token only through additionalArguments', () => {
@@ -57,5 +57,17 @@ describe('menuTemplate', () => {
   it('adds the app menu only on macOS', () => {
     expect(menuTemplate({ dev: false, platform: 'darwin' })[0]).toMatchObject({ role: 'appMenu' })
     expect(menuTemplate({ dev: false, platform: 'win32' })[0]).toMatchObject({ label: '文件' })
+  })
+})
+
+describe('keepOnClose', () => {
+  it('hides the window on macOS unless the app is quitting', () => {
+    expect(keepOnClose('darwin', false)).toBe(true)
+    expect(keepOnClose('darwin', true)).toBe(false)
+  })
+
+  it('lets closing the window quit elsewhere', () => {
+    expect(keepOnClose('win32', false)).toBe(false)
+    expect(keepOnClose('linux', false)).toBe(false)
   })
 })

@@ -24,6 +24,7 @@ import { listSessionIds, readSessionRecords, scriptedModelServer, type ScriptedM
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { showTab, fillProjectPath } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -172,8 +173,9 @@ async function overflowAt1024(app: ElectronApplication, page: Page): Promise<str
   return page.evaluate(() => {
     const out: string[] = []
     if (document.documentElement.scrollWidth > window.innerWidth) out.push(`document ${document.documentElement.scrollWidth}`)
-    const middle = document.querySelector('[data-testid="member-view"]') === null ? 'conversation' : 'member-view'
-    for (const id of ['sidebar', middle, 'right-panel', 'timeline']) {
+    const middle = ['member-view', 'conversation', 'capabilities-page', 'settings-page'].find(id => document.querySelector(`[data-testid="${id}"]`) !== null) ?? 'conversation'
+    const onPage = middle.endsWith('-page')
+    for (const id of ['sidebar', middle, 'main', ...(onPage ? [] : ['timeline'])]) {
       const el = document.querySelector(`[data-testid="${id}"]`)
       if (el === null) out.push(`${id} missing`)
       else if (el.scrollWidth > el.clientWidth + 1) out.push(`${id} ${el.scrollWidth}>${el.clientWidth}`)
@@ -181,8 +183,8 @@ async function overflowAt1024(app: ElectronApplication, page: Page): Promise<str
     for (const el of document.querySelectorAll('[data-testid="capability-candidate"], [data-testid="capability-current"]')) {
       if (el.scrollWidth > el.clientWidth + 1) out.push(`${el.dataset.testid} ${el.scrollWidth}>${el.clientWidth}`)
     }
-    const right = document.querySelector('[data-testid="right-panel"]').getBoundingClientRect()
-    if (right.right > window.innerWidth + 1) out.push(`right panel ends at ${right.right}`)
+    const right = document.querySelector('[data-testid="main"]').getBoundingClientRect()
+    if (right.right > window.innerWidth + 1) out.push(`main area ends at ${right.right}`)
     return out
   })
 }
@@ -218,7 +220,7 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
       let seeded: Awaited<ReturnType<typeof seedCapabilities>>
       try {
         await page.getByTestId('start-screen').waitFor()
-        await page.getByTestId('project-path').fill(root)
+        await fillProjectPath(page, root)
         await page.getByTestId('create-project').click()
         await page.getByTestId('workspace').waitFor()
         seeded = await seedCapabilities(root)
@@ -237,7 +239,7 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         await dialog.waitFor({ state: 'detached' })
 
         // D15: the adopted version and its components
-        await page.getByTestId('tab-capabilities').click()
+        await showTab(page, 'capabilities')
         const current = page.getByTestId('capability-current')
         await expect.poll(() => current.getAttribute('data-version')).toBe(seeded.bundle)
         expect(await page.getByTestId('capability-version').textContent()).toBe(seeded.bundle.slice(0, 12))
@@ -254,6 +256,7 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         await expect.poll(() => skill.getByTestId('candidate-reason').textContent()).toContain('The candidate passed fewer checks than the baseline.')
 
         // the module's cap_* tool runs in Electron (PTC on Electron's Node)
+        await page.getByTestId('page-back').click()
         const input = page.getByTestId('composer-input')
         await input.click()
         await page.keyboard.type('算一下订单合计')
@@ -268,7 +271,8 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         expect(result?.isError, result?.content).toBe(false)
         expect(result?.content).toContain('1230.5')
 
-        // 1024 px with the 能力 tab open
+        // 1024 px with the 能力 page open
+        await showTab(page, 'capabilities')
         expect(await overflowAt1024(app, page)).toEqual([])
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
 
@@ -291,7 +295,7 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
       ;({ app, page, consoleErrors } = await launch(home))
       try {
         await page.getByTestId('workspace').waitFor()
-        await page.getByTestId('tab-capabilities').click()
+        await showTab(page, 'capabilities')
         const current = page.getByTestId('capability-current')
         await expect.poll(() => current.getAttribute('data-version')).toBe('baseline')
         expect(await current.getAttribute('data-revision')).toBe('2')

@@ -25,6 +25,7 @@ import { listSessionIds, readSessionRecords, scriptedModelServer, type ScriptedM
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { showTab, fillProjectPath } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -137,8 +138,9 @@ async function overflowAt1024(app: ElectronApplication, page: Page): Promise<str
   return page.evaluate(() => {
     const out: string[] = []
     if (document.documentElement.scrollWidth > window.innerWidth) out.push(`document ${document.documentElement.scrollWidth}`)
-    const middle = document.querySelector('[data-testid="member-view"]') === null ? 'conversation' : 'member-view'
-    for (const id of ['sidebar', middle, 'right-panel', 'timeline']) {
+    const middle = ['member-view', 'conversation', 'capabilities-page', 'settings-page'].find(id => document.querySelector(`[data-testid="${id}"]`) !== null) ?? 'conversation'
+    const onPage = middle.endsWith('-page')
+    for (const id of ['sidebar', middle, 'main', ...(onPage ? [] : ['timeline'])]) {
       const el = document.querySelector(`[data-testid="${id}"]`)
       if (el === null) out.push(`${id} missing`)
       else if (el.scrollWidth > el.clientWidth + 1) out.push(`${id} ${el.scrollWidth}>${el.clientWidth}`)
@@ -146,8 +148,8 @@ async function overflowAt1024(app: ElectronApplication, page: Page): Promise<str
     for (const el of document.querySelectorAll('[data-testid="improvement-job"], [data-testid="improvement-detail"]')) {
       if (el.scrollWidth > el.clientWidth + 1) out.push(`${el.dataset.testid} ${el.scrollWidth}>${el.clientWidth}`)
     }
-    const right = document.querySelector('[data-testid="right-panel"]').getBoundingClientRect()
-    if (right.right > window.innerWidth + 1) out.push(`right panel ends at ${right.right}`)
+    const right = document.querySelector('[data-testid="main"]').getBoundingClientRect()
+    if (right.right > window.innerWidth + 1) out.push(`main area ends at ${right.right}`)
     return out
   })
 }
@@ -191,7 +193,7 @@ describe('desktop improvement jobs over the real SDK (scripted model)', () => {
       let seeded = ''
       try {
         await page.getByTestId('start-screen').waitFor()
-        await page.getByTestId('project-path').fill(root)
+        await fillProjectPath(page, root)
         await page.getByTestId('create-project').click()
         await page.getByTestId('workspace').waitFor()
         await page.getByTestId('new-session').click()
@@ -206,7 +208,7 @@ describe('desktop improvement jobs over the real SDK (scripted model)', () => {
         seeded = await seedAdoptedJob(root, sessionId!)
 
         // The tab picks the job up (job events) with its cost; the chain opens with it.
-        await page.getByTestId('tab-improvements').click()
+        await showTab(page, 'improvements')
         const job = page.locator(`[data-testid="improvement-job"][data-job="${seeded}"]`)
         await job.waitFor({ timeout: 20_000 })
         expect(await job.getAttribute('data-status')).toBe('adopted')
@@ -257,7 +259,7 @@ describe('desktop improvement jobs over the real SDK (scripted model)', () => {
       ;({ app, page, consoleErrors } = await launch(home))
       try {
         await page.getByTestId('workspace').waitFor()
-        await page.getByTestId('tab-improvements').click()
+        await showTab(page, 'improvements')
         await expect.poll(() => page.getByTestId('improvement-job').count(), { timeout: 20_000 }).toBe(2)
         expect(await page.locator(`[data-testid="improvement-job"][data-job="${seeded}"]`).getAttribute('data-status')).toBe('adopted')
         expect(await page.getByTestId('improvement-budget').textContent()).toContain('14')

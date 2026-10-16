@@ -23,6 +23,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dataDirSync, registerHome } from './data-dir.mjs'
 import { isLoopbackUrl } from './step2-runtime.mjs'
+import { closeDrawer, fillProjectPath, showTab } from './desktop-ui.mjs'
 
 // No trailing separator: on Windows a trailing backslash escapes the closing quote of the argument.
 export const DESKTOP_DIR = resolve(fileURLToPath(new URL('../../apps/desktop/', import.meta.url)))
@@ -277,7 +278,7 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     obs.window.startScreen = true
 
     step = 'D02 create project'
-    await page.getByTestId('project-path').fill(root)
+    await fillProjectPath(page, root)
     await page.getByTestId('create-project').click()
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
     await page.getByTestId('new-session').click()
@@ -294,6 +295,7 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
         return { canceled: false, filePaths: files }
       }
     }, [csv, xlsx])
+    await showTab(page, 'materials')
     await page.getByTestId('materials-panel').locator('button.primary.full').click()
     obs.materials = {
       dialogCalls: await poll(() => app.evaluate(() => globalThis.acceptDialogCalls), calls => calls.length >= 1, 'the file dialog'),
@@ -301,6 +303,7 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
       listText: await page.getByTestId('material-list').textContent(),
       onDisk: (await readdir(join(dataDirSync(root), 'materials'))).length,
     }
+    await closeDrawer(page)
 
     step = 'D04 send and stream'
     log('turn 1: send, stream, approve, present')
@@ -349,9 +352,9 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     obs.deliverable.removed = await diff.locator('[data-op="remove"]').allTextContents()
     obs.deliverable.added = await diff.locator('[data-op="add"]').allTextContents()
     await page.keyboard.press('Escape')
-    await page.getByTestId('tab-deliverables').click()
+    await showTab(page, 'deliverables')
     obs.deliverable.items = await page.getByTestId('deliverable-item').count()
-    await page.getByTestId('tab-materials').click()
+    await closeDrawer(page)
     const afterFeedback = await sessionRecords(root)
     obs.deliverable.feedback = afterFeedback.filter(r => r.type === 'feedback').map(r => ({ version: r.feedback?.version, rating: r.feedback?.rating }))
     obs.deliverable.versions = afterFeedback.filter(r => r.type === 'deliverable.presented').map(r => r.deliverable?.version)
@@ -428,7 +431,7 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
       reopened: true,
       sessions: await poll(() => page.getByTestId('session-item').count(), n => n === 1, 'one session in the sidebar'),
       turnEndLabel: await poll(() => page.getByTestId('turn-end').last().textContent(), text => text === '上次运行被中断（应用曾意外退出）', 'the interrupted marker'),
-      materials: await page.getByTestId('material-item').count(),
+      materials: await showTab(page, 'materials').then(() => page.getByTestId('material-item').count()),
       cards: await page.getByTestId('deliverable-card').count(),
       recent: await page.evaluate(() => globalThis.nexgent.invoke('projects.recent', {}).then(value => value.map(entry => entry.root), () => null)),
     }

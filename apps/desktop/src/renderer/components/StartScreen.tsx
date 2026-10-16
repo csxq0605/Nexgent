@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useAppState, useAppStore } from '../hooks.js'
 import { T, formatTime, isAbsolutePath } from '../strings.js'
 import markUrl from '../assets/mark.svg'
+import { Icon } from './Icon.js'
 
 /** No project open: recent projects plus open / create by folder. */
 export function StartScreen(): JSX.Element {
@@ -27,6 +28,7 @@ export function StartScreen(): JSX.Element {
     void open(false)
   }
 
+  const picker = store.client?.canPickDirectory === true
   return (
     <main className="start" data-testid="start-screen">
       <div className="start-card">
@@ -37,53 +39,66 @@ export function StartScreen(): JSX.Element {
             <p className="muted">{T.tagline}</p>
           </div>
         </div>
-        <h2>{T.startTitle}</h2>
-        <p className="muted">{T.startHint}</p>
-        {store.client?.canPickDirectory === true && (
-          <button type="button" className="primary" onClick={() => void store.pickAndOpenProject(false)} data-testid="pick-directory">
-            {T.chooseFolder}
-          </button>
-        )}
-        <form className="path-form" onSubmit={onSubmit}>
-          <label htmlFor="project-path">{T.folderPathLabel}</label>
-          <input
-            id="project-path"
-            data-testid="project-path"
-            value={path}
-            placeholder={T.folderPathPlaceholder}
-            onChange={event => setPath(event.target.value)}
-            spellCheck={false}
-          />
-          {invalid && <p className="field-error">{T.pathMustBeAbsolute}</p>}
-          <div className="row">
-            <button type="submit" className="primary" disabled={busy || path.trim() === ''}>
-              {T.openProject}
-            </button>
-            <button type="button" disabled={busy || path.trim() === ''} onClick={() => void open(true)} data-testid="create-project">
-              {T.createProject}
+        <div>
+          <h2>{T.startTitle}</h2>
+          <p className="start-lead muted">{T.startHint}</p>
+        </div>
+        {picker && (
+          <div className="start-actions">
+            <button type="button" className="primary" onClick={() => void store.pickAndOpenProject(false)} data-testid="pick-directory">
+              <Icon name="folder" />
+              {T.chooseFolder}
             </button>
           </div>
-        </form>
-        <h3>{T.recentProjects}</h3>
-        {state.recent.length === 0 ? (
-          <p className="muted">{T.noRecent}</p>
-        ) : (
-          <ul className="recent" data-testid="recent-projects">
-            {state.recent.map(project => (
-              <li key={project.root}>
-                <button type="button" className="recent-item" disabled={!project.exists} onClick={() => void store.openProject(project.root)} title={project.root}>
-                  <span className="recent-name">{project.name}</span>
-                  <span className="recent-root">{project.root}</span>
-                  <span className="muted small">{project.exists ? formatTime(project.lastOpenedAt) : T.missingProject}</span>
-                </button>
-                <button type="button" className="link small" onClick={() => void store.forgetProject(project.root)}>
-                  {T.forget}
-                </button>
-              </li>
-            ))}
-          </ul>
         )}
-        {state.appVersion !== undefined && <p className="muted small app-version">v{state.appVersion}</p>}
+        <details className="start-more" data-testid="start-more" open={!picker || invalid ? true : undefined}>
+          <summary>
+            <Icon name="chevronRight" className="chev" />
+            {T.startMore}
+          </summary>
+          <form className="path-form" onSubmit={onSubmit}>
+            <label htmlFor="project-path">{T.folderPathLabel}</label>
+            <input
+              id="project-path"
+              data-testid="project-path"
+              value={path}
+              placeholder={T.folderPathPlaceholder}
+              onChange={event => setPath(event.target.value)}
+              spellCheck={false}
+            />
+            {invalid && <p className="field-error">{T.pathMustBeAbsolute}</p>}
+            <div className="row">
+              <button type="submit" className={picker ? undefined : 'primary'} disabled={busy || path.trim() === ''}>
+                {T.openProject}
+              </button>
+              <button type="button" disabled={busy || path.trim() === ''} onClick={() => void open(true)} data-testid="create-project">
+                {T.createProject}
+              </button>
+            </div>
+          </form>
+        </details>
+        <div className="stack">
+          <div className="section-title">{T.recentProjects}</div>
+          {state.recent.length === 0 ? (
+            <p className="muted">{T.noRecent}</p>
+          ) : (
+            <ul className="recent" data-testid="recent-projects">
+              {state.recent.map(project => (
+                <li key={project.root}>
+                  <button type="button" className="recent-item" disabled={!project.exists} onClick={() => void store.openProject(project.root)} title={project.root}>
+                    <span className="recent-name">{project.name}</span>
+                    <span className="recent-root">{project.root}</span>
+                    <span className="faint small">{project.exists ? formatTime(project.lastOpenedAt) : T.missingProject}</span>
+                  </button>
+                  <button type="button" className="link small" onClick={() => void store.forgetProject(project.root)}>
+                    {T.forget}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {state.appVersion !== undefined && <p className="faint small app-version">v{state.appVersion}</p>}
       </div>
     </main>
   )

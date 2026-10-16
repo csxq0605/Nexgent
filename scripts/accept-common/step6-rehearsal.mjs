@@ -74,7 +74,7 @@ async function readSession(dir, id) {
       continue
     }
     if (record.type === 'session.start' && start === undefined) start = record
-    if (record.type === 'user.message' && firstUser === undefined) firstUser = record
+    if (record.type === 'user.message' && record.source !== 'inject' && firstUser === undefined) firstUser = record
     if (start !== undefined && firstUser !== undefined) break
   }
   return { file, start, firstUserMessage: firstUser?.content }

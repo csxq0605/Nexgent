@@ -25,6 +25,7 @@ import { scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-sup
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { showTab, fillProjectPath } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -173,7 +174,9 @@ async function overflowAt1024(app: ElectronApplication, page: Page): Promise<str
   return page.evaluate(() => {
     const out: string[] = []
     if (document.documentElement.scrollWidth > window.innerWidth) out.push(`document ${document.documentElement.scrollWidth}`)
-    for (const id of ['sidebar', 'conversation', 'right-panel']) {
+    const middle = ['member-view', 'conversation', 'capabilities-page', 'settings-page'].find(id => document.querySelector(`[data-testid="${id}"]`) !== null) ?? 'conversation'
+    const onPage = middle.endsWith('-page')
+    for (const id of ['sidebar', middle, 'main']) {
       const el = document.querySelector(`[data-testid="${id}"]`)
       if (el === null) out.push(`${id} missing`)
       else if (el.scrollWidth > el.clientWidth + 1) out.push(`${id} ${el.scrollWidth}>${el.clientWidth}`)
@@ -181,8 +184,8 @@ async function overflowAt1024(app: ElectronApplication, page: Page): Promise<str
     for (const el of document.querySelectorAll('[data-testid="improvement-job"], [data-testid="improvement-detail"], [data-testid="improvement-literals"], [data-testid="improvement-literal"], [data-testid="improvement-similar-rate"]')) {
       if (el.scrollWidth > el.clientWidth + 1) out.push(`${el.dataset.testid} ${el.scrollWidth}>${el.clientWidth}`)
     }
-    const right = document.querySelector('[data-testid="right-panel"]').getBoundingClientRect()
-    if (right.right > window.innerWidth + 1) out.push(`right panel ends at ${right.right}`)
+    const right = document.querySelector('[data-testid="main"]').getBoundingClientRect()
+    if (right.right > window.innerWidth + 1) out.push(`main area ends at ${right.right}`)
     return out
   })
 }
@@ -211,7 +214,7 @@ describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)',
       let { app, page, consoleErrors } = await launch(home)
       try {
         await page.getByTestId('start-screen').waitFor()
-        await page.getByTestId('project-path').fill(root)
+        await fillProjectPath(page, root)
         await page.getByTestId('create-project').click()
         await page.getByTestId('workspace').waitFor()
         const store = new CapabilityStore(dataPath(root, 'capabilities'))
@@ -245,7 +248,7 @@ describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)',
         await shot(page, 'step6-r5-approval-original-only')
         await page.keyboard.press('Escape')
         await dialog.waitFor({ state: 'detached' })
-        await page.getByTestId('tab-improvements').click()
+        await showTab(page, 'improvements')
         await expect.poll(() => page.getByTestId('improvement-job').count(), { timeout: 20_000 }).toBe(3)
 
         // Rejected before replay: the values found.
@@ -297,7 +300,7 @@ describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)',
         await dialog.waitFor({ timeout: 20_000 })
         await page.keyboard.press('Escape')
         await dialog.waitFor({ state: 'detached' })
-        await page.getByTestId('tab-improvements').click()
+        await showTab(page, 'improvements')
         await expect.poll(() => page.getByTestId('improvement-job').count(), { timeout: 20_000 }).toBe(3)
         await page.locator(`[data-testid="improvement-job"][data-job="${jobs.literal.jobId}"]`).getByTestId('improvement-trigger').click()
         await expect.poll(() => page.getByTestId('improvement-literal').count()).toBe(2)

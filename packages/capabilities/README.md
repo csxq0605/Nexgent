@@ -61,7 +61,28 @@
 | `@nexgent/context` | 压缩器 `setSessionOverride`：上下文策略的 `compaction` 只作用于该会话 | — |
 | `@nexgent/ptc` | 函数模块的每次调用在独立 PTC 进程执行 | — |
 
-上下文策略的 `instructions` 与 `personaSuffix` 以 `# Learned practices` 输出，团队模板以 `# Team templates` 输出。
+团队模板以 `# Team templates` 输出。上下文策略的 `instructions` 与 `personaSuffix` 不再进系统提示（ADR 0018 决策 4），改由经验手册在用户消息之前给出（见下节）。
+
+## 经验手册（`src/handbook/`，重做 V1，ADR 0018 决策 4、8、9）
+
+- 存储：`HandbookLog` 是一个 `ops.jsonl`，用户级在 `<NEXGENT_HOME>/handbook/`，项目级在 `<NEXGENT_HOME>/projects/<projectId>/handbook/`。只追加，`seq` 连续，追加时取 `ops.lock`；锁的进程已经不在时破锁。条目是日志的折叠（契约 `foldHandbook`）。
+- `Handbook.open({ projectRoot, home?, projectId?, learning? })` 给出一个项目看到的手册：
+  - 读项目的 `learning.useShared` 与 `learning.contribute`。`useShared` 关掉时，不读也不检索用户级条目；`contribute` 关掉时，写到用户级的新条目改记为项目级。
+  - `projectId` 取 `.nexgent/project.json`，没有这个文件时取根目录 realpath 的 SHA-256。
+- 写入只经过 `apply(changes, { actor, source?, literals? })`，一次一条小操作：
+  - `add` 先检查上限，再查重（词项 Jaccard ≥ 0.8 视为重复，不写）和具体数值（`findInstanceLiterals`，给了 `literals` 时；`taskLiteralSources` 收集一个任务的反馈与成果）。
+  - `supersedes` 显式取代旧条目，被取代的条目退休；项目级条目不能取代用户级条目。
+  - 投票在锁内检查：一个任务（`source.taskId`）对一条条目只投一票，也不能给从自己学来的条目投票（`already-voted`、`own-source`）。投票之后按 `nextHandbookStatus` 追加 `status`（`actor: host`），原因文字可以由调用方的 `statusReason` 给出（用户的语言）。
+  - 具体数值：项目级条目里，项目常量（两个以上任务给过的值）可以保留；用户级条目所有项目都会读，所以不豁免。
+  - `rollback(scope, toSeq)` 追加补偿操作，恢复文字、关键词与状态；票数不回退。
+- 检索：`retrieve(text, { k?, exclude? })` 是 BM25。英文按词切分，`snake_case` 名字也算一个词；中日韩文字取单字与相邻两字。关键词计两次。只检索试用与启用的条目，默认前 5 条。索引按日志末尾缓存，1000 条时单次检索不到 50 ms。
+- 注入：kernel 在根会话的用户轮写 `turn.start` 之前调用 `capabilityHost.handbookForTurn`（`HandbookHost.forTurn`），把选中的 id 写进 `turn.start.handbook`，把文字作为 `user.message { source: 'inject' }` 放在这一轮用户消息之前。不进系统提示。
+  - 每轮只给这个会话还没给过的条目。
+  - 会话所在能力版本的上下文策略：已采用版本的策略先迁成项目级、已启用的条目（`migrateContextPolicies`，每段或每个列表项一条，同一文字只迁一次），之后和其他条目一样检索。
+  - 不是条目的策略只给一次：试验副本里的候选版本，或会话试用的草稿。
+  - 改进会话只拿到自己试用的草稿策略。
+- `handbook_mark`：只能标记本任务给过的条目（成员会话按根会话算）。每个根会话每个条目一票，重复的忽略。票的 `source.sessionId` 是根会话。
+- 门控试验副本与比较臂副本（`isTrialCopy`：激活链第 1 条修订是复制时写的那条）只读手册：不迁移，标记不记票。
 
 ## 三个工具
 
@@ -114,6 +135,6 @@
 - `trials/` 下的 `.attempt`、`.lock`、`.log` 三种旁路文件还没写进 `data-formats.md`。
 - `test-command` 检查只认 `TEST_COMMAND_PATTERN` 里的测试命令（`@nexgent/tasking`），`node checks/verify.mjs` 这类脚本不会成为检查。
 - 回放只发用户消息，反馈轮的成果修改与审批不重放；`estimatedUsd` 只在价格表有该模型且用量各项已知时是数字。
-- 契约 `SkillSource` 没有能力包来源，能力包技能标为 `project`；`workflow` 工具不能按名字引用已采用的图；`personaSuffix` 输出在 `# Learned practices` 节，没有接到人设段落。
+- 契约 `SkillSource` 没有能力包来源，能力包技能标为 `project`；`workflow` 工具不能按名字引用已采用的图；`personaSuffix` 与 `instructions` 一样作为做法文字给出，没有接到人设段落。
 - 恢复的会话不会自动重新加载试用过的插件（重新加载要再问一次用户），需要再次 `capability_try`。
 - 能力包目录不设只读属性，完整性只靠加载时校验；Windows 上的硬链接发布与目录改名竞争还没有实跑。

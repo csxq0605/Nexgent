@@ -8,11 +8,11 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { FakeBridge, ZERO_USAGE, candidate, candidateDetail, improvementDetail, improvementJob, version } from '../testing/fake-bridge.js'
-import { emit, renderApp } from './helpers.js'
+import { emit, renderApp, showTab } from './helpers.js'
 
 async function openTab(bridge?: FakeBridge) {
   const rendered = await renderApp(bridge)
-  fireEvent.click(screen.getByTestId('tab-improvements'))
+  showTab('improvements')
   await waitFor(() => expect(screen.getByTestId('improvement-panel')).toBeTruthy())
   return rendered
 }
@@ -180,9 +180,10 @@ describe('improvement jobs in the right panel', () => {
     expect(button.disabled).toBe(true)
     expect(button.textContent).toBe('正在开始改进…')
     release()
-    // Started: the card says so and the 改进 tab opens on the new job.
-    await waitFor(() => expect(screen.getByTestId('deliverable-improve-started').textContent).toContain('已开始改进'))
-    expect((screen.getByTestId('deliverable-improve') as HTMLButtonElement).disabled).toBe(false)
+    // Started: the card says so and stays in the conversation; 查看进度 opens the job on the 能力 page.
+    await waitFor(() => expect(screen.getByTestId('deliverable-improve-started').textContent).toContain('已开始一次改进'))
+    expect(screen.getByTestId('conversation')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('deliverable-improve-show'))
     await waitFor(() => expect(screen.getByTestId('improvement-panel')).toBeTruthy())
     await waitFor(() => expect(screen.getAllByTestId('improvement-job').length).toBe(bridge.improvements.jobs.length))
   })
@@ -199,7 +200,7 @@ describe('improvement jobs in the right panel', () => {
     fireEvent.click(screen.getByTestId('deliverable-improve'))
     await waitFor(() => expect(screen.getAllByTestId('notice').length).toBe(1))
     await waitFor(() => expect((screen.getByTestId('deliverable-improve') as HTMLButtonElement).disabled).toBe(false))
-    expect(screen.getByTestId('deliverable-improve').textContent).toBe('改进')
+    expect(screen.getByTestId('deliverable-improve').textContent).toBe('改进做法')
     expect(screen.queryByTestId('deliverable-improve-started')).toBeNull()
   })
 })

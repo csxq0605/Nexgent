@@ -8,7 +8,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { CapabilityDecision, TrialVerdict } from '@nexgent/kernel'
 import { FakeBridge, candidate, candidateDetail, improvementDetail, improvementJob } from '../testing/fake-bridge.js'
-import { renderApp } from './helpers.js'
+import { renderApp, showTab } from './helpers.js'
 
 const ts = '2026-10-14T08:00:00.000Z'
 const decision = (extra: Record<string, unknown>): CapabilityDecision =>
@@ -25,7 +25,7 @@ function bridgeWith(status: 'rejected' | 'awaiting-approval', decisions: Capabil
 
 async function openJob(bridge: FakeBridge) {
   await renderApp(bridge)
-  fireEvent.click(screen.getByTestId('tab-improvements'))
+  showTab('improvements')
   await waitFor(() => expect(screen.getByTestId('improvement-panel')).toBeTruthy())
   fireEvent.click(screen.getByTestId('improvement-status'))
   await screen.findByTestId('improvement-gate')
@@ -66,7 +66,7 @@ describe('gate conclusions of ADR 0013', () => {
     const bridge = new FakeBridge()
     bridge.capabilities = { ...bridge.capabilities, candidates: [candidate({ id: 'c-2', status: 'rejected', decision: { id: 'd-2', outcome: 'rejected', reason: 'instance-literal', detail: '含 48213.55' } })] }
     await renderApp(bridge)
-    fireEvent.click(screen.getByTestId('tab-capabilities'))
+    showTab('capabilities')
     fireEvent.click(await screen.findByTestId('candidate-status'))
     await waitFor(() => expect(screen.getByTestId('candidate-reason').textContent).toContain('回放前已拒绝：候选含有原题的具体数值'))
   })
@@ -77,7 +77,7 @@ describe('gate conclusions of ADR 0013', () => {
     const verdict = { outcome: 'reject', reason: 'no-improvement', passRate: { candidate: 2 / 3, baseline: 2 / 3 }, similarPassRate: { candidate: 1, baseline: 1 }, feedbackPassRate: { candidate: 0, baseline: 0 }, costRatio: 1.358, decidedByReview: false } as TrialVerdict
     bridge.evidence['c-3'] = { receipts: [], decisions: [decision({ id: 'd-3', candidateId: 'c-3', reason: 'no-improvement', verdict })] }
     await renderApp(bridge)
-    fireEvent.click(screen.getByTestId('tab-capabilities'))
+    showTab('capabilities')
     fireEvent.click(await screen.findByTestId('candidate-status'))
     await waitFor(() => expect(screen.getByTestId('candidate-reason').textContent).toContain(
       '原因：没有改进。检查通过率 候选 67% / 基线 67%；同类题通过率：候选 100%，现在 100%；反馈检查（单独记）候选 0% / 基线 0%；费用是基线的 1.36 倍。',

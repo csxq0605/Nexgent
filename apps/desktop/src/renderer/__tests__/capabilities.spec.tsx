@@ -13,13 +13,13 @@ import type { CandidateDetail } from '@nexgent/sdk'
 import type { TrialCost, TrialVerdict } from '@nexgent/kernel'
 import { BUNDLE, FakeBridge, candidate, pluginInfo } from '../testing/fake-bridge.js'
 import { PROPOSED_POLL_WINDOW_MS, TRIAL_POLL_MS } from '../store.js'
-import { emit, renderApp } from './helpers.js'
+import { emit, renderApp, showTab } from './helpers.js'
 
 const capabilityEvent = (type: 'capability.version' | 'capability.candidate', extra: Record<string, unknown>) => ({ type, sessionId: undefined, ...extra })
 
 async function openTab(bridge?: FakeBridge) {
   const rendered = await renderApp(bridge)
-  fireEvent.click(screen.getByTestId('tab-capabilities'))
+  showTab('capabilities')
   await waitFor(() => expect(screen.getByTestId('capability-panel')).toBeTruthy())
   return rendered
 }
@@ -169,7 +169,7 @@ describe('plugin package approval', () => {
     fireEvent.click(within(dialog).getByTestId('plugin-deny'))
     await waitFor(() => expect(screen.queryByTestId('plugin-approval-dialog')).toBeNull())
     expect(bridge.callsOf('capabilities.approve')).toEqual([{ projectId: 'p1', candidateId: 'c-9', decision: 'deny' }])
-    fireEvent.click(screen.getByTestId('tab-capabilities'))
+    showTab('capabilities')
     await waitFor(() => expect(within(screen.getByTestId('capability-candidate')).getByTestId('candidate-status').textContent).toBe('未采用'))
     expect(screen.getByTestId('capability-current').dataset['version']).toBe('baseline')
   })
@@ -201,7 +201,7 @@ describe('plugin package approval', () => {
     const dialog = await screen.findByTestId('plugin-approval-dialog')
     fireEvent.click(within(dialog).getByLabelText('关闭'))
     expect(screen.queryByTestId('plugin-approval-dialog')).toBeNull()
-    fireEvent.click(screen.getByTestId('tab-capabilities'))
+    showTab('capabilities')
     await waitFor(() => expect(screen.getByTestId('capability-panel')).toBeTruthy())
     // A later refresh does not reopen it by itself.
     emit(bridge, capabilityEvent('capability.candidate', { candidate: bridge.capabilities.candidates[0] }))

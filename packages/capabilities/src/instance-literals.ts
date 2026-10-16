@@ -98,10 +98,26 @@ export async function jobLiteralSources(layout: WorkspaceLayout, jobId: string, 
   }
   addSession(job.request?.sessionId)
   if (job.request?.note !== undefined && job.request.note !== '') sources.push({ kind: 'feedback', ref: `request:${job.id}`, text: job.request.note, ...project })
+  sources.push(...await sessionLiteralSources(layout, sessions, id => feedbackIds.has(id), options))
+  return sources
+}
+
+/**
+ * The sources of a task (ADR 0013 decision 2 for handbook entries, ADR
+ * 0018 decision 4): the feedback comments of its root session and the text
+ * files of every deliverable version presented there.
+ */
+export async function taskLiteralSources(layout: WorkspaceLayout, sessionId: string, options: { readonly projectId?: string } = {}): Promise<InstanceLiteralSource[]> {
+  return sessionLiteralSources(layout, [sessionId], () => true, options)
+}
+
+async function sessionLiteralSources(layout: WorkspaceLayout, sessions: readonly string[], counts: (feedbackId: string) => boolean, options: { readonly projectId?: string }): Promise<InstanceLiteralSource[]> {
+  const project = options.projectId === undefined ? {} : { projectId: options.projectId }
+  const sources: InstanceLiteralSource[] = []
   const seenVersions = new Set<string>()
   for (const sessionId of sessions) {
     for (const record of await sessionRecords(layout, sessionId)) {
-      if (record.type === 'feedback' && feedbackIds.has(record.feedback.id)) {
+      if (record.type === 'feedback' && counts(record.feedback.id)) {
         sources.push({ kind: 'feedback', ref: `feedback:${record.feedback.id}`, text: record.feedback.comment, ...project })
       } else if (record.type === 'deliverable.presented') {
         const { deliverableId, version, files } = record.deliverable

@@ -1,8 +1,9 @@
 /**
  * The `@nexgent/capabilities` plugin: provides `ctx.capabilities` (the
  * loader and the project's capability store) and `ctx.capabilityHost` (the
- * kernel's step-4 seam over the same loader), registers the three
- * capability tools and the `capabilities` context provider, and runs the
+ * kernel's step-4 seam over the same loader, with the handbook entries a
+ * root turn is given), registers the three capability tools, `handbook_mark`
+ * and the `capabilities` context provider, and runs the
  * gate's host side (`ctx.capabilityGate`): the usage-regression watch before
  * every new root session and after every root turn, automatic trials of new
  * candidates, and the recovery of interrupted trials.
@@ -10,6 +11,7 @@
 import type { Context, SessionRecord } from '@nexgent/kernel'
 import { capabilitiesProvider, type CompactionOverrideSink } from './provider.js'
 import { CapabilityService, type CapabilitiesConfig } from './service.js'
+import { HandbookHost } from './handbook/host.js'
 import { capabilityTools } from './tools.js'
 import { GateHost, type GateHostConfig } from './trial/host.js'
 
@@ -25,6 +27,12 @@ export const CapabilitiesPlugin = {
     const service = new CapabilityService(ctx, ctx.workspace.layout.capabilities, ctx.sandbox, config ?? {})
     const gate = new GateHost(ctx, ctx.workspace.layout, service.store, config?.trial ?? {})
     const host = service.host()
+    const readRecords = async (sessionId: string): Promise<readonly SessionRecord[]> => {
+      const store = ctx.get('session')
+      return store === undefined ? [] : (await store.readAll(sessionId)).records
+    }
+    const home = config?.home ?? config?.trial?.env?.NEXGENT_HOME
+    const handbook = new HandbookHost(service, { projectRoot: ctx.workspace.layout.root, readRecords, ...(typeof home === 'string' && home !== '' ? { home } : {}) })
     if (config?.trial?.entry !== undefined) service.setTrialStarter(async candidateId => (await gate.trial(candidateId)).candidateId)
     ctx.provide('capabilities', service)
     ctx.provide('capabilityGate', gate)
@@ -35,6 +43,7 @@ export const CapabilitiesPlugin = {
         await gate.watchUsage()
         return host.current()
       },
+      handbookForTurn: input => handbook.forTurn(input),
       attach: async input => {
         const attachment = await host.attach(input)
         if (input.member === undefined) gate.followWhenOpen(input.sessionId)
@@ -42,10 +51,6 @@ export const CapabilitiesPlugin = {
       },
     })
     void gate.recover().catch(() => undefined)
-    const readRecords = async (sessionId: string): Promise<readonly SessionRecord[]> => {
-      const store = ctx.get('session')
-      return store === undefined ? [] : (await store.readAll(sessionId)).records
-    }
     // A propose session in a snapshot copy writes its session to the real project, which holds the job.
     const sessionsDir = (): string | undefined => {
       const dir = (ctx.get('session') as { readonly sessionsDir?: unknown } | undefined)?.sessionsDir
@@ -55,6 +60,8 @@ export const CapabilitiesPlugin = {
       for (const tool of capabilityTools(service, readRecords, { sessionsDir })) {
         scope.effect(() => scope.tools.register(tool), `tools.register(${tool.definition.name})`)
       }
+      const mark = handbook.markTool()
+      scope.effect(() => scope.tools.register(mark), `tools.register(${mark.definition.name})`)
     })
     ctx.inject(['context'], scope => {
       const compactor = scope.context.compactor as { setSessionOverride?: CompactionOverrideSink } | undefined

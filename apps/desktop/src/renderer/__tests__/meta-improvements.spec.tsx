@@ -9,11 +9,11 @@ import type { ComparisonArmResult } from '@nexgent/kernel'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { CHILD_VERSION, FakeBridge, armResult, changeRecord, comparison, improvementDetail, improvementJob, metaDiagnosis, metaJob } from '../testing/fake-bridge.js'
-import { emit, emitApp, renderApp } from './helpers.js'
+import { emit, emitApp, renderApp, showTab } from './helpers.js'
 
 async function openTab(bridge?: FakeBridge) {
   const rendered = await renderApp(bridge)
-  fireEvent.click(screen.getByTestId('tab-improvements'))
+  showTab('improvements')
   await waitFor(() => expect(screen.getByTestId('improvement-panel')).toBeTruthy())
   return rendered
 }

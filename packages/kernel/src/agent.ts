@@ -67,7 +67,7 @@ import { renderFeedbackPrompt, type FeedbackEntry, type TaskingService, type Tur
 import type { Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry } from './contracts/tools.js'
 import type { SandboxMode, Workspace } from './contracts/workspace.js'
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
-import type { AttachedComponent, CapabilityHost, ComponentUseRef, ImprovementRun, ImprovementSignals, TaskRecorder } from './capability-hooks.js'
+import type { AttachedComponent, CapabilityHost, ComponentUseRef, HandbookTurnSelection, ImprovementRun, ImprovementSignals, TaskRecorder } from './capability-hooks.js'
 import {
   approvalSubject,
   decideToolPolicy,
@@ -1084,7 +1084,8 @@ export class Agent {
     this.stats.turns += 1
     this.openTurn = turn
     try {
-      await this.append({ type: 'turn.start', turn })
+      const handbook = await this.handbookForTurn(services.capabilityHost, turn, source, text)
+      await this.append({ type: 'turn.start', turn, ...(handbook === undefined || handbook.ids.length === 0 ? {} : { handbook: [...handbook.ids] }) })
       this.emit({ type: 'turn.start', sessionId: this.sessionId, turn })
       this.componentUse.turn.clear()
       if (this.member === undefined) this.init.tree.beginRootTurn()
@@ -1096,6 +1097,10 @@ export class Agent {
       }
       if (services.context !== undefined && before !== undefined) {
         await this.beginContext(services.context, before, { turn, text, source, materialIds, signal })
+      }
+      if (handbook !== undefined) {
+        await this.append({ type: 'user.message', turn, content: handbook.text, source: 'inject' })
+        this.messages.push({ role: 'user', content: handbook.text })
       }
       await this.append({ type: 'user.message', turn, content: text, source, ...(materialIds.length > 0 ? { materials: materialIds } : {}) })
       this.messages.push({ role: 'user', content: text })
@@ -1169,6 +1174,21 @@ export class Agent {
       return (await tasking.materials.list()).length > 0
     } catch {
       return false
+    }
+  }
+
+  /**
+   * ADR 0018 decision 4: what the handbook gives a root session's user turn
+   * (not members or feedback turns; the host decides per session). A failure
+   * gives the turn nothing.
+   */
+  private async handbookForTurn(host: CapabilityHost | undefined, turn: number, source: 'user' | 'feedback', text: string): Promise<HandbookTurnSelection | undefined> {
+    if (host?.handbookForTurn === undefined || this.member !== undefined || source !== 'user') return undefined
+    try {
+      const selection = await host.handbookForTurn({ sessionId: this.sessionId, turn, text })
+      return selection === undefined || selection.text.trim() === '' ? undefined : selection
+    } catch {
+      return undefined
     }
   }
 

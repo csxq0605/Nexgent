@@ -83,6 +83,8 @@ export type {
   CheckFailureSignal,
   ComponentCallInput,
   ComponentUseRef,
+  HandbookTurnInput,
+  HandbookTurnSelection,
   ImprovementRun,
   ImprovementSignals,
   TaskBeginInput,
