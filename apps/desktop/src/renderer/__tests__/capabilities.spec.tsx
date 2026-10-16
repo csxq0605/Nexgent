@@ -7,12 +7,12 @@
  * arm's cost and the quality comparison, without the plugin wording);
  * manual rollback.
  */
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { CandidateDetail } from '@nexgent/sdk'
 import type { TrialCost, TrialVerdict } from '@nexgent/kernel'
 import { BUNDLE, FakeBridge, candidate, pluginInfo } from '../testing/fake-bridge.js'
-import { TRIAL_POLL_MS } from '../store.js'
+import { PROPOSED_POLL_WINDOW_MS, TRIAL_POLL_MS } from '../store.js'
 import { emit, renderApp } from './helpers.js'
 
 const capabilityEvent = (type: 'capability.version' | 'capability.candidate', extra: Record<string, unknown>) => ({ type, sessionId: undefined, ...extra })
@@ -42,6 +42,23 @@ describe('capability versions in the right panel', () => {
     await new Promise(resolve => setTimeout(resolve, TRIAL_POLL_MS + 500))
     expect(bridge.callsOf('capabilities.list').length).toBe(after)
   }, 3 * TRIAL_POLL_MS)
+
+  it('re-reads the list after a fresh proposal, so a gate that starts on its own when the task ends shows; an old proposal is left alone', async () => {
+    const bridge = new FakeBridge()
+    const old = new Date(Date.now() - PROPOSED_POLL_WINDOW_MS - 60_000).toISOString()
+    bridge.capabilities = { ...bridge.capabilities, candidates: [candidate({ id: 'c-8', status: 'proposed', proposedAt: new Date().toISOString() }), candidate({ id: 'c-7', status: 'proposed', proposedAt: old })] }
+    await openTab(bridge)
+    bridge.capabilities = { ...bridge.capabilities, candidates: [candidate({ id: 'c-8', status: 'trialing', trialId: 'abcdef12-0000' }), candidate({ id: 'c-7', status: 'proposed', proposedAt: old })] }
+    await waitFor(() => expect(screen.getAllByTestId('candidate-status')[0]!.textContent).toBe('门控试验中'), { timeout: TRIAL_POLL_MS + 3_000 })
+
+    const quiet = new FakeBridge()
+    quiet.capabilities = { ...quiet.capabilities, candidates: [candidate({ id: 'c-7', status: 'proposed', proposedAt: old })] }
+    cleanup()
+    await openTab(quiet)
+    const reads = quiet.callsOf('capabilities.list').length
+    await new Promise(resolve => setTimeout(resolve, TRIAL_POLL_MS + 500))
+    expect(quiet.callsOf('capabilities.list').length).toBe(reads)
+  }, 4 * TRIAL_POLL_MS)
 
   it('shows the baseline of a fresh project and no rollback', async () => {
     await openTab()

@@ -100,6 +100,9 @@ const INITIAL: AppState = {
 /** How often the capability list is re-read while a gate trial runs. */
 export const TRIAL_POLL_MS = 5_000
 
+/** A candidate proposed this recently may have its gate started on its own when the task ends (in another process, with no event): keep re-reading. */
+export const PROPOSED_POLL_WINDOW_MS = 10 * 60_000
+
 export class AppStore {
   private state: AppState = INITIAL
   private readonly listeners = new Set<() => void>()
@@ -319,7 +322,9 @@ export class AppStore {
       const capabilities = await c.call('capabilities.list', { projectId })
       if (this.projectId !== projectId || !latest()) return
       this.set({ capabilities })
-      this.pollWhileTrialing(capabilities.candidates.some(candidate => candidate.status === 'trialing'))
+      const now = Date.now()
+      this.pollWhileTrialing(capabilities.candidates.some(candidate => candidate.status === 'trialing'
+        || (candidate.status === 'proposed' && now - Date.parse(candidate.proposedAt) < PROPOSED_POLL_WINDOW_MS)))
       // A plugin that passed its gate waits for the user: ask once per candidate.
       const waiting = capabilities.candidates.find(candidate => candidate.status === 'awaiting-approval' && !this.askedApproval.has(candidate.id))
       if (waiting !== undefined && this.state.pluginApproval === undefined) await this.askPluginApproval(waiting.id)
