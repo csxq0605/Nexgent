@@ -173,7 +173,7 @@ async function snapshot(pkgs, root, home) {
     revisions: await revisionsOf(home),
     userConfig: await userConfigOf(home),
     projectConfig: await projectConfigOf(root),
-    legacyProjectImprovers: (await readdir(join(root, '.nexgent', 'improvers')).catch(() => [])).length > 0,
+    legacyProjectImprovers: (await readdir(join(dataDirSync(root), 'improvers')).catch(() => [])).length > 0,
   }
 }
 
@@ -665,7 +665,7 @@ export async function runStep6DesktopScenario(harness, work, { log = () => {} } 
       const project = await runFeedbackProject(harness, pkgs, work, {
         server,
         log: line => log(`prep: ${line}`),
-        config: { autoImprove: false },
+        config: { autoImprove: false, learning: { enabled: true } },
         createSdk: (e, h) => createStep5Sdk(pkgs, { env: e, home: h }),
       })
       obs.prepared.feedbackSession = project.tasks.at(-1)?.sessionId

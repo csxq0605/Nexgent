@@ -9,6 +9,7 @@
  * Usage: node step6-driver.mjs '<json spec>'
  *   spec: { mode: 'improve', root, home, baseUrl, key, sessionId }
  */
+import { registerHome } from './data-dir.mjs'
 import { createStep5Sdk, loadStep5Packages, readImprovements } from './step5-runtime.mjs'
 
 const spec = JSON.parse(process.argv[2] ?? '{}')
@@ -22,6 +23,7 @@ if (!loaded.ok) {
   process.exit(2)
 }
 const pkgs = loaded.pkgs
+registerHome(spec.root, spec.home)
 const sdk = createStep5Sdk(pkgs, { env: { NEXGENT_API_BASE_URL: spec.baseUrl, NEXGENT_API_KEY: spec.key, NEXGENT_HOME: spec.home }, home: spec.home })
 try {
   const { projectId } = await sdk.call('projects.open', { root: spec.root })
