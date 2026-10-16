@@ -1198,11 +1198,11 @@ ADR 0018 决策 2、ADR 0019 决策 1、6：每个根任务结束后有一份自
 | `score?` | number 0–1 | `combineScore` 的结果 |
 | `outcome` | `"success" \| "mixed" \| "failure" \| "unknown"` | `selfEvalOutcome` 的结果 |
 | `cost` | `LearningCost` | 生成要点与打分的花费 `{ usage, requestCount, estimatedUsd \| "unknown" }`，计入学习预算 |
-| `calibration?` | `{ model, score, agree, at, cost }` | 外部评审（默认 `claude-opus-5-5`）用同样的要点与检查打的分，`agree` 表示两边落在同一档 |
+| `calibration?` | `{ model, score, agree, at, cost }` | 外部评审（默认 `claude-opus-5-5`）用同样的要点与检查打的分，`agree` 表示两边得出同样的结局（不计用户评分时的 `selfEvalOutcome`） |
 
 **得分组合**（ADR 0019 决策 1，纪元内不变，纯函数 `combineScore`）：确定性检查通过率与加权评分要点得分（`rubricScore`，权重缺省 1）的平均；只有其一时取其一；都没有时没有得分。
 
-**结局**（`selfEvalOutcome`）：有用户评分时按评分（4–5 成功，3 一般，1–2 失败）；否则有检查失败即失败；没有评分要点得分时为 `unknown`（只过了检查不能证明做好了）；否则按得分分档：≥ 0.8 成功（`SUCCESS_SCORE`），< 0.5 失败（`FAILURE_SCORE`），其间一般（`scoreBand`）。
+**结局**（`selfEvalOutcome`）：有用户评分时按评分（4–5 成功，3 一般，1–2 失败）；否则有检查失败即失败；没有评分要点得分时为 `unknown`（只过了检查不能证明做好了）；否则按得分分档：有评分要点得分时按评分要点得分（`rubricScore`）分档，不用与检查通过率平均后的综合得分，免得全部通过的检查把漏了要点的结果抬成成功；≥ 0.8 成功（`SUCCESS_SCORE`），< 0.5 失败（`FAILURE_SCORE`），其间一般（`scoreBand`）。
 
 **抽样**（ADR 0018 决策 2，`selfEvalSample`）：学习关闭为 `learning-off`；预算余额不到一个任务上限为 `budget-exhausted`；余额宽裕（≥ 10 个任务上限，`SELF_EVAL_COMFORT_FACTOR`）时每个任务都打分（记 `random`）；余额紧张时依次给有用户反馈的、有检查失败的任务打分，其余按 25%（`SELF_EVAL_RANDOM_RATE`）抽取，没抽中记 `not-sampled`。
 
