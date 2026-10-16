@@ -1,9 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
-import { isNexgentError, type SandboxMode } from '@nexgent/kernel'
+import { isNexgentError, STR_REPLACE_INPUT_SCHEMA, WRITE_FILE_INPUT_SCHEMA, type SandboxMode } from '@nexgent/kernel'
 import { describe, expect, it } from 'vitest'
 import {
-  applyStrReplace,
+  applyEdits,
   createSandbox,
   createWorkspaceTools,
   LocalProcessRunner,
@@ -34,13 +34,15 @@ describe('tool definitions', () => {
     expect(tools.find(t => t.definition.name === 'read_file')!.definition.effects).toEqual(['read'])
   })
 
-  it('steers file writes to write_file / str_replace and the shell to running commands', async () => {
+  it('keeps descriptions free of shell prohibitions and exposes the frozen schemas', async () => {
     const { tools } = await setup()
-    const description = (name: string) => tools.find(t => t.definition.name === name)!.definition.description
-    expect(description('write_file')).toContain('Use this, not shell heredocs, echo or scripts, whenever you create a file yourself. It only creates files: an existing file is refused; change it with str_replace instead.')
-    expect(description('str_replace')).toContain('Use this, not sed, Python or other scripts, for every edit; call it once per change.')
-    const shell = description(process.platform === 'win32' ? 'pwsh' : 'bash')
-    expect(shell).toContain('to run programs, scripts and tests. Do not use it to write or edit files: create files with write_file and change them with str_replace.')
+    const get = (name: string) => tools.find(t => t.definition.name === name)!.definition
+    for (const name of ['write_file', 'str_replace', process.platform === 'win32' ? 'pwsh' : 'bash']) {
+      expect(get(name).description).not.toMatch(/not use it to write|not shell heredocs|not sed, Python/i)
+    }
+    expect(get(process.platform === 'win32' ? 'pwsh' : 'bash').description).toContain('Prefer write_file / str_replace for editing files you work on.')
+    expect(get('write_file').inputSchema).toEqual(WRITE_FILE_INPUT_SCHEMA)
+    expect(get('str_replace').inputSchema).toEqual(STR_REPLACE_INPUT_SCHEMA)
   })
 })
 
@@ -69,24 +71,53 @@ describe('write_file / read_file across modes', () => {
     expect(await tool('write_file').preflight({ path: 'src/a.txt', content: 'hello' }, ctx)).toEqual({ action: 'allow' })
     await tool('write_file').handler({ path: 'src/a.txt', content: 'hello' }, ctx)
     expect(await readFile(nodePath.join(workspace.root, 'src', 'a.txt'), 'utf8')).toBe('hello')
-    expect((await tool('read_file').handler({ path: 'src/a.txt' }, ctx)).content).toBe('hello')
+    expect((await tool('read_file').handler({ path: 'src/a.txt' }, ctx)).content).toBe('     1\thello')
   })
 
-  it('refuses to overwrite an existing file and points to str_replace', async () => {
+  it('replaces an existing file after read_file, after an earlier write, or with overwrite: true; refuses otherwise', async () => {
     const { tool, workspace } = await setup()
     const ctx = toolContext(workspace)
     const file = nodePath.join(workspace.root, 'scripts', 'build.mjs')
     const shown = nodePath.join('scripts', 'build.mjs')
     expect((await tool('write_file').handler({ path: 'scripts/build.mjs', content: 'v1' }, ctx)).content).toBe(`Created ${shown} (2 bytes)`)
-    const error = await tool('write_file').handler({ path: 'scripts/build.mjs', content: 'v2' }, ctx).catch((e: unknown) => e)
+    // written by this session: may be written again
+    expect((await tool('write_file').handler({ path: 'scripts/build.mjs', content: 'v2' }, ctx)).content).toBe(`Wrote ${shown} (2 bytes)`)
+    // an unread existing file (other session) is refused
+    await writeFile(nodePath.join(workspace.root, 'old.txt'), 'old')
+    const error = await tool('write_file').handler({ path: 'old.txt', content: 'new' }, ctx).catch((e: unknown) => e)
     expect(isNexgentError(error, 'tool/failed')).toBe(true)
-    expect((error as Error).message).toBe(`${shown} already exists; write_file only creates new files. Change it with str_replace (read it with read_file first).`)
-    expect(await readFile(file, 'utf8')).toBe('v1')
-    // an existing directory is refused the same way
-    await expect(tool('write_file').handler({ path: 'scripts', content: 'x' }, ctx)).rejects.toMatchObject({ code: 'tool/failed' })
-    // the edit path still works
-    await tool('str_replace').handler({ path: 'scripts/build.mjs', old_str: 'v1', new_str: 'v2' }, ctx)
+    expect((error as Error).message).toBe('old.txt already exists and was not read in this session. Read it with read_file first, or pass overwrite: true to replace it.')
+    expect(await readFile(nodePath.join(workspace.root, 'old.txt'), 'utf8')).toBe('old')
+    // another session that never read it is refused too
+    const other = { ...ctx, sessionId: 'other-session' }
+    await expect(tool('write_file').handler({ path: 'old.txt', content: 'new' }, other)).rejects.toMatchObject({ code: 'tool/failed' })
+    // after read_file it may replace; the reply has no created flag
+    await tool('read_file').handler({ path: 'old.txt' }, ctx)
+    const written = await tool('write_file').handler({ path: 'old.txt', content: 'read-then-write' }, ctx)
+    expect(await readFile(nodePath.join(workspace.root, 'old.txt'), 'utf8')).toBe('read-then-write')
+    expect(written.meta).toEqual({ path: nodePath.join(workspace.root, 'old.txt'), bytes: 15 })
+    // overwrite: true needs no read
+    await writeFile(nodePath.join(workspace.root, 'blind.txt'), 'old')
+    await tool('write_file').handler({ path: 'blind.txt', content: 'forced', overwrite: true }, other)
+    expect(await readFile(nodePath.join(workspace.root, 'blind.txt'), 'utf8')).toBe('forced')
+    // an existing directory is refused
+    await expect(tool('write_file').handler({ path: 'scripts', content: 'x', overwrite: true }, ctx)).rejects.toMatchObject({ code: 'tool/failed' })
     expect(await readFile(file, 'utf8')).toBe('v2')
+    // the edit path still works
+    await tool('str_replace').handler({ path: 'scripts/build.mjs', old_str: 'v2', new_str: 'v3' }, ctx)
+    expect(await readFile(file, 'utf8')).toBe('v3')
+  })
+
+  it('read_file numbers lines, honouring offset and limit, without changing str_replace matching', async () => {
+    const { tool, workspace } = await setup()
+    const ctx = toolContext(workspace)
+    await writeFile(nodePath.join(workspace.root, 'n.txt'), 'a\nb\nc\nd')
+    expect((await tool('read_file').handler({ path: 'n.txt' }, ctx)).content).toBe('     1\ta\n     2\tb\n     3\tc\n     4\td')
+    expect((await tool('read_file').handler({ path: 'n.txt', offset: 2, limit: 2 }, ctx)).content).toBe('     2\tb\n     3\tc\n[lines 2-3 of 4]')
+    await tool('str_replace').handler({ path: 'n.txt', old_str: 'b\nc', new_str: 'B' }, ctx)
+    expect(await readFile(nodePath.join(workspace.root, 'n.txt'), 'utf8')).toBe('a\nB\nd')
+    // numbers are not file text
+    await expect(tool('str_replace').handler({ path: 'n.txt', old_str: '     1\ta', new_str: 'x' }, ctx)).rejects.toMatchObject({ details: { reason: 'no-match' } })
   })
 
   it('denies an out-of-whitelist write with SANDBOX_DENIED and the resolved path', async () => {
@@ -106,7 +137,7 @@ describe('write_file / read_file across modes', () => {
     const ctx = toolContext(workspace, 'read-only')
     expect(await tool('write_file').preflight({ path: 'a.txt', content: 'x' }, ctx)).toMatchObject({ action: 'deny' })
     expect(await tool('write_file').preflight({ path: '.env', content: 'x' }, ctx)).toMatchObject({ action: 'deny' })
-    expect((await tool('read_file').handler({ path: 'a.txt' }, ctx)).content).toBe('data')
+    expect((await tool('read_file').handler({ path: 'a.txt' }, ctx)).content).toBe('     1\tdata')
   })
 
   it('follows ToolContext.sandboxMode over the sandbox default', async () => {
@@ -168,7 +199,7 @@ describe('write_file / read_file across modes', () => {
   it('redacts secrets in read output', async () => {
     const { tool, workspace } = await setup()
     await writeFile(nodePath.join(workspace.root, 'log.txt'), 'key=sk-abcdefghijklmnopqrstuvwx')
-    expect((await tool('read_file').handler({ path: 'log.txt' }, toolContext(workspace))).content).toBe('key=[redacted]')
+    expect((await tool('read_file').handler({ path: 'log.txt' }, toolContext(workspace))).content).toBe('     1\tkey=[redacted]')
   })
 })
 
@@ -185,7 +216,7 @@ describe('str_replace', () => {
     const file = nodePath.join(workspace.root, 'a.ts')
     await writeFile(file, 'x = 1\ny = 2\nx = 1\n')
     await expect(tool('str_replace').handler({ path: 'a.ts', old_str: 'x = 1', new_str: 'x = 9' }, toolContext(workspace)))
-      .rejects.toMatchObject({ code: 'tool/failed', details: { reason: 'multiple', lines: [1, 3] } })
+      .rejects.toMatchObject({ code: 'tool/failed', details: { reason: 'multiple', index: 0, lines: [1, 3] } })
     expect(await readFile(file, 'utf8')).toBe('x = 1\ny = 2\nx = 1\n')
   })
 
@@ -194,7 +225,32 @@ describe('str_replace', () => {
     await writeFile(nodePath.join(workspace.root, 'a.ts'), 'x = 1\n')
     await expect(tool('str_replace').handler({ path: 'a.ts', old_str: 'nope', new_str: '' }, toolContext(workspace)))
       .rejects.toMatchObject({ code: 'tool/failed', details: { reason: 'no-match' } })
-    expect(applyStrReplace('abc', '', 'x')).toMatchObject({ ok: false, reason: 'empty' })
+    expect(applyEdits('abc', [{ old_str: '', new_str: 'x' }], 'abc')).toMatchObject({ details: { reason: 'empty', index: 0 } })
+  })
+
+  it('replace_all replaces every occurrence', async () => {
+    const { tool, workspace } = await setup()
+    const file = nodePath.join(workspace.root, 'r.ts')
+    await writeFile(file, 'x = 1\ny = 2\nx = 1\n')
+    const result = await tool('str_replace').handler({ path: 'r.ts', old_str: 'x = 1', new_str: 'x = 9', replace_all: true }, toolContext(workspace))
+    expect(result.content).toBe('Edited r.ts (2 replacements)')
+    expect(await readFile(file, 'utf8')).toBe('x = 9\ny = 2\nx = 9\n')
+  })
+
+  it('applies several edits in order, all or nothing, naming the failing edit', async () => {
+    const { tool, workspace } = await setup()
+    const file = nodePath.join(workspace.root, 'm.ts')
+    const ctx = toolContext(workspace)
+    await writeFile(file, 'one\ntwo\nthree\n')
+    await tool('str_replace').handler({ path: 'm.ts', edits: [{ old_str: 'one', new_str: 'uno' }, { old_str: 'uno\ntwo', new_str: 'UNO TWO' }] }, ctx)
+    expect(await readFile(file, 'utf8')).toBe('UNO TWO\nthree\n')
+    const error = await tool('str_replace').handler({ path: 'm.ts', edits: [{ old_str: 'three', new_str: '3' }, { old_str: 'missing', new_str: 'x' }] }, ctx).catch((e: unknown) => e)
+    expect((error as Error).message).toContain('edit 2 of 2 was not found')
+    expect(error).toMatchObject({ code: 'tool/failed', details: { reason: 'no-match', index: 1 } })
+    expect(await readFile(file, 'utf8')).toBe('UNO TWO\nthree\n')
+    // inline and edits together are invalid
+    await expect(tool('str_replace').handler({ path: 'm.ts', old_str: 'a', new_str: 'b', edits: [{ old_str: 'three', new_str: '3' }] }, ctx))
+      .rejects.toMatchObject({ code: 'tool/invalid-input' })
   })
 
   it('preserves CRLF line endings without mixing in LF', async () => {

@@ -30,6 +30,9 @@ import { PRESENT_REQUEST } from '../cases.mjs'
 import { badOf, goodOf, pilotReferencePairs } from './cases.mjs'
 import { MEMORY_POLICY } from './memory.mjs'
 
+/** The injected skills-list messages of a request as one string (the list is no longer part of the system prompt). */
+const skillsListText = body => JSON.stringify((body?.messages ?? []).filter(message => message?.role === 'user').flatMap(message => (typeof message.content === 'string' ? [message.content] : (message.content ?? []).filter(block => block?.type === 'text').map(block => block.text))).filter(text => typeof text === 'string' && text.startsWith('# Skills')))
+
 /** Usage of every scripted answer: all four billed fields known (the gate refuses unknown costs). */
 export const USAGE = { inputTokens: 40, outputTokens: 12, cacheReadTokens: 0, cacheWriteTokens: 0 }
 
@@ -144,7 +147,7 @@ export class PilotModel {
       this.requests.push({ kind: 'other', step: at })
       return answer('Done.')
     }
-    return this.task(body, system, tools, task, at)
+    return this.task(body, system + skillsListText(body), tools, task, at)
   }
 
   /** The external or in-loop reviewer. @param {any} body @param {string} system */

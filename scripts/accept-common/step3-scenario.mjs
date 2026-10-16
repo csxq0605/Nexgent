@@ -24,7 +24,7 @@
  *   tools project (direct, workspace-write, test `web_fetch` row):
  *     ptc        run_code reads and writes project files and returns process.env; reads a
  *                file outside the project (refused); loops past its timeout (H17)
- *     sheet      write_spreadsheet with formulas, then external reference, unknown function,
+ *     sheet      load_skill spreadsheets (the tools are skill-gated), then write_spreadsheet with formulas, then external reference, unknown function,
  *                division by zero and too many sheets (each refused, nothing written) (H18)
  *     web        web_fetch of the local page (Markdown), of 127.0.0.1, of a private address
  *                and of a redirect to 127.0.0.1 (refused) (H19)
@@ -313,7 +313,8 @@ export function buildStep3Script(h, state = {}) {
         }),
         h.expectRequest('ptc timeout result', mentions(TASKS.ptc), answer('run_code checks done.')),
         // sheet
-        h.expectRequest('sheet turn', turnOf(TASKS.sheet), { toolCalls: [{ id: 'call-sheet-ok', name: 'write_spreadsheet', arguments: { path: TOOL_FILES.sheet, sheets: [{ name: 'Plan', rows: SHEET.rows }] } }], usage }),
+        h.expectRequest('sheet turn', turnOf(TASKS.sheet), { toolCalls: [{ id: 'call-sheet-skill', name: 'load_skill', arguments: { name: 'spreadsheets' } }], usage }),
+        h.expectRequest('sheet skill loaded', mentions(TASKS.sheet), { toolCalls: [{ id: 'call-sheet-ok', name: 'write_spreadsheet', arguments: { path: TOOL_FILES.sheet, sheets: [{ name: 'Plan', rows: SHEET.rows }] } }], usage }),
         h.expectRequest('sheet written', mentions(TASKS.sheet), { toolCalls: [{ id: 'call-sheet-external', name: 'write_spreadsheet', arguments: { path: TOOL_FILES.rejected[0], sheets: [{ name: 'S', rows: [[1, '=[Book2.xlsx]Sheet1!A1']] }] } }], usage }),
         h.expectRequest('external refused', mentions(TASKS.sheet), { toolCalls: [{ id: 'call-sheet-unknown', name: 'write_spreadsheet', arguments: { path: TOOL_FILES.rejected[1], sheets: [{ name: 'S', rows: [[1, '=NOSUCHFN(A1)']] }] } }], usage }),
         h.expectRequest('unknown refused', mentions(TASKS.sheet), { toolCalls: [{ id: 'call-sheet-divzero', name: 'write_spreadsheet', arguments: { path: TOOL_FILES.rejected[2], sheets: [{ name: 'S', rows: [[0, '=1/A1']] }] } }], usage }),

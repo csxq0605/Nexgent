@@ -17,7 +17,7 @@ import { NexgentError, type FunctionModuleSpec, type FunctionSpec, type Sandbox,
 import { projectFunctions, renderProgramResult, runProgram, type RunCodeToolOptions } from '@nexgent/ptc'
 
 /** Host functions a function receives only when it declares `write`. */
-const WRITING_FUNCTIONS = new Set(['writeFile', 'writeSpreadsheet'])
+const WRITING_FUNCTIONS = new Set(['writeFile'])
 
 /** The program body; host function names are identifiers (checked by `runProgram`). */
 function program(hostNames: readonly string[]): string {

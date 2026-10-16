@@ -1,7 +1,8 @@
 /**
  * System-prompt assembly: the profile's persona (PR #4 `system-prompt` row),
- * workspace facts and the visible tool list, rendered fresh for every
- * request and never stored in the session.
+ * workspace facts and guidance that depends on which tools are offered,
+ * rendered fresh for every request and never stored in the session. The
+ * tool definitions themselves go with the request, not into the prompt (K2).
  */
 import { renderMemberPromptLine, type MemberIdentity } from './contracts/collaboration.js'
 import type { SystemPromptSection } from './contracts/context.js'
@@ -62,29 +63,14 @@ function fill(text: string, values: Readonly<Record<string, string>>): string {
 }
 
 /**
- * Step-2 file-tool guidance (step-2 work partition, W0 → W7): create files
- * with `write_file` (which refuses existing files), edit them with `str_replace`, keep the shell for running
- * things, and declare deliverables with `present`. Each line appears only
- * when its tools are offered, so the prompt never names a tool the model
- * cannot call. The shell line exists because a real run (step 2, R02) wrote
- * every file through heredocs and Python string replacement.
+ * File guidance that no tool description carries: when to declare a
+ * deliverable, and where attached materials are. How to create and edit
+ * files is in the file tools' own descriptions (K2: the earlier lines
+ * repeated them and forbade writing files through the shell, a rule taken
+ * from one step-2 run, ADR 0017 decision 1).
  */
 function fileGuidance(tools: ReadonlySet<string>, materials: boolean): string[] {
   const lines: string[] = []
-  const shells = ['bash', 'pwsh'].filter(name => tools.has(name)).map(name => `\`${name}\``)
-  const write = tools.has('write_file')
-  const edit = tools.has('str_replace')
-  if (write) lines.push(`- To create a new file, use \`write_file\`; it refuses a file that already exists${edit ? ', so change existing files with `str_replace`' : ''}.`)
-  if (edit) {
-    lines.push(`- To change an existing file, use \`str_replace\`${tools.has('read_file') ? ' (read the file with `read_file` first)' : ''}; `
-      + 'for several changes, call it once per change.')
-  }
-  if (shells.length > 0 && (write || edit)) {
-    const own = [write ? '`write_file`' : undefined, edit ? '`str_replace`' : undefined].filter(Boolean).join(' and ')
-    lines.push(`- Write and edit file contents only with ${own}. Do not create or modify files through ${shells.join(' or ')}: `
-      + 'no heredocs (`cat > file <<EOF`), `echo >`, `tee`, `sed -i`, and no Python, Node or other scripts that write or rewrite a file. '
-      + `Use ${shells.join(' or ')} to run programs, scripts and tests; files those programs produce (for example a report your script generates), and copying or moving files, are fine.`)
-  }
   if (tools.has('present')) {
     lines.push('- When the user asks for a result file (a report, a document, a table, a figure), declare it with `present` before your final reply, and again after each revision, '
       + 'passing the `deliverableId` that `present` returned so it becomes a new version of the same deliverable. Ordinary code edits need no `present`: the files you changed are shown to the user anyway.')
@@ -134,12 +120,9 @@ export function renderSystemPrompt(input: SystemPromptInput): string {
     '# Environment',
     `- Platform: ${input.platform}; shell: ${shell}.`,
     `- Sandbox mode: ${SANDBOX_TEXT[input.sandboxMode]}${input.sandboxMode === 'read-only' && names.has('run_code') ? ' `run_code` still runs, but its writes are refused.' : ''}`,
-    '- Relative paths resolve against the project directory. `.nexgent/` holds Nexgent\'s own data; do not edit it.',
+    '- Relative paths resolve against the project directory. `.nexgent/` holds Nexgent\'s project settings; do not edit it.',
     '- If a tool call is denied, choose another approach or explain what permission is needed.',
   ].join('\n'))
-  if (input.tools.length > 0) {
-    sections.push(['# Tools', ...input.tools.map(tool => `- ${tool.name}: ${tool.description.split('\n')[0]}`)].join('\n'))
-  }
   const guidance = fileGuidance(names, input.materials === true)
   if (guidance.length > 0) sections.push(['# Working with files', ...guidance].join('\n'))
   const others = collaborationGuidance(names)

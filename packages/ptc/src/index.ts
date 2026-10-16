@@ -2,7 +2,7 @@
  * `@nexgent/ptc` — programmatic tool calling, Node backend: a runtime that
  * runs model-written JavaScript in a new, isolated Node process and answers
  * its host function calls (`runProgram`), the project host functions
- * (files and spreadsheets, checked against the caller's sandbox), and the
+ * (files, checked against the caller's sandbox), and the
  * `run_code` tool. `@nexgent/workflow` runs its scripts on the same runtime.
  * See README.md.
  */

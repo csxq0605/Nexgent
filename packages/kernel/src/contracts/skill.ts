@@ -1,3 +1,5 @@
+import type { Tool } from './tools.js'
+
 /**
  * The skill contract (step 2): discovery of `SKILL.md` files, the list the
  * system prompt shows, and on-demand loading through the `load_skill` tool.
@@ -22,7 +24,12 @@ export interface SkillManifest {
   readonly source: SkillSource
   /** Absolute path of the `SKILL.md`. */
   readonly path: string
-  /** Tool names the skill expects to be available (informational). */
+  /**
+   * Tool names the skill needs. A name that a plugin offered through
+   * {@link SkillGatedTools} (`ctx.skillTools`) becomes visible to a session
+   * only after that session ran `load_skill` for this skill; other names
+   * are informational.
+   */
   readonly tools?: readonly string[]
 }
 
@@ -56,6 +63,17 @@ export interface SkillRegistry {
   catalog(): Promise<SkillCatalog>
   /** Load one skill by name. @throws `tool/not-found` for an unknown name. */
   load(name: string): Promise<LoadedSkill>
+}
+
+/**
+ * The `ctx.skillTools` service of `@nexgent/skill`: a plugin offers a tool
+ * that stays out of every session's tool set until a session loads a skill
+ * whose `tools` names it. The tool is then registered in that session's own
+ * scope (and again after a resume).
+ */
+export interface SkillGatedTools {
+  /** Offer `tool` as skill-gated; @returns the disposer that withdraws the offer. */
+  offer(tool: Tool): () => void
 }
 
 /** Pattern a skill name must match. */

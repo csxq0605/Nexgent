@@ -4,15 +4,11 @@
  * calling session's sandbox mode and path policy, the same rules as the
  * file tools (`permissions.md` §代码执行进程): a denial throws
  * `sandbox/denied`, an `ask` goes through the call's approval flow, and in
- * `read-only` every write is refused. Spreadsheets go through
- * `@nexgent/tool-spreadsheet` (the same reader, calculator and writer as
- * `read_spreadsheet` / `write_spreadsheet`).
+ * `read-only` every write is refused.
  */
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { dirname, extname } from 'node:path'
+import { dirname } from 'node:path'
 import { NexgentError, type JsonValue, type Sandbox, type SandboxMode, type ToolContext } from '@nexgent/kernel'
-import { DocumentError, serialToIso } from '@nexgent/skill'
-import { Calculator, cellKey, columnLetters, FormulaError, loadWorkbook, MAX_SPREADSHEET_BYTES, usedBounds, writeSpreadsheetTool } from '@nexgent/tool-spreadsheet'
 import type { HostFunction } from './runtime.js'
 
 /** Largest file `readFile` returns. */
@@ -73,17 +69,10 @@ function encodingOf(value: JsonValue | undefined, fn: string): 'utf8' | 'base64'
   throw new NexgentError('tool/invalid-input', `${fn}() encoding must be "utf8" or "base64"`)
 }
 
-function cellValue(value: ReturnType<Calculator['value']>, date: boolean, date1904: boolean): JsonValue {
-  if (value instanceof FormulaError) return value.code
-  if (date && typeof value === 'number') return serialToIso(value, date1904)
-  return value
-}
-
 /**
  * The project host functions for one tool call: `readFile(path, { encoding })`,
  * `writeFile(path, content, { encoding, overwrite })`, `listDir(path)`,
- * `exists(path)`, `readSpreadsheet(path, { sheet })` and
- * `writeSpreadsheet({ path, sheets, overwrite })`.
+ * and `exists(path)`.
  */
 export function projectFunctions(sandbox: Sandbox, context: ToolContext): HostFunction[] {
   const ws = context.workspace
@@ -147,64 +136,6 @@ export function projectFunctions(sandbox: Sandbox, context: ToolContext): HostFu
         const path = ws.resolve(text(args, 0, 'exists() path'))
         await enforcePath(sandbox, 'read', path, context)
         return await stat(path).then(() => true, () => false)
-      },
-    },
-    {
-      name: 'readSpreadsheet',
-      async call(args) {
-        const raw = text(args, 0, 'readSpreadsheet() path')
-        const sheetName = options(args, 1, 'readSpreadsheet', ['sheet']).sheet
-        if (sheetName !== undefined && typeof sheetName !== 'string') throw new NexgentError('tool/invalid-input', 'readSpreadsheet() sheet must be a string')
-        const extension = extname(raw).toLowerCase()
-        if (extension !== '.xlsx' && extension !== '.xlsm') throw new NexgentError('tool/invalid-input', `readSpreadsheet() reads .xlsx files, not ${raw}`)
-        const path = ws.resolve(raw)
-        await enforcePath(sandbox, 'read', path, context)
-        const info = await stat(path).catch((error: NodeJS.ErrnoException) => {
-          throw new NexgentError('tool/failed', `cannot read ${raw}: ${error.code ?? error.message}`)
-        })
-        if (info.size > MAX_SPREADSHEET_BYTES) throw new NexgentError('tool/failed', `${raw} is ${info.size} bytes; the limit is ${MAX_SPREADSHEET_BYTES}`)
-        let book
-        try {
-          book = loadWorkbook(await readFile(path))
-        } catch (error) {
-          if (error instanceof DocumentError) throw new NexgentError('tool/failed', `${raw}: ${error.message}`)
-          throw error
-        }
-        const sheet = sheetName === undefined ? book.sheets[0] : book.sheets.find(candidate => candidate.name.toUpperCase() === sheetName.toUpperCase())
-        if (sheet === undefined) {
-          throw new NexgentError('tool/invalid-input', `no sheet named ${JSON.stringify(sheetName)}; sheets: ${book.sheets.map(s => s.name).join(', ')}`)
-        }
-        const calculator = new Calculator(book.sheets, { strict: false })
-        const bounds = usedBounds(sheet)
-        const rows: JsonValue[][] = []
-        const formulas: Record<string, string> = {}
-        if (bounds !== undefined) {
-          for (let r = 1; r <= bounds.bottom; r++) {
-            const row: JsonValue[] = []
-            for (let c = 1; c <= bounds.right; c++) {
-              const entry = sheet.cells.get(cellKey(r, c))
-              row.push(cellValue(calculator.value(sheet.name, r, c), entry?.date === true, book.date1904))
-              if (entry?.formula !== undefined) formulas[`${columnLetters(c)}${r}`] = `=${entry.formula}`
-            }
-            rows.push(row)
-          }
-        }
-        return { sheets: book.sheets.map(s => s.name), sheet: sheet.name, rows, formulas }
-      },
-    },
-    {
-      name: 'writeSpreadsheet',
-      async call(args) {
-        const input = args[0]
-        if (input === null || typeof input !== 'object' || Array.isArray(input)) {
-          throw new NexgentError('tool/invalid-input', 'writeSpreadsheet() takes { path, sheets, overwrite? } like the write_spreadsheet tool')
-        }
-        const path = (input as Record<string, JsonValue>).path
-        if (typeof path === 'string' && path !== '') await enforcePath(sandbox, 'write', ws.resolve(path), context)
-        // The tool checks the path again with the same rules; approval was already obtained above.
-        const output = await writeSpreadsheetTool(sandbox).handler(input, { ...context, approved: true })
-        if (output.isError === true) throw new NexgentError('tool/failed', output.content)
-        return { message: output.content, ...(output.meta === undefined ? {} : { meta: output.meta }) }
       },
     },
   ]

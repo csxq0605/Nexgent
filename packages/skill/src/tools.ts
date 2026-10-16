@@ -15,6 +15,7 @@ import {
   type ToolContext,
 } from '@nexgent/kernel'
 import type { CapabilitySkillLookup, LayeredSkillRegistry } from './capability-skills.js'
+import type { SkillToolGate } from './gating.js'
 import { DocumentError, documentFormat, extractDocument, DEFAULT_MAX_ROWS } from './documents/index.js'
 
 /** Largest file `read_document` opens (50 MiB). */
@@ -24,11 +25,11 @@ export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 export const MAX_DOCUMENT_OUTPUT_CHARS = 100_000
 
 /** `load_skill` over a registry. */
-export function loadSkillTool(registry: LayeredSkillRegistry, capabilitySkills?: CapabilitySkillLookup): Tool {
+export function loadSkillTool(registry: LayeredSkillRegistry, capabilitySkills?: CapabilitySkillLookup, gate?: SkillToolGate): Tool {
   return {
     definition: {
       name: LOAD_SKILL_TOOL.name,
-      description: 'Load the full instructions of a skill from the Skills list in the system prompt. Call it before doing work the skill covers.',
+      description: 'Load the full instructions of a skill from the skills list given in the conversation. Call it before doing work the skill covers.',
       inputSchema: LOAD_SKILL_TOOL.inputSchema,
       effects: LOAD_SKILL_TOOL.effects,
       approval: LOAD_SKILL_TOOL.approval,
@@ -38,9 +39,10 @@ export function loadSkillTool(registry: LayeredSkillRegistry, capabilitySkills?:
       if (typeof name !== 'string' || name === '') throw new NexgentError('tool/invalid-input', '"name" must be a non-empty string')
       const layers = capabilitySkills === undefined ? undefined : await capabilitySkills(context.sessionId)
       const skill = await registry.load(name, layers)
+      const revealed = gate?.reveal(context.sessionId, skill.manifest.tools) ?? []
       const header = `# Skill: ${skill.manifest.name}\n${skill.manifest.description}`
       return {
-        content: `${header}\n\n${skill.body.trim()}`,
+        content: `${header}\n\n${skill.body.trim()}${revealed.length === 0 ? '' : `\n\nTools now available: ${revealed.join(', ')}.`}`,
         meta: { name: skill.manifest.name, source: skill.manifest.source },
       }
     },

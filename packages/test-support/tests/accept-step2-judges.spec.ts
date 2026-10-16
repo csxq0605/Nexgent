@@ -87,7 +87,7 @@ describe('accept-step2 H judges', () => {
     ['H10', 'the diff touches an unexpected file', obs => { obs.diff.files.push({ path: 'report/README.md', change: 'modified' }) }],
     ['H10', 'no v2', obs => { obs.deliverableAfterFeedback.versions = obs.deliverableAfterFeedback.versions.slice(0, 1) }],
     ['H11', 'the goal was never completed', obs => { obs.records = obs.records.filter((r: { type: string }) => r.type !== 'goal.update'); obs.goalAtEnd.status = 'active' }],
-    ['H11', 'the goal is not in the system prompt', obs => { obs.phases.goal.requests[0].system = 'You are Nexgent.' }],
+    ['H11', 'the goal is not in the request', obs => { obs.phases.goal.requests[0].messages = [{ role: 'user', content: 'hi' }] }],
     ['H12', 'a descendant survived the cancel', obs => { obs.phases.cancelTool.survivors = [424242] }],
     ['H12', 'the streamed text was dropped', obs => {
       obs.records = obs.records.filter((r: { type: string; turn?: number }) => !(r.type === 'assistant.message' && r.turn === turnOf(obs, 'cancelStream')))

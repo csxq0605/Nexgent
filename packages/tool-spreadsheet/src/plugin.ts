@@ -2,22 +2,26 @@
  * Cordis plugin of `@nexgent/tool-spreadsheet` (profile row
  * `@nexgent/tool-spreadsheet`).
  */
-import type { Context } from '@nexgent/kernel'
+import type { Context, SkillGatedTools } from '@nexgent/kernel'
 import { readSpreadsheetTool, writeSpreadsheetTool } from './tools.js'
 
 /**
- * The plugin: whenever `ctx.tools` is available registers `read_spreadsheet`
- * and `write_spreadsheet` over `ctx.sandbox`; each registration is undone
- * when either side is disposed.
+ * The plugin: offers `read_spreadsheet` and `write_spreadsheet` over
+ * `ctx.sandbox` as skill-gated tools (`ctx.skillTools`, from
+ * `@nexgent/skill`): a session sees them only after it ran `load_skill` for
+ * the bundled `spreadsheets` skill. They are not in the default tool set.
+ * Each offer is withdrawn when either side is disposed.
  */
 export const SpreadsheetPlugin = {
   name: '@nexgent/tool-spreadsheet',
   inject: ['workspace', 'sandbox'],
   apply(ctx: Context): void {
     const sandbox = ctx.sandbox
-    ctx.inject(['tools'], scope => {
+    ctx.inject(['skillTools' as never], scope => {
+      const gate = (scope as unknown as { get(name: string): unknown }).get('skillTools') as SkillGatedTools | undefined
+      if (gate === undefined) return
       for (const tool of [readSpreadsheetTool(sandbox), writeSpreadsheetTool(sandbox)]) {
-        scope.effect(() => scope.tools.register(tool), `tools.register(${tool.definition.name})`)
+        scope.effect(() => gate.offer(tool), `skillTools.offer(${tool.definition.name})`)
       }
     })
   },

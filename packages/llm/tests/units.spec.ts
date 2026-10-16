@@ -39,6 +39,10 @@ describe('stop reasons and thinking', () => {
     expect(thinkingParam('off', 'xhigh')).toBeUndefined()
     expect(thinkingParam('off', 'max')).toBeUndefined()
     expect(thinkingParam('on', 'low')).toEqual({ type: 'adaptive', display: 'summarized' })
+    // Opus 5.5 rejects between_tools (and disabled): 'off' omits the parameter there.
+    expect(thinkingParam('off', 'low', 'claude-opus-5-5')).toBeUndefined()
+    expect(thinkingParam('off', 'low', 'claude-sonnet-5-5-20260901')).toEqual({ type: 'between_tools' })
+    expect(thinkingParam('on', 'low', 'claude-opus-5-5')).toEqual({ type: 'adaptive', display: 'summarized' })
   })
 })
 
