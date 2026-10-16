@@ -1,8 +1,7 @@
 /**
  * `run_code` over a real workspace sandbox: the project host functions read
  * and write within the caller's sandbox, refuse paths outside it and the
- * host's `.nexgent/` data, follow the session's mode, and reach
- * spreadsheets through `@nexgent/tool-spreadsheet`.
+ * host's `.nexgent/` data, and follow the session's mode.
  */
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -45,7 +44,8 @@ describe('run_code', () => {
   it('uses the contract name, schema, effects and approval', async () => {
     const { tool } = await setup()
     expect(tool.definition).toMatchObject({ name: 'run_code', inputSchema: RUN_CODE_TOOL.inputSchema, effects: ['read', 'write', 'execute'], approval: 'never', selfSandboxed: true })
-    expect(tool.definition.description).toContain('readSpreadsheet')
+    expect(tool.definition.description).toContain('readFile')
+    expect(tool.definition.description).not.toMatch(/spreadsheet/i)
   })
 
   it('reads and writes project files through host functions and returns the result', async () => {
@@ -103,17 +103,16 @@ describe('run_code', () => {
     await expect(readFile(join(root, 'b.txt'))).rejects.toThrow()
   })
 
-  it('writes a spreadsheet with formulas and reads back the calculated values', async () => {
-    const { root, run } = await setup()
-    const output = await run(`
-      await writeSpreadsheet({ path: 'purchase.xlsx', sheets: [{ name: 'Orders', rows: [['item', 'qty', 'price', 'total'], ['a', 2, 1.5, '=B2*C2'], ['b', 3, 2, '=B3*C3'], ['sum', null, null, '=SUM(D2:D3)']] }] })
-      return await readSpreadsheet('purchase.xlsx')`)
-    expect(output.isError).toBe(false)
-    const value = JSON.parse(output.content.slice(output.content.indexOf('Result:\n') + 8)) as { sheets: string[]; rows: unknown[][]; formulas: Record<string, string> }
-    expect(value.sheets).toEqual(['Orders'])
-    expect(value.rows[3]).toEqual(['sum', null, null, 9])
-    expect(value.formulas).toMatchObject({ D2: '=B2*C2', D4: '=SUM(D2:D3)' })
-    expect((await readFile(join(root, 'purchase.xlsx'))).length).toBeGreaterThan(0)
+  it('has no spreadsheet host functions (they are opt-in tools of the spreadsheets skill)', async () => {
+    const { run } = await setup()
+    for (const fn of ['readSpreadsheet', 'writeSpreadsheet']) {
+      const output = await run(`return typeof ${fn}`)
+      expect(output.isError).toBe(false)
+      expect(output.content).toContain('"undefined"')
+    }
+    const called = await run("return await readSpreadsheet('a.xlsx')")
+    expect(called.isError).toBe(true)
+    expect(called.content).toContain('readSpreadsheet is not defined')
   })
 
   it('reports a timeout and a failure as errors with the output so far', async () => {

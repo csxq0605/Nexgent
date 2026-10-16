@@ -81,8 +81,8 @@ export function shellTool(flavor: ShellFlavor, deps: ShellToolDeps): WorkspaceTo
     definition: {
       name,
       description: name === 'bash'
-        ? 'Run a command with `bash -c` in the project directory (or cwd) to run programs, scripts and tests. Do not use it to write or edit files: create files with write_file and change them with str_replace. Each call is a fresh process; no shell state persists. Output is capped (tail kept).'
-        : 'Run a command with `pwsh -NoProfile -NonInteractive -Command` in the project directory (or cwd) to run programs, scripts and tests. Do not use it to write or edit files: create files with write_file and change them with str_replace. Each call is a fresh process; no shell state persists. Output is capped (tail kept).',
+        ? 'Run a command with `bash -c` in the project directory (or cwd) to run programs, scripts and tests. Prefer write_file / str_replace for editing files you work on. Each call is a fresh process; no shell state persists. Output is capped (tail kept).'
+        : 'Run a command with `pwsh -NoProfile -NonInteractive -Command` in the project directory (or cwd) to run programs, scripts and tests. Prefer write_file / str_replace for editing files you work on. Each call is a fresh process; no shell state persists. Output is capped (tail kept).',
       inputSchema: objectSchema({
         command: { type: 'string', description: 'Script to run.' },
         cwd: { type: 'string', description: 'Working directory, relative to the project root (default ".").' },

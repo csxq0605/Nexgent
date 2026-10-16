@@ -227,12 +227,6 @@ importers:
       '@nexgent/kernel':
         specifier: workspace:*
         version: link:../kernel
-      '@nexgent/skill':
-        specifier: workspace:*
-        version: link:../skill
-      '@nexgent/tool-spreadsheet':
-        specifier: workspace:*
-        version: link:../tool-spreadsheet
       '@nexgent/workspace':
         specifier: workspace:*
         version: link:../workspace

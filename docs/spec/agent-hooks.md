@@ -67,25 +67,23 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 每次请求的系统提示按以下顺序拼接，节之间空一行；同一轮内各次请求的系统提示逐字节相同（缓存前缀稳定）：
 
 1. 步骤 1 的人格段与 `# Environment`（`renderSystemPrompt`，不变）；
-2. 步骤 1 的 `# Tools` 列表（不变）；
+2. ~~步骤 1 的 `# Tools` 列表~~（K2 去掉：工具定义随请求的 `tools` 发送，提示里再列一遍是重复）；
 3. \* `# Working with files`（见下节，已由 PR #8 落进 `system-prompt.ts`）；
 4. \* 本轮各提供者的 `systemSections`，每节渲染为 `# <title>` + 换行 + `body`，按提供者顺序、同一提供者内按 `id` 排序；
 5. 步骤 1 的结尾行（`suffix`）。
 
-提供者的建议内容（由各包实现，不是契约）：说明文件提供者输出 `# Project instructions`（项目根 `AGENTS.md`，没有则 `NEXGENT.md`，大小上限与截断规则写在 `@nexgent/context` 的 README）；目标提供者在有 `active` 目标时输出 `# Current goal`；技能提供者在有技能时输出 `# Skills`（名称、一行描述、触发说明，并说明用 `load_skill` 读全文）。
+提供者的建议内容（由各包实现，不是契约）：说明文件提供者输出 `# Project instructions`（项目根 `AGENTS.md`，没有则 `NEXGENT.md`，大小上限与截断规则写在 `@nexgent/context` 的 README）。**会变的内容不进系统提示**（K2，审查 P28：系统提示一变，缓存前缀就失效）：目标提供者在有 `active` 目标、且模型看到的历史里还没有当前目标时，以 `inject` 注入一条 `# Current goal`（目标设定或修改后的第一轮，以及压缩之后）；技能提供者在技能列表与这个会话上次注入的不同时，以 `inject` 注入技能列表（名称、一行描述、触发说明，并说明用 `load_skill` 读全文）。
 
 ## 系统提示增量
 
 `# Working with files` 一节由 `packages/kernel/src/system-prompt.ts` 的 `fileGuidance` 生成（PR #8，W7），每一条只在对应工具可见时出现，所以提示里不会出现模型调不了的工具。必须表达的内容（措辞以代码为准，改动需同时更新本节）：
 
-1. 修改已有文件用 `str_replace`（有 `read_file` 时先读），多处修改就分多次调用。——已实现。
-2. 新建文件用 `write_file`。`write_file` 只新建：目标已存在（文件或目录）时以 `tool/failed` 拒绝，错误信息为“`<path>` already exists; write_file only creates new files. Change it with str_replace (read it with read_file first).”，文件不变；创建是排他的（`wx`），检查与写入之间出现的文件也不会被覆盖。没有例外（本轮刚由 `write_file` 新建的文件同样要用 `str_replace` 修改）。——已实现（Windows 第 4 次真实运行的反馈轮里，模型用 `write_file` 整个重写已有脚本，R02 因此失败）。
-2a. 有 shell 工具时：文件内容只用 `write_file`（新建）/ `str_replace`（修改）写改，不经 shell 新建或修改文件（heredoc、`echo >`、`tee`、`sed -i`，以及写文件的 Python / Node 脚本都不行）；shell 用来运行程序、脚本和测试，程序自己产出的文件以及复制、移动文件不受限。`write_file`、`str_replace`、`bash` / `pwsh` 的工具描述里也写了同样的分工。——已实现（第 1 次真实模型补验 R02 里，模型全程用 heredoc 和 Python 替换写改文件，因此加强了这一条）。
+1、2、2a. **（K2 去掉，ADR 0017 第 1 条）** 原来这里写“改已有文件用 `str_replace`，多处修改分多次调用”“`write_file` 只新建”“不经 shell 新建或修改文件”。前两条与工具描述重复；第三条来自步骤 2 R02 一次运行的模型习惯，属于用例特化。K2 起编辑工具本身放宽（`write_file` 可覆盖本会话读过的文件或带 `overwrite: true`，`str_replace` 支持 `replace_all` 与一次多处编辑，`read_file` 带行号，见 `permissions.md` §路径策略与写入限制），怎么写改文件只由工具描述说明；`bash` / `pwsh` 的描述只留一句“改文件优先用 write_file / str_replace”。
 3. 结果就绪时用 `present` 声明交付，每次修订后再次声明；再次声明时带上 `present` 返回的 `deliverableId`，使之成为同一成果的新版本。——已实现。
 3a. **成果提醒**（2026-10-13 加，K1 去掉）：原来根会话在一次带 `write` 效果的工具调用成功、本轮还没有交付时，下一次请求前注入 `PRESENT_REMINDER`，每 `PRESENT_REMINDER_EVERY`（8）步至多一次；第 3 条也要求“改了项目文件（包括改代码）就用 `present` 声明”。这让 `present` 成了每个改文件任务的闸门（系统设计审查 P21）。K1 起不再注入提醒；第 3 条改为“用户要的成果文件（报告、文档、表格、图）用 `present` 声明；普通的代码修改不需要 `present`，改动过的文件本来就会展示给用户”。轮内改了哪些文件由 `turn.files` 给出，桌面应用在这一轮下面列出“本轮改动的文件”（已有）。——已实现。
 4. 用户附加的资料是只读副本，按随资料给出的路径读取，结果写进项目（K1 起资料在用户数据目录里，路径是绝对路径；数据还在项目里的旧项目仍是 `.nexgent/materials/` 下的相对路径）。只在项目有资料（`ctx.tasking.materials.list()` 非空，轮次开始时检查）时出现。——已实现。
 
-第 1、2、2a、3 条对应真实模型补验的 R02（修改轮里对已有文件的修改走 `str_replace`）与链路里的 present / v2。
+第 3 条对应链路里的 present / v2。
 
 ## 步骤 2 工具
 
@@ -94,6 +92,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | 工具 | 实现包 | 参数 | effects / approval | 行为要点 |
 | --- | --- | --- | --- | --- |
 | `present` | tasking | `paths: string[]`（1–50，第一项是主文件）、`summary: string`、`title?`、`deliverableId?` | `['read']` / `never` | 校验每个路径在项目内、存在、是文件、不在 `.nexgent/` 下；生成新版本快照；经 `ToolContext.appendRecord` 写 `deliverable.presented`；工具结果文本给出 `deliverableId` 与版本号；`read-only` 模式下也可用（快照由宿主写） |
+| `todo_write` | tasking | `todos: {text, status: pending\|in_progress\|done}[]`（≤30 项，每项 ≤200 字） | `['read']` / `never` | 每次调用替换整份计划；结果文本是清单（`[ ]` / `[~]` / `[x]`），`meta.todos` 带整份列表，界面据此显示计划（K2） |
 | `load_skill` | skill | `name: string` | `['read']` / `never` | 返回技能正文；未知名字返回工具错误 `tool/not-found` |
 | `read_document` | skill | `path: string`、`sheet?`、`maxRows?`（默认 500）、`pages?` | `['read']` / `never` | `.docx` 转文本，`.xlsx` 转表格（逐 sheet，CSV 式文本），`.pdf` 转文本；损坏文件返回工具错误而不是崩溃；路径按读策略检查（`materials/` 可读）；不写任何文件 |
 
@@ -205,4 +204,5 @@ kernel 的 `Agent` 在步骤 2 增加（形状由 W7 定，语义在此固定）
 | 压缩 | 脚本化 provider 报告超过阈值的输入后，下一次请求只含摘要与保留段；`compact` 失败时历史不变、同一轮不再尝试、账本有辅助请求记录；压缩后强杀再恢复，重建的历史与强杀前一致（context + kernel） |
 | 文件变更 | 文件工具与 `bash` / `pwsh` 各改一个文件，`turn.files` 与实际一致；`.nexgent/`、`node_modules/` 被忽略；取消的轮也有 `turn.files`（tasking + kernel） |
 | `present` | 不存在、项目外、`.nexgent/` 内的路径各被拒；`deliverable.presented` 在 `tool.result` 之前；v2 不改 v1 快照（tasking） |
+| `todo_write` | 结果文本与 `meta.todos` 一致；非法状态、超过上限返回工具错误（tasking） |
 | 宿主记录 | 轮外写 `goal.set`、轮中写 `material.added` 都能恢复；非宿主类型被拒（kernel） |

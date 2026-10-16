@@ -21,8 +21,6 @@
   },
   "dependencies": {
     "@nexgent/kernel": "workspace:*",
-    "@nexgent/skill": "workspace:*",
-    "@nexgent/tool-spreadsheet": "workspace:*",
     "@nexgent/workspace": "workspace:*"
   },
   "devDependencies": {

@@ -37,17 +37,22 @@ export type MessageParams = Anthropic.MessageStreamParams
 export type BetaMessageParams = Anthropic.Beta.Messages.MessageCreateParams
 
 /**
- * The `thinking` parameter for a mode and effort. `'off'` is `between_tools`
- * (the lowest setting on Claude Sonnet 5.5), which the API only accepts at
- * effort `high` or below; at `xhigh` / `max` the parameter is omitted, which
- * means adaptive thinking. `'on'` is adaptive with summarized display. Never
- * `disabled` and never `budget_tokens` (both are rejected with 400).
+ * The `thinking` parameter for a mode, effort and model. `'off'` is
+ * `between_tools` (the lowest setting on Claude Sonnet 5.5), which the API only
+ * accepts at effort `high` or below; at `xhigh` / `max` the parameter is
+ * omitted, which means adaptive thinking. Models outside the Sonnet 5.5 family
+ * reject `between_tools` (Claude Opus 5.5 answers 400 and has no way to turn
+ * thinking off), so for them `'off'` omits the parameter too. `'on'` is
+ * adaptive with summarized display. Never `disabled` and never `budget_tokens`
+ * (both are rejected with 400).
  * @param mode - the request's thinking mode.
  * @param effort - the effective effort level.
+ * @param model - the model id the request goes to; omitted means the default model.
  */
-export function thinkingParam(mode: ThinkingMode, effort: Effort): Anthropic.ThinkingConfigParam | undefined {
+export function thinkingParam(mode: ThinkingMode, effort: Effort, model = 'claude-sonnet-5-5'): Anthropic.ThinkingConfigParam | undefined {
   if (mode === 'on') return { type: 'adaptive', display: 'summarized' }
-  return effort === 'xhigh' || effort === 'max' ? undefined : { type: 'between_tools' }
+  if (effort === 'xhigh' || effort === 'max') return undefined
+  return /^claude-sonnet-5-5(?:$|[-@])/.test(model) ? { type: 'between_tools' } : undefined
 }
 
 /** Parse tool-call arguments for replay; unparsable text becomes `{}` (the API wants an object). */
@@ -146,7 +151,7 @@ export function toWireMessages(messages: readonly LLMMessage[]): { system: strin
 export function buildMessageParams(request: LLMRequest, model: string, options: WireOptions = DEFAULT_WIRE_OPTIONS): MessageParams {
   const effort = request.effort ?? options.effort
   const { system, messages } = toWireMessages(request.messages)
-  const thinking = thinkingParam(request.thinking, effort)
+  const thinking = thinkingParam(request.thinking, effort, model)
   const params: MessageParams = {
     model,
     max_tokens: request.maxTokens ?? options.maxTokens,

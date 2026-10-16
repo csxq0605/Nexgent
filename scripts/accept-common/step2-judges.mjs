@@ -196,7 +196,8 @@ export const JUDGES = {
     const request = phase(obs, 'goal').requests?.[0]
     return verdict([
       [set?.goal?.text === TASKS.goalText && set.goal.status === 'active', 'a goal.set record with the goal, active'],
-      [request !== undefined && systemText(tools, request).includes(TASKS.goalText), 'the active goal is in the next request\'s system prompt'],
+      // K2: the goal is injected as a message before the turn's own message, not part of the system prompt.
+      [request !== undefined && tools.requestText({ messages: request.messages }).includes(TASKS.goalText), 'the active goal is in the next request\'s messages'],
       [update?.goalId === set?.goal?.id && update?.status === 'completed', 'a goal.update record marking it completed'],
       [obs.goalAtEnd?.status === 'completed', 'the stored goal is completed'],
     ], `goal ${set?.goal?.id} set, shown to the model, then completed`)

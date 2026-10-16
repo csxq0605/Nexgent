@@ -703,7 +703,7 @@ function h20(obs) {
   const user = result('call-skill-user')
   const shared = result('call-skill-shared')
   return verdict([
-    [listed.includes(`- ${SKILLS.user.name}: ${SKILLS.user.description}`), 'the system prompt lists the user-level skill with its description'],
+    [listed.includes(`- ${SKILLS.user.name}: ${SKILLS.user.description}`), 'the skill list given to the model lists the user-level skill with its description'],
     [listed.includes(`- ${SKILLS.shared.name}: ${SKILLS.shared.project.description}`) && !listed.includes(SKILLS.shared.user.description), 'the clashing name is listed once, with the project description'],
     [user?.isError === false && user.content.includes(SKILLS.user.body), 'load_skill returns the user-level skill body'],
     [shared?.isError === false && shared.content.includes(SKILLS.shared.project.body) && !shared.content.includes(SKILLS.shared.user.body), 'load_skill of the clashing name returns the project body, not the user one'],

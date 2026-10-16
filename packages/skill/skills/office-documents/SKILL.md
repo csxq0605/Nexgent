@@ -7,7 +7,7 @@ tools: [read_document]
 
 # Reading Office documents
 
-Use `read_document` for `.docx`, `.xlsx` and `.pdf` files. `read_file` cannot read them: they are binary packages. Attached materials are read-only copies under `.nexgent/materials/<id>/`; pass that path as given in the materials list. Never try to edit or overwrite a material; write results to new files in the project.
+Use `read_document` for `.docx`, `.xlsx` and `.pdf` files. `read_file` cannot read them: they are binary packages. Attached materials are read-only copies; pass the path given in the materials list. Never try to edit or overwrite a material; write results to new files in the project.
 
 ## Excel (.xlsx)
 
