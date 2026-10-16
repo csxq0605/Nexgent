@@ -1,13 +1,13 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApp, type Context, type NexgentApp, type Plugin, type ToolContext } from '@nexgent/kernel'
+import { createApp, type Context, type NexgentApp, type Plugin, type SessionRecord, type ToolContext } from '@nexgent/kernel'
 import { ContextPlugin } from '@nexgent/context'
 import { SessionPlugin } from '@nexgent/session'
 import { SkillPlugin } from '@nexgent/skill'
 import { scriptedProvider, type ScriptedProvider } from '@nexgent/test-support'
 import { WorkspacePlugin } from '@nexgent/workspace'
-import { applyDraft, CapabilitiesPlugin, capabilitiesOf, listCandidates, type CapabilityService } from '../src/index.js'
+import { applyDraft, CapabilitiesPlugin, capabilitiesOf, Handbook, HANDBOOK_INJECT_HEADER, listCandidates, VERSION_PRACTICES_HEADER, type CapabilityService } from '../src/index.js'
 import { tempDir } from './helpers.js'
 
 let app: NexgentApp | undefined
@@ -16,7 +16,11 @@ afterEach(async () => {
   app = undefined
 })
 
+/** The Nexgent home of the current test (its user-level handbook). */
+let home: string | undefined
+
 async function boot(root: string, llm: ScriptedProvider): Promise<NexgentApp> {
+  home = await tempDir()
   const registry: Record<string, Plugin> = {
     '@nexgent/workspace': WorkspacePlugin as Plugin,
     '@nexgent/session': SessionPlugin as Plugin,
@@ -29,7 +33,7 @@ async function boot(root: string, llm: ScriptedProvider): Promise<NexgentApp> {
     registry,
     patches: [
       { id: 'workspace', config: { root } },
-      { insert: [{ id: 'context', name: '@nexgent/context' }, { id: 'skill', name: '@nexgent/skill' }, { id: 'capabilities', name: '@nexgent/capabilities' }] },
+      { insert: [{ id: 'context', name: '@nexgent/context' }, { id: 'skill', name: '@nexgent/skill' }, { id: 'capabilities', name: '@nexgent/capabilities', config: { home } }] },
     ],
   })
   return app
@@ -210,8 +214,12 @@ export default {
     expect(agent.capabilityVersion).toBe(bundle.version)
     expect(await service().sessionVersion(agent.sessionId)).toBe(bundle.version)
     llm.push({ toolCalls: [{ name: 'cap_probe_total', arguments: { values: [2, 2] } }] }, { content: 'four' })
-    expect((await agent.run({ text: 'Add.' })).reason).toEqual({ kind: 'completed' })
-    expect(llm.requests[0]!.messages[0]!.content).toContain('Always cite the file.')
+    expect((await agent.run({ text: 'Add the numbers and cite the file.' })).reason).toEqual({ kind: 'completed' })
+    // ADR 0018: the adopted policy is a project handbook entry, given before the user message, not in the system prompt.
+    const first = llm.requests[0]!.messages
+    expect(first[0]!.content).not.toContain('Always cite the file.')
+    expect(first.at(-2)).toMatchObject({ role: 'user', content: expect.stringContaining('Always cite the file.') })
+    expect(first.at(-1)).toMatchObject({ role: 'user', content: 'Add the numbers and cite the file.' })
     expect(llm.requests[1]!.messages.find(message => message.role === 'tool')).toMatchObject({ isError: false, content: expect.stringContaining('4') })
     expect(await service().toolComponent(agent.sessionId, 'cap_probe_total')).toEqual({ kind: 'function-module', name: 'probe', version: bundle.version })
 
@@ -379,5 +387,89 @@ describe('a component the session\'s version already carries (the gate\'s candid
     const [candidate] = await listCandidates(service().store.directory)
     expect(candidate).toMatchObject({ base: version })
     expect(candidate!.version).not.toBe(version)
+  })
+})
+
+describe('the handbook in the agent loop (ADR 0018 decision 4, scripted model)', () => {
+  const records = async (sessionId: string): Promise<readonly SessionRecord[]> => (await app!.ctx.session.readAll(sessionId)).records
+
+  it('gives a root turn its top entries before the user message, records them on turn.start, and takes one mark per entry', async () => {
+    const root = await tempDir()
+    const llm = scriptedProvider([])
+    const { agents } = (await boot(root, llm)).ctx
+    const handbook = await Handbook.open({ projectRoot: root, home: home!, learning: { useShared: true, contribute: true } })
+    const [added] = await handbook.apply([{ op: 'add', text: 'Recompute every total from the input rows before reporting it.', keywords: ['totals', 'report'] }], { actor: 'reflection' })
+    const [other] = await handbook.apply([{ op: 'add', text: 'Rename image files by date taken.', keywords: ['photos'] }], { actor: 'reflection' })
+    const id = added!.entryId!
+
+    const agent = await agents.create({ sandboxMode: 'workspace-write' })
+    llm.push(
+      { toolCalls: [{ name: 'handbook_mark', arguments: { entryId: id, verdict: 'helpful', reason: 'caught a wrong sum' } }, { name: 'handbook_mark', arguments: { entryId: other!.entryId!, verdict: 'harmful' } }] },
+      { toolCalls: [{ name: 'handbook_mark', arguments: { entryId: id, verdict: 'helpful' } }] },
+      { content: 'Done.' },
+    )
+    expect((await agent.run({ text: 'Report the totals of the sales sheet.' })).reason).toEqual({ kind: 'completed' })
+    const messages = llm.requests[0]!.messages
+    expect(messages[0]!.role).toBe('system')
+    expect(messages[0]!.content).not.toContain('Recompute every total')
+    expect(messages.at(-2)).toMatchObject({ role: 'user', content: expect.stringContaining(`[${id}] Recompute every total`) })
+    expect(messages.at(-2)!.content).toContain(HANDBOOK_INJECT_HEADER)
+    expect(messages.at(-2)!.content).not.toContain('Rename image files')
+    expect(messages.at(-1)).toMatchObject({ role: 'user', content: 'Report the totals of the sales sheet.' })
+    const first = await records(agent.sessionId)
+    expect(first.find(record => record.type === 'turn.start')).toMatchObject({ turn: 1, handbook: [id] })
+    const results = first.filter(record => record.type === 'tool.result' && record.name === 'handbook_mark')
+    expect(results.map(record => record.type === 'tool.result' && [record.isError, record.content])).toEqual([
+      [false, `Marked entry ${id} helpful.`],
+      [true, expect.stringContaining('was not given to this task')],
+      [false, expect.stringContaining('already marked')],
+    ])
+    expect((await handbook.find(id))?.entry).toMatchObject({ helpful: 1, harmful: 0 })
+    expect((await handbook.ops(id)).ops.at(-1)).toMatchObject({ op: 'upvote', actor: 'execution', reason: 'caught a wrong sum', source: { sessionId: agent.sessionId } })
+
+    // A later turn is not given the same entry again.
+    llm.push({ content: 'Again.' })
+    await agent.run({ text: 'Report the totals again.' })
+    const second = (await records(agent.sessionId)).filter(record => record.type === 'turn.start')
+    expect(second[1]).toEqual(expect.not.objectContaining({ handbook: expect.anything() }))
+    expect(llm.requests.at(-1)!.messages.filter(message => message.role === 'user' && message.content.includes(HANDBOOK_INJECT_HEADER))).toHaveLength(1)
+  })
+
+  it('in a trial copy, gives the version\'s policy practices but writes nothing to the handbook', async () => {
+    const root = await tempDir()
+    const llm = scriptedProvider([])
+    const { agents } = (await boot(root, llm)).ctx
+    const bundle = await service().store.write([
+      { kind: 'context-policy', name: 'house-rules', files: [{ path: 'policy.json', content: JSON.stringify({ formatVersion: 1, name: 'house-rules', description: 'Rules.', instructions: 'Always cite the file.' }) }] },
+    ])
+    await service().store.adopt(bundle.version, { trigger: 'manual', detail: 'replay copy for a gate trial' })
+    const agent = await agents.create({ sandboxMode: 'workspace-write' })
+    llm.push({ content: 'ok' })
+    await agent.run({ text: 'Add.' })
+    const injected = llm.requests[0]!.messages.at(-2)!
+    expect(injected).toMatchObject({ role: 'user', content: `${VERSION_PRACTICES_HEADER}\nAlways cite the file.` })
+    const handbook = await Handbook.open({ projectRoot: root, home: home!, learning: { useShared: true, contribute: true } })
+    expect(await handbook.project.read()).toEqual([])
+    expect((await records(agent.sessionId)).find(record => record.type === 'turn.start')).toEqual(expect.not.objectContaining({ handbook: expect.anything() }))
+  })
+
+  it('a context policy the session tries is given on its next turn, once', async () => {
+    const root = await tempDir()
+    const llm = scriptedProvider([])
+    const { agents } = (await boot(root, llm)).ctx
+    const agent = await agents.create({ sandboxMode: 'workspace-write' })
+    const policy = { kind: 'context-policy', name: 'house-rules', files: [{ path: 'policy.json', content: JSON.stringify({ formatVersion: 1, name: 'house-rules', description: 'Rules.', instructions: 'Name the source of every figure.' }) }] }
+    llm.push(
+      { toolCalls: [{ name: 'capability_draft', arguments: policy }] },
+      { toolCalls: [{ name: 'capability_try', arguments: { kind: 'context-policy', name: 'house-rules' } }] },
+      { content: 'Tried.' },
+      { content: 'Second.' },
+      { content: 'Third.' },
+    )
+    await agent.run({ text: 'Write the house rules down.' })
+    await agent.run({ text: 'Summarise the figures.' })
+    expect(llm.requests[3]!.messages.at(-2)).toMatchObject({ role: 'user', content: `${VERSION_PRACTICES_HEADER}\nName the source of every figure.` })
+    await agent.run({ text: 'And again.' })
+    expect(llm.requests[4]!.messages.filter(message => message.role === 'user' && message.content.includes('Name the source of every figure.'))).toHaveLength(1)
   })
 })

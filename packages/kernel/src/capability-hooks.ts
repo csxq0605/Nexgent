@@ -104,6 +104,30 @@ export interface CapabilityHost {
    * architecture.
    */
   componentOf?(call: ComponentCallInput): ComponentUseRef | undefined
+  /**
+   * Optional (ADR 0018 decision 4): the handbook entries a root task's user
+   * turn is given, asked before `turn.start` is written. The kernel records
+   * `ids` as `turn.start.handbook` and `text` as `user.message { source:
+   * 'inject' }` right before the turn's user message (never in the system
+   * prompt). Throwing or `undefined` gives the turn nothing.
+   */
+  handbookForTurn?(input: HandbookTurnInput): Promise<HandbookTurnSelection | undefined>
+}
+
+/** What {@link CapabilityHost.handbookForTurn} gets: a root session's user turn. */
+export interface HandbookTurnInput {
+  readonly sessionId: string
+  readonly turn: number
+  /** The user's text of the turn. */
+  readonly text: string
+}
+
+/** What a turn is given from the handbook. */
+export interface HandbookTurnSelection {
+  /** Entry ids, retrieval order (at most `HANDBOOK_TOP_K`); may be empty when `text` carries only other practices. */
+  readonly ids: readonly string[]
+  /** The injected message. */
+  readonly text: string
 }
 
 /** A root turn starts (step 4: the task's first turn; step 5: every root turn). */
