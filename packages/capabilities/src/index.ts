@@ -73,7 +73,7 @@ export { capabilityDraftTool, capabilityProposeTool, capabilityTools, capability
 export { capabilitiesProvider } from './provider.js'
 export { apply, CapabilitiesPlugin, name, type CapabilitiesPluginConfig } from './plugin.js'
 export * from './trial/index.js'
-export { checkJobLiterals, componentLiteralTexts, findJobLayout, instanceLiteralText, jobLiteralSources, layoutOfSessionsDir, MAX_LITERAL_TEXT_BYTES, projectTaskMessages, type LiteralCheckComponent } from './instance-literals.js'
+export { checkJobLiterals, componentLiteralTexts, taskLiteralSources, findJobLayout, instanceLiteralText, jobLiteralSources, layoutOfSessionsDir, MAX_LITERAL_TEXT_BYTES, projectTaskMessages, type LiteralCheckComponent } from './instance-literals.js'
 export {
   improversDir,
   improverVersionOf,
@@ -88,3 +88,19 @@ export {
   type ResolvedImprover,
 } from './improvers.js'
 export { isTransientFsError, renameRetrying, retryTransient, RENAME_RETRY_DELAYS_MS, TRANSIENT_RENAME_CODES, transientRenameCodes, type RenameRetryOptions } from './fs-retry.js'
+export { HANDBOOK_LOCK_FILE, HANDBOOK_LOG_FILE, checkHandbookOp, HandbookLog, normalizeKeywords, type HandbookOpInput } from './handbook/log.js'
+export {
+  Handbook,
+  HANDBOOK_DUPLICATE_SIMILARITY,
+  handbookProjectId,
+  projectLearning,
+  type HandbookApplyContext,
+  type HandbookChange,
+  type HandbookChangeResult,
+  type HandbookOpenOptions,
+  type LocatedEntry,
+} from './handbook/handbook.js'
+export { HandbookIndex, type ScoredEntry } from './handbook/retrieval.js'
+export { jaccard, terms, termSet } from './handbook/tokens.js'
+export { contextPolicyKey, deriveKeywords, MAX_MIGRATED_ENTRIES, migrateContextPolicies, policyPractices } from './handbook/migrate.js'
+export { COPY_ADOPTION_DETAILS, givenEntries, HANDBOOK_INJECT_HEADER, HandbookHost, isTrialCopy, VERSION_PRACTICES_HEADER, type HandbookHostOptions, type HandbookRecordReader } from './handbook/host.js'

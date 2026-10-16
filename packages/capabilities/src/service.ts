@@ -115,6 +115,8 @@ interface SessionState {
 export interface CapabilitiesConfig {
   /** Passed to the PTC runtime that runs function modules (Electron hosts set `nodePath`). */
   readonly ptc?: RunCodeToolOptions
+  /** Nexgent home of the user-level handbook (ADR 0018); default the gate's `NEXGENT_HOME`, then `NEXGENT_HOME` or `~/.nexgent`. */
+  readonly home?: string
 }
 
 const key = (ref: CapabilityComponentRef) => `${ref.kind}/${ref.name}`
