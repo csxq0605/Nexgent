@@ -299,6 +299,9 @@ export async function runImprovementsDesktopScenario(harness, work, { log = () =
         await explicit('failed', 'two', 'by-output')
         await explicit('rejected', 'improve', 'null', { withFeedback: true })
         await explicit('adopted', 'improve', 'by-output', { withFeedback: true })
+        // The prep needed snapshots (learning on); the desktop part starts with automatic improvement off,
+        // which since ADR 0017 is the learning switch: turn it off as a user would.
+        await sdk.call('settings.update', { projectId, patch: { learning: { enabled: false } } })
       } finally {
         await sdk.dispose()
       }
