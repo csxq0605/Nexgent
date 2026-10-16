@@ -120,6 +120,27 @@ describe('improver versions through the SDK (API 7: the user line)', () => {
   })
 })
 
+describe('learning settings through the SDK (API 8)', () => {
+  it('project learning settings read, patch and fall back to autoImprove; the notice is acknowledged once', async () => {
+    const t = await testSdk([])
+    const { projectId } = await openProject(t)
+    const settings = await t.sdk.call('settings.get', { projectId })
+    expect(settings.learning).toEqual({ enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true })
+    expect((await t.sdk.call('settings.update', { projectId, patch: { autoImprove: false } })).learning.enabled).toBe(false)
+    expect((await t.sdk.call('settings.update', { projectId, patch: { autoImprove: false } })).learning.enabled).toBe(false)
+    const patched = await t.sdk.call('settings.update', { projectId, patch: { learning: { enabled: true, budget: { maxUsd: 1 } }, costCaps: { perConversation: { maxUsd: 5 } } } })
+    expect(patched.learning).toMatchObject({ enabled: true, budget: { maxUsd: 1, windowDays: 30 } })
+    expect(patched.autoImprove).toBe(true)
+    expect(patched.costCaps).toEqual({ perConversation: { maxUsd: 5 } })
+    await expect(t.sdk.call('settings.update', { projectId, patch: { learning: { budget: { maxUsd: -1 } } } })).rejects.toMatchObject({ code: 'config/invalid' })
+    expect((await t.sdk.call('userSettings.get', {})).learning).toEqual({})
+    const first = await t.sdk.call('learning.acknowledge', {})
+    expect(first.learning.noticeAcknowledgedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    expect((await t.sdk.call('learning.acknowledge', {})).learning).toEqual(first.learning)
+    for (const method of ['handbook.list', 'learning.status'] as const) await expect(t.sdk.call(method, { projectId } as never)).rejects.toMatchObject({ code: 'internal' })
+  })
+})
+
 describe('user settings through the SDK (API 7)', () => {
   it('reads defaults, writes <home>/config.json, keeps the meta switch off unless asked, and rejects invalid values', async () => {
     const t = await testSdk([])

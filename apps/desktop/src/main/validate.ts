@@ -24,6 +24,8 @@ type FieldKind =
   | 'allowDeny'
   | 'capabilityVersion'
   | 'improverVersion'
+  | 'handbookScope'
+  | 'practiceSplit'
 
 interface FieldSpec {
   readonly kind: FieldKind
@@ -97,6 +99,12 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'improvers.list': { projectId: { kind: 'nonEmptyString', optional: true } },
   'improvers.show': { projectId: { kind: 'nonEmptyString', optional: true }, version: { kind: 'improverVersion' } },
   'improvers.rollback': { projectId: { kind: 'nonEmptyString', optional: true }, toVersion: { kind: 'improverVersion', optional: true }, reason: { kind: 'string', optional: true } },
+  'handbook.list': { projectId: id, scope: { kind: 'handbookScope', optional: true }, includeRetired: { kind: 'boolean', optional: true } },
+  'handbook.show': { projectId: id, entryId: id },
+  'learning.status': project,
+  'learning.acknowledge': {},
+  'practice.list': { projectId: { kind: 'nonEmptyString', optional: true }, split: { kind: 'practiceSplit', optional: true } },
+  'practice.show': { caseId: id },
 }
 
 const SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'full-access'])
@@ -148,6 +156,10 @@ function checkField(kind: FieldKind, value: unknown): boolean {
       return typeof value === 'string' && /^(?:baseline|[a-f0-9]{64})$/.test(value)
     case 'improverVersion':
       return typeof value === 'string' && /^(?:v0|[a-f0-9]{64})$/.test(value)
+    case 'handbookScope':
+      return value === 'user' || value === 'project'
+    case 'practiceSplit':
+      return value === 'train' || value === 'selection' || value === 'holdout' || value === 'guard'
     case 'approvalDecision':
       // `decidedBy` is set by the main process side, never by the page.
       return (

@@ -849,7 +849,9 @@
             "manual",
             "similar-regression",
             "no-similar-cases",
-            "instance-literal"
+            "instance-literal",
+            "cost-optimized",
+            "scorer-unreliable"
           ]
         },
         "passRate": {
@@ -1377,7 +1379,9 @@
             "manual",
             "similar-regression",
             "no-similar-cases",
-            "instance-literal"
+            "instance-literal",
+            "cost-optimized",
+            "scorer-unreliable"
           ]
         },
         "trigger": {

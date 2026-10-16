@@ -60,6 +60,12 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'improvers.list': p,
   'improvers.show': { ...p, version: 'v0' },
   'improvers.rollback': { ...p, toVersion: 'v0', reason: '子改进器更差' },
+  'handbook.list': { ...p, scope: 'user', includeRetired: true },
+  'handbook.show': { ...p, entryId: 'e1' },
+  'learning.status': p,
+  'learning.acknowledge': {},
+  'practice.list': { ...p, split: 'holdout' },
+  'practice.show': { caseId: 'c1' },
 }
 
 describe('method whitelist', () => {
@@ -83,6 +89,11 @@ describe('validateInput', () => {
       expect(validateInput('app.info', input)).toBe('input is not a plain object')
     }
     expect(validateInput('app.info', Object.create(null))).toBeUndefined()
+  })
+
+  it('API 8: rejects an unknown handbook scope or practice split', () => {
+    expect(validateInput('handbook.list', { ...p, scope: 'team' })).toBe('invalid field scope')
+    expect(validateInput('practice.list', { split: 'test' })).toBe('invalid field split')
   })
 
   it('rejects unknown fields without echoing their values', () => {

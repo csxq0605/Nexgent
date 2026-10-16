@@ -1,0 +1,961 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexgent.dev/schema/learning.v1.schema.json",
+  "title": "Nexgent learning and user-data files v1",
+  "description": "Project identity, user data directory files, self-evaluations, practice cases and handbook operations (ADR 0017-0019). Validate a file against $defs/<name>. See docs/spec/data-formats.md.",
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0
+    },
+    "usageCount": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "const": "unknown"
+        }
+      ]
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputTokens",
+        "outputTokens",
+        "totalTokens",
+        "cacheReadTokens",
+        "reasoningTokens"
+      ],
+      "properties": {
+        "inputTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "outputTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "totalTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "cacheReadTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "cacheWriteTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "reasoningTokens": {
+          "$ref": "#/$defs/usageCount"
+        }
+      }
+    },
+    "finishReason": {
+      "enum": [
+        "stop",
+        "tool-calls",
+        "max-tokens",
+        "aborted",
+        "refusal",
+        "pause",
+        "error"
+      ]
+    },
+    "refusalInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "explanation": {
+          "type": "string"
+        }
+      }
+    },
+    "jsonValue": {},
+    "errorInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "code": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "object"
+        }
+      }
+    },
+    "approvalScope": {
+      "enum": [
+        "once",
+        "session",
+        "project"
+      ]
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "approvalGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "grantedAt"
+      ],
+      "properties": {
+        "tool": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "grantedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "taskCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "passed"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      }
+    },
+    "learningCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "usage",
+        "requestCount",
+        "estimatedUsd"
+      ],
+      "properties": {
+        "usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "requestCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "estimatedUsd": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonNegativeNumber"
+            },
+            {
+              "const": "unknown"
+            }
+          ]
+        }
+      }
+    },
+    "projectIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "projectId",
+        "createdAt"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,200}$"
+        }
+      }
+    },
+    "projectDataIndex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "projectId",
+        "root",
+        "lastOpenedAt"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "root": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "lastOpenedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "projectGrants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "approvals"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "approvals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/approvalGrant"
+          }
+        }
+      }
+    },
+    "migrationEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "files",
+        "bytes"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "sessions",
+            "ledgers",
+            "snapshots",
+            "materials",
+            "outputs",
+            "capabilities",
+            "improvements",
+            "improvers"
+          ]
+        },
+        "files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "migrationRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "projectId",
+        "from",
+        "status",
+        "startedAt",
+        "entries",
+        "grantsMoved",
+        "oldDataKept"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "from": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "enum": [
+            "copying",
+            "done",
+            "failed"
+          ]
+        },
+        "startedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "finishedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/migrationEntry"
+          }
+        },
+        "grantsMoved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "oldDataKept": {
+          "const": true
+        },
+        "oldDataRemovedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "error": {
+          "$ref": "#/$defs/errorInfo"
+        }
+      }
+    },
+    "rubricItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^r[1-9][0-9]*$"
+        },
+        "text": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,300}$"
+        },
+        "weight": {
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        }
+      }
+    },
+    "rubric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "model",
+        "createdAt",
+        "generator"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/rubricItem"
+          }
+        },
+        "model": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "generator": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "rubricScore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "itemId",
+        "score"
+      ],
+      "properties": {
+        "itemId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "score": {
+          "enum": [
+            0,
+            0.5,
+            1
+          ]
+        },
+        "note": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,300}$"
+        }
+      }
+    },
+    "selfEvalCalibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "score",
+        "agree",
+        "at",
+        "cost"
+      ],
+      "properties": {
+        "model": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0
+        },
+        "agree": {
+          "type": "boolean"
+        },
+        "at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "cost": {
+          "$ref": "#/$defs/learningCost"
+        }
+      }
+    },
+    "selfEvaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "rules",
+        "projectId",
+        "taskId",
+        "sessionId",
+        "turn",
+        "createdAt",
+        "checks",
+        "sample",
+        "outcome",
+        "cost"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "rules": {
+          "const": "adr-0019"
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "taskId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/taskCheck"
+          }
+        },
+        "sample": {
+          "enum": [
+            "user-feedback",
+            "check-failed",
+            "random",
+            "not-sampled",
+            "budget-exhausted",
+            "learning-off"
+          ]
+        },
+        "rubric": {
+          "$ref": "#/$defs/rubric"
+        },
+        "scores": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rubricScore"
+          }
+        },
+        "scorer": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "feedback": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "feedbackIds"
+          ],
+          "properties": {
+            "feedbackIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/nonEmptyString"
+              }
+            },
+            "rating": {
+              "enum": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            }
+          }
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "mixed",
+            "failure",
+            "unknown"
+          ]
+        },
+        "cost": {
+          "$ref": "#/$defs/learningCost"
+        },
+        "calibration": {
+          "$ref": "#/$defs/selfEvalCalibration"
+        }
+      }
+    },
+    "practiceCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "id",
+        "source",
+        "createdAt",
+        "prompt",
+        "similarityKey",
+        "clusterId",
+        "split"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "source": {
+          "enum": [
+            "task",
+            "generic"
+          ]
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "prompt": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,20000}$"
+        },
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "projectId",
+            "tree"
+          ],
+          "properties": {
+            "projectId": {
+              "$ref": "#/$defs/projectId"
+            },
+            "tree": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "taskId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "similarityKey": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^A-Z\\n]{1,40}$"
+          }
+        },
+        "clusterId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "split": {
+          "enum": [
+            "train",
+            "selection",
+            "holdout",
+            "guard"
+          ]
+        },
+        "rubric": {
+          "$ref": "#/$defs/rubric"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "mixed",
+            "failure",
+            "unknown"
+          ]
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "handbookSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ],
+      "properties": {
+        "projectId": {
+          "$ref": "#/$defs/projectId"
+        },
+        "taskId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "handbookKeywords": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[^A-Z\\n]{1,40}$"
+      }
+    },
+    "handbookOp": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "formatVersion",
+            "op",
+            "seq",
+            "at",
+            "entryId",
+            "actor",
+            "text",
+            "keywords",
+            "scope"
+          ],
+          "properties": {
+            "formatVersion": {
+              "const": 1
+            },
+            "op": {
+              "const": "add"
+            },
+            "seq": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "entryId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "actor": {
+              "enum": [
+                "reflection",
+                "execution",
+                "user",
+                "host",
+                "migration"
+              ]
+            },
+            "source": {
+              "$ref": "#/$defs/handbookSource"
+            },
+            "reason": {
+              "type": "string",
+              "pattern": "^[\\s\\S]{1,200}$"
+            },
+            "text": {
+              "type": "string",
+              "pattern": "^[\\s\\S]{1,600}$"
+            },
+            "keywords": {
+              "$ref": "#/$defs/handbookKeywords"
+            },
+            "scope": {
+              "enum": [
+                "user",
+                "project"
+              ]
+            },
+            "projectId": {
+              "$ref": "#/$defs/projectId"
+            },
+            "status": {
+              "enum": [
+                "trial",
+                "active"
+              ]
+            },
+            "supersedes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/uuid"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "formatVersion",
+            "op",
+            "seq",
+            "at",
+            "entryId",
+            "actor"
+          ],
+          "properties": {
+            "formatVersion": {
+              "const": 1
+            },
+            "op": {
+              "const": "edit"
+            },
+            "seq": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "entryId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "actor": {
+              "enum": [
+                "reflection",
+                "execution",
+                "user",
+                "host",
+                "migration"
+              ]
+            },
+            "source": {
+              "$ref": "#/$defs/handbookSource"
+            },
+            "reason": {
+              "type": "string",
+              "pattern": "^[\\s\\S]{1,200}$"
+            },
+            "text": {
+              "type": "string",
+              "pattern": "^[\\s\\S]{1,600}$"
+            },
+            "keywords": {
+              "$ref": "#/$defs/handbookKeywords"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "formatVersion",
+            "op",
+            "seq",
+            "at",
+            "entryId",
+            "actor"
+          ],
+          "properties": {
+            "formatVersion": {
+              "const": 1
+            },
+            "op": {
+              "const": "upvote"
+            },
+            "seq": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "entryId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "actor": {
+              "enum": [
+                "reflection",
+                "execution",
+                "user",
+                "host",
+                "migration"
+              ]
+            },
+            "source": {
+              "$ref": "#/$defs/handbookSource"
+            },
+            "reason": {
+              "type": "string",
+              "pattern": "^[\\s\\S]{1,200}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "formatVersion",
+            "op",
+            "seq",
+            "at",
+            "entryId",
+            "actor"
+          ],
+          "properties": {
+            "formatVersion": {
+              "const": 1
+            },
+            "op": {
+              "const": "downvote"
+            },
+            "seq": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "entryId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "actor": {
+              "enum": [
+                "reflection",
+                "execution",
+                "user",
+                "host",
+                "migration"
+              ]
+            },
+            "source": {
+              "$ref": "#/$defs/handbookSource"
+            },
+            "reason": {
+              "type": "string",
+              "pattern": "^[\\s\\S]{1,200}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "formatVersion",
+            "op",
+            "seq",
+            "at",
+            "entryId",
+            "actor",
+            "status"
+          ],
+          "properties": {
+            "formatVersion": {
+              "const": 1
+            },
+            "op": {
+              "const": "status"
+            },
+            "seq": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "entryId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "actor": {
+              "enum": [
+                "reflection",
+                "execution",
+                "user",
+                "host",
+                "migration"
+              ]
+            },
+            "source": {
+              "$ref": "#/$defs/handbookSource"
+            },
+            "reason": {
+              "type": "string",
+              "pattern": "^[\\s\\S]{1,200}$"
+            },
+            "status": {
+              "enum": [
+                "trial",
+                "active",
+                "retired"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
