@@ -118,6 +118,15 @@ export interface SelfEvalModel {
 }
 
 /**
+ * Whether a request failure is the model refusing `thinking: off` (HTTP 400
+ * naming the thinking parameter): some models have no no-reasoning mode.
+ * Callers that asked with reasoning off then ask again with it on.
+ */
+export function rejectsThinkingOff(failure: string | undefined): boolean {
+  return failure !== undefined && /\b400\b/.test(failure) && /thinking/i.test(failure)
+}
+
+/**
  * A {@link SelfEvalModel} over kernel providers: `providerFor` returns the
  * provider whose ledger stamps `{ learningPhase, taskId }`.
  */
@@ -129,31 +138,37 @@ export function providerSelfEvalModel(options: {
   return {
     async complete(request) {
       const provider = options.providerFor({ learningPhase: request.phase, taskId: request.taskId, model: request.model })
-      let text = ''
-      let usage: LLMUsage | undefined
-      let failure: string | undefined
-      try {
-        for await (const event of provider.complete({
-          requestId: randomUUID(),
-          model: request.model,
-          thinking: request.thinking,
-          ...(request.effort === undefined ? {} : { effort: request.effort }),
-          maxTokens: request.maxTokens,
-          messages: [
-            { role: 'system', content: request.system },
-            { role: 'user', content: request.user },
-          ],
-          ...(request.signal === undefined ? {} : { signal: request.signal }),
-        }, { purpose: 'auxiliary', ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }) })) {
-          if (event.type === 'text.delta') text += event.text
-          else if (event.type === 'usage') usage = event.usage
-          else if (event.type === 'error') failure = `${event.error.code}: ${event.error.message}`
+      const send = async (thinking: 'off' | 'on', effort: SelfEvalRequest['effort']) => {
+        let text = ''
+        let usage: LLMUsage | undefined
+        let failure: string | undefined
+        try {
+          for await (const event of provider.complete({
+            requestId: randomUUID(),
+            model: request.model,
+            thinking,
+            ...(effort === undefined ? {} : { effort }),
+            maxTokens: request.maxTokens,
+            messages: [
+              { role: 'system', content: request.system },
+              { role: 'user', content: request.user },
+            ],
+            ...(request.signal === undefined ? {} : { signal: request.signal }),
+          }, { purpose: 'auxiliary', ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }) })) {
+            if (event.type === 'text.delta') text += event.text
+            else if (event.type === 'usage') usage = event.usage
+            else if (event.type === 'error') failure = `${event.error.code}: ${event.error.message}`
+          }
+        } catch (error) {
+          failure = error instanceof Error ? error.message : String(error)
         }
-      } catch (error) {
-        failure = error instanceof Error ? error.message : String(error)
+        return { text, usage, failure }
       }
-      const used = usage ?? { ...ZERO_USAGE, inputTokens: 'unknown', outputTokens: 'unknown' }
-      return { text, usage: used, estimatedUsd: options.estimateUsd(request.model, used), ...(failure === undefined ? {} : { failure: failure.slice(0, 500) }) }
+      let reply = await send(request.thinking, request.effort)
+      // A model without a no-reasoning mode refuses `thinking: off` before any work (nothing billed): ask again with reasoning at low effort.
+      if (request.thinking === 'off' && rejectsThinkingOff(reply.failure)) reply = await send('on', 'low')
+      const used = reply.usage ?? { ...ZERO_USAGE, inputTokens: 'unknown', outputTokens: 'unknown' }
+      return { text: reply.text, usage: used, estimatedUsd: options.estimateUsd(request.model, used), ...(reply.failure === undefined ? {} : { failure: reply.failure.slice(0, 500) }) }
     },
   }
 }
