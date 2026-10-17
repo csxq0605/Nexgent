@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { HandbookOp } from '@nexgent/kernel'
 import type { HandbookEntryView, LearningStatus } from '@nexgent/sdk'
 import { useAppState, useAppStore } from '../hooks.js'
-import { L, dayText, rateText, usdText } from '../strings.js'
+import { L, agoText, dayText, rateText, usdText } from '../strings.js'
 import { useUi } from '../ui.js'
 
 /** Kernel `HANDBOOK_ACTIVATE_HELPFUL` (the renderer imports no kernel values; a test keeps them equal). */
@@ -172,6 +172,14 @@ function entryMeta(entry: HandbookEntryView): string {
   return parts.join(' · ')
 }
 
+/** Redesign UI 1: how often the entry was given and held back, the outcome gap, and its last use. */
+function evidenceText(entry: HandbookEntryView): string {
+  const e = entry.evidence
+  const parts = [L.trials(e?.shown ?? 0, e?.heldBack ?? 0)]
+  if (e?.shownMean !== undefined && e.heldBackMean !== undefined) parts.push(L.trialGap(Math.round((e.shownMean - e.heldBackMean) * 100)))
+  return `${parts.join('，')}。${L.lastUsed(e?.lastUsedAt === undefined ? undefined : agoText(e.lastUsedAt))}`
+}
+
 function EntryRow({ entry }: { readonly entry: HandbookEntryView }): JSX.Element {
   const state = useAppState()
   const store = useAppStore()
@@ -185,6 +193,7 @@ function EntryRow({ entry }: { readonly entry: HandbookEntryView }): JSX.Element
           <span className="entry-text">{entry.text}</span>
         </button>
         <div className="muted small">{entryMeta(entry)}</div>
+        <div className="muted small" data-testid="handbook-evidence">{evidenceText(entry)}</div>
         {detail !== undefined && <EntryHistory keywords={detail.entry.keywords} sources={detail.entry.sources.length} ops={detail.ops} />}
       </div>
       {entry.status === 'retired' ? (

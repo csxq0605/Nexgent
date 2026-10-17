@@ -563,6 +563,21 @@ export interface CostWarningView {
 export interface HandbookEntryView extends HandbookEntry {
   /** Whether a task may be given it now (`isRetrievable`). */
   readonly retrievable: boolean
+  /** Redesign UI 1: how it fared when given or held back by lot (ADR 0023), and when a task last used it; absent when unknown. */
+  readonly evidence?: HandbookEntryEvidence
+}
+
+/** Redesign UI 1: one entry's randomized evidence (`Handbook.evidence()`) and its last use (`Handbook.usage()`). */
+export interface HandbookEntryEvidence {
+  /** Tasks it was drawn and shown to, with a known outcome. */
+  readonly shown: number
+  /** Tasks it was drawn and held back from, with a known outcome. */
+  readonly heldBack: number
+  /** Mean outcome (0–1) of each arm; absent with no tasks in that arm. */
+  readonly shownMean?: number
+  readonly heldBackMean?: number
+  /** When a task last said it used the entry. */
+  readonly lastUsedAt?: string
 }
 
 /** What `handbook.list` returns: the entries this project sees (its own plus the user's shared ones when `useShared`). */

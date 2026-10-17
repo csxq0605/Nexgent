@@ -8,6 +8,7 @@
 import { readFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { Handbook } from '@nexgent/capabilities'
 import { resolveProjectLayout, type LLMRequest } from '@nexgent/kernel'
 import { testSdk, type TestSdk } from './helpers.js'
 
@@ -84,9 +85,27 @@ describe('layer-1 learning through the SDK', () => {
     expect(stopped.ops.at(-1)).toMatchObject({ op: 'status', status: 'retired', actor: 'user', reason: '我不需要这条' })
     expect((await t.sdk.call('handbook.list', { projectId })).entries).toEqual([])
     expect((await t.sdk.call('handbook.list', { projectId, includeRetired: true })).entries).toHaveLength(1)
-    expect((await t.sdk.call('handbook.setStatus', { projectId, entryId: entry!.id, status: 'active' })).entry).toMatchObject({ status: 'active', retrievable: true })
+    // Taking it back restores the status it had before (trial).
+    expect((await t.sdk.call('handbook.setStatus', { projectId, entryId: entry!.id, status: 'active' })).entry).toMatchObject({ status: 'trial', retrievable: true })
+    expect((await t.sdk.call('handbook.show', { projectId, entryId: entry!.id })).ops.at(-1)).toMatchObject({ op: 'status', status: 'trial', actor: 'user' })
     await expect(t.sdk.call('handbook.setStatus', { projectId, entryId: '00000000-0000-4000-8000-000000000000', status: 'retired' })).rejects.toMatchObject({ code: 'handbook/not-found' })
     await expect(t.sdk.call('handbook.setStatus', { projectId, entryId: entry!.id, status: 'trial' as 'active' })).rejects.toMatchObject({ code: 'tool/invalid-input' })
+  })
+
+  it('shows how often each entry was given and held back, the outcome means and its last use', async () => {
+    const t = await testSdk([{ content: 'done', usage }, learner, learner, learner, learner], { legacyCounting: false })
+    const { projectId, root } = await runOne(t, true)
+    await until(async () => (await history(t, root)).history.length === 1)
+    const [entry] = (await t.sdk.call('handbook.list', { projectId })).entries
+    expect(entry!.evidence).toEqual({ shown: 0, heldBack: 0 })
+    const handbook = await Handbook.open({ projectRoot: root, home: t.home })
+    for (const [sessionId, draw, score] of [['a', 'shown', 0.9], ['b', 'held-back', 0.6]] as const) {
+      await handbook.recordTurn({ sessionId, taskId: sessionId, hits: [{ entryId: entry!.id, given: draw === 'shown', status: 'trial', draw, showProbability: 0.5 }] })
+      await handbook.recordOutcome({ sessionId, taskId: sessionId, score, evidence: ['user-rating'] })
+    }
+    const evidence = (await t.sdk.call('handbook.show', { projectId, entryId: entry!.id })).entry.evidence
+    expect(evidence).toMatchObject({ shown: 1, heldBack: 1 })
+    expect(evidence!.shownMean! - evidence!.heldBackMean!).toBeCloseTo(0.3)
   })
 
   it('asks nothing of the model before the notice is acknowledged', async () => {

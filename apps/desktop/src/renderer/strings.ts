@@ -840,6 +840,10 @@ export const L = {
   sinceDate: (date: string) => `${date} 学到`,
   stop: '停用',
   restore: '恢复',
+  // Redesign UI 1: give/withhold evidence and last use (outcome means are 0–1, shown on a 100-point scale).
+  trials: (shown: number, heldBack: number) => (shown === 0 && heldBack === 0 ? '还没有对照记录' : `给过 ${shown} 次，没给 ${heldBack} 次`),
+  trialGap: (points: number) => (points === 0 ? '两组结局一样' : `给了的结局${points > 0 ? '好' : '差'} ${Math.abs(points)} 分（满分 100）`),
+  lastUsed: (when: string | undefined) => (when === undefined ? '还没用到过' : `最近一次用到：${when}`),
   historyTitle: '经过',
   keywords: '适用于',
   sources: (n: number) => `从 ${n} 个任务里学到`,
@@ -942,6 +946,18 @@ export function usdText(usd: number): string {
 /** A percentage of a rate in [0, 1]. */
 export function rateText(rate: number | undefined): string {
   return rate === undefined ? '—' : `${Math.round(rate * 100)}%`
+}
+
+/** How long ago, as people say it: 刚才 / 5 分钟前 / 3 小时前 / 2 天前, then the day. */
+export function agoText(iso: string, now: number = Date.now()): string {
+  const at = Date.parse(iso)
+  if (Number.isNaN(at)) return iso
+  const minutes = Math.floor((now - at) / 60_000)
+  if (minutes < 1) return '刚才'
+  if (minutes < 60) return `${minutes} 分钟前`
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} 小时前`
+  if (minutes < 30 * 24 * 60) return `${Math.floor(minutes / (24 * 60))} 天前`
+  return dayText(iso)
 }
 
 /** A day as people say it: 10 月 16 日. */
