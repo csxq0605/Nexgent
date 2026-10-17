@@ -25,7 +25,8 @@
  *              session, learning off (retrieval stays on); no deliverable → the user asks
  *              once (counted); the deterministic judge scores; the external reviewer judges
  *              repeat 1 of every case and arm for the report only
- *   records    raw.json (report.mjs's input), report.md, manifest.json, observations.json
+ *   records    raw.json (report.mjs's input), report.md, manifest.json, observations.json;
+ *              sessions/<run>/ holds each holdout run's whole session directory
  *
  * Every step passes the profile's cost gate first (spend file `--spend`, real runs only);
  * an unknown cost counts as the step's reserve.
@@ -453,6 +454,10 @@ async function holdoutRun(ctx, template, task, repeat) {
       problems: result.reason === 'error' ? [result.error ?? 'turn failed'] : judged?.problems ?? [],
     }
     if (repeat === 1 && judged !== null) run.delivered = await deliveredFiles(task, runRoot)
+    // The whole session (messages, tool calls, subagents) stays in the run's output, so a missing deliverable can be traced.
+    const sessionDir = join((await layoutFor(runRoot, runHome)).sessions, sessionId)
+    const kept = join(ctx.out, 'sessions', slug(runId))
+    run.sessionKept = await cp(sessionDir, kept, { recursive: true }).then(() => rel(ctx.out, kept), () => null)
   } finally {
     await client.dispose().catch(() => undefined)
   }
