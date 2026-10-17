@@ -90,6 +90,7 @@ export function readDocumentTool(sandbox: Sandbox): Tool {
       inputSchema: READ_DOCUMENT_TOOL.inputSchema,
       effects: READ_DOCUMENT_TOOL.effects,
       approval: READ_DOCUMENT_TOOL.approval,
+      ...(READ_DOCUMENT_TOOL.concurrent === undefined ? {} : { concurrent: READ_DOCUMENT_TOOL.concurrent }),
     },
     handler: async (input, context) => {
       if (input === null || typeof input !== 'object' || Array.isArray(input)) throw new NexgentError('tool/invalid-input', 'arguments must be an object')

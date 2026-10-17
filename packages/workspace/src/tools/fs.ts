@@ -146,6 +146,7 @@ export function readFileTool(deps: ToolDeps): WorkspaceTool {
       }, ['path']),
       effects: ['read'],
       approval: 'never',
+      concurrent: true,
     },
     preflight: (input, context, grants) => guardPreflight(async () => {
       const path = stringField(inputObject(input), 'path', true)

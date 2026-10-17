@@ -26,7 +26,7 @@ export type { LoadedRow, PluginRegistry } from './profile.js'
 
 export { AgentsService } from './agents.js'
 export type { AgentsConfig, CreateAgentOptions, ResumeAgentOptions } from './agents.js'
-export { Agent, CHECKS_TIMEOUT_MS, DEFAULT_MAX_OUTPUT_CONTINUATIONS, DEFAULT_MAX_STEPS, OUTPUT_CUT_NOTE, OUTPUT_CUT_TOOL_RESULT, OUTPUT_CUT_TOOLS_NOTE, providerToolUses, stepLimitNote, FILES_END_CANCEL_MS, HOST_RECORD_TYPES, MODEL_IDLE_TIMEOUT, MODEL_TIMEOUT, repairHistory, TOOL_RECORD_TYPES, TOOL_TIMEOUT, TurnAbort } from './agent.js'
+export { Agent, CHECKS_TIMEOUT_MS, DEFAULT_MAX_OUTPUT_CONTINUATIONS, DEFAULT_MAX_STEPS, MAX_CONCURRENT_CALLS, OUTPUT_CUT_NOTE, OUTPUT_CUT_TOOL_RESULT, OUTPUT_CUT_TOOLS_NOTE, providerToolUses, stepLimitNote, FILES_END_CANCEL_MS, HOST_RECORD_TYPES, MODEL_IDLE_TIMEOUT, MODEL_TIMEOUT, repairHistory, TOOL_RECORD_TYPES, TOOL_TIMEOUT, TurnAbort } from './agent.js'
 export type {
   AgentSettings,
   CloseOptions,

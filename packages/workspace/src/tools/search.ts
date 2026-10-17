@@ -243,6 +243,7 @@ export function listFilesTool(deps: ToolDeps): WorkspaceTool {
       }, []),
       effects: ['read'],
       approval: 'never',
+      concurrent: true,
     },
     preflight: basePreflight(deps, name),
     handler: async (input, context) => {
@@ -434,6 +435,7 @@ export function searchTextTool(deps: ToolDeps): WorkspaceTool {
       }, ['pattern']),
       effects: ['read'],
       approval: 'never',
+      concurrent: true,
     },
     preflight: basePreflight(deps, name),
     handler: async (input, context) => {

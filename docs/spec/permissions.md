@@ -151,7 +151,7 @@
 | `workspace-write` | 执行 | 弹审批 | 拒绝，不提示 |
 | `full-access` | 执行 | 执行，不提示；例外是"始终审批"表 | — |
 
-**并发**（重做 C1，ADR 0017 决策 5；`isConcurrentTool`、`scheduleToolCalls`）。一个模型步骤里的多个工具调用，按调用顺序切成批：连续的可并发调用是一批，同时运行；其他调用各自一批，依次运行。可并发的是 `concurrent: true` 的工具（如 `delegate`、`handbook_mark`），或没声明时只有 `read` 效果、`approval: 'never'` 的工具；本次需要审批应答的调用永不并发，所以审批仍按调用顺序一个一个问。结果按调用顺序交回模型、按调用顺序写会话与账本，不按完成顺序。
+**并发**（重做 C1、K4，ADR 0017 决策 5；`isConcurrentTool`、`scheduleToolCalls`）。一个模型步骤里的多个工具调用，按调用顺序切成批：连续的可并发调用是一批，同时运行（一批最多 `MAX_CONCURRENT_CALLS` = 8 个同时跑，其中 `delegate` 最多 `maxConcurrentMembers` = 4 个）；其他调用各自一批，依次运行。可并发要工具自己声明 `concurrent: true` 且 `approval: 'never'`（现有：`read_file`、`list_files`、`search_text`、`read_document`、`read_spreadsheet`、`web_fetch`、`delegate`、`handbook_mark`）；只声明 `read` 效果但有状态的工具（`present`、待办、团队、工作流等）不声明就串行。本次需要预先审批（`approval` 为 `always`，或模式要求询问）的调用永不并发。并发调用在执行中提出的审批问题（如读项目外路径）排队一个一个问，前一个问题给的本会话授权会直接答复后面同类问题。结果按调用顺序交回模型，`tool.result` 与账本 `tool.call` 按调用顺序写；执行中写的审批记录与工具记录（如 `subagent.start`）按发生顺序写，各自带 `toolCallId`。
 
 `read-only` 下“始终审批”表里的写 / 执行类调用同样直接拒绝。`selfSandboxed` 是 `ToolDefinition` 的契约字段（`contracts/tools.ts`），只有确实对每次读写调用做沙箱与路径检查的宿主包才能声明；策略层按字段判断，不按工具名豁免（步骤 3 勘误，取代按名豁免 `run_code`）。
 

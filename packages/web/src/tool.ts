@@ -57,6 +57,7 @@ export function webFetchTool(options: WebFetchToolOptions = {}): Tool {
       },
       effects: ['network'],
       approval: 'never',
+      concurrent: true,
       timeoutMs: WEB_FETCH_TIMEOUT_MS,
     },
     handler: async (input, context) => {
