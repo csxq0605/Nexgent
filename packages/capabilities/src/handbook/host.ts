@@ -10,17 +10,19 @@
  *   the project's handbook first) or of a draft the session tried, each
  *   once. The kernel writes the ids to
  *   `turn.start.handbook`.
- * - `handbook_mark`: the executing model votes an entry it was given helpful
- *   or harmful; one vote per entry per task.
- * - Usage (`usage.ts`): each such turn first retires the entries nobody
- *   uses, then notes what retrieval found; not in a trial copy or an
- *   improvement session.
+ * - `handbook_mark`: the executing model says an entry it was given was
+ *   used or misled it (ADR 0023: “used” / “misled”, not evidence that it
+ *   helps); one mark per entry per task.
+ * - Evidence and usage (ADR 0023, `usage.ts`): each such turn first enables
+ *   or retires entries by their randomized evidence and retires the ones
+ *   nobody uses, then draws which found entries the model gets and records
+ *   the draws; not in a trial copy or an improvement session.
  */
-import { HANDBOOK_MARK_TOOL, NexgentError, type HandbookTurnInput, type HandbookTurnSelection, type SessionRecord, type Tool } from '@nexgent/kernel'
+import { HANDBOOK_EVIDENCE, HANDBOOK_MARK_TOOL, NexgentError, type HandbookDraw, type HandbookEntry, type HandbookTurnInput, type HandbookTurnSelection, type SessionRecord, type Tool } from '@nexgent/kernel'
 import type { CapabilityStore } from '../capability-store.js'
 import { readDecision } from '../decisions.js'
 import type { CapabilityService } from '../service.js'
-import { Handbook } from './handbook.js'
+import { Handbook, type HandbookTurnHit } from './handbook.js'
 import { contextPolicyKey, migrateContextPolicies } from './migrate.js'
 
 /** Reads a session's records. */
@@ -32,10 +34,27 @@ export interface HandbookHostOptions {
   /** Nexgent home; default `NEXGENT_HOME` or `~/.nexgent`. */
   readonly home?: string
   readonly readRecords: HandbookRecordReader
+  /** The coin of the randomized exposure (ADR 0023); default `Math.random`. */
+  readonly random?: () => number
+}
+
+/** A small seeded generator in [0, 1) (mulberry32), for a reproducible exposure coin. */
+export function seededRandom(seed: number): () => number {
+  let state = seed >>> 0
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let t = state
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
 }
 
 /** The opening line of the injected handbook message. */
 export const HANDBOOK_INJECT_HEADER = 'Experience from earlier tasks (handbook). Use what fits this task and ignore the rest. If an entry clearly helped or misled you, say so with handbook_mark.'
+
+/** The line before entries still on trial (ADR 0023: given to about half the tasks that find them). */
+export const HANDBOOK_TRIAL_HEADER = 'On trial (may not fit this task; follow the task as asked):'
 
 /** The opening line of practices that come with the session's capability version. */
 export const VERSION_PRACTICES_HEADER = 'Practices of this capability version:'
@@ -111,20 +130,51 @@ export class HandbookHost {
     // A policy that is not a handbook entry (a trial version's, a tried draft's) is given once; it stays in the history after that.
     const injected = records.flatMap(record => (record.type === 'user.message' && record.source === 'inject' ? [record.content] : []))
     const pinned = policies.filter(policy => policy.text !== '' && (policy.version === 'draft' || !migrated.has(contextPolicyKey(policy.text))) && !injected.some(text => text.includes(policy.text)))
-    // Bookkeeping of a real task: retire what nobody uses, note what was found; a failure here never stops the turn.
+    // Bookkeeping of a real task: enable or retire by evidence, retire what nobody uses, record the draws.
+    // A failure here never stops the turn.
     const counted = !improvement && !(await this.readOnly())
-    if (counted) await handbook.retireIdle().catch(() => undefined)
-    const usage = improvement ? undefined : await handbook.usage().catch(() => undefined)
-    const found = improvement ? [] : await handbook.retrieve(input.text, { exclude: givenEntries(records), ...(usage === undefined ? {} : { usage }) })
     if (counted) {
-      const ids = found.map(({ entry }) => entry.id)
-      await handbook.recordTurn({ sessionId: input.sessionId, found: ids, given: ids }).catch(() => undefined)
+      await handbook.applyEvidence().catch(() => undefined)
+      await handbook.retireIdle().catch(() => undefined)
     }
-    if (found.length === 0 && pinned.length === 0) return undefined
+    const drawn = counted ? await handbook.drawsOf(input.sessionId).catch(() => new Map<string, { readonly draw: HandbookDraw; readonly status?: 'trial' | 'active' }>()) : new Map<string, { readonly draw: HandbookDraw; readonly status?: 'trial' | 'active' }>()
+    const usage = improvement ? undefined : await handbook.usage().catch(() => undefined)
+    const found = improvement ? [] : await handbook.retrieve(input.text, { exclude: [...givenEntries(records), ...drawn.keys()], ...(usage === undefined ? {} : { usage }) })
+    const hits = this.#draw(found.map(({ entry }) => entry), [...drawn.values()].filter(draw => draw.status === 'trial').length, counted)
+    if (counted) await handbook.recordTurn({ sessionId: input.sessionId, taskId: input.sessionId, hits }).catch(() => undefined)
+    const byId = new Map(found.map(({ entry }) => [entry.id, entry]))
+    const given = (status: 'trial' | 'active') => hits.filter(hit => hit.given && hit.status === status).map(hit => byId.get(hit.entryId)!)
+    const active = given('active')
+    const trial = given('trial')
+    if (active.length === 0 && trial.length === 0 && pinned.length === 0) return undefined
+    const line = (entry: HandbookEntry) => `- [${entry.id}] ${entry.text.replace(/\s*\n\s*/g, ' ')}`
     const lines: string[] = []
-    if (found.length > 0) lines.push(HANDBOOK_INJECT_HEADER, ...found.map(({ entry }) => `- [${entry.id}] ${entry.text.replace(/\s*\n\s*/g, ' ')}`))
+    if (active.length > 0 || trial.length > 0) lines.push(HANDBOOK_INJECT_HEADER, ...active.map(line))
+    if (trial.length > 0) lines.push(HANDBOOK_TRIAL_HEADER, ...trial.map(line))
     if (pinned.length > 0) lines.push(...(lines.length > 0 ? [''] : []), VERSION_PRACTICES_HEADER, ...pinned.map(policy => policy.text))
-    return { ids: found.map(({ entry }) => entry.id), text: lines.join('\n') }
+    return { ids: [...active, ...trial].map(entry => entry.id), text: lines.join('\n') }
+  }
+
+  /**
+   * ADR 0023 decision 3: which found entries the model gets. Active entries,
+   * at most `maxActivePerTask`, each by a coin with `activeShowProbability`;
+   * one trial entry per task by a coin with `trialShowProbability`; the
+   * rest are noted as found but not given. A trial copy draws nothing: it
+   * gives the chosen entries, so gate replays do not depend on a coin.
+   */
+  #draw(found: readonly HandbookEntry[], trialDrawn: number, counted: boolean): HandbookTurnHit[] {
+    const random = this.#options.random ?? Math.random
+    let activeLeft = HANDBOOK_EVIDENCE.maxActivePerTask
+    let trialLeft = Math.max(0, HANDBOOK_EVIDENCE.maxTrialPerTask - trialDrawn)
+    return found.map(entry => {
+      const status = entry.status === 'active' ? 'active' : 'trial'
+      const chosen = status === 'active' ? activeLeft-- > 0 : trialLeft-- > 0
+      if (!chosen) return { entryId: entry.id, given: false, status }
+      if (!counted) return { entryId: entry.id, given: true, status }
+      const showProbability = status === 'active' ? HANDBOOK_EVIDENCE.activeShowProbability : HANDBOOK_EVIDENCE.trialShowProbability
+      const draw: HandbookDraw = random() < showProbability ? 'shown' : 'held-back'
+      return { entryId: entry.id, given: draw === 'shown', status, draw, showProbability }
+    })
   }
 
   /** The root session of a session (members mark entries their root task was given). */

@@ -7,7 +7,8 @@ import { SessionPlugin } from '@nexgent/session'
 import { SkillPlugin } from '@nexgent/skill'
 import { scriptedProvider, type ScriptedProvider } from '@nexgent/test-support'
 import { WorkspacePlugin } from '@nexgent/workspace'
-import { applyDraft, CapabilitiesPlugin, capabilitiesOf, Handbook, HANDBOOK_INJECT_HEADER, listCandidates, VERSION_PRACTICES_HEADER, type CapabilityService } from '../src/index.js'
+import { applyDraft, CapabilitiesPlugin, capabilitiesOf, Handbook, HANDBOOK_INJECT_HEADER,
+  HANDBOOK_TRIAL_HEADER, listCandidates, VERSION_PRACTICES_HEADER, type CapabilityService } from '../src/index.js'
 import { tempDir } from './helpers.js'
 
 let app: NexgentApp | undefined
@@ -33,7 +34,7 @@ async function boot(root: string, llm: ScriptedProvider): Promise<NexgentApp> {
     registry,
     patches: [
       { id: 'workspace', config: { root } },
-      { insert: [{ id: 'context', name: '@nexgent/context' }, { id: 'skill', name: '@nexgent/skill' }, { id: 'capabilities', name: '@nexgent/capabilities', config: { home } }] },
+      { insert: [{ id: 'context', name: '@nexgent/context' }, { id: 'skill', name: '@nexgent/skill' }, { id: 'capabilities', name: '@nexgent/capabilities', config: { home, handbookSeed: 7 } }] },
     ],
   })
   return app
@@ -426,6 +427,9 @@ describe('the handbook in the agent loop (ADR 0018 decision 4, scripted model)',
     ])
     expect((await handbook.find(id))?.entry).toMatchObject({ helpful: 1, harmful: 0 })
     expect((await handbook.ops(id)).ops.at(-1)).toMatchObject({ op: 'upvote', actor: 'execution', reason: 'caught a wrong sum', source: { sessionId: agent.sessionId } })
+    // The trial entry was drawn (ADR 0023) and the draw recorded next to the log.
+    expect(messages.at(-2)!.content).toContain(HANDBOOK_TRIAL_HEADER)
+    expect((await handbook.projectUsage.read()).concat(await handbook.userUsage.read()).find(record => record.kind === 'hit' && record.entryId === id)).toMatchObject({ draw: 'shown', given: true, status: 'trial', showProbability: 0.5 })
 
     // A later turn is not given the same entry again.
     llm.push({ content: 'Again.' })

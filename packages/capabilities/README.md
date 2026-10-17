@@ -90,6 +90,11 @@
   - 检索分数相同时，先排“用到次数 / 给出次数”高的，再排最近用到的。
   - `Handbook.restore(entryId)`：用户把下线的条目恢复到下线前的状态（`actor: user`）；被取代的条目不能恢复。
   - 阈值是代码常量（`HANDBOOK_IDLE_DAYS`、`HANDBOOK_IDLE_MIN_TASKS`、`HANDBOOK_UNUSED_GIVEN_LIMIT`），改进器改不到。
+- 随机注入对照（ADR 0023，常量 `HANDBOOK_EVIDENCE` 在 kernel 契约里）：
+  - `forTurn` 抽签：检索到的启用条目至多 4 条，每条按 0.9 给；试用条目每个任务至多抽 1 条，按 0.5 给；其余记为命中未给。抽签写在 `hit` 行（`draw`、`showProbability`、`status`、`taskId`）。同一会话抽过的条目后面的轮不再抽。试用条目单独列在 `HANDBOOK_TRIAL_HEADER` 之下。试验副本不抽签：选中的条目直接给，什么都不记。`handbookSeed` 配置给出可复现的抽签。
+  - `Handbook.recordOutcome({ sessionId, taskId, score, evidence, userNegative? })` 把根任务的结局写进有这个会话抽签记录的每一份 `usage.jsonl`；来源只能是用户、确定性检查、外部评审。
+  - `Handbook.applyEvidence()`（`forTurn` 每轮先调）按 `handbookStatusFromEvidence` 启用或下线：两组各至少 3 个结局已知、给的那组不差于不给的 → 启用；给的那组有用户否定，或至少 4 个任务、均分低 0.1 以上 → 下线。`Handbook.evidence()` 给出每条的两组计数与均分。
+  - 票只记“用到了 / 说它误导”：`upvote` 不再启用条目，`downvote` 只把启用的条目退回试用。
 
 ## 三个工具
 

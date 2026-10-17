@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { HANDBOOK_ACTIVATE_HELPFUL, resolveProjectDataLayout, resolveUserDataLayout, type HandbookEntry } from '@nexgent/kernel'
+import { resolveProjectDataLayout, resolveUserDataLayout, type HandbookEntry } from '@nexgent/kernel'
 import {
   deriveKeywords,
   Handbook,
@@ -157,22 +157,41 @@ describe('Handbook', () => {
     expect(edit).toMatchObject({ outcome: 'rejected', reason: 'instance-literal' })
   })
 
-  it('votes move an entry from trial to active only while the self-scorer is reliable, and harmful votes retire it, each status change logged', async () => {
+  it('votes only record use: they never enable an entry, and a misled vote sends an enabled one back to trial', async () => {
     const handbook = await project(await tempDir())
     const id = await add(handbook, 'Quote the input file names in the summary.', ['summary'])
-    // No calibrations yet: the scorer is not known to be reliable, so the votes count but the entry stays on trial.
-    for (let i = 0; i < HANDBOOK_ACTIVATE_HELPFUL; i += 1) await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'execution', source: { taskId: `t${i}` } })
-    expect((await handbook.find(id))?.entry).toMatchObject({ status: 'trial', helpful: 2 })
-    await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'execution', source: { taskId: 't-reliable' }, activate: true })
-    expect((await handbook.find(id))?.entry).toMatchObject({ status: 'active', helpful: 3 })
+    for (let i = 0; i < 5; i += 1) await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'execution', source: { taskId: `t${i}` } })
+    expect((await handbook.find(id))?.entry).toMatchObject({ status: 'trial', helpful: 5 })
     for (let i = 0; i < 5; i += 1) await handbook.apply([{ op: 'downvote', entryId: id }], { actor: 'execution', source: { taskId: `d${i}` } })
-    expect((await handbook.find(id))?.entry).toMatchObject({ status: 'retired', helpful: 3, harmful: 5 })
-    expect((await handbook.ops(id)).ops.filter(op => op.op === 'status').map(op => op.op === 'status' && [op.status, op.actor])).toEqual([['active', 'host'], ['retired', 'host']])
-    expect(await handbook.retrieve('write the summary')).toEqual([])
+    expect((await handbook.find(id))?.entry).toMatchObject({ status: 'trial', harmful: 5 })
+    const active = await add(handbook, 'List the files you changed at the end.', ['changes'], { status: 'active' })
+    await handbook.apply([{ op: 'downvote', entryId: active }], { actor: 'reflection', source: { taskId: 'task-9' }, statusReason: status => `回到${status === 'trial' ? '试用' : '?'}` })
+    expect((await handbook.ops(active)).ops.at(-1)).toMatchObject({ op: 'status', status: 'trial', actor: 'host', reason: '回到试用' })
     await expect(handbook.ops('00000000-0000-4000-8000-000000000000')).rejects.toMatchObject({ code: 'handbook/not-found' })
   })
 
-  it('a task votes on an entry once and never on an entry it taught; the status reason can be the caller\'s', async () => {
+  it('enables a trial entry on the randomized comparison and retires it on a negative user signal (ADR 0023)', async () => {
+    const handbook = await project(await tempDir())
+    const id = await add(handbook, 'Write the summary table before the charts.', ['summary table'])
+    const task = async (sessionId: string, draw: 'shown' | 'held-back', score: number, userNegative = false): Promise<void> => {
+      await handbook.recordTurn({ sessionId, taskId: sessionId, hits: [{ entryId: id, given: draw === 'shown', status: 'trial', draw, showProbability: 0.5 }] })
+      expect(await handbook.recordOutcome({ sessionId, taskId: sessionId, score, evidence: ['check'], userNegative })).toEqual(['user'])
+    }
+    for (let i = 0; i < 3; i += 1) await task(`s${i}`, 'shown', 0.8)
+    for (let i = 0; i < 2; i += 1) await task(`h${i}`, 'held-back', 0.6)
+    expect(await handbook.applyEvidence()).toEqual([])
+    await task('h2', 'held-back', 0.7)
+    expect((await handbook.drawsOf('h2')).get(id)).toEqual({ draw: 'held-back', status: 'trial' })
+    const [enabled] = await handbook.applyEvidence()
+    expect(enabled).toMatchObject({ op: 'status', entryId: id, status: 'active', actor: 'host' })
+    expect((await handbook.evidence()).get(id)).toMatchObject({ shown: 3, heldBack: 3 })
+    await task('s9', 'shown', 0.2, true)
+    expect((await handbook.applyEvidence()).map(op => op.op === 'status' && op.status)).toEqual(['retired'])
+    await expect(handbook.recordOutcome({ sessionId: 's9', taskId: 's9', score: 2, evidence: ['check'] })).rejects.toMatchObject({ code: 'tool/invalid-input' })
+    expect(await handbook.recordOutcome({ sessionId: 'never-drawn', taskId: 'x', score: 1, evidence: ['check'] })).toEqual([])
+  })
+
+  it('a task votes on an entry once and never on an entry it taught', async () => {
     const handbook = await project(await tempDir())
     const id = await add(handbook, 'List the files you changed at the end.', ['changes'])
     const votes = await handbook.apply([
@@ -181,8 +200,6 @@ describe('Handbook', () => {
       { op: 'downvote', entryId: id, source: { taskId: 'task-2' } },
     ], { actor: 'execution' })
     expect(votes.map(vote => vote.outcome === 'rejected' ? vote.reason : vote.outcome)).toEqual(['own-source', 'applied', 'already-voted'])
-    await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'reflection', source: { taskId: 'task-3' }, activate: true, statusReason: status => `已${status === 'active' ? '启用' : '下线'}` })
-    expect((await handbook.ops(id)).ops.at(-1)).toMatchObject({ op: 'status', status: 'active', actor: 'host', reason: '已启用' })
   })
 
   it('a project constant may stay in a project entry but not in a shared one', async () => {
@@ -222,7 +239,7 @@ describe('usage-based retirement', () => {
     const id = await add(handbook, 'Run the test suite before reporting a fix as done.', ['test suite'], { status: 'active' })
     advance(HANDBOOK_IDLE_DAYS.active + 1)
     expect(await handbook.retireIdle()).toEqual([])
-    for (let i = 0; i < HANDBOOK_IDLE_MIN_TASKS; i += 1) await handbook.recordTurn({ sessionId: `s${i}`, found: [], given: [] })
+    for (let i = 0; i < HANDBOOK_IDLE_MIN_TASKS; i += 1) await handbook.recordTurn({ sessionId: `s${i}`, hits: [] })
     const [retired] = await handbook.retireIdle()
     expect(retired).toMatchObject({ op: 'status', entryId: id, status: 'retired', actor: 'host' })
     expect(retired!.reason).toMatch(/^unused/)
@@ -237,12 +254,12 @@ describe('usage-based retirement', () => {
     const { handbook, advance } = await clocked()
     const id = await add(handbook, 'Write the summary table before the charts.', ['summary table'])
     advance(1)
-    for (let i = 0; i < HANDBOOK_UNUSED_GIVEN_LIMIT - 1; i += 1) await handbook.recordTurn({ sessionId: `a${i}`, found: [id], given: [id] })
-    await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'execution', source: { taskId: 'a0' }, activate: false })
+    for (let i = 0; i < HANDBOOK_UNUSED_GIVEN_LIMIT - 1; i += 1) await handbook.recordTurn({ sessionId: `a${i}`, hits: [{ entryId: id, given: true }] })
+    await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'execution', source: { taskId: 'a0' } })
     advance(1)
-    for (let i = 0; i < HANDBOOK_UNUSED_GIVEN_LIMIT - 1; i += 1) await handbook.recordTurn({ sessionId: `b${i}`, found: [id], given: [id] })
+    for (let i = 0; i < HANDBOOK_UNUSED_GIVEN_LIMIT - 1; i += 1) await handbook.recordTurn({ sessionId: `b${i}`, hits: [{ entryId: id, given: true }] })
     expect(await handbook.retireIdle()).toEqual([])
-    await handbook.recordTurn({ sessionId: 'b-last', found: [id], given: [id] })
+    await handbook.recordTurn({ sessionId: 'b-last', hits: [{ entryId: id, given: true }] })
     expect((await handbook.retireIdle()).map(op => op.entryId)).toEqual([id])
     expect((await handbook.usage()).get(id)).toMatchObject({ given: 2 * HANDBOOK_UNUSED_GIVEN_LIMIT - 1, used: 1 })
   })
