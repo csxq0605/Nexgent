@@ -142,7 +142,7 @@ export { finishedStatusCounts, metaDiagnosisTools, metaProposeTools, type MetaCh
 export { LearningHost, learnsFrom, REFLECTION_RESERVE_USD, type LearningHostOptions, type LearningStatus, type TurnEndInput } from './learning/host.js'
 export { learningBudgetStatus, recordUsd, type LearningBudgetStatus } from './learning/budget.js'
 export { COPIED_REQUEST_CHARS, curateReflection, DUPLICATE_SIMILARITY, MAX_ADDS_PER_REFLECTION, MAX_EDITS_PER_ENTRY, MAX_ENTRY_CHARS, MAX_OPS_PER_REFLECTION, projectNames, quotedRequests, reflectionEdits, statusReason, votesFromTask, type CurationContext, type CurationRejection, type CurationResult } from './learning/curate.js'
-export { NEGATIVE_RATING, taskOutcome, writeTaskOutcome, type TaskOutcome, type TaskOutcomeInput } from './learning/outcome.js'
+export { COMMENT_SCORE, NEGATIVE_RATING, REVERTED_OUTCOME, revertedTasks, taskOutcome, type TaskFiles, type TaskOutcome, type TaskOutcomeInput } from './learning/outcome.js'
 export { parseReflection, REFLECTION_MAX_TOKENS, REFLECTION_PROMPT_VERSION, reflectionSystemPrompt, reflectionUserMessage, type ContrastTask, type ParsedReflection, type ProposedOp, type ReflectionEvaluation, type ReflectionInput } from './learning/reflect.js'
 export { readTaskRun, renderTaskRun, RUN_RECORD_LIMITS, taskRunOf, type TaskRun } from './learning/run-record.js'
 export { enqueueItem, learningPaths, LEARNING_DIR, MAX_ATTEMPTS, MAX_HISTORY, MAX_PENDING, readLearningQueue, updateLearningQueue, type LearnedStatus, type LearnedTask, type LearningItem, type LearningItemStatus, type LearningQueueFile } from './learning/queue.js'
