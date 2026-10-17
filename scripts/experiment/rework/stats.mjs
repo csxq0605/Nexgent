@@ -47,6 +47,9 @@ export const COMPARISONS = /** @type {const} */ ([
 ])
 
 /** Wording of the criteria (frozen in the plan). */
+/** When L1 counts as having learned nothing (frozen in the plan). */
+export const L1_EMPTY_RULE = 'L1 能用的条目为 0，或不到一半的 L1 留出运行被给到条目'
+
 export const CRITERIA = Object.freeze({
   1: '一层有用：L1 − notes 与 (L1+L2) − L1 的 95% 区间下限都大于 0',
   2: '进化了：在整类留出的任务类型上 (L1+L2) − notes 的 95% 区间下限大于 0',
