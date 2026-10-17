@@ -9,13 +9,14 @@
  * The instructions are the improver's reflection part (ADR 0018 decision
  * 7): general, with no example drawn from any task type. `v1` keeps entries
  * short and abstract, leaves out preferences stated in one task's feedback,
- * and prefers a new entry to rewriting an old one.
+ * and prefers a new entry to rewriting an old one. `v2` (ADR 0023): a vote
+ * records that the run followed an entry, not that it helped.
  */
 import type { HandbookEntry, SelfEvalOutcome, TaskCheck } from '@nexgent/kernel'
 import { languageName, type LearningLanguage } from './text.js'
 
 /** Version of the reflection instructions below. */
-export const REFLECTION_PROMPT_VERSION = 'v1'
+export const REFLECTION_PROMPT_VERSION = 'v2'
 
 /** Output bound of the reflection request. */
 export const REFLECTION_MAX_TOKENS = 4_000
@@ -36,7 +37,7 @@ How to decide:
 - Start from the evidence: the evaluation, failed checks, failed tool calls, the user's feedback, and what the final answer did. An outcome marked unknown proves nothing either way.
 - When a contrasting task is given (similar, but its outcome differed), ask what one run did that the other did not, and whether that difference is a reusable practice.
 - Do not add a near-duplicate of an existing entry. Use "edit" only to correct an entry or make it shorter and clearer, never to append this task's details to it; an entry can be edited only a few times. A different lesson is a new entry. When a new entry replaces older ones, list their ids in "supersedes".
-- Vote only on entries listed under "Entries given to this task": "upvote" when following it clearly helped this run, "downvote" when following it hurt or it was wrong here. Do not vote on other entries.
+- Vote only on entries listed under "Entries given to this task": "upvote" when the run visibly followed it, "downvote" when following it misled the run or it was wrong here. A vote records use, not usefulness: whether an entry helps is measured elsewhere. Do not vote on other entries.
 - Use scope "project" only for a convention that holds in this project alone (for example its own naming or layout rules); otherwise use "user".
 - "keywords": 3 to 8 lowercase words a user would write when asking for such a task (an entry is shown only when its keywords or enough of its words appear in the task), not category names, file names or this task's values.
 - Few precise operations are better than many. An empty list is a good answer when nothing reusable was learned.

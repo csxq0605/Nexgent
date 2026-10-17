@@ -22,17 +22,20 @@
  *   similar to a visible entry it does not supersede is dropped.
  * - Supersedes and edits name visible entries of the same log (a
  *   user-level entry never retires another project's entry).
- * - Votes only on the entries given to the task, only with a known outcome,
- *   one per entry per task, never on an entry learned from the same task
- *   (an entry needs evidence from other tasks to be enabled).
+ * - Votes (ADR 0023: “used” / “said it misled”, never “useful”) only on
+ *   the entries given to the task, one per entry per task, never on an
+ *   entry learned from the same task. They do not depend on the task's
+ *   outcome: whether an entry helps is decided by the randomized exposure
+ *   comparison, from outcomes the host writes ({@link taskOutcome}).
  * - Project-level when the reflection says so, the project does not
  *   contribute (`learning.contribute`), or the text names a file or path
  *   of this project's tasks ({@link projectNames}): names mean something
  *   only in their project, so such an entry is not shared with others.
  *
  * What passes goes to `Handbook.apply` (`@nexgent/capabilities`), which
- * checks its own limits, duplicates and values again under the log's lock
- * and appends the status change the counts call for after a vote.
+ * checks its own limits, duplicates and values again under the log's lock.
+ * The host applies with `activate: false`, so a reflection vote never
+ * enables an entry.
  */
 import type { HandbookChange } from '@nexgent/capabilities'
 import {
@@ -44,7 +47,6 @@ import {
   type HandbookScope,
   type InstanceLiteralSource,
   type ProjectTaskMessage,
-  type SelfEvalOutcome,
 } from '@nexgent/kernel'
 import type { ProposedOp } from './reflect.js'
 import { keywordsOf, longestSharedRun, similarity, type LearningLanguage } from './text.js'
@@ -65,14 +67,13 @@ export const MAX_EDITS_PER_ENTRY = 2
 /** Why an operation was not written. */
 export type CurationRejection =
   | 'empty' | 'too-long' | 'instance-literal' | 'copies-request' | 'duplicate' | 'unknown-entry' | 'not-given'
-  | 'outcome-unknown' | 'already-voted' | 'own-entry' | 'too-many' | 'project-name' | 'edit-limit'
+  | 'already-voted' | 'own-entry' | 'too-many' | 'project-name' | 'edit-limit'
 
 /** What curation knows about the task. */
 export interface CurationContext {
   readonly projectId: string
   /** The task reflected on. */
   readonly taskId: string
-  readonly outcome: SelfEvalOutcome
   /** `learning.contribute`: whether user-level entries may be written. */
   readonly contribute: boolean
   /** Entries a vote may name. */
@@ -237,10 +238,6 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
       reject(op, 'not-given')
       continue
     }
-    if (ctx.outcome === 'unknown') {
-      reject(op, 'outcome-unknown')
-      continue
-    }
     if (entry.sources.some(source => source.taskId === ctx.taskId)) {
       reject(op, 'own-entry')
       continue
@@ -269,10 +266,15 @@ export function votesFromTask(ops: readonly HandbookOp[], taskId: string): Set<s
   return ids
 }
 
-/** The reason of the status change a vote leads to, in the user's language (`Handbook.apply`'s `statusReason`). */
+/**
+ * The reason of a status change after a vote, in the user's language
+ * (`Handbook.apply`'s `statusReason`). ADR 0023: `helpful` / `harmful` read
+ * as “used” / “said it misled”.
+ */
 export function statusReason(status: HandbookEntryStatus, entry: Pick<HandbookEntry, 'helpful' | 'harmful'>, language: LearningLanguage): string {
   const zh = language.toLowerCase().startsWith('zh')
-  if (status === 'active') return zh ? `有用 ${entry.helpful} 票、有害 ${entry.harmful} 票，转为启用` : `${entry.helpful} helpful and ${entry.harmful} harmful votes: enabled`
-  if (status === 'retired') return zh ? `有害 ${entry.harmful} 票、有用 ${entry.helpful} 票，下线` : `${entry.harmful} harmful and ${entry.helpful} helpful votes: retired`
-  return zh ? '回到试用' : 'back to trial'
+  const counts = zh ? `用到 ${entry.helpful} 次、说它误导 ${entry.harmful} 次` : `used ${entry.helpful} times, said to mislead ${entry.harmful} times`
+  if (status === 'active') return zh ? `${counts}，转为启用` : `${counts}: enabled`
+  if (status === 'retired') return zh ? `${counts}，下线` : `${counts}: retired`
+  return zh ? `${counts}，回到试用` : `${counts}: back to trial`
 }
