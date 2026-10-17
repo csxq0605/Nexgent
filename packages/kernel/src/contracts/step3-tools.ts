@@ -47,6 +47,8 @@ export const DELEGATE_TOOL: Step3ToolSpec = {
       materialIds,
       files,
       expectedOutput: { type: 'string', minLength: 1, description: 'One sentence: what the member should present.' },
+      continue: { type: 'string', minLength: 1, description: 'Member id from an earlier delegate or workflow result: send that member this task as a follow-up; it keeps everything it saw. name must be its name.' },
+      maxRequests: { type: 'integer', minimum: 1, maximum: 200, description: 'Most model requests this member may make in this run (the task\'s own cap still applies).' },
     },
   },
 }
@@ -61,6 +63,10 @@ export interface DelegateToolInput {
   readonly materialIds?: readonly string[]
   readonly files?: readonly string[]
   readonly expectedOutput?: string
+  /** Rework K4 (audit D6): the child session of an earlier `delegate` or workflow member of this parent, to continue. */
+  readonly continue?: string
+  /** Rework K4 (audit D11): the member's own request cap for this run ({@link BudgetShare.maxRequests}). */
+  readonly maxRequests?: number
 }
 
 /** `spawn_teammate`: add a named teammate (a child session) to this turn's team and give it its first task. */
@@ -115,7 +121,11 @@ export interface SendMessageToolInput {
   readonly text: string
 }
 
-/** `wait_teammates`: block until the named (default: all active) teammates are idle or stopped; returns their results and mail for the Lead. */
+/**
+ * `wait_teammates`: block until the named (default: all active) teammates are
+ * idle or stopped, or (default `until: 'mail-or-idle'`, rework K4) until a
+ * message for the Lead arrives; returns their results and mail for the Lead.
+ */
 export const WAIT_TEAMMATES_TOOL: Step3ToolSpec = {
   name: 'wait_teammates',
   effects: ['read'],
@@ -123,13 +133,42 @@ export const WAIT_TEAMMATES_TOOL: Step3ToolSpec = {
   inputSchema: {
     type: 'object',
     additionalProperties: false,
-    properties: { names: { type: 'array', items: memberName, description: 'Default: every active teammate.' } },
+    properties: {
+      names: { type: 'array', items: memberName, description: 'Default: every active teammate.' },
+      until: { enum: ['mail-or-idle', 'idle'], description: 'mail-or-idle (default): also return as soon as a teammate sends you a message; idle: only when they have all stopped.' },
+    },
   },
 }
 
 /** Input of {@link WAIT_TEAMMATES_TOOL}. */
 export interface WaitTeammatesToolInput {
   readonly names?: readonly string[]
+  readonly until?: 'mail-or-idle' | 'idle'
+}
+
+/**
+ * `wait_for_message` (teammates only, rework K4, audit D7): wait, without
+ * model requests, until a message for this teammate arrives, a named
+ * teammate finishes its current run, or the timeout passes.
+ */
+export const WAIT_FOR_MESSAGE_TOOL: Step3ToolSpec = {
+  name: 'wait_for_message',
+  effects: ['read'],
+  approval: 'never',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      teammates: { type: 'array', items: memberName, maxItems: 16, description: 'Also return when one of these teammates finishes its current run.' },
+      timeoutSeconds: { type: 'integer', minimum: 1, maximum: 600, description: 'Default 120.' },
+    },
+  },
+}
+
+/** Input of {@link WAIT_FOR_MESSAGE_TOOL}. */
+export interface WaitForMessageToolInput {
+  readonly teammates?: readonly string[]
+  readonly timeoutSeconds?: number
 }
 
 /** `team_task_create`: add a task to the shared board. */
@@ -274,6 +313,7 @@ export const STEP3_TOOLS: readonly Step3ToolSpec[] = [
   SPAWN_TEAMMATE_TOOL,
   SEND_MESSAGE_TOOL,
   WAIT_TEAMMATES_TOOL,
+  WAIT_FOR_MESSAGE_TOOL,
   TEAM_TASK_CREATE_TOOL,
   TEAM_TASK_LIST_TOOL,
   TEAM_TASK_UPDATE_TOOL,

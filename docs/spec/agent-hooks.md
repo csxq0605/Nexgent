@@ -104,15 +104,16 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 | 工具 | 实现包 | 参数 | effects / approval | 行为要点 |
 | --- | --- | --- | --- | --- |
-| `delegate` | subagent | `name`、`task`、`mode?: fresh \| fork`、`preset?`、`persona?`、`materialIds?`、`files?`、`expectedOutput?` | `['read']` / `never` | 建子会话（`executionForm: delegated`），把 `task`、要读的文件与期望产出拼成成员首轮的用户消息，`materialIds` 作为该轮的资料；前台等成员这一轮结束；写 `subagent.start` / `subagent.end`；工具结果是 `MemberResult` 的文本形式（状态、最后回复、成果 id / 版本 / 文件、费用） |
+| `delegate` | subagent | `name`、`task`、`mode?: fresh \| fork`、`preset?`、`persona?`、`materialIds?`、`files?`、`expectedOutput?`、`continue?`、`maxRequests?` | `['read']` / `never` | 建子会话（`executionForm: delegated`；给了 `continue` 时改为续聊本会话的那个委派或工作流成员，不能与 fork 同用；`maxRequests` 是这次运行的请求次数上限，用完结果为 `budget`），把 `task`、要读的文件与期望产出拼成成员首轮的用户消息，`materialIds` 作为该轮的资料；前台等成员这一轮结束；写 `subagent.start` / `subagent.end`；工具结果是 `MemberResult` 的文本形式（状态、最后回复、成果 id / 版本 / 文件、费用） |
 | `spawn_teammate` | team | `name`、`task`、`preset?`、`persona?`、`materialIds?`、`files?` | `['read']` / `never` | 建队友子会话（`team`），写 `team.member` 与 `subagent.start`，队友开始运行；不等待 |
 | `send_message` | team | `to`、`text` | `['read']` / `never` | 写 `team.message { state: queued }`；收件人正在运行时，在它下一次模型请求前经 `beforeRequest` 注入并写 `delivered`；收件人空闲时唤醒它跑一轮（新的一对 `subagent.start` / `end`），邮件在那一轮开始时注入；Lead 发的邮件立即唤醒，队友之间的邮件在 Lead 下一次调用团队工具或 `wait_teammates` 时唤醒。一个队友在一个 Lead 轮次里至多运行 8 次（`MAX_RUNS_PER_LEAD_TURN`，团队包内常量），更多的邮件留到下一轮。发给 `lead` 的邮件由 `wait_teammates` 交给 Lead，或在 Lead 下一轮开始时注入 |
-| `wait_teammates` | team | `names?` | `['read']` / `never` | 等指定（默认全部活跃）队友本轮停下；返回各自的 `MemberResult` 与发给 `lead` 的邮件 |
+| `wait_teammates` | team | `names?`、`until?: mail-or-idle \| idle` | `['read']` / `never` | 等指定（默认全部活跃）队友本轮停下；默认（`mail-or-idle`）有发给 `lead` 的邮件时提前返回，仍在工作的队友标为还在工作；返回各自的 `MemberResult` 与发给 `lead` 的邮件 |
+| `wait_for_message` | team（只给队友） | `teammates?`、`timeoutSeconds?`（1–600，默认 120） | `['read']` / `never` | 不发模型请求地等待：有给自己的邮件（下一步前注入）、所列队友之一当前没有运行、或超时，三者先到者返回（重做 K4，审查 D7） |
 | `team_task_create` / `team_task_list` / `team_task_update` | team | 见契约 | `['read']` / `never` | 任务板；依赖未完成的任务不能开始 |
 | `workflow` | workflow | `script` 与 `graph` 恰给一个；`title?`、`args?` | `['read']` / `never` | 写 `workflow.start` / `phase` / `end`；每个 `agent()` 是一个 `workflow` 成员；图先保存到 `.nexgent/architectures/` 再编译执行 |
 | `run_code` | ptc | `code`、`timeoutMs?`（1–300 s，默认 60 s） | `['read','write','execute']` / `never` | 独立 Node 进程、空环境变量；文件经宿主函数按调用方沙箱检查（`permissions.md` §代码执行进程） |
 
-成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow`、`send_message`、`team_task_create`、`team_task_list`、`team_task_update`（`MEMBER_DENIED_TOOLS`，即除 `run_code` 外的全部协作工具）。队友另由团队包在自己的作用域注册 `send_message`、`team_task_list`、`team_task_update`（`TEAMMATE_TOOLS`）；作用域的遮罩不隐藏同一作用域自己注册的工具，所以只有队友能看到这三个，委派对象与工作流节点看不到任何团队工具。
+成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow`、`send_message`、`wait_for_message`、`team_task_create`、`team_task_list`、`team_task_update`（`MEMBER_DENIED_TOOLS`，即除 `run_code` 外的全部协作工具）。队友另由团队包在自己的作用域注册 `send_message`、`team_task_list`、`team_task_update`、`wait_for_message`（`TEAMMATE_TOOLS`）；作用域的遮罩不隐藏同一作用域自己注册的工具，所以只有队友能看到这四个，委派对象与工作流节点看不到任何团队工具。
 
 ## 步骤 4 工具
 
@@ -154,7 +155,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 由「kernel 维护」落进 `system-prompt.ts`；措辞以代码为准，必须表达的内容：
 
-1. **形态选择原则**（只在 `delegate`、`spawn_teammate` 或 `workflow` 之一可见时出现，节名 `# Working with others`）：默认自己直接做；子任务能独立完成、有可检查的产出时再委派（fresh 写清目标、输入、产出与位置；需要当前对话上下文时用 fork）；多个子任务可以并行且需要互相沟通时组队；步骤固定、可批量时用工作流；成员各自写到自己的子目录，最终由自己读成员成果并用 `present` 交付。不写固定角色与阶段。
+1. **形态选择原则**（只在 `delegate`、`spawn_teammate` 或 `workflow` 之一可见时出现，节名 `# Working with others`）：默认自己直接做；子任务能独立完成、有可检查的产出时再委派（fresh 写清目标、输入、产出与位置；需要当前对话上下文时用 fork，fork 看得到本轮到目前为止的内容）；多个子任务可以并行且需要互相沟通时组队；步骤固定、可批量时用工作流；成员共用项目目录，写明每个成员可以改哪些文件，同时运行的两个成员不给同一个文件（重做 K4：不再要求写到各自的子目录），最终由自己读成员成果并用 `present` 交付。不写固定角色与阶段。
 2. **成员标识**（只在子会话出现）：系统提示的人设段之后单独一行，正文为 `renderMemberPromptLine(member)`，即 `Member: <name> (<executionForm>)`，逐字节固定（脚本化测试按它把请求路由到成员；fork 子会话首轮的用户消息与父会话相同，只能靠这一行区分）。随后一句说明：你是一个更大任务里的成员，只做交给你的部分，完成后用 `present` 交付文件并简要回复结果。
 3. 成员的人设段来自预设的 `persona`（没有则用默认人设）；父会话的系统提示不整体给成员。根会话没有成员标识行。
 

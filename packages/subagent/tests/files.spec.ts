@@ -52,7 +52,7 @@ describe('delegate text', () => {
       },
     })
     expect(text.split('\n')).toEqual([
-      'Member m finished: budget (session c).',
+      'Member m finished: budget (member id c).',
       'Use: 1 model request(s), 5 input / ? output tokens (cache read 0, cache write 0).',
       'Error: budget/exhausted: per-task requests cap reached (2 of 2)',
       'Deliverables: none presented.',

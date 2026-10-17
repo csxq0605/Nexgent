@@ -84,7 +84,7 @@ export const PRESET_NAME_PATTERN = /^[a-z][a-z0-9-]{0,63}$/
 export const PROJECT_PRESETS_DIR = '.nexgent/presets'
 
 /** Names of the built-in presets (`data-formats.md` §预设). */
-export const BUILTIN_PRESET_NAMES = ['read-only-analyst', 'read-only-checker', 'general-executor'] as const
+export const BUILTIN_PRESET_NAMES = ['read-only-analyst', 'read-only-checker', 'general-executor', 'explorer'] as const
 
 /**
  * A member's persona, tool scope and model parameters. Every field except
@@ -368,7 +368,30 @@ export const COLLABORATION_LIMITS = {
   maxMessageBytes: 65_536,
   /** Nodes of one workflow graph. */
   maxGraphNodes: 16,
+  /**
+   * Rework K4 (audit D10): characters of member replies one tool result
+   * shows in total (`delegate`, `workflow`, `wait_teammates`), split evenly
+   * between the members it reports and at least
+   * {@link COLLABORATION_LIMITS.minMemberReplyChars} each.
+   */
+  memberRepliesShownChars: 20_000,
+  minMemberReplyChars: 1_500,
 } as const
+
+/**
+ * Rework K4 (audit D10): a member's reply as a tool result shows it, cut to
+ * `max` characters with a note saying how much was left out and how to get
+ * the rest (continue the member with `delegate`, or read the files it wrote).
+ */
+export function memberReplyExcerpt(text: string, max: number): string {
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}\n[… ${text.length - max} more characters of this reply not shown; ask the member for a specific part with delegate continue, or read the files it wrote]`
+}
+
+/** Rework K4 (audit D10): the per-member share of {@link COLLABORATION_LIMITS.memberRepliesShownChars} when a result reports `members` replies. */
+export function memberReplyShare(members: number): number {
+  return Math.max(COLLABORATION_LIMITS.minMemberReplyChars, Math.floor(COLLABORATION_LIMITS.memberRepliesShownChars / Math.max(1, members)))
+}
 
 /**
  * Collaboration tools hidden from every child session: the tools that start
@@ -387,6 +410,7 @@ export const MEMBER_DENIED_TOOLS = [
   'wait_teammates',
   'workflow',
   'send_message',
+  'wait_for_message',
   'team_task_create',
   'team_task_list',
   'team_task_update',
@@ -405,4 +429,4 @@ export const MEMBER_DENIED_TOOLS = [
 ] as const
 
 /** Team tools a teammate gets in its own scope (the Lead has them too, registered globally). */
-export const TEAMMATE_TOOLS = ['send_message', 'team_task_list', 'team_task_update'] as const
+export const TEAMMATE_TOOLS = ['send_message', 'team_task_list', 'team_task_update', 'wait_for_message'] as const

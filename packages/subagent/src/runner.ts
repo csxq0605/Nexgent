@@ -192,7 +192,36 @@ export interface MemberRun {
  * or a parent record cannot be written.
  */
 export async function runMember(options: RunMemberOptions): Promise<MemberRun> {
-  const member = await startMember(options)
+  return runOpenMember(await startMember(options), options)
+}
+
+/** Options of {@link continueMember}. */
+export interface ContinueMemberOptions extends Omit<RunMemberOptions, 'agents' | 'mode' | 'title' | 'executionForm' | 'sandboxMode'> {
+  /** `ctx.agents` (only `resume` is used). */
+  readonly agents: Pick<AgentsService, 'resume'>
+  /** The member's child session, from an earlier run under the same parent. */
+  readonly childSessionId: string
+  /** The member's execution form as its session records it (`delegated` or `workflow`). */
+  readonly executionForm: MemberExecutionForm
+}
+
+/**
+ * Rework K4 (audit D6): reopen a member that ran before under the same parent
+ * and run one more turn of it with `prompt` (it keeps its whole history),
+ * recorded like a new run (`subagent.start` / `subagent.end` with the same
+ * child session), then close it again. The kernel checks that the session is
+ * a member of this parent.
+ */
+export async function continueMember(options: ContinueMemberOptions): Promise<MemberRun> {
+  const member = await options.agents.resume(options.childSessionId, {
+    child: { parentSessionId: options.parentSessionId, ...(options.budget === undefined ? {} : { budget: options.budget }) },
+    ...(options.preset === undefined ? {} : { preset: options.preset }),
+  })
+  return runOpenMember(member, { ...options, mode: 'fresh' })
+}
+
+/** Record `subagent.start`, run one turn of an open member, record `subagent.end`, and close it. */
+async function runOpenMember(member: Agent, options: Omit<RunMemberOptions, 'agents'>): Promise<MemberRun> {
   let run: MemberRun | undefined
   let failure: unknown
   try {
@@ -205,7 +234,7 @@ export async function runMember(options: RunMemberOptions): Promise<MemberRun> {
       childTurn: member.turn + 1,
       name: options.name,
       executionForm: options.executionForm,
-      ...(options.mode === undefined ? {} : { mode: options.mode }),
+      ...(options.mode === undefined || member.turn > 0 ? {} : { mode: options.mode }),
       ...(options.preset === undefined ? {} : { preset: options.preset.name }),
       ...(options.workflowId === undefined ? {} : { workflowId: options.workflowId }),
       task: task.slice(0, RECORDED_TASK_CHARS),

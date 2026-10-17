@@ -208,7 +208,7 @@ describe('the real delegation run', () => {
     expect(real.readonly?.reason).toEqual({ kind: 'completed' })
   })
 
-  it('the judges copy the kernel collaboration tools; a teammate keeps only its three team tools', () => {
+  it('the judges copy the kernel collaboration tools; a teammate keeps only its four team tools', () => {
     expect([...COLLABORATION_TOOLS]).toEqual(STEP3_TOOLS.map(t => t.name).filter(name => name !== 'run_code'))
     // The step-3 judges know only step-3 tools; step-4 names are judged by accept-step4.
     expect([...forbiddenFor('delegated')].sort()).toEqual(MEMBER_DENIED_TOOLS.filter(t => STEP3_TOOLS.some(s => s.name === t)).sort())
@@ -252,7 +252,8 @@ describe('H03 fork delegation', () => {
   it.each<[string, (d: Phase) => void]>([
     ['the forker has no fork.seed', d => { childRecords(d, 'forker').splice(1, 1) }],
     ['the seed lacks the earlier history', d => { const seed = childRecords(d, 'forker')[1]!; seed['messages'] = seed['messages'].slice(2) }],
-    ['the seed includes the current turn', d => { childRecords(d, 'forker')[1]!['messages'].push({ role: 'user', content: 'Ask a forked helper which supplier I prefer.' }) }],
+    // Rework K4 (audit D5): the seed now holds the current turn so far.
+    ['the seed lacks the current turn', d => { const seed = childRecords(d, 'forker')[1]!; seed['messages'] = seed['messages'].filter((m: { content?: unknown }) => !JSON.stringify(m.content ?? '').includes('Ask a forked helper which supplier I prefer.')) }],
     ['the forker request lacks the history', d => { const r = firstRequest(d, 'forker'); r['text'] = r['text'].replaceAll('PARENT-HISTORY-MARKER', '') }],
     ['the driver was not killed mid-stream', d => { d['phases'].forkKill.streaming = false }],
     ['the killed member lost its seed after resume', d => { childRecords(d, 'forker-two').splice(1, 1) }],
@@ -304,7 +305,7 @@ describe('H15 members cannot delegate', () => {
     const result = judge('H15', real, tools)
     expect(result.status, result.evidence).toBe('passed')
     expect(result.evidence).toMatch(/requests from members \((?=[^)]*delegated)(?=[^)]*workflow)(?=[^)]*team)[^)]*\); none sees a forbidden collaboration tool/)
-    // Teammates keep their own three team tools.
+    // Teammates keep their own four team tools.
     expect(TEAMMATE_TOOLS.every(t => teammateRequest(structuredClone(real) as unknown as Record<string, Phase>)['tools'].includes(t))).toBe(true)
   })
   it('fails when delegated members see the team tools (as before the contract erratum)', () => {

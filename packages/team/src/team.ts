@@ -98,7 +98,8 @@ export function renderTeammatePrompt(input: { readonly name: string; readonly ta
     `The team: ${[TEAM_LEAD_NAME, ...input.team].join(', ')} ("${TEAM_LEAD_NAME}" is the main conversation). `
     + 'Use send_message to reach anyone by name; messages to you arrive before your next step. '
     + 'team_task_list shows the shared task board and the team; team_task_update claims a task (in_progress), completes it with a one-line result, or cancels it. '
-    + `Write files under your own subdirectory (${input.name}/) unless told otherwise, and hand them back with present. `
+    + 'Keep to the files your task covers (teammates work in the same project at the same time), and hand new output files back with present. '
+    + 'To wait for a teammate\'s message or for a teammate to finish, call wait_for_message instead of sleeping. '
     + 'End with a short reply: what you did, where, and what is left.',
   )
   return parts.join('\n\n')
@@ -499,7 +500,7 @@ export class Team {
    * have no run in progress and none due, starting due runs meanwhile; then
    * hand over the Lead's mail (recorded `delivered`).
    */
-  async wait(call: LeadCall, names: readonly string[] | undefined): Promise<{ readonly targets: readonly string[]; readonly mail: readonly TeamMessage[] }> {
+  async wait(call: LeadCall, names: readonly string[] | undefined, until: 'mail-or-idle' | 'idle' = 'mail-or-idle'): Promise<{ readonly targets: readonly string[]; readonly mail: readonly TeamMessage[] }> {
     const unknown = (names ?? []).filter(name => !this.state.members.has(name))
     if (unknown.length > 0) throw new NexgentError('tool/invalid-input', `no teammates named ${unknown.join(', ')}`)
     const running = this.running()
@@ -513,7 +514,9 @@ export class Team {
       const changed = this.changed(call.signal)
       await this.serial(() => this.pump(call))
       const busy = targets.filter(name => this.mates.get(name)?.running !== undefined || this.runnable(name, call.turn) !== undefined)
-      if (busy.length === 0 || this.settling === call.turn) break
+      // Rework K4 (audit D7): a message for the Lead ends the wait early, so a teammate's question is answered while the others work.
+      const mail = until === 'mail-or-idle' && pendingFor(this.state, TEAM_LEAD_NAME).some(message => !this.inflight.has(message.id))
+      if (busy.length === 0 || mail || this.settling === call.turn) break
       await changed
     }
     const mail = await this.serial(async () => {
@@ -527,6 +530,28 @@ export class Team {
       return handed
     })
     return { targets, mail }
+  }
+
+  /**
+   * Rework K4 (audit D7), for a teammate's `wait_for_message`: wait without
+   * model requests until a message for `name` is queued (it is injected
+   * before the teammate's next step), one of `teammates` has no run in
+   * progress, or `timeoutMs` passes.
+   */
+  async waitForMessage(name: string, teammates: readonly string[], timeoutMs: number, signal: AbortSignal): Promise<{ readonly reason: 'mail' | 'finished' | 'timeout'; readonly mail: number; readonly finished: readonly string[] }> {
+    const unknown = teammates.filter(mate => mate === name || !this.state.members.has(mate))
+    if (unknown.length > 0) throw new NexgentError('tool/invalid-input', `not a teammate you can wait for: ${unknown.join(', ')}`)
+    const timeout = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+    for (;;) {
+      if (signal.aborted) throw new NexgentError('tool/aborted', 'wait_for_message was cancelled')
+      const changed = this.changed(timeout)
+      const mail = pendingFor(this.state, name).filter(message => !this.inflight.has(message.id)).length
+      if (mail > 0) return { reason: 'mail', mail, finished: [] }
+      const finished = teammates.filter(mate => this.mates.get(mate)?.running === undefined)
+      if (finished.length > 0) return { reason: 'finished', mail: 0, finished }
+      if (timeout.aborted) return { reason: 'timeout', mail: 0, finished: [] }
+      await changed
+    }
   }
 
   /** Add a board entry. */

@@ -116,9 +116,9 @@ describe('team: two teammates', () => {
         call('spawn_teammate', { name: 'alice', task: 'Do task t1: write alice/a.md.' }, 's1'),
         call('spawn_teammate', { name: 'bob', task: 'Do task t2: write bob/b.md.', preset: 'general-executor' }, 's2'),
       ),
-      calls(call('wait_teammates', {}, 'w1')),
+      calls(call('wait_teammates', { until: 'idle' }, 'w1')),
       calls(call('send_message', { to: 'bob', text: 'check part b once more' }, 'm1')),
-      calls(call('wait_teammates', {}, 'w2')),
+      calls(call('wait_teammates', { until: 'idle' }, 'w2')),
       calls(call('team_task_update', { id: 't3', status: 'in_progress' }, 'u3'), call('team_task_list', {}, 'l1')),
       { content: 'Both parts are written.' },
     ], {
@@ -229,6 +229,96 @@ describe('team: two teammates', () => {
     expect(roster.at(-1)).toMatchObject({ member: { status: 'idle' } })
     const types = leadRecords.map(r => r.type)
     expect(types.lastIndexOf('subagent.end')).toBeLessThan(types.lastIndexOf('turn.end'))
+    await lead.close()
+  })
+})
+
+describe('team: waiting without sleep (rework K4)', () => {
+  const waitForFile = (root: string) => ({
+    definition: { name: 'wait_for_file', description: 'Wait until a project file exists.', inputSchema: { type: 'object', properties: { path: { type: 'string' } } }, effects: ['read'] as const, approval: 'never' as const },
+    handler: async (input: unknown) => {
+      await until(() => existsSync(nodePath.join(root, (input as { path: string }).path)), 'the file')
+      return { content: 'there' }
+    },
+  })
+
+  it('wait_teammates returns as soon as a teammate writes to the Lead, while another keeps working', async () => {
+    const root = await tempRoot()
+    const { app, llm, records } = await boot(root, [
+      calls(
+        call('spawn_teammate', { name: 'asker', task: 'Ask the lead a question.' }, 's1'),
+        call('spawn_teammate', { name: 'worker', task: 'Work until released.' }, 's2'),
+      ),
+      calls(call('wait_teammates', {}, 'w1')),
+      calls(call('write_file', { path: 'release.txt', content: 'go\n' }, 'r1')),
+      calls(call('wait_teammates', {}, 'w2')),
+      { content: 'done' },
+    ], {
+      asker: [calls(call('send_message', { to: 'lead', text: 'which file?' }, 'q1')), { content: 'asked' }],
+      worker: [calls(call('wait_for_file', { path: 'release.txt' }, 'k1')), { content: 'worker done' }],
+    })
+    app.ctx.tools.register(waitForFile(root))
+    const lead = await app.agents.create()
+    expect((await lead.run('Go.')).reason).toEqual({ kind: 'completed' })
+    llm.assertConsumed()
+    const leadRecords = await records(lead.sessionId)
+    const first = resultOf(leadRecords, 'w1').content
+    expect(first).toContain('which file?')
+    expect(first).toMatch(/## worker \(still working; call wait_teammates again/)
+    expect(resultOf(leadRecords, 'w2').content).toContain('worker done')
+    await lead.close()
+  })
+
+  it('wait_for_message returns on a message, when a named teammate finishes, and on timeout', async () => {
+    const root = await tempRoot()
+    const { app, llm, records } = await boot(root, [
+      calls(
+        call('spawn_teammate', { name: 'waiter', task: 'Wait for the others.' }, 's1'),
+        call('spawn_teammate', { name: 'sender', task: 'Tell the waiter.' }, 's2'),
+      ),
+      calls(call('wait_teammates', { until: 'idle' }, 'w1')),
+      { content: 'done' },
+    ], {
+      waiter: [
+        calls(call('wait_for_message', { timeoutSeconds: 30 }, 'm1')),
+        calls(call('wait_for_message', { teammates: ['sender'], timeoutSeconds: 30 }, 'm2')),
+        calls(call('wait_for_message', { timeoutSeconds: 1 }, 'm3')),
+        { content: 'waiter done' },
+      ],
+      sender: [
+        slow(calls(call('send_message', { to: 'waiter', text: 'part one is ready' }, 'x1')), 50),
+        { content: 'sender done' },
+      ],
+    })
+    const lead = await app.agents.create()
+    expect((await lead.run('Go.')).reason).toEqual({ kind: 'completed' })
+    llm.assertConsumed()
+    const leadRecords = await records(lead.sessionId)
+    const waiter = of(leadRecords, 'team.member').find(r => r.member.name === 'waiter')!.member
+    const waiterRecords = await records(waiter.sessionId)
+    expect(resultOf(waiterRecords, 'm1').content).toMatch(/^1 new message for you/)
+    expect(of(waiterRecords, 'user.message').some(r => r.source === 'inject' && r.content.includes('part one is ready'))).toBe(true)
+    expect(resultOf(waiterRecords, 'm2').content).toMatch(/^sender is not working now/)
+    expect(resultOf(waiterRecords, 'm3').content).toBe('No message after 1 seconds.')
+    await lead.close()
+  })
+
+  it('wait_for_message refuses unknown teammates and the caller itself', async () => {
+    const root = await tempRoot()
+    const { app, llm, records } = await boot(root, [
+      calls(call('spawn_teammate', { name: 'solo', task: 'Try waiting.' }, 's1')),
+      calls(call('wait_teammates', { until: 'idle' }, 'w1')),
+      { content: 'done' },
+    ], {
+      solo: [calls(call('wait_for_message', { teammates: ['solo', 'ghost'] }, 'm1')), { content: 'solo done' }],
+    })
+    const lead = await app.agents.create()
+    await lead.run('Go.')
+    llm.assertConsumed()
+    const solo = of(await records(lead.sessionId), 'team.member').find(r => r.member.name === 'solo')!.member
+    const refused = resultOf(await records(solo.sessionId), 'm1')
+    expect(refused.isError).toBe(true)
+    expect(refused.content).toMatch(/not a teammate you can wait for: solo, ghost/)
     await lead.close()
   })
 })

@@ -684,12 +684,34 @@ export class Agent {
 
   /**
    * Step 3: the history a forked member starts from (`fork.seed`): this
-   * session's messages as of the end of its last completed turn (from the
-   * latest compaction on), and the last `seq` they cover. A turn in progress
-   * is not included.
+   * session's messages (from the latest compaction on) and the last `seq`
+   * they cover. Rework K4 (audit D5): during a turn this includes the turn so
+   * far, the user's message and every settled tool result, up to the reply
+   * whose calls are running; that reply keeps its text and its answered
+   * calls only (calls still running, such as the `delegate` that forks, are
+   * left out, and so are its provider blocks).
    */
   forkSeed(): { readonly messages: readonly Exclude<LLMMessage, { role: 'system' }>[]; readonly throughSeq: number } {
-    return { messages: [...this.settledHistory.messages], throughSeq: this.settledHistory.throughSeq }
+    if (this.running === undefined) return { messages: [...this.settledHistory.messages], throughSeq: this.settledHistory.throughSeq }
+    const messages = [...this.messages]
+    let last = -1
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]!.role === 'assistant') {
+        last = index
+        break
+      }
+    }
+    const reply = last === -1 ? undefined : messages[last] as Extract<LLMMessage, { role: 'assistant' }>
+    if (reply?.toolCalls === undefined || reply.toolCalls.length === 0) return { messages, throughSeq: this.lastSeq }
+    const answered = new Set(messages.slice(last + 1).flatMap(message => (message.role === 'tool' ? [message.toolCallId] : [])))
+    if (reply.toolCalls.every(call => answered.has(call.id))) return { messages, throughSeq: this.lastSeq }
+    const calls = reply.toolCalls.filter(call => answered.has(call.id))
+    const trimmed: Extract<LLMMessage, { role: 'assistant' }> = {
+      role: 'assistant',
+      content: reply.content !== '' || calls.length > 0 ? reply.content : '(Handing a sub-task to a member.)',
+      ...(calls.length === 0 ? {} : { toolCalls: calls }),
+    }
+    return { messages: [...messages.slice(0, last), trimmed, ...messages.slice(last + 1)], throughSeq: this.lastSeq }
   }
 
   /**

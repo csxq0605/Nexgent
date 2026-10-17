@@ -6,7 +6,7 @@
  *
  * The Lead's six tools are registered globally; a teammate gets its own
  * `send_message`, `team_task_list` and `team_task_update` in its agent scope
- * (they shadow the global ones). Members never start teammates: the kernel
+ * (they shadow the global ones), and `wait_for_message` (rework K4). Members never start teammates: the kernel
  * hides `spawn_teammate` and `wait_teammates` from them, and every Lead tool
  * refuses a call from a member.
  */
@@ -19,7 +19,9 @@ import {
   TEAM_TASK_CREATE_TOOL,
   TEAM_TASK_LIST_TOOL,
   TEAM_TASK_UPDATE_TOOL,
+  WAIT_FOR_MESSAGE_TOOL,
   WAIT_TEAMMATES_TOOL,
+  memberReplyShare,
   type JsonValue,
   type KernelToolContext,
   type SpawnTeammateToolInput,
@@ -52,7 +54,10 @@ const DESCRIPTIONS = {
   send_message: 'Send a message to a teammate by name, or to "lead". It is delivered once: before a working teammate\'s next step, '
     + 'otherwise at the start of the recipient\'s next turn; an idle teammate is woken by it.',
   wait_teammates: 'Wait until the named teammates (default: every active one) have stopped working, then return each one\'s last result '
-    + '(status, deliverables, final reply) and the messages sent to you.',
+    + '(status, deliverables, final reply) and the messages sent to you. By default it also returns as soon as a teammate sends you a message, '
+    + 'so you can answer it while the others keep working (until: "idle" waits for all of them); call it again to keep waiting.',
+  wait_for_message: 'Wait, without spending model requests, until a message for you arrives, one of the named teammates finishes its current run, '
+    + 'or the timeout passes (default 120 seconds). Use it instead of sleeping when you need another teammate\'s answer or result.',
   team_task_create: 'Add a task to the shared task board. dependsOn lists task ids that must be completed before this one can start.',
   team_task_list: 'Show the shared task board and the team.',
   team_task_update: 'Change a task: claim it (status in_progress; fails while a task it depends on is not completed), '
@@ -193,16 +198,19 @@ export function leadTools(options: LeadToolOptions): Tool[] {
       onlyLead(context, 'wait_teammates')
       const args = (raw ?? {}) as Record<string, unknown>
       const names = args.names === undefined ? undefined : stringList(args.names, 'names', 16)
+      if (args.until !== undefined && args.until !== 'mail-or-idle' && args.until !== 'idle') throw new NexgentError('tool/invalid-input', '"until" must be mail-or-idle or idle')
       const team = await options.team(context.sessionId)
-      const { targets, mail } = await team.wait(leadCall(context), names)
+      const { targets, mail } = await team.wait(leadCall(context), names, (args.until as 'mail-or-idle' | 'idle' | undefined) ?? 'mail-or-idle')
       const lines: string[] = []
       const members = []
+      const running = team.running()
+      const share = memberReplyShare(targets.length)
       if (targets.length === 0) lines.push('No teammate was working.')
       for (const name of targets) {
         const member = team.state.members.get(name)!
         const last = team.lastRun(name)
-        lines.push(`## ${name} (${member.status})`)
-        lines.push(last === undefined ? 'No run yet.' : renderMemberResult({ name, childSessionId: last.childSessionId, result: last.result }))
+        lines.push(`## ${name} (${running.has(name) ? 'still working; call wait_teammates again to wait for it' : member.status})`)
+        lines.push(last === undefined ? 'No run yet.' : renderMemberResult({ name, childSessionId: last.childSessionId, result: last.result }, share))
         members.push({ name, status: member.status, sessionId: member.sessionId, ...(last === undefined ? {} : { childTurn: last.childTurn, result: last.result }) })
       }
       if (mail.length > 0) {
@@ -275,5 +283,21 @@ export function teammateTools(team: Team, name: string): Tool[] {
       return { content: `Task ${task.id} is ${task.status}${task.owner === undefined ? '' : ` (owner ${task.owner})`}.`, meta: meta(task) }
     },
   }
-  return [send, list, update]
+  const waitFor: Tool = {
+    definition: definition(WAIT_FOR_MESSAGE_TOOL),
+    handler: async (raw, context) => {
+      const args = (raw ?? {}) as Record<string, unknown>
+      const teammates = stringList(args.teammates, 'teammates', 16)
+      const seconds = args.timeoutSeconds === undefined ? 120 : Number(args.timeoutSeconds)
+      if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600) throw new NexgentError('tool/invalid-input', '"timeoutSeconds" must be an integer from 1 to 600')
+      const outcome = await team.waitForMessage(name, teammates, seconds * 1000, context.signal)
+      const content = outcome.reason === 'mail'
+        ? `${outcome.mail} new message${outcome.mail === 1 ? '' : 's'} for you; ${outcome.mail === 1 ? 'it is' : 'they are'} shown before your next step.`
+        : outcome.reason === 'finished'
+          ? `${outcome.finished.join(', ')} ${outcome.finished.length === 1 ? 'is' : 'are'} not working now (finished or idle); check the files or the task board.`
+          : `No message after ${seconds} seconds.`
+      return { content, meta: meta(outcome) }
+    },
+  }
+  return [send, list, update, waitFor]
 }

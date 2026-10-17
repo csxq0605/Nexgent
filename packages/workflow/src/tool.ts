@@ -8,26 +8,30 @@
  * (`ToolContext.appendRecord`).
  */
 import { join } from 'node:path'
-import { NexgentError, PROJECT_ARCHITECTURES_DIR, WORKFLOW_TOOL, type JsonValue, type Tool, type ToolOutput } from '@nexgent/kernel'
+import { memberReplyExcerpt, memberReplyShare, NexgentError, PROJECT_ARCHITECTURES_DIR, WORKFLOW_TOOL, type JsonValue, type Tool, type ToolOutput } from '@nexgent/kernel'
 import { saveArchitecture } from './architecture-store.js'
 import type { WorkflowMemberRunner } from './runner.js'
 import { runWorkflow, type RunWorkflowOptions, type WorkflowRunResult } from './runtime.js'
 
-/** Characters of the script's result and of each member's reply shown to the model. */
+/**
+ * Characters of the script's result shown to the model. Member replies share
+ * `COLLABORATION_LIMITS.memberRepliesShownChars` like every collaboration
+ * tool (rework K4, audit D10).
+ */
 export const MAX_SHOWN_RESULT_CHARS = 20_000
-export const MAX_SHOWN_MEMBER_CHARS = 1_500
 
 /** The model-facing description of `workflow`. */
 export const WORKFLOW_DESCRIPTION = 'Orchestrate several members (child sessions) in the foreground and wait for all of them. '
   + 'Use it when the plan is fixed and has dependencies, stages or many items (for a few independent sub-tasks, call delegate several times in one reply instead); members write to their own subdirectories, and you read their results and present the final deliverable yourself. '
   + 'Give exactly one of `script` or `graph`. '
   + 'script: the body of an async JavaScript function that only coordinates (no files, network or Node APIs); `return` a JSON value. It can use: '
-  + 'agent(prompt, { name?, preset?, files?, materialIds?, tools?: { allow?, deny? }, model? }) → { name, status, text, deliverables, usage, requestCount } — runs one member to the end; '
+  + 'agent(prompt, { name?, preset?, files?, materialIds?, tools?: { allow?, deny? }, model?, maxRequests? }) → { name, status, text, deliverables, usage, requestCount } — runs one member to the end; '
   + 'it throws if the member does not complete: catch it to retry or skip that member, or leave it uncaught to end the workflow failed; '
   + 'parallel([() => agent(...), ...]) → results, waits for all; pipeline(items, stage1, stage2, ...) → per-item results, each stage gets (previous, item, index); '
   + 'phase(title) marks progress; log(...values) prints; args is the `args` input. '
   + 'graph: { nodes: [{ id, prompt, dependencies: [ids], preset?, tools?, model? }] } — each node runs once after its dependencies, with their replies appended to its prompt; the graph is saved for reuse. '
-  + 'At most 4 members run at once and 16 members per task; members cannot start members.'
+  + 'At most 4 members run at once and 16 members per task; members cannot start members. '
+  + 'To give one member a follow-up afterwards, call delegate with its name and member id as continue.'
 
 /** Options of {@link workflowTool}. */
 export interface WorkflowToolOptions {
@@ -51,13 +55,15 @@ export function renderWorkflowResult(result: WorkflowRunResult, title: string | 
   const lines = [`${name} ${result.status}: ${result.members.length} member${result.members.length === 1 ? '' : 's'}${tally === '' ? '' : ` (${tally})`}.`]
   if (result.error !== undefined) lines.push(`Error: ${result.error.message}`)
   if (architecture !== undefined) lines.push(`Graph saved as ${PROJECT_ARCHITECTURES_DIR}/${architecture}.json`)
+  const share = memberReplyShare(result.members.length)
   for (const member of result.members) {
-    lines.push('', `## ${member.name} (${member.status}, session ${member.childSessionId})`)
+    lines.push('', `## ${member.name} (${member.status}, member id ${member.childSessionId})`)
     if (member.files.length > 0) lines.push(`Files: ${member.files.join(', ')}`)
-    if (member.text !== '') lines.push(excerpt(member.text, MAX_SHOWN_MEMBER_CHARS))
+    if (member.text !== '') lines.push(memberReplyExcerpt(member.text, share))
   }
   if (result.output !== '') lines.push('', 'Log:', result.output.endsWith('\n') ? result.output.slice(0, -1) : result.output)
-  if (result.value !== undefined) lines.push('', 'Result:', excerpt(JSON.stringify(result.value, null, 2), MAX_SHOWN_RESULT_CHARS))
+  // A graph's result is its nodes' replies, already shown above.
+  if (result.value !== undefined && architecture === undefined) lines.push('', 'Result:', excerpt(JSON.stringify(result.value, null, 2), MAX_SHOWN_RESULT_CHARS))
   return {
     content: lines.join('\n'),
     isError: result.status !== 'completed',

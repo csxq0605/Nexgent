@@ -30,6 +30,8 @@ export interface WorkflowMemberRequest {
   readonly materialIds?: readonly string[]
   /** Project paths the member should read first. */
   readonly files?: readonly string[]
+  /** Rework K4 (audit D11): the member's own request cap for its run. */
+  readonly maxRequests?: number
   /** Fires when the workflow is cancelled or its script ends first. */
   readonly signal: AbortSignal
   /** Parent turn and tool call of the `workflow` call. */
@@ -51,7 +53,7 @@ export type WorkflowMemberRunner = (request: WorkflowMemberRequest) => Promise<M
 export function renderWorkflowMemberPrompt(task: string, files: readonly string[]): string {
   const parts = [task]
   if (files.length > 0) parts.push(`Read these project files first:\n${files.map(file => `- ${file}`).join('\n')}`)
-  parts.push('You are one member of a workflow. Write your files under your own subdirectory, hand them back with `present`, '
+  parts.push('You are one member of a workflow; other members may work in the same project at the same time, so keep to the files your task covers. Hand new output files back with `present`, '
     + 'then end with a short reply: what you did, what you produced and where. That reply is what the workflow reads.')
   return parts.join('\n\n')
 }
@@ -80,6 +82,7 @@ export function agentsMemberRunner(agents: Pick<AgentsService, 'create'>, capabi
       prompt: renderWorkflowMemberPrompt(request.task, files),
       task: request.task,
       ...(request.materialIds === undefined ? {} : { materialIds: request.materialIds }),
+      ...(request.maxRequests === undefined ? {} : { budget: { maxRequests: request.maxRequests } }),
       signal: request.signal,
       turn: request.turn,
       toolCallId: request.toolCallId,

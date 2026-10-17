@@ -124,7 +124,7 @@ describe('child sessions', () => {
     expect(ledger.of('tool.call')[0]).toMatchObject({ name: 'delegate', memberId: 'main', executionForm: 'direct' })
   })
 
-  it('forks the parent history up to its last completed turn into fork.seed (seq 2)', async () => {
+  it('forks the parent history, the current turn so far included, into fork.seed (seq 2; rework K4)', async () => {
     harness = await bootHarness({
       script: [textReply('first answer'), toolCallReply('c1', 'delegate', { task: 'go on' }), textReply('member done'), textReply('all done')],
     })
@@ -137,8 +137,15 @@ describe('child sessions', () => {
     const child = seen.child!
     const seed = store.of(child.sessionId, 'fork.seed')[0]!
     const rootEnd = store.of(root.sessionId, 'turn.end')[0]!
-    expect(seed).toMatchObject({ seq: 2, fromSessionId: root.sessionId, throughSeq: rootEnd.seq })
-    expect(seed.messages).toEqual([{ role: 'user', content: 'turn one' }, { role: 'assistant', content: 'first answer' }])
+    expect(seed).toMatchObject({ seq: 2, fromSessionId: root.sessionId })
+    expect(seed.throughSeq).toBeGreaterThan(rootEnd.seq)
+    // The reply whose delegate call is still running keeps no calls; with no text it gets a placeholder.
+    expect(seed.messages).toEqual([
+      { role: 'user', content: 'turn one' },
+      { role: 'assistant', content: 'first answer' },
+      { role: 'user', content: 'turn two' },
+      { role: 'assistant', content: '(Handing a sub-task to a member.)' },
+    ])
     expect(conversation(llm.requests[2]!)).toEqual([...seed.messages, { role: 'user', content: 'go on' }])
     await root.close()
   })

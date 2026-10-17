@@ -386,7 +386,7 @@ export function buildStep3Script(h, state = {}) {
           call('spawn_teammate', { name: 'alice', task: 'Do task t1: write alice/a.md.' }, 's1'),
           call('spawn_teammate', { name: 'bob', task: 'Do task t2: write bob/b.md.' }, 's2'),
         )),
-        h.expectRequest('teammates spawned', mentions(TASKS.teamWork), calls(call('wait_teammates', {}, 'w1'))),
+        h.expectRequest('teammates spawned', mentions(TASKS.teamWork), calls(call('wait_teammates', { until: 'idle' }, 'w1'))),
         h.expectRequest('teammates waited', mentions(TASKS.teamWork), calls(call('team_task_update', { id: 't3', status: 'in_progress' }, 'u3'), call('team_task_list', {}, 'l1'))),
         h.expectRequest('board listed', mentions(TASKS.teamWork), answer('Both parts are written.')),
       ],

@@ -68,6 +68,27 @@ describe('session temp directory', () => {
 })
 
 describe('write_file / read_file across modes', () => {
+  it('refuses to replace a file that changed after this session read it (rework K4), until it is read again', async () => {
+    const { tool, workspace } = await setup()
+    const a = toolContext(workspace)
+    const b = { ...a, sessionId: 'member-b' }
+    await writeFile(nodePath.join(workspace.root, 'shared.ts'), 'export const x = 1\n')
+    await tool('read_file').handler({ path: 'shared.ts' }, a)
+    await tool('read_file').handler({ path: 'shared.ts' }, b)
+    // b changes the file first (a different size, so the change shows even within one mtime tick)
+    await tool('str_replace').handler({ path: 'shared.ts', old_str: 'x = 1', new_str: 'x = 1, y = 2' }, b)
+    const error = await tool('write_file').handler({ path: 'shared.ts', content: 'export const x = 3\n' }, a).catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'tool/failed', details: { reason: 'changed' } })
+    expect((error as Error).message).toContain('shared.ts changed after you last read it')
+    expect(await readFile(nodePath.join(workspace.root, 'shared.ts'), 'utf8')).toBe('export const x = 1, y = 2\n')
+    // after reading again, a may replace it
+    await tool('read_file').handler({ path: 'shared.ts' }, a)
+    await tool('write_file').handler({ path: 'shared.ts', content: 'export const x = 3, y = 2\n' }, a)
+    expect(await readFile(nodePath.join(workspace.root, 'shared.ts'), 'utf8')).toBe('export const x = 3, y = 2\n')
+    // its own writes do not count as a change
+    await tool('write_file').handler({ path: 'shared.ts', content: 'export const x = 4, y = 2\n' }, a)
+  })
+
   it('writes and reads in workspace-write', async () => {
     const { tool, workspace } = await setup()
     const ctx = toolContext(workspace)
