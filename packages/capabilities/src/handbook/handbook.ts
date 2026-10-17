@@ -54,6 +54,7 @@ import {
 import { HandbookLog, normalizeKeywords, type HandbookOpInput } from './log.js'
 import { HandbookIndex, type ScoredEntry } from './retrieval.js'
 import { jaccard, termSet } from './tokens.js'
+import { handbookUsage, HandbookUsageLog, idleReason, type HandbookEntryUsage, type HandbookUsageInput } from './usage.js'
 import { scorerReliabilityOf } from '../learning/evaluations.js'
 
 /** Term-set similarity at or above which a new entry is a duplicate of a retrievable one. */
@@ -166,14 +167,21 @@ export class Handbook {
   readonly learning: Pick<LearningConfig, 'useShared' | 'contribute'>
   readonly user: HandbookLog
   readonly project: HandbookLog
+  /** `usage.jsonl` next to each log. */
+  readonly userUsage: HandbookUsageLog
+  readonly projectUsage: HandbookUsageLog
   readonly #home: string
+  readonly #now: () => Date
 
-  private constructor(home: string, projectId: string, learning: Pick<LearningConfig, 'useShared' | 'contribute'>, user: HandbookLog, project: HandbookLog) {
+  private constructor(home: string, projectId: string, learning: Pick<LearningConfig, 'useShared' | 'contribute'>, user: HandbookLog, project: HandbookLog, now: () => Date) {
     this.#home = home
+    this.#now = now
     this.projectId = projectId
     this.learning = learning
     this.user = user
     this.project = project
+    this.userUsage = new HandbookUsageLog(user.directory, { now })
+    this.projectUsage = new HandbookUsageLog(project.directory, { now })
   }
 
   /** Open the handbook a project sees. */
@@ -188,11 +196,16 @@ export class Handbook {
       { useShared: learning.useShared, contribute: learning.contribute },
       new HandbookLog(resolveUserDataLayout(home).handbook, now),
       new HandbookLog(resolveProjectDataLayout(home, projectId).handbook, now),
+      options.now ?? (() => new Date()),
     )
   }
 
   logOf(scope: HandbookScope): HandbookLog {
     return scope === 'user' ? this.user : this.project
+  }
+
+  usageLogOf(scope: HandbookScope): HandbookUsageLog {
+    return scope === 'user' ? this.userUsage : this.projectUsage
   }
 
   /** Every entry of the logs this project reads, project entries first. */
@@ -223,7 +236,7 @@ export class Handbook {
   }
 
   /** The top `k` retrievable entries for a task description (BM25), best first. */
-  async retrieve(text: string, options: { readonly k?: number; readonly exclude?: Iterable<string> } = {}): Promise<ScoredEntry[]> {
+  async retrieve(text: string, options: { readonly k?: number; readonly exclude?: Iterable<string>; readonly usage?: ReadonlyMap<string, HandbookEntryUsage> } = {}): Promise<ScoredEntry[]> {
     const [userOps, projectOps] = await Promise.all([this.learning.useShared ? this.user.read() : Promise.resolve([]), this.project.read()])
     const key = `${this.user.file}\u0000${userOps.at(-1)?.seq ?? 0}\u0000${userOps.length}\u0000${this.project.file}\u0000${projectOps.at(-1)?.seq ?? 0}\u0000${projectOps.length}\u0000${this.projectId}\u0000${this.learning.useShared}`
     let index = indexCache.get(key)
@@ -236,7 +249,83 @@ export class Handbook {
       if (indexCache.size >= 16) indexCache.delete(indexCache.keys().next().value!)
       indexCache.set(key, index)
     }
-    return index.search(text, options.k ?? HANDBOOK_TOP_K, new Set(options.exclude ?? []))
+    return index.search(text, options.k ?? HANDBOOK_TOP_K, new Set(options.exclude ?? []), options.usage)
+  }
+
+  /** How each entry this project sees (retired ones too) has been used. */
+  async usage(): Promise<Map<string, HandbookEntryUsage>> {
+    const out = new Map<string, HandbookEntryUsage>()
+    for (const scope of this.learning.useShared ? (['project', 'user'] as const) : (['project'] as const)) {
+      const [ops, records] = await Promise.all([this.logOf(scope).read(), this.usageLogOf(scope).read()])
+      const entries = (await this.#located()).filter(located => located.scope === scope).map(located => located.entry)
+      for (const [id, usage] of handbookUsage(entries, ops, records)) out.set(id, usage)
+    }
+    return out
+  }
+
+  /**
+   * Note a root turn that asked the handbook and what retrieval found for
+   * it (`given`: the ids put in front of the model). The turn counts in
+   * every log this project reads; a hit in its entry's log.
+   */
+  async recordTurn(input: { readonly sessionId: string; readonly found: readonly string[]; readonly given: readonly string[] }): Promise<void> {
+    const located = await this.#located()
+    const scopes: HandbookScope[] = this.learning.useShared ? ['project', 'user'] : ['project']
+    await Promise.all(scopes.map(scope => {
+      const lines: HandbookUsageInput[] = [{ kind: 'turn', projectId: this.projectId, sessionId: input.sessionId }]
+      for (const entryId of input.found) {
+        if (located.find(candidate => candidate.entry.id === entryId)?.scope !== scope) continue
+        lines.push({ kind: 'hit', projectId: this.projectId, sessionId: input.sessionId, entryId, given: input.given.includes(entryId) })
+      }
+      return this.usageLogOf(scope).append(lines)
+    }))
+  }
+
+  /**
+   * Retire the entries nobody uses ({@link idleReason}): a `status`
+   * operation by the host per entry, decided under the log's lock. The user
+   * brings one back with {@link Handbook.restore}.
+   */
+  async retireIdle(): Promise<HandbookOp[]> {
+    const written: HandbookOp[] = []
+    const now = this.#now()
+    for (const scope of this.learning.useShared ? (['project', 'user'] as const) : (['project'] as const)) {
+      const records = await this.usageLogOf(scope).read()
+      const idle = (current: readonly HandbookOp[]): HandbookOpInput[] => {
+        const entries = foldHandbook(current).filter(entry => entry.status !== 'retired' && (scope === 'user' ? entry.scope === 'user' : entry.projectId === this.projectId))
+        const usage = handbookUsage(entries, current, records)
+        return entries.flatMap(entry => {
+          const reason = idleReason(entry, usage.get(entry.id)!, now)
+          return reason === undefined ? [] : [{ op: 'status' as const, entryId: entry.id, actor: 'host' as const, status: 'retired' as const, reason: trimReason(reason)! }]
+        })
+      }
+      // Most turns retire nothing: look first, take the lock only when there is something to write.
+      if (idle(await this.logOf(scope).read()).length === 0) continue
+      written.push(...await this.logOf(scope).append(idle))
+    }
+    return written
+  }
+
+  /**
+   * The user brings a retired entry back, to the status it had before it was
+   * retired (trial when it never had another). Its idle time starts again.
+   * A superseded entry stays retired: the one that replaced it is the one to
+   * bring back or edit.
+   */
+  async restore(entryId: string, options: { readonly reason?: string } = {}): Promise<HandbookChangeResult> {
+    const located = await this.find(entryId)
+    if (located === undefined) return { outcome: 'rejected', entryId, reason: 'not-found', detail: `no handbook entry ${entryId} in this project` }
+    if (located.entry.supersededBy !== undefined) return { outcome: 'rejected', entryId, reason: 'invalid', detail: `entry ${entryId} was replaced by ${located.entry.supersededBy}` }
+    if (located.entry.status !== 'retired') return { outcome: 'applied', entryId, scope: located.scope, ops: [] }
+    const ops = (await this.logOf(located.scope).read()).filter(op => op.entryId === entryId)
+    let before: HandbookEntryStatus = 'trial'
+    let status: HandbookEntryStatus = 'trial'
+    for (const op of ops) {
+      const next: HandbookEntryStatus = op.op === 'add' ? op.status ?? 'trial' : op.op === 'status' ? op.status : status
+      if (next === 'retired' && status !== 'retired') before = status
+      status = next
+    }
+    return (await this.apply([{ op: 'status', entryId, status: before, reason: options.reason ?? 'brought back by the user' }], { actor: 'user' }))[0]!
   }
 
   /**

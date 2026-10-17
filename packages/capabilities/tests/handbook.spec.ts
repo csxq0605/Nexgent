@@ -6,6 +6,9 @@ import {
   deriveKeywords,
   Handbook,
   HandbookIndex,
+  HANDBOOK_IDLE_DAYS,
+  HANDBOOK_IDLE_MIN_TASKS,
+  HANDBOOK_UNUSED_GIVEN_LIMIT,
   HandbookLog,
   migrateContextPolicies,
   policyPractices,
@@ -204,6 +207,44 @@ describe('Handbook', () => {
     const entries = await handbook.entries({ includeRetired: true })
     expect(entries.find(entry => entry.id === kept)).toMatchObject({ text: 'Keep units in column headers.', status: 'trial' })
     expect(entries.find(entry => entry.id === later)).toMatchObject({ status: 'retired' })
+  })
+})
+
+describe('usage-based retirement', () => {
+  async function clocked(): Promise<{ handbook: Handbook; advance: (days: number) => void }> {
+    let now = Date.parse('2026-01-01T00:00:00Z')
+    const handbook = await Handbook.open({ projectRoot: await tempDir(), home: await tempDir(), learning: ON, now: () => new Date(now) })
+    return { handbook, advance: days => { now += days * 24 * 60 * 60 * 1000 } }
+  }
+
+  it('retires an entry not retrieved for long while tasks ran, keeps it when no tasks ran, and the user brings it back', async () => {
+    const { handbook, advance } = await clocked()
+    const id = await add(handbook, 'Run the test suite before reporting a fix as done.', ['test suite'], { status: 'active' })
+    advance(HANDBOOK_IDLE_DAYS.active + 1)
+    expect(await handbook.retireIdle()).toEqual([])
+    for (let i = 0; i < HANDBOOK_IDLE_MIN_TASKS; i += 1) await handbook.recordTurn({ sessionId: `s${i}`, found: [], given: [] })
+    const [retired] = await handbook.retireIdle()
+    expect(retired).toMatchObject({ op: 'status', entryId: id, status: 'retired', actor: 'host' })
+    expect(retired!.reason).toMatch(/^unused/)
+    expect(await handbook.retrieve('run the test suite')).toEqual([])
+    expect(await handbook.restore(id)).toMatchObject({ outcome: 'applied' })
+    expect((await handbook.find(id))!.entry.status).toBe('active')
+    expect(await handbook.retireIdle()).toEqual([])
+    expect((await handbook.retrieve('run the test suite')).map(({ entry }) => entry.id)).toEqual([id])
+  })
+
+  it('retires a trial entry given to many tasks that never used it; a use resets the count', async () => {
+    const { handbook, advance } = await clocked()
+    const id = await add(handbook, 'Write the summary table before the charts.', ['summary table'])
+    advance(1)
+    for (let i = 0; i < HANDBOOK_UNUSED_GIVEN_LIMIT - 1; i += 1) await handbook.recordTurn({ sessionId: `a${i}`, found: [id], given: [id] })
+    await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'execution', source: { taskId: 'a0' }, activate: false })
+    advance(1)
+    for (let i = 0; i < HANDBOOK_UNUSED_GIVEN_LIMIT - 1; i += 1) await handbook.recordTurn({ sessionId: `b${i}`, found: [id], given: [id] })
+    expect(await handbook.retireIdle()).toEqual([])
+    await handbook.recordTurn({ sessionId: 'b-last', found: [id], given: [id] })
+    expect((await handbook.retireIdle()).map(op => op.entryId)).toEqual([id])
+    expect((await handbook.usage()).get(id)).toMatchObject({ given: 2 * HANDBOOK_UNUSED_GIVEN_LIMIT - 1, used: 1 })
   })
 })
 

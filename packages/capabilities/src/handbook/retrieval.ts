@@ -15,6 +15,7 @@
  */
 import type { HandbookEntry } from '@nexgent/kernel'
 import { terms } from './tokens.js'
+import type { HandbookEntryUsage } from './usage.js'
 
 const K1 = 1.2
 const B = 0.75
@@ -62,14 +63,18 @@ export class HandbookIndex {
     return this.#docs.length
   }
 
-  /** Entries with a positive score for `query`, best first; ties keep active before trial, then the better vote balance, then the older entry. */
+  /**
+   * Entries with a positive score for `query`, best first; ties keep active
+   * before trial, then the larger share of tasks that used it, the more
+   * recent use, the better vote balance, then the older entry.
+   */
   #weight(doc: Doc, term: string, f: number, n: number): number {
     const df = this.#df.get(term) ?? 0
     const idf = Math.log(1 + (n - df + 0.5) / (df + 0.5))
     return idf * ((f * (K1 + 1)) / (f + K1 * (1 - B + (B * doc.length) / (this.#avgLength || 1))))
   }
 
-  search(query: string, k: number, exclude: ReadonlySet<string> = new Set()): ScoredEntry[] {
+  search(query: string, k: number, exclude: ReadonlySet<string> = new Set(), usage?: ReadonlyMap<string, Pick<HandbookEntryUsage, 'used' | 'given' | 'lastUsedAt'>>): ScoredEntry[] {
     const q = new Map<string, number>()
     for (const term of terms(query)) q.set(term, (q.get(term) ?? 0) + 1)
     if (q.size === 0 || this.#docs.length === 0 || k <= 0) return []
@@ -96,8 +101,14 @@ export class HandbookIndex {
     scored.sort((a, b) =>
       b.score - a.score
       || (a.entry.status === b.entry.status ? 0 : a.entry.status === 'active' ? -1 : 1)
+      || usedRatio(usage?.get(b.entry.id)) - usedRatio(usage?.get(a.entry.id))
+      || ((usage?.get(b.entry.id)?.lastUsedAt ?? '') > (usage?.get(a.entry.id)?.lastUsedAt ?? '') ? 1 : (usage?.get(b.entry.id)?.lastUsedAt ?? '') < (usage?.get(a.entry.id)?.lastUsedAt ?? '') ? -1 : 0)
       || (b.entry.helpful - b.entry.harmful) - (a.entry.helpful - a.entry.harmful)
       || (a.entry.createdAt < b.entry.createdAt ? -1 : a.entry.createdAt > b.entry.createdAt ? 1 : 0))
     return scored.slice(0, k)
   }
+}
+
+function usedRatio(usage: Pick<HandbookEntryUsage, 'used' | 'given'> | undefined): number {
+  return usage === undefined || usage.given === 0 ? 0 : Math.min(1, usage.used / usage.given)
 }

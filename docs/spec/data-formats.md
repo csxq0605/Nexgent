@@ -128,7 +128,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 ├── credentials.json  config.json  recent-projects.json
 ├── improvers/  improvements/             ADR 0012，不变
 ├── skills/                               用户技能（C2 细化库的布局）
-├── handbook/ops.jsonl                    用户级经验手册（本文“经验手册”）
+├── handbook/ops.jsonl                    用户级经验手册（本文“经验手册”；旁边的 usage.jsonl 是使用记录）
 ├── practice/cases/<caseId>.json          练习题（本文“练习题集”）
 └── projects/<projectId>/
     ├── project.json                      最近一次打开的位置（ProjectDataIndex）
@@ -1268,6 +1268,7 @@ ADR 0018 决策 4：第 1 层学习。一个条目是一条可复用的做法，
 - 检索：试用与启用的条目可被检索（`isRetrievable`），每个任务至多 5 条（`HANDBOOK_TOP_K`）；项目级条目只给本项目，用户级条目在 `learning.useShared` 开着时给所有项目。注入的条目 id 写在 `turn.start.handbook`。
 - 执行中的模型用 `handbook_mark`（只读、不审批、可并发）说一条注入的条目帮了忙还是带偏了；每个任务每个条目一票，重复的忽略。
 - 条目文字用用户的界面语言（ADR 0018 决策 11）；不得含某个任务的具体数值（沿用“候选与门控”的具体数值检查）。
+- 使用记录与按使用下线（参照 Codex memories）：每个手册目录在 `ops.jsonl` 旁边有 `usage.jsonl`，JSON Lines，只追加，不取锁，读取方跳过解析不了的行。它只是记账，不属于条目的历史。每行公共字段 `formatVersion: 1`、`at`、`kind`、`projectId`、`sessionId`（根会话）：`kind: "turn"` 是根任务的一轮问了手册（用户级文件在 `useShared` 开着时也记）；`kind: "hit"` 另带 `entryId`、`given`（是否给了模型），记在条目所在的那一份。“用到了”取 `ops.jsonl` 里的有用票。宿主每轮检索前下线没人用的条目，追加 `status: retired`（`actor: host`，`reason` 以 `unused:` 开头）：启用的条目 90 天、试用的条目 60 天没被检索到，并且其间至少有 10 个根会话问过这份手册；或者试用条目自上次被用到（或新增、恢复）以来给过 8 个根会话都没得到有用票。计时从条目新增、修改、用到、用户改状态或最近一次命中中最晚的那个算起。用户可以把它恢复到下线前的状态（`status` 操作，`actor: user`）；被取代的条目不能这样恢复。试验副本与改进会话不写这个文件。检索分数相同的条目，先按用到次数与给出次数之比，再按最近用到时间排序。
 
 **反思与整理**（重做 E1，`@nexgent/evolve` 的 `LearningHost`）：每个根任务轮结束后（`turn.end` 之后，内核调用可选的 `ctx.improve.noteTurnEnd`；用户、关机或父会话取消的轮不学），任务进入项目的学习队列；应用进程里的后台循环一次处理一个任务：先调 `selfEvaluate`（`@nexgent/capabilities`，见 §自评；每个任务只评一次，之后的轮只并入用户反馈；请求记 `learningPhase: "self-eval"` 或 `"calibrate"`，与反思共用学习预算），再读整段任务的会话记录与这份自评（自评失败或项目副本没有自评时，由本轮确定性检查与用户最后一次评分按 `selfEvalOutcome` 推出；`unknown` 不允许投票），找本项目历史里最相似、结局不同的一个任务作对照，发一次反思请求（`purpose: "auxiliary"`、`learningPhase: "reflect"`、`taskId` 为被学习的任务，不带 `sessionId`），把回答里的操作交给确定性整理，通过的经 `Handbook.apply`（`@nexgent/capabilities`，`actor: "reflection"`）写入，`apply` 在日志锁内再查一遍并按 `nextHandbookStatus` 追加 `status` 操作。被测试改进或比较组用的项目副本（`isTrialCopy`）不入队、不学。整理规则（任何任务都成立）：反思写的条目文字 1–300 字符（一条做法，不是清单）；关键词小写、去重、至多 12 个，缺省时从文字取；含任务具体数值的条目拒绝（`findInstanceLiterals`，项目级条目允许项目常量，用户级不允许）；与任务的用户消息或反馈评论共享 24 个以上连续字符、或用引号引用其中原话的条目，视为照抄一次性要求，拒绝（反馈里对某个成果的偏好不是规则）；反思对同一条目至多改写 2 次；与可见条目文字相似度 ≥ 0.6 且未声明取代的新条目视为重复，拒绝；`supersedes` 与 `edit` 只能指向同一份日志里未退休的条目；投票只能投给本任务被给到的条目（`turn.start.handbook`；没有注入记录时为按任务文字检索到的前 5 条），每个任务每个条目一票；`learning.contribute` 关着时新条目一律记为项目级；文字里有本项目任务消息中出现过的文件名（`name.ext`）或路径（`a/b`）时，新条目记为项目级（名字只在本项目有意义），给用户级条目的 `edit` 带进这类名字时拒绝；一次反思至多新增 3 条、写 10 个操作。执行中的模型经 `handbook_mark` 记票（`actor: "execution"`）；同一任务已投过的条目，反思不再投。
 
