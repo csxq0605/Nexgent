@@ -40,7 +40,7 @@
  *
  * Linux, macOS and Windows; needs `pnpm build`.
  */
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { execFileSync } from 'node:child_process'
@@ -49,7 +49,7 @@ import { gate, recordSpend } from '../step6/budget.mjs'
 import { PRESENT_REQUEST } from '../step6/cases.mjs'
 import { keepOutputs, realComplete } from '../step6/pilot/run.mjs'
 import { allowAll, copyProject, costOf, ledgerOf, loadPackages, MODEL, realKeyPresent, runIdOf, slug, TASK_CAPS } from '../step6/run.mjs'
-import { ARMS, armSupport, firstMessage, FORMAT_TEXT, notesText, standInText } from './arms.mjs'
+import { ARMS, armSupport, firstMessage, FORMAT_TEXT, notesText, reflectionsText, standInText } from './arms.mjs'
 import { allCases, caseById, feedbackCases, holdoutIsolation, judgeCase, trainingOrder } from './cases.mjs'
 import { listFiles, readText, sha256, writeFiles } from './common.mjs'
 import { caseFeedback, counts } from './feedback.mjs'
@@ -353,9 +353,32 @@ async function copyUserLevel(from, to, options) {
 }
 
 /**
+ * Every text the reflection wrote to a handbook in the training stream (add or edit, user
+ * level and each project), with its time: the reflections arm's raw material.
+ * @param {string} home the stream's NEXGENT_HOME
+ * @returns {Promise<Array<{ at: string, text: string }>>}
+ */
+async function reflectionWrites(home) {
+  /** @type {Array<{ at: string, text: string }>} */
+  const out = []
+  const logs = [join(home, 'handbook', 'ops.jsonl')]
+  for (const id of await readdir(join(home, 'projects')).catch(() => [])) logs.push(join(home, 'projects', id, 'handbook', 'ops.jsonl'))
+  for (const file of logs) {
+    const text = await readFile(file, 'utf8').catch(() => '')
+    for (const line of text.split('\n')) {
+      if (line.trim() === '') continue
+      let op
+      try { op = JSON.parse(line) } catch { continue }
+      if ((op.op === 'add' || op.op === 'edit') && op.actor === 'reflection' && typeof op.text === 'string') out.push({ at: String(op.at), text: op.text })
+    }
+  }
+  return out
+}
+
+/**
  * The template project (and home) of an arm, which every holdout run of the arm copies,
  * and the text the arm puts before the task message.
- * @param {any} ctx @param {string} arm @param {{ notes: string, standIn: boolean, streamHome: string }} inputs
+ * @param {any} ctx @param {string} arm @param {{ notes: string, reflections: string, standIn: boolean, streamHome: string }} inputs
  */
 async function armTemplate(ctx, arm, inputs) {
   const root = join(ctx.out, 'arms', slug(arm), 'project')
@@ -380,6 +403,7 @@ async function armTemplate(ctx, arm, inputs) {
   }
   if (arm === 'format') info.prefix = FORMAT_TEXT
   else if (arm === 'notes') info.prefix = inputs.notes
+  else if (arm === 'reflections') info.prefix = inputs.reflections
   else if (arm !== 'base' && arm !== 'L1') {
     if (!inputs.standIn) throw new Error(`no adapter for ${arm}`)
     info.standIn = true
@@ -504,9 +528,12 @@ export async function runRework(options) {
     const notesArm = notesText(obs.stream.notesEntries)
     await writeFile(join(out, 'stream', 'notes.txt'), notesArm.text)
     obs.notes = { entries: obs.stream.notesEntries.length, kept: notesArm.kept, dropped: notesArm.dropped, sha256: sha256(notesArm.text) }
+    const reflectionsArm = reflectionsText(await reflectionWrites(obs.stream.home))
+    await writeFile(join(out, 'stream', 'reflections.txt'), reflectionsArm.text)
+    obs.reflections = { kept: reflectionsArm.kept, dropped: reflectionsArm.dropped, sha256: sha256(reflectionsArm.text) }
 
     step = 'isolation'
-    const roots = [join(out, 'stream'), obs.stream.home, join(out, 'stream', 'notes.txt')]
+    const roots = [join(out, 'stream'), obs.stream.home, join(out, 'stream', 'notes.txt'), join(out, 'stream', 'reflections.txt')]
     obs.isolation = await holdoutIsolation(roots, cases)
     log(`isolation: ${obs.isolation.leaks.length} leaks over ${obs.isolation.scanned} files`)
     if (obs.isolation.leaks.length > 0) throw new Stop(`holdout isolation: ${obs.isolation.leaks.length} leaks; no holdout runs`)
@@ -521,7 +548,7 @@ export async function runRework(options) {
         log(`arm ${arm}: unavailable`)
         continue
       }
-      const template = await armTemplate(ctx, arm, { notes: notesArm.text, standIn: !available.available, streamHome: obs.stream.home })
+      const template = await armTemplate(ctx, arm, { notes: notesArm.text, reflections: reflectionsArm.text, standIn: !available.available, streamHome: obs.stream.home })
       obs.arms[arm] = { ...template, status: template.standIn ? 'stand-in' : 'ran' }
       templates.push(template)
       log(`arm ${arm}: ${template.entries.length} handbook entries visible${template.prefix === '' ? '' : `, ${Buffer.byteLength(template.prefix)} bytes before the task message`}`)
@@ -641,6 +668,7 @@ export async function rawRecords(obs, meta) {
     judges: obs.judges === undefined ? null : { pass: obs.judges.pass, samples: obs.judges.results.length, failed: obs.judges.results.filter((/** @type {any} */ r) => !r.ok) },
     stream: obs.stream === undefined ? null : { learning: obs.stream.learning, tasks: obs.stream.tasks.map((/** @type {any} */ t) => ({ ...t, handbook: named(t.handbook) })) },
     notes: obs.notes ?? null,
+    reflections: obs.reflections ?? null,
     isolation: obs.isolation === undefined ? null : { leaks: obs.isolation.leaks, scanned: obs.isolation.scanned, skipped: obs.isolation.skipped.length },
     arms: Object.fromEntries(Object.entries(obs.arms).map(([arm, a]) => [arm, { status: /** @type {any} */ (a).status, reason: /** @type {any} */ (a).reason ?? null, standIn: /** @type {any} */ (a).standIn ?? false }])),
     runs,
@@ -685,7 +713,7 @@ export { ARMS, listFiles, readText }
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const { options, problems } = parseArgs(process.argv.slice(2))
   if (problems.length > 0) {
-    process.stderr.write(`${problems.join('\n')}\nusage: rework/run.mjs (--scripted | --real) --profile smoke|m3|m4 --out <dir> [--spend <file>] [--stand-in] [--keep-runs]\n`)
+    process.stderr.write(`${problems.join('\n')}\nusage: rework/run.mjs (--scripted | --real) --profile smoke|m3|m3-large|m4 --out <dir> [--spend <file>] [--stand-in] [--keep-runs]\n`)
     process.exitCode = 2
   } else {
     // The first signal stops at the next gate and writes the records; a second one exits at once.

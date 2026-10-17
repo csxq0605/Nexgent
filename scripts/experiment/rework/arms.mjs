@@ -9,6 +9,10 @@
  *   notes      the user's feedback recorded verbatim, where the handbook goes: every counted
  *              feedback entry of the training stream, oldest first, under a header, before
  *              the task message
+ *   reflections  what the product's reflection wrote in the training stream, verbatim and
+ *              all of it (every handbook add / edit text, oldest first), where the handbook
+ *              goes, with no curation, dedup, status or retrieval (the "append the
+ *              reflections" baseline: L1 has to beat its own raw material)
  *   L1         the handbook only: a fresh project under a copy of the training stream's
  *              NEXGENT_HOME (its user level: handbook, settings; skills removed once V2
  *              has them), the product's own retrieval and injection (top entries for the
@@ -41,7 +45,7 @@
  * Linux, macOS and Windows; no dependencies.
  */
 
-export const ARMS = /** @type {const} */ (['base', 'format', 'notes', 'L1', 'L1+L2', 'L1+L2+L3'])
+export const ARMS = /** @type {const} */ (['base', 'format', 'notes', 'reflections', 'L1', 'L1+L2', 'L1+L2+L3'])
 
 /** @typedef {typeof ARMS[number]} Arm */
 
@@ -50,6 +54,7 @@ export const ARM_NEEDS = /** @type {Record<Arm, string[]>} */ ({
   base: [],
   format: [],
   notes: [],
+  reflections: [],
   L1: [],
   'L1+L2': ['L1 的全部', 'V2 技能库', 'E2 第 2 层归纳', '能从 NEXGENT_HOME 里只去掉技能（给 L1 臂）'],
   'L1+L2+L3': ['L1+L2 的全部', 'V3 框架版本存储', 'E3 第 3 层离线运行'],
@@ -84,6 +89,23 @@ export function notesText(entries) {
   return { text: ordered.length - start === 0 ? '' : render(ordered.slice(start)), kept: ordered.length - start, dropped: start }
 }
 
+/** The reflections arm's header (the handbook's wording, saying what the lines are). */
+export const REFLECTIONS_HEADER = 'Experience from earlier tasks (notes written after each earlier task, verbatim). Use what fits this task and ignore the rest.'
+
+/**
+ * The reflections arm's text: every text the reflection wrote to a handbook (add or edit,
+ * any scope), oldest first; when too long, the oldest are dropped (same limit as notes).
+ * @param {ReadonlyArray<{ at: string, text: string }>} written
+ * @returns {{ text: string, kept: number, dropped: number }}
+ */
+export function reflectionsText(written) {
+  const ordered = [...written].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+  const render = (/** @type {typeof ordered} */ list) => [REFLECTIONS_HEADER, ...list.map(w => `- ${w.text.replace(/\s*\n\s*/g, ' ')}`)].join('\n')
+  let start = 0
+  while (start < ordered.length && Buffer.byteLength(render(ordered.slice(start))) > NOTES_MAX_BYTES) start += 1
+  return { text: ordered.length - start === 0 ? '' : render(ordered.slice(start)), kept: ordered.length - start, dropped: start }
+}
+
 /**
  * The first message of a holdout run: the arm's text, a blank line, the task message.
  * @param {string} prefix the arm's text ('' for none)
@@ -108,7 +130,7 @@ export function armSupport(pkgs) {
   const out = {}
   const l1 = typeof pkgs?.capabilities?.Handbook === 'function' && typeof pkgs?.evolve?.LearningHost === 'function'
   for (const arm of ARMS) {
-    if (arm === 'L1' && !l1) out[arm] = { available: false, reason: '需要：已构建的 @nexgent/capabilities Handbook 与 @nexgent/evolve LearningHost' }
+    if ((arm === 'L1' || arm === 'reflections') && !l1) out[arm] = { available: false, reason: '需要：已构建的 @nexgent/capabilities Handbook 与 @nexgent/evolve LearningHost' }
     else out[arm] = ARM_NEEDS[arm].length === 0
       ? { available: true, reason: null }
       : { available: false, reason: `需要：${ARM_NEEDS[arm].join('；')}（适配写好后另行冻结）` }

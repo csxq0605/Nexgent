@@ -1,6 +1,6 @@
 {
   "formatVersion": 1,
-  "experimentId": "rework-3",
+  "experimentId": "rework-4",
   "decision": "docs/adr/0019-evaluation-epoch-practice-set.md §8",
   "partition": "docs/plan/rework-partition.md M1",
   "rules": "adr-0019",
@@ -122,7 +122,7 @@
     "trainFamilies": 4,
     "holdoutFamilies": 2,
     "trainPerFamily": 8,
-    "holdoutPerFamily": 10,
+    "holdoutPerFamily": 20,
     "guardPerTrainFamily": 1
   },
   "pointTypes": {
@@ -3078,6 +3078,785 @@
       ]
     },
     {
+      "id": "file-batch/holdout/11",
+      "family": "file-batch",
+      "split": "holdout",
+      "index": 11,
+      "folder": "job-1a400888",
+      "variant": "2-problems",
+      "traps": [
+        "ragged-row",
+        "semicolon-delimited"
+      ],
+      "message": "这次用到的文件都在项目的 job-1a400888/ 目录下，下面说的路径都相对于这个目录。请整理 inbox/ 下的 6 份 CSV 导出（export-log.txt 只是日志，不用管）：每份转成一个 JSON 数组文件（对象的键是表头，数量、单价、退款额、件数、重量、工时、库存 这几列是数值，要存成数字，别的列都是字符串），存到 converted/，文件名全小写，保留原来的名字（扩展名以外的部分），空格换成下划线“_”，扩展名改成 .json。原文件保持原样，留在 inbox/。另外生成 converted/manifest.csv，表头为 source,target,rows，一个 CSV 一行（source 为 inbox 里的文件名，target 为 JSON 文件名，rows 为 JSON 里的记录条数）。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 converted/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-1a400888/converted",
+        "job-1a400888/converted/manifest.csv",
+        "job-1a400888/converted/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
+          "feedback": "有的 JSON 内容和 CSV 对不上"
+        },
+        {
+          "id": "r2",
+          "type": "format",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
+          "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
+        },
+        {
+          "id": "r3",
+          "type": "missing",
+          "by": "check",
+          "weight": 1,
+          "text": "inbox/ 里的原文件字节不变、一个不少",
+          "feedback": "inbox 里的原文件被改动或删掉了"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Return Items.csv 里字段数不对的那一行（行号或记录号都可以）及怎么处理的",
+          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行"
+        }
+      ],
+      "files": {
+        "job-1a400888/inbox/Orders Q3.csv": "22ad9018a8885f8f7ac1a9aff81af4b98fdf3f99c94307aad2bacfe5ef161a3b",
+        "job-1a400888/inbox/Refunds.csv": "1baaefc80c281acbe0a8b97567593a98e9d06df92d1447ef3f239c4e1edb313a",
+        "job-1a400888/inbox/Return Items.csv": "c846842bf3ee4a61b24802e75dd47f63f1242c94ca57adf5d923299d1575189e",
+        "job-1a400888/inbox/Shipping Plan.csv": "5abd16660d55280e3c937567a291d1d2663e3b4497222afe819b5d847ecc4466",
+        "job-1a400888/inbox/Staff Hours.csv": "56f53ea6f1cf80a80e49cd69cedba2a2cb37907faf33b21d0a42b0e573af97a5",
+        "job-1a400888/inbox/Stock List.csv": "8c8d4cdcd05f1c3b501a01242bfb7598e618357a0337647675dd674d72498f85",
+        "job-1a400888/inbox/export-log.txt": "8f18d47d437f88b6885dd8b5ba629912ad0996fb4bc099d983990992178a3ecc"
+      },
+      "fingerprints": [
+        "OD20AA26",
+        "RF20AA32",
+        "RT20AA09",
+        "导出批次 20AA"
+      ]
+    },
+    {
+      "id": "file-batch/holdout/12",
+      "family": "file-batch",
+      "split": "holdout",
+      "index": 12,
+      "folder": "job-e3dd6118",
+      "variant": "3-problems",
+      "traps": [
+        "bom-header",
+        "duplicate-file",
+        "name-collision"
+      ],
+      "message": "这次用到的文件都在项目的 job-e3dd6118/ 目录下，下面说的路径都相对于这个目录。请整理 inbox/ 下的 9 份 CSV 导出（export-log.txt 只是日志，不用管）：每份转成一个 JSON 数组文件（对象的键是表头，金额、重量、实盘、数量、单价、件数、库存、退款额、客流、成交 这几列是数值，要存成数字，别的列都是字符串），存到 converted/，文件名全小写，保留原来的名字（扩展名以外的部分），空格换成连字符“-”，扩展名改成 .json。原文件保持原样，留在 inbox/。另外生成 converted/manifest.csv，表头为 source,target,rows，一个 CSV 一行（source 为 inbox 里的文件名，target 为 JSON 文件名，rows 为 JSON 里的记录条数）。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 converted/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-e3dd6118/converted",
+        "job-e3dd6118/converted/manifest.csv",
+        "job-e3dd6118/converted/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
+          "feedback": "有的 JSON 内容和 CSV 对不上"
+        },
+        {
+          "id": "r2",
+          "type": "format",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
+          "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
+        },
+        {
+          "id": "r3",
+          "type": "missing",
+          "by": "check",
+          "weight": 1,
+          "text": "inbox/ 里的原文件字节不变、一个不少",
+          "feedback": "inbox 里的原文件被改动或删掉了"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Shipping Plan.csv 和 Export 0623.csv 内容完全相同",
+          "feedback": "有两份输入文件内容一模一样，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Stock List.csv 和 Stock-List.csv 会得到同一个 JSON 文件名、已区分开",
+          "feedback": "有两份输入按命名规则会转成同一个文件名，说明里没提怎么处理"
+        }
+      ],
+      "files": {
+        "job-e3dd6118/inbox/Expense Sheet.csv": "c88f157c62c5c9a284195899fef52d105099cbc1b275bb389fa097ba1d683210",
+        "job-e3dd6118/inbox/Export 0623.csv": "fda409d43bdb84d3d9c522165449f8f1deed4292b302ec6f63c00922f3b5d3e5",
+        "job-e3dd6118/inbox/Inventory.csv": "1bf49a4885808f1f328133daa4c73185203f0fa66d929363203025732d6e7476",
+        "job-e3dd6118/inbox/Orders Q3.csv": "20f3f58f521021d2d53e602611e92f5795f29d3f74aa42ef2122b96972bf5b73",
+        "job-e3dd6118/inbox/Return Items.csv": "da555312f43018afcc5d883664b608e4c10e57258fee53b74381a0ca6380b1ea",
+        "job-e3dd6118/inbox/Shipping Plan.csv": "fda409d43bdb84d3d9c522165449f8f1deed4292b302ec6f63c00922f3b5d3e5",
+        "job-e3dd6118/inbox/Stock List.csv": "af22b0c112593308e2904667839a50b80421a7cc06178ac222a42467efad9f40",
+        "job-e3dd6118/inbox/Stock-List.csv": "db2dcdd203cbebb47427fc9edc02d7b22ba93f905cfd4798439407c27036c1b9",
+        "job-e3dd6118/inbox/Visit Log.csv": "13ca78fc3b3e87e88d316210b020183f101b3f842d66ca208ab4c30ce93fa387",
+        "job-e3dd6118/inbox/export-log.txt": "b0a02d0cb7e7646e1ab4e3c90fd34eed1df6b375da42488a9982e2a3f9eebf2c"
+      },
+      "fingerprints": [
+        "EXDD6424",
+        "SHDD6410",
+        "IVDD6435",
+        "导出批次 DD64"
+      ]
+    },
+    {
+      "id": "file-batch/holdout/13",
+      "family": "file-batch",
+      "split": "holdout",
+      "index": 13,
+      "folder": "job-994e7811",
+      "variant": "2-problems",
+      "traps": [
+        "duplicate-file",
+        "name-collision"
+      ],
+      "message": "这次用到的文件都在项目的 job-994e7811/ 目录下，下面说的路径都相对于这个目录。请整理 inbox/ 下的 8 份 CSV 导出（export-log.txt 只是日志，不用管）：每份转成一个 JSON 数组文件（对象的键是表头，金额、工时、库存、实盘、退款额、重量、时长 这几列是数值，要存成数字，别的列都是字符串），存到 converted/，文件名全小写，保留原来的名字（扩展名以外的部分），空格换成连字符“-”，扩展名改成 .json。原文件保持原样，留在 inbox/。另外生成 converted/manifest.csv，表头为 source,target,rows，一个 CSV 一行（source 为 inbox 里的文件名，target 为 JSON 文件名，rows 为 JSON 里的记录条数）。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 converted/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-994e7811/converted",
+        "job-994e7811/converted/manifest.csv",
+        "job-994e7811/converted/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
+          "feedback": "有的 JSON 内容和 CSV 对不上"
+        },
+        {
+          "id": "r2",
+          "type": "format",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
+          "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
+        },
+        {
+          "id": "r3",
+          "type": "missing",
+          "by": "check",
+          "weight": 1,
+          "text": "inbox/ 里的原文件字节不变、一个不少",
+          "feedback": "inbox 里的原文件被改动或删掉了"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Stock List.csv 和 Export 0611.csv 内容完全相同",
+          "feedback": "有两份输入文件内容一模一样，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Expense Sheet.csv 和 Expense-Sheet.csv 会得到同一个 JSON 文件名、已区分开",
+          "feedback": "有两份输入按命名规则会转成同一个文件名，说明里没提怎么处理"
+        }
+      ],
+      "files": {
+        "job-994e7811/inbox/Expense Sheet.csv": "07c5ae1596c72ffdaaecd8cf194ca66f009362d4cba601086e2c9cc419f38076",
+        "job-994e7811/inbox/Expense-Sheet.csv": "336edcc0aa566a38a50504f44ea39f8a149b65369b1dcdbc4db1847230f98e69",
+        "job-994e7811/inbox/Export 0611.csv": "1bab4220e25eb02344e1c9969fa3e10b1c3ebd6dd2e7f83df68308cf573b5ee5",
+        "job-994e7811/inbox/Inventory.csv": "0d928b3fb5fba51e2ec9d57f97de215a0e950242319272064e8501d02272dc57",
+        "job-994e7811/inbox/Refunds.csv": "472d186550d31f0691852e6b6fecbca4f764014f83fa8ac48c4a65a8825ba608",
+        "job-994e7811/inbox/Shipping Plan.csv": "0dcdd90d312ec1acea26868f3f62174d3ae9aaafc7ac838ab19a5b6c6bd41b48",
+        "job-994e7811/inbox/Stock List.csv": "1bab4220e25eb02344e1c9969fa3e10b1c3ebd6dd2e7f83df68308cf573b5ee5",
+        "job-994e7811/inbox/Support Tickets.csv": "a478a20b4ca88750a2052011f25febe578e69a8679ead64e0b819bceabc65ae6",
+        "job-994e7811/inbox/export-log.txt": "8a15ad52f37c15c7deac9308d05ceb4f1e1353797272aa5a156d97a66f1d32ac"
+      },
+      "fingerprints": [
+        "EX15AE17",
+        "ST15AE40",
+        "SK15AE01",
+        "导出批次 15AE"
+      ]
+    },
+    {
+      "id": "file-batch/holdout/14",
+      "family": "file-batch",
+      "split": "holdout",
+      "index": 14,
+      "folder": "job-e5888bc8",
+      "variant": "2-problems",
+      "traps": [
+        "duplicate-file",
+        "empty-file"
+      ],
+      "message": "这次用到的文件都在项目的 job-e5888bc8/ 目录下，下面说的路径都相对于这个目录。请整理 inbox/ 下的 7 份 CSV 导出（export-log.txt 只是日志，不用管）：每份转成一个 JSON 数组文件（对象的键是表头，金额、工时、实盘、库存、时长、客流、成交 这几列是数值，要存成数字，别的列都是字符串），存到 out/，文件名全小写，保留原来的名字（扩展名以外的部分），空格换成下划线“_”，扩展名改成 .json。原文件保持原样，留在 inbox/。另外生成 out/manifest.csv，表头为 source,target,rows，一个 CSV 一行（source 为 inbox 里的文件名，target 为 JSON 文件名，rows 为 JSON 里的记录条数）。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 out/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-e5888bc8/out",
+        "job-e5888bc8/out/manifest.csv",
+        "job-e5888bc8/out/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "out/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
+          "feedback": "有的 JSON 内容和 CSV 对不上"
+        },
+        {
+          "id": "r2",
+          "type": "format",
+          "by": "check",
+          "weight": 2,
+          "text": "out/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
+          "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
+        },
+        {
+          "id": "r3",
+          "type": "missing",
+          "by": "check",
+          "weight": 1,
+          "text": "inbox/ 里的原文件字节不变、一个不少",
+          "feedback": "inbox 里的原文件被改动或删掉了"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "out/notes.md 指出 Staff Hours.csv 和 Export 1126.csv 内容完全相同",
+          "feedback": "有两份输入文件内容一模一样，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "out/notes.md 指出 Expense Sheet.csv 只有表头、没有数据行",
+          "feedback": "有个输入文件没有数据行，说明里没提"
+        },
+        {
+          "id": "r6",
+          "type": "convention",
+          "by": "check",
+          "weight": 1,
+          "text": "out/ 下的 JSON 文件用两个空格缩进、文件末尾留一个换行",
+          "feedback": "JSON 文件的排版不统一，请统一用两个空格缩进，文件末尾留一个换行"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "weight": 1,
+          "text": "（一次性的要求，不计分）这次能顺便告诉我你先看了哪个文件吗",
+          "feedback": "这次能顺便告诉我你先看了哪个文件吗"
+        }
+      ],
+      "files": {
+        "job-e5888bc8/inbox/Expense Sheet.csv": "83cf773ed557d78f4f290a1e8c2c8907b32a19c2f23cba1369a3b04332b83f28",
+        "job-e5888bc8/inbox/Export 1126.csv": "0b13157e973eacd68593ce73fe8ac101b7329dcb9e210e6454d002d0727815be",
+        "job-e5888bc8/inbox/Inventory.csv": "3de0a3a3be4f7f955a34ef7d4371105a4e6a969b6de3314b4049263fddeab30f",
+        "job-e5888bc8/inbox/Staff Hours.csv": "0b13157e973eacd68593ce73fe8ac101b7329dcb9e210e6454d002d0727815be",
+        "job-e5888bc8/inbox/Stock List.csv": "8ba20cc16004b1731f47fa9345c20376b39c35a217db8b57a30fbf35cc7f9721",
+        "job-e5888bc8/inbox/Support Tickets.csv": "fb8969c1a22e1991d5d6d1fa2e832ce50007ea3ae25e5b19f0c391d6f8ee33d6",
+        "job-e5888bc8/inbox/Visit Log.csv": "1a685481cdee45241ebdd7a4eb3b7d92cd81d28e43885867ffe592ab7c625f4f",
+        "job-e5888bc8/inbox/export-log.txt": "c3d089dcf3928af88ab8ee1e9cdcc3e689cbaca5a2e9cc4f8c1f19cfcd820038"
+      },
+      "fingerprints": [
+        "STA22205",
+        "IVA22229",
+        "导出批次 A222"
+      ]
+    },
+    {
+      "id": "file-batch/holdout/15",
+      "family": "file-batch",
+      "split": "holdout",
+      "index": 15,
+      "folder": "job-a5798875",
+      "variant": "2-problems",
+      "traps": [
+        "bom-header",
+        "empty-file"
+      ],
+      "message": "这次用到的文件都在项目的 job-a5798875/ 目录下，下面说的路径都相对于这个目录。inbox/ 里是几份导出的 CSV（共 7 个，另有一个 export-log.txt 不用转换）。请把每个 CSV 转成一个 JSON 文件，内容是对象数组，每行一个对象、键用表头的列名；这些列是数值列，要写成 JSON 数字：金额、数量、单价、退款额、件数、库存、时长、客流、成交，其余列保持字符串。转换结果放在 out/ 下，文件名全小写，保留原来的名字（扩展名以外的部分），空格换成连字符“-”，扩展名改成 .json。inbox/ 里的原文件不要改动、不要删除。再写一份清单 out/manifest.csv，表头 source,target,rows，每个转换的 CSV 一行：source 是 inbox 里的文件名，target 是生成的 JSON 文件名，rows 是 JSON 里的记录条数。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 out/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-a5798875/out",
+        "job-a5798875/out/manifest.csv",
+        "job-a5798875/out/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "out/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
+          "feedback": "有的 JSON 内容和 CSV 对不上"
+        },
+        {
+          "id": "r2",
+          "type": "format",
+          "by": "check",
+          "weight": 2,
+          "text": "out/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
+          "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
+        },
+        {
+          "id": "r3",
+          "type": "missing",
+          "by": "check",
+          "weight": 1,
+          "text": "inbox/ 里的原文件字节不变、一个不少",
+          "feedback": "inbox 里的原文件被改动或删掉了"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "out/notes.md 指出 Refunds.csv 只有表头、没有数据行",
+          "feedback": "有个输入文件没有数据行，说明里没提"
+        }
+      ],
+      "files": {
+        "job-a5798875/inbox/Expense Sheet.csv": "eb2d5ceb36bbeb8dd19c649613cd3ebe7967ebeb9a0d7e8ce68d9deda7403ad1",
+        "job-a5798875/inbox/Orders Q3.csv": "201e88e4dfcd5038f2f976f80cccf288aaf1a1839e98a7fcbe4ac5e4a8b71290",
+        "job-a5798875/inbox/Refunds.csv": "f8c21714b7ba73804b1de8482f9853567deb32585e1c523f5db1a8f78ba8e7e8",
+        "job-a5798875/inbox/Return Items.csv": "b89e65980204fa3140f28c4bd05d7e1db1bc9eedb338e1d46395ac1fb41dc98c",
+        "job-a5798875/inbox/Stock List.csv": "97a349046ded917feb7fdc6b51789176d159dc6a6dbbc54afca61c41979d8170",
+        "job-a5798875/inbox/Support Tickets.csv": "b51b29c8d1b44890868aa56ab162a9e2c405f0a942487fcc38bddd265eec12b9",
+        "job-a5798875/inbox/Visit Log.csv": "2d4ae4daae644407a49d4681fe1c8cb6418646db23f520d0e7c3b3188867240a",
+        "job-a5798875/inbox/export-log.txt": "4593d1580ae50812f09a9f43714340bfc512d2fb548459d5507992459c4dfc89"
+      },
+      "fingerprints": [
+        "EX08F027",
+        "OD08F040",
+        "导出批次 08F0"
+      ]
+    },
+    {
+      "id": "file-batch/holdout/16",
+      "family": "file-batch",
+      "split": "holdout",
+      "index": 16,
+      "folder": "job-74c53c21",
+      "variant": "2-problems",
+      "traps": [
+        "ragged-row",
+        "empty-file"
+      ],
+      "message": "这次用到的文件都在项目的 job-74c53c21/ 目录下，下面说的路径都相对于这个目录。inbox/ 里是几份导出的 CSV（共 6 个，另有一个 export-log.txt 不用转换）。请把每个 CSV 转成一个 JSON 文件，内容是对象数组，每行一个对象、键用表头的列名；这些列是数值列，要写成 JSON 数字：金额、数量、单价、退款额、工时、库存、客流、成交，其余列保持字符串。转换结果放在 converted/ 下，文件名全小写，保留原来的名字（扩展名以外的部分），空格换成连字符“-”，扩展名改成 .json。inbox/ 里的原文件不要改动、不要删除。再写一份清单 converted/manifest.csv，表头 source,target,rows，每个转换的 CSV 一行：source 是 inbox 里的文件名，target 是生成的 JSON 文件名，rows 是 JSON 里的记录条数。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 converted/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-74c53c21/converted",
+        "job-74c53c21/converted/manifest.csv",
+        "job-74c53c21/converted/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
+          "feedback": "有的 JSON 内容和 CSV 对不上"
+        },
+        {
+          "id": "r2",
+          "type": "format",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
+          "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
+        },
+        {
+          "id": "r3",
+          "type": "missing",
+          "by": "check",
+          "weight": 1,
+          "text": "inbox/ 里的原文件字节不变、一个不少",
+          "feedback": "inbox 里的原文件被改动或删掉了"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Refunds.csv 里字段数不对的那一行（行号或记录号都可以）及怎么处理的",
+          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Stock List.csv 只有表头、没有数据行",
+          "feedback": "有个输入文件没有数据行，说明里没提"
+        },
+        {
+          "id": "r6",
+          "type": "convention",
+          "by": "check",
+          "weight": 1,
+          "text": "converted/ 下的 JSON 文件用两个空格缩进、文件末尾留一个换行",
+          "feedback": "JSON 文件的排版不统一，请统一用两个空格缩进，文件末尾留一个换行"
+        }
+      ],
+      "files": {
+        "job-74c53c21/inbox/Expense Sheet.csv": "78e071cf0089edadc0cd6f53322322a6288f0921515f4cb4982b787147f394e7",
+        "job-74c53c21/inbox/Orders Q3.csv": "57058bbf1a476cb4d1c79448c7918371f04d6f9f5582e9c16c7e41f731efcce1",
+        "job-74c53c21/inbox/Refunds.csv": "b7360bb8230a2f593ecd82575161d599ccf25dc34080d7181dd5f044d7ca55d7",
+        "job-74c53c21/inbox/Staff Hours.csv": "5beb95abc2e116eba4ed6b36edd532c97d7a1ff341ba83d717c5f77ffd2d605d",
+        "job-74c53c21/inbox/Stock List.csv": "ba142fe483191e1e2f791e2a731223583f14dc3583494d1506558c8f4f124b0f",
+        "job-74c53c21/inbox/Visit Log.csv": "4dbe93f0c0b2c8418527b7f65cbea709203d05dab96dbb2623c25cca1cc4c7b1",
+        "job-74c53c21/inbox/export-log.txt": "f59c9c3977982a495061cc33b4cb386fd741629b4dd5140eb6b8cfdd5cc4e036"
+      },
+      "fingerprints": [
+        "EXE40129",
+        "ODE40123",
+        "RFE40101",
+        "导出批次 E401"
+      ]
+    },
+    {
+      "id": "file-batch/holdout/17",
+      "family": "file-batch",
+      "split": "holdout",
+      "index": 17,
+      "folder": "job-33c763e8",
+      "variant": "2-problems",
+      "traps": [
+        "bom-header",
+        "name-collision"
+      ],
+      "message": "这次用到的文件都在项目的 job-33c763e8/ 目录下，下面说的路径都相对于这个目录。inbox/ 里是几份导出的 CSV（共 8 个，另有一个 export-log.txt 不用转换）。请把每个 CSV 转成一个 JSON 文件，内容是对象数组，每行一个对象、键用表头的列名；这些列是数值列，要写成 JSON 数字：金额、数量、单价、退款额、重量、工时、库存、客流、成交、件数，其余列保持字符串。转换结果放在 converted/ 下，文件名全小写，保留原来的名字（扩展名以外的部分），空格换成下划线“_”，扩展名改成 .json。inbox/ 里的原文件不要改动、不要删除。再写一份清单 converted/manifest.csv，表头 source,target,rows，每个转换的 CSV 一行：source 是 inbox 里的文件名，target 是生成的 JSON 文件名，rows 是 JSON 里的记录条数。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 converted/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-33c763e8/converted",
+        "job-33c763e8/converted/manifest.csv",
+        "job-33c763e8/converted/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
+          "feedback": "有的 JSON 内容和 CSV 对不上"
+        },
+        {
+          "id": "r2",
+          "type": "format",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
+          "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
+        },
+        {
+          "id": "r3",
+          "type": "missing",
+          "by": "check",
+          "weight": 1,
+          "text": "inbox/ 里的原文件字节不变、一个不少",
+          "feedback": "inbox 里的原文件被改动或删掉了"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Visit Log.csv 和 Visit_Log.csv 会得到同一个 JSON 文件名、已区分开",
+          "feedback": "有两份输入按命名规则会转成同一个文件名，说明里没提怎么处理"
+        },
+        {
+          "id": "r5",
+          "type": "convention",
+          "by": "check",
+          "weight": 1,
+          "text": "converted/ 下的 JSON 文件用两个空格缩进、文件末尾留一个换行",
+          "feedback": "JSON 文件的排版不统一，请统一用两个空格缩进，文件末尾留一个换行"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "weight": 1,
+          "text": "（一次性的要求，不计分）这次的说明用英文写也可以",
+          "feedback": "这次的说明用英文写也可以"
+        }
+      ],
+      "files": {
+        "job-33c763e8/inbox/Expense Sheet.csv": "841f25fa5aa3de4affcf77c77fa1dff66a4f701bc8ed73df3541139cf1fac5a6",
+        "job-33c763e8/inbox/Orders Q3.csv": "cacb1230a7931cfee798f8188f8540f7524181c222d51781d68540fcd25157a1",
+        "job-33c763e8/inbox/Refunds.csv": "27307dbe8b8a63228f6875e020c08eb2883233613195839a055faec5fad04da5",
+        "job-33c763e8/inbox/Shipping Plan.csv": "f22215fd95f42a52cfe11054137a4747f660408fe55b5675187897c49701e11e",
+        "job-33c763e8/inbox/Staff Hours.csv": "53d9b787c16314aa8324df9eee38cdac5173ce0674fbdc0d1d6c2d96687d548d",
+        "job-33c763e8/inbox/Stock List.csv": "8b42eb765e8d547f7fa495f0f8defa8b8618b275382b5b1c9e70acc47334ecab",
+        "job-33c763e8/inbox/Visit Log.csv": "79b9a348a98246a0213bc8a68143220f56cb37e77480c367e7b302fb8fbdf1fc",
+        "job-33c763e8/inbox/Visit_Log.csv": "aebc06ece99d196b9055017179c0cb06c71aa57429dd16600757e32f1a8f0da5",
+        "job-33c763e8/inbox/export-log.txt": "9d1335dff0e052c7e3e65c6e2ce311dda2826fc95b02428cb18ceea60e071435"
+      },
+      "fingerprints": [
+        "EX572219",
+        "OD572236",
+        "RF572208",
+        "导出批次 5722"
+      ]
+    },
+    {
+      "id": "file-batch/holdout/18",
+      "family": "file-batch",
+      "split": "holdout",
+      "index": 18,
+      "folder": "job-fe8329b2",
+      "variant": "2-problems",
+      "traps": [
+        "name-collision",
+        "empty-file"
+      ],
+      "message": "这次用到的文件都在项目的 job-fe8329b2/ 目录下，下面说的路径都相对于这个目录。请整理 inbox/ 下的 8 份 CSV 导出（export-log.txt 只是日志，不用管）：每份转成一个 JSON 数组文件（对象的键是表头，数量、单价、退款额、件数、重量、工时、库存、实盘、客流、成交 这几列是数值，要存成数字，别的列都是字符串），存到 converted/，文件名全小写，保留原来的名字（扩展名以外的部分），空格换成连字符“-”，扩展名改成 .json。原文件保持原样，留在 inbox/。另外生成 converted/manifest.csv，表头为 source,target,rows，一个 CSV 一行（source 为 inbox 里的文件名，target 为 JSON 文件名，rows 为 JSON 里的记录条数）。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 converted/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-fe8329b2/converted",
+        "job-fe8329b2/converted/manifest.csv",
+        "job-fe8329b2/converted/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
+          "feedback": "有的 JSON 内容和 CSV 对不上"
+        },
+        {
+          "id": "r2",
+          "type": "format",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
+          "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
+        },
+        {
+          "id": "r3",
+          "type": "missing",
+          "by": "check",
+          "weight": 1,
+          "text": "inbox/ 里的原文件字节不变、一个不少",
+          "feedback": "inbox 里的原文件被改动或删掉了"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Stock List.csv 和 Stock-List.csv 会得到同一个 JSON 文件名、已区分开",
+          "feedback": "有两份输入按命名规则会转成同一个文件名，说明里没提怎么处理"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Return Items.csv 只有表头、没有数据行",
+          "feedback": "有个输入文件没有数据行，说明里没提"
+        }
+      ],
+      "files": {
+        "job-fe8329b2/inbox/Orders Q3.csv": "edd6c6905bb2093751ec75abe78dc46cbbb210ce2292d91042a984f8a13a8025",
+        "job-fe8329b2/inbox/Refunds.csv": "b6f704dccf39356606cae985e3d62d050bcd10398e211337af7438408ead1b1f",
+        "job-fe8329b2/inbox/Return Items.csv": "02a467e2fb1bfc312f74b730ed810aa89ae7d916aff889273608100374d2dfe0",
+        "job-fe8329b2/inbox/Shipping Plan.csv": "aca40c2abe3252f7bc07e4a93da5a8b2fb9025482a6c14f85f676284131a2019",
+        "job-fe8329b2/inbox/Staff Hours.csv": "a21b7b9197457549e32904a7e4556c8e247123501de468b70b6f21a2a571cb79",
+        "job-fe8329b2/inbox/Stock List.csv": "4560bf86d3006cf54b95729a810599dcb2f92a5e71e69e871a2cfc583acb4fc8",
+        "job-fe8329b2/inbox/Stock-List.csv": "dac9a6e251adaeced1bbbcc3674fc6ff2fd1f7288f0a31892faae210d168621a",
+        "job-fe8329b2/inbox/Visit Log.csv": "16c5f0ca3b6c288a16c25e755aedba6b4cd1baef5f8b1d28cc449de7717dc180",
+        "job-fe8329b2/inbox/export-log.txt": "891d6eca6131fa6faa94ad0138d46318fe75a4e24db056dc26d73d00f0e90b04"
+      },
+      "fingerprints": [
+        "OD871736",
+        "RF871725",
+        "导出批次 8717"
+      ]
+    },
+    {
+      "id": "file-batch/holdout/19",
+      "family": "file-batch",
+      "split": "holdout",
+      "index": 19,
+      "folder": "job-8deb8774",
+      "variant": "2-problems",
+      "traps": [
+        "bom-header",
+        "ragged-row"
+      ],
+      "message": "这次用到的文件都在项目的 job-8deb8774/ 目录下，下面说的路径都相对于这个目录。请整理 inbox/ 下的 7 份 CSV 导出（export-log.txt 只是日志，不用管）：每份转成一个 JSON 数组文件（对象的键是表头，金额、实盘、退款额、件数、重量、工时、库存 这几列是数值，要存成数字，别的列都是字符串），存到 converted/，文件名全小写，保留原来的名字（扩展名以外的部分），空格换成下划线“_”，扩展名改成 .json。原文件保持原样，留在 inbox/。另外生成 converted/manifest.csv，表头为 source,target,rows，一个 CSV 一行（source 为 inbox 里的文件名，target 为 JSON 文件名，rows 为 JSON 里的记录条数）。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 converted/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-8deb8774/converted",
+        "job-8deb8774/converted/manifest.csv",
+        "job-8deb8774/converted/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
+          "feedback": "有的 JSON 内容和 CSV 对不上"
+        },
+        {
+          "id": "r2",
+          "type": "format",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
+          "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
+        },
+        {
+          "id": "r3",
+          "type": "missing",
+          "by": "check",
+          "weight": 1,
+          "text": "inbox/ 里的原文件字节不变、一个不少",
+          "feedback": "inbox 里的原文件被改动或删掉了"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Stock List.csv 里字段数不对的那一行（行号或记录号都可以）及怎么处理的",
+          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行"
+        },
+        {
+          "id": "r5",
+          "type": "convention",
+          "by": "check",
+          "weight": 1,
+          "text": "converted/ 下的 JSON 文件用两个空格缩进、文件末尾留一个换行",
+          "feedback": "JSON 文件的排版不统一，请统一用两个空格缩进，文件末尾留一个换行"
+        }
+      ],
+      "files": {
+        "job-8deb8774/inbox/Expense Sheet.csv": "26b1146a122f0865f562a5325d3dc42c1ff17d774720d17f552290bb79610caf",
+        "job-8deb8774/inbox/Inventory.csv": "c5a5cee93783a2c0633a3f9c7a09a822e50d5241f92b070a81819bae69f6b24b",
+        "job-8deb8774/inbox/Refunds.csv": "b65791f2f710e5a9036f40172d1bec537c41c848e9e7b6ded503d511a5e1ff29",
+        "job-8deb8774/inbox/Return Items.csv": "e5486ec14991d96a045ddaecf7b47c15dc006bf14a73f3869a95fc75e7ddc653",
+        "job-8deb8774/inbox/Shipping Plan.csv": "5be460518242f91f169a89ce7cc06ee363ce80057e9ca5fe13e3170edc0f6069",
+        "job-8deb8774/inbox/Staff Hours.csv": "119da65a585e2aa1f08389e1dd326543c3659c4c431ff3b35f6861213899bb05",
+        "job-8deb8774/inbox/Stock List.csv": "4de82015bf99d7c605c81caa73ed27f1b50c451d977b5bdf72ca03c12c72c880",
+        "job-8deb8774/inbox/export-log.txt": "1709d7cf40f8e10d26ebcafcf5d084ad0bb276097fc4f54be31ada72eae224de"
+      },
+      "fingerprints": [
+        "EX492744",
+        "IV492739",
+        "RF492701",
+        "导出批次 4927"
+      ]
+    },
+    {
+      "id": "file-batch/holdout/20",
+      "family": "file-batch",
+      "split": "holdout",
+      "index": 20,
+      "folder": "job-57a002e8",
+      "variant": "3-problems",
+      "traps": [
+        "duplicate-file",
+        "name-collision",
+        "semicolon-delimited"
+      ],
+      "message": "这次用到的文件都在项目的 job-57a002e8/ 目录下，下面说的路径都相对于这个目录。请整理 inbox/ 下的 8 份 CSV 导出（export-log.txt 只是日志，不用管）：每份转成一个 JSON 数组文件（对象的键是表头，金额、实盘、数量、单价、退款额、工时、件数、库存 这几列是数值，要存成数字，别的列都是字符串），存到 converted/，文件名全小写，保留原来的名字（扩展名以外的部分），空格换成连字符“-”，扩展名改成 .json。原文件保持原样，留在 inbox/。另外生成 converted/manifest.csv，表头为 source,target,rows，一个 CSV 一行（source 为 inbox 里的文件名，target 为 JSON 文件名，rows 为 JSON 里的记录条数）。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 converted/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-57a002e8/converted",
+        "job-57a002e8/converted/manifest.csv",
+        "job-57a002e8/converted/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
+          "feedback": "有的 JSON 内容和 CSV 对不上"
+        },
+        {
+          "id": "r2",
+          "type": "format",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
+          "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
+        },
+        {
+          "id": "r3",
+          "type": "missing",
+          "by": "check",
+          "weight": 1,
+          "text": "inbox/ 里的原文件字节不变、一个不少",
+          "feedback": "inbox 里的原文件被改动或删掉了"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Inventory.csv 和 Export 0708.csv 内容完全相同",
+          "feedback": "有两份输入文件内容一模一样，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "converted/notes.md 指出 Staff Hours.csv 和 Staff-Hours.csv 会得到同一个 JSON 文件名、已区分开",
+          "feedback": "有两份输入按命名规则会转成同一个文件名，说明里没提怎么处理"
+        }
+      ],
+      "files": {
+        "job-57a002e8/inbox/Expense Sheet.csv": "8aab68f3780459c185ba2ef6613e37bf259b207c330422d8d40b4fbc822ba5f6",
+        "job-57a002e8/inbox/Export 0708.csv": "b0848e501fb26ea6d22e63e4ea30f1e4a827026213ed3eab3bf304d3f92b8d86",
+        "job-57a002e8/inbox/Inventory.csv": "b0848e501fb26ea6d22e63e4ea30f1e4a827026213ed3eab3bf304d3f92b8d86",
+        "job-57a002e8/inbox/Orders Q3.csv": "3e7b5a5f2779f69f47fa586fcde80f3e0ce353fd8120ba082bd7fe39eeef2b34",
+        "job-57a002e8/inbox/Refunds.csv": "1db154f2b0beca110705667df9b5d7fd270a7b0c2e0206a265c089bc21807892",
+        "job-57a002e8/inbox/Staff Hours.csv": "c751407536f3b7696f6c6ed2c148cdb596acf92404d250fc7ff5bb5b5f86c36f",
+        "job-57a002e8/inbox/Staff-Hours.csv": "4556b53f441b4358cbd667ea27993525ba726b16a9588ed0b0f17434b961012b",
+        "job-57a002e8/inbox/Stock List.csv": "d4d02018a5c2e3c70a3cf6bd3d5306cbffe6352a9d41675f399982672030fe7e",
+        "job-57a002e8/inbox/export-log.txt": "6cbb6cec3511f2f04f919dc5be48c8c3cb823c791e82ae56fc498d1c74e3cc84"
+      },
+      "fingerprints": [
+        "EXE57E01",
+        "IVE57E08",
+        "IVE57E08",
+        "导出批次 E57E"
+      ]
+    },
+    {
       "id": "recompute/holdout/01",
       "family": "recompute",
       "split": "holdout",
@@ -3812,6 +4591,743 @@
         "YD764F12",
         "YD764F13",
         "YD764F11"
+      ]
+    },
+    {
+      "id": "recompute/holdout/11",
+      "family": "recompute",
+      "split": "holdout",
+      "index": 11,
+      "folder": "job-f864dd42",
+      "variant": "readings-3-problems",
+      "traps": [
+        "invalid-value",
+        "duplicate-id",
+        "mixed-units"
+      ],
+      "message": "这次用到的文件都在项目的 job-f864dd42/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下各小区的水表抄表记录（CSV，可能不止一个文件）统计成一张表，写到 output/result.csv：表头“小区,总用水量(立方米)”，按小区汇总用水量，用水量统一用立方米，保留两位小数（四舍五入），行按总量从多到少排列，最后一行是“合计”（各行相加）。统计范围是 2026 年 6 月；同一编号的记录只算一次，读不出数字的记录不计入。另外请写一个脚本 output/calc.mjs：在案例文件夹里直接运行 node output/calc.mjs（不带参数），就能读 data/ 下的 CSV 重新生成 output/result.csv，方便别人复算。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/check-notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-f864dd42/output/result.csv",
+        "job-f864dd42/output/calc.mjs",
+        "job-f864dd42/output/check-notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "output/result.csv 里每个小区的用水量总量和合计正确（只算6 月、同一编号一次、读得出数字的记录，统一单位，按要求舍入）",
+          "feedback": "结果表里的数和数据对不上"
+        },
+        {
+          "id": "r2",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 2,
+          "text": "换一份同样结构的 data/ 后，运行 node output/calc.mjs 能重新生成正确的结果表（脚本不是把数写死）",
+          "feedback": "换一份数据重新运行脚本，得不到正确的结果"
+        },
+        {
+          "id": "r3",
+          "type": "format",
+          "by": "check",
+          "weight": 1,
+          "text": "output/result.csv 表头是“小区,总用水量(立方米)”，行按总量从多到少排列，最后一行是“合计”且等于各行之和",
+          "feedback": "结果表的表头、行的顺序或合计行不对"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出编号 CB5F1909 的记录重复、只算了一次",
+          "feedback": "有重复的记录，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出有记录的单位是升、已换算成立方米",
+          "feedback": "有记录的单位和别的不一样，说明里没提"
+        },
+        {
+          "id": "r6",
+          "type": "convention",
+          "by": "check",
+          "weight": 1,
+          "text": "output/calc.mjs 开头的注释写明输入（data/）、输出和运行方法",
+          "feedback": "脚本开头缺少说明输入、输出和运行方法的注释"
+        }
+      ],
+      "files": {
+        "job-f864dd42/data/readings-1.csv": "d09483c42936c4b3b0643582db148ac691b3e5285aaf14f0df1096041f6e46f3",
+        "job-f864dd42/data/readings-2.csv": "dda50a7d1b80a5fc2d6f4c2ff131c9e94054d18e5c542dcc9546afd425684491"
+      },
+      "fingerprints": [
+        "CB5F1904",
+        "CB5F1906",
+        "CB5F1913"
+      ]
+    },
+    {
+      "id": "recompute/holdout/12",
+      "family": "recompute",
+      "split": "holdout",
+      "index": 12,
+      "folder": "job-bdf08612",
+      "variant": "shipments-3-problems",
+      "traps": [
+        "duplicate-id",
+        "out-of-period",
+        "mixed-units"
+      ],
+      "message": "这次用到的文件都在项目的 job-bdf08612/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下各线路的运单记录（CSV，可能不止一个文件）统计成一张表，写到 output/result.csv：表头“线路,总重量(kg)”，按线路汇总重量，重量统一用kg，保留两位小数（四舍五入），行按总量从多到少排列，最后一行是“合计”（各行相加）。统计范围是 2026 年 7 月；同一编号的记录只算一次，读不出数字的记录不计入。另外请写一个脚本 output/calc.mjs：在案例文件夹里直接运行 node output/calc.mjs（不带参数），就能读 data/ 下的 CSV 重新生成 output/result.csv，方便别人复算。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/check-notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-bdf08612/output/result.csv",
+        "job-bdf08612/output/calc.mjs",
+        "job-bdf08612/output/check-notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "output/result.csv 里每个线路的重量总量和合计正确（只算7 月、同一编号一次、读得出数字的记录，统一单位，按要求舍入）",
+          "feedback": "结果表里的数和数据对不上"
+        },
+        {
+          "id": "r2",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 2,
+          "text": "换一份同样结构的 data/ 后，运行 node output/calc.mjs 能重新生成正确的结果表（脚本不是把数写死）",
+          "feedback": "换一份数据重新运行脚本，得不到正确的结果"
+        },
+        {
+          "id": "r3",
+          "type": "format",
+          "by": "check",
+          "weight": 1,
+          "text": "output/result.csv 表头是“线路,总重量(kg)”，行按总量从多到少排列，最后一行是“合计”且等于各行之和",
+          "feedback": "结果表的表头、行的顺序或合计行不对"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出编号 YDB73804 的记录重复、只算了一次",
+          "feedback": "有重复的记录，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出编号 YDB73801 的日期不在 7 月、没有计入",
+          "feedback": "有记录不在统计的月份里，说明里没提"
+        },
+        {
+          "id": "r6",
+          "type": "convention",
+          "by": "check",
+          "weight": 1,
+          "text": "output/calc.mjs 开头的注释写明输入（data/）、输出和运行方法",
+          "feedback": "脚本开头缺少说明输入、输出和运行方法的注释"
+        }
+      ],
+      "files": {
+        "job-bdf08612/data/shipments-1.csv": "1f4c68e5bd00380fddfe0ddc14a36c3e5c6a328cfdca2383b2fdeae6bb968d5b",
+        "job-bdf08612/data/shipments-2.csv": "e28edfb0c1f5aca3f460e45273342a2200dd2634df8785518cd0bfc92dc292da"
+      },
+      "fingerprints": [
+        "YDB73813",
+        "YDB73806",
+        "YDB73810"
+      ]
+    },
+    {
+      "id": "recompute/holdout/13",
+      "family": "recompute",
+      "split": "holdout",
+      "index": 13,
+      "folder": "job-94da5de8",
+      "variant": "shipments-2-problems",
+      "traps": [
+        "invalid-value",
+        "duplicate-id"
+      ],
+      "message": "这次用到的文件都在项目的 job-94da5de8/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下各线路的运单记录（CSV，可能不止一个文件）统计成一张表，写到 output/summary.csv：表头“线路,总重量(kg)”，按线路汇总重量，重量统一用kg，保留两位小数（四舍五入），行按总量从少到多排列，最后一行是“合计”（各行相加）。统计范围是 2026 年 3 月；同一编号的记录只算一次，读不出数字的记录不计入。另外请写一个脚本 output/calc.mjs：在案例文件夹里直接运行 node output/calc.mjs（不带参数），就能读 data/ 下的 CSV 重新生成 output/summary.csv，方便别人复算。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-94da5de8/output/summary.csv",
+        "job-94da5de8/output/calc.mjs",
+        "job-94da5de8/output/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "output/summary.csv 里每个线路的重量总量和合计正确（只算3 月、同一编号一次、读得出数字的记录，统一单位，按要求舍入）",
+          "feedback": "结果表里的数和数据对不上"
+        },
+        {
+          "id": "r2",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 2,
+          "text": "换一份同样结构的 data/ 后，运行 node output/calc.mjs 能重新生成正确的结果表（脚本不是把数写死）",
+          "feedback": "换一份数据重新运行脚本，得不到正确的结果"
+        },
+        {
+          "id": "r3",
+          "type": "format",
+          "by": "check",
+          "weight": 1,
+          "text": "output/summary.csv 表头是“线路,总重量(kg)”，行按总量从少到多排列，最后一行是“合计”且等于各行之和",
+          "feedback": "结果表的表头、行的顺序或合计行不对"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/notes.md 指出编号 YD81BA17、YD81BA19 的数值缺失或不是数字、没有计入",
+          "feedback": "有记录的数值读不出来，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/notes.md 指出编号 YD81BA04 的记录重复、只算了一次",
+          "feedback": "有重复的记录，说明里没提"
+        }
+      ],
+      "files": {
+        "job-94da5de8/data/shipments.csv": "99cdd61759714abbdfe4b3d733b48e0feee35530ad7a4e19b530b345102b0254"
+      },
+      "fingerprints": [
+        "YD81BA18",
+        "YD81BA16",
+        "YD81BA07"
+      ]
+    },
+    {
+      "id": "recompute/holdout/14",
+      "family": "recompute",
+      "split": "holdout",
+      "index": 14,
+      "folder": "job-f19f0b26",
+      "variant": "shipments-3-problems",
+      "traps": [
+        "invalid-value",
+        "duplicate-id",
+        "mixed-units"
+      ],
+      "message": "这次用到的文件都在项目的 job-f19f0b26/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下各线路的运单记录（CSV，可能不止一个文件）统计成一张表，写到 output/summary.csv：表头“线路,总重量(kg)”，按线路汇总重量，重量统一用kg，保留两位小数（四舍五入），行按总量从少到多排列，最后一行是“合计”（各行相加）。统计范围是 2026 年 10 月；同一编号的记录只算一次，读不出数字的记录不计入。另外请写一个脚本 output/calc.mjs：在案例文件夹里直接运行 node output/calc.mjs（不带参数），就能读 data/ 下的 CSV 重新生成 output/summary.csv，方便别人复算。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/check-notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-f19f0b26/output/summary.csv",
+        "job-f19f0b26/output/calc.mjs",
+        "job-f19f0b26/output/check-notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "output/summary.csv 里每个线路的重量总量和合计正确（只算10 月、同一编号一次、读得出数字的记录，统一单位，按要求舍入）",
+          "feedback": "结果表里的数和数据对不上"
+        },
+        {
+          "id": "r2",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 2,
+          "text": "换一份同样结构的 data/ 后，运行 node output/calc.mjs 能重新生成正确的结果表（脚本不是把数写死）",
+          "feedback": "换一份数据重新运行脚本，得不到正确的结果"
+        },
+        {
+          "id": "r3",
+          "type": "format",
+          "by": "check",
+          "weight": 1,
+          "text": "output/summary.csv 表头是“线路,总重量(kg)”，行按总量从少到多排列，最后一行是“合计”且等于各行之和",
+          "feedback": "结果表的表头、行的顺序或合计行不对"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出编号 YD62F714 的数值缺失或不是数字、没有计入",
+          "feedback": "有记录的数值读不出来，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出编号 YD62F713 的记录重复、只算了一次",
+          "feedback": "有重复的记录，说明里没提"
+        },
+        {
+          "id": "r6",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出有记录的单位是g、已换算成kg",
+          "feedback": "有记录的单位和别的不一样，说明里没提"
+        }
+      ],
+      "files": {
+        "job-f19f0b26/data/shipments.csv": "b2d0f1d874787d1d08a4a3941d9a48adddf2cd7b8aa771d9f3d979507af3c261"
+      },
+      "fingerprints": [
+        "YD62F704",
+        "YD62F710",
+        "YD62F713"
+      ]
+    },
+    {
+      "id": "recompute/holdout/15",
+      "family": "recompute",
+      "split": "holdout",
+      "index": 15,
+      "folder": "job-be9e067e",
+      "variant": "shipments-2-problems",
+      "traps": [
+        "invalid-value",
+        "duplicate-id"
+      ],
+      "message": "这次用到的文件都在项目的 job-be9e067e/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下各线路的运单记录（CSV，可能不止一个文件）统计成一张表，写到 output/result.csv：表头“线路,总重量(kg)”，按线路汇总重量，重量统一用kg，保留两位小数（四舍五入），行按总量从多到少排列，最后一行是“合计”（各行相加）。统计范围是 2026 年 9 月；同一编号的记录只算一次，读不出数字的记录不计入。另外请写一个脚本 output/calc.mjs：在案例文件夹里直接运行 node output/calc.mjs（不带参数），就能读 data/ 下的 CSV 重新生成 output/result.csv，方便别人复算。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/check-notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-be9e067e/output/result.csv",
+        "job-be9e067e/output/calc.mjs",
+        "job-be9e067e/output/check-notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "output/result.csv 里每个线路的重量总量和合计正确（只算9 月、同一编号一次、读得出数字的记录，统一单位，按要求舍入）",
+          "feedback": "结果表里的数和数据对不上"
+        },
+        {
+          "id": "r2",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 2,
+          "text": "换一份同样结构的 data/ 后，运行 node output/calc.mjs 能重新生成正确的结果表（脚本不是把数写死）",
+          "feedback": "换一份数据重新运行脚本，得不到正确的结果"
+        },
+        {
+          "id": "r3",
+          "type": "format",
+          "by": "check",
+          "weight": 1,
+          "text": "output/result.csv 表头是“线路,总重量(kg)”，行按总量从多到少排列，最后一行是“合计”且等于各行之和",
+          "feedback": "结果表的表头、行的顺序或合计行不对"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出编号 YD247218、YD247211 的数值缺失或不是数字、没有计入",
+          "feedback": "有记录的数值读不出来，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出编号 YD247206 的记录重复、只算了一次",
+          "feedback": "有重复的记录，说明里没提"
+        }
+      ],
+      "files": {
+        "job-be9e067e/data/shipments.csv": "66a3f9f47fbb5795911bf3a6f8935f22e3e982221b7e0a9d608c0b2ad3167119"
+      },
+      "fingerprints": [
+        "YD247207",
+        "YD247211",
+        "YD247202"
+      ]
+    },
+    {
+      "id": "recompute/holdout/16",
+      "family": "recompute",
+      "split": "holdout",
+      "index": 16,
+      "folder": "job-2dc55ad7",
+      "variant": "readings-2-problems",
+      "traps": [
+        "invalid-value",
+        "duplicate-id"
+      ],
+      "message": "这次用到的文件都在项目的 job-2dc55ad7/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下各小区的水表抄表记录（CSV，可能不止一个文件）统计成一张表，写到 output/result.csv：表头“小区,总用水量(立方米)”，按小区汇总用水量，用水量统一用立方米，保留两位小数（四舍五入），行按总量从少到多排列，最后一行是“合计”（各行相加）。统计范围是 2026 年 7 月；同一编号的记录只算一次，读不出数字的记录不计入。另外请写一个脚本 output/calc.mjs：在案例文件夹里直接运行 node output/calc.mjs（不带参数），就能读 data/ 下的 CSV 重新生成 output/result.csv，方便别人复算。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-2dc55ad7/output/result.csv",
+        "job-2dc55ad7/output/calc.mjs",
+        "job-2dc55ad7/output/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "output/result.csv 里每个小区的用水量总量和合计正确（只算7 月、同一编号一次、读得出数字的记录，统一单位，按要求舍入）",
+          "feedback": "结果表里的数和数据对不上"
+        },
+        {
+          "id": "r2",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 2,
+          "text": "换一份同样结构的 data/ 后，运行 node output/calc.mjs 能重新生成正确的结果表（脚本不是把数写死）",
+          "feedback": "换一份数据重新运行脚本，得不到正确的结果"
+        },
+        {
+          "id": "r3",
+          "type": "format",
+          "by": "check",
+          "weight": 1,
+          "text": "output/result.csv 表头是“小区,总用水量(立方米)”，行按总量从少到多排列，最后一行是“合计”且等于各行之和",
+          "feedback": "结果表的表头、行的顺序或合计行不对"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/notes.md 指出编号 CBC13614、CBC13603 的数值缺失或不是数字、没有计入",
+          "feedback": "有记录的数值读不出来，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/notes.md 指出编号 CBC13606 的记录重复、只算了一次",
+          "feedback": "有重复的记录，说明里没提"
+        }
+      ],
+      "files": {
+        "job-2dc55ad7/data/readings-1.csv": "83d4aaf710d3144cd3379d14fbf334a16a4648c7bf1bc16a3dc7adf893ee637f",
+        "job-2dc55ad7/data/readings-2.csv": "7c23e2fb9b709050885c04bfb94b75a4af17e1a15c5fa31373086e6c1bdc42fb"
+      },
+      "fingerprints": [
+        "CBC13609",
+        "CBC13607",
+        "CBC13613"
+      ]
+    },
+    {
+      "id": "recompute/holdout/17",
+      "family": "recompute",
+      "split": "holdout",
+      "index": 17,
+      "folder": "job-260b9ce4",
+      "variant": "shipments-2-problems",
+      "traps": [
+        "out-of-period",
+        "rounding-trap"
+      ],
+      "message": "这次用到的文件都在项目的 job-260b9ce4/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下各线路的运单记录（CSV，可能不止一个文件）统计成一张表，写到 output/summary.csv：表头“线路,总重量(kg)”，按线路汇总重量，重量统一用kg，每条记录先四舍五入到两位小数、再按组相加（不要先加再舍入），行按总量从多到少排列，最后一行是“合计”（各行相加）。统计范围是 2026 年 10 月；同一编号的记录只算一次，读不出数字的记录不计入。另外请写一个脚本 output/calc.mjs：在案例文件夹里直接运行 node output/calc.mjs（不带参数），就能读 data/ 下的 CSV 重新生成 output/summary.csv，方便别人复算。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/check-notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-260b9ce4/output/summary.csv",
+        "job-260b9ce4/output/calc.mjs",
+        "job-260b9ce4/output/check-notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "output/summary.csv 里每个线路的重量总量和合计正确（只算10 月、同一编号一次、读得出数字的记录，统一单位，按要求舍入）",
+          "feedback": "结果表里的数和数据对不上"
+        },
+        {
+          "id": "r2",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 2,
+          "text": "换一份同样结构的 data/ 后，运行 node output/calc.mjs 能重新生成正确的结果表（脚本不是把数写死）",
+          "feedback": "换一份数据重新运行脚本，得不到正确的结果"
+        },
+        {
+          "id": "r3",
+          "type": "format",
+          "by": "check",
+          "weight": 1,
+          "text": "output/summary.csv 表头是“线路,总重量(kg)”，行按总量从多到少排列，最后一行是“合计”且等于各行之和",
+          "feedback": "结果表的表头、行的顺序或合计行不对"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出编号 YD6F3106、YD6F3113 的日期不在 10 月、没有计入",
+          "feedback": "有记录不在统计的月份里，说明里没提"
+        }
+      ],
+      "files": {
+        "job-260b9ce4/data/shipments-1.csv": "a6bcf04155056fd0fe4fc955b4b8672781221e3f9a582919f45766eef652faed",
+        "job-260b9ce4/data/shipments-2.csv": "52630c1cd32feeb2d644cad5666944ae9dfcfdc5bdcbd72a6f174fc972cdc422"
+      },
+      "fingerprints": [
+        "YD6F3112",
+        "YD6F3110",
+        "YD6F3113"
+      ]
+    },
+    {
+      "id": "recompute/holdout/18",
+      "family": "recompute",
+      "split": "holdout",
+      "index": 18,
+      "folder": "job-685dde5f",
+      "variant": "shipments-3-problems",
+      "traps": [
+        "invalid-value",
+        "duplicate-id",
+        "mixed-units"
+      ],
+      "message": "这次用到的文件都在项目的 job-685dde5f/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下各线路的运单记录（CSV，可能不止一个文件）统计成一张表，写到 output/result.csv：表头“线路,总重量(kg)”，按线路汇总重量，重量统一用kg，保留两位小数（四舍五入），行按总量从多到少排列，最后一行是“合计”（各行相加）。统计范围是 2026 年 5 月；同一编号的记录只算一次，读不出数字的记录不计入。另外请写一个脚本 output/calc.mjs：在案例文件夹里直接运行 node output/calc.mjs（不带参数），就能读 data/ 下的 CSV 重新生成 output/result.csv，方便别人复算。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-685dde5f/output/result.csv",
+        "job-685dde5f/output/calc.mjs",
+        "job-685dde5f/output/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "output/result.csv 里每个线路的重量总量和合计正确（只算5 月、同一编号一次、读得出数字的记录，统一单位，按要求舍入）",
+          "feedback": "结果表里的数和数据对不上"
+        },
+        {
+          "id": "r2",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 2,
+          "text": "换一份同样结构的 data/ 后，运行 node output/calc.mjs 能重新生成正确的结果表（脚本不是把数写死）",
+          "feedback": "换一份数据重新运行脚本，得不到正确的结果"
+        },
+        {
+          "id": "r3",
+          "type": "format",
+          "by": "check",
+          "weight": 1,
+          "text": "output/result.csv 表头是“线路,总重量(kg)”，行按总量从多到少排列，最后一行是“合计”且等于各行之和",
+          "feedback": "结果表的表头、行的顺序或合计行不对"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/notes.md 指出编号 YD280418 的数值缺失或不是数字、没有计入",
+          "feedback": "有记录的数值读不出来，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/notes.md 指出编号 YD280405 的记录重复、只算了一次",
+          "feedback": "有重复的记录，说明里没提"
+        },
+        {
+          "id": "r6",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/notes.md 指出有记录的单位是g、已换算成kg",
+          "feedback": "有记录的单位和别的不一样，说明里没提"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "weight": 1,
+          "text": "（一次性的要求，不计分）这次的说明写短一点就行",
+          "feedback": "这次的说明写短一点就行"
+        }
+      ],
+      "files": {
+        "job-685dde5f/data/shipments.csv": "bf83bc2d399018ed5389257535254e7d5aa339fa47343d1e3751acaf14ac0f09"
+      },
+      "fingerprints": [
+        "YD280409",
+        "YD280416",
+        "YD280407"
+      ]
+    },
+    {
+      "id": "recompute/holdout/19",
+      "family": "recompute",
+      "split": "holdout",
+      "index": 19,
+      "folder": "job-866fed02",
+      "variant": "readings-3-problems",
+      "traps": [
+        "invalid-value",
+        "duplicate-id",
+        "mixed-units"
+      ],
+      "message": "这次用到的文件都在项目的 job-866fed02/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下各小区的水表抄表记录（CSV，可能不止一个文件）统计成一张表，写到 output/result.csv：表头“小区,总用水量(立方米)”，按小区汇总用水量，用水量统一用立方米，保留两位小数（四舍五入），行按总量从多到少排列，最后一行是“合计”（各行相加）。统计范围是 2026 年 4 月；同一编号的记录只算一次，读不出数字的记录不计入。另外请写一个脚本 output/calc.mjs：在案例文件夹里直接运行 node output/calc.mjs（不带参数），就能读 data/ 下的 CSV 重新生成 output/result.csv，方便别人复算。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/check-notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-866fed02/output/result.csv",
+        "job-866fed02/output/calc.mjs",
+        "job-866fed02/output/check-notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "output/result.csv 里每个小区的用水量总量和合计正确（只算4 月、同一编号一次、读得出数字的记录，统一单位，按要求舍入）",
+          "feedback": "结果表里的数和数据对不上"
+        },
+        {
+          "id": "r2",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 2,
+          "text": "换一份同样结构的 data/ 后，运行 node output/calc.mjs 能重新生成正确的结果表（脚本不是把数写死）",
+          "feedback": "换一份数据重新运行脚本，得不到正确的结果"
+        },
+        {
+          "id": "r3",
+          "type": "format",
+          "by": "check",
+          "weight": 1,
+          "text": "output/result.csv 表头是“小区,总用水量(立方米)”，行按总量从多到少排列，最后一行是“合计”且等于各行之和",
+          "feedback": "结果表的表头、行的顺序或合计行不对"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出编号 CB090C08 的数值缺失或不是数字、没有计入",
+          "feedback": "有记录的数值读不出来，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出编号 CB090C21 的记录重复、只算了一次",
+          "feedback": "有重复的记录，说明里没提"
+        },
+        {
+          "id": "r6",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/check-notes.md 指出有记录的单位是升、已换算成立方米",
+          "feedback": "有记录的单位和别的不一样，说明里没提"
+        }
+      ],
+      "files": {
+        "job-866fed02/data/readings.csv": "3d70c0f74ca6425f4aaa79ca8c7e4ac36b50b69901353f8ba8e0e60e0d4c5176"
+      },
+      "fingerprints": [
+        "CB090C17",
+        "CB090C19",
+        "CB090C16"
+      ]
+    },
+    {
+      "id": "recompute/holdout/20",
+      "family": "recompute",
+      "split": "holdout",
+      "index": 20,
+      "folder": "job-5518a01d",
+      "variant": "timesheets-2-problems",
+      "traps": [
+        "out-of-period",
+        "mixed-units"
+      ],
+      "message": "这次用到的文件都在项目的 job-5518a01d/ 目录下，下面说的路径都相对于这个目录。请把 data/ 下各员工的工时记录（CSV，可能不止一个文件）统计成一张表，写到 output/summary.csv：表头“员工,总工时(小时)”，按员工汇总工时，工时统一用小时，保留两位小数（四舍五入），行按总量从多到少排列，最后一行是“合计”（各行相加）。统计范围是 2026 年 8 月；同一编号的记录只算一次，读不出数字的记录不计入。另外请写一个脚本 output/calc.mjs：在案例文件夹里直接运行 node output/calc.mjs（不带参数），就能读 data/ 下的 CSV 重新生成 output/summary.csv，方便别人复算。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/notes.md 里写明发现了什么、怎么处理的。",
+      "outputs": [
+        "job-5518a01d/output/summary.csv",
+        "job-5518a01d/output/calc.mjs",
+        "job-5518a01d/output/notes.md"
+      ],
+      "rubric": [
+        {
+          "id": "r1",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 3,
+          "text": "output/summary.csv 里每个员工的工时总量和合计正确（只算8 月、同一编号一次、读得出数字的记录，统一单位，按要求舍入）",
+          "feedback": "结果表里的数和数据对不上"
+        },
+        {
+          "id": "r2",
+          "type": "wrong-result",
+          "by": "check",
+          "weight": 2,
+          "text": "换一份同样结构的 data/ 后，运行 node output/calc.mjs 能重新生成正确的结果表（脚本不是把数写死）",
+          "feedback": "换一份数据重新运行脚本，得不到正确的结果"
+        },
+        {
+          "id": "r3",
+          "type": "format",
+          "by": "check",
+          "weight": 1,
+          "text": "output/summary.csv 表头是“员工,总工时(小时)”，行按总量从多到少排列，最后一行是“合计”且等于各行之和",
+          "feedback": "结果表的表头、行的顺序或合计行不对"
+        },
+        {
+          "id": "r4",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/notes.md 指出编号 GS952E07、GS952E03 的日期不在 8 月、没有计入",
+          "feedback": "有记录不在统计的月份里，说明里没提"
+        },
+        {
+          "id": "r5",
+          "type": "unverified",
+          "by": "check",
+          "weight": 2,
+          "text": "output/notes.md 指出有记录的单位是分钟、已换算成小时",
+          "feedback": "有记录的单位和别的不一样，说明里没提"
+        },
+        {
+          "id": "t",
+          "type": "taste",
+          "by": "none",
+          "weight": 1,
+          "text": "（一次性的要求，不计分）这次的说明用英文写也可以",
+          "feedback": "这次的说明用英文写也可以"
+        }
+      ],
+      "files": {
+        "job-5518a01d/data/timesheets.csv": "e9ddad4915173e17ea56985bf928677658a737ee9b6e4c3e845ec1263a708455"
+      },
+      "fingerprints": [
+        "GS952E08",
+        "GS952E05",
+        "GS952E03"
       ]
     },
     {
@@ -4611,6 +6127,18 @@
         "criterion": 1
       },
       {
+        "id": "L1-reflections",
+        "treatment": "L1",
+        "control": "reflections",
+        "criterion": null
+      },
+      {
+        "id": "reflections-notes",
+        "treatment": "reflections",
+        "control": "notes",
+        "criterion": null
+      },
+      {
         "id": "L2-L1",
         "treatment": "L1+L2",
         "control": "L1",
@@ -4666,6 +6194,9 @@
       }
     ],
     "scope": "合并、按留出题族、按要点类型分别算",
+    "required": [
+      "每臂、每题族“没交成果、要追问”的次数与比例（报告必列）"
+    ],
     "also": [
       "整题通过率",
       "每题重复间波动",
@@ -4687,6 +6218,7 @@
       "base",
       "format",
       "notes",
+      "reflections",
       "L1",
       "L1+L2",
       "L1+L2+L3"
@@ -4695,6 +6227,7 @@
       "base": [],
       "format": [],
       "notes": [],
+      "reflections": [],
       "L1": [],
       "L1+L2": [
         "L1 的全部",
@@ -4781,12 +6314,75 @@
         "base",
         "format",
         "notes",
+        "reflections",
         "L1",
         "L1+L2"
       ],
       "repeats": 3,
-      "estimateUsd": 80,
+      "estimateUsd": 50,
       "gateUsd": 90
+    },
+    "m3-large": {
+      "package": "M3",
+      "families": [
+        "reconcile",
+        "code-tests",
+        "cited-report",
+        "multi-step"
+      ],
+      "holdout": [
+        "file-batch/holdout/01",
+        "file-batch/holdout/02",
+        "file-batch/holdout/03",
+        "file-batch/holdout/04",
+        "file-batch/holdout/05",
+        "file-batch/holdout/06",
+        "file-batch/holdout/07",
+        "file-batch/holdout/08",
+        "file-batch/holdout/09",
+        "file-batch/holdout/10",
+        "file-batch/holdout/11",
+        "file-batch/holdout/12",
+        "file-batch/holdout/13",
+        "file-batch/holdout/14",
+        "file-batch/holdout/15",
+        "file-batch/holdout/16",
+        "file-batch/holdout/17",
+        "file-batch/holdout/18",
+        "file-batch/holdout/19",
+        "file-batch/holdout/20",
+        "recompute/holdout/01",
+        "recompute/holdout/02",
+        "recompute/holdout/03",
+        "recompute/holdout/04",
+        "recompute/holdout/05",
+        "recompute/holdout/06",
+        "recompute/holdout/07",
+        "recompute/holdout/08",
+        "recompute/holdout/09",
+        "recompute/holdout/10",
+        "recompute/holdout/11",
+        "recompute/holdout/12",
+        "recompute/holdout/13",
+        "recompute/holdout/14",
+        "recompute/holdout/15",
+        "recompute/holdout/16",
+        "recompute/holdout/17",
+        "recompute/holdout/18",
+        "recompute/holdout/19",
+        "recompute/holdout/20"
+      ],
+      "arms": [
+        "base",
+        "format",
+        "notes",
+        "reflections",
+        "L1",
+        "L1+L2"
+      ],
+      "repeats": 3,
+      "estimateUsd": 90,
+      "gateUsd": 100
     },
     "m4": {
       "package": "M4",
@@ -4833,12 +6429,12 @@
   },
   "scripts": {
     "scripts/experiment/rework/common.mjs": "89baa29c3a29c16a65dc3f11ca720b84a576e0067d07febee771ac93303b27d5",
-    "scripts/experiment/rework/cases.mjs": "0117e40311fb720d5a47a20e28f02ea90c43ed6902dec4ac129263a8e8b3d5d5",
+    "scripts/experiment/rework/cases.mjs": "63dade01d4fb4c49fcec4a63826ed9c0921943b551600616dc1c1c635725bc21",
     "scripts/experiment/rework/judges.mjs": "5d92f8532398e850eecbe0da219a5c517aae73321f2aa86499edd873b3e02360",
     "scripts/experiment/rework/feedback.mjs": "3c2a5e9809241a21367dde23c938c72561ca0054f64287f2279471d6716ea995",
     "scripts/experiment/rework/reviewer.mjs": "8389755321a30522b6632804d560970cf55cc47e9894f0a11369402d17a39af0",
-    "scripts/experiment/rework/stats.mjs": "64b2641717b95d34e1c1ce7cda1277f915d2c6936191e39e3582b2130f5ce4bb",
-    "scripts/experiment/rework/report.mjs": "c5db5697b426c23c52a678719376bb7f7b5646537a60919239bf5d6ac55a8c6f",
+    "scripts/experiment/rework/stats.mjs": "db82fb170b3cf35973ca3aab2c0a59fb70375ac8e5088560bed5c155b88fe24a",
+    "scripts/experiment/rework/report.mjs": "de9f0c93017e775fa029b11f6304f57de00bd0999e7c32589c95c739be5a6e48",
     "scripts/experiment/rework/families/reconcile.mjs": "2b7e9399a10f0c9dcefa6d2d3bf6ee4da2111d88f0555acc7082103fd802b662",
     "scripts/experiment/rework/families/code-tests.mjs": "a92f62a57c34fc2fbac9cd01c045b16961c2c40b2b12b93b6e688fcd2c0feb87",
     "scripts/experiment/rework/families/cited-report.mjs": "03e405ddd73fbe0678d9f12e23e19d8b1ce8a615882799e0f05e869d7831bde2",
@@ -4852,8 +6448,8 @@
     "scripts/experiment/step6/pilot/common.mjs": "0a91ada47fd740340c4c8dc418a40f7a00c45d43d2ff54f3ecafaed249443876",
     "scripts/experiment/step6/pilot/feedback.mjs": "40776c047da78e3e9ae0983ace46e20ab9fbb1cc573124875fe28e47a678e7e2",
     "scripts/experiment/step6/pilot/reviewer.mjs": "15ac330d6505c492242a435a598ad7a8b5099ada3f3474333141461bad206ba0",
-    "scripts/experiment/rework/run.mjs": "443ebe8bdfa6461f12c61d8ca19b7b9f2a73e349bd7614b2aeef28d4af5a67da",
-    "scripts/experiment/rework/arms.mjs": "b635c60169f62f02d26f7a3e70c51ef8ae5c4739a0aff3593604a6df0be5ab36",
+    "scripts/experiment/rework/run.mjs": "10b963bda6016787c904b24ae9a127c2b83a976ebeb663b45caba06caf44e9dd",
+    "scripts/experiment/rework/arms.mjs": "8f273b3bd91a3f46e911f9d86732d1d7e91f1115b7640686634f39ca32eae6ea",
     "scripts/experiment/step6/run.mjs": "08b7aef98056cf7921b0cba22bb6a1872269f6b4a90c5f46b83352d3bdca3a18",
     "scripts/experiment/step6/budget.mjs": "11a1901af5d71ffb15363c593d98ce2ecd8c05940db2a02cef34417aea49829d",
     "scripts/experiment/step6/pilot/run.mjs": "45e0c89ebe4538437ed52c07e2682c911da927abf1e086bd9a004ee9a27ce25a",
