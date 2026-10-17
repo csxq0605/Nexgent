@@ -20,7 +20,12 @@
  *   count against the same budget. The reflection reads that evaluation;
  *   only when there is none (it failed, or a trial copy) the outcome is
  *   derived from the turn's checks and the user's rating
- *   (`selfEvalOutcome`). An unknown outcome allows no votes.
+ *   (`selfEvalOutcome`). That evaluation only informs the reflection.
+ * - ADR 0023: the task's outcome for the randomized exposure comparison is
+ *   written from the user's rating, the checks and the external review
+ *   only ({@link taskOutcome}), never from the self-evaluation. Reflection
+ *   votes record use and are applied with `activate: false`, so they never
+ *   enable an entry.
  * - The handbook is `@nexgent/capabilities`' {@link Handbook}: retrieval,
  *   and every write through `Handbook.apply` (actor `reflection`). Votes of
  *   the executing model come through its `handbook_mark` tool.
@@ -66,6 +71,7 @@ import { estimateUsd } from '@nexgent/llm'
 import { breakStaleLock, tryCreateLock } from '../lock.js'
 import { readUserConfig } from '../user.js'
 import { learningBudgetStatus, type LearningBudgetStatus } from './budget.js'
+import { taskOutcome, writeTaskOutcome } from './outcome.js'
 import { curateReflection, reflectionEdits, statusReason, votesFromTask, type CurationRejection } from './curate.js'
 import {
   enqueueItem,
@@ -466,6 +472,10 @@ export class LearningHost {
     const language = this.#options.language ?? userLanguage ?? detectLanguage(run.task)
     const handbook = await this.handbook()
     const projectId = handbook.projectId
+    const calibration = selfEvaluation?.calibration ?? (await readEvaluation(evaluationsDirectory(this.#options.layout), item.taskId).catch(() => undefined))?.calibration
+    const outcome = taskOutcome({ checks: evaluation.checks, ...(evaluation.rating === undefined ? {} : { rating: evaluation.rating }), ...(calibration === undefined ? {} : { calibration }) })
+    // Bookkeeping: a failure here never stops the reflection.
+    if (outcome !== undefined) await writeTaskOutcome(handbook, { sessionId: item.sessionId, taskId: item.taskId, outcome }).catch(() => undefined)
     const [userOps, projectOps] = await Promise.all([handbook.user.read(), handbook.project.read()])
     const user = foldHandbook(userOps).filter(entry => entry.scope === 'user')
     const project = foldHandbook(projectOps).filter(entry => entry.projectId === projectId)
@@ -525,7 +535,6 @@ export class LearningHost {
     const curated = curateReflection(parsed.ops, {
       projectId,
       taskId: item.taskId,
-      outcome: evaluation.outcome,
       contribute: handbook.learning.contribute,
       votable: votableIds,
       user: handbook.learning.useShared ? user : [],
@@ -537,7 +546,7 @@ export class LearningHost {
       edits: reflectionEdits([...userOps, ...projectOps]),
     })
     // Apply checks again under the log's lock: one vote per entry per task (handbook_mark of a later turn included), none on the task's own entry.
-    const results: HandbookChangeResult[] = await handbook.apply(curated.changes, { actor: 'reflection', source, literals: { sources, projectMessages }, statusReason: (status, entry) => statusReason(status, entry, language) })
+    const results: HandbookChangeResult[] = await handbook.apply(curated.changes, { actor: 'reflection', source, literals: { sources, projectMessages }, activate: false, statusReason: (status, entry) => statusReason(status, entry, language) })
     const written = results.flatMap(result => (result.outcome === 'applied' ? result.ops : []))
     const refused = results.flatMap(result => (result.outcome === 'duplicate' ? ['duplicate' as const] : result.outcome === 'rejected' ? [result.reason === 'not-found' ? 'unknown-entry' as const : result.reason === 'own-source' ? 'own-entry' as const : result.reason] : []))
     const rejected: string[] = [...curated.rejected.map(entry => entry.reason as CurationRejection), ...refused]
