@@ -65,7 +65,7 @@ import {
 import { capabilitiesOf, type CapabilityService } from '@nexgent/capabilities'
 import type { ImprovementHost } from '@nexgent/evolve'
 import { projectSession, readSessionSummary, SESSION_FILE_NAME } from '@nexgent/session'
-import { createFeedbackEntry, materialAddedRecord, type LocalTaskingService } from '@nexgent/tasking'
+import { applyRewind, createFeedbackEntry, materialAddedRecord, planRewind, type LocalTaskingService } from '@nexgent/tasking'
 import {
   SDK_API_VERSION,
   SDK_METHOD_NAMES,
@@ -1162,6 +1162,29 @@ export class LocalNexgentSdk implements NexgentSdk {
           ...(input.plan === undefined ? {} : { plan: input.plan }),
         })
         return this.view(project, input.sessionId)
+      },
+
+      'sessions.rewind': async input => {
+        const project = this.project(input.projectId)
+        if (typeof input.turn !== 'number' || !Number.isSafeInteger(input.turn) || input.turn < 1) throw invalid('turn must be a positive integer')
+        if (input.apply !== undefined && typeof input.apply !== 'boolean') throw invalid('apply must be a boolean')
+        const entry = await this.rootSession(project, input.sessionId)
+        if (entry.running !== undefined || entry.agent.busy) throw new NexgentError('session/locked', `a turn is running in session ${input.sessionId}`)
+        const { records } = await project.app.ctx.session.readAll(input.sessionId)
+        const paths = records.flatMap(record => (record.type === 'turn.files' && record.turn >= input.turn ? record.changes.map(change => change.path) : []))
+        const { layout } = project.app.ctx.workspace
+        const plan = await planRewind({ layout, sessionId: input.sessionId, turn: input.turn, paths })
+        const applied = input.apply === true && plan.changes.length > 0
+        if (applied) {
+          await applyRewind(layout, plan)
+          await entry.agent.appendHostRecord({
+            type: 'turn.rewind',
+            toTurn: input.turn,
+            restored: plan.changes.filter(change => change.action === 'restore').map(change => change.path),
+            deleted: plan.changes.filter(change => change.action === 'delete').map(change => change.path),
+          })
+        }
+        return { turn: plan.turn, takenAt: plan.takenAt, changes: plan.changes, unchanged: plan.unchanged, applied }
       },
 
       'files.list': input => listProjectFiles(this.project(input.projectId).root),

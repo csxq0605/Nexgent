@@ -127,6 +127,7 @@ const inputs: SessionRecordInput[] = [
   },
   { type: 'goal.update', turn: 2, goalId: 'g1', status: 'completed', note: 'done' },
   { type: 'session.title', turn: 2, title: '月报整理' },
+  { type: 'turn.rewind', toTurn: 1, restored: ['report.md'], deleted: ['draft.txt'] },
   { type: 'session.mode', sandboxMode: 'workspace-write', plan: false, reason: 'plan-approved' },
   { type: 'turn.files', turn: 2, changes: [{ path: 'report/summary.csv', change: 'modified' }], omitted: 2 },
   // step 3 records (shapes only; a real child would not start members itself)

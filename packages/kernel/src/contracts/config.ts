@@ -157,7 +157,19 @@ export interface ProjectConfig {
    * `maxSteps` still wins for that member. Changing it always needs approval.
    */
   readonly maxStepsPerTurn?: number
+  /**
+   * Redesign 3.2: how many times a root turn goes on by itself when a
+   * deterministic check of this turn fails (a test command the model ran
+   * exited non-zero, a file it presented is missing or does not parse).
+   * Absent: {@link DEFAULT_CHECK_RETRIES}; 0 turns it off. Changing it always needs approval.
+   */
+  readonly checkRetries?: number
 }
+
+/** Default of {@link ProjectConfig.checkRetries}. */
+export const DEFAULT_CHECK_RETRIES = 2
+/** Highest {@link ProjectConfig.checkRetries}. */
+export const MAX_CHECK_RETRIES = 5
 
 /**
  * Top-level config fields whose change always needs approval, whatever the
@@ -165,7 +177,7 @@ export interface ProjectConfig {
  * permissions, budgets or gate.
  */
 export const GUARDED_PROJECT_CONFIG_FIELDS = [
-  'approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement', 'learning', 'maxStepsPerTurn',
+  'approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement', 'learning', 'maxStepsPerTurn', 'checkRetries',
   // ADR 0022: directories outside the project and the command sandbox are the user's to widen.
   'extraReadRoots', 'extraWriteRoots', 'commands',
 ] as const
@@ -221,6 +233,7 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
       ...(input.improvement?.shareImproverEvidence === undefined ? {} : { shareImproverEvidence: input.improvement.shareImproverEvidence }),
     }),
     ...(input.maxStepsPerTurn === undefined ? {} : { maxStepsPerTurn: input.maxStepsPerTurn }),
+    ...(input.checkRetries === undefined ? {} : { checkRetries: input.checkRetries }),
   }
 }
 

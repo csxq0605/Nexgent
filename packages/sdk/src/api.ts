@@ -761,6 +761,19 @@ export interface AppInfo {
  * `(input) => Promise<result>`; the desktop preload exposes exactly these
  * names (plus event subscription) and nothing else.
  */
+/** What `sessions.rewind` found or did (redesign 3.1). */
+export interface RewindView {
+  readonly turn: number
+  /** When the snapshot was taken (ISO-8601 UTC). */
+  readonly takenAt: string
+  /** Files that change (`restore`: old content back; `delete`: did not exist before the turn). */
+  readonly changes: readonly { readonly path: string; readonly action: 'restore' | 'delete' }[]
+  /** Files the session changed that are already as they were. */
+  readonly unchanged: readonly string[]
+  /** Whether the files were written (`apply: true` with something to change). */
+  readonly applied: boolean
+}
+
 export interface SdkMethods {
   'app.info': (input: Record<string, never>) => Promise<AppInfo>
 
@@ -791,6 +804,16 @@ export interface SdkMethods {
    * the session lock like `sessions.open`. Returns the updated view.
    */
   'sessions.setMode': (input: { readonly projectId: string; readonly sessionId: string; readonly sandboxMode?: SandboxMode; readonly plan?: boolean }) => Promise<SessionView>
+  /**
+   * Redesign 3.1: put the project files this session changed in `turn` and
+   * later back to how they were before `turn` (from that turn's snapshot).
+   * Without `apply` it only lists what would change, so the host can ask
+   * first; with `apply: true` it writes the files and a `turn.rewind`
+   * record. The conversation and its history stay. Root sessions only;
+   * rejects `session/locked` while a turn runs and `session/not-found` when
+   * that turn has no snapshot.
+   */
+  'sessions.rewind': (input: { readonly projectId: string; readonly sessionId: string; readonly turn: number; readonly apply?: boolean }) => Promise<RewindView>
 
   /** Lists the project's regular files (symbolic links are not followed; {@link PROJECT_FILES_SKIPPED_DIRS} are skipped). */
   'files.list': (input: { readonly projectId: string }) => Promise<ProjectFileListing>
@@ -926,6 +949,7 @@ export const SDK_METHOD_NAMES = [
   'sessions.export',
   'sessions.rename',
   'sessions.setMode',
+  'sessions.rewind',
   'files.list',
   'dialogs.pickDirectory',
   'dialogs.pickFiles',

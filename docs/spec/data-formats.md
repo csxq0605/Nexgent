@@ -179,6 +179,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `autoImprove` | boolean | `true` | 步骤 5：计入的反馈与失败的检查是否自动开始改进作业（ADR 0006；步骤 4 之前默认 `false`，从未生效）；显式“改进”不受它限制；改动它总要审批。ADR 0017 决策 3 起由 `learning.enabled` 取代：没写 `learning.enabled` 时取它的值；设置页改其中一个时两个保持相等 |
 | `capabilities` | `CapabilitiesConfig` | 见下 | 门控与回滚设置（步骤 4）；改动它总要审批（`permissions.md` §工具审批） |
 | `improvement` | `ImprovementConfig` | 见下 | 步骤 5：触发阈值、改进预算、诊断与提案的模型；ADR 0012 起另有 `shareImproverEvidence`；改动它总要审批 |
+| `checkRetries` | integer 0–5 | 2 | 重设计 3.2：根轮里本轮的确定性检查（本轮跑过的测试命令最近一次退出码非 0、本轮交付的文件缺失或解析不了）失败时，内核把失败项（截断到 2000 字符，开头 `[Nexgent] Automatic check`）作为一条 `user.message { source: "inject" }` 发回模型，在同一轮里接着做，最多这么多次；重试的模型调用计入这一轮的步数与费用上限，用户停止立即结束；0 关闭；成员与改进会话不重试；改动它总要审批 |
 | `maxStepsPerTurn` | integer ≥ 1 | 无（用 `agents.maxSteps`，400） | 一轮最多的模型调用次数；到了上限这一轮以 `cancelled`、`cause: "step-limit"` 结束，再发一条消息接着做（ADR 0021）；成员预设的 `maxSteps` 优先；改动它总要审批 |
 | `learning` | `LearningConfig` | 见下 | 重做 C1（ADR 0017 决策 3、ADR 0018 决策 2、8、10）：后台学习开关、美元预算、单任务自评上限、共享两个方向；改动它总要审批 |
 
@@ -321,6 +322,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `approval.decision` | 审批得到应答（含超时、取消、非 TTY 拒绝） | `turn`、`decision: ApprovalDecision` |
 | `approval.grant` | 用户选择 `session` 范围放行，紧跟对应的 `approval.decision` | `grant: { tool, pattern?, grantedAt }` |
 | `material.added`（步骤 2） | 宿主把一份资料复制进 `materials/` 后 | `turn?`、`material: MaterialRef` |
+| `turn.rewind`（重设计 3.1） | 宿主经 `sessions.rewind` 把文件退回某一轮开始前之后，两轮之间 | `toTurn`、`restored`（写回原内容的文件）、`deleted`（删掉的文件）；不带 `turn` |
 | `session.mode`（ADR 0022） | 会话中途换模式：宿主切换（`sessions.setMode`），或用户经 `exit_plan` 批准计划 | `sandboxMode`（此后的执行模式）、`plan`（计划模式是否还开着）、`reason: "host" \| "plan-approved"`；从下一次工具调用起生效 |
 | `deliverable.presented`（步骤 2） | `present` 生成一个成果版本后，在该调用的 `tool.result` 之前 | `turn`、`step`、`toolCallId`、`deliverable: DeliverableVersionRef` |
 | `turn.files`（步骤 2） | 每轮 `turn.end` 之前（装了文件追踪时，空列表也写） | `turn`、`changes: FileChange[]`、`omitted?` |
@@ -454,6 +456,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `goal.set`（步骤 2） | 无 | `goal = record.goal`（替换旧目标） |
 | `goal.update`（步骤 2） | 无 | `goal.status = status`；给了 `text` 则替换；给了 `note` 则替换；`goal.updatedAt = record.ts` |
 | `session.title`（步骤 2） | 无 | `title = record.title`（覆盖 `session.start` 的标题） |
+| `turn.rewind`（重设计 3.1） | 无 | 不改投影（历史与元数据不变） |
 | `session.mode`（ADR 0022） | 无 | `sandboxMode = record.sandboxMode`；`plan` 为 `true` 时设 `plan = true`，否则删除 `plan` |
 | `compaction`（步骤 2） | `messages = [{ role: "user", content: renderCompactionSummary(summary) }, ...messages 的最后 keepMessages 条]` | `lastCompactionSeq = seq`；删除 `lastUsage` |
 | `material.added`、`deliverable.presented`、`turn.files`、`feedback`（步骤 2） | 无 | 无 |
@@ -760,7 +763,7 @@ ADR 0019（纪元 `adr-0019`，`EVALUATOR_RULES` 与 `LEARNING_RULES`）给改�
 
 ## 任务快照与检查
 
-步骤 4。门控要重放过去的任务，所以从步骤 4 起每个根任务开始时都给工作区拍快照（决定 7）。K1 起只在项目开启学习（`learning.enabled`）时拍，轮末不再拍；快照在这一轮第一次请求的回复开始到达时才开始（不和发出请求争文件系统），在后台进行；只有可能改项目的工具调用（效果不只是 `read` / `network`）之前等它完成，只读工具不等；轮末写检查之前也等它。
+步骤 4。门控要重放过去的任务，所以从步骤 4 起每个根任务开始时都给工作区拍快照（决定 7）。K1 起只在项目开启学习（`learning.enabled`）时拍；重设计 3.1 起每个根轮都拍，不再看学习开没开（快照也是回退的来源，见下文“回退”）；轮末不再拍；快照在这一轮第一次请求的回复开始到达时才开始（不和发出请求争文件系统），在后台进行；只有可能改项目的工具调用（效果不只是 `read` / `network`）之前等它完成，只读工具不等；轮末写检查之前也等它。
 
 - **对象**：`.nexgent/snapshots/objects/<sha256>`，文件原始字节，每份内容只存一次。
 - **树**：`.nexgent/snapshots/trees/<sha256>.json`，`{ formatVersion: 1, files: [{ path, sha256, bytes, executable? }] }`，按路径排序，范围与 `turn.files` 相同（不含 `.nexgent/`、`.git/`、`node_modules/`，K1 起也不含项目 `.gitignore`、子目录 `.gitignore` 与 `.git/info/exclude` 忽略的路径；被忽略的目录不进入）；文件名是该对象规范 JSON 的 SHA-256。
@@ -769,6 +772,7 @@ ADR 0019（纪元 `adr-0019`，`EVALUATOR_RULES` 与 `LEARNING_RULES`）给改�
 - **检查记录**：`.nexgent/snapshots/checks/<taskId>.json`，根任务结束时写：`{ formatVersion: 1, taskId, turn?, sessionId, checkedAt, specs, results }`。`specs` 是 `TaskCheckSpec`：`{ id, name: "file-exists", path }`、`{ id, name: "parses", path, format: json | csv | xlsx }`、`{ id, name: "test-command", command, shell: bash | pwsh }`；`results` 与 `specs` 一一对应，`target` 为 spec 的 `id`。同样的结果写进 `task.outcome.checks`。
 - **按轮记（步骤 5，决定 7）。** 同一会话的多轮仍是同一个 `taskId`（反馈轮也是），快照与检查改为每个根轮各一份：`tasks/<taskId>.t<turn>.json` 在第 `turn` 个根轮开始时写，`checks/<taskId>.t<turn>.json` 在该轮结束时写一次，两者都带 `turn`（文件名由 `perTurnFileName(taskId, turn)` 给出）。反馈轮不会覆盖它所针对的那一轮的记录。不带轮号的 `<taskId>.json` 是步骤 4 写的：快照即第 1 轮，检查是当时最后一轮（每轮结束都覆盖）；读取方照旧接受，不迁移。步骤 5 起写入方继续同时写不带轮号的文件（第 1 轮快照、最新一轮检查），使步骤 4 的读取方不变。
 - **哪些命令成为 `test-command`（步骤 5，ADR 0006 决策 10）。** 取任务树在项目根目录跑过的 `bash` / `pwsh` 命令里符合测试命令模式（`TEST_COMMAND_PATTERN`：`npm|pnpm|yarn [run] test`、`vitest|jest|mocha`、`pytest`、`python -m pytest|unittest`、`node --test`、`node <文件>.test.<js|mjs|cjs|ts…>`、`go|cargo test`、`make test|check`，命令必须以它们开头）的，**退出码不论成败都算**，只排除表示“没有跑到测试”的退出码：任何命令的 126、127（不可执行、找不到命令），pytest 的 4、5（路径或参数错误、没有收集到测试）。超时或被取消的调用没有退出码，不算。同一命令只保留最近一次，取最近 3 条。K1 起**不在轮末重跑**：检查结果就是模型自己那次运行的退出码（`detail` 写 `the model's own run, exit code N`），退出码非 0 即一项失败的检查（此前在轮末重跑、以重跑结果为准；步骤 4 只取退出码为 0 的命令）。需要独立复核时在门控的后台副本里跑，不在用户的任务里跑。`ls`、`cat`、构建与生成脚本等探索性命令不符合模式，无论成败都不成为检查。
+- **回退**（重设计 3.1）：SDK 的 `sessions.rewind({ projectId, sessionId, turn, apply? })` 把这个会话在第 `turn` 轮及以后改过的文件（取各轮 `turn.files` 列出的路径）恢复成第 `turn` 轮开始时快照里的样子：快照里有的写回原内容与可执行位，快照里没有的（之后新建的）删除，其余文件不动。不带 `apply` 只列出会改哪些文件（`changes`）和已经一致的文件（`unchanged`），供宿主先问用户；`apply: true` 才写，并在会话里记一条 `turn.rewind`。对话历史不删，之后照常继续。轮次进行中拒绝（`session/locked`）；那一轮没有快照（过了保留期、项目过大）报 `session/not-found`。实现：`@nexgent/tasking` 的 `planRewind` / `applyRewind`。
 - **保留**（K1）：每次快照后清理：先删超过 30 天（`retentionMs`）的任务快照，再在对象总量超过 200 MiB（`maxStoreBytes`）时从旧到新删不在保留名单里的任务快照（保留名单由调用方给出，如练习题集与试验引用的任务；当前任务总是保留），最后删没有任何剩余快照引用的树与对象；1 小时内新写的对象不删。总量统计每 10 分钟一次（或一次快照写入超过 8 MiB 时）。路径一律项目相对、`/` 分隔。
 
 ## 改进作业

@@ -60,6 +60,10 @@ export class TaskTree {
   private readonly presented = new Map<string, readonly string[]>()
   /** Deliverable versions presented in the tree since the root's current turn started (the present note reads it). */
   presentedThisTurn = 0
+  /** Redesign 3.2: files presented since the root's current turn started (a check on them can make the turn retry). */
+  readonly filesPresentedThisTurn = new Set<string>()
+  /** Redesign 3.2: length of {@link commands} when the root's current turn started. */
+  commandsAtTurnStart = 0
   /**
    * Shell commands of the tree run in the project root that exited with a
    * code (any; step 5 keeps failing ones too), in call order. Timed-out and
@@ -110,6 +114,8 @@ export class TaskTree {
   beginRootTurn(): void {
     for (const entry of this.memberTotals.values()) entry.turn = emptyTotals()
     this.presentedThisTurn = 0
+    this.filesPresentedThisTurn.clear()
+    this.commandsAtTurnStart = this.commands.length
     this.turnUsd = 0
     this.turnUsdEstimated = false
     for (const key of [...this.warned]) if (key.startsWith('perTask:')) this.warned.delete(key)
@@ -127,6 +133,7 @@ export class TaskTree {
   present(deliverableId: string, paths: readonly string[]): void {
     this.presented.set(deliverableId, [...paths])
     this.presentedThisTurn += 1
+    for (const path of paths) this.filesPresentedThisTurn.add(path)
   }
 
   /** Step 4: files of the latest presented version of each deliverable, deduplicated, first presentation first. */

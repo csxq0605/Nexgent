@@ -375,6 +375,7 @@ export const USAGE_LINE = 'node checks/regions-verify.mjs'
  * The four root tasks of the check-failure phase, as script entries (one queue, in order):
  *   corrupt   test passes, then a str_replace breaks a value, present: the re-run fails
  *   failing   a wrong table, an exploratory command that fails, the test fails, present anyway
+ *             (the two automatic check retries get a reply each; the test still fails)
  *   explore   the right table, two failing commands that are not tests, the test passes
  *   fixed     a wrong table, the test fails, str_replace fixes it, the test passes
  */
@@ -397,6 +398,9 @@ function checkFailureScript(h, tasks) {
   call('failing', failing, 'test', test(failing))
   call('failing', failing, 'present', present(failing))
   say('failing', failing, 'Presented; the test still fails.')
+  // Redesign 3.2: the failing test of this turn sends the model back twice; it cannot fix it.
+  say('failing', failing, 'The test still fails; the table cannot be fixed from this data.')
+  say('failing', failing, 'Still failing; stopping here.')
   call('explore', explore, 'write', write(explore, outputFor(explore)))
   call('explore', explore, 'explore', [shellCall(EXPLORE)])
   call('explore', explore, 'usage', [shellCall({ bash: USAGE_LINE, pwsh: USAGE_LINE })])
