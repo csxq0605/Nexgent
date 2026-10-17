@@ -28,11 +28,12 @@ const toolRestriction: JsonSchema = {
   properties: { allow: { type: 'array', items: { type: 'string' } }, deny: { type: 'array', items: { type: 'string' } } },
 }
 
-/** `delegate`: run one sub-task in a child session and wait for its result (foreground, one-shot). */
+/** `delegate`: run one sub-task in a child session and wait for its result (foreground, one-shot; several in one step run at once). */
 export const DELEGATE_TOOL: Step3ToolSpec = {
   name: 'delegate',
   effects: ['read'],
   approval: 'never',
+  concurrent: true,
   inputSchema: {
     type: 'object',
     additionalProperties: false,

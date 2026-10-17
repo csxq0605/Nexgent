@@ -25,7 +25,7 @@ import type {
   ToolCallApproval,
 } from './contracts/approvals.js'
 import { BASELINE_VERSION, CAPABILITY_COMPONENT_KINDS, type CapabilityComponentKind, type CapabilityVersion, type ComponentUsage } from './contracts/capabilities.js'
-import type { AgentAttribution, BudgetShare, ExecutionForm, MemberIdentity } from './contracts/collaboration.js'
+import { COLLABORATION_LIMITS, type AgentAttribution, type BudgetShare, type ExecutionForm, type MemberIdentity } from './contracts/collaboration.js'
 import type { ProjectConfig } from './contracts/config.js'
 import type { CompactionCheckInput, ContextService, SystemPromptSection } from './contracts/context.js'
 import { NexgentError, toErrorInfo, type ErrorInfo, type NexgentErrorCode } from './contracts/errors.js'
@@ -64,7 +64,7 @@ import {
   type TurnEndReason,
 } from './contracts/session.js'
 import { renderFeedbackPrompt, type FeedbackEntry, type TaskingService, type TurnFileTracker } from './contracts/tasking.js'
-import type { Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry } from './contracts/tools.js'
+import { isConcurrentTool, scheduleToolCalls, type Tool, type ToolContext, type ToolDefinition, type ToolOutput, type ToolRegistry } from './contracts/tools.js'
 import type { SandboxMode, Workspace } from './contracts/workspace.js'
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
 import type { AttachedComponent, CapabilityHost, ComponentUseRef, HandbookTurnSelection, ImprovementRun, ImprovementSignals, TaskRecorder } from './capability-hooks.js'
@@ -87,6 +87,37 @@ export const MODEL_TIMEOUT = 'MODEL_TIMEOUT'
 export const MODEL_IDLE_TIMEOUT = 'MODEL_IDLE_TIMEOUT'
 /** Timeout code of a tool's declared `timeoutMs`. */
 export const TOOL_TIMEOUT = 'TOOL_TIMEOUT'
+
+/** ADR 0017 decision 5: at most this many calls of one step run at once. */
+export const MAX_CONCURRENT_CALLS = 8
+
+const DELEGATE_TOOL_NAME = 'delegate'
+
+/** One executed call, before its records are written. */
+interface ToolRun {
+  readonly tool: Tool | undefined
+  readonly output: { content: string; isError: boolean; error?: ErrorInfo; meta?: JsonValue }
+  readonly approval: ToolCallApproval
+  readonly durationMs: number
+}
+
+/** A small FIFO concurrency limit. */
+class Limit {
+  private active = 0
+  private readonly waiting: Array<() => void> = []
+  constructor(private readonly max: number) {}
+
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.active >= this.max) await new Promise<void>(resolve => this.waiting.push(resolve))
+    this.active += 1
+    try {
+      return await task()
+    } finally {
+      this.active -= 1
+      this.waiting.shift()?.()
+    }
+  }
+}
 /** Upper bound on `TurnFileTracker.endTurn` after a cancelled turn (`agent-hooks.md` §失败语义). */
 export const FILES_END_CANCEL_MS = 5_000
 /** Record types {@link Agent.appendHostRecord} accepts (the contract's `HostRecordType`). */
@@ -497,6 +528,8 @@ export class Agent {
   /** `perProject` usage read from the ledger at turn start, and this task's totals at that moment. */
   private projectUsage: { requests: number; tokens: number; ownRequests: number; ownTokens: number } | undefined
   private turnDenials = new Set<string>()
+  /** Approval questions run one at a time, also when calls of one step run concurrently (ADR 0017 decision 5). */
+  private approvalQueue: Promise<unknown> = Promise.resolve()
   /** Provider sections of the running turn, in render order; empty between turns. */
   private turnSections: readonly SystemPromptSection[] = []
   /** Whether the project had materials at the running turn's start (the "Working with files" materials line). */
@@ -1753,21 +1786,55 @@ export class Agent {
   // tools
   // -------------------------------------------------------------------------
 
+  /**
+   * Run one step's calls (ADR 0017 decision 5): consecutive concurrent calls
+   * (`concurrent: true` tools, no up-front approval) run together, at most
+   * {@link MAX_CONCURRENT_CALLS} at once and at most
+   * `maxConcurrentMembers` of them `delegate`; every other call runs alone,
+   * in call order. Results go back to the model, and `tool.result` and
+   * ledger records are written, in call order.
+   */
   private async runTools(turn: number, step: number, calls: readonly ToolCall[], signal: AbortSignal): Promise<void> {
     this.startSnapshot()
-    for (const call of calls) {
-      // Only a call that may change the project waits for the snapshot; reads go ahead while it runs.
-      if (!this.readOnly(call)) await this.awaitSnapshot()
+    for (const batch of scheduleToolCalls(calls.map(call => this.concurrentCall(call)))) {
+      const group = batch.map(index => calls[index]!)
+      // Only calls that may change the project wait for the snapshot; reads go ahead while it runs.
+      if (group.some(call => !this.readOnly(call))) await this.awaitSnapshot()
       if (signal.aborted) {
-        await this.writeToolResult(turn, step, call, {
-          content: 'Error: the turn was cancelled before this call ran.',
-          isError: true,
-          error: errorInfo('tool/aborted', 'cancelled before the call ran'),
-        }, 0)
+        for (const call of group) {
+          await this.writeToolResult(turn, step, call, {
+            content: 'Error: the turn was cancelled before this call ran.',
+            isError: true,
+            error: errorInfo('tool/aborted', 'cancelled before the call ran'),
+          }, 0)
+        }
         continue
       }
-      await this.runTool(turn, step, call, signal)
+      if (group.length === 1) {
+        await this.finishTool(turn, step, group[0]!, await this.runTool(turn, step, group[0]!, signal))
+        continue
+      }
+      const slots = new Limit(MAX_CONCURRENT_CALLS)
+      const memberSlots = new Limit(COLLABORATION_LIMITS.maxConcurrentMembers)
+      const runs = group.map(call => call.name === DELEGATE_TOOL_NAME
+        ? memberSlots.run(() => slots.run(() => this.runTool(turn, step, call, signal)))
+        : slots.run(() => this.runTool(turn, step, call, signal)))
+      for (const [index, run] of runs.entries()) await this.finishTool(turn, step, group[index]!, await run)
     }
+  }
+
+  /** Whether a call may join a concurrent batch: a known `concurrent` tool, valid input and no up-front approval. */
+  private concurrentCall(call: ToolCall): boolean {
+    const definition = this.init.tools.get(call.name)?.definition
+    if (definition?.concurrent !== true) return false
+    let input: unknown
+    try {
+      input = call.arguments.trim() === '' ? {} : JSON.parse(call.arguments)
+    } catch {
+      return false
+    }
+    if (validateJsonSchema(input, definition.inputSchema) !== undefined) return false
+    return isConcurrentTool(definition, decideToolPolicy(definition, this.sandboxMode, input).kind === 'ask')
   }
 
   private async writeToolResult(
@@ -1816,7 +1883,8 @@ export class Agent {
     })
   }
 
-  private async runTool(turn: number, step: number, call: ToolCall, signal: AbortSignal): Promise<void> {
+  /** Execute one call up to its result; {@link finishTool} records it. */
+  private async runTool(turn: number, step: number, call: ToolCall, signal: AbortSignal): Promise<ToolRun> {
     this.emit({ type: 'tool.start', sessionId: this.sessionId, turn, step, call })
     const tool = this.init.tools.get(call.name)
     let approval: ToolCallApproval = { required: false, decision: 'auto' }
@@ -1833,7 +1901,12 @@ export class Agent {
     } else {
       output = await this.executeTool(turn, step, call, tool, signal, failure, value => { approval = value }, ms => { durationMs = ms })
     }
+    return { tool, output, approval, durationMs }
+  }
 
+  /** Write a call's result, count it and add its ledger record. */
+  private async finishTool(turn: number, step: number, call: ToolCall, run: ToolRun): Promise<void> {
+    const { tool, output, approval, durationMs } = run
     await this.writeToolResult(turn, step, call, output, durationMs)
     this.stats.toolCallCount += 1
     this.stats.toolsUsed.add(call.name)
@@ -2006,7 +2079,14 @@ export class Agent {
   }
 
   /** Grant check → approval request → records; see `permissions.md` §工具审批. */
-  private async authorize(turn: number, call: ToolCall, definition: ToolDefinition, ask: ToolApprovalAsk, signal: AbortSignal): Promise<Authorization> {
+  private authorize(turn: number, call: ToolCall, definition: ToolDefinition, ask: ToolApprovalAsk, signal: AbortSignal): Promise<Authorization> {
+    // One question at a time; a grant given for an earlier question answers a later one without asking.
+    const next = this.approvalQueue.then(() => this.authorizeNow(turn, call, definition, ask, signal))
+    this.approvalQueue = next.catch(() => {})
+    return next
+  }
+
+  private async authorizeNow(turn: number, call: ToolCall, definition: ToolDefinition, ask: ToolApprovalAsk, signal: AbortSignal): Promise<Authorization> {
     const risk = ask.risk ?? 'medium'
     const subject = ask.subject ?? { kind: 'other' as const, value: ask.summary }
     const grantTool = ask.grantTool ?? definition.name

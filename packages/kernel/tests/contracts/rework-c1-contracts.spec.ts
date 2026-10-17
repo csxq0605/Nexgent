@@ -320,13 +320,13 @@ describe('edit tools (ADR 0017 decision 1)', () => {
 })
 
 describe('tool concurrency (ADR 0017 decision 5)', () => {
-  it('read-only tools that never ask run together; approvals and writes stay in order', () => {
-    expect(isConcurrentTool({ effects: ['read'], approval: 'never' })).toBe(true)
-    expect(isConcurrentTool({ effects: ['read'], approval: 'never' }, true)).toBe(false)
-    expect(isConcurrentTool({ effects: ['read', 'write'], approval: 'never' })).toBe(false)
-    expect(isConcurrentTool({ effects: ['read'], approval: 'always' })).toBe(false)
-    expect(isConcurrentTool({ effects: ['execute'], approval: 'never', concurrent: true })).toBe(true)
-    expect(isConcurrentTool({ effects: [], approval: 'never' })).toBe(false)
+  it('only tools that opt in and never ask run together; approvals and other calls stay in order', () => {
+    expect(isConcurrentTool({ approval: 'never', concurrent: true })).toBe(true)
+    expect(isConcurrentTool({ approval: 'never', concurrent: true }, true)).toBe(false)
+    expect(isConcurrentTool({ approval: 'always', concurrent: true })).toBe(false)
+    // A tool that only declares `read` effects but keeps state (present, todos) stays serial unless it opts in.
+    expect(isConcurrentTool({ approval: 'never' })).toBe(false)
+    expect(isConcurrentTool({ approval: 'never', concurrent: false })).toBe(false)
   })
 
   it('batches consecutive concurrent calls, in call order', () => {

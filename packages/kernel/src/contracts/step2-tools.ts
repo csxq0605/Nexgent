@@ -79,6 +79,7 @@ export const READ_DOCUMENT_TOOL: Step2ToolSpec = {
   name: 'read_document',
   effects: ['read'],
   approval: 'never',
+  concurrent: true,
   inputSchema: {
     type: 'object',
     additionalProperties: false,

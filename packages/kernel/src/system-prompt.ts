@@ -92,10 +92,11 @@ function collaborationGuidance(tools: ReadonlySet<string>): string[] {
   const lines = ['- By default, do the work yourself. Bring in members only when it clearly helps.']
   if (delegate) {
     lines.push('- Delegate a sub-task with `delegate` when it can be done on its own and has an output you can check. '
-      + 'With `fresh` (default), write a self-contained task: the goal, the inputs, what to produce and where; use `fork` when the member needs this conversation so far.')
+      + 'With `fresh` (default), write a self-contained task: the goal, the inputs, what to produce and where; use `fork` when the member needs this conversation so far. '
+      + 'Several `delegate` calls in one reply run at the same time, so put independent sub-tasks in the same reply.')
   }
   if (team) lines.push('- Form a team with `spawn_teammate` when several sub-tasks can run in parallel and need to talk to each other.')
-  if (workflow) lines.push('- Use `workflow` when the steps are fixed and can be batched.')
+  if (workflow) lines.push('- Use `workflow` when the plan is fixed and has dependencies, stages or many items that a short script should drive.')
   lines.push('- Members share the project directory: give each its own subdirectory to write into. Read their results yourself'
     + `${tools.has('present') ? ' and deliver the final result to the user with `present`' : ''}.`)
   return lines
